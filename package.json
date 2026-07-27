@@ -1,0 +1,59 @@
+{
+  "name": "lexa",
+  "version": "0.1.0",
+  "main": "index.js",
+  "scripts": {
+    "test": "vitest run",
+    "dev": "vite dev",
+    "build": "vite build",
+    "deploy": "wrangler deploy",
+    "typecheck": "tsc --noEmit",
+    "typegen": "wrangler types"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/yohanesgre/lexa.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/yohanesgre/lexa/issues"
+  },
+  "homepage": "https://github.com/yohanesgre/lexa#readme",
+  "description": "",
+  "type": "module",
+  "private": "true",
+  "dependencies": {
+    "@dnd-kit/core": "^6.3.1",
+    "@dnd-kit/sortable": "^10.0.0",
+    "@dnd-kit/utilities": "^3.2.2",
+    "@effect/platform": "^0.97.0",
+    "@tanstack/react-query": "^5.101.4",
+    "@tanstack/react-router": "^1.170.18",
+    "@tanstack/react-start": "^1.168.32",
+    "@tiptap/pm": "^3.29.1",
+    "@tiptap/react": "^3.29.1",
+    "@tiptap/starter-kit": "^3.29.1",
+    "clsx": "^2.1.1",
+    "effect": "^3.22.0",
+    "fractional-indexing": "^4.0.0",
+    "lucide-react": "^1.27.0",
+    "marked": "^18.0.7",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8",
+    "tailwind-merge": "^3.6.0"
+  },
+  "devDependencies": {
+    "@cloudflare/vite-plugin": "^1.47.0",
+    "@cloudflare/workers-types": "^5.20260727.1",
+    "@tailwindcss/vite": "^4.3.3",
+    "@types/react": "^19.2.17",
+    "@types/react-dom": "^19.2.3",
+    "tailwindcss": "^4.3.3",
+    "typescript": "^7.0.2",
+    "vite": "^8.1.5",
+    "vitest": "^4.1.10",
+    "wrangler": "^4.114.0"
+  }
+}

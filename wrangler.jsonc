@@ -1,0 +1,18 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "lexa",
+  "main": "@tanstack/react-start/server-entry",
+  "compatibility_date": "2026-01-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "workers_dev": false,
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "lexa-db",
+      "database_id": "REPLACE_AFTER_WRANGLER_D1_CREATE",
+      "migrations_dir": "migrations"
+    }
+  ],
+  "triggers": { "crons": ["17 3 * * *"] },
+  "observability": { "enabled": true }
+}

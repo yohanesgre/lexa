@@ -1,0 +1,10 @@
+node_modules/
+dist/
+.output/
+.wrangler/
+.dev.vars
+.env
+routeTree.gen.ts
+app/routeTree.gen.ts
+worker-configuration.d.ts
+*.log
