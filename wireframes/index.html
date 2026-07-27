@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Lexa Wireframes — Index</title>
+  <link rel="stylesheet" href="wireframes.css" />
+</head>
+<body class="bg-app color-primary" style="min-height:100vh;">
+
+  <nav class="app-nav">
+    <div class="nav-brand">Lexa</div>
+    <span class="font-micro text-2xs color-muted" style="text-transform:uppercase;letter-spacing:0.06em;">Wireframes</span>
+  </nav>
+
+  <main class="page-frame">
+    <h1 class="font-display text-2xl weight-600 color-primary mb-4">PHOSPHOR Wireframe Surfaces</h1>
+    <p class="text-sm color-secondary mb-4" style="max-width:560px;">
+      Static HTML previews of Lexa’s key surfaces. Styled with the PHOSPHOR design system — warm phosphor dark mode, Space Grotesk + IBM Plex Sans + JetBrains Mono + Departure Mono.
+    </p>
+
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:16px;margin-top:24px;">
+
+      <a href="dashboard.html" class="project-card" style="height:auto;min-height:120px;text-decoration:none;">
+        <div class="project-card-name" style="font-size:18px;">Dashboard</div>
+        <div class="project-card-desc">Project grid + quick actions. Project: Emberfall and others.</div>
+        <span class="annotation-tag mt-2">/index.tsx</span>
+      </a>
+
+      <a href="kanban.html" class="project-card" style="height:auto;min-height:120px;text-decoration:none;">
+        <div class="project-card-name" style="font-size:18px;">Kanban Board</div>
+        <div class="project-card-desc">The heart. Swimlanes, 5 columns, ~12 cards, drag state, WIP exceeded, out-of-sync.</div>
+        <span class="annotation-tag mt-2">/$slug/index.tsx</span>
+      </a>
+
+      <a href="task-detail.html" class="project-card" style="height:auto;min-height:120px;text-decoration:none;">
+        <div class="project-card-name" style="font-size:18px;">Task Detail Slideover</div>
+        <div class="project-card-desc">Slideover over dimmed backdrop. Inline title, TipTap description, property bar, GitHub sync warning.</div>
+        <span class="annotation-tag mt-2">/$slug/tasks/$id.tsx</span>
+      </a>
+
+      <a href="wiki.html" class="project-card" style="height:auto;min-height:120px;text-decoration:none;">
+        <div class="project-card-name" style="font-size:18px;">Wiki</div>
+        <div class="project-card-desc">Nested page tree sidebar + reading view with PHOSPHOR prose, code blocks, tables.</div>
+        <span class="annotation-tag mt-2">/$slug/wiki/$page.tsx</span>
+      </a>
+
+      <a href="settings.html" class="project-card" style="height:auto;min-height:120px;text-decoration:none;">
+        <div class="project-card-name" style="font-size:18px;">Settings</div>
+        <div class="project-card-desc">API key management + column/swimlane configuration. Tables and forms.</div>
+        <span class="annotation-tag mt-2">/settings.tsx &amp; /$slug/settings.tsx</span>
+      </a>
+
+    </div>
+
+    <div class="responsive-note mt-4" style="max-width:600px;">
+      <strong>About these wireframes.</strong> Each file is self-contained HTML+CSS with no JS. Hover, drag, and active states are rendered as separate static variants with annotation labels. Open any surface in a browser at ~1440px width for the intended preview.
+    </div>
+  </main>
+
+</body>
+</html>

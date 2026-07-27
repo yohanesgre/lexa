@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Lexa — Task Detail</title>
+  <link rel="stylesheet" href="wireframes.css" />
+</head>
+<body class="bg-app color-primary" style="min-height:100vh;position:relative;overflow:hidden;">
+
+  <!-- Dimmed Kanban Backdrop -->
+  <div style="position:absolute;inset:0;opacity:0.25;pointer-events:none;overflow:hidden;">
+    <nav class="app-nav">
+      <div class="nav-brand">Lexa</div>
+      <span class="font-micro text-2xs color-muted">Project: Emberfall</span>
+    </nav>
+    <div class="board-area">
+      <div class="board-header">
+        <h1 class="font-display text-xl weight-600 color-primary">Emberfall</h1>
+      </div>
+      <div class="board-scroll">
+        <div class="swimlane-header" style="margin-bottom:12px;">
+          <svg class="chevron" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg>
+          <span class="swimlane-name">Sprint 7 — The Furnace</span>
+        </div>
+        <div class="columns-row">
+          <div class="column" style="opacity:0.6;">
+            <div class="column-header has-cards"><span class="column-name">Backlog</span></div>
+            <div class="column-body"><div class="kanban-card" style="border-left:3px solid #4ADE80;"><div class="card-title">Implement double-jump mechanic</div></div></div>
+          </div>
+          <div class="column" style="opacity:0.6;">
+            <div class="column-header has-cards"><span class="column-name">In Progress</span></div>
+            <div class="column-body"><div class="kanban-card" style="border-left:3px solid #FF4444;"><div class="card-title">Crash on level 3-2 load</div></div></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Overlay -->
+  <div class="slideover-overlay"></div>
+
+  <!-- Slideover -->
+  <div class="slideover">
+    <!-- Header -->
+    <div class="slideover-header border-b-subtle">
+      <div class="flex items-center gap-2">
+        <span class="text-xs color-muted font-body">Emberfall / Board</span>
+        <span class="annotation-inline">Breadcrumb</span>
+      </div>
+      <button class="btn btn-ghost" style="width:32px;height:32px;padding:0;">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M18 6L6 18M6 6l12 12"/></svg>
+      </button>
+    </div>
+
+    <!-- Title -->
+    <div class="px-4 pt-4">
+      <h2 class="slideover-title">Crash on level 3-2 load</h2>
+      <span class="annotation-tag mt-1">Title: text-xl/600/Display, inline editable on click</span>
+    </div>
+
+    <!-- Property Bar -->
+    <div class="property-bar mt-3">
+      <div class="prop-field">
+        <span class="prop-label">Column</span>
+        <select class="prop-input" style="min-width:120px;">
+          <option>In Progress</option>
+        </select>
+      </div>
+      <div class="prop-field">
+        <span class="prop-label">Priority</span>
+        <span class="priority-badge pb-urgent">
+          <span class="priority-dot priority-urgent"></span>
+          Urgent
+        </span>
+      </div>
+      <div class="prop-field">
+        <span class="prop-label">Type</span>
+        <span class="type-badge type-bug">Bug</span>
+      </div>
+      <div class="prop-field">
+        <span class="prop-label">Assignee</span>
+        <input class="prop-input" value="AL" style="width:80px;" />
+      </div>
+      <span class="annotation-tag">PropertyBar: 4 fields, gap 12px</span>
+    </div>
+
+    <!-- Description (TipTap rendered) -->
+    <div class="slideover-body">
+      <div style="font-size:15px;line-height:22px;color:var(--lx-text-secondary);font-family:var(--lx-font-body);">
+        <p style="margin-bottom:12px;color:var(--lx-text-primary);">
+          The game crashes consistently when loading level 3-2 (The Furnace Depths). This appears to be related to the new tilemap streaming system introduced in Sprint 6.
+        </p>
+
+        <h3 style="font-size:16px;font-weight:500;font-family:var(--lx-font-display);color:var(--lx-text-primary);margin:20px 0 8px;letter-spacing:-0.02em;">Reproduction Steps</h3>
+        <ol style="margin:0 0 12px 20px;padding:0;">
+          <li style="margin-bottom:4px;">Start a new game or load any save past level 3-1</li>
+          <li style="margin-bottom:4px;">Enter the portal to level 3-2</li>
+          <li style="margin-bottom:4px;">Crash occurs during tilemap initialization (~80% repro rate)</li>
+        </ol>
+
+        <h3 style="font-size:16px;font-weight:500;font-family:var(--lx-font-display);color:var(--lx-text-primary);margin:20px 0 8px;letter-spacing:-0.02em;">Investigation Checklist</h3>
+        <ul class="checklist">
+          <li class="checked"><div class="checkbox checked"></div> Reproduced on Windows build</li>
+          <li class="checked"><div class="checkbox checked"></div> Reproduced on macOS build</li>
+          <li><div class="checkbox"></div> Check tilemap chunk boundaries</li>
+          <li><div class="checkbox"></div> Verify collision shape baking</li>
+          <li><div class="checkbox"></div> Test with async loading disabled</li>
+        </ul>
+
+        <p style="margin:12px 0;color:var(--lx-text-primary);">
+          The stack trace points to <code style="font-family:var(--lx-font-mono);font-size:12px;background:var(--lx-surface-elevated);padding:2px 4px;border-radius:4px;color:var(--lx-text-secondary);">TilemapChunkLoader._loadChunk()</code>. Suspect an off-by-one in the chunk coordinate math when transitioning between zones.
+        </p>
+
+        <div style="background:var(--lx-surface-elevated);border:1px solid var(--lx-border-default);border-radius:6px;padding:12px 16px;margin:12px 0;overflow-x:auto;">
+          <code style="font-family:var(--lx-font-mono);font-size:12px;color:var(--lx-text-secondary);white-space:pre;">ERROR: FATAL: Null pointer dereference
+   at: TilemapChunkLoader._loadChunk (tilemap_chunk_loader.gd:142)
+   chunk_coords: (14, 7)
+   buffer_size: 0</code>
+        </div>
+
+        <span class="annotation-tag">TipTap rendered: prose + checklist + code block</span>
+      </div>
+
+      <!-- GitHub Link Section: OUT OF SYNC -->
+      <div class="github-section mt-4" style="background:var(--lx-bg-warning-subtle);border-radius:6px;border:1px solid rgba(240,192,64,0.15);">
+        <div class="flex items-center justify-between">
+          <div class="flex items-center gap-2">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="color:var(--lx-text-link);"><path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77 5.07 5.07 0 0 0 19.91 1S18.73.65 16 2.48a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 9 18.13V22"/></svg>
+            <span class="font-mono text-sm weight-500 color-link">emberfall-godot #107</span>
+          </div>
+          <div class="flex items-center gap-2">
+            <span class="sync-dot sync-diverged"></span>
+            <span class="font-micro text-2xs color-warning" style="text-transform:uppercase;letter-spacing:0.04em;">Out of Sync</span>
+          </div>
+        </div>
+        <p class="text-xs color-secondary mt-2" style="line-height:16px;">
+          GitHub issue state (open) does not match this column (In Progress). Move the card to resync, or check the webhook delivery status.
+        </p>
+        <span class="annotation-tag mt-2">GitHub: out-of-sync warning variant</span>
+      </div>
+
+      <!-- GitHub Link Section: SYNCED (for comparison) -->
+      <div class="github-section mt-3">
+        <div class="flex items-center justify-between">
+          <div class="flex items-center gap-2">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="color:var(--lx-text-link);"><path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77 5.07 5.07 0 0 0 19.91 1S18.73.65 16 2.48a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 9 18.13V22"/></svg>
+            <span class="font-mono text-sm weight-500 color-link">emberfall-godot #91</span>
+          </div>
+          <div class="flex items-center gap-2">
+            <span class="sync-dot sync-synced"></span>
+            <span class="font-micro text-2xs color-success" style="text-transform:uppercase;letter-spacing:0.04em;">Synced</span>
+          </div>
+        </div>
+        <span class="annotation-tag mt-2">GitHub: synced variant (for comparison)</span>
+      </div>
+    </div>
+
+    <!-- Footer -->
+    <div class="slideover-footer">
+      <button class="btn btn-danger">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+        Delete
+      </button>
+      <button class="btn btn-ghost">Close</button>
+    </div>
+  </div>
+
+  <!-- Annotation rail for slideover dimensions -->
+  <div style="position:fixed;top:50%;right:484px;transform:translateY(-50%);z-index:55;">
+    <span class="annotation-tag">480px slideover</span>
+  </div>
+
+</body>
+</html>
