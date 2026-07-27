@@ -34,7 +34,7 @@ function NavSpan({ children }: { children: React.ReactNode }) {
   return <span className="nav-link opacity-50 cursor-not-allowed">{children}</span>;
 }
 
-function BoardDropdown({ active, currentSlug }: { active: boolean; currentSlug?: string }) {
+function ProjectDropdown({ to, label, active, currentSlug }: { to: string; label: string; active: boolean; currentSlug?: string }) {
   const [open, setOpen] = useState(false);
   const { data: projects } = useProjects();
   const containerRef = useRef<HTMLDivElement>(null);
@@ -70,7 +70,7 @@ function BoardDropdown({ active, currentSlug }: { active: boolean; currentSlug?:
         onClick={() => setOpen((v) => !v)}
         className={`nav-link flex items-center gap-1 ${active ? "active" : ""}`}
       >
-        Board
+        {label}
         <svg className="w-3 h-3 opacity-70" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
           <path d="M6 9l6 6 6-6" strokeLinecap="round" strokeLinejoin="round" />
         </svg>
@@ -90,7 +90,7 @@ function BoardDropdown({ active, currentSlug }: { active: boolean; currentSlug?:
               return (
                 <Link
                   key={project.id}
-                  to="/$slug"
+                  to={to}
                   params={{ slug: project.slug }}
                   className={
                     isCurrent
@@ -113,6 +113,8 @@ function RootComponent() {
   const [queryClient] = useState(() => new QueryClient());
   const params = useParams({ strict: false }) as { slug?: string };
   const slug = params?.slug;
+  const pathname = useRouterState({ select: (s) => s.location.pathname });
+  const wikiActive = Boolean(slug) && pathname.startsWith(`/${slug}/wiki`);
   return (
     <html lang="en" data-theme="dark">
       <head>
@@ -123,14 +125,8 @@ function RootComponent() {
           <nav className="app-nav">
             <div className="nav-brand">Lexa</div>
             <NavLink to="/">Dashboard</NavLink>
-            <BoardDropdown active={Boolean(slug)} currentSlug={slug} />
-            {slug ? (
-              <NavLink to="/$slug/wiki" params={{ slug }}>
-                Wiki
-              </NavLink>
-            ) : (
-              <NavSpan>Wiki</NavSpan>
-            )}
+            <ProjectDropdown to="/$slug" label="Board" active={Boolean(slug)} currentSlug={slug} />
+            <ProjectDropdown to="/$slug/wiki" label="Wiki" active={wikiActive} currentSlug={slug} />
             <NavSpan>Settings</NavSpan>
           </nav>
           <Outlet />
