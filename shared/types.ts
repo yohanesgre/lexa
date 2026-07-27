@@ -145,13 +145,6 @@ export interface TaskRow {
   column_github_state?: "open" | "closed" | null;
 }
 
-export interface Board {
-  project: Project;
-  columns: Column[];
-  swimlanes: Swimlane[];
-  tasks: Task[];
-}
-
 export function rowToTask(row: TaskRow, columnGithubState?: "open" | "closed" | null): Task {
   const githubState = columnGithubState ?? row.column_github_state ?? null;
   const hasLink = row.github_issue_id && row.github_issue_number && row.github_repo;

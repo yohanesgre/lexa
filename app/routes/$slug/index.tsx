@@ -1,36 +1,49 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useState } from "react";
-import { useBoard, useMoveTask, useUpdateTask } from "../../lib/queries";
+import { useBoard, useMoveTask, useUpdateTask, useCreateTask } from "../../lib/queries";
 import { KanbanBoard } from "../../components/kanban/KanbanBoard";
 import type { MoveTarget } from "../../components/kanban/KanbanBoard";
 import { TaskDetail } from "../../components/TaskDetail";
 import type { Task } from "../../../shared/types";
 
 export const Route = createFileRoute("/$slug/")({
+  validateSearch: (search: Record<string, unknown>): { task?: string } => ({
+    task: typeof search.task === "string" ? search.task : undefined,
+  }),
   component: BoardPage,
 });
 
 function BoardPage() {
   const { slug } = Route.useParams();
+  const search = Route.useSearch();
+  const navigate = Route.useNavigate();
   const { data: board, isLoading, error } = useBoard(slug);
   const moveTask = useMoveTask(slug);
   const updateTask = useUpdateTask(slug);
-  const [selectedTask, setSelectedTask] = useState<Task | null>(null);
+  const createTask = useCreateTask(slug);
+
+  const selectedTaskId = search.task ?? null;
+  const selectedTask = selectedTaskId ? board?.tasks.find((t) => t.id === selectedTaskId) ?? null : null;
 
   const handleMove = async (taskId: string, target: MoveTarget) => {
     await moveTask.mutateAsync({ id: taskId, ...target });
   };
 
+  const handleCreateTask = async (input: { columnId: string; swimlaneId?: string | null; title: string }) => {
+    await createTask.mutateAsync({ ...input, swimlaneId: input.swimlaneId ?? null });
+  };
+
   const handleUpdate = (id: string, data: Partial<Task>) => {
-    const input: Record<string, unknown> = { id };
-    if (data.title !== undefined) input.title = data.title;
-    if (data.description !== undefined) input.description = JSON.stringify(data.description);
-    if (data.priority !== undefined) input.priority = data.priority;
-    if (data.type !== undefined) input.type = data.type;
-    if (data.assignee !== undefined) input.assignee = data.assignee;
-    updateTask.mutate(input as Parameters<typeof updateTask.mutate>[0], {
+    updateTask.mutate({ id, ...data }, {
       onError: (e) => console.error("Task update failed", e),
     });
+  };
+
+  const handleSelectTask = (task: Task) => {
+    navigate({ search: { task: task.id }, replace: true } as never);
+  };
+
+  const handleClose = () => {
+    navigate({ search: { task: undefined }, replace: true } as never);
   };
 
   if (isLoading) return <div className="board-loading">Loading board…</div>;
@@ -42,12 +55,13 @@ function BoardPage() {
       <KanbanBoard
         board={board}
         onMoveTask={handleMove}
-        onSelectTask={(task) => setSelectedTask(task)}
+        onSelectTask={handleSelectTask}
+        onCreateTask={handleCreateTask}
       />
       {selectedTask && (
         <TaskDetail
           task={selectedTask}
-          onClose={() => setSelectedTask(null)}
+          onClose={handleClose}
           onUpdate={handleUpdate}
           columnName={board.columns.find((c) => c.id === selectedTask.columnId)?.name}
         />

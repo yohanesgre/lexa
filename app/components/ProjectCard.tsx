@@ -16,9 +16,8 @@ interface ProjectCardProps {
 }
 
 export function ProjectCard({ project, className }: ProjectCardProps) {
-  const stats = `/${project.slug}`;
   return (
-    <Link to="/$slug" params={{ slug: project.slug }} className={cn("project-card", className)}>
+    <Link to="/$slug" params={{ slug: project.slug }} search={{}} className={cn("project-card", className)}>
       {project.githubRepo && (
         <div className="project-card-gh">
           <GithubMark />
@@ -26,7 +25,6 @@ export function ProjectCard({ project, className }: ProjectCardProps) {
       )}
       <h2 className="project-card-name">{project.name}</h2>
       <p className="project-card-desc">{project.description}</p>
-      <span className="project-card-stats">{stats}</span>
     </Link>
   );
 }

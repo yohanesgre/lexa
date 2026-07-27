@@ -14,7 +14,7 @@ export function ColumnHeader({ name, color, taskCount, wipLimit, wipFlash = fals
   const wipState =
     wipLimit === null
       ? null
-      : wipFlash || taskCount >= wipLimit
+      : wipFlash || taskCount > wipLimit
         ? "exceeded"
         : taskCount >= wipLimit * 0.8
           ? "approaching"

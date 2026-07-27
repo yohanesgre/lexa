@@ -16,7 +16,11 @@ function Dashboard() {
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!name.trim()) return;
-    await createProject.mutateAsync({ name: name.trim() });
+    try {
+      await createProject.mutateAsync({ name: name.trim() });
+    } catch {
+      // error shown via createProject.error
+    }
     setName("");
   };
 

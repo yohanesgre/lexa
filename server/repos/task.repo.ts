@@ -101,9 +101,9 @@ export class TaskRepo extends Effect.Service<TaskRepo>()("Lexa/TaskRepo", {
         const decoded = decodeCursor(cursor ?? null);
         if (decoded) {
           conditions.push(
-            "(t.column_id = ? AND (t.position > ? OR (t.position = ? AND t.id > ?)))"
+            "(t.column_id > ? OR (t.column_id = ? AND t.position > ?) OR (t.column_id = ? AND t.position = ? AND t.id > ?))"
           );
-          params.push(decoded.columnId, decoded.position, decoded.position, decoded.taskId);
+          params.push(decoded.columnId, decoded.columnId, decoded.position, decoded.columnId, decoded.position, decoded.taskId);
         }
 
         const whereClause = conditions.join(" AND ");
@@ -116,6 +116,38 @@ export class TaskRepo extends Effect.Service<TaskRepo>()("Lexa/TaskRepo", {
             const tasks = rows.slice(0, limitVal).map((r) => rowToTask(r, r.column_github_state));
             return { tasks, hasMore };
           })
+        );
+      },
+
+      findAllByProject: (
+        projectId: string,
+        filters?: TaskFilters
+      ): Effect.Effect<Task[], DbError> => {
+        const conditions: string[] = ["t.project_id = ?"];
+        const params: unknown[] = [projectId];
+
+        if (filters?.columnId) {
+          conditions.push("t.column_id = ?");
+          params.push(filters.columnId);
+        }
+        if (filters?.swimlaneId) {
+          conditions.push("t.swimlane_id = ?");
+          params.push(filters.swimlaneId);
+        }
+        if (filters?.assignee) {
+          conditions.push("t.assignee = ?");
+          params.push(filters.assignee);
+        }
+        if (filters?.type) {
+          conditions.push("t.type = ?");
+          params.push(filters.type);
+        }
+
+        const whereClause = conditions.join(" AND ");
+        const sql = `SELECT t.*, c.github_state as column_github_state FROM tasks t LEFT JOIN columns c ON t.column_id = c.id WHERE ${whereClause} ORDER BY t.column_id, t.position`;
+
+        return queryAll<TaskRow & { column_github_state: "open" | "closed" | null }>(db, sql, ...params).pipe(
+          Effect.map((rows) => rows.map((r) => rowToTask(r, r.column_github_state)))
         );
       },
 

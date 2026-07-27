@@ -16,20 +16,15 @@ import {
   WipLimitExceeded,
   NeighborNotInColumn,
 } from "../api/errors";
-import type { Task, Column, Swimlane } from "../../shared/types";
+import type { Task, Column, Swimlane, TipTapDoc } from "../../shared/types";
 
-function isEmptyDoc(json: string): boolean {
-  try {
-    const doc = JSON.parse(json) as Record<string, unknown>;
-    const hasText = (node: Record<string, unknown>): boolean => {
-      if (node.type === "text") return (typeof node.text === "string" ? node.text : "").trim().length > 0;
-      if (node.content && Array.isArray(node.content)) return (node.content as Record<string, unknown>[]).some(hasText);
-      return false;
-    };
-    return !hasText(doc);
-  } catch {
-    return true;
-  }
+function isEmptyDoc(doc: TipTapDoc): boolean {
+  const hasText = (node: Record<string, unknown>): boolean => {
+    if (node.type === "text") return (typeof node.text === "string" ? node.text : "").trim().length > 0;
+    if (node.content && Array.isArray(node.content)) return (node.content as Record<string, unknown>[]).some(hasText);
+    return false;
+  };
+  return !hasText(doc as unknown as Record<string, unknown>);
 }
 
 function validateRequiredFields(
@@ -39,7 +34,7 @@ function validateRequiredFields(
   for (const field of column.requiredFields) {
     let empty = false;
     if (field === "description") {
-      empty = isEmptyDoc(typeof taskLike.description === "string" ? taskLike.description : "{}");
+      empty = isEmptyDoc(taskLike.description as TipTapDoc);
     } else if (field === "assignee") {
       empty = !taskLike.assignee;
     } else {
@@ -64,7 +59,7 @@ export class TaskService extends Effect.Service<TaskService>()("Lexa/TaskService
         columnId: string;
         swimlaneId?: string | null;
         title: string;
-        description?: string;
+        description?: TipTapDoc;
         priority?: "urgent" | "high" | "medium" | "low";
         type?: "feature" | "bug" | "task" | "asset";
         assignee?: string | null;
@@ -90,9 +85,10 @@ export class TaskService extends Effect.Service<TaskService>()("Lexa/TaskService
             }
           }
 
+          const desc = input.description ?? { type: "doc" as const, content: [] as unknown[] };
           const taskLike = {
             title: input.title,
-            description: input.description ?? "{}",
+            description: desc,
             priority: input.priority ?? "medium",
             type: input.type ?? "task",
             assignee: input.assignee ?? null,
@@ -111,7 +107,7 @@ export class TaskService extends Effect.Service<TaskService>()("Lexa/TaskService
               columnId: input.columnId,
               swimlaneId: input.swimlaneId ?? null,
               title: input.title,
-              description: input.description ?? "{}",
+              description: JSON.stringify(desc),
               priority: input.priority ?? "medium",
               type: input.type ?? "task",
               assignee: input.assignee ?? null,
@@ -145,11 +141,22 @@ export class TaskService extends Effect.Service<TaskService>()("Lexa/TaskService
           return yield* taskRepo.findByProject(projectId, filters, limit, cursor);
         }),
 
+      findAllByProject: (
+        projectId: string,
+        filters?: { columnId?: string; swimlaneId?: string; assignee?: string; type?: "feature" | "bug" | "task" | "asset" }
+      ): Effect.Effect<Task[], ProjectNotFound | DbError> =>
+        Effect.gen(function* () {
+          yield* projectRepo.findById(projectId).pipe(
+            Effect.catchTag("RowNotFound", () => new ProjectNotFound({ identifier: projectId }))
+          );
+          return yield* taskRepo.findAllByProject(projectId, filters);
+        }),
+
       update: (
         id: string,
         input: {
           title?: string;
-          description?: string;
+          description?: TipTapDoc;
           priority?: "urgent" | "high" | "medium" | "low";
           type?: "feature" | "bug" | "task" | "asset";
           assignee?: string | null;
@@ -164,13 +171,19 @@ export class TaskService extends Effect.Service<TaskService>()("Lexa/TaskService
           );
           const merged = {
             title: input.title ?? task.title,
-            description: input.description ?? JSON.stringify(task.description),
+            description: input.description ?? task.description,
             priority: input.priority ?? task.priority,
             type: input.type ?? task.type,
             assignee: input.assignee !== undefined ? input.assignee : task.assignee,
           };
           yield* validateRequiredFields(merged as Record<string, unknown>, column);
-          return yield* taskRepo.update(id, input).pipe(
+          return yield* taskRepo.update(id, {
+            title: input.title,
+            description: input.description !== undefined ? JSON.stringify(input.description) : undefined,
+            priority: input.priority,
+            type: input.type,
+            assignee: input.assignee,
+          }).pipe(
             Effect.catchTag("RowNotFound", () => new TaskNotFound({ id }))
           );
         }),
@@ -199,7 +212,7 @@ export class TaskService extends Effect.Service<TaskService>()("Lexa/TaskService
           if (!opts?.bypassGuards) {
             const taskLike = {
               title: task.title,
-              description: JSON.stringify(task.description),
+              description: task.description,
               priority: task.priority,
               type: task.type,
               assignee: task.assignee,

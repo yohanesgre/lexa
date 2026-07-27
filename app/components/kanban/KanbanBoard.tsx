@@ -10,7 +10,7 @@ import {
 } from "@dnd-kit/core";
 import { SortableContext, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import type { Board, Swimlane, Task, TipTapDoc } from "../../../shared/types";
+import type { Board, Swimlane, Task } from "../../../shared/types";
 import { keyAfter, keyBetween } from "../../../shared/positions";
 import { cn } from "../ui/cn";
 import { Column } from "./Column";
@@ -29,6 +29,7 @@ interface KanbanBoardProps {
   board: Board;
   onMoveTask: (taskId: string, target: MoveTarget) => Promise<void>;
   onSelectTask?: (task: Task) => void;
+  onCreateTask?: (input: { columnId: string; swimlaneId?: string | null; title: string }) => Promise<void>;
 }
 
 const byPosition = (a: Task, b: Task) => (a.position < b.position ? -1 : a.position > b.position ? 1 : 0);
@@ -39,18 +40,6 @@ const isWipLimit = (err: unknown): boolean => {
   return e.code === "WIP_LIMIT" || (typeof e.message === "string" && e.message.includes("WIP_LIMIT"));
 };
 
-function docToPlain(doc: TipTapDoc): string {
-  const texts: string[] = [];
-  const walk = (nodes: unknown[]): void => {
-    for (const n of nodes as { type?: string; text?: string; content?: unknown[] }[]) {
-      if (n.type === "text" && typeof n.text === "string") texts.push(n.text);
-      if (Array.isArray(n.content)) walk(n.content);
-    }
-  };
-  walk(doc.content);
-  return texts.join(" ").replace(/\s+/g, " ").trim();
-}
-
 function cardProps(task: Task) {
   return {
     id: task.id,
@@ -59,7 +48,6 @@ function cardProps(task: Task) {
     type: task.type,
     assignee: task.assignee,
     githubOutOfSync: task.github?.outOfSync ?? false,
-    description: docToPlain(task.description),
   };
 }
 
@@ -84,7 +72,7 @@ function SortableTaskCard({ task, onSelect }: { task: Task; onSelect?: (t: Task)
   );
 }
 
-export function KanbanBoard({ board, onMoveTask, onSelectTask }: KanbanBoardProps) {
+export function KanbanBoard({ board, onMoveTask, onSelectTask, onCreateTask }: KanbanBoardProps) {
   const [localTasks, setLocalTasks] = useState<Task[]>(board.tasks);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [flashColumnId, setFlashColumnId] = useState<string | null>(null);
@@ -231,7 +219,7 @@ export function KanbanBoard({ board, onMoveTask, onSelectTask }: KanbanBoardProp
       <div className="board-area">
         <div className="board-header">
           <div className="flex items-center gap-3">
-            <h1 className="font-display text-xl weight-600 color-primary">{board.project.name}</h1>
+            <h1 className="font-display text-xl font-semibold text-lx-text-primary">{board.project.name}</h1>
           </div>
           <div className="flex items-center gap-2">
             <button className="btn btn-ghost text-sm">Filter</button>
@@ -272,6 +260,9 @@ export function KanbanBoard({ board, onMoveTask, onSelectTask }: KanbanBoardProp
                           id={cellDropId(col.id, laneId)}
                           data={{ type: "column", columnId: col.id, swimlaneId: laneId }}
                           isEmpty={cell.length === 0}
+                          columnId={col.id}
+                          swimlaneId={laneId}
+                          onCreateTask={onCreateTask}
                         >
                           <SortableContext items={cell.map((t) => t.id)} strategy={verticalListSortingStrategy}>
                             {cell.map((task) => (

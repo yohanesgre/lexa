@@ -1,4 +1,4 @@
-import type { Project, Column, Swimlane, Task, Board } from "../../shared/types";
+import type { Project, Column, Swimlane, Task, Board, TipTapDoc } from "../../shared/types";
 
 const BASE = "/api";
 
@@ -66,7 +66,7 @@ export function listTasks(slug: string, params?: { columnId?: string; swimlaneId
   return request(`${BASE}/projects/${slug}/tasks${query ? "?" + query : ""}`);
 }
 
-export function createTask(slug: string, input: { columnId: string; swimlaneId?: string | null; title: string; description?: string; priority?: string; type?: string; assignee?: string | null }): Promise<Task> {
+export function createTask(slug: string, input: { columnId: string; swimlaneId?: string | null; title: string; description?: TipTapDoc; priority?: string; type?: string; assignee?: string | null }): Promise<Task> {
   return request(`${BASE}/projects/${slug}/tasks`, { method: "POST", body: JSON.stringify(input) });
 }
 
@@ -74,7 +74,7 @@ export function getTask(slug: string, id: string): Promise<Task> {
   return request(`${BASE}/projects/${slug}/tasks/${id}`);
 }
 
-export function updateTask(slug: string, id: string, input: { title?: string; description?: string; priority?: string; type?: string; assignee?: string | null }): Promise<Task> {
+export function updateTask(slug: string, id: string, input: { title?: string; description?: TipTapDoc; priority?: string; type?: string; assignee?: string | null }): Promise<Task> {
   return request(`${BASE}/projects/${slug}/tasks/${id}`, { method: "PATCH", body: JSON.stringify(input) });
 }
 

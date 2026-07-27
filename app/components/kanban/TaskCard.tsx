@@ -9,7 +9,6 @@ interface TaskCardProps {
   type: TaskType;
   assignee: string | null;
   githubOutOfSync: boolean;
-  description: string;
   isDragging?: boolean;
 }
 

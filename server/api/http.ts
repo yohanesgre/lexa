@@ -158,7 +158,7 @@ const CreateTaskPayload = Schema.Struct({
   columnId: Schema.String,
   swimlaneId: Schema.optional(Schema.NullOr(Schema.String)),
   title: Schema.String,
-  description: Schema.optional(Schema.String),
+  description: Schema.optional(Schema.Any),
   priority: Schema.optional(Schema.Literal("urgent", "high", "medium", "low")),
   type: Schema.optional(Schema.Literal("feature", "bug", "task", "asset")),
   assignee: Schema.optional(Schema.NullOr(Schema.String)),
@@ -166,7 +166,7 @@ const CreateTaskPayload = Schema.Struct({
 
 const UpdateTaskPayload = Schema.Struct({
   title: Schema.optional(Schema.String),
-  description: Schema.optional(Schema.String),
+  description: Schema.optional(Schema.Any),
   priority: Schema.optional(Schema.Literal("urgent", "high", "medium", "low")),
   type: Schema.optional(Schema.Literal("feature", "bug", "task", "asset")),
   assignee: Schema.optional(Schema.NullOr(Schema.String)),
@@ -430,12 +430,12 @@ const boardLive = HttpApiBuilder.group(LexaApi, "board", (handlers) =>
       const project = yield* projectService.findBySlug(req.path.slug);
       const columns = yield* columnService.findByProject(project.id);
       const swimlanes = yield* swimlaneService.findByProject(project.id);
-      const tasks = yield* taskService.findByProject(project.id);
+      const tasks = yield* taskService.findAllByProject(project.id);
       return {
         project: formatProject(project),
         columns: columns.map(formatColumn),
         swimlanes: swimlanes.map(formatSwimlane),
-        tasks: tasks.tasks.map(formatTask),
+        tasks: tasks.map(formatTask),
       };
     }))
   )

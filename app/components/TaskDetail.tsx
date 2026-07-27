@@ -195,7 +195,7 @@ export function TaskDetail({ task, onClose, onUpdate, columnName }: TaskDetailPr
           <span className="text-xs font-body text-lx-text-muted">
             {slug ? (
               <>
-                <Link to="/$slug" params={{ slug }} className="text-lx-text-muted hover:text-lx-text-secondary">
+                <Link to="/$slug" params={{ slug }} search={{}} className="text-lx-text-muted hover:text-lx-text-secondary">
                   {slug}
                 </Link>
                 {" / Board"}
