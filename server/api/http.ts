@@ -4,6 +4,12 @@ import { d1Live } from "../db/d1";
 import { errorResponse, errorToStatus } from "./errors";
 import { ProjectService } from "../services/project.service";
 import { ProjectRepo } from "../repos/project.repo";
+import { ColumnService } from "../services/column.service";
+import { ColumnRepo } from "../repos/column.repo";
+import { SwimlaneService } from "../services/swimlane.service";
+import { SwimlaneRepo } from "../repos/swimlane.repo";
+import { TaskService } from "../services/task.service";
+import { TaskRepo } from "../repos/task.repo";
 
 const healthEndpoint = HttpApiEndpoint.get("health", "/health").addSuccess(
   Schema.Struct({ ok: Schema.Boolean })
@@ -33,9 +39,7 @@ const CreateProjectPayload = Schema.Struct({
   githubRepo: Schema.optional(Schema.NullOr(Schema.String)),
 });
 
-const SlugPath = Schema.Struct({
-  slug: Schema.String,
-});
+const SlugPath = Schema.Struct({ slug: Schema.String });
 
 const listEndpoint = HttpApiEndpoint.get("list", "/projects").addSuccess(ProjectListResponse, { status: 200 });
 
@@ -52,9 +56,162 @@ const projectsGroup = HttpApiGroup.make("projects")
   .add(createEndpoint)
   .add(getBySlugEndpoint);
 
+const ColumnSchema = Schema.Struct({
+  id: Schema.String,
+  projectId: Schema.String,
+  name: Schema.String,
+  position: Schema.Number,
+  color: Schema.String,
+  wipLimit: Schema.NullOr(Schema.Number),
+  requiredFields: Schema.Array(Schema.String),
+  githubState: Schema.NullOr(Schema.Literal("open", "closed")),
+});
+
+const ColumnDataResponse = Schema.Struct({ data: Schema.Array(ColumnSchema) });
+
+const ColumnPayload = Schema.Struct({
+  name: Schema.String,
+  position: Schema.optional(Schema.Number),
+  color: Schema.optional(Schema.String),
+  wipLimit: Schema.optional(Schema.NullOr(Schema.Number)),
+  requiredFields: Schema.optional(Schema.Array(Schema.String)),
+  githubState: Schema.optional(Schema.NullOr(Schema.Literal("open", "closed"))),
+});
+
+const ColumnUpdatePayload = Schema.Struct({
+  name: Schema.optional(Schema.String),
+  position: Schema.optional(Schema.Number),
+  color: Schema.optional(Schema.String),
+  wipLimit: Schema.optional(Schema.NullOr(Schema.Number)),
+  requiredFields: Schema.optional(Schema.Array(Schema.String)),
+  githubState: Schema.optional(Schema.NullOr(Schema.Literal("open", "closed"))),
+});
+
+const ColumnPath = Schema.Struct({ slug: Schema.String, id: Schema.String });
+
+const columnsGroup = HttpApiGroup.make("columns")
+  .add(HttpApiEndpoint.get("listColumns", "/projects/:slug/columns")
+    .setPath(SlugPath).addSuccess(ColumnDataResponse))
+  .add(HttpApiEndpoint.post("createColumn", "/projects/:slug/columns")
+    .setPath(SlugPath).setPayload(ColumnPayload).addSuccess(ColumnSchema, { status: 201 }))
+  .add(HttpApiEndpoint.patch("updateColumn", "/projects/:slug/columns/:id")
+    .setPath(ColumnPath).setPayload(ColumnUpdatePayload).addSuccess(ColumnSchema))
+  .add(HttpApiEndpoint.del("deleteColumn", "/projects/:slug/columns/:id")
+    .setPath(ColumnPath)  .addSuccess(Schema.Undefined, { status: 204 }));
+
+const SwimlaneSchema = Schema.Struct({
+  id: Schema.String,
+  projectId: Schema.String,
+  name: Schema.String,
+  position: Schema.Number,
+});
+
+const SwimlaneDataResponse = Schema.Struct({ data: Schema.Array(SwimlaneSchema) });
+
+const SwimlanePayload = Schema.Struct({
+  name: Schema.String,
+  position: Schema.optional(Schema.Number),
+});
+
+const SwimlanePath = Schema.Struct({ slug: Schema.String, id: Schema.String });
+
+const swimlanesGroup = HttpApiGroup.make("swimlanes")
+  .add(HttpApiEndpoint.get("listSwimlanes", "/projects/:slug/swimlanes")
+    .setPath(SlugPath).addSuccess(SwimlaneDataResponse))
+  .add(HttpApiEndpoint.post("createSwimlane", "/projects/:slug/swimlanes")
+    .setPath(SlugPath).setPayload(SwimlanePayload).addSuccess(SwimlaneSchema, { status: 201 }))
+  .add(HttpApiEndpoint.patch("updateSwimlane", "/projects/:slug/swimlanes/:id")
+    .setPath(SwimlanePath).setPayload(SwimlanePayload).addSuccess(SwimlaneSchema))
+  .add(HttpApiEndpoint.del("deleteSwimlane", "/projects/:slug/swimlanes/:id")
+    .setPath(SwimlanePath)  .addSuccess(Schema.Undefined, { status: 204 }));
+
+const TaskSchema = Schema.Struct({
+  id: Schema.String,
+  projectId: Schema.String,
+  columnId: Schema.String,
+  swimlaneId: Schema.NullOr(Schema.String),
+  title: Schema.String,
+  description: Schema.Any,
+  priority: Schema.Literal("urgent", "high", "medium", "low"),
+  type: Schema.Literal("feature", "bug", "task", "asset"),
+  assignee: Schema.NullOr(Schema.String),
+  position: Schema.String,
+  github: Schema.NullOr(Schema.Struct({
+    issueId: Schema.String,
+    issueNumber: Schema.Number,
+    repo: Schema.String,
+    url: Schema.String,
+    syncedState: Schema.NullOr(Schema.Literal("open", "closed")),
+    outOfSync: Schema.Boolean,
+  })),
+  createdAt: Schema.String,
+  updatedAt: Schema.String,
+});
+
+const TaskListResponse = Schema.Struct({
+  data: Schema.Array(TaskSchema),
+  nextCursor: Schema.NullOr(Schema.String),
+});
+
+const CreateTaskPayload = Schema.Struct({
+  columnId: Schema.String,
+  swimlaneId: Schema.optional(Schema.NullOr(Schema.String)),
+  title: Schema.String,
+  description: Schema.optional(Schema.String),
+  priority: Schema.optional(Schema.Literal("urgent", "high", "medium", "low")),
+  type: Schema.optional(Schema.Literal("feature", "bug", "task", "asset")),
+  assignee: Schema.optional(Schema.NullOr(Schema.String)),
+});
+
+const UpdateTaskPayload = Schema.Struct({
+  title: Schema.optional(Schema.String),
+  description: Schema.optional(Schema.String),
+  priority: Schema.optional(Schema.Literal("urgent", "high", "medium", "low")),
+  type: Schema.optional(Schema.Literal("feature", "bug", "task", "asset")),
+  assignee: Schema.optional(Schema.NullOr(Schema.String)),
+});
+
+const MoveTaskPayload = Schema.Struct({
+  columnId: Schema.String,
+  swimlaneId: Schema.optional(Schema.NullOr(Schema.String)),
+  beforeTaskId: Schema.optional(Schema.String),
+  afterTaskId: Schema.optional(Schema.String),
+});
+
+const TaskPath = Schema.Struct({ slug: Schema.String, id: Schema.String });
+
+const BoardSchema = Schema.Struct({
+  project: ProjectSchema,
+  columns: Schema.Array(ColumnSchema),
+  swimlanes: Schema.Array(SwimlaneSchema),
+  tasks: Schema.Array(TaskSchema),
+});
+
+const tasksGroup = HttpApiGroup.make("tasks")
+  .add(HttpApiEndpoint.get("listTasks", "/projects/:slug/tasks")
+    .setPath(SlugPath).addSuccess(TaskListResponse))
+  .add(HttpApiEndpoint.post("createTask", "/projects/:slug/tasks")
+    .setPath(SlugPath).setPayload(CreateTaskPayload).addSuccess(TaskSchema, { status: 201 }))
+  .add(HttpApiEndpoint.get("getTask", "/projects/:slug/tasks/:id")
+    .setPath(TaskPath).addSuccess(TaskSchema))
+  .add(HttpApiEndpoint.patch("updateTask", "/projects/:slug/tasks/:id")
+    .setPath(TaskPath).setPayload(UpdateTaskPayload).addSuccess(TaskSchema))
+  .add(HttpApiEndpoint.post("moveTask", "/projects/:slug/tasks/:id/move")
+    .setPath(TaskPath).setPayload(MoveTaskPayload).addSuccess(TaskSchema))
+  .add(HttpApiEndpoint.del("deleteTask", "/projects/:slug/tasks/:id")
+    .setPath(TaskPath)  .addSuccess(Schema.Undefined, { status: 204 }));
+
+const boardGroup = HttpApiGroup.make("board")
+  .add(HttpApiEndpoint.get("getBoard", "/projects/:slug/board")
+    .setPath(SlugPath).addSuccess(BoardSchema));
+
 export const LexaApi = HttpApi.make("lexa")
   .add(healthGroup)
   .add(projectsGroup)
+  .add(columnsGroup)
+  .add(swimlanesGroup)
+  .add(tasksGroup)
+  .add(boardGroup)
   .prefix("/api");
 
 const apiLayer = HttpApiBuilder.api(LexaApi);
@@ -70,6 +227,11 @@ const respond = <A, E, R>(eff: Effect.Effect<A, E, R>): Effect.Effect<A | HttpSe
     )
   );
 
+const resolveProject = (projectService: ProjectService, slug: string) =>
+  projectService.findBySlug(slug).pipe(
+    Effect.mapError((e) => e)
+  );
+
 const healthLive = HttpApiBuilder.group(LexaApi, "health", (handlers) =>
   handlers.handle("health", () => Effect.succeed({ ok: true as const }))
 );
@@ -77,73 +239,227 @@ const healthLive = HttpApiBuilder.group(LexaApi, "health", (handlers) =>
 const projectsLive = HttpApiBuilder.group(LexaApi, "projects", (handlers) =>
   handlers
     .handle("list", () =>
-      respond(
-        Effect.gen(function* () {
-          const service = yield* ProjectService;
-          const projects = yield* service.list();
-          const nextCursor: string | null = null;
-          return {
-            data: projects.map((p) => ({
-              id: p.id,
-              name: p.name,
-              slug: p.slug,
-              description: p.description,
-              githubRepo: p.githubRepo,
-              createdAt: p.createdAt,
-              updatedAt: p.updatedAt,
-            })),
-            nextCursor,
-          };
-        })
-      )
+      respond(Effect.gen(function* () {
+        const service = yield* ProjectService;
+        const projects = yield* service.list();
+        return { data: projects.map(formatProject), nextCursor: null };
+      }))
     )
     .handle("create", (req) =>
-      respond(
-        Effect.gen(function* () {
-          const service = yield* ProjectService;
-          const project = yield* service.create({
-            name: req.payload.name,
-            slug: req.payload.slug,
-            description: req.payload.description,
-            githubRepo: req.payload.githubRepo,
-          });
-          return {
-            id: project.id,
-            name: project.name,
-            slug: project.slug,
-            description: project.description,
-            githubRepo: project.githubRepo,
-            createdAt: project.createdAt,
-            updatedAt: project.updatedAt,
-          };
-        })
-      )
+      respond(Effect.gen(function* () {
+        const service = yield* ProjectService;
+        const project = yield* service.create({
+          name: req.payload.name, slug: req.payload.slug,
+          description: req.payload.description, githubRepo: req.payload.githubRepo,
+        });
+        return formatProject(project);
+      }))
     )
     .handle("getBySlug", (req) =>
-      respond(
-        Effect.gen(function* () {
-          const service = yield* ProjectService;
-          const project = yield* service.findBySlug(req.path.slug);
-          return {
-            id: project.id,
-            name: project.name,
-            slug: project.slug,
-            description: project.description,
-            githubRepo: project.githubRepo,
-            createdAt: project.createdAt,
-            updatedAt: project.updatedAt,
-          };
-        })
-      )
+      respond(Effect.gen(function* () {
+        const service = yield* ProjectService;
+        const project = yield* service.findBySlug(req.path.slug);
+        return formatProject(project);
+      }))
     )
 );
 
+const columnsLive = HttpApiBuilder.group(LexaApi, "columns", (handlers) =>
+  handlers
+    .handle("listColumns", (req) =>
+      respond(Effect.gen(function* () {
+        const projectService = yield* ProjectService;
+        const columnService = yield* ColumnService;
+        const project = yield* projectService.findBySlug(req.path.slug);
+        const columns = yield* columnService.findByProject(project.id);
+        return { data: columns.map(formatColumn) };
+      }))
+    )
+    .handle("createColumn", (req) =>
+      respond(Effect.gen(function* () {
+        const projectService = yield* ProjectService;
+        const columnService = yield* ColumnService;
+        const project = yield* projectService.findBySlug(req.path.slug);
+        const column = yield* columnService.create({
+          projectId: project.id, name: req.payload.name,
+          color: req.payload.color,
+          wipLimit: req.payload.wipLimit, requiredFields: req.payload.requiredFields as string[] | undefined,
+          githubState: req.payload.githubState,
+        });
+        return formatColumn(column);
+      }))
+    )
+    .handle("updateColumn", (req) =>
+      respond(Effect.gen(function* () {
+        const columnService = yield* ColumnService;
+        const column = yield* columnService.update(req.path.id, {
+          name: req.payload.name, position: req.payload.position,
+          color: req.payload.color, wipLimit: req.payload.wipLimit,
+          requiredFields: req.payload.requiredFields as string[] | undefined,
+          githubState: req.payload.githubState,
+        });
+        return formatColumn(column);
+      }))
+    )
+    .handle("deleteColumn", (req) =>
+      respond(Effect.gen(function* () {
+        const columnService = yield* ColumnService;
+        yield* columnService.delete(req.path.id);
+        return undefined;
+      }))
+    )
+);
+
+const swimlanesLive = HttpApiBuilder.group(LexaApi, "swimlanes", (handlers) =>
+  handlers
+    .handle("listSwimlanes", (req) =>
+      respond(Effect.gen(function* () {
+        const projectService = yield* ProjectService;
+        const swimlaneService = yield* SwimlaneService;
+        const project = yield* projectService.findBySlug(req.path.slug);
+        const swimlanes = yield* swimlaneService.findByProject(project.id);
+        return { data: swimlanes.map(formatSwimlane) };
+      }))
+    )
+    .handle("createSwimlane", (req) =>
+      respond(Effect.gen(function* () {
+        const projectService = yield* ProjectService;
+        const swimlaneService = yield* SwimlaneService;
+        const project = yield* projectService.findBySlug(req.path.slug);
+        const swimlane = yield* swimlaneService.create({
+          projectId: project.id, name: req.payload.name,
+        });
+        return formatSwimlane(swimlane);
+      }))
+    )
+    .handle("updateSwimlane", (req) =>
+      respond(Effect.gen(function* () {
+        const swimlaneService = yield* SwimlaneService;
+        const swimlane = yield* swimlaneService.update(req.path.id, {
+          name: req.payload.name, position: req.payload.position,
+        });
+        return formatSwimlane(swimlane);
+      }))
+    )
+    .handle("deleteSwimlane", (req) =>
+      respond(Effect.gen(function* () {
+        const swimlaneService = yield* SwimlaneService;
+        yield* swimlaneService.delete(req.path.id);
+        return undefined;
+      }))
+    )
+);
+
+const tasksLive = HttpApiBuilder.group(LexaApi, "tasks", (handlers) =>
+  handlers
+    .handle("listTasks", (req) =>
+      respond(Effect.gen(function* () {
+        const projectService = yield* ProjectService;
+        const taskService = yield* TaskService;
+        const project = yield* projectService.findBySlug(req.path.slug);
+        const url = new URL(req.request.url);
+        const result = yield* taskService.findByProject(project.id);
+        return { data: result.tasks.map(formatTask), nextCursor: null };
+      }))
+    )
+    .handle("createTask", (req) =>
+      respond(Effect.gen(function* () {
+        const projectService = yield* ProjectService;
+        const taskService = yield* TaskService;
+        const project = yield* projectService.findBySlug(req.path.slug);
+        const task = yield* taskService.create({
+          projectId: project.id, columnId: req.payload.columnId,
+          swimlaneId: req.payload.swimlaneId, title: req.payload.title,
+          description: req.payload.description, priority: req.payload.priority,
+          type: req.payload.type, assignee: req.payload.assignee,
+        });
+        return formatTask(task);
+      }))
+    )
+    .handle("getTask", (req) =>
+      respond(Effect.gen(function* () {
+        const taskService = yield* TaskService;
+        const task = yield* taskService.getById(req.path.id);
+        return formatTask(task);
+      }))
+    )
+    .handle("updateTask", (req) =>
+      respond(Effect.gen(function* () {
+        const taskService = yield* TaskService;
+        const task = yield* taskService.update(req.path.id, {
+          title: req.payload.title, description: req.payload.description,
+          priority: req.payload.priority, type: req.payload.type,
+          assignee: req.payload.assignee,
+        });
+        return formatTask(task);
+      }))
+    )
+    .handle("moveTask", (req) =>
+      respond(Effect.gen(function* () {
+        const taskService = yield* TaskService;
+        const task = yield* taskService.move(req.path.id, {
+          columnId: req.payload.columnId, swimlaneId: req.payload.swimlaneId,
+          beforeTaskId: req.payload.beforeTaskId, afterTaskId: req.payload.afterTaskId,
+        });
+        return formatTask(task);
+      }))
+    )
+    .handle("deleteTask", (req) =>
+      respond(Effect.gen(function* () {
+        const taskService = yield* TaskService;
+        yield* taskService.delete(req.path.id);
+        return undefined;
+      }))
+    )
+);
+
+const boardLive = HttpApiBuilder.group(LexaApi, "board", (handlers) =>
+  handlers.handle("getBoard", (req) =>
+    respond(Effect.gen(function* () {
+      const projectService = yield* ProjectService;
+      const columnService = yield* ColumnService;
+      const swimlaneService = yield* SwimlaneService;
+      const taskService = yield* TaskService;
+      const project = yield* projectService.findBySlug(req.path.slug);
+      const columns = yield* columnService.findByProject(project.id);
+      const swimlanes = yield* swimlaneService.findByProject(project.id);
+      const tasks = yield* taskService.findByProject(project.id);
+      return {
+        project: formatProject(project),
+        columns: columns.map(formatColumn),
+        swimlanes: swimlanes.map(formatSwimlane),
+        tasks: tasks.tasks.map(formatTask),
+      };
+    }))
+  )
+);
+
+function formatProject(p: { id: string; name: string; slug: string; description: string; githubRepo: string | null; createdAt: string; updatedAt: string }) {
+  return p as any;
+}
+
+function formatColumn(c: { id: string; projectId: string; name: string; position: number; color: string; wipLimit: number | null; requiredFields: string[]; githubState: "open" | "closed" | null }) {
+  return c as any;
+}
+
+function formatSwimlane(s: { id: string; projectId: string; name: string; position: number }) {
+  return s as any;
+}
+
+function formatTask(t: { id: string; projectId: string; columnId: string; swimlaneId: string | null; title: string; description: any; priority: string; type: string; assignee: string | null; position: string; github: any; createdAt: string; updatedAt: string }) {
+  return t as any;
+}
+
 export function createApiHandler() {
-  const serviceLayer = Layer.mergeAll(ProjectRepo.Default, ProjectService.Default);
-  const handlerLayer = Layer.mergeAll(healthLive, projectsLive).pipe(
-    Layer.provide(serviceLayer),
-    Layer.provide(d1Live),
+  const serviceLayer = Layer.mergeAll(
+    ProjectRepo.Default, ProjectService.Default,
+    ColumnRepo.Default, ColumnService.Default,
+    SwimlaneRepo.Default, SwimlaneService.Default,
+    TaskRepo.Default, TaskService.Default,
   );
+  const handlerLayer = Layer.mergeAll(
+    healthLive, projectsLive, columnsLive, swimlanesLive, tasksLive, boardLive,
+  ).pipe(Layer.provide(serviceLayer), Layer.provide(d1Live));
   const merged = Layer.mergeAll(apiLayer, handlerLayer);
   return HttpApiBuilder.toWebHandler(merged as unknown as Parameters<typeof HttpApiBuilder.toWebHandler>[0]);
 }
