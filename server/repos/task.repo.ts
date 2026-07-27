@@ -1,5 +1,5 @@
 import { Effect } from "effect";
-import { D1, queryAll, queryFirst, run, DbError, RowNotFound, ConstraintViolation } from "../db/d1";
+import { D1, queryAll, queryFirst, run, batch, DbError, RowNotFound, ConstraintViolation } from "../db/d1";
 import { TaskRow, rowToTask } from "../../shared/types";
 import type { Task, Priority, TaskType } from "../../shared/types";
 
@@ -230,6 +230,26 @@ export class TaskRepo extends Effect.Service<TaskRepo>()("Lexa/TaskRepo", {
           )
         );
       },
+      moveFromWebhook: (
+        taskId: string,
+        target: { columnId: string; swimlaneId: string | null; position: string },
+        syncedState: "open" | "closed"
+      ): Effect.Effect<Task, RowNotFound | DbError | ConstraintViolation> =>
+        Effect.gen(function* () {
+          yield* batch(db, [
+            {
+              sql: `UPDATE tasks SET column_id = ?, swimlane_id = ?, position = ?, updated_at = datetime('now') WHERE id = ?`,
+              params: [target.columnId, target.swimlaneId, target.position, taskId],
+            },
+            {
+              sql: `UPDATE tasks SET github_synced_state = ?, updated_at = datetime('now') WHERE id = ?`,
+              params: [syncedState, taskId],
+            },
+          ]);
+          return yield* queryFirst<TaskRow>(db, `SELECT * FROM tasks WHERE id = ?`, taskId).pipe(
+            Effect.map((r) => rowToTask(r))
+          );
+        }),
     };
   }),
 }) {}

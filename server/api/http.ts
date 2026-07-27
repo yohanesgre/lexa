@@ -2,6 +2,7 @@ import { HttpApi, HttpApiBuilder, HttpApiEndpoint, HttpApiGroup, HttpServerRespo
 import { Effect, Layer, Schema } from "effect";
 import { d1Live } from "../db/d1";
 import { errorResponse, errorToStatus } from "./errors";
+import { clampLimit, nextCursor } from "../../shared/pagination";
 import { ProjectService } from "../services/project.service";
 import { ProjectRepo } from "../repos/project.repo";
 import { ColumnService } from "../services/column.service";
@@ -227,11 +228,6 @@ const respond = <A, E, R>(eff: Effect.Effect<A, E, R>): Effect.Effect<A | HttpSe
     )
   );
 
-const resolveProject = (projectService: ProjectService, slug: string) =>
-  projectService.findBySlug(slug).pipe(
-    Effect.mapError((e) => e)
-  );
-
 const healthLive = HttpApiBuilder.group(LexaApi, "health", (handlers) =>
   handlers.handle("health", () => Effect.succeed({ ok: true as const }))
 );
@@ -357,9 +353,20 @@ const tasksLive = HttpApiBuilder.group(LexaApi, "tasks", (handlers) =>
         const projectService = yield* ProjectService;
         const taskService = yield* TaskService;
         const project = yield* projectService.findBySlug(req.path.slug);
-        const url = new URL(req.request.url);
-        const result = yield* taskService.findByProject(project.id);
-        return { data: result.tasks.map(formatTask), nextCursor: null };
+        const q = new URL(req.request.url).searchParams;
+        const limit = clampLimit(q.get("limit"));
+        const cursor = q.get("cursor") ?? undefined;
+        const filters = {
+          columnId: q.get("columnId") ?? undefined,
+          swimlaneId: q.get("swimlaneId") ?? undefined,
+          assignee: q.get("assignee") ?? undefined,
+          type: (q.get("type") ?? undefined) as "feature" | "bug" | "task" | "asset" | undefined,
+        };
+        const result = yield* taskService.findByProject(project.id, filters, limit, cursor);
+        return {
+          data: result.tasks.map(formatTask),
+          nextCursor: result.hasMore ? nextCursor(result.tasks, limit) : null,
+        };
       }))
     )
     .handle("createTask", (req) =>

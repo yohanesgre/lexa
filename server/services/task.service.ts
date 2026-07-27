@@ -196,8 +196,16 @@ export class TaskService extends Effect.Service<TaskService>()("Lexa/TaskService
           if (task.columnId === target.columnId && !target.beforeTaskId && !target.afterTaskId)
             return task;
 
-          if (!opts?.bypassGuards)
-            yield* validateRequiredFields({ description: JSON.stringify(task.description), assignee: task.assignee } as Record<string, unknown>, column);
+          if (!opts?.bypassGuards) {
+            const taskLike = {
+              title: task.title,
+              description: JSON.stringify(task.description),
+              priority: task.priority,
+              type: task.type,
+              assignee: task.assignee,
+            };
+            yield* validateRequiredFields(taskLike as Record<string, unknown>, column);
+          }
 
           const computePosition = Effect.gen(function* () {
             if (target.beforeTaskId || target.afterTaskId) {
@@ -250,16 +258,11 @@ export class TaskService extends Effect.Service<TaskService>()("Lexa/TaskService
             Effect.catchTag("RowNotFound", () => Effect.succeed(null))
           );
           const position = keyAfter(last?.position ?? null);
-          yield* taskRepo.move(taskId, {
+          return yield* taskRepo.moveFromWebhook(taskId, {
             columnId,
             swimlaneId: task.swimlaneId,
             position,
-            projectId: task.projectId,
-          }, { bypassWip: true });
-          yield* taskRepo.setGithubSyncedState(taskId, syncedState);
-          return yield* taskRepo.findById(taskId).pipe(
-            Effect.catchTag("RowNotFound", () => new TaskNotFound({ id: taskId }))
-          );
+          }, syncedState);
         }),
 
       delete: (id: string): Effect.Effect<void, TaskNotFound | DbError> =>
