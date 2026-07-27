@@ -228,7 +228,17 @@ export function KanbanBoard({ board, onMoveTask, onSelectTask }: KanbanBoardProp
 
   return (
     <DndContext sensors={sensors} onDragStart={handleDragStart} onDragEnd={handleDragEnd} onDragCancel={() => setActiveId(null)}>
-      <div className="board-scroll">
+      <div className="board-area">
+        <div className="board-header">
+          <div className="flex items-center gap-3">
+            <h1 className="font-display text-xl weight-600 color-primary">{board.project.name}</h1>
+          </div>
+          <div className="flex items-center gap-2">
+            <button className="btn btn-ghost text-sm">Filter</button>
+            <button className="btn btn-ghost text-sm">Settings</button>
+          </div>
+        </div>
+        <div className="board-scroll">
         {rows.map(({ lane }) => {
           const laneId = lane?.id ?? null;
           const laneTaskCount = hasLanes
@@ -277,6 +287,7 @@ export function KanbanBoard({ board, onMoveTask, onSelectTask }: KanbanBoardProp
             </div>
           );
         })}
+        </div>
       </div>
       <DragOverlay dropAnimation={{ duration: 150, easing: "cubic-bezier(0.16, 1, 0.3, 1)" }}>
         {activeTask ? (

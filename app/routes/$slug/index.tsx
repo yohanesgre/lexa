@@ -45,16 +45,12 @@ function BoardPage() {
         onSelectTask={(task) => setSelectedTask(task)}
       />
       {selectedTask && (
-        <div className="task-detail-overlay" onClick={() => setSelectedTask(null)}>
-          <div className="task-detail-wrapper" onClick={(e) => e.stopPropagation()}>
-            <TaskDetail
-              task={selectedTask}
-              onClose={() => setSelectedTask(null)}
-              onUpdate={handleUpdate}
-              columnName={board.columns.find((c) => c.id === selectedTask.columnId)?.name}
-            />
-          </div>
-        </div>
+        <TaskDetail
+          task={selectedTask}
+          onClose={() => setSelectedTask(null)}
+          onUpdate={handleUpdate}
+          columnName={board.columns.find((c) => c.id === selectedTask.columnId)?.name}
+        />
       )}
     </div>
   );

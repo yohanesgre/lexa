@@ -30,6 +30,13 @@ export interface Swimlane {
   position: number;
 }
 
+export interface Board {
+  project: Project;
+  columns: Column[];
+  swimlanes: Swimlane[];
+  tasks: Task[];
+}
+
 export type Priority = "urgent" | "high" | "medium" | "low";
 export type TaskType = "feature" | "bug" | "task" | "asset";
 
@@ -136,6 +143,13 @@ export interface TaskRow {
   created_at: string;
   updated_at: string;
   column_github_state?: "open" | "closed" | null;
+}
+
+export interface Board {
+  project: Project;
+  columns: Column[];
+  swimlanes: Swimlane[];
+  tasks: Task[];
 }
 
 export function rowToTask(row: TaskRow, columnGithubState?: "open" | "closed" | null): Task {

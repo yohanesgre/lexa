@@ -1032,6 +1032,17 @@
     stroke-width: 1.5;
     fill: none;
   }
+  .dashboard-loading,
+  .dashboard-empty {
+    padding: 32px 0;
+    font-size: 13px;
+    color: var(--lx-text-muted);
+  }
+  .dashboard-error {
+    margin-top: 16px;
+    font-size: 13px;
+    color: var(--lx-text-danger);
+  }
 
   /* Buttons */
   .btn {
