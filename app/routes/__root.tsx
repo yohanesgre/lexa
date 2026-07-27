@@ -1,6 +1,6 @@
 import { HeadContent, Link, Outlet, Scripts, createRootRoute, useParams, useRouterState } from "@tanstack/react-router";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import phosphorCss from "../styles/phosphor.css?url";
 import { useProjects } from "../lib/queries";
 
@@ -37,15 +37,37 @@ function NavSpan({ children }: { children: React.ReactNode }) {
 function BoardDropdown({ active, currentSlug }: { active: boolean; currentSlug?: string }) {
   const [open, setOpen] = useState(false);
   const { data: projects } = useProjects();
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+
+    function handleMouseDown(event: MouseEvent) {
+      if (containerRef.current && !containerRef.current.contains(event.target as Node)) {
+        setOpen(false);
+      }
+    }
+
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        setOpen(false);
+      }
+    }
+
+    document.addEventListener("mousedown", handleMouseDown);
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", handleMouseDown);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [open]);
 
   return (
-    <div
-      className="relative flex items-center h-full"
-      onMouseEnter={() => setOpen(true)}
-      onMouseLeave={() => setOpen(false)}
-    >
+    <div ref={containerRef} className="relative flex items-center h-full">
       <button
         type="button"
+        aria-expanded={open}
+        onClick={() => setOpen((v) => !v)}
         className={`nav-link flex items-center gap-1 ${active ? "active" : ""}`}
       >
         Board
@@ -54,7 +76,10 @@ function BoardDropdown({ active, currentSlug }: { active: boolean; currentSlug?:
         </svg>
       </button>
       {open && (
-        <div className="absolute top-full left-0 mt-1 min-w-[180px] rounded-md border border-lx-border bg-lx-surface-elevated shadow-lx-md z-dropdown py-1">
+        <div
+          className="absolute top-full left-0 mt-1 min-w-[180px] rounded-md border border-lx-border bg-lx-surface-elevated shadow-lx-md z-dropdown py-1"
+          onClick={() => setOpen(false)}
+        >
           {!projects ? (
             <div className="px-3 py-2 text-sm text-lx-text-muted">Loading projects…</div>
           ) : projects.length === 0 ? (
@@ -99,7 +124,13 @@ function RootComponent() {
             <div className="nav-brand">Lexa</div>
             <NavLink to="/">Dashboard</NavLink>
             <BoardDropdown active={Boolean(slug)} currentSlug={slug} />
-            <NavSpan>Wiki</NavSpan>
+            {slug ? (
+              <NavLink to="/$slug/wiki" params={{ slug }}>
+                Wiki
+              </NavLink>
+            ) : (
+              <NavSpan>Wiki</NavSpan>
+            )}
             <NavSpan>Settings</NavSpan>
           </nav>
           <Outlet />

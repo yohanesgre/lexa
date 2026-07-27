@@ -1,4 +1,4 @@
-import type { Project, Column, Swimlane, Task, Board, TipTapDoc } from "../../shared/types";
+import type { Project, Column, Swimlane, Task, Board, WikiPageMeta, WikiPage, TipTapDoc } from "../../shared/types";
 
 const BASE = "/api";
 
@@ -88,4 +88,32 @@ export function deleteTask(slug: string, id: string): Promise<void> {
 
 export function getBoard(slug: string): Promise<Board> {
   return request(`${BASE}/projects/${slug}/board`);
+}
+
+export function listWikiPages(slug: string): Promise<{ data: WikiPageMeta[] }> {
+  return request(`${BASE}/projects/${slug}/wiki`);
+}
+
+export function createWikiPage(slug: string, input: { parentId?: string | null; title: string; slug?: string; content?: TipTapDoc }): Promise<WikiPage> {
+  return request(`${BASE}/projects/${slug}/wiki`, { method: "POST", body: JSON.stringify(input) });
+}
+
+export function searchWikiPages(slug: string, query: string): Promise<{ data: (WikiPage & { snippet: string })[] }> {
+  return request(`${BASE}/projects/${slug}/wiki/search?q=${encodeURIComponent(query)}`);
+}
+
+export function getWikiPage(slug: string, pageSlug: string): Promise<WikiPage> {
+  return request(`${BASE}/projects/${slug}/wiki/${pageSlug}`);
+}
+
+export function listWikiChildren(slug: string, pageSlug: string): Promise<{ data: WikiPageMeta[] }> {
+  return request(`${BASE}/projects/${slug}/wiki/${pageSlug}/children`);
+}
+
+export function updateWikiPage(slug: string, pageSlug: string, input: { title?: string; slug?: string; content?: TipTapDoc; parentId?: string | null; position?: number }): Promise<WikiPage> {
+  return request(`${BASE}/projects/${slug}/wiki/${pageSlug}`, { method: "PATCH", body: JSON.stringify(input) });
+}
+
+export function deleteWikiPage(slug: string, pageSlug: string): Promise<void> {
+  return request(`${BASE}/projects/${slug}/wiki/${pageSlug}`, { method: "DELETE" });
 }

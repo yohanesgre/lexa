@@ -11,6 +11,9 @@ import { SwimlaneService } from "../services/swimlane.service";
 import { SwimlaneRepo } from "../repos/swimlane.repo";
 import { TaskService } from "../services/task.service";
 import { TaskRepo } from "../repos/task.repo";
+import { WikiService } from "../services/wiki.service";
+import { WikiRepo } from "../repos/wiki.repo";
+import { extractText } from "../../shared/tiptap-text";
 
 const healthEndpoint = HttpApiEndpoint.get("health", "/health").addSuccess(
   Schema.Struct({ ok: Schema.Boolean })
@@ -116,6 +119,56 @@ const SwimlanePayload = Schema.Struct({
 
 const SwimlanePath = Schema.Struct({ slug: Schema.String, id: Schema.String });
 
+const WikiPageSchema = Schema.Struct({
+  id: Schema.String,
+  projectId: Schema.String,
+  title: Schema.String,
+  slug: Schema.String,
+  content: Schema.Any,
+  contentText: Schema.optional(Schema.String),
+  parentId: Schema.NullOr(Schema.String),
+  position: Schema.Number,
+  createdAt: Schema.String,
+  updatedAt: Schema.String,
+});
+
+const WikiPageMetaSchema = Schema.Struct({
+  id: Schema.String,
+  projectId: Schema.String,
+  title: Schema.String,
+  slug: Schema.String,
+  parentId: Schema.NullOr(Schema.String),
+  position: Schema.Number,
+  hasChildren: Schema.Boolean,
+  createdAt: Schema.String,
+  updatedAt: Schema.String,
+});
+
+const WikiPageCreatePayload = Schema.Struct({
+  parentId: Schema.optional(Schema.NullOr(Schema.String)),
+  title: Schema.String,
+  slug: Schema.optional(Schema.String),
+  content: Schema.optional(Schema.Any),
+});
+
+const WikiPageUpdatePayload = Schema.Struct({
+  title: Schema.optional(Schema.String),
+  slug: Schema.optional(Schema.String),
+  content: Schema.optional(Schema.Any),
+  parentId: Schema.optional(Schema.NullOr(Schema.String)),
+  position: Schema.optional(Schema.Number),
+});
+
+const WikiPageListResponse = Schema.Struct({ data: Schema.Array(WikiPageMetaSchema) });
+
+const WikiPageChildrenResponse = Schema.Struct({ data: Schema.Array(WikiPageMetaSchema) });
+
+const WikiSearchItemSchema = Schema.extend(WikiPageSchema, Schema.Struct({ snippet: Schema.String }));
+
+const WikiSearchResponse = Schema.Struct({ data: Schema.Array(WikiSearchItemSchema) });
+
+const PagePath = Schema.Struct({ slug: Schema.String, pageSlug: Schema.String });
+
 const swimlanesGroup = HttpApiGroup.make("swimlanes")
   .add(HttpApiEndpoint.get("listSwimlanes", "/projects/:slug/swimlanes")
     .setPath(SlugPath).addSuccess(SwimlaneDataResponse))
@@ -206,6 +259,22 @@ const boardGroup = HttpApiGroup.make("board")
   .add(HttpApiEndpoint.get("getBoard", "/projects/:slug/board")
     .setPath(SlugPath).addSuccess(BoardSchema));
 
+const wikiGroup = HttpApiGroup.make("wiki")
+  .add(HttpApiEndpoint.get("listPages", "/projects/:slug/wiki")
+    .setPath(SlugPath).addSuccess(WikiPageListResponse))
+  .add(HttpApiEndpoint.post("createPage", "/projects/:slug/wiki")
+    .setPath(SlugPath).setPayload(WikiPageCreatePayload).addSuccess(WikiPageSchema, { status: 201 }))
+  .add(HttpApiEndpoint.get("searchPages", "/projects/:slug/wiki/search")
+    .setPath(SlugPath).addSuccess(WikiSearchResponse))
+  .add(HttpApiEndpoint.get("getPage", "/projects/:slug/wiki/:pageSlug")
+    .setPath(PagePath).addSuccess(WikiPageSchema))
+  .add(HttpApiEndpoint.get("listChildren", "/projects/:slug/wiki/:pageSlug/children")
+    .setPath(PagePath).addSuccess(WikiPageChildrenResponse))
+  .add(HttpApiEndpoint.patch("updatePage", "/projects/:slug/wiki/:pageSlug")
+    .setPath(PagePath).setPayload(WikiPageUpdatePayload).addSuccess(WikiPageSchema))
+  .add(HttpApiEndpoint.del("deletePage", "/projects/:slug/wiki/:pageSlug")
+    .setPath(PagePath).addSuccess(Schema.Undefined, { status: 204 }));
+
 export const LexaApi = HttpApi.make("lexa")
   .add(healthGroup)
   .add(projectsGroup)
@@ -213,6 +282,7 @@ export const LexaApi = HttpApi.make("lexa")
   .add(swimlanesGroup)
   .add(tasksGroup)
   .add(boardGroup)
+  .add(wikiGroup)
   .prefix("/api");
 
 const apiLayer = HttpApiBuilder.api(LexaApi);
@@ -441,6 +511,94 @@ const boardLive = HttpApiBuilder.group(LexaApi, "board", (handlers) =>
   )
 );
 
+const wikiLive = HttpApiBuilder.group(LexaApi, "wiki", (handlers) =>
+  handlers
+    .handle("listPages", (req) =>
+      respond(Effect.gen(function* () {
+        const projectService = yield* ProjectService;
+        const wikiService = yield* WikiService;
+        const project = yield* projectService.findBySlug(req.path.slug);
+        const pages = yield* wikiService.findByProject(project.id);
+        return { data: pages.map(formatWikiPageMeta) };
+      }))
+    )
+    .handle("createPage", (req) =>
+      respond(Effect.gen(function* () {
+        const projectService = yield* ProjectService;
+        const wikiService = yield* WikiService;
+        const project = yield* projectService.findBySlug(req.path.slug);
+        const contentText = req.payload.content ? extractText(req.payload.content) : undefined;
+        const page = yield* wikiService.create(project.id, {
+          title: req.payload.title,
+          slug: req.payload.slug,
+          content: req.payload.content,
+          contentText,
+          parentId: req.payload.parentId ?? undefined,
+        });
+        return formatWikiPage(page);
+      }))
+    )
+    .handle("searchPages", (req) =>
+      respond(Effect.gen(function* () {
+        const projectService = yield* ProjectService;
+        const wikiService = yield* WikiService;
+        const project = yield* projectService.findBySlug(req.path.slug);
+        const q = new URL(req.request.url).searchParams.get("q");
+        if (!q) return { data: [] as any[] };
+        const results = yield* wikiService.search(project.id, q);
+        return { data: results.map(formatWikiPage) };
+      }))
+    )
+    .handle("getPage", (req) =>
+      respond(Effect.gen(function* () {
+        const projectService = yield* ProjectService;
+        const wikiService = yield* WikiService;
+        const project = yield* projectService.findBySlug(req.path.slug);
+        const page = yield* wikiService.findBySlug(project.id, req.path.pageSlug);
+        return formatWikiPage(page);
+      }))
+    )
+    .handle("listChildren", (req) =>
+      respond(Effect.gen(function* () {
+        const projectService = yield* ProjectService;
+        const wikiService = yield* WikiService;
+        const project = yield* projectService.findBySlug(req.path.slug);
+        const page = yield* wikiService.findBySlug(project.id, req.path.pageSlug);
+        const children = yield* wikiService.findChildren(project.id, page.id);
+        return { data: children.map(formatWikiPageMeta) };
+      }))
+    )
+    .handle("updatePage", (req) =>
+      respond(Effect.gen(function* () {
+        const projectService = yield* ProjectService;
+        const wikiService = yield* WikiService;
+        const project = yield* projectService.findBySlug(req.path.slug);
+        const page = yield* wikiService.findBySlug(project.id, req.path.pageSlug);
+        const updateInput: Record<string, unknown> = {};
+        if (req.payload.title !== undefined) updateInput.title = req.payload.title;
+        if (req.payload.slug !== undefined) updateInput.slug = req.payload.slug;
+        if (req.payload.parentId !== undefined) updateInput.parentId = req.payload.parentId;
+        if (req.payload.position !== undefined) updateInput.position = req.payload.position;
+        if (req.payload.content !== undefined) {
+          updateInput.content = JSON.stringify(req.payload.content);
+          updateInput.contentText = extractText(req.payload.content);
+        }
+        const updated = yield* wikiService.update(page.id, updateInput as any);
+        return formatWikiPage(updated);
+      }))
+    )
+    .handle("deletePage", (req) =>
+      respond(Effect.gen(function* () {
+        const projectService = yield* ProjectService;
+        const wikiService = yield* WikiService;
+        const project = yield* projectService.findBySlug(req.path.slug);
+        const page = yield* wikiService.findBySlug(project.id, req.path.pageSlug);
+        yield* wikiService.delete(page.id);
+        return undefined;
+      }))
+    )
+);
+
 function formatProject(p: { id: string; name: string; slug: string; description: string; githubRepo: string | null; createdAt: string; updatedAt: string }) {
   return p as any;
 }
@@ -457,15 +615,24 @@ function formatTask(t: { id: string; projectId: string; columnId: string; swimla
   return t as any;
 }
 
+function formatWikiPage(page: { id: string; projectId: string; title: string; slug: string; content: any; parentId: string | null; position: number; createdAt: string; updatedAt: string }) {
+  return page as any;
+}
+
+function formatWikiPageMeta(meta: { id: string; projectId: string; title: string; slug: string; parentId: string | null; position: number; updatedAt: string }) {
+  return { ...meta, hasChildren: false, createdAt: "" } as any;
+}
+
 export function createApiHandler() {
   const serviceLayer = Layer.mergeAll(
     ProjectRepo.Default, ProjectService.Default,
     ColumnRepo.Default, ColumnService.Default,
     SwimlaneRepo.Default, SwimlaneService.Default,
     TaskRepo.Default, TaskService.Default,
+    WikiRepo.Default, WikiService.Default,
   );
   const handlerLayer = Layer.mergeAll(
-    healthLive, projectsLive, columnsLive, swimlanesLive, tasksLive, boardLive,
+    healthLive, projectsLive, columnsLive, swimlanesLive, tasksLive, boardLive, wikiLive,
   ).pipe(Layer.provide(serviceLayer), Layer.provide(d1Live));
   const merged = Layer.mergeAll(apiLayer, handlerLayer);
   return HttpApiBuilder.toWebHandler(merged as unknown as Parameters<typeof HttpApiBuilder.toWebHandler>[0]);

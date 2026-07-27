@@ -63,6 +63,21 @@ export interface Task {
   updatedAt: ISODate;
 }
 
+export interface WikiPageMeta {
+  id: ID;
+  projectId: ID;
+  title: string;
+  slug: string;
+  parentId: ID | null;
+  position: number;
+  updatedAt: ISODate;
+}
+
+export interface WikiPage extends WikiPageMeta {
+  content: TipTapDoc;
+  createdAt: ISODate;
+}
+
 export interface ProjectRow {
   id: string;
   name: string;
@@ -122,6 +137,39 @@ export function rowToSwimlane(row: SwimlaneRow): Swimlane {
     projectId: row.project_id,
     name: row.name,
     position: row.position,
+  };
+}
+
+export interface WikiPageRow {
+  id: string;
+  project_id: string;
+  title: string;
+  slug: string;
+  content: string;
+  content_text: string;
+  parent_id: string | null;
+  position: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export function rowToWikiPageMeta(row: WikiPageRow): WikiPageMeta {
+  return {
+    id: row.id,
+    projectId: row.project_id,
+    title: row.title,
+    slug: row.slug,
+    parentId: row.parent_id,
+    position: row.position,
+    updatedAt: row.updated_at,
+  };
+}
+
+export function rowToWikiPage(row: WikiPageRow): WikiPage {
+  return {
+    ...rowToWikiPageMeta(row),
+    content: JSON.parse(row.content) as TipTapDoc,
+    createdAt: row.created_at,
   };
 }
 

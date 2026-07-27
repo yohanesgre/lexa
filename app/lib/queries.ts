@@ -1,5 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import type { Task, Board, TipTapDoc } from "../../shared/types";
+import type { Task, Board, TipTapDoc, WikiPageMeta } from "../../shared/types";
 import * as api from "./api";
 
 export function useProjects() {
@@ -63,4 +63,12 @@ export function useMoveTask(slug: string) {
       });
     },
   });
+}
+
+export function useWikiPages(slug: string) {
+  return useQuery({ queryKey: ["wiki", slug], queryFn: () => api.listWikiPages(slug).then((r) => r.data) });
+}
+
+export function useWikiPage(slug: string, pageSlug: string) {
+  return useQuery({ queryKey: ["wikiPage", slug, pageSlug], queryFn: () => api.getWikiPage(slug, pageSlug) });
 }

@@ -1,8 +1,9 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link, useParams } from "@tanstack/react-router";
 import { X } from "lucide-react";
-import type { Task, TipTapDoc } from "../../shared/types";
+import type { Task } from "../../shared/types";
 import { cn } from "./ui/cn";
+import { renderDoc } from "./tiptap-render";
 
 function GithubMark({ size = 14, className }: { size?: number; className?: string }) {
   return (
@@ -25,120 +26,6 @@ interface TaskDetailProps {
   onClose: () => void;
   onUpdate: (id: string, data: Partial<Task>) => void;
   columnName?: string;
-}
-
-type TTNode = {
-  type: string;
-  content?: TTNode[];
-  text?: string;
-  marks?: { type: string; attrs?: Record<string, unknown> }[];
-  attrs?: Record<string, unknown>;
-};
-
-const hasText = (nodes: TTNode[]): boolean =>
-  nodes.some((n) => (n.type === "text" && !!n.text?.trim()) || (n.content ? hasText(n.content) : false));
-
-function renderInline(nodes: TTNode[] | undefined, keyPrefix: string): ReactNode {
-  if (!nodes) return null;
-  return nodes.map((node, i) => {
-    const key = `${keyPrefix}-${i}`;
-    if (node.type === "text") {
-      let el: ReactNode = node.text ?? "";
-      for (const mark of node.marks ?? []) {
-        if (mark.type === "bold") el = <strong>{el}</strong>;
-        else if (mark.type === "italic") el = <em>{el}</em>;
-        else if (mark.type === "code") el = <code className="td-code">{el}</code>;
-        else if (mark.type === "link")
-          el = (
-            <a href={String(mark.attrs?.href ?? "#")} target="_blank" rel="noreferrer">
-              {el}
-            </a>
-          );
-      }
-      return <span key={key}>{el}</span>;
-    }
-    if (node.type === "hardBreak") return <br key={key} />;
-    return renderNode(node, key);
-  });
-}
-
-function renderNode(node: TTNode, key: string): ReactNode {
-  switch (node.type) {
-    case "paragraph":
-      return (
-        <p key={key} className="td-p">
-          {renderInline(node.content, key)}
-        </p>
-      );
-    case "heading": {
-      const level = Number(node.attrs?.level ?? 1);
-      const cls = level <= 1 ? "td-h1" : level === 2 ? "td-h2" : "td-h3";
-      const Tag = (level <= 1 ? "h1" : level === 2 ? "h2" : "h3") as "h1" | "h2" | "h3";
-      return (
-        <Tag key={key} className={cls}>
-          {renderInline(node.content, key)}
-        </Tag>
-      );
-    }
-    case "bulletList":
-      return (
-        <ul key={key} className="td-ul">
-          {renderInline(node.content, key)}
-        </ul>
-      );
-    case "orderedList":
-      return (
-        <ol key={key} className="td-ol">
-          {renderInline(node.content, key)}
-        </ol>
-      );
-    case "listItem":
-      return <li key={key}>{renderInline(node.content, key)}</li>;
-    case "taskList":
-      return (
-        <ul key={key} className="checklist">
-          {renderInline(node.content, key)}
-        </ul>
-      );
-    case "taskItem": {
-      const checked = node.attrs?.checked === true;
-      return (
-        <li key={key} className={cn(checked && "checked")}>
-          <span className={cn("checkbox", checked && "checked")} />
-          <span>{renderInline(node.content, key)}</span>
-        </li>
-      );
-    }
-    case "codeBlock":
-      return (
-        <pre key={key} className="td-pre">
-          <code>{collectText(node)}</code>
-        </pre>
-      );
-    case "blockquote":
-      return (
-        <blockquote key={key} className="td-quote">
-          {renderInline(node.content, key)}
-        </blockquote>
-      );
-    case "horizontalRule":
-      return <hr key={key} className="td-hr" />;
-    default:
-      return node.content ? <div key={key}>{renderInline(node.content, key)}</div> : null;
-  }
-}
-
-function collectText(node: TTNode): string {
-  if (node.type === "text") return node.text ?? "";
-  return (node.content ?? []).map(collectText).join("");
-}
-
-function renderDoc(doc: TipTapDoc): ReactNode {
-  const nodes = doc.content as TTNode[];
-  if (!hasText(nodes)) {
-    return <p className="td-p italic text-lx-text-muted">Add a description...</p>;
-  }
-  return nodes.map((node, i) => renderNode(node, `n${i}`));
 }
 
 const capitalize = (s: string) => s[0].toUpperCase() + s.slice(1);
