@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Lexa — Project Switcher Component</title>
+  <link rel="stylesheet" href="wireframes.css" />
+</head>
+<body class="bg-app color-primary" style="min-height:100vh;">
+
+  <nav class="app-nav">
+    <div class="nav-brand">Lexa</div>
+    <a href="index.html" class="nav-link">Wireframes</a>
+    <a href="dashboard.html" class="nav-link">Dashboard</a>
+    <a href="kanban.html" class="nav-link">Board</a>
+    <a href="wiki.html" class="nav-link">Wiki</a>
+    <a href="settings.html" class="nav-link">Settings</a>
+
+    <div class="project-switcher">
+      <button class="project-switcher-trigger">
+        <span class="text-sm weight-500 font-body color-primary">Emberfall</span>
+        <svg viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg>
+      </button>
+      <div class="menu project-switcher-menu">
+        <div class="menu-item project-switcher-row active">
+          <div class="project-switcher-row-info">
+            <span class="project-switcher-row-name">Emberfall</span>
+            <span class="project-switcher-row-desc">emberfall</span>
+          </div>
+          <span class="project-switcher-row-count font-micro text-2xs color-muted">042</span>
+        </div>
+        <div class="menu-item project-switcher-row">
+          <div class="project-switcher-row-info">
+            <span class="project-switcher-row-name">Void Drifter</span>
+            <span class="project-switcher-row-desc">void-drifter</span>
+          </div>
+          <span class="project-switcher-row-count font-micro text-2xs color-muted">018</span>
+        </div>
+        <div class="menu-item project-switcher-row">
+          <div class="project-switcher-row-info">
+            <span class="project-switcher-row-name">Ironbound</span>
+            <span class="project-switcher-row-desc">ironbound</span>
+          </div>
+          <span class="project-switcher-row-count font-micro text-2xs color-muted">007</span>
+        </div>
+        <div class="menu-item project-switcher-row">
+          <div class="project-switcher-row-info">
+            <span class="project-switcher-row-name">Pale Reach</span>
+            <span class="project-switcher-row-desc">pale-reach</span>
+          </div>
+          <span class="project-switcher-row-count font-micro text-2xs color-muted">031</span>
+        </div>
+        <div class="menu-separator"></div>
+        <div class="menu-item project-switcher-row">
+          <span class="project-switcher-row-name">Create new project</span>
+        </div>
+      </div>
+    </div>
+  </nav>
+
+  <main class="page-frame">
+    <h1 class="font-display text-2xl weight-600 color-primary mb-2">Project Switcher</h1>
+    <p class="text-sm color-secondary mb-4">Standalone component preview. Dropdown shown open below the nav trigger.</p>
+    <span class="annotation-tag">.app-nav with .project-switcher</span>
+  </main>
+
+</body>
+</html>

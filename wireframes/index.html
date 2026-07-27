@@ -20,37 +20,229 @@
     </p>
 
     <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:16px;margin-top:24px;">
+      <a href="flow-overview.html" class="project-card" style="height:auto;min-height:120px;text-decoration:none;border-color:var(--lx-border-focus);box-shadow:var(--lx-focus-glow);">
+        <div class="project-card-name" style="font-size:18px;">Start Here — Flow Overview</div>
+        <div class="project-card-desc">Canonical user paths and project-context rules. Read this before implementation.</div>
+        <span class="annotation-tag mt-2">flow-overview.html</span>
+      </a>
+    </div>
 
+    <h2 class="font-display text-xl weight-600 color-primary" style="margin-top:32px;margin-bottom:16px;">Core Screens</h2>
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:16px;">
       <a href="dashboard.html" class="project-card" style="height:auto;min-height:120px;text-decoration:none;">
         <div class="project-card-name" style="font-size:18px;">Dashboard</div>
-        <div class="project-card-desc">Project grid + quick actions. Project: Emberfall and others.</div>
+        <div class="project-card-desc">Cross-project command center. Health bars, urgent/sync counts, aggregate stats, needs-attention list.</div>
         <span class="annotation-tag mt-2">/index.tsx</span>
       </a>
-
       <a href="kanban.html" class="project-card" style="height:auto;min-height:120px;text-decoration:none;">
         <div class="project-card-name" style="font-size:18px;">Kanban Board</div>
-        <div class="project-card-desc">The heart. Swimlanes, 5 columns, ~12 cards, drag state, WIP exceeded, out-of-sync.</div>
+        <div class="project-card-desc">The heart. Swimlanes, columns, cards, drag states, WIP — with project switcher in nav.</div>
         <span class="annotation-tag mt-2">/$slug/index.tsx</span>
       </a>
-
-      <a href="task-detail.html" class="project-card" style="height:auto;min-height:120px;text-decoration:none;">
-        <div class="project-card-name" style="font-size:18px;">Task Detail Slideover</div>
-        <div class="project-card-desc">Slideover over dimmed backdrop. Inline title, TipTap description, property bar, GitHub sync warning.</div>
-        <span class="annotation-tag mt-2">/$slug/tasks/$id.tsx</span>
-      </a>
-
       <a href="wiki.html" class="project-card" style="height:auto;min-height:120px;text-decoration:none;">
         <div class="project-card-name" style="font-size:18px;">Wiki</div>
-        <div class="project-card-desc">Nested page tree sidebar + reading view with PHOSPHOR prose, code blocks, tables.</div>
+        <div class="project-card-desc">Nested page tree + prose reading view with code blocks, tables, and edit action.</div>
         <span class="annotation-tag mt-2">/$slug/wiki/$page.tsx</span>
       </a>
-
       <a href="settings.html" class="project-card" style="height:auto;min-height:120px;text-decoration:none;">
         <div class="project-card-name" style="font-size:18px;">Settings</div>
-        <div class="project-card-desc">API key management + column/swimlane configuration. Tables and forms.</div>
+        <div class="project-card-desc">API keys, columns, swimlanes, GitHub repo mapping — with project switcher in nav.</div>
         <span class="annotation-tag mt-2">/settings.tsx &amp; /$slug/settings.tsx</span>
       </a>
+    </div>
 
+    <h2 class="font-display text-xl weight-600 color-primary" style="margin-top:32px;margin-bottom:16px;">Dashboard States</h2>
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:16px;">
+      <a href="dashboard-empty.html" class="project-card" style="height:auto;min-height:120px;text-decoration:none;">
+        <div class="project-card-name" style="font-size:18px;">Empty</div>
+        <div class="project-card-desc">Zero projects. Empty-state icon, headline, subtext, New Project CTA.</div>
+        <span class="annotation-tag mt-2">/index.tsx state</span>
+      </a>
+      <a href="dashboard-new-project.html" class="project-card" style="height:auto;min-height:120px;text-decoration:none;">
+        <div class="project-card-name" style="font-size:18px;">New Project</div>
+        <div class="project-card-desc">Modal: name, description, GitHub repo (optional), create/cancel.</div>
+        <span class="annotation-tag mt-2">/index.tsx modal</span>
+      </a>
+      <a href="dashboard-project-menu.html" class="project-card" style="height:auto;min-height:120px;text-decoration:none;">
+        <div class="project-card-name" style="font-size:18px;">Project Menu</div>
+        <div class="project-card-desc">Card context menu: Rename, Settings, separator, Delete.</div>
+        <span class="annotation-tag mt-2">/index.tsx menu</span>
+      </a>
+      <a href="dashboard-delete-project.html" class="project-card" style="height:auto;min-height:120px;text-decoration:none;">
+        <div class="project-card-name" style="font-size:18px;">Delete Confirm</div>
+        <div class="project-card-desc">Confirm dialog over dimmed grid. Cascading delete warning.</div>
+        <span class="annotation-tag mt-2">/index.tsx dialog</span>
+      </a>
+    </div>
+
+    <h2 class="font-display text-xl weight-600 color-primary" style="margin-top:32px;margin-bottom:16px;">Board States</h2>
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:16px;">
+      <a href="kanban-column-menu.html" class="project-card" style="height:auto;min-height:120px;text-decoration:none;">
+        <div class="project-card-name" style="font-size:18px;">Column Menu</div>
+        <div class="project-card-desc">Dropdown on a column header: Add task, Rename, Edit, Delete, Clear.</div>
+        <span class="annotation-tag mt-2">/$slug/index.tsx</span>
+      </a>
+      <a href="kanban-swimlane-menu.html" class="project-card" style="height:auto;min-height:120px;text-decoration:none;">
+        <div class="project-card-name" style="font-size:18px;">Swimlane Menu</div>
+        <div class="project-card-desc">Dropdown on a swimlane header: Expand, Rename, Add column, Delete.</div>
+        <span class="annotation-tag mt-2">/$slug/index.tsx</span>
+      </a>
+      <a href="kanban-filter.html" class="project-card" style="height:auto;min-height:120px;text-decoration:none;">
+        <div class="project-card-name" style="font-size:18px;">Filter</div>
+        <div class="project-card-desc">Filter popover: Column, Priority, Type, Assignee, Swimlane. Active chips.</div>
+        <span class="annotation-tag mt-2">/$slug/index.tsx</span>
+      </a>
+      <a href="kanban-inline-add.html" class="project-card" style="height:auto;min-height:120px;text-decoration:none;">
+        <div class="project-card-name" style="font-size:18px;">Inline Add</div>
+        <div class="project-card-desc">Add-task form inside a column: title, priority, type, save/cancel.</div>
+        <span class="annotation-tag mt-2">/$slug/index.tsx</span>
+      </a>
+      <a href="kanban-empty.html" class="project-card" style="height:auto;min-height:120px;text-decoration:none;">
+        <div class="project-card-name" style="font-size:18px;">Empty Board</div>
+        <div class="project-card-desc">No columns, no swimlanes. Board header + empty-state CTA.</div>
+        <span class="annotation-tag mt-2">/$slug/index.tsx</span>
+      </a>
+    </div>
+
+    <h2 class="font-display text-xl weight-600 color-primary" style="margin-top:32px;margin-bottom:16px;">Task Detail States</h2>
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:16px;">
+      <a href="task-detail-create.html" class="project-card" style="height:auto;min-height:120px;text-decoration:none;">
+        <div class="project-card-name" style="font-size:18px;">Create</div>
+        <div class="project-card-desc">Empty slideover: title input, default props, empty description.</div>
+        <span class="annotation-tag mt-2">/$slug/tasks/new</span>
+      </a>
+      <a href="task-detail-edit.html" class="project-card" style="height:auto;min-height:120px;text-decoration:none;">
+        <div class="project-card-name" style="font-size:18px;">Edit</div>
+        <div class="project-card-desc">Inline title editing, dropdowns open, TipTap toolbar visible.</div>
+        <span class="annotation-tag mt-2">/$slug/tasks/$id.tsx</span>
+      </a>
+      <a href="task-detail-delete.html" class="project-card" style="height:auto;min-height:120px;text-decoration:none;">
+        <div class="project-card-name" style="font-size:18px;">Delete Confirm</div>
+        <div class="project-card-desc">Confirm dialog over slideover: cancel/delete.</div>
+        <span class="annotation-tag mt-2">/$slug/tasks/$id.tsx</span>
+      </a>
+      <a href="task-detail-github-link.html" class="project-card" style="height:auto;min-height:120px;text-decoration:none;">
+        <div class="project-card-name" style="font-size:18px;">GitHub Link</div>
+        <div class="project-card-desc">Link flow: repo input, create issue, loading, success.</div>
+        <span class="annotation-tag mt-2">/$slug/tasks/$id.tsx</span>
+      </a>
+      <a href="task-detail-github-unlinked.html" class="project-card" style="height:auto;min-height:120px;text-decoration:none;">
+        <div class="project-card-name" style="font-size:18px;">GitHub Unlinked</div>
+        <div class="project-card-desc">Null state: no GitHub issue linked yet.</div>
+        <span class="annotation-tag mt-2">/$slug/tasks/$id.tsx</span>
+      </a>
+      <a href="task-detail-required-field.html" class="project-card" style="height:auto;min-height:120px;text-decoration:none;">
+        <div class="project-card-name" style="font-size:18px;">Required Field</div>
+        <div class="project-card-desc">Validation error: "In Progress requires assignee".</div>
+        <span class="annotation-tag mt-2">/$slug/tasks/$id.tsx</span>
+      </a>
+    </div>
+
+    <h2 class="font-display text-xl weight-600 color-primary" style="margin-top:32px;margin-bottom:16px;">Wiki States</h2>
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:16px;">
+      <a href="wiki-page-menu.html" class="project-card" style="height:auto;min-height:120px;text-decoration:none;">
+        <div class="project-card-name" style="font-size:18px;">Page Menu</div>
+        <div class="project-card-desc">Tree item context menu: Add child, Rename, Move, Delete.</div>
+        <span class="annotation-tag mt-2">/$slug/wiki/</span>
+      </a>
+      <a href="wiki-edit.html" class="project-card" style="height:auto;min-height:120px;text-decoration:none;">
+        <div class="project-card-name" style="font-size:18px;">Edit</div>
+        <div class="project-card-desc">Full TipTap editor toolbar, title/slug inputs, save/cancel.</div>
+        <span class="annotation-tag mt-2">/$slug/wiki/$page.tsx</span>
+      </a>
+      <a href="wiki-empty.html" class="project-card" style="height:auto;min-height:120px;text-decoration:none;">
+        <div class="project-card-name" style="font-size:18px;">Empty</div>
+        <div class="project-card-desc">No pages. Empty-state CTA in sidebar and main area.</div>
+        <span class="annotation-tag mt-2">/$slug/wiki/</span>
+      </a>
+      <a href="wiki-search-results.html" class="project-card" style="height:auto;min-height:120px;text-decoration:none;">
+        <div class="project-card-name" style="font-size:18px;">Search Results</div>
+        <div class="project-card-desc">FTS5 snippet list with amber &lt;mark&gt; highlights, top result shown.</div>
+        <span class="annotation-tag mt-2">/$slug/wiki/</span>
+      </a>
+      <a href="wiki-page-not-found.html" class="project-card" style="height:auto;min-height:120px;text-decoration:none;">
+        <div class="project-card-name" style="font-size:18px;">Not Found</div>
+        <div class="project-card-desc">404 empty state with slug readout, back to wiki link.</div>
+        <span class="annotation-tag mt-2">/$slug/wiki/$page.tsx</span>
+      </a>
+      <a href="wiki-create-page.html" class="project-card" style="height:auto;min-height:120px;text-decoration:none;">
+        <div class="project-card-name" style="font-size:18px;">Create Page</div>
+        <div class="project-card-desc">Modal: title, parent selector, slug preview.</div>
+        <span class="annotation-tag mt-2">/$slug/wiki/</span>
+      </a>
+      <a href="wiki-mobile.html" class="project-card" style="height:auto;min-height:120px;text-decoration:none;">
+        <div class="project-card-name" style="font-size:18px;">Mobile</div>
+        <div class="project-card-desc">375px view. Sidebar collapsed, hamburger open over content.</div>
+        <span class="annotation-tag mt-2">/$slug/wiki/</span>
+      </a>
+    </div>
+
+    <h2 class="font-display text-xl weight-600 color-primary" style="margin-top:32px;margin-bottom:16px;">Settings States</h2>
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:16px;">
+      <a href="settings-column-modal.html" class="project-card" style="height:auto;min-height:120px;text-decoration:none;">
+        <div class="project-card-name" style="font-size:18px;">Column Modal</div>
+        <div class="project-card-desc">Create/edit form: name, color swatches, WIP, required fields, GH state.</div>
+        <span class="annotation-tag mt-2">/$slug/settings.tsx</span>
+      </a>
+      <a href="settings-api-key-reveal.html" class="project-card" style="height:auto;min-height:120px;text-decoration:none;">
+        <div class="project-card-name" style="font-size:18px;">API Key Reveal</div>
+        <div class="project-card-desc">Modal showing raw key once, copy button, warning text.</div>
+        <span class="annotation-tag mt-2">/settings.tsx</span>
+      </a>
+      <a href="settings-delete-confirm.html" class="project-card" style="height:auto;min-height:120px;text-decoration:none;">
+        <div class="project-card-name" style="font-size:18px;">Delete Confirm</div>
+        <div class="project-card-desc">Confirm dialog for column, API key, or swimlane deletion.</div>
+        <span class="annotation-tag mt-2">/settings.tsx</span>
+      </a>
+      <a href="settings-empty.html" class="project-card" style="height:auto;min-height:120px;text-decoration:none;">
+        <div class="project-card-name" style="font-size:18px;">Empty</div>
+        <div class="project-card-desc">New project settings: no keys, no columns, no swimlanes.</div>
+        <span class="annotation-tag mt-2">/$slug/settings.tsx</span>
+      </a>
+    </div>
+
+    <h2 class="font-display text-xl weight-600 color-primary" style="margin-top:32px;margin-bottom:16px;">Global Components &amp; Patterns</h2>
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:16px;">
+      <a href="navbar-project-switcher.html" class="project-card" style="height:auto;min-height:120px;text-decoration:none;">
+        <div class="project-card-name" style="font-size:18px;">Project Switcher</div>
+        <div class="project-card-desc">Global nav component: dropdown with 4 projects, task counts, slugs, "Create new project".</div>
+        <span class="annotation-tag mt-2">components/AppNav.tsx</span>
+      </a>
+      <a href="component-toast.html" class="project-card" style="height:auto;min-height:120px;text-decoration:none;">
+        <div class="project-card-name" style="font-size:18px;">Toast</div>
+        <div class="project-card-desc">Stacked notifications, top-right: success, warning, error + enter animation.</div>
+        <span class="annotation-tag mt-2">components/Toast.tsx</span>
+      </a>
+      <a href="component-confirm.html" class="project-card" style="height:auto;min-height:120px;text-decoration:none;">
+        <div class="project-card-name" style="font-size:18px;">Confirm Dialog</div>
+        <div class="project-card-desc">Centered modal over dimmed backdrop. Cancel / solid-danger confirm.</div>
+        <span class="annotation-tag mt-2">components/ConfirmDialog.tsx</span>
+      </a>
+      <a href="component-empty-state.html" class="project-card" style="height:auto;min-height:120px;text-decoration:none;">
+        <div class="project-card-name" style="font-size:18px;">Empty State</div>
+        <div class="project-card-desc">Icon tile, Display heading, subtext, one primary CTA. Full + compact variants.</div>
+        <span class="annotation-tag mt-2">components/EmptyState.tsx</span>
+      </a>
+      <a href="component-loading.html" class="project-card" style="height:auto;min-height:120px;text-decoration:none;">
+        <div class="project-card-name" style="font-size:18px;">Loading Skeleton</div>
+        <div class="project-card-desc">Layout-matched skeleton blocks for card lists and the detail panel. No spinners.</div>
+        <span class="annotation-tag mt-2">components/Skeleton.tsx</span>
+      </a>
+      <a href="component-dropdown.html" class="project-card" style="height:auto;min-height:120px;text-decoration:none;">
+        <div class="project-card-name" style="font-size:18px;">Dropdown Menu</div>
+        <div class="project-card-desc">Sections, icons, Mono shortcuts, keyboard focus ring, pinned danger action.</div>
+        <span class="annotation-tag mt-2">components/DropdownMenu.tsx</span>
+      </a>
+      <a href="component-mobile-nav.html" class="project-card" style="height:auto;min-height:120px;text-decoration:none;">
+        <div class="project-card-name" style="font-size:18px;">Mobile Nav</div>
+        <div class="project-card-desc">≤768px hamburger with dropdown panel over a scrim. Open + closed states.</div>
+        <span class="annotation-tag mt-2">components/AppNav.tsx</span>
+      </a>
+      <a href="page-404.html" class="project-card" style="height:auto;min-height:120px;text-decoration:none;">
+        <div class="project-card-name" style="font-size:18px;">404 Page</div>
+        <div class="project-card-desc">Full-page not-found with route readout and a dashboard back link.</div>
+        <span class="annotation-tag mt-2">/404.tsx</span>
+      </a>
     </div>
 
     <div class="responsive-note mt-4" style="max-width:600px;">

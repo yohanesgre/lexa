@@ -17,6 +17,19 @@ You are working on **Lexa**: a self-hosted project management tool for a small g
 
 **If documents conflict, stop and report the conflict to the user. Never resolve it yourself.**
 
+## Wireframes are the frontend source of truth
+
+The `wireframes/` directory contains the final UI/UX decisions for Lexa. When implementing or modifying frontend code, treat the wireframes as the authoritative reference for layout, structure, component states, and user flows. This section complements `IMPLEMENTATION.md`: the implementation plan defines the phase-by-phase build order and acceptance checks, while this rule defines how to interpret the wireframes when building frontend screens.
+
+1. Start with `wireframes/flow-overview.html` to understand canonical user flows and project-context rules.
+2. Use `wireframes/index.html` to browse all surfaces and states.
+3. Match the structure, spacing, hierarchy, and interactions shown in the wireframes exactly.
+4. Use `DESIGN_SYSTEM.md` for tokens, typography, and color values. PHOSPHOR tokens are CSS variables — no raw hex outside `phosphor.css`.
+5. If a wireframe conflicts with `DESIGN_SYSTEM.md` or any other design doc, the wireframe wins for frontend implementation. Report the conflict to the user.
+6. Do not add screens, states, or components that are not represented in the wireframes without explicit user approval.
+
+The wireframes are static HTML/CSS previews with no JavaScript. Implement interactions (dropdowns, modals, slideovers, drag-and-drop, inline editing, etc.) to match the rendered states and annotations.
+
 ## Non-negotiable rules
 
 1. **No scope creep.** If a feature, table, column, endpoint, MCP tool, or error code is not in the design docs, it does not get built. If you believe something is missing, report it — don't add it.

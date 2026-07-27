@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Lexa — Wiki: Mobile</title>
+  <link rel="stylesheet" href="wireframes.css" />
+</head>
+<body class="bg-app color-primary" style="min-height:100vh;">
+
+  <nav class="app-nav">
+    <div class="nav-brand">Lexa</div>
+    <a href="index.html" class="nav-link">Wireframes</a>
+    <a href="dashboard.html" class="nav-link">Dashboard</a>
+    <a href="kanban.html" class="nav-link">Board</a>
+    <a href="wiki.html" class="nav-link active">Wiki</a>
+    <a href="settings.html" class="nav-link">Settings</a>
+    <span class="font-micro text-2xs color-muted ml-2" style="text-transform:uppercase;letter-spacing:0.04em;">Project: Emberfall</span>
+  </nav>
+
+  <main class="page-frame" style="max-width:900px;">
+    <h1 class="font-display text-xl weight-600 color-primary mb-2">Wiki — Mobile</h1>
+    <p class="text-sm color-secondary mb-4" style="max-width:560px;">
+      Below 768px the 260px sidebar becomes an overlay panel. A hamburger toggle in the top bar slides it over the content (250ms, <span class="font-mono text-xs">--lx-ease-out</span>, DS §6.2).
+    </p>
+
+    <div class="flex gap-4" style="flex-wrap:wrap;">
+
+      <!-- Frame 1: sidebar collapsed -->
+      <div>
+        <div class="font-micro text-2xs color-muted mb-2" style="text-transform:uppercase;letter-spacing:0.04em;">State: Collapsed</div>
+        <div class="mobile-frame">
+
+          <!-- Mini top bar -->
+          <div class="flex items-center gap-2" style="height:44px;padding:0 12px;border-bottom:1px solid var(--lx-border-default);background:var(--lx-surface-elevated);flex-shrink:0;">
+            <button class="btn btn-ghost" style="width:32px;height:32px;padding:0;border:none;">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><line x1="4" y1="6" x2="20" y2="6"/><line x1="4" y1="12" x2="20" y2="12"/><line x1="4" y1="18" x2="20" y2="18"/></svg>
+            </button>
+            <span class="text-sm weight-500 color-primary font-body truncate">Elemental Damage</span>
+            <div class="flex-1"></div>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="color:var(--lx-text-muted);flex-shrink:0;"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>
+          </div>
+
+          <!-- Content -->
+          <div class="flex-1" style="overflow:hidden;padding:20px;">
+            <div class="text-xs color-muted font-body mb-1 truncate">Game Design Doc / Combat System</div>
+            <h1 class="font-display weight-600 color-primary" style="font-size:20px;line-height:26px;letter-spacing:-0.03em;margin-bottom:12px;">Elemental Damage</h1>
+            <p class="text-sm color-primary font-body" style="line-height:22px;margin-bottom:12px;">
+              Emberfall’s combat revolves around four elemental affinities: <strong>Fire</strong>, <strong>Ice</strong>, <strong>Earth</strong>, and <strong>Wind</strong>. Each enemy has a hidden resistance matrix.
+            </p>
+            <div style="background:var(--lx-surface-elevated);border:1px solid var(--lx-border-default);border-radius:6px;padding:10px 12px;overflow:hidden;">
+              <code class="font-mono text-xs color-secondary" style="white-space:pre;">var resistance =
+  target.resistance[affinity]</code>
+            </div>
+          </div>
+
+          <!-- Frame annotation -->
+          <div style="position:absolute;bottom:12px;left:12px;">
+            <span class="annotation-tag">Hamburger toggles sidebar</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Frame 2: sidebar open as overlay -->
+      <div>
+        <div class="font-micro text-2xs color-muted mb-2" style="text-transform:uppercase;letter-spacing:0.04em;">State: Sidebar open</div>
+        <div class="mobile-frame">
+
+          <!-- Same content underneath -->
+          <div class="flex items-center gap-2" style="height:44px;padding:0 12px;border-bottom:1px solid var(--lx-border-default);background:var(--lx-surface-elevated);flex-shrink:0;">
+            <button class="btn btn-ghost" style="width:32px;height:32px;padding:0;border:none;">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><line x1="4" y1="6" x2="20" y2="6"/><line x1="4" y1="12" x2="20" y2="12"/><line x1="4" y1="18" x2="20" y2="18"/></svg>
+            </button>
+            <span class="text-sm weight-500 color-primary font-body truncate">Elemental Damage</span>
+          </div>
+          <div class="flex-1" style="overflow:hidden;padding:20px;">
+            <div class="text-xs color-muted font-body mb-1 truncate">Game Design Doc / Combat System</div>
+            <h1 class="font-display weight-600 color-primary" style="font-size:20px;line-height:26px;letter-spacing:-0.03em;margin-bottom:12px;">Elemental Damage</h1>
+            <p class="text-sm color-primary font-body" style="line-height:22px;">
+              Emberfall’s combat revolves around four elemental affinities.
+            </p>
+          </div>
+
+          <!-- Scrim -->
+          <div style="position:absolute;inset:0;background:var(--lx-surface-overlay);"></div>
+
+          <!-- Sidebar overlay panel (reuses .wiki-sidebar styling) -->
+          <aside class="wiki-sidebar" style="position:absolute;left:0;top:0;bottom:0;box-shadow:var(--lx-shadow-lg);">
+            <div class="px-4 mb-3">
+              <div class="flex items-center gap-2 px-3 bg-input border-default r-sm" style="height:32px;">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="color:var(--lx-text-muted);flex-shrink:0;"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>
+                <span class="text-xs color-muted font-body">Search wiki...</span>
+              </div>
+            </div>
+
+            <div class="flex-1 overflow-y-auto">
+              <div class="tree-item" style="margin-bottom:2px;">
+                <svg class="chevron-small" viewBox="0 0 24 24" style="transform:rotate(90deg);"><path d="M9 18l6-6-6-6"/></svg>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="color:var(--lx-text-muted);margin-right:6px;flex-shrink:0;"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14 2 14 8 20 8"/></svg>
+                Game Design Doc
+              </div>
+              <div class="tree-item tree-indent-1" style="margin-bottom:2px;">
+                <svg class="chevron-small" viewBox="0 0 24 24" style="transform:rotate(90deg);"><path d="M9 18l6-6-6-6"/></svg>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="color:var(--lx-text-muted);margin-right:6px;flex-shrink:0;"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14 2 14 8 20 8"/></svg>
+                Combat System
+              </div>
+              <div class="tree-item tree-indent-2 active" style="margin-bottom:2px;">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="color:var(--lx-text-muted);margin-right:6px;flex-shrink:0;"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14 2 14 8 20 8"/></svg>
+                Elemental Damage
+              </div>
+              <div class="tree-item tree-indent-2" style="margin-bottom:2px;">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="color:var(--lx-text-muted);margin-right:6px;flex-shrink:0;"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14 2 14 8 20 8"/></svg>
+                Boss Patterns
+              </div>
+              <div class="tree-item" style="margin-bottom:2px;margin-top:8px;">
+                <svg class="chevron-small" viewBox="0 0 24 24"><path d="M9 18l6-6-6-6"/></svg>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="color:var(--lx-text-muted);margin-right:6px;flex-shrink:0;"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14 2 14 8 20 8"/></svg>
+                Art Direction
+              </div>
+            </div>
+
+            <div class="px-3 mt-2">
+              <button class="add-task-btn" style="justify-content:flex-start;padding-left:12px;">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 5v14m-7-7h14"/></svg>
+                New page
+              </button>
+            </div>
+          </aside>
+
+          <!-- Frame annotation -->
+          <div style="position:absolute;bottom:12px;right:12px;">
+            <span class="annotation-tag">Scrim tap dismisses</span>
+          </div>
+        </div>
+      </div>
+
+    </div>
+
+    <div class="responsive-note mt-4" style="max-width:600px;">
+      <strong>Behavior.</strong> The sidebar is the same 260px panel as desktop — on mobile it renders as a fixed overlay with a scrim instead of pushing the layout. The reading column drops its 720px max-width cap and uses 20px padding. Selecting a page closes the panel.
+    </div>
+  </main>
+
+</body>
+</html>

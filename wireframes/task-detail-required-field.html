@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Lexa — Task Detail: Required Field</title>
+  <link rel="stylesheet" href="wireframes.css" />
+</head>
+<body class="bg-app color-primary" style="min-height:100vh;position:relative;overflow:hidden;">
+
+  <!-- Dimmed Kanban Backdrop -->
+  <div style="position:absolute;inset:0;opacity:0.25;pointer-events:none;overflow:hidden;">
+    <nav class="app-nav">
+      <div class="nav-brand">Lexa</div>
+      <span class="font-micro text-2xs color-muted">Project: Emberfall</span>
+    </nav>
+    <div class="board-area">
+      <div class="board-header">
+        <h1 class="font-display text-xl weight-600 color-primary">Emberfall</h1>
+      </div>
+      <div class="board-scroll">
+        <div class="swimlane-header" style="margin-bottom:12px;">
+          <svg class="chevron" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg>
+          <span class="swimlane-name">Sprint 7 — The Furnace</span>
+        </div>
+        <div class="columns-row">
+          <div class="column" style="opacity:0.6;">
+            <div class="column-header has-cards"><span class="column-name">Backlog</span></div>
+            <div class="column-body"><div class="kanban-card" style="border-left:3px solid #4ADE80;"><div class="card-title">Implement double-jump mechanic</div></div></div>
+          </div>
+          <div class="column" style="opacity:0.6;">
+            <div class="column-header has-cards"><span class="column-name">In Progress</span></div>
+            <div class="column-body"><div class="kanban-card" style="border-left:3px solid #FF4444;"><div class="card-title">Crash on level 3-2 load</div></div></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Overlay -->
+  <div class="slideover-overlay"></div>
+
+  <!-- Slideover -->
+  <div class="slideover">
+    <!-- Header -->
+    <div class="slideover-header border-b-subtle">
+      <div class="flex items-center gap-2">
+        <span class="text-xs color-muted font-body">Emberfall / Board</span>
+        <span class="annotation-inline">required_fields violation on move</span>
+      </div>
+      <button class="btn btn-ghost" style="width:32px;height:32px;padding:0;">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M18 6L6 18M6 6l12 12"/></svg>
+      </button>
+    </div>
+
+    <!-- Title -->
+    <div class="px-4 pt-4">
+      <h2 class="slideover-title">Crash on level 3-2 load</h2>
+    </div>
+
+    <!-- Property Bar: move attempted to In Progress with empty assignee -->
+    <div class="property-bar mt-3">
+      <div class="prop-field">
+        <span class="prop-label">Column</span>
+        <select class="prop-input is-focused" style="min-width:120px;">
+          <option>In Progress</option>
+        </select>
+      </div>
+      <div class="prop-field">
+        <span class="prop-label">Priority</span>
+        <span class="priority-badge pb-urgent">
+          <span class="priority-dot priority-urgent"></span>
+          Urgent
+        </span>
+      </div>
+      <div class="prop-field">
+        <span class="prop-label">Type</span>
+        <span class="type-badge type-bug">Bug</span>
+      </div>
+      <div class="prop-field">
+        <span class="prop-label">Assignee</span>
+        <input class="prop-input is-focused" placeholder="Required" style="width:80px;" />
+      </div>
+      <span class="annotation-tag">Move rejected: column reverts until assignee is set. Assignee field gets focus ring</span>
+    </div>
+
+    <!-- Validation banner -->
+    <div class="px-4 pt-3">
+      <div class="banner-warning">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="flex-shrink:0;"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0zM12 9v4M12 17h.01"/></svg>
+        <span class="weight-500">In Progress requires assignee</span>
+        <button class="btn btn-ghost" style="width:24px;height:24px;padding:0;margin-left:auto;border:none;">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M18 6L6 18M6 6l12 12"/></svg>
+        </button>
+      </div>
+      <span class="annotation-tag mt-2">Banner: warning subtle bg + amber border, AlertTriangle, dismissible. Copy = "{column} requires {field}"</span>
+    </div>
+
+    <!-- Description -->
+    <div class="slideover-body">
+      <div class="pt-4" style="font-size:15px;line-height:22px;color:var(--lx-text-secondary);font-family:var(--lx-font-body);">
+        <p style="color:var(--lx-text-primary);">
+          The game crashes consistently when loading level 3-2 (The Furnace Depths). This appears to be related to the new tilemap streaming system introduced in Sprint 6.
+        </p>
+      </div>
+    </div>
+
+    <!-- Footer -->
+    <div class="slideover-footer">
+      <button class="btn btn-danger">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+        Delete
+      </button>
+      <button class="btn btn-ghost">Close</button>
+    </div>
+  </div>
+
+  <!-- Annotation rail -->
+  <div style="position:fixed;top:50%;right:484px;transform:translateY(-50%);z-index:55;">
+    <span class="annotation-tag">480px slideover — validation variant. required_fields enforced on create, move, and update</span>
+  </div>
+
+</body>
+</html>

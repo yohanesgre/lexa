@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Lexa — Kanban Board</title>
+  <title>Lexa — Kanban: Inline Add Task</title>
   <link rel="stylesheet" href="wireframes.css" />
 </head>
 <body class="bg-app color-primary">
@@ -15,12 +15,7 @@
     <a href="kanban.html" class="nav-link active">Board</a>
     <a href="wiki.html" class="nav-link">Wiki</a>
     <a href="settings.html" class="nav-link">Settings</a>
-    <div class="project-switcher">
-      <button class="project-switcher-trigger">
-        <span class="text-sm weight-500 font-body color-primary">Emberfall</span>
-        <svg viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg>
-      </button>
-    </div>
+    <span class="font-micro text-2xs color-muted ml-2" style="text-transform:uppercase;letter-spacing:0.04em;">Project: Emberfall</span>
   </nav>
 
   <div class="board-area">
@@ -28,7 +23,7 @@
     <div class="board-header">
       <div class="flex items-center gap-3">
         <h1 class="font-display text-xl weight-600 color-primary">Emberfall</h1>
-        <span class="annotation-tag">Kanban — the heart of Lexa</span>
+        <span class="annotation-tag">State: inline add-task form open (Backlog)</span>
       </div>
       <div class="flex items-center gap-2">
         <button class="btn btn-ghost text-sm">Filter</button>
@@ -45,12 +40,11 @@
           <svg class="chevron" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg>
           <span class="swimlane-name">Sprint 7 — The Furnace</span>
           <span class="swimlane-count">012</span>
-          <span class="annotation-inline">SwimlaneHeader: 36px, Space Grotesk</span>
         </div>
 
         <div class="columns-row">
 
-          <!-- Column: Backlog -->
+          <!-- Column: Backlog (inline add open) -->
           <div class="column">
             <div class="column-strip" style="background:transparent;"></div>
             <div class="column-header has-cards">
@@ -62,7 +56,6 @@
             </div>
             <div class="column-body">
 
-              <!-- Card 1 -->
               <div class="kanban-card" style="border-left:3px solid #4ADE80;">
                 <div class="flex items-center justify-between">
                   <span class="type-badge type-feature">Feature</span>
@@ -72,10 +65,8 @@
                 <div class="card-meta">
                   <div class="avatar">MK</div>
                 </div>
-                <span class="annotation" style="position:absolute;right:6px;bottom:4px;">left-border: type accent</span>
               </div>
 
-              <!-- Card 2 -->
               <div class="kanban-card" style="border-left:3px solid #FF4444;">
                 <div class="flex items-center justify-between">
                   <span class="type-badge type-bug">Bug</span>
@@ -90,27 +81,33 @@
                   </span>
                   <span class="sync-dot sync-synced"></span>
                 </div>
-                <span class="annotation" style="position:absolute;right:6px;bottom:4px;">GH linked + synced</span>
               </div>
 
-              <!-- Card 3 -->
-              <div class="kanban-card" style="border-left:3px solid #F472B6;">
-                <div class="flex items-center justify-between">
-                  <span class="type-badge type-asset">Asset</span>
-                  <span class="priority-dot priority-medium" title="Medium priority"></span>
+              <!-- Inline add-task form (replaces "Add task..." button) -->
+              <div class="inline-add-form">
+                <input class="prop-input w-full is-focused" value="Add wall-slide to ice caves" />
+                <div class="flex items-center gap-1 mt-2">
+                  <span class="prop-label mr-1">PRI</span>
+                  <span class="option-chip" title="Urgent"><span class="priority-dot priority-urgent"></span></span>
+                  <span class="option-chip selected" title="High"><span class="priority-dot priority-high"></span></span>
+                  <span class="option-chip" title="Medium"><span class="priority-dot priority-medium"></span></span>
+                  <span class="option-chip" title="Low"><span class="priority-dot priority-low"></span></span>
+                  <span style="width:1px;height:16px;background:var(--lx-border-default);margin:0 6px;flex-shrink:0;"></span>
+                  <span class="prop-label mr-1">Type</span>
+                  <span class="option-chip selected" title="Feature"><span class="priority-dot" style="background:#4ADE80;"></span></span>
+                  <span class="option-chip" title="Bug"><span class="priority-dot" style="background:#FF9999;"></span></span>
+                  <span class="option-chip" title="Task"><span class="priority-dot" style="background:#67E8F9;"></span></span>
+                  <span class="option-chip" title="Asset"><span class="priority-dot" style="background:#F9A8D4;"></span></span>
                 </div>
-                <div class="card-title mt-2">Sprite batching for enemy waves</div>
-                <div class="card-meta">
-                  <div class="avatar">JD</div>
+                <div class="flex items-center justify-end gap-2 mt-3">
+                  <button class="btn btn-ghost" style="height:28px;padding:0 10px;">Cancel</button>
+                  <button class="btn btn-primary" style="height:28px;padding:0 10px;">Save</button>
                 </div>
               </div>
 
-              <button class="add-task-btn">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 5v14m-7-7h14"/></svg>
-                Add task...
-              </button>
+              <span class="annotation-tag" style="align-self:flex-start;">InlineAdd — replaces “Add task…” while open · Enter saves · Esc cancels</span>
+              <span class="annotation-tag" style="align-self:flex-start;">quick-pick chips: single-select · defaults Medium / Task</span>
             </div>
-            <span class="annotation-rail" style="top:60%;">← 280px</span>
           </div>
 
           <!-- Column: Todo -->
@@ -125,7 +122,6 @@
             </div>
             <div class="column-body">
 
-              <!-- Card 4 -->
               <div class="kanban-card" style="border-left:3px solid #4ADE80;">
                 <div class="flex items-center justify-between">
                   <span class="type-badge type-feature">Feature</span>
@@ -142,7 +138,6 @@
                 </div>
               </div>
 
-              <!-- Card 5 -->
               <div class="kanban-card" style="border-left:3px solid #22D3EE;">
                 <div class="flex items-center justify-between">
                   <span class="type-badge type-task">Task</span>
@@ -151,24 +146,6 @@
                 <div class="card-title mt-2">Update localization strings</div>
                 <div class="card-meta">
                   <div class="avatar">AL</div>
-                </div>
-                <span class="annotation" style="position:absolute;right:6px;bottom:4px;">low = hollow ring</span>
-              </div>
-
-              <!-- Card 6 -->
-              <div class="kanban-card" style="border-left:3px solid #FF4444;">
-                <div class="flex items-center justify-between">
-                  <span class="type-badge type-bug">Bug</span>
-                  <span class="priority-dot priority-medium" title="Medium priority"></span>
-                </div>
-                <div class="card-title mt-2">Memory leak in particle system</div>
-                <div class="card-meta">
-                  <div class="avatar">JD</div>
-                  <span class="github-badge">
-                    <svg viewBox="0 0 24 24"><path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77 5.07 5.07 0 0 0 19.91 1S18.73.65 16 2.48a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 9 18.13V22"/></svg>
-                    #95
-                  </span>
-                  <span class="sync-dot sync-synced"></span>
                 </div>
               </div>
 
@@ -179,7 +156,7 @@
             </div>
           </div>
 
-          <!-- Column: In Progress (WIP exceeded) -->
+          <!-- Column: In Progress -->
           <div class="column">
             <div class="column-strip" style="background:#F0C040;"></div>
             <div class="column-header has-cards">
@@ -191,7 +168,6 @@
             </div>
             <div class="column-body">
 
-              <!-- Card 7 -->
               <div class="kanban-card" style="border-left:3px solid #4ADE80;">
                 <div class="flex items-center justify-between">
                   <span class="type-badge type-feature">Feature</span>
@@ -208,7 +184,6 @@
                 </div>
               </div>
 
-              <!-- Card 8: OUT OF SYNC -->
               <div class="kanban-card" style="border-left:3px solid #FF4444;">
                 <div class="flex items-center justify-between">
                   <span class="type-badge type-bug">Bug</span>
@@ -223,48 +198,6 @@
                   </span>
                   <span class="sync-dot sync-diverged"></span>
                 </div>
-                <span class="annotation-tag" style="position:absolute;right:6px;bottom:4px;">OUT OF SYNC</span>
-              </div>
-
-              <!-- Card 9 -->
-              <div class="kanban-card" style="border-left:3px solid #F472B6;">
-                <div class="flex items-center justify-between">
-                  <span class="type-badge type-asset">Asset</span>
-                  <span class="priority-dot priority-medium" title="Medium priority"></span>
-                </div>
-                <div class="card-title mt-2">Animate lava shader</div>
-                <div class="card-meta">
-                  <div class="avatar">JD</div>
-                </div>
-              </div>
-
-              <!-- Card 10 -->
-              <div class="kanban-card" style="border-left:3px solid #22D3EE;">
-                <div class="flex items-center justify-between">
-                  <span class="type-badge type-task">Task</span>
-                  <span class="priority-dot priority-low" title="Low priority"></span>
-                </div>
-                <div class="card-title mt-2">Refactor input handling</div>
-                <div class="card-meta">
-                  <div class="avatar">MK</div>
-                  <span class="github-badge">
-                    <svg viewBox="0 0 24 24"><path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77 5.07 5.07 0 0 0 19.91 1S18.73.65 16 2.48a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 9 18.13V22"/></svg>
-                    #110
-                  </span>
-                  <span class="sync-dot sync-synced"></span>
-                </div>
-              </div>
-
-              <!-- Card 11 -->
-              <div class="kanban-card" style="border-left:3px solid #4ADE80;">
-                <div class="flex items-center justify-between">
-                  <span class="type-badge type-feature">Feature</span>
-                  <span class="priority-dot priority-high" title="High priority"></span>
-                </div>
-                <div class="card-title mt-2">Save game checkpoint system</div>
-                <div class="card-meta">
-                  <div class="avatar">AL</div>
-                </div>
               </div>
 
               <button class="add-task-btn">
@@ -272,7 +205,6 @@
                 Add task...
               </button>
             </div>
-            <span class="annotation-tag" style="position:absolute;top:48px;right:8px;">WIP exceeded</span>
           </div>
 
           <!-- Column: Review -->
@@ -287,7 +219,6 @@
             </div>
             <div class="column-body">
 
-              <!-- Card 12 -->
               <div class="kanban-card" style="border-left:3px solid #4ADE80;">
                 <div class="flex items-center justify-between">
                   <span class="type-badge type-feature">Feature</span>
@@ -326,7 +257,6 @@
                 Add task...
               </button>
             </div>
-            <span class="annotation-tag" style="position:absolute;top:48px;right:8px;">Empty column</span>
           </div>
 
         </div>
@@ -338,41 +268,9 @@
           <svg class="chevron collapsed" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg>
           <span class="swimlane-name">Sprint 6 — Ash &amp; Bone</span>
           <span class="swimlane-count">000</span>
-          <span class="annotation-inline">Collapsed swimlane</span>
         </div>
       </div>
 
-      <!-- Dragged Card (static representation) -->
-      <div class="kanban-card state-dragging" style="position:absolute;left:680px;top:260px;width:260px;z-index:30;border-left:3px solid #4ADE80;">
-        <div class="flex items-center justify-between">
-          <span class="type-badge type-feature">Feature</span>
-          <span class="priority-dot priority-high" title="High priority"></span>
-        </div>
-        <div class="card-title mt-2">Implement double-jump mechanic</div>
-        <div class="card-meta">
-          <div class="avatar">MK</div>
-        </div>
-        <span class="annotation-tag" style="position:absolute;right:-140px;top:0;">Dragging state: rotate(1deg) + drag shadow</span>
-      </div>
-
-      <!-- Annotation: Selected card variant -->
-      <div class="kanban-card state-selected" style="position:absolute;left:680px;top:420px;width:260px;z-index:25;border-left:3px solid #FF4444;">
-        <div class="flex items-center justify-between">
-          <span class="type-badge type-bug">Bug</span>
-          <span class="priority-dot priority-urgent" title="Urgent priority"></span>
-        </div>
-        <div class="card-title mt-2">Selected card state (keyboard focus)</div>
-        <div class="card-meta">
-          <div class="avatar">AL</div>
-        </div>
-        <span class="annotation-tag" style="position:absolute;right:-180px;top:0;">Selected: amber selected bg + focus ring + glow</span>
-      </div>
-
-    </div>
-
-    <!-- Responsive Note -->
-    <div class="responsive-note" style="margin:0 16px 16px;max-width:640px;">
-      <strong>Responsive collapse.</strong> Below 1280px: board switches to single-column vertical stack with swimlane headers sticky at top. Below 768px: swimlanes collapse to tabs; cards expand to full width. Slideover becomes full-screen overlay. Sidebar nav collapses to hamburger.
     </div>
   </div>
 

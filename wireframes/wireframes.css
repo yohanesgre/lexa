@@ -61,6 +61,7 @@
   --lx-font-micro: "Departure Mono", "JetBrains Mono", monospace;
 
   --lx-ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --lx-ease-in-out: cubic-bezier(0.45, 0, 0.55, 1);
 }
 
 /* ---- Reset & Base ---- */
@@ -139,6 +140,7 @@ a:hover { color: var(--lx-text-link-hover); }
 .mb-2 { margin-bottom: 8px; }
 .mb-3 { margin-bottom: 12px; }
 .mb-4 { margin-bottom: 16px; }
+.mb-8 { margin-bottom: 32px; }
 
 .ml-1 { margin-left: 4px; }
 .ml-2 { margin-left: 8px; }
@@ -1046,6 +1048,155 @@ a:hover { color: var(--lx-text-link-hover); }
   font-weight: 500;
 }
 
+/* =========================================================
+   Wiki Extensions — added for wiki-* variant wireframes
+   (page menu, edit mode, empty, search results, not-found,
+   deep nesting, create modal, mobile)
+   ========================================================= */
+
+/* Context / dropdown menu (DS §8.2: DropdownMenuContent padding → 16px, radius-md, z-dropdown 30) */
+.menu {
+  min-width: 180px;
+  background: var(--lx-surface-elevated);
+  border: 1px solid var(--lx-border-default);
+  border-radius: 6px;
+  padding: 16px;
+  box-shadow: var(--lx-shadow-lg);
+  z-index: 30;
+}
+
+.menu-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 32px;
+  padding: 0 8px;
+  border-radius: 4px;
+  font-size: 13px;
+  font-family: var(--lx-font-body);
+  color: var(--lx-text-secondary);
+  cursor: pointer;
+  transition: background 100ms;
+}
+.menu-item:hover {
+  background: var(--lx-surface-card-hover);
+  color: var(--lx-text-primary);
+}
+.menu-item svg {
+  width: 14px;
+  height: 14px;
+  stroke: currentColor;
+  stroke-width: 1.5;
+  fill: none;
+  flex-shrink: 0;
+}
+.menu-item.danger { color: var(--lx-text-danger); }
+.menu-item.danger:hover { background: var(--lx-bg-danger-subtle); }
+
+.menu-separator {
+  height: 1px;
+  background: var(--lx-border-subtle);
+  margin: 4px 0;
+}
+
+/* Modal dialog — structural variant (header/body/footer) defined below in the
+   modal/empty-state additions block. Simple confirms use .dialog (component-confirm). */
+
+/* TipTap editor toolbar + editing surface */
+.editor-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 6px 8px;
+  background: var(--lx-surface-elevated);
+  border: 1px solid var(--lx-border-default);
+  border-radius: 6px 6px 0 0;
+}
+
+.toolbar-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  background: transparent;
+  border: none;
+  border-radius: 4px;
+  color: var(--lx-text-secondary);
+  cursor: pointer;
+  transition: background 100ms;
+}
+.toolbar-btn:hover { background: var(--lx-surface-card-hover); color: var(--lx-text-primary); }
+.toolbar-btn.active { background: var(--lx-surface-selected); color: var(--lx-text-link); }
+.toolbar-btn svg {
+  width: 14px;
+  height: 14px;
+  stroke: currentColor;
+  stroke-width: 1.5;
+  fill: none;
+}
+
+.toolbar-divider {
+  width: 1px;
+  height: 16px;
+  background: var(--lx-border-default);
+  margin: 0 6px;
+  flex-shrink: 0;
+}
+
+.editor-area {
+  background: var(--lx-surface-input);
+  border: 1px solid var(--lx-border-default);
+  border-top: none;
+  border-radius: 0 0 6px 6px;
+  padding: 16px 20px;
+}
+
+/* Sidebar FTS search result item */
+.search-result {
+  display: block;
+  padding: 8px 12px;
+  margin: 0 8px 2px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background 100ms;
+}
+.search-result:hover { background: var(--lx-surface-card-hover); }
+
+/* FTS highlight (snippet marks) */
+mark {
+  background: rgba(240, 192, 64, 0.16);
+  color: var(--lx-text-warning);
+  border-radius: 2px;
+  padding: 0 2px;
+}
+
+/* Deeper page-tree indents (16px per level, continuing tree-indent-1..3) */
+.tree-indent-4 { padding-left: 76px; }
+.tree-indent-5 { padding-left: 92px; }
+
+/* Keep active page aligned at deep indents (.tree-item.active wins specificity over .tree-indent-*,
+   so each active indent needs the 2px left border deducted, matching base 12px → 10px) */
+.tree-item.active.tree-indent-1 { padding-left: 26px; }
+.tree-item.active.tree-indent-2 { padding-left: 42px; }
+.tree-item.active.tree-indent-3 { padding-left: 58px; }
+.tree-item.active.tree-indent-4 { padding-left: 74px; }
+.tree-item.active.tree-indent-5 { padding-left: 90px; }
+
+/* Wireframe-only: 375px device frame for mobile previews */
+.mobile-frame {
+  position: relative;
+  width: 375px;
+  height: 700px;
+  flex-shrink: 0;
+  background: var(--lx-surface-app);
+  border: 1px solid var(--lx-border-strong);
+  border-radius: 12px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
 /* ---- Utility ---- */
 .line-clamp-2 {
   display: -webkit-box;
@@ -1065,4 +1216,1138 @@ a:hover { color: var(--lx-text-link-hover); }
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* =========================================================
+   v2 — Reusable Component Patterns
+   Added for component-*.html + page-404.html wireframes:
+   light theme tokens, toasts, dialog, dropdown, skeleton,
+   empty state, icon button, mobile nav, theme pane.
+   ========================================================= */
+
+/* ---- Light Theme Tokens (DESIGN_SYSTEM.md §2.2, verbatim) ----
+   Inert unless an ancestor sets data-theme="light". */
+[data-theme="light"] {
+  --lx-surface-app: #F5F0EB;
+  --lx-surface-elevated: #FFFFFF;
+  --lx-surface-column: #EBE5DE;
+  --lx-surface-card: #FFFFFF;
+  --lx-surface-card-hover: #F5F0EB;
+  --lx-surface-card-active: #EBE5DE;
+  --lx-surface-card-dragging: #FFFFFF;
+  --lx-surface-input: #FFFFFF;
+  --lx-surface-overlay: rgba(26, 23, 20, 0.35);
+  --lx-surface-tooltip: #1A1714;
+  --lx-surface-selected: rgba(212, 160, 23, 0.10);
+
+  --lx-border-default: #DDD5CC;
+  --lx-border-subtle: #EBE5DE;
+  --lx-border-strong: #C4BAB0;
+  --lx-border-focus: #D4A017;
+
+  --lx-text-primary: #1A1714;
+  --lx-text-secondary: #5C554F;
+  --lx-text-tertiary: #7A7169;
+  --lx-text-muted: #9C9187;
+  --lx-text-inverse: #FFFFFF;
+  --lx-text-link: #B8931A;
+  --lx-text-link-hover: #D4A017;
+  --lx-text-danger: #991B1B;
+  --lx-text-warning: #92400E;
+  --lx-text-success: #166534;
+
+  --lx-bg-danger-subtle: rgba(220, 38, 38, 0.08);
+  --lx-bg-warning-subtle: rgba(212, 160, 23, 0.08);
+  --lx-bg-success-subtle: rgba(22, 163, 74, 0.08);
+  --lx-bg-accent-subtle: rgba(212, 160, 23, 0.08);
+
+  --lx-shadow-sm: 0 1px 2px rgba(26, 23, 20, 0.08);
+  --lx-shadow-md: 0 4px 12px rgba(26, 23, 20, 0.10);
+  --lx-shadow-lg: 0 12px 32px rgba(26, 23, 20, 0.14);
+  --lx-shadow-drag: 0 8px 24px rgba(26, 23, 20, 0.18), 0 0 0 1px rgba(212, 160, 23, 0.25);
+  --lx-shadow-slideover: -4px 0 24px rgba(26, 23, 20, 0.12);
+
+  --lx-focus-ring: 0 0 0 2px var(--lx-surface-app), 0 0 0 4px var(--lx-border-focus);
+  --lx-focus-glow: 0 0 12px rgba(212, 160, 23, 0.15);
+
+  --lx-scrollbar-track: var(--lx-surface-app);
+  --lx-scrollbar-thumb: #C4BAB0;
+  --lx-scrollbar-thumb-hover: #9C9187;
+}
+
+/* ---- Reduced Motion (DESIGN_SYSTEM.md §6.8, verbatim) ---- */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* ---- Nav Icon Button (32px nav chrome: hamburger, theme toggle) ----
+   Distinct from .icon-btn (24px kanban-header kebab, defined below).
+   Meets the 32px minimum touch target (§9). */
+.nav-icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border-radius: 6px;
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--lx-text-secondary);
+  cursor: pointer;
+  transition: background 100ms, color 100ms;
+}
+.nav-icon-btn:hover { background: var(--lx-surface-card-hover); color: var(--lx-text-primary); }
+.nav-icon-btn.active { color: var(--lx-border-focus); }
+.nav-icon-btn svg { width: 18px; height: 18px; stroke: currentColor; stroke-width: 1.5; fill: none; }
+
+/* ---- Toast (§6.2: enter 300ms slide from top-right, leave 150ms fade) ---- */
+.toast-stack {
+  position: fixed;
+  top: 16px;
+  right: 16px;
+  z-index: 60;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 360px;
+}
+
+.toast {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  background: var(--lx-surface-tooltip);
+  border: 1px solid var(--lx-border-default);
+  border-radius: 6px;
+  padding: 12px 14px;
+  box-shadow: var(--lx-shadow-lg);
+}
+
+.toast-success { border-left: 3px solid #4ADE80; }
+.toast-warning { border-left: 3px solid #F0C040; }
+.toast-error   { border-left: 3px solid #FF4444; }
+
+.toast-icon { flex-shrink: 0; margin-top: 1px; display: inline-flex; }
+.toast-icon svg { width: 16px; height: 16px; stroke: currentColor; stroke-width: 1.5; fill: none; }
+.toast-success .toast-icon { color: #4ADE80; }
+.toast-warning .toast-icon { color: #F0C040; }
+.toast-error   .toast-icon { color: #FF4444; }
+
+.toast-title { font-size: 13px; font-weight: 500; line-height: 18px; color: var(--lx-text-primary); }
+.toast-body  { font-size: 12px; line-height: 16px; color: var(--lx-text-secondary); margin-top: 2px; }
+
+.toast-close {
+  width: 20px;
+  height: 20px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  border-radius: 4px;
+  color: var(--lx-text-muted);
+  cursor: pointer;
+  flex-shrink: 0;
+  margin-left: auto;
+  transition: background 100ms, color 100ms;
+}
+.toast-close:hover { color: var(--lx-text-primary); background: var(--lx-surface-card-hover); }
+.toast-close svg { width: 12px; height: 12px; stroke: currentColor; stroke-width: 1.5; fill: none; }
+
+.toast-enter { animation: lx-toast-enter 300ms var(--lx-ease-out) both; }
+@keyframes lx-toast-enter {
+  from { transform: translateX(100%); opacity: 0; }
+  to   { transform: translateX(0);    opacity: 1; }
+}
+
+/* ---- Dialog (§6.2: modal 150ms scale + fade) ---- */
+.dialog {
+  width: 400px;
+  background: var(--lx-surface-elevated);
+  border: 1px solid var(--lx-border-default);
+  border-radius: 8px;
+  box-shadow: var(--lx-shadow-lg);
+  padding: 20px;
+}
+
+.dialog-enter { animation: lx-dialog-enter 150ms var(--lx-ease-out) both; }
+@keyframes lx-dialog-enter {
+  from { scale: 0.97; opacity: 0; }
+  to   { scale: 1;    opacity: 1; }
+}
+
+/* Solid danger button — canonical definition at end of file (single source). */
+
+/* ---- Empty State ---- */
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 48px 24px;
+}
+
+.empty-state-icon {
+  width: 48px;
+  height: 48px;
+  border-radius: 12px;
+  background: var(--lx-surface-card);
+  border: 1px solid var(--lx-border-default);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--lx-text-muted);
+}
+.empty-state-icon svg { width: 24px; height: 24px; stroke: currentColor; stroke-width: 1.5; fill: none; }
+
+/* ---- Loading Skeleton ----
+   Pulse mirrors the "alive like a CRT" feel at low contrast.
+   Reduced-motion media query above flattens it to static. */
+.skeleton {
+  background: var(--lx-surface-card-hover);
+  border-radius: 4px;
+  animation: lx-skeleton-pulse 1.6s var(--lx-ease-in-out) infinite;
+}
+.skeleton-circle { border-radius: 9999px; }
+@keyframes lx-skeleton-pulse {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.45; }
+}
+
+/* ---- Dropdown Menu ---- */
+.dropdown-menu {
+  min-width: 220px;
+  background: var(--lx-surface-tooltip);
+  border: 1px solid var(--lx-border-default);
+  border-radius: 6px;
+  box-shadow: var(--lx-shadow-lg);
+  padding: 4px;
+}
+
+.dropdown-label {
+  font-family: var(--lx-font-micro);
+  font-size: 11px;
+  line-height: 14px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--lx-text-muted);
+  padding: 6px 10px 2px;
+}
+
+.dropdown-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 32px;
+  padding: 0 10px;
+  border-radius: 4px;
+  font-size: 13px;
+  font-family: var(--lx-font-body);
+  color: var(--lx-text-secondary);
+  cursor: pointer;
+}
+.dropdown-item svg { width: 16px; height: 16px; stroke: currentColor; stroke-width: 1.5; fill: none; flex-shrink: 0; }
+.dropdown-item:hover { background: var(--lx-surface-selected); color: var(--lx-text-primary); }
+
+/* Keyboard focus position — selected bg + phosphor focus ring (§6.7) */
+.dropdown-item.focused {
+  background: var(--lx-surface-selected);
+  color: var(--lx-text-primary);
+  box-shadow: var(--lx-focus-ring);
+}
+
+.dropdown-item.danger { color: var(--lx-text-danger); }
+.dropdown-item.danger:hover { background: var(--lx-bg-danger-subtle); }
+
+.dropdown-separator { height: 1px; background: var(--lx-border-subtle); margin: 4px 6px; }
+
+.dropdown-shortcut {
+  margin-left: auto;
+  font-family: var(--lx-font-mono);
+  font-size: 11px;
+  color: var(--lx-text-muted);
+}
+
+/* ---- Mobile Nav (≤768px breakpoint) ---- */
+.mobile-frame {
+  width: 390px;
+  border: 1px solid var(--lx-border-default);
+  border-radius: 12px;
+  overflow: hidden;
+  position: relative;
+  background: var(--lx-surface-app);
+  flex-shrink: 0;
+}
+
+.mobile-nav-panel {
+  position: absolute;
+  top: 48px;
+  left: 0;
+  right: 0;
+  background: var(--lx-surface-elevated);
+  border-bottom: 1px solid var(--lx-border-default);
+  box-shadow: var(--lx-shadow-lg);
+  padding: 8px;
+  z-index: 30;
+}
+
+.mobile-nav-link {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 40px;
+  padding: 0 12px;
+  border-radius: 6px;
+  font-size: 14px;
+  font-family: var(--lx-font-body);
+  color: var(--lx-text-secondary);
+  text-decoration: none;
+}
+.mobile-nav-link:hover { background: var(--lx-surface-card-hover); color: var(--lx-text-primary); }
+.mobile-nav-link.active {
+  background: var(--lx-surface-selected);
+  color: var(--lx-text-primary);
+  font-weight: 500;
+  box-shadow: inset 2px 0 0 var(--lx-border-focus);
+}
+.mobile-nav-link svg { width: 18px; height: 18px; stroke: currentColor; stroke-width: 1.5; fill: none; flex-shrink: 0; }
+
+/* ---- Theme Pane (theme-toggle demo shell) ---- */
+.theme-pane {
+  border: 1px solid var(--lx-border-default);
+  border-radius: 12px;
+  overflow: hidden;
+  background: var(--lx-surface-app);
+}
+
+/* =========================================================
+   ADDED (kanban state wireframes): dropdown menus, filter
+   UI, inline add-task form, mini option chips, icon buttons.
+   Used by kanban-column-menu / kanban-swimlane-menu /
+   kanban-filter / kanban-inline-add. All values route
+   through existing PHOSPHOR tokens above.
+   ========================================================= */
+
+/* ---- Popover / Dropdown Menu ---- */
+.menu-popover {
+  position: absolute;
+  min-width: 180px;
+  background: var(--lx-surface-elevated);
+  border: 1px solid var(--lx-border-default);
+  border-radius: 6px;
+  padding: 4px;
+  box-shadow: var(--lx-shadow-lg);
+  z-index: 30;
+}
+
+.menu-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 30px;
+  padding: 0 10px;
+  border-radius: 4px;
+  font-size: 13px;
+  font-family: var(--lx-font-body);
+  color: var(--lx-text-primary);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 100ms;
+}
+.menu-item:hover { background: var(--lx-surface-card-hover); }
+.menu-item.danger { color: var(--lx-text-danger); }
+.menu-item.danger:hover { background: var(--lx-bg-danger-subtle); }
+.menu-item svg {
+  width: 14px;
+  height: 14px;
+  stroke: currentColor;
+  stroke-width: 1.5;
+  fill: none;
+  flex-shrink: 0;
+}
+
+.menu-separator {
+  height: 1px;
+  background: var(--lx-border-subtle);
+  margin: 4px 6px;
+}
+
+/* ---- Icon button (header kebabs) ---- */
+.icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--lx-text-muted);
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background 100ms, color 100ms;
+}
+.icon-btn:hover { background: var(--lx-surface-card-hover); color: var(--lx-text-secondary); }
+.icon-btn.active { background: var(--lx-surface-card-hover); color: var(--lx-border-focus); }
+
+/* ---- Filter bar + active filter chips ---- */
+.filter-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 40px;
+  padding: 6px 16px;
+  border-bottom: 1px solid var(--lx-border-subtle);
+  flex-shrink: 0;
+}
+
+.filter-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 24px;
+  padding: 0 4px 0 8px;
+  background: var(--lx-surface-selected);
+  border: 1px solid rgba(240, 192, 64, 0.25);
+  border-radius: 4px;
+  font-size: 12px;
+  font-family: var(--lx-font-body);
+  color: var(--lx-text-primary);
+}
+
+.filter-chip-label { color: var(--lx-text-secondary); }
+
+.filter-chip-x {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border: none;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--lx-text-muted);
+  cursor: pointer;
+}
+.filter-chip-x:hover { color: var(--lx-text-danger); background: var(--lx-bg-danger-subtle); }
+.filter-chip-x svg {
+  width: 10px;
+  height: 10px;
+  stroke: currentColor;
+  stroke-width: 2;
+  fill: none;
+}
+
+/* ---- Filter popover rows ---- */
+.filter-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 5px 8px;
+}
+
+.filter-select {
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  height: 26px;
+  min-width: 128px;
+  padding: 0 8px;
+  background: var(--lx-surface-input);
+  border: 1px solid var(--lx-border-default);
+  border-radius: 4px;
+  font-size: 12px;
+  font-family: var(--lx-font-body);
+  color: var(--lx-text-tertiary);
+  cursor: pointer;
+  transition: border-color 100ms;
+}
+.filter-select:hover { border-color: var(--lx-border-strong); }
+.filter-select.has-value { color: var(--lx-text-primary); border-color: rgba(240, 192, 64, 0.35); }
+.filter-select svg {
+  width: 12px;
+  height: 12px;
+  stroke: currentColor;
+  stroke-width: 1.5;
+  fill: none;
+  flex-shrink: 0;
+}
+
+/* ---- Inline add-task form ---- */
+.inline-add-form {
+  background: var(--lx-surface-card);
+  border: 1px solid var(--lx-border-focus);
+  border-radius: 6px;
+  padding: 10px 12px;
+  box-shadow: var(--lx-focus-glow);
+}
+
+.inline-add-input {
+  width: 100%;
+  background: var(--lx-surface-input);
+  border: 1px solid var(--lx-border-default);
+  border-radius: 4px;
+  color: var(--lx-text-primary);
+  font-family: var(--lx-font-body);
+  font-size: 14px;
+  line-height: 20px;
+  padding: 6px 8px;
+  outline: none;
+}
+
+/* ---- Mini option chips (priority/type pickers) ---- */
+.option-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 22px;
+  min-width: 22px;
+  padding: 0 4px;
+  border-radius: 4px;
+  border: 1px solid transparent;
+  cursor: pointer;
+  transition: background 100ms;
+}
+.option-chip:hover { background: var(--lx-surface-card-hover); }
+.option-chip.selected {
+  background: var(--lx-surface-selected);
+  border-color: rgba(240, 192, 64, 0.35);
+}
+
+/* =========================================================
+   Additions for modal / empty-section wireframes
+   Used by: dashboard-new-project, settings-column-modal,
+   settings-api-key-reveal, settings-empty
+   Notes:
+   - Simple confirm dialogs use .dialog (see component-confirm)
+   - Empty states use .empty-state (see component-empty-state)
+   - Menus use .menu/.menu-item (see kanban-column-menu)
+   - Solid danger button: single .btn-danger-solid def at EOF
+   ========================================================= */
+
+/* ---- Modal / Dialog ----
+   440px centered dialog. Overlay reuses .slideover-overlay. */
+.modal {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 440px;
+  max-width: calc(100vw - 48px);
+  background: var(--lx-surface-elevated);
+  border: 1px solid var(--lx-border-default);
+  border-radius: 8px;
+  box-shadow: var(--lx-shadow-lg);
+  z-index: 50;
+  display: flex;
+  flex-direction: column;
+}
+
+.modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 56px;
+  padding: 0 16px;
+  border-bottom: 1px solid var(--lx-border-subtle);
+  flex-shrink: 0;
+}
+
+.modal-title {
+  font-family: var(--lx-font-display);
+  font-size: 16px;
+  font-weight: 500;
+  line-height: 24px;
+  letter-spacing: -0.02em;
+  color: var(--lx-text-primary);
+}
+
+.modal-body { padding: 16px; }
+
+.modal-footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 12px 16px;
+  border-top: 1px solid var(--lx-border-subtle);
+  flex-shrink: 0;
+}
+
+/* Compact dashed empty state for settings sections */
+.empty-box {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 32px 24px;
+  background: var(--lx-surface-card);
+  border: 1px dashed var(--lx-border-strong);
+  border-radius: 8px;
+  text-align: center;
+}
+
+/* ---- Form Fields (modal forms) ---- */
+.field { margin-bottom: 16px; }
+.field:last-child { margin-bottom: 0; }
+
+.field-label {
+  display: block;
+  font-size: 12px;
+  font-weight: 500;
+  font-family: var(--lx-font-body);
+  color: var(--lx-text-secondary);
+  margin-bottom: 6px;
+}
+
+.field-hint {
+  font-size: 11px;
+  line-height: 14px;
+  color: var(--lx-text-muted);
+  margin-top: 4px;
+}
+
+.w-full { width: 100%; }
+
+textarea.prop-input {
+  height: auto;
+  min-height: 72px;
+  padding: 8px 10px;
+  resize: vertical;
+  line-height: 18px;
+}
+
+/* ---- Swatch Picker (column color) ---- */
+.swatch-grid { display: flex; gap: 8px; flex-wrap: wrap; }
+
+.swatch-option {
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  border: 1px solid var(--lx-border-default);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.swatch-option.selected {
+  border-color: var(--lx-border-focus);
+  box-shadow: 0 0 0 2px var(--lx-surface-elevated), 0 0 0 4px var(--lx-border-focus);
+}
+
+/* ---- Checkbox rows (required fields multi-select) ---- */
+.check-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 0;
+  font-size: 13px;
+  font-family: var(--lx-font-body);
+  color: var(--lx-text-primary);
+  cursor: pointer;
+}
+.check-row .checkbox { margin-top: 0; }
+.check-row .check-meta { font-size: 11px; color: var(--lx-text-muted); }
+
+/* ---- Key Display (API key reveal) ---- */
+.key-display {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--lx-surface-input);
+  border: 1px solid var(--lx-border-default);
+  border-radius: 6px;
+  padding: 10px 12px;
+}
+.key-display code {
+  flex: 1;
+  font-family: var(--lx-font-mono);
+  font-size: 12px;
+  line-height: 16px;
+  color: var(--lx-text-primary);
+  word-break: break-all;
+}
+
+/* ---- Notice (inline warning/danger callout) ---- */
+.notice {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 6px;
+  font-size: 12px;
+  line-height: 16px;
+}
+.notice svg { width: 14px; height: 14px; flex-shrink: 0; margin-top: 1px; }
+.notice-warning { background: var(--lx-bg-warning-subtle); border: 1px solid rgba(240, 192, 64, 0.15); color: var(--lx-text-warning); }
+.notice-danger  { background: var(--lx-bg-danger-subtle);  border: 1px solid rgba(255, 68, 68, 0.15);  color: var(--lx-text-danger); }
+
+/* =========================================================
+   Task Detail state variants (added for task-detail-* wireframes)
+   ========================================================= */
+
+/* ---- TitleEditor input (inline title editing / create mode) ---- */
+.title-input {
+  width: 100%;
+  font-family: var(--lx-font-display);
+  font-size: 18px;
+  font-weight: 600;
+  line-height: 26px;
+  letter-spacing: -0.02em;
+  color: var(--lx-text-primary);
+  background: var(--lx-surface-input);
+  border: 1px solid var(--lx-border-default);
+  border-radius: 6px;
+  padding: 12px;
+  outline: none;
+}
+.title-input::placeholder {
+  color: var(--lx-text-muted);
+  font-weight: 400;
+}
+.title-input:focus,
+.title-input.is-focused {
+  border-color: var(--lx-border-focus);
+  box-shadow: var(--lx-focus-glow);
+}
+
+/* Static focus/open state for inputs in no-JS wireframes */
+.prop-input.is-focused {
+  border-color: var(--lx-border-focus);
+  box-shadow: var(--lx-focus-glow);
+}
+
+/* ---- Dropdown menu (open state) ---- */
+.dropdown-menu {
+  background: var(--lx-surface-elevated);
+  border: 1px solid var(--lx-border-default);
+  border-radius: 6px;
+  box-shadow: var(--lx-shadow-lg);
+  padding: 4px;
+  min-width: 160px;
+}
+
+.dropdown-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 32px;
+  padding: 0 10px;
+  border-radius: 4px;
+  font-size: 13px;
+  font-family: var(--lx-font-body);
+  color: var(--lx-text-secondary);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.dropdown-item:hover {
+  background: var(--lx-surface-card-hover);
+  color: var(--lx-text-primary);
+}
+.dropdown-item.active {
+  background: var(--lx-surface-selected);
+  color: var(--lx-text-primary);
+}
+
+/* ---- Confirmation dialog overlay (dims slideovers too) ----
+   The .dialog shell itself is defined once above (canonical, unpositioned);
+   wireframes center it with an explicit flex wrapper. */
+.dialog-overlay {
+  position: fixed;
+  inset: 0;
+  background: var(--lx-surface-overlay);
+  z-index: 60;
+}
+
+/* ---- Validation banner ---- */
+.banner-warning {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  background: var(--lx-bg-warning-subtle);
+  border: 1px solid rgba(240, 192, 64, 0.25);
+  border-radius: 6px;
+  color: var(--lx-text-warning);
+  font-size: 13px;
+  line-height: 18px;
+  font-family: var(--lx-font-body);
+}
+
+/* ---- TipTap toolbar placeholder ---- */
+.editor-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 4px;
+  background: var(--lx-surface-input);
+}
+
+.toolbar-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 28px;
+  height: 28px;
+  padding: 0 6px;
+  border-radius: 4px;
+  background: transparent;
+  border: none;
+  color: var(--lx-text-tertiary);
+  font-size: 12px;
+  font-weight: 600;
+  font-family: var(--lx-font-body);
+  cursor: pointer;
+}
+.toolbar-btn:hover {
+  background: var(--lx-surface-card-hover);
+  color: var(--lx-text-primary);
+}
+
+.toolbar-sep {
+  width: 1px;
+  height: 16px;
+  background: var(--lx-border-default);
+  margin: 0 4px;
+  flex-shrink: 0;
+}
+
+/* ---- Editor placeholder text ---- */
+.editor-placeholder {
+  color: var(--lx-text-muted);
+  font-size: 15px;
+  line-height: 22px;
+  font-family: var(--lx-font-body);
+}
+
+/* ---- Loading spinner (CSS-only) ---- */
+@keyframes lx-spin {
+  to { transform: rotate(360deg); }
+}
+
+.spinner {
+  width: 14px;
+  height: 14px;
+  border-radius: 9999px;
+  border: 2px solid rgba(148, 142, 136, 0.3);
+  border-top-color: var(--lx-border-focus);
+  animation: lx-spin 0.8s linear infinite;
+  flex-shrink: 0;
+}
+
+/* ---- Solid danger button (destructive confirmations) ---- */
+.btn-danger-solid {
+  background: #FF4444;
+  color: var(--lx-text-primary);
+  border-color: transparent;
+}
+.btn-danger-solid:hover { background: #E03A3A; }
+
+/* ---- Unlinked sync dot (completes sync-dot set per spec 2.5) ---- */
+.sync-unlinked { background: #6B6560; }
+
+/* =========================================================
+   Project Switcher
+   Replaces the static "Project: Name" label in .app-nav.
+   ========================================================= */
+
+.project-switcher {
+  position: relative;
+  display: inline-flex;
+  margin-left: auto;
+}
+
+.project-switcher-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 10px;
+  background: transparent;
+  border: 1px solid var(--lx-border-default);
+  border-radius: 6px;
+  color: var(--lx-text-primary);
+  cursor: pointer;
+  transition: background 100ms, border-color 100ms;
+}
+
+.project-switcher-trigger:hover {
+  background: var(--lx-surface-card-hover);
+  border-color: var(--lx-border-strong);
+}
+
+.project-switcher-trigger svg {
+  width: 12px;
+  height: 12px;
+  stroke: currentColor;
+  stroke-width: 1.5;
+  fill: none;
+  flex-shrink: 0;
+}
+
+.project-switcher-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  min-width: 220px;
+  max-width: 280px;
+  padding: 4px;
+}
+
+.project-switcher-row {
+  height: 40px;
+  padding: 0 10px;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.project-switcher-row.active {
+  background: var(--lx-surface-selected);
+}
+
+.project-switcher-row-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.project-switcher-row-name {
+  font-size: 13px;
+  font-weight: 500;
+  font-family: var(--lx-font-body);
+  color: var(--lx-text-primary);
+  line-height: 18px;
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.project-switcher-row-desc {
+  font-size: 11px;
+  line-height: 14px;
+  color: var(--lx-text-muted);
+  font-family: var(--lx-font-body);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.project-switcher-row-count {
+  font-family: var(--lx-font-micro);
+  font-size: 11px;
+  line-height: 14px;
+  color: var(--lx-text-muted);
+  letter-spacing: 0.02em;
+  flex-shrink: 0;
+}
+
+/* =========================================================
+   Dashboard Health Grid (dashboard.html)
+   Project health cards, WIP mini bars, aggregate stats,
+   and needs-attention lists.
+   ========================================================= */
+
+/* ---- Health Card ---- */
+.health-card {
+  height: auto;
+  min-height: 200px;
+  padding: 20px;
+}
+
+.health-card-status-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 12px;
+  flex-wrap: wrap;
+}
+
+.health-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 9999px;
+  flex-shrink: 0;
+}
+.health-dot-ok { background: var(--lx-text-success); }
+.health-dot-approaching { background: var(--lx-text-warning); }
+.health-dot-exceeded { background: var(--lx-text-danger); }
+
+.health-metric {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-family: var(--lx-font-micro);
+  font-size: 11px;
+  line-height: 14px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 4px;
+}
+.health-metric-urgent { color: var(--lx-text-danger); background: var(--lx-bg-danger-subtle); }
+.health-metric-sync { color: var(--lx-text-warning); background: var(--lx-bg-warning-subtle); }
+
+.wip-mini-bar {
+  display: flex;
+  gap: 3px;
+  height: 4px;
+  margin-top: 12px;
+  border-radius: 2px;
+  overflow: hidden;
+}
+.wip-mini-segment {
+  flex: 1;
+  min-width: 8px;
+  border-radius: 1px;
+}
+.wip-mini-segment-ok { background: var(--lx-text-success); }
+.wip-mini-segment-approaching { background: var(--lx-text-warning); }
+.wip-mini-segment-exceeded { background: var(--lx-text-danger); }
+.wip-mini-segment-empty { background: var(--lx-border-default); }
+
+.health-card-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: auto;
+  padding-top: 16px;
+}
+
+.health-card-stats {
+  font-family: var(--lx-font-micro);
+  font-size: 11px;
+  color: var(--lx-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.health-card-gh {
+  color: var(--lx-text-muted);
+}
+.health-card-gh svg {
+  width: 14px;
+  height: 14px;
+  stroke: currentColor;
+  stroke-width: 1.5;
+  fill: none;
+}
+
+/* ---- Aggregate Stats Bar ---- */
+.stats-bar {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 16px;
+}
+
+.stat-card {
+  background: var(--lx-surface-card);
+  border: 1px solid var(--lx-border-default);
+  border-radius: 12px;
+  padding: 20px;
+}
+
+.stat-label {
+  font-family: var(--lx-font-micro);
+  font-size: 11px;
+  color: var(--lx-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-bottom: 6px;
+}
+
+.stat-value {
+  font-family: var(--lx-font-display);
+  font-size: 36px;
+  font-weight: 600;
+  line-height: 40px;
+  color: var(--lx-text-primary);
+  letter-spacing: -0.03em;
+}
+
+.stat-value-danger { color: var(--lx-text-danger); }
+.stat-value-warning { color: var(--lx-text-warning); }
+
+/* ---- Needs Attention ---- */
+.attention-section {
+  margin-top: 32px;
+}
+
+.attention-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 16px;
+}
+
+.attention-card {
+  background: var(--lx-surface-card);
+  border: 1px solid var(--lx-border-default);
+  border-radius: 12px;
+  padding: 16px;
+}
+
+.attention-title {
+  font-family: var(--lx-font-display);
+  font-size: 16px;
+  font-weight: 500;
+  line-height: 24px;
+  color: var(--lx-text-primary);
+  margin-bottom: 12px;
+}
+
+.attention-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--lx-border-default);
+}
+.attention-item:last-child { border-bottom: none; }
+
+.attention-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 9999px;
+  flex-shrink: 0;
+  margin-top: 5px;
+}
+
+.attention-meta {
+  flex: 1;
+  min-width: 0;
+}
+
+.attention-task-title {
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 20px;
+  color: var(--lx-text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.attention-task-context {
+  font-size: 12px;
+  line-height: 16px;
+  color: var(--lx-text-secondary);
+  margin-top: 2px;
+}
+
+.attention-task-id {
+  font-family: var(--lx-font-mono);
+  font-size: 11px;
+  color: var(--lx-text-muted);
+  flex-shrink: 0;
 }

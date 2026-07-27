@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Lexa — Wiki</title>
+  <title>Lexa — Wiki: Page Context Menu</title>
   <link rel="stylesheet" href="wireframes.css" />
 </head>
 <body class="bg-app color-primary" style="min-height:100vh;">
@@ -15,12 +15,7 @@
     <a href="kanban.html" class="nav-link">Board</a>
     <a href="wiki.html" class="nav-link active">Wiki</a>
     <a href="settings.html" class="nav-link">Settings</a>
-    <div class="project-switcher">
-      <button class="project-switcher-trigger">
-        <span class="text-sm weight-500 font-body color-primary">Emberfall</span>
-        <svg viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg>
-      </button>
-    </div>
+    <span class="font-micro text-2xs color-muted ml-2" style="text-transform:uppercase;letter-spacing:0.04em;">Project: Emberfall</span>
   </nav>
 
   <div class="wiki-layout">
@@ -31,26 +26,47 @@
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="color:var(--lx-text-muted);"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>
           <span class="text-xs color-muted font-body">Search wiki...</span>
         </div>
-        <span class="annotation-tag">WikiSidebar: 260px, nested tree</span>
+        <span class="annotation-tag">Context menu on page tree item</span>
       </div>
 
-      <!-- Tree -->
-      <div class="flex-1 overflow-y-auto">
-        <!-- Root: Game Design Doc (active, expanded) -->
-        <div class="tree-item active" style="margin-bottom:2px;">
+      <!-- Tree (position:relative so the menu can anchor to the item) -->
+      <div class="flex-1 overflow-y-auto" style="position:relative;">
+        <!-- Root: Game Design Doc (expanded) -->
+        <div class="tree-item" style="margin-bottom:2px;">
           <svg class="chevron-small" viewBox="0 0 24 24" style="transform:rotate(90deg);"><path d="M9 18l6-6-6-6"/></svg>
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="color:var(--lx-text-muted);margin-right:6px;flex-shrink:0;"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14 2 14 8 20 8"/></svg>
           Game Design Doc
         </div>
 
-        <!-- Child: Combat System (expanded) -->
-        <div class="tree-item tree-indent-1" style="margin-bottom:2px;">
+        <!-- Child: Combat System — right-click target, shown with hover bg -->
+        <div class="tree-item tree-indent-1" style="margin-bottom:2px;background:var(--lx-surface-card-hover);color:var(--lx-text-primary);">
           <svg class="chevron-small" viewBox="0 0 24 24" style="transform:rotate(90deg);"><path d="M9 18l6-6-6-6"/></svg>
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="color:var(--lx-text-muted);margin-right:6px;flex-shrink:0;"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14 2 14 8 20 8"/></svg>
           Combat System
         </div>
 
-        <!-- Grandchildren -->
+        <!-- Context menu (anchored below the item, overlays following rows) -->
+        <div class="menu" style="position:absolute;top:64px;left:40px;">
+          <div class="menu-item">
+            <svg viewBox="0 0 24 24"><path d="M12 5v14m-7-7h14"/></svg>
+            Add child page
+          </div>
+          <div class="menu-item">
+            <svg viewBox="0 0 24 24"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/><path d="m15 5 4 4"/></svg>
+            Rename
+          </div>
+          <div class="menu-item">
+            <svg viewBox="0 0 24 24"><path d="M2 9V5a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.69.9l.81 1.2a2 2 0 0 0 1.67.9H20a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2v-1"/><path d="M2 13h10"/><path d="m9 10 3 3-3 3"/></svg>
+            Move
+          </div>
+          <div class="menu-separator"></div>
+          <div class="menu-item danger">
+            <svg viewBox="0 0 24 24"><path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+            Delete
+          </div>
+        </div>
+
+        <!-- Grandchildren (visually under the menu) -->
         <div class="tree-item tree-indent-2" style="margin-bottom:2px;">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="color:var(--lx-text-muted);margin-right:6px;flex-shrink:0;"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14 2 14 8 20 8"/></svg>
           Melee Framework
@@ -58,7 +74,6 @@
         <div class="tree-item tree-indent-2 active" style="margin-bottom:2px;">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="color:var(--lx-text-muted);margin-right:6px;flex-shrink:0;"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14 2 14 8 20 8"/></svg>
           Elemental Damage
-          <span class="annotation-inline">Active page</span>
         </div>
         <div class="tree-item tree-indent-2" style="margin-bottom:2px;">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="color:var(--lx-text-muted);margin-right:6px;flex-shrink:0;"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14 2 14 8 20 8"/></svg>
@@ -70,7 +85,6 @@
           <svg class="chevron-small" viewBox="0 0 24 24"><path d="M9 18l6-6-6-6"/></svg>
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="color:var(--lx-text-muted);margin-right:6px;flex-shrink:0;"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14 2 14 8 20 8"/></svg>
           Level Design
-          <span class="annotation-inline">Collapsed</span>
         </div>
 
         <!-- Root: Art Direction (collapsed) -->
@@ -79,13 +93,11 @@
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="color:var(--lx-text-muted);margin-right:6px;flex-shrink:0;"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14 2 14 8 20 8"/></svg>
           Art Direction
         </div>
+      </div>
 
-        <!-- Root: Sound & Music (collapsed) -->
-        <div class="tree-item" style="margin-bottom:2px;">
-          <svg class="chevron-small" viewBox="0 0 24 24"><path d="M9 18l6-6-6-6"/></svg>
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="color:var(--lx-text-muted);margin-right:6px;flex-shrink:0;"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14 2 14 8 20 8"/></svg>
-          Sound &amp; Music
-        </div>
+      <!-- Menu spec annotation -->
+      <div class="px-4 mt-2">
+        <span class="annotation-tag">Right-clicked item keeps hover bg · Menu: radius-md, padding 16px (DS §8.2), z-dropdown 30 · Delete = danger, separated</span>
       </div>
 
       <!-- Add page button -->
@@ -100,22 +112,16 @@
     <!-- Content -->
     <div class="wiki-content">
       <div class="wiki-prose">
-        <div class="flex items-center justify-between mb-1">
+        <div class="flex items-center gap-2 mb-1">
           <span class="text-xs color-muted font-body">Game Design Doc / Combat System</span>
-          <a href="wiki-edit.html" class="btn btn-ghost" style="height:28px;padding:0 10px;font-size:12px;">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/></svg>
-            Edit
-          </a>
         </div>
         <h1>Elemental Damage</h1>
-        <span class="annotation-tag mb-4">WikiProse: h1 = text-2xl/600/Display · Edit → wiki-edit.html</span>
 
         <p>
           Emberfall’s combat revolves around four elemental affinities: <strong>Fire</strong>, <strong>Ice</strong>, <strong>Earth</strong>, and <strong>Wind</strong>. Each enemy and boss has a hidden resistance matrix that determines damage multipliers. The player can switch affinities mid-combat via the D-pad or number keys, creating a rock-paper-scissors dynamic against shielded foes.
         </p>
 
         <h2>Damage Formula</h2>
-        <span class="annotation-tag">h2 = text-xl/600/Display</span>
 
         <p>
           Base damage is calculated from the weapon’s <code>attack_power</code> stat, modified by the player’s current affinity and the target’s resistance. The formula is intentionally simple — we want players to feel the impact of affinity choices without spreadsheet math.
@@ -126,50 +132,6 @@
     var resistance = target.resistance[affinity]
     var multiplier = 1.0 + (1.0 - resistance) * 2.0
     return int(base * multiplier)</code></pre>
-
-        <h2>Resistance Matrix</h2>
-
-        <table>
-          <thead>
-            <tr>
-              <th>Enemy Type</th>
-              <th>Fire</th>
-              <th>Ice</th>
-              <th>Earth</th>
-              <th>Wind</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr>
-              <td>Ember Wisp</td>
-              <td>0.25</td>
-              <td>1.50</td>
-              <td>1.00</td>
-              <td>1.25</td>
-            </tr>
-            <tr>
-              <td>Frost Knight</td>
-              <td>1.50</td>
-              <td>0.25</td>
-              <td>1.25</td>
-              <td>1.00</td>
-            </tr>
-            <tr>
-              <td>Stone Golem</td>
-              <td>1.25</td>
-              <td>1.00</td>
-              <td>0.25</td>
-              <td>1.50</td>
-            </tr>
-            <tr>
-              <td>Storm Harpy</td>
-              <td>1.00</td>
-              <td>1.25</td>
-              <td>1.50</td>
-              <td>0.25</td>
-            </tr>
-          </tbody>
-        </table>
 
         <h2>Status Effects</h2>
 
@@ -183,13 +145,6 @@
           <li><strong>Petrify (Earth):</strong> 1.5 second stun. Breaks on damage taken. 30s cooldown per target.</li>
           <li><strong>Gale (Wind):</strong> Knocks back small enemies. Launches player upward if self-cast (mobility tool).</li>
         </ul>
-
-        <h3>Edge Cases</h3>
-        <span class="annotation-tag">h3 = text-lg/500/Display</span>
-
-        <p>
-          When a player switches affinity while a projectile is mid-flight, the projectile retains its original affinity. This is intentional — it rewards pre-fight planning and punishes panic-switching. The only exception is the <code>Chameleon Cloak</code> artifact, which retroactively changes affinity on all active projectiles.
-        </p>
 
         <div style="margin-top:32px;padding-top:16px;border-top:1px solid var(--lx-border-default);">
           <span class="font-micro text-2xs color-muted" style="text-transform:uppercase;letter-spacing:0.04em;">Last edited 2 hours ago by AL</span>

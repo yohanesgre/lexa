@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Lexa — Kanban Board</title>
+  <title>Lexa — Kanban: Swimlane Menu</title>
   <link rel="stylesheet" href="wireframes.css" />
 </head>
 <body class="bg-app color-primary">
@@ -15,12 +15,7 @@
     <a href="kanban.html" class="nav-link active">Board</a>
     <a href="wiki.html" class="nav-link">Wiki</a>
     <a href="settings.html" class="nav-link">Settings</a>
-    <div class="project-switcher">
-      <button class="project-switcher-trigger">
-        <span class="text-sm weight-500 font-body color-primary">Emberfall</span>
-        <svg viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg>
-      </button>
-    </div>
+    <span class="font-micro text-2xs color-muted ml-2" style="text-transform:uppercase;letter-spacing:0.04em;">Project: Emberfall</span>
   </nav>
 
   <div class="board-area">
@@ -28,7 +23,7 @@
     <div class="board-header">
       <div class="flex items-center gap-3">
         <h1 class="font-display text-xl weight-600 color-primary">Emberfall</h1>
-        <span class="annotation-tag">Kanban — the heart of Lexa</span>
+        <span class="annotation-tag">State: swimlane header menu open (Sprint 7)</span>
       </div>
       <div class="flex items-center gap-2">
         <button class="btn btn-ghost text-sm">Filter</button>
@@ -39,14 +34,41 @@
     <!-- Board Scroll Area -->
     <div class="board-scroll" style="position:relative;">
 
-      <!-- Swimlane 1: Expanded -->
-      <div>
+      <!-- Swimlane 1: Expanded, menu open -->
+      <div style="position:relative;">
         <div class="swimlane-header">
           <svg class="chevron" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg>
           <span class="swimlane-name">Sprint 7 — The Furnace</span>
           <span class="swimlane-count">012</span>
-          <span class="annotation-inline">SwimlaneHeader: 36px, Space Grotesk</span>
+          <span class="flex-1"></span>
+          <button class="icon-btn active" title="Swimlane menu">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" stroke="none"><circle cx="5" cy="12" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="19" cy="12" r="1.5"/></svg>
+          </button>
         </div>
+
+        <!-- Swimlane dropdown menu (open state) -->
+        <div class="menu-popover" style="top:40px;left:0;">
+          <div class="menu-item">
+            <svg viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round"><path d="M18 15l-6-6-6 6"/></svg>
+            Collapse
+          </div>
+          <div class="menu-item">
+            <svg viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></svg>
+            Rename
+          </div>
+          <div class="menu-separator"></div>
+          <div class="menu-item">
+            <svg viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14m-7-7h14"/></svg>
+            Add column
+          </div>
+          <div class="menu-separator"></div>
+          <div class="menu-item danger">
+            <svg viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6M10 11v6M14 11v6"/></svg>
+            Delete swimlane
+          </div>
+        </div>
+        <span class="annotation-tag" style="position:absolute;top:196px;left:0;z-index:40;">SwimlaneMenu — opens from header ⋯ (hover) or right-click</span>
+        <span class="annotation" style="position:absolute;top:12px;left:340px;z-index:40;">first item toggles: “Collapse” ⇄ “Expand”</span>
 
         <div class="columns-row">
 
@@ -62,7 +84,6 @@
             </div>
             <div class="column-body">
 
-              <!-- Card 1 -->
               <div class="kanban-card" style="border-left:3px solid #4ADE80;">
                 <div class="flex items-center justify-between">
                   <span class="type-badge type-feature">Feature</span>
@@ -72,10 +93,8 @@
                 <div class="card-meta">
                   <div class="avatar">MK</div>
                 </div>
-                <span class="annotation" style="position:absolute;right:6px;bottom:4px;">left-border: type accent</span>
               </div>
 
-              <!-- Card 2 -->
               <div class="kanban-card" style="border-left:3px solid #FF4444;">
                 <div class="flex items-center justify-between">
                   <span class="type-badge type-bug">Bug</span>
@@ -90,10 +109,8 @@
                   </span>
                   <span class="sync-dot sync-synced"></span>
                 </div>
-                <span class="annotation" style="position:absolute;right:6px;bottom:4px;">GH linked + synced</span>
               </div>
 
-              <!-- Card 3 -->
               <div class="kanban-card" style="border-left:3px solid #F472B6;">
                 <div class="flex items-center justify-between">
                   <span class="type-badge type-asset">Asset</span>
@@ -110,7 +127,6 @@
                 Add task...
               </button>
             </div>
-            <span class="annotation-rail" style="top:60%;">← 280px</span>
           </div>
 
           <!-- Column: Todo -->
@@ -125,7 +141,6 @@
             </div>
             <div class="column-body">
 
-              <!-- Card 4 -->
               <div class="kanban-card" style="border-left:3px solid #4ADE80;">
                 <div class="flex items-center justify-between">
                   <span class="type-badge type-feature">Feature</span>
@@ -142,7 +157,6 @@
                 </div>
               </div>
 
-              <!-- Card 5 -->
               <div class="kanban-card" style="border-left:3px solid #22D3EE;">
                 <div class="flex items-center justify-between">
                   <span class="type-badge type-task">Task</span>
@@ -152,10 +166,8 @@
                 <div class="card-meta">
                   <div class="avatar">AL</div>
                 </div>
-                <span class="annotation" style="position:absolute;right:6px;bottom:4px;">low = hollow ring</span>
               </div>
 
-              <!-- Card 6 -->
               <div class="kanban-card" style="border-left:3px solid #FF4444;">
                 <div class="flex items-center justify-between">
                   <span class="type-badge type-bug">Bug</span>
@@ -179,7 +191,7 @@
             </div>
           </div>
 
-          <!-- Column: In Progress (WIP exceeded) -->
+          <!-- Column: In Progress -->
           <div class="column">
             <div class="column-strip" style="background:#F0C040;"></div>
             <div class="column-header has-cards">
@@ -191,7 +203,6 @@
             </div>
             <div class="column-body">
 
-              <!-- Card 7 -->
               <div class="kanban-card" style="border-left:3px solid #4ADE80;">
                 <div class="flex items-center justify-between">
                   <span class="type-badge type-feature">Feature</span>
@@ -208,7 +219,6 @@
                 </div>
               </div>
 
-              <!-- Card 8: OUT OF SYNC -->
               <div class="kanban-card" style="border-left:3px solid #FF4444;">
                 <div class="flex items-center justify-between">
                   <span class="type-badge type-bug">Bug</span>
@@ -223,10 +233,8 @@
                   </span>
                   <span class="sync-dot sync-diverged"></span>
                 </div>
-                <span class="annotation-tag" style="position:absolute;right:6px;bottom:4px;">OUT OF SYNC</span>
               </div>
 
-              <!-- Card 9 -->
               <div class="kanban-card" style="border-left:3px solid #F472B6;">
                 <div class="flex items-center justify-between">
                   <span class="type-badge type-asset">Asset</span>
@@ -238,7 +246,6 @@
                 </div>
               </div>
 
-              <!-- Card 10 -->
               <div class="kanban-card" style="border-left:3px solid #22D3EE;">
                 <div class="flex items-center justify-between">
                   <span class="type-badge type-task">Task</span>
@@ -255,7 +262,6 @@
                 </div>
               </div>
 
-              <!-- Card 11 -->
               <div class="kanban-card" style="border-left:3px solid #4ADE80;">
                 <div class="flex items-center justify-between">
                   <span class="type-badge type-feature">Feature</span>
@@ -272,7 +278,6 @@
                 Add task...
               </button>
             </div>
-            <span class="annotation-tag" style="position:absolute;top:48px;right:8px;">WIP exceeded</span>
           </div>
 
           <!-- Column: Review -->
@@ -287,7 +292,6 @@
             </div>
             <div class="column-body">
 
-              <!-- Card 12 -->
               <div class="kanban-card" style="border-left:3px solid #4ADE80;">
                 <div class="flex items-center justify-between">
                   <span class="type-badge type-feature">Feature</span>
@@ -326,7 +330,6 @@
                 Add task...
               </button>
             </div>
-            <span class="annotation-tag" style="position:absolute;top:48px;right:8px;">Empty column</span>
           </div>
 
         </div>
@@ -338,41 +341,10 @@
           <svg class="chevron collapsed" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg>
           <span class="swimlane-name">Sprint 6 — Ash &amp; Bone</span>
           <span class="swimlane-count">000</span>
-          <span class="annotation-inline">Collapsed swimlane</span>
+          <span class="annotation-inline">Collapsed — menu here shows “Expand” instead</span>
         </div>
       </div>
 
-      <!-- Dragged Card (static representation) -->
-      <div class="kanban-card state-dragging" style="position:absolute;left:680px;top:260px;width:260px;z-index:30;border-left:3px solid #4ADE80;">
-        <div class="flex items-center justify-between">
-          <span class="type-badge type-feature">Feature</span>
-          <span class="priority-dot priority-high" title="High priority"></span>
-        </div>
-        <div class="card-title mt-2">Implement double-jump mechanic</div>
-        <div class="card-meta">
-          <div class="avatar">MK</div>
-        </div>
-        <span class="annotation-tag" style="position:absolute;right:-140px;top:0;">Dragging state: rotate(1deg) + drag shadow</span>
-      </div>
-
-      <!-- Annotation: Selected card variant -->
-      <div class="kanban-card state-selected" style="position:absolute;left:680px;top:420px;width:260px;z-index:25;border-left:3px solid #FF4444;">
-        <div class="flex items-center justify-between">
-          <span class="type-badge type-bug">Bug</span>
-          <span class="priority-dot priority-urgent" title="Urgent priority"></span>
-        </div>
-        <div class="card-title mt-2">Selected card state (keyboard focus)</div>
-        <div class="card-meta">
-          <div class="avatar">AL</div>
-        </div>
-        <span class="annotation-tag" style="position:absolute;right:-180px;top:0;">Selected: amber selected bg + focus ring + glow</span>
-      </div>
-
-    </div>
-
-    <!-- Responsive Note -->
-    <div class="responsive-note" style="margin:0 16px 16px;max-width:640px;">
-      <strong>Responsive collapse.</strong> Below 1280px: board switches to single-column vertical stack with swimlane headers sticky at top. Below 768px: swimlanes collapse to tabs; cards expand to full width. Slideover becomes full-screen overlay. Sidebar nav collapses to hamburger.
     </div>
   </div>
 
