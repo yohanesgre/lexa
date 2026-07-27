@@ -2,6 +2,7 @@ import { HeadContent, Link, Outlet, Scripts, createRootRoute, useParams, useRout
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useState } from "react";
 import phosphorCss from "../styles/phosphor.css?url";
+import { useProjects } from "../lib/queries";
 
 export const Route = createRootRoute({
   head: () => ({
@@ -33,6 +34,56 @@ function NavSpan({ children }: { children: React.ReactNode }) {
   return <span className="nav-link opacity-50 cursor-not-allowed">{children}</span>;
 }
 
+function BoardDropdown({ active, currentSlug }: { active: boolean; currentSlug?: string }) {
+  const [open, setOpen] = useState(false);
+  const { data: projects } = useProjects();
+
+  return (
+    <div
+      className="relative flex items-center h-full"
+      onMouseEnter={() => setOpen(true)}
+      onMouseLeave={() => setOpen(false)}
+    >
+      <button
+        type="button"
+        className={`nav-link flex items-center gap-1 ${active ? "active" : ""}`}
+      >
+        Board
+        <svg className="w-3 h-3 opacity-70" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+          <path d="M6 9l6 6 6-6" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      </button>
+      {open && (
+        <div className="absolute top-full left-0 mt-1 min-w-[180px] rounded-md border border-lx-border bg-lx-surface-elevated shadow-lx-md z-dropdown py-1">
+          {!projects ? (
+            <div className="px-3 py-2 text-sm text-lx-text-muted">Loading projects…</div>
+          ) : projects.length === 0 ? (
+            <div className="px-3 py-2 text-sm text-lx-text-muted">No projects yet</div>
+          ) : (
+            projects.map((project) => {
+              const isCurrent = project.slug === currentSlug;
+              return (
+                <Link
+                  key={project.id}
+                  to="/$slug"
+                  params={{ slug: project.slug }}
+                  className={
+                    isCurrent
+                      ? "block px-3 py-1.5 text-sm text-lx-text-primary bg-lx-surface-selected"
+                      : "block px-3 py-1.5 text-sm text-lx-text-secondary hover:bg-lx-surface-card-hover hover:text-lx-text-primary"
+                  }
+                >
+                  {project.name}
+                </Link>
+              );
+            })
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function RootComponent() {
   const [queryClient] = useState(() => new QueryClient());
   const params = useParams({ strict: false }) as { slug?: string };
@@ -47,11 +98,7 @@ function RootComponent() {
           <nav className="app-nav">
             <div className="nav-brand">Lexa</div>
             <NavLink to="/">Dashboard</NavLink>
-            {slug ? (
-              <NavLink to="/$slug" params={{ slug: slug! }}>Board</NavLink>
-            ) : (
-              <NavSpan>Board</NavSpan>
-            )}
+            <BoardDropdown active={Boolean(slug)} currentSlug={slug} />
             <NavSpan>Wiki</NavSpan>
             <NavSpan>Settings</NavSpan>
           </nav>
