@@ -21,6 +21,22 @@ function GithubMark({ size = 14, className }: { size?: number; className?: strin
   );
 }
 
+function TrashIcon({ size = 14, className }: { size?: number; className?: string }) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={1.5}
+      className={className}
+    >
+      <path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+    </svg>
+  );
+}
+
 interface TaskDetailProps {
   mode?: "view" | "create";
   task?: Task;
@@ -28,6 +44,7 @@ interface TaskDetailProps {
   columns?: { id: string; name: string }[];
   onClose: () => void;
   onUpdate?: (id: string, data: Partial<Task>) => void;
+  onDelete?: (id: string) => Promise<void>;
   onCreate?: (input: {
     title: string;
     columnId: string;
@@ -110,12 +127,14 @@ const emptyDoc: TipTapDoc = { type: "doc", content: [] };
 const capitalize = (s: string) => s[0].toUpperCase() + s.slice(1);
 const fmtDate = (iso: string) => iso.slice(0, 10);
 
-export function TaskDetail({ mode = "view", task, defaultColumnId, columns, onClose, onUpdate, onCreate }: TaskDetailProps) {
+export function TaskDetail({ mode = "view", task, defaultColumnId, columns, onClose, onUpdate, onDelete, onCreate }: TaskDetailProps) {
   const params = useParams({ strict: false }) as { slug?: string };
   const slug = params.slug;
   const isCreate = mode === "create";
 
   const [open, setOpen] = useState(false);
+  const [showDeleteDialog, setShowDeleteDialog] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const closeTimer = useRef<number | null>(null);
 
   useEffect(() => {
@@ -138,7 +157,14 @@ export function TaskDetail({ mode = "view", task, defaultColumnId, columns, onCl
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") handleClose();
+      if (e.key === "Escape") {
+        if (showDeleteDialog) {
+          e.stopPropagation();
+          setShowDeleteDialog(false);
+        } else {
+          handleClose();
+        }
+      }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -181,6 +207,16 @@ export function TaskDetail({ mode = "view", task, defaultColumnId, columns, onCl
     const v = draft.trim();
     if (v && v !== task?.title) onUpdate?.(task!.id, { title: v });
     setEditingTitle(false);
+  };
+
+  const handleConfirmDelete = async () => {
+    if (!task || !onDelete) return;
+    setDeleting(true);
+    try {
+      await onDelete(task.id);
+    } finally {
+      setDeleting(false);
+    }
   };
 
   if (!isCreate && !task) return null;
@@ -473,9 +509,19 @@ export function TaskDetail({ mode = "view", task, defaultColumnId, columns, onCl
             </>
           ) : (
             <>
-              <span className="font-mono text-2xs text-lx-text-muted uppercase tracking-[0.04em]">
-                Created {fmtDate(task!.createdAt)} · Updated {fmtDate(task!.updatedAt)}
-              </span>
+              <div className="flex items-center gap-2">
+                <span className="font-mono text-2xs text-lx-text-muted uppercase tracking-[0.04em]">
+                  Created {fmtDate(task!.createdAt)} · Updated {fmtDate(task!.updatedAt)}
+                </span>
+                <button
+                  type="button"
+                  className="btn btn-danger"
+                  onClick={() => setShowDeleteDialog(true)}
+                >
+                  <TrashIcon size={14} />
+                  Delete
+                </button>
+              </div>
               <button className="btn btn-ghost" onClick={handleClose}>
                 Close
               </button>
@@ -483,6 +529,51 @@ export function TaskDetail({ mode = "view", task, defaultColumnId, columns, onCl
           )}
         </div>
       </div>
+
+      {showDeleteDialog && task && (
+        <>
+          <div className="dialog-overlay" onClick={() => setShowDeleteDialog(false)} />
+          <div className="fixed inset-0 flex items-center justify-center z-[70] pointer-events-none">
+            <div
+              className="dialog dialog-enter"
+              role="alertdialog"
+              aria-modal="true"
+              aria-labelledby="delete-task-title"
+            >
+              <div className="flex items-center gap-2">
+                <TrashIcon size={18} className="text-lx-text-danger" />
+                <h3
+                  id="delete-task-title"
+                  className="font-display text-lg font-medium text-lx-text-primary"
+                >
+                  Delete task
+                </h3>
+              </div>
+              <p className="text-sm text-lx-text-secondary mt-3 leading-5">
+                Delete <span className="text-lx-text-primary font-medium">&lsquo;{task.title}&rsquo;</span>? This cannot
+                be undone.
+              </p>
+              <div className="flex items-center gap-2 mt-4 justify-end">
+                <button
+                  type="button"
+                  className="btn btn-ghost"
+                  onClick={() => setShowDeleteDialog(false)}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-danger-solid"
+                  onClick={handleConfirmDelete}
+                  disabled={deleting}
+                >
+                  Delete
+                </button>
+              </div>
+            </div>
+          </div>
+        </>
+      )}
     </>
   );
 }

@@ -65,6 +65,20 @@ export function useMoveTask(slug: string) {
   });
 }
 
+export function useDeleteTask(slug: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id }: { id: string }) => api.deleteTask(slug, id),
+    onSuccess: (_, { id }) => {
+      qc.setQueryData(["board", slug], (old: Board | undefined) => {
+        if (!old) return old;
+        return { ...old, tasks: old.tasks.filter((t: Task) => t.id !== id) };
+      });
+      qc.removeQueries({ queryKey: ["tasks", slug, id] });
+    },
+  });
+}
+
 export function useWikiPages(slug: string) {
   return useQuery({ queryKey: ["wiki", slug], queryFn: () => api.listWikiPages(slug).then((r) => r.data) });
 }

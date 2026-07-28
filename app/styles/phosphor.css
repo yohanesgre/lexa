@@ -1986,4 +1986,70 @@
   .check-row .avatar {
     margin-right: 0;
   }
+
+  /* ---- Solid danger button (delete confirmations) ---- */
+  .btn-danger-solid {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    height: 32px;
+    padding: 0 14px;
+    border-radius: 6px;
+    font-size: 13px;
+    font-weight: 500;
+    font-family: var(--lx-font-body);
+    cursor: pointer;
+    border: 1px solid transparent;
+    background: #FF4444;
+    color: var(--lx-text-primary);
+    transition: background 100ms;
+  }
+  .btn-danger-solid:hover {
+    background: #E03A3A;
+  }
+  .btn-danger-solid:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  /* ---- Confirmation Dialog ---- */
+  .dialog-overlay {
+    position: fixed;
+    inset: 0;
+    background: var(--lx-surface-overlay);
+    z-index: 60;
+    transition: opacity 200ms var(--lx-ease-out);
+  }
+  .dialog-overlay.dialog-closed {
+    opacity: 0;
+  }
+
+  .dialog {
+    position: relative;
+    width: 400px;
+    max-width: calc(100vw - 32px);
+    background: var(--lx-surface-elevated);
+    border: 1px solid var(--lx-border-default);
+    border-radius: 12px;
+    padding: 20px;
+    box-shadow: var(--lx-shadow-lg);
+    z-index: 70;
+    pointer-events: auto;
+  }
+
+  .dialog-enter {
+    animation: lx-dialog-enter 200ms var(--lx-ease-out);
+  }
+
+  @keyframes lx-dialog-enter {
+    from {
+      opacity: 0;
+      transform: scale(0.96);
+    }
+    to {
+      opacity: 1;
+      transform: scale(1);
+    }
+  }
 }
