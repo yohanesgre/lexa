@@ -175,24 +175,6 @@ function ProjectSwitcher({
 
 function RootComponent() {
   const [queryClient] = useState(() => new QueryClient());
-  const params = useParams({ strict: false }) as { slug?: string };
-  const slug = params?.slug;
-  const pathname = useRouterState({ select: (s) => s.location.pathname });
-  const { data: projects } = useProjects();
-
-  const effectiveSlug = useMemo(() => {
-    if (slug) return slug;
-    if (projects && projects.length > 0) return projects[0].slug;
-    return undefined;
-  }, [slug, projects]);
-
-  const routeType: "dashboard" | "board" | "wiki" | "settings" = useMemo(() => {
-    if (pathname === "/") return "dashboard";
-    if (effectiveSlug && pathname.startsWith(`/${effectiveSlug}/wiki`)) return "wiki";
-    if (effectiveSlug && pathname.startsWith(`/${effectiveSlug}`)) return "board";
-    return "dashboard";
-  }, [pathname, effectiveSlug]);
-
   return (
     <html lang="en" data-theme="dark">
       <head>
@@ -200,22 +182,39 @@ function RootComponent() {
       </head>
       <body>
         <QueryClientProvider client={queryClient}>
-          <nav className="app-nav">
-            <div className="nav-brand">Lexa</div>
-            <NavLink to="/">Dashboard</NavLink>
-            <NavLink to={effectiveSlug ? "/$slug" : "/"} params={effectiveSlug ? { slug: effectiveSlug } : undefined} active={routeType === "board"}>
-              Board
-            </NavLink>
-            <NavLink to={effectiveSlug ? "/$slug/wiki" : "/"} params={effectiveSlug ? { slug: effectiveSlug } : undefined} active={routeType === "wiki"}>
-              Wiki
-            </NavLink>
-            <NavSpan>Settings</NavSpan>
-            <ProjectSwitcher currentSlug={slug} routeType={routeType} />
-          </nav>
+          <AppNav />
           <Outlet />
         </QueryClientProvider>
         <Scripts />
       </body>
     </html>
+  );
+}
+
+function AppNav() {
+  const params = useParams({ strict: false }) as { slug?: string };
+  const slug = params?.slug;
+  const pathname = useRouterState({ select: (s) => s.location.pathname });
+
+  const routeType: "dashboard" | "board" | "wiki" | "settings" = useMemo(() => {
+    if (pathname === "/") return "dashboard";
+    if (slug && pathname.startsWith(`/${slug}/wiki`)) return "wiki";
+    if (slug && pathname.startsWith(`/${slug}`)) return "board";
+    return "dashboard";
+  }, [pathname, slug]);
+
+  return (
+    <nav className="app-nav">
+      <div className="nav-brand">Lexa</div>
+      <NavLink to="/">Dashboard</NavLink>
+      <NavLink to={slug ? "/$slug" : "/"} params={slug ? { slug } : undefined} active={routeType === "board"}>
+        Board
+      </NavLink>
+      <NavLink to={slug ? "/$slug/wiki" : "/"} params={slug ? { slug } : undefined} active={routeType === "wiki"}>
+        Wiki
+      </NavLink>
+      <NavSpan>Settings</NavSpan>
+      <ProjectSwitcher currentSlug={slug} routeType={routeType} />
+    </nav>
   );
 }
