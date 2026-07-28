@@ -2,6 +2,8 @@ import { Effect } from "effect";
 import { D1, queryAll, queryFirst, run, DbError, RowNotFound, ConstraintViolation } from "../db/d1";
 import { WikiPageRow, rowToWikiPage, rowToWikiPageMeta } from "../../shared/types";
 import type { WikiPage, WikiPageMeta } from "../../shared/types";
+import type { WikiPageRevisionRow, WikiPageRevision, WikiPageRevisionSummary } from "../../shared/types";
+import { rowToWikiPageRevision, rowToWikiPageRevisionSummary } from "../../shared/types";
 
 export class WikiRepo extends Effect.Service<WikiRepo>()("Lexa/WikiRepo", {
   effect: Effect.gen(function* () {
@@ -151,6 +153,52 @@ export class WikiRepo extends Effect.Service<WikiRepo>()("Lexa/WikiRepo", {
           Effect.map((r) => r.count),
           Effect.catchTag("RowNotFound", () => Effect.succeed(0))
         ),
+
+      createRevision: (
+        pageId: string,
+        title: string,
+        slug: string,
+        content: string,
+        contentText: string,
+        saveType: "autosave" | "manual"
+      ): Effect.Effect<WikiPageRevision, DbError | ConstraintViolation> =>
+        Effect.gen(function* () {
+          const id = crypto.randomUUID();
+          yield* run(
+            db,
+            `INSERT INTO wiki_page_revisions (id, page_id, title, slug, content, content_text, save_type)
+             VALUES (?, ?, ?, ?, ?, ?, ?)`,
+            id, pageId, title, slug, content, contentText, saveType
+          );
+          return yield* queryFirst<WikiPageRevisionRow>(
+            db,
+            `SELECT * FROM wiki_page_revisions WHERE id = ?`,
+            id
+          ).pipe(
+            Effect.map(rowToWikiPageRevision),
+            Effect.catchTag("RowNotFound", () =>
+              new DbError({ message: "Revision not found after insert" })
+            )
+          );
+        }),
+
+      listRevisions: (
+        pageId: string,
+        limit?: number
+      ): Effect.Effect<WikiPageRevisionSummary[], DbError> =>
+        queryAll<WikiPageRevisionRow>(
+          db,
+          `SELECT * FROM wiki_page_revisions WHERE page_id = ? ORDER BY created_at DESC LIMIT ?`,
+          pageId,
+          limit ?? 20
+        ).pipe(Effect.map((rows) => rows.map(rowToWikiPageRevisionSummary))),
+
+      getRevision: (id: string): Effect.Effect<WikiPageRevision, RowNotFound | DbError> =>
+        queryFirst<WikiPageRevisionRow>(
+          db,
+          `SELECT * FROM wiki_page_revisions WHERE id = ?`,
+          id
+        ).pipe(Effect.map(rowToWikiPageRevision)),
 
       maxPosition: (
         projectId: string,

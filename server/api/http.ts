@@ -1,7 +1,7 @@
 import { HttpApi, HttpApiBuilder, HttpApiEndpoint, HttpApiGroup, HttpServerResponse } from "@effect/platform";
 import { Effect, Layer, Schema } from "effect";
 import { d1Live } from "../db/d1";
-import { errorResponse, errorToStatus } from "./errors";
+import { WikiPageNotFound, errorResponse, errorToStatus } from "./errors";
 import { clampLimit, nextCursor } from "../../shared/pagination";
 import { ProjectService } from "../services/project.service";
 import { ProjectRepo } from "../repos/project.repo";
@@ -159,6 +159,7 @@ const WikiPageUpdatePayload = Schema.Struct({
   content: Schema.optional(Schema.Any),
   parentId: Schema.optional(Schema.NullOr(Schema.String)),
   position: Schema.optional(Schema.Number),
+  saveType: Schema.optional(Schema.Literal("autosave", "manual")),
 });
 
 const WikiPageListResponse = Schema.Struct({ data: Schema.Array(WikiPageMetaSchema) });
@@ -170,6 +171,32 @@ const WikiSearchItemSchema = Schema.extend(WikiPageSchema, Schema.Struct({ snipp
 const WikiSearchResponse = Schema.Struct({ data: Schema.Array(WikiSearchItemSchema) });
 
 const PagePath = Schema.Struct({ slug: Schema.String, pageSlug: Schema.String });
+
+const RevisionPath = Schema.Struct({ slug: Schema.String, pageSlug: Schema.String, revisionId: Schema.String });
+
+const WikiPageRevisionSummarySchema = Schema.Struct({
+  id: Schema.String,
+  title: Schema.String,
+  saveType: Schema.Literal("autosave", "manual"),
+  createdAt: Schema.String,
+});
+
+const WikiPageRevisionSchema = Schema.Struct({
+  id: Schema.String,
+  pageId: Schema.String,
+  title: Schema.String,
+  slug: Schema.String,
+  content: Schema.Any,
+  contentText: Schema.String,
+  saveType: Schema.Literal("autosave", "manual"),
+  createdAt: Schema.String,
+});
+
+const RevisionsListResponse = Schema.Struct({ revisions: Schema.Array(WikiPageRevisionSummarySchema) });
+
+const RevisionResponse = Schema.Struct({ revision: WikiPageRevisionSchema });
+
+const RestorePayload = Schema.Struct({ revisionId: Schema.String });
 
 const swimlanesGroup = HttpApiGroup.make("swimlanes")
   .add(HttpApiEndpoint.get("listSwimlanes", "/projects/:slug/swimlanes")
@@ -275,7 +302,13 @@ const wikiGroup = HttpApiGroup.make("wiki")
   .add(HttpApiEndpoint.patch("updatePage", "/projects/:slug/wiki/:pageSlug")
     .setPath(PagePath).setPayload(WikiPageUpdatePayload).addSuccess(WikiPageSchema))
   .add(HttpApiEndpoint.del("deletePage", "/projects/:slug/wiki/:pageSlug")
-    .setPath(PagePath).addSuccess(Schema.Undefined, { status: 204 }));
+    .setPath(PagePath).addSuccess(Schema.Undefined, { status: 204 }))
+  .add(HttpApiEndpoint.get("listRevisions", "/projects/:slug/wiki/:pageSlug/revisions")
+    .setPath(PagePath).addSuccess(RevisionsListResponse))
+  .add(HttpApiEndpoint.get("getRevision", "/projects/:slug/wiki/:pageSlug/revisions/:revisionId")
+    .setPath(RevisionPath).addSuccess(RevisionResponse))
+  .add(HttpApiEndpoint.post("restoreRevision", "/projects/:slug/wiki/:pageSlug/restore")
+    .setPath(PagePath).setPayload(RestorePayload).addSuccess(WikiPageSchema));
 
 export const LexaApi = HttpApi.make("lexa")
   .add(healthGroup)
@@ -588,7 +621,8 @@ const wikiLive = HttpApiBuilder.group(LexaApi, "wiki", (handlers) =>
           updateInput.content = JSON.stringify(req.payload.content);
           updateInput.contentText = extractText(req.payload.content);
         }
-        const updated = yield* wikiService.update(page.id, updateInput as any);
+        const saveType = req.payload.saveType ?? "autosave";
+        const updated = yield* wikiService.update(page.id, updateInput as any, saveType);
         return formatWikiPage(updated);
       }))
     )
@@ -600,6 +634,39 @@ const wikiLive = HttpApiBuilder.group(LexaApi, "wiki", (handlers) =>
         const page = yield* wikiService.findBySlug(project.id, req.path.pageSlug);
         yield* wikiService.delete(page.id);
         return undefined;
+      }))
+    )
+    .handle("listRevisions", (req) =>
+      respond(Effect.gen(function* () {
+        const projectService = yield* ProjectService;
+        const wikiService = yield* WikiService;
+        const project = yield* projectService.findBySlug(req.path.slug);
+        const q = new URL(req.request.url).searchParams;
+        const limit = q.get("limit") ? parseInt(q.get("limit")!, 10) : undefined;
+        const revisions = yield* wikiService.listRevisions(req.path.pageSlug, project.id, limit);
+        return { revisions: revisions.map(formatWikiPageRevisionSummary) };
+      }))
+    )
+    .handle("getRevision", (req) =>
+      respond(Effect.gen(function* () {
+        const projectService = yield* ProjectService;
+        const wikiService = yield* WikiService;
+        const project = yield* projectService.findBySlug(req.path.slug);
+        const page = yield* wikiService.findBySlug(project.id, req.path.pageSlug);
+        const revision = yield* wikiService.getRevision(req.path.revisionId);
+        if (revision.pageId !== page.id) {
+          return yield* new WikiPageNotFound({ id: req.path.revisionId });
+        }
+        return { revision: formatWikiPageRevision(revision) };
+      }))
+    )
+    .handle("restoreRevision", (req) =>
+      respond(Effect.gen(function* () {
+        const projectService = yield* ProjectService;
+        const wikiService = yield* WikiService;
+        const project = yield* projectService.findBySlug(req.path.slug);
+        const page = yield* wikiService.restoreRevision(req.payload.revisionId, req.path.pageSlug, project.id);
+        return formatWikiPage(page);
       }))
     )
 );
@@ -630,6 +697,14 @@ function formatWikiPageMeta(
 ) {
   const hasChildren = parentIds.has(meta.id);
   return { ...meta, hasChildren, createdAt: "" } as any;
+}
+
+function formatWikiPageRevisionSummary(r: { id: string; title: string; saveType: string; createdAt: string }) {
+  return r as any;
+}
+
+function formatWikiPageRevision(r: { id: string; pageId: string; title: string; slug: string; content: any; contentText: string; saveType: string; createdAt: string }) {
+  return r as any;
 }
 
 export function createApiHandler() {

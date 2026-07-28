@@ -176,6 +176,57 @@ export function rowToWikiPage(row: WikiPageRow): WikiPage {
   };
 }
 
+export interface WikiPageRevisionRow {
+  id: string;
+  page_id: string;
+  title: string;
+  slug: string;
+  content: string;
+  content_text: string;
+  save_type: "autosave" | "manual";
+  created_at: string;
+}
+
+export interface WikiPageRevision {
+  id: string;
+  pageId: string;
+  title: string;
+  slug: string;
+  content: TipTapDoc;
+  contentText: string;
+  saveType: "autosave" | "manual";
+  createdAt: string;
+}
+
+export interface WikiPageRevisionSummary {
+  id: string;
+  title: string;
+  saveType: "autosave" | "manual";
+  createdAt: string;
+}
+
+export function rowToWikiPageRevision(row: WikiPageRevisionRow): WikiPageRevision {
+  return {
+    id: row.id,
+    pageId: row.page_id,
+    title: row.title,
+    slug: row.slug,
+    content: JSON.parse(row.content) as TipTapDoc,
+    contentText: row.content_text,
+    saveType: row.save_type,
+    createdAt: row.created_at,
+  };
+}
+
+export function rowToWikiPageRevisionSummary(row: WikiPageRevisionRow): WikiPageRevisionSummary {
+  return {
+    id: row.id,
+    title: row.title,
+    saveType: row.save_type,
+    createdAt: row.created_at,
+  };
+}
+
 export interface TaskRow {
   id: string;
   project_id: string;

@@ -3,7 +3,9 @@ import { WikiRepo } from "../repos/wiki.repo";
 import { ProjectRepo } from "../repos/project.repo";
 import { ConstraintViolation, DbError, RowNotFound } from "../db/d1";
 import { ProjectNotFound, WikiPageNotFound, SlugTaken, HasChildren } from "../api/errors";
-import type { WikiPage, WikiPageMeta, TipTapDoc } from "../../shared/types";
+import type { WikiPage, WikiPageMeta, WikiPageRevision, WikiPageRevisionSummary } from "../../shared/types";
+import type { TipTapDoc } from "../../shared/types";
+import { extractText } from "../../shared/tiptap-text";
 
 export class WikiService extends Effect.Service<WikiService>()("Lexa/WikiService", {
   dependencies: [WikiRepo.Default, ProjectRepo.Default],
@@ -96,14 +98,101 @@ export class WikiService extends Effect.Service<WikiService>()("Lexa/WikiService
           contentText?: string;
           parentId?: string | null;
           position?: number;
-        }
+        },
+        saveType: "autosave" | "manual" = "autosave"
       ): Effect.Effect<WikiPage, WikiPageNotFound | DbError | ConstraintViolation> =>
-        repo.update(id, input).pipe(
-          Effect.catchTag("RowNotFound", () => new WikiPageNotFound({ id }))
-        ),
+        Effect.gen(function* () {
+          const current = yield* repo.findById(id).pipe(
+            Effect.catchTag("RowNotFound", () => new WikiPageNotFound({ id }))
+          );
+          yield* repo.createRevision(
+            current.id,
+            current.title,
+            current.slug,
+            JSON.stringify(current.content),
+            extractText(current.content),
+            saveType
+          );
+          return yield* repo.update(id, input).pipe(
+            Effect.catchTag("RowNotFound", () => new WikiPageNotFound({ id }))
+          );
+        }),
+
+      saveRevision: (
+        pageId: string,
+        saveType: "autosave" | "manual"
+      ): Effect.Effect<WikiPageRevision, WikiPageNotFound | DbError | ConstraintViolation> =>
+        Effect.gen(function* () {
+          const page = yield* repo.findById(pageId).pipe(
+            Effect.catchTag("RowNotFound", () => new WikiPageNotFound({ id: pageId }))
+          );
+          return yield* repo.createRevision(
+            page.id,
+            page.title,
+            page.slug,
+            JSON.stringify(page.content),
+            extractText(page.content),
+            saveType
+          );
+        }),
+
+      listRevisions: (
+        pageSlug: string,
+        projectId: string,
+        limit?: number
+      ): Effect.Effect<WikiPageRevisionSummary[], ProjectNotFound | WikiPageNotFound | DbError> =>
+        Effect.gen(function* () {
+          yield* validateProject(projectId);
+          const page = yield* repo.findBySlug(projectId, pageSlug).pipe(
+            Effect.catchTag("RowNotFound", () => new WikiPageNotFound({ id: pageSlug }))
+          );
+          return yield* repo.listRevisions(page.id, limit);
+        }),
+
+      restoreRevision: (
+        revisionId: string,
+        pageSlug: string,
+        projectId: string
+      ): Effect.Effect<WikiPage, ProjectNotFound | WikiPageNotFound | DbError | ConstraintViolation> =>
+        Effect.gen(function* () {
+          yield* validateProject(projectId);
+          const page = yield* repo.findBySlug(projectId, pageSlug).pipe(
+            Effect.catchTag("RowNotFound", () => new WikiPageNotFound({ id: pageSlug }))
+          );
+          const revision = yield* repo.getRevision(revisionId).pipe(
+            Effect.catchTag("RowNotFound", () => new WikiPageNotFound({ id: revisionId }))
+          );
+          if (revision.pageId !== page.id) {
+            return yield* new WikiPageNotFound({ id: revisionId });
+          }
+          yield* repo.update(page.id, {
+            title: revision.title,
+            slug: revision.slug,
+            content: JSON.stringify(revision.content),
+            contentText: revision.contentText,
+          }).pipe(
+            Effect.catchTag("RowNotFound", () => new WikiPageNotFound({ id: page.id }))
+          );
+          yield* repo.createRevision(
+            page.id,
+            revision.title,
+            revision.slug,
+            JSON.stringify(revision.content),
+            revision.contentText,
+            "manual"
+          );
+          return yield* repo.findById(page.id).pipe(
+            Effect.catchTag("RowNotFound", () => new WikiPageNotFound({ id: page.id }))
+          );
+        }),
 
       getById: (id: string): Effect.Effect<WikiPage, WikiPageNotFound | DbError> =>
         repo.findById(id).pipe(
+          Effect.catchTag("RowNotFound", () => new WikiPageNotFound({ id }))
+        ),
+
+      getRevision: (id: string): Effect.Effect<WikiPageRevision, WikiPageNotFound | DbError> =>
+        repo.getRevision(id).pipe(
           Effect.catchTag("RowNotFound", () => new WikiPageNotFound({ id }))
         ),
 

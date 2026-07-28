@@ -1,4 +1,4 @@
-import type { Project, Column, Swimlane, Task, Board, WikiPageMeta, WikiPage, TipTapDoc } from "../../shared/types";
+import type { Project, Column, Swimlane, Task, Board, WikiPageMeta, WikiPage, WikiPageRevision, WikiPageRevisionSummary, TipTapDoc } from "../../shared/types";
 
 const BASE = "/api";
 
@@ -110,10 +110,23 @@ export function listWikiChildren(slug: string, pageSlug: string): Promise<{ data
   return request(`${BASE}/projects/${slug}/wiki/${pageSlug}/children`);
 }
 
-export function updateWikiPage(slug: string, pageSlug: string, input: { title?: string; slug?: string; content?: TipTapDoc; parentId?: string | null; position?: number }): Promise<WikiPage> {
+export function updateWikiPage(slug: string, pageSlug: string, input: { title?: string; slug?: string; content?: TipTapDoc; parentId?: string | null; position?: number; saveType?: "autosave" | "manual" }): Promise<WikiPage> {
   return request(`${BASE}/projects/${slug}/wiki/${pageSlug}`, { method: "PATCH", body: JSON.stringify(input) });
 }
 
 export function deleteWikiPage(slug: string, pageSlug: string): Promise<void> {
   return request(`${BASE}/projects/${slug}/wiki/${pageSlug}`, { method: "DELETE" });
+}
+
+export function listRevisions(slug: string, pageSlug: string, limit?: number): Promise<{ revisions: WikiPageRevisionSummary[] }> {
+  const qs = limit ? `?limit=${limit}` : "";
+  return request(`${BASE}/projects/${slug}/wiki/${pageSlug}/revisions${qs}`);
+}
+
+export function getRevision(slug: string, pageSlug: string, revisionId: string): Promise<{ revision: WikiPageRevision }> {
+  return request(`${BASE}/projects/${slug}/wiki/${pageSlug}/revisions/${revisionId}`);
+}
+
+export function restoreRevision(slug: string, pageSlug: string, revisionId: string): Promise<WikiPage> {
+  return request(`${BASE}/projects/${slug}/wiki/${pageSlug}/restore`, { method: "POST", body: JSON.stringify({ revisionId }) });
 }
