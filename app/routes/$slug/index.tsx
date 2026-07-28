@@ -28,7 +28,7 @@ function BoardPage() {
     await moveTask.mutateAsync({ id: taskId, ...target });
   };
 
-  const handleCreateTask = async (input: { columnId: string; swimlaneId?: string | null; title: string }) => {
+  const handleCreateTask = async (input: { columnId: string; swimlaneId?: string | null; title: string; priority?: string; type?: string }) => {
     await createTask.mutateAsync({ ...input, swimlaneId: input.swimlaneId ?? null });
   };
 

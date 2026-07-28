@@ -8,3 +8,5 @@ routeTree.gen.ts
 app/routeTree.gen.ts
 worker-configuration.d.ts
 *.log
+.playwright-mcp/
+dashboard-test.png
