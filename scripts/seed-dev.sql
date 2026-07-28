@@ -5,7 +5,7 @@
 -- ============================================================
 -- Projects
 -- ============================================================
-INSERT OR REPLACE INTO projects (id, name, slug, description, github_repo)
+INSERT OR IGNORE INTO projects (id, name, slug, description, github_repo)
 VALUES
   ('10000000-0000-0000-0000-000000000000', 'Empty Project', 'empty', 'Project with no columns, tasks, or wiki pages.', NULL),
   ('20000000-0000-0000-0000-000000000000', 'Tasks Only', 'tasks-only', 'Has tasks but no wiki.', NULL),
@@ -15,9 +15,11 @@ VALUES
 -- Tasks-only project: reset + seed
 -- ============================================================
 DELETE FROM tasks WHERE project_id = '20000000-0000-0000-0000-000000000000';
+DELETE FROM wiki_pages WHERE project_id = '20000000-0000-0000-0000-000000000000' AND id NOT IN (SELECT DISTINCT parent_id FROM wiki_pages WHERE parent_id IS NOT NULL AND project_id = '20000000-0000-0000-0000-000000000000');
+DELETE FROM wiki_pages WHERE project_id = '20000000-0000-0000-0000-000000000000' AND id NOT IN (SELECT DISTINCT parent_id FROM wiki_pages WHERE parent_id IS NOT NULL AND project_id = '20000000-0000-0000-0000-000000000000');
+DELETE FROM wiki_pages WHERE project_id = '20000000-0000-0000-0000-000000000000';
 DELETE FROM swimlanes WHERE project_id = '20000000-0000-0000-0000-000000000000';
 DELETE FROM columns WHERE project_id = '20000000-0000-0000-0000-000000000000';
-DELETE FROM wiki_pages WHERE project_id = '20000000-0000-0000-0000-000000000000';
 
 INSERT INTO columns (id, project_id, name, position, color, wip_limit, required_fields, github_state)
 VALUES
@@ -34,9 +36,11 @@ VALUES
 -- Emberfall2 full project: reset + seed
 -- ============================================================
 DELETE FROM tasks WHERE project_id = '507f1faf-5e10-4fe0-a6d5-dbf0b680c4ea';
+DELETE FROM wiki_pages WHERE project_id = '507f1faf-5e10-4fe0-a6d5-dbf0b680c4ea' AND id NOT IN (SELECT DISTINCT parent_id FROM wiki_pages WHERE parent_id IS NOT NULL AND project_id = '507f1faf-5e10-4fe0-a6d5-dbf0b680c4ea');
+DELETE FROM wiki_pages WHERE project_id = '507f1faf-5e10-4fe0-a6d5-dbf0b680c4ea' AND id NOT IN (SELECT DISTINCT parent_id FROM wiki_pages WHERE parent_id IS NOT NULL AND project_id = '507f1faf-5e10-4fe0-a6d5-dbf0b680c4ea');
+DELETE FROM wiki_pages WHERE project_id = '507f1faf-5e10-4fe0-a6d5-dbf0b680c4ea';
 DELETE FROM swimlanes WHERE project_id = '507f1faf-5e10-4fe0-a6d5-dbf0b680c4ea';
 DELETE FROM columns WHERE project_id = '507f1faf-5e10-4fe0-a6d5-dbf0b680c4ea';
-DELETE FROM wiki_pages WHERE project_id = '507f1faf-5e10-4fe0-a6d5-dbf0b680c4ea';
 
 INSERT INTO columns (id, project_id, name, position, color, wip_limit, required_fields, github_state)
 VALUES
@@ -71,12 +75,12 @@ VALUES
 -- ============================================================
 INSERT INTO wiki_pages (id, project_id, title, slug, content, content_text, parent_id, position)
 VALUES
-  ('70000000-0000-0000-0000-000000000000', '507f1faf-5e10-4fe0-a6d5-dbf0b680c4ea', 'Game Design Doc', 'game-design-doc', '{"type":"doc","content":[{"type":"heading","attrs":{"level":1},"content":[{"type":"text","text":"Game Design Doc"}]},{"type":"paragraph","content":[{"type":"text","text":"Master document describing Emberfall’s core pillars, target audience, and game loops."}]}]}', 'Game Design Doc\nMaster document describing Emberfall’s core pillars, target audience, and game loops.', NULL, 0),
-  ('70000000-0000-0000-0000-000000000001', '507f1faf-5e10-4fe0-a6d5-dbf0b680c4ea', 'Combat System', 'combat-system', '{"type":"doc","content":[{"type":"heading","attrs":{"level":1},"content":[{"type":"text","text":"Combat System"}]},{"type":"paragraph","content":[{"type":"text","text":"Emberfall’s combat revolves around four elemental affinities: Fire, Ice, Earth, and Wind."}]}]}', 'Combat System\nEmberfall’s combat revolves around four elemental affinities: Fire, Ice, Earth, and Wind.', '70000000-0000-0000-0000-000000000000', 0),
-  ('70000000-0000-0000-0000-000000000002', '507f1faf-5e10-4fe0-a6d5-dbf0b680c4ea', 'Melee Framework', 'melee-framework', '{"type":"doc","content":[{"type":"heading","attrs":{"level":1},"content":[{"type":"text","text":"Melee Framework"}]},{"type":"paragraph","content":[{"type":"text","text":"Close-range combat timing, hitstop, and combo windows."}]}]}', 'Melee Framework\nClose-range combat timing, hitstop, and combo windows.', '70000000-0000-0000-0000-000000000001', 0),
-  ('70000000-0000-0000-0000-000000000003', '507f1faf-5e10-4fe0-a6d5-dbf0b680c4ea', 'Elemental Damage', 'elemental-damage', '{"type":"doc","content":[{"type":"heading","attrs":{"level":1},"content":[{"type":"text","text":"Elemental Damage"}]},{"type":"paragraph","content":[{"type":"text","text":"Resistance matrix and status effects for each element."}]}]}', 'Elemental Damage\nResistance matrix and status effects for each element.', '70000000-0000-0000-0000-000000000001', 1),
-  ('70000000-0000-0000-0000-000000000004', '507f1faf-5e10-4fe0-a6d5-dbf0b680c4ea', 'Boss Patterns', 'boss-patterns', '{"type":"doc","content":[{"type":"heading","attrs":{"level":1},"content":[{"type":"text","text":"Boss Patterns"}]},{"type":"paragraph","content":[{"type":"text","text":"Phases, tells, and vulnerability windows for major bosses."}]}]}', 'Boss Patterns\nPhases, tells, and vulnerability windows for major bosses.', '70000000-0000-0000-0000-000000000001', 2),
-  ('70000000-0000-0000-0000-000000000005', '507f1faf-5e10-4fe0-a6d5-dbf0b680c4ea', 'Level Design', 'level-design', '{"type":"doc","content":[{"type":"heading","attrs":{"level":1},"content":[{"type":"text","text":"Level Design"}]},{"type":"paragraph","content":[{"type":"text","text":"World layout, encounter pacing, and tutorialization."}]}]}', 'Level Design\nWorld layout, encounter pacing, and tutorialization.', '70000000-0000-0000-0000-000000000000', 1),
-  ('70000000-0000-0000-0000-000000000006', '507f1faf-5e10-4fe0-a6d5-dbf0b680c4ea', 'Art Direction', 'art-direction', '{"type":"doc","content":[{"type":"heading","attrs":{"level":1},"content":[{"type":"text","text":"Art Direction"}]},{"type":"paragraph","content":[{"type":"text","text":"Color palette, character silhouettes, and environment mood."}]}]}', 'Art Direction\nColor palette, character silhouettes, and environment mood.', NULL, 1),
-  ('70000000-0000-0000-0000-000000000007', '507f1faf-5e10-4fe0-a6d5-dbf0b680c4ea', 'Sound & Music', 'sound-and-music', '{"type":"doc","content":[{"type":"heading","attrs":{"level":1},"content":[{"type":"text","text":"Sound & Music"}]},{"type":"paragraph","content":[{"type":"text","text":"Adaptive music system and sound effect prioritization."}]}]}', 'Sound & Music\nAdaptive music system and sound effect prioritization.', NULL, 2),
+  ('70000000-0000-0000-0000-000000000000', '507f1faf-5e10-4fe0-a6d5-dbf0b680c4ea', 'Game Design Doc', 'game-design-doc', '{"type":"doc","content":[{"type":"paragraph","content":[{"type":"text","text":"Master document describing Emberfall’s core pillars, target audience, and game loops."}]}]}', 'Game Design Doc\nMaster document describing Emberfall’s core pillars, target audience, and game loops.', NULL, 0),
+  ('70000000-0000-0000-0000-000000000001', '507f1faf-5e10-4fe0-a6d5-dbf0b680c4ea', 'Combat System', 'combat-system', '{"type":"doc","content":[{"type":"paragraph","content":[{"type":"text","text":"Emberfall’s combat revolves around four elemental affinities: Fire, Ice, Earth, and Wind."}]}]}', 'Combat System\nEmberfall’s combat revolves around four elemental affinities: Fire, Ice, Earth, and Wind.', '70000000-0000-0000-0000-000000000000', 0),
+  ('70000000-0000-0000-0000-000000000002', '507f1faf-5e10-4fe0-a6d5-dbf0b680c4ea', 'Melee Framework', 'melee-framework', '{"type":"doc","content":[{"type":"paragraph","content":[{"type":"text","text":"Close-range combat timing, hitstop, and combo windows."}]}]}', 'Melee Framework\nClose-range combat timing, hitstop, and combo windows.', '70000000-0000-0000-0000-000000000001', 0),
+  ('70000000-0000-0000-0000-000000000003', '507f1faf-5e10-4fe0-a6d5-dbf0b680c4ea', 'Elemental Damage', 'elemental-damage', '{"type":"doc","content":[{"type":"paragraph","content":[{"type":"text","text":"Resistance matrix and status effects for each element."}]}]}', 'Elemental Damage\nResistance matrix and status effects for each element.', '70000000-0000-0000-0000-000000000001', 1),
+  ('70000000-0000-0000-0000-000000000004', '507f1faf-5e10-4fe0-a6d5-dbf0b680c4ea', 'Boss Patterns', 'boss-patterns', '{"type":"doc","content":[{"type":"paragraph","content":[{"type":"text","text":"Phases, tells, and vulnerability windows for major bosses."}]}]}', 'Boss Patterns\nPhases, tells, and vulnerability windows for major bosses.', '70000000-0000-0000-0000-000000000001', 2),
+  ('70000000-0000-0000-0000-000000000005', '507f1faf-5e10-4fe0-a6d5-dbf0b680c4ea', 'Level Design', 'level-design', '{"type":"doc","content":[{"type":"paragraph","content":[{"type":"text","text":"World layout, encounter pacing, and tutorialization."}]}]}', 'Level Design\nWorld layout, encounter pacing, and tutorialization.', '70000000-0000-0000-0000-000000000000', 1),
+  ('70000000-0000-0000-0000-000000000006', '507f1faf-5e10-4fe0-a6d5-dbf0b680c4ea', 'Art Direction', 'art-direction', '{"type":"doc","content":[{"type":"paragraph","content":[{"type":"text","text":"Color palette, character silhouettes, and environment mood."}]}]}', 'Art Direction\nColor palette, character silhouettes, and environment mood.', NULL, 1),
+  ('70000000-0000-0000-0000-000000000007', '507f1faf-5e10-4fe0-a6d5-dbf0b680c4ea', 'Sound & Music', 'sound-and-music', '{"type":"doc","content":[{"type":"paragraph","content":[{"type":"text","text":"Adaptive music system and sound effect prioritization."}]}]}', 'Sound & Music\nAdaptive music system and sound effect prioritization.', NULL, 2),
   ('70000000-0000-0000-0000-000000000008', '507f1faf-5e10-4fe0-a6d5-dbf0b680c4ea', 'Empty Page', 'empty-page', '{"type":"doc","content":[]}', '', NULL, 3);
