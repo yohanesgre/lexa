@@ -886,6 +886,13 @@
     font-size: 13px;
     outline: none;
   }
+  textarea.prop-input {
+    height: auto;
+    min-height: 96px;
+    padding: 10px 12px;
+    resize: vertical;
+    line-height: 20px;
+  }
   .prop-input:focus,
   .prop-input.is-focused {
     border-color: var(--lx-border-focus);

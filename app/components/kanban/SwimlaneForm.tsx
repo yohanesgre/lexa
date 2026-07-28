@@ -116,7 +116,7 @@ export function SwimlaneForm({ swimlane, isOpen, onClose, onSubmit }: SwimlaneFo
                   value={description}
                   onChange={(e) => setDescription(e.target.value)}
                   placeholder="e.g. Release track, team, or sprint goal"
-                  rows={3}
+                  rows={4}
                 />
                 <p className="text-[11px] leading-4 text-lx-text-muted mt-1 font-body">
                   Shown as a subtitle under the swimlane header on the board.
