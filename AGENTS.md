@@ -32,7 +32,7 @@ The wireframes are static HTML/CSS previews with no JavaScript. Implement intera
 
 ### For @designer: wireframe-first execution
 
-When asked to implement frontend, do NOT design or invent. Open the relevant wireframe with agent-browser, screenshot it, snapshot it, then transcribe what you see into React components. Copy layout, spacing, copy text, and hierarchy exactly. Do not add extra padding, borders, or visual treatments not present in the wireframe. If the wireframe shows 3 columns, build 3 columns. If it shows a toggle in the sidebar, build that toggle. No creative interpretation.
+When asked to implement frontend, do NOT design or invent. Read the relevant wireframe HTML file, then transcribe what you see into React components. Copy layout, spacing, copy text, and hierarchy exactly. Do not add extra padding, borders, or visual treatments not present in the wireframe. If the wireframe shows 3 columns, build 3 columns. If it shows a toggle in the sidebar, build that toggle. No creative interpretation.
 
 ## Non-negotiable rules
 
