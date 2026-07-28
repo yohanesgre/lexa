@@ -1,3 +1,4 @@
+import { PanelRight } from "lucide-react";
 import { useRevisions } from "../../lib/queries";
 import { cn } from "../ui/cn";
 
@@ -10,6 +11,8 @@ interface EditSidebarProps {
   autosaveDelay: number;
   onAutosaveChange: (enabled: boolean) => void;
   onDelayChange: (delay: number) => void;
+  collapsed: boolean;
+  onToggle: () => void;
 }
 
 function formatRelative(iso: string): string {
@@ -33,12 +36,50 @@ export function EditSidebar({
   autosaveDelay,
   onAutosaveChange,
   onDelayChange,
+  collapsed,
+  onToggle,
 }: EditSidebarProps) {
   const { data: revisions, isLoading, error } = useRevisions(slug, pageSlug, 20);
+
+  if (collapsed) {
+    return (
+      <aside
+        style={{
+          width: 36,
+          minWidth: 36,
+          flexShrink: 0,
+          display: "flex",
+          flexDirection: "column",
+          alignItems: "center",
+          paddingTop: 8,
+          background: "var(--lx-surface-elevated)",
+          borderLeft: "1px solid var(--lx-border-default)",
+        }}
+      >
+        <button
+          type="button"
+          className="w-7 h-7 p-0 flex items-center justify-center text-lx-text-muted hover:text-lx-text-primary rounded"
+          onClick={onToggle}
+          aria-label="Expand sidebar"
+          title="Show page settings"
+        >
+          <PanelRight size={14} strokeWidth={1.5} />
+        </button>
+      </aside>
+    );
+  }
 
   return (
     <aside className="wiki-edit-sidebar">
       <div className="wiki-edit-sidebar-header">
+        <button
+          type="button"
+          className="w-7 h-7 p-0 flex items-center justify-center text-lx-text-muted hover:text-lx-text-primary mr-1"
+          onClick={onToggle}
+          aria-label="Collapse sidebar"
+        >
+          <PanelRight size={14} strokeWidth={1.5} />
+        </button>
         <span className="text-base font-semibold font-body text-lx-text-primary">Page settings</span>
       </div>
 

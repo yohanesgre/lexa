@@ -1,4 +1,5 @@
 @import "tailwindcss";
+@import "@phosphor-icons/web/regular";
 
 /* =========================================================
    Lexa — PHOSPHOR design tokens
@@ -1135,6 +1136,10 @@
     background: var(--lx-surface-selected);
     color: var(--lx-text-primary);
   }
+  .toolbar-btn .ph {
+    font-size: 14px;
+    line-height: 1;
+  }
   .toolbar-sep {
     width: 1px;
     align-self: stretch;
@@ -1279,11 +1284,6 @@
     gap: 2px;
     flex-wrap: wrap;
     align-items: center;
-  }
-  .wiki-toolbar-row + .wiki-toolbar-row {
-    border-top: 1px solid var(--lx-border-default);
-    padding-top: 4px;
-    margin-top: 4px;
   }
 
   .wiki-title-input {
