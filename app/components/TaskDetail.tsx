@@ -37,6 +37,22 @@ function TrashIcon({ size = 14, className }: { size?: number; className?: string
   );
 }
 
+function LinkIcon({ size = 14, className }: { size?: number; className?: string }) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={1.5}
+      className={className}
+    >
+      <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
+    </svg>
+  );
+}
+
 interface TaskDetailProps {
   mode?: "view" | "create";
   task?: Task;
@@ -177,9 +193,30 @@ export function TaskDetail({ mode = "view", task, defaultColumnId, columns, onCl
   const [createType, setCreateType] = useState<TaskType>("task");
   const [createAssignee, setCreateAssignee] = useState("");
 
+  // GitHub link flow state (UI-only)
+  const [linkState, setLinkState] = useState<"idle" | "input" | "loading" | "success">("idle");
+  const [linkRepo, setLinkRepo] = useState("");
+  const [linkedIssue, setLinkedIssue] = useState<{ repo: string; number: number } | null>(null);
+  const linkTimer = useRef<number | null>(null);
+
   useEffect(() => {
     if (defaultColumnId) setCreateColumnId(defaultColumnId);
   }, [defaultColumnId]);
+
+  const handleLinkIssue = () => {
+    if (!linkRepo.trim()) return;
+    setLinkState("loading");
+    linkTimer.current = window.setTimeout(() => {
+      setLinkedIssue({ repo: linkRepo.trim(), number: 100 + Math.floor(Math.random() * 900) });
+      setLinkState("success");
+    }, 1500);
+  };
+
+  useEffect(() => {
+    return () => {
+      if (linkTimer.current !== null) window.clearTimeout(linkTimer.current);
+    };
+  }, []);
 
   const handleCreate = async () => {
     const title = createTitle.trim();
@@ -202,6 +239,12 @@ export function TaskDetail({ mode = "view", task, defaultColumnId, columns, onCl
   useEffect(() => {
     if (task) setDraft(task.title);
   }, [task?.title]);
+
+  useEffect(() => {
+    setLinkState("idle");
+    setLinkRepo("");
+    setLinkedIssue(null);
+  }, [task?.id]);
 
   const saveTitle = () => {
     const v = draft.trim();
@@ -457,35 +500,133 @@ export function TaskDetail({ mode = "view", task, defaultColumnId, columns, onCl
             <>
               {renderDoc(task!.description)}
 
-              {github && (
-                <div className={cn("github-section mt-4", github.outOfSync && "github-warning")}>
-                  <div className="flex items-center justify-between">
-                    <a href={github.url} target="_blank" rel="noreferrer" className="flex items-center gap-2">
-                      <GithubMark size={14} className="text-lx-text-link" />
-                      <span className="font-mono text-sm font-medium text-lx-text-link">
-                        {github.repo} #{github.issueNumber}
-                      </span>
-                    </a>
-                    <div className="flex items-center gap-2">
-                      <span className={cn("sync-dot", github.outOfSync ? "sync-diverged" : "sync-synced")} />
-                      <span
-                        className={cn(
-                          "font-micro text-2xs uppercase tracking-[0.04em]",
-                          github.outOfSync ? "text-lx-text-warning" : "text-lx-text-success"
-                        )}
-                      >
-                        {github.outOfSync ? "Out of Sync" : "Synced"}
-                      </span>
+              <div className="github-section mt-4">
+                {github ? (
+                  <div className={cn(github.outOfSync && "github-warning")}>
+                    <div className="flex items-center justify-between">
+                      <a href={github.url} target="_blank" rel="noreferrer" className="flex items-center gap-2">
+                        <GithubMark size={14} className="text-lx-text-link" />
+                        <span className="font-mono text-sm font-medium text-lx-text-link">
+                          {github.repo} #{github.issueNumber}
+                        </span>
+                      </a>
+                      <div className="flex items-center gap-2">
+                        <span className={cn("sync-dot", github.outOfSync ? "sync-diverged" : "sync-synced")} />
+                        <span
+                          className={cn(
+                            "font-micro text-2xs uppercase tracking-[0.04em]",
+                            github.outOfSync ? "text-lx-text-warning" : "text-lx-text-success"
+                          )}
+                        >
+                          {github.outOfSync ? "Out of Sync" : "Synced"}
+                        </span>
+                      </div>
                     </div>
+                    {github.outOfSync && (
+                      <p className="text-xs text-lx-text-secondary mt-2 leading-4">
+                        GitHub issue state does not match this column. Move the card to resync, or check the webhook delivery
+                        status.
+                      </p>
+                    )}
                   </div>
-                  {github.outOfSync && (
-                    <p className="text-xs text-lx-text-secondary mt-2 leading-4">
-                      GitHub issue state does not match this column. Move the card to resync, or check the webhook delivery
-                      status.
-                    </p>
-                  )}
-                </div>
-              )}
+                ) : (
+                  <>
+                    {linkState === "success" && linkedIssue ? (
+                      <div className="github-link-success">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                            <GithubMark size={14} className="text-lx-text-link" />
+                            <span className="font-mono text-sm font-medium text-lx-text-link">
+                              {linkedIssue.repo} #{linkedIssue.number}
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <span className="sync-dot sync-synced" />
+                            <span className="font-micro text-2xs uppercase tracking-[0.04em] text-lx-text-success">
+                              Synced
+                            </span>
+                          </div>
+                        </div>
+                        <p className="text-xs text-lx-text-secondary mt-2 leading-4">
+                          Issue created and linked. Column changes now sync with GitHub.
+                        </p>
+                      </div>
+                    ) : (
+                      <>
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                            <GithubMark size={14} className="text-lx-text-muted" />
+                            <span className="text-sm text-lx-text-muted font-body">No issue linked</span>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <span className="sync-dot sync-unlinked" />
+                            <span className="font-micro text-2xs uppercase tracking-[0.04em] text-lx-text-muted">
+                              Unlinked
+                            </span>
+                          </div>
+                        </div>
+                        {linkState === "input" && (
+                          <div className="mt-3">
+                            <div className="flex items-center gap-2">
+                              <input
+                                className="prop-input font-mono flex-1"
+                                placeholder="owner/repo"
+                                value={linkRepo}
+                                onChange={(e) => setLinkRepo(e.target.value)}
+                                onKeyDown={(e) => {
+                                  if (e.key === "Enter" && linkRepo.trim()) {
+                                    e.preventDefault();
+                                    handleLinkIssue();
+                                  }
+                                  if (e.key === "Escape") {
+                                    e.stopPropagation();
+                                    setLinkState("idle");
+                                  }
+                                }}
+                                autoFocus
+                              />
+                              <button
+                                type="button"
+                                className="btn btn-primary shrink-0"
+                                onClick={handleLinkIssue}
+                                disabled={!linkRepo.trim()}
+                              >
+                                Create issue
+                              </button>
+                            </div>
+                            <p className="text-xs text-lx-text-muted mt-2 leading-4">
+                              Creates a GitHub issue from this task and links it.
+                            </p>
+                          </div>
+                        )}
+                        {linkState === "loading" && (
+                          <div className="mt-3">
+                            <div className="flex items-center gap-2">
+                              <input
+                                className="prop-input font-mono flex-1 opacity-50"
+                                value={linkRepo}
+                                disabled
+                              />
+                              <button type="button" className="btn btn-primary shrink-0 opacity-70" disabled>
+                                <span className="spinner" />
+                                Creating...
+                              </button>
+                            </div>
+                          </div>
+                        )}
+                        {linkState === "idle" && (
+                          <div className="mt-3">
+                            <button type="button" className="btn btn-ghost" onClick={() => setLinkState("input")}>
+                              <LinkIcon size={14} />
+                              Link issue
+                            </button>
+                          </div>
+                        )}
+                      </>
+                    )}
+                  </>
+                )}
+              </div>
             </>
           )}
         </div>

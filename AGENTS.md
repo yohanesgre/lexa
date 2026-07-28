@@ -57,6 +57,25 @@ These were each hard-won design fixes (see REVIEW.md). Breaking any of them rein
 11. **`required_fields` is enforced on create, move, AND update**, with TipTap-aware emptiness (a doc with no text nodes is empty).
 12. **One task ↔ one GitHub issue** (`UNIQUE(github_issue_id)` + already-linked guard).
 
+## Agent file boundaries
+
+These rules are non-negotiable and apply to every agent working on Lexa:
+
+- **@designer may only modify:**
+  - `app/components/` (UI components)
+  - `app/routes/` (route-level layout/styling, no backend logic)
+  - `app/styles/` (CSS, design tokens)
+  - `app/lib/` (client-side query hooks and utilities — never server libs)
+  - `DESIGN_SYSTEM.md` and `wireframes/design-system.css`
+- **@designer must never touch:**
+  - `server/` (any backend code: repos, services, MCP, API, DB, GitHub)
+  - `shared/types.ts` (schema types — read-only)
+  - `shared/` except pure frontend utilities explicitly in scope
+  - `IMPLEMENTATION.md`, `SCHEMA.md`, `LAYERS.md`, `API.md`, `MCP.md`, `ARCHITECTURE.md`, `REVIEW.md`
+  - `package.json`, `tsconfig.json`, `wrangler.jsonc`, `app.config.ts`
+- **@fixer scope is per-task** — specify exact files; same constraints apply unless the task explicitly includes backend files.
+- If an agent discovers a need for a new backend endpoint or shared type, it must report back to the orchestrator — never add it itself.
+
 ## Code conventions
 
 - **Effect-TS everywhere on the backend.** Services/repos use `Effect.Service<Name>()("Lexa/Name", { effect: Effect.gen(...) })`. Domain errors are `Data.TaggedError`. Repos surface `RowNotFound | DbError | ConstraintViolation`; services map to domain errors per the catalog.
