@@ -1,9 +1,10 @@
-import { HeadContent, Link, Outlet, Scripts, createRootRoute, useParams, useRouterState } from "@tanstack/react-router";
+import { HeadContent, Link, Outlet, Scripts, createRootRoute, useRouterState } from "@tanstack/react-router";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useState, useEffect, useRef, useMemo } from "react";
 import phosphorCss from "../styles/phosphor.css?url";
 import { useProjects } from "../lib/queries";
 import { stubTaskCount } from "../lib/dashboard-stubs";
+import { ProjectSelectionProvider, useProjectSelection } from "../lib/project-selection";
 
 export const Route = createRootRoute({
   head: () => ({
@@ -53,15 +54,10 @@ function ChevronIcon() {
   );
 }
 
-function ProjectSwitcher({
-  currentSlug,
-  routeType,
-}: {
-  currentSlug?: string;
-  routeType: "dashboard" | "board" | "wiki" | "settings";
-}) {
+function ProjectSwitcher({ routeType }: { routeType: "dashboard" | "board" | "wiki" | "settings" }) {
   const [open, setOpen] = useState(false);
-  const { data: projects } = useProjects();
+  const { data: projects, isLoading } = useProjects();
+  const { selectedSlug, selectedProjectName, setSelectedSlug } = useProjectSelection();
   const containerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -87,12 +83,9 @@ function ProjectSwitcher({
     };
   }, [open]);
 
-  const currentProject = useMemo(
-    () => projects?.find((p) => p.slug === currentSlug),
-    [projects, currentSlug]
-  );
-
-  const triggerLabel = routeType === "dashboard" ? "All Projects" : currentProject?.name ?? "Select project";
+  const triggerLabel = isLoading
+    ? "Loading…"
+    : selectedProjectName ?? (projects && projects.length === 0 ? "No projects" : "Select project");
 
   const targetFor = (slug: string) => {
     if (routeType === "wiki") return "/$slug/wiki" as const;
@@ -112,29 +105,7 @@ function ProjectSwitcher({
       </button>
       {open && (
         <div className="project-switcher-menu" onClick={() => setOpen(false)}>
-          {routeType === "dashboard" ? (
-            <div className="project-switcher-row active">
-              <div className="project-switcher-row-info">
-                <span className="project-switcher-row-name">All Projects</span>
-              </div>
-              <span className="project-switcher-row-count">
-                {String(projects?.reduce((sum, p) => sum + stubTaskCount(p.slug), 0) ?? 0).padStart(3, "0")}
-              </span>
-            </div>
-          ) : (
-            <Link
-              to="/"
-              className="project-switcher-row"
-            >
-              <div className="project-switcher-row-info">
-                <span className="project-switcher-row-name">All Projects</span>
-              </div>
-              <span className="project-switcher-row-count">
-                {String(projects?.reduce((sum, p) => sum + stubTaskCount(p.slug), 0) ?? 0).padStart(3, "0")}
-              </span>
-            </Link>
-          )}
-          {!projects ? (
+          {!projects || isLoading ? (
             <div className="project-switcher-row">
               <span className="project-switcher-row-desc">Loading projects…</span>
             </div>
@@ -144,13 +115,14 @@ function ProjectSwitcher({
             </div>
           ) : (
             projects.map((project) => {
-              const isCurrent = project.slug === currentSlug && routeType !== "dashboard";
+              const isCurrent = project.slug === selectedSlug;
               return (
                 <Link
                   key={project.id}
                   to={targetFor(project.slug)}
                   params={{ slug: project.slug }}
                   className={isCurrent ? "project-switcher-row active" : "project-switcher-row"}
+                  onClick={() => setSelectedSlug(project.slug)}
                 >
                   <div className="project-switcher-row-info">
                     <span className="project-switcher-row-name">{project.name}</span>
@@ -173,6 +145,41 @@ function ProjectSwitcher({
   );
 }
 
+function AppShell() {
+  const pathname = useRouterState({ select: (s) => s.location.pathname });
+  const { selectedSlug } = useProjectSelection();
+
+  const routeType: "dashboard" | "board" | "wiki" | "settings" = useMemo(() => {
+    if (pathname === "/") return "dashboard";
+    if (pathname.match(/^\/[^/]+\/wiki(?:\/.*)?$/)) return "wiki";
+    if (pathname.match(/^\/[^/]+$/)) return "board";
+    return "dashboard";
+  }, [pathname]);
+
+  const boardTo = selectedSlug ? "/$slug" : "/";
+  const wikiTo = selectedSlug ? "/$slug/wiki" : "/";
+  const boardParams = selectedSlug ? { slug: selectedSlug } : undefined;
+  const wikiParams = selectedSlug ? { slug: selectedSlug } : undefined;
+
+  return (
+    <>
+      <nav className="app-nav">
+        <div className="nav-brand">Lexa</div>
+        <NavLink to="/">Dashboard</NavLink>
+        <NavLink to={boardTo} params={boardParams} active={routeType === "board"}>
+          Board
+        </NavLink>
+        <NavLink to={wikiTo} params={wikiParams} active={routeType === "wiki"}>
+          Wiki
+        </NavLink>
+        <NavSpan>Settings</NavSpan>
+        <ProjectSwitcher routeType={routeType} />
+      </nav>
+      <Outlet />
+    </>
+  );
+}
+
 function RootComponent() {
   const [queryClient] = useState(() => new QueryClient());
   return (
@@ -182,39 +189,12 @@ function RootComponent() {
       </head>
       <body>
         <QueryClientProvider client={queryClient}>
-          <AppNav />
-          <Outlet />
+          <ProjectSelectionProvider>
+            <AppShell />
+          </ProjectSelectionProvider>
         </QueryClientProvider>
         <Scripts />
       </body>
     </html>
-  );
-}
-
-function AppNav() {
-  const params = useParams({ strict: false }) as { slug?: string };
-  const slug = params?.slug;
-  const pathname = useRouterState({ select: (s) => s.location.pathname });
-
-  const routeType: "dashboard" | "board" | "wiki" | "settings" = useMemo(() => {
-    if (pathname === "/") return "dashboard";
-    if (slug && pathname.startsWith(`/${slug}/wiki`)) return "wiki";
-    if (slug && pathname.startsWith(`/${slug}`)) return "board";
-    return "dashboard";
-  }, [pathname, slug]);
-
-  return (
-    <nav className="app-nav">
-      <div className="nav-brand">Lexa</div>
-      <NavLink to="/">Dashboard</NavLink>
-      <NavLink to={slug ? "/$slug" : "/"} params={slug ? { slug } : undefined} active={routeType === "board"}>
-        Board
-      </NavLink>
-      <NavLink to={slug ? "/$slug/wiki" : "/"} params={slug ? { slug } : undefined} active={routeType === "wiki"}>
-        Wiki
-      </NavLink>
-      <NavSpan>Settings</NavSpan>
-      <ProjectSwitcher currentSlug={slug} routeType={routeType} />
-    </nav>
   );
 }
