@@ -65,7 +65,7 @@ export function renderNode(
       );
     case "heading": {
       const level = Number(node.attrs?.level ?? 1);
-      const Tag = (level <= 1 ? "h1" : level === 2 ? "h2" : "h3") as "h1" | "h2" | "h3";
+      const Tag = (level <= 1 ? "h1" : level === 2 ? "h2" : level === 3 ? "h3" : level === 4 ? "h4" : "h5") as "h1" | "h2" | "h3" | "h4" | "h5";
       const cls = isWiki
         ? undefined
         : level <= 1
@@ -73,8 +73,10 @@ export function renderNode(
           : level === 2
             ? "td-h2"
             : "td-h3";
+      const headingText = collectText(node);
+      const id = slugifyHeading(headingText);
       return (
-        <Tag key={key} className={cls}>
+        <Tag key={key} className={cls} id={id}>
           {renderInline(node.content, key, variant)}
         </Tag>
       );
@@ -130,6 +132,42 @@ export function renderNode(
 export function collectText(node: TTNode): string {
   if (node.type === "text") return node.text ?? "";
   return (node.content ?? []).map(collectText).join("");
+}
+
+export function slugifyHeading(text: string): string {
+  return text
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
+export interface HeadingOutline {
+  level: number;
+  text: string;
+  id: string;
+}
+
+export function extractHeadings(node: TTNode): HeadingOutline[] {
+  const results: HeadingOutline[] = [];
+  const seen = new Map<string, number>();
+  function walk(n: TTNode) {
+    if (n.type === "heading") {
+      const level = Number(n.attrs?.level ?? 1);
+      const text = collectText(n);
+      let id = slugifyHeading(text);
+      const count = seen.get(id) ?? 0;
+      if (count > 0) {
+        id = `${id}-${count + 1}`;
+      }
+      seen.set(id, count + 1);
+      results.push({ level, text, id });
+    }
+    for (const child of n.content ?? []) {
+      walk(child);
+    }
+  }
+  walk(node);
+  return results;
 }
 
 export function renderDoc(doc: TipTapDoc, variant: "task" | "wiki" = "task"): ReactNode {

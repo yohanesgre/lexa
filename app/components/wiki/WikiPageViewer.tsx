@@ -13,8 +13,9 @@ import Placeholder from "@tiptap/extension-placeholder";
 import type { WikiPage, WikiPageMeta, TipTapDoc } from "../../../shared/types";
 import { useUpdateWikiPage } from "../../lib/queries";
 import { cn } from "../ui/cn";
-import { renderDoc } from "../tiptap-render";
+import { renderDoc, extractHeadings, slugifyHeading } from "../tiptap-render";
 import { EditSidebar } from "./EditSidebar";
+import { OutlineSidebar } from "./OutlineSidebar";
 
 const emptyDoc: TipTapDoc = { type: "doc", content: [] };
 
@@ -274,8 +275,8 @@ export function WikiPageViewer({ slug, page, pages }: WikiPageViewerProps) {
     return stored === null ? 800 : Number(stored) || 800;
   });
   const [sidebarVisible, setSidebarVisible] = useState(true);
+  const [outlineVisible, setOutlineVisible] = useState(true);
   const [previewContent, setPreviewContent] = useState<TipTapDoc>(emptyDoc);
-  const previewTimerRef = useRef<number | null>(null);
 
   useEffect(() => {
     window.localStorage.setItem("lexa-wiki-autosave", String(autosaveEnabled));
@@ -319,16 +320,19 @@ export function WikiPageViewer({ slug, page, pages }: WikiPageViewerProps) {
     editorRef.current = editor ?? null;
   }, [editor]);
 
+  const updatePreviewRef = useRef<(json: TipTapDoc) => void>(() => {});
+  updatePreviewRef.current = (json: TipTapDoc) => setPreviewContent(json);
+
   useEffect(() => {
     if (!editor) return;
-    if (previewTimerRef.current !== null) window.clearTimeout(previewTimerRef.current);
-    previewTimerRef.current = window.setTimeout(() => {
-      setPreviewContent(editor.getJSON() as unknown as TipTapDoc);
-    }, 300);
-    return () => {
-      if (previewTimerRef.current !== null) window.clearTimeout(previewTimerRef.current);
+    const handler = () => {
+      updatePreviewRef.current(editor.getJSON() as unknown as TipTapDoc);
     };
-  }, [editor, editor?.state.doc]);
+    editor.on("update", handler);
+    return () => {
+      editor.off("update", handler);
+    };
+  }, [editor]);
 
   const breadcrumb = buildAncestors(pages, page)
     .map((a) => a.title)
@@ -414,28 +418,38 @@ export function WikiPageViewer({ slug, page, pages }: WikiPageViewerProps) {
   useEffect(() => {
     return () => {
       if (autosaveTimer.current !== null) window.clearTimeout(autosaveTimer.current);
-      if (previewTimerRef.current !== null) window.clearTimeout(previewTimerRef.current);
     };
   }, []);
 
   if (!isEditing) {
+    const rawHeadings = extractHeadings(page.content as unknown as import("../tiptap-render").TTNode);
+    const pageTitleId = slugifyHeading(page.title);
+    const headings = [
+      { level: 1, text: page.title, id: pageTitleId },
+      ...rawHeadings.filter((h) => h.level >= 2),
+    ];
     return (
-      <div className="wiki-content">
-        <div className="wiki-prose">
-          <div className="flex items-center justify-between mb-1">
-            <span className="text-xs text-lx-text-muted font-body">{breadcrumb}</span>
-            <button type="button" className="btn btn-ghost h-7 px-2.5 text-xs" onClick={handleStartEditing}>
-              <Pencil size={14} strokeWidth={1.5} />
-              Edit
-            </button>
+      <div className="wiki-content wiki-edit-workspace">
+        <div className="flex flex-1 min-w-0">
+          <div className="flex-1 overflow-y-auto" style={{ padding: "32px 48px" }}>
+            <div className="wiki-prose">
+              <div className="flex items-center justify-between mb-1">
+                <span className="text-xs text-lx-text-muted font-body">{breadcrumb}</span>
+                <button type="button" className="btn btn-ghost h-7 px-2.5 text-xs" onClick={handleStartEditing}>
+                  <Pencil size={14} strokeWidth={1.5} />
+                  Edit
+                </button>
+              </div>
+              <h1 id={pageTitleId}>{page.title}</h1>
+              <div>{renderDoc(page.content, "wiki")}</div>
+              <div className="mt-8 pt-4 border-t border-lx-border-subtle">
+                <span className="font-micro text-2xs text-lx-text-muted uppercase tracking-[0.04em]">
+                  Last edited {formatRelative(page.updatedAt)}
+                </span>
+              </div>
+            </div>
           </div>
-          <h1>{page.title}</h1>
-          <div>{renderDoc(page.content, "wiki")}</div>
-          <div className="mt-8 pt-4 border-t border-lx-border-default">
-            <span className="font-micro text-2xs text-lx-text-muted uppercase tracking-[0.04em]">
-              Last edited {formatRelative(page.updatedAt)}
-            </span>
-          </div>
+          <OutlineSidebar headings={headings} collapsed={!outlineVisible} onToggle={() => setOutlineVisible(!outlineVisible)} />
         </div>
       </div>
     );
