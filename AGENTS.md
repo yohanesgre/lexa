@@ -118,6 +118,9 @@ Wireframes are static HTML files with no JavaScript. To preview them with agent-
 # Start a Python HTTP server in the wireframes directory
 cd wireframes && python3 -m http.server 8080 &
 
+# Always start the server first before using agent-browser on wireframes
+# The server must be running in the background
+
 # Open the wireframe
 agent-browser open http://localhost:8080/wiki-edit.html
 
