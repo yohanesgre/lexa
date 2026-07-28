@@ -115,8 +115,8 @@ When using agent-browser for testing, QA, or review, divide the scenario into sm
 Wireframes are static HTML files with no JavaScript. To preview them with agent-browser:
 
 ```bash
-# Start a Python HTTP server in the wireframes directory
-cd wireframes && python3 -m http.server 8080 &
+# Start a Python HTTP server in the wireframes directory (always use nohup)
+cd wireframes && nohup python3 -m http.server 8080 &
 
 # Always start the server first before using agent-browser on wireframes
 # The server must be running in the background
