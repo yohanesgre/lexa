@@ -30,6 +30,10 @@ The `wireframes/` directory contains the final UI/UX decisions for Lexa. When im
 
 The wireframes are static HTML/CSS previews with no JavaScript. Implement interactions (dropdowns, modals, slideovers, drag-and-drop, inline editing, etc.) to match the rendered states and annotations.
 
+### For @designer: wireframe-first execution
+
+When asked to implement frontend, do NOT design or invent. Open the relevant wireframe with agent-browser, screenshot it, snapshot it, then transcribe what you see into React components. Copy layout, spacing, copy text, and hierarchy exactly. Do not add extra padding, borders, or visual treatments not present in the wireframe. If the wireframe shows 3 columns, build 3 columns. If it shows a toggle in the sidebar, build that toggle. No creative interpretation.
+
 ## Non-negotiable rules
 
 1. **No scope creep.** If a feature, table, column, endpoint, MCP tool, or error code is not in the design docs, it does not get built. If you believe something is missing, report it — don't add it.
