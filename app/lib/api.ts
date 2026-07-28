@@ -31,11 +31,11 @@ export function listColumns(slug: string): Promise<{ data: Column[] }> {
   return request(`${BASE}/projects/${slug}/columns`);
 }
 
-export function createColumn(slug: string, input: { name: string; wipLimit?: number | null; requiredFields?: string[]; color?: string }): Promise<Column> {
+export function createColumn(slug: string, input: { name: string; wipLimit?: number | null; requiredFields?: string[]; color?: string; githubState?: "open" | "closed" | null }): Promise<Column> {
   return request(`${BASE}/projects/${slug}/columns`, { method: "POST", body: JSON.stringify(input) });
 }
 
-export function updateColumn(slug: string, id: string, input: { name?: string; wipLimit?: number | null; requiredFields?: string[]; color?: string; position?: number }): Promise<Column> {
+export function updateColumn(slug: string, id: string, input: { name?: string; wipLimit?: number | null; requiredFields?: string[]; color?: string; position?: number; githubState?: "open" | "closed" | null }): Promise<Column> {
   return request(`${BASE}/projects/${slug}/columns/${id}`, { method: "PATCH", body: JSON.stringify(input) });
 }
 

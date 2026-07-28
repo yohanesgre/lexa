@@ -1,5 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import type { Task, Board, TipTapDoc, WikiPageMeta } from "../../shared/types";
+import type { Task, Board, Column, Swimlane, TipTapDoc, WikiPageMeta } from "../../shared/types";
 import * as api from "./api";
 
 export function useProjects() {
@@ -85,4 +85,92 @@ export function useWikiPages(slug: string) {
 
 export function useWikiPage(slug: string, pageSlug: string) {
   return useQuery({ queryKey: ["wikiPage", slug, pageSlug], queryFn: () => api.getWikiPage(slug, pageSlug) });
+}
+
+export function useColumns(slug: string) {
+  return useQuery({ queryKey: ["projects", slug, "columns"], queryFn: () => api.listColumns(slug).then((r) => r.data) });
+}
+
+export function useCreateColumn(slug: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: Parameters<typeof api.createColumn>[1]) => api.createColumn(slug, input),
+    onSuccess: (column) => {
+      qc.setQueryData(["projects", slug, "columns"], (old: Column[] | undefined) => {
+        if (!old) return old;
+        return [...old, column];
+      });
+    },
+  });
+}
+
+export function useUpdateColumn(slug: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, ...input }: { id: string } & Parameters<typeof api.updateColumn>[2]) =>
+      api.updateColumn(slug, id, input),
+    onSuccess: (column) => {
+      qc.setQueryData(["projects", slug, "columns"], (old: Column[] | undefined) => {
+        if (!old) return old;
+        return old.map((c) => (c.id === column.id ? column : c));
+      });
+    },
+  });
+}
+
+export function useDeleteColumn(slug: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id }: { id: string }) => api.deleteColumn(slug, id),
+    onSuccess: (_, { id }) => {
+      qc.setQueryData(["projects", slug, "columns"], (old: Column[] | undefined) => {
+        if (!old) return old;
+        return old.filter((c) => c.id !== id);
+      });
+    },
+  });
+}
+
+export function useSwimlanes(slug: string) {
+  return useQuery({ queryKey: ["projects", slug, "swimlanes"], queryFn: () => api.listSwimlanes(slug).then((r) => r.data) });
+}
+
+export function useCreateSwimlane(slug: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: Parameters<typeof api.createSwimlane>[1]) => api.createSwimlane(slug, input),
+    onSuccess: (swimlane) => {
+      qc.setQueryData(["projects", slug, "swimlanes"], (old: Swimlane[] | undefined) => {
+        if (!old) return old;
+        return [...old, swimlane];
+      });
+    },
+  });
+}
+
+export function useUpdateSwimlane(slug: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, ...input }: { id: string } & Parameters<typeof api.updateSwimlane>[2]) =>
+      api.updateSwimlane(slug, id, input),
+    onSuccess: (swimlane) => {
+      qc.setQueryData(["projects", slug, "swimlanes"], (old: Swimlane[] | undefined) => {
+        if (!old) return old;
+        return old.map((s) => (s.id === swimlane.id ? swimlane : s));
+      });
+    },
+  });
+}
+
+export function useDeleteSwimlane(slug: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id }: { id: string }) => api.deleteSwimlane(slug, id),
+    onSuccess: (_, { id }) => {
+      qc.setQueryData(["projects", slug, "swimlanes"], (old: Swimlane[] | undefined) => {
+        if (!old) return old;
+        return old.filter((s) => s.id !== id);
+      });
+    },
+  });
 }
