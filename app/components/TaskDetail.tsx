@@ -8,6 +8,7 @@ import TaskList from "@tiptap/extension-task-list";
 import TaskItem from "@tiptap/extension-task-item";
 import Placeholder from "@tiptap/extension-placeholder";
 import type { Priority, Task, TaskType, TipTapDoc } from "../../shared/types";
+import { extractText } from "../../shared/tiptap-text";
 import { cn } from "./ui/cn";
 
 function GithubMark({ size = 14, className }: { size?: number; className?: string }) {
@@ -58,11 +59,14 @@ function LinkIcon({ size = 14, className }: { size?: number; className?: string 
   );
 }
 
+type RequiredFieldName = "assignee" | "description";
+
 interface TaskDetailProps {
   mode?: "view" | "create";
   task?: Task;
   defaultColumnId?: string;
   columns?: { id: string; name: string }[];
+  columnRequiredFields?: { columnId: string; fields: string[] }[];
   onClose: () => void;
   onUpdate?: (id: string, data: Partial<Task>) => void;
   onDelete?: (id: string) => Promise<void>;
@@ -147,6 +151,23 @@ const emptyDoc: TipTapDoc = { type: "doc", content: [] };
 
 const capitalize = (s: string) => s[0].toUpperCase() + s.slice(1);
 const fmtDate = (iso: string) => iso.slice(0, 10);
+
+function getMissingRequiredFields(
+  columnId: string,
+  requiredFieldsMap: { columnId: string; fields: string[] }[] | undefined,
+  values: { assignee: string | null; description: TipTapDoc }
+): RequiredFieldName[] {
+  const required = requiredFieldsMap?.find((column) => column.columnId === columnId)?.fields ?? [];
+  const missing: RequiredFieldName[] = [];
+  for (const field of required) {
+    if (field === "assignee" && (!values.assignee || values.assignee.trim() === "")) {
+      missing.push("assignee");
+    } else if (field === "description" && extractText(values.description) === "") {
+      missing.push("description");
+    }
+  }
+  return missing;
+}
 
 interface DescriptionEditorProps {
   initialContent: TipTapDoc;
@@ -309,7 +330,7 @@ function DescriptionEditor({
   );
 }
 
-export function TaskDetail({ mode = "view", task, defaultColumnId, columns, onClose, onUpdate, onDelete, onCreate }: TaskDetailProps) {
+export function TaskDetail({ mode = "view", task, defaultColumnId, columns, columnRequiredFields, onClose, onUpdate, onDelete, onCreate }: TaskDetailProps) {
   const params = useParams({ strict: false }) as { slug?: string };
   const slug = params.slug;
   const isCreate = mode === "create";
@@ -317,6 +338,8 @@ export function TaskDetail({ mode = "view", task, defaultColumnId, columns, onCl
   const [open, setOpen] = useState(false);
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [selectedColumnId, setSelectedColumnId] = useState(task?.columnId ?? "");
+  const [dismissedWarning, setDismissedWarning] = useState(false);
   const closeTimer = useRef<number | null>(null);
 
   useEffect(() => {
@@ -369,6 +392,10 @@ export function TaskDetail({ mode = "view", task, defaultColumnId, columns, onCl
   useEffect(() => {
     if (defaultColumnId) setCreateColumnId(defaultColumnId);
   }, [defaultColumnId]);
+
+  useEffect(() => {
+    if (task?.columnId) setSelectedColumnId(task.columnId);
+  }, [task?.columnId]);
 
   const handleLinkIssue = () => {
     if (!linkRepo.trim()) return;
@@ -428,6 +455,22 @@ export function TaskDetail({ mode = "view", task, defaultColumnId, columns, onCl
       setDeleting(false);
     }
   };
+
+  const currentColumnId = isCreate ? createColumnId : (selectedColumnId || task?.columnId || "");
+  const currentColumnName = columns?.find((column) => column.id === currentColumnId)?.name ?? "";
+  const missingFields = isCreate
+    ? getMissingRequiredFields(createColumnId, columnRequiredFields, {
+        assignee: createAssignee.trim() || null,
+        description: createDescription,
+      })
+    : getMissingRequiredFields(currentColumnId, columnRequiredFields, {
+        assignee: task?.assignee ?? null,
+        description: task?.description ?? emptyDoc,
+      });
+
+  useEffect(() => {
+    setDismissedWarning(false);
+  }, [currentColumnId, missingFields.join(",")]);
 
   if (!isCreate && !task) return null;
 
@@ -535,16 +578,22 @@ export function TaskDetail({ mode = "view", task, defaultColumnId, columns, onCl
               </select>
             ) : (
               <SelectDropdown
-                value={task!.columnId}
+                value={selectedColumnId}
                 options={(columns ?? []).map((column) => ({ value: column.id, label: column.name }))}
-                onChange={(columnId) => onUpdate?.(task!.id, { columnId })}
+                onChange={(columnId) => {
+                  setSelectedColumnId(columnId);
+                  onUpdate?.(task!.id, { columnId });
+                }}
                 trigger={({ toggle }) => (
                   <button
                     type="button"
-                    className="text-sm font-body text-lx-text-primary hover:text-lx-text-link transition-colors"
+                    className={cn(
+                      "text-sm font-body text-lx-text-primary hover:text-lx-text-link transition-colors",
+                      missingFields.length > 0 && "is-focused"
+                    )}
                     onClick={toggle}
                   >
-                    {columns?.find((column) => column.id === task!.columnId)?.name ?? "—"}
+                    {columns?.find((column) => column.id === selectedColumnId)?.name ?? "—"}
                   </button>
                 )}
               />
@@ -638,7 +687,7 @@ export function TaskDetail({ mode = "view", task, defaultColumnId, columns, onCl
             <span className="prop-label">Assignee</span>
             <input
               key={isCreate ? "create" : task!.id}
-              className="prop-input w-20"
+              className={cn("prop-input w-20", missingFields.includes("assignee") && "is-focused")}
               value={isCreate ? createAssignee : task!.assignee ?? ""}
               placeholder="—"
               onChange={isCreate ? (e) => setCreateAssignee(e.target.value) : undefined}
@@ -654,6 +703,33 @@ export function TaskDetail({ mode = "view", task, defaultColumnId, columns, onCl
             />
           </div>
         </div>
+
+        {missingFields.length > 0 && !dismissedWarning && (
+          <div className="px-4 pt-3">
+            <div className="banner-warning">
+              <svg
+                width="16"
+                height="16"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth={1.5}
+                style={{ flexShrink: 0 }}
+              >
+                <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0zM12 9v4M12 17h.01" />
+              </svg>
+              <span className="font-medium">{currentColumnName} requires {missingFields.join(", ")}</span>
+              <button
+                type="button"
+                className="banner-warning-dismiss"
+                onClick={() => setDismissedWarning(true)}
+                aria-label="Dismiss warning"
+              >
+                <X size={14} strokeWidth={1.5} />
+              </button>
+            </div>
+          </div>
+        )}
 
         <div className="slideover-body pt-4">
           {isCreate ? (

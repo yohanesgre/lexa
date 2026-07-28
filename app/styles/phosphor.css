@@ -886,9 +886,14 @@
     font-size: 13px;
     outline: none;
   }
-  .prop-input:focus {
+  .prop-input:focus,
+  .prop-input.is-focused {
     border-color: var(--lx-border-focus);
     box-shadow: var(--lx-focus-glow);
+  }
+  .prop-field button.is-focused {
+    border-radius: 4px;
+    box-shadow: var(--lx-focus-ring), var(--lx-focus-glow);
   }
   .github-section {
     padding: 16px;
@@ -898,6 +903,37 @@
     background: var(--lx-bg-warning-subtle);
     border: 1px solid rgba(240, 192, 64, 0.15);
     border-radius: 6px;
+  }
+  .banner-warning {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    padding: 10px 14px;
+    border-radius: 6px;
+    background: var(--lx-bg-warning-subtle);
+    border: 1px solid rgba(240, 192, 64, 0.25);
+    color: var(--lx-text-warning);
+    font-size: 13px;
+    line-height: 20px;
+    font-family: var(--lx-font-body);
+  }
+  .banner-warning-dismiss {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 24px;
+    height: 24px;
+    padding: 0;
+    margin-left: auto;
+    border: none;
+    border-radius: 4px;
+    background: transparent;
+    color: var(--lx-text-warning);
+    cursor: pointer;
+    flex-shrink: 0;
+  }
+  .banner-warning-dismiss:hover {
+    background: rgba(240, 192, 64, 0.15);
   }
   .slideover-footer {
     display: flex;
