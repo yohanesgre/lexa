@@ -7,20 +7,23 @@ export interface SwimlaneFormProps {
   swimlane?: Swimlane | null;
   isOpen: boolean;
   onClose: () => void;
-  onSubmit: (input: { name: string }) => void;
+  onSubmit: (input: { name: string; description?: string | null }) => void;
 }
 
 export function SwimlaneForm({ swimlane, isOpen, onClose, onSubmit }: SwimlaneFormProps) {
   const isEdit = !!swimlane;
   const [name, setName] = useState("");
+  const [description, setDescription] = useState("");
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!isOpen) return;
     if (swimlane) {
       setName(swimlane.name);
+      setDescription(swimlane.description);
     } else {
       setName("");
+      setDescription("");
     }
     setError(null);
   }, [isOpen, swimlane]);
@@ -47,7 +50,11 @@ export function SwimlaneForm({ swimlane, isOpen, onClose, onSubmit }: SwimlaneFo
       return;
     }
     setError(null);
-    onSubmit({ name: trimmedName });
+    const trimmedDescription = description.trim();
+    onSubmit({
+      name: trimmedName,
+      description: trimmedDescription === "" ? null : trimmedDescription,
+    });
     onClose();
   };
 
@@ -95,6 +102,25 @@ export function SwimlaneForm({ swimlane, isOpen, onClose, onSubmit }: SwimlaneFo
                   placeholder="e.g. Sprint 8 — The Hollow Crown"
                   autoFocus
                 />
+              </div>
+
+              <div className="mb-4">
+                <label className="block text-xs font-medium text-lx-text-secondary mb-1.5 font-body">
+                  Description
+                  <span className="font-mono text-[10px] uppercase tracking-[0.04em] text-lx-text-muted ml-1.5">
+                    Optional
+                  </span>
+                </label>
+                <textarea
+                  className="prop-input w-full"
+                  value={description}
+                  onChange={(e) => setDescription(e.target.value)}
+                  placeholder="e.g. Release track, team, or sprint goal"
+                  rows={3}
+                />
+                <p className="text-[11px] leading-4 text-lx-text-muted mt-1 font-body">
+                  Shown as a subtitle under the swimlane header on the board.
+                </p>
               </div>
             </div>
 

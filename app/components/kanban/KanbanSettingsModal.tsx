@@ -228,6 +228,9 @@ export function KanbanSettingsModal({ slug, isOpen, onClose }: KanbanSettingsMod
                             <th className="p-2.5 text-left text-[11px] uppercase tracking-[0.05em] text-lx-text-secondary font-medium font-body">
                               Name
                             </th>
+                            <th className="p-2.5 text-left text-[11px] uppercase tracking-[0.05em] text-lx-text-secondary font-medium font-body">
+                              Description
+                            </th>
                             <th className="w-[100px] p-2.5"></th>
                           </tr>
                         </thead>
@@ -238,6 +241,13 @@ export function KanbanSettingsModal({ slug, isOpen, onClose }: KanbanSettingsMod
                                 <GripVertical size={14} className="text-lx-text-muted cursor-grab" />
                               </td>
                               <td className="p-2.5 text-sm font-medium text-lx-text-primary">{swimlane.name}</td>
+                              <td className="p-2.5">
+                                {swimlane.description ? (
+                                  <span className="text-xs text-lx-text-secondary">{swimlane.description}</span>
+                                ) : (
+                                  <span className="text-xs text-lx-text-muted">—</span>
+                                )}
+                              </td>
                               <td className="p-2.5">
                                 <div className="flex items-center gap-2">
                                   <button type="button" className="btn btn-ghost h-7 px-2 text-xs" onClick={() => setSwimlaneForm({ isOpen: true, swimlane })}>
@@ -298,9 +308,9 @@ export function KanbanSettingsModal({ slug, isOpen, onClose }: KanbanSettingsMod
         onClose={() => setSwimlaneForm({ isOpen: false, swimlane: null })}
         onSubmit={(input) => {
           if (swimlaneForm.swimlane) {
-            updateSwimlane.mutate({ id: swimlaneForm.swimlane.id, name: input.name });
+            updateSwimlane.mutate({ id: swimlaneForm.swimlane.id, name: input.name, description: input.description ?? undefined });
           } else {
-            createSwimlane.mutate({ name: input.name });
+            createSwimlane.mutate({ name: input.name, description: input.description ?? undefined });
           }
         }}
       />

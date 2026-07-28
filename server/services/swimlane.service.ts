@@ -13,14 +13,14 @@ export class SwimlaneService extends Effect.Service<SwimlaneService>()("Lexa/Swi
     const db = yield* D1;
 
     return {
-      create: (input: { projectId: string; name: string }): Effect.Effect<Swimlane, ProjectNotFound | DbError> =>
+      create: (input: { projectId: string; name: string; description?: string }): Effect.Effect<Swimlane, ProjectNotFound | DbError> =>
         Effect.gen(function* () {
           yield* projectRepo.findById(input.projectId).pipe(
             Effect.catchTag("RowNotFound", () => new ProjectNotFound({ identifier: input.projectId }))
           );
           const maxPos = yield* repo.maxPosition(input.projectId);
           const id = crypto.randomUUID();
-          return yield* repo.create({ id, projectId: input.projectId, name: input.name, position: maxPos + 1 }).pipe(
+          return yield* repo.create({ id, projectId: input.projectId, name: input.name, description: input.description, position: maxPos + 1 }).pipe(
             Effect.catchTags({
               ConstraintViolation: (e) => new DbError({ message: e.message, cause: e }),
               RowNotFound: (e) => new DbError({ message: e.message, cause: e }),
@@ -39,7 +39,7 @@ export class SwimlaneService extends Effect.Service<SwimlaneService>()("Lexa/Swi
       getById: (id: string): Effect.Effect<Swimlane, SwimlaneNotFound | DbError> =>
         repo.findById(id).pipe(Effect.catchTag("RowNotFound", () => new SwimlaneNotFound({ id }))),
 
-      update: (id: string, input: { name?: string; position?: number }): Effect.Effect<Swimlane, SwimlaneNotFound | DbError> =>
+      update: (id: string, input: { name?: string; description?: string; position?: number }): Effect.Effect<Swimlane, SwimlaneNotFound | DbError> =>
         repo.update(id, input).pipe(
           Effect.catchTags({
             RowNotFound: () => new SwimlaneNotFound({ id }),

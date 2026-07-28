@@ -29,10 +29,11 @@ CREATE TABLE columns (
 -- Swimlanes
 -- ============================================================
 CREATE TABLE swimlanes (
-  id         TEXT PRIMARY KEY,
-  project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
-  name       TEXT NOT NULL,
-  position   INTEGER NOT NULL
+  id          TEXT PRIMARY KEY,
+  project_id  TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  name        TEXT NOT NULL,
+  description TEXT NOT NULL DEFAULT '',
+  position    INTEGER NOT NULL
 );
 
 -- ============================================================

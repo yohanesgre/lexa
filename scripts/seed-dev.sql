@@ -46,11 +46,11 @@ VALUES
   ('30000000-0000-0000-0000-000000000003', '507f1faf-5e10-4fe0-a6d5-dbf0b680c4ea', 'Done', 3, '#10b981', NULL, '[]', 'closed'),
   ('30000000-0000-0000-0000-000000000004', '507f1faf-5e10-4fe0-a6d5-dbf0b680c4ea', 'Blocked', 4, '#ef4444', NULL, '[]', NULL);
 
-INSERT INTO swimlanes (id, project_id, name, position)
+INSERT INTO swimlanes (id, project_id, name, description, position)
 VALUES
-  ('40000000-0000-0000-0000-000000000000', '507f1faf-5e10-4fe0-a6d5-dbf0b680c4ea', 'Core', 0),
-  ('40000000-0000-0000-0000-000000000001', '507f1faf-5e10-4fe0-a6d5-dbf0b680c4ea', 'Art', 1),
-  ('40000000-0000-0000-0000-000000000002', '507f1faf-5e10-4fe0-a6d5-dbf0b680c4ea', 'Audio', 2);
+  ('40000000-0000-0000-0000-000000000000', '507f1faf-5e10-4fe0-a6d5-dbf0b680c4ea', 'Core', 'Current sprint — furnace tilemap & combat', 0),
+  ('40000000-0000-0000-0000-000000000001', '507f1faf-5e10-4fe0-a6d5-dbf0b680c4ea', 'Art', 'Previous sprint — cleanup and polish', 1),
+  ('40000000-0000-0000-0000-000000000002', '507f1faf-5e10-4fe0-a6d5-dbf0b680c4ea', 'Audio', '', 2);
 
 INSERT INTO tasks (id, project_id, column_id, swimlane_id, title, description, priority, type, assignee, position, github_issue_id, github_issue_number, github_repo, github_synced_state)
 VALUES

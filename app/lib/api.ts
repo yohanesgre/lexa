@@ -47,11 +47,11 @@ export function listSwimlanes(slug: string): Promise<{ data: Swimlane[] }> {
   return request(`${BASE}/projects/${slug}/swimlanes`);
 }
 
-export function createSwimlane(slug: string, input: { name: string }): Promise<Swimlane> {
+export function createSwimlane(slug: string, input: { name: string; description?: string }): Promise<Swimlane> {
   return request(`${BASE}/projects/${slug}/swimlanes`, { method: "POST", body: JSON.stringify(input) });
 }
 
-export function updateSwimlane(slug: string, id: string, input: { name?: string; position?: number }): Promise<Swimlane> {
+export function updateSwimlane(slug: string, id: string, input: { name?: string; position?: number; description?: string }): Promise<Swimlane> {
   return request(`${BASE}/projects/${slug}/swimlanes/${id}`, { method: "PATCH", body: JSON.stringify(input) });
 }
 

@@ -27,6 +27,7 @@ export interface Swimlane {
   id: ID;
   projectId: ID;
   name: string;
+  description: string;
   position: number;
 }
 
@@ -128,6 +129,7 @@ export interface SwimlaneRow {
   id: string;
   project_id: string;
   name: string;
+  description: string;
   position: number;
 }
 
@@ -136,6 +138,7 @@ export function rowToSwimlane(row: SwimlaneRow): Swimlane {
     id: row.id,
     projectId: row.project_id,
     name: row.name,
+    description: row.description,
     position: row.position,
   };
 }

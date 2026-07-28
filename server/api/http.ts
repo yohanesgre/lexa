@@ -107,6 +107,7 @@ const SwimlaneSchema = Schema.Struct({
   id: Schema.String,
   projectId: Schema.String,
   name: Schema.String,
+  description: Schema.String,
   position: Schema.Number,
 });
 
@@ -114,6 +115,7 @@ const SwimlaneDataResponse = Schema.Struct({ data: Schema.Array(SwimlaneSchema) 
 
 const SwimlanePayload = Schema.Struct({
   name: Schema.String,
+  description: Schema.optional(Schema.String),
   position: Schema.optional(Schema.Number),
 });
 
@@ -393,7 +395,7 @@ const swimlanesLive = HttpApiBuilder.group(LexaApi, "swimlanes", (handlers) =>
         const swimlaneService = yield* SwimlaneService;
         const project = yield* projectService.findBySlug(req.path.slug);
         const swimlane = yield* swimlaneService.create({
-          projectId: project.id, name: req.payload.name,
+          projectId: project.id, name: req.payload.name, description: req.payload.description,
         });
         return formatSwimlane(swimlane);
       }))
@@ -402,7 +404,7 @@ const swimlanesLive = HttpApiBuilder.group(LexaApi, "swimlanes", (handlers) =>
       respond(Effect.gen(function* () {
         const swimlaneService = yield* SwimlaneService;
         const swimlane = yield* swimlaneService.update(req.path.id, {
-          name: req.payload.name, position: req.payload.position,
+          name: req.payload.name, description: req.payload.description, position: req.payload.position,
         });
         return formatSwimlane(swimlane);
       }))
@@ -607,7 +609,7 @@ function formatColumn(c: { id: string; projectId: string; name: string; position
   return c as any;
 }
 
-function formatSwimlane(s: { id: string; projectId: string; name: string; position: number }) {
+function formatSwimlane(s: { id: string; projectId: string; name: string; description: string; position: number }) {
   return s as any;
 }
 
