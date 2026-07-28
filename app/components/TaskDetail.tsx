@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Link, useParams } from "@tanstack/react-router";
-import { X } from "lucide-react";
-import type { Task } from "../../shared/types";
+import { Check, X } from "lucide-react";
+import type { Priority, Task, TaskType } from "../../shared/types";
 import { cn } from "./ui/cn";
 import { renderDoc } from "./tiptap-render";
 
@@ -25,13 +25,81 @@ interface TaskDetailProps {
   task: Task;
   onClose: () => void;
   onUpdate: (id: string, data: Partial<Task>) => void;
-  columnName?: string;
+  columns?: { id: string; name: string }[];
+}
+
+interface SelectOption {
+  value: string;
+  label: React.ReactNode;
+}
+
+interface SelectDropdownProps {
+  value: string;
+  options: SelectOption[];
+  onChange: (value: string) => void;
+  trigger: (props: { open: boolean; toggle: () => void }) => React.ReactNode;
+}
+
+function SelectDropdown({ value, options, onChange, trigger }: SelectDropdownProps) {
+  const [open, setOpen] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+
+    function handleMouseDown(event: MouseEvent) {
+      if (containerRef.current && !containerRef.current.contains(event.target as Node)) {
+        setOpen(false);
+      }
+    }
+
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        event.stopPropagation();
+        setOpen(false);
+      }
+    }
+
+    document.addEventListener("mousedown", handleMouseDown);
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", handleMouseDown);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [open]);
+
+  const toggle = () => setOpen((v) => !v);
+
+  return (
+    <div ref={containerRef} className="relative inline-flex">
+      {trigger({ open, toggle })}
+      {open && (
+        <div className={cn("menu-popover", "left")}>
+          {options.map((option) => (
+            <button
+              key={option.value}
+              type="button"
+              className={cn("menu-item", option.value === value && "active")}
+              onClick={() => {
+                onChange(option.value);
+                setOpen(false);
+              }}
+            >
+              {option.value === value && <Check size={14} strokeWidth={2} />}
+              {option.label}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
 }
 
 const capitalize = (s: string) => s[0].toUpperCase() + s.slice(1);
 const fmtDate = (iso: string) => iso.slice(0, 10);
 
-export function TaskDetail({ task, onClose, onUpdate, columnName }: TaskDetailProps) {
+
+export function TaskDetail({ task, onClose, onUpdate, columns }: TaskDetailProps) {
   const params = useParams({ strict: false }) as { slug?: string };
   const slug = params.slug;
 
@@ -130,18 +198,73 @@ export function TaskDetail({ task, onClose, onUpdate, columnName }: TaskDetailPr
         <div className="property-bar mt-3">
           <div className="prop-field">
             <span className="prop-label">Column</span>
-            <span className="text-sm font-body text-lx-text-primary">{columnName ?? "—"}</span>
+            <SelectDropdown
+              value={task.columnId}
+              options={(columns ?? []).map((column) => ({ value: column.id, label: column.name }))}
+              onChange={(columnId) => onUpdate(task.id, { columnId })}
+              trigger={({ toggle }) => (
+                <button
+                  type="button"
+                  className="text-sm font-body text-lx-text-primary hover:text-lx-text-link transition-colors"
+                  onClick={toggle}
+                >
+                  {columns?.find((column) => column.id === task.columnId)?.name ?? "—"}
+                </button>
+              )}
+            />
           </div>
           <div className="prop-field">
             <span className="prop-label">Priority</span>
-            <span className={cn("priority-badge", `pb-${task.priority}`)}>
-              <span className={cn("priority-dot", `priority-${task.priority}`)} />
-              {capitalize(task.priority)}
-            </span>
+            <SelectDropdown
+              value={task.priority}
+              options={(["urgent", "high", "medium", "low"] as Priority[]).map((priority) => ({
+                value: priority,
+                label: (
+                  <>
+                    <span className={cn("priority-dot", `priority-${priority}`)} />
+                    {capitalize(priority)}
+                  </>
+                ),
+              }))}
+              onChange={(priority) => onUpdate(task.id, { priority: priority as Priority })}
+              trigger={({ toggle }) => (
+                <button
+                  type="button"
+                  className={cn("priority-badge", `pb-${task.priority}`)}
+                  onClick={toggle}
+                >
+                  <span className={cn("priority-dot", `priority-${task.priority}`)} />
+                  {capitalize(task.priority)}
+                </button>
+              )}
+            />
           </div>
           <div className="prop-field">
             <span className="prop-label">Type</span>
-            <span className={cn("type-badge", `type-${task.type}`)}>{capitalize(task.type)}</span>
+            <SelectDropdown
+              value={task.type}
+              options={(["feature", "bug", "task", "asset"] as TaskType[]).map((type) => ({
+                value: type,
+                label: (
+                  <span
+                    className={cn("type-badge", `type-${type}`)}
+                    style={{ color: `var(--lx-badge-${type})` }}
+                  >
+                    {capitalize(type)}
+                  </span>
+                ),
+              }))}
+              onChange={(type) => onUpdate(task.id, { type: type as TaskType })}
+              trigger={({ toggle }) => (
+                <button
+                  type="button"
+                  className={cn("type-badge", `type-${task.type}`)}
+                  onClick={toggle}
+                >
+                  {capitalize(task.type)}
+                </button>
+              )}
+            />
           </div>
           <div className="prop-field">
             <span className="prop-label">Assignee</span>
