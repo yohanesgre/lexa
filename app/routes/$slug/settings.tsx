@@ -1,19 +1,7 @@
 import { useState } from "react";
 import { createFileRoute } from "@tanstack/react-router";
 import { AlertTriangle, Check, Copy, Key, Plus, Trash2 } from "lucide-react";
-
-interface MockKey {
-  id: string;
-  name: string;
-  created: string;
-  lastUsed: string | null;
-}
-
-const mockKeys: MockKey[] = [
-  { id: "1", name: "Hermes Production", created: "2026-07-15", lastUsed: "2026-07-27T14:30:00Z" },
-  { id: "2", name: "CI Deploy Bot", created: "2026-07-20", lastUsed: "2026-07-26T09:15:00Z" },
-  { id: "3", name: "Local Dev (MK)", created: "2026-07-25", lastUsed: null },
-];
+import { useApiKeys, useCreateApiKey, useDeleteApiKey } from "../../lib/queries";
 
 function formatRelative(iso: string): string {
   const then = new Date(iso).getTime();
@@ -109,9 +97,12 @@ function DeleteKeyModal({ name, onCancel, onConfirm }: { name: string; onCancel:
 }
 
 function SettingsPage() {
+  const { data: keys = [], isLoading, isError } = useApiKeys();
+  const createKey = useCreateApiKey();
+  const deleteKey = useDeleteApiKey();
   const [keyName, setKeyName] = useState("");
   const [reveal, setReveal] = useState<{ name: string; key: string } | null>(null);
-  const [deleting, setDeleting] = useState<MockKey | null>(null);
+  const [deleting, setDeleting] = useState<{ id: string; name: string } | null>(null);
 
   return (
     <main className="page-frame">
@@ -123,7 +114,11 @@ function SettingsPage() {
           Machine authentication for MCP agents and integrations. Keys are hashed with SHA-256 before storage. Only the full key is shown once on creation.
         </p>
 
-        {mockKeys.length === 0 ? (
+        {isLoading ? (
+          <div className="text-sm text-lx-text-muted py-8 text-center">Loading…</div>
+        ) : isError ? (
+          <div className="text-sm text-lx-text-danger py-8 text-center">Failed to load API keys.</div>
+        ) : keys.length === 0 ? (
           <div className="flex flex-col items-center gap-1.5 text-center mb-4" style={{ background: "var(--lx-surface-card)", border: "1px dashed var(--lx-border-strong)", borderRadius: 8, padding: 32 }}>
             <Key size={20} strokeWidth={1.5} className="text-lx-text-muted" />
             <div className="text-sm font-medium text-lx-text-primary mt-1">No API keys yet</div>
@@ -144,7 +139,7 @@ function SettingsPage() {
                 </tr>
               </thead>
               <tbody>
-                {mockKeys.map((k) => (
+                {keys.map((k) => (
                   <tr key={k.id} style={deleting?.id === k.id ? { background: "var(--lx-bg-danger-subtle)" } : undefined}>
                     <td>
                       <div className="flex items-center gap-2">
@@ -155,9 +150,9 @@ function SettingsPage() {
                     <td>
                       <span className="font-mono text-xs text-lx-text-muted">lxk_••••••••••••••••••••••••••••••••</span>
                     </td>
-                    <td className="text-xs text-lx-text-secondary">{k.created}</td>
+                    <td className="text-xs text-lx-text-secondary">{k.createdAt.slice(0, 10)}</td>
                     <td className="text-xs text-lx-text-secondary">
-                      {k.lastUsed ? formatRelative(k.lastUsed) : <span className="text-lx-text-muted">Never</span>}
+                      {k.lastUsedAt ? formatRelative(k.lastUsedAt) : <span className="text-lx-text-muted">Never</span>}
                     </td>
                     <td>
                       <button type="button" className="btn btn-ghost h-7 px-2 text-xs text-lx-text-danger" onClick={() => setDeleting(k)}>
@@ -184,14 +179,18 @@ function SettingsPage() {
             <button
               type="button"
               className="btn btn-primary"
-              disabled={!keyName.trim()}
-              onClick={() => {
-                setReveal({ name: keyName.trim(), key: `lxk_${crypto.randomUUID().replace(/-/g, "").slice(0, 32)}` });
-                setKeyName("");
-              }}
+              disabled={!keyName.trim() || createKey.isPending}
+              onClick={() =>
+                createKey.mutate(keyName.trim(), {
+                  onSuccess: (data) => {
+                    setReveal({ name: data.key.name, key: data.rawKey });
+                    setKeyName("");
+                  },
+                })
+              }
             >
               <Plus size={14} strokeWidth={1.5} />
-              Generate Key
+              {createKey.isPending ? "Generating…" : "Generate Key"}
             </button>
           </div>
         </div>
@@ -202,7 +201,13 @@ function SettingsPage() {
       )}
 
       {deleting && (
-        <DeleteKeyModal name={deleting.name} onCancel={() => setDeleting(null)} onConfirm={() => setDeleting(null)} />
+        <DeleteKeyModal
+          name={deleting.name}
+          onCancel={() => setDeleting(null)}
+          onConfirm={() => {
+            deleteKey.mutate(deleting.id, { onSuccess: () => setDeleting(null) });
+          }}
+        />
       )}
     </main>
   );

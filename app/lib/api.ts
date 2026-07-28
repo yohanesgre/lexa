@@ -1,4 +1,4 @@
-import type { Project, Column, Swimlane, Task, Board, WikiPageMeta, WikiPage, WikiPageRevision, WikiPageRevisionSummary, TipTapDoc } from "../../shared/types";
+import type { Project, Column, Swimlane, Task, Board, WikiPageMeta, WikiPage, WikiPageRevision, WikiPageRevisionSummary, TipTapDoc, ApiKey, ApiKeyCreateResult } from "../../shared/types";
 
 const BASE = "/api";
 
@@ -129,4 +129,16 @@ export function getRevision(slug: string, pageSlug: string, revisionId: string):
 
 export function restoreRevision(slug: string, pageSlug: string, revisionId: string): Promise<WikiPage> {
   return request(`${BASE}/projects/${slug}/wiki/${pageSlug}/restore`, { method: "POST", body: JSON.stringify({ revisionId }) });
+}
+
+export function listApiKeys(): Promise<{ data: ApiKey[] }> {
+  return request(`${BASE}/settings/api-keys`);
+}
+
+export function createApiKey(name: string): Promise<ApiKeyCreateResult> {
+  return request(`${BASE}/settings/api-keys`, { method: "POST", body: JSON.stringify({ name }) });
+}
+
+export function deleteApiKey(id: string): Promise<void> {
+  return request(`${BASE}/settings/api-keys/${id}`, { method: "DELETE" });
 }

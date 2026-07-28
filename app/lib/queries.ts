@@ -1,5 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import type { Task, Board, Column, Swimlane, TipTapDoc, WikiPageMeta } from "../../shared/types";
+import type { Task, Board, Column, Swimlane, TipTapDoc, WikiPageMeta, ApiKey, ApiKeyCreateResult } from "../../shared/types";
 import * as api from "./api";
 
 export function useProjects() {
@@ -228,6 +228,40 @@ export function useDeleteSwimlane(slug: string) {
       qc.setQueryData(["projects", slug, "swimlanes"], (old: Swimlane[] | undefined) => {
         if (!old) return old;
         return old.filter((s) => s.id !== id);
+      });
+    },
+  });
+}
+
+export function useApiKeys() {
+  return useQuery({
+    queryKey: ["api-keys"],
+    queryFn: () => api.listApiKeys().then((r) => r.data),
+    staleTime: 60_000,
+  });
+}
+
+export function useCreateApiKey() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (name: string) => api.createApiKey(name),
+    onSuccess: (result) => {
+      qc.setQueryData<ApiKey[]>(["api-keys"], (old) => {
+        if (!old) return [result.key];
+        return [result.key, ...old];
+      });
+    },
+  });
+}
+
+export function useDeleteApiKey() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.deleteApiKey(id),
+    onSuccess: (_, id) => {
+      qc.setQueryData<ApiKey[]>(["api-keys"], (old) => {
+        if (!old) return old;
+        return old.filter((k) => k.id !== id);
       });
     },
   });

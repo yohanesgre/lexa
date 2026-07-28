@@ -227,6 +227,26 @@ export function rowToWikiPageRevisionSummary(row: WikiPageRevisionRow): WikiPage
   };
 }
 
+export interface ApiKey {
+  id: ID;
+  name: string;
+  createdAt: ISODate;
+  lastUsedAt: ISODate | null;
+}
+
+export interface ApiKeyRow {
+  id: string;
+  name: string;
+  key_hash: string;
+  created_at: string;
+  last_used_at: string | null;
+}
+
+export interface ApiKeyCreateResult {
+  key: ApiKey;
+  rawKey: string;
+}
+
 export interface TaskRow {
   id: string;
   project_id: string;

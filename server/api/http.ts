@@ -13,7 +13,20 @@ import { TaskService } from "../services/task.service";
 import { TaskRepo } from "../repos/task.repo";
 import { WikiService } from "../services/wiki.service";
 import { WikiRepo } from "../repos/wiki.repo";
+import { ApiKeyService } from "../services/api-key.service";
+import { ApiKeyRepo } from "../repos/api-key.repo";
 import { extractText } from "../../shared/tiptap-text";
+
+const ApiKeySchema = Schema.Struct({
+  id: Schema.String,
+  name: Schema.String,
+  createdAt: Schema.String,
+  lastUsedAt: Schema.NullOr(Schema.String),
+});
+
+const CreateApiKeyInput = Schema.Struct({
+  name: Schema.String,
+});
 
 const healthEndpoint = HttpApiEndpoint.get("health", "/health").addSuccess(
   Schema.Struct({ ok: Schema.Boolean })
@@ -310,6 +323,17 @@ const wikiGroup = HttpApiGroup.make("wiki")
   .add(HttpApiEndpoint.post("restoreRevision", "/projects/:slug/wiki/:pageSlug/restore")
     .setPath(PagePath).setPayload(RestorePayload).addSuccess(WikiPageSchema));
 
+const ApiKeyPath = Schema.Struct({ id: Schema.String });
+
+const apiKeysGroup = HttpApiGroup.make("api-keys")
+  .add(HttpApiEndpoint.get("listApiKeys", "/settings/api-keys")
+    .addSuccess(Schema.Struct({ data: Schema.Array(ApiKeySchema) })))
+  .add(HttpApiEndpoint.post("createApiKey", "/settings/api-keys")
+    .setPayload(CreateApiKeyInput)
+    .addSuccess(Schema.Struct({ key: ApiKeySchema, rawKey: Schema.String }), { status: 201 }))
+  .add(HttpApiEndpoint.del("deleteApiKey", "/settings/api-keys/:id")
+    .setPath(ApiKeyPath).addSuccess(Schema.UndefinedOr(Schema.Void)));
+
 export const LexaApi = HttpApi.make("lexa")
   .add(healthGroup)
   .add(projectsGroup)
@@ -318,6 +342,7 @@ export const LexaApi = HttpApi.make("lexa")
   .add(tasksGroup)
   .add(boardGroup)
   .add(wikiGroup)
+  .add(apiKeysGroup)
   .prefix("/api");
 
 const apiLayer = HttpApiBuilder.api(LexaApi);
@@ -671,6 +696,31 @@ const wikiLive = HttpApiBuilder.group(LexaApi, "wiki", (handlers) =>
     )
 );
 
+const apiKeysLive = HttpApiBuilder.group(LexaApi, "api-keys", (handlers) =>
+  handlers
+    .handle("listApiKeys", (_req) =>
+      respond(Effect.gen(function* () {
+        const service = yield* ApiKeyService;
+        const keys = yield* service.list();
+        return { data: keys };
+      }))
+    )
+    .handle("createApiKey", (req) =>
+      respond(Effect.gen(function* () {
+        const service = yield* ApiKeyService;
+        const result = yield* service.create(req.payload.name);
+        return result;
+      }))
+    )
+    .handle("deleteApiKey", (req) =>
+      respond(Effect.gen(function* () {
+        const service = yield* ApiKeyService;
+        yield* service.delete(req.path.id);
+        return undefined;
+      }))
+    )
+);
+
 function formatProject(p: { id: string; name: string; slug: string; description: string; githubRepo: string | null; createdAt: string; updatedAt: string }) {
   return p as any;
 }
@@ -714,9 +764,10 @@ export function createApiHandler() {
     SwimlaneRepo.Default, SwimlaneService.Default,
     TaskRepo.Default, TaskService.Default,
     WikiRepo.Default, WikiService.Default,
+    ApiKeyRepo.Default, ApiKeyService.Default,
   );
   const handlerLayer = Layer.mergeAll(
-    healthLive, projectsLive, columnsLive, swimlanesLive, tasksLive, boardLive, wikiLive,
+    healthLive, projectsLive, columnsLive, swimlanesLive, tasksLive, boardLive, wikiLive, apiKeysLive,
   ).pipe(Layer.provide(serviceLayer), Layer.provide(d1Live));
   const merged = Layer.mergeAll(apiLayer, handlerLayer);
   return HttpApiBuilder.toWebHandler(merged as unknown as Parameters<typeof HttpApiBuilder.toWebHandler>[0]);
