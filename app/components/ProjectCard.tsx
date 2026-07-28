@@ -1,6 +1,7 @@
 import { Link } from "@tanstack/react-router";
 import { cn } from "./ui/cn";
 import type { Project } from "../../shared/types";
+import type { ProjectHealth } from "../lib/dashboard-stubs";
 
 function GithubMark({ size = 14 }: { size?: number }) {
   return (
@@ -12,19 +13,54 @@ function GithubMark({ size = 14 }: { size?: number }) {
 
 interface ProjectCardProps {
   project: Project;
+  health?: ProjectHealth;
   className?: string;
 }
 
-export function ProjectCard({ project, className }: ProjectCardProps) {
+export function ProjectCard({ project, health, className }: ProjectCardProps) {
   return (
-    <Link to="/$slug" params={{ slug: project.slug }} search={{}} className={cn("project-card", className)}>
+    <Link to="/$slug" params={{ slug: project.slug }} search={{}} className={cn("project-card health-card", className)}>
       {project.githubRepo && (
-        <div className="project-card-gh">
+        <div className="health-card-gh">
           <GithubMark />
         </div>
       )}
       <h2 className="project-card-name">{project.name}</h2>
       <p className="project-card-desc">{project.description}</p>
+      {health && (
+        <>
+          <div className="health-card-status-row">
+            <span className={cn("health-dot", `health-dot-${health.health}`)} />
+            {health.urgentCount > 0 && (
+              <span className="health-metric health-metric-urgent">
+                {String(health.urgentCount).padStart(3, "0")} urgent
+              </span>
+            )}
+            {health.syncCount > 0 && (
+              <span className="health-metric health-metric-sync">
+                {String(health.syncCount).padStart(3, "0")} sync
+              </span>
+            )}
+            {health.urgentCount === 0 && health.syncCount === 0 && (
+              <span className="health-card-stats">{String(health.taskCount).padStart(3, "0")} tasks</span>
+            )}
+          </div>
+          <div className="wip-mini-bar">
+            {health.wipSegments.map((segment, idx) => (
+              <div
+                key={idx}
+                className={cn("wip-mini-segment", `wip-mini-segment-${segment.state}`)}
+                style={{ flex: segment.flex }}
+              />
+            ))}
+          </div>
+          <div className="health-card-footer">
+            <div className="health-card-stats">
+              {String(health.taskCount).padStart(3, "0")} tasks · {String(health.columnCount).padStart(3, "0")} cols
+            </div>
+          </div>
+        </>
+      )}
     </Link>
   );
 }

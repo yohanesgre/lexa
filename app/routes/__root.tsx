@@ -1,8 +1,9 @@
 import { HeadContent, Link, Outlet, Scripts, createRootRoute, useParams, useRouterState } from "@tanstack/react-router";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useMemo } from "react";
 import phosphorCss from "../styles/phosphor.css?url";
 import { useProjects } from "../lib/queries";
+import { stubTaskCount } from "../lib/dashboard-stubs";
 
 export const Route = createRootRoute({
   head: () => ({
@@ -20,11 +21,21 @@ export const Route = createRootRoute({
   component: RootComponent,
 });
 
-function NavLink({ to, params, children }: { to: string; params?: Record<string, string>; children: React.ReactNode }) {
+function NavLink({
+  to,
+  params,
+  active,
+  children,
+}: {
+  to: string;
+  params?: Record<string, string>;
+  active?: boolean;
+  children: React.ReactNode;
+}) {
   const pathname = useRouterState({ select: (s) => s.location.pathname });
-  const active = pathname === to || pathname.startsWith(`${to}/`);
+  const isActive = active ?? (pathname === to || pathname.startsWith(`${to}/`));
   return (
-    <Link to={to} params={params} className={active ? "nav-link active" : "nav-link"}>
+    <Link to={to} params={params} className={isActive ? "nav-link active" : "nav-link"}>
       {children}
     </Link>
   );
@@ -34,7 +45,21 @@ function NavSpan({ children }: { children: React.ReactNode }) {
   return <span className="nav-link opacity-50 cursor-not-allowed">{children}</span>;
 }
 
-function ProjectDropdown({ to, label, active, currentSlug }: { to: string; label: string; active: boolean; currentSlug?: string }) {
+function ChevronIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+      <path d="M6 9l6 6 6-6" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+function ProjectSwitcher({
+  currentSlug,
+  routeType,
+}: {
+  currentSlug?: string;
+  routeType: "dashboard" | "board" | "wiki" | "settings";
+}) {
   const [open, setOpen] = useState(false);
   const { data: projects } = useProjects();
   const containerRef = useRef<HTMLDivElement>(null);
@@ -62,47 +87,86 @@ function ProjectDropdown({ to, label, active, currentSlug }: { to: string; label
     };
   }, [open]);
 
+  const currentProject = useMemo(
+    () => projects?.find((p) => p.slug === currentSlug),
+    [projects, currentSlug]
+  );
+
+  const triggerLabel = routeType === "dashboard" ? "All Projects" : currentProject?.name ?? "Select project";
+
+  const targetFor = (slug: string) => {
+    if (routeType === "wiki") return "/$slug/wiki" as const;
+    return "/$slug" as const;
+  };
+
   return (
-    <div ref={containerRef} className="relative flex items-center h-full">
+    <div ref={containerRef} className="project-switcher">
       <button
         type="button"
         aria-expanded={open}
         onClick={() => setOpen((v) => !v)}
-        className={`nav-link flex items-center gap-1 ${active ? "active" : ""}`}
+        className="project-switcher-trigger"
       >
-        {label}
-        <svg className="w-3 h-3 opacity-70" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-          <path d="M6 9l6 6 6-6" strokeLinecap="round" strokeLinejoin="round" />
-        </svg>
+        <span className="text-sm font-medium font-body text-lx-text-primary">{triggerLabel}</span>
+        <ChevronIcon />
       </button>
       {open && (
-        <div
-          className="absolute top-full left-0 mt-1 min-w-[180px] rounded-md border border-lx-border bg-lx-surface-elevated shadow-lx-md z-dropdown py-1"
-          onClick={() => setOpen(false)}
-        >
+        <div className="project-switcher-menu" onClick={() => setOpen(false)}>
+          {routeType === "dashboard" ? (
+            <div className="project-switcher-row active">
+              <div className="project-switcher-row-info">
+                <span className="project-switcher-row-name">All Projects</span>
+              </div>
+              <span className="project-switcher-row-count">
+                {String(projects?.reduce((sum, p) => sum + stubTaskCount(p.slug), 0) ?? 0).padStart(3, "0")}
+              </span>
+            </div>
+          ) : (
+            <Link
+              to="/"
+              className="project-switcher-row"
+            >
+              <div className="project-switcher-row-info">
+                <span className="project-switcher-row-name">All Projects</span>
+              </div>
+              <span className="project-switcher-row-count">
+                {String(projects?.reduce((sum, p) => sum + stubTaskCount(p.slug), 0) ?? 0).padStart(3, "0")}
+              </span>
+            </Link>
+          )}
           {!projects ? (
-            <div className="px-3 py-2 text-sm text-lx-text-muted">Loading projects…</div>
+            <div className="project-switcher-row">
+              <span className="project-switcher-row-desc">Loading projects…</span>
+            </div>
           ) : projects.length === 0 ? (
-            <div className="px-3 py-2 text-sm text-lx-text-muted">No projects yet</div>
+            <div className="project-switcher-row">
+              <span className="project-switcher-row-desc">No projects yet</span>
+            </div>
           ) : (
             projects.map((project) => {
-              const isCurrent = project.slug === currentSlug;
+              const isCurrent = project.slug === currentSlug && routeType !== "dashboard";
               return (
                 <Link
                   key={project.id}
-                  to={to}
+                  to={targetFor(project.slug)}
                   params={{ slug: project.slug }}
-                  className={
-                    isCurrent
-                      ? "block px-3 py-1.5 text-sm text-lx-text-primary bg-lx-surface-selected"
-                      : "block px-3 py-1.5 text-sm text-lx-text-secondary hover:bg-lx-surface-card-hover hover:text-lx-text-primary"
-                  }
+                  className={isCurrent ? "project-switcher-row active" : "project-switcher-row"}
                 >
-                  {project.name}
+                  <div className="project-switcher-row-info">
+                    <span className="project-switcher-row-name">{project.name}</span>
+                    <span className="project-switcher-row-desc">{project.slug}</span>
+                  </div>
+                  <span className="project-switcher-row-count">
+                    {String(stubTaskCount(project.slug)).padStart(3, "0")}
+                  </span>
                 </Link>
               );
             })
           )}
+          <div className="project-switcher-separator" />
+          <Link to="/" className="project-switcher-row">
+            <span className="project-switcher-row-name">Create new project</span>
+          </Link>
         </div>
       )}
     </div>
@@ -114,7 +178,21 @@ function RootComponent() {
   const params = useParams({ strict: false }) as { slug?: string };
   const slug = params?.slug;
   const pathname = useRouterState({ select: (s) => s.location.pathname });
-  const wikiActive = Boolean(slug) && pathname.startsWith(`/${slug}/wiki`);
+  const { data: projects } = useProjects();
+
+  const effectiveSlug = useMemo(() => {
+    if (slug) return slug;
+    if (projects && projects.length > 0) return projects[0].slug;
+    return undefined;
+  }, [slug, projects]);
+
+  const routeType: "dashboard" | "board" | "wiki" | "settings" = useMemo(() => {
+    if (pathname === "/") return "dashboard";
+    if (effectiveSlug && pathname.startsWith(`/${effectiveSlug}/wiki`)) return "wiki";
+    if (effectiveSlug && pathname.startsWith(`/${effectiveSlug}`)) return "board";
+    return "dashboard";
+  }, [pathname, effectiveSlug]);
+
   return (
     <html lang="en" data-theme="dark">
       <head>
@@ -125,9 +203,14 @@ function RootComponent() {
           <nav className="app-nav">
             <div className="nav-brand">Lexa</div>
             <NavLink to="/">Dashboard</NavLink>
-            <ProjectDropdown to="/$slug" label="Board" active={Boolean(slug)} currentSlug={slug} />
-            <ProjectDropdown to="/$slug/wiki" label="Wiki" active={wikiActive} currentSlug={slug} />
+            <NavLink to={effectiveSlug ? "/$slug" : "/"} params={effectiveSlug ? { slug: effectiveSlug } : undefined} active={routeType === "board"}>
+              Board
+            </NavLink>
+            <NavLink to={effectiveSlug ? "/$slug/wiki" : "/"} params={effectiveSlug ? { slug: effectiveSlug } : undefined} active={routeType === "wiki"}>
+              Wiki
+            </NavLink>
             <NavSpan>Settings</NavSpan>
+            <ProjectSwitcher currentSlug={slug} routeType={routeType} />
           </nav>
           <Outlet />
         </QueryClientProvider>

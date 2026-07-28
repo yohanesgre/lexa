@@ -29,7 +29,7 @@ interface KanbanBoardProps {
   board: Board;
   onMoveTask: (taskId: string, target: MoveTarget) => Promise<void>;
   onSelectTask?: (task: Task) => void;
-  onCreateTask?: (input: { columnId: string; swimlaneId?: string | null; title: string }) => Promise<void>;
+  onCreateTask?: (input: { columnId: string; swimlaneId?: string | null; title: string; priority?: string; type?: string }) => Promise<void>;
 }
 
 const byPosition = (a: Task, b: Task) => (a.position < b.position ? -1 : a.position > b.position ? 1 : 0);
@@ -47,6 +47,7 @@ function cardProps(task: Task) {
     priority: task.priority,
     type: task.type,
     assignee: task.assignee,
+    github: task.github,
     githubOutOfSync: task.github?.outOfSync ?? false,
   };
 }
@@ -227,7 +228,25 @@ export function KanbanBoard({ board, onMoveTask, onSelectTask, onCreateTask }: K
           </div>
         </div>
         <div className="board-scroll">
-        {rows.map(({ lane }) => {
+        {columns.length === 0 ? (
+          <div className="empty-state" style={{ padding: 24 }}>
+            <div className="empty-state-icon">
+              <svg width={24} height={24} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round">
+                <rect x="3" y="4" width="18" height="16" rx="2" />
+                <path d="M9 4v16M15 4v16" />
+              </svg>
+            </div>
+            <div className="empty-state-title">No columns yet</div>
+            <div className="empty-state-desc">Add a column to start tracking tasks.</div>
+            <button type="button" className="btn btn-primary mt-4" onClick={() => alert("Column creation coming in settings")}>
+              <svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5}>
+                <path d="M12 5v14m-7-7h14" />
+              </svg>
+              Add Column
+            </button>
+          </div>
+        ) : (
+          rows.map(({ lane }) => {
           const laneId = lane?.id ?? null;
           const laneTaskCount = hasLanes
             ? localTasks.filter((t) => (t.swimlaneId ?? null) === laneId).length
@@ -277,7 +296,8 @@ export function KanbanBoard({ board, onMoveTask, onSelectTask, onCreateTask }: K
               )}
             </div>
           );
-        })}
+        })
+        )}
         </div>
       </div>
       <DragOverlay dropAnimation={{ duration: 150, easing: "cubic-bezier(0.16, 1, 0.3, 1)" }}>
