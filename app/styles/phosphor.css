@@ -1878,6 +1878,9 @@
     opacity: 0.45;
     cursor: not-allowed;
   }
+  .menu-item.active {
+    background: var(--lx-surface-selected);
+  }
   .menu-item.danger {
     color: var(--lx-text-danger);
   }

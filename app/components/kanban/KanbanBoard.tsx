@@ -30,7 +30,7 @@ interface KanbanBoardProps {
   board: Board;
   onMoveTask: (taskId: string, target: MoveTarget) => Promise<void>;
   onSelectTask?: (task: Task) => void;
-  onCreateTask?: (input: { columnId: string; swimlaneId?: string | null; title: string; priority?: string; type?: string }) => Promise<void>;
+  onOpenCreateTask?: (columnId: string, swimlaneId?: string | null) => void;
 }
 
 const byPosition = (a: Task, b: Task) => (a.position < b.position ? -1 : a.position > b.position ? 1 : 0);
@@ -82,13 +82,12 @@ function SortableTaskCard({
   );
 }
 
-export function KanbanBoard({ board, onMoveTask, onSelectTask, onCreateTask }: KanbanBoardProps) {
+export function KanbanBoard({ board, onMoveTask, onSelectTask, onOpenCreateTask }: KanbanBoardProps) {
   const [localTasks, setLocalTasks] = useState<Task[]>(board.tasks);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [flashColumnId, setFlashColumnId] = useState<string | null>(null);
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set());
   const [filters, setFilters] = useState<FilterState>(emptyFilters());
-  const [addTaskVersion, setAddTaskVersion] = useState<Record<string, number>>({});
   const flashTimer = useRef<number | null>(null);
 
   useEffect(() => {
@@ -149,10 +148,6 @@ export function KanbanBoard({ board, onMoveTask, onSelectTask, onCreateTask }: K
       else next.add(laneId);
       return next;
     });
-
-  const triggerAddTask = (columnId: string) => {
-    setAddTaskVersion((prev) => ({ ...prev, [columnId]: (prev[columnId] ?? 0) + 1 }));
-  };
 
   const activeTask = activeId ? localTasks.find((t) => t.id === activeId) : undefined;
 
@@ -306,20 +301,16 @@ export function KanbanBoard({ board, onMoveTask, onSelectTask, onCreateTask }: K
                           name={col.name}
                           color={col.color}
                           taskCount={cell.length}
-                          hasCards={cell.length > 0}
                           wipLimit={col.wipLimit}
                           wipFlash={flashColumnId === col.id}
                           dimmed={dimmed}
-                          onAddTask={() => triggerAddTask(col.id)}
+                          onOpenCreate={() => onOpenCreateTask?.(col.id, laneId)}
                         />
                         <Column
                           id={cellDropId(col.id, laneId)}
                           data={{ type: "column", columnId: col.id, swimlaneId: laneId }}
                           isEmpty={cell.length === 0}
-                          columnId={col.id}
-                          swimlaneId={laneId}
-                          onCreateTask={onCreateTask}
-                          startAdding={addTaskVersion[col.id] ?? 0}
+                          onOpenCreate={() => onOpenCreateTask?.(col.id, laneId)}
                         >
                           <SortableContext items={cell.map((t) => t.id)} strategy={verticalListSortingStrategy}>
                             {cell.map((task) => (
