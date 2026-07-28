@@ -10,6 +10,7 @@ import {
 } from "@dnd-kit/core";
 import { SortableContext, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
+import { Link } from "@tanstack/react-router";
 import type { Board, Swimlane, Task } from "../../../shared/types";
 import { keyAfter, keyBetween } from "../../../shared/positions";
 import { cn } from "../ui/cn";
@@ -249,9 +250,14 @@ export function KanbanBoard({ board, onMoveTask, onSelectTask, onOpenCreateTask 
           </div>
           <div className="flex items-center gap-2">
             <FilterButton board={board} filters={filters} onChange={setFilters} />
-            <button type="button" className="btn btn-ghost text-sm">
+            <Link
+              to="/$slug/settings"
+              params={{ slug: board.project.slug }}
+              search={{}}
+              className="btn btn-ghost text-sm"
+            >
               Settings
-            </button>
+            </Link>
           </div>
         </div>
         {isFilterActive(filters) && <ActiveFilterBar board={board} filters={filters} onChange={setFilters} />}
@@ -266,12 +272,17 @@ export function KanbanBoard({ board, onMoveTask, onSelectTask, onOpenCreateTask 
             </div>
             <div className="empty-state-title">No columns yet</div>
             <div className="empty-state-desc">Add a column to start tracking tasks.</div>
-            <button type="button" className="btn btn-primary mt-4" onClick={() => alert("Column creation coming in settings")}>
+            <Link
+              to="/$slug/settings"
+              params={{ slug: board.project.slug }}
+              search={{}}
+              className="btn btn-primary mt-4"
+            >
               <svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5}>
                 <path d="M12 5v14m-7-7h14" />
               </svg>
               Add Column
-            </button>
+            </Link>
           </div>
         ) : (
           rows.map(({ lane }) => {
