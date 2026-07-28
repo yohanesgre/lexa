@@ -208,13 +208,24 @@
           <span class="annotation-inline">Toggle collapses sidebar to 36px strip</span>
         </div>
         <nav style="padding:8px 0;overflow-y:auto;">
-          <a href="#elemental-damage" style="display:flex;align-items:center;height:32px;padding:0 12px;font-size:13px;font-weight:400;font-family:var(--lx-font-body);color:var(--lx-text-secondary);text-decoration:none;border-left:2px solid transparent;">Elemental Damage</a>
-          <a href="#damage-formula" style="display:flex;align-items:center;height:32px;padding:0 12px;font-size:13px;font-weight:500;font-family:var(--lx-font-body);color:var(--lx-text-primary);text-decoration:none;background:var(--lx-surface-selected);border-left:2px solid var(--lx-border-focus);"><span style="color:var(--lx-text-muted);margin-right:2px;">├─ </span>Damage Formula</a>
-          <a href="#resistance-matrix" style="display:flex;align-items:center;height:32px;padding:0 12px;font-size:13px;font-weight:400;font-family:var(--lx-font-body);color:var(--lx-text-secondary);text-decoration:none;border-left:2px solid transparent;"><span style="color:var(--lx-text-muted);margin-right:2px;">├─ </span>Resistance Matrix</a>
-          <a href="#status-effects" style="display:flex;align-items:center;height:32px;padding:0 12px;font-size:13px;font-weight:400;font-family:var(--lx-font-body);color:var(--lx-text-secondary);text-decoration:none;border-left:2px solid transparent;"><span style="color:var(--lx-text-muted);margin-right:2px;">└─ </span>Status Effects</a>
-          <a href="#edge-cases" style="display:flex;align-items:center;height:32px;padding:0 12px;font-size:13px;font-weight:400;font-family:var(--lx-font-body);color:var(--lx-text-secondary);text-decoration:none;border-left:2px solid transparent;"><span style="color:var(--lx-text-muted);margin-right:2px;">  └─ </span>Edge Cases</a>
+          <!-- workspace-style tree: chevrons for expand/collapse, 16px indent per level -->
+          <a href="#elemental-damage" style="display:flex;align-items:center;height:32px;padding:0 12px 0 12px;font-size:13px;font-weight:400;font-family:var(--lx-font-body);color:var(--lx-text-secondary);text-decoration:none;border-left:2px solid transparent;">
+            <span style="width:16px;height:16px;margin-right:4px;flex-shrink:0;"></span>Elemental Damage
+          </a>
+          <a href="#damage-formula" style="display:flex;align-items:center;height:32px;padding:0 12px 0 28px;font-size:13px;font-weight:500;font-family:var(--lx-font-body);color:var(--lx-text-primary);text-decoration:none;background:var(--lx-surface-selected);border-left:2px solid var(--lx-border-focus);">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="transform:rotate(90deg);margin-right:4px;flex-shrink:0;color:var(--lx-text-muted);"><path d="M9 18l6-6-6-6"/></svg>Damage Formula
+          </a>
+          <a href="#resistance-matrix" style="display:flex;align-items:center;height:32px;padding:0 12px 0 28px;font-size:13px;font-weight:400;font-family:var(--lx-font-body);color:var(--lx-text-secondary);text-decoration:none;border-left:2px solid transparent;">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="transform:rotate(90deg);margin-right:4px;flex-shrink:0;color:var(--lx-text-muted);"><path d="M9 18l6-6-6-6"/></svg>Resistance Matrix
+          </a>
+          <a href="#status-effects" style="display:flex;align-items:center;height:32px;padding:0 12px 0 28px;font-size:13px;font-weight:400;font-family:var(--lx-font-body);color:var(--lx-text-secondary);text-decoration:none;border-left:2px solid transparent;">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="transform:rotate(90deg);margin-right:4px;flex-shrink:0;color:var(--lx-text-muted);"><path d="M9 18l6-6-6-6"/></svg>Status Effects
+          </a>
+          <a href="#edge-cases" style="display:flex;align-items:center;height:32px;padding:0 12px 0 44px;font-size:13px;font-weight:400;font-family:var(--lx-font-body);color:var(--lx-text-secondary);text-decoration:none;border-left:2px solid transparent;">
+            <span style="width:16px;height:16px;margin-right:4px;flex-shrink:0;"></span>Edge Cases
+          </a>
         </nav>
-        <span class="annotation-tag" style="display:block;padding:4px 12px;">App: antd Tree with showLine, scroll spy (IntersectionObserver), collapsible nodes, tree lines via antd ├── └── │ connectors</span>
+        <span class="annotation-tag" style="display:block;padding:4px 12px;">Workspace-style tree: chevron expand/collapse, 16px indent per level, scroll spy, collapsible</span>
       </aside>
     </div>
   </div>
