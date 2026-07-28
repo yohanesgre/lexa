@@ -1084,17 +1084,26 @@
   }
 
   .editor-content {
+    display: flex;
+    flex-direction: column;
     padding: 12px;
     background: var(--lx-surface-input);
     border-radius: 0 0 6px 6px;
     min-height: 120px;
   }
   .editor-content .ProseMirror {
+    flex: 1;
     font-size: 15px;
     line-height: 22px;
-    color: var(--lx-text-secondary);
+    color: var(--lx-text-primary);
     font-family: var(--lx-font-body);
+    background: transparent;
+    border: none;
     outline: none;
+    box-shadow: none;
+  }
+  .editor-content .ProseMirror:focus-visible {
+    box-shadow: none;
   }
   .editor-content .ProseMirror p {
     margin-bottom: 12px;
@@ -1165,7 +1174,7 @@
   .editor-content .ProseMirror p.is-editor-empty:first-child::before {
     content: attr(data-placeholder);
     float: left;
-    color: var(--lx-text-muted);
+    color: var(--lx-text-secondary);
     pointer-events: none;
     height: 0;
   }
