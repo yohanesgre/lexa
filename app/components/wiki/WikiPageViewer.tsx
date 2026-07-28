@@ -277,12 +277,17 @@ function WikiEditor({ editor }: WikiEditorProps) {
             </svg>
           </WikiToolbarButton>
           <span className="toolbar-sep" />
-          <button type="button" className="toolbar-btn" title="AI writing assistant" onClick={() => {}} style={{ width: "auto", padding: "0 6px", gap: 4 }}>
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+          <WikiToolbarButton
+            command={() => {}}
+            isActive={false}
+            title="AI writing assistant"
+            style={{ width: "auto", padding: "0 6px", gap: 4 }}
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
               <path d="M3 10 Q6 7 9 9 L17 9 L18 11 L16 12 L13 12 L12 17 L15 17 L15 19 L9 19 L9 17 L11 17 L10 12 L6 12 L4 11 Z" />
             </svg>
             Forge
-          </button>
+          </WikiToolbarButton>
         </div>
       </div>
       <EditorContent editor={editor} className="editor-content p-4 px-5" />
