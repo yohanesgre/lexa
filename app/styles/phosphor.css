@@ -1480,6 +1480,37 @@
     padding: 32px 24px;
   }
 
+  .settings-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+  }
+
+  .settings-table th,
+  .settings-table td {
+    text-align: left;
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--lx-border-default);
+  }
+
+  .settings-table th {
+    font-weight: 500;
+    color: var(--lx-text-secondary);
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    font-family: var(--lx-font-body);
+  }
+
+  .settings-table td {
+    color: var(--lx-text-primary);
+    font-family: var(--lx-font-body);
+  }
+
+  .settings-table tbody tr:last-child td {
+    border-bottom: none;
+  }
+
   /* Checklist (TipTap taskList read-mode) */
   .checklist {
     list-style: none;
@@ -2416,6 +2447,86 @@
       opacity: 1;
       transform: scale(1);
     }
+  }
+
+  .modal-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    height: 56px;
+    padding: 0 16px;
+    border-bottom: 1px solid var(--lx-border-subtle);
+    flex-shrink: 0;
+  }
+  .modal-title {
+    font-family: var(--lx-font-display);
+    font-size: 16px;
+    font-weight: 500;
+    line-height: 24px;
+    letter-spacing: -0.02em;
+    color: var(--lx-text-primary);
+  }
+  .modal-body {
+    padding: 16px;
+  }
+  .modal-footer {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 8px;
+    height: 56px;
+    padding: 0 16px;
+    border-top: 1px solid var(--lx-border-subtle);
+    flex-shrink: 0;
+  }
+
+  .field-label {
+    display: block;
+    font-size: 12px;
+    font-weight: 500;
+    font-family: var(--lx-font-body);
+    color: var(--lx-text-secondary);
+    margin-bottom: 6px;
+  }
+  .field-hint {
+    font-size: 12px;
+    line-height: 18px;
+    color: var(--lx-text-muted);
+    margin-top: 6px;
+  }
+
+  .key-display {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background: var(--lx-surface-input);
+    border: 1px solid var(--lx-border-default);
+    border-radius: 6px;
+    padding: 10px 12px;
+  }
+  .key-display code {
+    flex: 1;
+    font-family: var(--lx-font-mono);
+    font-size: 12px;
+    line-height: 16px;
+    color: var(--lx-text-primary);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .notice-warning {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    background: var(--lx-bg-warning-subtle);
+    border: 1px solid rgba(240, 192, 64, 0.15);
+    border-radius: 6px;
+    color: var(--lx-text-warning);
+    padding: 10px 12px;
+    font-size: 13px;
+    line-height: 20px;
+    font-family: var(--lx-font-body);
   }
 
   /* ---- Wiki edit settings sidebar ---- */

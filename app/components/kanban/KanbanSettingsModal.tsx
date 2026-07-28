@@ -143,10 +143,10 @@ export function KanbanSettingsModal({ slug, isOpen, onClose }: KanbanSettingsMod
                   {columns.length === 0 ? (
                     <EmptySection type="column" onAdd={() => setColumnForm({ isOpen: true, column: null })} />
                   ) : (
-                    <div className="bg-lx-surface-card border border-lx-border-default rounded-lg overflow-hidden">
+                    <div className="bg-lx-surface-card border border-lx-border rounded-lg overflow-hidden">
                       <table className="w-full border-collapse text-[13px] font-body">
                         <thead>
-                          <tr className="border-b border-lx-border-default">
+                          <tr className="border-b border-lx-border">
                             <th className="w-8 py-2.5 px-3"></th>
                             <th className="py-2.5 px-3 text-left text-[11px] uppercase tracking-[0.05em] text-lx-text-secondary font-medium font-body">
                               Name
@@ -168,7 +168,7 @@ export function KanbanSettingsModal({ slug, isOpen, onClose }: KanbanSettingsMod
                         </thead>
                         <tbody>
                           {columns.map((column) => (
-                            <tr key={column.id} className="border-b border-lx-border-default last:border-b-0">
+                            <tr key={column.id} className="border-b border-lx-border last:border-b-0">
                               <td className="py-2.5 px-3">
                                 <GripVertical size={14} className="text-lx-text-muted cursor-grab" />
                               </td>
@@ -233,10 +233,10 @@ export function KanbanSettingsModal({ slug, isOpen, onClose }: KanbanSettingsMod
                   {swimlanes.length === 0 ? (
                     <EmptySection type="swimlane" onAdd={() => setSwimlaneForm({ isOpen: true, swimlane: null })} />
                   ) : (
-                    <div className="bg-lx-surface-card border border-lx-border-default rounded-lg overflow-hidden">
+                    <div className="bg-lx-surface-card border border-lx-border rounded-lg overflow-hidden">
                       <table className="w-full border-collapse text-[13px] font-body">
                         <thead>
-                          <tr className="border-b border-lx-border-default">
+                          <tr className="border-b border-lx-border">
                             <th className="w-8 py-2.5 px-3"></th>
                             <th className="py-2.5 px-3 text-left text-[11px] uppercase tracking-[0.05em] text-lx-text-secondary font-medium font-body">
                               Name
@@ -249,7 +249,7 @@ export function KanbanSettingsModal({ slug, isOpen, onClose }: KanbanSettingsMod
                         </thead>
                         <tbody>
                           {swimlanes.map((swimlane) => (
-                            <tr key={swimlane.id} className="border-b border-lx-border-default last:border-b-0">
+                            <tr key={swimlane.id} className="border-b border-lx-border last:border-b-0">
                               <td className="py-2.5 px-3">
                                 <GripVertical size={14} className="text-lx-text-muted cursor-grab" />
                               </td>
