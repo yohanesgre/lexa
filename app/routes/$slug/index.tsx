@@ -1,9 +1,10 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useBoard, useMoveTask, useUpdateTask, useCreateTask } from "../../lib/queries";
+import { useState } from "react";
+import { useBoard, useMoveTask, useUpdateTask, useCreateTask, useDeleteTask } from "../../lib/queries";
 import { KanbanBoard } from "../../components/kanban/KanbanBoard";
 import type { MoveTarget } from "../../components/kanban/KanbanBoard";
 import { TaskDetail } from "../../components/TaskDetail";
-import type { Task } from "../../../shared/types";
+import type { Priority, Task, TaskType, TipTapDoc } from "../../../shared/types";
 
 export const Route = createFileRoute("/$slug/")({
   validateSearch: (search: Record<string, unknown>): { task?: string } => ({
@@ -20,16 +21,35 @@ function BoardPage() {
   const moveTask = useMoveTask(slug);
   const updateTask = useUpdateTask(slug);
   const createTask = useCreateTask(slug);
+  const deleteTask = useDeleteTask(slug);
+
+  const [createTarget, setCreateTarget] = useState<{ columnId: string; swimlaneId?: string | null } | null>(null);
 
   const selectedTaskId = search.task ?? null;
   const selectedTask = selectedTaskId ? board?.tasks.find((t) => t.id === selectedTaskId) ?? null : null;
+  const isCreating = createTarget !== null;
 
   const handleMove = async (taskId: string, target: MoveTarget) => {
     await moveTask.mutateAsync({ id: taskId, ...target });
   };
 
-  const handleCreateTask = async (input: { columnId: string; swimlaneId?: string | null; title: string; priority?: string; type?: string }) => {
-    await createTask.mutateAsync({ ...input, swimlaneId: input.swimlaneId ?? null });
+  const handleOpenCreateTask = (columnId: string, swimlaneId?: string | null) => {
+    setCreateTarget({ columnId, swimlaneId });
+  };
+
+  const handleCreate = async (input: {
+    title: string;
+    columnId: string;
+    priority: Priority;
+    type: TaskType;
+    assignee: string | null;
+    description: TipTapDoc;
+  }) => {
+    await createTask.mutateAsync({
+      ...input,
+      swimlaneId: createTarget?.swimlaneId ?? null,
+    });
+    setCreateTarget(null);
   };
 
   const handleUpdate = (id: string, data: Partial<Task>) => {
@@ -38,12 +58,19 @@ function BoardPage() {
     });
   };
 
+  const handleDelete = async (id: string) => {
+    await deleteTask.mutateAsync({ id });
+    navigate({ search: { task: undefined }, replace: true } as never);
+    setCreateTarget(null);
+  };
+
   const handleSelectTask = (task: Task) => {
     navigate({ search: { task: task.id }, replace: true } as never);
   };
 
   const handleClose = () => {
     navigate({ search: { task: undefined }, replace: true } as never);
+    setCreateTarget(null);
   };
 
   if (isLoading) return <div className="board-loading">Loading board…</div>;
@@ -56,14 +83,23 @@ function BoardPage() {
         board={board}
         onMoveTask={handleMove}
         onSelectTask={handleSelectTask}
-        onCreateTask={handleCreateTask}
+        onOpenCreateTask={handleOpenCreateTask}
       />
-      {selectedTask && (
+      {(selectedTask || isCreating) && (
         <TaskDetail
-          task={selectedTask}
+          mode={isCreating ? "create" : "view"}
+          task={selectedTask ?? undefined}
+          defaultColumnId={createTarget?.columnId}
+          columns={board.columns}
+          columnRequiredFields={board.columns.map((column) => ({
+            columnId: column.id,
+            fields: column.requiredFields,
+          }))}
+          availableAssignees={[...new Set(board.tasks.map((t) => t.assignee).filter(Boolean))] as string[]}
           onClose={handleClose}
           onUpdate={handleUpdate}
-          columnName={board.columns.find((c) => c.id === selectedTask.columnId)?.name}
+          onDelete={handleDelete}
+          onCreate={handleCreate}
         />
       )}
     </div>
