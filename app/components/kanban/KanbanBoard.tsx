@@ -306,6 +306,7 @@ export function KanbanBoard({ board, onMoveTask, onSelectTask, onCreateTask }: K
                           name={col.name}
                           color={col.color}
                           taskCount={cell.length}
+                          hasCards={cell.length > 0}
                           wipLimit={col.wipLimit}
                           wipFlash={flashColumnId === col.id}
                           dimmed={dimmed}

@@ -1,4 +1,4 @@
-import { ChevronDown, MoreHorizontal, ChevronUp, Pencil, Plus, Trash2 } from "lucide-react";
+import { MoreHorizontal, ChevronDown, ChevronUp, Pencil, Plus, Trash2 } from "lucide-react";
 import { cn } from "../ui/cn";
 import { Menu } from "../ui/Menu";
 
@@ -11,23 +11,23 @@ interface SwimlaneHeaderProps {
 
 export function SwimlaneHeader({ name, count, collapsed = false, onToggle }: SwimlaneHeaderProps) {
   return (
-    <div
-      className="swimlane-header"
-      onClick={onToggle}
-      role={onToggle ? "button" : undefined}
-      tabIndex={onToggle ? 0 : undefined}
-      onKeyDown={
-        onToggle
-          ? (e) => {
-              if (e.key === "Enter" || e.key === " ") {
-                e.preventDefault();
-                onToggle();
-              }
-            }
-          : undefined
-      }
-    >
-      <ChevronDown className={cn("chevron", collapsed && "collapsed")} strokeWidth={2} />
+    <div className="swimlane-header">
+      <button
+        type="button"
+        className="chevron-btn"
+        onClick={onToggle}
+        aria-label={collapsed ? "Expand swimlane" : "Collapse swimlane"}
+      >
+        <svg
+          className={cn("chevron", collapsed && "collapsed")}
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth={1.5}
+        >
+          <path d="M6 9l6 6 6-6" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      </button>
       <span className="swimlane-name">{name}</span>
       {count !== undefined && <span className="swimlane-count">{String(count).padStart(3, "0")}</span>}
       {onToggle && (

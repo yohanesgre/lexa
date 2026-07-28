@@ -730,11 +730,27 @@
     color: var(--lx-text-muted);
     margin-left: 8px;
   }
+  .chevron-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 24px;
+    height: 24px;
+    border: none;
+    border-radius: 4px;
+    background: transparent;
+    color: var(--lx-text-secondary);
+    cursor: pointer;
+    flex-shrink: 0;
+    margin-right: 2px;
+    transition: background 100ms;
+  }
+  .chevron-btn:hover {
+    background: var(--lx-surface-card-hover);
+  }
   .chevron {
     width: 14px;
     height: 14px;
-    color: var(--lx-text-secondary);
-    margin-right: 6px;
     flex-shrink: 0;
     transition: transform 200ms var(--lx-ease-out);
   }

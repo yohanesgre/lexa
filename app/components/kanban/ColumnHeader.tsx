@@ -6,6 +6,7 @@ interface ColumnHeaderProps {
   name: string;
   color: string;
   taskCount: number;
+  hasCards?: boolean;
   wipLimit: number | null;
   wipFlash?: boolean;
   dimmed?: boolean;
@@ -14,7 +15,7 @@ interface ColumnHeaderProps {
 
 const pad = (n: number) => String(n).padStart(2, "0");
 
-export function ColumnHeader({ name, color, taskCount, wipLimit, wipFlash = false, dimmed = false, onAddTask }: ColumnHeaderProps) {
+export function ColumnHeader({ name, color, taskCount, hasCards = false, wipLimit, wipFlash = false, dimmed = false, onAddTask }: ColumnHeaderProps) {
   const wipState =
     wipLimit === null
       ? null
@@ -27,7 +28,7 @@ export function ColumnHeader({ name, color, taskCount, wipLimit, wipFlash = fals
   return (
     <>
       <div className="column-strip" style={{ background: color || "transparent" }} />
-      <div className={cn("column-header", taskCount > 0 && "has-cards")}>
+      <div className={cn("column-header", hasCards && "has-cards")}>
         <div className="flex items-center">
           <span className={cn("column-name", dimmed && "opacity-60")}>{name}</span>
           <span className={cn("column-count", dimmed && "opacity-60")}>{pad(taskCount)}</span>
