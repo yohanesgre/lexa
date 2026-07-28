@@ -67,6 +67,7 @@ interface TaskDetailProps {
   defaultColumnId?: string;
   columns?: { id: string; name: string }[];
   columnRequiredFields?: { columnId: string; fields: string[] }[];
+  availableAssignees?: string[];
   onClose: () => void;
   onUpdate?: (id: string, data: Partial<Task>) => void;
   onDelete?: (id: string) => Promise<void>;
@@ -139,6 +140,104 @@ function SelectDropdown({ value, options, onChange, trigger }: SelectDropdownPro
             >
               {option.value === value && <Check size={14} strokeWidth={2} />}
               {option.label}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+interface AssigneeSuggestionsProps {
+  value: string;
+  availableAssignees: string[];
+  placeholder?: string;
+  inputClassName?: string;
+  onChange?: (value: string) => void;
+  onBlur?: (value: string) => void;
+}
+
+function AssigneeSuggestions({
+  value,
+  availableAssignees,
+  placeholder,
+  inputClassName,
+  onChange,
+  onBlur,
+}: AssigneeSuggestionsProps) {
+  const [open, setOpen] = useState(false);
+  const [draft, setDraft] = useState(value);
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    setDraft(value);
+  }, [value]);
+
+  useEffect(() => {
+    if (!open) return;
+
+    function handleMouseDown(event: MouseEvent) {
+      if (containerRef.current && !containerRef.current.contains(event.target as Node)) {
+        setOpen(false);
+      }
+    }
+
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        event.stopPropagation();
+        setOpen(false);
+      }
+    }
+
+    document.addEventListener("mousedown", handleMouseDown);
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", handleMouseDown);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [open]);
+
+  const hasSuggestions = availableAssignees.length > 0;
+
+  return (
+    <div ref={containerRef} className="relative inline-flex">
+      <input
+        className={inputClassName}
+        value={draft}
+        placeholder={placeholder}
+        onFocus={() => {
+          if (hasSuggestions) setOpen(true);
+        }}
+        onChange={(e) => {
+          const next = e.target.value;
+          setDraft(next);
+          onChange?.(next);
+        }}
+        onBlur={(e) => {
+          const related = e.relatedTarget as Node | null;
+          if (containerRef.current && related && containerRef.current.contains(related)) {
+            return;
+          }
+          onBlur?.(draft);
+        }}
+      />
+      {open && hasSuggestions && (
+        <div className={cn("menu-popover", "left")}>
+          {availableAssignees.map((assignee) => (
+            <button
+              key={assignee}
+              type="button"
+              className={cn("menu-item", assignee === draft && "active")}
+              onClick={() => {
+                setDraft(assignee);
+                onChange?.(assignee);
+                setOpen(false);
+              }}
+            >
+              {assignee === draft && <Check size={14} strokeWidth={2} />}
+              <span className="avatar">{assignee}</span>
+              <span className="flex-1 text-left">{assignee}</span>
+              <span className="font-mono text-2xs text-lx-text-muted">{assignee}</span>
             </button>
           ))}
         </div>
@@ -330,7 +429,7 @@ function DescriptionEditor({
   );
 }
 
-export function TaskDetail({ mode = "view", task, defaultColumnId, columns, columnRequiredFields, onClose, onUpdate, onDelete, onCreate }: TaskDetailProps) {
+export function TaskDetail({ mode = "view", task, defaultColumnId, columns, columnRequiredFields, availableAssignees, onClose, onUpdate, onDelete, onCreate }: TaskDetailProps) {
   const params = useParams({ strict: false }) as { slug?: string };
   const slug = params.slug;
   const isCreate = mode === "create";
@@ -685,18 +784,18 @@ export function TaskDetail({ mode = "view", task, defaultColumnId, columns, colu
           </div>
           <div className="prop-field">
             <span className="prop-label">Assignee</span>
-            <input
+            <AssigneeSuggestions
               key={isCreate ? "create" : task!.id}
-              className={cn("prop-input w-20", missingFields.includes("assignee") && "is-focused")}
               value={isCreate ? createAssignee : task!.assignee ?? ""}
+              availableAssignees={availableAssignees ?? []}
               placeholder="—"
-              onChange={isCreate ? (e) => setCreateAssignee(e.target.value) : undefined}
+              inputClassName={cn("prop-input w-20", missingFields.includes("assignee") && "is-focused")}
+              onChange={isCreate ? setCreateAssignee : undefined}
               onBlur={
                 isCreate
                   ? undefined
-                  : (e) => {
-                      const v = e.target.value.trim();
-                      const next = v || null;
+                  : (draft) => {
+                      const next = draft.trim() || null;
                       if (next !== task!.assignee) onUpdate?.(task!.id, { assignee: next });
                     }
               }
