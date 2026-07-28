@@ -76,8 +76,9 @@
     </aside>
 
     <!-- Edit view -->
-    <div class="wiki-content">
-      <div style="max-width:720px;margin:0 auto;">
+    <div class="wiki-content wiki-edit-workspace">
+      <div class="wiki-edit-main">
+        <div style="max-width:720px;margin:0 auto;">
 
         <!-- Header: breadcrumb + edit state + actions -->
         <div class="flex items-center justify-between mb-3">
@@ -87,8 +88,9 @@
           </div>
           <div class="flex items-center gap-2">
             <button class="btn btn-ghost">Cancel</button>
+            <button class="btn btn-ghost">Settings</button>
             <button class="btn btn-primary">Save</button>
-            <span class="annotation-inline">Save = primary, Cancel = ghost</span>
+            <span class="annotation-inline">Save = primary, Cancel/Settings = ghost. Settings opens right sidebar.</span>
           </div>
         </div>
 
@@ -219,6 +221,70 @@
         </div>
 
       </div>
+
+      <!-- Right edit settings sidebar -->
+      <aside class="wiki-edit-sidebar">
+        <div class="wiki-edit-sidebar-header">
+          <span class="text-base weight-600 font-body color-primary">Page settings</span>
+          <button class="nav-icon-btn" aria-label="Close settings">
+            <svg viewBox="0 0 24 24"><path d="M18 6L6 18"/><path d="M6 6l12 12"/></svg>
+          </button>
+        </div>
+
+        <div class="sidebar-section">
+          <div class="flex items-center justify-between mb-3">
+            <span class="text-sm weight-500 font-body color-primary">Autosave</span>
+            <button class="toggle-switch is-on" aria-label="Autosave on"></button>
+          </div>
+          <div class="mb-3">
+            <span class="prop-label" style="margin-bottom:6px;display:block;">Delay</span>
+            <div class="delay-selector">
+              <button class="delay-btn">500ms</button>
+              <button class="delay-btn is-active">800ms</button>
+              <button class="delay-btn">1500ms</button>
+              <button class="delay-btn">3000ms</button>
+            </div>
+          </div>
+          <p class="text-xs color-secondary font-body" style="line-height:18px;">
+            Automatically saves changes while you type.
+          </p>
+          <div class="mt-3">
+            <span class="annotation-tag">Off-state hides delay selector, shows "Unsaved changes" indicator</span>
+          </div>
+        </div>
+
+        <div class="sidebar-section" style="flex:1;display:flex;flex-direction:column;">
+          <span class="sidebar-section-title">Version History</span>
+          <div class="history-list">
+            <div class="history-item active">
+              <div class="flex flex-col gap-1">
+                <span class="text-sm weight-500 font-body color-primary">2 hours ago</span>
+                <span class="font-micro text-2xs color-warning" style="text-transform:uppercase;letter-spacing:0.04em;">Previewing</span>
+              </div>
+              <span class="history-badge history-badge-auto">autosave</span>
+            </div>
+            <div class="history-item">
+              <span class="text-sm weight-400 font-body color-primary">3 hours ago</span>
+              <span class="history-badge history-badge-manual">manual</span>
+            </div>
+            <div class="history-item">
+              <span class="text-sm weight-400 font-body color-primary">5 hours ago</span>
+              <span class="history-badge history-badge-auto">autosave</span>
+            </div>
+            <div class="history-item">
+              <span class="text-sm weight-400 font-body color-primary">Yesterday</span>
+              <span class="history-badge history-badge-manual">manual</span>
+            </div>
+          </div>
+          <div class="history-actions">
+            <button class="btn btn-primary" style="flex:1;">Restore</button>
+            <button class="btn btn-ghost" style="flex:1;">Close preview</button>
+          </div>
+          <div class="mt-3">
+            <span class="annotation-tag">Empty state: "No previous versions yet."</span>
+          </div>
+        </div>
+      </aside>
     </div>
   </div>
 
