@@ -9,6 +9,7 @@ import TaskItem from "@tiptap/extension-task-item";
 import Placeholder from "@tiptap/extension-placeholder";
 import type { Priority, Task, TaskType, TipTapDoc } from "../../shared/types";
 import { extractText } from "../../shared/tiptap-text";
+import { renderDoc } from "./tiptap-render";
 import { cn } from "./ui/cn";
 
 function GithubMark({ size = 14, className }: { size?: number; className?: string }) {
@@ -64,6 +65,7 @@ type RequiredFieldName = "assignee" | "description";
 interface TaskDetailProps {
   mode?: "view" | "create";
   task?: Task;
+  project?: { name: string };
   defaultColumnId?: string;
   columns?: { id: string; name: string }[];
   columnRequiredFields?: { columnId: string; fields: string[] }[];
@@ -234,10 +236,8 @@ function AssigneeSuggestions({
                 setOpen(false);
               }}
             >
-              {assignee === draft && <Check size={14} strokeWidth={2} />}
-              <span className="avatar">{assignee}</span>
+              <span className="avatar">{assignee.slice(0, 2).toUpperCase()}</span>
               <span className="flex-1 text-left">{assignee}</span>
-              <span className="font-mono text-2xs text-lx-text-muted">{assignee}</span>
             </button>
           ))}
         </div>
@@ -249,7 +249,6 @@ function AssigneeSuggestions({
 const emptyDoc: TipTapDoc = { type: "doc", content: [] };
 
 const capitalize = (s: string) => s[0].toUpperCase() + s.slice(1);
-const fmtDate = (iso: string) => iso.slice(0, 10);
 
 function getMissingRequiredFields(
   columnId: string,
@@ -429,7 +428,7 @@ function DescriptionEditor({
   );
 }
 
-export function TaskDetail({ mode = "view", task, defaultColumnId, columns, columnRequiredFields, availableAssignees, onClose, onUpdate, onDelete, onCreate }: TaskDetailProps) {
+export function TaskDetail({ mode = "view", task, project, defaultColumnId, columns, columnRequiredFields, availableAssignees, onClose, onUpdate, onDelete, onCreate }: TaskDetailProps) {
   const params = useParams({ strict: false }) as { slug?: string };
   const slug = params.slug;
   const isCreate = mode === "create";
@@ -585,7 +584,7 @@ export function TaskDetail({ mode = "view", task, defaultColumnId, columns, colu
               {slug ? (
                 <>
                   <Link to="/$slug" params={{ slug }} search={{}} className="text-lx-text-muted hover:text-lx-text-secondary">
-                    {slug}
+                    {project?.name ?? slug}
                   </Link>
                   {" / Board / "}
                 </>
@@ -599,7 +598,7 @@ export function TaskDetail({ mode = "view", task, defaultColumnId, columns, colu
               {slug ? (
                 <>
                   <Link to="/$slug" params={{ slug }} search={{}} className="text-lx-text-muted hover:text-lx-text-secondary">
-                    {slug}
+                    {project?.name ?? slug}
                   </Link>
                   {" / Board"}
                 </>
@@ -676,26 +675,22 @@ export function TaskDetail({ mode = "view", task, defaultColumnId, columns, colu
                 ))}
               </select>
             ) : (
-              <SelectDropdown
+              <select
+                className={cn("prop-input", missingFields.length > 0 && "is-focused")}
+                style={{ minWidth: 120, height: 32 }}
                 value={selectedColumnId}
-                options={(columns ?? []).map((column) => ({ value: column.id, label: column.name }))}
-                onChange={(columnId) => {
+                onChange={(e) => {
+                  const columnId = e.target.value;
                   setSelectedColumnId(columnId);
                   onUpdate?.(task!.id, { columnId });
                 }}
-                trigger={({ toggle }) => (
-                  <button
-                    type="button"
-                    className={cn(
-                      "text-sm font-body text-lx-text-primary hover:text-lx-text-link transition-colors",
-                      missingFields.length > 0 && "is-focused"
-                    )}
-                    onClick={toggle}
-                  >
-                    {columns?.find((column) => column.id === selectedColumnId)?.name ?? "—"}
-                  </button>
-                )}
-              />
+              >
+                {(columns ?? []).map((column) => (
+                  <option key={column.id} value={column.id}>
+                    {column.name}
+                  </option>
+                ))}
+              </select>
             )}
           </div>
           <div className="prop-field">
@@ -788,7 +783,7 @@ export function TaskDetail({ mode = "view", task, defaultColumnId, columns, colu
               key={isCreate ? "create" : task!.id}
               value={isCreate ? createAssignee : task!.assignee ?? ""}
               availableAssignees={availableAssignees ?? []}
-              placeholder="—"
+              placeholder="Initials"
               inputClassName={cn("prop-input w-20", missingFields.includes("assignee") && "is-focused")}
               onChange={isCreate ? setCreateAssignee : undefined}
               onBlur={
@@ -844,16 +839,7 @@ export function TaskDetail({ mode = "view", task, defaultColumnId, columns, colu
             </>
           ) : (
             <>
-              <DescriptionEditor
-                key={task!.id}
-                initialContent={task!.description}
-                onBlur={(doc) => {
-                  if (!task) return;
-                  const current = JSON.stringify(task.description);
-                  const next = JSON.stringify(doc);
-                  if (current !== next) onUpdate?.(task.id, { description: doc });
-                }}
-              />
+              <div className="td-prose">{renderDoc(task!.description, "task")}</div>
 
               <div className="github-section mt-4">
                 {github ? (
@@ -908,18 +894,26 @@ export function TaskDetail({ mode = "view", task, defaultColumnId, columns, colu
                       </div>
                     ) : (
                       <>
-                        <div className="flex items-center justify-between">
+                        {linkState === "idle" && (
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-2">
+                              <GithubMark size={14} className="text-lx-text-muted" />
+                              <span className="text-sm text-lx-text-muted font-body">No issue linked</span>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <span className="sync-dot sync-unlinked" />
+                              <span className="font-micro text-2xs uppercase tracking-[0.04em] text-lx-text-muted">
+                                Unlinked
+                              </span>
+                            </div>
+                          </div>
+                        )}
+                        {(linkState === "input" || linkState === "loading") && (
                           <div className="flex items-center gap-2">
                             <GithubMark size={14} className="text-lx-text-muted" />
-                            <span className="text-sm text-lx-text-muted font-body">No issue linked</span>
+                            <span className="text-sm text-lx-text-muted font-body">GitHub</span>
                           </div>
-                          <div className="flex items-center gap-2">
-                            <span className="sync-dot sync-unlinked" />
-                            <span className="font-micro text-2xs uppercase tracking-[0.04em] text-lx-text-muted">
-                              Unlinked
-                            </span>
-                          </div>
-                        </div>
+                        )}
                         {linkState === "input" && (
                           <div className="mt-3">
                             <div className="flex items-center gap-2">
@@ -989,7 +983,7 @@ export function TaskDetail({ mode = "view", task, defaultColumnId, columns, colu
         <div className="slideover-footer">
           {isCreate ? (
             <>
-              <span className="font-mono text-2xs text-lx-text-muted uppercase tracking-[0.04em]">Unsaved draft</span>
+              <span className="font-micro text-2xs text-lx-text-muted uppercase tracking-[0.04em]">Unsaved draft</span>
               <div className="flex items-center gap-2">
                 <button className="btn btn-ghost" onClick={handleClose}>
                   Cancel
@@ -1005,19 +999,14 @@ export function TaskDetail({ mode = "view", task, defaultColumnId, columns, colu
             </>
           ) : (
             <>
-              <div className="flex items-center gap-2">
-                <span className="font-mono text-2xs text-lx-text-muted uppercase tracking-[0.04em]">
-                  Created {fmtDate(task!.createdAt)} · Updated {fmtDate(task!.updatedAt)}
-                </span>
-                <button
-                  type="button"
-                  className="btn btn-danger"
-                  onClick={() => setShowDeleteDialog(true)}
-                >
-                  <TrashIcon size={14} />
-                  Delete
-                </button>
-              </div>
+              <button
+                type="button"
+                className="btn btn-danger"
+                onClick={() => setShowDeleteDialog(true)}
+              >
+                <TrashIcon size={14} />
+                Delete
+              </button>
               <button className="btn btn-ghost" onClick={handleClose}>
                 Close
               </button>

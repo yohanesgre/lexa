@@ -324,6 +324,11 @@
   }
 }
 
+/* ---- Typography utilities ---- */
+.font-micro {
+  font-family: var(--lx-font-micro);
+}
+
 /* ---- Motion keyframes ---- */
 @keyframes lx-wip-pulse {
   0%,
@@ -356,6 +361,12 @@
   }
   75% {
     transform: translateX(4px);
+  }
+}
+
+@keyframes lx-spin {
+  to {
+    transform: rotate(360deg);
   }
 }
 
@@ -567,6 +578,19 @@
   }
   .sync-diverged {
     background: var(--lx-text-warning);
+  }
+  .sync-unlinked {
+    background: var(--lx-text-tertiary);
+  }
+
+  .spinner {
+    width: 18px;
+    height: 18px;
+    border-radius: 9999px;
+    border: 2px solid var(--lx-border-strong);
+    border-top-color: var(--lx-border-focus);
+    animation: lx-spin 0.8s linear infinite;
+    flex-shrink: 0;
   }
 
   .drag-handle {
@@ -787,6 +811,16 @@
     display: flex;
     gap: 12px;
   }
+  .board-loading,
+  .board-error {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 200px;
+    color: var(--lx-text-muted);
+    font-size: 13px;
+    font-family: var(--lx-font-body);
+  }
 
   /* Slideover */
   .slideover {
@@ -850,6 +884,10 @@
     border-color: var(--lx-border-focus);
     box-shadow: var(--lx-focus-glow);
   }
+  .slideover-title-input::placeholder {
+    color: var(--lx-text-muted);
+    font-weight: 400;
+  }
   .slideover-body {
     flex: 1;
     overflow-y: auto;
@@ -905,6 +943,12 @@
   .github-section {
     padding: 16px;
     border-top: 1px solid var(--lx-border-subtle);
+  }
+  .github-link-success {
+    padding: 12px 16px;
+    border: 1px solid color-mix(in srgb, var(--lx-status-success) 20%, transparent);
+    border-radius: 6px;
+    background: var(--lx-bg-success-subtle);
   }
   .github-section.github-warning {
     background: var(--lx-bg-warning-subtle);
@@ -1058,6 +1102,7 @@
   }
   .editor-wrapper:focus-within {
     border-color: var(--lx-border-focus);
+    box-shadow: var(--lx-focus-glow);
   }
 
   .editor-toolbar {
@@ -2190,7 +2235,7 @@
     background: var(--lx-surface-elevated);
     border: 1px solid var(--lx-border-default);
     border-radius: 6px;
-    padding: 4px;
+    padding: 16px;
     box-shadow: var(--lx-shadow-lg);
     z-index: 30;
   }
@@ -2212,12 +2257,12 @@
     display: flex;
     align-items: center;
     gap: 8px;
-    height: 30px;
+    height: 32px;
     padding: 0 10px;
     border-radius: 4px;
     font-size: 13px;
     font-family: var(--lx-font-body);
-    color: var(--lx-text-primary);
+    color: var(--lx-text-secondary);
     cursor: pointer;
     white-space: nowrap;
     transition: background 100ms;

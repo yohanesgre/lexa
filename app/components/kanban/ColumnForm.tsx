@@ -19,11 +19,11 @@ export interface ColumnFormProps {
 
 const colors: { value: string | null; label: string; hex: string }[] = [
   { value: null, label: "None", hex: "transparent" },
-  { value: "#22D3EE", label: "Cyan", hex: "#22D3EE" },
   { value: "#F0C040", label: "Amber", hex: "#F0C040" },
   { value: "#4ADE80", label: "Green", hex: "#4ADE80" },
+  { value: "#22D3EE", label: "Cyan", hex: "#22D3EE" },
   { value: "#FF4444", label: "Red", hex: "#FF4444" },
-  { value: "#A855F7", label: "Purple", hex: "#A855F7" },
+  { value: "#F472B6", label: "Pink", hex: "#F472B6" },
 ];
 
 const requiredFieldOptions = [
@@ -246,7 +246,8 @@ export function ColumnForm({ column, isOpen, onClose, onSubmit }: ColumnFormProp
                   <option value="closed">closed</option>
                 </select>
                 <p className="text-[11px] leading-4 text-lx-text-muted mt-1 font-body">
-                  Maps this column to a GitHub issue state for two-way sync.
+                  Maps this column to a GitHub issue state for two-way sync. Uses{" "}
+                  <span className="font-mono">columns.github_state</span> — renaming the column never breaks sync.
                 </p>
               </div>
             </div>

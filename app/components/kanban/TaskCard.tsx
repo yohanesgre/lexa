@@ -54,7 +54,7 @@ export function TaskCard({ title, priority, type, assignee, github, githubOutOfS
       </div>
       <div className="card-title mt-2">{title}</div>
       <div className="card-meta">
-        {assignee && <div className="avatar">{assignee[0].toUpperCase()}</div>}
+        {assignee && <div className="avatar">{assignee.slice(0, 2).toUpperCase()}</div>}
         {github && (
           <span className="github-badge">
             <GithubMark />

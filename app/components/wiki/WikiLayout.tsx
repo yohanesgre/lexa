@@ -1,5 +1,5 @@
 import { Link, useNavigate } from "@tanstack/react-router";
-import { useEffect, useMemo, useState, useCallback } from "react";
+import { useEffect, useMemo, useState, useCallback, useRef } from "react";
 import { Search, ChevronRight, Plus, X, Pencil, FolderInput, Trash2 } from "lucide-react";
 import { useWikiPages, useSearchWikiPages, useDeleteWikiPage } from "../../lib/queries";
 import type { WikiPageMeta } from "../../../shared/types";
@@ -50,6 +50,20 @@ function getBreadcrumb(pagesById: Map<string, WikiPageMeta>, page: WikiPageMeta)
 
 function padCount(n: number): string {
   return String(n).padStart(3, "0");
+}
+
+const indentPadding: Record<number, number> = {
+  0: 12,
+  1: 28,
+  2: 44,
+  3: 60,
+  4: 76,
+  5: 92,
+};
+
+function getIndentPadding(level: number, isActive: boolean): number {
+  const base = indentPadding[level] ?? indentPadding[5];
+  return isActive ? base - 2 : base;
 }
 
 function renderSnippet(snippet: string): React.ReactNode {
@@ -109,12 +123,13 @@ function TreeItem({
         params={{ slug, pageSlug: node.slug }}
         className={cn(
           "tree-item",
-          level === 1 && "tree-indent-1",
-          level === 2 && "tree-indent-2",
-          level >= 3 && "tree-indent-3",
-          isActive && "active border-l-[3px] border-l-lx-accent",
+          isActive && "active border-l-2 border-l-lx-border-focus",
           contextMenuPageId === node.id && "bg-lx-surface-card-hover"
         )}
+        style={{
+          paddingLeft: getIndentPadding(level, isActive),
+          marginLeft: isActive ? 8 : undefined,
+        }}
         onContextMenu={(event) => onContextMenu(event, node)}
       >
         {hasChildren ? (
@@ -125,16 +140,14 @@ function TreeItem({
               e.stopPropagation();
               onToggle(node.id);
             }}
-            className="chevron-small p-1 -ml-1"
+            className="chevron-small p-0.5 -ml-0.5"
             style={{ transform: isExpanded ? "rotate(90deg)" : "rotate(0deg)" }}
             aria-label={isExpanded ? "Collapse" : "Expand"}
             onContextMenu={(event) => onContextMenu(event, node)}
           >
             <ChevronRight size={12} strokeWidth={2} />
           </button>
-        ) : (
-          <span className="w-3 h-3 mr-1 shrink-0" />
-        )}
+        ) : null}
         <PageIcon className="text-lx-text-muted mr-1.5 shrink-0" />
         <span className="truncate">{node.title}</span>
       </Link>
@@ -190,6 +203,8 @@ export function WikiLayout({ slug, activePageSlug, children }: WikiLayoutProps) 
   const [query, setQuery] = useState("");
   const [debouncedQuery, setDebouncedQuery] = useState("");
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const [isSearchFocused, setIsSearchFocused] = useState(false);
+  const searchInputRef = useRef<HTMLInputElement>(null);
   const [newPageModal, setNewPageModal] = useState<{ isOpen: boolean; defaultParentId: string | null }>({
     isOpen: false,
     defaultParentId: null,
@@ -299,26 +314,47 @@ export function WikiLayout({ slug, activePageSlug, children }: WikiLayoutProps) 
       <aside className="wiki-sidebar">
         <div className="px-4 mb-3">
           <div className="relative">
-            <Search
-              size={14}
-              strokeWidth={1.5}
-              className="absolute left-3 top-1/2 -translate-y-1/2 text-lx-text-muted pointer-events-none"
-            />
-            <input
-              type="text"
-              className="prop-input w-full pl-8 pr-8"
-              placeholder="Search wiki..."
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-            />
-            {query.length > 0 && (
+            {isSearchFocused || query.length > 0 ? (
+              <>
+                <Search
+                  size={14}
+                  strokeWidth={1.5}
+                  className="absolute left-3 top-1/2 -translate-y-1/2 text-lx-text-muted pointer-events-none"
+                />
+                <input
+                  ref={searchInputRef}
+                  type="text"
+                  className="prop-input w-full pl-8 pr-8"
+                  placeholder="Search wiki..."
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                  onBlur={() => {
+                    if (query.length === 0) setIsSearchFocused(false);
+                  }}
+                  autoFocus
+                />
+                {query.length > 0 && (
+                  <button
+                    type="button"
+                    className="absolute right-2 top-1/2 -translate-y-1/2 w-5 h-5 inline-flex items-center justify-center rounded text-lx-text-muted hover:text-lx-text-primary"
+                    onClick={() => {
+                      setQuery("");
+                      searchInputRef.current?.focus();
+                    }}
+                    aria-label="Clear search"
+                  >
+                    <X size={12} strokeWidth={1.5} />
+                  </button>
+                )}
+              </>
+            ) : (
               <button
                 type="button"
-                className="absolute right-2 top-1/2 -translate-y-1/2 w-5 h-5 inline-flex items-center justify-center rounded text-lx-text-muted hover:text-lx-text-primary"
-                onClick={() => setQuery("")}
-                aria-label="Clear search"
+                className="flex items-center gap-2 w-full h-8 px-3 text-left"
+                onClick={() => setIsSearchFocused(true)}
               >
-                <X size={12} strokeWidth={1.5} />
+                <Search size={14} strokeWidth={1.5} className="text-lx-text-muted" />
+                <span className="text-xs text-lx-text-muted font-body">Search wiki...</span>
               </button>
             )}
           </div>

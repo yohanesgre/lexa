@@ -161,8 +161,8 @@ export function NewPageModal({ slug, isOpen, onClose, defaultParentId, pages }: 
           aria-labelledby="new-page-title"
         >
           <form onSubmit={handleSubmit}>
-            <div className="h-14 px-4 border-b border-lx-border-subtle flex items-center justify-between">
-              <h2 id="new-page-title" className="font-display text-base font-medium text-lx-text-primary">
+            <div className="p-4 flex items-center justify-between">
+              <h2 id="new-page-title" className="font-display text-lg font-semibold text-lx-text-primary">
                 New page
               </h2>
               <button

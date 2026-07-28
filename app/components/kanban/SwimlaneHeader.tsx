@@ -11,11 +11,14 @@ interface SwimlaneHeaderProps {
 
 export function SwimlaneHeader({ name, count, collapsed = false, onToggle }: SwimlaneHeaderProps) {
   return (
-    <div className="swimlane-header">
+    <div className="swimlane-header" onClick={onToggle}>
       <button
         type="button"
         className="chevron-btn"
-        onClick={onToggle}
+        onClick={(e) => {
+          e.stopPropagation();
+          onToggle?.();
+        }}
         aria-label={collapsed ? "Expand swimlane" : "Collapse swimlane"}
       >
         <svg
@@ -23,13 +26,14 @@ export function SwimlaneHeader({ name, count, collapsed = false, onToggle }: Swi
           viewBox="0 0 24 24"
           fill="none"
           stroke="currentColor"
-          strokeWidth={1.5}
+          strokeWidth={2}
         >
           <path d="M6 9l6 6 6-6" strokeLinecap="round" strokeLinejoin="round" />
         </svg>
       </button>
       <span className="swimlane-name">{name}</span>
       {count !== undefined && <span className="swimlane-count">{String(count).padStart(3, "0")}</span>}
+      <span className="flex-1" />
       {onToggle && (
         <Menu
           align="left"

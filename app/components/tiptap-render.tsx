@@ -141,5 +141,9 @@ export function renderDoc(doc: TipTapDoc, variant: "task" | "wiki" = "task"): Re
       <p className="italic text-lx-text-muted">This page is empty.</p>
     );
   }
-  return nodes.map((node, i) => renderNode(node, `n${i}`, variant));
+  const visibleNodes = nodes.filter((node) => {
+    if (node.type === "heading") return hasText(node.content ?? []);
+    return true;
+  });
+  return visibleNodes.map((node, i) => renderNode(node, `n${i}`, variant));
 }

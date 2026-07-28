@@ -261,7 +261,7 @@ export function KanbanBoard({ board, onMoveTask, onSelectTask, onOpenCreateTask 
           </div>
         </div>
         {isFilterActive(filters) && <ActiveFilterBar board={board} filters={filters} onChange={setFilters} />}
-        <div className="board-scroll">
+        <div className={cn("board-scroll", columns.length === 0 && "items-center justify-center")}>
         {columns.length === 0 ? (
           <div className="empty-state" style={{ padding: 24 }}>
             <div className="empty-state-icon">
@@ -274,7 +274,7 @@ export function KanbanBoard({ board, onMoveTask, onSelectTask, onOpenCreateTask 
             <div className="empty-state-desc">Add a column to start tracking tasks.</div>
             <button
               type="button"
-              className="btn btn-primary mt-4"
+              className="btn btn-primary"
               onClick={() => setIsSettingsOpen(true)}
             >
               <svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5}>
