@@ -95,6 +95,38 @@ wrangler d1 execute lexa-db --local --command "<sql>"   # inspect data
 
 Each phase in IMPLEMENTATION.md has its own acceptance block — run it and paste the output.
 
+## Agent-browser usage
+
+When using agent-browser for testing, QA, or review, divide the scenario into smaller, focused tasks:
+
+1. **Open the page and snapshot first** — confirm the page loaded before interacting.
+2. **Test one feature at a time** — don't chain clicks across components in one pass.
+3. **Prefer `find role|text button click --name "..."` over `@eN` ref clicks** — refs become stale after any DOM change; semantic locators are more reliable across re-renders.
+4. **Verify after each interaction** — screenshot or snapshot after each click to confirm expected state.
+5. **Close overlays before continuing** — modals/dropdowns/menus may block interactions with underlying elements.
+6. **Check the console** (`eval` for `console.log` buffers) when a click produces no visible result.
+
+### Testing wireframes
+
+Wireframes are static HTML files with no JavaScript. To preview them with agent-browser:
+
+```bash
+# Start a Python HTTP server in the wireframes directory
+cd wireframes && python3 -m http.server 8080 &
+
+# Open the wireframe
+agent-browser open http://localhost:8080/wiki-edit.html
+
+# Inspect
+agent-browser screenshot /tmp/wireframe.png
+agent-browser snapshot -i -d 5
+
+# Clean up when done
+pkill -f "http.server 8080"
+```
+
+Use this to visually verify wireframe layout, spacing, and structure before implementing. Wireframe files live in `wireframes/` and use `wireframes/wireframes.css` for styles.
+
 ## When you're stuck
 
 1. Re-read the relevant design doc section — the answer is usually there.
