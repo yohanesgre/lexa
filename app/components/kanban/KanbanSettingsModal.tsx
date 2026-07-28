@@ -28,17 +28,14 @@ function ColorSwatch({ color }: { color: string }) {
   if (!color) {
     return (
       <span className="inline-flex items-center gap-2">
-        <span
-          className="inline-block w-3.5 h-3.5 rounded border"
-          style={{ background: "transparent", borderColor: "var(--lx-border-strong)" }}
-        />
+        <span className="color-swatch" style={{ background: "transparent", borderColor: "var(--lx-border-strong)" }} />
         <span className="text-xs text-lx-text-muted">None</span>
       </span>
     );
   }
   return (
     <span className="inline-flex items-center gap-2">
-      <span className="inline-block w-3.5 h-3.5 rounded border border-lx-border-default" style={{ background: color }} />
+      <span className="color-swatch" style={{ background: color }} />
       <span className="text-xs text-lx-text-secondary">{colorName(color)}</span>
     </span>
   );
@@ -46,11 +43,17 @@ function ColorSwatch({ color }: { color: string }) {
 
 function colorName(color: string): string {
   const names: Record<string, string> = {
+    "#6B7280": "Gray",
+    "#3B82F6": "Blue",
     "#F0C040": "Amber",
+    "#F59E0B": "Amber",
     "#4ADE80": "Green",
+    "#10B981": "Green",
     "#22D3EE": "Cyan",
     "#FF4444": "Red",
+    "#EF4444": "Red",
     "#F472B6": "Pink",
+    "#A855F7": "Purple",
   };
   return names[color.toUpperCase()] ?? color;
 }
@@ -124,7 +127,7 @@ export function KanbanSettingsModal({ slug, isOpen, onClose }: KanbanSettingsMod
             </button>
           </div>
 
-          <div className="p-4 overflow-y-auto" style={{ maxHeight: "calc(100vh - 140px)" }}>
+          <div className="px-5 py-4 overflow-y-auto" style={{ maxHeight: "calc(100vh - 140px)" }}>
             {isLoading ? (
               <div className="text-sm text-lx-text-muted py-8 text-center">Loading settings…</div>
             ) : columnsError || swimlanesError ? (
@@ -144,56 +147,66 @@ export function KanbanSettingsModal({ slug, isOpen, onClose }: KanbanSettingsMod
                       <table className="w-full border-collapse text-[13px] font-body">
                         <thead>
                           <tr className="border-b border-lx-border-default">
-                            <th className="w-8 p-2.5"></th>
-                            <th className="p-2.5 text-left text-[11px] uppercase tracking-[0.05em] text-lx-text-secondary font-medium font-body">
+                            <th className="w-8 py-2.5 px-3"></th>
+                            <th className="py-2.5 px-3 text-left text-[11px] uppercase tracking-[0.05em] text-lx-text-secondary font-medium font-body">
                               Name
                             </th>
-                            <th className="p-2.5 text-left text-[11px] uppercase tracking-[0.05em] text-lx-text-secondary font-medium font-body">
+                            <th className="py-2.5 px-3 text-left text-[11px] uppercase tracking-[0.05em] text-lx-text-secondary font-medium font-body">
                               Color
                             </th>
-                            <th className="p-2.5 text-left text-[11px] uppercase tracking-[0.05em] text-lx-text-secondary font-medium font-body">
+                            <th className="py-2.5 px-3 text-left text-[11px] uppercase tracking-[0.05em] text-lx-text-secondary font-medium font-body">
                               WIP Limit
                             </th>
-                            <th className="p-2.5 text-left text-[11px] uppercase tracking-[0.05em] text-lx-text-secondary font-medium font-body">
+                            <th className="py-2.5 px-3 text-left text-[11px] uppercase tracking-[0.05em] text-lx-text-secondary font-medium font-body">
                               Required Fields
                             </th>
-                            <th className="p-2.5 text-left text-[11px] uppercase tracking-[0.05em] text-lx-text-secondary font-medium font-body">
+                            <th className="py-2.5 px-3 text-left text-[11px] uppercase tracking-[0.05em] text-lx-text-secondary font-medium font-body">
                               GitHub State
                             </th>
-                            <th className="w-[100px] p-2.5"></th>
+                            <th className="w-[100px] py-2.5 px-3"></th>
                           </tr>
                         </thead>
                         <tbody>
                           {columns.map((column) => (
                             <tr key={column.id} className="border-b border-lx-border-default last:border-b-0">
-                              <td className="p-2.5">
+                              <td className="py-2.5 px-3">
                                 <GripVertical size={14} className="text-lx-text-muted cursor-grab" />
                               </td>
-                              <td className="p-2.5 text-sm font-medium text-lx-text-primary">{column.name}</td>
-                              <td className="p-2.5">
+                              <td className="py-2.5 px-3 text-sm font-medium text-lx-text-primary">{column.name}</td>
+                              <td className="py-2.5 px-3">
                                 <ColorSwatch color={column.color} />
                               </td>
-                              <td className="p-2.5">
+                              <td className="py-2.5 px-3">
                                 <span className="font-mono text-2xs text-lx-text-secondary">{formatWipLimit(column.wipLimit)}</span>
                               </td>
-                              <td className="p-2.5">
+                              <td className="py-2.5 px-3">
                                 <span className={cn("text-xs", column.requiredFields.length === 0 ? "text-lx-text-muted" : "text-lx-text-secondary")}>
                                   {formatRequiredFields(column.requiredFields)}
                                 </span>
                               </td>
-                              <td className="p-2.5">
+                              <td className="py-2.5 px-3">
                                 {column.githubState ? (
                                   <span className="font-mono text-2xs text-lx-text-success">{column.githubState}</span>
                                 ) : (
                                   <span className="text-xs text-lx-text-muted">—</span>
                                 )}
                               </td>
-                              <td className="p-2.5">
-                                <div className="flex items-center gap-2">
-                                  <button type="button" className="btn btn-ghost h-7 px-2 text-xs" onClick={() => setColumnForm({ isOpen: true, column })}>
+                              <td className="py-2.5 px-3">
+                                <div className="flex items-center gap-3">
+                                  <button
+                                    type="button"
+                                    className="btn btn-ghost h-7 px-2.5 text-xs"
+                                    onClick={() => setColumnForm({ isOpen: true, column })}
+                                    aria-label="Edit column"
+                                  >
                                     Edit
                                   </button>
-                                  <button type="button" className="btn btn-danger h-7 px-2" onClick={() => deleteColumn.mutate({ id: column.id })} aria-label="Delete column">
+                                  <button
+                                    type="button"
+                                    className="btn btn-danger h-7 w-7 p-0 flex items-center justify-center"
+                                    onClick={() => deleteColumn.mutate({ id: column.id })}
+                                    aria-label="Delete column"
+                                  >
                                     <Trash2 size={12} strokeWidth={1.5} />
                                   </button>
                                 </div>
@@ -224,36 +237,46 @@ export function KanbanSettingsModal({ slug, isOpen, onClose }: KanbanSettingsMod
                       <table className="w-full border-collapse text-[13px] font-body">
                         <thead>
                           <tr className="border-b border-lx-border-default">
-                            <th className="w-8 p-2.5"></th>
-                            <th className="p-2.5 text-left text-[11px] uppercase tracking-[0.05em] text-lx-text-secondary font-medium font-body">
+                            <th className="w-8 py-2.5 px-3"></th>
+                            <th className="py-2.5 px-3 text-left text-[11px] uppercase tracking-[0.05em] text-lx-text-secondary font-medium font-body">
                               Name
                             </th>
-                            <th className="p-2.5 text-left text-[11px] uppercase tracking-[0.05em] text-lx-text-secondary font-medium font-body">
+                            <th className="py-2.5 px-3 text-left text-[11px] uppercase tracking-[0.05em] text-lx-text-secondary font-medium font-body">
                               Description
                             </th>
-                            <th className="w-[100px] p-2.5"></th>
+                            <th className="w-[100px] py-2.5 px-3"></th>
                           </tr>
                         </thead>
                         <tbody>
                           {swimlanes.map((swimlane) => (
                             <tr key={swimlane.id} className="border-b border-lx-border-default last:border-b-0">
-                              <td className="p-2.5">
+                              <td className="py-2.5 px-3">
                                 <GripVertical size={14} className="text-lx-text-muted cursor-grab" />
                               </td>
-                              <td className="p-2.5 text-sm font-medium text-lx-text-primary">{swimlane.name}</td>
-                              <td className="p-2.5">
+                              <td className="py-2.5 px-3 text-sm font-medium text-lx-text-primary">{swimlane.name}</td>
+                              <td className="py-2.5 px-3">
                                 {swimlane.description ? (
                                   <span className="text-xs text-lx-text-secondary">{swimlane.description}</span>
                                 ) : (
                                   <span className="text-xs text-lx-text-muted">—</span>
                                 )}
                               </td>
-                              <td className="p-2.5">
-                                <div className="flex items-center gap-2">
-                                  <button type="button" className="btn btn-ghost h-7 px-2 text-xs" onClick={() => setSwimlaneForm({ isOpen: true, swimlane })}>
+                              <td className="py-2.5 px-3">
+                                <div className="flex items-center gap-3">
+                                  <button
+                                    type="button"
+                                    className="btn btn-ghost h-7 px-2.5 text-xs"
+                                    onClick={() => setSwimlaneForm({ isOpen: true, swimlane })}
+                                    aria-label="Edit swimlane"
+                                  >
                                     Edit
                                   </button>
-                                  <button type="button" className="btn btn-danger h-7 px-2" onClick={() => deleteSwimlane.mutate({ id: swimlane.id })} aria-label="Delete swimlane">
+                                  <button
+                                    type="button"
+                                    className="btn btn-danger h-7 w-7 p-0 flex items-center justify-center"
+                                    onClick={() => deleteSwimlane.mutate({ id: swimlane.id })}
+                                    aria-label="Delete swimlane"
+                                  >
                                     <Trash2 size={12} strokeWidth={1.5} />
                                   </button>
                                 </div>

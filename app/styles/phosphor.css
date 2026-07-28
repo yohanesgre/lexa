@@ -935,6 +935,14 @@
   .banner-warning-dismiss:hover {
     background: rgba(240, 192, 64, 0.15);
   }
+  .color-swatch {
+    width: 14px;
+    height: 14px;
+    border-radius: 4px;
+    display: inline-block;
+    border: 1px solid var(--lx-border-default);
+    flex-shrink: 0;
+  }
   .slideover-footer {
     display: flex;
     align-items: center;
