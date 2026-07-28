@@ -10,24 +10,17 @@ interface RenamePageModalProps {
   onClose: () => void;
 }
 
-function isValidSlug(value: string): boolean {
-  return /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(value) && value.length <= 60;
-}
-
 export function RenamePageModal({ slug, page, isOpen, onClose }: RenamePageModalProps) {
   const updatePage = useUpdateWikiPage(slug);
   const [title, setTitle] = useState("");
-  const [pageSlug, setPageSlug] = useState("");
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!isOpen) return;
     if (page) {
       setTitle(page.title);
-      setPageSlug(page.slug);
     } else {
       setTitle("");
-      setPageSlug("");
     }
     setError(null);
   }, [isOpen, page]);
@@ -49,25 +42,16 @@ export function RenamePageModal({ slug, page, isOpen, onClose }: RenamePageModal
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
     const trimmedTitle = title.trim();
-    const trimmedSlug = pageSlug.trim();
 
     if (trimmedTitle === "") {
       setError("Title is required");
-      return;
-    }
-    if (trimmedSlug === "") {
-      setError("Slug is required");
-      return;
-    }
-    if (!isValidSlug(trimmedSlug)) {
-      setError("Slug must be lowercase letters, numbers, and hyphens only");
       return;
     }
 
     setError(null);
 
     try {
-      await updatePage.mutateAsync({ pageSlug: page.slug, title: trimmedTitle, slug: trimmedSlug });
+      await updatePage.mutateAsync({ pageSlug: page.slug, title: trimmedTitle });
       onClose();
     } catch (err) {
       const message = err instanceof Error ? err.message : "Failed to rename page";
@@ -124,19 +108,6 @@ export function RenamePageModal({ slug, page, isOpen, onClose }: RenamePageModal
                   />
                 </div>
 
-                <div>
-                  <label htmlFor="rename-page-slug" className="prop-label block mb-1.5">
-                    Slug
-                  </label>
-                  <input
-                    id="rename-page-slug"
-                    type="text"
-                    className="prop-input w-full font-mono text-xs"
-                    value={pageSlug}
-                    onChange={(e) => setPageSlug(e.target.value)}
-                    placeholder="page-slug"
-                  />
-                </div>
               </div>
 
               <div className="flex items-center gap-2 mt-4 justify-end">

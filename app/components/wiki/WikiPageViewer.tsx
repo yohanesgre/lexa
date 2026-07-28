@@ -309,13 +309,8 @@ export function WikiPageViewer({ slug, page, pages }: WikiPageViewerProps) {
   const navigate = useNavigate();
   const updateWikiPage = useUpdateWikiPage(slug);
 
-  const parent = page.parentId ? pages.find((p) => p.id === page.parentId) : null;
-  const parentPath = parent ? `${parent.slug}/` : "";
-  const initialSlugSegment = page.slug.slice(parentPath.length);
-
   const [isEditing, setIsEditing] = useState(false);
   const [title, setTitle] = useState(page.title);
-  const [slugSegment, setSlugSegment] = useState(initialSlugSegment);
   const [lastSavedPage, setLastSavedPage] = useState(page);
   const [lastSavedAt, setLastSavedAt] = useState<Date | null>(null);
   const [isDirty, setIsDirty] = useState(false);
@@ -341,17 +336,12 @@ export function WikiPageViewer({ slug, page, pages }: WikiPageViewerProps) {
 
   const editorRef = useRef<Editor | null>(null);
   const titleRef = useRef(title);
-  const slugSegmentRef = useRef(slugSegment);
   const autosaveTimer = useRef<number | null>(null);
   const markDirtyRef = useRef<() => void>(() => {});
 
   useEffect(() => {
     titleRef.current = title;
   }, [title]);
-
-  useEffect(() => {
-    slugSegmentRef.current = slugSegment;
-  }, [slugSegment]);
 
   const editor = useEditor({
     immediatelyRender: false,
@@ -394,7 +384,6 @@ export function WikiPageViewer({ slug, page, pages }: WikiPageViewerProps) {
       const savedPage = await updateWikiPage.mutateAsync({
         pageSlug: page.slug,
         title: titleRef.current,
-        slug: `${parentPath}${slugSegmentRef.current}`,
         content: editor.getJSON() as unknown as TipTapDoc,
         saveType,
       });
@@ -433,7 +422,6 @@ export function WikiPageViewer({ slug, page, pages }: WikiPageViewerProps) {
 
   const handleStartEditing = () => {
     setTitle(page.title);
-    setSlugSegment(initialSlugSegment);
     setLastSavedPage(page);
     setLastSavedAt(null);
     setIsDirty(false);
@@ -448,7 +436,6 @@ export function WikiPageViewer({ slug, page, pages }: WikiPageViewerProps) {
       autosaveTimer.current = null;
     }
     setTitle(lastSavedPage.title);
-    setSlugSegment(lastSavedPage.slug.slice(parentPath.length));
     editorRef.current?.setEditable(false);
     editorRef.current?.commands.setContent(lastSavedPage.content as unknown as JSONContent);
     setIsDirty(false);
@@ -523,22 +510,6 @@ export function WikiPageViewer({ slug, page, pages }: WikiPageViewerProps) {
             }}
             placeholder="Page title"
           />
-
-          <div className="wiki-slug-row">
-            <span className="prop-label shrink-0">Slug</span>
-            <div className="wiki-slug-input">
-              <span className="wiki-slug-prefix">/wiki/{parentPath}</span>
-              <input
-                className="wiki-slug-segment"
-                value={slugSegment}
-                onChange={(e) => {
-                  setSlugSegment(e.target.value);
-                  markDirty();
-                }}
-                placeholder="page-slug"
-              />
-            </div>
-          </div>
 
           {editor && <WikiEditor editor={editor} />}
 
