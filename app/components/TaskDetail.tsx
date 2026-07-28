@@ -424,7 +424,7 @@ function DescriptionEditor({
           </svg>
         </ToolbarButton>
       </div>
-      <EditorContent editor={editor} />
+      <EditorContent editor={editor} className="editor-content" />
     </div>
   );
 }

@@ -1084,15 +1084,17 @@
     flex-shrink: 0;
   }
 
-  .editor-content .ProseMirror {
+  .editor-content {
     padding: 12px;
     background: var(--lx-surface-input);
     border-radius: 0 0 6px 6px;
+    min-height: 120px;
+  }
+  .editor-content .ProseMirror {
     font-size: 15px;
     line-height: 22px;
     color: var(--lx-text-secondary);
     font-family: var(--lx-font-body);
-    min-height: 120px;
     outline: none;
   }
   .editor-content .ProseMirror p {
