@@ -1,6 +1,7 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, Navigate } from "@tanstack/react-router";
 import { Plus } from "lucide-react";
 import { WikiLayout } from "../../../components/wiki/WikiLayout";
+import type { WikiPageMeta } from "../../../../shared/types";
 
 export const Route = createFileRoute("/$slug/wiki/")({
   component: WikiIndexPage,
@@ -53,6 +54,12 @@ function WikiEmptyState({ onCreate }: { onCreate: () => void }) {
   );
 }
 
+function firstRootPage(pages: WikiPageMeta[]): WikiPageMeta | undefined {
+  const roots = pages.filter((p) => p.parentId === null);
+  roots.sort((a, b) => a.position - b.position);
+  return roots[0];
+}
+
 function WikiIndexPage() {
   const { slug } = Route.useParams();
   return (
@@ -63,6 +70,16 @@ function WikiIndexPage() {
             <div className="wiki-content">
               <WikiEmptyState onCreate={openNewPage} />
             </div>
+          );
+        }
+        const first = firstRootPage(pages);
+        if (first) {
+          return (
+            <Navigate
+              to="/$slug/wiki/$pageSlug"
+              params={{ slug, pageSlug: first.slug }}
+              replace
+            />
           );
         }
         return (
