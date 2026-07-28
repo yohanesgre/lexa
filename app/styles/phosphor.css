@@ -780,7 +780,7 @@
     gap: 16px;
     padding: 16px;
     overflow-x: auto;
-    overflow-y: hidden;
+    overflow-y: auto;
     flex: 1;
   }
   .columns-row {
