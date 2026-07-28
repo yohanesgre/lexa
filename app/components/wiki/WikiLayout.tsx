@@ -492,13 +492,9 @@ export function WikiLayout({ slug, activePageSlug, children }: WikiLayoutProps) 
         </>
       )}
 
-      <div className="wiki-content">
-        <div className="wiki-prose">
-          {pages
-            ? children(pages, { openNewPage: () => setNewPageModal({ isOpen: true, defaultParentId: null }) })
-            : null}
-        </div>
-      </div>
+      {pages
+        ? children(pages, { openNewPage: () => setNewPageModal({ isOpen: true, defaultParentId: null }) })
+        : null}
     </div>
   );
 }

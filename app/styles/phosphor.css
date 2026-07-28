@@ -2406,4 +2406,178 @@
       transform: scale(1);
     }
   }
+
+  /* ---- Wiki edit settings sidebar ---- */
+  .wiki-edit-workspace {
+    display: flex;
+    padding: 0;
+    overflow: hidden;
+  }
+
+  .wiki-edit-main {
+    flex: 1;
+    overflow-y: auto;
+    padding: 32px 48px;
+    min-width: 0;
+  }
+
+  .wiki-edit-sidebar {
+    width: 280px;
+    flex-shrink: 0;
+    display: flex;
+    flex-direction: column;
+    background: var(--lx-surface-elevated);
+    border-left: 1px solid var(--lx-border-default);
+    box-shadow: var(--lx-shadow-slideover);
+    overflow: hidden;
+  }
+
+  .wiki-edit-sidebar-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    height: 48px;
+    padding: 0 12px 0 16px;
+    border-bottom: 1px solid var(--lx-border-subtle);
+    flex-shrink: 0;
+  }
+
+  .sidebar-section {
+    padding: 16px;
+    border-bottom: 1px solid var(--lx-border-subtle);
+  }
+  .sidebar-section:last-child {
+    border-bottom: none;
+  }
+
+  .sidebar-section-title {
+    display: block;
+    font-size: 12px;
+    font-weight: 500;
+    font-family: var(--lx-font-body);
+    color: var(--lx-text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    margin-bottom: 12px;
+  }
+
+  .toggle-switch {
+    width: 36px;
+    height: 20px;
+    border-radius: 9999px;
+    background: var(--lx-surface-card-hover);
+    border: 1px solid var(--lx-border-strong);
+    position: relative;
+    cursor: pointer;
+    flex-shrink: 0;
+    transition: background 100ms, border-color 100ms;
+  }
+  .toggle-switch::after {
+    content: "";
+    position: absolute;
+    top: 1px;
+    left: 1px;
+    width: 16px;
+    height: 16px;
+    border-radius: 9999px;
+    background: var(--lx-text-secondary);
+    transition: transform 100ms, background 100ms;
+  }
+  .toggle-switch.is-on {
+    background: var(--lx-border-focus);
+    border-color: var(--lx-border-focus);
+  }
+  .toggle-switch.is-on::after {
+    transform: translateX(16px);
+    background: var(--lx-text-inverse);
+  }
+
+  .delay-selector {
+    display: flex;
+    gap: 4px;
+    flex-wrap: wrap;
+  }
+  .delay-btn {
+    height: 24px;
+    padding: 0 8px;
+    border-radius: 4px;
+    border: 1px solid transparent;
+    background: transparent;
+    color: var(--lx-text-secondary);
+    font-family: var(--lx-font-mono);
+    font-size: 11px;
+    line-height: 14px;
+    cursor: pointer;
+    transition: background 100ms, border-color 100ms, color 100ms;
+  }
+  .delay-btn:hover {
+    background: var(--lx-surface-card-hover);
+    color: var(--lx-text-primary);
+  }
+  .delay-btn.is-active {
+    background: var(--lx-surface-selected);
+    border-color: color-mix(in srgb, var(--lx-border-focus) 35%, transparent);
+    color: var(--lx-text-primary);
+  }
+
+  .history-list {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    max-height: 240px;
+    overflow-y: auto;
+    margin-bottom: 12px;
+  }
+  .history-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 8px 10px;
+    border-radius: 4px;
+    border-left: 2px solid transparent;
+    cursor: pointer;
+    transition: background 100ms;
+  }
+  .history-item:hover {
+    background: var(--lx-surface-card-hover);
+  }
+  .history-item.active {
+    background: var(--lx-surface-selected);
+    border-left-color: var(--lx-border-focus);
+  }
+  .history-badge {
+    display: inline-flex;
+    align-items: center;
+    height: 18px;
+    padding: 0 5px;
+    border-radius: 3px;
+    font-family: var(--lx-font-micro);
+    font-size: 10px;
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    flex-shrink: 0;
+  }
+  .history-badge-auto {
+    background: color-mix(in srgb, var(--lx-badge-task) 10%, transparent);
+    color: var(--lx-badge-task);
+  }
+  .history-badge-manual {
+    background: var(--lx-bg-warning-subtle);
+    color: var(--lx-text-warning);
+  }
+  .history-actions {
+    display: flex;
+    gap: 8px;
+    flex-shrink: 0;
+  }
+  .history-empty {
+    padding: 24px 16px;
+    text-align: center;
+    font-size: 12px;
+    line-height: 18px;
+    color: var(--lx-text-muted);
+    font-family: var(--lx-font-body);
+  }
 }

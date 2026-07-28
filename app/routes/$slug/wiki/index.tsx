@@ -59,12 +59,18 @@ function WikiIndexPage() {
     <WikiLayout slug={slug}>
       {(pages, { openNewPage }) => {
         if (pages.length === 0) {
-          return <WikiEmptyState onCreate={openNewPage} />;
+          return (
+            <div className="wiki-content">
+              <WikiEmptyState onCreate={openNewPage} />
+            </div>
+          );
         }
         return (
-          <div className="flex items-center justify-center h-full text-lx-text-muted">
-            <div className="text-center">
-              <p className="text-sm">Select a page from the sidebar to start reading.</p>
+          <div className="wiki-content">
+            <div className="flex items-center justify-center h-full text-lx-text-muted">
+              <div className="text-center">
+                <p className="text-sm">Select a page from the sidebar to start reading.</p>
+              </div>
             </div>
           </div>
         );

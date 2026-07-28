@@ -124,6 +124,13 @@ export function useUpdateWikiPage(slug: string) {
   });
 }
 
+export function useRevisions(slug: string, pageSlug: string, limit?: number) {
+  return useQuery({
+    queryKey: ["wikiRevisions", slug, pageSlug, limit],
+    queryFn: () => api.listRevisions(slug, pageSlug, limit).then((r) => r.revisions),
+  });
+}
+
 export function useDeleteWikiPage(slug: string) {
   const qc = useQueryClient();
   return useMutation({

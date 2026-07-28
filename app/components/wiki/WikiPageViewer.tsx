@@ -14,6 +14,7 @@ import type { WikiPage, WikiPageMeta, TipTapDoc } from "../../../shared/types";
 import { useUpdateWikiPage } from "../../lib/queries";
 import { cn } from "../ui/cn";
 import { renderDoc } from "../tiptap-render";
+import { EditSidebar } from "./EditSidebar";
 
 const emptyDoc: TipTapDoc = { type: "doc", content: [] };
 
@@ -303,6 +304,24 @@ export function WikiPageViewer({ slug, page, pages }: WikiPageViewerProps) {
   const [lastSavedAt, setLastSavedAt] = useState<Date | null>(null);
   const [isDirty, setIsDirty] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  const [autosaveEnabled, setAutosaveEnabled] = useState(() => {
+    if (typeof window === "undefined") return true;
+    const stored = window.localStorage.getItem("lexa-wiki-autosave");
+    return stored === null ? true : stored === "true";
+  });
+  const [autosaveDelay, setAutosaveDelay] = useState(() => {
+    if (typeof window === "undefined") return 800;
+    const stored = window.localStorage.getItem("lexa-wiki-autosave-delay");
+    return stored === null ? 800 : Number(stored) || 800;
+  });
+
+  useEffect(() => {
+    window.localStorage.setItem("lexa-wiki-autosave", String(autosaveEnabled));
+  }, [autosaveEnabled]);
+
+  useEffect(() => {
+    window.localStorage.setItem("lexa-wiki-autosave-delay", String(autosaveDelay));
+  }, [autosaveDelay]);
 
   const editorRef = useRef<Editor | null>(null);
   const titleRef = useRef(title);
@@ -343,7 +362,7 @@ export function WikiPageViewer({ slug, page, pages }: WikiPageViewerProps) {
     .concat(page.title)
     .join(" / ");
 
-  const save = async () => {
+  const save = async (saveType: "autosave" | "manual" = "manual") => {
     const editor = editorRef.current;
     if (!editor) return;
     if (autosaveTimer.current !== null) {
@@ -357,6 +376,7 @@ export function WikiPageViewer({ slug, page, pages }: WikiPageViewerProps) {
         title: titleRef.current,
         slug: `${parentPath}${slugSegmentRef.current}`,
         content: editor.getJSON() as unknown as TipTapDoc,
+        saveType,
       });
       setLastSavedPage(savedPage);
       setLastSavedAt(new Date());
@@ -380,10 +400,11 @@ export function WikiPageViewer({ slug, page, pages }: WikiPageViewerProps) {
 
   const markDirty = () => {
     setIsDirty(true);
+    if (!autosaveEnabled) return;
     if (autosaveTimer.current !== null) window.clearTimeout(autosaveTimer.current);
     autosaveTimer.current = window.setTimeout(() => {
-      void saveRef.current();
-    }, 800);
+      void saveRef.current("autosave");
+    }, autosaveDelay);
   };
 
   useEffect(() => {
@@ -396,6 +417,7 @@ export function WikiPageViewer({ slug, page, pages }: WikiPageViewerProps) {
     setLastSavedPage(page);
     setLastSavedAt(null);
     setIsDirty(false);
+    editorRef.current?.setEditable(true);
     editorRef.current?.commands.setContent((page.content ?? emptyDoc) as unknown as JSONContent);
     setIsEditing(true);
   };
@@ -407,13 +429,15 @@ export function WikiPageViewer({ slug, page, pages }: WikiPageViewerProps) {
     }
     setTitle(lastSavedPage.title);
     setSlugSegment(lastSavedPage.slug.slice(parentPath.length));
+    editorRef.current?.setEditable(false);
     editorRef.current?.commands.setContent(lastSavedPage.content as unknown as JSONContent);
     setIsDirty(false);
     setIsEditing(false);
   };
 
   const handleSave = async () => {
-    if (isDirty) await saveRef.current();
+    if (isDirty) await saveRef.current("manual");
+    editorRef.current?.setEditable(false);
     setIsEditing(false);
   };
 
@@ -425,83 +449,98 @@ export function WikiPageViewer({ slug, page, pages }: WikiPageViewerProps) {
 
   if (!isEditing) {
     return (
-      <>
-        <div className="flex items-center justify-between mb-1">
-          <span className="text-xs text-lx-text-muted font-body">{breadcrumb}</span>
-          <button type="button" className="btn btn-ghost h-7 px-2.5 text-xs" onClick={handleStartEditing}>
-            <Pencil size={14} strokeWidth={1.5} />
-            Edit
-          </button>
+      <div className="wiki-content">
+        <div className="wiki-prose">
+          <div className="flex items-center justify-between mb-1">
+            <span className="text-xs text-lx-text-muted font-body">{breadcrumb}</span>
+            <button type="button" className="btn btn-ghost h-7 px-2.5 text-xs" onClick={handleStartEditing}>
+              <Pencil size={14} strokeWidth={1.5} />
+              Edit
+            </button>
+          </div>
+          <h1>{page.title}</h1>
+          <div>{renderDoc(page.content, "wiki")}</div>
+          <div className="mt-8 pt-4 border-t border-lx-border-default">
+            <span className="font-micro text-2xs text-lx-text-muted uppercase tracking-[0.04em]">
+              Last edited {formatRelative(page.updatedAt)}
+            </span>
+          </div>
         </div>
-        <h1>{page.title}</h1>
-        <div>{renderDoc(page.content, "wiki")}</div>
-        <div className="mt-8 pt-4 border-t border-lx-border-default">
-          <span className="font-micro text-2xs text-lx-text-muted uppercase tracking-[0.04em]">
-            Last edited {formatRelative(page.updatedAt)}
-          </span>
-        </div>
-      </>
+      </div>
     );
   }
 
   return (
-    <>
-      <div className="flex items-center justify-between mb-3">
-        <div className="flex items-center gap-2">
-          <span className="text-xs text-lx-text-muted font-body">{breadcrumb}</span>
-          <span className="font-micro text-2xs text-lx-text-warning uppercase tracking-[0.04em]">Editing</span>
-        </div>
-        <div className="flex items-center gap-2">
-          <button type="button" className="btn btn-ghost" onClick={handleCancel}>
-            Cancel
-          </button>
-          <button
-            type="button"
-            className="btn btn-primary"
-            onClick={handleSave}
-            disabled={isSaving}
-          >
-            {isSaving ? "Saving..." : "Save"}
-          </button>
-        </div>
-      </div>
+    <div className="wiki-content wiki-edit-workspace">
+      <div className="wiki-edit-main">
+        <div className="max-w-wiki-content mx-auto">
+          <div className="flex items-center justify-between mb-3">
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-lx-text-muted font-body">{breadcrumb}</span>
+              <span className="font-micro text-2xs text-lx-text-warning uppercase tracking-[0.04em]">Editing</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <button type="button" className="btn btn-ghost" onClick={handleCancel}>
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={handleSave}
+                disabled={isSaving}
+              >
+                {isSaving ? "Saving..." : "Save"}
+              </button>
+            </div>
+          </div>
 
-      <input
-        className="wiki-title-input"
-        value={title}
-        onChange={(e) => {
-          setTitle(e.target.value);
-          markDirty();
-        }}
-        placeholder="Page title"
-      />
-
-      <div className="wiki-slug-row">
-        <span className="prop-label shrink-0">Slug</span>
-        <div className="wiki-slug-input">
-          <span className="wiki-slug-prefix">/wiki/{parentPath}</span>
           <input
-            className="wiki-slug-segment"
-            value={slugSegment}
+            className="wiki-title-input"
+            value={title}
             onChange={(e) => {
-              setSlugSegment(e.target.value);
+              setTitle(e.target.value);
               markDirty();
             }}
-            placeholder="page-slug"
+            placeholder="Page title"
           />
+
+          <div className="wiki-slug-row">
+            <span className="prop-label shrink-0">Slug</span>
+            <div className="wiki-slug-input">
+              <span className="wiki-slug-prefix">/wiki/{parentPath}</span>
+              <input
+                className="wiki-slug-segment"
+                value={slugSegment}
+                onChange={(e) => {
+                  setSlugSegment(e.target.value);
+                  markDirty();
+                }}
+                placeholder="page-slug"
+              />
+            </div>
+          </div>
+
+          {editor && <WikiEditor editor={editor} />}
+
+          <div className="wiki-edit-footer">
+            <span className="save-indicator text-lx-text-muted">
+              {lastSavedAt ? formatSavedAt(lastSavedAt) : `Last edited ${formatRelative(lastSavedPage.updatedAt)}`}
+            </span>
+            {isDirty && (
+              <span className="save-indicator text-lx-text-warning">Unsaved changes</span>
+            )}
+          </div>
         </div>
       </div>
 
-      {editor && <WikiEditor editor={editor} />}
-
-      <div className="wiki-edit-footer">
-        <span className="save-indicator text-lx-text-muted">
-          {lastSavedAt ? formatSavedAt(lastSavedAt) : `Last edited ${formatRelative(lastSavedPage.updatedAt)}`}
-        </span>
-        {isDirty && (
-          <span className="save-indicator text-lx-text-warning">Unsaved changes</span>
-        )}
-      </div>
-    </>
+      <EditSidebar
+        slug={slug}
+        pageSlug={page.slug}
+        autosaveEnabled={autosaveEnabled}
+        autosaveDelay={autosaveDelay}
+        onAutosaveChange={setAutosaveEnabled}
+        onDelayChange={setAutosaveDelay}
+      />
+    </div>
   );
 }
