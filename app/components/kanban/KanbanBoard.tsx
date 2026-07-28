@@ -17,6 +17,7 @@ import { Column } from "./Column";
 import { ColumnHeader } from "./ColumnHeader";
 import { SwimlaneHeader } from "./SwimlaneHeader";
 import { TaskCard } from "./TaskCard";
+import { FilterButton, ActiveFilterBar, emptyFilters, isFilterActive, type FilterState } from "./BoardFilters";
 
 export interface MoveTarget {
   columnId: string;
@@ -52,7 +53,15 @@ function cardProps(task: Task) {
   };
 }
 
-function SortableTaskCard({ task, onSelect }: { task: Task; onSelect?: (t: Task) => void }) {
+function SortableTaskCard({
+  task,
+  onSelect,
+  dimmed,
+}: {
+  task: Task;
+  onSelect?: (t: Task) => void;
+  dimmed: boolean;
+}) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: task.id,
     data: { type: "card", columnId: task.columnId, swimlaneId: task.swimlaneId },
@@ -68,7 +77,7 @@ function SortableTaskCard({ task, onSelect }: { task: Task; onSelect?: (t: Task)
         if (!isDragging) { e.stopPropagation(); onSelect?.(task); }
       }}
     >
-      <TaskCard {...cardProps(task)} />
+      <TaskCard {...cardProps(task)} dimmed={dimmed} />
     </div>
   );
 }
@@ -78,6 +87,8 @@ export function KanbanBoard({ board, onMoveTask, onSelectTask, onCreateTask }: K
   const [activeId, setActiveId] = useState<string | null>(null);
   const [flashColumnId, setFlashColumnId] = useState<string | null>(null);
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set());
+  const [filters, setFilters] = useState<FilterState>(emptyFilters());
+  const [addTaskVersion, setAddTaskVersion] = useState<Record<string, number>>({});
   const flashTimer = useRef<number | null>(null);
 
   useEffect(() => {
@@ -112,6 +123,23 @@ export function KanbanBoard({ board, onMoveTask, onSelectTask, onCreateTask }: K
     [localTasks, hasLanes]
   );
 
+  const columnDimmed = useCallback(
+    (columnId: string) => filters.columns.size > 0 && !filters.columns.has(columnId),
+    [filters.columns]
+  );
+
+  const cardDimmed = useCallback(
+    (task: Task) => {
+      if (filters.columns.size > 0 && !filters.columns.has(task.columnId)) return true;
+      if (filters.priorities.size > 0 && !filters.priorities.has(task.priority)) return true;
+      if (filters.types.size > 0 && !filters.types.has(task.type)) return true;
+      if (filters.assignees.size > 0 && !filters.assignees.has(task.assignee ?? "")) return true;
+      if (filters.swimlanes.size > 0 && !filters.swimlanes.has(task.swimlaneId ?? "")) return true;
+      return false;
+    },
+    [filters]
+  );
+
   const cellDropId = (columnId: string, laneId: string | null) => `cell:${laneId ?? "none"}:${columnId}`;
 
   const toggleLane = (laneId: string) =>
@@ -121,6 +149,10 @@ export function KanbanBoard({ board, onMoveTask, onSelectTask, onCreateTask }: K
       else next.add(laneId);
       return next;
     });
+
+  const triggerAddTask = (columnId: string) => {
+    setAddTaskVersion((prev) => ({ ...prev, [columnId]: (prev[columnId] ?? 0) + 1 }));
+  };
 
   const activeTask = activeId ? localTasks.find((t) => t.id === activeId) : undefined;
 
@@ -146,8 +178,6 @@ export function KanbanBoard({ board, onMoveTask, onSelectTask, onCreateTask }: K
     if (overData?.type === "column") {
       targetColumnId = overData.columnId!;
       targetLaneId = overData.swimlaneId ?? null;
-      // Anchor to the end of the target cell: the server treats a same-column
-      // move without neighbors as a no-op, so an explicit anchor is required.
       const anchor =
         tasksInCell(targetColumnId, targetLaneId)
           .filter((t) => t.id !== task.id)
@@ -223,10 +253,13 @@ export function KanbanBoard({ board, onMoveTask, onSelectTask, onCreateTask }: K
             <h1 className="font-display text-xl font-semibold text-lx-text-primary">{board.project.name}</h1>
           </div>
           <div className="flex items-center gap-2">
-            <button className="btn btn-ghost text-sm">Filter</button>
-            <button className="btn btn-ghost text-sm">Settings</button>
+            <FilterButton board={board} filters={filters} onChange={setFilters} />
+            <button type="button" className="btn btn-ghost text-sm">
+              Settings
+            </button>
           </div>
         </div>
+        {isFilterActive(filters) && <ActiveFilterBar board={board} filters={filters} onChange={setFilters} />}
         <div className="board-scroll">
         {columns.length === 0 ? (
           <div className="empty-state" style={{ padding: 24 }}>
@@ -266,14 +299,17 @@ export function KanbanBoard({ board, onMoveTask, onSelectTask, onCreateTask }: K
                 <div className="columns-row">
                   {columns.map((col) => {
                     const cell = tasksInCell(col.id, laneId);
+                    const dimmed = columnDimmed(col.id);
                     return (
-                      <div className="column" key={col.id}>
+                      <div className={cn("column", dimmed && "opacity-45")} key={col.id}>
                         <ColumnHeader
                           name={col.name}
                           color={col.color}
                           taskCount={cell.length}
                           wipLimit={col.wipLimit}
                           wipFlash={flashColumnId === col.id}
+                          dimmed={dimmed}
+                          onAddTask={() => triggerAddTask(col.id)}
                         />
                         <Column
                           id={cellDropId(col.id, laneId)}
@@ -282,10 +318,11 @@ export function KanbanBoard({ board, onMoveTask, onSelectTask, onCreateTask }: K
                           columnId={col.id}
                           swimlaneId={laneId}
                           onCreateTask={onCreateTask}
+                          startAdding={addTaskVersion[col.id] ?? 0}
                         >
                           <SortableContext items={cell.map((t) => t.id)} strategy={verticalListSortingStrategy}>
                             {cell.map((task) => (
-                              <SortableTaskCard key={task.id} task={task} onSelect={onSelectTask} />
+                              <SortableTaskCard key={task.id} task={task} onSelect={onSelectTask} dimmed={cardDimmed(task)} />
                             ))}
                           </SortableContext>
                         </Column>

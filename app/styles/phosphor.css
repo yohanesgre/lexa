@@ -1779,4 +1779,192 @@
     margin: 0 6px;
     flex-shrink: 0;
   }
+
+  /* ---- Icon Button (column/swimlane header kebab) ---- */
+  .icon-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 24px;
+    height: 24px;
+    border: none;
+    border-radius: 4px;
+    background: transparent;
+    color: var(--lx-text-muted);
+    cursor: pointer;
+    flex-shrink: 0;
+    transition: background 100ms, color 100ms;
+  }
+  .icon-btn:hover {
+    background: var(--lx-surface-card-hover);
+    color: var(--lx-text-secondary);
+  }
+  .icon-btn.active {
+    background: var(--lx-surface-card-hover);
+    color: var(--lx-border-focus);
+  }
+  .column-header .icon-btn {
+    opacity: 0;
+  }
+  .column-header:hover .icon-btn,
+  .column-header .icon-btn.active {
+    opacity: 1;
+  }
+  .swimlane-header .icon-btn {
+    opacity: 0;
+    margin-left: auto;
+  }
+  .swimlane-header:hover .icon-btn,
+  .swimlane-header .icon-btn.active {
+    opacity: 1;
+  }
+
+  /* ---- Popover Menu ---- */
+  .menu-popover {
+    position: absolute;
+    top: calc(100% + 6px);
+    min-width: 180px;
+    background: var(--lx-surface-elevated);
+    border: 1px solid var(--lx-border-default);
+    border-radius: 6px;
+    padding: 4px;
+    box-shadow: var(--lx-shadow-lg);
+    z-index: 30;
+  }
+  .menu-popover.right {
+    right: 0;
+  }
+  .menu-popover.left {
+    left: 0;
+  }
+
+  .menu-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    height: 30px;
+    padding: 0 10px;
+    border-radius: 4px;
+    font-size: 13px;
+    font-family: var(--lx-font-body);
+    color: var(--lx-text-primary);
+    cursor: pointer;
+    white-space: nowrap;
+    transition: background 100ms;
+    background: transparent;
+    border: none;
+    width: 100%;
+  }
+  .menu-item:hover {
+    background: var(--lx-surface-card-hover);
+  }
+  .menu-item:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+  }
+  .menu-item.danger {
+    color: var(--lx-text-danger);
+  }
+  .menu-item.danger:hover {
+    background: var(--lx-bg-danger-subtle);
+  }
+  .menu-item svg {
+    width: 14px;
+    height: 14px;
+    stroke: currentColor;
+    stroke-width: 1.5;
+    fill: none;
+    flex-shrink: 0;
+  }
+
+  .menu-separator {
+    height: 1px;
+    background: var(--lx-border-subtle);
+    margin: 4px 6px;
+  }
+
+  /* ---- Filter Bar & Chips ---- */
+  .filter-bar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-height: 40px;
+    padding: 6px 16px;
+    border-bottom: 1px solid var(--lx-border-subtle);
+    flex-shrink: 0;
+    flex-wrap: wrap;
+  }
+  .filter-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    height: 24px;
+    padding: 0 4px 0 8px;
+    background: var(--lx-surface-selected);
+    border: 1px solid rgba(240, 192, 64, 0.25);
+    border-radius: 4px;
+    font-size: 12px;
+    font-family: var(--lx-font-body);
+    color: var(--lx-text-primary);
+  }
+  .filter-chip-label {
+    color: var(--lx-text-secondary);
+  }
+  .filter-chip-x {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 16px;
+    height: 16px;
+    border: none;
+    border-radius: 3px;
+    background: transparent;
+    color: var(--lx-text-muted);
+    cursor: pointer;
+  }
+  .filter-chip-x:hover {
+    color: var(--lx-text-danger);
+    background: var(--lx-bg-danger-subtle);
+  }
+  .filter-chip-x svg {
+    width: 10px;
+    height: 10px;
+    stroke: currentColor;
+    stroke-width: 2;
+    fill: none;
+  }
+  .filter-clear {
+    font-size: 12px;
+    font-family: var(--lx-font-body);
+    color: var(--lx-text-link);
+    background: none;
+    border: none;
+    cursor: pointer;
+    padding: 0;
+  }
+  .filter-clear:hover {
+    color: var(--lx-text-link-hover);
+  }
+
+  /* ---- Filter Popover Checkbox Rows ---- */
+  .check-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 4px 10px;
+    font-size: 13px;
+    font-family: var(--lx-font-body);
+    color: var(--lx-text-primary);
+    cursor: pointer;
+    transition: background 100ms;
+  }
+  .check-row:hover {
+    background: var(--lx-surface-card-hover);
+  }
+  .check-row .checkbox {
+    margin-top: 0;
+  }
+  .check-row .avatar {
+    margin-right: 0;
+  }
 }

@@ -12,6 +12,7 @@ interface ColumnProps {
   columnId?: string;
   swimlaneId?: string | null;
   onCreateTask?: (input: { columnId: string; swimlaneId?: string | null; title: string; priority?: string; type?: string }) => Promise<void>;
+  startAdding?: number;
 }
 
 const priorities: { value: Priority; dotClass: string }[] = [
@@ -28,7 +29,7 @@ const types: { value: TaskType; color: string }[] = [
   { value: "asset", color: "var(--lx-type-asset, #F472B6)" },
 ];
 
-export function Column({ id, children, data, isEmpty, columnId, swimlaneId, onCreateTask }: ColumnProps) {
+export function Column({ id, children, data, isEmpty, columnId, swimlaneId, onCreateTask, startAdding = 0 }: ColumnProps) {
   const { setNodeRef, isOver } = useDroppable({ id, data });
   const [isAdding, setIsAdding] = useState(false);
   const [title, setTitle] = useState("");
@@ -39,6 +40,10 @@ export function Column({ id, children, data, isEmpty, columnId, swimlaneId, onCr
   useEffect(() => {
     if (isAdding) inputRef.current?.focus();
   }, [isAdding]);
+
+  useEffect(() => {
+    if (startAdding > 0) setIsAdding(true);
+  }, [startAdding]);
 
   const submit = async () => {
     const v = title.trim();

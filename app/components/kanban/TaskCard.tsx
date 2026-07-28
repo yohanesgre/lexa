@@ -15,6 +15,7 @@ interface TaskCardProps {
   } | null;
   githubOutOfSync: boolean;
   isDragging?: boolean;
+  dimmed?: boolean;
 }
 
 const typeConfig: Record<TaskType, { label: string; badge: string; border: string }> = {
@@ -39,11 +40,11 @@ function GithubMark({ size = 12 }: { size?: number }) {
   );
 }
 
-export function TaskCard({ title, priority, type, assignee, github, githubOutOfSync, isDragging = false }: TaskCardProps) {
+export function TaskCard({ title, priority, type, assignee, github, githubOutOfSync, isDragging = false, dimmed = false }: TaskCardProps) {
   const { label, badge, border } = typeConfig[type];
   const isOutOfSync = github?.outOfSync ?? githubOutOfSync;
   return (
-    <div className={cn("kanban-card border-l-[3px]", border, isDragging && "state-dragging")}>
+    <div className={cn("kanban-card border-l-[3px]", border, isDragging && "state-dragging", dimmed && "opacity-45")}>
       <div className="flex items-center justify-between">
         <span className={cn("type-badge", badge)}>{label}</span>
         <span
