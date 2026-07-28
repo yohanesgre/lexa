@@ -1555,6 +1555,13 @@
     color: var(--lx-text-primary);
   }
 
+  @media (min-width: 1025px) {
+    .wiki-prose {
+      max-width: none;
+      margin: 0;
+    }
+  }
+
   .wiki-prose h1 {
     font-size: 24px;
     font-weight: 600;
