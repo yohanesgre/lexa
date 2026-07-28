@@ -1043,7 +1043,6 @@
   }
   .editor-wrapper:focus-within {
     border-color: var(--lx-border-focus);
-    box-shadow: var(--lx-focus-glow);
   }
 
   .editor-toolbar {
