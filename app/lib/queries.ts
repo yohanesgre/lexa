@@ -87,6 +87,57 @@ export function useWikiPage(slug: string, pageSlug: string) {
   return useQuery({ queryKey: ["wikiPage", slug, pageSlug], queryFn: () => api.getWikiPage(slug, pageSlug) });
 }
 
+export function useSearchWikiPages(slug: string, query: string) {
+  return useQuery({
+    queryKey: ["wikiSearch", slug, query],
+    queryFn: () => api.searchWikiPages(slug, query).then((r) => r.data),
+    enabled: query.length > 0,
+  });
+}
+
+export function useCreateWikiPage(slug: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: Parameters<typeof api.createWikiPage>[1]) => api.createWikiPage(slug, input),
+    onSuccess: (page) => {
+      qc.setQueryData<WikiPageMeta[]>(["wiki", slug], (old) => {
+        if (!old) return [page];
+        return [...old, page];
+      });
+      qc.setQueryData(["wikiPage", slug, page.slug], page);
+    },
+  });
+}
+
+export function useUpdateWikiPage(slug: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ pageSlug, ...input }: { pageSlug: string } & Parameters<typeof api.updateWikiPage>[2]) =>
+      api.updateWikiPage(slug, pageSlug, input),
+    onSuccess: (page) => {
+      qc.setQueryData<WikiPageMeta[]>(["wiki", slug], (old) => {
+        if (!old) return old;
+        return old.map((p) => (p.id === page.id ? page : p));
+      });
+      qc.setQueryData(["wikiPage", slug, page.slug], page);
+    },
+  });
+}
+
+export function useDeleteWikiPage(slug: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (pageSlug: string) => api.deleteWikiPage(slug, pageSlug),
+    onSuccess: (_data, pageSlug) => {
+      qc.setQueryData<WikiPageMeta[]>(["wiki", slug], (old) => {
+        if (!old) return old;
+        return old.filter((p) => p.slug !== pageSlug);
+      });
+      qc.removeQueries({ queryKey: ["wikiPage", slug, pageSlug] });
+    },
+  });
+}
+
 export function useColumns(slug: string) {
   return useQuery({ queryKey: ["projects", slug, "columns"], queryFn: () => api.listColumns(slug).then((r) => r.data) });
 }

@@ -521,7 +521,8 @@ const wikiLive = HttpApiBuilder.group(LexaApi, "wiki", (handlers) =>
         const wikiService = yield* WikiService;
         const project = yield* projectService.findBySlug(req.path.slug);
         const pages = yield* wikiService.findByProject(project.id);
-        return { data: pages.map(formatWikiPageMeta) };
+        const parentIds = new Set(pages.map((p) => p.parentId).filter((id): id is string => id !== null));
+        return { data: pages.map((p) => formatWikiPageMeta(p, parentIds)) };
       }))
     )
     .handle("createPage", (req) =>
@@ -567,7 +568,9 @@ const wikiLive = HttpApiBuilder.group(LexaApi, "wiki", (handlers) =>
         const project = yield* projectService.findBySlug(req.path.slug);
         const page = yield* wikiService.findBySlug(project.id, req.path.pageSlug);
         const children = yield* wikiService.findChildren(project.id, page.id);
-        return { data: children.map(formatWikiPageMeta) };
+        const allPages = yield* wikiService.findByProject(project.id);
+        const parentIds = new Set(allPages.map((p) => p.parentId).filter((id): id is string => id !== null));
+        return { data: children.map((p) => formatWikiPageMeta(p, parentIds)) };
       }))
     )
     .handle("updatePage", (req) =>
@@ -621,8 +624,12 @@ function formatWikiPage(page: { id: string; projectId: string; title: string; sl
   return page as any;
 }
 
-function formatWikiPageMeta(meta: { id: string; projectId: string; title: string; slug: string; parentId: string | null; position: number; updatedAt: string }) {
-  return { ...meta, hasChildren: false, createdAt: "" } as any;
+function formatWikiPageMeta(
+  meta: { id: string; projectId: string; title: string; slug: string; parentId: string | null; position: number; updatedAt: string },
+  parentIds: Set<string>
+) {
+  const hasChildren = parentIds.has(meta.id);
+  return { ...meta, hasChildren, createdAt: "" } as any;
 }
 
 export function createApiHandler() {

@@ -13,11 +13,11 @@ function WikiPagePage() {
 
   return (
     <WikiLayout slug={slug} activePageSlug={pageSlug}>
-      {(pages) => {
+      {(pages, _ctx) => {
         if (isLoading) return <div className="text-lx-text-muted">Loading page…</div>;
         if (error) return <div className="text-lx-text-danger">Failed to load page: {(error as Error).message}</div>;
         if (!page) return <div className="text-lx-text-muted">Page not found.</div>;
-        return <WikiPageViewer page={page} pages={pages} />;
+        return <WikiPageViewer slug={slug} page={page} pages={pages} />;
       }}
     </WikiLayout>
   );
