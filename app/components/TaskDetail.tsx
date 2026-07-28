@@ -1,9 +1,14 @@
 import { useEffect, useRef, useState } from "react";
 import { Link, useParams } from "@tanstack/react-router";
 import { Check, X } from "lucide-react";
+import { useEditor, EditorContent } from "@tiptap/react";
+import type { JSONContent } from "@tiptap/core";
+import StarterKit from "@tiptap/starter-kit";
+import TaskList from "@tiptap/extension-task-list";
+import TaskItem from "@tiptap/extension-task-item";
+import Placeholder from "@tiptap/extension-placeholder";
 import type { Priority, Task, TaskType, TipTapDoc } from "../../shared/types";
 import { cn } from "./ui/cn";
-import { renderDoc } from "./tiptap-render";
 
 function GithubMark({ size = 14, className }: { size?: number; className?: string }) {
   return (
@@ -143,6 +148,167 @@ const emptyDoc: TipTapDoc = { type: "doc", content: [] };
 const capitalize = (s: string) => s[0].toUpperCase() + s.slice(1);
 const fmtDate = (iso: string) => iso.slice(0, 10);
 
+interface DescriptionEditorProps {
+  initialContent: TipTapDoc;
+  onChange?: (doc: TipTapDoc) => void;
+  onBlur?: (doc: TipTapDoc) => void;
+  placeholder?: string;
+  editable?: boolean;
+}
+
+function ToolbarButton({
+  command,
+  isActive,
+  title,
+  children,
+  style,
+}: {
+  command: () => void;
+  isActive: boolean;
+  title: string;
+  children: React.ReactNode;
+  style?: React.CSSProperties;
+}) {
+  return (
+    <button
+      type="button"
+      title={title}
+      onClick={command}
+      className={cn("toolbar-btn", isActive && "active")}
+      style={style}
+    >
+      {children}
+    </button>
+  );
+}
+
+function DescriptionEditor({
+  initialContent,
+  onChange,
+  onBlur,
+  placeholder,
+  editable = true,
+}: DescriptionEditorProps) {
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  const editor = useEditor({
+    immediatelyRender: false,
+    extensions: [
+      StarterKit.configure({
+        heading: { levels: [2, 3] },
+      }),
+      TaskList,
+      TaskItem.configure({
+        nested: true,
+      }),
+      Placeholder.configure({
+        placeholder: placeholder ?? "Add a description...",
+      }),
+    ],
+    content: initialContent as unknown as JSONContent,
+    editable,
+    onUpdate: ({ editor: nextEditor }) => {
+      onChange?.(nextEditor.getJSON() as unknown as TipTapDoc);
+    },
+    onBlur: ({ event }) => {
+      if (!editor) return;
+      const related = (event as FocusEvent).relatedTarget as Node | null;
+      if (containerRef.current && related && containerRef.current.contains(related)) {
+        return;
+      }
+      onBlur?.(editor.getJSON() as unknown as TipTapDoc);
+    },
+  });
+
+  if (!editor) return null;
+
+  const headingLevel = (editor.getAttributes("heading").level as number | undefined) ?? 0;
+
+  return (
+    <div ref={containerRef} className="editor-wrapper">
+      <div className="editor-toolbar">
+        <ToolbarButton
+          command={() => editor.chain().focus().toggleBold().run()}
+          isActive={editor.isActive("bold")}
+          title="Bold"
+        >
+          B
+        </ToolbarButton>
+        <ToolbarButton
+          command={() => editor.chain().focus().toggleItalic().run()}
+          isActive={editor.isActive("italic")}
+          title="Italic"
+          style={{ fontStyle: "italic" }}
+        >
+          I
+        </ToolbarButton>
+        <ToolbarButton
+          command={() => editor.chain().focus().toggleStrike().run()}
+          isActive={editor.isActive("strike")}
+          title="Strike"
+          style={{ textDecoration: "line-through" }}
+        >
+          S
+        </ToolbarButton>
+        <span className="toolbar-sep" />
+        <ToolbarButton
+          command={() => editor.chain().focus().toggleHeading({ level: 2 }).run()}
+          isActive={headingLevel === 2}
+          title="Heading 2"
+        >
+          H2
+        </ToolbarButton>
+        <ToolbarButton
+          command={() => editor.chain().focus().toggleHeading({ level: 3 }).run()}
+          isActive={headingLevel === 3}
+          title="Heading 3"
+        >
+          H3
+        </ToolbarButton>
+        <span className="toolbar-sep" />
+        <ToolbarButton
+          command={() => editor.chain().focus().toggleBulletList().run()}
+          isActive={editor.isActive("bulletList")}
+          title="Bullet list"
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+            <path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01" />
+          </svg>
+        </ToolbarButton>
+        <ToolbarButton
+          command={() => editor.chain().focus().toggleOrderedList().run()}
+          isActive={editor.isActive("orderedList")}
+          title="Ordered list"
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+            <path d="M10 6h11M10 12h11M10 18h11M4 6h1v4M4 10h2M6 18H4c0-1 2-2 2-3s-1-1.5-2-1" />
+          </svg>
+        </ToolbarButton>
+        <ToolbarButton
+          command={() => editor.chain().focus().toggleTaskList().run()}
+          isActive={editor.isActive("taskList")}
+          title="Checklist"
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+            <path d="M3 17l2 2 4-4M3 7l2 2 4-4M13 6h8M13 12h8M13 18h8" />
+          </svg>
+        </ToolbarButton>
+        <span className="toolbar-sep" />
+        <ToolbarButton
+          command={() => editor.chain().focus().toggleCode().run()}
+          isActive={editor.isActive("code")}
+          title="Code"
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+            <path d="M18 16l4-4-4-4M6 8l-4 4 4 4" />
+          </svg>
+        </ToolbarButton>
+      </div>
+      <EditorContent editor={editor} />
+    </div>
+  );
+}
+
 export function TaskDetail({ mode = "view", task, defaultColumnId, columns, onClose, onUpdate, onDelete, onCreate }: TaskDetailProps) {
   const params = useParams({ strict: false }) as { slug?: string };
   const slug = params.slug;
@@ -192,6 +358,7 @@ export function TaskDetail({ mode = "view", task, defaultColumnId, columns, onCl
   const [createPriority, setCreatePriority] = useState<Priority>("medium");
   const [createType, setCreateType] = useState<TaskType>("task");
   const [createAssignee, setCreateAssignee] = useState("");
+  const [createDescription, setCreateDescription] = useState<TipTapDoc>(emptyDoc);
 
   // GitHub link flow state (UI-only)
   const [linkState, setLinkState] = useState<"idle" | "input" | "loading" | "success">("idle");
@@ -227,7 +394,7 @@ export function TaskDetail({ mode = "view", task, defaultColumnId, columns, onCl
       priority: createPriority,
       type: createType,
       assignee: createAssignee.trim() || null,
-      description: emptyDoc,
+      description: createDescription,
     });
     handleClose();
   };
@@ -491,14 +658,27 @@ export function TaskDetail({ mode = "view", task, defaultColumnId, columns, onCl
         <div className="slideover-body pt-4">
           {isCreate ? (
             <>
-              {renderDoc(emptyDoc)}
+              <DescriptionEditor
+                initialContent={emptyDoc}
+                onChange={setCreateDescription}
+                placeholder="Add a description..."
+              />
               <div className="mt-4 border border-dashed border-lx-border-default rounded-md p-3 text-xs text-lx-text-muted font-body">
                 No GitHub section in create mode — linking is available after the task exists.
               </div>
             </>
           ) : (
             <>
-              {renderDoc(task!.description)}
+              <DescriptionEditor
+                key={task!.id}
+                initialContent={task!.description}
+                onBlur={(doc) => {
+                  if (!task) return;
+                  const current = JSON.stringify(task.description);
+                  const next = JSON.stringify(doc);
+                  if (current !== next) onUpdate?.(task.id, { description: doc });
+                }}
+              />
 
               <div className="github-section mt-4">
                 {github ? (

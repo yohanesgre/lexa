@@ -999,6 +999,165 @@
     margin: 16px 0;
   }
 
+  /* ---- TipTap editor (task description) ---- */
+  .editor-wrapper {
+    border: 1px solid var(--lx-border-default);
+    border-radius: 6px;
+    transition: border-color 100ms, box-shadow 100ms;
+  }
+  .editor-wrapper:focus-within {
+    border-color: var(--lx-border-focus);
+    box-shadow: var(--lx-focus-glow);
+  }
+
+  .editor-toolbar {
+    display: flex;
+    gap: 2px;
+    padding: 6px 8px;
+    border-bottom: 1px solid var(--lx-border-default);
+    border-radius: 6px 6px 0 0;
+    background: var(--lx-surface-card);
+  }
+  .toolbar-btn {
+    width: 28px;
+    height: 28px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: none;
+    background: transparent;
+    border-radius: 4px;
+    color: var(--lx-text-secondary);
+    font-family: var(--lx-font-body);
+    font-size: 13px;
+    cursor: pointer;
+  }
+  .toolbar-btn:hover {
+    background: var(--lx-surface-elevated);
+    color: var(--lx-text-primary);
+  }
+  .toolbar-btn.active {
+    background: var(--lx-surface-selected);
+    color: var(--lx-text-primary);
+  }
+  .toolbar-sep {
+    width: 1px;
+    align-self: stretch;
+    margin: 2px 4px;
+    background: var(--lx-border-default);
+    flex-shrink: 0;
+  }
+
+  .editor-content .ProseMirror {
+    padding: 12px;
+    background: var(--lx-surface-input);
+    border-radius: 0 0 6px 6px;
+    font-size: 15px;
+    line-height: 22px;
+    color: var(--lx-text-secondary);
+    font-family: var(--lx-font-body);
+    min-height: 120px;
+    outline: none;
+  }
+  .editor-content .ProseMirror p {
+    margin-bottom: 12px;
+  }
+  .editor-content .ProseMirror p:last-child {
+    margin-bottom: 0;
+  }
+  .editor-content .ProseMirror h2 {
+    font-size: 18px;
+    font-weight: 600;
+    font-family: var(--lx-font-display);
+    line-height: 26px;
+    letter-spacing: -0.02em;
+    color: var(--lx-text-primary);
+    margin: 20px 0 8px;
+  }
+  .editor-content .ProseMirror h3 {
+    font-size: 16px;
+    font-weight: 500;
+    font-family: var(--lx-font-display);
+    line-height: 24px;
+    letter-spacing: -0.02em;
+    color: var(--lx-text-primary);
+    margin: 20px 0 8px;
+  }
+  .editor-content .ProseMirror ul {
+    list-style: disc;
+    margin: 0 0 12px 20px;
+  }
+  .editor-content .ProseMirror ol {
+    list-style: decimal;
+    margin: 0 0 12px 20px;
+  }
+  .editor-content .ProseMirror li {
+    margin-bottom: 4px;
+  }
+  .editor-content .ProseMirror code {
+    font-family: var(--lx-font-mono);
+    font-size: 12px;
+    background: var(--lx-surface-elevated);
+    padding: 2px 4px;
+    border-radius: 4px;
+    color: var(--lx-text-secondary);
+  }
+  .editor-content .ProseMirror pre {
+    background: var(--lx-surface-elevated);
+    border: 1px solid var(--lx-border-default);
+    border-radius: 6px;
+    padding: 12px 16px;
+    overflow-x: auto;
+    margin: 12px 0;
+  }
+  .editor-content .ProseMirror pre code {
+    background: transparent;
+    padding: 0;
+  }
+  .editor-content .ProseMirror blockquote {
+    border-left: 2px solid var(--lx-border-strong);
+    padding-left: 12px;
+    margin: 12px 0;
+    color: var(--lx-text-secondary);
+  }
+  .editor-content .ProseMirror hr {
+    border: 0;
+    border-top: 1px solid var(--lx-border-default);
+    margin: 16px 0;
+  }
+  .editor-content .ProseMirror p.is-editor-empty:first-child::before {
+    content: attr(data-placeholder);
+    float: left;
+    color: var(--lx-text-muted);
+    pointer-events: none;
+    height: 0;
+  }
+  .editor-content .ProseMirror ul[data-type="taskList"] {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+  }
+  .editor-content .ProseMirror ul[data-type="taskList"] li {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    padding: 4px 0;
+  }
+  .editor-content .ProseMirror ul[data-type="taskList"] li > label {
+    flex-shrink: 0;
+    margin-top: 4px;
+    cursor: pointer;
+  }
+  .editor-content .ProseMirror ul[data-type="taskList"] li > div {
+    flex: 1;
+  }
+  .editor-content .ProseMirror ul[data-type="taskList"] input[type="checkbox"] {
+    width: 14px;
+    height: 14px;
+    accent-color: var(--lx-border-focus);
+    cursor: pointer;
+  }
+
   /* Dashboard */
   .project-grid {
     display: grid;
