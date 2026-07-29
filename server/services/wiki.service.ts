@@ -1,7 +1,7 @@
 import { Effect } from "effect";
 import { WikiRepo } from "../repos/wiki.repo";
 import { ProjectRepo } from "../repos/project.repo";
-import { ConstraintViolation, DbError, RowNotFound } from "../db/d1";
+import { ConstraintViolation, DbError, RowNotFound } from "../db/database";
 import { ProjectNotFound, WikiPageNotFound, SlugTaken, HasChildren } from "../api/errors";
 import type { WikiPage, WikiPageMeta, WikiPageRevision, WikiPageRevisionSummary } from "../../shared/types";
 import type { TipTapDoc } from "../../shared/types";

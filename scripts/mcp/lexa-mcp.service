@@ -1,0 +1,16 @@
+[Unit]
+Description=Lexa MCP Server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/env npx tsx %INSTALL_DIR%/mcp-server.ts
+WorkingDirectory=%INSTALL_DIR%
+Restart=on-failure
+RestartSec=5
+Environment=NODE_ENV=production
+EnvironmentFile=-%h/.config/lexa-mcp/env
+
+[Install]
+WantedBy=default.target

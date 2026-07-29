@@ -1,11 +1,11 @@
 import { Effect } from "effect";
-import { D1, queryAll, queryFirst, run, DbError, RowNotFound, ConstraintViolation } from "../db/d1";
+import { Sqlite, queryAll, queryFirst, run, DbError, RowNotFound, ConstraintViolation } from "../db/database";
 import { ProjectRow, rowToProject } from "../../shared/types";
 import type { Project } from "../../shared/types";
 
 export class ProjectRepo extends Effect.Service<ProjectRepo>()("Lexa/ProjectRepo", {
   effect: Effect.gen(function* () {
-    const db = yield* D1;
+    const db = yield* Sqlite;
 
     return {
       create: (input: { id: string; name: string; slug: string; description: string; githubRepo: string | null }): Effect.Effect<void, ConstraintViolation | DbError> =>

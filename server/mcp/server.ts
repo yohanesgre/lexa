@@ -1,0 +1,275 @@
+import { Effect, Layer, ManagedRuntime } from "effect";
+import { ApiKeyRepo } from "../repos/api-key.repo";
+import { ProjectRepo } from "../repos/project.repo";
+import { ColumnRepo } from "../repos/column.repo";
+import { SwimlaneRepo } from "../repos/swimlane.repo";
+import { TaskRepo } from "../repos/task.repo";
+import { ProjectService } from "../services/project.service";
+import { ColumnService } from "../services/column.service";
+import { SwimlaneService } from "../services/swimlane.service";
+import { TaskService } from "../services/task.service";
+import { WikiService } from "../services/wiki.service";
+import { initSqlite } from "../db/database";
+import { errorCodeMap, errorMessage, errorDetails } from "../api/errors";
+import { tool as createTask } from "./tools/create-task";
+import { tool as listTasks } from "./tools/list-tasks";
+import { tool as getTask } from "./tools/get-task";
+import { tool as updateTask } from "./tools/update-task";
+import { tool as moveTask } from "./tools/move-task";
+import { tool as deleteTask } from "./tools/delete-task";
+import { tool as getWikiPage } from "./tools/get-wiki-page";
+import { tool as createWikiPage } from "./tools/create-wiki-page";
+import { tool as updateWikiPage } from "./tools/update-wiki-page";
+import { tool as listWikiPages } from "./tools/list-wiki-pages";
+import { tool as searchWiki } from "./tools/search-wiki";
+import { tool as listProjects } from "./tools/list-projects";
+import { tool as getProject } from "./tools/get-project";
+import { tool as getProjectStatus } from "./tools/get-project-status";
+import { tool as linkGithubIssue } from "./tools/link-github-issue";
+import { tool as unlinkGithubIssue } from "./tools/unlink-github-issue";
+
+interface ToolDef {
+  name: string;
+  description: string;
+  inputSchema: { type: string; properties: Record<string, unknown>; required?: string[] };
+  handler: (args: any) => Effect.Effect<any, any, any>;
+}
+
+const tools: ToolDef[] = [
+  createTask,
+  listTasks,
+  getTask,
+  updateTask,
+  moveTask,
+  deleteTask,
+  getWikiPage,
+  createWikiPage,
+  updateWikiPage,
+  listWikiPages,
+  searchWiki,
+  listProjects,
+  getProject,
+  getProjectStatus,
+  linkGithubIssue,
+  unlinkGithubIssue,
+];
+
+async function sha256(text: string): Promise<string> {
+  const data = new TextEncoder().encode(text);
+  const hash = await crypto.subtle.digest("SHA-256", data);
+  return Array.from(new Uint8Array(hash))
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
+}
+
+function jsonRpcError(id: string | number | null, code: number, message: string): object {
+  return { jsonrpc: "2.0", id, error: { code, message } };
+}
+
+function parseError(id: string | number | null): object {
+  return jsonRpcError(id, -32700, "Parse error");
+}
+
+function methodNotFound(id: string | number | null): object {
+  return jsonRpcError(id, -32601, "Method not found");
+}
+
+function buildToolError(e: unknown): object {
+  const error = e as { _tag: string } & Record<string, unknown>;
+  const code = errorCodeMap[error._tag] ?? "INTERNAL";
+  const message = errorMessage(error);
+  const details = errorDetails(error);
+  return { code, message, details };
+}
+
+export class McpServer extends Effect.Service<McpServer>()("Lexa/McpServer", {
+  dependencies: [
+    ApiKeyRepo.Default,
+    ProjectRepo.Default,
+    ColumnRepo.Default,
+    SwimlaneRepo.Default,
+    TaskRepo.Default,
+    ProjectService.Default,
+    ColumnService.Default,
+    SwimlaneService.Default,
+    TaskService.Default,
+    WikiService.Default,
+  ],
+  effect: Effect.gen(function* () {
+    const apiKeyRepo = yield* ApiKeyRepo;
+
+    const checkAuth = (authHeader: string) =>
+      Effect.gen(function* () {
+        if (!authHeader || !authHeader.startsWith("Bearer ")) {
+          return yield* Effect.fail("MISSING_AUTH");
+        }
+        const key = authHeader.slice(7);
+        if (!key.startsWith("lxk_") || !/^lxk_[0-9A-Za-z]{43}$/.test(key)) {
+          return yield* Effect.fail("INVALID_API_KEY");
+        }
+        const keyHash = yield* Effect.promise(() => sha256(key));
+        const row = yield* apiKeyRepo.findByHash(keyHash).pipe(
+          Effect.catchTag("RowNotFound", () => Effect.fail("INVALID_API_KEY"))
+        );
+        yield* apiKeyRepo.touchIfStale(row.id);
+        return undefined;
+      });
+
+    const dispatch = (request: any) =>
+      Effect.gen(function* () {
+        if (request.jsonrpc !== "2.0") {
+          return jsonRpcError(request.id ?? null, -32600, "Invalid Request: jsonrpc must be \"2.0\"");
+        }
+        const method = request.method;
+        const id = request.id ?? null;
+
+        switch (method) {
+          case "initialize":
+            return {
+              jsonrpc: "2.0",
+              id,
+              result: {
+                protocolVersion: "2025-03-26",
+                capabilities: { tools: {} },
+                serverInfo: { name: "lexa", version: "0.1.0" },
+              },
+            };
+
+          case "notifications/initialized":
+            return { jsonrpc: "2.0", id, result: {} };
+
+          case "ping":
+            return { jsonrpc: "2.0", id, result: {} };
+
+          case "tools/list":
+            return {
+              jsonrpc: "2.0",
+              id,
+              result: {
+                tools: tools.map((t) => ({
+                  name: t.name,
+                  description: t.description,
+                  inputSchema: t.inputSchema,
+                })),
+              },
+            };
+
+          case "tools/call": {
+            const toolName = request.params?.name;
+            const tool = tools.find((t) => t.name === toolName);
+            if (!tool) {
+              return jsonRpcError(id, -32602, `Unknown tool: ${toolName}`);
+            }
+
+            const args = request.params?.arguments ?? {};
+            const result = yield* tool.handler(args).pipe(
+              Effect.catchAll((e) => {
+                const err = buildToolError(e as any);
+                return Effect.succeed({ isError: true, error: err });
+              })
+            );
+
+            if (typeof result === "object" && result !== null && "isError" in result && (result as any).isError) {
+              const err = (result as any).error;
+              return {
+                jsonrpc: "2.0",
+                id,
+                result: {
+                  content: [{ type: "text", text: JSON.stringify(err) }],
+                  isError: true,
+                },
+              };
+            }
+
+            return {
+              jsonrpc: "2.0",
+              id,
+              result: {
+                content: [{ type: "text", text: JSON.stringify(result) }],
+              },
+            };
+          }
+
+          default:
+            return methodNotFound(id);
+        }
+      });
+
+    const handleRequest = (rawBody: string, authHeader: string) =>
+      Effect.gen(function* () {
+        const headers = { "Content-Type": "application/json" };
+
+        const authError = yield* checkAuth(authHeader).pipe(
+          Effect.match({
+            onSuccess: () => null as string | null,
+            onFailure: (err) => err as string,
+          })
+        );
+
+        if (authError !== null) {
+          const response: object = {
+            jsonrpc: "2.0",
+            id: null,
+            error: {
+              code: -32001,
+              message: authError === "MISSING_AUTH" ? "Missing authorization" : "Invalid API key",
+            },
+          };
+          return new Response(JSON.stringify(response), { status: 401, headers });
+        }
+
+        let request: any;
+        try {
+          request = JSON.parse(rawBody);
+        } catch {
+          return new Response(JSON.stringify(parseError(null)), { status: 200, headers });
+        }
+
+        if (Array.isArray(request)) {
+          return new Response(JSON.stringify(jsonRpcError(null, -32600, "Batch requests are not supported")), { status: 200, headers });
+        }
+
+        if (request.jsonrpc !== "2.0") {
+          return new Response(JSON.stringify(jsonRpcError(request.id ?? null, -32600, 'Invalid Request: jsonrpc must be "2.0"')), { status: 200, headers });
+        }
+
+        const response = yield* dispatch(request);
+        return new Response(JSON.stringify(response), { status: 200, headers });
+      });
+
+    return { handleRequest } as const;
+  }),
+}) {}
+
+const serviceLayer = Layer.mergeAll(
+  ApiKeyRepo.Default,
+  ProjectRepo.Default,
+  ColumnRepo.Default,
+  SwimlaneRepo.Default,
+  TaskRepo.Default,
+  ProjectService.Default,
+  ColumnService.Default,
+  SwimlaneService.Default,
+  TaskService.Default,
+  WikiService.Default,
+);
+
+function createMcpLayer(dbPath: string): any {
+  return McpServer.Default.pipe(
+    Layer.provide(Layer.provide(serviceLayer, initSqlite(dbPath))),
+  );
+}
+
+export function createMcpHandler(dbPath: string): (req: Request) => Promise<Response> {
+  const runtime = ManagedRuntime.make(createMcpLayer(dbPath));
+
+  return async (req: Request) => {
+    const authHeader = req.headers.get("Authorization") ?? "";
+    const rawBody = await req.text();
+    const program = Effect.gen(function* () {
+      const server = yield* McpServer;
+      return yield* server.handleRequest(rawBody, authHeader);
+    });
+    return runtime.runPromise(program);
+  };
+}

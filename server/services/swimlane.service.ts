@@ -1,7 +1,7 @@
 import { Effect } from "effect";
 import { SwimlaneRepo } from "../repos/swimlane.repo";
 import { ProjectRepo } from "../repos/project.repo";
-import { DbError, D1, queryAll } from "../db/d1";
+import { DbError, Sqlite, queryAll } from "../db/database";
 import { ProjectNotFound, SwimlaneNotFound, HasChildren } from "../api/errors";
 import type { Swimlane } from "../../shared/types";
 
@@ -10,7 +10,7 @@ export class SwimlaneService extends Effect.Service<SwimlaneService>()("Lexa/Swi
   effect: Effect.gen(function* () {
     const repo = yield* SwimlaneRepo;
     const projectRepo = yield* ProjectRepo;
-    const db = yield* D1;
+    const db = yield* Sqlite;
 
     return {
       create: (input: { projectId: string; name: string; description?: string }): Effect.Effect<Swimlane, ProjectNotFound | DbError> =>

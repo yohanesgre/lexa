@@ -1,7 +1,7 @@
 import { Effect } from "effect";
 import { ColumnRepo } from "../repos/column.repo";
 import { ProjectRepo } from "../repos/project.repo";
-import { D1, queryAll, DbError, RowNotFound, ConstraintViolation } from "../db/d1";
+import { Sqlite, queryAll, DbError, RowNotFound, ConstraintViolation } from "../db/database";
 import { ProjectNotFound, ColumnNotFound, HasChildren } from "../api/errors";
 import type { Column } from "../../shared/types";
 
@@ -10,7 +10,7 @@ export class ColumnService extends Effect.Service<ColumnService>()("Lexa/ColumnS
   effect: Effect.gen(function* () {
     const repo = yield* ColumnRepo;
     const projectRepo = yield* ProjectRepo;
-    const db = yield* D1;
+    const db = yield* Sqlite;
 
     return {
       create: (input: {

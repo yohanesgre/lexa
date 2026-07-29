@@ -4,6 +4,8 @@ dist/
 .wrangler/
 .dev.vars
 .env
+.env.staging
+.env.prod
 routeTree.gen.ts
 app/routeTree.gen.ts
 worker-configuration.d.ts

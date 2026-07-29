@@ -1,6 +1,6 @@
 import { Effect } from "effect";
 import { ProjectRepo } from "../repos/project.repo";
-import { ConstraintViolation, DbError, RowNotFound } from "../db/d1";
+import { ConstraintViolation, DbError, RowNotFound } from "../db/database";
 import { ProjectNotFound, SlugTaken } from "../api/errors";
 import type { Project } from "../../shared/types";
 

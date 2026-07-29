@@ -1,5 +1,5 @@
 import { Effect } from "effect";
-import { D1, queryAll, queryFirst, run, batch, DbError, RowNotFound, ConstraintViolation } from "../db/d1";
+import { Sqlite, queryAll, queryFirst, run, batch, DbError, RowNotFound, ConstraintViolation } from "../db/database";
 import { TaskRow, rowToTask } from "../../shared/types";
 import type { Task, Priority, TaskType } from "../../shared/types";
 
@@ -24,7 +24,7 @@ function decodeCursor(cursor: string | null): { columnId: string; position: stri
 
 export class TaskRepo extends Effect.Service<TaskRepo>()("Lexa/TaskRepo", {
   effect: Effect.gen(function* () {
-    const db = yield* D1;
+    const db = yield* Sqlite;
 
     return {
       create: (input: {

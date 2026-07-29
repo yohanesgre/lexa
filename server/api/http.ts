@@ -1,6 +1,7 @@
 import { HttpApi, HttpApiBuilder, HttpApiEndpoint, HttpApiGroup, HttpServerResponse } from "@effect/platform";
 import { Effect, Layer, Schema } from "effect";
-import { d1Live } from "../db/d1";
+import { Sqlite } from "../db/database";
+import { Database } from "bun:sqlite";
 import { WikiPageNotFound, errorResponse, errorToStatus } from "./errors";
 import { clampLimit, nextCursor } from "../../shared/pagination";
 import { ProjectService } from "../services/project.service";
@@ -757,7 +758,12 @@ function formatWikiPageRevision(r: { id: string; pageId: string; title: string; 
   return r as any;
 }
 
-export function createApiHandler() {
+export function createApiHandler(dbPath: string) {
+  const db = new Database(dbPath);
+  db.exec("PRAGMA journal_mode = WAL");
+  db.exec("PRAGMA foreign_keys = ON");
+  const dbLayer = Layer.succeed(Sqlite, db);
+
   const serviceLayer = Layer.mergeAll(
     ProjectRepo.Default, ProjectService.Default,
     ColumnRepo.Default, ColumnService.Default,
@@ -768,7 +774,7 @@ export function createApiHandler() {
   );
   const handlerLayer = Layer.mergeAll(
     healthLive, projectsLive, columnsLive, swimlanesLive, tasksLive, boardLive, wikiLive, apiKeysLive,
-  ).pipe(Layer.provide(serviceLayer), Layer.provide(d1Live));
+  ).pipe(Layer.provide(Layer.provide(serviceLayer, dbLayer)));
   const merged = Layer.mergeAll(apiLayer, handlerLayer);
   return HttpApiBuilder.toWebHandler(merged as unknown as Parameters<typeof HttpApiBuilder.toWebHandler>[0]);
 }

@@ -1,6 +1,6 @@
 import { Effect, Data } from "effect";
 import { ApiKeyRepo } from "../repos/api-key.repo";
-import { DbError, RowNotFound, ConstraintViolation } from "../db/d1";
+import { DbError, RowNotFound, ConstraintViolation } from "../db/database";
 import type { ApiKey, ApiKeyCreateResult } from "../../shared/types";
 
 export class ApiKeyNameEmpty extends Data.TaggedError("ApiKeyNameEmpty")<{}> {}

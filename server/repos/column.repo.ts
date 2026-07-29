@@ -1,11 +1,11 @@
 import { Effect } from "effect";
-import { D1, queryAll, queryFirst, run, DbError, RowNotFound, ConstraintViolation } from "../db/d1";
+import { Sqlite, queryAll, queryFirst, run, DbError, RowNotFound, ConstraintViolation } from "../db/database";
 import { ColumnRow, rowToColumn } from "../../shared/types";
 import type { Column } from "../../shared/types";
 
 export class ColumnRepo extends Effect.Service<ColumnRepo>()("Lexa/ColumnRepo", {
   effect: Effect.gen(function* () {
-    const db = yield* D1;
+    const db = yield* Sqlite;
 
     return {
       create: (input: {

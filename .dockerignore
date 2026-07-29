@@ -1,0 +1,8 @@
+node_modules
+.git
+dist
+.tanstack
+.wrangler
+data
+.env
+*.log

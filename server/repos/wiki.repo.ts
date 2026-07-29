@@ -1,5 +1,5 @@
 import { Effect } from "effect";
-import { D1, queryAll, queryFirst, run, DbError, RowNotFound, ConstraintViolation } from "../db/d1";
+import { Sqlite, queryAll, queryFirst, run, DbError, RowNotFound, ConstraintViolation } from "../db/database";
 import { WikiPageRow, rowToWikiPage, rowToWikiPageMeta } from "../../shared/types";
 import type { WikiPage, WikiPageMeta } from "../../shared/types";
 import type { WikiPageRevisionRow, WikiPageRevision, WikiPageRevisionSummary } from "../../shared/types";
@@ -7,7 +7,7 @@ import { rowToWikiPageRevision, rowToWikiPageRevisionSummary } from "../../share
 
 export class WikiRepo extends Effect.Service<WikiRepo>()("Lexa/WikiRepo", {
   effect: Effect.gen(function* () {
-    const db = yield* D1;
+    const db = yield* Sqlite;
 
     return {
       create: (input: {

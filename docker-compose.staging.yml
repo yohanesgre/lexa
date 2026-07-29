@@ -1,0 +1,12 @@
+services:
+  app:
+    environment:
+      - COMPOSE_PROJECT_NAME=lexa-staging
+
+  tunnel:
+    image: cloudflare/cloudflared
+    command: tunnel --no-autoupdate run --token ${CF_TUNNEL_TOKEN}
+    depends_on:
+      app:
+        condition: service_healthy
+    restart: unless-stopped
