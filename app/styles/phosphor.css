@@ -1325,7 +1325,20 @@
     letter-spacing: 0.04em;
   }
 
-  /* Dashboard */
+  /* ---- Empty Box (settings empty table state) ---- */
+  .empty-box {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 6px;
+    padding: 32px 24px;
+    background: var(--lx-surface-card);
+    border: 1px dashed var(--lx-border-strong);
+    border-radius: 8px;
+    text-align: center;
+  }
+
+  /* ---- Dashboard */
   .project-grid {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
@@ -1368,6 +1381,7 @@
     -webkit-line-clamp: 2;
     -webkit-box-orient: vertical;
     overflow: hidden;
+    min-height: 36px;
   }
   .project-card-stats {
     position: absolute;
@@ -1457,12 +1471,26 @@
     background: var(--lx-surface-elevated);
     flex-shrink: 0;
   }
+  .nav-spacer {
+    flex: 1;
+  }
+  .nav-links {
+    display: flex;
+    align-items: center;
+    gap: 24px;
+  }
+  .nav-right {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
   .nav-brand {
     font-family: var(--lx-font-display);
     font-size: 16px;
     font-weight: 600;
     color: var(--lx-text-primary);
     letter-spacing: -0.02em;
+    text-decoration: none;
   }
   .nav-link {
     font-size: 13px;
@@ -1815,7 +1843,6 @@
   .project-switcher {
     position: relative;
     display: inline-flex;
-    margin-left: auto;
   }
   .project-switcher-trigger {
     display: inline-flex;
@@ -1892,7 +1919,7 @@
   .project-switcher-row-desc {
     font-size: 11px;
     line-height: 14px;
-    color: var(--lx-text-muted);
+    color: var(--lx-text-secondary);
     font-family: var(--lx-font-body);
     white-space: nowrap;
     overflow: hidden;

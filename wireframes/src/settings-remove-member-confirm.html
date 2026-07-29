@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Lexa — Settings (Remove Member Confirmation)</title>
+  <link rel="stylesheet" href="wireframes.css" />
+</head>
+<body class="bg-app color-primary" style="min-height:100vh;position:relative;overflow:hidden;">
+
+  <!-- Dimmed Settings Backdrop (Project Members section) -->
+  <div style="position:absolute;inset:0;opacity:0.25;pointer-events:none;overflow:hidden;">
+    <INCLUDE navbar.html />
+    <main class="page-frame">
+      <h1 class="font-display text-2xl weight-600 color-primary mb-4">Settings</h1>
+      <section>
+        <h2 class="font-display text-lg weight-500 color-primary mb-3">Project Members</h2>
+        <div style="background:var(--lx-surface-card);border:1px solid var(--lx-border-default);border-radius:8px;overflow:hidden;">
+          <table class="settings-table">
+            <thead>
+              <tr><th>User</th><th>Email</th><th>Role</th><th style="width:80px;"></th></tr>
+            </thead>
+            <tbody>
+              <tr style="background:var(--lx-bg-danger-subtle);">
+                <td class="text-sm weight-500">Alice</td>
+                <td class="text-xs color-secondary">alice@example.com</td>
+                <td class="text-xs color-secondary">member</td>
+                <td></td>
+              </tr>
+              <tr>
+                <td class="text-sm weight-500">Yohanes</td>
+                <td class="text-xs color-secondary">yohanesgre@gmail.com</td>
+                <td class="text-xs color-secondary">admin</td>
+                <td></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <!-- Overlay -->
+  <div class="slideover-overlay"></div>
+
+  <!-- Remove Member Confirmation -->
+  <div style="position:fixed;inset:0;display:flex;align-items:center;justify-content:center;z-index:50;">
+    <div class="dialog dialog-enter">
+
+      <h2 class="font-display text-lg weight-500 color-primary">Remove member?</h2>
+
+      <p class="text-sm color-secondary mt-3" style="line-height:20px;">
+        Remove
+        <span class="font-mono text-xs" style="background:var(--lx-surface-card);border-radius:4px;padding:2px 5px;color:var(--lx-text-primary);">Alice</span>
+        from Emberfall? They will lose access to this project immediately.
+      </p>
+
+      <div class="flex items-center gap-2 mt-4" style="justify-content:flex-end;">
+        <button class="btn btn-ghost">Cancel</button>
+        <button class="btn btn-danger-solid">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+          Remove
+        </button>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- Annotations -->
+  <div style="position:fixed;top:24px;left:24px;z-index:55;display:flex;flex-direction:column;gap:8px;align-items:flex-start;">
+    <span class="annotation-tag">Canonical ConfirmDialog shell (.dialog, 400px) — see component-confirm.html</span>
+    <span class="annotation-tag">Backdrop table row flashes danger-subtle to show the removal target</span>
+  </div>
+
+</body>
+</html>

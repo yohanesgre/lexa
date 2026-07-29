@@ -1,6 +1,6 @@
 import { Effect } from "effect";
 import { Sqlite, queryAll, queryFirst, run, DbError, RowNotFound, ConstraintViolation } from "../db/database";
-import type { UserRow } from "../../shared/types";
+import type { UserRow } from "../../shared/db";
 
 export class UserRepo extends Effect.Service<UserRepo>()("Lexa/UserRepo", {
   effect: Effect.gen(function* () {

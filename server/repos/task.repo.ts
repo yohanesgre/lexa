@@ -1,6 +1,6 @@
 import { Effect } from "effect";
 import { Sqlite, queryAll, queryFirst, run, batch, DbError, RowNotFound, ConstraintViolation } from "../db/database";
-import { TaskRow, rowToTask } from "../../shared/types";
+import { TaskRow, rowToTask } from "../../shared/db";
 import type { Task, Priority, TaskType } from "../../shared/types";
 
 export interface TaskFilters {

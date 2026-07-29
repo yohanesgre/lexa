@@ -6,7 +6,7 @@ import { SwimlaneRepo } from "../repos/swimlane.repo";
 import { ConstraintViolation, DbError, RowNotFound } from "../db/database";
 import { keyAfter } from "../../shared/positions";
 import { keyBetween } from "../../shared/positions";
-import type { TaskRow } from "../../shared/types";
+import type { TaskRow } from "../../shared/db";
 import {
   TaskNotFound,
   ProjectNotFound,

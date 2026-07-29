@@ -31,6 +31,10 @@ export function getProject(slug: string): Promise<Project> {
   return request(`${BASE}/projects/${slug}`);
 }
 
+export function deleteProject(slug: string): Promise<void> {
+  return request(`${BASE}/projects/${slug}`, { method: "DELETE" });
+}
+
 export function listColumns(slug: string): Promise<{ data: Column[] }> {
   return request(`${BASE}/projects/${slug}/columns`);
 }
@@ -145,4 +149,28 @@ export function createApiKey(name: string): Promise<ApiKeyCreateResult> {
 
 export function deleteApiKey(id: string): Promise<void> {
   return request(`${BASE}/settings/api-keys/${id}`, { method: "DELETE" });
+}
+
+// ---- users & members ----
+
+type ApiUser = { id: string; email: string; name: string; role: "admin" | "member"; createdAt: string; lastSeen: string | null };
+
+export function listUsers(): Promise<{ data: ApiUser[] }> {
+  return request(`${BASE}/admin/users`);
+}
+
+export function updateUserRole(id: string, role: "admin" | "member"): Promise<ApiUser> {
+  return request(`${BASE}/admin/users/${id}`, { method: "PATCH", body: JSON.stringify({ role }) });
+}
+
+export function listProjectMembers(slug: string): Promise<{ data: ApiUser[] }> {
+  return request(`${BASE}/projects/${slug}/members`);
+}
+
+export function addProjectMember(userId: string, projectId: string): Promise<{ projectId: string; projectSlug: string; role: string }> {
+  return request(`${BASE}/admin/users/${userId}/projects`, { method: "PUT", body: JSON.stringify({ projectId, role: "member" }) });
+}
+
+export function removeProjectMember(userId: string, projectId: string): Promise<void> {
+  return request(`${BASE}/admin/users/${userId}/projects/${projectId}`, { method: "DELETE" });
 }

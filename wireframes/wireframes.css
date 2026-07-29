@@ -952,23 +952,37 @@ a:hover { color: var(--lx-text-link-hover); }
 
 /* ---- Nav / App Shell ---- */
 .app-nav {
-  display: flex;
-  align-items: center;
-  gap: 24px;
-  height: 48px;
-  padding: 0 16px;
-  border-bottom: 1px solid var(--lx-border-default);
-  background: var(--lx-surface-elevated);
-  flex-shrink: 0;
-}
+    display: flex;
+    align-items: center;
+    gap: 24px;
+    height: 48px;
+    padding: 0 16px;
+    border-bottom: 1px solid var(--lx-border-default);
+    background: var(--lx-surface-elevated);
+    flex-shrink: 0;
+  }
+  .nav-spacer {
+    flex: 1;
+  }
+  .nav-links {
+    display: flex;
+    align-items: center;
+    gap: 24px;
+  }
+  .nav-right {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
 
 .nav-brand {
-  font-family: var(--lx-font-display);
-  font-size: 16px;
-  font-weight: 600;
-  color: var(--lx-text-primary);
-  letter-spacing: -0.02em;
-}
+    font-family: var(--lx-font-display);
+    font-size: 16px;
+    font-weight: 600;
+    color: var(--lx-text-primary);
+    letter-spacing: -0.02em;
+    text-decoration: none;
+  }
 
 .nav-link {
   font-size: 13px;
@@ -2048,10 +2062,9 @@ textarea.prop-input {
    ========================================================= */
 
 .project-switcher {
-  position: relative;
-  display: inline-flex;
-  margin-left: auto;
-}
+    position: relative;
+    display: inline-flex;
+  }
 
 .project-switcher-trigger {
   display: inline-flex;

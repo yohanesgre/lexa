@@ -275,6 +275,7 @@ export function KanbanBoard({ board, onMoveTask, onSelectTask, onOpenCreateTask 
             <button
               type="button"
               className="btn btn-primary"
+              style={{ marginTop: 16 }}
               onClick={() => setIsSettingsOpen(true)}
             >
               <svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5}>

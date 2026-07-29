@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Lexa — Task Detail: GitHub Link</title>
+  <link rel="stylesheet" href="wireframes.css" />
+</head>
+<body class="bg-app color-primary" style="min-height:100vh;position:relative;overflow:hidden;">
+
+  <!-- Dimmed Kanban Backdrop -->
+  <div style="position:absolute;inset:0;opacity:0.25;pointer-events:none;overflow:hidden;">
+    <INCLUDE navbar.html />
+    <div class="board-area">
+      <div class="board-header">
+        <h1 class="font-display text-xl weight-600 color-primary">Emberfall</h1>
+      </div>
+      <div class="board-scroll">
+        <div class="swimlane-header" style="margin-bottom:12px;">
+          <svg class="chevron" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg>
+          <span class="swimlane-name">Sprint 7 — The Furnace</span>
+        </div>
+        <div class="columns-row">
+          <div class="column" style="opacity:0.6;">
+            <div class="column-header has-cards"><span class="column-name">Backlog</span></div>
+            <div class="column-body"><div class="kanban-card" style="border-left:3px solid #4ADE80;"><div class="card-title">Implement double-jump mechanic</div></div></div>
+          </div>
+          <div class="column" style="opacity:0.6;">
+            <div class="column-header has-cards"><span class="column-name">In Progress</span></div>
+            <div class="column-body"><div class="kanban-card" style="border-left:3px solid #FF4444;"><div class="card-title">Crash on level 3-2 load</div></div></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Overlay -->
+  <div class="slideover-overlay"></div>
+
+  <!-- Slideover -->
+  <div class="slideover">
+    <!-- Header -->
+    <div class="slideover-header border-b-subtle">
+      <div class="flex items-center gap-2">
+        <span class="text-xs color-muted font-body">Emberfall / Board</span>
+        <span class="annotation-inline">GitHub link flow</span>
+      </div>
+      <button class="btn btn-ghost" style="width:32px;height:32px;padding:0;">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M18 6L6 18M6 6l12 12"/></svg>
+      </button>
+    </div>
+
+    <!-- Title -->
+    <div class="px-4 pt-4">
+      <h2 class="slideover-title">Crash on level 3-2 load</h2>
+    </div>
+
+    <!-- Property Bar -->
+    <div class="property-bar mt-3">
+      <div class="prop-field">
+        <span class="prop-label">Column</span>
+        <select class="prop-input" style="min-width:120px;">
+          <option>In Progress</option>
+        </select>
+      </div>
+      <div class="prop-field">
+        <span class="prop-label">Priority</span>
+        <span class="priority-badge pb-urgent">
+          <span class="priority-dot priority-urgent"></span>
+          Urgent
+        </span>
+      </div>
+      <div class="prop-field">
+        <span class="prop-label">Type</span>
+        <span class="type-badge type-bug">Bug</span>
+      </div>
+      <div class="prop-field">
+        <span class="prop-label">Assignee</span>
+        <input class="prop-input" value="AL" style="width:80px;" />
+      </div>
+    </div>
+
+    <!-- Body: GitHub link section expanded -->
+    <div class="slideover-body">
+      <div class="github-section mt-4" style="padding-left:0;padding-right:0;border-top:none;">
+
+        <!-- Section header -->
+        <div class="flex items-center gap-2">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" class="color-secondary"><path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77 5.07 5.07 0 0 0 19.91 1S18.73.65 16 2.48a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 9 18.13V22"/></svg>
+          <span class="prop-label">GitHub</span>
+          <span class="annotation-inline">Expanded link flow — 3 states shown stacked</span>
+        </div>
+
+        <!-- State 1: repo input + Create issue -->
+        <div class="mt-3">
+          <div class="flex items-center gap-2">
+            <input class="prop-input is-focused font-mono" value="emberfall-godot" placeholder="owner/repo" style="flex:1;" />
+            <button class="btn btn-primary shrink-0">Create issue</button>
+          </div>
+          <p class="text-xs color-muted mt-2" style="line-height:16px;">
+            Creates a GitHub issue from this task and links it. Issue title and body are seeded from the task.
+          </p>
+          <div class="mt-2"><span class="annotation-tag">State 1: owner/repo input, focused</span></div>
+        </div>
+
+        <div style="border-top:1px dashed var(--lx-border-default);margin:16px 0;"></div>
+
+        <!-- State 2: loading -->
+        <div>
+          <div class="flex items-center gap-2">
+            <input class="prop-input font-mono" value="emberfall-godot" disabled style="flex:1;opacity:0.5;" />
+            <button class="btn btn-primary shrink-0" disabled style="opacity:0.7;">
+              <span class="spinner"></span>
+              Creating...
+            </button>
+          </div>
+          <div class="mt-2"><span class="annotation-tag">State 2: loading — input + button disabled, spinner in button</span></div>
+        </div>
+
+        <div style="border-top:1px dashed var(--lx-border-default);margin:16px 0;"></div>
+
+        <!-- State 3: success — linked -->
+        <div>
+          <div class="github-section" style="padding:12px 16px;border:1px solid rgba(74,222,128,0.2);border-radius:6px;background:var(--lx-bg-success-subtle);">
+            <div class="flex items-center justify-between">
+              <div class="flex items-center gap-2">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="color:var(--lx-text-link);"><path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77 5.07 5.07 0 0 0 19.91 1S18.73.65 16 2.48a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 9 18.13V22"/></svg>
+                <span class="font-mono text-sm weight-500 color-link">emberfall-godot #107</span>
+              </div>
+              <div class="flex items-center gap-2">
+                <span class="sync-dot sync-synced"></span>
+                <span class="font-micro text-2xs color-success" style="text-transform:uppercase;letter-spacing:0.04em;">Synced</span>
+              </div>
+            </div>
+            <p class="text-xs color-secondary mt-2" style="line-height:16px;">
+              Issue created and linked. Column changes now sync two-ways with GitHub issue state.
+            </p>
+          </div>
+          <div class="mt-2"><span class="annotation-tag">State 3: success — linked badge, sync indicator replaces the input row</span></div>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- Footer -->
+    <div class="slideover-footer">
+      <button class="btn btn-danger">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+        Delete
+      </button>
+      <button class="btn btn-ghost">Close</button>
+    </div>
+  </div>
+
+  <!-- Annotation rail -->
+  <div style="position:fixed;top:50%;right:484px;transform:translateY(-50%);z-index:55;">
+    <span class="annotation-tag">480px slideover — GitHub link flow</span>
+  </div>
+
+</body>
+</html>

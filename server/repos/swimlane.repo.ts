@@ -1,6 +1,6 @@
 import { Effect } from "effect";
 import { Sqlite, queryAll, queryFirst, run, DbError, RowNotFound, ConstraintViolation } from "../db/database";
-import { SwimlaneRow, rowToSwimlane } from "../../shared/types";
+import { SwimlaneRow, rowToSwimlane } from "../../shared/db";
 import type { Swimlane } from "../../shared/types";
 
 export class SwimlaneRepo extends Effect.Service<SwimlaneRepo>()("Lexa/SwimlaneRepo", {

@@ -1,6 +1,6 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { LayoutGrid, Plus, TrendingUp } from "lucide-react";
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { useProjects, useCreateProject } from "../lib/queries";
 import {
   stubProjectHealth,
@@ -23,6 +23,7 @@ function Dashboard() {
   const { data: projects, isLoading } = useProjects();
   const createProject = useCreateProject();
   const [name, setName] = useState("");
+  const [confirming, setConfirming] = useState(false);
 
   const healthData = useMemo(() => (projects ? stubProjectHealth(projects) : []), [projects]);
   const attentionTasks = useMemo(() => (projects ? stubAttentionTasks(projects) : []), [projects]);
@@ -34,15 +35,10 @@ function Dashboard() {
     return map;
   }, [healthData]);
 
-  const handleCreate = async (e: React.FormEvent) => {
+  const handleCreate = (e: React.FormEvent) => {
     e.preventDefault();
     if (!name.trim()) return;
-    try {
-      await createProject.mutateAsync({ name: name.trim() });
-    } catch {
-      // error shown via createProject.error
-    }
-    setName("");
+    setConfirming(true);
   };
 
   if (isLoading) {
@@ -69,10 +65,6 @@ function Dashboard() {
           </div>
         </div>
         <div className="flex items-center gap-3">
-          <button type="button" className="btn btn-ghost">
-            <TrendingUp size={14} strokeWidth={1.5} />
-            API Keys
-          </button>
           <form onSubmit={handleCreate} className="flex items-center gap-3">
             <input
               type="text"
@@ -91,6 +83,35 @@ function Dashboard() {
       </div>
 
       {createProject.error && <div className="dashboard-error">{(createProject.error as Error).message}</div>}
+
+      {confirming && (
+        <>
+          <div className="slideover-overlay" onClick={() => setConfirming(false)} />
+          <div className="fixed inset-0 flex items-center justify-center z-50 pointer-events-none">
+            <div className="dialog dialog-enter pointer-events-auto" role="dialog" aria-modal="true" style={{ maxWidth: 400 }}>
+              <h2 className="font-display text-lg font-medium text-lx-text-primary">Create project?</h2>
+              <p className="text-sm text-lx-text-secondary mt-3 leading-5">
+                Create{" "}
+                <span className="font-mono text-xs text-lx-text-primary" style={{ background: "var(--lx-surface-card)", borderRadius: 4, padding: "2px 5px" }}>
+                  {name.trim()}
+                </span>
+                ? It will be set up with 5 default columns (Todo, In Progress, Review, Done, Blocked).
+              </p>
+              <div className="flex items-center gap-2 mt-4 justify-end">
+                <button type="button" className="btn btn-ghost" onClick={() => setConfirming(false)}>Cancel</button>
+                <button type="button" className="btn btn-primary" onClick={() => {
+                  createProject.mutate({ name: name.trim() }, {
+                    onSettled: () => { setName(""); setConfirming(false); },
+                  });
+                }}>
+                  <Plus size={14} strokeWidth={1.5} />
+                  Create
+                </button>
+              </div>
+            </div>
+          </div>
+        </>
+      )}
 
       {isEmpty ? (
         <div className="bg-lx-surface-column border border-lx-border-subtle rounded-lg mt-4 flex" style={{ minHeight: 480 }}>

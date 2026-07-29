@@ -73,10 +73,28 @@ const getBySlugEndpoint = HttpApiEndpoint.get("getBySlug", "/projects/:slug")
   .setPath(SlugPath)
   .addSuccess(ProjectSchema, { status: 200 });
 
+const ProjectMemberSchema = Schema.Struct({
+  name: Schema.String,
+  email: Schema.String,
+  role: Schema.Literal("admin", "member"),
+});
+
+const ProjectMembersResponse = Schema.Struct({ data: Schema.Array(ProjectMemberSchema) });
+
+const membersEndpoint = HttpApiEndpoint.get("listMembers", "/projects/:slug/members")
+  .setPath(SlugPath)
+  .addSuccess(ProjectMembersResponse, { status: 200 });
+
 const projectsGroup = HttpApiGroup.make("projects")
   .add(listEndpoint)
   .add(createEndpoint)
-  .add(getBySlugEndpoint);
+  .add(getBySlugEndpoint)
+  .add(membersEndpoint)
+  .add(
+    HttpApiEndpoint.del("deleteProject", "/projects/:slug")
+      .setPath(SlugPath)
+      .addSuccess(Schema.UndefinedOr(Schema.Void))
+  );
 
 const ColumnSchema = Schema.Struct({
   id: Schema.String,
@@ -433,6 +451,30 @@ const projectsLive = HttpApiBuilder.group(LexaApi, "projects", (handlers) =>
         const service = yield* ProjectService;
         const project = yield* service.findBySlug(req.path.slug);
         return formatProject(project);
+      }))
+    )
+    .handle("listMembers", (req) =>
+      respond(Effect.gen(function* () {
+        const projectService = yield* ProjectService;
+        const roleRepo = yield* UserProjectRoleRepo;
+        const userRepo = yield* UserRepo;
+        const project = yield* projectService.findBySlug(req.path.slug);
+        const roles = yield* roleRepo.findByProjectId(project.id);
+        const members = yield* Effect.forEach(roles, (r) =>
+          Effect.gen(function* () {
+            const user = yield* userRepo.findById(r.user_id);
+            if (user.role === "admin") return undefined;
+            return { name: user.name, email: user.email, role: r.role };
+          })
+        );
+        return { data: members.filter((m): m is { name: string; email: string; role: "admin" | "member" } => m !== undefined) };
+      }))
+    )
+    .handle("deleteProject", (req) =>
+      respond(Effect.gen(function* () {
+        const service = yield* ProjectService;
+        yield* service.delete(req.path.slug);
+        return undefined;
       }))
     )
 );

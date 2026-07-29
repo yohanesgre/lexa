@@ -1,7 +1,7 @@
 import { Effect, Data } from "effect";
 import { UserRepo } from "../repos/user.repo";
 import { DbError, RowNotFound, ConstraintViolation } from "../db/database";
-import type { UserRow } from "../../shared/types";
+import type { UserRow } from "../../shared/db";
 
 export class UserNotFound extends Data.TaggedError("UserNotFound")<{ id: string }> {}
 export class CannotDeleteSelf extends Data.TaggedError("CannotDeleteSelf")<{}> {}

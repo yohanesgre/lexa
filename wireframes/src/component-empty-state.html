@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Lexa — Component: Empty State</title>
+  <link rel="stylesheet" href="wireframes.css" />
+</head>
+<body class="bg-app color-primary" style="min-height:100vh;">
+
+  <INCLUDE navbar.html />
+
+  <main class="page-frame">
+    <h1 class="font-display text-2xl weight-600 color-primary mb-2">Empty State</h1>
+    <span class="annotation-tag mb-4">components/EmptyState.tsx</span>
+    <p class="text-sm color-secondary mt-3" style="max-width:560px;">
+      The generic pattern: icon tile, Display heading, one line of secondary subtext, one primary CTA. Two scales — full surface and compact (in-column).
+    </p>
+
+    <div class="flex gap-4 mt-4" style="align-items:flex-start;flex-wrap:wrap;">
+
+      <!-- ===== Variant A: full-surface empty state ===== -->
+      <div style="flex:1;min-width:440px;max-width:600px;">
+        <div class="font-micro text-2xs color-muted mb-2" style="text-transform:uppercase;letter-spacing:0.04em;">A — Full surface (empty board, empty wiki, no search results)</div>
+        <div class="bg-column border-subtle r-lg" style="min-height:400px;display:flex;">
+          <div class="empty-state flex-1">
+            <div class="empty-state-icon">
+              <svg viewBox="0 0 24 24"><path d="M22 12h-6l-2 3h-4l-2-3H2"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/></svg>
+            </div>
+            <h2 class="font-display text-lg weight-500 color-primary mt-3">No tasks yet</h2>
+            <p class="text-sm color-secondary mt-1" style="max-width:300px;">Create your first task to start tracking work on this board.</p>
+            <button class="btn btn-primary mt-4">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 5v14m-7-7h14"/></svg>
+              New Task
+            </button>
+          </div>
+        </div>
+        <div class="mt-2" style="display:flex;flex-direction:column;gap:6px;align-items:flex-start;">
+          <span class="annotation-tag">icon tile: 48px, radius-xl, card surface, icon 24px muted</span>
+          <span class="annotation-tag">heading: text-lg/500/Display · subtext: text-sm secondary, max 300px · CTA: btn-primary, mt-16</span>
+        </div>
+      </div>
+
+      <!-- ===== Variant B: compact empty column ===== -->
+      <div>
+        <div class="font-micro text-2xs color-muted mb-2" style="text-transform:uppercase;letter-spacing:0.04em;">B — Compact (empty kanban column)</div>
+        <div class="column" style="height:400px;">
+          <div class="column-strip" style="background:transparent;"></div>
+          <div class="column-header">
+            <div class="flex items-center">
+              <span class="column-name">In Progress</span>
+              <span class="column-count">00</span>
+            </div>
+            <span class="wip-badge wip-ok">00/08</span>
+          </div>
+          <div class="column-body" style="align-items:center;justify-content:center;gap:8px;">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="color:var(--lx-text-muted);"><path d="M22 12h-6l-2 3h-4l-2-3H2"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/></svg>
+            <span class="text-xs color-tertiary">Nothing here yet</span>
+            <button class="add-task-btn">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 5v14m-7-7h14"/></svg>
+              Add task...
+            </button>
+          </div>
+        </div>
+        <div class="mt-2" style="display:flex;flex-direction:column;gap:6px;align-items:flex-start;">
+          <span class="annotation-tag">compact: no tile, no heading — icon 20px + one line + AddTaskButton</span>
+          <span class="annotation-tag">empty column header: no bottom border (has-cards off), count "00"</span>
+        </div>
+      </div>
+
+    </div>
+
+    <div class="responsive-note mt-4" style="max-width:640px;">
+      <strong>Rules.</strong> One CTA only — never stack two buttons. Subtext tells the user what appears here and how to create it, in one sentence. Icon is always muted; the phosphor accent is reserved for the CTA.
+    </div>
+  </main>
+
+</body>
+</html>

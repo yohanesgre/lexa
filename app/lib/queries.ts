@@ -19,6 +19,16 @@ export function useCreateProject() {
   });
 }
 
+export function useDeleteProject() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (slug: string) => api.deleteProject(slug),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["projects"] });
+    },
+  });
+}
+
 export function useBoard(slug: string) {
   return useQuery({ queryKey: ["board", slug], queryFn: () => api.getBoard(slug) });
 }
@@ -263,6 +273,54 @@ export function useDeleteApiKey() {
         if (!old) return old;
         return old.filter((k) => k.id !== id);
       });
+    },
+  });
+}
+
+// ---- users & project members ----
+
+export function useProject(slug: string) {
+  return useQuery({ queryKey: ["project", slug], queryFn: () => api.getProject(slug) });
+}
+
+export function useUsers() {
+  return useQuery({ queryKey: ["users"], queryFn: () => api.listUsers().then((r) => r.data) });
+}
+
+export function useUpdateUserRole() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, role }: { id: string; role: "admin" | "member" }) => api.updateUserRole(id, role),
+    onSuccess: (user) => {
+      qc.setQueryData<{ id: string; email: string; name: string; role: string }[]>(["users"], (old) => {
+        if (!old) return old;
+        return old.map((u) => (u.id === user.id ? user : u));
+      });
+      qc.invalidateQueries({ queryKey: ["project-members"] });
+    },
+  });
+}
+
+export function useProjectMembers(slug: string) {
+  return useQuery({ queryKey: ["project-members", slug], queryFn: () => api.listProjectMembers(slug).then((r) => r.data) });
+}
+
+export function useAddProjectMember(slug: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ userId, projectId }: { userId: string; projectId: string }) => api.addProjectMember(userId, projectId),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["project-members", slug] });
+    },
+  });
+}
+
+export function useRemoveProjectMember(slug: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ userId, projectId }: { userId: string; projectId: string }) => api.removeProjectMember(userId, projectId),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["project-members", slug] });
     },
   });
 }

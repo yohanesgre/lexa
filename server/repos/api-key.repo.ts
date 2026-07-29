@@ -1,6 +1,6 @@
 import { Effect } from "effect";
 import { Sqlite, queryAll, queryFirst, run, DbError, RowNotFound, ConstraintViolation } from "../db/database";
-import type { ApiKeyRow } from "../../shared/types";
+import type { ApiKeyRow } from "../../shared/db";
 
 export class ApiKeyRepo extends Effect.Service<ApiKeyRepo>()("Lexa/ApiKeyRepo", {
   effect: Effect.gen(function* () {

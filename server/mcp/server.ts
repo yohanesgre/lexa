@@ -10,6 +10,9 @@ import { ColumnService } from "../services/column.service";
 import { SwimlaneService } from "../services/swimlane.service";
 import { TaskService } from "../services/task.service";
 import { WikiService } from "../services/wiki.service";
+import { ApiKeyService } from "../services/api-key.service";
+import { UserService } from "../services/user.service";
+import { UserProjectRoleService } from "../services/user-project-role.service";
 import { initSqlite } from "../db/database";
 import { errorCodeMap, errorMessage, errorDetails } from "../api/errors";
 import { tool as createTask } from "./tools/create-task";
@@ -28,6 +31,23 @@ import { tool as getProject } from "./tools/get-project";
 import { tool as getProjectStatus } from "./tools/get-project-status";
 import { tool as linkGithubIssue } from "./tools/link-github-issue";
 import { tool as unlinkGithubIssue } from "./tools/unlink-github-issue";
+import { tool as createProject } from "./tools/create-project";
+import { tool as updateProject } from "./tools/update-project";
+import { tool as deleteProject } from "./tools/delete-project";
+import { tool as createColumn } from "./tools/create-column";
+import { tool as updateColumn } from "./tools/update-column";
+import { tool as deleteColumn } from "./tools/delete-column";
+import { tool as createSwimlane } from "./tools/create-swimlane";
+import { tool as updateSwimlane } from "./tools/update-swimlane";
+import { tool as deleteSwimlane } from "./tools/delete-swimlane";
+import { tool as listApiKeys } from "./tools/list-api-keys";
+import { tool as createApiKey } from "./tools/create-api-key";
+import { tool as deleteApiKey } from "./tools/delete-api-key";
+import { tool as listUsers } from "./tools/list-users";
+import { tool as updateUserRole } from "./tools/update-user-role";
+import { tool as listUserProjectRoles } from "./tools/list-user-project-roles";
+import { tool as setUserProjectRole } from "./tools/set-user-project-role";
+import { tool as removeUserProjectRole } from "./tools/remove-user-project-role";
 import { UserProjectRoleRepo } from "../repos/user-project-role.repo";
 import { checkProjectAccess } from "./auth";
 import { resolveTaskProject } from "./resolve";
@@ -56,6 +76,23 @@ const tools: ToolDef[] = [
   getProjectStatus,
   linkGithubIssue,
   unlinkGithubIssue,
+  createProject,
+  updateProject,
+  deleteProject,
+  createColumn,
+  updateColumn,
+  deleteColumn,
+  createSwimlane,
+  updateSwimlane,
+  deleteSwimlane,
+  listApiKeys,
+  createApiKey,
+  deleteApiKey,
+  listUsers,
+  updateUserRole,
+  listUserProjectRoles,
+  setUserProjectRole,
+  removeUserProjectRole,
 ];
 
 async function sha256(text: string): Promise<string> {
@@ -99,6 +136,9 @@ export class McpServer extends Effect.Service<McpServer>()("Lexa/McpServer", {
     SwimlaneService.Default,
     TaskService.Default,
     WikiService.Default,
+    ApiKeyService.Default,
+    UserService.Default,
+    UserProjectRoleService.Default,
   ],
   effect: Effect.gen(function* () {
     const apiKeyRepo = yield* ApiKeyRepo;
@@ -281,11 +321,15 @@ const serviceLayer = Layer.mergeAll(
   SwimlaneService.Default,
   TaskService.Default,
   WikiService.Default,
+  ApiKeyService.Default,
+  UserService.Default,
+  UserProjectRoleService.Default,
 );
 
-function createMcpLayer(dbPath: string): any {
-  return McpServer.Default.pipe(
-    Layer.provide(Layer.provide(serviceLayer, initSqlite(dbPath))),
+function createMcpLayer(dbPath: string): Layer.Layer<McpServer> {
+  return Layer.provide(
+    Layer.provideMerge(McpServer.Default, serviceLayer),
+    initSqlite(dbPath),
   );
 }
 

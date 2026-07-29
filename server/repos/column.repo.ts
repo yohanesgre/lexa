@@ -1,6 +1,6 @@
 import { Effect } from "effect";
 import { Sqlite, queryAll, queryFirst, run, DbError, RowNotFound, ConstraintViolation } from "../db/database";
-import { ColumnRow, rowToColumn } from "../../shared/types";
+import { ColumnRow, rowToColumn } from "../../shared/db";
 import type { Column } from "../../shared/types";
 
 export class ColumnRepo extends Effect.Service<ColumnRepo>()("Lexa/ColumnRepo", {

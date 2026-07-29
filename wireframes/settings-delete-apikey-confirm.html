@@ -11,8 +11,29 @@
   <!-- Dimmed Settings Backdrop (API Keys section) -->
   <div style="position:absolute;inset:0;opacity:0.25;pointer-events:none;overflow:hidden;">
     <nav class="app-nav">
-      <div class="nav-brand">Lexa</div>
-      <span class="font-micro text-2xs color-muted" style="text-transform:uppercase;letter-spacing:0.04em;">Project: Emberfall</span>
+      <a href="index.html" class="nav-brand">Lexa</a>
+      <div class="nav-links">
+        <a href="dashboard.html" class="nav-link">Dashboard</a>
+        <a href="kanban.html" class="nav-link">Board</a>
+        <a href="wiki.html" class="nav-link">Wiki</a>
+        <a href="settings.html" class="nav-link">Settings</a>
+      </div>
+      <div class="nav-spacer"></div>
+      <div class="nav-right">
+        <div class="project-switcher">
+          <button class="project-switcher-trigger">
+            <span class="text-sm weight-500 font-body color-primary">Emberfall</span>
+            <svg viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg>
+          </button>
+        </div>
+        <div style="position:relative;">
+          <button style="display:flex;align-items:center;gap:8px;height:28px;padding:0 8px 0 6px;background:transparent;border:1px solid var(--lx-border-default);border-radius:6px;color:var(--lx-text-primary);cursor:pointer;">
+            <div class="avatar" style="width:20px;height:20px;font-size:10px;">Y</div>
+            <span class="text-sm weight-500" style="line-height:1;">Yohanes</span>
+            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="flex-shrink:0;"><path d="M6 9l6 6 6-6"/></svg>
+          </button>
+        </div>
+      </div>
     </nav>
     <main class="page-frame">
       <h1 class="font-display text-2xl weight-600 color-primary mb-4">Settings</h1>

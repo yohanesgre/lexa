@@ -1,13 +1,23 @@
 import { Effect } from "effect";
 import { ProjectRepo } from "../repos/project.repo";
+import { ColumnRepo } from "../repos/column.repo";
 import { ConstraintViolation, DbError, RowNotFound } from "../db/database";
 import { ProjectNotFound, SlugTaken } from "../api/errors";
 import type { Project } from "../../shared/types";
 
+const DEFAULT_COLUMNS = [
+  { name: "Todo", color: "#6b7280", position: 1 },
+  { name: "In Progress", color: "#3b82f6", position: 2 },
+  { name: "Review", color: "#f59e0b", position: 3 },
+  { name: "Done", color: "#10b981", position: 4 },
+  { name: "Blocked", color: "#ef4444", position: 5 },
+];
+
 export class ProjectService extends Effect.Service<ProjectService>()("Lexa/ProjectService", {
-  dependencies: [ProjectRepo.Default],
+  dependencies: [ProjectRepo.Default, ColumnRepo.Default],
   effect: Effect.gen(function* () {
     const repo = yield* ProjectRepo;
+    const columnRepo = yield* ColumnRepo;
 
     const slugify = (name: string): string =>
       name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 60) || "project";
@@ -20,6 +30,19 @@ export class ProjectService extends Effect.Service<ProjectService>()("Lexa/Proje
           .create({ id, name: input.name, slug, description: input.description ?? "", githubRepo: input.githubRepo ?? null })
           .pipe(
             Effect.flatMap(() => repo.findBySlug(slug)),
+            Effect.tap((project) =>
+              Effect.all(
+                DEFAULT_COLUMNS.map((col) =>
+                  columnRepo.create({
+                    id: crypto.randomUUID(),
+                    projectId: project.id,
+                    name: col.name,
+                    position: col.position,
+                    color: col.color,
+                  })
+                )
+              )
+            ),
             Effect.catchTag("ConstraintViolation", () => new SlugTaken({ slug })),
             Effect.catchTag("RowNotFound", () => new SlugTaken({ slug }))
           );

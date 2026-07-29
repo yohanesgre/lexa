@@ -1,7 +1,9 @@
 import { useState, useRef, useEffect } from "react";
-import { createFileRoute } from "@tanstack/react-router";
-import { AlertTriangle, Check, Copy, Key, Plus, Trash2, Search, UserPlus } from "lucide-react";
-import { useApiKeys, useCreateApiKey, useDeleteApiKey } from "../../lib/queries";
+import { createFileRoute, useParams } from "@tanstack/react-router";
+import { AlertTriangle, Check, Copy, Key, Plus, Trash2, Search, UserPlus, Users } from "lucide-react";
+import { useQuery } from "@tanstack/react-query";
+import { useApiKeys, useCreateApiKey, useDeleteApiKey, useUsers, useUpdateUserRole, useProjectMembers, useAddProjectMember, useRemoveProjectMember, useDeleteProject } from "../../lib/queries";
+import * as api from "../../lib/api";
 
 function formatRelative(iso: string): string {
   const then = new Date(iso).getTime();
@@ -19,6 +21,11 @@ function formatRelative(iso: string): string {
 
 function ApiKeyRevealModal({ name, fullKey, onDone }: { name: string; fullKey: string; onDone: () => void }) {
   const [copied, setCopied] = useState(false);
+
+  useEffect(() => {
+    void navigator.clipboard.writeText(fullKey).then(() => setCopied(true));
+  }, [fullKey]);
+
   return (
     <>
       <div className="slideover-overlay" />
@@ -46,20 +53,20 @@ function ApiKeyRevealModal({ name, fullKey, onDone }: { name: string; fullKey: s
                   onClick={() => { void navigator.clipboard.writeText(fullKey); setCopied(true); }}
                 >
                   {copied ? <Check size={12} strokeWidth={1.5} /> : <Copy size={12} strokeWidth={1.5} />}
-                  {copied ? "Copied" : "Copy"}
+                  {copied ? "Copied to clipboard" : "Copy"}
                 </button>
               </div>
-              <div className="field-hint">Full key is shown here exactly once — in the table it is always masked.</div>
+              <div className="field-hint">Auto-copied to your clipboard. Keep it somewhere safe — Lexa stores only a SHA-256 hash.</div>
             </div>
 
             <div className="notice notice-warning">
               <AlertTriangle size={16} strokeWidth={1.5} />
-              <span>This key will not be shown again. Copy it now and store it somewhere safe — Lexa stores only a SHA-256 hash.</span>
+              <span>This key will not be shown again. Copy it now and store it somewhere safe.</span>
             </div>
           </div>
 
           <div className="modal-footer">
-            <button type="button" className="btn btn-primary" onClick={onDone}>Done</button>
+            <button type="button" className="btn btn-primary" onClick={onDone}>I've saved this key</button>
           </div>
         </div>
       </div>
@@ -125,6 +132,135 @@ function RemoveMemberModal({ name, onCancel, onConfirm }: { name: string; onCanc
   );
 }
 
+function DemoteAdminModal({ name, onCancel, onConfirm }: { name: string; onCancel: () => void; onConfirm: () => void }) {
+  return (
+    <>
+      <div className="slideover-overlay" onClick={onCancel} />
+      <div className="fixed inset-0 flex items-center justify-center z-50 pointer-events-none">
+        <div className="dialog dialog-enter pointer-events-auto" role="dialog" aria-modal="true">
+          <h2 className="font-display text-lg font-medium text-lx-text-primary">Demote admin?</h2>
+
+          <p className="text-sm text-lx-text-secondary mt-3 leading-5">
+            Demote{" "}
+            <span className="font-mono text-xs text-lx-text-primary" style={{ background: "var(--lx-surface-card)", borderRadius: 4, padding: "2px 5px" }}>
+              {name}
+            </span>
+            {" "}from admin to member? They will lose global admin access and can be re-added to specific projects.
+          </p>
+
+          <div className="flex items-center gap-2 mt-4 justify-end">
+            <button type="button" className="btn btn-ghost" onClick={onCancel}>Cancel</button>
+            <button type="button" className="btn btn-danger-solid" onClick={onConfirm}>
+              <Trash2 size={14} strokeWidth={1.5} />
+              Demote
+            </button>
+          </div>
+        </div>
+      </div>
+    </>
+  );
+}
+
+function AddAdminModal({ name, onCancel, onConfirm }: { name: string; onCancel: () => void; onConfirm: () => void }) {
+  return (
+    <>
+      <div className="slideover-overlay" onClick={onCancel} />
+      <div className="fixed inset-0 flex items-center justify-center z-50 pointer-events-none">
+        <div className="dialog dialog-enter pointer-events-auto" role="dialog" aria-modal="true">
+          <h2 className="font-display text-lg font-medium text-lx-text-primary">Promote to admin?</h2>
+
+          <p className="text-sm text-lx-text-secondary mt-3 leading-5">
+            Promote{" "}
+            <span className="font-mono text-xs text-lx-text-primary" style={{ background: "var(--lx-surface-card)", borderRadius: 4, padding: "2px 5px" }}>
+              {name}
+            </span>
+            {" "}to global admin? They will be removed from all per-project member lists.
+          </p>
+
+          <div className="flex items-center gap-2 mt-4 justify-end">
+            <button type="button" className="btn btn-ghost" onClick={onCancel}>Cancel</button>
+            <button type="button" className="btn btn-primary" onClick={onConfirm}>
+              <Plus size={14} strokeWidth={1.5} />
+              Promote
+            </button>
+          </div>
+        </div>
+      </div>
+    </>
+  );
+}
+
+function AddMemberModal({ name, onCancel, onConfirm }: { name: string; onCancel: () => void; onConfirm: () => void }) {
+  return (
+    <>
+      <div className="slideover-overlay" onClick={onCancel} />
+      <div className="fixed inset-0 flex items-center justify-center z-50 pointer-events-none">
+        <div className="dialog dialog-enter pointer-events-auto" role="dialog" aria-modal="true">
+          <h2 className="font-display text-lg font-medium text-lx-text-primary">Add member?</h2>
+
+          <p className="text-sm text-lx-text-secondary mt-3 leading-5">
+            Add{" "}
+            <span className="font-mono text-xs text-lx-text-primary" style={{ background: "var(--lx-surface-card)", borderRadius: 4, padding: "2px 5px" }}>
+              {name}
+            </span>
+            {" "}to this project? They will gain access immediately.
+          </p>
+
+          <div className="flex items-center gap-2 mt-4 justify-end">
+            <button type="button" className="btn btn-ghost" onClick={onCancel}>Cancel</button>
+            <button type="button" className="btn btn-primary" onClick={onConfirm}>
+              <Plus size={14} strokeWidth={1.5} />
+              Add
+            </button>
+          </div>
+        </div>
+      </div>
+    </>
+  );
+}
+
+function DeleteProjectModal({ name, onCancel, onConfirm }: { name: string; onCancel: () => void; onConfirm: () => void }) {
+  const [input, setInput] = useState("");
+
+  useEffect(() => { setInput(""); }, [name]);
+
+  return (
+    <>
+      <div className="slideover-overlay" onClick={onCancel} />
+      <div className="fixed inset-0 flex items-center justify-center z-50 pointer-events-none">
+        <div className="dialog dialog-enter pointer-events-auto" role="dialog" aria-modal="true" style={{ maxWidth: 420 }}>
+          <h2 className="font-display text-lg font-medium text-lx-text-primary">Delete project?</h2>
+
+          <p className="text-sm text-lx-text-secondary mt-3 leading-5">
+            This permanently deletes{" "}
+            <span className="font-mono text-xs text-lx-text-primary" style={{ background: "var(--lx-surface-card)", borderRadius: 4, padding: "2px 5px" }}>
+              {name}
+            </span>
+            {" "}and all its tasks, columns, swimlanes, wiki pages, and member assignments. This action cannot be undone.
+          </p>
+
+          <label className="field-label mt-4">Type <strong>{name}</strong> to confirm</label>
+          <input
+            className="prop-input mt-1"
+            placeholder={name}
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            style={{ width: "100%" }}
+          />
+
+          <div className="flex items-center gap-2 mt-4 justify-end">
+            <button type="button" className="btn btn-ghost" onClick={onCancel}>Cancel</button>
+            <button type="button" className="btn btn-danger-solid" onClick={onConfirm} disabled={input !== name}>
+              <Trash2 size={14} strokeWidth={1.5} />
+              Delete Project
+            </button>
+          </div>
+        </div>
+      </div>
+    </>
+  );
+}
+
 function InlineDropdown({ items, onSelect, onClose }: { items: { name: string; email: string }[]; onSelect: (email: string) => void; onClose: () => void }) {
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -147,77 +283,26 @@ function InlineDropdown({ items, onSelect, onClose }: { items: { name: string; e
   );
 }
 
-function AdminAddForm() {
-  const [query, setQuery] = useState("");
-  const [showDropdown, setShowDropdown] = useState(false);
-  // Mock suggestions — replace with real user list
-  const suggestions = [{ name: "Dani", email: "dani@yohanesgre.com" }, { name: "Danika", email: "danika@example.com" }].filter(
-    (u) => u.email.includes(query) || u.name.toLowerCase().includes(query.toLowerCase())
-  );
-
-  return (
-    <div className="mt-4 p-4" style={{ background: "var(--lx-surface-elevated)", border: "1px solid var(--lx-border-default)", borderRadius: 8 }}>
-      <h3 className="font-display text-base font-medium text-lx-text-primary mb-3">Add Admin</h3>
-      <div style={{ position: "relative" }}>
-        <div className="flex items-center gap-3 flex-wrap">
-          <input
-            className="prop-input"
-            placeholder="Search by email..."
-            value={query}
-            onChange={(e) => { setQuery(e.target.value); setShowDropdown(true); }}
-            onFocus={() => setShowDropdown(true)}
-            style={{ minWidth: 240 }}
-          />
-          <button type="button" className="btn btn-primary" disabled={!query.trim()}>
-            <Plus size={14} strokeWidth={1.5} />
-            Add
-          </button>
-        </div>
-        {showDropdown && <InlineDropdown items={suggestions} onSelect={(email) => { setQuery(email); setShowDropdown(false); }} onClose={() => setShowDropdown(false)} />}
-      </div>
-      <div className="text-xs text-lx-text-muted mt-2">Promotes an existing user to admin. They will be removed from all per-project member lists.</div>
-    </div>
-  );
-}
-
-function MemberAddForm() {
-  const [query, setQuery] = useState("");
-  const [showDropdown, setShowDropdown] = useState(false);
-  const suggestions = [{ name: "Alice", email: "alice@example.com" }, { name: "Bob", email: "bob@example.com" }].filter(
-    (u) => u.email.includes(query) || u.name.toLowerCase().includes(query.toLowerCase())
-  );
-
-  return (
-    <div className="mt-4 p-4" style={{ background: "var(--lx-surface-elevated)", border: "1px solid var(--lx-border-default)", borderRadius: 8 }}>
-      <h3 className="font-display text-base font-medium text-lx-text-primary mb-3">Add Member</h3>
-      <div style={{ position: "relative" }}>
-        <div className="flex items-center gap-3 flex-wrap">
-          <input
-            className="prop-input"
-            placeholder="Search by email..."
-            value={query}
-            onChange={(e) => { setQuery(e.target.value); setShowDropdown(true); }}
-            onFocus={() => setShowDropdown(true)}
-            style={{ minWidth: 240 }}
-          />
-          <button type="button" className="btn btn-primary" disabled={!query.trim()}>
-            <Plus size={14} strokeWidth={1.5} />
-            Add
-          </button>
-        </div>
-        {showDropdown && <InlineDropdown items={suggestions} onSelect={(email) => { setQuery(email); setShowDropdown(false); }} onClose={() => setShowDropdown(false)} />}
-      </div>
-      <div className="text-xs text-lx-text-muted mt-2">Search existing users by email. Admins are excluded from member suggestions.</div>
-    </div>
-  );
-}
 
 function MembersPopulated() {
+  const { slug } = useParams({ from: "/$slug/settings" });
+  const { data: members = [], isLoading } = useProjectMembers(slug);
+  const { data: project } = useQuery({ queryKey: ["project", slug], queryFn: () => api.getProject(slug) });
+  const { data: users = [] } = useUsers();
+  const removeMember = useRemoveProjectMember(slug);
   const [removing, setRemoving] = useState<string | null>(null);
-  const members = [
-    { name: "Alice", email: "alice@example.com", role: "member" as const },
-    { name: "Bob", email: "bob@example.com", role: "member" as const },
-  ];
+
+  if (isLoading) return <div className="text-sm text-lx-text-muted py-8 text-center">Loading…</div>;
+
+  if (members.length === 0) {
+    return (
+      <div className="empty-box mb-4">
+        <Users size={20} strokeWidth={1.5} style={{ color: "var(--lx-text-muted)" }} />
+        <div className="text-sm font-medium text-lx-text-primary">No members yet</div>
+        <p className="text-xs text-lx-text-secondary" style={{ maxWidth: 300 }}>Add members below to grant them access. Admins have full access automatically.</p>
+      </div>
+    );
+  }
 
   return (
     <>
@@ -254,7 +339,12 @@ function MembersPopulated() {
         <RemoveMemberModal
           name={removing}
           onCancel={() => setRemoving(null)}
-          onConfirm={() => setRemoving(null)}
+          onConfirm={() => {
+            const member = members.find((m) => m.name === removing);
+            const user = member ? users.find((u) => u.email === member.email) : undefined;
+            if (user && project) removeMember.mutate({ userId: user.id, projectId: project.id });
+            setRemoving(null);
+          }}
         />
       )}
     </>
@@ -265,9 +355,35 @@ function SettingsPage() {
   const { data: keys = [], isLoading, isError } = useApiKeys();
   const createKey = useCreateApiKey();
   const deleteKey = useDeleteApiKey();
+  const { data: users = [] } = useUsers();
+  const demote = useUpdateUserRole();
+  const admins = users.filter((u) => u.role === "admin");
+  const promote = useUpdateUserRole();
+  const [adminQuery, setAdminQuery] = useState("");
+  const [showAdminDropdown, setShowAdminDropdown] = useState(false);
+  const [promoting, setPromoting] = useState<{ id: string; name: string } | null>(null);
+  const adminSuggestions = users.filter(
+    (u) => u.role !== "admin" && (u.email.includes(adminQuery) || u.name.toLowerCase().includes(adminQuery.toLowerCase()))
+  );
+
+  const { slug } = useParams({ from: "/$slug/settings" });
+  const { data: members = [] } = useProjectMembers(slug);
+  const { data: project } = useQuery({ queryKey: ["project", slug], queryFn: () => api.getProject(slug) });
+  const addMember = useAddProjectMember(slug);
+  const [memberQuery, setMemberQuery] = useState("");
+  const [showMemberDropdown, setShowMemberDropdown] = useState(false);
+  const [adding, setAdding] = useState<{ id: string; name: string } | null>(null);
+  const memberEmails = new Set(members.map((m) => m.email));
+  const memberSuggestions = users.filter(
+    (u) => u.role !== "admin" && !memberEmails.has(u.email) && (u.email.includes(memberQuery) || u.name.toLowerCase().includes(memberQuery.toLowerCase()))
+  );
+
   const [keyName, setKeyName] = useState("");
   const [reveal, setReveal] = useState<{ name: string; key: string } | null>(null);
   const [deleting, setDeleting] = useState<{ id: string; name: string } | null>(null);
+  const [demoting, setDemoting] = useState<{ id: string; name: string } | null>(null);
+  const deleteProject = useDeleteProject();
+  const [deletingProject, setDeletingProject] = useState(false);
 
   return (
     <main className="page-frame">
@@ -375,69 +491,169 @@ function SettingsPage() {
         />
       )}
 
+      {demoting && (
+        <DemoteAdminModal
+          name={demoting.name}
+          onCancel={() => setDemoting(null)}
+          onConfirm={() => {
+            demote.mutate({ id: demoting.id, role: "member" }, { onSuccess: () => setDemoting(null) });
+          }}
+        />
+      )}
+
+      {promoting && (
+        <AddAdminModal
+          name={promoting.name}
+          onCancel={() => setPromoting(null)}
+          onConfirm={() => {
+            promote.mutate({ id: promoting.id, role: "admin" }, { onSuccess: () => setPromoting(null) });
+          }}
+        />
+      )}
+
+      {adding && (
+        <AddMemberModal
+          name={adding.name}
+          onCancel={() => setAdding(null)}
+          onConfirm={() => {
+            if (project) addMember.mutate({ userId: adding.id, projectId: project.id }, { onSuccess: () => setAdding(null) });
+          }}
+        />
+      )}
+
+      {deletingProject && project && (
+        <DeleteProjectModal
+          name={project.name}
+          onCancel={() => setDeletingProject(false)}
+          onConfirm={() => {
+            deleteProject.mutate(project.slug, {
+              onSuccess: () => { setDeletingProject(false); window.location.href = "/"; },
+            });
+          }}
+        />
+      )}
+
       {/* Admins (app scope) */}
       <section className="mb-8">
-        <h2 className="font-display text-lg font-medium text-lx-text-primary mb-2">Admins</h2>
-        <p className="text-sm text-lx-text-secondary mb-4" style={{ maxWidth: 560 }}>
-          Global administrators — promoted from registered users. Admins have full access to all projects and settings. Admins are automatically excluded from per-project member lists.
-        </p>
+        <div className="flex items-center justify-between mb-3">
+          <h2 className="font-display text-lg font-medium text-lx-text-primary">Admins</h2>
+          <span className="text-xs text-lx-text-muted">App scope</span>
+        </div>
+        <div className="flex items-start justify-between gap-4 mb-4">
+          <p className="text-sm text-lx-text-secondary" style={{ maxWidth: 560, marginBottom: 0 }}>
+            Global administrators — promoted from registered users. Admins have full access to all projects and settings. Admins are automatically excluded from per-project member lists.
+          </p>
+          <div style={{ position: "relative", minWidth: 240, flexShrink: 0 }}>
+            <input
+              className="prop-input"
+              placeholder="Add admin..."
+              style={{ width: "100%" }}
+              value={adminQuery}
+              onChange={(e) => { setAdminQuery(e.target.value); setShowAdminDropdown(true); }}
+              onFocus={() => setShowAdminDropdown(true)}
+            />
+            <span className="text-xs text-lx-text-muted" style={{ display: "block", marginTop: 4 }}>Type a name or email to promote.</span>
+            {showAdminDropdown && (
+              <InlineDropdown
+                items={adminSuggestions.map((u) => ({ name: u.name, email: u.email }))}
+                onSelect={(email) => {
+                  const user = adminSuggestions.find((u) => u.email === email);
+                  if (user) setPromoting({ id: user.id, name: user.name });
+                  setAdminQuery("");
+                  setShowAdminDropdown(false);
+                }}
+                onClose={() => setShowAdminDropdown(false)}
+              />
+            )}
+          </div>
+        </div>
         <div style={{ background: "var(--lx-surface-card)", border: "1px solid var(--lx-border-default)", borderRadius: 8, overflow: "hidden" }}>
           <table className="settings-table">
             <thead>
               <tr><th style={{ width: "auto" }}>User</th><th style={{ width: "auto" }}>Email</th><th style={{ width: 80 }}>Role</th><th style={{ width: 80 }} /></tr>
             </thead>
             <tbody>
-              <tr>
-                <td>
-                  <div className="flex items-center gap-2">
-                    <div className="avatar">Y</div>
-                    <span className="text-sm font-medium">Yohanes</span>
-                  </div>
-                </td>
-                <td className="text-xs text-lx-text-secondary">yohanesgre@gmail.com</td>
-                <td>
-                  <span className="text-xs" style={{ background: "var(--lx-bg-accent-subtle)", color: "var(--lx-text-link)", padding: "2px 8px", borderRadius: 9999, fontSize: 11 }}>admin</span>
-                </td>
-                <td>
-                  <button type="button" className="btn btn-ghost h-7 px-2 text-xs text-lx-text-danger">
-                    <Trash2 size={12} strokeWidth={1.5} />
-                  </button>
-                </td>
-              </tr>
-              <tr>
-                <td>
-                  <div className="flex items-center gap-2">
-                    <div className="avatar">L</div>
-                    <span className="text-sm font-medium">Lexa</span>
-                  </div>
-                </td>
-                <td className="text-xs text-lx-text-secondary">lexa@yohanesgre.com</td>
-                <td>
-                  <span className="text-xs" style={{ background: "var(--lx-bg-accent-subtle)", color: "var(--lx-text-link)", padding: "2px 8px", borderRadius: 9999, fontSize: 11 }}>admin</span>
-                </td>
-                <td>
-                  <button type="button" className="btn btn-ghost h-7 px-2 text-xs text-lx-text-danger">
-                    <Trash2 size={12} strokeWidth={1.5} />
-                  </button>
-                </td>
-              </tr>
+              {admins.map((a) => (
+                <tr key={a.id}>
+                  <td>
+                    <div className="flex items-center gap-2">
+                      <div className="avatar">{a.name[0]}</div>
+                      <span className="text-sm font-medium">{a.name}</span>
+                    </div>
+                  </td>
+                  <td className="text-xs text-lx-text-secondary">{a.email}</td>
+                  <td>
+                    <span className="text-xs" style={{ background: "var(--lx-bg-accent-subtle)", color: "var(--lx-text-link)", padding: "2px 8px", borderRadius: 9999, fontSize: 11 }}>{a.role}</span>
+                  </td>
+                  <td>
+                    <button type="button" className="btn btn-ghost h-7 px-2 text-xs text-lx-text-danger" onClick={() => setDemoting({ id: a.id, name: a.name })}>
+                      <Trash2 size={12} strokeWidth={1.5} />
+                    </button>
+                  </td>
+                </tr>
+              ))}
             </tbody>
           </table>
         </div>
-
-        <AdminAddForm />
       </section>
 
       {/* Project Members (per-project scope) */}
       <section className="mb-8">
-        <h2 className="font-display text-lg font-medium text-lx-text-primary mb-2">Project Members</h2>
-        <p className="text-sm text-lx-text-secondary mb-4" style={{ maxWidth: 560 }}>
-          Manage which team members can access this project. Changes take effect immediately.
-        </p>
+        <div className="flex items-center justify-between mb-3">
+          <h2 className="font-display text-lg font-medium text-lx-text-primary">Project Members</h2>
+          <span className="text-xs text-lx-text-muted">Per project</span>
+        </div>
+        <div className="flex items-start justify-between gap-4 mb-4">
+          <p className="text-sm text-lx-text-secondary" style={{ maxWidth: 560, marginBottom: 0 }}>
+            Manage which team members can access this project. Changes take effect immediately.
+          </p>
+          <div style={{ position: "relative", minWidth: 240, flexShrink: 0 }}>
+            <input
+              className="prop-input"
+              placeholder="Add member..."
+              style={{ width: "100%" }}
+              value={memberQuery}
+              onChange={(e) => { setMemberQuery(e.target.value); setShowMemberDropdown(true); }}
+              onFocus={() => setShowMemberDropdown(true)}
+            />
+            <span className="text-xs text-lx-text-muted" style={{ display: "block", marginTop: 4 }}>Type a name or email to add.</span>
+            {showMemberDropdown && (
+              <InlineDropdown
+                items={memberSuggestions.map((u) => ({ name: u.name, email: u.email }))}
+                onSelect={(email) => {
+                  const user = memberSuggestions.find((u) => u.email === email);
+                  if (user) setAdding({ id: user.id, name: user.name });
+                  setMemberQuery("");
+                  setShowMemberDropdown(false);
+                }}
+                onClose={() => setShowMemberDropdown(false)}
+              />
+            )}
+          </div>
+        </div>
 
         <MembersPopulated />
+      </section>
 
-        <MemberAddForm />
+      {/* Project Management */}
+      <section className="mb-8">
+        <h2 className="font-display text-lg font-medium text-lx-text-primary mb-3">Project</h2>
+        <p className="text-sm text-lx-text-secondary mb-4" style={{ maxWidth: 560 }}>
+          Manage this project's settings. Deleting a project removes all tasks, columns, swimlanes, wiki pages, and member assignments permanently.
+        </p>
+
+        <div style={{ background: "var(--lx-surface-card)", border: "1px solid var(--lx-border-default)", borderRadius: 8, padding: "16px 20px" }}>
+          <div className="flex items-center justify-between gap-3 flex-wrap">
+            <div>
+              <div className="text-sm font-medium text-lx-text-primary">{project?.name}</div>
+              <div className="text-xs text-lx-text-secondary">slug: {project?.slug}</div>
+            </div>
+            <button type="button" className="btn btn-danger h-7 px-3 text-xs" onClick={() => setDeletingProject(true)}>
+              <Trash2 size={12} strokeWidth={1.5} />
+              Delete Project
+            </button>
+          </div>
+        </div>
       </section>
     </main>
   );

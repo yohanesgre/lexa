@@ -6,7 +6,7 @@
     "test": "vitest run",
     "dev": "vite dev",
     "dev:server": "DATABASE_PATH=./data/lexa.db bun run server/entry.ts",
-    "dev:full": "LXK_DEV_SKIP_AUTH=1 DATABASE_PATH=./data/lexa.db bun run server/entry.ts & vite dev",
+    "dev:full": "DATABASE_PATH=./data/lexa.db bun run server/entry.ts & vite dev",
     "build": "vite build",
     "deploy": "wrangler deploy",
     "typecheck": "tsc --noEmit",

@@ -1,0 +1,298 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Lexa — Wiki: Edit Page</title>
+  <link rel="stylesheet" href="wireframes.css" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@phosphor-icons/web@2.1.2/src/regular/style.css" />
+</head>
+<body class="bg-app color-primary">
+
+  <INCLUDE navbar.html />
+
+  <div class="wiki-layout">
+    <!-- Sidebar -->
+    <aside class="wiki-sidebar">
+      <div class="px-4 mb-3">
+        <div class="flex items-center gap-2 mb-3">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="color:var(--lx-text-muted);"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>
+          <span class="text-xs color-muted font-body">Search wiki...</span>
+        </div>
+        <span class="annotation-tag">Sidebar unchanged in edit mode</span>
+      </div>
+
+      <!-- Tree -->
+      <div class="flex-1 overflow-y-auto">
+        <div class="tree-item" style="margin-bottom:2px;">
+          <svg class="chevron-small" viewBox="0 0 24 24" style="transform:rotate(90deg);"><path d="M9 18l6-6-6-6"/></svg>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="color:var(--lx-text-muted);margin-right:6px;flex-shrink:0;"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14 2 14 8 20 8"/></svg>
+          Game Design Doc
+        </div>
+        <div class="tree-item tree-indent-1" style="margin-bottom:2px;">
+          <svg class="chevron-small" viewBox="0 0 24 24" style="transform:rotate(90deg);"><path d="M9 18l6-6-6-6"/></svg>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="color:var(--lx-text-muted);margin-right:6px;flex-shrink:0;"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14 2 14 8 20 8"/></svg>
+          Combat System
+        </div>
+        <div class="tree-item tree-indent-2" style="margin-bottom:2px;">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="color:var(--lx-text-muted);margin-right:6px;flex-shrink:0;"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14 2 14 8 20 8"/></svg>
+          Melee Framework
+        </div>
+        <div class="tree-item tree-indent-2 active" style="margin-bottom:2px;">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="color:var(--lx-text-muted);margin-right:6px;flex-shrink:0;"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14 2 14 8 20 8"/></svg>
+          Elemental Damage
+          <span class="annotation-inline">Editing</span>
+        </div>
+        <div class="tree-item tree-indent-2" style="margin-bottom:2px;">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="color:var(--lx-text-muted);margin-right:6px;flex-shrink:0;"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14 2 14 8 20 8"/></svg>
+          Boss Patterns
+        </div>
+        <div class="tree-item tree-indent-1" style="margin-bottom:2px;">
+          <svg class="chevron-small" viewBox="0 0 24 24"><path d="M9 18l6-6-6-6"/></svg>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="color:var(--lx-text-muted);margin-right:6px;flex-shrink:0;"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14 2 14 8 20 8"/></svg>
+          Level Design
+        </div>
+        <div class="tree-item" style="margin-bottom:2px;margin-top:8px;">
+          <svg class="chevron-small" viewBox="0 0 24 24"><path d="M9 18l6-6-6-6"/></svg>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="color:var(--lx-text-muted);margin-right:6px;flex-shrink:0;"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14 2 14 8 20 8"/></svg>
+          Art Direction
+        </div>
+      </div>
+
+      <!-- Add page button -->
+      <div class="px-3 mt-2">
+        <button class="add-task-btn" style="justify-content:flex-start;padding-left:12px;">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 5v14m-7-7h14"/></svg>
+          New page
+        </button>
+      </div>
+    </aside>
+
+    <!-- Edit view: side-by-side editor + preview, collapsible right sidebar -->
+    <div class="wiki-content wiki-edit-workspace">
+      <div class="wiki-edit-main">
+        <div style="display:flex;flex-direction:column;height:100%;">
+
+        <!-- Header: breadcrumb + edit state + actions -->
+        <div class="flex items-center justify-between" style="padding:12px 16px;border-bottom:1px solid var(--lx-border-subtle);">
+          <div class="flex items-center gap-2">
+            <span class="text-xs color-muted font-body">Game Design Doc / Combat System</span>
+            <span class="font-micro text-2xs color-warning" style="text-transform:uppercase;letter-spacing:0.04em;">Editing</span>
+          </div>
+          <div class="flex items-center gap-2">
+            <button class="btn btn-ghost">Cancel</button>
+            <button class="btn btn-primary">Save</button>
+          </div>
+        </div>
+
+        <!-- Title input -->
+        <div style="padding:12px 16px 0;">
+          <input class="prop-input font-display" value="Elemental Damage" style="width:100%;height:44px;font-size:18px;font-weight:600;letter-spacing:-0.02em;padding:0 12px;" />
+          <div class="mt-1 mb-2">
+            <span class="annotation-tag">TitleEditor: text-xl/600/Display, 44px input</span>
+          </div>
+        </div>
+
+        <!-- Side-by-side: Preview left, Editor right -->
+        <div style="display:flex;overflow:hidden;border-top:1px solid var(--lx-border-subtle);">
+          <!-- Left: Preview -->
+          <div style="flex:1;display:flex;flex-direction:column;overflow:hidden;">
+            <div style="padding:4px 8px;border-bottom:1px solid var(--lx-border-subtle);background:var(--lx-bg-surface);">
+              <span class="text-xs color-muted font-body" style="text-transform:uppercase;letter-spacing:0.05em;">Preview</span>
+            </div>
+            <div class="wiki-prose" style="overflow-y:auto;padding:16px 20px;background:var(--lx-bg-page);">
+              <h1>Elemental Damage</h1>
+              <p>Emberfall’s combat revolves around four elemental affinities: <strong>Fire</strong>, <strong>Ice</strong>, <strong>Earth</strong>, and <strong>Wind</strong>. Each enemy and boss has a hidden resistance matrix that determines damage multipliers.</p>
+              <h2>Damage Formula</h2>
+              <p>Base damage is calculated from the weapon’s <code>attack_power</code> stat, modified by the player’s current affinity and the target’s resistance.</p>
+              <pre><code>func calculate_damage(attack_power: int, affinity: String, target: Enemy) -> int:
+    var base = attack_power * player.affinity_bonus(affinity)
+    var resistance = target.resistance[affinity]
+    var multiplier = 1.0 + (1.0 - resistance) * 2.0
+    return int(base * multiplier)</code></pre>
+              <h2>Resistance Matrix</h2>
+              <table>
+                <thead><tr><th>Enemy Type</th><th>Fire</th><th>Ice</th><th>Earth</th><th>Wind</th></tr></thead>
+                <tbody>
+                  <tr><td>Ember Wisp</td><td>0.25</td><td>1.50</td><td>1.00</td><td>1.25</td></tr>
+                  <tr><td>Frost Knight</td><td>1.50</td><td>0.25</td><td>1.25</td><td>1.00</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <!-- Right: Editor -->
+          <div style="flex:1;display:flex;flex-direction:column;overflow:hidden;border-left:1px solid var(--lx-border-subtle);">
+            <div style="padding:4px 8px;border-bottom:1px solid var(--lx-border-subtle);background:var(--lx-bg-surface);">
+              <span class="text-xs color-muted font-body" style="text-transform:uppercase;letter-spacing:0.05em;">Editor</span>
+            </div>
+
+            <!-- TipTap editor (focused) -->
+            <div class="editor-wrapper" style="border-color:var(--lx-border-focus);box-shadow:var(--lx-focus-glow);display:flex;flex-direction:column;">
+              <div class="editor-toolbar wiki-toolbar-host">
+                <div class="wiki-toolbar-row">
+                  <button class="toolbar-btn" title="Undo">
+                    <svg viewBox="0 0 24 24"><path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 5.5 5.5v0a5.5 5.5 0 0 1-5.5 5.5H11"/></svg>
+                  </button>
+                  <button class="toolbar-btn" title="Redo">
+                    <svg viewBox="0 0 24 24"><path d="M15 14l5-5-5-5"/><path d="M20 9H9.5A5.5 5.5 0 0 0 4 14.5v0A5.5 5.5 0 0 0 9.5 20H13"/></svg>
+                  </button>
+                  <span class="toolbar-sep"></span>
+                  <button class="toolbar-btn active" title="Bold">
+                    <svg viewBox="0 0 24 24"><path d="M14 12a4 4 0 0 0 0-8H6v8"/><path d="M15 20a4 4 0 0 0 0-8H6v8Z"/></svg>
+                  </button>
+                  <button class="toolbar-btn" title="Italic">
+                    <svg viewBox="0 0 24 24"><line x1="19" y1="4" x2="10" y2="4"/><line x1="14" y1="20" x2="5" y2="20"/><line x1="15" y1="4" x2="9" y2="20"/></svg>
+                  </button>
+                  <button class="toolbar-btn" title="Underline">
+                    <svg viewBox="0 0 24 24"><path d="M6 3v7a6 6 0 0 0 6 6 6 6 0 0 0 6-6V3"/><line x1="4" y1="21" x2="20" y2="21"/></svg>
+                  </button>
+                  <button class="toolbar-btn" title="Strikethrough">
+                    <svg viewBox="0 0 24 24"><path d="M16 4H9a3 3 0 0 0-2.83 4"/><path d="M14 12a4 4 0 0 1 0 8H6"/><line x1="4" y1="12" x2="20" y2="12"/></svg>
+                  </button>
+                  <button class="toolbar-btn" title="Highlight">
+                    <svg viewBox="0 0 24 24"><path d="m9 11-6 6v3h9l3-3"/><path d="m22 12-4 4 1.18 1.18a2 2 0 0 0 2.82-2.82L20 12"/></svg>
+                  </button>
+                  <span class="toolbar-sep"></span>
+                  <button class="toolbar-btn" title="Heading 2">H2</button>
+                  <button class="toolbar-btn" title="Heading 3">H3</button>
+                  <button class="toolbar-btn" title="Heading 4">H4</button>
+                  <button class="toolbar-btn" title="Heading 5">H5</button>
+                  <span class="toolbar-sep"></span>
+                  <button class="toolbar-btn" title="Bullet list">
+                    <svg viewBox="0 0 24 24"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>
+                  </button>
+                  <button class="toolbar-btn" title="Ordered list">
+                    <svg viewBox="0 0 24 24"><line x1="10" y1="6" x2="21" y2="6"/><line x1="10" y1="12" x2="21" y2="12"/><line x1="10" y1="18" x2="21" y2="18"/><path d="M4 6h1v4"/><path d="M4 10h2"/><path d="M6 18H4c0-1 2-2 2-3s-1-1.5-2-1"/></svg>
+                  </button>
+                  <button class="toolbar-btn" title="Task list">
+                    <svg viewBox="0 0 24 24"><path d="M3 17l2 2 4-4"/><path d="M3 7l2 2 4-4"/><line x1="13" y1="6" x2="21" y2="6"/><line x1="13" y1="12" x2="21" y2="12"/><line x1="13" y1="18" x2="21" y2="18"/></svg>
+                  </button>
+                  <span class="toolbar-sep"></span>
+                  <button class="toolbar-btn" title="Blockquote">
+                    <svg viewBox="0 0 24 24"><path d="M3 21c3 0 7-1 7-8V5c0-1.25-.756-2.017-2-2H4c-1.25 0-2 .75-2 1.972V11c0 1.25.75 2 2 2 1 0 1 0 1 1v1c0 1-1 2-2 2s-1 .008-1 1.031V21c0 1 0 1 1 1z"/><path d="M15 21c3 0 7-1 7-8V5c0-1.25-.757-2.017-2-2h-4c-1.25 0-2 .75-2 1.972V11c0 1.25.75 2 2 2h.75c0 2.25.25 4-2.75 4v3c0 1 0 1 1 1z"/></svg>
+                  </button>
+                  <button class="toolbar-btn" title="Code block">
+                    <svg viewBox="0 0 24 24"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/><line x1="12" y1="2" x2="12" y2="4"/><line x1="12" y1="20" x2="12" y2="22"/></svg>
+                  </button>
+                  <button class="toolbar-btn" title="Horizontal rule">
+                    <svg viewBox="0 0 24 24"><line x1="4" y1="12" x2="20" y2="12"/></svg>
+                  </button>
+                  <span class="toolbar-sep"></span>
+                  <button class="toolbar-btn" title="Link">
+                    <svg viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
+                  </button>
+                  <span class="toolbar-sep"></span>
+                  <button class="toolbar-btn" title="AI writing assistant">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M7 10H6a4 4 0 0 1-4-4 1 1 0 0 1 1-1h4" />
+                      <path d="M7 5a1 1 0 0 1 1-1h13a1 1 0 0 1 1 1 7 7 0 0 1-7 7H8a1 1 0 0 1-1-1z" />
+                      <path d="M9 12v5" />
+                      <path d="M15 12v5" />
+                      <path d="M5 20a3 3 0 0 1 3-3h8a3 3 0 0 1 3 3 1 1 0 0 1-1 1H6a1 1 0 0 1-1-1" />
+                    </svg>
+                    Forge
+                  </button>
+                </div>
+              </div>
+          </div>
+
+            <!-- Editor surface -->
+            <div class="editor-area wiki-prose" style="overflow-y:auto;border:none;">
+              <p>
+                Emberfall’s combat revolves around four elemental affinities: <strong>Fire</strong>, <strong>Ice</strong>, <strong>Earth</strong>, and <strong>Wind</strong>. Each enemy and boss has a hidden resistance matrix that determines damage multipliers.<span style="display:inline-block;width:2px;height:16px;background:var(--lx-border-focus);vertical-align:-3px;margin-left:1px;"></span><span class="annotation-inline">Caret</span>
+              </p>
+
+              <h2>Damage Formula</h2>
+              <p>
+                Base damage is calculated from the weapon’s <code>attack_power</code> stat, modified by the player’s current affinity and the target’s resistance. The formula is intentionally simple.
+              </p>
+
+              <pre><code>func calculate_damage(attack_power: int, affinity: String, target: Enemy) -> int:
+    var base = attack_power * player.affinity_bonus(affinity)
+    var resistance = target.resistance[affinity]
+    var multiplier = 1.0 + (1.0 - resistance) * 2.0
+    return int(base * multiplier)</code></pre>
+
+              <h2>Resistance Matrix</h2>
+              <table>
+                <thead><tr><th>Enemy Type</th><th>Fire</th><th>Ice</th><th>Earth</th><th>Wind</th></tr></thead>
+                <tbody>
+                  <tr><td>Ember Wisp</td><td>0.25</td><td>1.50</td><td>1.00</td><td>1.25</td></tr>
+                  <tr><td>Frost Knight</td><td>1.50</td><td>0.25</td><td>1.25</td><td>1.00</td></tr>
+                </tbody>
+              </table>
+            </div>
+
+            <!-- Footer meta -->
+            <div class="flex items-center justify-between" style="padding:8px 12px;border-top:1px solid var(--lx-border-subtle);background:var(--lx-bg-surface);">
+              <span class="font-micro text-2xs color-muted" style="text-transform:uppercase;letter-spacing:0.04em;">Last saved 2 hours ago by AL</span>
+              <span class="font-micro text-2xs color-warning" style="text-transform:uppercase;letter-spacing:0.04em;">Unsaved changes</span>
+            </div>
+          </div>
+        </div>
+        </div>
+      </div>
+
+      <!-- Right edit settings sidebar (collapsible) -->
+      <aside class="wiki-edit-sidebar">
+        <div class="wiki-edit-sidebar-header">
+          <button type="button" style="width:28px;height:28px;padding:0;border:none;background:none;cursor:pointer;display:flex;align-items:center;justify-content:center;color:var(--lx-text-secondary);margin-right:4px;flex-shrink:0;">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 3v18"/></svg>
+          </button>
+          <span class="text-xs color-secondary font-body" style="text-transform:uppercase;letter-spacing:0.05em;">Page settings</span>
+        </div>
+
+        <div class="sidebar-section">
+          <div class="flex items-center justify-between mb-3">
+            <span class="text-sm weight-500 font-body color-primary">Autosave</span>
+            <button class="toggle-switch is-on" aria-label="Autosave on"></button>
+          </div>
+          <div class="mb-3">
+            <span class="prop-label" style="margin-bottom:6px;display:block;">Delay</span>
+            <div class="delay-selector">
+              <button class="delay-btn">500ms</button>
+              <button class="delay-btn is-active">800ms</button>
+              <button class="delay-btn">1500ms</button>
+              <button class="delay-btn">3000ms</button>
+            </div>
+          </div>
+          <p class="text-xs color-secondary font-body" style="line-height:18px;">
+            Automatically saves changes while you type.
+          </p>
+        </div>
+
+        <div class="sidebar-section" style="flex:1;display:flex;flex-direction:column;">
+          <span class="sidebar-section-title">Version History</span>
+          <div class="history-list">
+            <div class="history-item active">
+              <div class="flex flex-col gap-1">
+                <span class="text-sm weight-500 font-body color-primary">2 hours ago</span>
+                <span class="font-micro text-2xs color-warning" style="text-transform:uppercase;letter-spacing:0.04em;">Previewing</span>
+              </div>
+              <span class="history-badge history-badge-auto">autosave</span>
+            </div>
+            <div class="history-item">
+              <span class="text-sm weight-400 font-body color-primary">3 hours ago</span>
+              <span class="history-badge history-badge-manual">manual</span>
+            </div>
+            <div class="history-item">
+              <span class="text-sm weight-400 font-body color-primary">5 hours ago</span>
+              <span class="history-badge history-badge-auto">autosave</span>
+            </div>
+            <div class="history-item">
+              <span class="text-sm weight-400 font-body color-primary">Yesterday</span>
+              <span class="history-badge history-badge-manual">manual</span>
+            </div>
+          </div>
+          <div class="history-actions">
+            <button class="btn btn-primary" style="flex:1;">Restore</button>
+            <button class="btn btn-ghost" style="flex:1;">Close preview</button>
+          </div>
+        </div>
+      </aside>
+    </div>
+  </div>
+
+</body>
+</html>

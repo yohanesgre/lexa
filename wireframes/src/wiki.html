@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Lexa — Wiki</title>
+  <link rel="stylesheet" href="wireframes.css" />
+</head>
+<body class="bg-app color-primary" style="min-height:100vh;">
+
+  <INCLUDE navbar.html />
+
+  <div class="wiki-layout">
+    <!-- Sidebar -->
+    <aside class="wiki-sidebar">
+      <div class="px-4 mb-3">
+        <div class="flex items-center gap-2 mb-3">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="color:var(--lx-text-muted);"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>
+          <span class="text-xs color-muted font-body">Search wiki...</span>
+        </div>
+        <span class="annotation-tag">WikiSidebar: 260px, nested tree</span>
+      </div>
+
+      <!-- Tree -->
+      <div class="flex-1 overflow-y-auto">
+        <!-- Root: Game Design Doc (active, expanded) -->
+        <div class="tree-item active" style="margin-bottom:2px;">
+          <svg class="chevron-small" viewBox="0 0 24 24" style="transform:rotate(90deg);"><path d="M9 18l6-6-6-6"/></svg>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="color:var(--lx-text-muted);margin-right:6px;flex-shrink:0;"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14 2 14 8 20 8"/></svg>
+          Game Design Doc
+        </div>
+
+        <!-- Child: Combat System (expanded) -->
+        <div class="tree-item tree-indent-1" style="margin-bottom:2px;">
+          <svg class="chevron-small" viewBox="0 0 24 24" style="transform:rotate(90deg);"><path d="M9 18l6-6-6-6"/></svg>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="color:var(--lx-text-muted);margin-right:6px;flex-shrink:0;"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14 2 14 8 20 8"/></svg>
+          Combat System
+        </div>
+
+        <!-- Grandchildren -->
+        <div class="tree-item tree-indent-2" style="margin-bottom:2px;">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="color:var(--lx-text-muted);margin-right:6px;flex-shrink:0;"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14 2 14 8 20 8"/></svg>
+          Melee Framework
+        </div>
+        <div class="tree-item tree-indent-2 active" style="margin-bottom:2px;">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="color:var(--lx-text-muted);margin-right:6px;flex-shrink:0;"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14 2 14 8 20 8"/></svg>
+          Elemental Damage
+          <span class="annotation-inline">Active page</span>
+        </div>
+        <div class="tree-item tree-indent-2" style="margin-bottom:2px;">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="color:var(--lx-text-muted);margin-right:6px;flex-shrink:0;"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14 2 14 8 20 8"/></svg>
+          Boss Patterns
+        </div>
+
+        <!-- Child: Level Design (collapsed) -->
+        <div class="tree-item tree-indent-1" style="margin-bottom:2px;">
+          <svg class="chevron-small" viewBox="0 0 24 24"><path d="M9 18l6-6-6-6"/></svg>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="color:var(--lx-text-muted);margin-right:6px;flex-shrink:0;"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14 2 14 8 20 8"/></svg>
+          Level Design
+          <span class="annotation-inline">Collapsed</span>
+        </div>
+
+        <!-- Root: Art Direction (collapsed) -->
+        <div class="tree-item" style="margin-bottom:2px;margin-top:8px;">
+          <svg class="chevron-small" viewBox="0 0 24 24"><path d="M9 18l6-6-6-6"/></svg>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="color:var(--lx-text-muted);margin-right:6px;flex-shrink:0;"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14 2 14 8 20 8"/></svg>
+          Art Direction
+        </div>
+
+        <!-- Root: Sound & Music (collapsed) -->
+        <div class="tree-item" style="margin-bottom:2px;">
+          <svg class="chevron-small" viewBox="0 0 24 24"><path d="M9 18l6-6-6-6"/></svg>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="color:var(--lx-text-muted);margin-right:6px;flex-shrink:0;"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14 2 14 8 20 8"/></svg>
+          Sound &amp; Music
+        </div>
+      </div>
+
+      <!-- Add page button -->
+      <div class="px-3 mt-2">
+        <button class="add-task-btn" style="justify-content:flex-start;padding-left:12px;">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 5v14m-7-7h14"/></svg>
+          New page
+        </button>
+      </div>
+    </aside>
+
+    <!-- Content -->
+    <div class="wiki-content wiki-view-workspace" style="display:flex;padding:0;overflow:hidden;">
+      <div style="flex:1;overflow-y:auto;padding:32px 48px;min-width:0;">
+        <div class="wiki-prose">
+          <div class="flex items-center justify-between mb-1">
+            <span class="text-xs color-muted font-body">Game Design Doc / Combat System</span>
+            <a href="wiki-edit.html" class="btn btn-ghost" style="height:28px;padding:0 10px;font-size:12px;">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/></svg>
+              Edit
+            </a>
+          </div>
+          <h1 id="elemental-damage">Elemental Damage</h1>
+          <span class="annotation-tag mb-4">WikiProse: h1 = text-2xl/600/Display · Edit → wiki-edit.html</span>
+
+          <p>
+            Emberfall’s combat revolves around four elemental affinities: <strong>Fire</strong>, <strong>Ice</strong>, <strong>Earth</strong>, and <strong>Wind</strong>. Each enemy and boss has a hidden resistance matrix that determines damage multipliers. The player can switch affinities mid-combat via the D-pad or number keys, creating a rock-paper-scissors dynamic against shielded foes.
+          </p>
+
+          <h2 id="damage-formula">Damage Formula</h2>
+          <span class="annotation-tag">h2 = text-xl/600/Display</span>
+
+          <p>
+            Base damage is calculated from the weapon’s <code>attack_power</code> stat, modified by the player’s current affinity and the target’s resistance. The formula is intentionally simple — we want players to feel the impact of affinity choices without spreadsheet math.
+          </p>
+
+          <pre><code>func calculate_damage(attack_power: int, affinity: String, target: Enemy) -> int:
+    var base = attack_power * player.affinity_bonus(affinity)
+    var resistance = target.resistance[affinity]
+    var multiplier = 1.0 + (1.0 - resistance) * 2.0
+    return int(base * multiplier)</code></pre>
+
+          <h2 id="resistance-matrix">Resistance Matrix</h2>
+
+          <table>
+            <thead>
+              <tr>
+                <th>Enemy Type</th>
+                <th>Fire</th>
+                <th>Ice</th>
+                <th>Earth</th>
+                <th>Wind</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>Ember Wisp</td>
+                <td>0.25</td>
+                <td>1.50</td>
+                <td>1.00</td>
+                <td>1.25</td>
+              </tr>
+              <tr>
+                <td>Frost Knight</td>
+                <td>1.50</td>
+                <td>0.25</td>
+                <td>1.25</td>
+                <td>1.00</td>
+              </tr>
+              <tr>
+                <td>Stone Golem</td>
+                <td>1.25</td>
+                <td>1.00</td>
+                <td>0.25</td>
+                <td>1.50</td>
+              </tr>
+              <tr>
+                <td>Storm Harpy</td>
+                <td>1.00</td>
+                <td>1.25</td>
+                <td>1.50</td>
+                <td>0.25</td>
+              </tr>
+            </tbody>
+          </table>
+
+          <h2 id="status-effects">Status Effects</h2>
+
+          <p>
+            Each element applies a unique status effect on critical hits (20% base chance, modifiable by gear):
+          </p>
+
+          <ul>
+            <li><strong>Burn (Fire):</strong> 3 ticks of 15% base damage over 4 seconds. Stacks refresh duration.</li>
+            <li><strong>Freeze (Ice):</strong> Target movement speed reduced 60% for 3 seconds. Bosses immune.</li>
+            <li><strong>Petrify (Earth):</strong> 1.5 second stun. Breaks on damage taken. 30s cooldown per target.</li>
+            <li><strong>Gale (Wind):</strong> Knocks back small enemies. Launches player upward if self-cast (mobility tool).</li>
+          </ul>
+
+          <h3 id="edge-cases">Edge Cases</h3>
+          <span class="annotation-tag">h3 = text-lg/500/Display</span>
+
+          <p>
+            When a player switches affinity while a projectile is mid-flight, the projectile retains its original affinity. This is intentional — it rewards pre-fight planning and punishes panic-switching. The only exception is the <code>Chameleon Cloak</code> artifact, which retroactively changes affinity on all active projectiles.
+          </p>
+
+          <div style="margin-top:32px;padding-top:16px;border-top:1px solid var(--lx-border-subtle);">
+            <span class="font-micro text-2xs color-muted" style="text-transform:uppercase;letter-spacing:0.04em;">Last edited 2 hours ago by AL</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Outline sidebar -->
+      <aside style="width:220px;flex-shrink:0;display:flex;flex-direction:column;background:var(--lx-surface-elevated);border-left:1px solid var(--lx-border-default);overflow:hidden;">
+        <div style="height:48px;padding:0 12px 0 16px;border-bottom:1px solid var(--lx-border-subtle);display:flex;align-items:center;gap:4px;">
+          <button type="button" style="width:24px;height:24px;padding:0;border:none;background:none;cursor:pointer;display:flex;align-items:center;justify-content:center;color:var(--lx-text-secondary);flex-shrink:0;">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 3v18"/></svg>
+          </button>
+          <span class="text-xs color-secondary font-body" style="text-transform:uppercase;letter-spacing:0.05em;">Contents</span>
+          <span class="annotation-inline">Toggle collapses sidebar to 36px strip</span>
+        </div>
+        <nav style="padding:8px 0;overflow-y:auto;">
+          <!-- workspace-style tree: chevrons for expand/collapse, 16px indent per level -->
+          <a href="#elemental-damage" style="display:flex;align-items:center;height:32px;padding:0 12px 0 12px;font-size:13px;font-weight:400;font-family:var(--lx-font-body);color:var(--lx-text-secondary);text-decoration:none;border-left:2px solid transparent;">
+            <span style="width:16px;height:16px;margin-right:4px;flex-shrink:0;"></span>Elemental Damage
+          </a>
+          <a href="#damage-formula" style="display:flex;align-items:center;height:32px;padding:0 12px 0 28px;font-size:13px;font-weight:500;font-family:var(--lx-font-body);color:var(--lx-text-primary);text-decoration:none;background:var(--lx-surface-selected);border-left:2px solid var(--lx-border-focus);">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="transform:rotate(90deg);margin-right:4px;flex-shrink:0;color:var(--lx-text-muted);"><path d="M9 18l6-6-6-6"/></svg>Damage Formula
+          </a>
+          <a href="#resistance-matrix" style="display:flex;align-items:center;height:32px;padding:0 12px 0 28px;font-size:13px;font-weight:400;font-family:var(--lx-font-body);color:var(--lx-text-secondary);text-decoration:none;border-left:2px solid transparent;">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="transform:rotate(90deg);margin-right:4px;flex-shrink:0;color:var(--lx-text-muted);"><path d="M9 18l6-6-6-6"/></svg>Resistance Matrix
+          </a>
+          <a href="#status-effects" style="display:flex;align-items:center;height:32px;padding:0 12px 0 28px;font-size:13px;font-weight:400;font-family:var(--lx-font-body);color:var(--lx-text-secondary);text-decoration:none;border-left:2px solid transparent;">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="transform:rotate(90deg);margin-right:4px;flex-shrink:0;color:var(--lx-text-muted);"><path d="M9 18l6-6-6-6"/></svg>Status Effects
+          </a>
+          <a href="#edge-cases" style="display:flex;align-items:center;height:32px;padding:0 12px 0 44px;font-size:13px;font-weight:400;font-family:var(--lx-font-body);color:var(--lx-text-secondary);text-decoration:none;border-left:2px solid transparent;">
+            <span style="width:16px;height:16px;margin-right:4px;flex-shrink:0;"></span>Edge Cases
+          </a>
+        </nav>
+        <span class="annotation-tag" style="display:block;padding:4px 12px;">Workspace-style tree: chevron expand/collapse, 16px indent per level, scroll spy, collapsible</span>
+      </aside>
+    </div>
+  </div>
+
+</body>
+</html>

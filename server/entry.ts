@@ -4,6 +4,7 @@ import { dirname, join } from "node:path";
 import { createHash, randomBytes } from "node:crypto";
 import { Database } from "bun:sqlite";
 import { createApiHandler } from "./api/http";
+import { createMcpHandler } from "./mcp/server";
 import { verifyApiKey } from "./api/auth-key";
 import { findOrCreateUser } from "./api/auth";
 
@@ -26,11 +27,16 @@ seedDevData(DATABASE_PATH);
 
 const apiHandlerRaw = createApiHandler(DATABASE_PATH) as unknown as { handler?: (req: Request) => Promise<Response> } | ((req: Request) => Promise<Response>);
 const apiHandler: (req: Request) => Promise<Response> = typeof apiHandlerRaw === "function" ? apiHandlerRaw : apiHandlerRaw.handler!;
+const mcpHandler = createMcpHandler(DATABASE_PATH);
 
 Bun.serve({
   port: PORT,
   async fetch(req) {
     const url = new URL(req.url);
+
+    if (url.pathname === "/mcp") {
+      return mcpHandler(req);
+    }
 
     if (url.pathname.startsWith("/api/")) {
       if (url.pathname !== "/api/health" && !verifyApiKey(req, DATABASE_PATH)) {

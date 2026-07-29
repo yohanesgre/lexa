@@ -1,0 +1,313 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Lexa — Flow Overview</title>
+  <link rel="stylesheet" href="wireframes.css" />
+  <style>
+    .flow-canvas {
+      display: flex;
+      gap: 32px;
+      padding: 24px 0;
+      overflow-x: auto;
+    }
+    .flow-column {
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+      min-width: 220px;
+    }
+    .flow-column-title {
+      font-family: var(--lx-font-micro);
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--lx-text-muted);
+      padding-bottom: 8px;
+      border-bottom: 1px solid var(--lx-border-default);
+    }
+    .flow-node {
+      background: var(--lx-surface-card);
+      border: 1px solid var(--lx-border-default);
+      border-radius: 8px;
+      padding: 14px;
+      position: relative;
+    }
+    .flow-node.primary {
+      border-color: var(--lx-border-focus);
+      box-shadow: var(--lx-focus-glow);
+    }
+    .flow-node-name {
+      font-family: var(--lx-font-display);
+      font-size: 15px;
+      font-weight: 600;
+      color: var(--lx-text-primary);
+      margin-bottom: 4px;
+    }
+    .flow-node-file {
+      font-family: var(--lx-font-mono);
+      font-size: 11px;
+      color: var(--lx-text-muted);
+    }
+    .flow-node-screen {
+      font-family: var(--lx-font-body);
+      font-size: 12px;
+      color: var(--lx-text-secondary);
+      margin-top: 6px;
+    }
+    .flow-edge {
+      position: absolute;
+      left: 50%;
+      bottom: -17px;
+      width: 1px;
+      height: 17px;
+      background: var(--lx-border-default);
+    }
+    .flow-edge::after {
+      content: '';
+      position: absolute;
+      bottom: 0;
+      left: -3px;
+      width: 0;
+      height: 0;
+      border-left: 4px solid transparent;
+      border-right: 4px solid transparent;
+      border-top: 5px solid var(--lx-border-default);
+    }
+    .flow-row {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+    }
+    .flow-badge {
+      font-family: var(--lx-font-micro);
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      padding: 2px 6px;
+      border-radius: 4px;
+      background: var(--lx-surface-elevated);
+      color: var(--lx-text-secondary);
+      border: 1px solid var(--lx-border-subtle);
+    }
+    .flow-badge.global {
+      color: var(--lx-text-link);
+      border-color: var(--lx-border-focus);
+    }
+    .flow-note {
+      font-family: var(--lx-font-body);
+      font-size: 12px;
+      color: var(--lx-text-secondary);
+      line-height: 1.5;
+      max-width: 720px;
+    }
+    .flow-legend {
+      display: flex;
+      gap: 16px;
+      margin-top: 8px;
+    }
+  </style>
+</head>
+<body class="bg-app color-primary" style="min-height:100vh;">
+
+  <INCLUDE navbar.html />
+
+  <main class="page-frame">
+    <div class="flex items-center justify-between mb-4">
+      <div>
+        <h1 class="font-display text-2xl weight-600 color-primary">User Flow Overview</h1>
+        <div class="font-micro text-2xs color-muted mt-1" style="text-transform:uppercase;letter-spacing:0.04em;">Canonical paths and project context rules</div>
+      </div>
+      <a href="index.html" class="btn btn-ghost text-sm">Back to index</a>
+    </div>
+
+    <p class="flow-note mb-4">
+      <strong>Project context rule.</strong> Dashboard is cross-project. Board, Wiki, and Settings are project-scoped. The global project switcher sets the current project and preserves the route type when possible. If the current route does not exist in the new project (e.g., a wiki page), fall back to that project's root for that route.
+    </p>
+
+    <div class="flow-legend mb-4">
+      <span class="flow-badge global">Global context</span>
+      <span class="flow-badge">Project context</span>
+    </div>
+
+    <span class="annotation-tag mb-4">Arrows show primary actions, not every click</span>
+
+    <div class="flow-canvas">
+
+      <!-- Column 1: Entry -->
+      <div class="flow-column">
+        <div class="flow-column-title">Entry</div>
+        <div class="flow-node primary">
+          <div class="flow-node-name">Dashboard</div>
+          <div class="flow-node-file">dashboard.html</div>
+          <div class="flow-node-screen">Cross-project health overview, command center, landing page.</div>
+          <div class="flow-edge"></div>
+        </div>
+        <div class="flow-node">
+          <div class="flow-node-name">Empty Dashboard</div>
+          <div class="flow-node-file">dashboard-empty.html</div>
+          <div class="flow-node-screen">First run: no projects yet.</div>
+        </div>
+      </div>
+
+      <!-- Column 2: Project selection -->
+      <div class="flow-column">
+        <div class="flow-column-title">Project Selection</div>
+        <div class="flow-node primary">
+          <div class="flow-node-name">Project Switcher</div>
+          <div class="flow-node-file">navbar-project-switcher.html</div>
+          <div class="flow-node-screen">Always in app-nav. Sets current project.</div>
+          <div class="flow-edge"></div>
+        </div>
+        <div class="flow-node">
+          <div class="flow-node-name">New Project</div>
+          <div class="flow-node-file">dashboard-new-project.html</div>
+          <div class="flow-node-screen">Modal from dashboard.</div>
+        </div>
+        <div class="flow-node">
+          <div class="flow-node-name">Delete Project</div>
+          <div class="flow-node-file">dashboard-delete-project.html</div>
+          <div class="flow-node-screen">Confirm before cascading delete.</div>
+        </div>
+      </div>
+
+      <!-- Column 3: Project surfaces -->
+      <div class="flow-column">
+        <div class="flow-column-title">Project Surfaces</div>
+        <div class="flow-node primary">
+          <div class="flow-node-name">Board</div>
+          <div class="flow-node-file">kanban.html</div>
+          <div class="flow-node-screen">Primary workspace. Swimlanes, columns, cards.</div>
+          <div class="flow-edge"></div>
+        </div>
+        <div class="flow-node">
+          <div class="flow-node-name">Wiki</div>
+          <div class="flow-node-file">wiki.html</div>
+          <div class="flow-node-screen">Nested docs for the current project.</div>
+        </div>
+        <div class="flow-node">
+          <div class="flow-node-name">Project Settings</div>
+          <div class="flow-node-file">settings.html (split to project scope)</div>
+          <div class="flow-node-screen">Columns, swimlanes, GitHub repo mapping.</div>
+        </div>
+      </div>
+
+      <!-- Column 4: Board actions -->
+      <div class="flow-column">
+        <div class="flow-column-title">Board Actions</div>
+        <div class="flow-node">
+          <div class="flow-node-name">Task Detail</div>
+          <div class="flow-node-file">task-detail.html</div>
+          <div class="flow-node-screen">Click card → slideover.</div>
+          <div class="flow-edge"></div>
+        </div>
+        <div class="flow-node">
+          <div class="flow-node-name">Create Task</div>
+          <div class="flow-node-file">task-detail-create.html</div>
+          <div class="flow-node-screen">Inline or slideover.</div>
+        </div>
+        <div class="flow-node">
+          <div class="flow-node-name">Filter</div>
+          <div class="flow-node-file">kanban-filter.html</div>
+          <div class="flow-node-screen">Column, priority, type, assignee.</div>
+        </div>
+        <div class="flow-node">
+          <div class="flow-node-name">Column / Swimlane Menu</div>
+          <div class="flow-node-file">kanban-column-menu.html / kanban-swimlane-menu.html</div>
+          <div class="flow-node-screen">Manage lanes inline.</div>
+        </div>
+        <div class="flow-node">
+          <div class="flow-node-name">Empty Board</div>
+          <div class="flow-node-file">kanban-empty.html</div>
+          <div class="flow-node-screen">New project, no columns yet.</div>
+        </div>
+      </div>
+
+      <!-- Column 5: Task actions -->
+      <div class="flow-column">
+        <div class="flow-column-title">Task Actions</div>
+        <div class="flow-node">
+          <div class="flow-node-name">Edit Task</div>
+          <div class="flow-node-file">task-detail-edit.html</div>
+          <div class="flow-node-screen">Title, properties, description.</div>
+        </div>
+        <div class="flow-node">
+          <div class="flow-node-name">GitHub Link</div>
+          <div class="flow-node-file">task-detail-github-link.html</div>
+          <div class="flow-node-screen">Create or link issue.</div>
+        </div>
+        <div class="flow-node">
+          <div class="flow-node-name">Delete Confirm</div>
+          <div class="flow-node-file">task-detail-delete.html</div>
+          <div class="flow-node-screen">Modal over slideover.</div>
+        </div>
+      </div>
+
+      <!-- Column 6: Wiki actions -->
+      <div class="flow-column">
+        <div class="flow-column-title">Wiki Actions</div>
+        <div class="flow-node">
+          <div class="flow-node-name">Edit Page</div>
+          <div class="flow-node-file">wiki-edit.html</div>
+          <div class="flow-node-screen">TipTap editor, title, slug.</div>
+        </div>
+        <div class="flow-node">
+          <div class="flow-node-name">Create Page</div>
+          <div class="flow-node-file">wiki-create-page.html</div>
+          <div class="flow-node-screen">Modal with parent selector.</div>
+        </div>
+        <div class="flow-node">
+          <div class="flow-node-name">Search</div>
+          <div class="flow-node-file">wiki-search-results.html</div>
+          <div class="flow-node-screen">FTS5 snippet list.</div>
+        </div>
+        <div class="flow-node">
+          <div class="flow-node-name">Page Menu</div>
+          <div class="flow-node-file">wiki-page-menu.html</div>
+          <div class="flow-node-screen">Rename, move, delete page.</div>
+        </div>
+      </div>
+
+      <!-- Column 7: Global components -->
+      <div class="flow-column">
+        <div class="flow-column-title">Global Patterns</div>
+        <div class="flow-node">
+          <div class="flow-node-name">Toast</div>
+          <div class="flow-node-file">component-toast.html</div>
+        </div>
+        <div class="flow-node">
+          <div class="flow-node-name">Confirm</div>
+          <div class="flow-node-file">component-confirm.html</div>
+        </div>
+        <div class="flow-node">
+          <div class="flow-node-name">Empty State</div>
+          <div class="flow-node-file">component-empty-state.html</div>
+        </div>
+        <div class="flow-node">
+          <div class="flow-node-name">Loading</div>
+          <div class="flow-node-file">component-loading.html</div>
+        </div>
+        <div class="flow-node">
+          <div class="flow-node-name">Dropdown</div>
+          <div class="flow-node-file">component-dropdown.html</div>
+        </div>
+        <div class="flow-node">
+          <div class="flow-node-name">Mobile Nav</div>
+          <div class="flow-node-file">component-mobile-nav.html</div>
+        </div>
+        <div class="flow-node">
+          <div class="flow-node-name">404</div>
+          <div class="flow-node-file">page-404.html</div>
+        </div>
+      </div>
+
+    </div>
+
+    <div class="responsive-note mt-4" style="max-width:900px;">
+      <strong>What's missing from this flow.</strong> Edge-case-only wireframes (long titles, WIP flash animation, no-swimlanes, deep nesting, overflow) are intentionally excluded. They should be rendered as states or annotations inside the canonical screens rather than separate files.
+    </div>
+  </main>
+
+</body>
+</html>

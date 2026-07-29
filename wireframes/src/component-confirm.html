@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Lexa — Component: Confirm Dialog</title>
+  <link rel="stylesheet" href="wireframes.css" />
+</head>
+<body class="bg-app color-primary" style="min-height:100vh;position:relative;overflow:hidden;">
+
+  <!-- Dimmed board backdrop (context) -->
+  <div style="position:absolute;inset:0;opacity:0.25;pointer-events:none;overflow:hidden;">
+    <INCLUDE navbar.html />
+    <div class="board-area">
+      <div class="board-header">
+        <h1 class="font-display text-xl weight-600 color-primary">Emberfall</h1>
+      </div>
+      <div class="board-scroll">
+        <div class="columns-row">
+          <div class="column">
+            <div class="column-header has-cards"><span class="column-name">In Progress</span></div>
+            <div class="column-body">
+              <div class="kanban-card" style="border-left:3px solid #FF4444;"><div class="card-title">Crash on level 3-2 load</div></div>
+              <div class="kanban-card" style="border-left:3px solid #22D3EE;"><div class="card-title">Tune dash cooldown timing</div></div>
+            </div>
+          </div>
+          <div class="column">
+            <div class="column-header has-cards"><span class="column-name">Done</span></div>
+            <div class="column-body">
+              <div class="kanban-card" style="border-left:3px solid #4ADE80;"><div class="card-title">Implement double-jump mechanic</div></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Overlay (shared token with slideover) -->
+  <div class="slideover-overlay"></div>
+  <div style="position:fixed;top:24px;left:24px;z-index:55;">
+    <span class="annotation-tag">backdrop: --lx-surface-overlay (same token as slideover)</span>
+  </div>
+
+  <!-- ===== CONFIRM DIALOG (centered) ===== -->
+  <div style="position:fixed;inset:0;display:flex;align-items:center;justify-content:center;z-index:50;">
+    <div class="dialog dialog-enter">
+
+      <div class="flex items-center justify-between">
+        <h2 class="font-display text-lg weight-500 color-primary">Delete task?</h2>
+        <span class="annotation-tag">.dialog — 400px, radius-lg 8px, shadow-lg</span>
+      </div>
+
+      <p class="text-sm color-secondary mt-3" style="line-height:20px;">
+        This will permanently delete
+        <span class="font-mono text-xs" style="background:var(--lx-surface-card);border-radius:4px;padding:2px 5px;color:var(--lx-text-primary);">#042</span>
+        &ldquo;Crash on level 3-2 load&rdquo; and its description. This action cannot be undone.
+      </p>
+
+      <div class="flex items-center gap-2 mt-4" style="justify-content:flex-end;">
+        <button class="btn btn-ghost">Cancel</button>
+        <button class="btn btn-danger-solid">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+          Delete task
+        </button>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- Behavior annotations -->
+  <div style="position:fixed;left:24px;bottom:24px;z-index:55;display:flex;flex-direction:column;gap:8px;align-items:flex-start;">
+    <span class="annotation-tag">enter: 150ms, scale 0.97 → 1 + fade, --lx-ease-out</span>
+    <span class="annotation-tag">Esc / backdrop click = Cancel · focus trapped in dialog · Cancel focused by default</span>
+    <span class="annotation-tag">destructive confirm = .btn-danger-solid (solid red) · non-destructive confirm = .btn-primary</span>
+    <span class="annotation-tag">title: text-lg/500/Display · body: text-sm/400/Body, secondary</span>
+  </div>
+
+  <!-- Component label -->
+  <div style="position:fixed;top:24px;right:24px;z-index:55;">
+    <span class="annotation-tag">components/ConfirmDialog.tsx — same shell for delete task, archive project, revoke API key, delete wiki page</span>
+  </div>
+
+</body>
+</html>

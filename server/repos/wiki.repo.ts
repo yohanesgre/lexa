@@ -1,9 +1,7 @@
 import { Effect } from "effect";
 import { Sqlite, queryAll, queryFirst, run, DbError, RowNotFound, ConstraintViolation } from "../db/database";
-import { WikiPageRow, rowToWikiPage, rowToWikiPageMeta } from "../../shared/types";
-import type { WikiPage, WikiPageMeta } from "../../shared/types";
-import type { WikiPageRevisionRow, WikiPageRevision, WikiPageRevisionSummary } from "../../shared/types";
-import { rowToWikiPageRevision, rowToWikiPageRevisionSummary } from "../../shared/types";
+import { WikiPageRow, rowToWikiPage, rowToWikiPageMeta, WikiPageRevisionRow, rowToWikiPageRevision, rowToWikiPageRevisionSummary } from "../../shared/db";
+import type { WikiPage, WikiPageMeta, WikiPageRevision, WikiPageRevisionSummary } from "../../shared/types";
 
 export class WikiRepo extends Effect.Service<WikiRepo>()("Lexa/WikiRepo", {
   effect: Effect.gen(function* () {

@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Lexa — Wiki: New Page Modal</title>
+  <link rel="stylesheet" href="wireframes.css" />
+</head>
+<body class="bg-app color-primary" style="min-height:100vh;position:relative;overflow:hidden;">
+
+  <!-- Dimmed wiki backdrop -->
+  <div style="position:absolute;inset:0;opacity:0.25;pointer-events:none;overflow:hidden;">
+    <INCLUDE navbar.html />
+    <div class="wiki-layout">
+      <aside class="wiki-sidebar">
+        <div class="px-4 mb-3">
+          <span class="text-xs color-muted font-body">Search wiki...</span>
+        </div>
+        <div class="flex-1 overflow-y-auto">
+          <div class="tree-item" style="margin-bottom:2px;">
+            <svg class="chevron-small" viewBox="0 0 24 24" style="transform:rotate(90deg);"><path d="M9 18l6-6-6-6"/></svg>
+            Game Design Doc
+          </div>
+          <div class="tree-item tree-indent-1" style="margin-bottom:2px;">
+            <svg class="chevron-small" viewBox="0 0 24 24" style="transform:rotate(90deg);"><path d="M9 18l6-6-6-6"/></svg>
+            Combat System
+          </div>
+          <div class="tree-item tree-indent-2" style="margin-bottom:2px;">Elemental Damage</div>
+        </div>
+      </aside>
+      <div class="wiki-content">
+        <div class="wiki-prose">
+          <h1>Elemental Damage</h1>
+          <p>Emberfall’s combat revolves around four elemental affinities.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Overlay (reused from slideover) -->
+  <div class="slideover-overlay"></div>
+
+  <!-- New page modal -->
+  <div class="modal">
+    <div class="flex items-center justify-between mb-1">
+      <h2 class="font-display text-lg weight-600 color-primary">New page</h2>
+      <button class="btn btn-ghost" style="width:32px;height:32px;padding:0;border:none;">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M18 6L6 18M6 6l12 12"/></svg>
+      </button>
+    </div>
+    <span class="annotation-tag">Modal: 440px, radius-lg, padding 16px (DS §8.2)</span>
+
+    <!-- Title -->
+    <div class="mt-3">
+      <label class="prop-label" style="display:block;margin-bottom:6px;">Title</label>
+      <input class="prop-input" value="Elemental Damage FAQ" style="width:100%;" />
+    </div>
+
+    <!-- Parent selector -->
+    <div class="mt-3">
+      <label class="prop-label" style="display:block;margin-bottom:6px;">Parent</label>
+      <select class="prop-input" style="width:100%;">
+        <option>(No parent — root)</option>
+        <option>Game Design Doc</option>
+        <option selected>&nbsp;&nbsp;Combat System</option>
+        <option>&nbsp;&nbsp;&nbsp;&nbsp;Elemental Damage</option>
+        <option>&nbsp;&nbsp;&nbsp;&nbsp;Boss Patterns</option>
+        <option>&nbsp;&nbsp;Level Design</option>
+        <option>Art Direction</option>
+        <option>Sound &amp; Music</option>
+      </select>
+      <span class="annotation-inline">Nested pages indented in options</span>
+    </div>
+
+
+
+    <!-- Actions -->
+    <div class="flex items-center gap-2 mt-4" style="justify-content:flex-end;">
+      <button class="btn btn-ghost">Cancel</button>
+      <button class="btn btn-primary">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 5v14m-7-7h14"/></svg>
+        Create page
+      </button>
+    </div>
+  </div>
+
+  <!-- Dimension rail -->
+  <div style="position:fixed;top:50%;left:calc(50% + 232px);transform:translateY(-50%);z-index:55;">
+    <span class="annotation-tag">150ms scale + fade in (DS §6.2)</span>
+  </div>
+
+</body>
+</html>

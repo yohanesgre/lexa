@@ -1,6 +1,6 @@
 import { Effect } from "effect";
 import { Sqlite, queryAll, queryFirst, run, DbError, RowNotFound, ConstraintViolation } from "../db/database";
-import { ProjectRow, rowToProject } from "../../shared/types";
+import { ProjectRow, rowToProject } from "../../shared/db";
 import type { Project } from "../../shared/types";
 
 export class ProjectRepo extends Effect.Service<ProjectRepo>()("Lexa/ProjectRepo", {

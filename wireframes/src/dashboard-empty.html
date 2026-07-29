@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Lexa — Dashboard (Empty)</title>
+  <link rel="stylesheet" href="wireframes.css" />
+</head>
+<body class="bg-app color-primary" style="min-height:100vh;">
+
+  <INCLUDE navbar.html />
+
+  <main class="page-frame">
+    <div class="flex items-center justify-between mb-4">
+      <h1 class="font-display text-2xl weight-600 color-primary">Projects</h1>
+      <div class="flex items-center gap-3">
+        <button class="btn btn-ghost">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M15 7h6m0 0v6m0-6l-9 9-4-4-6 6"/></svg>
+          API Keys
+        </button>
+        <button class="btn btn-primary">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 5v14m-7-7h14"/></svg>
+          New Project
+        </button>
+      </div>
+    </div>
+
+    <span class="annotation-tag mb-4">Dashboard — empty state variant (zero projects) · uses canonical EmptyState (component-empty-state.html)</span>
+
+    <div class="bg-column border-subtle r-lg mt-4" style="min-height:480px;display:flex;">
+      <div class="empty-state flex-1">
+        <div class="empty-state-icon">
+          <svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+        </div>
+        <h2 class="font-display text-lg weight-500 color-primary mt-3">No projects yet</h2>
+        <p class="text-sm color-secondary mt-1" style="max-width:300px;">Create your first project to start tracking tasks, columns, and wiki pages — with optional two-way GitHub sync.</p>
+        <button class="btn btn-primary mt-4">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 5v14m-7-7h14"/></svg>
+          New Project
+        </button>
+      </div>
+    </div>
+
+    <div class="mt-3 flex items-center gap-3" style="flex-wrap:wrap;">
+      <span class="annotation-tag">icon tile: 48px, radius-xl, LayoutGrid 24px muted</span>
+      <span class="annotation-tag">heading: text-lg/500/Display · subtext: text-sm secondary, max 300px</span>
+      <span class="annotation-tag">one CTA only — header actions stay as chrome</span>
+    </div>
+  </main>
+
+</body>
+</html>
