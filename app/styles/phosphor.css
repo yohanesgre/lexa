@@ -2298,6 +2298,54 @@
     margin: 4px 6px;
   }
 
+  /* ---- Dropdown Menu (settings user search suggestions) ---- */
+  .dropdown-menu {
+    min-width: 220px;
+    background: var(--lx-surface-tooltip);
+    border: 1px solid var(--lx-border-default);
+    border-radius: 6px;
+    box-shadow: var(--lx-shadow-lg);
+    padding: 4px;
+  }
+  .dropdown-label {
+    font-family: var(--lx-font-micro);
+    font-size: 11px;
+    line-height: 14px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--lx-text-muted);
+    padding: 6px 10px 2px;
+  }
+  .dropdown-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    height: 32px;
+    padding: 0 10px;
+    border-radius: 4px;
+    font-size: 13px;
+    font-family: var(--lx-font-body);
+    color: var(--lx-text-secondary);
+    cursor: pointer;
+  }
+  .dropdown-item:hover {
+    background: var(--lx-surface-selected);
+    color: var(--lx-text-primary);
+  }
+  .dropdown-item svg {
+    width: 16px;
+    height: 16px;
+    stroke: currentColor;
+    stroke-width: 1.5;
+    fill: none;
+    flex-shrink: 0;
+  }
+  .dropdown-separator {
+    height: 1px;
+    background: var(--lx-border-subtle);
+    margin: 4px 6px;
+  }
+
   /* ---- Filter Bar & Chips ---- */
   .filter-bar {
     display: flex;

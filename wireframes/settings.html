@@ -124,7 +124,7 @@
       <div style="background:var(--lx-surface-card);border:1px solid var(--lx-border-default);border-radius:8px;overflow:hidden;">
         <table class="settings-table">
           <thead>
-            <tr><th>User</th><th>Email</th><th>Role</th><th style="width:80px;"></th></tr>
+            <tr><th style="width:auto;">User</th><th style="width:auto;">Email</th><th style="width:80px;">Role</th><th style="width:80px;"></th></tr>
           </thead>
           <tbody>
             <tr>
@@ -208,17 +208,19 @@
       <div style="background:var(--lx-surface-card);border:1px solid var(--lx-border-default);border-radius:8px;overflow:hidden;">
         <table class="settings-table">
           <thead>
-            <tr><th>User</th><th>Email</th><th>Role</th><th style="width:80px;"></th></tr>
+            <tr><th style="width:auto;">User</th><th style="width:auto;">Email</th><th style="width:80px;">Role</th><th style="width:80px;"></th></tr>
           </thead>
           <tbody>
             <tr>
-              <td class="text-sm weight-500">Alice</td>
-              <td class="text-xs color-secondary">alice@example.com</td>
               <td>
-                <select style="height:28px;padding:0 8px;font-size:12px;background:var(--lx-surface-input);color:var(--lx-text-primary);border:1px solid var(--lx-border-default);border-radius:4px;">
-                  <option value="admin">admin</option>
-                  <option value="member" selected>member</option>
-                </select>
+                <div class="flex items-center gap-2">
+                  <div class="avatar">A</div>
+                  <span class="text-sm weight-500">Alice</span>
+                </div>
+              </td>
+              <td class="text-xs color-secondary">alice@example.com</td>
+              <td class="text-xs">
+                <span style="background:var(--lx-bg-accent-subtle);color:var(--lx-text-link);padding:2px 8px;border-radius:9999px;font-size:11px;">member</span>
               </td>
               <td>
                 <button class="btn btn-danger" style="height:28px;padding:0 10px;font-size:12px;">
@@ -227,13 +229,15 @@
               </td>
             </tr>
             <tr>
-              <td class="text-sm weight-500">Bob</td>
-              <td class="text-xs color-secondary">bob@example.com</td>
               <td>
-                <select style="height:28px;padding:0 8px;font-size:12px;background:var(--lx-surface-input);color:var(--lx-text-primary);border:1px solid var(--lx-border-default);border-radius:4px;">
-                  <option value="admin">admin</option>
-                  <option value="member" selected>member</option>
-                </select>
+                <div class="flex items-center gap-2">
+                  <div class="avatar">B</div>
+                  <span class="text-sm weight-500">Bob</span>
+                </div>
+              </td>
+              <td class="text-xs color-secondary">bob@example.com</td>
+              <td class="text-xs">
+                <span style="background:var(--lx-bg-accent-subtle);color:var(--lx-text-link);padding:2px 8px;border-radius:9999px;font-size:11px;">member</span>
               </td>
               <td>
                 <button class="btn btn-danger" style="height:28px;padding:0 10px;font-size:12px;">
@@ -244,7 +248,7 @@
           </tbody>
         </table>
       </div>
-      <span class="annotation-tag mt-2 mb-4">State: populated — shown when members exist. Role dropdown auto-saves. Remove opens confirmation dialog.</span>
+      <span class="annotation-tag mt-2 mb-4">State: populated — shown when members exist. Role shown as static badge (admins badge used for admin members). Remove opens confirmation dialog.</span>
 
       <div class="mt-4 p-4" style="background:var(--lx-surface-elevated);border:1px solid var(--lx-border-default);border-radius:8px;">
         <h3 class="font-display text-base weight-500 color-primary mb-3">Add Member</h3>
