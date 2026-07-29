@@ -1,6 +1,7 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
-import { markdownToDoc, docToMarkdown } from "../shared/markdown.ts";
-import type { TipTapDoc } from "../shared/types.ts";
+import { timingSafeEqual } from "node:crypto";
+import { markdownToDoc, docToMarkdown } from "../../shared/markdown";
+import type { TipTapDoc } from "../../shared/types";
 
 // ── Env file ──
 
@@ -976,10 +977,6 @@ const server = createServer(async (req, res) => {
   }
 
   const auth = req.headers["authorization"];
-import { timingSafeEqual } from "node:crypto";
-
-// ...
-
   if (!auth || !timingSafeEqual(Buffer.from(auth), Buffer.from(`Bearer ${API_KEY}`))) {
     res.writeHead(401, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ error: "unauthorized" }));

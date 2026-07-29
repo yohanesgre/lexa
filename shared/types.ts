@@ -227,6 +227,12 @@ export function rowToWikiPageRevisionSummary(row: WikiPageRevisionRow): WikiPage
   };
 }
 
+export interface UserProjectRoleRow {
+  user_id: string;
+  role: "admin" | "member";
+  project_id: string;
+}
+
 export interface ApiKey {
   id: ID;
   name: string;
@@ -234,10 +240,20 @@ export interface ApiKey {
   lastUsedAt: ISODate | null;
 }
 
+export interface UserRow {
+  id: string;
+  email: string;
+  name: string;
+  role: "admin" | "member";
+  created_at: string;
+  last_seen: string | null;
+}
+
 export interface ApiKeyRow {
   id: string;
   name: string;
   key_hash: string;
+  user_id: string | null;
   created_at: string;
   last_used_at: string | null;
 }

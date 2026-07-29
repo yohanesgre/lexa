@@ -1,5 +1,5 @@
 import { HttpApi, HttpApiBuilder, HttpApiEndpoint, HttpApiGroup, HttpServerResponse } from "@effect/platform";
-import { Effect, Layer, Schema } from "effect";
+import { Cause, Effect, Layer, Schema } from "effect";
 import { Sqlite } from "../db/database";
 import { Database } from "bun:sqlite";
 import { WikiPageNotFound, errorResponse, errorToStatus } from "./errors";
@@ -16,6 +16,10 @@ import { WikiService } from "../services/wiki.service";
 import { WikiRepo } from "../repos/wiki.repo";
 import { ApiKeyService } from "../services/api-key.service";
 import { ApiKeyRepo } from "../repos/api-key.repo";
+import { UserService } from "../services/user.service";
+import { UserRepo } from "../repos/user.repo";
+import { UserProjectRoleService } from "../services/user-project-role.service";
+import { UserProjectRoleRepo } from "../repos/user-project-role.repo";
 import { extractText } from "../../shared/tiptap-text";
 
 const ApiKeySchema = Schema.Struct({
@@ -335,6 +339,41 @@ const apiKeysGroup = HttpApiGroup.make("api-keys")
   .add(HttpApiEndpoint.del("deleteApiKey", "/settings/api-keys/:id")
     .setPath(ApiKeyPath).addSuccess(Schema.UndefinedOr(Schema.Void)));
 
+const UserSchema = Schema.Struct({
+  id: Schema.String,
+  email: Schema.String,
+  name: Schema.String,
+  role: Schema.String,
+  createdAt: Schema.String,
+  lastSeen: Schema.NullOr(Schema.String),
+});
+
+const UserPath = Schema.Struct({ id: Schema.String });
+const UpdateUserRoleInput = Schema.Struct({ role: Schema.Literal("admin", "member") });
+
+const ProjectRoleEntry = Schema.Struct({
+  projectId: Schema.String,
+  projectSlug: Schema.String,
+  role: Schema.Literal("admin", "member"),
+});
+
+const SetProjectRoleInput = Schema.Struct({
+  projectId: Schema.String,
+  role: Schema.Literal("admin", "member"),
+});
+
+const adminGroup = HttpApiGroup.make("admin")
+  .add(HttpApiEndpoint.get("listUsers", "/admin/users")
+    .addSuccess(Schema.Struct({ data: Schema.Array(UserSchema) })))
+  .add(HttpApiEndpoint.patch("updateUserRole", "/admin/users/:id")
+    .setPath(UserPath).setPayload(UpdateUserRoleInput).addSuccess(UserSchema))
+  .add(HttpApiEndpoint.get("listUserProjectRoles", "/admin/users/:id/projects")
+    .setPath(UserPath).addSuccess(Schema.Struct({ data: Schema.Array(ProjectRoleEntry) })))
+  .add(HttpApiEndpoint.put("setUserProjectRole", "/admin/users/:id/projects")
+    .setPath(UserPath).setPayload(SetProjectRoleInput).addSuccess(ProjectRoleEntry))
+  .add(HttpApiEndpoint.del("removeUserProjectRole", "/admin/users/:id/projects/:projectId")
+    .setPath(Schema.Struct({ id: Schema.String, projectId: Schema.String })).addSuccess(Schema.UndefinedOr(Schema.Void)));
+
 export const LexaApi = HttpApi.make("lexa")
   .add(healthGroup)
   .add(projectsGroup)
@@ -344,19 +383,26 @@ export const LexaApi = HttpApi.make("lexa")
   .add(boardGroup)
   .add(wikiGroup)
   .add(apiKeysGroup)
+  .add(adminGroup)
   .prefix("/api");
 
 const apiLayer = HttpApiBuilder.api(LexaApi);
 
 const respond = <A, E, R>(eff: Effect.Effect<A, E, R>): Effect.Effect<A | HttpServerResponse.HttpServerResponse, never, R> =>
   eff.pipe(
-    Effect.catchAll((e) =>
-      Effect.succeed(
-        HttpServerResponse.unsafeJson(errorResponse(e as { _tag: string } & Record<string, unknown>), {
-          status: errorToStatus(e as { _tag: string }),
-        })
-      )
-    )
+    Effect.catchAllCause((cause) => {
+      const defect = Cause.defects(cause).find(() => true);
+      if (defect) console.error("[API] Defect:", defect);
+      const failure = Cause.failureOption(cause);
+      return Effect.succeed(
+        HttpServerResponse.unsafeJson(
+          failure._tag === "Some"
+            ? errorResponse(failure.value as { _tag: string } & Record<string, unknown>)
+            : { error: { code: "INTERNAL", message: defect instanceof Error ? defect.message : "Internal error" } },
+          { status: failure._tag === "Some" ? errorToStatus(failure.value as { _tag: string }) : 500 }
+        )
+      );
+    })
   );
 
 const healthLive = HttpApiBuilder.group(LexaApi, "health", (handlers) =>
@@ -365,7 +411,7 @@ const healthLive = HttpApiBuilder.group(LexaApi, "health", (handlers) =>
 
 const projectsLive = HttpApiBuilder.group(LexaApi, "projects", (handlers) =>
   handlers
-    .handle("list", () =>
+    .handle("list", (req) =>
       respond(Effect.gen(function* () {
         const service = yield* ProjectService;
         const projects = yield* service.list();
@@ -699,7 +745,7 @@ const wikiLive = HttpApiBuilder.group(LexaApi, "wiki", (handlers) =>
 
 const apiKeysLive = HttpApiBuilder.group(LexaApi, "api-keys", (handlers) =>
   handlers
-    .handle("listApiKeys", (_req) =>
+    .handle("listApiKeys", (req) =>
       respond(Effect.gen(function* () {
         const service = yield* ApiKeyService;
         const keys = yield* service.list();
@@ -717,6 +763,59 @@ const apiKeysLive = HttpApiBuilder.group(LexaApi, "api-keys", (handlers) =>
       respond(Effect.gen(function* () {
         const service = yield* ApiKeyService;
         yield* service.delete(req.path.id);
+        return undefined;
+      }))
+    )
+);
+
+const adminLive = HttpApiBuilder.group(LexaApi, "admin", (handlers) =>
+  handlers
+    .handle("listUsers", () =>
+      respond(Effect.gen(function* () {
+        const service = yield* UserService;
+        const users = yield* service.list();
+        return { data: users.map((u) => ({ id: u.id, email: u.email, name: u.name, role: u.role, createdAt: u.created_at, lastSeen: u.last_seen })) };
+      }))
+    )
+    .handle("updateUserRole", (req) =>
+      respond(Effect.gen(function* () {
+        const service = yield* UserService;
+        if (req.payload.role === "admin") {
+          yield* service.promoteToAdmin(req.path.id);
+        } else {
+          yield* service.demoteToMember(req.path.id, "0");
+        }
+        const user = yield* service.getById(req.path.id);
+        return { id: user.id, email: user.email, name: user.name, role: user.role, createdAt: user.created_at, lastSeen: user.last_seen };
+      }))
+    )
+    .handle("listUserProjectRoles", (req) =>
+      respond(Effect.gen(function* () {
+        const service = yield* UserProjectRoleService;
+        const projectRepo = yield* ProjectRepo;
+        const roles = yield* service.listForUser(req.path.id);
+        const entries = yield* Effect.forEach(roles, (r) =>
+          Effect.gen(function* () {
+            const p = yield* projectRepo.findById(r.project_id).pipe(
+              Effect.catchTag("RowNotFound", () => Effect.succeed(null))
+            );
+            return { projectId: r.project_id, projectSlug: p ? (p as any).slug : "unknown", role: r.role };
+          })
+        );
+        return { data: entries };
+      }))
+    )
+    .handle("setUserProjectRole", (req) =>
+      respond(Effect.gen(function* () {
+        const service = yield* UserProjectRoleService;
+        yield* service.setRole(req.path.id, req.payload.projectId, req.payload.role);
+        return { projectId: req.payload.projectId, projectSlug: req.payload.projectId, role: req.payload.role };
+      }))
+    )
+    .handle("removeUserProjectRole", (req) =>
+      respond(Effect.gen(function* () {
+        const service = yield* UserProjectRoleService;
+        yield* service.removeAccess(req.path.id, req.path.projectId);
         return undefined;
       }))
     )
@@ -771,9 +870,11 @@ export function createApiHandler(dbPath: string) {
     TaskRepo.Default, TaskService.Default,
     WikiRepo.Default, WikiService.Default,
     ApiKeyRepo.Default, ApiKeyService.Default,
+    UserRepo.Default, UserService.Default,
+    UserProjectRoleRepo.Default, UserProjectRoleService.Default,
   );
   const handlerLayer = Layer.mergeAll(
-    healthLive, projectsLive, columnsLive, swimlanesLive, tasksLive, boardLive, wikiLive, apiKeysLive,
+    healthLive, projectsLive, columnsLive, swimlanesLive, tasksLive, boardLive, wikiLive, apiKeysLive, adminLive,
   ).pipe(Layer.provide(Layer.provide(serviceLayer, dbLayer)));
   const merged = Layer.mergeAll(apiLayer, handlerLayer);
   return HttpApiBuilder.toWebHandler(merged as unknown as Parameters<typeof HttpApiBuilder.toWebHandler>[0]);

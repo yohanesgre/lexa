@@ -7,6 +7,7 @@ services:
       - DATABASE_PATH=/app/data/lexa.db
       - PORT=3000
       - LXK_API_KEY=${LXK_API_KEY}
+      - LXK_ADMIN_EMAILS=${LXK_ADMIN_EMAILS:-}
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "bun", "-e", "fetch('http://localhost:3000/api/health').catch(() => process.exit(1))"]

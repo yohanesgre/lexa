@@ -1,5 +1,7 @@
 import { Data } from "effect";
 
+export { UserNotFound, CannotDeleteSelf } from "../services/user.service";
+
 export class TaskNotFound extends Data.TaggedError("TaskNotFound")<{ id: string }> {}
 export class ProjectNotFound extends Data.TaggedError("ProjectNotFound")<{ identifier: string }> {}
 export class ColumnNotFound extends Data.TaggedError("ColumnNotFound")<{ id: string }> {}
@@ -15,6 +17,8 @@ export class InvalidKey extends Data.TaggedError("InvalidKey")<{}> {}
 export class MissingAuth extends Data.TaggedError("MissingAuth")<{}> {}
 export class GithubApiError extends Data.TaggedError("GithubApiError")<{ message: string }> {}
 export class GithubWebhookError extends Data.TaggedError("GithubWebhookError")<{ message: string }> {}
+export class Forbidden extends Data.TaggedError("Forbidden")<{ message: string }> {}
+export { ProjectAccessDenied } from "../services/user-project-role.service";
 
 export const errorCodeMap: Record<string, string> = {
   TaskNotFound: "TASK_NOT_FOUND",
@@ -32,12 +36,22 @@ export const errorCodeMap: Record<string, string> = {
   MissingAuth: "MISSING_AUTH",
   GithubApiError: "GITHUB_API_ERROR",
   GithubWebhookError: "GITHUB_WEBHOOK_ERROR",
+  ProjectAccessDenied: "FORBIDDEN",
+  UserNotFound: "USER_NOT_FOUND",
+  CannotDeleteSelf: "CANNOT_DELETE_SELF",
+  Forbidden: "FORBIDDEN",
   ConstraintViolation: "CONSTRAINT",
   DbError: "DATABASE_ERROR",
 };
 
 export function errorToStatus(error: { _tag: string }): number {
   switch (error._tag) {
+    case "UserNotFound":
+      return 404;
+    case "CannotDeleteSelf":
+    case "ProjectAccessDenied":
+    case "Forbidden":
+      return 403;
     case "TaskNotFound":
     case "ProjectNotFound":
     case "ColumnNotFound":
@@ -91,6 +105,15 @@ export function errorMessage(error: { _tag: string } & Record<string, unknown>):
     case "InvalidKey":
     case "MissingAuth":
       return "Invalid or missing API key";
+    case "UserNotFound":
+      return "User not found";
+    case "CannotDeleteSelf":
+      return "Cannot modify your own account";
+    case "ProjectAccessDenied":
+      return `Access denied to project '${error.project}'`;
+    case "ProjectAccessDenied":
+      return `Access denied to project '${error.project}'`;
+    case "Forbidden":
     case "GithubApiError":
     case "GithubWebhookError":
     case "DbError":

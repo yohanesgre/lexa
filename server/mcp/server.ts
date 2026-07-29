@@ -1,5 +1,6 @@
 import { Effect, Layer, ManagedRuntime } from "effect";
 import { ApiKeyRepo } from "../repos/api-key.repo";
+import { UserRepo } from "../repos/user.repo";
 import { ProjectRepo } from "../repos/project.repo";
 import { ColumnRepo } from "../repos/column.repo";
 import { SwimlaneRepo } from "../repos/swimlane.repo";
@@ -27,12 +28,15 @@ import { tool as getProject } from "./tools/get-project";
 import { tool as getProjectStatus } from "./tools/get-project-status";
 import { tool as linkGithubIssue } from "./tools/link-github-issue";
 import { tool as unlinkGithubIssue } from "./tools/unlink-github-issue";
+import { UserProjectRoleRepo } from "../repos/user-project-role.repo";
+import { checkProjectAccess } from "./auth";
+import { resolveTaskProject } from "./resolve";
 
 interface ToolDef {
   name: string;
   description: string;
   inputSchema: { type: string; properties: Record<string, unknown>; required?: string[] };
-  handler: (args: any) => Effect.Effect<any, any, any>;
+  handler: (args: any, auth?: { userId: string | null; role: string }) => Effect.Effect<any, any, any>;
 }
 
 const tools: ToolDef[] = [
@@ -85,6 +89,7 @@ function buildToolError(e: unknown): object {
 export class McpServer extends Effect.Service<McpServer>()("Lexa/McpServer", {
   dependencies: [
     ApiKeyRepo.Default,
+    UserRepo.Default,
     ProjectRepo.Default,
     ColumnRepo.Default,
     SwimlaneRepo.Default,
@@ -112,10 +117,17 @@ export class McpServer extends Effect.Service<McpServer>()("Lexa/McpServer", {
           Effect.catchTag("RowNotFound", () => Effect.fail("INVALID_API_KEY"))
         );
         yield* apiKeyRepo.touchIfStale(row.id);
-        return undefined;
+        const userRepo = yield* UserRepo;
+        if (row.user_id) {
+          const user = yield* userRepo.findById(row.user_id).pipe(
+            Effect.catchTag("RowNotFound", () => Effect.fail("INVALID_API_KEY"))
+          );
+          return { keyId: row.id, userId: user.id, role: user.role };
+        }
+        return { keyId: row.id, userId: null, role: "admin" };
       });
 
-    const dispatch = (request: any) =>
+    const dispatch = (request: any, authContext: { keyId: string; userId: string | null; role: string }) =>
       Effect.gen(function* () {
         if (request.jsonrpc !== "2.0") {
           return jsonRpcError(request.id ?? null, -32600, "Invalid Request: jsonrpc must be \"2.0\"");
@@ -162,7 +174,20 @@ export class McpServer extends Effect.Service<McpServer>()("Lexa/McpServer", {
             }
 
             const args = request.params?.arguments ?? {};
-            const result = yield* tool.handler(args).pipe(
+
+            // Project-scoped authorization
+            if (typeof args?.project === "string") {
+              yield* checkProjectAccess(authContext.userId, authContext.role, args.project);
+            }
+            if (typeof args?.slug === "string" && ["get_project", "get_project_status"].includes(toolName)) {
+              yield* checkProjectAccess(authContext.userId, authContext.role, args.slug);
+            }
+            if (typeof args?.taskId === "string" && ["get_task", "update_task", "move_task", "delete_task"].includes(toolName)) {
+              const resolved = yield* resolveTaskProject(args.taskId);
+              yield* checkProjectAccess(authContext.userId, authContext.role, resolved.slug);
+            }
+
+            const result = yield* tool.handler(args, { userId: authContext.userId, role: authContext.role }).pipe(
               Effect.catchAll((e) => {
                 const err = buildToolError(e as any);
                 return Effect.succeed({ isError: true, error: err });
@@ -199,24 +224,26 @@ export class McpServer extends Effect.Service<McpServer>()("Lexa/McpServer", {
       Effect.gen(function* () {
         const headers = { "Content-Type": "application/json" };
 
-        const authError = yield* checkAuth(authHeader).pipe(
+        const authResult = yield* checkAuth(authHeader).pipe(
           Effect.match({
-            onSuccess: () => null as string | null,
-            onFailure: (err) => err as string,
+            onSuccess: (ctx) => ({ ctx, error: null }),
+            onFailure: (err) => ({ ctx: null, error: err as string }),
           })
         );
 
-        if (authError !== null) {
+        if (authResult.error !== null) {
           const response: object = {
             jsonrpc: "2.0",
             id: null,
             error: {
               code: -32001,
-              message: authError === "MISSING_AUTH" ? "Missing authorization" : "Invalid API key",
+              message: authResult.error === "MISSING_AUTH" ? "Missing authorization" : "Invalid API key",
             },
           };
           return new Response(JSON.stringify(response), { status: 401, headers });
         }
+
+        const authContext = authResult.ctx!;
 
         let request: any;
         try {
@@ -233,7 +260,7 @@ export class McpServer extends Effect.Service<McpServer>()("Lexa/McpServer", {
           return new Response(JSON.stringify(jsonRpcError(request.id ?? null, -32600, 'Invalid Request: jsonrpc must be "2.0"')), { status: 200, headers });
         }
 
-        const response = yield* dispatch(request);
+        const response = yield* dispatch(request, authContext);
         return new Response(JSON.stringify(response), { status: 200, headers });
       });
 
@@ -243,7 +270,9 @@ export class McpServer extends Effect.Service<McpServer>()("Lexa/McpServer", {
 
 const serviceLayer = Layer.mergeAll(
   ApiKeyRepo.Default,
+  UserRepo.Default,
   ProjectRepo.Default,
+  UserProjectRoleRepo.Default,
   ColumnRepo.Default,
   SwimlaneRepo.Default,
   TaskRepo.Default,

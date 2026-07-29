@@ -4,6 +4,8 @@ import { dirname } from "node:path";
 import { createHash, randomBytes } from "node:crypto";
 import { Database } from "bun:sqlite";
 import { createApiHandler } from "./api/http";
+import { verifyApiKey } from "./api/auth-key";
+import { findOrCreateUser } from "./api/auth";
 
 let ssrFetch: ((req: Request) => Promise<Response>) | null = null;
 try {
@@ -30,8 +32,13 @@ Bun.serve({
     const url = new URL(req.url);
 
     if (url.pathname.startsWith("/api/")) {
+      if (url.pathname !== "/api/health" && !verifyApiKey(req, DATABASE_PATH)) {
+        return new Response(JSON.stringify({ error: { code: "UNAUTHORIZED", message: "Invalid or missing API key" } }), { status: 401, headers: { "Content-Type": "application/json" } });
+      }
       return apiHandler(req);
     }
+
+    const user = findOrCreateUser(req, DATABASE_PATH);
 
     if (url.pathname === "/health") {
       return new Response(JSON.stringify({ ok: true }), {
@@ -89,8 +96,8 @@ function seedAdminKey(dbPath: string) {
     const keyHash = createHash("sha256").update(apiKey).digest("hex");
     const id = crypto.randomUUID();
 
-    db.prepare("INSERT INTO api_keys (id, name, key_hash) VALUES (?, ?, ?)")
-      .run(id, "admin", keyHash);
+    db.prepare("INSERT INTO api_keys (id, name, key_hash, user_id) VALUES (?, ?, ?, ?)")
+      .run(id, "admin", keyHash, null);
 
     if (process.env.LXK_API_KEY) {
       console.log(`Seeded admin API key from LXK_API_KEY`);

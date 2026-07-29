@@ -161,6 +161,14 @@ if pols: print(pols[0]['id'])
   echo "  Policy: allow @$EMAIL_DOMAIN"
 fi
 
+# ── Admin user ──
+if [ "$FLAVOR" != "dev" ]; then
+  echo ""
+  echo "── Admin user ──"
+  echo "  First Google login with this email will be auto-promoted to admin."
+  read -p "  Admin email: " ADMIN_EMAIL
+fi
+
 # ── API Key ──
 echo ""
 echo "── API Key ──"
@@ -181,6 +189,7 @@ fi
 if [ "$FLAVOR" = "dev" ]; then
   cat > .env << ENVEOF
 LXK_API_KEY=$API_KEY
+LXK_ADMIN_EMAILS=${ADMIN_EMAIL:-}
 DATABASE_PATH=./data/lexa.db
 PORT=3000
 COMPOSE_PROJECT_NAME=$COMPOSE_NAME
@@ -188,6 +197,7 @@ ENVEOF
 else
   cat > "$ENV_FILE" << ENVEOF
 LXK_API_KEY=$API_KEY
+LXK_ADMIN_EMAILS=${ADMIN_EMAIL:-}
 CF_TUNNEL_TOKEN=$TOKEN
 ENVEOF
 fi
