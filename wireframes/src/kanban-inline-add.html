@@ -18,8 +18,7 @@
         <span class="annotation-tag">State: inline add-task form open (Backlog)</span>
       </div>
       <div class="flex items-center gap-2">
-        <button class="btn btn-ghost text-sm">Filter</button>
-        <button class="btn btn-ghost text-sm">Settings</button>
+                <INCLUDE _board-header-buttons.html />
       </div>
     </div>
 
@@ -28,11 +27,7 @@
 
       <!-- Swimlane 1: Expanded -->
       <div>
-        <div class="swimlane-header">
-          <svg class="chevron" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg>
-          <span class="swimlane-name">Sprint 7 — The Furnace</span>
-          <span class="swimlane-count">012</span>
-        </div>
+        <INCLUDE _swimlane-header-expanded.html />
 
         <div class="columns-row">
 
@@ -55,7 +50,9 @@
                 </div>
                 <div class="card-title mt-2">Implement double-jump mechanic</div>
                 <div class="card-meta">
-                  <div class="avatar">MK</div>
+                  <div class="card-assignees">
+                    <div class="avatar">MK</div>
+                  </div>
                 </div>
               </div>
 
@@ -66,11 +63,19 @@
                 </div>
                 <div class="card-title mt-2">Fix collision on slope tiles</div>
                 <div class="card-meta">
-                  <div class="avatar">AL</div>
-                  <span class="github-badge">
-                    <svg viewBox="0 0 24 24"><path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77 5.07 5.07 0 0 0 19.91 1S18.73.65 16 2.48a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 9 18.13V22"/></svg>
-                    #88
-                  </span>
+                  <div class="card-assignees">
+                    <div class="avatar">AL</div>
+                    <div class="avatar">JD</div>
+                    <div class="avatar">MK</div>
+                    <span class="card-assignees-overflow">+1</span>
+                  </div>
+                  <div class="card-meta-spacer"></div>
+                  <div class="card-gh-issues">
+                    <span class="github-badge">
+                      <INCLUDE _github-icon.html />
+                      #88
+                    </span>
+                  </div>
                   <span class="sync-dot sync-synced"></span>
                 </div>
               </div>
@@ -121,11 +126,17 @@
                 </div>
                 <div class="card-title mt-2">HUD damage indicator</div>
                 <div class="card-meta">
-                  <div class="avatar">MK</div>
-                  <span class="github-badge">
-                    <svg viewBox="0 0 24 24"><path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77 5.07 5.07 0 0 0 19.91 1S18.73.65 16 2.48a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 9 18.13V22"/></svg>
-                    #91
-                  </span>
+                  <div class="card-assignees">
+                    <div class="avatar">MK</div>
+                    <div class="avatar">AL</div>
+                  </div>
+                  <div class="card-meta-spacer"></div>
+                  <div class="card-gh-issues">
+                    <span class="github-badge">
+                      <INCLUDE _github-icon.html />
+                      #91
+                    </span>
+                  </div>
                   <span class="sync-dot sync-synced"></span>
                 </div>
               </div>
@@ -137,13 +148,14 @@
                 </div>
                 <div class="card-title mt-2">Update localization strings</div>
                 <div class="card-meta">
-                  <div class="avatar">AL</div>
+                  <div class="card-assignees">
+                    <div class="avatar">AL</div>
+                  </div>
                 </div>
               </div>
 
               <button class="add-task-btn">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 5v14m-7-7h14"/></svg>
-                Add task...
+                <INCLUDE _add-task-icon.html />
               </button>
             </div>
           </div>
@@ -167,11 +179,22 @@
                 </div>
                 <div class="card-title mt-2">Boss arena trigger zones</div>
                 <div class="card-meta">
-                  <div class="avatar">MK</div>
-                  <span class="github-badge">
-                    <svg viewBox="0 0 24 24"><path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77 5.07 5.07 0 0 0 19.91 1S18.73.65 16 2.48a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 9 18.13V22"/></svg>
-                    #102
-                  </span>
+                  <div class="card-assignees">
+                    <div class="avatar">MK</div>
+                    <div class="avatar">JD</div>
+                  </div>
+                  <div class="card-meta-spacer"></div>
+                  <div class="card-gh-issues">
+                    <span class="github-badge">
+                      <INCLUDE _github-icon.html />
+                      #102
+                    </span>
+                    <span class="github-badge">
+                      <INCLUDE _github-icon.html />
+                      #104
+                    </span>
+                    <span class="card-gh-overflow">+4</span>
+                  </div>
                   <span class="sync-dot sync-synced"></span>
                 </div>
               </div>
@@ -183,18 +206,25 @@
                 </div>
                 <div class="card-title mt-2">Crash on level 3-2 load</div>
                 <div class="card-meta">
-                  <div class="avatar">AL</div>
-                  <span class="github-badge">
-                    <svg viewBox="0 0 24 24"><path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77 5.07 5.07 0 0 0 19.91 1S18.73.65 16 2.48a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 9 18.13V22"/></svg>
-                    #107
-                  </span>
+                  <div class="card-assignees">
+                    <div class="avatar">AL</div>
+                    <div class="avatar">MK</div>
+                    <div class="avatar">JD</div>
+                    <span class="card-assignees-overflow">+1</span>
+                  </div>
+                  <div class="card-meta-spacer"></div>
+                  <div class="card-gh-issues">
+                    <span class="github-badge">
+                      <INCLUDE _github-icon.html />
+                      #107
+                    </span>
+                  </div>
                   <span class="sync-dot sync-diverged"></span>
                 </div>
               </div>
 
               <button class="add-task-btn">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 5v14m-7-7h14"/></svg>
-                Add task...
+                <INCLUDE _add-task-icon.html />
               </button>
             </div>
           </div>
@@ -218,49 +248,35 @@
                 </div>
                 <div class="card-title mt-2">Parallax background layers</div>
                 <div class="card-meta">
-                  <div class="avatar">JD</div>
-                  <span class="github-badge">
-                    <svg viewBox="0 0 24 24"><path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77 5.07 5.07 0 0 0 19.91 1S18.73.65 16 2.48a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 9 18.13V22"/></svg>
-                    #115
-                  </span>
+                  <div class="card-assignees">
+                    <div class="avatar">JD</div>
+                    <div class="avatar">MK</div>
+                  </div>
+                  <div class="card-meta-spacer"></div>
+                  <div class="card-gh-issues">
+                    <span class="github-badge">
+                      <INCLUDE _github-icon.html />
+                      #115
+                    </span>
+                  </div>
                   <span class="sync-dot sync-synced"></span>
                 </div>
               </div>
 
               <button class="add-task-btn">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 5v14m-7-7h14"/></svg>
-                Add task...
+                <INCLUDE _add-task-icon.html />
               </button>
             </div>
           </div>
 
-          <!-- Column: Done (empty) -->
-          <div class="column">
-            <div class="column-strip" style="background:#4ADE80;"></div>
-            <div class="column-header">
-              <div class="flex items-center">
-                <span class="column-name">Done</span>
-                <span class="column-count">00</span>
-              </div>
-            </div>
-            <div class="column-body">
-              <button class="add-task-btn" style="margin-top:8px;">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 5v14m-7-7h14"/></svg>
-                Add task...
-              </button>
-            </div>
-          </div>
+        <INCLUDE _done-column-empty.html />
 
         </div>
       </div>
 
       <!-- Swimlane 2: Collapsed -->
       <div>
-        <div class="swimlane-header">
-          <svg class="chevron collapsed" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg>
-          <span class="swimlane-name">Sprint 6 — Ash &amp; Bone</span>
-          <span class="swimlane-count">000</span>
-        </div>
+      <INCLUDE _swimlane-header-collapsed.html />
       </div>
 
     </div>

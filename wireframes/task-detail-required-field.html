@@ -8,55 +8,55 @@
 </head>
 <body class="bg-app color-primary" style="min-height:100vh;position:relative;overflow:hidden;">
 
-  <!-- Dimmed Kanban Backdrop -->
-  <div style="position:absolute;inset:0;opacity:0.25;pointer-events:none;overflow:hidden;">
-    <nav class="app-nav">
-      <a href="index.html" class="nav-brand">Lexa</a>
-      <div class="nav-links">
-        <a href="dashboard.html" class="nav-link">Dashboard</a>
-        <a href="kanban.html" class="nav-link">Board</a>
-        <a href="wiki.html" class="nav-link">Wiki</a>
-        <a href="settings.html" class="nav-link">Settings</a>
-      </div>
-      <div class="nav-spacer"></div>
-      <div class="nav-right">
-        <div class="project-switcher">
-          <button class="project-switcher-trigger">
-            <span class="text-sm weight-500 font-body color-primary">Emberfall</span>
-            <svg viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg>
-          </button>
-        </div>
-        <div style="position:relative;">
-          <button style="display:flex;align-items:center;gap:8px;height:28px;padding:0 8px 0 6px;background:transparent;border:1px solid var(--lx-border-default);border-radius:6px;color:var(--lx-text-primary);cursor:pointer;">
-            <div class="avatar" style="width:20px;height:20px;font-size:10px;">Y</div>
-            <span class="text-sm weight-500" style="line-height:1;">Yohanes</span>
-            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="flex-shrink:0;"><path d="M6 9l6 6 6-6"/></svg>
-          </button>
-        </div>
-      </div>
-    </nav>
-    <div class="board-area">
-      <div class="board-header">
-        <h1 class="font-display text-xl weight-600 color-primary">Emberfall</h1>
-      </div>
-      <div class="board-scroll">
-        <div class="swimlane-header" style="margin-bottom:12px;">
-          <svg class="chevron" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg>
-          <span class="swimlane-name">Sprint 7 — The Furnace</span>
-        </div>
-        <div class="columns-row">
-          <div class="column" style="opacity:0.6;">
-            <div class="column-header has-cards"><span class="column-name">Backlog</span></div>
-            <div class="column-body"><div class="kanban-card" style="border-left:3px solid #4ADE80;"><div class="card-title">Implement double-jump mechanic</div></div></div>
+        <!-- Dimmed Kanban Backdrop -->
+        <div style="position:absolute;inset:0;opacity:0.25;pointer-events:none;overflow:hidden;">
+          <nav class="app-nav">
+            <a href="index.html" class="nav-brand">Lexa</a>
+            <div class="nav-links">
+              <a href="dashboard.html" class="nav-link">Dashboard</a>
+              <a href="kanban.html" class="nav-link">Board</a>
+              <a href="wiki.html" class="nav-link">Wiki</a>
+              <a href="settings.html" class="nav-link">Settings</a>
+            </div>
+            <div class="nav-spacer"></div>
+            <div class="nav-right">
+              <div class="project-switcher">
+                <button class="project-switcher-trigger">
+                  <span class="text-sm weight-500 font-body color-primary">Emberfall</span>
+                  <svg viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg>
+                </button>
+              </div>
+              <div style="position:relative;">
+                <button style="display:flex;align-items:center;gap:8px;height:28px;padding:0 8px 0 6px;background:transparent;border:1px solid var(--lx-border-default);border-radius:6px;color:var(--lx-text-primary);cursor:pointer;">
+                  <div class="avatar" style="width:20px;height:20px;font-size:10px;">Y</div>
+                  <span class="text-sm weight-500" style="line-height:1;">Yohanes</span>
+                  <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="flex-shrink:0;"><path d="M6 9l6 6 6-6"/></svg>
+                </button>
+              </div>
+            </div>
+          </nav>
+          <div class="board-area">
+            <div class="board-header">
+              <h1 class="font-display text-xl weight-600 color-primary">Emberfall</h1>
+            </div>
+            <div class="board-scroll">
+              <div class="swimlane-header" style="margin-bottom:12px;">
+                <svg class="chevron" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg>
+                <span class="swimlane-name">Sprint 7 — The Furnace</span>
+              </div>
+              <div class="columns-row">
+                <div class="column" style="opacity:0.6;">
+                  <div class="column-header has-cards"><span class="column-name">Backlog</span></div>
+                  <div class="column-body"><div class="kanban-card" style="border-left:3px solid #4ADE80;"><div class="card-title">Implement double-jump mechanic</div></div></div>
+                </div>
+                <div class="column" style="opacity:0.6;">
+                  <div class="column-header has-cards"><span class="column-name">In Progress</span></div>
+                  <div class="column-body"><div class="kanban-card" style="border-left:3px solid #FF4444;"><div class="card-title">Crash on level 3-2 load</div></div></div>
+                </div>
+              </div>
+            </div>
           </div>
-          <div class="column" style="opacity:0.6;">
-            <div class="column-header has-cards"><span class="column-name">In Progress</span></div>
-            <div class="column-body"><div class="kanban-card" style="border-left:3px solid #FF4444;"><div class="card-title">Crash on level 3-2 load</div></div></div>
-          </div>
         </div>
-      </div>
-    </div>
-  </div>
 
   <!-- Overlay -->
   <div class="slideover-overlay"></div>
@@ -67,11 +67,15 @@
     <div class="slideover-header border-b-subtle">
       <div class="flex items-center gap-2">
         <span class="text-xs color-muted font-body">Emberfall / Board</span>
-        <span class="annotation-inline">required_fields violation on move</span>
       </div>
-      <button class="btn btn-ghost" style="width:32px;height:32px;padding:0;">
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M18 6L6 18M6 6l12 12"/></svg>
-      </button>
+            <div style="display:flex;align-items:center;gap:4px;">
+              <button class="btn btn-ghost" style="width:32px;height:32px;padding:0;" title="Toggle width (480px → 720px)">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/></svg>
+              </button>
+              <button class="btn btn-ghost" style="width:32px;height:32px;padding:0;">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M18 6L6 18M6 6l12 12"/></svg>
+              </button>
+            </div>
     </div>
 
     <!-- Title -->
@@ -99,10 +103,11 @@
         <span class="type-badge type-bug">Bug</span>
       </div>
       <div class="prop-field">
-        <span class="prop-label">Assignee</span>
-        <input class="prop-input is-focused" placeholder="Required" style="width:80px;" />
+        <span class="prop-label">Assignees</span>
+        <div class="assignee-chips" style="min-height:28px;">
+          <input class="assignee-add-input is-focused" placeholder="Add assignee..." style="color:var(--lx-text-danger);" />
+        </div>
       </div>
-      <span class="annotation-tag">Move rejected: column reverts until assignee is set. Assignee field gets focus ring</span>
     </div>
 
     <!-- Validation banner -->
@@ -114,7 +119,6 @@
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M18 6L6 18M6 6l12 12"/></svg>
         </button>
       </div>
-      <span class="annotation-tag mt-2">Banner: warning subtle bg + amber border, AlertTriangle, dismissible. Copy = "{column} requires {field}"</span>
     </div>
 
     <!-- Description -->
@@ -126,19 +130,21 @@
       </div>
     </div>
 
-    <!-- Footer -->
-    <div class="slideover-footer">
-      <button class="btn btn-danger">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
-        Delete
-      </button>
-      <button class="btn btn-ghost">Close</button>
-    </div>
-  </div>
+          <!-- Footer -->
+          <div class="slideover-footer">
+            <button class="btn btn-danger">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+              Delete
+            </button>
+            <button class="btn btn-ghost">Close</button>
+          </div>
+        </div>
 
-  <!-- Annotation rail -->
-  <div style="position:fixed;top:50%;right:484px;transform:translateY(-50%);z-index:55;">
-    <span class="annotation-tag">480px slideover — validation variant. required_fields enforced on create, move, and update</span>
+  <!-- Annotations -->
+  <div style="position:fixed;top:24px;left:24px;z-index:55;display:flex;flex-direction:column;gap:8px;align-items:flex-start;">
+    <span class="annotation-tag">required_fields violation: move rejected until assignee is set</span>
+    <span class="annotation-tag">Move rejected: column reverts until assignee is set. Assignee field gets focus ring.</span>
+    <span class="annotation-tag">Banner: warning subtle bg + amber border, AlertTriangle, dismissible. Copy = "{column} requires {field}"</span>
   </div>
 
 </body>

@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Lexa — Dashboard (New Project Modal)</title>
+  <title>Lexa — Dashboard (Project Settings Modal)</title>
   <link rel="stylesheet" href="wireframes.css" />
 </head>
 <body class="bg-app color-primary" style="min-height:100vh;position:relative;overflow:hidden;">
@@ -15,7 +15,7 @@
       <div class="flex items-center justify-between mb-4">
         <h1 class="font-display text-2xl weight-600 color-primary">Projects</h1>
         <button class="btn btn-primary">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 5v14m-7-7h14"/></svg>
+          <INCLUDE _plus-icon.html />
           New Project
         </button>
       </div>
@@ -42,25 +42,26 @@
   <!-- Overlay -->
   <div class="slideover-overlay"></div>
 
-  <!-- New Project Modal -->
+  <!-- Project Settings Modal — handles both create and edit -->
   <div class="modal dialog-enter">
     <div class="modal-header">
-      <span class="modal-title">New Project</span>
+      <span class="modal-title">Project Settings</span>
+      <span class="annotation-inline">Same modal for create (header "New Project") and edit (header "Settings")</span>
       <button class="btn btn-ghost" style="width:32px;height:32px;padding:0;">
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M18 6L6 18M6 6l12 12"/></svg>
+        <INCLUDE _x-icon.html />
       </button>
     </div>
 
     <div class="modal-body">
       <div class="field">
         <label class="field-label">Name</label>
-        <input class="prop-input w-full" value="Starling" />
+        <input class="prop-input w-full" value="Void Drifter" />
         <div class="field-hint">Shown on the dashboard and in the nav. Slug is derived from the name.</div>
       </div>
 
       <div class="field">
         <label class="field-label">Description</label>
-        <textarea class="prop-input w-full" placeholder="One or two sentences — what is this game?"></textarea>
+        <textarea class="prop-input w-full">Roguelike spaceship builder with procedural sectors, modular hulls, and permadeath.</textarea>
       </div>
 
       <div class="field">
@@ -68,20 +69,27 @@
           GitHub Repository
           <span class="font-micro text-2xs color-muted" style="text-transform:uppercase;letter-spacing:0.04em;margin-left:6px;">Optional</span>
         </label>
-        <input class="prop-input w-full" placeholder="owner/repo — e.g. studio/emberfall-godot" />
+        <input class="prop-input w-full" value="studio/voiddrifter" />
         <div class="field-hint">Enables two-way issue sync. Can be linked later in Settings.</div>
       </div>
 
       <div class="mt-3">
-        <span class="annotation-tag">Form: label 12px/500 · prop-input 32px · textarea 72px min</span>
+        <span class="annotation-tag">Create mode: fields empty, footer = Cancel + "Create Project". Edit mode: fields populated, footer = Cancel + "Save" + "Delete Project" (danger).</span>
       </div>
     </div>
 
     <div class="modal-footer">
       <button class="btn btn-ghost">Cancel</button>
+      <!-- Create mode: single primary button -->
+      <!-- <button class="btn btn-primary"><svg>...</svg> Create Project</button> -->
+      <!-- Edit mode: save + delete -->
+      <button class="btn btn-danger-solid" style="margin-right:auto;">
+        <INCLUDE _trash-icon.html />
+        Delete Project
+      </button>
       <button class="btn btn-primary">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 5v14m-7-7h14"/></svg>
-        Create Project
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M20 6L9 17l-5-5"/></svg>
+        Save Changes
       </button>
     </div>
   </div>

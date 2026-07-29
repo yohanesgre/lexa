@@ -30,6 +30,8 @@ The `wireframes/` directory contains the final UI/UX decisions for Lexa. When im
 
 The wireframes are static HTML/CSS previews with no JavaScript. Implement interactions (dropdowns, modals, slideovers, drag-and-drop, inline editing, etc.) to match the rendered states and annotations.
 
+Wireframes use `<INCLUDE partials/FILE />` directives. Always run `bash wireframes/build.sh` after any wireframe edit. Edit source files in `wireframes/src/`, never edit built output in `wireframes/` directly.
+
 ### For @designer: wireframe-first execution
 
 When asked to implement frontend, do NOT design or invent. Read the relevant wireframe HTML file, then transcribe what you see into React components. Copy layout, spacing, copy text, and hierarchy exactly. Do not add extra padding, borders, or visual treatments not present in the wireframe. If the wireframe shows 3 columns, build 3 columns. If it shows a toggle in the sidebar, build that toggle. No creative interpretation.

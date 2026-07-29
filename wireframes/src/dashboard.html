@@ -17,12 +17,8 @@
         <div class="font-micro text-2xs color-muted mt-1" style="text-transform:uppercase;letter-spacing:0.04em;">Project health overview</div>
       </div>
       <div class="flex items-center gap-3">
-        <button class="btn btn-ghost">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M15 7h6m0 0v6m0-6l-9 9-4-4-6 6"/></svg>
-          API Keys
-        </button>
         <button class="btn btn-primary">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 5v14m-7-7h14"/></svg>
+          <INCLUDE _plus-icon.html />
           New Project
         </button>
       </div>
@@ -57,13 +53,16 @@
         <div class="health-card-footer">
           <div class="health-card-stats">042 tasks · 005 cols</div>
           <div class="health-card-gh">
-            <svg viewBox="0 0 24 24"><path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77 5.07 5.07 0 0 0 19.91 1S18.73.65 16 2.48a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 9 18.13V22"/></svg>
+            <INCLUDE _github-icon.html />
           </div>
         </div>
       </div>
 
-      <!-- Project: Void Drifter -->
-      <div class="project-card health-card">
+      <!-- Project: Void Drifter — ⋯ button opens Project Settings Modal directly -->
+      <div class="project-card health-card" style="position:relative;">
+        <button class="btn btn-ghost" style="position:absolute;top:12px;right:12px;width:28px;height:28px;padding:0;" title="Project Settings">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/></svg>
+        </button>
         <div class="project-card-name">Void Drifter</div>
         <div class="project-card-desc">Roguelike spaceship builder. Procedural sectors, modular hulls, permadeath with persistent unlocks.</div>
         <div class="health-card-status-row">
@@ -99,7 +98,7 @@
         <div class="health-card-footer">
           <div class="health-card-stats">089 tasks · 004 cols</div>
           <div class="health-card-gh">
-            <svg viewBox="0 0 24 24"><path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77 5.07 5.07 0 0 0 19.91 1S18.73.65 16 2.48a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 9 18.13V22"/></svg>
+            <INCLUDE _github-icon.html />
           </div>
         </div>
       </div>

@@ -8,31 +8,7 @@
 </head>
 <body class="bg-app color-primary" style="min-height:100vh;position:relative;overflow:hidden;">
 
-  <!-- Dimmed Kanban Backdrop -->
-  <div style="position:absolute;inset:0;opacity:0.25;pointer-events:none;overflow:hidden;">
-    <INCLUDE navbar.html />
-    <div class="board-area">
-      <div class="board-header">
-        <h1 class="font-display text-xl weight-600 color-primary">Emberfall</h1>
-      </div>
-      <div class="board-scroll">
-        <div class="swimlane-header" style="margin-bottom:12px;">
-          <svg class="chevron" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg>
-          <span class="swimlane-name">Sprint 7 — The Furnace</span>
-        </div>
-        <div class="columns-row">
-          <div class="column" style="opacity:0.6;">
-            <div class="column-header has-cards"><span class="column-name">Backlog</span></div>
-            <div class="column-body"><div class="kanban-card" style="border-left:3px solid #4ADE80;"><div class="card-title">Implement double-jump mechanic</div></div></div>
-          </div>
-          <div class="column" style="opacity:0.6;">
-            <div class="column-header has-cards"><span class="column-name">In Progress</span></div>
-            <div class="column-body"><div class="kanban-card" style="border-left:3px solid #FF4444;"><div class="card-title">Crash on level 3-2 load</div></div></div>
-          </div>
-        </div>
-      </div>
-    </div>
-  </div>
+      <INCLUDE _task-detail-backdrop.html />
 
   <!-- Overlay -->
   <div class="slideover-overlay"></div>
@@ -43,11 +19,8 @@
     <div class="slideover-header border-b-subtle">
       <div class="flex items-center gap-2">
         <span class="text-xs color-muted font-body">Emberfall / Board</span>
-        <span class="annotation-inline">GitHub link flow</span>
       </div>
-      <button class="btn btn-ghost" style="width:32px;height:32px;padding:0;">
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M18 6L6 18M6 6l12 12"/></svg>
-      </button>
+      <INCLUDE _slideover-header-td.html />
     </div>
 
     <!-- Title -->
@@ -75,8 +48,17 @@
         <span class="type-badge type-bug">Bug</span>
       </div>
       <div class="prop-field">
-        <span class="prop-label">Assignee</span>
-        <input class="prop-input" value="AL" style="width:80px;" />
+        <span class="prop-label">Assignees</span>
+        <div class="assignee-chips">
+          <span class="assignee-chip">
+            <div class="avatar">AL</div>
+            <span class="text-sm weight-500">Alex Lin</span>
+          </span>
+          <span class="assignee-chip">
+            <div class="avatar">MK</div>
+            <span class="text-sm weight-500">Maria Kim</span>
+          </span>
+        </div>
       </div>
     </div>
 
@@ -86,9 +68,8 @@
 
         <!-- Section header -->
         <div class="flex items-center gap-2">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" class="color-secondary"><path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77 5.07 5.07 0 0 0 19.91 1S18.73.65 16 2.48a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 9 18.13V22"/></svg>
+          <INCLUDE _github-icon.html />
           <span class="prop-label">GitHub</span>
-          <span class="annotation-inline">Expanded link flow — 3 states shown stacked</span>
         </div>
 
         <!-- State 1: repo input + Create issue -->
@@ -100,7 +81,6 @@
           <p class="text-xs color-muted mt-2" style="line-height:16px;">
             Creates a GitHub issue from this task and links it. Issue title and body are seeded from the task.
           </p>
-          <div class="mt-2"><span class="annotation-tag">State 1: owner/repo input, focused</span></div>
         </div>
 
         <div style="border-top:1px dashed var(--lx-border-default);margin:16px 0;"></div>
@@ -114,7 +94,6 @@
               Creating...
             </button>
           </div>
-          <div class="mt-2"><span class="annotation-tag">State 2: loading — input + button disabled, spinner in button</span></div>
         </div>
 
         <div style="border-top:1px dashed var(--lx-border-default);margin:16px 0;"></div>
@@ -124,7 +103,7 @@
           <div class="github-section" style="padding:12px 16px;border:1px solid rgba(74,222,128,0.2);border-radius:6px;background:var(--lx-bg-success-subtle);">
             <div class="flex items-center justify-between">
               <div class="flex items-center gap-2">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="color:var(--lx-text-link);"><path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77 5.07 5.07 0 0 0 19.91 1S18.73.65 16 2.48a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 9 18.13V22"/></svg>
+                <INCLUDE _github-icon.html />
                 <span class="font-mono text-sm weight-500 color-link">emberfall-godot #107</span>
               </div>
               <div class="flex items-center gap-2">
@@ -136,25 +115,19 @@
               Issue created and linked. Column changes now sync two-ways with GitHub issue state.
             </p>
           </div>
-          <div class="mt-2"><span class="annotation-tag">State 3: success — linked badge, sync indicator replaces the input row</span></div>
         </div>
 
       </div>
     </div>
 
-    <!-- Footer -->
-    <div class="slideover-footer">
-      <button class="btn btn-danger">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
-        Delete
-      </button>
-      <button class="btn btn-ghost">Close</button>
-    </div>
-  </div>
+      <INCLUDE _slideover-footer-td.html />
 
-  <!-- Annotation rail -->
-  <div style="position:fixed;top:50%;right:484px;transform:translateY(-50%);z-index:55;">
-    <span class="annotation-tag">480px slideover — GitHub link flow</span>
+  <!-- Annotations -->
+  <div style="position:fixed;top:24px;left:24px;z-index:55;display:flex;flex-direction:column;gap:8px;align-items:flex-start;">
+    <span class="annotation-tag">GitHub link flow — expanded, 3 states stacked</span>
+    <span class="annotation-tag">State 1: owner/repo input, focused</span>
+    <span class="annotation-tag">State 2: loading — input + button disabled, spinner in button</span>
+    <span class="annotation-tag">State 3: success — linked badge, sync indicator replaces the input row</span>
   </div>
 
 </body>

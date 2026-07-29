@@ -551,6 +551,57 @@
     gap: 8px;
     margin-top: 8px;
   }
+  .card-meta-spacer {
+    flex: 1;
+  }
+  .card-assignees {
+    display: flex;
+    align-items: center;
+  }
+  .card-assignees .avatar {
+    position: relative;
+  }
+  .card-assignees .avatar:first-child { z-index: 3; }
+  .card-assignees .avatar:nth-child(2) { z-index: 2; }
+  .card-assignees .avatar:nth-child(3) { z-index: 1; }
+  .card-assignees .avatar + .avatar {
+    margin-left: -6px;
+  }
+  .card-assignees-overflow {
+    width: 20px;
+    height: 20px;
+    font-size: 10px;
+    font-weight: 500;
+    font-family: var(--lx-font-micro);
+    color: var(--lx-text-secondary);
+    background: var(--lx-surface-column);
+    border-radius: 9999px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-left: 2px;
+    flex-shrink: 0;
+  }
+  .card-gh-overflow {
+    width: 20px;
+    height: 20px;
+    font-size: 10px;
+    font-weight: 500;
+    font-family: var(--lx-font-micro);
+    color: var(--lx-text-secondary);
+    background: var(--lx-surface-column);
+    border-radius: 9999px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+  }
+  .card-gh-issues {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    flex-shrink: 0;
+  }
 
   .github-badge {
     display: inline-flex;
@@ -558,7 +609,10 @@
     gap: 3px;
     font-family: var(--lx-font-mono);
     font-size: 11px;
-    color: var(--lx-text-muted);
+    color: var(--lx-text-secondary);
+    background: var(--lx-surface-column);
+    border-radius: 9999px;
+    padding: 1px 5px;
   }
   .github-badge svg {
     width: 12px;
@@ -754,6 +808,34 @@
     font-size: 11px;
     color: var(--lx-text-muted);
     margin-left: 8px;
+  }
+  .swimlane-desc {
+    font-size: 11px;
+    line-height: 16px;
+    color: var(--lx-text-secondary);
+    font-family: var(--lx-font-body);
+    margin-left: 12px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 240px;
+    flex-shrink: 1;
+  }
+  .swimlane-desc-more {
+    font-size: 11px;
+    font-family: var(--lx-font-body);
+    color: var(--lx-text-link);
+    background: none;
+    border: none;
+    border-radius: 3px;
+    cursor: pointer;
+    padding: 1px 4px;
+    margin-left: 4px;
+    flex-shrink: 0;
+  }
+  .swimlane-desc-more:hover {
+    background: var(--lx-surface-card-hover);
+    text-decoration: underline;
   }
   .chevron-btn {
     display: inline-flex;
@@ -1808,6 +1890,7 @@
   .empty-state-icon {
     width: 48px;
     height: 48px;
+    margin-bottom: 12px;
     border-radius: 12px;
     background: var(--lx-surface-card);
     border: 1px solid var(--lx-border-default);
@@ -2423,6 +2506,67 @@
     stroke-width: 2;
     fill: none;
   }
+  /* ---- Assignee chip (task detail slideover) ---- */
+  .assignee-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    height: 28px;
+    padding: 0 4px 0 4px;
+    background: var(--lx-surface-elevated);
+    border: 1px solid var(--lx-border-default);
+    border-radius: 6px;
+    font-size: 13px;
+    font-family: var(--lx-font-body);
+    color: var(--lx-text-primary);
+  }
+  .assignee-chip .avatar {
+    width: 20px;
+    height: 20px;
+    font-size: 9px;
+  }
+  .assignee-chip-x {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 18px;
+    height: 18px;
+    border: none;
+    border-radius: 4px;
+    background: transparent;
+    color: var(--lx-text-muted);
+    cursor: pointer;
+  }
+  .assignee-chip-x:hover {
+    color: var(--lx-text-danger);
+    background: var(--lx-bg-danger-subtle);
+  }
+  .assignee-chip-x svg {
+    width: 12px;
+    height: 12px;
+    stroke: currentColor;
+    stroke-width: 1.5;
+    fill: none;
+  }
+  .assignee-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    align-items: center;
+  }
+  .assignee-add-input {
+    border: none;
+    background: transparent;
+    font-size: 13px;
+    font-family: var(--lx-font-body);
+    color: var(--lx-text-secondary);
+    outline: none;
+    min-width: 120px;
+    padding: 2px 4px;
+  }
+  .assignee-add-input::placeholder { color: var(--lx-text-muted); }
+  .assignee-add-input:focus { color: var(--lx-text-primary); }
+
   .filter-clear {
     font-size: 12px;
     font-family: var(--lx-font-body);
