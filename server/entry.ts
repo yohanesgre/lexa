@@ -1,6 +1,6 @@
 import { runMigrations } from "./db/migrate";
-import { mkdirSync } from "node:fs";
-import { dirname } from "node:path";
+import { mkdirSync, existsSync, readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { createHash, randomBytes } from "node:crypto";
 import { Database } from "bun:sqlite";
 import { createApiHandler } from "./api/http";
@@ -111,28 +111,18 @@ function seedAdminKey(dbPath: string) {
 }
 
 function seedDevData(dbPath: string) {
+  const seedFile = join(import.meta.dir, "..", "scripts", "seed-dev.sql");
+  if (!existsSync(seedFile)) return;
+
   const db = new Database(dbPath);
   try {
     const row = db.prepare("SELECT COUNT(*) as cnt FROM projects").get() as { cnt: number } | null;
     if (row && row.cnt > 0) return;
 
-    const projId = crypto.randomUUID();
-    db.prepare("INSERT INTO projects (id, name, slug, description) VALUES (?, ?, ?, ?)")
-      .run(projId, "Emberfall", "emberfall", "Demo project for local development");
-
-    const cols = ["Backlog", "To Do", "In Progress", "Review", "Done"];
-    cols.forEach((name, i) => {
-      db.prepare("INSERT INTO columns (id, project_id, name, position, color, wip_limit) VALUES (?, ?, ?, ?, ?, ?)")
-        .run(crypto.randomUUID(), projId, name, i, "#6b7280", name === "Done" || name === "In Progress" ? 5 : null);
-    });
-
-    const lanes = ["Art", "Code", "Design"];
-    lanes.forEach((name, i) => {
-      db.prepare("INSERT INTO swimlanes (id, project_id, name, position) VALUES (?, ?, ?, ?)")
-        .run(crypto.randomUUID(), projId, name, i);
-    });
-
-    console.log("Seeded dev data: project 'emberfall', 5 columns, 3 swimlanes");
+    console.log("Seeding dev data...");
+    const sql = readFileSync(seedFile, "utf-8");
+    db.exec(sql);
+    console.log("Seed complete");
   } finally {
     db.close();
   }
