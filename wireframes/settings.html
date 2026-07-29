@@ -111,6 +111,162 @@
       </div>
     </section>
 
+    <!-- Admins (app scope) -->
+    <section class="mb-8">
+      <div class="flex items-center justify-between mb-3">
+        <h2 class="font-display text-lg weight-500 color-primary">Admins</h2>
+        <span class="annotation-tag">App scope</span>
+      </div>
+      <p class="text-sm color-secondary mb-4" style="max-width:560px;">
+        Global administrators — promoted from registered users. Admins have full access to all projects and settings. Admins are automatically excluded from per-project member lists.
+      </p>
+
+      <div style="background:var(--lx-surface-card);border:1px solid var(--lx-border-default);border-radius:8px;overflow:hidden;">
+        <table class="settings-table">
+          <thead>
+            <tr><th>User</th><th>Email</th><th>Role</th><th style="width:80px;"></th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>
+                <div class="flex items-center gap-2">
+                  <div class="avatar">Y</div>
+                  <span class="text-sm weight-500">Yohanes</span>
+                </div>
+              </td>
+              <td class="text-xs color-secondary">yohanesgre@gmail.com</td>
+              <td class="text-xs">
+                <span style="background:var(--lx-bg-accent-subtle);color:var(--lx-text-link);padding:2px 8px;border-radius:9999px;font-size:11px;">admin</span>
+              </td>
+              <td>
+                <button class="btn btn-danger" style="height:28px;padding:0 10px;font-size:12px;">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+                </button>
+              </td>
+            </tr>
+            <tr>
+              <td>
+                <div class="flex items-center gap-2">
+                  <div class="avatar">L</div>
+                  <span class="text-sm weight-500">Lexa</span>
+                </div>
+              </td>
+              <td class="text-xs color-secondary">lexa@yohanesgre.com</td>
+              <td class="text-xs">
+                <span style="background:var(--lx-bg-accent-subtle);color:var(--lx-text-link);padding:2px 8px;border-radius:9999px;font-size:11px;">admin</span>
+              </td>
+              <td>
+                <button class="btn btn-danger" style="height:28px;padding:0 10px;font-size:12px;">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+                </button>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="mt-4 p-4" style="background:var(--lx-surface-elevated);border:1px solid var(--lx-border-default);border-radius:8px;">
+        <h3 class="font-display text-base weight-500 color-primary mb-3">Add Admin</h3>
+        <div style="position:relative;">
+          <div class="flex items-center gap-3" style="flex-wrap:wrap;">
+            <input class="prop-input" placeholder="Search by email..." style="min-width:240px;" value="dani@" />
+            <button class="btn btn-primary">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 5v14m-7-7h14"/></svg>
+              Add
+            </button>
+          </div>
+          <!-- Suggestion dropdown -->
+          <div class="dropdown-menu" style="position:absolute;top:100%;left:0;margin-top:4px;z-index:10;">
+            <div class="dropdown-label">Users</div>
+            <div class="dropdown-item"><span>Dani</span><span class="text-xs color-secondary">dani@yohanesgre.com</span></div>
+            <div class="dropdown-item"><span>Danika</span><span class="text-xs color-secondary">danika@example.com</span></div>
+          </div>
+        </div>
+        <span class="annotation-tag mt-2">Promotes an existing user to admin. They will be removed from all per-project member lists.</span>
+      </div>
+    </section>
+
+    <!-- Project Members (per-project scope) -->
+    <section class="mb-8">
+      <div class="flex items-center justify-between mb-3">
+        <h2 class="font-display text-lg weight-500 color-primary">Project Members</h2>
+        <span class="annotation-tag">Per project</span>
+      </div>
+      <p class="text-sm color-secondary mb-4" style="max-width:560px;">
+        Manage which team members can access this project. Changes take effect immediately.
+      </p>
+
+      <!-- Empty state (shown when no members assigned) -->
+      <div class="empty-box mb-4">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="color:var(--lx-text-muted);"><path d="M17 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75M21 21v-2a4 4 0 0 0-4-6.47M13 7a4 4 0 1 1-8 0 4 4 0 0 1 8 0zM1 21v-2a4 4 0 0 1 4-4h4"/></svg>
+        <div class="text-sm weight-500 color-primary">No members yet</div>
+        <p class="text-xs color-secondary" style="max-width:300px;">Add members below to grant them access. Admins have full access automatically.</p>
+      </div>
+      <span class="annotation-tag mb-4">State: empty — shown when no members assigned</span>
+
+      <!-- Populated state (shown when members exist) -->
+      <div style="background:var(--lx-surface-card);border:1px solid var(--lx-border-default);border-radius:8px;overflow:hidden;">
+        <table class="settings-table">
+          <thead>
+            <tr><th>User</th><th>Email</th><th>Role</th><th style="width:80px;"></th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td class="text-sm weight-500">Alice</td>
+              <td class="text-xs color-secondary">alice@example.com</td>
+              <td>
+                <select style="height:28px;padding:0 8px;font-size:12px;background:var(--lx-surface-input);color:var(--lx-text-primary);border:1px solid var(--lx-border-default);border-radius:4px;">
+                  <option value="admin">admin</option>
+                  <option value="member" selected>member</option>
+                </select>
+              </td>
+              <td>
+                <button class="btn btn-danger" style="height:28px;padding:0 10px;font-size:12px;">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+                </button>
+              </td>
+            </tr>
+            <tr>
+              <td class="text-sm weight-500">Bob</td>
+              <td class="text-xs color-secondary">bob@example.com</td>
+              <td>
+                <select style="height:28px;padding:0 8px;font-size:12px;background:var(--lx-surface-input);color:var(--lx-text-primary);border:1px solid var(--lx-border-default);border-radius:4px;">
+                  <option value="admin">admin</option>
+                  <option value="member" selected>member</option>
+                </select>
+              </td>
+              <td>
+                <button class="btn btn-danger" style="height:28px;padding:0 10px;font-size:12px;">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+                </button>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <span class="annotation-tag mt-2 mb-4">State: populated — shown when members exist. Role dropdown auto-saves. Remove opens confirmation dialog.</span>
+
+      <div class="mt-4 p-4" style="background:var(--lx-surface-elevated);border:1px solid var(--lx-border-default);border-radius:8px;">
+        <h3 class="font-display text-base weight-500 color-primary mb-3">Add Member</h3>
+        <div style="position:relative;">
+          <div class="flex items-center gap-3" style="flex-wrap:wrap;">
+            <input class="prop-input" placeholder="Search by email..." style="min-width:240px;" value="alice@" />
+            <button class="btn btn-primary">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 5v14m-7-7h14"/></svg>
+              Add
+            </button>
+          </div>
+          <!-- Suggestion dropdown — same pattern as Add Admin -->
+          <div class="dropdown-menu" style="position:absolute;top:100%;left:0;margin-top:4px;z-index:10;">
+            <div class="dropdown-label">Users</div>
+            <div class="dropdown-item"><span>Alice</span><span class="text-xs color-secondary">alice@example.com</span></div>
+            <div class="dropdown-item"><span>Bob</span><span class="text-xs color-secondary">bob@example.com</span></div>
+          </div>
+        </div>
+        <span class="annotation-tag mt-2">Search existing users by email. Admins are excluded from member suggestions.</span>
+      </div>
+    </section>
+
   </main>
 
 </body>

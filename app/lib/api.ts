@@ -3,7 +3,11 @@ import type { Project, Column, Swimlane, Task, Board, WikiPageMeta, WikiPage, Wi
 const BASE = "/api";
 
 async function request<T>(url: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(url, { ...init, headers: { "Content-Type": "application/json", ...init?.headers } });
+  const headers: Record<string, string> = { "Content-Type": "application/json", ...init?.headers as Record<string, string> };
+  if (import.meta.env.VITE_LXK_API_KEY) {
+    headers["Authorization"] = `Bearer ${import.meta.env.VITE_LXK_API_KEY}`;
+  }
+  const res = await fetch(url, { ...init, headers });
   if (!res.ok) {
     const body = await res.json().catch(() => ({})) as { error?: { code?: string; message?: string; details?: unknown } };
     const err = new Error(body.error?.message ?? `HTTP ${res.status}`) as Error & { code?: string; details?: unknown };

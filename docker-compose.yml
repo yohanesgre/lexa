@@ -1,6 +1,9 @@
 services:
   app:
-    build: .
+    build:
+      context: .
+      args:
+        VITE_LXK_API_KEY: ${VITE_LXK_API_KEY}
     volumes:
       - lexa-data:/app/data
     environment:

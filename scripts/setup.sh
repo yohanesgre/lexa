@@ -3,6 +3,7 @@ set -euo pipefail
 
 DOMAIN="${1:-}"
 FLAVOR="${2:-dev}"
+BARE="${3:-}"
 CF_TOKEN="${CF_API_TOKEN:-${CLOUDFLARE_API_TOKEN:-}}"
 SCRIPT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$SCRIPT_DIR"
@@ -189,6 +190,7 @@ fi
 if [ "$FLAVOR" = "dev" ]; then
   cat > .env << ENVEOF
 LXK_API_KEY=$API_KEY
+VITE_LXK_API_KEY=$API_KEY
 LXK_ADMIN_EMAILS=${ADMIN_EMAIL:-}
 DATABASE_PATH=./data/lexa.db
 PORT=3000
@@ -197,6 +199,7 @@ ENVEOF
 else
   cat > "$ENV_FILE" << ENVEOF
 LXK_API_KEY=$API_KEY
+VITE_LXK_API_KEY=$API_KEY
 LXK_ADMIN_EMAILS=${ADMIN_EMAIL:-}
 CF_TUNNEL_TOKEN=$TOKEN
 ENVEOF
@@ -204,6 +207,18 @@ fi
 echo "  Wrote $ENV_FILE"
 
 # ── Start ──
+if [ "$BARE" = "--bare" ]; then
+  echo ""
+  echo "═══════════════════════════════════════════════════════"
+  echo "  Lexa $FLAVOR — bare metal"
+  echo ""
+  echo "  rm -f data/lexa.db*"
+  echo "  bun dev:full"
+  echo ""
+  echo "  API key: $API_KEY"
+  echo "═══════════════════════════════════════════════════════"
+  exit 0
+fi
 echo "==> Building and starting..."
 COMPOSE_PROJECT_NAME="$COMPOSE_NAME" docker compose $COMPOSE_FILES --env-file "$ENV_FILE" up -d --build --wait
 

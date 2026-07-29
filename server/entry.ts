@@ -22,6 +22,7 @@ mkdirSync(dirname(DATABASE_PATH), { recursive: true });
 
 runMigrations(DATABASE_PATH);
 seedAdminKey(DATABASE_PATH);
+seedDevData(DATABASE_PATH);
 
 const apiHandlerRaw = createApiHandler(DATABASE_PATH) as unknown as { handler?: (req: Request) => Promise<Response> } | ((req: Request) => Promise<Response>);
 const apiHandler: (req: Request) => Promise<Response> = typeof apiHandlerRaw === "function" ? apiHandlerRaw : apiHandlerRaw.handler!;
@@ -104,6 +105,34 @@ function seedAdminKey(dbPath: string) {
     } else {
       console.log(`\n⚡ Admin API key created: ${apiKey}\n`);
     }
+  } finally {
+    db.close();
+  }
+}
+
+function seedDevData(dbPath: string) {
+  const db = new Database(dbPath);
+  try {
+    const row = db.prepare("SELECT COUNT(*) as cnt FROM projects").get() as { cnt: number } | null;
+    if (row && row.cnt > 0) return;
+
+    const projId = crypto.randomUUID();
+    db.prepare("INSERT INTO projects (id, name, slug, description) VALUES (?, ?, ?, ?)")
+      .run(projId, "Emberfall", "emberfall", "Demo project for local development");
+
+    const cols = ["Backlog", "To Do", "In Progress", "Review", "Done"];
+    cols.forEach((name, i) => {
+      db.prepare("INSERT INTO columns (id, project_id, name, position, color, wip_limit) VALUES (?, ?, ?, ?, ?, ?)")
+        .run(crypto.randomUUID(), projId, name, i, "#6b7280", name === "Done" || name === "In Progress" ? 5 : null);
+    });
+
+    const lanes = ["Art", "Code", "Design"];
+    lanes.forEach((name, i) => {
+      db.prepare("INSERT INTO swimlanes (id, project_id, name, position) VALUES (?, ?, ?, ?)")
+        .run(crypto.randomUUID(), projId, name, i);
+    });
+
+    console.log("Seeded dev data: project 'emberfall', 5 columns, 3 swimlanes");
   } finally {
     db.close();
   }
