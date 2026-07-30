@@ -58,23 +58,14 @@
       <div class="field">
         <label class="field-label">
           Description
-          <span class="font-micro text-2xs color-muted" style="text-transform:uppercase;letter-spacing:0.04em;margin-left:6px;">Optional, supports basic formatting</span>
+          <span class="font-micro text-2xs color-muted" style="text-transform:uppercase;letter-spacing:0.04em;margin-left:6px;">Optional</span>
         </label>
-        <div style="border:1px solid var(--lx-border-focus);border-radius:6px;box-shadow:var(--lx-focus-glow);resize:vertical;overflow:auto;min-height:100px;">
-          <INCLUDE _editor-toolbar.html />
-          <div style="padding:12px;background:var(--lx-surface-input);border-radius:0 0 6px 6px;font-size:15px;line-height:22px;color:var(--lx-text-secondary);font-family:var(--lx-font-body);min-height:80px;">
-            <p style="color:var(--lx-text-primary);margin:0;">Current sprint — furnace tilemap &amp; combat</p>
-            <ul style="margin:8px 0 0 0;padding-left:20px;color:var(--lx-text-secondary);">
-              <li style="margin-bottom:4px;">Furnace tilemap chunk streaming</li>
-              <li style="margin-bottom:4px;">Boss arena trigger zones</li>
-              <li>Lava shader visual polish</li>
-            </ul>
-          </div>
-          <div style="display:flex;align-items:center;justify-content:center;height:8px;cursor:ns-resize;background:transparent;border-top:1px solid var(--lx-border-subtle);">
-            <div style="width:32px;height:3px;background:var(--lx-border-strong);border-radius:2px;"></div>
-          </div>
-        </div>
-        <div class="field-hint">Basic TipTap editor with formatting. Supports line breaks, bold, bullet/ordered lists. Shown truncated with "read more" in the swimlane header.</div>
+        <!-- Implementation note: use <textarea> with prop-input class. Plain text only — no TipTap needed. Schema is TEXT column. -->
+        <textarea class="prop-input w-full" rows="4" style="resize:vertical;min-height:100px;">Current sprint — furnace tilemap &amp; combat.
+- Furnace tilemap chunk streaming
+- Boss arena trigger zones
+- Lava shader visual polish</textarea>
+        <div class="field-hint">Plain text. Shown truncated with "read more" in the swimlane header.</div>
       </div>
 
       <div class="mt-3">

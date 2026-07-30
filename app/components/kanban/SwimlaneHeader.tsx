@@ -1,76 +1,327 @@
-import { MoreHorizontal, ChevronDown, ChevronUp, Pencil, Plus, Trash2 } from "lucide-react";
+import { useState } from "react";
+import { MoreHorizontal, ChevronDown, ChevronUp, Pencil, Plus, Trash2, Settings, X } from "lucide-react";
 import { cn } from "../ui/cn";
 import { Menu } from "../ui/Menu";
+import { useUpdateSwimlane, useDeleteSwimlane, useCreateColumn } from "../../lib/queries";
+import { SwimlaneForm } from "./SwimlaneForm";
+import { ColumnForm } from "./ColumnForm";
+import type { Swimlane } from "../../../shared/types";
 
 interface SwimlaneHeaderProps {
-  name: string;
+  slug: string;
+  lane: Swimlane;
   count?: number;
   collapsed?: boolean;
   onToggle?: () => void;
 }
 
-export function SwimlaneHeader({ name, count, collapsed = false, onToggle }: SwimlaneHeaderProps) {
+export function SwimlaneHeader({ slug, lane, count, collapsed = false, onToggle }: SwimlaneHeaderProps) {
+  const updateSwimlane = useUpdateSwimlane(slug);
+  const deleteSwimlane = useDeleteSwimlane(slug);
+  const createColumn = useCreateColumn(slug);
+
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [isRenaming, setIsRenaming] = useState(false);
+  const [renameName, setRenameName] = useState(lane.name);
+  const [deleteConfirm, setDeleteConfirm] = useState(false);
+  const [isAddColumnOpen, setIsAddColumnOpen] = useState(false);
+  const [isDescOpen, setIsDescOpen] = useState(false);
+
+  const truncatedDesc = lane.description
+    ? lane.description.length > 80
+      ? lane.description.slice(0, 80) + "..."
+      : lane.description
+    : null;
+
+  const handleRename = () => {
+    setRenameName(lane.name);
+    setIsRenaming(true);
+  };
+
+  const submitRename = () => {
+    const trimmed = renameName.trim();
+    if (trimmed && trimmed !== lane.name) {
+      updateSwimlane.mutate({ id: lane.id, name: trimmed });
+    }
+    setIsRenaming(false);
+  };
+
+  const handleDelete = () => {
+    deleteSwimlane.mutate({ id: lane.id });
+    setDeleteConfirm(false);
+  };
+
   return (
-    <div className="swimlane-header" onClick={onToggle}>
-      <button
-        type="button"
-        className="chevron-btn"
-        onClick={(e) => {
-          e.stopPropagation();
-          onToggle?.();
-        }}
-        aria-label={collapsed ? "Expand swimlane" : "Collapse swimlane"}
-      >
-        <svg
-          className={cn("chevron", collapsed && "collapsed")}
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth={2}
+    <>
+      <div className="swimlane-header" onClick={onToggle}>
+        <button
+          type="button"
+          className="chevron-btn"
+          onClick={(e) => {
+            e.stopPropagation();
+            onToggle?.();
+          }}
+          aria-label={collapsed ? "Expand swimlane" : "Collapse swimlane"}
         >
-          <path d="M6 9l6 6 6-6" strokeLinecap="round" strokeLinejoin="round" />
-        </svg>
-      </button>
-      <span className="swimlane-name">{name}</span>
-      {count !== undefined && <span className="swimlane-count">{String(count).padStart(3, "0")}</span>}
-      <span className="flex-1" />
-      {onToggle && (
-        <Menu
-          align="left"
-          trigger={({ open, toggle }) => (
-            <button
-              type="button"
-              className={cn("icon-btn", open && "active")}
-              onClick={(e) => {
-                e.stopPropagation();
-                toggle();
+          <svg
+            className={cn("chevron", collapsed && "collapsed")}
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth={2}
+          >
+            <path d="M6 9l6 6 6-6" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
+        </button>
+        {isRenaming ? (
+          <form
+            onSubmit={(e) => { e.preventDefault(); submitRename(); }}
+            className="flex items-center"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <input
+              className="prop-input"
+              style={{ width: 160, height: 24, fontSize: 13 }}
+              value={renameName}
+              onChange={(e) => setRenameName(e.target.value)}
+              onBlur={submitRename}
+              autoFocus
+              onKeyDown={(e) => {
+                if (e.key === "Escape") { setRenameName(lane.name); setIsRenaming(false); }
               }}
-              title="Swimlane menu"
-            >
-              <MoreHorizontal size={14} />
+            />
+          </form>
+        ) : (
+          <span className="swimlane-name">{lane.name}</span>
+        )}
+        {count !== undefined && <span className="swimlane-count">{String(count).padStart(3, "0")}</span>}
+        {truncatedDesc && !collapsed && (
+          <>
+            <span className="swimlane-desc">{truncatedDesc}</span>
+            {lane.description.length > 80 && (
+              <button
+                type="button"
+                className="swimlane-desc-more"
+                onClick={(e) => { e.stopPropagation(); setIsDescOpen(true); }}
+              >
+                read more
+              </button>
+            )}
+          </>
+        )}
+        <span className="flex-1" />
+        {onToggle && (
+          <Menu
+            align="right"
+            gap={16}
+            trigger={({ open, toggle }) => (
+              <button
+                type="button"
+                className={cn("icon-btn", open && "active")}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  toggle();
+                }}
+                title="Swimlane menu"
+              >
+                <MoreHorizontal size={14} />
+              </button>
+            )}
+          >
+            <button type="button" className="menu-item" onClick={onToggle}>
+              {collapsed ? <ChevronDown size={14} /> : <ChevronUp size={14} />}
+              {collapsed ? "Expand" : "Collapse"}
             </button>
-          )}
-        >
-          <button type="button" className="menu-item" onClick={onToggle}>
-            {collapsed ? <ChevronDown size={14} /> : <ChevronUp size={14} />}
-            {collapsed ? "Expand" : "Collapse"}
-          </button>
-          <button type="button" className="menu-item" disabled>
-            <Pencil size={14} />
-            Rename
-          </button>
-          <div className="menu-separator" />
-          <button type="button" className="menu-item" disabled>
-            <Plus size={14} />
-            Add column
-          </button>
-          <div className="menu-separator" />
-          <button type="button" className="menu-item danger" disabled>
-            <Trash2 size={14} />
-            Delete swimlane
-          </button>
-        </Menu>
+            <button type="button" className="menu-item" onClick={() => setIsSettingsOpen(true)}>
+              <Settings size={14} />
+              Settings
+            </button>
+            <div className="menu-separator" />
+            <button type="button" className="menu-item" onClick={handleRename}>
+              <Pencil size={14} />
+              Rename
+            </button>
+            <button type="button" className="menu-item" onClick={() => setIsAddColumnOpen(true)}>
+              <Plus size={14} />
+              Add column
+            </button>
+            <div className="menu-separator" />
+            <button type="button" className="menu-item danger" onClick={() => setDeleteConfirm(true)}>
+              <Trash2 size={14} />
+              Delete swimlane
+            </button>
+          </Menu>
+        )}
+      </div>
+
+      <SwimlaneForm
+        slug={slug}
+        swimlane={lane}
+        isOpen={isSettingsOpen}
+        onClose={() => setIsSettingsOpen(false)}
+        onSubmit={(input) => {
+          updateSwimlane.mutate({
+            id: lane.id,
+            name: input.name,
+            description: input.description ?? undefined,
+          });
+          setIsSettingsOpen(false);
+        }}
+      />
+
+      <ColumnForm
+        slug={slug}
+        column={null}
+        isOpen={isAddColumnOpen}
+        onClose={() => setIsAddColumnOpen(false)}
+        onSubmit={(input) => {
+          createColumn.mutate({
+            name: input.name,
+            wipLimit: input.wipLimit,
+            requiredFields: input.requiredFields,
+            color: input.color ?? undefined,
+            githubState: (input.githubState as "open" | "closed" | null | undefined) ?? undefined,
+          });
+          setIsAddColumnOpen(false);
+        }}
+      />
+
+      {deleteConfirm && (
+        <>
+          <div className="dialog-overlay" onClick={() => setDeleteConfirm(false)} />
+          <div className="fixed inset-0 flex items-center justify-center z-[80] pointer-events-none">
+            <div className="dialog dialog-enter pointer-events-auto" role="dialog" aria-modal="true">
+              <h2 className="font-display text-lg font-medium text-lx-text-primary">Delete &lsquo;{lane.name}&rsquo;?</h2>
+              <p className="text-sm text-lx-text-secondary mt-3 leading-5">
+                This will unassign all tasks in this swimlane. This action cannot be undone.
+              </p>
+              <div className="flex items-center gap-2 mt-4 justify-end">
+                <button type="button" className="btn btn-ghost" onClick={() => setDeleteConfirm(false)}>Cancel</button>
+                <button type="button" className="btn btn-danger-solid" onClick={handleDelete}>
+                  <Trash2 size={14} strokeWidth={1.5} />
+                  Delete
+                </button>
+              </div>
+            </div>
+          </div>
+        </>
       )}
-    </div>
+
+      {isDescOpen && (
+        <>
+          <div className="dialog-overlay" onClick={() => setIsDescOpen(false)} />
+          <div className="fixed inset-0 flex items-center justify-center z-[80] pointer-events-none">
+            <div className="dialog dialog-enter pointer-events-auto" role="dialog" aria-modal="true" style={{ maxWidth: 440 }}>
+              <h2 className="font-display text-lg font-medium text-lx-text-primary">{lane.name}</h2>
+              <div className="text-sm text-lx-text-secondary font-body leading-5 mt-3">
+                {renderSwimlaneDesc(lane.description)}
+              </div>
+              <div className="flex items-center justify-end gap-2 mt-4">
+                <button type="button" className="btn btn-ghost" onClick={() => setIsDescOpen(false)}>Close</button>
+                <button
+                  type="button"
+                  className="btn btn-ghost"
+                  style={{ fontSize: 11, color: "var(--lx-text-link)" }}
+                  onClick={() => { setIsDescOpen(false); setIsSettingsOpen(true); }}
+                >
+                  Edit in Settings
+                </button>
+              </div>
+            </div>
+          </div>
+        </>
+      )}
+    </>
   );
+}
+
+const BOLD_RE = /\*\*(.+?)\*\*/g;
+const ITALIC_RE = /(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)/g;
+const CODE_RE = /`(.+?)`/g;
+
+function renderInline(text: string): React.ReactNode[] {
+  const parts: React.ReactNode[] = [];
+  let remaining = text;
+  let key = 0;
+
+  while (remaining.length > 0) {
+    const bold = BOLD_RE.exec(remaining);
+    const italic = ITALIC_RE.exec(remaining);
+    const code = CODE_RE.exec(remaining);
+
+    const matches = [
+      bold && { ...bold, type: "bold" as const },
+      italic && { ...italic, type: "italic" as const },
+      code && { ...code, type: "code" as const },
+    ].filter(Boolean).sort((a, b) => a!.index - b!.index);
+
+    if (matches.length === 0) {
+      parts.push(<span key={key++}>{remaining}</span>);
+      break;
+    }
+
+    const m = matches[0]!;
+    if (m.index > 0) {
+      parts.push(<span key={key++}>{remaining.slice(0, m.index)}</span>);
+    }
+
+    if (m.type === "bold") {
+      parts.push(<strong key={key++}>{m[1]}</strong>);
+    } else if (m.type === "italic") {
+      parts.push(<em key={key++}>{m[1]}</em>);
+    } else {
+      parts.push(<code key={key++} className="font-mono text-xs bg-lx-surface-elevated px-1 rounded">{m[1]}</code>);
+    }
+
+    remaining = remaining.slice(m.index + m[0].length);
+    BOLD_RE.lastIndex = 0;
+    ITALIC_RE.lastIndex = 0;
+    CODE_RE.lastIndex = 0;
+  }
+
+  return parts;
+}
+
+function renderSwimlaneDesc(text: string | null): React.ReactNode {
+  if (!text) return "No description.";
+
+  const lines = text.split("\n");
+  const nodes: React.ReactNode[] = [];
+  let key = 0;
+  let i = 0;
+
+  while (i < lines.length) {
+    const line = lines[i];
+
+    // List item
+    if (/^[-*]\s/.test(line)) {
+      const items: React.ReactNode[] = [];
+      while (i < lines.length && /^[-*]\s/.test(lines[i])) {
+        items.push(<li key={key++} style={{ marginBottom: 4 }}>{renderInline(lines[i].slice(2))}</li>);
+        i++;
+      }
+      nodes.push(<ul key={key++} style={{ margin: "8px 0 0 0", paddingLeft: 20 }}>{items}</ul>);
+      continue;
+    }
+
+    // Empty line → paragraph break
+    if (line.trim() === "") {
+      i++;
+      continue;
+    }
+
+    // Paragraph: collect consecutive non-empty, non-list lines
+    const paraLines: string[] = [];
+    while (i < lines.length && lines[i].trim() !== "" && !/^[-*]\s/.test(lines[i])) {
+      paraLines.push(lines[i]);
+      i++;
+    }
+    nodes.push(
+      <p key={key++} style={{ margin: paraLines.length > 1 ? "8px 0 0 0" : 0 }}>
+        {renderInline(paraLines.join(" "))}
+      </p>
+    );
+  }
+
+  return nodes.length > 0 ? nodes : "No description.";
 }

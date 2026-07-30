@@ -14,7 +14,7 @@
   <div class="slideover-overlay"></div>
 
   <!-- Slideover: CREATE + EDIT (same form — empty = create, populated = edit) -->
-  <div class="slideover">
+  <div class="slideover slideover-expanded">
     <!-- Header -->
     <div class="slideover-header border-b-subtle">
       <div class="flex items-center gap-2">
@@ -47,12 +47,13 @@
         <span class="prop-label">Type</span>
         <span class="type-badge type-bug" style="box-shadow:var(--lx-focus-glow);border-radius:4px;">Bug</span>
       </div>
-      <div class="prop-field" style="flex-direction:column;gap:6px;align-items:flex-start;">
-        <div style="display:flex;align-items:center;gap:6px;">
-          <span class="prop-label" style="flex-shrink:0;">Assignees</span>
-          <input class="assignee-add-input" placeholder="Add assignee..." value="Al" style="flex:1;padding:6px 8px;border:1px solid var(--lx-border-focus);border-radius:6px;" />
-        </div>
-        <div class="assignee-chips">
+      <div class="prop-field">
+        <span class="prop-label">Assignees</span>
+        <button class="btn btn-ghost" style="width:20px;height:20px;padding:0;flex-shrink:0;" title="Done editing assignees">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 6L9 17l-5-5"/></svg>
+        </button>
+        <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
+          <input class="assignee-add-input" placeholder="Add assignee..." value="Al" style="min-width:120px;max-width:120px;padding:6px 8px;border:1px solid var(--lx-border-focus);border-radius:6px;" />
           <span class="assignee-chip">
             <div class="avatar">AL</div>
             <span class="text-sm weight-500">Alex Lin</span>
@@ -70,6 +71,13 @@
           <span class="assignee-chip">
             <div class="avatar">JD</div>
             <span class="text-sm weight-500">James Diaz</span>
+            <button class="assignee-chip-x">
+              <INCLUDE _x-icon.html />
+            </button>
+          </span>
+          <span class="assignee-chip">
+            <div class="avatar">AP</div>
+            <span class="text-sm weight-500">Alan Park</span>
             <button class="assignee-chip-x">
               <INCLUDE _x-icon.html />
             </button>
@@ -114,23 +122,31 @@
             <div class="flex items-center gap-2">
               <INCLUDE _github-icon.html />
               <span class="font-mono text-sm weight-500 color-link">emberfall-godot #107</span>
-              <span class="sync-dot sync-diverged"></span>
-              <span class="font-micro text-2xs color-warning" style="text-transform:uppercase;letter-spacing:0.04em;">Diverged</span>
             </div>
-            <button class="icon-btn" title="Unlink" style="width:24px;height:24px;">
-              <INCLUDE _x-icon.html />
-            </button>
+            <div class="flex items-center gap-1">
+              <div class="flex items-center gap-2">
+                <span class="sync-dot sync-diverged"></span>
+                <span class="font-micro text-2xs color-warning" style="text-transform:uppercase;letter-spacing:0.04em;">Diverged</span>
+              </div>
+              <button class="icon-btn" title="Unlink" style="width:24px;height:24px;">
+                <INCLUDE _x-icon.html />
+              </button>
+            </div>
           </div>
           <div class="flex items-center justify-between" style="padding:6px 10px;background:var(--lx-surface-elevated);border:1px solid var(--lx-border-default);border-radius:6px;">
             <div class="flex items-center gap-2">
               <INCLUDE _github-icon.html />
               <span class="font-mono text-sm weight-500 color-link">emberfall-godot #91</span>
-              <span class="sync-dot sync-synced"></span>
-              <span class="font-micro text-2xs color-success" style="text-transform:uppercase;letter-spacing:0.04em;">Synced</span>
             </div>
-            <button class="icon-btn" title="Unlink" style="width:24px;height:24px;">
-              <INCLUDE _x-icon.html />
-            </button>
+            <div class="flex items-center gap-1">
+              <div class="flex items-center gap-2">
+                <span class="sync-dot sync-synced"></span>
+                <span class="font-micro text-2xs color-success" style="text-transform:uppercase;letter-spacing:0.04em;">Synced</span>
+              </div>
+              <button class="icon-btn" title="Unlink" style="width:24px;height:24px;">
+                <INCLUDE _x-icon.html />
+              </button>
+            </div>
           </div>
         </div>
       </div>

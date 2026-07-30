@@ -1,9 +1,13 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import type { Task, Board, Column, Swimlane, TipTapDoc, WikiPageMeta, ApiKey, ApiKeyCreateResult } from "../../shared/types";
+import type { Task, Board, Column, Swimlane, TipTapDoc, WikiPageMeta, ApiKey, ApiKeyCreateResult, Dashboard } from "../../shared/types";
 import * as api from "./api";
 
 export function useProjects() {
   return useQuery({ queryKey: ["projects"], queryFn: () => api.listProjects().then((r) => r.data) });
+}
+
+export function useDashboard() {
+  return useQuery({ queryKey: ["dashboard"], queryFn: () => api.getDashboard() });
 }
 
 export function useCreateProject() {
@@ -29,6 +33,19 @@ export function useDeleteProject() {
   });
 }
 
+export function useUpdateProject() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ slug, ...input }: { slug: string; name?: string; description?: string; githubRepo?: string | null }) => api.updateProject(slug, input),
+    onSuccess: (project) => {
+      qc.setQueryData<Project[]>(["projects"], (old) => {
+        if (!old) return [project];
+        return old.map((p) => (p.id === project.id ? project : p));
+      });
+    },
+  });
+}
+
 export function useBoard(slug: string) {
   return useQuery({ queryKey: ["board", slug], queryFn: () => api.getBoard(slug) });
 }
@@ -36,7 +53,7 @@ export function useBoard(slug: string) {
 export function useUpdateTask(slug: string) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, ...input }: { id: string; title?: string; description?: TipTapDoc; priority?: string; type?: string; assignee?: string | null }) =>
+    mutationFn: ({ id, ...input }: { id: string; title?: string; description?: TipTapDoc; priority?: string; type?: string; assignees?: string[] }) =>
       api.updateTask(slug, id, input),
     onSuccess: (task) => {
       qc.setQueryData(["tasks", slug, task.id], task);
@@ -64,7 +81,7 @@ export function useCreateTask(slug: string) {
 export function useMoveTask(slug: string) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, ...target }: { id: string; columnId: string; swimlaneId?: string | null; beforeTaskId?: string; afterTaskId?: string }) =>
+    mutationFn: ({ id, ...target }: { id: string; columnId: string; swimlaneId: string; beforeTaskId?: string; afterTaskId?: string }) =>
       api.moveTask(slug, id, target),
     onSuccess: (task) => {
       qc.setQueryData(["board", slug], (old: Board | undefined) => {

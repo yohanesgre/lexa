@@ -39,7 +39,7 @@ export class WikiService extends Effect.Service<WikiService>()("Lexa/WikiService
           const id = crypto.randomUUID();
           const contentJson = JSON.stringify(input.content ?? { type: "doc", content: [] });
           const contentText = input.contentText ?? "";
-          return yield* repo
+          const page = yield* repo
             .create({
               id,
               projectId,
@@ -51,6 +51,8 @@ export class WikiService extends Effect.Service<WikiService>()("Lexa/WikiService
               position: position + 1,
             })
             .pipe(Effect.catchTag("ConstraintViolation", () => new SlugTaken({ slug })));
+          yield* Effect.logInfo(`[Wiki] Created page ${page.id} in project ${page.projectId}`);
+          return page;
         }),
 
       findByProject: (projectId: string): Effect.Effect<WikiPageMeta[], ProjectNotFound | DbError> =>
@@ -113,9 +115,11 @@ export class WikiService extends Effect.Service<WikiService>()("Lexa/WikiService
             extractText(current.content),
             saveType
           );
-          return yield* repo.update(id, input).pipe(
+          const updated = yield* repo.update(id, input).pipe(
             Effect.catchTag("RowNotFound", () => new WikiPageNotFound({ id }))
           );
+          yield* Effect.logInfo(`[Wiki] Updated page ${updated.id}`);
+          return updated;
         }),
 
       saveRevision: (
@@ -126,7 +130,7 @@ export class WikiService extends Effect.Service<WikiService>()("Lexa/WikiService
           const page = yield* repo.findById(pageId).pipe(
             Effect.catchTag("RowNotFound", () => new WikiPageNotFound({ id: pageId }))
           );
-          return yield* repo.createRevision(
+          const revision = yield* repo.createRevision(
             page.id,
             page.title,
             page.slug,
@@ -134,6 +138,8 @@ export class WikiService extends Effect.Service<WikiService>()("Lexa/WikiService
             extractText(page.content),
             saveType
           );
+          yield* Effect.logInfo(`[Wiki] Saved revision for page ${page.id}`);
+          return revision;
         }),
 
       listRevisions: (
@@ -181,6 +187,7 @@ export class WikiService extends Effect.Service<WikiService>()("Lexa/WikiService
             revision.contentText,
             "manual"
           );
+          yield* Effect.logInfo(`[Wiki] Restored revision ${revisionId} for page ${page.id}`);
           return yield* repo.findById(page.id).pipe(
             Effect.catchTag("RowNotFound", () => new WikiPageNotFound({ id: page.id }))
           );
@@ -203,9 +210,11 @@ export class WikiService extends Effect.Service<WikiService>()("Lexa/WikiService
           );
           const count = yield* repo.countChildren(id);
           if (count > 0) return yield* new HasChildren({ count });
-          return yield* repo.delete(id).pipe(
+          yield* repo.delete(id).pipe(
             Effect.catchTag("ConstraintViolation", () => new HasChildren({ count: -1 }))
           );
+          yield* Effect.logInfo(`[Wiki] Deleted page ${id}`);
+          return;
         }),
     };
   }),

@@ -134,7 +134,7 @@ function WikiEditor({ editor }: WikiEditorProps) {
           <WikiToolbarButton
             command={() => editor.chain().focus().toggleStrike().run()}
             isActive={editor.isActive("strike")}
-            title="Strike"
+            title="Strikethrough"
           >
             <i className="ph ph-text-strikethrough" />
           </WikiToolbarButton>
@@ -143,7 +143,7 @@ function WikiEditor({ editor }: WikiEditorProps) {
             isActive={editor.isActive("highlight")}
             title="Highlight"
           >
-            <i className="ph ph-highlighter" />
+            <i className="ph ph-highlighter-circle" />
           </WikiToolbarButton>
           <span className="toolbar-sep" />
           <WikiToolbarButton
@@ -151,28 +151,28 @@ function WikiEditor({ editor }: WikiEditorProps) {
             isActive={headingLevel === 2}
             title="Heading 2"
           >
-            H2
+            <i className="ph ph-text-h-two" />
           </WikiToolbarButton>
           <WikiToolbarButton
             command={() => editor.chain().focus().toggleHeading({ level: 3 }).run()}
             isActive={headingLevel === 3}
             title="Heading 3"
           >
-            H3
+            <i className="ph ph-text-h-three" />
           </WikiToolbarButton>
           <WikiToolbarButton
             command={() => editor.chain().focus().toggleHeading({ level: 4 }).run()}
             isActive={headingLevel === 4}
             title="Heading 4"
           >
-            H4
+            <i className="ph ph-text-h-four" />
           </WikiToolbarButton>
           <WikiToolbarButton
             command={() => editor.chain().focus().toggleHeading({ level: 5 }).run()}
             isActive={headingLevel === 5}
             title="Heading 5"
           >
-            H5
+            <i className="ph ph-text-h-five" />
           </WikiToolbarButton>
           <WikiToolbarButton
             command={() => editor.chain().focus().toggleBulletList().run()}
@@ -193,7 +193,7 @@ function WikiEditor({ editor }: WikiEditorProps) {
             isActive={editor.isActive("taskList")}
             title="Task list"
           >
-            <i className="ph ph-check-square" />
+            <i className="ph ph-list-checks" />
           </WikiToolbarButton>
           <span className="toolbar-sep" />
           <WikiToolbarButton
@@ -208,7 +208,7 @@ function WikiEditor({ editor }: WikiEditorProps) {
             isActive={editor.isActive("codeBlock")}
             title="Code block"
           >
-            <i className="ph ph-code" />
+            <i className="ph ph-code-block" />
           </WikiToolbarButton>
           <WikiToolbarButton
             command={() => editor.chain().focus().setHorizontalRule().run()}
@@ -232,13 +232,7 @@ function WikiEditor({ editor }: WikiEditorProps) {
             title="AI writing assistant"
             style={{ width: "auto", padding: "0 6px", gap: 4 }}
           >
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M7 10H6a4 4 0 0 1-4-4 1 1 0 0 1 1-1h4" />
-              <path d="M7 5a1 1 0 0 1 1-1h13a1 1 0 0 1 1 1 7 7 0 0 1-7 7H8a1 1 0 0 1-1-1z" />
-              <path d="M9 12v5" />
-              <path d="M15 12v5" />
-              <path d="M5 20a3 3 0 0 1 3-3h8a3 3 0 0 1 3 3 1 1 0 0 1-1 1H6a1 1 0 0 1-1-1" />
-            </svg>
+            <i className="ph ph-hammer" style={{ fontSize: 16 }} />
             Forge
           </WikiToolbarButton>
         </div>
@@ -321,7 +315,10 @@ export function WikiPageViewer({ slug, page, pages }: WikiPageViewerProps) {
   }, [editor]);
 
   const updatePreviewRef = useRef<(json: TipTapDoc) => void>(() => {});
-  updatePreviewRef.current = (json: TipTapDoc) => setPreviewContent(json);
+
+  useEffect(() => {
+    updatePreviewRef.current = (json: TipTapDoc) => setPreviewContent(json);
+  }, []);
 
   useEffect(() => {
     if (!editor) return;
@@ -369,9 +366,7 @@ export function WikiPageViewer({ slug, page, pages }: WikiPageViewerProps) {
   };
 
   const saveRef = useRef(save);
-  useEffect(() => {
-    saveRef.current = save;
-  }, [save]);
+  saveRef.current = save;
 
   const markDirty = () => {
     setIsDirty(true);

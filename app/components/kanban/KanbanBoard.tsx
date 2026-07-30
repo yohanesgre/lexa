@@ -19,10 +19,12 @@ import { SwimlaneHeader } from "./SwimlaneHeader";
 import { TaskCard } from "./TaskCard";
 import { FilterButton, ActiveFilterBar, emptyFilters, isFilterActive, type FilterState } from "./BoardFilters";
 import { KanbanSettingsModal } from "./KanbanSettingsModal";
+import { ColumnForm } from "./ColumnForm";
+import { useCreateColumn } from "../../lib/queries";
 
 export interface MoveTarget {
   columnId: string;
-  swimlaneId?: string | null;
+  swimlaneId: string;
   beforeTaskId?: string;
   afterTaskId?: string;
 }
@@ -31,10 +33,12 @@ interface KanbanBoardProps {
   board: Board;
   onMoveTask: (taskId: string, target: MoveTarget) => Promise<void>;
   onSelectTask?: (task: Task) => void;
-  onOpenCreateTask?: (columnId: string, swimlaneId?: string | null) => void;
+  onOpenCreateTask?: (columnId: string, swimlaneId?: string) => void;
 }
 
 const byPosition = (a: Task, b: Task) => (a.position < b.position ? -1 : a.position > b.position ? 1 : 0);
+
+const cellDropId = (columnId: string, laneId: string | null) => `cell:${laneId ?? "none"}:${columnId}`;
 
 const isWipLimit = (err: unknown): boolean => {
   if (typeof err !== "object" || err === null) return false;
@@ -42,15 +46,22 @@ const isWipLimit = (err: unknown): boolean => {
   return e.code === "WIP_LIMIT" || (typeof e.message === "string" && e.message.includes("WIP_LIMIT"));
 };
 
+const isRequiredField = (err: unknown): boolean => {
+  if (typeof err !== "object" || err === null) return false;
+  const e = err as { code?: unknown; message?: unknown };
+  return e.code === "REQUIRED_FIELD" || (typeof e.message === "string" && e.message.includes("REQUIRED_FIELD"));
+};
+
+const isRejection = (err: unknown): boolean => isWipLimit(err) || isRequiredField(err);
+
 function cardProps(task: Task) {
   return {
     id: task.id,
     title: task.title,
     priority: task.priority,
     type: task.type,
-    assignee: task.assignee,
-    github: task.github,
-    githubOutOfSync: task.github?.outOfSync ?? false,
+    assignees: task.assignees,
+    githubs: task.githubs,
   };
 }
 
@@ -58,10 +69,14 @@ function SortableTaskCard({
   task,
   onSelect,
   dimmed,
+  isNew,
+  isShaking,
 }: {
   task: Task;
   onSelect?: (t: Task) => void;
   dimmed: boolean;
+  isNew?: boolean;
+  isShaking?: boolean;
 }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: task.id,
@@ -71,14 +86,14 @@ function SortableTaskCard({
     <div
       ref={setNodeRef}
       style={{ transform: CSS.Transform.toString(transform), transition }}
-      className={cn(isDragging && "drag-source")}
+      className={cn(isDragging && "drag-source", isShaking && "lx-shake")}
       {...attributes}
       {...listeners}
       onClick={(e) => {
         if (!isDragging) { e.stopPropagation(); onSelect?.(task); }
       }}
     >
-      <TaskCard {...cardProps(task)} dimmed={dimmed} />
+      <TaskCard {...cardProps(task)} dimmed={dimmed} className={cn(isNew && "card-enter")} />
     </div>
   );
 }
@@ -87,10 +102,29 @@ export function KanbanBoard({ board, onMoveTask, onSelectTask, onOpenCreateTask 
   const [localTasks, setLocalTasks] = useState<Task[]>(board.tasks);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [flashColumnId, setFlashColumnId] = useState<string | null>(null);
-  const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set());
-  const [filters, setFilters] = useState<FilterState>(emptyFilters());
-  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [shakeTaskId, setShakeTaskId] = useState<string | null>(null);
+  const [newTaskIds, setNewTaskIds] = useState<Set<string>>(new Set());
   const flashTimer = useRef<number | null>(null);
+  const shakeTimer = useRef<number | null>(null);
+  const prevTaskIds = useRef<Set<string>>(new Set());
+  const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set());
+  const [filters, setFilters] = useState<FilterState>(() => emptyFilters());
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [isColumnCreateOpen, setIsColumnCreateOpen] = useState(false);
+  const createColumn = useCreateColumn(board.project.slug);
+
+  useEffect(() => {
+    const currentIds = new Set(localTasks.map((t) => t.id));
+    const prev = prevTaskIds.current;
+    const added = new Set<string>();
+    for (const id of currentIds) if (!prev.has(id)) added.add(id);
+    if (added.size > 0) {
+      setNewTaskIds(added);
+      const t = window.setTimeout(() => setNewTaskIds(new Set()), 200);
+      return () => window.clearTimeout(t);
+    }
+    prevTaskIds.current = currentIds;
+  }, [localTasks]);
 
   useEffect(() => {
     setLocalTasks(board.tasks);
@@ -105,23 +139,26 @@ export function KanbanBoard({ board, onMoveTask, onSelectTask, onOpenCreateTask 
 
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 4 } }));
 
-  const columns = useMemo(() => [...board.columns].sort((a, b) => a.position - b.position), [board.columns]);
-  const lanes = useMemo(() => [...board.swimlanes].sort((a, b) => a.position - b.position), [board.swimlanes]);
+  const columns = useMemo(() => board.columns.toSorted((a, b) => a.position - b.position), [board.columns]);
+  const lanes = useMemo(() => board.swimlanes.toSorted((a, b) => a.position - b.position), [board.swimlanes]);
   const hasLanes = lanes.length > 0;
 
-  const rows = useMemo<{ lane: Swimlane | null }[]>(() => {
-    if (!hasLanes) return [{ lane: null }];
-    const r: { lane: Swimlane | null }[] = lanes.map((lane) => ({ lane }));
-    if (localTasks.some((t) => t.swimlaneId === null)) r.unshift({ lane: null });
-    return r;
-  }, [hasLanes, lanes, localTasks]);
+  const rows = useMemo<{ lane: Swimlane }[]>(() => {
+    if (!hasLanes) return [];
+    return lanes.map((lane) => ({ lane }));
+  }, [hasLanes, lanes]);
 
   const tasksInCell = useCallback(
-    (columnId: string, laneId: string | null) =>
+    (columnId: string, laneId: string) =>
       localTasks
-        .filter((t) => t.columnId === columnId && (hasLanes ? (t.swimlaneId ?? null) === laneId : true))
+        .filter((t) => t.columnId === columnId && t.swimlaneId === laneId)
         .sort(byPosition),
-    [localTasks, hasLanes]
+    [localTasks]
+  );
+
+  const columnTotalCount = useCallback(
+    (columnId: string) => localTasks.filter((t) => t.columnId === columnId).length,
+    [localTasks]
   );
 
   const columnDimmed = useCallback(
@@ -130,18 +167,21 @@ export function KanbanBoard({ board, onMoveTask, onSelectTask, onOpenCreateTask 
   );
 
   const cardDimmed = useCallback(
+    (task: Task) => filters.columns.size > 0 && !filters.columns.has(task.columnId),
+    [filters.columns]
+  );
+
+  const cardHidden = useCallback(
     (task: Task) => {
-      if (filters.columns.size > 0 && !filters.columns.has(task.columnId)) return true;
       if (filters.priorities.size > 0 && !filters.priorities.has(task.priority)) return true;
       if (filters.types.size > 0 && !filters.types.has(task.type)) return true;
-      if (filters.assignees.size > 0 && !filters.assignees.has(task.assignee ?? "")) return true;
-      if (filters.swimlanes.size > 0 && !filters.swimlanes.has(task.swimlaneId ?? "")) return true;
+      if (filters.assignees.size > 0 && !task.assignees.some((a) => filters.assignees.has(a))) return true;
+      if (filters.swimlanes.size > 0 && !filters.swimlanes.has(task.swimlaneId)) return true;
       return false;
     },
     [filters]
   );
 
-  const cellDropId = (columnId: string, laneId: string | null) => `cell:${laneId ?? "none"}:${columnId}`;
 
   const toggleLane = (laneId: string) =>
     setCollapsed((prev) => {
@@ -164,17 +204,17 @@ export function KanbanBoard({ board, onMoveTask, onSelectTask, onOpenCreateTask 
     if (String(over.id) === task.id) return;
 
     const overData = over.data.current as
-      | { type?: string; columnId?: string; swimlaneId?: string | null }
+      | { type?: string; columnId?: string; swimlaneId?: string }
       | undefined;
 
     let targetColumnId: string;
-    let targetLaneId: string | null;
+    let targetLaneId: string;
     let beforeTaskId: string | undefined;
     let afterTaskId: string | undefined;
 
     if (overData?.type === "column") {
       targetColumnId = overData.columnId!;
-      targetLaneId = overData.swimlaneId ?? null;
+      targetLaneId = overData.swimlaneId!;
       const anchor =
         tasksInCell(targetColumnId, targetLaneId)
           .filter((t) => t.id !== task.id)
@@ -188,12 +228,12 @@ export function KanbanBoard({ board, onMoveTask, onSelectTask, onOpenCreateTask 
       const overTask = localTasks.find((t) => t.id === String(over.id));
       if (!overTask) return;
       targetColumnId = overTask.columnId;
-      targetLaneId = overTask.swimlaneId ?? null;
+      targetLaneId = overTask.swimlaneId;
       const items = tasksInCell(targetColumnId, targetLaneId).filter((t) => t.id !== task.id);
       const idx = items.findIndex((t) => t.id === overTask.id);
       const fromAbove =
         task.columnId !== targetColumnId ||
-        (task.swimlaneId ?? null) !== targetLaneId ||
+        task.swimlaneId !== targetLaneId ||
         task.position < overTask.position;
       if (fromAbove) {
         beforeTaskId = overTask.id;
@@ -204,7 +244,7 @@ export function KanbanBoard({ board, onMoveTask, onSelectTask, onOpenCreateTask 
       }
     }
 
-    const sameCell = task.columnId === targetColumnId && (task.swimlaneId ?? null) === targetLaneId;
+    const sameCell = task.columnId === targetColumnId && task.swimlaneId === targetLaneId;
     if (sameCell) {
       const items = tasksInCell(targetColumnId, targetLaneId);
       const cur = items.findIndex((t) => t.id === task.id);
@@ -232,11 +272,17 @@ export function KanbanBoard({ board, onMoveTask, onSelectTask, onOpenCreateTask 
       await onMoveTask(task.id, { columnId: targetColumnId, swimlaneId: targetLaneId, beforeTaskId, afterTaskId });
     } catch (err) {
       setLocalTasks(snapshot);
+      if (isRejection(err)) {
+        setShakeTaskId(task.id);
+        if (shakeTimer.current !== null) window.clearTimeout(shakeTimer.current);
+        shakeTimer.current = window.setTimeout(() => setShakeTaskId(null), 200);
+      }
       if (isWipLimit(err)) {
         setFlashColumnId(targetColumnId);
         if (flashTimer.current !== null) window.clearTimeout(flashTimer.current);
         flashTimer.current = window.setTimeout(() => setFlashColumnId(null), 1500);
-      } else {
+      }
+      if (!isRejection(err)) {
         console.error("Task move failed", err);
       }
     }
@@ -276,7 +322,7 @@ export function KanbanBoard({ board, onMoveTask, onSelectTask, onOpenCreateTask 
               type="button"
               className="btn btn-primary"
               style={{ marginTop: 16 }}
-              onClick={() => setIsSettingsOpen(true)}
+              onClick={() => setIsColumnCreateOpen(true)}
             >
               <svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5}>
                 <path d="M12 5v14m-7-7h14" />
@@ -286,21 +332,18 @@ export function KanbanBoard({ board, onMoveTask, onSelectTask, onOpenCreateTask 
           </div>
         ) : (
           rows.map(({ lane }) => {
-          const laneId = lane?.id ?? null;
-          const laneTaskCount = hasLanes
-            ? localTasks.filter((t) => (t.swimlaneId ?? null) === laneId).length
-            : localTasks.length;
-          const isCollapsed = laneId !== null && collapsed.has(laneId);
+          const laneId = lane.id;
+          const laneTaskCount = localTasks.filter((t) => t.swimlaneId === laneId).length;
+          const isCollapsed = collapsed.has(laneId);
           return (
-            <div key={laneId ?? "no-lane"}>
-              {lane && (
-                <SwimlaneHeader
-                  name={lane.name}
-                  count={laneTaskCount}
-                  collapsed={isCollapsed}
-                  onToggle={() => toggleLane(lane.id)}
-                />
-              )}
+            <div key={laneId}>
+              <SwimlaneHeader
+                slug={board.project.slug}
+                lane={lane}
+                count={laneTaskCount}
+                collapsed={isCollapsed}
+                onToggle={() => toggleLane(lane.id)}
+              />
               {!isCollapsed && (
                 <div className="columns-row">
                   {columns.map((col) => {
@@ -309,9 +352,9 @@ export function KanbanBoard({ board, onMoveTask, onSelectTask, onOpenCreateTask 
                     return (
                       <div className={cn("column", dimmed && "opacity-45")} key={col.id}>
                         <ColumnHeader
-                          name={col.name}
-                          color={col.color}
-                          taskCount={cell.length}
+                          slug={board.project.slug}
+                          column={col}
+                          taskCount={columnTotalCount(col.id)}
                           wipLimit={col.wipLimit}
                           wipFlash={flashColumnId === col.id}
                           dimmed={dimmed}
@@ -321,11 +364,14 @@ export function KanbanBoard({ board, onMoveTask, onSelectTask, onOpenCreateTask 
                           id={cellDropId(col.id, laneId)}
                           data={{ type: "column", columnId: col.id, swimlaneId: laneId }}
                           isEmpty={cell.length === 0}
+                          slug={board.project.slug}
+                          columnId={col.id}
+                          swimlaneId={laneId}
                           onOpenCreate={() => onOpenCreateTask?.(col.id, laneId)}
                         >
                           <SortableContext items={cell.map((t) => t.id)} strategy={verticalListSortingStrategy}>
-                            {cell.map((task) => (
-                              <SortableTaskCard key={task.id} task={task} onSelect={onSelectTask} dimmed={cardDimmed(task)} />
+                            {cell.filter((task) => !cardHidden(task)).map((task) => (
+                              <SortableTaskCard key={task.id} task={task} onSelect={onSelectTask} dimmed={cardDimmed(task)} isNew={newTaskIds.has(task.id)} isShaking={shakeTaskId === task.id} />
                             ))}
                           </SortableContext>
                         </Column>
@@ -351,6 +397,21 @@ export function KanbanBoard({ board, onMoveTask, onSelectTask, onOpenCreateTask 
         slug={board.project.slug}
         isOpen={isSettingsOpen}
         onClose={() => setIsSettingsOpen(false)}
+      />
+      <ColumnForm
+        slug={board.project.slug}
+        column={null}
+        isOpen={isColumnCreateOpen}
+        onClose={() => setIsColumnCreateOpen(false)}
+        onSubmit={(input) => {
+          createColumn.mutate({
+            name: input.name,
+            wipLimit: input.wipLimit,
+            requiredFields: input.requiredFields,
+            color: input.color ?? undefined,
+            githubState: (input.githubState as "open" | "closed" | null | undefined) ?? undefined,
+          });
+        }}
       />
     </DndContext>
   );

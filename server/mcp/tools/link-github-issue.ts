@@ -2,7 +2,7 @@ import { Effect } from "effect";
 
 export const tool = {
   name: "link_github_issue",
-  description: "Create a GitHub issue from a task and link it. STUB — GitHub integration not yet available.",
+  description: "Create a GitHub issue from a task and link it. Supports multiple issues per task. STUB — GitHub integration not yet available.",
   inputSchema: {
     type: "object",
     properties: {

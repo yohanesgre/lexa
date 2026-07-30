@@ -19,6 +19,7 @@ export class ColumnRepo extends Effect.Service<ColumnRepo>()("Lexa/ColumnRepo", 
         githubState?: "open" | "closed" | null;
       }): Effect.Effect<Column, ConstraintViolation | DbError | RowNotFound> =>
         Effect.gen(function* () {
+          yield* Effect.logDebug("[ColumnRepo] create");
           yield* run(
             db,
             `INSERT INTO columns (id, project_id, name, position, color, wip_limit, required_fields, github_state)
@@ -87,9 +88,11 @@ export class ColumnRepo extends Effect.Service<ColumnRepo>()("Lexa/ColumnRepo", 
         if (sets.length === 0)
           return queryFirst<ColumnRow>(db, `SELECT * FROM columns WHERE id = ?`, id).pipe(Effect.map(rowToColumn));
         params.push(id);
-        return run(db, `UPDATE columns SET ${sets.join(", ")} WHERE id = ?`, ...params).pipe(
-          Effect.flatMap(() => queryFirst<ColumnRow>(db, `SELECT * FROM columns WHERE id = ?`, id)),
-          Effect.map(rowToColumn)
+        return Effect.logDebug(`[ColumnRepo] update id=${id}`).pipe(
+          Effect.flatMap(() => run(db, `UPDATE columns SET ${sets.join(", ")} WHERE id = ?`, ...params).pipe(
+            Effect.flatMap(() => queryFirst<ColumnRow>(db, `SELECT * FROM columns WHERE id = ?`, id)),
+            Effect.map(rowToColumn)
+          ))
         );
       },
 

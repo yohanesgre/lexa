@@ -201,16 +201,23 @@ Anyone with issue-triage permission on a linked repo can trigger webhook-driven 
 ### Key Components
 ```
 KanbanBoard
-├── SwimlaneHeader (name, collapse toggle)
+├── SwimlaneHeader (name, description truncated, "read more" modal, context menu)
+│   ├── Context menu: Expand/Collapse, Settings (swimlane form), Rename, Add Column, Delete
 │   └── Column
-│       ├── ColumnHeader (name, count, WIP badge — warns at limit)
+│       ├── ColumnHeader (name, count, WIP badge, context menu)
+│       │   └── Context menu: Add task, Rename, Edit column (ColumnForm), Delete, Clear all tasks
 │       ├── TaskCard (draggable)
-│       └── AddTaskButton
-└── TaskDetail (slideover)
-    ├── TitleEditor (inline)
-    ├── TipTapEditor (description, checklist support)
-    ├── PropertyBar (column, priority, type, assignee)
-    └── GitHubLink (issue number badge, if linked)
+│       ├── Column → InlineAddTask (title input, Priority/Type dropdowns, Save/Cancel)
+│       │   └── Defaults: High priority, Feature type. Enter saves, Esc cancels.
+│       └── KanbanSettingsModal (columns + swimlanes table, ColumnForm, SwimlaneForm)
+│           ├── ColumnForm: 13-color palette, wipLimit, requiredFields, githubState
+│           └── SwimlaneForm: name + description textarea
+├── TaskDetail (slideover)
+│   ├── TitleEditor (inline, click to edit)
+│   ├── DescriptionEditor (TipTap, double-click to edit, save on blur)
+│   ├── PropertyBar (Column dropdown, Priority badge, Type badge, Assignee chips)
+│   └── GitHubSection (linked issue badge, sync status dot, out-of-sync warning)
+└── BoardFilters (priority, type, assignee — floating filter bar)
 
 WikiLayout
 ├── WikiSidebar (page tree — nested, collapsible, drag to reorder)
@@ -219,9 +226,19 @@ WikiLayout
     ├── TipTapEditor (full rich text)
     └── PageMeta (last edited)
 
-Dashboard
-├── ProjectGrid → ProjectCard (name, description, task stats)
-└── QuickActions (create project, manage API keys)
+Dashboard (Command Center)
+├── Header ("Command Center" + "New Project" button)
+├── ProjectGrid → ProjectCard (health card variant)
+│   ├── Health dot (green/amber/red — overall column health)
+│   ├── Urgent count badge, Sync count badge
+│   ├── WIP mini bar (colored segments per column)
+│   ├── Stats footer (task count, column count)
+│   ├── GitHub icon (if linked)
+│   └── ⋯ settings button → project settings modal
+├── StatsBar (4 aggregate stat cards: total tasks, active projects, WIP exceeded, out-of-sync)
+└── AttentionSection (two-column grid)
+    ├── Urgent tasks list (per-task rows with dot, title, project·column, task ID)
+    └── Out-of-sync GitHub issues list (same layout, amber dot)
 ```
 
 Removed from v1: `SubtaskList`, `CommentThread` (ghost features — no schema backing).

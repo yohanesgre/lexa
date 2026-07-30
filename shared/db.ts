@@ -175,12 +175,12 @@ export interface TaskRow {
   id: string;
   project_id: string;
   column_id: string;
-  swimlane_id: string | null;
+  swimlane_id: string;
   title: string;
   description: string;
   priority: Priority;
   type: TaskType;
-  assignee: string | null;
+  assignees: string;
   position: string;
   github_issue_id: string | null;
   github_issue_number: number | null;
@@ -189,13 +189,31 @@ export interface TaskRow {
   created_at: string;
   updated_at: string;
   column_github_state?: "open" | "closed" | null;
+  github_issues_raw?: string | null;
 }
 
 export function rowToTask(row: TaskRow, columnGithubState?: "open" | "closed" | null): {
-  id: string; projectId: string; columnId: string; swimlaneId: string | null; title: string; description: TipTapDoc; priority: Priority; type: TaskType; assignee: string | null; position: string; github: { issueId: string; issueNumber: number; repo: string; url: string; syncedState: "open" | "closed" | null; outOfSync: boolean } | null; createdAt: ISODate; updatedAt: ISODate;
+  id: string; projectId: string; columnId: string; swimlaneId: string; title: string; description: TipTapDoc; priority: Priority; type: TaskType; assignees: string[]; position: string; githubs: { issueId: string; issueNumber: number; repo: string; syncedState: "open" | "closed" | null; url: string; outOfSync: boolean }[]; createdAt: ISODate; updatedAt: ISODate;
 } {
-  const githubState = columnGithubState ?? row.column_github_state ?? null;
-  const hasLink = row.github_issue_id && row.github_issue_number && row.github_repo;
+  const colState = columnGithubState ?? row.column_github_state ?? null;
+  const githubs: { issueId: string; issueNumber: number; repo: string; syncedState: "open" | "closed" | null; url: string; outOfSync: boolean }[] = [];
+  const seen = new Set<string>();
+  if (row.github_issues_raw) {
+    for (const part of row.github_issues_raw.split("||")) {
+      const [issueId, issueNumberStr, repo, syncedState] = part.split(",");
+      if (!issueId || !issueNumberStr || !repo || seen.has(issueId)) continue;
+      seen.add(issueId);
+      const outOfSync = !!(syncedState && colState && syncedState !== colState);
+      githubs.push({
+        issueId,
+        issueNumber: Number(issueNumberStr),
+        repo,
+        syncedState: (syncedState || null) as "open" | "closed" | null,
+        url: `https://github.com/${repo}/issues/${issueNumberStr}`,
+        outOfSync,
+      });
+    }
+  }
   return {
     id: row.id,
     projectId: row.project_id,
@@ -205,18 +223,9 @@ export function rowToTask(row: TaskRow, columnGithubState?: "open" | "closed" | 
     description: JSON.parse(row.description) as TipTapDoc,
     priority: row.priority,
     type: row.type,
-    assignee: row.assignee,
+    assignees: row.assignees ? row.assignees.split(",").filter(Boolean) : [],
     position: row.position,
-    github: hasLink
-      ? {
-          issueId: row.github_issue_id!,
-          issueNumber: row.github_issue_number!,
-          repo: row.github_repo!,
-          url: `https://github.com/${row.github_repo}/issues/${row.github_issue_number}`,
-          syncedState: row.github_synced_state,
-          outOfSync: githubState !== null && row.github_synced_state !== githubState,
-        }
-      : null,
+    githubs,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };

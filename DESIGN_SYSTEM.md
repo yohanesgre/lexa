@@ -371,7 +371,7 @@ Cursor:        grab
 **Internal Layout (top to bottom):**
 1. **Top row:** Type badge (left) + Priority dot (right, with tooltip)
 2. **Title:** `text-base/600/Body`, 3-line clamp, margin-top 8px
-3. **Meta row:** Assignee avatar (20px circle, fallback initials) + GitHub link badge (if linked, Mono font) + sync indicator dot. margin-top 8px.
+3. **Meta row:** Assignee avatars (20px circle, stacked, max 3 + overflow) + `.card-meta-spacer` (flex: 1) pushing GitHub section to right edge + GitHub link badges (stacked, max 2 + overflow, Mono font) + sync indicator dot. margin-top 8px.
 4. **Bottom row (optional):** Checklist progress `text-2xs/500/Micro`, color `--lx-text-muted`.
 
 **Type Badge:**
@@ -412,8 +412,19 @@ Border-bottom: 1px solid var(--lx-border-subtle)  (only if cards present)
 - **Count:** `text-2xs/500/Micro`, color `--lx-text-muted`, margin-left 6px (rendered as "05" not "5" — zero-padded in Micro font)
 - **WipBadge:** Right-aligned (see 5.4)
 - **Color strip:** 3px tall strip at top of column, color = `columns.color` (user-defined). Transparent if undefined.
+- **Context menu (⋮):** Add task, Rename (inline input), Edit column (ColumnForm modal), separator, Delete (confirm dialog), Clear all tasks (confirm dialog)
 
-**AddTaskButton (bottom of column):**
+**InlineAddTask (replaces AddTaskButton when open):**
+- Replaces "+ Add task..." button. Opens on button click. Closes on Save/Cancel/Esc.
+- `.inline-add-form`: background `--lx-surface-card`, border `1px solid --lx-border-focus`, radius 6px, padding 10px 12px, box-shadow `--lx-focus-glow`
+- **Title input:** Width 100%, background `--lx-surface-input`, border `1px solid --lx-border-default`, auto-focused
+- **Priority:** Row — `justify-between`. `select.prop-input` (width: 140px). 4 options with colored `●` prefix: Urgent `#FF4444`, High `#FF8844` (default), Medium `#F0C040`, Low `#A0A0A0`. Selected value color applied via `color` on `<select>` element (not `<option>` — see implementation note).
+- **Type:** Row — `justify-between`. `select.prop-input` (width: 140px). 4 options with colored `●` prefix: Feature `#4ADE80` (default), Bug `#FF4444`, Task `#67E8F9`, Asset `#F9A8D4`. Same color-on-select trick.
+- **Footer:** Right-aligned Cancel (`.btn-ghost`, 28px) + Save (`.btn-primary`, 28px). Save disabled if title empty.
+- **Keyboard:** Enter saves, Esc cancels
+- **Mutation:** Calls `createTask` on save, updates board cache via `setQueryData`
+
+**AddTaskButton (fallback, when inline form not open):**
 - Height: 32px, width 100%
 - Background: transparent
 - Hover: `--lx-surface-card-hover`
@@ -434,9 +445,11 @@ Margin-bottom: 12px
 
 - **Chevron:** 14px, `--lx-text-secondary`, rotates 90° when expanded
 - **Name:** `text-sm/500/Display`, `--lx-text-primary` (Display font gives swimlanes personality)
+- **Description:** `text-2xs/Body`, `--lx-text-secondary`, truncated to 80 chars, max-width 240px, `white-space: nowrap; overflow: hidden; text-overflow: ellipsis`. "read more" link (`text-2xs/Body`, `--lx-text-link`) opens modal with full text. Hidden when collapsed.
 - **Count:** `text-2xs/500/Micro`, `--lx-text-muted`, margin-left 8px
+- **Context menu (⋮):** Settings (swimlane form — name, description), separator, Rename (inline), Add Column (ColumnForm create), Delete (confirm dialog)
 - **Hover:** Background → `--lx-surface-card-hover`
-- **Collapsed:** Chevron points right; columns below hidden
+- **Collapsed:** Chevron points right; columns below hidden; description hidden
 
 ### 5.4 WipBadge
 
@@ -541,26 +554,90 @@ Padding:       16px 0
 - Drag handle (on hover): 14px, `--lx-text-muted`, cursor grab
 - Add page button: 32px, full width, `text-sm/500`, `--lx-text-muted`, hover `--lx-surface-card-hover`
 
-### 5.9 ProjectCard (Dashboard)
+### 5.9 ProjectCard (Dashboard — Health Card)
+
+Two variants share the same card shell. The health card is the canonical populated-state view.
 
 ```
 Background:    var(--lx-surface-card)
 Border:        1px solid var(--lx-border-default)
 Radius:        radius-xl (12px)
 Padding:       20px
-Height:        160px
+Height:        160px                           (bare card)
+Min-height:    200px                           (health card — taller for extra content)
 Shadow:        none
+Display:       flex, flex-direction: column
 ```
 
-**Content:**
+**Base content (both variants):**
 - **Name:** `text-2xl/600/Display`, `--lx-text-primary`, margin-bottom 8px
 - **Description:** `text-sm/400/Body`, `--lx-text-secondary`, 2-line clamp
-- **Stats row:** Absolute, 16px from bottom. `text-xs/500/Micro`, `--lx-text-muted`. Format: "042 TASKS · 003 COLS" (zero-padded, uppercase, Micro font).
 - **GitHub icon:** If linked, 14px Lucide `Github`, `--lx-text-muted`, top-right 16px.
+- **Settings button (⋯):** Top-right 12px, 28×28px ghost button. Opens project settings modal (name, description, GitHub repo, delete). Not present on bare variant.
+
+**Bare variant (empty-state / settings backdrop):**
+- **Stats row:** Absolute, 16px from bottom. `text-xs/500/Micro`, `--lx-text-muted`. Format: "042 TASKS · 003 COLS" (zero-padded, uppercase, Micro font).
+
+**Health variant (populated dashboard):**
+- **Status row:** Flex row, gap 10px, margin-top 12px.
+  - **Health dot:** 8px circle. Green (`--lx-text-success`) = ok, amber (`--lx-text-warning`) = approaching, red (`--lx-text-danger`) = exceeded. Derived: any column WIP exceeded → red; urgent tasks present → amber; else green.
+  - **Urgent badge:** If urgentCount > 0. `text-2xs/500/Micro`, uppercase, `--lx-text-danger` on `--lx-bg-danger-subtle`, 18px height, padding 0 5px, radius 4px. Format: "005 urgent" (zero-padded).
+  - **Sync badge:** If syncCount > 0. Same dimensions. `--lx-text-warning` on `--lx-bg-warning-subtle`. Format: "002 sync" (zero-padded).
+- **WIP mini bar:** Flex row, gap 3px, height 4px, margin-top 12px, radius 2px. One segment per column, colored by WIP state: green (ok), amber (approaching), red (exceeded), muted border color (empty). Flex values proportional to column task counts.
+- **Footer:** Flex row, space-between, margin-top auto, padding-top 16px. Stats readout: "042 tasks · 005 cols" in `text-2xs/500/Micro`, `--lx-text-muted`, zero-padded.
 
 **States:**
-- **Hover:** Shadow → `--lx-shadow-md`, border → `--lx-border-strong`, `translateY(-2px)`
+- **Bare card hover:** Shadow → `--lx-shadow-md`, border → `--lx-border-strong`, `translateY(-2px)`
+- **Health card hover:** Same as bare.
 - **Focus:** Ring → `--lx-focus-ring`
+
+### 5.9b Aggregate Stats Bar
+
+Row of 4 stat cards below the project grid. Always visible when projects exist.
+
+```
+Container:    grid, 4 equal columns, gap 16px
+Card:         var(--lx-surface-card), border: 1px solid var(--lx-border-default), radius-xl (12px), padding 20px
+Label:        text-2xs/500/Micro, --lx-text-muted, uppercase, letter-spacing 0.04em, margin-bottom 6px
+Value:        text-3xl/600/Display (36px), --lx-text-primary, line-height 40px, letter-spacing -0.03em
+```
+
+| Card | Label | Value source | Conditional class |
+|------|-------|-------------|-------------------|
+| Total tasks | "Total tasks" | Sum of all project task counts | — |
+| Active projects | "Active projects" | Project count | — |
+| WIP exceeded | "WIP exceeded" | Count of projects with health "exceeded" | `.stat-value-danger` (`--lx-text-danger`) if > 0 |
+| Out-of-sync tasks | "Out-of-sync tasks" | Sum of all project syncCounts | `.stat-value-warning` (`--lx-text-warning`) if > 0 |
+
+All values zero-padded to 3 digits.
+
+### 5.9c Needs Attention Section
+
+Two-column grid below the stats bar. Hidden when both columns would be empty.
+
+```
+Container:    margin-top 32px
+Grid:         2 equal columns, gap 16px
+Card:         var(--lx-surface-card), border: 1px solid var(--lx-border-default), radius-xl (12px), padding 16px
+Title:        text-lg/500/Display, --lx-text-primary, margin-bottom 12px
+```
+
+**Urgent tasks column:**
+- Title: "Urgent tasks"
+- Items: one row per urgent task across all projects.
+  - Row: flex, gap 10px, padding 8px 0, border-bottom: 1px solid `--lx-border-default` (none on last).
+  - Health dot: 8px red circle (`--lx-text-danger`), margin-top 5px.
+  - Meta: Task title (`text-base/600/Body`, `--lx-text-primary`, text-overflow ellipsis) + subtitle (`text-xs/Body`, `--lx-text-secondary`, "ProjectName · ColumnName").
+  - Task ID badge: `text-xs/500/Mono`, `--lx-text-muted`, flex-shrink 0.
+  - Each row links to the task detail (`/$slug?task=id`).
+
+**Out-of-sync GitHub issues column:**
+- Title: "Out-of-sync GitHub issues"
+- Items: one row per out-of-sync task.
+  - Same layout as urgent tasks.
+  - Amber dot (`--lx-text-warning`).
+  - Subtitle format: "ProjectName · owner/repo#N".
+  - Only shown when at least one project has `githubRepo` and out-of-sync tasks.
 
 ---
 

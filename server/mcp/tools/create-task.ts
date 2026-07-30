@@ -18,19 +18,16 @@ export const tool = {
       description: { type: "string", description: "Task description in Markdown" },
       priority: { type: "string", enum: ["urgent", "high", "medium", "low"], description: "Priority (default: medium)" },
       type: { type: "string", enum: ["feature", "bug", "task", "asset"], description: "Task type (default: task)" },
-      assignee: { type: "string", description: "Assignee name" },
-      swimlane: { type: "string", description: "Swimlane name (case-insensitive)" },
+      assignees: { type: "array", items: { type: "string" }, description: "Assignee names" },
+      swimlane: { type: "string", description: "Swimlane name (case-insensitive, required)" },
     },
-    required: ["project", "column", "title"],
+    required: ["project", "column", "swimlane", "title"],
   },
   handler: (args: any) =>
     Effect.gen(function* () {
       const project = yield* resolveProject(args.project);
       const column = yield* resolveColumn(project.id, args.column);
-      let swimlane: Swimlane | null = null;
-      if (args.swimlane) {
-        swimlane = yield* resolveSwimlane(project.id, args.swimlane);
-      }
+      let swimlane = yield* resolveSwimlane(project.id, args.swimlane);
 
       const description = args.description
         ? markdownToDoc(args.description)
@@ -40,12 +37,12 @@ export const tool = {
       const task = yield* taskService.create({
         projectId: project.id,
         columnId: column.id,
-        swimlaneId: swimlane?.id ?? null,
+        swimlaneId: swimlane.id,
         title: args.title,
         description,
         priority: args.priority ?? "medium",
         type: args.type ?? "task",
-        assignee: args.assignee ?? null,
+        assignees: args.assignees ?? [],
       });
 
       const columnRepo = yield* ColumnRepo;
@@ -71,15 +68,13 @@ export const tool = {
         swimlane: taskSwimlane?.name ?? null,
         priority: task.priority,
         type: task.type,
-        assignee: task.assignee,
-        githubIssue: task.github
-          ? {
-              number: task.github.issueNumber,
-              repo: task.github.repo,
-              url: task.github.url,
-              outOfSync: task.github.outOfSync,
-            }
-          : null,
+        assignees: task.assignees,
+        githubIssues: task.githubs.map(g => ({
+          number: g.issueNumber,
+          repo: g.repo,
+          url: g.url,
+          outOfSync: g.outOfSync,
+        })),
         updatedAt: task.updatedAt,
       };
     }),

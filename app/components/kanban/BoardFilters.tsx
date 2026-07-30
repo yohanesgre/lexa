@@ -70,7 +70,7 @@ function FilterCheckbox({
   label: string;
 }) {
   return (
-    <div className="check-row" onClick={onChange}>
+    <div className="check-row" role="button" tabIndex={0} onClick={onChange} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") onChange(); }}>
       <span className={cn("checkbox", checked && "checked")} />
       {icon}
       <span>{label}</span>
@@ -89,11 +89,10 @@ function FilterPopover({
 }) {
   const assignees = useMemo(() => {
     const set = new Set<string>();
-    for (const t of board.tasks) if (t.assignee) set.add(t.assignee);
+    for (const t of board.tasks) for (const a of t.assignees) set.add(a);
     return Array.from(set).sort();
   }, [board.tasks]);
-  const hasUnassigned = board.tasks.some((t) => !t.assignee);
-  const hasUnlane = board.tasks.some((t) => !t.swimlaneId);
+  const hasUnassigned = board.tasks.some((t) => t.assignees.length === 0);
 
   const toggleColumn = (id: string) => onChange({ ...filters, columns: toggleSet(filters.columns, id) });
   const togglePriority = (value: Priority) => onChange({ ...filters, priorities: toggleSet(filters.priorities, value) });
@@ -179,14 +178,6 @@ function FilterPopover({
                 label={lane.name}
               />
             ))}
-            {hasUnlane && (
-              <FilterCheckbox
-                checked={filters.swimlanes.has("")}
-                onChange={() => toggleSwimlane("")}
-                icon={<span className="priority-dot" style={{ background: "var(--lx-border-default)" }} />}
-                label="No swimlane"
-              />
-            )}
           </FilterSection>
         </>
       )}
@@ -263,25 +254,26 @@ export function FilterButton({ board, filters, onChange }: { board: Board; filte
 
 export function ActiveFilterBar({ board, filters, onChange }: { board: Board; filters: FilterState; onChange: (filters: FilterState) => void }) {
   const items = useMemo(() => {
-    const result: Array<{ label: string; value: string; remove: () => void }> = [];
+    const result: Array<{ label: string; value: string; key: string; remove: () => void }> = [];
+    const colMap = new Map(board.columns.map((c) => [c.id, c]));
+    const laneMap = new Map(board.swimlanes.map((l) => [l.id, l.name]));
+    const priorityMap = new Map(priorityConfig.map((x) => [x.value, x.label]));
+    const typeMap = new Map(typeConfig.map((x) => [x.value, x.label]));
     for (const colId of filters.columns) {
-      const col = board.columns.find((c) => c.id === colId);
-      if (col) result.push({ label: "Column", value: col.name, remove: () => onChange({ ...filters, columns: toggleSet(filters.columns, colId) }) });
+      const col = colMap.get(colId);
+      if (col) result.push({ label: "Column", value: col.name, key: `col:${colId}`, remove: () => onChange({ ...filters, columns: toggleSet(filters.columns, colId) }) });
     }
     for (const p of filters.priorities) {
-      const label = priorityConfig.find((x) => x.value === p)?.label ?? p;
-      result.push({ label: "Priority", value: label, remove: () => onChange({ ...filters, priorities: toggleSet(filters.priorities, p) }) });
+      result.push({ label: "Priority", value: priorityMap.get(p) ?? p, key: `pri:${p}`, remove: () => onChange({ ...filters, priorities: toggleSet(filters.priorities, p) }) });
     }
     for (const t of filters.types) {
-      const label = typeConfig.find((x) => x.value === t)?.label ?? t;
-      result.push({ label: "Type", value: label, remove: () => onChange({ ...filters, types: toggleSet(filters.types, t) }) });
+      result.push({ label: "Type", value: typeMap.get(t) ?? t, key: `type:${t}`, remove: () => onChange({ ...filters, types: toggleSet(filters.types, t) }) });
     }
     for (const a of filters.assignees) {
-      result.push({ label: "Assignee", value: a || "Unassigned", remove: () => onChange({ ...filters, assignees: toggleSet(filters.assignees, a) }) });
+      result.push({ label: "Assignee", value: a || "Unassigned", key: `asgn:${a}`, remove: () => onChange({ ...filters, assignees: toggleSet(filters.assignees, a) }) });
     }
     for (const s of filters.swimlanes) {
-      const lane = board.swimlanes.find((l) => l.id === s);
-      result.push({ label: "Swimlane", value: lane?.name ?? "No swimlane", remove: () => onChange({ ...filters, swimlanes: toggleSet(filters.swimlanes, s) }) });
+      result.push({ label: "Swimlane", value: laneMap.get(s) ?? "No swimlane", key: `lane:${s}`, remove: () => onChange({ ...filters, swimlanes: toggleSet(filters.swimlanes, s) }) });
     }
     return result;
   }, [filters, board, onChange]);
@@ -290,11 +282,11 @@ export function ActiveFilterBar({ board, filters, onChange }: { board: Board; fi
 
   return (
     <div className="filter-bar">
-      {items.map((item, idx) => (
-        <span key={idx} className="filter-chip">
+      {items.map((item) => (
+        <span key={item.key} className="filter-chip">
           <span className="filter-chip-label">{item.label}</span>
           {item.value}
-          <button type="button" className="filter-chip-x" onClick={item.remove}>
+          <button type="button" className="filter-chip-x" aria-label={`Remove ${item.label} filter`} onClick={item.remove}>
             <X size={10} strokeWidth={2} />
           </button>
         </span>

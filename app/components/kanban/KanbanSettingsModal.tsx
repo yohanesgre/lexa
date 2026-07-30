@@ -1,5 +1,15 @@
-import { useState } from "react";
+import React, { useState, useEffect, useMemo } from "react";
+import {
+  DndContext,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+} from "@dnd-kit/core";
+import { SortableContext, useSortable, verticalListSortingStrategy, arrayMove } from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
 import { GripVertical, Plus, Trash2, X } from "lucide-react";
+import { ModalPortal, useModalStack } from "../ui/ModalStack";
 import type { Column, Swimlane } from "../../../shared/types";
 import {
   useColumns,
@@ -23,6 +33,23 @@ interface KanbanSettingsModalProps {
 
 const formatRequiredFields = (fields: string[]) => (fields.length === 0 ? "—" : fields.join(", "));
 const formatWipLimit = (limit: number | null) => (limit === null ? "—" : String(limit).padStart(3, "0"));
+
+function SortableRow({ id, children, className }: { id: string; children: React.ReactNode; className?: string }) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id });
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.5 : 1,
+  };
+  return (
+    <tr ref={setNodeRef} style={style} className={className} {...attributes}>
+      <td className="py-2.5 px-3" {...listeners} style={{ cursor: "grab" }}>
+        <GripVertical size={14} className="text-lx-text-muted" />
+      </td>
+      {children}
+    </tr>
+  );
+}
 
 function ColorSwatch({ color }: { color: string }) {
   if (!color) {
@@ -91,6 +118,7 @@ function EmptySection({ type, onAdd }: { type: "column" | "swimlane"; onAdd: () 
 export function KanbanSettingsModal({ slug, isOpen, onClose }: KanbanSettingsModalProps) {
   const { data: columns = [], isLoading: columnsLoading, isError: columnsError } = useColumns(slug);
   const { data: swimlanes = [], isLoading: swimlanesLoading, isError: swimlanesError } = useSwimlanes(slug);
+  const base = useModalStack();
 
   const createColumn = useCreateColumn(slug);
   const updateColumn = useUpdateColumn(slug);
@@ -102,6 +130,55 @@ export function KanbanSettingsModal({ slug, isOpen, onClose }: KanbanSettingsMod
 
   const [columnForm, setColumnForm] = useState<{ isOpen: boolean; column?: Column | null }>({ isOpen: false, column: null });
   const [swimlaneForm, setSwimlaneForm] = useState<{ isOpen: boolean; swimlane?: Swimlane | null }>({ isOpen: false, swimlane: null });
+  const [deleteColumnTarget, setDeleteColumnTarget] = useState<Column | null>(null);
+  const [deleteSwimlaneTarget, setDeleteSwimlaneTarget] = useState<Swimlane | null>(null);
+  const [descModalTarget, setDescModalTarget] = useState<Swimlane | null>(null);
+
+  // DnD state — track local item order, sync positions on drop
+  const [colOrder, setColOrder] = useState<string[]>([]);
+  const [laneOrder, setLaneOrder] = useState<string[]>([]);
+
+  useEffect(() => {
+    if (columns.length > 0) setColOrder(columns.map((c) => c.id));
+  }, [columns]);
+
+  useEffect(() => {
+    if (swimlanes.length > 0) setLaneOrder(swimlanes.map((s) => s.id));
+  }, [swimlanes]);
+
+  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
+
+  const handleColumnDragEnd = (event: DragEndEvent) => {
+    const oldIndex = colOrder.indexOf(event.active.id as string);
+    const newIndex = colOrder.indexOf(event.over!.id as string);
+    if (oldIndex === newIndex) return;
+    const reordered = arrayMove(colOrder, oldIndex, newIndex);
+    setColOrder(reordered);
+    reordered.forEach((id, i) => {
+      updateColumn.mutate({ id, position: i });
+    });
+  };
+
+  const handleSwimlaneDragEnd = (event: DragEndEvent) => {
+    const oldIndex = laneOrder.indexOf(event.active.id as string);
+    const newIndex = laneOrder.indexOf(event.over!.id as string);
+    if (oldIndex === newIndex) return;
+    const reordered = arrayMove(laneOrder, oldIndex, newIndex);
+    setLaneOrder(reordered);
+    reordered.forEach((id, i) => {
+      updateSwimlane.mutate({ id, position: i });
+    });
+  };
+
+  const orderedColumns = useMemo(() => {
+    if (colOrder.length === 0) return columns;
+    return colOrder.flatMap((id) => { const c = columns.find((c) => c.id === id); return c ? [c] : []; });
+  }, [columns, colOrder]);
+
+  const orderedSwimlanes = useMemo(() => {
+    if (laneOrder.length === 0) return swimlanes;
+    return laneOrder.flatMap((id) => { const s = swimlanes.find((s) => s.id === id); return s ? [s] : []; });
+  }, [swimlanes, laneOrder]);
 
   if (!isOpen) return null;
 
@@ -109,7 +186,14 @@ export function KanbanSettingsModal({ slug, isOpen, onClose }: KanbanSettingsMod
 
   return (
     <>
-      <div className="dialog-overlay" onClick={onClose} />
+      <div
+        className="dialog-overlay"
+        role="button"
+        tabIndex={0}
+        aria-label="Close dialog"
+        onClick={onClose}
+        onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") onClose(); }}
+      />
       <div className="fixed inset-0 flex items-center justify-center z-[70] pointer-events-none">
         <div
           className="dialog dialog-enter pointer-events-auto p-0"
@@ -144,77 +228,52 @@ export function KanbanSettingsModal({ slug, isOpen, onClose }: KanbanSettingsMod
                     <EmptySection type="column" onAdd={() => setColumnForm({ isOpen: true, column: null })} />
                   ) : (
                     <div className="bg-lx-surface-card border border-lx-border rounded-lg overflow-hidden">
+                      <DndContext sensors={sensors} onDragEnd={handleColumnDragEnd}>
+                        <SortableContext items={orderedColumns.map((c) => c.id)} strategy={verticalListSortingStrategy}>
                       <table className="w-full border-collapse text-[13px] font-body">
                         <thead>
                           <tr className="border-b border-lx-border">
                             <th className="w-8 py-2.5 px-3"></th>
-                            <th className="py-2.5 px-3 text-left text-[11px] uppercase tracking-[0.05em] text-lx-text-secondary font-medium font-body">
-                              Name
-                            </th>
-                            <th className="py-2.5 px-3 text-left text-[11px] uppercase tracking-[0.05em] text-lx-text-secondary font-medium font-body">
-                              Color
-                            </th>
-                            <th className="py-2.5 px-3 text-left text-[11px] uppercase tracking-[0.05em] text-lx-text-secondary font-medium font-body">
-                              WIP Limit
-                            </th>
-                            <th className="py-2.5 px-3 text-left text-[11px] uppercase tracking-[0.05em] text-lx-text-secondary font-medium font-body">
-                              Required Fields
-                            </th>
-                            <th className="py-2.5 px-3 text-left text-[11px] uppercase tracking-[0.05em] text-lx-text-secondary font-medium font-body">
-                              GitHub State
-                            </th>
+                            <th className="py-2.5 px-3 text-left text-[11px] uppercase tracking-[0.05em] text-lx-text-secondary font-medium font-body">Name</th>
+                            <th className="py-2.5 px-3 text-left text-[11px] uppercase tracking-[0.05em] text-lx-text-secondary font-medium font-body">Color</th>
+                            <th className="py-2.5 px-3 text-left text-[11px] uppercase tracking-[0.05em] text-lx-text-secondary font-medium font-body">WIP Limit</th>
+                            <th className="py-2.5 px-3 text-left text-[11px] uppercase tracking-[0.05em] text-lx-text-secondary font-medium font-body">Required Fields</th>
+                            <th className="py-2.5 px-3 text-left text-[11px] uppercase tracking-[0.05em] text-lx-text-secondary font-medium font-body">GitHub State</th>
                             <th className="w-[100px] py-2.5 px-3"></th>
                           </tr>
                         </thead>
                         <tbody>
-                          {columns.map((column) => (
-                            <tr key={column.id} className="border-b border-lx-border last:border-b-0">
-                              <td className="py-2.5 px-3">
-                                <GripVertical size={14} className="text-lx-text-muted cursor-grab" />
-                              </td>
-                              <td className="py-2.5 px-3 text-sm font-medium text-lx-text-primary">{column.name}</td>
-                              <td className="py-2.5 px-3">
-                                <ColorSwatch color={column.color} />
-                              </td>
-                              <td className="py-2.5 px-3">
-                                <span className="font-mono text-2xs text-lx-text-secondary">{formatWipLimit(column.wipLimit)}</span>
-                              </td>
-                              <td className="py-2.5 px-3">
-                                <span className={cn("text-xs", column.requiredFields.length === 0 ? "text-lx-text-muted" : "text-lx-text-secondary")}>
-                                  {formatRequiredFields(column.requiredFields)}
-                                </span>
-                              </td>
-                              <td className="py-2.5 px-3">
-                                {column.githubState ? (
-                                  <span className="font-mono text-2xs text-lx-text-success">{column.githubState}</span>
-                                ) : (
-                                  <span className="text-xs text-lx-text-muted">—</span>
-                                )}
-                              </td>
-                              <td className="py-2.5 px-3">
-                                <div className="flex items-center gap-3">
-                                  <button
-                                    type="button"
-                                    className="btn btn-ghost h-7 px-2.5 text-xs"
-                                    onClick={() => setColumnForm({ isOpen: true, column })}
-                                    aria-label="Edit column"
-                                  >
-                                    Edit
-                                  </button>
-                                  <button
-                                    type="button"
-                                    className="btn btn-danger h-7 w-7 p-0 flex items-center justify-center"
-                                    onClick={() => deleteColumn.mutate({ id: column.id })}
-                                    aria-label="Delete column"
-                                  >
-                                    <Trash2 size={12} strokeWidth={1.5} />
-                                  </button>
-                                </div>
-                              </td>
-                            </tr>
-                          ))}
+                              {orderedColumns.map((column) => (
+                                <SortableRow key={column.id} id={column.id} className="border-b border-lx-border last:border-b-0">
+                                  <td className="py-2.5 px-3 text-sm font-medium text-lx-text-primary">{column.name}</td>
+                                  <td className="py-2.5 px-3"><ColorSwatch color={column.color} /></td>
+                                  <td className="py-2.5 px-3"><span className="font-mono text-2xs text-lx-text-secondary">{formatWipLimit(column.wipLimit)}</span></td>
+                                  <td className="py-2.5 px-3">
+                                    <span className={cn("text-xs", column.requiredFields.length === 0 ? "text-lx-text-muted" : "text-lx-text-secondary")}>
+                                      {formatRequiredFields(column.requiredFields)}
+                                    </span>
+                                  </td>
+                                  <td className="py-2.5 px-3">
+                                    {column.githubState ? (
+                                      <span className="font-mono text-2xs text-lx-text-success">{column.githubState}</span>
+                                    ) : (
+                                      <span className="text-xs text-lx-text-muted">—</span>
+                                    )}
+                                  </td>
+                                  <td className="py-2.5 px-3">
+                                    <div className="flex items-center gap-3">
+                                      <button type="button" className="btn btn-ghost h-7 px-2.5 text-xs" onClick={() => setColumnForm({ isOpen: true, column })} aria-label="Edit column">Edit</button>
+                                      <button type="button" className="btn btn-danger h-7 w-7 p-0 flex items-center justify-center" onClick={() => setDeleteColumnTarget(column)} aria-label="Delete column">
+                                        <Trash2 size={12} strokeWidth={1.5} />
+                                      </button>
+                                    </div>
+                                  </td>
+                                </SortableRow>
+                              ))}
                         </tbody>
                       </table>
+                        </SortableContext>
+                      </DndContext>
                     </div>
                   )}
 
@@ -234,57 +293,48 @@ export function KanbanSettingsModal({ slug, isOpen, onClose }: KanbanSettingsMod
                     <EmptySection type="swimlane" onAdd={() => setSwimlaneForm({ isOpen: true, swimlane: null })} />
                   ) : (
                     <div className="bg-lx-surface-card border border-lx-border rounded-lg overflow-hidden">
+                      <DndContext sensors={sensors} onDragEnd={handleSwimlaneDragEnd}>
+                        <SortableContext items={orderedSwimlanes.map((s) => s.id)} strategy={verticalListSortingStrategy}>
                       <table className="w-full border-collapse text-[13px] font-body">
                         <thead>
                           <tr className="border-b border-lx-border">
                             <th className="w-8 py-2.5 px-3"></th>
-                            <th className="py-2.5 px-3 text-left text-[11px] uppercase tracking-[0.05em] text-lx-text-secondary font-medium font-body">
-                              Name
-                            </th>
-                            <th className="py-2.5 px-3 text-left text-[11px] uppercase tracking-[0.05em] text-lx-text-secondary font-medium font-body">
-                              Description
-                            </th>
+                            <th className="py-2.5 px-3 text-left text-[11px] uppercase tracking-[0.05em] text-lx-text-secondary font-medium font-body" style={{ width: 160 }}>Name</th>
+                            <th className="py-2.5 px-3 text-left text-[11px] uppercase tracking-[0.05em] text-lx-text-secondary font-medium font-body">Description</th>
                             <th className="w-[100px] py-2.5 px-3"></th>
                           </tr>
                         </thead>
                         <tbody>
-                          {swimlanes.map((swimlane) => (
-                            <tr key={swimlane.id} className="border-b border-lx-border last:border-b-0">
-                              <td className="py-2.5 px-3">
-                                <GripVertical size={14} className="text-lx-text-muted cursor-grab" />
-                              </td>
-                              <td className="py-2.5 px-3 text-sm font-medium text-lx-text-primary">{swimlane.name}</td>
-                              <td className="py-2.5 px-3">
-                                {swimlane.description ? (
-                                  <span className="text-xs text-lx-text-secondary">{swimlane.description}</span>
-                                ) : (
-                                  <span className="text-xs text-lx-text-muted">—</span>
-                                )}
-                              </td>
-                              <td className="py-2.5 px-3">
-                                <div className="flex items-center gap-3">
-                                  <button
-                                    type="button"
-                                    className="btn btn-ghost h-7 px-2.5 text-xs"
-                                    onClick={() => setSwimlaneForm({ isOpen: true, swimlane })}
-                                    aria-label="Edit swimlane"
-                                  >
-                                    Edit
-                                  </button>
-                                  <button
-                                    type="button"
-                                    className="btn btn-danger h-7 w-7 p-0 flex items-center justify-center"
-                                    onClick={() => deleteSwimlane.mutate({ id: swimlane.id })}
-                                    aria-label="Delete swimlane"
-                                  >
-                                    <Trash2 size={12} strokeWidth={1.5} />
-                                  </button>
-                                </div>
-                              </td>
-                            </tr>
-                          ))}
+                              {orderedSwimlanes.map((swimlane) => (
+                                <SortableRow key={swimlane.id} id={swimlane.id} className="border-b border-lx-border last:border-b-0">
+                                  <td className="py-2.5 px-3 text-sm font-medium text-lx-text-primary">{swimlane.name}</td>
+                                  <td className="py-2.5 px-3" style={{ maxWidth: 0 }}>
+                                    {swimlane.description ? (
+                                      <span
+                                        className="text-xs text-lx-text-secondary truncate block cursor-pointer"
+                                        title={swimlane.description}
+                                        onClick={() => setDescModalTarget(swimlane)}
+                                      >
+                                        {swimlane.description}
+                                      </span>
+                                    ) : (
+                                      <span className="text-xs text-lx-text-muted">—</span>
+                                    )}
+                                  </td>
+                                  <td className="py-2.5 px-3">
+                                    <div className="flex items-center gap-3">
+                                      <button type="button" className="btn btn-ghost h-7 px-2.5 text-xs" onClick={() => setSwimlaneForm({ isOpen: true, swimlane })} aria-label="Edit swimlane">Edit</button>
+                                      <button type="button" className="btn btn-danger h-7 w-7 p-0 flex items-center justify-center" onClick={() => setDeleteSwimlaneTarget(swimlane)} aria-label="Delete swimlane">
+                                        <Trash2 size={12} strokeWidth={1.5} />
+                                      </button>
+                                    </div>
+                                  </td>
+                                </SortableRow>
+                              ))}
                         </tbody>
                       </table>
+                        </SortableContext>
+                      </DndContext>
                     </div>
                   )}
 
@@ -303,6 +353,7 @@ export function KanbanSettingsModal({ slug, isOpen, onClose }: KanbanSettingsMod
         slug={slug}
         column={columnForm.column ?? null}
         isOpen={columnForm.isOpen}
+        zIndex={80}
         onClose={() => setColumnForm({ isOpen: false, column: null })}
         onSubmit={(input) => {
           if (columnForm.column) {
@@ -312,6 +363,7 @@ export function KanbanSettingsModal({ slug, isOpen, onClose }: KanbanSettingsMod
               wipLimit: input.wipLimit,
               requiredFields: input.requiredFields,
               color: input.color ?? undefined,
+              githubState: (input.githubState as "open" | "closed" | null | undefined) ?? undefined,
             });
           } else {
             createColumn.mutate({
@@ -319,6 +371,7 @@ export function KanbanSettingsModal({ slug, isOpen, onClose }: KanbanSettingsMod
               wipLimit: input.wipLimit,
               requiredFields: input.requiredFields,
               color: input.color ?? undefined,
+              githubState: (input.githubState as "open" | "closed" | null | undefined) ?? undefined,
             });
           }
         }}
@@ -328,6 +381,7 @@ export function KanbanSettingsModal({ slug, isOpen, onClose }: KanbanSettingsMod
         slug={slug}
         swimlane={swimlaneForm.swimlane ?? null}
         isOpen={swimlaneForm.isOpen}
+        zIndex={80}
         onClose={() => setSwimlaneForm({ isOpen: false, swimlane: null })}
         onSubmit={(input) => {
           if (swimlaneForm.swimlane) {
@@ -337,6 +391,66 @@ export function KanbanSettingsModal({ slug, isOpen, onClose }: KanbanSettingsMod
           }
         }}
       />
+
+      {deleteColumnTarget &&
+        <ModalPortal overlayZ={80} dialogZ={81}>
+          <div className="dialog dialog-enter pointer-events-auto" role="dialog" aria-modal="true">
+            <h2 className="font-display text-lg font-medium text-lx-text-primary">Delete &lsquo;{deleteColumnTarget.name}&rsquo;?</h2>
+            <p className="text-sm text-lx-text-secondary mt-3 leading-5">
+              This will remove all tasks in this column. This action cannot be undone.
+            </p>
+            <div className="flex items-center gap-2 mt-4 justify-end">
+              <button type="button" className="btn btn-ghost" onClick={() => setDeleteColumnTarget(null)}>Cancel</button>
+              <button type="button" className="btn btn-danger-solid" onClick={() => { deleteColumn.mutate({ id: deleteColumnTarget.id }); setDeleteColumnTarget(null); }}>
+                <Trash2 size={14} strokeWidth={1.5} />
+                Delete
+              </button>
+            </div>
+          </div>
+        </ModalPortal>}
+
+      {deleteSwimlaneTarget &&
+        <ModalPortal overlayZ={80} dialogZ={81}>
+          <div className="dialog dialog-enter pointer-events-auto" role="dialog" aria-modal="true">
+            <h2 className="font-display text-lg font-medium text-lx-text-primary">Delete &lsquo;{deleteSwimlaneTarget.name}&rsquo;?</h2>
+            <p className="text-sm text-lx-text-secondary mt-3 leading-5">
+              This will unassign all tasks in this swimlane. This action cannot be undone.
+            </p>
+            <div className="flex items-center gap-2 mt-4 justify-end">
+              <button type="button" className="btn btn-ghost" onClick={() => setDeleteSwimlaneTarget(null)}>Cancel</button>
+              <button type="button" className="btn btn-danger-solid" onClick={() => { deleteSwimlane.mutate({ id: deleteSwimlaneTarget.id }); setDeleteSwimlaneTarget(null); }}>
+                <Trash2 size={14} strokeWidth={1.5} />
+                Delete
+              </button>
+            </div>
+          </div>
+        </ModalPortal>}
+
+      {descModalTarget &&
+        <ModalPortal overlayZ={80} dialogZ={81}>
+          <div className="dialog dialog-enter pointer-events-auto" role="dialog" aria-modal="true" style={{ maxWidth: 440 }}>
+            <h2 className="font-display text-lg font-medium text-lx-text-primary">{descModalTarget.name}</h2>
+            <div className="text-sm text-lx-text-secondary font-body leading-5 mt-3 whitespace-pre-wrap">
+              {descModalTarget.description || "No description."}
+            </div>
+            <div className="flex items-center justify-end gap-2 mt-4">
+              <button type="button" className="btn btn-ghost" onClick={() => setDescModalTarget(null)}>Close</button>
+            </div>
+          </div>
+        </ModalPortal>}
+
+      {descModalTarget &&
+        <ModalPortal overlayZ={base.overlayZ} dialogZ={base.dialogZ}>
+          <div className="dialog dialog-enter pointer-events-auto" role="dialog" aria-modal="true" style={{ maxWidth: 440 }}>
+            <h2 className="font-display text-lg font-medium text-lx-text-primary">{descModalTarget.name}</h2>
+            <div className="text-sm text-lx-text-secondary font-body leading-5 mt-3 whitespace-pre-wrap">
+              {descModalTarget.description || "No description."}
+            </div>
+            <div className="flex items-center justify-end gap-2 mt-4">
+              <button type="button" className="btn btn-ghost" onClick={() => setDescModalTarget(null)}>Close</button>
+            </div>
+          </div>
+        </ModalPortal>}
     </>
   );
 }

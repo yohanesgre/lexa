@@ -76,31 +76,34 @@ interface Swimlane {
   id: ID;
   projectId: ID;
   name: string;
+  description: string;
   position: number;
 }
 
 type Priority = "urgent" | "high" | "medium" | "low";
 type TaskType = "feature" | "bug" | "task" | "asset";
 
+interface GithubIssue {
+  issueId: string;
+  issueNumber: number;
+  repo: string;                 // "owner/name"
+  syncedState: "open" | "closed" | null;
+  url: string;                  // derived: github.com/<repo>/issues/<n>
+  outOfSync: boolean;           // derived: syncedState !== column's githubState
+}
+
 interface Task {
   id: ID;
   projectId: ID;
   columnId: ID;
-  swimlaneId: ID | null;
+  swimlaneId: ID;
   title: string;
   description: TipTapDoc;
   priority: Priority;
   type: TaskType;
-  assignee: string | null;
+  assignees: string[];
   position: string;               // fractional-index key (opaque to clients)
-  github: {
-    issueId: string;
-    issueNumber: number;
-    repo: string;                 // "owner/name"
-    url: string;                  // derived: github.com/<repo>/issues/<n>
-    syncedState: "open" | "closed" | null;
-    outOfSync: boolean;           // derived: syncedState !== column's githubState
-  } | null;
+  githubs: GithubIssue[];         // multiple GitHub issues per task
   createdAt: ISODate;
   updatedAt: ISODate;
 }
@@ -133,6 +136,45 @@ interface Board {                 // GET /board — full snapshot, unpaginated
   swimlanes: Swimlane[];          // ordered by position
   tasks: Task[];                  // ALL tasks, ordered by (columnId, position)
 }
+
+interface ProjectHealth {
+  project: Project;
+  taskCount: number;
+  columnCount: number;
+  urgentCount: number;            // tasks with priority "urgent" across all columns
+  syncCount: number;              // distinct tasks where any linked issue's syncedState ≠ column's githubState
+  health: "ok" | "approaching" | "exceeded";
+  wipSegments: Array<{
+    state: "ok" | "approaching" | "exceeded" | "empty";
+    flex: number;                 // proportional width in the WIP mini bar
+  }>;
+}
+
+interface Dashboard {             // GET /api/dashboard — full dashboard snapshot
+  projects: ProjectHealth[];      // ordered by name
+  stats: {
+    totalTasks: number;
+    activeProjects: number;
+    wipExceeded: number;
+    outOfSync: number;
+  };
+  urgentTasks: Array<{            // all urgent tasks across all projects, capped at 50
+    id: ID;
+    title: string;
+    projectName: string;
+    projectSlug: string;
+    columnName: string;
+    priority: Priority;
+  }>;
+  outOfSyncTasks: Array<{         // all out-of-sync tasks across all projects, capped at 50
+    id: ID;
+    title: string;
+    projectName: string;
+    projectSlug: string;
+    repo: string;
+    issueNumber: number;
+  }>;
+}
 ```
 
 ## Endpoints
@@ -156,6 +198,15 @@ body { name?, description?, githubRepo? }
 
 DELETE /api/projects/:slug
 → 204 | 404        (cascades: columns, swimlanes, tasks, wiki)
+
+GET    /api/dashboard
+→ 200 Dashboard     (unpaginated full snapshot — health cards, stats, attention lists)
+  Health derivation per project:
+  - health: "exceeded" if any column has tasks > wipLimit; "approaching" if urgentCount > 0; else "ok"
+  - wipSegments: one segment per column, state = compare count vs wipLimit (empty if count=0)
+  - urgentCount: tasks WHERE priority = 'urgent' AND column_id IN (project columns)
+  - syncCount: tasks WHERE github.outOfSync = true
+  urgentTasks/outOfSyncTasks capped at 50 items each
 ```
 
 ### Columns
@@ -181,9 +232,9 @@ DELETE /api/projects/:slug/columns/:id
 
 ```
 GET    /api/projects/:slug/swimlanes        → 200 { data: Swimlane[] }
-POST   /api/projects/:slug/swimlanes        body { name*, position? } → 201 Swimlane
-PATCH  /api/projects/:slug/swimlanes/:id    body { name?, position? } → 200 Swimlane
-DELETE /api/projects/:slug/swimlanes/:id    → 204 (tasks' swimlane_id → NULL, not deleted)
+POST   /api/projects/:slug/swimlanes        body { name*, description?, position? } → 201 Swimlane
+PATCH  /api/projects/:slug/swimlanes/:id    body { name?, description?, position? } → 200 Swimlane
+DELETE /api/projects/:slug/swimlanes/:id    → 204 (tasks must be reassigned first — swimlane_id is NOT NULL)
 ```
 
 ### Tasks
@@ -193,7 +244,7 @@ GET    /api/projects/:slug/tasks?columnId&swimlaneId&assignee&type&limit&cursor
 → 200 { data: Task[], nextCursor }
 
 POST   /api/projects/:slug/tasks
-body { columnId*, swimlaneId?, title*, description?, priority?, type?, assignee? }
+body { columnId*, swimlaneId*, title*, description?, priority?, type?, assignees? }
 → 201 Task
   | 404 COLUMN_NOT_FOUND / SWIMLANE_NOT_FOUND
   | 422 REQUIRED_FIELD            (creating directly into a guarded column)
@@ -203,12 +254,12 @@ GET    /api/projects/:slug/tasks/:id
 → 200 Task | 404
 
 PATCH  /api/projects/:slug/tasks/:id
-body { title?, description?, priority?, type?, assignee? }
+body { title?, description?, priority?, type?, assignees? }
 → 200 Task | 404 | 422 REQUIRED_FIELD   (can't clear a required field in guarded column)
 
 POST   /api/projects/:slug/tasks/:id/move
-body { columnId*, swimlaneId?, beforeTaskId?, afterTaskId? }
-  - swimlaneId omitted → keep current; explicit null → clear
+body { columnId*, swimlaneId*, beforeTaskId?, afterTaskId? }
+  - swimlaneId required — every task belongs to a swimlane
   - beforeTaskId/afterTaskId omitted → append to end of target column
   - before/after must belong to target column
 → 200 Task

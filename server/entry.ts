@@ -42,7 +42,12 @@ Bun.serve({
       if (url.pathname !== "/api/health" && !verifyApiKey(req, DATABASE_PATH)) {
         return new Response(JSON.stringify({ error: { code: "UNAUTHORIZED", message: "Invalid or missing API key" } }), { status: 401, headers: { "Content-Type": "application/json" } });
       }
-      return apiHandler(req);
+      try {
+        return await apiHandler(req);
+      } catch (err) {
+        console.error("[API] Uncaught:", err);
+        return new Response(JSON.stringify({ error: { code: "INTERNAL", message: err instanceof Error ? err.message : String(err) } }), { status: 500, headers: { "Content-Type": "application/json" } });
+      }
     }
 
     const user = findOrCreateUser(req, DATABASE_PATH);
@@ -129,6 +134,8 @@ function seedDevData(dbPath: string) {
     const sql = readFileSync(seedFile, "utf-8");
     db.exec(sql);
     console.log("Seed complete");
+  } catch (err) {
+    console.error("Seed failed:", (err as Error).message);
   } finally {
     db.close();
   }

@@ -44,11 +44,14 @@ export class ApiKeyService extends Effect.Service<ApiKeyService>()("Lexa/ApiKeyS
           const keyHash = yield* Effect.promise(() => sha256(rawKey));
           const id = crypto.randomUUID();
           const row = yield* repo.create({ id, name: trimmed, keyHash });
+          yield* Effect.logInfo(`[ApiKey] Created ${row.id} name=${trimmed}`);
           return { key: rowToApiKey(row), rawKey };
         }),
 
       delete: (id: string): Effect.Effect<void, DbError | RowNotFound | ConstraintViolation> =>
-        repo.deleteById(id),
+        repo.deleteById(id).pipe(
+          Effect.tap(() => Effect.logInfo(`[ApiKey] Deleted ${id}`))
+        ),
     };
   }),
 }) {}

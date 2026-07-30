@@ -26,7 +26,7 @@ export const tool = {
 
       const moved = yield* taskService.move(args.taskId, {
         columnId: column.id,
-        swimlaneId: null,
+        swimlaneId: task.swimlaneId,
         beforeTaskId: args.beforeTaskId,
         afterTaskId: args.afterTaskId,
       });
@@ -54,15 +54,13 @@ export const tool = {
         swimlane: swimlane?.name ?? null,
         priority: moved.priority,
         type: moved.type,
-        assignee: moved.assignee,
-        githubIssue: moved.github
-          ? {
-              number: moved.github.issueNumber,
-              repo: moved.github.repo,
-              url: moved.github.url,
-              outOfSync: moved.github.outOfSync,
-            }
-          : null,
+        assignees: moved.assignees,
+        githubIssues: moved.githubs.map(g => ({
+          number: g.issueNumber,
+          repo: g.repo,
+          url: g.url,
+          outOfSync: g.outOfSync,
+        })),
         updatedAt: moved.updatedAt,
       };
     }),

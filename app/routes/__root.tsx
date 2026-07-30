@@ -3,7 +3,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import phosphorCss from "../styles/phosphor.css?url";
 import { useProjects } from "../lib/queries";
-import { stubTaskCount } from "../lib/dashboard-stubs";
+import { ModalStackProvider } from "../components/ui/ModalStack";
 import { ProjectSelectionProvider, useProjectSelection } from "../lib/project-selection";
 
 export const Route = createRootRoute({
@@ -128,9 +128,6 @@ function ProjectSwitcher({ routeType }: { routeType: "dashboard" | "board" | "wi
                     <span className="project-switcher-row-name">{project.name}</span>
                     <span className="project-switcher-row-desc">{project.slug}</span>
                   </div>
-                  <span className="project-switcher-row-count">
-                    {String(stubTaskCount(project.slug)).padStart(3, "0")}
-                  </span>
                 </Link>
               );
             })
@@ -256,9 +253,11 @@ function RootComponent() {
       </head>
       <body>
         <QueryClientProvider client={queryClient}>
-          <ProjectSelectionProvider>
-            <AppShell />
-          </ProjectSelectionProvider>
+          <ModalStackProvider>
+            <ProjectSelectionProvider>
+              <AppShell />
+            </ProjectSelectionProvider>
+          </ModalStackProvider>
         </QueryClientProvider>
         <Scripts />
       </body>

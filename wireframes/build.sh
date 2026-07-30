@@ -1,37 +1,50 @@
 #!/usr/bin/env bash
-# Build wireframes: recursively replace <INCLUDE partials/FILE> with actual content.
-# Reads from src/ → writes to ./ (wireframes root).
+# Build wireframes: recursively resolve <INCLUDE partials/FILE> from src/ → dist/.
 # Supports nested includes — partials can include other partials.
+# Handles both line-start and inline (mid-tag) INCLUDEs.
 set -euo pipefail
 cd "$(dirname "$0")"
 
 MAX_DEPTH=10
+PARTIALS_DIR="src/partials"
 
-resolve_file() {
-  local file="$1" indent="${2:-}" depth="${3:-0}"
-  if (( depth > MAX_DEPTH )); then
-    echo "${indent}<!-- MAX_DEPTH exceeded for $file -->"
-    return
-  fi
-  while IFS= read -r line; do
-    if [[ "$line" =~ ^([[:space:]]*)"<INCLUDE "(.*)" />"[[:space:]]*$ ]]; then
-      local partial="partials/${BASH_REMATCH[2]}"
-      local sub_indent="${indent}${BASH_REMATCH[1]}"
-      if [[ -f "$partial" ]]; then
-        resolve_file "$partial" "$sub_indent" $((depth + 1))
-      else
-        echo "${indent}<!-- MISSING: $partial -->"
-      fi
-    else
-      echo "${indent}${line}"
-    fi
-  done < "$file"
-}
+rm -rf dist
+mkdir -p dist
+cp src/wireframes.css dist/
 
-for src_file in src/*.html; do
-  base=$(basename "$src_file")
-  out_file="$base"
-  resolve_file "$src_file" "" 0 > "$out_file"
-  echo "  built $base"
-done
-echo "Done."
+python3 - "$PARTIALS_DIR" "$MAX_DEPTH" << 'PYEOF'
+import sys, re, os
+
+partials_dir = sys.argv[1]
+max_depth = int(sys.argv[2])
+
+def resolve(filepath, depth=0):
+    if depth > max_depth:
+        return f"<!-- MAX_DEPTH exceeded for {filepath} -->"
+    with open(filepath) as f:
+        content = f.read()
+    def repl(m):
+        indent = m.group(1)
+        name = m.group(2)
+        p = os.path.join(partials_dir, name)
+        if os.path.isfile(p):
+            inner = resolve(p, depth + 1)
+            return "\n".join(indent + line for line in inner.split("\n"))
+        return f"{indent}<!-- MISSING: {p} -->"
+    # Match <INCLUDE name.html /> at line start (with optional indent) or inline
+    content = re.sub(r'^(\s*)<INCLUDE (\S+) />', repl, content, flags=re.MULTILINE)
+    content = re.sub(r'<INCLUDE (\S+) />', lambda m: resolve(os.path.join(partials_dir, m.group(1)), depth + 1).strip(), content)
+    return content
+
+src_dir = "src"
+for f in sorted(os.listdir(src_dir)):
+    if not f.endswith(".html"):
+        continue
+    src = os.path.join(src_dir, f)
+    out = os.path.join("dist", f)
+    result = resolve(src)
+    with open(out, "w") as fh:
+        fh.write(result)
+    print(f"  built {f}")
+print("Done.")
+PYEOF
