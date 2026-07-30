@@ -59,11 +59,11 @@ interface TaskSummary {
   id: string;
   title: string;
   column: string;              // name, not id
-  swimlane: string | null;     // name
+  swimlane: string;             // name
   priority: "urgent" | "high" | "medium" | "low";
   type: "feature" | "bug" | "task" | "asset";
-  assignee: string | null;
-  githubIssue: { number: number; repo: string; url: string; outOfSync: boolean } | null;
+  assignees: string[];
+  githubIssues: { number: number; repo: string; url: string; outOfSync: boolean }[];
   updatedAt: string;
 }
 
@@ -82,7 +82,7 @@ interface PageMeta { title: string; slug: string; parentSlug: string | null; upd
 
 **`create_task`**
 ```json
-Input:  { project*, column*, title*, description?, priority?, type?, assignee?, swimlane? }
+Input:  { project*, column*, title*, description?, priority?, type?, assignees?, swimlane? }
         description = Markdown. priority/type default "medium"/"task".
 Output: TaskSummary
 Errors: PROJECT_NOT_FOUND, COLUMN_NOT_FOUND (+availableColumns), SWIMLANE_NOT_FOUND, REQUIRED_FIELD
@@ -103,8 +103,8 @@ Output: TaskDetail (description as Markdown)
 
 **`update_task`**
 ```json
-Input:  { taskId*, title?, description?, priority?, type?, assignee? }
-        description = Markdown (full replace). assignee: explicit null clears.
+Input:  { taskId*, title?, description?, priority?, type?, assignees? }
+        description = Markdown (full replace). assignees: empty array clears.
 Output: TaskDetail
 Errors: TASK_NOT_FOUND, REQUIRED_FIELD
 ```
@@ -174,7 +174,7 @@ Errors: TASK_NOT_FOUND, ALREADY_LINKED, GITHUB_API_ERROR
 
 **`unlink_github_issue`**
 ```json
-Input:  { taskId* }
+Input:  { taskId*, issueId* }     issueId = GitHub node_id to unlink
 Output: { unlinked: true }        (GitHub issue is NOT closed or deleted)
 ```
 
@@ -198,7 +198,9 @@ Output: { name, slug, description, githubRepo,
 ```json
 Input:  { slug* }
 Output: { columns: [{ name, count, wipLimit }], totalTasks }
-        Cheap board-health snapshot — use this before batch moves.
+         Cheap board-health snapshot — use this before batch moves.
+         Lightweight agent tool (no urgent/sync/dashboard-level aggregation).
+         Dashboard health aggregation is the REST GET /api/dashboard endpoint.
 ```
 
 ## Agent Usage Notes (included in tool descriptions)

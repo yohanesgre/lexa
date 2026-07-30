@@ -24,6 +24,7 @@ CREATE TABLE projects (
 -- required_fields: JSON array of fields a task must have populated
 --   before entering this column, e.g. '["description","assignee"]'.
 --   Emptiness for "description" = TipTap doc with no text-bearing nodes.
+--   Emptiness for "assignee" = task_assignees has no rows for this task.
 -- github_state: maps this column to a GitHub issue state for sync.
 --   Exactly one column per project should map to 'closed' (e.g. Done).
 --   Renaming a column never breaks sync — the mapping is explicit.
@@ -43,10 +44,11 @@ CREATE TABLE columns (
 -- Swimlanes (horizontal grouping)
 -- ============================================================
 CREATE TABLE swimlanes (
-  id         TEXT PRIMARY KEY,
-  project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
-  name       TEXT NOT NULL,
-  position   INTEGER NOT NULL
+  id          TEXT PRIMARY KEY,
+  project_id  TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  name        TEXT NOT NULL,
+  description TEXT NOT NULL DEFAULT '',
+  position    INTEGER NOT NULL
 );
 
 -- ============================================================
@@ -55,32 +57,57 @@ CREATE TABLE swimlanes (
 -- position: fractional-index key (see Design Notes). UNIQUE(column_id, position)
 --   turns a concurrent-create race into a constraint violation → app retries
 --   with a freshly generated key.
--- github_issue_id UNIQUE: one task ↔ one GitHub issue, enforced.
--- github_synced_state: last KNOWN issue state — set both when we push to
---   GitHub AND when we process a GitHub-originated webhook. The webhook
---   handler compares payload state against this; equal → echo → skip.
+-- GitHub issues are stored in the task_github_issues junction table (multi-issue).
+-- The old inline columns (github_issue_id, github_issue_number, github_repo,
+--   github_synced_state) still exist on the tasks table but are unused — D1 does
+--   not support DROP COLUMN.
 CREATE TABLE tasks (
   id                  TEXT PRIMARY KEY,
   project_id          TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
   column_id           TEXT NOT NULL REFERENCES columns(id) ON DELETE RESTRICT,
                                                             -- deleting non-empty column → ColumnNotEmpty 409
-  swimlane_id         TEXT REFERENCES swimlanes(id) ON DELETE SET NULL,
+  swimlane_id         TEXT NOT NULL REFERENCES swimlanes(id),
   title               TEXT NOT NULL,
   description         TEXT NOT NULL DEFAULT '{}',            -- TipTap JSON
   priority            TEXT NOT NULL DEFAULT 'medium'
                         CHECK (priority IN ('urgent','high','medium','low')),
   type                TEXT NOT NULL DEFAULT 'task'
-                        CHECK (type IN ('feature','bug','task','asset')),
-  assignee            TEXT,                                  -- freeform string; no users table
+                         CHECK (type IN ('feature','bug','task','asset')),
   position            TEXT NOT NULL,                         -- fractional-index key
-  github_issue_id     TEXT UNIQUE,                           -- GitHub node_id; one task ↔ one issue
-  github_issue_number INTEGER,
-  github_repo         TEXT,                                  -- "owner/name" captured at link time;
-                                                             -- issue URL derived: github.com/<repo>/issues/<n>
-  github_synced_state TEXT CHECK (github_synced_state IN ('open','closed')),
+  github_issue_id     TEXT UNIQUE,                           -- DEPRECATED — now in task_github_issues
+  github_issue_number INTEGER,                              -- DEPRECATED
+  github_repo         TEXT,                                  -- DEPRECATED
+  github_synced_state TEXT CHECK (github_synced_state IN ('open','closed')), -- DEPRECATED
   created_at          TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at          TEXT NOT NULL DEFAULT (datetime('now')),  -- maintained by app
   UNIQUE(column_id, position)
+);
+
+-- ============================================================
+-- Task GitHub Issues (multi-issue junction table)
+-- ============================================================
+-- One task can be linked to multiple GitHub issues (across repos).
+-- synced_state: echo suppression per-link — the webhook handler compares the
+--   payload state against this value; equal → skip. Different from column's
+--   githubState → outOfSync displayed in UI.
+CREATE TABLE task_github_issues (
+  task_id       TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+  issue_id      TEXT NOT NULL,                              -- GitHub node_id
+  issue_number  INTEGER NOT NULL,
+  repo          TEXT NOT NULL,                              -- "owner/name"
+  synced_state  TEXT CHECK (synced_state IN ('open','closed')),
+  PRIMARY KEY (task_id, issue_id)
+);
+
+-- ============================================================
+-- Task Assignees (multi-assignee junction table)
+-- ============================================================
+-- Replaces the old tasks.assignee TEXT column (single string).
+-- Stacked avatars on kanban cards render up to 3 + overflow count.
+CREATE TABLE task_assignees (
+  task_id   TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+  user_name TEXT NOT NULL,
+  PRIMARY KEY (task_id, user_name)
 );
 
 -- ============================================================
@@ -203,7 +230,7 @@ Count-check-then-update is racy. The move is a single conditional statement:
 ```sql
 UPDATE tasks
 SET column_id = ?2,
-    swimlane_id = ?3,          -- omitted in payload → app passes current value; explicit NULL → clear
+    swimlane_id = ?3,          -- required — every task must belong to a swimlane
     position = ?4,
     updated_at = datetime('now')
 WHERE id = ?1
@@ -218,13 +245,14 @@ WHERE id = ?1
 
 - The `column_id = ?2` short-circuit prevents false `WipLimitExceeded` on pure reorders inside an at-limit column (the moving task would otherwise count itself).
 - Count and last-key queries include `project_id` so `idx_tasks_board` (leftmost `project_id`) applies.
-- Swimlane semantics: payload omits `swimlaneId` → keep current value; explicit `null` → clear the lane.
+- Every task must belong to both a column and a swimlane. Columns are templates rendered inside swimlane rows. New projects get a default "Default" swimlane.
+- **WIP limit is per-column total** — counts ALL tasks in the column across all swimlanes. The WIP badge in each swimlane row shows the same total, not per-swimlane count.
 
-### Echo suppression (`github_synced_state`)
-Every Lexa→GitHub state sync writes the state we pushed. The webhook handler compares the payload's issue state against `github_synced_state`: equal → our own echo → skip (and update `received_at` only). Without this, every move triggers a self-reinforcing webhook storm.
+### Echo suppression (`synced_state`)
+Every Lexa→GitHub state sync writes the state we pushed to `task_github_issues.synced_state` for that specific issue. The webhook handler compares the payload's issue state against `synced_state`: equal → our own echo → skip. Without this, every move triggers a self-reinforcing webhook storm.
 
-### One task ↔ one issue
-`UNIQUE(github_issue_id)` + an already-linked guard in the service prevents duplicate issue creation and ambiguous webhook lookups (`findByGithubIssue` always returns ≤1 row).
+### One task ↔ many issues
+Multiple GitHub issues can link to one task. Each link has its own `synced_state` for per-issue echo suppression. The webhook looks up by `issue_id` in `task_github_issues` to find the task.
 
 ### FTS5 for `search_wiki`
 The `wiki_fts` external-content table + triggers keep the index in sync automatically. The app maintains `content_text` (plain-text projection of TipTap JSON) on every wiki write — searching raw TipTap JSON would match syntax tokens, not words.

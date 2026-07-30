@@ -1,16 +1,14 @@
 import { useEffect, useRef, useState } from "react";
 import { Link, useParams } from "@tanstack/react-router";
-import { Check, X } from "lucide-react";
-import { useEditor, EditorContent } from "@tiptap/react";
-import type { JSONContent } from "@tiptap/core";
-import StarterKit from "@tiptap/starter-kit";
-import TaskList from "@tiptap/extension-task-list";
-import TaskItem from "@tiptap/extension-task-item";
-import Placeholder from "@tiptap/extension-placeholder";
-import type { Priority, Task, TaskType, TipTapDoc } from "../../shared/types";
+import { Check, ChevronDown, X } from "lucide-react";
+import type { Priority, Task, TaskType, TipTapDoc, GithubIssue } from "../../shared/types";
 import { extractText } from "../../shared/tiptap-text";
 import { renderDoc } from "./tiptap-render";
+import { TextEditor } from "./TextEditor";
+import { Toolbar, textEditorExtensions } from "./TextEditor";
 import { cn } from "./ui/cn";
+import { useEditor, EditorContent } from "@tiptap/react";
+import type { JSONContent } from "@tiptap/core";
 
 function GithubMark({ size = 14, className }: { size?: number; className?: string }) {
   return (
@@ -78,7 +76,7 @@ interface TaskDetailProps {
     columnId: string;
     priority: Priority;
     type: TaskType;
-    assignee: string | null;
+    assignees: string[];
     description: TipTapDoc;
   }) => Promise<void>;
 }
@@ -150,30 +148,34 @@ function SelectDropdown({ value, options, onChange, trigger }: SelectDropdownPro
   );
 }
 
-interface AssigneeSuggestionsProps {
-  value: string;
+interface AssigneeChipsProps {
+  assignees: string[];
   availableAssignees: string[];
   placeholder?: string;
   inputClassName?: string;
-  onChange?: (value: string) => void;
-  onBlur?: (value: string) => void;
+  inputStyle?: React.CSSProperties;
+  onChange?: (assignees: string[]) => void;
+  readonly?: boolean;
+  compact?: boolean;
+  expanded?: boolean;
 }
 
-function AssigneeSuggestions({
-  value,
+function AssigneeChips({
+  assignees,
   availableAssignees,
   placeholder,
   inputClassName,
+  inputStyle,
   onChange,
-  onBlur,
-}: AssigneeSuggestionsProps) {
+  readonly,
+  compact,
+  expanded = false,
+}: AssigneeChipsProps) {
+  const [localExpanded, setLocalExpanded] = useState(false);
+  const isExpanded = expanded || localExpanded;
   const [open, setOpen] = useState(false);
-  const [draft, setDraft] = useState(value);
+  const [draft, setDraft] = useState("");
   const containerRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    setDraft(value);
-  }, [value]);
 
   useEffect(() => {
     if (!open) return;
@@ -199,50 +201,118 @@ function AssigneeSuggestions({
     };
   }, [open]);
 
-  const hasSuggestions = availableAssignees.length > 0;
+  const suggestions = availableAssignees.filter(
+    (a) => !assignees.includes(a) && (!draft || a.toLowerCase().includes(draft.toLowerCase()))
+  );
+
+  const handleAdd = (name: string) => {
+    onChange?.([...assignees, name]);
+    setDraft("");
+    setOpen(false);
+  };
+
+  const handleRemove = (name: string) => {
+    onChange?.(assignees.filter((a) => a !== name));
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === "Enter" && draft.trim() && !assignees.includes(draft.trim())) {
+      e.preventDefault();
+      handleAdd(draft.trim());
+    }
+  };
+
+  if (readonly) {
+    const visible = compact && !isExpanded ? assignees.slice(0, 3) : assignees;
+    const overflow = compact && !isExpanded ? assignees.length - 3 : 0;
+    return (
+      <>
+        {visible.map((a) => (
+          <span key={a} className="assignee-chip">
+            <span className="avatar">{a.slice(0, 2).toUpperCase()}</span>
+            <span className="text-sm text-lx-text-primary font-medium">{a}</span>
+          </span>
+        ))}
+        {overflow > 0 && (
+          <button
+            type="button"
+            className="assignee-chip"
+            style={{ opacity: 0.6, cursor: "pointer", border: "none", background: "none", font: "inherit" }}
+            onClick={() => setLocalExpanded(true)}
+            title="Show all assignees"
+          >
+            <span className="avatar">+{overflow}</span>
+          </button>
+        )}
+        {compact && isExpanded && (
+          <button
+            type="button"
+            className="assignee-chip"
+            style={{ opacity: 0.6, cursor: "pointer", border: "none", background: "none", font: "inherit" }}
+            onClick={() => setLocalExpanded(false)}
+            title="Collapse"
+          >
+            <span className="avatar" style={{ fontSize: 10 }}>-</span>
+          </button>
+        )}
+      </>
+    );
+  }
 
   return (
-    <div ref={containerRef} className="relative inline-flex">
+    <>
       <input
         className={inputClassName}
+        style={inputStyle}
         value={draft}
         placeholder={placeholder}
         onFocus={() => {
-          if (hasSuggestions) setOpen(true);
+          if (availableAssignees.length > 0) setOpen(true);
         }}
         onChange={(e) => {
-          const next = e.target.value;
-          setDraft(next);
-          onChange?.(next);
+          setDraft(e.target.value);
+          if (!open && availableAssignees.length > 0) setOpen(true);
         }}
+        onKeyDown={handleKeyDown}
         onBlur={(e) => {
           const related = e.relatedTarget as Node | null;
           if (containerRef.current && related && containerRef.current.contains(related)) {
             return;
           }
-          onBlur?.(draft);
+          if (draft.trim() && !assignees.includes(draft.trim())) {
+            handleAdd(draft.trim());
+          }
         }}
       />
-      {open && hasSuggestions && (
-        <div className={cn("menu-popover", "left")}>
-          {availableAssignees.map((assignee) => (
+      {assignees.map((a) => (
+        <span key={a} className="assignee-chip">
+          <span className="avatar">{a.slice(0, 2).toUpperCase()}</span>
+          <span className="text-sm text-lx-text-primary font-medium">{a}</span>
+          <button type="button" className="assignee-chip-x" onClick={() => handleRemove(a)}>
+            <X size={10} strokeWidth={2} />
+          </button>
+        </span>
+      ))}
+      {open && suggestions.length > 0 && (
+        <div className="dropdown-menu" style={{ position: "absolute", top: "100%", left: 0, zIndex: 60 }}>
+          <div className="dropdown-label">Members</div>
+          {suggestions.map((name) => (
             <button
-              key={assignee}
+              key={name}
               type="button"
-              className={cn("menu-item", assignee === draft && "active")}
-              onClick={() => {
-                setDraft(assignee);
-                onChange?.(assignee);
-                setOpen(false);
-              }}
+              className={cn("dropdown-item", assignees.includes(name) && "active")}
+              onClick={() => handleAdd(name)}
             >
-              <span className="avatar">{assignee.slice(0, 2).toUpperCase()}</span>
-              <span className="flex-1 text-left">{assignee}</span>
+              <span className="avatar">{name.slice(0, 2).toUpperCase()}</span>
+              <div>
+                <div className="text-sm font-medium text-lx-text-primary">{name}</div>
+                <div className="font-mono text-2xs text-lx-text-muted">{name.toLowerCase()}@example.com</div>
+              </div>
             </button>
           ))}
         </div>
       )}
-    </div>
+    </>
   );
 }
 
@@ -253,12 +323,12 @@ const capitalize = (s: string) => s[0].toUpperCase() + s.slice(1);
 function getMissingRequiredFields(
   columnId: string,
   requiredFieldsMap: { columnId: string; fields: string[] }[] | undefined,
-  values: { assignee: string | null; description: TipTapDoc }
+  values: { assignees: string[]; description: TipTapDoc }
 ): RequiredFieldName[] {
   const required = requiredFieldsMap?.find((column) => column.columnId === columnId)?.fields ?? [];
   const missing: RequiredFieldName[] = [];
   for (const field of required) {
-    if (field === "assignee" && (!values.assignee || values.assignee.trim() === "")) {
+    if (field === "assignee" && values.assignees.length === 0) {
       missing.push("assignee");
     } else if (field === "description" && extractText(values.description) === "") {
       missing.push("description");
@@ -275,32 +345,6 @@ interface DescriptionEditorProps {
   editable?: boolean;
 }
 
-function ToolbarButton({
-  command,
-  isActive,
-  title,
-  children,
-  style,
-}: {
-  command: () => void;
-  isActive: boolean;
-  title: string;
-  children: React.ReactNode;
-  style?: React.CSSProperties;
-}) {
-  return (
-    <button
-      type="button"
-      title={title}
-      onClick={command}
-      className={cn("toolbar-btn", isActive && "active")}
-      style={style}
-    >
-      {children}
-    </button>
-  );
-}
-
 function DescriptionEditor({
   initialContent,
   onChange,
@@ -308,34 +352,21 @@ function DescriptionEditor({
   placeholder,
   editable = true,
 }: DescriptionEditorProps) {
-  const containerRef = useRef<HTMLDivElement>(null);
+  const onBlurRef = useRef(onBlur);
+  onBlurRef.current = onBlur;
+  const onChangeRef = useRef(onChange);
+  onChangeRef.current = onChange;
 
   const editor = useEditor({
     immediatelyRender: false,
-    extensions: [
-      StarterKit.configure({
-        heading: { levels: [2, 3] },
-      }),
-      TaskList,
-      TaskItem.configure({
-        nested: true,
-      }),
-      Placeholder.configure({
-        placeholder: placeholder ?? "Add a description...",
-      }),
-    ],
+    extensions: textEditorExtensions,
     content: initialContent as unknown as JSONContent,
     editable,
     onUpdate: ({ editor: nextEditor }) => {
-      onChange?.(nextEditor.getJSON() as unknown as TipTapDoc);
+      onChangeRef.current?.(nextEditor.getJSON() as unknown as TipTapDoc);
     },
-    onBlur: ({ event }) => {
-      if (!editor) return;
-      const related = (event as FocusEvent).relatedTarget as Node | null;
-      if (containerRef.current && related && containerRef.current.contains(related)) {
-        return;
-      }
-      onBlur?.(editor.getJSON() as unknown as TipTapDoc);
+    onBlur: ({ editor: ed }) => {
+      onBlurRef.current?.(ed.getJSON() as unknown as TipTapDoc);
     },
   });
 
@@ -344,85 +375,8 @@ function DescriptionEditor({
   const headingLevel = (editor.getAttributes("heading").level as number | undefined) ?? 0;
 
   return (
-    <div ref={containerRef} className="editor-wrapper">
-      <div className="editor-toolbar">
-        <ToolbarButton
-          command={() => editor.chain().focus().toggleBold().run()}
-          isActive={editor.isActive("bold")}
-          title="Bold"
-        >
-          B
-        </ToolbarButton>
-        <ToolbarButton
-          command={() => editor.chain().focus().toggleItalic().run()}
-          isActive={editor.isActive("italic")}
-          title="Italic"
-          style={{ fontStyle: "italic" }}
-        >
-          I
-        </ToolbarButton>
-        <ToolbarButton
-          command={() => editor.chain().focus().toggleStrike().run()}
-          isActive={editor.isActive("strike")}
-          title="Strike"
-          style={{ textDecoration: "line-through" }}
-        >
-          S
-        </ToolbarButton>
-        <span className="toolbar-sep" />
-        <ToolbarButton
-          command={() => editor.chain().focus().toggleHeading({ level: 2 }).run()}
-          isActive={headingLevel === 2}
-          title="Heading 2"
-        >
-          H2
-        </ToolbarButton>
-        <ToolbarButton
-          command={() => editor.chain().focus().toggleHeading({ level: 3 }).run()}
-          isActive={headingLevel === 3}
-          title="Heading 3"
-        >
-          H3
-        </ToolbarButton>
-        <span className="toolbar-sep" />
-        <ToolbarButton
-          command={() => editor.chain().focus().toggleBulletList().run()}
-          isActive={editor.isActive("bulletList")}
-          title="Bullet list"
-        >
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
-            <path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01" />
-          </svg>
-        </ToolbarButton>
-        <ToolbarButton
-          command={() => editor.chain().focus().toggleOrderedList().run()}
-          isActive={editor.isActive("orderedList")}
-          title="Ordered list"
-        >
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
-            <path d="M10 6h11M10 12h11M10 18h11M4 6h1v4M4 10h2M6 18H4c0-1 2-2 2-3s-1-1.5-2-1" />
-          </svg>
-        </ToolbarButton>
-        <ToolbarButton
-          command={() => editor.chain().focus().toggleTaskList().run()}
-          isActive={editor.isActive("taskList")}
-          title="Checklist"
-        >
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
-            <path d="M3 17l2 2 4-4M3 7l2 2 4-4M13 6h8M13 12h8M13 18h8" />
-          </svg>
-        </ToolbarButton>
-        <span className="toolbar-sep" />
-        <ToolbarButton
-          command={() => editor.chain().focus().toggleCode().run()}
-          isActive={editor.isActive("code")}
-          title="Code"
-        >
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
-            <path d="M18 16l4-4-4-4M6 8l-4 4 4 4" />
-          </svg>
-        </ToolbarButton>
-      </div>
+    <div className="editor-wrapper">
+      <Toolbar editor={editor} headingLevel={headingLevel} />
       <EditorContent editor={editor} className="editor-content" />
     </div>
   );
@@ -434,6 +388,7 @@ export function TaskDetail({ mode = "view", task, project, defaultColumnId, colu
   const isCreate = mode === "create";
 
   const [open, setOpen] = useState(false);
+  const [expanded, setExpanded] = useState(false);
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [selectedColumnId, setSelectedColumnId] = useState(task?.columnId ?? "");
@@ -473,15 +428,13 @@ export function TaskDetail({ mode = "view", task, project, defaultColumnId, colu
     return () => window.removeEventListener("keydown", onKey);
   });
 
-  // Create mode state
   const [createTitle, setCreateTitle] = useState("");
   const [createColumnId, setCreateColumnId] = useState(defaultColumnId ?? (columns?.[0]?.id ?? ""));
   const [createPriority, setCreatePriority] = useState<Priority>("medium");
   const [createType, setCreateType] = useState<TaskType>("task");
-  const [createAssignee, setCreateAssignee] = useState("");
+  const [createAssignees, setCreateAssignees] = useState<string[]>([]);
   const [createDescription, setCreateDescription] = useState<TipTapDoc>(emptyDoc);
 
-  // GitHub link flow state (UI-only)
   const [linkState, setLinkState] = useState<"idle" | "input" | "loading" | "success">("idle");
   const [linkRepo, setLinkRepo] = useState("");
   const [linkedIssue, setLinkedIssue] = useState<{ repo: string; number: number } | null>(null);
@@ -518,14 +471,15 @@ export function TaskDetail({ mode = "view", task, project, defaultColumnId, colu
       columnId: createColumnId,
       priority: createPriority,
       type: createType,
-      assignee: createAssignee.trim() || null,
+      assignees: createAssignees,
       description: createDescription,
     });
     handleClose();
   };
 
-  // View mode state
   const [editingTitle, setEditingTitle] = useState(false);
+  const [editingDescription, setEditingDescription] = useState(false);
+  const [editingAssignees, setEditingAssignees] = useState(false);
   const [draft, setDraft] = useState(task?.title ?? "");
 
   useEffect(() => {
@@ -558,11 +512,11 @@ export function TaskDetail({ mode = "view", task, project, defaultColumnId, colu
   const currentColumnName = columns?.find((column) => column.id === currentColumnId)?.name ?? "";
   const missingFields = isCreate
     ? getMissingRequiredFields(createColumnId, columnRequiredFields, {
-        assignee: createAssignee.trim() || null,
+        assignees: createAssignees,
         description: createDescription,
       })
     : getMissingRequiredFields(currentColumnId, columnRequiredFields, {
-        assignee: task?.assignee ?? null,
+        assignees: task?.assignees ?? [],
         description: task?.description ?? emptyDoc,
       });
 
@@ -572,12 +526,12 @@ export function TaskDetail({ mode = "view", task, project, defaultColumnId, colu
 
   if (!isCreate && !task) return null;
 
-  const github = isCreate ? null : task?.github ?? null;
+  const githubs: GithubIssue[] = isCreate ? [] : task?.githubs ?? [];
 
   return (
     <>
       <div className={cn("slideover-overlay", !open && "overlay-closed")} onClick={handleClose} />
-      <div className={cn("slideover", !open && "slideover-closed")} role="dialog" aria-modal="true">
+      <div className={cn("slideover", expanded && "slideover-expanded", !open && "slideover-closed")} role="dialog" aria-modal="true">
         <div className="slideover-header border-b border-lx-border-subtle">
           {isCreate ? (
             <span className="text-xs font-body text-lx-text-muted">
@@ -607,9 +561,21 @@ export function TaskDetail({ mode = "view", task, project, defaultColumnId, colu
               )}
             </span>
           )}
-          <button className="btn btn-ghost !w-8 !h-8 !p-0" onClick={handleClose} aria-label="Close">
-            <X size={18} strokeWidth={1.5} />
-          </button>
+          <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+            <button
+              className="btn btn-ghost !w-8 !h-8 !p-0"
+              onClick={() => setExpanded((v) => !v)}
+              aria-label="Toggle width"
+              title="Toggle width (480px → 60vw)"
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5}>
+                <path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7" />
+              </svg>
+            </button>
+            <button className="btn btn-ghost !w-8 !h-8 !p-0" onClick={handleClose} aria-label="Close">
+              <X size={18} strokeWidth={1.5} />
+            </button>
+          </div>
         </div>
 
         <div className="px-4 pt-4">
@@ -675,22 +641,28 @@ export function TaskDetail({ mode = "view", task, project, defaultColumnId, colu
                 ))}
               </select>
             ) : (
-              <select
-                className={cn("prop-input", missingFields.length > 0 && "is-focused")}
-                style={{ minWidth: 120, height: 32 }}
+              <SelectDropdown
                 value={selectedColumnId}
-                onChange={(e) => {
-                  const columnId = e.target.value;
+                options={(columns ?? []).map((col) => ({
+                  value: col.id,
+                  label: col.name,
+                }))}
+                onChange={(columnId) => {
                   setSelectedColumnId(columnId);
                   onUpdate?.(task!.id, { columnId });
                 }}
-              >
-                {(columns ?? []).map((column) => (
-                  <option key={column.id} value={column.id}>
-                    {column.name}
-                  </option>
-                ))}
-              </select>
+                trigger={({ open, toggle }) => (
+                  <button
+                    type="button"
+                    className={cn("prop-input", missingFields.length > 0 && "is-focused")}
+                    style={{ minWidth: 120, height: 32, justifyContent: "space-between", display: "inline-flex", alignItems: "center" }}
+                    onClick={toggle}
+                  >
+                    <span>{currentColumnName || "—"}</span>
+                    <ChevronDown size={14} className={cn("transition-transform", open && "rotate-180")} />
+                  </button>
+                )}
+              />
             )}
           </div>
           <div className="prop-field">
@@ -709,7 +681,7 @@ export function TaskDetail({ mode = "view", task, project, defaultColumnId, colu
                 }))}
                 onChange={(priority) => setCreatePriority(priority as Priority)}
                 trigger={({ toggle }) => (
-                  <button type="button" className={cn("priority-badge", `pb-${createPriority}`)} onClick={toggle}>
+                  <button type="button" className={cn("priority-badge", `pb-${createPriority}`)} onClick={toggle} style={{ boxShadow: "var(--lx-focus-glow)" }}>
                     <span className={cn("priority-dot", `priority-${createPriority}`)} />
                     {capitalize(createPriority)}
                   </button>
@@ -752,7 +724,7 @@ export function TaskDetail({ mode = "view", task, project, defaultColumnId, colu
                 }))}
                 onChange={(type) => setCreateType(type as TaskType)}
                 trigger={({ toggle }) => (
-                  <button type="button" className={cn("type-badge", `type-${createType}`)} onClick={toggle}>
+                  <button type="button" className={cn("type-badge", `type-${createType}`)} onClick={toggle} style={{ boxShadow: "var(--lx-focus-glow)", borderRadius: 4 }}>
                     {capitalize(createType)}
                   </button>
                 )}
@@ -777,25 +749,57 @@ export function TaskDetail({ mode = "view", task, project, defaultColumnId, colu
               />
             )}
           </div>
-          <div className="prop-field">
-            <span className="prop-label">Assignee</span>
-            <AssigneeSuggestions
-              key={isCreate ? "create" : task!.id}
-              value={isCreate ? createAssignee : task!.assignee ?? ""}
-              availableAssignees={availableAssignees ?? []}
-              placeholder="Initials"
-              inputClassName={cn("prop-input w-20", missingFields.includes("assignee") && "is-focused")}
-              onChange={isCreate ? setCreateAssignee : undefined}
-              onBlur={
-                isCreate
-                  ? undefined
-                  : (draft) => {
-                      const next = draft.trim() || null;
-                      if (next !== task!.assignee) onUpdate?.(task!.id, { assignee: next });
-                    }
-              }
-            />
-          </div>
+          {isCreate || editingAssignees ? (
+            <div className="prop-field" style={{ flexWrap: "wrap" }}>
+              <span className="prop-label">Assignees</span>
+              <button
+                type="button"
+                className="btn btn-ghost"
+                style={{ width: 20, height: 20, padding: 0, flexShrink: 0 }}
+                onClick={() => setEditingAssignees(false)}
+                title="Done editing assignees"
+              >
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+                  <path d="M20 6L9 17l-5-5" />
+                </svg>
+              </button>
+              <AssigneeChips
+                key={isCreate ? "create" : task!.id}
+                assignees={isCreate ? createAssignees : task!.assignees ?? []}
+                availableAssignees={availableAssignees ?? []}
+                placeholder="Add assignee..."
+                inputClassName={cn("prop-input", missingFields.includes("assignee") && "is-focused")}
+                inputStyle={{ minWidth: 120, maxWidth: 120, padding: "6px 8px", border: "1px solid var(--lx-border-focus)", borderRadius: 6 }}
+                onChange={isCreate
+                  ? setCreateAssignees
+                  : (next) => onUpdate?.(task!.id, { assignees: next })}
+              />
+            </div>
+          ) : (
+            <div className="prop-field">
+              <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                <span className="prop-label">Assignees</span>
+                <button
+                  type="button"
+                  className="btn btn-ghost"
+                  style={{ width: 20, height: 20, padding: 0 }}
+                  onClick={() => setEditingAssignees(true)}
+                  title="Edit assignees"
+                >
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5}>
+                    <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+                    <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
+                  </svg>
+                </button>
+              </div>
+              <AssigneeChips
+                readonly
+                compact
+                assignees={task!.assignees ?? []}
+                availableAssignees={availableAssignees ?? []}
+              />
+            </div>
+          )}
         </div>
 
         {missingFields.length > 0 && !dismissedWarning && (
@@ -839,37 +843,67 @@ export function TaskDetail({ mode = "view", task, project, defaultColumnId, colu
             </>
           ) : (
             <>
-              <div className="td-prose">{renderDoc(task!.description, "task")}</div>
+              {editingDescription ? (
+                <DescriptionEditor
+                  initialContent={task!.description}
+                  editable={true}
+                  onBlur={(doc) => {
+                    onUpdate?.(task!.id, { description: doc });
+                    setEditingDescription(false);
+                  }}
+                />
+              ) : (
+                <div className="td-prose" onDoubleClick={() => setEditingDescription(true)}>
+                  {renderDoc(task!.description, "task")}
+                </div>
+              )}
 
               <div className="github-section mt-4">
-                {github ? (
-                  <div className={cn(github.outOfSync && "github-warning")}>
-                    <div className="flex items-center justify-between">
-                      <a href={github.url} target="_blank" rel="noreferrer" className="flex items-center gap-2">
-                        <GithubMark size={14} className="text-lx-text-link" />
-                        <span className="font-mono text-sm font-medium text-lx-text-link">
-                          {github.repo} #{github.issueNumber}
-                        </span>
-                      </a>
-                      <div className="flex items-center gap-2">
-                        <span className={cn("sync-dot", github.outOfSync ? "sync-diverged" : "sync-synced")} />
-                        <span
-                          className={cn(
-                            "font-micro text-2xs uppercase tracking-[0.04em]",
-                            github.outOfSync ? "text-lx-text-warning" : "text-lx-text-success"
-                          )}
-                        >
-                          {github.outOfSync ? "Out of Sync" : "Synced"}
-                        </span>
-                      </div>
+                {githubs.length > 0 ? (
+                  <div>
+                    <div className="flex items-center gap-2 mb-2">
+                      <GithubMark size={14} className="text-lx-text-muted" />
+                      <span className="prop-label">GitHub Issues</span>
+                      <button type="button" className="btn btn-ghost" style={{ height: 24, padding: "0 8px", fontSize: 11 }} onClick={() => setLinkState("input")}>
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M12 5v14m-7-7h14"/></svg>
+                        Link issue
+                      </button>
                     </div>
-                    {github.outOfSync && (
-                      <p className="text-xs text-lx-text-secondary mt-2 leading-4">
-                        GitHub issue state does not match this column. Move the card to resync, or check the webhook delivery
-                        status.
-                      </p>
-                    )}
+                    <div className="space-y-2">
+                    {githubs.map(g => (
+                      <div key={g.issueId} className={cn("github-issue-row", g.outOfSync && "github-warning")}>
+                        <div className="flex items-center justify-between">
+                          <a href={g.url} target="_blank" rel="noreferrer" className="flex items-center gap-2">
+                            <GithubMark size={14} className="text-lx-text-link" />
+                            <span className="font-mono text-sm font-medium text-lx-text-link">
+                              {g.repo} #{g.issueNumber}
+                            </span>
+                          </a>
+                          <div className="flex items-center gap-1">
+                            <div className="flex items-center gap-2">
+                              <span className={cn("sync-dot", g.outOfSync ? "sync-diverged" : "sync-synced")} />
+                              <span
+                                className={cn(
+                                  "font-micro text-2xs uppercase tracking-[0.04em]",
+                                  g.outOfSync ? "text-lx-text-warning" : "text-lx-text-success"
+                                )}
+                              >
+                                {g.outOfSync ? "Diverged" : "Synced"}
+                              </span>
+                            </div>
+                            <button
+                              type="button"
+                              className="btn btn-ghost !w-6 !h-6 !p-0"
+                              title="Unlink issue"
+                            >
+                              <X size={12} strokeWidth={1.5} />
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
                   </div>
+                    </div>
                 ) : (
                   <>
                     {linkState === "success" && linkedIssue ? (
@@ -911,7 +945,7 @@ export function TaskDetail({ mode = "view", task, project, defaultColumnId, colu
                         {(linkState === "input" || linkState === "loading") && (
                           <div className="flex items-center gap-2">
                             <GithubMark size={14} className="text-lx-text-muted" />
-                            <span className="text-sm text-lx-text-muted font-body">GitHub</span>
+                            <span className="text-sm text-lx-text-muted font-body">GitHub Issues</span>
                           </div>
                         )}
                         {linkState === "input" && (

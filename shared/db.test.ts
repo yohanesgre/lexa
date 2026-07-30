@@ -68,33 +68,45 @@ describe("rowToWikiPageRevision / rowToWikiPageRevisionSummary", () => {
 });
 
 describe("rowToTask", () => {
-  const row: TaskRow = { id: "t1", project_id: "p1", column_id: "c1", swimlane_id: null, title: "Fix bug", description: '{"type":"doc","content":[]}', priority: "high", type: "bug", assignee: "alice", position: "a0", github_issue_id: null, github_issue_number: null, github_repo: null, github_synced_state: null, created_at: NOW, updated_at: NOW };
+  const row: TaskRow = { id: "t1", project_id: "p1", column_id: "c1", swimlane_id: "s1", title: "Fix bug", description: '{"type":"doc","content":[]}', priority: "high", type: "bug", assignees: "alice", position: "a0", github_issue_id: null, github_issue_number: null, github_repo: null, github_synced_state: null, created_at: NOW, updated_at: NOW, github_issues_raw: null };
 
   it("maps all fields", () => {
     const t = rowToTask(row);
     expect(t.id).toBe("t1");
     expect(t.projectId).toBe("p1");
+    expect(t.swimlaneId).toBe("s1");
     expect(t.priority).toBe("high");
     expect(t.type).toBe("bug");
-    expect(t.assignee).toBe("alice");
-    expect(t.github).toBeNull();
+    expect(t.assignees).toEqual(["alice"]);
+    expect(t.githubs).toEqual([]);
   });
 
-  it("builds github object when linked", () => {
-    const linked: TaskRow = { ...row, github_issue_id: "ghi1", github_issue_number: 42, github_repo: "owner/repo", github_synced_state: "open" };
+  it("builds githubs array from raw concat string", () => {
+    const linked: TaskRow = { ...row, github_issues_raw: "ghi1,42,owner/repo,open" };
     const t = rowToTask(linked);
-    expect(t.github).toEqual({ issueId: "ghi1", issueNumber: 42, repo: "owner/repo", url: "https://github.com/owner/repo/issues/42", syncedState: "open", outOfSync: false });
+    expect(t.githubs).toEqual([{
+      issueId: "ghi1", issueNumber: 42, repo: "owner/repo",
+      url: "https://github.com/owner/repo/issues/42",
+      syncedState: "open", outOfSync: false,
+    }]);
+  });
+
+  it("builds multiple githubs", () => {
+    const linked: TaskRow = { ...row, github_issues_raw: "ghi1,1,r1,open||ghi2,2,r2,closed" };
+    const t = rowToTask(linked);
+    expect(t.githubs).toHaveLength(2);
+    expect(t.githubs[1]).toMatchObject({ issueId: "ghi2", issueNumber: 2, repo: "r2", syncedState: "closed" });
   });
 
   it("detects outOfSync when column githubState differs", () => {
-    const linked: TaskRow = { ...row, github_issue_id: "ghi1", github_issue_number: 1, github_repo: "r", github_synced_state: "open" };
+    const linked: TaskRow = { ...row, github_issues_raw: "ghi1,1,r,open" };
     const t = rowToTask(linked, "closed");
-    expect(t.github!.outOfSync).toBe(true);
+    expect(t.githubs[0].outOfSync).toBe(true);
   });
 
   it("uses column_github_state from row when arg not provided", () => {
-    const linked: TaskRow = { ...row, github_issue_id: "ghi1", github_issue_number: 1, github_repo: "r", github_synced_state: "closed", column_github_state: "open" };
+    const linked: TaskRow = { ...row, github_issues_raw: "ghi1,1,r,closed", column_github_state: "open" };
     const t = rowToTask(linked);
-    expect(t.github!.outOfSync).toBe(true);
+    expect(t.githubs[0].outOfSync).toBe(true);
   });
 });

@@ -1,4 +1,5 @@
 import { Effect, Layer, ManagedRuntime } from "effect";
+import { LoggerLayer } from "../logging/logger";
 import { ApiKeyRepo } from "../repos/api-key.repo";
 import { UserRepo } from "../repos/user.repo";
 import { ProjectRepo } from "../repos/project.repo";
@@ -329,7 +330,7 @@ const serviceLayer = Layer.mergeAll(
 function createMcpLayer(dbPath: string): Layer.Layer<McpServer> {
   return Layer.provide(
     Layer.provideMerge(McpServer.Default, serviceLayer),
-    initSqlite(dbPath),
+    Layer.mergeAll(initSqlite(dbPath), LoggerLayer),
   );
 }
 
@@ -341,8 +342,35 @@ export function createMcpHandler(dbPath: string): (req: Request) => Promise<Resp
     const rawBody = await req.text();
     const program = Effect.gen(function* () {
       const server = yield* McpServer;
+      yield* Effect.logInfo(`[MCP] ${extractMethod(rawBody)}`).pipe(Effect.annotateLogs(extractAnnotations(rawBody)));
       return yield* server.handleRequest(rawBody, authHeader);
     });
     return runtime.runPromise(program);
   };
+}
+
+function extractMethod(body: string): string {
+  try {
+    const msg = JSON.parse(body);
+    if (msg.method) return `method=${msg.method}`;
+    if (msg.id !== undefined && msg.result !== undefined) return "response";
+    if (msg.id !== undefined && msg.error !== undefined) return `error:${msg.error.code}`;
+    if (msg.method === "notifications/initialized") return "notifinit";
+    return "unknown";
+  } catch {
+    return "parse-error";
+  }
+}
+
+function extractAnnotations(body: string): Record<string, string> {
+  try {
+    const msg = JSON.parse(body);
+    const ann: Record<string, string> = {};
+    if (msg.method) ann.mcp_method = msg.method;
+    if (msg.id !== undefined) ann.mcp_id = String(msg.id);
+    if (msg.params && msg.params.name) ann.mcp_tool = msg.params.name;
+    return ann;
+  } catch {
+    return {};
+  }
 }

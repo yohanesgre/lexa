@@ -1,6 +1,7 @@
 import { Effect } from "effect";
 import { ProjectRepo } from "../repos/project.repo";
 import { ColumnRepo } from "../repos/column.repo";
+import { SwimlaneRepo } from "../repos/swimlane.repo";
 import { ConstraintViolation, DbError, RowNotFound } from "../db/database";
 import { ProjectNotFound, SlugTaken } from "../api/errors";
 import type { Project } from "../../shared/types";
@@ -14,10 +15,11 @@ const DEFAULT_COLUMNS = [
 ];
 
 export class ProjectService extends Effect.Service<ProjectService>()("Lexa/ProjectService", {
-  dependencies: [ProjectRepo.Default, ColumnRepo.Default],
+  dependencies: [ProjectRepo.Default, ColumnRepo.Default, SwimlaneRepo.Default],
   effect: Effect.gen(function* () {
     const repo = yield* ProjectRepo;
     const columnRepo = yield* ColumnRepo;
+    const swimlaneRepo = yield* SwimlaneRepo;
 
     const slugify = (name: string): string =>
       name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 60) || "project";
@@ -31,8 +33,8 @@ export class ProjectService extends Effect.Service<ProjectService>()("Lexa/Proje
           .pipe(
             Effect.flatMap(() => repo.findBySlug(slug)),
             Effect.tap((project) =>
-              Effect.all(
-                DEFAULT_COLUMNS.map((col) =>
+              Effect.all([
+                ...DEFAULT_COLUMNS.map((col) =>
                   columnRepo.create({
                     id: crypto.randomUUID(),
                     projectId: project.id,
@@ -40,9 +42,16 @@ export class ProjectService extends Effect.Service<ProjectService>()("Lexa/Proje
                     position: col.position,
                     color: col.color,
                   })
-                )
-              )
+                ),
+                swimlaneRepo.create({
+                  id: crypto.randomUUID(),
+                  projectId: project.id,
+                  name: "Default",
+                  position: 0,
+                }),
+              ])
             ),
+            Effect.tap((project) => Effect.logInfo(`[Project] Created ${project.id} slug=${project.slug}`)),
             Effect.catchTag("ConstraintViolation", () => new SlugTaken({ slug })),
             Effect.catchTag("RowNotFound", () => new SlugTaken({ slug }))
           );
@@ -72,9 +81,11 @@ export class ProjectService extends Effect.Service<ProjectService>()("Lexa/Proje
           const project = yield* repo.findBySlug(slug).pipe(
             Effect.catchTag("RowNotFound", () => new ProjectNotFound({ identifier: slug }))
           );
-          return yield* repo.delete(project.id).pipe(
+          yield* repo.delete(project.id).pipe(
             Effect.catchTag("ConstraintViolation", () => new ProjectNotFound({ identifier: slug }))
           );
+          yield* Effect.logInfo(`[Project] Deleted ${project.id}`);
+          return;
         }),
     };
   }),

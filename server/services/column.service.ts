@@ -27,7 +27,7 @@ export class ColumnService extends Effect.Service<ColumnService>()("Lexa/ColumnS
           );
           const maxPos = yield* repo.maxPosition(input.projectId);
           const id = crypto.randomUUID();
-          return yield* repo.create({
+          const col = yield* repo.create({
             id,
             projectId: input.projectId,
             name: input.name,
@@ -37,6 +37,8 @@ export class ColumnService extends Effect.Service<ColumnService>()("Lexa/ColumnS
             color: input.color,
             githubState: input.githubState,
           });
+          yield* Effect.logInfo(`[Column] Created ${col.id} in project ${col.projectId}`);
+          return col;
         }),
 
       findByProject: (projectId: string): Effect.Effect<Column[], ProjectNotFound | DbError> =>
@@ -61,7 +63,10 @@ export class ColumnService extends Effect.Service<ColumnService>()("Lexa/ColumnS
           githubState?: "open" | "closed" | null;
         }
       ): Effect.Effect<Column, ColumnNotFound | DbError | ConstraintViolation> =>
-        repo.update(id, input).pipe(Effect.catchTag("RowNotFound", () => new ColumnNotFound({ id }))),
+        repo.update(id, input).pipe(
+          Effect.catchTag("RowNotFound", () => new ColumnNotFound({ id })),
+          Effect.tap((col) => Effect.logInfo(`[Column] Updated ${col.id}`))
+        ),
 
       delete: (id: string): Effect.Effect<void, ColumnNotFound | HasChildren | DbError> =>
         Effect.gen(function* () {
@@ -75,9 +80,11 @@ export class ColumnService extends Effect.Service<ColumnService>()("Lexa/ColumnS
           );
           const count = rows[0]?.c ?? 0;
           if (count > 0) return yield* new HasChildren({ count });
-          return yield* repo.delete(id).pipe(
+          yield* repo.delete(id).pipe(
             Effect.catchTag("ConstraintViolation", () => new HasChildren({ count: -1 }))
           );
+          yield* Effect.logInfo(`[Column] Deleted ${id}`);
+          return;
         }),
     };
   }),

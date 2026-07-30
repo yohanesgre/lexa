@@ -36,7 +36,7 @@ function validateRequiredFields(
     if (field === "description") {
       empty = isEmptyDoc(taskLike.description as TipTapDoc);
     } else if (field === "assignee") {
-      empty = !taskLike.assignee;
+      empty = !taskLike.assignees || (taskLike.assignees as string[]).length === 0;
     } else {
       empty = !taskLike[field];
     }
@@ -57,12 +57,12 @@ export class TaskService extends Effect.Service<TaskService>()("Lexa/TaskService
       create: (input: {
         projectId: string;
         columnId: string;
-        swimlaneId?: string | null;
+        swimlaneId: string;
         title: string;
         description?: TipTapDoc;
         priority?: "urgent" | "high" | "medium" | "low";
         type?: "feature" | "bug" | "task" | "asset";
-        assignee?: string | null;
+        assignees?: string[];
       }): Effect.Effect<Task, ProjectNotFound | ColumnNotFound | SwimlaneNotFound | RequiredFieldMissing | ConstraintViolation | DbError | RowNotFound> =>
         Effect.gen(function* () {
           const project = yield* projectRepo.findById(input.projectId).pipe(
@@ -91,7 +91,7 @@ export class TaskService extends Effect.Service<TaskService>()("Lexa/TaskService
             description: desc,
             priority: input.priority ?? "medium",
             type: input.type ?? "task",
-            assignee: input.assignee ?? null,
+            assignees: input.assignees ?? [],
           };
           yield* validateRequiredFields(taskLike as Record<string, unknown>, column);
 
@@ -105,24 +105,26 @@ export class TaskService extends Effect.Service<TaskService>()("Lexa/TaskService
               id: crypto.randomUUID(),
               projectId: input.projectId,
               columnId: input.columnId,
-              swimlaneId: input.swimlaneId ?? null,
+              swimlaneId: input.swimlaneId,
               title: input.title,
               description: JSON.stringify(desc),
               priority: input.priority ?? "medium",
               type: input.type ?? "task",
-              assignee: input.assignee ?? null,
+              assignees: input.assignees ?? [],
               position,
             }).pipe(
               Effect.catchTag("RowNotFound", () => new ProjectNotFound({ identifier: input.projectId }))
             );
           });
 
-          return yield* doInsert.pipe(
+          const task = yield* doInsert.pipe(
             Effect.catchIf(
               (e) => e instanceof ConstraintViolation && e.isPositionConflict,
               () => doInsert
             )
           );
+          yield* Effect.logInfo(`[Task] Created ${task.id} in column ${task.columnId} project ${task.projectId}`);
+          return task;
         }),
 
       getById: (id: string): Effect.Effect<Task, TaskNotFound | DbError> =>
@@ -159,7 +161,7 @@ export class TaskService extends Effect.Service<TaskService>()("Lexa/TaskService
           description?: TipTapDoc;
           priority?: "urgent" | "high" | "medium" | "low";
           type?: "feature" | "bug" | "task" | "asset";
-          assignee?: string | null;
+          assignees?: string[];
         }
       ): Effect.Effect<Task, TaskNotFound | ColumnNotFound | RequiredFieldMissing | ConstraintViolation | DbError | RowNotFound> =>
         Effect.gen(function* () {
@@ -174,18 +176,20 @@ export class TaskService extends Effect.Service<TaskService>()("Lexa/TaskService
             description: input.description ?? task.description,
             priority: input.priority ?? task.priority,
             type: input.type ?? task.type,
-            assignee: input.assignee !== undefined ? input.assignee : task.assignee,
+            assignees: input.assignees !== undefined ? input.assignees : task.assignees,
           };
           yield* validateRequiredFields(merged as Record<string, unknown>, column);
-          return yield* taskRepo.update(id, {
+          const updated = yield* taskRepo.update(id, {
             title: input.title,
             description: input.description !== undefined ? JSON.stringify(input.description) : undefined,
             priority: input.priority,
             type: input.type,
-            assignee: input.assignee,
+            assignees: input.assignees,
           }).pipe(
             Effect.catchTag("RowNotFound", () => new TaskNotFound({ id }))
           );
+          yield* Effect.logInfo(`[Task] Updated ${updated.id}`);
+          return updated;
         }),
 
       move: (taskId: string, target: MoveTarget, opts?: { bypassGuards?: boolean }): Effect.Effect<Task, TaskNotFound | ColumnNotFound | SwimlaneNotFound | RequiredFieldMissing | WipLimitExceeded | NeighborNotInColumn | DbError | ConstraintViolation | RowNotFound> =>
@@ -215,7 +219,7 @@ export class TaskService extends Effect.Service<TaskService>()("Lexa/TaskService
               description: task.description,
               priority: task.priority,
               type: task.type,
-              assignee: task.assignee,
+              assignees: task.assignees,
             };
             yield* validateRequiredFields(taskLike as Record<string, unknown>, column);
           }
@@ -251,18 +255,20 @@ export class TaskService extends Effect.Service<TaskService>()("Lexa/TaskService
             return result.task;
           });
 
-          return yield* doMove.pipe(
+          const moved = yield* doMove.pipe(
             Effect.catchIf(
               (e) => e instanceof ConstraintViolation && e.isPositionConflict,
               () => doMove
             )
           );
+          yield* Effect.logInfo(`[Task] Moved ${moved.id} column=${moved.columnId} swimlane=${moved.swimlaneId} pos=${moved.position}`);
+          return moved;
         }),
 
-      moveFromWebhook: (taskId: string, columnId: string, syncedState: "open" | "closed"): Effect.Effect<Task, TaskNotFound | ColumnNotFound | DbError | ConstraintViolation | RowNotFound> =>
+      moveFromWebhook: (issueId: string, columnId: string, syncedState: "open" | "closed"): Effect.Effect<Task, TaskNotFound | ColumnNotFound | DbError | ConstraintViolation | RowNotFound> =>
         Effect.gen(function* () {
-          const task = yield* taskRepo.findById(taskId).pipe(
-            Effect.catchTag("RowNotFound", () => new TaskNotFound({ id: taskId }))
+          const task = yield* taskRepo.findByGithubIssue(issueId).pipe(
+            Effect.catchTag("RowNotFound", () => new TaskNotFound({ id: issueId }))
           );
           yield* columnRepo.findById(columnId).pipe(
             Effect.catchTag("RowNotFound", () => new ColumnNotFound({ id: columnId }))
@@ -271,11 +277,13 @@ export class TaskService extends Effect.Service<TaskService>()("Lexa/TaskService
             Effect.catchTag("RowNotFound", () => Effect.succeed(null))
           );
           const position = keyAfter(last?.position ?? null);
-          return yield* taskRepo.moveFromWebhook(taskId, {
+          const webhookMoved = yield* taskRepo.moveFromWebhook(task.id, issueId, {
             columnId,
             swimlaneId: task.swimlaneId,
             position,
           }, syncedState);
+          yield* Effect.logInfo(`[Task] Webhook-moved ${webhookMoved.id} column=${webhookMoved.columnId}`);
+          return webhookMoved;
         }),
 
       delete: (id: string): Effect.Effect<void, TaskNotFound | DbError> =>
@@ -284,6 +292,7 @@ export class TaskService extends Effect.Service<TaskService>()("Lexa/TaskService
           yield* taskRepo.delete(id).pipe(
             Effect.catchTag("ConstraintViolation", () => new TaskNotFound({ id }))
           );
+          yield* Effect.logInfo(`[Task] Deleted ${id}`);
           return undefined;
         }),
     };
@@ -292,7 +301,7 @@ export class TaskService extends Effect.Service<TaskService>()("Lexa/TaskService
 
 interface MoveTarget {
   columnId: string;
-  swimlaneId?: string | null;
+  swimlaneId: string;
   beforeTaskId?: string;
   afterTaskId?: string;
 }

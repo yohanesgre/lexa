@@ -20,12 +20,14 @@ export class SwimlaneService extends Effect.Service<SwimlaneService>()("Lexa/Swi
           );
           const maxPos = yield* repo.maxPosition(input.projectId);
           const id = crypto.randomUUID();
-          return yield* repo.create({ id, projectId: input.projectId, name: input.name, description: input.description, position: maxPos + 1 }).pipe(
+          const lane = yield* repo.create({ id, projectId: input.projectId, name: input.name, description: input.description, position: maxPos + 1 }).pipe(
             Effect.catchTags({
               ConstraintViolation: (e) => new DbError({ message: e.message, cause: e }),
               RowNotFound: (e) => new DbError({ message: e.message, cause: e }),
             })
           );
+          yield* Effect.logInfo(`[Swimlane] Created ${lane.id} in project ${lane.projectId}`);
+          return lane;
         }),
 
       findByProject: (projectId: string): Effect.Effect<Swimlane[], ProjectNotFound | DbError> =>
@@ -44,7 +46,8 @@ export class SwimlaneService extends Effect.Service<SwimlaneService>()("Lexa/Swi
           Effect.catchTags({
             RowNotFound: () => new SwimlaneNotFound({ id }),
             ConstraintViolation: (e) => new DbError({ message: e.message, cause: e }),
-          })
+          }),
+          Effect.tap((lane) => Effect.logInfo(`[Swimlane] Updated ${lane.id}`))
         ),
 
       delete: (id: string): Effect.Effect<void, SwimlaneNotFound | HasChildren | DbError> =>
@@ -53,9 +56,11 @@ export class SwimlaneService extends Effect.Service<SwimlaneService>()("Lexa/Swi
           const rows = yield* queryAll<{ c: number }>(db, `SELECT COUNT(*) as c FROM tasks WHERE swimlane_id = ?`, id);
           const count = rows[0]?.c ?? 0;
           if (count > 0) return yield* new HasChildren({ count });
-          return yield* repo.delete(id).pipe(
+          yield* repo.delete(id).pipe(
             Effect.catchTag("ConstraintViolation", (e) => new DbError({ message: e.message, cause: e }))
           );
+          yield* Effect.logInfo(`[Swimlane] Deleted ${id}`);
+          return;
         }),
     };
   }),

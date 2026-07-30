@@ -1,4 +1,5 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { Plus, X } from "lucide-react";
 import { cn } from "../ui/cn";
 import type { Column } from "../../../shared/types";
@@ -15,26 +16,34 @@ export interface ColumnFormProps {
     requiredFields?: string[];
     githubState?: string | null;
   }) => void;
+  zIndex?: number;
 }
 
 const colors: { value: string | null; label: string; hex: string }[] = [
   { value: null, label: "None", hex: "transparent" },
-  { value: "#F0C040", label: "Amber", hex: "#F0C040" },
-  { value: "#4ADE80", label: "Green", hex: "#4ADE80" },
-  { value: "#22D3EE", label: "Cyan", hex: "#22D3EE" },
-  { value: "#FF4444", label: "Red", hex: "#FF4444" },
-  { value: "#F472B6", label: "Pink", hex: "#F472B6" },
+  { value: "#71717a", label: "Zinc", hex: "#71717a" },
+  { value: "#ef4444", label: "Red", hex: "#ef4444" },
+  { value: "#f97316", label: "Orange", hex: "#f97316" },
+  { value: "#f59e0b", label: "Amber", hex: "#f59e0b" },
+  { value: "#a3e635", label: "Lime", hex: "#a3e635" },
+  { value: "#22c55e", label: "Green", hex: "#22c55e" },
+  { value: "#10b981", label: "Emerald", hex: "#10b981" },
+  { value: "#06b6d4", label: "Cyan", hex: "#06b6d4" },
+  { value: "#3b82f6", label: "Blue", hex: "#3b82f6" },
+  { value: "#6366f1", label: "Indigo", hex: "#6366f1" },
+  { value: "#a78bfa", label: "Violet", hex: "#a78bfa" },
+  { value: "#ec4899", label: "Pink", hex: "#ec4899" },
 ];
 
 const requiredFieldOptions = [
-  { value: "type", label: "Type" },
+  { value: "title", label: "Title" },
   { value: "assignee", label: "Assignee" },
   { value: "description", label: "Description" },
 ] as const;
 
 type RequiredFieldValue = (typeof requiredFieldOptions)[number]["value"];
 
-export function ColumnForm({ column, isOpen, onClose, onSubmit }: ColumnFormProps) {
+export function ColumnForm({ column, isOpen, onClose, onSubmit, zIndex = 70 }: ColumnFormProps) {
   const isEdit = !!column;
   const [name, setName] = useState("");
   const [color, setColor] = useState<string | null>(null);
@@ -42,6 +51,9 @@ export function ColumnForm({ column, isOpen, onClose, onSubmit }: ColumnFormProp
   const [requiredFields, setRequiredFields] = useState<RequiredFieldValue[]>([]);
   const [githubState, setGithubState] = useState<"open" | "closed" | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
 
   useEffect(() => {
     if (!isOpen) return;
@@ -66,12 +78,12 @@ export function ColumnForm({ column, isOpen, onClose, onSubmit }: ColumnFormProp
     function handleKeyDown(event: KeyboardEvent) {
       if (event.key === "Escape") {
         event.stopPropagation();
-        onClose();
+        onCloseRef.current();
       }
     }
     document.addEventListener("keydown", handleKeyDown);
     return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [isOpen, onClose]);
+  }, [isOpen]);
 
   if (!isOpen) return null;
 
@@ -104,10 +116,18 @@ export function ColumnForm({ column, isOpen, onClose, onSubmit }: ColumnFormProp
     );
   };
 
-  return (
+  return createPortal(
     <>
-      <div className="dialog-overlay" onClick={onClose} />
-      <div className="fixed inset-0 flex items-center justify-center z-[70] pointer-events-none">
+      <div
+        className="dialog-overlay"
+        style={{ zIndex: zIndex }}
+        role="button"
+        tabIndex={0}
+        aria-label="Close dialog"
+        onClick={onClose}
+        onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") onClose(); }}
+      />
+      <div className="fixed inset-0 flex items-center justify-center pointer-events-none" style={{ zIndex: zIndex + 1 }}>
         <div
           className="dialog dialog-enter pointer-events-auto p-0"
           style={{ width: 440, maxWidth: "calc(100vw - 48px)" }}
@@ -138,10 +158,11 @@ export function ColumnForm({ column, isOpen, onClose, onSubmit }: ColumnFormProp
               )}
 
               <div className="mb-4">
-                <label className="block text-xs font-medium text-lx-text-secondary mb-1.5 font-body">
+                <label className="block text-xs font-medium text-lx-text-secondary mb-1.5 font-body" htmlFor="column-form-name">
                   Name
                 </label>
                 <input
+                  id="column-form-name"
                   className="prop-input w-full"
                   value={name}
                   onChange={(e) => setName(e.target.value)}
@@ -184,13 +205,14 @@ export function ColumnForm({ column, isOpen, onClose, onSubmit }: ColumnFormProp
               </div>
 
               <div className="mb-4">
-                <label className="block text-xs font-medium text-lx-text-secondary mb-1.5 font-body">
+                <label className="block text-xs font-medium text-lx-text-secondary mb-1.5 font-body" htmlFor="column-form-wip">
                   WIP Limit
                   <span className="font-mono text-[10px] uppercase tracking-[0.04em] text-lx-text-muted ml-1.5">
                     Optional
                   </span>
                 </label>
                 <input
+                  id="column-form-wip"
                   className="prop-input"
                   type="number"
                   min={1}
@@ -264,6 +286,7 @@ export function ColumnForm({ column, isOpen, onClose, onSubmit }: ColumnFormProp
           </form>
         </div>
       </div>
-    </>
+    </>,
+    typeof document !== "undefined" ? document.body : null as any
   );
 }

@@ -43,15 +43,13 @@ export const tool = {
         swimlane: swimlane?.name ?? null,
         priority: task.priority,
         type: task.type,
-        assignee: task.assignee,
-        githubIssue: task.github
-          ? {
-              number: task.github.issueNumber,
-              repo: task.github.repo,
-              url: task.github.url,
-              outOfSync: task.github.outOfSync,
-            }
-          : null,
+        assignees: task.assignees,
+        githubIssues: task.githubs.map(g => ({
+          number: g.issueNumber,
+          repo: g.repo,
+          url: g.url,
+          outOfSync: g.outOfSync,
+        })),
         updatedAt: task.updatedAt,
         description: docToMarkdown(task.description),
         createdAt: task.createdAt,

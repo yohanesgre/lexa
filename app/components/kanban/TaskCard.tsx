@@ -1,21 +1,16 @@
 import { cn } from "../ui/cn";
-import type { Priority, TaskType } from "../../../shared/types";
+import type { Priority, TaskType, GithubIssue } from "../../../shared/types";
 
 interface TaskCardProps {
   id: string;
   title: string;
   priority: Priority;
   type: TaskType;
-  assignee: string | null;
-  github: {
-    issueNumber: number;
-    repo: string;
-    url: string;
-    outOfSync: boolean;
-  } | null;
-  githubOutOfSync: boolean;
+  assignees: string[];
+  githubs: GithubIssue[];
   isDragging?: boolean;
   dimmed?: boolean;
+  className?: string;
 }
 
 const typeConfig: Record<TaskType, { label: string; badge: string; border: string }> = {
@@ -40,11 +35,11 @@ function GithubMark({ size = 12 }: { size?: number }) {
   );
 }
 
-export function TaskCard({ title, priority, type, assignee, github, githubOutOfSync, isDragging = false, dimmed = false }: TaskCardProps) {
+export function TaskCard({ title, priority, type, assignees, githubs, isDragging = false, dimmed = false, className }: TaskCardProps) {
   const { label, badge, border } = typeConfig[type];
-  const isOutOfSync = github?.outOfSync ?? githubOutOfSync;
+  const hasOutOfSync = githubs.some(g => g.outOfSync);
   return (
-    <div className={cn("kanban-card border-l-[3px]", border, isDragging && "state-dragging", dimmed && "opacity-45")}>
+    <div className={cn("kanban-card border-l-[3px]", border, isDragging && "state-dragging", dimmed && "opacity-45", className)}>
       <div className="flex items-center justify-between">
         <span className={cn("type-badge", badge)}>{label}</span>
         <span
@@ -54,17 +49,26 @@ export function TaskCard({ title, priority, type, assignee, github, githubOutOfS
       </div>
       <div className="card-title mt-2">{title}</div>
       <div className="card-meta">
-        {assignee && <div className="avatar">{assignee.slice(0, 2).toUpperCase()}</div>}
-        {github && (
-          <span className="github-badge">
-            <GithubMark />
-            #{github.issueNumber}
-          </span>
-        )}
-        {github && (
+        <div className="card-assignees">
+          {assignees.slice(0, 3).map((a) => (
+            <div className="avatar" key={a}>{a.slice(0, 2).toUpperCase()}</div>
+          ))}
+          {assignees.length > 3 && <span className="card-assignees-overflow">+{assignees.length - 3}</span>}
+        </div>
+        <div className="card-meta-spacer" />
+        <div className="card-gh-issues">
+          {githubs.slice(0, 2).map(g => (
+            <span className="github-badge" key={g.issueId}>
+              <GithubMark />
+              #{g.issueNumber}
+            </span>
+          ))}
+          {githubs.length > 2 && <span className="card-gh-overflow">+{githubs.length - 2}</span>}
+        </div>
+        {githubs.length > 0 && (
           <span
-            className={cn("sync-dot", isOutOfSync ? "sync-diverged" : "sync-synced")}
-            title={isOutOfSync ? "Out of sync with GitHub" : "Synced with GitHub"}
+            className={cn("sync-dot", hasOutOfSync ? "sync-diverged" : "sync-synced")}
+            title={hasOutOfSync ? "Out of sync with GitHub" : "Synced with GitHub"}
           />
         )}
       </div>

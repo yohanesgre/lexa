@@ -47,11 +47,12 @@
         <span class="prop-label">Type</span>
         <span class="type-badge type-bug">Bug</span>
       </div>
-      <div class="prop-field">
+      <div class="prop-field" style="flex-wrap:wrap;">
         <span class="prop-label">Assignees</span>
-        <div class="assignee-chips" style="min-height:28px;">
-          <input class="assignee-add-input is-focused" placeholder="Add assignee..." style="color:var(--lx-text-danger);" />
-        </div>
+        <button class="btn btn-ghost" style="width:20px;height:20px;padding:0;flex-shrink:0;" title="Done editing assignees">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 6L9 17l-5-5"/></svg>
+        </button>
+        <input class="assignee-add-input is-focused" placeholder="Add assignee..." style="min-width:120px;max-width:120px;padding:6px 8px;border:1px solid var(--lx-border-focus);border-radius:6px;color:var(--lx-text-danger);" />
       </div>
     </div>
 

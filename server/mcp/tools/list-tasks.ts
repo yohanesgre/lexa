@@ -62,7 +62,7 @@ export const tool = {
 
       const tasks = result.tasks.map((t) => {
         const col = columnMap.get(t.columnId);
-        const lane = t.swimlaneId ? swimlaneMap.get(t.swimlaneId) ?? null : null;
+        const lane = swimlaneMap.get(t.swimlaneId) ?? null;
         return {
           id: t.id,
           title: t.title,
@@ -70,15 +70,13 @@ export const tool = {
           swimlane: lane?.name ?? null,
           priority: t.priority,
           type: t.type,
-          assignee: t.assignee,
-          githubIssue: t.github
-            ? {
-                number: t.github.issueNumber,
-                repo: t.github.repo,
-                url: t.github.url,
-                outOfSync: t.github.outOfSync,
-              }
-            : null,
+          assignees: t.assignees,
+          githubIssues: t.githubs.map(g => ({
+                number: g.issueNumber,
+                repo: g.repo,
+                url: g.url,
+                outOfSync: g.outOfSync,
+              })),
           updatedAt: t.updatedAt,
         };
       });

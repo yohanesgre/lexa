@@ -1,4 +1,4 @@
-import type { Project, Column, Swimlane, Task, Board, WikiPageMeta, WikiPage, WikiPageRevision, WikiPageRevisionSummary, TipTapDoc, ApiKey, ApiKeyCreateResult } from "../../shared/types";
+import type { Project, Column, Swimlane, Task, Board, WikiPageMeta, WikiPage, WikiPageRevision, WikiPageRevisionSummary, TipTapDoc, ApiKey, ApiKeyCreateResult, Dashboard } from "../../shared/types";
 
 const BASE = "/api";
 
@@ -23,7 +23,11 @@ export function listProjects(): Promise<{ data: Project[]; nextCursor: string | 
   return request(`${BASE}/projects`);
 }
 
-export function createProject(input: { name: string; slug?: string }): Promise<Project> {
+export function getDashboard(): Promise<Dashboard> {
+  return request(`${BASE}/dashboard`);
+}
+
+export function createProject(input: { name: string; slug?: string; description?: string; githubRepo?: string | null }): Promise<Project> {
   return request(`${BASE}/projects`, { method: "POST", body: JSON.stringify(input) });
 }
 
@@ -33,6 +37,10 @@ export function getProject(slug: string): Promise<Project> {
 
 export function deleteProject(slug: string): Promise<void> {
   return request(`${BASE}/projects/${slug}`, { method: "DELETE" });
+}
+
+export function updateProject(slug: string, input: { name?: string; description?: string; githubRepo?: string | null }): Promise<Project> {
+  return request(`${BASE}/projects/${slug}`, { method: "PATCH", body: JSON.stringify(input) });
 }
 
 export function listColumns(slug: string): Promise<{ data: Column[] }> {
@@ -74,7 +82,7 @@ export function listTasks(slug: string, params?: { columnId?: string; swimlaneId
   return request(`${BASE}/projects/${slug}/tasks${query ? "?" + query : ""}`);
 }
 
-export function createTask(slug: string, input: { columnId: string; swimlaneId?: string | null; title: string; description?: TipTapDoc; priority?: string; type?: string; assignee?: string | null }): Promise<Task> {
+export function createTask(slug: string, input: { columnId: string; swimlaneId: string; title: string; description?: TipTapDoc; priority?: string; type?: string; assignees?: string[] }): Promise<Task> {
   return request(`${BASE}/projects/${slug}/tasks`, { method: "POST", body: JSON.stringify(input) });
 }
 
@@ -82,11 +90,11 @@ export function getTask(slug: string, id: string): Promise<Task> {
   return request(`${BASE}/projects/${slug}/tasks/${id}`);
 }
 
-export function updateTask(slug: string, id: string, input: { title?: string; description?: TipTapDoc; priority?: string; type?: string; assignee?: string | null }): Promise<Task> {
+export function updateTask(slug: string, id: string, input: { title?: string; description?: TipTapDoc; priority?: string; type?: string; assignees?: string[] }): Promise<Task> {
   return request(`${BASE}/projects/${slug}/tasks/${id}`, { method: "PATCH", body: JSON.stringify(input) });
 }
 
-export function moveTask(slug: string, id: string, target: { columnId: string; swimlaneId?: string | null; beforeTaskId?: string; afterTaskId?: string }): Promise<Task> {
+export function moveTask(slug: string, id: string, target: { columnId: string; swimlaneId: string; beforeTaskId?: string; afterTaskId?: string }): Promise<Task> {
   return request(`${BASE}/projects/${slug}/tasks/${id}/move`, { method: "POST", body: JSON.stringify(target) });
 }
 

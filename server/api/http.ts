@@ -1,5 +1,6 @@
-import { HttpApi, HttpApiBuilder, HttpApiEndpoint, HttpApiGroup, HttpServerResponse } from "@effect/platform";
+import { HttpApi, HttpApiBuilder, HttpApiEndpoint, HttpApiGroup, HttpMiddleware, HttpServerResponse } from "@effect/platform";
 import { Cause, Effect, Layer, Schema } from "effect";
+import { LoggerLayer } from "../logging/logger";
 import { Sqlite } from "../db/database";
 import { Database } from "bun:sqlite";
 import { WikiPageNotFound, errorResponse, errorToStatus } from "./errors";
@@ -20,6 +21,7 @@ import { UserService } from "../services/user.service";
 import { UserRepo } from "../repos/user.repo";
 import { UserProjectRoleService } from "../services/user-project-role.service";
 import { UserProjectRoleRepo } from "../repos/user-project-role.repo";
+import { DashboardService } from "../services/dashboard.service";
 import { extractText } from "../../shared/tiptap-text";
 
 const ApiKeySchema = Schema.Struct({
@@ -85,11 +87,21 @@ const membersEndpoint = HttpApiEndpoint.get("listMembers", "/projects/:slug/memb
   .setPath(SlugPath)
   .addSuccess(ProjectMembersResponse, { status: 200 });
 
+const ProjectUpdatePayload = Schema.Struct({
+  name: Schema.optional(Schema.String),
+  description: Schema.optional(Schema.String),
+  githubRepo: Schema.optional(Schema.NullOr(Schema.String)),
+});
+
 const projectsGroup = HttpApiGroup.make("projects")
   .add(listEndpoint)
   .add(createEndpoint)
   .add(getBySlugEndpoint)
   .add(membersEndpoint)
+  .add(
+    HttpApiEndpoint.patch("updateProject", "/projects/:slug")
+      .setPath(SlugPath).setPayload(ProjectUpdatePayload).addSuccess(ProjectSchema)
+  )
   .add(
     HttpApiEndpoint.del("deleteProject", "/projects/:slug")
       .setPath(SlugPath)
@@ -244,6 +256,15 @@ const swimlanesGroup = HttpApiGroup.make("swimlanes")
   .add(HttpApiEndpoint.del("deleteSwimlane", "/projects/:slug/swimlanes/:id")
     .setPath(SwimlanePath)  .addSuccess(Schema.Undefined, { status: 204 }));
 
+const GithubIssueSchema = Schema.Struct({
+  issueId: Schema.String,
+  issueNumber: Schema.Number,
+  repo: Schema.String,
+  syncedState: Schema.NullOr(Schema.Literal("open", "closed")),
+  url: Schema.String,
+  outOfSync: Schema.Boolean,
+});
+
 const TaskSchema = Schema.Struct({
   id: Schema.String,
   projectId: Schema.String,
@@ -253,16 +274,9 @@ const TaskSchema = Schema.Struct({
   description: Schema.Any,
   priority: Schema.Literal("urgent", "high", "medium", "low"),
   type: Schema.Literal("feature", "bug", "task", "asset"),
-  assignee: Schema.NullOr(Schema.String),
+  assignees: Schema.Array(Schema.String),
   position: Schema.String,
-  github: Schema.NullOr(Schema.Struct({
-    issueId: Schema.String,
-    issueNumber: Schema.Number,
-    repo: Schema.String,
-    url: Schema.String,
-    syncedState: Schema.NullOr(Schema.Literal("open", "closed")),
-    outOfSync: Schema.Boolean,
-  })),
+  githubs: Schema.Array(GithubIssueSchema),
   createdAt: Schema.String,
   updatedAt: Schema.String,
 });
@@ -274,12 +288,12 @@ const TaskListResponse = Schema.Struct({
 
 const CreateTaskPayload = Schema.Struct({
   columnId: Schema.String,
-  swimlaneId: Schema.optional(Schema.NullOr(Schema.String)),
+  swimlaneId: Schema.String,
   title: Schema.String,
   description: Schema.optional(Schema.Any),
   priority: Schema.optional(Schema.Literal("urgent", "high", "medium", "low")),
   type: Schema.optional(Schema.Literal("feature", "bug", "task", "asset")),
-  assignee: Schema.optional(Schema.NullOr(Schema.String)),
+  assignees: Schema.optional(Schema.Array(Schema.String)),
 });
 
 const UpdateTaskPayload = Schema.Struct({
@@ -287,12 +301,12 @@ const UpdateTaskPayload = Schema.Struct({
   description: Schema.optional(Schema.Any),
   priority: Schema.optional(Schema.Literal("urgent", "high", "medium", "low")),
   type: Schema.optional(Schema.Literal("feature", "bug", "task", "asset")),
-  assignee: Schema.optional(Schema.NullOr(Schema.String)),
+  assignees: Schema.optional(Schema.Array(Schema.String)),
 });
 
 const MoveTaskPayload = Schema.Struct({
   columnId: Schema.String,
-  swimlaneId: Schema.optional(Schema.NullOr(Schema.String)),
+  swimlaneId: Schema.String,
   beforeTaskId: Schema.optional(Schema.String),
   afterTaskId: Schema.optional(Schema.String),
 });
@@ -323,6 +337,50 @@ const tasksGroup = HttpApiGroup.make("tasks")
 const boardGroup = HttpApiGroup.make("board")
   .add(HttpApiEndpoint.get("getBoard", "/projects/:slug/board")
     .setPath(SlugPath).addSuccess(BoardSchema));
+
+const WipSegmentSchema = Schema.Struct({
+  state: Schema.Literal("ok", "approaching", "exceeded", "empty"),
+  flex: Schema.Number,
+});
+
+const ProjectHealthSchema = Schema.Struct({
+  project: ProjectSchema,
+  taskCount: Schema.Number,
+  columnCount: Schema.Number,
+  urgentCount: Schema.Number,
+  syncCount: Schema.Number,
+  health: Schema.Literal("ok", "approaching", "exceeded"),
+  wipSegments: Schema.Array(WipSegmentSchema),
+});
+
+const DashboardStatsSchema = Schema.Struct({
+  totalTasks: Schema.Number,
+  activeProjects: Schema.Number,
+  wipExceeded: Schema.Number,
+  outOfSync: Schema.Number,
+});
+
+const UrgentTaskSchema = Schema.Struct({
+  id: Schema.String, title: Schema.String,
+  projectName: Schema.String, projectSlug: Schema.String,
+  columnName: Schema.String, priority: Schema.String,
+});
+
+const OutOfSyncTaskSchema = Schema.Struct({
+  id: Schema.String, title: Schema.String,
+  projectName: Schema.String, projectSlug: Schema.String,
+  repo: Schema.String, issueNumber: Schema.Number,
+});
+
+const DashboardSchema = Schema.Struct({
+  projects: Schema.Array(ProjectHealthSchema),
+  stats: DashboardStatsSchema,
+  urgentTasks: Schema.Array(UrgentTaskSchema),
+  outOfSyncTasks: Schema.Array(OutOfSyncTaskSchema),
+});
+
+const dashboardGroup = HttpApiGroup.make("dashboard")
+  .add(HttpApiEndpoint.get("getDashboard", "/dashboard").addSuccess(DashboardSchema));
 
 const wikiGroup = HttpApiGroup.make("wiki")
   .add(HttpApiEndpoint.get("listPages", "/projects/:slug/wiki")
@@ -400,6 +458,7 @@ export const LexaApi = HttpApi.make("lexa")
   .add(tasksGroup)
   .add(boardGroup)
   .add(wikiGroup)
+  .add(dashboardGroup)
   .add(apiKeysGroup)
   .add(adminGroup)
   .prefix("/api");
@@ -409,15 +468,23 @@ const apiLayer = HttpApiBuilder.api(LexaApi);
 const respond = <A, E, R>(eff: Effect.Effect<A, E, R>): Effect.Effect<A | HttpServerResponse.HttpServerResponse, never, R> =>
   eff.pipe(
     Effect.catchAllCause((cause) => {
-      const defect = Cause.defects(cause).find(() => true);
-      if (defect) console.error("[API] Defect:", defect);
       const failure = Cause.failureOption(cause);
+      if (failure._tag === "Some") {
+        const err = failure.value as { _tag: string } & Record<string, unknown>;
+        const resp = errorResponse(err);
+        const status = errorToStatus(err);
+        return Effect.logError(`[HTTP] ${status} ${resp.error.code}: ${resp.error.message}`).pipe(
+          Effect.annotateLogs({ code: resp.error.code, status, ...resp.error.details }),
+          Effect.as(HttpServerResponse.unsafeJson(resp, { status })),
+        );
+      }
+      for (const d of Cause.defects(cause)) {
+        console.error("[API] Defect:", d instanceof Error ? d.message : String(d), d instanceof Error ? d.stack : undefined);
+      }
       return Effect.succeed(
         HttpServerResponse.unsafeJson(
-          failure._tag === "Some"
-            ? errorResponse(failure.value as { _tag: string } & Record<string, unknown>)
-            : { error: { code: "INTERNAL", message: defect instanceof Error ? defect.message : "Internal error" } },
-          { status: failure._tag === "Some" ? errorToStatus(failure.value as { _tag: string }) : 500 }
+          { error: { code: "INTERNAL", message: "Internal error" } },
+          { status: 500 }
         )
       );
     })
@@ -468,6 +535,17 @@ const projectsLive = HttpApiBuilder.group(LexaApi, "projects", (handlers) =>
           })
         );
         return { data: members.filter((m): m is { name: string; email: string; role: "admin" | "member" } => m !== undefined) };
+      }))
+    )
+    .handle("updateProject", (req) =>
+      respond(Effect.gen(function* () {
+        const service = yield* ProjectService;
+        const project = yield* service.update(req.path.slug, {
+          name: req.payload.name,
+          description: req.payload.description,
+          githubRepo: req.payload.githubRepo,
+        });
+        return formatProject(project);
       }))
     )
     .handle("deleteProject", (req) =>
@@ -597,7 +675,7 @@ const tasksLive = HttpApiBuilder.group(LexaApi, "tasks", (handlers) =>
           projectId: project.id, columnId: req.payload.columnId,
           swimlaneId: req.payload.swimlaneId, title: req.payload.title,
           description: req.payload.description, priority: req.payload.priority,
-          type: req.payload.type, assignee: req.payload.assignee,
+          type: req.payload.type, assignees: req.payload.assignees,
         });
         return formatTask(task);
       }))
@@ -615,7 +693,7 @@ const tasksLive = HttpApiBuilder.group(LexaApi, "tasks", (handlers) =>
         const task = yield* taskService.update(req.path.id, {
           title: req.payload.title, description: req.payload.description,
           priority: req.payload.priority, type: req.payload.type,
-          assignee: req.payload.assignee,
+          assignees: req.payload.assignees,
         });
         return formatTask(task);
       }))
@@ -656,6 +734,15 @@ const boardLive = HttpApiBuilder.group(LexaApi, "board", (handlers) =>
         swimlanes: swimlanes.map(formatSwimlane),
         tasks: tasks.map(formatTask),
       };
+    }))
+  )
+);
+
+const dashboardLive = HttpApiBuilder.group(LexaApi, "dashboard", (handlers) =>
+  handlers.handle("getDashboard", () =>
+    respond(Effect.gen(function* () {
+      const service = yield* DashboardService;
+      return yield* service.getDashboard();
     }))
   )
 );
@@ -875,7 +962,7 @@ function formatSwimlane(s: { id: string; projectId: string; name: string; descri
   return s as any;
 }
 
-function formatTask(t: { id: string; projectId: string; columnId: string; swimlaneId: string | null; title: string; description: any; priority: string; type: string; assignee: string | null; position: string; github: any; createdAt: string; updatedAt: string }) {
+function formatTask(t: { id: string; projectId: string; columnId: string; swimlaneId: string; title: string; description: any; priority: string; type: string; assignees: string[]; position: string; githubs: any[]; createdAt: string; updatedAt: string }) {
   return t as any;
 }
 
@@ -914,10 +1001,25 @@ export function createApiHandler(dbPath: string) {
     ApiKeyRepo.Default, ApiKeyService.Default,
     UserRepo.Default, UserService.Default,
     UserProjectRoleRepo.Default, UserProjectRoleService.Default,
+    DashboardService.Default,
   );
   const handlerLayer = Layer.mergeAll(
-    healthLive, projectsLive, columnsLive, swimlanesLive, tasksLive, boardLive, wikiLive, apiKeysLive, adminLive,
-  ).pipe(Layer.provide(Layer.provide(serviceLayer, dbLayer)));
+    healthLive, projectsLive, columnsLive, swimlanesLive, tasksLive, boardLive, wikiLive, apiKeysLive, adminLive, dashboardLive,
+  ).pipe(Layer.provide(Layer.provide(serviceLayer, Layer.mergeAll(dbLayer, LoggerLayer))));
   const merged = Layer.mergeAll(apiLayer, handlerLayer);
-  return HttpApiBuilder.toWebHandler(merged as unknown as Parameters<typeof HttpApiBuilder.toWebHandler>[0]);
+  const { handler } = HttpApiBuilder.toWebHandler(merged as unknown as Parameters<typeof HttpApiBuilder.toWebHandler>[0]);
+  return async (req: Request) => {
+    const start = Date.now();
+    const url = new URL(req.url);
+    try {
+      const res = await handler(req);
+      const level = res.status >= 500 ? "ERROR" : res.status >= 400 ? "WARN" : "INFO";
+      console.log(JSON.stringify({ level, service: "http", method: req.method, path: url.pathname, status: res.status, duration: Date.now() - start, timestamp: new Date().toISOString() }));
+      return res;
+    } catch (err) {
+      const e = err instanceof Error ? err : new Error(String(err));
+      console.log(JSON.stringify({ level: "ERROR", service: "http", method: req.method, path: url.pathname, status: 500, duration: Date.now() - start, timestamp: new Date().toISOString(), error: e.message, stack: e.stack }));
+      return new Response(JSON.stringify({ error: { code: "INTERNAL", message: e.message } }), { status: 500, headers: { "Content-Type": "application/json" } });
+    }
+  };
 }

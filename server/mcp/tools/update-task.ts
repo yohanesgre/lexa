@@ -7,7 +7,7 @@ import type { Swimlane, Column } from "../../../shared/types";
 
 export const tool = {
   name: "update_task",
-  description: "Update task fields. description takes Markdown (full replace). assignee: explicit null clears. Returns TaskDetail.",
+  description: "Update task fields. description takes Markdown (full replace). assignees: empty array clears. Returns TaskDetail.",
   inputSchema: {
     type: "object",
     properties: {
@@ -16,7 +16,7 @@ export const tool = {
       description: { type: "string", description: "New description in Markdown (full replace)" },
       priority: { type: "string", enum: ["urgent", "high", "medium", "low"] },
       type: { type: "string", enum: ["feature", "bug", "task", "asset"] },
-      assignee: { type: "string", description: "Assignee name (null to clear)" },
+      assignees: { type: "array", items: { type: "string" }, description: "Assignee names (empty array to clear)" },
     },
     required: ["taskId"],
   },
@@ -32,7 +32,7 @@ export const tool = {
         description: descriptionDoc as any,
         priority: args.priority,
         type: args.type,
-        assignee: args.assignee !== undefined ? args.assignee : undefined,
+        assignees: args.assignees,
       });
 
       const columnRepo = yield* ColumnRepo;
@@ -58,15 +58,13 @@ export const tool = {
         swimlane: swimlane?.name ?? null,
         priority: task.priority,
         type: task.type,
-        assignee: task.assignee,
-        githubIssue: task.github
-          ? {
-              number: task.github.issueNumber,
-              repo: task.github.repo,
-              url: task.github.url,
-              outOfSync: task.github.outOfSync,
-            }
-          : null,
+        assignees: task.assignees,
+        githubIssues: task.githubs.map(g => ({
+          number: g.issueNumber,
+          repo: g.repo,
+          url: g.url,
+          outOfSync: g.outOfSync,
+        })),
         updatedAt: task.updatedAt,
         description: docToMarkdown(task.description),
         createdAt: task.createdAt,

@@ -47,25 +47,36 @@
         <span class="prop-label">Type</span>
         <span class="type-badge type-bug">Bug</span>
       </div>
-      <div class="prop-field">
-        <span class="prop-label">Assignees</span>
-        <div class="assignee-chips">
-          <span class="assignee-chip">
-            <div class="avatar">AL</div>
-            <span class="text-sm weight-500">Alex Lin</span>
-          </span>
-          <span class="assignee-chip">
-            <div class="avatar">MK</div>
-            <span class="text-sm weight-500">Maria Kim</span>
-          </span>
-          <span class="assignee-chip">
-            <div class="avatar">JD</div>
-            <span class="text-sm weight-500">James Diaz</span>
-          </span>
-          <span class="assignee-chip" style="opacity:0.6;">
-            <div class="avatar">+1</div>
-          </span>
+      <div class="prop-field" style="flex-wrap:wrap;">
+        <div style="display:flex;align-items:center;gap:4px;">
+          <span class="prop-label">Assignees</span>
+          <button class="btn btn-ghost" style="width:20px;height:20px;padding:0;" title="Edit assignees">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+          </button>
         </div>
+        <span class="assignee-chip">
+          <div class="avatar">AL</div>
+          <span class="text-sm weight-500">Alex Lin</span>
+        </span>
+        <span class="assignee-chip">
+          <div class="avatar">MK</div>
+          <span class="text-sm weight-500">Maria Kim</span>
+        </span>
+        <span class="assignee-chip">
+          <div class="avatar">JD</div>
+          <span class="text-sm weight-500">James Diaz</span>
+        </span>
+        <button class="assignee-chip" style="opacity:0.6;cursor:pointer;border:none;background:none;font:inherit;" title="Show all assignees">
+          <div class="avatar">+1</div>
+        </button>
+        <!-- Expanded: clicking +1 reveals hidden chips inline -->
+        <!-- <span class="assignee-chip">
+          <div class="avatar">AP</div>
+          <span class="text-sm weight-500">Alan Park</span>
+        </span>
+        <button class="assignee-chip" style="opacity:0.6;cursor:pointer;border:none;background:none;font:inherit;" title="Collapse">
+          <div class="avatar" style="font-size:10px;">−</div>
+        </button> -->
       </div>
     </div>
 
@@ -105,7 +116,7 @@
     </div>
 
     <!-- GitHub Issues: multi-issue list -->
-    <div style="margin-top:24px;padding:0 16px;">
+    <div style="margin-top:24px;padding:0;">
       <div class="flex items-center gap-2 mb-2">
         <INCLUDE _github-icon.html />
         <span class="prop-label">GitHub Issues</span>
@@ -116,11 +127,12 @@
         <div class="flex items-center gap-2">
           <INCLUDE _github-icon.html />
           <span class="font-mono text-sm weight-500 color-link">emberfall-godot #107</span>
-          <span class="sync-dot sync-diverged"></span>
-          <span class="font-micro text-2xs color-warning" style="text-transform:uppercase;letter-spacing:0.04em;">Diverged</span>
         </div>
         <div class="flex items-center gap-1">
-          <p class="text-xs color-warning" style="max-width:200px;line-height:14px;">GitHub state (open) ≠ column (In Progress). Move card to resync.</p>
+          <div class="flex items-center gap-2">
+            <span class="sync-dot sync-diverged"></span>
+            <span class="font-micro text-2xs color-warning" style="text-transform:uppercase;letter-spacing:0.04em;">Diverged</span>
+          </div>
           <button class="icon-btn" title="Unlink" style="width:20px;height:20px;">
             <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg>
           </button>
@@ -132,12 +144,16 @@
         <div class="flex items-center gap-2">
           <INCLUDE _github-icon.html />
           <span class="font-mono text-sm weight-500 color-link">emberfall-godot #91</span>
-          <span class="sync-dot sync-synced"></span>
-          <span class="font-micro text-2xs color-success" style="text-transform:uppercase;letter-spacing:0.04em;">Synced</span>
         </div>
-        <button class="icon-btn" title="Unlink" style="width:20px;height:20px;">
-          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg>
-        </button>
+        <div class="flex items-center gap-1">
+          <div class="flex items-center gap-2">
+            <span class="sync-dot sync-synced"></span>
+            <span class="font-micro text-2xs color-success" style="text-transform:uppercase;letter-spacing:0.04em;">Synced</span>
+          </div>
+          <button class="icon-btn" title="Unlink" style="width:20px;height:20px;">
+            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg>
+          </button>
+        </div>
       </div>
     </div>
     </div>
@@ -148,10 +164,10 @@
   <div style="position:fixed;top:24px;left:24px;z-index:55;display:flex;flex-direction:column;gap:8px;align-items:flex-start;">
     <span class="annotation-tag">Breadcrumb: Emberfall / Board</span>
     <span class="annotation-tag">Title: text-xl/600/Display, inline editable on click</span>
-    <span class="annotation-tag">PropertyBar: 4 fields — Column, Priority, Type, Assignee chips</span>
+    <span class="annotation-tag">PropertyBar: 4 fields — Column, Priority, Type, Assignee chips. +N chip is clickable — expands to show all assignees inline, replaced with − to collapse</span>
     <span class="annotation-tag">TipTap rendered: prose + checklist + code block</span>
     <span class="annotation-tag">Double-click description → opens task-detail-edit.html (Tiptap editor inline)</span>
-    <span class="annotation-tag">GitHub Issues: multi-issue list with sync state + unlink per row</span>
+    <span class="annotation-tag">GitHub Issues: multi-issue list with sync state + unlink per row. Diverged issue shows warning text inline: "GitHub state ≠ column. Move card to resync."</span>
   </div>
 
 </body>

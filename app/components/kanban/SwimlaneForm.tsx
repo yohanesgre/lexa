@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
-import { Plus, X } from "lucide-react";
+import { createPortal } from "react-dom";
+import { Plus, Trash2, X } from "lucide-react";
 import type { Swimlane } from "../../../shared/types";
 
 export interface SwimlaneFormProps {
@@ -8,9 +9,10 @@ export interface SwimlaneFormProps {
   isOpen: boolean;
   onClose: () => void;
   onSubmit: (input: { name: string; description?: string | null }) => void;
+  zIndex?: number;
 }
 
-export function SwimlaneForm({ swimlane, isOpen, onClose, onSubmit }: SwimlaneFormProps) {
+export function SwimlaneForm({ swimlane, isOpen, onClose, onSubmit, zIndex = 70 }: SwimlaneFormProps) {
   const isEdit = !!swimlane;
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
@@ -58,10 +60,10 @@ export function SwimlaneForm({ swimlane, isOpen, onClose, onSubmit }: SwimlaneFo
     onClose();
   };
 
-  return (
+  return createPortal(
     <>
-      <div className="dialog-overlay" onClick={onClose} />
-      <div className="fixed inset-0 flex items-center justify-center z-[70] pointer-events-none">
+      <div className="dialog-overlay" style={{ zIndex: zIndex }} onClick={onClose} />
+      <div className="fixed inset-0 flex items-center justify-center pointer-events-none" style={{ zIndex: zIndex + 1 }}>
         <div
           className="dialog dialog-enter pointer-events-auto p-0"
           style={{ width: 440, maxWidth: "calc(100vw - 48px)" }}
@@ -124,7 +126,22 @@ export function SwimlaneForm({ swimlane, isOpen, onClose, onSubmit }: SwimlaneFo
               </div>
             </div>
 
-            <div className="flex items-center justify-end gap-2 px-4 py-3 border-t border-lx-border-subtle">
+            <div className="flex items-center gap-2 px-4 py-3 border-t border-lx-border-subtle">
+              {isEdit && (
+                <button
+                  type="button"
+                  className="btn btn-danger-solid"
+                  style={{ marginRight: "auto" }}
+                  onClick={() => {
+                    if (window.confirm(`Delete "${swimlane!.name}"? This will unassign all tasks in this swimlane.`)) {
+                      onClose();
+                    }
+                  }}
+                >
+                  <Trash2 size={14} strokeWidth={1.5} />
+                  Delete Swimlane
+                </button>
+              )}
               <button type="button" className="btn btn-ghost" onClick={onClose}>
                 Cancel
               </button>
@@ -136,6 +153,7 @@ export function SwimlaneForm({ swimlane, isOpen, onClose, onSubmit }: SwimlaneFo
           </form>
         </div>
       </div>
-    </>
+    </>,
+    typeof document !== "undefined" ? document.body : null as any
   );
 }

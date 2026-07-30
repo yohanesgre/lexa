@@ -23,7 +23,7 @@ function BoardPage() {
   const createTask = useCreateTask(slug);
   const deleteTask = useDeleteTask(slug);
 
-  const [createTarget, setCreateTarget] = useState<{ columnId: string; swimlaneId?: string | null } | null>(null);
+  const [createTarget, setCreateTarget] = useState<{ columnId: string; swimlaneId: string } | null>(null);
 
   const selectedTaskId = search.task ?? null;
   const selectedTask = selectedTaskId ? board?.tasks.find((t) => t.id === selectedTaskId) ?? null : null;
@@ -33,7 +33,8 @@ function BoardPage() {
     await moveTask.mutateAsync({ id: taskId, ...target });
   };
 
-  const handleOpenCreateTask = (columnId: string, swimlaneId?: string | null) => {
+  const handleOpenCreateTask = (columnId: string, swimlaneId?: string) => {
+    if (!swimlaneId) return;
     setCreateTarget({ columnId, swimlaneId });
   };
 
@@ -42,20 +43,22 @@ function BoardPage() {
     columnId: string;
     priority: Priority;
     type: TaskType;
-    assignee: string | null;
+    assignees: string[];
     description: TipTapDoc;
   }) => {
-    await createTask.mutateAsync({
-      ...input,
-      swimlaneId: createTarget?.swimlaneId ?? null,
-    });
-    setCreateTarget(null);
+    try {
+      await createTask.mutateAsync({
+        ...input,
+        swimlaneId: createTarget.swimlaneId,
+      });
+      setCreateTarget(null);
+    } catch (e) {
+      console.error("Task create failed", e);
+    }
   };
 
   const handleUpdate = (id: string, data: Partial<Task>) => {
-    updateTask.mutate({ id, ...data }, {
-      onError: (e) => console.error("Task update failed", e),
-    });
+    updateTask.mutate({ id, ...data });
   };
 
   const handleDelete = async (id: string) => {
@@ -95,7 +98,7 @@ function BoardPage() {
             columnId: column.id,
             fields: column.requiredFields,
           }))}
-          availableAssignees={[...new Set(board.tasks.map((t) => t.assignee).filter(Boolean))] as string[]}
+          availableAssignees={[...new Set(board.tasks.flatMap((t) => t.assignees))] as string[]}
           onClose={handleClose}
           onUpdate={handleUpdate}
           onDelete={handleDelete}

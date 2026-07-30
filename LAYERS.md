@@ -144,7 +144,7 @@ export class TaskService extends Effect.Service<TaskService>()("TaskService", {
         for (const field of required) {
           const empty =
             field === "description" ? isEmptyDoc(task.description)
-            : field === "assignee"    ? !task.assignee
+            : field === "assignee"    ? !task.assignees || task.assignees.length === 0
             : !(task as any)[field];
           if (empty)
             return yield* new RequiredFieldMissing({ field, column: column.name });
@@ -456,6 +456,7 @@ WikiService      → WikiRepo, ProjectRepo
 ProjectService   → ProjectRepo
 ColumnService    → ColumnRepo
 SwimlaneService  → SwimlaneRepo
+DashboardService → TaskRepo, ColumnRepo, ProjectRepo
 AuthService      → ApiKeyRepo
 GitHubService    → GitHubClient, WebhookEventRepo, TaskRepo, TaskService, ColumnRepo, ProjectRepo
 Routes/MCP       → all services (orchestration layer — the only place

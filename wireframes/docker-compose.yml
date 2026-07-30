@@ -1,0 +1,17 @@
+services:
+  wireframes:
+    build: .
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:80"]
+      interval: 30s
+      retries: 3
+      start_period: 5s
+
+  tunnel:
+    image: cloudflare/cloudflared
+    command: tunnel --no-autoupdate run --token ${CF_TUNNEL_TOKEN}
+    depends_on:
+      wireframes:
+        condition: service_healthy
+    restart: unless-stopped

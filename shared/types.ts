@@ -41,25 +41,27 @@ export interface Board {
 export type Priority = "urgent" | "high" | "medium" | "low";
 export type TaskType = "feature" | "bug" | "task" | "asset";
 
+export interface GithubIssue {
+  issueId: string;
+  issueNumber: number;
+  repo: string;
+  syncedState: "open" | "closed" | null;
+  url: string;
+  outOfSync: boolean;
+}
+
 export interface Task {
   id: ID;
   projectId: ID;
   columnId: ID;
-  swimlaneId: ID | null;
+  swimlaneId: ID;
   title: string;
   description: TipTapDoc;
   priority: Priority;
   type: TaskType;
-  assignee: string | null;
+  assignees: string[];
   position: string;
-  github: {
-    issueId: string;
-    issueNumber: number;
-    repo: string;
-    url: string;
-    syncedState: "open" | "closed" | null;
-    outOfSync: boolean;
-  } | null;
+  githubs: GithubIssue[];
   createdAt: ISODate;
   updatedAt: ISODate;
 }
@@ -107,4 +109,51 @@ export interface ApiKey {
 export interface ApiKeyCreateResult {
   key: ApiKey;
   rawKey: string;
+}
+
+export interface WipSegment {
+  state: "ok" | "approaching" | "exceeded" | "empty";
+  flex: number;
+}
+
+export interface ProjectHealth {
+  project: Project;
+  taskCount: number;
+  columnCount: number;
+  urgentCount: number;
+  syncCount: number;
+  health: "ok" | "approaching" | "exceeded";
+  wipSegments: WipSegment[];
+}
+
+export interface DashboardStats {
+  totalTasks: number;
+  activeProjects: number;
+  wipExceeded: number;
+  outOfSync: number;
+}
+
+export interface UrgentTask {
+  id: string;
+  title: string;
+  projectName: string;
+  projectSlug: string;
+  columnName: string;
+  priority: Priority;
+}
+
+export interface OutOfSyncTask {
+  id: string;
+  title: string;
+  projectName: string;
+  projectSlug: string;
+  repo: string;
+  issueNumber: number;
+}
+
+export interface Dashboard {
+  projects: ProjectHealth[];
+  stats: DashboardStats;
+  urgentTasks: UrgentTask[];
+  outOfSyncTasks: OutOfSyncTask[];
 }

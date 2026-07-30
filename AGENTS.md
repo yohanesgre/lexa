@@ -101,16 +101,32 @@ wrangler d1 execute lexa-db --local --command "<sql>"   # inspect data
 
 Each phase in IMPLEMENTATION.md has its own acceptance block — run it and paste the output.
 
-## Agent-browser usage
+## Agent-browser usage — Snapshot-First (No Vision Required)
+
+DeepSeek V4 Pro cannot see images. Always use text-based accessibility-tree snapshots for debugging. Never `screenshot` with a blind model — use `snapshot -i` instead.
 
 When using agent-browser for testing, QA, or review, divide the scenario into smaller, focused tasks:
 
-1. **Open the page and snapshot first** — confirm the page loaded before interacting.
+1. **Open and snapshot first** — `agent-browser snapshot -i` to confirm page loaded.
 2. **Test one feature at a time** — don't chain clicks across components in one pass.
-3. **Prefer `find role|text button click --name "..."` over `@eN` ref clicks** — refs become stale after any DOM change; semantic locators are more reliable across re-renders.
-4. **Verify after each interaction** — screenshot or snapshot after each click to confirm expected state.
-5. **Close overlays before continuing** — modals/dropdowns/menus may block interactions with underlying elements.
-6. **Check the console** (`eval` for `console.log` buffers) when a click produces no visible result.
+3. **Prefer semantic locators** — `find role|text button click --name "..."` over `@eN` ref clicks. Refs stale after any DOM change; semantic locators survive re-renders.
+4. **Snapshot after each interaction** — `snapshot -i` to confirm expected state. Never guess.
+5. **Extract text and state** — `get text @e1`, `eval "...textContent"`, `console` for debugging.
+6. **Check console** — `agent-browser console` or `eval` when a click produces no visible result.
+7. **Close overlays before continuing** — modals/dropdowns/menus may block underlying elements.
+
+### Key commands
+
+```bash
+agent-browser snapshot -i              # interactive elements only (~200-400 tokens)
+agent-browser snapshot -i -d 3         # cap depth
+agent-browser snapshot -s "#main"      # scope to CSS selector
+agent-browser find text "Error"        # locate text on page
+agent-browser find role alert          # find ARIA alerts/toasts
+agent-browser get text @e1             # full visible text of element
+agent-browser eval "document.querySelector('.error')?.textContent"
+agent-browser console                  # dump console output
+```
 
 ### Testing wireframes
 
@@ -126,15 +142,14 @@ cd wireframes && nohup python3 -m http.server 8080 &
 # Open the wireframe
 agent-browser open http://localhost:8080/wiki-edit.html
 
-# Inspect
-agent-browser screenshot /tmp/wireframe.png
+# Inspect (text-based — no vision model needed)
 agent-browser snapshot -i -d 5
 
 # Clean up when done
 pkill -f "http.server 8080"
 ```
 
-Use this to visually verify wireframe layout, spacing, and structure before implementing. Wireframe files live in `wireframes/` and use `wireframes/wireframes.css` for styles.
+Use this to verify wireframe layout, spacing, and structure before implementing. Wireframe files live in `wireframes/` and use `wireframes/wireframes.css` for styles.
 
 ## When you're stuck
 

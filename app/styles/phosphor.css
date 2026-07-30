@@ -920,6 +920,9 @@
     flex-direction: column;
     transition: transform 200ms var(--lx-ease-out);
   }
+  .slideover.slideover-expanded {
+    width: 60vw;
+  }
   .slideover.slideover-closed {
     transform: translateX(100%);
   }
@@ -1197,26 +1200,30 @@
     background: var(--lx-surface-card);
   }
   .toolbar-btn {
-    width: 28px;
-    height: 28px;
-    display: flex;
+    display: inline-flex;
     align-items: center;
     justify-content: center;
+    min-width: 28px;
+    height: 28px;
+    padding: 0 6px;
+    gap: 4px;
     border: none;
     background: transparent;
     border-radius: 4px;
     color: var(--lx-text-secondary);
     font-family: var(--lx-font-body);
-    font-size: 13px;
+    font-size: 12px;
+    font-weight: 600;
     cursor: pointer;
+    transition: background 100ms, color 100ms;
   }
   .toolbar-btn:hover {
-    background: var(--lx-surface-elevated);
+    background: var(--lx-surface-card-hover);
     color: var(--lx-text-primary);
   }
   .toolbar-btn.active {
     background: var(--lx-surface-selected);
-    color: var(--lx-text-primary);
+    color: var(--lx-text-link);
   }
   .toolbar-btn .ph {
     font-size: 14px;
@@ -2024,6 +2031,8 @@
 
   /* ---- Dashboard Health Grid (dashboard.html) ---- */
   .health-card {
+    display: flex;
+    flex-direction: column;
     height: auto;
     min-height: 200px;
     padding: 20px;
@@ -2119,6 +2128,37 @@
     stroke: currentColor;
     stroke-width: 1.5;
     fill: none;
+  }
+
+  /* ---- Loading Skeleton ---- */
+  .skeleton {
+    background: var(--lx-surface-card-hover);
+    border-radius: 4px;
+    animation: lx-skeleton-pulse 1.6s var(--lx-ease-in-out) infinite;
+  }
+  .skeleton-circle {
+    border-radius: 9999px;
+  }
+  @keyframes lx-skeleton-pulse {
+    0%, 100% { opacity: 1; }
+    50%      { opacity: 0.45; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .skeleton { animation: none; }
+  }
+
+  .dashboard-settings-btn {
+    position: absolute;
+    top: 12px;
+    right: 12px;
+    width: 28px;
+    height: 28px;
+    padding: 0;
+    opacity: 0;
+    transition: opacity 100ms;
+  }
+  .project-card:hover .dashboard-settings-btn {
+    opacity: 1;
   }
 
   /* ---- Aggregate Stats Bar (dashboard.html) ---- */
@@ -2342,16 +2382,11 @@
     background: var(--lx-surface-elevated);
     border: 1px solid var(--lx-border-default);
     border-radius: 6px;
-    padding: 16px;
+    padding: 4px 0;
     box-shadow: var(--lx-shadow-lg);
-    z-index: 30;
-  }
-  .menu {
-    position: fixed;
-  }
-  .menu-popover {
     position: absolute;
     top: calc(100% + 6px);
+    z-index: 30;
   }
   .menu-popover.right {
     right: 0;
@@ -2668,6 +2703,18 @@
     }
   }
 
+  .modal {
+    position: relative;
+    width: 440px;
+    max-width: calc(100vw - 32px);
+    background: var(--lx-surface-elevated);
+    border: 1px solid var(--lx-border-default);
+    border-radius: 12px;
+    box-shadow: var(--lx-shadow-lg);
+    z-index: 70;
+    pointer-events: auto;
+  }
+
   .modal-header {
     display: flex;
     align-items: center;
@@ -2697,6 +2744,13 @@
     padding: 0 16px;
     border-top: 1px solid var(--lx-border-subtle);
     flex-shrink: 0;
+  }
+
+  .field {
+    margin-bottom: 16px;
+  }
+  .field:last-child {
+    margin-bottom: 0;
   }
 
   .field-label {
