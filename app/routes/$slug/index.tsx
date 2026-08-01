@@ -1,10 +1,11 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useState } from "react";
-import { useBoard, useMoveTask, useUpdateTask, useCreateTask, useDeleteTask } from "../../lib/queries";
+import { useBoard, useMoveTask, useUpdateTask, useCreateTask, useDeleteTask, useArchiveTask, useRestoreTask } from "../../lib/queries";
+import { useToast } from "../../components/ui/Toast";
 import { KanbanBoard } from "../../components/kanban/KanbanBoard";
 import type { MoveTarget } from "../../components/kanban/KanbanBoard";
 import { TaskDetail } from "../../components/TaskDetail";
-import type { Priority, Task, TaskType, TipTapDoc } from "../../../shared/types";
+import type { Task, TipTapDoc } from "../../../shared/types";
 
 export const Route = createFileRoute("/$slug/")({
   validateSearch: (search: Record<string, unknown>): { task?: string } => ({
@@ -17,11 +18,15 @@ function BoardPage() {
   const { slug } = Route.useParams();
   const search = Route.useSearch();
   const navigate = Route.useNavigate();
-  const { data: board, isLoading, error } = useBoard(slug);
+  const [showArchived, setShowArchived] = useState(false);
+  const { data: board, isLoading, error } = useBoard(slug, showArchived);
+  const toast = useToast();
   const moveTask = useMoveTask(slug);
   const updateTask = useUpdateTask(slug);
   const createTask = useCreateTask(slug);
   const deleteTask = useDeleteTask(slug);
+  const archiveTask = useArchiveTask(slug);
+  const restoreTask = useRestoreTask(slug);
 
   const [createTarget, setCreateTarget] = useState<{ columnId: string; swimlaneId: string } | null>(null);
 
@@ -41,11 +46,12 @@ function BoardPage() {
   const handleCreate = async (input: {
     title: string;
     columnId: string;
-    priority: Priority;
-    type: TaskType;
+    priority: string;
+    type: string;
     assignees: string[];
     description: TipTapDoc;
   }) => {
+    if (!createTarget) return;
     try {
       await createTask.mutateAsync({
         ...input,
@@ -53,7 +59,7 @@ function BoardPage() {
       });
       setCreateTarget(null);
     } catch (e) {
-      console.error("Task create failed", e);
+      toast.push("error", "Failed to create task", (e as Error).message);
     }
   };
 
@@ -62,9 +68,31 @@ function BoardPage() {
   };
 
   const handleDelete = async (id: string) => {
-    await deleteTask.mutateAsync({ id });
-    navigate({ search: { task: undefined }, replace: true } as never);
-    setCreateTarget(null);
+    try {
+      await deleteTask.mutateAsync({ id });
+      navigate({ search: { task: undefined }, replace: true } as never);
+      setCreateTarget(null);
+    } catch {
+      // error toast comes from the mutation
+    }
+  };
+
+  const handleArchive = async (id: string) => {
+    try {
+      await archiveTask.mutateAsync({ id });
+      navigate({ search: { task: undefined }, replace: true } as never);
+      setCreateTarget(null);
+    } catch {
+      // error toast comes from the mutation
+    }
+  };
+
+  const handleRestore = async (id: string) => {
+    try {
+      await restoreTask.mutateAsync({ id });
+    } catch {
+      // error toast comes from the mutation
+    }
   };
 
   const handleSelectTask = (task: Task) => {
@@ -76,7 +104,48 @@ function BoardPage() {
     setCreateTarget(null);
   };
 
-  if (isLoading) return <div className="board-loading">Loading board…</div>;
+  if (isLoading) {
+    return (
+      <div className="board-area">
+        <div className="board-header">
+          <div className="skeleton" style={{ width: 140, height: 22 }} />
+          <div className="flex items-center gap-2">
+            <div className="skeleton" style={{ width: 72, height: 32 }} />
+            <div className="skeleton" style={{ width: 88, height: 32 }} />
+          </div>
+        </div>
+        <div className="board-scroll" style={{ overflow: "hidden" }}>
+          {[0, 1, 2].map((lane) => (
+            <div key={lane}>
+              <div className="skeleton" style={{ width: 320, height: 36, marginBottom: 12 }} />
+              <div className="columns-row">
+                {[0, 1, 2, 3].map((col) => (
+                  <div key={col} className="column" style={{ minHeight: 320 }}>
+                    <div className="column-header">
+                      <div className="skeleton" style={{ width: col * 23 + 52, height: 12 }} />
+                    </div>
+                    <div className="column-body">
+                      {[0, 1].map((card) => (
+                        <div key={card} className="bg-lx-surface-card border border-lx-border-subtle rounded-md" style={{ padding: "10px 12px" }}>
+                          <div className="skeleton" style={{ width: card === 0 ? 56 : 40, height: 18 }} />
+                          <div className="skeleton mt-2" style={{ width: card === 0 ? "85%" : "92%", height: 14 }} />
+                          <div className="skeleton mt-1" style={{ width: card === 0 ? "60%" : "45%", height: 14 }} />
+                          <div className="flex items-center gap-2 mt-2">
+                            <div className="skeleton skeleton-circle" style={{ width: 20, height: 20 }} />
+                            <div className="skeleton" style={{ width: card === 0 ? 72 : 56, height: 12 }} />
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  }
   if (error) return <div className="board-error">Failed to load board: {(error as Error).message}</div>;
   if (!board) return <div className="board-error">Project not found</div>;
 
@@ -84,11 +153,13 @@ function BoardPage() {
     <div className="board-page">
       <KanbanBoard
         board={board}
+        showArchived={showArchived}
+        onToggleArchived={setShowArchived}
         onMoveTask={handleMove}
         onSelectTask={handleSelectTask}
         onOpenCreateTask={handleOpenCreateTask}
       />
-      {(selectedTask || isCreating) && (
+      {(selectedTaskId !== null || isCreating) && (
         <TaskDetail
           mode={isCreating ? "create" : "view"}
           task={selectedTask ?? undefined}
@@ -99,9 +170,12 @@ function BoardPage() {
             fields: column.requiredFields,
           }))}
           availableAssignees={[...new Set(board.tasks.flatMap((t) => t.assignees))] as string[]}
+          fieldConfig={board.fieldConfig}
           onClose={handleClose}
           onUpdate={handleUpdate}
           onDelete={handleDelete}
+          onArchive={handleArchive}
+          onRestore={handleRestore}
           onCreate={handleCreate}
         />
       )}

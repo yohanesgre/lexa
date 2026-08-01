@@ -250,10 +250,10 @@ function renderInline(text: string): React.ReactNode[] {
     const code = CODE_RE.exec(remaining);
 
     const matches = [
-      bold && { ...bold, type: "bold" as const },
-      italic && { ...italic, type: "italic" as const },
-      code && { ...code, type: "code" as const },
-    ].filter(Boolean).sort((a, b) => a!.index - b!.index);
+      bold && { match: bold, type: "bold" as const },
+      italic && { match: italic, type: "italic" as const },
+      code && { match: code, type: "code" as const },
+    ].filter(Boolean).sort((a, b) => a!.match.index - b!.match.index);
 
     if (matches.length === 0) {
       parts.push(<span key={key++}>{remaining}</span>);
@@ -261,19 +261,20 @@ function renderInline(text: string): React.ReactNode[] {
     }
 
     const m = matches[0]!;
-    if (m.index > 0) {
-      parts.push(<span key={key++}>{remaining.slice(0, m.index)}</span>);
+    const { match, type } = m;
+    if (match.index > 0) {
+      parts.push(<span key={key++}>{remaining.slice(0, match.index)}</span>);
     }
 
-    if (m.type === "bold") {
-      parts.push(<strong key={key++}>{m[1]}</strong>);
-    } else if (m.type === "italic") {
-      parts.push(<em key={key++}>{m[1]}</em>);
+    if (type === "bold") {
+      parts.push(<strong key={key++}>{match[1]}</strong>);
+    } else if (type === "italic") {
+      parts.push(<em key={key++}>{match[1]}</em>);
     } else {
-      parts.push(<code key={key++} className="font-mono text-xs bg-lx-surface-elevated px-1 rounded">{m[1]}</code>);
+      parts.push(<code key={key++} className="font-mono text-xs bg-lx-surface-elevated px-1 rounded">{match[1]}</code>);
     }
 
-    remaining = remaining.slice(m.index + m[0].length);
+    remaining = remaining.slice(match.index + match[0].length);
     BOLD_RE.lastIndex = 0;
     ITALIC_RE.lastIndex = 0;
     CODE_RE.lastIndex = 0;

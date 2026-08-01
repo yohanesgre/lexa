@@ -86,10 +86,25 @@
       </div>
     </div>
 
-    <!-- Description: TipTap editor, expandable -->
+    <!-- Description: TipTap editor — flush with the slideover surface, no nested panel -->
     <div class="slideover-body">
-      <div class="pt-4" style="border:1px solid var(--lx-border-focus);border-radius:6px;box-shadow:var(--lx-focus-glow);resize:vertical;overflow:auto;min-height:120px;">
-        <INCLUDE _editor-toolbar.html />
+      <div style="border:1px solid var(--lx-border-focus);border-radius:6px;box-shadow:var(--lx-focus-glow);resize:vertical;overflow:auto;min-height:120px;">
+        <!-- Edit-mode header: compact icon exit controls, not part of the toolbar -->
+        <div class="flex items-center justify-between" style="padding:6px 8px 6px 12px;border-bottom:1px solid var(--lx-border-default);border-radius:6px 6px 0 0;background:var(--lx-surface-card);">
+          <span class="font-micro text-2xs color-muted" style="text-transform:uppercase;letter-spacing:0.04em;">Editing description</span>
+          <div class="flex items-center gap-2">
+            <button class="btn btn-ghost btn-icon-sm" style="width:28px;height:28px;padding:0;" title="Revert changes (Esc)">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg>
+            </button>
+            <button class="btn btn-primary btn-icon-sm" style="width:28px;height:28px;padding:0;" title="Save and finish (Enter)">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M20 6L9 17l-5-5"/></svg>
+            </button>
+          </div>
+        </div>
+        <span class="annotation" style="position:absolute;top:52px;right:16px;z-index:2;">Editor header: icon-only exit controls — ✕ (btn-ghost, 28px) reverts; ✓ (btn-primary, 28px) flushes via the same save path as blur and returns to read mode. Tooltips + aria-labels carry the action names. Enter in the editor finishes (unless composing); Esc reverts. Blur still saves. Toolbar below stays quiet.</span>
+        <div style="display:flex;align-items:center;border-bottom:1px solid var(--lx-border-default);">
+          <INCLUDE _editor-toolbar.html />
+        </div>
         <div style="padding:12px;background:var(--lx-surface-input);border-radius:0 0 6px 6px;font-size:15px;line-height:22px;color:var(--lx-text-secondary);font-family:var(--lx-font-body);min-height:160px;">
           <p style="color:var(--lx-text-primary);">
             The game crashes consistently when loading level 3-2 (The Furnace Depths). This appears to be related to the new tilemap streaming system introduced in Sprint 6.<span style="display:inline-block;width:1px;height:16px;background:var(--lx-border-focus);vertical-align:text-bottom;margin-left:2px;"></span>
@@ -106,6 +121,7 @@
           <div style="width:32px;height:3px;background:var(--lx-border-strong);border-radius:2px;"></div>
         </div>
       </div>
+      <span class="annotation" style="position:absolute;top:auto;bottom:150px;right:16px;z-index:2;">Layout: the editor block sits flush with the slideover body (no pt-4 gap, no outer card box). Only the inner editor has the focus border + glow — the surface reads as one continuous column with the property bar. The resize handle stays attached to the editor block.</span>
 
       <!-- GitHub Link Section: multi-issue, synced + diverged examples -->
       <div class="github-section mt-3" style="padding-left:0;padding-right:0;">
@@ -246,8 +262,10 @@
     <span class="annotation-tag">PropertyBar: 4 fields, all shown focused.</span>
     <span class="annotation-tag">Assignee chips: avatar + name + ×. Add via text input dropdown (settings add-member pattern).</span>
     <span class="annotation-tag">Composite: 4 dropdowns open — Column, Priority, Type, Assignee text input with Members dropdown.</span>
-    <span class="annotation-tag">TipTap editor: drag bottom handle to expand vertically. Min 120px, no max. Auto-saves.</span>
+    <span class="annotation-tag">TipTap editor: flush with slideover body — no pt-4 gap, no outer card box; only the inner editor shows the focus border + glow. Drag bottom handle to expand vertically. Min 120px, no max. Auto-saves.</span>
+    <span class="annotation-tag">Description edit: header row carries compact icon exit controls — ✕ (ghost, reverts without saving) and ✓ (primary, flushes via same save path as blur, returns to read mode); both 28px with tooltips + aria-labels. Enter in the editor finishes; Esc reverts; blur still saves.</span>
     <span class="annotation-tag">GitHub Issues: multi-issue list, each with independent sync state + unlink button.</span>
+    <span class="annotation-tag">Create mode footer: "Create task" shows "Creating…" + disabled while the create mutation is pending; Enter in title also creates. Double-submit guarded.</span>
   </div>
 
 </body>

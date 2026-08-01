@@ -68,15 +68,15 @@ describe("rowToWikiPageRevision / rowToWikiPageRevisionSummary", () => {
 });
 
 describe("rowToTask", () => {
-  const row: TaskRow = { id: "t1", project_id: "p1", column_id: "c1", swimlane_id: "s1", title: "Fix bug", description: '{"type":"doc","content":[]}', priority: "high", type: "bug", assignees: "alice", position: "a0", github_issue_id: null, github_issue_number: null, github_repo: null, github_synced_state: null, created_at: NOW, updated_at: NOW, github_issues_raw: null };
+  const row: TaskRow = { id: "t1", project_id: "p1", column_id: "c1", swimlane_id: "s1", title: "Fix bug", description: '{"type":"doc","content":[]}', priority: "prio-opt-1", type: "type-opt-1", assignees: "alice", position: "a0", archived_at: null, github_issue_id: null, github_issue_number: null, github_repo: null, github_synced_state: null, created_at: NOW, updated_at: NOW, github_issues_raw: null };
 
   it("maps all fields", () => {
     const t = rowToTask(row);
     expect(t.id).toBe("t1");
     expect(t.projectId).toBe("p1");
     expect(t.swimlaneId).toBe("s1");
-    expect(t.priority).toBe("high");
-    expect(t.type).toBe("bug");
+    expect(t.priority).toBe("prio-opt-1");
+    expect(t.type).toBe("type-opt-1");
     expect(t.assignees).toEqual(["alice"]);
     expect(t.githubs).toEqual([]);
   });
@@ -108,5 +108,11 @@ describe("rowToTask", () => {
     const linked: TaskRow = { ...row, github_issues_raw: "ghi1,1,r,closed", column_github_state: "open" };
     const t = rowToTask(linked);
     expect(t.githubs[0].outOfSync).toBe(true);
+  });
+
+  it("maps archivedAt", () => {
+    const t = rowToTask({ ...row, archived_at: "2026-08-01 10:00:00" });
+    expect(t.archivedAt).toBe("2026-08-01 10:00:00");
+    expect(rowToTask(row).archivedAt).toBeNull();
   });
 });

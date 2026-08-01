@@ -25,7 +25,7 @@
 │  SwimlaneRepo  ApiKeyRepo  WebhookEventRepo            │
 ├─────────────────────────────────────────────────────────┤
 │               Infrastructure Layer                       │
-│  D1Database   GitHubClient   Config (env bindings)      │
+│  Sqlite (bun:sqlite)   GitHubClient   Config (env)      │
 └─────────────────────────────────────────────────────────┘
 ```
 
@@ -34,12 +34,12 @@
 ## Infrastructure
 
 ```typescript
-// The D1 binding arrives per-request from the Workers env. Built per request:
-const d1Live = (env: Env) => Layer.succeed(D1Database, env.DB);
+// The SQLite connection is created at boot from DATABASE_PATH and injected
+// as a layer (server/db/database.ts). One connection, WAL mode, FK pragmas on.
+export class Sqlite extends Context.Tag("Lexa/Sqlite")<Sqlite, Database>() {}
+export const initSqlite = (dbPath: string) => Layer.succeed(Sqlite, new Database(dbPath));
 
-export class D1Database extends Context.Tag("D1Database")<D1Database, D1DatabaseBinding>() {}
-
-// GitHub App credentials from Workers secrets
+// GitHub App credentials from env vars (LXK/GITHUB_* in .env / docker-compose)
 export class GitHubConfig extends Context.Tag("GitHubConfig")<GitHubConfig, {
   readonly appId: string;
   readonly privateKey: string;      // PEM, for JWT signing
@@ -48,19 +48,19 @@ export class GitHubConfig extends Context.Tag("GitHubConfig")<GitHubConfig, {
 
 // GitHub API client. Installation tokens are cached ~50min (1h TTL minus
 // margin) keyed by installation id — never minted per call. The cache lives
-// in MODULE/isolate scope (outside the per-request Effect layer) — a
-// per-request layer would mint a fresh token on every request.
+// in MODULE scope (outside the per-request Effect layer) — a per-request
+// layer would mint a fresh token on every request.
 export class GitHubClient extends Effect.Service<GitHubClient>()("GitHubClient", {
   effect: Effect.gen(function* () {
     const config = yield* GitHubConfig;
-    // Octokit instance + token cache initialized here
+    // Hand-rolled fetch client + token cache initialized here
     return {
       createIssue: (repo: string, title: string, body: string) => ...,
       updateIssueState: (repo: string, issueNumber: number, state: "open" | "closed") => ...,
       getIssue: (repo: string, issueNumber: number) => ...,
       // HMAC-SHA-256 over the RAW request body, compared against the
       // X-Hub-Signature-256 header with constant-time comparison
-      // (Web Crypto subtle.sign/subtle.verify — Workers-native).
+      // (node:crypto createHmac — Bun runtime).
       // Runs BEFORE any JSON parsing. Failure → 401, no processing.
       verifyWebhookSignature: (rawBody: ArrayBuffer, signatureHeader: string) => ...,
     };
@@ -71,12 +71,12 @@ export class GitHubClient extends Effect.Service<GitHubClient>()("GitHubClient",
 
 ## Repositories
 
-Declared as `Effect.Service` (not bare `Context.Tag`), each with `dependencies: [D1Live]`-style wiring:
+Declared as `Effect.Service` (not bare `Context.Tag`), each with `dependencies: [SqliteLive]`-style wiring:
 
 ```typescript
 export class TaskRepo extends Effect.Service<TaskRepo>()("TaskRepo", {
   effect: Effect.gen(function* () {
-    const db = yield* D1Database;
+    const db = yield* Sqlite;
     return {
       create: (input: CreateTaskInput) => ...,
       findById: (id: string) => ...,                         // RowNotFound | DbError
@@ -96,14 +96,14 @@ export class TaskRepo extends Effect.Service<TaskRepo>()("TaskRepo", {
 
 export class WebhookEventRepo extends Effect.Service<WebhookEventRepo>()("WebhookEventRepo", {
   effect: Effect.gen(function* () {
-    const db = yield* D1Database;
+    const db = yield* Sqlite;
     return {
       isSeen: (deliveryId: string) => ...,                   // cheap pre-check
       // INSERT after successful processing (never before — a mid-processing
       // failure must leave the delivery unrecorded so GitHub's retry
       // reprocesses it; all handlers are idempotent).
       recordDelivery: (deliveryId: string) => ...,
-      prune: (olderThanDays: number) => ...,                 // called by Cron Trigger
+      prune: (olderThanDays: number) => ...,                 // called by a boot/timer task
     };
   }),
 }) {}
@@ -259,9 +259,18 @@ export class TaskService extends Effect.Service<TaskService>()("TaskService", {
 
       // Webhook-only path: bypass-guard move + synced-state write as ONE
       // repo-level batch() — atomic (SCHEMA.md §No multi-statement ACID).
+      // Phase 6 note: must NOT move archived tasks — add an archived-guard
+      // (skip when task.archived_at IS NOT NULL) before moving.
       moveFromWebhook: (taskId: string, columnId: string, syncedState: "open" | "closed") => ...,
 
       delete: (id: string) => ...,
+
+      // Archive/restore: idempotent soft-state flip on tasks.archived_at.
+      // Archived tasks keep column/swimlane/position; board/WIP/count
+      // queries exclude them unless includeArchived is set. No GitHub
+      // interaction (routes orchestrate any sync, per the no-cycle rule).
+      archive: (id: string) => ...,
+      restore: (id: string) => ...,
     };
   }),
   dependencies: [/* TaskRepo, ColumnRepo, SwimlaneRepo, ProjectRepo */],
@@ -333,7 +342,7 @@ export class GitHubService extends Effect.Service<GitHubService>()("GitHubServic
 
           // 5. Webhook moves bypass WIP limits and required_fields
           //    (log-and-skip semantics: robots ≠ humans). Move + synced-state
-          //    write execute as ONE D1 batch() — atomic.
+          //    write execute as ONE SQLite transaction (batch helper) — atomic.
           yield* taskService.moveFromWebhook(task.id, target.id, incomingState);
 
           // 6. Record delivery only AFTER success (see step 1).
@@ -442,6 +451,8 @@ All list endpoints and MCP `list_*`/`search_*` tools: `?limit` (default 50, max 
 | `NeighborNotInColumn` | 422 | `NEIGHBOR_NOT_IN_COLUMN` | beforeTaskId/afterTaskId not in target column |
 | `GithubIssueAlreadyLinked` | 409 | `ALREADY_LINKED` | |
 | `RequiredFieldMissing` | 422 | `REQUIRED_FIELD` | TipTap-aware emptiness; enforced on create/move/update |
+| `OptionInUse` | 409 | `OPTION_IN_USE` | delete priority/type option still referenced by tasks |
+| `InvalidOption` | 422 | `INVALID_OPTION` | unknown/foreign option id, duplicate label, or empty list |
 | `ConstraintViolation` | 500 | `CONSTRAINT` | internal; `isPositionConflict` variants are retried (create/move) before surfacing |
 | `DbError` | 500 | `DATABASE_ERROR` | |
 | `GithubApiError` | 502 | `GITHUB_API_ERROR` | never fails a user move |
@@ -451,16 +462,17 @@ All list endpoints and MCP `list_*`/`search_*` tools: `?limit` (default 50, max 
 ## Service Dependency Map (v2 — acyclic)
 
 ```
-TaskService      → TaskRepo, ColumnRepo, SwimlaneRepo, ProjectRepo
-WikiService      → WikiRepo, ProjectRepo
-ProjectService   → ProjectRepo
-ColumnService    → ColumnRepo
-SwimlaneService  → SwimlaneRepo
-DashboardService → TaskRepo, ColumnRepo, ProjectRepo
-AuthService      → ApiKeyRepo
-GitHubService    → GitHubClient, WebhookEventRepo, TaskRepo, TaskService, ColumnRepo, ProjectRepo
-Routes/MCP       → all services (orchestration layer — the only place
-                   TaskService and GitHubService meet)
+TaskService        → TaskRepo, ColumnRepo, SwimlaneRepo, ProjectRepo, FieldConfigRepo
+FieldConfigService → FieldConfigRepo, ProjectRepo
+WikiService        → WikiRepo, ProjectRepo
+ProjectService     → ProjectRepo, ColumnRepo, SwimlaneRepo, FieldConfigRepo
+ColumnService      → ColumnRepo
+SwimlaneService    → SwimlaneRepo
+DashboardService   → TaskRepo, ColumnRepo, ProjectRepo, FieldConfigRepo
+AuthService        → ApiKeyRepo
+GitHubService      → GitHubClient, WebhookEventRepo, TaskRepo, TaskService, ColumnRepo, ProjectRepo
+Routes/MCP         → all services (orchestration layer — the only place
+                     TaskService and GitHubService meet)
 ```
 
 ## Cut from v1

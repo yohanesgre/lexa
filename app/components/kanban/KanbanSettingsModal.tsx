@@ -10,7 +10,7 @@ import { SortableContext, useSortable, verticalListSortingStrategy, arrayMove } 
 import { CSS } from "@dnd-kit/utilities";
 import { GripVertical, Plus, Trash2, X } from "lucide-react";
 import { ModalPortal, useModalStack } from "../ui/ModalStack";
-import type { Column, Swimlane } from "../../../shared/types";
+import type { Column, Swimlane, FieldConfig, FieldOption } from "../../../shared/types";
 import {
   useColumns,
   useCreateColumn,
@@ -20,10 +20,13 @@ import {
   useCreateSwimlane,
   useUpdateSwimlane,
   useDeleteSwimlane,
+  useFieldConfig,
+  useUpdateFieldConfig,
 } from "../../lib/queries";
 import { cn } from "../ui/cn";
 import { ColumnForm } from "./ColumnForm";
 import { SwimlaneForm } from "./SwimlaneForm";
+import { OptionForm } from "./OptionForm";
 
 interface KanbanSettingsModalProps {
   slug: string;
@@ -118,6 +121,8 @@ function EmptySection({ type, onAdd }: { type: "column" | "swimlane"; onAdd: () 
 export function KanbanSettingsModal({ slug, isOpen, onClose }: KanbanSettingsModalProps) {
   const { data: columns = [], isLoading: columnsLoading, isError: columnsError } = useColumns(slug);
   const { data: swimlanes = [], isLoading: swimlanesLoading, isError: swimlanesError } = useSwimlanes(slug);
+  const { data: fieldConfig, isLoading: configLoading, isError: configError } = useFieldConfig(slug);
+  const updateFieldConfig = useUpdateFieldConfig(slug);
   const base = useModalStack();
 
   const createColumn = useCreateColumn(slug);
@@ -127,6 +132,75 @@ export function KanbanSettingsModal({ slug, isOpen, onClose }: KanbanSettingsMod
   const createSwimlane = useCreateSwimlane(slug);
   const updateSwimlane = useUpdateSwimlane(slug);
   const deleteSwimlane = useDeleteSwimlane(slug);
+
+  const [optionForm, setOptionForm] = useState<{ kind: "priority" | "type"; isOpen: boolean; option?: FieldOption | null }>({ kind: "priority", isOpen: false, option: null });
+  const [optionOrder, setOptionOrder] = useState<{ priorities: string[]; types: string[] }>({ priorities: [], types: [] });
+
+  useEffect(() => {
+    if (fieldConfig) setOptionOrder({ priorities: fieldConfig.priorities.map((o) => o.id), types: fieldConfig.types.map((o) => o.id) });
+  }, [fieldConfig]);
+
+  const orderedOptions = useMemo(() => {
+    if (!fieldConfig) return { priorities: [] as FieldOption[], types: [] as FieldOption[] };
+    const order = (list: FieldOption[], ids: string[]) => {
+      if (ids.length === 0) return list;
+      return ids.flatMap((id) => { const o = list.find((x) => x.id === id); return o ? [o] : []; });
+    };
+    return { priorities: order(fieldConfig.priorities, optionOrder.priorities), types: order(fieldConfig.types, optionOrder.types) };
+  }, [fieldConfig, optionOrder]);
+
+  const handleOptionDragEnd = (event: DragEndEvent, kind: "priority" | "type") => {
+    const ids = kind === "priority" ? optionOrder.priorities : optionOrder.types;
+    const oldIndex = ids.indexOf(event.active.id as string);
+    const newIndex = ids.indexOf(event.over!.id as string);
+    if (oldIndex === newIndex || !fieldConfig) return;
+    const reordered = arrayMove(ids, oldIndex, newIndex);
+    setOptionOrder((prev) => ({ ...prev, [kind]: reordered }));
+    const full = {
+      priorities: kind === "priority"
+        ? reordered.map((id) => {
+            const o = fieldConfig.priorities.find((x) => x.id === id)!;
+            return { id: o.id, label: o.label, color: o.color };
+          })
+        : fieldConfig.priorities.map((o) => ({ id: o.id, label: o.label, color: o.color })),
+      types: kind === "type"
+        ? reordered.map((id) => {
+            const o = fieldConfig.types.find((x) => x.id === id)!;
+            return { id: o.id, label: o.label, color: o.color };
+          })
+        : fieldConfig.types.map((o) => ({ id: o.id, label: o.label, color: o.color })),
+    };
+    updateFieldConfig.mutate(full);
+  };
+
+  const submitOption = (input: { label: string; color: string }) => {
+    if (!fieldConfig) return;
+    const { kind } = optionForm;
+    const list = kind === "priority" ? fieldConfig.priorities : fieldConfig.types;
+    const existing = optionForm.option;
+    const next = existing
+      ? list.map((o) => (o.id === existing.id ? { ...o, label: input.label, color: input.color } : o))
+      : [...list, { id: "", label: input.label, color: input.color, position: list.length }];
+    const full = kind === "priority"
+      ? { priorities: next.map((o) => ({ id: o.id, label: o.label, color: o.color })), types: fieldConfig.types.map((o) => ({ id: o.id, label: o.label, color: o.color })) }
+      : { priorities: fieldConfig.priorities.map((o) => ({ id: o.id, label: o.label, color: o.color })), types: next.map((o) => ({ id: o.id, label: o.label, color: o.color })) };
+    updateFieldConfig.mutate(full, {
+      onError: () => {
+        // Revert optimistic order on failure.
+        if (fieldConfig) setOptionOrder({ priorities: fieldConfig.priorities.map((o) => o.id), types: fieldConfig.types.map((o) => o.id) });
+      },
+    });
+  };
+
+  const deleteOption = (kind: "priority" | "type", option: FieldOption) => {
+    if (!fieldConfig) return;
+    const list = kind === "priority" ? fieldConfig.priorities : fieldConfig.types;
+    const next = list.filter((o) => o.id !== option.id);
+    const full = kind === "priority"
+      ? { priorities: next.map((o) => ({ id: o.id, label: o.label, color: o.color })), types: fieldConfig.types.map((o) => ({ id: o.id, label: o.label, color: o.color })) }
+      : { priorities: fieldConfig.priorities.map((o) => ({ id: o.id, label: o.label, color: o.color })), types: next.map((o) => ({ id: o.id, label: o.label, color: o.color })) };
+    updateFieldConfig.mutate(full);
+  };
 
   const [columnForm, setColumnForm] = useState<{ isOpen: boolean; column?: Column | null }>({ isOpen: false, column: null });
   const [swimlaneForm, setSwimlaneForm] = useState<{ isOpen: boolean; swimlane?: Swimlane | null }>({ isOpen: false, swimlane: null });
@@ -212,9 +286,9 @@ export function KanbanSettingsModal({ slug, isOpen, onClose }: KanbanSettingsMod
           </div>
 
           <div className="px-5 py-4 overflow-y-auto" style={{ maxHeight: "calc(100vh - 140px)" }}>
-            {isLoading ? (
+            {isLoading || configLoading ? (
               <div className="text-sm text-lx-text-muted py-8 text-center">Loading settings…</div>
-            ) : columnsError || swimlanesError ? (
+            ) : columnsError || swimlanesError || configError ? (
               <div className="text-sm text-lx-text-danger py-8 text-center">Failed to load settings.</div>
             ) : (
               <>
@@ -283,6 +357,110 @@ export function KanbanSettingsModal({ slug, isOpen, onClose }: KanbanSettingsMod
                   </button>
                 </section>
 
+                <section className="mb-8">
+                  <h3 className="font-display text-base font-medium text-lx-text-primary mb-3">Priorities</h3>
+                  <p className="text-sm text-lx-text-secondary mb-3 max-w-[560px]">
+                    The priority options available on tasks in this project. First option is the create default.
+                  </p>
+                  {orderedOptions.priorities.length === 0 ? (
+                    <div className="text-sm text-lx-text-muted py-4">No priorities configured.</div>
+                  ) : (
+                    <div className="bg-lx-surface-card border border-lx-border rounded-lg overflow-hidden">
+                      <DndContext sensors={sensors} onDragEnd={(e) => handleOptionDragEnd(e, "priority")}>
+                        <SortableContext items={orderedOptions.priorities.map((o) => o.id)} strategy={verticalListSortingStrategy}>
+                          <table className="w-full border-collapse text-[13px] font-body">
+                            <thead>
+                              <tr className="border-b border-lx-border">
+                                <th className="w-8 py-2.5 px-3"></th>
+                                <th className="py-2.5 px-3 text-left text-[11px] uppercase tracking-[0.05em] text-lx-text-secondary font-medium font-body">Label</th>
+                                <th className="py-2.5 px-3 text-left text-[11px] uppercase tracking-[0.05em] text-lx-text-secondary font-medium font-body">Color</th>
+                                <th className="w-[100px] py-2.5 px-3"></th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {orderedOptions.priorities.map((opt) => (
+                                <SortableRow key={opt.id} id={opt.id} className="border-b border-lx-border last:border-b-0">
+                                  <td className="py-2.5 px-3 text-sm font-medium text-lx-text-primary">{opt.label}</td>
+                                  <td className="py-2.5 px-3">
+                                    <span className="inline-flex items-center gap-2">
+                                      <span className="color-swatch" style={{ background: opt.color }} />
+                                      <span className="text-xs text-lx-text-secondary">{opt.color}</span>
+                                    </span>
+                                  </td>
+                                  <td className="py-2.5 px-3">
+                                    <div className="flex items-center gap-3">
+                                      <button type="button" className="btn btn-ghost h-7 px-2.5 text-xs" onClick={() => setOptionForm({ kind: "priority", isOpen: true, option: opt })} aria-label="Edit priority">Edit</button>
+                                      <button type="button" className="btn btn-danger h-7 w-7 p-0 flex items-center justify-center" onClick={() => deleteOption("priority", opt)} aria-label="Delete priority">
+                                        <Trash2 size={12} strokeWidth={1.5} />
+                                      </button>
+                                    </div>
+                                  </td>
+                                </SortableRow>
+                              ))}
+                            </tbody>
+                          </table>
+                        </SortableContext>
+                      </DndContext>
+                    </div>
+                  )}
+                  <button type="button" className="btn btn-ghost mt-3" onClick={() => setOptionForm({ kind: "priority", isOpen: true, option: null })}>
+                    <Plus size={14} strokeWidth={1.5} />
+                    Add Priority
+                  </button>
+                </section>
+
+                <section className="mb-8">
+                  <h3 className="font-display text-base font-medium text-lx-text-primary mb-3">Types</h3>
+                  <p className="text-sm text-lx-text-secondary mb-3 max-w-[560px]">
+                    The type options available on tasks in this project. First option is the create default.
+                  </p>
+                  {orderedOptions.types.length === 0 ? (
+                    <div className="text-sm text-lx-text-muted py-4">No types configured.</div>
+                  ) : (
+                    <div className="bg-lx-surface-card border border-lx-border rounded-lg overflow-hidden">
+                      <DndContext sensors={sensors} onDragEnd={(e) => handleOptionDragEnd(e, "type")}>
+                        <SortableContext items={orderedOptions.types.map((o) => o.id)} strategy={verticalListSortingStrategy}>
+                          <table className="w-full border-collapse text-[13px] font-body">
+                            <thead>
+                              <tr className="border-b border-lx-border">
+                                <th className="w-8 py-2.5 px-3"></th>
+                                <th className="py-2.5 px-3 text-left text-[11px] uppercase tracking-[0.05em] text-lx-text-secondary font-medium font-body">Label</th>
+                                <th className="py-2.5 px-3 text-left text-[11px] uppercase tracking-[0.05em] text-lx-text-secondary font-medium font-body">Color</th>
+                                <th className="w-[100px] py-2.5 px-3"></th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {orderedOptions.types.map((opt) => (
+                                <SortableRow key={opt.id} id={opt.id} className="border-b border-lx-border last:border-b-0">
+                                  <td className="py-2.5 px-3 text-sm font-medium text-lx-text-primary">{opt.label}</td>
+                                  <td className="py-2.5 px-3">
+                                    <span className="inline-flex items-center gap-2">
+                                      <span className="color-swatch" style={{ background: opt.color }} />
+                                      <span className="text-xs text-lx-text-secondary">{opt.color}</span>
+                                    </span>
+                                  </td>
+                                  <td className="py-2.5 px-3">
+                                    <div className="flex items-center gap-3">
+                                      <button type="button" className="btn btn-ghost h-7 px-2.5 text-xs" onClick={() => setOptionForm({ kind: "type", isOpen: true, option: opt })} aria-label="Edit type">Edit</button>
+                                      <button type="button" className="btn btn-danger h-7 w-7 p-0 flex items-center justify-center" onClick={() => deleteOption("type", opt)} aria-label="Delete type">
+                                        <Trash2 size={12} strokeWidth={1.5} />
+                                      </button>
+                                    </div>
+                                  </td>
+                                </SortableRow>
+                              ))}
+                            </tbody>
+                          </table>
+                        </SortableContext>
+                      </DndContext>
+                    </div>
+                  )}
+                  <button type="button" className="btn btn-ghost mt-3" onClick={() => setOptionForm({ kind: "type", isOpen: true, option: null })}>
+                    <Plus size={14} strokeWidth={1.5} />
+                    Add Type
+                  </button>
+                </section>
+
                 <section>
                   <h3 className="font-display text-base font-medium text-lx-text-primary mb-3">Swimlanes</h3>
                   <p className="text-sm text-lx-text-secondary mb-3 max-w-[560px]">
@@ -348,6 +526,15 @@ export function KanbanSettingsModal({ slug, isOpen, onClose }: KanbanSettingsMod
           </div>
         </div>
       </div>
+
+      <OptionForm
+        kind={optionForm.kind}
+        option={optionForm.option ?? null}
+        isOpen={optionForm.isOpen}
+        zIndex={90}
+        onClose={() => setOptionForm({ ...optionForm, isOpen: false })}
+        onSubmit={submitOption}
+      />
 
       <ColumnForm
         slug={slug}

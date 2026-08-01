@@ -1,4 +1,4 @@
-# D1 Database Schema (v2 — post-review)
+# SQLite Schema (v2 — post-review)
 
 > Reviewed against REVIEW.md. Changes from v1: labels & subtasks cut (YAGNI), `column_policies` table replaced by `columns.required_fields`, `columns.github_state` added for sync mapping, `tasks.github_synced_state` for echo suppression, `UNIQUE(github_issue_id)`, `UNIQUE(column_id, position)` for fractional-index integrity, FTS5 for wiki search, `webhook_events` dedup table, consolidated indexes.
 
@@ -52,6 +52,33 @@ CREATE TABLE swimlanes (
 );
 
 -- ============================================================
+-- Task field options (per-project customizable priority/type)
+-- ============================================================
+-- Each project owns ordered option lists for the two task fields.
+-- tasks.priority / tasks.type reference these IDs (no CHECK enums).
+-- position: integer ordering; the FIRST option (position 0) is the
+--   create default. Delete is blocked while any task uses the option.
+CREATE TABLE priority_options (
+  id          TEXT PRIMARY KEY,
+  project_id  TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  label       TEXT NOT NULL,
+  color       TEXT NOT NULL DEFAULT '#6b7280',
+  position    INTEGER NOT NULL,
+  UNIQUE(project_id, label)
+);
+CREATE INDEX idx_priority_options_project ON priority_options(project_id, position);
+
+CREATE TABLE type_options (
+  id          TEXT PRIMARY KEY,
+  project_id  TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  label       TEXT NOT NULL,
+  color       TEXT NOT NULL DEFAULT '#6b7280',
+  position    INTEGER NOT NULL,
+  UNIQUE(project_id, label)
+);
+CREATE INDEX idx_type_options_project ON type_options(project_id, position);
+
+-- ============================================================
 -- Tasks (the core entity)
 -- ============================================================
 -- position: fractional-index key (see Design Notes). UNIQUE(column_id, position)
@@ -59,8 +86,8 @@ CREATE TABLE swimlanes (
 --   with a freshly generated key.
 -- GitHub issues are stored in the task_github_issues junction table (multi-issue).
 -- The old inline columns (github_issue_id, github_issue_number, github_repo,
---   github_synced_state) still exist on the tasks table but are unused — D1 does
---   not support DROP COLUMN.
+--   github_synced_state) still exist on the tasks table but are unused — SQLite's
+--   DROP COLUMN (3.35+) could remove them, but they are harmless and left in place.
 CREATE TABLE tasks (
   id                  TEXT PRIMARY KEY,
   project_id          TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
@@ -69,11 +96,12 @@ CREATE TABLE tasks (
   swimlane_id         TEXT NOT NULL REFERENCES swimlanes(id),
   title               TEXT NOT NULL,
   description         TEXT NOT NULL DEFAULT '{}',            -- TipTap JSON
-  priority            TEXT NOT NULL DEFAULT 'medium'
-                        CHECK (priority IN ('urgent','high','medium','low')),
-  type                TEXT NOT NULL DEFAULT 'task'
-                         CHECK (type IN ('feature','bug','task','asset')),
+  priority            TEXT NOT NULL REFERENCES priority_options(id),
+  type                TEXT NOT NULL REFERENCES type_options(id),
   position            TEXT NOT NULL,                         -- fractional-index key
+  archived_at         TEXT,                                   -- NULL = live; set to datetime('now') on archive
+                                                              -- archived tasks keep column/position and are excluded
+                                                              -- from board/WIP/count queries unless includeArchived
   github_issue_id     TEXT UNIQUE,                           -- DEPRECATED — now in task_github_issues
   github_issue_number INTEGER,                              -- DEPRECATED
   github_repo         TEXT,                                  -- DEPRECATED
@@ -180,7 +208,7 @@ CREATE INDEX idx_revisions_page ON wiki_page_revisions(page_id, created_at DESC)
 -- construction, so unsalted SHA-256 of the raw key is a sound storage hash.
 -- key_hash UNIQUE also serves as the lookup index.
 -- last_used_at: updated only when NULL or older than 1 hour (sampled,
---   avoids a D1 write on every MCP call).
+--   avoids a SQLite write on every MCP call).
 CREATE TABLE api_keys (
   id           TEXT PRIMARY KEY,
   name         TEXT NOT NULL,                                -- "hermes", "opencode-local"
@@ -213,6 +241,15 @@ CREATE INDEX idx_wiki_parent     ON wiki_pages(parent_id) WHERE parent_id IS NOT
 ```
 
 ## Design Notes
+
+### Task field options (custom priority/type)
+Priority and type are per-project option lists (`priority_options` / `type_options`), not global enums. Tasks reference option IDs via `tasks.priority` / `tasks.type` (FK to the option tables; SQLite enforces membership).
+
+- **Order** = `position` ascending; the first option (position 0) is the create default.
+- **Backfill:** migration `0010` creates both tables, seeds the legacy 4+4 options per existing project, then rewrites `tasks.priority` / `tasks.type` to the matching option IDs. New projects get their option rows seeded at creation (ProjectService).
+- **Delete rule:** an option used by any task cannot be deleted (`OptionInUse` 409). Reassign or delete the tasks first.
+- **Validation:** create/update task payloads carry option IDs; services validate the ID belongs to the task's project (`InvalidOption` 422).
+- **Dashboard urgency:** `countUrgent` / `findUrgentAcrossAllProjects` use a project's first priority option (position 0) as the "urgent" equivalent. If a team reorders so a different option leads, urgency follows the new default.
 
 ### Fractional indexing — use the library, not a hand-rolled scheme
 `tasks.position` uses the `fractional-indexing` npm package (Workers-safe, ~2KB). The library exports `generateKeyBetween(a, b)` and `generateNKeysBetween(a, b, n)` only — define wrappers: `generateKeyAfter(x) = generateKeyBetween(x, null)`, `generateKeyBefore(x) = generateKeyBetween(null, x)`.
@@ -261,18 +298,18 @@ The `wiki_fts` external-content table + triggers keep the index in sync automati
 Every repo `update*` method sets `updated_at = datetime('now')` in the same statement. No triggers — the write path is already centralized in repositories.
 
 ### No multi-statement ACID needed
-Every mutation is either a single statement or a D1 `batch()` (atomic all-or-nothing). The one multi-write flow (move + update synced state) is a batch.
+Every mutation is either a single statement or a SQLite transaction (`server/db/database.ts` `batch()` helper — `db.transaction()` wrapping prepared statements, atomic all-or-nothing). The one multi-write flow (move + update synced state) runs through `batch()`.
 
-### D1 notes (unchanged from v1)
-- TEXT UUIDs via `crypto.randomUUID()` in Workers.
-- D1 is eventually read-replicated — frontend must update its cache from mutation responses (TanStack Query `setQueryData`), not refetch, or cards visually snap back.
-- 100KB row limit: fine for TipTap docs at this scale.
-- `webhook_events` grows unboundedly → periodic prune (`DELETE WHERE received_at < datetime('now','-7 days')`) via a Cron Trigger.
+### SQLite notes (unchanged from v1)
+- TEXT UUIDs via `crypto.randomUUID()` in Bun.
+- SQLite is local (WAL) — reads are immediate. Frontend still updates its cache from mutation responses (TanStack Query `setQueryData`), not refetch, because the mutation response is the authoritative state.
+- No row-size limits at this scale: fine for TipTap docs.
+- `webhook_events` grows unboundedly → periodic prune (`DELETE WHERE received_at < datetime('now','-7 days')`) on a timer or at boot.
 
 ## Cut from v1 (YAGNI — see REVIEW.md 🟢)
 
 | Cut | Replacement |
 |-----|-------------|
-| `labels` + `task_labels` tables, 3 routes, 2 MCP tools | `tasks.type` (feature/bug/task/asset) covers game-dev categorization |
+| `labels` + `task_labels` tables, 3 routes, 2 MCP tools | `type_options` (customizable per-project task types) covers game-dev categorization |
 | `tasks.parent_id` (subtasks) | Flat tasks; breakdown lives in the TipTap description checklist |
 | `column_policies` table (3 rule types) | `columns.required_fields` JSON array — the only enforceable policy without a roles system or column-entry timestamps |

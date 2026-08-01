@@ -11,7 +11,7 @@
   <INCLUDE navbar.html />
 
   <div class="board-area">
-    <span class="annotation-tag" style="display:block;margin-bottom:12px;">Behaviour: every task must belong to a column AND a swimlane. Tasks without a swimlane are not allowed. Column is a template — rendered inside each swimlane row. WIP badge shows total column count across ALL swimlanes — same number in every row.</span>
+    <span class="annotation-tag" style="display:block;margin-bottom:12px;">Behaviour: every task must belong to a column AND a swimlane. Tasks without a swimlane are not allowed. Column is a template — rendered inside each swimlane row. WIP badge shows total column count across ALL swimlanes — same number in every row. Archive: cards keep their column/position when archived; archived tasks are excluded from WIP counts and board unless "Show archived" is on.</span>
 
     <!-- Board Header -->
     <div class="board-header">
@@ -20,6 +20,10 @@
         <span class="annotation-tag">Kanban — the heart of Lexa</span>
       </div>
       <div class="flex items-center gap-2">
+        <button class="btn btn-ghost text-sm" title="Show archived tasks">
+          <span class="toggle-switch"></span>
+          Show archived
+        </button>
                 <INCLUDE _board-header-buttons.html />
       </div>
     </div>
@@ -49,7 +53,12 @@
               <div class="kanban-card" style="border-left:3px solid #4ADE80;">
                 <div class="flex items-center justify-between">
                   <span class="type-badge type-feature">Feature</span>
-                  <span class="priority-dot priority-high" title="High priority"></span>
+                  <span class="flex items-center gap-1">
+                    <span class="priority-dot priority-high" title="High priority"></span>
+                    <button class="icon-btn" title="Card menu">
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" stroke="none"><circle cx="5" cy="12" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="19" cy="12" r="1.5"/></svg>
+                    </button>
+                  </span>
                 </div>
                 <div class="card-title mt-2">Implement double-jump mechanic</div>
                 <div class="card-meta">
@@ -344,6 +353,39 @@
                 </div>
               </div>
 
+              <!-- Card 13: ARCHIVED (visible when "Show archived" is on) -->
+              <div class="kanban-card state-archived" style="border-left:3px solid #22D3EE;">
+                <div class="flex items-center justify-between">
+                  <span class="type-badge type-task">Task</span>
+                  <span class="flex items-center gap-1">
+                    <span class="priority-dot priority-low" title="Low priority"></span>
+                    <button class="icon-btn active" title="Card menu">
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" stroke="none"><circle cx="5" cy="12" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="19" cy="12" r="1.5"/></svg>
+                    </button>
+                  </span>
+                </div>
+                <div class="card-title mt-2">Retire old weather system</div>
+                <div class="card-meta">
+                  <div class="card-assignees">
+                    <div class="avatar">JD</div>
+                  </div>
+                  <div class="card-meta-spacer"></div>
+                  <span class="archived-tag">Archived</span>
+                </div>
+                <!-- Card menu (open state) -->
+                <div class="menu-popover" style="top:26px;right:6px;">
+                  <div class="menu-item">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+                    Restore
+                  </div>
+                  <div class="menu-item danger">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6M10 11v6M14 11v6"/></svg>
+                    Delete
+                  </div>
+                </div>
+                <span class="annotation-tag" style="position:absolute;right:6px;bottom:4px;">ARCHIVED — dimmed, non-draggable, stays in original column</span>
+              </div>
+
               <button class="add-task-btn">
                 <INCLUDE _add-task-icon.html />
               </button>
@@ -386,6 +428,13 @@
         <span class="annotation-tag" style="position:absolute;right:-180px;top:0;">Selected: amber selected bg + focus ring + glow</span>
       </div>
 
+    </div>
+
+    <!-- Archive annotations -->
+    <div style="margin:0 16px 16px;max-width:640px;display:flex;flex-direction:column;gap:8px;align-items:flex-start;">
+      <span class="annotation-tag">Show archived (board header): toggles includeArchived — archived cards render dimmed in their original column; WIP badges exclude them; they are not draggable.</span>
+      <span class="annotation-tag">Card kebab (⋮, visible on hover): Archive on live cards; Restore on archived cards. Archive/Restore are reversible, no confirm dialog. Restore returns card to original column/position.</span>
+      <span class="annotation-tag">Delete stays in the card menu and TaskDetail footer — unchanged (delete is permanent; archive is not).</span>
     </div>
 
     <!-- Responsive Note -->

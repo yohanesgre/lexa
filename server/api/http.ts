@@ -1,8 +1,12 @@
 import { HttpApi, HttpApiBuilder, HttpApiEndpoint, HttpApiGroup, HttpMiddleware, HttpServerResponse } from "@effect/platform";
 import { Cause, Effect, Layer, Schema } from "effect";
+import { createHash, randomBytes } from "node:crypto";
+import { readFileSync, existsSync } from "node:fs";
+import { join } from "node:path";
 import { LoggerLayer } from "../logging/logger";
 import { Sqlite } from "../db/database";
 import { Database } from "bun:sqlite";
+import { getSetting, setSetting } from "../db/settings";
 import { WikiPageNotFound, errorResponse, errorToStatus } from "./errors";
 import { clampLimit, nextCursor } from "../../shared/pagination";
 import { ProjectService } from "../services/project.service";
@@ -22,6 +26,8 @@ import { UserRepo } from "../repos/user.repo";
 import { UserProjectRoleService } from "../services/user-project-role.service";
 import { UserProjectRoleRepo } from "../repos/user-project-role.repo";
 import { DashboardService } from "../services/dashboard.service";
+import { FieldConfigService } from "../services/field-config.service";
+import { FieldConfigRepo } from "../repos/field-config.repo";
 import { extractText } from "../../shared/tiptap-text";
 
 const ApiKeySchema = Schema.Struct({
@@ -40,6 +46,25 @@ const healthEndpoint = HttpApiEndpoint.get("health", "/health").addSuccess(
 );
 
 const healthGroup = HttpApiGroup.make("health").add(healthEndpoint);
+
+// ── Setup wizard (first-run bootstrap, API-key exempt) ──
+const SetupStatusSchema = Schema.Struct({
+  configured: Schema.Boolean,
+  needsAdmin: Schema.Boolean,
+  hasApiKey: Schema.Boolean,
+  hasProjects: Schema.Boolean,
+  hasUsers: Schema.Boolean,
+});
+const SetupAdminInput = Schema.Struct({ email: Schema.String });
+const SetupApiKeyResponse = Schema.Struct({ key: Schema.String });
+const SetupSeedResponse = Schema.Struct({ seeded: Schema.Boolean });
+const SetupOkResponse = Schema.Struct({ ok: Schema.Boolean });
+
+const setupGroup = HttpApiGroup.make("setup")
+  .add(HttpApiEndpoint.get("status", "/setup/status").addSuccess(SetupStatusSchema))
+  .add(HttpApiEndpoint.post("setAdmin", "/setup/admin").setPayload(SetupAdminInput).addSuccess(SetupOkResponse))
+  .add(HttpApiEndpoint.post("createApiKey", "/setup/api-key").addSuccess(SetupApiKeyResponse))
+  .add(HttpApiEndpoint.post("seed", "/setup/seed").addSuccess(SetupSeedResponse));
 
 const ProjectSchema = Schema.Struct({
   id: Schema.String,
@@ -169,6 +194,36 @@ const SwimlanePayload = Schema.Struct({
 
 const SwimlanePath = Schema.Struct({ slug: Schema.String, id: Schema.String });
 
+const FieldOptionSchema = Schema.Struct({
+  id: Schema.String,
+  label: Schema.String,
+  color: Schema.String,
+  position: Schema.Number,
+});
+
+const FieldConfigSchema = Schema.Struct({
+  priorities: Schema.Array(FieldOptionSchema),
+  types: Schema.Array(FieldOptionSchema),
+});
+
+const FieldOptionInputSchema = Schema.Struct({
+  id: Schema.optional(Schema.String),
+  label: Schema.String,
+  color: Schema.optional(Schema.String),
+  position: Schema.optional(Schema.Number),
+});
+
+const FieldConfigPayload = Schema.Struct({
+  priorities: Schema.Array(FieldOptionInputSchema),
+  types: Schema.Array(FieldOptionInputSchema),
+});
+
+const fieldConfigGroup = HttpApiGroup.make("field-config")
+  .add(HttpApiEndpoint.get("getFieldConfig", "/projects/:slug/field-config")
+    .setPath(SlugPath).addSuccess(FieldConfigSchema))
+  .add(HttpApiEndpoint.put("putFieldConfig", "/projects/:slug/field-config")
+    .setPath(SlugPath).setPayload(FieldConfigPayload).addSuccess(FieldConfigSchema));
+
 const WikiPageSchema = Schema.Struct({
   id: Schema.String,
   projectId: Schema.String,
@@ -272,11 +327,12 @@ const TaskSchema = Schema.Struct({
   swimlaneId: Schema.NullOr(Schema.String),
   title: Schema.String,
   description: Schema.Any,
-  priority: Schema.Literal("urgent", "high", "medium", "low"),
-  type: Schema.Literal("feature", "bug", "task", "asset"),
+  priority: Schema.String,        // priority_options.id
+  type: Schema.String,            // type_options.id
   assignees: Schema.Array(Schema.String),
   position: Schema.String,
   githubs: Schema.Array(GithubIssueSchema),
+  archivedAt: Schema.NullOr(Schema.String),
   createdAt: Schema.String,
   updatedAt: Schema.String,
 });
@@ -291,16 +347,16 @@ const CreateTaskPayload = Schema.Struct({
   swimlaneId: Schema.String,
   title: Schema.String,
   description: Schema.optional(Schema.Any),
-  priority: Schema.optional(Schema.Literal("urgent", "high", "medium", "low")),
-  type: Schema.optional(Schema.Literal("feature", "bug", "task", "asset")),
+  priority: Schema.optional(Schema.String),
+  type: Schema.optional(Schema.String),
   assignees: Schema.optional(Schema.Array(Schema.String)),
 });
 
 const UpdateTaskPayload = Schema.Struct({
   title: Schema.optional(Schema.String),
   description: Schema.optional(Schema.Any),
-  priority: Schema.optional(Schema.Literal("urgent", "high", "medium", "low")),
-  type: Schema.optional(Schema.Literal("feature", "bug", "task", "asset")),
+  priority: Schema.optional(Schema.String),
+  type: Schema.optional(Schema.String),
   assignees: Schema.optional(Schema.Array(Schema.String)),
 });
 
@@ -317,6 +373,7 @@ const BoardSchema = Schema.Struct({
   project: ProjectSchema,
   columns: Schema.Array(ColumnSchema),
   swimlanes: Schema.Array(SwimlaneSchema),
+  fieldConfig: FieldConfigSchema,
   tasks: Schema.Array(TaskSchema),
 });
 
@@ -332,7 +389,11 @@ const tasksGroup = HttpApiGroup.make("tasks")
   .add(HttpApiEndpoint.post("moveTask", "/projects/:slug/tasks/:id/move")
     .setPath(TaskPath).setPayload(MoveTaskPayload).addSuccess(TaskSchema))
   .add(HttpApiEndpoint.del("deleteTask", "/projects/:slug/tasks/:id")
-    .setPath(TaskPath)  .addSuccess(Schema.Undefined, { status: 204 }));
+    .setPath(TaskPath)  .addSuccess(Schema.Undefined, { status: 204 }))
+  .add(HttpApiEndpoint.post("archiveTask", "/projects/:slug/tasks/:id/archive")
+    .setPath(TaskPath).addSuccess(TaskSchema))
+  .add(HttpApiEndpoint.post("restoreTask", "/projects/:slug/tasks/:id/restore")
+    .setPath(TaskPath).addSuccess(TaskSchema));
 
 const boardGroup = HttpApiGroup.make("board")
   .add(HttpApiEndpoint.get("getBoard", "/projects/:slug/board")
@@ -452,9 +513,11 @@ const adminGroup = HttpApiGroup.make("admin")
 
 export const LexaApi = HttpApi.make("lexa")
   .add(healthGroup)
+  .add(setupGroup)
   .add(projectsGroup)
   .add(columnsGroup)
   .add(swimlanesGroup)
+  .add(fieldConfigGroup)
   .add(tasksGroup)
   .add(boardGroup)
   .add(wikiGroup)
@@ -464,6 +527,12 @@ export const LexaApi = HttpApi.make("lexa")
   .prefix("/api");
 
 const apiLayer = HttpApiBuilder.api(LexaApi);
+
+// The HttpApi platform rewrites req.request.url to a host-less relative path
+// (fromWeb → removeHost). originalUrl keeps the full URL, so parse query params
+// from that instead of calling `new URL(req.request.url)` (which throws).
+const searchParams = (req: { request: { originalUrl: string } }): URLSearchParams =>
+  new URL(req.request.originalUrl).searchParams;
 
 const respond = <A, E, R>(eff: Effect.Effect<A, E, R>): Effect.Effect<A | HttpServerResponse.HttpServerResponse, never, R> =>
   eff.pipe(
@@ -492,6 +561,71 @@ const respond = <A, E, R>(eff: Effect.Effect<A, E, R>): Effect.Effect<A | HttpSe
 
 const healthLive = HttpApiBuilder.group(LexaApi, "health", (handlers) =>
   handlers.handle("health", () => Effect.succeed({ ok: true as const }))
+);
+
+function generateRawApiKey(): string {
+  const raw = randomBytes(32);
+  const chars = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
+  let value = 0n;
+  for (const b of raw) value = (value << 8n) | BigInt(b);
+  let result = "";
+  const base = 62n;
+  while (value > 0n) { result = chars[Number(value % base)] + result; value /= base; }
+  while (result.length < 43) result = chars[0] + result;
+  return `lxk_${result}`;
+}
+
+function setupStatus(db: Database) {
+  const apiKeyCount = (db.prepare("SELECT COUNT(*) c FROM api_keys").get() as { c: number }).c;
+  const projectCount = (db.prepare("SELECT COUNT(*) c FROM projects").get() as { c: number }).c;
+  const userCount = (db.prepare("SELECT COUNT(*) c FROM users").get() as { c: number }).c;
+  const adminEmails = [...(process.env.LXK_ADMIN_EMAILS || "").split(",").map((s) => s.trim()).filter(Boolean), ...(getSetting(db, "admin_emails") || "").split(",").map((s) => s.trim()).filter(Boolean)];
+  return {
+    configured: apiKeyCount > 0 && adminEmails.length > 0,
+    needsAdmin: adminEmails.length === 0,
+    hasApiKey: apiKeyCount > 0,
+    hasProjects: projectCount > 0,
+    hasUsers: userCount > 0,
+  };
+}
+
+const setupLive = HttpApiBuilder.group(LexaApi, "setup", (handlers) =>
+  handlers
+    .handle("status", () =>
+      respond(Effect.gen(function* () {
+        const db = yield* Sqlite;
+        return setupStatus(db);
+      }))
+    )
+    .handle("setAdmin", (req) =>
+      respond(Effect.gen(function* () {
+        const db = yield* Sqlite;
+        const existing = getSetting(db, "admin_emails") || "";
+        const emails = [...new Set([...existing.split(",").map((s) => s.trim().toLowerCase()).filter(Boolean), req.payload.email.trim().toLowerCase()])];
+        setSetting(db, "admin_emails", emails.join(","));
+        return { ok: true as const };
+      }))
+    )
+    .handle("createApiKey", () =>
+      respond(Effect.gen(function* () {
+        const db = yield* Sqlite;
+        const key = generateRawApiKey();
+        const keyHash = createHash("sha256").update(key).digest("hex");
+        db.prepare("INSERT INTO api_keys (id, name, key_hash) VALUES (?, ?, ?)").run(crypto.randomUUID(), "setup-wizard", keyHash);
+        return { key };
+      }))
+    )
+    .handle("seed", () =>
+      respond(Effect.gen(function* () {
+        const db = yield* Sqlite;
+        const seedFile = join(import.meta.dir, "../../scripts/seed-dev.sql");
+        if (!existsSync(seedFile)) return { seeded: false as const };
+        const projectCount = (db.prepare("SELECT COUNT(*) c FROM projects").get() as { c: number }).c;
+        if (projectCount > 0) return { seeded: false as const };
+        db.exec(readFileSync(seedFile, "utf-8"));
+        return { seeded: true as const };
+      }))
+    )
 );
 
 const projectsLive = HttpApiBuilder.group(LexaApi, "projects", (handlers) =>
@@ -643,6 +777,40 @@ const swimlanesLive = HttpApiBuilder.group(LexaApi, "swimlanes", (handlers) =>
     )
 );
 
+const fieldConfigLive = HttpApiBuilder.group(LexaApi, "field-config", (handlers) =>
+  handlers
+    .handle("getFieldConfig", (req) =>
+      respond(Effect.gen(function* () {
+        const projectService = yield* ProjectService;
+        const service = yield* FieldConfigService;
+        const project = yield* projectService.findBySlug(req.path.slug);
+        return yield* service.findByProject(project.id);
+      }))
+    )
+    .handle("putFieldConfig", (req) =>
+      respond(Effect.gen(function* () {
+        const projectService = yield* ProjectService;
+        const service = yield* FieldConfigService;
+        const project = yield* projectService.findBySlug(req.path.slug);
+        const config = yield* service.replace(project.id, {
+          priorities: req.payload.priorities.map((o, i) => ({
+            id: o.id ?? "",
+            label: o.label,
+            color: o.color ?? "#6b7280",
+            position: o.position ?? i,
+          })),
+          types: req.payload.types.map((o, i) => ({
+            id: o.id ?? "",
+            label: o.label,
+            color: o.color ?? "#6b7280",
+            position: o.position ?? i,
+          })),
+        });
+        return config;
+      }))
+    )
+);
+
 const tasksLive = HttpApiBuilder.group(LexaApi, "tasks", (handlers) =>
   handlers
     .handle("listTasks", (req) =>
@@ -650,14 +818,14 @@ const tasksLive = HttpApiBuilder.group(LexaApi, "tasks", (handlers) =>
         const projectService = yield* ProjectService;
         const taskService = yield* TaskService;
         const project = yield* projectService.findBySlug(req.path.slug);
-        const q = new URL(req.request.url).searchParams;
+        const q = searchParams(req);
         const limit = clampLimit(q.get("limit"));
         const cursor = q.get("cursor") ?? undefined;
         const filters = {
           columnId: q.get("columnId") ?? undefined,
           swimlaneId: q.get("swimlaneId") ?? undefined,
           assignee: q.get("assignee") ?? undefined,
-          type: (q.get("type") ?? undefined) as "feature" | "bug" | "task" | "asset" | undefined,
+          type: q.get("type") ?? undefined,
         };
         const result = yield* taskService.findByProject(project.id, filters, limit, cursor);
         return {
@@ -715,6 +883,20 @@ const tasksLive = HttpApiBuilder.group(LexaApi, "tasks", (handlers) =>
         return undefined;
       }))
     )
+    .handle("archiveTask", (req) =>
+      respond(Effect.gen(function* () {
+        const taskService = yield* TaskService;
+        const task = yield* taskService.archive(req.path.id);
+        return formatTask(task);
+      }))
+    )
+    .handle("restoreTask", (req) =>
+      respond(Effect.gen(function* () {
+        const taskService = yield* TaskService;
+        const task = yield* taskService.restore(req.path.id);
+        return formatTask(task);
+      }))
+    )
 );
 
 const boardLive = HttpApiBuilder.group(LexaApi, "board", (handlers) =>
@@ -724,14 +906,18 @@ const boardLive = HttpApiBuilder.group(LexaApi, "board", (handlers) =>
       const columnService = yield* ColumnService;
       const swimlaneService = yield* SwimlaneService;
       const taskService = yield* TaskService;
+      const fieldConfigService = yield* FieldConfigService;
       const project = yield* projectService.findBySlug(req.path.slug);
       const columns = yield* columnService.findByProject(project.id);
       const swimlanes = yield* swimlaneService.findByProject(project.id);
-      const tasks = yield* taskService.findAllByProject(project.id);
+      const fieldConfig = yield* fieldConfigService.findByProject(project.id);
+      const includeArchived = searchParams(req).get("includeArchived") === "true";
+      const tasks = yield* taskService.findAllByProject(project.id, { includeArchived });
       return {
         project: formatProject(project),
         columns: columns.map(formatColumn),
         swimlanes: swimlanes.map(formatSwimlane),
+        fieldConfig,
         tasks: tasks.map(formatTask),
       };
     }))
@@ -780,7 +966,7 @@ const wikiLive = HttpApiBuilder.group(LexaApi, "wiki", (handlers) =>
         const projectService = yield* ProjectService;
         const wikiService = yield* WikiService;
         const project = yield* projectService.findBySlug(req.path.slug);
-        const q = new URL(req.request.url).searchParams.get("q");
+        const q = searchParams(req).get("q");
         if (!q) return { data: [] as any[] };
         const results = yield* wikiService.search(project.id, q);
         return { data: results.map(formatWikiPage) };
@@ -842,7 +1028,7 @@ const wikiLive = HttpApiBuilder.group(LexaApi, "wiki", (handlers) =>
         const projectService = yield* ProjectService;
         const wikiService = yield* WikiService;
         const project = yield* projectService.findBySlug(req.path.slug);
-        const q = new URL(req.request.url).searchParams;
+        const q = searchParams(req);
         const limit = q.get("limit") ? parseInt(q.get("limit")!, 10) : undefined;
         const revisions = yield* wikiService.listRevisions(req.path.pageSlug, project.id, limit);
         return { revisions: revisions.map(formatWikiPageRevisionSummary) };
@@ -997,6 +1183,7 @@ export function createApiHandler(dbPath: string) {
     ColumnRepo.Default, ColumnService.Default,
     SwimlaneRepo.Default, SwimlaneService.Default,
     TaskRepo.Default, TaskService.Default,
+    FieldConfigRepo.Default, FieldConfigService.Default,
     WikiRepo.Default, WikiService.Default,
     ApiKeyRepo.Default, ApiKeyService.Default,
     UserRepo.Default, UserService.Default,
@@ -1004,8 +1191,8 @@ export function createApiHandler(dbPath: string) {
     DashboardService.Default,
   );
   const handlerLayer = Layer.mergeAll(
-    healthLive, projectsLive, columnsLive, swimlanesLive, tasksLive, boardLive, wikiLive, apiKeysLive, adminLive, dashboardLive,
-  ).pipe(Layer.provide(Layer.provide(serviceLayer, Layer.mergeAll(dbLayer, LoggerLayer))));
+    healthLive, setupLive, projectsLive, columnsLive, swimlanesLive, fieldConfigLive, tasksLive, boardLive, wikiLive, apiKeysLive, adminLive, dashboardLive,
+  ).pipe(Layer.provide(Layer.provide(serviceLayer, Layer.mergeAll(dbLayer, LoggerLayer))), Layer.provide(dbLayer));
   const merged = Layer.mergeAll(apiLayer, handlerLayer);
   const { handler } = HttpApiBuilder.toWebHandler(merged as unknown as Parameters<typeof HttpApiBuilder.toWebHandler>[0]);
   return async (req: Request) => {

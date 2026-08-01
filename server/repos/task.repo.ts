@@ -1,13 +1,14 @@
 import { Effect } from "effect";
 import { Sqlite, queryAll, queryFirst, run, batch, DbError, RowNotFound, ConstraintViolation } from "../db/database";
 import { TaskRow, rowToTask } from "../../shared/db";
-import type { Task, Priority, TaskType } from "../../shared/types";
+import type { Task } from "../../shared/types";
 
 export interface TaskFilters {
   columnId?: string;
   swimlaneId?: string;
   assignee?: string;
-  type?: TaskType;
+  type?: string;              // type_options.id
+  includeArchived?: boolean;
 }
 
 function decodeCursor(cursor: string | null): { columnId: string; position: string; taskId: string } | null {
@@ -38,8 +39,8 @@ export class TaskRepo extends Effect.Service<TaskRepo>()("Lexa/TaskRepo", {
         swimlaneId: string;
         title: string;
         description: string;
-        priority: Priority;
-        type: TaskType;
+        priority: string;
+        type: string;
         assignees?: string[];
         position: string;
         githubIssueId?: string;
@@ -121,6 +122,9 @@ export class TaskRepo extends Effect.Service<TaskRepo>()("Lexa/TaskRepo", {
           conditions.push("t.type = ?");
           params.push(filters.type);
         }
+        if (!filters?.includeArchived) {
+          conditions.push("t.archived_at IS NULL");
+        }
 
         const decoded = decodeCursor(cursor ?? null);
         if (decoded) {
@@ -166,6 +170,9 @@ export class TaskRepo extends Effect.Service<TaskRepo>()("Lexa/TaskRepo", {
           conditions.push("t.type = ?");
           params.push(filters.type);
         }
+        if (!filters?.includeArchived) {
+          conditions.push("t.archived_at IS NULL");
+        }
 
         const whereClause = conditions.join(" AND ");
         const sql = `SELECT ${TASK_SELECT} FROM ${TASK_FROM} WHERE ${whereClause} GROUP BY t.id ORDER BY t.column_id, t.position`;
@@ -178,7 +185,7 @@ export class TaskRepo extends Effect.Service<TaskRepo>()("Lexa/TaskRepo", {
       findLastInColumn: (projectId: string, columnId: string): Effect.Effect<TaskRow & { column_github_state: "open" | "closed" | null; github_issues_raw: string | null }, RowNotFound | DbError> =>
         queryFirst<TaskRow & { column_github_state: "open" | "closed" | null; github_issues_raw: string | null }>(
           db,
-          `SELECT ${TASK_SELECT} FROM ${TASK_FROM} WHERE t.project_id = ? AND t.column_id = ? GROUP BY t.id ORDER BY t.position DESC LIMIT 1`,
+          `SELECT ${TASK_SELECT} FROM ${TASK_FROM} WHERE t.project_id = ? AND t.column_id = ? AND t.archived_at IS NULL GROUP BY t.id ORDER BY t.position DESC LIMIT 1`,
           projectId,
           columnId
         ),
@@ -188,8 +195,8 @@ export class TaskRepo extends Effect.Service<TaskRepo>()("Lexa/TaskRepo", {
         input: {
           title?: string;
           description?: string;
-          priority?: Priority;
-          type?: TaskType;
+          priority?: string;
+          type?: string;
           assignees?: string[];
         }
       ): Effect.Effect<Task, RowNotFound | DbError | ConstraintViolation> =>
@@ -298,7 +305,7 @@ export class TaskRepo extends Effect.Service<TaskRepo>()("Lexa/TaskRepo", {
                   db,
                   `UPDATE tasks SET column_id = ?2, swimlane_id = ?3, position = ?4, updated_at = datetime('now')
                    WHERE id = ?1
-                     AND (column_id = ?2 OR (SELECT COUNT(*) FROM tasks WHERE project_id = ?5 AND column_id = ?2) < COALESCE((SELECT wip_limit FROM columns WHERE id = ?2), 9223372036854775807))`,
+                     AND (column_id = ?2 OR (SELECT COUNT(*) FROM tasks WHERE project_id = ?5 AND column_id = ?2 AND archived_at IS NULL) < COALESCE((SELECT wip_limit FROM columns WHERE id = ?2), 9223372036854775807))`,
                   taskId,
                   target.columnId,
                   target.swimlaneId,
@@ -321,14 +328,20 @@ export class TaskRepo extends Effect.Service<TaskRepo>()("Lexa/TaskRepo", {
         );
       },
       countByProject: (projectId: string): Effect.Effect<number, DbError> =>
-        queryAll<{ cnt: number }>(db, `SELECT COUNT(*) as cnt FROM tasks WHERE project_id = ?`, projectId).pipe(
+        queryAll<{ cnt: number }>(db, `SELECT COUNT(*) as cnt FROM tasks WHERE project_id = ? AND archived_at IS NULL`, projectId).pipe(
           Effect.map((rows) => rows[0]?.cnt ?? 0)
         ),
 
       countUrgent: (projectId: string): Effect.Effect<number, DbError> =>
-        queryAll<{ cnt: number }>(db, `SELECT COUNT(*) as cnt FROM tasks WHERE project_id = ? AND priority = 'urgent'`, projectId).pipe(
-          Effect.map((rows) => rows[0]?.cnt ?? 0)
-        ),
+        queryAll<{ cnt: number }>(
+          db,
+          `SELECT COUNT(*) as cnt FROM tasks t
+           WHERE t.project_id = ?
+             AND t.archived_at IS NULL
+             AND t.priority = (SELECT id FROM priority_options WHERE project_id = ? ORDER BY position LIMIT 1)`,
+          projectId,
+          projectId
+        ).pipe(Effect.map((rows) => rows[0]?.cnt ?? 0)),
 
       countOutOfSync: (projectId: string): Effect.Effect<number, DbError> =>
         queryAll<{ cnt: number }>(
@@ -337,12 +350,13 @@ export class TaskRepo extends Effect.Service<TaskRepo>()("Lexa/TaskRepo", {
            INNER JOIN columns c ON t.column_id = c.id
            INNER JOIN task_github_issues gi ON gi.task_id = t.id
            WHERE t.project_id = ?
+             AND t.archived_at IS NULL
              AND gi.synced_state IS NOT c.github_state`,
           projectId
         ).pipe(Effect.map((rows) => rows[0]?.cnt ?? 0)),
 
       countByColumn: (projectId: string, columnId: string): Effect.Effect<number, DbError> =>
-        queryAll<{ cnt: number }>(db, `SELECT COUNT(*) as cnt FROM tasks WHERE project_id = ? AND column_id = ?`, projectId, columnId).pipe(
+        queryAll<{ cnt: number }>(db, `SELECT COUNT(*) as cnt FROM tasks WHERE project_id = ? AND column_id = ? AND archived_at IS NULL`, projectId, columnId).pipe(
           Effect.map((rows) => rows[0]?.cnt ?? 0)
         ),
 
@@ -353,7 +367,8 @@ export class TaskRepo extends Effect.Service<TaskRepo>()("Lexa/TaskRepo", {
            FROM tasks t
            INNER JOIN projects p ON t.project_id = p.id
            INNER JOIN columns c ON t.column_id = c.id
-           WHERE t.priority = 'urgent'
+           WHERE t.priority = (SELECT id FROM priority_options WHERE project_id = p.id ORDER BY position LIMIT 1)
+             AND t.archived_at IS NULL
            ORDER BY t.created_at DESC
            LIMIT ?`,
           limit
@@ -368,10 +383,22 @@ export class TaskRepo extends Effect.Service<TaskRepo>()("Lexa/TaskRepo", {
            INNER JOIN columns c ON t.column_id = c.id
            INNER JOIN task_github_issues gi ON gi.task_id = t.id
            WHERE gi.synced_state IS NOT c.github_state
+             AND t.archived_at IS NULL
            ORDER BY t.updated_at DESC
            LIMIT ?`,
           limit
         ),
+
+      setArchived: (id: string, archivedAt: string | null): Effect.Effect<Task, DbError | RowNotFound | ConstraintViolation> =>
+        Effect.gen(function* () {
+          yield* Effect.logDebug(`[TaskRepo] setArchived id=${id} archivedAt=${archivedAt}`);
+          yield* run(db, `UPDATE tasks SET archived_at = ?, updated_at = datetime('now') WHERE id = ?`, archivedAt, id);
+          return yield* queryFirst<TaskRow & { column_github_state: "open" | "closed" | null; github_issues_raw: string | null }>(
+            db,
+            `SELECT ${TASK_SELECT} FROM ${TASK_FROM} WHERE t.id = ? GROUP BY t.id`,
+            id
+          ).pipe(Effect.map((r) => rowToTask(r)));
+        }),
 
       moveFromWebhook: (
         taskId: string,

@@ -4,7 +4,7 @@
 
 ## Overview
 
-A lightweight, self-hosted project management tool built for small game development teams (2–5 people). Kanban board, issue/task ticketing, nested wiki/docs, AI agent (MCP) access, and GitHub issue sync — running on Cloudflare Workers + D1.
+A lightweight, self-hosted project management tool built for small game development teams (2–5 people). Kanban board, issue/task ticketing, nested wiki/docs, AI agent (MCP) access, and GitHub issue sync — running on a Bun standalone server with SQLite.
 
 ## Tech Stack
 
@@ -12,11 +12,11 @@ A lightweight, self-hosted project management tool built for small game developm
 | ------------ | ----------------------------- | --------- |
 | Frontend     | React + Vite + TanStack Start | SSR for initial load, SPA-like after, file-based routing |
 | Backend      | Effect-TS + @effect/platform HttpApi | Typed errors, DI, declarative error→HTTP mapping, OpenAPI for free |
-| Database     | Cloudflare D1                 | SQLite, free tier, batch API for atomic mutations |
-| Serverless   | Cloudflare Workers            | Same runtime as D1, zero cold starts for MCP |
-| Human auth   | Cloudflare Access             | Zero auth code — email allowlist in CF dashboard, Worker reads identity header |
+| Database     | SQLite via bun:sqlite (WAL)   | Local file, zero-ops, transactional batch helper for atomic mutations |
+| Runtime      | Bun standalone HTTP server (Docker) | One process for SSR + REST + MCP + webhooks; simple deploys |
+| Human auth   | Cloudflare Access (via cloudflared tunnel) | Zero auth code — email allowlist in CF dashboard, server reads identity header |
 | Machine auth | API keys (`lxk_` + base62(32B)) | Hermes/MCP: Bearer key → SHA-256 lookup |
-| MCP Server   | Built into Worker             | Streamable HTTP, stateless, shares Effect services with REST |
+| MCP Server   | Built into the Bun server     | Streamable HTTP, stateless, shares Effect services with REST |
 | GitHub Sync  | GitHub App + Webhooks         | Issues r/w + Metadata read only; echo-suppressed two-way state sync |
 | Styling      | Tailwind                      | Fast, tree-shaken |
 | Rich Text    | TipTap (ProseMirror)          | Structured JSON, React integration, MCP-friendly |
@@ -64,15 +64,15 @@ api_keys                        webhook_events
 ## Auth
 
 ### Humans → Cloudflare Access
-The Worker hostname sits behind Cloudflare Access with an email allowlist (or GitHub org policy) managed in the CF dashboard. The Worker reads `Cf-Access-Authenticated-User-Email` for identity (assignee suggestions, display). **No OAuth code, no sessions, no cookies, no CSRF surface, no auth routes.**
+The app hostname sits behind Cloudflare Access (via the cloudflared tunnel) with an email allowlist (or GitHub org policy) managed in the CF dashboard. The Bun server reads `Cf-Access-Authenticated-User-Email` from the tunneled request for identity (assignee suggestions, display). **No OAuth code, no sessions, no cookies, no CSRF surface, no auth routes.**
 
 Two deployment rules make this sound (both mandatory):
 
-1. **Disable the `workers.dev` route** in wrangler config and serve only on the Access-protected hostname — otherwise anyone can hit `<worker>.workers.dev` directly and forge the identity header. Defense in depth: the Worker also verifies the `Cf-Access-Jwt-Assertion` JWT against Cloudflare's public keys (cheap, Workers-native).
+1. **Serve only on the Access-protected hostname through the tunnel** — no public bypass. The tunnel is the only ingress; there is no `workers.dev` route to disable.
 2. **Machine endpoints can't do Access's browser flow.** Add Access "bypass" policies scoped to `/mcp` and `/api/webhooks/*` — they authenticate via API key and HMAC signature respectively (both already designed). Optional alternative for Hermes: a CF service token.
 
 ### Machines → API keys
-`Authorization: Bearer lxk_<base62(32 random bytes)>`. Worker: `SHA-256(raw)` → `api_keys.key_hash` lookup. Keys are full read/write — **no scopes** (single-agent trust model, explicit). `last_used_at` updated only when NULL or stale >1h.
+`Authorization: Bearer lxk_<base62(32 random bytes)>`. Server: `SHA-256(raw)` → `api_keys.key_hash` lookup. Keys are full read/write — **no scopes** (single-agent trust model, explicit). `last_used_at` updated only when NULL or stale >1h.
 
 The webhook route is exempt from API-key middleware — it authenticates via `X-Hub-Signature-256` (HMAC-SHA-256 over the raw body, constant-time compare, verified before parsing).
 
@@ -243,8 +243,8 @@ Dashboard (Command Center)
 
 Removed from v1: `SubtaskList`, `CommentThread` (ghost features — no schema backing).
 
-### D1 read-your-writes
-D1 is read-replicated; a refetch after mutation can hit a stale replica and snap cards back. Rule: **mutations return the updated entity and TanStack Query updates its cache from the mutation response (`setQueryData`) — no refetch on the mutation path.**
+### Mutation responses are authoritative
+SQLite is local (WAL) so reads are immediate, but the mutation response is still the single source of truth. Rule: **mutations return the updated entity and TanStack Query updates its cache from the mutation response (`setQueryData`) — no refetch on the mutation path.**
 
 ## File Structure
 
@@ -255,57 +255,38 @@ lexa/
 │   ├── index.tsx             # Dashboard
 │   ├── $slug/
 │   │   ├── index.tsx         # Kanban
-│   │   ├── tasks/$id.tsx
 │   │   ├── wiki/index.tsx
 │   │   ├── wiki/$page.tsx
 │   │   └── settings.tsx
 │   └── settings.tsx
-├── components/
-│   ├── kanban/  (board, column, card, swimlane)
-│   ├── wiki/    (editor, sidebar, page-tree)
-│   ├── task/    (detail, property-bar)
-│   └── ui/      (shadcn/ui primitives)
-├── services/                 # Effect-TS services
-│   ├── task.service.ts       (includes required-field validation)
-│   ├── project.service.ts
-│   ├── wiki.service.ts
-│   ├── column.service.ts
-│   ├── swimlane.service.ts
-│   ├── github.service.ts
-│   └── auth.service.ts
-├── repositories/
-│   ├── task.repo.ts
-│   ├── project.repo.ts
-│   ├── wiki.repo.ts
-│   ├── column.repo.ts
-│   ├── swimlane.repo.ts
-│   ├── api-key.repo.ts
-│   └── webhook-event.repo.ts
-├── api/                      # @effect/platform HttpApi route handlers
-│   ├── projects.ts
-│   ├── columns.ts
-│   ├── swimlanes.ts
-│   ├── tasks.ts
-│   ├── wiki.ts
-│   ├── settings.ts
-│   └── webhooks/github.ts
-├── mcp/
-│   ├── server.ts             # Streamable HTTP, stateless
-│   └── tools/                # one file per tool (see MCP table)
-├── db/
-│   └── schema.sql            # D1 migrations
-├── worker-configuration.d.ts
-├── wrangler.jsonc            # D1 binding + Cron Trigger (webhook_events prune)
+│   ├── components/
+│   │   ├── kanban/  (board, column, card, swimlane)
+│   │   ├── wiki/    (editor, sidebar, page-tree)
+│   │   ├── task/    (detail, property-bar)
+│   │   └── ui/      (toast, modal-stack, menu)
+│   └── lib/         (api.ts, queries.ts)
+├── server/                   # Effect-TS services
+│   ├── entry.ts              # Bun.serve — routes /mcp, /api/*, static, SSR
+│   ├── api/                  # HttpApi app (http.ts), auth-key.ts, auth.ts, errors.ts
+│   ├── services/             # task, project, wiki, column, swimlane, ...
+│   ├── repos/                # task.repo.ts, project.repo.ts, ...
+│   ├── db/                   # database.ts (bun:sqlite layer), migrate.ts
+│   ├── mcp/                  # server.ts + tools/
+│   └── github/               # GitHub App client + webhook
+├── shared/                   # types + pure functions (markdown, positions, tiptap-text)
+├── migrations/               # *.sql applied on boot by server/db/migrate.ts
+├── scripts/                  # setup.sh (deploy), seed-dev.sql, mcp/
+├── wireframes/               # src (source of truth) + dist (compiled)
 └── package.json
 ```
 
-Changes from v1: removed label service/repo/routes, policy.service.ts (folded into task.service.ts), subtask-list.tsx; added api-key.repo.ts, webhook-event.repo.ts; `routes/` renamed `api/` (HttpApi); no auth routes needed (Cloudflare Access).
+Changes from v1: removed label service/repo/routes, policy.service.ts (folded into task.service.ts), subtask-list.tsx; added api-key.repo.ts, webhook-event.repo.ts; `routes/` renamed `api/` (HttpApi); runtime migrated from Cloudflare Workers/D1 to Bun + SQLite (commit 3315ca8).
 
 ## Development Phases
 
 | Phase | Scope | Dependencies |
 |-------|-------|-------------|
-| **1. Foundation + spike** | D1 schema, Effect repos/services (Project, Task), HttpApi scaffolding, **TanStack Start-on-Workers spike** (validate SSR+D1 in one deploy before building on it) | — |
+| **1. Foundation + spike** | SQLite schema, Effect repos/services (Project, Task), HttpApi scaffolding, **TanStack Start + Bun SSR spike** (validate SSR+SQLite in one process before building on it) | — |
 | **2. Kanban CRUD** | Column/Swimlane services, task CRUD, atomic move + WIP + required_fields | Phase 1 |
 | **3. Frontend Core** | Dashboard, kanban board (dnd-kit), task detail slideover | Phase 2 |
 | **4. Wiki** | Wiki service/repo, TipTap editor, page tree, FTS search | Phase 1 |
@@ -319,13 +300,13 @@ Phases 1, 4, 5 can start together (Wiki and MCP depend only on the foundation).
 
 1. **Fractional indexing via `fractional-indexing` npm package** — hand-rolled key generation was wrong (duplicate keys between dense neighbors). `UNIQUE(column_id, position)` + retry-on-conflict handles concurrent creates.
 2. **Atomic move as one operation** — `{ columnId, swimlaneId, beforeTaskId, afterTaskId }` → one conditional UPDATE. WIP limit enforced inside the statement (no check-then-act race).
-3. **Cloudflare Access for human auth** — zero auth code for a self-hosted 2–5 person tool. API keys (`lxk_` format) for machines only.
+3. **Cloudflare Access for human auth** — zero auth code for a self-hosted 2–5 person tool (tunneled ingress). API keys (`lxk_` format) for machines only.
 4. **Echo-suppressed GitHub sync** — `github_synced_state` comparison + delivery dedup + immediate ack. Column mapping via `columns.github_state`, never by name.
 5. **No service-to-service cycles** — TaskService has no GitHub dependency; routes orchestrate Lexa→GitHub sync. GitHubService→TaskService (webhooks) is the only service edge.
 6. **Cut: labels, subtasks, 2 of 3 column policies** — `tasks.type` covers categorization; TipTap checklists cover breakdown; `required_fields` is the only enforceable policy. Reversible: these are doc-level cuts, adding back later is a schema migration, not a redesign.
 7. **@effect/platform HttpApi** — tagged errors map declaratively to HTTP statuses + OpenAPI generation.
 8. **TipTap JSON content** (unchanged) — with app-maintained `content_text` plain-text projection for FTS5 search.
-9. **Mutation-response cache updates** — frontend never refetches on the mutation path (D1 read-replication).
+9. **Mutation-response cache updates** — frontend never refetches on the mutation path (mutation response is authoritative).
 10. **No users table** (unchanged) — assignees are freeform strings; identity comes from Access/GitHub.
 11. **Round-2 hardening** (oracle verification pass) — within-column reorders short-circuit the WIP check; deterministic key generation mandates re-read-then-regenerate retries for create AND move; neighborless moves default to append-to-end (never `generateKeyBetween(null,null)`); webhook delivery recorded only after successful processing; `task.github_repo` stored at link time; `/board` unpaginated endpoint; `required_fields` enforced on create/move/update.
 12. **Design system: PHOSPHOR (approved)** — warm-phosphor CRT/HUD identity (see DESIGN_SYSTEM.md). Four-voice type: Space Grotesk (display), IBM Plex Sans (body), JetBrains Mono (IDs/code), Departure Mono (micro HUD labels). Brown-black `#0C0B09` surfaces, phosphor amber `#F0C040` accent, focus = amber glow ("CRT cursor"). Dark-first, density-first, gamification visual-only. First proposal (Geist/Linear-adjacent) rejected by user — no Vercel/Linear aesthetics.

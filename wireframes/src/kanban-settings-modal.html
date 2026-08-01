@@ -111,6 +111,105 @@
         </div>
       </section>
 
+      <!-- Task Fields: Priorities + Types -->
+      <section class="mb-8">
+        <div class="flex items-center justify-between mb-3">
+          <h2 class="font-display text-base weight-500 color-primary">Priorities</h2>
+        </div>
+        <p class="text-sm color-secondary mb-3" style="max-width:560px;">
+          The priority options available on tasks in this project. Order defines the dropdown order; first option is the default.
+        </p>
+        <div style="background:var(--lx-surface-card);border:1px solid var(--lx-border-default);border-radius:8px;overflow:hidden;">
+          <table class="settings-table">
+            <thead>
+              <tr><th style="width:32px;"></th><th>Label</th><th>Color</th><th style="width:100px;"></th></tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="color:var(--lx-text-muted);cursor:grab;"><circle cx="9" cy="12" r="1"/><circle cx="9" cy="5" r="1"/><circle cx="9" cy="19" r="1"/><circle cx="15" cy="12" r="1"/><circle cx="15" cy="5" r="1"/><circle cx="15" cy="19" r="1"/></svg></td>
+                <td class="text-sm weight-500">Urgent</td>
+                <td><span class="priority-dot priority-urgent"></span> <span class="text-xs color-secondary">Red</span></td>
+                <td><div class="flex items-center gap-2"><button class="btn btn-ghost" style="height:28px;padding:0 8px;font-size:12px;">Edit</button><button class="btn btn-danger" style="height:28px;padding:0 8px;font-size:12px;"><INCLUDE _trash-icon.html /></button></div></td>
+              </tr>
+              <tr>
+                <td><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="color:var(--lx-text-muted);cursor:grab;"><circle cx="9" cy="12" r="1"/><circle cx="9" cy="5" r="1"/><circle cx="9" cy="19" r="1"/><circle cx="15" cy="12" r="1"/><circle cx="15" cy="5" r="1"/><circle cx="15" cy="19" r="1"/></svg></td>
+                <td class="text-sm weight-500">High</td>
+                <td><span class="priority-dot priority-high"></span> <span class="text-xs color-secondary">Amber</span></td>
+                <td><div class="flex items-center gap-2"><button class="btn btn-ghost" style="height:28px;padding:0 8px;font-size:12px;">Edit</button><button class="btn btn-danger" style="height:28px;padding:0 8px;font-size:12px;"><INCLUDE _trash-icon.html /></button></div></td>
+              </tr>
+              <tr>
+                <td><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="color:var(--lx-text-muted);cursor:grab;"><circle cx="9" cy="12" r="1"/><circle cx="9" cy="5" r="1"/><circle cx="9" cy="19" r="1"/><circle cx="15" cy="12" r="1"/><circle cx="15" cy="5" r="1"/><circle cx="15" cy="19" r="1"/></svg></td>
+                <td class="text-sm weight-500">Medium</td>
+                <td><span class="priority-dot priority-medium"></span> <span class="text-xs color-secondary">Cyan</span></td>
+                <td><div class="flex items-center gap-2"><button class="btn btn-ghost" style="height:28px;padding:0 8px;font-size:12px;">Edit</button><button class="btn btn-danger" style="height:28px;padding:0 8px;font-size:12px;"><INCLUDE _trash-icon.html /></button></div></td>
+              </tr>
+              <tr>
+                <td><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="color:var(--lx-text-muted);cursor:grab;"><circle cx="9" cy="12" r="1"/><circle cx="9" cy="5" r="1"/><circle cx="9" cy="19" r="1"/><circle cx="15" cy="12" r="1"/><circle cx="15" cy="5" r="1"/><circle cx="15" cy="19" r="1"/></svg></td>
+                <td class="text-sm weight-500">Low</td>
+                <td><span class="priority-dot priority-low"></span> <span class="text-xs color-secondary">Gray</span></td>
+                <td><div class="flex items-center gap-2"><button class="btn btn-ghost" style="height:28px;padding:0 8px;font-size:12px;">Edit</button><button class="btn btn-danger" style="height:28px;padding:0 8px;font-size:12px;"><INCLUDE _trash-icon.html /></button></div></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="mt-3">
+          <button class="btn btn-ghost">
+            <INCLUDE _plus-icon.html />
+            Add Priority
+          </button>
+        </div>
+        <span class="annotation-tag" style="align-self:flex-start;margin-top:8px;">Deleting a priority used by tasks is blocked — reassign tasks first. First option in the list is the create default.</span>
+      </section>
+
+      <section class="mb-8">
+        <div class="flex items-center justify-between mb-3">
+          <h2 class="font-display text-base weight-500 color-primary">Types</h2>
+        </div>
+        <p class="text-sm color-secondary mb-3" style="max-width:560px;">
+          The type options available on tasks in this project. Order defines the dropdown order; first option is the default.
+        </p>
+        <div style="background:var(--lx-surface-card);border:1px solid var(--lx-border-default);border-radius:8px;overflow:hidden;">
+          <table class="settings-table">
+            <thead>
+              <tr><th style="width:32px;"></th><th>Label</th><th>Color</th><th style="width:100px;"></th></tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="color:var(--lx-text-muted);cursor:grab;"><circle cx="9" cy="12" r="1"/><circle cx="9" cy="5" r="1"/><circle cx="9" cy="19" r="1"/><circle cx="15" cy="12" r="1"/><circle cx="15" cy="5" r="1"/><circle cx="15" cy="19" r="1"/></svg></td>
+                <td class="text-sm weight-500">Feature</td>
+                <td><span class="type-badge type-feature">Feature</span> <span class="text-xs color-secondary">Green</span></td>
+                <td><div class="flex items-center gap-2"><button class="btn btn-ghost" style="height:28px;padding:0 8px;font-size:12px;">Edit</button><button class="btn btn-danger" style="height:28px;padding:0 8px;font-size:12px;"><INCLUDE _trash-icon.html /></button></div></td>
+              </tr>
+              <tr>
+                <td><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="color:var(--lx-text-muted);cursor:grab;"><circle cx="9" cy="12" r="1"/><circle cx="9" cy="5" r="1"/><circle cx="9" cy="19" r="1"/><circle cx="15" cy="12" r="1"/><circle cx="15" cy="5" r="1"/><circle cx="15" cy="19" r="1"/></svg></td>
+                <td class="text-sm weight-500">Bug</td>
+                <td><span class="type-badge type-bug">Bug</span> <span class="text-xs color-secondary">Red</span></td>
+                <td><div class="flex items-center gap-2"><button class="btn btn-ghost" style="height:28px;padding:0 8px;font-size:12px;">Edit</button><button class="btn btn-danger" style="height:28px;padding:0 8px;font-size:12px;"><INCLUDE _trash-icon.html /></button></div></td>
+              </tr>
+              <tr>
+                <td><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="color:var(--lx-text-muted);cursor:grab;"><circle cx="9" cy="12" r="1"/><circle cx="9" cy="5" r="1"/><circle cx="9" cy="19" r="1"/><circle cx="15" cy="12" r="1"/><circle cx="15" cy="5" r="1"/><circle cx="15" cy="19" r="1"/></svg></td>
+                <td class="text-sm weight-500">Task</td>
+                <td><span class="type-badge type-task">Task</span> <span class="text-xs color-secondary">Cyan</span></td>
+                <td><div class="flex items-center gap-2"><button class="btn btn-ghost" style="height:28px;padding:0 8px;font-size:12px;">Edit</button><button class="btn btn-danger" style="height:28px;padding:0 8px;font-size:12px;"><INCLUDE _trash-icon.html /></button></div></td>
+              </tr>
+              <tr>
+                <td><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="color:var(--lx-text-muted);cursor:grab;"><circle cx="9" cy="12" r="1"/><circle cx="9" cy="5" r="1"/><circle cx="9" cy="19" r="1"/><circle cx="15" cy="12" r="1"/><circle cx="15" cy="5" r="1"/><circle cx="15" cy="19" r="1"/></svg></td>
+                <td class="text-sm weight-500">Asset</td>
+                <td><span class="type-badge type-asset">Asset</span> <span class="text-xs color-secondary">Pink</span></td>
+                <td><div class="flex items-center gap-2"><button class="btn btn-ghost" style="height:28px;padding:0 8px;font-size:12px;">Edit</button><button class="btn btn-danger" style="height:28px;padding:0 8px;font-size:12px;"><INCLUDE _trash-icon.html /></button></div></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="mt-3">
+          <button class="btn btn-ghost">
+            <INCLUDE _plus-icon.html />
+            Add Type
+          </button>
+        </div>
+        <span class="annotation-tag" style="align-self:flex-start;margin-top:8px;">Deleting a type used by tasks is blocked — reassign tasks first. First option in the list is the create default.</span>
+      </section>
+
       <!-- Swimlanes -->
       <section>
         <div class="flex items-center justify-between mb-3">
@@ -158,6 +257,7 @@
     <span class="annotation-tag">Swimlane Edit → kanban-swimlane-settings-modal (edit mode). Delete → confirmation dialog (swimlane variant, see component-confirm.html)</span>
     <span class="annotation-tag">Add Column/Swimlane buttons open their respective create modals</span>
     <span class="annotation-tag">Drag handles on left of each row for reordering. Save on drop.</span>
+    <span class="annotation-tag">Priorities &amp; Types: per-project option lists (label + color). Add via "Add Priority"/"Add Type" → modal. Edit/Delete per row. Order = dropdown order, first = create default. Delete blocked while tasks use the option.</span>
     <span class="annotation-tag">API Keys live on the separate project Settings page</span>
   </div>
 

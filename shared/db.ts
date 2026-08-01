@@ -1,7 +1,34 @@
 // Database row types — mirror SQL column names exactly (snake_case).
 // Used by server repos/services only. Frontend never imports this file.
 
-import type { TipTapDoc, Priority, TaskType, ISODate } from "./types";
+import type { TipTapDoc, ISODate } from "./types";
+
+export interface PriorityOptionRow {
+  id: string;
+  project_id: string;
+  label: string;
+  color: string;
+  position: number;
+}
+
+export interface TypeOptionRow {
+  id: string;
+  project_id: string;
+  label: string;
+  color: string;
+  position: number;
+}
+
+export function rowToFieldOption(row: PriorityOptionRow | TypeOptionRow): {
+  id: string; label: string; color: string; position: number;
+} {
+  return {
+    id: row.id,
+    label: row.label,
+    color: row.color,
+    position: row.position,
+  };
+}
 
 export interface ProjectRow {
   id: string;
@@ -178,10 +205,11 @@ export interface TaskRow {
   swimlane_id: string;
   title: string;
   description: string;
-  priority: Priority;
-  type: TaskType;
+  priority: string;           // priority_options.id
+  type: string;               // type_options.id
   assignees: string;
   position: string;
+  archived_at: string | null;
   github_issue_id: string | null;
   github_issue_number: number | null;
   github_repo: string | null;
@@ -193,7 +221,7 @@ export interface TaskRow {
 }
 
 export function rowToTask(row: TaskRow, columnGithubState?: "open" | "closed" | null): {
-  id: string; projectId: string; columnId: string; swimlaneId: string; title: string; description: TipTapDoc; priority: Priority; type: TaskType; assignees: string[]; position: string; githubs: { issueId: string; issueNumber: number; repo: string; syncedState: "open" | "closed" | null; url: string; outOfSync: boolean }[]; createdAt: ISODate; updatedAt: ISODate;
+  id: string; projectId: string; columnId: string; swimlaneId: string; title: string; description: TipTapDoc; priority: string; type: string; assignees: string[]; position: string; githubs: { issueId: string; issueNumber: number; repo: string; syncedState: "open" | "closed" | null; url: string; outOfSync: boolean }[]; archivedAt: ISODate | null; createdAt: ISODate; updatedAt: ISODate;
 } {
   const colState = columnGithubState ?? row.column_github_state ?? null;
   const githubs: { issueId: string; issueNumber: number; repo: string; syncedState: "open" | "closed" | null; url: string; outOfSync: boolean }[] = [];
@@ -226,6 +254,7 @@ export function rowToTask(row: TaskRow, columnGithubState?: "open" | "closed" | 
     assignees: row.assignees ? row.assignees.split(",").filter(Boolean) : [],
     position: row.position,
     githubs,
+    archivedAt: row.archived_at,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };

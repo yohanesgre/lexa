@@ -102,6 +102,70 @@
         <span class="annotation-tag mt-2">block heights match the real line heights (14px body, 22px title, 32px buttons)</span>
       </div>
 
+      <!-- ===== C: Board skeleton (initial board query load) ===== -->
+      <div style="flex:1;min-width:560px;">
+        <div class="font-micro text-2xs color-muted mb-2" style="text-transform:uppercase;letter-spacing:0.04em;">C — Kanban board (initial load)</div>
+        <div class="bg-elevated border-default" style="overflow:hidden;">
+          <div class="flex items-center justify-between" style="height:56px;padding:0 16px;border-bottom:1px solid var(--lx-border-default);">
+            <div class="skeleton" style="width:140px;height:22px;"></div>
+            <div class="flex items-center gap-2">
+              <div class="skeleton" style="width:72px;height:32px;"></div>
+              <div class="skeleton" style="width:88px;height:32px;"></div>
+            </div>
+          </div>
+          <div style="padding:16px;display:flex;flex-direction:column;gap:16px;">
+            <div class="skeleton" style="width:320px;height:36px;"></div>
+            <div class="flex gap-3">
+              <div class="bg-column border-subtle r-lg" style="width:280px;min-height:320px;display:flex;flex-direction:column;">
+                <div class="column-header">
+                  <div class="skeleton" style="width:72px;height:12px;"></div>
+                </div>
+                <div class="column-body" style="overflow:hidden;">
+                  <div class="bg-card border-subtle r-md" style="padding:10px 12px;">
+                    <div class="skeleton" style="width:56px;height:18px;"></div>
+                    <div class="skeleton mt-2" style="width:85%;height:14px;"></div>
+                    <div class="skeleton mt-1" style="width:60%;height:14px;"></div>
+                    <div class="flex items-center gap-2 mt-2">
+                      <div class="skeleton skeleton-circle" style="width:20px;height:20px;"></div>
+                      <div class="skeleton" style="width:72px;height:12px;"></div>
+                    </div>
+                  </div>
+                  <div class="bg-card border-subtle r-md" style="padding:10px 12px;">
+                    <div class="skeleton" style="width:40px;height:18px;"></div>
+                    <div class="skeleton mt-2" style="width:92%;height:14px;"></div>
+                    <div class="skeleton mt-1" style="width:45%;height:14px;"></div>
+                  </div>
+                </div>
+              </div>
+              <div class="bg-column border-subtle r-lg" style="width:280px;min-height:320px;display:flex;flex-direction:column;">
+                <div class="column-header">
+                  <div class="skeleton" style="width:56px;height:12px;"></div>
+                </div>
+                <div class="column-body" style="overflow:hidden;">
+                  <div class="bg-card border-subtle r-md" style="padding:10px 12px;">
+                    <div class="skeleton" style="width:48px;height:18px;"></div>
+                    <div class="skeleton mt-2" style="width:78%;height:14px;"></div>
+                    <div class="skeleton mt-1" style="width:66%;height:14px;"></div>
+                  </div>
+                </div>
+              </div>
+              <div class="bg-column border-subtle r-lg" style="width:280px;min-height:320px;display:flex;flex-direction:column;">
+                <div class="column-header">
+                  <div class="skeleton" style="width:64px;height:12px;"></div>
+                </div>
+                <div class="column-body" style="overflow:hidden;">
+                  <div class="bg-card border-subtle r-md" style="padding:10px 12px;">
+                    <div class="skeleton" style="width:40px;height:18px;"></div>
+                    <div class="skeleton mt-2" style="width:88%;height:14px;"></div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <span class="annotation-tag mt-2">Board skeleton: 1 swimlane bar + 3 column shells with card skeletons, header + filter/settings button bars. Replaces “Loading board…” text.</span>
+      </div>
+
     </div>
 
     <div class="mt-4" style="display:grid;grid-template-columns:1fr 1fr;gap:16px;max-width:800px;">

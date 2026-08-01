@@ -6,10 +6,12 @@ import { ProjectRepo } from "../repos/project.repo";
 import { ColumnRepo } from "../repos/column.repo";
 import { SwimlaneRepo } from "../repos/swimlane.repo";
 import { TaskRepo } from "../repos/task.repo";
+import { FieldConfigRepo } from "../repos/field-config.repo";
 import { ProjectService } from "../services/project.service";
 import { ColumnService } from "../services/column.service";
 import { SwimlaneService } from "../services/swimlane.service";
 import { TaskService } from "../services/task.service";
+import { FieldConfigService } from "../services/field-config.service";
 import { WikiService } from "../services/wiki.service";
 import { ApiKeyService } from "../services/api-key.service";
 import { UserService } from "../services/user.service";
@@ -22,6 +24,8 @@ import { tool as getTask } from "./tools/get-task";
 import { tool as updateTask } from "./tools/update-task";
 import { tool as moveTask } from "./tools/move-task";
 import { tool as deleteTask } from "./tools/delete-task";
+import { tool as archiveTask } from "./tools/archive-task";
+import { tool as restoreTask } from "./tools/restore-task";
 import { tool as getWikiPage } from "./tools/get-wiki-page";
 import { tool as createWikiPage } from "./tools/create-wiki-page";
 import { tool as updateWikiPage } from "./tools/update-wiki-page";
@@ -67,6 +71,8 @@ const tools: ToolDef[] = [
   updateTask,
   moveTask,
   deleteTask,
+  archiveTask,
+  restoreTask,
   getWikiPage,
   createWikiPage,
   updateWikiPage,
@@ -132,10 +138,12 @@ export class McpServer extends Effect.Service<McpServer>()("Lexa/McpServer", {
     ColumnRepo.Default,
     SwimlaneRepo.Default,
     TaskRepo.Default,
+    FieldConfigRepo.Default,
     ProjectService.Default,
     ColumnService.Default,
     SwimlaneService.Default,
     TaskService.Default,
+    FieldConfigService.Default,
     WikiService.Default,
     ApiKeyService.Default,
     UserService.Default,
@@ -223,7 +231,7 @@ export class McpServer extends Effect.Service<McpServer>()("Lexa/McpServer", {
             if (typeof args?.slug === "string" && ["get_project", "get_project_status"].includes(toolName)) {
               yield* checkProjectAccess(authContext.userId, authContext.role, args.slug);
             }
-            if (typeof args?.taskId === "string" && ["get_task", "update_task", "move_task", "delete_task"].includes(toolName)) {
+            if (typeof args?.taskId === "string" && ["get_task", "update_task", "move_task", "delete_task", "archive_task", "restore_task"].includes(toolName)) {
               const resolved = yield* resolveTaskProject(args.taskId);
               yield* checkProjectAccess(authContext.userId, authContext.role, resolved.slug);
             }
@@ -317,10 +325,12 @@ const serviceLayer = Layer.mergeAll(
   ColumnRepo.Default,
   SwimlaneRepo.Default,
   TaskRepo.Default,
+  FieldConfigRepo.Default,
   ProjectService.Default,
   ColumnService.Default,
   SwimlaneService.Default,
   TaskService.Default,
+  FieldConfigService.Default,
   WikiService.Default,
   ApiKeyService.Default,
   UserService.Default,

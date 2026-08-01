@@ -2,7 +2,7 @@ import { useState } from "react";
 import { MoreHorizontal, Plus, SlidersHorizontal, Trash2, Eraser } from "lucide-react";
 import { cn } from "../ui/cn";
 import { Menu } from "../ui/Menu";
-import { useBoard, useDeleteColumn, useDeleteTask } from "../../lib/queries";
+import { useBoard, useUpdateColumn, useDeleteColumn, useDeleteTask } from "../../lib/queries";
 import { ColumnForm } from "./ColumnForm";
 import type { Column } from "../../../shared/types";
 
@@ -22,6 +22,7 @@ export function ColumnHeader({ slug, column, taskCount, wipLimit, wipFlash = fal
   const { data: board } = useBoard(slug);
   const deleteColumn = useDeleteColumn(slug);
   const deleteTask = useDeleteTask(slug);
+  const updateColumn = useUpdateColumn(slug);
 
   const [isEditOpen, setIsEditOpen] = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState(false);

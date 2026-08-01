@@ -530,6 +530,16 @@
     background: var(--lx-surface-selected);
     box-shadow: var(--lx-focus-ring), var(--lx-focus-glow);
   }
+  .kanban-card.state-archived {
+    opacity: 0.45;
+    filter: saturate(0.4);
+    cursor: default;
+  }
+  .kanban-card.state-archived:hover {
+    background: var(--lx-surface-card);
+    border-color: var(--lx-border-subtle);
+    box-shadow: none;
+  }
   .kanban-card.card-enter {
     animation: lx-card-enter 200ms var(--lx-ease-out);
   }
@@ -1547,6 +1557,19 @@
   }
   .btn-danger:hover {
     background: var(--lx-bg-danger-subtle);
+  }
+
+  /* Compact action buttons: consistent 28px height for paired Cancel/Save rows */
+  .btn-sm {
+    height: 28px;
+    padding: 0 10px;
+    font-size: 12px;
+  }
+  .btn-icon-sm {
+    width: 28px;
+    height: 28px;
+    padding: 0;
+    flex-shrink: 0;
   }
 
   /* Nav / page frame */
@@ -2663,6 +2686,111 @@
     cursor: not-allowed;
   }
 
+  /* ---- Toast Notifications (wireframes: component-toast.html) ---- */
+  .toast-stack {
+    position: fixed;
+    top: 16px;
+    right: 16px;
+    z-index: 60;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    width: 360px;
+    max-width: calc(100vw - 32px);
+    pointer-events: none;
+  }
+
+  .toast {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    background: var(--lx-surface-tooltip);
+    border: 1px solid var(--lx-border-default);
+    border-radius: 6px;
+    padding: 12px 14px;
+    box-shadow: var(--lx-shadow-lg);
+    pointer-events: auto;
+  }
+
+  .toast-success { border-left: 3px solid #4ADE80; }
+  .toast-warning { border-left: 3px solid #F0C040; }
+  .toast-error   { border-left: 3px solid #FF4444; }
+
+  .toast-icon {
+    flex-shrink: 0;
+    margin-top: 1px;
+    display: inline-flex;
+  }
+  .toast-icon svg {
+    width: 16px;
+    height: 16px;
+    stroke: currentColor;
+    stroke-width: 1.5;
+    fill: none;
+  }
+  .toast-success .toast-icon { color: #4ADE80; }
+  .toast-warning .toast-icon { color: #F0C040; }
+  .toast-error   .toast-icon { color: #FF4444; }
+
+  .toast-title {
+    font-size: 13px;
+    font-weight: 500;
+    line-height: 18px;
+    color: var(--lx-text-primary);
+  }
+  .toast-body {
+    font-size: 12px;
+    line-height: 16px;
+    color: var(--lx-text-secondary);
+    margin-top: 2px;
+  }
+
+  .toast-close {
+    width: 20px;
+    height: 20px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    background: transparent;
+    border: none;
+    border-radius: 4px;
+    color: var(--lx-text-muted);
+    cursor: pointer;
+    flex-shrink: 0;
+    margin-left: auto;
+    transition: background 100ms, color 100ms;
+  }
+  .toast-close:hover {
+    color: var(--lx-text-primary);
+    background: var(--lx-surface-card-hover);
+  }
+  .toast-close svg {
+    width: 12px;
+    height: 12px;
+    stroke: currentColor;
+    stroke-width: 1.5;
+    fill: none;
+  }
+
+  .toast-enter {
+    animation: lx-toast-enter 300ms var(--lx-ease-out) both;
+  }
+  .toast-leave {
+    transition: opacity 150ms var(--lx-ease-out);
+    opacity: 0;
+  }
+
+  @keyframes lx-toast-enter {
+    from {
+      transform: translateX(100%);
+      opacity: 0;
+    }
+    to {
+      transform: translateX(0);
+      opacity: 1;
+    }
+  }
+
   /* ---- Confirmation Dialog ---- */
   .dialog-overlay {
     position: fixed;
@@ -2879,7 +3007,7 @@
     transition: transform 100ms, background 100ms;
   }
   .toggle-switch.is-on {
-    background: var(--lx-border-focus);
+    background: var(--lx-surface-selected);
     border-color: var(--lx-border-focus);
   }
   .toggle-switch.is-on::after {

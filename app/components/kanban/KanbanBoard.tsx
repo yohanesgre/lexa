@@ -20,7 +20,11 @@ import { TaskCard } from "./TaskCard";
 import { FilterButton, ActiveFilterBar, emptyFilters, isFilterActive, type FilterState } from "./BoardFilters";
 import { KanbanSettingsModal } from "./KanbanSettingsModal";
 import { ColumnForm } from "./ColumnForm";
-import { useCreateColumn } from "../../lib/queries";
+import { useArchiveTask, useCreateColumn, useRestoreTask } from "../../lib/queries";
+import { Menu } from "../ui/Menu";
+import { MoreHorizontal } from "lucide-react";
+import { Archive, Trash2 } from "lucide-react";
+import { useToast } from "../ui/Toast";
 
 export interface MoveTarget {
   columnId: string;
@@ -31,6 +35,8 @@ export interface MoveTarget {
 
 interface KanbanBoardProps {
   board: Board;
+  showArchived?: boolean;
+  onToggleArchived?: (show: boolean) => void;
   onMoveTask: (taskId: string, target: MoveTarget) => Promise<void>;
   onSelectTask?: (task: Task) => void;
   onOpenCreateTask?: (columnId: string, swimlaneId?: string) => void;
@@ -54,12 +60,14 @@ const isRequiredField = (err: unknown): boolean => {
 
 const isRejection = (err: unknown): boolean => isWipLimit(err) || isRequiredField(err);
 
-function cardProps(task: Task) {
+function cardProps(task: Task, board: Board) {
   return {
     id: task.id,
     title: task.title,
     priority: task.priority,
     type: task.type,
+    priorities: board.fieldConfig?.priorities ?? [],
+    types: board.fieldConfig?.types ?? [],
     assignees: task.assignees,
     githubs: task.githubs,
   };
@@ -67,20 +75,30 @@ function cardProps(task: Task) {
 
 function SortableTaskCard({
   task,
+  board,
   onSelect,
   dimmed,
   isNew,
   isShaking,
+  onArchive,
+  onRestore,
+  onDelete,
 }: {
   task: Task;
+  board: Board;
   onSelect?: (t: Task) => void;
   dimmed: boolean;
   isNew?: boolean;
   isShaking?: boolean;
+  onArchive?: (id: string) => void;
+  onRestore?: (id: string) => void;
+  onDelete?: (id: string) => void;
 }) {
+  const archived = task.archivedAt != null;
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: task.id,
     data: { type: "card", columnId: task.columnId, swimlaneId: task.swimlaneId },
+    disabled: archived,
   });
   return (
     <div
@@ -90,15 +108,53 @@ function SortableTaskCard({
       {...attributes}
       {...listeners}
       onClick={(e) => {
-        if (!isDragging) { e.stopPropagation(); onSelect?.(task); }
+        if (!isDragging && !archived) { e.stopPropagation(); onSelect?.(task); }
       }}
     >
-      <TaskCard {...cardProps(task)} dimmed={dimmed} className={cn(isNew && "card-enter")} />
+      <TaskCard
+        {...cardProps(task, board)}
+        dimmed={dimmed}
+        archived={archived}
+        className={cn(isNew && "card-enter")}
+        action={
+          <Menu
+            align="right"
+            trigger={({ open, toggle }) => (
+              <button
+                type="button"
+                className={cn("icon-btn", open && "active")}
+                onClick={(e) => { e.stopPropagation(); toggle(); }}
+                title="Card menu"
+                aria-label="Card menu"
+              >
+                <MoreHorizontal size={14} />
+              </button>
+            )}
+          >
+            {archived ? (
+              <button type="button" className="menu-item" onClick={(e) => { e.stopPropagation(); onRestore?.(task.id); }}>
+                <Archive size={14} />
+                Restore
+              </button>
+            ) : (
+              <button type="button" className="menu-item" onClick={(e) => { e.stopPropagation(); onArchive?.(task.id); }}>
+                <Archive size={14} />
+                Archive
+              </button>
+            )}
+            <div className="menu-separator" />
+            <button type="button" className="menu-item danger" onClick={(e) => { e.stopPropagation(); onDelete?.(task.id); }}>
+              <Trash2 size={14} />
+              Delete
+            </button>
+          </Menu>
+        }
+      />
     </div>
   );
 }
 
-export function KanbanBoard({ board, onMoveTask, onSelectTask, onOpenCreateTask }: KanbanBoardProps) {
+export function KanbanBoard({ board, showArchived = false, onToggleArchived, onMoveTask, onSelectTask, onOpenCreateTask }: KanbanBoardProps) {
   const [localTasks, setLocalTasks] = useState<Task[]>(board.tasks);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [flashColumnId, setFlashColumnId] = useState<string | null>(null);
@@ -112,6 +168,9 @@ export function KanbanBoard({ board, onMoveTask, onSelectTask, onOpenCreateTask 
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isColumnCreateOpen, setIsColumnCreateOpen] = useState(false);
   const createColumn = useCreateColumn(board.project.slug);
+  const archiveTask = useArchiveTask(board.project.slug);
+  const restoreTask = useRestoreTask(board.project.slug);
+  const toast = useToast();
 
   useEffect(() => {
     const currentIds = new Set(localTasks.map((t) => t.id));
@@ -281,6 +340,22 @@ export function KanbanBoard({ board, onMoveTask, onSelectTask, onOpenCreateTask 
         setFlashColumnId(targetColumnId);
         if (flashTimer.current !== null) window.clearTimeout(flashTimer.current);
         flashTimer.current = window.setTimeout(() => setFlashColumnId(null), 1500);
+        const column = board.columns.find((c) => c.id === targetColumnId);
+        const limit = column?.wipLimit ?? 0;
+        toast.push(
+          "warning",
+          "WIP limit exceeded",
+          `${column?.name ?? "Column"} is at ${columnTotalCount(targetColumnId)}/${limit} tasks. Move blocked.`
+        );
+      }
+      if (isRequiredField(err)) {
+        const column = board.columns.find((c) => c.id === targetColumnId);
+        const fields = (column?.requiredFields ?? []).join(", ");
+        toast.push(
+          "warning",
+          "Required fields missing",
+          `${column?.name ?? "Column"} requires: ${fields}.`
+        );
       }
       if (!isRejection(err)) {
         console.error("Task move failed", err);
@@ -296,6 +371,15 @@ export function KanbanBoard({ board, onMoveTask, onSelectTask, onOpenCreateTask 
             <h1 className="font-display text-xl font-semibold text-lx-text-primary">{board.project.name}</h1>
           </div>
           <div className="flex items-center gap-2">
+            <button
+              type="button"
+              className={cn("btn btn-ghost text-sm", showArchived && "active")}
+              onClick={() => onToggleArchived?.(!showArchived)}
+              title="Show archived tasks"
+            >
+              <span className={cn("toggle-switch", showArchived && "is-on")} />
+              Show archived
+            </button>
             <FilterButton board={board} filters={filters} onChange={setFilters} />
             <button
               type="button"
@@ -367,11 +451,23 @@ export function KanbanBoard({ board, onMoveTask, onSelectTask, onOpenCreateTask 
                           slug={board.project.slug}
                           columnId={col.id}
                           swimlaneId={laneId}
+                          priorities={board.fieldConfig?.priorities ?? []}
+                          types={board.fieldConfig?.types ?? []}
                           onOpenCreate={() => onOpenCreateTask?.(col.id, laneId)}
                         >
                           <SortableContext items={cell.map((t) => t.id)} strategy={verticalListSortingStrategy}>
                             {cell.filter((task) => !cardHidden(task)).map((task) => (
-                              <SortableTaskCard key={task.id} task={task} onSelect={onSelectTask} dimmed={cardDimmed(task)} isNew={newTaskIds.has(task.id)} isShaking={shakeTaskId === task.id} />
+                              <SortableTaskCard
+                                key={task.id}
+                                task={task}
+                                board={board}
+                                onSelect={onSelectTask}
+                                dimmed={cardDimmed(task)}
+                                isNew={newTaskIds.has(task.id)}
+                                isShaking={shakeTaskId === task.id}
+                                onArchive={(id) => archiveTask.mutate({ id })}
+                                onRestore={(id) => restoreTask.mutate({ id })}
+                              />
                             ))}
                           </SortableContext>
                         </Column>
@@ -389,7 +485,7 @@ export function KanbanBoard({ board, onMoveTask, onSelectTask, onOpenCreateTask 
       <DragOverlay dropAnimation={{ duration: 150, easing: "cubic-bezier(0.16, 1, 0.3, 1)" }}>
         {activeTask ? (
           <div style={{ width: 258 }}>
-            <TaskCard {...cardProps(activeTask)} isDragging />
+            <TaskCard {...cardProps(activeTask, board)} isDragging />
           </div>
         ) : null}
       </DragOverlay>
