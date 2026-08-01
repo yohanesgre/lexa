@@ -3,6 +3,8 @@
 > Oracle review (kimi-k3) of ARCHITECTURE.md, SCHEMA.md, LAYERS.md  
 > Verdict: bones are good, but 5 blockers + 14 should-fix items before coding.
 
+> **Post-implementation migration note (2026-07-31):** The runtime migrated from Cloudflare Workers/D1 to **Bun standalone + SQLite** (commit 3315ca8; see AGENTS.md for the current stack). The design decisions recorded below remain valid — where they mention "D1 batch", "Worker", or "Cron Trigger", the current equivalents are: SQLite transactions (`server/db/database.ts` `batch()` helper), the Bun HTTP server (`server/entry.ts`), and a boot/timer prune task. Historical findings are preserved as-is.
+
 ---
 
 ## 🔴 BLOCKERS — must fix before coding

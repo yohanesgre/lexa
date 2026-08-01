@@ -3,6 +3,7 @@ import { Plus } from "lucide-react";
 import { type ReactNode, useState } from "react";
 import { cn } from "../ui/cn";
 import { useCreateTask } from "../../lib/queries";
+import type { FieldOption } from "../../../shared/types";
 
 interface ColumnProps {
   id: string;
@@ -12,31 +13,40 @@ interface ColumnProps {
   slug?: string;
   columnId?: string;
   swimlaneId?: string;
+  priorities?: FieldOption[];
+  types?: FieldOption[];
   onOpenCreate?: () => void;
 }
 
-export function Column({ id, children, data, isEmpty, slug, columnId, swimlaneId, onOpenCreate }: ColumnProps) {
+export function Column({ id, children, data, isEmpty, slug, columnId, swimlaneId, priorities = [], types = [], onOpenCreate }: ColumnProps) {
   const { setNodeRef, isOver } = useDroppable({ id, data });
   const empty = isEmpty ?? false;
   const [showForm, setShowForm] = useState(false);
   const [title, setTitle] = useState("");
-  const [priority, setPriority] = useState("high");
-  const [type, setType] = useState("feature");
+  const [priority, setPriority] = useState<string>(priorities[0]?.id ?? "");
+  const [type, setType] = useState<string>(types[0]?.id ?? "");
   const createTaskMutation = useCreateTask(slug ?? "");
   const createTask = slug ? createTaskMutation : null;
 
-  const resetForm = () => { setShowForm(false); setTitle(""); setPriority("high"); setType("feature"); };
+  const resetForm = () => {
+    setShowForm(false);
+    setTitle("");
+    setPriority(priorities[0]?.id ?? "");
+    setType(types[0]?.id ?? "");
+  };
 
   const handleSave = () => {
-    if (!title.trim() || !createTask || !columnId) return;
-    createTask.mutate({
-      columnId,
-      swimlaneId: swimlaneId ?? "",
-      title: title.trim(),
-      priority,
-      type,
-    });
-    resetForm();
+    if (!title.trim() || !createTask || !columnId || createTask.isPending) return;
+    createTask.mutate(
+      {
+        columnId,
+        swimlaneId: swimlaneId ?? "",
+        title: title.trim(),
+        priority,
+        type,
+      },
+      { onSettled: resetForm }
+    );
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -72,35 +82,32 @@ export function Column({ id, children, data, isEmpty, slug, columnId, swimlaneId
           <div className="flex flex-col gap-2 mt-2">
             <div className="flex items-center justify-between">
               <span className="prop-label">Priority</span>
-              <select className="prop-input" style={{ width: 140, color: priorityColor(priority) }} value={priority} onChange={(e) => setPriority(e.target.value)}>
-                <option value="urgent" style={{ color: "#FF4444" }}>● Urgent</option>
-                <option value="high" style={{ color: "#FF8844" }}>● High</option>
-                <option value="medium" style={{ color: "#F0C040" }}>● Medium</option>
-                <option value="low" style={{ color: "#A0A0A0" }}>● Low</option>
+              <select className="prop-input" style={{ width: 140, color: priorities.find((p) => p.id === priority)?.color ?? "#A0A0A0" }} value={priority} onChange={(e) => setPriority(e.target.value)}>
+                {priorities.map((p) => (
+                  <option key={p.id} value={p.id} style={{ color: p.color }}>● {p.label}</option>
+                ))}
               </select>
             </div>
             <div className="flex items-center justify-between">
               <span className="prop-label">Type</span>
-              <select className="prop-input" style={{ width: 140, color: typeColorDot(type) }} value={type} onChange={(e) => setType(e.target.value)}>
-                <option value="feature" style={{ color: "#4ADE80" }}>● Feature</option>
-                <option value="bug" style={{ color: "#FF4444" }}>● Bug</option>
-                <option value="task" style={{ color: "#67E8F9" }}>● Task</option>
-                <option value="asset" style={{ color: "#F9A8D4" }}>● Asset</option>
+              <select className="prop-input" style={{ width: 140, color: types.find((t) => t.id === type)?.color ?? "#A0A0A0" }} value={type} onChange={(e) => setType(e.target.value)}>
+                {types.map((t) => (
+                  <option key={t.id} value={t.id} style={{ color: t.color }}>● {t.label}</option>
+                ))}
               </select>
             </div>
           </div>
           <div className="flex items-center justify-end gap-2 mt-3">
-            <button type="button" className="btn btn-ghost" style={{ height: 28, padding: "0 10px" }} onClick={resetForm}>
+            <button type="button" className="btn btn-ghost btn-sm" onClick={resetForm} disabled={createTask?.isPending}>
               Cancel
             </button>
             <button
               type="button"
-              className="btn btn-primary"
-              style={{ height: 28, padding: "0 10px" }}
+              className="btn btn-primary btn-sm"
               onClick={handleSave}
               disabled={!title.trim() || createTask?.isPending}
             >
-              Save
+              {createTask?.isPending ? "Saving..." : "Save"}
             </button>
           </div>
         </div>
@@ -112,24 +119,4 @@ export function Column({ id, children, data, isEmpty, slug, columnId, swimlaneId
       )}
     </div>
   );
-}
-
-function typeColorDot(t: string): string {
-  const colors: Record<string, string> = {
-    feature: "#4ADE80",
-    bug: "#FF4444",
-    task: "#67E8F9",
-    asset: "#F9A8D4",
-  };
-  return colors[t] ?? "#6b7280";
-}
-
-function priorityColor(p: string): string {
-  const colors: Record<string, string> = {
-    urgent: "#FF4444",
-    high: "#FF8844",
-    medium: "#F0C040",
-    low: "#A0A0A0",
-  };
-  return colors[p] ?? "#A0A0A0";
 }

@@ -2,10 +2,12 @@ import { useRef, useMemo } from "react";
 import { useEditor, EditorContent } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
 import Highlight from "@tiptap/extension-highlight";
+import Underline from "@tiptap/extension-underline";
 import TaskList from "@tiptap/extension-task-list";
 import TaskItem from "@tiptap/extension-task-item";
 import Placeholder from "@tiptap/extension-placeholder";
 import type { TipTapDoc } from "../../shared/types";
+import type { JSONContent } from "@tiptap/core";
 import { cn } from "./ui/cn";
 
 export const textEditorExtensions = [
@@ -13,6 +15,7 @@ export const textEditorExtensions = [
     heading: { levels: [2, 3, 4, 5] },
     link: { openOnClick: false },
   }),
+  Underline,
   Highlight.configure({ multicolor: false }),
   TaskList,
   TaskItem.configure({ nested: true }),
@@ -30,17 +33,61 @@ interface TextEditorProps {
   extensions?: typeof textEditorExtensions;
 }
 
+function ToolbarButton({
+  command,
+  isActive,
+  title,
+  children,
+  disabled,
+}: {
+  command: () => void;
+  isActive: boolean;
+  title: string;
+  children: React.ReactNode;
+  disabled?: boolean;
+}) {
+  return (
+    <button
+      type="button"
+      title={title}
+      aria-label={title}
+      aria-pressed={isActive}
+      onClick={command}
+      disabled={disabled}
+      className={cn("toolbar-btn", isActive && "active")}
+    >
+      {children}
+    </button>
+  );
+}
+
+function ToolbarSeparator() {
+  return <span className="toolbar-sep" role="separator" aria-hidden="true" />;
+}
+
+function setLink(editor: NonNullable<ReturnType<typeof useEditor>>) {
+  const previous = editor.getAttributes("link").href as string | undefined;
+  const url = window.prompt("Link URL", previous ?? "");
+  if (url === null) return;
+  if (url.trim() === "") {
+    editor.chain().focus().extendMarkRange("link").unsetLink().run();
+    return;
+  }
+  const href = /^https?:\/\//i.test(url) ? url : `https://${url}`;
+  editor.chain().focus().extendMarkRange("link").setLink({ href }).run();
+}
+
 export function Toolbar({ editor, headingLevel }: { editor: NonNullable<ReturnType<typeof useEditor>>; headingLevel: number }) {
   return (
     <div className="editor-toolbar wiki-toolbar-host" style={{ borderBottom: "1px solid var(--lx-border-default)", borderRadius: "6px 6px 0 0" }}>
       <div className="wiki-toolbar-row">
-        <button type="button" title="Undo" onClick={() => editor.chain().focus().undo().run()} disabled={!editor.can().undo()} className="toolbar-btn">
+        <ToolbarButton command={() => editor.chain().focus().undo().run()} isActive={false} title="Undo" disabled={!editor.can().undo()}>
           <i className="ph ph-arrow-arc-left" />
-        </button>
-        <button type="button" title="Redo" onClick={() => editor.chain().focus().redo().run()} disabled={!editor.can().redo()} className="toolbar-btn">
+        </ToolbarButton>
+        <ToolbarButton command={() => editor.chain().focus().redo().run()} isActive={false} title="Redo" disabled={!editor.can().redo()}>
           <i className="ph ph-arrow-arc-right" />
-        </button>
-        <span className="toolbar-sep" />
+        </ToolbarButton>
+        <ToolbarSeparator />
         <ToolbarButton command={() => editor.chain().focus().toggleBold().run()} isActive={editor.isActive("bold")} title="Bold">
           <i className="ph ph-text-b" />
         </ToolbarButton>
@@ -56,7 +103,7 @@ export function Toolbar({ editor, headingLevel }: { editor: NonNullable<ReturnTy
         <ToolbarButton command={() => editor.chain().focus().toggleHighlight().run()} isActive={editor.isActive("highlight")} title="Highlight">
           <i className="ph ph-highlighter-circle" />
         </ToolbarButton>
-        <span className="toolbar-sep" />
+        <ToolbarSeparator />
         <ToolbarButton command={() => editor.chain().focus().toggleHeading({ level: 2 }).run()} isActive={headingLevel === 2} title="Heading 2">
           <i className="ph ph-text-h-two" />
         </ToolbarButton>
@@ -69,7 +116,7 @@ export function Toolbar({ editor, headingLevel }: { editor: NonNullable<ReturnTy
         <ToolbarButton command={() => editor.chain().focus().toggleHeading({ level: 5 }).run()} isActive={headingLevel === 5} title="Heading 5">
           <i className="ph ph-text-h-five" />
         </ToolbarButton>
-        <span className="toolbar-sep" />
+        <ToolbarSeparator />
         <ToolbarButton command={() => editor.chain().focus().toggleBulletList().run()} isActive={editor.isActive("bulletList")} title="Bullet list">
           <i className="ph ph-list-bullets" />
         </ToolbarButton>
@@ -79,7 +126,7 @@ export function Toolbar({ editor, headingLevel }: { editor: NonNullable<ReturnTy
         <ToolbarButton command={() => editor.chain().focus().toggleTaskList().run()} isActive={editor.isActive("taskList")} title="Task list">
           <i className="ph ph-list-checks" />
         </ToolbarButton>
-        <span className="toolbar-sep" />
+        <ToolbarSeparator />
         <ToolbarButton command={() => editor.chain().focus().toggleBlockquote().run()} isActive={editor.isActive("blockquote")} title="Blockquote">
           <i className="ph ph-quotes" />
         </ToolbarButton>
@@ -89,40 +136,17 @@ export function Toolbar({ editor, headingLevel }: { editor: NonNullable<ReturnTy
         <ToolbarButton command={() => editor.chain().focus().setHorizontalRule().run()} isActive={false} title="Horizontal rule">
           <i className="ph ph-minus" />
         </ToolbarButton>
-        <span className="toolbar-sep" />
-        <button type="button" title="Link" onClick={() => { const url = window.prompt("URL"); if (url) editor.chain().focus().setLink({ href: url }).run(); }} className={cn("toolbar-btn", editor.isActive("link") && "active")}>
+        <ToolbarSeparator />
+        <ToolbarButton command={() => setLink(editor)} isActive={editor.isActive("link")} title="Link">
           <i className="ph ph-link" />
-        </button>
-        <span className="toolbar-sep" />
-        <button type="button" title="AI writing assistant" className="toolbar-btn">
+        </ToolbarButton>
+        <ToolbarSeparator />
+        <ToolbarButton command={() => {}} isActive={false} title="AI writing assistant (coming soon)" disabled>
           <i className="ph ph-hammer" style={{ fontSize: 16 }} />
           Forge
-        </button>
+        </ToolbarButton>
       </div>
     </div>
-  );
-}
-
-function ToolbarButton({
-  command,
-  isActive,
-  title,
-  children,
-}: {
-  command: () => void;
-  isActive: boolean;
-  title: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <button
-      type="button"
-      title={title}
-      onClick={command}
-      className={cn("toolbar-btn", isActive && "active")}
-    >
-      {children}
-    </button>
   );
 }
 

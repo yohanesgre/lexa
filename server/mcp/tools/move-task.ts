@@ -2,7 +2,9 @@ import { Effect } from "effect";
 import { TaskService } from "../../services/task.service";
 import { ColumnRepo } from "../../repos/column.repo";
 import { SwimlaneRepo } from "../../repos/swimlane.repo";
+import { FieldConfigRepo } from "../../repos/field-config.repo";
 import { resolveColumn } from "../resolve";
+import { optionLabel } from "../field-options";
 import type { Swimlane, Column } from "../../../shared/types";
 
 export const tool = {
@@ -47,13 +49,18 @@ export const tool = {
         swimlane = yield* eff;
       }
 
+      const configRepo = yield* FieldConfigRepo;
+      const config = yield* configRepo.findByProject(moved.projectId);
+
       return {
         id: moved.id,
         title: moved.title,
         column: resultColumn.name,
         swimlane: swimlane?.name ?? null,
-        priority: moved.priority,
-        type: moved.type,
+        priority: optionLabel(config.priorities, moved.priority),
+        type: optionLabel(config.types, moved.type),
+        priorityId: moved.priority,
+        typeId: moved.type,
         assignees: moved.assignees,
         githubIssues: moved.githubs.map(g => ({
           number: g.issueNumber,

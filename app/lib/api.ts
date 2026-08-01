@@ -1,11 +1,23 @@
-import type { Project, Column, Swimlane, Task, Board, WikiPageMeta, WikiPage, WikiPageRevision, WikiPageRevisionSummary, TipTapDoc, ApiKey, ApiKeyCreateResult, Dashboard } from "../../shared/types";
+import type { Project, Column, Swimlane, Task, Board, WikiPageMeta, WikiPage, WikiPageRevision, WikiPageRevisionSummary, TipTapDoc, ApiKey, ApiKeyCreateResult, Dashboard, FieldConfig } from "../../shared/types";
 
 const BASE = "/api";
 
+// Prefer the key injected by the server at request time (dev:server / prod),
+// so `bun run setup` rotating the key never leaves the browser with a stale
+// build-time baked key. Falls back to the Vite build-time env var.
+function clientApiKey(): string | undefined {
+  if (typeof document !== "undefined") {
+    const meta = document.querySelector('meta[name="lxk-api-key"]') as HTMLMetaElement | null;
+    if (meta?.content) return meta.content;
+  }
+  return import.meta.env.VITE_LXK_API_KEY;
+}
+
 async function request<T>(url: string, init?: RequestInit): Promise<T> {
   const headers: Record<string, string> = { "Content-Type": "application/json", ...init?.headers as Record<string, string> };
-  if (import.meta.env.VITE_LXK_API_KEY) {
-    headers["Authorization"] = `Bearer ${import.meta.env.VITE_LXK_API_KEY}`;
+  const key = clientApiKey();
+  if (key) {
+    headers["Authorization"] = `Bearer ${key}`;
   }
   const res = await fetch(url, { ...init, headers });
   if (!res.ok) {
@@ -21,6 +33,31 @@ async function request<T>(url: string, init?: RequestInit): Promise<T> {
 
 export function listProjects(): Promise<{ data: Project[]; nextCursor: string | null }> {
   return request(`${BASE}/projects`);
+}
+
+// ── Setup wizard (first-run bootstrap) ──
+export interface SetupStatus {
+  configured: boolean;
+  needsAdmin: boolean;
+  hasApiKey: boolean;
+  hasProjects: boolean;
+  hasUsers: boolean;
+}
+
+export function getSetupStatus(): Promise<SetupStatus> {
+  return request(`${BASE}/setup/status`);
+}
+
+export function setSetupAdmin(email: string): Promise<{ ok: boolean }> {
+  return request(`${BASE}/setup/admin`, { method: "POST", body: JSON.stringify({ email }) });
+}
+
+export function createSetupApiKey(): Promise<{ key: string }> {
+  return request(`${BASE}/setup/api-key`, { method: "POST" });
+}
+
+export function seedSampleData(): Promise<{ seeded: boolean }> {
+  return request(`${BASE}/setup/seed`, { method: "POST" });
 }
 
 export function getDashboard(): Promise<Dashboard> {
@@ -102,8 +139,27 @@ export function deleteTask(slug: string, id: string): Promise<void> {
   return request(`${BASE}/projects/${slug}/tasks/${id}`, { method: "DELETE" });
 }
 
-export function getBoard(slug: string): Promise<Board> {
-  return request(`${BASE}/projects/${slug}/board`);
+export function archiveTask(slug: string, id: string): Promise<Task> {
+  return request(`${BASE}/projects/${slug}/tasks/${id}/archive`, { method: "POST" });
+}
+
+export function restoreTask(slug: string, id: string): Promise<Task> {
+  return request(`${BASE}/projects/${slug}/tasks/${id}/restore`, { method: "POST" });
+}
+
+export function getBoard(slug: string, includeArchived = false): Promise<Board> {
+  const qs = includeArchived ? "?includeArchived=true" : "";
+  return request(`${BASE}/projects/${slug}/board${qs}`);
+}
+
+// ── Field config (per-project priority/type options) ──
+
+export function getFieldConfig(slug: string): Promise<FieldConfig> {
+  return request(`${BASE}/projects/${slug}/field-config`);
+}
+
+export function updateFieldConfig(slug: string, input: { priorities: { id?: string; label: string; color?: string; position?: number }[]; types: { id?: string; label: string; color?: string; position?: number }[] }): Promise<FieldConfig> {
+  return request(`${BASE}/projects/${slug}/field-config`, { method: "PUT", body: JSON.stringify(input) });
 }
 
 export function listWikiPages(slug: string): Promise<{ data: WikiPageMeta[] }> {

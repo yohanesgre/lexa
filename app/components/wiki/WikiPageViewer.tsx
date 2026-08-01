@@ -12,7 +12,7 @@ import Underline from "@tiptap/extension-underline";
 import Placeholder from "@tiptap/extension-placeholder";
 import type { WikiPage, WikiPageMeta, TipTapDoc } from "../../../shared/types";
 import { useUpdateWikiPage } from "../../lib/queries";
-import { cn } from "../ui/cn";
+import { Toolbar } from "../TextEditor";
 import { renderDoc, extractHeadings, slugifyHeading } from "../tiptap-render";
 import { EditSidebar } from "./EditSidebar";
 import { OutlineSidebar } from "./OutlineSidebar";
@@ -51,192 +51,14 @@ function buildAncestors(pages: WikiPageMeta[], page: WikiPage): WikiPageMeta[] {
   return ancestors;
 }
 
-function setLink(editor: Editor) {
-  const previousUrl = (editor.getAttributes("link").href as string | undefined) ?? "";
-  const url = window.prompt("Link URL", previousUrl);
-  if (url === null) return;
-  if (url === "") {
-    editor.chain().focus().extendMarkRange("link").unsetLink().run();
-  } else {
-    editor.chain().focus().extendMarkRange("link").setLink({ href: url }).run();
-  }
-}
-
-interface WikiToolbarButtonProps {
-  command: () => void;
-  isActive: boolean;
-  title: string;
-  children: React.ReactNode;
-  style?: React.CSSProperties;
-}
-
-function WikiToolbarButton({ command, isActive, title, children, style }: WikiToolbarButtonProps) {
-  return (
-    <button
-      type="button"
-      title={title}
-      onClick={command}
-      className={cn("toolbar-btn", isActive && "active !text-lx-text-link")}
-      style={style}
-    >
-      {children}
-    </button>
-  );
-}
-
 interface WikiEditorProps {
   editor: Editor;
 }
 
 function WikiEditor({ editor }: WikiEditorProps) {
-  const headingLevel = (editor.getAttributes("heading").level as number | undefined) ?? 0;
-
   return (
     <div className="editor-wrapper flex flex-col flex-1 min-h-0">
-      <div className="editor-toolbar wiki-toolbar-host bg-lx-surface-elevated">
-        <div className="wiki-toolbar-row">
-          <WikiToolbarButton
-            command={() => editor.chain().focus().undo().run()}
-            isActive={false}
-            title="Undo"
-          >
-            <i className="ph ph-arrow-arc-left" />
-          </WikiToolbarButton>
-          <WikiToolbarButton
-            command={() => editor.chain().focus().redo().run()}
-            isActive={false}
-            title="Redo"
-          >
-            <i className="ph ph-arrow-arc-right" />
-          </WikiToolbarButton>
-          <span className="toolbar-sep" />
-          <WikiToolbarButton
-            command={() => editor.chain().focus().toggleBold().run()}
-            isActive={editor.isActive("bold")}
-            title="Bold"
-          >
-            <i className="ph ph-text-b" />
-          </WikiToolbarButton>
-          <WikiToolbarButton
-            command={() => editor.chain().focus().toggleItalic().run()}
-            isActive={editor.isActive("italic")}
-            title="Italic"
-          >
-            <i className="ph ph-text-italic" />
-          </WikiToolbarButton>
-          <WikiToolbarButton
-            command={() => editor.chain().focus().toggleUnderline().run()}
-            isActive={editor.isActive("underline")}
-            title="Underline"
-          >
-            <i className="ph ph-text-underline" />
-          </WikiToolbarButton>
-          <WikiToolbarButton
-            command={() => editor.chain().focus().toggleStrike().run()}
-            isActive={editor.isActive("strike")}
-            title="Strikethrough"
-          >
-            <i className="ph ph-text-strikethrough" />
-          </WikiToolbarButton>
-          <WikiToolbarButton
-            command={() => editor.chain().focus().toggleHighlight().run()}
-            isActive={editor.isActive("highlight")}
-            title="Highlight"
-          >
-            <i className="ph ph-highlighter-circle" />
-          </WikiToolbarButton>
-          <span className="toolbar-sep" />
-          <WikiToolbarButton
-            command={() => editor.chain().focus().toggleHeading({ level: 2 }).run()}
-            isActive={headingLevel === 2}
-            title="Heading 2"
-          >
-            <i className="ph ph-text-h-two" />
-          </WikiToolbarButton>
-          <WikiToolbarButton
-            command={() => editor.chain().focus().toggleHeading({ level: 3 }).run()}
-            isActive={headingLevel === 3}
-            title="Heading 3"
-          >
-            <i className="ph ph-text-h-three" />
-          </WikiToolbarButton>
-          <WikiToolbarButton
-            command={() => editor.chain().focus().toggleHeading({ level: 4 }).run()}
-            isActive={headingLevel === 4}
-            title="Heading 4"
-          >
-            <i className="ph ph-text-h-four" />
-          </WikiToolbarButton>
-          <WikiToolbarButton
-            command={() => editor.chain().focus().toggleHeading({ level: 5 }).run()}
-            isActive={headingLevel === 5}
-            title="Heading 5"
-          >
-            <i className="ph ph-text-h-five" />
-          </WikiToolbarButton>
-          <WikiToolbarButton
-            command={() => editor.chain().focus().toggleBulletList().run()}
-            isActive={editor.isActive("bulletList")}
-            title="Bullet list"
-          >
-            <i className="ph ph-list-bullets" />
-          </WikiToolbarButton>
-          <WikiToolbarButton
-            command={() => editor.chain().focus().toggleOrderedList().run()}
-            isActive={editor.isActive("orderedList")}
-            title="Ordered list"
-          >
-            <i className="ph ph-list-numbers" />
-          </WikiToolbarButton>
-          <WikiToolbarButton
-            command={() => editor.chain().focus().toggleTaskList().run()}
-            isActive={editor.isActive("taskList")}
-            title="Task list"
-          >
-            <i className="ph ph-list-checks" />
-          </WikiToolbarButton>
-          <span className="toolbar-sep" />
-          <WikiToolbarButton
-            command={() => editor.chain().focus().toggleBlockquote().run()}
-            isActive={editor.isActive("blockquote")}
-            title="Blockquote"
-          >
-            <i className="ph ph-quotes" />
-          </WikiToolbarButton>
-          <WikiToolbarButton
-            command={() => editor.chain().focus().toggleCodeBlock().run()}
-            isActive={editor.isActive("codeBlock")}
-            title="Code block"
-          >
-            <i className="ph ph-code-block" />
-          </WikiToolbarButton>
-          <WikiToolbarButton
-            command={() => editor.chain().focus().setHorizontalRule().run()}
-            isActive={false}
-            title="Horizontal rule"
-          >
-            <i className="ph ph-minus" />
-          </WikiToolbarButton>
-          <span className="toolbar-sep" />
-          <WikiToolbarButton
-            command={() => setLink(editor)}
-            isActive={editor.isActive("link")}
-            title="Link"
-          >
-            <i className="ph ph-link" />
-          </WikiToolbarButton>
-          <span className="toolbar-sep" />
-          <WikiToolbarButton
-            command={() => {}}
-            isActive={false}
-            title="AI writing assistant"
-            style={{ width: "auto", padding: "0 6px", gap: 4 }}
-          >
-            <i className="ph ph-hammer" style={{ fontSize: 16 }} />
-            Forge
-          </WikiToolbarButton>
-        </div>
-      </div>
+      <Toolbar editor={editor} headingLevel={(editor.getAttributes("heading").level as number | undefined) ?? 0} />
       <EditorContent editor={editor} className="editor-content flex-1 p-4 px-5" />
     </div>
   );
@@ -530,14 +352,20 @@ export function WikiPageViewer({ slug, page, pages }: WikiPageViewerProps) {
               }}
             >
               <span className="font-micro text-2xs text-lx-text-muted uppercase tracking-[0.04em]">
-                {lastSavedAt
-                  ? formatSavedAt(lastSavedAt)
-                  : `Last edited ${formatRelative(lastSavedPage.updatedAt)}`}
+                {isSaving
+                  ? "Saving…"
+                  : lastSavedAt
+                    ? formatSavedAt(lastSavedAt)
+                    : `Last edited ${formatRelative(lastSavedPage.updatedAt)}`}
               </span>
-              {isDirty && (
-                <span className="font-micro text-2xs text-lx-text-warning uppercase tracking-[0.04em]">
-                  Unsaved changes
-                </span>
+              {isSaving ? (
+                <span className="font-micro text-2xs text-lx-text-warning uppercase tracking-[0.04em]">Saving…</span>
+              ) : (
+                isDirty && (
+                  <span className="font-micro text-2xs text-lx-text-warning uppercase tracking-[0.04em]">
+                    Unsaved changes
+                  </span>
+                )
               )}
             </div>
           </div>

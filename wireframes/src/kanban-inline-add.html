@@ -104,13 +104,15 @@
                   </div>
                 </div>
                 <div class="flex items-center justify-end gap-2 mt-3">
-                  <button class="btn btn-ghost" style="height:28px;padding:0 10px;">Cancel</button>
-                  <button class="btn btn-primary" style="height:28px;padding:0 10px;">Save</button>
+                  <button class="btn btn-ghost btn-sm">Cancel</button>
+                  <button class="btn btn-primary btn-sm">Save</button>
                 </div>
+                <span class="annotation" style="align-self:flex-start;">Action row: Cancel + Save share .btn-sm (28px height, consistent padding), 8px gap between them.</span>
               </div>
 
               <span class="annotation-tag" style="align-self:flex-start;">InlineAdd — replaces “Add task…” while open · Enter saves · Esc cancels</span>
               <span class="annotation-tag" style="align-self:flex-start;">Priority + Type dropdowns · defaults High / Feature · colored ● prefix in options · selected color via select's inline style</span>
+              <span class="annotation-tag" style="align-self:flex-start;">Save shows “Saving…” while the create mutation is pending (button + Cancel disabled, double-submit guarded)</span>
             </div>
           </div>
 

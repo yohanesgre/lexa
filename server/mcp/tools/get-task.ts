@@ -2,7 +2,9 @@ import { Effect } from "effect";
 import { TaskService } from "../../services/task.service";
 import { ColumnRepo } from "../../repos/column.repo";
 import { SwimlaneRepo } from "../../repos/swimlane.repo";
+import { FieldConfigRepo } from "../../repos/field-config.repo";
 import { docToMarkdown } from "../../../shared/markdown";
+import { optionLabel } from "../field-options";
 import type { Swimlane, Column } from "../../../shared/types";
 
 export const tool = {
@@ -19,6 +21,9 @@ export const tool = {
     Effect.gen(function* () {
       const taskService = yield* TaskService;
       const task = yield* taskService.getById(args.taskId);
+
+      const configRepo = yield* FieldConfigRepo;
+      const config = yield* configRepo.findByProject(task.projectId);
 
       const columnRepo = yield* ColumnRepo;
       let column: Column = { name: "unknown" } as Column;
@@ -41,8 +46,10 @@ export const tool = {
         title: task.title,
         column: column.name,
         swimlane: swimlane?.name ?? null,
-        priority: task.priority,
-        type: task.type,
+        priority: optionLabel(config.priorities, task.priority),
+        type: optionLabel(config.types, task.type),
+        priorityId: task.priority,
+        typeId: task.type,
         assignees: task.assignees,
         githubIssues: task.githubs.map(g => ({
           number: g.issueNumber,

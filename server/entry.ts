@@ -23,7 +23,11 @@ mkdirSync(dirname(DATABASE_PATH), { recursive: true });
 
 runMigrations(DATABASE_PATH);
 seedAdminKey(DATABASE_PATH);
-seedDevData(DATABASE_PATH);
+// Sample data is the setup wizard's job (CLI `bun run setup` or web `/setup`).
+// Boot-time seeding only for explicit dev opt-in (LXK_SEED_DEV=1).
+if (process.env.LXK_SEED_DEV === "1") {
+  seedDevData(DATABASE_PATH);
+}
 
 const apiHandlerRaw = createApiHandler(DATABASE_PATH) as unknown as { handler?: (req: Request) => Promise<Response> } | ((req: Request) => Promise<Response>);
 const apiHandler: (req: Request) => Promise<Response> = typeof apiHandlerRaw === "function" ? apiHandlerRaw : apiHandlerRaw.handler!;
@@ -39,7 +43,7 @@ Bun.serve({
     }
 
     if (url.pathname.startsWith("/api/")) {
-      if (url.pathname !== "/api/health" && !verifyApiKey(req, DATABASE_PATH)) {
+      if (url.pathname !== "/api/health" && !url.pathname.startsWith("/api/setup") && !verifyApiKey(req, DATABASE_PATH)) {
         return new Response(JSON.stringify({ error: { code: "UNAUTHORIZED", message: "Invalid or missing API key" } }), { status: 401, headers: { "Content-Type": "application/json" } });
       }
       try {
@@ -67,7 +71,23 @@ Bun.serve({
     }
 
     if (ssrFetch) {
-      return ssrFetch(req);
+      const res = await ssrFetch(req);
+      // Inject the server's current API key into the HTML so the browser can
+      // authenticate without a build-time baked key. This keeps :3000 working
+      // even after `bun run setup` rotates the key in .env (the built bundle
+      // would otherwise carry a stale key).
+      if (process.env.LXK_API_KEY && res.headers.get("content-type")?.includes("text/html")) {
+        const html = await res.text();
+        const injected = html.replace(
+          "<head>",
+          `<head><meta name="lxk-api-key" content="${process.env.LXK_API_KEY}">`
+        );
+        return new Response(injected, {
+          status: res.status,
+          headers: res.headers,
+        });
+      }
+      return res;
     }
     if (url.pathname === "/") {
       return new Response(`<!DOCTYPE html>

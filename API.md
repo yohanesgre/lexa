@@ -39,8 +39,10 @@ All non-2xx responses share one shape:
 | 409 | `HAS_CHILDREN` | Delete column with tasks / wiki page with children (details: `{ count }`) |
 | 409 | `WIP_LIMIT` | Move would exceed column WIP limit |
 | 409 | `ALREADY_LINKED` | Task already has a GitHub issue |
+| 409 | `OPTION_IN_USE` | Delete priority/type option still referenced by tasks (details: `{ optionId, label }`) |
 | 422 | `REQUIRED_FIELD` | Column's `required_fields` not satisfied (details: `{ field, column }`) |
 | 422 | `NEIGHBOR_NOT_IN_COLUMN` | `beforeTaskId`/`afterTaskId` not in target column |
+| 422 | `INVALID_OPTION` | Unknown priority/type option id, duplicate label, or empty option list (details: `{ optionId? }`) |
 | 500 | `DATABASE_ERROR` / `CONSTRAINT` / `INTERNAL` | |
 | 502 | `GITHUB_API_ERROR` | Only on explicit GitHub-linking endpoints; never on moves |
 
@@ -80,8 +82,19 @@ interface Swimlane {
   position: number;
 }
 
-type Priority = "urgent" | "high" | "medium" | "low";
-type TaskType = "feature" | "bug" | "task" | "asset";
+// Per-project customizable task fields. tasks.priority / tasks.type hold
+// option IDs; labels+colors resolve through these lists (see Field Config).
+interface FieldOption {
+  id: ID;
+  label: string;
+  color: string;            // hex
+  position: number;         // ordering; position 0 = create default
+}
+
+interface FieldConfig {
+  priorities: FieldOption[];
+  types: FieldOption[];
+}
 
 interface GithubIssue {
   issueId: string;
@@ -99,11 +112,12 @@ interface Task {
   swimlaneId: ID;
   title: string;
   description: TipTapDoc;
-  priority: Priority;
-  type: TaskType;
+  priority: ID;               // priority_options.id — resolves via Board.fieldConfig
+  type: ID;                   // type_options.id
   assignees: string[];
   position: string;               // fractional-index key (opaque to clients)
   githubs: GithubIssue[];         // multiple GitHub issues per task
+  archivedAt: ISODate | null;     // null = live; set = archived (keeps column/position)
   createdAt: ISODate;
   updatedAt: ISODate;
 }
@@ -134,6 +148,7 @@ interface Board {                 // GET /board — full snapshot, unpaginated
   project: Project;
   columns: Column[];              // ordered by position
   swimlanes: Swimlane[];          // ordered by position
+  fieldConfig: FieldConfig;       // priority + type option lists (labels/colors)
   tasks: Task[];                  // ALL tasks, ordered by (columnId, position)
 }
 
@@ -141,7 +156,7 @@ interface ProjectHealth {
   project: Project;
   taskCount: number;
   columnCount: number;
-  urgentCount: number;            // tasks with priority "urgent" across all columns
+  urgentCount: number;            // tasks with the project's FIRST priority option (position 0) across all columns
   syncCount: number;              // distinct tasks where any linked issue's syncedState ≠ column's githubState
   health: "ok" | "approaching" | "exceeded";
   wipSegments: Array<{
@@ -164,7 +179,7 @@ interface Dashboard {             // GET /api/dashboard — full dashboard snaps
     projectName: string;
     projectSlug: string;
     columnName: string;
-    priority: Priority;
+    priority: ID;               // first priority option id (position 0)
   }>;
   outOfSyncTasks: Array<{         // all out-of-sync tasks across all projects, capped at 50
     id: ID;
@@ -204,7 +219,7 @@ GET    /api/dashboard
   Health derivation per project:
   - health: "exceeded" if any column has tasks > wipLimit; "approaching" if urgentCount > 0; else "ok"
   - wipSegments: one segment per column, state = compare count vs wipLimit (empty if count=0)
-  - urgentCount: tasks WHERE priority = 'urgent' AND column_id IN (project columns)
+  - urgentCount: tasks WHERE priority = (first priority option for the project) AND column_id IN (project columns)
   - syncCount: tasks WHERE github.outOfSync = true
   urgentTasks/outOfSyncTasks capped at 50 items each
 ```
@@ -241,13 +256,16 @@ DELETE /api/projects/:slug/swimlanes/:id    → 204 (tasks must be reassigned fi
 
 ```
 GET    /api/projects/:slug/tasks?columnId&swimlaneId&assignee&type&limit&cursor
+  type = a type_options ID from field-config
 → 200 { data: Task[], nextCursor }
 
 POST   /api/projects/:slug/tasks
 body { columnId*, swimlaneId*, title*, description?, priority?, type?, assignees? }
+  priority/type = option IDs from field-config; omitted → first option (position 0)
 → 201 Task
   | 404 COLUMN_NOT_FOUND / SWIMLANE_NOT_FOUND
   | 422 REQUIRED_FIELD            (creating directly into a guarded column)
+  | 422 INVALID_OPTION            (bad priority/type id)
   position: appended to end of column
 
 GET    /api/projects/:slug/tasks/:id
@@ -256,6 +274,7 @@ GET    /api/projects/:slug/tasks/:id
 PATCH  /api/projects/:slug/tasks/:id
 body { title?, description?, priority?, type?, assignees? }
 → 200 Task | 404 | 422 REQUIRED_FIELD   (can't clear a required field in guarded column)
+  | 422 INVALID_OPTION           (bad priority/type id)
 
 POST   /api/projects/:slug/tasks/:id/move
 body { columnId*, swimlaneId*, beforeTaskId?, afterTaskId? }
@@ -274,9 +293,47 @@ body { columnId*, swimlaneId*, beforeTaskId?, afterTaskId? }
 DELETE /api/projects/:slug/tasks/:id
 → 204 | 404
 
-GET    /api/projects/:slug/board
+POST   /api/projects/:slug/tasks/:id/archive
+→ 200 Task (archivedAt set) | 404
+  Idempotent: archiving an already-archived task returns it unchanged.
+  Archived tasks keep column/swimlane/position; they are excluded from
+  board/WIP/count queries unless includeArchived is set.
+
+POST   /api/projects/:slug/tasks/:id/restore
+→ 200 Task (archivedAt null) | 404
+  Idempotent: restoring a live task returns it unchanged.
+
+GET    /api/projects/:slug/board?includeArchived=true
 → 200 Board          (unpaginated full snapshot — the kanban's single fetch)
+  includeArchived omitted/false → archived tasks excluded; true → included
+  (rendered dimmed in the UI, non-draggable, still in their original column)
+  fieldConfig included — tasks' priority/type are option IDs resolved via it
 ```
+
+### Field Config (priorities & types)
+
+```
+GET    /api/projects/:slug/field-config
+→ 200 FieldConfig        (priorities + types, each ordered by position)
+
+PUT    /api/projects/:slug/field-config
+body { priorities: FieldOption[], types: FieldOption[] }   (FULL REPLACE of both lists)
+  Each option: { id?, label*, color*, position* }
+    - id omitted → create; id present → update that option
+    - options missing from the payload are deleted (only if unused by tasks)
+→ 200 FieldConfig
+  | 404 PROJECT_NOT_FOUND
+  | 409 OPTION_IN_USE { optionId, label }     (delete blocked: tasks reference it)
+  | 422 INVALID_OPTION { optionId }           (unknown id, or label duplicates, or empty list)
+```
+
+Notes:
+- `position` is authored by the client (drag-reorder); the server stores it as given.
+- The **first** option (position 0) in each list is the create default and the
+  dashboard "urgent" equivalent for that project.
+- Deleting a used option is rejected — reassign or delete tasks first.
+- `PATCH /projects/:slug/tasks/:id` and `POST /projects/:slug/tasks` accept
+  priority/type as option IDs; unknown or foreign-project IDs → `INVALID_OPTION`.
 
 ### Task ↔ GitHub link
 
@@ -345,6 +402,6 @@ Handled events: issues.closed, issues.reopened, issues.edited
 
 ## Notes
 
-- **Mutation responses are authoritative.** Every mutating endpoint returns the updated entity. The frontend updates TanStack Query cache from the response (`setQueryData`) and never refetches on the mutation path — D1 is read-replicated.
+- **Mutation responses are authoritative.** Every mutating endpoint returns the updated entity. The frontend updates TanStack Query cache from the response (`setQueryData`) and never refetches on the mutation path — the response is the authoritative state.
 - **`position` is opaque.** Clients never read or write it directly; ordering is expressed via `beforeTaskId`/`afterTaskId` (tasks) or `position` integer reassignment (columns/swimlanes/wiki siblings).
 - **`:slug` in task routes is routing context**, not an authorization boundary in v1 (single-tenant, Access-gated). Task IDs are globally unique UUIDs.

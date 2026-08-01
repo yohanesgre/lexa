@@ -14,3 +14,9 @@ worker-configuration.d.ts
 .playwright-mcp/
 dashboard-test.png
 wireframes/dist/
+
+# Command Code local state (taste learning, design reports, permissions) — never commit
+.commandcode/
+# Agent skills are installed globally (~/.agents/skills/), not vendored
+skills/
+skills-lock.json

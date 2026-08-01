@@ -13,6 +13,8 @@ export class HasChildren extends Data.TaggedError("HasChildren")<{ count: number
 export class NeighborNotInColumn extends Data.TaggedError("NeighborNotInColumn")<{ taskId: string }> {}
 export class GithubIssueAlreadyLinked extends Data.TaggedError("GithubIssueAlreadyLinked")<{ taskId: string }> {}
 export class RequiredFieldMissing extends Data.TaggedError("RequiredFieldMissing")<{ field: string; column: string }> {}
+export class OptionInUse extends Data.TaggedError("OptionInUse")<{ optionId: string; label: string }> {}
+export class InvalidOption extends Data.TaggedError("InvalidOption")<{ optionId?: string; message?: string }> {}
 export class InvalidKey extends Data.TaggedError("InvalidKey")<{}> {}
 export class MissingAuth extends Data.TaggedError("MissingAuth")<{}> {}
 export class GithubApiError extends Data.TaggedError("GithubApiError")<{ message: string }> {}
@@ -32,6 +34,8 @@ export const errorCodeMap: Record<string, string> = {
   NeighborNotInColumn: "NEIGHBOR_NOT_IN_COLUMN",
   GithubIssueAlreadyLinked: "ALREADY_LINKED",
   RequiredFieldMissing: "REQUIRED_FIELD",
+  OptionInUse: "OPTION_IN_USE",
+  InvalidOption: "INVALID_OPTION",
   InvalidKey: "INVALID_API_KEY",
   MissingAuth: "MISSING_AUTH",
   GithubApiError: "GITHUB_API_ERROR",
@@ -62,9 +66,11 @@ export function errorToStatus(error: { _tag: string }): number {
     case "SlugTaken":
     case "HasChildren":
     case "GithubIssueAlreadyLinked":
+    case "OptionInUse":
       return 409;
     case "RequiredFieldMissing":
     case "NeighborNotInColumn":
+    case "InvalidOption":
       return 422;
     case "InvalidKey":
     case "MissingAuth":
@@ -102,6 +108,12 @@ export function errorMessage(error: { _tag: string } & Record<string, unknown>):
       return `Task already has a GitHub issue`;
     case "RequiredFieldMissing":
       return `Field '${error.field}' is required in column '${error.column}'`;
+    case "OptionInUse":
+      return `Option '${error.label}' is still used by tasks. Reassign those tasks first.`;
+    case "InvalidOption":
+      return typeof error.message === "string" && error.message
+        ? error.message
+        : `Unknown option id '${error.optionId ?? ""}'`;
     case "InvalidKey":
     case "MissingAuth":
       return "Invalid or missing API key";

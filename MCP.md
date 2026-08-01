@@ -47,7 +47,7 @@ Tool failures return MCP-standard `isError: true` with a JSON text payload:
 }
 ```
 
-Codes mirror the REST catalog: `PROJECT_NOT_FOUND`, `COLUMN_NOT_FOUND`, `SWIMLANE_NOT_FOUND`, `TASK_NOT_FOUND`, `PAGE_NOT_FOUND`, `SLUG_TAKEN`, `HAS_CHILDREN`, `WIP_LIMIT`, `ALREADY_LINKED`, `REQUIRED_FIELD`, `NEIGHBOR_NOT_IN_COLUMN`, `INVALID_API_KEY`, `MISSING_AUTH`, `GITHUB_API_ERROR`, `DATABASE_ERROR`, `CONSTRAINT`, `INTERNAL`.
+Codes mirror the REST catalog: `PROJECT_NOT_FOUND`, `COLUMN_NOT_FOUND`, `SWIMLANE_NOT_FOUND`, `TASK_NOT_FOUND`, `PAGE_NOT_FOUND`, `SLUG_TAKEN`, `HAS_CHILDREN`, `WIP_LIMIT`, `ALREADY_LINKED`, `REQUIRED_FIELD`, `NEIGHBOR_NOT_IN_COLUMN`, `OPTION_IN_USE`, `INVALID_OPTION`, `INVALID_API_KEY`, `MISSING_AUTH`, `GITHUB_API_ERROR`, `DATABASE_ERROR`, `CONSTRAINT`, `INTERNAL`.
 
 ## Response Shapes
 
@@ -60,10 +60,13 @@ interface TaskSummary {
   title: string;
   column: string;              // name, not id
   swimlane: string;             // name
-  priority: "urgent" | "high" | "medium" | "low";
-  type: "feature" | "bug" | "task" | "asset";
+  priority: string;             // priority label (e.g. "High") — from project field-config
+  type: string;                 // type label (e.g. "Bug")
+  priorityId: string;           // option id (stable identifier)
+  typeId: string;
   assignees: string[];
   githubIssues: { number: number; repo: string; url: string; outOfSync: boolean }[];
+  archivedAt: string | null;   // set when archived; null = live
   updatedAt: string;
 }
 
@@ -83,15 +86,18 @@ interface PageMeta { title: string; slug: string; parentSlug: string | null; upd
 **`create_task`**
 ```json
 Input:  { project*, column*, title*, description?, priority?, type?, assignees?, swimlane? }
-        description = Markdown. priority/type default "medium"/"task".
+        description = Markdown. priority/type are LABELS from the project's
+        field-config (call get_project to list them); case-insensitive; omitted → first option.
 Output: TaskSummary
-Errors: PROJECT_NOT_FOUND, COLUMN_NOT_FOUND (+availableColumns), SWIMLANE_NOT_FOUND, REQUIRED_FIELD
+Errors: PROJECT_NOT_FOUND, COLUMN_NOT_FOUND (+availableColumns), SWIMLANE_NOT_FOUND,
+        REQUIRED_FIELD, INVALID_OPTION (+availablePriorities/availableTypes)
 ```
 
 **`list_tasks`**
 ```json
-Input:  { project*, column?, swimlane?, assignee?, type?, limit?, cursor? }
-        limit: default 50, max 200.
+Input:  { project*, column?, swimlane?, assignee?, type?, limit?, cursor?, includeArchived? }
+        type = type LABEL (case-insensitive) from field-config.
+        limit: default 50, max 200. includeArchived: default false.
 Output: { tasks: TaskSummary[], nextCursor: string | null }
 ```
 
@@ -105,8 +111,9 @@ Output: TaskDetail (description as Markdown)
 ```json
 Input:  { taskId*, title?, description?, priority?, type?, assignees? }
         description = Markdown (full replace). assignees: empty array clears.
+        priority/type are LABELS (case-insensitive).
 Output: TaskDetail
-Errors: TASK_NOT_FOUND, REQUIRED_FIELD
+Errors: TASK_NOT_FOUND, REQUIRED_FIELD, INVALID_OPTION (+availablePriorities/availableTypes)
 ```
 
 **`move_task`**
@@ -124,6 +131,23 @@ Notes: within-column reorder never fails WIP. If the task is GitHub-linked and t
 ```json
 Input:  { taskId* }
 Output: { deleted: true }
+```
+
+**`archive_task`**
+```json
+Input:  { taskId* }
+Output: TaskSummary (archivedAt set)
+Errors: TASK_NOT_FOUND
+Notes: idempotent. Archived tasks keep their column/position but are hidden
+       from the board (and list_tasks by default) until restored.
+```
+
+**`restore_task`**
+```json
+Input:  { taskId* }
+Output: TaskSummary (archivedAt null)
+Errors: TASK_NOT_FOUND
+Notes: idempotent. Restores the task to its original column/position.
 ```
 
 ### Wiki
@@ -191,7 +215,11 @@ Output: { projects: [{ name, slug, description, taskCount }] }
 Input:  { slug* }
 Output: { name, slug, description, githubRepo,
           columns: [{ name, wipLimit, requiredFields, githubState }],
-          swimlanes: [{ name }] }
+          swimlanes: [{ name }],
+          priorities: [{ id, label, color, position }],
+          types: [{ id, label, color, position }] }
+        Priorities/types are the project's field-config — use the LABELS when
+        calling create_task/update_task/list_tasks.
 ```
 
 **`get_project_status`**
@@ -205,7 +233,7 @@ Output: { columns: [{ name, count, wipLimit }], totalTasks }
 
 ## Agent Usage Notes (included in tool descriptions)
 
-1. **Names, not UUIDs** — pass `"In Progress"`, not a column UUID. Task IDs are the only UUIDs you need, and they come from `create_task`/`list_tasks`.
+1. **Names, not UUIDs** — pass `"In Progress"`, not a column UUID. Task IDs are the only UUIDs you need, and they come from `create_task`/`list_tasks`. Priority/type are passed as LABELS from the project's field-config (e.g. `"High"`, `"Bug"`); call `get_project` to see the valid labels.
 2. **Markdown everywhere** — descriptions and wiki content are plain Markdown.
 3. **Summaries vs details** — `list_tasks` omits descriptions on purpose; call `get_task` only for tasks you actually need to read.
 4. **Self-correcting errors** — when a name lookup fails, the error's `details.available*` lists the valid options. Retry with one of those.
