@@ -5,12 +5,11 @@
   "scripts": {
     "test": "vitest run",
     "dev": "vite dev",
-    "dev:server": "DATABASE_PATH=./data/lexa.db bun run server/entry.ts",
-    "dev:full": "DATABASE_PATH=./data/lexa.db bun run server/entry.ts & vite dev",
+    "dev:server": "bun --env-file=.env run server/entry.ts",
+    "dev:full": "bash scripts/dev.sh",
+    "setup": "bun run scripts/setup-cli.ts",
     "build": "vite build",
-    "deploy": "wrangler deploy",
     "typecheck": "tsc --noEmit",
-    "typegen": "wrangler types",
     "doctor": "npx react-doctor@latest"
   },
   "repository": {
@@ -63,7 +62,6 @@
     "tailwindcss": "^4.3.3",
     "typescript": "^7.0.2",
     "vite": "^8.1.5",
-    "vitest": "^4.1.10",
-    "wrangler": "^4.114.0"
+    "vitest": "^4.1.10"
   }
 }

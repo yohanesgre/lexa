@@ -25,6 +25,11 @@
 
     <!-- Title -->
     <div class="px-4 pt-4">
+      <!-- Archived variant notice banner -->
+      <div style="display:flex;align-items:center;gap:8px;background:var(--lx-surface-elevated);border:1px solid var(--lx-border-default);border-radius:6px;padding:8px 12px;margin-bottom:12px;">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+        <span class="font-micro text-2xs color-muted" style="text-transform:uppercase;letter-spacing:0.04em;">Archived — not shown on the board unless "Show archived" is on</span>
+      </div>
       <h2 class="slideover-title">Crash on level 3-2 load</h2>
     </div>
 
@@ -168,6 +173,8 @@
     <span class="annotation-tag">TipTap rendered: prose + checklist + code block</span>
     <span class="annotation-tag">Double-click description → opens task-detail-edit.html (Tiptap editor inline)</span>
     <span class="annotation-tag">GitHub Issues: multi-issue list with sync state + unlink per row. Diverged issue shows warning text inline: "GitHub state ≠ column. Move card to resync."</span>
+    <span class="annotation-tag">Footer: Archive (ghost) + Delete (ghost danger) opens confirm dialog · Close. Archived task variant: footer shows Restore (ghost) instead of Archive, plus an "Archived" notice banner. Delete dialog's Delete button shows "Deleting…" while pending (task-detail-required-field.html shows the same dialog chrome)</span>
+    <span class="annotation-tag">Stale ?task= deep link (deleted/missing task): slideover shows "Task not found" empty state with a Close button instead of rendering nothing</span>
   </div>
 
 </body>

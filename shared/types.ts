@@ -35,11 +35,21 @@ export interface Board {
   project: Project;
   columns: Column[];
   swimlanes: Swimlane[];
+  fieldConfig: FieldConfig;
   tasks: Task[];
 }
 
-export type Priority = "urgent" | "high" | "medium" | "low";
-export type TaskType = "feature" | "bug" | "task" | "asset";
+export interface FieldOption {
+  id: ID;
+  label: string;
+  color: string;
+  position: number;
+}
+
+export interface FieldConfig {
+  priorities: FieldOption[];
+  types: FieldOption[];
+}
 
 export interface GithubIssue {
   issueId: string;
@@ -57,11 +67,12 @@ export interface Task {
   swimlaneId: ID;
   title: string;
   description: TipTapDoc;
-  priority: Priority;
-  type: TaskType;
+  priority: ID;               // priority_options.id — resolve via Board.fieldConfig
+  type: ID;                   // type_options.id
   assignees: string[];
   position: string;
   githubs: GithubIssue[];
+  archivedAt: ISODate | null;
   createdAt: ISODate;
   updatedAt: ISODate;
 }
@@ -139,7 +150,7 @@ export interface UrgentTask {
   projectName: string;
   projectSlug: string;
   columnName: string;
-  priority: Priority;
+  priority: ID;               // first priority option id (position 0)
 }
 
 export interface OutOfSyncTask {

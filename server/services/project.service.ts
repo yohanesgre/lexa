@@ -2,6 +2,7 @@ import { Effect } from "effect";
 import { ProjectRepo } from "../repos/project.repo";
 import { ColumnRepo } from "../repos/column.repo";
 import { SwimlaneRepo } from "../repos/swimlane.repo";
+import { FieldConfigRepo } from "../repos/field-config.repo";
 import { ConstraintViolation, DbError, RowNotFound } from "../db/database";
 import { ProjectNotFound, SlugTaken } from "../api/errors";
 import type { Project } from "../../shared/types";
@@ -15,11 +16,12 @@ const DEFAULT_COLUMNS = [
 ];
 
 export class ProjectService extends Effect.Service<ProjectService>()("Lexa/ProjectService", {
-  dependencies: [ProjectRepo.Default, ColumnRepo.Default, SwimlaneRepo.Default],
+  dependencies: [ProjectRepo.Default, ColumnRepo.Default, SwimlaneRepo.Default, FieldConfigRepo.Default],
   effect: Effect.gen(function* () {
     const repo = yield* ProjectRepo;
     const columnRepo = yield* ColumnRepo;
     const swimlaneRepo = yield* SwimlaneRepo;
+    const fieldConfigRepo = yield* FieldConfigRepo;
 
     const slugify = (name: string): string =>
       name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 60) || "project";
@@ -49,6 +51,7 @@ export class ProjectService extends Effect.Service<ProjectService>()("Lexa/Proje
                   name: "Default",
                   position: 0,
                 }),
+                fieldConfigRepo.seedDefaults(project.id),
               ])
             ),
             Effect.tap((project) => Effect.logInfo(`[Project] Created ${project.id} slug=${project.slug}`)),

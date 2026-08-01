@@ -5,6 +5,11 @@ import type { ApiKey, ApiKeyCreateResult } from "../../shared/types";
 
 export class ApiKeyNameEmpty extends Data.TaggedError("ApiKeyNameEmpty")<{}> {}
 
+// System/bootstrap keys created outside the settings UI (env LXK_API_KEY seed,
+// first-run wizard key, dev seed). They authenticate the frontend/server but
+// are not user-managed — the settings list shows only user-generated keys.
+const SYSTEM_KEY_NAMES = new Set(["admin", "setup-wizard", "dev-local"]);
+
 function rowToApiKey(row: { id: string; name: string; created_at: string; last_used_at: string | null }): ApiKey {
   return { id: row.id, name: row.name, createdAt: row.created_at, lastUsedAt: row.last_used_at };
 }
@@ -34,7 +39,11 @@ export class ApiKeyService extends Effect.Service<ApiKeyService>()("Lexa/ApiKeyS
 
     return {
       list: (): Effect.Effect<ApiKey[], DbError> =>
-        Effect.map(repo.listAll(), rows => rows.map(rowToApiKey)),
+        Effect.map(repo.listAll(), rows =>
+          rows
+            .filter((r) => !SYSTEM_KEY_NAMES.has(r.name))
+            .map(rowToApiKey)
+        ),
 
       create: (name: string): Effect.Effect<ApiKeyCreateResult, ApiKeyNameEmpty | DbError | ConstraintViolation | RowNotFound> =>
         Effect.gen(function* () {

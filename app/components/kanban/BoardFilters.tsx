@@ -1,12 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Filter, X } from "lucide-react";
 import { cn } from "../ui/cn";
-import type { Board, Priority, TaskType } from "../../../shared/types";
+import type { Board } from "../../../shared/types";
 
 export interface FilterState {
   columns: Set<string>;
-  priorities: Set<Priority>;
-  types: Set<TaskType>;
+  priorities: Set<string>;
+  types: Set<string>;
   assignees: Set<string>;
   swimlanes: Set<string>;
 }
@@ -25,20 +25,6 @@ export const isFilterActive = (filters: FilterState) =>
   filters.types.size > 0 ||
   filters.assignees.size > 0 ||
   filters.swimlanes.size > 0;
-
-const priorityConfig: { value: Priority; label: string; dotClass: string }[] = [
-  { value: "urgent", label: "Urgent", dotClass: "priority-urgent" },
-  { value: "high", label: "High", dotClass: "priority-high" },
-  { value: "medium", label: "Medium", dotClass: "priority-medium" },
-  { value: "low", label: "Low", dotClass: "priority-low" },
-];
-
-const typeConfig: { value: TaskType; label: string; color: string }[] = [
-  { value: "feature", label: "Feature", color: "var(--lx-type-feature, #4ADE80)" },
-  { value: "bug", label: "Bug", color: "var(--lx-type-bug, #FF4444)" },
-  { value: "task", label: "Task", color: "var(--lx-type-task, #22D3EE)" },
-  { value: "asset", label: "Asset", color: "var(--lx-type-asset, #F472B6)" },
-];
 
 function toggleSet<T>(set: Set<T>, value: T): Set<T> {
   const next = new Set(set);
@@ -95,11 +81,14 @@ function FilterPopover({
   const hasUnassigned = board.tasks.some((t) => t.assignees.length === 0);
 
   const toggleColumn = (id: string) => onChange({ ...filters, columns: toggleSet(filters.columns, id) });
-  const togglePriority = (value: Priority) => onChange({ ...filters, priorities: toggleSet(filters.priorities, value) });
-  const toggleType = (value: TaskType) => onChange({ ...filters, types: toggleSet(filters.types, value) });
+  const togglePriority = (value: string) => onChange({ ...filters, priorities: toggleSet(filters.priorities, value) });
+  const toggleType = (value: string) => onChange({ ...filters, types: toggleSet(filters.types, value) });
   const toggleAssignee = (value: string) => onChange({ ...filters, assignees: toggleSet(filters.assignees, value) });
   const toggleSwimlane = (value: string) => onChange({ ...filters, swimlanes: toggleSet(filters.swimlanes, value) });
   const clear = () => onChange(emptyFilters());
+
+  const priorities = board.fieldConfig?.priorities ?? [];
+  const types = board.fieldConfig?.types ?? [];
 
   return (
     <div className="menu-popover right" style={{ top: 40, minWidth: 256, maxHeight: "calc(100vh - 120px)", overflowY: "auto" }}>
@@ -118,12 +107,12 @@ function FilterPopover({
       <div className="menu-separator" />
 
       <FilterSection label="Priority">
-        {priorityConfig.map((p) => (
+        {priorities.map((p) => (
           <FilterCheckbox
-            key={p.value}
-            checked={filters.priorities.has(p.value)}
-            onChange={() => togglePriority(p.value)}
-            icon={<span className={cn("priority-dot", p.dotClass)} />}
+            key={p.id}
+            checked={filters.priorities.has(p.id)}
+            onChange={() => togglePriority(p.id)}
+            icon={<span className="priority-dot" style={{ background: p.color }} />}
             label={p.label}
           />
         ))}
@@ -132,11 +121,11 @@ function FilterPopover({
       <div className="menu-separator" />
 
       <FilterSection label="Type">
-        {typeConfig.map((t) => (
+        {types.map((t) => (
           <FilterCheckbox
-            key={t.value}
-            checked={filters.types.has(t.value)}
-            onChange={() => toggleType(t.value)}
+            key={t.id}
+            checked={filters.types.has(t.id)}
+            onChange={() => toggleType(t.id)}
             icon={<span className="priority-dot" style={{ background: t.color }} />}
             label={t.label}
           />
@@ -257,8 +246,8 @@ export function ActiveFilterBar({ board, filters, onChange }: { board: Board; fi
     const result: Array<{ label: string; value: string; key: string; remove: () => void }> = [];
     const colMap = new Map(board.columns.map((c) => [c.id, c]));
     const laneMap = new Map(board.swimlanes.map((l) => [l.id, l.name]));
-    const priorityMap = new Map(priorityConfig.map((x) => [x.value, x.label]));
-    const typeMap = new Map(typeConfig.map((x) => [x.value, x.label]));
+    const priorityMap = new Map((board.fieldConfig?.priorities ?? []).map((x) => [x.id, x.label]));
+    const typeMap = new Map((board.fieldConfig?.types ?? []).map((x) => [x.id, x.label]));
     for (const colId of filters.columns) {
       const col = colMap.get(colId);
       if (col) result.push({ label: "Column", value: col.name, key: `col:${colId}`, remove: () => onChange({ ...filters, columns: toggleSet(filters.columns, colId) }) });

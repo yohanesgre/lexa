@@ -4,6 +4,7 @@ import { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import phosphorCss from "../styles/phosphor.css?url";
 import { useProjects } from "../lib/queries";
 import { ModalStackProvider } from "../components/ui/ModalStack";
+import { ToastProvider } from "../components/ui/Toast";
 import { ProjectSelectionProvider, useProjectSelection } from "../lib/project-selection";
 
 export const Route = createRootRoute({
@@ -26,17 +27,24 @@ function NavLink({
   to,
   params,
   active,
+  exact = false,
   children,
 }: {
   to: string;
   params?: Record<string, string>;
   active?: boolean;
+  exact?: boolean;
   children: React.ReactNode;
 }) {
   const pathname = useRouterState({ select: (s) => s.location.pathname });
   const isActive = active ?? (pathname === to || pathname.startsWith(`${to}/`));
   return (
-    <Link to={to} params={params} className={isActive ? "nav-link active" : "nav-link"}>
+    <Link
+      to={to}
+      params={params}
+      className={isActive ? "nav-link active" : "nav-link"}
+      activeOptions={exact ? { exact: true } : undefined}
+    >
       {children}
     </Link>
   );
@@ -210,6 +218,8 @@ function AppShell() {
     return "dashboard";
   }, [pathname]);
 
+  const isSetup = pathname === "/setup";
+
   const boardTo = selectedSlug ? "/$slug" : "/";
   const wikiTo = selectedSlug ? "/$slug/wiki" : "/";
   const settingsTo = selectedSlug ? "/$slug/settings" : "/";
@@ -219,26 +229,28 @@ function AppShell() {
 
   return (
     <>
-      <nav className="app-nav">
-        <div className="nav-brand">Lexa</div>
-        <div className="nav-links">
-          <NavLink to="/">Dashboard</NavLink>
-          <NavLink to={boardTo} params={boardParams} active={routeType === "board"}>
-            Board
-          </NavLink>
-          <NavLink to={wikiTo} params={wikiParams} active={routeType === "wiki"}>
-            Wiki
-          </NavLink>
-          <NavLink to={settingsTo} params={settingsParams} active={routeType === "settings"}>
-            Settings
-          </NavLink>
-        </div>
-        <div className="nav-spacer" />
-        <div className="nav-right">
-          <ProjectSwitcher routeType={routeType} />
-          <UserProfile />
-        </div>
-      </nav>
+      {!isSetup && (
+        <nav className="app-nav">
+          <div className="nav-brand">Lexa</div>
+          <div className="nav-links">
+            <NavLink to="/" exact>Dashboard</NavLink>
+            <NavLink to={boardTo} params={boardParams} active={routeType === "board"} exact>
+              Board
+            </NavLink>
+            <NavLink to={wikiTo} params={wikiParams} active={routeType === "wiki"}>
+              Wiki
+            </NavLink>
+            <NavLink to={settingsTo} params={settingsParams} active={routeType === "settings"}>
+              Settings
+            </NavLink>
+          </div>
+          <div className="nav-spacer" />
+          <div className="nav-right">
+            <ProjectSwitcher routeType={routeType} />
+            <UserProfile />
+          </div>
+        </nav>
+      )}
       <Outlet />
     </>
   );
@@ -254,9 +266,11 @@ function RootComponent() {
       <body>
         <QueryClientProvider client={queryClient}>
           <ModalStackProvider>
-            <ProjectSelectionProvider>
-              <AppShell />
-            </ProjectSelectionProvider>
+            <ToastProvider>
+              <ProjectSelectionProvider>
+                <AppShell />
+              </ProjectSelectionProvider>
+            </ToastProvider>
           </ModalStackProvider>
         </QueryClientProvider>
         <Scripts />

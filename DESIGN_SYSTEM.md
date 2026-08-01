@@ -170,7 +170,7 @@ Apply to `:root` for dark (default) and `[data-theme="light"]` for light.
 
 ### 2.3 Priority Colors
 
-Priority uses a hardware-LED dot system. Colors are consistent across modes (the dark/light semantic tokens handle context).
+Priority uses a hardware-LED dot system. Colors are consistent across modes (the dark/light semantic tokens handle context). These are the **default** palette for newly created projects; each project can recolor/reorder/rename its priority options in Board Settings (see §5.9i).
 
 | Priority | Hex | Name | LED Character |
 |----------|-----|------|---------------|
@@ -181,7 +181,7 @@ Priority uses a hardware-LED dot system. Colors are consistent across modes (the
 
 ### 2.4 Task Type Colors
 
-Task types use a left-border accent on cards (3px) and small badges.
+Task types use a left-border accent on cards (3px) and small badges. These are the **default** palette for newly created projects; each project can customize its type options in Board Settings (see §5.9i).
 
 | Type | Hex | Name | Border/Badge Color |
 |------|-----|------|-------------------|
@@ -420,7 +420,7 @@ Border-bottom: 1px solid var(--lx-border-subtle)  (only if cards present)
 - **Title input:** Width 100%, background `--lx-surface-input`, border `1px solid --lx-border-default`, auto-focused
 - **Priority:** Row — `justify-between`. `select.prop-input` (width: 140px). 4 options with colored `●` prefix: Urgent `#FF4444`, High `#FF8844` (default), Medium `#F0C040`, Low `#A0A0A0`. Selected value color applied via `color` on `<select>` element (not `<option>` — see implementation note).
 - **Type:** Row — `justify-between`. `select.prop-input` (width: 140px). 4 options with colored `●` prefix: Feature `#4ADE80` (default), Bug `#FF4444`, Task `#67E8F9`, Asset `#F9A8D4`. Same color-on-select trick.
-- **Footer:** Right-aligned Cancel (`.btn-ghost`, 28px) + Save (`.btn-primary`, 28px). Save disabled if title empty.
+- **Footer:** Right-aligned Cancel (`.btn-ghost btn-sm`) + Save (`.btn-primary btn-sm`), 8px gap. Both 28px tall, padding 0 10px, `text-xs/500`. Save disabled if title empty.
 - **Keyboard:** Enter saves, Esc cancels
 - **Mutation:** Calls `createTask` on save, updates board cache via `setQueryData`
 
@@ -638,6 +638,104 @@ Title:        text-lg/500/Display, --lx-text-primary, margin-bottom 12px
   - Amber dot (`--lx-text-warning`).
   - Subtitle format: "ProjectName · owner/repo#N".
   - Only shown when at least one project has `githubRepo` and out-of-sync tasks.
+
+### 5.9d Toast Notifications
+
+Transient feedback for mutations (see `wireframes/component-toast.html`). Status LED philosophy: the 3px left accent and icon carry the signal — hue first, text second. Surface is `--lx-surface-tooltip`, the highest elevated layer.
+
+```
+Stack:     fixed, top 16px right 16px, width 360px, gap 8px, z-index 60 (above slideover)
+Toast:     --lx-surface-tooltip bg, 1px solid --lx-border-default, radius-md (6px), padding 12px 14px, --lx-shadow-lg
+Accent:    3px left border — success #4ADE80 · warning #F0C040 · error #FF4444
+Title:     text-sm/500/Body, --lx-text-primary
+Body:      text-xs/Body, --lx-text-secondary, margin-top 2px
+Close:     20×20px ghost icon button, --lx-text-muted, hover --lx-surface-card-hover
+```
+
+**Variants:** `toast-success` (check-circle icon), `toast-warning` (alert-triangle), `toast-error` (x-circle).
+
+**Behavior:**
+
+| Event | Spec |
+|-------|------|
+| Enter | 300ms slide from top-right (`translateX(100%)` → 0), `--lx-ease-out`. No stagger. |
+| Leave | 150ms fade out |
+| Auto-dismiss | 5s for success / warning. Errors persist until dismissed. |
+| Stacking | Max 3 visible, newest on top |
+| Hover | Pauses the auto-dismiss timer |
+
+**Wiring:** All mutations surface success/error toasts via `useToast()` (`app/components/ui/Toast.tsx`). WIP-limit and required-field drag rejections push warning toasts with the column name and count/limit.
+
+### 5.9e Loading Skeletons
+
+Skeletons mirror the final layout so content lands without shift (see `wireframes/component-loading.html`). Lexa uses no spinners — blocks pulse gently (opacity 1 → 0.45 → 1, 1.6s) and go static under reduced motion.
+
+```
+Token:     .skeleton = --lx-surface-card-hover fill, radius-sm. Circles via .skeleton-circle.
+Rules:     Never use borders on skeleton blocks — fill only.
+When:      Initial query loads only. Mutations never show skeletons — TanStack Query updates
+           the cache from the authoritative mutation response.
+Surfaces:  Dashboard project cards (3-block grid), board (swimlane bar + column shells + card
+           skeletons), slideover detail panel (480px shape: header, title, property bar, description, footer).
+```
+
+### 5.9f Pending States (Mutation Buttons)
+
+Every mutation trigger names the work while pending. Buttons disable during pending and swap label to the gerund form.
+
+| Control | Idle | Pending |
+|---------|------|---------|
+| Inline-add task Save | "Save" | "Saving..." (form stays open until mutation settles — `onSettled` reset) |
+| Slideover create footer | "Create task" | "Creating..." |
+| Delete confirm dialogs | "Delete" | "Deleting..." |
+| GitHub link issue | "Create issue" | "Creating..." (spinner + disabled input) |
+| Wiki editor save | "Save" | "Saving..." (footer save indicator also flips to "Saving…") |
+
+### 5.9g TaskDetail Not-Found State
+
+A stale `?task=<id>` deep link (deleted/missing task) renders the slideover with an empty state instead of nothing:
+
+```
+Icon:     empty-state-icon (AlertCircle, 24px)
+Title:    "Task not found" (empty-state-title)
+Desc:     "This task was deleted or the link is stale." (empty-state-desc)
+Action:   "Close" btn-primary → closes slideover and clears ?task= search param
+```
+
+### 5.9h Description Editor Exit Controls
+
+The TipTap description editor in TaskDetail (edit mode) has an explicit way to finish or abandon editing (see `wireframes/task-detail-edit.html`):
+
+```
+Header:     "Editing description" micro label (font-micro, uppercase, --lx-text-muted)
+Exit ✕:     btn-ghost btn-icon-sm, 28×28px, icon-only (X 13px, stroke 2) — reverts without saving
+Exit ✓:     btn-primary btn-icon-sm, 28×28px, icon-only (Check 13px, stroke 2.5) — flushes the doc
+            through the same save path as blur, returns to read mode
+Gap:        8px between the two icon buttons
+Tooltips:   ✕ "Revert changes (Esc)" · ✓ "Save and finish (Enter)"
+Aria:       aria-label on both ("Revert changes" / "Save and finish editing")
+Keyboard:   Enter in the editor finishes (unless IME composing); Esc reverts. Blur still saves.
+```
+
+Layout: the editor block sits flush with the slideover body — no `pt-4` gap, no outer card box. The edit-mode header row + toolbar strip share the editor's top border; only the inner editor carries the focus border + glow. Create mode renders the description editor chrome-less (no header) — the footer "Create task" remains the single commit point.
+
+### 5.9i Task Field Options (Board Settings — Priorities & Types)
+
+Per-project customization of the two task fields. Lives in the Board Settings modal (see `wireframes/kanban-settings-modal.html`), between Columns and Swimlanes:
+
+```
+Section:  "Priorities" — ordered list (drag to reorder, like columns)
+          "Types" — ordered list (drag to reorder, like columns)
+Columns:  drag handle | Label | Color | Edit / Delete
+Add:      "+ Add Priority" / "+ Add Type" → option form modal (label + color swatches)
+Delete:   blocked while any task uses the option (toast explains: reassign first)
+Order:    position ascending; FIRST option = create default + dashboard "urgent" equivalent
+Colors:   same color swatch palette as ColumnForm
+```
+
+- Cards, slideover property bar, inline-add form, and filter popover all render options from the project's field-config (label + color), never hardcoded enums.
+- Priority dot stays an 8px LED; a custom color renders as a solid dot (only the legacy default "Low" uses the hollow ring).
+- The board fetch (`GET /board`) carries `fieldConfig`, so every surface resolves labels/colors from one source without extra requests.
 
 ---
 

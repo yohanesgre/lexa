@@ -1,31 +1,21 @@
 import { cn } from "../ui/cn";
-import type { Priority, TaskType, GithubIssue } from "../../../shared/types";
+import type { GithubIssue, FieldOption } from "../../../shared/types";
 
 interface TaskCardProps {
   id: string;
   title: string;
-  priority: Priority;
-  type: TaskType;
+  priority: string;               // priority_options.id
+  type: string;                   // type_options.id
+  priorities: FieldOption[];      // from board.fieldConfig
+  types: FieldOption[];
   assignees: string[];
   githubs: GithubIssue[];
   isDragging?: boolean;
   dimmed?: boolean;
+  archived?: boolean;
+  action?: React.ReactNode;
   className?: string;
 }
-
-const typeConfig: Record<TaskType, { label: string; badge: string; border: string }> = {
-  feature: { label: "Feature", badge: "type-feature", border: "border-l-lx-type-feature" },
-  bug: { label: "Bug", badge: "type-bug", border: "border-l-lx-type-bug" },
-  task: { label: "Task", badge: "type-task", border: "border-l-lx-type-task" },
-  asset: { label: "Asset", badge: "type-asset", border: "border-l-lx-type-asset" },
-};
-
-const priorityDot: Record<Priority, string> = {
-  urgent: "priority-dot priority-urgent",
-  high: "priority-dot priority-high",
-  medium: "priority-dot priority-medium",
-  low: "priority-dot priority-low",
-};
 
 function GithubMark({ size = 12 }: { size?: number }) {
   return (
@@ -35,17 +25,31 @@ function GithubMark({ size = 12 }: { size?: number }) {
   );
 }
 
-export function TaskCard({ title, priority, type, assignees, githubs, isDragging = false, dimmed = false, className }: TaskCardProps) {
-  const { label, badge, border } = typeConfig[type];
+export function TaskCard({ title, priority, type, priorities, types, assignees, githubs, isDragging = false, dimmed = false, archived = false, action, className }: TaskCardProps) {
+  const typeOpt = types.find((t) => t.id === type);
+  const prioOpt = priorities.find((p) => p.id === priority);
+  const typeLabel = typeOpt?.label ?? type;
+  const typeColor = typeOpt?.color ?? "#6b7280";
+  const prioColor = prioOpt?.color ?? "#6b6560";
   const hasOutOfSync = githubs.some(g => g.outOfSync);
   return (
-    <div className={cn("kanban-card border-l-[3px]", border, isDragging && "state-dragging", dimmed && "opacity-45", className)}>
+    <div className={cn("kanban-card border-l-[3px]", isDragging && "state-dragging", dimmed && "opacity-45", archived && "state-archived", className)}
+      style={{ borderLeftColor: typeColor }}>
       <div className="flex items-center justify-between">
-        <span className={cn("type-badge", badge)}>{label}</span>
         <span
-          className={cn("priority-dot", priorityDot[priority])}
-          title={`${priority[0].toUpperCase()}${priority.slice(1)} priority`}
-        />
+          className="type-badge"
+          style={{ background: `${typeColor}1a`, color: typeColor }}
+        >
+          {typeLabel}
+        </span>
+        <span className="flex items-center gap-1">
+          <span
+            className="priority-dot"
+            style={{ background: prioColor }}
+            title={`${typeLabel} · ${prioColor}`}
+          />
+          {action}
+        </span>
       </div>
       <div className="card-title mt-2">{title}</div>
       <div className="card-meta">

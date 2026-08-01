@@ -2,6 +2,31 @@
 
 > Tracks implementation gaps between wireframes (source of truth) and current code. Each item references the relevant design doc.
 
+## TASK FIELDS
+
+### ✅ TASKF-1: Per-project customizable priority/type
+
+Wireframes (kanban-settings-modal.html) show a "Priorities" + "Types" section in Board Settings so teams can customize the two task fields. Implementation previously used fixed enums (`urgent/high/medium/low`, `feature/bug/task/asset`) locked in SQL CHECK constraints, REST literals, and MCP enums.
+
+**Backend:**
+- [x] `migrations/0010_task_field_options.sql` — `priority_options`/`type_options` tables (project-scoped, ordered, unique label), backfill legacy 4+4 per project, rewrite `tasks.priority`/`type` to option IDs
+- [x] `server/repos/field-config.repo.ts` — CRUD + list replace + `seedDefaults` + `countTasksUsing`
+- [x] `server/services/field-config.service.ts` — full-replace PUT validation (dupes, empty, unknown ids → `INVALID_OPTION`; used-option delete → `OPTION_IN_USE`)
+- [x] `server/api/errors.ts` — `OptionInUse` (409), `InvalidOption` (422) + catalog entries
+- [x] `server/api/http.ts` — `GET/PUT /api/projects/:slug/field-config`, `/board` carries `fieldConfig`, task create/update accept option ids
+- [x] `server/services/task.service.ts` + `task.repo.ts` — option-id create/update; defaults to first option; dashboard urgency = first priority option
+- [x] `server/services/project.service.ts` — seeds default options on project create
+- [x] MCP — `get_project` lists priorities/types; `create_task`/`update_task`/`list_tasks` take labels (case-insensitive) and return labels + ids
+
+**Frontend:**
+- [x] `shared/types.ts` + `shared/db.ts` — `FieldOption`/`FieldConfig`, `Task.priority`/`type` = option ids
+- [x] `app/lib/api.ts` + `queries.ts` — `getFieldConfig`/`updateFieldConfig` hooks
+- [x] `app/components/kanban/KanbanSettingsModal.tsx` — Priorities + Types sections (drag-reorder, add/edit/delete via `OptionForm`)
+- [x] `app/components/kanban/OptionForm.tsx` — label + color swatch modal
+- [x] `TaskCard.tsx`, `BoardFilters.tsx`, `Column.tsx`, `TaskDetail.tsx` — render options from `board.fieldConfig`
+
+**Refs:** SCHEMA.md §Task field options, API.md §Field Config, MCP.md §get_project/create_task, DESIGN_SYSTEM.md §5.9i, wireframes/kanban-settings-modal.html
+
 ## DASHBOARD
 
 ### ✅ DASH-1: Replace dashboard stubs with real health aggregation
@@ -191,9 +216,26 @@ Wireframe Bug type uses `#FF4444`. Implementation uses CSS variables. All type b
 
 Wireframe and implementation match.
 
----
+### ✅ KAN-18: Task archive feature
 
-## SCHEMA CONFLICTS (needs architectural decision)
+Archive tasks from the kanban (card kebab ⋮ and TaskDetail footer). Archive is reversible; no requirement on which tasks can be archived; delete stays untouched.
+
+- [x] `migrations/0009_task_archive.sql` — `tasks.archived_at` (NULL = live, timestamp = archived)
+- [x] `shared/types.ts` + `shared/db.ts` — `Task.archivedAt`, `TaskRow.archived_at`, `rowToTask` mapping
+- [x] `server/repos/task.repo.ts` — `setArchived`; `findAllByProject`/`findByProject` `includeArchived`; WIP count / `findLastInColumn` / dashboard aggregates exclude archived
+- [x] `server/services/task.service.ts` — `archive`/`restore` (idempotent, no GitHub dependency)
+- [x] `server/api/http.ts` — `POST /tasks/:id/archive`, `POST /tasks/:id/restore`, `GET /board?includeArchived`
+- [x] `server/mcp/` — `archive_task`, `restore_task` tools; `list_tasks includeArchived`; taskId auth list extended
+- [x] `app/lib/api.ts` + `app/lib/queries.ts` — `archiveTask`/`restoreTask`, `useBoard(slug, includeArchived)`, `useArchiveTask`/`useRestoreTask` with both board-variant cache updates
+- [x] `app/components/kanban/TaskCard.tsx` + `KanbanBoard.tsx` — card kebab (Archive/Restore/Delete), "Show archived" toggle, archived cards dimmed + non-draggable
+- [x] `app/components/TaskDetail.tsx` — Archive/Restore footer button + archived notice banner
+- [x] Wireframes — `kanban.html` (toggle, kebab, archived card state + annotations), `task-detail.html` (Restore footer, archived notice), `wireframes.css` (`.state-archived`, `.archived-tag`)
+- [x] Docs: SCHEMA.md, API.md, MCP.md, LAYERS.md, IMPLEMENTATION.md
+- [x] Tests: 66/66 pass; wireframes build clean
+
+**Refs:** `wireframes/src/kanban.html`, `wireframes/src/task-detail.html`
+
+---
 
 ### ✅ ARCH-1: Task model single-assignee → multi-assignee
 

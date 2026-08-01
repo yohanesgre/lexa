@@ -162,20 +162,29 @@ if pols: print(pols[0]['id'])
   echo "  Policy: allow @$EMAIL_DOMAIN"
 fi
 
-# ── Admin user ──
-if [ "$FLAVOR" != "dev" ]; then
+# ── API Key / Admin email / Seed ──
+if [ "$FLAVOR" = "dev" ]; then
+  echo ""
+  echo "── Lexa application setup (dev) ──"
+  echo "  Running: bun run setup"
+  echo "  (Admin email, API key, migrations, and seed are handled by the wizard.)"
+  bun run setup
+  # reload values written by the wizard
+  set -a; . ./.env; set +a
+else
+  # Staging/prod: env file must include CF_TUNNEL_TOKEN (from the CF API above),
+  # so the app-level pieces are prompted here, then the web wizard (/setup)
+  # can complete the admin email + seed inside the container.
   echo ""
   echo "── Admin user ──"
   echo "  First Google login with this email will be auto-promoted to admin."
   read -p "  Admin email: " ADMIN_EMAIL
-fi
 
-# ── API Key ──
-echo ""
-echo "── API Key ──"
-read -p "  API key (lxk_...) [Enter to generate]: " API_KEY
-if [ -z "$API_KEY" ]; then
-  API_KEY="lxk_$(python3 -c "
+  echo ""
+  echo "── API Key ──"
+  read -p "  API key (lxk_...) [Enter to generate]: " API_KEY
+  if [ -z "$API_KEY" ]; then
+    API_KEY="lxk_$(python3 -c "
 import secrets; raw=secrets.token_bytes(32)
 chars='0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz'
 v=int.from_bytes(raw); r=''
@@ -183,28 +192,17 @@ while v>0: r=chars[v%62]+r; v//=62
 while len(r)<43: r='0'+r
 print(r)
 ")"
-  echo "  Generated: $API_KEY"
-fi
+    echo "  Generated: $API_KEY"
+  fi
 
-# ── Env file ──
-if [ "$FLAVOR" = "dev" ]; then
-  cat > .env << ENVEOF
-LXK_API_KEY=$API_KEY
-VITE_LXK_API_KEY=$API_KEY
-LXK_ADMIN_EMAILS=${ADMIN_EMAIL:-}
-DATABASE_PATH=./data/lexa.db
-PORT=3000
-COMPOSE_PROJECT_NAME=$COMPOSE_NAME
-ENVEOF
-else
   cat > "$ENV_FILE" << ENVEOF
 LXK_API_KEY=$API_KEY
 VITE_LXK_API_KEY=$API_KEY
 LXK_ADMIN_EMAILS=${ADMIN_EMAIL:-}
 CF_TUNNEL_TOKEN=$TOKEN
 ENVEOF
+  echo "  Wrote $ENV_FILE"
 fi
-echo "  Wrote $ENV_FILE"
 
 # ── Start ──
 if [ "$BARE" = "--bare" ]; then
@@ -212,10 +210,11 @@ if [ "$BARE" = "--bare" ]; then
   echo "═══════════════════════════════════════════════════════"
   echo "  Lexa $FLAVOR — bare metal"
   echo ""
+  echo "  bun run setup"
   echo "  rm -f data/lexa.db*"
   echo "  bun dev:full"
   echo ""
-  echo "  API key: $API_KEY"
+  echo "  API key: ${API_KEY:-run bun run setup}"
   echo "═══════════════════════════════════════════════════════"
   exit 0
 fi

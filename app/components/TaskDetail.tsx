@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Link, useParams } from "@tanstack/react-router";
 import { Check, ChevronDown, X } from "lucide-react";
-import type { Priority, Task, TaskType, TipTapDoc, GithubIssue } from "../../shared/types";
+import type { Task, TipTapDoc, GithubIssue } from "../../shared/types";
 import { extractText } from "../../shared/tiptap-text";
 import { renderDoc } from "./tiptap-render";
 import { TextEditor } from "./TextEditor";
@@ -42,6 +42,23 @@ function TrashIcon({ size = 14, className }: { size?: number; className?: string
   );
 }
 
+function ArchiveIcon({ size = 14, className }: { size?: number; className?: string }) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={1.5}
+      className={className}
+    >
+      <path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6" />
+      <path d="M8 4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+    </svg>
+  );
+}
+
 function LinkIcon({ size = 14, className }: { size?: number; className?: string }) {
   return (
     <svg
@@ -68,14 +85,17 @@ interface TaskDetailProps {
   columns?: { id: string; name: string }[];
   columnRequiredFields?: { columnId: string; fields: string[] }[];
   availableAssignees?: string[];
+  fieldConfig?: { priorities: { id: string; label: string; color: string }[]; types: { id: string; label: string; color: string }[] };
   onClose: () => void;
   onUpdate?: (id: string, data: Partial<Task>) => void;
   onDelete?: (id: string) => Promise<void>;
+  onArchive?: (id: string) => Promise<void>;
+  onRestore?: (id: string) => Promise<void>;
   onCreate?: (input: {
     title: string;
     columnId: string;
-    priority: Priority;
-    type: TaskType;
+    priority: string;
+    type: string;
     assignees: string[];
     description: TipTapDoc;
   }) => Promise<void>;
@@ -318,8 +338,6 @@ function AssigneeChips({
 
 const emptyDoc: TipTapDoc = { type: "doc", content: [] };
 
-const capitalize = (s: string) => s[0].toUpperCase() + s.slice(1);
-
 function getMissingRequiredFields(
   columnId: string,
   requiredFieldsMap: { columnId: string; fields: string[] }[] | undefined,
@@ -341,6 +359,8 @@ interface DescriptionEditorProps {
   initialContent: TipTapDoc;
   onChange?: (doc: TipTapDoc) => void;
   onBlur?: (doc: TipTapDoc) => void;
+  onDone?: (doc: TipTapDoc) => void;
+  onCancel?: () => void;
   placeholder?: string;
   editable?: boolean;
 }
@@ -349,6 +369,8 @@ function DescriptionEditor({
   initialContent,
   onChange,
   onBlur,
+  onDone,
+  onCancel,
   placeholder,
   editable = true,
 }: DescriptionEditorProps) {
@@ -356,6 +378,10 @@ function DescriptionEditor({
   onBlurRef.current = onBlur;
   const onChangeRef = useRef(onChange);
   onChangeRef.current = onChange;
+  const onDoneRef = useRef(onDone);
+  onDoneRef.current = onDone;
+  const onCancelRef = useRef(onCancel);
+  onCancelRef.current = onCancel;
 
   const editor = useEditor({
     immediatelyRender: false,
@@ -368,21 +394,74 @@ function DescriptionEditor({
     onBlur: ({ editor: ed }) => {
       onBlurRef.current?.(ed.getJSON() as unknown as TipTapDoc);
     },
+    editorProps: {
+      handleKeyDown: (_view, event) => {
+        // Enter (not during IME composition) finishes editing; Esc reverts.
+        if (event.key === "Enter" && !event.isComposing && !event.shiftKey) {
+          event.preventDefault();
+          const doc = editor?.getJSON() as unknown as TipTapDoc | undefined;
+          if (doc) onDoneRef.current?.(doc);
+          return true;
+        }
+        if (event.key === "Escape") {
+          event.preventDefault();
+          onCancelRef.current?.();
+          return true;
+        }
+        return false;
+      },
+    },
   });
 
   if (!editor) return null;
 
   const headingLevel = (editor.getAttributes("heading").level as number | undefined) ?? 0;
 
+  const handleDone = () => {
+    onDoneRef.current?.(editor.getJSON() as unknown as TipTapDoc);
+  };
+
   return (
     <div className="editor-wrapper">
-      <Toolbar editor={editor} headingLevel={headingLevel} />
+      {onDone && (
+        <div
+          className="flex items-center justify-between"
+          style={{ padding: "6px 8px 6px 12px", borderBottom: "1px solid var(--lx-border-default)", borderRadius: "6px 6px 0 0", background: "var(--lx-surface-card)" }}
+        >
+          <span className="font-micro text-2xs text-lx-text-muted uppercase tracking-[0.04em]">Editing description</span>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              className="btn btn-ghost btn-icon-sm"
+              style={{ width: 28, height: 28, padding: 0 }}
+              onClick={() => onCancelRef.current?.()}
+              title="Revert changes (Esc)"
+              aria-label="Revert changes"
+            >
+              <X size={13} strokeWidth={2} />
+            </button>
+            <button
+              type="button"
+              className="btn btn-primary btn-icon-sm"
+              style={{ width: 28, height: 28, padding: 0 }}
+              onClick={handleDone}
+              title="Save and finish (Enter)"
+              aria-label="Save and finish editing"
+            >
+              <Check size={13} strokeWidth={2.5} />
+            </button>
+          </div>
+        </div>
+      )}
+      <div style={{ display: "flex", alignItems: "center", borderBottom: "1px solid var(--lx-border-default)" }}>
+        <Toolbar editor={editor} headingLevel={headingLevel} />
+      </div>
       <EditorContent editor={editor} className="editor-content" />
     </div>
   );
 }
 
-export function TaskDetail({ mode = "view", task, project, defaultColumnId, columns, columnRequiredFields, availableAssignees, onClose, onUpdate, onDelete, onCreate }: TaskDetailProps) {
+export function TaskDetail({ mode = "view", task, project, defaultColumnId, columns, columnRequiredFields, availableAssignees, fieldConfig, onClose, onUpdate, onDelete, onArchive, onRestore, onCreate }: TaskDetailProps) {
   const params = useParams({ strict: false }) as { slug?: string };
   const slug = params.slug;
   const isCreate = mode === "create";
@@ -430,10 +509,11 @@ export function TaskDetail({ mode = "view", task, project, defaultColumnId, colu
 
   const [createTitle, setCreateTitle] = useState("");
   const [createColumnId, setCreateColumnId] = useState(defaultColumnId ?? (columns?.[0]?.id ?? ""));
-  const [createPriority, setCreatePriority] = useState<Priority>("medium");
-  const [createType, setCreateType] = useState<TaskType>("task");
+  const [createPriority, setCreatePriority] = useState<string>(fieldConfig?.priorities[0]?.id ?? "");
+  const [createType, setCreateType] = useState<string>(fieldConfig?.types[0]?.id ?? "");
   const [createAssignees, setCreateAssignees] = useState<string[]>([]);
   const [createDescription, setCreateDescription] = useState<TipTapDoc>(emptyDoc);
+  const [creating, setCreating] = useState(false);
 
   const [linkState, setLinkState] = useState<"idle" | "input" | "loading" | "success">("idle");
   const [linkRepo, setLinkRepo] = useState("");
@@ -465,16 +545,21 @@ export function TaskDetail({ mode = "view", task, project, defaultColumnId, colu
 
   const handleCreate = async () => {
     const title = createTitle.trim();
-    if (!title || !createColumnId || !onCreate) return;
-    await onCreate({
-      title,
-      columnId: createColumnId,
-      priority: createPriority,
-      type: createType,
-      assignees: createAssignees,
-      description: createDescription,
-    });
-    handleClose();
+    if (!title || !createColumnId || !onCreate || creating) return;
+    setCreating(true);
+    try {
+      await onCreate({
+        title,
+        columnId: createColumnId,
+        priority: createPriority,
+        type: createType,
+        assignees: createAssignees,
+        description: createDescription,
+      });
+      handleClose();
+    } finally {
+      setCreating(false);
+    }
   };
 
   const [editingTitle, setEditingTitle] = useState(false);
@@ -510,6 +595,7 @@ export function TaskDetail({ mode = "view", task, project, defaultColumnId, colu
 
   const currentColumnId = isCreate ? createColumnId : (selectedColumnId || task?.columnId || "");
   const currentColumnName = columns?.find((column) => column.id === currentColumnId)?.name ?? "";
+  const isArchived = !isCreate && task != null && task.archivedAt != null;
   const missingFields = isCreate
     ? getMissingRequiredFields(createColumnId, columnRequiredFields, {
         assignees: createAssignees,
@@ -524,7 +610,36 @@ export function TaskDetail({ mode = "view", task, project, defaultColumnId, colu
     setDismissedWarning(false);
   }, [currentColumnId, missingFields.join(",")]);
 
-  if (!isCreate && !task) return null;
+  if (!isCreate && !task) {
+    return (
+      <>
+        <div className={cn("slideover-overlay", !open && "overlay-closed")} onClick={handleClose} />
+        <div className={cn("slideover", !open && "slideover-closed")} role="dialog" aria-modal="true">
+          <div className="slideover-header border-b border-lx-border-subtle">
+            <span className="text-xs font-body text-lx-text-muted">Board</span>
+            <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+              <button className="btn btn-ghost !w-8 !h-8 !p-0" onClick={handleClose} aria-label="Close">
+                <X size={18} strokeWidth={1.5} />
+              </button>
+            </div>
+          </div>
+          <div className="slideover-body flex items-center justify-center" style={{ flexDirection: "column", gap: 12 }}>
+            <div className="empty-state-icon">
+              <svg width={24} height={24} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="12" cy="12" r="10" />
+                <path d="M12 8v4M12 16h.01" />
+              </svg>
+            </div>
+            <div className="empty-state-title">Task not found</div>
+            <div className="empty-state-desc">This task was deleted or the link is stale.</div>
+            <button type="button" className="btn btn-primary" style={{ marginTop: 8 }} onClick={handleClose}>
+              Close
+            </button>
+          </div>
+        </div>
+      </>
+    );
+  }
 
   const githubs: GithubIssue[] = isCreate ? [] : task?.githubs ?? [];
 
@@ -579,6 +694,17 @@ export function TaskDetail({ mode = "view", task, project, defaultColumnId, colu
         </div>
 
         <div className="px-4 pt-4">
+          {isArchived && (
+            <div
+              className="flex items-center gap-2"
+              style={{ background: "var(--lx-surface-elevated)", border: "1px solid var(--lx-border-default)", borderRadius: 6, padding: "8px 12px", marginBottom: 12 }}
+            >
+              <ArchiveIcon size={14} />
+              <span className="font-micro text-2xs text-lx-text-muted uppercase tracking-[0.04em]">
+                Archived — not shown on the board unless "Show archived" is on
+              </span>
+            </div>
+          )}
           {isCreate ? (
             <input
               className="slideover-title-input"
@@ -670,42 +796,48 @@ export function TaskDetail({ mode = "view", task, project, defaultColumnId, colu
             {isCreate ? (
               <SelectDropdown
                 value={createPriority}
-                options={(["urgent", "high", "medium", "low"] as Priority[]).map((priority) => ({
-                  value: priority,
+                options={(fieldConfig?.priorities ?? []).map((priority) => ({
+                  value: priority.id,
                   label: (
                     <>
-                      <span className={cn("priority-dot", `priority-${priority}`)} />
-                      {capitalize(priority)}
+                      <span className="priority-dot" style={{ background: priority.color }} />
+                      {priority.label}
                     </>
                   ),
                 }))}
-                onChange={(priority) => setCreatePriority(priority as Priority)}
-                trigger={({ toggle }) => (
-                  <button type="button" className={cn("priority-badge", `pb-${createPriority}`)} onClick={toggle} style={{ boxShadow: "var(--lx-focus-glow)" }}>
-                    <span className={cn("priority-dot", `priority-${createPriority}`)} />
-                    {capitalize(createPriority)}
-                  </button>
-                )}
+                onChange={(priority) => setCreatePriority(priority)}
+                trigger={({ toggle }) => {
+                  const opt = (fieldConfig?.priorities ?? []).find((p) => p.id === createPriority);
+                  return (
+                    <button type="button" className="priority-badge" onClick={toggle} style={{ boxShadow: "var(--lx-focus-glow)", color: opt?.color, background: `${opt?.color ?? "#6b6560"}1a` }}>
+                      <span className="priority-dot" style={{ background: opt?.color ?? "#6b6560" }} />
+                      {opt?.label ?? "—"}
+                    </button>
+                  );
+                }}
               />
             ) : (
               <SelectDropdown
                 value={task!.priority}
-                options={(["urgent", "high", "medium", "low"] as Priority[]).map((priority) => ({
-                  value: priority,
+                options={(fieldConfig?.priorities ?? []).map((priority) => ({
+                  value: priority.id,
                   label: (
                     <>
-                      <span className={cn("priority-dot", `priority-${priority}`)} />
-                      {capitalize(priority)}
+                      <span className="priority-dot" style={{ background: priority.color }} />
+                      {priority.label}
                     </>
                   ),
                 }))}
-                onChange={(priority) => onUpdate?.(task!.id, { priority: priority as Priority })}
-                trigger={({ toggle }) => (
-                  <button type="button" className={cn("priority-badge", `pb-${task!.priority}`)} onClick={toggle}>
-                    <span className={cn("priority-dot", `priority-${task!.priority}`)} />
-                    {capitalize(task!.priority)}
-                  </button>
-                )}
+                onChange={(priority) => onUpdate?.(task!.id, { priority })}
+                trigger={({ toggle }) => {
+                  const opt = (fieldConfig?.priorities ?? []).find((p) => p.id === task!.priority);
+                  return (
+                    <button type="button" className="priority-badge" onClick={toggle} style={{ color: opt?.color, background: `${opt?.color ?? "#6b6560"}1a` }}>
+                      <span className="priority-dot" style={{ background: opt?.color ?? "#6b6560" }} />
+                      {opt?.label ?? "—"}
+                    </button>
+                  );
+                }}
               />
             )}
           </div>
@@ -714,38 +846,44 @@ export function TaskDetail({ mode = "view", task, project, defaultColumnId, colu
             {isCreate ? (
               <SelectDropdown
                 value={createType}
-                options={(["feature", "bug", "task", "asset"] as TaskType[]).map((type) => ({
-                  value: type,
+                options={(fieldConfig?.types ?? []).map((type) => ({
+                  value: type.id,
                   label: (
-                    <span className={cn("type-badge", `type-${type}`)} style={{ color: `var(--lx-badge-${type})` }}>
-                      {capitalize(type)}
+                    <span className="type-badge" style={{ background: `${type.color}1a`, color: type.color }}>
+                      {type.label}
                     </span>
                   ),
                 }))}
-                onChange={(type) => setCreateType(type as TaskType)}
-                trigger={({ toggle }) => (
-                  <button type="button" className={cn("type-badge", `type-${createType}`)} onClick={toggle} style={{ boxShadow: "var(--lx-focus-glow)", borderRadius: 4 }}>
-                    {capitalize(createType)}
-                  </button>
-                )}
+                onChange={(type) => setCreateType(type)}
+                trigger={({ toggle }) => {
+                  const opt = (fieldConfig?.types ?? []).find((t) => t.id === createType);
+                  return (
+                    <button type="button" className="type-badge" onClick={toggle} style={{ background: `${opt?.color ?? "#6b7280"}1a`, color: opt?.color ?? "#6b7280", boxShadow: "var(--lx-focus-glow)", borderRadius: 4 }}>
+                      {opt?.label ?? "—"}
+                    </button>
+                  );
+                }}
               />
             ) : (
               <SelectDropdown
                 value={task!.type}
-                options={(["feature", "bug", "task", "asset"] as TaskType[]).map((type) => ({
-                  value: type,
+                options={(fieldConfig?.types ?? []).map((type) => ({
+                  value: type.id,
                   label: (
-                    <span className={cn("type-badge", `type-${type}`)} style={{ color: `var(--lx-badge-${type})` }}>
-                      {capitalize(type)}
+                    <span className="type-badge" style={{ background: `${type.color}1a`, color: type.color }}>
+                      {type.label}
                     </span>
                   ),
                 }))}
-                onChange={(type) => onUpdate?.(task!.id, { type: type as TaskType })}
-                trigger={({ toggle }) => (
-                  <button type="button" className={cn("type-badge", `type-${task!.type}`)} onClick={toggle}>
-                    {capitalize(task!.type)}
-                  </button>
-                )}
+                onChange={(type) => onUpdate?.(task!.id, { type })}
+                trigger={({ toggle }) => {
+                  const opt = (fieldConfig?.types ?? []).find((t) => t.id === task!.type);
+                  return (
+                    <button type="button" className="type-badge" onClick={toggle} style={{ background: `${opt?.color ?? "#6b7280"}1a`, color: opt?.color ?? "#6b7280" }}>
+                      {opt?.label ?? "—"}
+                    </button>
+                  );
+                }}
               />
             )}
           </div>
@@ -849,6 +987,13 @@ export function TaskDetail({ mode = "view", task, project, defaultColumnId, colu
                   editable={true}
                   onBlur={(doc) => {
                     onUpdate?.(task!.id, { description: doc });
+                    setEditingDescription(false);
+                  }}
+                  onDone={(doc) => {
+                    onUpdate?.(task!.id, { description: doc });
+                    setEditingDescription(false);
+                  }}
+                  onCancel={() => {
                     setEditingDescription(false);
                   }}
                 />
@@ -1025,14 +1170,25 @@ export function TaskDetail({ mode = "view", task, project, defaultColumnId, colu
                 <button
                   className="btn btn-primary"
                   onClick={handleCreate}
-                  disabled={!createTitle.trim() || !createColumnId}
+                  disabled={!createTitle.trim() || !createColumnId || creating}
                 >
-                  Create task
+                  {creating ? "Creating..." : "Create task"}
                 </button>
               </div>
             </>
           ) : (
             <>
+              {isArchived ? (
+                <button type="button" className="btn btn-ghost" onClick={() => onRestore?.(task!.id)} title="Restore this task to the board">
+                  <ArchiveIcon size={14} />
+                  Restore
+                </button>
+              ) : (
+                <button type="button" className="btn btn-ghost" onClick={() => onArchive?.(task!.id)} title="Archive this task">
+                  <ArchiveIcon size={14} />
+                  Archive
+                </button>
+              )}
               <button
                 type="button"
                 className="btn btn-danger"
@@ -1086,7 +1242,7 @@ export function TaskDetail({ mode = "view", task, project, defaultColumnId, colu
                   onClick={handleConfirmDelete}
                   disabled={deleting}
                 >
-                  Delete
+                  {deleting ? "Deleting..." : "Delete"}
                 </button>
               </div>
             </div>

@@ -1,10 +1,17 @@
 import { Database } from "bun:sqlite";
+import { getSetting } from "../db/settings";
 
 export interface LexaUser {
   id: string;
   email: string;
   name: string;
   role: "admin" | "member";
+}
+
+export function adminEmails(db: Database): string[] {
+  const envEmails = (process.env.LXK_ADMIN_EMAILS || "").split(",").map((e) => e.trim().toLowerCase()).filter(Boolean);
+  const settingsEmails = (getSetting(db, "admin_emails") || "").split(",").map((e) => e.trim().toLowerCase()).filter(Boolean);
+  return [...new Set([...envEmails, ...settingsEmails])];
 }
 
 export function findOrCreateUser(req: Request, dbPath: string): LexaUser | null {
@@ -23,8 +30,7 @@ export function findOrCreateUser(req: Request, dbPath: string): LexaUser | null 
       return existing;
     }
 
-    const adminEmails = (process.env.LXK_ADMIN_EMAILS || "").split(",").map((e) => e.trim().toLowerCase());
-    const role = adminEmails.includes(email.toLowerCase()) ? "admin" : "member";
+    const role = adminEmails(db).includes(email.toLowerCase()) ? "admin" : "member";
 
     const id = crypto.randomUUID();
     db.prepare("INSERT INTO users (id, email, name, role, last_seen) VALUES (?, ?, ?, ?, datetime('now'))")

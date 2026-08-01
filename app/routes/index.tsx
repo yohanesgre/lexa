@@ -1,7 +1,8 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { LayoutGrid, Plus, X } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useDashboard, useCreateProject } from "../lib/queries";
+import { getSetupStatus } from "../lib/api";
 import { ProjectCard } from "../components/ProjectCard";
 import { cn } from "../components/ui/cn";
 
@@ -14,12 +15,26 @@ function pad(n: number) {
 }
 
 function Dashboard() {
+  const navigate = useNavigate();
   const { data: dashboard, isLoading } = useDashboard();
   const createProject = useCreateProject();
   const [showCreate, setShowCreate] = useState(false);
   const [name, setName] = useState("");
   const [desc, setDesc] = useState("");
   const [githubRepo, setGithubRepo] = useState("");
+  const [needsSetup, setNeedsSetup] = useState(false);
+
+  useEffect(() => {
+    getSetupStatus()
+      .then((s) => {
+        if (s.needsAdmin && !s.hasProjects && !s.hasApiKey) {
+          navigate({ to: "/setup" });
+        } else if (s.needsAdmin) {
+          setNeedsSetup(true);
+        }
+      })
+      .catch(() => {});
+  }, [navigate]);
 
   const healthData = dashboard?.projects ?? [];
   const attentionTasks = dashboard?.urgentTasks ?? [];
@@ -75,6 +90,17 @@ function Dashboard() {
           </button>
         </div>
       </div>
+
+      {needsSetup && (
+        <div className="flex items-center justify-between bg-lx-surface-elevated border border-lx-border-warning rounded-md px-4 py-2.5 mb-4">
+          <div className="text-sm text-lx-text-secondary">
+            <span className="font-medium text-lx-text-primary">Setup incomplete</span> — no admin email is configured.
+          </div>
+          <Link to="/setup" className="btn btn-ghost !h-7 !px-3 text-xs">
+            Finish setup
+          </Link>
+        </div>
+      )}
 
       {createProject.error && <div className="dashboard-error">{(createProject.error as Error).message}</div>}
 

@@ -3,6 +3,7 @@ import { TaskRepo, TaskFilters } from "../repos/task.repo";
 import { ProjectRepo } from "../repos/project.repo";
 import { ColumnRepo } from "../repos/column.repo";
 import { SwimlaneRepo } from "../repos/swimlane.repo";
+import { FieldConfigRepo } from "../repos/field-config.repo";
 import { ConstraintViolation, DbError, RowNotFound } from "../db/database";
 import { keyAfter } from "../../shared/positions";
 import { keyBetween } from "../../shared/positions";
@@ -15,6 +16,7 @@ import {
   RequiredFieldMissing,
   WipLimitExceeded,
   NeighborNotInColumn,
+  InvalidOption,
 } from "../api/errors";
 import type { Task, Column, Swimlane, TipTapDoc } from "../../shared/types";
 
@@ -46,12 +48,43 @@ function validateRequiredFields(
 }
 
 export class TaskService extends Effect.Service<TaskService>()("Lexa/TaskService", {
-  dependencies: [TaskRepo.Default, ProjectRepo.Default, ColumnRepo.Default, SwimlaneRepo.Default],
+  dependencies: [TaskRepo.Default, ProjectRepo.Default, ColumnRepo.Default, SwimlaneRepo.Default, FieldConfigRepo.Default],
   effect: Effect.gen(function* () {
     const taskRepo = yield* TaskRepo;
     const projectRepo = yield* ProjectRepo;
     const columnRepo = yield* ColumnRepo;
     const swimlaneRepo = yield* SwimlaneRepo;
+    const fieldConfigRepo = yield* FieldConfigRepo;
+
+    const resolveOption = (
+      projectId: string,
+      kind: "priority" | "type",
+      value?: string
+    ): Effect.Effect<string, InvalidOption | DbError> =>
+      Effect.gen(function* () {
+        if (value !== undefined && value !== "") return value;
+        const first = kind === "priority"
+          ? yield* fieldConfigRepo.findFirstPriority(projectId)
+          : yield* fieldConfigRepo.findTypesByProject(projectId).pipe(
+              Effect.map((opts) => opts[0] ?? null)
+            );
+        if (!first) return yield* new InvalidOption({ message: `project has no ${kind} options configured` });
+        return first.id;
+      });
+
+    const validateOption = (
+      projectId: string,
+      kind: "priority" | "type",
+      value: string
+    ): Effect.Effect<void, InvalidOption | DbError> =>
+      Effect.gen(function* () {
+        const options = kind === "priority"
+          ? yield* fieldConfigRepo.findPrioritiesByProject(projectId)
+          : yield* fieldConfigRepo.findTypesByProject(projectId);
+        if (!options.some((o) => o.id === value)) {
+          return yield* new InvalidOption({ optionId: value, message: `unknown ${kind} option for this project` });
+        }
+      });
 
     return {
       create: (input: {
@@ -60,10 +93,10 @@ export class TaskService extends Effect.Service<TaskService>()("Lexa/TaskService
         swimlaneId: string;
         title: string;
         description?: TipTapDoc;
-        priority?: "urgent" | "high" | "medium" | "low";
-        type?: "feature" | "bug" | "task" | "asset";
+        priority?: string;
+        type?: string;
         assignees?: string[];
-      }): Effect.Effect<Task, ProjectNotFound | ColumnNotFound | SwimlaneNotFound | RequiredFieldMissing | ConstraintViolation | DbError | RowNotFound> =>
+      }): Effect.Effect<Task, ProjectNotFound | ColumnNotFound | SwimlaneNotFound | RequiredFieldMissing | InvalidOption | ConstraintViolation | DbError | RowNotFound> =>
         Effect.gen(function* () {
           const project = yield* projectRepo.findById(input.projectId).pipe(
             Effect.catchTag("RowNotFound", () => new ProjectNotFound({ identifier: input.projectId }))
@@ -86,11 +119,15 @@ export class TaskService extends Effect.Service<TaskService>()("Lexa/TaskService
           }
 
           const desc = input.description ?? { type: "doc" as const, content: [] as unknown[] };
+          const priority = yield* resolveOption(project.id, "priority", input.priority);
+          const type = yield* resolveOption(project.id, "type", input.type);
+          yield* validateOption(project.id, "priority", priority);
+          yield* validateOption(project.id, "type", type);
           const taskLike = {
             title: input.title,
             description: desc,
-            priority: input.priority ?? "medium",
-            type: input.type ?? "task",
+            priority,
+            type,
             assignees: input.assignees ?? [],
           };
           yield* validateRequiredFields(taskLike as Record<string, unknown>, column);
@@ -108,8 +145,8 @@ export class TaskService extends Effect.Service<TaskService>()("Lexa/TaskService
               swimlaneId: input.swimlaneId,
               title: input.title,
               description: JSON.stringify(desc),
-              priority: input.priority ?? "medium",
-              type: input.type ?? "task",
+              priority,
+              type,
               assignees: input.assignees ?? [],
               position,
             }).pipe(
@@ -132,7 +169,7 @@ export class TaskService extends Effect.Service<TaskService>()("Lexa/TaskService
 
       findByProject: (
         projectId: string,
-        filters?: { columnId?: string; swimlaneId?: string; assignee?: string; type?: "feature" | "bug" | "task" | "asset" },
+        filters?: { columnId?: string; swimlaneId?: string; assignee?: string; type?: string; includeArchived?: boolean },
         limit?: number,
         cursor?: string
       ): Effect.Effect<{ tasks: Task[]; hasMore: boolean }, ProjectNotFound | DbError> =>
@@ -145,7 +182,7 @@ export class TaskService extends Effect.Service<TaskService>()("Lexa/TaskService
 
       findAllByProject: (
         projectId: string,
-        filters?: { columnId?: string; swimlaneId?: string; assignee?: string; type?: "feature" | "bug" | "task" | "asset" }
+        filters?: { columnId?: string; swimlaneId?: string; assignee?: string; type?: string; includeArchived?: boolean }
       ): Effect.Effect<Task[], ProjectNotFound | DbError> =>
         Effect.gen(function* () {
           yield* projectRepo.findById(projectId).pipe(
@@ -159,11 +196,11 @@ export class TaskService extends Effect.Service<TaskService>()("Lexa/TaskService
         input: {
           title?: string;
           description?: TipTapDoc;
-          priority?: "urgent" | "high" | "medium" | "low";
-          type?: "feature" | "bug" | "task" | "asset";
+          priority?: string;
+          type?: string;
           assignees?: string[];
         }
-      ): Effect.Effect<Task, TaskNotFound | ColumnNotFound | RequiredFieldMissing | ConstraintViolation | DbError | RowNotFound> =>
+      ): Effect.Effect<Task, TaskNotFound | ColumnNotFound | RequiredFieldMissing | InvalidOption | ConstraintViolation | DbError | RowNotFound> =>
         Effect.gen(function* () {
           const task = yield* taskRepo.findById(id).pipe(
             Effect.catchTag("RowNotFound", () => new TaskNotFound({ id }))
@@ -171,11 +208,15 @@ export class TaskService extends Effect.Service<TaskService>()("Lexa/TaskService
           const column = yield* columnRepo.findById(task.columnId).pipe(
             Effect.catchTag("RowNotFound", () => new ColumnNotFound({ id: task.columnId }))
           );
+          const priority = input.priority !== undefined ? input.priority : task.priority;
+          const type = input.type !== undefined ? input.type : task.type;
+          if (input.priority !== undefined) yield* validateOption(task.projectId, "priority", input.priority);
+          if (input.type !== undefined) yield* validateOption(task.projectId, "type", input.type);
           const merged = {
             title: input.title ?? task.title,
             description: input.description ?? task.description,
-            priority: input.priority ?? task.priority,
-            type: input.type ?? task.type,
+            priority,
+            type,
             assignees: input.assignees !== undefined ? input.assignees : task.assignees,
           };
           yield* validateRequiredFields(merged as Record<string, unknown>, column);
@@ -294,6 +335,28 @@ export class TaskService extends Effect.Service<TaskService>()("Lexa/TaskService
           );
           yield* Effect.logInfo(`[Task] Deleted ${id}`);
           return undefined;
+        }),
+
+      archive: (id: string): Effect.Effect<Task, TaskNotFound | RowNotFound | DbError | ConstraintViolation> =>
+        Effect.gen(function* () {
+          const task = yield* taskRepo.findById(id).pipe(
+            Effect.catchTag("RowNotFound", () => new TaskNotFound({ id }))
+          );
+          if (task.archivedAt) return task;
+          const archived = yield* taskRepo.setArchived(id, new Date().toISOString());
+          yield* Effect.logInfo(`[Task] Archived ${archived.id}`);
+          return archived;
+        }),
+
+      restore: (id: string): Effect.Effect<Task, TaskNotFound | RowNotFound | DbError | ConstraintViolation> =>
+        Effect.gen(function* () {
+          const task = yield* taskRepo.findById(id).pipe(
+            Effect.catchTag("RowNotFound", () => new TaskNotFound({ id }))
+          );
+          if (!task.archivedAt) return task;
+          const restored = yield* taskRepo.setArchived(id, null);
+          yield* Effect.logInfo(`[Task] Restored ${restored.id}`);
+          return restored;
         }),
     };
   }),

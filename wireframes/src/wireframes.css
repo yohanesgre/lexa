@@ -355,6 +355,31 @@ a:hover { color: var(--lx-text-link-hover); }
   box-shadow: var(--lx-focus-ring), var(--lx-focus-glow);
 }
 
+/* Archived card: dimmed, non-interactive */
+.kanban-card.state-archived {
+  opacity: 0.45;
+  filter: saturate(0.4);
+  cursor: default;
+}
+.kanban-card.state-archived:hover {
+  background: var(--lx-surface-card);
+  border-color: var(--lx-border-subtle);
+  box-shadow: none;
+}
+
+/* Archived tag (inline chip on archived cards) */
+.archived-tag {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--lx-text-muted);
+  border: 1px solid var(--lx-border-subtle);
+  border-radius: 4px;
+  padding: 1px 6px;
+  white-space: nowrap;
+}
+
 .card-title {
   font-size: 14px;
   font-weight: 600;
@@ -1038,6 +1063,23 @@ a:hover { color: var(--lx-text-link-hover); }
   border-color: var(--lx-border-default);
 }
 .btn-danger:hover { background: var(--lx-bg-danger-subtle); }
+
+/* Compact action buttons: consistent 28px height for paired Cancel/Save rows */
+.btn-sm {
+  height: 28px;
+  padding: 0 10px;
+  font-size: 12px;
+}
+.btn-icon-sm {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  flex-shrink: 0;
+}
+.btn-icon-sm svg {
+  width: 13px;
+  height: 13px;
+}
 
 /* ---- Nav / App Shell ---- */
 .app-nav {
