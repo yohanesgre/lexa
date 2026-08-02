@@ -238,9 +238,112 @@ CREATE INDEX idx_swimlanes_proj  ON swimlanes(project_id, position);
 CREATE INDEX idx_wiki_project    ON wiki_pages(project_id);
 CREATE INDEX idx_wiki_parent     ON wiki_pages(parent_id) WHERE parent_id IS NOT NULL;
 -- tasks.github_issue_id and api_keys.key_hash are indexed by their UNIQUE constraints.
+
+-- ============================================================
+-- Forge: runtime agents + persisted document sources (migration 0011)
+-- ============================================================
+-- runtimes: daemons that run agent CLIs (opencode/hermes) and poll for tasks.
+-- forge_tasks: the writing-assist queue (created from editors, claimed by a
+--   runtime, streamed/completed by the daemon).
+-- document_sources: persisted per-document sources (wiki page or external URL)
+--   that Forge grounds its output in.
+CREATE TABLE runtimes (
+  id         TEXT PRIMARY KEY,
+  name       TEXT NOT NULL,
+  provider   TEXT NOT NULL CHECK (provider IN ('opencode', 'hermes', 'command-code')),
+  status     TEXT NOT NULL DEFAULT 'offline' CHECK (status IN ('online', 'offline')),
+  hostname   TEXT NOT NULL DEFAULT '',
+  last_seen  TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE forge_tasks (
+  id            TEXT PRIMARY KEY,
+  runtime_id    TEXT REFERENCES runtimes(id) ON DELETE SET NULL,
+  project_id    TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  document_type TEXT NOT NULL CHECK (document_type IN ('task', 'wiki')),
+  document_id   TEXT NOT NULL,
+  action        TEXT NOT NULL CHECK (action IN ('continue', 'rewrite', 'summarize', 'expand', 'grammar')),
+  selection     TEXT NOT NULL DEFAULT '',
+  doc_context   TEXT NOT NULL DEFAULT '',
+  status        TEXT NOT NULL DEFAULT 'queued'
+                  CHECK (status IN ('queued', 'running', 'completed', 'failed', 'cancelled')),
+  result        TEXT,
+  error         TEXT,
+  created_at    TEXT NOT NULL DEFAULT (datetime('now')),
+  started_at    TEXT,
+  finished_at   TEXT
+);
+CREATE INDEX idx_forge_tasks_status ON forge_tasks(status, created_at);
+
+CREATE TABLE document_sources (
+  id            TEXT PRIMARY KEY,
+  project_id    TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  document_type TEXT NOT NULL CHECK (document_type IN ('task', 'wiki')),
+  document_id   TEXT NOT NULL,
+  kind          TEXT NOT NULL CHECK (kind IN ('wiki', 'external')),
+  title         TEXT NOT NULL DEFAULT '',
+  ref           TEXT NOT NULL,          -- wiki page slug or external URL
+  created_at    TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE(document_type, document_id, kind, ref)
+);
+CREATE INDEX idx_sources_document ON document_sources(document_type, document_id);
+
+-- ============================================================
+-- Task links: subtask_of / blocked_by / related_to (migration 0012)
+-- ============================================================
+-- Directed links between tasks. Semantics:
+--   subtask_of : from = child, to = parent. Child inherits parent's column;
+--                moving a parent cascades to children; deleting a parent with
+--                children is blocked (HAS_CHILDREN); cycles are rejected.
+--   blocked_by : from = blocked task, to = blocker. Informational only.
+--   related_to : symmetric display, stored once (from→to).
+CREATE TABLE task_links (
+  id           TEXT PRIMARY KEY,
+  project_id   TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  from_task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+  to_task_id   TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+  relation     TEXT NOT NULL CHECK (relation IN ('subtask_of', 'blocked_by', 'related_to')),
+  created_at   TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE(from_task_id, to_task_id, relation)
+);
+CREATE INDEX idx_task_links_from ON task_links(from_task_id);
+CREATE INDEX idx_task_links_to   ON task_links(to_task_id);
+CREATE INDEX idx_task_links_proj ON task_links(project_id);
 ```
 
 ## Design Notes
+
+### Task links (subtask / blocked-by / related)
+One directed `task_links` table covers all three relations (deliberately reversing
+the v1 "cut subtasks" YAGNI — semantics now defined):
+
+- **Subtask placement:** a child's `column_id` equals its parent's. Creating with
+  `parentId` inherits the parent's column/swimlane and inserts the `subtask_of`
+  link. Moving a parent cascades to children (same column, re-keyed after the
+  parent, WIP-bypassed). Cycle guard: a `subtask_of` link whose target is a
+  descendant of `from` is rejected (`TASK_LINK_CYCLE`).
+- **Blocked-by:** informational — card warning dot + tooltip, listed in detail.
+  No move guard.
+- **Related-to:** symmetric display, stored once.
+- **@-autocomplete:** `GET /projects/:slug/tasks/search?q=` backs the add-link
+  dropdown (title LIKE, excludes archived + self, capped at 10).
+
+### Forge (runtime agent writing assistant)
+Forge is the AI writing button in the task/wiki editors. A **daemon** on a machine
+with agent CLIs installed (opencode/hermes) registers as a `runtimes` row, polls
+`forge_tasks`, spawns the CLI in one-shot mode per task, and reports the result.
+
+- **Task lifecycle:** `queued` → (daemon claims) `running` → `completed`/`failed`.
+  FIFO claim: the daemon updates the row conditionally (`WHERE status='queued'`);
+  a lost race returns null and the daemon polls again.
+- **`document_sources`** persist per document (task or wiki page). `kind=wiki`
+  stores the wiki page **slug** in `ref`; `kind=external` stores the URL. Forge
+  resolves wiki sources to page content server-side; external URLs are fetched
+  with an **SSRF guard** (DNS resolve → reject private/loopback/link-local/CGNAT).
+- **Auth:** browser calls use the normal Bearer API key; daemon endpoints
+  (`/api/forge/daemon/*`, `/api/forge/runtimes/*`) accept `x-forge-token`
+  (`LXK_FORGE_DAEMON_TOKEN`) or a Bearer key.
 
 ### Task field options (custom priority/type)
 Priority and type are per-project option lists (`priority_options` / `type_options`), not global enums. Tasks reference option IDs via `tasks.priority` / `tasks.type` (FK to the option tables; SQLite enforces membership).
@@ -311,5 +414,5 @@ Every mutation is either a single statement or a SQLite transaction (`server/db/
 | Cut | Replacement |
 |-----|-------------|
 | `labels` + `task_labels` tables, 3 routes, 2 MCP tools | `type_options` (customizable per-project task types) covers game-dev categorization |
-| `tasks.parent_id` (subtasks) | Flat tasks; breakdown lives in the TipTap description checklist |
+| ~~`tasks.parent_id` (subtasks)~~ **restored 2026-08** | Flat tasks were the v1 cut; subtasks are now first-class via `task_links(relation='subtask_of')` with defined semantics (see Design Notes) |
 | `column_policies` table (3 rule types) | `columns.required_fields` JSON array — the only enforceable policy without a roles system or column-entry timestamps |

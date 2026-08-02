@@ -259,3 +259,113 @@ export function rowToTask(row: TaskRow, columnGithubState?: "open" | "closed" | 
     updatedAt: row.updated_at,
   };
 }
+
+export interface RuntimeRow {
+  id: string;
+  name: string;
+  provider: "opencode" | "hermes" | "command-code";
+  status: "online" | "offline";
+  hostname: string;
+  last_seen: string | null;
+  created_at: string;
+}
+
+export function rowToRuntime(row: RuntimeRow): {
+  id: string; name: string; provider: "opencode" | "hermes" | "command-code"; status: "online" | "offline"; hostname: string; lastSeen: string | null; createdAt: string;
+} {
+  return {
+    id: row.id,
+    name: row.name,
+    provider: row.provider,
+    status: row.status,
+    hostname: row.hostname,
+    lastSeen: row.last_seen,
+    createdAt: row.created_at,
+  };
+}
+
+export interface ForgeTaskRow {
+  id: string;
+  runtime_id: string | null;
+  project_id: string;
+  document_type: "task" | "wiki";
+  document_id: string;
+  action: "continue" | "rewrite" | "summarize" | "expand" | "grammar";
+  selection: string;
+  doc_context: string;
+  status: "queued" | "running" | "completed" | "failed" | "cancelled";
+  result: string | null;
+  error: string | null;
+  created_at: string;
+  started_at: string | null;
+  finished_at: string | null;
+}
+
+export function rowToForgeTask(row: ForgeTaskRow): {
+  id: string; runtimeId: string | null; projectId: string; documentType: "task" | "wiki"; documentId: string; action: "continue" | "rewrite" | "summarize" | "expand" | "grammar"; selection: string; docContext: string; status: "queued" | "running" | "completed" | "failed" | "cancelled"; result: string | null; error: string | null; createdAt: string; startedAt: string | null; finishedAt: string | null;
+} {
+  return {
+    id: row.id,
+    runtimeId: row.runtime_id,
+    projectId: row.project_id,
+    documentType: row.document_type,
+    documentId: row.document_id,
+    action: row.action,
+    selection: row.selection,
+    docContext: row.doc_context,
+    status: row.status,
+    result: row.result,
+    error: row.error,
+    createdAt: row.created_at,
+    startedAt: row.started_at,
+    finishedAt: row.finished_at,
+  };
+}
+
+export interface DocumentSourceRow {
+  id: string;
+  project_id: string;
+  document_type: "task" | "wiki";
+  document_id: string;
+  kind: "wiki" | "external";
+  title: string;
+  ref: string;
+  created_at: string;
+}
+
+export function rowToDocumentSource(row: DocumentSourceRow): {
+  id: string; projectId: string; documentType: "task" | "wiki"; documentId: string; kind: "wiki" | "external"; title: string; ref: string; createdAt: string;
+} {
+  return {
+    id: row.id,
+    projectId: row.project_id,
+    documentType: row.document_type,
+    documentId: row.document_id,
+    kind: row.kind,
+    title: row.title,
+    ref: row.ref,
+    createdAt: row.created_at,
+  };
+}
+
+export interface TaskLinkRow {
+  id: string;
+  project_id: string;
+  from_task_id: string;
+  to_task_id: string;
+  relation: "subtask_of" | "blocked_by" | "related_to";
+  created_at: string;
+}
+
+export function rowToTaskLink(row: TaskLinkRow): {
+  id: string; projectId: string; fromTaskId: string; toTaskId: string; relation: "subtask_of" | "blocked_by" | "related_to"; createdAt: string;
+} {
+  return {
+    id: row.id,
+    projectId: row.project_id,
+    fromTaskId: row.from_task_id,
+    toTaskId: row.to_task_id,
+    relation: row.relation,
+    createdAt: row.created_at,
+  };
+}

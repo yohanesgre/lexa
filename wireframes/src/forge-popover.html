@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Lexa — Forge Popover (AI Writing Assistant)</title>
+  <link rel="stylesheet" href="wireframes.css" />
+</head>
+<body class="bg-app color-primary" style="min-height:100vh;position:relative;">
+
+  <!-- Dimmed editor backdrop -->
+  <div style="position:absolute;inset:0;opacity:0.25;pointer-events:none;overflow:hidden;">
+    <div class="editor-toolbar wiki-toolbar-host" style="border-bottom:1px solid var(--lx-border-default);border-radius:6px 6px 0 0;margin:24px;">
+      <div class="wiki-toolbar-row">
+        <button class="toolbar-btn" title="Bold"><svg viewBox="0 0 24 24" width="16" height="16"><path d="M14 12a4 4 0 0 0 0-8H6v8"/><path d="M15 20a4 4 0 0 0 0-8H6v8Z"/></svg></button>
+        <span class="toolbar-sep"></span>
+        <button class="toolbar-btn active" title="AI writing assistant (Forge)">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="m15 12-8.373 8.373a2.121 2.121 0 1 1-3-3L12 9m7-4 .65-.65a2.121 2.121 0 1 1 3 3L19.003 11M15 5l2 2"/><path d="M6 18 2 22"/></svg>
+          Forge
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Forge Popover: idle state -->
+  <div class="menu-popover" style="position:absolute;top:76px;left:48px;width:340px;">
+    <div class="forge-header" style="display:flex;align-items:center;justify-content:space-between;padding:10px 12px;border-bottom:1px solid var(--lx-border-default);">
+      <span class="text-sm weight-500 color-primary" style="font-family:var(--lx-font-body);">Forge</span>
+      <span class="font-micro text-2xs color-muted" style="text-transform:uppercase;letter-spacing:0.04em;">AI writing assistant</span>
+    </div>
+
+    <!-- Action picker -->
+    <div style="padding:10px 12px;border-bottom:1px solid var(--lx-border-default);">
+      <span class="prop-label" style="display:block;margin-bottom:6px;">Action</span>
+      <div class="flex items-center gap-2" style="flex-wrap:wrap;">
+        <button class="btn btn-ghost" style="height:26px;padding:0 10px;font-size:12px;border-color:var(--lx-border-focus);color:var(--lx-text-primary);">Continue</button>
+        <button class="btn btn-ghost" style="height:26px;padding:0 10px;font-size:12px;">Rewrite</button>
+        <button class="btn btn-ghost" style="height:26px;padding:0 10px;font-size:12px;">Summarize</button>
+        <button class="btn btn-ghost" style="height:26px;padding:0 10px;font-size:12px;">Expand</button>
+        <button class="btn btn-ghost" style="height:26px;padding:0 10px;font-size:12px;">Fix grammar</button>
+      </div>
+    </div>
+
+    <!-- Runtime picker -->
+    <div style="padding:10px 12px;border-bottom:1px solid var(--lx-border-default);">
+      <span class="prop-label" style="display:block;margin-bottom:6px;">Runtime</span>
+      <select class="prop-input" style="width:100%;height:28px;font-size:12px;">
+        <option>dev-mbp · command-code</option>
+        <option>staging-box · hermes</option>
+      </select>
+      <span class="annotation-inline" style="display:block;margin-top:4px;">Which daemon runs this request. Forge always uses the current task/wiki page as its context.</span>
+    </div>
+
+    <!-- Generate -->
+    <div style="padding:10px 12px;display:flex;align-items:center;justify-content:space-between;">
+      <span class="font-micro text-2xs color-muted" style="text-transform:uppercase;letter-spacing:0.04em;">Selection: 142 chars</span>
+      <button class="btn btn-primary" style="height:28px;padding:0 12px;font-size:12px;">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="m15 12-8.373 8.373a2.121 2.121 0 1 1-3-3L12 9m7-4 .65-.65a2.121 2.121 0 1 1 3 3L19.003 11M15 5l2 2"/><path d="M6 18 2 22"/></svg>
+        Generate
+      </button>
+    </div>
+  </div>
+
+  <!-- Forge Popover: running state -->
+  <div class="menu-popover" style="position:absolute;top:76px;left:420px;width:340px;">
+    <div class="forge-header" style="display:flex;align-items:center;justify-content:space-between;padding:10px 12px;border-bottom:1px solid var(--lx-border-default);">
+      <span class="text-sm weight-500 color-primary" style="font-family:var(--lx-font-body);">Forge</span>
+      <span class="font-micro text-2xs color-warning" style="text-transform:uppercase;letter-spacing:0.04em;">Running…</span>
+    </div>
+    <div style="padding:12px;">
+      <div class="flex items-center gap-2 mb-2">
+        <span class="spinner" style="width:12px;height:12px;border-width:2px;"></span>
+        <span class="text-xs color-secondary font-body">dev-mbp · command-code · Continue</span>
+      </div>
+      <div style="background:var(--lx-surface-input);border:1px solid var(--lx-border-default);border-radius:6px;padding:10px 12px;min-height:120px;font-size:13px;line-height:20px;color:var(--lx-text-secondary);font-family:var(--lx-font-body);white-space:pre-wrap;">
+        The furnace zone crash stems from an off-by-one in the chunk coordinate math when transitioning between zones. The stack trace in <span style="color:var(--lx-text-primary);">#107</span> points to <span style="font-family:var(--lx-font-mono);font-size:12px;">TilemapChunkLoader._loadChunk()</span> — the loader assumes chunk indices start at 0, but the streaming system assigns them from the world origin…
+      </div>
+      <div class="flex items-center justify-end gap-2 mt-3">
+        <button class="btn btn-ghost" style="height:26px;padding:0 10px;font-size:12px;">Reject</button>
+        <button class="btn btn-primary" style="height:26px;padding:0 10px;font-size:12px;">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M20 6L9 17l-5-5"/></svg>
+          Accept
+        </button>
+      </div>
+      <span class="annotation-inline" style="display:block;margin-top:6px;">Running: streams agent output. Accept inserts into the editor at the cursor/selection; Reject discards. Esc closes.</span>
+    </div>
+  </div>
+
+  <!-- Annotations -->
+  <div style="position:fixed;bottom:24px;left:24px;z-index:55;display:flex;flex-direction:column;gap:8px;align-items:flex-start;">
+    <span class="annotation-tag">Opens from the Forge toolbar button in task detail + wiki editors.</span>
+    <span class="annotation-tag">Actions: Continue (from cursor) · Rewrite (selected text) · Summarize · Expand · Fix grammar.</span>
+    <span class="annotation-tag">Runtime: pick which daemon runs the request (online runtimes only). Forge uses the current task/wiki page as context.</span>
+    <span class="annotation-tag">Generate → POST /api/forge/tasks → daemon runs agent CLI → streamed result → Accept/Reject.</span>
+    <span class="annotation-tag">Background: closing the popup does NOT cancel a running task — it completes server-side and re-appears here next open.</span>
+    <span class="annotation-tag">Disabled ("coming soon") when LXK_FORGE_ENABLED is unset.</span>
+  </div>
+
+</body>
+</html>

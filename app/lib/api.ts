@@ -1,4 +1,4 @@
-import type { Project, Column, Swimlane, Task, Board, WikiPageMeta, WikiPage, WikiPageRevision, WikiPageRevisionSummary, TipTapDoc, ApiKey, ApiKeyCreateResult, Dashboard, FieldConfig } from "../../shared/types";
+import type { Project, Column, Swimlane, Task, Board, WikiPageMeta, WikiPage, WikiPageRevision, WikiPageRevisionSummary, TipTapDoc, ApiKey, ApiKeyCreateResult, Dashboard, FieldConfig, ForgeTask, DocumentSource, Runtime, TaskLink, TaskLinkSuggestion } from "../../shared/types";
 
 const BASE = "/api";
 
@@ -119,7 +119,7 @@ export function listTasks(slug: string, params?: { columnId?: string; swimlaneId
   return request(`${BASE}/projects/${slug}/tasks${query ? "?" + query : ""}`);
 }
 
-export function createTask(slug: string, input: { columnId: string; swimlaneId: string; title: string; description?: TipTapDoc; priority?: string; type?: string; assignees?: string[] }): Promise<Task> {
+export function createTask(slug: string, input: { columnId: string; swimlaneId: string; title: string; description?: TipTapDoc; priority?: string; type?: string; parentId?: string; assignees?: string[] }): Promise<Task> {
   return request(`${BASE}/projects/${slug}/tasks`, { method: "POST", body: JSON.stringify(input) });
 }
 
@@ -237,4 +237,68 @@ export function addProjectMember(userId: string, projectId: string): Promise<{ p
 
 export function removeProjectMember(userId: string, projectId: string): Promise<void> {
   return request(`${BASE}/admin/users/${userId}/projects/${projectId}`, { method: "DELETE" });
+}
+
+// ── Forge (AI writing assistant) ──
+
+export function createForgeTask(input: {
+  slug: string;
+  documentType: "task" | "wiki";
+  documentId: string;
+  action: string;
+  selection?: string;
+  runtimeId?: string;
+}): Promise<ForgeTask> {
+  return request(`${BASE}/forge/tasks`, { method: "POST", body: JSON.stringify(input) });
+}
+
+export function getForgeTask(id: string): Promise<ForgeTask> {
+  return request(`${BASE}/forge/tasks/${id}`);
+}
+
+export function listForgeTasks(slug: string, documentType: "task" | "wiki", documentId: string): Promise<{ data: ForgeTask[] }> {
+  return request(`${BASE}/forge/tasks?documentType=${documentType}&documentId=${encodeURIComponent(documentId)}`);
+}
+
+export interface RecentForgeTask extends ForgeTask {
+  projectName: string;
+  documentTitle: string;
+}
+
+export function listRecentForgeTasks(): Promise<{ data: RecentForgeTask[] }> {
+  return request(`${BASE}/forge/tasks/recent`);
+}
+
+export function listRuntimes(): Promise<{ data: Runtime[] }> {
+  return request(`${BASE}/forge/runtimes`);
+}
+
+export function listSources(slug: string, documentType: "task" | "wiki", documentId: string): Promise<{ data: DocumentSource[] }> {
+  return request(`${BASE}/projects/${slug}/documents/${documentType}/${documentId}/sources`);
+}
+
+export function addSource(slug: string, documentType: "task" | "wiki", documentId: string, input: { kind: "wiki" | "external"; ref: string }): Promise<DocumentSource> {
+  return request(`${BASE}/projects/${slug}/documents/${documentType}/${documentId}/sources`, { method: "POST", body: JSON.stringify(input) });
+}
+
+export function removeSource(slug: string, documentType: "task" | "wiki", documentId: string, sourceId: string): Promise<void> {
+  return request(`${BASE}/projects/${slug}/documents/${documentType}/${documentId}/sources/${sourceId}`, { method: "DELETE" });
+}
+
+// ── Task links (subtask / blocked-by / related) ──
+
+export function listTaskLinks(slug: string, taskId: string): Promise<{ data: TaskLink[] }> {
+  return request(`${BASE}/projects/${slug}/tasks/${taskId}/links`);
+}
+
+export function addTaskLink(slug: string, taskId: string, input: { toTaskId: string; relation: "subtask_of" | "blocked_by" | "related_to" }): Promise<TaskLink> {
+  return request(`${BASE}/projects/${slug}/tasks/${taskId}/links`, { method: "POST", body: JSON.stringify(input) });
+}
+
+export function removeTaskLink(slug: string, taskId: string, linkId: string): Promise<void> {
+  return request(`${BASE}/projects/${slug}/tasks/${taskId}/links/${linkId}`, { method: "DELETE" });
+}
+
+export function searchTasks(slug: string, q: string, exclude = ""): Promise<{ data: TaskLinkSuggestion[] }> {
+  return request(`${BASE}/projects/${slug}/tasks/search?q=${encodeURIComponent(q)}&exclude=${encodeURIComponent(exclude)}`);
 }

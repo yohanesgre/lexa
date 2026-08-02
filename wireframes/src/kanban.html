@@ -69,6 +69,43 @@
                 <span class="annotation" style="position:absolute;right:6px;bottom:4px;">left-border: type accent</span>
               </div>
 
+              <!-- Card 1b: parent card with collapsed subtasks (chevron) -->
+              <div class="kanban-card" style="border-left:3px solid #22D3EE;">
+                <div class="flex items-center justify-between">
+                  <span class="type-badge type-task">Task</span>
+                  <span class="flex items-center gap-1">
+                    <span class="priority-dot priority-medium" title="Medium priority"></span>
+                  </span>
+                </div>
+                <div class="card-title mt-2">
+                  <span class="subtask-chevron" style="display:inline-flex;align-items:center;margin-right:4px;color:var(--lx-text-muted);cursor:pointer;">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18l6-6-6-6"/></svg>
+                  </span>
+                  Save game checkpoint system
+                  <span class="font-micro text-2xs color-muted" style="margin-left:6px;">03</span>
+                </div>
+                <div class="card-meta">
+                  <div class="card-assignees">
+                    <div class="avatar">JD</div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Card 1c: expanded subtask child (indented) -->
+              <div class="kanban-card kanban-card-subtask" style="border-left:3px solid #22D3EE;margin-left:16px;opacity:0.85;">
+                <div class="flex items-center justify-between">
+                  <span class="type-badge type-task">Task</span>
+                  <span class="priority-dot priority-low" title="Low priority"></span>
+                </div>
+                <div class="card-title mt-2">Auto-save on zone transition</div>
+                <div class="card-meta">
+                  <div class="card-assignees">
+                    <div class="avatar">JD</div>
+                  </div>
+                </div>
+                <span class="annotation" style="position:absolute;right:6px;bottom:4px;">subtask — indented 16px under parent, slightly dimmed</span>
+              </div>
+
               <!-- Card 2: multi-assignee + multi-GH (out of sync) -->
               <div class="kanban-card" style="border-left:3px solid #FF4444;">
                 <div class="flex items-center justify-between">

@@ -453,6 +453,14 @@ All list endpoints and MCP `list_*`/`search_*` tools: `?limit` (default 50, max 
 | `RequiredFieldMissing` | 422 | `REQUIRED_FIELD` | TipTap-aware emptiness; enforced on create/move/update |
 | `OptionInUse` | 409 | `OPTION_IN_USE` | delete priority/type option still referenced by tasks |
 | `InvalidOption` | 422 | `INVALID_OPTION` | unknown/foreign option id, duplicate label, or empty list |
+| `SourceNotFound` | 404 | `SOURCE_NOT_FOUND` | delete a source that doesn't exist |
+| `SourceFetchError` | 422 | `SOURCE_FETCH_ERROR` | bad URL / SSRF-guard block / unreadable page |
+| `SourceUnreachable` | 422 | `SOURCE_UNREACHABLE` | fetch failed (timeout, DNS, network) |
+| `ForgeTaskNotFound` | 404 | `FORGE_TASK_NOT_FOUND` | |
+| `NoRuntimeOnline` | 409 | `NO_RUNTIME_ONLINE` | create Forge task with no daemon up |
+| `TaskLinkNotFound` | 404 | `TASK_LINK_NOT_FOUND` | delete a link that doesn't exist |
+| `TaskLinkCycle` | 409 | `TASK_LINK_CYCLE` | subtask_of would create a cycle |
+| `InvalidTaskLink` | 422 | `INVALID_TASK_LINK` | self-link or cross-project link |
 | `ConstraintViolation` | 500 | `CONSTRAINT` | internal; `isPositionConflict` variants are retried (create/move) before surfacing |
 | `DbError` | 500 | `DATABASE_ERROR` | |
 | `GithubApiError` | 502 | `GITHUB_API_ERROR` | never fails a user move |
@@ -464,6 +472,9 @@ All list endpoints and MCP `list_*`/`search_*` tools: `?limit` (default 50, max 
 ```
 TaskService        → TaskRepo, ColumnRepo, SwimlaneRepo, ProjectRepo, FieldConfigRepo
 FieldConfigService → FieldConfigRepo, ProjectRepo
+ForgeService       → ForgeRepo, SourceRepo, SourceService, TaskRepo, WikiRepo, ProjectRepo
+SourceService      → SourceRepo, ProjectRepo, WikiRepo
+TaskLinkService    → TaskLinkRepo, TaskRepo, ProjectRepo
 WikiService        → WikiRepo, ProjectRepo
 ProjectService     → ProjectRepo, ColumnRepo, SwimlaneRepo, FieldConfigRepo
 ColumnService      → ColumnRepo

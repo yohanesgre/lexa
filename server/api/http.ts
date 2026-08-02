@@ -28,6 +28,12 @@ import { UserProjectRoleRepo } from "../repos/user-project-role.repo";
 import { DashboardService } from "../services/dashboard.service";
 import { FieldConfigService } from "../services/field-config.service";
 import { FieldConfigRepo } from "../repos/field-config.repo";
+import { ForgeService } from "../services/forge.service";
+import { ForgeRepo } from "../repos/forge.repo";
+import { SourceService } from "../services/source.service";
+import { SourceRepo } from "../repos/source.repo";
+import { TaskLinkService } from "../services/task-link.service";
+import { TaskLinkRepo } from "../repos/task-link.repo";
 import { extractText } from "../../shared/tiptap-text";
 
 const ApiKeySchema = Schema.Struct({
@@ -224,6 +230,159 @@ const fieldConfigGroup = HttpApiGroup.make("field-config")
   .add(HttpApiEndpoint.put("putFieldConfig", "/projects/:slug/field-config")
     .setPath(SlugPath).setPayload(FieldConfigPayload).addSuccess(FieldConfigSchema));
 
+// ── Forge (runtime agent writing assistant) ──
+
+const RuntimeSchema = Schema.Struct({
+  id: Schema.String,
+  name: Schema.String,
+  provider: Schema.Literal("opencode", "hermes", "command-code"),
+  status: Schema.Literal("online", "offline"),
+  hostname: Schema.String,
+  lastSeen: Schema.NullOr(Schema.String),
+  createdAt: Schema.String,
+});
+
+const ForgeTaskSchema = Schema.Struct({
+  id: Schema.String,
+  runtimeId: Schema.NullOr(Schema.String),
+  projectId: Schema.String,
+  documentType: Schema.Literal("task", "wiki"),
+  documentId: Schema.String,
+  action: Schema.Literal("continue", "rewrite", "summarize", "expand", "grammar"),
+  selection: Schema.String,
+  docContext: Schema.String,
+  status: Schema.Literal("queued", "running", "completed", "failed", "cancelled"),
+  result: Schema.NullOr(Schema.String),
+  error: Schema.NullOr(Schema.String),
+  createdAt: Schema.String,
+  startedAt: Schema.NullOr(Schema.String),
+  finishedAt: Schema.NullOr(Schema.String),
+});
+
+const SourceSchema = Schema.Struct({
+  id: Schema.String,
+  projectId: Schema.String,
+  documentType: Schema.Literal("task", "wiki"),
+  documentId: Schema.String,
+  kind: Schema.Literal("wiki", "external"),
+  title: Schema.String,
+  ref: Schema.String,
+  createdAt: Schema.String,
+});
+
+const RegisterRuntimeInput = Schema.Struct({
+  name: Schema.String,
+  provider: Schema.Literal("opencode", "hermes", "command-code"),
+  hostname: Schema.optional(Schema.String),
+});
+
+const HeartbeatInput = Schema.Struct({ runtimeId: Schema.String });
+const ClaimInput = Schema.Struct({ runtimeId: Schema.String });
+const CompleteTaskInput = Schema.Struct({ result: Schema.String });
+const FailTaskInput = Schema.Struct({ error: Schema.String });
+
+const CreateForgeTaskInput = Schema.Struct({
+  slug: Schema.String,
+  documentType: Schema.Literal("task", "wiki"),
+  documentId: Schema.String,
+  action: Schema.Literal("continue", "rewrite", "summarize", "expand", "grammar"),
+  selection: Schema.optional(Schema.String),
+  runtimeId: Schema.optional(Schema.String),   // pick a specific runtime; omitted = any
+});
+
+const ForgeTaskPath = Schema.Struct({ id: Schema.String });
+
+const ForgeTaskListResponse = Schema.Struct({ data: Schema.Array(ForgeTaskSchema) });
+
+const RecentForgeTaskSchema = Schema.extend(
+  ForgeTaskSchema,
+  Schema.Struct({ projectName: Schema.String, documentTitle: Schema.String })
+);
+const RecentForgeTaskListResponse = Schema.Struct({ data: Schema.Array(RecentForgeTaskSchema) });
+
+const DocumentPath = Schema.Struct({
+  slug: Schema.String,
+  type: Schema.Literal("task", "wiki"),
+  id: Schema.String,
+});
+
+const AddSourceInput = Schema.Struct({
+  kind: Schema.Literal("wiki", "external"),
+  ref: Schema.String,
+});
+
+const SourceListResponse = Schema.Struct({ data: Schema.Array(SourceSchema) });
+
+// ── Task links (subtask / blocked-by / related) ──
+
+const TaskLinkSchema = Schema.Struct({
+  id: Schema.String,
+  projectId: Schema.String,
+  fromTaskId: Schema.String,
+  toTaskId: Schema.String,
+  relation: Schema.Literal("subtask_of", "blocked_by", "related_to"),
+  createdAt: Schema.String,
+});
+
+const TaskLinkListResponse = Schema.Struct({ data: Schema.Array(TaskLinkSchema) });
+
+const AddTaskLinkInput = Schema.Struct({
+  toTaskId: Schema.String,
+  relation: Schema.Literal("subtask_of", "blocked_by", "related_to"),
+});
+
+const TaskLinkSuggestionSchema = Schema.Struct({
+  id: Schema.String,
+  title: Schema.String,
+  columnName: Schema.String,
+  type: Schema.String,
+  priority: Schema.String,
+});
+
+const TaskSearchResponse = Schema.Struct({ data: Schema.Array(TaskLinkSuggestionSchema) });
+
+const TaskLinkPath = Schema.Struct({ slug: Schema.String, id: Schema.String });
+
+const taskLinksGroup = HttpApiGroup.make("task-links")
+  .add(HttpApiEndpoint.get("listTaskLinks", "/projects/:slug/tasks/:id/links")
+    .setPath(TaskLinkPath).addSuccess(TaskLinkListResponse))
+  .add(HttpApiEndpoint.post("addTaskLink", "/projects/:slug/tasks/:id/links")
+    .setPath(TaskLinkPath).setPayload(AddTaskLinkInput).addSuccess(TaskLinkSchema, { status: 201 }))
+  .add(HttpApiEndpoint.del("removeTaskLink", "/projects/:slug/tasks/:id/links/:linkId")
+    .setPath(Schema.Struct({ slug: Schema.String, id: Schema.String, linkId: Schema.String }))
+    .addSuccess(Schema.UndefinedOr(Schema.Void)))
+  .add(HttpApiEndpoint.get("searchTasks", "/projects/:slug/tasks/search")
+    .setPath(SlugPath).addSuccess(TaskSearchResponse));
+
+const forgeGroup = HttpApiGroup.make("forge")
+  .add(HttpApiEndpoint.post("registerRuntime", "/forge/runtimes/register")
+    .setPayload(RegisterRuntimeInput).addSuccess(RuntimeSchema, { status: 201 }))
+  .add(HttpApiEndpoint.post("heartbeat", "/forge/daemon/heartbeat")
+    .setPayload(HeartbeatInput).addSuccess(Schema.Struct({ ok: Schema.Boolean })))
+  .add(HttpApiEndpoint.post("claimTask", "/forge/daemon/claim")
+    .setPayload(ClaimInput).addSuccess(Schema.NullOr(ForgeTaskSchema)))
+  .add(HttpApiEndpoint.get("listRuntimes", "/forge/runtimes")
+    .addSuccess(Schema.Struct({ data: Schema.Array(RuntimeSchema) })))
+  .add(HttpApiEndpoint.post("createForgeTask", "/forge/tasks")
+    .setPayload(CreateForgeTaskInput).addSuccess(ForgeTaskSchema, { status: 201 }))
+  .add(HttpApiEndpoint.get("getForgeTask", "/forge/tasks/:id")
+    .setPath(ForgeTaskPath).addSuccess(ForgeTaskSchema))
+  .add(HttpApiEndpoint.get("listForgeTasks", "/forge/tasks")
+    .setPath(SlugPath).addSuccess(ForgeTaskListResponse))
+  .add(HttpApiEndpoint.get("listRecentForgeTasks", "/forge/tasks/recent")
+    .addSuccess(RecentForgeTaskListResponse))
+  .add(HttpApiEndpoint.post("completeForgeTask", "/forge/daemon/tasks/:id/complete")
+    .setPath(ForgeTaskPath).setPayload(CompleteTaskInput).addSuccess(ForgeTaskSchema))
+  .add(HttpApiEndpoint.post("failForgeTask", "/forge/daemon/tasks/:id/fail")
+    .setPath(ForgeTaskPath).setPayload(FailTaskInput).addSuccess(ForgeTaskSchema))
+  .add(HttpApiEndpoint.get("listSources", "/projects/:slug/documents/:type/:id/sources")
+    .setPath(DocumentPath).addSuccess(SourceListResponse))
+  .add(HttpApiEndpoint.post("addSource", "/projects/:slug/documents/:type/:id/sources")
+    .setPath(DocumentPath).setPayload(AddSourceInput).addSuccess(SourceSchema, { status: 201 }))
+  .add(HttpApiEndpoint.del("removeSource", "/projects/:slug/documents/:type/:id/sources/:sourceId")
+    .setPath(Schema.Struct({ slug: Schema.String, type: Schema.Literal("task", "wiki"), id: Schema.String, sourceId: Schema.String }))
+    .addSuccess(Schema.UndefinedOr(Schema.Void)));
+
 const WikiPageSchema = Schema.Struct({
   id: Schema.String,
   projectId: Schema.String,
@@ -349,6 +508,7 @@ const CreateTaskPayload = Schema.Struct({
   description: Schema.optional(Schema.Any),
   priority: Schema.optional(Schema.String),
   type: Schema.optional(Schema.String),
+  parentId: Schema.optional(Schema.String),
   assignees: Schema.optional(Schema.Array(Schema.String)),
 });
 
@@ -374,6 +534,7 @@ const BoardSchema = Schema.Struct({
   columns: Schema.Array(ColumnSchema),
   swimlanes: Schema.Array(SwimlaneSchema),
   fieldConfig: FieldConfigSchema,
+  links: Schema.Array(TaskLinkSchema),
   tasks: Schema.Array(TaskSchema),
 });
 
@@ -518,6 +679,8 @@ export const LexaApi = HttpApi.make("lexa")
   .add(columnsGroup)
   .add(swimlanesGroup)
   .add(fieldConfigGroup)
+  .add(forgeGroup)
+  .add(taskLinksGroup)
   .add(tasksGroup)
   .add(boardGroup)
   .add(wikiGroup)
@@ -811,6 +974,170 @@ const fieldConfigLive = HttpApiBuilder.group(LexaApi, "field-config", (handlers)
     )
 );
 
+const forgeLive = HttpApiBuilder.group(LexaApi, "forge", (handlers) =>
+  handlers
+    .handle("registerRuntime", (req) =>
+      respond(Effect.gen(function* () {
+        const service = yield* ForgeService;
+        const runtime = yield* service.registerRuntime({
+          name: req.payload.name,
+          provider: req.payload.provider,
+          hostname: req.payload.hostname ?? "",
+        });
+        return runtime;
+      }))
+    )
+    .handle("heartbeat", (req) =>
+      respond(Effect.gen(function* () {
+        const service = yield* ForgeService;
+        yield* service.heartbeat(req.payload.runtimeId);
+        return { ok: true as const };
+      }))
+    )
+    .handle("claimTask", (req) =>
+      respond(Effect.gen(function* () {
+        const service = yield* ForgeService;
+        return yield* service.claimNext(req.payload.runtimeId);
+      }))
+    )
+    .handle("listRuntimes", () =>
+      respond(Effect.gen(function* () {
+        const service = yield* ForgeService;
+        const runtimes = yield* service.listRuntimes();
+        return { data: runtimes };
+      }))
+    )
+    .handle("createForgeTask", (req) =>
+      respond(Effect.gen(function* () {
+        const projectService = yield* ProjectService;
+        const service = yield* ForgeService;
+        const project = yield* projectService.findBySlug(req.payload.slug);
+        const task = yield* service.create({
+          projectId: project.id,
+          documentType: req.payload.documentType,
+          documentId: req.payload.documentId,
+          action: req.payload.action,
+          selection: req.payload.selection ?? "",
+          runtimeId: req.payload.runtimeId,
+        });
+        return task;
+      }))
+    )
+    .handle("getForgeTask", (req) =>
+      respond(Effect.gen(function* () {
+        const service = yield* ForgeService;
+        return yield* service.getById(req.path.id);
+      }))
+    )
+    .handle("listForgeTasks", (req) =>
+      respond(Effect.gen(function* () {
+        const projectService = yield* ProjectService;
+        const service = yield* ForgeService;
+        const project = yield* projectService.findBySlug(req.path.slug);
+        const q = searchParams(req);
+        const documentType = (q.get("documentType") ?? "task") as "task" | "wiki";
+        const documentId = q.get("documentId") ?? "";
+        const tasks = yield* service.listForDocument(project.id, documentType, documentId);
+        return { data: tasks };
+      }))
+    )
+    .handle("listRecentForgeTasks", () =>
+      respond(Effect.gen(function* () {
+        const service = yield* ForgeService;
+        const tasks = yield* service.listRecent(10);
+        return { data: tasks };
+      }))
+    )
+    .handle("completeForgeTask", (req) =>
+      respond(Effect.gen(function* () {
+        const service = yield* ForgeService;
+        return yield* service.complete(req.path.id, req.payload.result);
+      }))
+    )
+    .handle("failForgeTask", (req) =>
+      respond(Effect.gen(function* () {
+        const service = yield* ForgeService;
+        return yield* service.fail(req.path.id, req.payload.error);
+      }))
+    )
+    .handle("listSources", (req) =>
+      respond(Effect.gen(function* () {
+        const projectService = yield* ProjectService;
+        const service = yield* SourceService;
+        const project = yield* projectService.findBySlug(req.path.slug);
+        const sources = yield* service.findByDocument(project.id, req.path.type, req.path.id);
+        return { data: sources };
+      }))
+    )
+    .handle("addSource", (req) =>
+      respond(Effect.gen(function* () {
+        const projectService = yield* ProjectService;
+        const service = yield* SourceService;
+        const project = yield* projectService.findBySlug(req.path.slug);
+        const source = yield* service.add({
+          projectId: project.id,
+          documentType: req.path.type,
+          documentId: req.path.id,
+          kind: req.payload.kind,
+          ref: req.payload.ref,
+        });
+        return source;
+      }))
+    )
+    .handle("removeSource", (req) =>
+      respond(Effect.gen(function* () {
+        const service = yield* SourceService;
+        yield* service.remove(req.path.sourceId);
+        return undefined;
+      }))
+    )
+);
+
+const taskLinksLive = HttpApiBuilder.group(LexaApi, "task-links", (handlers) =>
+  handlers
+    .handle("listTaskLinks", (req) =>
+      respond(Effect.gen(function* () {
+        const projectService = yield* ProjectService;
+        const service = yield* TaskLinkService;
+        const project = yield* projectService.findBySlug(req.path.slug);
+        const links = yield* service.findByTask(project.id, req.path.id);
+        return { data: links };
+      }))
+    )
+    .handle("addTaskLink", (req) =>
+      respond(Effect.gen(function* () {
+        const projectService = yield* ProjectService;
+        const service = yield* TaskLinkService;
+        const project = yield* projectService.findBySlug(req.path.slug);
+        const link = yield* service.add({
+          projectId: project.id,
+          fromTaskId: req.path.id,
+          toTaskId: req.payload.toTaskId,
+          relation: req.payload.relation,
+        });
+        return link;
+      }))
+    )
+    .handle("removeTaskLink", (req) =>
+      respond(Effect.gen(function* () {
+        const service = yield* TaskLinkService;
+        yield* service.remove(req.path.linkId);
+        return undefined;
+      }))
+    )
+    .handle("searchTasks", (req) =>
+      respond(Effect.gen(function* () {
+        const projectService = yield* ProjectService;
+        const service = yield* TaskLinkService;
+        const project = yield* projectService.findBySlug(req.path.slug);
+        const q = searchParams(req).get("q") ?? "";
+        const exclude = searchParams(req).get("exclude") ?? "";
+        const suggestions = yield* service.search(project.id, q, exclude);
+        return { data: suggestions };
+      }))
+    )
+);
+
 const tasksLive = HttpApiBuilder.group(LexaApi, "tasks", (handlers) =>
   handlers
     .handle("listTasks", (req) =>
@@ -843,7 +1170,8 @@ const tasksLive = HttpApiBuilder.group(LexaApi, "tasks", (handlers) =>
           projectId: project.id, columnId: req.payload.columnId,
           swimlaneId: req.payload.swimlaneId, title: req.payload.title,
           description: req.payload.description, priority: req.payload.priority,
-          type: req.payload.type, assignees: req.payload.assignees,
+          type: req.payload.type, parentId: req.payload.parentId,
+          assignees: req.payload.assignees,
         });
         return formatTask(task);
       }))
@@ -907,10 +1235,12 @@ const boardLive = HttpApiBuilder.group(LexaApi, "board", (handlers) =>
       const swimlaneService = yield* SwimlaneService;
       const taskService = yield* TaskService;
       const fieldConfigService = yield* FieldConfigService;
+      const taskLinkRepo = yield* TaskLinkRepo;
       const project = yield* projectService.findBySlug(req.path.slug);
       const columns = yield* columnService.findByProject(project.id);
       const swimlanes = yield* swimlaneService.findByProject(project.id);
       const fieldConfig = yield* fieldConfigService.findByProject(project.id);
+      const links = yield* taskLinkRepo.findByProject(project.id);
       const includeArchived = searchParams(req).get("includeArchived") === "true";
       const tasks = yield* taskService.findAllByProject(project.id, { includeArchived });
       return {
@@ -918,6 +1248,7 @@ const boardLive = HttpApiBuilder.group(LexaApi, "board", (handlers) =>
         columns: columns.map(formatColumn),
         swimlanes: swimlanes.map(formatSwimlane),
         fieldConfig,
+        links,
         tasks: tasks.map(formatTask),
       };
     }))
@@ -1184,6 +1515,9 @@ export function createApiHandler(dbPath: string) {
     SwimlaneRepo.Default, SwimlaneService.Default,
     TaskRepo.Default, TaskService.Default,
     FieldConfigRepo.Default, FieldConfigService.Default,
+    ForgeRepo.Default, ForgeService.Default,
+    SourceRepo.Default, SourceService.Default,
+    TaskLinkRepo.Default, TaskLinkService.Default,
     WikiRepo.Default, WikiService.Default,
     ApiKeyRepo.Default, ApiKeyService.Default,
     UserRepo.Default, UserService.Default,
@@ -1191,7 +1525,7 @@ export function createApiHandler(dbPath: string) {
     DashboardService.Default,
   );
   const handlerLayer = Layer.mergeAll(
-    healthLive, setupLive, projectsLive, columnsLive, swimlanesLive, fieldConfigLive, tasksLive, boardLive, wikiLive, apiKeysLive, adminLive, dashboardLive,
+    healthLive, setupLive, projectsLive, columnsLive, swimlanesLive, fieldConfigLive, forgeLive, taskLinksLive, tasksLive, boardLive, wikiLive, apiKeysLive, adminLive, dashboardLive,
   ).pipe(Layer.provide(Layer.provide(serviceLayer, Layer.mergeAll(dbLayer, LoggerLayer))), Layer.provide(dbLayer));
   const merged = Layer.mergeAll(apiLayer, handlerLayer);
   const { handler } = HttpApiBuilder.toWebHandler(merged as unknown as Parameters<typeof HttpApiBuilder.toWebHandler>[0]);
