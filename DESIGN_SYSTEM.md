@@ -720,7 +720,6 @@ Keyboard:   Enter in the editor finishes (unless IME composing); Esc reverts. Bl
 Layout: the editor block sits flush with the slideover body — no `pt-4` gap, no outer card box. The edit-mode header row + toolbar strip share the editor's top border; only the inner editor carries the focus border + glow. Create mode renders the description editor chrome-less (no header) — the footer "Create task" remains the single commit point.
 
 ### 5.9i Task Field Options (Board Settings — Priorities & Types)
-
 Per-project customization of the two task fields. Lives in the Board Settings modal (see `wireframes/kanban-settings-modal.html`), between Columns and Swimlanes:
 
 ```
@@ -736,6 +735,71 @@ Colors:   same color swatch palette as ColumnForm
 - Cards, slideover property bar, inline-add form, and filter popover all render options from the project's field-config (label + color), never hardcoded enums.
 - Priority dot stays an 8px LED; a custom color renders as a solid dot (only the legacy default "Low" uses the hollow ring).
 - The board fetch (`GET /board`) carries `fieldConfig`, so every surface resolves labels/colors from one source without extra requests.
+
+### 5.9j Forge (AI Writing Assistant)
+
+The Forge button lives in the shared editor toolbar (task detail + wiki), see `wireframes/forge-popover.html`:
+
+```
+Trigger:   toolbar "Forge" button (hammer icon). Disabled + "coming soon"
+           tooltip when the server has no forge support / no daemon online.
+Popover:   Action chips — Continue · Rewrite · Summarize · Expand · Fix grammar.
+           Runtime dropdown — which online daemon runs the request (name · provider).
+           Generate → POST /api/forge/tasks → daemon runs the agent CLI →
+           streamed result → Accept / Reject.
+Context:   Forge always uses the current task/wiki page as its context (no
+           per-invocation source picker in the popover).
+Accept:    Replaces the selection (or inserts at cursor) with the result.
+Background: closing the popup does NOT cancel a running task — it completes
+           server-side and re-appears in the popover on the next open.
+States:    idle → running (spinner + "Agent working…") → completed (result
+           box) / failed (error box) → accept/reject.
+```
+
+Sources (task detail + wiki page view): a `Sources` section lists persisted
+sources (wiki pages with a book icon, external URLs with a globe icon) with an
+inline add box. Wiki pages are searched by title; URLs are fetched server-side
+with an SSRF guard (private/loopback IPs blocked). The same section appears
+inside the Forge popover.
+
+### 5.9k Task Links (Subtask / Blocked-by / Related)
+
+See `wireframes/task-detail.html` (Links section) + `kanban.html` (subtask cards):
+
+```
+Subtask:   parent card shows a chevron + child count (e.g. "03"). Clicking the
+           chevron collapses/expands children. Children render as cards
+           indented 16px under the parent, slightly dimmed (kanban-card-subtask).
+Blocked:   card shows an amber warning dot (sync-diverged) with tooltip
+           "Blocked by <title>". Informational — no move restriction.
+Related:   symmetric "related" row in the Links section.
+Add:       "Add link" field in the Links section — type @ or a title → task
+           suggestion dropdown (title + column). Relation dropdown beside the
+           field (Related to / Subtask of / Blocked by). Rows show a relation
+           label + title + remove ×.
+```
+
+- Subtask children inherit the parent's column; moving a parent cascades to its
+  children. Deleting a parent with children is blocked.
+- Board cards render subtask grouping + blocked dots from `board.links` (no
+  extra fetches).
+
+### 5.9l Forge Runtimes (Settings)
+
+A read-only table on the Settings page (between API Keys and Admins), see
+`wireframes/settings.html`:
+
+```
+Section:  "Forge Runtimes" (Global scope tag)
+Table:    Name | Provider | Hostname | Status | Last seen
+Status:   online = sync-synced dot + "Online" (success green);
+          offline = sync-unlinked dot + "Offline" (muted)
+Empty:    dashed box — "No runtimes yet" + `bun run forge:daemon` code hint
+Refresh:  polls every 30s (runtimes self-register + heartbeat)
+```
+
+- Read-only by design: daemons self-register and heartbeat; a live daemon
+  re-registers on its next poll, so no remove action is offered.
 
 ---
 

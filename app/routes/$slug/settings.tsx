@@ -2,7 +2,7 @@ import { useState, useRef, useEffect } from "react";
 import { createFileRoute, useParams } from "@tanstack/react-router";
 import { AlertTriangle, Check, Copy, Key, Plus, Trash2, Search, UserPlus, Users } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
-import { useApiKeys, useCreateApiKey, useDeleteApiKey, useUsers, useUpdateUserRole, useProjectMembers, useAddProjectMember, useRemoveProjectMember, useDeleteProject } from "../../lib/queries";
+import { useApiKeys, useCreateApiKey, useDeleteApiKey, useUsers, useUpdateUserRole, useProjectMembers, useAddProjectMember, useRemoveProjectMember, useDeleteProject, useRuntimes } from "../../lib/queries";
 import * as api from "../../lib/api";
 
 function formatRelative(iso: string): string {
@@ -355,6 +355,7 @@ function SettingsPage() {
   const { data: keys = [], isLoading, isError } = useApiKeys();
   const createKey = useCreateApiKey();
   const deleteKey = useDeleteApiKey();
+  const { data: runtimes = [], isLoading: runtimesLoading, isError: runtimesError } = useRuntimes();
   const { data: users = [] } = useUsers();
   const demote = useUpdateUserRole();
   const admins = users.filter((u) => u.role === "admin");
@@ -475,6 +476,71 @@ function SettingsPage() {
             </button>
           </div>
         </div>
+      </section>
+
+      {/* Forge Runtimes (global) */}
+      <section className="mb-8">
+        <div className="flex items-center justify-between mb-3">
+          <h2 className="font-display text-lg font-medium text-lx-text-primary">Forge Runtimes</h2>
+          <span className="font-micro text-2xs text-lx-text-muted uppercase tracking-[0.04em]">Global scope</span>
+        </div>
+        <p className="text-sm text-lx-text-secondary mb-4" style={{ maxWidth: 560 }}>
+          Machines running the Forge daemon (AI writing assistant). The daemon spawns the installed agent CLI (opencode / hermes) when a Forge task is queued.
+        </p>
+
+        {runtimesLoading ? (
+          <div className="text-sm text-lx-text-muted py-8 text-center">Loading runtimes…</div>
+        ) : runtimesError ? (
+          <div className="text-sm text-lx-text-danger py-8 text-center">Failed to load runtimes.</div>
+        ) : runtimes.length === 0 ? (
+          <div className="flex flex-col items-center gap-1.5 text-center mb-4" style={{ background: "var(--lx-surface-card)", border: "1px dashed var(--lx-border-strong)", borderRadius: 8, padding: 24 }}>
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} className="text-lx-text-muted"><rect x="4" y="4" width="16" height="16" rx="2" /><rect x="9" y="9" width="6" height="6" /></svg>
+            <div className="text-sm font-medium text-lx-text-primary mt-1">No runtimes yet</div>
+            <p className="text-xs text-lx-text-secondary" style={{ maxWidth: 360 }}>
+              Start the Forge daemon on a machine with opencode or hermes installed:
+            </p>
+            <code className="font-mono text-xs" style={{ background: "var(--lx-surface-input)", border: "1px solid var(--lx-border-default)", borderRadius: 4, padding: "6px 10px", color: "var(--lx-text-secondary)", marginTop: 8, display: "inline-block" }}>
+              bun run forge:daemon
+            </code>
+          </div>
+        ) : (
+          <div style={{ background: "var(--lx-surface-card)", border: "1px solid var(--lx-border-default)", borderRadius: 8, overflow: "hidden", marginBottom: 16 }}>
+            <table className="settings-table">
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Provider</th>
+                  <th>Hostname</th>
+                  <th>Status</th>
+                  <th>Last seen</th>
+                </tr>
+              </thead>
+              <tbody>
+                {runtimes.map((r) => (
+                  <tr key={r.id}>
+                    <td>
+                      <div className="flex items-center gap-2">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} className="text-lx-text-muted flex-shrink-0"><rect x="4" y="4" width="16" height="16" rx="2" /><rect x="9" y="9" width="6" height="6" /></svg>
+                        <span className="text-sm font-medium">{r.name}</span>
+                      </div>
+                    </td>
+                    <td className="text-xs text-lx-text-secondary">{r.provider}</td>
+                    <td className="font-mono text-xs text-lx-text-secondary">{r.hostname || "—"}</td>
+                    <td>
+                      <span className="flex items-center gap-2">
+                        <span className={r.status === "online" ? "sync-dot sync-synced" : "sync-dot sync-unlinked"} />
+                        <span className={`font-micro text-2xs uppercase tracking-[0.04em] ${r.status === "online" ? "text-lx-text-success" : "text-lx-text-muted"}`}>
+                          {r.status === "online" ? "Online" : "Offline"}
+                        </span>
+                      </span>
+                    </td>
+                    <td className="text-xs text-lx-text-secondary">{r.lastSeen ? formatRelative(r.lastSeen) : <span className="text-lx-text-muted">Never</span>}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </section>
 
       {reveal && (

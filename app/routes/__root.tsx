@@ -6,6 +6,7 @@ import { useProjects } from "../lib/queries";
 import { ModalStackProvider } from "../components/ui/ModalStack";
 import { ToastProvider } from "../components/ui/Toast";
 import { ProjectSelectionProvider, useProjectSelection } from "../lib/project-selection";
+import { ForgeStatus } from "../components/forge/ForgeStatus";
 
 export const Route = createRootRoute({
   head: () => ({
@@ -246,6 +247,7 @@ function AppShell() {
           </div>
           <div className="nav-spacer" />
           <div className="nav-right">
+            <ForgeStatus />
             <ProjectSwitcher routeType={routeType} />
             <UserProfile />
           </div>

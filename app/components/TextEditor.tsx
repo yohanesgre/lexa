@@ -1,4 +1,4 @@
-import { useRef, useMemo } from "react";
+import { useRef, useMemo, useState } from "react";
 import { useEditor, EditorContent } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
 import Highlight from "@tiptap/extension-highlight";
@@ -9,6 +9,7 @@ import Placeholder from "@tiptap/extension-placeholder";
 import type { TipTapDoc } from "../../shared/types";
 import type { JSONContent } from "@tiptap/core";
 import { cn } from "./ui/cn";
+import { ForgePopover } from "./forge/ForgePopover";
 
 export const textEditorExtensions = [
   StarterKit.configure({
@@ -31,6 +32,13 @@ interface TextEditorProps {
   editorProps?: Record<string, unknown>;
   className?: string;
   extensions?: typeof textEditorExtensions;
+  // Forge (AI writing assistant) wiring
+  forge?: {
+    slug: string;
+    documentType: "task" | "wiki";
+    documentId: string;
+    onAccept?: (text: string) => void;
+  };
 }
 
 function ToolbarButton({
@@ -77,7 +85,31 @@ function setLink(editor: NonNullable<ReturnType<typeof useEditor>>) {
   editor.chain().focus().extendMarkRange("link").setLink({ href }).run();
 }
 
-export function Toolbar({ editor, headingLevel }: { editor: NonNullable<ReturnType<typeof useEditor>>; headingLevel: number }) {
+export function Toolbar({
+  editor,
+  headingLevel,
+  forge,
+}: {
+  editor: NonNullable<ReturnType<typeof useEditor>>;
+  headingLevel: number;
+  forge?: TextEditorProps["forge"];
+}) {
+  const [forgeOpen, setForgeOpen] = useState(false);
+  const [forgeAnchor, setForgeAnchor] = useState<DOMRect | null>(null);
+  const forgeBtnRef = useRef<HTMLButtonElement>(null);
+
+  const handleAccept = (text: string) => {
+    if (!text) return;
+    const { from, to } = editor.state.selection;
+    const hasSelection = from !== to;
+    if (hasSelection) {
+      editor.chain().focus().insertContentAt({ from, to }, text).run();
+    } else {
+      editor.chain().focus().insertContent(text).run();
+    }
+    forge?.onAccept?.(text);
+  };
+
   return (
     <div className="editor-toolbar wiki-toolbar-host" style={{ borderBottom: "1px solid var(--lx-border-default)", borderRadius: "6px 6px 0 0" }}>
       <div className="wiki-toolbar-row">
@@ -141,11 +173,34 @@ export function Toolbar({ editor, headingLevel }: { editor: NonNullable<ReturnTy
           <i className="ph ph-link" />
         </ToolbarButton>
         <ToolbarSeparator />
-        <ToolbarButton command={() => {}} isActive={false} title="AI writing assistant (coming soon)" disabled>
+        <button
+          ref={forgeBtnRef}
+          type="button"
+          className={cn("toolbar-btn", forgeOpen && "active")}
+          title={forge ? "AI writing assistant (Forge)" : "AI writing assistant (coming soon)"}
+          aria-label="Forge AI writing assistant"
+          disabled={!forge}
+          onClick={() => {
+            setForgeAnchor(forgeBtnRef.current?.getBoundingClientRect() ?? null);
+            setForgeOpen((v) => !v);
+          }}
+        >
           <i className="ph ph-hammer" style={{ fontSize: 16 }} />
           Forge
-        </ToolbarButton>
+        </button>
       </div>
+      {forge && forgeOpen && (
+        <ForgePopover
+          editor={editor}
+          slug={forge.slug}
+          documentType={forge.documentType}
+          documentId={forge.documentId}
+          open={forgeOpen}
+          onClose={() => setForgeOpen(false)}
+          onAccept={handleAccept}
+          anchorRect={forgeAnchor}
+        />
+      )}
     </div>
   );
 }
@@ -159,6 +214,7 @@ export function TextEditor({
   editorProps,
   className,
   extensions,
+  forge,
 }: TextEditorProps) {
   const onBlurRef = useRef(onBlur);
   onBlurRef.current = onBlur;
@@ -196,7 +252,7 @@ export function TextEditor({
 
   return (
     <div className={cn("editor-wrapper", className)}>
-      <Toolbar editor={editor} headingLevel={headingLevel} />
+      <Toolbar editor={editor} headingLevel={headingLevel} forge={forge} />
       <EditorContent editor={editor} className="editor-content" />
     </div>
   );

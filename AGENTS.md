@@ -160,6 +160,13 @@ bun run build
   test mode**, only tester emails can log in — the admin email must be a
   tester and inside the Access allow-domain policy or the first login fails.
 - Health check: `curl http://localhost:3000/api/health` → `{"ok":true}`.
+- **Forge (AI writing assistant):** the Forge button in the task/wiki editors
+  needs the daemon running: `bun run forge:daemon` (env: `LEXA_URL`,
+  `LEXA_API_KEY` or `LXK_FORGE_DAEMON_TOKEN`, `FORGE_AGENT=opencode|hermes|command-code`).
+  `bash scripts/forge/install.sh` installs it as a systemd user service.
+  Without a daemon, Generate returns `NO_RUNTIME_ONLINE`.
+  The `command-code` provider spawns this CLI non-interactively
+  (`cmd -p <prompt> --no-session --skip-onboarding --permission-mode auto-accept`).
 - `scripts/setup.sh <domain> [dev|staging|prod]` is for deployment
   (Docker + cloudflared tunnel + Access). Local dev does not need it.
 

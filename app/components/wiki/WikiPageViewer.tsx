@@ -16,6 +16,7 @@ import { Toolbar } from "../TextEditor";
 import { renderDoc, extractHeadings, slugifyHeading } from "../tiptap-render";
 import { EditSidebar } from "./EditSidebar";
 import { OutlineSidebar } from "./OutlineSidebar";
+import { SourcesSection } from "../forge/SourcesSection";
 
 const emptyDoc: TipTapDoc = { type: "doc", content: [] };
 
@@ -53,12 +54,13 @@ function buildAncestors(pages: WikiPageMeta[], page: WikiPage): WikiPageMeta[] {
 
 interface WikiEditorProps {
   editor: Editor;
+  forge?: { slug: string; documentType: "task" | "wiki"; documentId: string };
 }
 
-function WikiEditor({ editor }: WikiEditorProps) {
+function WikiEditor({ editor, forge }: WikiEditorProps) {
   return (
     <div className="editor-wrapper flex flex-col flex-1 min-h-0">
-      <Toolbar editor={editor} headingLevel={(editor.getAttributes("heading").level as number | undefined) ?? 0} />
+      <Toolbar editor={editor} headingLevel={(editor.getAttributes("heading").level as number | undefined) ?? 0} forge={forge} />
       <EditorContent editor={editor} className="editor-content flex-1 p-4 px-5" />
     </div>
   );
@@ -259,6 +261,12 @@ export function WikiPageViewer({ slug, page, pages }: WikiPageViewerProps) {
               </div>
               <h1 id={pageTitleId}>{page.title}</h1>
               <div>{renderDoc(page.content, "wiki")}</div>
+              <SourcesSection
+                slug={slug}
+                documentType="wiki"
+                documentId={page.slug}
+                className="mt-8 pt-4 border-t border-lx-border-subtle"
+              />
               <div className="mt-8 pt-4 border-t border-lx-border-subtle">
                 <span className="font-micro text-2xs text-lx-text-muted uppercase tracking-[0.04em]">
                   Last edited {formatRelative(page.updatedAt)}
@@ -342,7 +350,7 @@ export function WikiPageViewer({ slug, page, pages }: WikiPageViewerProps) {
             >
               <span className="text-xs text-lx-text-muted font-body uppercase tracking-[0.05em]">Editor</span>
             </div>
-            {editor && <WikiEditor editor={editor} />}
+            {editor && <WikiEditor editor={editor} forge={{ slug, documentType: "wiki", documentId: page.slug }} />}
             <div
               className="flex items-center justify-between"
               style={{

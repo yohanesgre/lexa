@@ -36,6 +36,7 @@ export interface Board {
   columns: Column[];
   swimlanes: Swimlane[];
   fieldConfig: FieldConfig;
+  links: TaskLink[];
   tasks: Task[];
 }
 
@@ -167,4 +168,70 @@ export interface Dashboard {
   stats: DashboardStats;
   urgentTasks: UrgentTask[];
   outOfSyncTasks: OutOfSyncTask[];
+}
+
+// ── Forge (runtime agent writing assistant) ──
+
+export type ForgeProvider = "opencode" | "hermes" | "command-code";
+export type ForgeAction = "continue" | "rewrite" | "summarize" | "expand" | "grammar";
+export type ForgeTaskStatus = "queued" | "running" | "completed" | "failed" | "cancelled";
+export type SourceKind = "wiki" | "external";
+
+export interface Runtime {
+  id: ID;
+  name: string;
+  provider: ForgeProvider;
+  status: "online" | "offline";
+  hostname: string;
+  lastSeen: ISODate | null;
+  createdAt: ISODate;
+}
+
+export interface ForgeTask {
+  id: ID;
+  runtimeId: ID | null;
+  projectId: ID;
+  documentType: "task" | "wiki";
+  documentId: string;
+  action: ForgeAction;
+  selection: string;
+  docContext: string;
+  status: ForgeTaskStatus;
+  result: string | null;
+  error: string | null;
+  createdAt: ISODate;
+  startedAt: ISODate | null;
+  finishedAt: ISODate | null;
+}
+
+export interface DocumentSource {
+  id: ID;
+  projectId: ID;
+  documentType: "task" | "wiki";
+  documentId: string;
+  kind: SourceKind;
+  title: string;
+  ref: string;          // wiki page slug (kind=wiki) or URL (kind=external)
+  createdAt: ISODate;
+}
+
+// ── Task links (subtask / blocked-by / related) ──
+
+export type TaskLinkRelation = "subtask_of" | "blocked_by" | "related_to";
+
+export interface TaskLink {
+  id: ID;
+  projectId: ID;
+  fromTaskId: ID;       // "this task"
+  toTaskId: ID;         // "that task"
+  relation: TaskLinkRelation;
+  createdAt: ISODate;
+}
+
+export interface TaskLinkSuggestion {
+  id: ID;
+  title: string;
+  columnName: string;
+  type: string;         // type_options.id — resolve color via fieldConfig
+  priority: string;     // priority_options.id
 }

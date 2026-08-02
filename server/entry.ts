@@ -43,7 +43,15 @@ Bun.serve({
     }
 
     if (url.pathname.startsWith("/api/")) {
-      if (url.pathname !== "/api/health" && !url.pathname.startsWith("/api/setup") && !verifyApiKey(req, DATABASE_PATH)) {
+      const isSetup = url.pathname.startsWith("/api/setup");
+      const isHealth = url.pathname === "/api/health";
+      const isForgeDaemon = url.pathname.startsWith("/api/forge/daemon/") || url.pathname.startsWith("/api/forge/runtimes/");
+      // Forge daemon endpoints accept the daemon token (LXK_FORGE_DAEMON_TOKEN)
+      // in place of the API key — the daemon may hold its own credential.
+      const daemonTokenOk = isForgeDaemon && process.env.LXK_FORGE_DAEMON_TOKEN
+        ? req.headers.get("x-forge-token") === process.env.LXK_FORGE_DAEMON_TOKEN
+        : false;
+      if (!isHealth && !isSetup && !daemonTokenOk && !verifyApiKey(req, DATABASE_PATH)) {
         return new Response(JSON.stringify({ error: { code: "UNAUTHORIZED", message: "Invalid or missing API key" } }), { status: 401, headers: { "Content-Type": "application/json" } });
       }
       try {

@@ -2,6 +2,47 @@
 
 > Tracks implementation gaps between wireframes (source of truth) and current code. Each item references the relevant design doc.
 
+## TASK LINKS
+
+### ✅ TASKLINK-1: Subtask / blocked-by / related links + @-autocomplete
+
+Wireframes `kanban.html` (subtask cards) + `task-detail.html` (Links section) show task-to-task linking. Implemented as one directed `task_links` table with three relations.
+
+**Backend:**
+- [x] `migrations/0012_task_links.sql` — `task_links` (project-scoped, unique from/to/relation)
+- [x] `server/repos/task-link.repo.ts` + `server/services/task-link.service.ts` — CRUD, cycle guard (ancestor walk), child column inheritance, search
+- [x] `server/services/task.service.ts` — create with `parentId` (auto-link + column inheritance), move cascades to children
+- [x] `server/api/http.ts` — task-links group (list/add/remove) + `GET /tasks/search?q&exclude` + board carries `links`
+
+**Frontend:**
+- [x] `app/components/forge/LinksSection.tsx` — link list (relation label + title + remove), @-autocomplete dropdown (title + column) + relation picker
+- [x] `app/components/kanban/TaskCard.tsx` — parent chevron + child count, blocked-by warning dot, subtask indent/dim
+- [x] `app/components/kanban/KanbanBoard.tsx` — group children under parents, collapse toggle, move cascade via board.links
+- [x] `app/lib/api.ts` + `queries.ts` — link CRUD + task search hooks
+
+**Refs:** SCHEMA.md §Task links, API.md §Task Links, LAYERS.md §TaggedErrors, DESIGN_SYSTEM.md §5.9k, wireframes/kanban.html + task-detail.html
+
+## FORGE
+
+### ✅ FORGE-1: Runtime agent writing assistant (multica-style daemon)
+
+Wireframe `forge-popover.html` + `_editor-toolbar.html` show the Forge AI writing button. Implemented as a daemon runtime: a `scripts/forge/daemon.ts` process registers as a runtime, polls for tasks, spawns the installed agent CLI (opencode/hermes) one-shot per task, and reports the result back.
+
+**Backend:**
+- [x] `migrations/0011_forge_runtimes.sql` — `runtimes`, `forge_tasks`, `document_sources`
+- [x] `server/repos/forge.repo.ts` + `server/services/forge.service.ts` — runtime register/heartbeat, FIFO task claim, prompt build (action + doc context + resolved sources)
+- [x] `server/repos/source.repo.ts` + `server/services/source.service.ts` — per-document sources, wiki resolution, external fetch with SSRF guard (`server/forge-ssrf.ts` + tests)
+- [x] `server/api/http.ts` — forge group: register/claim/complete/fail/tasks + sources CRUD; daemon auth via `x-forge-token` (`LXK_FORGE_DAEMON_TOKEN`) in `server/entry.ts`
+- [x] `scripts/forge/daemon.ts` + `scripts/forge/install.sh` (systemd user unit) + `forge:daemon` npm script
+
+**Frontend:**
+- [x] `app/components/forge/ForgePopover.tsx` — action chips, persisted sources, Generate → poll → Accept/Reject
+- [x] `app/components/forge/SourcesSection.tsx` — wiki/URL add + remove, reused on TaskDetail + WikiPageViewer + popover
+- [x] `TextEditor.tsx` / `TaskDetail.tsx` / `WikiPageViewer.tsx` — wired via `forge` prop
+- [x] `app/lib/api.ts` + `queries.ts` — forge + sources hooks
+
+**Refs:** SCHEMA.md §Forge, API.md §Forge, LAYERS.md §TaggedErrors, DESIGN_SYSTEM.md §5.9j, wireframes/forge-popover.html
+
 ## TASK FIELDS
 
 ### ✅ TASKF-1: Per-project customizable priority/type

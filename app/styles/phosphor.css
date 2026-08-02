@@ -514,6 +514,12 @@
     border-color: var(--lx-border-default);
     box-shadow: var(--lx-shadow-sm);
   }
+
+  /* Subtask child card — indented under parent, slightly dimmed */
+  .kanban-card-subtask {
+    margin-left: 16px;
+    opacity: 0.85;
+  }
   .kanban-card:active {
     background: var(--lx-surface-card-active);
     transform: scale(0.995);
@@ -931,7 +937,7 @@
     transition: transform 200ms var(--lx-ease-out);
   }
   .slideover.slideover-expanded {
-    width: 60vw;
+    width: calc(100vw - 48px);
   }
   .slideover.slideover-closed {
     transform: translateX(100%);
@@ -1037,19 +1043,28 @@
     box-shadow: var(--lx-focus-ring), var(--lx-focus-glow);
   }
   .github-section {
-    padding: 16px;
     border-top: 1px solid var(--lx-border-subtle);
+  }
+  /* GitHub issue rows — same flat bordered-row treatment as Links/Sources */
+  .github-issue-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 6px 10px;
+    border: 1px solid var(--lx-border-default);
+    border-radius: 6px;
+    background: var(--lx-surface-elevated);
+    margin-bottom: 4px;
+  }
+  .github-issue-row.github-warning {
+    background: var(--lx-bg-warning-subtle);
+    border: 1px solid rgba(240, 192, 64, 0.15);
   }
   .github-link-success {
     padding: 12px 16px;
     border: 1px solid color-mix(in srgb, var(--lx-status-success) 20%, transparent);
     border-radius: 6px;
     background: var(--lx-bg-success-subtle);
-  }
-  .github-section.github-warning {
-    background: var(--lx-bg-warning-subtle);
-    border: 1px solid rgba(240, 192, 64, 0.15);
-    border-radius: 6px;
   }
   .banner-warning {
     display: flex;
@@ -1595,6 +1610,22 @@
     display: flex;
     align-items: center;
     gap: 8px;
+  }
+
+  /* Forge status pill in the navbar (running / done / failed states) */
+  .forge-status {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    height: 28px;
+    padding: 0 10px;
+    border-radius: 9999px;
+    border: 1px solid;
+    font-family: var(--lx-font-body);
+    font-size: 12px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: background 100ms, border-color 100ms;
   }
   .nav-brand {
     font-family: var(--lx-font-display);

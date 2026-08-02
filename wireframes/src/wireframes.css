@@ -341,6 +341,13 @@ a:hover { color: var(--lx-text-link-hover); }
   box-shadow: var(--lx-shadow-sm);
 }
 
+/* Subtask child card — indented under parent, slightly dimmed */
+.kanban-card-subtask {
+  margin-left: 16px;
+  opacity: 0.85;
+  cursor: grab;
+}
+
 .kanban-card.state-dragging {
   background: var(--lx-surface-card-dragging);
   border-color: var(--lx-border-focus);
@@ -674,7 +681,7 @@ a:hover { color: var(--lx-text-link-hover); }
 }
 
 .slideover.slideover-expanded {
-  width: 60vw;
+  width: calc(100vw - 48px);
 }
 
 .slideover-overlay {
@@ -747,8 +754,23 @@ a:hover { color: var(--lx-text-link-hover); }
 }
 
 .github-section {
-  padding: 16px;
   border-top: 1px solid var(--lx-border-subtle);
+}
+
+/* GitHub issue rows — same flat bordered-row treatment as Links/Sources */
+.github-issue-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 10px;
+  border: 1px solid var(--lx-border-default);
+  border-radius: 6px;
+  background: var(--lx-surface-elevated);
+  margin-bottom: 4px;
+}
+.github-issue-row.github-warning {
+  background: var(--lx-bg-warning-subtle);
+  border: 1px solid rgba(240, 192, 64, 0.15);
 }
 
 .slideover-footer {
@@ -1622,6 +1644,21 @@ mark {
   font-family: var(--lx-font-body);
   color: var(--lx-text-secondary);
   cursor: pointer;
+}
+
+/* Forge status pill in the navbar (running / done states) */
+.forge-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 10px;
+  border-radius: 9999px;
+  font-family: var(--lx-font-body);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 100ms, border-color 100ms;
 }
 .dropdown-item svg { width: 16px; height: 16px; stroke: currentColor; stroke-width: 1.5; fill: none; flex-shrink: 0; }
 .dropdown-item:hover { background: var(--lx-surface-selected); color: var(--lx-text-primary); }

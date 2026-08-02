@@ -180,6 +180,30 @@
           </p>
 
           <div style="margin-top:32px;padding-top:16px;border-top:1px solid var(--lx-border-subtle);">
+            <div class="flex items-center gap-2 mb-2">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="color:var(--lx-text-muted);"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>
+              <span class="prop-label">Sources</span>
+              <span class="font-micro text-2xs color-muted" style="text-transform:uppercase;letter-spacing:0.04em;">used by Forge</span>
+            </div>
+            <div class="flex items-center justify-between" style="padding:6px 10px;background:var(--lx-surface-elevated);border:1px solid var(--lx-border-default);border-radius:6px;margin-bottom:4px;max-width:560px;">
+              <div class="flex items-center gap-2" style="min-width:0;">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="color:var(--lx-text-muted);flex-shrink:0;"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
+                <span class="text-sm color-secondary truncate">gamedev.stackexchange.com/questions/821…</span>
+                <span class="font-micro text-2xs color-muted">web</span>
+              </div>
+              <button class="icon-btn" title="Remove source" style="width:20px;height:20px;"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg></button>
+            </div>
+            <div class="flex items-center gap-2 mt-2" style="max-width:560px;">
+              <input class="prop-input" placeholder="Add wiki page or URL…" style="flex:1;height:28px;font-size:12px;" />
+              <button class="btn btn-ghost" style="height:26px;padding:0 8px;font-size:12px;flex-shrink:0;">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 5v14m-7-7h14"/></svg>
+                Add
+              </button>
+            </div>
+            <span class="annotation-inline" style="display:block;margin-top:4px;">Persisted per-document sources; Forge uses them as context (wiki pages resolved server-side, external URLs fetched with SSRF guard)</span>
+          </div>
+
+          <div style="margin-top:32px;padding-top:16px;border-top:1px solid var(--lx-border-subtle);">
             <span class="font-micro text-2xs color-muted" style="text-transform:uppercase;letter-spacing:0.04em;">Last edited 2 hours ago by AL</span>
           </div>
         </div>
