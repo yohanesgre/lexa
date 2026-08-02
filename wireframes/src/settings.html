@@ -98,6 +98,60 @@
       </div>
     </section>
 
+    <!-- Forge Runtimes (global) -->
+    <section class="mb-8">
+      <div class="flex items-center justify-between mb-3">
+        <h2 class="font-display text-lg weight-500 color-primary">Forge Runtimes</h2>
+        <span class="annotation-tag">Global scope</span>
+      </div>
+      <p class="text-sm color-secondary mb-4" style="max-width:560px;">
+        Machines running the Forge daemon (AI writing assistant). The daemon spawns the installed agent CLI (opencode / hermes) when a Forge task is queued.
+      </p>
+
+      <div style="background:var(--lx-surface-card);border:1px solid var(--lx-border-default);border-radius:8px;overflow:hidden;">
+        <table class="settings-table">
+          <thead>
+            <tr><th>Name</th><th>Provider</th><th>Hostname</th><th>Status</th><th>Last seen</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>
+                <div class="flex items-center gap-2">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="color:var(--lx-text-muted);flex-shrink:0;"><rect x="4" y="4" width="16" height="16" rx="2"/><rect x="9" y="9" width="6" height="6"/></svg>
+                  <span class="text-sm weight-500">dev-mbp</span>
+                </div>
+              </td>
+              <td class="text-xs color-secondary">opencode</td>
+              <td class="font-mono text-xs color-secondary">yohanes-mbp.local</td>
+              <td><span class="flex items-center gap-2"><span class="sync-dot sync-synced"></span><span class="font-micro text-2xs color-success" style="text-transform:uppercase;letter-spacing:0.04em;">Online</span></span></td>
+              <td class="text-xs color-secondary">just now</td>
+            </tr>
+            <tr>
+              <td>
+                <div class="flex items-center gap-2">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="color:var(--lx-text-muted);flex-shrink:0;"><rect x="4" y="4" width="16" height="16" rx="2"/><rect x="9" y="9" width="6" height="6"/></svg>
+                  <span class="text-sm weight-500">staging-box</span>
+                </div>
+              </td>
+              <td class="text-xs color-secondary">hermes</td>
+              <td class="font-mono text-xs color-secondary">box01</td>
+              <td><span class="flex items-center gap-2"><span class="sync-dot sync-unlinked"></span><span class="font-micro text-2xs color-muted" style="text-transform:uppercase;letter-spacing:0.04em;">Offline</span></span></td>
+              <td class="text-xs color-secondary">3 hours ago</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <!-- Empty state (shown when no runtimes) -->
+      <div class="empty-box mt-4" style="padding:24px;">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="color:var(--lx-text-muted);"><rect x="4" y="4" width="16" height="16" rx="2"/><rect x="9" y="9" width="6" height="6"/></svg>
+        <div class="text-sm weight-500 color-primary">No runtimes yet</div>
+        <p class="text-xs color-secondary" style="max-width:360px;">Start the Forge daemon on a machine with opencode or hermes installed:</p>
+        <code class="font-mono text-xs" style="background:var(--lx-surface-input);border:1px solid var(--lx-border-default);border-radius:4px;padding:6px 10px;color:var(--lx-text-secondary);margin-top:8px;display:inline-block;">bun run forge:daemon</code>
+      </div>
+      <span class="annotation-tag mt-2 mb-4">Read-only: daemons self-register + heartbeat. Remove is intentionally not offered (a live daemon re-registers on its next poll).</span>
+    </section>
+
     <!-- Admins (app scope) -->
     <section class="mb-8">
       <div class="flex items-center justify-between mb-3">

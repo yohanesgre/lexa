@@ -6,6 +6,8 @@ import { extractText } from "../../shared/tiptap-text";
 import { renderDoc } from "./tiptap-render";
 import { TextEditor } from "./TextEditor";
 import { Toolbar, textEditorExtensions } from "./TextEditor";
+import { SourcesSection } from "./forge/SourcesSection";
+import { LinksSection } from "./forge/LinksSection";
 import { cn } from "./ui/cn";
 import { useEditor, EditorContent } from "@tiptap/react";
 import type { JSONContent } from "@tiptap/core";
@@ -85,6 +87,7 @@ interface TaskDetailProps {
   columns?: { id: string; name: string }[];
   columnRequiredFields?: { columnId: string; fields: string[] }[];
   availableAssignees?: string[];
+  taskTitles?: Map<string, string>;    // taskId → title, for link display
   fieldConfig?: { priorities: { id: string; label: string; color: string }[]; types: { id: string; label: string; color: string }[] };
   onClose: () => void;
   onUpdate?: (id: string, data: Partial<Task>) => void;
@@ -363,6 +366,7 @@ interface DescriptionEditorProps {
   onCancel?: () => void;
   placeholder?: string;
   editable?: boolean;
+  forge?: { slug: string; documentType: "task" | "wiki"; documentId: string };
 }
 
 function DescriptionEditor({
@@ -373,6 +377,7 @@ function DescriptionEditor({
   onCancel,
   placeholder,
   editable = true,
+  forge,
 }: DescriptionEditorProps) {
   const onBlurRef = useRef(onBlur);
   onBlurRef.current = onBlur;
@@ -454,14 +459,14 @@ function DescriptionEditor({
         </div>
       )}
       <div style={{ display: "flex", alignItems: "center", borderBottom: "1px solid var(--lx-border-default)" }}>
-        <Toolbar editor={editor} headingLevel={headingLevel} />
+        <Toolbar editor={editor} headingLevel={headingLevel} forge={forge} />
       </div>
       <EditorContent editor={editor} className="editor-content" />
     </div>
   );
 }
 
-export function TaskDetail({ mode = "view", task, project, defaultColumnId, columns, columnRequiredFields, availableAssignees, fieldConfig, onClose, onUpdate, onDelete, onArchive, onRestore, onCreate }: TaskDetailProps) {
+export function TaskDetail({ mode = "view", task, project, defaultColumnId, columns, columnRequiredFields, availableAssignees, taskTitles, fieldConfig, onClose, onUpdate, onDelete, onArchive, onRestore, onCreate }: TaskDetailProps) {
   const params = useParams({ strict: false }) as { slug?: string };
   const slug = params.slug;
   const isCreate = mode === "create";
@@ -681,7 +686,7 @@ export function TaskDetail({ mode = "view", task, project, defaultColumnId, colu
               className="btn btn-ghost !w-8 !h-8 !p-0"
               onClick={() => setExpanded((v) => !v)}
               aria-label="Toggle width"
-              title="Toggle width (480px → 60vw)"
+              title="Toggle width (480px → full width)"
             >
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5}>
                 <path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7" />
@@ -974,6 +979,7 @@ export function TaskDetail({ mode = "view", task, project, defaultColumnId, colu
                 initialContent={emptyDoc}
                 onChange={setCreateDescription}
                 placeholder="Add a description..."
+                forge={slug ? { slug, documentType: "task", documentId: task?.id ?? "" } : undefined}
               />
               <div className="mt-4 border border-dashed border-lx-border-default rounded-md p-3 text-xs text-lx-text-muted font-body">
                 No GitHub section in create mode — linking is available after the task exists.
@@ -985,6 +991,7 @@ export function TaskDetail({ mode = "view", task, project, defaultColumnId, colu
                 <DescriptionEditor
                   initialContent={task!.description}
                   editable={true}
+                  forge={slug ? { slug, documentType: "task", documentId: task!.id } : undefined}
                   onBlur={(doc) => {
                     onUpdate?.(task!.id, { description: doc });
                     setEditingDescription(false);
@@ -1003,7 +1010,23 @@ export function TaskDetail({ mode = "view", task, project, defaultColumnId, colu
                 </div>
               )}
 
-              <div className="github-section mt-4">
+              {!isCreate && slug && (
+                <LinksSection
+                  slug={slug}
+                  taskId={task!.id}
+                  taskTitleById={taskTitles}
+                  className="mt-4 pt-4 border-t border-lx-border-subtle"
+                />
+              )}
+              {!isCreate && slug && (
+                <SourcesSection
+                  slug={slug}
+                  documentType="task"
+                  documentId={task!.id}
+                  className="mt-4 pt-4 border-t border-lx-border-subtle"
+                />
+              )}
+              <div className="github-section mt-4 pt-4">
                 {githubs.length > 0 ? (
                   <div>
                     <div className="flex items-center gap-2 mb-2">
@@ -1014,10 +1037,10 @@ export function TaskDetail({ mode = "view", task, project, defaultColumnId, colu
                         Link issue
                       </button>
                     </div>
-                    <div className="space-y-2">
+                    <div>
                     {githubs.map(g => (
                       <div key={g.issueId} className={cn("github-issue-row", g.outOfSync && "github-warning")}>
-                        <div className="flex items-center justify-between">
+                        <div className="flex items-center justify-between w-full">
                           <a href={g.url} target="_blank" rel="noreferrer" className="flex items-center gap-2">
                             <GithubMark size={14} className="text-lx-text-link" />
                             <span className="font-mono text-sm font-medium text-lx-text-link">

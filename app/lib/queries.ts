@@ -1,5 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import type { Task, Project, Board, Column, Swimlane, TipTapDoc, WikiPageMeta, ApiKey, ApiKeyCreateResult, Dashboard, FieldConfig } from "../../shared/types";
+import type { Task, Project, Board, Column, Swimlane, TipTapDoc, WikiPageMeta, ApiKey, ApiKeyCreateResult, Dashboard, FieldConfig, DocumentSource, ForgeTask, TaskLink } from "../../shared/types";
 import * as api from "./api";
 import { useToast } from "../components/ui/Toast";
 
@@ -527,5 +527,150 @@ export function useRemoveProjectMember(slug: string) {
     onError: (err) => {
       toast.push("error", "Failed to remove member", toastMessage(err));
     },
+  });
+}
+
+// ── Forge (AI writing assistant) ──
+
+export function useRuntimes() {
+  // Forge daemon runtimes (opencode/hermes machines). Polled so the
+  // settings page shows online/offline status.
+  return useQuery({ queryKey: ["forge-runtimes"], queryFn: () => api.listRuntimes().then((r) => r.data), staleTime: 15_000, refetchInterval: 30_000 });
+}
+
+// Recent Forge tasks across all projects — powers the navbar status pill.
+export function useRecentForgeTasks() {
+  return useQuery({
+    queryKey: ["forge-recent-tasks"],
+    queryFn: () => api.listRecentForgeTasks().then((r) => r.data),
+    refetchInterval: (query) => {
+      const hasActive = (query.state.data ?? []).some((t) => t.status === "queued" || t.status === "running");
+      return hasActive ? 1500 : 15_000;
+    },
+  });
+}
+
+export function useCreateForgeTask() {
+  const toast = useToast();
+  return useMutation({
+    mutationFn: api.createForgeTask,
+    onError: (err) => {
+      toast.push("error", "Forge unavailable", toastMessage(err));
+    },
+  });
+}
+
+export function useForgeTask(id: string | null, enabled: boolean) {
+  return useQuery({
+    queryKey: ["forge-task", id],
+    queryFn: () => api.getForgeTask(id!),
+    enabled: enabled && id !== null,
+    refetchInterval: (query) => {
+      const status = query.state.data?.status;
+      return status === "queued" || status === "running" ? 1500 : false;
+    },
+  });
+}
+
+// Most recent Forge task for a document — used to resume a run that finished
+// after the popover was closed (background work keeps running server-side).
+export function useRecentForgeTask(slug: string, documentType: "task" | "wiki", documentId: string, enabled: boolean) {
+  return useQuery({
+    queryKey: ["forge-recent", slug, documentType, documentId],
+    queryFn: () => api.listForgeTasks(slug, documentType, documentId).then((r) => r.data[0] ?? null),
+    enabled: enabled && !!documentId,
+    refetchInterval: (query) => {
+      const status = query.state.data?.status;
+      return status === "queued" || status === "running" ? 1500 : false;
+    },
+  });
+}
+
+export function useSources(slug: string, documentType: "task" | "wiki", documentId: string) {
+  return useQuery({
+    queryKey: ["sources", slug, documentType, documentId],
+    queryFn: () => api.listSources(slug, documentType, documentId).then((r) => r.data),
+    enabled: !!slug && !!documentId,
+  });
+}
+
+export function useAddSource(slug: string, documentType: "task" | "wiki", documentId: string) {
+  const qc = useQueryClient();
+  const toast = useToast();
+  return useMutation({
+    mutationFn: (input: { kind: "wiki" | "external"; ref: string }) => api.addSource(slug, documentType, documentId, input),
+    onSuccess: (source) => {
+      qc.setQueryData<DocumentSource[]>(["sources", slug, documentType, documentId], (old) => [...(old ?? []), source]);
+      toast.push("success", "Source added");
+    },
+    onError: (err) => {
+      toast.push("error", "Failed to add source", toastMessage(err));
+    },
+  });
+}
+
+export function useRemoveSource(slug: string, documentType: "task" | "wiki", documentId: string) {
+  const qc = useQueryClient();
+  const toast = useToast();
+  return useMutation({
+    mutationFn: (sourceId: string) => api.removeSource(slug, documentType, documentId, sourceId),
+    onSuccess: (_, sourceId) => {
+      qc.setQueryData<DocumentSource[]>(["sources", slug, documentType, documentId], (old) => (old ?? []).filter((s) => s.id !== sourceId));
+      toast.push("success", "Source removed");
+    },
+    onError: (err) => {
+      toast.push("error", "Failed to remove source", toastMessage(err));
+    },
+  });
+}
+
+// ── Task links (subtask / blocked-by / related) ──
+
+export function useTaskLinks(slug: string, taskId: string) {
+  return useQuery({
+    queryKey: ["task-links", slug, taskId],
+    queryFn: () => api.listTaskLinks(slug, taskId).then((r) => r.data),
+    enabled: !!slug && !!taskId,
+  });
+}
+
+export function useAddTaskLink(slug: string, taskId: string) {
+  const qc = useQueryClient();
+  const toast = useToast();
+  return useMutation({
+    mutationFn: (input: { toTaskId: string; relation: "subtask_of" | "blocked_by" | "related_to" }) => api.addTaskLink(slug, taskId, input),
+    onSuccess: (link) => {
+      qc.setQueryData<TaskLink[]>(["task-links", slug, taskId], (old) => [...(old ?? []), link]);
+      qc.invalidateQueries({ queryKey: ["board", slug] });
+      toast.push("success", "Task linked");
+    },
+    onError: (err) => {
+      toast.push("error", "Failed to link task", toastMessage(err));
+    },
+  });
+}
+
+export function useRemoveTaskLink(slug: string, taskId: string) {
+  const qc = useQueryClient();
+  const toast = useToast();
+  return useMutation({
+    mutationFn: (linkId: string) => api.removeTaskLink(slug, taskId, linkId),
+    onSuccess: (_, linkId) => {
+      qc.setQueryData<TaskLink[]>(["task-links", slug, taskId], (old) => (old ?? []).filter((l) => l.id !== linkId));
+      qc.invalidateQueries({ queryKey: ["board", slug] });
+      toast.push("success", "Link removed");
+    },
+    onError: (err) => {
+      toast.push("error", "Failed to remove link", toastMessage(err));
+    },
+  });
+}
+
+export function useTaskSearch(slug: string, query: string, exclude = "") {
+  return useQuery({
+    queryKey: ["task-search", slug, query, exclude],
+    queryFn: () => api.searchTasks(slug, query, exclude).then((r) => r.data),
+    enabled: query.trim().length >= 2,
+    staleTime: 5_000,
   });
 }

@@ -73,6 +73,30 @@ function cardProps(task: Task, board: Board) {
   };
 }
 
+// Link maps derived from board.links: children per parent, blocked-by titles per task.
+function useLinkMaps(board: Board) {
+  return useMemo(() => {
+    const childrenByParent = new Map<string, string[]>();
+    const parentOf = new Map<string, string>();
+    const blockedBy = new Map<string, string[]>();
+    const titleById = new Map(board.tasks.map((t) => [t.id, t.title]));
+    for (const link of board.links) {
+      if (link.relation === "subtask_of") {
+        const kids = childrenByParent.get(link.toTaskId) ?? [];
+        kids.push(link.fromTaskId);
+        childrenByParent.set(link.toTaskId, kids);
+        parentOf.set(link.fromTaskId, link.toTaskId);
+      } else if (link.relation === "blocked_by") {
+        const blockers = blockedBy.get(link.fromTaskId) ?? [];
+        const title = titleById.get(link.toTaskId);
+        if (title) blockers.push(title);
+        blockedBy.set(link.fromTaskId, blockers);
+      }
+    }
+    return { childrenByParent, parentOf, blockedBy };
+  }, [board]);
+}
+
 function SortableTaskCard({
   task,
   board,
@@ -83,6 +107,11 @@ function SortableTaskCard({
   onArchive,
   onRestore,
   onDelete,
+  isSubtask = false,
+  blockedBy = [],
+  subtaskCount = 0,
+  onToggleSubtasks,
+  subtasksCollapsed = false,
 }: {
   task: Task;
   board: Board;
@@ -93,6 +122,11 @@ function SortableTaskCard({
   onArchive?: (id: string) => void;
   onRestore?: (id: string) => void;
   onDelete?: (id: string) => void;
+  isSubtask?: boolean;
+  blockedBy?: string[];
+  subtaskCount?: number;
+  onToggleSubtasks?: () => void;
+  subtasksCollapsed?: boolean;
 }) {
   const archived = task.archivedAt != null;
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
@@ -115,6 +149,11 @@ function SortableTaskCard({
         {...cardProps(task, board)}
         dimmed={dimmed}
         archived={archived}
+        isSubtask={isSubtask}
+        blockedBy={blockedBy}
+        subtaskCount={subtaskCount}
+        onToggleSubtasks={onToggleSubtasks}
+        subtasksCollapsed={subtasksCollapsed}
         className={cn(isNew && "card-enter")}
         action={
           <Menu
@@ -164,6 +203,8 @@ export function KanbanBoard({ board, showArchived = false, onToggleArchived, onM
   const shakeTimer = useRef<number | null>(null);
   const prevTaskIds = useRef<Set<string>>(new Set());
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set());
+  const [collapsedParents, setCollapsedParents] = useState<ReadonlySet<string>>(new Set());
+  const { childrenByParent, blockedBy } = useLinkMaps(board);
   const [filters, setFilters] = useState<FilterState>(() => emptyFilters());
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isColumnCreateOpen, setIsColumnCreateOpen] = useState(false);
@@ -456,19 +497,58 @@ export function KanbanBoard({ board, showArchived = false, onToggleArchived, onM
                           onOpenCreate={() => onOpenCreateTask?.(col.id, laneId)}
                         >
                           <SortableContext items={cell.map((t) => t.id)} strategy={verticalListSortingStrategy}>
-                            {cell.filter((task) => !cardHidden(task)).map((task) => (
-                              <SortableTaskCard
-                                key={task.id}
-                                task={task}
-                                board={board}
-                                onSelect={onSelectTask}
-                                dimmed={cardDimmed(task)}
-                                isNew={newTaskIds.has(task.id)}
-                                isShaking={shakeTaskId === task.id}
-                                onArchive={(id) => archiveTask.mutate({ id })}
-                                onRestore={(id) => restoreTask.mutate({ id })}
-                              />
-                            ))}
+                            {cell
+                              .filter((task) => !cardHidden(task))
+                              .filter((task) => !childrenByParent.has(task.id)) // parents render at top level
+                              .map((task) => {
+                                const kids = (childrenByParent.get(task.id) ?? [])
+                                  .map((id) => localTasks.find((t) => t.id === id))
+                                  .filter((t): t is Task => !!t)
+                                  .filter((t) => !cardHidden(t))
+                                  .sort(byPosition);
+                                const isCollapsed = collapsedParents.has(task.id);
+                                return (
+                                  <div key={task.id}>
+                                    <SortableTaskCard
+                                      task={task}
+                                      board={board}
+                                      onSelect={onSelectTask}
+                                      dimmed={cardDimmed(task)}
+                                      isNew={newTaskIds.has(task.id)}
+                                      isShaking={shakeTaskId === task.id}
+                                      onArchive={(id) => archiveTask.mutate({ id })}
+                                      onRestore={(id) => restoreTask.mutate({ id })}
+                                      blockedBy={blockedBy.get(task.id) ?? []}
+                                      subtaskCount={kids.length}
+                                      onToggleSubtasks={() =>
+                                        setCollapsedParents((prev) => {
+                                          const next = new Set(prev);
+                                          if (next.has(task.id)) next.delete(task.id);
+                                          else next.add(task.id);
+                                          return next;
+                                        })
+                                      }
+                                      subtasksCollapsed={isCollapsed}
+                                    />
+                                    {!isCollapsed &&
+                                      kids.map((kid) => (
+                                        <SortableTaskCard
+                                          key={kid.id}
+                                          task={kid}
+                                          board={board}
+                                          onSelect={onSelectTask}
+                                          dimmed={cardDimmed(kid)}
+                                          isNew={newTaskIds.has(kid.id)}
+                                          isShaking={shakeTaskId === kid.id}
+                                          onArchive={(id) => archiveTask.mutate({ id })}
+                                          onRestore={(id) => restoreTask.mutate({ id })}
+                                          isSubtask
+                                          blockedBy={blockedBy.get(kid.id) ?? []}
+                                        />
+                                      ))}
+                                  </div>
+                                );
+                              })}
                           </SortableContext>
                         </Column>
                       </div>

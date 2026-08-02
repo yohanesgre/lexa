@@ -20,6 +20,14 @@ export class MissingAuth extends Data.TaggedError("MissingAuth")<{}> {}
 export class GithubApiError extends Data.TaggedError("GithubApiError")<{ message: string }> {}
 export class GithubWebhookError extends Data.TaggedError("GithubWebhookError")<{ message: string }> {}
 export class Forbidden extends Data.TaggedError("Forbidden")<{ message: string }> {}
+export class SourceNotFound extends Data.TaggedError("SourceNotFound")<{ id: string }> {}
+export class SourceFetchError extends Data.TaggedError("SourceFetchError")<{ message: string }> {}
+export class SourceUnreachable extends Data.TaggedError("SourceUnreachable")<{ url: string }> {}
+export class ForgeTaskNotFound extends Data.TaggedError("ForgeTaskNotFound")<{ id: string }> {}
+export class NoRuntimeOnline extends Data.TaggedError("NoRuntimeOnline")<{}> {}
+export class TaskLinkNotFound extends Data.TaggedError("TaskLinkNotFound")<{ id: string }> {}
+export class TaskLinkCycle extends Data.TaggedError("TaskLinkCycle")<{ message: string }> {}
+export class InvalidTaskLink extends Data.TaggedError("InvalidTaskLink")<{ message: string }> {}
 export { ProjectAccessDenied } from "../services/user-project-role.service";
 
 export const errorCodeMap: Record<string, string> = {
@@ -40,6 +48,14 @@ export const errorCodeMap: Record<string, string> = {
   MissingAuth: "MISSING_AUTH",
   GithubApiError: "GITHUB_API_ERROR",
   GithubWebhookError: "GITHUB_WEBHOOK_ERROR",
+  SourceNotFound: "SOURCE_NOT_FOUND",
+  SourceFetchError: "SOURCE_FETCH_ERROR",
+  SourceUnreachable: "SOURCE_UNREACHABLE",
+  ForgeTaskNotFound: "FORGE_TASK_NOT_FOUND",
+  NoRuntimeOnline: "NO_RUNTIME_ONLINE",
+  TaskLinkNotFound: "TASK_LINK_NOT_FOUND",
+  TaskLinkCycle: "TASK_LINK_CYCLE",
+  InvalidTaskLink: "INVALID_TASK_LINK",
   ProjectAccessDenied: "FORBIDDEN",
   UserNotFound: "USER_NOT_FOUND",
   CannotDeleteSelf: "CANNOT_DELETE_SELF",
@@ -61,16 +77,22 @@ export function errorToStatus(error: { _tag: string }): number {
     case "ColumnNotFound":
     case "SwimlaneNotFound":
     case "WikiPageNotFound":
+    case "SourceNotFound":
+    case "ForgeTaskNotFound":
+    case "TaskLinkNotFound":
       return 404;
     case "WipLimitExceeded":
     case "SlugTaken":
     case "HasChildren":
     case "GithubIssueAlreadyLinked":
     case "OptionInUse":
+    case "NoRuntimeOnline":
+    case "TaskLinkCycle":
       return 409;
     case "RequiredFieldMissing":
     case "NeighborNotInColumn":
     case "InvalidOption":
+    case "InvalidTaskLink":
       return 422;
     case "InvalidKey":
     case "MissingAuth":
@@ -114,6 +136,22 @@ export function errorMessage(error: { _tag: string } & Record<string, unknown>):
       return typeof error.message === "string" && error.message
         ? error.message
         : `Unknown option id '${error.optionId ?? ""}'`;
+    case "SourceNotFound":
+      return `Source not found`;
+    case "SourceFetchError":
+      return typeof error.message === "string" && error.message ? error.message : "Failed to fetch source";
+    case "SourceUnreachable":
+      return `Cannot reach '${error.url}'`;
+    case "ForgeTaskNotFound":
+      return `Forge task not found`;
+    case "NoRuntimeOnline":
+      return `No Forge runtime is online. Start the daemon (bun run forge:daemon) and try again.`;
+    case "TaskLinkNotFound":
+      return `Task link not found`;
+    case "TaskLinkCycle":
+      return typeof error.message === "string" && error.message ? error.message : "Task link would create a cycle";
+    case "InvalidTaskLink":
+      return typeof error.message === "string" && error.message ? error.message : "Invalid task link";
     case "InvalidKey":
     case "MissingAuth":
       return "Invalid or missing API key";

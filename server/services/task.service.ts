@@ -4,7 +4,7 @@ import { ProjectRepo } from "../repos/project.repo";
 import { ColumnRepo } from "../repos/column.repo";
 import { SwimlaneRepo } from "../repos/swimlane.repo";
 import { FieldConfigRepo } from "../repos/field-config.repo";
-import { ConstraintViolation, DbError, RowNotFound } from "../db/database";
+import { ConstraintViolation, DbError, RowNotFound, Sqlite, run, queryAll } from "../db/database";
 import { keyAfter } from "../../shared/positions";
 import { keyBetween } from "../../shared/positions";
 import type { TaskRow } from "../../shared/db";
@@ -55,6 +55,7 @@ export class TaskService extends Effect.Service<TaskService>()("Lexa/TaskService
     const columnRepo = yield* ColumnRepo;
     const swimlaneRepo = yield* SwimlaneRepo;
     const fieldConfigRepo = yield* FieldConfigRepo;
+    const db = yield* Sqlite;
 
     const resolveOption = (
       projectId: string,
@@ -96,28 +97,44 @@ export class TaskService extends Effect.Service<TaskService>()("Lexa/TaskService
         priority?: string;
         type?: string;
         assignees?: string[];
-      }): Effect.Effect<Task, ProjectNotFound | ColumnNotFound | SwimlaneNotFound | RequiredFieldMissing | InvalidOption | ConstraintViolation | DbError | RowNotFound> =>
+        parentId?: string;            // create as subtask of this task
+      }): Effect.Effect<Task, ProjectNotFound | ColumnNotFound | SwimlaneNotFound | TaskNotFound | RequiredFieldMissing | InvalidOption | ConstraintViolation | DbError | RowNotFound> =>
         Effect.gen(function* () {
           const project = yield* projectRepo.findById(input.projectId).pipe(
             Effect.catchTag("RowNotFound", () => new ProjectNotFound({ identifier: input.projectId }))
           );
 
-          const column = yield* columnRepo.findById(input.columnId).pipe(
-            Effect.catchTag("RowNotFound", () => new ColumnNotFound({ id: input.columnId }))
+          // Subtask: inherit the parent's column/swimlane.
+          let parent: Task | null = null;
+          let columnId = input.columnId;
+          let swimlaneId = input.swimlaneId;
+          if (input.parentId) {
+            const parentId = input.parentId;
+            parent = yield* taskRepo.findById(parentId).pipe(
+              Effect.catchTag("RowNotFound", () => new TaskNotFound({ id: parentId }))
+            );
+            if (parent.projectId !== project.id) {
+              return yield* new TaskNotFound({ id: parentId });
+            }
+            columnId = parent.columnId;
+            swimlaneId = parent.swimlaneId;
+          }
+
+          const column = yield* columnRepo.findById(columnId).pipe(
+            Effect.catchTag("RowNotFound", () => new ColumnNotFound({ id: columnId }))
           );
           if (column.projectId !== project.id) {
-            return yield* new ColumnNotFound({ id: input.columnId });
+            return yield* new ColumnNotFound({ id: columnId });
           }
 
-          if (input.swimlaneId) {
-            const lane = yield* swimlaneRepo.findById(input.swimlaneId!).pipe(
-              Effect.catchTag("RowNotFound", () => new SwimlaneNotFound({ id: input.swimlaneId! }))
+          if (swimlaneId) {
+            const lane = yield* swimlaneRepo.findById(swimlaneId).pipe(
+              Effect.catchTag("RowNotFound", () => new SwimlaneNotFound({ id: swimlaneId }))
             );
             if (lane.projectId !== project.id) {
-              return yield* new SwimlaneNotFound({ id: input.swimlaneId });
+              return yield* new SwimlaneNotFound({ id: swimlaneId });
             }
           }
-
           const desc = input.description ?? { type: "doc" as const, content: [] as unknown[] };
           const priority = yield* resolveOption(project.id, "priority", input.priority);
           const type = yield* resolveOption(project.id, "type", input.type);
@@ -133,23 +150,36 @@ export class TaskService extends Effect.Service<TaskService>()("Lexa/TaskService
           yield* validateRequiredFields(taskLike as Record<string, unknown>, column);
 
           const doInsert = Effect.gen(function* () {
-            const lastRow = yield* taskRepo.findLastInColumn(input.projectId, input.columnId).pipe(
+            const lastRow = yield* taskRepo.findLastInColumn(input.projectId, columnId).pipe(
               Effect.catchTag("RowNotFound", () => Effect.succeed(null))
             );
             const last = lastRow as TaskRow | null;
             const position = keyAfter(last?.position ?? null);
-            return yield* taskRepo.create({
-              id: crypto.randomUUID(),
+            const taskId = crypto.randomUUID();
+            yield* taskRepo.create({
+              id: taskId,
               projectId: input.projectId,
-              columnId: input.columnId,
-              swimlaneId: input.swimlaneId,
+              columnId,
+              swimlaneId,
               title: input.title,
               description: JSON.stringify(desc),
               priority,
               type,
               assignees: input.assignees ?? [],
               position,
-            }).pipe(
+            });
+            if (parent) {
+              yield* run(
+                db,
+                `INSERT INTO task_links (id, project_id, from_task_id, to_task_id, relation)
+                 VALUES (?, ?, ?, ?, 'subtask_of')`,
+                crypto.randomUUID(),
+                input.projectId,
+                taskId,
+                parent.id
+              );
+            }
+            return yield* taskRepo.findById(taskId).pipe(
               Effect.catchTag("RowNotFound", () => new ProjectNotFound({ identifier: input.projectId }))
             );
           });
@@ -302,6 +332,30 @@ export class TaskService extends Effect.Service<TaskService>()("Lexa/TaskService
               () => doMove
             )
           );
+
+          // Cascade: when a parent moves, its subtasks follow (same column,
+          // appended after the parent's new position).
+          if (moved.columnId !== task.columnId || moved.swimlaneId !== task.swimlaneId) {
+            const children = yield* queryAll<{ id: string; position: string }>(
+              db,
+              `SELECT t.id, t.position FROM task_links tl
+               INNER JOIN tasks t ON t.id = tl.from_task_id
+               WHERE tl.to_task_id = ? AND tl.relation = 'subtask_of'
+               ORDER BY t.position`,
+              taskId
+            );
+            let childPos = moved.position;
+            for (const child of children) {
+              childPos = keyAfter(childPos);
+              yield* taskRepo.move(child.id, {
+                columnId: moved.columnId,
+                swimlaneId: moved.swimlaneId,
+                position: childPos,
+                projectId: task.projectId,
+              }, { bypassWip: true });
+            }
+          }
+
           yield* Effect.logInfo(`[Task] Moved ${moved.id} column=${moved.columnId} swimlane=${moved.swimlaneId} pos=${moved.position}`);
           return moved;
         }),

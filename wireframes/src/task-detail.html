@@ -120,15 +120,99 @@
         </div>
     </div>
 
+    <!-- Sources (persisted, used by Forge) -->
+    <div style="margin-top:24px;padding:16px 0 0;border-top:1px solid var(--lx-border-subtle);">
+      <div class="flex items-center gap-2 mb-2">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="color:var(--lx-text-muted);"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>
+        <span class="prop-label">Sources</span>
+        <span class="font-micro text-2xs color-muted" style="text-transform:uppercase;letter-spacing:0.04em;">used by Forge</span>
+      </div>
+      <div class="flex items-center justify-between" style="padding:6px 10px;background:var(--lx-surface-elevated);border:1px solid var(--lx-border-default);border-radius:6px;margin-bottom:4px;">
+        <div class="flex items-center gap-2" style="min-width:0;">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="color:var(--lx-text-muted);flex-shrink:0;"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>
+          <span class="text-sm color-secondary truncate">Game Design Doc</span>
+          <span class="font-micro text-2xs color-muted">wiki</span>
+        </div>
+        <button class="icon-btn" title="Remove source" style="width:20px;height:20px;"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg></button>
+      </div>
+      <div class="flex items-center gap-2 mt-2">
+        <input class="prop-input" placeholder="Add wiki page or URL…" style="flex:1;height:28px;font-size:12px;" />
+        <button class="btn btn-ghost" style="height:26px;padding:0 8px;font-size:12px;flex-shrink:0;">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 5v14m-7-7h14"/></svg>
+          Add
+        </button>
+      </div>
+    </div>
+
+    <!-- Links: subtasks, blocked-by, related (with @-autocomplete) -->
+    <div style="margin-top:24px;padding:16px 0 0;border-top:1px solid var(--lx-border-subtle);">
+      <div class="flex items-center gap-2 mb-2">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="color:var(--lx-text-muted);"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
+        <span class="prop-label">Links</span>
+        <span class="font-micro text-2xs color-muted" style="text-transform:uppercase;letter-spacing:0.04em;">subtasks · blocked · related</span>
+      </div>
+
+      <!-- Subtasks (children) -->
+      <div class="flex items-center justify-between" style="padding:6px 10px;background:var(--lx-surface-elevated);border:1px solid var(--lx-border-default);border-radius:6px;margin-bottom:4px;">
+        <div class="flex items-center gap-2" style="min-width:0;">
+          <span class="font-micro text-2xs color-muted" style="text-transform:uppercase;letter-spacing:0.04em;">subtask</span>
+          <span class="text-sm color-secondary truncate">Auto-save on zone transition</span>
+        </div>
+        <button class="icon-btn" title="Remove link" style="width:20px;height:20px;"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg></button>
+      </div>
+
+      <!-- Blocked by -->
+      <div class="flex items-center justify-between" style="padding:6px 10px;background:var(--lx-bg-warning-subtle);border:1px solid rgba(240,192,64,0.15);border-radius:6px;margin-bottom:4px;">
+        <div class="flex items-center gap-2" style="min-width:0;">
+          <span class="sync-dot sync-diverged"></span>
+          <span class="font-micro text-2xs color-warning" style="text-transform:uppercase;letter-spacing:0.04em;">blocked by</span>
+          <span class="text-sm color-secondary truncate">Boss arena trigger zones</span>
+        </div>
+        <button class="icon-btn" title="Remove link" style="width:20px;height:20px;"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg></button>
+      </div>
+
+      <!-- Related -->
+      <div class="flex items-center justify-between" style="padding:6px 10px;background:var(--lx-surface-elevated);border:1px solid var(--lx-border-default);border-radius:6px;margin-bottom:4px;">
+        <div class="flex items-center gap-2" style="min-width:0;">
+          <span class="font-micro text-2xs color-muted" style="text-transform:uppercase;letter-spacing:0.04em;">related</span>
+          <span class="text-sm color-secondary truncate">Implement double-jump mechanic</span>
+        </div>
+        <button class="icon-btn" title="Remove link" style="width:20px;height:20px;"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg></button>
+      </div>
+
+      <!-- Add-link field with @-autocomplete -->
+      <div style="position:relative;">
+        <div class="flex items-center gap-2 mt-2">
+          <input class="prop-input" placeholder="Add link — type @ or a task title…" value="@" style="flex:1;height:28px;font-size:12px;" />
+          <select class="prop-input" style="width:110px;height:28px;font-size:12px;flex-shrink:0;">
+            <option>Related to</option>
+            <option>Subtask of</option>
+            <option>Blocked by</option>
+          </select>
+          <button class="btn btn-ghost" style="height:26px;padding:0 8px;font-size:12px;flex-shrink:0;">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 5v14m-7-7h14"/></svg>
+            Link
+          </button>
+        </div>
+        <!-- Suggestion dropdown -->
+        <div class="dropdown-menu" style="position:absolute;top:100%;left:0;margin-top:4px;z-index:30;width:100%;">
+          <div class="dropdown-label">Tasks</div>
+          <div class="dropdown-item"><span class="type-badge type-feature" style="font-size:10px;height:16px;">F</span><span>Implement double-jump mechanic</span><span class="text-xs color-muted">Backlog</span></div>
+          <div class="dropdown-item"><span class="type-badge type-bug" style="font-size:10px;height:16px;">B</span><span>Fix collision on slope tiles</span><span class="text-xs color-muted">Backlog</span></div>
+          <div class="dropdown-item"><span class="type-badge type-task" style="font-size:10px;height:16px;">T</span><span>Update localization strings</span><span class="text-xs color-muted">Todo</span></div>
+        </div>
+      </div>
+    </div>
+
     <!-- GitHub Issues: multi-issue list -->
-    <div style="margin-top:24px;padding:0;">
+    <div style="margin-top:24px;padding:16px 0 0;border-top:1px solid var(--lx-border-subtle);">
       <div class="flex items-center gap-2 mb-2">
         <INCLUDE _github-icon.html />
         <span class="prop-label">GitHub Issues</span>
       </div>
 
       <!-- Diverged issue -->
-      <div class="flex items-center justify-between" style="padding:6px 10px;background:var(--lx-bg-warning-subtle);border:1px solid rgba(240,192,64,0.15);border-radius:6px;margin-bottom:4px;">
+      <div class="github-issue-row github-warning">
         <div class="flex items-center gap-2">
           <INCLUDE _github-icon.html />
           <span class="font-mono text-sm weight-500 color-link">emberfall-godot #107</span>
@@ -145,7 +229,7 @@
       </div>
 
       <!-- Synced issue -->
-      <div class="flex items-center justify-between" style="padding:6px 10px;border:1px solid var(--lx-border-default);border-radius:6px;background:var(--lx-surface-elevated);margin-bottom:4px;">
+      <div class="github-issue-row">
         <div class="flex items-center gap-2">
           <INCLUDE _github-icon.html />
           <span class="font-mono text-sm weight-500 color-link">emberfall-godot #91</span>
@@ -172,6 +256,8 @@
     <span class="annotation-tag">PropertyBar: 4 fields — Column, Priority, Type, Assignee chips. +N chip is clickable — expands to show all assignees inline, replaced with − to collapse</span>
     <span class="annotation-tag">TipTap rendered: prose + checklist + code block</span>
     <span class="annotation-tag">Double-click description → opens task-detail-edit.html (Tiptap editor inline)</span>
+    <span class="annotation-tag">Sources: persisted per-document (document_sources) — wiki pages or external URLs. Forge uses them as context; add/remove inline.</span>
+    <span class="annotation-tag">Links: subtask_of / blocked_by / related_to. Add via @-autocomplete (search tasks by title, relation dropdown beside field). Blocked-by rows show warning dot. Subtasks render indented under parent on board (kanban.html).</span>
     <span class="annotation-tag">GitHub Issues: multi-issue list with sync state + unlink per row. Diverged issue shows warning text inline: "GitHub state ≠ column. Move card to resync."</span>
     <span class="annotation-tag">Footer: Archive (ghost) + Delete (ghost danger) opens confirm dialog · Close. Archived task variant: footer shows Restore (ghost) instead of Archive, plus an "Archived" notice banner. Delete dialog's Delete button shows "Deleting…" while pending (task-detail-required-field.html shows the same dialog chrome)</span>
     <span class="annotation-tag">Stale ?task= deep link (deleted/missing task): slideover shows "Task not found" empty state with a Close button instead of rendering nothing</span>

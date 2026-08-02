@@ -8,6 +8,30 @@
   </div>
   <div class="nav-spacer"></div>
   <div class="nav-right">
+    <!-- Forge status pill (running state) -->
+    <button class="forge-status" style="display:flex;align-items:center;gap:6px;height:28px;padding:0 10px;background:var(--lx-surface-card);border:1px solid rgba(240,192,64,0.35);border-radius:9999px;color:var(--lx-text-primary);cursor:pointer;font-family:var(--lx-font-body);font-size:12px;font-weight:500;">
+      <span class="spinner" style="width:10px;height:10px;border-width:2px;"></span>
+      Forge · summarizing
+    </button>
+    <!-- Forge status pill (completed — click opens popover) -->
+    <div style="position:relative;">
+      <button class="forge-status" style="display:flex;align-items:center;gap:6px;height:28px;padding:0 10px;background:var(--lx-bg-success-subtle);border:1px solid rgba(74,222,128,0.25);border-radius:9999px;color:var(--lx-text-success);cursor:pointer;font-family:var(--lx-font-body);font-size:12px;font-weight:500;">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M20 6L9 17l-5-5"/></svg>
+        1 done
+      </button>
+      <!-- Popover: recent forge tasks -->
+      <div class="dropdown-menu" style="position:absolute;top:calc(100% + 6px);right:0;width:300px;z-index:60;">
+        <div class="dropdown-label">Forge · recent</div>
+        <div class="dropdown-item">
+          <span class="text-xs color-secondary truncate">Summarize · "Critical crash on level 3 load"</span>
+          <span class="font-micro text-2xs color-success" style="text-transform:uppercase;letter-spacing:0.04em;">done</span>
+        </div>
+        <div class="dropdown-item">
+          <span class="text-xs color-secondary truncate">Continue · "Implement double-jump"</span>
+          <span class="font-micro text-2xs color-warning" style="text-transform:uppercase;letter-spacing:0.04em;">running</span>
+        </div>
+      </div>
+    </div>
     <div class="project-switcher">
       <button class="project-switcher-trigger">
         <span class="text-sm weight-500 font-body color-primary">Emberfall</span>

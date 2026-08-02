@@ -34,8 +34,10 @@ All non-2xx responses share one shape:
 |------|------|------|
 | 400 | `BAD_REQUEST` | Malformed JSON / validation failure (details: field errors) |
 | 401 | `MISSING_AUTH` / `INVALID_API_KEY` / `INVALID_ACCESS_JWT` | No/invalid credentials |
-| 404 | `PROJECT_NOT_FOUND` `COLUMN_NOT_FOUND` `SWIMLANE_NOT_FOUND` `TASK_NOT_FOUND` `PAGE_NOT_FOUND` | |
+| 404 | `PROJECT_NOT_FOUND` `COLUMN_NOT_FOUND` `SWIMLANE_NOT_FOUND` `TASK_NOT_FOUND` `PAGE_NOT_FOUND` `SOURCE_NOT_FOUND` `FORGE_TASK_NOT_FOUND` `TASK_LINK_NOT_FOUND` | |
 | 409 | `SLUG_TAKEN` | Duplicate project slug or wiki slug (details: `{ slug }`) |
+| 409 | `NO_RUNTIME_ONLINE` | Create Forge task with no daemon registered/online |
+| 409 | `TASK_LINK_CYCLE` | subtask_of link would create a cycle (details: `{ message }`) |
 | 409 | `HAS_CHILDREN` | Delete column with tasks / wiki page with children (details: `{ count }`) |
 | 409 | `WIP_LIMIT` | Move would exceed column WIP limit |
 | 409 | `ALREADY_LINKED` | Task already has a GitHub issue |
@@ -43,6 +45,8 @@ All non-2xx responses share one shape:
 | 422 | `REQUIRED_FIELD` | Column's `required_fields` not satisfied (details: `{ field, column }`) |
 | 422 | `NEIGHBOR_NOT_IN_COLUMN` | `beforeTaskId`/`afterTaskId` not in target column |
 | 422 | `INVALID_OPTION` | Unknown priority/type option id, duplicate label, or empty option list (details: `{ optionId? }`) |
+| 422 | `SOURCE_FETCH_ERROR` | External source URL invalid, unreadable, or blocked by SSRF guard (details: `{ message }`) |
+| 422 | `INVALID_TASK_LINK` | Self-link or cross-project task link (details: `{ message }`) |
 | 500 | `DATABASE_ERROR` / `CONSTRAINT` / `INTERNAL` | |
 | 502 | `GITHUB_API_ERROR` | Only on explicit GitHub-linking endpoints; never on moves |
 
@@ -144,11 +148,67 @@ interface ApiKey {
   lastUsedAt: ISODate | null;
 }
 
+interface Runtime {
+  id: ID;
+  name: string;
+  provider: "opencode" | "hermes" | "command-code";
+  status: "online" | "offline";
+  hostname: string;
+  lastSeen: ISODate | null;
+  createdAt: ISODate;
+}
+
+interface ForgeTask {
+  id: ID;
+  runtimeId: ID | null;
+  projectId: ID;
+  documentType: "task" | "wiki";
+  documentId: string;
+  action: "continue" | "rewrite" | "summarize" | "expand" | "grammar";
+  selection: string;
+  docContext: string;
+  status: "queued" | "running" | "completed" | "failed" | "cancelled";
+  result: string | null;
+  error: string | null;
+  createdAt: ISODate;
+  startedAt: ISODate | null;
+  finishedAt: ISODate | null;
+}
+
+interface DocumentSource {
+  id: ID;
+  projectId: ID;
+  documentType: "task" | "wiki";
+  documentId: string;
+  kind: "wiki" | "external";
+  title: string;
+  ref: string;          // wiki page slug (wiki) or URL (external)
+  createdAt: ISODate;
+}
+
+interface TaskLink {
+  id: ID;
+  projectId: ID;
+  fromTaskId: ID;       // "this task"
+  toTaskId: ID;         // "that task"
+  relation: "subtask_of" | "blocked_by" | "related_to";
+  createdAt: ISODate;
+}
+
+interface TaskLinkSuggestion {
+  id: ID;
+  title: string;
+  columnName: string;
+  type: ID;             // type_options.id
+  priority: ID;         // priority_options.id
+}
+
 interface Board {                 // GET /board — full snapshot, unpaginated
   project: Project;
   columns: Column[];              // ordered by position
   swimlanes: Swimlane[];          // ordered by position
   fieldConfig: FieldConfig;       // priority + type option lists (labels/colors)
+  links: TaskLink[];              // all task links in the project
   tasks: Task[];                  // ALL tasks, ordered by (columnId, position)
 }
 
@@ -260,10 +320,12 @@ GET    /api/projects/:slug/tasks?columnId&swimlaneId&assignee&type&limit&cursor
 → 200 { data: Task[], nextCursor }
 
 POST   /api/projects/:slug/tasks
-body { columnId*, swimlaneId*, title*, description?, priority?, type?, assignees? }
+body { columnId*, swimlaneId*, title*, description?, priority?, type?, parentId?, assignees? }
   priority/type = option IDs from field-config; omitted → first option (position 0)
+  parentId = create as subtask of that task (inherits parent's column/swimlane,
+             inserts a subtask_of link)
 → 201 Task
-  | 404 COLUMN_NOT_FOUND / SWIMLANE_NOT_FOUND
+  | 404 COLUMN_NOT_FOUND / SWIMLANE_NOT_FOUND / TASK_NOT_FOUND (bad parentId)
   | 422 REQUIRED_FIELD            (creating directly into a guarded column)
   | 422 INVALID_OPTION            (bad priority/type id)
   position: appended to end of column
@@ -308,7 +370,36 @@ GET    /api/projects/:slug/board?includeArchived=true
   includeArchived omitted/false → archived tasks excluded; true → included
   (rendered dimmed in the UI, non-draggable, still in their original column)
   fieldConfig included — tasks' priority/type are option IDs resolved via it
+  links included — subtask grouping + blocked dots render without extra fetches
 ```
+
+### Task Links (subtasks, blocked-by, related)
+
+```
+GET    /api/projects/:slug/tasks/:id/links
+→ 200 { data: TaskLink[] }        // all relations involving the task
+
+POST   /api/projects/:slug/tasks/:id/links
+body { toTaskId*, relation*: "subtask_of"|"blocked_by"|"related_to" }
+→ 201 TaskLink
+  | 404 TASK_NOT_FOUND
+  | 409 TASK_LINK_CYCLE            // subtask_of would create a cycle
+  | 422 INVALID_TASK_LINK          // self-link, cross-project
+
+DELETE /api/projects/:slug/tasks/:id/links/:linkId
+→ 204 | 404 TASK_LINK_NOT_FOUND
+
+GET    /api/projects/:slug/tasks/search?q&exclude
+→ 200 { data: TaskLinkSuggestion[] }   // @-autocomplete; title LIKE, cap 10
+  exclude = task id to skip (the current task)
+```
+
+Notes:
+- `subtask_of`: child inherits the parent's column; moving a parent cascades to
+  children (same column, re-keyed after parent, WIP-bypassed).
+- `blocked_by`: informational — warning dot on the card, listed in detail. No
+  move guard.
+- `related_to`: symmetric display, stored once (from→to).
 
 ### Field Config (priorities & types)
 
@@ -399,6 +490,59 @@ headers: X-GitHub-Event, X-GitHub-Delivery, X-Hub-Signature-256
 → 401 on signature mismatch (before body parsing)
 Handled events: issues.closed, issues.reopened, issues.edited
 ```
+
+### Forge (AI writing assistant)
+
+```
+POST   /api/forge/runtimes/register        (daemon; x-forge-token or Bearer)
+body { name*, provider*: "opencode"|"hermes"|"command-code", hostname? }
+→ 201 Runtime
+
+GET    /api/forge/runtimes
+→ 200 { data: Runtime[] }                  (offline if last_seen > 2 min ago)
+
+POST   /api/forge/daemon/heartbeat         (daemon)
+body { runtimeId* }  → 200 { ok: true }
+
+POST   /api/forge/daemon/claim             (daemon)
+body { runtimeId* }
+→ 200 ForgeTask | null                     (oldest queued, FIFO; marks running)
+
+POST   /api/forge/tasks                    (browser)
+body { slug*, documentType*: "task"|"wiki", documentId*, action*,
+       selection? }
+  action: continue | rewrite | summarize | expand | grammar
+→ 201 ForgeTask
+  | 404 PROJECT_NOT_FOUND / TASK_NOT_FOUND / PAGE_NOT_FOUND
+  | 409 NO_RUNTIME_ONLINE                 (no daemon is up)
+
+GET    /api/forge/tasks/:id
+→ 200 ForgeTask
+
+POST   /api/forge/daemon/tasks/:id/complete   (daemon)  body { result* } → 200 ForgeTask
+POST   /api/forge/daemon/tasks/:id/fail       (daemon)  body { error* }  → 200 ForgeTask
+
+GET    /api/projects/:slug/documents/:type/:id/sources
+→ 200 { data: DocumentSource[] }
+
+POST   /api/projects/:slug/documents/:type/:id/sources
+body { kind*: "wiki"|"external", ref* }   (wiki = page slug; external = URL)
+→ 201 DocumentSource
+  | 404 PAGE_NOT_FOUND                     (wiki slug unknown)
+  | 422 SOURCE_FETCH_ERROR                 (bad URL / private-IP block)
+
+DELETE /api/projects/:slug/documents/:type/:id/sources/:sourceId
+→ 204 | 404 SOURCE_NOT_FOUND
+```
+
+Notes:
+- **Daemon auth:** `/api/forge/daemon/*` and `/api/forge/runtimes/*` accept the
+  shared secret `LXK_FORGE_DAEMON_TOKEN` via `x-forge-token`, or a normal Bearer
+  API key. Browser endpoints use the Bearer key.
+- **SSRF guard:** external sources resolve DNS and reject private/loopback/
+  link-local/CGNAT addresses before fetching.
+- **MCP loop:** the spawned agent CLI talks to Lexa's MCP (`/mcp`) to read task
+  context / act; the one-shot result is returned to the editor for accept/reject.
 
 ## Notes
 
