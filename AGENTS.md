@@ -6,20 +6,20 @@ You are working on **Lexa**: a self-hosted project management tool for a small g
 
 ## Document authority (read in this order before touching code)
 
-1. `IMPLEMENTATION.md` — your execution plan. Phases, files, acceptance checks.
-2. `SCHEMA.md` — SQL and data invariants. Copy verbatim.
-3. `LAYERS.md` — Effect service patterns, error catalog, webhook/auth flows.
-4. `API.md` — REST contract. Endpoint shapes are exact.
-5. `MCP.md` — Agent-facing tool contract. Tool shapes are exact.
-6. `DESIGN_SYSTEM.md` + `wireframes/` — all visual decisions.
-7. `ARCHITECTURE.md` — context and rationale (decisions log) only.
-8. `REVIEW.md` — historical record of design review. Do not implement from it.
+1. `docs/IMPLEMENTATION.md` — your execution plan. Phases, files, acceptance checks.
+2. `docs/SCHEMA.md` — SQL and data invariants. Copy verbatim.
+3. `docs/LAYERS.md` — Effect service patterns, error catalog, webhook/auth flows.
+4. `docs/API.md` — REST contract. Endpoint shapes are exact.
+5. `docs/MCP.md` — Agent-facing tool contract. Tool shapes are exact.
+6. `docs/DESIGN_SYSTEM.md` + `wireframes/` — all visual decisions.
+7. `docs/ARCHITECTURE.md` — context and rationale (decisions log) only.
+8. `docs/REVIEW.md` — historical record of design review. Do not implement from it.
 
 **If documents conflict, stop and report the conflict to the user. Never resolve it yourself.**
 
 ## Wireframes are the frontend source of truth
 
-The `wireframes/` directory contains the final UI/UX decisions for Lexa. When implementing or modifying frontend code, treat the wireframes as the authoritative reference for layout, structure, component states, and user flows. This section complements `IMPLEMENTATION.md`: the implementation plan defines the phase-by-phase build order and acceptance checks, while this rule defines how to interpret the wireframes when building frontend screens.
+The `wireframes/` directory contains the final UI/UX decisions for Lexa. When implementing or modifying frontend code, treat the wireframes as the authoritative reference for layout, structure, component states, and user flows. This section complements `docs/IMPLEMENTATION.md`: the implementation plan defines the phase-by-phase build order and acceptance checks, while this rule defines how to interpret the wireframes when building frontend screens.
 
 **Wireframe-first rule (non-negotiable):** Any UI/UX design change — new states, layout changes, component changes, copy changes, motion changes — must be made in the wireframes FIRST (edit `wireframes/src/`, run `bash wireframes/build.sh`), then implemented in code. Never change the app's UI without the wireframes reflecting the change first. If code and wireframes drift, the wireframe is the source of truth.
 
@@ -30,8 +30,8 @@ The `wireframes/` directory contains the final UI/UX decisions for Lexa. When im
 1. Start with `wireframes/flow-overview.html` to understand canonical user flows and project-context rules.
 2. Use `wireframes/index.html` to browse all surfaces and states.
 3. Match the structure, spacing, hierarchy, and interactions shown in the wireframes exactly.
-4. Use `DESIGN_SYSTEM.md` for tokens, typography, and color values. PHOSPHOR tokens are CSS variables — no raw hex outside `phosphor.css`.
-5. If a wireframe conflicts with `DESIGN_SYSTEM.md` or any other design doc, the wireframe wins for frontend implementation. Report the conflict to the user.
+4. Use `docs/DESIGN_SYSTEM.md` for tokens, typography, and color values. PHOSPHOR tokens are CSS variables — no raw hex outside `phosphor.css`.
+5. If a wireframe conflicts with `docs/DESIGN_SYSTEM.md` or any other design doc, the wireframe wins for frontend implementation. Report the conflict to the user.
 6. Do not add screens, states, or components that are not represented in the wireframes without explicit user approval.
 
 The wireframes are static HTML/CSS previews with no JavaScript. Implement interactions (dropdowns, modals, slideovers, drag-and-drop, inline editing, etc.) to match the rendered states and annotations.
@@ -54,7 +54,7 @@ When asked to implement frontend, do NOT design or invent. Read the relevant wir
 
 ## Architectural invariants — never violate these
 
-These were each hard-won design fixes (see REVIEW.md). Breaking any of them reintroduces a known bug:
+These were each hard-won design fixes (see docs/REVIEW.md). Breaking any of them reintroduces a known bug:
 
 1. **No service-to-service cycles.** `TaskService` must never depend on `GitHubService`. Lexa→GitHub sync is orchestrated by route handlers only.
 2. **Echo suppression.** Every Lexa→GitHub state sync writes `github_synced_state`; the webhook skips payloads matching it. Webhook delivery is recorded **after** successful processing, never before.
@@ -78,12 +78,12 @@ These rules are non-negotiable and apply to every agent working on Lexa:
   - `app/routes/` (route-level layout/styling, no backend logic)
   - `app/styles/` (CSS, design tokens)
   - `app/lib/` (client-side query hooks and utilities — never server libs)
-  - `DESIGN_SYSTEM.md` and `wireframes/design-system.css`
+  - `docs/DESIGN_SYSTEM.md` and `wireframes/design-system.css`
 - **@designer must never touch:**
   - `server/` (any backend code: repos, services, MCP, API, DB, GitHub)
   - `shared/types.ts` (schema types — read-only)
   - `shared/` except pure frontend utilities explicitly in scope
-  - `IMPLEMENTATION.md`, `SCHEMA.md`, `LAYERS.md`, `API.md`, `MCP.md`, `ARCHITECTURE.md`, `REVIEW.md`
+  - `docs/` (design docs: `IMPLEMENTATION.md`, `SCHEMA.md`, `LAYERS.md`, `API.md`, `MCP.md`, `ARCHITECTURE.md`, `REVIEW.md`, `DESIGN_SYSTEM.md`)
   - `package.json`, `tsconfig.json`, `app.config.ts`
 - **@fixer scope is per-task** — specify exact files; same constraints apply unless the task explicitly includes backend files.
 - If an agent discovers a need for a new backend endpoint or shared type, it must report back to the orchestrator — never add it itself.
@@ -93,7 +93,7 @@ These rules are non-negotiable and apply to every agent working on Lexa:
 - **Effect-TS everywhere on the backend.** Services/repos use `Effect.Service<Name>()("Lexa/Name", { effect: Effect.gen(...) })`. Domain errors are `Data.TaggedError`. Repos surface `RowNotFound | DbError | ConstraintViolation`; services map to domain errors per the catalog.
 - **Repos are thin.** Raw SQLite prepared statements via bun:sqlite. No business logic in repos. `updated_at = datetime('now')` inside every UPDATE statement.
 - **Routes are thinner.** `@effect/platform` HttpApi groups; parse → call service → return. Error→status mapping is declarative (`.addError`), from the catalog — no hand-rolled try/catch responses.
-- **Frontend:** TanStack Query for all server state; components match `wireframes/*.html` structure and `DESIGN_SYSTEM.md` tokens exactly. PHOSPHOR tokens are CSS variables — no raw hex outside `phosphor.css`.
+- **Frontend:** TanStack Query for all server state; components match `wireframes/*.html` structure and `docs/DESIGN_SYSTEM.md` tokens exactly. PHOSPHOR tokens are CSS variables — no raw hex outside `phosphor.css`.
 - **File placement:** `app/` (TanStack Start routes + components), `server/` (db/repos/services/api/mcp/github), `shared/` (types + pure functions). Nothing else at root except config.
 
 ## Verification commands
@@ -200,7 +200,7 @@ bun run build
 - `scripts/setup.sh <domain> [dev|staging|prod]` is for deployment
   (Docker + cloudflared tunnel + Access). Local dev does not need it.
 
-Each phase in IMPLEMENTATION.md has its own acceptance block — run it and paste the output.
+Each phase in docs/IMPLEMENTATION.md has its own acceptance block — run it and paste the output.
 
 ## Agent-browser usage — Snapshot-First (No Vision Required)
 
@@ -255,5 +255,5 @@ Use this to verify wireframe layout, spacing, and structure before implementing.
 ## When you're stuck
 
 1. Re-read the relevant design doc section — the answer is usually there.
-2. Check `REVIEW.md` if you're tempted to change an invariant (it explains why it exists).
+2. Check `docs/REVIEW.md` if you're tempted to change an invariant (it explains why it exists).
 3. If genuinely blocked or docs are ambiguous: **stop and ask the user.** State what's ambiguous and what you would otherwise do. Do not guess on architecture.
