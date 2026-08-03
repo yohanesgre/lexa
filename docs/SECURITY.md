@@ -1,7 +1,7 @@
 # Security Hardening — Lexa
 
 > Oracle review: 3 critical, 5 important, 9 nice-to-have. Prioritized by attacker impact.
-> Updated: Workers removed — Bun standalone deployment.
+> Updated: Workers removed — Bun standalone deployment. All code-level items closed 2026-08-03 (v0.1.0 hardening — see RELEASE.md).
 
 ## 🔴 Critical
 
@@ -55,26 +55,15 @@ Server exits with `process.exit(1)` if `LXK_API_KEY` env var is missing. Never s
 
 ### 7. FTS5 MATCH crashes leak errors
 
-**Status: 🔴 NOT FIXED**
-
-**Impact:** FTS operator syntax (`"`, `NEAR/`, unbalanced parens) in search query crashes SQLite → error to client.
-
-**Where:** `server/repos/wiki.repo.ts:81` — user query bound raw into `MATCH ?`
-
-**Fix:**
-- Catch `DbError` in wiki search service
-- Map to `422 SEARCH_ERROR` with generic message
-- Optionally sanitize query (strip `"` and special operators) before MATCH
+**Status: ✅ FIXED** (v0.1.0 — `WikiService.search` maps `DbError` → 422 `SEARCH_ERROR` with a generic message; `server/services/wiki.service.ts`)
 
 ### 8. API key management — resolved
 
-**Status: ✅ FIXED** (all `/api/*` routes guarded by `verifyApiKey`)
-
-API key management endpoints (`/api/settings/api-keys`) are behind the same auth check as all other endpoints.
+**Status: ✅ FIXED** (all `/api/*` routes guarded by `verifyApiKey`; **v0.1.0 hardening:** admin-only enforcement added on `/api/settings/api-keys`, `/api/admin/*`, project/column/swimlane/field-config mutations, and Forge agents/skills CRUD — caller identity resolved from the key (keys without a user = admin), non-admins get 403 `FORBIDDEN`. Matches the MCP surface (`server/mcp/auth.ts`).)
 
 ### 9. Webhooks not yet implemented
 
-**Status: 🔲 PENDING (Phase 6)**
+**Status: 🔲 PENDING (Phase 6 — deferred out of v0.1.0)**
 
 **Impact:** When built — signature timing oracle, replay attacks, unbounded body.
 
@@ -83,41 +72,29 @@ API key management endpoints (`/api/settings/api-keys`) are behind the same auth
 - `X-GitHub-Delivery` dedup before enqueue, reject duplicates with 200
 - Cap body size before HMAC verification
 
+### 10. Setup wizard endpoints unauthenticated after first run
+
+**Status: ✅ FIXED** (v0.1.0 — `POST /api/setup/admin`, `/api/setup/api-key`, `/api/setup/seed` lock with 403 `SETUP_LOCKED` once setup is complete (flag set by the new `/api/setup/complete` or when projects exist); see `server/api/http.ts`.)
+
 ## 🟢 Nice-to-have
 
 ### 10. MCP skips `jsonrpc: "2.0"` validation
-**Where:** `server/mcp/server.ts:118` — dispatches on any parsed object.<br>
-**Fix:** Validate `jsonrpc` field, reject batch arrays explicitly.
+**Status: ✅ FIXED** — `server/mcp/server.ts` rejects non-`"2.0"` requests.
 
 ### 11. Key format pre-check too loose
-**Where:** `server/mcp/server.ts:107` — `key.length < 5` check<br>
-**Fix:** Enforce `/^lxk_[0-9A-Za-z]{43}$/` before hashing.
+**Status: ✅ FIXED** — `server/mcp/server.ts` and `server/api/auth-key.ts` enforce `/^lxk_[0-9A-Za-z]{43}$/` before hashing.
 
-### 12. Local server CORS `*` with Authorization
-**Where:** `scripts/mcp/mcp-server.ts:953-955`<br>
-**Fix:** Delete CORS headers entirely — MCP clients aren't browsers.
-
-### 13. Local `/mcp` prefix match too broad
-**Where:** `scripts/mcp/mcp-server.ts:971` — `startsWith("/mcp")` passes `/mcpfoo`<br>
-**Fix:** Exact match `req.url === "/mcp"`
-
-### 14. Key compare not constant-time
-**Status: ✅ FIXED** (`scripts/mcp/mcp-server.ts:978` — uses `timingSafeEqual`)
-
-### 15. Startup logs key prefix
-**Where:** `scripts/mcp/mcp-server.ts:1014` — prints first 8 chars of key<br>
-**Fix:** Drop the log line.
+### 12–15. Legacy `scripts/mcp/` local MCP server (CORS `*`, loose `/mcp` prefix, key log)
+**Status: ✅ N/A** — deleted in v0.1.0; the MCP surface is `server/mcp/` (exact `/mcp` match on the main server, constant-time key compare, no CORS headers, no key logging).
 
 ### 16. `/health` discloses WORKER_URL
 **Status: ⬜ STALE** (no longer applicable — `WORKER_URL` field removed or harmless in Bun standalone)
 
 ### 17. No security headers on REST responses
-**Where:** All API responses<br>
-**Fix:** Add `X-Content-Type-Options: nosniff`, `Cache-Control: no-store`.
+**Status: ✅ FIXED** (v0.1.0 — `X-Content-Type-Options: nosniff` + `Cache-Control: no-store` on all `/api/*` and `/mcp` responses; `server/entry.ts`)
 
 ### 18. `parseInt` unchecked NaN on revisions limit
-**Where:** `server/api/http.ts:670`<br>
-**Fix:** Clamp via `clampLimit` like tasks path does.
+**Status: ✅ FIXED** (v0.1.0 — wiki `listRevisions` uses `clampLimit` like the tasks path)
 
 ## Passed Review
 
@@ -130,8 +107,6 @@ API key management endpoints (`/api/settings/api-keys`) are behind the same auth
 
 ## Fix Priority (remaining)
 
-1. **#7 — FTS5 error handling** (data leak via search)
-2. **#5 — Rate limiting** (CF dashboard, zero code)
-3. **#2 — Access JWT verify** (defense in depth, low urgency)
-4. **#9 — Webhook hardening** (during Phase 6 build)
-5. **#10-18 — Nice-to-haves** (choose per effort)
+1. **#5 — Rate limiting** (CF dashboard, zero code)
+2. **#2 — Access JWT verify** (defense in depth, low urgency)
+3. **#9 — Webhook hardening** (during Phase 6 build)

@@ -1,4 +1,4 @@
-import { Logger, LogLevel, Layer } from "effect";
+import { Logger, LogLevel, Layer, FiberId } from "effect";
 
 const levelFromEnv = (): LogLevel.LogLevel => {
   const raw = (typeof process !== "undefined" ? process.env.LOG_LEVEL : undefined) ?? "info";
@@ -27,7 +27,7 @@ const structuredLogger = Logger.make(({ logLevel, message, annotations, date, fi
     level: logLevel.label,
     message: String(message),
     timestamp: date.toISOString(),
-    fiber: fiberId.id,
+    fiber: Array.from(FiberId.ids(fiberId))[0] ?? null,
     ...extra,
   };
   const line = JSON.stringify(entry);
