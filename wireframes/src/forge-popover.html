@@ -29,16 +29,32 @@
       <span class="font-micro text-2xs color-muted" style="text-transform:uppercase;letter-spacing:0.04em;">AI writing assistant</span>
     </div>
 
-    <!-- Action picker -->
+    <!-- Agent picker -->
     <div style="padding:10px 12px;border-bottom:1px solid var(--lx-border-default);">
-      <span class="prop-label" style="display:block;margin-bottom:6px;">Action</span>
+      <span class="prop-label" style="display:block;margin-bottom:6px;">Agent</span>
+      <div class="flex items-center gap-2" style="flex-wrap:wrap;">
+        <button class="btn btn-ghost" style="height:26px;padding:0 10px;font-size:12px;border-color:var(--lx-border-focus);color:var(--lx-text-primary);">Lexa</button>
+        <button class="btn btn-ghost" style="height:26px;padding:0 10px;font-size:12px;">Style reviewer</button>
+        <button class="btn btn-ghost" style="height:26px;padding:0 10px;font-size:12px;">⋯</button>
+      </div>
+    </div>
+
+    <!-- Skill picker (dependent on the selected agent) -->
+    <div style="padding:10px 12px;border-bottom:1px solid var(--lx-border-default);">
+      <span class="prop-label" style="display:block;margin-bottom:6px;">Skill</span>
       <div class="flex items-center gap-2" style="flex-wrap:wrap;">
         <button class="btn btn-ghost" style="height:26px;padding:0 10px;font-size:12px;border-color:var(--lx-border-focus);color:var(--lx-text-primary);">Continue</button>
         <button class="btn btn-ghost" style="height:26px;padding:0 10px;font-size:12px;">Rewrite</button>
         <button class="btn btn-ghost" style="height:26px;padding:0 10px;font-size:12px;">Summarize</button>
-        <button class="btn btn-ghost" style="height:26px;padding:0 10px;font-size:12px;">Expand</button>
-        <button class="btn btn-ghost" style="height:26px;padding:0 10px;font-size:12px;">Fix grammar</button>
+        <button class="btn btn-ghost" style="height:26px;padding:0 10px;font-size:12px;">⋯</button>
       </div>
+      <span class="annotation-inline" style="display:block;margin-top:4px;">Skills listed belong to the selected agent only. Changing the agent resets the skill to its first attached.</span>
+    </div>
+
+    <!-- Additional prompt (per-run override) -->
+    <div style="padding:10px 12px;border-bottom:1px solid var(--lx-border-default);">
+      <span class="prop-label" style="display:block;margin-bottom:6px;">Additional prompt <span class="font-micro text-2xs color-muted" style="text-transform:uppercase;letter-spacing:0.04em;margin-left:4px;">Optional</span></span>
+      <textarea class="prop-input w-full" rows="3" style="font-size:12px;line-height:1.5;resize:vertical;" placeholder="Extra instructions for this run…"></textarea>
     </div>
 
     <!-- Runtime picker -->
@@ -48,7 +64,7 @@
         <option>dev-mbp · command-code</option>
         <option>staging-box · hermes</option>
       </select>
-      <span class="annotation-inline" style="display:block;margin-top:4px;">Which daemon runs this request. Forge always uses the current task/wiki page as its context.</span>
+      <span class="annotation-inline" style="display:block;margin-top:4px;">Which daemon runs this request. Any online runtime qualifies — Forge uses the daemon's agent CLI directly, no Lexa MCP connection needed. No runtime online → the picker shows "No runtime online" and Generate is disabled.</span>
     </div>
 
     <!-- Generate -->
@@ -68,31 +84,145 @@
       <span class="font-micro text-2xs color-warning" style="text-transform:uppercase;letter-spacing:0.04em;">Running…</span>
     </div>
     <div style="padding:12px;">
-      <div class="flex items-center gap-2 mb-2">
-        <span class="spinner" style="width:12px;height:12px;border-width:2px;"></span>
-        <span class="text-xs color-secondary font-body">dev-mbp · command-code · Continue</span>
+      <div class="flex items-center justify-between gap-2 mb-2">
+        <div class="flex items-center gap-2">
+          <span class="spinner" style="width:12px;height:12px;border-width:2px;"></span>
+          <span class="text-xs color-secondary font-body">dev-mbp · command-code · Continue</span>
+        </div>
+        <button class="btn btn-ghost" style="height:24px;padding:0 8px;font-size:11px;">Cancel</button>
       </div>
-      <div style="background:var(--lx-surface-input);border:1px solid var(--lx-border-default);border-radius:6px;padding:10px 12px;min-height:120px;font-size:13px;line-height:20px;color:var(--lx-text-secondary);font-family:var(--lx-font-body);white-space:pre-wrap;">
-        The furnace zone crash stems from an off-by-one in the chunk coordinate math when transitioning between zones. The stack trace in <span style="color:var(--lx-text-primary);">#107</span> points to <span style="font-family:var(--lx-font-mono);font-size:12px;">TilemapChunkLoader._loadChunk()</span> — the loader assumes chunk indices start at 0, but the streaming system assigns them from the world origin…
+      <!-- Live activity log: verbose stream of what the agent is doing right now -->
+      <div style="background:var(--lx-surface-input);border:1px solid var(--lx-border-default);border-radius:6px;overflow:hidden;">
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:6px 10px;border-bottom:1px solid var(--lx-border-subtle);">
+          <div class="flex items-center" style="gap:4px;">
+            <span class="font-micro text-2xs color-muted" style="text-transform:uppercase;letter-spacing:0.04em;">Activity</span>
+            <button class="btn btn-ghost" style="height:18px;padding:0 5px;font-size:10px;" title="Open the full log viewer">
+              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/></svg>
+            </button>
+          </div>
+          <div class="flex items-center gap-2" style="flex-shrink:0;">
+            <span class="font-micro text-2xs color-muted" style="text-transform:uppercase;letter-spacing:0.04em;">Follow</span>
+            <button class="btn btn-ghost" style="height:18px;padding:0 6px;font-size:10px;border-color:var(--lx-border-focus);color:var(--lx-text-primary);" title="Pause auto-scroll">●</button>
+            <span class="font-micro text-2xs color-warning" style="text-transform:uppercase;letter-spacing:0.04em;">● live</span>
+          </div>
+        </div>
+        <!-- Scrollable body: newest at bottom. Last ~50 lines shown live; full log capped at 400 lines server-side. -->
+        <div style="padding:8px 10px;font-family:var(--lx-font-mono);font-size:11px;line-height:19px;color:var(--lx-text-secondary);max-height:180px;overflow-y:auto;">
+          <div style="display:flex;gap:8px;">
+            <span class="color-success" style="flex-shrink:0;">●</span>
+            <span>12:04:11 claimed by dev-mbp</span>
+          </div>
+          <div style="display:flex;gap:8px;">
+            <span class="color-success" style="flex-shrink:0;">●</span>
+            <span>12:04:11 model command-code/Qwen3.7-Max</span>
+          </div>
+          <div style="display:flex;gap:8px;">
+            <span class="color-success" style="flex-shrink:0;">●</span>
+            <span>12:04:12 $ cmd -p … --no-session --skip-onboarding --permission-mode auto-accept</span>
+          </div>
+          <div style="display:flex;gap:8px;">
+            <span class="color-success" style="flex-shrink:0;">●</span>
+            <span>12:04:12 agent started</span>
+          </div>
+          <div style="display:flex;gap:8px;">
+            <span class="color-success" style="flex-shrink:0;">●</span>
+            <span>12:04:12 reading document context</span>
+          </div>
+          <!-- Agent stdout streamed verbatim, line by line -->
+          <div style="display:flex;gap:8px;">
+            <span class="color-muted" style="flex-shrink:0;">·</span>
+            <span>12:04:13 ▸ Loading project context…</span>
+          </div>
+          <div style="display:flex;gap:8px;">
+            <span class="color-muted" style="flex-shrink:0;">·</span>
+            <span>12:04:13 ▸ Summarizing selection (142 chars)</span>
+          </div>
+          <!-- stderr lines tinted danger, prefixed [stderr] -->
+          <div style="display:flex;gap:8px;color:var(--lx-text-danger);">
+            <span class="color-danger" style="flex-shrink:0;">!</span>
+            <span>12:04:14 [stderr] model fallback: deepseek-v4-flash not found, using deepseek-v4</span>
+          </div>
+          <div style="display:flex;gap:8px;">
+            <span class="color-muted" style="flex-shrink:0;">·</span>
+            <span>12:04:15 ▸ Writing draft…</span>
+          </div>
+          <!-- Current step: pulsing amber caret on a subtle highlight -->
+          <div style="display:flex;gap:8px;background:rgba(240,192,64,0.08);border-radius:4px;padding:0 2px;">
+            <span class="color-warning" style="flex-shrink:0;">●</span>
+            <span class="color-primary">12:04:16 generating text… <span style="animation:lx-wip-pulse 1.2s ease-in-out infinite;">▍</span></span>
+          </div>
+        </div>
+      </div>
+      <span class="annotation-inline" style="display:block;margin-top:6px;">Verbose live log — the daemon streams the agent CLI's stdout line by line (prefixed ▸) plus lifecycle markers (claim, model, command, agent start, done). stderr lines are prefixed [stderr] and tinted danger. Header: "Activity · Follow ● (pauses auto-scroll) · ● live". Body is scrollable (max-height 180px, newest at bottom, auto-scrolls in follow mode; last ~50 lines rendered live). Server-side caps: each line ≤500 chars (daemon) / ≤2000 chars (server), log trimmed to 400 lines per task (FIFO). Timestamps are server-side (HH:MM:SS). Persisted per task; closing the popup doesn't cancel the run.</span>
+    </div>
+  </div>
+
+  <!-- Forge Popover: completed state — shows the target document name, not the raw result. The result body is only visible in the editor review (forge-review.html). -->
+  <div class="menu-popover" style="position:absolute;top:76px;left:792px;width:340px;">
+    <div class="forge-header" style="display:flex;align-items:center;justify-content:space-between;padding:10px 12px;border-bottom:1px solid var(--lx-border-default);">
+      <span class="text-sm weight-500 color-primary" style="font-family:var(--lx-font-body);">Forge</span>
+      <span class="font-micro text-2xs color-success" style="text-transform:uppercase;letter-spacing:0.04em;">Ready</span>
+    </div>
+    <div style="padding:12px;">
+      <div style="background:var(--lx-surface-input);border:1px solid var(--lx-border-default);border-radius:6px;padding:10px 12px;">
+        <div class="flex items-center gap-2 mb-1">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--lx-text-success)" stroke-width="2.5"><path d="M20 6L9 17l-5-5"/></svg>
+          <span class="text-xs weight-500 color-primary" style="font-family:var(--lx-font-body);">Player movement with analog stick</span>
+        </div>
+        <span class="font-micro text-2xs color-muted" style="text-transform:uppercase;letter-spacing:0.04em;">Rewrite — ready to review</span>
       </div>
       <div class="flex items-center justify-end gap-2 mt-3">
         <button class="btn btn-ghost" style="height:26px;padding:0 10px;font-size:12px;">Reject</button>
         <button class="btn btn-primary" style="height:26px;padding:0 10px;font-size:12px;">
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M20 6L9 17l-5-5"/></svg>
-          Accept
+          Review in editor
         </button>
       </div>
-      <span class="annotation-inline" style="display:block;margin-top:6px;">Running: streams agent output. Accept inserts into the editor at the cursor/selection; Reject discards. Esc closes.</span>
+      <span class="annotation-inline" style="display:block;margin-top:6px;">The popover never shows the raw result text — it shows the target document's name (task title / wiki page title, from the server) plus the skill. The result body appears only in the editor review (forge-review.html).</span>
+    </div>
+  </div>
+
+  <!-- Forge Popover: empty-skills state — the selected agent has no attached skills, Generate is disabled -->
+  <div class="menu-popover" style="position:absolute;top:440px;left:48px;width:340px;">
+    <div class="forge-header" style="display:flex;align-items:center;justify-content:space-between;padding:10px 12px;border-bottom:1px solid var(--lx-border-default);">
+      <span class="text-sm weight-500 color-primary" style="font-family:var(--lx-font-body);">Forge</span>
+      <span class="font-micro text-2xs color-muted" style="text-transform:uppercase;letter-spacing:0.04em;">AI writing assistant</span>
+    </div>
+    <div style="padding:10px 12px;border-bottom:1px solid var(--lx-border-default);">
+      <span class="prop-label" style="display:block;margin-bottom:6px;">Agent</span>
+      <div class="flex items-center gap-2" style="flex-wrap:wrap;">
+        <button class="btn btn-ghost" style="height:26px;padding:0 10px;font-size:12px;border-color:var(--lx-border-focus);color:var(--lx-text-primary);">Style reviewer</button>
+      </div>
+    </div>
+    <div style="padding:10px 12px;border-bottom:1px solid var(--lx-border-default);">
+      <span class="prop-label" style="display:block;margin-bottom:6px;">Skill</span>
+      <div style="background:var(--lx-surface-input);border:1px solid var(--lx-border-default);border-radius:6px;padding:8px 10px;">
+        <span class="text-xs color-muted">No skills attached — add them in Settings.</span>
+      </div>
+    </div>
+    <div style="padding:10px 12px;display:flex;align-items:center;justify-content:space-between;">
+      <span class="font-micro text-2xs color-muted" style="text-transform:uppercase;letter-spacing:0.04em;">Selection: 142 chars</span>
+      <button class="btn btn-primary" disabled style="height:28px;padding:0 12px;font-size:12px;opacity:.45;">Generate</button>
     </div>
   </div>
 
   <!-- Annotations -->
   <div style="position:fixed;bottom:24px;left:24px;z-index:55;display:flex;flex-direction:column;gap:8px;align-items:flex-start;">
     <span class="annotation-tag">Opens from the Forge toolbar button in task detail + wiki editors.</span>
-    <span class="annotation-tag">Actions: Continue (from cursor) · Rewrite (selected text) · Summarize · Expand · Fix grammar.</span>
-    <span class="annotation-tag">Runtime: pick which daemon runs the request (online runtimes only). Forge uses the current task/wiki page as context.</span>
-    <span class="annotation-tag">Generate → POST /api/forge/tasks → daemon runs agent CLI → streamed result → Accept/Reject.</span>
+    <span class="annotation-tag">Agent: a named rule bundle defined in Settings — its instructions become AGENTS.md in the run dir. NOT the runtime's CLI agent (that's the "CLI"/"Persona" on the runtime row). Builtin "Lexa" is the default; the list is editable + extensible in Settings.</span>
+    <span class="annotation-tag">Skill: a named operation bundle attached to agents (M2M). Chips show only the selected agent's attached skills; changing the agent resets the skill to its first attached. Builtins: Continue (from cursor) · Rewrite (selected text) · Summarize · Expand · Fix grammar.</span>
+    <span class="annotation-tag">Overflow: more than 6 agents or skills collapses the row into a dropdown (chips stay for the first 6).</span>
+    <span class="annotation-tag">Empty-skills state: an agent with zero attached skills shows the hint + disabled Generate — skills must be attached in Settings first.</span>
+    <span class="annotation-tag">Additional prompt: per-run free text appended to the prompt (stored on the task, cleared on popover close). Optional.</span>
+    <span class="annotation-tag">Rules delivery: the server embeds the chosen agent + skill rules into the claim response (agentMarkdown/skillMarkdown); the daemon writes them into the run dir as AGENTS.md + .agents/&lt;skill&gt;/SKILL.md. No host-side store — edits apply to the very next run.</span>
+    <span class="annotation-tag">Runtime: pick which daemon runs the request (any online runtime — no Lexa MCP connection required; Settings shows the MCP state per runtime as informational). Forge uses the current task/wiki page as context.</span>
+    <span class="annotation-tag">Generate → POST /api/forge/tasks → daemon runs agent CLI → result → Review in editor (forge-review.html) / Reject.</span>
+    <span class="annotation-tag">While a result is being reviewed in the editor, this popover shows "In review in editor" and hides its buttons.</span>
+    <span class="annotation-tag">After Accept in the review banner (forge-review.html), the task is marked applied and the popover starts fresh — the next open lands on Generate, never on the applied result (it can't be inserted twice).</span>
+    <span class="annotation-tag">Reject (popover or banner) keeps the task reviewable — the result can be inserted again from the popover if you change your mind. Rejected tasks are not re-attached on reopen this session.</span>
     <span class="annotation-tag">Background: closing the popup does NOT cancel a running task — it completes server-side and re-appears here next open.</span>
+    <span class="annotation-tag">Overflow: the popover anchors 6px below the Forge button, but when it would extend past the bottom of the viewport it flips above the button (8px gap); left edge is clamped to the viewport. Every control stays reachable — the popover never clips off-screen buttons (the Review in editor / Reject row must never fall below the fold).</span>
+    <span class="annotation-tag">The popover shows the target document name (task title / wiki page title), never the raw result body — the result text appears only in the editor review.</span>
     <span class="annotation-tag">Disabled ("coming soon") when LXK_FORGE_ENABLED is unset.</span>
   </div>
 

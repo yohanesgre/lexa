@@ -1,6 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import type { Task, Project, Board, Column, Swimlane, TipTapDoc, WikiPageMeta, ApiKey, ApiKeyCreateResult, Dashboard, FieldConfig, DocumentSource, ForgeTask, TaskLink } from "../../shared/types";
+import type { Task, Project, Board, Column, Swimlane, TipTapDoc, WikiPageMeta, ApiKey, ApiKeyCreateResult, Dashboard, FieldConfig, DocumentSource, ForgeTask, TaskLink, Runtime, ForgeAgent, ForgeSkill } from "../../shared/types";
 import * as api from "./api";
+import type { RecentForgeTask, ForgeHistoryPage } from "./api";
 import { useToast } from "../components/ui/Toast";
 
 function toastMessage(err: unknown): string {
@@ -144,11 +145,13 @@ export function useMoveTask(slug: string) {
     mutationFn: ({ id, ...target }: { id: string; columnId: string; swimlaneId: string; beforeTaskId?: string; afterTaskId?: string }) =>
       api.moveTask(slug, id, target),
     onSuccess: (task) => {
-      // Keep the archived-board cache in sync with the authoritative move response.
-      qc.setQueryData(["board", slug, true], (old: Board | undefined) => {
-        if (!old) return old;
-        return { ...old, tasks: old.tasks.map((t: Task) => (t.id === task.id ? task : t)) };
-      });
+      // Keep both board caches in sync with the authoritative move response.
+      for (const archived of [false, true]) {
+        qc.setQueryData(["board", slug, archived], (old: Board | undefined) => {
+          if (!old) return old;
+          return { ...old, tasks: old.tasks.map((t: Task) => (t.id === task.id ? task : t)) };
+        });
+      }
       toast.push("success", "Task moved");
     },
     onError: (err) => {
@@ -538,6 +541,36 @@ export function useRuntimes() {
   return useQuery({ queryKey: ["forge-runtimes"], queryFn: () => api.listRuntimes().then((r) => r.data), staleTime: 15_000, refetchInterval: 30_000 });
 }
 
+export function useUpdateRuntime() {
+  const qc = useQueryClient();
+  const toast = useToast();
+  return useMutation({
+    mutationFn: ({ id, patch }: { id: string; patch: { name?: string; provider?: "opencode" | "hermes" | "command-code"; agent?: string; model?: string; printLogs?: boolean; logLevel?: "" | "DEBUG" | "INFO" | "WARN" | "ERROR"; extraArgs?: string[] } }) => api.updateRuntime(id, patch),
+    onSuccess: (runtime) => {
+      qc.setQueryData<Runtime[]>(["forge-runtimes"], (rows) => rows?.map((r) => (r.id === runtime.id ? runtime : r)));
+      toast.push("success", "Runtime updated — applies on the next Forge task");
+    },
+    onError: (err) => {
+      toast.push("error", "Failed to update runtime", toastMessage(err));
+    },
+  });
+}
+
+export function useRemoveRuntime() {
+  const qc = useQueryClient();
+  const toast = useToast();
+  return useMutation({
+    mutationFn: (id: string) => api.removeRuntime(id),
+    onSuccess: (_, id) => {
+      qc.setQueryData<Runtime[]>(["forge-runtimes"], (rows) => rows?.filter((r) => r.id !== id));
+      toast.push("success", "Runtime removed");
+    },
+    onError: (err) => {
+      toast.push("error", "Failed to remove runtime", toastMessage(err));
+    },
+  });
+}
+
 // Recent Forge tasks across all projects — powers the navbar status pill.
 export function useRecentForgeTasks() {
   return useQuery({
@@ -551,11 +584,216 @@ export function useRecentForgeTasks() {
 }
 
 export function useCreateForgeTask() {
+  const qc = useQueryClient();
   const toast = useToast();
   return useMutation({
     mutationFn: api.createForgeTask,
+    onSuccess: (task) => {
+      // Reflect the new task in the navbar pill immediately — the recent
+      // list polls every 15s when idle, which feels like a missing status.
+      const projects = qc.getQueryData<Project[]>(["projects"]);
+      const project = projects?.find((p) => p.id === task.projectId);
+      qc.setQueryData<RecentForgeTask[]>(["forge-recent-tasks"], (rows) => [
+        { ...task, projectName: project?.name ?? "" },
+        ...(rows ?? []),
+      ]);
+    },
     onError: (err) => {
       toast.push("error", "Forge unavailable", toastMessage(err));
+    },
+  });
+}
+
+// Cancel a queued/running Forge task from the popover or the navbar panel.
+// Updates the recent-tasks list and every cached history page from the
+// authoritative mutation response (never invalidate on the mutation path).
+export function useCancelForgeTask() {
+  const qc = useQueryClient();
+  const toast = useToast();
+  return useMutation({
+    mutationFn: (id: string) => api.cancelForgeTask(id),
+    onSuccess: (task) => {
+      qc.setQueryData<ForgeTask[]>(["forge-recent-tasks"], (rows) =>
+        rows?.map((r) => (r.id === task.id ? { ...r, status: task.status } : r))
+      );
+      qc.setQueriesData<ForgeHistoryPage>({ queryKey: ["forge-task-history"] }, (page) =>
+        page ? { ...page, data: page.data.map((r) => (r.id === task.id ? { ...r, status: task.status } : r)) } : page
+      );
+      toast.push("success", "Forge task cancelled");
+    },
+    onError: (err) => {
+      toast.push("error", "Failed to cancel Forge task", toastMessage(err));
+    },
+  });
+}
+
+// Full Forge task history for the control panel: filterable, cursor-paginated.
+// Polls while any row on the current page is queued/running so active runs
+// update in place; idle pages refresh on a slow heartbeat.
+export function useForgeTaskHistory(
+  filters: { slug?: string; status?: ForgeTask["status"]; skillId?: string; documentType?: "task" | "wiki"; limit?: number },
+  cursor: string | null
+) {
+  return useQuery({
+    queryKey: ["forge-task-history", filters, cursor],
+    queryFn: () => api.listForgeTaskHistory({ ...filters, cursor: cursor ?? undefined }),
+    staleTime: 30_000,
+    refetchInterval: (query) => {
+      const hasActive = (query.state.data?.data ?? []).some((t) => t.status === "queued" || t.status === "running");
+      return hasActive ? 1500 : 15_000;
+    },
+  });
+}
+
+// ── Forge agents & skills (global rule bundles) ──
+
+export function useForgeAgents() {
+  return useQuery({
+    queryKey: ["forge-agents"],
+    queryFn: () => api.listForgeAgents().then((r) => r.data),
+    staleTime: 30_000,
+  });
+}
+
+export function useForgeSkills() {
+  return useQuery({
+    queryKey: ["forge-skills"],
+    queryFn: () => api.listForgeSkills().then((r) => r.data),
+    staleTime: 30_000,
+  });
+}
+
+export function useCreateForgeAgent() {
+  const qc = useQueryClient();
+  const toast = useToast();
+  return useMutation({
+    mutationFn: api.createForgeAgent,
+    onSuccess: (agent) => {
+      qc.setQueryData<ForgeAgent[]>(["forge-agents"], (rows) => [...(rows ?? []), agent]);
+      toast.push("success", `Agent '${agent.name}' created`);
+    },
+    onError: (err) => {
+      toast.push("error", "Failed to create agent", toastMessage(err));
+    },
+  });
+}
+
+export function useUpdateForgeAgent() {
+  const qc = useQueryClient();
+  const toast = useToast();
+  return useMutation({
+    mutationFn: ({ id, patch }: { id: string; patch: { name?: string; description?: string; instructions?: string } }) => api.updateForgeAgent(id, patch),
+    onSuccess: (agent) => {
+      qc.setQueryData<ForgeAgent[]>(["forge-agents"], (rows) => rows?.map((r) => (r.id === agent.id ? agent : r)));
+      toast.push("success", `Agent '${agent.name}' saved`);
+    },
+    onError: (err) => {
+      toast.push("error", "Failed to save agent", toastMessage(err));
+    },
+  });
+}
+
+export function useDeleteForgeAgent() {
+  const qc = useQueryClient();
+  const toast = useToast();
+  return useMutation({
+    mutationFn: (id: string) => api.deleteForgeAgent(id),
+    onSuccess: (_v, id) => {
+      qc.setQueryData<ForgeAgent[]>(["forge-agents"], (rows) => rows?.filter((r) => r.id !== id));
+      toast.push("success", "Agent deleted");
+    },
+    onError: (err) => {
+      toast.push("error", "Failed to delete agent", toastMessage(err));
+    },
+  });
+}
+
+export function useReplaceAgentSkills() {
+  const qc = useQueryClient();
+  const toast = useToast();
+  return useMutation({
+    mutationFn: ({ id, skillIds }: { id: string; skillIds: string[] }) => api.replaceAgentSkills(id, skillIds),
+    onSuccess: (agent) => {
+      qc.setQueryData<ForgeAgent[]>(["forge-agents"], (rows) => rows?.map((r) => (r.id === agent.id ? agent : r)));
+      toast.push("success", `Skills updated for '${agent.name}'`);
+    },
+    onError: (err) => {
+      toast.push("error", "Failed to update skills", toastMessage(err));
+    },
+  });
+}
+
+export function useResetForgeAgent() {
+  const qc = useQueryClient();
+  const toast = useToast();
+  return useMutation({
+    mutationFn: (id: string) => api.resetForgeAgent(id),
+    onSuccess: (agent) => {
+      qc.setQueryData<ForgeAgent[]>(["forge-agents"], (rows) => rows?.map((r) => (r.id === agent.id ? agent : r)));
+      toast.push("success", `Agent '${agent.name}' reset to default`);
+    },
+    onError: (err) => {
+      toast.push("error", "Failed to reset agent", toastMessage(err));
+    },
+  });
+}
+
+export function useCreateForgeSkill() {
+  const qc = useQueryClient();
+  const toast = useToast();
+  return useMutation({
+    mutationFn: api.createForgeSkill,
+    onSuccess: (skill) => {
+      qc.setQueryData<ForgeSkill[]>(["forge-skills"], (rows) => [...(rows ?? []), skill]);
+      toast.push("success", `Skill '${skill.name}' created`);
+    },
+    onError: (err) => {
+      toast.push("error", "Failed to create skill", toastMessage(err));
+    },
+  });
+}
+
+export function useUpdateForgeSkill() {
+  const qc = useQueryClient();
+  const toast = useToast();
+  return useMutation({
+    mutationFn: ({ id, patch }: { id: string; patch: { name?: string; description?: string; instructions?: string } }) => api.updateForgeSkill(id, patch),
+    onSuccess: (skill) => {
+      qc.setQueryData<ForgeSkill[]>(["forge-skills"], (rows) => rows?.map((r) => (r.id === skill.id ? skill : r)));
+      toast.push("success", `Skill '${skill.name}' saved`);
+    },
+    onError: (err) => {
+      toast.push("error", "Failed to save skill", toastMessage(err));
+    },
+  });
+}
+
+export function useDeleteForgeSkill() {
+  const qc = useQueryClient();
+  const toast = useToast();
+  return useMutation({
+    mutationFn: (id: string) => api.deleteForgeSkill(id),
+    onSuccess: (_v, id) => {
+      qc.setQueryData<ForgeSkill[]>(["forge-skills"], (rows) => rows?.filter((r) => r.id !== id));
+      toast.push("success", "Skill deleted");
+    },
+    onError: (err) => {
+      toast.push("error", "Failed to delete skill", toastMessage(err));
+    },
+  });
+}
+
+export function useResetForgeSkill() {
+  const qc = useQueryClient();
+  const toast = useToast();
+  return useMutation({
+    mutationFn: (id: string) => api.resetForgeSkill(id),
+    onSuccess: (skill) => {
+      qc.setQueryData<ForgeSkill[]>(["forge-skills"], (rows) => rows?.map((r) => (r.id === skill.id ? skill : r)));
+      toast.push("success", `Skill '${skill.name}' reset to default`);
+    },
+    onError: (err) => {
+      toast.push("error", "Failed to reset skill", toastMessage(err));
     },
   });
 }
@@ -569,6 +807,17 @@ export function useForgeTask(id: string | null, enabled: boolean) {
       const status = query.state.data?.status;
       return status === "queued" || status === "running" ? 1500 : false;
     },
+  });
+}
+
+// Live activity feed for a Forge task. Polls fast while the task is active
+// so the "what is it doing now" log stays current.
+export function useForgeTaskLogs(id: string | null, enabled: boolean) {
+  return useQuery({
+    queryKey: ["forge-task-logs", id],
+    queryFn: () => api.listForgeTaskLogs(id!).then((r) => r.data),
+    enabled: enabled && id !== null,
+    refetchInterval: enabled ? 1500 : false,
   });
 }
 

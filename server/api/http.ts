@@ -7,7 +7,7 @@ import { LoggerLayer } from "../logging/logger";
 import { Sqlite } from "../db/database";
 import { Database } from "bun:sqlite";
 import { getSetting, setSetting } from "../db/settings";
-import { WikiPageNotFound, errorResponse, errorToStatus } from "./errors";
+import { ProjectNotFound, WikiPageNotFound, MachineNotFound, errorResponse, errorToStatus } from "./errors";
 import { clampLimit, nextCursor } from "../../shared/pagination";
 import { ProjectService } from "../services/project.service";
 import { ProjectRepo } from "../repos/project.repo";
@@ -29,7 +29,11 @@ import { DashboardService } from "../services/dashboard.service";
 import { FieldConfigService } from "../services/field-config.service";
 import { FieldConfigRepo } from "../repos/field-config.repo";
 import { ForgeService } from "../services/forge.service";
+import { RuntimeEventService } from "../services/runtime-event.service";
 import { ForgeRepo } from "../repos/forge.repo";
+import { RuntimeEventRepo } from "../repos/runtime-event.repo";
+import { RuntimeMachineRepo } from "../repos/runtime-machine.repo";
+import { RuntimeMachineService } from "../services/runtime-machine.service";
 import { SourceService } from "../services/source.service";
 import { SourceRepo } from "../repos/source.repo";
 import { TaskLinkService } from "../services/task-link.service";
@@ -232,11 +236,31 @@ const fieldConfigGroup = HttpApiGroup.make("field-config")
 
 // ── Forge (runtime agent writing assistant) ──
 
+const RuntimeModelSchema = Schema.Struct({
+  id: Schema.String,
+  provider: Schema.String,
+  name: Schema.String,
+});
+
+const RuntimeAgentSchema = Schema.Struct({
+  id: Schema.String,
+  name: Schema.String,
+});
+
 const RuntimeSchema = Schema.Struct({
   id: Schema.String,
   name: Schema.String,
   provider: Schema.Literal("opencode", "hermes", "command-code"),
+  machineId: Schema.NullOr(Schema.String),
+  agent: Schema.String,
+  model: Schema.String,
+  printLogs: Schema.Boolean,
+  logLevel: Schema.Literal("", "DEBUG", "INFO", "WARN", "ERROR"),
+  extraArgs: Schema.Array(Schema.String),
+  modelsCatalog: Schema.Array(RuntimeModelSchema),
+  agentsCatalog: Schema.Array(RuntimeAgentSchema),
   status: Schema.Literal("online", "offline"),
+  mcpConnected: Schema.Boolean,
   hostname: Schema.String,
   lastSeen: Schema.NullOr(Schema.String),
   createdAt: Schema.String,
@@ -248,7 +272,12 @@ const ForgeTaskSchema = Schema.Struct({
   projectId: Schema.String,
   documentType: Schema.Literal("task", "wiki"),
   documentId: Schema.String,
-  action: Schema.Literal("continue", "rewrite", "summarize", "expand", "grammar"),
+  documentTitle: Schema.String,
+  agentId: Schema.String,
+  skillId: Schema.String,
+  agentName: Schema.String,
+  skillName: Schema.String,
+  extraPrompt: Schema.String,
   selection: Schema.String,
   docContext: Schema.String,
   status: Schema.Literal("queued", "running", "completed", "failed", "cancelled"),
@@ -258,6 +287,75 @@ const ForgeTaskSchema = Schema.Struct({
   startedAt: Schema.NullOr(Schema.String),
   finishedAt: Schema.NullOr(Schema.String),
 });
+
+// Claim response carries the runtime's server-authoritative config so the
+// daemon spawns with the latest provider + model + injected args + opencode
+// logging flags without restarting, plus the server-built prompt (sources
+// resolved, output rules enforced) and the task's agent/skill rules as
+// Markdown — the daemon writes those into the run dir as AGENTS.md +
+// .agents/<skill>/SKILL.md (files-only delivery, no host store).
+const ClaimResponseSchema = Schema.Struct({
+  task: Schema.NullOr(ForgeTaskSchema),
+  provider: Schema.Literal("opencode", "hermes", "command-code"),
+  agent: Schema.String,
+  model: Schema.String,
+  printLogs: Schema.Boolean,
+  logLevel: Schema.Literal("", "DEBUG", "INFO", "WARN", "ERROR"),
+  extraArgs: Schema.Array(Schema.String),
+  prompt: Schema.String,
+  agentMarkdown: Schema.String,
+  skillMarkdown: Schema.String,
+});
+
+const ForgeAgentSchema = Schema.Struct({
+  id: Schema.String,
+  name: Schema.String,
+  description: Schema.String,
+  instructions: Schema.String,
+  isBuiltin: Schema.Boolean,
+  skillIds: Schema.Array(Schema.String),
+  createdAt: Schema.String,
+  updatedAt: Schema.String,
+});
+
+const ForgeSkillSchema = Schema.Struct({
+  id: Schema.String,
+  name: Schema.String,
+  description: Schema.String,
+  instructions: Schema.String,
+  isBuiltin: Schema.Boolean,
+  createdAt: Schema.String,
+  updatedAt: Schema.String,
+});
+
+const CreateForgeAgentInput = Schema.Struct({
+  name: Schema.String,
+  description: Schema.optionalWith(Schema.String, { default: () => "" }),
+  instructions: Schema.String,
+});
+
+const UpdateForgeAgentInput = Schema.Struct({
+  name: Schema.optional(Schema.String),
+  description: Schema.optional(Schema.String),
+  instructions: Schema.optional(Schema.String),
+});
+
+const ReplaceAgentSkillsInput = Schema.Struct({ skillIds: Schema.Array(Schema.String) });
+
+const CreateForgeSkillInput = Schema.Struct({
+  name: Schema.String,
+  description: Schema.optionalWith(Schema.String, { default: () => "" }),
+  instructions: Schema.String,
+});
+
+const UpdateForgeSkillInput = Schema.Struct({
+  name: Schema.optional(Schema.String),
+  description: Schema.optional(Schema.String),
+  instructions: Schema.optional(Schema.String),
+});
+
+const ForgeAgentPath = Schema.Struct({ id: Schema.String });
+const ForgeSkillPath = Schema.Struct({ id: Schema.String });
 
 const SourceSchema = Schema.Struct({
   id: Schema.String,
@@ -271,13 +369,79 @@ const SourceSchema = Schema.Struct({
 });
 
 const RegisterRuntimeInput = Schema.Struct({
+  id: Schema.optional(Schema.String),
   name: Schema.String,
   provider: Schema.Literal("opencode", "hermes", "command-code"),
+  machineId: Schema.String,
+  agent: Schema.optional(Schema.String),
+  model: Schema.optional(Schema.String),
   hostname: Schema.optional(Schema.String),
 });
 
-const HeartbeatInput = Schema.Struct({ runtimeId: Schema.String });
+// ── Runtime setup events (web wizard → machine CLI listener) ──
+const RuntimeEventSchema = Schema.Struct({
+  id: Schema.String,
+  machineId: Schema.String,
+  action: Schema.Literal("install", "update", "remove"),
+  agentCli: Schema.Literal("opencode", "hermes", "command-code"),
+  apiKeyId: Schema.NullOr(Schema.String),
+  status: Schema.Literal("pending", "claimed", "completed", "failed"),
+  error: Schema.NullOr(Schema.String),
+  createdAt: Schema.String,
+  claimedAt: Schema.NullOr(Schema.String),
+  finishedAt: Schema.NullOr(Schema.String),
+});
+
+const CreateRuntimeEventInput = Schema.Struct({
+  machineId: Schema.String,
+  action: Schema.Literal("install", "update"),
+  agentCli: Schema.Literal("opencode", "hermes", "command-code"),
+  apiKeyId: Schema.optional(Schema.String),
+  rawKey: Schema.optional(Schema.String),
+});
+
+const RuntimeEventListResponse = Schema.Struct({ data: Schema.Array(RuntimeEventSchema) });
+const RuntimeEventPath = Schema.Struct({ id: Schema.String });
+const FailRuntimeEventInput = Schema.Struct({ error: Schema.String });
+
+// ── Machine presence and CLI-reported runtime catalogs ──
+const MachineSchema = Schema.Struct({
+  id: Schema.String,
+  hostname: Schema.String,
+  lastSeen: Schema.NullOr(Schema.String),
+  createdAt: Schema.String,
+});
+const MachineListResponse = Schema.Struct({ data: Schema.Array(MachineSchema) });
+const RuntimeCatalogInput = Schema.Struct({
+  runtimeId: Schema.String,
+  agentCli: Schema.Literal("opencode", "hermes", "command-code"),
+  models: Schema.Array(RuntimeModelSchema),
+  agents: Schema.Array(RuntimeAgentSchema),
+});
+const MachineHeartbeatInput = Schema.Struct({
+  id: Schema.String,
+  hostname: Schema.optional(Schema.String),
+  runtimes: Schema.optional(Schema.Array(RuntimeCatalogInput)),
+});
+
+const UpdateRuntimeInput = Schema.Struct({
+  name: Schema.optional(Schema.String),
+  provider: Schema.optional(Schema.Literal("opencode", "hermes", "command-code")),
+  agent: Schema.optional(Schema.String),
+  model: Schema.optional(Schema.String),
+  printLogs: Schema.optional(Schema.Boolean),
+  logLevel: Schema.optional(Schema.Literal("", "DEBUG", "INFO", "WARN", "ERROR")),
+  extraArgs: Schema.optional(Schema.Array(Schema.String)),
+});
+
+const HeartbeatInput = Schema.Struct({
+  runtimeId: Schema.String,
+  // Daemon-verified Lexa MCP connectivity (initialize+ping vs /mcp). Older
+  // daemons never send it → treated as false (blocked from Forge tasks).
+  mcpConnected: Schema.optionalWith(Schema.Boolean, { default: () => false }),
+});
 const ClaimInput = Schema.Struct({ runtimeId: Schema.String });
+const ClaimRuntimeEventInput = Schema.Struct({ machineId: Schema.String });
 const CompleteTaskInput = Schema.Struct({ result: Schema.String });
 const FailTaskInput = Schema.Struct({ error: Schema.String });
 
@@ -285,20 +449,46 @@ const CreateForgeTaskInput = Schema.Struct({
   slug: Schema.String,
   documentType: Schema.Literal("task", "wiki"),
   documentId: Schema.String,
-  action: Schema.Literal("continue", "rewrite", "summarize", "expand", "grammar"),
+  agentId: Schema.String,
+  skillId: Schema.String,
+  extraPrompt: Schema.optional(Schema.String),   // per-run additional instructions
   selection: Schema.optional(Schema.String),
   runtimeId: Schema.optional(Schema.String),   // pick a specific runtime; omitted = any
 });
 
 const ForgeTaskPath = Schema.Struct({ id: Schema.String });
+const RuntimeIdPath = Schema.Struct({ id: Schema.String });
 
 const ForgeTaskListResponse = Schema.Struct({ data: Schema.Array(ForgeTaskSchema) });
 
 const RecentForgeTaskSchema = Schema.extend(
   ForgeTaskSchema,
-  Schema.Struct({ projectName: Schema.String, documentTitle: Schema.String })
+  Schema.Struct({ projectName: Schema.String })
 );
 const RecentForgeTaskListResponse = Schema.Struct({ data: Schema.Array(RecentForgeTaskSchema) });
+
+// History rows carry the project name (control panel lists across projects).
+// summary = per-status totals, global (not filter-scoped).
+const ForgeTaskHistoryResponse = Schema.Struct({
+  data: Schema.Array(RecentForgeTaskSchema),
+  nextCursor: Schema.NullOr(Schema.String),
+  summary: Schema.Struct({
+    queued: Schema.Number,
+    running: Schema.Number,
+    completed: Schema.Number,
+    failed: Schema.Number,
+    cancelled: Schema.Number,
+  }),
+});
+
+const ForgeTaskLogSchema = Schema.Struct({
+  id: Schema.String,
+  taskId: Schema.String,
+  message: Schema.String,
+  createdAt: Schema.String,
+});
+const ForgeTaskLogListResponse = Schema.Struct({ data: Schema.Array(ForgeTaskLogSchema) });
+const AppendLogInput = Schema.Struct({ message: Schema.String });
 
 const DocumentPath = Schema.Struct({
   slug: Schema.String,
@@ -357,10 +547,32 @@ const taskLinksGroup = HttpApiGroup.make("task-links")
 const forgeGroup = HttpApiGroup.make("forge")
   .add(HttpApiEndpoint.post("registerRuntime", "/forge/runtimes/register")
     .setPayload(RegisterRuntimeInput).addSuccess(RuntimeSchema, { status: 201 }))
+  .add(HttpApiEndpoint.patch("updateRuntime", "/forge/runtimes/:id")
+    .setPath(RuntimeIdPath).setPayload(UpdateRuntimeInput).addSuccess(RuntimeSchema))
+  .add(HttpApiEndpoint.del("removeRuntime", "/forge/runtimes/:id")
+    .setPath(RuntimeIdPath).addSuccess(Schema.Undefined, { status: 204 }))
   .add(HttpApiEndpoint.post("heartbeat", "/forge/daemon/heartbeat")
     .setPayload(HeartbeatInput).addSuccess(Schema.Struct({ ok: Schema.Boolean })))
   .add(HttpApiEndpoint.post("claimTask", "/forge/daemon/claim")
-    .setPayload(ClaimInput).addSuccess(Schema.NullOr(ForgeTaskSchema)))
+    .setPayload(ClaimInput).addSuccess(ClaimResponseSchema))
+  // Runtime setup events — web wizard creates, CLI listener claims/completes.
+  .add(HttpApiEndpoint.post("createRuntimeEvent", "/forge/runtime-events")
+    .setPayload(CreateRuntimeEventInput).addSuccess(RuntimeEventSchema, { status: 201 }))
+  .add(HttpApiEndpoint.post("claimRuntimeEvent", "/forge/runtime-events/claim")
+    .setPayload(ClaimRuntimeEventInput)
+    .addSuccess(Schema.NullOr(Schema.Struct({ event: RuntimeEventSchema, rawKey: Schema.NullOr(Schema.String) }))))
+  .add(HttpApiEndpoint.post("completeRuntimeEvent", "/forge/runtime-events/:id/complete")
+    .setPath(RuntimeEventPath).addSuccess(RuntimeEventSchema))
+  .add(HttpApiEndpoint.post("failRuntimeEvent", "/forge/runtime-events/:id/fail")
+    .setPath(RuntimeEventPath).setPayload(FailRuntimeEventInput).addSuccess(RuntimeEventSchema))
+  .add(HttpApiEndpoint.get("getRuntimeEvent", "/forge/runtime-events/:id")
+    .setPath(RuntimeEventPath).addSuccess(RuntimeEventSchema))
+  .add(HttpApiEndpoint.get("listRuntimeEvents", "/forge/runtime-events")
+    .addSuccess(RuntimeEventListResponse))
+  .add(HttpApiEndpoint.post("machineHeartbeat", "/forge/machines/heartbeat")
+    .setPayload(MachineHeartbeatInput).addSuccess(MachineSchema))
+  .add(HttpApiEndpoint.get("listMachines", "/forge/machines")
+    .addSuccess(MachineListResponse))
   .add(HttpApiEndpoint.get("listRuntimes", "/forge/runtimes")
     .addSuccess(Schema.Struct({ data: Schema.Array(RuntimeSchema) })))
   .add(HttpApiEndpoint.post("createForgeTask", "/forge/tasks")
@@ -368,13 +580,45 @@ const forgeGroup = HttpApiGroup.make("forge")
   .add(HttpApiEndpoint.get("getForgeTask", "/forge/tasks/:id")
     .setPath(ForgeTaskPath).addSuccess(ForgeTaskSchema))
   .add(HttpApiEndpoint.get("listForgeTasks", "/forge/tasks")
-    .setPath(SlugPath).addSuccess(ForgeTaskListResponse))
+    .addSuccess(ForgeTaskListResponse))
   .add(HttpApiEndpoint.get("listRecentForgeTasks", "/forge/tasks/recent")
     .addSuccess(RecentForgeTaskListResponse))
+  .add(HttpApiEndpoint.get("listForgeTaskHistory", "/forge/tasks/history")
+    .addSuccess(ForgeTaskHistoryResponse))
   .add(HttpApiEndpoint.post("completeForgeTask", "/forge/daemon/tasks/:id/complete")
     .setPath(ForgeTaskPath).setPayload(CompleteTaskInput).addSuccess(ForgeTaskSchema))
   .add(HttpApiEndpoint.post("failForgeTask", "/forge/daemon/tasks/:id/fail")
     .setPath(ForgeTaskPath).setPayload(FailTaskInput).addSuccess(ForgeTaskSchema))
+  .add(HttpApiEndpoint.get("getDaemonTaskStatus", "/forge/daemon/tasks/:id/status")
+    .setPath(ForgeTaskPath).addSuccess(Schema.Struct({ status: Schema.String })))
+  .add(HttpApiEndpoint.post("cancelForgeTask", "/forge/tasks/:id/cancel")
+    .setPath(ForgeTaskPath).addSuccess(ForgeTaskSchema))
+  .add(HttpApiEndpoint.get("listForgeTaskLogs", "/forge/tasks/:id/logs")
+    .setPath(ForgeTaskPath).addSuccess(ForgeTaskLogListResponse))
+  .add(HttpApiEndpoint.post("appendForgeTaskLog", "/forge/daemon/tasks/:id/log")
+    .setPath(ForgeTaskPath).setPayload(AppendLogInput).addSuccess(ForgeTaskLogSchema))
+  .add(HttpApiEndpoint.get("listForgeAgents", "/forge/agents")
+    .addSuccess(Schema.Struct({ data: Schema.Array(ForgeAgentSchema) })))
+  .add(HttpApiEndpoint.post("createForgeAgent", "/forge/agents")
+    .setPayload(CreateForgeAgentInput).addSuccess(ForgeAgentSchema, { status: 201 }))
+  .add(HttpApiEndpoint.patch("updateForgeAgent", "/forge/agents/:id")
+    .setPath(ForgeAgentPath).setPayload(UpdateForgeAgentInput).addSuccess(ForgeAgentSchema))
+  .add(HttpApiEndpoint.del("deleteForgeAgent", "/forge/agents/:id")
+    .setPath(ForgeAgentPath).addSuccess(Schema.UndefinedOr(Schema.Void)))
+  .add(HttpApiEndpoint.put("replaceAgentSkills", "/forge/agents/:id/skills")
+    .setPath(ForgeAgentPath).setPayload(ReplaceAgentSkillsInput).addSuccess(ForgeAgentSchema))
+  .add(HttpApiEndpoint.post("resetForgeAgent", "/forge/agents/:id/reset")
+    .setPath(ForgeAgentPath).addSuccess(ForgeAgentSchema))
+  .add(HttpApiEndpoint.get("listForgeSkills", "/forge/skills")
+    .addSuccess(Schema.Struct({ data: Schema.Array(ForgeSkillSchema) })))
+  .add(HttpApiEndpoint.post("createForgeSkill", "/forge/skills")
+    .setPayload(CreateForgeSkillInput).addSuccess(ForgeSkillSchema, { status: 201 }))
+  .add(HttpApiEndpoint.patch("updateForgeSkill", "/forge/skills/:id")
+    .setPath(ForgeSkillPath).setPayload(UpdateForgeSkillInput).addSuccess(ForgeSkillSchema))
+  .add(HttpApiEndpoint.del("deleteForgeSkill", "/forge/skills/:id")
+    .setPath(ForgeSkillPath).addSuccess(Schema.UndefinedOr(Schema.Void)))
+  .add(HttpApiEndpoint.post("resetForgeSkill", "/forge/skills/:id/reset")
+    .setPath(ForgeSkillPath).addSuccess(ForgeSkillSchema))
   .add(HttpApiEndpoint.get("listSources", "/projects/:slug/documents/:type/:id/sources")
     .setPath(DocumentPath).addSuccess(SourceListResponse))
   .add(HttpApiEndpoint.post("addSource", "/projects/:slug/documents/:type/:id/sources")
@@ -980,24 +1224,147 @@ const forgeLive = HttpApiBuilder.group(LexaApi, "forge", (handlers) =>
       respond(Effect.gen(function* () {
         const service = yield* ForgeService;
         const runtime = yield* service.registerRuntime({
+          id: req.payload.id,
           name: req.payload.name,
           provider: req.payload.provider,
+          machineId: req.payload.machineId,
+          agent: req.payload.agent ?? "",
+          model: req.payload.model ?? "",
           hostname: req.payload.hostname ?? "",
         });
         return runtime;
       }))
     )
+    .handle("updateRuntime", (req) =>
+      respond(Effect.gen(function* () {
+        const service = yield* ForgeService;
+        return yield* service.updateRuntime(req.path.id, {
+          ...(req.payload.name !== undefined ? { name: req.payload.name } : {}),
+          ...(req.payload.provider !== undefined ? { provider: req.payload.provider } : {}),
+          ...(req.payload.agent !== undefined ? { agent: req.payload.agent } : {}),
+          ...(req.payload.model !== undefined ? { model: req.payload.model } : {}),
+          ...(req.payload.printLogs !== undefined ? { printLogs: req.payload.printLogs } : {}),
+          ...(req.payload.logLevel !== undefined ? { logLevel: req.payload.logLevel } : {}),
+          ...(req.payload.extraArgs !== undefined ? { extraArgs: [...req.payload.extraArgs] } : {}),
+        });
+      }))
+    )
+    .handle("removeRuntime", (req) =>
+      respond(Effect.gen(function* () {
+        const service = yield* ForgeService;
+        const machineService = yield* RuntimeMachineService;
+        const eventService = yield* RuntimeEventService;
+        const runtime = yield* service.getRuntimeConfig(req.path.id);
+        if (!runtime.machineId) {
+          return yield* new MachineNotFound({ id: "" });
+        }
+        yield* machineService.requireOnline(runtime.machineId);
+        yield* eventService.createRemove({ machineId: runtime.machineId, agentCli: runtime.provider });
+        yield* service.removeRuntime(req.path.id);
+        return undefined;
+      }))
+    )
     .handle("heartbeat", (req) =>
       respond(Effect.gen(function* () {
         const service = yield* ForgeService;
-        yield* service.heartbeat(req.payload.runtimeId);
+        yield* service.heartbeat(
+          req.payload.runtimeId,
+          req.payload.mcpConnected
+        );
         return { ok: true as const };
       }))
     )
     .handle("claimTask", (req) =>
       respond(Effect.gen(function* () {
         const service = yield* ForgeService;
-        return yield* service.claimNext(req.payload.runtimeId);
+        const task = yield* service.claimNext(req.payload.runtimeId);
+        if (!task) return { task: null, provider: "opencode" as const, agent: "", model: "", printLogs: false, logLevel: "", extraArgs: [], prompt: "", agentMarkdown: "", skillMarkdown: "" };
+        const runtime = yield* service.getRuntimeConfig(req.payload.runtimeId);
+        // Server-authoritative prompt (resolves linked sources, enforces
+        // output rules). If source resolution fails, fall back to the
+        // daemon's local minimal build rather than blocking the claim.
+        const prompt = yield* service.buildPromptForTask(task).pipe(
+          Effect.catchAll(() => Effect.succeed(""))
+        );
+        // Claim-carried rule files: the daemon writes these into the run dir
+        // as AGENTS.md + .agents/<skill>/SKILL.md before spawning the CLI.
+        const { agentMarkdown, skillMarkdown } = yield* service.resolveRules(task).pipe(
+          Effect.map((r) => ({ agentMarkdown: r.agent.instructions, skillMarkdown: r.skill.instructions })),
+          Effect.catchAll(() => Effect.succeed({ agentMarkdown: "", skillMarkdown: "" }))
+        );
+        return { task, provider: runtime.provider, agent: runtime.agent, model: runtime.model, printLogs: runtime.printLogs, logLevel: runtime.logLevel, extraArgs: runtime.extraArgs, prompt, agentMarkdown, skillMarkdown };
+      }))
+    )
+    // Runtime setup events — the CLI listener claims these over the same
+    // poll pattern the daemon uses for tasks.
+    .handle("createRuntimeEvent", (req) =>
+      respond(Effect.gen(function* () {
+        const service = yield* RuntimeEventService;
+        return yield* service.create({
+          machineId: req.payload.machineId,
+          action: req.payload.action,
+          agentCli: req.payload.agentCli,
+          apiKeyId: req.payload.apiKeyId,
+          rawKey: req.payload.rawKey,
+        });
+      }))
+    )
+    .handle("claimRuntimeEvent", (req) =>
+      respond(Effect.gen(function* () {
+        const service = yield* RuntimeEventService;
+        return yield* service.claimForMachine(req.payload.machineId);
+      }))
+    )
+    .handle("completeRuntimeEvent", (req) =>
+      respond(Effect.gen(function* () {
+        const service = yield* RuntimeEventService;
+        return yield* service.complete(req.path.id);
+      }))
+    )
+    .handle("failRuntimeEvent", (req) =>
+      respond(Effect.gen(function* () {
+        const service = yield* RuntimeEventService;
+        return yield* service.fail(req.path.id, req.payload.error);
+      }))
+    )
+    .handle("getRuntimeEvent", (req) =>
+      respond(Effect.gen(function* () {
+        const service = yield* RuntimeEventService;
+        return yield* service.getById(req.path.id);
+      }))
+    )
+    .handle("listRuntimeEvents", (req) =>
+      respond(Effect.gen(function* () {
+        const service = yield* RuntimeEventService;
+        const q = searchParams(req);
+        const events = yield* service.list(q.get("machineId") ?? undefined);
+        return { data: events };
+      }))
+    )
+    .handle("machineHeartbeat", (req) =>
+      respond(Effect.gen(function* () {
+        const machineService = yield* RuntimeMachineService;
+        const forgeService = yield* ForgeService;
+        const machine = yield* machineService.heartbeat({
+          id: req.payload.id,
+          hostname: req.payload.hostname ?? "",
+        });
+        if (req.payload.runtimes) {
+          yield* forgeService.syncCatalogs(req.payload.id, req.payload.runtimes.map((catalog) => ({
+            runtimeId: catalog.runtimeId,
+            agentCli: catalog.agentCli,
+            models: [...catalog.models],
+            agents: [...catalog.agents],
+          })));
+        }
+        return machine;
+      }))
+    )
+    .handle("listMachines", () =>
+      respond(Effect.gen(function* () {
+        const service = yield* RuntimeMachineService;
+        const machines = yield* service.list();
+        return { data: machines };
       }))
     )
     .handle("listRuntimes", () =>
@@ -1016,7 +1383,9 @@ const forgeLive = HttpApiBuilder.group(LexaApi, "forge", (handlers) =>
           projectId: project.id,
           documentType: req.payload.documentType,
           documentId: req.payload.documentId,
-          action: req.payload.action,
+          agentId: req.payload.agentId,
+          skillId: req.payload.skillId,
+          extraPrompt: req.payload.extraPrompt ?? "",
           selection: req.payload.selection ?? "",
           runtimeId: req.payload.runtimeId,
         });
@@ -1033,8 +1402,10 @@ const forgeLive = HttpApiBuilder.group(LexaApi, "forge", (handlers) =>
       respond(Effect.gen(function* () {
         const projectService = yield* ProjectService;
         const service = yield* ForgeService;
-        const project = yield* projectService.findBySlug(req.path.slug);
         const q = searchParams(req);
+        const slug = q.get("slug");
+        if (!slug) return yield* Effect.fail(ProjectNotFound);
+        const project = yield* projectService.findBySlug(slug);
         const documentType = (q.get("documentType") ?? "task") as "task" | "wiki";
         const documentId = q.get("documentId") ?? "";
         const tasks = yield* service.listForDocument(project.id, documentType, documentId);
@@ -1048,16 +1419,138 @@ const forgeLive = HttpApiBuilder.group(LexaApi, "forge", (handlers) =>
         return { data: tasks };
       }))
     )
+    .handle("listForgeTaskHistory", (req) =>
+      respond(Effect.gen(function* () {
+        const projectService = yield* ProjectService;
+        const service = yield* ForgeService;
+        const q = searchParams(req);
+        const slug = q.get("slug") ?? undefined;
+        const project = slug ? yield* projectService.findBySlug(slug) : null;
+        const status = q.get("status");
+        const skillId = q.get("skillId") ?? undefined;
+        const documentType = q.get("documentType");
+        const statuses = new Set(["queued", "running", "completed", "failed", "cancelled"]);
+        const limitRaw = Number(q.get("limit") ?? 50);
+        const limit = Number.isFinite(limitRaw) ? Math.min(Math.max(Math.trunc(limitRaw), 1), 200) : 50;
+        const result = yield* service.listHistory(
+          {
+            projectId: project?.id,
+            status: status && statuses.has(status) ? (status as "queued" | "running" | "completed" | "failed" | "cancelled") : undefined,
+            skillId,
+            documentType: documentType === "task" || documentType === "wiki" ? documentType : undefined,
+          },
+          limit,
+          q.get("cursor") ?? undefined
+        );
+        return { data: result.tasks, nextCursor: result.nextCursor, summary: result.summary };
+      }))
+    )
     .handle("completeForgeTask", (req) =>
       respond(Effect.gen(function* () {
         const service = yield* ForgeService;
         return yield* service.complete(req.path.id, req.payload.result);
       }))
     )
+    .handle("getDaemonTaskStatus", (req) =>
+      respond(Effect.gen(function* () {
+        const service = yield* ForgeService;
+        const task = yield* service.getById(req.path.id);
+        return { status: task.status };
+      }))
+    )
     .handle("failForgeTask", (req) =>
       respond(Effect.gen(function* () {
         const service = yield* ForgeService;
         return yield* service.fail(req.path.id, req.payload.error);
+      }))
+    )
+    .handle("cancelForgeTask", (req) =>
+      respond(Effect.gen(function* () {
+        const service = yield* ForgeService;
+        return yield* service.cancel(req.path.id);
+      }))
+    )
+    .handle("listForgeTaskLogs", (req) =>
+      respond(Effect.gen(function* () {
+        const service = yield* ForgeService;
+        const logs = yield* service.listLogs(req.path.id);
+        return { data: logs };
+      }))
+    )
+    .handle("appendForgeTaskLog", (req) =>
+      respond(Effect.gen(function* () {
+        const service = yield* ForgeService;
+        return yield* service.appendLog(req.path.id, req.payload.message);
+      }))
+    )
+    .handle("listForgeAgents", () =>
+      respond(Effect.gen(function* () {
+        const service = yield* ForgeService;
+        const agents = yield* service.listAgents();
+        return { data: agents };
+      }))
+    )
+    .handle("createForgeAgent", (req) =>
+      respond(Effect.gen(function* () {
+        const service = yield* ForgeService;
+        return yield* service.createAgent(req.payload);
+      }))
+    )
+    .handle("updateForgeAgent", (req) =>
+      respond(Effect.gen(function* () {
+        const service = yield* ForgeService;
+        return yield* service.updateAgent(req.path.id, req.payload);
+      }))
+    )
+    .handle("deleteForgeAgent", (req) =>
+      respond(Effect.gen(function* () {
+        const service = yield* ForgeService;
+        yield* service.deleteAgent(req.path.id);
+        return undefined;
+      }))
+    )
+    .handle("replaceAgentSkills", (req) =>
+      respond(Effect.gen(function* () {
+        const service = yield* ForgeService;
+        return yield* service.replaceAgentSkills(req.path.id, [...req.payload.skillIds]);
+      }))
+    )
+    .handle("resetForgeAgent", (req) =>
+      respond(Effect.gen(function* () {
+        const service = yield* ForgeService;
+        return yield* service.resetAgentToDefault(req.path.id);
+      }))
+    )
+    .handle("listForgeSkills", () =>
+      respond(Effect.gen(function* () {
+        const service = yield* ForgeService;
+        const skills = yield* service.listSkills();
+        return { data: skills };
+      }))
+    )
+    .handle("createForgeSkill", (req) =>
+      respond(Effect.gen(function* () {
+        const service = yield* ForgeService;
+        return yield* service.createSkill(req.payload);
+      }))
+    )
+    .handle("updateForgeSkill", (req) =>
+      respond(Effect.gen(function* () {
+        const service = yield* ForgeService;
+        return yield* service.updateSkill(req.path.id, req.payload);
+      }))
+    )
+    .handle("deleteForgeSkill", (req) =>
+      respond(Effect.gen(function* () {
+        const service = yield* ForgeService;
+        yield* service.deleteSkill(req.path.id);
+        return undefined;
+      }))
+    )
+    .handle("resetForgeSkill", (req) =>
+      respond(Effect.gen(function* () {
+        const service = yield* ForgeService;
+        return yield* service.resetSkillToDefault(req.path.id);
       }))
     )
     .handle("listSources", (req) =>
@@ -1171,7 +1664,7 @@ const tasksLive = HttpApiBuilder.group(LexaApi, "tasks", (handlers) =>
           swimlaneId: req.payload.swimlaneId, title: req.payload.title,
           description: req.payload.description, priority: req.payload.priority,
           type: req.payload.type, parentId: req.payload.parentId,
-          assignees: req.payload.assignees,
+          assignees: req.payload.assignees ? [...req.payload.assignees] : undefined,
         });
         return formatTask(task);
       }))
@@ -1189,7 +1682,7 @@ const tasksLive = HttpApiBuilder.group(LexaApi, "tasks", (handlers) =>
         const task = yield* taskService.update(req.path.id, {
           title: req.payload.title, description: req.payload.description,
           priority: req.payload.priority, type: req.payload.type,
-          assignees: req.payload.assignees,
+          assignees: req.payload.assignees ? [...req.payload.assignees] : undefined,
         });
         return formatTask(task);
       }))
@@ -1516,6 +2009,8 @@ export function createApiHandler(dbPath: string) {
     TaskRepo.Default, TaskService.Default,
     FieldConfigRepo.Default, FieldConfigService.Default,
     ForgeRepo.Default, ForgeService.Default,
+    RuntimeEventRepo.Default, RuntimeEventService.Default,
+    RuntimeMachineRepo.Default, RuntimeMachineService.Default,
     SourceRepo.Default, SourceService.Default,
     TaskLinkRepo.Default, TaskLinkService.Default,
     WikiRepo.Default, WikiService.Default,

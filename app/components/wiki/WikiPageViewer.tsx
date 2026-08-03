@@ -4,6 +4,7 @@ import { Pencil } from "lucide-react";
 import { useEditor, EditorContent } from "@tiptap/react";
 import type { Editor, JSONContent } from "@tiptap/core";
 import StarterKit from "@tiptap/starter-kit";
+import Code from "@tiptap/extension-code";
 import TaskList from "@tiptap/extension-task-list";
 import TaskItem from "@tiptap/extension-task-item";
 import Link from "@tiptap/extension-link";
@@ -13,15 +14,19 @@ import Placeholder from "@tiptap/extension-placeholder";
 import type { WikiPage, WikiPageMeta, TipTapDoc } from "../../../shared/types";
 import { useUpdateWikiPage } from "../../lib/queries";
 import { Toolbar } from "../TextEditor";
+import { ForgeReviewSurface } from "../forge/ForgeReviewSurface";
+import { useForgeReview } from "../forge/useForgeReview";
+import { cn } from "../ui/cn";
 import { renderDoc, extractHeadings, slugifyHeading } from "../tiptap-render";
 import { EditSidebar } from "./EditSidebar";
 import { OutlineSidebar } from "./OutlineSidebar";
 import { SourcesSection } from "../forge/SourcesSection";
+import { parseApiDate } from "../../lib/date";
 
 const emptyDoc: TipTapDoc = { type: "doc", content: [] };
 
 function formatRelative(iso: string): string {
-  const then = new Date(iso).getTime();
+  const then = parseApiDate(iso).getTime();
   const now = Date.now();
   const diff = Math.max(0, now - then);
   const minutes = Math.floor(diff / 60000);
@@ -55,12 +60,17 @@ function buildAncestors(pages: WikiPageMeta[], page: WikiPage): WikiPageMeta[] {
 interface WikiEditorProps {
   editor: Editor;
   forge?: { slug: string; documentType: "task" | "wiki"; documentId: string };
+  onReviewStateChange?: (active: boolean, accepted: boolean) => void;
 }
 
-function WikiEditor({ editor, forge }: WikiEditorProps) {
+function WikiEditor({ editor, forge, onReviewStateChange }: WikiEditorProps) {
+  const { review, appliedTaskId, handleReview, handleAcceptReview, handleRejectReview } = useForgeReview(editor, onReviewStateChange);
   return (
-    <div className="editor-wrapper flex flex-col flex-1 min-h-0">
-      <Toolbar editor={editor} headingLevel={(editor.getAttributes("heading").level as number | undefined) ?? 0} forge={forge} />
+    <div className={cn("editor-wrapper flex flex-col flex-1 min-h-0", review && "is-reviewing")}>
+      <Toolbar editor={editor} headingLevel={(editor.getAttributes("heading").level as number | undefined) ?? 0} forge={forge} reviewActive={review !== null} appliedTaskId={appliedTaskId} onReview={handleReview} />
+      {review && (
+        <ForgeReviewSurface action={review.action} runtime={review.runtime} diff={review.diff} onAccept={handleAcceptReview} onReject={handleRejectReview} />
+      )}
       <EditorContent editor={editor} className="editor-content flex-1 p-4 px-5" />
     </div>
   );
@@ -108,6 +118,9 @@ export function WikiPageViewer({ slug, page, pages }: WikiPageViewerProps) {
   const titleRef = useRef(title);
   const autosaveTimer = useRef<number | null>(null);
   const markDirtyRef = useRef<() => void>(() => {});
+  // While a Forge result is being reviewed, autosave is suspended — the
+  // unaccepted insert must not reach the database before Accept.
+  const reviewActiveRef = useRef(false);
 
   useEffect(() => {
     titleRef.current = title;
@@ -116,7 +129,10 @@ export function WikiPageViewer({ slug, page, pages }: WikiPageViewerProps) {
   const editor = useEditor({
     immediatelyRender: false,
     extensions: [
-      StarterKit.configure({ heading: { levels: [2, 3, 4, 5] } }),
+      StarterKit.configure({ heading: { levels: [2, 3, 4, 5] }, code: false }),
+      // Code must combine with other marks (bold+code is valid CommonMark,
+      // common in Forge results) or accepting such a result throws.
+      Code.extend({ excludes: "" }),
       TaskList,
       TaskItem.configure({ nested: true }),
       Link.configure({ openOnClick: false }),
@@ -194,11 +210,21 @@ export function WikiPageViewer({ slug, page, pages }: WikiPageViewerProps) {
 
   const markDirty = () => {
     setIsDirty(true);
+    if (reviewActiveRef.current) return;
     if (!autosaveEnabled) return;
     if (autosaveTimer.current !== null) window.clearTimeout(autosaveTimer.current);
     autosaveTimer.current = window.setTimeout(() => {
       void saveRef.current("autosave");
     }, autosaveDelay);
+  };
+
+  const handleReviewStateChange = (active: boolean, _accepted: boolean) => {
+    reviewActiveRef.current = active;
+    if (!active) {
+      // Accept/Reject ended the review — persist whatever the doc holds now
+      // (the accepted result, or the restored pre-review snapshot).
+      markDirtyRef.current?.();
+    }
   };
 
   useEffect(() => {
@@ -350,7 +376,7 @@ export function WikiPageViewer({ slug, page, pages }: WikiPageViewerProps) {
             >
               <span className="text-xs text-lx-text-muted font-body uppercase tracking-[0.05em]">Editor</span>
             </div>
-            {editor && <WikiEditor editor={editor} forge={{ slug, documentType: "wiki", documentId: page.slug }} />}
+            {editor && <WikiEditor editor={editor} forge={{ slug, documentType: "wiki", documentId: page.slug }} onReviewStateChange={handleReviewStateChange} />}
             <div
               className="flex items-center justify-between"
               style={{

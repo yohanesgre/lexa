@@ -5,9 +5,16 @@
     <a href="kanban.html" class="nav-link">Board</a>
     <a href="wiki.html" class="nav-link">Wiki</a>
     <a href="settings.html" class="nav-link">Settings</a>
+    <a href="forge-control-panel.html" class="nav-link">Forge</a>
   </div>
+  <span class="annotation-tag" style="display:block;position:absolute;top:34px;left:12px;z-index:2;">Forge nav link → forge-control-panel.html (/forge): cross-project task history, always reachable. The status pill (right) stays the quick-status surface; the pill popover's "Forge control panel" entry is the shortcut.</span>
   <div class="nav-spacer"></div>
   <div class="nav-right">
+    <!-- Forge status pill — ALWAYS visible. Idle: neutral surface, no state color. -->
+    <button class="forge-status" style="display:flex;align-items:center;gap:6px;height:28px;padding:0 10px;background:var(--lx-surface-card);border:1px solid var(--lx-border-default);border-radius:9999px;color:var(--lx-text-secondary);cursor:pointer;font-family:var(--lx-font-body);font-size:12px;font-weight:500;">
+      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="m15 12-8.373 8.373a2.121 2.121 0 1 1-3-3L12 9m7-4 .65-.65a2.121 2.121 0 1 1 3 3L19.003 11M15 5l2 2"/><path d="M6 18 2 22"/></svg>
+      Forge
+    </button>
     <!-- Forge status pill (running state) -->
     <button class="forge-status" style="display:flex;align-items:center;gap:6px;height:28px;padding:0 10px;background:var(--lx-surface-card);border:1px solid rgba(240,192,64,0.35);border-radius:9999px;color:var(--lx-text-primary);cursor:pointer;font-family:var(--lx-font-body);font-size:12px;font-weight:500;">
       <span class="spinner" style="width:10px;height:10px;border-width:2px;"></span>
@@ -19,17 +26,61 @@
         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M20 6L9 17l-5-5"/></svg>
         1 done
       </button>
-      <!-- Popover: recent forge tasks -->
-      <div class="dropdown-menu" style="position:absolute;top:calc(100% + 6px);right:0;width:300px;z-index:60;">
+      <!-- Popover: recent forge tasks (control panel) -->
+      <div class="dropdown-menu" style="position:absolute;top:calc(100% + 6px);right:0;width:320px;z-index:60;">
         <div class="dropdown-label">Forge · recent</div>
-        <div class="dropdown-item">
-          <span class="text-xs color-secondary truncate">Summarize · "Critical crash on level 3 load"</span>
-          <span class="font-micro text-2xs color-success" style="text-transform:uppercase;letter-spacing:0.04em;">done</span>
+        <a class="dropdown-item" href="forge-control-panel.html" style="height:28px;text-decoration:none;">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M8 6h13M8 12h13M8 18h13"/><path d="M3 6h.01M3 12h.01M3 18h.01"/></svg>
+          <span class="text-xs color-secondary">Forge control panel</span>
+        </a>
+        <div class="dropdown-separator"></div>
+        <a class="dropdown-item" href="task-detail.html" style="height:auto;padding:8px 10px;align-items:flex-start;flex-direction:column;gap:2px;text-decoration:none;">
+          <span style="display:flex;align-items:center;gap:8px;width:100%;">
+            <span class="text-xs color-secondary truncate" style="flex:1;">Summarize · "Critical crash on level 3 load"</span>
+            <span class="font-micro text-2xs color-success" style="text-transform:uppercase;letter-spacing:0.04em;flex-shrink:0;">done</span>
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="flex-shrink:0;color:var(--lx-text-muted);"><path d="M9 6l6 6-6 6"/></svg>
+            <button class="forge-dismiss" title="Dismiss from panel" style="display:flex;align-items:center;justify-content:center;width:20px;height:20px;border:none;background:transparent;border-radius:4px;color:var(--lx-text-muted);cursor:pointer;flex-shrink:0;">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg>
+            </button>
+          </span>
+          <span class="font-micro text-2xs color-muted">Emberfall</span>
+          <span class="font-mono" style="display:flex;align-items:center;gap:6px;font-size:10px;color:var(--lx-text-muted);">
+            <span style="overflow:hidden;text-overflow:ellipsis;">6fed4acc-65ba-4053-b3ef-38e50046f844</span>
+            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="flex-shrink:0;cursor:pointer;" title="Copy task id"><path d="M20 9l-9 9-4-4"/><rect x="8" y="4" width="12" height="12" rx="2"/></svg>
+          </span>
+        </a>
+        <a class="dropdown-item" href="wiki.html" style="height:auto;padding:8px 10px;align-items:flex-start;flex-direction:column;gap:2px;text-decoration:none;">
+          <span style="display:flex;align-items:center;gap:8px;width:100%;">
+            <span class="text-xs color-secondary truncate" style="flex:1;">Continue · "Implement double-jump"</span>
+            <span class="font-micro text-2xs color-warning" style="text-transform:uppercase;letter-spacing:0.04em;flex-shrink:0;">running</span>
+            <button class="forge-dismiss" title="Cancel this Forge task" style="display:flex;align-items:center;justify-content:center;width:20px;height:20px;border:none;background:transparent;border-radius:4px;color:var(--lx-text-muted);cursor:pointer;flex-shrink:0;">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg>
+            </button>
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="flex-shrink:0;color:var(--lx-text-muted);"><path d="M9 6l6 6-6 6"/></svg>
+          </span>
+          <span class="font-micro text-2xs color-muted">Emberfall · dev-mbp · command-code</span>
+          <span class="font-mono" style="font-size:10px;color:var(--lx-text-muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%;">… generating text…</span>
+        </a>
+        <div class="dropdown-item danger" style="height:auto;padding:8px 10px;align-items:flex-start;flex-direction:column;gap:2px;">
+          <span style="display:flex;align-items:center;gap:8px;width:100%;">
+            <span class="text-xs color-secondary truncate" style="flex:1;">Rewrite · "Balance tuning pass"</span>
+            <span class="font-micro text-2xs color-danger" style="text-transform:uppercase;letter-spacing:0.04em;flex-shrink:0;">failed</span>
+            <button class="forge-dismiss" title="Dismiss from panel" style="display:flex;align-items:center;justify-content:center;width:20px;height:20px;border:none;background:transparent;border-radius:4px;color:var(--lx-text-muted);cursor:pointer;flex-shrink:0;">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg>
+            </button>
+          </span>
+          <span class="font-micro text-2xs color-muted">Emberfall</span>
         </div>
-        <div class="dropdown-item">
-          <span class="text-xs color-secondary truncate">Continue · "Implement double-jump"</span>
-          <span class="font-micro text-2xs color-warning" style="text-transform:uppercase;letter-spacing:0.04em;">running</span>
-        </div>
+        <div class="dropdown-separator"></div>
+        <a class="dropdown-item" href="settings.html" style="height:28px;">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>
+          <span class="text-xs color-secondary">Forge runtimes</span>
+        </a>
+        <span class="annotation-tag" style="display:block;margin:6px 10px 2px;">Rows are links: task → Board with that task open, wiki → the wiki page. A finished result is reached by reopening Forge in that document's editor — the popover resumes the task (it is never re-offered after Reject).</span>
+        <span class="annotation-tag" style="display:block;margin:4px 10px;">Dismiss (X) hides a finished task (done/failed/cancelled) from this panel and the pill counts — per-browser, persists across sessions. On running/queued rows the X cancels the task server-side (POST /api/forge/tasks/:id/cancel), then dismisses the row. The result stays reachable in the document; only the badge is cleared.</span>
+        <span class="annotation-tag" style="display:block;margin:4px 10px;">Running/queued rows show which daemon is working: project · runtime name · provider. Footer links to Settings → Forge Runtimes.</span>
+        <span class="annotation-tag" style="display:block;margin:4px 10px;">The pill is ALWAYS visible — idle shows a neutral "Forge" (hammer icon, no state color); active shows amber spinner + skill; finished shows counts. It opens this panel even when idle.</span>
+        <span class="annotation-tag" style="display:block;margin:4px 10px;">Each row carries its task id (mono, truncated) with a copy button — for debugging (daemon logs, API calls, MCP tools). Clicking the id copies it to the clipboard.</span>
       </div>
     </div>
     <div class="project-switcher">

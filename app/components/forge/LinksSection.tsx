@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { Link2, Plus, X } from "lucide-react";
+import { Link2, X } from "lucide-react";
 import { useAddTaskLink, useRemoveTaskLink, useTaskLinks, useTaskSearch } from "../../lib/queries";
 import { cn } from "../ui/cn";
 import type { TaskLinkRelation } from "../../../shared/types";
@@ -87,7 +87,7 @@ export function LinksSection({ slug, taskId, taskTitleById, className }: LinksSe
 
       {links.length === 0 && (
         <div className="text-xs text-lx-text-muted mb-2">
-          No links yet. Link a subtask, blocker, or related task.
+          No links yet. Type a task title and press Enter to link a subtask, blocker, or related task.
         </div>
       )}
 
@@ -95,7 +95,7 @@ export function LinksSection({ slug, taskId, taskTitleById, className }: LinksSe
         <div className="flex items-center gap-2 mt-2">
           <input
             className="prop-input"
-            placeholder="Add link — type @ or a task title…"
+            placeholder="Add link — type a task title…"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             onFocus={() => setFocused(true)}
@@ -119,21 +119,6 @@ export function LinksSection({ slug, taskId, taskTitleById, className }: LinksSe
             <option value="subtask_of">Subtask of</option>
             <option value="blocked_by">Blocked by</option>
           </select>
-          <button
-            type="button"
-            className="btn btn-ghost"
-            style={{ height: 26, padding: "0 8px", fontSize: 12, flexShrink: 0 }}
-            disabled={!query.trim() || suggestions.length === 0 || addLink.isPending}
-            onClick={() => {
-              if (suggestions.length > 0) {
-                addLink.mutate({ toTaskId: suggestions[0].id, relation });
-                setQuery("");
-              }
-            }}
-          >
-            <Plus size={12} strokeWidth={1.5} />
-            Link
-          </button>
         </div>
 
         {focused && query.trim().length >= 2 && suggestions.length > 0 && (

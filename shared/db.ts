@@ -1,7 +1,7 @@
 // Database row types — mirror SQL column names exactly (snake_case).
 // Used by server repos/services only. Frontend never imports this file.
 
-import type { TipTapDoc, ISODate } from "./types";
+import type { TipTapDoc, ISODate, RuntimeAgent, RuntimeModel } from "./types";
 
 export interface PriorityOptionRow {
   id: string;
@@ -264,20 +264,76 @@ export interface RuntimeRow {
   id: string;
   name: string;
   provider: "opencode" | "hermes" | "command-code";
+  machine_id: string | null;
+  agent: string;
+  model: string;
+  print_logs: number;
+  log_level: string;
+  extra_args: string;
+  models_catalog: string;
+  agents_catalog: string;
   status: "online" | "offline";
+  mcp_connected: number;
   hostname: string;
   last_seen: string | null;
   created_at: string;
 }
 
+function parseArgs(raw: string | null): string[] {
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed.filter((a): a is string => typeof a === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
+function parseModelsCatalog(raw: string | null): { id: string; provider: string; name: string }[] {
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed)
+      ? parsed.filter((m): m is { id: string; provider: string; name: string } =>
+          typeof m?.id === "string" && typeof m?.provider === "string" && typeof m?.name === "string"
+        )
+      : [];
+  } catch {
+    return [];
+  }
+}
+
+function parseAgentsCatalog(raw: string | null): RuntimeAgent[] {
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed)
+      ? parsed.filter((agent): agent is RuntimeAgent =>
+          typeof agent?.id === "string" && typeof agent?.name === "string"
+        )
+      : [];
+  } catch {
+    return [];
+  }
+}
+
 export function rowToRuntime(row: RuntimeRow): {
-  id: string; name: string; provider: "opencode" | "hermes" | "command-code"; status: "online" | "offline"; hostname: string; lastSeen: string | null; createdAt: string;
+  id: string; name: string; provider: "opencode" | "hermes" | "command-code"; machineId: string | null; agent: string; model: string; printLogs: boolean; logLevel: "" | "DEBUG" | "INFO" | "WARN" | "ERROR"; extraArgs: string[]; modelsCatalog: RuntimeModel[]; agentsCatalog: RuntimeAgent[]; status: "online" | "offline"; mcpConnected: boolean; hostname: string; lastSeen: string | null; createdAt: string;
 } {
   return {
     id: row.id,
     name: row.name,
     provider: row.provider,
+    machineId: row.machine_id ?? null,
+    agent: row.agent ?? "",
+    model: row.model,
+    printLogs: (row.print_logs ?? 0) === 1,
+    logLevel: (row.log_level as "" | "DEBUG" | "INFO" | "WARN" | "ERROR") ?? "",
+    extraArgs: parseArgs(row.extra_args),
+    modelsCatalog: parseModelsCatalog(row.models_catalog),
+    agentsCatalog: parseAgentsCatalog(row.agents_catalog),
     status: row.status,
+    mcpConnected: row.mcp_connected === 1,
     hostname: row.hostname,
     lastSeen: row.last_seen,
     createdAt: row.created_at,
@@ -290,7 +346,12 @@ export interface ForgeTaskRow {
   project_id: string;
   document_type: "task" | "wiki";
   document_id: string;
-  action: "continue" | "rewrite" | "summarize" | "expand" | "grammar";
+  document_title?: string | null;
+  agent_id: string;
+  skill_id: string;
+  agent_name?: string | null;
+  skill_name?: string | null;
+  extra_prompt: string;
   selection: string;
   doc_context: string;
   status: "queued" | "running" | "completed" | "failed" | "cancelled";
@@ -302,7 +363,7 @@ export interface ForgeTaskRow {
 }
 
 export function rowToForgeTask(row: ForgeTaskRow): {
-  id: string; runtimeId: string | null; projectId: string; documentType: "task" | "wiki"; documentId: string; action: "continue" | "rewrite" | "summarize" | "expand" | "grammar"; selection: string; docContext: string; status: "queued" | "running" | "completed" | "failed" | "cancelled"; result: string | null; error: string | null; createdAt: string; startedAt: string | null; finishedAt: string | null;
+  id: string; runtimeId: string | null; projectId: string; documentType: "task" | "wiki"; documentId: string; documentTitle: string; agentId: string; skillId: string; agentName: string; skillName: string; extraPrompt: string; selection: string; docContext: string; status: "queued" | "running" | "completed" | "failed" | "cancelled"; result: string | null; error: string | null; createdAt: string; startedAt: string | null; finishedAt: string | null;
 } {
   return {
     id: row.id,
@@ -310,7 +371,12 @@ export function rowToForgeTask(row: ForgeTaskRow): {
     projectId: row.project_id,
     documentType: row.document_type,
     documentId: row.document_id,
-    action: row.action,
+    documentTitle: row.document_title ?? "",
+    agentId: row.agent_id,
+    skillId: row.skill_id,
+    agentName: row.agent_name ?? "",
+    skillName: row.skill_name ?? "",
+    extraPrompt: row.extra_prompt,
     selection: row.selection,
     docContext: row.doc_context,
     status: row.status,
@@ -320,6 +386,66 @@ export function rowToForgeTask(row: ForgeTaskRow): {
     startedAt: row.started_at,
     finishedAt: row.finished_at,
   };
+}
+
+export interface ForgeAgentRow {
+  id: string;
+  name: string;
+  description: string;
+  instructions: string;
+  is_builtin: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export function rowToForgeAgent(row: ForgeAgentRow, skillIds: string[]): {
+  id: string; name: string; description: string; instructions: string; isBuiltin: boolean; skillIds: string[]; createdAt: string; updatedAt: string;
+} {
+  return {
+    id: row.id,
+    name: row.name,
+    description: row.description,
+    instructions: row.instructions,
+    isBuiltin: row.is_builtin === 1,
+    skillIds,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+export interface ForgeSkillRow {
+  id: string;
+  name: string;
+  description: string;
+  instructions: string;
+  is_builtin: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export function rowToForgeSkill(row: ForgeSkillRow): {
+  id: string; name: string; description: string; instructions: string; isBuiltin: boolean; createdAt: string; updatedAt: string;
+} {
+  return {
+    id: row.id,
+    name: row.name,
+    description: row.description,
+    instructions: row.instructions,
+    isBuiltin: row.is_builtin === 1,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+export interface ForgeTaskLogRow {
+  id: string;
+  task_id: string;
+  message: string;
+  created_at: string;
+}
+
+export function rowToForgeTaskLog(row: ForgeTaskLogRow): { id: string; taskId: string; message: string; createdAt: string } {
+  return { id: row.id, taskId: row.task_id, message: row.message, createdAt: row.created_at };
 }
 
 export interface DocumentSourceRow {
