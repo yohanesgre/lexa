@@ -1,4 +1,4 @@
-import type { Project, Column, Swimlane, Task, Board, WikiPageMeta, WikiPage, WikiPageRevision, WikiPageRevisionSummary, TipTapDoc, ApiKey, ApiKeyCreateResult, Dashboard, FieldConfig, ForgeTask, DocumentSource, Runtime, TaskLink, TaskLinkSuggestion } from "../../shared/types";
+import type { Project, Column, Swimlane, Task, Board, WikiPageMeta, WikiPage, WikiPageRevision, WikiPageRevisionSummary, TipTapDoc, ApiKey, ApiKeyCreateResult, Dashboard, FieldConfig, ForgeTask, ForgeTaskLog, ForgeTaskStatus, ForgeAgent, ForgeSkill, DocumentSource, Runtime, RuntimeEvent, Machine, TaskLink, TaskLinkSuggestion } from "../../shared/types";
 
 const BASE = "/api";
 
@@ -245,7 +245,9 @@ export function createForgeTask(input: {
   slug: string;
   documentType: "task" | "wiki";
   documentId: string;
-  action: string;
+  agentId: string;
+  skillId: string;
+  extraPrompt?: string;
   selection?: string;
   runtimeId?: string;
 }): Promise<ForgeTask> {
@@ -256,21 +258,128 @@ export function getForgeTask(id: string): Promise<ForgeTask> {
   return request(`${BASE}/forge/tasks/${id}`);
 }
 
+export function cancelForgeTask(id: string): Promise<ForgeTask> {
+  return request(`${BASE}/forge/tasks/${id}/cancel`, { method: "POST" });
+}
+
+export function listForgeTaskLogs(id: string): Promise<{ data: ForgeTaskLog[] }> {
+  return request(`${BASE}/forge/tasks/${id}/logs`);
+}
+
 export function listForgeTasks(slug: string, documentType: "task" | "wiki", documentId: string): Promise<{ data: ForgeTask[] }> {
-  return request(`${BASE}/forge/tasks?documentType=${documentType}&documentId=${encodeURIComponent(documentId)}`);
+  return request(`${BASE}/forge/tasks?slug=${encodeURIComponent(slug)}&documentType=${documentType}&documentId=${encodeURIComponent(documentId)}`);
 }
 
 export interface RecentForgeTask extends ForgeTask {
   projectName: string;
-  documentTitle: string;
 }
 
 export function listRecentForgeTasks(): Promise<{ data: RecentForgeTask[] }> {
   return request(`${BASE}/forge/tasks/recent`);
 }
 
+export interface ForgeHistoryPage {
+  data: RecentForgeTask[];
+  nextCursor: string | null;
+  summary: Record<ForgeTaskStatus, number>;
+}
+
+// Full Forge task history (control panel): optional filters + keyset cursor.
+export function listForgeTaskHistory(filters: {
+  slug?: string;
+  status?: ForgeTaskStatus;
+  skillId?: string;
+  documentType?: "task" | "wiki";
+  limit?: number;
+  cursor?: string;
+}): Promise<ForgeHistoryPage> {
+  const q = new URLSearchParams();
+  if (filters.slug) q.set("slug", filters.slug);
+  if (filters.status) q.set("status", filters.status);
+  if (filters.skillId) q.set("skillId", filters.skillId);
+  if (filters.documentType) q.set("documentType", filters.documentType);
+  if (filters.limit) q.set("limit", String(filters.limit));
+  if (filters.cursor) q.set("cursor", filters.cursor);
+  const qs = q.toString();
+  return request(`${BASE}/forge/tasks/history${qs ? `?${qs}` : ""}`);
+}
+
+// ── Forge agents & skills (global rule bundles) ──
+
+export function listForgeAgents(): Promise<{ data: ForgeAgent[] }> {
+  return request(`${BASE}/forge/agents`);
+}
+
+export function createForgeAgent(input: { name: string; description?: string; instructions: string }): Promise<ForgeAgent> {
+  return request(`${BASE}/forge/agents`, { method: "POST", body: JSON.stringify(input) });
+}
+
+export function updateForgeAgent(id: string, patch: { name?: string; description?: string; instructions?: string }): Promise<ForgeAgent> {
+  return request(`${BASE}/forge/agents/${id}`, { method: "PATCH", body: JSON.stringify(patch) });
+}
+
+export function deleteForgeAgent(id: string): Promise<void> {
+  return request(`${BASE}/forge/agents/${id}`, { method: "DELETE" });
+}
+
+export function replaceAgentSkills(id: string, skillIds: string[]): Promise<ForgeAgent> {
+  return request(`${BASE}/forge/agents/${id}/skills`, { method: "PUT", body: JSON.stringify({ skillIds }) });
+}
+
+export function resetForgeAgent(id: string): Promise<ForgeAgent> {
+  return request(`${BASE}/forge/agents/${id}/reset`, { method: "POST" });
+}
+
+export function listForgeSkills(): Promise<{ data: ForgeSkill[] }> {
+  return request(`${BASE}/forge/skills`);
+}
+
+export function createForgeSkill(input: { name: string; description?: string; instructions: string }): Promise<ForgeSkill> {
+  return request(`${BASE}/forge/skills`, { method: "POST", body: JSON.stringify(input) });
+}
+
+export function updateForgeSkill(id: string, patch: { name?: string; description?: string; instructions?: string }): Promise<ForgeSkill> {
+  return request(`${BASE}/forge/skills/${id}`, { method: "PATCH", body: JSON.stringify(patch) });
+}
+
+export function deleteForgeSkill(id: string): Promise<void> {
+  return request(`${BASE}/forge/skills/${id}`, { method: "DELETE" });
+}
+
+export function resetForgeSkill(id: string): Promise<ForgeSkill> {
+  return request(`${BASE}/forge/skills/${id}/reset`, { method: "POST" });
+}
+
 export function listRuntimes(): Promise<{ data: Runtime[] }> {
   return request(`${BASE}/forge/runtimes`);
+}
+
+export function updateRuntime(id: string, patch: { name?: string; provider?: "opencode" | "hermes" | "command-code"; agent?: string; model?: string; printLogs?: boolean; logLevel?: "" | "DEBUG" | "INFO" | "WARN" | "ERROR"; extraArgs?: string[] }): Promise<Runtime> {
+  return request(`${BASE}/forge/runtimes/${id}`, { method: "PATCH", body: JSON.stringify(patch) });
+}
+
+export function removeRuntime(id: string): Promise<void> {
+  return request(`${BASE}/forge/runtimes/${id}`, { method: "DELETE" });
+}
+
+// ── Runtime setup events (web wizard → machine CLI listener) ──
+
+export function createRuntimeEvent(input: {
+  machineId: string;
+  action: "install" | "update";
+  agentCli: "opencode" | "hermes" | "command-code";
+  apiKeyId?: string;
+  rawKey?: string;
+}): Promise<RuntimeEvent> {
+  return request(`${BASE}/forge/runtime-events`, { method: "POST", body: JSON.stringify(input) });
+}
+
+export function getRuntimeEvent(id: string): Promise<RuntimeEvent> {
+  return request(`${BASE}/forge/runtime-events/${id}`);
+}
+
+export function listMachines(): Promise<{ data: Machine[] }> {
+  return request(`${BASE}/forge/machines`);
 }
 
 export function listSources(slug: string, documentType: "task" | "wiki", documentId: string): Promise<{ data: DocumentSource[] }> {

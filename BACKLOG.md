@@ -43,6 +43,24 @@ Wireframe `forge-popover.html` + `_editor-toolbar.html` show the Forge AI writin
 
 **Refs:** SCHEMA.md §Forge, API.md §Forge, LAYERS.md §TaggedErrors, DESIGN_SYSTEM.md §5.9j, wireframes/forge-popover.html
 
+### ✅ FORGE-2: Agents + skills (global rule bundles, claim-carried delivery)
+
+The fixed action enum becomes named **agents** (rule bundles; builtin "Lexa") and **skills** (operation bundles; 5 builtins) with M2M bindings. Delivery is files-only and claim-carried: the server sends the task's instructions as `agentMarkdown`/`skillMarkdown` in the claim; the daemon writes `AGENTS.md` + `.agents/<skill>/SKILL.md` into the run dir; AGENTS.md-capable CLIs (opencode) read them natively. No host store, no sync layer — an edit applies to the very next run. All host state consolidates under `~/.lexa/` (migrate-and-delete from `~/.config/lexa-*`, no fallback).
+
+- [x] `migrations/0027_forge_agents_skills.sql` — `forge_agents` + `forge_skills` + `forge_agent_skills` (seeded builtins), `forge_tasks` rebuild (agent_id/skill_id/extra_prompt, backfill, drop action)
+- [x] `shared/types.ts` + `shared/db.ts` — `ForgeAgent`/`ForgeSkill`, task ids + names; `ForgeAction` removed
+- [x] `server/repos/forge.repo.ts` — agent/skill CRUD + `replaceAgentSkills` + task-name JOINs + usage counts
+- [x] `server/services/forge.service.ts` — rules resolution, new buildPrompt (context + output contract + pointer; no rules), builtin/reset guards, errors
+- [x] `server/api/http.ts` — agents/skills CRUD + bindings + reset endpoints; tasks input; claim carries markdown
+- [x] `scripts/forge/daemon.ts` — `~/.lexa/runs/<taskId>` workdirs, claim-carried seeding, explicit cleanup
+- [x] `scripts/cli/config.ts` + `machine.ts` — `~/.lexa` paths, migrate-and-delete on login/listen
+- [x] Frontend — popover agent→skill dependent pickers + additional prompt; control panel All-skills filter; status/log/banner names; Settings Agents + Skills sections + `PromptEditorModal`
+- [x] Wireframes — `settings-agents-skills.html`, popover/control-panel/settings updates, build green
+
+**Backlog (deferred):** artifacts (run persistence + retention), project memory, SKILL.md file assets (agentskills.io standard), per-agent access control, agent→runtime binding, per-project agents/skills, sync-health notifications (drift is impossible with claim-carried delivery).
+
+**Refs:** SCHEMA.md §Forge, API.md §Forge agents & skills, LAYERS.md §TaggedErrors, DESIGN_SYSTEM.md §Settings, wireframes/settings-agents-skills.html + forge-popover.html, docs/plan-agents-skills.html
+
 ## TASK FIELDS
 
 ### ✅ TASKF-1: Per-project customizable priority/type

@@ -1216,6 +1216,135 @@
     box-shadow: var(--lx-focus-glow);
   }
 
+  /* Forge review-in-editor: focused panel in the editor body — between the
+     toolbar and the document (forge-review wireframe). Not toolbar chrome:
+     the wrapper carries the focus ring and the document dims until Accept. */
+  .editor-wrapper.is-reviewing {
+    border-color: var(--lx-border-focus);
+    box-shadow: var(--lx-focus-glow);
+  }
+  .editor-wrapper.is-reviewing .editor-content {
+    opacity: 0.55;
+    pointer-events: none;
+  }
+  .forge-review-panel {
+    background: var(--lx-surface-card);
+    border-top: 1px solid var(--lx-border-default);
+    border-bottom: 1px solid var(--lx-border-default);
+    overflow: hidden;
+  }
+
+  .forge-review-banner {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 8px 12px;
+    background: var(--lx-bg-warning-subtle);
+    border-bottom: 1px solid var(--lx-border-default);
+  }
+  .forge-review-identity {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+  }
+  .forge-review-title {
+    font-family: var(--lx-font-micro);
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--lx-text-warning);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .forge-review-note {
+    font-size: 11px;
+    color: var(--lx-text-secondary);
+    opacity: 0.8;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .forge-diff {
+    margin: 0;
+    border: 0;
+    border-radius: 0;
+    overflow: hidden;
+    background: var(--lx-surface-card);
+  }
+  .forge-diff-empty {
+    margin: 0;
+    padding: 16px;
+    border: 0;
+    border-top: 1px dashed var(--lx-border-default);
+    border-radius: 0;
+    font-family: var(--lx-font-mono);
+    font-size: 12px;
+    color: var(--lx-text-muted);
+  }
+  .forge-diff-hunk + .forge-diff-hunk {
+    border-top: 1px solid var(--lx-border-default);
+  }
+  .forge-diff-hunk-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 4px 12px;
+    background: var(--lx-surface-elevated);
+    border-bottom: 1px solid var(--lx-border-subtle);
+    font-family: var(--lx-font-mono);
+    font-size: 11px;
+    color: var(--lx-text-muted);
+  }
+  .forge-diff-line {
+    display: flex;
+    gap: 10px;
+    padding: 2px 12px;
+    font-family: var(--lx-font-mono);
+    font-size: 12px;
+    line-height: 20px;
+  }
+  .forge-diff-line.del {
+    background: var(--lx-bg-danger-subtle);
+  }
+  .forge-diff-line.add {
+    background: var(--lx-bg-success-subtle);
+  }
+  .forge-diff-sign {
+    color: var(--lx-text-danger);
+    flex-shrink: 0;
+    user-select: none;
+  }
+  .forge-diff-line.add .forge-diff-sign {
+    color: var(--lx-text-success);
+  }
+  .forge-diff-text {
+    color: var(--lx-text-secondary);
+    overflow-wrap: anywhere;
+  }
+  .forge-diff-line.del > .forge-diff-text {
+    color: var(--lx-text-danger);
+  }
+  .forge-diff-line.add > .forge-diff-text {
+    color: var(--lx-text-success);
+  }
+  .forge-diff-span.same {
+    color: var(--lx-text-secondary);
+  }
+  .forge-diff-span.del {
+    background: color-mix(in srgb, var(--lx-text-danger) 22%, transparent);
+    color: var(--lx-text-danger);
+    border-radius: 3px;
+  }
+  .forge-diff-span.add {
+    background: color-mix(in srgb, var(--lx-text-success) 22%, transparent);
+    color: var(--lx-text-success);
+    border-radius: 3px;
+  }
+
   .editor-toolbar {
     display: flex;
     gap: 2px;
@@ -1626,6 +1755,112 @@
     font-weight: 500;
     cursor: pointer;
     transition: background 100ms, border-color 100ms;
+  }
+  /* Dismiss (X) on finished tasks in the Forge status panel */
+  .forge-dismiss {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 20px;
+    height: 20px;
+    border: none;
+    background: transparent;
+    border-radius: 4px;
+    color: var(--lx-text-muted);
+    cursor: pointer;
+    flex-shrink: 0;
+    transition: background 100ms, color 100ms;
+  }
+
+  /* Live activity feed for a running Forge task (popover) */
+  .forge-task-log {
+    background: var(--lx-surface-input);
+    border: 1px solid var(--lx-border-default);
+    border-radius: 6px;
+    overflow: hidden;
+  }
+  .forge-task-log-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 6px 10px;
+    border-bottom: 1px solid var(--lx-border-subtle);
+    font-family: var(--lx-font-body);
+    font-size: 10px;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--lx-text-muted);
+  }
+  .forge-task-log-live {
+    color: var(--lx-text-warning);
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+  }
+  .forge-task-log-live::before {
+    content: "";
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: currentColor;
+    animation: lx-wip-pulse 1.2s ease-in-out infinite;
+  }
+  .forge-task-log-body {
+    max-height: 180px;
+    overflow-y: auto;
+    padding: 8px 10px;
+    font-family: var(--lx-font-mono);
+    font-size: 11px;
+    line-height: 19px;
+  }
+  .forge-task-log-line {
+    display: flex;
+    gap: 8px;
+    color: var(--lx-text-secondary);
+    white-space: nowrap;
+  }
+  .forge-task-log-dot {
+    flex-shrink: 0;
+    color: var(--lx-text-success);
+    font-size: 8px;
+    line-height: 19px;
+  }
+  .forge-task-log-time {
+    flex-shrink: 0;
+    color: var(--lx-text-muted);
+  }
+  .forge-task-log-msg {
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  /* stderr lines (daemon prefixes [stderr]) — tinted danger so agent errors
+     stand out from the stdout stream. */
+  .forge-task-log-line.stderr {
+    color: var(--lx-text-danger);
+  }
+  .forge-task-log-line.stderr .forge-task-log-dot {
+    color: var(--lx-text-danger);
+  }
+  .forge-task-log-line.current {
+    background: rgba(240, 192, 64, 0.08);
+    border-radius: 4px;
+    padding: 0 2px;
+  }
+  .forge-task-log-line.current .forge-task-log-dot {
+    color: var(--lx-text-warning);
+  }
+  .forge-task-log-line.current .forge-task-log-msg {
+    color: var(--lx-text-primary);
+  }
+  /* Follow toggle in the log header — active (pulsing ●) means auto-scroll on */
+  .forge-task-log-head .btn.is-active {
+    border-color: var(--lx-border-focus);
+    color: var(--lx-text-primary);
+    animation: lx-wip-pulse 1.2s ease-in-out infinite;
+  }
+  .forge-dismiss:hover {
+    background: var(--lx-bg-danger-subtle);
+    color: var(--lx-text-danger);
   }
   .nav-brand {
     font-family: var(--lx-font-display);
@@ -2449,6 +2684,11 @@
     left: 0;
   }
 
+  [data-forge-popover] {
+    max-height: calc(100vh - 16px);
+    overflow-y: auto;
+  }
+
   .menu-item {
     display: flex;
     align-items: center;
@@ -2571,6 +2811,30 @@
   }
   .filter-chip-label {
     color: var(--lx-text-secondary);
+  }
+  .status-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    height: 24px;
+    padding: 0 10px;
+    background: transparent;
+    border: 1px solid var(--lx-border-default);
+    border-radius: 4px;
+    font-size: 12px;
+    font-weight: 500;
+    font-family: var(--lx-font-body);
+    color: var(--lx-text-secondary);
+    cursor: pointer;
+  }
+  .status-chip:hover {
+    background: var(--lx-surface-card-hover);
+  }
+  .status-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    flex-shrink: 0;
   }
   .filter-chip-x {
     display: inline-flex;
@@ -2903,6 +3167,65 @@
     padding: 0 16px;
     border-top: 1px solid var(--lx-border-subtle);
     flex-shrink: 0;
+  }
+
+  /* Expanded Forge log viewer (forge-log-modal) — shared by the editor
+     popover and the control panel slideover. Same append-only feed as the
+     compact .forge-task-log, but full-height with wrapped lines. */
+  .forge-log-modal {
+    width: 760px;
+    max-width: calc(100vw - 32px);
+    padding: 0;
+    max-height: min(80vh, 720px);
+    display: flex;
+    flex-direction: column;
+  }
+  .forge-log-modal .modal-header {
+    height: auto;
+    padding: 12px 16px;
+    gap: 12px;
+  }
+  .forge-log-modal .modal-title {
+    font-size: 15px;
+  }
+  .forge-log-modal-body {
+    padding: 12px 16px 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    flex: 1;
+    min-height: 0;
+  }
+  .forge-log-modal .modal-footer {
+    height: auto;
+    padding: 10px 16px;
+    justify-content: space-between;
+  }
+  /* Expanded feed: wraps long lines instead of truncating (the compact boxes
+     ellipsize; the viewer wraps so the full stream is readable). */
+  .forge-task-log-expanded {
+    flex: 1;
+    min-height: 0;
+    max-height: none;
+    padding: 12px 14px;
+    font-size: 12.5px;
+    line-height: 21px;
+    border: 1px solid var(--lx-border-default);
+    border-radius: 6px;
+    overflow-y: auto;
+  }
+  .forge-task-log-expanded .forge-task-log-line {
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+  .forge-task-log-expanded .forge-task-log-dot {
+    font-size: 9px;
+    line-height: 21px;
+  }
+  .forge-task-log-expanded .forge-task-log-msg {
+    overflow: visible;
+    text-overflow: clip;
+    white-space: pre-wrap;
   }
 
   .field {

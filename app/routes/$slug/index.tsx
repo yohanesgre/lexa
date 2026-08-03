@@ -165,6 +165,7 @@ function BoardPage() {
           task={selectedTask ?? undefined}
           defaultColumnId={createTarget?.columnId}
           columns={board.columns}
+          swimlanes={board.swimlanes}
           columnRequiredFields={board.columns.map((column) => ({
             columnId: column.id,
             fields: column.requiredFields,
@@ -174,6 +175,7 @@ function BoardPage() {
           fieldConfig={board.fieldConfig}
           onClose={handleClose}
           onUpdate={handleUpdate}
+          onMove={handleMove}
           onDelete={handleDelete}
           onArchive={handleArchive}
           onRestore={handleRestore}

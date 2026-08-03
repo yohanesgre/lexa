@@ -20,7 +20,7 @@
       <div class="flex items-center gap-2">
         <span class="text-xs color-muted font-body">Emberfall / Board</span>
       </div>
-      <INCLUDE _slideover-header-td.html />
+      <INCLUDE _slideover-header-td-expanded.html />
     </div>
 
     <!-- Title: inline editing as input -->
@@ -34,6 +34,12 @@
         <span class="prop-label">Column</span>
         <select class="prop-input is-focused" style="min-width:120px;">
           <option>In Progress</option>
+        </select>
+      </div>
+      <div class="prop-field">
+        <span class="prop-label">Swimlane</span>
+        <select class="prop-input" style="min-width:120px;">
+          <option>Sprint 6 — Ash &amp; Bone</option>
         </select>
       </div>
       <div class="prop-field">
@@ -258,6 +264,7 @@
   <!-- Annotations -->
   <div style="position:fixed;top:24px;left:24px;z-index:55;display:flex;flex-direction:column;gap:8px;align-items:flex-start;">
     <span class="annotation-tag">Same form handles both: empty fields = create, filled = edit.</span>
+    <span class="annotation-tag">Width toggle: collapsed shows expand icon (arrows out); expanded (this state) swaps to shrink icon (arrows in). Toggle width (full width → 480px).</span>
     <span class="annotation-tag">TitleEditor: click-to-edit, input state. Save on blur/Enter, Esc reverts.</span>
     <span class="annotation-tag">PropertyBar: 4 fields, all shown focused.</span>
     <span class="annotation-tag">Assignee chips: avatar + name + ×. Add via text input dropdown (settings add-member pattern).</span>

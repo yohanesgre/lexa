@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Lexa — Settings (Runtime Edit Modal)</title>
+  <link rel="stylesheet" href="wireframes.css" />
+</head>
+<body class="bg-app color-primary" style="min-height:100vh;position:relative;overflow:hidden;">
+
+  <!-- Dimmed Settings Backdrop -->
+  <div style="position:absolute;inset:0;opacity:0.25;pointer-events:none;overflow:hidden;">
+    <INCLUDE navbar.html />
+    <main class="page-frame">
+      <h1 class="font-display text-2xl weight-600 color-primary mb-4">Settings</h1>
+      <section class="mb-8">
+        <div class="flex items-center justify-between mb-3">
+          <h2 class="font-display text-lg weight-500 color-primary">Agent Runtimes</h2>
+          <button class="btn btn-primary" style="height:28px;padding:0 12px;font-size:12px;">Setup runtime</button>
+        </div>
+        <div style="background:var(--lx-surface-card);border:1px solid var(--lx-border-default);border-radius:8px;overflow:hidden;">
+          <table class="settings-table">
+            <thead>
+              <tr><th>Name</th><th>CLI</th><th>Model</th><th>Hostname</th><th>Status</th><th>Last seen</th><th></th></tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><span class="text-sm weight-500">dev-mbp</span></td>
+                <td class="text-xs color-secondary">opencode</td>
+                <td class="font-mono text-xs color-secondary">deepseek-v4-flash</td>
+                <td class="font-mono text-xs color-secondary">yohanes-mbp.local</td>
+                <td><span class="flex items-center gap-2"><span class="sync-dot sync-synced"></span><span class="font-micro text-2xs color-success" style="text-transform:uppercase;letter-spacing:0.04em;">Online</span></span></td>
+                <td class="text-xs color-secondary">just now</td>
+                <td style="text-align:right;"><button class="btn btn-ghost" style="width:28px;height:28px;padding:0;font-size:14px;line-height:1;">⋯</button></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <!-- Overlay -->
+  <div class="slideover-overlay"></div>
+
+  <!-- Edit Runtime Modal -->
+  <div class="modal dialog-enter" style="width:560px;">
+    <div class="modal-header">
+      <span class="modal-title">Edit runtime</span>
+      <button class="btn btn-ghost" style="width:32px;height:32px;padding:0;">
+        <INCLUDE _x-icon.html />
+      </button>
+    </div>
+
+    <div class="modal-body">
+      <!-- Identity (read-only) -->
+      <div class="flex items-center gap-3 mb-5" style="background:var(--lx-surface-input);border:1px solid var(--lx-border-default);border-radius:6px;padding:10px 12px;">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="color:var(--lx-text-muted);flex-shrink:0;"><rect x="4" y="4" width="16" height="16" rx="2"/><rect x="9" y="9" width="6" height="6"/></svg>
+        <div class="flex-1">
+          <div class="text-sm weight-500 color-primary">dev-mbp</div>
+          <div class="text-xs color-secondary">opencode · yohanes-mbp.local · <span class="color-success">Online</span></div>
+        </div>
+        <span class="font-micro text-2xs color-muted" style="text-transform:uppercase;letter-spacing:0.04em;">Daemon-reported</span>
+      </div>
+      <span class="annotation-tag" style="display:block;margin-bottom:12px;">Identity strip: name/agent/hostname/status shown as daemon-reported telemetry. The agent is editable below (which CLI the daemon spawns); the daemon machine must have that CLI installed.</span>
+
+      <div class="field">
+        <label class="field-label">Name</label>
+        <input class="prop-input w-full" type="text" value="dev-mbp" />
+        <div class="field-hint">Display name only. The daemon keeps its own FORGE_RUNTIME_NAME.</div>
+      </div>
+
+      <div class="field">
+        <label class="field-label">Agent CLI</label>
+        <div class="prop-input w-full font-mono" style="display:flex;align-items:center;">opencode</div>
+        <div class="field-hint">Installed runtime identity. To use another CLI on this machine, create another runtime from Setup runtime.</div>
+      </div>
+
+      <div class="field">
+        <label class="field-label">Persona <span class="font-micro text-2xs color-muted" style="text-transform:uppercase;letter-spacing:0.04em;margin-left:6px;">opencode --agent</span></label>
+        <select class="prop-input w-full font-mono"><option>Default agent</option><option selected>build — primary</option><option>plan — primary</option><option>Custom…</option></select>
+        <div class="field-hint">The machine listener reports installed agent personas after setup. Empty = the CLI default. Custom remains available.</div>
+      </div>
+
+      <div class="field">
+        <label class="field-label">Logging <span class="font-micro text-2xs color-muted" style="text-transform:uppercase;letter-spacing:0.04em;margin-left:6px;">opencode run</span></label>
+        <label class="flex items-center gap-2 mb-2" style="cursor:pointer;">
+          <input type="checkbox" checked />
+          <span class="text-xs color-secondary">Print logs to stderr (<span class="font-mono">--print-logs</span>)</span>
+        </label>
+        <select class="prop-input w-full">
+          <option>DEBUG</option>
+          <option selected>INFO</option>
+          <option>WARN</option>
+          <option>ERROR</option>
+        </select>
+        <div class="field-hint">Passed as --print-logs / --log-level at spawn. Streamed into the task's activity log. Applies on the next Forge task — no daemon restart needed. Shown only when Agent CLI = opencode.</div>
+      </div>
+
+      <div class="field">
+        <label class="field-label">Model</label>
+        <!-- Searchable live picker (open state) — catalog reported by the runtime's agent -->
+        <div style="position:relative;">
+          <input class="prop-input w-full" type="text" value="deepseek-v4" placeholder="Search models — provider/model…" />
+          <div class="menu" style="position:absolute;top:calc(100% + 4px);left:0;right:0;max-height:260px;overflow-y:auto;padding:8px;display:flex;flex-direction:column;gap:2px;">
+            <div class="font-micro text-2xs color-muted" style="text-transform:uppercase;letter-spacing:0.04em;padding:6px 8px;">opencode</div>
+            <div class="menu-item" style="font-family:var(--lx-font-mono);font-size:12px;justify-content:space-between;">
+              <span>opencode/deepseek-v4-flash</span>
+              <span class="text-2xs color-muted" style="font-family:var(--lx-font-body);">fast hybrid-attention reasoning</span>
+            </div>
+            <div class="menu-item" style="font-family:var(--lx-font-mono);font-size:12px;justify-content:space-between;">
+              <span>opencode/deepseek-v4-pro</span>
+              <span class="text-2xs color-muted" style="font-family:var(--lx-font-body);">hybrid-attention long-context reasoning</span>
+            </div>
+            <div class="font-micro text-2xs color-muted" style="text-transform:uppercase;letter-spacing:0.04em;padding:6px 8px;">deepseek</div>
+            <div class="menu-item" style="font-family:var(--lx-font-mono);font-size:12px;justify-content:space-between;">
+              <span>deepseek/deepseek-v4-flash</span>
+              <span class="text-2xs color-muted" style="font-family:var(--lx-font-body);">fast hybrid-attention reasoning</span>
+            </div>
+            <div class="menu-item" style="font-family:var(--lx-font-mono);font-size:12px;justify-content:space-between;">
+              <span>deepseek/deepseek-v4-pro</span>
+              <span class="text-2xs color-muted" style="font-family:var(--lx-font-body);">hybrid-attention long-context reasoning</span>
+            </div>
+            <div class="menu-separator" style="margin:4px 0;"></div>
+            <div class="menu-item" style="color:var(--lx-text-link);">Custom model…</div>
+          </div>
+        </div>
+        <div class="field-hint">Live catalog reported by the machine listener (opencode models / cmd --list-models), refreshed every ~10 min. Stores the full provider/model id — passed as --model.</div>
+      </div>
+
+      <div class="field">
+        <label class="field-label">
+          Extra args
+          <span class="font-micro text-2xs color-muted" style="text-transform:uppercase;letter-spacing:0.04em;margin-left:6px;">Optional</span>
+        </label>
+        <div class="flex flex-col" style="gap:6px;">
+          <div class="flex items-center gap-2">
+            <span class="font-mono text-2xs color-muted" style="width:14px;">1</span>
+            <input class="prop-input flex-1 font-mono" type="text" value="--temperature" />
+            <button class="btn btn-ghost" style="width:28px;height:28px;padding:0;">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 6h18"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg>
+            </button>
+          </div>
+          <div class="flex items-center gap-2">
+            <span class="font-mono text-2xs color-muted" style="width:14px;">2</span>
+            <input class="prop-input flex-1 font-mono" type="text" value="0.2" />
+            <button class="btn btn-ghost" style="width:28px;height:28px;padding:0;">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 6h18"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg>
+            </button>
+          </div>
+          <button class="btn btn-ghost" style="align-self:flex-start;height:28px;padding:0 10px;font-size:12px;">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14"/><path d="M5 12h14"/></svg>
+            Add arg
+          </button>
+        </div>
+        <div class="field-hint">Appended to the agent CLI for every task on this runtime — e.g. --temperature 0.2. Tokens are passed verbatim (no shell). Up to 32 args.</div>
+      </div>
+
+      <div class="notice mt-2" style="display:flex;align-items:center;gap:8px;">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="color:var(--lx-text-link);flex-shrink:0;"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>
+        <span class="text-xs color-secondary">Applies to the next Forge task on this runtime. No daemon restart needed.</span>
+      </div>
+
+      <div class="flex justify-end mt-5" style="gap:8px;">
+        <button class="btn btn-ghost">Cancel</button>
+        <button class="btn btn-primary">Save changes</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Annotations -->
+  <div style="position:fixed;bottom:24px;left:24px;z-index:55;display:flex;flex-direction:column;gap:8px;align-items:flex-start;max-width:440px;">
+    <span class="annotation-tag">Opens from the gear action on any runtime row in Settings → Agent Runtimes. Online and offline runtimes are both editable.</span>
+    <span class="annotation-tag">Server-authoritative config: model + extra args are stored on the runtime row and injected by the daemon at spawn time (claim response carries them). Env file (FORGE_MODEL) stays a bootstrap default.</span>
+    <span class="annotation-tag">Extra args = one token per row, mono. Removed row uses trash icon; Add arg appends a row. Save validates: max 32 tokens, each ≤200 chars, no empty tokens.</span>
+    <span class="annotation-tag">Model picker: searchable list of the runtime's actual models, grouped by provider. Source: the agent CLI on the runtime's machine (opencode models — one provider/model id per line; cmd --list-models). The listener refreshes at boot + every ~10 min and sends the catalog with its machine heartbeat.</span>
+    <span class="annotation-tag">Persona picker: same machine-reported catalog for CLI personas, with Default and Custom fallbacks.</span>
+    <span class="annotation-tag">Empty catalog (offline runtime, hermes — no non-interactive list, or the list command failed) falls back to per-agent presets + Custom… — same UX as before.</span>
+    <span class="annotation-tag">Selected value stores the full provider/model id (e.g. opencode/deepseek-v4-flash), server-authoritative, passed verbatim to --model. Custom model stays free text.</span>
+    <span class="annotation-tag">Offline variant: same modal, identity strip shows Offline (muted), note reads "the daemon will use this on its next boot".</span>
+  </div>
+
+</body>
+</html>

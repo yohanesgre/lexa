@@ -118,7 +118,7 @@ bun run dev:full       # API (:3000) + vite frontend (:5173) together, Ctrl-C st
 ```
 
 `scripts/dev.sh` (what `dev:full` runs) loads `.env` into the shell, boots
-`server/entry.ts` on :3000 and `vite dev` on :5173 (vite proxies `/api` → :3000),
+`server/entry.ts` on :3000 and `vite dev` on :5173 (vite proxies `/api` and `/mcp` → :3000),
 and sets `LXK_SEED_DEV=1` for sample data on every boot. Delete `data/lexa.db*`
 to start fresh.
 
@@ -161,12 +161,42 @@ bun run build
   tester and inside the Access allow-domain policy or the first login fails.
 - Health check: `curl http://localhost:3000/api/health` → `{"ok":true}`.
 - **Forge (AI writing assistant):** the Forge button in the task/wiki editors
-  needs the daemon running: `bun run forge:daemon` (env: `LEXA_URL`,
+  needs at least one online daemon child. The daemon is managed by
+  `lexa-cli machine listen` (env: `LEXA_URL`,
   `LEXA_API_KEY` or `LXK_FORGE_DAEMON_TOKEN`, `FORGE_AGENT=opencode|hermes|command-code`).
-  `bash scripts/forge/install.sh` installs it as a systemd user service.
+  The listener owns per-runtime daemon children; there are no per-runtime systemd units.
   Without a daemon, Generate returns `NO_RUNTIME_ONLINE`.
   The `command-code` provider spawns this CLI non-interactively
   (`cmd -p <prompt> --no-session --skip-onboarding --permission-mode auto-accept`).
+  Every run picks an **agent** (rule bundle, default "Lexa") + a dependent
+  **skill** (operation bundle) in the popover; the claim carries their
+  instructions (`agentMarkdown`/`skillMarkdown`) and the daemon writes them
+  into the run dir as `AGENTS.md` + `.agents/<skill>/SKILL.md` — files-only,
+  no host store, edits apply to the next run. All host state lives under
+  `~/.lexa/` (`LEXA_DIR`); `lexa-cli login` + the listener migrate the legacy
+  `~/.config/lexa-*` dirs there (migrate-and-delete, no fallback).
+- **lexa-cli (`bun run lexa-cli` / `scripts/cli/index.ts`):** the operator CLI
+  wrapping the REST API with `lxk_` Bearer keys. `lexa-cli login --url … --key …`
+  stores creds in `~/.lexa/config.json` (chmod 600); env fallbacks
+  `LEXA_URL`/`LEXA_API_KEY`. Manages the Forge daemon as first-class commands:
+  `lexa-cli machine install|listen|start|stop|restart|status|logs|list` (the
+  listener is the machine-level supervisor). Also
+  `lexa-cli task|wiki|project` for CRUD. The daemon accepts a Settings API key
+  in `LEXA_API_KEY` **or** `LXK_FORGE_DAEMON_TOKEN` (an `lxk_` prefix is routed
+  to Bearer automatically). Agent skill: `~/.agents/skills/lexa-cli/SKILL.md`.
+  MCP remains the agent surface (cloud agentic AI); the CLI is for humans/operators.
+- **Runtime setup wizard → CLI listener:** the web Settings wizard (Settings →
+  Forge Runtimes → Setup runtime) lists registered machines from
+  `GET /api/forge/machines`, then sends only machine + agent CLI + a fresh key
+  through `POST /api/forge/runtime-events`. The listener persists its machine id
+  at `~/.lexa/machine-id`, heartbeats every 3s, claims only its own
+  events, and owns one daemon child per runtime under
+  `~/.lexa/runtimes/<runtime-id>/env` (chmod 600). Runtime
+  provider/model, persona, logging, and extra args are configured after
+  setup from Settings. The listener discovers installed CLI agent/model catalogs
+  and sends them in the machine heartbeat. `machine install` is a thin listener
+  alias; `--no-systemd` writes no daemon files and runs the listener under your
+  own supervisor.
 - `scripts/setup.sh <domain> [dev|staging|prod]` is for deployment
   (Docker + cloudflared tunnel + Access). Local dev does not need it.
 

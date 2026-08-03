@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Lexa — Forge Review in Editor (Diff)</title>
+  <link rel="stylesheet" href="wireframes.css" />
+</head>
+<body class="bg-app color-primary" style="min-height:100vh;position:relative;">
+
+  <!-- Editor frame: task description editor in review state -->
+  <div style="position:absolute;inset:0;opacity:0.2;pointer-events:none;overflow:hidden;">
+    <div style="margin:24px;background:var(--lx-surface-card);border:1px solid var(--lx-border-default);border-radius:6px;">
+      <div class="editor-toolbar wiki-toolbar-host" style="border-bottom:1px solid var(--lx-border-default);border-radius:6px 6px 0 0;">
+        <div class="wiki-toolbar-row">
+          <button class="toolbar-btn" title="Undo"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 7v6h6"/><path d="M21 17a9 9 0 0 0-9-9 9 9 0 0 0-6 2.3L3 13"/></svg></button>
+          <button class="toolbar-btn" title="Redo"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M21 7v6h-6"/><path d="M3 17a9 9 0 0 1 9-9 9 9 0 0 1 6 2.3L21 13"/></svg></button>
+          <span class="toolbar-sep"></span>
+          <button class="toolbar-btn" title="Bold"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M14 12a4 4 0 0 0 0-8H6v8"/><path d="M15 20a4 4 0 0 0 0-8H6v8Z"/></svg></button>
+          <span class="toolbar-sep"></span>
+          <button class="toolbar-btn" title="Heading 2"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M4 12h8"/><path d="M4 18V6"/><path d="M12 18V6"/><path d="M21 18h-4"/><path d="M17 12v6"/></svg></button>
+          <span class="toolbar-sep"></span>
+          <button class="toolbar-btn active" title="AI writing assistant (Forge)">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="m15 12-8.373 8.373a2.121 2.121 0 1 1-3-3L12 9m7-4 .65-.65a2.121 2.121 0 1 1 3 3L19.003 11M15 5l2 2"/><path d="M6 18 2 22"/></svg>
+            Forge
+          </button>
+        </div>
+      </div>
+
+      <!-- Original document — untouched during review -->
+      <div style="padding:16px 20px;min-height:300px;font-family:var(--lx-font-body);font-size:14px;line-height:22px;color:var(--lx-text-primary);">
+        <p style="margin:0 0 12px;color:var(--lx-text-secondary);">
+          The furnace zone crash stems from an off-by-one in the chunk coordinate math when transitioning between zones. <span style="color:var(--lx-text-primary);">#107</span> points to <code style="font-family:var(--lx-font-mono);font-size:12px;background:var(--lx-surface-elevated);padding:2px 4px;border-radius:4px;">TilemapChunkLoader._loadChunk()</code>.
+        </p>
+        <h3 style="font-size:16px;font-weight:500;font-family:var(--lx-font-display);color:var(--lx-text-primary);margin:0 0 8px;letter-spacing:-0.02em;">Root cause</h3>
+        <ul style="margin:0 0 12px;padding-left:20px;color:var(--lx-text-secondary);">
+          <li>Loader assumes chunk indices start at 0</li>
+          <li>Streaming system assigns indices from the world origin</li>
+        </ul>
+        <div style="background:var(--lx-surface-elevated);border:1px solid var(--lx-border-default);border-radius:6px;padding:10px 14px;margin:0 0 4px;">
+          <code style="font-family:var(--lx-font-mono);font-size:12px;color:var(--lx-text-secondary);white-space:pre;">const cx = chunkIndex - originChunkIndex; // missing -1 shift</code>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Focused editor surface: review mode. The review panel lives in the editor body — below the toolbar, above the dimmed document. Never toolbar chrome. -->
+  <div style="max-width:720px;margin:48px auto 0;background:var(--lx-surface-card);border:1px solid var(--lx-border-focus);border-radius:6px;box-shadow:var(--lx-focus-glow);overflow:hidden;">
+
+    <!-- Toolbar: unchanged chrome (the review surface is NOT part of it) -->
+    <div class="editor-toolbar wiki-toolbar-host" style="border-bottom:1px solid var(--lx-border-default);">
+      <div class="wiki-toolbar-row">
+        <button class="toolbar-btn" title="Undo"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 7v6h6"/><path d="M21 17a9 9 0 0 0-9-9 9 9 0 0 0-6 2.3L3 13"/></svg></button>
+        <button class="toolbar-btn" title="Redo"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M21 7v6h-6"/><path d="M3 17a9 9 0 0 1 9-9 9 9 0 0 1 6 2.3L21 13"/></svg></button>
+        <span class="toolbar-sep"></span>
+        <button class="toolbar-btn" title="Bold"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M14 12a4 4 0 0 0 0-8H6v8"/><path d="M15 20a4 4 0 0 0 0-8H6v8Z"/></svg></button>
+        <span class="toolbar-sep"></span>
+        <button class="toolbar-btn" title="Heading 2"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M4 12h8"/><path d="M4 18V6"/><path d="M12 18V6"/><path d="M21 18h-4"/><path d="M17 12v6"/></svg></button>
+        <span class="toolbar-sep"></span>
+        <button class="toolbar-btn active" title="AI writing assistant (Forge)">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="m15 12-8.373 8.373a2.121 2.121 0 1 1-3-3L12 9m7-4 .65-.65a2.121 2.121 0 1 1 3 3L19.003 11M15 5l2 2"/><path d="M6 18 2 22"/></svg>
+          Forge
+        </button>
+      </div>
+    </div>
+
+    <!-- Review panel: identity banner + full-bleed diff. Occupies the editor body between toolbar and document. -->
+    <div style="background:var(--lx-surface-card);">
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;padding:8px 12px;background:var(--lx-bg-warning-subtle);border-bottom:1px solid var(--lx-border-default);">
+        <div style="display:flex;flex-direction:column;gap:2px;min-width:0;">
+          <span class="font-micro text-2xs color-warning" style="text-transform:uppercase;letter-spacing:0.04em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">Forge · Summarize · dev-mbp</span>
+          <span class="font-body" style="font-size:11px;color:var(--lx-text-secondary);opacity:0.8;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">Nothing is changed until you accept</span>
+        </div>
+        <div class="flex items-center gap-2" style="flex-shrink:0;">
+          <span class="font-mono" style="font-size:11px;letter-spacing:0.02em;">
+            <span class="color-success">+2</span> <span class="color-danger">−5</span>
+          </span>
+          <button class="btn btn-ghost" style="height:28px;padding:0 10px;font-size:12px;">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg>
+            Reject
+          </button>
+          <button class="btn btn-primary" style="height:28px;padding:0 10px;font-size:12px;">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M20 6L9 17l-5-5"/></svg>
+            Accept
+          </button>
+        </div>
+      </div>
+
+    <!-- Diff view: whole current document vs AI result, word-level highlights (full-bleed panel body) -->
+    <div class="diff-view" style="overflow:hidden;">
+      <div class="diff-hunk">
+        <div class="diff-hunk-header" style="display:flex;align-items:center;gap:8px;padding:4px 12px;background:var(--lx-surface-elevated);border-bottom:1px solid var(--lx-border-subtle);">
+          <span class="font-mono" style="font-size:11px;color:var(--lx-text-muted);">@@ -1,1 +1,1 @@</span>
+        </div>
+        <div class="diff-line diff-del" style="display:flex;gap:10px;padding:2px 12px;background:var(--lx-bg-danger-subtle);">
+          <span class="font-mono" style="font-size:12px;line-height:20px;color:var(--lx-text-danger);flex-shrink:0;">−</span>
+          <span class="font-mono" style="font-size:12px;line-height:20px;color:var(--lx-text-secondary);">
+            <del style="background:rgba(220,38,38,0.22);color:var(--lx-text-danger);text-decoration:none;border-radius:3px;">The furnace zone crash stems from an</del> off-by-one in the chunk coordinate math <del style="background:rgba(220,38,38,0.22);color:var(--lx-text-danger);text-decoration:none;border-radius:3px;">when transitioning between zones. #107 points to</del> TilemapChunkLoader._loadChunk()<del style="background:rgba(220,38,38,0.22);color:var(--lx-text-danger);text-decoration:none;border-radius:3px;">.</del>
+          </span>
+        </div>
+        <div class="diff-line diff-add" style="display:flex;gap:10px;padding:2px 12px;background:var(--lx-bg-success-subtle);">
+          <span class="font-mono" style="font-size:12px;line-height:20px;color:var(--lx-text-success);flex-shrink:0;">+</span>
+          <span class="font-mono" style="font-size:12px;line-height:20px;color:var(--lx-text-secondary);">
+            <ins style="background:rgba(22,163,74,0.22);color:var(--lx-text-success);text-decoration:none;border-radius:3px;">Root cause: an</ins> off-by-one in the chunk coordinate math <ins style="background:rgba(22,163,74,0.22);color:var(--lx-text-success);text-decoration:none;border-radius:3px;">in</ins> TilemapChunkLoader._loadChunk()<ins style="background:rgba(22,163,74,0.22);color:var(--lx-text-success);text-decoration:none;border-radius:3px;"> — chunk indices are assigned from the world origin, but the loader assumes they start at 0.</ins>
+          </span>
+        </div>
+      </div>
+      <div class="diff-hunk" style="border-top:1px solid var(--lx-border-default);">
+        <div class="diff-hunk-header" style="display:flex;align-items:center;gap:8px;padding:4px 12px;background:var(--lx-surface-elevated);border-bottom:1px solid var(--lx-border-subtle);">
+          <span class="font-mono" style="font-size:11px;color:var(--lx-text-muted);">@@ -2,4 +2,1 @@</span>
+        </div>
+        <div class="diff-line diff-del" style="display:flex;gap:10px;padding:2px 12px;background:var(--lx-bg-danger-subtle);">
+          <span class="font-mono" style="font-size:12px;line-height:20px;color:var(--lx-text-danger);flex-shrink:0;">−</span>
+          <span class="font-mono" style="font-size:12px;line-height:20px;color:var(--lx-text-danger);">Root cause</span>
+        </div>
+        <div class="diff-line diff-del" style="display:flex;gap:10px;padding:2px 12px;background:var(--lx-bg-danger-subtle);">
+          <span class="font-mono" style="font-size:12px;line-height:20px;color:var(--lx-text-danger);flex-shrink:0;">−</span>
+          <span class="font-mono" style="font-size:12px;line-height:20px;color:var(--lx-text-danger);">- Loader assumes chunk indices start at 0</span>
+        </div>
+        <div class="diff-line diff-del" style="display:flex;gap:10px;padding:2px 12px;background:var(--lx-bg-danger-subtle);">
+          <span class="font-mono" style="font-size:12px;line-height:20px;color:var(--lx-text-danger);flex-shrink:0;">−</span>
+          <span class="font-mono" style="font-size:12px;line-height:20px;color:var(--lx-text-danger);">- Streaming system assigns indices from the world origin</span>
+        </div>
+        <div class="diff-line diff-del" style="display:flex;gap:10px;padding:2px 12px;background:var(--lx-bg-danger-subtle);">
+          <span class="font-mono" style="font-size:12px;line-height:20px;color:var(--lx-text-danger);flex-shrink:0;">−</span>
+          <span class="font-mono" style="font-size:12px;line-height:20px;color:var(--lx-text-danger);">const cx = chunkIndex - originChunkIndex; // missing -1 shift</span>
+        </div>
+        <div class="diff-line diff-add" style="display:flex;gap:10px;padding:2px 12px;background:var(--lx-bg-success-subtle);">
+          <span class="font-mono" style="font-size:12px;line-height:20px;color:var(--lx-text-success);flex-shrink:0;">+</span>
+          <span class="font-mono" style="font-size:12px;line-height:20px;color:var(--lx-text-success);">Root cause: the loader assumes chunk indices start at 0, but the streaming system assigns them from the world origin.</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Original document — dimmed reference below the panel. Unmodified; the panel overlays the review. -->
+    <div style="padding:12px 20px 16px;border-top:1px solid var(--lx-border-subtle);opacity:0.55;pointer-events:none;font-family:var(--lx-font-body);font-size:14px;line-height:22px;color:var(--lx-text-primary);">
+      <p style="margin:0 0 12px;color:var(--lx-text-secondary);">
+        The furnace zone crash stems from an off-by-one in the chunk coordinate math when transitioning between zones. <span style="color:var(--lx-text-primary);">#107</span> points to <code style="font-family:var(--lx-font-mono);font-size:12px;background:var(--lx-surface-elevated);padding:2px 4px;border-radius:4px;">TilemapChunkLoader._loadChunk()</code>.
+      </p>
+      <h3 style="font-size:16px;font-weight:500;font-family:var(--lx-font-display);color:var(--lx-text-primary);margin:0 0 8px;letter-spacing:-0.02em;">Root cause</h3>
+      <ul style="margin:0 0 12px;padding-left:20px;color:var(--lx-text-secondary);">
+        <li>Loader assumes chunk indices start at 0</li>
+        <li>Streaming system assigns indices from the world origin</li>
+      </ul>
+      <div style="background:var(--lx-surface-elevated);border:1px solid var(--lx-border-default);border-radius:6px;padding:10px 14px;margin:0 0 4px;">
+        <code style="font-family:var(--lx-font-mono);font-size:12px;color:var(--lx-text-secondary);white-space:pre;">const cx = chunkIndex - originChunkIndex; // missing -1 shift</code>
+      </div>
+    </div>
+  </div>
+
+  <!-- Annotations -->
+  <div style="position:fixed;bottom:24px;left:24px;z-index:55;display:flex;flex-direction:column;gap:8px;align-items:flex-start;">
+    <span class="annotation-tag">Reached from the Forge popover "Review in editor" button (forge-popover.html). The popover closes; review continues here at full editor width.</span>
+    <span class="annotation-tag">On mount the review surface aligns its top edge into view (block-start within the scroll container — the editor can sit deep in a scrollable slideover, and the banner must never be left off-screen above the fold: Accept/Reject always reachable).</span>
+    <span class="annotation-tag">Placement: the review surface is a focused panel in the editor body — between the toolbar and the document, full content width. It is NOT toolbar chrome; the toolbar above stays untouched (the Forge button just stays active). The editor wrapper carries the focus ring (border-focus + focus glow) while review is active.</span>
+    <span class="annotation-tag">The original document below the panel is dimmed (opacity 0.55, pointer-events off) as a read-only reference — the panel holds the decision, the doc stays byte-identical until Accept.</span>
+    <span class="annotation-tag">Diff review: the document is NOT modified while the banner is up. The panel is a git-style unified diff of the WHOLE current document vs the AI result (plain text; word-level del/ins highlights inside changed lines — the del/ins marks on hunk 1 show the token match: "off-by-one in the chunk coordinate math" and TilemapChunkLoader._loadChunk() are unchanged).</span>
+    <span class="annotation-tag">Header stat is git-style: +added −removed (mono). No selection (Continue/Expand) renders a pure-addition diff.</span>
+    <span class="annotation-tag">The editor is read-only during review (no "edit freely" — nothing to lose). Accept REPLACES the whole document content with the result (result Markdown → TipTap), regardless of where the cursor or selection was — the Forge result is the new description, not an insert. Reject leaves the document byte-identical; Esc = Reject.</span>
+    <span class="annotation-tag">Accept also marks the task Applied: the next Forge popover open shows a terminal Applied state (forge-popover.html) instead of re-offering "Review in editor" — the result can never be inserted twice.</span>
+    <span class="annotation-tag">Task blur-save is safe: during review the doc is unmodified, so blur persists the original — an unaccepted result can never reach the database. Wiki autosave needs no suspension for the same reason; on Accept, the replacement triggers the surface's own save path (task: blur/done · wiki: autosave/manual save).</span>
+    <span class="annotation-tag">While review is active the Forge popover shows "In review in editor" and hides its buttons, preventing duplicate inserts.</span>
+    <span class="annotation-tag">The review surface is rendered by the editing surfaces (task description editor · wiki editor), not by the shared Toolbar component — the Toolbar only toggles the review via the Forge popover.</span>
+    <span class="annotation-tag">Failed tasks never enter preview — the error stays in the popover. Result identical to the document shows a "no changes" empty state; Accept is then a no-op.</span>
+  </div>
+
+</body>
+</html>
