@@ -122,14 +122,12 @@ export function ProjectCard({ project, health, className }: ProjectCardProps) {
 
       {settingsOpen && (
         <>
-          <div
+          <button
+            type="button"
             className="slideover-overlay"
-            role="button"
-            tabIndex={0}
             aria-label="Close dialog"
             onClick={() => setSettingsOpen(false)}
-            onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") setSettingsOpen(false); }}
-          />
+            />
           <div className="fixed inset-0 flex items-center justify-center z-50 pointer-events-none">
             <form
               className="modal dialog-enter pointer-events-auto"
@@ -226,14 +224,12 @@ export function ProjectCard({ project, health, className }: ProjectCardProps) {
 
       {deleteOpen && (
         <>
-          <div
+          <button
+            type="button"
             className="slideover-overlay"
-            role="button"
-            tabIndex={0}
             aria-label="Close dialog"
             onClick={() => setDeleteOpen(false)}
-            onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") setDeleteOpen(false); }}
-          />
+            />
           <div className="fixed inset-0 flex items-center justify-center z-50 pointer-events-none">
             <div
               className="dialog dialog-enter pointer-events-auto"

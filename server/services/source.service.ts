@@ -19,7 +19,10 @@ export class SourceService extends Effect.Service<SourceService>()("Lexa/SourceS
       Effect.gen(function* () {
         try {
           const res = yield* Effect.promise(() =>
-            fetch(`https://dns.google/resolve?name=${encodeURIComponent(hostname)}&type=A`).then((r) => r.json() as Promise<{ Answer?: { data: string }[] }>)
+            fetch(`https://dns.google/resolve?name=${encodeURIComponent(hostname)}&type=A`).then(async (r) => {
+              if (!r.ok) throw new Error(`dns.google ${r.status}`);
+              return r.json() as Promise<{ Answer?: { data: string }[] }>;
+            })
           );
           const addresses = (res.Answer ?? []).map((a) => a.data);
           if (addresses.length > 0) return addresses;

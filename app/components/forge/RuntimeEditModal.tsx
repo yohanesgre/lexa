@@ -256,7 +256,7 @@ export function RuntimeEditModal({ runtime, onClose }: { runtime: Runtime; onClo
               </label>
               <div className="flex flex-col" style={{ gap: 6 }}>
                 {args.map((arg, i) => (
-                  <div key={i} className="flex items-center gap-2">
+                  <div key={`${i}-${arg}`} className="flex items-center gap-2">
                     <span className="font-mono text-2xs text-lx-text-muted" style={{ width: 14 }}>{i + 1}</span>
                     <input
                       className="prop-input flex-1 font-mono"

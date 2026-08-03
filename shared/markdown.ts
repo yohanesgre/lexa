@@ -262,7 +262,7 @@ function renderTaskItem(item: TipTapNode): string {
 function collectText(node: TipTapNode): string {
   if (node.type === "text") return node.text ?? "";
   if (node.content && node.content.length > 0) {
-    return node.content.map(collectText).filter(Boolean).join(" ");
+    return node.content.flatMap((c) => { const t = collectText(c); return t ? [t] : []; }).join(" ");
   }
   return "";
 }

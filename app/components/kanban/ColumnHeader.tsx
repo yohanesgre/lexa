@@ -118,14 +118,12 @@ export function ColumnHeader({ slug, column, taskCount, wipLimit, wipFlash = fal
 
       {deleteConfirm && (
         <>
-          <div
+          <button
+            type="button"
             className="dialog-overlay"
-            role="button"
-            tabIndex={0}
             aria-label="Close dialog"
             onClick={() => setDeleteConfirm(false)}
-            onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") setDeleteConfirm(false); }}
-          />
+            />
           <div className="fixed inset-0 flex items-center justify-center z-[80] pointer-events-none">
             <div className="dialog dialog-enter pointer-events-auto" role="dialog" aria-modal="true" aria-labelledby="delete-column-title">
               <h2 id="delete-column-title" className="font-display text-lg font-medium text-lx-text-primary">Delete &lsquo;{column.name}&rsquo;?</h2>
@@ -146,14 +144,12 @@ export function ColumnHeader({ slug, column, taskCount, wipLimit, wipFlash = fal
 
       {clearConfirm && (
         <>
-          <div
+          <button
+            type="button"
             className="dialog-overlay"
-            role="button"
-            tabIndex={0}
             aria-label="Close dialog"
             onClick={() => setClearConfirm(false)}
-            onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") setClearConfirm(false); }}
-          />
+            />
           <div className="fixed inset-0 flex items-center justify-center z-[80] pointer-events-none">
             <div className="dialog dialog-enter pointer-events-auto" role="dialog" aria-modal="true" aria-labelledby="clear-column-title">
               <h2 id="clear-column-title" className="font-display text-lg font-medium text-lx-text-primary">Clear all tasks?</h2>

@@ -15,7 +15,7 @@ const STATUS_LABEL: Record<string, string> = {
   cancelled: "Cancelled",
 };
 
-const DISMISSED_KEY = "lxk.forge-dismissed-tasks";
+const DISMISSED_KEY = "lxk.forge-dismissed-tasks:v1";
 const TERMINAL_STATUSES = new Set(["completed", "failed", "cancelled"]);
 
 function skillLabel(t: RecentForgeTask): string {
@@ -67,6 +67,10 @@ export function ForgeStatus() {
   const cancelTask = useCancelForgeTask();
   const [open, setOpen] = useState(false);
   const [dismissed, setDismissed] = useState<Set<string>>(loadDismissed);
+  const dismissedRef = useRef(dismissed);
+  useEffect(() => {
+    dismissedRef.current = dismissed;
+  });
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
@@ -119,16 +123,15 @@ export function ForgeStatus() {
   };
 
   const dismiss = (id: string) => {
-    setDismissed((prev) => {
-      const next = new Set(prev);
-      next.add(id);
-      try {
-        localStorage.setItem(DISMISSED_KEY, JSON.stringify([...next]));
-      } catch {
-        // storage unavailable (private mode) — dismissal lasts this session
-      }
-      return next;
-    });
+    const next = new Set(dismissedRef.current);
+    next.add(id);
+    dismissedRef.current = next;
+    setDismissed(next);
+    try {
+      localStorage.setItem(DISMISSED_KEY, JSON.stringify([...next]));
+    } catch {
+      // storage unavailable (private mode) — dismissal lasts this session
+    }
   };
 
   // The pill is ALWAYS visible — idle shows a neutral "Forge" so the Forge

@@ -74,15 +74,13 @@ export function OptionForm({ kind, option, isOpen, onClose, onSubmit, zIndex = 8
 
   return createPortal(
     <>
-      <div
+      <button
+        type="button"
         className="dialog-overlay"
         style={{ zIndex }}
-        role="button"
-        tabIndex={0}
         aria-label="Close dialog"
         onClick={onClose}
-        onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") onClose(); }}
-      />
+        />
       <div className="fixed inset-0 flex items-center justify-center pointer-events-none" style={{ zIndex: zIndex + 1 }}>
         <div
           className="dialog dialog-enter pointer-events-auto p-0"

@@ -116,20 +116,11 @@ export function deleteSwimlane(slug: string, id: string): Promise<void> {
   return request(`${BASE}/projects/${slug}/swimlanes/${id}`, { method: "DELETE" });
 }
 
-export function listTasks(slug: string, params?: { columnId?: string; swimlaneId?: string; assignee?: string; type?: string; limit?: number; cursor?: string }): Promise<{ data: Task[]; nextCursor: string | null }> {
-  const qs = new URLSearchParams();
-  if (params) Object.entries(params).forEach(([k, v]) => { if (v !== undefined) qs.set(k, String(v)); });
-  const query = qs.toString();
-  return request(`${BASE}/projects/${slug}/tasks${query ? "?" + query : ""}`);
-}
 
 export function createTask(slug: string, input: { columnId: string; swimlaneId: string; title: string; description?: TipTapDoc; priority?: string; type?: string; parentId?: string; assignees?: string[] }): Promise<Task> {
   return request(`${BASE}/projects/${slug}/tasks`, { method: "POST", body: JSON.stringify(input) });
 }
 
-export function getTask(slug: string, id: string): Promise<Task> {
-  return request(`${BASE}/projects/${slug}/tasks/${id}`);
-}
 
 export function updateTask(slug: string, id: string, input: { title?: string; description?: TipTapDoc; priority?: string; type?: string; assignees?: string[] }): Promise<Task> {
   return request(`${BASE}/projects/${slug}/tasks/${id}`, { method: "PATCH", body: JSON.stringify(input) });
@@ -182,9 +173,6 @@ export function getWikiPage(slug: string, pageSlug: string): Promise<WikiPage> {
   return request(`${BASE}/projects/${slug}/wiki/${pageSlug}`);
 }
 
-export function listWikiChildren(slug: string, pageSlug: string): Promise<{ data: WikiPageMeta[] }> {
-  return request(`${BASE}/projects/${slug}/wiki/${pageSlug}/children`);
-}
 
 export function updateWikiPage(slug: string, pageSlug: string, input: { title?: string; slug?: string; content?: TipTapDoc; parentId?: string | null; position?: number; saveType?: "autosave" | "manual" }): Promise<WikiPage> {
   return request(`${BASE}/projects/${slug}/wiki/${pageSlug}`, { method: "PATCH", body: JSON.stringify(input) });
@@ -199,13 +187,7 @@ export function listRevisions(slug: string, pageSlug: string, limit?: number): P
   return request(`${BASE}/projects/${slug}/wiki/${pageSlug}/revisions${qs}`);
 }
 
-export function getRevision(slug: string, pageSlug: string, revisionId: string): Promise<{ revision: WikiPageRevision }> {
-  return request(`${BASE}/projects/${slug}/wiki/${pageSlug}/revisions/${revisionId}`);
-}
 
-export function restoreRevision(slug: string, pageSlug: string, revisionId: string): Promise<WikiPage> {
-  return request(`${BASE}/projects/${slug}/wiki/${pageSlug}/restore`, { method: "POST", body: JSON.stringify({ revisionId }) });
-}
 
 export function listApiKeys(): Promise<{ data: ApiKey[] }> {
   return request(`${BASE}/settings/api-keys`);

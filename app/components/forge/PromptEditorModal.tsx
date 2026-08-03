@@ -37,7 +37,7 @@ export function PromptEditorModal({ kind, entity, allSkills = [], onClose }: Pro
   const resetSkill = useResetForgeSkill();
 
   const dirty = entity === null || name !== entity.name || description !== entity.description || instructions !== entity.instructions;
-  const skillsDirty = agent !== null && JSON.stringify([...attachedSkillIds].sort()) !== JSON.stringify([...agent.skillIds].sort());
+  const skillsDirty = agent !== null && JSON.stringify([...attachedSkillIds].toSorted()) !== JSON.stringify([...agent.skillIds].sort());
   const canSave = name.trim().length > 0 && instructions.trim().length > 0 && (dirty || skillsDirty);
   const pending =
     createAgent.isPending || updateAgent.isPending || replaceSkills.isPending ||
@@ -93,7 +93,8 @@ export function PromptEditorModal({ kind, entity, allSkills = [], onClose }: Pro
     }
   };
 
-  const attachedNames = allSkills.filter((s) => attachedSkillIds.includes(s.id)).map((s) => s.name);
+  const attachedSet = new Set(attachedSkillIds);
+  const attachedNames = allSkills.filter((s) => attachedSet.has(s.id)).map((s) => s.name);
 
   return (
     <div className="modal dialog-enter" style={{ width: 600 }}>
@@ -144,7 +145,7 @@ export function PromptEditorModal({ kind, entity, allSkills = [], onClose }: Pro
                   <label key={s.id} className="flex items-center gap-2" style={{ cursor: "pointer", fontSize: 12, color: "var(--lx-text-secondary)" }}>
                     <input
                       type="checkbox"
-                      checked={attachedSkillIds.includes(s.id)}
+                      checked={attachedSet.has(s.id)}
                       onChange={(e) =>
                         setAttachedSkillIds((prev) => (e.target.checked ? [...prev, s.id] : prev.filter((id) => id !== s.id)))
                       }
