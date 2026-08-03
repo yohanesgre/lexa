@@ -11,6 +11,11 @@ services:
       - PORT=3000
       - LXK_API_KEY=${LXK_API_KEY}
       - LXK_ADMIN_EMAILS=${LXK_ADMIN_EMAILS:-}
+      - LXK_FORGE_DAEMON_TOKEN=${LXK_FORGE_DAEMON_TOKEN:-}
+      - GITHUB_APP_ID=${GITHUB_APP_ID:-}
+      - GITHUB_PRIVATE_KEY=${GITHUB_PRIVATE_KEY:-}
+      - GITHUB_PRIVATE_KEY_FILE=${GITHUB_PRIVATE_KEY_FILE:-}
+      - GITHUB_WEBHOOK_SECRET=${GITHUB_WEBHOOK_SECRET:-}
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "bun", "-e", "fetch('http://localhost:3000/api/health').catch(() => process.exit(1))"]

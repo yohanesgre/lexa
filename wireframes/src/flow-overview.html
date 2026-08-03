@@ -123,7 +123,7 @@
     </div>
 
     <p class="flow-note mb-4">
-      <strong>Project context rule.</strong> Dashboard and global Settings (<code>/settings</code>) are cross-project. Board, Wiki, and project Settings (<code>/:slug/settings</code>) are project-scoped. The global project switcher preserves the route type when possible. If the current route does not exist in the new project (e.g., a wiki page when the target project has no wiki), fall back to that project's board (<code>/:slug</code>).
+      <strong>Project context rule.</strong> Dashboard and global Settings (<code>/settings</code>) are cross-project. Board, Wiki, and project Settings (<code>/:slug/settings</code>) are project-scoped. The global project switcher preserves the route type when possible. If the current route does not exist in the new project (e.g., a wiki page when the target project has no wiki), fall back to that project's board (<code>/:slug</code>). With zero projects, <code>/settings</code> still opens from the nav and renders only the global sections — Project Members and Project management are hidden (see <a href="settings-no-project.html">settings-no-project.html</a>).
     </p>
 
     <div class="flow-legend mb-4">

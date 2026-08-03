@@ -370,6 +370,7 @@ export class TaskService extends Effect.Service<TaskService>()("Lexa/TaskService
           const task = yield* taskRepo.findByGithubIssue(issueId).pipe(
             Effect.catchTag("RowNotFound", () => new TaskNotFound({ id: issueId }))
           );
+          if (task.archivedAt) return task;
           yield* columnRepo.findById(columnId).pipe(
             Effect.catchTag("RowNotFound", () => new ColumnNotFound({ id: columnId }))
           );

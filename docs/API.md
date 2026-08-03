@@ -2,13 +2,11 @@
 
 > Derived from ARCHITECTURE.md (v2.1) routes and LAYERS.md (v2.1) services. This is the frontend↔backend contract. For the agent-facing contract see MCP.md.
 
-> ⚠ **Not implemented in v0.1.0 — planned:** the two-way GitHub sync (`POST/DELETE /api/projects/:slug/tasks/:id/github-link`, `POST /api/webhooks/github`, and the `Task.githubs` / `githubOutOfSync` fields). The endpoints below are the planned contract; they 404 until the feature ships (Phase 6). The MCP `link_github_issue`/`unlink_github_issue` tools are stubs for the same reason.
-
 ## Conventions
 
 | Concern | Convention |
 |---------|-----------|
-| Base URL | `https://<worker-host>/api` |
+| Base URL | `https://<host>/api` (Bun server behind the cloudflared tunnel) |
 | Auth (human) | Cloudflare Access — JWT verified via `Cf-Access-Jwt-Assertion`; identity from `Cf-Access-Authenticated-User-Email` |
 | Auth (machine) | `Authorization: Bearer lxk_<base62(32B)>` |
 | Content type | `application/json; charset=utf-8` |
@@ -440,15 +438,19 @@ Notes:
 - `PATCH /projects/:slug/tasks/:id` and `POST /projects/:slug/tasks` accept
   priority/type as option IDs; unknown or foreign-project IDs → `INVALID_OPTION`.
 
-### Task ↔ GitHub link (planned — not implemented in v0.1.0)
+### Task ↔ GitHub link
 
 ```
 POST   /api/projects/:slug/tasks/:id/github-link
 body { repo* }                   ("owner/name" — creates a GitHub issue from the task)
 → 200 Task (with github populated) | 404 | 409 ALREADY_LINKED | 502 GITHUB_API_ERROR
+  ALREADY_LINKED fires when the task already has an issue in the same repo
+  (multi-issue: one link per repo per task).
 
-DELETE /api/projects/:slug/tasks/:id/github-link
-→ 200 Task (github: null) | 404  (does NOT close/delete the GitHub issue)
+DELETE /api/projects/:slug/tasks/:id/github-link/:issueId
+→ 200 Task | 404 TASK_NOT_FOUND
+  Unlinks the specific issue (issueId = GitHub node_id). Does NOT close or
+  delete the GitHub issue. Idempotent: unknown issueId is a no-op.
 ```
 
 ### Wiki
@@ -495,14 +497,16 @@ DELETE /api/settings/api-keys/:id
 → 204 | 404
 ```
 
-### GitHub Webhook (planned — not implemented in v0.1.0; no API-key middleware)
+### GitHub Webhook
 
 ```
 POST   /api/webhooks/github
-headers: X-GitHub-Event, X-GitHub-Delivery, X-Hub-Signature-256
-→ 200 immediately (processing deferred via ctx.waitUntil)
+headers: X-GitHub-Event: issues, X-GitHub-Delivery, X-Hub-Signature-256
+→ 200 immediately (processing deferred to the background — Bun has no
+  waitUntil; the handler acks first, then processes fire-and-forget)
 → 401 on signature mismatch (before body parsing)
-Handled events: issues.closed, issues.reopened, issues.edited
+Handled: event "issues" with payload.action closed | reopened | edited
+  (GitHub sends the transition in the payload, not in the header)
 ```
 
 ### Forge (AI writing assistant)

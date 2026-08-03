@@ -415,3 +415,13 @@ export function removeTaskLink(slug: string, taskId: string, linkId: string): Pr
 export function searchTasks(slug: string, q: string, exclude = ""): Promise<{ data: TaskLinkSuggestion[] }> {
   return request(`${BASE}/projects/${slug}/tasks/search?q=${encodeURIComponent(q)}&exclude=${encodeURIComponent(exclude)}`);
 }
+
+// ── Task ↔ GitHub issue links ──
+
+export function linkGithubIssue(slug: string, taskId: string, repo: string): Promise<Task> {
+  return request(`${BASE}/projects/${slug}/tasks/${taskId}/github-link`, { method: "POST", body: JSON.stringify({ repo }) });
+}
+
+export function unlinkGithubIssue(slug: string, taskId: string, issueId: string): Promise<Task> {
+  return request(`${BASE}/projects/${slug}/tasks/${taskId}/github-link/${issueId}`, { method: "DELETE" });
+}

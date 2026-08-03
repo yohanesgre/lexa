@@ -91,7 +91,6 @@ export function ForgeControlPanel() {
   const summary = history.data?.summary;
   const online = runtimes.data?.filter((r) => r.status === "online").length ?? 0;
   const total = runtimes.data?.length ?? 0;
-  const settingsSlug = projects.data?.[0]?.slug;
 
   const reset = (next: { slug?: string; status?: ForgeTaskStatus | null; skillId?: string }) => {
     if (next.slug !== undefined) setSlug(next.slug);
@@ -126,12 +125,10 @@ export function ForgeControlPanel() {
       <div className="flex items-center justify-between mb-3">
         <h1 className="font-display text-2xl weight-600 color-primary mb-0">Forge</h1>
         <div className="flex items-center gap-3">
-          {settingsSlug && (
-            <Link to="/$slug/settings" params={{ slug: settingsSlug }} className="btn btn-ghost" style={{ height: 28, padding: "0 12px", fontSize: 12, textDecoration: "none", display: "inline-flex", alignItems: "center", gap: 6 }}>
-              <LayoutGrid size={14} strokeWidth={1.5} />
-              Forge runtimes
-            </Link>
-          )}
+          <Link to="/settings" className="btn btn-ghost" style={{ height: 28, padding: "0 12px", fontSize: 12, textDecoration: "none", display: "inline-flex", alignItems: "center", gap: 6 }}>
+            <LayoutGrid size={14} strokeWidth={1.5} />
+            Forge runtimes
+          </Link>
         </div>
       </div>
       <p className="text-sm text-lx-text-secondary mb-4" style={{ maxWidth: 560 }}>

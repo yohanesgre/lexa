@@ -195,11 +195,18 @@ print(r)
     echo "  Generated: $API_KEY"
   fi
 
+  # Preserve existing GitHub sync config across re-runs (setup.sh rewrites $ENV_FILE).
+  GITHUB_APP_ID=$(grep -m1 '^GITHUB_APP_ID=' "$ENV_FILE" 2>/dev/null | cut -d= -f2- || true)
+  GITHUB_WEBHOOK_SECRET=$(grep -m1 '^GITHUB_WEBHOOK_SECRET=' "$ENV_FILE" 2>/dev/null | cut -d= -f2- || true)
+
   cat > "$ENV_FILE" << ENVEOF
 LXK_API_KEY=$API_KEY
 VITE_LXK_API_KEY=$API_KEY
 LXK_ADMIN_EMAILS=${ADMIN_EMAIL:-}
 CF_TUNNEL_TOKEN=$TOKEN
+GITHUB_APP_ID=${GITHUB_APP_ID:-}
+GITHUB_PRIVATE_KEY_FILE=/app/github-app.private-key.pem
+GITHUB_WEBHOOK_SECRET=${GITHUB_WEBHOOK_SECRET:-}
 ENVEOF
   echo "  Wrote $ENV_FILE"
 fi

@@ -35,7 +35,10 @@ export function run(db: Database, sql: string, ...params: unknown[]): Effect.Eff
     try: () => db.prepare(sql).run(...params).changes as number,
     catch: (e) => {
       const msg = String(e);
-      if (msg.includes("SQLITE_CONSTRAINT")) {
+      // bun:sqlite reports constraints as "SQLiteError: UNIQUE constraint
+      // failed: projects.slug" / "FOREIGN KEY constraint failed" — the
+      // literal SQLITE_CONSTRAINT string never appears.
+      if (msg.includes("SQLITE_CONSTRAINT") || /constraint failed/i.test(msg)) {
         return new ConstraintViolation({ message: msg, isPositionConflict: /tasks\.column_id.*tasks\.position/.test(msg) });
       }
       return new DbError({ message: msg, cause: e });
@@ -50,7 +53,7 @@ export function batch(db: Database, stmts: { sql: string; params: unknown[] }[])
     },
     catch: (e) => {
       const msg = String(e);
-      if (msg.includes("SQLITE_CONSTRAINT")) {
+      if (msg.includes("SQLITE_CONSTRAINT") || /constraint failed/i.test(msg)) {
         return new ConstraintViolation({ message: msg, isPositionConflict: /tasks\.column_id.*tasks\.position/.test(msg) });
       }
       return new DbError({ message: msg, cause: e });

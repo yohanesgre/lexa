@@ -16,6 +16,7 @@ import { WikiService } from "../services/wiki.service";
 import { ApiKeyService } from "../services/api-key.service";
 import { UserService } from "../services/user.service";
 import { UserProjectRoleService } from "../services/user-project-role.service";
+import { GitHubService } from "../services/github.service";
 import { initSqlite } from "../db/database";
 import { errorCodeMap, errorMessage, errorDetails } from "../api/errors";
 import { tool as createTask } from "./tools/create-task";
@@ -148,6 +149,7 @@ export class McpServer extends Effect.Service<McpServer>()("Lexa/McpServer", {
     ApiKeyService.Default,
     UserService.Default,
     UserProjectRoleService.Default,
+    GitHubService.Default,
   ],
   effect: Effect.gen(function* () {
     const apiKeyRepo = yield* ApiKeyRepo;
@@ -231,7 +233,7 @@ export class McpServer extends Effect.Service<McpServer>()("Lexa/McpServer", {
             if (typeof args?.slug === "string" && ["get_project", "get_project_status"].includes(toolName)) {
               yield* checkProjectAccess(authContext.userId, authContext.role, args.slug);
             }
-            if (typeof args?.taskId === "string" && ["get_task", "update_task", "move_task", "delete_task", "archive_task", "restore_task"].includes(toolName)) {
+            if (typeof args?.taskId === "string" && ["get_task", "update_task", "move_task", "delete_task", "archive_task", "restore_task", "link_github_issue", "unlink_github_issue"].includes(toolName)) {
               const resolved = yield* resolveTaskProject(args.taskId);
               yield* checkProjectAccess(authContext.userId, authContext.role, resolved.slug);
             }
@@ -335,6 +337,7 @@ const serviceLayer = Layer.mergeAll(
   ApiKeyService.Default,
   UserService.Default,
   UserProjectRoleService.Default,
+  GitHubService.Default,
 );
 
 function createMcpLayer(dbPath: string): Layer.Layer<McpServer> {

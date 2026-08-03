@@ -237,6 +237,55 @@ export function useRestoreTask(slug: string) {
   });
 }
 
+function useGithubLinkMutation(slug: string, apiFn: (slug: string, id: string, key: string) => Promise<Task>) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, key }: { id: string; key: string }) => apiFn(slug, id, key),
+    onSuccess: (task) => {
+      // Mutation responses are authoritative — update both board caches in place.
+      for (const archived of [false, true]) {
+        qc.setQueryData(["board", slug, archived], (old: Board | undefined) => {
+          if (!old) return old;
+          return { ...old, tasks: old.tasks.map((t: Task) => (t.id === task.id ? task : t)) };
+        });
+      }
+      qc.setQueryData(["tasks", slug, task.id], task);
+    },
+  });
+}
+
+export function useLinkGithubIssue(slug: string) {
+  const toast = useToast();
+  const mutation = useGithubLinkMutation(slug, api.linkGithubIssue);
+  return {
+    ...mutation,
+    mutateAsync: async (input: { id: string; repo: string }): Promise<Task> => {
+      try {
+        return await mutation.mutateAsync({ id: input.id, key: input.repo });
+      } catch (err) {
+        toast.push("error", "Failed to link GitHub issue", toastMessage(err));
+        throw err;
+      }
+    },
+  };
+}
+
+export function useUnlinkGithubIssue(slug: string) {
+  const toast = useToast();
+  const mutation = useGithubLinkMutation(slug, api.unlinkGithubIssue);
+  return {
+    ...mutation,
+    mutateAsync: async (input: { id: string; issueId: string }): Promise<Task> => {
+      try {
+        return await mutation.mutateAsync({ id: input.id, key: input.issueId });
+      } catch (err) {
+        toast.push("error", "Failed to unlink GitHub issue", toastMessage(err));
+        throw err;
+      }
+    },
+  };
+}
+
 export function useWikiPages(slug: string) {
   return useQuery({ queryKey: ["wiki", slug], queryFn: () => api.listWikiPages(slug).then((r) => r.data) });
 }

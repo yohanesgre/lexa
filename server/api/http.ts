@@ -1,5 +1,5 @@
 import { HttpApi, HttpApiBuilder, HttpApiEndpoint, HttpApiGroup, HttpMiddleware, HttpServerResponse } from "@effect/platform";
-import { Cause, Effect, Layer, Schema } from "effect";
+import { Cause, Effect, Layer, ManagedRuntime, Schema } from "effect";
 import { createHash, randomBytes } from "node:crypto";
 import { readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
@@ -39,6 +39,9 @@ import { SourceService } from "../services/source.service";
 import { SourceRepo } from "../repos/source.repo";
 import { TaskLinkService } from "../services/task-link.service";
 import { TaskLinkRepo } from "../repos/task-link.repo";
+import { GitHubService } from "../services/github.service";
+import { WebhookEventRepo } from "../repos/webhook-event.repo";
+import { GitHubClient } from "../github/client";
 import { extractText } from "../../shared/tiptap-text";
 
 const ApiKeySchema = Schema.Struct({
@@ -775,6 +778,10 @@ const MoveTaskPayload = Schema.Struct({
 
 const TaskPath = Schema.Struct({ slug: Schema.String, id: Schema.String });
 
+const GithubLinkPayload = Schema.Struct({ repo: Schema.String });
+
+const GithubLinkPath = Schema.Struct({ slug: Schema.String, id: Schema.String, issueId: Schema.String });
+
 const BoardSchema = Schema.Struct({
   project: ProjectSchema,
   columns: Schema.Array(ColumnSchema),
@@ -800,7 +807,11 @@ const tasksGroup = HttpApiGroup.make("tasks")
   .add(HttpApiEndpoint.post("archiveTask", "/projects/:slug/tasks/:id/archive")
     .setPath(TaskPath).addSuccess(TaskSchema))
   .add(HttpApiEndpoint.post("restoreTask", "/projects/:slug/tasks/:id/restore")
-    .setPath(TaskPath).addSuccess(TaskSchema));
+    .setPath(TaskPath).addSuccess(TaskSchema))
+  .add(HttpApiEndpoint.post("linkGithubIssue", "/projects/:slug/tasks/:id/github-link")
+    .setPath(TaskPath).setPayload(GithubLinkPayload).addSuccess(TaskSchema))
+  .add(HttpApiEndpoint.del("unlinkGithubIssue", "/projects/:slug/tasks/:id/github-link/:issueId")
+    .setPath(GithubLinkPath).addSuccess(TaskSchema));
 
 const boardGroup = HttpApiGroup.make("board")
   .add(HttpApiEndpoint.get("getBoard", "/projects/:slug/board")
@@ -1745,10 +1756,19 @@ const tasksLive = HttpApiBuilder.group(LexaApi, "tasks", (handlers) =>
     .handle("moveTask", (req) =>
       respond(Effect.gen(function* () {
         const taskService = yield* TaskService;
+        const columnService = yield* ColumnService;
+        const githubService = yield* GitHubService;
         const task = yield* taskService.move(req.path.id, {
           columnId: req.payload.columnId, swimlaneId: req.payload.swimlaneId,
           beforeTaskId: req.payload.beforeTaskId, afterTaskId: req.payload.afterTaskId,
         });
+        const column = yield* columnService.getById(req.payload.columnId);
+        if (column.githubState && task.githubs.length > 0) {
+          // Best-effort, non-blocking: a GitHub failure never fails the move.
+          yield* githubService.syncStateFromLexa(task.id, column.githubState).pipe(
+            Effect.catchTag("GithubApiError", (e) => Effect.logWarning(`[GitHub] sync failed for task ${task.id}`, e))
+          );
+        }
         return formatTask(task);
       }))
     )
@@ -1770,6 +1790,30 @@ const tasksLive = HttpApiBuilder.group(LexaApi, "tasks", (handlers) =>
       respond(Effect.gen(function* () {
         const taskService = yield* TaskService;
         const task = yield* taskService.restore(req.path.id);
+        return formatTask(task);
+      }))
+    )
+    .handle("linkGithubIssue", (req) =>
+      respond(Effect.gen(function* () {
+        const projectService = yield* ProjectService;
+        const taskService = yield* TaskService;
+        const githubService = yield* GitHubService;
+        yield* projectService.findBySlug(req.path.slug);
+        yield* githubService.createLinkedIssue(req.path.id, req.payload.repo);
+        const task = yield* taskService.getById(req.path.id);
+        return formatTask(task);
+      }))
+    )
+    .handle("unlinkGithubIssue", (req) =>
+      respond(Effect.gen(function* () {
+        const projectService = yield* ProjectService;
+        const taskService = yield* TaskService;
+        const taskRepo = yield* TaskRepo;
+        yield* projectService.findBySlug(req.path.slug);
+        yield* taskService.getById(req.path.id);
+        // Does NOT close or delete the GitHub issue.
+        yield* taskRepo.unlinkGithubIssue(req.path.id, req.path.issueId);
+        const task = yield* taskService.getById(req.path.id);
         return formatTask(task);
       }))
     )
@@ -2066,23 +2110,7 @@ export function createApiHandler(dbPath: string) {
   db.exec("PRAGMA foreign_keys = ON");
   const dbLayer = Layer.succeed(Sqlite, db);
 
-  const serviceLayer = Layer.mergeAll(
-    ProjectRepo.Default, ProjectService.Default,
-    ColumnRepo.Default, ColumnService.Default,
-    SwimlaneRepo.Default, SwimlaneService.Default,
-    TaskRepo.Default, TaskService.Default,
-    FieldConfigRepo.Default, FieldConfigService.Default,
-    ForgeRepo.Default, ForgeService.Default,
-    RuntimeEventRepo.Default, RuntimeEventService.Default,
-    RuntimeMachineRepo.Default, RuntimeMachineService.Default,
-    SourceRepo.Default, SourceService.Default,
-    TaskLinkRepo.Default, TaskLinkService.Default,
-    WikiRepo.Default, WikiService.Default,
-    ApiKeyRepo.Default, ApiKeyService.Default,
-    UserRepo.Default, UserService.Default,
-    UserProjectRoleRepo.Default, UserProjectRoleService.Default,
-    DashboardService.Default,
-  );
+  const serviceLayer = buildServiceLayer();
   const handlerLayer = Layer.mergeAll(
     healthLive, setupLive, projectsLive, columnsLive, swimlanesLive, fieldConfigLive, forgeLive, taskLinksLive, tasksLive, boardLive, wikiLive, apiKeysLive, adminLive, dashboardLive,
   ).pipe(Layer.provide(Layer.provide(serviceLayer, Layer.mergeAll(dbLayer, LoggerLayer))), Layer.provide(dbLayer));
@@ -2101,5 +2129,73 @@ export function createApiHandler(dbPath: string) {
       console.log(JSON.stringify({ level: "ERROR", service: "http", method: req.method, path: url.pathname, status: 500, duration: Date.now() - start, timestamp: new Date().toISOString(), error: e.message, stack: e.stack }));
       return new Response(JSON.stringify({ error: { code: "INTERNAL", message: e.message } }), { status: 500, headers: { "Content-Type": "application/json" } });
     }
+  };
+}
+
+function buildServiceLayer() {
+  return Layer.mergeAll(
+    ProjectRepo.Default, ProjectService.Default,
+    ColumnRepo.Default, ColumnService.Default,
+    SwimlaneRepo.Default, SwimlaneService.Default,
+    TaskRepo.Default, TaskService.Default,
+    FieldConfigRepo.Default, FieldConfigService.Default,
+    ForgeRepo.Default, ForgeService.Default,
+    RuntimeEventRepo.Default, RuntimeEventService.Default,
+    RuntimeMachineRepo.Default, RuntimeMachineService.Default,
+    SourceRepo.Default, SourceService.Default,
+    TaskLinkRepo.Default, TaskLinkService.Default,
+    WikiRepo.Default, WikiService.Default,
+    ApiKeyRepo.Default, ApiKeyService.Default,
+    UserRepo.Default, UserService.Default,
+    UserProjectRoleRepo.Default, UserProjectRoleService.Default,
+    WebhookEventRepo.Default,
+    GitHubClient.Default, GitHubService.Default,
+    DashboardService.Default,
+  );
+}
+
+// Webhook route — OUTSIDE the HttpApi app (HttpApi reads the body before
+// handlers; HMAC verification needs the RAW body). Verifies the signature
+// before parsing, acks 200 immediately, processes in the background (Bun has
+// no waitUntil — ack first, then fire-and-forget).
+export function createWebhookHandler(dbPath: string): (req: Request) => Promise<Response> {
+  const db = new Database(dbPath);
+  db.exec("PRAGMA journal_mode = WAL");
+  db.exec("PRAGMA foreign_keys = ON");
+  const runtime = ManagedRuntime.make(
+    Layer.provideMerge(
+      buildServiceLayer(),
+      Layer.mergeAll(Layer.succeed(Sqlite, db), LoggerLayer),
+    )
+  );
+
+  return async (req: Request) => {
+    const rawBody = await req.arrayBuffer();
+    const signature = req.headers.get("x-hub-signature-256");
+    const valid = await runtime.runPromise(
+      Effect.gen(function* () {
+        const client = yield* GitHubClient;
+        return yield* client.verifyWebhookSignature(rawBody, signature);
+      })
+    );
+    if (!valid) {
+      return new Response(
+        JSON.stringify({ error: { code: "GITHUB_WEBHOOK_ERROR", message: "Invalid signature" } }),
+        { status: 401, headers: { "Content-Type": "application/json" } }
+      );
+    }
+
+    const deliveryId = req.headers.get("x-github-delivery") ?? "";
+    const event = req.headers.get("x-github-event") ?? "";
+
+    const processing = Effect.gen(function* () {
+      const service = yield* GitHubService;
+      const payload = JSON.parse(new TextDecoder().decode(rawBody)) as Record<string, unknown>;
+      yield* service.handleWebhook(deliveryId, event, payload as any);
+    });
+    runtime.runPromise(processing).catch((e) => {
+      console.error(`[Webhook] processing failed delivery=${deliveryId} event=${event}:`, e);
+    });
+    return new Response(JSON.stringify({ ok: true }), { status: 200, headers: { "Content-Type": "application/json" } });
   };
 }

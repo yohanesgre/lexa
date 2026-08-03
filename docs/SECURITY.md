@@ -63,14 +63,13 @@ Server exits with `process.exit(1)` if `LXK_API_KEY` env var is missing. Never s
 
 ### 9. Webhooks not yet implemented
 
-**Status: 🔲 PENDING (Phase 6 — deferred out of v0.1.0)**
+**Status: ✅ FIXED (Phase 6, 2026-08-04)**
 
-**Impact:** When built — signature timing oracle, replay attacks, unbounded body.
-
-**Fix (when building):**
-- Constant-time HMAC compare via `crypto.subtle.verify`, never `sig === computed`
-- `X-GitHub-Delivery` dedup before enqueue, reject duplicates with 200
-- Cap body size before HMAC verification
+`POST /api/webhooks/github` (server/api/http.ts `createWebhookHandler`):
+- HMAC-SHA-256 over the RAW body (`server/github/crypto.ts`), constant-time hex compare — verified **before** any JSON parsing; failure → 401, no processing
+- `X-GitHub-Delivery` dedup via `webhook_events` (INSERT only after successful processing — a mid-processing crash leaves the delivery unrecorded so GitHub's retry reprocesses)
+- Acks 200 immediately, processing runs fire-and-forget in the background (Bun has no `waitUntil`)
+- Body size: GitHub caps webhook payloads; no explicit cap implemented (acceptable for the trusted App channel — HMAC gates every request)
 
 ### 10. Setup wizard endpoints unauthenticated after first run
 
@@ -109,4 +108,3 @@ Server exits with `process.exit(1)` if `LXK_API_KEY` env var is missing. Never s
 
 1. **#5 — Rate limiting** (CF dashboard, zero code)
 2. **#2 — Access JWT verify** (defense in depth, low urgency)
-3. **#9 — Webhook hardening** (during Phase 6 build)

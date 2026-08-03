@@ -41,12 +41,17 @@ swimlanes (per project, ordered)
 │
 tasks
 ├── id, column_id, swimlane_id (nullable), project_id
-├── title, description (TipTap JSON), priority, type (feature|bug|task|asset)
-├── assignee (freeform string)
+├── title, description (TipTap JSON), priority, type (option ids — field-config)
+├── assignee (freeform string), archived_at (soft archive)
 ├── position (fractional-index key, UNIQUE per column)
-├── github_issue_id (UNIQUE), github_issue_number, github_repo ("owner/name")
-├── github_synced_state (last known issue state — echo suppression)
 └── timestamps
+│
+task_github_issues (junction — one task ↔ many issues, one per repo)
+├── task_id, issue_id (GitHub node_id, UNIQUE per task), issue_number, repo ("owner/name")
+└── synced_state (last known issue state — per-issue echo suppression)
+│
+task_links (subtask_of / blocked_by / related_to)
+└── id, project_id, from_task_id, to_task_id, relation
 │
 wiki_pages (nested)
 ├── id, title, slug (UNIQUE per project), content (TipTap JSON)
@@ -56,10 +61,10 @@ wiki_pages (nested)
 │
 api_keys                        webhook_events
 ├── id, name, key_hash (SHA-256) ├── delivery_id (X-GitHub-Delivery, PK)
-└── timestamps                   └── received_at (pruned >7 days via Cron)
+└── timestamps                   └── received_at (pruned >7 days at boot)
 ```
 
-**Cut from v1:** labels (2 tables, 3 routes, 2 MCP tools) — `tasks.type` covers game-dev categorization. Subtasks (`parent_id`) — flat tasks; breakdown lives in the description checklist. Column policies `restrict_roles`/`min_time` — unenforceable without roles/timestamps (see REVIEW.md 🔴 #5).
+**Cut from v1:** labels (2 tables, 3 routes, 2 MCP tools) — `tasks.type` covers game-dev categorization. Subtasks (`parent_id`) were cut, then re-added as `task_links` relations (`subtask_of` with column inheritance + cycle guard — see REVIEW.md 🔴 #5). Column policies `restrict_roles`/`min_time` — unenforceable without roles/timestamps (see REVIEW.md 🔴 #5).
 
 ## Auth
 
@@ -174,13 +179,13 @@ Move in Lexa → syncStateFromLexa() → GitHub issue closed
 ```
 
 1. `webhook_events` dedups on `X-GitHub-Delivery` (at-least-once delivery).
-2. Webhook acks 200 immediately; processing in `ctx.waitUntil` (GitHub's 10s timeout).
-3. Echo suppression via `github_synced_state` comparison.
+2. Webhook acks 200 immediately; processing in the background (Bun has no `waitUntil` — ack first, then fire-and-forget on a shared Effect runtime; GitHub's 10s timeout is respected by the immediate ack).
+3. Echo suppression via per-link `synced_state` comparison (`task_github_issues.synced_state` — one row per linked issue).
 4. Webhook column lookup by `github_state` mapping — **never by name** (renaming "Done" can't break sync).
-5. Webhook-driven moves bypass WIP limits and required_fields (`bypassGuards: true`) — robots ≠ humans.
+5. Webhook-driven moves bypass WIP limits and required_fields (`bypassGuards: true`) — robots ≠ humans; archived tasks are never moved.
 6. `move()` early-returns on no-op (same column, no reposition).
-7. One task ↔ one issue: `UNIQUE(github_issue_id)` + already-linked guard.
-8. Failed Lexa→GitHub sync diverges by design (best-effort, no retry queue). The UI surfaces it: a linked task shows "out of sync" when `github_synced_state` ≠ its column's `github_state`. Manual re-move resyncs.
+7. One task ↔ many issues (junction table), one per repo: duplicate repo links rejected (already-linked guard). Per-issue `UNIQUE(task_id, issue_id)`.
+8. Failed Lexa→GitHub sync diverges by design (best-effort, no retry queue). The UI surfaces it: a linked task shows "out of sync" when `synced_state` ≠ its column's `github_state`. Manual re-move resyncs.
 
 ### Trust boundary (explicit decision)
 Anyone with issue-triage permission on a linked repo can trigger webhook-driven board moves (close/reopen an issue → card moves, bypassing WIP and required_fields). This is intentional — GitHub is the source of truth for issue state (see sync matrix). On public repos, external contributors can affect the board; if that becomes a problem, the mitigation is restricting the App to private repos or filtering webhook senders — not more auth code.
