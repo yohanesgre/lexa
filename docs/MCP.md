@@ -6,8 +6,8 @@
 
 | Concern | Value |
 |---------|-------|
-| Endpoint | `https://<worker-host>/mcp` |
-| Protocol | MCP over **Streamable HTTP**, **stateless mode** (no session persistence — each request self-contained; fits Workers) |
+| Endpoint | `https://<host>/mcp` (Bun server behind the cloudflared tunnel) |
+| Protocol | MCP over **Streamable HTTP**, **stateless mode** (no session persistence — each request self-contained) |
 | Auth | `Authorization: Bearer lxk_<base62(32B)>` — same keys as REST. Keys are full read/write (no scopes — single-agent trust model, documented) |
 | Access bypass | `/mcp` is on a Cloudflare Access **bypass** policy — Bearer key is the only auth on this route |
 
@@ -188,9 +188,6 @@ Output: { results: [{ title, slug, snippet }] }
 ```
 
 ### GitHub
-
-> ⚠ **Not implemented in v0.1.0 — stubs.** Both tools below return a
-> not-implemented error until the two-way GitHub sync ships (Phase 6).
 
 **`link_github_issue`**
 ```json

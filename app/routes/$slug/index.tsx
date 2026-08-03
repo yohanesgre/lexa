@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useState } from "react";
-import { useBoard, useMoveTask, useUpdateTask, useCreateTask, useDeleteTask, useArchiveTask, useRestoreTask } from "../../lib/queries";
+import { useBoard, useMoveTask, useUpdateTask, useCreateTask, useDeleteTask, useArchiveTask, useRestoreTask, useLinkGithubIssue, useUnlinkGithubIssue } from "../../lib/queries";
 import { useToast } from "../../components/ui/Toast";
 import { KanbanBoard } from "../../components/kanban/KanbanBoard";
 import type { MoveTarget } from "../../components/kanban/KanbanBoard";
@@ -27,6 +27,8 @@ function BoardPage() {
   const deleteTask = useDeleteTask(slug);
   const archiveTask = useArchiveTask(slug);
   const restoreTask = useRestoreTask(slug);
+  const linkGithubIssue = useLinkGithubIssue(slug);
+  const unlinkGithubIssue = useUnlinkGithubIssue(slug);
 
   const [createTarget, setCreateTarget] = useState<{ columnId: string; swimlaneId: string } | null>(null);
 
@@ -93,6 +95,16 @@ function BoardPage() {
     } catch {
       // error toast comes from the mutation
     }
+  };
+
+  const handleLinkGithub = async (id: string, repo: string) => {
+    const task = await linkGithubIssue.mutateAsync({ id, repo });
+    const linked = task.githubs.find((g) => g.repo === repo);
+    return linked ? { repo: linked.repo, issueNumber: linked.issueNumber } : null;
+  };
+
+  const handleUnlinkGithub = async (id: string, issueId: string) => {
+    await unlinkGithubIssue.mutateAsync({ id, issueId });
   };
 
   const handleSelectTask = (task: Task) => {
@@ -179,6 +191,8 @@ function BoardPage() {
           onDelete={handleDelete}
           onArchive={handleArchive}
           onRestore={handleRestore}
+          onLinkGithub={handleLinkGithub}
+          onUnlinkGithub={handleUnlinkGithub}
           onCreate={handleCreate}
         />
       )}

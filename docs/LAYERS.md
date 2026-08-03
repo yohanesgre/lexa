@@ -39,17 +39,23 @@
 export class Sqlite extends Context.Tag("Lexa/Sqlite")<Sqlite, Database>() {}
 export const initSqlite = (dbPath: string) => Layer.succeed(Sqlite, new Database(dbPath));
 
-// GitHub App credentials from env vars (LXK/GITHUB_* in .env / docker-compose)
+// GitHub App credentials from env vars (LXK/GITHUB_* in .env / docker-compose).
+// GITHUB_PRIVATE_KEY: inline PEM (escaped \n) OR GITHUB_PRIVATE_KEY_FILE: path
+// to a .pem file (read at boot — no escaping needed). Inline wins if both set.
 export class GitHubConfig extends Context.Tag("GitHubConfig")<GitHubConfig, {
   readonly appId: string;
-  readonly privateKey: string;      // PEM, for JWT signing
+  readonly privateKey: string;      // PEM, for JWT signing (PKCS#1 or PKCS#8 — normalized internally)
   readonly webhookSecret: string;   // for HMAC-SHA-256 verification
 }>() {}
 
 // GitHub API client. Installation tokens are cached ~50min (1h TTL minus
 // margin) keyed by installation id — never minted per call. The cache lives
 // in MODULE scope (outside the per-request Effect layer) — a per-request
-// layer would mint a fresh token on every request.
+// layer would mint a fresh token on every request. Per-repo installation
+// resolution is cached the same way (Map<repo, installationId>).
+// IMPORTANT: GitHub App keys are PKCS#1 ("BEGIN RSA PRIVATE KEY"); Web Crypto
+// importKey("pkcs8") only accepts PKCS#8 — normalize via node:crypto
+// createPrivateKey().export({type:"pkcs8",format:"der"}) before importKey.
 export class GitHubClient extends Effect.Service<GitHubClient>()("GitHubClient", {
   effect: Effect.gen(function* () {
     const config = yield* GitHubConfig;
@@ -60,7 +66,7 @@ export class GitHubClient extends Effect.Service<GitHubClient>()("GitHubClient",
       getIssue: (repo: string, issueNumber: number) => ...,
       // HMAC-SHA-256 over the RAW request body, compared against the
       // X-Hub-Signature-256 header with constant-time comparison
-      // (node:crypto createHmac — Bun runtime).
+      // (Web Crypto subtle.verify/importKey — pure, testable outside bun).
       // Runs BEFORE any JSON parsing. Failure → 401, no processing.
       verifyWebhookSignature: (rawBody: ArrayBuffer, signatureHeader: string) => ...,
     };
@@ -280,7 +286,8 @@ export class TaskService extends Effect.Service<TaskService>()("TaskService", {
 ### GitHubService — depends on TaskService (webhook direction only)
 
 ```typescript
-export class GitHubService extends Effect.Service<GitHubService>()("GitHubService", {
+export class GitHubService extends Effect.Service<GitHubService>()("Lexa/GitHubService", {
+  dependencies: [GitHubClient.Default, WebhookEventRepo.Default, TaskRepo.Default, TaskService.Default, ColumnRepo.Default],
   effect: Effect.gen(function* () {
     const client = yield* GitHubClient;
     const webhookEvents = yield* WebhookEventRepo;
@@ -290,23 +297,28 @@ export class GitHubService extends Effect.Service<GitHubService>()("GitHubServic
 
     return {
       // ---- Lexa → GitHub (called by ROUTES after a successful move) ----
-      // Pushes state, then records what we pushed so the resulting webhook
-      // echo is recognized and skipped.
+      // Pushes state per linked issue, then records what we pushed so the
+      // resulting webhook echo is recognized and skipped. Multi-issue:
+      // Task.githubs is the junction table (task_github_issues), one link
+      // per repo per task.
       syncStateFromLexa: (taskId: string, columnGithubState: "open" | "closed") =>
         Effect.gen(function* () {
           const task = yield* taskRepo.findById(taskId);
-          if (!task.githubIssueId || !task.githubIssueNumber || !task.githubRepo) return;
-          // repo comes from the TASK's stored "owner/name" (captured at link
-          // time) — never parsed out of an html_url, never assumed to be
-          // project.github_repo
-          yield* client.updateIssueState(task.githubRepo, task.githubIssueNumber, columnGithubState);
-          yield* taskRepo.setGithubSyncedState(taskId, columnGithubState);
+          for (const issue of task.githubs) {
+            // repo comes from the STORED link ("owner/name" captured at link
+            // time) — never parsed out of an html_url, never assumed to be
+            // project.github_repo
+            yield* client.updateIssueState(issue.repo, issue.issueNumber, columnGithubState);
+            yield* taskRepo.setGithubSyncedState(taskId, issue.issueId, columnGithubState);
+          }
         }),
 
       // ---- GitHub → Lexa (webhook processing) ----
-      // Runs inside ctx.waitUntil — the route acks GitHub immediately (200)
-      // to stay under GitHub's 10s timeout and avoid retry amplification.
-      handleWebhook: (deliveryId: string, event: string, payload: any) =>
+      // The route acks GitHub immediately (200) to stay under GitHub's 10s
+      // timeout and avoid retry amplification. Bun has no waitUntil — the
+      // handler acks first, then runs the Effect fire-and-forget on a shared
+      // ManagedRuntime.
+      handleWebhook: (deliveryId: string, event: string, payload: { action?: string; issue?: { node_id?: string; title?: string } }) =>
         Effect.gen(function* () {
           // 1. Cheap pre-check; the authoritative recordDelivery happens AFTER
           //    successful processing — a mid-processing failure must leave the
@@ -315,24 +327,34 @@ export class GitHubService extends Effect.Service<GitHubService>()("GitHubServic
           //    overwrite), so duplicate processing is safe.
           if (yield* webhookEvents.isSeen(deliveryId)) return;
 
-          // 2. Only state transitions and title edits are handled.
-          //    (issues.labeled dropped — no label feature anymore.)
-          if (event !== "issues.closed" && event !== "issues.reopened" && event !== "issues.edited")
+          // 2. GitHub sends X-GitHub-Event "issues" with the transition in
+          //    payload.action (closed/reopened/edited) — compose the
+          //    "issues.<action>" form. (issues.labeled dropped — no label
+          //    feature anymore.)
+          const action = payload.action ?? "";
+          if (event !== "issues" || (action !== "closed" && action !== "reopened" && action !== "edited"))
             return;
+          const nodeId = payload.issue?.node_id;
+          if (!nodeId) return;
 
-          const task = yield* taskRepo.findByGithubIssue(payload.issue.node_id);
+          const task = yield* taskRepo.findByGithubIssue(nodeId).pipe(
+            Effect.catchTag("RowNotFound", () => Effect.succeed(null))
+          );
           if (!task) return;                                   // issue not linked to any task
 
-          if (event === "issues.edited") {
+          if (action === "edited") {
             // Title sync is GitHub → Lexa only (documented asymmetry).
-            yield* taskRepo.update(task.id, { title: payload.issue.title });
+            const title = payload.issue?.title;
+            if (title) yield* taskRepo.update(task.id, { title });
             return;
           }
 
-          const incomingState = event === "issues.closed" ? "closed" : "open";
+          const incomingState = action === "closed" ? "closed" : "open";
 
-          // 3. ECHO SUPPRESSION: we already pushed this exact state → skip.
-          if (task.githubSyncedState === incomingState) return;
+          // 3. ECHO SUPPRESSION (per link): we already pushed this exact
+          //    state → skip.
+          const link = task.githubs.find((g) => g.issueId === nodeId);
+          if (link && link.syncedState === incomingState) return;
 
           // 4. Column lookup by explicit mapping — never by name
           //    (renaming "Done" → "Shipped" can't break sync).
@@ -342,29 +364,32 @@ export class GitHubService extends Effect.Service<GitHubService>()("GitHubServic
 
           // 5. Webhook moves bypass WIP limits and required_fields
           //    (log-and-skip semantics: robots ≠ humans). Move + synced-state
-          //    write execute as ONE SQLite transaction (batch helper) — atomic.
-          yield* taskService.moveFromWebhook(task.id, target.id, incomingState);
+          //    write execute as ONE SQLite transaction (batch helper) —
+          //    atomic. Archived tasks are never moved (archived-guard).
+          yield* taskService.moveFromWebhook(nodeId, target.id, incomingState);
 
           // 6. Record delivery only AFTER success (see step 1).
           yield* webhookEvents.recordDelivery(deliveryId);
         }),
 
-      // One task ↔ one issue: guard against double-linking.
+      // Create a GitHub issue from a task and link it. One task can hold
+      // multiple issues but only one per repo — duplicate repo links are
+      // rejected (ALREADY_LINKED).
       createLinkedIssue: (taskId: string, repo: string) =>
         Effect.gen(function* () {
           const task = yield* taskRepo.findById(taskId);
-          if (task.githubIssueId)
+          if (task.githubs.some((g) => g.repo === repo))
             return yield* new GithubIssueAlreadyLinked({ taskId });
           const issue = yield* client.createIssue(repo, task.title, extractText(task.description));
           yield* taskRepo.setGithubLink(taskId, {
-            issueId: issue.node_id,
+            issueId: issue.nodeId,
             issueNumber: issue.number,
             repo,                       // stored "owner/name" — used by all future syncs
           });
+          return { issueId: issue.nodeId, issueNumber: issue.number, repo };
         }),
     };
   }),
-  dependencies: [/* GitHubClient, WebhookEventRepo, TaskRepo, TaskService, ColumnRepo */],
 }) {}
 ```
 
@@ -377,7 +402,7 @@ export class AuthService extends Effect.Service<AuthService>()("AuthService", {
     return {
       // HUMANS: deployment sits behind Cloudflare Access. Access enforces
       // the identity policy (email allowlist / GitHub org) BEFORE requests
-      // reach the Worker. The Worker only reads the trusted header for
+      // reach the server. The server only reads the trusted header for
       // identity display. No OAuth code, no sessions, no CSRF surface.
       identityFromAccess: (headers: Headers) =>
         Effect.succeed(headers.get("Cf-Access-Authenticated-User-Email")),
@@ -421,7 +446,7 @@ const moveHandler = (req) =>
   Effect.gen(function* () {
     const task = yield* TaskService.move(req.params.id, req.payload);
     const column = yield* ColumnService.getById(req.payload.columnId);
-    if (column.githubState && task.githubIssueId) {
+    if (column.githubState && task.githubs.length > 0) {
       // Best-effort, non-blocking: a GitHub failure never fails the move.
       yield* GitHubService.syncStateFromLexa(task.id, column.githubState).pipe(
         Effect.catchTag("GithubApiError", (e) => Effect.logWarning("sync failed", e)));
@@ -430,11 +455,11 @@ const moveHandler = (req) =>
   });
 ```
 
-The webhook route is exempt from API-key middleware and verifies `X-Hub-Signature-256` (HMAC-SHA-256, raw body, constant-time) before parsing; acks 200 immediately and processes via `ctx.waitUntil`.
+The webhook route is exempt from API-key middleware and verifies `X-Hub-Signature-256` (HMAC-SHA-256, raw body, constant-time) before parsing; acks 200 immediately and processes in the background (Bun has no `waitUntil` — the handler returns the ack, then runs the Effect fire-and-forget on a shared `ManagedRuntime`; `webhook_events` pruned at boot, >7 days).
 
 ## Pagination
 
-All list endpoints and MCP `list_*`/`search_*` tools: `?limit` (default 50, max 200) + cursor (opaque: `"<columnId>:<position>:<taskId>"` for tasks). Unbounded lists would blow the MCP context window and Worker memory.
+All list endpoints and MCP `list_*`/`search_*` tools: `?limit` (default 50, max 200) + cursor (opaque: `"<columnId>:<position>:<taskId>"` for tasks). Unbounded lists would blow the MCP context window and server memory.
 
 ## TaggedErrors Catalog (v2)
 

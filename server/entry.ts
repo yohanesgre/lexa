@@ -3,7 +3,7 @@ import { mkdirSync, existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { createHash, randomBytes } from "node:crypto";
 import { Database } from "bun:sqlite";
-import { createApiHandler } from "./api/http";
+import { createApiHandler, createWebhookHandler } from "./api/http";
 import { createMcpHandler } from "./mcp/server";
 import { verifyApiKey } from "./api/auth-key";
 import { findOrCreateUser } from "./api/auth";
@@ -23,6 +23,7 @@ const DATABASE_PATH = process.env.DATABASE_PATH || "/app/data/lexa.db";
 mkdirSync(dirname(DATABASE_PATH), { recursive: true });
 
 runMigrations(DATABASE_PATH);
+pruneWebhookEvents(DATABASE_PATH);
 seedAdminKey(DATABASE_PATH);
 // Sample data is the setup wizard's job (CLI `bun run setup` or web `/setup`).
 // Boot-time seeding only for explicit dev opt-in (LXK_SEED_DEV=1).
@@ -33,6 +34,7 @@ if (process.env.LXK_SEED_DEV === "1") {
 const apiHandlerRaw = createApiHandler(DATABASE_PATH) as unknown as { handler?: (req: Request) => Promise<Response> } | ((req: Request) => Promise<Response>);
 const apiHandler: (req: Request) => Promise<Response> = typeof apiHandlerRaw === "function" ? apiHandlerRaw : apiHandlerRaw.handler!;
 const mcpHandler = createMcpHandler(DATABASE_PATH);
+const webhookHandler = createWebhookHandler(DATABASE_PATH);
 
 function withSecurityHeaders(res: Response): Response {
   res.headers.set("X-Content-Type-Options", "nosniff");
@@ -50,6 +52,11 @@ Bun.serve({
     }
 
     if (url.pathname.startsWith("/api/")) {
+      // GitHub webhook: HMAC-SHA-256 is the auth (no API-key middleware),
+      // signature verified over the RAW body before any parsing.
+      if (url.pathname === "/api/webhooks/github") {
+        return withSecurityHeaders(await webhookHandler(req));
+      }
       const isSetup = url.pathname.startsWith("/api/setup");
       const isHealth = url.pathname === "/api/health";
       const isForgeDaemon = url.pathname.startsWith("/api/forge/daemon/") || url.pathname.startsWith("/api/forge/runtimes/");
@@ -132,6 +139,15 @@ Bun.serve({
 });
 
 console.log(`Lexa running on http://0.0.0.0:${PORT}`);
+
+function pruneWebhookEvents(dbPath: string) {
+  const db = new Database(dbPath);
+  try {
+    db.exec("DELETE FROM webhook_events WHERE received_at < datetime('now', '-7 days')");
+  } finally {
+    db.close();
+  }
+}
 
 function seedAdminKey(dbPath: string) {
   const db = new Database(dbPath);

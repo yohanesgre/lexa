@@ -1,8 +1,9 @@
 import { Effect } from "effect";
+import { GitHubService } from "../../services/github.service";
 
 export const tool = {
   name: "link_github_issue",
-  description: "Create a GitHub issue from a task and link it. Supports multiple issues per task. STUB — GitHub integration not yet available.",
+  description: "Create a GitHub issue from a task and link it. Supports multiple issues per task (one per repo).",
   inputSchema: {
     type: "object",
     properties: {
@@ -11,13 +12,13 @@ export const tool = {
     },
     required: ["taskId", "repo"],
   },
-  handler: (_args: any) =>
-    Effect.succeed({
-      isError: true,
-      error: {
-        code: "NOT_IMPLEMENTED",
-        message: "GitHub integration not yet available",
-        details: {},
-      },
+  handler: (args: any) =>
+    Effect.gen(function* () {
+      const githubService = yield* GitHubService;
+      const linked = yield* githubService.createLinkedIssue(args.taskId, args.repo);
+      return {
+        issueNumber: linked.issueNumber,
+        url: `https://github.com/${linked.repo}/issues/${linked.issueNumber}`,
+      };
     }),
 };
