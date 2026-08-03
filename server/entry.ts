@@ -10,6 +10,7 @@ import { findOrCreateUser } from "./api/auth";
 
 let ssrFetch: ((req: Request) => Promise<Response>) | null = null;
 try {
+  // @ts-expect-error built artifact (vite build emits dist/server/server.js); typed at the cast below
   const mod = await import("../dist/server/server.js");
   ssrFetch = (mod as any).default?.fetch ?? (mod as any).fetch ?? null;
 } catch {
@@ -33,13 +34,19 @@ const apiHandlerRaw = createApiHandler(DATABASE_PATH) as unknown as { handler?: 
 const apiHandler: (req: Request) => Promise<Response> = typeof apiHandlerRaw === "function" ? apiHandlerRaw : apiHandlerRaw.handler!;
 const mcpHandler = createMcpHandler(DATABASE_PATH);
 
+function withSecurityHeaders(res: Response): Response {
+  res.headers.set("X-Content-Type-Options", "nosniff");
+  res.headers.set("Cache-Control", "no-store");
+  return res;
+}
+
 Bun.serve({
   port: PORT,
   async fetch(req) {
     const url = new URL(req.url);
 
     if (url.pathname === "/mcp") {
-      return mcpHandler(req);
+      return withSecurityHeaders(await mcpHandler(req));
     }
 
     if (url.pathname.startsWith("/api/")) {
@@ -52,13 +59,13 @@ Bun.serve({
         ? req.headers.get("x-forge-token") === process.env.LXK_FORGE_DAEMON_TOKEN
         : false;
       if (!isHealth && !isSetup && !daemonTokenOk && !verifyApiKey(req, DATABASE_PATH)) {
-        return new Response(JSON.stringify({ error: { code: "UNAUTHORIZED", message: "Invalid or missing API key" } }), { status: 401, headers: { "Content-Type": "application/json" } });
+        return withSecurityHeaders(new Response(JSON.stringify({ error: { code: "UNAUTHORIZED", message: "Invalid or missing API key" } }), { status: 401, headers: { "Content-Type": "application/json" } }));
       }
       try {
-        return await apiHandler(req);
+        return withSecurityHeaders(await apiHandler(req));
       } catch (err) {
         console.error("[API] Uncaught:", err);
-        return new Response(JSON.stringify({ error: { code: "INTERNAL", message: err instanceof Error ? err.message : String(err) } }), { status: 500, headers: { "Content-Type": "application/json" } });
+        return withSecurityHeaders(new Response(JSON.stringify({ error: { code: "INTERNAL", message: err instanceof Error ? err.message : String(err) } }), { status: 500, headers: { "Content-Type": "application/json" } }));
       }
     }
 

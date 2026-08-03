@@ -56,7 +56,7 @@ All design and spec docs live in [`docs/`](docs/):
 | [`docs/DESIGN_SYSTEM.md`](docs/DESIGN_SYSTEM.md) | PHOSPHOR design tokens and component specs |
 | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | Big picture and decisions log |
 | [`docs/REVIEW.md`](docs/REVIEW.md) | Historical design-review record |
-| [`docs/BACKLOG.md`](docs/BACKLOG.md) | Backlog of completed/pending work |
+| [`docs/RELEASE.md`](docs/RELEASE.md) | v0.1.0 release plan and verification gates |
 | [`docs/SECURITY.md`](docs/SECURITY.md) | Security model |
 
 `wireframes/` holds the static UI/UX source of truth (HTML previews — `bash wireframes/build.sh` rebuilds them). `AGENTS.md` is the agent rules file used by AI coding agents working on this repo.

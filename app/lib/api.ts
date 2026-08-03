@@ -60,6 +60,10 @@ export function seedSampleData(): Promise<{ seeded: boolean }> {
   return request(`${BASE}/setup/seed`, { method: "POST" });
 }
 
+export function completeSetup(): Promise<{ ok: boolean }> {
+  return request(`${BASE}/setup/complete`, { method: "POST" });
+}
+
 export function getDashboard(): Promise<Dashboard> {
   return request(`${BASE}/dashboard`);
 }

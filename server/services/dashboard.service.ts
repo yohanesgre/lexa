@@ -3,6 +3,7 @@ import { ProjectRepo } from "../repos/project.repo";
 import { ColumnRepo } from "../repos/column.repo";
 import { TaskRepo } from "../repos/task.repo";
 import type { Dashboard } from "../../shared/types";
+import { DbError } from "../db/database";
 
 export class DashboardService extends Effect.Service<DashboardService>()("Lexa/DashboardService", {
   dependencies: [ProjectRepo.Default, ColumnRepo.Default, TaskRepo.Default],
@@ -12,7 +13,7 @@ export class DashboardService extends Effect.Service<DashboardService>()("Lexa/D
     const taskRepo = yield* TaskRepo;
 
     return {
-      getDashboard: (): Effect.Effect<Dashboard> =>
+      getDashboard: (): Effect.Effect<Dashboard, DbError> =>
         Effect.gen(function* () {
           const projects = yield* projectRepo.list();
 
