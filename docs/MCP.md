@@ -189,6 +189,9 @@ Output: { results: [{ title, slug, snippet }] }
 
 ### GitHub
 
+> ⚠ **Not implemented in v0.1.0 — stubs.** Both tools below return a
+> not-implemented error until the two-way GitHub sync ships (Phase 6).
+
 **`link_github_issue`**
 ```json
 Input:  { taskId*, repo* }        repo = "owner/name" — creates a GitHub issue from the task

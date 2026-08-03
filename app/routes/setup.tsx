@@ -1,7 +1,7 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { Check, Copy, KeyRound, Mail, Database, ArrowRight, ArrowLeft, Sparkles } from "lucide-react";
 import { useEffect, useState } from "react";
-import { getSetupStatus, setSetupAdmin, createSetupApiKey, seedSampleData, type SetupStatus } from "../lib/api";
+import { getSetupStatus, setSetupAdmin, createSetupApiKey, seedSampleData, completeSetup, type SetupStatus } from "../lib/api";
 import { copyToClipboard } from "../lib/clipboard";
 import { cn } from "../components/ui/cn";
 
@@ -82,6 +82,7 @@ function SetupWizard() {
       if (seed) {
         await seedSampleData().catch(() => {});
       }
+      await completeSetup().catch(() => {});
       setStep(3);
     } finally {
       setBusy(false);

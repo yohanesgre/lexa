@@ -4,6 +4,7 @@ import { UserRepo } from "../repos/user.repo";
 import { ProjectRepo } from "../repos/project.repo";
 import { DbError, RowNotFound, ConstraintViolation } from "../db/database";
 import { UserNotFound } from "./user.service";
+import type { UserProjectRoleRow } from "../../shared/db";
 
 export class ProjectAccessDenied extends Data.TaggedError("ProjectAccessDenied")<{ project: string; role: string }> {}
 export class ProjectNotFound extends Data.TaggedError("ProjectNotFound")<{ identifier: string }> {}

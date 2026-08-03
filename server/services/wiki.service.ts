@@ -2,7 +2,7 @@ import { Effect } from "effect";
 import { WikiRepo } from "../repos/wiki.repo";
 import { ProjectRepo } from "../repos/project.repo";
 import { ConstraintViolation, DbError, RowNotFound } from "../db/database";
-import { ProjectNotFound, WikiPageNotFound, SlugTaken, HasChildren } from "../api/errors";
+import { ProjectNotFound, WikiPageNotFound, SlugTaken, HasChildren, SearchError } from "../api/errors";
 import type { WikiPage, WikiPageMeta, WikiPageRevision, WikiPageRevisionSummary } from "../../shared/types";
 import type { TipTapDoc } from "../../shared/types";
 import { extractText } from "../../shared/tiptap-text";
@@ -18,7 +18,7 @@ export class WikiService extends Effect.Service<WikiService>()("Lexa/WikiService
 
     const validateProject = (projectId: string) =>
       projectRepo.findById(projectId).pipe(
-        Effect.catchTag("RowNotFound", () => new ProjectNotFound({ identifier: projectId }))
+        Effect.catchTag("RowNotFound", () => Effect.fail(new ProjectNotFound({ identifier: projectId })))
       );
 
     return {
@@ -85,10 +85,16 @@ export class WikiService extends Effect.Service<WikiService>()("Lexa/WikiService
         projectId: string,
         query: string,
         limit?: number
-      ): Effect.Effect<(WikiPage & { snippet: string })[], ProjectNotFound | DbError> =>
+      ): Effect.Effect<(WikiPage & { snippet: string })[], ProjectNotFound | DbError | SearchError> =>
         Effect.gen(function* () {
           yield* validateProject(projectId);
-          return yield* repo.search(projectId, query, limit);
+          // FTS5 operator syntax (quotes, NEAR/, unbalanced parens) makes
+          // SQLite throw — map to a generic 422 instead of leaking a 500.
+          return yield* Effect.catchTag(
+            repo.search(projectId, query, limit),
+            "DbError",
+            () => Effect.fail(new SearchError())
+          );
         }),
 
       update: (

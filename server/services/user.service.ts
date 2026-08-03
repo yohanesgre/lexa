@@ -10,6 +10,7 @@ export class UserService extends Effect.Service<UserService>()("Lexa/UserService
   dependencies: [UserRepo.Default],
   effect: Effect.gen(function* () {
     const repo = yield* UserRepo;
+    const cannotDeleteSelf: Effect.Effect<never, CannotDeleteSelf> = Effect.fail(new CannotDeleteSelf());
 
     return {
       list: (): Effect.Effect<UserRow[], DbError> => repo.listAll(),
@@ -19,7 +20,7 @@ export class UserService extends Effect.Service<UserService>()("Lexa/UserService
           Effect.catchTag("RowNotFound", () => Effect.fail(new UserNotFound({ id })))
         ),
 
-      promoteToAdmin: (id: string): Effect.Effect<void, DbError | UserNotFound | ConstraintViolation> =>
+      promoteToAdmin: (id: string): Effect.Effect<void, DbError | RowNotFound | UserNotFound | ConstraintViolation> =>
         Effect.gen(function* () {
           yield* repo.findById(id).pipe(
             Effect.catchTag("RowNotFound", () => Effect.fail(new UserNotFound({ id })))
@@ -27,9 +28,12 @@ export class UserService extends Effect.Service<UserService>()("Lexa/UserService
           yield* repo.updateRole(id, "admin");
         }),
 
-      demoteToMember: (id: string, currentUserId: string): Effect.Effect<void, DbError | UserNotFound | ConstraintViolation | CannotDeleteSelf> =>
+      demoteToMember: (id: string, currentUserId: string): Effect.Effect<void, DbError | RowNotFound | UserNotFound | ConstraintViolation | CannotDeleteSelf> =>
         Effect.gen(function* () {
-          if (id === currentUserId) return yield* Effect.fail(new CannotDeleteSelf({}));
+          if (id === currentUserId) {
+            yield* cannotDeleteSelf;
+            return;
+          }
           yield* repo.findById(id).pipe(
             Effect.catchTag("RowNotFound", () => Effect.fail(new UserNotFound({ id })))
           );

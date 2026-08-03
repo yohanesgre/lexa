@@ -20,6 +20,8 @@ export class MissingAuth extends Data.TaggedError("MissingAuth")<{}> {}
 export class GithubApiError extends Data.TaggedError("GithubApiError")<{ message: string }> {}
 export class GithubWebhookError extends Data.TaggedError("GithubWebhookError")<{ message: string }> {}
 export class Forbidden extends Data.TaggedError("Forbidden")<{ message: string }> {}
+export class SetupLocked extends Data.TaggedError("SetupLocked")<{}> {}
+export class SearchError extends Data.TaggedError("SearchError")<{}> {}
 export class SourceNotFound extends Data.TaggedError("SourceNotFound")<{ id: string }> {}
 export class SourceFetchError extends Data.TaggedError("SourceFetchError")<{ message: string }> {}
 export class SourceUnreachable extends Data.TaggedError("SourceUnreachable")<{ url: string }> {}
@@ -78,6 +80,8 @@ export const errorCodeMap: Record<string, string> = {
   UserNotFound: "USER_NOT_FOUND",
   CannotDeleteSelf: "CANNOT_DELETE_SELF",
   Forbidden: "FORBIDDEN",
+  SetupLocked: "SETUP_LOCKED",
+  SearchError: "SEARCH_ERROR",
   ConstraintViolation: "CONSTRAINT",
   DbError: "DATABASE_ERROR",
 };
@@ -89,6 +93,7 @@ export function errorToStatus(error: { _tag: string }): number {
     case "CannotDeleteSelf":
     case "ProjectAccessDenied":
     case "Forbidden":
+    case "SetupLocked":
       return 403;
     case "TaskNotFound":
     case "ProjectNotFound":
@@ -120,6 +125,7 @@ export function errorToStatus(error: { _tag: string }): number {
     case "InvalidOption":
     case "InvalidTaskLink":
     case "ForgeBuiltinDelete":
+    case "SearchError":
       return 422;
     case "InvalidKey":
     case "MissingAuth":
@@ -209,6 +215,11 @@ export function errorMessage(error: { _tag: string } & Record<string, unknown>):
     case "ProjectAccessDenied":
       return `Access denied to project '${error.project}'`;
     case "Forbidden":
+      return "Admin role required";
+    case "SetupLocked":
+      return "Setup is already complete — the wizard only runs on first install";
+    case "SearchError":
+      return "Search query is invalid — try simpler terms";
     case "GithubApiError":
     case "GithubWebhookError":
     case "DbError":

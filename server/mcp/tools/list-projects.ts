@@ -23,7 +23,7 @@ export const tool = {
           return { projects: [] };
         }
         const roleRepo = yield* UserProjectRoleRepo;
-        const mappings = yield* roleRepo.findByUser(auth.userId);
+        const mappings = yield* roleRepo.findByUserId(auth.userId);
         const allowedProjectIds = new Set(mappings.map((m) => m.project_id));
         visibleProjects = projects.filter((p) => allowedProjectIds.has(p.id));
       }

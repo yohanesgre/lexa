@@ -167,7 +167,7 @@ async function main() {
   console.log("                   Google Cloud → OAuth consent screen, and to the");
   console.log("                   CF Access allow policy.");
   console.log("");
-  console.log("  MCP (optional):  bash scripts/mcp/install.sh");
+  console.log("  MCP (optional):  point your agent at https://<host>/mcp with an lxk_ API key");
 }
 
 main().catch((e) => {

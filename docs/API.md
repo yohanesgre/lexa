@@ -2,6 +2,8 @@
 
 > Derived from ARCHITECTURE.md (v2.1) routes and LAYERS.md (v2.1) services. This is the frontend↔backend contract. For the agent-facing contract see MCP.md.
 
+> ⚠ **Not implemented in v0.1.0 — planned:** the two-way GitHub sync (`POST/DELETE /api/projects/:slug/tasks/:id/github-link`, `POST /api/webhooks/github`, and the `Task.githubs` / `githubOutOfSync` fields). The endpoints below are the planned contract; they 404 until the feature ships (Phase 6). The MCP `link_github_issue`/`unlink_github_issue` tools are stubs for the same reason.
+
 ## Conventions
 
 | Concern | Convention |
@@ -438,7 +440,7 @@ Notes:
 - `PATCH /projects/:slug/tasks/:id` and `POST /projects/:slug/tasks` accept
   priority/type as option IDs; unknown or foreign-project IDs → `INVALID_OPTION`.
 
-### Task ↔ GitHub link
+### Task ↔ GitHub link (planned — not implemented in v0.1.0)
 
 ```
 POST   /api/projects/:slug/tasks/:id/github-link
@@ -493,7 +495,7 @@ DELETE /api/settings/api-keys/:id
 → 204 | 404
 ```
 
-### GitHub Webhook (no API-key middleware)
+### GitHub Webhook (planned — not implemented in v0.1.0; no API-key middleware)
 
 ```
 POST   /api/webhooks/github
