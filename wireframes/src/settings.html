@@ -98,20 +98,26 @@
       </div>
     </section>
 
-    <!-- Forge Runtimes (global) -->
+    <!-- Agent Runtimes (global) -->
     <section class="mb-8">
       <div class="flex items-center justify-between mb-3">
-        <h2 class="font-display text-lg weight-500 color-primary">Forge Runtimes</h2>
-        <span class="annotation-tag">Global scope</span>
+        <h2 class="font-display text-lg weight-500 color-primary">Agent Runtimes</h2>
+        <div class="flex items-center gap-2">
+          <span class="annotation-tag">Global scope</span>
+          <button class="btn btn-primary" style="height:28px;padding:0 12px;font-size:12px;">
+            <INCLUDE _plus-icon.html />
+            Setup runtime
+          </button>
+        </div>
       </div>
       <p class="text-sm color-secondary mb-4" style="max-width:560px;">
-        Machines running the Forge daemon (AI writing assistant). The daemon spawns the installed agent CLI (opencode / hermes) when a Forge task is queued.
+        Machines running the Forge daemon (AI writing assistant). The listener owns daemon children and reports installed agent/model catalogs. Provider/model, agent, and logging are configured from each completed runtime row.
       </p>
 
       <div style="background:var(--lx-surface-card);border:1px solid var(--lx-border-default);border-radius:8px;overflow:hidden;">
         <table class="settings-table">
           <thead>
-            <tr><th>Name</th><th>Provider</th><th>Hostname</th><th>Status</th><th>Last seen</th></tr>
+            <tr><th>Name</th><th>CLI</th><th>Model</th><th>Hostname</th><th>Status</th><th>MCP</th><th>Last seen</th><th></th></tr>
           </thead>
           <tbody>
             <tr>
@@ -122,9 +128,20 @@
                 </div>
               </td>
               <td class="text-xs color-secondary">opencode</td>
+              <td class="font-mono text-xs color-secondary">opencode/deepseek-v4-flash</td>
               <td class="font-mono text-xs color-secondary">yohanes-mbp.local</td>
               <td><span class="flex items-center gap-2"><span class="sync-dot sync-synced"></span><span class="font-micro text-2xs color-success" style="text-transform:uppercase;letter-spacing:0.04em;">Online</span></span></td>
+              <td><span class="font-micro text-2xs color-success" style="text-transform:uppercase;letter-spacing:0.04em;">Connected</span></td>
               <td class="text-xs color-secondary">just now</td>
+              <td style="text-align:right;white-space:nowrap;">
+                <button class="btn btn-ghost" style="width:28px;height:28px;padding:0;font-size:12px;" aria-label="Edit runtime">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>
+                </button>
+                <button class="btn btn-danger" style="width:28px;height:28px;padding:0;font-size:12px;">
+                  <INCLUDE _trash-icon.html />
+                </button>
+                <span class="annotation-inline" style="margin-left:4px;">gear opens edit modal; trash removes the runtime (confirm dialog)</span>
+              </td>
             </tr>
             <tr>
               <td>
@@ -133,10 +150,24 @@
                   <span class="text-sm weight-500">staging-box</span>
                 </div>
               </td>
-              <td class="text-xs color-secondary">hermes</td>
+              <td class="text-xs color-secondary">command-code</td>
+              <td class="font-mono text-xs color-secondary">claude-sonnet-4-5</td>
               <td class="font-mono text-xs color-secondary">box01</td>
               <td><span class="flex items-center gap-2"><span class="sync-dot sync-unlinked"></span><span class="font-micro text-2xs color-muted" style="text-transform:uppercase;letter-spacing:0.04em;">Offline</span></span></td>
+              <td><span class="font-micro text-2xs color-muted" style="text-transform:uppercase;letter-spacing:0.04em;">Not set</span></td>
               <td class="text-xs color-secondary">3 hours ago</td>
+              <td style="text-align:right;white-space:nowrap;">
+                <button class="btn btn-ghost" style="width:28px;height:28px;padding:0;font-size:12px;" aria-label="Restart runtime" title="Restart guide">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M21 12a9 9 0 1 1-3-6.7"/><path d="M21 3v6h-6"/></svg>
+                </button>
+                <button class="btn btn-ghost" style="width:28px;height:28px;padding:0;font-size:12px;" aria-label="Edit runtime">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>
+                </button>
+                <button class="btn btn-danger" disabled style="width:28px;height:28px;padding:0;font-size:12px;opacity:.45;">
+                  <INCLUDE _trash-icon.html />
+                </button>
+                <span class="annotation-inline" style="margin-left:4px;">Offline rows add restart guidance. Remove stays disabled until the machine listener is online; offline rows are never auto-removed.</span>
+              </td>
             </tr>
           </tbody>
         </table>
@@ -146,10 +177,14 @@
       <div class="empty-box mt-4" style="padding:24px;">
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="color:var(--lx-text-muted);"><rect x="4" y="4" width="16" height="16" rx="2"/><rect x="9" y="9" width="6" height="6"/></svg>
         <div class="text-sm weight-500 color-primary">No runtimes yet</div>
-        <p class="text-xs color-secondary" style="max-width:360px;">Start the Forge daemon on a machine with opencode or hermes installed:</p>
-        <code class="font-mono text-xs" style="background:var(--lx-surface-input);border:1px solid var(--lx-border-default);border-radius:4px;padding:6px 10px;color:var(--lx-text-secondary);margin-top:8px;display:inline-block;">bun run forge:daemon</code>
+        <p class="text-xs color-secondary" style="max-width:360px;">Connect a machine with an agent CLI installed (opencode, hermes, or command-code). Setup generates the exact env + start command.</p>
+        <button class="btn btn-primary" style="margin-top:10px;">
+          <INCLUDE _plus-icon.html />
+          Setup runtime
+        </button>
       </div>
-      <span class="annotation-tag mt-2 mb-4">Read-only: daemons self-register + heartbeat. Remove is intentionally not offered (a live daemon re-registers on its next poll).</span>
+      <span class="annotation-tag mt-2 mb-4">Table: the machine listener owns daemon children; runtime rows self-register + heartbeat. Agent CLI + hostname + status are telemetry. Model + agent + logging + extra args are server-authoritative config: the gear opens settings-runtime-edit.html and applies on the next Forge task. Remove is explicit and online-only: the server queues a remove event, deletes the row, and the listener kills the matching child + env directory. Setup opens settings-runtime-setup.html.</span>
+      <span class="annotation-tag mt-1 mb-4">MCP column: informational — the daemon verifies its Lexa MCP connection (initialize+ping against /mcp) on every heartbeat and reports mcp_connected. Forge tasks do NOT require it (the daemon runs the agent CLI directly with the prompt as context); MCP is the surface for cloud agents. "Not set" is fine for Forge-only runtimes.</span>
     </section>
 
     <!-- Admins (app scope) -->

@@ -1,0 +1,608 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Lexa Plan — Agents + Skills for Forge</title>
+<style>
+  :root {
+    --bg: #0f0f13;
+    --bg-elev: #14141a;
+    --card: #17171d;
+    --card-2: #1c1c24;
+    --border: #26262f;
+    --border-2: #32323d;
+    --text: #e8e8ee;
+    --text-2: #a2a2b0;
+    --text-3: #6f6f7c;
+    --link: #7c93ff;
+    --success: #4ade80;
+    --warn: #f0c040;
+    --danger: #f87171;
+    --purple: #b48cff;
+    --cyan: #5eead4;
+    --font-body: system-ui, -apple-system, "Segoe UI", sans-serif;
+    --font-mono: ui-monospace, "SF Mono", "Cascadia Code", Menlo, monospace;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--font-body);
+    -webkit-font-smoothing: antialiased;
+    line-height: 1.6;
+  }
+  .stage { max-width: 900px; margin: 0 auto; padding: 64px 32px 120px; }
+
+  /* ── header ── */
+  .kicker {
+    font-family: var(--font-mono); font-size: 12px; letter-spacing: .14em;
+    text-transform: uppercase; color: var(--link); margin-bottom: 14px;
+  }
+  h1 { font-size: 40px; line-height: 1.15; font-weight: 650; letter-spacing: -.02em; margin-bottom: 12px; }
+  .lede { font-size: 16px; line-height: 1.65; color: var(--text-2); max-width: 780px; }
+  .lede b { color: var(--text); font-weight: 600; }
+  .meta { display: flex; gap: 10px; align-items: center; margin-top: 18px; flex-wrap: wrap; }
+
+  /* ── tags ── */
+  .tag {
+    display: inline-block; font-family: var(--font-mono); font-size: 10.5px;
+    letter-spacing: .06em; text-transform: uppercase; border-radius: 4px;
+    padding: 3px 10px; border: 1px solid var(--border-2); color: var(--text-2);
+  }
+  .tag.blue { color: var(--link); border-color: rgba(124,147,255,.4); }
+  .tag.green { color: var(--success); border-color: rgba(74,222,128,.4); }
+  .tag.amber { color: var(--warn); border-color: rgba(240,192,64,.4); }
+  .tag.purple { color: var(--purple); border-color: rgba(180,140,255,.4); }
+  .tag.red { color: var(--danger); border-color: rgba(248,113,113,.4); }
+  .tag.cyan { color: var(--cyan); border-color: rgba(94,234,212,.4); }
+
+  /* ── sections ── */
+  section { margin-top: 64px; }
+  .sec-head { display: flex; align-items: baseline; gap: 12px; margin-bottom: 18px; }
+  .sec-num {
+    font-family: var(--font-mono); font-size: 13px; color: var(--link);
+    flex-shrink: 0;
+  }
+  h2 { font-size: 22px; font-weight: 650; letter-spacing: -.01em; }
+
+  h3 { font-size: 15px; font-weight: 600; margin: 22px 0 10px; color: var(--text); }
+  h3 .sub { color: var(--text-3); font-family: var(--font-mono); font-size: 12px; font-weight: 400; }
+
+  p { font-size: 14.5px; color: var(--text-2); margin: 8px 0; }
+  p b { color: var(--text); font-weight: 600; }
+  .muted { color: var(--text-3); }
+  .accent { color: var(--link); }
+  .ok { color: var(--success); }
+  .warnc { color: var(--warn); }
+  .bad { color: var(--danger); }
+  .mono { font-family: var(--font-mono); }
+
+  code {
+    font-family: var(--font-mono); font-size: .88em;
+    background: var(--card-2); border: 1px solid var(--border);
+    border-radius: 5px; padding: 1px 6px; color: var(--cyan);
+  }
+  pre.code {
+    font-family: var(--font-mono); font-size: 13px; line-height: 1.7;
+    background: var(--bg-elev); border: 1px solid var(--border);
+    border-radius: 10px; padding: 18px 20px; color: var(--text-2);
+    white-space: pre; overflow-x: auto; margin: 12px 0;
+  }
+  pre.code .c { color: var(--text-3); }
+  pre.code .k { color: var(--link); }
+  pre.code .g { color: var(--success); }
+
+  /* ── cards ── */
+  .card {
+    background: var(--card); border: 1px solid var(--border);
+    border-radius: 10px; padding: 18px 20px;
+  }
+  .card h3 { font-size: 15px; font-weight: 600; margin-bottom: 8px; }
+  .card p, .card li { font-size: 13.5px; line-height: 1.6; color: var(--text-2); }
+  .card ul { list-style: none; }
+  .card li { padding-left: 16px; position: relative; margin-bottom: 6px; }
+  .card li::before { content: "▸"; position: absolute; left: 0; color: var(--link); }
+
+  .grid { display: grid; gap: 14px; }
+  .grid.cols-2 { grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); }
+  .grid.cols-3 { grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); }
+
+  /* ── tables ── */
+  .tbl-wrap { border: 1px solid var(--border); border-radius: 10px; overflow: hidden; margin: 12px 0; }
+  table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+  thead { background: var(--bg-elev); }
+  th {
+    font-family: var(--font-mono); font-size: 11px; letter-spacing: .06em;
+    text-transform: uppercase; color: var(--text-3); font-weight: 600;
+    text-align: left; padding: 10px 16px; border-bottom: 1px solid var(--border);
+  }
+  td { padding: 11px 16px; border-bottom: 1px solid var(--border); color: var(--text-2); vertical-align: top; }
+  tbody tr:last-child td { border-bottom: none; }
+  td:first-child { color: var(--text); white-space: nowrap; }
+  td code { white-space: nowrap; }
+  tbody tr:hover { background: rgba(124,147,255,.03); }
+
+  /* ── stepper / pills ── */
+  .stepper { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin: 12px 0; }
+  .pill {
+    display: flex; align-items: center; gap: 7px; border-radius: 7px;
+    padding: 7px 12px; font-size: 13px; border: 1px solid var(--border-2);
+    background: var(--card); color: var(--text-2);
+  }
+  .pill .dn { font-family: var(--font-mono); font-size: 11px; color: var(--text-3); }
+  .pill.done { border-color: rgba(74,222,128,.4); color: var(--text); }
+  .pill.done .dn { color: var(--success); }
+  .pill.cur { border-color: var(--link); color: var(--text); background: rgba(124,147,255,.08); }
+  .pill.cur .dn { color: var(--link); }
+  .pill.gate { border-color: rgba(240,192,64,.45); }
+  .pill.gate .dn { color: var(--warn); }
+  .conn { color: var(--text-3); font-size: 12px; }
+
+  /* ── flow graphs ── */
+  .flow { display: flex; flex-direction: column; }
+  .flow-node {
+    display: flex; align-items: center; gap: 12px;
+    background: var(--card); border: 1px solid var(--border-2);
+    border-radius: 8px; padding: 10px 14px;
+  }
+  .flow-node .ic {
+    font-family: var(--font-mono); font-size: 10.5px; letter-spacing: .04em;
+    width: 30px; height: 30px; border-radius: 7px; flex-shrink: 0;
+    display: grid; place-items: center; font-weight: 700;
+  }
+  .flow-node .t { font-size: 13px; font-weight: 600; }
+  .flow-node .s { font-family: var(--font-mono); font-size: 11px; color: var(--text-3); margin-top: 2px; line-height: 1.5; }
+  .flow-node.dmn { border-color: rgba(74,222,128,.4); }
+  .flow-node.dmn .ic { background: rgba(74,222,128,.12); color: var(--success); }
+  .flow-node.cli { border-color: rgba(94,234,212,.4); }
+  .flow-node.cli .ic { background: rgba(94,234,212,.12); color: var(--cyan); }
+  .flow-node.srv { border-color: rgba(180,140,255,.4); }
+  .flow-node.srv .ic { background: rgba(180,140,255,.12); color: var(--purple); }
+  .flow-node.warn { border-color: rgba(240,192,64,.45); }
+  .flow-node.warn .ic { background: rgba(240,192,64,.12); color: var(--warn); }
+  .flow-node.hl { border-color: var(--link); background: rgba(124,147,255,.06); }
+  .flow-node.hl .ic { background: rgba(124,147,255,.15); color: var(--link); }
+  .flow-arrow { display: flex; justify-content: center; color: var(--text-3); font-size: 11px; padding: 3px 0; }
+  .flow-branch {
+    margin-left: 20px; padding-left: 18px; border-left: 1px dashed var(--border-2);
+    display: flex; flex-direction: column;
+  }
+  .flow-branch .flow-node { margin-top: 8px; }
+  .flow-loop {
+    border: 1px dashed var(--border-2); border-radius: 8px;
+    padding: 8px 14px; margin-top: 10px; margin-left: 20px;
+  }
+  .flow-loop .lt {
+    font-family: var(--font-mono); font-size: 10px; letter-spacing: .1em;
+    text-transform: uppercase; color: var(--text-3); margin-bottom: 5px;
+  }
+  .flow-legend { display: flex; gap: 14px; flex-wrap: wrap; margin: 10px 0 4px; }
+  .flow-legend span { font-family: var(--font-mono); font-size: 11px; color: var(--text-3); }
+  .flow-legend .dmn { color: var(--success); }
+  .flow-legend .cli { color: var(--cyan); }
+  .flow-legend .srv { color: var(--purple); }
+  .flow-legend .warn { color: var(--warn); }
+
+  /* ── sequence ── */
+  .seq { display: flex; flex-direction: column; margin: 16px 0; border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
+  .seq-lanes { display: flex; background: var(--bg-elev); border-bottom: 1px solid var(--border); }
+  .seq-lane {
+    flex: 1; font-size: 11.5px; font-weight: 600; padding: 10px 8px;
+    text-align: center; font-family: var(--font-mono); letter-spacing: .04em;
+  }
+  .seq-lane.wiz { color: var(--link); }
+  .seq-lane.srv { color: var(--purple); }
+  .seq-lane.cli { color: var(--cyan); }
+  .seq-lane.dmn { color: var(--success); }
+  .seq-body { background: var(--card); }
+  .seq-msg { padding: 8px 18px; font-size: 12.5px; line-height: 1.55; color: var(--text-2); position: relative; }
+  .seq-msg + .seq-msg { border-top: 1px solid var(--border); }
+  .seq-msg .from { font-family: var(--font-mono); font-size: 10.5px; color: var(--text-3); margin-right: 8px; letter-spacing: .04em; }
+  .seq-msg b { color: var(--text); font-weight: 600; }
+  .seq-msg .sync { color: var(--success); }
+  .seq-msg .mem { color: var(--warn); }
+
+  /* ── checklist ── */
+  .checks { list-style: none; }
+  .checks li {
+    display: flex; gap: 12px; align-items: flex-start;
+    background: var(--card); border: 1px solid var(--border);
+    border-radius: 8px; padding: 12px 16px; margin-bottom: 8px;
+    font-size: 13.5px; color: var(--text-2);
+  }
+  .checks .ck { color: var(--link); font-family: var(--font-mono); flex-shrink: 0; margin-top: 1px; }
+
+  /* ── callout ── */
+  .callout {
+    border: 1px solid rgba(240,192,64,.35); background: rgba(240,192,64,.05);
+    border-radius: 8px; padding: 12px 16px; font-size: 13.5px; color: var(--text-2); margin: 12px 0;
+  }
+  .callout b { color: var(--warn); }
+
+  footer { margin-top: 80px; padding-top: 24px; border-top: 1px solid var(--border); font-size: 12px; color: var(--text-3); font-family: var(--font-mono); }
+</style>
+</head>
+<body>
+<div class="stage">
+
+  <!-- ── header ── -->
+  <div class="kicker">Lexa · Design Plan</div>
+  <h1>Agents + Skills for Forge</h1>
+  <p class="lede">
+    Forge prompt management: named <b>agent</b> rule bundles, <b>skill</b> operations, and
+    <b>claim-carried delivery</b> — the server hands each task's rules to the daemon inside the claim
+    response. The host keeps no store, so it can never drift.
+  </p>
+  <div class="meta">
+    <span class="tag green">Status · Final</span>
+    <span class="tag blue">docs/plan-agents-skills.html</span>
+    <span class="tag cyan">No sync layer</span>
+    <span class="tag purple">Wireframes first</span>
+    <span class="tag amber">No scope creep</span>
+  </div>
+
+  <!-- ── concept ── -->
+  <section>
+    <div class="sec-head"><span class="sec-num">§0</span><h2>Concept</h2></div>
+    <div class="grid cols-3">
+      <div class="card">
+        <h3>Agent</h3>
+        <ul>
+          <li>Named rule bundle: <code>name</code>, <code>description</code> <span class="muted">(display-only, never reaches the agent)</span>, <code>instructions</code></li>
+          <li>Builtin <b class="ok">Lexa</b> (default) + custom, admin-created</li>
+          <li><b>Global</b> — not project-scoped</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h3>Skill</h3>
+        <ul>
+          <li>Named operation bundle, same shape</li>
+          <li>Builtins: <b>Continue · Rewrite · Summarize · Expand · Fix grammar</b> <span class="muted">(seeded from <code>ACTION_PROMPTS</code>)</span></li>
+          <li>Custom, admin-created · <b>Global</b></li>
+        </ul>
+      </div>
+      <div class="card">
+        <h3>Binding</h3>
+        <ul>
+          <li>Many-to-many via <code>forge_agent_skills</code></li>
+          <li>Seed: Lexa ↔ all 5 builtins</li>
+          <li>Custom agents start empty</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h3>Popover</h3>
+        <ul>
+          <li>Agent chips <span class="muted">(default Lexa)</span> → dependent Skill chips</li>
+          <li>Runtime picker per task · Additional prompt textarea per run</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h3>Delivery</h3>
+        <ul>
+          <li>Rules ride the <b>claim response</b>: <code>agentMarkdown</code> + <code>skillMarkdown</code></li>
+          <li>Daemon writes them into the run dir; CLI reads them natively</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h3>Freshness</h3>
+        <ul>
+          <li>Edits apply to the <b>very next task</b> — by construction</li>
+          <li>No store, no sync, no drift, no notification states</li>
+        </ul>
+      </div>
+    </div>
+    <div class="callout">
+      <b>Accepted tradeoff:</b> hermes / command-code do not read <code>AGENTS.md</code> natively — they run
+      on task context + output contract (degraded rule fidelity). Full fidelity is for AGENTS.md-capable CLIs (opencode).
+    </div>
+    <p><b class="bad">Dropped:</b> project memory · host-side sync store, events, and sync-health notifications <span class="muted">(their failure mode — drift — no longer exists; offline hosts are already surfaced)</span> · <b class="warnc">Backlog:</b> artifacts, retention.</p>
+  </section>
+
+  <!-- ── host layout ── -->
+  <section>
+    <div class="sec-head"><span class="sec-num">§1</span><h2>Host layout</h2></div>
+    <p>Single root <code>~/.lexa/</code> (env <code>LEXA_DIR</code> override), <code>chmod 700</code>. Works on Linux + macOS (<code>os.homedir()</code>, same pattern as <code>~/.agents/</code>). <b>Everything</b> the runtime host stores lives here — config, machine identity, runtime envs, and per-run workdirs.</p>
+    <pre class="code">~/.lexa/
+├── config.json                  <span class="c">← login creds (600) · was ~/.config/lexa-cli/config.json</span>
+├── machine-id                   <span class="c">← · was ~/.config/lexa-cli/machine-id</span>
+├── env                          <span class="c">← daemon bootstrap env (600) · was ~/.config/lexa-forge/env</span>
+├── runtimes/&lt;id&gt;/env            <span class="c">← per-runtime env (600) · was ~/.config/lexa-forge/runtimes/&lt;id&gt;/env</span>
+└── runs/&lt;taskId&gt;/                <span class="c">← per-task workdir, ephemeral (cleaned after the run)</span>
+    ├── AGENTS.md                 <span class="c">← agent rules, written from the claim payload</span>
+    ├── .agents/&lt;skillId&gt;/SKILL.md <span class="c">← skill rules, written from the claim payload</span>
+    └── &lt;anything the agent writes&gt;</pre>
+    <div class="diagram">
+      <div class="box hl"><div class="t">Server claim</div><div class="s">task + prompt + agentMarkdown + skillMarkdown</div></div>
+      <span class="arrow-x">→</span>
+      <div class="box"><div class="t">Daemon</div><div class="s">writes files into run dir</div></div>
+      <span class="arrow-x">→</span>
+      <div class="box"><div class="t">Run dir</div><div class="s">~/.lexa/runs/&lt;taskId&gt;</div></div>
+      <span class="arrow-x">→</span>
+      <div class="box ok-b"><div class="t">Agent CLI</div><div class="s">cwd = run dir · native discovery</div></div>
+    </div>
+    <p class="muted">Workdir is ephemeral by design: explicit cleanup after complete / fail / cancel. The server is the single source of truth for rules — the host is stateless between runs. <code>~/.local/share/lexa-forge/</code> (listener install + systemd unit) stays where it is — installation data, not runtime state.</p>
+    <div class="callout">
+      <b>Migration — migrate and delete, no fallback.</b> On listener boot and <code>lexa-cli login</code>: if the old dirs
+      (<code>~/.config/lexa-cli/</code>, <code>~/.config/lexa-forge/</code>) exist → move their contents into <code>~/.lexa/</code>
+      (rename, same user/fs), delete the empty parents. New path wins if both exist. Migrate <b>before</b> reading config.
+      Stale-version risk accepted: old binaries recreated after migration can't see the new state — upgrade all components together.
+    </div>
+  </section>
+
+  <!-- ── migrations ── -->
+  <section>
+    <div class="sec-head"><span class="sec-num">§2</span><h2>Migrations <span class="sub">migrations/0027_forge_agents_skills.sql</span></h2></div>
+    <div class="tbl-wrap">
+      <table>
+        <thead><tr><th>Change</th><th>Detail</th></tr></thead>
+        <tbody>
+          <tr><td><code>forge_agents</code></td><td>id TEXT PK · name UNIQUE NOT NULL · description · instructions NOT NULL · is_builtin INT · timestamps — seed <b class="ok">Lexa</b></td></tr>
+          <tr><td><code>forge_skills</code></td><td>same shape — seed 5 builtins (from <code>ACTION_PROMPTS</code>, forge.service.ts:60-66)</td></tr>
+          <tr><td><code>forge_agent_skills</code></td><td>(agent_id, skill_id) PK both — seed Lexa ↔ 5</td></tr>
+          <tr><td><code>forge_tasks</code></td><td>+ <code>agent_id</code> NOT NULL · <code>skill_id</code> NOT NULL · <code>extra_prompt</code> DEFAULT '' — backfill skill from <code>action</code>, agent → 'lexa' — drop <code>action</code></td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="muted">No <code>machines</code> changes. No <code>runtime_events</code> rebuild — the <code>sync</code> action never ships.</p>
+  </section>
+
+  <!-- ── shared types ── -->
+  <section>
+    <div class="sec-head"><span class="sec-num">§3</span><h2>Shared types <span class="sub">shared/types.ts · shared/db.ts</span></h2></div>
+    <div class="grid cols-2">
+      <div class="card">
+        <h3>ForgeAgent</h3>
+        <p class="mono">id · name · description · instructions · isBuiltin · skillIds[] · createdAt · updatedAt</p>
+      </div>
+      <div class="card">
+        <h3>ForgeSkill</h3>
+        <p class="mono">id · name · description · instructions · isBuiltin · createdAt · updatedAt</p>
+      </div>
+    </div>
+    <ul style="list-style:none; margin-top:12px;" class="card">
+      <li style="padding:4px 0 4px 16px; position:relative;">▸ Drop <code>ForgeAction</code> union — keep <code>RuntimeEventAction</code> (separate concern)</li>
+      <li style="padding:4px 0 4px 16px; position:relative;">▸ <code>ForgeTask</code>: <code>action</code> → <code>agentId</code> · <code>skillId</code> · <code>extraPrompt</code>; list payloads JOIN <code>agentName</code>/<code>skillName</code></li>
+      <li style="padding:4px 0 4px 16px; position:relative;">▸ <code>shared/db.ts</code> row types + <code>rowToForgeTask</code> updated</li>
+      <li style="padding:4px 0 4px 16px; position:relative;">▸ No <code>projectSlug</code> on the claim <span class="muted">(was only needed for artifacts)</span></li>
+    </ul>
+  </section>
+
+  <!-- ── backend ── -->
+  <section>
+    <div class="sec-head"><span class="sec-num">§4</span><h2>Backend</h2></div>
+
+    <h3>Repos <span class="sub">server/repos/forge.repo.ts</span></h3>
+    <ul class="card" style="list-style:none; padding:16px 20px;">
+      <li style="padding:3px 0 3px 16px; position:relative;">▸ Agent CRUD + <code>replaceAgentSkills</code> — builtin delete refused at service layer</li>
+      <li style="padding:3px 0 3px 16px; position:relative;">▸ Skill CRUD</li>
+      <li style="padding:3px 0 3px 16px; position:relative;">▸ Task insert/select with ids + extraPrompt; recent/history JOIN names</li>
+    </ul>
+
+    <h3>Service <span class="sub">server/services/forge.service.ts</span></h3>
+    <ul class="card" style="list-style:none; padding:16px 20px;">
+      <li style="padding:3px 0 3px 16px; position:relative;">▸ <code>buildPrompt(task, agent, skill)</code>: identity + task line + doc context + sources + selection + <code>extra_prompt</code> section + pointer line + output contract — <b>no rules embedded</b></li>
+      <li style="padding:3px 0 3px 16px; position:relative;">▸ Claim assembles <code>agentMarkdown</code> (agent.instructions) + <code>skillMarkdown</code> (skill.instructions) from the task's rows</li>
+      <li style="padding:3px 0 3px 16px; position:relative;">▸ <code>AgentNotFound</code> · <code>SkillNotFound</code> → <code>server/api/errors.ts</code> (<code>AGENT_NOT_FOUND</code> / <code>SKILL_NOT_FOUND</code> + status mapping)</li>
+    </ul>
+
+    <h3>API <span class="sub">server/api/http.ts · mutations admin-gated</span></h3>
+    <div class="tbl-wrap">
+      <table>
+        <thead><tr><th>Endpoint</th><th>Purpose</th></tr></thead>
+        <tbody>
+          <tr><td><code>GET/POST /api/forge/agents</code></td><td>list / create</td></tr>
+          <tr><td><code>PATCH/DELETE /api/forge/agents/:id</code></td><td>update / delete <span class="muted">(builtin → 422)</span></td></tr>
+          <tr><td><code>PUT /api/forge/agents/:id/skills</code></td><td>full-replace bindings <code>{ skillIds }</code></td></tr>
+          <tr><td><code>GET/POST /api/forge/skills</code></td><td>list / create</td></tr>
+          <tr><td><code>PATCH/DELETE /api/forge/skills/:id</code></td><td>update / delete <span class="muted">(builtin → 422)</span></td></tr>
+          <tr><td><code>POST /api/forge/tasks</code></td><td><code>{ agentId, skillId, extraPrompt?, runtimeId?, selection }</code> — replaces <code>action</code></td></tr>
+        </tbody>
+      </table>
+    </div>
+    <ul class="card" style="list-style:none; padding:16px 20px;">
+      <li style="padding:3px 0 3px 16px; position:relative;">▸ Claim response: <code>{ task, provider, agent, model, printLogs, logLevel, extraArgs, prompt, agentMarkdown, skillMarkdown }</code></li>
+      <li style="padding:3px 0 3px 16px; position:relative;">▸ Agent/skill mutations touch nothing else — no events, no versions; the next claim is fresh by construction</li>
+      <li style="padding:3px 0 3px 16px; position:relative;">▸ Heartbeat + runtimes list unchanged from today</li>
+    </ul>
+  </section>
+
+  <!-- ── listener + daemon ── -->
+  <section>
+    <div class="sec-head"><span class="sec-num">§5</span><h2>Listener &amp; Daemon</h2></div>
+    <div class="grid cols-2">
+      <div class="card">
+        <h3>Listener <span class="sub">scripts/cli/machine.ts — unchanged from today</span></h3>
+        <ul>
+          <li>Boot: migrate old <code>~/.config/lexa-*</code> dirs into <code>~/.lexa/</code> — move, delete empty parents, no fallback</li>
+          <li>Heartbeat loop (3s): machine + agent/model catalogs</li>
+          <li>Claim machine events: <code>install</code> / <code>update</code> / <code>remove</code> — env write (<code>~/.lexa/runtimes/&lt;id&gt;/env</code>), daemon child spawn / restart / kill</li>
+          <li>No sync routine, no boot sync, no <code>syncVersion</code> — nothing new</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h3>Daemon <span class="sub">scripts/forge/daemon.ts</span></h3>
+        <ul>
+          <li>Workdir: <code>join(LEXA_DIR, "runs", task.id)</code> — replaces <code>/tmp/lexa-forge/&lt;taskId&gt;</code></li>
+          <li>Pre-spawn: write <code>AGENTS.md</code> from <code>agentMarkdown</code> + <code>.agents/&lt;skillId&gt;/SKILL.md</code> from <code>skillMarkdown</code> — no fetch, no gap-fill</li>
+          <li>Explicit <b>cleanup</b> of the run dir after complete / fail / cancel</li>
+          <li>Prompt per §4 — context + output contract + pointer line</li>
+          <li>Runs serialized in poll loop (daemon.ts:213-229) → seeding race-free</li>
+        </ul>
+      </div>
+    </div>
+
+    <h3>Flow — listener</h3>
+    <div class="flow">
+      <div class="flow-node cli hl"><div class="ic">GO</div><div><div class="t">lexa-cli machine listen — start</div><div class="s">migrate old .config dirs → ~/.lexa (migrate-and-delete, no fallback) · read ~/.lexa/config.json + machine-id · register machine</div></div></div>
+      <div class="flow-arrow">▼</div>
+      <div class="flow-node cli srv"><div class="ic">HBT</div><div><div class="t">Heartbeat loop · 3s</div><div class="s">machine + agent/model catalogs → POST /api/forge/runtime-listeners/heartbeat</div></div></div>
+      <div class="flow-arrow">▼</div>
+      <div class="flow-node cli warn"><div class="ic">CLAIM</div><div><div class="t">Event loop</div><div class="s">GET /api/forge/runtime-events/claim — events persist server-side while the machine is offline</div></div></div>
+      <div class="flow-branch">
+        <div class="flow-node cli srv"><div class="ic">CFG</div><div><div class="t">event = install · update</div><div class="s">write ~/.lexa/runtimes/&lt;id&gt;/env → spawn / restart daemon child</div></div></div>
+        <div class="flow-node cli srv"><div class="ic">DEL</div><div><div class="t">event = remove</div><div class="s">kill daemon child + delete its env dir</div></div></div>
+        <div class="flow-node cli"><div class="ic">IDL</div><div><div class="t">event = none</div><div class="s">sleep → re-claim</div></div></div>
+      </div>
+      <div class="flow-loop"><div class="lt">⟳ loop back to claim</div><div class="s muted" style="font-family:var(--font-mono);font-size:11px;">listener owns one daemon child per runtime · heartbeats keep flowing during idle · no rule content ever touches this process</div></div>
+    </div>
+
+    <h3>Flow — daemon <span class="sub">one child per runtime, spawned by the listener</span></h3>
+    <div class="flow">
+      <div class="flow-node dmn hl"><div class="ic">GO</div><div><div class="t">forge daemon — start</div><div class="s">env from ~/.lexa/runtimes/&lt;id&gt;/env (bootstrap fallback ~/.lexa/env) · provider/model/extra args server-authoritative</div></div></div>
+      <div class="flow-arrow">▼</div>
+      <div class="flow-node dmn srv"><div class="ic">REG</div><div><div class="t">Register runtime</div><div class="s">POST /api/forge/runtimes/register { id, name, provider, machineId, model, hostname }</div></div></div>
+      <div class="flow-arrow">▼</div>
+      <div class="flow-node dmn srv"><div class="ic">HBT</div><div><div class="t">Heartbeat loop · 15s</div><div class="s">POST /api/forge/daemon/heartbeat { runtimeId, mcpConnected } — informational</div></div></div>
+      <div class="flow-arrow">▼</div>
+      <div class="flow-node dmn warn"><div class="ic">CLAIM</div><div><div class="t">Task loop</div><div class="s">POST /api/forge/daemon/claim { runtimeId } → task + provider/agent/model/logging/extraArgs + prompt + agentMarkdown + skillMarkdown</div></div></div>
+      <div class="flow-branch">
+        <div class="flow-node dmn"><div class="ic">IDL</div><div><div class="t">task = none</div><div class="s">sleep (POLL_MS) → re-claim</div></div></div>
+        <div class="flow-node dmn"><div class="ic">SEED</div><div><div class="t">task claimed → prepare run dir</div><div class="s">mkdir ~/.lexa/runs/&lt;taskId&gt; · write AGENTS.md from agentMarkdown · write .agents/&lt;skillId&gt;/SKILL.md from skillMarkdown — no fetch, always fresh</div></div></div>
+        <div class="flow-arrow">▼</div>
+        <div class="flow-node dmn"><div class="ic">SPWN</div><div><div class="t">Spawn agent CLI</div><div class="s">cwd = run dir · env stripped of LEXA_API_KEY · opencode run --agent --model / cmd -p / hermes -p + extraArgs · detached (cancel kills the whole tree)</div></div></div>
+        <div class="flow-arrow">▼</div>
+        <div class="flow-node dmn"><div class="ic">STREAM</div><div><div class="t">Stream + report</div><div class="s">stdout ▸ / stderr [stderr] → POST /api/forge/daemon/tasks/:id/log · done → complete(result) · error → fail(error) · cancel → kill(-pid)</div></div></div>
+        <div class="flow-arrow">▼</div>
+        <div class="flow-node dmn"><div class="ic">CLN</div><div><div class="t">Cleanup</div><div class="s">rm -rf ~/.lexa/runs/&lt;taskId&gt; — ephemeral by design</div></div></div>
+      </div>
+      <div class="flow-loop"><div class="lt">⟳ loop back to claim</div><div class="s muted" style="font-family:var(--font-mono);font-size:11px;">serialized: one task at a time → seeding is race-free · next claim after the run finishes</div></div>
+    </div>
+    <div class="flow-legend">
+      <span class="cli">▣ listener</span><span class="dmn">▣ daemon</span><span class="srv">▣ server call</span><span class="warn">▣ decision</span>
+    </div>
+  </section>
+
+  <!-- ── delivery flow ── -->
+  <section>
+    <div class="sec-head"><span class="sec-num">§6</span><h2>Delivery — claim-carried rules</h2></div>
+    <div class="seq">
+      <div class="seq-lanes">
+        <div class="seq-lane wiz">DASHBOARD</div>
+        <div class="seq-lane srv">SERVER</div>
+        <div class="seq-lane dmn">DAEMON</div>
+        <div class="seq-lane cli">AGENT CLI</div>
+      </div>
+      <div class="seq-body">
+        <div class="seq-msg"><span class="from">DASH</span>edit agent / skill → <b>save</b></div>
+        <div class="seq-msg"><span class="from">SRV</span>rows updated — nothing to propagate <span class="muted">(no store, no events, no versions)</span></div>
+        <div class="seq-msg"><span class="from">DMN</span>next claim → response carries <code class="sync">agentMarkdown</code> + <code class="sync">skillMarkdown</code> built from the current rows</div>
+        <div class="seq-msg"><span class="from">DMN</span>write <code class="sync">AGENTS.md</code> + <code>.agents/&lt;skillId&gt;/SKILL.md</code> into the run dir</div>
+        <div class="seq-msg"><span class="from">CLI</span>spawned with cwd = run dir → reads rules natively (opencode)</div>
+        <div class="seq-msg"><span class="from">DMN</span>result reported → run dir cleaned up</div>
+      </div>
+    </div>
+    <p class="muted">Freshness is by construction: an edit applies to the very next task. There is no state to be out of date, so there is nothing to notify about — the only failure mode is an offline host, already surfaced in the runtimes table.</p>
+  </section>
+
+  <!-- ── frontend ── -->
+  <section>
+    <div class="sec-head"><span class="sec-num">§7</span><h2>Frontend</h2></div>
+
+    <h3>Popover — dependent pickers</h3>
+    <div class="stepper">
+      <span class="pill cur"><span class="dn">1</span>Agent chips · default Lexa</span>
+      <span class="conn">→</span>
+      <span class="pill"><span class="dn">2</span>Skill chips · attached only</span>
+      <span class="conn">→</span>
+      <span class="pill"><span class="dn">3</span>Runtime · per task</span>
+      <span class="conn">→</span>
+      <span class="pill gate"><span class="dn">4</span>Additional prompt · per run</span>
+      <span class="conn">→</span>
+      <span class="pill done"><span class="dn">5</span>Generate</span>
+    </div>
+    <ul class="card" style="list-style:none; padding:16px 20px;">
+      <li style="padding:3px 0 3px 16px; position:relative;">▸ Skill chips reset on agent change; default = first attached → Continue; &gt;6 per row → dropdown</li>
+      <li style="padding:3px 0 3px 16px; position:relative;">▸ Empty-skills agent: hint "No skills attached — add them in Settings" + Generate disabled</li>
+      <li style="padding:3px 0 3px 16px; position:relative;">▸ Additional prompt textarea (~3 rows), cleared on close</li>
+      <li style="padding:3px 0 3px 16px; position:relative;">▸ Pass <code>agentId</code>/<code>skillId</code>/<code>extraPrompt</code> to createForgeTask</li>
+    </ul>
+
+    <h3>Surfaces</h3>
+    <div class="grid cols-3">
+      <div class="card">
+        <h3>Control panel</h3>
+        <p>"All actions" → <b>"All skills"</b> filter; rows show skill name; detail pane shows agent + skill.</p>
+      </div>
+      <div class="card">
+        <h3>Status / log / banner</h3>
+        <p><code>ForgeStatus</code> · <code>ForgeTaskLogModal</code> · <code>ReviewBanner</code>: action labels → skill/agent names.</p>
+      </div>
+      <div class="card">
+        <h3>Runtimes table</h3>
+        <p>Unchanged from today — no Sync column. Offline is the only runtime signal that exists.</p>
+      </div>
+    </div>
+
+    <h3>Settings — Agents + Skills</h3>
+    <ul class="card" style="list-style:none; padding:16px 20px;">
+      <li style="padding:3px 0 3px 16px; position:relative;">▸ Tables: name · description · builtin badge · updated — + editor modal (<code>PromptEditorModal.tsx</code>)</li>
+      <li style="padding:3px 0 3px 16px; position:relative;">▸ Editor: name · description · mono instructions textarea · file-preview ("written to the run dir at claim time" + rendered content) · builtin <b class="ok">Reset to default</b> / custom <b class="bad">Delete</b></li>
+      <li style="padding:3px 0 3px 16px; position:relative;">▸ Agent modal: attached-skills checkboxes · Skill modal: read-only "Used by"</li>
+      <li style="padding:3px 0 3px 16px; position:relative;">▸ Naming fix (labels only): runtimes "Agent" → <b>"CLI"</b> · edit modal "Agent persona" → <b>"Persona"</b></li>
+    </ul>
+  </section>
+
+  <!-- ── wireframes + docs ── -->
+  <section>
+    <div class="sec-head"><span class="sec-num">§8</span><h2>Wireframes first · Docs sync</h2></div>
+    <div class="stepper">
+      <span class="pill cur"><span class="dn">1</span>settings-agents-skills.html</span>
+      <span class="conn">→</span>
+      <span class="pill"><span class="dn">2</span>settings.html · relabel</span>
+      <span class="conn">→</span>
+      <span class="pill"><span class="dn">3</span>forge-popover.html</span>
+      <span class="conn">→</span>
+      <span class="pill"><span class="dn">4</span>forge-control-panel.html</span>
+      <span class="conn">→</span>
+      <span class="pill gate"><span class="dn">5</span>bash wireframes/build.sh</span>
+    </div>
+    <p style="margin-top:14px;">Docs: <b>SCHEMA.md · API.md · DESIGN_SYSTEM.md · IMPLEMENTATION.md · BACKLOG.md · LAYERS.md</b> <span class="muted">(MCP.md untouched — Forge not in MCP)</span></p>
+  </section>
+
+  <!-- ── verification ── -->
+  <section>
+    <div class="sec-head"><span class="sec-num">§9</span><h2>Verification gates</h2></div>
+    <ul class="checks">
+      <li><span class="ck">⌁</span><span><code>tsc --noEmit</code> clean · <code>vitest run</code> clean</span></li>
+      <li><span class="ck">⌁</span><span>Migration on fresh DB + existing DB — backfill correctness (old tasks → correct skill + 'lexa' agent)</span></li>
+      <li><span class="ck">⌁</span><span>Claim carries rules: edit an agent → the next claim's <code>agentMarkdown</code> reflects it; run dir gets <code>AGENTS.md</code> + <code>.agents/&lt;skillId&gt;/SKILL.md</code></span></li>
+      <li><span class="ck">⌁</span><span>Daemon: workdir seeded from claim payload only; run dir removed after complete / fail / cancel (no leftovers)</span></li>
+      <li><span class="ck">⌁</span><span>Popover: agent switch resets skill list; empty-skills disables Generate; run uses chosen agent + skill + extraPrompt</span></li>
+      <li><span class="ck">⌁</span><span>Offline host: claim simply fails until online — no catch-up, no sync dependency</span></li>
+      <li><span class="ck">⌁</span><span>Smoke via <code>bun run dev:full</code></span></li>
+    </ul>
+  </section>
+
+  <!-- ── out of scope ── -->
+  <section>
+    <div class="sec-head"><span class="sec-num">§10</span><h2>Out of scope → BACKLOG</h2></div>
+    <div class="grid cols-2">
+      <div class="card">
+        <h3 class="warnc">Deferred</h3>
+        <ul>
+          <li><b>Artifacts</b>: run persistence + retention under <code>~/.lexa/runs/</code>, artifacts in UI</li>
+          <li>Project memory files</li>
+          <li>SKILL.md file assets/scripts (agentskills.io standard)</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h3 class="muted">Not built</h3>
+        <ul>
+          <li>Host-side sync store, sync events, sync-health notifications</li>
+          <li>Per-agent access control</li>
+          <li>Agent→runtime binding</li>
+          <li>Per-project agents/skills</li>
+          <li>Skills marketplace / autopilots / squads</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <footer>
+    LEXA · PLAN-AGENTS-SKILLS · CLAIM-CARRIED RULES · NO STORE · WIREFRAME-FIRST · tsc + vitest AT EVERY GATE
+  </footer>
+
+</div>
+</body>
+</html>

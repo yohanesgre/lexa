@@ -46,7 +46,7 @@
       </a>
       <a href="settings.html" class="project-card" style="height:auto;min-height:120px;text-decoration:none;">
         <div class="project-card-name" style="font-size:18px;">Settings</div>
-         <div class="project-card-desc">4 sections: API Keys (masked-key table, create form), Admins, Project Members (empty/populated states), Project Management (delete with confirmation).</div>
+         <div class="project-card-desc">API Keys (masked-key table, create form), Admins, Agent Runtimes (name/agent/model/hostname/status table, Setup runtime CTA), Project Members, Project Management (delete with confirmation).</div>
         <span class="annotation-tag mt-2">/$slug/settings.tsx</span>
       </a>
     </div>
@@ -247,6 +247,36 @@
         <div class="project-card-name" style="font-size:18px;">Dropdown Menu</div>
         <div class="project-card-desc">Sections, icons, Mono shortcuts, keyboard focus ring, pinned danger action.</div>
         <span class="annotation-tag mt-2">components/DropdownMenu.tsx</span>
+      </a>
+      <a href="forge-control-panel.html" class="project-card" style="height:auto;min-height:120px;text-decoration:none;">
+        <div class="project-card-name" style="font-size:18px;">Forge Control Panel</div>
+        <div class="project-card-desc">Global task history across all projects: summary strip (active/queued/done/failed/runtimes), status chips + project/action filters, task table with live rows, paginated history, detail slideover with activity feed + markdown result.</div>
+        <span class="annotation-tag mt-2">/forge.tsx</span>
+      </a>
+      <a href="forge-popover.html" class="project-card" style="height:auto;min-height:120px;text-decoration:none;">
+        <div class="project-card-name" style="font-size:18px;">Forge Popover</div>
+        <div class="project-card-desc">AI writing assistant popover: agent + skill pickers (skills attach to agents), runtime selector, per-run additional prompt, Generate, running state, result review. Accept → review in editor.</div>
+        <span class="annotation-tag mt-2">components/forge/ForgePopover.tsx</span>
+      </a>
+      <a href="forge-review.html" class="project-card" style="height:auto;min-height:120px;text-decoration:none;">
+        <div class="project-card-name" style="font-size:18px;">Forge Review in Editor</div>
+        <div class="project-card-desc">Result preview inside the editor at full width: whole-document diff, review banner with Accept/Reject, snapshot restore on reject.</div>
+        <span class="annotation-tag mt-2">components/forge/ReviewBanner.tsx</span>
+      </a>
+      <a href="settings-runtime-setup.html" class="project-card" style="height:auto;min-height:120px;text-decoration:none;">
+        <div class="project-card-name" style="font-size:18px;">Runtime Setup Modal</div>
+        <div class="project-card-desc">4-step machine-first wizard (Machine → Agent CLI → Key / Send → Verify) opened from Settings → Agent Runtimes. Completed runtimes expose listener-reported agent/model catalogs for Settings.</div>
+        <span class="annotation-tag mt-2">components/forge/RuntimeSetupModal.tsx</span>
+      </a>
+      <a href="settings-runtime-edit.html" class="project-card" style="height:auto;min-height:120px;text-decoration:none;">
+        <div class="project-card-name" style="font-size:18px;">Runtime Edit Modal</div>
+        <div class="project-card-desc">Edit config of an existing runtime from the ⋯ row action: daemon-reported identity strip, name, live provider-aware model picker (catalog from the agent, ~10 min refresh; presets fallback when offline), injectable extra CLI args list. Server-authoritative — applies on next task.</div>
+        <span class="annotation-tag mt-2">components/forge/RuntimeEditModal.tsx</span>
+      </a>
+      <a href="settings-runtime-restart.html" class="project-card" style="height:auto;min-height:120px;text-decoration:none;">
+        <div class="project-card-name" style="font-size:18px;">Runtime Restart Modal</div>
+        <div class="project-card-desc">Recovery path for an offline runtime: why it's offline, the exact restart command (manual + systemd) with this runtime's agent/model baked in, and live polling that closes when it's back online.</div>
+        <span class="annotation-tag mt-2">components/forge/RuntimeRestartModal.tsx</span>
       </a>
       <a href="page-404.html" class="project-card" style="height:auto;min-height:120px;text-decoration:none;">
         <div class="project-card-name" style="font-size:18px;">404 Page</div>

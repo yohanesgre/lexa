@@ -786,24 +786,125 @@ Add:       "Add link" field in the Links section — type @ or a title → task
 
 ### 5.9l Forge Runtimes (Settings)
 
-A read-only table on the Settings page (between API Keys and Admins), see
+A table on the Settings page (between API Keys and Admins), see
 `wireframes/settings.html`:
 
 ```
-Section:  "Forge Runtimes" (Global scope tag)
-Table:    Name | Provider | Hostname | Status | Last seen
+Section:  "Agent Runtimes" (Global scope tag)
+Table:    Name | Agent | Model | Hostname | Status | Last seen | ⋯
+Model:    mono, muted (agent model id — server-authoritative)
 Status:   online = sync-synced dot + "Online" (success green);
           offline = sync-unlinked dot + "Offline" (muted)
-Empty:    dashed box — "No runtimes yet" + `bun run forge:daemon` code hint
+CTA:      "Setup runtime" primary button (header) + empty-state CTA
+Rows:     trailing ⋯ button opens the edit modal
+Empty:    dashed box — "No runtimes yet" + setup CTA
 Refresh:  polls every 30s (runtimes self-register + heartbeat)
 ```
 
-- Read-only by design: daemons self-register and heartbeat; a live daemon
-  re-registers on its next poll, so no remove action is offered.
+- **Telemetry vs config**: agent CLI/hostname/status are daemon-reported
+  (read-only); the machine listener also reports agent and model catalogs. Model,
+  persona, logging, name and extra args are server-authoritative config,
+  editable via the ⋯ row action (edit modal, `settings-runtime-edit.html`,
+  `components/forge/RuntimeEditModal.tsx`): identity strip, name input, agent
+  picker, model picker, logging controls, and an injectable extra-args list (one token per row, mono; appended
+  verbatim to the CLI spawn — no shell). Edits apply on the daemon's next
+  claim; no restart needed.
+- **Model picker**: when the machine listener reported a model catalog (`modelsCatalog`
+  non-empty), the field is a searchable, provider-grouped list (provider
+  headers + mono `provider/model` id + human name; "Custom model…" at the
+  bottom). Stores the full `provider/model` id — passed verbatim to `--model`.
+  The listener refreshes the catalog at boot and every ~10 min, sending it with
+  its machine heartbeat (Settings polls every 30s, so the picker self-updates). Empty
+  catalog (offline runtime, hermes — no scriptable model list, or a failed
+  list command) falls back to per-agent presets + Custom…
+- **Remove** is an explicit online-only table action. It creates a machine-scoped
+  remove event, deletes the row, and the listener kills the matching child. An
+  offline machine keeps its runtime row and exposes restart guidance instead.
+- **Setup runtime** opens the 4-step wizard modal (`settings-runtime-setup.html`,
+  `components/forge/RuntimeSetupModal.tsx`): Machine → Agent CLI → Key / Send
+  (fresh key, machine-scoped install event) → Verify (polls event + runtime
+  heartbeat). Provider/model, persona, logging, and extra args are configured in
+  the completed runtime row. Modal width 560px.
+- **Naming**: the runtimes table labels the CLI column "CLI" and the CLI persona
+  field "Persona" (was "Agent"/"Agent persona") — "Agent" now always means the
+  Lexa rule bundle, not the runtime's CLI.
+
+### 5.9n Agents + Skills (Settings sections)
+
+Two global Settings sections above Agent Runtimes (`wireframes/settings-agents-skills.html`,
+`components/forge/AgentSkillSettings.tsx` + `PromptEditorModal.tsx`):
+
+- **Agents** = named rule bundles (name, display-only description, mono
+  instructions → `AGENTS.md` at run time) with attached-skills checkboxes (M2M
+  bindings). **Skills** = named operation bundles (instructions →
+  `.agents/<skill>/SKILL.md`) with a read-only "Used by" list.
+- Tables: name · description · skills count / used-by · builtin badge (accent
+  pill) · updated · edit gear + trash (builtins: disabled, `FORGE_BUILTIN_DELETE`).
+- Editor modal (600px): name, description, mono instructions textarea (7 rows),
+  attached-skills checkboxes (agents), a **delivery preview** (rendered view of
+  the AGENTS.md/SKILL.md content that ships in the claim), builtin **Reset to
+  default** / custom **Delete**, Cancel/Save.
+- The Forge popover picks an **Agent** (default Lexa) then a dependent **Skill**
+  (attached only; resets on agent change; empty-skills agent → hint + disabled
+  Generate) plus an optional per-run **Additional prompt** textarea.
 
 ---
 
 ## 6. Motion
+### 5.9m Forge Control Panel (`/forge`)
+
+Global page — every AI writing-assist run across all projects, newest first.
+Source of truth: `wireframes/forge-control-panel.html`.
+
+```
+Scope:     Global route /forge (outside $slug); "Forge runtimes" ghost button
+           links to the first project's Settings (runtimes are per-project).
+Summary:   strip of five cards — Active (queued+running, warning), Queued,
+           Done (success), Failed (danger), Runtimes (online / total).
+           Counts ride the history response summary block — no separate
+           aggregate endpoint. Active rows auto-refresh.
+Filters:   status chips (All · Queued · Running · Done · Failed · Cancelled —
+           mirror the navbar pill vocabulary) + project select + action
+           select. Map to query params status/slug/action; changing a filter
+           resets pagination to the newest page.
+Table:     Task ("Action · document title" + mono task id) | Project | Runtime
+           | Status | Started | Finished | row action. Running/queued rows
+           show a spinner and a Cancel (X) instead of the status word.
+           Clicking a row opens the task record slideover (width 520px).
+Paging:    ← Newer / Older → cursor-paginated; Newer disabled on the newest
+           page, Older disabled on the last. Page changes reset to the top.
+Slideover: meta grid (Document + Open document →, Action, Runtime + provider
+           · model mono, Timeline), Activity log (live dot while queued/
+           running, static when finished), Result box (Markdown, read-only,
+           success-tinted) or Error box (danger). Accept/reject stays in the
+           document's editor — the control panel is the record, not the
+           workbench. Cancelling a row keeps the record (status → Cancelled);
+           the panel never dismisses rows.
+States:    loading = skeleton rows; empty = "No Forge runs yet" (no rows at
+           all) or "No runs match the current filters"; error = danger box
+           with Retry — the summary strip stays visible.
+```
+
+Expanded log viewer (`forge-log-modal`) — opened by Expand in the slideover's
+Activity head or the editor popover's log head. One shared component
+(`ForgeTaskLogModal`), 760px dialog, full-height feed with wrapped lines (the
+compact boxes ellipsize; the viewer wraps so the whole stream is readable).
+
+```
+Identity:  modal-title "Action · "document"" + mono sub-line
+           "Task <id6> · <runtime> · <provider> · <model>".
+Header:    Follow toggle + "● live" while queued/running (auto-scroll pins
+           the feed to the newest line), Copy ("HH:MM:SS message" per line,
+           label flips to Copied for 2s), Close (X). The last line carries
+           the current tint only while active.
+Body:      "Activity feed · N lines · append-only" + status label with
+           duration ("Completed · 17s"; live elapsed while running).
+           stderr lines tinted danger, prefixed [stderr] by the daemon.
+Footer:    "Created t · Started t · Finished t" timeline + Close.
+Dismiss:   Esc, overlay click, or Close. While open, Escape is owned by the
+           viewer — the popover/slideover stays put underneath.
+```
+
 
 ### 6.1 Philosophy
 

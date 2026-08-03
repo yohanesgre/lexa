@@ -1249,6 +1249,10 @@ a:hover { color: var(--lx-text-link-hover); }
   background: var(--lx-surface-card-hover);
   color: var(--lx-text-primary);
 }
+.menu-item.active {
+  background: var(--lx-surface-selected);
+  color: var(--lx-text-primary);
+}
 .menu-item svg {
   width: 14px;
   height: 14px;
@@ -1830,6 +1834,30 @@ mark {
 }
 
 .filter-chip-label { color: var(--lx-text-secondary); }
+
+/* Status chips (forge history filter): one segmented control, status color as identity */
+.status-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 24px;
+  padding: 0 10px;
+  background: transparent;
+  border: 1px solid var(--lx-border-default);
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 500;
+  font-family: var(--lx-font-body);
+  color: var(--lx-text-secondary);
+  cursor: pointer;
+}
+.status-chip:hover { background: var(--lx-surface-card-hover); }
+.status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
 
 .filter-chip-x {
   display: inline-flex;

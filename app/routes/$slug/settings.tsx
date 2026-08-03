@@ -1,12 +1,19 @@
 import { useState, useRef, useEffect } from "react";
 import { createFileRoute, useParams } from "@tanstack/react-router";
-import { AlertTriangle, Check, Copy, Key, Plus, Trash2, Search, UserPlus, Users } from "lucide-react";
+import { AlertTriangle, Check, Copy, Key, Plus, RotateCcw, Settings, Trash2, Search, UserPlus, Users } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
-import { useApiKeys, useCreateApiKey, useDeleteApiKey, useUsers, useUpdateUserRole, useProjectMembers, useAddProjectMember, useRemoveProjectMember, useDeleteProject, useRuntimes } from "../../lib/queries";
+import { useApiKeys, useCreateApiKey, useDeleteApiKey, useUsers, useUpdateUserRole, useProjectMembers, useAddProjectMember, useRemoveProjectMember, useDeleteProject, useRuntimes, useRemoveRuntime } from "../../lib/queries";
+import { RuntimeSetupModal } from "../../components/forge/RuntimeSetupModal";
+import { RuntimeEditModal } from "../../components/forge/RuntimeEditModal";
+import { RuntimeRestartModal } from "../../components/forge/RuntimeRestartModal";
+import { AgentsSettingsSection, SkillsSettingsSection } from "../../components/forge/AgentSkillSettings";
+import { copyToClipboard } from "../../lib/clipboard";
+import type { Runtime } from "../../../shared/types";
 import * as api from "../../lib/api";
+import { parseApiDate } from "../../lib/date";
 
 function formatRelative(iso: string): string {
-  const then = new Date(iso).getTime();
+  const then = parseApiDate(iso).getTime();
   const now = Date.now();
   const diff = Math.max(0, now - then);
   const m = Math.floor(diff / 60000);
@@ -23,7 +30,7 @@ function ApiKeyRevealModal({ name, fullKey, onDone }: { name: string; fullKey: s
   const [copied, setCopied] = useState(false);
 
   useEffect(() => {
-    void navigator.clipboard.writeText(fullKey).then(() => setCopied(true));
+    void copyToClipboard(fullKey).then(() => setCopied(true));
   }, [fullKey]);
 
   return (
@@ -50,7 +57,7 @@ function ApiKeyRevealModal({ name, fullKey, onDone }: { name: string; fullKey: s
                   type="button"
                   className="btn btn-ghost flex-shrink-0"
                   style={{ height: 28, padding: "0 10px", fontSize: 12 }}
-                  onClick={() => { void navigator.clipboard.writeText(fullKey); setCopied(true); }}
+                  onClick={() => { void copyToClipboard(fullKey).then(() => setCopied(true)); }}
                 >
                   {copied ? <Check size={12} strokeWidth={1.5} /> : <Copy size={12} strokeWidth={1.5} />}
                   {copied ? "Copied to clipboard" : "Copy"}
@@ -117,6 +124,35 @@ function RemoveMemberModal({ name, onCancel, onConfirm }: { name: string; onCanc
               {name}
             </span>
             {" "}from this project? They will lose access immediately.
+          </p>
+
+          <div className="flex items-center gap-2 mt-4 justify-end">
+            <button type="button" className="btn btn-ghost" onClick={onCancel}>Cancel</button>
+            <button type="button" className="btn btn-danger-solid" onClick={onConfirm}>
+              <Trash2 size={14} strokeWidth={1.5} />
+              Remove
+            </button>
+          </div>
+        </div>
+      </div>
+    </>
+  );
+}
+
+function RemoveRuntimeModal({ name, hostname, onCancel, onConfirm }: { name: string; hostname: string; onCancel: () => void; onConfirm: () => void }) {
+  return (
+    <>
+      <div className="slideover-overlay" onClick={onCancel} />
+      <div className="fixed inset-0 flex items-center justify-center z-50 pointer-events-none">
+        <div className="dialog dialog-enter pointer-events-auto" role="dialog" aria-modal="true">
+          <h2 className="font-display text-lg font-medium text-lx-text-primary">Remove runtime?</h2>
+
+          <p className="text-sm text-lx-text-secondary mt-3 leading-5">
+            Remove{" "}
+            <span className="font-mono text-xs text-lx-text-primary" style={{ background: "var(--lx-surface-card)", borderRadius: 4, padding: "2px 5px" }}>
+              {name}
+            </span>
+            {hostname ? ` (${hostname})` : ""} from the runtimes list? The machine listener will stop its child daemon and clean up its runtime files.
           </p>
 
           <div className="flex items-center gap-2 mt-4 justify-end">
@@ -356,6 +392,11 @@ function SettingsPage() {
   const createKey = useCreateApiKey();
   const deleteKey = useDeleteApiKey();
   const { data: runtimes = [], isLoading: runtimesLoading, isError: runtimesError } = useRuntimes();
+  const [setupOpen, setSetupOpen] = useState(false);
+  const [editing, setEditing] = useState<Runtime | null>(null);
+  const [restarting, setRestarting] = useState<Runtime | null>(null);
+  const removeRuntime = useRemoveRuntime();
+  const [removing, setRemoving] = useState<Runtime | null>(null);
   const { data: users = [] } = useUsers();
   const demote = useUpdateUserRole();
   const admins = users.filter((u) => u.role === "admin");
@@ -478,14 +519,26 @@ function SettingsPage() {
         </div>
       </section>
 
-      {/* Forge Runtimes (global) */}
+      {/* Agents (global) — rule bundles */}
+      <AgentsSettingsSection />
+
+      {/* Skills (global) — operation bundles */}
+      <SkillsSettingsSection />
+
+      {/* Agent Runtimes (global) */}
       <section className="mb-8">
         <div className="flex items-center justify-between mb-3">
-          <h2 className="font-display text-lg font-medium text-lx-text-primary">Forge Runtimes</h2>
-          <span className="font-micro text-2xs text-lx-text-muted uppercase tracking-[0.04em]">Global scope</span>
+          <h2 className="font-display text-lg font-medium text-lx-text-primary">Agent Runtimes</h2>
+          <div className="flex items-center gap-3">
+            <span className="font-micro text-2xs text-lx-text-muted uppercase tracking-[0.04em]">Global scope</span>
+            <button type="button" className="btn btn-primary" style={{ height: 28, padding: "0 12px", fontSize: 12 }} onClick={() => setSetupOpen(true)}>
+              <Plus size={14} strokeWidth={1.5} />
+              Setup runtime
+            </button>
+          </div>
         </div>
         <p className="text-sm text-lx-text-secondary mb-4" style={{ maxWidth: 560 }}>
-          Machines running the Forge daemon (AI writing assistant). The daemon spawns the installed agent CLI (opencode / hermes) when a Forge task is queued.
+          Machines running the Forge daemon (AI writing assistant). The daemon spawns the installed agent CLI (opencode / hermes / command-code) when a Forge task is queued.
         </p>
 
         {runtimesLoading ? (
@@ -496,12 +549,13 @@ function SettingsPage() {
           <div className="flex flex-col items-center gap-1.5 text-center mb-4" style={{ background: "var(--lx-surface-card)", border: "1px dashed var(--lx-border-strong)", borderRadius: 8, padding: 24 }}>
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} className="text-lx-text-muted"><rect x="4" y="4" width="16" height="16" rx="2" /><rect x="9" y="9" width="6" height="6" /></svg>
             <div className="text-sm font-medium text-lx-text-primary mt-1">No runtimes yet</div>
-            <p className="text-xs text-lx-text-secondary" style={{ maxWidth: 360 }}>
-              Start the Forge daemon on a machine with opencode or hermes installed:
+            <p className="text-xs text-lx-text-secondary" style={{ maxWidth: 380 }}>
+              Connect a machine with an agent CLI installed (opencode, hermes, or command-code). Setup generates the exact env + start command.
             </p>
-            <code className="font-mono text-xs" style={{ background: "var(--lx-surface-input)", border: "1px solid var(--lx-border-default)", borderRadius: 4, padding: "6px 10px", color: "var(--lx-text-secondary)", marginTop: 8, display: "inline-block" }}>
-              bun run forge:daemon
-            </code>
+            <button type="button" className="btn btn-primary" style={{ height: 28, padding: "0 12px", fontSize: 12, marginTop: 8 }} onClick={() => setSetupOpen(true)}>
+              <Plus size={14} strokeWidth={1.5} />
+              Setup runtime
+            </button>
           </div>
         ) : (
           <div style={{ background: "var(--lx-surface-card)", border: "1px solid var(--lx-border-default)", borderRadius: 8, overflow: "hidden", marginBottom: 16 }}>
@@ -509,10 +563,13 @@ function SettingsPage() {
               <thead>
                 <tr>
                   <th>Name</th>
-                  <th>Provider</th>
+                  <th>CLI</th>
+                  <th>Model</th>
                   <th>Hostname</th>
                   <th>Status</th>
+                  <th>MCP</th>
                   <th>Last seen</th>
+                  <th></th>
                 </tr>
               </thead>
               <tbody>
@@ -525,6 +582,7 @@ function SettingsPage() {
                       </div>
                     </td>
                     <td className="text-xs text-lx-text-secondary">{r.provider}</td>
+                    <td className="font-mono text-xs text-lx-text-secondary">{r.model || "—"}</td>
                     <td className="font-mono text-xs text-lx-text-secondary">{r.hostname || "—"}</td>
                     <td>
                       <span className="flex items-center gap-2">
@@ -534,7 +592,25 @@ function SettingsPage() {
                         </span>
                       </span>
                     </td>
+                    <td>
+                      <span className={`font-micro text-2xs uppercase tracking-[0.04em] ${r.mcpConnected ? "text-lx-text-success" : "text-lx-text-muted"}`}>
+                        {r.mcpConnected ? "Connected" : "Not set"}
+                      </span>
+                    </td>
                     <td className="text-xs text-lx-text-secondary">{r.lastSeen ? formatRelative(r.lastSeen) : <span className="text-lx-text-muted">Never</span>}</td>
+                    <td style={{ textAlign: "right", whiteSpace: "nowrap" }}>
+                      {r.status === "offline" && (
+                        <button type="button" className="btn btn-ghost" style={{ width: 28, height: 28, padding: 0, fontSize: 12 }} onClick={() => setRestarting(r)} aria-label={`Restart ${r.name}`} title="Restart guide — how to bring this daemon back">
+                          <RotateCcw size={14} strokeWidth={1.5} />
+                        </button>
+                      )}
+                      <button type="button" className="btn btn-ghost" style={{ width: 28, height: 28, padding: 0, fontSize: 12 }} onClick={() => setEditing(r)} aria-label={`Edit ${r.name}`} title="Edit runtime">
+                        <Settings size={14} strokeWidth={1.5} />
+                      </button>
+                      <button type="button" className="btn btn-danger" style={{ width: 28, height: 28, padding: 0, fontSize: 12, opacity: r.status === "offline" || !r.machineId ? 0.45 : 1 }} disabled={r.status === "offline" || !r.machineId} onClick={() => setRemoving(r)} aria-label={`Remove ${r.name}`} title={r.status === "offline" ? "Machine offline — restart its listener before removing" : !r.machineId ? "Runtime has no registered machine" : "Remove runtime"}>
+                        <Trash2 size={14} strokeWidth={1.5} />
+                      </button>
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -545,6 +621,29 @@ function SettingsPage() {
 
       {reveal && (
         <ApiKeyRevealModal name={reveal.name} fullKey={reveal.key} onDone={() => setReveal(null)} />
+      )}
+
+      {setupOpen && (
+        <RuntimeSetupModal onClose={() => setSetupOpen(false)} />
+      )}
+
+      {editing && (
+        <RuntimeEditModal runtime={editing} onClose={() => setEditing(null)} />
+      )}
+
+      {restarting && (
+        <RuntimeRestartModal runtime={restarting} onClose={() => setRestarting(null)} />
+      )}
+
+      {removing && (
+        <RemoveRuntimeModal
+          name={removing.name}
+          hostname={removing.hostname}
+          onCancel={() => setRemoving(null)}
+          onConfirm={() => {
+            removeRuntime.mutate(removing.id, { onSuccess: () => setRemoving(null) });
+          }}
+        />
       )}
 
       {deleting && (

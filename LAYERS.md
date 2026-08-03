@@ -457,7 +457,13 @@ All list endpoints and MCP `list_*`/`search_*` tools: `?limit` (default 50, max 
 | `SourceFetchError` | 422 | `SOURCE_FETCH_ERROR` | bad URL / SSRF-guard block / unreadable page |
 | `SourceUnreachable` | 422 | `SOURCE_UNREACHABLE` | fetch failed (timeout, DNS, network) |
 | `ForgeTaskNotFound` | 404 | `FORGE_TASK_NOT_FOUND` | |
+| `AgentNotFound` | 404 | `AGENT_NOT_FOUND` | unknown forge agent (task create / claim resolve) |
+| `SkillNotFound` | 404 | `SKILL_NOT_FOUND` | unknown forge skill (task create / bindings) |
+| `ForgeBuiltinDelete` | 422 | `FORGE_BUILTIN_DELETE` | delete/reset-guard on a builtin agent/skill |
+| `ForgeEntityInUse` | 409 | `FORGE_ENTITY_IN_USE` | delete agent/skill still referenced by forge tasks |
 | `NoRuntimeOnline` | 409 | `NO_RUNTIME_ONLINE` | create Forge task with no daemon up |
+| `MachineNotFound` | 404 | `MACHINE_NOT_FOUND` | unknown machine target |
+| `MachineOffline` | 409 | `MACHINE_OFFLINE` | remove/restart requires an online listener |
 | `TaskLinkNotFound` | 404 | `TASK_LINK_NOT_FOUND` | delete a link that doesn't exist |
 | `TaskLinkCycle` | 409 | `TASK_LINK_CYCLE` | subtask_of would create a cycle |
 | `InvalidTaskLink` | 422 | `INVALID_TASK_LINK` | self-link or cross-project link |

@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Lexa — Settings (Agents + Skills)</title>
+  <link rel="stylesheet" href="wireframes.css" />
+</head>
+<body class="bg-app color-primary" style="min-height:100vh;position:relative;overflow:hidden;">
+
+  <!-- Dimmed Settings Backdrop -->
+  <div style="position:absolute;inset:0;opacity:0.25;pointer-events:none;overflow:hidden;">
+    <INCLUDE navbar.html />
+    <main class="page-frame">
+      <h1 class="font-display text-2xl weight-600 color-primary mb-4">Settings</h1>
+
+      <!-- Agents (global) -->
+      <section class="mb-8">
+        <div class="flex items-center justify-between mb-3">
+          <h2 class="font-display text-lg weight-500 color-primary">Agents</h2>
+          <span class="annotation-tag">Global scope</span>
+        </div>
+        <p class="text-sm color-secondary mb-4" style="max-width:560px;">
+          Named rule bundles sent to the runtime agent on every Forge run (as AGENTS.md). The agent's instructions define behavior; skills define what it can do. Not to be confused with a runtime's CLI agent — that's the CLI/Persona on the runtime row.
+        </p>
+        <div style="background:var(--lx-surface-card);border:1px solid var(--lx-border-default);border-radius:8px;overflow:hidden;">
+          <table class="settings-table">
+            <thead>
+              <tr><th>Name</th><th>Description</th><th>Skills</th><th>Builtin</th><th>Updated</th><th></th></tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><span class="text-sm weight-500">Lexa</span></td>
+                <td class="text-xs color-secondary">Default writing assistant — matches the document's voice, outputs only text.</td>
+                <td class="text-xs color-secondary">5</td>
+                <td><span class="font-micro text-2xs" style="text-transform:uppercase;letter-spacing:0.04em;background:var(--lx-bg-accent-subtle);color:var(--lx-text-link);padding:2px 8px;border-radius:9999px;font-size:10px;">builtin</span></td>
+                <td class="text-xs color-secondary">2 hours ago</td>
+                <td style="text-align:right;">
+                  <button class="btn btn-ghost" style="width:28px;height:28px;padding:0;font-size:12px;" aria-label="Edit agent">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>
+                  </button>
+                  <button class="btn btn-danger" disabled style="width:28px;height:28px;padding:0;font-size:12px;opacity:.45;">
+                    <INCLUDE _trash-icon.html />
+                  </button>
+                  <span class="annotation-inline" style="margin-left:4px;">Builtins: editable + Reset to default, never deletable.</span>
+                </td>
+              </tr>
+              <tr>
+                <td><span class="text-sm weight-500">Style reviewer</span></td>
+                <td class="text-xs color-secondary">Focuses on clarity, voice consistency, and scannable structure.</td>
+                <td class="text-xs color-secondary">3</td>
+                <td class="text-xs color-muted">—</td>
+                <td class="text-xs color-secondary">yesterday</td>
+                <td style="text-align:right;">
+                  <button class="btn btn-ghost" style="width:28px;height:28px;padding:0;font-size:12px;" aria-label="Edit agent">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>
+                  </button>
+                  <button class="btn btn-danger" style="width:28px;height:28px;padding:0;font-size:12px;">
+                    <INCLUDE _trash-icon.html />
+                  </button>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="mt-4" style="display:flex;justify-content:flex-end;">
+          <button class="btn btn-primary" style="height:28px;padding:0 12px;font-size:12px;">
+            <INCLUDE _plus-icon.html />
+            New agent
+          </button>
+        </div>
+        <span class="annotation-tag mt-2 mb-4">Agents are global. The Forge popover picks one per run; its instructions are written into the run dir as AGENTS.md (claim-carried). Skills column shows the count of attached skills. Deleting a custom agent is immediate; builtins refuse delete.</span>
+      </section>
+
+      <!-- Skills (global) -->
+      <section class="mb-8">
+        <div class="flex items-center justify-between mb-3">
+          <h2 class="font-display text-lg weight-500 color-primary">Skills</h2>
+          <span class="annotation-tag">Global scope</span>
+        </div>
+        <p class="text-sm color-secondary mb-4" style="max-width:560px;">
+          Named operation bundles attached to agents. On a Forge run the chosen skill's instructions become <span class="font-mono text-2xs">.agents/&lt;skill&gt;/SKILL.md</span> in the run dir. Builtins cover the original assistant actions.
+        </p>
+        <div style="background:var(--lx-surface-card);border:1px solid var(--lx-border-default);border-radius:8px;overflow:hidden;">
+          <table class="settings-table">
+            <thead>
+              <tr><th>Name</th><th>Description</th><th>Used by</th><th>Builtin</th><th>Updated</th><th></th></tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><span class="text-sm weight-500">Continue</span></td>
+                <td class="text-xs color-secondary">Continue the text naturally, matching its style, tone, and structure. Output only the continuation.</td>
+                <td class="text-xs color-secondary">Lexa</td>
+                <td><span class="font-micro text-2xs" style="text-transform:uppercase;letter-spacing:0.04em;background:var(--lx-bg-accent-subtle);color:var(--lx-text-link);padding:2px 8px;border-radius:9999px;font-size:10px;">builtin</span></td>
+                <td class="text-xs color-secondary">2 hours ago</td>
+                <td style="text-align:right;">
+                  <button class="btn btn-ghost" style="width:28px;height:28px;padding:0;font-size:12px;" aria-label="Edit skill">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>
+                  </button>
+                  <button class="btn btn-danger" disabled style="width:28px;height:28px;padding:0;font-size:12px;opacity:.45;">
+                    <INCLUDE _trash-icon.html />
+                  </button>
+                </td>
+              </tr>
+              <tr>
+                <td><span class="text-sm weight-500">Rewrite</span></td>
+                <td class="text-xs color-secondary">Rewrite the selected text to be clearer and more concise, keeping the meaning.</td>
+                <td class="text-xs color-secondary">Lexa · Style reviewer</td>
+                <td><span class="font-micro text-2xs" style="text-transform:uppercase;letter-spacing:0.04em;background:var(--lx-bg-accent-subtle);color:var(--lx-text-link);padding:2px 8px;border-radius:9999px;font-size:10px;">builtin</span></td>
+                <td class="text-xs color-secondary">2 hours ago</td>
+                <td style="text-align:right;">
+                  <button class="btn btn-ghost" style="width:28px;height:28px;padding:0;font-size:12px;" aria-label="Edit skill">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>
+                  </button>
+                  <button class="btn btn-danger" disabled style="width:28px;height:28px;padding:0;font-size:12px;opacity:.45;">
+                    <INCLUDE _trash-icon.html />
+                  </button>
+                </td>
+              </tr>
+              <tr>
+                <td><span class="text-sm weight-500">Fix grammar</span></td>
+                <td class="text-xs color-secondary">Fix grammar, spelling, and punctuation without changing meaning or structure.</td>
+                <td class="text-xs color-secondary">Lexa</td>
+                <td><span class="font-micro text-2xs" style="text-transform:uppercase;letter-spacing:0.04em;background:var(--lx-bg-accent-subtle);color:var(--lx-text-link);padding:2px 8px;border-radius:9999px;font-size:10px;">builtin</span></td>
+                <td class="text-xs color-secondary">2 hours ago</td>
+                <td style="text-align:right;">
+                  <button class="btn btn-ghost" style="width:28px;height:28px;padding:0;font-size:12px;" aria-label="Edit skill">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>
+                  </button>
+                  <button class="btn btn-danger" disabled style="width:28px;height:28px;padding:0;font-size:12px;opacity:.45;">
+                    <INCLUDE _trash-icon.html />
+                  </button>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="mt-4" style="display:flex;justify-content:flex-end;">
+          <button class="btn btn-primary" style="height:28px;padding:0 12px;font-size:12px;">
+            <INCLUDE _plus-icon.html />
+            New skill
+          </button>
+        </div>
+        <span class="annotation-tag mt-2">Used by = agents with this skill attached (M2M, read-only here — bindings are managed from the agent editor). Builtins are seeded from the original assistant actions and can be edited or reset, never deleted. An agent with zero skills can't run (popover disables Generate).</span>
+      </section>
+    </main>
+  </div>
+
+  <!-- Overlay -->
+  <div class="slideover-overlay"></div>
+
+  <!-- Agent Editor Modal -->
+  <div class="modal dialog-enter" style="width:600px;">
+    <div class="modal-header">
+      <span class="modal-title">Edit agent — Lexa</span>
+      <button class="btn btn-ghost" style="width:32px;height:32px;padding:0;">
+        <INCLUDE _x-icon.html />
+      </button>
+    </div>
+
+    <div class="modal-body">
+      <div class="field">
+        <label class="field-label">Name</label>
+        <input class="prop-input w-full" type="text" value="Lexa" />
+      </div>
+
+      <div class="field">
+        <label class="field-label">Description</label>
+        <input class="prop-input w-full" type="text" value="Default writing assistant — matches the document's voice, outputs only text." />
+        <div class="field-hint">Display-only — never sent to the runtime agent.</div>
+      </div>
+
+      <div class="field">
+        <label class="field-label">Instructions <span class="font-micro text-2xs color-muted" style="text-transform:uppercase;letter-spacing:0.04em;margin-left:6px;">AGENTS.md</span></label>
+        <textarea class="prop-input w-full font-mono" rows="7" style="font-size:12px;line-height:1.6;resize:vertical;">You are Forge, a writing assistant inside Lexa. You help a game-dev team write task descriptions and wiki pages. You are a text editor, not an agent: you do not call tools, you do not read files, and you do not act on any system. Your whole output is the text you write. Match the document's existing voice and structure. If the linked sources contradict the document, prefer the sources.</textarea>
+        <div class="field-hint">Written to the run dir as <span class="font-mono">AGENTS.md</span> at claim time. The runtime CLI reads it natively (opencode). Edits apply to the very next run — no host store, nothing to sync.</div>
+      </div>
+
+      <div class="field">
+        <label class="field-label">Attached skills</label>
+        <div style="background:var(--lx-surface-input);border:1px solid var(--lx-border-default);border-radius:6px;padding:10px 12px;display:flex;flex-direction:column;gap:6px;">
+          <label class="flex items-center gap-2" style="cursor:pointer;font-size:12px;color:var(--lx-text-secondary);">
+            <input type="checkbox" checked /> Continue — continue the text naturally, matching style and structure
+          </label>
+          <label class="flex items-center gap-2" style="cursor:pointer;font-size:12px;color:var(--lx-text-secondary);">
+            <input type="checkbox" checked /> Rewrite — clearer, more concise, keep the meaning
+          </label>
+          <label class="flex items-center gap-2" style="cursor:pointer;font-size:12px;color:var(--lx-text-secondary);">
+            <input type="checkbox" checked /> Summarize — 1-2 sentence overview, then key-point bullets
+          </label>
+          <label class="flex items-center gap-2" style="cursor:pointer;font-size:12px;color:var(--lx-text-secondary);">
+            <input type="checkbox" checked /> Expand — more detail in labeled sections
+          </label>
+          <label class="flex items-center gap-2" style="cursor:pointer;font-size:12px;color:var(--lx-text-secondary);">
+            <input type="checkbox" checked /> Fix grammar — correct without changing meaning or formatting
+          </label>
+        </div>
+        <div class="field-hint">The Forge popover only offers skills attached here. An agent with none can't generate.</div>
+      </div>
+
+      <!-- File preview -->
+      <div class="field">
+        <label class="field-label">Delivery preview <span class="font-micro text-2xs color-muted" style="text-transform:uppercase;letter-spacing:0.04em;margin-left:6px;">~/.lexa/runs/&lt;taskId&gt;/AGENTS.md</span></label>
+        <div style="background:var(--lx-surface-input);border:1px solid var(--lx-border-default);border-radius:6px;padding:10px 12px;font-family:var(--lx-font-mono);font-size:11px;line-height:1.7;color:var(--lx-text-secondary);max-height:140px;overflow-y:auto;">
+          <div><span class="color-muted"># AGENTS.md — Lexa</span></div>
+          <div>&nbsp;</div>
+          <div>You are Forge, a writing assistant inside Lexa. You help a game-dev team write task descriptions and wiki pages. You are a text editor, not an agent: you do not call tools, you do not read files, and you do not act on any system. Your whole output is the text you write. Match the document's existing voice and structure. If the linked sources contradict the document, prefer the sources.</div>
+          <div>&nbsp;</div>
+          <div><span class="color-muted"># .agents/continue/SKILL.md — attached skill</span></div>
+          <div>Continue the text below naturally, matching its style, tone, and structure. Output only the continuation, no preamble.</div>
+        </div>
+        <div class="field-hint">Rendered view of what the daemon writes into the run dir when this agent runs with its attached skills. The skill file shown reflects the skill selected in the popover.</div>
+      </div>
+
+      <div class="flex items-center justify-between mt-5">
+        <button class="btn btn-ghost" style="height:28px;padding:0 10px;font-size:12px;">Reset to default</button>
+        <div class="flex" style="gap:8px;">
+          <button class="btn btn-ghost">Cancel</button>
+          <button class="btn btn-primary">Save changes</button>
+        </div>
+      </div>
+      <span class="annotation-tag" style="display:block;margin-top:10px;">Builtin agent: Reset to default restores the seeded instructions + the full builtin skill set. Custom agents instead show Delete here (destructive, confirm dialog). Reset is disabled until the instructions or bindings differ from the defaults.</span>
+    </div>
+  </div>
+
+  <!-- Annotations -->
+  <div style="position:fixed;bottom:24px;left:24px;z-index:55;display:flex;flex-direction:column;gap:8px;align-items:flex-start;max-width:460px;">
+    <span class="annotation-tag">New Settings sections, global scope. Agents = rule bundles (instructions → AGENTS.md at run time); Skills = operation bundles (instructions → .agents/&lt;skill&gt;/SKILL.md). Both are prompt text only — no files, no assets.</span>
+    <span class="annotation-tag">Agent editor opens from the gear on an agent row; skill editor is the same modal minus the Attached skills block (replaced by read-only "Used by" agent list).</span>
+    <span class="annotation-tag">Save → PATCH/PUT /api/forge/agents/:id (+ PUT /api/forge/agents/:id/skills for bindings). No events, no versions — the next task claim carries the new rules, so edits apply immediately to every runtime.</span>
+    <span class="annotation-tag">Name collision note: runtime rows label the CLI as "CLI" (was "Agent") and the CLI persona as "Persona" (was "Agent persona") so "Agent" here always means the Lexa rule bundle.</span>
+    <span class="annotation-tag">Custom agent deletion is immediate and permanent; tasks already queued keep the rules they were claimed with (the task stores agentId + skillId, resolved at claim).</span>
+    <span class="annotation-tag">Empty state (no agents): empty-box with "No agents yet — create one to tune what Forge sends to your runtimes" + New agent CTA, mirroring the runtimes empty state.</span>
+  </div>
+
+</body>
+</html>

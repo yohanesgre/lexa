@@ -242,20 +242,62 @@ CREATE INDEX idx_wiki_parent     ON wiki_pages(parent_id) WHERE parent_id IS NOT
 -- ============================================================
 -- Forge: runtime agents + persisted document sources (migration 0011)
 -- ============================================================
--- runtimes: daemons that run agent CLIs (opencode/hermes) and poll for tasks.
+-- runtimes: daemons that run agent CLIs (opencode/hermes/command-code) and poll
+--   for tasks. model is the agent model id reported by the daemon (FORGE_MODEL);
+--   extra_args is server-authoritative injected CLI tokens (JSON array), applied
+--   by the daemon at spawn time (Settings → Edit runtime).
+--   models_catalog is the live provider/model list the daemon reports with its
+--   machine listener heartbeat after each refresh (boot + every ~10 min); []
+--   when offline or the agent has no scriptable model list (hermes). Powers
+--   the Settings picker. agents_catalog follows the same rule for personas.
 -- forge_tasks: the writing-assist queue (created from editors, claimed by a
 --   runtime, streamed/completed by the daemon).
 -- document_sources: persisted per-document sources (wiki page or external URL)
 --   that Forge grounds its output in.
 CREATE TABLE runtimes (
-  id         TEXT PRIMARY KEY,
-  name       TEXT NOT NULL,
-  provider   TEXT NOT NULL CHECK (provider IN ('opencode', 'hermes', 'command-code')),
-  status     TEXT NOT NULL DEFAULT 'offline' CHECK (status IN ('online', 'offline')),
-  hostname   TEXT NOT NULL DEFAULT '',
-  last_seen  TEXT,
-  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  id             TEXT PRIMARY KEY,
+  name           TEXT NOT NULL,
+  provider       TEXT NOT NULL CHECK (provider IN ('opencode', 'hermes', 'command-code')),
+  model          TEXT NOT NULL DEFAULT '',
+  extra_args     TEXT NOT NULL DEFAULT '[]',
+  models_catalog TEXT NOT NULL DEFAULT '[]',   -- migration 0016
+  agents_catalog TEXT NOT NULL DEFAULT '[]',   -- migration 0026
+  machine_id     TEXT REFERENCES machines(id) ON DELETE SET NULL, -- migration 0025
+  status         TEXT NOT NULL DEFAULT 'offline' CHECK (status IN ('online', 'offline')),
+  hostname       TEXT NOT NULL DEFAULT '',
+  last_seen      TEXT,
+  created_at     TEXT NOT NULL DEFAULT (datetime('now'))
 );
+
+-- ============================================================
+-- Forge: machine registry + setup events (migrations 0023–0025)
+-- ============================================================
+CREATE TABLE machines (
+  id          TEXT PRIMARY KEY,
+  hostname    TEXT NOT NULL DEFAULT '',
+  last_seen   TEXT,
+  created_at  TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX idx_machines_last_seen ON machines(last_seen);
+
+-- Setup events are machine-scoped. Runtime execution settings stay on the
+-- runtimes row and are edited from Settings after installation.
+CREATE TABLE runtime_events (
+  id          TEXT PRIMARY KEY,
+  machine_id  TEXT NOT NULL REFERENCES machines(id) ON DELETE CASCADE,
+  action      TEXT NOT NULL DEFAULT 'install'
+                CHECK (action IN ('install', 'update', 'remove')),
+  agent_cli   TEXT NOT NULL CHECK (agent_cli IN ('opencode','hermes','command-code')),
+  api_key_id  TEXT REFERENCES api_keys(id) ON DELETE SET NULL,
+  status      TEXT NOT NULL DEFAULT 'pending'
+                CHECK (status IN ('pending','claimed','completed','failed')),
+  error       TEXT,
+  created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+  claimed_at  TEXT,
+  finished_at TEXT
+);
+CREATE INDEX idx_runtime_events_machine ON runtime_events(machine_id, status);
+CREATE INDEX idx_runtime_events_status ON runtime_events(status, created_at);
 
 CREATE TABLE forge_tasks (
   id            TEXT PRIMARY KEY,
@@ -263,7 +305,9 @@ CREATE TABLE forge_tasks (
   project_id    TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
   document_type TEXT NOT NULL CHECK (document_type IN ('task', 'wiki')),
   document_id   TEXT NOT NULL,
-  action        TEXT NOT NULL CHECK (action IN ('continue', 'rewrite', 'summarize', 'expand', 'grammar')),
+  agent_id      TEXT NOT NULL REFERENCES forge_agents(id),
+  skill_id      TEXT NOT NULL REFERENCES forge_skills(id),
+  extra_prompt  TEXT NOT NULL DEFAULT '',
   selection     TEXT NOT NULL DEFAULT '',
   doc_context   TEXT NOT NULL DEFAULT '',
   status        TEXT NOT NULL DEFAULT 'queued'
@@ -275,6 +319,41 @@ CREATE TABLE forge_tasks (
   finished_at   TEXT
 );
 CREATE INDEX idx_forge_tasks_status ON forge_tasks(status, created_at);
+
+-- ============================================================
+-- Forge agents + skills (migration 0027) — global rule bundles
+-- ============================================================
+-- Agents are named rule bundles: their instructions become AGENTS.md in the
+-- run dir at claim time (claim-carried, no host store). Skills are named
+-- operation bundles: their instructions become .agents/<skill>/SKILL.md.
+-- Bindings are many-to-many. "Lexa" (the default agent) and the five
+-- original assistant actions (continue/rewrite/summarize/expand/grammar)
+-- are seeded builtins; builtins are editable + resettable but not deletable.
+CREATE TABLE forge_agents (
+  id           TEXT PRIMARY KEY,
+  name         TEXT NOT NULL UNIQUE,
+  description  TEXT NOT NULL DEFAULT '',
+  instructions TEXT NOT NULL,
+  is_builtin   INTEGER NOT NULL DEFAULT 0,
+  created_at   TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at   TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE forge_skills (
+  id           TEXT PRIMARY KEY,
+  name         TEXT NOT NULL UNIQUE,
+  description  TEXT NOT NULL DEFAULT '',
+  instructions TEXT NOT NULL,
+  is_builtin   INTEGER NOT NULL DEFAULT 0,
+  created_at   TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at   TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE forge_agent_skills (
+  agent_id TEXT NOT NULL REFERENCES forge_agents(id) ON DELETE CASCADE,
+  skill_id TEXT NOT NULL REFERENCES forge_skills(id) ON DELETE CASCADE,
+  PRIMARY KEY (agent_id, skill_id)
+);
 
 CREATE TABLE document_sources (
   id            TEXT PRIMARY KEY,
@@ -288,6 +367,20 @@ CREATE TABLE document_sources (
   UNIQUE(document_type, document_id, kind, ref)
 );
 CREATE INDEX idx_sources_document ON document_sources(document_type, document_id);
+
+-- ============================================================
+-- Forge task activity log (migration 0018)
+-- ============================================================
+-- Append-only live status feed per task: the daemon streams lines
+-- (claimed by <runtime>, model <id>, agent started, generating,
+-- done/failed) so the UI can show what a task is doing right now.
+CREATE TABLE forge_task_logs (
+  id         TEXT PRIMARY KEY,
+  task_id    TEXT NOT NULL REFERENCES forge_tasks(id) ON DELETE CASCADE,
+  message    TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX idx_forge_task_logs_task ON forge_task_logs(task_id, created_at);
 
 -- ============================================================
 -- Task links: subtask_of / blocked_by / related_to (migration 0012)
@@ -330,17 +423,39 @@ the v1 "cut subtasks" YAGNI — semantics now defined):
   dropdown (title LIKE, excludes archived + self, capped at 10).
 
 ### Forge (runtime agent writing assistant)
-Forge is the AI writing button in the task/wiki editors. A **daemon** on a machine
-with agent CLIs installed (opencode/hermes) registers as a `runtimes` row, polls
-`forge_tasks`, spawns the CLI in one-shot mode per task, and reports the result.
+Forge is the AI writing button in the task/wiki editors. A **CLI listener** on a
+machine registers the machine, claims setup events, owns one daemon child per
+installed agent CLI, and reports the machine's available agents/models. Each
+daemon registers as a `runtimes` row, polls `forge_tasks`, spawns the configured
+CLI in one-shot mode per task, and reports the result.
 
 - **Task lifecycle:** `queued` → (daemon claims) `running` → `completed`/`failed`.
   FIFO claim: the daemon updates the row conditionally (`WHERE status='queued'`);
   a lost race returns null and the daemon polls again.
+- **Agents + skills (0027):** every task carries `agent_id` + `skill_id` (global
+  rule bundles, M2M bindings). The server resolves them **at claim time** and
+  sends the instructions back as `agentMarkdown`/`skillMarkdown`; the daemon
+  writes them into the run dir as `AGENTS.md` + `.agents/<skill>/SKILL.md` —
+  files-only delivery, no host store, so edits apply to the very next run.
+  The prompt itself carries only task context + the output contract (+ the
+  per-task `extra_prompt`).
+- **Machine state root:** everything the host stores lives in `~/.lexa/`
+  (`LEXA_DIR` override): `config.json`, `machine-id`, `env`, `runtimes/<id>/env`,
+  and per-run workdirs under `runs/<taskId>/` (ephemeral — removed after every
+  run). The listener migrates the legacy `~/.config/lexa-cli` +
+  `~/.config/lexa-forge` dirs into it on boot — migrate-and-delete, no fallback.
+- **`forge_task_logs`** is the append-only live status feed per task. The daemon
+  streams a line per step (claimed, model, agent started, generating, done/failed);
+  the UI polls `GET /api/forge/tasks/:id/logs` while a task is active to show
+  what it's doing right now.
 - **`document_sources`** persist per document (task or wiki page). `kind=wiki`
   stores the wiki page **slug** in `ref`; `kind=external` stores the URL. Forge
   resolves wiki sources to page content server-side; external URLs are fetched
   with an **SSRF guard** (DNS resolve → reject private/loopback/link-local/CGNAT).
+- **Setup:** the web wizard sends only machine + agent CLI + a fresh one-time key.
+  Provider/model, agent persona, logging, and extra args are edited after setup
+  from Settings. The listener discovers catalogs by invoking the installed CLI
+  and sends them with the machine heartbeat.
 - **Auth:** browser calls use the normal Bearer API key; daemon endpoints
   (`/api/forge/daemon/*`, `/api/forge/runtimes/*`) accept `x-forge-token`
   (`LXK_FORGE_DAEMON_TOKEN`) or a Bearer key.

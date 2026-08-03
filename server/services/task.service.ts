@@ -281,7 +281,12 @@ export class TaskService extends Effect.Service<TaskService>()("Lexa/TaskService
               return yield* new SwimlaneNotFound({ id: target.swimlaneId! });
           }
 
-          if (task.columnId === target.columnId && !target.beforeTaskId && !target.afterTaskId)
+          if (
+            task.columnId === target.columnId &&
+            (target.swimlaneId === undefined || target.swimlaneId === task.swimlaneId) &&
+            !target.beforeTaskId &&
+            !target.afterTaskId
+          )
             return task;
 
           if (!opts?.bypassGuards) {

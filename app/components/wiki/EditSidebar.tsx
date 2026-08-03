@@ -1,6 +1,7 @@
 import { useRevisions } from "../../lib/queries";
 import { cn } from "../ui/cn";
 import { WikiSidebar } from "./WikiSidebar";
+import { parseApiDate } from "../../lib/date";
 
 const DELAY_OPTIONS = [500, 800, 1500, 3000];
 
@@ -16,7 +17,7 @@ interface EditSidebarProps {
 }
 
 function formatRelative(iso: string): string {
-  const then = new Date(iso).getTime();
+  const then = parseApiDate(iso).getTime();
   const now = Date.now();
   const diff = Math.max(0, now - then);
   const minutes = Math.floor(diff / 60000);

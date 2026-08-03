@@ -42,6 +42,12 @@
         </select>
       </div>
       <div class="prop-field">
+        <span class="prop-label">Swimlane</span>
+        <select class="prop-input" style="min-width:120px;">
+          <option>Sprint 6 — Ash &amp; Bone</option>
+        </select>
+      </div>
+      <div class="prop-field">
         <span class="prop-label">Priority</span>
         <span class="priority-badge pb-urgent">
           <span class="priority-dot priority-urgent"></span>
@@ -135,16 +141,26 @@
         </div>
         <button class="icon-btn" title="Remove source" style="width:20px;height:20px;"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg></button>
       </div>
-      <div class="flex items-center gap-2 mt-2">
-        <input class="prop-input" placeholder="Add wiki page or URL…" style="flex:1;height:28px;font-size:12px;" />
-        <button class="btn btn-ghost" style="height:26px;padding:0 8px;font-size:12px;flex-shrink:0;">
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 5v14m-7-7h14"/></svg>
-          Add
-        </button>
+      <div style="position:relative;">
+        <div class="flex items-center gap-2 mt-2">
+          <input class="prop-input" placeholder="Add source — type @ for a wiki page or paste a URL…" value="@" style="flex:1;height:28px;font-size:12px;" />
+          <button class="btn btn-ghost" style="height:26px;padding:0 8px;font-size:12px;flex-shrink:0;">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 5v14m-7-7h14"/></svg>
+            Add
+          </button>
+        </div>
+        <!-- @-mention dropdown: @ opens the wiki page list, typing filters it -->
+        <div class="menu-popover" style="position:absolute;top:calc(100% + 4px);left:0;right:0;z-index:30;max-height:224px;overflow-y:auto;">
+          <button class="menu-item" type="button"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg><span style="flex:1;text-align:left;">Game Design Doc</span><span class="font-micro text-2xs color-muted">design/game-design-doc</span></button>
+          <button class="menu-item active" type="button"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg><span style="flex:1;text-align:left;">Enemy AI Brainstorm</span><span class="font-micro text-2xs color-muted">enemy-ai-brainstorm</span></button>
+          <button class="menu-item" type="button"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg><span style="flex:1;text-align:left;">Level 3 Crash Report</span><span class="font-micro text-2xs color-muted">level-3-crash-report</span></button>
+        </div>
+        <span class="annotation-inline">Typing @ opens the wiki page list; keep typing to filter by title. ↑/↓ move the highlight, Enter picks it, Esc closes. Selection adds the page by slug — the only wiki ref the server validates. Without @, pasted URLs add as external sources.</span>
+        <span class="annotation-tag">No-match state: disabled row reads "No wiki pages match 'xyz'". Empty project wiki: "No wiki pages in this project yet".</span>
       </div>
     </div>
 
-    <!-- Links: subtasks, blocked-by, related (with @-autocomplete) -->
+    <!-- Links: subtasks, blocked-by, related (with title autocomplete) -->
     <div style="margin-top:24px;padding:16px 0 0;border-top:1px solid var(--lx-border-subtle);">
       <div class="flex items-center gap-2 mb-2">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="color:var(--lx-text-muted);"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
@@ -180,19 +196,15 @@
         <button class="icon-btn" title="Remove link" style="width:20px;height:20px;"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg></button>
       </div>
 
-      <!-- Add-link field with @-autocomplete -->
+      <!-- Add-link field with title autocomplete (no button — Enter or click adds) -->
       <div style="position:relative;">
         <div class="flex items-center gap-2 mt-2">
-          <input class="prop-input" placeholder="Add link — type @ or a task title…" value="@" style="flex:1;height:28px;font-size:12px;" />
+          <input class="prop-input" placeholder="Add link — type a task title…" value="double" style="flex:1;height:28px;font-size:12px;" />
           <select class="prop-input" style="width:110px;height:28px;font-size:12px;flex-shrink:0;">
             <option>Related to</option>
             <option>Subtask of</option>
             <option>Blocked by</option>
           </select>
-          <button class="btn btn-ghost" style="height:26px;padding:0 8px;font-size:12px;flex-shrink:0;">
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 5v14m-7-7h14"/></svg>
-            Link
-          </button>
         </div>
         <!-- Suggestion dropdown -->
         <div class="dropdown-menu" style="position:absolute;top:100%;left:0;margin-top:4px;z-index:30;width:100%;">
@@ -253,13 +265,14 @@
   <div style="position:fixed;top:24px;left:24px;z-index:55;display:flex;flex-direction:column;gap:8px;align-items:flex-start;">
     <span class="annotation-tag">Breadcrumb: Emberfall / Board</span>
     <span class="annotation-tag">Title: text-xl/600/Display, inline editable on click</span>
-    <span class="annotation-tag">PropertyBar: 4 fields — Column, Priority, Type, Assignee chips. +N chip is clickable — expands to show all assignees inline, replaced with − to collapse</span>
+    <span class="annotation-tag">PropertyBar: 5 fields — Column, Swimlane, Priority, Type, Assignee chips. +N chip is clickable — expands to show all assignees inline, replaced with − to collapse</span>
+    <span class="annotation-tag">Swimlane dropdown (next to Column): changes the task's lane via the move endpoint — same column, appended at the end of the column in the new lane. Subtasks follow the parent. Hidden entirely when the project has no swimlanes. Create mode has no Swimlane field — the lane comes from the board cell the +Add was clicked in.</span>
     <span class="annotation-tag">TipTap rendered: prose + checklist + code block</span>
     <span class="annotation-tag">Double-click description → opens task-detail-edit.html (Tiptap editor inline)</span>
-    <span class="annotation-tag">Sources: persisted per-document (document_sources) — wiki pages or external URLs. Forge uses them as context; add/remove inline.</span>
-    <span class="annotation-tag">Links: subtask_of / blocked_by / related_to. Add via @-autocomplete (search tasks by title, relation dropdown beside field). Blocked-by rows show warning dot. Subtasks render indented under parent on board (kanban.html).</span>
+    <span class="annotation-tag">Sources: persisted per-document (document_sources) — wiki pages or external URLs. Forge uses them as context; add/remove inline. Wiki pages added via @-mention picker (always a validated slug); URLs added as external refs.</span>
+    <span class="annotation-tag">Links: subtask_of / blocked_by / related_to. Add by typing a task title (2+ chars opens the suggestion list, filters as you type) — press Enter or click a suggestion to add, no button. Blocked-by rows show warning dot. Subtasks render indented under parent on board (kanban.html).</span>
     <span class="annotation-tag">GitHub Issues: multi-issue list with sync state + unlink per row. Diverged issue shows warning text inline: "GitHub state ≠ column. Move card to resync."</span>
-    <span class="annotation-tag">Footer: Archive (ghost) + Delete (ghost danger) opens confirm dialog · Close. Archived task variant: footer shows Restore (ghost) instead of Archive, plus an "Archived" notice banner. Delete dialog's Delete button shows "Deleting…" while pending (task-detail-required-field.html shows the same dialog chrome)</span>
+    <span class="annotation-tag">Footer: Archive (ghost) + Delete (ghost danger) opens confirm dialog. No footer Close — only the header X. Archived task variant: footer shows Restore (ghost) instead of Archive, plus an "Archived" notice banner. Delete dialog's Delete button shows "Deleting…" while pending (task-detail-required-field.html shows the same dialog chrome)</span>
     <span class="annotation-tag">Stale ?task= deep link (deleted/missing task): slideover shows "Task not found" empty state with a Close button instead of rendering nothing</span>
   </div>
 

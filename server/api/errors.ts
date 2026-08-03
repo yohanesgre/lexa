@@ -24,6 +24,15 @@ export class SourceNotFound extends Data.TaggedError("SourceNotFound")<{ id: str
 export class SourceFetchError extends Data.TaggedError("SourceFetchError")<{ message: string }> {}
 export class SourceUnreachable extends Data.TaggedError("SourceUnreachable")<{ url: string }> {}
 export class ForgeTaskNotFound extends Data.TaggedError("ForgeTaskNotFound")<{ id: string }> {}
+export class AgentNotFound extends Data.TaggedError("AgentNotFound")<{ id: string }> {}
+export class SkillNotFound extends Data.TaggedError("SkillNotFound")<{ id: string }> {}
+export class ForgeBuiltinDelete extends Data.TaggedError("ForgeBuiltinDelete")<{ kind: "agent" | "skill"; name: string }> {}
+export class ForgeEntityInUse extends Data.TaggedError("ForgeEntityInUse")<{ kind: "agent" | "skill"; name: string; count: number }> {}
+export class RuntimeNotFound extends Data.TaggedError("RuntimeNotFound")<{ id: string }> {}
+export class RuntimeEventNotFound extends Data.TaggedError("RuntimeEventNotFound")<{ id: string }> {}
+export class MachineNotFound extends Data.TaggedError("MachineNotFound")<{ id: string }> {}
+export class MachineOffline extends Data.TaggedError("MachineOffline")<{ id: string; hostname: string; lastSeen: string | null }> {}
+export class ApiKeyNotFound extends Data.TaggedError("ApiKeyNotFound")<{ id: string }> {}
 export class NoRuntimeOnline extends Data.TaggedError("NoRuntimeOnline")<{}> {}
 export class TaskLinkNotFound extends Data.TaggedError("TaskLinkNotFound")<{ id: string }> {}
 export class TaskLinkCycle extends Data.TaggedError("TaskLinkCycle")<{ message: string }> {}
@@ -52,6 +61,15 @@ export const errorCodeMap: Record<string, string> = {
   SourceFetchError: "SOURCE_FETCH_ERROR",
   SourceUnreachable: "SOURCE_UNREACHABLE",
   ForgeTaskNotFound: "FORGE_TASK_NOT_FOUND",
+  AgentNotFound: "AGENT_NOT_FOUND",
+  SkillNotFound: "SKILL_NOT_FOUND",
+  ForgeBuiltinDelete: "FORGE_BUILTIN_DELETE",
+  ForgeEntityInUse: "FORGE_ENTITY_IN_USE",
+  RuntimeNotFound: "RUNTIME_NOT_FOUND",
+  RuntimeEventNotFound: "RUNTIME_EVENT_NOT_FOUND",
+  MachineNotFound: "MACHINE_NOT_FOUND",
+  MachineOffline: "MACHINE_OFFLINE",
+  ApiKeyNotFound: "API_KEY_NOT_FOUND",
   NoRuntimeOnline: "NO_RUNTIME_ONLINE",
   TaskLinkNotFound: "TASK_LINK_NOT_FOUND",
   TaskLinkCycle: "TASK_LINK_CYCLE",
@@ -79,6 +97,12 @@ export function errorToStatus(error: { _tag: string }): number {
     case "WikiPageNotFound":
     case "SourceNotFound":
     case "ForgeTaskNotFound":
+    case "AgentNotFound":
+    case "SkillNotFound":
+    case "RuntimeNotFound":
+    case "RuntimeEventNotFound":
+    case "MachineNotFound":
+    case "ApiKeyNotFound":
     case "TaskLinkNotFound":
       return 404;
     case "WipLimitExceeded":
@@ -87,12 +111,15 @@ export function errorToStatus(error: { _tag: string }): number {
     case "GithubIssueAlreadyLinked":
     case "OptionInUse":
     case "NoRuntimeOnline":
+    case "MachineOffline":
     case "TaskLinkCycle":
+    case "ForgeEntityInUse":
       return 409;
     case "RequiredFieldMissing":
     case "NeighborNotInColumn":
     case "InvalidOption":
     case "InvalidTaskLink":
+    case "ForgeBuiltinDelete":
       return 422;
     case "InvalidKey":
     case "MissingAuth":
@@ -144,6 +171,24 @@ export function errorMessage(error: { _tag: string } & Record<string, unknown>):
       return `Cannot reach '${error.url}'`;
     case "ForgeTaskNotFound":
       return `Forge task not found`;
+    case "AgentNotFound":
+      return `Forge agent not found`;
+    case "SkillNotFound":
+      return `Forge skill not found`;
+    case "ForgeBuiltinDelete":
+      return `Builtin ${error.kind} '${error.name}' cannot be deleted — edit it or reset it to default instead`;
+    case "ForgeEntityInUse":
+      return `${error.kind === "agent" ? "Agent" : "Skill"} '${error.name}' is still used by ${error.count} forge task${error.count === 1 ? "" : "s"} — reassign those tasks first`;
+    case "RuntimeNotFound":
+      return `Runtime not found`;
+    case "RuntimeEventNotFound":
+      return `Runtime setup event not found`;
+    case "MachineNotFound":
+      return `Machine not found`;
+    case "MachineOffline":
+      return `Machine '${error.hostname || error.id}' is offline. Restart its listener before removing or restarting the runtime.`;
+    case "ApiKeyNotFound":
+      return `API key not found`;
     case "NoRuntimeOnline":
       return `No Forge runtime is online. Start the daemon (bun run forge:daemon) and try again.`;
     case "TaskLinkNotFound":

@@ -173,15 +173,95 @@ export interface Dashboard {
 // ── Forge (runtime agent writing assistant) ──
 
 export type ForgeProvider = "opencode" | "hermes" | "command-code";
-export type ForgeAction = "continue" | "rewrite" | "summarize" | "expand" | "grammar";
 export type ForgeTaskStatus = "queued" | "running" | "completed" | "failed" | "cancelled";
 export type SourceKind = "wiki" | "external";
+
+// A named rule bundle defined in Lexa. Its instructions are written into the
+// run dir as AGENTS.md at claim time. Distinct from a runtime's CLI agent
+// (Runtime.agent — the CLI persona flag).
+export interface ForgeAgent {
+  id: ID;
+  name: string;
+  // Display-only — never sent to the runtime agent.
+  description: string;
+  instructions: string;
+  isBuiltin: boolean;
+  skillIds: ID[];
+  createdAt: ISODate;
+  updatedAt: ISODate;
+}
+
+// A named operation bundle attached to agents (M2M). Its instructions are
+// written into the run dir as .agents/<skill>/SKILL.md at claim time.
+export interface ForgeSkill {
+  id: ID;
+  name: string;
+  description: string;
+  instructions: string;
+  isBuiltin: boolean;
+  createdAt: ISODate;
+  updatedAt: ISODate;
+}
+
+// A model the runtime's agent CLI can spawn, as reported by lexa-cli
+// (opencode models --verbose / cmd --list-models). id is the full
+// provider/model id — stored verbatim as Runtime.model and passed to --model.
+export interface RuntimeModel {
+  id: string;
+  provider: string;
+  name: string;
+}
+
+export interface RuntimeAgent {
+  id: string;
+  name: string;
+}
 
 export interface Runtime {
   id: ID;
   name: string;
   provider: ForgeProvider;
+  machineId: ID | null;
+  // The agent CLI's internal agent/persona flag (opencode --agent build/plan).
+  // Empty = the CLI's default agent.
+  agent: string;
+  model: string;
+  // opencode run flags: --print-logs (bool) + --log-level (DEBUG|INFO|WARN|ERROR).
+  // Empty logLevel = opencode's default. Only applied for the opencode provider.
+  printLogs: boolean;
+  logLevel: "" | "DEBUG" | "INFO" | "WARN" | "ERROR";
+  extraArgs: string[];
+  modelsCatalog: RuntimeModel[];
+  agentsCatalog: RuntimeAgent[];
   status: "online" | "offline";
+  // Daemon-verified Lexa MCP connectivity (initialize+ping on every
+  // heartbeat). Runtimes without it are blocked from Forge tasks.
+  mcpConnected: boolean;
+  hostname: string;
+  lastSeen: ISODate | null;
+  createdAt: ISODate;
+}
+
+export type RuntimeEventAction = "install" | "update" | "remove";
+
+export interface RuntimeEvent {
+  id: ID;
+  machineId: ID;
+  action: RuntimeEventAction;
+  agentCli: ForgeProvider;
+  // Null for update/remove events; install delivers a fresh key once.
+  apiKeyId: ID | null;
+  status: "pending" | "claimed" | "completed" | "failed";
+  error: string | null;
+  createdAt: ISODate;
+  claimedAt: ISODate | null;
+  finishedAt: ISODate | null;
+}
+
+// A `lexa-cli machine listen` process heartbeating machine presence so the web
+// setup wizard can target a listening machine.
+export interface Machine {
+  id: ID;
   hostname: string;
   lastSeen: ISODate | null;
   createdAt: ISODate;
@@ -193,7 +273,12 @@ export interface ForgeTask {
   projectId: ID;
   documentType: "task" | "wiki";
   documentId: string;
-  action: ForgeAction;
+  documentTitle: string;
+  agentId: ID;
+  skillId: ID;
+  agentName: string;
+  skillName: string;
+  extraPrompt: string;
   selection: string;
   docContext: string;
   status: ForgeTaskStatus;
@@ -202,6 +287,14 @@ export interface ForgeTask {
   createdAt: ISODate;
   startedAt: ISODate | null;
   finishedAt: ISODate | null;
+}
+
+// One line of the live activity feed for a Forge task (append-only).
+export interface ForgeTaskLog {
+  id: ID;
+  taskId: ID;
+  message: string;
+  createdAt: ISODate;
 }
 
 export interface DocumentSource {

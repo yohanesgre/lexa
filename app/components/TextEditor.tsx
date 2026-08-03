@@ -1,6 +1,7 @@
-import { useRef, useMemo, useState } from "react";
+import { useRef, useMemo, useState, useEffect } from "react";
 import { useEditor, EditorContent } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
+import Code from "@tiptap/extension-code";
 import Highlight from "@tiptap/extension-highlight";
 import Underline from "@tiptap/extension-underline";
 import TaskList from "@tiptap/extension-task-list";
@@ -10,12 +11,20 @@ import type { TipTapDoc } from "../../shared/types";
 import type { JSONContent } from "@tiptap/core";
 import { cn } from "./ui/cn";
 import { ForgePopover } from "./forge/ForgePopover";
+import { ForgeReviewSurface } from "./forge/ForgeReviewSurface";
+import { useForgeReview, type ForgeReviewIdentity } from "./forge/useForgeReview";
 
 export const textEditorExtensions = [
   StarterKit.configure({
     heading: { levels: [2, 3, 4, 5] },
     link: { openOnClick: false },
+    code: false,
   }),
+  // StarterKit's code mark excludes all other marks (bold+code is invalid
+  // in the schema), but valid CommonMark like **`code`** produces exactly
+  // that combination — and Forge results routinely contain it. Without this,
+  // accepting such a result throws and the review panel is stuck open.
+  Code.extend({ excludes: "" }),
   Underline,
   Highlight.configure({ multicolor: false }),
   TaskList,
@@ -37,8 +46,11 @@ interface TextEditorProps {
     slug: string;
     documentType: "task" | "wiki";
     documentId: string;
-    onAccept?: (text: string) => void;
   };
+  // Fired when a Forge review enters/exits the editor (used by surfaces to
+  // suspend autosave while a result is under review — the document itself is
+  // never modified until Accept, so nothing unaccepted can be saved).
+  onReviewStateChange?: (active: boolean) => void;
 }
 
 function ToolbarButton({
@@ -89,30 +101,28 @@ export function Toolbar({
   editor,
   headingLevel,
   forge,
+  reviewActive,
+  appliedTaskId,
+  onReview,
 }: {
   editor: NonNullable<ReturnType<typeof useEditor>>;
   headingLevel: number;
   forge?: TextEditorProps["forge"];
+  // Forge review-in-editor: the review surface is rendered by the editing
+  // surfaces in the editor body, not by the toolbar. The toolbar only opens
+  // the Forge popover; "Review in editor" hands the result up via onReview.
+  reviewActive: boolean;
+  appliedTaskId: string | null;
+  onReview?: (text: string, identity: ForgeReviewIdentity) => void;
 }) {
   const [forgeOpen, setForgeOpen] = useState(false);
   const [forgeAnchor, setForgeAnchor] = useState<DOMRect | null>(null);
   const forgeBtnRef = useRef<HTMLButtonElement>(null);
 
-  const handleAccept = (text: string) => {
-    if (!text) return;
-    const { from, to } = editor.state.selection;
-    const hasSelection = from !== to;
-    if (hasSelection) {
-      editor.chain().focus().insertContentAt({ from, to }, text).run();
-    } else {
-      editor.chain().focus().insertContent(text).run();
-    }
-    forge?.onAccept?.(text);
-  };
-
   return (
-    <div className="editor-toolbar wiki-toolbar-host" style={{ borderBottom: "1px solid var(--lx-border-default)", borderRadius: "6px 6px 0 0" }}>
-      <div className="wiki-toolbar-row">
+    <>
+      <div className="editor-toolbar wiki-toolbar-host" style={{ borderBottom: "1px solid var(--lx-border-default)", borderRadius: "6px 6px 0 0" }}>
+        <div className="wiki-toolbar-row">
         <ToolbarButton command={() => editor.chain().focus().undo().run()} isActive={false} title="Undo" disabled={!editor.can().undo()}>
           <i className="ph ph-arrow-arc-left" />
         </ToolbarButton>
@@ -189,6 +199,7 @@ export function Toolbar({
           Forge
         </button>
       </div>
+      </div>
       {forge && forgeOpen && (
         <ForgePopover
           editor={editor}
@@ -197,11 +208,16 @@ export function Toolbar({
           documentId={forge.documentId}
           open={forgeOpen}
           onClose={() => setForgeOpen(false)}
-          onAccept={handleAccept}
+          onReview={(text, identity) => {
+            setForgeOpen(false);
+            onReview?.(text, identity);
+          }}
+          reviewActive={reviewActive}
+          appliedTaskId={appliedTaskId}
           anchorRect={forgeAnchor}
         />
       )}
-    </div>
+    </>
   );
 }
 
@@ -215,11 +231,24 @@ export function TextEditor({
   className,
   extensions,
   forge,
+  onReviewStateChange,
 }: TextEditorProps) {
   const onBlurRef = useRef(onBlur);
   onBlurRef.current = onBlur;
   const onChangeRef = useRef(onChange);
   onChangeRef.current = onChange;
+  const wrapperRef = useRef<HTMLDivElement>(null);
+  const lastPointerDownInside = useRef(false);
+
+  useEffect(() => {
+    const onPointerDown = (e: PointerEvent) => {
+      const target = e.target as HTMLElement | null;
+      lastPointerDownInside.current =
+        wrapperRef.current?.contains(target) === true || target?.closest("[data-forge-popover]") !== null;
+    };
+    document.addEventListener("pointerdown", onPointerDown, true);
+    return () => document.removeEventListener("pointerdown", onPointerDown, true);
+  }, []);
 
   const finalExtensions = useMemo(() => {
     const base = extensions ?? textEditorExtensions;
@@ -237,7 +266,24 @@ export function TextEditor({
     extensions: finalExtensions,
     content: initialContent as unknown as JSONContent,
     editable,
-    editorProps,
+    editorProps: {
+      ...editorProps,
+      handleDOMEvents: {
+        ...(editorProps as Record<string, any> | undefined)?.handleDOMEvents,
+        // Returning true stops ProseMirror's focusEvents plugin, so the
+        // editor never reports a blur when focus moves within its own chrome
+        // (toolbar buttons) and onBlur doesn't exit edit mode. A blur with
+        // null relatedTarget (browser quirk when a selection is active) is
+        // only kept when the pointer went down inside the chrome.
+        blur: (_view, event) => {
+          const related = (event as FocusEvent).relatedTarget as HTMLElement | null;
+          if (related !== null) {
+            return wrapperRef.current?.contains(related) === true || related?.closest("[data-forge-popover]") !== null;
+          }
+          return lastPointerDownInside.current;
+        },
+      },
+    },
     onUpdate: ({ editor: nextEditor }) => {
       onChangeRef.current?.(nextEditor.getJSON() as unknown as TipTapDoc);
     },
@@ -246,13 +292,18 @@ export function TextEditor({
     },
   });
 
+  const { review, appliedTaskId, handleReview, handleAcceptReview, handleRejectReview } = useForgeReview(editor, onReviewStateChange);
+
   if (!editor) return null;
 
   const headingLevel = (editor.getAttributes("heading").level as number | undefined) ?? 0;
 
   return (
-    <div className={cn("editor-wrapper", className)}>
-      <Toolbar editor={editor} headingLevel={headingLevel} forge={forge} />
+    <div className={cn("editor-wrapper", className, review && "is-reviewing")} ref={wrapperRef}>
+      <Toolbar editor={editor} headingLevel={headingLevel} forge={forge} reviewActive={review !== null} appliedTaskId={appliedTaskId} onReview={handleReview} />
+      {review && (
+        <ForgeReviewSurface action={review.action} runtime={review.runtime} diff={review.diff} onAccept={handleAcceptReview} onReject={handleRejectReview} />
+      )}
       <EditorContent editor={editor} className="editor-content" />
     </div>
   );

@@ -8,6 +8,7 @@
     "dev:server": "bun --env-file=.env run server/entry.ts",
     "dev:full": "bash scripts/dev.sh",
     "forge:daemon": "bun run scripts/forge/daemon.ts",
+    "lexa-cli": "bun run scripts/cli/index.ts",
     "setup": "bun run scripts/setup-cli.ts",
     "build": "vite build",
     "typecheck": "tsc --noEmit",

@@ -2,6 +2,7 @@ import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { Check, Copy, KeyRound, Mail, Database, ArrowRight, ArrowLeft, Sparkles } from "lucide-react";
 import { useEffect, useState } from "react";
 import { getSetupStatus, setSetupAdmin, createSetupApiKey, seedSampleData, type SetupStatus } from "../lib/api";
+import { copyToClipboard } from "../lib/clipboard";
 import { cn } from "../components/ui/cn";
 
 export const Route = createFileRoute("/setup")({
@@ -89,7 +90,7 @@ function SetupWizard() {
 
   const copyKey = async () => {
     if (!apiKey) return;
-    await navigator.clipboard.writeText(apiKey).catch(() => {});
+    await copyToClipboard(apiKey);
     setCopied(true);
     window.setTimeout(() => setCopied(false), 1500);
   };

@@ -213,6 +213,7 @@ function AppShell() {
 
   const routeType: "dashboard" | "board" | "wiki" | "settings" = useMemo(() => {
     if (pathname === "/") return "dashboard";
+    if (pathname === "/forge") return "dashboard";
     if (pathname.match(/^\/[^/]+\/wiki(?:\/.*)?$/)) return "wiki";
     if (pathname.match(/^\/[^/]+\/settings$/)) return "settings";
     if (pathname.match(/^\/[^/]+$/)) return "board";
@@ -244,6 +245,7 @@ function AppShell() {
             <NavLink to={settingsTo} params={settingsParams} active={routeType === "settings"}>
               Settings
             </NavLink>
+            <NavLink to="/forge">Forge</NavLink>
           </div>
           <div className="nav-spacer" />
           <div className="nav-right">

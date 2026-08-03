@@ -8,6 +8,8 @@ import { TextEditor } from "./TextEditor";
 import { Toolbar, textEditorExtensions } from "./TextEditor";
 import { SourcesSection } from "./forge/SourcesSection";
 import { LinksSection } from "./forge/LinksSection";
+import { ForgeReviewSurface } from "./forge/ForgeReviewSurface";
+import { useForgeReview } from "./forge/useForgeReview";
 import { cn } from "./ui/cn";
 import { useEditor, EditorContent } from "@tiptap/react";
 import type { JSONContent } from "@tiptap/core";
@@ -85,12 +87,14 @@ interface TaskDetailProps {
   project?: { name: string };
   defaultColumnId?: string;
   columns?: { id: string; name: string }[];
+  swimlanes?: { id: string; name: string }[];
   columnRequiredFields?: { columnId: string; fields: string[] }[];
   availableAssignees?: string[];
   taskTitles?: Map<string, string>;    // taskId → title, for link display
   fieldConfig?: { priorities: { id: string; label: string; color: string }[]; types: { id: string; label: string; color: string }[] };
   onClose: () => void;
   onUpdate?: (id: string, data: Partial<Task>) => void;
+  onMove?: (id: string, target: { columnId: string; swimlaneId: string; beforeTaskId?: string; afterTaskId?: string }) => void;
   onDelete?: (id: string) => Promise<void>;
   onArchive?: (id: string) => Promise<void>;
   onRestore?: (id: string) => Promise<void>;
@@ -367,6 +371,7 @@ interface DescriptionEditorProps {
   placeholder?: string;
   editable?: boolean;
   forge?: { slug: string; documentType: "task" | "wiki"; documentId: string };
+  onReviewStateChange?: (active: boolean) => void;
 }
 
 function DescriptionEditor({
@@ -378,6 +383,7 @@ function DescriptionEditor({
   placeholder,
   editable = true,
   forge,
+  onReviewStateChange,
 }: DescriptionEditorProps) {
   const onBlurRef = useRef(onBlur);
   onBlurRef.current = onBlur;
@@ -387,6 +393,28 @@ function DescriptionEditor({
   onDoneRef.current = onDone;
   const onCancelRef = useRef(onCancel);
   onCancelRef.current = onCancel;
+  // Forge review end: persist whatever the doc holds now (the accepted
+  // replacement) via the same save path as Done. Reject leaves the doc
+  // untouched — stay in edit mode.
+  const handleReviewStateChange = (active: boolean, accepted: boolean) => {
+    onReviewStateChange?.(active);
+    if (!active && accepted && onDoneRef.current && editorRef.current) {
+      onDoneRef.current(editorRef.current.getJSON() as unknown as TipTapDoc);
+    }
+  };
+  const wrapperRef = useRef<HTMLDivElement>(null);
+  const lastPointerDownInside = useRef(false);
+  const editorRef = useRef<NonNullable<ReturnType<typeof useEditor>> | null>(null);
+
+  useEffect(() => {
+    const onPointerDown = (e: PointerEvent) => {
+      const target = e.target as HTMLElement | null;
+      lastPointerDownInside.current =
+        wrapperRef.current?.contains(target) === true || target?.closest("[data-forge-popover]") !== null;
+    };
+    document.addEventListener("pointerdown", onPointerDown, true);
+    return () => document.removeEventListener("pointerdown", onPointerDown, true);
+  }, []);
 
   const editor = useEditor({
     immediatelyRender: false,
@@ -398,6 +426,9 @@ function DescriptionEditor({
     },
     onBlur: ({ editor: ed }) => {
       onBlurRef.current?.(ed.getJSON() as unknown as TipTapDoc);
+    },
+    onCreate: ({ editor: ed }) => {
+      editorRef.current = ed;
     },
     editorProps: {
       handleKeyDown: (_view, event) => {
@@ -415,8 +446,25 @@ function DescriptionEditor({
         }
         return false;
       },
+      handleDOMEvents: {
+        // Returning true stops ProseMirror's focusEvents plugin, so the
+        // editor never reports a blur when focus moves within its own chrome
+        // (toolbar, done/cancel buttons) and onBlur doesn't exit edit mode.
+        // A blur with null relatedTarget (browser quirk when a selection is
+        // active, or prompt dialogs) is only kept when the pointer went down
+        // inside the chrome.
+        blur: (_view, event) => {
+          const related = (event as FocusEvent).relatedTarget as HTMLElement | null;
+          if (related !== null) {
+            return wrapperRef.current?.contains(related) === true || related?.closest("[data-forge-popover]") !== null;
+          }
+          return lastPointerDownInside.current;
+        },
+      },
     },
   });
+
+  const { review, appliedTaskId, handleReview, handleAcceptReview, handleRejectReview } = useForgeReview(editor, handleReviewStateChange);
 
   if (!editor) return null;
 
@@ -427,7 +475,7 @@ function DescriptionEditor({
   };
 
   return (
-    <div className="editor-wrapper">
+    <div className={cn("editor-wrapper", review && "is-reviewing")} ref={wrapperRef}>
       {onDone && (
         <div
           className="flex items-center justify-between"
@@ -459,14 +507,17 @@ function DescriptionEditor({
         </div>
       )}
       <div style={{ display: "flex", alignItems: "center", borderBottom: "1px solid var(--lx-border-default)" }}>
-        <Toolbar editor={editor} headingLevel={headingLevel} forge={forge} />
+        <Toolbar editor={editor} headingLevel={headingLevel} forge={forge} reviewActive={review !== null} appliedTaskId={appliedTaskId} onReview={handleReview} />
       </div>
+      {review && (
+        <ForgeReviewSurface action={review.action} runtime={review.runtime} diff={review.diff} onAccept={handleAcceptReview} onReject={handleRejectReview} />
+      )}
       <EditorContent editor={editor} className="editor-content" />
     </div>
   );
 }
 
-export function TaskDetail({ mode = "view", task, project, defaultColumnId, columns, columnRequiredFields, availableAssignees, taskTitles, fieldConfig, onClose, onUpdate, onDelete, onArchive, onRestore, onCreate }: TaskDetailProps) {
+export function TaskDetail({ mode = "view", task, project, defaultColumnId, columns, swimlanes, columnRequiredFields, availableAssignees, taskTitles, fieldConfig, onClose, onUpdate, onMove, onDelete, onArchive, onRestore, onCreate }: TaskDetailProps) {
   const params = useParams({ strict: false }) as { slug?: string };
   const slug = params.slug;
   const isCreate = mode === "create";
@@ -476,6 +527,7 @@ export function TaskDetail({ mode = "view", task, project, defaultColumnId, colu
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [selectedColumnId, setSelectedColumnId] = useState(task?.columnId ?? "");
+  const [selectedSwimlaneId, setSelectedSwimlaneId] = useState(task?.swimlaneId ?? "");
   const [dismissedWarning, setDismissedWarning] = useState(false);
   const closeTimer = useRef<number | null>(null);
 
@@ -532,6 +584,10 @@ export function TaskDetail({ mode = "view", task, project, defaultColumnId, colu
   useEffect(() => {
     if (task?.columnId) setSelectedColumnId(task.columnId);
   }, [task?.columnId]);
+
+  useEffect(() => {
+    if (task?.swimlaneId) setSelectedSwimlaneId(task.swimlaneId);
+  }, [task?.swimlaneId]);
 
   const handleLinkIssue = () => {
     if (!linkRepo.trim()) return;
@@ -600,6 +656,7 @@ export function TaskDetail({ mode = "view", task, project, defaultColumnId, colu
 
   const currentColumnId = isCreate ? createColumnId : (selectedColumnId || task?.columnId || "");
   const currentColumnName = columns?.find((column) => column.id === currentColumnId)?.name ?? "";
+  const currentSwimlaneName = swimlanes?.find((lane) => lane.id === selectedSwimlaneId)?.name ?? "";
   const isArchived = !isCreate && task != null && task.archivedAt != null;
   const missingFields = isCreate
     ? getMissingRequiredFields(createColumnId, columnRequiredFields, {
@@ -685,12 +742,18 @@ export function TaskDetail({ mode = "view", task, project, defaultColumnId, colu
             <button
               className="btn btn-ghost !w-8 !h-8 !p-0"
               onClick={() => setExpanded((v) => !v)}
-              aria-label="Toggle width"
-              title="Toggle width (480px → full width)"
+              aria-label={expanded ? "Shrink width" : "Expand width"}
+              title={expanded ? "Toggle width (full width → 480px)" : "Toggle width (480px → full width)"}
             >
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5}>
-                <path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7" />
-              </svg>
+              {expanded ? (
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5}>
+                  <path d="M4 14h6v6M20 10h-6V4M14 14l7-7M10 10l-7 7" />
+                </svg>
+              ) : (
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5}>
+                  <path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7" />
+                </svg>
+              )}
             </button>
             <button className="btn btn-ghost !w-8 !h-8 !p-0" onClick={handleClose} aria-label="Close">
               <X size={18} strokeWidth={1.5} />
@@ -796,6 +859,33 @@ export function TaskDetail({ mode = "view", task, project, defaultColumnId, colu
               />
             )}
           </div>
+          {!isCreate && (swimlanes?.length ?? 0) > 0 && (
+            <div className="prop-field">
+              <span className="prop-label">Swimlane</span>
+              <SelectDropdown
+                value={selectedSwimlaneId}
+                options={(swimlanes ?? []).map((lane) => ({
+                  value: lane.id,
+                  label: lane.name,
+                }))}
+                onChange={(swimlaneId) => {
+                  setSelectedSwimlaneId(swimlaneId);
+                  onMove?.(task!.id, { columnId: task!.columnId, swimlaneId });
+                }}
+                trigger={({ open, toggle }) => (
+                  <button
+                    type="button"
+                    className="prop-input"
+                    style={{ minWidth: 120, height: 32, justifyContent: "space-between", display: "inline-flex", alignItems: "center" }}
+                    onClick={toggle}
+                  >
+                    <span>{currentSwimlaneName || "—"}</span>
+                    <ChevronDown size={14} className={cn("transition-transform", open && "rotate-180")} />
+                  </button>
+                )}
+              />
+            </div>
+          )}
           <div className="prop-field">
             <span className="prop-label">Priority</span>
             {isCreate ? (
@@ -1219,9 +1309,6 @@ export function TaskDetail({ mode = "view", task, project, defaultColumnId, colu
               >
                 <TrashIcon size={14} />
                 Delete
-              </button>
-              <button className="btn btn-ghost" onClick={handleClose}>
-                Close
               </button>
             </>
           )}
