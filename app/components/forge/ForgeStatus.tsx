@@ -4,7 +4,6 @@ import { Check, ChevronRight, Copy, Hammer, List, X } from "lucide-react";
 import { Link } from "@tanstack/react-router";
 import { cn } from "../ui/cn";
 import { copyToClipboard } from "../../lib/clipboard";
-import { useProjectSelection } from "../../lib/project-selection";
 import { useProjects, useRecentForgeTasks, useRuntimes, useCancelForgeTask, useForgeTaskLogs } from "../../lib/queries";
 import type { RecentForgeTask } from "../../lib/api";
 
@@ -65,7 +64,6 @@ export function ForgeStatus() {
   const { data: tasks = [] } = useRecentForgeTasks();
   const { data: projects = [] } = useProjects();
   const { data: runtimes = [] } = useRuntimes();
-  const { selectedSlug } = useProjectSelection();
   const cancelTask = useCancelForgeTask();
   const [open, setOpen] = useState(false);
   const [dismissed, setDismissed] = useState<Set<string>>(loadDismissed);
@@ -138,7 +136,6 @@ export function ForgeStatus() {
   const idle = !active && doneCount === 0 && failedCount === 0;
 
   const slugByProject = new Map(projects.map((p) => [p.id, p.slug]));
-  const runtimesSlug = selectedSlug ?? projects[0]?.slug;
 
   return (
     <div ref={containerRef} style={{ position: "relative" }}>
@@ -293,22 +290,17 @@ export function ForgeStatus() {
               <List size={14} strokeWidth={1.5} />
               <span className="text-xs text-lx-text-secondary">Forge control panel</span>
             </Link>
-            {runtimesSlug && (
-              <>
-                <div className="dropdown-separator" />
-                <Link
-                  to="/$slug/settings"
-                  params={{ slug: runtimesSlug }}
-                  role="menuitem"
-                  onClick={() => setOpen(false)}
-                  className="dropdown-item"
-                  style={{ height: 28, textDecoration: "none" }}
-                >
-                  <Hammer size={14} strokeWidth={1.5} />
-                  <span className="text-xs text-lx-text-secondary">Forge runtimes</span>
-                </Link>
-              </>
-            )}
+            <div className="dropdown-separator" />
+            <Link
+              to="/settings"
+              role="menuitem"
+              onClick={() => setOpen(false)}
+              className="dropdown-item"
+              style={{ height: 28, textDecoration: "none" }}
+            >
+              <Hammer size={14} strokeWidth={1.5} />
+              <span className="text-xs text-lx-text-secondary">Forge runtimes</span>
+            </Link>
           </div>,
           document.body
         )}

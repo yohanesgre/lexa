@@ -214,6 +214,7 @@ function AppShell() {
   const routeType: "dashboard" | "board" | "wiki" | "settings" = useMemo(() => {
     if (pathname === "/") return "dashboard";
     if (pathname === "/forge") return "dashboard";
+    if (pathname === "/settings") return "settings";
     if (pathname.match(/^\/[^/]+\/wiki(?:\/.*)?$/)) return "wiki";
     if (pathname.match(/^\/[^/]+\/settings$/)) return "settings";
     if (pathname.match(/^\/[^/]+$/)) return "board";
@@ -224,10 +225,8 @@ function AppShell() {
 
   const boardTo = selectedSlug ? "/$slug" : "/";
   const wikiTo = selectedSlug ? "/$slug/wiki" : "/";
-  const settingsTo = selectedSlug ? "/$slug/settings" : "/";
   const boardParams = selectedSlug ? { slug: selectedSlug } : undefined;
   const wikiParams = selectedSlug ? { slug: selectedSlug } : undefined;
-  const settingsParams = selectedSlug ? { slug: selectedSlug } : undefined;
 
   return (
     <>
@@ -242,7 +241,7 @@ function AppShell() {
             <NavLink to={wikiTo} params={wikiParams} active={routeType === "wiki"}>
               Wiki
             </NavLink>
-            <NavLink to={settingsTo} params={settingsParams} active={routeType === "settings"}>
+            <NavLink to="/settings" active={routeType === "settings"}>
               Settings
             </NavLink>
             <NavLink to="/forge">Forge</NavLink>

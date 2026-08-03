@@ -98,6 +98,8 @@ interface TaskDetailProps {
   onDelete?: (id: string) => Promise<void>;
   onArchive?: (id: string) => Promise<void>;
   onRestore?: (id: string) => Promise<void>;
+  onLinkGithub?: (id: string, repo: string) => Promise<{ repo: string; issueNumber: number } | null | undefined>;
+  onUnlinkGithub?: (id: string, issueId: string) => Promise<void>;
   onCreate?: (input: {
     title: string;
     columnId: string;
@@ -517,7 +519,7 @@ function DescriptionEditor({
   );
 }
 
-export function TaskDetail({ mode = "view", task, project, defaultColumnId, columns, swimlanes, columnRequiredFields, availableAssignees, taskTitles, fieldConfig, onClose, onUpdate, onMove, onDelete, onArchive, onRestore, onCreate }: TaskDetailProps) {
+export function TaskDetail({ mode = "view", task, project, defaultColumnId, columns, swimlanes, columnRequiredFields, availableAssignees, taskTitles, fieldConfig, onClose, onUpdate, onMove, onDelete, onArchive, onRestore, onLinkGithub, onUnlinkGithub, onCreate }: TaskDetailProps) {
   const params = useParams({ strict: false }) as { slug?: string };
   const slug = params.slug;
   const isCreate = mode === "create";
@@ -575,7 +577,6 @@ export function TaskDetail({ mode = "view", task, project, defaultColumnId, colu
   const [linkState, setLinkState] = useState<"idle" | "input" | "loading" | "success">("idle");
   const [linkRepo, setLinkRepo] = useState("");
   const [linkedIssue, setLinkedIssue] = useState<{ repo: string; number: number } | null>(null);
-  const linkTimer = useRef<number | null>(null);
 
   useEffect(() => {
     if (defaultColumnId) setCreateColumnId(defaultColumnId);
@@ -589,20 +590,26 @@ export function TaskDetail({ mode = "view", task, project, defaultColumnId, colu
     if (task?.swimlaneId) setSelectedSwimlaneId(task.swimlaneId);
   }, [task?.swimlaneId]);
 
-  const handleLinkIssue = () => {
-    if (!linkRepo.trim()) return;
+  const handleLinkIssue = async () => {
+    if (!task || !linkRepo.trim()) return;
     setLinkState("loading");
-    linkTimer.current = window.setTimeout(() => {
-      setLinkedIssue({ repo: linkRepo.trim(), number: 100 + Math.floor(Math.random() * 900) });
+    try {
+      const linked = await onLinkGithub?.(task.id, linkRepo.trim());
+      if (linked) setLinkedIssue({ repo: linked.repo, number: linked.issueNumber });
       setLinkState("success");
-    }, 1500);
+    } catch {
+      setLinkState("idle");
+    }
   };
 
-  useEffect(() => {
-    return () => {
-      if (linkTimer.current !== null) window.clearTimeout(linkTimer.current);
-    };
-  }, []);
+  const handleUnlinkIssue = async (issueId: string) => {
+    if (!task) return;
+    try {
+      await onUnlinkGithub?.(task.id, issueId);
+    } catch {
+      // error toast comes from the mutation
+    }
+  };
 
   const handleCreate = async () => {
     const title = createTitle.trim();
@@ -1153,6 +1160,7 @@ export function TaskDetail({ mode = "view", task, project, defaultColumnId, colu
                               type="button"
                               className="btn btn-ghost !w-6 !h-6 !p-0"
                               title="Unlink issue"
+                              onClick={() => handleUnlinkIssue(g.issueId)}
                             >
                               <X size={12} strokeWidth={1.5} />
                             </button>

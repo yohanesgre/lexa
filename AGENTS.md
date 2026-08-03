@@ -109,6 +109,12 @@ bun run dev                     # local smoke testing (vite + server)
 The `.env` file is **required** — it supplies `LXK_API_KEY` (server auth) and
 `VITE_LXK_API_KEY` (browser auth header). `bun run setup` writes it.
 
+**GitHub sync (Phase 6):** full setup guide in `docs/GITHUB_SETUP.md` — GitHub
+App creation, webhook URL/secret, `GITHUB_APP_ID` / `GITHUB_PRIVATE_KEY` (inline
+PEM) or `GITHUB_PRIVATE_KEY_FILE` (path — recommended), prod volume mount,
+Access bypass policies for `/api/webhooks/*` and `/mcp`, and the acceptance
+round-trip. Without the bypass, GitHub deliveries 302 on Access.
+
 **One command — the recommended dev loop:**
 
 ```bash

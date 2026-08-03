@@ -1,10 +1,10 @@
-# Release — v0.1.0
+# Release — v0.1.0 (internal verification ledger)
 
-> Status: HARDENING COMPLETE — all A–E items green (2026-08-03). Tag `v0.1.0`
-> pending user go.
+> User-facing release notes: `docs/RELEASE_NOTES.md`.
+> Status: SHIPPED — tag `v0.1.0` (2026-08-04). All A–G items green.
 
-Scope: first tagged release of Lexa as a self-hosted project-management tool.
-GitHub two-way sync is **deferred** (planned, not implemented — see §B).
+Scope: first tagged release of Lexa as a self-hosted project-management tool,
+**including** the two-way GitHub issue sync (Phase 6 — see §F/G).
 
 ## A. Security hardening
 
@@ -29,15 +29,16 @@ GitHub two-way sync is **deferred** (planned, not implemented — see §B).
  - [x] **A5 — Limit clamp.** Wiki `listRevisions` uses `clampLimit` instead of
       unchecked `parseInt`. (SECURITY.md #18.)
 
-## B. GitHub sync — deferred, docs made honest
+## B. GitHub sync — shipped (Phase 6, not deferred)
 
- - [x] `docs/API.md`: `github-link` endpoints, `POST /api/webhooks/github`, and
-      task `github` fields marked **planned — not implemented in v0.1.0**.
- - [x] `docs/MCP.md`: `link_github_issue`/`unlink_github_issue` already carry
-      STUB wording — verify and keep.
- - [x] `docs/SECURITY.md`: statuses updated — #7/#17/#18 fixed after A3–A5,
-      #9 stays pending (Phase 6), #12/#13/#15 N/A (legacy `scripts/mcp/`
-      deleted).
+ - [x] Two-way issue sync shipped: GitHub App client (JWT/token cache/HMAC),
+      `GitHubService`, raw webhook route (HMAC before parse, ack-200 +
+      background processing, `webhook_events` dedup, per-issue echo
+      suppression), `github-link` REST endpoints, MCP tools, TaskDetail UI.
+      Full setup guide: `docs/GITHUB_SETUP.md`.
+ - [x] `docs/API.md` / `docs/MCP.md` / `docs/LAYERS.md` / `docs/ARCHITECTURE.md`
+      synced to the implemented multi-issue reality; `docs/SECURITY.md` #9 →
+      FIXED.
 
 ## C. Legacy `scripts/mcp/` removed
 
@@ -57,10 +58,14 @@ GitHub two-way sync is **deferred** (planned, not implemented — see §B).
 ## E. Verification gates (run in order, before tagging)
 
 1. ✅ `tsc --noEmit` — pass (also fixed 17 pre-existing baseline errors: FiberId logging, findByUserId, dashboard/role error unions, catchTag narrowing, `CannotDeleteSelf()` arity, SSR import decl).
-2. ✅ `vitest run` — 88/88 green.
+2. ✅ `vitest run` — 95/95 green (incl. GitHub crypto: JWT PKCS#1/PKCS#8, HMAC constant-time).
 3. ✅ `bun run build` — production build succeeds.
 4. ✅ Stack restarted with current `.env`; `/api/health` ok; `lxk-api-key` meta injected on :3000.
-5. ✅ Backend curl suite 37/37: 401/200 auth, setup mutations → 403 `SETUP_LOCKED`, member key → 403 on admin endpoints (admin key → 200), board/fieldConfig, task CRUD + archive/restore, 404/204 codes, FTS crash → 422 `SEARCH_ERROR`, revisions limit clamp, forge endpoints, MCP handshake (401 without key / 200 with / jsonrpc validation).
-6. ✅ Frontend pass (clean browser): dashboard, board, task detail, wiki tree + page + editor, settings (API Keys/Agents/Skills/Runtimes), Forge popover — all render, console errors = 0. (agent-browser showed a stale-HMR React error from the pre-restart dev server; absent on clean load.)
+5. ✅ Backend curl suite: 401/200 auth, setup mutations locked, board/fieldConfig, task CRUD + archive/restore, 404/204 codes, FTS crash → 422 `SEARCH_ERROR`, forge endpoints, MCP handshake (401 without key / 200 with / jsonrpc validation). **Constraint mapping fixed:** bun:sqlite reports `UNIQUE constraint failed:` (no `SQLITE_CONSTRAINT` string) — `run()`/`batch()` now classify correctly: duplicate slug → 409 `SLUG_TAKEN`, non-empty column delete → 409 `HAS_CHILDREN`, position conflicts → retryable `ConstraintViolation` (was: all 500 `DATABASE_ERROR`).
+6. ✅ Frontend pass (clean browser): dashboard, board, task detail, wiki tree + page + editor, settings (API Keys/Agents/Skills/Runtimes), Forge popover — all render, console errors = 0.
 7. ✅ `docker compose build app` — image builds.
-8. ⏳ Working tree reviewed; commit + `git tag v0.1.0` + push — **on user go**.
+8. ✅ **MCP prod smoke** (lexa.yohanesgre.com/mcp, prod key): initialize, tools/list (35 tools), create_project → create_task → move_task → create_wiki_page → search_wiki → get_task — all green.
+9. ✅ **GitHub round-trip on production** (fresh DB): link task → issue created+closed on move; close/reopen on GitHub → task follows (webhook); echo suppressed; deliveries recorded after success; bad-signature → 401.
+10. ✅ **Migration squash:** `migrations/0001_init.sql` is a single clean unreleased schema (no rebuild/backfill steps; Forge builtin seeds kept). Fresh apply verified: inventory identical to the pre-squash DB, full API + MCP suite green on the new schema, existing dev/prod DBs boot without re-migration.
+11. ✅ Prod redeployed on a clean volume (`lexa-prod_lexa-data` recreated); health ok, webhook/MCP bypass 401s verified.
+12. ✅ Working tree committed; tag `v0.1.0` pushed.
