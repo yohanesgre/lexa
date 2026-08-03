@@ -526,9 +526,6 @@ export function useDeleteApiKey() {
 
 // ---- users & project members ----
 
-export function useProject(slug: string) {
-  return useQuery({ queryKey: ["project", slug], queryFn: () => api.getProject(slug) });
-}
 
 export function useUsers() {
   return useQuery({ queryKey: ["users"], queryFn: () => api.listUsers().then((r) => r.data) });

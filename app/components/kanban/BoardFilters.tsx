@@ -56,11 +56,11 @@ function FilterCheckbox({
   label: string;
 }) {
   return (
-    <div className="check-row" role="button" tabIndex={0} onClick={onChange} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") onChange(); }}>
+    <button type="button" className="check-row" onClick={onChange}>
       <span className={cn("checkbox", checked && "checked")} />
       {icon}
       <span>{label}</span>
-    </div>
+    </button>
   );
 }
 

@@ -40,9 +40,7 @@ export class ApiKeyService extends Effect.Service<ApiKeyService>()("Lexa/ApiKeyS
     return {
       list: (): Effect.Effect<ApiKey[], DbError> =>
         Effect.map(repo.listAll(), rows =>
-          rows
-            .filter((r) => !SYSTEM_KEY_NAMES.has(r.name))
-            .map(rowToApiKey)
+          rows.flatMap((r) => (SYSTEM_KEY_NAMES.has(r.name) ? [] : [rowToApiKey(r)]))
         ),
 
       create: (name: string): Effect.Effect<ApiKeyCreateResult, ApiKeyNameEmpty | DbError | ConstraintViolation | RowNotFound> =>

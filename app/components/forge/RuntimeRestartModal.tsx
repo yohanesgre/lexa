@@ -7,6 +7,8 @@ import { useRuntimes } from "../../lib/queries";
 import { parseApiDate } from "../../lib/date";
 import type { Runtime } from "../../../shared/types";
 
+const LAST_SEEN_FMT = new Intl.DateTimeFormat(undefined);
+
 function isOnline(lastSeen: string | null): boolean {
   return !!lastSeen && Date.now() - parseApiDate(lastSeen).getTime() < 2 * 60 * 1000;
 }
@@ -84,7 +86,7 @@ export function RuntimeRestartModal({ runtime, onClose }: { runtime: Runtime; on
                   <pre className="font-mono text-xs text-lx-text-secondary whitespace-pre-wrap leading-6 m-0">lexa-cli machine listen</pre>
                   <button type="button" className="btn btn-ghost" style={{ position: "absolute", top: 8, right: 8, height: 24, padding: "0 8px", fontSize: 11 }} onClick={copy}>{copied ? <Check size={12} strokeWidth={1.5} /> : <Copy size={12} strokeWidth={1.5} />} {copied ? "Copied" : "Copy"}</button>
                 </div>
-                <div className="field-hint mt-1.5">Last seen: {machine?.lastSeen ? parseApiDate(machine.lastSeen).toLocaleString() : "never"}. This modal keeps polling.</div>
+                <div className="field-hint mt-1.5">Last seen: {machine?.lastSeen ? LAST_SEEN_FMT.format(parseApiDate(machine.lastSeen)) : "never"}. This modal keeps polling.</div>
               </div>
             )}
 

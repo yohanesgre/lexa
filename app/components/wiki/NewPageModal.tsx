@@ -21,7 +21,7 @@ function buildFlatPages(pages: WikiPageMeta[]): PageWithDepth[] {
     list.push(page);
     byParent.set(page.parentId, list);
   }
-  const sort = (list: WikiPageMeta[]) => [...list].sort((a, b) => a.position - b.position);
+  const sort = (list: WikiPageMeta[]) => [...list].toSorted((a, b) => a.position - b.position);
   const result: PageWithDepth[] = [];
   const recurse = (parentId: string | null, depth: number) => {
     for (const page of sort(byParent.get(parentId) ?? [])) {
