@@ -234,9 +234,11 @@ export function TextEditor({
   onReviewStateChange,
 }: TextEditorProps) {
   const onBlurRef = useRef(onBlur);
-  onBlurRef.current = onBlur;
   const onChangeRef = useRef(onChange);
-  onChangeRef.current = onChange;
+  useEffect(() => {
+    onBlurRef.current = onBlur;
+    onChangeRef.current = onChange;
+  });
   const wrapperRef = useRef<HTMLDivElement>(null);
   const lastPointerDownInside = useRef(false);
 

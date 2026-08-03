@@ -15,10 +15,12 @@ const STATUS_META: Record<ForgeTaskStatus, { label: string; color: string }> = {
 
 // SQLite datetime('now') is "YYYY-MM-DD HH:MM:SS" in UTC — render the local
 // wall-clock time for the log's timestamp column.
+const LOG_TIME_FMT = new Intl.DateTimeFormat([], { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false });
+
 function formatLogTime(iso: string): string {
   const d = parseApiDate(iso);
   if (Number.isNaN(d.getTime())) return iso.slice(11, 19);
-  return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false });
+  return LOG_TIME_FMT.format(d);
 }
 
 // "HH:MM:SS message" per line — what the Copy button puts on the clipboard.

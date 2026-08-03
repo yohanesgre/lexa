@@ -53,7 +53,9 @@ export function ColumnForm({ column, isOpen, onClose, onSubmit, zIndex = 70 }: C
   const [error, setError] = useState<string | null>(null);
 
   const onCloseRef = useRef(onClose);
-  onCloseRef.current = onClose;
+  useEffect(() => {
+    onCloseRef.current = onClose;
+  });
 
   useEffect(() => {
     if (!isOpen) return;
@@ -118,15 +120,13 @@ export function ColumnForm({ column, isOpen, onClose, onSubmit, zIndex = 70 }: C
 
   return createPortal(
     <>
-      <div
+      <button
+        type="button"
         className="dialog-overlay"
         style={{ zIndex: zIndex }}
-        role="button"
-        tabIndex={0}
         aria-label="Close dialog"
         onClick={onClose}
-        onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") onClose(); }}
-      />
+        />
       <div className="fixed inset-0 flex items-center justify-center pointer-events-none" style={{ zIndex: zIndex + 1 }}>
         <div
           className="dialog dialog-enter pointer-events-auto p-0"

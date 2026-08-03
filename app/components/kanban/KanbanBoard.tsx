@@ -498,8 +498,7 @@ export function KanbanBoard({ board, showArchived = false, onToggleArchived, onM
                         >
                           <SortableContext items={cell.map((t) => t.id)} strategy={verticalListSortingStrategy}>
                             {cell
-                              .filter((task) => !cardHidden(task))
-                              .filter((task) => !childrenByParent.has(task.id)) // parents render at top level
+                              .filter((task) => !cardHidden(task) && !childrenByParent.has(task.id)) // parents render at top level
                               .map((task) => {
                                 const kids = (childrenByParent.get(task.id) ?? [])
                                   .map((id) => localTasks.find((t) => t.id === id))

@@ -230,8 +230,9 @@ function AssigneeChips({
     };
   }, [open]);
 
+  const assigneesSet = new Set(assignees);
   const suggestions = availableAssignees.filter(
-    (a) => !assignees.includes(a) && (!draft || a.toLowerCase().includes(draft.toLowerCase()))
+    (a) => !assigneesSet.has(a) && (!draft || a.toLowerCase().includes(draft.toLowerCase()))
   );
 
   const handleAdd = (name: string) => {
@@ -329,7 +330,7 @@ function AssigneeChips({
             <button
               key={name}
               type="button"
-              className={cn("dropdown-item", assignees.includes(name) && "active")}
+              className={cn("dropdown-item", assigneesSet.has(name) && "active")}
               onClick={() => handleAdd(name)}
             >
               <span className="avatar">{name.slice(0, 2).toUpperCase()}</span>
@@ -388,13 +389,15 @@ function DescriptionEditor({
   onReviewStateChange,
 }: DescriptionEditorProps) {
   const onBlurRef = useRef(onBlur);
-  onBlurRef.current = onBlur;
   const onChangeRef = useRef(onChange);
-  onChangeRef.current = onChange;
   const onDoneRef = useRef(onDone);
-  onDoneRef.current = onDone;
   const onCancelRef = useRef(onCancel);
-  onCancelRef.current = onCancel;
+  useEffect(() => {
+    onBlurRef.current = onBlur;
+    onChangeRef.current = onChange;
+    onDoneRef.current = onDone;
+    onCancelRef.current = onCancel;
+  });
   // Forge review end: persist whatever the doc holds now (the accepted
   // replacement) via the same save path as Done. Reject leaves the doc
   // untouched — stay in edit mode.
@@ -636,7 +639,7 @@ export function TaskDetail({ mode = "view", task, project, defaultColumnId, colu
   const [draft, setDraft] = useState(task?.title ?? "");
 
   useEffect(() => {
-    if (task) setDraft(task.title);
+    if (task?.title !== undefined) setDraft(task.title);
   }, [task?.title]);
 
   useEffect(() => {
@@ -675,9 +678,11 @@ export function TaskDetail({ mode = "view", task, project, defaultColumnId, colu
         description: task?.description ?? emptyDoc,
       });
 
+  const missingFieldsKey = missingFields.join(",");
+
   useEffect(() => {
     setDismissedWarning(false);
-  }, [currentColumnId, missingFields.join(",")]);
+  }, [currentColumnId, missingFieldsKey]);
 
   if (!isCreate && !task) {
     return (
@@ -687,7 +692,7 @@ export function TaskDetail({ mode = "view", task, project, defaultColumnId, colu
           <div className="slideover-header border-b border-lx-border-subtle">
             <span className="text-xs font-body text-lx-text-muted">Board</span>
             <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
-              <button className="btn btn-ghost !w-8 !h-8 !p-0" onClick={handleClose} aria-label="Close">
+              <button type="button" className="btn btn-ghost !w-8 !h-8 !p-0" onClick={handleClose} aria-label="Close">
                 <X size={18} strokeWidth={1.5} />
               </button>
             </div>
@@ -746,7 +751,7 @@ export function TaskDetail({ mode = "view", task, project, defaultColumnId, colu
             </span>
           )}
           <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
-            <button
+            <button type="button"
               className="btn btn-ghost !w-8 !h-8 !p-0"
               onClick={() => setExpanded((v) => !v)}
               aria-label={expanded ? "Shrink width" : "Expand width"}
@@ -762,7 +767,7 @@ export function TaskDetail({ mode = "view", task, project, defaultColumnId, colu
                 </svg>
               )}
             </button>
-            <button className="btn btn-ghost !w-8 !h-8 !p-0" onClick={handleClose} aria-label="Close">
+            <button type="button" className="btn btn-ghost !w-8 !h-8 !p-0" onClick={handleClose} aria-label="Close">
               <X size={18} strokeWidth={1.5} />
             </button>
           </div>
@@ -1285,10 +1290,10 @@ export function TaskDetail({ mode = "view", task, project, defaultColumnId, colu
             <>
               <span className="font-micro text-2xs text-lx-text-muted uppercase tracking-[0.04em]">Unsaved draft</span>
               <div className="flex items-center gap-2">
-                <button className="btn btn-ghost" onClick={handleClose}>
+                <button type="button" className="btn btn-ghost" onClick={handleClose}>
                   Cancel
                 </button>
-                <button
+                <button type="button"
                   className="btn btn-primary"
                   onClick={handleCreate}
                   disabled={!createTitle.trim() || !createColumnId || creating}

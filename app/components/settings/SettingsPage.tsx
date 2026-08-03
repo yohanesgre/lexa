@@ -28,6 +28,11 @@ function formatRelative(iso: string): string {
 function ApiKeyRevealModal({ name, fullKey, onDone }: { name: string; fullKey: string; onDone: () => void }) {
   const [copied, setCopied] = useState(false);
 
+  const handleCopyKey = async () => {
+    await copyToClipboard(fullKey);
+    setCopied(true);
+  };
+
   useEffect(() => {
     void copyToClipboard(fullKey).then(() => setCopied(true));
   }, [fullKey]);
@@ -56,7 +61,7 @@ function ApiKeyRevealModal({ name, fullKey, onDone }: { name: string; fullKey: s
                   type="button"
                   className="btn btn-ghost flex-shrink-0"
                   style={{ height: 28, padding: "0 10px", fontSize: 12 }}
-                  onClick={() => { void copyToClipboard(fullKey).then(() => setCopied(true)); }}
+                  onClick={handleCopyKey}
                 >
                   {copied ? <Check size={12} strokeWidth={1.5} /> : <Copy size={12} strokeWidth={1.5} />}
                   {copied ? "Copied to clipboard" : "Copy"}

@@ -42,6 +42,8 @@ export function ModalStackProvider({ children }: { children: React.ReactNode }) 
 }
 
 export function ModalPortal({ children, overlayZ, dialogZ }: { children: React.ReactNode; overlayZ: number; dialogZ: number }) {
+  const portalTarget = typeof document !== "undefined" ? document.body : null;
+  if (!portalTarget) return null;
   return createPortal(
     <>
       <div className="dialog-overlay" style={{ zIndex: overlayZ }} />
@@ -49,6 +51,6 @@ export function ModalPortal({ children, overlayZ, dialogZ }: { children: React.R
         {children}
       </div>
     </>,
-    document.body,
+    portalTarget,
   );
 }

@@ -63,6 +63,14 @@ export function RuntimeSetupModal({ onClose }: { onClose: () => void }) {
   );
   const canSend = !!machine && !!agentCli && !!selectedKeyId && !!createdRawKey;
 
+
+  const handleCopyKey = async () => {
+    if (!createdRawKey) return;
+    await copyToClipboard(createdRawKey);
+    setCopied(true);
+  };
+
+
   const handleCreateKey = () => {
     if (!newKeyName.trim()) return;
     createApiKey.mutate(newKeyName.trim(), {
@@ -210,7 +218,7 @@ lexa-cli machine listen`}
                   <div className="mb-4" style={{ background: "var(--lx-surface-input)", border: "1px solid var(--lx-border-default)", borderRadius: 6, padding: 8 }}>
                     <div className="flex items-center gap-2">
                       <code className="font-mono text-xs text-lx-text-secondary flex-1 truncate">{createdRawKey}</code>
-                      <button type="button" className="btn btn-ghost flex-shrink-0" style={{ height: 24, padding: "0 8px", fontSize: 11 }} onClick={() => { void copyToClipboard(createdRawKey).then(() => setCopied(true)); }}>
+                      <button type="button" className="btn btn-ghost flex-shrink-0" style={{ height: 24, padding: "0 8px", fontSize: 11 }} onClick={handleCopyKey}>
                         {copied ? <Check size={12} strokeWidth={1.5} /> : <Copy size={12} strokeWidth={1.5} />} {copied ? "Copied" : "Copy"}
                       </button>
                     </div>

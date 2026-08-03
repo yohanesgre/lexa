@@ -14,8 +14,8 @@ export function DiffView({ diff }: { diff: DiffResult }) {
 
   return (
     <div className="forge-diff">
-      {diff.hunks.map((hunk, i) => (
-        <div className="forge-diff-hunk" key={i}>
+      {diff.hunks.map((hunk) => (
+        <div className="forge-diff-hunk" key={`${hunk.oldStart}-${hunk.newStart}`}>
           <div className="forge-diff-hunk-header">
             @@ -{hunk.oldStart},{hunk.oldLines} +{hunk.newStart},{hunk.newLines} @@
           </div>

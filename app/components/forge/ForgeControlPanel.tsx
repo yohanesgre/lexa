@@ -19,9 +19,11 @@ const STATUS_META: Record<ForgeTaskStatus, { label: string; color: string; dot: 
   cancelled: { label: "Cancelled", color: "text-lx-text-muted", dot: "var(--lx-text-muted)", tint: "var(--lx-surface-selected)" },
 };
 
+const LOG_TIME_FMT = new Intl.DateTimeFormat([], { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false });
+
 function formatLogTime(iso: string): string {  const d = parseApiDate(iso);
   if (Number.isNaN(d.getTime())) return iso.slice(11, 19);
-  return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false });
+  return LOG_TIME_FMT.format(d);
 }
 
 function formatRelative(iso: string): string {
@@ -46,7 +48,7 @@ function formatDayTime(iso: string | null): string {
   if (Number.isNaN(d.getTime())) return iso.slice(11, 16);
   const now = new Date();
   const sameDay = d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth() && d.getDate() === now.getDate();
-  return sameDay ? d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false }) : formatRelative(iso);
+  return sameDay ? LOG_TIME_FMT.format(d).slice(0, 5) : formatRelative(iso);
 }
 
 function durationLabel(task: ForgeTask): string {
@@ -71,6 +73,7 @@ function openDocumentPath(task: ForgeTask, projectSlug: string | undefined): str
 }
 
 export function ForgeControlPanel() {
+  const portalTarget = typeof document !== "undefined" ? document.body : null;
   const [status, setStatus] = useState<ForgeTaskStatus | null>(null);
   const [slug, setSlug] = useState("");
   const [skillId, setSkillId] = useState("");
@@ -224,7 +227,7 @@ export function ForgeControlPanel() {
             <div className="text-sm weight-500 color-primary">Could not load Forge history</div>
             <div className="text-xs color-secondary">The server may be unreachable. Check that the daemon and API are running.</div>
           </div>
-          <button className="btn btn-ghost" style={{ height: 28, padding: "0 12px", fontSize: 12, flexShrink: 0 }} onClick={() => history.refetch()}>
+          <button type="button" className="btn btn-ghost" style={{ height: 28, padding: "0 12px", fontSize: 12, flexShrink: 0 }} onClick={() => history.refetch()}>
             Retry
           </button>
         </div>
@@ -305,7 +308,7 @@ export function ForgeControlPanel() {
                     <td className="text-xs color-secondary">{formatDayTime(t.finishedAt)}</td>
                     <td>
                       {isActive ? (
-                        <button
+                        <button type="button"
                           className="btn btn-ghost"
                           aria-label="Cancel task"
                           title="Cancel this Forge task"
@@ -335,10 +338,10 @@ export function ForgeControlPanel() {
         <div className="flex items-center justify-between mt-3" style={{ gap: 12 }}>
           <span className="text-xs color-muted">{page.length > 0 ? `Showing ${page.length} runs` : "End of history"}</span>
           <div className="flex items-center gap-2">
-            <button className="btn btn-ghost" disabled={cursor === null} style={{ height: 28, padding: "0 12px", fontSize: 12 }} onClick={() => setCursor(null)}>
+            <button type="button" className="btn btn-ghost" disabled={cursor === null} style={{ height: 28, padding: "0 12px", fontSize: 12 }} onClick={() => setCursor(null)}>
               ← Newer
             </button>
-            <button className="btn btn-ghost" disabled={!history.data?.nextCursor} style={{ height: 28, padding: "0 12px", fontSize: 12 }} onClick={() => history.data?.nextCursor && setCursor(history.data.nextCursor)}>
+            <button type="button" className="btn btn-ghost" disabled={!history.data?.nextCursor} style={{ height: 28, padding: "0 12px", fontSize: 12 }} onClick={() => history.data?.nextCursor && setCursor(history.data.nextCursor)}>
               Older →
             </button>
           </div>
@@ -346,7 +349,7 @@ export function ForgeControlPanel() {
       )}
 
       {/* Slideover: task record */}
-      {selectedId !== null &&
+      {selectedId !== null && portalTarget !== null &&
         createPortal(
           <>
             <div className="slideover-overlay" onClick={() => setSelectedId(null)} />
@@ -357,7 +360,7 @@ export function ForgeControlPanel() {
                     {detail ? `${detail.projectName || "Forge"} / ${detail.documentType === "wiki" ? "Wiki" : "Tasks"}` : "Forge"}
                   </span>
                 </div>
-                <button className="btn btn-ghost !w-8 !h-8 !p-0" onClick={() => setSelectedId(null)} aria-label="Close">
+                <button type="button" className="btn btn-ghost !w-8 !h-8 !p-0" onClick={() => setSelectedId(null)} aria-label="Close">
                   <X size={18} strokeWidth={1.5} />
                 </button>
               </div>
@@ -472,7 +475,7 @@ export function ForgeControlPanel() {
               )}
             </div>
           </>,
-          document.body
+          portalTarget
         )}
       </main>
 

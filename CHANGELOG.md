@@ -45,6 +45,18 @@ AI writing assistant, MCP server for agents, and two-way GitHub issue sync.
   to PKCS#8 before Web Crypto `importKey`
 - **Webhook event matching** — `X-GitHub-Event: issues` + `payload.action`
   composition (compound `issues.closed` header values never arrive from GitHub)
+- **React Doctor sweep (34 → 38/100)** — fixed all 14 app-code errors
+  (ref reads in render, unguarded `document`/`window` in render, impure state
+  updater, effect with fresh deps), missing `type="button"` on 10 buttons,
+  overlay click-catchers converted from `div[role=button]` to native buttons,
+  `toSorted`/`flatMap`/Set-lookup perf fixes, `Intl.DateTimeFormat` module
+  instances instead of per-render `toLocale*`, dead exports removed,
+  `fetch` response status check in SSRF guard, versioned Forge dismissal key.
+  Remaining warnings (a11y sweep: dialogs/labels/static-element interactions)
+  are tracked as follow-up work.
+- **Skill hygiene** — project-bound `.agents/` and `.repos/` gitlink removed
+  (skills are global-only); `.repos/effect` pinned to `effect@3.22.1` matching
+  the installed version (was v4 beta — source research returned wrong APIs)
 
 ### Notes
 

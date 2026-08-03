@@ -125,7 +125,13 @@ export function SkillsSettingsSection() {
   const { data: agents = [] } = useForgeAgents();
   const [editing, setEditing] = useState<ForgeSkill | "new" | null>(null);
 
-  const usedBy = (skillId: string): string => agents.filter((a) => a.skillIds.includes(skillId)).map((a) => a.name).join(" · ") || "—";
+  const usedBy = (skillId: string): string => {
+    let names = "";
+    for (const a of agents) {
+      if (a.skillIds.includes(skillId)) names = names ? `${names} · ${a.name}` : a.name;
+    }
+    return names || "—";
+  };
 
   return (
     <section className="mb-8">

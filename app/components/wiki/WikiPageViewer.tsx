@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import { Pencil } from "lucide-react";
 import { useEditor, EditorContent } from "@tiptap/react";
@@ -206,9 +206,11 @@ export function WikiPageViewer({ slug, page, pages }: WikiPageViewerProps) {
   };
 
   const saveRef = useRef(save);
-  saveRef.current = save;
+  useEffect(() => {
+    saveRef.current = save;
+  });
 
-  const markDirty = () => {
+  const markDirty = useCallback(() => {
     setIsDirty(true);
     if (reviewActiveRef.current) return;
     if (!autosaveEnabled) return;
@@ -216,7 +218,7 @@ export function WikiPageViewer({ slug, page, pages }: WikiPageViewerProps) {
     autosaveTimer.current = window.setTimeout(() => {
       void saveRef.current("autosave");
     }, autosaveDelay);
-  };
+  }, [autosaveEnabled, autosaveDelay]);
 
   const handleReviewStateChange = (active: boolean, _accepted: boolean) => {
     reviewActiveRef.current = active;

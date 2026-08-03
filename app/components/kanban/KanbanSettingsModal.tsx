@@ -260,14 +260,12 @@ export function KanbanSettingsModal({ slug, isOpen, onClose }: KanbanSettingsMod
 
   return (
     <>
-      <div
+      <button
+        type="button"
         className="dialog-overlay"
-        role="button"
-        tabIndex={0}
         aria-label="Close dialog"
         onClick={onClose}
-        onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") onClose(); }}
-      />
+        />
       <div className="fixed inset-0 flex items-center justify-center z-[70] pointer-events-none">
         <div
           className="dialog dialog-enter pointer-events-auto p-0"

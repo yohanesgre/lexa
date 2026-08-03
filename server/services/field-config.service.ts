@@ -58,7 +58,7 @@ export class FieldConfigService extends Effect.Service<FieldConfigService>()("Le
               }
             }
             // Deleting an option that tasks still use is blocked.
-            const keptIds = new Set(options.map((o) => o.id).filter(Boolean));
+            const keptIds = new Set(options.flatMap((o) => (o.id ? [o.id] : [])));
             for (const old of existing) {
               if (!keptIds.has(old.id)) {
                 const count = yield* repo.countTasksUsing(old.id, kind);

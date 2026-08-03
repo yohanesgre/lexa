@@ -4,6 +4,7 @@
   "description": "Self-hosted project management for small game dev teams — Kanban with swimlanes/WIP limits, nested wiki, MCP server for AI agents, Forge AI writing assistant.",
   "scripts": {
     "test": "vitest run",
+    "prepare": "./scripts/prepare-effect.sh",
     "dev": "vite dev",
     "dev:server": "bun --env-file=.env run server/entry.ts",
     "dev:full": "bash scripts/dev.sh",

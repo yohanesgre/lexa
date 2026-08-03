@@ -70,9 +70,8 @@ export function ForgePopover({ editor, slug, documentType, documentId, open, onC
   const containerRef = useRef<HTMLDivElement>(null);
 
   const selectedAgent: ForgeAgent | null = agents.find((a) => a.id === agentId) ?? null;
-  const agentSkills: ForgeSkill[] = selectedAgent
-    ? skills.filter((s) => selectedAgent.skillIds.includes(s.id))
-    : [];
+  const agentSkillIds = new Set(selectedAgent?.skillIds ?? []);
+  const agentSkills: ForgeSkill[] = selectedAgent ? skills.filter((s) => agentSkillIds.has(s.id)) : [];
   const selectedSkill: ForgeSkill | null = agentSkills.find((s) => s.id === skillId) ?? null;
 
   // Default selection: the builtin "Lexa" agent (or the first agent) and its
@@ -85,9 +84,9 @@ export function ForgePopover({ editor, slug, documentType, documentId, open, onC
 
   useEffect(() => {
     if (!agentId) return;
-    const attached = agents.find((a) => a.id === agentId)?.skillIds ?? [];
-    if (!attached.includes(skillId)) {
-      setSkillId(skills.filter((s) => attached.includes(s.id))[0]?.id ?? "");
+    const attached = new Set(agents.find((a) => a.id === agentId)?.skillIds ?? []);
+    if (!attached.has(skillId)) {
+      setSkillId(skills.filter((s) => attached.has(s.id))[0]?.id ?? "");
     }
   }, [agentId, agents, skills, skillId]);
 
@@ -206,7 +205,7 @@ export function ForgePopover({ editor, slug, documentType, documentId, open, onC
     ? {
         position: "fixed",
         top: popoverTop,
-        left: Math.min(Math.max(8, anchorRect.left), window.innerWidth - 348),
+        left: Math.min(Math.max(8, anchorRect.left), (typeof window !== "undefined" ? window.innerWidth : 0) - 348),
         zIndex: 80,
         width: 340,
       }
@@ -266,6 +265,9 @@ export function ForgePopover({ editor, slug, documentType, documentId, open, onC
       </div>
     );
   };
+
+  const portalTarget = typeof document !== "undefined" ? document.body : null;
+  if (!portalTarget) return null;
 
   return createPortal(
     <div ref={containerRef} className="menu-popover" data-forge-popover style={popoverStyle}>
@@ -509,6 +511,6 @@ export function ForgePopover({ editor, slug, documentType, documentId, open, onC
         runtimes={runtimes}
       />
     </div>,
-    document.body
+    portalTarget
   );
 }
