@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import { Pencil } from "lucide-react";
 import { useEditor } from "@tiptap/react";
@@ -61,16 +61,57 @@ interface WikiPageViewerProps {
   pages: WikiPageMeta[];
 }
 
+type EditState = {
+  isEditing: boolean;
+  title: string;
+  lastSavedPage: WikiPage;
+  lastSavedAt: Date | null;
+  isDirty: boolean;
+  isSaving: boolean;
+};
+
+type EditAction =
+  | { type: "start"; page: WikiPage }
+  | { type: "title"; title: string }
+  | { type: "dirty" }
+  | { type: "saving" }
+  | { type: "saved"; page: WikiPage; at: Date }
+  | { type: "cancel"; page: WikiPage }
+  | { type: "stopEditing" }
+  | { type: "done" };
+
+function initEditState(page: WikiPage): EditState {
+  return { isEditing: false, title: page.title, lastSavedPage: page, lastSavedAt: null, isDirty: false, isSaving: false };
+}
+
+function editReducer(state: EditState, action: EditAction): EditState {
+  switch (action.type) {
+    case "start":
+      return { ...state, isEditing: true, title: action.page.title, lastSavedPage: action.page, lastSavedAt: null, isDirty: false };
+    case "title":
+      return { ...state, title: action.title };
+    case "dirty":
+      return { ...state, isDirty: true };
+    case "saving":
+      return { ...state, isSaving: true };
+    case "saved":
+      return { ...state, isSaving: false, lastSavedPage: action.page, lastSavedAt: action.at, isDirty: false };
+    case "cancel":
+      return { ...state, isEditing: false, title: action.page.title, lastSavedPage: action.page, isDirty: false, isSaving: false };
+    case "stopEditing":
+      return { ...state, isEditing: false, isSaving: false };
+    case "done":
+      return { ...state, isSaving: false };
+  }
+}
+
 export function WikiPageViewer({ slug, page, pages }: WikiPageViewerProps) {
   const navigate = useNavigate();
   const updateWikiPage = useUpdateWikiPage(slug);
 
-  const [isEditing, setIsEditing] = useState(false);
-  const [title, setTitle] = useState(page.title);
-  const [lastSavedPage, setLastSavedPage] = useState(page);
-  const [lastSavedAt, setLastSavedAt] = useState<Date | null>(null);
-  const [isDirty, setIsDirty] = useState(false);
-  const [isSaving, setIsSaving] = useState(false);
+  const [edit, dispatch] = useReducer(editReducer, page, initEditState);
+  const { isEditing, title, lastSavedPage, lastSavedAt, isDirty, isSaving } = edit;
+  const [previewContent, setPreviewContent] = useState<TipTapDoc>(emptyDoc);
   const [autosaveEnabled, setAutosaveEnabled] = useState(() => {
     if (typeof window === "undefined") return true;
     const stored = window.localStorage.getItem("lexa-wiki-autosave");
@@ -83,7 +124,7 @@ export function WikiPageViewer({ slug, page, pages }: WikiPageViewerProps) {
   });
   const [sidebarVisible, setSidebarVisible] = useState(true);
   const [outlineVisible, setOutlineVisible] = useState(true);
-  const [previewContent, setPreviewContent] = useState<TipTapDoc>(emptyDoc);
+
 
   useEffect(() => {
     window.localStorage.setItem("lexa-wiki-autosave", String(autosaveEnabled));
@@ -161,7 +202,7 @@ export function WikiPageViewer({ slug, page, pages }: WikiPageViewerProps) {
       window.clearTimeout(autosaveTimer.current);
       autosaveTimer.current = null;
     }
-    setIsSaving(true);
+    dispatch({ type: "saving" });
     try {
       const savedPage = await updateWikiPage.mutateAsync({
         pageSlug: page.slug,
@@ -169,9 +210,7 @@ export function WikiPageViewer({ slug, page, pages }: WikiPageViewerProps) {
         content: editor.getJSON() as unknown as TipTapDoc,
         saveType,
       });
-      setLastSavedPage(savedPage);
-      setLastSavedAt(new Date());
-      setIsDirty(false);
+      dispatch({ type: "saved", page: savedPage, at: new Date() });
       if (savedPage.slug !== page.slug) {
         navigate({
           to: "/$slug/wiki/$pageSlug",
@@ -180,7 +219,7 @@ export function WikiPageViewer({ slug, page, pages }: WikiPageViewerProps) {
         });
       }
     } finally {
-      setIsSaving(false);
+      dispatch({ type: "done" });
     }
   };
 
@@ -190,7 +229,7 @@ export function WikiPageViewer({ slug, page, pages }: WikiPageViewerProps) {
   });
 
   const markDirty = useCallback(() => {
-    setIsDirty(true);
+    dispatch({ type: "dirty" });
     if (reviewActiveRef.current) return;
     if (!autosaveEnabled) return;
     if (autosaveTimer.current !== null) window.clearTimeout(autosaveTimer.current);
@@ -213,14 +252,10 @@ export function WikiPageViewer({ slug, page, pages }: WikiPageViewerProps) {
   }, [markDirty]);
 
   const handleStartEditing = () => {
-    setTitle(page.title);
-    setLastSavedPage(page);
-    setLastSavedAt(null);
-    setIsDirty(false);
+    dispatch({ type: "start", page });
     setPreviewContent(page.content ?? emptyDoc);
     editorRef.current?.setEditable(true);
     editorRef.current?.commands.setContent((page.content ?? emptyDoc) as unknown as JSONContent);
-    setIsEditing(true);
   };
 
   const handleCancel = () => {
@@ -228,17 +263,16 @@ export function WikiPageViewer({ slug, page, pages }: WikiPageViewerProps) {
       window.clearTimeout(autosaveTimer.current);
       autosaveTimer.current = null;
     }
-    setTitle(lastSavedPage.title);
+    dispatch({ type: "cancel", page: lastSavedPage });
     editorRef.current?.setEditable(false);
     editorRef.current?.commands.setContent(lastSavedPage.content as unknown as JSONContent);
-    setIsDirty(false);
-    setIsEditing(false);
+    dispatch({ type: "stopEditing" });
   };
 
   const handleSave = async () => {
     if (isDirty) await saveRef.current("manual");
     editorRef.current?.setEditable(false);
-    setIsEditing(false);
+    dispatch({ type: "stopEditing" });
   };
 
   useEffect(() => {
@@ -316,7 +350,7 @@ export function WikiPageViewer({ slug, page, pages }: WikiPageViewerProps) {
             aria-label="Page title"
             value={title}
             onChange={(e) => {
-              setTitle(e.target.value);
+              dispatch({ type: "title", title: e.target.value });
               markDirty();
             }}
             placeholder="Page title"
