@@ -237,6 +237,10 @@ export interface Runtime {
   // Daemon-verified Lexa MCP connectivity (initialize+ping on every
   // heartbeat). Runtimes without it are blocked from Forge tasks.
   mcpConnected: boolean;
+  // Last daemon failure reported via the machine heartbeat — e.g.
+  // "API key revoked" after the daemon exited with code 3. Cleared on
+  // daemon register/heartbeat success. Null = no known failure.
+  lastError: string | null;
   hostname: string;
   lastSeen: ISODate | null;
   createdAt: ISODate;
@@ -259,10 +263,16 @@ export interface RuntimeEvent {
 }
 
 // A `lexa-cli machine listen` process heartbeating machine presence so the web
-// setup wizard can target a listening machine.
+// setup wizard can target a listening machine. A machine is a host: runtimes
+// are bound to it (Runtime.machineId), not the other way around.
 export interface Machine {
   id: ID;
   hostname: string;
+  // Installed agent CLIs probed by the listener (`opencode --version`,
+  // `cmd --version`; hermes skipped) and sent with every heartbeat.
+  clis: Array<{ provider: ForgeProvider; version: string }>;
+  // Null until the machine listens — a login-registered machine is
+  // "bound, not listening".
   lastSeen: ISODate | null;
   createdAt: ISODate;
 }
@@ -294,6 +304,11 @@ export interface ForgeTaskLog {
   id: ID;
   taskId: ID;
   message: string;
+  // Which agent stream produced the line (daemon tees both into the feed).
+  stream: "out" | "err";
+  // Severity assigned ONCE by the daemon at write time (shared/forge-log.ts).
+  // The UI renders the stored level; legacy rows default to "info".
+  level: "info" | "warn" | "error";
   createdAt: ISODate;
 }
 

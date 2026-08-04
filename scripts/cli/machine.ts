@@ -5,6 +5,7 @@ import {
   mkdirSync,
   readdirSync,
   readFileSync,
+  renameSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
@@ -13,13 +14,25 @@ import { join, dirname } from "node:path";
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { LexaClient, type RuntimeCatalogInfo, type RuntimeEventInfo } from "./api";
 import { LEXA_DIR, migrateLegacyDirs, type CliConfig } from "./config";
+import { DAEMON_SOURCE } from "./packed";
 
 const SERVICE_NAME = "lexa-forge-listen";
+// Compiled (`bun build --compile`) binaries have no real source dir —
+// import.meta.dir points into the embedded bunfs. Running from source
+// (`bun run scripts/cli/index.ts`) keeps it on disk. The daemon child
+// source and the systemd ExecStart differ between the two layouts.
+export const COMPILED = (import.meta.dir ?? "").startsWith("/$bunfs");
 const INSTALL_DIR = join(homedir(), ".local", "share", "lexa-forge");
 // Runtime state root — everything the host stores lives here (config.json,
 // machine-id, env, runtimes/<id>/env, runs/). Legacy ~/.config/lexa-* dirs
 // are migrated into it on listen (migrate-and-delete, no fallback).
 const RUNTIMES_DIR = join(LEXA_DIR, "runtimes");
+// Project workspaces — one persistent dir per project under ~/.lexa/projects/,
+// seeded on first sight with README.md (project context) + AGENTS.md (static
+// orchestrator). The Forge daemon runs opencode from the workspace dir with a
+// sealed per-run HOME; per-agent rule bundles live in .agents/agents/<id>/.
+const PROJECTS_DIR = join(LEXA_DIR, "projects");
+const PROJECT_INDEX_PATH = join(LEXA_DIR, "projects.json");
 const LISTENER_UNIT_PATH = join(homedir(), ".config", "systemd", "user", `${SERVICE_NAME}.service`);
 const DAEMON_SRC = join(import.meta.dir, "..", "forge", "daemon.ts");
 const CLI_ENTRY = join(import.meta.dir, "index.ts");
@@ -55,13 +68,14 @@ function hasSystemd(): boolean {
 }
 
 function listenerUnit(): string {
+  const exec = COMPILED ? `${process.execPath} machine listen` : `bun run ${CLI_ENTRY} machine listen`;
   return `[Unit]
 Description=Lexa Forge machine listener (web wizard → runtime daemons)
 After=network-online.target
 
 [Service]
 Type=simple
-ExecStart=bun run ${CLI_ENTRY} machine listen
+ExecStart=${exec}
 Restart=on-failure
 RestartSec=5
 
@@ -168,19 +182,109 @@ function isAgentCli(value: string | undefined): value is "opencode" | "hermes" |
   return value === "opencode" || value === "hermes" || value === "command-code";
 }
 
-function loadOrCreateMachineId(): string {
+// Machine identity: `hostname-<unique>` so machine ids are human-readable in
+// the Settings machines list (existing UUID ids keep working — opaque to the
+// server). Persisted in ~/.lexa/machine-id; never regenerated once written.
+export function getOrCreateMachineId(): string {
   try {
     if (existsSync(MACHINE_ID_PATH)) {
       const existing = readFileSync(MACHINE_ID_PATH, "utf-8").trim();
       if (existing) return existing;
     }
-    const id = crypto.randomUUID();
+    const id = `${osHostname()}-${crypto.randomUUID().slice(0, 8)}`;
     mkdirSync(dirname(MACHINE_ID_PATH), { recursive: true });
     writeFileSync(MACHINE_ID_PATH, `${id}\n`, { mode: 0o600 });
     return id;
   } catch {
-    return crypto.randomUUID();
+    return `${osHostname()}-${crypto.randomUUID().slice(0, 8)}`;
   }
+}
+
+// ── Project workspaces ──
+// The server sends the project index on every machine heartbeat; the
+// listener persists it (so the daemon can resolve names without a server
+// round-trip) and provisions one workspace dir per project. Seeding is
+// write-once: README.md and the orchestrator AGENTS.md are never overwritten
+// once they exist (operator edits survive; daemon per-run files live in
+// .agents/ and .forge/).
+export interface WorkspaceProjectInfo {
+  id: string;
+  name: string;
+  slug: string;
+  description: string;
+}
+
+function writeProjectIndex(projects: WorkspaceProjectInfo[]): void {
+  const index: Record<string, { name: string; slug: string; description: string }> = {};
+  for (const p of projects) {
+    index[p.id] = { name: p.name, slug: p.slug, description: p.description };
+  }
+  const tmp = `${PROJECT_INDEX_PATH}.tmp`;
+  writeFileSync(tmp, JSON.stringify(index, null, 2), { mode: 0o644 });
+  renameSync(tmp, PROJECT_INDEX_PATH);
+}
+
+function provisionWorkspaces(projects: WorkspaceProjectInfo[]): { total: number; created: number } {
+  let created = 0;
+  for (const p of projects) {
+    const dir = join(PROJECTS_DIR, p.id);
+    if (!existsSync(dir)) {
+      mkdirSync(dir, { recursive: true });
+      created += 1;
+    }
+    const readme = join(dir, "README.md");
+    if (!existsSync(readme)) {
+      writeFileSync(readme, [
+        `# ${p.name}`,
+        "",
+        p.description || "(no description)",
+        "",
+        "This is the Lexa Forge workspace for this project. Clone or symlink the",
+        "project's repository here — e.g. `ln -s /path/to/repo repo/`. The Forge",
+        "agent works from this directory and can only read files inside it.",
+        "",
+      ].join("\n"), { mode: 0o644 });
+    }
+    const orchestrator = join(dir, "AGENTS.md");
+    if (!existsSync(orchestrator)) {
+      writeFileSync(orchestrator, [
+        `# ${p.name}`,
+        "",
+        p.description || "",
+        "",
+        "You are one of Lexa's agents working on this project. Your agent id is",
+        "named in your prompt — read `.agents/agents/<yourId>/AGENTS.md` and follow",
+        "it exactly. Skills live in `.agents/skills/`.",
+        "",
+        "Work only inside this workspace directory. Project files (if any) are",
+        "under `repo/`.",
+        "",
+        `File access: use ABSOLUTE paths under \`${dir}/\` (e.g. \`${dir}/repo/foo\`) —`,
+        "relative paths are denied by the workspace policy. Never touch anything",
+        "outside this directory.",
+        "",
+      ].join("\n"), { mode: 0o644 });
+    }
+  }
+  return { total: projects.length, created };
+}
+
+// Installed agent CLIs on this machine (probed once at listener start) —
+// sent with every heartbeat so Settings can show the machine↔CLI binding
+// without waiting for a runtime env to exist.
+export async function probeClis(): Promise<Array<{ provider: "opencode" | "hermes" | "command-code"; version: string }>> {
+  const clis: Array<{ provider: "opencode" | "hermes" | "command-code"; version: string }> = [];
+  const probe = async (bin: string, provider: "opencode" | "hermes" | "command-code") => {
+    const out = await runCapture(bin, ["--version"]);
+    const version = out.split("\n")[0]?.trim() || "";
+    if (version) clis.push({ provider, version: version.slice(0, 60) });
+  };
+  await Promise.all([
+    probe("opencode", "opencode"),
+    probe(CMD_BIN, "command-code"),
+    // hermes: no reliable --version flag — skipped.
+  ]);
+  return clis;
 }
 
 function runCapture(bin: string, args: string[]): Promise<string> {
@@ -291,15 +395,33 @@ function writeRuntimeEnv(path: string, env: Record<string, string>): void {
   chmodSync(path, 0o600);
 }
 
-function ensureDaemonInstalled(): void {
-  const destination = join(INSTALL_DIR, "daemon.ts");
-  if (!existsSync(DAEMON_SRC)) {
-    throw new Error(`Daemon source missing at ${DAEMON_SRC}`);
-  }
+// The daemon imports shared modules (shared/forge-log.ts), so the standalone
+// child must be BUNDLED before install — raw source would fail to resolve
+// imports from INSTALL_DIR. `bun build` inlines everything into daemon.js.
+function buildDaemon(outfile: string, sourceFile?: string): void {
   mkdirSync(INSTALL_DIR, { recursive: true });
-  // Refresh the copied child on every listener start/restart so schema and
-  // environment contract changes reach runtimes created by older versions.
-  copyFileSync(DAEMON_SRC, destination);
+  const entry = sourceFile ?? join(INSTALL_DIR, "daemon-src.ts");
+  if (!sourceFile) writeFileSync(entry, DAEMON_SOURCE);
+  const res = spawnSync("bun", ["build", "--target=bun", "--outfile", outfile, entry], { stdio: "pipe" });
+  if (!sourceFile) rmSync(entry, { force: true });
+  if (res.status !== 0) {
+    throw new Error(`daemon bundle failed: ${res.stderr?.toString().slice(0, 500) || res.stdout?.toString().slice(0, 500)}`);
+  }
+}
+
+function ensureDaemonInstalled(): void {
+  const destination = join(INSTALL_DIR, "daemon.js");
+  if (DAEMON_SOURCE) {
+    // Compiled binary: the daemon ships inside the executable as a bundle.
+    buildDaemon(destination);
+  } else {
+    if (!existsSync(DAEMON_SRC)) {
+      throw new Error(`Daemon source missing at ${DAEMON_SRC}`);
+    }
+    // Refresh the bundled child on every listener start/restart so schema and
+    // environment contract changes reach runtimes created by older versions.
+    buildDaemon(destination, DAEMON_SRC);
+  }
 }
 
 function normalizeRuntimeEnv(runtime: RuntimeEnv, serverUrl: string, machineId: string, hostname: string): RuntimeEnv {
@@ -333,10 +455,11 @@ function spawnRuntime(
   children: Map<string, RuntimeChild>,
   stopping: Set<string>,
   shuttingDown: () => boolean,
+  onAuthFailure?: (runtimeId: string) => void,
 ): void {
   ensureDaemonInstalled();
   stopping.delete(runtime.runtimeId);
-  const child = spawn("bun", ["run", join(INSTALL_DIR, "daemon.ts")], {
+  const child = spawn("bun", ["run", join(INSTALL_DIR, "daemon.js")], {
     cwd: INSTALL_DIR,
     env: { ...process.env, ...runtime.env },
     stdio: "inherit",
@@ -344,14 +467,23 @@ function spawnRuntime(
   });
   children.set(runtime.runtimeId, { runtimeId: runtime.runtimeId, child });
   child.on("error", (error) => console.error(`  [runtime ${runtime.runtimeId}] ${error.message}`));
-  child.on("exit", () => {
+  child.on("exit", (code) => {
     if (children.get(runtime.runtimeId)?.child !== child) return;
     children.delete(runtime.runtimeId);
     if (shuttingDown() || stopping.has(runtime.runtimeId)) return;
+    if (code === 3) {
+      // Auth failure (revoked/rotated API key): the daemon cannot work and
+      // would crash-loop — do NOT respawn. Report it so Settings shows the
+      // runtime as "API key revoked — re-run Setup runtime"; the user fixes
+      // it by re-running setup (install event rewrites the env with a fresh key).
+      console.error(`  [runtime ${runtime.runtimeId}] daemon stopped: API key revoked — re-run Setup runtime`);
+      onAuthFailure?.(runtime.runtimeId);
+      return;
+    }
     console.error(`  [runtime ${runtime.runtimeId}] daemon exited; retrying in 5s`);
     setTimeout(() => {
       const latest = listRuntimeEnvs().find((entry) => entry.runtimeId === runtime.runtimeId);
-      if (latest && !shuttingDown()) spawnRuntime(latest, children, stopping, shuttingDown);
+      if (latest && !shuttingDown()) spawnRuntime(latest, children, stopping, shuttingDown, onAuthFailure);
     }, 5000).unref?.();
   });
 }
@@ -408,7 +540,7 @@ export async function machineListen(config: CliConfig): Promise<void> {
   migrateLegacyDirs();
   mkdirSync(LEXA_DIR, { recursive: true, mode: 0o700 });
   const client = new LexaClient(config);
-  const machineId = loadOrCreateMachineId();
+  const machineId = getOrCreateMachineId();
   const machineHostname = osHostname();
   const children = new Map<string, RuntimeChild>();
   const stopping = new Set<string>();
@@ -417,6 +549,17 @@ export async function machineListen(config: CliConfig): Promise<void> {
   let catalogsDirty = true;
   let lastCatalogRefreshAt = 0;
   let refreshing = false;
+  // Installed agent CLIs (probed once at start) — sent with every heartbeat.
+  let clis: Array<{ provider: "opencode" | "hermes" | "command-code"; version: string }> = [];
+  // Daemons that exited with auth failure (code 3) — relayed once so the
+  // server can surface lastError on the runtime row.
+  const pendingDaemonErrors = new Map<string, string>();
+  // First heartbeat provisions workspaces and logs the count once.
+  let workspacesLogged = false;
+
+  const onAuthFailure = (runtimeId: string) => {
+    pendingDaemonErrors.set(runtimeId, "API key revoked");
+  };
 
   const refreshCatalogs = async () => {
     if (refreshing) return;
@@ -445,21 +588,41 @@ export async function machineListen(config: CliConfig): Promise<void> {
   process.once("SIGINT", () => { void shutdown().finally(() => process.exit(0)); });
 
   for (const runtime of listRuntimeEnvs()) {
-    spawnRuntime(normalizeRuntimeEnv(runtime, config.url, machineId, machineHostname), children, stopping, () => shuttingDown);
+    spawnRuntime(normalizeRuntimeEnv(runtime, config.url, machineId, machineHostname), children, stopping, () => shuttingDown, onAuthFailure);
   }
   void refreshCatalogs();
+  clis = await probeClis().catch(() => []);
+  if (clis.length > 0) {
+    console.log(`  CLIs: ${clis.map((c) => `${c.provider} ${c.version}`).join(", ")}`);
+  }
   console.log(`  Lexa Forge machine listener — ${machineId}`);
   console.log(`  Polling ${config.url} every ${EVENT_POLL_MS}ms. Press Ctrl-C to stop.`);
 
   for (;;) {
     try {
       if (Date.now() - lastCatalogRefreshAt >= CATALOG_REFRESH_MS) void refreshCatalogs();
+      const daemonErrors = pendingDaemonErrors.size > 0
+        ? [...pendingDaemonErrors.entries()].map(([runtimeId, error]) => ({ runtimeId, error }))
+        : undefined;
       const heartbeat = await client.machineHeartbeat({
         id: machineId,
         hostname: machineHostname,
         ...(catalogsDirty ? { runtimes: catalogs } : {}),
+        ...(clis.length > 0 ? { clis } : {}),
+        ...(daemonErrors ? { daemonErrors } : {}),
       });
-      if (catalogsDirty && heartbeat) catalogsDirty = false;
+      if (heartbeat) {
+        pendingDaemonErrors.clear();
+        if (catalogsDirty) catalogsDirty = false;
+        if (Array.isArray(heartbeat.projects) && heartbeat.projects.length > 0) {
+          writeProjectIndex(heartbeat.projects);
+          const provisioned = provisionWorkspaces(heartbeat.projects);
+          if (!workspacesLogged) {
+            workspacesLogged = true;
+            console.log(`  Workspaces: ${provisioned.total} project${provisioned.total === 1 ? "" : "s"} (${provisioned.created} created)`);
+          }
+        }
+      }
       const claim = await client.claimRuntimeEvent(machineId);
       if (claim) {
         await handleSetupEvent(client, config.url, machineId, machineHostname, claim.event, claim.rawKey, children, stopping, () => shuttingDown);
@@ -473,6 +636,56 @@ export async function machineListen(config: CliConfig): Promise<void> {
   }
 }
 
+function readProjectIndex(): Record<string, { name: string; slug: string; description: string }> {
+  try {
+    if (!existsSync(PROJECT_INDEX_PATH)) return {};
+    return JSON.parse(readFileSync(PROJECT_INDEX_PATH, "utf-8")) as Record<string, { name: string; slug: string; description: string }>;
+  } catch {
+    return {};
+  }
+}
+
+// ── lexa-cli machine workspace ──
+
+// Local workspace view — one row per provisioned dir under ~/.lexa/projects/.
+// Orphan = dir exists but the project is gone from the server index (kept
+// deliberately, never auto-deleted — it may hold operator files).
+export function workspaceList(): void {
+  const index = readProjectIndex();
+  const dirs = existsSync(PROJECTS_DIR) ? readdirSync(PROJECTS_DIR).sort() : [];
+  if (dirs.length === 0) {
+    console.log("  No workspaces yet — run `lexa-cli machine listen` (or `machine workspace sync`); the listener provisions them from the server heartbeat.");
+    return;
+  }
+  const rows = dirs.map((id) => {
+    const info = index[id];
+    const dir = join(PROJECTS_DIR, id);
+    let hasFiles = false;
+    try {
+      hasFiles = readdirSync(dir).some((name) => !name.startsWith("."));
+    } catch { /* unreadable dir */ }
+    return {
+      NAME: info?.name ?? "—",
+      ID: id,
+      PATH: dir,
+      STATUS: info ? (hasFiles ? "provisioned" : "empty") : "orphan",
+    };
+  });
+  printTable(rows);
+  console.log("  Populate: clone or symlink the project repo into the workspace dir, e.g. `ln -s /path/to/repo <dir>/repo`.");
+}
+
+// Force a re-index from the server (useful without a running listener) and
+// provision any missing workspace dirs.
+export async function workspaceSync(config: CliConfig): Promise<void> {
+  const client = new LexaClient(config);
+  const projects = await client.listProjects();
+  const index = projects.map((p) => ({ id: p.id, name: p.name, slug: p.slug, description: p.description ?? "" }));
+  writeProjectIndex(index);
+  const provisioned = provisionWorkspaces(index);
+  console.log(`  Synced ${provisioned.total} project${provisioned.total === 1 ? "" : "s"} into ${PROJECTS_DIR} (${provisioned.created} workspace dir(s) created)`);
+}
+
 export async function listMachines(config: CliConfig): Promise<void> {
   const client = new LexaClient(config);
   try {
@@ -484,7 +697,8 @@ export async function listMachines(config: CliConfig): Promise<void> {
     printTable(machines.map((machine) => ({
       ID: machine.id,
       HOST: machine.hostname || "—",
-      STATUS: machine.lastSeen ? "online" : "offline",
+      CLIS: machine.clis?.length ? machine.clis.map((c) => `${c.provider} ${c.version}`).join(", ") : "—",
+      STATUS: machine.lastSeen ? "online" : "bound",
       "LAST SEEN": machine.lastSeen ? machine.lastSeen.slice(0, 19) : "never",
     })));
   } catch (error) {
@@ -502,11 +716,12 @@ export async function listRuntimes(config: CliConfig): Promise<void> {
       return;
     }
     printTable(runtimes.map((runtime) => ({
+      ID: runtime.id,
       NAME: runtime.name,
       AGENT: runtime.provider,
       MODEL: runtime.model || "—",
       HOST: runtime.hostname || "—",
-      STATUS: runtime.status,
+      STATUS: runtime.lastError ? `offline (${runtime.lastError.slice(0, 40)})` : runtime.status,
       MCP: runtime.mcpConnected ? "connected" : "not set",
       "LAST SEEN": runtime.lastSeen ? runtime.lastSeen.slice(0, 19).replace("T", " ") : "never",
     })));

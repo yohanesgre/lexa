@@ -1,12 +1,12 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { Check, ChevronRight, Copy, LayoutGrid, Maximize, X } from "lucide-react";
-import { Link } from "@tanstack/react-router";
+import { Link, useSearch } from "@tanstack/react-router";
 import { cn } from "../ui/cn";
 import { parseApiDate } from "../../lib/date";
 import { copyToClipboard } from "../../lib/clipboard";
 import { useCancelForgeTask, useForgeTask, useForgeTaskHistory, useForgeTaskLogs, useForgeSkills, useProjects, useRuntimes } from "../../lib/queries";
-import { ForgeTaskLogModal } from "./ForgeTaskLogModal";
+import { ForgeTaskLogModal, classifyLogLine } from "./ForgeTaskLogModal";
 import type { ForgeTask, ForgeTaskStatus } from "../../../shared/types";
 
 const STATUS_ORDER: ForgeTaskStatus[] = ["queued", "running", "completed", "failed", "cancelled"];
@@ -82,31 +82,31 @@ function SummaryStrip({ summary, activeCount, online, total }: {
   return (
     <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(140px,1fr))", gap: 12, marginBottom: 16 }}>
       <div style={{ background: "var(--lx-surface-card)", border: "1px solid var(--lx-border-default)", borderRadius: 8, padding: "10px 14px" }}>
-        <div className="font-micro text-2xs color-muted" style={{ textTransform: "uppercase", letterSpacing: "0.04em" }}>Active</div>
+        <div className="font-micro text-2xs text-lx-text-muted" style={{ textTransform: "uppercase", letterSpacing: "0.04em" }}>Active</div>
         <div className="font-display text-xl weight-600 text-lx-text-warning" style={{ lineHeight: 1.2 }}>
           {summary ? activeCount : "—"}
-          <span className="font-micro text-2xs color-muted" style={{ marginLeft: 6 }}>
+          <span className="font-micro text-2xs text-lx-text-muted" style={{ marginLeft: 6 }}>
             {(summary?.running ?? 0) > 0 ? "running" : (summary?.queued ?? 0) > 0 ? "queued" : "idle"}
           </span>
         </div>
       </div>
       <div style={{ background: "var(--lx-surface-card)", border: "1px solid var(--lx-border-default)", borderRadius: 8, padding: "10px 14px" }}>
-        <div className="font-micro text-2xs color-muted" style={{ textTransform: "uppercase", letterSpacing: "0.04em" }}>Queued</div>
-        <div className="font-display text-xl weight-600 color-primary" style={{ lineHeight: 1.2 }}>{summary ? summary.queued : "—"}</div>
+        <div className="font-micro text-2xs text-lx-text-muted" style={{ textTransform: "uppercase", letterSpacing: "0.04em" }}>Queued</div>
+        <div className="font-display text-xl weight-600 text-lx-text-primary" style={{ lineHeight: 1.2 }}>{summary ? summary.queued : "—"}</div>
       </div>
       <div style={{ background: "var(--lx-surface-card)", border: "1px solid var(--lx-border-default)", borderRadius: 8, padding: "10px 14px" }}>
-        <div className="font-micro text-2xs color-muted" style={{ textTransform: "uppercase", letterSpacing: "0.04em" }}>Done</div>
+        <div className="font-micro text-2xs text-lx-text-muted" style={{ textTransform: "uppercase", letterSpacing: "0.04em" }}>Done</div>
         <div className="font-display text-xl weight-600 text-lx-text-success" style={{ lineHeight: 1.2 }}>{summary ? summary.completed : "—"}</div>
       </div>
       <div style={{ background: "var(--lx-surface-card)", border: "1px solid var(--lx-border-default)", borderRadius: 8, padding: "10px 14px" }}>
-        <div className="font-micro text-2xs color-muted" style={{ textTransform: "uppercase", letterSpacing: "0.04em" }}>Failed</div>
+        <div className="font-micro text-2xs text-lx-text-muted" style={{ textTransform: "uppercase", letterSpacing: "0.04em" }}>Failed</div>
         <div className="font-display text-xl weight-600 text-lx-text-danger" style={{ lineHeight: 1.2 }}>{summary ? summary.failed : "—"}</div>
       </div>
       <div style={{ background: "var(--lx-surface-card)", border: "1px solid var(--lx-border-default)", borderRadius: 8, padding: "10px 14px" }}>
-        <div className="font-micro text-2xs color-muted" style={{ textTransform: "uppercase", letterSpacing: "0.04em" }}>Runtimes</div>
-        <div className="font-display text-xl weight-600 color-primary" style={{ lineHeight: 1.2 }}>
+        <div className="font-micro text-2xs text-lx-text-muted" style={{ textTransform: "uppercase", letterSpacing: "0.04em" }}>Runtimes</div>
+        <div className="font-display text-xl weight-600 text-lx-text-primary" style={{ lineHeight: 1.2 }}>
           {total > 0 ? online : "—"}
-          {total > 0 && <span className="font-micro text-2xs color-muted" style={{ marginLeft: 6 }}>/ {total} online</span>}
+          {total > 0 && <span className="font-micro text-2xs text-lx-text-muted" style={{ marginLeft: 6 }}>/ {total} online</span>}
         </div>
       </div>
     </div>
@@ -190,11 +190,11 @@ function HistoryTable({ tasks, copiedId, onCopyId, onSelect, onCancel, runtimeNa
             return (
               <tr key={t.id} style={{ cursor: "pointer" }} onClick={() => onSelect(t.id)}>
                 <td>
-                  <div className="text-sm weight-500 color-primary">
+                  <div className="text-sm weight-500 text-lx-text-primary">
                     {t.skillName || t.skillId} · "{t.documentTitle}"
                   </div>
                   <div className="flex items-center gap-1" style={{ minWidth: 0 }}>
-                    <span className="font-mono text-2xs color-muted" style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{t.id}</span>
+                    <span className="font-mono text-2xs text-lx-text-muted" style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{t.id}</span>
                     <button
                       type="button"
                       className="icon-btn"
@@ -210,8 +210,8 @@ function HistoryTable({ tasks, copiedId, onCopyId, onSelect, onCancel, runtimeNa
                     </button>
                   </div>
                 </td>
-                <td className="text-xs color-secondary">{t.projectName || "—"}</td>
-                <td className="text-xs color-secondary">{runtimeName(t.runtimeId)}</td>
+                <td className="text-xs text-lx-text-secondary">{t.projectName || "—"}</td>
+                <td className="text-xs text-lx-text-secondary">{runtimeName(t.runtimeId)}</td>
                 <td>
                   {isActive ? (
                     <span className="flex items-center gap-2">
@@ -226,8 +226,8 @@ function HistoryTable({ tasks, copiedId, onCopyId, onSelect, onCancel, runtimeNa
                     </span>
                   )}
                 </td>
-                <td className="text-xs color-secondary">{formatDayTime(t.startedAt)}</td>
-                <td className="text-xs color-secondary">{formatDayTime(t.finishedAt)}</td>
+                <td className="text-xs text-lx-text-secondary">{formatDayTime(t.startedAt)}</td>
+                <td className="text-xs text-lx-text-secondary">{formatDayTime(t.finishedAt)}</td>
                 <td>
                   {isActive ? (
                     <button type="button"
@@ -257,6 +257,8 @@ function HistoryTable({ tasks, copiedId, onCopyId, onSelect, onCancel, runtimeNa
 
 export function ForgeControlPanel() {
   const portalTarget = typeof document !== "undefined" ? document.body : null;
+  // ?task=<id> deep-link (navbar Forge dropdown rows) — opens the record.
+  const search = useSearch({ from: "/forge" });
   const [status, setStatus] = useState<ForgeTaskStatus | null>(null);
   const [slug, setSlug] = useState("");
   const [skillId, setSkillId] = useState("");
@@ -264,6 +266,10 @@ export function ForgeControlPanel() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [logModalOpen, setLogModalOpen] = useState(false);
   const [copiedId, setCopiedId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (search.task) setSelectedId(search.task);
+  }, [search.task]);
 
   const skills = useForgeSkills();
   const history = useForgeTaskHistory({ slug: slug || undefined, status: status ?? undefined, skillId: skillId || undefined }, cursor);
@@ -309,7 +315,7 @@ export function ForgeControlPanel() {
     <>
       <main className="page-frame">
       <div className="flex items-center justify-between mb-3">
-        <h1 className="font-display text-2xl weight-600 color-primary mb-0">Forge</h1>
+        <h1 className="font-display text-2xl weight-600 text-lx-text-primary mb-0">Forge</h1>
         <div className="flex items-center gap-3">
           <Link to="/settings" className="btn btn-ghost" style={{ height: 28, padding: "0 12px", fontSize: 12, textDecoration: "none", display: "inline-flex", alignItems: "center", gap: 6 }}>
             <LayoutGrid size={14} strokeWidth={1.5} />
@@ -344,8 +350,8 @@ export function ForgeControlPanel() {
             <path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
           </svg>
           <div style={{ flex: 1, minWidth: 0 }}>
-            <div className="text-sm weight-500 color-primary">Could not load Forge history</div>
-            <div className="text-xs color-secondary">The server may be unreachable. Check that the daemon and API are running.</div>
+            <div className="text-sm weight-500 text-lx-text-primary">Could not load Forge history</div>
+            <div className="text-xs text-lx-text-secondary">The server may be unreachable. Check that the daemon and API are running.</div>
           </div>
           <button type="button" className="btn btn-ghost" style={{ height: 28, padding: "0 12px", fontSize: 12, flexShrink: 0 }} onClick={() => history.refetch()}>
             Retry
@@ -357,10 +363,10 @@ export function ForgeControlPanel() {
             <path d="m15 12-8.373 8.373a2.121 2.121 0 1 1-3-3L12 9m7-4 .65-.65a2.121 2.121 0 1 1 3 3L19.003 11M15 5l2 2" />
             <path d="M6 18 2 22" />
           </svg>
-          <div className="text-sm weight-500 color-primary">
+          <div className="text-sm weight-500 text-lx-text-primary">
             {status || slug || skillId ? "No runs match the current filters" : cursor !== null ? "No older runs" : "No Forge runs yet"}
           </div>
-          <p className="text-xs color-secondary" style={{ maxWidth: 380 }}>
+          <p className="text-xs text-lx-text-secondary" style={{ maxWidth: 380 }}>
             {status || slug || skillId
               ? "Try widening the filters — for example by clearing the status chip or choosing another project."
               : cursor !== null
@@ -384,7 +390,7 @@ export function ForgeControlPanel() {
           end-of-history page) so Newer is always reachable */}
       {!history.isLoading && !history.isError && (page.length > 0 || cursor !== null || history.data?.nextCursor != null) && (
         <div className="flex items-center justify-between mt-3" style={{ gap: 12 }}>
-          <span className="text-xs color-muted">{page.length > 0 ? `Showing ${page.length} runs` : "End of history"}</span>
+          <span className="text-xs text-lx-text-muted">{page.length > 0 ? `Showing ${page.length} runs` : "End of history"}</span>
           <div className="flex items-center gap-2">
             <button type="button" className="btn btn-ghost" disabled={cursor === null} style={{ height: 28, padding: "0 12px", fontSize: 12 }} onClick={() => setCursor(null)}>
               ← Newer
@@ -420,7 +426,7 @@ export function ForgeControlPanel() {
                       {detail.skillName || detail.skillId} · "{detail.documentTitle}"
                     </h2>
                     <div className="flex items-center gap-2 mt-1">
-                      <span className="font-micro text-2xs color-muted" style={{ textTransform: "uppercase", letterSpacing: "0.04em" }}>Task {detail.id.slice(0, 6)}</span>
+                      <span className="font-micro text-2xs text-lx-text-muted" style={{ textTransform: "uppercase", letterSpacing: "0.04em" }}>Task {detail.id.slice(0, 6)}</span>
                       <span className={cn("font-micro text-2xs", STATUS_META[detail.status].color)} style={{ textTransform: "uppercase", letterSpacing: "0.04em" }}>
                         {STATUS_META[detail.status].label} · {durationLabel(detail)}
                       </span>
@@ -431,20 +437,20 @@ export function ForgeControlPanel() {
                   <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px 16px", padding: "16px 16px 0" }}>
                     <div>
                       <span className="prop-label">Document</span>
-                      <div className="text-sm color-primary">{detail.documentTitle}</div>
+                      <div className="text-sm text-lx-text-primary">{detail.documentTitle}</div>
                       <Link to={openDocumentPath(detail, detailProjectSlug)} style={{ fontSize: 12, color: "var(--lx-text-link)", textDecoration: "none" }} onClick={() => setSelectedId(null)}>
                         Open document →
                       </Link>
                     </div>
                     <div>
                       <span className="prop-label">Skill</span>
-                      <div className="text-sm color-primary">{detail.skillName || detail.skillId}</div>
+                      <div className="text-sm text-lx-text-primary">{detail.skillName || detail.skillId}</div>
                     </div>
                     <div>
                       <span className="prop-label">Runtime</span>
-                      <div className="text-sm color-primary">{detail.runtimeId ? runtimeName(detail.runtimeId) : "—"}</div>
+                      <div className="text-sm text-lx-text-primary">{detail.runtimeId ? runtimeName(detail.runtimeId) : "—"}</div>
                       {detail.runtimeId && (
-                        <div className="font-mono text-2xs color-muted">
+                        <div className="font-mono text-2xs text-lx-text-muted">
                           {(() => {
                             const r = runtimes.data?.find((x) => x.id === detail.runtimeId);
                             return r ? `${r.provider} · ${r.model}` : "";
@@ -454,41 +460,56 @@ export function ForgeControlPanel() {
                     </div>
                     <div>
                       <span className="prop-label">Timeline</span>
-                      <div className="text-xs color-secondary">{timelineLabel(detail)}</div>
+                      <div className="text-xs text-lx-text-secondary">{timelineLabel(detail)}</div>
                     </div>
                   </div>
 
-                  {/* Activity log — live while queued/running, static once finished */}
-                  <div className="slideover-body">
-                    <div className="flex items-center justify-between" style={{ marginBottom: 8 }}>
-                      <span className="font-micro text-2xs color-muted" style={{ textTransform: "uppercase", letterSpacing: "0.04em" }}>Activity</span>
-                      <button type="button" className="btn btn-ghost" style={{ height: 22, padding: "0 8px", fontSize: 11 }} onClick={() => setLogModalOpen(true)}>
-                        <Maximize size={11} strokeWidth={1.5} />
-                        <span style={{ marginLeft: 5 }}>Expand</span>
-                      </button>
-                    </div>
-                    <div className="forge-task-log">
-                      <div className="forge-task-log-head">
-                        <span className="forge-task-log-live">
-                          <span className="forge-task-log-dot" />
-                          {detail.status === "queued" || detail.status === "running" ? "Live" : "Log"}
-                        </span>
+                    {/* Activity log — live while queued/running, static once finished */}
+                    <div className="slideover-body">
+                      <div className="flex items-center justify-between" style={{ marginBottom: 8 }}>
+                        <span className="font-micro text-2xs text-lx-text-muted" style={{ textTransform: "uppercase", letterSpacing: "0.04em" }}>Activity</span>
+                        <button type="button" className="btn btn-ghost" style={{ height: 22, padding: "0 8px", fontSize: 11 }} onClick={() => setLogModalOpen(true)}>
+                          <Maximize size={11} strokeWidth={1.5} />
+                          <span style={{ marginLeft: 5 }}>Expand</span>
+                        </button>
                       </div>
-                      <div className="forge-task-log-body">
-                        {(logs.data ?? []).map((line, i) => (
-                          <div key={line.id} className={cn("forge-task-log-line", i === (logs.data?.length ?? 0) - 1 && "current")}>
-                            <span className="forge-task-log-dot" aria-hidden="true">●</span>
-                            <span className="forge-task-log-time">{formatLogTime(line.createdAt)}</span>
-                            <span className="forge-task-log-msg">{line.message}</span>
+                      <div className="forge-task-log">
+                        <div className="forge-task-log-head">
+                          {(() => {
+                            const logActive = detail.status === "queued" || detail.status === "running";
+                            const count = logs.data?.length ?? 0;
+                            return (
+                              <span className={cn("forge-task-log-live", !logActive && "is-static")}>
+                                {logActive ? "Live" : "Log"} · {count} {count === 1 ? "line" : "lines"}
+                              </span>
+                            );
+                          })()}
+                        </div>
+                        {(logs.data?.length ?? 0) === 0 ? (
+                          <div className="forge-task-log-empty">
+                            {detail.status === "queued" ? "Queued — waiting for a runtime to claim it." : "No activity recorded for this task."}
                           </div>
-                        ))}
+                        ) : (
+                          <div className="forge-task-log-body">
+                        {(logs.data ?? []).map((line, i) => {
+                          const { level, display } = classifyLogLine(line);
+                          const isLast = i === (logs.data?.length ?? 0) - 1;
+                          return (
+                            <div key={line.id} className={cn("forge-task-log-line", level === "error" && "stderr", level === "warn" && "warn", (detail.status === "queued" || detail.status === "running") && isLast && "current")}>
+                              <span className="forge-task-log-dot" aria-hidden="true">{level === "info" ? "●" : "!"}</span>
+                              <span className="forge-task-log-time">{formatLogTime(line.createdAt)}</span>
+                              <span className="forge-task-log-msg">{display}</span>
+                            </div>
+                          );
+                        })}
+                          </div>
+                        )}
                       </div>
-                    </div>
 
                     {/* Result (completed) */}
                     {detail.status === "completed" && (
                       <>
-                        <div className="font-micro text-2xs color-muted" style={{ textTransform: "uppercase", letterSpacing: "0.04em", margin: "16px 0 8px" }}>Result</div>
+                        <div className="font-micro text-2xs text-lx-text-muted" style={{ textTransform: "uppercase", letterSpacing: "0.04em", margin: "16px 0 8px" }}>Result</div>
                         <div style={{ background: "var(--lx-bg-success-subtle)", border: "1px solid rgba(74,222,128,0.25)", borderRadius: 6, padding: "12px 16px", fontSize: 14, lineHeight: "22px", color: "var(--lx-text-primary)", whiteSpace: "pre-wrap", fontFamily: "var(--lx-font-body)" }}>
                           {detail.result || "No result returned."}
                         </div>
@@ -498,7 +519,7 @@ export function ForgeControlPanel() {
                     {/* Failure details */}
                     {detail.status === "failed" && (
                       <>
-                        <div className="font-micro text-2xs color-muted" style={{ textTransform: "uppercase", letterSpacing: "0.04em", margin: "16px 0 8px" }}>Error</div>
+                        <div className="font-micro text-2xs text-lx-text-muted" style={{ textTransform: "uppercase", letterSpacing: "0.04em", margin: "16px 0 8px" }}>Error</div>
                         <div className="border rounded-md p-3 text-[13px] leading-5 font-body whitespace-pre-wrap max-h-56 overflow-y-auto text-lx-text-danger bg-lx-bg-danger-subtle border-lx-border-default">
                           {detail.error || "Task failed without an error message."}
                         </div>

@@ -926,6 +926,8 @@
     position: fixed;
     top: 0;
     right: 0;
+    left: auto; /* kill the <dialog> UA default inset-inline-start: 0 */
+    margin: 0;  /* and its margin: auto centering */
     width: 480px;
     height: 100vh;
     background: var(--lx-surface-elevated);
@@ -1815,13 +1817,28 @@
     background: currentColor;
     animation: lx-wip-pulse 1.2s ease-in-out infinite;
   }
+  /* Static feed (finished/cancelled): the dot desaturates and stops pulsing —
+     a dead "live" indicator on a closed log is noise. */
+  .forge-task-log-live.is-static {
+    color: var(--lx-text-muted);
+  }
+  .forge-task-log-live.is-static::before {
+    animation: none;
+  }
   .forge-task-log-body {
     max-height: 180px;
     overflow-y: auto;
     padding: 8px 10px;
     font-family: var(--lx-font-mono);
     font-size: 11px;
-    line-height: 19px;
+    line-height: 20px;
+  }
+  .forge-task-log-empty {
+    font-family: var(--lx-font-mono);
+    font-size: 11px;
+    line-height: 20px;
+    color: var(--lx-text-muted);
+    padding: 8px 10px;
   }
   .forge-task-log-line {
     display: flex;
@@ -1833,7 +1850,7 @@
     flex-shrink: 0;
     color: var(--lx-text-success);
     font-size: 8px;
-    line-height: 19px;
+    line-height: 20px;
   }
   .forge-task-log-time {
     flex-shrink: 0;
@@ -1843,13 +1860,23 @@
     overflow: hidden;
     text-overflow: ellipsis;
   }
-  /* stderr lines (daemon prefixes [stderr]) — tinted danger so agent errors
-     stand out from the stdout stream. */
+  /* stderr lines (daemon prefixes [stderr]) — tinted danger + a subtle red
+     wash so agent errors stand out from the stdout stream. The [stderr]
+     prefix itself is stripped visually (the tint carries it); Copy keeps it. */
   .forge-task-log-line.stderr {
     color: var(--lx-text-danger);
+    background: rgba(255, 68, 68, 0.05);
   }
   .forge-task-log-line.stderr .forge-task-log-dot {
     color: var(--lx-text-danger);
+  }
+  /* warn tier (retries, rate limits, backoffs — level classified once by the
+     daemon) — amber, softer than errors but visible. */
+  .forge-task-log-line.warn {
+    color: var(--lx-text-warning);
+  }
+  .forge-task-log-line.warn .forge-task-log-dot {
+    color: var(--lx-text-warning);
   }
   .forge-task-log-line.current {
     background: rgba(240, 192, 64, 0.08);

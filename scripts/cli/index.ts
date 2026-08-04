@@ -2,7 +2,8 @@
 /**
  * lexa-cli — Lexa operator & daemon-management CLI.
  *
- *   bun run lexa-cli <command> [options]
+ *   lexa-cli <command> [options]        (prod: compiled binary)
+ *   lexa-cli-dev <command> [options]    (dev: bun run scripts/cli/index.ts)
  *
  * Wraps the Lexa REST API with the same lxk_ Bearer auth as the web app.
  * The Forge daemon stays a polling process; this CLI installs/starts/stops it
@@ -10,10 +11,15 @@
  *
  * Env fallbacks (overridden by --url/--key or saved login):
  *   LEXA_URL, LEXA_API_KEY
+ *
+ * `lexa-cli login` without flags prompts interactively (TTY only); scripts
+ * always pass --url/--key or env vars.
  */
 import { LexaClient } from "./api";
 import { loadConfig, saveConfig, clearConfig, type CliConfig } from "./config";
-import { machineInstall, machineStart, machineStop, machineRestart, machineStatus, machineLogs, listMachines, listRuntimes, machineListen } from "./machine";
+import { COMPILED, getOrCreateMachineId } from "./machine";
+import { hostname as osHostname } from "node:os";
+import { machineInstall, machineStart, machineStop, machineRestart, machineStatus, machineLogs, listMachines, listRuntimes, machineListen, workspaceList, workspaceSync } from "./machine";
 
 const ENV_URL = process.env.LEXA_URL ?? "";
 const ENV_KEY = process.env.LEXA_API_KEY ?? "";
@@ -83,9 +89,68 @@ function printTable(rows: Record<string, string>[]): void {
 
 // ── commands ──
 
+// Interactive prompts — only ever used when stdin is a TTY and the login
+// flags were omitted. Scripts and pipes never prompt.
+// Plain line reading in cooked mode (no readline): the terminal driver
+// handles echo and backspace, so there is no raw mode, no ANSI cursor
+// queries, and nothing that can hang on a real terminal.
+function promptLogin(question: string, fallback = ""): Promise<string> {
+  return new Promise((resolve) => {
+    const done = (line: string) => {
+      // Remove all stdin listeners — bun keeps a read interest on a TTY
+      // stdin alive, which would keep the event loop running forever after
+      // login; main() then exits explicitly.
+      process.stdin.off("data", onData);
+      process.stdin.off("end", onEnd);
+      process.off("SIGINT", onSigint);
+      resolve(line.trim() || fallback);
+    };
+    let buffer = "";
+    const onData = (chunk: Buffer) => {
+      buffer += chunk.toString("utf8");
+      const nl = buffer.indexOf("\n");
+      if (nl < 0) return; // line may arrive in multiple chunks
+      // Strip erase chars in case the terminal is in raw mode (cooked
+      // terminals already apply backspace at the driver level).
+      let line = buffer.slice(0, nl).replace(/\r$/, "");
+      while (true) {
+        const bs = line.search(/[\x7f\b]/);
+        if (bs < 0) break;
+        line = line.slice(0, Math.max(0, bs - 1)) + line.slice(bs + 1);
+      }
+      buffer = "";
+      done(line);
+    };
+    const onEnd = () => done(fallback);
+    const onSigint = () => {
+      process.stdout.write("\n");
+      process.exit(130);
+    };
+    process.stdout.write(question);
+    process.stdin.on("data", onData);
+    process.stdin.on("end", onEnd);
+    process.once("SIGINT", onSigint);
+  });
+}
+
 async function cmdLogin(flags: Record<string, string | boolean>): Promise<void> {
-  const url = ((typeof flags.url === "string" && flags.url) || ENV_URL || "").replace(/\/+$/, "");
-  const key = (typeof flags.key === "string" && flags.key) || ENV_KEY || "";
+  let url = ((typeof flags.url === "string" && flags.url) || ENV_URL || "").replace(/\/+$/, "");
+  let key = (typeof flags.key === "string" && flags.key) || ENV_KEY || "";
+  if (!url || !key) {
+    if (!process.stdin.isTTY) {
+      console.error("  Usage: lexa-cli login --url <base> --key <lxk_...>");
+      console.error("  Or run `lexa-cli login` on a terminal for interactive prompts.");
+      process.exit(1);
+    }
+    if (!url) {
+      // Dev flavor (running from source) defaults to the local dev server;
+      // the compiled prod binary requires an explicit URL.
+      const fallback = COMPILED ? "" : "http://localhost:3000";
+      url = await promptLogin(fallback ? `  Server URL (default: ${fallback}): ` : "  Server URL: ", fallback);
+      url = url.replace(/\/+$/, "");
+    }
+    if (!key) key = await promptLogin("  API key — from Settings → API Keys, starts with lxk_: ");
+  }
   if (!url || !key) {
     console.error("  Usage: lexa-cli login --url <base> --key <lxk_...>");
     process.exit(1);
@@ -106,6 +171,17 @@ async function cmdLogin(flags: Record<string, string | boolean>): Promise<void> 
   }
   saveConfig({ url, apiKey: key });
   console.log(`  Logged in to ${url}`);
+  // Bind the machine: registration creates the machines row (last_seen NULL
+  // = "bound, not listening") so it shows up in Settings before the
+  // listener ever runs. Non-fatal — login must succeed even if the server
+  // hiccups; the listener re-registers on its first heartbeat anyway.
+  try {
+    const machineId = getOrCreateMachineId();
+    await client.registerMachine({ id: machineId, hostname: osHostname() });
+    console.log(`  Registered machine ${machineId} — run \`lexa-cli machine listen\` to go online`);
+  } catch {
+    console.log("  (machine registration skipped — run `lexa-cli machine listen` to register)");
+  }
 }
 
 async function cmdLogout(): Promise<void> {
@@ -303,6 +379,42 @@ async function cmdWikiGet(flags: Record<string, string | boolean>, args: string[
 
 // ── runtime commands ──
 
+async function cmdRuntimeDelete(flags: Record<string, string | boolean>, args: string[]): Promise<void> {
+  const { client } = requireClient(flags);
+  const id = args[0] || "";
+  if (!id) {
+    console.error("  Usage: lexa-cli runtime delete <id>");
+    console.error("  (ids from `lexa-cli runtime list`)");
+    process.exit(1);
+  }
+  try {
+    await client.deleteRuntime(id);
+    console.log(`  Deleted runtime ${id}`);
+    console.log("  Its daemon + env are cleaned up by the machine listener on its next heartbeat.");
+  } catch (e) {
+    console.error(`  Failed: ${(e as Error).message}`);
+    process.exit(1);
+  }
+}
+
+async function cmdMachineDelete(flags: Record<string, string | boolean>, args: string[]): Promise<void> {
+  const { client } = requireClient(flags);
+  const id = args[0] || "";
+  if (!id) {
+    console.error("  Usage: lexa-cli machine delete <id>");
+    console.error("  (ids from `lexa-cli machine list`)");
+    process.exit(1);
+  }
+  try {
+    await client.deleteMachine(id);
+    console.log(`  Deleted machine ${id} (with its runtimes)`);
+    console.log("  Note: if its listener is still running, the machine will reappear — run `lexa-cli machine stop` on it to fully remove.");
+  } catch (e) {
+    console.error(`  Failed: ${(e as Error).message}`);
+    process.exit(1);
+  }
+}
+
 function cmdMachineInstall(flags: Record<string, string | boolean>): void {
   if (!resolveConfig(flags)) {
     console.error("  Not logged in. Run: lexa-cli login first.");
@@ -319,6 +431,7 @@ Usage: lexa-cli <command> [options]
 
 Auth:
   login    --url <base> --key <lxk_...>   save credentials (chmod 600)
+                                           prompts interactively when omitted
   logout                                 remove saved credentials
   status                                 server health + auth + counts
 
@@ -338,6 +451,9 @@ Projects:
 
 Runtimes (Forge daemon):
   runtime list                                   server-side daemon view
+  runtime delete <id>                            remove a runtime (daemon + env
+                                                  cleaned up by its machine's
+                                                  listener on next heartbeat)
 
 Machine listener:
   machine list                                   registered machine view
@@ -347,6 +463,13 @@ Machine listener:
   machine start | stop | restart                 systemctl --user lexa-forge-listen
   machine status                                 systemd state
   machine logs                                   journalctl --user -u lexa-forge-listen -f
+  machine delete <id>                            remove a machine + its runtimes
+                                                  (reappears if still listening — stop
+                                                  the listener first for permanent removal)
+
+Forge workspaces (local machine view):
+  machine workspace list                         per-project dirs under ~/.lexa/projects/
+  machine workspace sync                         re-index projects from the server + provision
 
 Env fallbacks: LEXA_URL, LEXA_API_KEY. Flags override saved login.
 `;
@@ -394,6 +517,7 @@ async function main(): Promise<void> {
     case "runtime":
       switch (sub) {
         case "list": { const { config } = requireClient(flags); await listRuntimes(config); break; }
+        case "delete": { await cmdRuntimeDelete(flags, rest); break; }
         default: console.error("  Unknown: runtime " + sub); process.exit(1);
       }
       break;
@@ -408,6 +532,14 @@ async function main(): Promise<void> {
         case "restart": machineRestart(); break;
         case "status": machineStatus(); break;
         case "logs": machineLogs(); break;
+        case "delete": { await cmdMachineDelete(flags, rest); break; }
+        case "workspace":
+          switch (rest[0]) {
+            case "list": workspaceList(); break;
+            case "sync": { const { config } = requireClient(flags); await workspaceSync(config); break; }
+            default: console.error("  Unknown: machine workspace " + (rest[0] ?? "")); process.exit(1);
+          }
+          break;
         default: console.error("  Unknown: machine " + sub); process.exit(1);
       }
       break;
@@ -417,6 +549,9 @@ async function main(): Promise<void> {
       console.log(HELP);
       process.exit(1);
   }
+  // Explicit exit: bun keeps a read interest on TTY stdin after interactive
+  // prompts, which would otherwise keep the event loop alive forever.
+  process.exit(0);
 }
 
 main().catch((e) => {

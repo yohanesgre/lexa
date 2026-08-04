@@ -274,6 +274,7 @@ export interface RuntimeRow {
   agents_catalog: string;
   status: "online" | "offline";
   mcp_connected: number;
+  last_error: string | null;
   hostname: string;
   last_seen: string | null;
   created_at: string;
@@ -318,7 +319,7 @@ function parseAgentsCatalog(raw: string | null): RuntimeAgent[] {
 }
 
 export function rowToRuntime(row: RuntimeRow): {
-  id: string; name: string; provider: "opencode" | "hermes" | "command-code"; machineId: string | null; agent: string; model: string; printLogs: boolean; logLevel: "" | "DEBUG" | "INFO" | "WARN" | "ERROR"; extraArgs: string[]; modelsCatalog: RuntimeModel[]; agentsCatalog: RuntimeAgent[]; status: "online" | "offline"; mcpConnected: boolean; hostname: string; lastSeen: string | null; createdAt: string;
+  id: string; name: string; provider: "opencode" | "hermes" | "command-code"; machineId: string | null; agent: string; model: string; printLogs: boolean; logLevel: "" | "DEBUG" | "INFO" | "WARN" | "ERROR"; extraArgs: string[]; modelsCatalog: RuntimeModel[]; agentsCatalog: RuntimeAgent[]; status: "online" | "offline"; mcpConnected: boolean; lastError: string | null; hostname: string; lastSeen: string | null; createdAt: string;
 } {
   return {
     id: row.id,
@@ -334,6 +335,7 @@ export function rowToRuntime(row: RuntimeRow): {
     agentsCatalog: parseAgentsCatalog(row.agents_catalog),
     status: row.status,
     mcpConnected: row.mcp_connected === 1,
+    lastError: row.last_error ?? null,
     hostname: row.hostname,
     lastSeen: row.last_seen,
     createdAt: row.created_at,
@@ -441,11 +443,27 @@ export interface ForgeTaskLogRow {
   id: string;
   task_id: string;
   message: string;
+  stream: "out" | "err";
+  level: "info" | "warn" | "error";
   created_at: string;
 }
 
-export function rowToForgeTaskLog(row: ForgeTaskLogRow): { id: string; taskId: string; message: string; createdAt: string } {
-  return { id: row.id, taskId: row.task_id, message: row.message, createdAt: row.created_at };
+export function rowToForgeTaskLog(row: ForgeTaskLogRow): {
+  id: string;
+  taskId: string;
+  message: string;
+  stream: "out" | "err";
+  level: "info" | "warn" | "error";
+  createdAt: string;
+} {
+  return {
+    id: row.id,
+    taskId: row.task_id,
+    message: row.message,
+    stream: row.stream,
+    level: row.level,
+    createdAt: row.created_at,
+  };
 }
 
 export interface DocumentSourceRow {

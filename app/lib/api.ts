@@ -348,6 +348,10 @@ export function removeRuntime(id: string): Promise<void> {
   return request(`${BASE}/forge/runtimes/${id}`, { method: "DELETE" });
 }
 
+export function removeMachine(id: string): Promise<void> {
+  return request(`${BASE}/forge/machines/${id}`, { method: "DELETE" });
+}
+
 // ── Runtime setup events (web wizard → machine CLI listener) ──
 
 export function createRuntimeEvent(input: {

@@ -16,7 +16,7 @@ const AGENTS: Array<{ id: ForgeProvider; name: string; desc: string; runs: strin
   { id: "command-code", name: "command-code", desc: "Claude Code CLI in non-interactive mode.", runs: "cmd -p <prompt>" },
 ];
 
-function isMachineOnline(machine: Machine): boolean {
+function isMachineListening(machine: Machine): boolean {
   if (!machine.lastSeen) return false;
   return Date.now() - parseApiDate(machine.lastSeen).getTime() < 2 * 60 * 1000;
 }
@@ -55,7 +55,7 @@ export function RuntimeSetupModal({ onClose }: { onClose: () => void }) {
     refetchInterval: eventId ? 4000 : false,
   });
 
-  const onlineMachines = machines.filter(isMachineOnline);
+  const onlineMachines = machines.filter(isMachineListening);
   const eventDone = event?.status === "completed";
   const eventFailed = event?.status === "failed";
   const runtimeOnline = !!machine && !!agentCli && runtimes.some((runtime) =>
@@ -131,7 +131,7 @@ export function RuntimeSetupModal({ onClose }: { onClose: () => void }) {
               <div>
                 <h3 className="font-display text-base font-medium text-lx-text-primary mb-1">Choose a machine</h3>
                 <p className="text-xs text-lx-text-secondary leading-5 mb-4">
-                  The machine listener registers itself after <span className="font-mono">lexa-cli login</span> and keeps this list current.
+                  <span className="font-mono">lexa-cli login</span> binds the machine; <span className="font-mono">machine listen</span> brings it online. The new runtime will be bound to the machine you choose.
                 </p>
                 {machinesLoading ? (
                   <div className="flex flex-col items-center gap-3 py-6">
@@ -141,22 +141,28 @@ export function RuntimeSetupModal({ onClose }: { onClose: () => void }) {
                 ) : machines.length > 0 ? (
                   <div className="flex flex-col gap-2">
                     {machines.map((candidate) => {
-                      const online = isMachineOnline(candidate);
+                      const listening = isMachineListening(candidate);
                       return (
                         <button
                           key={candidate.id}
                           type="button"
-                          disabled={!online}
+                          disabled={!listening}
                           onClick={() => setMachine(candidate)}
                           className="flex items-center gap-3 text-left w-full"
-                          style={{ opacity: online ? 1 : 0.55, background: "var(--lx-surface-card)", border: `1px solid ${machine?.id === candidate.id ? "var(--lx-border-focus)" : "var(--lx-border-default)"}`, borderRadius: 6, padding: "10px 12px", cursor: online ? "pointer" : "not-allowed" }}
+                          style={{ opacity: listening ? 1 : 0.55, background: "var(--lx-surface-card)", border: `1px solid ${machine?.id === candidate.id ? "var(--lx-border-focus)" : "var(--lx-border-default)"}`, borderRadius: 6, padding: "10px 12px", cursor: listening ? "pointer" : "not-allowed" }}
                         >
-                          <Monitor size={16} strokeWidth={1.5} className={online ? "text-lx-text-link" : "text-lx-text-muted"} />
+                          <Monitor size={16} strokeWidth={1.5} className={listening ? "text-lx-text-link" : "text-lx-text-muted"} />
                           <span className="flex-1">
                             <span className="block text-sm font-medium text-lx-text-primary">{candidate.hostname || "Unnamed machine"}</span>
-                            <span className="block text-xs text-lx-text-secondary">{online ? "Online now" : `Offline · last seen ${formatLastSeen(candidate)}`}</span>
+                            <span className="block text-xs text-lx-text-secondary">
+                              {listening
+                                ? `Listening · ${candidate.clis?.length ? candidate.clis.map((c) => `${c.provider} ${c.version}`).join(" · ") : "CLIs unknown"}`
+                                : candidate.lastSeen
+                                  ? `Offline · last seen ${formatLastSeen(candidate)}`
+                                  : "Bound, not listening — run `lexa-cli machine listen`"}
+                            </span>
                           </span>
-                          <span className={cn("sync-dot", online ? "sync-synced" : "sync-unlinked")} />
+                          <span className={cn("sync-dot", listening ? "sync-synced" : "sync-unlinked")} />
                         </button>
                       );
                     })}
@@ -172,7 +178,7 @@ lexa-cli machine listen`}
                 </pre>
                 <div className="flex justify-between mt-5">
                   <button type="button" className="btn btn-ghost" onClick={onClose}>Cancel</button>
-                  <button type="button" className="btn btn-primary" disabled={!machine || !isMachineOnline(machine)} onClick={() => setStep(1)}>Continue</button>
+                  <button type="button" className="btn btn-primary" disabled={!machine || !isMachineListening(machine)} onClick={() => setStep(1)}>Continue</button>
                 </div>
               </div>
             )}

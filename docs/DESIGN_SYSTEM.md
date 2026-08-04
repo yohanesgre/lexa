@@ -743,7 +743,7 @@ The Forge button lives in the shared editor toolbar (task detail + wiki), see `w
 ```
 Trigger:   toolbar "Forge" button (hammer icon). Disabled + "coming soon"
            tooltip when the server has no forge support / no daemon online.
-Popover:   Action chips — Continue · Rewrite · Summarize · Expand · Fix grammar.
+Popover:   Action chips — Requirements · Deliverables · Review · Definition of done · Status · Polish.
            Runtime dropdown — which online daemon runs the request (name · provider).
            Generate → POST /api/forge/tasks → daemon runs the agent CLI →
            streamed result → Accept / Reject.
