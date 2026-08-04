@@ -6,7 +6,7 @@ import { cn } from "../ui/cn";
 import { docToMarkdown } from "../../../shared/markdown";
 import { useCreateForgeTask, useForgeTask, useRuntimes, useRecentForgeTask, useCancelForgeTask, useForgeTaskLogs, useForgeAgents, useForgeSkills } from "../../lib/queries";
 import { parseApiDate } from "../../lib/date";
-import { ForgeTaskLogModal } from "./ForgeTaskLogModal";
+import { ForgeTaskLogModal, classifyLogLine } from "./ForgeTaskLogModal";
 import type { ForgeAgent, ForgeSkill, ForgeTask, ForgeTaskLog, Runtime } from "../../../shared/types";
 
 // Task ids the user rejected this session — never re-attach to them on
@@ -163,6 +163,7 @@ function TaskStatusPanel(props: {
   onReview: (text: string, identity: { action: string; runtimeName: string | null; provider: string | null; taskId: string }) => void;
 }) {
   const { taskId, taskData, running, failed, done, reviewActive, followLog, setFollowLog, logBodyRef, logs, setLogModalOpen, dismissedIdsRef, cancelTask, setTaskId, runtimes, onReview } = props;
+  const logLines = (logs.data ?? []).slice(-50);
   return (
   <div style={{ padding: "0 12px 12px" }}>
     {running && (
@@ -191,54 +192,45 @@ function TaskStatusPanel(props: {
         </button>
       </div>
     )}
-    {running && (logs.data ?? []).length > 0 && (
+    {running && (
       <div className="forge-task-log" style={{ marginBottom: 8 }}>
-        <div className="forge-task-log-head">
-          <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
-            <span>Activity</span>
-            <button
-              type="button"
-              className="btn btn-ghost"
-              style={{ height: 18, padding: "0 5px", fontSize: 10, lineHeight: "16px" }}
-              onClick={() => setLogModalOpen(true)}
-              aria-label="Expand log"
-              title="Open the full log viewer"
-            >
-              <Maximize size={10} strokeWidth={1.5} />
+        <div className="slideover-body" style={{ padding: 0 }}>
+          <div className="flex items-center justify-between" style={{ marginBottom: 8 }}>
+            <span className="font-micro text-2xs text-lx-text-muted" style={{ textTransform: "uppercase", letterSpacing: "0.04em" }}>Activity</span>
+            <button type="button" className="btn btn-ghost" style={{ height: 22, padding: "0 8px", fontSize: 11 }} onClick={() => setLogModalOpen(true)} aria-label="Expand log" title="Open the full log viewer">
+              <Maximize size={11} strokeWidth={1.5} />
+              <span style={{ marginLeft: 5 }}>Expand</span>
             </button>
-          </span>
-          <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
-            <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
-              <span className="font-micro text-2xs uppercase tracking-[0.04em]" style={{ color: "var(--lx-text-muted)" }}>Follow</span>
-              <button
-                type="button"
-                className={cn("btn btn-ghost", followLog && "is-active")}
-                aria-pressed={followLog}
-                aria-label={followLog ? "Pause auto-scroll" : "Resume auto-scroll"}
-                title={followLog ? "Pause auto-scroll" : "Resume auto-scroll"}
-                style={{ height: 18, padding: "0 6px", fontSize: 10, lineHeight: "16px" }}
-                onClick={() => setFollowLog((v) => !v)}
-              >
-                ●
-              </button>
-            </span>
-            <span className="forge-task-log-live">● live</span>
-          </span>
-        </div>
-        <div className="forge-task-log-body" ref={logBodyRef}>
-          {logs.data!.slice(-50).map((line) => {
-            // stderr lines are prefixed [stderr] by the daemon — tint
-            // them danger so errors stand out from the stdout stream.
-            const isStderr = line.message.startsWith("[stderr]");
-            const isLast = line.id === logs.data![logs.data!.length - 1].id;
-            return (
-              <div key={line.id} className={cn("forge-task-log-line", isStderr && "stderr", isLast && "current")}>
-                <span className="forge-task-log-dot" aria-hidden="true">{isStderr ? "!" : "●"}</span>
-                <span className="forge-task-log-time">{formatLogTime(line.createdAt)}</span>
-                <span className="forge-task-log-msg">{line.message}</span>
+          </div>
+          <div className="forge-task-log">
+            <div className="forge-task-log-head">
+              <span className="forge-task-log-live">Live · {logLines.length} {logLines.length === 1 ? "line" : "lines"}</span>
+              <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+                <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                  <span className="font-micro text-2xs uppercase tracking-[0.04em] text-lx-text-muted">Follow</span>
+                  <button type="button" className={cn("btn btn-ghost", followLog && "is-active")} aria-pressed={followLog} aria-label={followLog ? "Pause auto-scroll" : "Resume auto-scroll"} title={followLog ? "Pause auto-scroll" : "Resume auto-scroll"} style={{ height: 18, padding: "0 6px", fontSize: 10, lineHeight: "16px" }} onClick={() => setFollowLog((v) => !v)}>●</button>
+                </span>
+                <span className="forge-task-log-live" style={{ marginLeft: 8 }}>live</span>
+              </span>
+            </div>
+            {logLines.length === 0 ? (
+              <div className="forge-task-log-empty">{taskData?.runtimeId ? "Waiting for daemon activity." : "Queued — waiting for a runtime to claim it."}</div>
+            ) : (
+              <div className="forge-task-log-body" ref={logBodyRef}>
+                {logLines.map((line, index) => {
+                  const { level, display } = classifyLogLine(line);
+                  const isLast = index === logLines.length - 1;
+                  return (
+                    <div key={line.id} className={cn("forge-task-log-line", level === "error" && "stderr", level === "warn" && "warn", isLast && "current")}>
+                      <span className="forge-task-log-dot" aria-hidden="true">{level === "info" ? "●" : "!"}</span>
+                      <span className="forge-task-log-time">{formatLogTime(line.createdAt)}</span>
+                      <span className="forge-task-log-msg">{display}</span>
+                    </div>
+                  );
+                })}
               </div>
-            );
-          })}
+            )}
+          </div>
         </div>
       </div>
     )}

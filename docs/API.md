@@ -176,7 +176,10 @@ interface ForgeTask {
   documentType: "task" | "wiki";
   documentId: string;
   documentTitle: string;   // task title / wiki page title — the UI shows this, never the raw result
-  action: "continue" | "rewrite" | "summarize" | "expand" | "grammar";
+  agentId: ID;             // global rule bundle (Settings → Agents)
+  skillId: ID;             // global operation bundle (Settings → Skills)
+  skillName: string;
+  extraPrompt: string;
   selection: string;
   docContext: string;
   status: "queued" | "running" | "completed" | "failed" | "cancelled";
@@ -533,22 +536,32 @@ GET    /api/forge/runtimes
 → 200 { data: Runtime[] }                  (offline if last_seen > 2 min ago)
 
 DELETE /api/forge/runtimes/:id              (browser)
-→ 204 | 404 RUNTIME_NOT_FOUND | 409 MACHINE_OFFLINE
-Online removal creates a machine-scoped `remove` event, deletes the runtime
-row, and lets the listener kill the matching child + env directory. Offline
-removal is blocked; the runtime remains listed until its machine listener is
-online.
+→ 204 | 404 RUNTIME_NOT_FOUND
+Removal never blocks: it queues a machine-scoped `remove` event (delivered
+whenever the machine's listener next heartbeats — the listener kills the
+matching child + env directory) and deletes the runtime row. A machine hosts
+at most one runtime per agent CLI, so the whole (machine, provider) pair is
+removed — keeping host state consistent with the provider-scoped event.
+Runtimes without a machine are deleted directly.
 
 POST   /api/forge/daemon/heartbeat         (daemon child)
 body { runtimeId*, mcpConnected? }
 → 200 { ok: true }
 The daemon reports liveness and MCP status. `lexa-cli machine listen` discovers
-agent/model catalogs and sends them through the machine heartbeat.
+agent/model catalogs and sends them through the machine heartbeat. A live
+heartbeat clears the runtime's last_error. A revoked runtime key makes every
+daemon call return 401 — the daemon exits with code 3 and the listener does
+NOT respawn it; the listener relays the failure on its next machine heartbeat
+(daemonErrors) so the runtime row shows last_error = "API key revoked".
+Recovery: re-run Setup runtime (install event delivers a fresh key).
 
 POST   /api/forge/daemon/claim             (daemon)
 body { runtimeId* }
 → 200 { task: ForgeTask | null, provider, agent, model: string, extraArgs: string[], prompt: string,
-        agentMarkdown: string, skillMarkdown: string }
+        agentMarkdown: string, skillMarkdown: string, skillIds: string[] }
+        skillIds = full current skill-id set; the daemon prunes stale
+        .agents/skills/<id> dirs not in this list (opencode auto-discovers
+        every bundle in that dir)
   (oldest queued, FIFO; marks running. provider + agent + model + extraArgs are
   the runtime's server-side config so the daemon spawns the configured CLI with
   the latest settings. prompt is the server-built task prompt (context + output
@@ -581,16 +594,42 @@ GET    /api/forge/runtime-events/:id       (browser)  → 200 RuntimeEvent
 GET    /api/forge/runtime-events           (browser)  → 200 { data: RuntimeEvent[] }
 
 # ── Machine registry and CLI catalogs ──
-POST   /api/forge/machines/heartbeat          (listener)
-body { id*, hostname?, runtimes?: [{ runtimeId, agentCli, models, agents }] }
+POST   /api/forge/machines/register             (cli login)
+body { id*, hostname* }
 → 200 Machine
-Upserts a machine row. The CLI persists id in ~/.lexa/machine-id.
+Binds a machine: upsert WITHOUT touching last_seen — a logged-in machine is
+"bound, not listening" (last_seen stays NULL until its listener heartbeats).
+Idempotent. Machine ids are `hostname-<unique>` (new machines; legacy UUID
+ids keep working).
+
+POST   /api/forge/machines/heartbeat          (listener)
+body { id*, hostname?, clis?: [{ provider, version }],
+       runtimes?: [{ runtimeId, agentCli, models, agents }],
+       daemonErrors?: [{ runtimeId, error }] }
+→ 200 Machine
+Upserts a machine row (marks it listening). The CLI persists id in
+~/.lexa/machine-id. clis = installed agent CLIs probed at listener start
+(opencode/cmd --version; hermes skipped). daemonErrors relay daemon failures
+the daemon itself can't report (revoked key → exit code 3) — stored on the
+matching runtime row as last_error. Also runs the stuck-task sweep: 'running'
+forge tasks whose runtime has been offline > 10 min are re-queued, and stale
+'running' runs (started > FORGE_STALE_RUN_MIN, default 30m, runtime offline
+or gone) are hard-deleted — task + log — since the runner is dead and will
+never post a result.
 Catalogs are stored on matching runtime rows and power Settings pickers.
 
 GET    /api/forge/machines                     (browser)
 → 200 { data: Machine[] }
 Machines with last_seen > 2 min ago are marked offline. Offline machines stay
-visible but cannot be targeted or removed.
+visible but cannot be targeted for runtime setup.
+
+DELETE /api/forge/machines/:id                  (browser)
+→ 204 | 404 MACHINE_NOT_FOUND
+Removes the host: queues machine-scoped `remove` events for each of its
+runtimes (deduped per provider, delivered on the listener's next heartbeat),
+deletes the runtime rows, its pending setup events (FK cascade), and the
+machine row. Never blocks — a still-listening machine reappears on its next
+heartbeat (upsert) until `lexa-cli machine stop` is run on it.
 
 POST   /api/forge/tasks                    (browser)
 body { slug*, documentType*: "task"|"wiki", documentId*, agentId*, skillId*,
@@ -609,6 +648,9 @@ POST   /api/forge/tasks/:id/cancel             (browser)
 
 GET    /api/forge/tasks/:id/logs               (browser)
 → 200 { data: ForgeTaskLog[] }   (ascending; live activity feed while running)
+Each log row carries stream ("out"|"err") + level ("info"|"warn"|"error") —
+classified ONCE by the daemon at write time (shared/forge-log.ts) and stored;
+the UI renders the stored level. Legacy rows default to out/info.
 
 GET    /api/forge/tasks/history                (browser)
 query { slug?, status?, skillId?, documentType?, limit?, cursor? }
@@ -665,8 +707,10 @@ DELETE /api/forge/skills/:id
 POST   /api/forge/skills/:id/reset         (builtin only)
 → 200 ForgeSkill  | 404 SKILL_NOT_FOUND | 422 FORGE_BUILTIN_DELETE
 
-POST   /api/forge/daemon/tasks/:id/log         (daemon)  body { message* } → 200 ForgeTaskLog
-(appends one activity line — claim, model, agent start, generating, done/failed)
+POST   /api/forge/daemon/tasks/:id/log         (daemon)  body { message*, stream? ("out"|"err"), level? ("info"|"warn"|"error") } → 200 ForgeTaskLog
+(appends one activity line — claim, model, agent start, generating, done/failed;
+stream/level are classified once by the daemon and stored; defaults out/info
+keep older daemons working)
 
 POST   /api/forge/daemon/tasks/:id/complete   (daemon)  body { result* } → 200 ForgeTask
 POST   /api/forge/daemon/tasks/:id/fail       (daemon)  body { error* }  → 200 ForgeTask

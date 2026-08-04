@@ -33,7 +33,6 @@ export class ForgeEntityInUse extends Data.TaggedError("ForgeEntityInUse")<{ kin
 export class RuntimeNotFound extends Data.TaggedError("RuntimeNotFound")<{ id: string }> {}
 export class RuntimeEventNotFound extends Data.TaggedError("RuntimeEventNotFound")<{ id: string }> {}
 export class MachineNotFound extends Data.TaggedError("MachineNotFound")<{ id: string }> {}
-export class MachineOffline extends Data.TaggedError("MachineOffline")<{ id: string; hostname: string; lastSeen: string | null }> {}
 export class ApiKeyNotFound extends Data.TaggedError("ApiKeyNotFound")<{ id: string }> {}
 export class NoRuntimeOnline extends Data.TaggedError("NoRuntimeOnline")<{}> {}
 export class TaskLinkNotFound extends Data.TaggedError("TaskLinkNotFound")<{ id: string }> {}
@@ -70,7 +69,6 @@ export const errorCodeMap: Record<string, string> = {
   RuntimeNotFound: "RUNTIME_NOT_FOUND",
   RuntimeEventNotFound: "RUNTIME_EVENT_NOT_FOUND",
   MachineNotFound: "MACHINE_NOT_FOUND",
-  MachineOffline: "MACHINE_OFFLINE",
   ApiKeyNotFound: "API_KEY_NOT_FOUND",
   NoRuntimeOnline: "NO_RUNTIME_ONLINE",
   TaskLinkNotFound: "TASK_LINK_NOT_FOUND",
@@ -116,7 +114,6 @@ export function errorToStatus(error: { _tag: string }): number {
     case "GithubIssueAlreadyLinked":
     case "OptionInUse":
     case "NoRuntimeOnline":
-    case "MachineOffline":
     case "TaskLinkCycle":
     case "ForgeEntityInUse":
       return 409;
@@ -191,8 +188,6 @@ export function errorMessage(error: { _tag: string } & Record<string, unknown>):
       return `Runtime setup event not found`;
     case "MachineNotFound":
       return `Machine not found`;
-    case "MachineOffline":
-      return `Machine '${error.hostname || error.id}' is offline. Restart its listener before removing or restarting the runtime.`;
     case "ApiKeyNotFound":
       return `API key not found`;
     case "NoRuntimeOnline":

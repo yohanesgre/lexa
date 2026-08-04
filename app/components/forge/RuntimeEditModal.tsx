@@ -28,7 +28,6 @@ export function RuntimeEditModal({ runtime, onClose }: { runtime: Runtime; onClo
     return !PRESETS[runtime.provider]?.includes(runtime.model);
   });
   const [args, setArgs] = useState<string[]>(runtime.extraArgs);
-  const [printLogs, setPrintLogs] = useState(runtime.printLogs);
   const [logLevel, setLogLevel] = useState(runtime.logLevel);
   const update = useUpdateRuntime();
 
@@ -57,12 +56,12 @@ export function RuntimeEditModal({ runtime, onClose }: { runtime: Runtime; onClo
 
   const save = () => {
     update.mutate(
-      { id: runtime.id, patch: { name: name.trim(), agent: agent.trim(), model: model.trim(), printLogs, logLevel, extraArgs: trimmedArgs } },
+      { id: runtime.id, patch: { name: name.trim(), agent: agent.trim(), model: model.trim(), printLogs: true, logLevel, extraArgs: trimmedArgs } },
       { onSuccess: () => onClose() }
     );
   };
 
-  const dirty = name.trim() !== runtime.name || agent.trim() !== runtime.agent || model.trim() !== runtime.model || printLogs !== runtime.printLogs || logLevel !== runtime.logLevel || JSON.stringify(trimmedArgs) !== JSON.stringify(runtime.extraArgs);
+  const dirty = name.trim() !== runtime.name || agent.trim() !== runtime.agent || model.trim() !== runtime.model || logLevel !== runtime.logLevel || JSON.stringify(trimmedArgs) !== JSON.stringify(runtime.extraArgs);
 
   return (
     <>
@@ -140,10 +139,9 @@ export function RuntimeEditModal({ runtime, onClose }: { runtime: Runtime; onClo
                   Logging
                   <span className="font-micro text-2xs text-lx-text-muted uppercase tracking-[0.04em]" style={{ marginLeft: 6 }}>opencode run</span>
                 </div>
-                <label className="flex items-center gap-2 mb-2" style={{ cursor: "pointer" }}>
-                  <input type="checkbox" checked={printLogs} onChange={(e) => setPrintLogs(e.target.checked)} />
-                  <span className="text-xs text-lx-text-secondary">Print logs to stderr ({`--print-logs`})</span>
-                </label>
+                <div className="text-xs text-lx-text-secondary mb-2">
+                  Diagnostic logs always print to stderr ({`--print-logs`}) and stream into the activity log.
+                </div>
                 <select
                   className="prop-input w-full"
                   aria-label="Log level"
@@ -155,7 +153,7 @@ export function RuntimeEditModal({ runtime, onClose }: { runtime: Runtime; onClo
                     <option key={l} value={l}>{l}</option>
                   ))}
                 </select>
-                <div className="field-hint">Passed as --print-logs / --log-level at spawn. Streamed into the task's activity log. Applies on the next Forge task — no daemon restart needed.</div>
+                <div className="field-hint">Controls the always-on opencode diagnostic stderr stream. The activity log captures stdout and stderr separately, with stored info/warn/error levels. Applies on the next Forge task — no daemon restart needed.</div>
               </div>
             )}
 

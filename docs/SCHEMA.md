@@ -266,8 +266,14 @@ CREATE TABLE runtimes (
   status         TEXT NOT NULL DEFAULT 'offline' CHECK (status IN ('online', 'offline')),
   hostname       TEXT NOT NULL DEFAULT '',
   last_seen      TEXT,
+  last_error     TEXT,                          -- migration 0002: last daemon
+                                                 -- failure relayed by the
+                                                 -- machine listener (e.g.
+                                                 -- "API key revoked", exit 3)
   created_at     TEXT NOT NULL DEFAULT (datetime('now'))
 );
+-- Invariant: a machine hosts at most one runtime per provider (the listener
+-- reuses the env on install; remove events are provider-scoped).
 
 -- ============================================================
 -- Forge: machine registry + setup events (migrations 0023–0025)
@@ -275,10 +281,19 @@ CREATE TABLE runtimes (
 CREATE TABLE machines (
   id          TEXT PRIMARY KEY,
   hostname    TEXT NOT NULL DEFAULT '',
-  last_seen   TEXT,
+  clis        TEXT NOT NULL DEFAULT '[]',   -- migration 0002: installed agent
+                                            -- CLIs reported by the listener
+                                            -- heartbeat ([{ provider, version }])
+  last_seen   TEXT,                         -- NULL = "bound, not listening"
   created_at  TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE INDEX idx_machines_last_seen ON machines(last_seen);
+-- Machine lifecycle: lexa-cli login registers (last_seen NULL = bound);
+-- machine listen/start heartbeats every 3s (listening); last_seen goes NULL
+-- after 2 min without a heartbeat (offline). Machine ids are
+-- `hostname-<unique>` for new machines; legacy UUID ids keep working.
+-- Delete removes runtimes + pending events (queued remove events first);
+-- a still-listening machine reappears on its next heartbeat.
 
 -- Setup events are machine-scoped. Runtime execution settings stay on the
 -- runtimes row and are edited from Settings after installation.
@@ -378,9 +393,16 @@ CREATE TABLE forge_task_logs (
   id         TEXT PRIMARY KEY,
   task_id    TEXT NOT NULL REFERENCES forge_tasks(id) ON DELETE CASCADE,
   message    TEXT NOT NULL,
+  stream     TEXT NOT NULL DEFAULT 'out' CHECK (stream IN ('out','err')), -- migration 0003
+  level      TEXT NOT NULL DEFAULT 'info' CHECK (level IN ('info','warn','error')), -- migration 0003
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE INDEX idx_forge_task_logs_task ON forge_task_logs(task_id, created_at);
+-- Levels are classified ONCE by the daemon at write time (shared/forge-log.ts
+-- — stderr ≠ error; retries/rate-limits → warn) and stored; the UI renders
+-- the stored level, never re-classifies. Legacy rows default out/info; the UI
+-- falls back to the shared classifier for rows still carrying the old
+-- [stderr] marker.
 
 -- ============================================================
 -- Task links: subtask_of / blocked_by / related_to (migration 0012)

@@ -64,7 +64,7 @@ CREATE TABLE forge_skills (
 
 CREATE TABLE forge_task_logs (
   id         TEXT PRIMARY KEY,
-  task_id    TEXT NOT NULL REFERENCES "forge_tasks_old"(id) ON DELETE CASCADE,
+  task_id    TEXT NOT NULL REFERENCES forge_tasks(id) ON DELETE CASCADE,
   message    TEXT NOT NULL,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
@@ -324,31 +324,36 @@ END;
 
 INSERT INTO forge_agents (id, name, description, instructions, is_builtin) VALUES
   ('lexa', 'Lexa',
-   'Default writing assistant — matches the document''s voice, outputs only text.',
-   'You are Forge, a writing assistant inside Lexa. You help a game-dev team write task descriptions and wiki pages. You are a text editor, not an agent: you do not call tools, you do not read files, and you do not act on any system. Your whole output is the text you write.',
+   'Default project assistant — writes and sharpens task descriptions, requirements, and wiki pages.',
+   'You are Forge, Lexa''s project management assistant. You help teams run their projects: you write task descriptions, requirements, and wiki pages, and you sharpen the team''s documents — spotting missing details, unclear scope, and weak acceptance criteria. You may read files in your working directory (the project workspace) to ground your writing in the actual repo and docs. You do not write files, run commands, or act on any system — your whole output is the text you write. Match the document''s existing voice and structure. If the linked sources contradict the document, prefer the sources.',
    1);
 
 INSERT INTO forge_skills (id, name, description, instructions, is_builtin) VALUES
-  ('continue', 'Continue',
-   'Continue the text naturally from the cursor, matching its style, tone, and structure.',
-   'Continue the text below naturally, matching its style, tone, and structure. Output only the continuation, no preamble.',
+  ('requirements', 'Requirements',
+   'Write clear, testable requirements for a task.',
+   'Write only the task''s requirements — what must hold when it''s done. One concrete, verifiable condition per checkbox item (- [ ]). No design proposals or background. Output only the checklist.',
    1),
-  ('rewrite', 'Rewrite',
-   'Make the selected text clearer and more concise without changing the meaning.',
-   'Rewrite the selected text to be clearer and more concise. Keep the meaning. Keep the same structure and level of detail — tighten the prose, don''t restructure arbitrarily. Output only the rewritten text.',
+  ('deliverables', 'Deliverables',
+   'Break a task into deliverables.',
+   'Split the task into a checklist of deliverables — concrete, actionable outputs. Each must be independently completable. Note dependencies. Output only the checklist.',
    1),
-  ('summarize', 'Summarize',
-   'Condense the selected text into an overview plus key-point bullets.',
-   'Summarize the selected text. Lead with a 1–2 sentence overview, then 3–6 bullets of the key points. Keep it tight. Output only the summary.',
+  ('review', 'Review',
+   'Improve a task''s clarity and completeness like a PM.',
+   'Review the task like a project manager: fix missing details, unclear scope, weak requirements, and risks. Output the improved full task — not a separate report.',
    1),
-  ('expand', 'Expand',
-   'Expand the selected text into more detail, keeping the same voice.',
-   'Expand the selected text into more detail, keeping the same voice. Break it into labeled sections with subheadings and add concrete examples or specifics where they help. Output only the expanded text.',
+  ('definition-of-done', 'Definition of done',
+   'Write a Definition of Done checklist for a task.',
+   'Write a Definition of Done checklist (- [ ]): conditions that must hold before the task counts as complete. Each item concrete and verifiable. Output only the checklist.',
    1),
-  ('grammar', 'Fix grammar',
-   'Fix grammar, spelling, and punctuation without changing meaning or formatting.',
-   'Fix grammar, spelling, and punctuation in the selected text. Do not change meaning, style, or structure — preserve the exact formatting. Output only the corrected text.',
+  ('status', 'Status',
+   'Write a status update: progress, blockers, next steps.',
+   'Write a status update: what''s done, what''s blocked (and why), what''s next. Be honest; flag risks early. Output only the status update.',
+   1),
+  ('polish', 'Polish',
+   'Refine the selected text: clearer, more concise, same meaning.',
+   'Polish the selected text: clearer and more concise, keeping the meaning, structure, and level of detail. Output only the polished text.',
    1);
 
 INSERT INTO forge_agent_skills (agent_id, skill_id) VALUES
-  ('lexa', 'continue'), ('lexa', 'rewrite'), ('lexa', 'summarize'), ('lexa', 'expand'), ('lexa', 'grammar');
+  ('lexa', 'requirements'), ('lexa', 'deliverables'), ('lexa', 'review'),
+  ('lexa', 'definition-of-done'), ('lexa', 'status'), ('lexa', 'polish');

@@ -4,7 +4,7 @@ import { Check, ChevronRight, Copy, Hammer, List, X } from "lucide-react";
 import { Link } from "@tanstack/react-router";
 import { cn } from "../ui/cn";
 import { copyToClipboard } from "../../lib/clipboard";
-import { useProjects, useRecentForgeTasks, useRuntimes, useCancelForgeTask, useForgeTaskLogs } from "../../lib/queries";
+import { useRecentForgeTasks, useRuntimes, useCancelForgeTask, useForgeTaskLogs } from "../../lib/queries";
 import type { RecentForgeTask } from "../../lib/api";
 
 const STATUS_LABEL: Record<string, string> = {
@@ -62,7 +62,6 @@ function TaskRowMain({ t, navigable }: { t: RecentForgeTask; navigable: boolean 
 
 export function ForgeStatus() {
   const { data: tasks = [] } = useRecentForgeTasks();
-  const { data: projects = [] } = useProjects();
   const { data: runtimes = [] } = useRuntimes();
   const cancelTask = useCancelForgeTask();
   const [open, setOpen] = useState(false);
@@ -138,8 +137,6 @@ export function ForgeStatus() {
   // entry point (and its panel) is reachable even with no recent tasks.
   const idle = !active && doneCount === 0 && failedCount === 0;
 
-  const slugByProject = new Map(projects.map((p) => [p.id, p.slug]));
-
   return (
     <div ref={containerRef} style={{ position: "relative" }}>
       <button
@@ -189,7 +186,6 @@ export function ForgeStatus() {
               <div className="text-xs text-lx-text-muted px-3 py-3">No Forge tasks yet.</div>
             ) : (
               visible.slice(0, 6).map((t) => {
-                const slug = slugByProject.get(t.projectId);
                 const runtime = runtimes.find((r) => r.id === t.runtimeId);
                 const isActive = t.status === "queued" || t.status === "running";
                 const meta =
@@ -199,33 +195,46 @@ export function ForgeStatus() {
                     key={t.id}
                     role="menuitem"
                     className="dropdown-item"
-                    style={{ height: "auto", padding: "8px 10px", alignItems: "flex-start", flexDirection: "column", gap: 2, cursor: "default" }}
+                    style={{ height: "auto", padding: "8px 10px", alignItems: "flex-start", flexDirection: "column", gap: 2, cursor: "pointer", position: "relative" }}
                   >
-                    <div className="flex items-center gap-2 w-full">
-                      {slug &&
-                        (t.documentType === "task" ? (
-                          <Link
-                            to="/$slug"
-                            params={{ slug }}
-                            search={{ task: t.documentId }}
-                            onClick={() => setOpen(false)}
-                            className="flex items-center gap-2 w-full"
-                            style={{ flex: 1, minWidth: 0, textDecoration: "none", color: "inherit" }}
-                          >
-                            <TaskRowMain t={t} navigable />
-                          </Link>
-                        ) : (
-                          <Link
-                            to="/$slug/wiki/$pageSlug"
-                            params={{ slug, pageSlug: t.documentId }}
-                            onClick={() => setOpen(false)}
-                            className="flex items-center gap-2 w-full"
-                            style={{ flex: 1, minWidth: 0, textDecoration: "none", color: "inherit" }}
-                          >
-                            <TaskRowMain t={t} navigable />
-                          </Link>
-                        ))}
-                      {!slug && <TaskRowMain t={t} navigable={false} />}
+                    <Link
+                      to="/forge"
+                      search={{ task: t.id }}
+                      onClick={() => setOpen(false)}
+                      className="flex flex-col w-full"
+                      style={{ gap: 2, textDecoration: "none", color: "inherit", minWidth: 0 }}
+                    >
+                      <div className="flex items-center gap-2 w-full" style={{ paddingRight: 64 }}>
+                        <TaskRowMain t={t} navigable />
+                      </div>
+                      <span className="font-micro text-2xs text-lx-text-muted">{meta}</span>
+                      {isActive && activeLogs.data && activeLogs.data.length > 0 && (
+                        <span
+                          className="font-mono"
+                          style={{ fontSize: 10, color: "var(--lx-text-muted)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: "100%", display: "inline-flex", alignItems: "center", gap: 6 }}
+                        >
+                          <span className="forge-task-log-live" />
+                          {activeLogs.data[activeLogs.data.length - 1].message}
+                        </span>
+                      )}
+                    </Link>
+                    <span
+                      className="font-mono"
+                      style={{ fontSize: 10, color: "var(--lx-text-muted)", display: "inline-flex", alignItems: "center", gap: 6, minWidth: 0, paddingRight: 64 }}
+                    >
+                      <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 180 }}>{t.id}</span>
+                    </span>
+                    <div style={{ position: "absolute", top: 8, right: 8, display: "flex", gap: 4 }}>
+                      <button
+                        type="button"
+                        className="forge-dismiss"
+                        aria-label="Copy task id"
+                        title={copiedId === t.id ? "Copied" : "Copy task id"}
+                        onClick={() => copyTaskId(t.id)}
+                        style={{ width: 16, height: 16 }}
+                      >
+                        {copiedId === t.id ? <Check size={10} strokeWidth={2.5} /> : <Copy size={10} strokeWidth={1.5} />}
+                      </button>
                       {isActive && (
                         <button
                           type="button"
@@ -253,32 +262,6 @@ export function ForgeStatus() {
                         </button>
                       )}
                     </div>
-                    <span className="font-micro text-2xs text-lx-text-muted">{meta}</span>
-                    <span
-                      className="font-mono"
-                      style={{ fontSize: 10, color: "var(--lx-text-muted)", display: "inline-flex", alignItems: "center", gap: 6, minWidth: 0 }}
-                    >
-                      <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 180 }}>{t.id}</span>
-                      <button
-                        type="button"
-                        className="forge-dismiss"
-                        aria-label="Copy task id"
-                        title={copiedId === t.id ? "Copied" : "Copy task id"}
-                        onClick={() => copyTaskId(t.id)}
-                        style={{ width: 16, height: 16, flexShrink: 0 }}
-                      >
-                        {copiedId === t.id ? <Check size={10} strokeWidth={2.5} /> : <Copy size={10} strokeWidth={1.5} />}
-                      </button>
-                    </span>
-                    {isActive && activeLogs.data && activeLogs.data.length > 0 && (
-                      <span
-                        className="font-mono"
-                        style={{ fontSize: 10, color: "var(--lx-text-muted)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: "100%", display: "inline-flex", alignItems: "center", gap: 6 }}
-                      >
-                        <span className="forge-task-log-live" />
-                        {activeLogs.data[activeLogs.data.length - 1].message}
-                      </span>
-                    )}
                   </div>
                 );
               })

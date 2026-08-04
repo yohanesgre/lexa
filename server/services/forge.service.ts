@@ -10,27 +10,30 @@ import { ProjectNotFound, TaskNotFound, WikiPageNotFound, ForgeTaskNotFound, NoR
 import { docToMarkdown } from "../../shared/markdown";
 import type { ForgeTask, ForgeTaskLog, DocumentSource, TipTapDoc, ForgeAgent, ForgeSkill } from "../../shared/types";
 
-// Builtin seed defaults — mirrors migrations/0027_forge_agents_skills.sql.
+// Builtin seed defaults — mirrors migrations/0001_init.sql (fresh installs) and
+// migrations/0004_forge_pm_skills.sql (existing DBs).
 // Reset to default restores these exact values (and, for Lexa, the full
 // builtin skill set). Keep the two in sync when editing either.
 const DEFAULT_AGENT: { id: string; instructions: string; skillIds: string[] } = {
   id: "lexa",
   instructions:
-    "You are Forge, a writing assistant inside Lexa. You help a game-dev team write task descriptions and wiki pages. You are a text editor, not an agent: you do not call tools, you do not read files, and you do not act on any system. Your whole output is the text you write.",
-  skillIds: ["continue", "rewrite", "summarize", "expand", "grammar"],
+    "You are Forge, Lexa's project management assistant. You help teams run their projects: you write task descriptions, requirements, and wiki pages, and you sharpen the team's documents — spotting missing details, unclear scope, and weak acceptance criteria. You may read files in your working directory (the project workspace) to ground your writing in the actual repo and docs. You do not write files, run commands, or act on any system — your whole output is the text you write. Match the document's existing voice and structure. If the linked sources contradict the document, prefer the sources.",
+  skillIds: ["requirements", "deliverables", "review", "definition-of-done", "status", "polish"],
 };
 
 const DEFAULT_SKILLS: Record<string, string> = {
-  continue:
-    "Continue the text below naturally, matching its style, tone, and structure. Output only the continuation, no preamble.",
-  rewrite:
-    "Rewrite the selected text to be clearer and more concise. Keep the meaning. Keep the same structure and level of detail — tighten the prose, don't restructure arbitrarily. Output only the rewritten text.",
-  summarize:
-    "Summarize the selected text. Lead with a 1–2 sentence overview, then 3–6 bullets of the key points. Keep it tight. Output only the summary.",
-  expand:
-    "Expand the selected text into more detail, keeping the same voice. Break it into labeled sections with subheadings and add concrete examples or specifics where they help. Output only the expanded text.",
-  grammar:
-    "Fix grammar, spelling, and punctuation in the selected text. Do not change meaning, style, or structure — preserve the exact formatting. Output only the corrected text.",
+  requirements:
+    "Write only the task's requirements — what must hold when it's done. One concrete, verifiable condition per checkbox item (- [ ]). No design proposals or background. Output only the checklist.",
+  deliverables:
+    "Split the task into a checklist of deliverables — concrete, actionable outputs. Each must be independently completable. Note dependencies. Output only the checklist.",
+  review:
+    "Review the task like a project manager: fix missing details, unclear scope, weak requirements, and risks. Output the improved full task — not a separate report.",
+  "definition-of-done":
+    "Write a Definition of Done checklist (- [ ]): conditions that must hold before the task counts as complete. Each item concrete and verifiable. Output only the checklist.",
+  status:
+    "Write a status update: what's done, what's blocked (and why), what's next. Be honest; flag risks early. Output only the status update.",
+  polish:
+    "Polish the selected text: clearer and more concise, keeping the meaning, structure, and level of detail. Output only the polished text.",
 };
 
 export class ForgeService extends Effect.Service<ForgeService>()("Lexa/ForgeService", {
@@ -80,12 +83,13 @@ export class ForgeService extends Effect.Service<ForgeService>()("Lexa/ForgeServ
         return parts.join("\n\n");
       });
 
-    // Forge is a pure text-generation assistant: the agent's role and rules
-    // travel as FILES (AGENTS.md + .agents/<skill>/SKILL.md written into the
-    // run dir at claim time, read natively by AGENTS.md-capable CLIs like
-    // opencode). The prompt carries the per-task context plus the hard
-    // output contract — anything besides the requested text (status lines,
-    // "I found...", MCP chatter, fences) lands verbatim in the document.
+    // Forge is a text-only project-management assistant: the agent's role and
+    // rules travel as FILES (AGENTS.md + .agents/<skill>/SKILL.md written into
+    // the run dir at claim time, read natively by AGENTS.md-capable CLIs like
+    // opencode). The agent may read workspace files for grounding; the prompt
+    // carries the per-task context plus the hard output contract — anything
+    // besides the requested text (status lines, "I found...", MCP chatter,
+    // fences) lands verbatim in the document.
     const MARKDOWN_STYLE = [
       "Section headings: use ## and ### — never H1 (the document already has its own title).",
       "Keep paragraphs short and scannable — one idea per paragraph, no walls of text.",
@@ -99,11 +103,20 @@ export class ForgeService extends Effect.Service<ForgeService>()("Lexa/ForgeServ
 
     const buildPrompt = (
       task: ForgeTask,
+      agent: ForgeAgent,
       skill: ForgeSkill,
       docContext: string,
       sourcesContent: string
     ): string => {
       const sections: string[] = [`Task: ${skill.name}`];
+      // The workspace holds every lexa-agent's rule bundle persistently
+      // (.agents/agents/<id>/AGENTS.md); the prompt names the active one so
+      // the model reads the right file for this run. The skill file gets the
+      // same pointer: opencode's globs exclude hidden dirs and the skill tool
+      // is denied in the sandbox, so auto-discovery never surfaces SKILL.md —
+      // only an explicit path makes delivery deterministic.
+      sections.push("", `Agent: ${agent.name} (id ${agent.id}) — read .agents/agents/${agent.id}/AGENTS.md and follow it exactly.`);
+      sections.push("", `Skill: ${skill.name} (id ${skill.id}) — read .agents/skills/${skill.id}/SKILL.md and follow it exactly.`);
       if (task.extraPrompt) {
         sections.push("", `Additional instructions:\n${task.extraPrompt}`);
       }
@@ -112,7 +125,7 @@ export class ForgeService extends Effect.Service<ForgeService>()("Lexa/ForgeServ
       if (task.selection) sections.push("", `Selected text:\n"""\n${task.selection}\n"""`);
       sections.push(
         "",
-        "Your working directory contains AGENTS.md (your role and rules) and .agents/ (your skills) — follow them.",
+        "Your working directory contains AGENTS.md (project rules) and .agents/ (your rules and skills) — follow them.",
         "",
         "Output rules:",
         "- Output ONLY the requested text. Nothing else.",
@@ -304,9 +317,9 @@ export class ForgeService extends Effect.Service<ForgeService>()("Lexa/ForgeServ
       // Build the full prompt (with resolved sources) for the daemon.
       buildPromptForTask: (task: ForgeTask): Effect.Effect<string, AgentNotFound | SkillNotFound | DbError | RowNotFound | WikiPageNotFound | import("../api/errors").SourceFetchError | import("../api/errors").SourceUnreachable> =>
         Effect.gen(function* () {
-          const { skill } = yield* resolveRulesImpl(task);
+          const { agent, skill } = yield* resolveRulesImpl(task);
           const sourcesContent = yield* loadSourcesContent(task.projectId, task.documentType, task.documentId);
-          return buildPrompt(task, skill, task.docContext, sourcesContent);
+          return buildPrompt(task, agent, skill, task.docContext, sourcesContent);
         }),
 
       listForDocument: (projectId: string, documentType: "task" | "wiki", documentId: string): Effect.Effect<ForgeTask[], DbError> =>
@@ -340,14 +353,20 @@ export class ForgeService extends Effect.Service<ForgeService>()("Lexa/ForgeServ
       // Live activity feed for a task — the daemon appends lines, the UI
       // polls while the task is running. The message is bounded so a chatty
       // agent can't grow rows without limit (daemon truncates to 500; this
-      // is the server-side safety net).
-      appendLog: (taskId: string, message: string): Effect.Effect<ForgeTaskLog, ForgeTaskNotFound | ConstraintViolation | DbError | RowNotFound> =>
+      // is the server-side safety net). stream/level are classified ONCE by
+      // the daemon (shared/forge-log.ts) and stored — the UI renders them.
+      appendLog: (
+        taskId: string,
+        message: string,
+        stream: "out" | "err" = "out",
+        level: "info" | "warn" | "error" = "info"
+      ): Effect.Effect<ForgeTaskLog, ForgeTaskNotFound | ConstraintViolation | DbError | RowNotFound> =>
         Effect.gen(function* () {
           yield* repo.findTaskById(taskId).pipe(
             Effect.catchTag("RowNotFound", () => new ForgeTaskNotFound({ id: taskId }))
           );
           const bounded = message.slice(0, 2000);
-          return yield* repo.appendLog(crypto.randomUUID(), taskId, bounded);
+          return yield* repo.appendLog(crypto.randomUUID(), taskId, bounded, stream, level);
         }),
 
       listLogs: (taskId: string): Effect.Effect<ForgeTaskLog[], DbError> =>
@@ -375,6 +394,39 @@ export class ForgeService extends Effect.Service<ForgeService>()("Lexa/ForgeServ
         repo.deleteRuntime(id).pipe(
           Effect.catchTag("RowNotFound", () => new RuntimeNotFound({ id }))
         ),
+
+      // Remove events are provider-scoped and a machine hosts at most one
+      // runtime per agent CLI — delete the whole (machine, provider) pair so
+      // host state stays consistent with the queued event.
+      removeRuntimePair: (machineId: string, provider: "opencode" | "hermes" | "command-code"): Effect.Effect<void, ConstraintViolation | DbError> =>
+        repo.deleteRuntimePair(machineId, provider),
+
+      reportDaemonErrors: (errors: Array<{ runtimeId: string; error: string }>): Effect.Effect<void, ConstraintViolation | DbError> =>
+        Effect.forEach(errors, (entry) => repo.setRuntimeLastError(entry.runtimeId, entry.error.slice(0, 500))).pipe(
+          Effect.map(() => undefined)
+        ),
+
+      clearRuntimeLastError: (id: string): Effect.Effect<void, ConstraintViolation | DbError> =>
+        repo.clearRuntimeLastError(id),
+
+      sweepStuckTasks: (): Effect.Effect<number, ConstraintViolation | DbError> =>
+        repo.sweepStuckTasks(),
+
+      // Stale-run auto-removal threshold: a `running` task older than this
+      // whose runtime is offline/gone is hard-deleted (task + log). A live
+      // runtime is never touched. Override with FORGE_STALE_RUN_MIN.
+      sweepStalledTasks: (): Effect.Effect<number, ConstraintViolation | DbError> =>
+        Effect.gen(function* () {
+          const staleMin = (() => {
+            const v = Number(process.env.FORGE_STALE_RUN_MIN);
+            return Number.isFinite(v) && v > 0 ? v : 30;
+          })();
+          // Delete BEFORE re-queue: re-queuing first would move the stale
+          // run out of 'running' and shield it from the removal check.
+          const removed = yield* repo.deleteStaleRuns(staleMin);
+          const requeued = yield* repo.sweepStuckTasks();
+          return requeued + removed;
+        }),
 
       heartbeat: (id: string, mcpConnected: boolean): Effect.Effect<void, ConstraintViolation | DbError> =>
         Effect.gen(function* () {

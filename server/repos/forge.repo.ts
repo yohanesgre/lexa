@@ -80,6 +80,35 @@ export class ForgeRepo extends Effect.Service<ForgeRepo>()("Lexa/ForgeRepo", {
           )
         ),
 
+      // Remove events are provider-scoped (the listener deletes every env
+      // matching the agent CLI), and a machine hosts at most one runtime per
+      // agent CLI — so deleting one row removes the whole (machine, provider)
+      // pair, keeping host state consistent with the queued event.
+      deleteRuntimePair: (machineId: string, provider: ForgeProvider): Effect.Effect<void, ConstraintViolation | DbError> =>
+        run(db, `DELETE FROM runtimes WHERE machine_id = ? AND provider = ?`, machineId, provider).pipe(
+          Effect.map(() => undefined)
+        ),
+
+      listRuntimesByMachine: (machineId: string): Effect.Effect<Runtime[], DbError> =>
+        queryAll<RuntimeRow>(db, `SELECT * FROM runtimes WHERE machine_id = ?`, machineId).pipe(
+          Effect.map((rows) => rows.map(rowToRuntime))
+        ),
+
+      deleteRuntimesByMachine: (machineId: string): Effect.Effect<void, ConstraintViolation | DbError> =>
+        run(db, `DELETE FROM runtimes WHERE machine_id = ?`, machineId).pipe(
+          Effect.map(() => undefined)
+        ),
+
+      setRuntimeLastError: (id: string, error: string): Effect.Effect<void, ConstraintViolation | DbError> =>
+        run(db, `UPDATE runtimes SET last_error = ? WHERE id = ?`, error, id).pipe(
+          Effect.map(() => undefined)
+        ),
+
+      clearRuntimeLastError: (id: string): Effect.Effect<void, ConstraintViolation | DbError> =>
+        run(db, `UPDATE runtimes SET last_error = NULL WHERE id = ?`, id).pipe(
+          Effect.map(() => undefined)
+        ),
+
       updateRuntime: (id: string, patch: { name?: string; provider?: ForgeProvider; agent?: string; model?: string; printLogs?: boolean; logLevel?: string; extraArgs?: string[] }): Effect.Effect<Runtime, RowNotFound | ConstraintViolation | DbError> =>
         Effect.gen(function* () {
           const sets: string[] = [];
@@ -322,6 +351,57 @@ export class ForgeRepo extends Effect.Service<ForgeRepo>()("Lexa/ForgeRepo", {
           return updated.status === "running" && updated.runtimeId === runtimeId ? updated : null;
         }),
 
+      // Re-queue `running` tasks whose runner is gone: started > 10 min ago
+      // AND the bound runtime has no heartbeat in the last 2 min (offline).
+      // Clearing runtime_id/started_at lets any runtime claim it again.
+      // A slow-but-alive daemon is never touched (its heartbeat is fresh).
+      sweepStuckTasks: (): Effect.Effect<number, ConstraintViolation | DbError> =>
+        run(
+          db,
+          `UPDATE forge_tasks SET status = 'queued', runtime_id = NULL, started_at = NULL
+           WHERE status = 'running'
+             AND started_at < datetime('now', '-10 minutes')
+             AND (
+               runtime_id IS NULL
+               OR NOT EXISTS (
+                 SELECT 1 FROM runtimes r
+                 WHERE r.id = forge_tasks.runtime_id
+                   AND r.last_seen >= datetime('now', '-2 minutes')
+               )
+             )`
+        ),
+
+      // Auto-remove stale `running` runs: started longer than staleMinutes
+      // ago AND the bound runtime is offline or gone — the runner is dead
+      // and will never post a result, so the record is purged (task + logs)
+      // instead of being re-queued forever. A live runtime is never touched
+      // (the run may legitimately be long).
+      deleteStaleRuns: (staleMinutes: number): Effect.Effect<number, ConstraintViolation | DbError> =>
+        Effect.gen(function* () {
+          const stale = yield* queryAll<{ id: string }>(
+            db,
+            `SELECT id FROM forge_tasks
+             WHERE status = 'running'
+               AND started_at < datetime('now', ?)
+               AND (
+                 runtime_id IS NULL
+                 OR NOT EXISTS (
+                   SELECT 1 FROM runtimes r
+                   WHERE r.id = forge_tasks.runtime_id
+                     AND r.last_seen >= datetime('now', '-2 minutes')
+                 )
+               )`,
+            `-${staleMinutes} minutes`
+          );
+          let removed = 0;
+          for (const row of stale) {
+            yield* run(db, `DELETE FROM forge_task_logs WHERE task_id = ?`, row.id);
+            yield* run(db, `DELETE FROM forge_tasks WHERE id = ?`, row.id);
+            removed += 1;
+          }
+          return removed;
+        }),
+
       // Terminal status writes. Cancel wins over a late daemon complete/fail:
       // the daemon may still be finishing a run after the user cancelled it,
       // so complete/fail only transition from 'running'. Cancel transitions
@@ -466,7 +546,13 @@ export class ForgeRepo extends Effect.Service<ForgeRepo>()("Lexa/ForgeRepo", {
         ),
 
       // ── Task activity log ──
-      appendLog: (id: string, taskId: string, message: string): Effect.Effect<ForgeTaskLog, ConstraintViolation | DbError | RowNotFound> =>
+      appendLog: (
+        id: string,
+        taskId: string,
+        message: string,
+        stream: "out" | "err" = "out",
+        level: "info" | "warn" | "error" = "info"
+      ): Effect.Effect<ForgeTaskLog, ConstraintViolation | DbError | RowNotFound> =>
         Effect.gen(function* () {
           yield* run(
             db,
@@ -478,10 +564,12 @@ export class ForgeRepo extends Effect.Service<ForgeRepo>()("Lexa/ForgeRepo", {
           );
           yield* run(
             db,
-            `INSERT INTO forge_task_logs (id, task_id, message) VALUES (?, ?, ?)`,
+            `INSERT INTO forge_task_logs (id, task_id, message, stream, level) VALUES (?, ?, ?, ?, ?)`,
             id,
             taskId,
-            message
+            message,
+            stream,
+            level
           );
           return yield* queryFirst<ForgeTaskLogRow>(db, `SELECT * FROM forge_task_logs WHERE id = ?`, id).pipe(
             Effect.map(rowToForgeTaskLog)

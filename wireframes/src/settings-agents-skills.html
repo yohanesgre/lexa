@@ -31,8 +31,8 @@
             <tbody>
               <tr>
                 <td><span class="text-sm weight-500">Lexa</span></td>
-                <td class="text-xs color-secondary">Default writing assistant — matches the document's voice, outputs only text.</td>
-                <td class="text-xs color-secondary">5</td>
+                <td class="text-xs color-secondary">Default project assistant — writes and sharpens task descriptions, requirements, and wiki pages.</td>
+                <td class="text-xs color-secondary">6</td>
                 <td><span class="font-micro text-2xs" style="text-transform:uppercase;letter-spacing:0.04em;background:var(--lx-bg-accent-subtle);color:var(--lx-text-link);padding:2px 8px;border-radius:9999px;font-size:10px;">builtin</span></td>
                 <td class="text-xs color-secondary">2 hours ago</td>
                 <td style="text-align:right;">
@@ -79,7 +79,7 @@
           <span class="annotation-tag">Global scope</span>
         </div>
         <p class="text-sm color-secondary mb-4" style="max-width:560px;">
-          Named operation bundles attached to agents. On a Forge run the chosen skill's instructions become <span class="font-mono text-2xs">.agents/&lt;skill&gt;/SKILL.md</span> in the run dir. Builtins cover the original assistant actions.
+          Named operation bundles attached to agents. On a Forge run the chosen skill's instructions become <span class="font-mono text-2xs">.agents/&lt;skill&gt;/SKILL.md</span> in the run dir. Builtins: Requirements · Deliverables · Review · Definition of done · Status · Polish.
         </p>
         <div style="background:var(--lx-surface-card);border:1px solid var(--lx-border-default);border-radius:8px;overflow:hidden;">
           <table class="settings-table">
@@ -88,8 +88,8 @@
             </thead>
             <tbody>
               <tr>
-                <td><span class="text-sm weight-500">Continue</span></td>
-                <td class="text-xs color-secondary">Continue the text naturally, matching its style, tone, and structure. Output only the continuation.</td>
+                <td><span class="text-sm weight-500">Requirements</span></td>
+                <td class="text-xs color-secondary">Write clear, testable requirements for a task.</td>
                 <td class="text-xs color-secondary">Lexa</td>
                 <td><span class="font-micro text-2xs" style="text-transform:uppercase;letter-spacing:0.04em;background:var(--lx-bg-accent-subtle);color:var(--lx-text-link);padding:2px 8px;border-radius:9999px;font-size:10px;">builtin</span></td>
                 <td class="text-xs color-secondary">2 hours ago</td>
@@ -103,8 +103,23 @@
                 </td>
               </tr>
               <tr>
-                <td><span class="text-sm weight-500">Rewrite</span></td>
-                <td class="text-xs color-secondary">Rewrite the selected text to be clearer and more concise, keeping the meaning.</td>
+                <td><span class="text-sm weight-500">Deliverables</span></td>
+                <td class="text-xs color-secondary">Break a task into deliverables.</td>
+                <td class="text-xs color-secondary">Lexa</td>
+                <td><span class="font-micro text-2xs" style="text-transform:uppercase;letter-spacing:0.04em;background:var(--lx-bg-accent-subtle);color:var(--lx-text-link);padding:2px 8px;border-radius:9999px;font-size:10px;">builtin</span></td>
+                <td class="text-xs color-secondary">2 hours ago</td>
+                <td style="text-align:right;">
+                  <button class="btn btn-ghost" style="width:28px;height:28px;padding:0;font-size:12px;" aria-label="Edit skill">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>
+                  </button>
+                  <button class="btn btn-danger" disabled style="width:28px;height:28px;padding:0;font-size:12px;opacity:.45;">
+                    <INCLUDE _trash-icon.html />
+                  </button>
+                </td>
+              </tr>
+              <tr>
+                <td><span class="text-sm weight-500">Review</span></td>
+                <td class="text-xs color-secondary">Improve a task's clarity and completeness like a PM.</td>
                 <td class="text-xs color-secondary">Lexa · Style reviewer</td>
                 <td><span class="font-micro text-2xs" style="text-transform:uppercase;letter-spacing:0.04em;background:var(--lx-bg-accent-subtle);color:var(--lx-text-link);padding:2px 8px;border-radius:9999px;font-size:10px;">builtin</span></td>
                 <td class="text-xs color-secondary">2 hours ago</td>
@@ -118,9 +133,39 @@
                 </td>
               </tr>
               <tr>
-                <td><span class="text-sm weight-500">Fix grammar</span></td>
-                <td class="text-xs color-secondary">Fix grammar, spelling, and punctuation without changing meaning or structure.</td>
+                <td><span class="text-sm weight-500">Definition of done</span></td>
+                <td class="text-xs color-secondary">Write a Definition of Done checklist for a task.</td>
                 <td class="text-xs color-secondary">Lexa</td>
+                <td><span class="font-micro text-2xs" style="text-transform:uppercase;letter-spacing:0.04em;background:var(--lx-bg-accent-subtle);color:var(--lx-text-link);padding:2px 8px;border-radius:9999px;font-size:10px;">builtin</span></td>
+                <td class="text-xs color-secondary">2 hours ago</td>
+                <td style="text-align:right;">
+                  <button class="btn btn-ghost" style="width:28px;height:28px;padding:0;font-size:12px;" aria-label="Edit skill">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>
+                  </button>
+                  <button class="btn btn-danger" disabled style="width:28px;height:28px;padding:0;font-size:12px;opacity:.45;">
+                    <INCLUDE _trash-icon.html />
+                  </button>
+                </td>
+              </tr>
+              <tr>
+                <td><span class="text-sm weight-500">Status</span></td>
+                <td class="text-xs color-secondary">Write a status update: progress, blockers, next steps.</td>
+                <td class="text-xs color-secondary">Lexa · Style reviewer</td>
+                <td><span class="font-micro text-2xs" style="text-transform:uppercase;letter-spacing:0.04em;background:var(--lx-bg-accent-subtle);color:var(--lx-text-link);padding:2px 8px;border-radius:9999px;font-size:10px;">builtin</span></td>
+                <td class="text-xs color-secondary">2 hours ago</td>
+                <td style="text-align:right;">
+                  <button class="btn btn-ghost" style="width:28px;height:28px;padding:0;font-size:12px;" aria-label="Edit skill">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>
+                  </button>
+                  <button class="btn btn-danger" disabled style="width:28px;height:28px;padding:0;font-size:12px;opacity:.45;">
+                    <INCLUDE _trash-icon.html />
+                  </button>
+                </td>
+              </tr>
+              <tr>
+                <td><span class="text-sm weight-500">Polish</span></td>
+                <td class="text-xs color-secondary">Refine the selected text: clearer, more concise, same meaning.</td>
+                <td class="text-xs color-secondary">Lexa · Style reviewer</td>
                 <td><span class="font-micro text-2xs" style="text-transform:uppercase;letter-spacing:0.04em;background:var(--lx-bg-accent-subtle);color:var(--lx-text-link);padding:2px 8px;border-radius:9999px;font-size:10px;">builtin</span></td>
                 <td class="text-xs color-secondary">2 hours ago</td>
                 <td style="text-align:right;">
@@ -141,7 +186,7 @@
             New skill
           </button>
         </div>
-        <span class="annotation-tag mt-2">Used by = agents with this skill attached (M2M, read-only here — bindings are managed from the agent editor). Builtins are seeded from the original assistant actions and can be edited or reset, never deleted. An agent with zero skills can't run (popover disables Generate).</span>
+        <span class="annotation-tag mt-2">Used by = agents with this skill attached (M2M, read-only here — bindings are managed from the agent editor). Builtins: Requirements · Deliverables · Review · Definition of done · Status · Polish — editable or reset, never deleted. An agent with zero skills can't run (popover disables Generate).</span>
       </section>
     </main>
   </div>
@@ -166,13 +211,13 @@
 
       <div class="field">
         <label class="field-label">Description</label>
-        <input class="prop-input w-full" type="text" value="Default writing assistant — matches the document's voice, outputs only text." />
+        <input class="prop-input w-full" type="text" value="Default project assistant — writes and sharpens task descriptions, requirements, and wiki pages." />
         <div class="field-hint">Display-only — never sent to the runtime agent.</div>
       </div>
 
       <div class="field">
         <label class="field-label">Instructions <span class="font-micro text-2xs color-muted" style="text-transform:uppercase;letter-spacing:0.04em;margin-left:6px;">AGENTS.md</span></label>
-        <textarea class="prop-input w-full font-mono" rows="7" style="font-size:12px;line-height:1.6;resize:vertical;">You are Forge, a writing assistant inside Lexa. You help a game-dev team write task descriptions and wiki pages. You are a text editor, not an agent: you do not call tools, you do not read files, and you do not act on any system. Your whole output is the text you write. Match the document's existing voice and structure. If the linked sources contradict the document, prefer the sources.</textarea>
+        <textarea class="prop-input w-full font-mono" rows="7" style="font-size:12px;line-height:1.6;resize:vertical;">You are Forge, Lexa's project management assistant. You help teams run their projects: you write task descriptions, requirements, and wiki pages, and you sharpen the team's documents — spotting missing details, unclear scope, and weak acceptance criteria. You may read files in your working directory (the project workspace) to ground your writing in the actual repo and docs. You do not write files, run commands, or act on any system — your whole output is the text you write. Match the document's existing voice and structure. If the linked sources contradict the document, prefer the sources.</textarea>
         <div class="field-hint">Written to the run dir as <span class="font-mono">AGENTS.md</span> at claim time. The runtime CLI reads it natively (opencode). Edits apply to the very next run — no host store, nothing to sync.</div>
       </div>
 
@@ -180,19 +225,22 @@
         <label class="field-label">Attached skills</label>
         <div style="background:var(--lx-surface-input);border:1px solid var(--lx-border-default);border-radius:6px;padding:10px 12px;display:flex;flex-direction:column;gap:6px;">
           <label class="flex items-center gap-2" style="cursor:pointer;font-size:12px;color:var(--lx-text-secondary);">
-            <input type="checkbox" checked /> Continue — continue the text naturally, matching style and structure
+            <input type="checkbox" checked /> Requirements — concrete, testable checkbox list
           </label>
           <label class="flex items-center gap-2" style="cursor:pointer;font-size:12px;color:var(--lx-text-secondary);">
-            <input type="checkbox" checked /> Rewrite — clearer, more concise, keep the meaning
+            <input type="checkbox" checked /> Deliverables — checklist of concrete outputs
           </label>
           <label class="flex items-center gap-2" style="cursor:pointer;font-size:12px;color:var(--lx-text-secondary);">
-            <input type="checkbox" checked /> Summarize — 1-2 sentence overview, then key-point bullets
+            <input type="checkbox" checked /> Review — PM pass, improved full task
           </label>
           <label class="flex items-center gap-2" style="cursor:pointer;font-size:12px;color:var(--lx-text-secondary);">
-            <input type="checkbox" checked /> Expand — more detail in labeled sections
+            <input type="checkbox" checked /> Definition of done — completion checklist
           </label>
           <label class="flex items-center gap-2" style="cursor:pointer;font-size:12px;color:var(--lx-text-secondary);">
-            <input type="checkbox" checked /> Fix grammar — correct without changing meaning or formatting
+            <input type="checkbox" checked /> Status — progress, blockers, next steps
+          </label>
+          <label class="flex items-center gap-2" style="cursor:pointer;font-size:12px;color:var(--lx-text-secondary);">
+            <input type="checkbox" checked /> Polish — clearer, more concise, same meaning
           </label>
         </div>
         <div class="field-hint">The Forge popover only offers skills attached here. An agent with none can't generate.</div>
@@ -204,10 +252,10 @@
         <div style="background:var(--lx-surface-input);border:1px solid var(--lx-border-default);border-radius:6px;padding:10px 12px;font-family:var(--lx-font-mono);font-size:11px;line-height:1.7;color:var(--lx-text-secondary);max-height:140px;overflow-y:auto;">
           <div><span class="color-muted"># AGENTS.md — Lexa</span></div>
           <div>&nbsp;</div>
-          <div>You are Forge, a writing assistant inside Lexa. You help a game-dev team write task descriptions and wiki pages. You are a text editor, not an agent: you do not call tools, you do not read files, and you do not act on any system. Your whole output is the text you write. Match the document's existing voice and structure. If the linked sources contradict the document, prefer the sources.</div>
+          <div>You are Forge, Lexa's project management assistant. You help teams run their projects: you write task descriptions, requirements, and wiki pages, and you sharpen the team's documents — spotting missing details, unclear scope, and weak acceptance criteria. You may read files in your working directory (the project workspace) to ground your writing in the actual repo and docs. You do not write files, run commands, or act on any system — your whole output is the text you write. Match the document's existing voice and structure. If the linked sources contradict the document, prefer the sources.</div>
           <div>&nbsp;</div>
-          <div><span class="color-muted"># .agents/continue/SKILL.md — attached skill</span></div>
-          <div>Continue the text below naturally, matching its style, tone, and structure. Output only the continuation, no preamble.</div>
+          <div><span class="color-muted"># .agents/skills/requirements/SKILL.md — attached skill</span></div>
+          <div>Write only the task's requirements — what must hold when it's done. One concrete, verifiable condition per checkbox item (- [ ]). No design proposals or background. Output only the checklist.</div>
         </div>
         <div class="field-hint">Rendered view of what the daemon writes into the run dir when this agent runs with its attached skills. The skill file shown reflects the skill selected in the popover.</div>
       </div>

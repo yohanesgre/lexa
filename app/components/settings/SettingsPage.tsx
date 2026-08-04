@@ -1,13 +1,13 @@
 import { useState, useRef, useEffect } from "react";
 import { AlertTriangle, Check, Copy, Key, Plus, RotateCcw, Settings, Trash2, Search, UserPlus, Users } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
-import { useApiKeys, useCreateApiKey, useDeleteApiKey, useUsers, useUpdateUserRole, useProjectMembers, useAddProjectMember, useRemoveProjectMember, useDeleteProject, useRuntimes, useRemoveRuntime } from "../../lib/queries";
+import { useApiKeys, useCreateApiKey, useDeleteApiKey, useUsers, useUpdateUserRole, useProjectMembers, useAddProjectMember, useRemoveProjectMember, useDeleteProject, useRuntimes, useMachines, useRemoveRuntime, useRemoveMachine } from "../../lib/queries";
 import { RuntimeSetupModal } from "../forge/RuntimeSetupModal";
 import { RuntimeEditModal } from "../forge/RuntimeEditModal";
 import { RuntimeRestartModal } from "../forge/RuntimeRestartModal";
 import { AgentsSettingsSection, SkillsSettingsSection } from "../forge/AgentSkillSettings";
 import { copyToClipboard } from "../../lib/clipboard";
-import type { Runtime } from "../../../shared/types";
+import type { Runtime, Machine } from "../../../shared/types";
 import * as api from "../../lib/api";
 import { parseApiDate } from "../../lib/date";
 
@@ -156,7 +156,41 @@ function RemoveRuntimeModal({ name, hostname, onCancel, onConfirm }: { name: str
             <span className="font-mono text-xs text-lx-text-primary" style={{ background: "var(--lx-surface-card)", borderRadius: 4, padding: "2px 5px" }}>
               {name}
             </span>
-            {hostname ? ` (${hostname})` : ""} from the runtimes list? The machine listener will stop its child daemon and clean up its runtime files.
+            {hostname ? ` (${hostname})` : ""} from the runtimes list? The server queues a remove event — the machine's listener stops the daemon and cleans up its runtime files on its next heartbeat.
+          </p>
+
+          <div className="flex items-center gap-2 mt-4 justify-end">
+            <button type="button" className="btn btn-ghost" onClick={onCancel}>Cancel</button>
+            <button type="button" className="btn btn-danger-solid" onClick={onConfirm}>
+              <Trash2 size={14} strokeWidth={1.5} />
+              Remove
+            </button>
+          </div>
+        </dialog>
+      </div>
+    </>
+  );
+}
+
+function RemoveMachineModal({ id, runtimeCount, onCancel, onConfirm }: { id: string; runtimeCount: number; onCancel: () => void; onConfirm: () => void }) {
+  return (
+    <>
+      <button type="button" className="slideover-overlay" onClick={onCancel} aria-label="Close" />
+      <div className="fixed inset-0 flex items-center justify-center z-50 pointer-events-none">
+        <dialog open className="dialog dialog-enter pointer-events-auto" aria-modal="true" aria-label="Dialog">
+          <h2 className="font-display text-lg font-medium text-lx-text-primary">Remove machine?</h2>
+
+          <p className="text-sm text-lx-text-secondary mt-3 leading-5">
+            Remove{" "}
+            <span className="font-mono text-xs text-lx-text-primary" style={{ background: "var(--lx-surface-card)", borderRadius: 4, padding: "2px 5px" }}>
+              {id}
+            </span>
+            {runtimeCount > 0 ? ` and its ${runtimeCount} runtime${runtimeCount === 1 ? "" : "s"}` : ""}?
+            Their daemons are stopped by the machine listener on its next heartbeat.
+          </p>
+          <p className="text-sm mt-2 leading-5" style={{ color: "var(--lx-text-warning, #d97706)" }}>
+            If the listener is still running on that machine, it will reappear within seconds — run{" "}
+            <span className="font-mono text-xs">lexa-cli machine stop</span> there first for permanent removal.
           </p>
 
           <div className="flex items-center gap-2 mt-4 justify-end">
@@ -570,11 +604,14 @@ export function SettingsPage({ slug }: { slug?: string }) {
   const createKey = useCreateApiKey();
   const deleteKey = useDeleteApiKey();
   const { data: runtimes = [], isLoading: runtimesLoading, isError: runtimesError } = useRuntimes();
+  const { data: machines = [] } = useMachines();
   const [setupOpen, setSetupOpen] = useState(false);
   const [editing, setEditing] = useState<Runtime | null>(null);
   const [restarting, setRestarting] = useState<Runtime | null>(null);
   const removeRuntime = useRemoveRuntime();
   const [removing, setRemoving] = useState<Runtime | null>(null);
+  const removeMachine = useRemoveMachine();
+  const [removingMachine, setRemovingMachine] = useState<Machine | null>(null);
   const { data: users = [] } = useUsers();
   const demote = useUpdateUserRole();
   const promote = useUpdateUserRole();
@@ -588,6 +625,81 @@ export function SettingsPage({ slug }: { slug?: string }) {
   return (
     <main className="page-frame">
       <h1 className="font-display text-2xl font-semibold text-lx-text-primary mb-6">Settings</h1>
+
+      {/* Agent Runtimes (global) */}
+      <section className="mb-8">
+        <div className="flex items-center justify-between mb-3">
+          <h2 className="font-display text-lg font-medium text-lx-text-primary">Agent Runtimes</h2>
+          <div className="flex items-center gap-3">
+            <span className="font-micro text-2xs text-lx-text-muted uppercase tracking-[0.04em]">Global scope</span>
+            <button type="button" className="btn btn-primary" style={{ height: 28, padding: "0 12px", fontSize: 12 }} onClick={() => setSetupOpen(true)}>
+              <Plus size={14} strokeWidth={1.5} />
+              Setup runtime
+            </button>
+          </div>
+        </div>
+        <p className="text-sm text-lx-text-secondary mb-4" style={{ maxWidth: 560 }}>
+          Machines running the Forge daemon. The daemon spawns the installed agent CLI when a Forge task is queued.
+        </p>
+        {machines.length > 0 && (
+          <div className="mb-4" style={{ background: "var(--lx-surface-card)", border: "1px solid var(--lx-border-default)", borderRadius: 8, overflow: "hidden" }}>
+            <div className="flex items-center justify-between" style={{ padding: "10px 12px 0" }}>
+              <h3 className="font-display text-sm font-medium text-lx-text-primary">Machines</h3>
+              <span className="font-micro text-2xs text-lx-text-muted uppercase tracking-[0.04em]">Hosts</span>
+            </div>
+            <table className="settings-table">
+              <thead><tr><th>Machine</th><th>State</th><th>Runtimes</th><th>CLIs</th><th>Last seen</th><th /></tr></thead>
+              <tbody>
+                {machines.map((m) => {
+                  const listening = !!m.lastSeen && Date.now() - parseApiDate(m.lastSeen).getTime() < 2 * 60 * 1000;
+                  const runtimeCount = runtimes.filter((r) => r.machineId === m.id).length;
+                  return (
+                    <tr key={m.id}>
+                      <td className="text-sm font-medium">{m.id}</td>
+                      <td><span className="flex items-center gap-2"><span className={listening ? "sync-dot sync-synced" : "sync-dot sync-unlinked"} /><span className={`font-micro text-2xs uppercase tracking-[0.04em] ${listening ? "text-lx-text-success" : "text-lx-text-muted"}`}>{listening ? "Listening" : m.lastSeen ? "Offline" : "Bound, not listening"}</span></span></td>
+                      <td className="text-xs text-lx-text-secondary">{runtimeCount ? `${runtimeCount} runtime${runtimeCount === 1 ? "" : "s"}` : "—"}</td>
+                      <td className="font-mono text-xs text-lx-text-secondary">{m.clis?.length ? m.clis.map((c) => `${c.provider} ${c.version}`).join(" · ") : "—"}</td>
+                      <td className="text-xs text-lx-text-secondary">{m.lastSeen ? formatRelative(m.lastSeen) : <span className="text-lx-text-muted">Never</span>}</td>
+                      <td style={{ textAlign: "right" }}><button type="button" className="btn btn-danger" style={{ width: 28, height: 28, padding: 0 }} onClick={() => setRemovingMachine(m)} aria-label={`Remove machine ${m.id}`} title="Remove machine"><Trash2 size={14} strokeWidth={1.5} /></button></td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+        {runtimesLoading ? (
+          <div className="text-sm text-lx-text-muted py-8 text-center">Loading runtimes…</div>
+        ) : runtimesError ? (
+          <div className="text-sm text-lx-text-danger py-8 text-center">Failed to load runtimes.</div>
+        ) : runtimes.length === 0 ? (
+          <div className="flex flex-col items-center gap-1.5 text-center mb-4" style={{ background: "var(--lx-surface-card)", border: "1px dashed var(--lx-border-strong)", borderRadius: 8, padding: 24 }}>
+            <div className="text-sm font-medium text-lx-text-primary">No runtimes yet</div>
+            <p className="text-xs text-lx-text-secondary" style={{ maxWidth: 380 }}>Connect a machine with opencode, hermes, or command-code installed, then set up a runtime.</p>
+            <button type="button" className="btn btn-primary" style={{ height: 28, padding: "0 12px", fontSize: 12, marginTop: 8 }} onClick={() => setSetupOpen(true)}><Plus size={14} strokeWidth={1.5} />Setup runtime</button>
+          </div>
+        ) : (
+          <div style={{ background: "var(--lx-surface-card)", border: "1px solid var(--lx-border-default)", borderRadius: 8, overflow: "hidden" }}>
+            <table className="settings-table">
+              <thead><tr><th>Name</th><th>CLI</th><th>Model</th><th>Hostname</th><th>Status</th><th>MCP</th><th>Last seen</th><th /></tr></thead>
+              <tbody>
+                {runtimes.map((r) => (
+                  <tr key={r.id}>
+                    <td className="text-sm font-medium">{r.name}</td>
+                    <td className="text-xs text-lx-text-secondary">{r.provider}</td>
+                    <td className="font-mono text-xs text-lx-text-secondary">{r.model || "—"}</td>
+                    <td className="font-mono text-xs text-lx-text-secondary">{r.hostname || "—"}</td>
+                    <td><span className="flex items-center gap-2"><span className={r.status === "online" ? "sync-dot sync-synced" : "sync-dot sync-unlinked"} /><span className={`font-micro text-2xs uppercase tracking-[0.04em] ${r.status === "online" ? "text-lx-text-success" : "text-lx-text-muted"}`}>{r.status === "online" ? "Online" : "Offline"}</span></span>{r.lastError && <span className="block text-xs mt-1" style={{ color: "var(--lx-text-warning)" }}>{r.lastError.toLowerCase().includes("api key") ? "API key revoked — re-run Setup runtime" : r.lastError}</span>}</td>
+                    <td><span className={`font-micro text-2xs uppercase tracking-[0.04em] ${r.mcpConnected ? "text-lx-text-success" : "text-lx-text-muted"}`}>{r.mcpConnected ? "Connected" : "Not set"}</span></td>
+                    <td className="text-xs text-lx-text-secondary">{r.lastSeen ? formatRelative(r.lastSeen) : <span className="text-lx-text-muted">Never</span>}</td>
+                    <td style={{ textAlign: "right", whiteSpace: "nowrap" }}>{r.status === "offline" && <button type="button" className="btn btn-ghost" style={{ width: 28, height: 28, padding: 0 }} onClick={() => setRestarting(r)} aria-label={`Restart ${r.name}`} title="Restart guide"><RotateCcw size={14} strokeWidth={1.5} /></button>}<button type="button" className="btn btn-ghost" style={{ width: 28, height: 28, padding: 0 }} onClick={() => setEditing(r)} aria-label={`Edit ${r.name}`} title="Edit runtime"><Settings size={14} strokeWidth={1.5} /></button><button type="button" className="btn btn-danger" style={{ width: 28, height: 28, padding: 0 }} onClick={() => setRemoving(r)} aria-label={`Remove ${r.name}`} title="Remove runtime"><Trash2 size={14} strokeWidth={1.5} /></button></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
 
       <section className="mb-8">
         <h2 className="font-display text-lg font-medium text-lx-text-primary mb-2">API Keys</h2>
@@ -684,100 +796,6 @@ export function SettingsPage({ slug }: { slug?: string }) {
       {/* Skills (global) — operation bundles */}
       <SkillsSettingsSection />
 
-      {/* Agent Runtimes (global) */}
-      <section className="mb-8">
-        <div className="flex items-center justify-between mb-3">
-          <h2 className="font-display text-lg font-medium text-lx-text-primary">Agent Runtimes</h2>
-          <div className="flex items-center gap-3">
-            <span className="font-micro text-2xs text-lx-text-muted uppercase tracking-[0.04em]">Global scope</span>
-            <button type="button" className="btn btn-primary" style={{ height: 28, padding: "0 12px", fontSize: 12 }} onClick={() => setSetupOpen(true)}>
-              <Plus size={14} strokeWidth={1.5} />
-              Setup runtime
-            </button>
-          </div>
-        </div>
-        <p className="text-sm text-lx-text-secondary mb-4" style={{ maxWidth: 560 }}>
-          Machines running the Forge daemon (AI writing assistant). The daemon spawns the installed agent CLI (opencode / hermes / command-code) when a Forge task is queued.
-        </p>
-
-        {runtimesLoading ? (
-          <div className="text-sm text-lx-text-muted py-8 text-center">Loading runtimes…</div>
-        ) : runtimesError ? (
-          <div className="text-sm text-lx-text-danger py-8 text-center">Failed to load runtimes.</div>
-        ) : runtimes.length === 0 ? (
-          <div className="flex flex-col items-center gap-1.5 text-center mb-4" style={{ background: "var(--lx-surface-card)", border: "1px dashed var(--lx-border-strong)", borderRadius: 8, padding: 24 }}>
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} className="text-lx-text-muted"><rect x="4" y="4" width="16" height="16" rx="2" /><rect x="9" y="9" width="6" height="6" /></svg>
-            <div className="text-sm font-medium text-lx-text-primary mt-1">No runtimes yet</div>
-            <p className="text-xs text-lx-text-secondary" style={{ maxWidth: 380 }}>
-              Connect a machine with an agent CLI installed (opencode, hermes, or command-code). Setup generates the exact env + start command.
-            </p>
-            <button type="button" className="btn btn-primary" style={{ height: 28, padding: "0 12px", fontSize: 12, marginTop: 8 }} onClick={() => setSetupOpen(true)}>
-              <Plus size={14} strokeWidth={1.5} />
-              Setup runtime
-            </button>
-          </div>
-        ) : (
-          <div style={{ background: "var(--lx-surface-card)", border: "1px solid var(--lx-border-default)", borderRadius: 8, overflow: "hidden", marginBottom: 16 }}>
-            <table className="settings-table">
-              <thead>
-                <tr>
-                  <th>Name</th>
-                  <th>CLI</th>
-                  <th>Model</th>
-                  <th>Hostname</th>
-                  <th>Status</th>
-                  <th>MCP</th>
-                  <th>Last seen</th>
-                  <th></th>
-                </tr>
-              </thead>
-              <tbody>
-                {runtimes.map((r) => (
-                  <tr key={r.id}>
-                    <td>
-                      <div className="flex items-center gap-2">
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} className="text-lx-text-muted flex-shrink-0"><rect x="4" y="4" width="16" height="16" rx="2" /><rect x="9" y="9" width="6" height="6" /></svg>
-                        <span className="text-sm font-medium">{r.name}</span>
-                      </div>
-                    </td>
-                    <td className="text-xs text-lx-text-secondary">{r.provider}</td>
-                    <td className="font-mono text-xs text-lx-text-secondary">{r.model || "—"}</td>
-                    <td className="font-mono text-xs text-lx-text-secondary">{r.hostname || "—"}</td>
-                    <td>
-                      <span className="flex items-center gap-2">
-                        <span className={r.status === "online" ? "sync-dot sync-synced" : "sync-dot sync-unlinked"} />
-                        <span className={`font-micro text-2xs uppercase tracking-[0.04em] ${r.status === "online" ? "text-lx-text-success" : "text-lx-text-muted"}`}>
-                          {r.status === "online" ? "Online" : "Offline"}
-                        </span>
-                      </span>
-                    </td>
-                    <td>
-                      <span className={`font-micro text-2xs uppercase tracking-[0.04em] ${r.mcpConnected ? "text-lx-text-success" : "text-lx-text-muted"}`}>
-                        {r.mcpConnected ? "Connected" : "Not set"}
-                      </span>
-                    </td>
-                    <td className="text-xs text-lx-text-secondary">{r.lastSeen ? formatRelative(r.lastSeen) : <span className="text-lx-text-muted">Never</span>}</td>
-                    <td style={{ textAlign: "right", whiteSpace: "nowrap" }}>
-                      {r.status === "offline" && (
-                        <button type="button" className="btn btn-ghost" style={{ width: 28, height: 28, padding: 0, fontSize: 12 }} onClick={() => setRestarting(r)} aria-label={`Restart ${r.name}`} title="Restart guide — how to bring this daemon back">
-                          <RotateCcw size={14} strokeWidth={1.5} />
-                        </button>
-                      )}
-                      <button type="button" className="btn btn-ghost" style={{ width: 28, height: 28, padding: 0, fontSize: 12 }} onClick={() => setEditing(r)} aria-label={`Edit ${r.name}`} title="Edit runtime">
-                        <Settings size={14} strokeWidth={1.5} />
-                      </button>
-                      <button type="button" className="btn btn-danger" style={{ width: 28, height: 28, padding: 0, fontSize: 12, opacity: r.status === "offline" || !r.machineId ? 0.45 : 1 }} disabled={r.status === "offline" || !r.machineId} onClick={() => setRemoving(r)} aria-label={`Remove ${r.name}`} title={r.status === "offline" ? "Machine offline — restart its listener before removing" : !r.machineId ? "Runtime has no registered machine" : "Remove runtime"}>
-                        <Trash2 size={14} strokeWidth={1.5} />
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </section>
-
       {/* Admins (app scope) */}
       <AdminsSection
         users={users}
@@ -811,6 +829,17 @@ export function SettingsPage({ slug }: { slug?: string }) {
           onCancel={() => setRemoving(null)}
           onConfirm={() => {
             removeRuntime.mutate(removing.id, { onSuccess: () => setRemoving(null) });
+          }}
+        />
+      )}
+
+      {removingMachine && (
+        <RemoveMachineModal
+          id={removingMachine.id}
+          runtimeCount={runtimes.filter((r) => r.machineId === removingMachine.id).length}
+          onCancel={() => setRemovingMachine(null)}
+          onConfirm={() => {
+            removeMachine.mutate(removingMachine.id, { onSuccess: () => setRemovingMachine(null) });
           }}
         />
       )}

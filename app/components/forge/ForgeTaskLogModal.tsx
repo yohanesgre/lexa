@@ -29,6 +29,27 @@ function logToText(lines: ForgeTaskLog[]): string {
   return lines.map((l) => `${formatLogTime(l.createdAt)} ${l.message}`).join("\n");
 }
 
+// Line presentation: the daemon classifies severity ONCE at write time
+// (shared/forge-log.ts) and stores stream + level on the row — the UI renders
+// the stored level and never re-classifies. Fallback: pre-v2 rows default to
+// stream 'out' / level 'info', so rows that still carry the old [stderr]
+// marker (a legacy stderr line with a default level) go through the shared
+// classifier. The [stderr]/▸ transport markers are stripped visually either
+// way; Copy keeps the raw message.
+import { classifyLogLine as classifyFallback, type LogLevel } from "../../../shared/forge-log";
+const STDERR_STRIP = "[stderr]";
+export function classifyLogLine(line: {
+  message: string;
+  stream: "out" | "err";
+  level: "info" | "warn" | "error";
+}): { level: "info" | "warn" | "error"; display: string } {
+  const isStderr = line.message.startsWith(STDERR_STRIP);
+  const display = isStderr ? line.message.slice(STDERR_STRIP.length).trimStart() : line.message.replace(/^\u25B8\s*/, "");
+  const legacy = isStderr && line.level === "info" && line.stream === "out";
+  const level: LogLevel = legacy ? classifyFallback("err", line.message).level : line.level;
+  return { level, display };
+}
+
 function durationLabel(task: ForgeTask): string {
   const start = task.startedAt ? parseApiDate(task.startedAt).getTime() : null;
   const end = task.finishedAt ? parseApiDate(task.finishedAt).getTime() : null;
@@ -110,27 +131,29 @@ export function ForgeTaskLogModal({
               <div className="modal-title" style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                 {task.skillName || task.skillId} · "{task.documentTitle}"
               </div>
-              <div className="font-mono text-2xs color-muted" style={{ marginTop: 2 }}>
+              <div className="font-mono text-2xs text-lx-text-muted" style={{ marginTop: 2 }}>
                 Task {task.id.slice(0, 6)} · {runtime?.name ?? "—"} · {runtime?.provider ?? "—"} · {runtime?.model ?? "—"}
               </div>
             </div>
             <div className="flex items-center gap-2" style={{ marginLeft: "auto", flexShrink: 0 }}>
               {active && (
-                <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
-                  <span className="font-micro text-2xs uppercase tracking-[0.04em]" style={{ color: "var(--lx-text-muted)" }}>Follow</span>
-                  <button
-                    type="button"
-                    className={cn("btn btn-ghost", followLog && "is-active")}
-                    aria-pressed={followLog}
-                    aria-label={followLog ? "Pause auto-scroll" : "Resume auto-scroll"}
-                    title={followLog ? "Pause auto-scroll" : "Resume auto-scroll"}
-                    style={{ height: 20, padding: "0 7px", fontSize: 10, lineHeight: "18px" }}
-                    onClick={() => setFollowLog((v) => !v)}
-                  >
-                    ●
-                  </button>
-                  <span className="forge-task-log-live">● live</span>
-                </span>
+                <>
+                  <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                    <span className="font-micro text-2xs uppercase tracking-[0.04em]" style={{ color: "var(--lx-text-muted)" }}>Follow</span>
+                    <button
+                      type="button"
+                      className={cn("btn btn-ghost", followLog && "is-active")}
+                      aria-pressed={followLog}
+                      aria-label={followLog ? "Pause auto-scroll" : "Resume auto-scroll"}
+                      title={followLog ? "Pause auto-scroll" : "Resume auto-scroll"}
+                      style={{ height: 20, padding: "0 7px", fontSize: 10, lineHeight: "18px" }}
+                      onClick={() => setFollowLog((v) => !v)}
+                    >
+                      ●
+                    </button>
+                  </span>
+                  <span className="forge-task-log-live" style={{ marginLeft: 8 }}>live</span>
+                </>
               )}
               <button type="button" className="btn btn-ghost" style={{ height: 26, padding: "0 10px", fontSize: 11 }} onClick={handleCopy}>
                 {copied ? <Check size={11} strokeWidth={2.5} /> : <Copy size={11} strokeWidth={1.5} />}
@@ -144,7 +167,7 @@ export function ForgeTaskLogModal({
 
           <div className="forge-log-modal-body">
             <div className="flex items-center justify-between">
-              <span className="font-micro text-2xs color-muted" style={{ textTransform: "uppercase", letterSpacing: "0.04em" }}>
+              <span className="font-micro text-2xs text-lx-text-muted" style={{ textTransform: "uppercase", letterSpacing: "0.04em" }}>
                 Activity feed · {lines.length} {lines.length === 1 ? "line" : "lines"} · append-only
               </span>
               <span className={cn("font-micro text-2xs", status.color)} style={{ textTransform: "uppercase", letterSpacing: "0.04em" }}>
@@ -153,20 +176,18 @@ export function ForgeTaskLogModal({
             </div>
             <div className="forge-task-log forge-task-log-expanded" ref={bodyRef}>
               {lines.length === 0 ? (
-                <div className="color-muted" style={{ fontFamily: "var(--lx-font-mono)", fontSize: 12.5, lineHeight: "21px" }}>
+                <div className="text-lx-text-muted" style={{ fontFamily: "var(--lx-font-mono)", fontSize: 12.5, lineHeight: "21px" }}>
                   {task.status === "queued" ? "Queued — waiting for a runtime to claim it." : "No activity recorded for this task."}
                 </div>
               ) : (
                 lines.map((line) => {
-                  // stderr lines are prefixed [stderr] by the daemon — tint
-                  // them danger so errors stand out from the stdout stream.
-                  const isStderr = line.message.startsWith("[stderr]");
+                  const { level, display } = classifyLogLine(line);
                   const isLast = line.id === lines[lines.length - 1].id;
                   return (
-                    <div key={line.id} className={cn("forge-task-log-line", isStderr && "stderr", active && isLast && "current")}>
-                      <span className="forge-task-log-dot" aria-hidden="true">{isStderr ? "!" : "●"}</span>
+                    <div key={line.id} className={cn("forge-task-log-line", level === "error" && "stderr", level === "warn" && "warn", active && isLast && "current")}>
+                      <span className="forge-task-log-dot" aria-hidden="true">{level === "info" ? "●" : "!"}</span>
                       <span className="forge-task-log-time">{formatLogTime(line.createdAt)}</span>
-                      <span className="forge-task-log-msg">{line.message}</span>
+                      <span className="forge-task-log-msg">{display}</span>
                     </div>
                   );
                 })
@@ -175,12 +196,9 @@ export function ForgeTaskLogModal({
           </div>
 
           <div className="modal-footer">
-            <span className="font-micro text-2xs color-muted" style={{ textTransform: "uppercase", letterSpacing: "0.04em" }}>
+            <span className="font-micro text-2xs text-lx-text-muted" style={{ textTransform: "uppercase", letterSpacing: "0.04em" }}>
               {timelineLabel(task)}
             </span>
-            <button type="button" className="btn btn-ghost" style={{ height: 28, padding: "0 12px", fontSize: 12 }} onClick={onClose}>
-              Close
-            </button>
           </div>
         </dialog>
       </div>

@@ -67,6 +67,7 @@ export interface RuntimeInfo {
   model: string;
   status: "online" | "offline";
   mcpConnected: boolean;
+  lastError: string | null;
   hostname: string;
   lastSeen: string | null;
 }
@@ -166,9 +167,21 @@ export class LexaClient {
     return r.data;
   }
 
+  async deleteRuntime(id: string): Promise<void> {
+    await this.request<void>(`/api/forge/runtimes/${encodeURIComponent(id)}`, { method: "DELETE" });
+  }
+
   async listMachines(): Promise<MachineInfo[]> {
     const r = await this.request<{ data: MachineInfo[] }>("/api/forge/machines");
     return r.data;
+  }
+
+  async registerMachine(input: { id: string; hostname: string }): Promise<MachineInfo> {
+    return this.request<MachineInfo>("/api/forge/machines/register", { method: "POST", body: JSON.stringify(input) });
+  }
+
+  async deleteMachine(id: string): Promise<void> {
+    await this.request<void>(`/api/forge/machines/${encodeURIComponent(id)}`, { method: "DELETE" });
   }
 
   // ── Runtime setup events (web wizard → listener) ──
@@ -189,16 +202,30 @@ export class LexaClient {
 
   // Presence heartbeat and runtime catalogs — machine identity is stable across
   // listener restarts and catalog discovery stays in this CLI process.
-  async machineHeartbeat(input: { id: string; hostname: string; runtimes?: RuntimeCatalogInfo[] }): Promise<MachineInfo> {
-    return this.request<MachineInfo>("/api/forge/machines/heartbeat", { method: "POST", body: JSON.stringify(input) });
+  async machineHeartbeat(input: {
+    id: string;
+    hostname: string;
+    runtimes?: RuntimeCatalogInfo[];
+    clis?: Array<{ provider: "opencode" | "hermes" | "command-code"; version: string }>;
+    daemonErrors?: Array<{ runtimeId: string; error: string }>;
+  }): Promise<MachineHeartbeatInfo> {
+    return this.request<MachineHeartbeatInfo>("/api/forge/machines/heartbeat", { method: "POST", body: JSON.stringify(input) });
   }
 }
 
 export interface MachineInfo {
   id: string;
   hostname: string;
+  clis: Array<{ provider: "opencode" | "hermes" | "command-code"; version: string }>;
   lastSeen: string | null;
   createdAt: string;
+}
+
+// Heartbeat response extends the machine with the project index (id, name,
+// slug, description) — the listener provisions one workspace dir per project
+// under ~/.lexa/projects/ from it.
+export interface MachineHeartbeatInfo extends MachineInfo {
+  projects: Array<{ id: string; name: string; slug: string; description: string }>;
 }
 
 export interface RuntimeEventInfo {

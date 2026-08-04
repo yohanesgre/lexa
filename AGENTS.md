@@ -176,20 +176,57 @@ bun run build
   (`cmd -p <prompt> --no-session --skip-onboarding --permission-mode auto-accept`).
   Every run picks an **agent** (rule bundle, default "Lexa") + a dependent
   **skill** (operation bundle) in the popover; the claim carries their
-  instructions (`agentMarkdown`/`skillMarkdown`) and the daemon writes them
-  into the run dir as `AGENTS.md` + `.agents/<skill>/SKILL.md` — files-only,
-  no host store, edits apply to the next run. All host state lives under
+  instructions (`agentMarkdown`/`skillMarkdown`) — files-only, no host store,
+  edits apply to the next run. All host state lives under
   `~/.lexa/` (`LEXA_DIR`); `lexa-cli login` + the listener migrate the legacy
   `~/.config/lexa-*` dirs there (migrate-and-delete, no fallback).
-- **lexa-cli (`bun run lexa-cli` / `scripts/cli/index.ts`):** the operator CLI
-  wrapping the REST API with `lxk_` Bearer keys. `lexa-cli login --url … --key …`
+- **Forge project workspaces (opencode only):** every project gets a
+  persistent workspace dir at `~/.lexa/projects/<projectId>/`, provisioned by
+  the listener from the server heartbeat project index (server sends
+  `projects:[{id,name,slug,description}]` on every machine heartbeat; the
+  listener persists the index to `~/.lexa/projects.json`). Seeded write-once:
+  `README.md` (name + description + "clone repo here") and `AGENTS.md`
+  (static orchestrator — "your agent id is named in your prompt, read
+  `.agents/agents/<id>/AGENTS.md`"). Populate by cloning/symlinking the
+  project repo into the workspace (e.g. `ln -s /path/to/repo repo/`) — the
+  agent can only read inside the workspace. Per run the daemon
+  (over)writes `.agents/agents/<agentId>/AGENTS.md` (the selected lexa-agent's
+  rules, persistent across runs) and `.agents/skills/<skillId>/SKILL.md`
+  (skill instructions with name/description frontmatter so opencode
+  auto-discovers it), seeds a sealed per-run HOME at the workspace's
+  `.forge/` (wiped + reseeded each run — daemon-owned; contains the deny-rule
+  `opencode.json` (bash fully denied;
+  read/edit/write/glob/grep allowed but geometrically bounded by
+  `external_directory: deny`, which opencode evaluates on the resolved path;
+  `*auth.json*` denied; `skill` and `webfetch` tools denied — the host's
+  personal global skills and the network never reach Forge runs) + a copy of
+  `~/.local/share/opencode/auth.json`
+  (chmod 600) — spawns opencode with `cwd = workspace`, `HOME`/`XDG_*` =
+  sandbox, and `PWD = workspace` (opencode resolves its session/project
+  directory from env.PWD — a stale inherited PWD makes the real workspace
+  look "external" and blocks all reads), then `rm -rf`s `.forge/` when done
+  (rules and workspace persist; global opencode config —
+  permissions, MCP servers, plugins — never loads into Forge runs). The
+  server-built prompt carries an
+  `Agent: <name> (id <id>) — read .agents/agents/<id>/AGENTS.md` pointer line.
+  `lexa-cli machine workspace list|sync` inspects/re-syncs local workspaces.
+  hermes/command-code keep the legacy ephemeral `~/.lexa/runs/` layout.
+- **lexa-cli — two builds, one interface:** **prod** = compiled binary
+  (`bun run compile:cli` embeds the daemon source into `scripts/cli/packed.ts`,
+  then `bun run install:cli` → `~/.local/bin/lexa-cli`; the systemd listener
+  unit runs the binary directly); **dev** = `bun run lexa-cli-dev` or
+  `bun run install:cli-dev` → `~/.local/bin/lexa-cli-dev` (shim running the
+  live repo source via bun — never overwrites the prod name). The operator CLI
+  wraps the REST API with `lxk_` Bearer keys. `lexa-cli login --url … --key …`
   stores creds in `~/.lexa/config.json` (chmod 600); env fallbacks
   `LEXA_URL`/`LEXA_API_KEY`. Manages the Forge daemon as first-class commands:
   `lexa-cli machine install|listen|start|stop|restart|status|logs|list` (the
   listener is the machine-level supervisor). Also
   `lexa-cli task|wiki|project` for CRUD. The daemon accepts a Settings API key
   in `LEXA_API_KEY` **or** `LXK_FORGE_DAEMON_TOKEN` (an `lxk_` prefix is routed
-  to Bearer automatically). Agent skill: `~/.agents/skills/lexa-cli/SKILL.md`.
+  to Bearer automatically). `scripts/cli/packed.ts` is a build-time embed —
+  keep the committed stub empty so dev copies daemon.ts fresh from disk.
+  Agent skill: `~/.agents/skills/lexa-cli/SKILL.md`.
   MCP remains the agent surface (cloud agentic AI); the CLI is for humans/operators.
 - **Runtime setup wizard → CLI listener:** the web Settings wizard (Settings →
   Forge Runtimes → Setup runtime) lists registered machines from

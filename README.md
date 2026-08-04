@@ -36,7 +36,7 @@ vitest run
 
 ## CLI
 
-`bun run lexa-cli` wraps the REST API (`lxk_` Bearer keys): `lexa-cli login --url … --key …`, then `task|wiki|project` CRUD and `machine install|listen|start|stop|restart|status|logs|list` for Forge daemons.
+`lexa-cli` wraps the REST API (`lxk_` Bearer keys): `lexa-cli login --url … --key …`, then `task|wiki|project` CRUD and `machine install|listen|start|stop|restart|status|logs|list` for Forge daemons. Dev uses `bun run lexa-cli-dev` (live repo source); prod ships a compiled binary via `bun run compile:cli` + `bun run install:cli` (→ `~/.local/bin/lexa-cli`).
 
 ## Deploying
 
