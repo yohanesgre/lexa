@@ -113,6 +113,148 @@ function SummaryStrip({ summary, activeCount, online, total }: {
   );
 }
 
+function FilterBar({ status, slug, skillId, projects, skills, onReset }: {
+  status: ForgeTaskStatus | null;
+  slug: string;
+  skillId: string;
+  projects: { data?: { id: string; slug: string; name: string }[] };
+  skills: { data?: { id: string; name: string }[] };
+  onReset: (patch: Partial<{ status: ForgeTaskStatus | null; slug: string; skillId: string }>) => void;
+}) {
+  return (
+    <div className="flex items-center gap-2" style={{ flexWrap: "wrap", marginBottom: 12 }}>
+      <button
+        type="button"
+        className="status-chip"
+        aria-pressed={status === null}
+        style={status === null ? { background: "var(--lx-surface-selected)", borderColor: "var(--lx-border-focus)", color: "var(--lx-text-primary)" } : undefined}
+        onClick={() => onReset({ status: null })}
+      >
+        All
+      </button>
+      {STATUS_ORDER.map((s) => (
+        <button
+          key={s}
+          type="button"
+          className="status-chip"
+          aria-pressed={status === s}
+          style={status === s ? { background: STATUS_META[s].tint, borderColor: "var(--lx-border-focus)", color: "var(--lx-text-primary)" } : undefined}
+          onClick={() => onReset({ status: s })}
+        >
+          <span className="status-dot" style={{ background: STATUS_META[s].dot }} />
+          {STATUS_META[s].label}
+        </button>
+      ))}
+      <span style={{ width: 1, height: 20, background: "var(--lx-border-default)", margin: "0 4px" }} />
+      <select className="prop-input" aria-label="Filter by project" style={{ height: 24, fontSize: 12, minWidth: 140 }} value={slug} onChange={(e) => onReset({ slug: e.target.value })}>
+        <option value="">All projects</option>
+        {(projects.data ?? []).map((p) => (
+          <option key={p.id} value={p.slug}>{p.name}</option>
+        ))}
+      </select>
+      <select className="prop-input" aria-label="Filter by skill" style={{ height: 24, fontSize: 12, minWidth: 130 }} value={skillId} onChange={(e) => onReset({ skillId: e.target.value })}>
+        <option value="">All skills</option>
+        {(skills.data ?? []).map((s) => (
+          <option key={s.id} value={s.id}>{s.name}</option>
+        ))}
+      </select>
+    </div>
+  );
+}
+
+function HistoryTable({ tasks, copiedId, onCopyId, onSelect, onCancel, runtimeName }: {
+  tasks: (ForgeTask & { projectName?: string })[];
+  copiedId: string | null;
+  onCopyId: (id: string) => void;
+  onSelect: (id: string) => void;
+  onCancel: (id: string) => void;
+  runtimeName: (id: string | null) => string;
+}) {
+  return (
+    <div style={{ background: "var(--lx-surface-card)", border: "1px solid var(--lx-border-default)", borderRadius: 8, overflow: "hidden" }}>
+      <table className="settings-table">
+        <thead>
+          <tr>
+            <th style={{ width: "auto" }}>Task</th>
+            <th>Project</th>
+            <th>Runtime</th>
+            <th>Status</th>
+            <th>Started</th>
+            <th>Finished</th>
+            <th style={{ width: 44 }}></th>
+          </tr>
+        </thead>
+        <tbody>
+          {tasks.map((t) => {
+            const isActive = t.status === "queued" || t.status === "running";
+            return (
+              <tr key={t.id} style={{ cursor: "pointer" }} onClick={() => onSelect(t.id)}>
+                <td>
+                  <div className="text-sm weight-500 color-primary">
+                    {t.skillName || t.skillId} · "{t.documentTitle}"
+                  </div>
+                  <div className="flex items-center gap-1" style={{ minWidth: 0 }}>
+                    <span className="font-mono text-2xs color-muted" style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{t.id}</span>
+                    <button
+                      type="button"
+                      className="icon-btn"
+                      aria-label="Copy task id"
+                      title={copiedId === t.id ? "Copied" : "Copy task id"}
+                      style={{ width: 18, height: 18, flexShrink: 0 }}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onCopyId(t.id);
+                      }}
+                    >
+                      {copiedId === t.id ? <Check size={10} strokeWidth={2.5} /> : <Copy size={10} strokeWidth={1.5} />}
+                    </button>
+                  </div>
+                </td>
+                <td className="text-xs color-secondary">{t.projectName || "—"}</td>
+                <td className="text-xs color-secondary">{runtimeName(t.runtimeId)}</td>
+                <td>
+                  {isActive ? (
+                    <span className="flex items-center gap-2">
+                      <span className="spinner" style={{ width: 9, height: 9, borderWidth: 2 }} />
+                      <span className={cn("font-micro text-2xs", STATUS_META[t.status].color)} style={{ textTransform: "uppercase", letterSpacing: "0.04em" }}>
+                        {STATUS_META[t.status].label}
+                      </span>
+                    </span>
+                  ) : (
+                    <span className={cn("font-micro text-2xs", STATUS_META[t.status].color)} style={{ textTransform: "uppercase", letterSpacing: "0.04em" }}>
+                      {STATUS_META[t.status].label}
+                    </span>
+                  )}
+                </td>
+                <td className="text-xs color-secondary">{formatDayTime(t.startedAt)}</td>
+                <td className="text-xs color-secondary">{formatDayTime(t.finishedAt)}</td>
+                <td>
+                  {isActive ? (
+                    <button type="button"
+                      className="btn btn-ghost"
+                      aria-label="Cancel task"
+                      title="Cancel this Forge task"
+                      style={{ width: 26, height: 26, padding: 0 }}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onCancel(t.id);
+                      }}
+                    >
+                      <X size={12} strokeWidth={2} />
+                    </button>
+                  ) : (
+                    <ChevronRight size={12} strokeWidth={1.5} style={{ color: "var(--lx-text-muted)" }} />
+                  )}
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 export function ForgeControlPanel() {
   const portalTarget = typeof document !== "undefined" ? document.body : null;
   const [status, setStatus] = useState<ForgeTaskStatus | null>(null);
@@ -183,44 +325,9 @@ export function ForgeControlPanel() {
       <SummaryStrip summary={summary} activeCount={activeCount} online={online} total={total} />
 
 
-      {/* Filter bar — one segmented control; the status dot carries the status color */}
-      <div className="flex items-center gap-2" style={{ flexWrap: "wrap", marginBottom: 12 }}>
-        <button
-          type="button"
-          className="status-chip"
-          aria-pressed={status === null}
-          style={status === null ? { background: "var(--lx-surface-selected)", borderColor: "var(--lx-border-focus)", color: "var(--lx-text-primary)" } : undefined}
-          onClick={() => reset({ status: null })}
-        >
-          All
-        </button>
-        {STATUS_ORDER.map((s) => (
-          <button
-            key={s}
-            type="button"
-            className="status-chip"
-            aria-pressed={status === s}
-            style={status === s ? { background: STATUS_META[s].tint, borderColor: "var(--lx-border-focus)", color: "var(--lx-text-primary)" } : undefined}
-            onClick={() => reset({ status: s })}
-          >
-            <span className="status-dot" style={{ background: STATUS_META[s].dot }} />
-            {STATUS_META[s].label}
-          </button>
-        ))}
-        <span style={{ width: 1, height: 20, background: "var(--lx-border-default)", margin: "0 4px" }} />
-        <select className="prop-input" aria-label="Filter by project" style={{ height: 24, fontSize: 12, minWidth: 140 }} value={slug} onChange={(e) => reset({ slug: e.target.value })}>
-          <option value="">All projects</option>
-          {(projects.data ?? []).map((p) => (
-            <option key={p.id} value={p.slug}>{p.name}</option>
-          ))}
-        </select>
-        <select className="prop-input" aria-label="Filter by skill" style={{ height: 24, fontSize: 12, minWidth: 130 }} value={skillId} onChange={(e) => reset({ skillId: e.target.value })}>
-          <option value="">All skills</option>
-          {(skills.data ?? []).map((s) => (
-            <option key={s.id} value={s.id}>{s.name}</option>
-          ))}
-        </select>
-      </div>
+      <FilterBar status={status} slug={slug} skillId={skillId} projects={projects} skills={skills} onReset={reset} />
+
+
 
       {/* Table */}
       {history.isLoading ? (
@@ -262,88 +369,16 @@ export function ForgeControlPanel() {
           </p>
         </div>
       ) : (
-        <div style={{ background: "var(--lx-surface-card)", border: "1px solid var(--lx-border-default)", borderRadius: 8, overflow: "hidden" }}>
-          <table className="settings-table">
-            <thead>
-              <tr>
-                <th style={{ width: "auto" }}>Task</th>
-                <th>Project</th>
-                <th>Runtime</th>
-                <th>Status</th>
-                <th>Started</th>
-                <th>Finished</th>
-                <th style={{ width: 44 }}></th>
-              </tr>
-            </thead>
-            <tbody>
-              {page.map((t) => {
-                const isActive = t.status === "queued" || t.status === "running";
-                return (
-                  <tr key={t.id} style={{ cursor: "pointer" }} onClick={() => setSelectedId(t.id)}>
-                    <td>
-                      <div className="text-sm weight-500 color-primary">
-                        {t.skillName || t.skillId} · "{t.documentTitle}"
-                      </div>
-                      <div className="flex items-center gap-1" style={{ minWidth: 0 }}>
-                        <span className="font-mono text-2xs color-muted" style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{t.id}</span>
-                        <button
-                          type="button"
-                          className="icon-btn"
-                          aria-label="Copy task id"
-                          title={copiedId === t.id ? "Copied" : "Copy task id"}
-                          style={{ width: 18, height: 18, flexShrink: 0 }}
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            copyTaskId(t.id);
-                          }}
-                        >
-                          {copiedId === t.id ? <Check size={10} strokeWidth={2.5} /> : <Copy size={10} strokeWidth={1.5} />}
-                        </button>
-                      </div>
-                    </td>
-                    <td className="text-xs color-secondary">{t.projectName || "—"}</td>
-                    <td className="text-xs color-secondary">{runtimeName(t.runtimeId)}</td>
-                    <td>
-                      {isActive ? (
-                        <span className="flex items-center gap-2">
-                          <span className="spinner" style={{ width: 9, height: 9, borderWidth: 2 }} />
-                          <span className={cn("font-micro text-2xs", STATUS_META[t.status].color)} style={{ textTransform: "uppercase", letterSpacing: "0.04em" }}>
-                            {STATUS_META[t.status].label}
-                          </span>
-                        </span>
-                      ) : (
-                        <span className={cn("font-micro text-2xs", STATUS_META[t.status].color)} style={{ textTransform: "uppercase", letterSpacing: "0.04em" }}>
-                          {STATUS_META[t.status].label}
-                        </span>
-                      )}
-                    </td>
-                    <td className="text-xs color-secondary">{formatDayTime(t.startedAt)}</td>
-                    <td className="text-xs color-secondary">{formatDayTime(t.finishedAt)}</td>
-                    <td>
-                      {isActive ? (
-                        <button type="button"
-                          className="btn btn-ghost"
-                          aria-label="Cancel task"
-                          title="Cancel this Forge task"
-                          style={{ width: 26, height: 26, padding: 0 }}
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            cancelTask.mutate(t.id);
-                          }}
-                        >
-                          <X size={12} strokeWidth={2} />
-                        </button>
-                      ) : (
-                        <ChevronRight size={12} strokeWidth={1.5} style={{ color: "var(--lx-text-muted)" }} />
-                      )}
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
+      <HistoryTable
+        tasks={page}
+        copiedId={copiedId}
+        onCopyId={copyTaskId}
+        onSelect={setSelectedId}
+        onCancel={(id) => cancelTask.mutate(id)}
+        runtimeName={runtimeName}
+      />
       )}
+
 
       {/* Pagination — stays visible when a cursor is active (even on an empty
           end-of-history page) so Newer is always reachable */}

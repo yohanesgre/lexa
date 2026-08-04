@@ -81,6 +81,23 @@ AI writing assistant, MCP server for agents, and two-way GitHub issue sync.
   `emptyFilters`/`isFilterActive` → `app/lib/filters.ts`, wiki helpers →
   `app/lib/wiki.ts`. 8 warnings remain (giant-component splits, useReducer,
   jsx-max-depth) — tracked as follow-up.
+- **React Doctor sweep IV (91 → 100/100)** — split the TaskDetail giant
+  (870 → 271 lines) into TaskPropertyBar, GitHubSection, TaskFooter,
+  TaskDescriptionSection, DeleteTaskDialog, TaskNotFoundDialog,
+  SlideoverHeader, TaskTitleInput, MissingFieldsWarning, `useTaskDetailActions`
+  hook, `icons.tsx`, `AssigneeChips`, `SelectDropdown`, `DescriptionEditor`;
+  ForgeControlPanel → FilterBar + HistoryTable + SummaryStrip; ForgePopover →
+  TaskStatusPanel + PromptFields; KanbanBoard → BoardLane + BoardToolbar +
+  BoardEmptyState + SortableTaskCard; KanbanSettingsModal → section/table
+  components (Columns/Option/SwimlanesSettingsSection, ConfirmDeleteDialog,
+  DescriptionModal); WikiPageViewer edit state → `useReducer`
+  (`editReducer`/`initEditState`). **Fixed a reducer bug the refactor
+  introduced**: the save `finally` dispatched `stopEditing`, so the ~800ms
+  autosave after entering edit mode kicked the user back to read mode — now
+  a `done` action that only clears `isSaving`. Wiki `app/router.tsx`
+  "unused-file" is a documented false positive (build entry consumed by the
+  vite `tanstackStart` plugin by convention — verified the build fails without
+  it), excluded in `doctor.config.ts` with evidence. 0 issues remain.
 - **Skill hygiene** — project-bound `.agents/` and `.repos/` gitlink removed
   (skills are global-only); `.repos/effect` pinned to `effect@3.22.1` matching
   the installed version (was v4 beta — source research returned wrong APIs)

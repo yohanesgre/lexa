@@ -7,7 +7,7 @@ import { docToMarkdown } from "../../../shared/markdown";
 import { useCreateForgeTask, useForgeTask, useRuntimes, useRecentForgeTask, useCancelForgeTask, useForgeTaskLogs, useForgeAgents, useForgeSkills } from "../../lib/queries";
 import { parseApiDate } from "../../lib/date";
 import { ForgeTaskLogModal } from "./ForgeTaskLogModal";
-import type { ForgeAgent, ForgeSkill, Runtime } from "../../../shared/types";
+import type { ForgeAgent, ForgeSkill, ForgeTask, ForgeTaskLog, Runtime } from "../../../shared/types";
 
 // Task ids the user rejected this session — never re-attach to them on
 // reopen, so a rejected result isn't offered again in this session.
@@ -144,6 +144,185 @@ const renderChips = <T,>(items: T[], selected: string | null, onSelect: (id: str
     </div>
   );
 }
+function TaskStatusPanel(props: {
+  taskId: string;
+  taskData: ForgeTask | null;
+  running: boolean;
+  failed: boolean;
+  done: boolean;
+  reviewActive: boolean;
+  followLog: boolean;
+  setFollowLog: (updater: (prev: boolean) => boolean) => void;
+  logBodyRef: React.RefObject<HTMLDivElement | null>;
+  logs: { data?: ForgeTaskLog[] };
+  setLogModalOpen: (v: boolean) => void;
+  dismissedIdsRef: Set<string>;
+  cancelTask: { mutate: (id: string) => void; isPending: boolean };
+  setTaskId: (v: string | null) => void;
+  runtimes: Runtime[];
+  onReview: (text: string, identity: { action: string; runtimeName: string | null; provider: string | null; taskId: string }) => void;
+}) {
+  const { taskId, taskData, running, failed, done, reviewActive, followLog, setFollowLog, logBodyRef, logs, setLogModalOpen, dismissedIdsRef, cancelTask, setTaskId, runtimes, onReview } = props;
+  return (
+  <div style={{ padding: "0 12px 12px" }}>
+    {running && (
+      <div className="flex items-center justify-between gap-2 mb-2">
+        <div className="flex items-center gap-2">
+          <span className="spinner" style={{ width: 12, height: 12, borderWidth: 2 }} />
+          <span className="text-xs text-lx-text-secondary font-body">
+            {taskData?.runtimeId ? "Agent working…" : "Queued…"}
+          </span>
+        </div>
+        <button
+          type="button"
+          className="btn btn-ghost"
+          style={{ height: 24, padding: "0 8px", fontSize: 11 }}
+          onClick={() => {
+            if (taskData) {
+              dismissedIdsRef.add(taskData.id);
+              cancelTask.mutate(taskData.id);
+              setTaskId(null);
+            }
+          }}
+          disabled={cancelTask.isPending}
+          title="Cancel this Forge task — it stops working server-side"
+        >
+          Cancel
+        </button>
+      </div>
+    )}
+    {running && (logs.data ?? []).length > 0 && (
+      <div className="forge-task-log" style={{ marginBottom: 8 }}>
+        <div className="forge-task-log-head">
+          <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+            <span>Activity</span>
+            <button
+              type="button"
+              className="btn btn-ghost"
+              style={{ height: 18, padding: "0 5px", fontSize: 10, lineHeight: "16px" }}
+              onClick={() => setLogModalOpen(true)}
+              aria-label="Expand log"
+              title="Open the full log viewer"
+            >
+              <Maximize size={10} strokeWidth={1.5} />
+            </button>
+          </span>
+          <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+            <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+              <span className="font-micro text-2xs uppercase tracking-[0.04em]" style={{ color: "var(--lx-text-muted)" }}>Follow</span>
+              <button
+                type="button"
+                className={cn("btn btn-ghost", followLog && "is-active")}
+                aria-pressed={followLog}
+                aria-label={followLog ? "Pause auto-scroll" : "Resume auto-scroll"}
+                title={followLog ? "Pause auto-scroll" : "Resume auto-scroll"}
+                style={{ height: 18, padding: "0 6px", fontSize: 10, lineHeight: "16px" }}
+                onClick={() => setFollowLog((v) => !v)}
+              >
+                ●
+              </button>
+            </span>
+            <span className="forge-task-log-live">● live</span>
+          </span>
+        </div>
+        <div className="forge-task-log-body" ref={logBodyRef}>
+          {logs.data!.slice(-50).map((line) => {
+            // stderr lines are prefixed [stderr] by the daemon — tint
+            // them danger so errors stand out from the stdout stream.
+            const isStderr = line.message.startsWith("[stderr]");
+            const isLast = line.id === logs.data![logs.data!.length - 1].id;
+            return (
+              <div key={line.id} className={cn("forge-task-log-line", isStderr && "stderr", isLast && "current")}>
+                <span className="forge-task-log-dot" aria-hidden="true">{isStderr ? "!" : "●"}</span>
+                <span className="forge-task-log-time">{formatLogTime(line.createdAt)}</span>
+                <span className="forge-task-log-msg">{line.message}</span>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    )}
+    {(done || failed) && (
+      <>
+        {failed ? (
+          <div className="border rounded-md p-3 text-[13px] leading-5 font-body whitespace-pre-wrap max-h-56 overflow-y-auto text-lx-text-danger bg-lx-bg-danger-subtle border-lx-border-default">
+            {taskData?.error}
+          </div>
+        ) : (
+          <div
+            className="border rounded-md p-3 text-[13px] leading-5 font-body"
+            style={{ background: "var(--lx-surface-input)", borderColor: "var(--lx-border-default)", color: "var(--lx-text-secondary)" }}
+          >
+            <div className="flex items-center gap-2 mb-1">
+              <Check size={14} strokeWidth={2.5} className="text-lx-text-success" />
+              <span className="font-medium text-lx-text-primary">{taskData?.documentTitle || "Document"}</span>
+            </div>
+            <span className="font-micro text-2xs text-lx-text-muted uppercase tracking-[0.04em]">
+              {taskData?.skillName ? taskData.skillName : ""} — ready to review
+            </span>
+          </div>
+        )}
+        {!failed && (
+          <div className="flex items-center justify-end gap-2 mt-3">
+            {reviewActive ? (
+              <span className="font-micro text-2xs text-lx-text-warning uppercase tracking-[0.04em]">In review in editor</span>
+            ) : (
+              <>
+                <button
+                  type="button"
+                  className="btn btn-ghost"
+                  style={{ height: 26, padding: "0 10px", fontSize: 12 }}
+                  onClick={() => {
+                    if (taskData) dismissedIdsRef.add(taskData.id);
+                    setTaskId(null);
+                  }}
+                >
+                  Reject
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  style={{ height: 26, padding: "0 10px", fontSize: 12 }}
+                  onClick={() => {
+                    if (taskData?.result) {
+                      const runtime = runtimes.find((r) => r.id === taskData.runtimeId);
+                      onReview(taskData.result, {
+                        action: taskData.skillName || taskData.skillId,
+                        runtimeName: runtime?.name ?? null,
+                        provider: runtime?.provider ?? null,
+                        taskId: taskData.id,
+                      });
+                    }
+                  }}
+                >
+                  <Check size={12} strokeWidth={2.5} />
+                  Review in editor
+                </button>
+              </>
+            )}
+          </div>
+        )}
+        {failed && (
+          <div className="flex items-center justify-end mt-3">
+            <button
+              type="button"
+              className="btn btn-ghost"
+              style={{ height: 26, padding: "0 10px", fontSize: 12 }}
+              onClick={() => {
+                if (taskData) dismissedIdsRef.add(taskData.id);
+                setTaskId(null);
+              }}
+            >
+              Reject
+            </button>
+          </div>
+        )}
+      </>
+    )}
+  </div>
+  );
+}
+
 export function ForgePopover({ editor, slug, documentType, documentId, open, onClose, onReview, reviewActive, appliedTaskId, anchorRect }: ForgePopoverProps) {
   // Agent + dependent Skill pickers: the skill list only shows skills attached
   // to the selected agent (M2M bindings managed in Settings → Agents).
@@ -351,163 +530,26 @@ export function ForgePopover({ editor, slug, documentType, documentId, open, onC
       </div>
 
       {taskId && (
-        <div style={{ padding: "0 12px 12px" }}>
-          {running && (
-            <div className="flex items-center justify-between gap-2 mb-2">
-              <div className="flex items-center gap-2">
-                <span className="spinner" style={{ width: 12, height: 12, borderWidth: 2 }} />
-                <span className="text-xs text-lx-text-secondary font-body">
-                  {taskData?.runtimeId ? "Agent working…" : "Queued…"}
-                </span>
-              </div>
-              <button
-                type="button"
-                className="btn btn-ghost"
-                style={{ height: 24, padding: "0 8px", fontSize: 11 }}
-                onClick={() => {
-                  if (taskData) {
-                    dismissedIdsRef.add(taskData.id);
-                    cancelTask.mutate(taskData.id);
-                    setTaskId(null);
-                  }
-                }}
-                disabled={cancelTask.isPending}
-                title="Cancel this Forge task — it stops working server-side"
-              >
-                Cancel
-              </button>
-            </div>
-          )}
-          {running && (logs.data ?? []).length > 0 && (
-            <div className="forge-task-log" style={{ marginBottom: 8 }}>
-              <div className="forge-task-log-head">
-                <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
-                  <span>Activity</span>
-                  <button
-                    type="button"
-                    className="btn btn-ghost"
-                    style={{ height: 18, padding: "0 5px", fontSize: 10, lineHeight: "16px" }}
-                    onClick={() => setLogModalOpen(true)}
-                    aria-label="Expand log"
-                    title="Open the full log viewer"
-                  >
-                    <Maximize size={10} strokeWidth={1.5} />
-                  </button>
-                </span>
-                <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
-                  <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
-                    <span className="font-micro text-2xs uppercase tracking-[0.04em]" style={{ color: "var(--lx-text-muted)" }}>Follow</span>
-                    <button
-                      type="button"
-                      className={cn("btn btn-ghost", followLog && "is-active")}
-                      aria-pressed={followLog}
-                      aria-label={followLog ? "Pause auto-scroll" : "Resume auto-scroll"}
-                      title={followLog ? "Pause auto-scroll" : "Resume auto-scroll"}
-                      style={{ height: 18, padding: "0 6px", fontSize: 10, lineHeight: "16px" }}
-                      onClick={() => setFollowLog((v) => !v)}
-                    >
-                      ●
-                    </button>
-                  </span>
-                  <span className="forge-task-log-live">● live</span>
-                </span>
-              </div>
-              <div className="forge-task-log-body" ref={logBodyRef}>
-                {logs.data!.slice(-50).map((line) => {
-                  // stderr lines are prefixed [stderr] by the daemon — tint
-                  // them danger so errors stand out from the stdout stream.
-                  const isStderr = line.message.startsWith("[stderr]");
-                  const isLast = line.id === logs.data![logs.data!.length - 1].id;
-                  return (
-                    <div key={line.id} className={cn("forge-task-log-line", isStderr && "stderr", isLast && "current")}>
-                      <span className="forge-task-log-dot" aria-hidden="true">{isStderr ? "!" : "●"}</span>
-                      <span className="forge-task-log-time">{formatLogTime(line.createdAt)}</span>
-                      <span className="forge-task-log-msg">{line.message}</span>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          )}
-          {(done || failed) && (
-            <>
-              {failed ? (
-                <div className="border rounded-md p-3 text-[13px] leading-5 font-body whitespace-pre-wrap max-h-56 overflow-y-auto text-lx-text-danger bg-lx-bg-danger-subtle border-lx-border-default">
-                  {taskData?.error}
-                </div>
-              ) : (
-                <div
-                  className="border rounded-md p-3 text-[13px] leading-5 font-body"
-                  style={{ background: "var(--lx-surface-input)", borderColor: "var(--lx-border-default)", color: "var(--lx-text-secondary)" }}
-                >
-                  <div className="flex items-center gap-2 mb-1">
-                    <Check size={14} strokeWidth={2.5} className="text-lx-text-success" />
-                    <span className="font-medium text-lx-text-primary">{taskData?.documentTitle || "Document"}</span>
-                  </div>
-                  <span className="font-micro text-2xs text-lx-text-muted uppercase tracking-[0.04em]">
-                    {taskData?.skillName ? taskData.skillName : ""} — ready to review
-                  </span>
-                </div>
-              )}
-              {!failed && (
-                <div className="flex items-center justify-end gap-2 mt-3">
-                  {reviewActive ? (
-                    <span className="font-micro text-2xs text-lx-text-warning uppercase tracking-[0.04em]">In review in editor</span>
-                  ) : (
-                    <>
-                      <button
-                        type="button"
-                        className="btn btn-ghost"
-                        style={{ height: 26, padding: "0 10px", fontSize: 12 }}
-                        onClick={() => {
-                          if (taskData) dismissedIdsRef.add(taskData.id);
-                          setTaskId(null);
-                        }}
-                      >
-                        Reject
-                      </button>
-                      <button
-                        type="button"
-                        className="btn btn-primary"
-                        style={{ height: 26, padding: "0 10px", fontSize: 12 }}
-                        onClick={() => {
-                          if (taskData?.result) {
-                            const runtime = runtimes.find((r) => r.id === taskData.runtimeId);
-                            onReview(taskData.result, {
-                              action: taskData.skillName || taskData.skillId,
-                              runtimeName: runtime?.name ?? null,
-                              provider: runtime?.provider ?? null,
-                              taskId: taskData.id,
-                            });
-                          }
-                        }}
-                      >
-                        <Check size={12} strokeWidth={2.5} />
-                        Review in editor
-                      </button>
-                    </>
-                  )}
-                </div>
-              )}
-              {failed && (
-                <div className="flex items-center justify-end mt-3">
-                  <button
-                    type="button"
-                    className="btn btn-ghost"
-                    style={{ height: 26, padding: "0 10px", fontSize: 12 }}
-                    onClick={() => {
-                      if (taskData) dismissedIdsRef.add(taskData.id);
-                      setTaskId(null);
-                    }}
-                  >
-                    Reject
-                  </button>
-                </div>
-              )}
-            </>
-          )}
-        </div>
+        <TaskStatusPanel
+          taskId={taskId}
+          taskData={taskData}
+          running={running}
+          failed={failed}
+          done={done}
+          reviewActive={reviewActive}
+          followLog={followLog}
+          setFollowLog={setFollowLog}
+          logBodyRef={logBodyRef}
+          logs={logs}
+          setLogModalOpen={setLogModalOpen}
+          dismissedIdsRef={dismissedIdsRef}
+          cancelTask={cancelTask}
+          setTaskId={setTaskId}
+          runtimes={runtimes}
+          onReview={onReview}
+        />
       )}
+
 
       {/* Rendered inside the popover so the fixed modal layers above it (the
           popover's stacking context is z-80). */}

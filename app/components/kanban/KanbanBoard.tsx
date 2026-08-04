@@ -14,10 +14,9 @@ import type { Board, Swimlane, Task } from "../../../shared/types";
 import { keyAfter, keyBetween } from "../../../shared/positions";
 import { cn } from "../ui/cn";
 import { Column } from "./Column";
-import { ColumnHeader } from "./ColumnHeader";
-import { SwimlaneHeader } from "./SwimlaneHeader";
+import { BoardLane } from "./BoardLane";
+import { BoardToolbar } from "./BoardToolbar";
 import { TaskCard } from "./TaskCard";
-import { FilterButton, ActiveFilterBar } from "./BoardFilters";
 import { emptyFilters, isFilterActive, type FilterState } from "../../lib/filters";
 import { KanbanSettingsModal } from "./KanbanSettingsModal";
 import { ColumnForm } from "./ColumnForm";
@@ -100,108 +99,29 @@ function useLinkMaps(board: Board) {
 
 const EMPTY_BLOCKED_BY: string[] = [];
 
-function SortableTaskCard({
-  task,
-  board,
-  onSelect,
-  dimmed,
-  isNew,
-  isShaking,
-  onArchive,
-  onRestore,
-  onDelete,
-  isSubtask = false,
-  blockedBy = EMPTY_BLOCKED_BY,
-  subtaskCount = 0,
-  onToggleSubtasks,
-  subtasksCollapsed = false,
-}: {
-  task: Task;
-  board: Board;
-  onSelect?: (t: Task) => void;
-  dimmed: boolean;
-  isNew?: boolean;
-  isShaking?: boolean;
-  onArchive?: (id: string) => void;
-  onRestore?: (id: string) => void;
-  onDelete?: (id: string) => void;
-  isSubtask?: boolean;
-  blockedBy?: string[];
-  subtaskCount?: number;
-  onToggleSubtasks?: () => void;
-  subtasksCollapsed?: boolean;
-}) {
-  const archived = task.archivedAt != null;
-  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
-    id: task.id,
-    data: { type: "card", columnId: task.columnId, swimlaneId: task.swimlaneId },
-    disabled: archived,
-  });
+
+function BoardEmptyState({ onAddColumn }: { onAddColumn: () => void }) {
   return (
-    <div
-      ref={setNodeRef}
-      style={{ transform: CSS.Transform.toString(transform), transition }}
-      className={cn(isDragging && "drag-source", isShaking && "lx-shake")}
-      {...attributes}
-      {...listeners}
-      role="button"
-      tabIndex={0}
-      aria-label={`Open task ${task.title}`}
-      onClick={(e) => {
-        if (!isDragging && !archived) { e.stopPropagation(); onSelect?.(task); }
-      }}
-      onKeyDown={(e) => {
-        if ((e.key === "Enter" || e.key === " ") && !isDragging && !archived) {
-          e.preventDefault();
-          e.stopPropagation();
-          onSelect?.(task);
-        }
-      }}
-    >
-      <TaskCard
-        {...cardProps(task, board)}
-        dimmed={dimmed}
-        archived={archived}
-        isSubtask={isSubtask}
-        blockedBy={blockedBy}
-        subtaskCount={subtaskCount}
-        onToggleSubtasks={onToggleSubtasks}
-        subtasksCollapsed={subtasksCollapsed}
-        className={cn(isNew && "card-enter")}
-        action={
-          <Menu
-            align="right"
-            trigger={({ open, toggle }) => (
-              <button
-                type="button"
-                className={cn("icon-btn", open && "active")}
-                onClick={(e) => { e.stopPropagation(); toggle(); }}
-                title="Card menu"
-                aria-label="Card menu"
-              >
-                <MoreHorizontal size={14} />
-              </button>
-            )}
-          >
-            {archived ? (
-              <button type="button" className="menu-item" onClick={(e) => { e.stopPropagation(); onRestore?.(task.id); }}>
-                <Archive size={14} />
-                Restore
-              </button>
-            ) : (
-              <button type="button" className="menu-item" onClick={(e) => { e.stopPropagation(); onArchive?.(task.id); }}>
-                <Archive size={14} />
-                Archive
-              </button>
-            )}
-            <div className="menu-separator" />
-            <button type="button" className="menu-item danger" onClick={(e) => { e.stopPropagation(); onDelete?.(task.id); }}>
-              <Trash2 size={14} />
-              Delete
-            </button>
-          </Menu>
-        }
-      />
+    <div className="empty-state" style={{ padding: 24 }}>
+      <div className="empty-state-icon">
+        <svg width={24} height={24} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round">
+          <rect x="3" y="4" width="18" height="16" rx="2" />
+          <path d="M9 4v16M15 4v16" />
+        </svg>
+      </div>
+      <div className="empty-state-title">No columns yet</div>
+      <div className="empty-state-desc">Add a column to start tracking tasks.</div>
+      <button
+        type="button"
+        className="btn btn-primary"
+        style={{ marginTop: 16 }}
+        onClick={onAddColumn}
+      >
+        <svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5}>
+          <path d="M12 5v14m-7-7h14" />
+        </svg>
+        Add Column
+      </button>
     </div>
   );
 }
@@ -420,157 +340,48 @@ export function KanbanBoard({ board, showArchived = false, onToggleArchived, onM
   return (
     <DndContext sensors={sensors} onDragStart={handleDragStart} onDragEnd={handleDragEnd} onDragCancel={() => setActiveId(null)}>
       <div className="board-area">
-        <div className="board-header">
-          <div className="flex items-center gap-3">
-            <h1 className="font-display text-xl font-semibold text-lx-text-primary">{board.project.name}</h1>
-          </div>
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              className={cn("btn btn-ghost text-sm", showArchived && "active")}
-              onClick={() => onToggleArchived?.(!showArchived)}
-              title="Show archived tasks"
-            >
-              <span className={cn("toggle-switch", showArchived && "is-on")} />
-              Show archived
-            </button>
-            <FilterButton board={board} filters={filters} onChange={setFilters} />
-            <button
-              type="button"
-              className="btn btn-ghost text-sm"
-              onClick={() => setIsSettingsOpen(true)}
-            >
-              Settings
-            </button>
-          </div>
-        </div>
-        {isFilterActive(filters) && <ActiveFilterBar board={board} filters={filters} onChange={setFilters} />}
+        <BoardToolbar
+          board={board}
+          showArchived={showArchived}
+          filters={filters}
+          onToggleArchived={onToggleArchived!}
+          onFiltersChange={setFilters}
+          onOpenSettings={() => setIsSettingsOpen(true)}
+        />
+
         <div className={cn("board-scroll", columns.length === 0 && "items-center justify-center")}>
         {columns.length === 0 ? (
-          <div className="empty-state" style={{ padding: 24 }}>
-            <div className="empty-state-icon">
-              <svg width={24} height={24} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round">
-                <rect x="3" y="4" width="18" height="16" rx="2" />
-                <path d="M9 4v16M15 4v16" />
-              </svg>
-            </div>
-            <div className="empty-state-title">No columns yet</div>
-            <div className="empty-state-desc">Add a column to start tracking tasks.</div>
-            <button
-              type="button"
-              className="btn btn-primary"
-              style={{ marginTop: 16 }}
-              onClick={() => setIsColumnCreateOpen(true)}
-            >
-              <svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5}>
-                <path d="M12 5v14m-7-7h14" />
-              </svg>
-              Add Column
-            </button>
-          </div>
+          <BoardEmptyState onAddColumn={() => setIsColumnCreateOpen(true)} />
         ) : (
-          rows.map(({ lane }) => {
-          const laneId = lane.id;
-          const laneTaskCount = localTasks.filter((t) => t.swimlaneId === laneId).length;
-          const isCollapsed = collapsed.has(laneId);
-          return (
-            <div key={laneId}>
-              <SwimlaneHeader
-                slug={board.project.slug}
-                lane={lane}
-                count={laneTaskCount}
-                collapsed={isCollapsed}
-                onToggle={() => toggleLane(lane.id)}
-              />
-              {!isCollapsed && (
-                <div className="columns-row">
-                  {columns.map((col) => {
-                    const cell = tasksInCell(col.id, laneId);
-                    const dimmed = columnDimmed(col.id);
-                    return (
-                      <div className={cn("column", dimmed && "opacity-45")} key={col.id}>
-                        <ColumnHeader
-                          slug={board.project.slug}
-                          column={col}
-                          taskCount={columnTotalCount(col.id)}
-                          wipLimit={col.wipLimit}
-                          wipFlash={flashColumnId === col.id}
-                          dimmed={dimmed}
-                          onOpenCreate={() => onOpenCreateTask?.(col.id, laneId)}
-                        />
-                        <Column
-                          id={cellDropId(col.id, laneId)}
-                          data={{ type: "column", columnId: col.id, swimlaneId: laneId }}
-                          isEmpty={cell.length === 0}
-                          slug={board.project.slug}
-                          columnId={col.id}
-                          swimlaneId={laneId}
-                          priorities={board.fieldConfig?.priorities ?? []}
-                          types={board.fieldConfig?.types ?? []}
-                          onOpenCreate={() => onOpenCreateTask?.(col.id, laneId)}
-                        >
-                          <SortableContext items={cell.map((t) => t.id)} strategy={verticalListSortingStrategy}>
-                            {cell.flatMap((task) => {
-                              if (cardHidden(task) || childrenByParent.has(task.id)) return []; // parents render at top level
-                                const kids = (childrenByParent.get(task.id) ?? [])
-                                  .map((id) => localTasks.find((t) => t.id === id))
-                                  .filter((t): t is Task => !!t)
-                                  .filter((t) => !cardHidden(t))
-                                  .sort(byPosition);
-                                const isCollapsed = collapsedParents.has(task.id);
-                                const card = (
-                                  <div key={task.id}>
-                                    <SortableTaskCard
-                                      task={task}
-                                      board={board}
-                                      onSelect={onSelectTask}
-                                      dimmed={cardDimmed(task)}
-                                      isNew={newTaskIds.has(task.id)}
-                                      isShaking={shakeTaskId === task.id}
-                                      onArchive={(id) => archiveTask.mutate({ id })}
-                                      onRestore={(id) => restoreTask.mutate({ id })}
-                                      blockedBy={blockedBy.get(task.id) ?? []}
-                                      subtaskCount={kids.length}
-                                      onToggleSubtasks={() =>
-                                        setCollapsedParents((prev) => {
-                                          const next = new Set(prev);
-                                          if (next.has(task.id)) next.delete(task.id);
-                                          else next.add(task.id);
-                                          return next;
-                                        })
-                                      }
-                                      subtasksCollapsed={isCollapsed}
-                                    />
-                                    {!isCollapsed &&
-                                      kids.map((kid) => (
-                                        <SortableTaskCard
-                                          key={kid.id}
-                                          task={kid}
-                                          board={board}
-                                          onSelect={onSelectTask}
-                                          dimmed={cardDimmed(kid)}
-                                          isNew={newTaskIds.has(kid.id)}
-                                          isShaking={shakeTaskId === kid.id}
-                                          onArchive={(id) => archiveTask.mutate({ id })}
-                                          onRestore={(id) => restoreTask.mutate({ id })}
-                                          isSubtask
-                                          blockedBy={blockedBy.get(kid.id) ?? []}
-                                        />
-                                      ))}
-                                  </div>
-                                );
-                                return [card];
-                              })}
-                          </SortableContext>
-                        </Column>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
-          );
-        })
+          rows.map(({ lane }) => (
+            <BoardLane
+              key={lane.id}
+              slug={board.project.slug}
+              lane={lane}
+              columns={columns}
+              board={board}
+              localTasks={localTasks}
+              childrenByParent={childrenByParent}
+              blockedBy={blockedBy}
+              cardHidden={cardHidden}
+              cardDimmed={cardDimmed}
+              columnTotalCount={columnTotalCount}
+              columnDimmed={columnDimmed}
+              cellDropId={cellDropId}
+              flashColumnId={flashColumnId}
+              collapsed={collapsed}
+              toggleLane={toggleLane}
+              onOpenCreateTask={onOpenCreateTask}
+              onSelectTask={onSelectTask!}
+              newTaskIds={newTaskIds}
+              shakeTaskId={shakeTaskId}
+              archiveTask={archiveTask}
+              restoreTask={restoreTask}
+              collapsedParents={collapsedParents as Set<string>}
+              setCollapsedParents={setCollapsedParents}
+            />
+          ))
+
         )}
         </div>
       </div>
