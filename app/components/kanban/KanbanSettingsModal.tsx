@@ -267,10 +267,9 @@ export function KanbanSettingsModal({ slug, isOpen, onClose }: KanbanSettingsMod
         onClick={onClose}
         />
       <div className="fixed inset-0 flex items-center justify-center z-[70] pointer-events-none">
-        <div
+        <dialog open
           className="dialog dialog-enter pointer-events-auto p-0"
           style={{ width: 800, maxWidth: "calc(100vw - 48px)" }}
-          role="dialog"
           aria-modal="true"
           aria-labelledby="board-settings-title"
         >
@@ -486,13 +485,15 @@ export function KanbanSettingsModal({ slug, isOpen, onClose }: KanbanSettingsMod
                                   <td className="py-2.5 px-3 text-sm font-medium text-lx-text-primary">{swimlane.name}</td>
                                   <td className="py-2.5 px-3" style={{ maxWidth: 0 }}>
                                     {swimlane.description ? (
-                                      <span
+                                      <button
+                                        type="button"
                                         className="text-xs text-lx-text-secondary truncate block cursor-pointer"
+                                        style={{ border: "none", background: "none", padding: 0, maxWidth: "100%" }}
                                         title={swimlane.description}
                                         onClick={() => setDescModalTarget(swimlane)}
                                       >
                                         {swimlane.description}
-                                      </span>
+                                      </button>
                                     ) : (
                                       <span className="text-xs text-lx-text-muted">—</span>
                                     )}
@@ -522,10 +523,11 @@ export function KanbanSettingsModal({ slug, isOpen, onClose }: KanbanSettingsMod
               </>
             )}
           </div>
-        </div>
+        </dialog>
       </div>
 
-      <OptionForm
+      {optionForm.isOpen && (
+<OptionForm
         kind={optionForm.kind}
         option={optionForm.option ?? null}
         isOpen={optionForm.isOpen}
@@ -533,8 +535,10 @@ export function KanbanSettingsModal({ slug, isOpen, onClose }: KanbanSettingsMod
         onClose={() => setOptionForm({ ...optionForm, isOpen: false })}
         onSubmit={submitOption}
       />
+      )}
 
-      <ColumnForm
+      {columnForm.isOpen && (
+<ColumnForm
         slug={slug}
         column={columnForm.column ?? null}
         isOpen={columnForm.isOpen}
@@ -561,8 +565,10 @@ export function KanbanSettingsModal({ slug, isOpen, onClose }: KanbanSettingsMod
           }
         }}
       />
+      )}
 
-      <SwimlaneForm
+      {swimlaneForm.isOpen && (
+<SwimlaneForm
         slug={slug}
         swimlane={swimlaneForm.swimlane ?? null}
         isOpen={swimlaneForm.isOpen}
@@ -576,10 +582,11 @@ export function KanbanSettingsModal({ slug, isOpen, onClose }: KanbanSettingsMod
           }
         }}
       />
+      )}
 
       {deleteColumnTarget &&
         <ModalPortal overlayZ={80} dialogZ={81}>
-          <div className="dialog dialog-enter pointer-events-auto" role="dialog" aria-modal="true">
+          <dialog open className="dialog dialog-enter pointer-events-auto" aria-modal="true" aria-label="Confirm">
             <h2 className="font-display text-lg font-medium text-lx-text-primary">Delete &lsquo;{deleteColumnTarget.name}&rsquo;?</h2>
             <p className="text-sm text-lx-text-secondary mt-3 leading-5">
               This will remove all tasks in this column. This action cannot be undone.
@@ -591,12 +598,12 @@ export function KanbanSettingsModal({ slug, isOpen, onClose }: KanbanSettingsMod
                 Delete
               </button>
             </div>
-          </div>
+          </dialog>
         </ModalPortal>}
 
       {deleteSwimlaneTarget &&
         <ModalPortal overlayZ={80} dialogZ={81}>
-          <div className="dialog dialog-enter pointer-events-auto" role="dialog" aria-modal="true">
+          <dialog open className="dialog dialog-enter pointer-events-auto" aria-modal="true" aria-label="Confirm">
             <h2 className="font-display text-lg font-medium text-lx-text-primary">Delete &lsquo;{deleteSwimlaneTarget.name}&rsquo;?</h2>
             <p className="text-sm text-lx-text-secondary mt-3 leading-5">
               This will unassign all tasks in this swimlane. This action cannot be undone.
@@ -608,12 +615,12 @@ export function KanbanSettingsModal({ slug, isOpen, onClose }: KanbanSettingsMod
                 Delete
               </button>
             </div>
-          </div>
+          </dialog>
         </ModalPortal>}
 
       {descModalTarget &&
         <ModalPortal overlayZ={80} dialogZ={81}>
-          <div className="dialog dialog-enter pointer-events-auto" role="dialog" aria-modal="true" style={{ maxWidth: 440 }}>
+          <dialog open className="dialog dialog-enter pointer-events-auto" aria-modal="true" aria-label="Confirm" style={{ maxWidth: 440 }}>
             <h2 className="font-display text-lg font-medium text-lx-text-primary">{descModalTarget.name}</h2>
             <div className="text-sm text-lx-text-secondary font-body leading-5 mt-3 whitespace-pre-wrap">
               {descModalTarget.description || "No description."}
@@ -621,12 +628,12 @@ export function KanbanSettingsModal({ slug, isOpen, onClose }: KanbanSettingsMod
             <div className="flex items-center justify-end gap-2 mt-4">
               <button type="button" className="btn btn-ghost" onClick={() => setDescModalTarget(null)}>Close</button>
             </div>
-          </div>
+          </dialog>
         </ModalPortal>}
 
       {descModalTarget &&
         <ModalPortal overlayZ={base.overlayZ} dialogZ={base.dialogZ}>
-          <div className="dialog dialog-enter pointer-events-auto" role="dialog" aria-modal="true" style={{ maxWidth: 440 }}>
+          <dialog open className="dialog dialog-enter pointer-events-auto" aria-modal="true" aria-label="Confirm" style={{ maxWidth: 440 }}>
             <h2 className="font-display text-lg font-medium text-lx-text-primary">{descModalTarget.name}</h2>
             <div className="text-sm text-lx-text-secondary font-body leading-5 mt-3 whitespace-pre-wrap">
               {descModalTarget.description || "No description."}
@@ -634,7 +641,7 @@ export function KanbanSettingsModal({ slug, isOpen, onClose }: KanbanSettingsMod
             <div className="flex items-center justify-end gap-2 mt-4">
               <button type="button" className="btn btn-ghost" onClick={() => setDescModalTarget(null)}>Close</button>
             </div>
-          </div>
+          </dialog>
         </ModalPortal>}
     </>
   );

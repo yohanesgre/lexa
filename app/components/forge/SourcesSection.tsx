@@ -114,6 +114,7 @@ export function SourcesSection({ slug, documentType, documentId, className }: So
         <div className="flex items-center gap-2">
           <input
             className="prop-input"
+            aria-label="Add source — type @ for a wiki page or paste a URL"
             placeholder="Add source — type @ for a wiki page or paste a URL…"
             value={value}
             onChange={(e) => {

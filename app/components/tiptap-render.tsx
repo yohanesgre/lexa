@@ -24,7 +24,7 @@ export function renderInline(
 ): ReactNode {
   if (!nodes) return null;
   return nodes.map((node, i) => {
-    const key = `${keyPrefix}-${i}`;
+    const nodeKey = `${keyPrefix}-${i}`;
     if (node.type === "text") {
       let el: ReactNode = node.text ?? "";
       for (const mark of node.marks ?? []) {
@@ -43,10 +43,10 @@ export function renderInline(
             </a>
           );
       }
-      return <span key={key}>{el}</span>;
+      return <span key={nodeKey}>{el}</span>;
     }
-    if (node.type === "hardBreak") return <br key={key} />;
-    return renderNode(node, key, variant);
+    if (node.type === "hardBreak") return <br key={nodeKey} />;
+    return renderNode(node, nodeKey, variant);
   });
 }
 

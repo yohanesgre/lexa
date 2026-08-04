@@ -52,8 +52,25 @@ AI writing assistant, MCP server for agents, and two-way GitHub issue sync.
   `toSorted`/`flatMap`/Set-lookup perf fixes, `Intl.DateTimeFormat` module
   instances instead of per-render `toLocale*`, dead exports removed,
   `fetch` response status check in SSRF guard, versioned Forge dismissal key.
-  Remaining warnings (a11y sweep: dialogs/labels/static-element interactions)
-  are tracked as follow-up work.
+- **React Doctor sweep II (56 → 81/100)** — modal state-sync effects removed
+  (forms conditionally mounted, selection derived during render, guarded
+  render updates), 33 custom `role="dialog"`/`role="alertdialog"` containers
+  converted to native `<dialog open>` with accessible names (slideovers,
+  confirmations, forms; form submit preserved), 56 static-element/click-key
+  interaction fixes (overlay click-catchers as buttons, menu roles, card
+  keyboard support), 61 label/placeholder/control-label fixes, webhook
+  signature verification made explicit in the route, setup wizard no longer
+  persists the API key to localStorage, `URL.parse` guard, context value
+  memoized, `useSyncExternalStore` for client-only toast rendering,
+  `useEffectEvent` for document listeners, `Intl` formatters with explicit
+  locale/timezone, async submit reentry guards, stable list keys.
+  Remaining warnings (giant/multi-comp splits, dialog polish) are tracked as
+  follow-up.
+- **Menu component click bug** — the outside-click mousedown listener only
+  checked the trigger container, but the popover renders in a PORTAL: any
+  click inside the popover counted as "outside", unmounting the menu on
+  mousedown and swallowing the item's `click` — menu items (column/swimlane
+  settings, card menus) never fired. The popover is now treated as inside.
 - **Skill hygiene** — project-bound `.agents/` and `.repos/` gitlink removed
   (skills are global-only); `.repos/effect` pinned to `effect@3.22.1` matching
   the installed version (was v4 beta — source research returned wrong APIs)

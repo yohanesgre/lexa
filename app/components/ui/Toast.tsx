@@ -1,4 +1,4 @@
-import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { createPortal } from "react-dom";
 
 export type ToastVariant = "success" | "warning" | "error";
@@ -64,11 +64,9 @@ function Icon({ variant }: { variant: ToastVariant }) {
 export function ToastProvider({ children }: { children: React.ReactNode }) {
   const [toasts, setToasts] = useState<ToastItem[]>([]);
   const timers = useRef<Map<number, number>>(new Map());
-  const [mounted, setMounted] = useState(false);
-
-  useEffect(() => {
-    setMounted(true);
-  }, []);
+  // Client-only render: SSR snapshot is false, client snapshot is true —
+  // no effect, no hydration flicker.
+  const mounted = useSyncExternalStore(() => () => {}, () => true, () => false);
 
   const dismiss = useCallback((id: number) => {
     setToasts((prev) => prev.filter((t) => t.id !== id));

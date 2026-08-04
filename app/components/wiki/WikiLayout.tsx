@@ -70,9 +70,9 @@ function renderSnippet(snippet: string): React.ReactNode {
   const parts = snippet.split(/(\*\*[^*]+\*\*)/g);
   return parts.map((part, index) => {
     if (part.startsWith("**") && part.endsWith("**")) {
-      return <mark key={index}>{part.slice(2, -2)}</mark>;
+      return <mark key={part}>{part.slice(2, -2)}</mark>;
     }
-    return <span key={index}>{part}</span>;
+    return <span key={part}>{part}</span>;
   });
 }
 
@@ -228,13 +228,13 @@ export function WikiLayout({ slug, activePageSlug, children }: WikiLayoutProps) 
     return () => window.clearTimeout(timer);
   }, [query]);
 
-  useEffect(() => {
-    if (!pages) return;
-    setExpanded((prev) => {
-      if (prev.size > 0) return prev;
-      return new Set(pages.map((p) => p.id));
-    });
-  }, [pages]);
+  const [prevPages, setPrevPages] = useState(pages);
+  if (pages !== prevPages) {
+    setPrevPages(pages);
+    if (pages) {
+      setExpanded((prev) => (prev.size > 0 ? prev : new Set(pages.map((p) => p.id))));
+    }
+  }
 
   useEffect(() => {
     if (!contextMenu) return;
@@ -325,6 +325,7 @@ export function WikiLayout({ slug, activePageSlug, children }: WikiLayoutProps) 
                   ref={searchInputRef}
                   type="text"
                   className="prop-input w-full pl-8 pr-8"
+                  aria-label="Search wiki"
                   placeholder="Search wiki..."
                   value={query}
                   onChange={(e) => setQuery(e.target.value)}
@@ -478,29 +479,32 @@ export function WikiLayout({ slug, activePageSlug, children }: WikiLayoutProps) 
         </div>
       </aside>
 
-      <NewPageModal
+      {newPageModal.isOpen && (
+<NewPageModal
         slug={slug}
         isOpen={newPageModal.isOpen}
         onClose={() => setNewPageModal({ isOpen: false, defaultParentId: null })}
         defaultParentId={newPageModal.defaultParentId}
         pages={pages ?? []}
       />
+      )}
 
-      <RenamePageModal
+      {renameModal.isOpen && (
+<RenamePageModal
         slug={slug}
         page={renameModal.page}
         isOpen={renameModal.isOpen}
         onClose={() => setRenameModal({ isOpen: false, page: null })}
       />
+      )}
 
       {deleteConfirm && (
         <>
-          <div className="dialog-overlay" onClick={() => setDeleteConfirm(null)} />
+          <button type="button" className="dialog-overlay" onClick={() => setDeleteConfirm(null)} aria-label="Close" />
           <div className="fixed inset-0 flex items-center justify-center z-[80] pointer-events-none">
-            <div
+            <dialog open
               className="dialog dialog-enter pointer-events-auto p-4"
               style={{ width: 360, maxWidth: "calc(100vw - 48px)" }}
-              role="alertdialog"
               aria-modal="true"
               aria-labelledby="delete-page-title"
             >
@@ -523,7 +527,7 @@ export function WikiLayout({ slug, activePageSlug, children }: WikiLayoutProps) 
                   Delete
                 </button>
               </div>
-            </div>
+            </dialog>
           </div>
         </>
       )}

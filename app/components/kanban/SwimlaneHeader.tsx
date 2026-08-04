@@ -81,6 +81,7 @@ export function SwimlaneHeader({ slug, lane, count, collapsed = false, onToggle 
           >
             <input
               className="prop-input"
+              aria-label="Rename swimlane"
               style={{ width: 160, height: 24, fontSize: 13 }}
               value={renameName}
               onChange={(e) => setRenameName(e.target.value)}
@@ -154,7 +155,8 @@ export function SwimlaneHeader({ slug, lane, count, collapsed = false, onToggle 
         )}
       </div>
 
-      <SwimlaneForm
+      {isSettingsOpen && (
+<SwimlaneForm
         slug={slug}
         swimlane={lane}
         isOpen={isSettingsOpen}
@@ -168,8 +170,10 @@ export function SwimlaneHeader({ slug, lane, count, collapsed = false, onToggle 
           setIsSettingsOpen(false);
         }}
       />
+      )}
 
-      <ColumnForm
+      {isAddColumnOpen && (
+<ColumnForm
         slug={slug}
         column={null}
         isOpen={isAddColumnOpen}
@@ -185,12 +189,13 @@ export function SwimlaneHeader({ slug, lane, count, collapsed = false, onToggle 
           setIsAddColumnOpen(false);
         }}
       />
+      )}
 
       {deleteConfirm && (
         <>
-          <div className="dialog-overlay" onClick={() => setDeleteConfirm(false)} />
+          <button type="button" className="dialog-overlay" onClick={() => setDeleteConfirm(false)} aria-label="Close" />
           <div className="fixed inset-0 flex items-center justify-center z-[80] pointer-events-none">
-            <div className="dialog dialog-enter pointer-events-auto" role="dialog" aria-modal="true">
+            <dialog open className="dialog dialog-enter pointer-events-auto" aria-modal="true" aria-label="Confirm">
               <h2 className="font-display text-lg font-medium text-lx-text-primary">Delete &lsquo;{lane.name}&rsquo;?</h2>
               <p className="text-sm text-lx-text-secondary mt-3 leading-5">
                 This will unassign all tasks in this swimlane. This action cannot be undone.
@@ -202,16 +207,16 @@ export function SwimlaneHeader({ slug, lane, count, collapsed = false, onToggle 
                   Delete
                 </button>
               </div>
-            </div>
+            </dialog>
           </div>
         </>
       )}
 
       {isDescOpen && (
         <>
-          <div className="dialog-overlay" onClick={() => setIsDescOpen(false)} />
+          <button type="button" className="dialog-overlay" onClick={() => setIsDescOpen(false)} aria-label="Close" />
           <div className="fixed inset-0 flex items-center justify-center z-[80] pointer-events-none">
-            <div className="dialog dialog-enter pointer-events-auto" role="dialog" aria-modal="true" style={{ maxWidth: 440 }}>
+            <dialog open className="dialog dialog-enter pointer-events-auto" aria-modal="true" aria-label="Confirm" style={{ maxWidth: 440 }}>
               <h2 className="font-display text-lg font-medium text-lx-text-primary">{lane.name}</h2>
               <div className="text-sm text-lx-text-secondary font-body leading-5 mt-3">
                 {renderSwimlaneDesc(lane.description)}
@@ -227,7 +232,7 @@ export function SwimlaneHeader({ slug, lane, count, collapsed = false, onToggle 
                   Edit in Settings
                 </button>
               </div>
-            </div>
+            </dialog>
           </div>
         </>
       )}
