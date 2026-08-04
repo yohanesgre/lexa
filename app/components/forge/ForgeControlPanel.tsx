@@ -73,6 +73,46 @@ function openDocumentPath(task: ForgeTask, projectSlug: string | undefined): str
   return task.documentType === "wiki" ? `/${projectSlug ?? ""}/wiki/${task.documentId}` : `/${projectSlug ?? ""}/?task=${task.documentId}`;
 }
 
+function SummaryStrip({ summary, activeCount, online, total }: {
+  summary: Record<ForgeTaskStatus, number> | undefined;
+  activeCount: number;
+  online: number;
+  total: number;
+}) {
+  return (
+    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(140px,1fr))", gap: 12, marginBottom: 16 }}>
+      <div style={{ background: "var(--lx-surface-card)", border: "1px solid var(--lx-border-default)", borderRadius: 8, padding: "10px 14px" }}>
+        <div className="font-micro text-2xs color-muted" style={{ textTransform: "uppercase", letterSpacing: "0.04em" }}>Active</div>
+        <div className="font-display text-xl weight-600 text-lx-text-warning" style={{ lineHeight: 1.2 }}>
+          {summary ? activeCount : "—"}
+          <span className="font-micro text-2xs color-muted" style={{ marginLeft: 6 }}>
+            {(summary?.running ?? 0) > 0 ? "running" : (summary?.queued ?? 0) > 0 ? "queued" : "idle"}
+          </span>
+        </div>
+      </div>
+      <div style={{ background: "var(--lx-surface-card)", border: "1px solid var(--lx-border-default)", borderRadius: 8, padding: "10px 14px" }}>
+        <div className="font-micro text-2xs color-muted" style={{ textTransform: "uppercase", letterSpacing: "0.04em" }}>Queued</div>
+        <div className="font-display text-xl weight-600 color-primary" style={{ lineHeight: 1.2 }}>{summary ? summary.queued : "—"}</div>
+      </div>
+      <div style={{ background: "var(--lx-surface-card)", border: "1px solid var(--lx-border-default)", borderRadius: 8, padding: "10px 14px" }}>
+        <div className="font-micro text-2xs color-muted" style={{ textTransform: "uppercase", letterSpacing: "0.04em" }}>Done</div>
+        <div className="font-display text-xl weight-600 text-lx-text-success" style={{ lineHeight: 1.2 }}>{summary ? summary.completed : "—"}</div>
+      </div>
+      <div style={{ background: "var(--lx-surface-card)", border: "1px solid var(--lx-border-default)", borderRadius: 8, padding: "10px 14px" }}>
+        <div className="font-micro text-2xs color-muted" style={{ textTransform: "uppercase", letterSpacing: "0.04em" }}>Failed</div>
+        <div className="font-display text-xl weight-600 text-lx-text-danger" style={{ lineHeight: 1.2 }}>{summary ? summary.failed : "—"}</div>
+      </div>
+      <div style={{ background: "var(--lx-surface-card)", border: "1px solid var(--lx-border-default)", borderRadius: 8, padding: "10px 14px" }}>
+        <div className="font-micro text-2xs color-muted" style={{ textTransform: "uppercase", letterSpacing: "0.04em" }}>Runtimes</div>
+        <div className="font-display text-xl weight-600 color-primary" style={{ lineHeight: 1.2 }}>
+          {total > 0 ? online : "—"}
+          {total > 0 && <span className="font-micro text-2xs color-muted" style={{ marginLeft: 6 }}>/ {total} online</span>}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function ForgeControlPanel() {
   const portalTarget = typeof document !== "undefined" ? document.body : null;
   const [status, setStatus] = useState<ForgeTaskStatus | null>(null);
@@ -140,36 +180,8 @@ export function ForgeControlPanel() {
       </p>
 
       {/* Summary strip — counts ride the history response (no separate aggregate endpoint) */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(140px,1fr))", gap: 12, marginBottom: 16 }}>
-        <div style={{ background: "var(--lx-surface-card)", border: "1px solid var(--lx-border-default)", borderRadius: 8, padding: "10px 14px" }}>
-          <div className="font-micro text-2xs color-muted" style={{ textTransform: "uppercase", letterSpacing: "0.04em" }}>Active</div>
-          <div className="font-display text-xl weight-600 text-lx-text-warning" style={{ lineHeight: 1.2 }}>
-            {summary ? activeCount : "—"}
-            <span className="font-micro text-2xs color-muted" style={{ marginLeft: 6 }}>
-              {(summary?.running ?? 0) > 0 ? "running" : (summary?.queued ?? 0) > 0 ? "queued" : "idle"}
-            </span>
-          </div>
-        </div>
-        <div style={{ background: "var(--lx-surface-card)", border: "1px solid var(--lx-border-default)", borderRadius: 8, padding: "10px 14px" }}>
-          <div className="font-micro text-2xs color-muted" style={{ textTransform: "uppercase", letterSpacing: "0.04em" }}>Queued</div>
-          <div className="font-display text-xl weight-600 color-primary" style={{ lineHeight: 1.2 }}>{summary ? summary.queued : "—"}</div>
-        </div>
-        <div style={{ background: "var(--lx-surface-card)", border: "1px solid var(--lx-border-default)", borderRadius: 8, padding: "10px 14px" }}>
-          <div className="font-micro text-2xs color-muted" style={{ textTransform: "uppercase", letterSpacing: "0.04em" }}>Done</div>
-          <div className="font-display text-xl weight-600 text-lx-text-success" style={{ lineHeight: 1.2 }}>{summary ? summary.completed : "—"}</div>
-        </div>
-        <div style={{ background: "var(--lx-surface-card)", border: "1px solid var(--lx-border-default)", borderRadius: 8, padding: "10px 14px" }}>
-          <div className="font-micro text-2xs color-muted" style={{ textTransform: "uppercase", letterSpacing: "0.04em" }}>Failed</div>
-          <div className="font-display text-xl weight-600 text-lx-text-danger" style={{ lineHeight: 1.2 }}>{summary ? summary.failed : "—"}</div>
-        </div>
-        <div style={{ background: "var(--lx-surface-card)", border: "1px solid var(--lx-border-default)", borderRadius: 8, padding: "10px 14px" }}>
-          <div className="font-micro text-2xs color-muted" style={{ textTransform: "uppercase", letterSpacing: "0.04em" }}>Runtimes</div>
-          <div className="font-display text-xl weight-600 color-primary" style={{ lineHeight: 1.2 }}>
-            {total > 0 ? online : "—"}
-            {total > 0 && <span className="font-micro text-2xs color-muted" style={{ marginLeft: 6 }}>/ {total} online</span>}
-          </div>
-        </div>
-      </div>
+      <SummaryStrip summary={summary} activeCount={activeCount} online={online} total={total} />
+
 
       {/* Filter bar — one segmented control; the status dot carries the status color */}
       <div className="flex items-center gap-2" style={{ flexWrap: "wrap", marginBottom: 12 }}>

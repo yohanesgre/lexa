@@ -5,6 +5,8 @@ import { useWikiPages, useSearchWikiPages, useDeleteWikiPage } from "../../lib/q
 import type { WikiPageMeta } from "../../../shared/types";
 import { cn } from "../ui/cn";
 import { NewPageModal } from "./NewPageModal";
+import { WikiPageContextMenu } from "./WikiPageContextMenu";
+import { WikiSearchBox } from "./WikiSearchBox";
 import { RenamePageModal } from "./RenamePageModal";
 
 interface WikiLayoutContext {
@@ -313,52 +315,12 @@ export function WikiLayout({ slug, activePageSlug, children }: WikiLayoutProps) 
     <div className="wiki-layout">
       <aside className="wiki-sidebar">
         <div className="px-4 mb-3">
-          <div className="relative">
-            {isSearchFocused || query.length > 0 ? (
-              <>
-                <Search
-                  size={14}
-                  strokeWidth={1.5}
-                  className="absolute left-3 top-1/2 -translate-y-1/2 text-lx-text-muted pointer-events-none"
-                />
-                <input
-                  ref={searchInputRef}
-                  type="text"
-                  className="prop-input w-full pl-8 pr-8"
-                  aria-label="Search wiki"
-                  placeholder="Search wiki..."
-                  value={query}
-                  onChange={(e) => setQuery(e.target.value)}
-                  onBlur={() => {
-                    if (query.length === 0) setIsSearchFocused(false);
-                  }}
-                  autoFocus
-                />
-                {query.length > 0 && (
-                  <button
-                    type="button"
-                    className="absolute right-2 top-1/2 -translate-y-1/2 w-5 h-5 inline-flex items-center justify-center rounded text-lx-text-muted hover:text-lx-text-primary"
-                    onClick={() => {
-                      setQuery("");
-                      searchInputRef.current?.focus();
-                    }}
-                    aria-label="Clear search"
-                  >
-                    <X size={12} strokeWidth={1.5} />
-                  </button>
-                )}
-              </>
-            ) : (
-              <button
-                type="button"
-                className="flex items-center gap-2 w-full h-8 px-3 text-left"
-                onClick={() => setIsSearchFocused(true)}
-              >
-                <Search size={14} strokeWidth={1.5} className="text-lx-text-muted" />
-                <span className="text-xs text-lx-text-muted font-body">Search wiki...</span>
-              </button>
-            )}
-          </div>
+          <WikiSearchBox
+            query={query}
+            focused={isSearchFocused}
+            onQueryChange={setQuery}
+            onFocusedChange={setIsSearchFocused}
+          />
         </div>
 
         <div className="flex-1 overflow-y-auto">
@@ -412,57 +374,19 @@ export function WikiLayout({ slug, activePageSlug, children }: WikiLayoutProps) 
           ))}
 
           {contextMenu && contextMenuPosition && (
-            <div
-              id="wiki-page-context-menu"
-              className="menu"
-              style={{ left: contextMenuPosition.x, top: contextMenuPosition.y }}
-              role="menu"
-            >
-              <button
-                type="button"
-                className="menu-item"
-                onClick={handleAddChild}
-                role="menuitem"
-              >
-                <Plus size={14} strokeWidth={1.5} />
-                Add child page
-              </button>
-              <button
-                type="button"
-                className="menu-item"
-                onClick={handleRename}
-                role="menuitem"
-              >
-                <Pencil size={14} strokeWidth={1.5} />
-                Rename
-              </button>
-              <button
-                type="button"
-                className="menu-item"
-                disabled
-                role="menuitem"
-                aria-disabled="true"
-              >
-                <FolderInput size={14} strokeWidth={1.5} />
-                Move
-              </button>
-              <div className="menu-separator" />
-              <button
-                type="button"
-                className="menu-item danger"
-                onClick={() => {
-                  if (!contextMenu || !pages) return;
-                  const page = pages.find((p) => p.id === contextMenu.pageId);
-                  if (page) setDeleteConfirm(page);
-                  setContextMenu(null);
-                  setContextMenuPosition(null);
-                }}
-                role="menuitem"
-              >
-                <Trash2 size={14} strokeWidth={1.5} />
-                Delete
-              </button>
-            </div>
+            <WikiPageContextMenu
+              x={contextMenuPosition.x}
+              y={contextMenuPosition.y}
+              onAddChild={handleAddChild}
+              onRename={handleRename}
+              onDelete={() => {
+                if (!contextMenu || !pages) return;
+                const page = pages.find((p) => p.id === contextMenu.pageId);
+                if (page) setDeleteConfirm(page);
+                setContextMenu(null);
+                setContextMenuPosition(null);
+              }}
+            />
           )}
         </div>
 

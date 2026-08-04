@@ -118,6 +118,36 @@ function EmptySection({ type, onAdd }: { type: "column" | "swimlane"; onAdd: () 
   );
 }
 
+function ColumnsTableRow({ column, onEdit, onDelete }: { column: Column; onEdit: () => void; onDelete: () => void }) {
+  return (
+    <SortableRow id={column.id} className="border-b border-lx-border last:border-b-0">
+      <td className="py-2.5 px-3 text-sm font-medium text-lx-text-primary">{column.name}</td>
+      <td className="py-2.5 px-3"><ColorSwatch color={column.color} /></td>
+      <td className="py-2.5 px-3"><span className="font-mono text-2xs text-lx-text-secondary">{formatWipLimit(column.wipLimit)}</span></td>
+      <td className="py-2.5 px-3">
+        <span className={cn("text-xs", column.requiredFields.length === 0 ? "text-lx-text-muted" : "text-lx-text-secondary")}>
+          {formatRequiredFields(column.requiredFields)}
+        </span>
+      </td>
+      <td className="py-2.5 px-3">
+        {column.githubState ? (
+          <span className="font-mono text-2xs text-lx-text-success">{column.githubState}</span>
+        ) : (
+          <span className="text-xs text-lx-text-muted">—</span>
+        )}
+      </td>
+      <td className="py-2.5 px-3">
+        <div className="flex items-center gap-3">
+          <button type="button" className="btn btn-ghost h-7 px-2.5 text-xs" onClick={onEdit} aria-label="Edit column">Edit</button>
+          <button type="button" className="btn btn-danger h-7 w-7 p-0 flex items-center justify-center" onClick={onDelete} aria-label="Delete column">
+            <Trash2 size={12} strokeWidth={1.5} />
+          </button>
+        </div>
+      </td>
+    </SortableRow>
+  );
+}
+
 export function KanbanSettingsModal({ slug, isOpen, onClose }: KanbanSettingsModalProps) {
   const { data: columns = [], isLoading: columnsLoading, isError: columnsError } = useColumns(slug);
   const { data: swimlanes = [], isLoading: swimlanesLoading, isError: swimlanesError } = useSwimlanes(slug);
@@ -315,31 +345,12 @@ export function KanbanSettingsModal({ slug, isOpen, onClose }: KanbanSettingsMod
                         </thead>
                         <tbody>
                               {orderedColumns.map((column) => (
-                                <SortableRow key={column.id} id={column.id} className="border-b border-lx-border last:border-b-0">
-                                  <td className="py-2.5 px-3 text-sm font-medium text-lx-text-primary">{column.name}</td>
-                                  <td className="py-2.5 px-3"><ColorSwatch color={column.color} /></td>
-                                  <td className="py-2.5 px-3"><span className="font-mono text-2xs text-lx-text-secondary">{formatWipLimit(column.wipLimit)}</span></td>
-                                  <td className="py-2.5 px-3">
-                                    <span className={cn("text-xs", column.requiredFields.length === 0 ? "text-lx-text-muted" : "text-lx-text-secondary")}>
-                                      {formatRequiredFields(column.requiredFields)}
-                                    </span>
-                                  </td>
-                                  <td className="py-2.5 px-3">
-                                    {column.githubState ? (
-                                      <span className="font-mono text-2xs text-lx-text-success">{column.githubState}</span>
-                                    ) : (
-                                      <span className="text-xs text-lx-text-muted">—</span>
-                                    )}
-                                  </td>
-                                  <td className="py-2.5 px-3">
-                                    <div className="flex items-center gap-3">
-                                      <button type="button" className="btn btn-ghost h-7 px-2.5 text-xs" onClick={() => setColumnForm({ isOpen: true, column })} aria-label="Edit column">Edit</button>
-                                      <button type="button" className="btn btn-danger h-7 w-7 p-0 flex items-center justify-center" onClick={() => setDeleteColumnTarget(column)} aria-label="Delete column">
-                                        <Trash2 size={12} strokeWidth={1.5} />
-                                      </button>
-                                    </div>
-                                  </td>
-                                </SortableRow>
+                                <ColumnsTableRow
+                                  key={column.id}
+                                  column={column}
+                                  onEdit={() => setColumnForm({ isOpen: true, column })}
+                                  onDelete={() => setDeleteColumnTarget(column)}
+                                />
                               ))}
                         </tbody>
                       </table>

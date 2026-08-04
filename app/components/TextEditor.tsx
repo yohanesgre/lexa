@@ -1,36 +1,13 @@
 import { useRef, useMemo, useState, useEffect } from "react";
 import { useEditor, EditorContent } from "@tiptap/react";
-import StarterKit from "@tiptap/starter-kit";
-import Code from "@tiptap/extension-code";
-import Highlight from "@tiptap/extension-highlight";
-import Underline from "@tiptap/extension-underline";
-import TaskList from "@tiptap/extension-task-list";
-import TaskItem from "@tiptap/extension-task-item";
-import Placeholder from "@tiptap/extension-placeholder";
 import type { TipTapDoc } from "../../shared/types";
 import type { JSONContent } from "@tiptap/core";
 import { cn } from "./ui/cn";
 import { ForgePopover } from "./forge/ForgePopover";
 import { ForgeReviewSurface } from "./forge/ForgeReviewSurface";
 import { useForgeReview, type ForgeReviewIdentity } from "./forge/useForgeReview";
-
-export const textEditorExtensions = [
-  StarterKit.configure({
-    heading: { levels: [2, 3, 4, 5] },
-    link: { openOnClick: false },
-    code: false,
-  }),
-  // StarterKit's code mark excludes all other marks (bold+code is invalid
-  // in the schema), but valid CommonMark like **`code`** produces exactly
-  // that combination — and Forge results routinely contain it. Without this,
-  // accepting such a result throws and the review panel is stuck open.
-  Code.extend({ excludes: "" }),
-  Underline,
-  Highlight.configure({ multicolor: false }),
-  TaskList,
-  TaskItem.configure({ nested: true }),
-  Placeholder.configure({ placeholder: "Start writing..." }),
-];
+import { textEditorExtensions } from "../lib/tiptap";
+import Placeholder from "@tiptap/extension-placeholder";
 
 interface TextEditorProps {
   initialContent: TipTapDoc;

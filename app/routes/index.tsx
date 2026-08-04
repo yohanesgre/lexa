@@ -1,10 +1,11 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
-import { LayoutGrid, Plus, X } from "lucide-react";
+import { LayoutGrid, Plus } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useDashboard, useCreateProject } from "../lib/queries";
 import { getSetupStatus } from "../lib/api";
 import { ProjectCard } from "../components/ProjectCard";
 import { cn } from "../components/ui/cn";
+import { CreateProjectModal } from "../components/CreateProjectModal";
 
 export const Route = createFileRoute("/")({
   component: Dashboard,
@@ -19,9 +20,6 @@ function Dashboard() {
   const { data: dashboard, isLoading } = useDashboard();
   const createProject = useCreateProject();
   const [showCreate, setShowCreate] = useState(false);
-  const [name, setName] = useState("");
-  const [desc, setDesc] = useState("");
-  const [githubRepo, setGithubRepo] = useState("");
   const [needsSetup, setNeedsSetup] = useState(false);
 
   useEffect(() => {
@@ -104,118 +102,16 @@ function Dashboard() {
 
       {createProject.error && <div className="dashboard-error">{(createProject.error as Error).message}</div>}
 
-      {showCreate && (
-        <>
-          <button
-            type="button"
-            className="slideover-overlay"
-            aria-label="Close dialog"
-            onClick={() => setShowCreate(false)}
-            />
-          <div className="fixed inset-0 flex items-center justify-center z-50 pointer-events-none">
-            <dialog open
-              className="modal dialog-enter pointer-events-auto"
-              aria-modal="true"
-              aria-labelledby="create-project-title"
-              style={{ maxWidth: 440 }}
-            >
-              <div className="modal-header">
-                <span id="create-project-title" className="modal-title">New Project</span>
-                <button
-                  type="button"
-                  className="btn btn-ghost"
-                  style={{ width: 32, height: 32, padding: 0 }}
-                  aria-label="Close"
-                  onClick={() => setShowCreate(false)}
-                >
-                  <X size={16} strokeWidth={1.5} />
-                </button>
-              </div>
-              <div className="modal-body">
-                <div className="field" style={{ marginBottom: 16 }}>
-                  <label className="field-label" htmlFor="create-project-name">Name</label>
-                  <input
-                    id="create-project-name"
-                    className="prop-input w-full"
-                    value={name}
-                    onChange={(e) => setName(e.target.value)}
-                    autoFocus
-                    placeholder=""
-                    disabled={createProject.isPending}
-                  />
-                  <div className="field-hint">Shown on the dashboard and in the nav. Slug is derived from the name.</div>
-                </div>
-                <div className="field" style={{ marginBottom: 16 }}>
-                  <label className="field-label" htmlFor="create-project-desc">Description</label>
-                  <textarea
-                    id="create-project-desc"
-                    className="prop-input w-full"
-                    value={desc}
-                    onChange={(e) => setDesc(e.target.value)}
-                    rows={3}
-                    disabled={createProject.isPending}
-                  />
-                </div>
-                <div className="field">
-                  <label className="field-label" htmlFor="create-project-gh">
-                    GitHub Repository
-                    <span
-                      className="font-micro text-2xs text-lx-text-muted"
-                      style={{ textTransform: "uppercase", letterSpacing: "0.04em", marginLeft: 6 }}
-                    >
-                      Optional
-                    </span>
-                  </label>
-                  <input
-                    id="create-project-gh"
-                    className="prop-input w-full"
-                    value={githubRepo}
-                    onChange={(e) => setGithubRepo(e.target.value)}
-                    placeholder="owner/name"
-                    disabled={createProject.isPending}
-                  />
-                  <div className="field-hint">Enables two-way issue sync. Can be linked later in Settings.</div>
-                </div>
-              </div>
-              <div className="modal-footer">
-                <button
-                  type="button"
-                  className="btn btn-ghost"
-                  onClick={() => setShowCreate(false)}
-                  disabled={createProject.isPending}
-                >
-                  Cancel
-                </button>
-                <button
-                  type="button"
-                  className="btn btn-primary"
-                  disabled={createProject.isPending || !name.trim()}
-                  onClick={() => {
-                    createProject.mutate(
-                      {
-                        name: name.trim(),
-                        description: desc.trim() || undefined,
-                        githubRepo: githubRepo.trim() || undefined,
-                      },
-                      {
-                        onSuccess: () => {
-                          setName("");
-                          setDesc("");
-                          setGithubRepo("");
-                          setShowCreate(false);
-                        },
-                      }
-                    );
-                  }}
-                >
-                  <Plus size={14} strokeWidth={1.5} />
-                  Create Project
-                </button>
-              </div>
-            </dialog>
-          </div>
-        </>
-      )}
+      <CreateProjectModal
+        open={showCreate}
+        pending={createProject.isPending}
+        onClose={() => setShowCreate(false)}
+        onSubmit={(input) => {
+          createProject.mutate(input, {
+            onSuccess: () => setShowCreate(false),
+          });
+        }}
+      />
 
       {isEmpty ? (
         <div className="bg-lx-surface-column border border-lx-border-subtle rounded-lg mt-4 flex" style={{ minHeight: 480 }}>
