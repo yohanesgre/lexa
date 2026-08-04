@@ -491,6 +491,80 @@ function ProjectBoundSettings({ slug }: { slug: string }) {
   );
 }
 
+function AdminsSection({ users, onPromote, onDemote }: { users: { id: string; email: string; name: string; role: "admin" | "member" }[]; onPromote: (id: string, name: string) => void; onDemote: (id: string, name: string) => void }) {
+  const admins = users.filter((u) => u.role === "admin");
+  const [query, setQuery] = useState("");
+  const [showDropdown, setShowDropdown] = useState(false);
+  const suggestions = users.filter(
+    (u) => u.role !== "admin" && (u.email.includes(query) || u.name.toLowerCase().includes(query.toLowerCase()))
+  );
+  return (
+    <section className="mb-8">
+      <div className="flex items-center justify-between mb-3">
+        <h2 className="font-display text-lg font-medium text-lx-text-primary">Admins</h2>
+        <span className="text-xs text-lx-text-muted">App scope</span>
+      </div>
+      <div className="flex items-start justify-between gap-4 mb-4">
+        <p className="text-sm text-lx-text-secondary" style={{ maxWidth: 560, marginBottom: 0 }}>
+          Global administrators — promoted from registered users. Admins have full access to all projects and settings. Admins are automatically excluded from per-project member lists.
+        </p>
+        <div style={{ position: "relative", minWidth: 240, flexShrink: 0 }}>
+          <input
+            className="prop-input"
+            aria-label="Add admin"
+            placeholder="Add admin..."
+            style={{ width: "100%" }}
+            value={query}
+            onChange={(e) => { setQuery(e.target.value); setShowDropdown(true); }}
+            onFocus={() => setShowDropdown(true)}
+          />
+          <span className="text-xs text-lx-text-muted" style={{ display: "block", marginTop: 4 }}>Type a name or email to promote.</span>
+          {showDropdown && (
+            <InlineDropdown
+              items={suggestions.map((u) => ({ name: u.name, email: u.email }))}
+              onSelect={(email) => {
+                const user = suggestions.find((u) => u.email === email);
+                if (user) onPromote(user.id, user.name);
+                setQuery("");
+                setShowDropdown(false);
+              }}
+              onClose={() => setShowDropdown(false)}
+            />
+          )}
+        </div>
+      </div>
+      <div style={{ background: "var(--lx-surface-card)", border: "1px solid var(--lx-border-default)", borderRadius: 8, overflow: "hidden" }}>
+        <table className="settings-table">
+          <thead>
+            <tr><th style={{ width: "auto" }}>User</th><th style={{ width: "auto" }}>Email</th><th style={{ width: 80 }}>Role</th><th style={{ width: 80 }} /></tr>
+          </thead>
+          <tbody>
+            {admins.map((a) => (
+              <tr key={a.id}>
+                <td>
+                  <div className="flex items-center gap-2">
+                    <div className="avatar">{a.name[0]}</div>
+                    <span className="text-sm font-medium">{a.name}</span>
+                  </div>
+                </td>
+                <td className="text-xs text-lx-text-secondary">{a.email}</td>
+                <td>
+                  <span className="text-xs" style={{ background: "var(--lx-bg-accent-subtle)", color: "var(--lx-text-link)", padding: "2px 8px", borderRadius: 9999, fontSize: 11 }}>{a.role}</span>
+                </td>
+                <td>
+                  <button type="button" className="btn btn-ghost h-7 px-2 text-xs text-lx-text-danger" aria-label={`Remove ${a.name} from admins`} onClick={() => onDemote(a.id, a.name)}>
+                    <Trash2 size={12} strokeWidth={1.5} />
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  );
+}
+
 export function SettingsPage({ slug }: { slug?: string }) {
   const { data: keys = [], isLoading, isError } = useApiKeys();
   const createKey = useCreateApiKey();
@@ -503,14 +577,8 @@ export function SettingsPage({ slug }: { slug?: string }) {
   const [removing, setRemoving] = useState<Runtime | null>(null);
   const { data: users = [] } = useUsers();
   const demote = useUpdateUserRole();
-  const admins = users.filter((u) => u.role === "admin");
   const promote = useUpdateUserRole();
-  const [adminQuery, setAdminQuery] = useState("");
-  const [showAdminDropdown, setShowAdminDropdown] = useState(false);
   const [promoting, setPromoting] = useState<{ id: string; name: string } | null>(null);
-  const adminSuggestions = users.filter(
-    (u) => u.role !== "admin" && (u.email.includes(adminQuery) || u.name.toLowerCase().includes(adminQuery.toLowerCase()))
-  );
 
   const [keyName, setKeyName] = useState("");
   const [reveal, setReveal] = useState<{ name: string; key: string } | null>(null);
@@ -711,69 +779,12 @@ export function SettingsPage({ slug }: { slug?: string }) {
       </section>
 
       {/* Admins (app scope) */}
-      <section className="mb-8">
-        <div className="flex items-center justify-between mb-3">
-          <h2 className="font-display text-lg font-medium text-lx-text-primary">Admins</h2>
-          <span className="text-xs text-lx-text-muted">App scope</span>
-        </div>
-        <div className="flex items-start justify-between gap-4 mb-4">
-          <p className="text-sm text-lx-text-secondary" style={{ maxWidth: 560, marginBottom: 0 }}>
-            Global administrators — promoted from registered users. Admins have full access to all projects and settings. Admins are automatically excluded from per-project member lists.
-          </p>
-          <div style={{ position: "relative", minWidth: 240, flexShrink: 0 }}>
-            <input
-              className="prop-input"
-              aria-label="Add admin"
-              placeholder="Add admin..."
-              style={{ width: "100%" }}
-              value={adminQuery}
-              onChange={(e) => { setAdminQuery(e.target.value); setShowAdminDropdown(true); }}
-              onFocus={() => setShowAdminDropdown(true)}
-            />
-            <span className="text-xs text-lx-text-muted" style={{ display: "block", marginTop: 4 }}>Type a name or email to promote.</span>
-            {showAdminDropdown && (
-              <InlineDropdown
-                items={adminSuggestions.map((u) => ({ name: u.name, email: u.email }))}
-                onSelect={(email) => {
-                  const user = adminSuggestions.find((u) => u.email === email);
-                  if (user) setPromoting({ id: user.id, name: user.name });
-                  setAdminQuery("");
-                  setShowAdminDropdown(false);
-                }}
-                onClose={() => setShowAdminDropdown(false)}
-              />
-            )}
-          </div>
-        </div>
-        <div style={{ background: "var(--lx-surface-card)", border: "1px solid var(--lx-border-default)", borderRadius: 8, overflow: "hidden" }}>
-          <table className="settings-table">
-            <thead>
-              <tr><th style={{ width: "auto" }}>User</th><th style={{ width: "auto" }}>Email</th><th style={{ width: 80 }}>Role</th><th style={{ width: 80 }} /></tr>
-            </thead>
-            <tbody>
-              {admins.map((a) => (
-                <tr key={a.id}>
-                  <td>
-                    <div className="flex items-center gap-2">
-                      <div className="avatar">{a.name[0]}</div>
-                      <span className="text-sm font-medium">{a.name}</span>
-                    </div>
-                  </td>
-                  <td className="text-xs text-lx-text-secondary">{a.email}</td>
-                  <td>
-                    <span className="text-xs" style={{ background: "var(--lx-bg-accent-subtle)", color: "var(--lx-text-link)", padding: "2px 8px", borderRadius: 9999, fontSize: 11 }}>{a.role}</span>
-                  </td>
-                  <td>
-                    <button type="button" className="btn btn-ghost h-7 px-2 text-xs text-lx-text-danger" aria-label={`Remove ${a.name} from admins`} onClick={() => setDemoting({ id: a.id, name: a.name })}>
-                      <Trash2 size={12} strokeWidth={1.5} />
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </section>
+      <AdminsSection
+        users={users}
+        onPromote={(id, name) => setPromoting({ id, name })}
+        onDemote={(id, name) => setDemoting({ id, name })}
+      />
+
 
       {slug && <ProjectBoundSettings slug={slug} />}
 

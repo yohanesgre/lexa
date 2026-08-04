@@ -160,7 +160,7 @@ export function RuntimeEditModal({ runtime, onClose }: { runtime: Runtime; onClo
             )}
 
             <div className="field">
-              <label className="field-label" id="runtime-model-label">Model</label>
+              <div className="field-label" id="runtime-model-label">Model</div>
               {catalog.length > 0 ? (
                 <>
                   <div className="relative">

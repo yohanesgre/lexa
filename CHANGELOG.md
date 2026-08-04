@@ -71,6 +71,16 @@ AI writing assistant, MCP server for agents, and two-way GitHub issue sync.
   click inside the popover counted as "outside", unmounting the menu on
   mousedown and swallowing the item's `click` — menu items (column/swimlane
   settings, card menus) never fired. The popover is now treated as inside.
+- **React Doctor sweep III (89–90/100)** — structural refactors: `__root.tsx`
+  split into `app/components/layout/` (NavLink, ProjectSwitcher, UserProfile,
+  AppShell), New Project modal → `CreateProjectModal`, wiki edit split →
+  `WikiEditSplit` + `WikiEditor`, context menu → `WikiPageContextMenu`,
+  search box → `WikiSearchBox`, Admins section → `AdminsSection`, Forge
+  summary strip → `SummaryStrip`, ForgePopover prompt/runtime →
+  `PromptFields`, `textEditorExtensions` → `app/lib/tiptap.ts`,
+  `emptyFilters`/`isFilterActive` → `app/lib/filters.ts`, wiki helpers →
+  `app/lib/wiki.ts`. 8 warnings remain (giant-component splits, useReducer,
+  jsx-max-depth) — tracked as follow-up.
 - **Skill hygiene** — project-bound `.agents/` and `.repos/` gitlink removed
   (skills are global-only); `.repos/effect` pinned to `effect@3.22.1` matching
   the installed version (was v4 beta — source research returned wrong APIs)

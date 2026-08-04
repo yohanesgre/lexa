@@ -5,7 +5,8 @@ import type { Task, TipTapDoc, GithubIssue } from "../../shared/types";
 import { extractText } from "../../shared/tiptap-text";
 import { renderDoc } from "./tiptap-render";
 import { TextEditor } from "./TextEditor";
-import { Toolbar, textEditorExtensions } from "./TextEditor";
+import { Toolbar } from "./TextEditor";
+import { textEditorExtensions } from "../lib/tiptap";
 import { SourcesSection } from "./forge/SourcesSection";
 import { LinksSection } from "./forge/LinksSection";
 import { ForgeReviewSurface } from "./forge/ForgeReviewSurface";
@@ -823,25 +824,18 @@ export function TaskDetail({ mode = "view", task, project, defaultColumnId, colu
               }}
             />
           ) : (
-            <h2
+            <button
+              type="button"
               className="slideover-title"
-              role="button"
-              tabIndex={0}
+              style={{ border: "none", background: "none", padding: 0, textAlign: "left", cursor: "pointer" }}
               onClick={() => {
                 setDraft(task!.title);
                 setEditingTitle(true);
               }}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" || e.key === " ") {
-                  e.preventDefault();
-                  setDraft(task!.title);
-                  setEditingTitle(true);
-                }
-              }}
               title="Click to edit"
             >
               {task?.title}
-            </h2>
+            </button>
           )}
         </div>
 

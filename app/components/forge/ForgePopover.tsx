@@ -7,7 +7,7 @@ import { docToMarkdown } from "../../../shared/markdown";
 import { useCreateForgeTask, useForgeTask, useRuntimes, useRecentForgeTask, useCancelForgeTask, useForgeTaskLogs, useForgeAgents, useForgeSkills } from "../../lib/queries";
 import { parseApiDate } from "../../lib/date";
 import { ForgeTaskLogModal } from "./ForgeTaskLogModal";
-import type { ForgeAgent, ForgeSkill } from "../../../shared/types";
+import type { ForgeAgent, ForgeSkill, Runtime } from "../../../shared/types";
 
 // Task ids the user rejected this session — never re-attach to them on
 // reopen, so a rejected result isn't offered again in this session.
@@ -39,6 +39,111 @@ interface ForgePopoverProps {
   anchorRect: DOMRect | null;
 }
 
+function PromptFields({ extraPrompt, setExtraPrompt, runtimeId, setRuntimeId, onlineRuntimes }: {
+  extraPrompt: string;
+  setExtraPrompt: (v: string) => void;
+  runtimeId: string;
+  setRuntimeId: (v: string) => void;
+  onlineRuntimes: Runtime[];
+}) {
+  return (
+    <>
+      {/* Additional prompt — per-run free text, appended to the task prompt */}
+      <div style={{ padding: "10px 12px", borderBottom: "1px solid var(--lx-border-default)" }}>
+        <span className="prop-label" style={{ display: "block", marginBottom: 6 }}>
+          Additional prompt <span className="font-micro text-2xs text-lx-text-muted uppercase tracking-[0.04em]" style={{ marginLeft: 4 }}>Optional</span>
+        </span>
+        <textarea
+          className="prop-input w-full"
+          rows={3}
+          aria-label="Additional prompt"
+          value={extraPrompt}
+          onChange={(e) => setExtraPrompt(e.target.value)}
+          placeholder="Extra instructions for this run…"
+          style={{ fontSize: 12, lineHeight: 1.5, resize: "vertical" }}
+        />
+      </div>
+
+      <div style={{ padding: "10px 12px", borderBottom: "1px solid var(--lx-border-default)" }}>
+        <span className="prop-label" style={{ display: "block", marginBottom: 6 }}>Runtime</span>
+        <select
+          className="prop-input w-full"
+          aria-label="Runtime"
+          value={runtimeId}
+          onChange={(e) => setRuntimeId(e.target.value)}
+          style={{ height: 28, fontSize: 12 }}
+          disabled={onlineRuntimes.length === 0}
+        >
+          {onlineRuntimes.length === 0 ? (
+            <option value="">No runtime online</option>
+          ) : (
+            onlineRuntimes.map((r) => (
+              <option key={r.id} value={r.id}>{r.name} · {r.provider}</option>
+            ))
+          )}
+        </select>
+      </div>
+    </>
+  );
+}
+
+
+
+const renderChips = <T,>(items: T[], selected: string | null, onSelect: (id: string) => void, label: (item: T) => string, idOf: (item: T) => string, restOpen: boolean, setRestOpen: (v: boolean) => void) => {
+  const visible = items.length > CHIP_MAX ? items.slice(0, CHIP_MAX) : items;
+  const rest = items.length > CHIP_MAX ? items.slice(CHIP_MAX) : [];
+  return (
+    <div className="flex items-center gap-2" style={{ flexWrap: "wrap" }}>
+      {visible.map((item) => (
+        <button
+          key={idOf(item)}
+          type="button"
+          className="btn btn-ghost"
+          style={{
+            height: 26, padding: "0 10px", fontSize: 12,
+            borderColor: selected === idOf(item) ? "var(--lx-border-focus)" : undefined,
+            color: selected === idOf(item) ? "var(--lx-text-primary)" : undefined,
+          }}
+          onClick={() => onSelect(idOf(item))}
+        >
+          {label(item)}
+        </button>
+      ))}
+      {rest.length > 0 && (
+        <div style={{ position: "relative" }}>
+          <button
+            type="button"
+            className="btn btn-ghost"
+            style={{ height: 26, padding: "0 10px", fontSize: 12 }}
+            aria-label="More options"
+            onClick={() => setRestOpen(!restOpen)}
+            aria-expanded={restOpen}
+          >
+            ⋯
+          </button>
+          {restOpen && (
+            <div className="menu" style={{ position: "absolute", top: "calc(100% + 4px)", left: 0, zIndex: 10, padding: 8, display: "flex", flexDirection: "column", gap: 2 }}>
+              {rest.map((item) => (
+                <button
+                  key={idOf(item)}
+                  type="button"
+                  className="menu-item"
+                  style={{ fontSize: 12, color: selected === idOf(item) ? "var(--lx-text-primary)" : undefined }}
+                  onClick={() => {
+                    onSelect(idOf(item));
+                    setRestOpen(false);
+                  }}
+                >
+                  {label(item)}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
 export function ForgePopover({ editor, slug, documentType, documentId, open, onClose, onReview, reviewActive, appliedTaskId, anchorRect }: ForgePopoverProps) {
   // Agent + dependent Skill pickers: the skill list only shows skills attached
   // to the selected agent (M2M bindings managed in Settings → Agents).
@@ -109,11 +214,15 @@ export function ForgePopover({ editor, slug, documentType, documentId, open, onC
   // attach to it so the user can accept/reject the finished result. Tasks the
   // user already applied (accepted in the review banner) or explicitly
   // dismissed are skipped — the popover starts fresh for the next Forge run.
-  useEffect(() => {
-    if (open && taskId === null && recent?.data && (recent.data.status === "queued" || recent.data.status === "running" || recent.data.status === "completed") && !dismissedIdsRef.has(recent.data.id) && recent.data.id !== appliedTaskId) {
-      setTaskId(recent.data.id);
-    }
-  }, [open, recent, taskId, appliedTaskId]);
+  const [prevAttachId, setPrevAttachId] = useState<string | null>(null);
+  const attachId =
+    open && taskId === null && recent?.data && (recent.data.status === "queued" || recent.data.status === "running" || recent.data.status === "completed") && !dismissedIdsRef.has(recent.data.id) && recent.data.id !== appliedTaskId
+      ? recent.data.id
+      : null;
+  if (attachId !== null && prevAttachId !== attachId) {
+    setPrevAttachId(attachId);
+    setTaskId(attachId);
+  }
 
   // Follow mode: keep the activity log pinned to the newest line while the
   // task runs. The user can pause it (manual scroll) via the Follow toggle.
@@ -188,61 +297,7 @@ export function ForgePopover({ editor, slug, documentType, documentId, open, onC
       }
     : {};
 
-  const renderChips = <T,>(items: T[], selected: string | null, onSelect: (id: string) => void, label: (item: T) => string, idOf: (item: T) => string, restOpen: boolean, setRestOpen: (v: boolean) => void) => {
-    const visible = items.length > CHIP_MAX ? items.slice(0, CHIP_MAX) : items;
-    const rest = items.length > CHIP_MAX ? items.slice(CHIP_MAX) : [];
-    return (
-      <div className="flex items-center gap-2" style={{ flexWrap: "wrap" }}>
-        {visible.map((item) => (
-          <button
-            key={idOf(item)}
-            type="button"
-            className="btn btn-ghost"
-            style={{
-              height: 26, padding: "0 10px", fontSize: 12,
-              borderColor: selected === idOf(item) ? "var(--lx-border-focus)" : undefined,
-              color: selected === idOf(item) ? "var(--lx-text-primary)" : undefined,
-            }}
-            onClick={() => onSelect(idOf(item))}
-          >
-            {label(item)}
-          </button>
-        ))}
-        {rest.length > 0 && (
-          <div style={{ position: "relative" }}>
-            <button
-              type="button"
-              className="btn btn-ghost"
-              style={{ height: 26, padding: "0 10px", fontSize: 12 }}
-              aria-label="More options"
-              onClick={() => setRestOpen(!restOpen)}
-              aria-expanded={restOpen}
-            >
-              ⋯
-            </button>
-            {restOpen && (
-              <div className="menu" style={{ position: "absolute", top: "calc(100% + 4px)", left: 0, zIndex: 10, padding: 8, display: "flex", flexDirection: "column", gap: 2 }}>
-                {rest.map((item) => (
-                  <button
-                    key={idOf(item)}
-                    type="button"
-                    className="menu-item"
-                    style={{ fontSize: 12, color: selected === idOf(item) ? "var(--lx-text-primary)" : undefined }}
-                    onClick={() => {
-                      onSelect(idOf(item));
-                      setRestOpen(false);
-                    }}
-                  >
-                    {label(item)}
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-        )}
-      </div>
-    );
-  };
+;
 
   const portalTarget = typeof document !== "undefined" ? document.body : null;
   if (!portalTarget) return null;
@@ -274,41 +329,14 @@ export function ForgePopover({ editor, slug, documentType, documentId, open, onC
         )}
       </div>
 
-      {/* Additional prompt — per-run free text, appended to the task prompt */}
-      <div style={{ padding: "10px 12px", borderBottom: "1px solid var(--lx-border-default)" }}>
-        <span className="prop-label" style={{ display: "block", marginBottom: 6 }}>
-          Additional prompt <span className="font-micro text-2xs text-lx-text-muted uppercase tracking-[0.04em]" style={{ marginLeft: 4 }}>Optional</span>
-        </span>
-        <textarea
-          className="prop-input w-full"
-          rows={3}
-          aria-label="Additional prompt"
-          value={extraPrompt}
-          onChange={(e) => setExtraPrompt(e.target.value)}
-          placeholder="Extra instructions for this run…"
-          style={{ fontSize: 12, lineHeight: 1.5, resize: "vertical" }}
-        />
-      </div>
+      <PromptFields
+        extraPrompt={extraPrompt}
+        setExtraPrompt={setExtraPrompt}
+        runtimeId={runtimeId}
+        setRuntimeId={setRuntimeId}
+        onlineRuntimes={onlineRuntimes}
+      />
 
-      <div style={{ padding: "10px 12px", borderBottom: "1px solid var(--lx-border-default)" }}>
-        <span className="prop-label" style={{ display: "block", marginBottom: 6 }}>Runtime</span>
-        <select
-          className="prop-input w-full"
-          aria-label="Runtime"
-          value={runtimeId}
-          onChange={(e) => setRuntimeId(e.target.value)}
-          style={{ height: 28, fontSize: 12 }}
-          disabled={onlineRuntimes.length === 0}
-        >
-          {onlineRuntimes.length === 0 ? (
-            <option value="">No runtime online</option>
-          ) : (
-            onlineRuntimes.map((r) => (
-              <option key={r.id} value={r.id}>{r.name} · {r.provider}</option>
-            ))
-          )}
-        </select>
-      </div>
 
       <div style={{ padding: "10px 12px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
         <span className="font-micro text-2xs text-lx-text-muted uppercase tracking-[0.04em]">

@@ -17,7 +17,8 @@ import { Column } from "./Column";
 import { ColumnHeader } from "./ColumnHeader";
 import { SwimlaneHeader } from "./SwimlaneHeader";
 import { TaskCard } from "./TaskCard";
-import { FilterButton, ActiveFilterBar, emptyFilters, isFilterActive, type FilterState } from "./BoardFilters";
+import { FilterButton, ActiveFilterBar } from "./BoardFilters";
+import { emptyFilters, isFilterActive, type FilterState } from "../../lib/filters";
 import { KanbanSettingsModal } from "./KanbanSettingsModal";
 import { ColumnForm } from "./ColumnForm";
 import { useArchiveTask, useCreateColumn, useRestoreTask } from "../../lib/queries";
@@ -509,16 +510,15 @@ export function KanbanBoard({ board, showArchived = false, onToggleArchived, onM
                           onOpenCreate={() => onOpenCreateTask?.(col.id, laneId)}
                         >
                           <SortableContext items={cell.map((t) => t.id)} strategy={verticalListSortingStrategy}>
-                            {cell
-                              .filter((task) => !cardHidden(task) && !childrenByParent.has(task.id)) // parents render at top level
-                              .map((task) => {
+                            {cell.flatMap((task) => {
+                              if (cardHidden(task) || childrenByParent.has(task.id)) return []; // parents render at top level
                                 const kids = (childrenByParent.get(task.id) ?? [])
                                   .map((id) => localTasks.find((t) => t.id === id))
                                   .filter((t): t is Task => !!t)
                                   .filter((t) => !cardHidden(t))
                                   .sort(byPosition);
                                 const isCollapsed = collapsedParents.has(task.id);
-                                return (
+                                const card = (
                                   <div key={task.id}>
                                     <SortableTaskCard
                                       task={task}
@@ -559,6 +559,7 @@ export function KanbanBoard({ board, showArchived = false, onToggleArchived, onM
                                       ))}
                                   </div>
                                 );
+                                return [card];
                               })}
                           </SortableContext>
                         </Column>

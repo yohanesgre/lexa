@@ -71,11 +71,9 @@ export function NewPageModal({ slug, isOpen, onClose, defaultParentId, pages }: 
     return () => document.removeEventListener("keydown", handleKeyDown);
   }, [isOpen]);
 
-  const [submitting, setSubmitting] = useState(false);
-
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
-    if (submitting) return;
+    if (createPage.isPending) return;
     const trimmedTitle = title.trim();
 
     if (trimmedTitle === "") {
@@ -85,7 +83,6 @@ export function NewPageModal({ slug, isOpen, onClose, defaultParentId, pages }: 
 
     setError(null);
 
-    setSubmitting(true);
     try {
       const page = await createPage.mutateAsync({ title: trimmedTitle, parentId });
       onClose();
@@ -94,7 +91,6 @@ export function NewPageModal({ slug, isOpen, onClose, defaultParentId, pages }: 
     } catch (err) {
       const message = err instanceof Error ? err.message : "Failed to create page";
       setError(message);
-      setSubmitting(false);
     }
   };
 
