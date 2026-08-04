@@ -66,9 +66,9 @@ export function RuntimeEditModal({ runtime, onClose }: { runtime: Runtime; onClo
 
   return (
     <>
-      <div className="slideover-overlay" onClick={onClose} />
+      <button type="button" className="slideover-overlay" onClick={onClose} aria-label="Close" />
       <div className="fixed inset-0 flex items-center justify-center z-50 pointer-events-none">
-        <div className="dialog dialog-enter pointer-events-auto" role="dialog" aria-modal="true" style={{ maxWidth: 560, width: "100%" }}>
+        <dialog open className="dialog dialog-enter pointer-events-auto" aria-modal="true" aria-label="Edit runtime" style={{ maxWidth: 560, width: "100%" }}>
           <div className="modal-header">
             <span className="modal-title">Edit runtime</span>
             <button type="button" className="btn btn-ghost" style={{ width: 32, height: 32, padding: 0 }} onClick={onClose} aria-label="Close">
@@ -93,26 +93,27 @@ export function RuntimeEditModal({ runtime, onClose }: { runtime: Runtime; onClo
             </div>
 
             <div className="field">
-              <label className="field-label">Name</label>
-              <input className="prop-input w-full" type="text" value={name} onChange={(e) => setName(e.target.value)} />
+              <label className="field-label" htmlFor="runtime-name">Name</label>
+              <input id="runtime-name" className="prop-input w-full" type="text" value={name} onChange={(e) => setName(e.target.value)} />
               <div className="field-hint">Display name only. The daemon keeps its own FORGE_RUNTIME_NAME.</div>
             </div>
 
             <div className="field">
-              <label className="field-label">Agent CLI</label>
+              <div className="field-label">Agent CLI</div>
               <div className="prop-input w-full font-mono">{provider}</div>
               <div className="field-hint">Installed runtime identity. To use another CLI on this machine, create another runtime from Setup runtime.</div>
             </div>
 
             {(provider === "opencode" || agentCatalog.length > 0) && (
               <div className="field">
-                <label className="field-label">
+                <label className="field-label" htmlFor="runtime-agent">
                   Persona
                   <span className="font-micro text-2xs text-lx-text-muted uppercase tracking-[0.04em]" style={{ marginLeft: 6 }}>CLI agent</span>
                 </label>
                 {agentCatalog.length > 0 ? (
                   <>
                     <select
+                      id="runtime-agent"
                       className="prop-input w-full font-mono"
                       value={agentCustom ? "__custom__" : agent}
                       onChange={(e) => {
@@ -124,10 +125,10 @@ export function RuntimeEditModal({ runtime, onClose }: { runtime: Runtime; onClo
                       {agentCatalog.map((entry) => <option key={entry.id} value={entry.id}>{entry.id}{entry.name !== entry.id ? ` — ${entry.name}` : ""}</option>)}
                       <option value="__custom__">Custom…</option>
                     </select>
-                    {agentCustom && <input className="prop-input w-full mt-2 font-mono" type="text" value={agent} onChange={(e) => setAgent(e.target.value)} placeholder="agent id" autoFocus />}
+                    {agentCustom && <input className="prop-input w-full mt-2 font-mono" type="text" value={agent} onChange={(e) => setAgent(e.target.value)} placeholder="agent id" aria-label="Custom agent id" autoFocus />}
                   </>
                 ) : (
-                  <input className="prop-input w-full font-mono" type="text" value={agent} onChange={(e) => setAgent(e.target.value)} placeholder="build (default)" />
+                  <input className="prop-input w-full font-mono" type="text" value={agent} onChange={(e) => setAgent(e.target.value)} placeholder="build (default)" aria-label="Agent persona" />
                 )}
                 <div className="field-hint">The CLI listener reports available agents after setup. Empty = the CLI default. Applies on the next Forge task.</div>
               </div>
@@ -135,16 +136,17 @@ export function RuntimeEditModal({ runtime, onClose }: { runtime: Runtime; onClo
 
             {provider === "opencode" && (
               <div className="field">
-                <label className="field-label">
+                <div className="field-label">
                   Logging
                   <span className="font-micro text-2xs text-lx-text-muted uppercase tracking-[0.04em]" style={{ marginLeft: 6 }}>opencode run</span>
-                </label>
+                </div>
                 <label className="flex items-center gap-2 mb-2" style={{ cursor: "pointer" }}>
                   <input type="checkbox" checked={printLogs} onChange={(e) => setPrintLogs(e.target.checked)} />
                   <span className="text-xs text-lx-text-secondary">Print logs to stderr ({`--print-logs`})</span>
                 </label>
                 <select
                   className="prop-input w-full"
+                  aria-label="Log level"
                   value={logLevel}
                   onChange={(e) => setLogLevel(e.target.value as typeof logLevel)}
                 >
@@ -158,13 +160,14 @@ export function RuntimeEditModal({ runtime, onClose }: { runtime: Runtime; onClo
             )}
 
             <div className="field">
-              <label className="field-label">Model</label>
+              <label className="field-label" id="runtime-model-label">Model</label>
               {catalog.length > 0 ? (
                 <>
                   <div className="relative">
                     <input
                       className="prop-input w-full font-mono"
                       type="text"
+                      aria-labelledby="runtime-model-label"
                       value={pickerOpen ? query : model}
                       placeholder="Search models — provider/model…"
                       onChange={(e) => { setQuery(e.target.value); setPickerOpen(true); }}
@@ -219,7 +222,7 @@ export function RuntimeEditModal({ runtime, onClose }: { runtime: Runtime; onClo
                     )}
                   </div>
                   {custom && (
-                    <input className="prop-input w-full mt-2 font-mono" type="text" value={model} onChange={(e) => setModel(e.target.value)} placeholder="e.g. opencode/deepseek-v4-flash" autoFocus />
+                    <input className="prop-input w-full mt-2 font-mono" type="text" value={model} onChange={(e) => setModel(e.target.value)} placeholder="e.g. opencode/deepseek-v4-flash" aria-labelledby="runtime-model-label" autoFocus />
                   )}
                   <div className="field-hint">Live catalog reported by this runtime's agent, refreshed every ~10 min. Stores the full provider/model id — passed as --model.</div>
                 </>
@@ -227,7 +230,7 @@ export function RuntimeEditModal({ runtime, onClose }: { runtime: Runtime; onClo
                 <>
                   {presets.length > 0 ? (
                     <>
-                      <select className="prop-input w-full" value={custom ? "__custom__" : model} onChange={(e) => {
+                      <select className="prop-input w-full" aria-labelledby="runtime-model-label" value={custom ? "__custom__" : model} onChange={(e) => {
                         if (e.target.value === "__custom__") setCustom(true);
                         else { setCustom(false); setModel(e.target.value); }
                       }}>
@@ -238,11 +241,11 @@ export function RuntimeEditModal({ runtime, onClose }: { runtime: Runtime; onClo
                         <option value="__custom__">Custom…</option>
                       </select>
                       {custom && (
-                        <input className="prop-input w-full mt-2 font-mono" type="text" value={model} onChange={(e) => setModel(e.target.value)} placeholder="e.g. deepseek-v4-flash" autoFocus />
+                        <input className="prop-input w-full mt-2 font-mono" type="text" value={model} onChange={(e) => setModel(e.target.value)} placeholder="e.g. deepseek-v4-flash" aria-labelledby="runtime-model-label" autoFocus />
                       )}
                     </>
                   ) : (
-                    <input className="prop-input w-full font-mono" type="text" value={model} onChange={(e) => setModel(e.target.value)} placeholder="e.g. deepseek-v4-flash" />
+                    <input className="prop-input w-full font-mono" type="text" aria-labelledby="runtime-model-label" value={model} onChange={(e) => setModel(e.target.value)} placeholder="e.g. deepseek-v4-flash" />
                   )}
                   <div className="field-hint">Runtime offline or its agent has no scriptable model list (hermes) — falling back to presets. Reconnect the daemon to refresh the live catalog.</div>
                 </>
@@ -250,17 +253,18 @@ export function RuntimeEditModal({ runtime, onClose }: { runtime: Runtime; onClo
             </div>
 
             <div className="field">
-              <label className="field-label">
+              <div className="field-label">
                 Extra args
                 <span className="font-micro text-2xs text-lx-text-muted uppercase tracking-[0.04em]" style={{ marginLeft: 6 }}>Optional</span>
-              </label>
+              </div>
               <div className="flex flex-col" style={{ gap: 6 }}>
                 {args.map((arg, i) => (
-                  <div key={`${i}-${arg}`} className="flex items-center gap-2">
+                  <div key={arg} className="flex items-center gap-2">
                     <span className="font-mono text-2xs text-lx-text-muted" style={{ width: 14 }}>{i + 1}</span>
                     <input
                       className="prop-input flex-1 font-mono"
                       type="text"
+                      aria-label={`Extra arg ${i + 1}`}
                       value={arg}
                       onChange={(e) => {
                         const next = [...args];
@@ -301,7 +305,7 @@ export function RuntimeEditModal({ runtime, onClose }: { runtime: Runtime; onClo
               </button>
             </div>
           </div>
-        </div>
+        </dialog>
       </div>
     </>
   );

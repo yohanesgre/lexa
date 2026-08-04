@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, useEffectEvent } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import { Plus, X } from "lucide-react";
 import { useCreateWikiPage } from "../../lib/queries";
@@ -56,26 +56,26 @@ export function NewPageModal({ slug, isOpen, onClose, defaultParentId, pages }: 
     onClose();
   }, [parentId, onClose, resetForm]);
 
-  useEffect(() => {
-    if (!isOpen) return;
-    const resolvedParent = defaultParentId && pagesById.has(defaultParentId) ? defaultParentId : null;
-    resetForm(resolvedParent);
-  }, [isOpen, defaultParentId, pagesById, resetForm]);
-
+  const onEscape = useEffectEvent((event: KeyboardEvent) => {
+    if (event.key === "Escape") {
+      event.stopPropagation();
+      handleClose();
+    }
+  });
   useEffect(() => {
     if (!isOpen) return;
     function handleKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape") {
-        event.stopPropagation();
-        handleClose();
-      }
+      onEscape(event);
     }
     document.addEventListener("keydown", handleKeyDown);
     return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [isOpen, handleClose]);
+  }, [isOpen]);
+
+  const [submitting, setSubmitting] = useState(false);
 
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
+    if (submitting) return;
     const trimmedTitle = title.trim();
 
     if (trimmedTitle === "") {
@@ -85,6 +85,7 @@ export function NewPageModal({ slug, isOpen, onClose, defaultParentId, pages }: 
 
     setError(null);
 
+    setSubmitting(true);
     try {
       const page = await createPage.mutateAsync({ title: trimmedTitle, parentId });
       onClose();
@@ -93,6 +94,7 @@ export function NewPageModal({ slug, isOpen, onClose, defaultParentId, pages }: 
     } catch (err) {
       const message = err instanceof Error ? err.message : "Failed to create page";
       setError(message);
+      setSubmitting(false);
     }
   };
 
@@ -100,12 +102,11 @@ export function NewPageModal({ slug, isOpen, onClose, defaultParentId, pages }: 
 
   return (
     <>
-      <div className="dialog-overlay" onClick={handleClose} />
+      <button type="button" className="dialog-overlay" onClick={handleClose} aria-label="Close" />
       <div className="fixed inset-0 flex items-center justify-center z-[70] pointer-events-none">
-        <div
+        <dialog open
           className="dialog dialog-enter pointer-events-auto p-0"
           style={{ width: 440, maxWidth: "calc(100vw - 48px)" }}
-          role="dialog"
           aria-modal="true"
           aria-labelledby="new-page-title"
         >
@@ -180,7 +181,7 @@ export function NewPageModal({ slug, isOpen, onClose, defaultParentId, pages }: 
               </div>
             </div>
           </form>
-        </div>
+        </dialog>
       </div>
     </>
   );

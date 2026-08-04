@@ -98,7 +98,8 @@ export function ColumnHeader({ slug, column, taskCount, wipLimit, wipFlash = fal
         </div>
       </div>
 
-      <ColumnForm
+      {isEditOpen && (
+<ColumnForm
         slug={slug}
         column={column}
         isOpen={isEditOpen}
@@ -115,6 +116,7 @@ export function ColumnHeader({ slug, column, taskCount, wipLimit, wipFlash = fal
           setIsEditOpen(false);
         }}
       />
+      )}
 
       {deleteConfirm && (
         <>
@@ -125,7 +127,7 @@ export function ColumnHeader({ slug, column, taskCount, wipLimit, wipFlash = fal
             onClick={() => setDeleteConfirm(false)}
             />
           <div className="fixed inset-0 flex items-center justify-center z-[80] pointer-events-none">
-            <div className="dialog dialog-enter pointer-events-auto" role="dialog" aria-modal="true" aria-labelledby="delete-column-title">
+            <dialog open className="dialog dialog-enter pointer-events-auto" aria-modal="true" aria-labelledby="delete-column-title">
               <h2 id="delete-column-title" className="font-display text-lg font-medium text-lx-text-primary">Delete &lsquo;{column.name}&rsquo;?</h2>
               <p className="text-sm text-lx-text-secondary mt-3 leading-5">
                 This will remove all tasks in this column. This action cannot be undone.
@@ -137,7 +139,7 @@ export function ColumnHeader({ slug, column, taskCount, wipLimit, wipFlash = fal
                   Delete
                 </button>
               </div>
-            </div>
+            </dialog>
           </div>
         </>
       )}
@@ -151,7 +153,7 @@ export function ColumnHeader({ slug, column, taskCount, wipLimit, wipFlash = fal
             onClick={() => setClearConfirm(false)}
             />
           <div className="fixed inset-0 flex items-center justify-center z-[80] pointer-events-none">
-            <div className="dialog dialog-enter pointer-events-auto" role="dialog" aria-modal="true" aria-labelledby="clear-column-title">
+            <dialog open className="dialog dialog-enter pointer-events-auto" aria-modal="true" aria-labelledby="clear-column-title">
               <h2 id="clear-column-title" className="font-display text-lg font-medium text-lx-text-primary">Clear all tasks?</h2>
               <p className="text-sm text-lx-text-secondary mt-3 leading-5">
                 This will permanently delete all {taskCount} task{taskCount !== 1 ? "s" : ""} in <span className="font-medium text-lx-text-primary">&lsquo;{column.name}&rsquo;</span>. This action cannot be undone.
@@ -163,7 +165,7 @@ export function ColumnHeader({ slug, column, taskCount, wipLimit, wipFlash = fal
                   Clear
                 </button>
               </div>
-            </div>
+            </dialog>
           </div>
         </>
       )}

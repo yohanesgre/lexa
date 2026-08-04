@@ -19,7 +19,8 @@ const STATUS_META: Record<ForgeTaskStatus, { label: string; color: string; dot: 
   cancelled: { label: "Cancelled", color: "text-lx-text-muted", dot: "var(--lx-text-muted)", tint: "var(--lx-surface-selected)" },
 };
 
-const LOG_TIME_FMT = new Intl.DateTimeFormat([], { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false });
+const USER_TIME_ZONE = typeof window !== "undefined" ? Intl.DateTimeFormat().resolvedOptions().timeZone : "UTC";
+const LOG_TIME_FMT = new Intl.DateTimeFormat("en-GB", { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false, timeZone: USER_TIME_ZONE });
 
 function formatLogTime(iso: string): string {  const d = parseApiDate(iso);
   if (Number.isNaN(d.getTime())) return iso.slice(11, 19);
@@ -195,13 +196,13 @@ export function ForgeControlPanel() {
           </button>
         ))}
         <span style={{ width: 1, height: 20, background: "var(--lx-border-default)", margin: "0 4px" }} />
-        <select className="prop-input" style={{ height: 24, fontSize: 12, minWidth: 140 }} value={slug} onChange={(e) => reset({ slug: e.target.value })}>
+        <select className="prop-input" aria-label="Filter by project" style={{ height: 24, fontSize: 12, minWidth: 140 }} value={slug} onChange={(e) => reset({ slug: e.target.value })}>
           <option value="">All projects</option>
           {(projects.data ?? []).map((p) => (
             <option key={p.id} value={p.slug}>{p.name}</option>
           ))}
         </select>
-        <select className="prop-input" style={{ height: 24, fontSize: 12, minWidth: 130 }} value={skillId} onChange={(e) => reset({ skillId: e.target.value })}>
+        <select className="prop-input" aria-label="Filter by skill" style={{ height: 24, fontSize: 12, minWidth: 130 }} value={skillId} onChange={(e) => reset({ skillId: e.target.value })}>
           <option value="">All skills</option>
           {(skills.data ?? []).map((s) => (
             <option key={s.id} value={s.id}>{s.name}</option>
@@ -352,8 +353,8 @@ export function ForgeControlPanel() {
       {selectedId !== null && portalTarget !== null &&
         createPortal(
           <>
-            <div className="slideover-overlay" onClick={() => setSelectedId(null)} />
-            <div className="slideover" role="dialog" aria-modal="true" style={{ width: 520 }}>
+            <button type="button" className="slideover-overlay" onClick={() => setSelectedId(null)} aria-label="Close" />
+            <dialog open className="slideover" aria-modal="true" aria-label="Forge task details" style={{ width: 520 }}>
               <div className="slideover-header border-b border-lx-border-subtle">
                 <div className="flex items-center gap-2">
                   <span className="text-xs text-lx-text-muted font-body">
@@ -473,19 +474,21 @@ export function ForgeControlPanel() {
                   </button>
                 </div>
               )}
-            </div>
+            </dialog>
           </>,
           portalTarget
         )}
       </main>
 
-      <ForgeTaskLogModal
+      {logModalOpen && (
+<ForgeTaskLogModal
         open={logModalOpen}
         onClose={() => setLogModalOpen(false)}
         task={detail}
         logs={logs.data ?? []}
         runtimes={runtimes.data}
       />
+      )}
     </>
   );
 }

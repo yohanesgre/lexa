@@ -65,10 +65,12 @@ export function TaskCard({ title, priority, type, priorities, types, assignees, 
       </div>
       <div className="card-title mt-2">
         {subtaskCount > 0 && (
-          <span
+          <button
+            type="button"
             className="inline-flex items-center justify-center mr-1 text-lx-text-muted cursor-pointer"
-            style={{ width: 16, height: 16 }}
+            style={{ width: 16, height: 16, border: "none", background: "none", padding: 0 }}
             title={subtasksCollapsed ? "Expand subtasks" : "Collapse subtasks"}
+            aria-label={subtasksCollapsed ? "Expand subtasks" : "Collapse subtasks"}
             onClick={(e) => { e.stopPropagation(); onToggleSubtasks?.(); }}
           >
             <svg
@@ -77,7 +79,7 @@ export function TaskCard({ title, priority, type, priorities, types, assignees, 
             >
               <path d="M9 18l6-6-6-6" />
             </svg>
-          </span>
+          </button>
         )}
         {title}
         {subtaskCount > 0 && <span className="font-micro text-2xs text-lx-text-muted" style={{ marginLeft: 6 }}>{String(subtaskCount).padStart(2, "0")}</span>}

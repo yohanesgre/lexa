@@ -7,7 +7,8 @@ import { useRuntimes } from "../../lib/queries";
 import { parseApiDate } from "../../lib/date";
 import type { Runtime } from "../../../shared/types";
 
-const LAST_SEEN_FMT = new Intl.DateTimeFormat(undefined);
+const USER_TIME_ZONE = typeof window !== "undefined" ? Intl.DateTimeFormat().resolvedOptions().timeZone : "UTC";
+const LAST_SEEN_FMT = new Intl.DateTimeFormat("en-GB", { timeZone: USER_TIME_ZONE });
 
 function isOnline(lastSeen: string | null): boolean {
   return !!lastSeen && Date.now() - parseApiDate(lastSeen).getTime() < 2 * 60 * 1000;
@@ -61,9 +62,9 @@ export function RuntimeRestartModal({ runtime, onClose }: { runtime: Runtime; on
 
   return (
     <>
-      <div className="slideover-overlay" onClick={onClose} />
+      <button type="button" className="slideover-overlay" onClick={onClose} aria-label="Close" />
       <div className="fixed inset-0 flex items-center justify-center z-50 pointer-events-none">
-        <div className="dialog dialog-enter pointer-events-auto" role="dialog" aria-modal="true" style={{ maxWidth: 560, width: "100%" }}>
+        <dialog open className="dialog dialog-enter pointer-events-auto" aria-modal="true" aria-label="Restart runtime" style={{ maxWidth: 560, width: "100%" }}>
           <div className="modal-header">
             <span className="modal-title">Restart runtime — {runtime.name}</span>
             <button type="button" className="btn btn-ghost" style={{ width: 32, height: 32, padding: 0 }} onClick={onClose} aria-label="Close"><X size={16} strokeWidth={1.5} /></button>
@@ -81,10 +82,10 @@ export function RuntimeRestartModal({ runtime, onClose }: { runtime: Runtime; on
 
             {!machineOnline && (
               <div className="field">
-                <label className="field-label">Run on the machine</label>
+                <div className="field-label">Run on the machine</div>
                 <div style={{ background: "var(--lx-surface-input)", border: "1px solid var(--lx-border-default)", borderRadius: 6, padding: 12, position: "relative" }}>
                   <pre className="font-mono text-xs text-lx-text-secondary whitespace-pre-wrap leading-6 m-0">lexa-cli machine listen</pre>
-                  <button type="button" className="btn btn-ghost" style={{ position: "absolute", top: 8, right: 8, height: 24, padding: "0 8px", fontSize: 11 }} onClick={copy}>{copied ? <Check size={12} strokeWidth={1.5} /> : <Copy size={12} strokeWidth={1.5} />} {copied ? "Copied" : "Copy"}</button>
+                  <button type="button" className="btn btn-ghost" aria-label="Copy machine listen command" style={{ position: "absolute", top: 8, right: 8, height: 24, padding: "0 8px", fontSize: 11 }} onClick={copy}>{copied ? <Check size={12} strokeWidth={1.5} /> : <Copy size={12} strokeWidth={1.5} />} {copied ? "Copied" : "Copy"}</button>
                 </div>
                 <div className="field-hint mt-1.5">Last seen: {machine?.lastSeen ? LAST_SEEN_FMT.format(parseApiDate(machine.lastSeen)) : "never"}. This modal keeps polling.</div>
               </div>
@@ -104,7 +105,7 @@ export function RuntimeRestartModal({ runtime, onClose }: { runtime: Runtime; on
               {!machineOnline && <button type="button" className="btn btn-ghost" onClick={() => void qc.refetchQueries({ queryKey: ["forge-machines"] })}>Check again</button>}
             </div>
           </div>
-        </div>
+        </dialog>
       </div>
     </>
   );

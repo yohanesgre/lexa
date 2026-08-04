@@ -113,9 +113,8 @@ function Dashboard() {
             onClick={() => setShowCreate(false)}
             />
           <div className="fixed inset-0 flex items-center justify-center z-50 pointer-events-none">
-            <div
+            <dialog open
               className="modal dialog-enter pointer-events-auto"
-              role="dialog"
               aria-modal="true"
               aria-labelledby="create-project-title"
               style={{ maxWidth: 440 }}
@@ -213,7 +212,7 @@ function Dashboard() {
                   Create Project
                 </button>
               </div>
-            </div>
+            </dialog>
           </div>
         </>
       )}
