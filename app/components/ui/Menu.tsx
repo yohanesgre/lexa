@@ -67,6 +67,7 @@ export function Menu({ trigger, children, align = "right", gap = 8 }: MenuProps)
             role="menu"
             style={popoverStyle}
             onClick={() => setOpen(false)}
+            onKeyDown={(e) => { if (e.key === "Escape") setOpen(false); }}
           >
             {children}
           </div>,

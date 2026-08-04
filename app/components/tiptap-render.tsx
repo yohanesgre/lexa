@@ -43,7 +43,7 @@ export function renderInline(
             </a>
           );
       }
-      return <span key={nodeKey}>{el}</span>;
+      return <span key={`${keyPrefix}-t-${node.text ?? ""}`}>{el}</span>;
     }
     if (node.type === "hardBreak") return <br key={nodeKey} />;
     return renderNode(node, nodeKey, variant);

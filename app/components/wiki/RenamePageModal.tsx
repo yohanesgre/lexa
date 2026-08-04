@@ -30,13 +30,11 @@ export function RenamePageModal({ slug, page, isOpen, onClose }: RenamePageModal
     return () => document.removeEventListener("keydown", handleKeyDown);
   }, [isOpen]);
 
-  const [submitting, setSubmitting] = useState(false);
-
   if (!isOpen || !page) return null;
 
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
-    if (submitting) return;
+    if (updatePage.isPending) return;
     const trimmedTitle = title.trim();
 
     if (trimmedTitle === "") {
@@ -46,14 +44,12 @@ export function RenamePageModal({ slug, page, isOpen, onClose }: RenamePageModal
 
     setError(null);
 
-    setSubmitting(true);
     try {
       await updatePage.mutateAsync({ pageSlug: page.slug, title: trimmedTitle });
       onClose();
     } catch (err) {
       const message = err instanceof Error ? err.message : "Failed to rename page";
       setError(message);
-      setSubmitting(false);
     }
   };
 

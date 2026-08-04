@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import { Pencil } from "lucide-react";
-import { useEditor, EditorContent } from "@tiptap/react";
+import { useEditor } from "@tiptap/react";
 import type { Editor, JSONContent } from "@tiptap/core";
 import StarterKit from "@tiptap/starter-kit";
 import Code from "@tiptap/extension-code";
@@ -13,11 +13,9 @@ import Underline from "@tiptap/extension-underline";
 import Placeholder from "@tiptap/extension-placeholder";
 import type { WikiPage, WikiPageMeta, TipTapDoc } from "../../../shared/types";
 import { useUpdateWikiPage } from "../../lib/queries";
-import { Toolbar } from "../TextEditor";
-import { ForgeReviewSurface } from "../forge/ForgeReviewSurface";
-import { useForgeReview } from "../forge/useForgeReview";
-import { cn } from "../ui/cn";
 import { renderDoc, extractHeadings, slugifyHeading } from "../tiptap-render";
+import { WikiEditor } from "./WikiEditor";
+import { WikiEditSplit } from "./WikiEditSplit";
 import { EditSidebar } from "./EditSidebar";
 import { OutlineSidebar } from "./OutlineSidebar";
 import { SourcesSection } from "../forge/SourcesSection";
@@ -55,25 +53,6 @@ function buildAncestors(pages: WikiPageMeta[], page: WikiPage): WikiPageMeta[] {
     currentId = parent.parentId;
   }
   return ancestors;
-}
-
-interface WikiEditorProps {
-  editor: Editor;
-  forge?: { slug: string; documentType: "task" | "wiki"; documentId: string };
-  onReviewStateChange?: (active: boolean, accepted: boolean) => void;
-}
-
-function WikiEditor({ editor, forge, onReviewStateChange }: WikiEditorProps) {
-  const { review, appliedTaskId, handleReview, handleAcceptReview, handleRejectReview } = useForgeReview(editor, onReviewStateChange);
-  return (
-    <div className={cn("editor-wrapper flex flex-col flex-1 min-h-0", review && "is-reviewing")}>
-      <Toolbar editor={editor} headingLevel={(editor.getAttributes("heading").level as number | undefined) ?? 0} forge={forge} reviewActive={review !== null} appliedTaskId={appliedTaskId} onReview={handleReview} />
-      {review && (
-        <ForgeReviewSurface action={review.action} runtime={review.runtime} diff={review.diff} onAccept={handleAcceptReview} onReject={handleRejectReview} />
-      )}
-      <EditorContent editor={editor} className="editor-content flex-1 p-4 px-5" />
-    </div>
-  );
 }
 
 interface WikiPageViewerProps {
@@ -344,69 +323,17 @@ export function WikiPageViewer({ slug, page, pages }: WikiPageViewerProps) {
           />
         </div>
 
-        {/* Side-by-side: Preview left, Editor right */}
-        <div className="flex flex-1 overflow-hidden" style={{ borderTop: "1px solid var(--lx-border-subtle)" }}>
-          {/* Left: Preview */}
-          <div className="flex flex-1 flex-col overflow-hidden">
-            <div
-              style={{
-                padding: "4px 8px",
-                borderBottom: "1px solid var(--lx-border-subtle)",
-                background: "var(--lx-bg-surface)",
-              }}
-            >
-              <span className="text-xs text-lx-text-muted font-body uppercase tracking-[0.05em]">Preview</span>
-            </div>
-            <div
-              className="wiki-prose flex-1 overflow-y-auto"
-              style={{ padding: "16px 20px", background: "var(--lx-bg-page)" }}
-            >
-              {renderDoc(previewContent, "wiki")}
-            </div>
-          </div>
-
-          {/* Right: Editor */}
-          <div
-            className="flex flex-1 flex-col overflow-hidden"
-            style={{ borderLeft: "1px solid var(--lx-border-subtle)" }}
-          >
-            <div
-              style={{
-                padding: "4px 8px",
-                borderBottom: "1px solid var(--lx-border-subtle)",
-                background: "var(--lx-bg-surface)",
-              }}
-            >
-              <span className="text-xs text-lx-text-muted font-body uppercase tracking-[0.05em]">Editor</span>
-            </div>
-            {editor && <WikiEditor editor={editor} forge={{ slug, documentType: "wiki", documentId: page.slug }} onReviewStateChange={handleReviewStateChange} />}
-            <div
-              className="flex items-center justify-between"
-              style={{
-                padding: "8px 12px",
-                borderTop: "1px solid var(--lx-border-subtle)",
-                background: "var(--lx-bg-surface)",
-              }}
-            >
-              <span className="font-micro text-2xs text-lx-text-muted uppercase tracking-[0.04em]">
-                {isSaving
-                  ? "Saving…"
-                  : lastSavedAt
-                    ? formatSavedAt(lastSavedAt)
-                    : `Last edited ${formatRelative(lastSavedPage.updatedAt)}`}
-              </span>
-              {isSaving ? (
-                <span className="font-micro text-2xs text-lx-text-warning uppercase tracking-[0.04em]">Saving…</span>
-              ) : (
-                isDirty && (
-                  <span className="font-micro text-2xs text-lx-text-warning uppercase tracking-[0.04em]">
-                    Unsaved changes
-                  </span>
-                )
-              )}
-            </div>
-          </div>
-        </div>
+        <WikiEditSplit
+          editor={editor}
+          slug={slug}
+          pageSlug={page.slug}
+          previewContent={previewContent}
+          isSaving={isSaving}
+          isDirty={isDirty}
+          lastSavedAt={lastSavedAt}
+          lastSavedLabel={isSaving ? "Saving…" : lastSavedAt ? formatSavedAt(lastSavedAt) : `Last edited ${formatRelative(lastSavedPage.updatedAt)}`}
+          onReviewStateChange={handleReviewStateChange}
+        />
       </div>
 
       <EditSidebar
