@@ -41,7 +41,7 @@ function ApiKeyRevealModal({ name, fullKey, onDone }: { name: string; fullKey: s
     <>
       <div className="slideover-overlay" />
       <div className="fixed inset-0 flex items-center justify-center z-50 pointer-events-none">
-        <div className="dialog dialog-enter pointer-events-auto" role="dialog" aria-modal="true" style={{ maxWidth: 464 }}>
+        <dialog open className="dialog dialog-enter pointer-events-auto" aria-modal="true" aria-label="Dialog" style={{ maxWidth: 464 }}>
           <div className="modal-header">
             <span className="modal-title">API Key Created</span>
             <span className="wip-badge wip-ok">NEW</span>
@@ -49,12 +49,12 @@ function ApiKeyRevealModal({ name, fullKey, onDone }: { name: string; fullKey: s
 
           <div className="modal-body">
             <div className="mb-4">
-              <label className="field-label">Name</label>
+              <div className="field-label">Name</div>
               <div className="text-sm font-medium text-lx-text-primary">{name}</div>
             </div>
 
             <div className="mb-4">
-              <label className="field-label">Key</label>
+              <div className="field-label">Key</div>
               <div className="key-display">
                 <code>{fullKey}</code>
                 <button
@@ -79,7 +79,7 @@ function ApiKeyRevealModal({ name, fullKey, onDone }: { name: string; fullKey: s
           <div className="modal-footer">
             <button type="button" className="btn btn-primary" onClick={onDone}>I've saved this key</button>
           </div>
-        </div>
+        </dialog>
       </div>
     </>
   );
@@ -88,9 +88,9 @@ function ApiKeyRevealModal({ name, fullKey, onDone }: { name: string; fullKey: s
 function DeleteKeyModal({ name, onCancel, onConfirm }: { name: string; onCancel: () => void; onConfirm: () => void }) {
   return (
     <>
-      <div className="slideover-overlay" onClick={onCancel} />
+      <button type="button" className="slideover-overlay" onClick={onCancel} aria-label="Close" />
       <div className="fixed inset-0 flex items-center justify-center z-50 pointer-events-none">
-        <div className="dialog dialog-enter pointer-events-auto" role="dialog" aria-modal="true">
+        <dialog open className="dialog dialog-enter pointer-events-auto" aria-modal="true" aria-label="Dialog">
           <h2 className="font-display text-lg font-medium text-lx-text-primary">Delete API key?</h2>
 
           <p className="text-sm text-lx-text-secondary mt-3 leading-5">
@@ -108,7 +108,7 @@ function DeleteKeyModal({ name, onCancel, onConfirm }: { name: string; onCancel:
               Delete
             </button>
           </div>
-        </div>
+        </dialog>
       </div>
     </>
   );
@@ -117,9 +117,9 @@ function DeleteKeyModal({ name, onCancel, onConfirm }: { name: string; onCancel:
 function RemoveMemberModal({ name, onCancel, onConfirm }: { name: string; onCancel: () => void; onConfirm: () => void }) {
   return (
     <>
-      <div className="slideover-overlay" onClick={onCancel} />
+      <button type="button" className="slideover-overlay" onClick={onCancel} aria-label="Close" />
       <div className="fixed inset-0 flex items-center justify-center z-50 pointer-events-none">
-        <div className="dialog dialog-enter pointer-events-auto" role="dialog" aria-modal="true">
+        <dialog open className="dialog dialog-enter pointer-events-auto" aria-modal="true" aria-label="Dialog">
           <h2 className="font-display text-lg font-medium text-lx-text-primary">Remove member?</h2>
 
           <p className="text-sm text-lx-text-secondary mt-3 leading-5">
@@ -137,7 +137,7 @@ function RemoveMemberModal({ name, onCancel, onConfirm }: { name: string; onCanc
               Remove
             </button>
           </div>
-        </div>
+        </dialog>
       </div>
     </>
   );
@@ -146,9 +146,9 @@ function RemoveMemberModal({ name, onCancel, onConfirm }: { name: string; onCanc
 function RemoveRuntimeModal({ name, hostname, onCancel, onConfirm }: { name: string; hostname: string; onCancel: () => void; onConfirm: () => void }) {
   return (
     <>
-      <div className="slideover-overlay" onClick={onCancel} />
+      <button type="button" className="slideover-overlay" onClick={onCancel} aria-label="Close" />
       <div className="fixed inset-0 flex items-center justify-center z-50 pointer-events-none">
-        <div className="dialog dialog-enter pointer-events-auto" role="dialog" aria-modal="true">
+        <dialog open className="dialog dialog-enter pointer-events-auto" aria-modal="true" aria-label="Dialog">
           <h2 className="font-display text-lg font-medium text-lx-text-primary">Remove runtime?</h2>
 
           <p className="text-sm text-lx-text-secondary mt-3 leading-5">
@@ -166,7 +166,7 @@ function RemoveRuntimeModal({ name, hostname, onCancel, onConfirm }: { name: str
               Remove
             </button>
           </div>
-        </div>
+        </dialog>
       </div>
     </>
   );
@@ -175,9 +175,9 @@ function RemoveRuntimeModal({ name, hostname, onCancel, onConfirm }: { name: str
 function DemoteAdminModal({ name, onCancel, onConfirm }: { name: string; onCancel: () => void; onConfirm: () => void }) {
   return (
     <>
-      <div className="slideover-overlay" onClick={onCancel} />
+      <button type="button" className="slideover-overlay" onClick={onCancel} aria-label="Close" />
       <div className="fixed inset-0 flex items-center justify-center z-50 pointer-events-none">
-        <div className="dialog dialog-enter pointer-events-auto" role="dialog" aria-modal="true">
+        <dialog open className="dialog dialog-enter pointer-events-auto" aria-modal="true" aria-label="Dialog">
           <h2 className="font-display text-lg font-medium text-lx-text-primary">Demote admin?</h2>
 
           <p className="text-sm text-lx-text-secondary mt-3 leading-5">
@@ -195,7 +195,7 @@ function DemoteAdminModal({ name, onCancel, onConfirm }: { name: string; onCance
               Demote
             </button>
           </div>
-        </div>
+        </dialog>
       </div>
     </>
   );
@@ -204,9 +204,9 @@ function DemoteAdminModal({ name, onCancel, onConfirm }: { name: string; onCance
 function AddAdminModal({ name, onCancel, onConfirm }: { name: string; onCancel: () => void; onConfirm: () => void }) {
   return (
     <>
-      <div className="slideover-overlay" onClick={onCancel} />
+      <button type="button" className="slideover-overlay" onClick={onCancel} aria-label="Close" />
       <div className="fixed inset-0 flex items-center justify-center z-50 pointer-events-none">
-        <div className="dialog dialog-enter pointer-events-auto" role="dialog" aria-modal="true">
+        <dialog open className="dialog dialog-enter pointer-events-auto" aria-modal="true" aria-label="Dialog">
           <h2 className="font-display text-lg font-medium text-lx-text-primary">Promote to admin?</h2>
 
           <p className="text-sm text-lx-text-secondary mt-3 leading-5">
@@ -224,7 +224,7 @@ function AddAdminModal({ name, onCancel, onConfirm }: { name: string; onCancel: 
               Promote
             </button>
           </div>
-        </div>
+        </dialog>
       </div>
     </>
   );
@@ -233,9 +233,9 @@ function AddAdminModal({ name, onCancel, onConfirm }: { name: string; onCancel: 
 function AddMemberModal({ name, onCancel, onConfirm }: { name: string; onCancel: () => void; onConfirm: () => void }) {
   return (
     <>
-      <div className="slideover-overlay" onClick={onCancel} />
+      <button type="button" className="slideover-overlay" onClick={onCancel} aria-label="Close" />
       <div className="fixed inset-0 flex items-center justify-center z-50 pointer-events-none">
-        <div className="dialog dialog-enter pointer-events-auto" role="dialog" aria-modal="true">
+        <dialog open className="dialog dialog-enter pointer-events-auto" aria-modal="true" aria-label="Dialog">
           <h2 className="font-display text-lg font-medium text-lx-text-primary">Add member?</h2>
 
           <p className="text-sm text-lx-text-secondary mt-3 leading-5">
@@ -253,7 +253,7 @@ function AddMemberModal({ name, onCancel, onConfirm }: { name: string; onCancel:
               Add
             </button>
           </div>
-        </div>
+        </dialog>
       </div>
     </>
   );
@@ -262,13 +262,11 @@ function AddMemberModal({ name, onCancel, onConfirm }: { name: string; onCancel:
 function DeleteProjectModal({ name, onCancel, onConfirm }: { name: string; onCancel: () => void; onConfirm: () => void }) {
   const [input, setInput] = useState("");
 
-  useEffect(() => { setInput(""); }, [name]);
-
   return (
     <>
-      <div className="slideover-overlay" onClick={onCancel} />
+      <button type="button" className="slideover-overlay" onClick={onCancel} aria-label="Close" />
       <div className="fixed inset-0 flex items-center justify-center z-50 pointer-events-none">
-        <div className="dialog dialog-enter pointer-events-auto" role="dialog" aria-modal="true" style={{ maxWidth: 420 }}>
+        <dialog open className="dialog dialog-enter pointer-events-auto" aria-modal="true" aria-label="Dialog" style={{ maxWidth: 420 }}>
           <h2 className="font-display text-lg font-medium text-lx-text-primary">Delete project?</h2>
 
           <p className="text-sm text-lx-text-secondary mt-3 leading-5">
@@ -279,8 +277,9 @@ function DeleteProjectModal({ name, onCancel, onConfirm }: { name: string; onCan
             {" "}and all its tasks, columns, swimlanes, wiki pages, and member assignments. This action cannot be undone.
           </p>
 
-          <label className="field-label mt-4">Type <strong>{name}</strong> to confirm</label>
+          <label className="field-label mt-4" htmlFor="confirm-delete">Type <strong>{name}</strong> to confirm</label>
           <input
+            id="confirm-delete"
             className="prop-input mt-1"
             placeholder={name}
             value={input}
@@ -295,7 +294,7 @@ function DeleteProjectModal({ name, onCancel, onConfirm }: { name: string; onCan
               Delete Project
             </button>
           </div>
-        </div>
+        </dialog>
       </div>
     </>
   );
@@ -314,10 +313,10 @@ function InlineDropdown({ items, onSelect, onClose }: { items: { name: string; e
     <div ref={ref} className="dropdown-menu" style={{ position: "absolute", top: "100%", left: 0, marginTop: 4, zIndex: 10 }}>
       <div className="dropdown-label">Users</div>
       {items.map((u) => (
-        <div key={u.email} className="dropdown-item" onClick={() => onSelect(u.email)}>
+        <button key={u.email} type="button" className="dropdown-item w-full text-left" onClick={() => onSelect(u.email)}>
           <span>{u.name}</span>
           <span className="text-xs text-lx-text-secondary">{u.email}</span>
-        </div>
+        </button>
       ))}
     </div>
   );
@@ -363,7 +362,7 @@ function MembersTable({ slug }: { slug: string }) {
                   <span className="text-xs" style={{ background: "var(--lx-bg-accent-subtle)", color: "var(--lx-text-link)", padding: "2px 8px", borderRadius: 9999, fontSize: 11 }}>{m.role}</span>
                 </td>
                 <td>
-                  <button type="button" className="btn btn-ghost h-7 px-2 text-xs text-lx-text-danger" onClick={() => setRemoving(m.name)}>
+                  <button type="button" className="btn btn-ghost h-7 px-2 text-xs text-lx-text-danger" aria-label={`Remove ${m.name} from project`} onClick={() => setRemoving(m.name)}>
                     <Trash2 size={12} strokeWidth={1.5} />
                   </button>
                 </td>
@@ -420,6 +419,7 @@ function ProjectBoundSettings({ slug }: { slug: string }) {
           <div style={{ position: "relative", minWidth: 240, flexShrink: 0 }}>
             <input
               className="prop-input"
+              aria-label="Add member"
               placeholder="Add member..."
               style={{ width: "100%" }}
               value={memberQuery}
@@ -568,7 +568,7 @@ export function SettingsPage({ slug }: { slug?: string }) {
                       {k.lastUsedAt ? formatRelative(k.lastUsedAt) : <span className="text-lx-text-muted">Never</span>}
                     </td>
                     <td>
-                      <button type="button" className="btn btn-ghost h-7 px-2 text-xs text-lx-text-danger" onClick={() => setDeleting(k)}>
+                      <button type="button" className="btn btn-ghost h-7 px-2 text-xs text-lx-text-danger" aria-label={`Delete key ${k.name}`} onClick={() => setDeleting(k)}>
                         <Trash2 size={12} strokeWidth={1.5} />
                       </button>
                     </td>
@@ -584,6 +584,7 @@ export function SettingsPage({ slug }: { slug?: string }) {
           <div className="flex items-center gap-3 flex-wrap">
             <input
               className="prop-input"
+              aria-label="Key name"
               placeholder="Key name (e.g. Hermes Staging)"
               value={keyName}
               onChange={(e) => setKeyName(e.target.value)}
@@ -722,6 +723,7 @@ export function SettingsPage({ slug }: { slug?: string }) {
           <div style={{ position: "relative", minWidth: 240, flexShrink: 0 }}>
             <input
               className="prop-input"
+              aria-label="Add admin"
               placeholder="Add admin..."
               style={{ width: "100%" }}
               value={adminQuery}
@@ -762,7 +764,7 @@ export function SettingsPage({ slug }: { slug?: string }) {
                     <span className="text-xs" style={{ background: "var(--lx-bg-accent-subtle)", color: "var(--lx-text-link)", padding: "2px 8px", borderRadius: 9999, fontSize: 11 }}>{a.role}</span>
                   </td>
                   <td>
-                    <button type="button" className="btn btn-ghost h-7 px-2 text-xs text-lx-text-danger" onClick={() => setDemoting({ id: a.id, name: a.name })}>
+                    <button type="button" className="btn btn-ghost h-7 px-2 text-xs text-lx-text-danger" aria-label={`Remove ${a.name} from admins`} onClick={() => setDemoting({ id: a.id, name: a.name })}>
                       <Trash2 size={12} strokeWidth={1.5} />
                     </button>
                   </td>

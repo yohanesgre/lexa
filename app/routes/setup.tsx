@@ -97,12 +97,8 @@ function SetupWizard() {
   };
 
   const goToApp = () => {
-    if (apiKey) {
-      // Persist the key for the browser's API calls (dev convenience).
-      try {
-        localStorage.setItem("lxk_dev_api_key", apiKey);
-      } catch { /* ignore */ }
-    }
+    // No token persistence: the server injects the current API key into the
+    // served HTML (<meta name="lxk-api-key">) and the client prefers it.
     navigate({ to: "/" });
   };
 
@@ -141,8 +137,9 @@ function SetupWizard() {
               <p className="text-sm text-lx-text-secondary leading-5 mb-4">
                 The first person to log in with this email becomes an admin. They can invite teammates and manage settings.
               </p>
-              <label className="prop-label block mb-1.5">Email address</label>
+              <label className="prop-label block mb-1.5" htmlFor="setup-email">Email address</label>
               <input
+                id="setup-email"
                 className="prop-input w-full"
                 type="email"
                 value={email}

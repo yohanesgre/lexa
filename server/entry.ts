@@ -3,7 +3,7 @@ import { mkdirSync, existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { createHash, randomBytes } from "node:crypto";
 import { Database } from "bun:sqlite";
-import { createApiHandler, createWebhookHandler } from "./api/http";
+import { createApiHandler, createWebhookHandler, createWebhookVerifier } from "./api/http";
 import { createMcpHandler } from "./mcp/server";
 import { verifyApiKey } from "./api/auth-key";
 import { findOrCreateUser } from "./api/auth";
@@ -34,6 +34,7 @@ if (process.env.LXK_SEED_DEV === "1") {
 const apiHandlerRaw = createApiHandler(DATABASE_PATH) as unknown as { handler?: (req: Request) => Promise<Response> } | ((req: Request) => Promise<Response>);
 const apiHandler: (req: Request) => Promise<Response> = typeof apiHandlerRaw === "function" ? apiHandlerRaw : apiHandlerRaw.handler!;
 const mcpHandler = createMcpHandler(DATABASE_PATH);
+const verifyWebhook = createWebhookVerifier(DATABASE_PATH);
 const webhookHandler = createWebhookHandler(DATABASE_PATH);
 
 function withSecurityHeaders(res: Response): Response {
@@ -52,10 +53,20 @@ Bun.serve({
     }
 
     if (url.pathname.startsWith("/api/")) {
-      // GitHub webhook: HMAC-SHA-256 is the auth (no API-key middleware),
-      // signature verified over the RAW body before any parsing.
+      // GitHub webhook: HMAC-SHA-256 is the auth (no API-key middleware).
+      // Signature verified over the RAW body, constant-time, BEFORE any
+      // parsing or processing — mismatch → 401. Ack 200 immediately, then
+      // the handler processes fire-and-forget in the background.
       if (url.pathname === "/api/webhooks/github") {
-        return withSecurityHeaders(await webhookHandler(req));
+        const rawBody = await req.arrayBuffer();
+        const signature = req.headers.get("x-hub-signature-256");
+        const valid = await verifyWebhook(rawBody, signature);
+        if (!valid) {
+          return withSecurityHeaders(
+            new Response(JSON.stringify({ error: { code: "GITHUB_WEBHOOK_ERROR", message: "Invalid signature" } }), { status: 401, headers: { "Content-Type": "application/json" } })
+          );
+        }
+        return withSecurityHeaders(webhookHandler(rawBody, req.headers.get("x-github-delivery") ?? "", req.headers.get("x-github-event") ?? ""));
       }
       const isSetup = url.pathname.startsWith("/api/setup");
       const isHealth = url.pathname === "/api/health";

@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useMemo, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import { useParams } from "@tanstack/react-router";
 import { useProjects } from "./queries";
 
@@ -52,24 +52,30 @@ export function ProjectSelectionProvider({ children }: { children: React.ReactNo
     }
   }, [hydrated, isLoading, projects, selectedSlug]);
 
-  const wrappedSetSelectedSlug = (slug: string) => {
-    setSelectedSlug(slug);
-    try {
-      localStorage.setItem(STORAGE_KEY, slug);
-    } catch {
-      // ignore storage errors
-    }
-  };
+  const wrappedSetSelectedSlug = useCallback(
+    (slug: string) => {
+      setSelectedSlug(slug);
+      try {
+        localStorage.setItem(STORAGE_KEY, slug);
+      } catch {
+        // ignore storage errors
+      }
+    },
+    []
+  );
 
   const selectedProjectName = useMemo(
     () => projects?.find((p) => p.slug === selectedSlug)?.name,
     [projects, selectedSlug]
   );
 
+  const contextValue = useMemo(
+    () => ({ selectedSlug, selectedProjectName, setSelectedSlug: wrappedSetSelectedSlug }),
+    [selectedSlug, selectedProjectName, wrappedSetSelectedSlug]
+  );
+
   return (
-    <ProjectSelectionContext.Provider
-      value={{ selectedSlug, selectedProjectName, setSelectedSlug: wrappedSetSelectedSlug }}
-    >
+    <ProjectSelectionContext.Provider value={contextValue}>
       {children}
     </ProjectSelectionContext.Provider>
   );

@@ -334,6 +334,7 @@ export function WikiPageViewer({ slug, page, pages }: WikiPageViewerProps) {
         <div style={{ padding: "12px 16px 0" }}>
           <input
             className="wiki-title-input"
+            aria-label="Page title"
             value={title}
             onChange={(e) => {
               setTitle(e.target.value);

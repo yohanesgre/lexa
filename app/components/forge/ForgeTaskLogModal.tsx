@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useEffectEvent } from "react";
 import { Check, Copy, X } from "lucide-react";
 import { cn } from "../ui/cn";
 import { copyToClipboard } from "../../lib/clipboard";
@@ -15,7 +15,8 @@ const STATUS_META: Record<ForgeTaskStatus, { label: string; color: string }> = {
 
 // SQLite datetime('now') is "YYYY-MM-DD HH:MM:SS" in UTC — render the local
 // wall-clock time for the log's timestamp column.
-const LOG_TIME_FMT = new Intl.DateTimeFormat([], { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false });
+const USER_TIME_ZONE = typeof window !== "undefined" ? Intl.DateTimeFormat().resolvedOptions().timeZone : "UTC";
+const LOG_TIME_FMT = new Intl.DateTimeFormat("en-GB", { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false, timeZone: USER_TIME_ZONE });
 
 function formatLogTime(iso: string): string {
   const d = parseApiDate(iso);
@@ -73,22 +74,18 @@ export function ForgeTaskLogModal({
     }
   }, [lines, followLog]);
 
-  useEffect(() => {
-    if (!open) {
-      setCopied(false);
-      setFollowLog(true);
-    }
-  }, [open]);
-
+  const onEscape = useEffectEvent((e: KeyboardEvent) => {
+    if (e.key === "Escape") onClose();
+  });
   useEffect(() => {
     if (!open) return;
     closeRef.current?.focus();
     function handleKeyDown(e: KeyboardEvent) {
-      if (e.key === "Escape") onClose();
+      onEscape(e);
     }
     document.addEventListener("keydown", handleKeyDown);
     return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [open, onClose]);
+  }, [open]);
 
   if (!open || !task) return null;
 
@@ -105,9 +102,9 @@ export function ForgeTaskLogModal({
 
   return (
     <>
-      <div className="slideover-overlay" onClick={onClose} />
+      <button type="button" className="slideover-overlay" onClick={onClose} aria-label="Close" />
       <div className="fixed inset-0 flex items-center justify-center z-50 pointer-events-none">
-        <div className="dialog dialog-enter forge-log-modal pointer-events-auto" role="dialog" aria-modal="true" aria-label="Forge task log">
+        <dialog open className="dialog dialog-enter forge-log-modal pointer-events-auto" aria-modal="true" aria-label="Forge task log">
           <div className="modal-header">
             <div style={{ minWidth: 0 }}>
               <div className="modal-title" style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
@@ -185,7 +182,7 @@ export function ForgeTaskLogModal({
               Close
             </button>
           </div>
-        </div>
+        </dialog>
       </div>
     </>
   );

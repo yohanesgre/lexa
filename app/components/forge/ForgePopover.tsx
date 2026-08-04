@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, useEffectEvent } from "react";
 import { createPortal } from "react-dom";
 import { Check, Hammer, Maximize } from "lucide-react";
 import type { Editor } from "@tiptap/core";
@@ -69,26 +69,15 @@ export function ForgePopover({ editor, slug, documentType, documentId, open, onC
   const recent = useRecentForgeTask(slug, documentType, documentId, open && taskId === null);
   const containerRef = useRef<HTMLDivElement>(null);
 
-  const selectedAgent: ForgeAgent | null = agents.find((a) => a.id === agentId) ?? null;
+  // Default selection derives during render: the builtin "Lexa" agent (or the
+  // first agent) and its first attached skill. Changing the agent resets the
+  // skill by falling back to the first attached skill of the new agent.
+  const effectiveAgentId = agentId !== "" ? agentId : (agents.find((a) => a.id === "lexa")?.id ?? agents[0]?.id ?? "");
+  const selectedAgent: ForgeAgent | null = agents.find((a) => a.id === effectiveAgentId) ?? null;
   const agentSkillIds = new Set(selectedAgent?.skillIds ?? []);
   const agentSkills: ForgeSkill[] = selectedAgent ? skills.filter((s) => agentSkillIds.has(s.id)) : [];
-  const selectedSkill: ForgeSkill | null = agentSkills.find((s) => s.id === skillId) ?? null;
-
-  // Default selection: the builtin "Lexa" agent (or the first agent) and its
-  // first attached skill. Changing the agent resets the skill.
-  useEffect(() => {
-    if (agentId === "" && agents.length > 0) {
-      setAgentId(agents.find((a) => a.id === "lexa")?.id ?? agents[0].id);
-    }
-  }, [agents, agentId]);
-
-  useEffect(() => {
-    if (!agentId) return;
-    const attached = new Set(agents.find((a) => a.id === agentId)?.skillIds ?? []);
-    if (!attached.has(skillId)) {
-      setSkillId(skills.filter((s) => attached.has(s.id))[0]?.id ?? "");
-    }
-  }, [agentId, agents, skills, skillId]);
+  const effectiveSkillId = agentSkillIds.has(skillId) ? skillId : (agentSkills[0]?.id ?? "");
+  const selectedSkill: ForgeSkill | null = agentSkills.find((s) => s.id === effectiveSkillId) ?? null;
 
   // Auto-select the first online runtime.
   useEffect(() => {
@@ -97,35 +86,23 @@ export function ForgePopover({ editor, slug, documentType, documentId, open, onC
     }
   }, [onlineRuntimes, runtimeId]);
 
+  const onOutsideClick = useEffectEvent((e: MouseEvent) => {
+    if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+      onClose();
+    }
+  });
+  const onDocumentKeyDown = useEffectEvent((e: KeyboardEvent) => {
+    // The expanded log viewer owns Escape while it is open.
+    if (e.key === "Escape" && !logModalOpen) onClose();
+  });
   useEffect(() => {
     if (!open) return;
-    function handleMouseDown(e: MouseEvent) {
-      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
-        onClose();
-      }
-    }
-    function handleKeyDown(e: KeyboardEvent) {
-      // The expanded log viewer owns Escape while it is open.
-      if (e.key === "Escape" && !logModalOpen) onClose();
-    }
-    document.addEventListener("mousedown", handleMouseDown);
-    document.addEventListener("keydown", handleKeyDown);
+    document.addEventListener("mousedown", onOutsideClick);
+    document.addEventListener("keydown", onDocumentKeyDown);
     return () => {
-      document.removeEventListener("mousedown", handleMouseDown);
-      document.removeEventListener("keydown", handleKeyDown);
+      document.removeEventListener("mousedown", onOutsideClick);
+      document.removeEventListener("keydown", onDocumentKeyDown);
     };
-  }, [open, onClose, logModalOpen]);
-
-  useEffect(() => {
-    if (!open) {
-      setTaskId(null);
-      setAgentId("");
-      setSkillId("");
-      setExtraPrompt("");
-      setAgentMenuOpen(false);
-      setSkillMenuOpen(false);
-      setLogModalOpen(false);
-    }
   }, [open]);
 
   // When the popover reopens and there's a recent task (from a background run),
@@ -237,6 +214,7 @@ export function ForgePopover({ editor, slug, documentType, documentId, open, onC
               type="button"
               className="btn btn-ghost"
               style={{ height: 26, padding: "0 10px", fontSize: 12 }}
+              aria-label="More options"
               onClick={() => setRestOpen(!restOpen)}
               aria-expanded={restOpen}
             >
@@ -281,14 +259,14 @@ export function ForgePopover({ editor, slug, documentType, documentId, open, onC
       {/* Agent picker — rule bundle, distinct from the runtime's CLI agent */}
       <div style={{ padding: "10px 12px", borderBottom: "1px solid var(--lx-border-default)" }}>
         <span className="prop-label" style={{ display: "block", marginBottom: 6 }}>Agent</span>
-        {renderChips(agents, agentId, setAgentId, (a) => a.name, (a) => a.id, agentMenuOpen, setAgentMenuOpen)}
+        {renderChips(agents, effectiveAgentId, setAgentId, (a) => a.name, (a) => a.id, agentMenuOpen, setAgentMenuOpen)}
       </div>
 
       {/* Skill picker — only the selected agent's attached skills */}
       <div style={{ padding: "10px 12px", borderBottom: "1px solid var(--lx-border-default)" }}>
         <span className="prop-label" style={{ display: "block", marginBottom: 6 }}>Skill</span>
         {selectedAgent && agentSkills.length > 0 ? (
-          renderChips(agentSkills, skillId, setSkillId, (s) => s.name, (s) => s.id, skillMenuOpen, setSkillMenuOpen)
+          renderChips(agentSkills, effectiveSkillId, setSkillId, (s) => s.name, (s) => s.id, skillMenuOpen, setSkillMenuOpen)
         ) : (
           <div style={{ background: "var(--lx-surface-input)", border: "1px solid var(--lx-border-default)", borderRadius: 6, padding: "8px 10px" }}>
             <span className="text-xs text-lx-text-muted">No skills attached — add them in Settings.</span>
@@ -304,6 +282,7 @@ export function ForgePopover({ editor, slug, documentType, documentId, open, onC
         <textarea
           className="prop-input w-full"
           rows={3}
+          aria-label="Additional prompt"
           value={extraPrompt}
           onChange={(e) => setExtraPrompt(e.target.value)}
           placeholder="Extra instructions for this run…"
@@ -315,6 +294,7 @@ export function ForgePopover({ editor, slug, documentType, documentId, open, onC
         <span className="prop-label" style={{ display: "block", marginBottom: 6 }}>Runtime</span>
         <select
           className="prop-input w-full"
+          aria-label="Runtime"
           value={runtimeId}
           onChange={(e) => setRuntimeId(e.target.value)}
           style={{ height: 28, fontSize: 12 }}
@@ -503,13 +483,15 @@ export function ForgePopover({ editor, slug, documentType, documentId, open, onC
 
       {/* Rendered inside the popover so the fixed modal layers above it (the
           popover's stacking context is z-80). */}
-      <ForgeTaskLogModal
+      {logModalOpen && (
+<ForgeTaskLogModal
         open={logModalOpen}
         onClose={() => setLogModalOpen(false)}
         task={taskData}
         logs={logs.data ?? []}
         runtimes={runtimes}
       />
+      )}
     </div>,
     portalTarget
   );

@@ -37,7 +37,7 @@ export function PromptEditorModal({ kind, entity, allSkills = [], onClose }: Pro
   const resetSkill = useResetForgeSkill();
 
   const dirty = entity === null || name !== entity.name || description !== entity.description || instructions !== entity.instructions;
-  const skillsDirty = agent !== null && JSON.stringify([...attachedSkillIds].toSorted()) !== JSON.stringify([...agent.skillIds].sort());
+  const skillsDirty = agent !== null && JSON.stringify([...attachedSkillIds].toSorted()) !== JSON.stringify([...agent.skillIds].toSorted());
   const canSave = name.trim().length > 0 && instructions.trim().length > 0 && (dirty || skillsDirty);
   const pending =
     createAgent.isPending || updateAgent.isPending || replaceSkills.isPending ||
@@ -94,7 +94,7 @@ export function PromptEditorModal({ kind, entity, allSkills = [], onClose }: Pro
   };
 
   const attachedSet = new Set(attachedSkillIds);
-  const attachedNames = allSkills.filter((s) => attachedSet.has(s.id)).map((s) => s.name);
+  const attachedNames = allSkills.flatMap((s) => (attachedSet.has(s.id) ? [s.name] : []));
 
   return (
     <div className="modal dialog-enter" style={{ width: 600 }}>

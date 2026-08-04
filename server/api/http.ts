@@ -952,7 +952,7 @@ const apiLayer = HttpApiBuilder.api(LexaApi);
 // (fromWeb → removeHost). originalUrl keeps the full URL, so parse query params
 // from that instead of calling `new URL(req.request.url)` (which throws).
 const searchParams = (req: { request: { originalUrl: string } }): URLSearchParams =>
-  new URL(req.request.originalUrl).searchParams;
+  URL.parse(req.request.originalUrl)?.searchParams ?? new URLSearchParams();
 
 const respond = <A, E, R>(eff: Effect.Effect<A, E, R>): Effect.Effect<A | HttpServerResponse.HttpServerResponse, never, R> =>
   eff.pipe(
@@ -2155,39 +2155,39 @@ function buildServiceLayer() {
 }
 
 // Webhook route — OUTSIDE the HttpApi app (HttpApi reads the body before
-// handlers; HMAC verification needs the RAW body). Verifies the signature
-// before parsing, acks 200 immediately, processes in the background (Bun has
-// no waitUntil — ack first, then fire-and-forget).
-export function createWebhookHandler(dbPath: string): (req: Request) => Promise<Response> {
+// handlers; HMAC verification needs the RAW body). The ROUTE verifies the
+// signature before parsing (createWebhookVerifier), then acks 200 immediately;
+// processing runs in the background (Bun has no waitUntil — ack first, then
+// fire-and-forget). Each factory builds its own runtime on the shared layers.
+function buildWebhookRuntime(dbPath: string) {
   const db = new Database(dbPath);
   db.exec("PRAGMA journal_mode = WAL");
   db.exec("PRAGMA foreign_keys = ON");
-  const runtime = ManagedRuntime.make(
+  return ManagedRuntime.make(
     Layer.provideMerge(
       buildServiceLayer(),
       Layer.mergeAll(Layer.succeed(Sqlite, db), LoggerLayer),
     )
   );
+}
 
-  return async (req: Request) => {
-    const rawBody = await req.arrayBuffer();
-    const signature = req.headers.get("x-hub-signature-256");
-    const valid = await runtime.runPromise(
+// HMAC-SHA-256 verification over the RAW body, constant-time compare — the
+// route calls this BEFORE any JSON parsing or processing (401 on mismatch).
+export function createWebhookVerifier(dbPath: string): (rawBody: ArrayBuffer, signature: string | null) => Promise<boolean> {
+  const runtime = buildWebhookRuntime(dbPath);
+  return (rawBody, signature) =>
+    runtime.runPromise(
       Effect.gen(function* () {
         const client = yield* GitHubClient;
         return yield* client.verifyWebhookSignature(rawBody, signature);
       })
     );
-    if (!valid) {
-      return new Response(
-        JSON.stringify({ error: { code: "GITHUB_WEBHOOK_ERROR", message: "Invalid signature" } }),
-        { status: 401, headers: { "Content-Type": "application/json" } }
-      );
-    }
+}
 
-    const deliveryId = req.headers.get("x-github-delivery") ?? "";
-    const event = req.headers.get("x-github-event") ?? "";
+export function createWebhookHandler(dbPath: string): (rawBody: ArrayBuffer, deliveryId: string, event: string) => Response {
+  const runtime = buildWebhookRuntime(dbPath);
 
+  return (rawBody, deliveryId, event) => {
     const processing = Effect.gen(function* () {
       const service = yield* GitHubService;
       const payload = JSON.parse(new TextDecoder().decode(rawBody)) as Record<string, unknown>;

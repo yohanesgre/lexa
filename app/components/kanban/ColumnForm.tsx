@@ -59,24 +59,6 @@ export function ColumnForm({ column, isOpen, onClose, onSubmit, zIndex = 70 }: C
 
   useEffect(() => {
     if (!isOpen) return;
-    if (column) {
-      setName(column.name);
-      setColor(column.color || null);
-      setWipLimit(column.wipLimit === null ? "" : String(column.wipLimit));
-      setRequiredFields(column.requiredFields as RequiredFieldValue[]);
-      setGithubState(column.githubState);
-    } else {
-      setName("");
-      setColor(null);
-      setWipLimit("");
-      setRequiredFields([]);
-      setGithubState(null);
-    }
-    setError(null);
-  }, [isOpen, column]);
-
-  useEffect(() => {
-    if (!isOpen) return;
     function handleKeyDown(event: KeyboardEvent) {
       if (event.key === "Escape") {
         event.stopPropagation();
@@ -128,10 +110,9 @@ export function ColumnForm({ column, isOpen, onClose, onSubmit, zIndex = 70 }: C
         onClick={onClose}
         />
       <div className="fixed inset-0 flex items-center justify-center pointer-events-none" style={{ zIndex: zIndex + 1 }}>
-        <div
+        <dialog open
           className="dialog dialog-enter pointer-events-auto p-0"
           style={{ width: 440, maxWidth: "calc(100vw - 48px)" }}
-          role="dialog"
           aria-modal="true"
           aria-labelledby="column-form-title"
         >
@@ -172,9 +153,9 @@ export function ColumnForm({ column, isOpen, onClose, onSubmit, zIndex = 70 }: C
               </div>
 
               <div className="mb-4">
-                <label className="block text-xs font-medium text-lx-text-secondary mb-1.5 font-body">
+                <div className="block text-xs font-medium text-lx-text-secondary mb-1.5 font-body">
                   Color
-                </label>
+                </div>
                 <div className="flex flex-wrap gap-2">
                   {colors.map((c) => {
                     const selected = color === c.value;
@@ -227,9 +208,9 @@ export function ColumnForm({ column, isOpen, onClose, onSubmit, zIndex = 70 }: C
               </div>
 
               <div className="mb-4">
-                <label className="block text-xs font-medium text-lx-text-secondary mb-1.5 font-body">
+                <div className="block text-xs font-medium text-lx-text-secondary mb-1.5 font-body">
                   Required Fields
-                </label>
+                </div>
                 <div className="space-y-1">
                   {requiredFieldOptions.map((field) => {
                     const checked = requiredFields.includes(field.value);
@@ -252,11 +233,12 @@ export function ColumnForm({ column, isOpen, onClose, onSubmit, zIndex = 70 }: C
               </div>
 
               <div className="mb-4">
-                <label className="block text-xs font-medium text-lx-text-secondary mb-1.5 font-body">
+                <div className="block text-xs font-medium text-lx-text-secondary mb-1.5 font-body">
                   GitHub State Mapping
-                </label>
+                </div>
                 <select
                   className="prop-input w-full"
+                  aria-label="GitHub state mapping"
                   value={githubState ?? ""}
                   onChange={(e) => {
                     const value = e.target.value;
@@ -284,7 +266,7 @@ export function ColumnForm({ column, isOpen, onClose, onSubmit, zIndex = 70 }: C
               </button>
             </div>
           </form>
-        </div>
+        </dialog>
       </div>
     </>,
     typeof document !== "undefined" ? document.body : null as any

@@ -97,6 +97,8 @@ function useLinkMaps(board: Board) {
   }, [board]);
 }
 
+const EMPTY_BLOCKED_BY: string[] = [];
+
 function SortableTaskCard({
   task,
   board,
@@ -108,7 +110,7 @@ function SortableTaskCard({
   onRestore,
   onDelete,
   isSubtask = false,
-  blockedBy = [],
+  blockedBy = EMPTY_BLOCKED_BY,
   subtaskCount = 0,
   onToggleSubtasks,
   subtasksCollapsed = false,
@@ -141,8 +143,18 @@ function SortableTaskCard({
       className={cn(isDragging && "drag-source", isShaking && "lx-shake")}
       {...attributes}
       {...listeners}
+      role="button"
+      tabIndex={0}
+      aria-label={`Open task ${task.title}`}
       onClick={(e) => {
         if (!isDragging && !archived) { e.stopPropagation(); onSelect?.(task); }
+      }}
+      onKeyDown={(e) => {
+        if ((e.key === "Enter" || e.key === " ") && !isDragging && !archived) {
+          e.preventDefault();
+          e.stopPropagation();
+          onSelect?.(task);
+        }
       }}
     >
       <TaskCard
@@ -573,7 +585,8 @@ export function KanbanBoard({ board, showArchived = false, onToggleArchived, onM
         isOpen={isSettingsOpen}
         onClose={() => setIsSettingsOpen(false)}
       />
-      <ColumnForm
+      {isColumnCreateOpen && (
+<ColumnForm
         slug={board.project.slug}
         column={null}
         isOpen={isColumnCreateOpen}
@@ -588,6 +601,7 @@ export function KanbanBoard({ board, showArchived = false, onToggleArchived, onM
           });
         }}
       />
+      )}
     </DndContext>
   );
 }

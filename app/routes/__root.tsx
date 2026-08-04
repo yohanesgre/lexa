@@ -113,7 +113,7 @@ function ProjectSwitcher({ routeType }: { routeType: "dashboard" | "board" | "wi
         <ChevronIcon />
       </button>
       {open && (
-        <div className="project-switcher-menu" onClick={() => setOpen(false)}>
+        <div className="project-switcher-menu" role="menu" onClick={() => setOpen(false)}>
           {!projects || isLoading ? (
             <div className="project-switcher-row">
               <span className="project-switcher-row-desc">Loading projects…</span>
@@ -195,12 +195,12 @@ function UserProfile() {
             Profile
           </div>
           <div className="dropdown-separator" />
-          <div className="dropdown-item" style={{ color: "var(--lx-text-danger)", gap: 8 }} onClick={() => { setOpen(false); }}>
+          <button type="button" className="dropdown-item" style={{ color: "var(--lx-text-danger)", gap: 8, width: "100%", textAlign: "left", border: "none", background: "none", font: "inherit", padding: "8px 12px", cursor: "pointer" }} onClick={() => { setOpen(false); }}>
             <svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5}>
               <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9" />
             </svg>
             Sign out
-          </div>
+          </button>
         </div>
       )}
     </div>

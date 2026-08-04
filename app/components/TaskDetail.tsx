@@ -318,7 +318,7 @@ function AssigneeChips({
         <span key={a} className="assignee-chip">
           <span className="avatar">{a.slice(0, 2).toUpperCase()}</span>
           <span className="text-sm text-lx-text-primary font-medium">{a}</span>
-          <button type="button" className="assignee-chip-x" onClick={() => handleRemove(a)}>
+          <button type="button" className="assignee-chip-x" aria-label={`Remove assignee ${a}`} onClick={() => handleRemove(a)}>
             <X size={10} strokeWidth={2} />
           </button>
         </span>
@@ -642,11 +642,13 @@ export function TaskDetail({ mode = "view", task, project, defaultColumnId, colu
     if (task?.title !== undefined) setDraft(task.title);
   }, [task?.title]);
 
-  useEffect(() => {
+  const [prevTaskId, setPrevTaskId] = useState(task?.id ?? null);
+  if (prevTaskId !== (task?.id ?? null)) {
+    setPrevTaskId(task?.id ?? null);
     setLinkState("idle");
     setLinkRepo("");
     setLinkedIssue(null);
-  }, [task?.id]);
+  }
 
   const saveTitle = () => {
     const v = draft.trim();
@@ -680,15 +682,17 @@ export function TaskDetail({ mode = "view", task, project, defaultColumnId, colu
 
   const missingFieldsKey = missingFields.join(",");
 
-  useEffect(() => {
+  const [prevFieldKey, setPrevFieldKey] = useState(`${currentColumnId}:${missingFieldsKey}`);
+  if (prevFieldKey !== `${currentColumnId}:${missingFieldsKey}`) {
+    setPrevFieldKey(`${currentColumnId}:${missingFieldsKey}`);
     setDismissedWarning(false);
-  }, [currentColumnId, missingFieldsKey]);
+  }
 
   if (!isCreate && !task) {
     return (
       <>
-        <div className={cn("slideover-overlay", !open && "overlay-closed")} onClick={handleClose} />
-        <div className={cn("slideover", !open && "slideover-closed")} role="dialog" aria-modal="true">
+        <button type="button" className={cn("slideover-overlay", !open && "overlay-closed")} onClick={handleClose} aria-label="Close" />
+        <dialog open className={cn("slideover", !open && "slideover-closed")} aria-modal="true" aria-label="Task details">
           <div className="slideover-header border-b border-lx-border-subtle">
             <span className="text-xs font-body text-lx-text-muted">Board</span>
             <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
@@ -710,7 +714,7 @@ export function TaskDetail({ mode = "view", task, project, defaultColumnId, colu
               Close
             </button>
           </div>
-        </div>
+        </dialog>
       </>
     );
   }
@@ -719,8 +723,8 @@ export function TaskDetail({ mode = "view", task, project, defaultColumnId, colu
 
   return (
     <>
-      <div className={cn("slideover-overlay", !open && "overlay-closed")} onClick={handleClose} />
-      <div className={cn("slideover", expanded && "slideover-expanded", !open && "slideover-closed")} role="dialog" aria-modal="true">
+      <button type="button" className={cn("slideover-overlay", !open && "overlay-closed")} onClick={handleClose} aria-label="Close" />
+      <dialog open className={cn("slideover", expanded && "slideover-expanded", !open && "slideover-closed")} aria-modal="true" aria-label="Task details">
         <div className="slideover-header border-b border-lx-border-subtle">
           {isCreate ? (
             <span className="text-xs font-body text-lx-text-muted">
@@ -788,6 +792,7 @@ export function TaskDetail({ mode = "view", task, project, defaultColumnId, colu
           {isCreate ? (
             <input
               className="slideover-title-input"
+              aria-label="Task title"
               placeholder="Task title..."
               value={createTitle}
               autoFocus
@@ -803,6 +808,7 @@ export function TaskDetail({ mode = "view", task, project, defaultColumnId, colu
           ) : editingTitle ? (
             <input
               className="slideover-title-input"
+              aria-label="Task title"
               value={draft}
               autoFocus
               onChange={(e) => setDraft(e.target.value)}
@@ -819,9 +825,18 @@ export function TaskDetail({ mode = "view", task, project, defaultColumnId, colu
           ) : (
             <h2
               className="slideover-title"
+              role="button"
+              tabIndex={0}
               onClick={() => {
                 setDraft(task!.title);
                 setEditingTitle(true);
+              }}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  setDraft(task!.title);
+                  setEditingTitle(true);
+                }
               }}
               title="Click to edit"
             >
@@ -836,6 +851,7 @@ export function TaskDetail({ mode = "view", task, project, defaultColumnId, colu
             {isCreate ? (
               <select
                 className="prop-input"
+                aria-label="Column"
                 style={{ minWidth: 120 }}
                 value={createColumnId}
                 onChange={(e) => setCreateColumnId(e.target.value)}
@@ -1224,6 +1240,7 @@ export function TaskDetail({ mode = "view", task, project, defaultColumnId, colu
                             <div className="flex items-center gap-2">
                               <input
                                 className="prop-input font-mono flex-1"
+                                aria-label="GitHub repository (owner/repo)"
                                 placeholder="owner/repo"
                                 value={linkRepo}
                                 onChange={(e) => setLinkRepo(e.target.value)}
@@ -1258,6 +1275,7 @@ export function TaskDetail({ mode = "view", task, project, defaultColumnId, colu
                             <div className="flex items-center gap-2">
                               <input
                                 className="prop-input font-mono flex-1 opacity-50"
+                                aria-label="GitHub repository (owner/repo)"
                                 value={linkRepo}
                                 disabled
                               />
@@ -1326,15 +1344,14 @@ export function TaskDetail({ mode = "view", task, project, defaultColumnId, colu
             </>
           )}
         </div>
-      </div>
+      </dialog>
 
       {showDeleteDialog && task && (
         <>
-          <div className="dialog-overlay" onClick={() => setShowDeleteDialog(false)} />
+          <button type="button" className="dialog-overlay" onClick={() => setShowDeleteDialog(false)} aria-label="Close" />
           <div className="fixed inset-0 flex items-center justify-center z-[70] pointer-events-none">
-            <div
+            <dialog open
               className="dialog dialog-enter"
-              role="alertdialog"
               aria-modal="true"
               aria-labelledby="delete-task-title"
             >
@@ -1368,7 +1385,7 @@ export function TaskDetail({ mode = "view", task, project, defaultColumnId, colu
                   {deleting ? "Deleting..." : "Delete"}
                 </button>
               </div>
-            </div>
+            </dialog>
           </div>
         </>
       )}

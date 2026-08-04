@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useEffectEvent } from "react";
 import { createPortal } from "react-dom";
 import { X } from "lucide-react";
 import { cn } from "../ui/cn";
@@ -32,29 +32,20 @@ export function OptionForm({ kind, option, isOpen, onClose, onSubmit, zIndex = 8
   const [color, setColor] = useState("#F0C040");
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    if (!isOpen) return;
-    if (option) {
-      setLabel(option.label);
-      setColor(option.color);
-    } else {
-      setLabel("");
-      setColor("#F0C040");
+  const onEscape = useEffectEvent((event: KeyboardEvent) => {
+    if (event.key === "Escape") {
+      event.stopPropagation();
+      onClose();
     }
-    setError(null);
-  }, [isOpen, option]);
-
+  });
   useEffect(() => {
     if (!isOpen) return;
     function handleKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape") {
-        event.stopPropagation();
-        onClose();
-      }
+      onEscape(event);
     }
     document.addEventListener("keydown", handleKeyDown);
     return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [isOpen, onClose]);
+  }, [isOpen]);
 
   if (!isOpen) return null;
 
@@ -82,10 +73,9 @@ export function OptionForm({ kind, option, isOpen, onClose, onSubmit, zIndex = 8
         onClick={onClose}
         />
       <div className="fixed inset-0 flex items-center justify-center pointer-events-none" style={{ zIndex: zIndex + 1 }}>
-        <div
+        <dialog open
           className="dialog dialog-enter pointer-events-auto p-0"
           style={{ width: 400, maxWidth: "calc(100vw - 48px)" }}
-          role="dialog"
           aria-modal="true"
           aria-labelledby="option-form-title"
         >
@@ -121,9 +111,9 @@ export function OptionForm({ kind, option, isOpen, onClose, onSubmit, zIndex = 8
               </div>
 
               <div className="mb-2">
-                <label className="block text-xs font-medium text-lx-text-secondary mb-1.5 font-body">
+                <div className="block text-xs font-medium text-lx-text-secondary mb-1.5 font-body">
                   Color
-                </label>
+                </div>
                 <div className="flex flex-wrap gap-2">
                   {swatches.map((c) => {
                     const selected = color.toUpperCase() === c.value.toUpperCase();
@@ -159,7 +149,7 @@ export function OptionForm({ kind, option, isOpen, onClose, onSubmit, zIndex = 8
               </button>
             </div>
           </form>
-        </div>
+        </dialog>
       </div>
     </>,
     typeof document !== "undefined" ? document.body : null as any

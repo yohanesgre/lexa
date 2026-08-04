@@ -95,6 +95,7 @@ export function LinksSection({ slug, taskId, taskTitleById, className }: LinksSe
         <div className="flex items-center gap-2 mt-2">
           <input
             className="prop-input"
+            aria-label="Add link — type a task title"
             placeholder="Add link — type a task title…"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
@@ -111,6 +112,7 @@ export function LinksSection({ slug, taskId, taskTitleById, className }: LinksSe
           />
           <select
             className="prop-input"
+            aria-label="Link relation"
             value={relation}
             onChange={(e) => setRelation(e.target.value as TaskLinkRelation)}
             style={{ width: 110, height: 28, fontSize: 12, flexShrink: 0 }}

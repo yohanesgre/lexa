@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useEffectEvent } from "react";
 import { createPortal } from "react-dom";
 import { Plus, Trash2, X } from "lucide-react";
 import type { Swimlane } from "../../../shared/types";
@@ -18,29 +18,20 @@ export function SwimlaneForm({ swimlane, isOpen, onClose, onSubmit, zIndex = 70 
   const [description, setDescription] = useState("");
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    if (!isOpen) return;
-    if (swimlane) {
-      setName(swimlane.name);
-      setDescription(swimlane.description);
-    } else {
-      setName("");
-      setDescription("");
+  const onEscape = useEffectEvent((event: KeyboardEvent) => {
+    if (event.key === "Escape") {
+      event.stopPropagation();
+      onClose();
     }
-    setError(null);
-  }, [isOpen, swimlane]);
-
+  });
   useEffect(() => {
     if (!isOpen) return;
     function handleKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape") {
-        event.stopPropagation();
-        onClose();
-      }
+      onEscape(event);
     }
     document.addEventListener("keydown", handleKeyDown);
     return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [isOpen, onClose]);
+  }, [isOpen]);
 
   if (!isOpen) return null;
 
@@ -62,12 +53,11 @@ export function SwimlaneForm({ swimlane, isOpen, onClose, onSubmit, zIndex = 70 
 
   return createPortal(
     <>
-      <div className="dialog-overlay" style={{ zIndex: zIndex }} onClick={onClose} />
+      <button type="button" className="dialog-overlay" style={{ zIndex: zIndex }} aria-label="Close" onClick={onClose} />
       <div className="fixed inset-0 flex items-center justify-center pointer-events-none" style={{ zIndex: zIndex + 1 }}>
-        <div
+        <dialog open
           className="dialog dialog-enter pointer-events-auto p-0"
           style={{ width: 440, maxWidth: "calc(100vw - 48px)" }}
-          role="dialog"
           aria-modal="true"
           aria-labelledby="swimlane-form-title"
         >
@@ -94,10 +84,11 @@ export function SwimlaneForm({ swimlane, isOpen, onClose, onSubmit, zIndex = 70 
               )}
 
               <div className="mb-4">
-                <label className="block text-xs font-medium text-lx-text-secondary mb-1.5 font-body">
+                <label className="block text-xs font-medium text-lx-text-secondary mb-1.5 font-body" htmlFor="swimlane-name">
                   Name
                 </label>
                 <input
+                  id="swimlane-name"
                   className="prop-input w-full"
                   value={name}
                   onChange={(e) => setName(e.target.value)}
@@ -107,13 +98,14 @@ export function SwimlaneForm({ swimlane, isOpen, onClose, onSubmit, zIndex = 70 
               </div>
 
               <div className="mb-4">
-                <label className="block text-xs font-medium text-lx-text-secondary mb-1.5 font-body">
+                <label className="block text-xs font-medium text-lx-text-secondary mb-1.5 font-body" htmlFor="swimlane-description">
                   Description
                   <span className="font-mono text-[10px] uppercase tracking-[0.04em] text-lx-text-muted ml-1.5">
                     Optional
                   </span>
                 </label>
                 <textarea
+                  id="swimlane-description"
                   className="prop-input w-full"
                   value={description}
                   onChange={(e) => setDescription(e.target.value)}
@@ -151,7 +143,7 @@ export function SwimlaneForm({ swimlane, isOpen, onClose, onSubmit, zIndex = 70 
               </button>
             </div>
           </form>
-        </div>
+        </dialog>
       </div>
     </>,
     typeof document !== "undefined" ? document.body : null as any

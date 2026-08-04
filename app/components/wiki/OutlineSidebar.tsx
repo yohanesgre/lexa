@@ -82,6 +82,7 @@ function TreeItems({
               {hasChildren ? (
                 <button
                   type="button"
+                  aria-label="Toggle section"
                   onClick={(e) => {
                     e.preventDefault();
                     e.stopPropagation();
@@ -125,7 +126,9 @@ export function OutlineSidebar({ headings, collapsed, onToggle }: OutlineSidebar
   const [expandedKeys, setExpandedKeys] = useState<Set<string>>(new Set());
   const tree = useMemo(() => toTree(headings), [headings]);
 
-  useEffect(() => {
+  const [prevTree, setPrevTree] = useState(tree);
+  if (prevTree !== tree) {
+    setPrevTree(tree);
     const all = new Set<string>();
     function walk(nodes: TreeNode[]) {
       for (const n of nodes) {
@@ -137,7 +140,7 @@ export function OutlineSidebar({ headings, collapsed, onToggle }: OutlineSidebar
     }
     walk(tree);
     setExpandedKeys(all);
-  }, [tree]);
+  }
 
   useEffect(() => {
     if (headings.length === 0) return;

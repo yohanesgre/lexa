@@ -12,15 +12,20 @@ interface MenuProps {
 export function Menu({ trigger, children, align = "right", gap = 8 }: MenuProps) {
   const [open, setOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
+  const popoverRef = useRef<HTMLDivElement>(null);
   const [popoverStyle, setPopoverStyle] = useState<React.CSSProperties>({});
 
   useEffect(() => {
     if (!open) return;
 
     function handleMouseDown(event: MouseEvent) {
-      if (containerRef.current && !containerRef.current.contains(event.target as Node)) {
-        setOpen(false);
-      }
+      // The popover renders in a PORTAL — both the trigger container and the
+      // popover itself count as "inside" the menu. Treating the popover as
+      // outside would unmount it on mousedown, swallowing the item's click.
+      const target = event.target as Node;
+      if (containerRef.current?.contains(target)) return;
+      if (popoverRef.current?.contains(target)) return;
+      setOpen(false);
     }
 
     function handleKeyDown(event: KeyboardEvent) {
@@ -57,7 +62,9 @@ export function Menu({ trigger, children, align = "right", gap = 8 }: MenuProps)
       {open &&
         createPortal(
           <div
+            ref={popoverRef}
             className={cn("menu-popover")}
+            role="menu"
             style={popoverStyle}
             onClick={() => setOpen(false)}
           >

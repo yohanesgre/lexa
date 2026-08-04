@@ -102,9 +102,9 @@ export function RuntimeSetupModal({ onClose }: { onClose: () => void }) {
 
   return (
     <>
-      <div className="slideover-overlay" onClick={onClose} />
+      <button type="button" className="slideover-overlay" onClick={onClose} aria-label="Close" />
       <div className="fixed inset-0 flex items-center justify-center z-50 pointer-events-none">
-        <div className="dialog dialog-enter pointer-events-auto" role="dialog" aria-modal="true" style={{ maxWidth: 560, width: "100%" }}>
+        <dialog open className="dialog dialog-enter pointer-events-auto" aria-modal="true" aria-label="Setup runtime" style={{ maxWidth: 560, width: "100%" }}>
           <div className="modal-header">
             <span className="modal-title">Setup runtime</span>
             <button type="button" className="btn btn-ghost" style={{ width: 32, height: 32, padding: 0 }} onClick={onClose} aria-label="Close">
@@ -206,9 +206,9 @@ lexa-cli machine listen`}
                 <h3 className="font-display text-base font-medium text-lx-text-primary mb-1">Create key and install</h3>
                 <p className="text-xs text-lx-text-secondary leading-5 mb-4">The fresh key is delivered once to the selected machine listener. Runtime settings become available after its first heartbeat.</p>
                 <div className="field mb-4">
-                  <label className="prop-label block mb-1">Key name</label>
+                  <label className="prop-label block mb-1" htmlFor="runtime-key-name">Key name</label>
                   <div className="flex gap-2">
-                    <input className="prop-input flex-1" type="text" value={newKeyName} onChange={(event) => setNewKeyName(event.target.value)} placeholder="e.g. forge-opencode" onKeyDown={(event) => { if (event.key === "Enter") handleCreateKey(); }} />
+                    <input id="runtime-key-name" className="prop-input flex-1" type="text" value={newKeyName} onChange={(event) => setNewKeyName(event.target.value)} placeholder="e.g. forge-opencode" onKeyDown={(event) => { if (event.key === "Enter") handleCreateKey(); }} />
                     <button type="button" className="btn btn-ghost" disabled={!newKeyName.trim() || createApiKey.isPending} onClick={handleCreateKey}>
                       {createApiKey.isPending ? <RefreshCw size={14} strokeWidth={1.5} className="animate-spin" /> : <Check size={14} strokeWidth={1.5} />} Create
                     </button>
@@ -268,7 +268,7 @@ lexa-cli machine listen`}
               </div>
             )}
           </div>
-        </div>
+        </dialog>
       </div>
     </>
   );

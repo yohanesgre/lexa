@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useEffectEvent } from "react";
 import { Save, X } from "lucide-react";
 import { useUpdateWikiPage } from "../../lib/queries";
 import type { WikiPageMeta } from "../../../shared/types";
@@ -15,32 +15,28 @@ export function RenamePageModal({ slug, page, isOpen, onClose }: RenamePageModal
   const [title, setTitle] = useState("");
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    if (!isOpen) return;
-    if (page) {
-      setTitle(page.title);
-    } else {
-      setTitle("");
+  const onEscape = useEffectEvent((event: KeyboardEvent) => {
+    if (event.key === "Escape") {
+      event.stopPropagation();
+      onClose();
     }
-    setError(null);
-  }, [isOpen, page]);
-
+  });
   useEffect(() => {
     if (!isOpen) return;
     function handleKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape") {
-        event.stopPropagation();
-        onClose();
-      }
+      onEscape(event);
     }
     document.addEventListener("keydown", handleKeyDown);
     return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [isOpen, onClose]);
+  }, [isOpen]);
+
+  const [submitting, setSubmitting] = useState(false);
 
   if (!isOpen || !page) return null;
 
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
+    if (submitting) return;
     const trimmedTitle = title.trim();
 
     if (trimmedTitle === "") {
@@ -50,23 +46,24 @@ export function RenamePageModal({ slug, page, isOpen, onClose }: RenamePageModal
 
     setError(null);
 
+    setSubmitting(true);
     try {
       await updatePage.mutateAsync({ pageSlug: page.slug, title: trimmedTitle });
       onClose();
     } catch (err) {
       const message = err instanceof Error ? err.message : "Failed to rename page";
       setError(message);
+      setSubmitting(false);
     }
   };
 
   return (
     <>
-      <div className="dialog-overlay" onClick={onClose} />
+      <button type="button" className="dialog-overlay" onClick={onClose} aria-label="Close" />
       <div className="fixed inset-0 flex items-center justify-center z-[70] pointer-events-none">
-        <div
+        <dialog open
           className="dialog dialog-enter pointer-events-auto p-0"
           style={{ width: 440, maxWidth: "calc(100vw - 48px)" }}
-          role="dialog"
           aria-modal="true"
           aria-labelledby="rename-page-title"
         >
@@ -121,7 +118,7 @@ export function RenamePageModal({ slug, page, isOpen, onClose }: RenamePageModal
               </div>
             </div>
           </form>
-        </div>
+        </dialog>
       </div>
     </>
   );

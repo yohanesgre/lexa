@@ -129,13 +129,12 @@ export function ProjectCard({ project, health, className }: ProjectCardProps) {
             onClick={() => setSettingsOpen(false)}
             />
           <div className="fixed inset-0 flex items-center justify-center z-50 pointer-events-none">
-            <form
+            <dialog
+              open
               className="modal dialog-enter pointer-events-auto"
-              role="dialog"
-              aria-modal="true"
               aria-labelledby="project-settings-title"
-              onSubmit={handleSave}
             >
+              <form onSubmit={handleSave} style={{ display: "contents" }}>
               <div className="modal-header">
                 <span id="project-settings-title" className="modal-title">Project Settings</span>
                 <button
@@ -217,7 +216,8 @@ export function ProjectCard({ project, health, className }: ProjectCardProps) {
                   Save Changes
                 </button>
               </div>
-            </form>
+              </form>
+            </dialog>
           </div>
         </>
       )}
@@ -231,9 +231,8 @@ export function ProjectCard({ project, health, className }: ProjectCardProps) {
             onClick={() => setDeleteOpen(false)}
             />
           <div className="fixed inset-0 flex items-center justify-center z-50 pointer-events-none">
-            <div
+            <dialog open
               className="dialog dialog-enter pointer-events-auto"
-              role="dialog"
               aria-modal="true"
               aria-labelledby="delete-project-title"
             >
@@ -293,7 +292,7 @@ export function ProjectCard({ project, health, className }: ProjectCardProps) {
                   Delete Project
                 </button>
               </div>
-            </div>
+            </dialog>
           </div>
         </>
       )}
