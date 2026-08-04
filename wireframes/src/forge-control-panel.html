@@ -23,7 +23,7 @@
     </div>
 
     <div class="px-4 pt-4">
-      <h2 class="slideover-title">Summarize · "Critical crash on level 3 load"</h2>
+      <h2 class="slideover-title">Review · "Critical crash on level 3 load"</h2>
       <div class="flex items-center gap-2 mt-1">
         <span class="font-micro text-2xs color-muted" style="text-transform:uppercase;letter-spacing:0.04em;">Task #1e2c9d</span>
         <span class="font-micro text-2xs color-success" style="text-transform:uppercase;letter-spacing:0.04em;">Completed · 0.4 min</span>
@@ -39,7 +39,7 @@
       </div>
       <div>
         <span class="prop-label">Skill</span>
-        <div class="text-sm color-primary">Summarize</div>
+        <div class="text-sm color-primary">Review</div>
       </div>
       <div>
         <span class="prop-label">Runtime</span>
@@ -61,13 +61,20 @@
           <span style="margin-left:5px;">Expand</span>
         </button>
       </div>
-      <div style="background:var(--lx-surface-elevated);border:1px solid var(--lx-border-default);border-radius:6px;padding:10px 12px;font-family:var(--lx-font-mono);font-size:11px;line-height:20px;color:var(--lx-text-secondary);">
-        <div style="display:flex;gap:8px;"><span style="color:var(--lx-text-muted);">●</span><span style="color:var(--lx-text-muted);flex-shrink:0;">14:02:12</span><span>Claimed by dev-mbp (opencode)</span></div>
-        <div style="display:flex;gap:8px;"><span style="color:var(--lx-text-muted);">●</span><span style="color:var(--lx-text-muted);flex-shrink:0;">14:02:13</span><span>Model opencode/deepseek-v4-flash · agent build</span></div>
-        <div style="display:flex;gap:8px;"><span style="color:var(--lx-text-muted);">●</span><span style="color:var(--lx-text-muted);flex-shrink:0;">14:02:13</span><span>Generating…</span></div>
-        <div style="display:flex;gap:8px;"><span style="color:var(--lx-text-muted);">●</span><span style="color:var(--lx-text-muted);flex-shrink:0;">14:02:36</span><span>Done</span></div>
+      <div style="background:var(--lx-surface-elevated);border:1px solid var(--lx-border-default);border-radius:6px;overflow:hidden;">
+        <div style="display:flex;align-items:center;justify-content:space-between;padding:6px 10px;border-bottom:1px solid var(--lx-border-subtle);font-family:var(--lx-font-body);font-size:10px;letter-spacing:0.04em;text-transform:uppercase;color:var(--lx-text-muted);">
+          <span style="display:inline-flex;align-items:center;gap:4px;color:var(--lx-text-warning);">● Live · 4 lines</span>
+        </div>
+        <div style="padding:8px 10px;font-family:var(--lx-font-mono);font-size:11px;line-height:20px;">
+          <div style="display:flex;gap:8px;color:var(--lx-text-secondary);"><span style="color:var(--lx-text-success);font-size:8px;">●</span><span style="color:var(--lx-text-muted);flex-shrink:0;">14:02:12</span><span>Claimed by dev-mbp (opencode)</span></div>
+          <div style="display:flex;gap:8px;color:var(--lx-text-secondary);"><span style="color:var(--lx-text-success);font-size:8px;">●</span><span style="color:var(--lx-text-muted);flex-shrink:0;">14:02:13</span><span>Model opencode/deepseek-v4-flash · agent build</span></div>
+          <div style="display:flex;gap:8px;color:var(--lx-text-warning);"><span style="color:var(--lx-text-warning);font-size:8px;">!</span><span style="color:var(--lx-text-muted);flex-shrink:0;">14:02:14</span><span>rate limit hit, retrying in 5s…</span></div>
+          <div style="display:flex;gap:8px;color:var(--lx-text-danger);"><span style="color:var(--lx-text-danger);font-size:8px;">!</span><span style="color:var(--lx-text-muted);flex-shrink:0;">14:02:15</span><span>model request failed, retrying…</span></div>
+          <div style="display:flex;gap:8px;color:var(--lx-text-secondary);"><span style="color:var(--lx-text-success);font-size:8px;">●</span><span style="color:var(--lx-text-muted);flex-shrink:0;">14:02:16</span><span>token usage: 2.1k in, 340 out</span></div>
+          <div style="display:flex;gap:8px;color:var(--lx-text-secondary);background:rgba(240,192,64,0.08);"><span style="color:var(--lx-text-success);font-size:8px;">●</span><span style="color:var(--lx-text-muted);flex-shrink:0;">14:02:36</span><span>Generating…</span></div>
+        </div>
       </div>
-      <span class="annotation-inline" style="margin-top:4px;">Log lines are the daemon's append-only activity feed (GET /api/forge/tasks/:id/logs). While queued/running the panel polls and the last line carries a live dot. Expand opens the full log viewer (below) — same feed, larger type, follow + copy. The viewer is shared with the editor popover (forge-log-modal).</span>
+      <span class="annotation-inline" style="margin-top:4px;">Compact log: daemon's append-only feed (GET /api/forge/tasks/:id/logs). Levels are assigned ONCE by the daemon at write time and stored on the row (stream out/err + level info/warn/error — migration 0003); the UI renders the stored level, no text matching at render time. info = neutral ●; warn = amber ! (retries, rate limits, backoffs); error = danger ! (model failures, exceptions, denials). The legacy [stderr]/▸ markers still prefix raw messages (kept in Copy); pre-v2 rows with the marker fall back to the shared regex classifier. While queued/running the panel polls and the head shows an amber live dot + line count; the last line carries a subtle amber tint. When static the dot desaturates (muted, no pulse) and the label reads "Log · N lines". Empty feed shows "Queued — waiting for a runtime to claim it." or "No activity recorded for this task." in muted mono. Expand opens the full log viewer (below) — same feed, larger type, follow + copy. The viewer is shared with the editor popover (forge-log-modal).</span>
 
       <!-- Result (completed) -->
       <div class="font-micro text-2xs color-muted" style="text-transform:uppercase;letter-spacing:0.04em;margin:16px 0 8px;">Result</div>
@@ -91,13 +98,15 @@
   <div class="dialog dialog-enter" style="width:760px;max-width:calc(100vw - 32px);padding:0;max-height:min(80vh,720px);display:flex;flex-direction:column;">
     <div class="modal-header" style="height:auto;padding:12px 16px;gap:12px;">
       <div style="min-width:0;">
-        <div class="modal-title" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:15px;">Summarize · "Critical crash on level 3 load"</div>
+        <div class="modal-title" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:15px;">Review · "Critical crash on level 3 load"</div>
         <div class="font-mono text-2xs color-muted" style="margin-top:2px;">Task 1e2c9d · dev-mbp · opencode · opencode/deepseek-v4-flash</div>
       </div>
       <div class="flex items-center gap-2" style="margin-left:auto;flex-shrink:0;">
-        <span class="font-micro text-2xs color-muted" style="text-transform:uppercase;letter-spacing:0.04em;">Follow</span>
-        <button class="btn btn-ghost" style="height:20px;padding:0 7px;font-size:10px;border-color:var(--lx-border-focus);color:var(--lx-text-primary);" title="Pause auto-scroll">●</button>
-        <span class="font-micro text-2xs color-warning" style="text-transform:uppercase;letter-spacing:0.04em;">● live</span>
+        <span class="flex items-center" style="gap:6px;">
+          <span class="font-micro text-2xs color-muted" style="text-transform:uppercase;letter-spacing:0.04em;">Follow</span>
+          <button class="btn btn-ghost" style="height:20px;padding:0 7px;font-size:10px;border-color:var(--lx-border-focus);color:var(--lx-text-primary);" title="Pause auto-scroll">●</button>
+        </span>
+        <span class="font-micro text-2xs color-warning" style="text-transform:uppercase;letter-spacing:0.04em;margin-left:8px;">● live</span>
         <button class="btn btn-ghost" style="height:26px;padding:0 10px;font-size:11px;" title="Copy the log">
           <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
           <span style="margin-left:5px;">Copy</span>
@@ -106,6 +115,7 @@
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg>
         </button>
       </div>
+      <span class="annotation-inline" style="margin-top:4px;">Expanded log header actions: Follow label + pause/resume toggle are grouped together; the live indicator sits apart with its own breathing room (margin-left 8px over the 8px group gap). Copy + Close stay right-aligned.</span>
     </div>
     <div style="padding:12px 16px 16px;display:flex;flex-direction:column;gap:8px;flex:1;min-height:0;">
       <div class="flex items-center justify-between">
@@ -121,10 +131,9 @@
     </div>
     <div class="modal-footer" style="height:auto;padding:10px 16px;justify-content:space-between;">
       <span class="font-micro text-2xs color-muted" style="text-transform:uppercase;letter-spacing:0.04em;">Created 14:02:11 · Started 14:02:12 · Finished 14:02:36</span>
-      <button class="btn btn-ghost" style="height:28px;padding:0 12px;font-size:12px;">Close</button>
     </div>
   </div>
-  <span class="annotation-tag" style="position:relative;z-index:2;">Expanded log viewer state — opens over the slideover from its Expand button (same component as the editor popover). Identity header (skill · doc, mono task id · runtime · provider · model), Follow toggle + live dot while queued/running, Copy (HH:MM:SS message lines), full-height feed with wrapped lines (no ellipsis — the compact boxes truncate, the viewer wraps), stderr lines tinted danger, footer carries the timeline + Close. Esc / overlay click closes. The viewer is read-only; accept/reject stays in the editor.</span>
+  <span class="annotation-tag" style="position:relative;z-index:2;">Expanded log viewer state — opens over the slideover from its Expand button (same component as the editor popover). Identity header (skill · doc, mono task id · runtime · provider · model), Follow toggle + live dot while queued/running, Copy (HH:MM:SS message lines), full-height feed with wrapped lines (no ellipsis — the compact boxes truncate, the viewer wraps), levels stored server-side: error → danger !, warn → amber !, info → neutral ● (see compact annotation), footer carries the timeline only — the header X closes (Esc / overlay click also close). The viewer is read-only; accept/reject stays in the editor.</span>
 
   <!-- Page -->
   <main class="page-frame">
@@ -177,7 +186,7 @@
       <button class="status-chip" aria-pressed="false"><span class="status-dot" style="background:var(--lx-text-muted);"></span>Cancelled</button>
       <span style="width:1px;height:20px;background:var(--lx-border-default);margin:0 4px;"></span>
       <select class="prop-input" style="height:24px;font-size:12px;min-width:140px;"><option>All projects</option><option>Emberfall</option><option>Umbra Tactics</option></select>
-      <select class="prop-input" style="height:24px;font-size:12px;min-width:130px;"><option>All skills</option><option>Continue</option><option>Rewrite</option><option>Summarize</option><option>Expand</option><option>Fix grammar</option></select>
+      <select class="prop-input" style="height:24px;font-size:12px;min-width:130px;"><option>All skills</option><option>Requirements</option><option>Deliverables</option><option>Review</option><option>Definition of done</option><option>Status</option><option>Polish</option></select>
       <span class="annotation-inline">One segmented control, one shape: selected chip = status-tinted fill + focus border, unselected = ghost. The leading dot carries the status color (queued/running = warning, done = success, failed = danger, cancelled = muted) — the filter speaks the same color language as the table and the navbar pill. Selects align to the 24px chip height.</span>
     </div>
 
@@ -190,7 +199,7 @@
         <tbody>
           <tr style="cursor:pointer;">
             <td>
-              <div class="text-sm weight-500 color-primary">Summarize · "Critical crash on level 3 load"</div>
+              <div class="text-sm weight-500 color-primary">Review · "Critical crash on level 3 load"</div>
               <div class="flex items-center gap-1" style="min-width:0;">
                 <span class="font-mono text-2xs color-muted" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">6fed4acc-65ba-4053-b3ef-38e50046f844</span>
                 <button class="icon-btn" title="Copy task id" aria-label="Copy task id" style="width:18px;height:18px;flex-shrink:0;">
@@ -207,7 +216,7 @@
           </tr>
           <tr style="cursor:pointer;">
             <td>
-              <div class="text-sm weight-500 color-primary">Continue · "Implement double-jump"</div>
+              <div class="text-sm weight-500 color-primary">Deliverables · "Implement double-jump"</div>
               <div class="flex items-center gap-1" style="min-width:0;">
                 <span class="font-mono text-2xs color-muted" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">8a11f2dd-0c48-4e6a-9d52-41f7d9c30e71</span>
                 <button class="icon-btn" title="Copy task id" aria-label="Copy task id" style="width:18px;height:18px;flex-shrink:0;">
@@ -228,7 +237,7 @@
           </tr>
           <tr style="cursor:pointer;">
             <td>
-              <div class="text-sm weight-500 color-primary">Rewrite · "Balance tuning pass"</div>
+              <div class="text-sm weight-500 color-primary">Requirements · "Balance tuning pass"</div>
               <div class="flex items-center gap-1" style="min-width:0;">
                 <span class="font-mono text-2xs color-muted" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">c42d9be1-77fd-4a5e-9b3f-1e8a0c2d5a19</span>
                 <button class="icon-btn" title="Copy task id" aria-label="Copy task id" style="width:18px;height:18px;flex-shrink:0;">
@@ -245,7 +254,7 @@
           </tr>
           <tr style="cursor:pointer;">
             <td>
-              <div class="text-sm weight-500 color-primary">Grammar · "Getting started wiki"</div>
+              <div class="text-sm weight-500 color-primary">Status · "Getting started wiki"</div>
               <div class="font-mono text-2xs color-muted">f3019c54-aa12-4b8e-9c7d-2a9b3e4f5c61</div>
             </td>
             <td class="text-xs color-secondary">Emberfall</td>
@@ -257,7 +266,7 @@
           </tr>
           <tr style="cursor:pointer;">
             <td>
-              <div class="text-sm weight-500 color-primary">Expand · "Rendering pipeline notes"</div>
+              <div class="text-sm weight-500 color-primary">Definition of done · "Rendering pipeline notes"</div>
               <div class="font-mono text-2xs color-muted">b0e7d8f2-5c31-4a2b-9e51-7f4a2c8d1e03</div>
             </td>
             <td class="text-xs color-secondary">Umbra Tactics</td>

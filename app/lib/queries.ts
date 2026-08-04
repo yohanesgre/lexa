@@ -1,5 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import type { Task, Project, Board, Column, Swimlane, TipTapDoc, WikiPageMeta, ApiKey, ApiKeyCreateResult, Dashboard, FieldConfig, DocumentSource, ForgeTask, TaskLink, Runtime, ForgeAgent, ForgeSkill } from "../../shared/types";
+import type { Task, Project, Board, Column, Swimlane, TipTapDoc, WikiPageMeta, ApiKey, ApiKeyCreateResult, Dashboard, FieldConfig, DocumentSource, ForgeTask, TaskLink, Runtime, ForgeAgent, ForgeSkill, Machine } from "../../shared/types";
 import * as api from "./api";
 import type { RecentForgeTask, ForgeHistoryPage } from "./api";
 import { useToast } from "../components/ui/Toast";
@@ -587,6 +587,11 @@ export function useRuntimes() {
   return useQuery({ queryKey: ["forge-runtimes"], queryFn: () => api.listRuntimes().then((r) => r.data), staleTime: 15_000, refetchInterval: 30_000 });
 }
 
+export function useMachines() {
+  // Machine hosts (bound via lexa-cli login, listening via machine listen).
+  return useQuery({ queryKey: ["forge-machines"], queryFn: () => api.listMachines().then((r) => r.data), staleTime: 15_000, refetchInterval: 30_000 });
+}
+
 export function useUpdateRuntime() {
   const qc = useQueryClient();
   const toast = useToast();
@@ -613,6 +618,24 @@ export function useRemoveRuntime() {
     },
     onError: (err) => {
       toast.push("error", "Failed to remove runtime", toastMessage(err));
+    },
+  });
+}
+
+export function useRemoveMachine() {
+  const qc = useQueryClient();
+  const toast = useToast();
+  return useMutation({
+    mutationFn: (id: string) => api.removeMachine(id),
+    onSuccess: (_, id) => {
+      qc.setQueryData<Machine[]>(["forge-machines"], (rows) => rows?.filter((m) => m.id !== id));
+      // The machine's runtimes are removed server-side (cascade) — drop them
+      // from the runtimes cache too so the table doesn't show stale rows.
+      qc.setQueryData<Runtime[]>(["forge-runtimes"], (rows) => rows?.filter((r) => r.machineId !== id));
+      toast.push("success", "Machine removed");
+    },
+    onError: (err) => {
+      toast.push("error", "Failed to remove machine", toastMessage(err));
     },
   });
 }

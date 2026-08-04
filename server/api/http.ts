@@ -266,6 +266,7 @@ const RuntimeSchema = Schema.Struct({
   agentsCatalog: Schema.Array(RuntimeAgentSchema),
   status: Schema.Literal("online", "offline"),
   mcpConnected: Schema.Boolean,
+  lastError: Schema.NullOr(Schema.String),
   hostname: Schema.String,
   lastSeen: Schema.NullOr(Schema.String),
   createdAt: Schema.String,
@@ -298,7 +299,9 @@ const ForgeTaskSchema = Schema.Struct({
 // logging flags without restarting, plus the server-built prompt (sources
 // resolved, output rules enforced) and the task's agent/skill rules as
 // Markdown — the daemon writes those into the run dir as AGENTS.md +
-// .agents/<skill>/SKILL.md (files-only delivery, no host store).
+// .agents/<skill>/SKILL.md (files-only delivery, no host store). `skillIds`
+// is the full current skill-id set: the daemon prunes stale skill dirs from
+// the workspace so obsolete bundles never pollute opencode's discovery.
 const ClaimResponseSchema = Schema.Struct({
   task: Schema.NullOr(ForgeTaskSchema),
   provider: Schema.Literal("opencode", "hermes", "command-code"),
@@ -310,6 +313,7 @@ const ClaimResponseSchema = Schema.Struct({
   prompt: Schema.String,
   agentMarkdown: Schema.String,
   skillMarkdown: Schema.String,
+  skillIds: Schema.Array(Schema.String),
 });
 
 const ForgeAgentSchema = Schema.Struct({
@@ -413,10 +417,35 @@ const FailRuntimeEventInput = Schema.Struct({ error: Schema.String });
 const MachineSchema = Schema.Struct({
   id: Schema.String,
   hostname: Schema.String,
+  clis: Schema.Array(Schema.Struct({
+    provider: Schema.Literal("opencode", "hermes", "command-code"),
+    version: Schema.String,
+  })),
   lastSeen: Schema.NullOr(Schema.String),
   createdAt: Schema.String,
 });
 const MachineListResponse = Schema.Struct({ data: Schema.Array(MachineSchema) });
+// Heartbeat response extends the machine with the project index — the
+// listener provisions one workspace dir per project under ~/.lexa/projects/
+// and keeps its local project-name lookup fresh without extra requests.
+const MachineHeartbeatResponse = Schema.Struct({
+  ...MachineSchema.fields,
+  projects: Schema.Array(Schema.Struct({
+    id: Schema.String,
+    name: Schema.String,
+    slug: Schema.String,
+    description: Schema.String,
+  })),
+});
+const MachineRegisterInput = Schema.Struct({
+  id: Schema.String,
+  hostname: Schema.String,
+});
+const MachineIdPath = Schema.Struct({ id: Schema.String });
+const DaemonErrorInput = Schema.Struct({
+  runtimeId: Schema.String,
+  error: Schema.String,
+});
 const RuntimeCatalogInput = Schema.Struct({
   runtimeId: Schema.String,
   agentCli: Schema.Literal("opencode", "hermes", "command-code"),
@@ -427,6 +456,11 @@ const MachineHeartbeatInput = Schema.Struct({
   id: Schema.String,
   hostname: Schema.optional(Schema.String),
   runtimes: Schema.optional(Schema.Array(RuntimeCatalogInput)),
+  clis: Schema.optional(Schema.Array(Schema.Struct({
+    provider: Schema.Literal("opencode", "hermes", "command-code"),
+    version: Schema.String,
+  }))),
+  daemonErrors: Schema.optional(Schema.Array(DaemonErrorInput)),
 });
 
 const UpdateRuntimeInput = Schema.Struct({
@@ -490,10 +524,18 @@ const ForgeTaskLogSchema = Schema.Struct({
   id: Schema.String,
   taskId: Schema.String,
   message: Schema.String,
+  stream: Schema.Literal("out", "err"),
+  level: Schema.Literal("info", "warn", "error"),
   createdAt: Schema.String,
 });
 const ForgeTaskLogListResponse = Schema.Struct({ data: Schema.Array(ForgeTaskLogSchema) });
-const AppendLogInput = Schema.Struct({ message: Schema.String });
+// stream/level are classified ONCE by the daemon at write time; defaults keep
+// older daemons (and any non-daemon writer) working.
+const AppendLogInput = Schema.Struct({
+  message: Schema.String,
+  stream: Schema.optional(Schema.Literal("out", "err")),
+  level: Schema.optional(Schema.Literal("info", "warn", "error")),
+});
 
 const DocumentPath = Schema.Struct({
   slug: Schema.String,
@@ -575,9 +617,13 @@ const forgeGroup = HttpApiGroup.make("forge")
   .add(HttpApiEndpoint.get("listRuntimeEvents", "/forge/runtime-events")
     .addSuccess(RuntimeEventListResponse))
   .add(HttpApiEndpoint.post("machineHeartbeat", "/forge/machines/heartbeat")
-    .setPayload(MachineHeartbeatInput).addSuccess(MachineSchema))
+    .setPayload(MachineHeartbeatInput).addSuccess(MachineHeartbeatResponse))
+  .add(HttpApiEndpoint.post("registerMachine", "/forge/machines/register")
+    .setPayload(MachineRegisterInput).addSuccess(MachineSchema))
   .add(HttpApiEndpoint.get("listMachines", "/forge/machines")
     .addSuccess(MachineListResponse))
+  .add(HttpApiEndpoint.del("removeMachine", "/forge/machines/:id")
+    .setPath(MachineIdPath).addSuccess(Schema.Undefined, { status: 204 }))
   .add(HttpApiEndpoint.get("listRuntimes", "/forge/runtimes")
     .addSuccess(Schema.Struct({ data: Schema.Array(RuntimeSchema) })))
   .add(HttpApiEndpoint.post("createForgeTask", "/forge/tasks")
@@ -1289,6 +1335,9 @@ const forgeLive = HttpApiBuilder.group(LexaApi, "forge", (handlers) =>
           model: req.payload.model ?? "",
           hostname: req.payload.hostname ?? "",
         });
+        // Successful registration proves the daemon's credential works —
+        // clear any previously reported failure.
+        yield* service.clearRuntimeLastError(runtime.id);
         return runtime;
       }))
     )
@@ -1309,15 +1358,19 @@ const forgeLive = HttpApiBuilder.group(LexaApi, "forge", (handlers) =>
     .handle("removeRuntime", (req) =>
       respond(Effect.gen(function* () {
         const service = yield* ForgeService;
-        const machineService = yield* RuntimeMachineService;
         const eventService = yield* RuntimeEventService;
         const runtime = yield* service.getRuntimeConfig(req.path.id);
-        if (!runtime.machineId) {
-          return yield* new MachineNotFound({ id: "" });
+        // Never blocks on machine state: the remove event is delivered
+        // whenever the machine's listener next heartbeats. Runtimes without
+        // a machine have nothing to notify — delete directly.
+        if (runtime.machineId) {
+          yield* eventService.createRemove({ machineId: runtime.machineId, agentCli: runtime.provider });
+          // Remove events are provider-scoped; a machine hosts at most one
+          // runtime per agent CLI — remove the whole pair.
+          yield* service.removeRuntimePair(runtime.machineId, runtime.provider);
+        } else {
+          yield* service.removeRuntime(req.path.id);
         }
-        yield* machineService.requireOnline(runtime.machineId);
-        yield* eventService.createRemove({ machineId: runtime.machineId, agentCli: runtime.provider });
-        yield* service.removeRuntime(req.path.id);
         return undefined;
       }))
     )
@@ -1328,6 +1381,9 @@ const forgeLive = HttpApiBuilder.group(LexaApi, "forge", (handlers) =>
           req.payload.runtimeId,
           req.payload.mcpConnected
         );
+        // A live heartbeat proves the credential works — clear any
+        // previously reported auth failure.
+        yield* service.clearRuntimeLastError(req.payload.runtimeId);
         return { ok: true as const };
       }))
     )
@@ -1335,7 +1391,7 @@ const forgeLive = HttpApiBuilder.group(LexaApi, "forge", (handlers) =>
       respond(Effect.gen(function* () {
         const service = yield* ForgeService;
         const task = yield* service.claimNext(req.payload.runtimeId);
-        if (!task) return { task: null, provider: "opencode" as const, agent: "", model: "", printLogs: false, logLevel: "", extraArgs: [], prompt: "", agentMarkdown: "", skillMarkdown: "" };
+        if (!task) return { task: null, provider: "opencode" as const, agent: "", model: "", printLogs: false, logLevel: "", extraArgs: [], prompt: "", agentMarkdown: "", skillMarkdown: "", skillIds: [] };
         const runtime = yield* service.getRuntimeConfig(req.payload.runtimeId);
         // Server-authoritative prompt (resolves linked sources, enforces
         // output rules). If source resolution fails, fall back to the
@@ -1345,11 +1401,17 @@ const forgeLive = HttpApiBuilder.group(LexaApi, "forge", (handlers) =>
         );
         // Claim-carried rule files: the daemon writes these into the run dir
         // as AGENTS.md + .agents/<skill>/SKILL.md before spawning the CLI.
-        const { agentMarkdown, skillMarkdown } = yield* service.resolveRules(task).pipe(
-          Effect.map((r) => ({ agentMarkdown: r.agent.instructions, skillMarkdown: r.skill.instructions })),
-          Effect.catchAll(() => Effect.succeed({ agentMarkdown: "", skillMarkdown: "" }))
-        );
-        return { task, provider: runtime.provider, agent: runtime.agent, model: runtime.model, printLogs: runtime.printLogs, logLevel: runtime.logLevel, extraArgs: runtime.extraArgs, prompt, agentMarkdown, skillMarkdown };
+        const { rules, skillIds } = yield* Effect.all({
+          rules: service.resolveRules(task).pipe(
+            Effect.map((r) => ({ agentMarkdown: r.agent.instructions, skillMarkdown: r.skill.instructions })),
+            Effect.catchAll(() => Effect.succeed({ agentMarkdown: "", skillMarkdown: "" }))
+          ),
+          skillIds: service.listSkills().pipe(
+            Effect.map((s) => s.map((x) => x.id)),
+            Effect.catchAll(() => Effect.succeed([] as string[]))
+          ),
+        });
+        return { task, provider: runtime.provider, agent: runtime.agent, model: runtime.model, printLogs: runtime.printLogs, logLevel: runtime.logLevel, extraArgs: runtime.extraArgs, prompt, agentMarkdown: rules.agentMarkdown, skillMarkdown: rules.skillMarkdown, skillIds };
       }))
     )
     // Runtime setup events — the CLI listener claims these over the same
@@ -1402,9 +1464,11 @@ const forgeLive = HttpApiBuilder.group(LexaApi, "forge", (handlers) =>
       respond(Effect.gen(function* () {
         const machineService = yield* RuntimeMachineService;
         const forgeService = yield* ForgeService;
+        const projectService = yield* ProjectService;
         const machine = yield* machineService.heartbeat({
           id: req.payload.id,
           hostname: req.payload.hostname ?? "",
+          clis: req.payload.clis ? req.payload.clis.map((c) => ({ provider: c.provider, version: c.version })) : undefined,
         });
         if (req.payload.runtimes) {
           yield* forgeService.syncCatalogs(req.payload.id, req.payload.runtimes.map((catalog) => ({
@@ -1414,7 +1478,39 @@ const forgeLive = HttpApiBuilder.group(LexaApi, "forge", (handlers) =>
             agents: [...catalog.agents],
           })));
         }
-        return machine;
+        if (req.payload.daemonErrors) {
+          // The daemon died with a reportable failure (e.g. revoked API key,
+          // exit code 3). The listener has valid auth, so it relays on the
+          // machine's behalf — the runtime row surfaces it as lastError.
+          yield* forgeService.reportDaemonErrors([...req.payload.daemonErrors]);
+        }
+        // Stuck-task sweep: runs while any machine listens (3s cadence) —
+        // the only case where a re-claim is possible. Re-queues 'running'
+        // tasks whose runtime has been offline > 10 min, and hard-deletes
+        // stale 'running' runs (started > FORGE_STALE_RUN_MIN, runtime
+        // offline/gone — the runner is dead and will never complete).
+        const swept = yield* forgeService.sweepStalledTasks();
+        if (swept > 0) {
+          console.log(`[forge-sweep] ${swept} stale task(s) re-queued or removed`);
+        }
+        const projects = yield* projectService.list();
+        return { ...machine, projects: projects.map((p) => ({ id: p.id, name: p.name, slug: p.slug, description: p.description })) };
+      }))
+    )
+    .handle("registerMachine", (req) =>
+      respond(Effect.gen(function* () {
+        const machineService = yield* RuntimeMachineService;
+        return yield* machineService.register({
+          id: req.payload.id,
+          hostname: req.payload.hostname,
+        });
+      }))
+    )
+    .handle("removeMachine", (req) =>
+      respond(Effect.gen(function* () {
+        const machineService = yield* RuntimeMachineService;
+        yield* machineService.delete(req.path.id);
+        return undefined;
       }))
     )
     .handle("listMachines", () =>
@@ -1537,7 +1633,7 @@ const forgeLive = HttpApiBuilder.group(LexaApi, "forge", (handlers) =>
     .handle("appendForgeTaskLog", (req) =>
       respond(Effect.gen(function* () {
         const service = yield* ForgeService;
-        return yield* service.appendLog(req.path.id, req.payload.message);
+        return yield* service.appendLog(req.path.id, req.payload.message, req.payload.stream ?? "out", req.payload.level ?? "info");
       }))
     )
     .handle("listForgeAgents", () =>

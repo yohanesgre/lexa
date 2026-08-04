@@ -84,17 +84,14 @@
 
       <div class="field">
         <label class="field-label">Logging <span class="font-micro text-2xs color-muted" style="text-transform:uppercase;letter-spacing:0.04em;margin-left:6px;">opencode run</span></label>
-        <label class="flex items-center gap-2 mb-2" style="cursor:pointer;">
-          <input type="checkbox" checked />
-          <span class="text-xs color-secondary">Print logs to stderr (<span class="font-mono">--print-logs</span>)</span>
-        </label>
+        <div class="text-xs color-secondary mb-2">Diagnostic logs always print to stderr (<span class="font-mono">--print-logs</span>) and stream into the activity log.</div>
         <select class="prop-input w-full">
           <option>DEBUG</option>
           <option selected>INFO</option>
           <option>WARN</option>
           <option>ERROR</option>
         </select>
-        <div class="field-hint">Passed as --print-logs / --log-level at spawn. Streamed into the task's activity log. Applies on the next Forge task — no daemon restart needed. Shown only when Agent CLI = opencode.</div>
+        <div class="field-hint">Controls the always-on opencode diagnostic stderr stream. The activity log captures stdout and stderr separately, with stored info/warn/error levels. Applies on the next Forge task — no daemon restart needed. Shown only when Agent CLI = opencode.</div>
       </div>
 
       <div class="field">
