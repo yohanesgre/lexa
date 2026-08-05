@@ -28,8 +28,11 @@ Bun server, no Cloudflare WAF dependency (the WAF rule path is paid on some plan
   sidecar) — and stamps it as `x-lexa-remote-ip` on the reconstructed request
   (any inbound value deleted first, spoof-guard). The middleware applies the
   same `isPrivateIp`-gated trust to `cf-connecting-ip`.
-- `/api/setup*` and `/api/health` are exempt (first-run wizard, health probes —
-  cheap unauthenticated GETs must not 429).
+- `/api/setup*` and `/api/health` ARE rate-limited (restored after a brief
+  Path-B exemption — the unauthenticated pre-lock setup surface keeps its
+  throttle). `/api/forge/daemon/*` + `/api/forge/runtimes/register` are exempt
+  (token-gated; a chatty agent's log stream must not 429 against the shared
+  bucket).
 - Denied requests get **429** `{ "error": { "code": "RATE_LIMITED", "message": "Rate limit exceeded" } }`
   with a `Retry-After` header (seconds until the window resets). Same raw
   early-gate pattern as the 413 `BODY_TOO_LARGE` response.
@@ -41,8 +44,9 @@ Bun server, no Cloudflare WAF dependency (the WAF rule path is paid on some plan
 | `/api/*` (REST, humans + machines) | Bearer `lxk_*` (or Access) | Yes (middleware) |
 | `/mcp` (AI agents) | Bearer `lxk_*` | Yes (entry; shared bucket) |
 | `/api/webhooks/github` (GitHub → Lexa) | HMAC-SHA-256 | **No — exempt** |
-| `/api/setup/*` (first-run wizard) | None (setup-locked after first run) | No — exempt |
-| `/api/health` | None | No — exempt |
+| `/api/setup/*` (first-run wizard) | None (setup-locked after first run) | Yes |
+| `/api/health` | None | Yes |
+| `/api/forge/daemon/*` + `/api/forge/runtimes/register` | daemon token | **No — exempt** (token-gated; log streams must not 429) |
 
 ### Webhook exemption (do not remove)
 
