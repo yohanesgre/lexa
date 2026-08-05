@@ -6,9 +6,9 @@ import type { ApiKey, ApiKeyCreateResult } from "../../shared/types";
 export class ApiKeyNameEmpty extends Data.TaggedError("ApiKeyNameEmpty")<{}> {}
 
 // System/bootstrap keys created outside the settings UI (env LXK_API_KEY seed,
-// first-run wizard key, dev seed). They authenticate the frontend/server but
-// are not user-managed — the settings list shows only user-generated keys.
-const SYSTEM_KEY_NAMES = new Set(["admin", "setup-wizard", "dev-local"]);
+// first-run wizard key). They authenticate the frontend/server but are not
+// user-managed — the settings list shows only user-generated keys.
+const SYSTEM_KEY_NAMES = new Set(["admin", "setup-wizard"]);
 
 function rowToApiKey(row: { id: string; name: string; created_at: string; last_used_at: string | null }): ApiKey {
   return { id: row.id, name: row.name, createdAt: row.created_at, lastUsedAt: row.last_used_at };
