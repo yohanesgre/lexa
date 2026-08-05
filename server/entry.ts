@@ -10,9 +10,8 @@ import { verifyAccessAssertion } from "./api/access-auth";
 import { resolveApiKeyIdentity } from "./api/auth-key";
 import { getSetting, setSetting } from "./db/settings";
 import { createRateLimiter, isPrivateIp } from "./api/rate-limit";
+import { MAX_API_BODY } from "./api/limits";
 import type { Server } from "bun";
-
-const MAX_API_BODY = Number(process.env.LXK_MAX_BODY_MB ?? 16) * 1024 * 1024;
 
 let ssrFetch: ((req: Request) => Promise<Response>) | null = null;
 try {
