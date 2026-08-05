@@ -6,20 +6,19 @@ You are working on **Lexa**: a self-hosted project management tool for a small g
 
 ## Document authority (read in this order before touching code)
 
-1. `docs/IMPLEMENTATION.md` — your execution plan. Phases, files, acceptance checks.
-2. `docs/SCHEMA.md` — SQL and data invariants. Copy verbatim.
-3. `docs/LAYERS.md` — Effect service patterns, error catalog, webhook/auth flows.
-4. `docs/API.md` — REST contract. Endpoint shapes are exact.
-5. `docs/MCP.md` — Agent-facing tool contract. Tool shapes are exact.
-6. `docs/DESIGN_SYSTEM.md` + `wireframes/` — all visual decisions.
-7. `docs/ARCHITECTURE.md` — context and rationale (decisions log) only.
-8. `docs/REVIEW.md` — historical record of design review. Do not implement from it.
+1. `docs/SCHEMA.md` — SQL and data invariants. Copy verbatim.
+2. `docs/LAYERS.md` — Effect service patterns, error catalog, webhook/auth flows.
+3. `docs/API.md` — REST contract. Endpoint shapes are exact.
+4. `docs/MCP.md` — Agent-facing tool contract. Tool shapes are exact.
+5. `docs/DESIGN_SYSTEM.md` + `wireframes/` — all visual decisions.
+6. `docs/ARCHITECTURE.md` — context and rationale (decisions log) only.
+7. `docs/REVIEW.md` — historical record of design review. Do not implement from it.
 
 **If documents conflict, stop and report the conflict to the user. Never resolve it yourself.**
 
 ## Wireframes are the frontend source of truth
 
-The `wireframes/` directory contains the final UI/UX decisions for Lexa. When implementing or modifying frontend code, treat the wireframes as the authoritative reference for layout, structure, component states, and user flows. This section complements `docs/IMPLEMENTATION.md`: the implementation plan defines the phase-by-phase build order and acceptance checks, while this rule defines how to interpret the wireframes when building frontend screens.
+The `wireframes/` directory contains the final UI/UX decisions for Lexa. When implementing or modifying frontend code, treat the wireframes as the authoritative reference for layout, structure, component states, and user flows. This section defines how to interpret the wireframes when building frontend screens.
 
 **Wireframe-first rule (non-negotiable):** Any UI/UX design change — new states, layout changes, component changes, copy changes, motion changes — must be made in the wireframes FIRST (edit `wireframes/src/`, run `bash wireframes/build.sh`), then implemented in code. Never change the app's UI without the wireframes reflecting the change first. If code and wireframes drift, the wireframe is the source of truth.
 
@@ -83,7 +82,7 @@ These rules are non-negotiable and apply to every agent working on Lexa:
   - `server/` (any backend code: repos, services, MCP, API, DB, GitHub)
   - `shared/types.ts` (schema types — read-only)
   - `shared/` except pure frontend utilities explicitly in scope
-  - `docs/` (design docs: `IMPLEMENTATION.md`, `SCHEMA.md`, `LAYERS.md`, `API.md`, `MCP.md`, `ARCHITECTURE.md`, `REVIEW.md`, `DESIGN_SYSTEM.md`)
+  - `docs/` (design docs: `SCHEMA.md`, `LAYERS.md`, `API.md`, `MCP.md`, `ARCHITECTURE.md`, `REVIEW.md`, `DESIGN_SYSTEM.md`)
   - `package.json`, `tsconfig.json`, `app.config.ts`
 - **@fixer scope is per-task** — specify exact files; same constraints apply unless the task explicitly includes backend files.
 - If an agent discovers a need for a new backend endpoint or shared type, it must report back to the orchestrator — never add it itself.
@@ -244,7 +243,7 @@ bun run build
   (Docker + cloudflared tunnel + Access); the legacy bash setup.sh has been removed.
   Local dev does not need it.
 
-Each phase in docs/IMPLEMENTATION.md has its own acceptance block — run it and paste the output.
+Acceptance checks live in `docs/RELEASE.md` (gates) and `docs/GITHUB_SETUP.md` (sync round-trip) — run them and paste the output.
 
 ## Agent-browser usage — Snapshot-First (No Vision Required)
 

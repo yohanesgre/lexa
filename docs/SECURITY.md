@@ -1,33 +1,27 @@
 # Security Hardening — Lexa
 
 > Oracle review: 3 critical, 5 important, 9 nice-to-have. Prioritized by attacker impact.
-> Updated: Workers removed — Bun standalone deployment. All code-level items closed 2026-08-03 (v0.1.0 hardening — see RELEASE.md).
+> Updated: Workers removed — Bun standalone deployment. All code-level items closed 2026-08-06 (v0.1.0 hardening + Access JWT verification — see RELEASE.md).
 
 ## 🔴 Critical
 
 ### 1. REST API has zero auth enforcement
 
-**Status: ✅ FIXED** (`verifyApiKey` in `server/api/auth-key.ts`, called from `server/entry.ts:35-38`)
+**Status: ✅ FIXED** (`verifyApiKey` in `server/api/auth-key.ts`, enforced in the `server/entry.ts` fetch handler)
 
-All `/api/*` routes (except `/api/health`) require `Authorization: Bearer lxk_*` header. SHA-256 hashed against `api_keys` table. Frontend sends key via `VITE_LXK_API_KEY` at build time.
+All `/api/*` routes (except `/api/health`) require `Authorization: Bearer lxk_*` header. SHA-256 hashed against `api_keys` table. The server injects its current key into served HTML (`<meta name="lxk-api-key">`); the client prefers it over any build-time `VITE_LXK_API_KEY`, so key rotation never breaks the browser.
 
 ### 2. CF Access header trusted without JWT verification
 
-**Status: 🔴 ACCEPTABLE RISK**
+**Status: ✅ FIXED** (2026-08-06 audit hardening — opt-in via `LXK_ACCESS_AUD`)
 
-**Impact:** Tunnel guarantees header authenticity in production. If tunnel bypassed (direct container access, misconfigured ingress), attacker sets `Cf-Access-Authenticated-User-Email` header and spoofs any user.
-
-**Where:** `server/api/auth.ts:6` — reads header without verifying Access JWT.
-
-**Fix (defense-in-depth, low priority):**
-1. Verify Access JWT against team certs (`https://<team>.cloudflareaccess.com/cdn-cgi/access/certs`)
-2. Reject requests with CF headers but no tunnel origin IP
+`server/api/access-auth.ts` verifies the `Cf-Access-Jwt-Assertion` against the team JWKS (`https://<team>.cloudflareaccess.com/cdn-cgi/access/certs`, audience must match `LXK_ACCESS_AUD`); the JWKS fetch is SSRF-hardened. When `LXK_ACCESS_AUD` is unset, headers are still trusted for tunnel-authenticated identity, with a boot warning (`server/entry.ts:50`). Tunnel-bypass spoofing is now closed for deployments that set the env var.
 
 ### 3. Default credential — resolved
 
-**Status: ✅ FIXED** (`scripts/mcp/mcp-server.ts:30-34`)
+**Status: ✅ FIXED** (`seedAdminKey` in `server/entry.ts`)
 
-Server exits with `process.exit(1)` if `LXK_API_KEY` env var is missing. Never ships fallback secrets.
+No hardcoded fallback secret. `seedAdminKey` seeds the `api_keys` table from `LXK_API_KEY` when set, otherwise mints a random high-entropy key (logged once at boot).
 
 ## 🟡 Important
 
@@ -39,15 +33,9 @@ Server exits with `process.exit(1)` if `LXK_API_KEY` env var is missing. Never s
 
 ### 5. No rate limiting
 
-**Status: ⬜ CONFIGURATION REQUIRED (CF Dashboard)**
+**Status: ✅ FIXED** (2026-08-06 — in-process limiter, no CF dependency; see [`docs/RATE_LIMITING.md`](RATE_LIMITING.md))
 
-**Impact:** Buggy agent or leaked key burns D1-equivalent reads/writes. `resolveTaskProject` fans out HTTP calls per project — amplification built in.
-
-**Where:** All `/api/*` endpoints (Bun server).
-
-**Fix:**
-- CF Rate Limiting rule on `/api/*` (Zero Trust Dashboard, zero code)
-- Document limits in `API.md`
+Fixed-window per-IP limiter (600 req / 10 min, constants in `server/api/rate-limit.ts`), enforced first in the fetch handler (`server/entry.ts`) before auth and body reads. Covers `/api/*` + `/mcp`; `/api/webhooks/github` exempt (HMAC-authenticated, bursty). Denied → 429 `RATE_LIMITED` with `Retry-After`.
 
 ### 6. Unbounded request bodies
 
@@ -103,8 +91,3 @@ Server exits with `process.exit(1)` if `LXK_API_KEY` env var is missing. Never s
 | Cursor decode | Bound after decode, safe |
 | API key hash timing | SHA-256 of 256-bit key makes timing oracle useless |
 | MCP auth ordering | Auth validated before parse — correct |
-
-## Fix Priority (remaining)
-
-1. **#5 — Rate limiting** (CF dashboard, zero code)
-2. **#2 — Access JWT verify** (defense in depth, low urgency)

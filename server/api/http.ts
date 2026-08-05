@@ -145,7 +145,7 @@ const projectsGroup = HttpApiGroup.make("projects")
   .add(
     HttpApiEndpoint.del("deleteProject", "/projects/:slug")
       .setPath(SlugPath)
-      .addSuccess(Schema.UndefinedOr(Schema.Void))
+      .addSuccess(Schema.Undefined, { status: 204 })
   );
 
 const ColumnSchema = Schema.Struct({
@@ -587,7 +587,7 @@ const taskLinksGroup = HttpApiGroup.make("task-links")
     .setPath(TaskLinkPath).setPayload(AddTaskLinkInput).addSuccess(TaskLinkSchema, { status: 201 }))
   .add(HttpApiEndpoint.del("removeTaskLink", "/projects/:slug/tasks/:id/links/:linkId")
     .setPath(Schema.Struct({ slug: Schema.String, id: Schema.String, linkId: Schema.String }))
-    .addSuccess(Schema.UndefinedOr(Schema.Void)))
+    .addSuccess(Schema.Undefined, { status: 204 }))
   .add(HttpApiEndpoint.get("searchTasks", "/projects/:slug/tasks/search")
     .setPath(SlugPath).addSuccess(TaskSearchResponse));
 
@@ -655,7 +655,7 @@ const forgeGroup = HttpApiGroup.make("forge")
   .add(HttpApiEndpoint.patch("updateForgeAgent", "/forge/agents/:id")
     .setPath(ForgeAgentPath).setPayload(UpdateForgeAgentInput).addSuccess(ForgeAgentSchema))
   .add(HttpApiEndpoint.del("deleteForgeAgent", "/forge/agents/:id")
-    .setPath(ForgeAgentPath).addSuccess(Schema.UndefinedOr(Schema.Void)))
+    .setPath(ForgeAgentPath).addSuccess(Schema.Undefined, { status: 204 }))
   .add(HttpApiEndpoint.put("replaceAgentSkills", "/forge/agents/:id/skills")
     .setPath(ForgeAgentPath).setPayload(ReplaceAgentSkillsInput).addSuccess(ForgeAgentSchema))
   .add(HttpApiEndpoint.post("resetForgeAgent", "/forge/agents/:id/reset")
@@ -667,7 +667,7 @@ const forgeGroup = HttpApiGroup.make("forge")
   .add(HttpApiEndpoint.patch("updateForgeSkill", "/forge/skills/:id")
     .setPath(ForgeSkillPath).setPayload(UpdateForgeSkillInput).addSuccess(ForgeSkillSchema))
   .add(HttpApiEndpoint.del("deleteForgeSkill", "/forge/skills/:id")
-    .setPath(ForgeSkillPath).addSuccess(Schema.UndefinedOr(Schema.Void)))
+    .setPath(ForgeSkillPath).addSuccess(Schema.Undefined, { status: 204 }))
   .add(HttpApiEndpoint.post("resetForgeSkill", "/forge/skills/:id/reset")
     .setPath(ForgeSkillPath).addSuccess(ForgeSkillSchema))
   .add(HttpApiEndpoint.get("listSources", "/projects/:slug/documents/:type/:id/sources")
@@ -676,7 +676,7 @@ const forgeGroup = HttpApiGroup.make("forge")
     .setPath(DocumentPath).setPayload(AddSourceInput).addSuccess(SourceSchema, { status: 201 }))
   .add(HttpApiEndpoint.del("removeSource", "/projects/:slug/documents/:type/:id/sources/:sourceId")
     .setPath(Schema.Struct({ slug: Schema.String, type: Schema.Literal("task", "wiki"), id: Schema.String, sourceId: Schema.String }))
-    .addSuccess(Schema.UndefinedOr(Schema.Void)));
+    .addSuccess(Schema.Undefined, { status: 204 }));
 
 const WikiPageSchema = Schema.Struct({
   id: Schema.String,
@@ -938,7 +938,7 @@ const apiKeysGroup = HttpApiGroup.make("api-keys")
     .setPayload(CreateApiKeyInput)
     .addSuccess(Schema.Struct({ key: ApiKeySchema, rawKey: Schema.String }), { status: 201 }))
   .add(HttpApiEndpoint.del("deleteApiKey", "/settings/api-keys/:id")
-    .setPath(ApiKeyPath).addSuccess(Schema.UndefinedOr(Schema.Void)));
+    .setPath(ApiKeyPath).addSuccess(Schema.Undefined, { status: 204 }));
 
 const UserSchema = Schema.Struct({
   id: Schema.String,
@@ -973,7 +973,7 @@ const adminGroup = HttpApiGroup.make("admin")
   .add(HttpApiEndpoint.put("setUserProjectRole", "/admin/users/:id/projects")
     .setPath(UserPath).setPayload(SetProjectRoleInput).addSuccess(ProjectRoleEntry))
   .add(HttpApiEndpoint.del("removeUserProjectRole", "/admin/users/:id/projects/:projectId")
-    .setPath(Schema.Struct({ id: Schema.String, projectId: Schema.String })).addSuccess(Schema.UndefinedOr(Schema.Void)));
+    .setPath(Schema.Struct({ id: Schema.String, projectId: Schema.String })).addSuccess(Schema.Undefined, { status: 204 }));
 
 export const LexaApi = HttpApi.make("lexa")
   .add(healthGroup)

@@ -280,7 +280,7 @@ lexa/
 │   └── github/               # GitHub App client + webhook
 ├── shared/                   # types + pure functions (markdown, positions, tiptap-text)
 ├── migrations/               # *.sql applied on boot by server/db/migrate.ts
-├── scripts/                  # cli/ (lexa-cli incl. deploy), seed-dev.sql, mcp/
+├── scripts/                  # cli/ (lexa-cli incl. deploy), forge/ (Forge daemon), dev.sh, seed-dev.sql, setup-cli.ts
 ├── wireframes/               # src (source of truth) + dist (compiled)
 └── package.json
 ```
