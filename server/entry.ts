@@ -136,10 +136,12 @@ const server: Server<unknown> = Bun.serve({
       const cfIp = req.headers.get("cf-connecting-ip");
       const ip = socketIp && isPrivateIp(socketIp) && cfIp ? cfIp : (socketIp ?? cfIp ?? "unknown");
       if (!rateLimiter.check(ip)) {
+        const retryAfter = Math.ceil(rateLimiter.retryAfterMs(ip) / 1000);
+        console.warn(`[API] rate limited ip=${ip} retryAfter=${retryAfter}s`);
         return withSecurityHeaders(
           new Response(JSON.stringify({ error: { code: "RATE_LIMITED", message: "Rate limit exceeded" } }), {
             status: 429,
-            headers: { "Content-Type": "application/json", "Retry-After": String(Math.ceil(rateLimiter.retryAfterMs(ip) / 1000)) },
+            headers: { "Content-Type": "application/json", "Retry-After": String(retryAfter) },
           })
         );
       }
@@ -151,15 +153,22 @@ const server: Server<unknown> = Bun.serve({
       }
       const read = await readBodyWithLimit(req, MAX_API_BODY);
       if (!read.ok) {
+        console.warn(`[MCP] body too large path=${path} declared=${req.headers.get("content-length") ?? "unknown"} bytes`);
         return tooLargeResponse();
       }
       const mcpReq = new Request(req.url, { method: "POST", headers: req.headers, body: read.bytes });
-      return withSecurityHeaders(await mcpHandler(mcpReq));
+      try {
+        return withSecurityHeaders(await mcpHandler(mcpReq));
+      } catch (err) {
+        console.error("[MCP] Uncaught:", err);
+        throw err;
+      }
     }
 
     if (url.pathname.startsWith("/api/")) {
       const contentLength = Number(req.headers.get("content-length") ?? 0);
       if (contentLength > MAX_API_BODY) {
+        console.warn(`[API] body too large path=${path} declared=${contentLength} bytes`);
         return tooLargeResponse();
       }
       // GitHub webhook: HMAC-SHA-256 is the auth (no API-key middleware).
@@ -169,12 +178,14 @@ const server: Server<unknown> = Bun.serve({
       if (url.pathname === "/api/webhooks/github") {
         const read = await readBodyWithLimit(req, 1_000_000);
         if (!read.ok) {
+          console.warn(`[Webhook] body too large path=${path} declared=${req.headers.get("content-length") ?? "unknown"} bytes`);
           return tooLargeResponse();
         }
         const rawBody = read.bytes;
         const signature = req.headers.get("x-hub-signature-256");
         const valid = await verifyWebhook(rawBody, signature);
         if (!valid) {
+          console.warn(`[Webhook] signature rejected delivery=${req.headers.get("x-github-delivery") ?? "unknown"} event=${req.headers.get("x-github-event") ?? "unknown"}`);
           return withSecurityHeaders(
             new Response(JSON.stringify({ error: { code: "GITHUB_WEBHOOK_ERROR", message: "Invalid signature" } }), { status: 401, headers: { "Content-Type": "application/json" } })
           );
@@ -192,11 +203,15 @@ const server: Server<unknown> = Bun.serve({
         ? constantTimeTokenEqual(req.headers.get("x-forge-token") ?? "", process.env.LXK_FORGE_DAEMON_TOKEN)
         : false;
       if (!isHealth && !isSetup && !daemonTokenOk) {
-        const identity = resolveApiKeyIdentity(req.headers.get("Authorization") ?? "", DATABASE_PATH);
+        const authHeader = req.headers.get("Authorization") ?? "";
+        const identity = resolveApiKeyIdentity(authHeader, DATABASE_PATH);
         if (!identity) {
+          const reason = authHeader.startsWith("Bearer ") ? "unknown key" : "missing or malformed key";
+          console.warn(`[Auth] denied path=${path} reason=${reason}`);
           return withSecurityHeaders(new Response(JSON.stringify({ error: { code: "UNAUTHORIZED", message: "Invalid or missing API key" } }), { status: 401, headers: { "Content-Type": "application/json" } }));
         }
         if (identity.userId !== null && identity.role !== "admin") {
+          console.warn(`[Auth] denied path=${path} reason=member key`);
           return withSecurityHeaders(new Response(JSON.stringify({ error: { code: "FORBIDDEN", message: "Member API keys are not supported on the REST API yet" } }), { status: 403, headers: { "Content-Type": "application/json" } }));
         }
       }
