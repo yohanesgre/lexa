@@ -83,8 +83,7 @@ done | sort | uniq -c
 
 Expect `200` for the first ~600 and `429` for the rest, then a `Retry-After`
 header on the 429s. Requests pass again after the window resets. (Unauthenticated
-bursts work too — rate limiting runs before auth, so 401s consume the bucket;
-`/api/health` is exempt and will NOT 429.)
+bursts work too — rate limiting runs before auth, so 401s consume the bucket.)
 
 Smoke-check the exemption: trigger a GitHub webhook delivery (move a task between
 columns with issue sync on) and confirm the card still moves.
