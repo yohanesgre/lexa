@@ -327,6 +327,11 @@ CREATE TABLE runtimes (
 CREATE TABLE machines (
   id          TEXT PRIMARY KEY,
   hostname    TEXT NOT NULL DEFAULT '',
+  secret      TEXT NOT NULL DEFAULT '',        -- per-machine binding (0003):
+                                              -- minted ONCE at register, returned
+                                              -- a single time, required on event
+                                              -- claim (x-machine-secret); '' =
+                                              -- legacy machine, must re-register
   clis        TEXT NOT NULL DEFAULT '[]',   -- installed agent
                                             -- CLIs reported by the listener
                                             -- heartbeat ([{ provider, version }])

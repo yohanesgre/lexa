@@ -35,7 +35,7 @@ No hardcoded fallback secret. `seedAdminKey` seeds the `api_keys` table from `LX
 
 **Status: ✅ FIXED** (2026-08-06 — in-process limiter, no CF dependency; see [`docs/RATE_LIMITING.md`](RATE_LIMITING.md))
 
-Fixed-window per-IP limiter (600 req / 10 min, constants in `server/api/rate-limit.ts`), enforced **before auth** — `/api/*` in the API middleware, `/mcp` at the entry edge, one shared bucket. Covers `/api/*` + `/mcp`; `/api/webhooks/github`, `/api/setup*`, `/api/health` exempt (HMAC-authenticated / cheap unauthenticated GETs). IP resolved in entry (socket + `isPrivateIp`-gated `CF-Connecting-IP`), stamped spoof-safe on the reconstructed request. Denied → 429 `RATE_LIMITED` with `Retry-After`.
+Fixed-window per-IP limiter (600 req / 10 min, constants in `server/api/rate-limit.ts`), enforced **before auth** — `/api/*` in the API middleware, `/mcp` at the entry edge, one shared bucket. Covers `/api/*` + `/mcp`; `/api/webhooks/github` + `/api/forge/daemon/*` + `/api/forge/runtimes/register` exempt (HMAC- / daemon-token-authenticated); `/api/setup*` + `/api/health` ARE limited (unauth surfaces keep their throttle). IP resolved in entry (socket + `isPrivateIp`-gated `CF-Connecting-IP`), stamped spoof-safe on the reconstructed request. Denied → 429 `RATE_LIMITED` with `Retry-After`.
 
 ### 6. Unbounded request bodies
 

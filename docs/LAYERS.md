@@ -501,6 +501,8 @@ All list endpoints and MCP `list_*`/`search_*` tools: `?limit` (default 50, max 
 | `ForgeEntityInUse` | 409 | `FORGE_ENTITY_IN_USE` | delete agent/skill still referenced by forge tasks |
 | `NoRuntimeOnline` | 409 | `NO_RUNTIME_ONLINE` | create Forge task with no daemon up |
 | `MachineNotFound` | 404 | `MACHINE_NOT_FOUND` | unknown machine target |
+| `MachineIdTaken` | 409 | `MACHINE_ID_TAKEN` | register: id bound to another host, legacy (no secret), or secret mismatch (details: `{ id, reason }`) |
+| `MachineSecretMismatch` | 403 | `FORBIDDEN` | runtime-event claim without a matching machine secret — identical response for missing machine/legacy/wrong secret (no existence oracle) |
 | `MachineOffline` | 409 | `MACHINE_OFFLINE` | remove/restart requires an online listener |
 | `TaskLinkNotFound` | 404 | `TASK_LINK_NOT_FOUND` | delete a link that doesn't exist |
 | `TaskLinkCycle` | 409 | `TASK_LINK_CYCLE` | subtask_of would create a cycle |

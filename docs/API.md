@@ -35,12 +35,13 @@ All non-2xx responses share one shape:
 | 400 | — | Payload schema validation failures are rejected by the platform before handlers run; the body is the platform's response, not the envelope above. No domain code maps to 400. |
 | 401 | `UNAUTHORIZED` | Missing or invalid API key (auth middleware in `server/api/middleware.ts`; see Auth) |
 | 401 | `GITHUB_WEBHOOK_ERROR` | Webhook signature mismatch (before body parsing) |
-| 403 | `FORBIDDEN` | Admin-only endpoint called by a non-admin, or project access denied (details: `{ message }`) |
+| 403 | `FORBIDDEN` | Admin-only endpoint called by a non-admin, project access denied (details: `{ message }`), or machine-secret mismatch on runtime-event claim |
 | 403 | `SETUP_LOCKED` | Mutating `/api/setup/*` call after setup is complete or projects exist |
 | 403 | `CANNOT_DELETE_SELF` | Demoting or removing the last admin via the admin user routes (details: `{ message }`) |
 | 404 | `USER_NOT_FOUND` | Unknown user id on admin role endpoints |
 | 404 | `PROJECT_NOT_FOUND` `COLUMN_NOT_FOUND` `SWIMLANE_NOT_FOUND` `TASK_NOT_FOUND` `PAGE_NOT_FOUND` `SOURCE_NOT_FOUND` `FORGE_TASK_NOT_FOUND` `TASK_LINK_NOT_FOUND` `MACHINE_NOT_FOUND` `RUNTIME_NOT_FOUND` `RUNTIME_EVENT_NOT_FOUND` `API_KEY_NOT_FOUND` `AGENT_NOT_FOUND` `SKILL_NOT_FOUND` | |
 | 409 | `SLUG_TAKEN` | Duplicate project slug or wiki slug (details: `{ slug }`); also the constraint fallback on project update/delete |
+| 409 | `MACHINE_ID_TAKEN` | Machine id already registered to another host, legacy (no secret), or secret mismatch (details: `{ id, reason: "hostname" \| "legacy" \| "secret_mismatch" }`) |
 | 409 | `TASK_HAS_CHILDREN` | Task delete hits a constraint (defensive — subtask links cascade on delete) |
 | 409 | `NO_RUNTIME_ONLINE` | Create Forge task with no daemon online |
 | 409 | `TASK_LINK_CYCLE` | subtask_of link would create a cycle (details: `{ message }`) |
@@ -752,12 +753,17 @@ The wizard sends only machine + agent CLI. Provider/model, agent persona,
 logging, and extra args are configured after setup. Install creates a FRESH API
 key; rawKey is verified against the stored SHA-256 hash and held ONLY in memory.
 
-POST   /api/forge/runtime-events/claim     (listener; Bearer)
-body { machineId* }
+POST   /api/forge/runtime-events/claim     (listener; Bearer + x-machine-secret)
+body { machineId* }   header: x-machine-secret
 → 200 { event: RuntimeEvent | null, rawKey: string | null }   (null = none pending)
+  | 403 FORBIDDEN ("machine secret mismatch" — identical for missing machine,
+    legacy '' secret, missing header, wrong secret; no existence oracle)
 Oldest pending event for that machine, marked claimed. rawKey is delivered ONCE
 here (removed from the in-memory store); null if the claim TTL (5 min) expired.
 A claimed event is reclaimed after 2 min if never completed.
+The secret binds machine identity: it is minted once at register, returned a
+single time, and required on every claim — a key holder without the machine's
+secret cannot hijack another machine's pending install event.
 
 POST   /api/forge/runtime-events/:id/complete   (listener)  → 200 RuntimeEvent
 POST   /api/forge/runtime-events/:id/fail       (listener)  body { error* } → 200 RuntimeEvent
@@ -769,12 +775,17 @@ GET    /api/forge/runtime-events           (browser)  → 200 { data: RuntimeEve
 
 # ── Machine registry and CLI catalogs ──
 POST   /api/forge/machines/register             (cli login)
-body { id*, hostname* }
-→ 200 Machine
-Binds a machine: upsert WITHOUT touching last_seen — a logged-in machine is
+body { id*, hostname*, secret? }
+→ 200 { machine, secret: string | null }
+  | 409 MACHINE_ID_TAKEN { id, reason: "hostname" | "legacy" | "secret_mismatch" }
+Binds a machine: registers WITHOUT touching last_seen — a logged-in machine is
 "bound, not listening" (last_seen stays NULL until its listener heartbeats).
-Idempotent. Machine ids are `hostname-<unique>` (new machines; legacy UUID
-ids keep working).
+Unknown id → minted a fresh 43-char secret, returned EXACTLY ONCE. Known id +
+hostname + secret match → idempotent no-op, secret never re-returned. Known id
+with mismatched/wrong secret or a legacy '' secret → 409 (remove the machine
+and re-register). Machine ids are `hostname-<unique>` (new machines; legacy
+UUID ids keep working). The listener persists the secret at
+`~/.lexa/machine-secret` (chmod 600).
 
 POST   /api/forge/machines/heartbeat          (listener)
 body { id*, hostname?, clis?: [{ provider, version }],
