@@ -36,7 +36,7 @@ describe("runMigrations", () => {
   it("applies the real migrations dir and records _migrations", () => {
     const dbPath = join(tmpDir(), "app.db");
     runMigrations(dbPath, MIGRATIONS);
-    expect(appliedMigrations(dbPath)).toEqual(["0001_init.sql"]);
+    expect(appliedMigrations(dbPath)).toEqual(["0001_init.sql", "0002_revoke_dev_seed_key.sql"]);
     const db = new Database(dbPath);
     expect(tableExists(db, "tasks")).toBe(true);
     expect(tableExists(db, "_migrations")).toBe(true);
@@ -47,7 +47,7 @@ describe("runMigrations", () => {
     const dbPath = join(tmpDir(), "app.db");
     runMigrations(dbPath, MIGRATIONS);
     runMigrations(dbPath, MIGRATIONS);
-    expect(appliedMigrations(dbPath)).toEqual(["0001_init.sql"]);
+    expect(appliedMigrations(dbPath)).toEqual(["0001_init.sql", "0002_revoke_dev_seed_key.sql"]);
   });
 
   it("rolls back a failed migration atomically (no partial schema, no _migrations row)", () => {
@@ -74,6 +74,6 @@ describe("runMigrations", () => {
   it("keeps the default migrations dir (prod behavior)", () => {
     const dbPath = join(tmpDir(), "app.db");
     runMigrations(dbPath);
-    expect(appliedMigrations(dbPath)).toEqual(["0001_init.sql"]);
+    expect(appliedMigrations(dbPath)).toEqual(["0001_init.sql", "0002_revoke_dev_seed_key.sql"]);
   });
 });

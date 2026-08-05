@@ -158,9 +158,13 @@ async function main() {
       }
     }
   }
+  // 6. Lock setup — CLI-provisioned instances are complete; /api/setup/*
+  //    mutating endpoints stay locked from now on.
+  setSetting(db, "setup_complete", "1");
+  console.log("  Setup marked complete — /api/setup/* is now locked.");
   db.close();
 
-  // 6. Summary
+  // 7. Summary
   console.log("\n══════════════════════════════════════════════");
   console.log("  Setup complete");
   console.log("══════════════════════════════════════════════");

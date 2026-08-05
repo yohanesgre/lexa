@@ -1,15 +1,17 @@
 import { Effect, Data } from "effect";
 import { UserRepo } from "../repos/user.repo";
-import { DbError, RowNotFound, ConstraintViolation } from "../db/database";
+import { DbError, RowNotFound, ConstraintViolation, Sqlite, run } from "../db/database";
 import type { UserRow } from "../../shared/db";
 
 export class UserNotFound extends Data.TaggedError("UserNotFound")<{ id: string }> {}
 export class CannotDeleteSelf extends Data.TaggedError("CannotDeleteSelf")<{}> {}
+export class LastAdminDemote extends Data.TaggedError("LastAdminDemote")<{}> {}
 
 export class UserService extends Effect.Service<UserService>()("Lexa/UserService", {
   dependencies: [UserRepo.Default],
   effect: Effect.gen(function* () {
     const repo = yield* UserRepo;
+    const db = yield* Sqlite;
     const cannotDeleteSelf: Effect.Effect<never, CannotDeleteSelf> = Effect.fail(new CannotDeleteSelf());
 
     return {
@@ -28,16 +30,29 @@ export class UserService extends Effect.Service<UserService>()("Lexa/UserService
           yield* repo.updateRole(id, "admin");
         }),
 
-      demoteToMember: (id: string, currentUserId: string): Effect.Effect<void, DbError | RowNotFound | UserNotFound | ConstraintViolation | CannotDeleteSelf> =>
+      demoteToMember: (id: string, currentUserId: string): Effect.Effect<void, DbError | RowNotFound | UserNotFound | ConstraintViolation | CannotDeleteSelf | LastAdminDemote> =>
         Effect.gen(function* () {
           if (id === currentUserId) {
             yield* cannotDeleteSelf;
             return;
           }
-          yield* repo.findById(id).pipe(
+          const target = yield* repo.findById(id).pipe(
             Effect.catchTag("RowNotFound", () => Effect.fail(new UserNotFound({ id })))
           );
-          yield* repo.updateRole(id, "member");
+          if (target.role !== "admin") return; // demoting a member is an idempotent no-op
+          // Atomic last-admin guard: the COUNT and the role write are one
+          // statement — two concurrent demotes can't both pass with one
+          // admin left (each sees the other's committed change).
+          const changed = yield* run(
+            db,
+            `UPDATE users SET role = 'member', updated_at = datetime('now')
+             WHERE id = ? AND role = 'admin'
+               AND (SELECT COUNT(*) FROM users WHERE role = 'admin') > 1`,
+            id
+          );
+          if (changed === 0) {
+            return yield* new LastAdminDemote();
+          }
         }),
     };
   }),

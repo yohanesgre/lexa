@@ -1,12 +1,16 @@
 import { runMigrations } from "./db/migrate";
 import { mkdirSync, existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { createHash, randomBytes } from "node:crypto";
+import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { Database } from "bun:sqlite";
 import { createApiHandler, createWebhookHandler, createWebhookVerifier } from "./api/http";
 import { createMcpHandler } from "./mcp/server";
-import { verifyApiKey } from "./api/auth-key";
-import { findOrCreateUser } from "./api/auth";
+import { findOrCreateUser, findOrCreateUserByIdentity, adminEmails } from "./api/auth";
+import { verifyAccessAssertion } from "./api/access-auth";
+import { resolveApiKeyIdentity } from "./api/auth-key";
+import { getSetting, setSetting } from "./db/settings";
+
+const MAX_API_BODY = Number(process.env.LXK_MAX_BODY_MB ?? 16) * 1024 * 1024;
 
 let ssrFetch: ((req: Request) => Promise<Response>) | null = null;
 try {
@@ -31,10 +35,20 @@ try {
 } catch {}
 pruneWebhookEvents(DATABASE_PATH);
 seedAdminKey(DATABASE_PATH);
+autoLockSetupIfConfigured(DATABASE_PATH);
+setInterval(() => {
+  try {
+    pruneWebhookEvents(DATABASE_PATH);
+  } catch {}
+}, 3600_000).unref();
 // Sample data is the setup wizard's job (CLI `bun run setup` or web `/setup`).
 // Boot-time seeding only for explicit dev opt-in (LXK_SEED_DEV=1).
 if (process.env.LXK_SEED_DEV === "1") {
   seedDevData(DATABASE_PATH);
+}
+
+if (!process.env.LXK_ACCESS_AUD) {
+  console.warn("Access JWT verification disabled (LXK_ACCESS_AUD unset) — Cf-Access-* headers trusted as-is");
 }
 
 const apiHandlerRaw = createApiHandler(DATABASE_PATH) as unknown as { handler?: (req: Request) => Promise<Response> } | ((req: Request) => Promise<Response>);
@@ -49,6 +63,64 @@ function withSecurityHeaders(res: Response): Response {
   return res;
 }
 
+function tooLargeResponse(): Response {
+  return withSecurityHeaders(new Response(JSON.stringify({ error: { code: "BODY_TOO_LARGE", message: "Request body too large" } }), { status: 413, headers: { "Content-Type": "application/json" } }));
+}
+
+// Streams the request body up to maxBytes; ok:false → caller replies 413.
+// A missing content-length (chunked) is allowed through but the stream is
+// still capped — the total byte count is what matters.
+async function readBodyWithLimit(req: Request, maxBytes: number): Promise<{ ok: true; bytes: ArrayBuffer } | { ok: false }> {
+  const len = Number(req.headers.get("content-length") ?? 0);
+  if (len > maxBytes) return { ok: false };
+  const reader = req.body?.getReader();
+  if (!reader) return { ok: true, bytes: new ArrayBuffer(0) };
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    if (value) {
+      total += value.byteLength;
+      if (total > maxBytes) return { ok: false };
+      chunks.push(value);
+    }
+  }
+  const out = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    out.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return { ok: true, bytes: out.buffer as ArrayBuffer };
+}
+
+function constantTimeTokenEqual(a: string, b: string): boolean {
+  const hexA = createHash("sha256").update(a).digest("hex");
+  const hexB = createHash("sha256").update(b).digest("hex");
+  const bufA = Buffer.from(hexA, "hex");
+  const bufB = Buffer.from(hexB, "hex");
+  if (bufA.length !== bufB.length) return false;
+  return timingSafeEqual(bufA, bufB);
+}
+
+// Instances configured entirely via env (LXK_ADMIN_EMAILS + a key, no web
+// wizard) would leave /api/setup/* key-minting unlocked forever. Lock it at
+// boot: setup_complete=1 iff a key exists AND merged admin emails are set.
+function autoLockSetupIfConfigured(dbPath: string) {
+  const db = new Database(dbPath);
+  try {
+    if (getSetting(db, "setup_complete") === "1") return;
+    const apiKeyCount = (db.prepare("SELECT COUNT(*) c FROM api_keys").get() as { c: number } | null)?.c ?? 0;
+    if (apiKeyCount === 0) return;
+    if (adminEmails(db).length === 0) return;
+    setSetting(db, "setup_complete", "1");
+    console.log("Setup auto-locked (configured via env)");
+  } finally {
+    db.close();
+  }
+}
+
 Bun.serve({
   port: PORT,
   async fetch(req) {
@@ -58,16 +130,29 @@ Bun.serve({
       if (req.method !== "POST") {
         return withSecurityHeaders(new Response(JSON.stringify({ error: { code: "METHOD_NOT_ALLOWED", message: "Only POST is accepted" } }), { status: 405, headers: { "Content-Type": "application/json" } }));
       }
-      return withSecurityHeaders(await mcpHandler(req));
+      const read = await readBodyWithLimit(req, MAX_API_BODY);
+      if (!read.ok) {
+        return tooLargeResponse();
+      }
+      const mcpReq = new Request(req.url, { method: "POST", headers: req.headers, body: read.bytes });
+      return withSecurityHeaders(await mcpHandler(mcpReq));
     }
 
     if (url.pathname.startsWith("/api/")) {
+      const contentLength = Number(req.headers.get("content-length") ?? 0);
+      if (contentLength > MAX_API_BODY) {
+        return tooLargeResponse();
+      }
       // GitHub webhook: HMAC-SHA-256 is the auth (no API-key middleware).
       // Signature verified over the RAW body, constant-time, BEFORE any
       // parsing or processing — mismatch → 401. Ack 200 immediately, then
       // the handler processes fire-and-forget in the background.
       if (url.pathname === "/api/webhooks/github") {
-        const rawBody = await req.arrayBuffer();
+        const read = await readBodyWithLimit(req, 1_000_000);
+        if (!read.ok) {
+          return tooLargeResponse();
+        }
+        const rawBody = read.bytes;
         const signature = req.headers.get("x-hub-signature-256");
         const valid = await verifyWebhook(rawBody, signature);
         if (!valid) {
@@ -79,14 +164,22 @@ Bun.serve({
       }
       const isSetup = url.pathname.startsWith("/api/setup");
       const isHealth = url.pathname === "/api/health";
-      const isForgeDaemon = url.pathname.startsWith("/api/forge/daemon/") || url.pathname.startsWith("/api/forge/runtimes/");
+      const isForgeDaemon = url.pathname.startsWith("/api/forge/daemon/") || url.pathname === "/api/forge/runtimes/register";
       // Forge daemon endpoints accept the daemon token (LXK_FORGE_DAEMON_TOKEN)
       // in place of the API key — the daemon may hold its own credential.
+      // Constant-time comparison (sha256 digest length is fixed, so
+      // timingSafeEqual never sees mismatched buffers).
       const daemonTokenOk = isForgeDaemon && process.env.LXK_FORGE_DAEMON_TOKEN
-        ? req.headers.get("x-forge-token") === process.env.LXK_FORGE_DAEMON_TOKEN
+        ? constantTimeTokenEqual(req.headers.get("x-forge-token") ?? "", process.env.LXK_FORGE_DAEMON_TOKEN)
         : false;
-      if (!isHealth && !isSetup && !daemonTokenOk && !verifyApiKey(req, DATABASE_PATH)) {
-        return withSecurityHeaders(new Response(JSON.stringify({ error: { code: "UNAUTHORIZED", message: "Invalid or missing API key" } }), { status: 401, headers: { "Content-Type": "application/json" } }));
+      if (!isHealth && !isSetup && !daemonTokenOk) {
+        const identity = resolveApiKeyIdentity(req.headers.get("Authorization") ?? "", DATABASE_PATH);
+        if (!identity) {
+          return withSecurityHeaders(new Response(JSON.stringify({ error: { code: "UNAUTHORIZED", message: "Invalid or missing API key" } }), { status: 401, headers: { "Content-Type": "application/json" } }));
+        }
+        if (identity.userId !== null && identity.role !== "admin") {
+          return withSecurityHeaders(new Response(JSON.stringify({ error: { code: "FORBIDDEN", message: "Member API keys are not supported on the REST API yet" } }), { status: 403, headers: { "Content-Type": "application/json" } }));
+        }
       }
       try {
         return withSecurityHeaders(await apiHandler(req));
@@ -96,7 +189,16 @@ Bun.serve({
       }
     }
 
-    const user = findOrCreateUser(req, DATABASE_PATH);
+    let user: ReturnType<typeof findOrCreateUser>;
+    if (process.env.LXK_ACCESS_AUD) {
+      const claims = await verifyAccessAssertion(req);
+      if (!claims) {
+        return withSecurityHeaders(new Response(JSON.stringify({ error: { code: "UNAUTHORIZED", message: "Invalid Access assertion" } }), { status: 401, headers: { "Content-Type": "application/json" } }));
+      }
+      user = findOrCreateUserByIdentity(claims.email, claims.name, DATABASE_PATH);
+    } else {
+      user = findOrCreateUser(req, DATABASE_PATH);
+    }
 
     if (url.pathname === "/health") {
       return new Response(JSON.stringify({ ok: true }), {
