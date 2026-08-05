@@ -166,11 +166,6 @@ const server: Server<unknown> = Bun.serve({
     }
 
     if (url.pathname.startsWith("/api/")) {
-      const contentLength = Number(req.headers.get("content-length") ?? 0);
-      if (contentLength > MAX_API_BODY) {
-        console.warn(`[API] body too large path=${path} declared=${contentLength} bytes`);
-        return tooLargeResponse();
-      }
       // GitHub webhook: HMAC-SHA-256 is the auth (no API-key middleware).
       // Signature verified over the RAW body, constant-time, BEFORE any
       // parsing or processing — mismatch → 401. Ack 200 immediately, then
@@ -192,6 +187,16 @@ const server: Server<unknown> = Bun.serve({
         }
         return withSecurityHeaders(webhookHandler(rawBody, req.headers.get("x-github-delivery") ?? "", req.headers.get("x-github-event") ?? ""));
       }
+      // Stream-cap every other /api body — a chunked/CL-less request must not
+      // bypass the cap (/api/setup/* is an unauthenticated surface).
+      const read = await readBodyWithLimit(req, MAX_API_BODY);
+      if (!read.ok) {
+        console.warn(`[API] body too large path=${path} declared=${req.headers.get("content-length") ?? "unknown"} bytes`);
+        return tooLargeResponse();
+      }
+      // Reconstruct: the original req's stream is consumed — apiHandler must
+      // see the buffered body, not an empty one.
+      const apiReq = new Request(req.url, { method: req.method, headers: req.headers, body: read.bytes });
       const isSetup = url.pathname.startsWith("/api/setup");
       const isHealth = url.pathname === "/api/health";
       const isForgeDaemon = url.pathname.startsWith("/api/forge/daemon/") || url.pathname === "/api/forge/runtimes/register";
@@ -216,7 +221,7 @@ const server: Server<unknown> = Bun.serve({
         }
       }
       try {
-        return withSecurityHeaders(await apiHandler(req));
+        return withSecurityHeaders(await apiHandler(apiReq));
       } catch (err) {
         console.error("[API] Uncaught:", err);
         return withSecurityHeaders(new Response(JSON.stringify({ error: { code: "INTERNAL", message: err instanceof Error ? err.message : String(err) } }), { status: 500, headers: { "Content-Type": "application/json" } }));
@@ -260,9 +265,13 @@ const server: Server<unknown> = Bun.serve({
           "<head>",
           `<head><meta name="lxk-api-key" content="${process.env.LXK_API_KEY}">`
         );
+        // The key-bearing page must never be cached (browser or CDN).
+        const injectedHeaders = new Headers(res.headers);
+        injectedHeaders.set("Cache-Control", "no-store");
+        injectedHeaders.set("X-Content-Type-Options", "nosniff");
         return new Response(injected, {
           status: res.status,
-          headers: res.headers,
+          headers: injectedHeaders,
         });
       }
       return res;
@@ -277,7 +286,7 @@ const server: Server<unknown> = Bun.serve({
 <p>Self-hosted project management for small teams.</p>
 <p>API: <a href="/api/health"><code>/api/health</code></a> · <a href="/api/projects"><code>/api/projects</code></a></p>
 <p>MCP: <code>${url.hostname}:9000</code> (run locally)</p>
-</main></body></html>`, { headers: { "Content-Type": "text/html" } });
+</main></body></html>`, { headers: { "Content-Type": "text/html", "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff" } });
     }
     const filePath = url.pathname;
     const file = Bun.file(`dist/client${filePath}`);

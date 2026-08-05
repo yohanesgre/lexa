@@ -78,7 +78,7 @@ Fixed-window per-IP limiter (600 req / 10 min, constants in `server/api/rate-lim
 **Status: ⬜ STALE** (no longer applicable — `WORKER_URL` field removed or harmless in Bun standalone)
 
 ### 17. No security headers on REST responses
-**Status: ✅ FIXED** (v0.1.0 — `X-Content-Type-Options: nosniff` + `Cache-Control: no-store` on all `/api/*` and `/mcp` responses; `server/entry.ts`)
+**Status: ✅ FIXED** (v0.1.0 — `X-Content-Type-Options: nosniff` + `Cache-Control: no-store` on all `/api/*` and `/mcp` responses; extended 2026-08 to the key-bearing SSR HTML page and the root fallback page — the admin key meta tag must never be cached)
 
 ### 18. `parseInt` unchecked NaN on revisions limit
 **Status: ✅ FIXED** (v0.1.0 — wiki `listRevisions` uses `clampLimit` like the tasks path)

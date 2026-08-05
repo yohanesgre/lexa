@@ -51,7 +51,7 @@ All non-2xx responses share one shape:
 | 409 | `FORGE_ENTITY_IN_USE` | Delete agent/skill still used by forge tasks (details: `{ kind, name, count }`) |
 | 409 | `CONSTRAINT` | Generic constraint-violation fallback (typed codes like `SLUG_TAKEN` / `HAS_CHILDREN` / `OPTION_IN_USE` are raised whenever possible) |
 | 409 | `LAST_ADMIN_DEMOTE` | Demote/remove would leave the instance with no admin |
-| 413 | `BODY_TOO_LARGE` | Request body exceeds `LXK_MAX_BODY_MB` (default 16) — early gate in `server/entry.ts`, before auth |
+| 413 | `BODY_TOO_LARGE` | Request body exceeds `LXK_MAX_BODY_MB` (default 16) — early gate in `server/entry.ts`, before auth; stream-capped, so chunked/CL-less bodies are capped too |
 | 422 | `REQUIRED_FIELD` | Column's `required_fields` not satisfied (details: `{ field, column }`) |
 | 422 | `NEIGHBOR_NOT_IN_COLUMN` | `beforeTaskId`/`afterTaskId` not in target column (details: `{ taskId }`) |
 | 422 | `INVALID_OPTION` | Unknown priority/type option id, duplicate label, or empty option list (details: `{ optionId? }`) |
