@@ -12,6 +12,36 @@
 | Auth | `Authorization: Bearer lxk_<base62(43)>` (must match `^lxk_[0-9A-Za-z]{43}$`) — same keys as REST. Missing/malformed/unknown key → HTTP 401 with JSON-RPC error code `-32001` ("Missing authorization" / "Invalid API key") |
 | Access bypass | `/mcp` is on a Cloudflare Access **bypass** policy — Bearer key is the only auth on this route |
 
+## Remote MCP (client machines)
+
+Use this when the agent runs on a machine that does **not** have `lexa-cli`
+installed — e.g. a client workstation that only reads/updates tasks. The hosting
+machine itself can just as well use `lexa-cli` locally; the MCP endpoint is for
+agents without the CLI. No extra server-side setup: `/mcp` is already
+Access-bypassed, TLS comes from the tunnel, and Bearer keys are the auth.
+
+```json
+{
+  "mcpServers": {
+    "lexa": {
+      "type": "http",
+      "url": "https://lexa.example.com/mcp",
+      "headers": { "Authorization": "Bearer lxk_..." }
+    }
+  }
+}
+```
+
+- **One key per client machine** — create the key in Settings → API keys, keep it
+  only on that machine; revocation is then per-client. An unlinked key is `admin`;
+  a user-linked key inherits the user's role and project grants (see Access Control).
+- **Rate limited per client IP** — 600 req / 10 min default (`server/api/rate-limit.ts`
+  constants). Agents behind a shared egress NAT all share one bucket; raise `max`
+  if a fleet of clients trips it.
+- **16 MB body cap** applies; responses are JSON-RPC envelopes (never raw HTML).
+- The local `lexa-cli` path (REST + Bearer) and the remote MCP path are
+  interchangeable — same keys, same authorization model.
+
 ## Access Control
 
 Keys are **not** blanket read/write. Access is role-scoped per project:
@@ -55,13 +85,13 @@ Tool failures return MCP-standard `isError: true` with a JSON text payload:
 {
   "content": [{
     "type": "text",
-    "text": "{\"code\":\"WIP_LIMIT\",\"message\":\"Column 'In Progress' is at its WIP limit of 4\",\"details\":{\"column\":\"In Progress\",\"limit\":4}}"
+    "text": "{\"code\":\"WIP_LIMIT\",\"message\":\"Column 'In Progress' is at its WIP limit of 4\",\"details\":{\"column\":\"In Progress\",\"limit\":4,\"current\":4}}"
   }],
   "isError": true
 }
 ```
 
-Codes mirror the REST catalog: `PROJECT_NOT_FOUND`, `COLUMN_NOT_FOUND`, `SWIMLANE_NOT_FOUND`, `TASK_NOT_FOUND`, `PAGE_NOT_FOUND`, `SLUG_TAKEN`, `HAS_CHILDREN`, `WIP_LIMIT`, `ALREADY_LINKED`, `REQUIRED_FIELD`, `NEIGHBOR_NOT_IN_COLUMN`, `OPTION_IN_USE`, `INVALID_OPTION`, `INVALID_API_KEY`, `MISSING_AUTH`, `FORBIDDEN`, `USER_NOT_FOUND`, `API_KEY_NOT_FOUND`, `CANNOT_DELETE_SELF`, `GITHUB_API_ERROR`, `DATABASE_ERROR`, `CONSTRAINT`, `INTERNAL`.
+Codes mirror the REST catalog: `PROJECT_NOT_FOUND`, `COLUMN_NOT_FOUND`, `SWIMLANE_NOT_FOUND`, `TASK_NOT_FOUND`, `PAGE_NOT_FOUND`, `SLUG_TAKEN`, `HAS_CHILDREN`, `WIP_LIMIT`, `ALREADY_LINKED`, `REQUIRED_FIELD`, `NEIGHBOR_NOT_IN_COLUMN`, `OPTION_IN_USE`, `INVALID_OPTION`, `INVALID_ARGS`, `INVALID_API_KEY`, `MISSING_AUTH`, `FORBIDDEN`, `USER_NOT_FOUND`, `API_KEY_NOT_FOUND`, `CANNOT_DELETE_SELF`, `LAST_ADMIN_DEMOTE`, `GITHUB_API_ERROR`, `DATABASE_ERROR`, `CONSTRAINT`, `INTERNAL`.
 
 ## Response Shapes
 

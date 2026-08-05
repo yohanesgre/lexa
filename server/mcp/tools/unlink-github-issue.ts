@@ -15,6 +15,11 @@ export const tool = {
   handler: (args: any) =>
     Effect.gen(function* () {
       const taskRepo = yield* TaskRepo;
+      yield* taskRepo.findById(args.taskId).pipe(
+        Effect.catchTag("RowNotFound", () =>
+          Effect.fail({ code: "TASK_NOT_FOUND", message: `Task not found: ${args.taskId}` })
+        )
+      );
       yield* taskRepo.unlinkGithubIssue(args.taskId, args.issueId);
       return { unlinked: true };
     }),

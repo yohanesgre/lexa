@@ -124,11 +124,22 @@ function methodNotFound(id: string | number | null): object {
 }
 
 function buildToolError(e: unknown): object {
-  const error = e as { _tag: string } & Record<string, unknown>;
-  const code = errorCodeMap[error._tag] ?? "INTERNAL";
-  const message = errorMessage(error);
-  const details = errorDetails(error);
-  return { code, message, details };
+  const error = e as { _tag?: string; code?: string; message?: string; details?: unknown } & Record<string, unknown>;
+  const tag = error._tag;
+  if (typeof tag === "string" && tag) {
+    const tagged = { ...error, _tag: tag };
+    return {
+      code: errorCodeMap[tag] ?? "INTERNAL",
+      message: errorMessage(tagged),
+      details: errorDetails(tagged),
+    };
+  }
+  // Inline fail objects ({ code, message, details }) from tools — no _tag.
+  return {
+    code: typeof error.code === "string" ? error.code : "INTERNAL",
+    message: typeof error.message === "string" ? error.message : "Internal server error",
+    details: (error.details ?? {}) as Record<string, unknown>,
+  };
 }
 
 export class McpServer extends Effect.Service<McpServer>()("Lexa/McpServer", {
@@ -322,7 +333,18 @@ export class McpServer extends Effect.Service<McpServer>()("Lexa/McpServer", {
           return new Response(JSON.stringify(jsonRpcError(request.id ?? null, -32600, 'Invalid Request: jsonrpc must be "2.0"')), { status: 200, headers });
         }
 
-        const response = yield* dispatch(request, authContext);
+        const response = yield* dispatch(request, authContext).pipe(
+          // Unhandled tool failures (e.g. checkProjectAccess denial) must
+          // surface as a tool error envelope — never a thrown rejection/500.
+          Effect.catchAll((e) => {
+            const err = buildToolError(e as any);
+            return Effect.succeed({
+              jsonrpc: "2.0",
+              id: request.id ?? null,
+              result: { content: [{ type: "text", text: JSON.stringify(err) }], isError: true },
+            });
+          })
+        );
         return new Response(JSON.stringify(response), { status: 200, headers });
       });
 

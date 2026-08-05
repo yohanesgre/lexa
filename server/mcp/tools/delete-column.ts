@@ -19,6 +19,9 @@ export const tool = {
       if (!auth || auth.role !== "admin") {
         return { isError: true, error: { code: "FORBIDDEN", message: "Admin access required" } };
       }
+      if (typeof args.column !== "string" || args.column === "") {
+        return { isError: true, error: { code: "INVALID_ARGS", message: "column is required" } };
+      }
 
       const project = yield* resolveProject(args.project);
       const columnService = yield* ColumnService;

@@ -329,8 +329,15 @@ export class TaskService extends Effect.Service<TaskService>()("Lexa/TaskService
               position,
               projectId: task.projectId,
             }, { bypassWip: opts?.bypassGuards });
-            if (result.changes === 0)
-              return yield* new WipLimitExceeded({ column: column.name, limit: column.wipLimit ?? 0 });
+            if (result.changes === 0) {
+              const count = yield* queryAll<{ cnt: number }>(
+                db,
+                `SELECT COUNT(*) as cnt FROM tasks WHERE project_id = ? AND column_id = ? AND archived_at IS NULL`,
+                task.projectId,
+                target.columnId
+              ).pipe(Effect.map((rows) => rows[0]?.cnt ?? 0));
+              return yield* new WipLimitExceeded({ column: column.name, limit: column.wipLimit ?? 0, current: count });
+            }
             return result.task;
           });
 
