@@ -39,11 +39,13 @@ try {
   db.close();
 } catch {}
 pruneWebhookEvents(DATABASE_PATH);
+pruneRuntimeEvents(DATABASE_PATH);
 seedAdminKey(DATABASE_PATH);
 autoLockSetupIfConfigured(DATABASE_PATH);
 setInterval(() => {
   try {
     pruneWebhookEvents(DATABASE_PATH);
+    pruneRuntimeEvents(DATABASE_PATH);
   } catch {}
 }, 3600_000).unref();
 // Sample data is the setup wizard's job (CLI `bun run setup` or web `/setup`).
@@ -291,6 +293,17 @@ function pruneWebhookEvents(dbPath: string) {
   const db = new Database(dbPath);
   try {
     db.exec("DELETE FROM webhook_events WHERE received_at < datetime('now', '-7 days')");
+  } finally {
+    db.close();
+  }
+}
+
+function pruneRuntimeEvents(dbPath: string) {
+  const db = new Database(dbPath);
+  try {
+    // Terminal-state setup events older than 7 days. Pending/claimed events
+    // stay: a claimed event is reclaimable for 2 minutes after a crash.
+    db.exec("DELETE FROM runtime_events WHERE status IN ('completed', 'failed') AND finished_at < datetime('now', '-7 days')");
   } finally {
     db.close();
   }

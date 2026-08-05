@@ -441,6 +441,13 @@ const MachineHeartbeatResponse = Schema.Struct({
 const MachineRegisterInput = Schema.Struct({
   id: Schema.String,
   hostname: Schema.String,
+  secret: Schema.optionalWith(Schema.String, { default: () => "" }),
+});
+// Register returns the minted secret exactly once (first registration only);
+// re-registration no-ops without a secret.
+const MachineRegisterResponse = Schema.Struct({
+  machine: MachineSchema,
+  secret: Schema.NullOr(Schema.String),
 });
 const MachineIdPath = Schema.Struct({ id: Schema.String });
 const DaemonErrorInput = Schema.Struct({
@@ -620,7 +627,7 @@ const forgeGroup = HttpApiGroup.make("forge")
   .add(HttpApiEndpoint.post("machineHeartbeat", "/forge/machines/heartbeat")
     .setPayload(MachineHeartbeatInput).addSuccess(MachineHeartbeatResponse))
   .add(HttpApiEndpoint.post("registerMachine", "/forge/machines/register")
-    .setPayload(MachineRegisterInput).addSuccess(MachineSchema))
+    .setPayload(MachineRegisterInput).addSuccess(MachineRegisterResponse))
   .add(HttpApiEndpoint.get("listMachines", "/forge/machines")
     .addSuccess(MachineListResponse))
   .add(HttpApiEndpoint.del("removeMachine", "/forge/machines/:id")
@@ -1436,7 +1443,7 @@ const forgeLive = HttpApiBuilder.group(LexaApi, "forge", (handlers) =>
     .handle("claimRuntimeEvent", (req) =>
       respond(Effect.gen(function* () {
         const service = yield* RuntimeEventService;
-        return yield* service.claimForMachine(req.payload.machineId);
+        return yield* service.claimForMachine(req.payload.machineId, req.request.headers["x-machine-secret"] ?? "");
       }))
     )
     .handle("completeRuntimeEvent", (req) =>
@@ -1508,6 +1515,7 @@ const forgeLive = HttpApiBuilder.group(LexaApi, "forge", (handlers) =>
         return yield* machineService.register({
           id: req.payload.id,
           hostname: req.payload.hostname,
+          secret: req.payload.secret,
         });
       }))
     )
