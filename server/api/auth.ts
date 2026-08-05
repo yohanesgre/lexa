@@ -20,6 +20,10 @@ export function findOrCreateUser(req: Request, dbPath: string): LexaUser | null 
 
   const name = req.headers.get("Cf-Access-Authenticated-User-Name") || email.split("@")[0];
 
+  return findOrCreateUserByIdentity(email, name, dbPath);
+}
+
+export function findOrCreateUserByIdentity(email: string, name: string, dbPath: string): LexaUser | null {
   const db = new Database(dbPath);
   db.exec("PRAGMA journal_mode = WAL");
   db.exec("PRAGMA foreign_keys = ON");

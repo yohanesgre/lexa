@@ -3,16 +3,6 @@
 -- Idempotent — deletes old seed rows then re-inserts.
 
 -- ============================================================
--- API Keys — for local MCP testing
--- ============================================================
-DELETE FROM api_keys WHERE id LIKE 'seed-%';
-
--- Raw key: lxk_devseed000000000000000000000000000
--- Usage: Authorization: Bearer lxk_devseed000000000000000000000000000
-INSERT INTO api_keys (id, name, key_hash, created_at)
-VALUES ('seed-key-01', 'dev-local', '5924df2b48817e5557d6ffff89c997306f5dad1d679563891bc7e61ae6ff8722', datetime('now'));
-
--- ============================================================
 -- Users — beyond migration default admin
 -- ============================================================
 DELETE FROM user_project_roles WHERE user_id IN (SELECT id FROM users WHERE email IN ('dev1@lexa.local', 'dev2@lexa.local', 'qa@lexa.local', 'artist@lexa.local', 'composer@lexa.local', 'pm@lexa.local'));

@@ -1,6 +1,6 @@
 import { Data } from "effect";
 
-export { UserNotFound, CannotDeleteSelf } from "../services/user.service";
+export { UserNotFound, CannotDeleteSelf, LastAdminDemote } from "../services/user.service";
 
 export class TaskNotFound extends Data.TaggedError("TaskNotFound")<{ id: string }> {}
 export class ProjectNotFound extends Data.TaggedError("ProjectNotFound")<{ identifier: string }> {}
@@ -77,6 +77,8 @@ export const errorCodeMap: Record<string, string> = {
   ProjectAccessDenied: "FORBIDDEN",
   UserNotFound: "USER_NOT_FOUND",
   CannotDeleteSelf: "CANNOT_DELETE_SELF",
+  LastAdminDemote: "LAST_ADMIN_DEMOTE",
+  ApiKeyNameEmpty: "API_KEY_NAME_EMPTY",
   Forbidden: "FORBIDDEN",
   SetupLocked: "SETUP_LOCKED",
   SearchError: "SEARCH_ERROR",
@@ -117,6 +119,7 @@ export function errorToStatus(error: { _tag: string }): number {
     case "TaskLinkCycle":
     case "ForgeEntityInUse":
     case "ConstraintViolation":
+    case "LastAdminDemote":
       return 409;
     case "RequiredFieldMissing":
     case "NeighborNotInColumn":
@@ -124,6 +127,8 @@ export function errorToStatus(error: { _tag: string }): number {
     case "InvalidTaskLink":
     case "ForgeBuiltinDelete":
     case "SearchError":
+    case "ApiKeyNameEmpty":
+    case "SourceUnreachable":
       return 422;
     case "InvalidKey":
     case "MissingAuth":
@@ -131,6 +136,7 @@ export function errorToStatus(error: { _tag: string }): number {
     case "GithubWebhookError":
       return 400;
     case "GithubApiError":
+    case "SourceFetchError":
       return 502;
     case "DbError":
       return 500;
@@ -208,6 +214,10 @@ export function errorMessage(error: { _tag: string } & Record<string, unknown>):
       return "User not found";
     case "CannotDeleteSelf":
       return "Cannot modify your own account";
+    case "LastAdminDemote":
+      return "Cannot demote the last admin";
+    case "ApiKeyNameEmpty":
+      return "API key name is required";
     case "ProjectAccessDenied":
       return `Access denied to project '${error.project}'`;
     case "Forbidden":

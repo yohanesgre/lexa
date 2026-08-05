@@ -1866,9 +1866,14 @@ const tasksLive = HttpApiBuilder.group(LexaApi, "tasks", (handlers) =>
         });
         const column = yield* columnService.getById(req.payload.columnId);
         if (column.githubState && task.githubs.length > 0) {
-          // Best-effort, non-blocking: a GitHub failure never fails the move.
+          // Best-effort, non-blocking: a GitHub failure never fails the move
+          // (the move already committed — failing here would make clients
+          // retry and risk double work; echo suppression makes a re-sync
+          // idempotent). Log and skip.
           yield* githubService.syncStateFromLexa(task.id, column.githubState).pipe(
-            Effect.catchTag("GithubApiError", (e) => Effect.logWarning(`[GitHub] sync failed for task ${task.id}`, e))
+            Effect.catchTag("GithubApiError", (e) => Effect.logWarning(`[GitHub] sync failed for task ${task.id}`, e)),
+            Effect.catchTag("DbError", (e) => Effect.logWarning(`[GitHub] sync failed for task ${task.id}`, e)),
+            Effect.catchTag("ConstraintViolation", (e) => Effect.logWarning(`[GitHub] sync failed for task ${task.id}`, e))
           );
         }
         return formatTask(task);
@@ -2123,12 +2128,12 @@ const adminLive = HttpApiBuilder.group(LexaApi, "admin", (handlers) =>
     )
     .handle("updateUserRole", (req) =>
       respond(Effect.gen(function* () {
-        yield* requireAdmin(req);
+        const identity = yield* requireAdmin(req);
         const service = yield* UserService;
         if (req.payload.role === "admin") {
           yield* service.promoteToAdmin(req.path.id);
         } else {
-          yield* service.demoteToMember(req.path.id, "0");
+          yield* service.demoteToMember(req.path.id, identity.userId ?? "");
         }
         const user = yield* service.getById(req.path.id);
         return { id: user.id, email: user.email, name: user.name, role: user.role, createdAt: user.created_at, lastSeen: user.last_seen };
@@ -2155,8 +2160,12 @@ const adminLive = HttpApiBuilder.group(LexaApi, "admin", (handlers) =>
       respond(Effect.gen(function* () {
         yield* requireAdmin(req);
         const service = yield* UserProjectRoleService;
+        const projectRepo = yield* ProjectRepo;
         yield* service.setRole(req.path.id, req.payload.projectId, req.payload.role);
-        return { projectId: req.payload.projectId, projectSlug: req.payload.projectId, role: req.payload.role };
+        const project = yield* projectRepo.findById(req.payload.projectId).pipe(
+          Effect.catchTag("RowNotFound", () => Effect.succeed(null))
+        );
+        return { projectId: req.payload.projectId, projectSlug: project ? (project as any).slug : "unknown", role: req.payload.role };
       }))
     )
     .handle("removeUserProjectRole", (req) =>
