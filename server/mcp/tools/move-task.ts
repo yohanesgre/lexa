@@ -1,10 +1,12 @@
 import { Effect } from "effect";
 import { TaskService } from "../../services/task.service";
+import { GitHubService } from "../../services/github.service";
 import { ColumnRepo } from "../../repos/column.repo";
 import { SwimlaneRepo } from "../../repos/swimlane.repo";
 import { FieldConfigRepo } from "../../repos/field-config.repo";
 import { resolveColumn } from "../resolve";
 import { optionLabel } from "../field-options";
+import { TaskNotFound } from "../../api/errors";
 import type { Swimlane, Column } from "../../../shared/types";
 
 export const tool = {
@@ -31,7 +33,13 @@ export const tool = {
         swimlaneId: task.swimlaneId,
         beforeTaskId: args.beforeTaskId,
         afterTaskId: args.afterTaskId,
-      });
+      }).pipe(
+        // A RowNotFound here is a missing neighbor (the task itself and the
+        // column were already resolved above) — REST semantics: TASK_NOT_FOUND.
+        Effect.catchTag("RowNotFound", () =>
+          new TaskNotFound({ id: args.beforeTaskId ?? args.afterTaskId ?? "" })
+        )
+      );
 
       const columnRepo = yield* ColumnRepo;
       let resultColumn: Column = column;
@@ -39,6 +47,18 @@ export const tool = {
         Effect.catchTag("RowNotFound", () => Effect.succeed(column))
       );
       resultColumn = colResult;
+
+      if (resultColumn.githubState && moved.githubs.length > 0) {
+        // Best-effort, non-blocking — mirrors the REST move handler: a GitHub
+        // failure never fails the move (echo suppression makes a re-sync
+        // idempotent). Log and skip.
+        const githubService = yield* GitHubService;
+        yield* githubService.syncStateFromLexa(moved.id, resultColumn.githubState).pipe(
+          Effect.catchTag("GithubApiError", (e) => Effect.logWarning(`[GitHub] sync failed for task ${moved.id}`, e)),
+          Effect.catchTag("DbError", (e) => Effect.logWarning(`[GitHub] sync failed for task ${moved.id}`, e)),
+          Effect.catchTag("ConstraintViolation", (e) => Effect.logWarning(`[GitHub] sync failed for task ${moved.id}`, e))
+        );
+      }
 
       const swimlaneRepo = yield* SwimlaneRepo;
       let swimlane: Swimlane | null = null;

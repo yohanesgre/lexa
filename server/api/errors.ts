@@ -7,7 +7,7 @@ export class ProjectNotFound extends Data.TaggedError("ProjectNotFound")<{ ident
 export class ColumnNotFound extends Data.TaggedError("ColumnNotFound")<{ id: string }> {}
 export class SwimlaneNotFound extends Data.TaggedError("SwimlaneNotFound")<{ id: string }> {}
 export class WikiPageNotFound extends Data.TaggedError("WikiPageNotFound")<{ id: string }> {}
-export class WipLimitExceeded extends Data.TaggedError("WipLimitExceeded")<{ column: string; limit: number }> {}
+export class WipLimitExceeded extends Data.TaggedError("WipLimitExceeded")<{ column: string; limit: number; current: number }> {}
 export class SlugTaken extends Data.TaggedError("SlugTaken")<{ slug: string }> {}
 export class HasChildren extends Data.TaggedError("HasChildren")<{ count: number }> {}
 export class NeighborNotInColumn extends Data.TaggedError("NeighborNotInColumn")<{ taskId: string }> {}

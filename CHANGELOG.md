@@ -19,6 +19,8 @@ User-facing notes per release: `docs/RELEASE_NOTES.md`.
 
 - **Request body cap** — `LXK_MAX_BODY_MB` (default 16 MB) enforced early in `server/entry.ts` (413 `BODY_TOO_LARGE`)
 - **DELETE endpoints return 204** — 7 routes aligned to the API.md contract (client already handled 204)
+- **MCP error paths hardened (oracle audit)** — authz denials return a FORBIDDEN tool envelope instead of a bare HTTP 500; inline tool errors (`INVALID_OPTION` + `available*`, `TASK_NOT_FOUND`) no longer degrade to `INTERNAL`; MCP move now triggers best-effort GitHub state sync like the REST move; missing-arg guards (`INVALID_ARGS`) in column tools; `unlink_github_issue` 404s properly; `WipLimitExceeded` carries `current` in details. New `server/mcp/server.test.ts`: 9 regression tests (authz matrix, error codes, JSON-RPC validation, 35 tools).
+- **Rate limiter IP trust** — `cf-connecting-ip` accepted only from private socket peers (tunnel sidecar); direct-origin requests are keyed by socket IP (`isPrivateIp` helper + tests)
 - **Docs** — SECURITY.md fully closed; `docs/RATE_LIMITING.md` added; API.md error table corrected to implemented statuses (502/422 `SOURCE_*`, 409 `CONSTRAINT`/`LAST_ADMIN_DEMOTE`, 413/429 early gates); stale plan docs removed
 ## [0.1.0] - 2026-08-04
 
