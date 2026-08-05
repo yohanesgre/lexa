@@ -19,7 +19,7 @@ export function createApiMiddleware(db: Database) {
       const declared = Number(request.headers["content-length"] ?? 0);
       if (declared > MAX_API_BODY) {
         console.warn(`[API] body too large path=${path} declared=${request.headers["content-length"] ?? "unknown"} bytes`);
-        return yield* HttpServerResponse.json(
+        return HttpServerResponse.unsafeJson(
           { error: { code: "BODY_TOO_LARGE", message: "Request body too large" } },
           { status: 413 }
         );
