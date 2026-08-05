@@ -63,3 +63,7 @@ export function createRateLimiter(opts?: RateLimiterOptions): RateLimiter {
     },
   };
 }
+
+// Shared instance across surfaces (API middleware + entry's /mcp path) so
+// buckets count traffic from the same IP against one window.
+export const apiRateLimiter = createRateLimiter();
