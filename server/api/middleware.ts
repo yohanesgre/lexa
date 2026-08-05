@@ -25,14 +25,20 @@ export function createApiMiddleware(db: Database) {
 
       const isSetup = path.startsWith("/api/setup");
       const isHealth = path === "/api/health";
+      // Forge daemon endpoints accept the daemon token (LXK_FORGE_DAEMON_TOKEN)
+      // in place of the API key — the daemon may hold its own credential.
+      const isForgeDaemon = path.startsWith("/api/forge/daemon/") || path === "/api/forge/runtimes/register";
 
       // Rate limit before auth: a blocked IP stays blocked regardless of key.
-      // IP is resolved in entry (socket only visible there) and stamped on the
-      // reconstructed Request — any inbound x-lexa-remote-ip is deleted first.
+      // Only the token-gated forge-daemon/runtimes-register surface is exempt
+      // (a chatty agent's log POSTs must not share the IP bucket); setup and
+      // health are rate-limited again. IP is resolved in entry (socket only
+      // visible there) and stamped on the reconstructed Request — any inbound
+      // x-lexa-remote-ip is deleted first.
       const stampedIp = request.headers[X_LEXA_REMOTE_IP] ?? "";
       const cfIp = request.headers["cf-connecting-ip"];
       const ip = stampedIp && isPrivateIp(stampedIp) && cfIp ? cfIp : (stampedIp || cfIp || "unknown");
-      if (!isSetup && !isHealth && !apiRateLimiter.check(ip)) {
+      if (!isForgeDaemon && !apiRateLimiter.check(ip)) {
         const retryAfter = Math.ceil(apiRateLimiter.retryAfterMs(ip) / 1000);
         console.warn(`[API] rate limited ip=${ip} retryAfter=${retryAfter}s`);
         return withSecurityHeaders(
@@ -54,7 +60,6 @@ export function createApiMiddleware(db: Database) {
         );
       }
 
-      const isForgeDaemon = path.startsWith("/api/forge/daemon/") || path === "/api/forge/runtimes/register";
       const daemonTokenOk = isForgeDaemon && process.env.LXK_FORGE_DAEMON_TOKEN
         ? constantTimeTokenEqual(request.headers["x-forge-token"] ?? "", process.env.LXK_FORGE_DAEMON_TOKEN)
         : false;
