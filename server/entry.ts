@@ -15,13 +15,18 @@ import type { Server } from "bun";
 let ssrFetch: ((req: Request) => Promise<Response>) | null = null;
 try {
   // @ts-expect-error built artifact (vite build emits dist/server/server.js); typed at the cast below
-  const mod = await import("../dist/server/server.js");
-  ssrFetch = (mod as any).default?.fetch ?? (mod as any).fetch ?? null;
+  const mod = (await import("../dist/server/server.js")) as unknown as {
+    default?: { fetch?: (req: Request) => Promise<Response> };
+    fetch?: (req: Request) => Promise<Response>;
+  };
+  ssrFetch = mod.default?.fetch ?? mod.fetch ?? null;
 } catch {
   console.warn("SSR handler not available — frontend will use fallback");
 }
 
-const PORT = parseInt(process.env.PORT || "3000", 10);
+const rawPort = Number(process.env.PORT ?? 3000);
+const PORT = Number.isInteger(rawPort) && rawPort > 0 ? rawPort : 3000;
+if (PORT !== rawPort) console.warn(`Invalid PORT (${process.env.PORT}) — falling back to ${PORT}`);
 const DATABASE_PATH = process.env.DATABASE_PATH || "/app/data/lexa.db";
 
 mkdirSync(dirname(DATABASE_PATH), { recursive: true });
@@ -116,28 +121,23 @@ const server: Server<unknown> = Bun.serve({
     const url = new URL(req.url);
 
     const path = url.pathname;
-    const isApiSurface = path === "/mcp" || path.startsWith("/api/");
-    if (isApiSurface && !path.startsWith("/api/webhooks/")) {
-      // /api rate limiting lives in the HttpApi middleware (setup/health
-      // exempt); /mcp is not HttpApi so its limiter call stays here.
-      if (path === "/mcp") {
-        const socketIp = server.requestIP(req)?.address;
-        const cfIp = req.headers.get("cf-connecting-ip");
-        const ip = socketIp && isPrivateIp(socketIp) && cfIp ? cfIp : (socketIp ?? cfIp ?? "unknown");
-        if (!apiRateLimiter.check(ip)) {
-          const retryAfter = Math.ceil(apiRateLimiter.retryAfterMs(ip) / 1000);
-          console.warn(`[API] rate limited ip=${ip} retryAfter=${retryAfter}s`);
-          return withSecurityHeaders(
-            new Response(JSON.stringify({ error: { code: "RATE_LIMITED", message: "Rate limit exceeded" } }), {
-              status: 429,
-              headers: { "Content-Type": "application/json", "Retry-After": String(retryAfter) },
-            })
-          );
-        }
-      }
-    }
 
     if (url.pathname === "/mcp") {
+      // /api rate limiting lives in the HttpApi middleware; /mcp is not
+      // HttpApi, so its limiter call stays here (shared bucket).
+      const socketIp = server.requestIP(req)?.address;
+      const cfIp = req.headers.get("cf-connecting-ip");
+      const ip = socketIp && isPrivateIp(socketIp) && cfIp ? cfIp : (socketIp ?? cfIp ?? "unknown");
+      if (!apiRateLimiter.check(ip)) {
+        const retryAfter = Math.ceil(apiRateLimiter.retryAfterMs(ip) / 1000);
+        console.warn(`[API] rate limited ip=${ip} retryAfter=${retryAfter}s`);
+        return withSecurityHeaders(
+          new Response(JSON.stringify({ error: { code: "RATE_LIMITED", message: "Rate limit exceeded" } }), {
+            status: 429,
+            headers: { "Content-Type": "application/json", "Retry-After": String(retryAfter) },
+          })
+        );
+      }
       if (req.method !== "POST") {
         return withSecurityHeaders(new Response(JSON.stringify({ error: { code: "METHOD_NOT_ALLOWED", message: "Only POST is accepted" } }), { status: 405, headers: { "Content-Type": "application/json" } }));
       }
@@ -199,7 +199,7 @@ const server: Server<unknown> = Bun.serve({
         return await apiHandler(apiReq);
       } catch (err) {
         console.error("[API] Uncaught:", err);
-        return new Response(JSON.stringify({ error: { code: "INTERNAL", message: err instanceof Error ? err.message : String(err) } }), { status: 500, headers: { "Content-Type": "application/json" } });
+        return withSecurityHeaders(new Response(JSON.stringify({ error: { code: "INTERNAL", message: "Internal error" } }), { status: 500, headers: { "Content-Type": "application/json" } }));
       }
     }
 
@@ -220,8 +220,9 @@ const server: Server<unknown> = Bun.serve({
       });
     }
 
-    // Static assets from dist/client/ — serve before SSR
-    if (url.pathname.startsWith("/assets/") || url.pathname.startsWith("/favicon")) {
+    // Static assets from dist/client/ — serve before SSR. `..` is rejected
+    // (defense in depth; Bun's file.exists already refuses deep traversal).
+    if ((url.pathname.startsWith("/assets/") || url.pathname.startsWith("/favicon")) && !url.pathname.includes("..")) {
       const file = Bun.file(`dist/client${url.pathname}`);
       if (await file.exists()) {
         return new Response(file);
@@ -229,7 +230,13 @@ const server: Server<unknown> = Bun.serve({
     }
 
     if (ssrFetch) {
-      const res = await ssrFetch(req);
+      let res: Response;
+      try {
+        res = await ssrFetch(req);
+      } catch (err) {
+        console.error("[SSR] Uncaught:", err);
+        return withSecurityHeaders(new Response("Internal error", { status: 500, headers: { "Content-Type": "text/plain" } }));
+      }
       // Inject the server's current API key into the HTML so the browser can
       // authenticate without a build-time baked key. This keeps :3000 working
       // even after `bun run setup` rotates the key in .env (the built bundle
@@ -260,12 +267,12 @@ const server: Server<unknown> = Bun.serve({
 <h1>Lexa</h1>
 <p>Self-hosted project management for small teams.</p>
 <p>API: <a href="/api/health"><code>/api/health</code></a> · <a href="/api/projects"><code>/api/projects</code></a></p>
-<p>MCP: <code>${url.hostname}:9000</code> (run locally)</p>
+<p>MCP: <code>/mcp</code> (streamable HTTP, Bearer key)</p>
 </main></body></html>`, { headers: { "Content-Type": "text/html", "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff" } });
     }
     const filePath = url.pathname;
     const file = Bun.file(`dist/client${filePath}`);
-    if (await file.exists()) {
+    if (!url.pathname.includes("..") && await file.exists()) {
       return new Response(file);
     }
 
@@ -304,8 +311,11 @@ function seedAdminKey(dbPath: string) {
 
     if (process.env.LXK_API_KEY) {
       console.log(`Seeded admin API key from LXK_API_KEY`);
-    } else {
+    } else if (process.stdout.isTTY) {
+      // Interactive boot only — container logs must not persist the raw key.
       console.log(`\n⚡ Admin API key created: ${apiKey}\n`);
+    } else {
+      console.log("Admin API key generated — set LXK_API_KEY for non-interactive boots (key not printed to logs)");
     }
   } finally {
     db.close();
