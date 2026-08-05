@@ -1,5 +1,6 @@
 import { Context, Effect, Layer, Data } from "effect";
 import { Database } from "bun:sqlite";
+import { chmodSync, existsSync } from "node:fs";
 
 export class DbError extends Data.TaggedError("DbError")<{ message: string; cause?: unknown }> {}
 export class RowNotFound extends Data.TaggedError("RowNotFound")<{ table: string }> {}
@@ -7,10 +8,22 @@ export class ConstraintViolation extends Data.TaggedError("ConstraintViolation")
 
 export class Sqlite extends Context.Tag("Lexa/Sqlite")<Sqlite, Database>() {}
 
+// Transaction nesting depth. Single-threaded server — a plain counter is safe.
+// withTx()/batch() check it to avoid BEGIN/transaction inside an open tx
+// (SQLite forbids nested transactions on one connection).
+let txDepth = 0;
+
 export function initSqlite(dbPath: string): Layer.Layer<Sqlite> {
   const db = new Database(dbPath);
   db.exec("PRAGMA journal_mode = WAL");
   db.exec("PRAGMA foreign_keys = ON");
+  db.exec("PRAGMA busy_timeout = 5000");
+  // DB file + WAL/SHM companions hold task/wiki content — keep them user-only.
+  try { chmodSync(dbPath, 0o600); } catch {}
+  for (const suffix of ["-wal", "-shm"]) {
+    const p = dbPath + suffix;
+    if (existsSync(p)) { try { chmodSync(p, 0o600); } catch {} }
+  }
   return Layer.succeed(Sqlite, db);
 }
 
@@ -49,7 +62,12 @@ export function run(db: Database, sql: string, ...params: unknown[]): Effect.Eff
 export function batch(db: Database, stmts: { sql: string; params: unknown[] }[]): Effect.Effect<void, ConstraintViolation | DbError> {
   return Effect.try({
     try: () => {
-      db.transaction(() => { for (const { sql, params } of stmts) db.prepare(sql).run(...params); })();
+      if (txDepth > 0) {
+        // Inside an open withTx — run directly, participate in the outer tx.
+        for (const { sql, params } of stmts) db.prepare(sql).run(...params);
+      } else {
+        db.transaction(() => { for (const { sql, params } of stmts) db.prepare(sql).run(...params); })();
+      }
     },
     catch: (e) => {
       const msg = String(e);
@@ -58,5 +76,30 @@ export function batch(db: Database, stmts: { sql: string; params: unknown[] }[])
       }
       return new DbError({ message: msg, cause: e });
     },
+  });
+}
+
+export function withTx<A, E>(db: Database, effect: Effect.Effect<A, E, never>): Effect.Effect<A, E, never> {
+  return Effect.suspend(() => {
+    if (txDepth > 0) {
+      // Nested withTx — participate in the outer transaction.
+      return effect;
+    }
+    txDepth++;
+    try {
+      db.exec("BEGIN");
+    } catch (e) {
+      txDepth--;
+      throw e;
+    }
+    return effect.pipe(
+      Effect.tap(() => Effect.sync(() => db.exec("COMMIT"))),
+      Effect.catchAllCause((cause) =>
+        Effect.sync(() => {
+          try { db.exec("ROLLBACK"); } catch { /* no active transaction */ }
+        }).pipe(Effect.zipRight(Effect.failCause(cause)))
+      ),
+      Effect.onExit(() => Effect.sync(() => { txDepth--; }))
+    );
   });
 }

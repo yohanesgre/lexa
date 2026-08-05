@@ -3,7 +3,7 @@ import { GitHubService } from "../../services/github.service";
 
 export const tool = {
   name: "link_github_issue",
-  description: "Create a GitHub issue from a task and link it. Supports multiple issues per task (one per repo).",
+  description: "Create a GitHub issue from a task and link it (repo = 'owner/name'). A task may hold several linked issues, one per repo — a duplicate repo link fails with ALREADY_LINKED.",
   inputSchema: {
     type: "object",
     properties: {

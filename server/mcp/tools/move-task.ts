@@ -68,6 +68,7 @@ export const tool = {
           url: g.url,
           outOfSync: g.outOfSync,
         })),
+        archivedAt: moved.archivedAt,
         updatedAt: moved.updatedAt,
       };
     }),

@@ -1,5 +1,5 @@
 import { Effect } from "effect";
-import { Sqlite, queryAll, queryFirst, run, DbError, RowNotFound, ConstraintViolation } from "../db/database";
+import { Sqlite, queryAll, queryFirst, run, withTx, DbError, RowNotFound, ConstraintViolation } from "../db/database";
 import { RuntimeRow, ForgeTaskRow, ForgeTaskLogRow, ForgeAgentRow, ForgeSkillRow, rowToRuntime, rowToForgeTask, rowToForgeTaskLog, rowToForgeAgent, rowToForgeSkill } from "../../shared/db";
 import type { Runtime, ForgeTask, ForgeTaskLog, ForgeProvider, ForgeTaskStatus, ForgeAgent, ForgeSkill } from "../../shared/types";
 
@@ -232,12 +232,15 @@ export class ForgeRepo extends Effect.Service<ForgeRepo>()("Lexa/ForgeRepo", {
         ),
 
       replaceAgentSkills: (agentId: string, skillIds: string[]): Effect.Effect<void, ConstraintViolation | DbError> =>
-        Effect.gen(function* () {
-          yield* run(db, `DELETE FROM forge_agent_skills WHERE agent_id = ?`, agentId);
-          for (const skillId of skillIds) {
-            yield* run(db, `INSERT INTO forge_agent_skills (agent_id, skill_id) VALUES (?, ?)`, agentId, skillId);
-          }
-        }),
+        withTx(
+          db,
+          Effect.gen(function* () {
+            yield* run(db, `DELETE FROM forge_agent_skills WHERE agent_id = ?`, agentId);
+            for (const skillId of skillIds) {
+              yield* run(db, `INSERT INTO forge_agent_skills (agent_id, skill_id) VALUES (?, ?)`, agentId, skillId);
+            }
+          })
+        ),
 
       listSkills: (): Effect.Effect<ForgeSkill[], DbError> =>
         queryAll<ForgeSkillRow>(db, `SELECT * FROM forge_skills ORDER BY is_builtin DESC, created_at`).pipe(
@@ -553,28 +556,31 @@ export class ForgeRepo extends Effect.Service<ForgeRepo>()("Lexa/ForgeRepo", {
         stream: "out" | "err" = "out",
         level: "info" | "warn" | "error" = "info"
       ): Effect.Effect<ForgeTaskLog, ConstraintViolation | DbError | RowNotFound> =>
-        Effect.gen(function* () {
-          yield* run(
-            db,
-            `DELETE FROM forge_task_logs WHERE task_id = ? AND id NOT IN (
-               SELECT id FROM forge_task_logs WHERE task_id = ? ORDER BY created_at DESC, rowid DESC LIMIT ${LOG_CAP - 1}
-             )`,
-            taskId,
-            taskId
-          );
-          yield* run(
-            db,
-            `INSERT INTO forge_task_logs (id, task_id, message, stream, level) VALUES (?, ?, ?, ?, ?)`,
-            id,
-            taskId,
-            message,
-            stream,
-            level
-          );
-          return yield* queryFirst<ForgeTaskLogRow>(db, `SELECT * FROM forge_task_logs WHERE id = ?`, id).pipe(
-            Effect.map(rowToForgeTaskLog)
-          );
-        }),
+        withTx(
+          db,
+          Effect.gen(function* () {
+            yield* run(
+              db,
+              `DELETE FROM forge_task_logs WHERE task_id = ? AND id NOT IN (
+                 SELECT id FROM forge_task_logs WHERE task_id = ? ORDER BY created_at DESC, rowid DESC LIMIT ${LOG_CAP - 1}
+               )`,
+              taskId,
+              taskId
+            );
+            yield* run(
+              db,
+              `INSERT INTO forge_task_logs (id, task_id, message, stream, level) VALUES (?, ?, ?, ?, ?)`,
+              id,
+              taskId,
+              message,
+              stream,
+              level
+            );
+            return yield* queryFirst<ForgeTaskLogRow>(db, `SELECT * FROM forge_task_logs WHERE id = ?`, id).pipe(
+              Effect.map(rowToForgeTaskLog)
+            );
+          })
+        ),
 
       listLogs: (taskId: string): Effect.Effect<ForgeTaskLog[], DbError> =>
         queryAll<ForgeTaskLogRow>(db, `SELECT * FROM forge_task_logs WHERE task_id = ? ORDER BY created_at ASC, rowid ASC`, taskId).pipe(

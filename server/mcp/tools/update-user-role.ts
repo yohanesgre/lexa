@@ -22,7 +22,7 @@ export const tool = {
       if (args.role === "admin") {
         yield* userService.promoteToAdmin(args.userId);
       } else {
-        yield* userService.demoteToMember(args.userId, "0");
+        yield* userService.demoteToMember(args.userId, auth?.userId ?? "0");
       }
       const user = yield* userService.getById(args.userId);
       return { id: user.id, email: user.email, name: user.name, role: user.role };

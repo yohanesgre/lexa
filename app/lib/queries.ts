@@ -40,8 +40,20 @@ export function useDeleteProject() {
   const toast = useToast();
   return useMutation({
     mutationFn: (slug: string) => api.deleteProject(slug),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["projects"] });
+    onSuccess: (_v, slug) => {
+      qc.setQueryData<Project[]>(["projects"], (old) => (old ?? []).filter((p) => p.slug !== slug));
+      qc.removeQueries({ queryKey: ["board", slug] });
+      qc.removeQueries({ queryKey: ["projects", slug] });
+      qc.removeQueries({ queryKey: ["project", slug] });
+      qc.removeQueries({ queryKey: ["field-config", slug] });
+      qc.removeQueries({ queryKey: ["project-members", slug] });
+      qc.removeQueries({ queryKey: ["wiki", slug] });
+      qc.removeQueries({ queryKey: ["wikiPage", slug] });
+      qc.removeQueries({ queryKey: ["tasks", slug] });
+      qc.removeQueries({ queryKey: ["task-links", slug] });
+      qc.removeQueries({ queryKey: ["task-search", slug] });
+      qc.removeQueries({ queryKey: ["sources", slug] });
+      qc.removeQueries({ queryKey: ["forge-recent", slug] });
       toast.push("success", "Project deleted");
     },
     onError: (err) => {
@@ -83,8 +95,10 @@ export function useUpdateFieldConfig(slug: string) {
     mutationFn: (input: Parameters<typeof api.updateFieldConfig>[1]) => api.updateFieldConfig(slug, input),
     onSuccess: (config) => {
       qc.setQueryData<FieldConfig>(["field-config", slug], config);
-      // The board carries fieldConfig — refresh so cards/labels pick up changes.
-      qc.invalidateQueries({ queryKey: ["board", slug] });
+      // Cards resolve labels/colors from the board's embedded fieldConfig.
+      for (const archived of [false, true]) {
+        qc.setQueryData<Board>(["board", slug, archived], (old) => (old ? { ...old, fieldConfig: config } : old));
+      }
       toast.push("success", "Task fields updated");
     },
     onError: (err) => {
@@ -526,6 +540,7 @@ export function useDeleteApiKey() {
 
 // ---- users & project members ----
 
+type MemberUser = { id: string; email: string; name: string; role: string; createdAt: string; lastSeen: string | null };
 
 export function useUsers() {
   return useQuery({ queryKey: ["users"], queryFn: () => api.listUsers().then((r) => r.data) });
@@ -536,11 +551,11 @@ export function useUpdateUserRole() {
   return useMutation({
     mutationFn: ({ id, role }: { id: string; role: "admin" | "member" }) => api.updateUserRole(id, role),
     onSuccess: (user) => {
-      qc.setQueryData<{ id: string; email: string; name: string; role: string }[]>(["users"], (old) => {
+      qc.setQueryData<MemberUser[]>(["users"], (old) => {
         if (!old) return old;
         return old.map((u) => (u.id === user.id ? user : u));
       });
-      qc.invalidateQueries({ queryKey: ["project-members"] });
+      qc.setQueriesData<MemberUser[]>({ queryKey: ["project-members"] }, (old) => old?.map((u) => (u.id === user.id ? user : u)));
     },
   });
 }
@@ -554,8 +569,13 @@ export function useAddProjectMember(slug: string) {
   const toast = useToast();
   return useMutation({
     mutationFn: ({ userId, projectId }: { userId: string; projectId: string }) => api.addProjectMember(userId, projectId),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["project-members", slug] });
+    onSuccess: (result, { userId }) => {
+      // The members list stores full user records — build the entry from the
+      // users cache (loaded on the same settings page) plus the response.
+      const user = qc.getQueryData<MemberUser[]>(["users"])?.find((u) => u.id === userId);
+      if (user) {
+        qc.setQueryData<MemberUser[]>(["project-members", slug], (old) => (old ? [...old, { ...user, role: result.role }] : [{ ...user, role: result.role }]));
+      }
       toast.push("success", "Member added");
     },
     onError: (err) => {
@@ -569,8 +589,8 @@ export function useRemoveProjectMember(slug: string) {
   const toast = useToast();
   return useMutation({
     mutationFn: ({ userId, projectId }: { userId: string; projectId: string }) => api.removeProjectMember(userId, projectId),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["project-members", slug] });
+    onSuccess: (_v, { userId }) => {
+      qc.setQueryData<MemberUser[]>(["project-members", slug], (old) => (old ?? []).filter((m) => m.id !== userId));
       toast.push("success", "Member removed");
     },
     onError: (err) => {
@@ -959,7 +979,10 @@ export function useAddTaskLink(slug: string, taskId: string) {
     mutationFn: (input: { toTaskId: string; relation: "subtask_of" | "blocked_by" | "related_to" }) => api.addTaskLink(slug, taskId, input),
     onSuccess: (link) => {
       qc.setQueryData<TaskLink[]>(["task-links", slug, taskId], (old) => [...(old ?? []), link]);
-      qc.invalidateQueries({ queryKey: ["board", slug] });
+      // Board link maps (subtasks/blocked-by) derive from board.links.
+      for (const archived of [false, true]) {
+        qc.setQueryData<Board>(["board", slug, archived], (old) => (old ? { ...old, links: [...old.links, link] } : old));
+      }
       toast.push("success", "Task linked");
     },
     onError: (err) => {
@@ -973,9 +996,11 @@ export function useRemoveTaskLink(slug: string, taskId: string) {
   const toast = useToast();
   return useMutation({
     mutationFn: (linkId: string) => api.removeTaskLink(slug, taskId, linkId),
-    onSuccess: (_, linkId) => {
+    onSuccess: (_v, linkId) => {
       qc.setQueryData<TaskLink[]>(["task-links", slug, taskId], (old) => (old ?? []).filter((l) => l.id !== linkId));
-      qc.invalidateQueries({ queryKey: ["board", slug] });
+      for (const archived of [false, true]) {
+        qc.setQueryData<Board>(["board", slug, archived], (old) => (old ? { ...old, links: old.links.filter((l) => l.id !== linkId) } : old));
+      }
       toast.push("success", "Link removed");
     },
     onError: (err) => {

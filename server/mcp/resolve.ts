@@ -3,7 +3,7 @@ import { ProjectRepo } from "../repos/project.repo";
 import { ColumnRepo } from "../repos/column.repo";
 import { SwimlaneRepo } from "../repos/swimlane.repo";
 import { TaskRepo } from "../repos/task.repo";
-import { ProjectNotFound, ColumnNotFound, SwimlaneNotFound } from "../api/errors";
+import { ProjectNotFound, ColumnNotFound, SwimlaneNotFound, TaskNotFound } from "../api/errors";
 import { DbError } from "../db/database";
 
 export function resolveProject(projectSlug: string) {
@@ -62,7 +62,9 @@ export function resolveTaskProject(taskId: string) {
   return Effect.gen(function* () {
     const taskRepo = yield* TaskRepo;
     const projectRepo = yield* ProjectRepo;
-    const task = yield* taskRepo.findById(taskId);
+    const task = yield* taskRepo.findById(taskId).pipe(
+      Effect.catchTag("RowNotFound", () => new TaskNotFound({ id: taskId }))
+    );
     return yield* projectRepo.findById(task.projectId);
   });
 }

@@ -339,6 +339,7 @@ function writeRuleBundles(workspace: string, task: ForgeTask, agentMarkdown: str
 // concurrent runtimes share the same current set, so only obsolete ids are
 // ever removed.
 function pruneStaleSkillDirs(workspace: string, skillIds: string[]) {
+  if (skillIds.length === 0) return; // empty set = server error; never wipe on it
   const dir = join(workspace, ".agents", "skills");
   if (!existsSync(dir)) return;
   const known = new Set(skillIds);

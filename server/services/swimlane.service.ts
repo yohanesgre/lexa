@@ -22,8 +22,8 @@ export class SwimlaneService extends Effect.Service<SwimlaneService>()("Lexa/Swi
           const id = crypto.randomUUID();
           const lane = yield* repo.create({ id, projectId: input.projectId, name: input.name, description: input.description, position: maxPos + 1 }).pipe(
             Effect.catchTags({
-              ConstraintViolation: (e) => new DbError({ message: e.message, cause: e }),
-              RowNotFound: (e) => new DbError({ message: e.message, cause: e }),
+              ConstraintViolation: (e) => new DbError({ message: "Database error", cause: e }),
+              RowNotFound: (e) => new DbError({ message: "Database error", cause: e }),
             })
           );
           yield* Effect.logInfo(`[Swimlane] Created ${lane.id} in project ${lane.projectId}`);
@@ -45,7 +45,7 @@ export class SwimlaneService extends Effect.Service<SwimlaneService>()("Lexa/Swi
         repo.update(id, input).pipe(
           Effect.catchTags({
             RowNotFound: () => new SwimlaneNotFound({ id }),
-            ConstraintViolation: (e) => new DbError({ message: e.message, cause: e }),
+            ConstraintViolation: (e) => new DbError({ message: "Database error", cause: e }),
           }),
           Effect.tap((lane) => Effect.logInfo(`[Swimlane] Updated ${lane.id}`))
         ),
@@ -57,7 +57,7 @@ export class SwimlaneService extends Effect.Service<SwimlaneService>()("Lexa/Swi
           const count = rows[0]?.c ?? 0;
           if (count > 0) return yield* new HasChildren({ count });
           yield* repo.delete(id).pipe(
-            Effect.catchTag("ConstraintViolation", (e) => new DbError({ message: e.message, cause: e }))
+            Effect.catchTag("ConstraintViolation", (e) => new DbError({ message: "Database error", cause: e }))
           );
           yield* Effect.logInfo(`[Swimlane] Deleted ${id}`);
           return;

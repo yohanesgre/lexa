@@ -116,6 +116,7 @@ export function errorToStatus(error: { _tag: string }): number {
     case "NoRuntimeOnline":
     case "TaskLinkCycle":
     case "ForgeEntityInUse":
+    case "ConstraintViolation":
       return 409;
     case "RequiredFieldMissing":
     case "NeighborNotInColumn":
@@ -131,6 +132,8 @@ export function errorToStatus(error: { _tag: string }): number {
       return 400;
     case "GithubApiError":
       return 502;
+    case "DbError":
+      return 500;
     default:
       return 500;
   }
@@ -207,8 +210,6 @@ export function errorMessage(error: { _tag: string } & Record<string, unknown>):
       return "Cannot modify your own account";
     case "ProjectAccessDenied":
       return `Access denied to project '${error.project}'`;
-    case "ProjectAccessDenied":
-      return `Access denied to project '${error.project}'`;
     case "Forbidden":
       return "Admin role required";
     case "SetupLocked":
@@ -217,9 +218,13 @@ export function errorMessage(error: { _tag: string } & Record<string, unknown>):
       return "Search query is invalid — try simpler terms";
     case "GithubApiError":
     case "GithubWebhookError":
-    case "DbError":
-    case "ConstraintViolation":
       return typeof error.message === "string" ? error.message : "Internal server error";
+    case "DbError":
+      // Raw SQLite text stays server-side (logged in http.ts respond) — never
+      // leak it to clients.
+      return "Database error";
+    case "ConstraintViolation":
+      return "Constraint violation";
     default:
       return "Internal server error";
   }
@@ -227,6 +232,11 @@ export function errorMessage(error: { _tag: string } & Record<string, unknown>):
 
 export function errorDetails(error: { _tag: string } & Record<string, unknown>): Record<string, unknown> {
   const { _tag, ...rest } = error;
+  if (_tag === "DbError" || _tag === "ConstraintViolation") {
+    // Scrub raw SQLite text (message/cause) from client-visible details; raw
+    // detail is preserved in server logs via http.ts respond()'s rawMessage.
+    return _tag === "ConstraintViolation" ? { isPositionConflict: rest.isPositionConflict ?? false } : {};
+  }
   return rest;
 }
 
