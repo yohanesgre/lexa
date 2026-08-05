@@ -9,8 +9,8 @@ import { findOrCreateUser, findOrCreateUserByIdentity, adminEmails } from "./api
 import { verifyAccessAssertion } from "./api/access-auth";
 import { resolveApiKeyIdentity, constantTimeTokenEqual } from "./api/auth-key";
 import { getSetting, setSetting } from "./db/settings";
-import { createRateLimiter, isPrivateIp } from "./api/rate-limit";
-import { MAX_API_BODY } from "./api/limits";
+import { apiRateLimiter, isPrivateIp } from "./api/rate-limit";
+import { MAX_API_BODY, X_LEXA_REMOTE_IP } from "./api/limits";
 import type { Server } from "bun";
 
 let ssrFetch: ((req: Request) => Promise<Response>) | null = null;
@@ -64,7 +64,6 @@ const apiHandler: (req: Request) => Promise<Response> = typeof apiHandlerRaw ===
 const mcpHandler = createMcpHandler(DATABASE_PATH);
 const verifyWebhook = createWebhookVerifier(DATABASE_PATH);
 const webhookHandler = createWebhookHandler(DATABASE_PATH);
-const rateLimiter = createRateLimiter();
 
 function withSecurityHeaders(res: Response): Response {
   res.headers.set("X-Content-Type-Options", "nosniff");
@@ -129,18 +128,22 @@ const server: Server<unknown> = Bun.serve({
     const path = url.pathname;
     const isApiSurface = path === "/mcp" || path.startsWith("/api/");
     if (isApiSurface && !path.startsWith("/api/webhooks/")) {
-      const socketIp = server.requestIP(req)?.address;
-      const cfIp = req.headers.get("cf-connecting-ip");
-      const ip = socketIp && isPrivateIp(socketIp) && cfIp ? cfIp : (socketIp ?? cfIp ?? "unknown");
-      if (!rateLimiter.check(ip)) {
-        const retryAfter = Math.ceil(rateLimiter.retryAfterMs(ip) / 1000);
-        console.warn(`[API] rate limited ip=${ip} retryAfter=${retryAfter}s`);
-        return withSecurityHeaders(
-          new Response(JSON.stringify({ error: { code: "RATE_LIMITED", message: "Rate limit exceeded" } }), {
-            status: 429,
-            headers: { "Content-Type": "application/json", "Retry-After": String(retryAfter) },
-          })
-        );
+      // /api rate limiting lives in the HttpApi middleware (setup/health
+      // exempt); /mcp is not HttpApi so its limiter call stays here.
+      if (path === "/mcp") {
+        const socketIp = server.requestIP(req)?.address;
+        const cfIp = req.headers.get("cf-connecting-ip");
+        const ip = socketIp && isPrivateIp(socketIp) && cfIp ? cfIp : (socketIp ?? cfIp ?? "unknown");
+        if (!apiRateLimiter.check(ip)) {
+          const retryAfter = Math.ceil(apiRateLimiter.retryAfterMs(ip) / 1000);
+          console.warn(`[API] rate limited ip=${ip} retryAfter=${retryAfter}s`);
+          return withSecurityHeaders(
+            new Response(JSON.stringify({ error: { code: "RATE_LIMITED", message: "Rate limit exceeded" } }), {
+              status: 429,
+              headers: { "Content-Type": "application/json", "Retry-After": String(retryAfter) },
+            })
+          );
+        }
       }
     }
 
@@ -194,6 +197,12 @@ const server: Server<unknown> = Bun.serve({
       // Reconstruct: the original req's stream is consumed — apiHandler must
       // see the buffered body, not an empty one.
       const apiReq = new Request(req.url, { method: req.method, headers: req.headers, body: read.bytes });
+      // The middleware resolves the caller IP from this header (socket IPs are
+      // only visible here). Delete any inbound value first so clients can't
+      // spoof a fresh bucket.
+      const socketIp = server.requestIP(req)?.address ?? "";
+      if (apiReq.headers.has(X_LEXA_REMOTE_IP)) apiReq.headers.delete(X_LEXA_REMOTE_IP);
+      apiReq.headers.set(X_LEXA_REMOTE_IP, socketIp);
       const isSetup = url.pathname.startsWith("/api/setup");
       const isHealth = url.pathname === "/api/health";
       const isForgeDaemon = url.pathname.startsWith("/api/forge/daemon/") || url.pathname === "/api/forge/runtimes/register";
