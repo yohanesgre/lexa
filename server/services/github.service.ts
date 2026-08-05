@@ -57,12 +57,18 @@ export class GitHubService extends Effect.Service<GitHubService>()("Lexa/GitHubS
           const task = yield* taskRepo.findByGithubIssue(nodeId).pipe(
             Effect.catchTag("RowNotFound", () => Effect.succeed(null))
           );
-          if (!task) return; // issue not linked to any task
+          if (!task) {
+            // Issue not linked to any task — nothing to process, but the
+            // delivery succeeded: record so GitHub stops retrying it.
+            yield* webhookEvents.recordDelivery(deliveryId);
+            return;
+          }
 
           if (action === "edited") {
             // Title sync is GitHub → Lexa only (documented asymmetry).
             const title = payload.issue?.title;
             if (title) yield* taskRepo.update(task.id, { title });
+            yield* webhookEvents.recordDelivery(deliveryId);
             return;
           }
 

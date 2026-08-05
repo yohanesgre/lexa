@@ -45,6 +45,11 @@ export class SwimlaneRepo extends Effect.Service<SwimlaneRepo>()("Lexa/SwimlaneR
       maxPosition: (projectId: string): Effect.Effect<number, DbError> =>
         queryAll<{ mp: number }>(db, `SELECT COALESCE(MAX(position), -1) as mp FROM swimlanes WHERE project_id = ?`, projectId)
           .pipe(Effect.map((rows) => rows[0]?.mp ?? -1)),
+
+      countTasks: (swimlaneId: string): Effect.Effect<number, DbError> =>
+        queryAll<{ c: number }>(db, `SELECT COUNT(*) as c FROM tasks WHERE swimlane_id = ?`, swimlaneId).pipe(
+          Effect.map((rows) => rows[0]?.c ?? 0)
+        ),
     };
   }),
 }) {}

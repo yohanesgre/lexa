@@ -40,7 +40,8 @@ All non-2xx responses share one shape:
 | 403 | `CANNOT_DELETE_SELF` | Demoting or removing the last admin via the admin user routes (details: `{ message }`) |
 | 404 | `USER_NOT_FOUND` | Unknown user id on admin role endpoints |
 | 404 | `PROJECT_NOT_FOUND` `COLUMN_NOT_FOUND` `SWIMLANE_NOT_FOUND` `TASK_NOT_FOUND` `PAGE_NOT_FOUND` `SOURCE_NOT_FOUND` `FORGE_TASK_NOT_FOUND` `TASK_LINK_NOT_FOUND` `MACHINE_NOT_FOUND` `RUNTIME_NOT_FOUND` `RUNTIME_EVENT_NOT_FOUND` `API_KEY_NOT_FOUND` `AGENT_NOT_FOUND` `SKILL_NOT_FOUND` | |
-| 409 | `SLUG_TAKEN` | Duplicate project slug or wiki slug (details: `{ slug }`) |
+| 409 | `SLUG_TAKEN` | Duplicate project slug or wiki slug (details: `{ slug }`); also the constraint fallback on project update/delete |
+| 409 | `TASK_HAS_CHILDREN` | Task delete hits a constraint (defensive — subtask links cascade on delete) |
 | 409 | `NO_RUNTIME_ONLINE` | Create Forge task with no daemon online |
 | 409 | `TASK_LINK_CYCLE` | subtask_of link would create a cycle (details: `{ message }`) |
 | 409 | `HAS_CHILDREN` | Delete column with tasks / wiki page with children (details: `{ count }`) |
@@ -399,7 +400,7 @@ body { name?, description?, githubRepo? }
 → 200 Project | 403 FORBIDDEN | 404
 
 DELETE /api/projects/:slug   (admin)
-→ 204 | 403 FORBIDDEN | 404        (cascades: columns, swimlanes, tasks, wiki)
+→ 204 | 403 FORBIDDEN | 404 | 409 SLUG_TAKEN (constraint fallback)   (cascades: columns, swimlanes, tasks, wiki)
 
 GET    /api/dashboard
 → 200 Dashboard     (unpaginated full snapshot — health cards, stats, attention lists)
@@ -455,6 +456,8 @@ DELETE /api/projects/:slug/swimlanes/:id  (admin) → 204 | 403 FORBIDDEN (tasks
 GET    /api/projects/:slug/tasks?columnId&swimlaneId&assignee&type&limit&cursor
   type = a type_options ID from field-config
 → 200 { data: Task[], nextCursor }
+  List rows carry `description` as an empty doc (slim select) — fetch the
+  task for content. Board responses behave the same.
 
 POST   /api/projects/:slug/tasks
 body { columnId*, swimlaneId*, title*, description?, priority?, type?, parentId?, assignees? }
@@ -490,7 +493,7 @@ body { columnId*, swimlaneId*, beforeTaskId?, afterTaskId? }
   task.github.outOfSync becomes true)
 
 DELETE /api/projects/:slug/tasks/:id
-→ 204 | 404
+→ 204 | 404 | 409 TASK_HAS_CHILDREN (defensive — subtask links cascade on delete)
 
 POST   /api/projects/:slug/tasks/:id/archive
 → 200 Task (archivedAt set) | 404

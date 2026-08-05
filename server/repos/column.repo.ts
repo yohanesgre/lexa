@@ -105,6 +105,11 @@ export class ColumnRepo extends Effect.Service<ColumnRepo>()("Lexa/ColumnRepo", 
           `SELECT COALESCE(MAX(position), -1) as mp FROM columns WHERE project_id = ?`,
           projectId
         ).pipe(Effect.map((rows) => rows[0]?.mp ?? -1)),
+
+      countTasks: (columnId: string): Effect.Effect<number, DbError> =>
+        queryAll<{ c: number }>(db, `SELECT COUNT(*) as c FROM tasks WHERE column_id = ?`, columnId).pipe(
+          Effect.map((rows) => rows[0]?.c ?? 0)
+        ),
     };
   }),
 }) {}
