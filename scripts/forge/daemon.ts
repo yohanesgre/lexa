@@ -555,14 +555,23 @@ function runAgent(prompt: string, cwd: string, provider: "opencode" | "hermes" |
     const cmdline = args.map((a) => (a.length > 60 ? `${a.slice(0, 60)}…` : a)).join(" ");
     console.log(`  $ ${bin} ${cmdline}`);
     logTask(taskId, `$ ${bin} ${cmdline}`);
-    const childEnv: Record<string, string | undefined> = {
-      ...process.env,
-      // LEXA_API_KEY must NOT reach the agent — opencode ≥1.18 treats it as
-      // its own server auth key and every run fails with "Unexpected server
-      // error". Forge runs on the prompt alone (no Lexa MCP tool calls), so
-      // the agent needs no Lexa credentials.
-    };
-    delete childEnv.LEXA_API_KEY;
+    // The agent env is a WHITELIST — the daemon's own env is never inherited
+    // wholesale. Lexa credentials must not reach the agent: LEXA_API_KEY
+    // breaks opencode (≥1.18 treats it as its own server auth key — every run
+    // fails with "Unexpected server error"), and LXK_FORGE_DAEMON_TOKEN /
+    // LXK_API_KEY / LEXA_URL / LEXA_DIR would leak the server credential to
+    // unsandboxed hermes/command-code runs (they read the real HOME, incl.
+    // ~/.lexa/config.json). Forge runs on the prompt alone (no Lexa MCP tool
+    // calls), so the agent needs no Lexa env at all. No provider reads
+    // FORGE_* either — FORGE_CMD_BIN only picks the binary the daemon spawns.
+    const childEnv: Record<string, string | undefined> = {};
+    for (const key of ["PATH", "HOME", "TMPDIR", "TERM", "LANG"]) {
+      const value = process.env[key];
+      if (value !== undefined) childEnv[key] = value;
+    }
+    for (const [key, value] of Object.entries(process.env)) {
+      if (key.startsWith("LC_") && value !== undefined) childEnv[key] = value;
+    }
     // PWD must match the spawn cwd: opencode resolves its session/project
     // directory from env.PWD, and a stale inherited PWD (the daemon's own
     // launch dir) makes it treat the real workspace as "external" — which
@@ -591,8 +600,20 @@ function runAgent(prompt: string, cwd: string, provider: "opencode" | "hermes" |
     });
     onSpawn?.(child);
 
+    // Bounded capture: a chatty agent can emit tens of MB, and buffering it
+    // all would grow daemon RAM without limit (the 16MB server cap only
+    // rejects the final POST, after buffering). Keep the LAST STDOUT_TAIL of
+    // stdout (rolling tail) plus a total count; the complete POST sends the
+    // tail. Server-side storage is capped separately (forge.repo: 1MB).
+    const STDOUT_TAIL = 1024 * 1024;
+    const STDERR_TAIL = 64 * 1024;
     let stdout = "";
-    let stderr = "";
+    let stdoutTotal = 0;
+    let stderrTail = "";
+    const appendTail = (tail: string, chunk: string, cap: number) => {
+      const next = tail + chunk;
+      return next.length <= cap ? next : next.slice(-cap);
+    };
 
     // Verbose streaming: tee the agent's stdout/stderr into the task log as
     // it arrives. Lines are batched and flushed every STREAM_FLUSH_MS so a
@@ -631,8 +652,17 @@ function runAgent(prompt: string, cwd: string, provider: "opencode" | "hermes" |
       scheduleFlush();
     };
 
-    child.stdout.on("data", (d) => { stdout += d.toString(); tee("out", d); });
-    child.stderr.on("data", (d) => { stderr += d.toString(); tee("err", d); });
+    child.stdout.on("data", (d) => {
+      const s = d.toString();
+      stdoutTotal += s.length;
+      stdout = appendTail(stdout, s, STDOUT_TAIL);
+      tee("out", d);
+    });
+    child.stderr.on("data", (d) => {
+      const s = d.toString();
+      stderrTail = appendTail(stderrTail, s, STDERR_TAIL);
+      tee("err", d);
+    });
 
     child.on("error", (e) => { flush(); reject(new Error(`spawn ${bin}: ${e.message}`)); });
     child.on("close", (code) => {
@@ -646,11 +676,14 @@ function runAgent(prompt: string, cwd: string, provider: "opencode" | "hermes" |
       }
       flush();
       if (flushTimer) { clearTimeout(flushTimer); flushTimer = null; }
+      if (stdoutTotal > stdout.length) {
+        logTask(taskId, `agent output truncated — kept last ${stdout.length} of ${stdoutTotal} chars`);
+      }
       const trimmed = stdout.trim();
       if (code === 0 && trimmed) {
         resolve(trimmed);
       } else {
-        const errTail = stderr.trim().slice(-4000);
+        const errTail = stderrTail.trim().slice(-4000);
         reject(new Error(errTail || `agent exited with code ${code} and no output`));
       }
     });
