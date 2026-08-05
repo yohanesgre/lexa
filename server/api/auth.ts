@@ -23,6 +23,7 @@ export function findOrCreateUser(req: Request, dbPath: string): LexaUser | null 
   const db = new Database(dbPath);
   db.exec("PRAGMA journal_mode = WAL");
   db.exec("PRAGMA foreign_keys = ON");
+  db.exec("PRAGMA busy_timeout = 5000");
   try {
     const existing = db.prepare("SELECT id, email, name, role FROM users WHERE email = ?").get(email) as LexaUser | null;
     if (existing) {
@@ -33,8 +34,17 @@ export function findOrCreateUser(req: Request, dbPath: string): LexaUser | null 
     const role = adminEmails(db).includes(email.toLowerCase()) ? "admin" : "member";
 
     const id = crypto.randomUUID();
-    db.prepare("INSERT INTO users (id, email, name, role, last_seen) VALUES (?, ?, ?, ?, datetime('now'))")
-      .run(id, email, name, role);
+    try {
+      db.prepare("INSERT INTO users (id, email, name, role, last_seen) VALUES (?, ?, ?, ?, datetime('now'))")
+        .run(id, email, name, role);
+    } catch (e) {
+      // Duplicate-email race: another request created the user between our
+      // SELECT and INSERT. Re-read instead of surfacing the raw SqliteError
+      // (entry.ts calls this outside the API error mapping path).
+      const existing = db.prepare("SELECT id, email, name, role FROM users WHERE email = ?").get(email) as LexaUser | null;
+      if (existing) return existing;
+      throw e;
+    }
     return { id, email, name, role } as LexaUser;
   } finally {
     db.close();

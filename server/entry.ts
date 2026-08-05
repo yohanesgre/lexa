@@ -23,6 +23,12 @@ const DATABASE_PATH = process.env.DATABASE_PATH || "/app/data/lexa.db";
 mkdirSync(dirname(DATABASE_PATH), { recursive: true });
 
 runMigrations(DATABASE_PATH);
+// FTS5 optimize merges deleted-row b-trees; table may be absent on a pre-0001 DB.
+try {
+  const db = new Database(DATABASE_PATH);
+  db.exec("INSERT INTO wiki_fts(wiki_fts) VALUES('optimize')");
+  db.close();
+} catch {}
 pruneWebhookEvents(DATABASE_PATH);
 seedAdminKey(DATABASE_PATH);
 // Sample data is the setup wizard's job (CLI `bun run setup` or web `/setup`).
@@ -49,6 +55,9 @@ Bun.serve({
     const url = new URL(req.url);
 
     if (url.pathname === "/mcp") {
+      if (req.method !== "POST") {
+        return withSecurityHeaders(new Response(JSON.stringify({ error: { code: "METHOD_NOT_ALLOWED", message: "Only POST is accepted" } }), { status: 405, headers: { "Content-Type": "application/json" } }));
+      }
       return withSecurityHeaders(await mcpHandler(req));
     }
 

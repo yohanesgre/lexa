@@ -5,7 +5,7 @@ import { TaskRepo } from "../repos/task.repo";
 import { WikiRepo } from "../repos/wiki.repo";
 import { ProjectRepo } from "../repos/project.repo";
 import { SourceService } from "./source.service";
-import { DbError, RowNotFound, ConstraintViolation } from "../db/database";
+import { DbError, RowNotFound, ConstraintViolation, Sqlite, withTx } from "../db/database";
 import { ProjectNotFound, TaskNotFound, WikiPageNotFound, ForgeTaskNotFound, NoRuntimeOnline, RuntimeNotFound, AgentNotFound, SkillNotFound, ForgeBuiltinDelete, ForgeEntityInUse } from "../api/errors";
 import { docToMarkdown } from "../../shared/markdown";
 import type { ForgeTask, ForgeTaskLog, DocumentSource, TipTapDoc, ForgeAgent, ForgeSkill } from "../../shared/types";
@@ -45,6 +45,7 @@ export class ForgeService extends Effect.Service<ForgeService>()("Lexa/ForgeServ
     const taskRepo = yield* TaskRepo;
     const wikiRepo = yield* WikiRepo;
     const projectRepo = yield* ProjectRepo;
+    const db = yield* Sqlite;
 
     const loadDocumentContext = (
       projectId: string,
@@ -197,11 +198,16 @@ export class ForgeService extends Effect.Service<ForgeService>()("Lexa/ForgeServ
           if (!agent.isBuiltin || agent.id !== DEFAULT_AGENT.id) {
             return yield* new ForgeBuiltinDelete({ kind: "agent", name: agent.name });
           }
-          yield* repo.updateAgent(id, { instructions: DEFAULT_AGENT.instructions }).pipe(
-            Effect.catchTag("RowNotFound", () => new AgentNotFound({ id }))
+          return yield* withTx(
+            db,
+            Effect.gen(function* () {
+              yield* repo.updateAgent(id, { instructions: DEFAULT_AGENT.instructions }).pipe(
+                Effect.catchTag("RowNotFound", () => new AgentNotFound({ id }))
+              );
+              yield* repo.replaceAgentSkills(id, DEFAULT_AGENT.skillIds);
+              return yield* repo.findAgentById(id).pipe(Effect.catchTag("RowNotFound", () => new AgentNotFound({ id })));
+            })
           );
-          yield* repo.replaceAgentSkills(id, DEFAULT_AGENT.skillIds);
-          return yield* repo.findAgentById(id).pipe(Effect.catchTag("RowNotFound", () => new AgentNotFound({ id })));
         }),
       // ── Skills ──
       listSkills: (): Effect.Effect<ForgeSkill[], DbError> => repo.listSkills(),

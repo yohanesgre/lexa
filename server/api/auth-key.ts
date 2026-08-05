@@ -23,6 +23,7 @@ export function resolveApiKeyIdentity(authHeader: string, dbPath: string): ApiKe
   const db = new Database(dbPath);
   db.exec("PRAGMA journal_mode = WAL");
   db.exec("PRAGMA foreign_keys = ON");
+  db.exec("PRAGMA busy_timeout = 5000");
   try {
     const row = db.prepare("SELECT id, user_id FROM api_keys WHERE key_hash = ?").get(keyHash) as
       | { id: string; user_id: string | null }

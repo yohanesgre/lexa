@@ -101,6 +101,7 @@ export const tool = {
           url: g.url,
           outOfSync: g.outOfSync,
         })),
+        archivedAt: task.archivedAt,
         updatedAt: task.updatedAt,
         description: docToMarkdown(task.description),
         createdAt: task.createdAt,

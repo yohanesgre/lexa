@@ -7,8 +7,8 @@
 | Concern | Convention |
 |---------|-----------|
 | Base URL | `https://<host>/api` (Bun server behind the cloudflared tunnel) |
-| Auth (human) | Cloudflare Access — JWT verified via `Cf-Access-Jwt-Assertion`; identity from `Cf-Access-Authenticated-User-Email` |
-| Auth (machine) | `Authorization: Bearer lxk_<base62(32B)>` |
+| Auth (machine) | `Authorization: Bearer lxk_<43 base62 chars>` — required by every `/api/*` route except `/api/health`, `/api/setup/*`, the GitHub webhook (HMAC), and forge-daemon routes carrying `x-forge-token` (see Auth) |
+| Auth (human) | Cloudflare Access terminates at the edge (Google OAuth). The server never verifies a JWT — it reads `Cf-Access-Authenticated-User-Email` / `Cf-Access-Authenticated-User-Name` only for page (SSR) user provisioning. The REST API itself is machine-key only. |
 | Content type | `application/json; charset=utf-8` |
 | IDs | UUID strings |
 | Timestamps | ISO 8601 UTC (`2026-07-27T10:30:00Z`) |
@@ -32,23 +32,64 @@ All non-2xx responses share one shape:
 
 | HTTP | Code | When |
 |------|------|------|
-| 400 | `BAD_REQUEST` | Malformed JSON / validation failure (details: field errors) |
-| 401 | `MISSING_AUTH` / `INVALID_API_KEY` / `INVALID_ACCESS_JWT` | No/invalid credentials |
-| 404 | `PROJECT_NOT_FOUND` `COLUMN_NOT_FOUND` `SWIMLANE_NOT_FOUND` `TASK_NOT_FOUND` `PAGE_NOT_FOUND` `SOURCE_NOT_FOUND` `FORGE_TASK_NOT_FOUND` `TASK_LINK_NOT_FOUND` `MACHINE_NOT_FOUND` | |
+| 400 | — | Payload schema validation failures are rejected by the platform before handlers run; the body is the platform's response, not the envelope above. No domain code maps to 400. |
+| 401 | `UNAUTHORIZED` | Missing or invalid API key (auth middleware in entry.ts; see Auth) |
+| 401 | `GITHUB_WEBHOOK_ERROR` | Webhook signature mismatch (before body parsing) |
+| 403 | `FORBIDDEN` | Admin-only endpoint called by a non-admin, or project access denied (details: `{ message }`) |
+| 403 | `SETUP_LOCKED` | Mutating `/api/setup/*` call after setup is complete or projects exist |
+| 403 | `CANNOT_DELETE_SELF` | (reserved — mapped in the error table but not reachable via REST: the admin role-update handler passes a placeholder caller id) |
+| 404 | `USER_NOT_FOUND` | Unknown user id on admin role endpoints |
+| 404 | `PROJECT_NOT_FOUND` `COLUMN_NOT_FOUND` `SWIMLANE_NOT_FOUND` `TASK_NOT_FOUND` `PAGE_NOT_FOUND` `SOURCE_NOT_FOUND` `FORGE_TASK_NOT_FOUND` `TASK_LINK_NOT_FOUND` `MACHINE_NOT_FOUND` `RUNTIME_NOT_FOUND` `RUNTIME_EVENT_NOT_FOUND` `API_KEY_NOT_FOUND` `AGENT_NOT_FOUND` `SKILL_NOT_FOUND` | |
 | 409 | `SLUG_TAKEN` | Duplicate project slug or wiki slug (details: `{ slug }`) |
-| 409 | `NO_RUNTIME_ONLINE` `MACHINE_OFFLINE` | Create Forge task with no daemon registered/online; runtime removal/restart target machine is offline |
+| 409 | `NO_RUNTIME_ONLINE` | Create Forge task with no daemon online |
 | 409 | `TASK_LINK_CYCLE` | subtask_of link would create a cycle (details: `{ message }`) |
 | 409 | `HAS_CHILDREN` | Delete column with tasks / wiki page with children (details: `{ count }`) |
 | 409 | `WIP_LIMIT` | Move would exceed column WIP limit |
-| 409 | `ALREADY_LINKED` | Task already has a GitHub issue |
+| 409 | `ALREADY_LINKED` | Task already has a GitHub issue in that repo |
 | 409 | `OPTION_IN_USE` | Delete priority/type option still referenced by tasks (details: `{ optionId, label }`) |
+| 409 | `FORGE_ENTITY_IN_USE` | Delete agent/skill still used by forge tasks (details: `{ kind, name, count }`) |
 | 422 | `REQUIRED_FIELD` | Column's `required_fields` not satisfied (details: `{ field, column }`) |
-| 422 | `NEIGHBOR_NOT_IN_COLUMN` | `beforeTaskId`/`afterTaskId` not in target column |
+| 422 | `NEIGHBOR_NOT_IN_COLUMN` | `beforeTaskId`/`afterTaskId` not in target column (details: `{ taskId }`) |
 | 422 | `INVALID_OPTION` | Unknown priority/type option id, duplicate label, or empty option list (details: `{ optionId? }`) |
-| 422 | `SOURCE_FETCH_ERROR` | External source URL invalid, unreadable, or blocked by SSRF guard (details: `{ message }`) |
 | 422 | `INVALID_TASK_LINK` | Self-link or cross-project task link (details: `{ message }`) |
+| 422 | `FORGE_BUILTIN_DELETE` | Delete/reset of a builtin agent or skill (details: `{ kind, name }`) |
+| 422 | `SEARCH_ERROR` | Wiki FTS5 query rejected |
+| 422 | `SOURCE_FETCH_ERROR` | External source URL invalid or unreadable (details: `{ message }`) |
+| 500 | `SOURCE_UNREACHABLE` | External source DNS/fetch failed after the SSRF guard (details: `{ url }`) — falls through the 500 default arm |
 | 500 | `DATABASE_ERROR` / `CONSTRAINT` / `INTERNAL` | |
 | 502 | `GITHUB_API_ERROR` | Only on explicit GitHub-linking endpoints; never on moves |
+
+Defined in the error map but never raised by any handler — do not match on them:
+- `MISSING_AUTH` / `INVALID_API_KEY` — the auth middleware emits `UNAUTHORIZED` instead.
+- `MACHINE_OFFLINE` — runtime removal never blocks; `NO_RUNTIME_ONLINE` is the only offline error.
+- `INVALID_ACCESS_JWT` — Access JWT validation happens at the edge; the server only reads identity headers.
+
+## Auth
+
+Every `/api/*` request except the exempt routes below is rejected with
+`401 { "error": { "code": "UNAUTHORIZED", "message": "Invalid or missing API key" } }`
+unless the `Authorization` header carries a valid key:
+
+- Format: `Authorization: Bearer lxk_<43 base62 chars>` (regex `^lxk_[0-9A-Za-z]{43}$`).
+- The key is SHA-256-hashed and looked up in `api_keys`; `last_used_at` is
+  bumped at most hourly. Keys created without a user (`user_id` NULL — the
+  seeded `LXK_API_KEY` and setup-wizard keys) resolve to **admin**; keys bound
+  to a user carry that user's `role`.
+- **Admin vs member:** a `requireAdmin` gate (403 `FORBIDDEN`) protects project
+  create/update/delete, column and swimlane mutations, `PUT field-config`, all
+  `/api/settings/api-keys/*`, all `/api/admin/*`, and Forge agent/skill CRUD +
+  reset + skill binding. Everything else (reads, task/wiki/board operations,
+  Forge task creation) works for any valid key.
+- **Exempt routes** (no API key needed):
+  - `GET /api/health`
+  - `/api/setup/*` (first-run wizard)
+  - `POST /api/webhooks/github` — HMAC-SHA-256 signature over the raw body is the auth
+  - `/api/forge/daemon/*` and `/api/forge/runtimes/*` — also accept the daemon
+    token (`x-forge-token: <LXK_FORGE_DAEMON_TOKEN>` header) in place of a key
+- **Cloudflare Access** protects the host at the edge; the server does not
+  verify the JWT. For page requests the SSR path upserts a user from
+  `Cf-Access-Authenticated-User-Email` (admins come from `LXK_ADMIN_EMAILS` env
+  or the `admin_emails` setting). API requests are never authenticated by Access.
 
 ## Entity Schemas (TypeScript)
 
@@ -133,11 +174,14 @@ interface WikiPageMeta {          // list/tree views — no content
   slug: string;
   parentId: ID | null;
   position: number;
+  hasChildren: boolean;
+  createdAt: ISODate;         // wire quirk: list formatters emit "" here
   updatedAt: ISODate;
 }
 
 interface WikiPage extends WikiPageMeta {
   content: TipTapDoc;
+  contentText?: string;       // plain-text extraction; present on create/update/search responses
   createdAt: ISODate;
 }
 
@@ -159,14 +203,40 @@ interface Runtime {
   name: string;
   provider: "opencode" | "hermes" | "command-code";
   machineId: ID | null;
+  agent: string;           // CLI persona flag (opencode --agent); "" = default
   model: string;           // full "provider/model" id — passed verbatim to --model
+  printLogs: boolean;
+  logLevel: "" | "DEBUG" | "INFO" | "WARN" | "ERROR";
   extraArgs: string[];
   modelsCatalog: RuntimeModel[];  // live list from lexa-cli; [] = offline/hermes/failure
   agentsCatalog: Array<{ id: string; name: string }>; // reported by lexa-cli
   status: "online" | "offline";
+  mcpConnected: boolean;      // daemon-reported /mcp reachability
+  lastError: string | null;   // last daemon failure (e.g. revoked key); cleared on live heartbeat/register
   hostname: string;
   lastSeen: ISODate | null;
   createdAt: ISODate;
+}
+
+interface Machine {
+  id: string;              // "hostname-<unique>" (legacy UUID ids keep working)
+  hostname: string;
+  clis: Array<{ provider: "opencode" | "hermes" | "command-code"; version: string }>;
+  lastSeen: ISODate | null;  // null = bound, not listening
+  createdAt: ISODate;
+}
+
+interface RuntimeEvent {
+  id: ID;
+  machineId: ID;
+  action: "install" | "update" | "remove";
+  agentCli: "opencode" | "hermes" | "command-code";
+  apiKeyId: ID | null;
+  status: "pending" | "claimed" | "completed" | "failed";
+  error: string | null;
+  createdAt: ISODate;
+  claimedAt: ISODate | null;
+  finishedAt: ISODate | null;
 }
 
 interface ForgeTask {
@@ -177,6 +247,7 @@ interface ForgeTask {
   documentId: string;
   documentTitle: string;   // task title / wiki page title — the UI shows this, never the raw result
   agentId: ID;             // global rule bundle (Settings → Agents)
+  agentName: string;
   skillId: ID;             // global operation bundle (Settings → Skills)
   skillName: string;
   extraPrompt: string;
@@ -269,25 +340,58 @@ interface Dashboard {             // GET /api/dashboard — full dashboard snaps
 
 ## Endpoints
 
+### Health & Setup wizard
+
+```
+GET    /api/health
+→ 200 { ok: true }
+  API-key exempt (health probe).
+
+GET    /api/setup/status
+→ 200 { configured: boolean, needsAdmin: boolean, hasApiKey: boolean,
+        hasProjects: boolean, hasUsers: boolean }
+  API-key exempt. configured = setup_complete flag OR (api key + admin emails present).
+
+POST   /api/setup/admin        body { email* }
+→ 200 { ok: true } | 403 SETUP_LOCKED
+  Appends the email to settings.admin_emails (env LXK_ADMIN_EMAILS is also honored).
+
+POST   /api/setup/api-key
+→ 200 { key: "lxk_..." }
+  Creates a fresh admin key (user_id NULL → admin). rawKey returned once.
+
+POST   /api/setup/seed
+→ 200 { seeded: boolean }
+  Loads scripts/seed-dev.sql into an empty DB. seeded=false if the file is
+  missing or the DB already has projects.
+
+POST   /api/setup/complete
+→ 200 { ok: true } | 403 SETUP_LOCKED
+  Sets setup_complete=1.
+
+The mutating setup endpoints fail 403 SETUP_LOCKED once setup_complete=1 or
+any project exists — the wizard only runs on first install.
+```
+
 ### Projects
 
 ```
 GET    /api/projects
-→ 200 { data: Project[], nextCursor }
+→ 200 { data: Project[], nextCursor }   (nextCursor always null — unpaginated)
 
-POST   /api/projects
+POST   /api/projects          (admin)
 body { name*, slug?, description?, githubRepo? }
-→ 201 Project | 409 SLUG_TAKEN
+→ 201 Project | 403 FORBIDDEN | 409 SLUG_TAKEN
 
 GET    /api/projects/:slug
 → 200 Project | 404
 
-PATCH  /api/projects/:slug
+PATCH  /api/projects/:slug   (admin)
 body { name?, description?, githubRepo? }
-→ 200 Project | 404
+→ 200 Project | 403 FORBIDDEN | 404
 
-DELETE /api/projects/:slug
-→ 204 | 404        (cascades: columns, swimlanes, tasks, wiki)
+DELETE /api/projects/:slug   (admin)
+→ 204 | 403 FORBIDDEN | 404        (cascades: columns, swimlanes, tasks, wiki)
 
 GET    /api/dashboard
 → 200 Dashboard     (unpaginated full snapshot — health cards, stats, attention lists)
@@ -299,32 +403,42 @@ GET    /api/dashboard
   urgentTasks/outOfSyncTasks capped at 50 items each
 ```
 
+### Project Members
+
+```
+GET    /api/projects/:slug/members
+→ 200 { data: [{ name, email, role: "admin"|"member" }] }
+  Users holding an explicit project role (user_project_roles rows). Global
+  admins are filtered out. Membership changes are made via
+  /api/admin/users/:id/projects — there are no project-scoped write endpoints.
+```
+
 ### Columns
 
 ```
 GET    /api/projects/:slug/columns
 → 200 { data: Column[] }         (ordered by position; not paginated — bounded by nature)
 
-POST   /api/projects/:slug/columns
+POST   /api/projects/:slug/columns      (admin)
 body { name*, position?, color?, wipLimit?, requiredFields?, githubState? }
-→ 201 Column | 404 PROJECT_NOT_FOUND
+→ 201 Column | 403 FORBIDDEN | 404 PROJECT_NOT_FOUND
   position omitted → appended to end
 
-PATCH  /api/projects/:slug/columns/:id
+PATCH  /api/projects/:slug/columns/:id  (admin)
 body { name?, color?, wipLimit?, requiredFields?, githubState?, position? }
-→ 200 Column | 404
+→ 200 Column | 403 FORBIDDEN | 404
 
-DELETE /api/projects/:slug/columns/:id
-→ 204 | 409 HAS_CHILDREN { count }   (must migrate tasks first)
+DELETE /api/projects/:slug/columns/:id  (admin)
+→ 204 | 403 FORBIDDEN | 409 HAS_CHILDREN { count }   (must migrate tasks first)
 ```
 
 ### Swimlanes
 
 ```
 GET    /api/projects/:slug/swimlanes        → 200 { data: Swimlane[] }
-POST   /api/projects/:slug/swimlanes        body { name*, description?, position? } → 201 Swimlane
-PATCH  /api/projects/:slug/swimlanes/:id    body { name?, description?, position? } → 200 Swimlane
-DELETE /api/projects/:slug/swimlanes/:id    → 204 (tasks must be reassigned first — swimlane_id is NOT NULL)
+POST   /api/projects/:slug/swimlanes   (admin)  body { name*, description?, position? } → 201 Swimlane | 403 FORBIDDEN
+PATCH  /api/projects/:slug/swimlanes/:id  (admin) body { name?, description?, position? } → 200 Swimlane | 403 FORBIDDEN
+DELETE /api/projects/:slug/swimlanes/:id  (admin) → 204 | 403 FORBIDDEN (tasks must be reassigned first — swimlane_id is NOT NULL)
 ```
 
 ### Tasks
@@ -422,12 +536,13 @@ Notes:
 GET    /api/projects/:slug/field-config
 → 200 FieldConfig        (priorities + types, each ordered by position)
 
-PUT    /api/projects/:slug/field-config
+PUT    /api/projects/:slug/field-config  (admin)
 body { priorities: FieldOption[], types: FieldOption[] }   (FULL REPLACE of both lists)
   Each option: { id?, label*, color*, position* }
     - id omitted → create; id present → update that option
     - options missing from the payload are deleted (only if unused by tasks)
 → 200 FieldConfig
+  | 403 FORBIDDEN
   | 404 PROJECT_NOT_FOUND
   | 409 OPTION_IN_USE { optionId, label }     (delete blocked: tasks reference it)
   | 422 INVALID_OPTION { optionId }           (unknown id, or label duplicates, or empty list)
@@ -459,9 +574,10 @@ DELETE /api/projects/:slug/tasks/:id/github-link/:issueId
 ### Wiki
 
 ```
-GET    /api/projects/:slug/wiki?parentId&limit&cursor
-→ 200 { data: WikiPageMeta[], nextCursor }
-  parentId omitted → root pages; "null" → root pages explicitly
+GET    /api/projects/:slug/wiki
+→ 200 { data: WikiPageMeta[] }   (ALL pages of the project, flat — no
+  parentId filter, no pagination; parentId + hasChildren let the client tree
+  the list)
 
 POST   /api/projects/:slug/wiki
 body { title*, slug?, content?, parentId? }
@@ -471,7 +587,9 @@ GET    /api/projects/:slug/wiki/:pageSlug
 → 200 WikiPage | 404 PAGE_NOT_FOUND
 
 PATCH  /api/projects/:slug/wiki/:pageSlug
-body { title?, slug?, content?, parentId?, position? }
+body { title?, slug?, content?, parentId?, position?, saveType?: "autosave"|"manual" }
+  saveType defaults to "autosave" — controls which revision bucket the update
+  lands in.
 → 200 WikiPage | 404 | 409 SLUG_TAKEN
 
 DELETE /api/projects/:slug/wiki/:pageSlug
@@ -480,24 +598,65 @@ DELETE /api/projects/:slug/wiki/:pageSlug
 GET    /api/projects/:slug/wiki/:pageSlug/children
 → 200 { data: WikiPageMeta[] }     (ordered by position)
 
-GET    /api/projects/:slug/wiki/search?q*&limit
-→ 200 { data: [{ id, title, slug, snippet }] }
-  snippet: FTS5 match context (~160 chars, <mark> tags around hits)
+GET    /api/projects/:slug/wiki/search?q*
+→ 200 { data: Array<WikiPage & { snippet }> }
+  snippet: FTS5 match context (~160 chars, <mark> tags around hits).
+  q missing/empty → 200 { data: [] }.
+
+GET    /api/projects/:slug/wiki/:pageSlug/revisions?limit
+→ 200 { revisions: [{ id, title, saveType: "autosave"|"manual", createdAt }] }
+  Newest first. limit clamped 1–200.
+
+GET    /api/projects/:slug/wiki/:pageSlug/revisions/:revisionId
+→ 200 { revision: { id, pageId, title, slug, content: TipTapDoc,
+                    contentText: string, saveType, createdAt } }
+  | 404 PAGE_NOT_FOUND   (also when the revision belongs to a different page)
+
+POST   /api/projects/:slug/wiki/:pageSlug/restore
+body { revisionId* }
+→ 200 WikiPage  | 404 PAGE_NOT_FOUND (unknown page or revision)
+  Rolls the page back to that revision (records a new revision).
 ```
 
 ### Settings
 
 ```
-GET    /api/settings/api-keys
+GET    /api/settings/api-keys  (admin)
 → 200 { data: ApiKey[] }
 
-POST   /api/settings/api-keys
+POST   /api/settings/api-keys  (admin)
 body { name* }
 → 201 { key: ApiKey, rawKey: "lxk_..." }
   ⚠ rawKey returned ONCE — never stored, never shown again
 
-DELETE /api/settings/api-keys/:id
+DELETE /api/settings/api-keys/:id  (admin)
 → 204 | 404
+```
+
+### Admin (users & project roles)
+
+All endpoints require an admin caller — members get `403 FORBIDDEN`.
+
+```
+GET    /api/admin/users
+→ 200 { data: [{ id, email, name, role, createdAt, lastSeen }] }
+
+PATCH  /api/admin/users/:id       body { role*: "admin"|"member" }
+→ 200 { id, email, name, role, createdAt, lastSeen }
+  | 403 FORBIDDEN | 404 USER_NOT_FOUND
+  (demote-to-member on self is guarded by the code but the REST caller id is
+  a placeholder, so CANNOT_DELETE_SELF is not reachable here)
+
+GET    /api/admin/users/:id/projects
+→ 200 { data: [{ projectId, projectSlug, role: "admin"|"member" }] }
+
+PUT    /api/admin/users/:id/projects    body { projectId*, role*: "admin"|"member" }
+→ 200 { projectId, projectSlug, role }
+  | 403 FORBIDDEN
+  (wire quirk: projectSlug currently echoes projectId)
+
+DELETE /api/admin/users/:id/projects/:projectId
+→ 204 | 403 FORBIDDEN
 ```
 
 ### GitHub Webhook
@@ -507,7 +666,8 @@ POST   /api/webhooks/github
 headers: X-GitHub-Event: issues, X-GitHub-Delivery, X-Hub-Signature-256
 → 200 immediately (processing deferred to the background — Bun has no
   waitUntil; the handler acks first, then processes fire-and-forget)
-→ 401 on signature mismatch (before body parsing)
+→ 401 { error: { code: "GITHUB_WEBHOOK_ERROR", message: "Invalid signature" } }
+  on signature mismatch (before body parsing)
 Handled: event "issues" with payload.action closed | reopened | edited
   (GitHub sends the transition in the payload, not in the header)
 ```
@@ -557,15 +717,17 @@ Recovery: re-run Setup runtime (install event delivers a fresh key).
 
 POST   /api/forge/daemon/claim             (daemon)
 body { runtimeId* }
-→ 200 { task: ForgeTask | null, provider, agent, model: string, extraArgs: string[], prompt: string,
+→ 200 { task: ForgeTask | null, provider, agent, model: string, printLogs: boolean,
+        logLevel: ""|"DEBUG"|"INFO"|"WARN"|"ERROR", extraArgs: string[], prompt: string,
         agentMarkdown: string, skillMarkdown: string, skillIds: string[] }
         skillIds = full current skill-id set; the daemon prunes stale
         .agents/skills/<id> dirs not in this list (opencode auto-discovers
         every bundle in that dir)
-  (oldest queued, FIFO; marks running. provider + agent + model + extraArgs are
-  the runtime's server-side config so the daemon spawns the configured CLI with
-  the latest settings. prompt is the server-built task prompt (context + output
-  contract; empty = the daemon falls back to its local minimal build).
+  (oldest queued, FIFO; marks running. provider + agent + model + printLogs +
+  logLevel + extraArgs are the runtime's server-side config so the daemon
+  spawns the configured CLI with the latest settings. prompt is the
+  server-built task prompt (context + output contract; empty = the daemon
+  falls back to its local minimal build).
   agentMarkdown/skillMarkdown are the task's agent + skill instructions — the
   daemon writes them into the run dir as AGENTS.md + .agents/<skill>/SKILL.md
   (files-only delivery, no host store).)
@@ -581,7 +743,7 @@ key; rawKey is verified against the stored SHA-256 hash and held ONLY in memory.
 
 POST   /api/forge/runtime-events/claim     (listener; Bearer)
 body { machineId* }
-→ 200 { event: RuntimeEvent | null, rawKey: string | null }
+→ 200 { event: RuntimeEvent | null, rawKey: string | null }   (null = none pending)
 Oldest pending event for that machine, marked claimed. rawKey is delivered ONCE
 here (removed from the in-memory store); null if the claim TTL (5 min) expired.
 A claimed event is reclaimed after 2 min if never completed.
@@ -592,6 +754,7 @@ POST   /api/forge/runtime-events/:id/fail       (listener)  body { error* } → 
 
 GET    /api/forge/runtime-events/:id       (browser)  → 200 RuntimeEvent
 GET    /api/forge/runtime-events           (browser)  → 200 { data: RuntimeEvent[] }
+  ?machineId=<id> filters by machine
 
 # ── Machine registry and CLI catalogs ──
 POST   /api/forge/machines/register             (cli login)
@@ -606,7 +769,9 @@ POST   /api/forge/machines/heartbeat          (listener)
 body { id*, hostname?, clis?: [{ provider, version }],
        runtimes?: [{ runtimeId, agentCli, models, agents }],
        daemonErrors?: [{ runtimeId, error }] }
-→ 200 Machine
+→ 200 Machine & { projects: [{ id, name, slug, description }] }
+  projects = full project index; the listener provisions one workspace dir
+  per project under ~/.lexa/projects/ and keeps its local lookup fresh.
 Upserts a machine row (marks it listening). The CLI persists id in
 ~/.lexa/machine-id. clis = installed agent CLIs probed at listener start
 (opencode/cmd --version; hermes skipped). daemonErrors relay daemon failures
@@ -643,6 +808,18 @@ body { slug*, documentType*: "task"|"wiki", documentId*, agentId*, skillId*,
 GET    /api/forge/tasks/:id
 → 200 ForgeTask
 
+GET    /api/forge/tasks?slug*&documentType&documentId
+→ 200 { data: ForgeTask[] }   (for one document, per doc — the Forge panel's
+  per-document run list; status newest-first)
+  | 404 PROJECT_NOT_FOUND  (slug missing or unknown)
+
+GET    /api/forge/tasks/recent
+→ 200 { data: Array<ForgeTask & { projectName }> }   (10 newest, cross-project)
+
+GET    /api/forge/daemon/tasks/:id/status    (daemon)
+→ 200 { status: "queued"|"running"|"completed"|"failed"|"cancelled" }
+  Polling fallback for daemons that cannot stream logs.
+
 POST   /api/forge/tasks/:id/cancel             (browser)
 → 200 ForgeTask  (status → "cancelled"; daemon discards the run)
 
@@ -670,42 +847,43 @@ this endpoint every 1.5s while any row on the page is queued/running, else
 on a 15s idle heartbeat.
 
 # ── Forge agents & skills (global rule bundles; browser, Bearer) ──
+# All mutations are admin-only (403 FORBIDDEN for members).
 GET    /api/forge/agents
 → 200 { data: ForgeAgent[] }   (agent = { id, name, description, instructions,
   isBuiltin, skillIds[], createdAt, updatedAt })
 
-POST   /api/forge/agents                   body { name*, description?, instructions* }
-→ 201 ForgeAgent  | 409 CONSTRAINT (duplicate name)
+POST   /api/forge/agents        (admin)  body { name*, description?, instructions* }
+→ 201 ForgeAgent  | 403 FORBIDDEN | 409 CONSTRAINT (duplicate name)
 
-PATCH  /api/forge/agents/:id               body { name?, description?, instructions? }
-→ 200 ForgeAgent  | 404 AGENT_NOT_FOUND | 409 CONSTRAINT
+PATCH  /api/forge/agents/:id    (admin)  body { name?, description?, instructions? }
+→ 200 ForgeAgent  | 403 FORBIDDEN | 404 AGENT_NOT_FOUND | 409 CONSTRAINT
 
-DELETE /api/forge/agents/:id
-→ 204 | 404 AGENT_NOT_FOUND | 422 FORGE_BUILTIN_DELETE | 409 FORGE_ENTITY_IN_USE
+DELETE /api/forge/agents/:id    (admin)
+→ 204 | 403 FORBIDDEN | 404 AGENT_NOT_FOUND | 422 FORGE_BUILTIN_DELETE | 409 FORGE_ENTITY_IN_USE
   (builtins can't be deleted; an agent still used by forge tasks can't either)
 
-PUT    /api/forge/agents/:id/skills        body { skillIds*: string[] }  (full replace)
-→ 200 ForgeAgent  | 404 AGENT_NOT_FOUND / SKILL_NOT_FOUND
+PUT    /api/forge/agents/:id/skills  (admin)  body { skillIds*: string[] }  (full replace)
+→ 200 ForgeAgent  | 403 FORBIDDEN | 404 AGENT_NOT_FOUND / SKILL_NOT_FOUND
   (M2M bindings; the Forge popover only offers the attached skills)
 
-POST   /api/forge/agents/:id/reset         (builtin only)
+POST   /api/forge/agents/:id/reset  (admin; builtin only)
 → 200 ForgeAgent  (restores the seeded instructions + full builtin skill set)
-  | 404 AGENT_NOT_FOUND | 422 FORGE_BUILTIN_DELETE
+  | 403 FORBIDDEN | 404 AGENT_NOT_FOUND | 422 FORGE_BUILTIN_DELETE
 
 GET    /api/forge/skills
 → 200 { data: ForgeSkill[] }   (skill = { id, name, description, instructions, isBuiltin, createdAt, updatedAt })
 
-POST   /api/forge/skills                   body { name*, description?, instructions* }
-→ 201 ForgeSkill  | 409 CONSTRAINT
+POST   /api/forge/skills        (admin)  body { name*, description?, instructions* }
+→ 201 ForgeSkill  | 403 FORBIDDEN | 409 CONSTRAINT
 
-PATCH  /api/forge/skills/:id               body { name?, description?, instructions? }
-→ 200 ForgeSkill  | 404 SKILL_NOT_FOUND | 409 CONSTRAINT
+PATCH  /api/forge/skills/:id    (admin)  body { name?, description?, instructions? }
+→ 200 ForgeSkill  | 403 FORBIDDEN | 404 SKILL_NOT_FOUND | 409 CONSTRAINT
 
-DELETE /api/forge/skills/:id
-→ 204 | 404 SKILL_NOT_FOUND | 422 FORGE_BUILTIN_DELETE | 409 FORGE_ENTITY_IN_USE
+DELETE /api/forge/skills/:id    (admin)
+→ 204 | 403 FORBIDDEN | 404 SKILL_NOT_FOUND | 422 FORGE_BUILTIN_DELETE | 409 FORGE_ENTITY_IN_USE
 
-POST   /api/forge/skills/:id/reset         (builtin only)
-→ 200 ForgeSkill  | 404 SKILL_NOT_FOUND | 422 FORGE_BUILTIN_DELETE
+POST   /api/forge/skills/:id/reset  (admin; builtin only)
+→ 200 ForgeSkill  | 403 FORBIDDEN | 404 SKILL_NOT_FOUND | 422 FORGE_BUILTIN_DELETE
 
 POST   /api/forge/daemon/tasks/:id/log         (daemon)  body { message*, stream? ("out"|"err"), level? ("info"|"warn"|"error") } → 200 ForgeTaskLog
 (appends one activity line — claim, model, agent start, generating, done/failed;

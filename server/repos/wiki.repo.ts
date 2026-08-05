@@ -73,10 +73,11 @@ export class WikiRepo extends Effect.Service<WikiRepo>()("Lexa/WikiRepo", {
         const limitVal = limit ?? 20;
         return queryAll<WikiPageRow & { snippet: string }>(
           db,
-          `SELECT wiki_pages.*, snippet(wiki_fts, 1, '**', '**', '…', 32) AS snippet
+           `SELECT wiki_pages.*, snippet(wiki_fts, 1, '**', '**', '…', 32) AS snippet
            FROM wiki_fts
            JOIN wiki_pages ON wiki_pages.rowid = wiki_fts.rowid
            WHERE wiki_fts MATCH ? AND project_id = ?
+           ORDER BY bm25(wiki_fts)
            LIMIT ?`,
           query,
           projectId,
