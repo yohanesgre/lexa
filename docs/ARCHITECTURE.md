@@ -117,6 +117,30 @@ Webhooks          POST                /api/webhooks/github   (signature-verified
 Settings          GET/POST/DELETE     /api/settings/api-keys[/:id]
 ```
 
+### Request pipeline
+
+`server/entry.ts` is the Bun.serve edge: boot/migrations, the webhook branch
+(HMAC before parse), `/mcp` (rate check + stream cap + handler), static/SSR,
+and the `/api` **stream cap** (`readBodyWithLimit` — chunked bodies cannot
+bypass `LXK_MAX_BODY_MB`; the request is reconstructed and the resolved
+socket IP is stamped as `x-lexa-remote-ip`, inbound header deleted first to
+prevent spoofing — socket IP is only visible at this layer).
+
+Everything else runs as HttpApi middleware (`server/api/middleware.ts`),
+applied at build time, before route matching and before body decode:
+
+1. **Rate limit** — per-IP, `isPrivateIp`-gated `cf-connecting-ip` trust; `/api/setup` + `/api/health` exempt; shares one bucket with `/mcp` (`apiRateLimiter`)
+2. **Content-length pre-check** — declared size > `LXK_MAX_BODY_MB` → 413 fast-path (stream cap above stays authoritative)
+3. **Auth** — daemon token (`x-forge-token`, constant-time) for `/api/forge/daemon/*` + `/api/forge/runtimes/register`, else Bearer key → `resolveApiKeyIdentity` on the shared connection; setup/health exempt; 401/403 envelopes byte-identical to the old dispatcher
+4. **`AuthIdentity` provision** — handlers read the Context tag (no per-request DB opens)
+5. **Security headers** — nosniff + no-store on every `/api` response, including router 404s
+
+Platform quirks that shaped this: `MaxBodySize` is unenforced in
+@effect/platform 0.97 (stream cap must stay in entry), `remoteAddress` is
+unpopulated on the web-handler path (hence the IP stamp), and middleware must
+short-circuit with literal `HttpServerResponse` values — failing with
+undeclared errors hits the error encoder and 500s.
+
 ## MCP Server (Hermes/OpenCode)
 
 - **Transport:** Streamable HTTP at `/mcp`, stateless mode (no session persistence — each request self-contained, fits Workers).
@@ -271,8 +295,8 @@ lexa/
 │   │   └── ui/      (toast, modal-stack, menu)
 │   └── lib/         (api.ts, queries.ts)
 ├── server/                   # Effect-TS services
-│   ├── entry.ts              # Bun.serve — routes /mcp, /api/*, static, SSR
-│   ├── api/                  # HttpApi app (http.ts), auth-key.ts, auth.ts, errors.ts
+│   ├── entry.ts              # Bun.serve — boot, webhook, /mcp, static/SSR, /api stream cap + IP stamp
+│   ├── api/                  # HttpApi app (http.ts), middleware.ts (rate/auth/headers), auth-key.ts, auth.ts, errors.ts, limits.ts
 │   ├── services/             # task, project, wiki, column, swimlane, ...
 │   ├── repos/                # task.repo.ts, project.repo.ts, ...
 │   ├── db/                   # database.ts (bun:sqlite layer), migrate.ts

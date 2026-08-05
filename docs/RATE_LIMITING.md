@@ -19,11 +19,17 @@ Bun server, no Cloudflare WAF dependency (the WAF rule path is paid on some plan
 
 - Fixed window, per client IP: **600 requests per 10 minutes** (defaults —
   `max` / `windowMs` constants in `server/api/rate-limit.ts`).
-- Runs **first** in the fetch handler (`server/entry.ts`), before body reads and
-  before auth — cheap, and it also throttles unauthenticated key-guessing floods.
-- Client IP: `CF-Connecting-IP` header (set by Cloudflare/cloudflared), falling
-  back to the socket address via `server.requestIP()`. Behind the tunnel the real
-  visitor IP is used.
+- Enforced **before auth** — `/api/*` in the API middleware (rate limit →
+  body pre-check → auth, so a blocked IP stays blocked regardless of key),
+  `/mcp` at the entry edge. One shared bucket (`apiRateLimiter`) across both
+  surfaces. Also throttles unauthenticated key-guessing floods.
+- Client IP: entry resolves it — `server.requestIP()` socket address,
+  `CF-Connecting-IP` trusted only when the socket peer is private (tunnel
+  sidecar) — and stamps it as `x-lexa-remote-ip` on the reconstructed request
+  (any inbound value deleted first, spoof-guard). The middleware applies the
+  same `isPrivateIp`-gated trust to `cf-connecting-ip`.
+- `/api/setup*` and `/api/health` are exempt (first-run wizard, health probes —
+  cheap unauthenticated GETs must not 429).
 - Denied requests get **429** `{ "error": { "code": "RATE_LIMITED", "message": "Rate limit exceeded" } }`
   with a `Retry-After` header (seconds until the window resets). Same raw
   early-gate pattern as the 413 `BODY_TOO_LARGE` response.
@@ -32,11 +38,11 @@ Bun server, no Cloudflare WAF dependency (the WAF rule path is paid on some plan
 
 | Surface | Auth | Limited |
 |---|---|---|
-| `/api/*` (REST, humans + machines) | Bearer `lxk_*` (or Access) | Yes |
-| `/mcp` (AI agents) | Bearer `lxk_*` | Yes |
+| `/api/*` (REST, humans + machines) | Bearer `lxk_*` (or Access) | Yes (middleware) |
+| `/mcp` (AI agents) | Bearer `lxk_*` | Yes (entry; shared bucket) |
 | `/api/webhooks/github` (GitHub → Lexa) | HMAC-SHA-256 | **No — exempt** |
-| `/api/setup/*` (first-run wizard) | None (setup-locked after first run) | Yes |
-| `/api/health` | None | Yes (harmless) |
+| `/api/setup/*` (first-run wizard) | None (setup-locked after first run) | No — exempt |
+| `/api/health` | None | No — exempt |
 
 ### Webhook exemption (do not remove)
 
@@ -67,12 +73,14 @@ all local requests share one IP, so the burst hits the limit):
 
 ```bash
 for i in $(seq 1 700); do
-  curl -s -o /dev/null -w "%{http_code}\n" http://localhost:3000/api/health
+  curl -s -o /dev/null -w "%{http_code}\n" http://localhost:3000/api/projects
 done | sort | uniq -c
 ```
 
 Expect `200` for the first ~600 and `429` for the rest, then a `Retry-After`
-header on the 429s. Requests pass again after the window resets.
+header on the 429s. Requests pass again after the window resets. (Unauthenticated
+bursts work too — rate limiting runs before auth, so 401s consume the bucket;
+`/api/health` is exempt and will NOT 429.)
 
 Smoke-check the exemption: trigger a GitHub webhook delivery (move a task between
 columns with issue sync on) and confirm the card still moves.
