@@ -7,8 +7,8 @@
 | Concern | Convention |
 |---------|-----------|
 | Base URL | `https://<host>/api` (Bun server behind the cloudflared tunnel) |
-| Auth (machine) | `Authorization: Bearer lxk_<43 base62 chars>` — required by every `/api/*` route except `/api/health`, `/api/setup/*`, the GitHub webhook (HMAC), and forge-daemon routes carrying `x-forge-token` (see Auth) |
-| Auth (human) | Cloudflare Access terminates at the edge (Google OAuth). The server never verifies a JWT — it reads `Cf-Access-Authenticated-User-Email` / `Cf-Access-Authenticated-User-Name` only for page (SSR) user provisioning. The REST API itself is machine-key only. |
+| Auth (machine) | `Authorization: Bearer lxk_<43 base62 chars>` — required by every `/api/*` route except `/api/health`, `/api/setup/*`, the GitHub webhook (HMAC), and `/api/forge/runtimes/register` + `/api/forge/daemon/*` routes carrying `x-forge-token` (see Auth) |
+| Auth (human) | Cloudflare Access terminates at the edge (Google OAuth). With `LXK_ACCESS_AUD` set, the server verifies the `Cf-Access-Jwt-Assertion` against the team JWKS (`server/api/access-auth.ts`) and upserts users from the claims; without it, it trusts `Cf-Access-Authenticated-User-Email` / `Cf-Access-Authenticated-User-Name` headers (tunnel-authenticated, boot warning). Page (SSR) user provisioning only — the REST API itself is machine-key only. |
 | Content type | `application/json; charset=utf-8` |
 | IDs | UUID strings |
 | Timestamps | ISO 8601 UTC (`2026-07-27T10:30:00Z`) |
@@ -37,7 +37,7 @@ All non-2xx responses share one shape:
 | 401 | `GITHUB_WEBHOOK_ERROR` | Webhook signature mismatch (before body parsing) |
 | 403 | `FORBIDDEN` | Admin-only endpoint called by a non-admin, or project access denied (details: `{ message }`) |
 | 403 | `SETUP_LOCKED` | Mutating `/api/setup/*` call after setup is complete or projects exist |
-| 403 | `CANNOT_DELETE_SELF` | (reserved — mapped in the error table but not reachable via REST: the admin role-update handler passes a placeholder caller id) |
+| 403 | `CANNOT_DELETE_SELF` | Demoting or removing the last admin via the admin user routes (details: `{ message }`) |
 | 404 | `USER_NOT_FOUND` | Unknown user id on admin role endpoints |
 | 404 | `PROJECT_NOT_FOUND` `COLUMN_NOT_FOUND` `SWIMLANE_NOT_FOUND` `TASK_NOT_FOUND` `PAGE_NOT_FOUND` `SOURCE_NOT_FOUND` `FORGE_TASK_NOT_FOUND` `TASK_LINK_NOT_FOUND` `MACHINE_NOT_FOUND` `RUNTIME_NOT_FOUND` `RUNTIME_EVENT_NOT_FOUND` `API_KEY_NOT_FOUND` `AGENT_NOT_FOUND` `SKILL_NOT_FOUND` | |
 | 409 | `SLUG_TAKEN` | Duplicate project slug or wiki slug (details: `{ slug }`) |
@@ -48,21 +48,26 @@ All non-2xx responses share one shape:
 | 409 | `ALREADY_LINKED` | Task already has a GitHub issue in that repo |
 | 409 | `OPTION_IN_USE` | Delete priority/type option still referenced by tasks (details: `{ optionId, label }`) |
 | 409 | `FORGE_ENTITY_IN_USE` | Delete agent/skill still used by forge tasks (details: `{ kind, name, count }`) |
+| 409 | `CONSTRAINT` | Generic constraint-violation fallback (typed codes like `SLUG_TAKEN` / `HAS_CHILDREN` / `OPTION_IN_USE` are raised whenever possible) |
+| 409 | `LAST_ADMIN_DEMOTE` | Demote/remove would leave the instance with no admin |
+| 413 | `BODY_TOO_LARGE` | Request body exceeds `LXK_MAX_BODY_MB` (default 16) — early gate in `server/entry.ts`, before auth |
 | 422 | `REQUIRED_FIELD` | Column's `required_fields` not satisfied (details: `{ field, column }`) |
 | 422 | `NEIGHBOR_NOT_IN_COLUMN` | `beforeTaskId`/`afterTaskId` not in target column (details: `{ taskId }`) |
 | 422 | `INVALID_OPTION` | Unknown priority/type option id, duplicate label, or empty option list (details: `{ optionId? }`) |
 | 422 | `INVALID_TASK_LINK` | Self-link or cross-project task link (details: `{ message }`) |
 | 422 | `FORGE_BUILTIN_DELETE` | Delete/reset of a builtin agent or skill (details: `{ kind, name }`) |
 | 422 | `SEARCH_ERROR` | Wiki FTS5 query rejected |
-| 422 | `SOURCE_FETCH_ERROR` | External source URL invalid or unreadable (details: `{ message }`) |
-| 500 | `SOURCE_UNREACHABLE` | External source DNS/fetch failed after the SSRF guard (details: `{ url }`) — falls through the 500 default arm |
-| 500 | `DATABASE_ERROR` / `CONSTRAINT` / `INTERNAL` | |
+| 422 | `SOURCE_UNREACHABLE` | External source DNS/fetch failed after the SSRF guard (details: `{ url }`) |
+| 422 | `API_KEY_NAME_EMPTY` | API key name missing or blank |
+| 429 | `RATE_LIMITED` | Per-IP rate limit exceeded on `/api/*` or `/mcp` (webhook exempt) — early gate in `server/entry.ts`; see docs/RATE_LIMITING.md |
+| 500 | `DATABASE_ERROR` / `INTERNAL` | |
 | 502 | `GITHUB_API_ERROR` | Only on explicit GitHub-linking endpoints; never on moves |
+| 502 | `SOURCE_FETCH_ERROR` | External source fetch failed upstream after the SSRF guard (details: `{ message }`) |
 
 Defined in the error map but never raised by any handler — do not match on them:
 - `MISSING_AUTH` / `INVALID_API_KEY` — the auth middleware emits `UNAUTHORIZED` instead.
 - `MACHINE_OFFLINE` — runtime removal never blocks; `NO_RUNTIME_ONLINE` is the only offline error.
-- `INVALID_ACCESS_JWT` — Access JWT validation happens at the edge; the server only reads identity headers.
+- `INVALID_ACCESS_JWT` — a failed Access JWT verification (only armed when `LXK_ACCESS_AUD` is set) emits `UNAUTHORIZED` instead.
 
 ## Auth
 
@@ -84,12 +89,15 @@ unless the `Authorization` header carries a valid key:
   - `GET /api/health`
   - `/api/setup/*` (first-run wizard)
   - `POST /api/webhooks/github` — HMAC-SHA-256 signature over the raw body is the auth
-  - `/api/forge/daemon/*` and `/api/forge/runtimes/*` — also accept the daemon
-    token (`x-forge-token: <LXK_FORGE_DAEMON_TOKEN>` header) in place of a key
-- **Cloudflare Access** protects the host at the edge; the server does not
-  verify the JWT. For page requests the SSR path upserts a user from
-  `Cf-Access-Authenticated-User-Email` (admins come from `LXK_ADMIN_EMAILS` env
-  or the `admin_emails` setting). API requests are never authenticated by Access.
+  - `/api/forge/daemon/*` and `/api/forge/runtimes/register` — also accept the
+    daemon token (`x-forge-token: <LXK_FORGE_DAEMON_TOKEN>` header) in place of a key
+- **Cloudflare Access** protects the host at the edge. With `LXK_ACCESS_AUD` set,
+  `server/api/access-auth.ts` verifies the `Cf-Access-Jwt-Assertion` against the
+  team JWKS (audience must match) — an invalid assertion → 401, and the SSR path
+  upserts a user from the verified claims. Without `LXK_ACCESS_AUD`, identity
+  headers are trusted as-is (tunnel-authenticated; boot warning logged). Admins
+  come from `LXK_ADMIN_EMAILS` env or the `admin_emails` setting. API requests
+  are never authenticated by Access.
 
 ## Entity Schemas (TypeScript)
 
@@ -643,9 +651,9 @@ GET    /api/admin/users
 
 PATCH  /api/admin/users/:id       body { role*: "admin"|"member" }
 → 200 { id, email, name, role, createdAt, lastSeen }
-  | 403 FORBIDDEN | 404 USER_NOT_FOUND
-  (demote-to-member on self is guarded by the code but the REST caller id is
-  a placeholder, so CANNOT_DELETE_SELF is not reachable here)
+  | 403 FORBIDDEN | 404 USER_NOT_FOUND | 403 CANNOT_DELETE_SELF
+  (demote-to-member on self → `CANNOT_DELETE_SELF`; the caller identity comes
+  from the API key, not a placeholder)
 
 GET    /api/admin/users/:id/projects
 → 200 { data: [{ projectId, projectSlug, role: "admin"|"member" }] }
@@ -907,11 +915,12 @@ DELETE /api/projects/:slug/documents/:type/:id/sources/:sourceId
 ```
 
 Notes:
-- **Daemon auth:** `/api/forge/daemon/*` and `/api/forge/runtimes/*` accept the
-  shared secret `LXK_FORGE_DAEMON_TOKEN` via `x-forge-token`, or a normal Bearer
-  API key. Browser endpoints use the Bearer key. The CLI listener
-  (`machine listen`) uses the Bearer key from its saved login for
-  `/api/forge/runtime-events/*` and `/api/forge/machines/*`.
+- **Daemon auth:** `/api/forge/daemon/*` and `/api/forge/runtimes/register` accept
+  the shared secret `LXK_FORGE_DAEMON_TOKEN` via `x-forge-token`, or a normal
+  Bearer API key; the other runtime routes require the Bearer key. Browser
+  endpoints use the Bearer key. The CLI listener (`machine listen`) uses the
+  Bearer key from its saved login for `/api/forge/runtime-events/*` and
+  `/api/forge/machines/*`.
 - **SSRF guard:** external sources resolve DNS and reject private/loopback/
   link-local/CGNAT addresses before fetching.
 - **MCP loop:** the spawned agent CLI receives a server-built prompt; the

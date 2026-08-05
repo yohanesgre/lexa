@@ -9,6 +9,8 @@ import { findOrCreateUser, findOrCreateUserByIdentity, adminEmails } from "./api
 import { verifyAccessAssertion } from "./api/access-auth";
 import { resolveApiKeyIdentity } from "./api/auth-key";
 import { getSetting, setSetting } from "./db/settings";
+import { createRateLimiter } from "./api/rate-limit";
+import type { Server } from "bun";
 
 const MAX_API_BODY = Number(process.env.LXK_MAX_BODY_MB ?? 16) * 1024 * 1024;
 
@@ -56,6 +58,7 @@ const apiHandler: (req: Request) => Promise<Response> = typeof apiHandlerRaw ===
 const mcpHandler = createMcpHandler(DATABASE_PATH);
 const verifyWebhook = createWebhookVerifier(DATABASE_PATH);
 const webhookHandler = createWebhookHandler(DATABASE_PATH);
+const rateLimiter = createRateLimiter();
 
 function withSecurityHeaders(res: Response): Response {
   res.headers.set("X-Content-Type-Options", "nosniff");
@@ -121,10 +124,24 @@ function autoLockSetupIfConfigured(dbPath: string) {
   }
 }
 
-Bun.serve({
+const server: Server<unknown> = Bun.serve({
   port: PORT,
   async fetch(req) {
     const url = new URL(req.url);
+
+    const path = url.pathname;
+    const isApiSurface = path === "/mcp" || path.startsWith("/api/");
+    if (isApiSurface && !path.startsWith("/api/webhooks/")) {
+      const ip = req.headers.get("cf-connecting-ip") ?? server.requestIP(req)?.address ?? "unknown";
+      if (!rateLimiter.check(ip)) {
+        return withSecurityHeaders(
+          new Response(JSON.stringify({ error: { code: "RATE_LIMITED", message: "Rate limit exceeded" } }), {
+            status: 429,
+            headers: { "Content-Type": "application/json", "Retry-After": String(Math.ceil(rateLimiter.retryAfterMs(ip) / 1000)) },
+          })
+        );
+      }
+    }
 
     if (url.pathname === "/mcp") {
       if (req.method !== "POST") {

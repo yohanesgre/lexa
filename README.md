@@ -60,11 +60,11 @@ All design and spec docs live in [`docs/`](docs/):
 
 | Doc | Contents |
 |---|---|
-| [`docs/IMPLEMENTATION.md`](docs/IMPLEMENTATION.md) | Execution plan: phases, files, acceptance checks |
 | [`docs/SCHEMA.md`](docs/SCHEMA.md) | SQL schema and data invariants |
 | [`docs/LAYERS.md`](docs/LAYERS.md) | Effect service patterns, error catalog, webhook/auth flows |
 | [`docs/API.md`](docs/API.md) | REST contract |
 | [`docs/MCP.md`](docs/MCP.md) | Agent-facing MCP tool contract |
+| [`docs/RATE_LIMITING.md`](docs/RATE_LIMITING.md) | App-level rate limiting for `/api` and `/mcp` (webhook-exempt) |
 | [`docs/DESIGN_SYSTEM.md`](docs/DESIGN_SYSTEM.md) | PHOSPHOR design tokens and component specs |
 | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | Big picture and decisions log |
 | [`docs/GITHUB_SETUP.md`](docs/GITHUB_SETUP.md) | GitHub App setup: webhook URL/secret, private key, Access bypass policies |

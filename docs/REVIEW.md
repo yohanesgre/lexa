@@ -75,7 +75,7 @@ GitHub OAuth is mentioned but: no auth routes exist, no session table, no OAuth 
 | # | Simplification | Impact |
 |---|---------------|--------|
 | 1 | Cut Labels entirely | -2 tables, -3 routes, -1 service, -2 MCP tools |
-| 2 | Cut subtasks (parent_id) — **restored 2026-08-01** | Was "undefined semantics, UX cost". Now first-class via `task_links(relation='subtask_of')` with defined semantics (column inheritance, move cascade, cycle guard). See IMPLEMENTATION.md. |
+| 2 | Cut subtasks (parent_id) — **restored 2026-08-01** | Was "undefined semantics, UX cost". Now first-class via `task_links(relation='subtask_of')` with defined semantics (column inheritance, move cascade, cycle guard). See SCHEMA.md. |
 | 3 | Cut restrict_roles + min_time (see 🔴 #5) | PolicyService collapses into TaskService |
 | 4 | Cloudflare Access instead of GitHub OAuth (see 🔴 #4) | Deletes most security-sensitive code |
 | 5 | Use @effect/platform HttpApi for routes | Auto-generates HTTP mapping + OpenAPI |
