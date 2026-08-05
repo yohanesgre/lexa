@@ -129,9 +129,9 @@ prevent spoofing — socket IP is only visible at this layer).
 Everything else runs as HttpApi middleware (`server/api/middleware.ts`),
 applied at build time, before route matching and before body decode:
 
-1. **Rate limit** — per-IP, `isPrivateIp`-gated `cf-connecting-ip` trust; `/api/setup` + `/api/health` exempt; shares one bucket with `/mcp` (`apiRateLimiter`)
+1. **Rate limit** — per-IP, `isPrivateIp`-gated `cf-connecting-ip` trust; `/api/setup` + `/api/health` ARE limited; `/api/forge/daemon/*` + `/api/forge/runtimes/register` exempt (token-gated); shares one bucket with `/mcp` (`apiRateLimiter`)
 2. **Content-length pre-check** — declared size > `LXK_MAX_BODY_MB` → 413 fast-path (stream cap above stays authoritative)
-3. **Auth** — daemon token (`x-forge-token`, constant-time) for `/api/forge/daemon/*` + `/api/forge/runtimes/register`, else Bearer key → `resolveApiKeyIdentity` on the shared connection; setup/health exempt; 401/403 envelopes byte-identical to the old dispatcher
+3. **Auth** — daemon token (`x-forge-token`, constant-time) for `/api/forge/daemon/*` + `/api/forge/runtimes/register`, else Bearer key → `resolveApiKeyIdentity` on the shared connection; setup/health auth-exempt; 401/403 envelopes byte-identical to the old dispatcher
 4. **`AuthIdentity` provision** — handlers read the Context tag (no per-request DB opens)
 5. **Security headers** — nosniff + no-store on every `/api` response, including router 404s
 
