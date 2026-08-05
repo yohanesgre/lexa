@@ -33,7 +33,7 @@ All non-2xx responses share one shape:
 | HTTP | Code | When |
 |------|------|------|
 | 400 | — | Payload schema validation failures are rejected by the platform before handlers run; the body is the platform's response, not the envelope above. No domain code maps to 400. |
-| 401 | `UNAUTHORIZED` | Missing or invalid API key (auth middleware in entry.ts; see Auth) |
+| 401 | `UNAUTHORIZED` | Missing or invalid API key (auth middleware in `server/api/middleware.ts`; see Auth) |
 | 401 | `GITHUB_WEBHOOK_ERROR` | Webhook signature mismatch (before body parsing) |
 | 403 | `FORBIDDEN` | Admin-only endpoint called by a non-admin, or project access denied (details: `{ message }`) |
 | 403 | `SETUP_LOCKED` | Mutating `/api/setup/*` call after setup is complete or projects exist |
@@ -51,7 +51,7 @@ All non-2xx responses share one shape:
 | 409 | `FORGE_ENTITY_IN_USE` | Delete agent/skill still used by forge tasks (details: `{ kind, name, count }`) |
 | 409 | `CONSTRAINT` | Generic constraint-violation fallback (typed codes like `SLUG_TAKEN` / `HAS_CHILDREN` / `OPTION_IN_USE` are raised whenever possible) |
 | 409 | `LAST_ADMIN_DEMOTE` | Demote/remove would leave the instance with no admin |
-| 413 | `BODY_TOO_LARGE` | Request body exceeds `LXK_MAX_BODY_MB` (default 16) — early gate in `server/entry.ts`, before auth; stream-capped, so chunked/CL-less bodies are capped too |
+| 413 | `BODY_TOO_LARGE` | Request body exceeds `LXK_MAX_BODY_MB` (default 16) — early gates, before auth: stream cap in `server/entry.ts` (chunked/CL-less bodies included) + declared-length pre-check in the API middleware |
 | 422 | `REQUIRED_FIELD` | Column's `required_fields` not satisfied (details: `{ field, column }`) |
 | 422 | `NEIGHBOR_NOT_IN_COLUMN` | `beforeTaskId`/`afterTaskId` not in target column (details: `{ taskId }`) |
 | 422 | `INVALID_OPTION` | Unknown priority/type option id, duplicate label, or empty option list (details: `{ optionId? }`) |
@@ -60,7 +60,7 @@ All non-2xx responses share one shape:
 | 422 | `SEARCH_ERROR` | Wiki FTS5 query rejected |
 | 422 | `SOURCE_UNREACHABLE` | External source DNS/fetch failed after the SSRF guard (details: `{ url }`) |
 | 422 | `API_KEY_NAME_EMPTY` | API key name missing or blank |
-| 429 | `RATE_LIMITED` | Per-IP rate limit exceeded on `/api/*` or `/mcp` (webhook exempt) — early gate in `server/entry.ts`; see docs/RATE_LIMITING.md |
+| 429 | `RATE_LIMITED` | Per-IP rate limit exceeded on `/api/*` or `/mcp` (webhook, `/api/setup*`, `/api/health` exempt) — `/api` enforced in the API middleware, `/mcp` in `server/entry.ts`, one shared bucket; see docs/RATE_LIMITING.md |
 | 500 | `DATABASE_ERROR` / `INTERNAL` | |
 | 502 | `GITHUB_API_ERROR` | Only on explicit GitHub-linking endpoints; never on moves |
 | 502 | `SOURCE_FETCH_ERROR` | External source fetch failed upstream after the SSRF guard (details: `{ message }`) |

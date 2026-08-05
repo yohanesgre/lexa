@@ -7,7 +7,7 @@
 
 ### 1. REST API has zero auth enforcement
 
-**Status: ✅ FIXED** (`verifyApiKey` in `server/api/auth-key.ts`, enforced in the `server/entry.ts` fetch handler)
+**Status: ✅ FIXED** (auth middleware in `server/api/middleware.ts` — `resolveApiKeyIdentity` on the shared Sqlite connection, before route matching)
 
 All `/api/*` routes (except `/api/health`) require `Authorization: Bearer lxk_*` header. SHA-256 hashed against `api_keys` table. The server injects its current key into served HTML (`<meta name="lxk-api-key">`); the client prefers it over any build-time `VITE_LXK_API_KEY`, so key rotation never breaks the browser.
 
@@ -35,7 +35,7 @@ No hardcoded fallback secret. `seedAdminKey` seeds the `api_keys` table from `LX
 
 **Status: ✅ FIXED** (2026-08-06 — in-process limiter, no CF dependency; see [`docs/RATE_LIMITING.md`](RATE_LIMITING.md))
 
-Fixed-window per-IP limiter (600 req / 10 min, constants in `server/api/rate-limit.ts`), enforced first in the fetch handler (`server/entry.ts`) before auth and body reads. Covers `/api/*` + `/mcp`; `/api/webhooks/github` exempt (HMAC-authenticated, bursty). Denied → 429 `RATE_LIMITED` with `Retry-After`.
+Fixed-window per-IP limiter (600 req / 10 min, constants in `server/api/rate-limit.ts`), enforced **before auth** — `/api/*` in the API middleware, `/mcp` at the entry edge, one shared bucket. Covers `/api/*` + `/mcp`; `/api/webhooks/github`, `/api/setup*`, `/api/health` exempt (HMAC-authenticated / cheap unauthenticated GETs). IP resolved in entry (socket + `isPrivateIp`-gated `CF-Connecting-IP`), stamped spoof-safe on the reconstructed request. Denied → 429 `RATE_LIMITED` with `Retry-After`.
 
 ### 6. Unbounded request bodies
 
