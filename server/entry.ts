@@ -227,10 +227,12 @@ const server: Server<unknown> = Bun.serve({
         }
       }
       try {
-        return withSecurityHeaders(await apiHandler(apiReq));
+        // Security headers are applied by the HttpApi middleware; the
+        // middleware also covers router 404s and its own short-circuits.
+        return await apiHandler(apiReq);
       } catch (err) {
         console.error("[API] Uncaught:", err);
-        return withSecurityHeaders(new Response(JSON.stringify({ error: { code: "INTERNAL", message: err instanceof Error ? err.message : String(err) } }), { status: 500, headers: { "Content-Type": "application/json" } }));
+        return new Response(JSON.stringify({ error: { code: "INTERNAL", message: err instanceof Error ? err.message : String(err) } }), { status: 500, headers: { "Content-Type": "application/json" } });
       }
     }
 
