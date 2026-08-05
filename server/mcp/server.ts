@@ -263,7 +263,9 @@ export class McpServer extends Effect.Service<McpServer>()("Lexa/McpServer", {
             const result = yield* tool.handler(args, { userId: authContext.userId, role: authContext.role }).pipe(
               Effect.catchAll((e) => {
                 const err = buildToolError(e as any);
-                return Effect.succeed({ isError: true, error: err });
+                return Effect.logWarning(`[MCP] tool ${toolName} failed code=${(err as any).code}`).pipe(
+                  Effect.as({ isError: true, error: err })
+                );
               })
             );
 
@@ -305,6 +307,7 @@ export class McpServer extends Effect.Service<McpServer>()("Lexa/McpServer", {
         );
 
         if (authResult.error !== null) {
+          yield* Effect.logWarning(`[MCP] auth denied reason=${authResult.error}`);
           const response: object = {
             jsonrpc: "2.0",
             id: null,
@@ -338,11 +341,13 @@ export class McpServer extends Effect.Service<McpServer>()("Lexa/McpServer", {
           // surface as a tool error envelope — never a thrown rejection/500.
           Effect.catchAll((e) => {
             const err = buildToolError(e as any);
-            return Effect.succeed({
-              jsonrpc: "2.0",
-              id: request.id ?? null,
-              result: { content: [{ type: "text", text: JSON.stringify(err) }], isError: true },
-            });
+            return Effect.logWarning(`[MCP] request rejected code=${(err as any).code}`).pipe(
+              Effect.as({
+                jsonrpc: "2.0",
+                id: request.id ?? null,
+                result: { content: [{ type: "text", text: JSON.stringify(err) }], isError: true },
+              })
+            );
           })
         );
         return new Response(JSON.stringify(response), { status: 200, headers });
