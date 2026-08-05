@@ -53,7 +53,7 @@ GitHub sync setup (GitHub App, webhook, Access bypass): `docs/GITHUB_SETUP.md`.
 - **Auth model:** humans = Cloudflare Access (email allowlist); machines = `lxk_` API keys. REST is Access-gated; agents use `/mcp` (bypass + key).
 - **GitHub sync is best-effort by design** — no retry queue; divergence is surfaced (Diverged dot), a re-move resyncs.
 - **No email notifications, no comments** — cut for v1 (small team, tight scope).
-- **Rate limiting** not enforced in code — configure CF rate rules if you expose `/api` publicly.
+- **Rate limiting** — in-process per-IP limiter on `/api/*` + `/mcp` (webhook-exempt, 600 req/10 min), added post-release 2026-08-06 (see `docs/RATE_LIMITING.md`).
 - **Migrations are squashed into one clean `0001_init.sql`** — v0.1.0 installs fresh; existing pre-release DBs continue to boot unmodified (no re-migration).
 
 ## Verification

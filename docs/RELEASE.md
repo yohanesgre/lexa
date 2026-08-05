@@ -1,10 +1,10 @@
 # Release — v0.1.0 (internal verification ledger)
 
 > User-facing release notes: `docs/RELEASE_NOTES.md`.
-> Status: SHIPPED — tag `v0.1.0` (2026-08-04). All A–G items green.
+> Status: SHIPPED — tag `v0.1.0` (2026-08-04). All A–E items green.
 
 Scope: first tagged release of Lexa as a self-hosted project-management tool,
-**including** the two-way GitHub issue sync (Phase 6 — see §F/G).
+**including** the two-way GitHub issue sync (Phase 6 — see §B/E).
 
 ## A. Security hardening
 
