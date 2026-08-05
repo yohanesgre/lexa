@@ -1,5 +1,14 @@
 import { Database } from "bun:sqlite";
+import { Context } from "effect";
 import { getSetting } from "../db/settings";
+
+// Caller identity behind a validated API key, resolved once per request by
+// the API middleware and consumed by admin-gated handlers.
+export interface AuthIdentity {
+  userId: string | null;
+  role: "admin" | "member";
+}
+export class AuthIdentity extends Context.Tag("Lexa/AuthIdentity")<AuthIdentity, AuthIdentity>() {}
 
 export interface LexaUser {
   id: string;
