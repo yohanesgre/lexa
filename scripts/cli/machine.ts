@@ -37,6 +37,7 @@ const LISTENER_UNIT_PATH = join(homedir(), ".config", "systemd", "user", `${SERV
 const DAEMON_SRC = join(import.meta.dir, "..", "forge", "daemon.ts");
 const CLI_ENTRY = join(import.meta.dir, "index.ts");
 const MACHINE_ID_PATH = join(LEXA_DIR, "machine-id");
+const MACHINE_SECRET_PATH = join(LEXA_DIR, "machine-secret");
 const EVENT_POLL_MS = 3000;
 const CATALOG_REFRESH_MS = 10 * 60 * 1000;
 const COMMAND_TIMEOUT_MS = 30_000;
@@ -198,6 +199,24 @@ export function getOrCreateMachineId(): string {
   } catch {
     return `${osHostname()}-${crypto.randomUUID().slice(0, 8)}`;
   }
+}
+
+// Machine binding secret: minted by the server on first registration,
+// returned exactly once and persisted here (chmod 600, alongside machine-id).
+// Sent with register (re-binding) and as x-machine-secret on claim.
+export function getOrCreateMachineSecret(): string {
+  try {
+    if (existsSync(MACHINE_SECRET_PATH)) {
+      return readFileSync(MACHINE_SECRET_PATH, "utf-8").trim();
+    }
+  } catch { /* treated as missing */ }
+  return "";
+}
+
+export function saveMachineSecret(secret: string): void {
+  mkdirSync(dirname(MACHINE_SECRET_PATH), { recursive: true });
+  writeFileSync(MACHINE_SECRET_PATH, `${secret}\n`, { mode: 0o600 });
+  chmodSync(MACHINE_SECRET_PATH, 0o600);
 }
 
 // ── Project workspaces ──
@@ -437,6 +456,35 @@ function normalizeRuntimeEnv(runtime: RuntimeEnv, serverUrl: string, machineId: 
   return { ...runtime, env };
 }
 
+// Kill a process and its whole descendant tree via a /proc walk (children
+// first). The daemon spawns agents with detached: true — each agent is its
+// own process-group leader, so process.kill(-pid) on the daemon alone would
+// orphan the agent and its tool children (they'd run to completion: burning
+// tokens, writing the workspace). Process groups are unreliable depending on
+// how the listener itself was launched (systemd, nohup, setsid), so walk
+// /proc instead — same approach as the daemon's own in-run cancel path.
+function collectDescendants(root: number): number[] {
+  const out: number[] = [];
+  for (const entry of readdirSync("/proc")) {
+    if (!/^\d+$/.test(entry)) continue;
+    let ppid = -1;
+    try {
+      ppid = Number(readFileSync(`/proc/${entry}/stat`, "utf8").split(" ")[3]);
+    } catch { continue; }
+    if (ppid === root) out.push(Number(entry), ...collectDescendants(Number(entry)));
+  }
+  return out;
+}
+
+function killTree(pid: number): void {
+  // Collect BEFORE killing: once the daemon dies, its detached agent child
+  // is reparented to init and a /proc walk from the daemon pid finds nothing.
+  const all = [pid, ...collectDescendants(pid)];
+  for (const p of all.reverse()) {
+    try { process.kill(p, "SIGKILL"); } catch { /* already gone */ }
+  }
+}
+
 async function killChild(runtimeId: string, children: Map<string, RuntimeChild>, stopping: Set<string>): Promise<void> {
   const runtime = children.get(runtimeId);
   if (!runtime) return;
@@ -444,10 +492,23 @@ async function killChild(runtimeId: string, children: Map<string, RuntimeChild>,
   children.delete(runtimeId);
   const pid = runtime.child.pid;
   if (pid) {
-    try { process.kill(-pid, "SIGTERM"); } catch { try { runtime.child.kill("SIGTERM"); } catch { /* already exited */ } }
+    // Capture the daemon's descendant tree NOW — the agent is the daemon's
+    // direct child until the daemon dies; once the daemon exits, the
+    // detached agent is reparented to init and the /proc walk can't find it.
+    const tree = [pid, ...collectDescendants(pid)];
+    // Graceful first: SIGTERM the daemon and everything we captured (the
+    // agent winds down its tool children), then force-kill children-first.
+    for (const p of tree) {
+      try { process.kill(p, "SIGTERM"); } catch { /* already gone */ }
+    }
     await new Promise((resolve) => setTimeout(resolve, 500));
-    try { process.kill(-pid, "SIGKILL"); } catch { /* already exited */ }
+    for (const p of tree.reverse()) {
+      try { process.kill(p, "SIGKILL"); } catch { /* already gone */ }
+    }
   }
+  // The daemon is dead — drop its pid file so the next listener boot does
+  // not try to sweep it (and a fresh spawn overwrites it anyway).
+  try { rmSync(join(RUNTIMES_DIR, runtimeId, "daemon.pid"), { force: true }); } catch { /* ignore */ }
 }
 
 function spawnRuntime(
@@ -466,10 +527,22 @@ function spawnRuntime(
     detached: true,
   });
   children.set(runtime.runtimeId, { runtimeId: runtime.runtimeId, child });
+  // Persist the daemon pid — a crashed listener (SIGKILL/power loss) leaves
+  // its detached daemons running; the next listener boot kills them by this
+  // pid before spawning fresh ones (see killStaleDaemon). Without it, every
+  // restart spawns a SECOND daemon for the same runtime and both claim tasks.
+  if (child.pid) {
+    try {
+      writeFileSync(join(RUNTIMES_DIR, runtime.runtimeId, "daemon.pid"), `${child.pid}\n`, { mode: 0o600 });
+    } catch { /* non-fatal — a stale daemon would linger until the next machine stop */ }
+  }
   child.on("error", (error) => console.error(`  [runtime ${runtime.runtimeId}] ${error.message}`));
   child.on("exit", (code) => {
     if (children.get(runtime.runtimeId)?.child !== child) return;
     children.delete(runtime.runtimeId);
+    // Clean daemon exit — the pid file is stale now; drop it so a future
+    // boot does not probe (and killTree) a dead pid.
+    try { rmSync(join(RUNTIMES_DIR, runtime.runtimeId, "daemon.pid"), { force: true }); } catch { /* ignore */ }
     if (shuttingDown() || stopping.has(runtime.runtimeId)) return;
     if (code === 3) {
       // Auth failure (revoked/rotated API key): the daemon cannot work and
@@ -536,11 +609,43 @@ async function handleSetupEvent(
   }
 }
 
+// A listener crash (SIGKILL/power loss) leaves its daemons running —
+// detached, reparented to init, still claiming tasks and heartbeating. On
+// boot, kill each runtime's stale daemon (via the persisted daemon.pid)
+// BEFORE spawning a fresh one; otherwise two daemons claim the same runtime,
+// and repeated crashes multiply daemons.
+function killStaleDaemon(runtime: RuntimeEnv): void {
+  const pidFile = join(RUNTIMES_DIR, runtime.runtimeId, "daemon.pid");
+  let raw: string;
+  try {
+    raw = readFileSync(pidFile, "utf-8").trim();
+  } catch {
+    return; // no pid file — nothing stale to sweep
+  }
+  const pid = Number(raw);
+  if (!Number.isInteger(pid) || pid <= 0) return;
+  try {
+    process.kill(pid, 0);
+  } catch (e) {
+    // ESRCH = dead pid — stale file, the fresh spawn overwrites it.
+    // EPERM/EACCES = alive but un-signallable — still stale; killTree
+    // fails harmlessly per-process if it cannot signal them.
+    if ((e as NodeJS.ErrnoException).code === "ESRCH") return;
+  }
+  console.log(`  [runtime ${runtime.runtimeId}] killing stale daemon (pid ${pid}) from a crashed listener`);
+  killTree(pid);
+}
+
 export async function machineListen(config: CliConfig): Promise<void> {
   migrateLegacyDirs();
   mkdirSync(LEXA_DIR, { recursive: true, mode: 0o700 });
   const client = new LexaClient(config);
   const machineId = getOrCreateMachineId();
+  const machineSecret = getOrCreateMachineSecret();
+  if (!machineSecret) {
+    console.error("  Machine secret missing — re-run `lexa-cli login` to re-register this machine");
+    return;
+  }
   const machineHostname = osHostname();
   const children = new Map<string, RuntimeChild>();
   const stopping = new Set<string>();
@@ -588,6 +693,7 @@ export async function machineListen(config: CliConfig): Promise<void> {
   process.once("SIGINT", () => { void shutdown().finally(() => process.exit(0)); });
 
   for (const runtime of listRuntimeEnvs()) {
+    killStaleDaemon(runtime);
     spawnRuntime(normalizeRuntimeEnv(runtime, config.url, machineId, machineHostname), children, stopping, () => shuttingDown, onAuthFailure);
   }
   void refreshCatalogs();
@@ -623,7 +729,7 @@ export async function machineListen(config: CliConfig): Promise<void> {
           }
         }
       }
-      const claim = await client.claimRuntimeEvent(machineId);
+      const claim = await client.claimRuntimeEvent(machineId, machineSecret);
       if (claim) {
         await handleSetupEvent(client, config.url, machineId, machineHostname, claim.event, claim.rawKey, children, stopping, () => shuttingDown);
         await refreshCatalogs();

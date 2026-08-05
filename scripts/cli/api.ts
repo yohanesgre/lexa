@@ -176,8 +176,8 @@ export class LexaClient {
     return r.data;
   }
 
-  async registerMachine(input: { id: string; hostname: string }): Promise<MachineInfo> {
-    return this.request<MachineInfo>("/api/forge/machines/register", { method: "POST", body: JSON.stringify(input) });
+  async registerMachine(input: { id: string; hostname: string; secret: string }): Promise<{ machine: MachineInfo; secret: string | null }> {
+    return this.request<{ machine: MachineInfo; secret: string | null }>("/api/forge/machines/register", { method: "POST", body: JSON.stringify(input) });
   }
 
   async deleteMachine(id: string): Promise<void> {
@@ -185,9 +185,10 @@ export class LexaClient {
   }
 
   // ── Runtime setup events (web wizard → listener) ──
-  async claimRuntimeEvent(machineId: string): Promise<{ event: RuntimeEventInfo; rawKey: string | null } | null> {
+  async claimRuntimeEvent(machineId: string, secret: string): Promise<{ event: RuntimeEventInfo; rawKey: string | null } | null> {
     return this.request<{ event: RuntimeEventInfo; rawKey: string | null } | null>("/api/forge/runtime-events/claim", {
       method: "POST",
+      headers: { "x-machine-secret": secret },
       body: JSON.stringify({ machineId }),
     });
   }
