@@ -9,6 +9,7 @@ import { Database } from "bun:sqlite";
 import { getSetting, setSetting } from "../db/settings";
 import { ProjectNotFound, WikiPageNotFound, MachineNotFound, Forbidden, SetupLocked, errorResponse, errorToStatus } from "./errors";
 import { resolveApiKeyIdentity } from "./auth-key";
+import { createApiMiddleware } from "./middleware";
 import { clampLimit, nextCursor } from "../../shared/pagination";
 import { ProjectService } from "../services/project.service";
 import { ProjectRepo } from "../repos/project.repo";
@@ -2227,7 +2228,8 @@ export function createApiHandler(dbPath: string) {
     healthLive, setupLive, projectsLive, columnsLive, swimlanesLive, fieldConfigLive, forgeLive, taskLinksLive, tasksLive, boardLive, wikiLive, apiKeysLive, adminLive, dashboardLive,
   ).pipe(Layer.provide(Layer.provide(serviceLayer, Layer.mergeAll(dbLayer, LoggerLayer))), Layer.provide(dbLayer));
   const merged = Layer.mergeAll(apiLayer, handlerLayer);
-  const { handler } = HttpApiBuilder.toWebHandler(merged as unknown as Parameters<typeof HttpApiBuilder.toWebHandler>[0]);
+  const finalLayer = Layer.provide(merged, createApiMiddleware(db));
+  const { handler } = HttpApiBuilder.toWebHandler(finalLayer as unknown as Parameters<typeof HttpApiBuilder.toWebHandler>[0]);
   return async (req: Request) => {
     const start = Date.now();
     const url = new URL(req.url);
