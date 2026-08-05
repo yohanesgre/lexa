@@ -17,6 +17,7 @@ User-facing notes per release: `docs/RELEASE_NOTES.md`.
 
 ### Changed
 
+- **API gatekeeping moved into HttpApi middleware** — rate limit, content-length pre-check, API-key auth (daemon-token/setup/health exempt), and security headers now live in `server/api/middleware.ts` as API-level middleware; `server/entry.ts` shrinks to boot + webhook + `/mcp` + static + stream-cap glue. Same envelopes/statuses/log lines; `x-lexa-remote-ip` socket-IP stamping (spoof-safe) feeds the limiter
 - **Request body cap** — `LXK_MAX_BODY_MB` (default 16 MB) enforced early in `server/entry.ts` (413 `BODY_TOO_LARGE`)
 - **DELETE endpoints return 204** — 7 routes aligned to the API.md contract (client already handled 204)
 - **MCP error paths hardened (oracle audit)** — authz denials return a FORBIDDEN tool envelope instead of a bare HTTP 500; inline tool errors (`INVALID_OPTION` + `available*`, `TASK_NOT_FOUND`) no longer degrade to `INTERNAL`; MCP move now triggers best-effort GitHub state sync like the REST move; missing-arg guards (`INVALID_ARGS`) in column tools; `unlink_github_issue` 404s properly; `WipLimitExceeded` carries `current` in details. New `server/mcp/server.test.ts`: 9 regression tests (authz matrix, error codes, JSON-RPC validation, 35 tools).

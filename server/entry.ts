@@ -1,13 +1,12 @@
 import { runMigrations } from "./db/migrate";
 import { mkdirSync, existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { Database } from "bun:sqlite";
 import { createApiHandler, createWebhookHandler, createWebhookVerifier } from "./api/http";
 import { createMcpHandler } from "./mcp/server";
 import { findOrCreateUser, findOrCreateUserByIdentity, adminEmails } from "./api/auth";
 import { verifyAccessAssertion } from "./api/access-auth";
-import { resolveApiKeyIdentity, constantTimeTokenEqual } from "./api/auth-key";
 import { getSetting, setSetting } from "./db/settings";
 import { apiRateLimiter, isPrivateIp } from "./api/rate-limit";
 import { MAX_API_BODY, X_LEXA_REMOTE_IP } from "./api/limits";
@@ -52,13 +51,6 @@ if (!process.env.LXK_ACCESS_AUD) {
   console.warn("Access JWT verification disabled (LXK_ACCESS_AUD unset) — Cf-Access-* headers trusted as-is");
 }
 
-// Shared connection for the entry-side auth block (belt-and-braces while the
-// middleware owns auth; retired once entry's block is deleted).
-const apiAuthDb = new Database(DATABASE_PATH);
-apiAuthDb.exec("PRAGMA journal_mode = WAL");
-apiAuthDb.exec("PRAGMA foreign_keys = ON");
-apiAuthDb.exec("PRAGMA busy_timeout = 5000");
-
 const apiHandlerRaw = createApiHandler(DATABASE_PATH) as unknown as { handler?: (req: Request) => Promise<Response> } | ((req: Request) => Promise<Response>);
 const apiHandler: (req: Request) => Promise<Response> = typeof apiHandlerRaw === "function" ? apiHandlerRaw : apiHandlerRaw.handler!;
 const mcpHandler = createMcpHandler(DATABASE_PATH);
@@ -76,11 +68,9 @@ function tooLargeResponse(): Response {
 }
 
 // Streams the request body up to maxBytes; ok:false → caller replies 413.
-// A missing content-length (chunked) is allowed through but the stream is
-// still capped — the total byte count is what matters.
+// The declared content-length pre-check lives in the HttpApi middleware — here
+// the stream itself is capped (chunked/CL-less bodies can't bypass the cap).
 async function readBodyWithLimit(req: Request, maxBytes: number): Promise<{ ok: true; bytes: ArrayBuffer } | { ok: false }> {
-  const len = Number(req.headers.get("content-length") ?? 0);
-  if (len > maxBytes) return { ok: false };
   const reader = req.body?.getReader();
   if (!reader) return { ok: true, bytes: new ArrayBuffer(0) };
   const chunks: Uint8Array[] = [];
@@ -203,29 +193,6 @@ const server: Server<unknown> = Bun.serve({
       const socketIp = server.requestIP(req)?.address ?? "";
       if (apiReq.headers.has(X_LEXA_REMOTE_IP)) apiReq.headers.delete(X_LEXA_REMOTE_IP);
       apiReq.headers.set(X_LEXA_REMOTE_IP, socketIp);
-      const isSetup = url.pathname.startsWith("/api/setup");
-      const isHealth = url.pathname === "/api/health";
-      const isForgeDaemon = url.pathname.startsWith("/api/forge/daemon/") || url.pathname === "/api/forge/runtimes/register";
-      // Forge daemon endpoints accept the daemon token (LXK_FORGE_DAEMON_TOKEN)
-      // in place of the API key — the daemon may hold its own credential.
-      // Constant-time comparison (sha256 digest length is fixed, so
-      // timingSafeEqual never sees mismatched buffers).
-      const daemonTokenOk = isForgeDaemon && process.env.LXK_FORGE_DAEMON_TOKEN
-        ? constantTimeTokenEqual(req.headers.get("x-forge-token") ?? "", process.env.LXK_FORGE_DAEMON_TOKEN)
-        : false;
-      if (!isHealth && !isSetup && !daemonTokenOk) {
-        const authHeader = req.headers.get("Authorization") ?? "";
-        const identity = resolveApiKeyIdentity(authHeader, apiAuthDb);
-        if (!identity) {
-          const reason = authHeader.startsWith("Bearer ") ? "unknown key" : "missing or malformed key";
-          console.warn(`[Auth] denied path=${path} reason=${reason}`);
-          return withSecurityHeaders(new Response(JSON.stringify({ error: { code: "UNAUTHORIZED", message: "Invalid or missing API key" } }), { status: 401, headers: { "Content-Type": "application/json" } }));
-        }
-        if (identity.userId !== null && identity.role !== "admin") {
-          console.warn(`[Auth] denied path=${path} reason=member key`);
-          return withSecurityHeaders(new Response(JSON.stringify({ error: { code: "FORBIDDEN", message: "Member API keys are not supported on the REST API yet" } }), { status: 403, headers: { "Content-Type": "application/json" } }));
-        }
-      }
       try {
         // Security headers are applied by the HttpApi middleware; the
         // middleware also covers router 404s and its own short-circuits.
