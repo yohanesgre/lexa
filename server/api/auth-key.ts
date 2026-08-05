@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, timingSafeEqual } from "node:crypto";
 import { Database } from "bun:sqlite";
 
 export interface ApiKeyIdentity {
@@ -7,23 +7,14 @@ export interface ApiKeyIdentity {
   role: "admin" | "member";
 }
 
-export function verifyApiKey(req: Request, dbPath: string): boolean {
-  const authHeader = req.headers.get("Authorization") || "";
-  return resolveApiKeyIdentity(authHeader, dbPath) !== null;
-}
-
-// Resolve the caller behind an Authorization header: key → user (null user
-// means a setup/seeded key — admin). Mirrors the MCP auth rule so REST and
-// MCP enforce the same role model.
-export function resolveApiKeyIdentity(authHeader: string, dbPath: string): ApiKeyIdentity | null {
+// Resolve the caller behind an Authorization header against a shared
+// connection: key → user (null user means a setup/seeded key — admin).
+// Mirrors the MCP auth rule so REST and MCP enforce the same role model.
+export function resolveApiKeyIdentity(authHeader: string, db: Database): ApiKeyIdentity | null {
   if (!authHeader.startsWith("Bearer ")) return null;
   const key = authHeader.slice(7);
   if (!key.startsWith("lxk_") || !/^lxk_[0-9A-Za-z]{43}$/.test(key)) return null;
   const keyHash = createHash("sha256").update(key).digest("hex");
-  const db = new Database(dbPath);
-  db.exec("PRAGMA journal_mode = WAL");
-  db.exec("PRAGMA foreign_keys = ON");
-  db.exec("PRAGMA busy_timeout = 5000");
   try {
     const row = db.prepare("SELECT id, user_id FROM api_keys WHERE key_hash = ?").get(keyHash) as
       | { id: string; user_id: string | null }
@@ -36,7 +27,16 @@ export function resolveApiKeyIdentity(authHeader: string, dbPath: string): ApiKe
     return { keyId: row.id, userId: row.user_id, role: user.role };
   } catch {
     return null;
-  } finally {
-    db.close();
   }
+}
+
+// Constant-time comparison (sha256 digest length is fixed, so timingSafeEqual
+// never sees mismatched buffers).
+export function constantTimeTokenEqual(a: string, b: string): boolean {
+  const hexA = createHash("sha256").update(a).digest("hex");
+  const hexB = createHash("sha256").update(b).digest("hex");
+  const bufA = Buffer.from(hexA, "hex");
+  const bufB = Buffer.from(hexB, "hex");
+  if (bufA.length !== bufB.length) return false;
+  return timingSafeEqual(bufA, bufB);
 }
