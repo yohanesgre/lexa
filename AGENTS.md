@@ -231,8 +231,10 @@ bun run build
   Forge Runtimes → Setup runtime) lists registered machines from
   `GET /api/forge/machines`, then sends only machine + agent CLI + a fresh key
   through `POST /api/forge/runtime-events`. The listener persists its machine id
-  at `~/.lexa/machine-id`, heartbeats every 3s, claims only its own
-  events, and owns one daemon child per runtime under
+  at `~/.lexa/machine-id` and the per-machine secret (minted once at register)
+  at `~/.lexa/machine-secret` (both chmod 600), heartbeats every 3s, claims
+  only its own events (sending `x-machine-secret`), and owns one daemon child
+  per runtime under
   `~/.lexa/runtimes/<runtime-id>/env` (chmod 600). Runtime
   provider/model, persona, logging, and extra args are configured after
   setup from Settings. The listener discovers installed CLI agent/model catalogs
