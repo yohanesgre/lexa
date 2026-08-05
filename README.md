@@ -34,13 +34,25 @@ tsc --noEmit
 vitest run
 ```
 
+## Environment variables
+
+`.env.example` lists every key the app reads, but you rarely edit it by hand — most values are generated or prompted:
+
+| Situation | Fill by hand | Generated / prompted |
+|---|---|---|
+| Local dev (`.env`) | `GITHUB_APP_ID`, `GITHUB_PRIVATE_KEY`/`_FILE`, `GITHUB_WEBHOOK_SECRET` — only if you want two-way GitHub sync ([`docs/GITHUB_SETUP.md`](docs/GITHUB_SETUP.md)) | `LXK_API_KEY` + `VITE_LXK_API_KEY` and `LXK_ADMIN_EMAILS` via `bun run setup`; the rest have defaults |
+| Staging/prod (`.env.staging` / `.env.prod`) | `GITHUB_*` on first deploy if you want issue sync; `LXK_ACCESS_AUD` after deploy — grab the Access audience tag from the Cloudflare dashboard (`https://<team>.cloudflareaccess.com/cdn-cgi/access/get-ksi`) to enable Access JWT verification | `lexa-cli deploy` prompts for admin email, API key and tunnel token, and writes the file (preserving `GITHUB_*` across re-runs) |
+| Optional anywhere | `LXK_FORGE_DAEMON_TOKEN` (daemon shared secret instead of a Settings API key), `LXK_MAX_BODY_MB` (body cap, default 16), `LOG_LEVEL` | — |
+
+`LXK_SEED_DEV` is dev-only and set by `scripts/dev.sh`; `COMPOSE_PROJECT_NAME` is read by docker compose, not the app. The server never needs the GitHub private key inline when `GITHUB_PRIVATE_KEY_FILE` is set (read at boot, no escaping).
+
 ## CLI
 
 `lexa-cli` wraps the REST API (`lxk_` Bearer keys): `lexa-cli login --url … --key …`, then `task|wiki|project` CRUD and `machine install|listen|start|stop|restart|status|logs|list` for Forge daemons. Dev uses `bun run lexa-cli-dev` (live repo source); prod ships a compiled binary via `bun run compile:cli` + `bun run install:cli` (→ `~/.local/bin/lexa-cli`).
 
 ## Deploying
 
-`lexa-cli deploy <domain> [dev|staging|prod]` — Docker + cloudflared tunnel + Cloudflare Access.
+`lexa-cli deploy <domain> [dev|staging|prod]` — Docker + cloudflared tunnel + Cloudflare Access. Dev delegates to the `bun run setup` wizard; staging/prod provision the tunnel, DNS, ingress and Access IdP/app/policy (prompting for a Cloudflare API token and Google OAuth client, cached in `~/.lexa/config.json`), write the env file, and bring up compose. `--bare` provisions and writes files but skips docker (for CI/manual bring-up). GitHub App creds are preserved across re-runs.
 
 ## Documentation
 
@@ -55,8 +67,10 @@ All design and spec docs live in [`docs/`](docs/):
 | [`docs/MCP.md`](docs/MCP.md) | Agent-facing MCP tool contract |
 | [`docs/DESIGN_SYSTEM.md`](docs/DESIGN_SYSTEM.md) | PHOSPHOR design tokens and component specs |
 | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | Big picture and decisions log |
+| [`docs/GITHUB_SETUP.md`](docs/GITHUB_SETUP.md) | GitHub App setup: webhook URL/secret, private key, Access bypass policies |
 | [`docs/REVIEW.md`](docs/REVIEW.md) | Historical design-review record |
 | [`docs/RELEASE.md`](docs/RELEASE.md) | v0.1.0 release plan and verification gates |
+| [`docs/RELEASE_NOTES.md`](docs/RELEASE_NOTES.md) | Changelog |
 | [`docs/SECURITY.md`](docs/SECURITY.md) | Security model |
 
 `wireframes/` holds the static UI/UX source of truth (HTML previews — `bash wireframes/build.sh` rebuilds them). `AGENTS.md` is the agent rules file used by AI coding agents working on this repo.
