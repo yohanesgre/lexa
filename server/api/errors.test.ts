@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { DbError, ConstraintViolation } from "../db/database";
-import { TaskNotFound, errorToStatus, errorMessage, errorDetails, errorResponse } from "./errors";
+import { TaskNotFound, TaskHasChildren, errorToStatus, errorMessage, errorDetails, errorResponse } from "./errors";
 
 const RAW = "UNIQUE constraint failed: tasks.column_id, tasks.position";
 
@@ -19,6 +19,13 @@ describe("errorToStatus", () => {
 
   it("keeps existing domain mapping (TaskNotFound → 404)", () => {
     expect(errorToStatus(new TaskNotFound({ id: "t1" }))).toBe(404);
+  });
+
+  it("maps TaskHasChildren to 409 with TASK_HAS_CHILDREN code", () => {
+    expect(errorToStatus(new TaskHasChildren({ taskId: "t1" }))).toBe(409);
+    const response = errorResponse(asCatalogError(new TaskHasChildren({ taskId: "t1" })));
+    expect(response.error.code).toBe("TASK_HAS_CHILDREN");
+    expect(response.error.details).toEqual({ taskId: "t1" });
   });
 });
 

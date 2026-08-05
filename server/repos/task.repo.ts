@@ -1,6 +1,6 @@
 import { Effect } from "effect";
 import { Sqlite, queryAll, queryFirst, run, batch, DbError, RowNotFound, ConstraintViolation } from "../db/database";
-import { TaskRow, rowToTask } from "../../shared/db";
+import { TaskRow, rowToTask, rowToTaskSlim } from "../../shared/db";
 import type { Task } from "../../shared/types";
 
 export interface TaskFilters {
@@ -23,9 +23,15 @@ function decodeCursor(cursor: string | null): { columnId: string; position: stri
   }
 }
 
-const TASK_SELECT = `t.*, c.github_state as column_github_state, GROUP_CONCAT(ta.user_name) AS assignees, COALESCE(GROUP_CONCAT(gi.issue_id || ',' || gi.issue_number || ',' || gi.repo || ',' || COALESCE(gi.synced_state,''), '||'), '') AS github_issues_raw`;
+const TASK_SELECT = `t.*, c.github_state as column_github_state, GROUP_CONCAT(ta.user_name, '||') AS assignees, COALESCE(GROUP_CONCAT(gi.issue_id || ',' || gi.issue_number || ',' || gi.repo || ',' || COALESCE(gi.synced_state,''), '||'), '') AS github_issues_raw`;
+
+// Slim variant for list/board/anchor paths — no t.description (the TipTap
+// blob is only needed for get/update/mutation responses).
+const TASK_SELECT_SLIM = `t.id, t.project_id, t.column_id, t.swimlane_id, t.title, t.priority, t.type, t.position, t.archived_at, t.github_issue_id, t.github_issue_number, t.github_repo, t.github_synced_state, t.created_at, t.updated_at, c.github_state as column_github_state, GROUP_CONCAT(ta.user_name, '||') AS assignees, COALESCE(GROUP_CONCAT(gi.issue_id || ',' || gi.issue_number || ',' || gi.repo || ',' || COALESCE(gi.synced_state,''), '||'), '') AS github_issues_raw`;
 
 const TASK_FROM = `tasks t LEFT JOIN columns c ON t.column_id = c.id LEFT JOIN task_assignees ta ON ta.task_id = t.id LEFT JOIN task_github_issues gi ON gi.task_id = t.id`;
+
+type SlimTaskRow = Omit<TaskRow, "description"> & { column_github_state: "open" | "closed" | null; github_issues_raw: string | null };
 
 export class TaskRepo extends Effect.Service<TaskRepo>()("Lexa/TaskRepo", {
   effect: Effect.gen(function* () {
@@ -135,13 +141,13 @@ export class TaskRepo extends Effect.Service<TaskRepo>()("Lexa/TaskRepo", {
         }
 
         const whereClause = conditions.join(" AND ");
-        const sql = `SELECT ${TASK_SELECT} FROM ${TASK_FROM} WHERE ${whereClause} GROUP BY t.id ORDER BY t.column_id, t.position LIMIT ?`;
+        const sql = `SELECT ${TASK_SELECT_SLIM} FROM ${TASK_FROM} WHERE ${whereClause} GROUP BY t.id ORDER BY t.column_id, t.position LIMIT ?`;
         params.push(limitVal + 1);
 
-        return queryAll<TaskRow & { column_github_state: "open" | "closed" | null; github_issues_raw: string | null }>(db, sql, ...params).pipe(
+        return queryAll<SlimTaskRow>(db, sql, ...params).pipe(
           Effect.map((rows) => {
             const hasMore = rows.length > limitVal;
-            const tasks = rows.slice(0, limitVal).map((r) => rowToTask(r, r.column_github_state));
+            const tasks = rows.slice(0, limitVal).map((r) => rowToTaskSlim(r, r.column_github_state));
             return { tasks, hasMore };
           })
         );
@@ -175,20 +181,20 @@ export class TaskRepo extends Effect.Service<TaskRepo>()("Lexa/TaskRepo", {
         }
 
         const whereClause = conditions.join(" AND ");
-        const sql = `SELECT ${TASK_SELECT} FROM ${TASK_FROM} WHERE ${whereClause} GROUP BY t.id ORDER BY t.column_id, t.position`;
+        const sql = `SELECT ${TASK_SELECT_SLIM} FROM ${TASK_FROM} WHERE ${whereClause} GROUP BY t.id ORDER BY t.column_id, t.position`;
 
-        return queryAll<TaskRow & { column_github_state: "open" | "closed" | null; github_issues_raw: string | null }>(db, sql, ...params).pipe(
-          Effect.map((rows) => rows.map((r) => rowToTask(r, r.column_github_state)))
+        return queryAll<SlimTaskRow>(db, sql, ...params).pipe(
+          Effect.map((rows) => rows.map((r) => rowToTaskSlim(r, r.column_github_state)))
         );
       },
 
-      findLastInColumn: (projectId: string, columnId: string): Effect.Effect<TaskRow & { column_github_state: "open" | "closed" | null; github_issues_raw: string | null }, RowNotFound | DbError> =>
-        queryFirst<TaskRow & { column_github_state: "open" | "closed" | null; github_issues_raw: string | null }>(
+      findLastInColumn: (projectId: string, columnId: string): Effect.Effect<Task, RowNotFound | DbError> =>
+        queryFirst<SlimTaskRow>(
           db,
-          `SELECT ${TASK_SELECT} FROM ${TASK_FROM} WHERE t.project_id = ? AND t.column_id = ? AND t.archived_at IS NULL GROUP BY t.id ORDER BY t.position DESC LIMIT 1`,
+          `SELECT ${TASK_SELECT_SLIM} FROM ${TASK_FROM} WHERE t.project_id = ? AND t.column_id = ? AND t.archived_at IS NULL GROUP BY t.id ORDER BY t.position DESC LIMIT 1`,
           projectId,
           columnId
-        ),
+        ).pipe(Effect.map((r) => rowToTaskSlim(r, r.column_github_state))),
 
       update: (
         id: string,
@@ -284,6 +290,27 @@ export class TaskRepo extends Effect.Service<TaskRepo>()("Lexa/TaskRepo", {
           taskId,
           issueId
         ).pipe(Effect.map(() => undefined)),
+
+      createSubtaskLink: (projectId: string, fromTaskId: string, toTaskId: string): Effect.Effect<void, ConstraintViolation | DbError> =>
+        run(
+          db,
+          `INSERT INTO task_links (id, project_id, from_task_id, to_task_id, relation)
+           VALUES (?, ?, ?, ?, 'subtask_of')`,
+          crypto.randomUUID(),
+          projectId,
+          fromTaskId,
+          toTaskId
+        ).pipe(Effect.map(() => undefined)),
+
+      findSubtasks: (taskId: string): Effect.Effect<Array<{ id: string; position: string }>, DbError> =>
+        queryAll<{ id: string; position: string }>(
+          db,
+          `SELECT t.id, t.position FROM task_links tl
+           INNER JOIN tasks t ON t.id = tl.from_task_id
+           WHERE tl.to_task_id = ? AND tl.relation = 'subtask_of'
+           ORDER BY t.position`,
+          taskId
+        ),
 
       move: (
         taskId: string,

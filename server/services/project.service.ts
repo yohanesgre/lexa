@@ -73,24 +73,24 @@ export class ProjectService extends Effect.Service<ProjectService>()("Lexa/Proje
 
       list: (): Effect.Effect<Project[], DbError> => repo.list(),
 
-      update: (slug: string, input: { name?: string; description?: string; githubRepo?: string | null }): Effect.Effect<Project, ProjectNotFound | DbError> =>
+      update: (slug: string, input: { name?: string; description?: string; githubRepo?: string | null }): Effect.Effect<Project, ProjectNotFound | SlugTaken | DbError> =>
         Effect.gen(function* () {
           const project = yield* repo.findBySlug(slug).pipe(
             Effect.catchTag("RowNotFound", () => new ProjectNotFound({ identifier: slug }))
           );
           return yield* repo.update(project.id, input).pipe(
             Effect.catchTag("RowNotFound", () => new ProjectNotFound({ identifier: slug })),
-            Effect.catchTag("ConstraintViolation", () => new ProjectNotFound({ identifier: slug }))
+            Effect.catchTag("ConstraintViolation", () => new SlugTaken({ slug }))
           );
         }),
 
-      delete: (slug: string): Effect.Effect<void, ProjectNotFound | DbError> =>
+      delete: (slug: string): Effect.Effect<void, ProjectNotFound | SlugTaken | DbError> =>
         Effect.gen(function* () {
           const project = yield* repo.findBySlug(slug).pipe(
             Effect.catchTag("RowNotFound", () => new ProjectNotFound({ identifier: slug }))
           );
           yield* repo.delete(project.id).pipe(
-            Effect.catchTag("ConstraintViolation", () => new ProjectNotFound({ identifier: slug }))
+            Effect.catchTag("ConstraintViolation", () => new SlugTaken({ slug }))
           );
           yield* Effect.logInfo(`[Project] Deleted ${project.id}`);
           return;

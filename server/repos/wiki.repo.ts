@@ -153,8 +153,18 @@ export class WikiRepo extends Effect.Service<WikiRepo>()("Lexa/WikiRepo", {
           Effect.catchTag("RowNotFound", () => Effect.succeed(0))
         ),
 
-      createRevision: (
-        pageId: string,
+      pruneRevisions: (pageId: string, keep = 100): Effect.Effect<void, ConstraintViolation | DbError> =>
+        run(
+          db,
+          `DELETE FROM wiki_page_revisions WHERE page_id = ? AND id NOT IN
+             (SELECT id FROM wiki_page_revisions WHERE page_id = ?
+              ORDER BY created_at DESC, id DESC LIMIT ?)`,
+          pageId,
+          pageId,
+          keep
+        ).pipe(Effect.map(() => undefined)),
+
+      createRevision: (        pageId: string,
         title: string,
         slug: string,
         content: string,

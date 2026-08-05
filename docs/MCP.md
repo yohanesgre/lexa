@@ -178,6 +178,7 @@ Notes: within-column reorder never fails WIP. If the task is GitHub-linked and t
 ```json
 Input:  { taskId* }
 Output: { deleted: true }
+Errors: TASK_NOT_FOUND, TASK_HAS_CHILDREN (defensive — subtask links cascade on delete)
 ```
 
 **`archive_task`**

@@ -1,7 +1,7 @@
 import { Effect } from "effect";
 import { FieldConfigRepo } from "../repos/field-config.repo";
 import { ProjectRepo } from "../repos/project.repo";
-import { DbError, RowNotFound, ConstraintViolation } from "../db/database";
+import { DbError, RowNotFound, ConstraintViolation, Sqlite, withTx } from "../db/database";
 import { ProjectNotFound, OptionInUse, InvalidOption } from "../api/errors";
 import type { FieldConfig, FieldOption } from "../../shared/types";
 
@@ -10,6 +10,7 @@ export class FieldConfigService extends Effect.Service<FieldConfigService>()("Le
   effect: Effect.gen(function* () {
     const repo = yield* FieldConfigRepo;
     const projectRepo = yield* ProjectRepo;
+    const db = yield* Sqlite;
 
     const getByProject = (projectId: string): Effect.Effect<FieldConfig, ProjectNotFound | DbError> =>
       Effect.gen(function* () {
@@ -80,10 +81,14 @@ export class FieldConfigService extends Effect.Service<FieldConfigService>()("Le
           validateList("type", input.types),
         ]);
 
-        yield* Effect.all([
-          repo.replaceList(projectId, "priority", priorities),
-          repo.replaceList(projectId, "type", types),
-        ]);
+        // One tx: a crash mid-way can't leave priorities new / types old.
+        yield* withTx(
+          db,
+          Effect.all([
+            repo.replaceList(projectId, "priority", priorities),
+            repo.replaceList(projectId, "type", types),
+          ])
+        );
         yield* Effect.logInfo(`[FieldConfig] Replaced options for project ${projectId}`);
         return yield* repo.findByProject(projectId);
       });

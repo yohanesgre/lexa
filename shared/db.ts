@@ -223,6 +223,20 @@ export interface TaskRow {
 export function rowToTask(row: TaskRow, columnGithubState?: "open" | "closed" | null): {
   id: string; projectId: string; columnId: string; swimlaneId: string; title: string; description: TipTapDoc; priority: string; type: string; assignees: string[]; position: string; githubs: { issueId: string; issueNumber: number; repo: string; syncedState: "open" | "closed" | null; url: string; outOfSync: boolean }[]; archivedAt: ISODate | null; createdAt: ISODate; updatedAt: ISODate;
 } {
+  return taskFromRow(row, columnGithubState, JSON.parse(row.description) as TipTapDoc);
+}
+
+// Slim rows (board/list paths select no description) map to an empty doc —
+// the key stays in the response shape, the blob never ships.
+export function rowToTaskSlim(row: Omit<TaskRow, "description">, columnGithubState?: "open" | "closed" | null): {
+  id: string; projectId: string; columnId: string; swimlaneId: string; title: string; description: TipTapDoc; priority: string; type: string; assignees: string[]; position: string; githubs: { issueId: string; issueNumber: number; repo: string; syncedState: "open" | "closed" | null; url: string; outOfSync: boolean }[]; archivedAt: ISODate | null; createdAt: ISODate; updatedAt: ISODate;
+} {
+  return taskFromRow(row as TaskRow, columnGithubState, { type: "doc", content: [] });
+}
+
+function taskFromRow(row: TaskRow, columnGithubState: "open" | "closed" | null | undefined, description: TipTapDoc): {
+  id: string; projectId: string; columnId: string; swimlaneId: string; title: string; description: TipTapDoc; priority: string; type: string; assignees: string[]; position: string; githubs: { issueId: string; issueNumber: number; repo: string; syncedState: "open" | "closed" | null; url: string; outOfSync: boolean }[]; archivedAt: ISODate | null; createdAt: ISODate; updatedAt: ISODate;
+} {
   const colState = columnGithubState ?? row.column_github_state ?? null;
   const githubs: { issueId: string; issueNumber: number; repo: string; syncedState: "open" | "closed" | null; url: string; outOfSync: boolean }[] = [];
   const seen = new Set<string>();
@@ -248,10 +262,10 @@ export function rowToTask(row: TaskRow, columnGithubState?: "open" | "closed" | 
     columnId: row.column_id,
     swimlaneId: row.swimlane_id,
     title: row.title,
-    description: JSON.parse(row.description) as TipTapDoc,
+    description,
     priority: row.priority,
     type: row.type,
-    assignees: row.assignees ? row.assignees.split(",").filter(Boolean) : [],
+    assignees: row.assignees ? row.assignees.split("||").filter(Boolean) : [],
     position: row.position,
     githubs,
     archivedAt: row.archived_at,

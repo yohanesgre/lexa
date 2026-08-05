@@ -10,6 +10,7 @@ export class WikiPageNotFound extends Data.TaggedError("WikiPageNotFound")<{ id:
 export class WipLimitExceeded extends Data.TaggedError("WipLimitExceeded")<{ column: string; limit: number; current: number }> {}
 export class SlugTaken extends Data.TaggedError("SlugTaken")<{ slug: string }> {}
 export class HasChildren extends Data.TaggedError("HasChildren")<{ count: number }> {}
+export class TaskHasChildren extends Data.TaggedError("TaskHasChildren")<{ taskId: string }> {}
 export class NeighborNotInColumn extends Data.TaggedError("NeighborNotInColumn")<{ taskId: string }> {}
 export class GithubIssueAlreadyLinked extends Data.TaggedError("GithubIssueAlreadyLinked")<{ taskId: string }> {}
 export class RequiredFieldMissing extends Data.TaggedError("RequiredFieldMissing")<{ field: string; column: string }> {}
@@ -49,6 +50,7 @@ export const errorCodeMap: Record<string, string> = {
   WipLimitExceeded: "WIP_LIMIT",
   SlugTaken: "SLUG_TAKEN",
   HasChildren: "HAS_CHILDREN",
+  TaskHasChildren: "TASK_HAS_CHILDREN",
   NeighborNotInColumn: "NEIGHBOR_NOT_IN_COLUMN",
   GithubIssueAlreadyLinked: "ALREADY_LINKED",
   RequiredFieldMissing: "REQUIRED_FIELD",
@@ -113,6 +115,7 @@ export function errorToStatus(error: { _tag: string }): number {
     case "WipLimitExceeded":
     case "SlugTaken":
     case "HasChildren":
+    case "TaskHasChildren":
     case "GithubIssueAlreadyLinked":
     case "OptionInUse":
     case "NoRuntimeOnline":
@@ -163,6 +166,8 @@ export function errorMessage(error: { _tag: string } & Record<string, unknown>):
       return `Slug '${error.slug}' is already taken`;
     case "HasChildren":
       return `Resource has ${error.count} children`;
+    case "TaskHasChildren":
+      return `Task has subtasks — delete or unlink them first`;
     case "NeighborNotInColumn":
       return `Neighbor task ${error.taskId} is not in the target column`;
     case "GithubIssueAlreadyLinked":

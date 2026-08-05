@@ -471,8 +471,9 @@ All list endpoints and MCP `list_*`/`search_*` tools: `?limit` (default 50, max 
 | `SwimlaneNotFound` | 404 | `SWIMLANE_NOT_FOUND` | incl. cross-project refs |
 | `WikiPageNotFound` | 404 | `PAGE_NOT_FOUND` | |
 | `WipLimitExceeded` | 409 | `WIP_LIMIT` | atomic, from conditional UPDATE (not fired by within-column reorders) |
-| `SlugTaken` | 409 | `SLUG_TAKEN` | SQLITE_CONSTRAINT on projects.slug or wiki_pages(project_id, slug) |
+| `SlugTaken` | 409 | `SLUG_TAKEN` | SQLITE_CONSTRAINT on projects.slug or wiki_pages(project_id, slug); also the constraint fallback on project update/delete |
 | `HasChildren` | 409 | `HAS_CHILDREN` | column delete with tasks; wiki-page delete with children |
+| `TaskHasChildren` | 409 | `TASK_HAS_CHILDREN` | task delete hits a constraint (defensive — subtask links CASCADE) |
 | `NeighborNotInColumn` | 422 | `NEIGHBOR_NOT_IN_COLUMN` | beforeTaskId/afterTaskId not in target column |
 | `GithubIssueAlreadyLinked` | 409 | `ALREADY_LINKED` | |
 | `RequiredFieldMissing` | 422 | `REQUIRED_FIELD` | TipTap-aware emptiness; enforced on create/move/update |
