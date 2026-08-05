@@ -66,7 +66,7 @@ GITHUB_APP_ID=1234567
 GITHUB_PRIVATE_KEY_FILE=/app/github-app.private-key.pem
 GITHUB_WEBHOOK_SECRET=...
 ```
-`scripts/setup.sh <domain> prod` preserves the `GITHUB_*` block when it rewrites
+`lexa-cli deploy <domain> prod` preserves the `GITHUB_*` block when it rewrites
 the env file. The key file is gitignored (`*.private-key.pem`) and excluded
 from the Docker build context (`.dockerignore`) — never commit it.
 
