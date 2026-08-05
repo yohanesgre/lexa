@@ -9,7 +9,7 @@ import { findOrCreateUser, findOrCreateUserByIdentity, adminEmails } from "./api
 import { verifyAccessAssertion } from "./api/access-auth";
 import { resolveApiKeyIdentity } from "./api/auth-key";
 import { getSetting, setSetting } from "./db/settings";
-import { createRateLimiter } from "./api/rate-limit";
+import { createRateLimiter, isPrivateIp } from "./api/rate-limit";
 import type { Server } from "bun";
 
 const MAX_API_BODY = Number(process.env.LXK_MAX_BODY_MB ?? 16) * 1024 * 1024;
@@ -132,7 +132,9 @@ const server: Server<unknown> = Bun.serve({
     const path = url.pathname;
     const isApiSurface = path === "/mcp" || path.startsWith("/api/");
     if (isApiSurface && !path.startsWith("/api/webhooks/")) {
-      const ip = req.headers.get("cf-connecting-ip") ?? server.requestIP(req)?.address ?? "unknown";
+      const socketIp = server.requestIP(req)?.address;
+      const cfIp = req.headers.get("cf-connecting-ip");
+      const ip = socketIp && isPrivateIp(socketIp) && cfIp ? cfIp : (socketIp ?? cfIp ?? "unknown");
       if (!rateLimiter.check(ip)) {
         return withSecurityHeaders(
           new Response(JSON.stringify({ error: { code: "RATE_LIMITED", message: "Rate limit exceeded" } }), {

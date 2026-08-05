@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { createRateLimiter } from "./rate-limit";
+import { createRateLimiter, isPrivateIp } from "./rate-limit";
 
 describe("createRateLimiter", () => {
   it("allows up to max, denies max+1 in the same window", () => {
@@ -53,5 +53,37 @@ describe("createRateLimiter", () => {
     expect(rl.retryAfterMs("a", 2000)).toBe(0); // evicted → fresh bucket → allowed
     expect(rl.check("a", 2000)).toBe(true);
     expect(rl.check("b", 2000)).toBe(true);
+  });
+});
+
+describe("isPrivateIp", () => {
+  it("accepts IPv4 loopback and RFC1918 ranges", () => {
+    expect(isPrivateIp("127.0.0.1")).toBe(true);
+    expect(isPrivateIp("10.0.0.1")).toBe(true);
+    expect(isPrivateIp("172.16.0.1")).toBe(true);
+    expect(isPrivateIp("172.31.255.255")).toBe(true);
+    expect(isPrivateIp("192.168.1.1")).toBe(true);
+  });
+
+  it("rejects public IPv4 addresses", () => {
+    expect(isPrivateIp("8.8.8.8")).toBe(false);
+    expect(isPrivateIp("11.0.0.1")).toBe(false);
+    expect(isPrivateIp("172.32.0.1")).toBe(false);
+  });
+
+  it("accepts IPv6 loopback and unique-local", () => {
+    expect(isPrivateIp("::1")).toBe(true);
+    expect(isPrivateIp("fc00::1")).toBe(true);
+    expect(isPrivateIp("fd12:3456::1")).toBe(true);
+    expect(isPrivateIp("::ffff:10.0.0.1")).toBe(true);
+  });
+
+  it("rejects IPv6-mapped public IPv4 and garbage input", () => {
+    expect(isPrivateIp("::ffff:8.8.8.8")).toBe(false);
+    expect(isPrivateIp("::ffff:11.0.0.1")).toBe(false);
+    expect(isPrivateIp("")).toBe(false);
+    expect(isPrivateIp("not-an-ip")).toBe(false);
+    expect(isPrivateIp("999.1.1.1")).toBe(false);
+    expect(isPrivateIp("::ffff:999.1.1.1")).toBe(false);
   });
 });

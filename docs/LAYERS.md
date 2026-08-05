@@ -127,7 +127,7 @@ export class WebhookEventRepo extends Effect.Service<WebhookEventRepo>()("Webhoo
 class TaskNotFound extends Data.TaggedError("TaskNotFound")<{ id: string }> {}
 class ColumnNotFound extends Data.TaggedError("ColumnNotFound")<{ id: string }> {}
 class SwimlaneNotFound extends Data.TaggedError("SwimlaneNotFound")<{ id: string }> {}
-class WipLimitExceeded extends Data.TaggedError("WipLimitExceeded")<{ column: string; limit: number }> {}
+class WipLimitExceeded extends Data.TaggedError("WipLimitExceeded")<{ column: string; limit: number; current: number }> {}
 class RequiredFieldMissing extends Data.TaggedError("RequiredFieldMissing")<{ field: string; column: string }> {}
 class NeighborNotInColumn extends Data.TaggedError("NeighborNotInColumn")<{ taskId: string }> {}
 
