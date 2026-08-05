@@ -61,15 +61,13 @@ All non-2xx responses share one shape:
 | 422 | `SEARCH_ERROR` | Wiki FTS5 query rejected |
 | 422 | `SOURCE_UNREACHABLE` | External source DNS/fetch failed after the SSRF guard (details: `{ url }`) |
 | 422 | `API_KEY_NAME_EMPTY` | API key name missing or blank |
-| 429 | `RATE_LIMITED` | Per-IP rate limit exceeded on `/api/*` or `/mcp` (webhook, `/api/setup*`, `/api/health` exempt) — `/api` enforced in the API middleware, `/mcp` in `server/entry.ts`, one shared bucket; see docs/RATE_LIMITING.md |
+| 429 | `RATE_LIMITED` | Per-IP rate limit exceeded on `/api/*` or `/mcp` (webhook, `/api/forge/daemon/*`, `/api/forge/runtimes/register` exempt; `/api/setup*` + `/api/health` ARE limited) — `/api` enforced in the API middleware, `/mcp` in `server/entry.ts`, one shared bucket; see docs/RATE_LIMITING.md |
 | 500 | `DATABASE_ERROR` / `INTERNAL` | |
 | 502 | `GITHUB_API_ERROR` | Only on explicit GitHub-linking endpoints; never on moves |
 | 502 | `SOURCE_FETCH_ERROR` | External source fetch failed upstream after the SSRF guard (details: `{ message }`) |
 
-Defined in the error map but never raised by any handler — do not match on them:
-- `MISSING_AUTH` / `INVALID_API_KEY` — the auth middleware emits `UNAUTHORIZED` instead.
-- `MACHINE_OFFLINE` — runtime removal never blocks; `NO_RUNTIME_ONLINE` is the only offline error.
-- `INVALID_ACCESS_JWT` — a failed Access JWT verification (only armed when `LXK_ACCESS_AUD` is set) emits `UNAUTHORIZED` instead.
+Defined in the error map but never raised by any REST handler — do not match on them:
+- `MISSING_AUTH` / `INVALID_API_KEY` — the auth middleware emits `UNAUTHORIZED` instead (MCP raises them natively).
 
 ## Auth
 

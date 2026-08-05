@@ -464,7 +464,7 @@ One `HttpApiBuilder.middleware` wraps the whole router (pre-routing, before deco
 - **Literal short-circuits only.** Return `HttpServerResponse.unsafeJson(...)` for 429/413/401/403 — never `Effect.fail` with an undeclared error. In @effect/platform 0.97 the error encoder cannot encode undeclared failures → raw cause → 500 trap.
 - **`AuthIdentity` is provided, not re-fetched.** Middleware resolves the key once via `resolveApiKeyIdentity(authHeader, db)` on the *shared* Sqlite connection and `Effect.provideService`s the tag; handlers/`requireAdmin` read it. Per-request DB opens are banned (they cost 3 PRAGMAs each).
 - **Socket IP lives only in entry.** `remoteAddress` is unpopulated on the web-handler path, so entry stamps `x-lexa-remote-ip` (deleting any inbound value first — spoof guard) on the reconstructed request; middleware applies the `isPrivateIp`-gated `cf-connecting-ip` trust.
-- **Exemptions are path predicates inside the middleware** (identical to the old dispatcher): `/api/setup*` + `/api/health` skip auth and rate limiting; `/api/forge/daemon/*` + `/api/forge/runtimes/register` accept the daemon token instead.
+- **Exemptions are path predicates inside the middleware**: `/api/setup*` + `/api/health` skip AUTH only (they stay rate-limited); `/api/forge/daemon/*` + `/api/forge/runtimes/register` accept the daemon token instead and are rate-limit-exempt (token-gated, log streams must not 429).
 - **Rate limiting shares one bucket with `/mcp`** (`apiRateLimiter` singleton) and runs before auth — a blocked IP stays blocked regardless of key.
 - **Router 404s** fail with `RouteNotFound` after the middleware; caught inside so 404s carry the security headers (empty body, platform-identical shape).
 - **`MaxBodySize` is unenforced in 0.97** — the authoritative body cap is entry's stream cap (`readBodyWithLimit`); the middleware pre-check is a declared-length fast-path only.
@@ -503,7 +503,6 @@ All list endpoints and MCP `list_*`/`search_*` tools: `?limit` (default 50, max 
 | `MachineNotFound` | 404 | `MACHINE_NOT_FOUND` | unknown machine target |
 | `MachineIdTaken` | 409 | `MACHINE_ID_TAKEN` | register: id bound to another host, legacy (no secret), or secret mismatch (details: `{ id, reason }`) |
 | `MachineSecretMismatch` | 403 | `FORBIDDEN` | runtime-event claim without a matching machine secret — identical response for missing machine/legacy/wrong secret (no existence oracle) |
-| `MachineOffline` | 409 | `MACHINE_OFFLINE` | remove/restart requires an online listener |
 | `TaskLinkNotFound` | 404 | `TASK_LINK_NOT_FOUND` | delete a link that doesn't exist |
 | `TaskLinkCycle` | 409 | `TASK_LINK_CYCLE` | subtask_of would create a cycle |
 | `InvalidTaskLink` | 422 | `INVALID_TASK_LINK` | self-link or cross-project link |
