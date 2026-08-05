@@ -40,7 +40,7 @@ vitest run
 
 ## Deploying
 
-`scripts/setup.sh <domain> [dev|staging|prod]` — Docker + cloudflared tunnel + Cloudflare Access.
+`lexa-cli deploy <domain> [dev|staging|prod]` — Docker + cloudflared tunnel + Cloudflare Access.
 
 ## Documentation
 

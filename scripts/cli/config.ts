@@ -12,6 +12,16 @@ export interface CliConfig {
   apiKey: string;
 }
 
+// Deploy credentials (Cloudflare + Google OAuth) persisted alongside the
+// login so `lexa-cli deploy` works without a saved url/apiKey.
+export interface DeployCreds {
+  cfToken?: string;
+  googleClientId?: string;
+  googleClientSecret?: string;
+  cfTeamDomain?: string;
+  emailDomain?: string;
+}
+
 export const LEXA_DIR = process.env.LEXA_DIR ?? join(homedir(), ".lexa");
 const CONFIG_PATH = join(LEXA_DIR, "config.json");
 
@@ -76,4 +86,30 @@ export function clearConfig(): void {
   } catch (e) {
     console.error(`  Could not remove ${CONFIG_PATH}: ${(e as Error).message}`);
   }
+}
+
+export function loadDeployCreds(): DeployCreds | null {
+  try {
+    if (!existsSync(CONFIG_PATH)) return null;
+    const raw = JSON.parse(readFileSync(CONFIG_PATH, "utf-8")) as { deploy?: DeployCreds };
+    return raw.deploy ?? null;
+  } catch {
+    return null;
+  }
+}
+
+export function saveDeployCreds(creds: DeployCreds): void {
+  migrateLegacyDirs();
+  mkdirSync(LEXA_DIR, { recursive: true, mode: 0o700 });
+  let existing: Record<string, unknown> = {};
+  try {
+    if (existsSync(CONFIG_PATH)) {
+      existing = JSON.parse(readFileSync(CONFIG_PATH, "utf-8")) as Record<string, unknown>;
+    }
+  } catch {
+    existing = {};
+  }
+  existing.deploy = creds;
+  writeFileSync(CONFIG_PATH, JSON.stringify(existing, null, 2) + "\n", { mode: 0o600 });
+  chmodSync(CONFIG_PATH, 0o600);
 }
