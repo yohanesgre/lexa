@@ -457,6 +457,18 @@ const moveHandler = (req) =>
 
 The webhook route is exempt from API-key middleware and verifies `X-Hub-Signature-256` (HMAC-SHA-256, raw body, constant-time) before parsing; acks 200 immediately and processes in the background (Bun has no `waitUntil` — the handler returns the ack, then runs the Effect fire-and-forget on a shared `ManagedRuntime`; `webhook_events` pruned at boot, >7 days).
 
+### API middleware
+
+One `HttpApiBuilder.middleware` wraps the whole router (pre-routing, before decode). Order: **rate limit → content-length pre-check → auth → security headers**. Rules:
+
+- **Literal short-circuits only.** Return `HttpServerResponse.unsafeJson(...)` for 429/413/401/403 — never `Effect.fail` with an undeclared error. In @effect/platform 0.97 the error encoder cannot encode undeclared failures → raw cause → 500 trap.
+- **`AuthIdentity` is provided, not re-fetched.** Middleware resolves the key once via `resolveApiKeyIdentity(authHeader, db)` on the *shared* Sqlite connection and `Effect.provideService`s the tag; handlers/`requireAdmin` read it. Per-request DB opens are banned (they cost 3 PRAGMAs each).
+- **Socket IP lives only in entry.** `remoteAddress` is unpopulated on the web-handler path, so entry stamps `x-lexa-remote-ip` (deleting any inbound value first — spoof guard) on the reconstructed request; middleware applies the `isPrivateIp`-gated `cf-connecting-ip` trust.
+- **Exemptions are path predicates inside the middleware** (identical to the old dispatcher): `/api/setup*` + `/api/health` skip auth and rate limiting; `/api/forge/daemon/*` + `/api/forge/runtimes/register` accept the daemon token instead.
+- **Rate limiting shares one bucket with `/mcp`** (`apiRateLimiter` singleton) and runs before auth — a blocked IP stays blocked regardless of key.
+- **Router 404s** fail with `RouteNotFound` after the middleware; caught inside so 404s carry the security headers (empty body, platform-identical shape).
+- **`MaxBodySize` is unenforced in 0.97** — the authoritative body cap is entry's stream cap (`readBodyWithLimit`); the middleware pre-check is a declared-length fast-path only.
+
 ## Pagination
 
 All list endpoints and MCP `list_*`/`search_*` tools: `?limit` (default 50, max 200) + cursor (opaque: `"<columnId>:<position>:<taskId>"` for tasks). Unbounded lists would blow the MCP context window and server memory.
