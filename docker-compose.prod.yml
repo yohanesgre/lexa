@@ -1,7 +1,5 @@
 services:
   app:
-    environment:
-      - COMPOSE_PROJECT_NAME=lexa-prod
     volumes:
       # GitHub App private key (GITHUB_PRIVATE_KEY_FILE=/app/github-app.private-key.pem)
       - ./github-app.private-key.pem:/app/github-app.private-key.pem:ro
