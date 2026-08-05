@@ -3,7 +3,8 @@ import { RuntimeEventRepo, storeRawKey, takeRawKey } from "../repos/runtime-even
 import { RuntimeMachineRepo } from "../repos/runtime-machine.repo";
 import { ApiKeyRepo } from "../repos/api-key.repo";
 import { DbError, RowNotFound, ConstraintViolation } from "../db/database";
-import { ApiKeyNotFound, MachineNotFound, RuntimeEventNotFound } from "../api/errors";
+import { ApiKeyNotFound, MachineNotFound, MachineSecretMismatch, RuntimeEventNotFound } from "../api/errors";
+import { constantTimeTokenEqual } from "../api/auth-key";
 import type { ForgeProvider, RuntimeEvent, RuntimeEventAction } from "../../shared/types";
 
 export class RuntimeEventService extends Effect.Service<RuntimeEventService>()("Lexa/RuntimeEventService", {
@@ -69,8 +70,17 @@ export class RuntimeEventService extends Effect.Service<RuntimeEventService>()("
           return yield* createRow({ ...input, action: "remove", apiKeyId: null });
         }),
 
-      claimForMachine: (machineId: string): Effect.Effect<{ event: RuntimeEvent; rawKey: string | null } | null, ConstraintViolation | DbError> =>
+      claimForMachine: (machineId: string, secret: string): Effect.Effect<{ event: RuntimeEvent; rawKey: string | null } | null, MachineSecretMismatch | ConstraintViolation | DbError> =>
         Effect.gen(function* () {
+          // Machine identity is client-chosen, so the claim surface is bound
+          // to the per-machine secret. Missing row, legacy '' secret, and
+          // mismatch all fail identically — no existence oracle.
+          const stored = yield* machineRepo.findSecret(machineId).pipe(
+            Effect.catchTag("RowNotFound", () => new MachineSecretMismatch())
+          );
+          if (stored === "" || !constantTimeTokenEqual(stored, secret)) {
+            return yield* new MachineSecretMismatch();
+          }
           const event = yield* repo.claimNextForMachine(machineId);
           if (!event) return null;
           return { event, rawKey: takeRawKey(event.id) };

@@ -1,10 +1,26 @@
 import { Effect } from "effect";
+import { randomBytes } from "node:crypto";
 import { RuntimeMachineRepo, type MachineCli } from "../repos/runtime-machine.repo";
 import { ForgeRepo } from "../repos/forge.repo";
 import { RuntimeEventService } from "./runtime-event.service";
 import { DbError, ConstraintViolation, Sqlite, withTx } from "../db/database";
-import { MachineNotFound } from "../api/errors";
+import { MachineIdTaken, MachineNotFound } from "../api/errors";
 import type { Machine } from "../../shared/types";
+
+// 43-char base62 secret (same algorithm as entry.ts generateRawKey, without
+// the lxk_ prefix). Minted per machine at first registration; returned to the
+// caller exactly once.
+function generateMachineSecret(): string {
+  const raw = randomBytes(32);
+  const chars = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
+  let value = 0n;
+  for (const b of raw) value = (value << 8n) | BigInt(b);
+  let result = "";
+  const base = 62n;
+  while (value > 0n) { result = chars[Number(value % base)] + result; value /= base; }
+  while (result.length < 43) result = chars[0] + result;
+  return result;
+}
 
 export class RuntimeMachineService extends Effect.Service<RuntimeMachineService>()("Lexa/RuntimeMachineService", {
   dependencies: [RuntimeMachineRepo.Default, ForgeRepo.Default, RuntimeEventService.Default],
@@ -20,8 +36,20 @@ export class RuntimeMachineService extends Effect.Service<RuntimeMachineService>
       );
 
     return {
-      register: (input: { id: string; hostname: string }): Effect.Effect<Machine, ConstraintViolation | DbError> =>
-        repo.register(input),
+      register: (input: { id: string; hostname: string; secret: string }): Effect.Effect<
+        { machine: Machine; secret: string | null },
+        MachineIdTaken | ConstraintViolation | DbError
+      > =>
+        Effect.gen(function* () {
+          const mintedSecret = generateMachineSecret();
+          const result = yield* repo.register({ ...input, mintedSecret });
+          if (result._tag === "conflict") {
+            return yield* new MachineIdTaken({ id: input.id, reason: result.reason });
+          }
+          return result._tag === "created"
+            ? { machine: result.machine, secret: mintedSecret }
+            : { machine: result.machine, secret: null };
+        }),
 
       heartbeat: (input: { id: string; hostname: string; clis?: MachineCli[] }): Effect.Effect<Machine, ConstraintViolation | DbError> =>
         repo.heartbeat(input),

@@ -416,11 +416,11 @@ export class ForgeRepo extends Effect.Service<ForgeRepo>()("Lexa/ForgeRepo", {
           const params: unknown[] = [status];
           if (result !== undefined) {
             sets.push("result = ?");
-            params.push(result);
+            params.push(result === null ? null : result.slice(0, 1024 * 1024));
           }
           if (error !== undefined) {
             sets.push("error = ?");
-            params.push(error);
+            params.push(error === null ? null : error.slice(0, 2000));
           }
           const from =
             status === "cancelled" ? "status IN ('queued', 'running')" : "status = 'running'";

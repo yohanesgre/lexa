@@ -34,6 +34,8 @@ export class ForgeEntityInUse extends Data.TaggedError("ForgeEntityInUse")<{ kin
 export class RuntimeNotFound extends Data.TaggedError("RuntimeNotFound")<{ id: string }> {}
 export class RuntimeEventNotFound extends Data.TaggedError("RuntimeEventNotFound")<{ id: string }> {}
 export class MachineNotFound extends Data.TaggedError("MachineNotFound")<{ id: string }> {}
+export class MachineIdTaken extends Data.TaggedError("MachineIdTaken")<{ id: string; reason: "hostname" | "legacy" | "secret_mismatch" }> {}
+export class MachineSecretMismatch extends Data.TaggedError("MachineSecretMismatch")<{}> {}
 export class ApiKeyNotFound extends Data.TaggedError("ApiKeyNotFound")<{ id: string }> {}
 export class NoRuntimeOnline extends Data.TaggedError("NoRuntimeOnline")<{}> {}
 export class TaskLinkNotFound extends Data.TaggedError("TaskLinkNotFound")<{ id: string }> {}
@@ -71,6 +73,8 @@ export const errorCodeMap: Record<string, string> = {
   RuntimeNotFound: "RUNTIME_NOT_FOUND",
   RuntimeEventNotFound: "RUNTIME_EVENT_NOT_FOUND",
   MachineNotFound: "MACHINE_NOT_FOUND",
+  MachineIdTaken: "MACHINE_ID_TAKEN",
+  MachineSecretMismatch: "FORBIDDEN",
   ApiKeyNotFound: "API_KEY_NOT_FOUND",
   NoRuntimeOnline: "NO_RUNTIME_ONLINE",
   TaskLinkNotFound: "TASK_LINK_NOT_FOUND",
@@ -96,6 +100,7 @@ export function errorToStatus(error: { _tag: string }): number {
     case "ProjectAccessDenied":
     case "Forbidden":
     case "SetupLocked":
+    case "MachineSecretMismatch":
       return 403;
     case "TaskNotFound":
     case "ProjectNotFound":
@@ -123,6 +128,7 @@ export function errorToStatus(error: { _tag: string }): number {
     case "ForgeEntityInUse":
     case "ConstraintViolation":
     case "LastAdminDemote":
+    case "MachineIdTaken":
       return 409;
     case "RequiredFieldMissing":
     case "NeighborNotInColumn":
@@ -202,6 +208,12 @@ export function errorMessage(error: { _tag: string } & Record<string, unknown>):
       return `Runtime setup event not found`;
     case "MachineNotFound":
       return `Machine not found`;
+    case "MachineIdTaken":
+      return error.reason === "hostname"
+        ? `Machine id '${error.id}' is already registered to another host`
+        : `Machine id '${error.id}' has no matching secret — remove it and re-register`;
+    case "MachineSecretMismatch":
+      return "machine secret mismatch";
     case "ApiKeyNotFound":
       return `API key not found`;
     case "NoRuntimeOnline":
