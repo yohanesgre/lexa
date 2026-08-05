@@ -8,7 +8,7 @@ import { Sqlite } from "../db/database";
 import { Database } from "bun:sqlite";
 import { getSetting, setSetting } from "../db/settings";
 import { ProjectNotFound, WikiPageNotFound, MachineNotFound, Forbidden, SetupLocked, errorResponse, errorToStatus } from "./errors";
-import { resolveApiKeyIdentity } from "./auth-key";
+import { AuthIdentity } from "./auth";
 import { createApiMiddleware } from "./middleware";
 import { clampLimit, nextCursor } from "../../shared/pagination";
 import { ProjectService } from "../services/project.service";
@@ -1032,18 +1032,16 @@ const respond = <A, E, R>(eff: Effect.Effect<A, E, R>): Effect.Effect<A | HttpSe
     })
   );
 
-// Admin-only gate: resolves the caller from the Authorization header (same
-// role rule as the MCP surface — keys without a user are admin) and fails
-// with 403 FORBIDDEN unless they are an admin.
-let apiDbPath: string | null = null;
-const requireAdmin = (req: { request: { headers: Record<string, string> } }) =>
-  Effect.gen(function* () {
-    const identity = resolveApiKeyIdentity(req.request.headers["authorization"] ?? "", apiDbPath ?? "");
-    if (!identity || identity.role !== "admin") {
-      return yield* Effect.fail(new Forbidden({ message: "Admin role required" }));
-    }
-    return identity;
-  });
+// Admin-only gate: consumes the caller identity resolved by the API
+// middleware (member keys are 403'd there already — this is belt-and-braces
+// for any handler reached through a path that skips the middleware check).
+const requireAdmin = Effect.gen(function* () {
+  const identity = yield* AuthIdentity;
+  if (identity.role !== "admin") {
+    return yield* Effect.fail(new Forbidden({ message: "Admin role required" }));
+  }
+  return identity;
+});
 
 const healthLive = HttpApiBuilder.group(LexaApi, "health", (handlers) =>
   handlers.handle("health", () => Effect.succeed({ ok: true as const }))
@@ -1146,7 +1144,7 @@ const projectsLive = HttpApiBuilder.group(LexaApi, "projects", (handlers) =>
     )
     .handle("create", (req) =>
       respond(Effect.gen(function* () {
-        yield* requireAdmin(req);
+        yield* requireAdmin;
         const service = yield* ProjectService;
         const project = yield* service.create({
           name: req.payload.name, slug: req.payload.slug,
@@ -1181,7 +1179,7 @@ const projectsLive = HttpApiBuilder.group(LexaApi, "projects", (handlers) =>
     )
     .handle("updateProject", (req) =>
       respond(Effect.gen(function* () {
-        yield* requireAdmin(req);
+        yield* requireAdmin;
         const service = yield* ProjectService;
         const project = yield* service.update(req.path.slug, {
           name: req.payload.name,
@@ -1193,7 +1191,7 @@ const projectsLive = HttpApiBuilder.group(LexaApi, "projects", (handlers) =>
     )
     .handle("deleteProject", (req) =>
       respond(Effect.gen(function* () {
-        yield* requireAdmin(req);
+        yield* requireAdmin;
         const service = yield* ProjectService;
         yield* service.delete(req.path.slug);
         return undefined;
@@ -1214,7 +1212,7 @@ const columnsLive = HttpApiBuilder.group(LexaApi, "columns", (handlers) =>
     )
     .handle("createColumn", (req) =>
       respond(Effect.gen(function* () {
-        yield* requireAdmin(req);
+        yield* requireAdmin;
         const projectService = yield* ProjectService;
         const columnService = yield* ColumnService;
         const project = yield* projectService.findBySlug(req.path.slug);
@@ -1229,7 +1227,7 @@ const columnsLive = HttpApiBuilder.group(LexaApi, "columns", (handlers) =>
     )
     .handle("updateColumn", (req) =>
       respond(Effect.gen(function* () {
-        yield* requireAdmin(req);
+        yield* requireAdmin;
         const columnService = yield* ColumnService;
         const column = yield* columnService.update(req.path.id, {
           name: req.payload.name, position: req.payload.position,
@@ -1242,7 +1240,7 @@ const columnsLive = HttpApiBuilder.group(LexaApi, "columns", (handlers) =>
     )
     .handle("deleteColumn", (req) =>
       respond(Effect.gen(function* () {
-        yield* requireAdmin(req);
+        yield* requireAdmin;
         const columnService = yield* ColumnService;
         yield* columnService.delete(req.path.id);
         return undefined;
@@ -1263,7 +1261,7 @@ const swimlanesLive = HttpApiBuilder.group(LexaApi, "swimlanes", (handlers) =>
     )
     .handle("createSwimlane", (req) =>
       respond(Effect.gen(function* () {
-        yield* requireAdmin(req);
+        yield* requireAdmin;
         const projectService = yield* ProjectService;
         const swimlaneService = yield* SwimlaneService;
         const project = yield* projectService.findBySlug(req.path.slug);
@@ -1275,7 +1273,7 @@ const swimlanesLive = HttpApiBuilder.group(LexaApi, "swimlanes", (handlers) =>
     )
     .handle("updateSwimlane", (req) =>
       respond(Effect.gen(function* () {
-        yield* requireAdmin(req);
+        yield* requireAdmin;
         const swimlaneService = yield* SwimlaneService;
         const swimlane = yield* swimlaneService.update(req.path.id, {
           name: req.payload.name, description: req.payload.description, position: req.payload.position,
@@ -1285,7 +1283,7 @@ const swimlanesLive = HttpApiBuilder.group(LexaApi, "swimlanes", (handlers) =>
     )
     .handle("deleteSwimlane", (req) =>
       respond(Effect.gen(function* () {
-        yield* requireAdmin(req);
+        yield* requireAdmin;
         const swimlaneService = yield* SwimlaneService;
         yield* swimlaneService.delete(req.path.id);
         return undefined;
@@ -1305,7 +1303,7 @@ const fieldConfigLive = HttpApiBuilder.group(LexaApi, "field-config", (handlers)
     )
     .handle("putFieldConfig", (req) =>
       respond(Effect.gen(function* () {
-        yield* requireAdmin(req);
+        yield* requireAdmin;
         const projectService = yield* ProjectService;
         const service = yield* FieldConfigService;
         const project = yield* projectService.findBySlug(req.path.slug);
@@ -1652,21 +1650,21 @@ const forgeLive = HttpApiBuilder.group(LexaApi, "forge", (handlers) =>
     )
     .handle("createForgeAgent", (req) =>
       respond(Effect.gen(function* () {
-        yield* requireAdmin(req);
+        yield* requireAdmin;
         const service = yield* ForgeService;
         return yield* service.createAgent(req.payload);
       }))
     )
     .handle("updateForgeAgent", (req) =>
       respond(Effect.gen(function* () {
-        yield* requireAdmin(req);
+        yield* requireAdmin;
         const service = yield* ForgeService;
         return yield* service.updateAgent(req.path.id, req.payload);
       }))
     )
     .handle("deleteForgeAgent", (req) =>
       respond(Effect.gen(function* () {
-        yield* requireAdmin(req);
+        yield* requireAdmin;
         const service = yield* ForgeService;
         yield* service.deleteAgent(req.path.id);
         return undefined;
@@ -1674,14 +1672,14 @@ const forgeLive = HttpApiBuilder.group(LexaApi, "forge", (handlers) =>
     )
     .handle("replaceAgentSkills", (req) =>
       respond(Effect.gen(function* () {
-        yield* requireAdmin(req);
+        yield* requireAdmin;
         const service = yield* ForgeService;
         return yield* service.replaceAgentSkills(req.path.id, [...req.payload.skillIds]);
       }))
     )
     .handle("resetForgeAgent", (req) =>
       respond(Effect.gen(function* () {
-        yield* requireAdmin(req);
+        yield* requireAdmin;
         const service = yield* ForgeService;
         return yield* service.resetAgentToDefault(req.path.id);
       }))
@@ -1695,21 +1693,21 @@ const forgeLive = HttpApiBuilder.group(LexaApi, "forge", (handlers) =>
     )
     .handle("createForgeSkill", (req) =>
       respond(Effect.gen(function* () {
-        yield* requireAdmin(req);
+        yield* requireAdmin;
         const service = yield* ForgeService;
         return yield* service.createSkill(req.payload);
       }))
     )
     .handle("updateForgeSkill", (req) =>
       respond(Effect.gen(function* () {
-        yield* requireAdmin(req);
+        yield* requireAdmin;
         const service = yield* ForgeService;
         return yield* service.updateSkill(req.path.id, req.payload);
       }))
     )
     .handle("deleteForgeSkill", (req) =>
       respond(Effect.gen(function* () {
-        yield* requireAdmin(req);
+        yield* requireAdmin;
         const service = yield* ForgeService;
         yield* service.deleteSkill(req.path.id);
         return undefined;
@@ -1717,7 +1715,7 @@ const forgeLive = HttpApiBuilder.group(LexaApi, "forge", (handlers) =>
     )
     .handle("resetForgeSkill", (req) =>
       respond(Effect.gen(function* () {
-        yield* requireAdmin(req);
+        yield* requireAdmin;
         const service = yield* ForgeService;
         return yield* service.resetSkillToDefault(req.path.id);
       }))
@@ -2093,7 +2091,7 @@ const apiKeysLive = HttpApiBuilder.group(LexaApi, "api-keys", (handlers) =>
   handlers
     .handle("listApiKeys", (req) =>
       respond(Effect.gen(function* () {
-        yield* requireAdmin(req);
+        yield* requireAdmin;
         const service = yield* ApiKeyService;
         const keys = yield* service.list();
         return { data: keys };
@@ -2101,7 +2099,7 @@ const apiKeysLive = HttpApiBuilder.group(LexaApi, "api-keys", (handlers) =>
     )
     .handle("createApiKey", (req) =>
       respond(Effect.gen(function* () {
-        yield* requireAdmin(req);
+        yield* requireAdmin;
         const service = yield* ApiKeyService;
         const result = yield* service.create(req.payload.name);
         return result;
@@ -2109,7 +2107,7 @@ const apiKeysLive = HttpApiBuilder.group(LexaApi, "api-keys", (handlers) =>
     )
     .handle("deleteApiKey", (req) =>
       respond(Effect.gen(function* () {
-        yield* requireAdmin(req);
+        yield* requireAdmin;
         const service = yield* ApiKeyService;
         yield* service.delete(req.path.id);
         return undefined;
@@ -2121,7 +2119,7 @@ const adminLive = HttpApiBuilder.group(LexaApi, "admin", (handlers) =>
   handlers
     .handle("listUsers", (req) =>
       respond(Effect.gen(function* () {
-        yield* requireAdmin(req);
+        yield* requireAdmin;
         const service = yield* UserService;
         const users = yield* service.list();
         return { data: users.map((u) => ({ id: u.id, email: u.email, name: u.name, role: u.role, createdAt: u.created_at, lastSeen: u.last_seen })) };
@@ -2129,7 +2127,7 @@ const adminLive = HttpApiBuilder.group(LexaApi, "admin", (handlers) =>
     )
     .handle("updateUserRole", (req) =>
       respond(Effect.gen(function* () {
-        const identity = yield* requireAdmin(req);
+        const identity = yield* requireAdmin;
         const service = yield* UserService;
         if (req.payload.role === "admin") {
           yield* service.promoteToAdmin(req.path.id);
@@ -2142,7 +2140,7 @@ const adminLive = HttpApiBuilder.group(LexaApi, "admin", (handlers) =>
     )
     .handle("listUserProjectRoles", (req) =>
       respond(Effect.gen(function* () {
-        yield* requireAdmin(req);
+        yield* requireAdmin;
         const service = yield* UserProjectRoleService;
         const projectRepo = yield* ProjectRepo;
         const roles = yield* service.listForUser(req.path.id);
@@ -2159,7 +2157,7 @@ const adminLive = HttpApiBuilder.group(LexaApi, "admin", (handlers) =>
     )
     .handle("setUserProjectRole", (req) =>
       respond(Effect.gen(function* () {
-        yield* requireAdmin(req);
+        yield* requireAdmin;
         const service = yield* UserProjectRoleService;
         const projectRepo = yield* ProjectRepo;
         yield* service.setRole(req.path.id, req.payload.projectId, req.payload.role);
@@ -2171,7 +2169,7 @@ const adminLive = HttpApiBuilder.group(LexaApi, "admin", (handlers) =>
     )
     .handle("removeUserProjectRole", (req) =>
       respond(Effect.gen(function* () {
-        yield* requireAdmin(req);
+        yield* requireAdmin;
         const service = yield* UserProjectRoleService;
         yield* service.removeAccess(req.path.id, req.path.projectId);
         return undefined;
@@ -2216,7 +2214,6 @@ function formatWikiPageRevision(r: { id: string; pageId: string; title: string; 
 }
 
 export function createApiHandler(dbPath: string) {
-  apiDbPath = dbPath;
   const db = new Database(dbPath);
   db.exec("PRAGMA journal_mode = WAL");
   db.exec("PRAGMA foreign_keys = ON");
