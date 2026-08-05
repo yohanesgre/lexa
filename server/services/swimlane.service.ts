@@ -1,7 +1,7 @@
 import { Effect } from "effect";
 import { SwimlaneRepo } from "../repos/swimlane.repo";
 import { ProjectRepo } from "../repos/project.repo";
-import { DbError, Sqlite, queryAll } from "../db/database";
+import { DbError } from "../db/database";
 import { ProjectNotFound, SwimlaneNotFound, HasChildren } from "../api/errors";
 import type { Swimlane } from "../../shared/types";
 
@@ -10,7 +10,6 @@ export class SwimlaneService extends Effect.Service<SwimlaneService>()("Lexa/Swi
   effect: Effect.gen(function* () {
     const repo = yield* SwimlaneRepo;
     const projectRepo = yield* ProjectRepo;
-    const db = yield* Sqlite;
 
     return {
       create: (input: { projectId: string; name: string; description?: string }): Effect.Effect<Swimlane, ProjectNotFound | DbError> =>
@@ -53,8 +52,7 @@ export class SwimlaneService extends Effect.Service<SwimlaneService>()("Lexa/Swi
       delete: (id: string): Effect.Effect<void, SwimlaneNotFound | HasChildren | DbError> =>
         Effect.gen(function* () {
           yield* repo.findById(id).pipe(Effect.catchTag("RowNotFound", () => new SwimlaneNotFound({ id })));
-          const rows = yield* queryAll<{ c: number }>(db, `SELECT COUNT(*) as c FROM tasks WHERE swimlane_id = ?`, id);
-          const count = rows[0]?.c ?? 0;
+          const count = yield* repo.countTasks(id);
           if (count > 0) return yield* new HasChildren({ count });
           yield* repo.delete(id).pipe(
             Effect.catchTag("ConstraintViolation", (e) => new DbError({ message: "Database error", cause: e }))

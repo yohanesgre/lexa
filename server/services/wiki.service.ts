@@ -1,7 +1,7 @@
 import { Effect } from "effect";
 import { WikiRepo } from "../repos/wiki.repo";
 import { ProjectRepo } from "../repos/project.repo";
-import { ConstraintViolation, DbError, RowNotFound, Sqlite, run, withTx } from "../db/database";
+import { ConstraintViolation, DbError, RowNotFound, Sqlite, withTx } from "../db/database";
 import { ProjectNotFound, WikiPageNotFound, SlugTaken, HasChildren, SearchError } from "../api/errors";
 import type { WikiPage, WikiPageMeta, WikiPageRevision, WikiPageRevisionSummary } from "../../shared/types";
 import type { TipTapDoc } from "../../shared/types";
@@ -127,14 +127,7 @@ export class WikiService extends Effect.Service<WikiService>()("Lexa/WikiService
               );
               // Prune: keep the newest 100 revisions per page (same tx as
               // the insert — no unbounded revision growth).
-              yield* run(
-                db,
-                `DELETE FROM wiki_page_revisions WHERE page_id = ? AND id NOT IN
-                   (SELECT id FROM wiki_page_revisions WHERE page_id = ?
-                    ORDER BY created_at DESC, id DESC LIMIT 100)`,
-                current.id,
-                current.id
-              );
+              yield* repo.pruneRevisions(current.id);
               return yield* repo.update(id, input).pipe(
                 Effect.catchTag("RowNotFound", () => new WikiPageNotFound({ id }))
               );
