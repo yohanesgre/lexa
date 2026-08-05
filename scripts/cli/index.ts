@@ -17,6 +17,7 @@
  */
 import { LexaClient } from "./api";
 import { loadConfig, saveConfig, clearConfig, type CliConfig } from "./config";
+import { cmdDeploy } from "./deploy";
 import { COMPILED, getOrCreateMachineId } from "./machine";
 import { hostname as osHostname } from "node:os";
 import { machineInstall, machineStart, machineStop, machineRestart, machineStatus, machineLogs, listMachines, listRuntimes, machineListen, workspaceList, workspaceSync } from "./machine";
@@ -471,6 +472,13 @@ Forge workspaces (local machine view):
   machine workspace list                         per-project dirs under ~/.lexa/projects/
   machine workspace sync                         re-index projects from the server + provision
 
+Deploy (Docker + cloudflared tunnel + Access):
+  deploy <domain> [dev|staging|prod] [--bare]   dev: setup wizard + .env;
+                                                 staging/prod: Cloudflare tunnel,
+                                                 Access + Google IdP provisioning,
+                                                 .env.<flavor> + docker compose up;
+                                                 --bare prints bare-metal steps
+
 Env fallbacks: LEXA_URL, LEXA_API_KEY. Flags override saved login.
 `;
 
@@ -489,6 +497,7 @@ async function main(): Promise<void> {
     case "login": await cmdLogin(flags); break;
     case "logout": await cmdLogout(); break;
     case "status": await cmdStatus(flags); break;
+    case "deploy": await cmdDeploy(flags, positionals.slice(1)); break;
 
     case "project":
       if (sub === "list") await cmdProjectList(flags);

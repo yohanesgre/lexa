@@ -43,7 +43,7 @@
 ```bash
 bun run setup          # admin email, API key, migrations, optional sample data
 bun run dev:full       # dev: API :3000 + frontend :5173
-# prod: scripts/setup.sh <domain> prod
+# prod: lexa-cli deploy <domain> prod
 ```
 
 GitHub sync setup (GitHub App, webhook, Access bypass): `docs/GITHUB_SETUP.md`.

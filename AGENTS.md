@@ -240,8 +240,9 @@ bun run build
   and sends them in the machine heartbeat. `machine install` is a thin listener
   alias; `--no-systemd` writes no daemon files and runs the listener under your
   own supervisor.
-- `scripts/setup.sh <domain> [dev|staging|prod]` is for deployment
-  (Docker + cloudflared tunnel + Access). Local dev does not need it.
+- `lexa-cli deploy <domain> [dev|staging|prod]` is for deployment
+  (Docker + cloudflared tunnel + Access); the legacy bash setup.sh has been removed.
+  Local dev does not need it.
 
 Each phase in docs/IMPLEMENTATION.md has its own acceptance block — run it and paste the output.
 
