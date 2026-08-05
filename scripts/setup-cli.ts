@@ -10,7 +10,7 @@
  * settings table so Docker/staging/prod web setups stay consistent.
  */
 import { createHash, randomBytes } from "node:crypto";
-import { existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync, mkdirSync, chmodSync } from "node:fs";
 import { resolve, dirname } from "node:path";
 import { Database } from "bun:sqlite";
 import { runMigrations } from "../server/db/migrate";
@@ -39,6 +39,7 @@ function writeEnv(env: Record<string, string>) {
   mkdirSync(dirname(ENV_PATH), { recursive: true });
   const lines = Object.entries(env).map(([k, v]) => `${k}=${v}`);
   writeFileSync(ENV_PATH, lines.join("\n") + "\n");
+  try { chmodSync(ENV_PATH, 0o600); } catch {}
 }
 
 function generateRawKey(): string {
@@ -106,12 +107,20 @@ async function main() {
   console.log("\n── Database ──");
   ensureDirForDb(DB_PATH);
   runMigrations(DB_PATH);
+  try { chmodSync(DB_PATH, 0o600); } catch {}
+  // FTS5 optimize; table may be absent on a pre-0001 DB.
+  try {
+    const db = new Database(DB_PATH);
+    db.exec("INSERT INTO wiki_fts(wiki_fts) VALUES('optimize')");
+    db.close();
+  } catch {}
 
   // Mirror admin email into settings table (helps Docker/web-wizard parity)
   try {
     const db = new Database(DB_PATH);
     db.exec("PRAGMA journal_mode = WAL");
     db.exec("PRAGMA foreign_keys = ON");
+    db.exec("PRAGMA busy_timeout = 5000");
     if (env.LXK_ADMIN_EMAILS) {
       const existing = getSetting(db, "admin_emails") || "";
       const merged = [...new Set([...existing.split(",").map((s) => s.trim().toLowerCase()).filter(Boolean), ...env.LXK_ADMIN_EMAILS.split(",").map((s) => s.trim().toLowerCase())])];

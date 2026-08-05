@@ -1008,8 +1008,14 @@ const respond = <A, E, R>(eff: Effect.Effect<A, E, R>): Effect.Effect<A | HttpSe
         const err = failure.value as { _tag: string } & Record<string, unknown>;
         const resp = errorResponse(err);
         const status = errorToStatus(err);
-        return Effect.logError(`[HTTP] ${status} ${resp.error.code}: ${resp.error.message}`).pipe(
-          Effect.annotateLogs({ code: resp.error.code, status, ...resp.error.details }),
+        // Raw message/cause stay server-side (client response is scrubbed by
+        // errorResponse/errorDetails). Embedded in the message — the HttpApi
+        // handler path drops annotateLogs annotations.
+        const rawMessage = err.message !== undefined ? String(err.message) : "";
+        const rawCause = err.cause instanceof Error ? err.cause.message : err.cause !== undefined ? String(err.cause) : "";
+        const raw = rawCause ? `${rawMessage} (cause: ${rawCause})` : rawMessage;
+        return Effect.logError(`[HTTP] ${status} ${resp.error.code}: ${resp.error.message} [raw: ${raw}]`).pipe(
+          Effect.annotateLogs({ code: resp.error.code, status, ...resp.error.details, rawMessage, rawCause }),
           Effect.as(HttpServerResponse.unsafeJson(resp, { status })),
         );
       }
@@ -2204,6 +2210,7 @@ export function createApiHandler(dbPath: string) {
   const db = new Database(dbPath);
   db.exec("PRAGMA journal_mode = WAL");
   db.exec("PRAGMA foreign_keys = ON");
+  db.exec("PRAGMA busy_timeout = 5000");
   const dbLayer = Layer.succeed(Sqlite, db);
 
   const serviceLayer = buildServiceLayer();
@@ -2259,6 +2266,7 @@ function buildWebhookRuntime(dbPath: string) {
   const db = new Database(dbPath);
   db.exec("PRAGMA journal_mode = WAL");
   db.exec("PRAGMA foreign_keys = ON");
+  db.exec("PRAGMA busy_timeout = 5000");
   return ManagedRuntime.make(
     Layer.provideMerge(
       buildServiceLayer(),

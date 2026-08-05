@@ -4,7 +4,7 @@ import { ProjectRepo } from "../repos/project.repo";
 import { ColumnRepo } from "../repos/column.repo";
 import { SwimlaneRepo } from "../repos/swimlane.repo";
 import { FieldConfigRepo } from "../repos/field-config.repo";
-import { ConstraintViolation, DbError, RowNotFound, Sqlite, run, queryAll } from "../db/database";
+import { ConstraintViolation, DbError, RowNotFound, Sqlite, run, queryAll, withTx } from "../db/database";
 import { keyAfter } from "../../shared/positions";
 import { keyBetween } from "../../shared/positions";
 import type { TaskRow } from "../../shared/db";
@@ -184,10 +184,13 @@ export class TaskService extends Effect.Service<TaskService>()("Lexa/TaskService
             );
           });
 
-          const task = yield* doInsert.pipe(
-            Effect.catchIf(
-              (e) => e instanceof ConstraintViolation && e.isPositionConflict,
-              () => doInsert
+          const task = yield* withTx(
+            db,
+            doInsert.pipe(
+              Effect.catchIf(
+                (e) => e instanceof ConstraintViolation && e.isPositionConflict,
+                () => doInsert
+              )
             )
           );
           yield* Effect.logInfo(`[Task] Created ${task.id} in column ${task.columnId} project ${task.projectId}`);
@@ -331,35 +334,41 @@ export class TaskService extends Effect.Service<TaskService>()("Lexa/TaskService
             return result.task;
           });
 
-          const moved = yield* doMove.pipe(
-            Effect.catchIf(
-              (e) => e instanceof ConstraintViolation && e.isPositionConflict,
-              () => doMove
-            )
-          );
+          const moved = yield* withTx(
+            db,
+            Effect.gen(function* () {
+              const m = yield* doMove.pipe(
+                Effect.catchIf(
+                  (e) => e instanceof ConstraintViolation && e.isPositionConflict,
+                  () => doMove
+                )
+              );
 
-          // Cascade: when a parent moves, its subtasks follow (same column,
-          // appended after the parent's new position).
-          if (moved.columnId !== task.columnId || moved.swimlaneId !== task.swimlaneId) {
-            const children = yield* queryAll<{ id: string; position: string }>(
-              db,
-              `SELECT t.id, t.position FROM task_links tl
-               INNER JOIN tasks t ON t.id = tl.from_task_id
-               WHERE tl.to_task_id = ? AND tl.relation = 'subtask_of'
-               ORDER BY t.position`,
-              taskId
-            );
-            let childPos = moved.position;
-            for (const child of children) {
-              childPos = keyAfter(childPos);
-              yield* taskRepo.move(child.id, {
-                columnId: moved.columnId,
-                swimlaneId: moved.swimlaneId,
-                position: childPos,
-                projectId: task.projectId,
-              }, { bypassWip: true });
-            }
-          }
+              // Cascade: when a parent moves, its subtasks follow (same column,
+              // appended after the parent's new position).
+              if (m.columnId !== task.columnId || m.swimlaneId !== task.swimlaneId) {
+                const children = yield* queryAll<{ id: string; position: string }>(
+                  db,
+                  `SELECT t.id, t.position FROM task_links tl
+                   INNER JOIN tasks t ON t.id = tl.from_task_id
+                   WHERE tl.to_task_id = ? AND tl.relation = 'subtask_of'
+                   ORDER BY t.position`,
+                  taskId
+                );
+                let childPos = m.position;
+                for (const child of children) {
+                  childPos = keyAfter(childPos);
+                  yield* taskRepo.move(child.id, {
+                    columnId: m.columnId,
+                    swimlaneId: m.swimlaneId,
+                    position: childPos,
+                    projectId: task.projectId,
+                  }, { bypassWip: true });
+                }
+              }
+              return m;
+            })
+          );
 
           yield* Effect.logInfo(`[Task] Moved ${moved.id} column=${moved.columnId} swimlane=${moved.swimlaneId} pos=${moved.position}`);
           return moved;

@@ -2,7 +2,7 @@ import { Effect } from "effect";
 import { TaskLinkRepo } from "../repos/task-link.repo";
 import { TaskRepo } from "../repos/task.repo";
 import { ProjectRepo } from "../repos/project.repo";
-import { DbError, RowNotFound, ConstraintViolation } from "../db/database";
+import { DbError, RowNotFound, ConstraintViolation, Sqlite, withTx } from "../db/database";
 import { ProjectNotFound, TaskNotFound, TaskLinkNotFound, TaskLinkCycle, InvalidTaskLink } from "../api/errors";
 import { keyAfter } from "../../shared/positions";
 import type { TaskLink, TaskLinkRelation, TaskLinkSuggestion } from "../../shared/types";
@@ -13,6 +13,7 @@ export class TaskLinkService extends Effect.Service<TaskLinkService>()("Lexa/Tas
     const repo = yield* TaskLinkRepo;
     const taskRepo = yield* TaskRepo;
     const projectRepo = yield* ProjectRepo;
+    const db = yield* Sqlite;
 
     // Walk the subtask_of parent chain from a task; return the ancestor ids.
     const ancestorIds = (taskId: string): Effect.Effect<Set<string>, DbError> =>
@@ -75,26 +76,28 @@ export class TaskLinkService extends Effect.Service<TaskLinkService>()("Lexa/Tas
           }
 
           // Child inherits the parent's column (subtask_of: from=child, to=parent).
-          if (input.relation === "subtask_of" && from.columnId !== to.columnId) {
-            const last = yield* taskRepo.findLastInColumn(input.projectId, to.columnId).pipe(
-              Effect.catchTag("RowNotFound", () => Effect.succeed(null))
-            );
-            yield* taskRepo.move(input.fromTaskId, {
-              columnId: to.columnId,
-              swimlaneId: to.swimlaneId,
-              position: keyAfter(last?.position ?? null),
-              projectId: input.projectId,
-            });
-          }
-
-          return yield* repo.create({
-            id: crypto.randomUUID(),
-            projectId: input.projectId,
-            fromTaskId: input.fromTaskId,
-            toTaskId: input.toTaskId,
-            relation: input.relation,
-          }).pipe(
-            Effect.catchTag("ConstraintViolation", (e) => new DbError({ message: e.message, cause: e }))
+          return yield* withTx(
+            db,
+            Effect.gen(function* () {
+              if (input.relation === "subtask_of" && from.columnId !== to.columnId) {
+                const last = yield* taskRepo.findLastInColumn(input.projectId, to.columnId).pipe(
+                  Effect.catchTag("RowNotFound", () => Effect.succeed(null))
+                );
+                yield* taskRepo.move(input.fromTaskId, {
+                  columnId: to.columnId,
+                  swimlaneId: to.swimlaneId,
+                  position: keyAfter(last?.position ?? null),
+                  projectId: input.projectId,
+                });
+              }
+              return yield* repo.create({
+                id: crypto.randomUUID(),
+                projectId: input.projectId,
+                fromTaskId: input.fromTaskId,
+                toTaskId: input.toTaskId,
+                relation: input.relation,
+              });
+            })
           );
         }),
 

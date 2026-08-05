@@ -67,7 +67,7 @@ These were each hard-won design fixes (see docs/REVIEW.md). Breaking any of them
 9. **Webhook route has no API-key middleware** — HMAC-SHA-256 signature verification over the raw body is the auth, and it runs before JSON parsing.
 10. **Column→GitHub state mapping uses `columns.github_state`**, never column names.
 11. **`required_fields` is enforced on create, move, AND update**, with TipTap-aware emptiness (a doc with no text nodes is empty).
-12. **One task ↔ one GitHub issue** (`UNIQUE(github_issue_id)` + already-linked guard).
+12. **An issue links to at most one task; a task may hold several issues, one per repo** (`task_github_issues` junction PK `(task_id, issue_id)` + `UNIQUE(issue_id)` index + per-repo ALREADY_LINKED guard).
 
 ## Agent file boundaries
 

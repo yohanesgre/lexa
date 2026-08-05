@@ -1,6 +1,6 @@
 # SQLite Schema (v2 — post-review)
 
-> Reviewed against REVIEW.md. Changes from v1: labels & subtasks cut (YAGNI), `column_policies` table replaced by `columns.required_fields`, `columns.github_state` added for sync mapping, `tasks.github_synced_state` for echo suppression, `UNIQUE(github_issue_id)`, `UNIQUE(column_id, position)` for fractional-index integrity, FTS5 for wiki search, `webhook_events` dedup table, consolidated indexes.
+> Reviewed against REVIEW.md. Changes from v1: labels & subtasks cut (YAGNI), `column_policies` table replaced by `columns.required_fields`, `columns.github_state` added for sync mapping, `tasks.github_synced_state` for echo suppression, `task_github_issues` junction (multi-issue, one per repo, `UNIQUE(issue_id)`), `UNIQUE(column_id, position)` for fractional-index integrity, FTS5 for wiki search, `webhook_events` dedup table, consolidated indexes.
 
 ## Full Schema
 
@@ -16,6 +16,29 @@ CREATE TABLE projects (
   github_repo TEXT,                                          -- "owner/repo"
   created_at  TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at  TEXT NOT NULL DEFAULT (datetime('now'))        -- maintained by app on every UPDATE
+);
+
+-- ============================================================
+-- Users + project roles
+-- ============================================================
+-- Users auto-register on first CF Access login; the global role comes from
+-- LXK_ADMIN_EMAILS / settings.admin_emails (env OR settings checked at auth).
+CREATE TABLE users (
+  id         TEXT PRIMARY KEY,
+  email      TEXT NOT NULL UNIQUE,
+  name       TEXT NOT NULL,
+  role       TEXT NOT NULL DEFAULT 'member' CHECK(role IN ('admin', 'member')),
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  last_seen  TEXT
+);
+
+-- Per-project roles. PRIMARY KEY includes role: a user holds at most one
+-- row per (project, role) — admin + member rows can coexist.
+CREATE TABLE user_project_roles (
+  user_id    TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  role       TEXT NOT NULL CHECK(role IN ('admin', 'member')),
+  project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  PRIMARY KEY (user_id, role, project_id)
 );
 
 -- ============================================================
@@ -55,7 +78,8 @@ CREATE TABLE swimlanes (
 -- Task field options (per-project customizable priority/type)
 -- ============================================================
 -- Each project owns ordered option lists for the two task fields.
--- tasks.priority / tasks.type reference these IDs (no CHECK enums).
+-- tasks.priority / tasks.type are plain TEXT columns (no FK, no CHECK —
+-- DEFAULT 'medium' / 'task'); the app validates values against these lists.
 -- position: integer ordering; the FIRST option (position 0) is the
 --   create default. Delete is blocked while any task uses the option.
 CREATE TABLE priority_options (
@@ -81,8 +105,9 @@ CREATE INDEX idx_type_options_project ON type_options(project_id, position);
 -- ============================================================
 -- Tasks (the core entity)
 -- ============================================================
--- position: fractional-index key (see Design Notes). UNIQUE(column_id, position)
---   turns a concurrent-create race into a constraint violation → app retries
+-- position: fractional-index key (see Design Notes). idx_tasks_position
+--   (UNIQUE index on (column_id, position)) turns a
+--   concurrent-create race into a constraint violation → app retries
 --   with a freshly generated key.
 -- GitHub issues are stored in the task_github_issues junction table (multi-issue).
 -- The old inline columns (github_issue_id, github_issue_number, github_repo,
@@ -91,24 +116,23 @@ CREATE INDEX idx_type_options_project ON type_options(project_id, position);
 CREATE TABLE tasks (
   id                  TEXT PRIMARY KEY,
   project_id          TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
-  column_id           TEXT NOT NULL REFERENCES columns(id) ON DELETE RESTRICT,
+  column_id           TEXT NOT NULL REFERENCES columns(id),  -- no ON DELETE clause in DDL;
                                                             -- deleting non-empty column → ColumnNotEmpty 409
   swimlane_id         TEXT NOT NULL REFERENCES swimlanes(id),
   title               TEXT NOT NULL,
-  description         TEXT NOT NULL DEFAULT '{}',            -- TipTap JSON
-  priority            TEXT NOT NULL REFERENCES priority_options(id),
-  type                TEXT NOT NULL REFERENCES type_options(id),
+  description         TEXT NOT NULL DEFAULT '{"type":"doc","content":[]}', -- TipTap JSON
+  priority            TEXT NOT NULL DEFAULT 'medium',        -- label string — no FK
+  type                TEXT NOT NULL DEFAULT 'task',          -- label string — no FK
   position            TEXT NOT NULL,                         -- fractional-index key
   archived_at         TEXT,                                   -- NULL = live; set to datetime('now') on archive
                                                               -- archived tasks keep column/position and are excluded
                                                               -- from board/WIP/count queries unless includeArchived
-  github_issue_id     TEXT UNIQUE,                           -- DEPRECATED — now in task_github_issues
+  github_issue_id     TEXT,                                  -- DEPRECATED — now in task_github_issues
   github_issue_number INTEGER,                              -- DEPRECATED
   github_repo         TEXT,                                  -- DEPRECATED
   github_synced_state TEXT CHECK (github_synced_state IN ('open','closed')), -- DEPRECATED
   created_at          TEXT NOT NULL DEFAULT (datetime('now')),
-  updated_at          TEXT NOT NULL DEFAULT (datetime('now')),  -- maintained by app
-  UNIQUE(column_id, position)
+  updated_at          TEXT NOT NULL DEFAULT (datetime('now'))   -- maintained by app
 );
 
 -- ============================================================
@@ -214,7 +238,8 @@ CREATE TABLE api_keys (
   name         TEXT NOT NULL,                                -- "hermes", "opencode-local"
   key_hash     TEXT NOT NULL UNIQUE,                         -- hex(SHA-256(raw key))
   created_at   TEXT NOT NULL DEFAULT (datetime('now')),
-  last_used_at TEXT
+  last_used_at TEXT,
+  user_id      TEXT REFERENCES users(id)                       -- owning user; NULL = unbound key
 );
 
 -- ============================================================
@@ -228,19 +253,36 @@ CREATE TABLE webhook_events (
 );
 
 -- ============================================================
+-- Settings (app key/value store)
+-- ============================================================
+-- e.g. settings.admin_emails — mirrored from LXK_ADMIN_EMAILS by the
+-- setup wizard; read alongside the env var at auth time.
+CREATE TABLE settings (
+  key        TEXT PRIMARY KEY,
+  value      TEXT NOT NULL,
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- ============================================================
 -- Indexes
 -- ============================================================
 -- Board fetch = WHERE project_id=? ORDER BY column, position → one index.
 CREATE INDEX idx_tasks_board     ON tasks(project_id, column_id, position);
 CREATE INDEX idx_tasks_swimlane  ON tasks(project_id, swimlane_id);
+CREATE UNIQUE INDEX idx_tasks_position ON tasks(column_id, position);              -- fractional-index integrity
+CREATE UNIQUE INDEX idx_task_github_issues_issue ON task_github_issues(issue_id);  -- issue → at most one task
 CREATE INDEX idx_columns_project ON columns(project_id, position);
 CREATE INDEX idx_swimlanes_proj  ON swimlanes(project_id, position);
 CREATE INDEX idx_wiki_project    ON wiki_pages(project_id);
 CREATE INDEX idx_wiki_parent     ON wiki_pages(parent_id) WHERE parent_id IS NOT NULL;
--- tasks.github_issue_id and api_keys.key_hash are indexed by their UNIQUE constraints.
+CREATE INDEX idx_runtimes_machine ON runtimes(machine_id);
+CREATE INDEX idx_task_links_from ON task_links(from_task_id);
+CREATE INDEX idx_task_links_to   ON task_links(to_task_id);
+CREATE INDEX idx_task_links_proj ON task_links(project_id);
+-- api_keys.key_hash is indexed by its UNIQUE constraint.
 
 -- ============================================================
--- Forge: runtime agents + persisted document sources (migration 0011)
+-- Forge: runtime agents + persisted document sources
 -- ============================================================
 -- runtimes: daemons that run agent CLIs (opencode/hermes/command-code) and poll
 --   for tasks. model is the agent model id reported by the daemon (FORGE_MODEL);
@@ -260,13 +302,17 @@ CREATE TABLE runtimes (
   provider       TEXT NOT NULL CHECK (provider IN ('opencode', 'hermes', 'command-code')),
   model          TEXT NOT NULL DEFAULT '',
   extra_args     TEXT NOT NULL DEFAULT '[]',
-  models_catalog TEXT NOT NULL DEFAULT '[]',   -- migration 0016
-  agents_catalog TEXT NOT NULL DEFAULT '[]',   -- migration 0026
-  machine_id     TEXT REFERENCES machines(id) ON DELETE SET NULL, -- migration 0025
+  models_catalog TEXT NOT NULL DEFAULT '[]',
+  mcp_connected  INTEGER NOT NULL DEFAULT 0,   -- daemon MCP link up (0/1)
+  agent          TEXT NOT NULL DEFAULT '',     -- bound agent (rule bundle) id
+  print_logs     INTEGER NOT NULL DEFAULT 0,   -- print run logs toggle
+  log_level      TEXT NOT NULL DEFAULT '',     -- daemon log verbosity
+  agents_catalog TEXT NOT NULL DEFAULT '[]',
+  machine_id     TEXT REFERENCES machines(id) ON DELETE SET NULL,
   status         TEXT NOT NULL DEFAULT 'offline' CHECK (status IN ('online', 'offline')),
   hostname       TEXT NOT NULL DEFAULT '',
   last_seen      TEXT,
-  last_error     TEXT,                          -- migration 0002: last daemon
+  last_error     TEXT,                          -- last daemon
                                                  -- failure relayed by the
                                                  -- machine listener (e.g.
                                                  -- "API key revoked", exit 3)
@@ -276,12 +322,12 @@ CREATE TABLE runtimes (
 -- reuses the env on install; remove events are provider-scoped).
 
 -- ============================================================
--- Forge: machine registry + setup events (migrations 0023–0025)
+-- Forge: machine registry + setup events
 -- ============================================================
 CREATE TABLE machines (
   id          TEXT PRIMARY KEY,
   hostname    TEXT NOT NULL DEFAULT '',
-  clis        TEXT NOT NULL DEFAULT '[]',   -- migration 0002: installed agent
+  clis        TEXT NOT NULL DEFAULT '[]',   -- installed agent
                                             -- CLIs reported by the listener
                                             -- heartbeat ([{ provider, version }])
   last_seen   TEXT,                         -- NULL = "bound, not listening"
@@ -336,7 +382,7 @@ CREATE TABLE forge_tasks (
 CREATE INDEX idx_forge_tasks_status ON forge_tasks(status, created_at);
 
 -- ============================================================
--- Forge agents + skills (migration 0027) — global rule bundles
+-- Forge agents + skills — global rule bundles
 -- ============================================================
 -- Agents are named rule bundles: their instructions become AGENTS.md in the
 -- run dir at claim time (claim-carried, no host store). Skills are named
@@ -384,7 +430,7 @@ CREATE TABLE document_sources (
 CREATE INDEX idx_sources_document ON document_sources(document_type, document_id);
 
 -- ============================================================
--- Forge task activity log (migration 0018)
+-- Forge task activity log
 -- ============================================================
 -- Append-only live status feed per task: the daemon streams lines
 -- (claimed by <runtime>, model <id>, agent started, generating,
@@ -393,8 +439,8 @@ CREATE TABLE forge_task_logs (
   id         TEXT PRIMARY KEY,
   task_id    TEXT NOT NULL REFERENCES forge_tasks(id) ON DELETE CASCADE,
   message    TEXT NOT NULL,
-  stream     TEXT NOT NULL DEFAULT 'out' CHECK (stream IN ('out','err')), -- migration 0003
-  level      TEXT NOT NULL DEFAULT 'info' CHECK (level IN ('info','warn','error')), -- migration 0003
+  stream     TEXT NOT NULL DEFAULT 'out',  -- no CHECK in DDL
+  level      TEXT NOT NULL DEFAULT 'info', -- no CHECK in DDL
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE INDEX idx_forge_task_logs_task ON forge_task_logs(task_id, created_at);
@@ -405,7 +451,7 @@ CREATE INDEX idx_forge_task_logs_task ON forge_task_logs(task_id, created_at);
 -- [stderr] marker.
 
 -- ============================================================
--- Task links: subtask_of / blocked_by / related_to (migration 0012)
+-- Task links: subtask_of / blocked_by / related_to
 -- ============================================================
 -- Directed links between tasks. Semantics:
 --   subtask_of : from = child, to = parent. Child inherits parent's column;
@@ -483,10 +529,10 @@ CLI in one-shot mode per task, and reports the result.
   (`LXK_FORGE_DAEMON_TOKEN`) or a Bearer key.
 
 ### Task field options (custom priority/type)
-Priority and type are per-project option lists (`priority_options` / `type_options`), not global enums. Tasks reference option IDs via `tasks.priority` / `tasks.type` (FK to the option tables; SQLite enforces membership).
+Priority and type are per-project option lists (`priority_options` / `type_options`), not global enums. `tasks.priority` / `tasks.type` are plain TEXT columns (DEFAULT `'medium'` / `'task'`) with **no FK** — SQLite enforces nothing; the service validates the value against the project's option rows (`InvalidOption` 422) and resolves an empty value to the first option.
 
 - **Order** = `position` ascending; the first option (position 0) is the create default.
-- **Backfill:** migration `0010` creates both tables, seeds the legacy 4+4 options per existing project, then rewrites `tasks.priority` / `tasks.type` to the matching option IDs. New projects get their option rows seeded at creation (ProjectService).
+- **Seeding:** option rows are created by the app — new projects get them at creation (ProjectService). Tasks created through the API resolve an empty priority/type to the project's first option; the literal `'medium'` / `'task'` defaults only apply to rows written outside the service.
 - **Delete rule:** an option used by any task cannot be deleted (`OptionInUse` 409). Reassign or delete the tasks first.
 - **Validation:** create/update task payloads carry option IDs; services validate the ID belongs to the task's project (`InvalidOption` 422).
 - **Dashboard urgency:** `countUrgent` / `findUrgentAcrossAllProjects` use a project's first priority option (position 0) as the "urgent" equivalent. If a team reorders so a different option leads, urgency follows the new default.

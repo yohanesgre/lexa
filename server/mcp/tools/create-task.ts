@@ -29,7 +29,7 @@ export const tool = {
     Effect.gen(function* () {
       const project = yield* resolveProject(args.project);
       const column = yield* resolveColumn(project.id, args.column);
-      let swimlane = yield* resolveSwimlane(project.id, args.swimlane);
+      const swimlane = yield* resolveSwimlane(project.id, args.swimlane);
 
       const description = args.description
         ? markdownToDoc(args.description)
@@ -103,6 +103,7 @@ export const tool = {
           url: g.url,
           outOfSync: g.outOfSync,
         })),
+        archivedAt: task.archivedAt,
         updatedAt: task.updatedAt,
       };
     }),

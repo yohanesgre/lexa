@@ -58,27 +58,45 @@ export class SourceService extends Effect.Service<SourceService>()("Lexa/SourceS
 
     const fetchText = (url: string): Effect.Effect<string, SourceFetchError | SourceUnreachable> =>
       Effect.gen(function* () {
-        yield* assertPublicUrl(url);
-        const res = yield* Effect.promise(() =>
-          fetch(url, {
-            headers: { "User-Agent": "Lexa-Forge/0.1" },
-            redirect: "follow",
-            signal: AbortSignal.timeout(10_000),
-          })
-        ).pipe(
-          Effect.catchAll(() => Effect.fail(new SourceUnreachable({ url })))
-        );
-        if (!res.ok) {
-          return yield* new SourceFetchError({ message: `HTTP ${res.status} fetching ${url}` });
+        let currentUrl = url;
+        yield* assertPublicUrl(currentUrl);
+        // redirect: "manual" — every hop is re-validated against the SSRF
+        // guard, so a public URL cannot redirect to a private address.
+        for (let hops = 0; hops <= 5; hops++) {
+          const res = yield* Effect.promise(() =>
+            fetch(currentUrl, {
+              headers: { "User-Agent": "Lexa-Forge/0.1" },
+              redirect: "manual",
+              signal: AbortSignal.timeout(10_000),
+            })
+          ).pipe(
+            Effect.catchAll(() => Effect.fail(new SourceUnreachable({ url })))
+          );
+          if (res.status >= 300 && res.status < 400) {
+            if (hops === 5) {
+              return yield* new SourceFetchError({ message: `Too many redirects fetching ${url}` });
+            }
+            const location = res.headers.get("location");
+            if (!location) {
+              return yield* new SourceFetchError({ message: `Redirect without Location fetching ${currentUrl}` });
+            }
+            currentUrl = new URL(location, currentUrl).toString();
+            yield* assertPublicUrl(currentUrl);
+            continue;
+          }
+          if (!res.ok) {
+            return yield* new SourceFetchError({ message: `HTTP ${res.status} fetching ${url}` });
+          }
+          const html = yield* Effect.promise(() => res.text()).pipe(
+            Effect.catchAll(() => Effect.fail(new SourceUnreachable({ url })))
+          );
+          const text = htmlToText(html);
+          if (!text.trim()) {
+            return yield* new SourceFetchError({ message: `No readable text at ${url}` });
+          }
+          return text;
         }
-        const html = yield* Effect.promise(() => res.text()).pipe(
-          Effect.catchAll(() => Effect.fail(new SourceUnreachable({ url })))
-        );
-        const text = htmlToText(html);
-        if (!text.trim()) {
-          return yield* new SourceFetchError({ message: `No readable text at ${url}` });
-        }
-        return text;
+        return yield* new SourceFetchError({ message: `Too many redirects fetching ${url}` });
       });
 
     const htmlToText = (html: string): string =>
@@ -139,9 +157,7 @@ export class SourceService extends Effect.Service<SourceService>()("Lexa/SourceS
             kind: input.kind,
             title,
             ref: input.ref,
-          }).pipe(
-            Effect.catchTag("ConstraintViolation", (e) => new DbError({ message: e.message, cause: e }))
-          );
+          });
         }),
 
       remove: (id: string): Effect.Effect<void, SourceNotFound | ConstraintViolation | DbError> =>

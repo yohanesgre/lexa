@@ -234,8 +234,19 @@ export class McpServer extends Effect.Service<McpServer>()("Lexa/McpServer", {
               yield* checkProjectAccess(authContext.userId, authContext.role, args.slug);
             }
             if (typeof args?.taskId === "string" && ["get_task", "update_task", "move_task", "delete_task", "archive_task", "restore_task", "link_github_issue", "unlink_github_issue"].includes(toolName)) {
-              const resolved = yield* resolveTaskProject(args.taskId);
-              yield* checkProjectAccess(authContext.userId, authContext.role, resolved.slug);
+              const resolution = yield* resolveTaskProject(args.taskId).pipe(Effect.either);
+              if (resolution._tag === "Left") {
+                const err = buildToolError(resolution.left as any);
+                return {
+                  jsonrpc: "2.0",
+                  id,
+                  result: {
+                    content: [{ type: "text", text: JSON.stringify(err) }],
+                    isError: true,
+                  },
+                };
+              }
+              yield* checkProjectAccess(authContext.userId, authContext.role, resolution.right.slug);
             }
 
             const result = yield* tool.handler(args, { userId: authContext.userId, role: authContext.role }).pipe(

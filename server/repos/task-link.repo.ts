@@ -81,12 +81,12 @@ export class TaskLinkRepo extends Effect.Service<TaskLinkRepo>()("Lexa/TaskLinkR
            WHERE t.project_id = ?
              AND t.archived_at IS NULL
              AND t.id != ?
-             AND t.title LIKE ?
+             AND t.title LIKE ? ESCAPE '\\'
            ORDER BY t.updated_at DESC
            LIMIT ?`,
           projectId,
           excludeTaskId,
-          `%${query}%`,
+          `%${query.replace(/[\\%_]/g, (ch) => `\\${ch}`)}%`,
           limit
         ),
     };

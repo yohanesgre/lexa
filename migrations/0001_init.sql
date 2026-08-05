@@ -1,8 +1,10 @@
--- Lexa schema v0.1.0 (squashed 0001..0027 into a single clean migration — 2026-08-04).
--- Unreleased squash: no intermediate rebuild/backfill steps, just the final
--- schema plus the Forge builtin seeds. No placeholder admin: users
--- auto-register on first CF Access login; admin role from LXK_ADMIN_EMAILS /
--- settings.admin_emails.
+-- Lexa schema v0.1.0 (squashed 0001..0027 into a single clean migration — 2026-08-04;
+-- re-squashed 2026-08-05, folding 0002..0008: machines.clis / runtimes.last_error /
+-- forge_task_logs stream+level columns, idx_tasks_position + board + swimlane +
+-- task_github_issues issue-unique indexes; runtime_listeners dropped; no
+-- intermediate data-migration steps, just the final schema plus the Forge
+-- builtin seeds). No placeholder admin: users auto-register on first CF Access
+-- login; admin role from LXK_ADMIN_EMAILS / settings.admin_emails.
 
 CREATE TABLE api_keys (
   id           TEXT PRIMARY KEY,
@@ -66,6 +68,11 @@ CREATE TABLE forge_task_logs (
   id         TEXT PRIMARY KEY,
   task_id    TEXT NOT NULL REFERENCES forge_tasks(id) ON DELETE CASCADE,
   message    TEXT NOT NULL,
+  -- stream/level: the daemon classifies each log line ONCE at write time
+  -- (shared/forge-log.ts); the UI renders the stored level, no text matching
+  -- at render time.
+  stream     TEXT NOT NULL DEFAULT 'out',
+  level      TEXT NOT NULL DEFAULT 'info',
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -92,6 +99,9 @@ CREATE TABLE forge_tasks (
 CREATE TABLE machines (
   id          TEXT PRIMARY KEY,
   hostname    TEXT NOT NULL DEFAULT '',
+  -- clis: installed agent CLIs reported by the listener heartbeat
+  --   (JSON array of { provider, version }).
+  clis        TEXT NOT NULL DEFAULT '[]',
   last_seen   TEXT,
   created_at  TEXT NOT NULL DEFAULT (datetime('now'))
 );
@@ -132,13 +142,6 @@ CREATE TABLE runtime_events (
   FOREIGN KEY (machine_id) REFERENCES machines(id) ON DELETE CASCADE
 );
 
-CREATE TABLE runtime_listeners (
-  id          TEXT PRIMARY KEY,
-  hostname    TEXT NOT NULL DEFAULT '',
-  last_seen   TEXT,
-  created_at  TEXT NOT NULL DEFAULT (datetime('now'))
-);
-
 CREATE TABLE "runtimes" (
   id         TEXT PRIMARY KEY,
   name       TEXT NOT NULL,
@@ -148,7 +151,7 @@ CREATE TABLE "runtimes" (
   hostname   TEXT NOT NULL DEFAULT '',
   last_seen  TEXT,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
-, extra_args TEXT NOT NULL DEFAULT '[]', models_catalog TEXT NOT NULL DEFAULT '[]', mcp_connected INTEGER NOT NULL DEFAULT 0, agent TEXT NOT NULL DEFAULT '', print_logs INTEGER NOT NULL DEFAULT 0, log_level TEXT NOT NULL DEFAULT '', machine_id TEXT REFERENCES machines(id) ON DELETE SET NULL, agents_catalog TEXT NOT NULL DEFAULT '[]');
+, extra_args TEXT NOT NULL DEFAULT '[]', models_catalog TEXT NOT NULL DEFAULT '[]', mcp_connected INTEGER NOT NULL DEFAULT 0, agent TEXT NOT NULL DEFAULT '', print_logs INTEGER NOT NULL DEFAULT 0, log_level TEXT NOT NULL DEFAULT '', machine_id TEXT REFERENCES machines(id) ON DELETE SET NULL, agents_catalog TEXT NOT NULL DEFAULT '[]', last_error TEXT);
 
 CREATE TABLE settings (
   key        TEXT PRIMARY KEY,
@@ -273,6 +276,8 @@ CREATE INDEX idx_columns_project ON columns(project_id, position);
 
 CREATE INDEX idx_forge_task_logs_task ON forge_task_logs(task_id, created_at);
 
+CREATE INDEX idx_forge_tasks_created ON forge_tasks(created_at DESC, id DESC);
+
 CREATE INDEX idx_forge_tasks_status ON forge_tasks(status, created_at);
 
 CREATE INDEX idx_machines_last_seen ON machines(last_seen);
@@ -285,19 +290,25 @@ CREATE INDEX idx_runtime_events_machine ON runtime_events(machine_id, status);
 
 CREATE INDEX idx_runtime_events_status ON runtime_events(status, created_at);
 
-CREATE INDEX idx_runtime_listeners_last_seen ON runtime_listeners(last_seen);
-
 CREATE INDEX idx_runtimes_machine ON runtimes(machine_id);
 
 CREATE INDEX idx_sources_document ON document_sources(document_type, document_id);
 
 CREATE INDEX idx_swimlanes_proj  ON swimlanes(project_id, position);
 
+CREATE UNIQUE INDEX idx_task_github_issues_issue ON task_github_issues(issue_id);  -- issue → at most one task
+
 CREATE INDEX idx_task_links_from ON task_links(from_task_id);
 
 CREATE INDEX idx_task_links_proj ON task_links(project_id);
 
 CREATE INDEX idx_task_links_to   ON task_links(to_task_id);
+
+CREATE INDEX idx_tasks_board     ON tasks(project_id, column_id, position);
+
+CREATE UNIQUE INDEX idx_tasks_position  ON tasks(column_id, position);      -- fractional-index integrity
+
+CREATE INDEX idx_tasks_swimlane  ON tasks(project_id, swimlane_id);
 
 CREATE INDEX idx_type_options_project ON type_options(project_id, position);
 

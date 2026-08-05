@@ -1,25 +1,44 @@
 import { Database } from "bun:sqlite";
-import { readdirSync, readFileSync } from "node:fs";
+import { readdirSync, readFileSync, chmodSync } from "node:fs";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 
-export function runMigrations(dbPath: string) {
+// import.meta.dir is bun-only; fall back for non-bun runtimes (vitest workers).
+const DEFAULT_MIGRATIONS_DIR = import.meta.dir
+  ? join(import.meta.dir, "../../migrations")
+  : fileURLToPath(new URL("../../migrations", import.meta.url));
+
+export function runMigrations(dbPath: string, migrationsDir = DEFAULT_MIGRATIONS_DIR) {
   const db = new Database(dbPath) as any;
-  
+  try { chmodSync(dbPath, 0o600); } catch {}
+  (db as any).exec("PRAGMA busy_timeout = 5000");
+
   (db as any).run("CREATE TABLE IF NOT EXISTS _migrations (name TEXT PRIMARY KEY, applied_at TEXT DEFAULT (datetime('now')))");
-  
-  const dir = join(import.meta.dir, "../../migrations");
-  const files = readdirSync(dir).filter((f: string) => f.endsWith(".sql")).sort();
+
+  const files = readdirSync(migrationsDir).filter((f: string) => f.endsWith(".sql")).sort();
 
   for (const file of files) {
     const row = (db as any).query("SELECT name FROM _migrations WHERE name = ?").get(file) as { name: string } | null;
     if (row) continue;
 
-    const sql = readFileSync(join(dir, file), "utf-8");
-    (db as any).run(sql);
-    (db as any).run("INSERT INTO _migrations (name) VALUES (?)", [file]);
+    const sql = readFileSync(join(migrationsDir, file), "utf-8");
+    // Atomic per-file apply: migration + its record in one transaction. A
+    // failed migration leaves no partial schema and no _migrations row.
+    (db as any).exec("BEGIN");
+    try {
+      (db as any).run(sql);
+      (db as any).run("INSERT INTO _migrations (name) VALUES (?)", [file]);
+      (db as any).exec("COMMIT");
+    } catch (e) {
+      (db as any).exec("ROLLBACK");
+      throw e;
+    }
     console.log(`Applied migration: ${file}`);
   }
-  
+
+  // Populate sqlite_stat1 so the planner picks indexes instead of coin-flipping.
+  (db as any).exec("ANALYZE");
+
   db.close();
 }
 

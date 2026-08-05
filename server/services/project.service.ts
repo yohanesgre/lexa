@@ -3,7 +3,7 @@ import { ProjectRepo } from "../repos/project.repo";
 import { ColumnRepo } from "../repos/column.repo";
 import { SwimlaneRepo } from "../repos/swimlane.repo";
 import { FieldConfigRepo } from "../repos/field-config.repo";
-import { ConstraintViolation, DbError, RowNotFound } from "../db/database";
+import { ConstraintViolation, DbError, RowNotFound, Sqlite, withTx } from "../db/database";
 import { ProjectNotFound, SlugTaken } from "../api/errors";
 import type { Project } from "../../shared/types";
 
@@ -22,6 +22,7 @@ export class ProjectService extends Effect.Service<ProjectService>()("Lexa/Proje
     const columnRepo = yield* ColumnRepo;
     const swimlaneRepo = yield* SwimlaneRepo;
     const fieldConfigRepo = yield* FieldConfigRepo;
+    const db = yield* Sqlite;
 
     const slugify = (name: string): string =>
       name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 60) || "project";
@@ -30,34 +31,38 @@ export class ProjectService extends Effect.Service<ProjectService>()("Lexa/Proje
       create: (input: { name: string; slug?: string; description?: string; githubRepo?: string | null }): Effect.Effect<Project, SlugTaken | DbError | RowNotFound> => {
         const slug = input.slug || slugify(input.name);
         const id = crypto.randomUUID();
-        return repo
-          .create({ id, name: input.name, slug, description: input.description ?? "", githubRepo: input.githubRepo ?? null })
-          .pipe(
-            Effect.flatMap(() => repo.findBySlug(slug)),
-            Effect.tap((project) =>
-              Effect.all([
-                ...DEFAULT_COLUMNS.map((col) =>
-                  columnRepo.create({
+        return withTx(
+          db,
+          repo
+            .create({ id, name: input.name, slug, description: input.description ?? "", githubRepo: input.githubRepo ?? null })
+            .pipe(
+              Effect.flatMap(() => repo.findBySlug(slug)),
+              Effect.tap((project) =>
+                Effect.all([
+                  ...DEFAULT_COLUMNS.map((col) =>
+                    columnRepo.create({
+                      id: crypto.randomUUID(),
+                      projectId: project.id,
+                      name: col.name,
+                      position: col.position,
+                      color: col.color,
+                    })
+                  ),
+                  swimlaneRepo.create({
                     id: crypto.randomUUID(),
                     projectId: project.id,
-                    name: col.name,
-                    position: col.position,
-                    color: col.color,
-                  })
-                ),
-                swimlaneRepo.create({
-                  id: crypto.randomUUID(),
-                  projectId: project.id,
-                  name: "Default",
-                  position: 0,
-                }),
-                fieldConfigRepo.seedDefaults(project.id),
-              ])
-            ),
-            Effect.tap((project) => Effect.logInfo(`[Project] Created ${project.id} slug=${project.slug}`)),
-            Effect.catchTag("ConstraintViolation", () => new SlugTaken({ slug })),
-            Effect.catchTag("RowNotFound", () => new SlugTaken({ slug }))
-          );
+                    name: "Default",
+                    position: 0,
+                  }),
+                  fieldConfigRepo.seedDefaults(project.id),
+                ])
+              )
+            )
+        ).pipe(
+          Effect.tap((project) => Effect.logInfo(`[Project] Created ${project.id} slug=${project.slug}`)),
+          Effect.catchTag("ConstraintViolation", () => new SlugTaken({ slug })),
+          Effect.catchTag("RowNotFound", () => new SlugTaken({ slug }))
+        );
       },
 
       findBySlug: (slug: string): Effect.Effect<Project, ProjectNotFound | DbError> =>
