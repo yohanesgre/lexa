@@ -7,7 +7,7 @@ import { createApiHandler, createWebhookHandler, createWebhookVerifier } from ".
 import { createMcpHandler } from "./mcp/server";
 import { findOrCreateUser, findOrCreateUserByIdentity, adminEmails } from "./api/auth";
 import { verifyAccessAssertion } from "./api/access-auth";
-import { resolveApiKeyIdentity } from "./api/auth-key";
+import { resolveApiKeyIdentity, constantTimeTokenEqual } from "./api/auth-key";
 import { getSetting, setSetting } from "./db/settings";
 import { createRateLimiter, isPrivateIp } from "./api/rate-limit";
 import { MAX_API_BODY } from "./api/limits";
@@ -52,6 +52,13 @@ if (!process.env.LXK_ACCESS_AUD) {
   console.warn("Access JWT verification disabled (LXK_ACCESS_AUD unset) — Cf-Access-* headers trusted as-is");
 }
 
+// Shared connection for the entry-side auth block (belt-and-braces while the
+// middleware owns auth; retired once entry's block is deleted).
+const apiAuthDb = new Database(DATABASE_PATH);
+apiAuthDb.exec("PRAGMA journal_mode = WAL");
+apiAuthDb.exec("PRAGMA foreign_keys = ON");
+apiAuthDb.exec("PRAGMA busy_timeout = 5000");
+
 const apiHandlerRaw = createApiHandler(DATABASE_PATH) as unknown as { handler?: (req: Request) => Promise<Response> } | ((req: Request) => Promise<Response>);
 const apiHandler: (req: Request) => Promise<Response> = typeof apiHandlerRaw === "function" ? apiHandlerRaw : apiHandlerRaw.handler!;
 const mcpHandler = createMcpHandler(DATABASE_PATH);
@@ -95,15 +102,6 @@ async function readBodyWithLimit(req: Request, maxBytes: number): Promise<{ ok: 
     offset += chunk.byteLength;
   }
   return { ok: true, bytes: out.buffer as ArrayBuffer };
-}
-
-function constantTimeTokenEqual(a: string, b: string): boolean {
-  const hexA = createHash("sha256").update(a).digest("hex");
-  const hexB = createHash("sha256").update(b).digest("hex");
-  const bufA = Buffer.from(hexA, "hex");
-  const bufB = Buffer.from(hexB, "hex");
-  if (bufA.length !== bufB.length) return false;
-  return timingSafeEqual(bufA, bufB);
 }
 
 // Instances configured entirely via env (LXK_ADMIN_EMAILS + a key, no web
@@ -208,7 +206,7 @@ const server: Server<unknown> = Bun.serve({
         : false;
       if (!isHealth && !isSetup && !daemonTokenOk) {
         const authHeader = req.headers.get("Authorization") ?? "";
-        const identity = resolveApiKeyIdentity(authHeader, DATABASE_PATH);
+        const identity = resolveApiKeyIdentity(authHeader, apiAuthDb);
         if (!identity) {
           const reason = authHeader.startsWith("Bearer ") ? "unknown key" : "missing or malformed key";
           console.warn(`[Auth] denied path=${path} reason=${reason}`);

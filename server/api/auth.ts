@@ -4,11 +4,11 @@ import { getSetting } from "../db/settings";
 
 // Caller identity behind a validated API key, resolved once per request by
 // the API middleware and consumed by admin-gated handlers.
-export interface AuthIdentity {
+export interface AuthIdentityShape {
   userId: string | null;
   role: "admin" | "member";
 }
-export class AuthIdentity extends Context.Tag("Lexa/AuthIdentity")<AuthIdentity, AuthIdentity>() {}
+export class AuthIdentity extends Context.Tag("Lexa/AuthIdentity")<AuthIdentity, AuthIdentityShape>() {}
 
 export interface LexaUser {
   id: string;
