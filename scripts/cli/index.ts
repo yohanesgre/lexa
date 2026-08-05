@@ -15,10 +15,10 @@
  * `lexa-cli login` without flags prompts interactively (TTY only); scripts
  * always pass --url/--key or env vars.
  */
-import { LexaClient } from "./api";
+import { LexaClient, ApiError } from "./api";
 import { loadConfig, saveConfig, clearConfig, type CliConfig } from "./config";
 import { cmdDeploy } from "./deploy";
-import { COMPILED, getOrCreateMachineId } from "./machine";
+import { COMPILED, getOrCreateMachineId, getOrCreateMachineSecret, saveMachineSecret } from "./machine";
 import { hostname as osHostname } from "node:os";
 import { machineInstall, machineStart, machineStop, machineRestart, machineStatus, machineLogs, listMachines, listRuntimes, machineListen, workspaceList, workspaceSync } from "./machine";
 
@@ -174,14 +174,20 @@ async function cmdLogin(flags: Record<string, string | boolean>): Promise<void> 
   console.log(`  Logged in to ${url}`);
   // Bind the machine: registration creates the machines row (last_seen NULL
   // = "bound, not listening") so it shows up in Settings before the
-  // listener ever runs. Non-fatal — login must succeed even if the server
-  // hiccups; the listener re-registers on its first heartbeat anyway.
+  // listener ever runs. The server mints a per-machine secret on first
+  // registration (returned once) — persisted for the listener's claims.
+  // Non-fatal — login must succeed even if the server hiccups.
   try {
     const machineId = getOrCreateMachineId();
-    await client.registerMachine({ id: machineId, hostname: osHostname() });
+    const registered = await client.registerMachine({ id: machineId, hostname: osHostname(), secret: getOrCreateMachineSecret() });
+    if (registered.secret) saveMachineSecret(registered.secret);
     console.log(`  Registered machine ${machineId} — run \`lexa-cli machine listen\` to go online`);
-  } catch {
-    console.log("  (machine registration skipped — run `lexa-cli machine listen` to register)");
+  } catch (e) {
+    if (e instanceof ApiError && e.code === "MACHINE_ID_TAKEN") {
+      console.log(`  ${e.message}`);
+    } else {
+      console.log("  (machine registration skipped — run `lexa-cli machine listen` to register)");
+    }
   }
 }
 
