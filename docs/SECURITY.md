@@ -57,7 +57,7 @@ Fixed-window per-IP limiter (600 req / 10 min, constants in `server/api/rate-lim
 - HMAC-SHA-256 over the RAW body (`server/github/crypto.ts`), constant-time hex compare — verified **before** any JSON parsing; failure → 401, no processing
 - `X-GitHub-Delivery` dedup via `webhook_events` (INSERT only after successful processing — a mid-processing crash leaves the delivery unrecorded so GitHub's retry reprocesses)
 - Acks 200 immediately, processing runs fire-and-forget in the background (Bun has no `waitUntil`)
-- Body size: GitHub caps webhook payloads; no explicit cap implemented (acceptable for the trusted App channel — HMAC gates every request)
+- Body size: webhook bodies are stream-capped at **1 MB** in `server/entry.ts` (413 on exceed; GitHub retries the delivery). Large pushes (many commits/messages) can exceed the cap — revisit if a sync wedge shows up.
 
 ### 10. Setup wizard endpoints unauthenticated after first run
 
