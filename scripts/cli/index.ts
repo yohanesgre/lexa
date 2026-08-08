@@ -488,6 +488,46 @@ Deploy (Docker + cloudflared tunnel + Access):
 Env fallbacks: LEXA_URL, LEXA_API_KEY. Flags override saved login.
 `;
 
+const GROUP_HELP: Record<string, string> = {
+  project: `Projects:
+  project list [--json]`,
+  task: `Tasks:
+  task list    --project <slug> [--limit N] [--json]
+  task create  --project <slug> --column <name> --swimlane <name> --title <t>
+  task get     <id> --project <slug> [--json]
+  task move    <id> --project <slug> --column <name> [--swimlane <name>]
+  task update  <id> --project <slug> [--title <t>] [--priority <p>] [--type <t>]`,
+  wiki: `Wiki:
+  wiki list --project <slug> [--json]
+  wiki get  <pageSlug> --project <slug> [--json]`,
+  runtime: `Runtimes (Forge daemon):
+  runtime list                                   server-side daemon view
+  runtime delete <id>                            remove a runtime (daemon + env
+                                                  cleaned up by its machine's
+                                                  listener on next heartbeat)`,
+  machine: `Machine listener:
+  machine list                                   registered machine view
+  machine install                                ensure listener + start (systemd)
+                                                  --no-systemd: run listener yourself
+  machine listen                                 run the machine listener (foreground)
+  machine start | stop | restart                 systemctl --user lexa-forge-listen
+  machine status                                 systemd state
+  machine logs                                   journalctl --user -u lexa-forge-listen -f
+  machine delete <id>                            remove a machine + its runtimes
+                                                  (reappears if still listening — stop
+                                                  the listener first for permanent removal)
+
+Forge workspaces (local machine view):
+  machine workspace list                         per-project dirs under ~/.lexa/projects/
+  machine workspace sync                         re-index projects from the server + provision`,
+};
+
+function usage(cmd: string, sub: string): never {
+  if (sub !== "") console.error(`  Unknown: ${cmd} ${sub}`);
+  console.log(GROUP_HELP[cmd] ?? HELP);
+  process.exit(sub === "" ? 0 : 1);
+}
+
 async function main(): Promise<void> {
   const argv = process.argv.slice(2);
   if (argv.length === 0 || argv[0] === "--help" || argv[0] === "-h" || argv[0] === "help") {
@@ -507,7 +547,7 @@ async function main(): Promise<void> {
 
     case "project":
       if (sub === "list") await cmdProjectList(flags);
-      else { console.error("  Unknown: project " + sub); process.exit(1); }
+      else usage("project", sub);
       break;
 
     case "task":
@@ -517,7 +557,7 @@ async function main(): Promise<void> {
         case "get": await cmdTaskGet(flags, rest); break;
         case "move": await cmdTaskMove(flags, rest); break;
         case "update": await cmdTaskUpdate(flags, rest); break;
-        default: console.error("  Unknown: task " + sub); process.exit(1);
+        default: usage("task", sub);
       }
       break;
 
@@ -525,7 +565,7 @@ async function main(): Promise<void> {
       switch (sub) {
         case "list": await cmdWikiList(flags); break;
         case "get": await cmdWikiGet(flags, rest); break;
-        default: console.error("  Unknown: wiki " + sub); process.exit(1);
+        default: usage("wiki", sub);
       }
       break;
 
@@ -533,7 +573,7 @@ async function main(): Promise<void> {
       switch (sub) {
         case "list": { const { config } = requireClient(flags); await listRuntimes(config); break; }
         case "delete": { await cmdRuntimeDelete(flags, rest); break; }
-        default: console.error("  Unknown: runtime " + sub); process.exit(1);
+        default: usage("runtime", sub);
       }
       break;
 
@@ -552,10 +592,10 @@ async function main(): Promise<void> {
           switch (rest[0]) {
             case "list": workspaceList(); break;
             case "sync": { const { config } = requireClient(flags); await workspaceSync(config); break; }
-            default: console.error("  Unknown: machine workspace " + (rest[0] ?? "")); process.exit(1);
+            default: usage("machine", rest[0] === undefined ? "" : `workspace ${rest[0]}`);
           }
           break;
-        default: console.error("  Unknown: machine " + sub); process.exit(1);
+        default: usage("machine", sub);
       }
       break;
 
