@@ -98,7 +98,7 @@ function BoardPage() {
   };
 
   const handleLinkGithub = async (id: string, repo: string) => {
-    const task = await linkGithubIssue.mutateAsync({ id, repo });
+    const { data: task } = await linkGithubIssue.mutateAsync({ id, repo });
     const linked = task.githubs.find((g) => g.repo === repo);
     return linked ? { repo: linked.repo, issueNumber: linked.issueNumber } : null;
   };
