@@ -7,7 +7,7 @@ import { LoggerLayer } from "../logging/logger";
 import { Sqlite, withTx } from "../db/database";
 import { Database } from "bun:sqlite";
 import { getSetting, setSetting } from "../db/settings";
-import { ProjectNotFound, WikiPageNotFound, MachineNotFound, Forbidden, SetupLocked, TaskNotFound, errorResponse, errorToStatus } from "./errors";
+import { ProjectNotFound, WikiPageNotFound, MachineNotFound, Forbidden, SetupLocked, TaskNotFound, InvalidName, NoUserContext, errorResponse, errorToStatus } from "./errors";
 import { AuthIdentity, actorFromIdentity } from "./auth";
 import { createApiMiddleware } from "./middleware";
 import { clampLimit, nextCursor } from "../../shared/pagination";
@@ -1050,6 +1050,16 @@ const adminGroup = HttpApiGroup.make("admin")
   .add(HttpApiEndpoint.del("removeUserProjectRole", "/admin/users/:id/projects/:projectId")
     .setPath(Schema.Struct({ id: Schema.String, projectId: Schema.String })).addSuccess(Schema.Undefined, { status: 204 }));
 
+// Self-service — no admin gate: the caller key names the user via x-lxk-user,
+// and the acting user's row is updated (see meLive). Agents with bare keys get
+// NO_USER_CONTEXT: they have no profile to edit.
+const UpdateMyNameInput = Schema.Struct({ name: Schema.String });
+
+const meGroup = HttpApiGroup.make("me")
+  .add(HttpApiEndpoint.patch("updateMe", "/me")
+    .setPayload(UpdateMyNameInput)
+    .addSuccess(UserSchema));
+
 export const LexaApi = HttpApi.make("lexa")
   .add(healthGroup)
   .add(setupGroup)
@@ -1065,6 +1075,7 @@ export const LexaApi = HttpApi.make("lexa")
   .add(dashboardGroup)
   .add(apiKeysGroup)
   .add(adminGroup)
+  .add(meGroup)
   .prefix("/api");
 
 const apiLayer = HttpApiBuilder.api(LexaApi);
@@ -2322,6 +2333,28 @@ const adminLive = HttpApiBuilder.group(LexaApi, "admin", (handlers) =>
     )
 );
 
+// Self-service profile: the browser's x-lxk-user header (resolved by the
+// middleware into AuthIdentity.userId) names the acting user. Bare API keys
+// have no user context — agents have no profile to edit.
+const meLive = HttpApiBuilder.group(LexaApi, "me", (handlers) =>
+  handlers
+    .handle("updateMe", (req) =>
+      respond(Effect.gen(function* () {
+        const identity = yield* AuthIdentity;
+        if (!identity.userId) {
+          return yield* Effect.fail(new NoUserContext());
+        }
+        const name = req.payload.name.trim();
+        if (name.length === 0 || name.length > 80) {
+          return yield* Effect.fail(new InvalidName({ reason: "Name must be 1-80 characters" }));
+        }
+        const service = yield* UserService;
+        const user = yield* service.updateName(identity.userId, name);
+        return { id: user.id, email: user.email, name: user.name, role: user.role, createdAt: user.created_at, lastSeen: user.last_seen };
+      }))
+    )
+);
+
 function formatProject(p: { id: string; name: string; slug: string; description: string; githubRepo: string | null; createdAt: string; updatedAt: string }) {
   return p as any;
 }
@@ -2373,7 +2406,7 @@ export function createApiHandler(dbPath: string) {
 
   const serviceLayer = buildServiceLayer();
   const handlerLayer = Layer.mergeAll(
-    healthLive, setupLive, projectsLive, columnsLive, swimlanesLive, fieldConfigLive, forgeLive, taskLinksLive, tasksLive, boardLive, wikiLive, apiKeysLive, adminLive, dashboardLive,
+    healthLive, setupLive, projectsLive, columnsLive, swimlanesLive, fieldConfigLive, forgeLive, taskLinksLive, tasksLive, boardLive, wikiLive, apiKeysLive, adminLive, meLive, dashboardLive,
   ).pipe(Layer.provide(Layer.provide(serviceLayer, Layer.mergeAll(dbLayer, LoggerLayer))), Layer.provide(dbLayer));
   const merged = Layer.mergeAll(apiLayer, handlerLayer);
   const finalLayer = Layer.provide(merged, createApiMiddleware(db, dbPath));

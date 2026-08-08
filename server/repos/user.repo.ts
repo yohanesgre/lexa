@@ -24,6 +24,12 @@ export class UserRepo extends Effect.Service<UserRepo>()("Lexa/UserRepo", {
           yield* run(db, `UPDATE users SET role = ? WHERE id = ?`, role, id);
         }),
 
+      updateName: (id: string, name: string): Effect.Effect<void, DbError | RowNotFound | ConstraintViolation> =>
+        Effect.gen(function* () {
+          yield* queryFirst<{ id: string }>(db, `SELECT id FROM users WHERE id = ?`, id);
+          yield* run(db, `UPDATE users SET name = ? WHERE id = ?`, name, id);
+        }),
+
       // Atomic last-admin guard: the COUNT and the role write are one
       // statement — returns 0 when the demote would leave no admin.
       demoteIfNotLastAdmin: (id: string): Effect.Effect<number, ConstraintViolation | DbError> =>

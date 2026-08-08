@@ -45,6 +45,8 @@ export class CommentNotFound extends Data.TaggedError("CommentNotFound")<{ id: n
 export class CommentEditForbidden extends Data.TaggedError("CommentEditForbidden")<{ id: number }> {}
 export class CommentDeleteForbidden extends Data.TaggedError("CommentDeleteForbidden")<{ id: number }> {}
 export class CommentInvalid extends Data.TaggedError("CommentInvalid")<{ reason: string }> {}
+export class InvalidName extends Data.TaggedError("InvalidName")<{ reason: string }> {}
+export class NoUserContext extends Data.TaggedError("NoUserContext")<{}> {}
 export { ProjectAccessDenied } from "../services/user-project-role.service";
 
 export const errorCodeMap: Record<string, string> = {
@@ -88,6 +90,8 @@ export const errorCodeMap: Record<string, string> = {
   CommentEditForbidden: "COMMENT_EDIT_FORBIDDEN",
   CommentDeleteForbidden: "COMMENT_DELETE_FORBIDDEN",
   CommentInvalid: "COMMENT_INVALID",
+  InvalidName: "INVALID_NAME",
+  NoUserContext: "NO_USER_CONTEXT",
   ProjectAccessDenied: "FORBIDDEN",
   UserNotFound: "USER_NOT_FOUND",
   CannotDeleteSelf: "CANNOT_DELETE_SELF",
@@ -150,11 +154,13 @@ export function errorToStatus(error: { _tag: string }): number {
     case "ApiKeyNameEmpty":
     case "SourceUnreachable":
     case "CommentInvalid":
+    case "InvalidName":
       return 422;
     case "InvalidKey":
     case "MissingAuth":
       return 401;
     case "GithubWebhookError":
+    case "NoUserContext":
       return 400;
     case "GithubApiError":
     case "SourceFetchError":
@@ -249,6 +255,10 @@ export function errorMessage(error: { _tag: string } & Record<string, unknown>):
       return "You can only delete your own comments (or an admin's)";
     case "CommentInvalid":
       return String(error.reason ?? "Invalid comment");
+    case "InvalidName":
+      return String(error.reason ?? "Invalid name");
+    case "NoUserContext":
+      return "No user context — this endpoint requires the x-lxk-user header";
     case "CannotDeleteSelf":
       return "Cannot modify your own account";
     case "LastAdminDemote":
