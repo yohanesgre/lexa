@@ -183,6 +183,35 @@ function isAgentCli(value: string | undefined): value is "opencode" | "hermes" |
   return value === "opencode" || value === "hermes" || value === "command-code";
 }
 
+// Daemons (and every agent run beneath them) must not inherit the listener
+// shell's secrets — a dev loop with `set -a; . ./.env` would leak them into
+// every spawned agent env, and an inherited LXK_FORGE_DAEMON_TOKEN masks
+// revoked runtime keys (the daemon would authenticate with the stale
+// inherited value instead of its env-file key, defeating exit-code-3
+// detection). The listener itself still reads its own env; only the spawned
+// daemon env is scrubbed. Blocklist wins over allowlist.
+const ALLOWED_ENV_KEYS = ["PATH", "HOME", "LANG", "TERM", "TZ", "PWD", "SHELL", "USER", "LOGNAME"];
+const ALLOWED_ENV_PREFIXES = ["LC_", "XDG_", "BUN_"];
+const SECRET_ENV_PREFIXES = ["LXK_", "GITHUB_", "CF_", "CLOUDFLARE_", "AWS_", "AZURE_", "GOOGLE_"];
+const SECRET_ENV_MARKERS = ["SECRET", "TOKEN", "PRIVATE_KEY", "API_KEY", "PASSWORD"];
+
+function isSecretEnvKey(key: string): boolean {
+  const upper = key.toUpperCase();
+  return SECRET_ENV_PREFIXES.some((prefix) => key.startsWith(prefix))
+    || SECRET_ENV_MARKERS.some((marker) => upper.includes(marker));
+}
+
+function scrubDaemonEnv(env: Record<string, string | undefined>): Record<string, string | undefined> {
+  const out: Record<string, string | undefined> = {};
+  for (const [key, value] of Object.entries(env)) {
+    if (isSecretEnvKey(key)) continue;
+    if (ALLOWED_ENV_KEYS.includes(key) || ALLOWED_ENV_PREFIXES.some((prefix) => key.startsWith(prefix))) {
+      out[key] = value;
+    }
+  }
+  return out;
+}
+
 // Machine identity: `hostname-<unique>` so machine ids are human-readable in
 // the Settings machines list (existing UUID ids keep working — opaque to the
 // server). Persisted in ~/.lexa/machine-id; never regenerated once written.
@@ -522,7 +551,7 @@ function spawnRuntime(
   stopping.delete(runtime.runtimeId);
   const child = spawn("bun", ["run", join(INSTALL_DIR, "daemon.js")], {
     cwd: INSTALL_DIR,
-    env: { ...process.env, ...runtime.env },
+    env: { ...scrubDaemonEnv(process.env), ...runtime.env },
     stdio: "inherit",
     detached: true,
   });
@@ -700,6 +729,9 @@ export async function machineListen(config: CliConfig): Promise<void> {
   clis = await probeClis().catch(() => []);
   if (clis.length > 0) {
     console.log(`  CLIs: ${clis.map((c) => `${c.provider} ${c.version}`).join(", ")}`);
+  }
+  if (Object.keys(process.env).some(isSecretEnvKey)) {
+    console.warn("  [listen] WARNING: started with .env exported — server secrets are in this shell. Daemons will NOT inherit them (scrubbed at spawn); put runtime credentials in the runtime env file (Setup runtime wizard).");
   }
   console.log(`  Lexa Forge machine listener — ${machineId}`);
   console.log(`  Polling ${config.url} every ${EVENT_POLL_MS}ms. Press Ctrl-C to stop.`);
