@@ -1,5 +1,6 @@
 import { type Token, type Tokens, marked } from "marked";
 import type { TipTapDoc } from "./types";
+import { safeHref } from "./safe-href";
 
 type TipTapMark = { type: string; attrs?: Record<string, unknown> };
 type TipTapNode = {
@@ -54,7 +55,12 @@ function flattenInline(tokens: Token[], parentMarks: TipTapMark[] = []): TipTapN
       }
       case "link": {
         flush();
-        const attrs: Record<string, unknown> = { href: t.href };
+        // Scheme allowlist at the authoring boundary: disallowed hrefs are
+        // dropped entirely — a stored javascript: href would execute in any
+        // viewer's session (see shared/safe-href.ts).
+        const href = safeHref(t.href);
+        const attrs: Record<string, unknown> = {};
+        if (href) attrs.href = href;
         if (t.title) attrs.title = t.title;
         out.push(...flattenInline(t.tokens ?? [], [...parentMarks, { type: "link", attrs }]));
         break;
