@@ -27,6 +27,7 @@ function TasksPage() {
   const [columnId, setColumnId] = useState("");
   const [typeId, setTypeId] = useState("");
   const [priorityId, setPriorityId] = useState("");
+  const [assignee, setAssignee] = useState("");
   const [sortKey, setSortKey] = useState<SortKey>("board");
 
   const { board, tasks, isLoading, error, refetch } = useTasks(slug, showArchived);
@@ -34,6 +35,7 @@ function TasksPage() {
   const columns = boardQuery.data?.columns ?? [];
   const swimlanes = boardQuery.data?.swimlanes ?? [];
   const fieldConfig = boardQuery.data?.fieldConfig;
+  const assigneeOptions = useMemo(() => [...new Set((board?.tasks ?? []).flatMap((t) => t.assignees))].sort(), [board]);
 
   const moveTask = useMoveTask(slug);
   const updateTask = useUpdateTask(slug);
@@ -43,7 +45,7 @@ function TasksPage() {
   const linkGithubIssue = useLinkGithubIssue(slug);
   const unlinkGithubIssue = useUnlinkGithubIssue(slug);
 
-  const hasActiveFilters = query !== "" || columnId !== "" || typeId !== "" || priorityId !== "";
+  const hasActiveFilters = query !== "" || columnId !== "" || typeId !== "" || priorityId !== "" || assignee !== "";
 
   const filtered = useMemo(() => {
     let list = tasks ?? [];
@@ -52,6 +54,8 @@ function TasksPage() {
     if (columnId) list = list.filter((t) => t.columnId === columnId);
     if (typeId) list = list.filter((t) => t.typeId === typeId);
     if (priorityId) list = list.filter((t) => t.priorityId === priorityId);
+    if (assignee) list = list.filter((t) => t.assignees.includes(assignee));
+    if (showArchived) list = list.filter((t) => t.archivedAt !== null);
     const priorityPos = new Map((fieldConfig?.priorities ?? []).map((o) => [o.id, o.position]));
     if (sortKey === "priority") {
       list = [...list].sort((a, b) => (priorityPos.get(a.priorityId) ?? 999) - (priorityPos.get(b.priorityId) ?? 999));
@@ -59,13 +63,14 @@ function TasksPage() {
       list = [...list].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
     }
     return list;
-  }, [tasks, fieldConfig, query, columnId, typeId, priorityId, sortKey]);
+  }, [tasks, fieldConfig, query, columnId, typeId, priorityId, assignee, showArchived, sortKey]);
 
   const clearFilters = () => {
     setQuery("");
     setColumnId("");
     setTypeId("");
     setPriorityId("");
+    setAssignee("");
   };
 
   const selectedTaskId = search.task ?? null;
@@ -161,7 +166,7 @@ function TasksPage() {
           <div>
             <h1 className="tasks-title">Tasks</h1>
             <div className="tasks-sub">
-              {board.project.name} · {board.tasks.length} total
+              {board.project.name} · {board.tasks.filter((t) => t.archivedAt === null).length} total
             </div>
           </div>
         </div>
@@ -190,6 +195,12 @@ function TasksPage() {
           <option value="">All priorities</option>
           {(fieldConfig?.priorities ?? []).map((o) => (
             <option key={o.id} value={o.id}>{o.label}</option>
+          ))}
+        </select>
+        <select className="tasks-select" value={assignee} onChange={(e) => setAssignee(e.target.value)}>
+          <option value="">All assignees</option>
+          {assigneeOptions.map((name) => (
+            <option key={name} value={name}>{name}</option>
           ))}
         </select>
         <select className="tasks-select" value={sortKey} onChange={(e) => setSortKey(e.target.value as SortKey)}>

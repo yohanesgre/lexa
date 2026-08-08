@@ -99,6 +99,7 @@ export interface TaskListItem {
   columnId: string;
   columnName: string;
   swimlaneName: string;
+  assignees: string[];
   githubNumber: number | null;
   archivedAt: string | null;
   createdAt: string;
@@ -127,6 +128,7 @@ export function deriveTaskList(board: Board): TaskListItem[] {
       columnId: t.columnId,
       columnName: columnName.get(t.columnId) ?? "Unknown column",
       swimlaneName: swimlaneName.get(t.swimlaneId) ?? "Unknown swimlane",
+      assignees: t.assignees,
       githubNumber: t.githubs[0]?.issueNumber ?? null,
       archivedAt: t.archivedAt,
       createdAt: t.createdAt,

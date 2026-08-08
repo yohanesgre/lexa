@@ -4009,6 +4009,7 @@
 
   .tasks-select {
     height: 28px;
+    max-width: 140px;
     padding: 0 8px;
     background: var(--lx-surface-input);
     border: 1px solid var(--lx-border-default);
