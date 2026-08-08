@@ -938,7 +938,7 @@ export function useAddSource(slug: string, documentType: "task" | "wiki", docume
   const toast = useToast();
   return useMutation({
     mutationFn: (input: { kind: "wiki" | "external"; ref: string }) => api.addSource(slug, documentType, documentId, input),
-    onSuccess: (source) => {
+    onSuccess: ({ data: source, activity }) => {
       qc.setQueryData<DocumentSource[]>(["sources", slug, documentType, documentId], (old) => [...(old ?? []), source]);
       toast.push("success", "Source added");
     },
@@ -978,7 +978,7 @@ export function useAddTaskLink(slug: string, taskId: string) {
   const toast = useToast();
   return useMutation({
     mutationFn: (input: { toTaskId: string; relation: "subtask_of" | "blocked_by" | "related_to" }) => api.addTaskLink(slug, taskId, input),
-    onSuccess: (link) => {
+    onSuccess: ({ data: link, activity }) => {
       qc.setQueryData<TaskLink[]>(["task-links", slug, taskId], (old) => [...(old ?? []), link]);
       // Board link maps (subtasks/blocked-by) derive from board.links.
       for (const archived of [false, true]) {
