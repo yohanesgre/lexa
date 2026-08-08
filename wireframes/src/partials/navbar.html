@@ -88,13 +88,120 @@
         <span class="text-sm weight-500 font-body color-primary">Emberfall</span>
         <svg viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg>
       </button>
+      <!-- Expanded dropdown: rows carry health dot + task count -->
+      <div class="dropdown-menu project-switcher-menu">
+        <div class="dropdown-label">Projects</div>
+        <a class="dropdown-item project-switcher-row active" href="dashboard.html" style="text-decoration:none;">
+          <span class="health-dot health-dot-exceeded"></span>
+          <span class="project-switcher-row-info">
+            <span class="project-switcher-row-name">Emberfall</span>
+            <span class="project-switcher-row-desc">emberfall</span>
+          </span>
+          <span class="project-switcher-row-count">042</span>
+        </a>
+        <a class="dropdown-item project-switcher-row" href="dashboard.html" style="text-decoration:none;">
+          <span class="health-dot health-dot-ok"></span>
+          <span class="project-switcher-row-info">
+            <span class="project-switcher-row-name">Void Drifter</span>
+            <span class="project-switcher-row-desc">void-drifter</span>
+          </span>
+          <span class="project-switcher-row-count">128</span>
+        </a>
+        <a class="dropdown-item project-switcher-row" href="dashboard.html" style="text-decoration:none;">
+          <span class="health-dot health-dot-approaching"></span>
+          <span class="project-switcher-row-info">
+            <span class="project-switcher-row-name">Ironbound</span>
+            <span class="project-switcher-row-desc">ironbound</span>
+          </span>
+          <span class="project-switcher-row-count">089</span>
+        </a>
+        <a class="dropdown-item project-switcher-row" href="dashboard.html" style="text-decoration:none;">
+          <span class="health-dot health-dot-ok"></span>
+          <span class="project-switcher-row-info">
+            <span class="project-switcher-row-name">Pale Reach</span>
+            <span class="project-switcher-row-desc">pale-reach</span>
+          </span>
+          <span class="project-switcher-row-count">034</span>
+        </a>
+        <div class="dropdown-separator"></div>
+        <a class="dropdown-item" href="dashboard-new-project.html" style="text-decoration:none;">
+          <INCLUDE _plus-icon.html />
+          <span class="text-sm color-secondary">Create new project</span>
+        </a>
+        <span class="annotation-tag" style="display:block;margin:6px 10px 2px;">Row anatomy: leading health dot (health-dot-ok / approaching / exceeded) · project name (primary) · slug (secondary) · trailing task count (font-micro, right-aligned). Active row = selected project. Data from the shared useDashboard() cache (dot + count). Picking a project from the dashboard stays on <span class="font-mono">/</span>; from board/wiki rows target <span class="font-mono">/$slug</span> (existing routeType logic). "Create new project" → <span class="font-mono">/?new=1</span>. States: loading / empty / overflow unchanged.</span>
+      </div>
     </div>
-    <div style="position:relative;">
-      <button style="display:flex;align-items:center;gap:8px;height:28px;padding:0 8px 0 6px;background:transparent;border:1px solid var(--lx-border-default);border-radius:6px;color:var(--lx-text-primary);cursor:pointer;">
-        <div class="avatar" style="width:20px;height:20px;font-size:10px;">Y</div>
-        <span class="text-sm weight-500" style="line-height:1;">Yohanes</span>
-        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="flex-shrink:0;"><path d="M6 9l6 6 6-6"/></svg>
-      </button>
+    <!-- User menu trigger — CLOSED state (default on every page) -->
+    <div style="display:flex;flex-direction:column;align-items:flex-end;gap:0;">
+      <span class="annotation-tag">User menu — closed</span>
+      <div style="position:relative;">
+        <button style="display:flex;align-items:center;gap:8px;height:28px;padding:0 8px 0 6px;background:transparent;border:1px solid var(--lx-border-default);border-radius:6px;color:var(--lx-text-primary);cursor:pointer;">
+          <div class="avatar" style="width:20px;height:20px;font-size:10px;">Y</div>
+          <span class="text-sm weight-500" style="line-height:1;">Yohanes</span>
+          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="flex-shrink:0;"><path d="M6 9l6 6 6-6"/></svg>
+        </button>
+      </div>
+    </div>
+
+    <!-- User menu — OPEN state: click trigger toggles this dropdown -->
+    <div style="display:flex;flex-direction:column;align-items:flex-end;gap:0;">
+      <span class="annotation-tag">State: menu open</span>
+      <div style="position:relative;">
+        <button style="display:flex;align-items:center;gap:8px;height:28px;padding:0 8px 0 6px;background:transparent;border:1px solid var(--lx-border-default);border-radius:6px;color:var(--lx-text-primary);cursor:pointer;">
+          <div class="avatar" style="width:20px;height:20px;font-size:10px;">Y</div>
+          <span class="text-sm weight-500" style="line-height:1;">Yohanes</span>
+          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="flex-shrink:0;"><path d="M6 9l6 6 6-6"/></svg>
+        </button>
+        <div class="dropdown-menu" style="position:absolute;top:calc(100% + 6px);right:0;min-width:180px;z-index:60;">
+          <div class="dropdown-label">Account</div>
+          <div class="dropdown-item">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+            Profile
+          </div>
+          <div class="dropdown-separator"></div>
+          <button type="button" class="dropdown-item danger" style="gap:8px;width:100%;text-align:left;border:none;background:none;font:inherit;padding:0 10px;cursor:pointer;">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9"/></svg>
+            Sign out
+          </button>
+          <span class="annotation-tag" style="display:block;margin:6px 10px 2px;">Click trigger toggles; Esc or outside click closes. Profile opens the identity panel (next state). Sign out → <span class="font-mono">https://&lt;team&gt;.cloudflareaccess.com/cdn-cgi/access/logout</span> with return_to back to app root — hidden entirely when there is no Access identity (local dev / API-key mode, no lxk-user meta).</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Profile panel — OPEN state: panel replaces the menu on the same trigger -->
+    <div style="display:flex;flex-direction:column;align-items:flex-end;gap:0;">
+      <span class="annotation-tag">State: profile panel</span>
+      <div style="position:relative;">
+        <button style="display:flex;align-items:center;gap:8px;height:28px;padding:0 8px 0 6px;background:transparent;border:1px solid var(--lx-border-default);border-radius:6px;color:var(--lx-text-primary);cursor:pointer;">
+          <div class="avatar" style="width:20px;height:20px;font-size:10px;">Y</div>
+          <span class="text-sm weight-500" style="line-height:1;">Yohanes</span>
+          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="flex-shrink:0;"><path d="M6 9l6 6 6-6"/></svg>
+        </button>
+        <div class="dropdown-menu" style="position:absolute;top:calc(100% + 6px);right:0;width:280px;z-index:60;">
+          <span class="annotation-tag" style="display:block;margin:6px 10px;">Panel replaces the menu — same trigger, click Profile in the menu to open.</span>
+          <div style="display:flex;align-items:flex-start;gap:10px;padding:8px 10px 10px;">
+            <div class="avatar" style="width:28px;height:28px;font-size:12px;">Y</div>
+            <div style="flex:1;min-width:0;">
+              <div style="display:flex;align-items:center;gap:6px;">
+                <span class="text-sm weight-600 color-primary" style="line-height:1.2;white-space:nowrap;">Yohanes</span>
+                <span style="background:var(--lx-bg-accent-subtle);color:var(--lx-text-link);padding:2px 8px;border-radius:9999px;font-size:11px;flex-shrink:0;">Admin</span>
+              </div>
+              <div class="text-xs color-muted" style="line-height:1.4;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">yohanes@emberfall.dev</div>
+              <div class="text-xs color-muted" style="line-height:1.4;">Member since Mar 2026</div>
+            </div>
+          </div>
+          <div class="dropdown-separator"></div>
+          <div class="dropdown-label" style="padding:8px 10px 4px;">Display name</div>
+          <div style="padding:0 10px;">
+            <input class="prop-input" value="Yohanes" style="width:100%;" />
+          </div>
+          <div style="display:flex;justify-content:flex-end;gap:8px;padding:8px 10px 6px;">
+            <button class="btn btn-ghost btn-sm">Cancel</button>
+            <button class="btn btn-primary btn-sm">Save</button>
+          </div>
+          <span class="annotation-tag" style="display:block;margin:4px 10px;">Identity comes from the server-injected lxk-user meta (role + createdAt). Save → PATCH /api/me { name }; the header trigger updates from the mutation response.</span>
+        </div>
+      </div>
     </div>
   </div>
 </nav>

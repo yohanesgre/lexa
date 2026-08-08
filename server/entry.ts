@@ -254,16 +254,23 @@ const server: Server<unknown> = Bun.serve({
               // holder). Escape `&` first so the introduced entities survive;
               // the browser decodes them at attribute-parse time, so the
               // client's JSON.parse still sees the original email/name.
-              const userJson = JSON.stringify({ email: user.email, name: user.name })
+              const userJson = JSON.stringify({ email: user.email, name: user.name, role: user.role, createdAt: user.createdAt, lastSeen: user.lastSeen })
                 .replace(/&/g, "&amp;")
                 .replace(/'/g, "&#39;")
                 .replace(/</g, "&lt;");
               return `<meta name="lxk-user" content='${userJson}'>`;
             })()
           : "";
+        // Sign-out target: Cloudflare Access logout. Only emitted when the
+        // team subdomain is configured (LXK_ACCESS_TEAM) — local dev has no
+        // Access session, so the client hides Sign out entirely.
+        const accessTeam = process.env.LXK_ACCESS_TEAM || "";
+        const logoutMeta = accessTeam
+          ? `<meta name="lxk-logout" content="https://${accessTeam.replace(/[^a-zA-Z0-9.-]/g, "")}.cloudflareaccess.com/cdn-cgi/access/logout">`
+          : "";
         const injected = html.replace(
           "<head>",
-          `<head><meta name="lxk-api-key" content="${process.env.LXK_API_KEY}">${userMeta}`
+          `<head><meta name="lxk-api-key" content="${process.env.LXK_API_KEY}">${userMeta}${logoutMeta}`
         );
         // The key-bearing page must never be cached (browser or CDN).
         const injectedHeaders = new Headers(res.headers);

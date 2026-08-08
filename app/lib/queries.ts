@@ -569,6 +569,20 @@ export function useUpdateUserRole() {
   });
 }
 
+export function useUpdateMyName() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (name: string) => api.updateMyName(name),
+    onSuccess: (user) => {
+      qc.setQueryData<MemberUser[]>(["users"], (old) => {
+        if (!old) return old;
+        return old.map((u) => (u.id === user.id ? user : u));
+      });
+      qc.setQueriesData<MemberUser[]>({ queryKey: ["project-members"] }, (old) => old?.map((u) => (u.id === user.id ? user : u)));
+    },
+  });
+}
+
 export function useProjectMembers(slug: string) {
   return useQuery({ queryKey: ["project-members", slug], queryFn: () => api.listProjectMembers(slug).then((r) => r.data) });
 }
