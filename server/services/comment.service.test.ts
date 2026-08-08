@@ -7,8 +7,8 @@ import { Effect, Layer, Context, Either } from "effect";
 import { Database } from "bun:sqlite";
 import { runMigrations } from "../db/migrate";
 import { Sqlite, initSqlite } from "../db/database";
-import { CommentService, CommentInvalid, CommentNotFound, CommentEditForbidden, CommentDeleteForbidden } from "./comment.service";
-import { TaskNotFound } from "../api/errors";
+import { CommentService } from "./comment.service";
+import { CommentInvalid, CommentNotFound, CommentEditForbidden, CommentDeleteForbidden, TaskNotFound } from "../api/errors";
 import type { AuthIdentityShape } from "../api/auth";
 import type { TipTapDoc, Actor } from "../../shared/types";
 

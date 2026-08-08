@@ -41,6 +41,10 @@ export class NoRuntimeOnline extends Data.TaggedError("NoRuntimeOnline")<{}> {}
 export class TaskLinkNotFound extends Data.TaggedError("TaskLinkNotFound")<{ id: string }> {}
 export class TaskLinkCycle extends Data.TaggedError("TaskLinkCycle")<{ message: string }> {}
 export class InvalidTaskLink extends Data.TaggedError("InvalidTaskLink")<{ message: string }> {}
+export class CommentNotFound extends Data.TaggedError("CommentNotFound")<{ id: number }> {}
+export class CommentEditForbidden extends Data.TaggedError("CommentEditForbidden")<{ id: number }> {}
+export class CommentDeleteForbidden extends Data.TaggedError("CommentDeleteForbidden")<{ id: number }> {}
+export class CommentInvalid extends Data.TaggedError("CommentInvalid")<{ reason: string }> {}
 export { ProjectAccessDenied } from "../services/user-project-role.service";
 
 export const errorCodeMap: Record<string, string> = {
@@ -80,6 +84,10 @@ export const errorCodeMap: Record<string, string> = {
   TaskLinkNotFound: "TASK_LINK_NOT_FOUND",
   TaskLinkCycle: "TASK_LINK_CYCLE",
   InvalidTaskLink: "INVALID_TASK_LINK",
+  CommentNotFound: "COMMENT_NOT_FOUND",
+  CommentEditForbidden: "COMMENT_EDIT_FORBIDDEN",
+  CommentDeleteForbidden: "COMMENT_DELETE_FORBIDDEN",
+  CommentInvalid: "COMMENT_INVALID",
   ProjectAccessDenied: "FORBIDDEN",
   UserNotFound: "USER_NOT_FOUND",
   CannotDeleteSelf: "CANNOT_DELETE_SELF",
@@ -101,6 +109,8 @@ export function errorToStatus(error: { _tag: string }): number {
     case "Forbidden":
     case "SetupLocked":
     case "MachineSecretMismatch":
+    case "CommentEditForbidden":
+    case "CommentDeleteForbidden":
       return 403;
     case "TaskNotFound":
     case "ProjectNotFound":
@@ -116,6 +126,7 @@ export function errorToStatus(error: { _tag: string }): number {
     case "MachineNotFound":
     case "ApiKeyNotFound":
     case "TaskLinkNotFound":
+    case "CommentNotFound":
       return 404;
     case "WipLimitExceeded":
     case "SlugTaken":
@@ -138,6 +149,7 @@ export function errorToStatus(error: { _tag: string }): number {
     case "SearchError":
     case "ApiKeyNameEmpty":
     case "SourceUnreachable":
+    case "CommentInvalid":
       return 422;
     case "InvalidKey":
     case "MissingAuth":
@@ -229,6 +241,14 @@ export function errorMessage(error: { _tag: string } & Record<string, unknown>):
       return "Invalid or missing API key";
     case "UserNotFound":
       return "User not found";
+    case "CommentNotFound":
+      return "Comment not found";
+    case "CommentEditForbidden":
+      return "You can only edit your own comments";
+    case "CommentDeleteForbidden":
+      return "You can only delete your own comments (or an admin's)";
+    case "CommentInvalid":
+      return String(error.reason ?? "Invalid comment");
     case "CannotDeleteSelf":
       return "Cannot modify your own account";
     case "LastAdminDemote":
