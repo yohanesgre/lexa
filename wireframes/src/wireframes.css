@@ -2368,8 +2368,8 @@ textarea.prop-input {
 .project-switcher-row {
   height: 40px;
   padding: 0 10px;
-  justify-content: space-between;
-  gap: 12px;
+  justify-content: flex-start;
+  gap: 10px;
 }
 
 .project-switcher-row.active {
@@ -2412,6 +2412,7 @@ textarea.prop-input {
   color: var(--lx-text-muted);
   letter-spacing: 0.02em;
   flex-shrink: 0;
+  margin-left: auto;
 }
 
 /* =========================================================
@@ -2540,6 +2541,75 @@ textarea.prop-input {
 
 .stat-value-danger { color: var(--lx-text-danger); }
 .stat-value-warning { color: var(--lx-text-warning); }
+
+/* ---- Column WIP Breakdown (dashboard project status view) ---- */
+.status-column-row {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--lx-border-subtle);
+}
+.status-column-row:last-child { border-bottom: none; }
+
+.status-column-name {
+  width: 160px;
+  flex-shrink: 0;
+  font-size: 13px;
+  font-weight: 500;
+  font-family: var(--lx-font-body);
+  color: var(--lx-text-primary);
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.status-column-count {
+  width: 88px;
+  flex-shrink: 0;
+  font-family: var(--lx-font-micro);
+  font-size: 11px;
+  line-height: 14px;
+  color: var(--lx-text-muted);
+  letter-spacing: 0.02em;
+}
+
+.status-bar {
+  flex: 1;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--lx-surface-elevated);
+  overflow: hidden;
+}
+
+.status-bar-fill {
+  display: block;
+  height: 100%;
+  border-radius: 2px;
+}
+
+.status-bar-ok { background: var(--lx-text-success); }
+.status-bar-approaching { background: var(--lx-text-warning); }
+.status-bar-exceeded { background: var(--lx-text-danger); }
+
+.status-badge {
+  flex-shrink: 0;
+  min-width: 84px;
+  text-align: center;
+  font-family: var(--lx-font-micro);
+  font-size: 10px;
+  line-height: 14px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid;
+}
+.status-badge-ok { color: var(--lx-text-success); border-color: rgba(134, 238, 172, 0.35); }
+.status-badge-approaching { color: var(--lx-text-warning); border-color: rgba(252, 211, 77, 0.35); }
+.status-badge-exceeded { color: var(--lx-text-danger); border-color: rgba(255, 153, 153, 0.4); }
+.status-badge-empty { color: var(--lx-text-muted); border-color: var(--lx-border-default); }
 
 /* ---- Needs Attention ---- */
 .attention-section {

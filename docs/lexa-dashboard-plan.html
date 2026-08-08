@@ -1,0 +1,351 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Lexa — Dashboard → Project Status Plan</title>
+<style>
+  :root {
+    --bg: #0f1115; --surface: #171a21; --surface-2: #1e222b;
+    --border: #2a2f3a; --border-strong: #3a4150;
+    --text: #e8eaed; --text-2: #a8aeb8; --text-3: #6b7280;
+    --accent: #f0c040; --accent-dim: rgba(240,192,64,.12);
+    --green: #4ade80; --red: #f87171; --blue: #60a5fa; --cyan: #22d3ee;
+    --mono: "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
+    --sans: -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: var(--bg); color: var(--text); font-family: var(--sans); line-height: 1.55; padding-bottom: 80px; }
+  .wrap { max-width: 1100px; margin: 0 auto; padding: 0 24px; }
+
+  header { padding: 48px 0 28px; border-bottom: 1px solid var(--border); }
+  .kicker { font-family: var(--mono); font-size: 11px; letter-spacing: .12em; text-transform: uppercase; color: var(--text-3); }
+  h1 { font-size: 30px; font-weight: 650; letter-spacing: -0.02em; margin: 8px 0 6px; }
+  .lede { color: var(--text-2); max-width: 780px; font-size: 14.5px; }
+  .status { display: inline-block; margin-top: 12px; font-size: 11px; font-family: var(--mono); color: var(--accent); background: var(--accent-dim); border: 1px solid rgba(240,192,64,.3); padding: 3px 10px; border-radius: 999px; }
+
+  nav { position: sticky; top: 0; z-index: 10; background: rgba(15,17,21,.92); backdrop-filter: blur(8px); border-bottom: 1px solid var(--border); padding: 10px 0; }
+  nav .wrap { display: flex; gap: 6px; flex-wrap: wrap; }
+  nav a { font-size: 12px; color: var(--text-2); text-decoration: none; padding: 4px 10px; border: 1px solid transparent; border-radius: 6px; font-family: var(--mono); }
+  nav a:hover { color: var(--text); border-color: var(--border-strong); }
+
+  section { padding: 40px 0; border-bottom: 1px solid var(--border); }
+  section h2 { font-size: 17px; font-weight: 600; letter-spacing: -0.01em; margin-bottom: 4px; }
+  section h2 .num { color: var(--accent); font-family: var(--mono); font-size: 13px; margin-right: 8px; }
+  .sub { color: var(--text-3); font-size: 13px; margin-bottom: 20px; }
+
+  .chips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
+  .chip { font-size: 12px; color: var(--text-2); border: 1px solid var(--border-strong); border-radius: 999px; padding: 4px 12px; background: var(--surface); }
+  .chip b { color: var(--text); font-weight: 550; }
+  .chip .tag { color: var(--accent); font-family: var(--mono); font-size: 10.5px; }
+
+  .tbl { width: 100%; border-collapse: collapse; font-size: 13px; margin-top: 8px; }
+  .tbl th { text-align: left; font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: var(--text-3); font-weight: 550; padding: 6px 10px; border-bottom: 1px solid var(--border-strong); }
+  .tbl td { padding: 7px 10px; border-bottom: 1px solid var(--border); vertical-align: top; color: var(--text-2); }
+  .tbl td:first-child { color: var(--text); }
+  .tbl tr:hover td { background: var(--surface-2); }
+  .mono { font-family: var(--mono); font-size: 12px; }
+  .dim { color: var(--text-3); }
+  .act-new { color: var(--green); } .act-edit { color: var(--cyan); } .act-del { color: var(--red); }
+
+  .diagram { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 22px; margin-top: 12px; overflow-x: auto; }
+  .lanes { display: flex; flex-direction: column; gap: 14px; min-width: 860px; }
+  .lane { display: flex; align-items: stretch; gap: 10px; }
+  .lane .lbl { font-family: var(--mono); font-size: 10px; color: var(--text-3); width: 92px; text-align: right; letter-spacing: .06em; text-transform: uppercase; flex-shrink: 0; padding-top: 8px; }
+  .lane .boxes { display: flex; flex-direction: column; gap: 8px; flex: 1; }
+  .box { background: var(--surface-2); border: 1px solid var(--border-strong); border-radius: 8px; padding: 8px 12px; font-size: 12px; font-family: var(--mono); }
+  .box small { color: var(--text-3); font-family: var(--sans); font-size: 11px; }
+  .box .arrow { color: var(--accent); font-size: 11px; }
+  .box.ok { border-color: rgba(74,222,128,.4); }
+  .box.warn { border-color: rgba(240,192,64,.45); }
+  .box.blue { border-color: rgba(96,165,250,.45); }
+  .row-arrow { display: flex; align-items: center; justify-content: center; color: var(--text-3); font-size: 12px; padding: 2px 0; }
+  .row-arrow::before { content: "↓"; }
+
+  /* phase timeline */
+  .phase { display: flex; gap: 14px; margin-top: 10px; }
+  .phase .rail { display: flex; flex-direction: column; align-items: center; gap: 4px; flex-shrink: 0; }
+  .phase .rail .dot { width: 12px; height: 12px; border-radius: 50%; background: var(--accent); border: 2px solid var(--bg); box-shadow: 0 0 0 2px rgba(240,192,64,.4); margin-top: 4px; }
+  .phase .rail .line { flex: 1; width: 2px; background: var(--border-strong); }
+  .phase .card { flex: 1; background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 14px 16px; margin-bottom: 14px; }
+  .phase .card h3 { font-size: 14px; font-weight: 600; }
+  .phase .card h3 .who { font-size: 10.5px; font-family: var(--mono); color: var(--accent); letter-spacing: .05em; text-transform: uppercase; margin-left: 8px; }
+  .phase .card .gate { margin-top: 8px; font-size: 12px; font-family: var(--mono); color: var(--green); }
+  .phase .card .gate::before { content: "▣ gate: "; color: var(--text-3); }
+  .phase .card ul { margin: 8px 0 0 18px; font-size: 12.5px; color: var(--text-2); }
+  .phase .card li { margin-bottom: 4px; }
+  .phase .card li .mono { color: var(--text); }
+
+  .callout { border: 1px solid; border-radius: 8px; padding: 12px 14px; font-size: 13px; margin-top: 14px; }
+  .callout.amber { border-color: rgba(240,192,64,.35); background: var(--accent-dim); color: var(--text-2); }
+  .callout.amber b { color: var(--accent); }
+  .callout.green { border-color: rgba(74,222,128,.3); background: rgba(74,222,128,.07); color: var(--text-2); }
+  .callout.green b { color: var(--green); }
+  .callout.red { border-color: rgba(248,113,113,.3); background: rgba(248,113,113,.07); color: var(--text-2); }
+  .callout.red b { color: var(--red); }
+
+  /* dashboard sketch */
+  .sketch { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 18px; margin-top: 12px; }
+  .sketch .sk-head { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; }
+  .sketch .sk-title { font-size: 15px; font-weight: 600; }
+  .sketch .sk-sub { font-size: 11px; color: var(--text-3); }
+  .sketch .sk-btns { margin-left: auto; display: flex; gap: 8px; }
+  .sketch .sk-btn { font-size: 10.5px; border: 1px solid var(--border-strong); border-radius: 5px; padding: 3px 9px; color: var(--text-2); background: var(--surface-2); font-family: var(--mono); }
+  .sketch .sk-btn.primary { color: #17140a; background: var(--accent); border-color: var(--accent); }
+  .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; vertical-align: middle; }
+  .dot.ok { background: var(--green); } .dot.warn { background: var(--accent); } .dot.err { background: var(--red); }
+  .sk-stats { display: flex; gap: 10px; margin-bottom: 14px; }
+  .sk-stat { flex: 1; border: 1px solid var(--border); border-radius: 8px; padding: 8px 12px; background: var(--surface-2); }
+  .sk-stat .l { font-size: 9.5px; text-transform: uppercase; letter-spacing: .08em; color: var(--text-3); font-family: var(--mono); }
+  .sk-stat .v { font-size: 18px; font-family: var(--mono); color: var(--text); margin-top: 2px; }
+  .sk-stat .v.danger { color: var(--red); } .sk-stat .v.warnc { color: var(--accent); }
+  .sk-col { display: flex; align-items: center; gap: 10px; border: 1px solid var(--border); border-radius: 8px; padding: 8px 12px; margin-bottom: 6px; background: var(--surface-2); }
+  .sk-col .nm { width: 130px; font-size: 12.5px; flex-shrink: 0; }
+  .sk-col .bar { flex: 1; height: 6px; background: var(--bg); border-radius: 3px; overflow: hidden; }
+  .sk-col .bar i { display: block; height: 100%; border-radius: 3px; }
+  .sk-col .cnt { font-family: var(--mono); font-size: 11.5px; color: var(--text-2); width: 64px; text-align: right; }
+  .sk-col .st { font-family: var(--mono); font-size: 9.5px; text-transform: uppercase; letter-spacing: .06em; padding: 2px 7px; border-radius: 999px; border: 1px solid; width: 84px; text-align: center; }
+  .st-ok { color: var(--green); border-color: rgba(74,222,128,.4); }
+  .st-warn { color: var(--accent); border-color: rgba(240,192,64,.4); }
+  .st-err { color: var(--red); border-color: rgba(248,113,113,.5); }
+  .st-empty { color: var(--text-3); border-color: var(--border-strong); }
+  .sk-attn { display: flex; gap: 10px; margin-top: 14px; }
+  .sk-attn-card { flex: 1; border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; background: var(--surface-2); }
+  .sk-attn-card .t { font-size: 10px; text-transform: uppercase; letter-spacing: .08em; color: var(--text-3); font-family: var(--mono); margin-bottom: 6px; }
+  .sk-attn-row { display: flex; align-items: center; gap: 8px; font-size: 11.5px; color: var(--text-2); padding: 3px 0; }
+  .sk-attn-row .ctx { color: var(--text-3); font-size: 10.5px; }
+
+  footer { padding: 28px 0; color: var(--text-3); font-size: 12px; font-family: var(--mono); }
+  .check { font-family: var(--mono); font-size: 12px; color: var(--text-2); margin-top: 6px; }
+  .check::before { content: "☐ "; color: var(--text-3); }
+  .cmp { display: flex; gap: 12px; margin-top: 12px; }
+  .cmp .half { flex: 1; }
+  .cmp .cap { font-family: var(--mono); font-size: 10px; letter-spacing: .1em; text-transform: uppercase; color: var(--text-3); margin-bottom: 8px; }
+  .cmp .cap .x { color: var(--red); } .cmp .cap .y { color: var(--green); }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="wrap">
+    <div class="kicker">Lexa · Implementation Plan</div>
+    <h1>Dashboard → Project Status View</h1>
+    <p class="lede">The dashboard at <span class="mono">/</span> stops listing projects and becomes the status detail view of the currently selected project. Project switching moves fully to the navbar switcher, which gains health dots + task counts. Backend untouched — the existing <span class="mono">GET /api/dashboard</span> payload is re-scoped client-side (Approach A).</p>
+    <span class="status">DESIGN APPROVED · SPEC COMMITTED · PENDING IMPLEMENTATION</span>
+    <div class="chips">
+      <span class="chip">Zero backend changes <b>✓</b></span>
+      <span class="chip">Wireframes <b>first</b></span>
+      <span class="chip">4 files <b>touched · 1 deleted · 1 created</b></span>
+      <span class="chip">Design skill <b>product register</b></span>
+    </div>
+  </div>
+</header>
+
+<nav><div class="wrap">
+  <a href="#plan">1 · Plan</a>
+  <a href="#files">2 · File map</a>
+  <a href="#data">3 · Data flow</a>
+  <a href="#view">4 · New view sketch</a>
+  <a href="#edge">5 · Edge cases</a>
+  <a href="#verify">6 · Verification</a>
+</div></nav>
+
+<div class="wrap">
+
+<section id="plan">
+  <h2><span class="num">01</span>Plan — three phases, two gates</h2>
+  <p class="sub">Wireframes are the source of truth and come first. Implementation is frontend-only; verification gates before and after.</p>
+
+  <div class="phase">
+    <div class="rail"><span class="dot"></span><span class="line"></span></div>
+    <div class="card">
+      <h3>Phase 1 — Wireframes<span class="who">designer</span></h3>
+      <ul>
+        <li><span class="mono">wireframes/src/dashboard.html</span> → rewrite as project status view (header w/ health dot + ⋯ + New project; column WIP rows; project-scoped stats; project-scoped Needs Attention)</li>
+        <li><span class="mono">wireframes/src/partials/navbar.html</span> → switcher rows gain health dot + trailing task count; <span class="mono">navbar-project-switcher.html</span> preview updated</li>
+        <li><span class="mono">flow-overview.html</span> + <span class="mono">index.html</span> → dashboard node re-described, switcher node updated</li>
+        <li>Run <span class="mono">bash wireframes/build.sh</span> — never touch <span class="mono">wireframes/dist/</span></li>
+      </ul>
+      <div class="gate">wireframes/build.sh renders · annotations present · no dist hand-edits</div>
+    </div>
+  </div>
+
+  <div class="phase">
+    <div class="rail"><span class="dot"></span><span class="line"></span></div>
+    <div class="card">
+      <h3>Phase 2 — Frontend components<span class="who">designer + fixer</span></h3>
+      <ul>
+        <li>Extract <span class="mono">ProjectSettingsModal.tsx</span> from ProjectCard (name, description, GitHub repo, delete)</li>
+        <li>Rewrite <span class="mono">app/routes/index.tsx</span> → selected project's status; <span class="mono">validateSearch</span> for <span class="mono">?new=1</span> → CreateProjectModal</li>
+        <li>Expand <span class="mono">ProjectSwitcher.tsx</span> → health dot + task count; dashboard target = <span class="mono">/</span>; "Create new project" → <span class="mono">/?new=1</span></li>
+        <li><span class="mono">app/lib/queries.ts</span> → selector for selected project's health entry</li>
+        <li>Delete <span class="mono">ProjectCard.tsx</span> (modal already extracted)</li>
+      </ul>
+      <div class="gate">tsc --noEmit passes · vitest run green · no backend/shared/docs edits</div>
+    </div>
+  </div>
+
+  <div class="phase">
+    <div class="rail"><span class="dot"></span></div>
+    <div class="card">
+      <h3>Phase 3 — Smoke verification<span class="who">orchestrator</span></h3>
+      <ul>
+        <li><span class="mono">bun run dev:full</span> → agent-browser snapshot checks (no vision): selected project renders, switcher from board/wiki, <span class="mono">?new=1</span> modal, empty state, stale-selection fallback</li>
+        <li>Wireframe build output spot-checked in browser</li>
+      </ul>
+      <div class="gate">all smoke scenarios pass · acceptance pasted</div>
+    </div>
+  </div>
+
+  <div class="callout amber"><b>Dependency:</b> Phase 2 starts only after Phase 1's gate — code transcribes the wireframes exactly. Phase 3 runs after Phase 2's tsc gate.</div>
+</section>
+
+<section id="files">
+  <h2><span class="num">02</span>File map</h2>
+  <p class="sub">All changes are frontend + wireframes. <span class="act-new">new</span> · <span class="act-edit">edit</span> · <span class="act-del">delete</span></p>
+  <table class="tbl">
+    <tr><th>File</th><th>Action</th><th>Change</th></tr>
+    <tr><td class="mono">wireframes/src/dashboard.html</td><td><span class="act-edit">edit</span></td><td>Project status view (replaces health-card grid)</td></tr>
+    <tr><td class="mono">wireframes/src/partials/navbar.html</td><td><span class="act-edit">edit</span></td><td>Switcher rows: health dot + task count</td></tr>
+    <tr><td class="mono">wireframes/src/navbar-project-switcher.html</td><td><span class="act-edit">edit</span></td><td>Preview page shows expanded state</td></tr>
+    <tr><td class="mono">wireframes/src/flow-overview.html</td><td><span class="act-edit">edit</span></td><td>Dashboard node re-described</td></tr>
+    <tr><td class="mono">wireframes/src/index.html</td><td><span class="act-edit">edit</span></td><td>Browse index updated</td></tr>
+    <tr><td class="mono">app/routes/index.tsx</td><td><span class="act-edit">edit</span></td><td>Selected-project status; <span class="mono">?new=1</span> search param</td></tr>
+    <tr><td class="mono">app/components/ProjectSettingsModal.tsx</td><td><span class="act-new">new</span></td><td>Extracted from ProjectCard (⋯ in header)</td></tr>
+    <tr><td class="mono">app/components/layout/ProjectSwitcher.tsx</td><td><span class="act-edit">edit</span></td><td>Health dot + count; dashboard target <span class="mono">/</span></td></tr>
+    <tr><td class="mono">app/lib/queries.ts</td><td><span class="act-edit">edit</span></td><td>Selected-project health selector</td></tr>
+    <tr><td class="mono">app/components/ProjectCard.tsx</td><td><span class="act-del">delete</span></td><td>Replaced by status view + extracted modal</td></tr>
+  </table>
+  <div class="callout green"><b>Untouched by design:</b> <span class="mono">server/</span> (all), <span class="mono">shared/types.ts</span>, <span class="mono">docs/API.md</span>, <span class="mono">docs/SCHEMA.md</span>, <span class="mono">package.json</span>, <span class="mono">app.config.ts</span>.</div>
+</section>
+
+<section id="data">
+  <h2><span class="num">03</span>Data flow — one endpoint, two consumers</h2>
+  <p class="sub">No backend change. The existing dashboard payload already carries per-project health; react-query shares it app-wide.</p>
+  <div class="diagram">
+    <div class="lanes">
+      <div class="lane">
+        <span class="lbl">Server</span>
+        <div class="boxes">
+          <div class="box ok"><span class="arrow">①</span> GET /api/dashboard <small>· unchanged · per-project: health, wipSegments, taskCount, urgentCount, syncCount + urgentTasks[] + outOfSyncTasks[] (each w/ projectSlug)</small></div>
+        </div>
+      </div>
+      <div class="row-arrow"></div>
+      <div class="lane">
+        <span class="lbl">Client cache</span>
+        <div class="boxes">
+          <div class="box"><span class="arrow">②</span> react-query <span class="mono">useDashboard()</span> <small>· one fetch, shared by navbar + page</small></div>
+        </div>
+      </div>
+      <div class="row-arrow"></div>
+      <div class="lane">
+        <span class="lbl">Consumers</span>
+        <div class="boxes">
+          <div class="box blue"><span class="arrow">③</span> Dashboard <span class="mono">/</span> — filters projects by selectedSlug <small>· urgent/out-of-sync lists filtered by projectSlug</small></div>
+          <div class="box blue"><span class="arrow">④</span> ProjectSwitcher (all pages) — maps projects[] → health dot + task count</div>
+        </div>
+      </div>
+      <div class="row-arrow"></div>
+      <div class="lane">
+        <span class="lbl">Selection</span>
+        <div class="boxes">
+          <div class="box warn"><span class="arrow">⑤</span> useProjectSelection <small>· localStorage <span class="mono">lexa:selectedProject</span> · fallback chain: selected → stored → first project</small></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="view">
+  <h2><span class="num">04</span>New view sketch — what `/` renders</h2>
+  <p class="sub">Static sketch of the approved layout. Wireframe (Phase 1) is the binding spec; this is the review aid.</p>
+
+  <div class="cmp">
+    <div class="half">
+      <div class="cap"><span class="x">✕ before</span> — Command Center (all projects)</div>
+      <div class="sketch" style="opacity:.55;">
+        <div class="sk-head"><div class="sk-title">Command Center</div><div class="sk-sub">Project health overview</div><div class="sk-btns"><span class="sk-btn">New project</span></div></div>
+        <div style="display:flex;gap:8px;">
+          <div style="flex:1;border:1px solid var(--border);border-radius:8px;padding:8px;height:92px;"><div style="font-size:11px;color:var(--text-2);">Emberfall</div><div style="font-size:9px;color:var(--text-3);margin:4px 0;">042 tasks · 005 cols</div><span class="dot err"></span> 005 urgent <span class="dot warn"></span> 002 sync</div>
+          <div style="flex:1;border:1px solid var(--border);border-radius:8px;padding:8px;height:92px;"><div style="font-size:11px;color:var(--text-2);">Void Drifter</div><div style="font-size:9px;color:var(--text-3);margin:4px 0;">128 tasks · 006 cols</div><span class="dot ok"></span> 000 urgent</div>
+        </div>
+        <div style="display:flex;gap:8px;margin-top:8px;">
+          <div style="flex:1;border:1px solid var(--border);border-radius:8px;padding:8px;height:92px;"><div style="font-size:11px;color:var(--text-2);">Ironbound</div><div style="font-size:9px;color:var(--text-3);margin:4px 0;">089 tasks · 004 cols</div><span class="dot warn"></span> 001 urgent</div>
+          <div style="flex:1;border:1px solid var(--border);border-radius:8px;padding:8px;height:92px;"><div style="font-size:11px;color:var(--text-2);">Pale Reach</div><div style="font-size:9px;color:var(--text-3);margin:4px 0;">034 tasks · 004 cols</div><span class="dot ok"></span> 000 urgent</div>
+        </div>
+        <div class="sk-stats" style="margin-top:10px;">
+          <div class="sk-stat"><div class="l">Total tasks</div><div class="v">293</div></div>
+          <div class="sk-stat"><div class="l">Active projects</div><div class="v">004</div></div>
+          <div class="sk-stat"><div class="l">WIP exceeded</div><div class="v danger">001</div></div>
+          <div class="sk-stat"><div class="l">Out-of-sync</div><div class="v warnc">002</div></div>
+        </div>
+      </div>
+    </div>
+    <div class="half">
+      <div class="cap"><span class="y">✓ after</span> — Emberfall status (selected project)</div>
+      <div class="sketch">
+        <div class="sk-head">
+          <span class="dot err"></span>
+          <div><div class="sk-title">Emberfall</div><div class="sk-sub">Project status</div></div>
+          <div class="sk-btns"><span class="sk-btn">⋯</span><span class="sk-btn primary">New project</span></div>
+        </div>
+        <div class="sk-stats">
+          <div class="sk-stat"><div class="l">Total tasks</div><div class="v">042</div></div>
+          <div class="sk-stat"><div class="l">WIP exceeded</div><div class="v danger">001</div></div>
+          <div class="sk-stat"><div class="l">Out-of-sync</div><div class="v warnc">002</div></div>
+        </div>
+        <div class="sk-col"><div class="nm">Backlog</div><div class="bar"><i style="width:30%;background:var(--green);"></i></div><div class="cnt">12 / ∞</div><span class="st st-ok">ok</span></div>
+        <div class="sk-col"><div class="nm">In Progress</div><div class="bar"><i style="width:80%;background:var(--accent);"></i></div><div class="cnt">8 / 10</div><span class="st st-warn">approaching</span></div>
+        <div class="sk-col"><div class="nm">Needs Review</div><div class="bar"><i style="width:100%;background:var(--red);"></i></div><div class="cnt">5 / 4</div><span class="st st-err">exceeded</span></div>
+        <div class="sk-col"><div class="nm">Done</div><div class="bar"><i style="width:100%;background:var(--green);"></i></div><div class="cnt">17 / ∞</div><span class="st st-ok">ok</span></div>
+        <div class="sk-attn">
+          <div class="sk-attn-card"><div class="t">Urgent tasks</div>
+            <div class="sk-attn-row"><span class="dot err"></span>Fix hitbox desync during dodge roll <span class="ctx">· In Progress</span></div>
+            <div class="sk-attn-row"><span class="dot err"></span>Rebalance fire sword damage <span class="ctx">· Backlog</span></div>
+          </div>
+          <div class="sk-attn-card"><div class="t">Out-of-sync GitHub</div>
+            <div class="sk-attn-row"><span class="dot warn"></span>Title differs from Lexa task <span class="ctx">· #142</span></div>
+            <div class="sk-attn-row"><span class="dot warn"></span>State mismatch: closed <span class="ctx">· #156</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="edge">
+  <h2><span class="num">05</span>Edge cases</h2>
+  <p class="sub">Explicit behavior decisions — no crash paths.</p>
+  <table class="tbl">
+    <tr><th>Scenario</th><th>Behavior</th></tr>
+    <tr><td>No projects</td><td>Existing dashboard-empty state (create CTA); switcher shows "No projects yet"</td></tr>
+    <tr><td>selectedSlug stale / deleted</td><td>Provider fallback chain: selected → stored → first project; page re-renders, no crash</td></tr>
+    <tr><td>Selected project deleted while viewing</td><td>Refetch returns without it → fallback kicks in on next render</td></tr>
+    <tr><td>Dashboard query error</td><td>Existing <span class="mono">dashboard-error</span> surface; never show empty state on error</td></tr>
+    <tr><td><span class="mono">?new=1</span> on empty instance</td><td>Empty state still renders with its own CTA; modal opens only when projects exist</td></tr>
+    <tr><td>Switcher overflow (many projects)</td><td>Menu max-height + scroll; existing hover/active/focus states unchanged</td></tr>
+  </table>
+</section>
+
+<section id="verify">
+  <h2><span class="num">06</span>Verification</h2>
+  <p class="sub">Minimum evidence per change, run in order.</p>
+  <div class="check">tsc --noEmit — phase gate, must pass after Phase 2</div>
+  <div class="check">vitest run — shared pure modules unaffected (no expected changes)</div>
+  <div class="check">bash wireframes/build.sh — renders without errors</div>
+  <div class="check">bun run dev:full — smoke via agent-browser snapshots (no vision needed)</div>
+  <div class="check">Smoke: / shows selected project's status (dot, WIP rows, stats, attention)</div>
+  <div class="check">Smoke: switcher shows health dot + task count on board + wiki pages</div>
+  <div class="check">Smoke: pick project from dashboard → stays on /; pick from board → /$slug</div>
+  <div class="check">Smoke: switcher "Create new project" → /?new=1 opens modal, param cleared</div>
+  <div class="check">Smoke: empty state (fresh DB) + stale-selection fallback</div>
+  <div class="callout green"><b>Definition of done:</b> tsc + vitest green, all smoke scenarios pass, wireframe build committed first, no backend or docs/API.md drift.</div>
+</section>
+
+<footer>
+  docs/lexa-dashboard-plan.html · spec: docs/superpowers/specs/2026-08-09-dashboard-project-status-design.md · 2026-08-09
+</footer>
+
+</div>
+</body>
+</html>

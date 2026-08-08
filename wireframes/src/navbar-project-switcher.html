@@ -12,8 +12,9 @@
 
   <main class="page-frame">
     <h1 class="font-display text-2xl weight-600 color-primary mb-2">Project Switcher</h1>
-    <p class="text-sm color-secondary mb-4">Standalone component preview. Dropdown shown open below the nav trigger.</p>
-    <span class="annotation-tag">.app-nav with .project-switcher</span>
+    <p class="text-sm color-secondary mb-4">Global nav component. Dropdown shown open below the trigger — each row: leading health dot, project name, slug, trailing task count.</p>
+    <span class="annotation-tag">.app-nav with .project-switcher — rows from useDashboard() (shared react-query cache): health-dot-* + task count per project, active row = selected project</span>
+    <span class="annotation-tag mt-2" style="display:block;">Pick from dashboard → <span class="font-mono">/</span>; from board/wiki → <span class="font-mono">/$slug</span> (routeType preserved, fallback to board). "Create new project" row → <span class="font-mono">/?new=1</span> opens the CreateProjectModal.</span>
   </main>
 
 </body>

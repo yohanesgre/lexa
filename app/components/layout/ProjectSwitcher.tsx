@@ -1,12 +1,15 @@
 import { useEffect, useRef, useState } from "react";
 import { Link } from "@tanstack/react-router";
-import { useProjects } from "../../lib/queries";
+import { useProjects, useDashboard } from "../../lib/queries";
 import { useProjectSelection } from "../../lib/project-selection";
 import { ChevronIcon } from "./ChevronIcon";
+
+type ProjectStatus = { health: "ok" | "approaching" | "exceeded"; taskCount: number };
 
 export function ProjectSwitcher({ routeType }: { routeType: "dashboard" | "board" | "wiki" | "settings" }) {
   const [open, setOpen] = useState(false);
   const { data: projects, isLoading } = useProjects();
+  const { data: dashboard } = useDashboard();
   const { selectedSlug, selectedProjectName, setSelectedSlug } = useProjectSelection();
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -38,9 +41,17 @@ export function ProjectSwitcher({ routeType }: { routeType: "dashboard" | "board
     : selectedProjectName ?? (projects && projects.length === 0 ? "No projects" : "Select project");
 
   const targetFor = (slug: string) => {
+    if (routeType === "dashboard") return "/" as const;
     if (routeType === "wiki") return "/$slug/wiki" as const;
     return "/$slug" as const;
   };
+
+  const statusBySlug = new Map<string, ProjectStatus>();
+  if (dashboard?.projects) {
+    for (const entry of dashboard.projects) {
+      statusBySlug.set(entry.project.slug, { health: entry.health, taskCount: entry.taskCount });
+    }
+  }
 
   return (
     <div ref={containerRef} className="project-switcher">
@@ -66,6 +77,31 @@ export function ProjectSwitcher({ routeType }: { routeType: "dashboard" | "board
           ) : (
             projects.map((project) => {
               const isCurrent = project.slug === selectedSlug;
+              const status = statusBySlug.get(project.slug);
+              const rowContent = (
+                <>
+                  <span className={status ? `health-dot health-dot-${status.health}` : "health-dot"} />
+                  <div className="project-switcher-row-info">
+                    <span className="project-switcher-row-name">{project.name}</span>
+                    <span className="project-switcher-row-desc">{project.slug}</span>
+                  </div>
+                  <span className="project-switcher-row-count">
+                    {status ? String(status.taskCount).padStart(3, "0") : ""}
+                  </span>
+                </>
+              );
+              if (routeType === "dashboard") {
+                return (
+                  <Link
+                    key={project.id}
+                    to="/"
+                    className={isCurrent ? "project-switcher-row active" : "project-switcher-row"}
+                    onClick={() => setSelectedSlug(project.slug)}
+                  >
+                    {rowContent}
+                  </Link>
+                );
+              }
               return (
                 <Link
                   key={project.id}
@@ -74,16 +110,18 @@ export function ProjectSwitcher({ routeType }: { routeType: "dashboard" | "board
                   className={isCurrent ? "project-switcher-row active" : "project-switcher-row"}
                   onClick={() => setSelectedSlug(project.slug)}
                 >
-                  <div className="project-switcher-row-info">
-                    <span className="project-switcher-row-name">{project.name}</span>
-                    <span className="project-switcher-row-desc">{project.slug}</span>
-                  </div>
+                  {rowContent}
                 </Link>
               );
             })
           )}
           <div className="project-switcher-separator" />
-          <Link to="/" className="project-switcher-row" activeProps={{ className: "project-switcher-row" }}>
+          <Link
+            to="/"
+            search={{ new: true } as never}
+            className="project-switcher-row"
+            activeProps={{ className: "project-switcher-row" }}
+          >
             <span className="project-switcher-row-name">Create new project</span>
           </Link>
         </div>
