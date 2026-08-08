@@ -34,10 +34,13 @@ export function ActivityTab({ slug, taskId, isArchived }: ActivityTabProps) {
   const updateComment = useUpdateComment(slug ?? "", taskId);
   const deleteComment = useDeleteComment(slug ?? "", taskId);
 
-  // Server pages arrive newest-first (keyset DESC); the wireframe renders the
-  // timeline oldest → newest with the newest at the bottom next to the
-  // composer — reverse the flattened pages.
-  const items = (data?.pages.flatMap((p) => p.data) ?? []).slice().reverse();
+  // Server pages are newest-chunk-first, each page ascending (Task 14: the
+  // repo returns ascending slices; page 0 holds the newest chunk). The
+  // wireframe renders oldest → newest with the newest at the bottom next to
+  // the composer — reverse the PAGE order (items stay ascending). New
+  // activity is appended to page 1's end by the mutation hooks, so it lands
+  // at the bottom of the display.
+  const items = (data?.pages ?? []).slice().reverse().flatMap((p) => p.data);
   const memberList = (members.data ?? []).map((m) => ({ id: m.id, name: m.name }));
 
   return (

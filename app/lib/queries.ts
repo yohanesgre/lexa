@@ -1046,14 +1046,18 @@ export function useTaskActivity(slug: string, taskId: string) {
   });
 }
 
-// Prepend items into page 1 of the timeline cache. No dedupe: server rows are
-// append-only and a fresh fetch replaces the whole cache, so the same row can
-// never appear twice (events and comments may share numeric ids across tables
-// but prepends only ever add rows not yet in the cache).
+// Append items to the END of page 1 of the timeline cache. Server pages are
+// newest-chunk-first with ascending items; the timeline renders oldest →
+// newest by reversing the page order, so new rows (newest) belong at the end
+// of page 1 — that lands them at the bottom of the display, next to the
+// composer (wireframe). No dedupe: server rows are append-only and a fresh
+// fetch replaces the whole cache, so the same row can never appear twice
+// (events and comments may share numeric ids across tables but prepends only
+// ever add rows not yet in the cache).
 export function prependActivity(qc: QueryClient, slug: string, taskId: string, items: ActivityItem[]) {
   qc.setQueryData<InfiniteData<ActivityPage>>(["task-activity", slug, taskId], (old) => {
     if (!old) return old;
-    return { ...old, pages: old.pages.map((p, i) => (i === 0 ? { ...p, data: [...items, ...p.data] } : p)) };
+    return { ...old, pages: old.pages.map((p, i) => (i === 0 ? { ...p, data: [...p.data, ...items] } : p)) };
   });
 }
 
@@ -1116,7 +1120,7 @@ export function useDeleteComment(slug: string, taskId: string) {
           pages: old.pages.map((p, i) => ({
             ...p,
             data: i === 0
-              ? [local, ...p.data.filter((it) => !(it.kind === "comment" && it.id === commentId))]
+              ? [...p.data.filter((it) => !(it.kind === "comment" && it.id === commentId)), local]
               : p.data.filter((it) => !(it.kind === "comment" && it.id === commentId)),
           })),
         };
