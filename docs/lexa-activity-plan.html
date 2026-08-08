@@ -132,7 +132,7 @@
     <div class="kicker">Lexa · Design &amp; Implementation Plan</div>
     <h1>Task Activity Timeline + Comments</h1>
     <p class="lede">A unified activity timeline in the task slideover — human comments and system events interleaved, like GitHub's issue timeline. Reverses the v1 "comments-free" cut; driven by the missing context trail and agent visibility. Comments stay in Lexa (no GitHub sync).</p>
-    <span class="status">DESIGN APPROVED · spec: docs/specs/ACTIVITY_COMMENTS.md</span>
+    <span class="status" style="color: var(--green); border-color: rgba(74,222,128,.4); background: rgba(74,222,128,.08);">IMPLEMENTED · 2026-08-08 · 25 commits · gates green (tsc 0 · 212 tests) · spec: docs/specs/ACTIVITY_COMMENTS.md</span>
     <div class="chips">
       <span class="chip">Structure <b>Unified timeline</b></span>
       <span class="chip">Approach <b>A</b> · append-only, service-emitted <span class="tag">✔</span></span>
@@ -229,7 +229,7 @@ created_at    TEXT NOT NULL DEFAULT (datetime('now'))</pre>
         <span class="box emit">TaskService — create · update · move · archive · restore · delete · links · sources · github</span>
       </div>
       <div class="layer" style="justify-content:center;">
-        <span class="box emit" style="border-color:rgba(96,165,250,.45);">ForgeService — terminal state + accept/reject</span>
+        <span class="box emit" style="border-color:rgba(96,165,250,.45);">ForgeService — terminal state (complete · fail · cancel)</span>
         <span class="box emit">CommentService — create · edit · delete + authz</span>
       </div>
       <div class="arrow-down"></div>
@@ -291,7 +291,7 @@ created_at    TEXT NOT NULL DEFAULT (datetime('now'))</pre>
   <div class="ev"><span class="t">github_linked / github_unlinked</span><span class="x">"Linked GitHub issue emberfall-godot #107" · "Unlinked GitHub issue #91"</span></div>
   <div class="ev"><span class="t">github_synced</span><span class="x">"Issue #107 closed on GitHub — task moved to Done" (webhook, actor system/github)</span></div>
   <div class="ev"><span class="t">forge_completed / forge_failed / forge_cancelled</span><span class="x">"Forge: opencode completed — result ready" · "Forge run failed"</span></div>
-  <div class="ev"><span class="t">forge_accepted / forge_rejected</span><span class="x">"Maria accepted the Forge result"</span></div>
+  <div class="ev"><span class="t">forge_accepted / forge_rejected</span><span class="x dim" style="text-decoration: line-through;">"Maria accepted the Forge result"</span> <span class="dim">— dropped: accept is client-side, no server hook (see spec)</span></div>
   <div class="ev"><span class="t">commented / comment_deleted</span><span class="x">"Maria commented" · "Maria deleted a comment"</span></div>
 </section>
 
@@ -312,13 +312,14 @@ created_at    TEXT NOT NULL DEFAULT (datetime('now'))</pre>
 <section id="phases">
   <h2><span class="num">07</span>Implementation phases</h2>
   <p class="sub">Wireframe-first (non-negotiable) · tsc --noEmit at every gate · vitest for shared/ · acceptance per docs/RELEASE.md.</p>
+  <div class="callout green" style="margin-bottom:14px;"><b>All phases complete.</b> Shipped 2026-08-08 as 25 commits (02e5d44..5a849b3) on main — migration 0004, 37 MCP tools, 212 tests, gates green. Pending human gates: GitHub webhook round-trip + Forge live runs (need tunnel/daemon).</div>
 
   <div class="phase">
     <div class="n">P0</div>
     <div>
       <h3>Wireframes — Activity tab in task slideover</h3>
       <p>Edit wireframes/src/task-detail.html: tab bar (Description | Activity), timeline list (event rows + comment cards), composer with TipTap toolbar, "edited" markers, deleted-comment collapse, mention chips, "load older" pagination, empty state. Annotations in notes, never HTML comments. Run wireframes/build.sh.</p>
-      <span class="gate">gate: build.sh clean + tsc</span>
+      <span class="gate">done · build.sh clean + tsc</span>
       <div class="files">wireframes/src/task-detail.html · partials/</div>
     </div>
   </div>
@@ -328,7 +329,7 @@ created_at    TEXT NOT NULL DEFAULT (datetime('now'))</pre>
     <div>
       <h3>Schema + shared types</h3>
       <p>Migration 00XX: both tables + indexes + backfill INSERT..SELECT (one 'created' row per task). shared/types.ts: ActivityType enum, ActivityEvent, Comment types, Actor. SCHEMA.md verbatim update.</p>
-      <span class="gate">gate: tsc + migration runs clean on fresh DB</span>
+      <span class="gate">done · tsc + migration runs clean on fresh DB</span>
       <div class="files">server/db/migrations/ · shared/types.ts · docs/SCHEMA.md</div>
     </div>
   </div>
@@ -337,8 +338,8 @@ created_at    TEXT NOT NULL DEFAULT (datetime('now'))</pre>
     <div class="n">P2</div>
     <div>
       <h3>Repos + services</h3>
-      <p>ActivityRepo, CommentRepo (thin, prepared statements). ActivityService (append, listMerged), CommentService (create/edit/delete + authz), actor resolution in routes + MCP entry. Emission points in TaskService (all mutators, same batch), ForgeService (terminal + accept/reject), webhook path rides the existing atomic move.</p>
-      <span class="gate">gate: tsc + vitest (positions/markdown untouched, new unit tests)</span>
+      <p>ActivityRepo, CommentRepo (thin, prepared statements). ActivityService (append, listMerged), CommentService (create/edit/delete + authz), actor resolution in routes + MCP entry. Emission points in TaskService (all mutators, same batch), ForgeService (terminal states; accept/reject dropped — client-side only), webhook path rides the existing atomic move.</p>
+      <span class="gate">done · tsc + vitest (positions/markdown untouched, new unit tests)</span>
       <div class="files">server/repos/ · server/services/ · server/api/auth.ts</div>
     </div>
   </div>
@@ -348,7 +349,7 @@ created_at    TEXT NOT NULL DEFAULT (datetime('now'))</pre>
     <div>
       <h3>REST endpoints</h3>
       <p>activity read + comments CRUD per §04, error mapping from catalog (.addError, no hand-rolled try/catch), response envelope: activity[] appended to existing task mutation responses. API.md verbatim update.</p>
-      <span class="gate">gate: backend curl suite (auth, 404/403/422, cursor pagination, envelope)</span>
+      <span class="gate">done · backend curl suite (auth, 404/403/422, cursor pagination, envelope)</span>
       <div class="files">server/api/ · docs/API.md</div>
     </div>
   </div>
@@ -358,7 +359,7 @@ created_at    TEXT NOT NULL DEFAULT (datetime('now'))</pre>
     <div>
       <h3>MCP tools</h3>
       <p>get_task_activity (Markdown timeline), add_task_comment (Markdown → TipTap at boundary; markdownToDoc/docToMarkdown already in shared/markdown.ts). Agent attribution via api key name. MCP.md verbatim update.</p>
-      <span class="gate">gate: MCP handshake + tool smoke (jsonrpc, 401 without key)</span>
+      <span class="gate">done · MCP handshake + tool smoke (jsonrpc, 401 without key)</span>
       <div class="files">server/mcp/ · docs/MCP.md</div>
     </div>
   </div>
@@ -368,7 +369,7 @@ created_at    TEXT NOT NULL DEFAULT (datetime('now'))</pre>
     <div>
       <h3>Frontend</h3>
       <p>Activity tab per wireframe: timeline query hook (cursor), comment composer (TipTap), mention highlight (render-time, project members), plain-text rendering for event messages (XSS rule), setQueryData prepends from mutation responses, empty/loading states, archived-task variant.</p>
-      <span class="gate">gate: tsc + browser pass (agent-browser snapshot — console errors 0)</span>
+      <span class="gate">done · tsc + browser pass (agent-browser snapshot — console errors 0)</span>
       <div class="files">app/components/ · app/routes/ · app/lib/</div>
     </div>
   </div>
@@ -378,14 +379,14 @@ created_at    TEXT NOT NULL DEFAULT (datetime('now'))</pre>
     <div>
       <h3>Verification + docs</h3>
       <p>Full acceptance: backend suite (new comment/activity cases), frontend pass, release gate checks. LAYERS.md (services, error catalog, new invariant), AGENTS.md invariant line, ARCHITECTURE.md decisions log, RELEASE_NOTES.md (reverses the "no comments" note).</p>
-      <span class="gate gate red">gate: docs/RELEASE.md checks + paste outputs</span>
+      <span class="gate">done · docs/RELEASE.md checks + paste outputs</span>
       <div class="files">docs/LAYERS.md · AGENTS.md · ARCHITECTURE.md · RELEASE_NOTES.md</div>
     </div>
   </div>
 </section>
 
 <footer>
-  Draft v1 · design approved 2026-08-08 · spec: docs/specs/ACTIVITY_COMMENTS.md
+  Draft v1 · design approved 2026-08-08 · <b>implemented 2026-08-08</b> · spec: docs/specs/ACTIVITY_COMMENTS.md
 </footer>
 
 </div>
