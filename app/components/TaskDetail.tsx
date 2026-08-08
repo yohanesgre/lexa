@@ -25,6 +25,7 @@ import { SourcesSection } from "./forge/SourcesSection";
 import { LinksSection } from "./forge/LinksSection";
 import { ForgeReviewSurface } from "./forge/ForgeReviewSurface";
 import { useForgeReview } from "./forge/useForgeReview";
+import { ActivityTab } from "./activity/ActivityTab";
 import { cn } from "./ui/cn";
 import { useEditor, EditorContent } from "@tiptap/react";
 import type { JSONContent } from "@tiptap/core";
@@ -96,6 +97,7 @@ export function TaskDetail({ mode = "view", task, project, defaultColumnId, colu
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [dismissedWarning, setDismissedWarning] = useState(false);
+  const [tab, setTab] = useState<"description" | "activity">("description");
   const closeTimer = useRef<number | null>(null);
 
   useEffect(() => {
@@ -298,9 +300,20 @@ export function TaskDetail({ mode = "view", task, project, defaultColumnId, colu
           />
         )}
 
-
+        {!isCreate && (
+          <div className="tab-bar">
+            <button type="button" className={cn("tab-btn", tab === "description" && "active")} onClick={() => setTab("description")}>
+              Description
+            </button>
+            <button type="button" className={cn("tab-btn", tab === "activity" && "active")} onClick={() => setTab("activity")}>
+              Activity
+            </button>
+          </div>
+        )}
 
         <div className="slideover-body pt-4">
+        {tab === "description" ? (
+        <>
         <TaskDescriptionSection
           isCreate={isCreate}
           slug={slug}
@@ -324,6 +337,10 @@ export function TaskDetail({ mode = "view", task, project, defaultColumnId, colu
           onLink={onLinkGithub!}
           onUnlink={onUnlinkGithub!}
         />
+        </>
+        ) : (
+          <ActivityTab slug={slug} taskId={task!.id} isArchived={isArchived} />
+        )}
         </div>
 
         <TaskFooter
