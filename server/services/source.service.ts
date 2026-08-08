@@ -2,18 +2,22 @@ import { Effect } from "effect";
 import { SourceRepo } from "../repos/source.repo";
 import { ProjectRepo } from "../repos/project.repo";
 import { WikiRepo } from "../repos/wiki.repo";
-import { DbError, RowNotFound, ConstraintViolation } from "../db/database";
+import { DbError, RowNotFound, ConstraintViolation, Sqlite, withTx } from "../db/database";
 import { ProjectNotFound, WikiPageNotFound, SourceNotFound, SourceFetchError, SourceUnreachable } from "../api/errors";
+import { ActivityService } from "./activity.service";
+import * as msg from "../activity-messages";
 import { extractText } from "../../shared/tiptap-text";
 import { isPrivateIp, isPublicUrl } from "../forge-ssrf";
-import type { DocumentSource, TipTapDoc } from "../../shared/types";
+import type { DocumentSource, TipTapDoc, Actor, ActivityEvent } from "../../shared/types";
 
 export class SourceService extends Effect.Service<SourceService>()("Lexa/SourceService", {
-  dependencies: [SourceRepo.Default, ProjectRepo.Default, WikiRepo.Default],
+  dependencies: [SourceRepo.Default, ProjectRepo.Default, WikiRepo.Default, ActivityService.Default],
   effect: Effect.gen(function* () {
     const repo = yield* SourceRepo;
     const projectRepo = yield* ProjectRepo;
     const wikiRepo = yield* WikiRepo;
+    const activityService = yield* ActivityService;
+    const db = yield* Sqlite;
 
     const resolveAddresses = (hostname: string): Effect.Effect<string[], never> =>
       Effect.gen(function* () {
@@ -129,13 +133,14 @@ export class SourceService extends Effect.Service<SourceService>()("Lexa/SourceS
 
       // Add a source. For wiki kind, `ref` is a wiki page slug — validate it
       // exists in the project and store its title. For external, `ref` is a URL.
-      add: (input: {
+      // Task timelines get a source_added row in the same transaction.
+      add: (actor: Actor, input: {
         projectId: string;
         documentType: "task" | "wiki";
         documentId: string;
         kind: "wiki" | "external";
         ref: string;
-      }): Effect.Effect<DocumentSource, ProjectNotFound | WikiPageNotFound | SourceFetchError | SourceUnreachable | ConstraintViolation | DbError | RowNotFound> =>
+      }): Effect.Effect<{ source: DocumentSource; activity: ActivityEvent[] }, ProjectNotFound | WikiPageNotFound | SourceFetchError | SourceUnreachable | ConstraintViolation | DbError | RowNotFound> =>
         Effect.gen(function* () {
           yield* projectRepo.findById(input.projectId).pipe(
             Effect.catchTag("RowNotFound", () => new ProjectNotFound({ identifier: input.projectId }))
@@ -149,21 +154,42 @@ export class SourceService extends Effect.Service<SourceService>()("Lexa/SourceS
           } else {
             yield* assertPublicUrl(input.ref);
           }
-          return yield* repo.create({
-            id: crypto.randomUUID(),
-            projectId: input.projectId,
-            documentType: input.documentType,
-            documentId: input.documentId,
-            kind: input.kind,
-            title,
-            ref: input.ref,
-          });
+          return yield* withTx(db, Effect.gen(function* () {
+            const source = yield* repo.create({
+              id: crypto.randomUUID(),
+              projectId: input.projectId,
+              documentType: input.documentType,
+              documentId: input.documentId,
+              kind: input.kind,
+              title,
+              ref: input.ref,
+            });
+            let activity: ActivityEvent[] = [];
+            if (input.documentType === "task") {
+              const ev = yield* activityService.append(input.documentId, actor, "source_added",
+                msg.sourceAdded(title, input.kind === "wiki" ? "wiki" : "url"));
+              activity = [ev];
+            }
+            return { source, activity };
+          }));
         }),
 
-      remove: (id: string): Effect.Effect<void, SourceNotFound | ConstraintViolation | DbError> =>
+      remove: (actor: Actor, id: string): Effect.Effect<{ activity: ActivityEvent[] }, SourceNotFound | ConstraintViolation | DbError | RowNotFound> =>
         Effect.gen(function* () {
-          const n = yield* repo.delete(id);
-          if (n === 0) return yield* new SourceNotFound({ id });
+          const source = yield* repo.findById(id).pipe(
+            Effect.catchTag("RowNotFound", () => new SourceNotFound({ id }))
+          );
+          if (source.documentType !== "task") {
+            const n = yield* repo.delete(id);
+            if (n === 0) return yield* new SourceNotFound({ id });
+            return { activity: [] as ActivityEvent[] };
+          }
+          return yield* withTx(db, Effect.gen(function* () {
+            const n = yield* repo.delete(id);
+            if (n === 0) return yield* new SourceNotFound({ id });
+            const ev = yield* activityService.append(source.documentId, actor, "source_removed", msg.sourceRemoved(source.title));
+            return { activity: [ev] };
+          }));
         }),
 
       // Resolve a source's content as plain text (used by the Forge prompt).

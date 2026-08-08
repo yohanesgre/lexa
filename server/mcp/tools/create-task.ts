@@ -6,7 +6,7 @@ import { FieldConfigRepo } from "../../repos/field-config.repo";
 import { resolveProject, resolveColumn, resolveSwimlane } from "../resolve";
 import { resolveFieldOptionId, optionLabel } from "../field-options";
 import { markdownToDoc } from "../../../shared/markdown";
-import type { Swimlane, Column } from "../../../shared/types";
+import type { Swimlane, Column, Actor } from "../../../shared/types";
 
 export const tool = {
   name: "create_task",
@@ -25,7 +25,7 @@ export const tool = {
     },
     required: ["project", "column", "swimlane", "title"],
   },
-  handler: (args: any) =>
+  handler: (args: any, ctx?: { userId: string | null; role: string }) =>
     Effect.gen(function* () {
       const project = yield* resolveProject(args.project);
       const column = yield* resolveColumn(project.id, args.column);
@@ -57,7 +57,8 @@ export const tool = {
       }
 
       const taskService = yield* TaskService;
-      const task = yield* taskService.create({
+      const actor: Actor = { kind: "agent", label: "mcp", userId: ctx?.userId ?? null };
+      const { task } = yield* taskService.create(actor, {
         projectId: project.id,
         columnId: column.id,
         swimlaneId: swimlane.id,

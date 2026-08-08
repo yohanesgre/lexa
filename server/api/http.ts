@@ -4,11 +4,11 @@ import { createHash, randomBytes } from "node:crypto";
 import { readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { LoggerLayer } from "../logging/logger";
-import { Sqlite } from "../db/database";
+import { Sqlite, withTx } from "../db/database";
 import { Database } from "bun:sqlite";
 import { getSetting, setSetting } from "../db/settings";
 import { ProjectNotFound, WikiPageNotFound, MachineNotFound, Forbidden, SetupLocked, errorResponse, errorToStatus } from "./errors";
-import { AuthIdentity } from "./auth";
+import { AuthIdentity, actorFromIdentity } from "./auth";
 import { createApiMiddleware } from "./middleware";
 import { clampLimit, nextCursor } from "../../shared/pagination";
 import { ProjectService } from "../services/project.service";
@@ -41,6 +41,8 @@ import { SourceRepo } from "../repos/source.repo";
 import { TaskLinkService } from "../services/task-link.service";
 import { TaskLinkRepo } from "../repos/task-link.repo";
 import { GitHubService } from "../services/github.service";
+import { ActivityService } from "../services/activity.service";
+import * as msg from "../activity-messages";
 import { WebhookEventRepo } from "../repos/webhook-event.repo";
 import { GitHubClient } from "../github/client";
 import { extractText } from "../../shared/tiptap-text";
@@ -1741,8 +1743,9 @@ const forgeLive = HttpApiBuilder.group(LexaApi, "forge", (handlers) =>
       respond(Effect.gen(function* () {
         const projectService = yield* ProjectService;
         const service = yield* SourceService;
+        const identity = yield* AuthIdentity;
         const project = yield* projectService.findBySlug(req.path.slug);
-        const source = yield* service.add({
+        const { source } = yield* service.add(actorFromIdentity(identity), {
           projectId: project.id,
           documentType: req.path.type,
           documentId: req.path.id,
@@ -1755,7 +1758,8 @@ const forgeLive = HttpApiBuilder.group(LexaApi, "forge", (handlers) =>
     .handle("removeSource", (req) =>
       respond(Effect.gen(function* () {
         const service = yield* SourceService;
-        yield* service.remove(req.path.sourceId);
+        const identity = yield* AuthIdentity;
+        yield* service.remove(actorFromIdentity(identity), req.path.sourceId);
         return undefined;
       }))
     )
@@ -1776,8 +1780,9 @@ const taskLinksLive = HttpApiBuilder.group(LexaApi, "task-links", (handlers) =>
       respond(Effect.gen(function* () {
         const projectService = yield* ProjectService;
         const service = yield* TaskLinkService;
+        const identity = yield* AuthIdentity;
         const project = yield* projectService.findBySlug(req.path.slug);
-        const link = yield* service.add({
+        const { link } = yield* service.add(actorFromIdentity(identity), {
           projectId: project.id,
           fromTaskId: req.path.id,
           toTaskId: req.payload.toTaskId,
@@ -1789,7 +1794,8 @@ const taskLinksLive = HttpApiBuilder.group(LexaApi, "task-links", (handlers) =>
     .handle("removeTaskLink", (req) =>
       respond(Effect.gen(function* () {
         const service = yield* TaskLinkService;
-        yield* service.remove(req.path.linkId);
+        const identity = yield* AuthIdentity;
+        yield* service.remove(actorFromIdentity(identity), req.path.linkId);
         return undefined;
       }))
     )
@@ -1833,8 +1839,9 @@ const tasksLive = HttpApiBuilder.group(LexaApi, "tasks", (handlers) =>
       respond(Effect.gen(function* () {
         const projectService = yield* ProjectService;
         const taskService = yield* TaskService;
+        const identity = yield* AuthIdentity;
         const project = yield* projectService.findBySlug(req.path.slug);
-        const task = yield* taskService.create({
+        const { task } = yield* taskService.create(actorFromIdentity(identity), {
           projectId: project.id, columnId: req.payload.columnId,
           swimlaneId: req.payload.swimlaneId, title: req.payload.title,
           description: req.payload.description, priority: req.payload.priority,
@@ -1854,7 +1861,8 @@ const tasksLive = HttpApiBuilder.group(LexaApi, "tasks", (handlers) =>
     .handle("updateTask", (req) =>
       respond(Effect.gen(function* () {
         const taskService = yield* TaskService;
-        const task = yield* taskService.update(req.path.id, {
+        const identity = yield* AuthIdentity;
+        const { task } = yield* taskService.update(actorFromIdentity(identity), req.path.id, {
           title: req.payload.title, description: req.payload.description,
           priority: req.payload.priority, type: req.payload.type,
           assignees: req.payload.assignees ? [...req.payload.assignees] : undefined,
@@ -1867,7 +1875,8 @@ const tasksLive = HttpApiBuilder.group(LexaApi, "tasks", (handlers) =>
         const taskService = yield* TaskService;
         const columnService = yield* ColumnService;
         const githubService = yield* GitHubService;
-        const task = yield* taskService.move(req.path.id, {
+        const identity = yield* AuthIdentity;
+        const { task } = yield* taskService.move(actorFromIdentity(identity), req.path.id, {
           columnId: req.payload.columnId, swimlaneId: req.payload.swimlaneId,
           beforeTaskId: req.payload.beforeTaskId, afterTaskId: req.payload.afterTaskId,
         });
@@ -1889,21 +1898,24 @@ const tasksLive = HttpApiBuilder.group(LexaApi, "tasks", (handlers) =>
     .handle("deleteTask", (req) =>
       respond(Effect.gen(function* () {
         const taskService = yield* TaskService;
-        yield* taskService.delete(req.path.id);
+        const identity = yield* AuthIdentity;
+        yield* taskService.delete(actorFromIdentity(identity), req.path.id);
         return undefined;
       }))
     )
     .handle("archiveTask", (req) =>
       respond(Effect.gen(function* () {
         const taskService = yield* TaskService;
-        const task = yield* taskService.archive(req.path.id);
+        const identity = yield* AuthIdentity;
+        const { task } = yield* taskService.archive(actorFromIdentity(identity), req.path.id);
         return formatTask(task);
       }))
     )
     .handle("restoreTask", (req) =>
       respond(Effect.gen(function* () {
         const taskService = yield* TaskService;
-        const task = yield* taskService.restore(req.path.id);
+        const identity = yield* AuthIdentity;
+        const { task } = yield* taskService.restore(actorFromIdentity(identity), req.path.id);
         return formatTask(task);
       }))
     )
@@ -1912,8 +1924,9 @@ const tasksLive = HttpApiBuilder.group(LexaApi, "tasks", (handlers) =>
         const projectService = yield* ProjectService;
         const taskService = yield* TaskService;
         const githubService = yield* GitHubService;
+        const identity = yield* AuthIdentity;
         yield* projectService.findBySlug(req.path.slug);
-        yield* githubService.createLinkedIssue(req.path.id, req.payload.repo);
+        yield* githubService.createLinkedIssue(actorFromIdentity(identity), req.path.id, req.payload.repo);
         const task = yield* taskService.getById(req.path.id);
         return formatTask(task);
       }))
@@ -1923,12 +1936,24 @@ const tasksLive = HttpApiBuilder.group(LexaApi, "tasks", (handlers) =>
         const projectService = yield* ProjectService;
         const taskService = yield* TaskService;
         const taskRepo = yield* TaskRepo;
+        const activityService = yield* ActivityService;
+        const identity = yield* AuthIdentity;
         yield* projectService.findBySlug(req.path.slug);
-        yield* taskService.getById(req.path.id);
-        // Does NOT close or delete the GitHub issue.
-        yield* taskRepo.unlinkGithubIssue(req.path.id, req.path.issueId);
         const task = yield* taskService.getById(req.path.id);
-        return formatTask(task);
+        const issue = task.githubs.find((g) => g.issueId === req.path.issueId);
+        const db = yield* Sqlite;
+        // Does NOT close or delete the GitHub issue.
+        yield* withTx(db, Effect.gen(function* () {
+          yield* taskRepo.unlinkGithubIssue(req.path.id, req.path.issueId);
+          if (issue) {
+            // Handler-level emission — the unlink lives in the route, not a
+            // service (documented deviation: services-only rule).
+            yield* activityService.append(req.path.id, actorFromIdentity(identity), "github_unlinked",
+              msg.githubUnlinked(issue.repo, issue.issueNumber));
+          }
+        }));
+        const updated = yield* taskService.getById(req.path.id);
+        return formatTask(updated);
       }))
     )
 );
