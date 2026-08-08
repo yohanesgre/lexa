@@ -3571,7 +3571,12 @@
     top: var(--marker-center, 16px);
   }
   .activity-timeline > :last-child::before {
-    bottom: var(--marker-center, 16px);
+    /* bottom: measures from the row's bottom edge, but the marker sits at the
+       row's top — calc(100% - marker-center) pins the segment end to the
+       marker's vertical center regardless of the row height (a comment card
+       or a wrapped message is taller than 2×marker-center). No dangling tail
+       below the last marker. */
+    bottom: calc(100% - var(--marker-center, 16px));
   }
 
   /* "Load older" ghost button — keyset cursor pagination */
