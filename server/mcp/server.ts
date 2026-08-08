@@ -27,6 +27,8 @@ import { tool as moveTask } from "./tools/move-task";
 import { tool as deleteTask } from "./tools/delete-task";
 import { tool as archiveTask } from "./tools/archive-task";
 import { tool as restoreTask } from "./tools/restore-task";
+import { tool as getTaskActivity } from "./tools/get-task-activity";
+import { tool as addTaskComment } from "./tools/add-task-comment";
 import { tool as getWikiPage } from "./tools/get-wiki-page";
 import { tool as createWikiPage } from "./tools/create-wiki-page";
 import { tool as updateWikiPage } from "./tools/update-wiki-page";
@@ -55,6 +57,10 @@ import { tool as listUserProjectRoles } from "./tools/list-user-project-roles";
 import { tool as setUserProjectRole } from "./tools/set-user-project-role";
 import { tool as removeUserProjectRole } from "./tools/remove-user-project-role";
 import { UserProjectRoleRepo } from "../repos/user-project-role.repo";
+import { ActivityRepo } from "../repos/activity.repo";
+import { CommentRepo } from "../repos/comment.repo";
+import { ActivityService } from "../services/activity.service";
+import { CommentService } from "../services/comment.service";
 import { checkProjectAccess } from "./auth";
 import { resolveTaskProject } from "./resolve";
 
@@ -62,7 +68,7 @@ interface ToolDef {
   name: string;
   description: string;
   inputSchema: { type: string; properties: Record<string, unknown>; required?: string[] };
-  handler: (args: any, auth?: { userId: string | null; role: string }) => Effect.Effect<any, any, any>;
+  handler: (args: any, auth?: { userId: string | null; role: string; keyName: string }) => Effect.Effect<any, any, any>;
 }
 
 const tools: ToolDef[] = [
@@ -74,6 +80,8 @@ const tools: ToolDef[] = [
   deleteTask,
   archiveTask,
   restoreTask,
+  getTaskActivity,
+  addTaskComment,
   getWikiPage,
   createWikiPage,
   updateWikiPage,
@@ -161,6 +169,8 @@ export class McpServer extends Effect.Service<McpServer>()("Lexa/McpServer", {
     UserService.Default,
     UserProjectRoleService.Default,
     GitHubService.Default,
+    ActivityService.Default,
+    CommentService.Default,
   ],
   effect: Effect.gen(function* () {
     const apiKeyRepo = yield* ApiKeyRepo;
@@ -184,12 +194,12 @@ export class McpServer extends Effect.Service<McpServer>()("Lexa/McpServer", {
           const user = yield* userRepo.findById(row.user_id).pipe(
             Effect.catchTag("RowNotFound", () => Effect.fail("INVALID_API_KEY"))
           );
-          return { keyId: row.id, userId: user.id, role: user.role };
+          return { keyId: row.id, keyName: row.name, userId: user.id, role: user.role };
         }
-        return { keyId: row.id, userId: null, role: "admin" };
+        return { keyId: row.id, keyName: row.name, userId: null, role: "admin" };
       });
 
-    const dispatch = (request: any, authContext: { keyId: string; userId: string | null; role: string }) =>
+    const dispatch = (request: any, authContext: { keyId: string; keyName: string; userId: string | null; role: string }) =>
       Effect.gen(function* () {
         if (request.jsonrpc !== "2.0") {
           return jsonRpcError(request.id ?? null, -32600, "Invalid Request: jsonrpc must be \"2.0\"");
@@ -244,7 +254,7 @@ export class McpServer extends Effect.Service<McpServer>()("Lexa/McpServer", {
             if (typeof args?.slug === "string" && ["get_project", "get_project_status"].includes(toolName)) {
               yield* checkProjectAccess(authContext.userId, authContext.role, args.slug);
             }
-            if (typeof args?.taskId === "string" && ["get_task", "update_task", "move_task", "delete_task", "archive_task", "restore_task", "link_github_issue", "unlink_github_issue"].includes(toolName)) {
+            if (typeof args?.taskId === "string" && ["get_task", "update_task", "move_task", "delete_task", "archive_task", "restore_task", "link_github_issue", "unlink_github_issue", "get_task_activity", "add_task_comment"].includes(toolName)) {
               const resolution = yield* resolveTaskProject(args.taskId).pipe(Effect.either);
               if (resolution._tag === "Left") {
                 const err = buildToolError(resolution.left as any);
@@ -260,7 +270,7 @@ export class McpServer extends Effect.Service<McpServer>()("Lexa/McpServer", {
               yield* checkProjectAccess(authContext.userId, authContext.role, resolution.right.slug);
             }
 
-            const result = yield* tool.handler(args, { userId: authContext.userId, role: authContext.role }).pipe(
+            const result = yield* tool.handler(args, { userId: authContext.userId, role: authContext.role, keyName: authContext.keyName }).pipe(
               Effect.catchAll((e) => {
                 const err = buildToolError(e as any);
                 return Effect.logWarning(`[MCP] tool ${toolName} failed code=${(err as any).code}`).pipe(
@@ -366,6 +376,10 @@ const serviceLayer = Layer.mergeAll(
   SwimlaneRepo.Default,
   TaskRepo.Default,
   FieldConfigRepo.Default,
+  ActivityRepo.Default,
+  CommentRepo.Default,
+  ActivityService.Default,
+  CommentService.Default,
   ProjectService.Default,
   ColumnService.Default,
   SwimlaneService.Default,

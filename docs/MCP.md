@@ -50,7 +50,7 @@ Keys are **not** blanket read/write. Access is role-scoped per project:
 - Project-scoped checks run **before** the tool handler:
   - Tools with a `project` argument (project slug) resolve the project, then check access.
   - `get_project` / `get_project_status` take `slug` — same check.
-  - `get_task` / `update_task` / `move_task` / `delete_task` / `archive_task` / `restore_task` / `link_github_issue` / `unlink_github_issue` take `taskId` — the owning project is resolved from the task, then checked.
+  - `get_task` / `update_task` / `move_task` / `delete_task` / `archive_task` / `restore_task` / `link_github_issue` / `unlink_github_issue` / `get_task_activity` / `add_task_comment` take `taskId` — the owning project is resolved from the task, then checked.
   - Denied → tool error `FORBIDDEN` (details carry the reason). A non-admin referencing an unknown project also gets `FORBIDDEN`, not `PROJECT_NOT_FOUND`.
 - `list_projects`: admins see all projects; members see only granted projects.
 - **Admin-only tools** (enforced in the handler — `FORBIDDEN` unless the key's role is `admin`): `create_project`/`update_project`/`delete_project`, `create_column`/`update_column`/`delete_column`, `create_swimlane`/`update_swimlane`/`delete_swimlane`, `list_api_keys`/`create_api_key`/`delete_api_key`, `list_users`/`update_user_role`, `list_user_project_roles`/`set_user_project_role`/`remove_user_project_role`.
@@ -196,6 +196,27 @@ Input:  { taskId* }
 Output: TaskSummary (archivedAt null)
 Errors: TASK_NOT_FOUND
 Notes: idempotent. Restores the task to its original column/position.
+```
+
+**`get_task_activity`**
+```json
+Input:  { taskId*, cursor? }
+Output: { activity: [{ type, actor, at, message, comment?: { markdown } }], nextCursor }
+Errors: TASK_NOT_FOUND
+Notes: Activity timeline for the task, oldest first. Events (moves, field
+       changes, links, GitHub sync, Forge runs) and comments — comments are
+       serialized as Markdown (comment.markdown). Pass nextCursor for older
+       entries. Same page as the REST endpoint.
+```
+
+**`add_task_comment`**
+```json
+Input:  { taskId*, comment* }
+Output: { id, authorLabel, body (Markdown), createdAt }
+Errors: TASK_NOT_FOUND, COMMENT_INVALID
+Notes: The comment is Markdown; stored as rich text and rendered in the Lexa
+       UI. The agent's API key name is recorded as the author. Agents have NO
+       comment edit/delete tools — comments are append-only from MCP.
 ```
 
 ### Wiki
