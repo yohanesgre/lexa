@@ -1,7 +1,7 @@
 import { useQuery, useMutation, useQueryClient, useInfiniteQuery } from "@tanstack/react-query";
 import { useMemo } from "react";
 import type { QueryClient, InfiniteData } from "@tanstack/react-query";
-import type { Task, Project, Board, Column, Swimlane, TipTapDoc, WikiPageMeta, ApiKey, ApiKeyCreateResult, Dashboard, FieldConfig, DocumentSource, ForgeTask, TaskLink, Runtime, ForgeAgent, ForgeSkill, Machine, ActivityItem } from "../../shared/types";
+import type { Task, Project, Board, Column, Swimlane, TipTapDoc, WikiPageMeta, ApiKey, ApiKeyCreateResult, Dashboard, FieldConfig, DocumentSource, ForgeTask, TaskLink, Runtime, ForgeAgent, ForgeSkill, Machine, ActivityItem, ActivityEvent } from "../../shared/types";
 import * as api from "./api";
 import type { TaskMutationResult, ActivityPage } from "./api";
 import type { RecentForgeTask, ForgeHistoryPage } from "./api";
@@ -174,7 +174,7 @@ export function useUpdateTask(slug: string) {
   const qc = useQueryClient();
   const toast = useToast();
   return useMutation({
-    mutationFn: ({ id, ...input }: { id: string; title?: string; description?: TipTapDoc; priority?: string; type?: string; assignees?: string[] }) =>
+    mutationFn: ({ id, ...input }: { id: string; title?: string; description?: TipTapDoc; priority?: string; type?: string; assignees?: string[]; dueAt?: string | null }) =>
       api.updateTask(slug, id, input),
     onSuccess: ({ data: task, activity }) => {
       qc.setQueryData(["tasks", slug, task.id], task);
@@ -221,7 +221,7 @@ export function useMoveTask(slug: string) {
   const qc = useQueryClient();
   const toast = useToast();
   return useMutation({
-    mutationFn: ({ id, ...target }: { id: string; columnId: string; swimlaneId: string; beforeTaskId?: string; afterTaskId?: string }) =>
+    mutationFn: ({ id, ...target }: { id: string; columnId: string; swimlaneId: string; beforeTaskId?: string; afterTaskId?: string; clearDueAt?: boolean }) =>
       api.moveTask(slug, id, target),
     onSuccess: ({ data: task, activity }) => {
       // Keep both board caches in sync with the authoritative move response.
@@ -539,6 +539,13 @@ export function useCreateSwimlane(slug: string) {
         if (!old) return old;
         return [...old, swimlane];
       });
+      // Lane headers render on the board — keep both board caches in sync.
+      for (const archived of [false, true]) {
+        qc.setQueryData(["board", slug, archived], (old: Board | undefined) => {
+          if (!old) return old;
+          return { ...old, swimlanes: [...old.swimlanes, swimlane] };
+        });
+      }
       toast.push("success", "Swimlane created");
     },
     onError: (err) => {
@@ -558,10 +565,67 @@ export function useUpdateSwimlane(slug: string) {
         if (!old) return old;
         return old.map((s) => (s.id === swimlane.id ? swimlane : s));
       });
+      // The lane header renders the due chip — refresh the board caches too,
+      // or the board shows a stale deadline until refetch.
+      for (const archived of [false, true]) {
+        qc.setQueryData(["board", slug, archived], (old: Board | undefined) => {
+          if (!old) return old;
+          return { ...old, swimlanes: old.swimlanes.map((l: Swimlane) => (l.id === swimlane.id ? swimlane : l)) };
+        });
+      }
       toast.push("success", "Swimlane updated");
     },
     onError: (err) => {
       toast.push("error", "Failed to update swimlane", toastMessage(err));
+    },
+  });
+}
+
+export function useArchiveSwimlane(slug: string) {
+  const qc = useQueryClient();
+  const toast = useToast();
+  return useMutation({
+    mutationFn: ({ id }: { id: string }) => api.archiveSwimlane(slug, id),
+    onSuccess: ({ data: lane, activity }) => {
+      for (const archived of [false, true]) {
+        qc.setQueryData(["board", slug, archived], (old: Board | undefined) => {
+          if (!old) return old;
+          return {
+            ...old,
+            swimlanes: old.swimlanes.map((l: Swimlane) => (l.id === lane.id ? lane : l)),
+            tasks: old.tasks.map((t: Task) =>
+              activity.some((a) => a.taskId === t.id && a.type === "archived") ? { ...t, archivedAt: lane.archivedAt } : t
+            ),
+          };
+        });
+      }
+      qc.setQueryData(["projects", slug, "swimlanes"], (old: Swimlane[] | undefined) => old?.map((l) => (l.id === lane.id ? lane : l)));
+      toast.push("success", activity.length > 0 ? `Swimlane archived (${activity.length} tasks)` : "Swimlane archived");
+    },
+    onError: (err) => {
+      toast.push("error", "Failed to archive swimlane", toastMessage(err));
+    },
+  });
+}
+
+export function useRestoreSwimlane(slug: string) {
+  const qc = useQueryClient();
+  const toast = useToast();
+  return useMutation({
+    mutationFn: ({ id }: { id: string }) => api.restoreSwimlane(slug, id),
+    onSuccess: ({ data: lane }) => {
+      // Restore brings the lane back only — tasks stay archived.
+      for (const archived of [false, true]) {
+        qc.setQueryData(["board", slug, archived], (old: Board | undefined) => {
+          if (!old) return old;
+          return { ...old, swimlanes: old.swimlanes.map((l: Swimlane) => (l.id === lane.id ? lane : l)) };
+        });
+      }
+      qc.setQueryData(["projects", slug, "swimlanes"], (old: Swimlane[] | undefined) => old?.map((l) => (l.id === lane.id ? lane : l)));
+      toast.push("success", "Swimlane restored");
+    },
+    onError: (err) => {
+      toast.push("error", "Failed to restore swimlane", toastMessage(err));
     },
   });
 }

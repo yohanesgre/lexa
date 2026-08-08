@@ -5,9 +5,16 @@ export { UserNotFound, CannotDeleteSelf, LastAdminDemote } from "../services/use
 export class TaskNotFound extends Data.TaggedError("TaskNotFound")<{ id: string }> {}
 export class ProjectNotFound extends Data.TaggedError("ProjectNotFound")<{ identifier: string }> {}
 export class ColumnNotFound extends Data.TaggedError("ColumnNotFound")<{ id: string }> {}
-export class SwimlaneNotFound extends Data.TaggedError("SwimlaneNotFound")<{ id: string }> {}
+export class SwimlaneNotFound extends Data.TaggedError("SwimlaneNotFound")<{ id: string; availableSwimlanes?: string[] }> {}
 export class WikiPageNotFound extends Data.TaggedError("WikiPageNotFound")<{ id: string }> {}
 export class WipLimitExceeded extends Data.TaggedError("WipLimitExceeded")<{ column: string; limit: number; current: number }> {}
+export class DeadlineAfterLane extends Data.TaggedError("DeadlineAfterLane")<{
+  date: string;                    // the lane's due date (YYYY-MM-DD)
+  taskId?: string;                 // first offending task (lane-shrink path)
+}> {}
+export class BacklogProtected extends Data.TaggedError("BacklogProtected")<{
+  action: "archive" | "delete" | "deadline";
+}> {}
 export class SlugTaken extends Data.TaggedError("SlugTaken")<{ slug: string }> {}
 export class HasChildren extends Data.TaggedError("HasChildren")<{ count: number }> {}
 export class TaskHasChildren extends Data.TaggedError("TaskHasChildren")<{ taskId: string }> {}
@@ -56,6 +63,8 @@ export const errorCodeMap: Record<string, string> = {
   SwimlaneNotFound: "SWIMLANE_NOT_FOUND",
   WikiPageNotFound: "PAGE_NOT_FOUND",
   WipLimitExceeded: "WIP_LIMIT",
+  DeadlineAfterLane: "DEADLINE_AFTER_LANE",
+  BacklogProtected: "BACKLOG_PROTECTED",
   SlugTaken: "SLUG_TAKEN",
   HasChildren: "HAS_CHILDREN",
   TaskHasChildren: "TASK_HAS_CHILDREN",
@@ -133,6 +142,8 @@ export function errorToStatus(error: { _tag: string }): number {
     case "CommentNotFound":
       return 404;
     case "WipLimitExceeded":
+    case "DeadlineAfterLane":
+    case "BacklogProtected":
     case "SlugTaken":
     case "HasChildren":
     case "TaskHasChildren":
@@ -186,6 +197,10 @@ export function errorMessage(error: { _tag: string } & Record<string, unknown>):
       return `Page not found`;
     case "WipLimitExceeded":
       return `Column '${error.column}' is at its WIP limit of ${error.limit}`;
+    case "DeadlineAfterLane":
+      return `Task deadline cannot be later than the lane's (lane due ${error.date})`;
+    case "BacklogProtected":
+      return `The Backlog lane is protected (${error.action} not allowed)`;
     case "SlugTaken":
       return `Slug '${error.slug}' is already taken`;
     case "HasChildren":

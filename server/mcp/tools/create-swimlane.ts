@@ -11,6 +11,7 @@ export const tool = {
       project: { type: "string", description: "Project slug" },
       name: { type: "string", description: "Swimlane name" },
       description: { type: "string", description: "Swimlane description" },
+      dueAt: { type: "string", description: "Milestone due date (YYYY-MM-DD). Omit to leave unchanged; empty string clears it." },
     },
     required: ["project", "name"],
   },
@@ -26,6 +27,7 @@ export const tool = {
         projectId: project.id,
         name: args.name,
         description: args.description,
+        dueAt: args.dueAt === "" ? null : args.dueAt,
       });
 
       return {

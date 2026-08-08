@@ -16,6 +16,9 @@ export function descriptionUpdated(actor: string) { return `${actor} updated the
 export function priorityChanged(from: string, to: string) { return `Priority changed: ${from} → ${to}`; }
 export function typeChanged(from: string, to: string) { return `Type changed: ${from} → ${to}`; }
 export function assigneesUpdated(actor: string) { return `${actor} updated assignees`; }
+export function dueDateChanged(from: string | null, to: string | null) {
+  return to === null ? "Due date cleared" : from === null ? `Due date set: ${to}` : `Due date changed: ${from} → ${to}`;
+}
 export function archived(actor: string) { return `${actor} archived this task`; }
 export function restored(actor: string) { return `${actor} restored this task`; }
 export function deletedTask(actor: string) { return `${actor} deleted this task`; }
@@ -48,13 +51,14 @@ export function formatActivityMessage(type: ActivityType, payload: ActivityMessa
       return moved(p.actor, p.fromCol, p.toCol, p.fromLane, p.toLane);
     }
     case "field_changed": {
-      const p = payload as { variant: "title" | "description" | "assignees" | "priority" | "type"; actor?: string; from?: string; to?: string };
+      const p = payload as { variant: "title" | "description" | "assignees" | "priority" | "type" | "dueAt"; actor?: string; from?: string; to?: string };
       switch (p.variant) {
         case "title": return titleChanged(p.actor ?? "");
         case "description": return descriptionUpdated(p.actor ?? "");
         case "assignees": return assigneesUpdated(p.actor ?? "");
         case "priority": return priorityChanged(p.from ?? "", p.to ?? "");
         case "type": return typeChanged(p.from ?? "", p.to ?? "");
+        case "dueAt": return dueDateChanged(p.from ?? null, p.to ?? null);
         // Missing/typo variant: never emit undefined (message is stored in a
         // NOT NULL column and frozen at write time). The never-assert makes a
         // future variant addition fail compilation here.

@@ -42,18 +42,21 @@ export function SwimlanesSettingsSection({ swimlanes, sensors, onDragEnd, onEdit
         <div className="bg-lx-surface-card border border-lx-border rounded-lg overflow-hidden">
           <DndContext sensors={sensors} onDragEnd={onDragEnd}>
             <SortableContext items={swimlanes.map((s) => s.id)} strategy={verticalListSortingStrategy}>
-              <table className="w-full border-collapse text-[13px] font-body">
+              <table className="w-full border-collapse text-[13px] font-body" style={{ tableLayout: "fixed" }}>
                 <thead>
                   <tr className="border-b border-lx-border">
-                    <th className="w-8 py-2.5 px-3"></th>
-                    <th className="py-2.5 px-3 text-left text-[11px] uppercase tracking-[0.05em] text-lx-text-secondary font-medium font-body" style={{ width: 160 }}>Name</th>
+                    <th className="py-2.5 px-3 whitespace-nowrap" style={{ width: 44 }}></th>
+                    <th className="py-2.5 px-3 text-left text-[11px] uppercase tracking-[0.05em] text-lx-text-secondary font-medium font-body" style={{ width: 200 }}>Name</th>
                     <th className="py-2.5 px-3 text-left text-[11px] uppercase tracking-[0.05em] text-lx-text-secondary font-medium font-body">Description</th>
-                    <th className="w-[100px] py-2.5 px-3"></th>
+                    <th className="py-2.5 px-3 whitespace-nowrap" style={{ width: 100 }}></th>
                   </tr>
                 </thead>
                 <tbody>
                   {swimlanes.map((swimlane) => (
                     <SortableRow key={swimlane.id} id={swimlane.id} className="border-b border-lx-border last:border-b-0">
+                      <td className="py-2.5 px-3 whitespace-nowrap">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="text-lx-text-muted cursor-grab"><circle cx="9" cy="12" r="1" /><circle cx="9" cy="5" r="1" /><circle cx="9" cy="19" r="1" /><circle cx="15" cy="12" r="1" /><circle cx="15" cy="5" r="1" /><circle cx="15" cy="19" r="1" /></svg>
+                      </td>
                       <td className="py-2.5 px-3 text-sm font-medium text-lx-text-primary">{swimlane.name}</td>
                       <td className="py-2.5 px-3" style={{ maxWidth: 0 }}>
                         {swimlane.description ? (

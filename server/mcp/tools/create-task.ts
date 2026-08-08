@@ -21,15 +21,18 @@ export const tool = {
       priority: { type: "string", description: "Priority label from the project's field-config (default: first option)" },
       type: { type: "string", description: "Type label from the project's field-config (default: first option)" },
       assignees: { type: "array", items: { type: "string" }, description: "Assignee names" },
-      swimlane: { type: "string", description: "Swimlane name (case-insensitive, required)" },
+      swimlane: { type: "string", description: "Swimlane name (case-insensitive). Omitted → task lands in the project's Backlog lane" },
+      dueAt: { type: "string", description: "Task due date (YYYY-MM-DD), must not be later than the swimlane's due date" },
     },
-    required: ["project", "column", "swimlane", "title"],
+    required: ["project", "column", "title"],
   },
   handler: (args: any, ctx?: { userId: string | null; role: string }) =>
     Effect.gen(function* () {
       const project = yield* resolveProject(args.project);
       const column = yield* resolveColumn(project.id, args.column);
-      const swimlane = yield* resolveSwimlane(project.id, args.swimlane);
+      const swimlane = args.swimlane
+        ? yield* resolveSwimlane(project.id, args.swimlane)
+        : null;
 
       const description = args.description
         ? markdownToDoc(args.description)
@@ -61,12 +64,13 @@ export const tool = {
       const { task } = yield* taskService.create(actor, {
         projectId: project.id,
         columnId: column.id,
-        swimlaneId: swimlane.id,
+        swimlaneId: swimlane?.id,
         title: args.title,
         description,
         priority: priority.id,
         type: type.id,
         assignees: args.assignees ?? [],
+        dueAt: args.dueAt === "" ? null : args.dueAt,
       });
 
       const columnRepo = yield* ColumnRepo;
@@ -105,6 +109,7 @@ export const tool = {
           outOfSync: g.outOfSync,
         })),
         archivedAt: task.archivedAt,
+        dueAt: task.dueAt,
         updatedAt: task.updatedAt,
       };
     }),

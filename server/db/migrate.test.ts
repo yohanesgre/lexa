@@ -41,6 +41,7 @@ describe("runMigrations", () => {
       "0002_revoke_dev_seed_key.sql",
       "0003_machine_secret.sql",
       "0004_task_activity.sql",
+      "0005_milestone_deadlines.sql",
     ]);
     const db = new Database(dbPath);
     expect(tableExists(db, "tasks")).toBe(true);
@@ -57,6 +58,7 @@ describe("runMigrations", () => {
       "0002_revoke_dev_seed_key.sql",
       "0003_machine_secret.sql",
       "0004_task_activity.sql",
+      "0005_milestone_deadlines.sql",
     ]);
   });
 
@@ -89,6 +91,7 @@ describe("runMigrations", () => {
       "0002_revoke_dev_seed_key.sql",
       "0003_machine_secret.sql",
       "0004_task_activity.sql",
+      "0005_milestone_deadlines.sql",
     ]);
   });
 });
@@ -127,6 +130,54 @@ describe("0004_task_activity", () => {
     expect(cols.map((c: any) => c.name)).toEqual(
       expect.arrayContaining(["id", "task_id", "author_id", "author_kind", "author_label", "body", "edited_at", "deleted_at", "created_at"])
     );
+    db2.close();
+  });
+});
+
+describe("0005_milestone_deadlines", () => {
+  it("adds columns, converts Default lanes to Backlog, backfills missing backlog lanes", () => {
+    // Phase like prod: apply 0001–0004, seed projects, then apply 0005 so its
+    // backfill sees the lanes that existed before the migration.
+    const dir = tmpDir();
+    for (const f of readdirSync(MIGRATIONS).filter((f) => f.endsWith(".sql"))) {
+      if (f !== "0005_milestone_deadlines.sql") copyFileSync(join(MIGRATIONS, f), join(dir, f));
+    }
+    const dbPath = join(dir, "app.db");
+    runMigrations(dbPath, dir);
+    const db = new Database(dbPath);
+    // p1 has a 'Default' lane (becomes Backlog); p2 renamed its lane historically
+    // ('Sprint 1' — no backlog lane); p3 already has a 'Backlog' lane but no kind.
+    db.prepare("INSERT INTO projects (id, name, slug) VALUES ('p1','P1','p1'), ('p2','P2','p2'), ('p3','P3','p3')").run();
+    db.prepare("INSERT INTO swimlanes (id, project_id, name, position) VALUES ('s1','p1','Default',0)").run();
+    db.prepare("INSERT INTO swimlanes (id, project_id, name, position) VALUES ('s2','p2','Sprint 1',0)").run();
+    db.prepare("INSERT INTO swimlanes (id, project_id, name, position) VALUES ('s3','p3','Backlog',0), ('s4','p3','Sprint 1',1)").run();
+    db.close();
+
+    copyFileSync(join(MIGRATIONS, "0005_milestone_deadlines.sql"), join(dir, "0005_milestone_deadlines.sql"));
+    runMigrations(dbPath, dir);
+
+    const db2 = new Database(dbPath);
+    const cols = db2.prepare("SELECT name FROM pragma_table_info('swimlanes')").all() as any[];
+    expect(cols.map((c: any) => c.name)).toEqual(
+      expect.arrayContaining(["due_at", "archived_at", "kind"])
+    );
+    const taskCols = db2.prepare("SELECT name FROM pragma_table_info('tasks')").all() as any[];
+    expect(taskCols.map((c: any) => c.name)).toContain("due_at");
+    const rows = db2.prepare("SELECT project_id, name, kind FROM swimlanes ORDER BY project_id, position").all() as any[];
+    expect(rows).toEqual([
+      { project_id: "p1", name: "Backlog", kind: "backlog" },           // 'Default' converted
+      { project_id: "p2", name: "Sprint 1", kind: "milestone" },
+      { project_id: "p2", name: "Backlog", kind: "backlog" },           // backfilled
+      { project_id: "p3", name: "Backlog", kind: "milestone" },         // pre-existing name, kind untouched
+      { project_id: "p3", name: "Sprint 1", kind: "milestone" },
+      { project_id: "p3", name: "Backlog", kind: "backlog" },           // backfilled — identity is kind, not name
+    ]);
+    const backlogCounts = db2.prepare("SELECT project_id, COUNT(*) as c FROM swimlanes WHERE kind = 'backlog' GROUP BY project_id").all() as any[];
+    expect(backlogCounts).toEqual([
+      { project_id: "p1", c: 1 },
+      { project_id: "p2", c: 1 },
+      { project_id: "p3", c: 1 },
+    ]);
     db2.close();
   });
 });

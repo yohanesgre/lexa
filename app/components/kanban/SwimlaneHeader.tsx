@@ -1,8 +1,9 @@
 import { useState } from "react";
-import { MoreHorizontal, ChevronDown, ChevronUp, Pencil, Plus, Trash2, Settings, X } from "lucide-react";
+import { MoreHorizontal, ChevronDown, ChevronUp, Pencil, Plus, Trash2, Settings, X, Archive } from "lucide-react";
 import { cn } from "../ui/cn";
 import { Menu } from "../ui/Menu";
-import { useUpdateSwimlane, useDeleteSwimlane, useCreateColumn } from "../../lib/queries";
+import { useUpdateSwimlane, useDeleteSwimlane, useCreateColumn, useArchiveSwimlane, useRestoreSwimlane } from "../../lib/queries";
+import { formatDueLabel } from "../../lib/dates";
 import { SwimlaneForm } from "./SwimlaneForm";
 import { ColumnForm } from "./ColumnForm";
 import type { Swimlane } from "../../../shared/types";
@@ -19,6 +20,8 @@ export function SwimlaneHeader({ slug, lane, count, collapsed = false, onToggle 
   const updateSwimlane = useUpdateSwimlane(slug);
   const deleteSwimlane = useDeleteSwimlane(slug);
   const createColumn = useCreateColumn(slug);
+  const archiveSwimlane = useArchiveSwimlane(slug);
+  const restoreSwimlane = useRestoreSwimlane(slug);
 
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isRenaming, setIsRenaming] = useState(false);
@@ -26,6 +29,8 @@ export function SwimlaneHeader({ slug, lane, count, collapsed = false, onToggle 
   const [deleteConfirm, setDeleteConfirm] = useState(false);
   const [isAddColumnOpen, setIsAddColumnOpen] = useState(false);
   const [isDescOpen, setIsDescOpen] = useState(false);
+
+  const due = lane.dueAt ? formatDueLabel(lane.dueAt) : null;
 
   const truncatedDesc = lane.description
     ? lane.description.length > 80
@@ -53,7 +58,14 @@ export function SwimlaneHeader({ slug, lane, count, collapsed = false, onToggle 
 
   return (
     <>
-      <div className="swimlane-header" onClick={onToggle}>
+      <div
+        className={cn(
+          "swimlane-header",
+          lane.kind === "backlog" && "swimlane-backlog",
+          !!lane.archivedAt && "swimlane-archived"
+        )}
+        onClick={onToggle}
+      >
         <button
           type="button"
           className="chevron-btn"
@@ -96,6 +108,23 @@ export function SwimlaneHeader({ slug, lane, count, collapsed = false, onToggle 
           <span className="swimlane-name">{lane.name}</span>
         )}
         {count !== undefined && <span className="swimlane-count">{String(count).padStart(3, "0")}</span>}
+        {due && lane.kind !== "backlog" && !lane.archivedAt && (
+          <span className={cn("lane-due", due.overdue && "lane-due-overdue")}>{due.text}</span>
+        )}
+        {lane.kind === "backlog" && !collapsed && (
+          <span
+            style={{
+              fontSize: 11,
+              fontFamily: "var(--lx-font-micro)",
+              marginLeft: 8,
+              textTransform: "uppercase",
+              letterSpacing: "0.04em",
+              color: "var(--lx-text-muted)",
+            }}
+          >
+            system lane
+          </span>
+        )}
         {truncatedDesc && !collapsed && (
           <>
             <span className="swimlane-desc">{truncatedDesc}</span>
@@ -111,7 +140,7 @@ export function SwimlaneHeader({ slug, lane, count, collapsed = false, onToggle 
           </>
         )}
         <span className="flex-1" />
-        {onToggle && (
+        {(onToggle || !!lane.archivedAt) && (
           <Menu
             align="right"
             gap={16}
@@ -129,10 +158,12 @@ export function SwimlaneHeader({ slug, lane, count, collapsed = false, onToggle 
               </button>
             )}
           >
-            <button type="button" className="menu-item" onClick={onToggle}>
-              {collapsed ? <ChevronDown size={14} /> : <ChevronUp size={14} />}
-              {collapsed ? "Expand" : "Collapse"}
-            </button>
+            {onToggle && (
+              <button type="button" className="menu-item" onClick={onToggle}>
+                {collapsed ? <ChevronDown size={14} /> : <ChevronUp size={14} />}
+                {collapsed ? "Expand" : "Collapse"}
+              </button>
+            )}
             <button type="button" className="menu-item" onClick={() => setIsSettingsOpen(true)}>
               <Settings size={14} />
               Settings
@@ -146,6 +177,32 @@ export function SwimlaneHeader({ slug, lane, count, collapsed = false, onToggle 
               <Plus size={14} />
               Add column
             </button>
+            {!lane.archivedAt && lane.kind === "milestone" && (
+              <>
+                <div className="menu-separator" />
+                <button
+                  type="button"
+                  className="menu-item"
+                  onClick={() => archiveSwimlane.mutate({ id: lane.id })}
+                >
+                  <Archive size={14} />
+                  Archive swimlane
+                </button>
+              </>
+            )}
+            {!!lane.archivedAt && (
+              <>
+                <div className="menu-separator" />
+                <button
+                  type="button"
+                  className="menu-item"
+                  onClick={() => restoreSwimlane.mutate({ id: lane.id })}
+                >
+                  <Archive size={14} />
+                  Restore swimlane
+                </button>
+              </>
+            )}
             <div className="menu-separator" />
             <button type="button" className="menu-item danger" onClick={() => setDeleteConfirm(true)}>
               <Trash2 size={14} />

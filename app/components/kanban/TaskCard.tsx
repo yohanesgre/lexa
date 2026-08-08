@@ -1,4 +1,5 @@
 import { cn } from "../ui/cn";
+import { formatDueLabel } from "../../lib/dates";
 import type { GithubIssue, FieldOption } from "../../../shared/types";
 
 interface TaskCardProps {
@@ -10,6 +11,7 @@ interface TaskCardProps {
   types: FieldOption[];
   assignees: string[];
   githubs: GithubIssue[];
+  dueAt?: string | null;
   isDragging?: boolean;
   dimmed?: boolean;
   archived?: boolean;
@@ -30,13 +32,14 @@ function GithubMark({ size = 12 }: { size?: number }) {
   );
 }
 
-export function TaskCard({ title, priority, type, priorities, types, assignees, githubs, isDragging = false, dimmed = false, archived = false, isSubtask = false, blockedBy = [], subtaskCount = 0, onToggleSubtasks, subtasksCollapsed = false, action, className }: TaskCardProps) {
+export function TaskCard({ title, priority, type, priorities, types, assignees, githubs, dueAt, isDragging = false, dimmed = false, archived = false, isSubtask = false, blockedBy = [], subtaskCount = 0, onToggleSubtasks, subtasksCollapsed = false, action, className }: TaskCardProps) {
   const typeOpt = types.find((t) => t.id === type);
   const prioOpt = priorities.find((p) => p.id === priority);
   const typeLabel = typeOpt?.label ?? type;
   const typeColor = typeOpt?.color ?? "#6b7280";
   const prioColor = prioOpt?.color ?? "#6b6560";
   const hasOutOfSync = githubs.some(g => g.outOfSync);
+  const due = dueAt ? formatDueLabel(dueAt) : null;
   return (
     <div className={cn("kanban-card border-l-[3px]", isSubtask && "kanban-card-subtask", isDragging && "state-dragging", dimmed && "opacity-45", archived && "state-archived", className)}
       style={{ borderLeftColor: typeColor }}>
@@ -91,6 +94,9 @@ export function TaskCard({ title, priority, type, priorities, types, assignees, 
           ))}
           {assignees.length > 3 && <span className="card-assignees-overflow">+{assignees.length - 3}</span>}
         </div>
+        {due && (
+          <span className={cn("card-due", due.overdue && "card-due-overdue")}>{due.text}</span>
+        )}
         <div className="card-meta-spacer" />
         <div className="card-gh-issues">
           {githubs.slice(0, 2).map(g => (

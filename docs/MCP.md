@@ -129,13 +129,14 @@ interface PageMeta { title: string; slug: string; parentSlug: string | null; upd
 
 **`create_task`**
 ```json
-Input:  { project*, column*, title*, description?, priority?, type?, assignees?, swimlane* }
+Input:  { project*, column*, title*, description?, priority?, type?, assignees?, swimlane?, dueAt? }
         description = Markdown. priority/type are LABELS from the project's
         field-config (call get_project to list them); case-insensitive; omitted → first option.
-        swimlane required (name, case-insensitive) — tasks always belong to a swimlane (schema NOT NULL).
+        swimlane (name, case-insensitive) OPTIONAL — omitted → task lands in the project's
+        Backlog lane. dueAt = "YYYY-MM-DD" — must not be later than the swimlane's due date.
 Output: TaskSummary
 Errors: PROJECT_NOT_FOUND, COLUMN_NOT_FOUND (+availableColumns), SWIMLANE_NOT_FOUND (+availableSwimlanes),
-        REQUIRED_FIELD, INVALID_OPTION (+availablePriorities/availableTypes)
+        DEADLINE_AFTER_LANE {date}, REQUIRED_FIELD, INVALID_OPTION (+availablePriorities/availableTypes)
 ```
 
 **`list_tasks`**
@@ -154,11 +155,12 @@ Output: TaskDetail (description as Markdown)
 
 **`update_task`**
 ```json
-Input:  { taskId*, title?, description?, priority?, type?, assignees? }
+Input:  { taskId*, title?, description?, priority?, type?, assignees?, dueAt? }
         description = Markdown (full replace). assignees: empty array clears.
-        priority/type are LABELS (case-insensitive).
+        priority/type are LABELS (case-insensitive). dueAt: "YYYY-MM-DD";
+        empty string clears. Must not be later than the lane's due date.
 Output: TaskDetail
-Errors: TASK_NOT_FOUND, REQUIRED_FIELD, INVALID_OPTION (+availablePriorities/availableTypes)
+Errors: TASK_NOT_FOUND, DEADLINE_AFTER_LANE {date}, REQUIRED_FIELD, INVALID_OPTION (+availablePriorities/availableTypes)
 ```
 
 **`move_task`**
@@ -354,25 +356,46 @@ Notes: column must be empty (no tasks).
 
 **`create_swimlane`** — Admin only
 ```json
-Input:  { project*, name*, description? }
+Input:  { project*, name*, description?, dueAt? }
+        dueAt = "YYYY-MM-DD" milestone deadline; empty string clears. Lanes are
+        always created as kind 'milestone' — the Backlog lane is system-seeded.
 Output: { id, name, description, position }
 Errors: FORBIDDEN, PROJECT_NOT_FOUND
 ```
 
 **`update_swimlane`** — Admin only
 ```json
-Input:  { project*, swimlane*, name?, description? }
-        swimlane = name (case-insensitive).
+Input:  { project*, swimlane*, name?, description?, dueAt? }
+        swimlane = name (case-insensitive). dueAt: empty string clears.
+        Setting dueAt earlier than a live task's deadline → DEADLINE_AFTER_LANE.
+        dueAt on the Backlog lane → BACKLOG_PROTECTED.
 Output: { id, name, description, position }
-Errors: FORBIDDEN, PROJECT_NOT_FOUND, SWIMLANE_NOT_FOUND
+Errors: FORBIDDEN, PROJECT_NOT_FOUND, SWIMLANE_NOT_FOUND, DEADLINE_AFTER_LANE {date}, BACKLOG_PROTECTED
 ```
 
 **`delete_swimlane`** — Admin only
 ```json
 Input:  { project*, swimlane* }   swimlane = name (case-insensitive)
 Output: { deleted: true }
-Errors: FORBIDDEN, PROJECT_NOT_FOUND, SWIMLANE_NOT_FOUND, HAS_CHILDREN
-Notes: swimlane must be empty (no tasks).
+Errors: FORBIDDEN, PROJECT_NOT_FOUND, SWIMLANE_NOT_FOUND, HAS_CHILDREN, BACKLOG_PROTECTED
+Notes: swimlane must be empty (no tasks). The Backlog lane cannot be deleted.
+```
+
+**`archive_swimlane`** — Admin only
+```json
+Input:  { project*, swimlane* }   swimlane = name (case-insensitive)
+Output: { message: 'Archived swimlane "<name>" (<n> tasks archived)' }
+Errors: FORBIDDEN, PROJECT_NOT_FOUND, SWIMLANE_NOT_FOUND, BACKLOG_PROTECTED
+Notes: one transaction — the lane AND all its live tasks are archived (per-task
+       `archived` activity rows). Idempotent. The Backlog lane cannot be archived.
+```
+
+**`restore_swimlane`** — Admin only
+```json
+Input:  { project*, swimlane* }   swimlane = name (case-insensitive)
+Output: { message: 'Restored swimlane "<name>"' }
+Errors: FORBIDDEN, PROJECT_NOT_FOUND, SWIMLANE_NOT_FOUND
+Notes: lane only — tasks stay archived (restore individually). Idempotent.
 ```
 
 ### Administration (API keys, users, project grants)

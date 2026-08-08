@@ -68,8 +68,18 @@
         <div class="field-hint">Plain text. Shown truncated with "read more" in the swimlane header.</div>
       </div>
 
+      <div class="field">
+        <label class="field-label">
+          Due date
+          <span class="font-micro text-2xs color-muted" style="text-transform:uppercase;letter-spacing:0.04em;margin-left:6px;">Optional · milestones only</span>
+        </label>
+        <INCLUDE _datepicker.html />
+        <div class="field-hint">Stored as <span class="font-mono">swimlanes.due_at</span> YYYY-MM-DD — date-only, no time-of-day. Empty = lane has no deadline. Clear on the Backlog lane is rejected (<span class="font-mono">BACKLOG_PROTECTED</span>); the Backlog variant shows no date field at all.</div>
+      </div>
+
       <div class="mt-3">
         <span class="annotation-tag">Create mode: fields empty, title "Create Swimlane", footer = Cancel + "Create Swimlane". Edit mode: fields populated, footer = "Delete Swimlane" (danger, left) + Cancel + "Save Changes".</span>
+        <span class="annotation-tag" style="display:block;margin-top:4px;">Backlog variant: editing the system Backlog lane hides the Due date field entirely — Backlog can never carry a deadline.</span>
       </div>
     </div>
 

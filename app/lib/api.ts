@@ -144,16 +144,29 @@ export function listSwimlanes(slug: string): Promise<{ data: Swimlane[] }> {
   return request(`${BASE}/projects/${slug}/swimlanes`);
 }
 
-export function createSwimlane(slug: string, input: { name: string; description?: string }): Promise<Swimlane> {
+export function createSwimlane(slug: string, input: { name: string; description?: string; dueAt?: string | null }): Promise<Swimlane> {
   return request(`${BASE}/projects/${slug}/swimlanes`, { method: "POST", body: JSON.stringify(input) });
 }
 
-export function updateSwimlane(slug: string, id: string, input: { name?: string; position?: number; description?: string }): Promise<Swimlane> {
+export function updateSwimlane(slug: string, id: string, input: { name?: string; position?: number; description?: string; dueAt?: string | null }): Promise<Swimlane> {
   return request(`${BASE}/projects/${slug}/swimlanes/${id}`, { method: "PATCH", body: JSON.stringify(input) });
 }
 
 export function deleteSwimlane(slug: string, id: string): Promise<void> {
   return request(`${BASE}/projects/${slug}/swimlanes/${id}`, { method: "DELETE" });
+}
+
+export interface SwimlaneMutationResult {
+  data: Swimlane;
+  activity: ActivityEvent[];
+}
+
+export function archiveSwimlane(slug: string, id: string): Promise<SwimlaneMutationResult> {
+  return request(`${BASE}/projects/${slug}/swimlanes/${id}/archive`, { method: "POST" });
+}
+
+export function restoreSwimlane(slug: string, id: string): Promise<SwimlaneMutationResult> {
+  return request(`${BASE}/projects/${slug}/swimlanes/${id}/restore`, { method: "POST" });
 }
 
 
@@ -162,16 +175,16 @@ export interface TaskMutationResult {
   activity: ActivityEvent[];
 }
 
-export function createTask(slug: string, input: { columnId: string; swimlaneId: string; title: string; description?: TipTapDoc; priority?: string; type?: string; parentId?: string; assignees?: string[] }): Promise<TaskMutationResult> {
+export function createTask(slug: string, input: { columnId: string; swimlaneId?: string; title: string; description?: TipTapDoc; priority?: string; type?: string; parentId?: string; assignees?: string[]; dueAt?: string | null }): Promise<TaskMutationResult> {
   return request(`${BASE}/projects/${slug}/tasks`, { method: "POST", body: JSON.stringify(input) });
 }
 
 
-export function updateTask(slug: string, id: string, input: { title?: string; description?: TipTapDoc; priority?: string; type?: string; assignees?: string[] }): Promise<TaskMutationResult> {
+export function updateTask(slug: string, id: string, input: { title?: string; description?: TipTapDoc; priority?: string; type?: string; assignees?: string[]; dueAt?: string | null }): Promise<TaskMutationResult> {
   return request(`${BASE}/projects/${slug}/tasks/${id}`, { method: "PATCH", body: JSON.stringify(input) });
 }
 
-export function moveTask(slug: string, id: string, target: { columnId: string; swimlaneId: string; beforeTaskId?: string; afterTaskId?: string }): Promise<TaskMutationResult> {
+export function moveTask(slug: string, id: string, target: { columnId: string; swimlaneId: string; beforeTaskId?: string; afterTaskId?: string; clearDueAt?: boolean }): Promise<TaskMutationResult> {
   return request(`${BASE}/projects/${slug}/tasks/${id}/move`, { method: "POST", body: JSON.stringify(target) });
 }
 

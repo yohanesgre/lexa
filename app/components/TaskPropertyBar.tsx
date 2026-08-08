@@ -3,6 +3,7 @@ import type { Task } from "../../shared/types";
 import { cn } from "./ui/cn";
 import { SelectDropdown } from "./ui/SelectDropdown";
 import { AssigneeChips } from "./AssigneeChips";
+import { DatePicker } from "./ui/DatePicker";
 
 interface TaskPropertyBarProps {
   isCreate: boolean;
@@ -17,7 +18,7 @@ interface TaskPropertyBarProps {
   setSelectedColumnId: (v: string) => void;
   selectedSwimlaneId: string;
   setSelectedSwimlaneId: (v: string) => void;
-  onUpdate: (id: string, data: { columnId?: string; priority?: string; type?: string; assignees?: string[] }) => void;
+  onUpdate: (id: string, data: { columnId?: string; priority?: string; type?: string; assignees?: string[]; dueAt?: string | null }) => void;
   onMove: (id: string, data: { columnId: string; swimlaneId: string }) => void;
   createColumnId: string;
   setCreateColumnId: (v: string) => void;
@@ -27,6 +28,8 @@ interface TaskPropertyBarProps {
   setCreateType: (v: string) => void;
   createAssignees: string[];
   setCreateAssignees: (v: string[]) => void;
+  createDueAt: string;
+  setCreateDueAt: (v: string) => void;
   availableAssignees: string[] | undefined;
   editingAssignees: boolean;
   setEditingAssignees: (v: boolean) => void;
@@ -36,7 +39,7 @@ export function TaskPropertyBar(props: TaskPropertyBarProps) {
   const { isCreate, task, columns, swimlanes, fieldConfig, missingFields, currentColumnName, currentSwimlaneName,
     selectedColumnId, setSelectedColumnId, selectedSwimlaneId, setSelectedSwimlaneId, onUpdate, onMove,
     createColumnId, setCreateColumnId, createPriority, setCreatePriority, createType, setCreateType,
-    createAssignees, setCreateAssignees, availableAssignees, editingAssignees, setEditingAssignees } = props;
+    createAssignees, setCreateAssignees, createDueAt, setCreateDueAt, availableAssignees, editingAssignees, setEditingAssignees } = props;
   const priorities = fieldConfig?.priorities ?? [];
   const types = fieldConfig?.types ?? [];
   return (
@@ -202,6 +205,20 @@ export function TaskPropertyBar(props: TaskPropertyBarProps) {
             </button>
           );
         }}
+      />
+    )}
+  </div>
+  <div className="prop-field">
+    <span className="prop-label">Due date</span>
+    {isCreate ? (
+      <DatePicker
+        value={createDueAt === "" ? null : createDueAt}
+        onChange={(v) => setCreateDueAt(v ?? "")}
+      />
+    ) : (
+      <DatePicker
+        value={task?.dueAt ?? null}
+        onChange={(v) => onUpdate?.(task!.id, { dueAt: v })}
       />
     )}
   </div>

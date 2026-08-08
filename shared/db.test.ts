@@ -33,8 +33,13 @@ describe("rowToColumn", () => {
 
 describe("rowToSwimlane", () => {
   it("maps fields", () => {
-    const row: SwimlaneRow = { id: "s1", project_id: "p1", name: "Backend", description: "server work", position: 1 };
-    expect(rowToSwimlane(row)).toEqual({ id: "s1", projectId: "p1", name: "Backend", description: "server work", position: 1 });
+    const row: SwimlaneRow = { id: "s1", project_id: "p1", name: "Backend", description: "server work", position: 1, due_at: null, archived_at: null };
+    expect(rowToSwimlane(row)).toEqual({ id: "s1", projectId: "p1", name: "Backend", description: "server work", position: 1, dueAt: null, archivedAt: null, kind: "milestone" });
+  });
+
+  it("defaults kind to milestone and maps due fields", () => {
+    const row: SwimlaneRow = { id: "s1", project_id: "p1", name: "Backlog", description: "", position: 0, due_at: "2026-08-14", archived_at: "2026-08-01T00:00:00Z", kind: "backlog" };
+    expect(rowToSwimlane(row)).toEqual({ id: "s1", projectId: "p1", name: "Backlog", description: "", position: 0, dueAt: "2026-08-14", archivedAt: "2026-08-01T00:00:00Z", kind: "backlog" });
   });
 });
 
@@ -68,7 +73,7 @@ describe("rowToWikiPageRevision / rowToWikiPageRevisionSummary", () => {
 });
 
 describe("rowToTask", () => {
-  const row: TaskRow = { id: "t1", project_id: "p1", column_id: "c1", swimlane_id: "s1", title: "Fix bug", description: '{"type":"doc","content":[]}', priority: "prio-opt-1", type: "type-opt-1", assignees: "alice", position: "a0", archived_at: null, github_issue_id: null, github_issue_number: null, github_repo: null, github_synced_state: null, created_at: NOW, updated_at: NOW, github_issues_raw: null };
+  const row: TaskRow = { id: "t1", project_id: "p1", column_id: "c1", swimlane_id: "s1", title: "Fix bug", description: '{"type":"doc","content":[]}', priority: "prio-opt-1", type: "type-opt-1", assignees: "alice", position: "a0", due_at: null, archived_at: null, github_issue_id: null, github_issue_number: null, github_repo: null, github_synced_state: null, created_at: NOW, updated_at: NOW, github_issues_raw: null };
 
   it("maps all fields", () => {
     const t = rowToTask(row);
@@ -79,6 +84,12 @@ describe("rowToTask", () => {
     expect(t.type).toBe("type-opt-1");
     expect(t.assignees).toEqual(["alice"]);
     expect(t.githubs).toEqual([]);
+  });
+
+  it("maps due_at", () => {
+    const t = rowToTask({ ...row, due_at: "2026-08-14" });
+    expect(t.dueAt).toBe("2026-08-14");
+    expect(rowToTask(row).dueAt).toBeNull();
   });
 
   it("builds githubs array from raw concat string", () => {

@@ -17,6 +17,7 @@ import {
   WipLimitExceeded,
   NeighborNotInColumn,
   InvalidOption,
+  DeadlineAfterLane,
 } from "../api/errors";
 import { ActivityService } from "./activity.service";
 import * as msg from "../activity-messages";
@@ -94,14 +95,15 @@ export class TaskService extends Effect.Service<TaskService>()("Lexa/TaskService
       create: (actor: Actor, input: {
         projectId: string;
         columnId: string;
-        swimlaneId: string;
+        swimlaneId?: string | null;
         title: string;
         description?: TipTapDoc;
         priority?: string;
         type?: string;
         assignees?: string[];
         parentId?: string;            // create as subtask of this task
-      }): Effect.Effect<{ task: Task; activity: ActivityEvent[] }, ProjectNotFound | ColumnNotFound | SwimlaneNotFound | TaskNotFound | RequiredFieldMissing | InvalidOption | ConstraintViolation | DbError | RowNotFound> =>
+        dueAt?: string | null;
+      }): Effect.Effect<{ task: Task; activity: ActivityEvent[] }, ProjectNotFound | ColumnNotFound | SwimlaneNotFound | TaskNotFound | RequiredFieldMissing | InvalidOption | DeadlineAfterLane | ConstraintViolation | DbError | RowNotFound> =>
         Effect.gen(function* () {
           const project = yield* projectRepo.findById(input.projectId).pipe(
             Effect.catchTag("RowNotFound", () => new ProjectNotFound({ identifier: input.projectId }))
@@ -130,14 +132,22 @@ export class TaskService extends Effect.Service<TaskService>()("Lexa/TaskService
             return yield* new ColumnNotFound({ id: columnId });
           }
 
-          if (swimlaneId) {
-            const lane = yield* swimlaneRepo.findById(swimlaneId).pipe(
-              Effect.catchTag("RowNotFound", () => new SwimlaneNotFound({ id: swimlaneId }))
-            );
-            if (lane.projectId !== project.id) {
-              return yield* new SwimlaneNotFound({ id: swimlaneId });
-            }
+          const lane = swimlaneId
+            ? yield* swimlaneRepo.findById(swimlaneId).pipe(
+                Effect.catchTag("RowNotFound", () => new SwimlaneNotFound({ id: swimlaneId! }))
+              )
+            : yield* swimlaneRepo.findBacklog(project.id).pipe(
+                Effect.catchTag("RowNotFound", () => new SwimlaneNotFound({ id: "backlog", availableSwimlanes: [] }))
+              );
+          if (lane.projectId !== project.id) {
+            return yield* new SwimlaneNotFound({ id: swimlaneId ?? "backlog" });
           }
+          if (lane.archivedAt) {
+            return yield* new SwimlaneNotFound({ id: lane.id, availableSwimlanes: [] });
+          }
+          if (input.dueAt && lane.dueAt && input.dueAt > lane.dueAt)
+            return yield* new DeadlineAfterLane({ date: lane.dueAt });
+          swimlaneId = lane.id;
           const desc = input.description ?? { type: "doc" as const, content: [] as unknown[] };
           const priority = yield* resolveOption(project.id, "priority", input.priority);
           const type = yield* resolveOption(project.id, "type", input.type);
@@ -169,6 +179,7 @@ export class TaskService extends Effect.Service<TaskService>()("Lexa/TaskService
               type,
               assignees: input.assignees ?? [],
               position,
+              dueAt: input.dueAt ?? null,
             });
             if (parent) {
               yield* taskRepo.createSubtaskLink(input.projectId, taskId, parent.id);
@@ -231,8 +242,9 @@ export class TaskService extends Effect.Service<TaskService>()("Lexa/TaskService
           priority?: string;
           type?: string;
           assignees?: string[];
+          dueAt?: string | null;
         }
-      ): Effect.Effect<{ task: Task; activity: ActivityEvent[] }, TaskNotFound | ColumnNotFound | RequiredFieldMissing | InvalidOption | ConstraintViolation | DbError | RowNotFound> =>
+      ): Effect.Effect<{ task: Task; activity: ActivityEvent[] }, TaskNotFound | ColumnNotFound | SwimlaneNotFound | RequiredFieldMissing | InvalidOption | DeadlineAfterLane | ConstraintViolation | DbError | RowNotFound> =>
         Effect.gen(function* () {
           const task = yield* taskRepo.findById(id).pipe(
             Effect.catchTag("RowNotFound", () => new TaskNotFound({ id }))
@@ -240,6 +252,13 @@ export class TaskService extends Effect.Service<TaskService>()("Lexa/TaskService
           const column = yield* columnRepo.findById(task.columnId).pipe(
             Effect.catchTag("RowNotFound", () => new ColumnNotFound({ id: task.columnId }))
           );
+          if (input.dueAt !== undefined && input.dueAt !== null) {
+            const lane = yield* swimlaneRepo.findById(task.swimlaneId).pipe(
+              Effect.catchTag("RowNotFound", () => new SwimlaneNotFound({ id: task.swimlaneId }))
+            );
+            if (lane.dueAt && input.dueAt > lane.dueAt)
+              return yield* new DeadlineAfterLane({ date: lane.dueAt });
+          }
           const priority = input.priority !== undefined ? input.priority : task.priority;
           const type = input.type !== undefined ? input.type : task.type;
           if (input.priority !== undefined) yield* validateOption(task.projectId, "priority", input.priority);
@@ -275,6 +294,9 @@ export class TaskService extends Effect.Service<TaskService>()("Lexa/TaskService
           if (input.assignees !== undefined && [...input.assignees].sort().join("\u0000") !== [...task.assignees].sort().join("\u0000")) {
             rows.push({ type: "field_changed", message: msg.assigneesUpdated(actor.label) });
           }
+          if (input.dueAt !== undefined && input.dueAt !== task.dueAt) {
+            rows.push({ type: "field_changed", message: msg.dueDateChanged(task.dueAt ?? null, input.dueAt ?? null) });
+          }
 
           const updated = yield* withTx(db, Effect.gen(function* () {
             const u = yield* taskRepo.update(id, {
@@ -283,6 +305,7 @@ export class TaskService extends Effect.Service<TaskService>()("Lexa/TaskService
               priority: input.priority,
               type: input.type,
               assignees: input.assignees,
+              dueAt: input.dueAt,
             }).pipe(
               Effect.catchTag("RowNotFound", () => new TaskNotFound({ id }))
             );
@@ -296,7 +319,7 @@ export class TaskService extends Effect.Service<TaskService>()("Lexa/TaskService
           return updated;
         }),
 
-      move: (actor: Actor, taskId: string, target: MoveTarget, opts?: { bypassGuards?: boolean }): Effect.Effect<{ task: Task; activity: ActivityEvent[] }, TaskNotFound | ColumnNotFound | SwimlaneNotFound | RequiredFieldMissing | WipLimitExceeded | NeighborNotInColumn | DbError | ConstraintViolation | RowNotFound> =>
+      move: (actor: Actor, taskId: string, target: MoveTarget, opts?: { bypassGuards?: boolean }): Effect.Effect<{ task: Task; activity: ActivityEvent[] }, TaskNotFound | ColumnNotFound | SwimlaneNotFound | RequiredFieldMissing | WipLimitExceeded | NeighborNotInColumn | DeadlineAfterLane | DbError | ConstraintViolation | RowNotFound> =>
         Effect.gen(function* () {
           const task = yield* taskRepo.findById(taskId).pipe(
             Effect.catchTag("RowNotFound", () => new TaskNotFound({ id: taskId }))
@@ -312,13 +335,18 @@ export class TaskService extends Effect.Service<TaskService>()("Lexa/TaskService
             );
             if (lane.projectId !== task.projectId)
               return yield* new SwimlaneNotFound({ id: target.swimlaneId! });
+            if (lane.archivedAt)
+              return yield* new SwimlaneNotFound({ id: target.swimlaneId!, availableSwimlanes: [] });
+            if (task.dueAt && lane.dueAt && task.dueAt > lane.dueAt && !target.clearDueAt)
+              return yield* new DeadlineAfterLane({ date: lane.dueAt });
           }
 
           if (
             task.columnId === target.columnId &&
             (target.swimlaneId === undefined || target.swimlaneId === task.swimlaneId) &&
             !target.beforeTaskId &&
-            !target.afterTaskId
+            !target.afterTaskId &&
+            !target.clearDueAt
           )
             return { task, activity: [] };
 
@@ -358,6 +386,7 @@ export class TaskService extends Effect.Service<TaskService>()("Lexa/TaskService
               swimlaneId: resolvedSwimlane,
               position,
               projectId: task.projectId,
+              clearDueAt: target.clearDueAt ?? false,
             }, { bypassWip: opts?.bypassGuards });
             if (result.changes === 0) {
               const count = yield* taskRepo.countByColumn(task.projectId, target.columnId);
@@ -515,6 +544,7 @@ interface MoveTarget {
   swimlaneId: string;
   beforeTaskId?: string;
   afterTaskId?: string;
+  clearDueAt?: boolean;
 }
 
 // Webhook moves attribute to the system, not to any key/user.

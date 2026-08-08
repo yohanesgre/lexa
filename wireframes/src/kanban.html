@@ -12,6 +12,7 @@
 
   <div class="board-area">
     <span class="annotation-tag" style="display:block;margin-bottom:12px;">Behaviour: every task must belong to a column AND a swimlane. Tasks without a swimlane are not allowed. Column is a template — rendered inside each swimlane row. WIP badge shows total column count across ALL swimlanes — same number in every row. Archive: cards keep their column/position when archived; archived tasks are excluded from WIP counts and board unless "Show archived" is on.</span>
+    <span class="annotation-tag" style="display:block;margin-bottom:12px;">Card deadline chip: card shows its OWN deadline only (<span class="font-mono">tasks.due_at</span>, optional, never later than the lane's — else <span class="font-mono">409 DEADLINE_AFTER_LANE</span>). The lane deadline lives on the lane header, never on cards. Red chip = past-due own deadline. Cards in the Backlog lane may carry any deadline (Backlog has none).</span>
 
     <!-- Board Header -->
     <div class="board-header">
@@ -65,6 +66,7 @@
                   <div class="card-assignees">
                     <div class="avatar">MK</div>
                   </div>
+                  <span class="card-due">Due Tue</span>
                 </div>
                 <span class="annotation" style="position:absolute;right:6px;bottom:4px;">left-border: type accent</span>
               </div>
@@ -120,6 +122,8 @@
                     <div class="avatar">MK</div>
                     <span class="card-assignees-overflow">+1</span>
                   </div>
+                  <span class="card-due card-due-overdue">Due Tue</span>
+                </div>
                   <div class="card-meta-spacer"></div>
                   <div class="card-gh-issues">
                     <span class="github-badge">
@@ -465,6 +469,17 @@
         <span class="annotation-tag" style="position:absolute;right:-180px;top:0;">Selected: amber selected bg + focus ring + glow</span>
       </div>
 
+    </div>
+
+    <!-- Archived lanes section -->
+    <div style="margin:16px 0;max-width:640px;">
+      <span class="annotation-tag" style="display:block;margin-bottom:8px;">Archived lanes — shown when "Show archived" is on (board header). Dimmed dashed header + Restore. Backlog never appears here (<span class="font-mono">BACKLOG_PROTECTED</span>).</span>
+      <div class="swimlane-archived">
+        <span class="swimlane-name">Demo 0</span>
+        <span class="swimlane-count">006</span>
+        <button class="btn btn-ghost btn-sm" style="margin-left:auto;">Restore</button>
+      </div>
+      <span class="annotation-tag" style="display:block;margin:6px 0;">Archiving a lane archives its live tasks in one transaction (per-task activity rows). Restore brings the lane back only — tasks restore individually, no implicit cascade.</span>
     </div>
 
     <!-- Archive annotations -->

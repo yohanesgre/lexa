@@ -1,18 +1,16 @@
 import { Effect } from "effect";
 import { SwimlaneService } from "../../services/swimlane.service";
 import { resolveProject, resolveSwimlane } from "../resolve";
+import type { Actor } from "../../../shared/types";
 
 export const tool = {
-  name: "update_swimlane",
-  description: "Update a swimlane's name, description, or due date. Admin only.",
+  name: "archive_swimlane",
+  description: "Archive a milestone swimlane. All live tasks in the lane are archived in the same transaction. The Backlog lane cannot be archived. Admin only.",
   inputSchema: {
     type: "object",
     properties: {
       project: { type: "string", description: "Project slug" },
       swimlane: { type: "string", description: "Swimlane name (case-insensitive)" },
-      name: { type: "string", description: "New name" },
-      description: { type: "string", description: "New description" },
-      dueAt: { type: "string", description: "Milestone due date (YYYY-MM-DD). Omit to leave unchanged; empty string clears it." },
     },
     required: ["project", "swimlane"],
   },
@@ -25,17 +23,11 @@ export const tool = {
       const project = yield* resolveProject(args.project);
       const swimlane = yield* resolveSwimlane(project.id, args.swimlane);
       const swimlaneService = yield* SwimlaneService;
-      const patch: { name?: string; description?: string; dueAt?: string | null } = {};
-      if (args.name !== undefined) patch.name = args.name;
-      if (args.description !== undefined) patch.description = args.description;
-      if (args.dueAt !== undefined) patch.dueAt = args.dueAt === "" ? null : args.dueAt;
-      const updated = yield* swimlaneService.update(swimlane.id, patch);
+      const actor: Actor = { kind: "agent", label: "mcp", userId: auth?.userId ?? null };
+      const { lane, activity } = yield* swimlaneService.archive(actor, swimlane.id);
 
       return {
-        id: updated.id,
-        name: updated.name,
-        description: updated.description,
-        position: updated.position,
+        message: `Archived swimlane "${lane.name}" (${activity.length} tasks archived)`,
       };
     }),
 };

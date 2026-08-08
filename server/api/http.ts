@@ -204,6 +204,9 @@ const SwimlaneSchema = Schema.Struct({
   name: Schema.String,
   description: Schema.String,
   position: Schema.Number,
+  dueAt: Schema.NullOr(Schema.String),
+  archivedAt: Schema.NullOr(Schema.String),
+  kind: Schema.Literal("backlog", "milestone"),
 });
 
 const SwimlaneDataResponse = Schema.Struct({ data: Schema.Array(SwimlaneSchema) });
@@ -212,6 +215,7 @@ const SwimlanePayload = Schema.Struct({
   name: Schema.String,
   description: Schema.optional(Schema.String),
   position: Schema.optional(Schema.Number),
+  dueAt: Schema.optional(Schema.NullOr(Schema.String)),
 });
 
 const SwimlanePath = Schema.Struct({ slug: Schema.String, id: Schema.String });
@@ -807,6 +811,11 @@ const RevisionResponse = Schema.Struct({ revision: WikiPageRevisionSchema });
 
 const RestorePayload = Schema.Struct({ revisionId: Schema.String });
 
+const SwimlaneMutationResponse = Schema.Struct({
+  data: SwimlaneSchema,
+  activity: Schema.Array(ActivityEventSchema),
+});
+
 const swimlanesGroup = HttpApiGroup.make("swimlanes")
   .add(HttpApiEndpoint.get("listSwimlanes", "/projects/:slug/swimlanes")
     .setPath(SlugPath).addSuccess(SwimlaneDataResponse))
@@ -815,7 +824,11 @@ const swimlanesGroup = HttpApiGroup.make("swimlanes")
   .add(HttpApiEndpoint.patch("updateSwimlane", "/projects/:slug/swimlanes/:id")
     .setPath(SwimlanePath).setPayload(SwimlanePayload).addSuccess(SwimlaneSchema))
   .add(HttpApiEndpoint.del("deleteSwimlane", "/projects/:slug/swimlanes/:id")
-    .setPath(SwimlanePath)  .addSuccess(Schema.Undefined, { status: 204 }));
+    .setPath(SwimlanePath)  .addSuccess(Schema.Undefined, { status: 204 }))
+  .add(HttpApiEndpoint.post("archiveSwimlane", "/projects/:slug/swimlanes/:id/archive")
+    .setPath(SwimlanePath).addSuccess(SwimlaneMutationResponse))
+  .add(HttpApiEndpoint.post("restoreSwimlane", "/projects/:slug/swimlanes/:id/restore")
+    .setPath(SwimlanePath).addSuccess(SwimlaneMutationResponse));
 
 const GithubIssueSchema = Schema.Struct({
   issueId: Schema.String,
@@ -839,6 +852,7 @@ const TaskSchema = Schema.Struct({
   position: Schema.String,
   githubs: Schema.Array(GithubIssueSchema),
   archivedAt: Schema.NullOr(Schema.String),
+  dueAt: Schema.NullOr(Schema.String),
   createdAt: Schema.String,
   updatedAt: Schema.String,
 });
@@ -855,13 +869,14 @@ const TaskMutationResponse = Schema.Struct({
 
 const CreateTaskPayload = Schema.Struct({
   columnId: Schema.String,
-  swimlaneId: Schema.String,
+  swimlaneId: Schema.optional(Schema.String),
   title: Schema.String,
   description: Schema.optional(Schema.Any),
   priority: Schema.optional(Schema.String),
   type: Schema.optional(Schema.String),
   parentId: Schema.optional(Schema.String),
   assignees: Schema.optional(Schema.Array(Schema.String)),
+  dueAt: Schema.optional(Schema.NullOr(Schema.String)),
 });
 
 const UpdateTaskPayload = Schema.Struct({
@@ -870,6 +885,7 @@ const UpdateTaskPayload = Schema.Struct({
   priority: Schema.optional(Schema.String),
   type: Schema.optional(Schema.String),
   assignees: Schema.optional(Schema.Array(Schema.String)),
+  dueAt: Schema.optional(Schema.NullOr(Schema.String)),
 });
 
 const MoveTaskPayload = Schema.Struct({
@@ -877,6 +893,7 @@ const MoveTaskPayload = Schema.Struct({
   swimlaneId: Schema.String,
   beforeTaskId: Schema.optional(Schema.String),
   afterTaskId: Schema.optional(Schema.String),
+  clearDueAt: Schema.optional(Schema.Boolean),
 });
 
 const TaskPath = Schema.Struct({ slug: Schema.String, id: Schema.String });
@@ -1340,7 +1357,7 @@ const swimlanesLive = HttpApiBuilder.group(LexaApi, "swimlanes", (handlers) =>
         const projectService = yield* ProjectService;
         const swimlaneService = yield* SwimlaneService;
         const project = yield* projectService.findBySlug(req.path.slug);
-        const swimlanes = yield* swimlaneService.findByProject(project.id);
+        const swimlanes = yield* swimlaneService.findByProject(project.id, { includeArchived: true });
         return { data: swimlanes.map(formatSwimlane) };
       }))
     )
@@ -1352,6 +1369,7 @@ const swimlanesLive = HttpApiBuilder.group(LexaApi, "swimlanes", (handlers) =>
         const project = yield* projectService.findBySlug(req.path.slug);
         const swimlane = yield* swimlaneService.create({
           projectId: project.id, name: req.payload.name, description: req.payload.description,
+          dueAt: req.payload.dueAt,
         });
         return formatSwimlane(swimlane);
       }))
@@ -1362,6 +1380,7 @@ const swimlanesLive = HttpApiBuilder.group(LexaApi, "swimlanes", (handlers) =>
         const swimlaneService = yield* SwimlaneService;
         const swimlane = yield* swimlaneService.update(req.path.id, {
           name: req.payload.name, description: req.payload.description, position: req.payload.position,
+          dueAt: req.payload.dueAt,
         });
         return formatSwimlane(swimlane);
       }))
@@ -1372,6 +1391,24 @@ const swimlanesLive = HttpApiBuilder.group(LexaApi, "swimlanes", (handlers) =>
         const swimlaneService = yield* SwimlaneService;
         yield* swimlaneService.delete(req.path.id);
         return undefined;
+      }))
+    )
+    .handle("archiveSwimlane", (req) =>
+      respond(Effect.gen(function* () {
+        yield* requireAdmin;
+        const swimlaneService = yield* SwimlaneService;
+        const identity = yield* AuthIdentity;
+        const result = yield* swimlaneService.archive(actorFromIdentity(identity), req.path.id);
+        return { data: formatSwimlane(result.lane), activity: activityPayload(result.activity) };
+      }))
+    )
+    .handle("restoreSwimlane", (req) =>
+      respond(Effect.gen(function* () {
+        yield* requireAdmin;
+        const swimlaneService = yield* SwimlaneService;
+        const identity = yield* AuthIdentity;
+        const result = yield* swimlaneService.restore(actorFromIdentity(identity), req.path.id);
+        return { data: formatSwimlane(result.lane), activity: activityPayload(result.activity) };
       }))
     )
 );
@@ -1923,6 +1960,7 @@ const tasksLive = HttpApiBuilder.group(LexaApi, "tasks", (handlers) =>
           description: req.payload.description, priority: req.payload.priority,
           type: req.payload.type, parentId: req.payload.parentId,
           assignees: req.payload.assignees ? [...req.payload.assignees] : undefined,
+          dueAt: req.payload.dueAt,
         });
         return { data: formatTask(task), activity: activityPayload(activity) };
       }))
@@ -1942,6 +1980,7 @@ const tasksLive = HttpApiBuilder.group(LexaApi, "tasks", (handlers) =>
           title: req.payload.title, description: req.payload.description,
           priority: req.payload.priority, type: req.payload.type,
           assignees: req.payload.assignees ? [...req.payload.assignees] : undefined,
+          dueAt: req.payload.dueAt,
         });
         return { data: formatTask(task), activity: activityPayload(activity) };
       }))
@@ -1955,6 +1994,7 @@ const tasksLive = HttpApiBuilder.group(LexaApi, "tasks", (handlers) =>
         const { task, activity } = yield* taskService.move(actorFromIdentity(identity), req.path.id, {
           columnId: req.payload.columnId, swimlaneId: req.payload.swimlaneId,
           beforeTaskId: req.payload.beforeTaskId, afterTaskId: req.payload.afterTaskId,
+          clearDueAt: req.payload.clearDueAt,
         });
         const column = yield* columnService.getById(req.payload.columnId);
         if (column.githubState && task.githubs.length > 0) {
@@ -2091,11 +2131,11 @@ const boardLive = HttpApiBuilder.group(LexaApi, "board", (handlers) =>
       const fieldConfigService = yield* FieldConfigService;
       const taskLinkRepo = yield* TaskLinkRepo;
       const project = yield* projectService.findBySlug(req.path.slug);
+      const includeArchived = searchParams(req).get("includeArchived") === "true";
       const columns = yield* columnService.findByProject(project.id);
-      const swimlanes = yield* swimlaneService.findByProject(project.id);
+      const swimlanes = yield* swimlaneService.findByProject(project.id, { includeArchived });
       const fieldConfig = yield* fieldConfigService.findByProject(project.id);
       const links = yield* taskLinkRepo.findByProject(project.id);
-      const includeArchived = searchParams(req).get("includeArchived") === "true";
       const tasks = yield* taskService.findAllByProject(project.id, { includeArchived });
       return {
         project: formatProject(project),
