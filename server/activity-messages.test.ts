@@ -31,18 +31,38 @@ describe("activity messages", () => {
     expect(m.formatActivityMessage("forge_failed", {})).toBe("Forge run failed");
   });
 
-  it("formatActivityMessage covers every ActivityType", () => {
-    const types: ActivityType[] = [
-      "created", "moved", "field_changed", "archived", "restored", "deleted",
-      "link_added", "link_removed", "source_added", "source_removed",
-      "github_linked", "github_unlinked", "github_synced",
-      "forge_completed", "forge_failed", "forge_cancelled",
-      "commented", "comment_deleted",
+  it("formatActivityMessage covers every ActivityType with valid payloads", () => {
+    const cases: [ActivityType, m.ActivityMessagePayload, string][] = [
+      ["created", { actor: "Maria" }, "Maria created this task"],
+      ["moved", { actor: "Maria", fromCol: "Backlog", toCol: "Done", fromLane: null, toLane: null }, "Maria moved from Backlog to Done"],
+      ["field_changed", { variant: "title", actor: "Maria" }, "Maria changed the title"],
+      ["field_changed", { variant: "description", actor: "Maria" }, "Maria updated the description"],
+      ["field_changed", { variant: "assignees", actor: "Maria" }, "Maria updated assignees"],
+      ["field_changed", { variant: "priority", from: "Medium", to: "High" }, "Priority changed: Medium → High"],
+      ["field_changed", { variant: "type", from: "Bug", to: "Feature" }, "Type changed: Bug → Feature"],
+      ["archived", { actor: "Maria" }, "Maria archived this task"],
+      ["restored", { actor: "Maria" }, "Maria restored this task"],
+      ["deleted", { actor: "Maria" }, "Maria deleted this task"],
+      ["link_added", { relation: "subtask_of", title: "X" }, "Linked subtask: X"],
+      ["link_removed", { relation: "blocked_by", title: "X" }, "Removed blocked-by: X"],
+      ["source_added", { label: "Home", kind: "wiki" }, "Added source: Home (wiki)"],
+      ["source_removed", { label: "Home" }, "Removed source: Home"],
+      ["github_linked", { repo: "owner/repo", number: 1 }, "Linked GitHub issue owner/repo #1"],
+      ["github_unlinked", { repo: "owner/repo", number: 1 }, "Unlinked GitHub issue owner/repo #1"],
+      ["github_synced", { number: 107, state: "closed", toCol: "Done" }, "Issue #107 closed on GitHub — task moved to Done"],
+      ["forge_completed", { agent: "opencode" }, "Forge: opencode completed — result ready"],
+      ["forge_failed", {}, "Forge run failed"],
+      ["forge_cancelled", {}, "Forge run cancelled"],
+      ["commented", { actor: "Maria" }, "Maria commented"],
+      ["comment_deleted", { actor: "Maria" }, "Maria deleted a comment"],
     ];
-    for (const t of types) {
-      const msg = m.formatActivityMessage(t, {});
-      expect(typeof msg).toBe("string");
-      expect(msg.length).toBeGreaterThan(0);
+    for (const [t, payload, expected] of cases) {
+      expect(m.formatActivityMessage(t, payload), `type=${t}`).toBe(expected);
     }
+  });
+
+  it("field_changed with a missing or unknown variant falls back instead of emitting garbage", () => {
+    expect(m.formatActivityMessage("field_changed", {})).toBe("Task updated");
+    expect(m.formatActivityMessage("field_changed", { variant: "typo", actor: "Maria" })).toBe("Task updated");
   });
 });
