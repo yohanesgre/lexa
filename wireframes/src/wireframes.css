@@ -2809,3 +2809,338 @@ textarea.prop-input {
   color: var(--lx-text-muted);
   font-family: var(--lx-font-body);
 }
+
+/* =========================================================
+   Task Activity tab (task-detail.html — timeline + comments)
+   Same flat language as status-chip / assignee-chip: 6px
+   radii, PHOSPHOR tokens only, 11–14px type.
+   ========================================================= */
+
+/* ---- Tab bar: segmented control under the property bar ---- */
+.tab-bar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 10px 16px 0;
+  border-bottom: 1px solid var(--lx-border-subtle);
+  flex-shrink: 0;
+}
+
+.tab-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 26px;
+  padding: 0 12px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: transparent;
+  font-size: 12px;
+  font-weight: 500;
+  font-family: var(--lx-font-body);
+  color: var(--lx-text-secondary);
+  cursor: pointer;
+  transition: background 100ms, color 100ms, border-color 100ms;
+}
+.tab-btn:hover { background: var(--lx-surface-card-hover); color: var(--lx-text-primary); }
+.tab-btn.active {
+  background: var(--lx-surface-selected);
+  border-color: var(--lx-border-focus);
+  color: var(--lx-text-primary);
+}
+
+/* ---- Activity panel ---- */
+.activity-panel {
+  padding-top: 8px;
+  display: flex;
+  flex-direction: column;
+}
+
+/* ---- Timeline rows + vertical step rail ---- */
+.activity-timeline {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Vertical step rail — one continuous line through all step markers.
+   Starts at the first marker's center (no segment above the first step),
+   ends at the last marker's center (no dangling tail). Markers — event
+   dots, comment avatars — share the same 24px rail column, centered on
+   this line. The "Load older" button sits above the rail start. */
+.activity-rail {
+  position: absolute;
+  left: 12px;         /* center of the 24px rail column */
+  top: 16px;          /* first marker center — "created" event dot */
+  bottom: 24px;       /* last marker center — author comment avatar */
+  width: 2px;
+  margin-left: -1px;
+  background: var(--lx-border-subtle);
+  pointer-events: none;
+}
+
+/* "Load older" ghost button — keyset cursor pagination */
+.load-older {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  width: 100%;
+  height: 28px;
+  margin: 2px 0 4px;
+  background: transparent;
+  border: 1px dashed var(--lx-border-strong);
+  border-radius: 6px;
+  color: var(--lx-text-secondary);
+  font-size: 12px;
+  font-family: var(--lx-font-body);
+  cursor: pointer;
+  transition: background 100ms, color 100ms;
+}
+.load-older:hover { background: var(--lx-surface-card-hover); color: var(--lx-text-primary); }
+
+.activity-row {
+  display: flex;
+  gap: 10px;
+  padding: 7px 0;
+}
+
+.activity-dot {
+  width: 24px;          /* shares the rail column with comment avatars */
+  flex-shrink: 0;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: 2px;     /* keeps the marker centered on the rail line */
+  color: var(--lx-text-muted);
+}
+.activity-dot svg {
+  width: 14px;
+  height: 14px;
+  stroke: currentColor;
+  stroke-width: 1.5;
+  fill: none;
+  flex-shrink: 0;
+}
+.activity-dot-core {
+  width: 8px;
+  height: 8px;
+  border-radius: 9999px;
+  background: var(--lx-text-muted);
+  margin-top: 3px;
+  flex-shrink: 0;
+}
+.activity-dot-agent { color: var(--lx-text-warning); }
+
+/* Markers sit above the rail — opaque, they cover the line where they cross */
+.activity-row .activity-dot,
+.comment-card .avatar {
+  position: relative;
+  z-index: 1;
+}
+
+/* Step hover: row highlight + marker brighten (existing hover language) */
+.activity-row:hover,
+.comment-card:hover {
+  background: var(--lx-surface-card-hover);
+}
+.activity-row:hover .activity-dot-core { background: var(--lx-text-secondary); }
+
+.activity-body {
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
+  line-height: 18px;
+  font-family: var(--lx-font-body);
+  color: var(--lx-text-secondary);
+}
+.activity-msg { color: var(--lx-text-secondary); }
+.activity-time {
+  color: var(--lx-text-muted);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+/* ---- Agent attribution ---- */
+.agent-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-family: var(--lx-font-micro);
+  color: var(--lx-text-warning);
+  background: var(--lx-bg-warning-subtle);
+  border: 1px solid rgba(240, 192, 64, 0.25);
+  border-radius: 4px;
+  padding: 1px 5px;
+  flex-shrink: 0;
+}
+.agent-tag svg {
+  width: 10px;
+  height: 10px;
+  stroke: currentColor;
+  stroke-width: 1.5;
+  fill: none;
+}
+.agent-label {
+  font-family: var(--lx-font-mono);
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--lx-text-primary);
+}
+.agent-keyhint {
+  font-size: 11px;
+  font-style: italic;
+  color: var(--lx-text-muted);
+}
+
+/* ---- Comment cards ---- */
+.comment-card {
+  display: flex;
+  gap: 10px;
+  padding: 12px 0;
+}
+.comment-card .avatar {
+  width: 24px;
+  height: 24px;
+  font-size: 10px;
+}
+
+.agent-avatar {
+  background: var(--lx-bg-warning-subtle);
+  border: 1px solid rgba(240, 192, 64, 0.25);
+  color: var(--lx-text-warning);
+  border-radius: 9999px;
+}
+.agent-avatar svg {
+  width: 12px;
+  height: 12px;
+  stroke: currentColor;
+  stroke-width: 1.5;
+  fill: none;
+}
+
+.comment-content {
+  flex: 1;
+  min-width: 0;
+}
+
+.comment-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.comment-author {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--lx-text-primary);
+  white-space: nowrap;
+}
+.comment-time {
+  font-size: 11px;
+  color: var(--lx-text-muted);
+  white-space: nowrap;
+}
+.comment-edited {
+  font-size: 11px;
+  font-style: italic;
+  color: var(--lx-text-muted);
+  white-space: nowrap;
+}
+
+/* Author/admin actions — revealed on row hover */
+.comment-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: auto;
+  opacity: 0;
+  transition: opacity 100ms;
+  flex-shrink: 0;
+}
+.comment-actions.visible { opacity: 1; }
+.comment-card:hover .comment-actions { opacity: 1; }
+
+/* TipTap-rendered comment body */
+.comment-text {
+  margin-top: 4px;
+  font-size: 14px;
+  line-height: 21px;
+  color: var(--lx-text-secondary);
+  font-family: var(--lx-font-body);
+}
+.comment-text p { margin-bottom: 6px; color: var(--lx-text-primary); }
+.comment-text p:last-child { margin-bottom: 0; }
+.comment-text ul,
+.comment-text ol {
+  margin: 4px 0 8px 18px;
+  padding: 0;
+}
+.comment-text li { margin-bottom: 2px; }
+.comment-text strong { color: var(--lx-text-primary); font-weight: 600; }
+.comment-text code {
+  font-family: var(--lx-font-mono);
+  font-size: 12px;
+  background: var(--lx-surface-elevated);
+  padding: 1px 4px;
+  border-radius: 4px;
+  color: var(--lx-text-secondary);
+}
+
+/* Mention chip — render-time highlight over project member names */
+.mention-chip {
+  display: inline;
+  background: var(--lx-surface-selected);
+  border-radius: 4px;
+  padding: 1px 4px;
+  color: var(--lx-text-link);
+  font-weight: 500;
+}
+
+/* ---- Composer (pinned at the bottom of the timeline) ---- */
+.composer {
+  margin-top: 12px;
+  border: 1px solid var(--lx-border-default);
+  border-radius: 6px;
+  background: var(--lx-surface-input);
+  transition: border-color 100ms, box-shadow 100ms;
+}
+.composer:focus-within {
+  border-color: var(--lx-border-focus);
+  box-shadow: var(--lx-focus-glow);
+}
+
+.composer-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 4px 6px;
+  border-bottom: 1px solid var(--lx-border-subtle);
+}
+
+.composer-editor {
+  padding: 10px 12px;
+  min-height: 64px;
+  font-size: 14px;
+  line-height: 20px;
+  color: var(--lx-text-primary);
+  font-family: var(--lx-font-body);
+  outline: none;
+}
+.composer-editor:empty::before {
+  content: attr(data-placeholder);
+  color: var(--lx-text-muted);
+}
+
+.composer-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 10px;
+  border-top: 1px solid var(--lx-border-subtle);
+}

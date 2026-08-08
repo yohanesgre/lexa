@@ -1,0 +1,393 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Lexa — Task Activity &amp; Comments · Plan</title>
+<style>
+  :root {
+    --bg: #0f1115;
+    --surface: #171a21;
+    --surface-2: #1e222b;
+    --border: #2a2f3a;
+    --border-strong: #3a4150;
+    --text: #e8eaed;
+    --text-2: #a8aeb8;
+    --text-3: #6b7280;
+    --accent: #f0c040;
+    --accent-dim: rgba(240,192,64,.12);
+    --green: #4ade80;
+    --red: #f87171;
+    --blue: #60a5fa;
+    --mono: "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
+    --sans: -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: var(--bg); color: var(--text); font-family: var(--sans); line-height: 1.55; padding-bottom: 80px; }
+  .wrap { max-width: 1080px; margin: 0 auto; padding: 0 24px; }
+
+  /* Header */
+  header { padding: 48px 0 28px; border-bottom: 1px solid var(--border); }
+  .kicker { font-family: var(--mono); font-size: 11px; letter-spacing: .12em; text-transform: uppercase; color: var(--text-3); }
+  h1 { font-size: 30px; font-weight: 650; letter-spacing: -0.02em; margin: 8px 0 6px; }
+  .lede { color: var(--text-2); max-width: 720px; font-size: 14.5px; }
+  .status { display: inline-block; margin-top: 12px; font-size: 11px; font-family: var(--mono); color: var(--accent); background: var(--accent-dim); border: 1px solid rgba(240,192,64,.3); padding: 3px 10px; border-radius: 999px; }
+
+  /* Nav */
+  nav { position: sticky; top: 0; z-index: 10; background: rgba(15,17,21,.92); backdrop-filter: blur(8px); border-bottom: 1px solid var(--border); padding: 10px 0; }
+  nav .wrap { display: flex; gap: 6px; flex-wrap: wrap; }
+  nav a { font-size: 12px; color: var(--text-2); text-decoration: none; padding: 4px 10px; border: 1px solid transparent; border-radius: 6px; font-family: var(--mono); }
+  nav a:hover { color: var(--text); border-color: var(--border-strong); }
+
+  section { padding: 40px 0; border-bottom: 1px solid var(--border); }
+  section h2 { font-size: 17px; font-weight: 600; letter-spacing: -0.01em; margin-bottom: 4px; }
+  section h2 .num { color: var(--accent); font-family: var(--mono); font-size: 13px; margin-right: 8px; }
+  .sub { color: var(--text-3); font-size: 13px; margin-bottom: 20px; }
+
+  /* Decision chips */
+  .chips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
+  .chip { font-size: 12px; color: var(--text-2); border: 1px solid var(--border-strong); border-radius: 999px; padding: 4px 12px; background: var(--surface); }
+  .chip b { color: var(--text); font-weight: 550; }
+  .chip .tag { color: var(--accent); font-family: var(--mono); font-size: 10.5px; }
+
+  /* Tables */
+  .tbl { width: 100%; border-collapse: collapse; font-size: 13px; margin-top: 8px; }
+  .tbl th { text-align: left; font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: var(--text-3); font-weight: 550; padding: 6px 10px; border-bottom: 1px solid var(--border-strong); }
+  .tbl td { padding: 7px 10px; border-bottom: 1px solid var(--border); vertical-align: top; color: var(--text-2); }
+  .tbl td:first-child { color: var(--text); }
+  .tbl tr:hover td { background: var(--surface-2); }
+  .mono { font-family: var(--mono); font-size: 12px; }
+  .dim { color: var(--text-3); }
+
+  /* Schema cards */
+  .schema-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 12px; }
+  @media (max-width: 860px) { .schema-grid { grid-template-columns: 1fr; } }
+  .table-card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
+  .table-card .t-head { padding: 10px 14px; border-bottom: 1px solid var(--border); font-family: var(--mono); font-size: 13px; font-weight: 600; background: var(--surface-2); display: flex; justify-content: space-between; align-items: center; }
+  .table-card .t-head .pill { font-size: 10px; font-family: var(--mono); color: var(--green); border: 1px solid rgba(74,222,128,.35); padding: 1px 7px; border-radius: 999px; font-weight: 400; }
+  .table-card .t-head .pill.amber { color: var(--accent); border-color: rgba(240,192,64,.35); }
+  .table-card pre { padding: 12px 14px; font-family: var(--mono); font-size: 11.5px; line-height: 1.65; color: var(--text-2); overflow-x: auto; white-space: pre; }
+  .table-card .note { padding: 8px 14px 12px; font-size: 12px; color: var(--text-3); border-top: 1px dashed var(--border); }
+
+  /* Diagram */
+  .diagram { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 22px; margin-top: 12px; overflow-x: auto; }
+  .layers { display: flex; flex-direction: column; gap: 14px; min-width: 640px; }
+  .layer { display: flex; align-items: center; gap: 10px; }
+  .layer .lbl { font-family: var(--mono); font-size: 10.5px; color: var(--text-3); width: 72px; text-align: right; letter-spacing: .06em; text-transform: uppercase; flex-shrink: 0; }
+  .box { background: var(--surface-2); border: 1px solid var(--border-strong); border-radius: 8px; padding: 9px 14px; font-size: 12.5px; font-family: var(--mono); white-space: nowrap; }
+  .box small { color: var(--text-3); font-family: var(--sans); }
+  .box.emit { border-color: rgba(240,192,64,.5); }
+  .box.emit::after { content: " ⟶ activity"; color: var(--accent); font-size: 11px; margin-left: 6px; }
+  .arrow-down { text-align: center; color: var(--text-3); font-size: 12px; margin: 2px 0; }
+  .arrow-down::before { content: "↓"; }
+  .arrow-right { color: var(--text-3); font-size: 14px; }
+  .dep { font-size: 11px; font-family: var(--mono); color: var(--blue); }
+  .dep-x { font-size: 11px; font-family: var(--mono); color: var(--red); }
+
+  /* Callouts */
+  .callout { border: 1px solid; border-radius: 8px; padding: 12px 14px; font-size: 13px; margin-top: 14px; }
+  .callout.amber { border-color: rgba(240,192,64,.35); background: var(--accent-dim); color: var(--text-2); }
+  .callout.amber b { color: var(--accent); }
+  .callout.green { border-color: rgba(74,222,128,.3); background: rgba(74,222,128,.07); color: var(--text-2); }
+  .callout.green b { color: var(--green); }
+  .callout.red { border-color: rgba(248,113,113,.3); background: rgba(248,113,113,.07); color: var(--text-2); }
+  .callout.red b { color: var(--red); }
+
+  /* Endpoint blocks */
+  .ep { margin-top: 10px; }
+  .ep-row { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 10px 14px; margin-bottom: 8px; }
+  .ep-row .line { font-family: var(--mono); font-size: 12.5px; display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; }
+  .m { display: inline-block; font-size: 10.5px; font-weight: 700; padding: 2px 7px; border-radius: 5px; letter-spacing: .04em; }
+  .m.get { background: rgba(96,165,250,.15); color: var(--blue); }
+  .m.post { background: rgba(74,222,128,.15); color: var(--green); }
+  .m.patch { background: rgba(240,192,64,.15); color: var(--accent); }
+  .m.del { background: rgba(248,113,113,.15); color: var(--red); }
+  .ep-row .path { color: var(--text); }
+  .ep-row .resp { font-size: 12px; color: var(--text-2); margin-top: 4px; font-family: var(--mono); }
+  .ep-row .resp .dim { color: var(--text-3); }
+
+  /* Event catalog */
+  .ev { display: grid; grid-template-columns: 190px 1fr; gap: 4px 14px; font-size: 12.5px; padding: 6px 0; border-bottom: 1px solid var(--border); align-items: baseline; }
+  .ev:last-child { border-bottom: none; }
+  .ev .t { font-family: var(--mono); color: var(--accent); font-size: 12px; }
+  .ev .x { color: var(--text-2); }
+
+  /* Phases */
+  .phase { display: grid; grid-template-columns: 64px 1fr; gap: 0 18px; padding: 14px 0; border-bottom: 1px solid var(--border); }
+  .phase:last-child { border-bottom: none; }
+  .phase .n { font-family: var(--mono); font-size: 20px; color: var(--accent); font-weight: 650; line-height: 1.2; }
+  .phase h3 { font-size: 14px; font-weight: 600; margin-bottom: 3px; }
+  .phase p { font-size: 13px; color: var(--text-2); margin-bottom: 6px; }
+  .phase .gate { display: inline-block; font-family: var(--mono); font-size: 11px; color: var(--green); border: 1px solid rgba(74,222,128,.35); border-radius: 999px; padding: 2px 10px; }
+  .phase .gate.red { color: var(--red); border-color: rgba(248,113,113,.35); }
+  .phase .files { font-family: var(--mono); font-size: 11px; color: var(--text-3); margin-top: 4px; }
+
+  footer { padding: 28px 0; color: var(--text-3); font-size: 12px; font-family: var(--mono); }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="wrap">
+    <div class="kicker">Lexa · Design &amp; Implementation Plan</div>
+    <h1>Task Activity Timeline + Comments</h1>
+    <p class="lede">A unified activity timeline in the task slideover — human comments and system events interleaved, like GitHub's issue timeline. Reverses the v1 "comments-free" cut; driven by the missing context trail and agent visibility. Comments stay in Lexa (no GitHub sync).</p>
+    <span class="status">DESIGN APPROVED · spec: docs/specs/ACTIVITY_COMMENTS.md</span>
+    <div class="chips">
+      <span class="chip">Structure <b>Unified timeline</b></span>
+      <span class="chip">Approach <b>A</b> · append-only, service-emitted <span class="tag">✔</span></span>
+      <span class="chip">Comments <b>TipTap JSON</b></span>
+      <span class="chip">Edit/delete <b>author + admin delete</b></span>
+      <span class="chip">GitHub <b>no sync</b> <span class="tag">✔</span></span>
+      <span class="chip">MCP <b>read + add</b></span>
+      <span class="chip">Mentions <b>highlight only</b></span>
+      <span class="chip">Events <b>simple frozen messages</b></span>
+      <span class="chip">Ids <b>INTEGER rowid</b> <span class="tag">fixed</span></span>
+      <span class="chip">Retention <b>never prune</b></span>
+      <span class="chip">No FTS · No notifications · No comment revision history</span>
+    </div>
+  </div>
+</header>
+
+<nav><div class="wrap">
+  <a href="#data">1 · Data model</a>
+  <a href="#actors">2 · Actors</a>
+  <a href="#services">3 · Services</a>
+  <a href="#api">4 · REST + MCP</a>
+  <a href="#events">5 · Event catalog</a>
+  <a href="#authz">6 · Authz</a>
+  <a href="#phases">7 · Phases</a>
+</div></nav>
+
+<div class="wrap">
+
+<section id="data">
+  <h2><span class="num">01</span>Data model — two append-only tables</h2>
+  <p class="sub">SCHEMA.md additions · migration 00XX · rowid ids fix the second-granularity tie-break (UUIDs don't order chronologically).</p>
+  <div class="schema-grid">
+    <div class="table-card">
+      <div class="t-head">task_comments <span class="pill">soft delete</span></div>
+<pre>id           INTEGER PRIMARY KEY AUTOINCREMENT
+task_id      TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE
+author_id    TEXT REFERENCES users(id) ON DELETE SET NULL  -- NULL: agent/system
+author_kind  TEXT NOT NULL DEFAULT 'user'
+             CHECK (author_kind IN ('user','agent','system'))
+author_label TEXT NOT NULL        -- frozen name at write time
+body         TEXT NOT NULL        -- TipTap JSON doc
+edited_at    TEXT                 -- set on edit → "edited" marker
+deleted_at   TEXT                 -- soft delete → hidden from timeline
+created_at   TEXT NOT NULL DEFAULT (datetime('now'))</pre>
+      <div class="note">Index: <span class="mono">(task_id, created_at, id)</span> · body ≤ 64KB, non-empty TipTap doc (invariant #11 emptiness check)</div>
+    </div>
+    <div class="table-card">
+      <div class="t-head">task_activity <span class="pill amber">append-only</span></div>
+<pre>id            INTEGER PRIMARY KEY AUTOINCREMENT
+task_id       TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE
+actor_kind    TEXT NOT NULL CHECK (actor_kind IN ('user','agent','system'))
+actor_label   TEXT NOT NULL        -- frozen display name
+actor_user_id TEXT REFERENCES users(id) ON DELETE SET NULL
+                                   -- agent: key owner · user: their id · NULL: unbound/system
+type          TEXT NOT NULL        -- enum in shared/types.ts (no CHECK)
+message       TEXT NOT NULL        -- frozen at write time; the record
+created_at    TEXT NOT NULL DEFAULT (datetime('now'))</pre>
+      <div class="note">Index: <span class="mono">(task_id, created_at, id)</span> · backfill: one <span class="mono">created</span> row per existing task (from tasks.created_at) · never pruned (contrast: webhook_events 7-day)</div>
+    </div>
+  </div>
+  <div class="callout red"><b>XSS rule:</b> <span class="mono">message</span> and labels contain user-controlled strings (column names, actor names) frozen at write time — frontend renders them as <b>plain text, never HTML</b>. Mention highlighting applies only to TipTap comment bodies.</div>
+</section>
+
+<section id="actors">
+  <h2><span class="num">02</span>Actor model — resolved at the boundary</h2>
+  <p class="sub">Services receive <span class="mono">actor: Actor {kind, label, userId?}</span> as a parameter — transport-agnostic. <b style="color:var(--text);">Attribution ≠ authorization:</b> a bound key authorizes with the owner's permissions but is attributed as the agent ("opencode-local moved…", never "Maria moved…"); <span class="mono">actor_user_id</span> records whose key drove it.</p>
+  <table class="tbl">
+    <tr><th>Surface</th><th>kind</th><th>label</th><th>actor_user_id</th></tr>
+    <tr><td>Browser (Cf-Access)</td><td class="mono">user</td><td class="mono">users.name</td><td>user id</td></tr>
+    <tr><td>MCP — bound key</td><td class="mono">agent</td><td class="mono">api key name</td><td>key owner id</td></tr>
+    <tr><td>MCP — unbound key</td><td class="mono">agent</td><td class="mono">api key name</td><td class="mono">NULL</td></tr>
+    <tr><td>GitHub webhook</td><td class="mono">system</td><td class="mono">github</td><td class="mono">NULL</td></tr>
+    <tr><td>Forge daemon</td><td class="mono">agent</td><td class="mono">runtime agent name</td><td>daemon key owner (if bound)</td></tr>
+    <tr><td>Migration backfill</td><td class="mono">system</td><td class="mono">system</td><td class="mono">NULL</td></tr>
+  </table>
+</section>
+
+<section id="services">
+  <h2><span class="num">03</span>Services — emission discipline, no cycles</h2>
+  <p class="sub">LAYERS.md additions. ActivityService is a leaf — never depends on TaskService (preserves invariant #1).</p>
+  <div class="diagram">
+    <div class="layers">
+      <div class="layer">
+        <span class="lbl">Routes</span>
+        <span class="box">REST route handlers</span>
+        <span class="arrow-right">·</span>
+        <span class="box">MCP handlers</span>
+        <span class="arrow-right">·</span>
+        <span class="box">Webhook handler</span>
+      </div>
+      <div class="arrow-down"></div>
+      <div class="layer">
+        <span class="lbl">Services</span>
+        <span class="box emit">TaskService — create · update · move · archive · restore · delete · links · sources · github</span>
+      </div>
+      <div class="layer" style="justify-content:center;">
+        <span class="box emit" style="border-color:rgba(96,165,250,.45);">ForgeService — terminal state + accept/reject</span>
+        <span class="box emit">CommentService — create · edit · delete + authz</span>
+      </div>
+      <div class="arrow-down"></div>
+      <div class="layer">
+        <span class="lbl">Leaf</span>
+        <span class="box" style="border-color:rgba(74,222,128,.5);">ActivityService — append() · listMerged()</span>
+        <span class="dep">no dep on TaskService</span>
+      </div>
+      <div class="arrow-down"></div>
+      <div class="layer">
+        <span class="lbl">DB</span>
+        <span class="box">task_activity</span>
+        <span class="arrow-right">·</span>
+        <span class="box">task_comments</span>
+      </div>
+    </div>
+  </div>
+  <div class="callout amber"><b>New invariant:</b> every task mutation emits exactly one <span class="mono">task_activity</span> row in the same transaction as the mutation (batch()). Emission inside services — the webhook <span class="mono">bypassGuards</span> move path is covered automatically.</div>
+</section>
+
+<section id="api">
+  <h2><span class="num">04</span>API surface — REST + MCP</h2>
+  <p class="sub">API.md + MCP.md additions. Exact shapes.</p>
+  <div class="ep">
+    <div class="ep-row">
+      <div class="line"><span class="m get">GET</span><span class="path">/api/projects/:slug/tasks/:id/activity?cursor&limit</span></div>
+      <div class="resp">→ 200 { data: ActivityItem[], nextCursor } &nbsp;<span class="dim">Item = {kind:'event', id, type, actorKind, actorLabel, message, createdAt} | {kind:'comment', id, authorKind, authorLabel, body: TipTapDoc, editedAt, createdAt}</span></div>
+    </div>
+    <div class="ep-row">
+      <div class="line"><span class="m post">POST</span><span class="path">/api/projects/:slug/tasks/:id/comments</span> <span class="dim">body { body: TipTapDoc }</span></div>
+      <div class="resp">→ 201 { data: { comment, activity } } <span class="dim">· activity = the 'commented' row</span></div>
+    </div>
+    <div class="ep-row">
+      <div class="line"><span class="m patch">PATCH</span><span class="path">/api/projects/:slug/tasks/:id/comments/:commentId</span> <span class="dim">body { body } · author only</span></div>
+      <div class="resp">→ 200 { data: Comment } <span class="dim">· sets edited_at, marker only — no activity row (avoids noise)</span></div>
+    </div>
+    <div class="ep-row">
+      <div class="line"><span class="m del">DELETE</span><span class="path">/api/projects/:slug/tasks/:id/comments/:commentId</span> <span class="dim">author or project admin</span></div>
+      <div class="resp">→ 204 <span class="dim">· soft delete + 'comment_deleted' row</span></div>
+    </div>
+  </div>
+  <table class="tbl" style="margin-top:16px;">
+    <tr><th>MCP tool</th><th>Shape</th><th>Notes</th></tr>
+    <tr><td class="mono">get_task_activity</td><td class="mono">{ taskId }</td><td>Markdown timeline — comments serialized via docToMarkdown; includes actor, time, message</td></tr>
+    <tr><td class="mono">add_task_comment</td><td class="mono">{ taskId, comment: Markdown }</td><td>→ created comment (Markdown); markdownToDoc at boundary; actor = api key name</td></tr>
+  </table>
+  <div class="callout green"><b>Response envelope rule (invariant #6):</b> all task mutations return the appended activity row(s) via <span class="mono">activity?: ActivityEvent[]</span>. Client prepends with setQueryData — never invalidateQueries on the mutation path. Webhook-driven entries appear on next slideover open (documented).</div>
+</section>
+
+<section id="events">
+  <h2><span class="num">05</span>Event catalog — frozen messages</h2>
+  <p class="sub">Full coverage of task mutations. Type enum lives in shared/types.ts; messages formatted once at write time.</p>
+  <div class="ev"><span class="t">created</span><span class="x">"Maria created this task" — backfilled for existing tasks</span></div>
+  <div class="ev"><span class="t">moved</span><span class="x">"Maria moved from In Progress to Done" · lane change: "…to Sprint 6 in Done"</span></div>
+  <div class="ev"><span class="t">field_changed</span><span class="x">"Priority changed: Medium → High" · "Title changed" · "Description updated" (no diffs) · "Assignees updated"</span></div>
+  <div class="ev"><span class="t">archived / restored / deleted</span><span class="x">"Maria archived this task" · "Maria deleted this task"</span></div>
+  <div class="ev"><span class="t">link_added / link_removed</span><span class="x">"Linked subtask: Auto-save on zone transition" · "Removed blocked-by: Boss arena trigger zones"</span></div>
+  <div class="ev"><span class="t">source_added / source_removed</span><span class="x">"Added source: Game Design Doc (wiki)" · "Removed source: https://…"</span></div>
+  <div class="ev"><span class="t">github_linked / github_unlinked</span><span class="x">"Linked GitHub issue emberfall-godot #107" · "Unlinked GitHub issue #91"</span></div>
+  <div class="ev"><span class="t">github_synced</span><span class="x">"Issue #107 closed on GitHub — task moved to Done" (webhook, actor system/github)</span></div>
+  <div class="ev"><span class="t">forge_completed / forge_failed / forge_cancelled</span><span class="x">"Forge: opencode completed — result ready" · "Forge run failed"</span></div>
+  <div class="ev"><span class="t">forge_accepted / forge_rejected</span><span class="x">"Maria accepted the Forge result"</span></div>
+  <div class="ev"><span class="t">commented / comment_deleted</span><span class="x">"Maria commented" · "Maria deleted a comment"</span></div>
+</section>
+
+<section id="authz">
+  <h2><span class="num">06</span>Authorization + errors</h2>
+  <p class="sub">Error catalog additions (LAYERS.md).</p>
+  <table class="tbl">
+    <tr><th>Action</th><th>Allowed</th><th>Else</th></tr>
+    <tr><td>Comment create</td><td>any project member</td><td>— (project middleware)</td></tr>
+    <tr><td>Comment edit</td><td>author only</td><td class="mono">403 COMMENT_EDIT_FORBIDDEN</td></tr>
+    <tr><td>Comment delete</td><td>author · project admin (users.role='admin' or admin user_project_roles row)</td><td class="mono">403 COMMENT_DELETE_FORBIDDEN</td></tr>
+    <tr><td>Unknown comment</td><td>—</td><td class="mono">404 COMMENT_NOT_FOUND</td></tr>
+    <tr><td>Empty / malformed / &gt;64KB body</td><td>—</td><td class="mono">422 COMMENT_INVALID</td></tr>
+  </table>
+  <div class="callout amber"><b>Pagination:</b> keyset on (created_at, rowid) per table → merged in memory (two bounded sets, slice to limit) → deterministic cross-table order. Cursor encodes <span class="mono">created_at|rowid|kind</span>. Timeline query = <span class="mono">WHERE task_id=? AND id&lt;? ORDER BY id DESC LIMIT ?</span>.</div>
+</section>
+
+<section id="phases">
+  <h2><span class="num">07</span>Implementation phases</h2>
+  <p class="sub">Wireframe-first (non-negotiable) · tsc --noEmit at every gate · vitest for shared/ · acceptance per docs/RELEASE.md.</p>
+
+  <div class="phase">
+    <div class="n">P0</div>
+    <div>
+      <h3>Wireframes — Activity tab in task slideover</h3>
+      <p>Edit wireframes/src/task-detail.html: tab bar (Description | Activity), timeline list (event rows + comment cards), composer with TipTap toolbar, "edited" markers, deleted-comment collapse, mention chips, "load older" pagination, empty state. Annotations in notes, never HTML comments. Run wireframes/build.sh.</p>
+      <span class="gate">gate: build.sh clean + tsc</span>
+      <div class="files">wireframes/src/task-detail.html · partials/</div>
+    </div>
+  </div>
+
+  <div class="phase">
+    <div class="n">P1</div>
+    <div>
+      <h3>Schema + shared types</h3>
+      <p>Migration 00XX: both tables + indexes + backfill INSERT..SELECT (one 'created' row per task). shared/types.ts: ActivityType enum, ActivityEvent, Comment types, Actor. SCHEMA.md verbatim update.</p>
+      <span class="gate">gate: tsc + migration runs clean on fresh DB</span>
+      <div class="files">server/db/migrations/ · shared/types.ts · docs/SCHEMA.md</div>
+    </div>
+  </div>
+
+  <div class="phase">
+    <div class="n">P2</div>
+    <div>
+      <h3>Repos + services</h3>
+      <p>ActivityRepo, CommentRepo (thin, prepared statements). ActivityService (append, listMerged), CommentService (create/edit/delete + authz), actor resolution in routes + MCP entry. Emission points in TaskService (all mutators, same batch), ForgeService (terminal + accept/reject), webhook path rides the existing atomic move.</p>
+      <span class="gate">gate: tsc + vitest (positions/markdown untouched, new unit tests)</span>
+      <div class="files">server/repos/ · server/services/ · server/api/auth.ts</div>
+    </div>
+  </div>
+
+  <div class="phase">
+    <div class="n">P3</div>
+    <div>
+      <h3>REST endpoints</h3>
+      <p>activity read + comments CRUD per §04, error mapping from catalog (.addError, no hand-rolled try/catch), response envelope: activity[] appended to existing task mutation responses. API.md verbatim update.</p>
+      <span class="gate">gate: backend curl suite (auth, 404/403/422, cursor pagination, envelope)</span>
+      <div class="files">server/api/ · docs/API.md</div>
+    </div>
+  </div>
+
+  <div class="phase">
+    <div class="n">P4</div>
+    <div>
+      <h3>MCP tools</h3>
+      <p>get_task_activity (Markdown timeline), add_task_comment (Markdown → TipTap at boundary; markdownToDoc/docToMarkdown already in shared/markdown.ts). Agent attribution via api key name. MCP.md verbatim update.</p>
+      <span class="gate">gate: MCP handshake + tool smoke (jsonrpc, 401 without key)</span>
+      <div class="files">server/mcp/ · docs/MCP.md</div>
+    </div>
+  </div>
+
+  <div class="phase">
+    <div class="n">P5</div>
+    <div>
+      <h3>Frontend</h3>
+      <p>Activity tab per wireframe: timeline query hook (cursor), comment composer (TipTap), mention highlight (render-time, project members), plain-text rendering for event messages (XSS rule), setQueryData prepends from mutation responses, empty/loading states, archived-task variant.</p>
+      <span class="gate">gate: tsc + browser pass (agent-browser snapshot — console errors 0)</span>
+      <div class="files">app/components/ · app/routes/ · app/lib/</div>
+    </div>
+  </div>
+
+  <div class="phase">
+    <div class="n">P6</div>
+    <div>
+      <h3>Verification + docs</h3>
+      <p>Full acceptance: backend suite (new comment/activity cases), frontend pass, release gate checks. LAYERS.md (services, error catalog, new invariant), AGENTS.md invariant line, ARCHITECTURE.md decisions log, RELEASE_NOTES.md (reverses the "no comments" note).</p>
+      <span class="gate gate red">gate: docs/RELEASE.md checks + paste outputs</span>
+      <div class="files">docs/LAYERS.md · AGENTS.md · ARCHITECTURE.md · RELEASE_NOTES.md</div>
+    </div>
+  </div>
+</section>
+
+<footer>
+  Draft v1 · design approved 2026-08-08 · spec: docs/specs/ACTIVITY_COMMENTS.md
+</footer>
+
+</div>
+</body>
+</html>
