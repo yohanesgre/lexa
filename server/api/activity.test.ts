@@ -86,4 +86,32 @@ describe("GET /api/projects/:slug/tasks/:id/activity", () => {
     }));
     expect(res.status).toBe(404);
   });
+
+  it("updateTask response carries the appended activity", async () => {
+    const res = await handler(new Request("http://lexa.test/api/projects/p1/tasks/t1", {
+      method: "PATCH",
+      headers: { authorization: `Bearer ${ADMIN_KEY}`, "x-lxk-user": "maria@lexa.test", "content-type": "application/json" },
+      body: JSON.stringify({ title: "New title" }),
+    }));
+    expect(res.status).toBe(200);
+    const { data, activity } = await res.json();
+    expect(data.title).toBe("New title");
+    expect(activity).toHaveLength(1);
+    expect(activity[0].type).toBe("field_changed");
+    expect(activity[0].message).toBe("Maria changed the title");
+    expect(activity[0].kind).toBe("event");
+  });
+
+  it("moveTask response carries the appended activity", async () => {
+    const res = await handler(new Request("http://lexa.test/api/projects/p1/tasks/t1/move", {
+      method: "POST",
+      headers: { authorization: `Bearer ${ADMIN_KEY}`, "x-lxk-user": "maria@lexa.test", "content-type": "application/json" },
+      body: JSON.stringify({ columnId: "c1", swimlaneId: "s1" }),
+    }));
+    expect(res.status).toBe(200);
+    const { data, activity } = await res.json();
+    expect(data.title).toBe("New title");
+    // no-op move (same column/lane, no neighbors) → no activity rows
+    expect(activity).toEqual([]);
+  });
 });

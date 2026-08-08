@@ -49,6 +49,7 @@ import * as msg from "../activity-messages";
 import { WebhookEventRepo } from "../repos/webhook-event.repo";
 import { GitHubClient } from "../github/client";
 import { extractText } from "../../shared/tiptap-text";
+import type { ActivityEvent } from "../../shared/types";
 
 const ApiKeySchema = Schema.Struct({
   id: Schema.String,
@@ -591,13 +592,51 @@ const TaskLinkSuggestionSchema = Schema.Struct({
 
 const TaskSearchResponse = Schema.Struct({ data: Schema.Array(TaskLinkSuggestionSchema) });
 
+// Mutation envelope (invariant 6): the response carries the activity rows
+// appended by the mutation — clients prepend them to the timeline via
+// setQueryData (Task 14), never refetch.
+const ActivityEventSchema = Schema.Struct({
+  kind: Schema.Literal("event"),
+  id: Schema.Number,
+  actorKind: Schema.Literal("user", "agent", "system"),
+  actorLabel: Schema.String,
+  actorUserId: Schema.NullOr(Schema.String),
+  type: Schema.Literal("created", "moved", "field_changed", "archived", "restored", "deleted",
+    "link_added", "link_removed", "source_added", "source_removed",
+    "github_linked", "github_unlinked", "github_synced",
+    "forge_completed", "forge_failed", "forge_cancelled",
+    "commented", "comment_deleted"),
+  message: Schema.String,
+  createdAt: Schema.String,
+});
+
+const TaskCommentSchema = Schema.Struct({
+  kind: Schema.Literal("comment"),
+  id: Schema.Number,
+  authorId: Schema.NullOr(Schema.String),
+  authorKind: Schema.Literal("user", "agent", "system"),
+  authorLabel: Schema.String,
+  body: Schema.Any,
+  editedAt: Schema.NullOr(Schema.String),
+  createdAt: Schema.String,
+});
+
+const LinkMutationResponse = Schema.Struct({
+  data: TaskLinkSchema,
+  activity: Schema.Array(ActivityEventSchema),
+});
+const SourceMutationResponse = Schema.Struct({
+  data: SourceSchema,
+  activity: Schema.Array(ActivityEventSchema),
+});
+
 const TaskLinkPath = Schema.Struct({ slug: Schema.String, id: Schema.String });
 
 const taskLinksGroup = HttpApiGroup.make("task-links")
   .add(HttpApiEndpoint.get("listTaskLinks", "/projects/:slug/tasks/:id/links")
     .setPath(TaskLinkPath).addSuccess(TaskLinkListResponse))
   .add(HttpApiEndpoint.post("addTaskLink", "/projects/:slug/tasks/:id/links")
-    .setPath(TaskLinkPath).setPayload(AddTaskLinkInput).addSuccess(TaskLinkSchema, { status: 201 }))
+    .setPath(TaskLinkPath).setPayload(AddTaskLinkInput).addSuccess(LinkMutationResponse, { status: 201 }))
   .add(HttpApiEndpoint.del("removeTaskLink", "/projects/:slug/tasks/:id/links/:linkId")
     .setPath(Schema.Struct({ slug: Schema.String, id: Schema.String, linkId: Schema.String }))
     .addSuccess(Schema.Undefined, { status: 204 }))
@@ -686,7 +725,7 @@ const forgeGroup = HttpApiGroup.make("forge")
   .add(HttpApiEndpoint.get("listSources", "/projects/:slug/documents/:type/:id/sources")
     .setPath(DocumentPath).addSuccess(SourceListResponse))
   .add(HttpApiEndpoint.post("addSource", "/projects/:slug/documents/:type/:id/sources")
-    .setPath(DocumentPath).setPayload(AddSourceInput).addSuccess(SourceSchema, { status: 201 }))
+    .setPath(DocumentPath).setPayload(AddSourceInput).addSuccess(SourceMutationResponse, { status: 201 }))
   .add(HttpApiEndpoint.del("removeSource", "/projects/:slug/documents/:type/:id/sources/:sourceId")
     .setPath(Schema.Struct({ slug: Schema.String, type: Schema.Literal("task", "wiki"), id: Schema.String, sourceId: Schema.String }))
     .addSuccess(Schema.Undefined, { status: 204 }));
@@ -809,6 +848,11 @@ const TaskListResponse = Schema.Struct({
   nextCursor: Schema.NullOr(Schema.String),
 });
 
+const TaskMutationResponse = Schema.Struct({
+  data: TaskSchema,
+  activity: Schema.Array(ActivityEventSchema),
+});
+
 const CreateTaskPayload = Schema.Struct({
   columnId: Schema.String,
   swimlaneId: Schema.String,
@@ -841,32 +885,6 @@ const GithubLinkPayload = Schema.Struct({ repo: Schema.String });
 
 const GithubLinkPath = Schema.Struct({ slug: Schema.String, id: Schema.String, issueId: Schema.String });
 
-const ActivityEventSchema = Schema.Struct({
-  kind: Schema.Literal("event"),
-  id: Schema.Number,
-  actorKind: Schema.Literal("user", "agent", "system"),
-  actorLabel: Schema.String,
-  actorUserId: Schema.NullOr(Schema.String),
-  type: Schema.Literal("created", "moved", "field_changed", "archived", "restored", "deleted",
-    "link_added", "link_removed", "source_added", "source_removed",
-    "github_linked", "github_unlinked", "github_synced",
-    "forge_completed", "forge_failed", "forge_cancelled",
-    "commented", "comment_deleted"),
-  message: Schema.String,
-  createdAt: Schema.String,
-});
-
-const TaskCommentSchema = Schema.Struct({
-  kind: Schema.Literal("comment"),
-  id: Schema.Number,
-  authorId: Schema.NullOr(Schema.String),
-  authorKind: Schema.Literal("user", "agent", "system"),
-  authorLabel: Schema.String,
-  body: Schema.Any,
-  editedAt: Schema.NullOr(Schema.String),
-  createdAt: Schema.String,
-});
-
 const ActivityItemSchema = Schema.Union(ActivityEventSchema, TaskCommentSchema);
 const ActivityPageSchema = Schema.Struct({ data: Schema.Array(ActivityItemSchema), nextCursor: Schema.NullOr(Schema.String) });
 
@@ -890,19 +908,19 @@ const tasksGroup = HttpApiGroup.make("tasks")
   .add(HttpApiEndpoint.get("listTasks", "/projects/:slug/tasks")
     .setPath(SlugPath).addSuccess(TaskListResponse))
   .add(HttpApiEndpoint.post("createTask", "/projects/:slug/tasks")
-    .setPath(SlugPath).setPayload(CreateTaskPayload).addSuccess(TaskSchema, { status: 201 }))
+    .setPath(SlugPath).setPayload(CreateTaskPayload).addSuccess(TaskMutationResponse, { status: 201 }))
   .add(HttpApiEndpoint.get("getTask", "/projects/:slug/tasks/:id")
     .setPath(TaskPath).addSuccess(TaskSchema))
   .add(HttpApiEndpoint.patch("updateTask", "/projects/:slug/tasks/:id")
-    .setPath(TaskPath).setPayload(UpdateTaskPayload).addSuccess(TaskSchema))
+    .setPath(TaskPath).setPayload(UpdateTaskPayload).addSuccess(TaskMutationResponse))
   .add(HttpApiEndpoint.post("moveTask", "/projects/:slug/tasks/:id/move")
-    .setPath(TaskPath).setPayload(MoveTaskPayload).addSuccess(TaskSchema))
+    .setPath(TaskPath).setPayload(MoveTaskPayload).addSuccess(TaskMutationResponse))
   .add(HttpApiEndpoint.del("deleteTask", "/projects/:slug/tasks/:id")
     .setPath(TaskPath)  .addSuccess(Schema.Undefined, { status: 204 }))
   .add(HttpApiEndpoint.post("archiveTask", "/projects/:slug/tasks/:id/archive")
-    .setPath(TaskPath).addSuccess(TaskSchema))
+    .setPath(TaskPath).addSuccess(TaskMutationResponse))
   .add(HttpApiEndpoint.post("restoreTask", "/projects/:slug/tasks/:id/restore")
-    .setPath(TaskPath).addSuccess(TaskSchema))
+    .setPath(TaskPath).addSuccess(TaskMutationResponse))
   .add(HttpApiEndpoint.get("taskActivity", "/projects/:slug/tasks/:id/activity")
     .setPath(TaskPath).addSuccess(ActivityPageSchema))
   .add(HttpApiEndpoint.post("createComment", "/projects/:slug/tasks/:id/comments")
@@ -912,9 +930,9 @@ const tasksGroup = HttpApiGroup.make("tasks")
   .add(HttpApiEndpoint.del("deleteComment", "/projects/:slug/tasks/:id/comments/:commentId")
     .setPath(CommentIdPath).addSuccess(Schema.Void, { status: 204 }))
   .add(HttpApiEndpoint.post("linkGithubIssue", "/projects/:slug/tasks/:id/github-link")
-    .setPath(TaskPath).setPayload(GithubLinkPayload).addSuccess(TaskSchema))
+    .setPath(TaskPath).setPayload(GithubLinkPayload).addSuccess(TaskMutationResponse))
   .add(HttpApiEndpoint.del("unlinkGithubIssue", "/projects/:slug/tasks/:id/github-link/:issueId")
-    .setPath(GithubLinkPath).addSuccess(TaskSchema));
+    .setPath(GithubLinkPath).addSuccess(TaskMutationResponse));
 
 const boardGroup = HttpApiGroup.make("board")
   .add(HttpApiEndpoint.get("getBoard", "/projects/:slug/board")
@@ -1792,14 +1810,14 @@ const forgeLive = HttpApiBuilder.group(LexaApi, "forge", (handlers) =>
         const service = yield* SourceService;
         const identity = yield* AuthIdentity;
         const project = yield* projectService.findBySlug(req.path.slug);
-        const { source } = yield* service.add(actorFromIdentity(identity), {
+        const { source, activity } = yield* service.add(actorFromIdentity(identity), {
           projectId: project.id,
           documentType: req.path.type,
           documentId: req.path.id,
           kind: req.payload.kind,
           ref: req.payload.ref,
         });
-        return source;
+        return { data: source, activity: activityPayload(activity) };
       }))
     )
     .handle("removeSource", (req) =>
@@ -1829,13 +1847,13 @@ const taskLinksLive = HttpApiBuilder.group(LexaApi, "task-links", (handlers) =>
         const service = yield* TaskLinkService;
         const identity = yield* AuthIdentity;
         const project = yield* projectService.findBySlug(req.path.slug);
-        const { link } = yield* service.add(actorFromIdentity(identity), {
+        const { link, activity } = yield* service.add(actorFromIdentity(identity), {
           projectId: project.id,
           fromTaskId: req.path.id,
           toTaskId: req.payload.toTaskId,
           relation: req.payload.relation,
         });
-        return link;
+        return { data: link, activity: activityPayload(activity) };
       }))
     )
     .handle("removeTaskLink", (req) =>
@@ -1888,14 +1906,14 @@ const tasksLive = HttpApiBuilder.group(LexaApi, "tasks", (handlers) =>
         const taskService = yield* TaskService;
         const identity = yield* AuthIdentity;
         const project = yield* projectService.findBySlug(req.path.slug);
-        const { task } = yield* taskService.create(actorFromIdentity(identity), {
+        const { task, activity } = yield* taskService.create(actorFromIdentity(identity), {
           projectId: project.id, columnId: req.payload.columnId,
           swimlaneId: req.payload.swimlaneId, title: req.payload.title,
           description: req.payload.description, priority: req.payload.priority,
           type: req.payload.type, parentId: req.payload.parentId,
           assignees: req.payload.assignees ? [...req.payload.assignees] : undefined,
         });
-        return formatTask(task);
+        return { data: formatTask(task), activity: activityPayload(activity) };
       }))
     )
     .handle("getTask", (req) =>
@@ -1909,12 +1927,12 @@ const tasksLive = HttpApiBuilder.group(LexaApi, "tasks", (handlers) =>
       respond(Effect.gen(function* () {
         const taskService = yield* TaskService;
         const identity = yield* AuthIdentity;
-        const { task } = yield* taskService.update(actorFromIdentity(identity), req.path.id, {
+        const { task, activity } = yield* taskService.update(actorFromIdentity(identity), req.path.id, {
           title: req.payload.title, description: req.payload.description,
           priority: req.payload.priority, type: req.payload.type,
           assignees: req.payload.assignees ? [...req.payload.assignees] : undefined,
         });
-        return formatTask(task);
+        return { data: formatTask(task), activity: activityPayload(activity) };
       }))
     )
     .handle("moveTask", (req) =>
@@ -1923,7 +1941,7 @@ const tasksLive = HttpApiBuilder.group(LexaApi, "tasks", (handlers) =>
         const columnService = yield* ColumnService;
         const githubService = yield* GitHubService;
         const identity = yield* AuthIdentity;
-        const { task } = yield* taskService.move(actorFromIdentity(identity), req.path.id, {
+        const { task, activity } = yield* taskService.move(actorFromIdentity(identity), req.path.id, {
           columnId: req.payload.columnId, swimlaneId: req.payload.swimlaneId,
           beforeTaskId: req.payload.beforeTaskId, afterTaskId: req.payload.afterTaskId,
         });
@@ -1939,7 +1957,7 @@ const tasksLive = HttpApiBuilder.group(LexaApi, "tasks", (handlers) =>
             Effect.catchTag("ConstraintViolation", (e) => Effect.logWarning(`[GitHub] sync failed for task ${task.id}`, e))
           );
         }
-        return formatTask(task);
+        return { data: formatTask(task), activity: activityPayload(activity) };
       }))
     )
     .handle("deleteTask", (req) =>
@@ -1954,16 +1972,16 @@ const tasksLive = HttpApiBuilder.group(LexaApi, "tasks", (handlers) =>
       respond(Effect.gen(function* () {
         const taskService = yield* TaskService;
         const identity = yield* AuthIdentity;
-        const { task } = yield* taskService.archive(actorFromIdentity(identity), req.path.id);
-        return formatTask(task);
+        const { task, activity } = yield* taskService.archive(actorFromIdentity(identity), req.path.id);
+        return { data: formatTask(task), activity: activityPayload(activity) };
       }))
     )
     .handle("restoreTask", (req) =>
       respond(Effect.gen(function* () {
         const taskService = yield* TaskService;
         const identity = yield* AuthIdentity;
-        const { task } = yield* taskService.restore(actorFromIdentity(identity), req.path.id);
-        return formatTask(task);
+        const { task, activity } = yield* taskService.restore(actorFromIdentity(identity), req.path.id);
+        return { data: formatTask(task), activity: activityPayload(activity) };
       }))
     )
     .handle("taskActivity", (req) =>
@@ -2019,9 +2037,9 @@ const tasksLive = HttpApiBuilder.group(LexaApi, "tasks", (handlers) =>
         const githubService = yield* GitHubService;
         const identity = yield* AuthIdentity;
         yield* projectService.findBySlug(req.path.slug);
-        yield* githubService.createLinkedIssue(actorFromIdentity(identity), req.path.id, req.payload.repo);
+        const linked = yield* githubService.createLinkedIssue(actorFromIdentity(identity), req.path.id, req.payload.repo);
         const task = yield* taskService.getById(req.path.id);
-        return formatTask(task);
+        return { data: formatTask(task), activity: activityPayload(linked.activity) };
       }))
     )
     .handle("unlinkGithubIssue", (req) =>
@@ -2036,17 +2054,18 @@ const tasksLive = HttpApiBuilder.group(LexaApi, "tasks", (handlers) =>
         const issue = task.githubs.find((g) => g.issueId === req.path.issueId);
         const db = yield* Sqlite;
         // Does NOT close or delete the GitHub issue.
-        yield* withTx(db, Effect.gen(function* () {
+        const ev = yield* withTx(db, Effect.gen(function* () {
           yield* taskRepo.unlinkGithubIssue(req.path.id, req.path.issueId);
           if (issue) {
             // Handler-level emission — the unlink lives in the route, not a
             // service (documented deviation: services-only rule).
-            yield* activityService.append(req.path.id, actorFromIdentity(identity), "github_unlinked",
+            return yield* activityService.append(req.path.id, actorFromIdentity(identity), "github_unlinked",
               msg.githubUnlinked(issue.repo, issue.issueNumber));
           }
+          return null;
         }));
         const updated = yield* taskService.getById(req.path.id);
-        return formatTask(updated);
+        return { data: formatTask(updated), activity: ev ? activityPayload([ev]) : [] };
       }))
     )
 );
@@ -2317,6 +2336,12 @@ function formatSwimlane(s: { id: string; projectId: string; name: string; descri
 
 function formatTask(t: { id: string; projectId: string; columnId: string; swimlaneId: string; title: string; description: any; priority: string; type: string; assignees: string[]; position: string; githubs: any[]; createdAt: string; updatedAt: string }) {
   return t as any;
+}
+
+// The response schema requires the kind discriminator; service results are
+// plain ActivityEvent (no kind). Added here, at the API boundary.
+function activityPayload(events: ActivityEvent[]) {
+  return events.map((a) => ({ kind: "event" as const, ...a }));
 }
 
 function formatWikiPage(page: { id: string; projectId: string; title: string; slug: string; content: any; parentId: string | null; position: number; createdAt: string; updatedAt: string }) {

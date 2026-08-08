@@ -1,6 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import type { Task, Project, Board, Column, Swimlane, TipTapDoc, WikiPageMeta, ApiKey, ApiKeyCreateResult, Dashboard, FieldConfig, DocumentSource, ForgeTask, TaskLink, Runtime, ForgeAgent, ForgeSkill, Machine } from "../../shared/types";
 import * as api from "./api";
+import type { TaskMutationResult } from "./api";
 import type { RecentForgeTask, ForgeHistoryPage } from "./api";
 import { useToast } from "../components/ui/Toast";
 
@@ -113,7 +114,7 @@ export function useUpdateTask(slug: string) {
   return useMutation({
     mutationFn: ({ id, ...input }: { id: string; title?: string; description?: TipTapDoc; priority?: string; type?: string; assignees?: string[] }) =>
       api.updateTask(slug, id, input),
-    onSuccess: (task) => {
+    onSuccess: ({ data: task, activity }) => {
       qc.setQueryData(["tasks", slug, task.id], task);
       qc.setQueryData(["board", slug, false], (old: Board | undefined) => {
         if (!old) return old;
@@ -135,7 +136,7 @@ export function useCreateTask(slug: string) {
   const toast = useToast();
   return useMutation({
     mutationFn: (input: Parameters<typeof api.createTask>[1]) => api.createTask(slug, input),
-    onSuccess: (task) => {
+    onSuccess: ({ data: task, activity }) => {
       qc.setQueryData(["board", slug, false], (old: Board | undefined) => {
         if (!old) return old;
         return { ...old, tasks: [...old.tasks, task] };
@@ -158,7 +159,7 @@ export function useMoveTask(slug: string) {
   return useMutation({
     mutationFn: ({ id, ...target }: { id: string; columnId: string; swimlaneId: string; beforeTaskId?: string; afterTaskId?: string }) =>
       api.moveTask(slug, id, target),
-    onSuccess: (task) => {
+    onSuccess: ({ data: task, activity }) => {
       // Keep both board caches in sync with the authoritative move response.
       for (const archived of [false, true]) {
         qc.setQueryData(["board", slug, archived], (old: Board | undefined) => {
@@ -205,7 +206,7 @@ export function useArchiveTask(slug: string) {
   const toast = useToast();
   return useMutation({
     mutationFn: ({ id }: { id: string }) => api.archiveTask(slug, id),
-    onSuccess: (task) => {
+    onSuccess: ({ data: task, activity }) => {
       // Live board: remove the card. Archived board: update in place.
       qc.setQueryData(["board", slug, false], (old: Board | undefined) => {
         if (!old) return old;
@@ -229,7 +230,7 @@ export function useRestoreTask(slug: string) {
   const toast = useToast();
   return useMutation({
     mutationFn: ({ id }: { id: string }) => api.restoreTask(slug, id),
-    onSuccess: (task) => {
+    onSuccess: ({ data: task, activity }) => {
       // Archived board: update in place. Live board: re-insert at its column/position.
       qc.setQueryData(["board", slug, true], (old: Board | undefined) => {
         if (!old) return old;
@@ -251,11 +252,11 @@ export function useRestoreTask(slug: string) {
   });
 }
 
-function useGithubLinkMutation(slug: string, apiFn: (slug: string, id: string, key: string) => Promise<Task>) {
+function useGithubLinkMutation(slug: string, apiFn: (slug: string, id: string, key: string) => Promise<TaskMutationResult>) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: ({ id, key }: { id: string; key: string }) => apiFn(slug, id, key),
-    onSuccess: (task) => {
+    onSuccess: ({ data: task, activity }) => {
       // Mutation responses are authoritative — update both board caches in place.
       for (const archived of [false, true]) {
         qc.setQueryData(["board", slug, archived], (old: Board | undefined) => {
@@ -273,7 +274,7 @@ export function useLinkGithubIssue(slug: string) {
   const mutation = useGithubLinkMutation(slug, api.linkGithubIssue);
   return {
     ...mutation,
-    mutateAsync: async (input: { id: string; repo: string }): Promise<Task> => {
+    mutateAsync: async (input: { id: string; repo: string }): Promise<TaskMutationResult> => {
       try {
         return await mutation.mutateAsync({ id: input.id, key: input.repo });
       } catch (err) {
@@ -289,7 +290,7 @@ export function useUnlinkGithubIssue(slug: string) {
   const mutation = useGithubLinkMutation(slug, api.unlinkGithubIssue);
   return {
     ...mutation,
-    mutateAsync: async (input: { id: string; issueId: string }): Promise<Task> => {
+    mutateAsync: async (input: { id: string; issueId: string }): Promise<TaskMutationResult> => {
       try {
         return await mutation.mutateAsync({ id: input.id, key: input.issueId });
       } catch (err) {
