@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Lexa — Tasks</title>
+  <link rel="stylesheet" href="wireframes.css" />
+</head>
+<body class="bg-app color-primary" style="min-height:100vh;">
+
+  <INCLUDE navbar.html />
+
+  <main class="page-frame">
+    <div class="tasks-page">
+
+      <!-- Header: title + project name + unfiltered total count -->
+      <div class="tasks-header">
+        <div>
+          <h1 class="tasks-title">Tasks</h1>
+          <div class="tasks-sub">Emberfall · 14 total</div>
+        </div>
+        <span class="annotation-tag">Count = unfiltered total for the project (<span class="font-mono">board.tasks.length</span>) — filters never change it. Count shown for the selected project only.</span>
+      </div>
+
+      <!-- Filter bar: search · column · type · priority · sort · archived toggle -->
+      <div class="tasks-filter">
+        <input class="tasks-search" type="search" placeholder="Search tasks…" />
+        <select class="tasks-select">
+          <option>All columns</option>
+          <option>Todo</option>
+          <option>In Progress</option>
+          <option>Review</option>
+          <option>Done</option>
+          <option>Blocked</option>
+        </select>
+        <select class="tasks-select">
+          <option>All types</option>
+          <option>Bug</option>
+          <option>Feature</option>
+          <option>Chore</option>
+        </select>
+        <select class="tasks-select">
+          <option>All priorities</option>
+          <option>Urgent</option>
+          <option>High</option>
+          <option>Medium</option>
+          <option>Low</option>
+        </select>
+        <select class="tasks-select">
+          <option>Board order</option>
+          <option>Priority</option>
+          <option>Newest created</option>
+        </select>
+        <button type="button" class="tasks-archive-toggle">Archived</button>
+      </div>
+      <div class="flex gap-2 mt-2 flex-wrap">
+        <span class="annotation-tag">Dropdowns list only values present in the project (<span class="font-mono">board.columns</span> / <span class="font-mono">fieldConfig</span>) — no global field catalog.</span>
+        <span class="annotation-tag">Filters intersect (AND) — search + column + type + priority all apply together.</span>
+        <span class="annotation-tag">Sort is single-active: Board order (columnId, position — default) · Priority (fieldConfig option order) · Newest created (createdAt desc).</span>
+        <span class="annotation-tag">Archived toggle mirrors board semantics — archived tasks excluded from the count; toggle ON shows them dimmed (see state block below).</span>
+      </div>
+
+      <!-- State 1: list (default) -->
+      <span class="annotation-tag">Card anatomy: left priority accent bar (3px, colored inline from fieldConfig — the scan signal) · title line (primary, truncates) · meta line: "where" (column · swimlane, quiet flat text, flexes) + "what" (type/priority chips · GitHub · date, right-aligned group). Card = surface bg + border + radius, 12px/16px padding; hover shifts border/bg (no lift); focus-visible ring; .archived stays dimmed (accent dims too).</span>
+      <span class="annotation-tag">Row click → TaskDetail slideover via <span class="font-mono">?task=&lt;id&gt;</span> (same param pattern as board). Closing/back clears the param; filters persist — they live in component state, not the URL.</span>
+      <div class="tasks-list">
+        <button type="button" class="task-row">
+          <span class="task-row-accent" style="background:#FF6B6B;"></span>
+          <span class="task-row-title">Fix hitbox desync during dodge roll</span>
+          <span class="task-row-meta">
+            <span class="task-row-where">In Progress · Core Loop</span>
+            <span class="task-row-status">
+              <span class="task-chip type">Bug</span>
+              <span class="task-chip priority" style="color:#FF6B6B;border-color:#FF6B6B;">Urgent</span>
+              <span class="task-gh">#142</span>
+              <span class="task-row-date">2026-07-14</span>
+            </span>
+          </span>
+        </button>
+        <button type="button" class="task-row">
+          <span class="task-row-accent" style="background:#F0C040;"></span>
+          <span class="task-row-title">Rebalance fire sword damage curve</span>
+          <span class="task-row-meta">
+            <span class="task-row-where">Review · Core Loop</span>
+            <span class="task-row-status">
+              <span class="task-chip type">Feature</span>
+              <span class="task-chip priority" style="color:#F0C040;border-color:#F0C040;">High</span>
+              <span class="task-gh">#144</span>
+              <span class="task-row-date">2026-07-13</span>
+            </span>
+          </span>
+        </button>
+        <button type="button" class="task-row">
+          <span class="task-row-accent" style="background:#FF6B6B;"></span>
+          <span class="task-row-title">Crash on sector 7 boss transition</span>
+          <span class="task-row-meta">
+            <span class="task-row-where">In Progress · Systems</span>
+            <span class="task-row-status">
+              <span class="task-chip type">Bug</span>
+              <span class="task-chip priority" style="color:#FF6B6B;border-color:#FF6B6B;">Urgent</span>
+              <span class="task-gh">#156</span>
+              <span class="task-row-date">2026-07-12</span>
+            </span>
+          </span>
+        </button>
+        <button type="button" class="task-row">
+          <span class="task-row-accent" style="background:#4ADE80;"></span>
+          <span class="task-row-title">Write final encounter dialogue</span>
+          <span class="task-row-meta">
+            <span class="task-row-where">Todo · Writing</span>
+            <span class="task-row-status">
+              <span class="task-chip type">Chore</span>
+              <span class="task-chip priority" style="color:#4ADE80;border-color:#4ADE80;">Low</span>
+              <span class="task-row-date">2026-07-11</span>
+            </span>
+          </span>
+        </button>
+        <button type="button" class="task-row">
+          <span class="task-row-accent" style="background:#F0C040;"></span>
+          <span class="task-row-title">AI pathfinding fails on destructible tiles</span>
+          <span class="task-row-meta">
+            <span class="task-row-where">Blocked · Systems</span>
+            <span class="task-row-status">
+              <span class="task-chip type">Bug</span>
+              <span class="task-chip priority" style="color:#F0C040;border-color:#F0C040;">High</span>
+              <span class="task-gh">#171</span>
+              <span class="task-row-date">2026-07-09</span>
+            </span>
+          </span>
+        </button>
+        <button type="button" class="task-row">
+          <span class="task-row-accent" style="background:#22D3EE;"></span>
+          <span class="task-row-title">Add double-jump input buffer</span>
+          <span class="task-row-meta">
+            <span class="task-row-where">Todo · Core Loop</span>
+            <span class="task-row-status">
+              <span class="task-chip type">Feature</span>
+              <span class="task-chip priority" style="color:#22D3EE;border-color:#22D3EE;">Medium</span>
+              <span class="task-row-date">2026-07-08</span>
+            </span>
+          </span>
+        </button>
+        <button type="button" class="task-row">
+          <span class="task-row-accent" style="background:#4ADE80;"></span>
+          <span class="task-row-title">Polish dash trail particles</span>
+          <span class="task-row-meta">
+            <span class="task-row-where">Review · VFX</span>
+            <span class="task-row-status">
+              <span class="task-chip type">Chore</span>
+              <span class="task-chip priority" style="color:#4ADE80;border-color:#4ADE80;">Low</span>
+              <span class="task-gh">#182</span>
+              <span class="task-row-date">2026-07-06</span>
+            </span>
+          </span>
+        </button>
+        <button type="button" class="task-row">
+          <span class="task-row-accent" style="background:#F0C040;"></span>
+          <span class="task-row-title">Balance tuning pass — fire tree</span>
+          <span class="task-row-meta">
+            <span class="task-row-where">Done · Systems</span>
+            <span class="task-row-status">
+              <span class="task-chip type">Feature</span>
+              <span class="task-chip priority" style="color:#F0C040;border-color:#F0C040;">High</span>
+              <span class="task-row-date">2026-07-03</span>
+            </span>
+          </span>
+        </button>
+      </div>
+
+      <!-- State 2: loading skeleton rows -->
+      <div class="tasks-state-block">
+        <span class="annotation-tag">State: loading — layout-matched skeleton rows, no spinners (same <span class="font-mono">.skeleton</span> pattern as other surfaces)</span>
+        <div class="tasks-list">
+          <div class="task-row">
+            <div class="skeleton" style="width:55%;height:14px;"></div>
+          </div>
+          <div class="task-row">
+            <div class="skeleton" style="width:49%;height:14px;"></div>
+          </div>
+          <div class="task-row">
+            <div class="skeleton" style="width:58%;height:14px;"></div>
+          </div>
+          <div class="task-row">
+            <div class="skeleton" style="width:43%;height:14px;"></div>
+          </div>
+          <div class="task-row">
+            <div class="skeleton" style="width:52%;height:14px;"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- State 3: empty project -->
+      <div class="tasks-state-block">
+        <span class="annotation-tag">State: empty project — zero tasks on the board → CTA opens the board (<span class="font-mono">/$slug</span>)</span>
+        <div class="tasks-empty">
+          <div class="tasks-empty-title">No tasks yet</div>
+          <div class="tasks-empty-sub">Create tasks from the board.</div>
+          <button type="button" class="btn btn-primary btn-sm">Open board</button>
+        </div>
+      </div>
+
+      <!-- State 4: no match (filters active) -->
+      <div class="tasks-state-block">
+        <span class="annotation-tag">State: no match — filters/search active, zero rows → "Clear filters" resets search + all dropdowns (NOT the archived toggle / sort)</span>
+        <div class="tasks-empty">
+          <div class="tasks-empty-title">No tasks match</div>
+          <div class="tasks-empty-sub">Try adjusting your filters.</div>
+          <button type="button" class="btn btn-ghost btn-sm">Clear filters</button>
+        </div>
+      </div>
+
+      <!-- State 5: archived toggle ON — dimmed rows -->
+      <div class="tasks-state-block">
+        <span class="annotation-tag">State: archived toggle ON — archived tasks shown dimmed (<span class="font-mono">.archived</span>), still excluded from the header count</span>
+        <div class="tasks-filter">
+          <input class="tasks-search" type="search" placeholder="Search tasks…" />
+          <select class="tasks-select"><option>All columns</option></select>
+          <select class="tasks-select"><option>All types</option></select>
+          <select class="tasks-select"><option>All priorities</option></select>
+          <select class="tasks-select"><option>Board order</option></select>
+          <button type="button" class="tasks-archive-toggle on">Archived</button>
+        </div>
+        <div class="tasks-list mt-2">
+          <button type="button" class="task-row archived">
+            <span class="task-row-accent" style="background:#4ADE80;"></span>
+            <span class="task-row-title">Legacy quest tracker cleanup</span>
+            <span class="task-row-meta">
+              <span class="task-row-where">Done · Core Loop</span>
+              <span class="task-row-status">
+                <span class="task-chip type">Chore</span>
+                <span class="task-chip priority" style="color:#4ADE80;border-color:#4ADE80;">Low</span>
+                <span class="task-row-date">2026-06-28</span>
+              </span>
+            </span>
+          </button>
+          <button type="button" class="task-row archived">
+            <span class="task-row-accent" style="background:#22D3EE;"></span>
+            <span class="task-row-title">Old lighting pass notes</span>
+            <span class="task-row-meta">
+              <span class="task-row-where">Done · VFX</span>
+              <span class="task-row-status">
+                <span class="task-chip type">Chore</span>
+                <span class="task-chip priority" style="color:#22D3EE;border-color:#22D3EE;">Medium</span>
+                <span class="task-row-date">2026-06-21</span>
+              </span>
+            </span>
+          </button>
+        </div>
+      </div>
+
+      <!-- State 6: load error -->
+      <div class="tasks-state-block">
+        <span class="annotation-tag">State: load error — panel + retry refetches; never render the empty state on error</span>
+        <div class="tasks-error">
+          <div class="tasks-error-title">Failed to load tasks</div>
+          <div class="tasks-error-sub"><span class="font-mono">Network error</span> — the board query failed to load</div>
+          <button type="button" class="btn btn-ghost btn-sm">Retry</button>
+        </div>
+      </div>
+
+    </div>
+  </main>
+
+</body>
+</html>

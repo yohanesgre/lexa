@@ -1,4 +1,5 @@
 import { useQuery, useMutation, useQueryClient, useInfiniteQuery } from "@tanstack/react-query";
+import { useMemo } from "react";
 import type { QueryClient, InfiniteData } from "@tanstack/react-query";
 import type { Task, Project, Board, Column, Swimlane, TipTapDoc, WikiPageMeta, ApiKey, ApiKeyCreateResult, Dashboard, FieldConfig, DocumentSource, ForgeTask, TaskLink, Runtime, ForgeAgent, ForgeSkill, Machine, ActivityItem } from "../../shared/types";
 import * as api from "./api";
@@ -84,6 +85,64 @@ export function useUpdateProject() {
 
 export function useBoard(slug: string, includeArchived = false) {
   return useQuery({ queryKey: ["board", slug, includeArchived], queryFn: () => api.getBoard(slug, includeArchived) });
+}
+
+export interface TaskListItem {
+  id: string;
+  title: string;
+  priorityId: string;
+  priorityLabel: string;
+  priorityColor: string;
+  typeId: string;
+  typeLabel: string;
+  typeColor: string;
+  columnId: string;
+  columnName: string;
+  swimlaneName: string;
+  githubNumber: number | null;
+  archivedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+// Pure derivation of a flat display-ready task list — shares the board query
+// cache (same key as useBoard) so board and list never double-fetch.
+export function deriveTaskList(board: Board): TaskListItem[] {
+  const columnName = new Map(board.columns.map((c) => [c.id, c.name]));
+  const swimlaneName = new Map(board.swimlanes.map((s) => [s.id, s.name]));
+  const priority = new Map(board.fieldConfig.priorities.map((o) => [o.id, o]));
+  const type = new Map(board.fieldConfig.types.map((o) => [o.id, o]));
+  return board.tasks.map((t) => {
+    const p = priority.get(t.priority);
+    const ty = type.get(t.type);
+    return {
+      id: t.id,
+      title: t.title,
+      priorityId: t.priority,
+      priorityLabel: p?.label ?? t.priority,
+      priorityColor: p?.color ?? "",
+      typeId: t.type,
+      typeLabel: ty?.label ?? t.type,
+      typeColor: ty?.color ?? "",
+      columnId: t.columnId,
+      columnName: columnName.get(t.columnId) ?? "Unknown column",
+      swimlaneName: swimlaneName.get(t.swimlaneId) ?? "Unknown swimlane",
+      githubNumber: t.githubs[0]?.issueNumber ?? null,
+      archivedAt: t.archivedAt,
+      createdAt: t.createdAt,
+      updatedAt: t.updatedAt,
+    };
+  });
+}
+
+export function useTasks(slug: string, showArchived = false) {
+  const query = useQuery({
+    queryKey: ["board", slug, showArchived],
+    queryFn: () => api.getBoard(slug, showArchived),
+  });
+  const board = query.data;
+  const tasks = useMemo(() => (board ? deriveTaskList(board) : undefined), [board]);
+  return { ...query, board, tasks };
 }
 
 export function useFieldConfig(slug: string) {

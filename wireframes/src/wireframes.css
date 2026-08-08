@@ -3214,3 +3214,281 @@ textarea.prop-input {
   padding: 8px 10px;
   border-top: 1px solid var(--lx-border-subtle);
 }
+
+/* =========================================================
+   Tasks List (tasks.html)
+   Per-project flat task list: header, filter bar, rows,
+   empty/no-match/error states, archived toggle.
+   ========================================================= */
+
+.tasks-page {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.tasks-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.tasks-title {
+  font-family: var(--lx-font-display);
+  font-size: 24px;
+  font-weight: 600;
+  line-height: 30px;
+  letter-spacing: -0.03em;
+  color: var(--lx-text-primary);
+}
+
+.tasks-sub {
+  font-family: var(--lx-font-micro);
+  font-size: 11px;
+  line-height: 14px;
+  color: var(--lx-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-top: 4px;
+}
+
+.tasks-filter {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.tasks-search {
+  flex: 1;
+  min-width: 200px;
+  height: 28px;
+  padding: 0 10px;
+  background: var(--lx-surface-input);
+  border: 1px solid var(--lx-border-default);
+  border-radius: 4px;
+  color: var(--lx-text-primary);
+  font-family: var(--lx-font-body);
+  font-size: 13px;
+  outline: none;
+  transition: border-color 100ms;
+}
+.tasks-search::placeholder { color: var(--lx-text-muted); }
+.tasks-search:focus { border-color: var(--lx-border-focus); }
+
+.tasks-select {
+  height: 28px;
+  padding: 0 8px;
+  background: var(--lx-surface-input);
+  border: 1px solid var(--lx-border-default);
+  border-radius: 4px;
+  color: var(--lx-text-secondary);
+  font-family: var(--lx-font-body);
+  font-size: 12px;
+  cursor: pointer;
+  transition: border-color 100ms;
+}
+.tasks-select:hover { border-color: var(--lx-border-strong); }
+
+.tasks-archive-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 10px;
+  background: transparent;
+  border: 1px solid var(--lx-border-default);
+  border-radius: 4px;
+  color: var(--lx-text-secondary);
+  font-family: var(--lx-font-body);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 100ms, border-color 100ms;
+}
+.tasks-archive-toggle:hover { background: var(--lx-surface-card-hover); }
+.tasks-archive-toggle.on {
+  color: var(--lx-text-primary);
+  border-color: rgba(240, 192, 64, 0.35);
+  background: var(--lx-bg-accent-subtle);
+}
+
+.tasks-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.task-row {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+  width: 100%;
+  padding: 12px 16px;
+  background: var(--lx-surface-card);
+  border: 1px solid var(--lx-border-default);
+  border-radius: 12px;
+  text-align: left;
+  font: inherit;
+  cursor: pointer;
+  transition: background 100ms, border-color 100ms;
+}
+.task-row:hover {
+  background: var(--lx-surface-card-hover);
+  border-color: var(--lx-border-strong);
+}
+.task-row:focus-visible {
+  outline: none;
+  box-shadow: var(--lx-focus-ring);
+}
+
+/* Left priority accent bar — colored inline from fieldConfig (never hardcoded) */
+.task-row-accent {
+  position: absolute;
+  left: 0;
+  top: 10px;
+  bottom: 10px;
+  width: 3px;
+  border-radius: 0 2px 2px 0;
+  pointer-events: none;
+}
+
+.task-row.archived { opacity: 0.55; }
+.task-row.archived .task-row-title { color: var(--lx-text-muted); }
+
+.task-row-title {
+  flex: 1;
+  min-width: 0;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 20px;
+  color: var(--lx-text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.task-row-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+}
+
+/* "Where" — column · swimlane as quiet flat text, left, flexes to fill */
+.task-row-where {
+  flex: 1;
+  min-width: 0;
+  font-size: 12px;
+  line-height: 16px;
+  color: var(--lx-text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* "What" — type/priority chips + github + date, right-aligned group */
+.task-row-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.task-chip {
+  display: inline-flex;
+  align-items: center;
+  height: 20px;
+  padding: 0 8px;
+  border-radius: 9999px;
+  border: 1px solid var(--lx-border-default);
+  font-family: var(--lx-font-body);
+  font-size: 11px;
+  line-height: 14px;
+  color: var(--lx-text-secondary);
+  white-space: nowrap;
+}
+.task-chip.type { border-color: transparent; color: var(--lx-text-muted); }
+.task-chip.priority { border-color: transparent; }
+
+.task-gh {
+  display: inline-flex;
+  align-items: center;
+  height: 20px;
+  padding: 0 8px;
+  border-radius: 9999px;
+  background: var(--lx-bg-accent-subtle);
+  border: 1px solid rgba(240, 192, 64, 0.35);
+  color: var(--lx-text-link);
+  font-family: var(--lx-font-mono);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.task-row-date {
+  font-family: var(--lx-font-micro);
+  font-size: 11px;
+  line-height: 14px;
+  color: var(--lx-text-muted);
+  white-space: nowrap;
+}
+
+.tasks-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 48px 16px;
+  background: var(--lx-surface-card);
+  border: 1px solid var(--lx-border-default);
+  border-radius: 12px;
+  text-align: center;
+}
+.tasks-empty-title {
+  font-family: var(--lx-font-display);
+  font-size: 18px;
+  font-weight: 500;
+  line-height: 26px;
+  color: var(--lx-text-primary);
+}
+.tasks-empty-sub {
+  font-size: 13px;
+  line-height: 18px;
+  color: var(--lx-text-secondary);
+}
+.tasks-empty .btn { margin-top: 12px; }
+
+.tasks-error {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 24px 16px;
+  background: var(--lx-surface-card);
+  border: 1px solid var(--lx-border-default);
+  border-radius: 12px;
+  text-align: center;
+}
+.tasks-error-title {
+  font-family: var(--lx-font-display);
+  font-size: 16px;
+  font-weight: 500;
+  line-height: 24px;
+  color: var(--lx-text-danger);
+}
+.tasks-error-sub {
+  font-size: 13px;
+  line-height: 18px;
+  color: var(--lx-text-secondary);
+}
+.tasks-error .btn { margin-top: 12px; }
+
+.tasks-state-block {
+  margin-top: 32px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}

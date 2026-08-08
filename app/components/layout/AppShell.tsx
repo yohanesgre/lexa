@@ -10,10 +10,11 @@ export function AppShell() {
   const pathname = useRouterState({ select: (s) => s.location.pathname });
   const { selectedSlug } = useProjectSelection();
 
-  const routeType: "dashboard" | "board" | "wiki" | "settings" = useMemo(() => {
+  const routeType: "dashboard" | "board" | "tasks" | "wiki" | "settings" = useMemo(() => {
     if (pathname === "/") return "dashboard";
     if (pathname === "/forge") return "dashboard";
     if (pathname === "/settings") return "settings";
+    if (pathname.match(/^\/[^/]+\/tasks$/)) return "tasks";
     if (pathname.match(/^\/[^/]+\/wiki(?:\/.*)?$/)) return "wiki";
     if (pathname.match(/^\/[^/]+\/settings$/)) return "settings";
     if (pathname.match(/^\/[^/]+$/)) return "board";
@@ -24,8 +25,10 @@ export function AppShell() {
 
   const boardTo = selectedSlug ? "/$slug" : "/";
   const wikiTo = selectedSlug ? "/$slug/wiki" : "/";
+  const tasksTo = selectedSlug ? "/$slug/tasks" : "/";
   const boardParams = selectedSlug ? { slug: selectedSlug } : undefined;
   const wikiParams = selectedSlug ? { slug: selectedSlug } : undefined;
+  const tasksParams = selectedSlug ? { slug: selectedSlug } : undefined;
 
   return (
     <>
@@ -36,6 +39,9 @@ export function AppShell() {
             <NavLink to="/" exact>Dashboard</NavLink>
             <NavLink to={boardTo} params={boardParams} active={routeType === "board"} exact>
               Board
+            </NavLink>
+            <NavLink to={tasksTo} params={tasksParams} active={routeType === "tasks"} exact>
+              Tasks
             </NavLink>
             <NavLink to={wikiTo} params={wikiParams} active={routeType === "wiki"}>
               Wiki
