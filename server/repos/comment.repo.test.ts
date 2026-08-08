@@ -3,10 +3,10 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { Effect, Layer, Context } from "effect";
+import { Effect, Layer, Context, Either } from "effect";
 import { Database } from "bun:sqlite";
 import { runMigrations } from "../db/migrate";
-import { Sqlite, initSqlite } from "../db/database";
+import { Sqlite, initSqlite, RowNotFound, ConstraintViolation } from "../db/database";
 import { CommentRepo } from "./comment.repo";
 
 const MIGRATIONS = fileURLToPath(new URL("../../migrations", import.meta.url));
@@ -66,6 +66,67 @@ describe("CommentRepo", () => {
         yield* repo.softDelete(c.id);
         const hidden = yield* repo.listByTaskKeyset("t1", null, 10);
         expect(hidden).toEqual([]);
+      })
+    );
+  });
+
+  it("insert with nonexistent task_id fails with tagged ConstraintViolation (not a defect)", () => {
+    const db = tmpDb();
+    seed(db);
+    const repo = makeRepo(db);
+    const result = Effect.runSync(Effect.either(
+      repo.insert({ taskId: "nope", authorId: null, authorKind: "system", authorLabel: "system", body: JSON.stringify({ type: "doc", content: [] }) })
+    ));
+    expect(Either.isLeft(result)).toBe(true);
+    if (Either.isLeft(result)) expect(result.left).toBeInstanceOf(ConstraintViolation);
+  });
+
+  it("updateBody on missing id fails with RowNotFound", () => {
+    const db = tmpDb();
+    seed(db);
+    const repo = makeRepo(db);
+    const result = Effect.runSync(Effect.either(
+      repo.updateBody(999, JSON.stringify({ type: "doc", content: [] }))
+    ));
+    expect(Either.isLeft(result)).toBe(true);
+    if (Either.isLeft(result)) expect(result.left).toBeInstanceOf(RowNotFound);
+  });
+
+  it("softDelete on missing id fails with RowNotFound", () => {
+    const db = tmpDb();
+    seed(db);
+    const repo = makeRepo(db);
+    const result = Effect.runSync(Effect.either(repo.softDelete(999)));
+    expect(Either.isLeft(result)).toBe(true);
+    if (Either.isLeft(result)) expect(result.left).toBeInstanceOf(RowNotFound);
+  });
+
+  it("updateBody on an already-deleted comment fails with RowNotFound", () => {
+    const db = tmpDb();
+    seed(db);
+    const repo = makeRepo(db);
+    Effect.runSync(
+      Effect.gen(function* () {
+        const c = yield* repo.insert({ taskId: "t1", authorId: "u1", authorKind: "user", authorLabel: "Maria", body: JSON.stringify({ type: "doc", content: [] }) });
+        yield* repo.softDelete(c.id);
+        const result = yield* Effect.either(repo.updateBody(c.id, JSON.stringify({ type: "doc", content: [] })));
+        expect(Either.isLeft(result)).toBe(true);
+        if (Either.isLeft(result)) expect(result.left).toBeInstanceOf(RowNotFound);
+      })
+    );
+  });
+
+  it("softDelete on an already-deleted comment fails with RowNotFound", () => {
+    const db = tmpDb();
+    seed(db);
+    const repo = makeRepo(db);
+    Effect.runSync(
+      Effect.gen(function* () {
+        const c = yield* repo.insert({ taskId: "t1", authorId: "u1", authorKind: "user", authorLabel: "Maria", body: JSON.stringify({ type: "doc", content: [] }) });
+        yield* repo.softDelete(c.id);
+        const result = yield* Effect.either(repo.softDelete(c.id));
+        expect(Either.isLeft(result)).toBe(true);
+        if (Either.isLeft(result)) expect(result.left).toBeInstanceOf(RowNotFound);
       })
     );
   });
