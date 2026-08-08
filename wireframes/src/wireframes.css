@@ -950,33 +950,47 @@ a:hover { color: var(--lx-text-link-hover); }
   gap: 16px;
 }
 
+.project-cards {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 16px;
+}
+
 .project-card {
   position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 16px;
   background: var(--lx-surface-card);
   border: 1px solid var(--lx-border-default);
   border-radius: 12px;
-  padding: 20px;
-  height: 160px;
-  display: flex;
-  flex-direction: column;
-  transition: box-shadow 100ms, border-color 100ms, transform 100ms;
+  color: inherit;
+  text-decoration: none;
   cursor: pointer;
+  transition: background 100ms, border-color 100ms;
 }
 
 .project-card:hover {
-  box-shadow: var(--lx-shadow-md);
+  background: var(--lx-surface-card-hover);
   border-color: var(--lx-border-strong);
-  transform: translateY(-2px);
+}
+
+.project-card:focus-visible {
+  outline: none;
+  box-shadow: var(--lx-focus-ring);
 }
 
 .project-card-name {
-  font-size: 24px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 16px;
   font-weight: 600;
   font-family: var(--lx-font-display);
-  line-height: 30px;
-  letter-spacing: -0.03em;
+  line-height: 22px;
+  letter-spacing: -0.02em;
   color: var(--lx-text-primary);
-  margin-bottom: 8px;
 }
 
 .project-card-desc {
@@ -1135,6 +1149,12 @@ a:hover { color: var(--lx-text-link-hover); }
     color: var(--lx-text-primary);
     letter-spacing: -0.02em;
     text-decoration: none;
+  }
+
+.nav-brand.active {
+    color: var(--lx-text-link);
+    text-decoration: underline;
+    text-underline-offset: 4px;
   }
 
 .nav-link {

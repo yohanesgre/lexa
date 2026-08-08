@@ -17,7 +17,7 @@ export function SlideoverHeader({ slug, project, isCreate, expanded, setExpanded
     <span className="text-xs font-body text-lx-text-muted">
       {slug ? (
         <>
-          <Link to="/$slug" params={{ slug }} search={{}} className="text-lx-text-muted hover:text-lx-text-secondary">
+          <Link to="/$slug/board" params={{ slug }} search={{}} className="text-lx-text-muted hover:text-lx-text-secondary">
             {project?.name ?? slug}
           </Link>
           {" / Board / "}
@@ -31,7 +31,7 @@ export function SlideoverHeader({ slug, project, isCreate, expanded, setExpanded
     <span className="text-xs font-body text-lx-text-muted">
       {slug ? (
         <>
-          <Link to="/$slug" params={{ slug }} search={{}} className="text-lx-text-muted hover:text-lx-text-secondary">
+          <Link to="/$slug/board" params={{ slug }} search={{}} className="text-lx-text-muted hover:text-lx-text-secondary">
             {project?.name ?? slug}
           </Link>
           {" / Board"}

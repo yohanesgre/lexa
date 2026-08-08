@@ -210,7 +210,7 @@ function TasksPage() {
         <div className="tasks-empty">
           <div className="tasks-empty-title">No tasks yet</div>
           <div className="tasks-empty-sub">Create tasks from the board.</div>
-          <button type="button" className="btn btn-primary btn-sm" onClick={() => navigate({ to: "/$slug", params: { slug } } as never)}>
+          <button type="button" className="btn btn-primary btn-sm" onClick={() => navigate({ to: "/$slug/board", params: { slug } } as never)}>
             Open board
           </button>
         </div>
