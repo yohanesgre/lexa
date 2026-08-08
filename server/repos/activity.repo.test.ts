@@ -3,10 +3,10 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { Effect, Layer, Context } from "effect";
+import { Effect, Layer, Context, Either } from "effect";
 import { Database } from "bun:sqlite";
 import { runMigrations } from "../db/migrate";
-import { Sqlite, initSqlite } from "../db/database";
+import { Sqlite, initSqlite, ConstraintViolation } from "../db/database";
 import { ActivityRepo } from "./activity.repo";
 
 const MIGRATIONS = fileURLToPath(new URL("../../migrations", import.meta.url));
@@ -68,5 +68,16 @@ describe("ActivityRepo", () => {
         expect(none).toEqual([]);
       })
     );
+  });
+
+  it("insert with nonexistent task_id fails with tagged ConstraintViolation (not a defect)", () => {
+    const db = tmpDb();
+    seed(db);
+    const repo = makeRepo(db);
+    const result = Effect.runSync(Effect.either(
+      repo.insert({ taskId: "nope", actorKind: "user", actorLabel: "Maria", actorUserId: null, type: "created", message: "x" })
+    ));
+    expect(Either.isLeft(result)).toBe(true);
+    if (Either.isLeft(result)) expect(result.left).toBeInstanceOf(ConstraintViolation);
   });
 });
