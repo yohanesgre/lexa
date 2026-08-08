@@ -1,5 +1,6 @@
 import { Effect } from "effect";
 import { TaskService } from "../../services/task.service";
+import type { Actor } from "../../../shared/types";
 
 export const tool = {
   name: "delete_task",
@@ -11,10 +12,11 @@ export const tool = {
     },
     required: ["taskId"],
   },
-  handler: (args: any) =>
+  handler: (args: any, ctx?: { userId: string | null; role: string }) =>
     Effect.gen(function* () {
       const taskService = yield* TaskService;
-      yield* taskService.delete(args.taskId);
+      const actor: Actor = { kind: "agent", label: "mcp", userId: ctx?.userId ?? null };
+      yield* taskService.delete(actor, args.taskId);
       return { deleted: true };
     }),
 };

@@ -5,7 +5,7 @@ import { SwimlaneRepo } from "../../repos/swimlane.repo";
 import { FieldConfigRepo } from "../../repos/field-config.repo";
 import { docToMarkdown, markdownToDoc } from "../../../shared/markdown";
 import { resolveFieldOptionId, optionLabel } from "../field-options";
-import type { Swimlane, Column } from "../../../shared/types";
+import type { Swimlane, Column, Actor } from "../../../shared/types";
 
 export const tool = {
   name: "update_task",
@@ -22,7 +22,7 @@ export const tool = {
     },
     required: ["taskId"],
   },
-  handler: (args: any) =>
+  handler: (args: any, ctx?: { userId: string | null; role: string }) =>
     Effect.gen(function* () {
       const taskService = yield* TaskService;
       const descriptionDoc = args.description !== undefined
@@ -61,7 +61,8 @@ export const tool = {
         typeId = resolved.id;
       }
 
-      const task = yield* taskService.update(args.taskId, {
+      const actor: Actor = { kind: "agent", label: "mcp", userId: ctx?.userId ?? null };
+      const { task } = yield* taskService.update(actor, args.taskId, {
         title: args.title,
         description: descriptionDoc as any,
         priority: priorityId,

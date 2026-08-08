@@ -1,5 +1,6 @@
 import { Effect } from "effect";
 import { GitHubService } from "../../services/github.service";
+import type { Actor } from "../../../shared/types";
 
 export const tool = {
   name: "link_github_issue",
@@ -12,10 +13,12 @@ export const tool = {
     },
     required: ["taskId", "repo"],
   },
-  handler: (args: any) =>
+  handler: (args: any, ctx?: { userId: string | null; role: string }) =>
     Effect.gen(function* () {
       const githubService = yield* GitHubService;
-      const linked = yield* githubService.createLinkedIssue(args.taskId, args.repo);
+      // MCP attribution: agent actor; label upgraded to the key name in Task 10.
+      const actor: Actor = { kind: "agent", label: "mcp", userId: ctx?.userId ?? null };
+      const linked = yield* githubService.createLinkedIssue(actor, args.taskId, args.repo);
       return {
         issueNumber: linked.issueNumber,
         url: `https://github.com/${linked.repo}/issues/${linked.issueNumber}`,

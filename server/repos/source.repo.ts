@@ -1,5 +1,5 @@
 import { Effect } from "effect";
-import { Sqlite, queryAll, run, DbError, ConstraintViolation } from "../db/database";
+import { Sqlite, queryAll, queryFirst, run, DbError, RowNotFound, ConstraintViolation } from "../db/database";
 import { DocumentSourceRow, rowToDocumentSource } from "../../shared/db";
 import type { DocumentSource } from "../../shared/types";
 
@@ -8,6 +8,11 @@ export class SourceRepo extends Effect.Service<SourceRepo>()("Lexa/SourceRepo", 
     const db = yield* Sqlite;
 
     return {
+      findById: (id: string): Effect.Effect<DocumentSource, RowNotFound | DbError> =>
+        queryFirst<DocumentSourceRow>(db, `SELECT * FROM document_sources WHERE id = ?`, id).pipe(
+          Effect.map(rowToDocumentSource)
+        ),
+
       findByDocument: (projectId: string, documentType: "task" | "wiki", documentId: string): Effect.Effect<DocumentSource[], DbError> =>
         queryAll<DocumentSourceRow>(
           db,

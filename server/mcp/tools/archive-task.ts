@@ -4,7 +4,7 @@ import { ColumnRepo } from "../../repos/column.repo";
 import { SwimlaneRepo } from "../../repos/swimlane.repo";
 import { FieldConfigRepo } from "../../repos/field-config.repo";
 import { optionLabel } from "../field-options";
-import type { Swimlane, Column } from "../../../shared/types";
+import type { Swimlane, Column, Actor } from "../../../shared/types";
 
 export const tool = {
   name: "archive_task",
@@ -16,10 +16,11 @@ export const tool = {
     },
     required: ["taskId"],
   },
-  handler: (args: any) =>
+  handler: (args: any, ctx?: { userId: string | null; role: string }) =>
     Effect.gen(function* () {
       const taskService = yield* TaskService;
-      const task = yield* taskService.archive(args.taskId);
+      const actor: Actor = { kind: "agent", label: "mcp", userId: ctx?.userId ?? null };
+      const { task } = yield* taskService.archive(actor, args.taskId);
 
       const columnRepo = yield* ColumnRepo;
       let column: Column = { name: "unknown" } as Column;
