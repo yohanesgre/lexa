@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { DbError, ConstraintViolation } from "../db/database";
 import { TaskNotFound, TaskHasChildren, errorToStatus, errorMessage, errorDetails, errorResponse } from "./errors";
+import { CommentNotFound, CommentEditForbidden, CommentDeleteForbidden, CommentInvalid } from "./errors";
 
 const RAW = "UNIQUE constraint failed: tasks.column_id, tasks.position";
 
@@ -26,6 +27,16 @@ describe("errorToStatus", () => {
     const response = errorResponse(asCatalogError(new TaskHasChildren({ taskId: "t1" })));
     expect(response.error.code).toBe("TASK_HAS_CHILDREN");
     expect(response.error.details).toEqual({ taskId: "t1" });
+  });
+
+  it("maps comment errors to their statuses and codes", () => {
+    expect(errorToStatus(new CommentNotFound({ id: 1 }))).toBe(404);
+    expect(errorToStatus(new CommentEditForbidden({ id: 1 }))).toBe(403);
+    expect(errorToStatus(new CommentDeleteForbidden({ id: 1 }))).toBe(403);
+    expect(errorToStatus(new CommentInvalid({ reason: "comment body is empty" }))).toBe(422);
+    const resp = errorResponse(asCatalogError(new CommentInvalid({ reason: "comment body is empty" })));
+    expect(resp.error.code).toBe("COMMENT_INVALID");
+    expect(resp.error.message).toBe("comment body is empty");
   });
 });
 

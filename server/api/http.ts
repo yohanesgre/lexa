@@ -42,6 +42,8 @@ import { TaskLinkService } from "../services/task-link.service";
 import { TaskLinkRepo } from "../repos/task-link.repo";
 import { GitHubService } from "../services/github.service";
 import { ActivityService } from "../services/activity.service";
+import { ActivityRepo } from "../repos/activity.repo";
+import { CommentRepo } from "../repos/comment.repo";
 import * as msg from "../activity-messages";
 import { WebhookEventRepo } from "../repos/webhook-event.repo";
 import { GitHubClient } from "../github/client";
@@ -838,6 +840,35 @@ const GithubLinkPayload = Schema.Struct({ repo: Schema.String });
 
 const GithubLinkPath = Schema.Struct({ slug: Schema.String, id: Schema.String, issueId: Schema.String });
 
+const ActivityEventSchema = Schema.Struct({
+  kind: Schema.Literal("event"),
+  id: Schema.Number,
+  actorKind: Schema.Literal("user", "agent", "system"),
+  actorLabel: Schema.String,
+  actorUserId: Schema.NullOr(Schema.String),
+  type: Schema.Literal("created", "moved", "field_changed", "archived", "restored", "deleted",
+    "link_added", "link_removed", "source_added", "source_removed",
+    "github_linked", "github_unlinked", "github_synced",
+    "forge_completed", "forge_failed", "forge_cancelled",
+    "commented", "comment_deleted"),
+  message: Schema.String,
+  createdAt: Schema.String,
+});
+
+const TaskCommentSchema = Schema.Struct({
+  kind: Schema.Literal("comment"),
+  id: Schema.Number,
+  authorId: Schema.NullOr(Schema.String),
+  authorKind: Schema.Literal("user", "agent", "system"),
+  authorLabel: Schema.String,
+  body: Schema.Any,
+  editedAt: Schema.NullOr(Schema.String),
+  createdAt: Schema.String,
+});
+
+const ActivityItemSchema = Schema.Union(ActivityEventSchema, TaskCommentSchema);
+const ActivityPageSchema = Schema.Struct({ data: Schema.Array(ActivityItemSchema), nextCursor: Schema.NullOr(Schema.String) });
+
 const BoardSchema = Schema.Struct({
   project: ProjectSchema,
   columns: Schema.Array(ColumnSchema),
@@ -864,6 +895,8 @@ const tasksGroup = HttpApiGroup.make("tasks")
     .setPath(TaskPath).addSuccess(TaskSchema))
   .add(HttpApiEndpoint.post("restoreTask", "/projects/:slug/tasks/:id/restore")
     .setPath(TaskPath).addSuccess(TaskSchema))
+  .add(HttpApiEndpoint.get("taskActivity", "/projects/:slug/tasks/:id/activity")
+    .setPath(TaskPath).addSuccess(ActivityPageSchema))
   .add(HttpApiEndpoint.post("linkGithubIssue", "/projects/:slug/tasks/:id/github-link")
     .setPath(TaskPath).setPayload(GithubLinkPayload).addSuccess(TaskSchema))
   .add(HttpApiEndpoint.del("unlinkGithubIssue", "/projects/:slug/tasks/:id/github-link/:issueId")
@@ -1919,6 +1952,17 @@ const tasksLive = HttpApiBuilder.group(LexaApi, "tasks", (handlers) =>
         return formatTask(task);
       }))
     )
+    .handle("taskActivity", (req) =>
+      respond(Effect.gen(function* () {
+        const projectService = yield* ProjectService;
+        const activityService = yield* ActivityService;
+        yield* projectService.findBySlug(req.path.slug);
+        const q = searchParams(req);
+        const limit = clampLimit(q.get("limit"));
+        const page = yield* activityService.listMerged(req.path.id, q.get("cursor") ?? null, limit);
+        return { data: page.items, nextCursor: page.nextCursor };
+      }))
+    )
     .handle("linkGithubIssue", (req) =>
       respond(Effect.gen(function* () {
         const projectService = yield* ProjectService;
@@ -2288,6 +2332,7 @@ function buildServiceLayer() {
     RuntimeMachineRepo.Default, RuntimeMachineService.Default,
     SourceRepo.Default, SourceService.Default,
     TaskLinkRepo.Default, TaskLinkService.Default,
+    ActivityRepo.Default, CommentRepo.Default, ActivityService.Default,
     WikiRepo.Default, WikiService.Default,
     ApiKeyRepo.Default, ApiKeyService.Default,
     UserRepo.Default, UserService.Default,

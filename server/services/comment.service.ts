@@ -1,4 +1,4 @@
-import { Effect, Data } from "effect";
+import { Effect } from "effect";
 import { withTx, Sqlite, DbError, ConstraintViolation, RowNotFound } from "../db/database";
 import { CommentRepo } from "../repos/comment.repo";
 import { ActivityRepo } from "../repos/activity.repo";
@@ -6,14 +6,10 @@ import { TaskRepo } from "../repos/task.repo";
 import { UserProjectRoleRepo } from "../repos/user-project-role.repo";
 import { TipTapDoc, Actor, TaskComment, ActivityEvent } from "../../shared/types";
 import type { AuthIdentityShape } from "../api/auth";
-import { TaskNotFound } from "../api/errors";
+import { TaskNotFound, CommentNotFound, CommentEditForbidden, CommentDeleteForbidden, CommentInvalid } from "../api/errors";
 import { isEmptyDoc } from "./task.service";
 import * as msg from "../activity-messages";
 
-export class CommentNotFound extends Data.TaggedError("CommentNotFound")<{ id: number }> {}
-export class CommentEditForbidden extends Data.TaggedError("CommentEditForbidden")<{ id: number }> {}
-export class CommentDeleteForbidden extends Data.TaggedError("CommentDeleteForbidden")<{ id: number }> {}
-export class CommentInvalid extends Data.TaggedError("CommentInvalid")<{ reason: string }> {}
 const MAX_COMMENT_BYTES = 65536;
 
 export class CommentService extends Effect.Service<CommentService>()("Lexa/CommentService", {
