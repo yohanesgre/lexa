@@ -48,7 +48,40 @@ vitest run
 
 ## CLI
 
-`lexa-cli` wraps the REST API (`lxk_` Bearer keys): `lexa-cli login --url … --key …`, then `task|wiki|project` CRUD and `machine install|listen|start|stop|restart|status|logs|list` for Forge daemons. Dev uses `bun run lexa-cli-dev` (live repo source); prod ships a compiled binary via `bun run compile:cli` + `bun run install:cli` (→ `~/.local/bin/lexa-cli`).
+`lexa-cli` wraps the REST API with the same `lxk_` Bearer auth as the web app. Log in once, then drive Lexa from a terminal or scripts:
+
+```bash
+lexa-cli login --url http://localhost:3000 --key lxk_...   # prompts interactively when flags are omitted
+lexa-cli status                                            # server health, auth, project count
+```
+
+| Command | What it does |
+|---|---|
+| `login [--url <base> --key <lxk_...>]` | Save credentials (`~/.lexa/config.json`, chmod 600) and register this machine |
+| `logout` | Remove saved credentials |
+| `status` | Server health + auth + project count |
+| `task list [--limit N] [--json]` | List tasks (`--project <slug>` required on all task commands) |
+| `task create --column <name> --swimlane <name> --title <t>` | New task — columns/swimlanes by name, not id |
+| `task get <id> [--json]` | Inspect a task |
+| `task move <id> --column <name> [--swimlane <name>]` | Move a task between columns/swimlanes |
+| `task update <id> [--title] [--priority] [--type]` | Edit a task |
+| `wiki list [--json]` | List wiki pages (`--project <slug>`) |
+| `wiki get <pageSlug> [--json]` | Read a page — TipTap content rendered as Markdown |
+| `project list [--json]` | Projects |
+| `runtime list` / `runtime delete <id>` | Forge daemon view, server-side |
+| `machine list` | Registered machines |
+| `machine install [--no-systemd]` / `machine listen` | Install + run the Forge listener (no-systemd: run it under your own supervisor) |
+| `machine start \| stop \| restart \| status \| logs` | Manage the `lexa-forge-listen` systemd user unit |
+| `machine delete <id>` | Remove a machine and its runtimes |
+| `machine workspace list \| sync` | Per-project Forge workspaces under `~/.lexa/projects/` |
+| `deploy <domain> [dev\|staging\|prod] [--bare]` | Docker + cloudflared tunnel + Access (see Deploying) |
+
+Every `list`/`get` accepts `--json` for script-friendly output. `LEXA_URL` + `LEXA_API_KEY` env vars replace the saved login; explicit flags win.
+
+Two builds, one interface:
+
+- **Dev** — `bun run lexa-cli-dev`, or `bun run install:cli-dev` (→ `~/.local/bin/lexa-cli-dev`): a shim that runs the live repo source via bun. Picks up code changes without compiling; needs the repo at the installed path; never touches the prod name.
+- **Prod** — `bun run compile:cli` + `bun run install:cli` (→ `~/.local/bin/lexa-cli`): a standalone compiled binary, self-contained for machines without the repo. The Forge daemon source is bundled and embedded (the listener writes it to `~/.local/share/lexa-forge/daemon.js`); the systemd listener unit runs this binary. `compile:cli` regenerates `scripts/cli/packed.ts` — restore the committed stub with `git checkout scripts/cli/packed.ts` after compiling.
 
 ## Deploying
 
