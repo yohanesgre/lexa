@@ -1,5 +1,7 @@
 <nav class="app-nav">
   <a href="index.html" class="nav-brand">Lexa</a>
+  <span class="annotation-tag" style="position:absolute;top:50px;left:16px;z-index:3;">Lexa brand = homepage (app route <span class="font-mono">/</span>) — click returns home. Active state when routeType is "home": <span class="nav-brand active" style="display:inline-flex;">Lexa</span> (accent color + underline).</span>
+  <span class="annotation-tag" style="position:absolute;top:72px;left:16px;z-index:3;">Dashboard tab → dashboard.html = project dashboard (app route <span class="font-mono">/$slug</span>) · Board tab → kanban.html = board (app route <span class="font-mono">/$slug/board</span>).</span>
   <div class="nav-links">
     <a href="dashboard.html" class="nav-link">Dashboard</a>
     <a href="kanban.html" class="nav-link">Board</a>
@@ -129,7 +131,7 @@
           <INCLUDE _plus-icon.html />
           <span class="text-sm color-secondary">Create new project</span>
         </a>
-        <span class="annotation-tag" style="display:block;margin:6px 10px 2px;">Row anatomy: leading health dot (health-dot-ok / approaching / exceeded) · project name (primary) · slug (secondary) · trailing task count (font-micro, right-aligned). Active row = selected project. Data from the shared useDashboard() cache (dot + count). Picking a project from the dashboard stays on <span class="font-mono">/</span>; from board/wiki rows target <span class="font-mono">/$slug</span> (existing routeType logic). "Create new project" → <span class="font-mono">/?new=1</span>. States: loading / empty / overflow unchanged.</span>
+        <span class="annotation-tag" style="display:block;margin:6px 10px 2px;">Row anatomy: leading health dot (health-dot-ok / approaching / exceeded) · project name (primary) · slug (secondary) · trailing task count (font-micro, right-aligned). Active row = selected project. Data from the shared useDashboard() cache (dot + count). Row hrefs → dashboard.html (app route <span class="font-mono">/$slug</span>, the project dashboard). From the homepage (<span class="font-mono">/</span>) and project dashboard (<span class="font-mono">/$slug</span>) picking a project targets <span class="font-mono">/$slug</span>; from board (<span class="font-mono">/$slug/board</span>) rows target <span class="font-mono">/$slug/board</span>; wiki rows target <span class="font-mono">/$slug/wiki</span>. "Create new project" → <span class="font-mono">/?new=1</span>. States: loading / empty / overflow unchanged.</span>
       </div>
     </div>
     <!-- User menu trigger — CLOSED state (default on every page) -->

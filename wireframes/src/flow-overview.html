@@ -123,7 +123,7 @@
     </div>
 
     <p class="flow-note mb-4">
-      <strong>Project context rule.</strong> Board, Wiki, project Settings (<code>/:slug/settings</code>), and the Dashboard (status view of the selected project) are project-scoped. Global Settings (<code>/settings</code>) is cross-project. The global project switcher preserves the route type when possible. If the current route does not exist in the new project (e.g., a wiki page when the target project has no wiki), fall back to that project's board (<code>/:slug</code>). With zero projects, <code>/settings</code> still opens from the nav and renders only the global sections — Project Members and Project management are hidden (see <a href="settings-no-project.html">settings-no-project.html</a>).
+      <strong>Project context rule.</strong> Board (<code>/:slug/board</code>), Wiki, project Settings (<code>/:slug/settings</code>), and the project Dashboard (status view at <code>/:slug</code>) are project-scoped. The Homepage (<code>/</code>) and global Settings (<code>/settings</code>) are cross-project. The global project switcher preserves the route type when possible. If the current route does not exist in the new project (e.g., a wiki page when the target project has no wiki), fall back to that project's board (<code>/:slug/board</code>). With zero projects, <code>/settings</code> still opens from the nav and renders only the global sections — Project Members and Project management are hidden (see <a href="settings-no-project.html">settings-no-project.html</a>).
     </p>
 
     <div class="flow-legend mb-4">
@@ -139,13 +139,19 @@
       <div class="flow-column">
         <div class="flow-column-title">Entry</div>
         <div class="flow-node primary">
-          <div class="flow-node-name">Dashboard</div>
-          <div class="flow-node-file">dashboard.html</div>
-          <div class="flow-node-screen">Project status view of the selected project: health dot + name, project-scoped stats, column WIP breakdown, Needs Attention (this project only). Landing page.</div>
+          <div class="flow-node-name">Homepage</div>
+          <div class="flow-node-file">home.html</div>
+          <div class="flow-node-screen">All-projects overview + switcher at <code>/</code>: cards (name, description, health dot). Entered via the Lexa brand logo.</div>
           <div class="flow-edge"></div>
         </div>
         <div class="flow-node">
-          <div class="flow-node-name">Empty Dashboard</div>
+          <div class="flow-node-name">Project Dashboard</div>
+          <div class="flow-node-file">dashboard.html</div>
+          <div class="flow-node-screen">Status view at <code>/$slug</code>: health dot + name, project-scoped stats, column WIP breakdown, Needs Attention (this project only). Card click → <code>/$slug</code>.</div>
+          <div class="flow-edge"></div>
+        </div>
+        <div class="flow-node">
+          <div class="flow-node-name">Empty Homepage</div>
           <div class="flow-node-file">dashboard-empty.html</div>
           <div class="flow-node-screen">First run: no projects yet.</div>
         </div>
@@ -157,18 +163,18 @@
         <div class="flow-node primary">
           <div class="flow-node-name">Project Switcher</div>
           <div class="flow-node-file">navbar-project-switcher.html</div>
-          <div class="flow-node-screen">Always in app-nav. Rows carry health dot + task count; sets current project.</div>
+          <div class="flow-node-screen">Always in app-nav. Rows carry health dot + task count; sets current project. Home/dashboard rows → <code>/$slug</code>; board rows → <code>/$slug/board</code>; wiki rows → <code>/$slug/wiki</code>.</div>
           <div class="flow-edge"></div>
         </div>
         <div class="flow-node">
           <div class="flow-node-name">New Project</div>
           <div class="flow-node-file">dashboard-new-project.html</div>
-          <div class="flow-node-screen">Modal from dashboard.</div>
+          <div class="flow-node-screen">Modal from homepage via <code>/?new=1</code>.</div>
         </div>
         <div class="flow-node">
           <div class="flow-node-name">Delete Project</div>
           <div class="flow-node-file">dashboard-delete-project.html</div>
-          <div class="flow-node-screen">Confirm before cascading delete.</div>
+          <div class="flow-node-screen">Confirm before cascading delete (from project dashboard settings).</div>
         </div>
       </div>
 
@@ -178,7 +184,7 @@
         <div class="flow-node">
           <div class="flow-node-name">Board</div>
           <div class="flow-node-file">kanban.html</div>
-          <div class="flow-node-screen">Primary workspace. Swimlanes, columns, multi-assignee + multi-GH cards, drag/selected states.</div>
+          <div class="flow-node-screen">Primary workspace at <code>/$slug/board</code>. Swimlanes, columns, multi-assignee + multi-GH cards, drag/selected states. Dashboard column rows and attention items link here (<code>?task=</code> opens the slideover).</div>
         </div>
         <div class="flow-node">
           <div class="flow-node-name">Tasks</div>

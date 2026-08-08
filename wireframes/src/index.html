@@ -29,15 +29,20 @@
 
     <h2 class="font-display text-xl weight-600 color-primary" style="margin-top:32px;margin-bottom:16px;">Core Screens</h2>
     <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:16px;">
-      <a href="dashboard.html" class="project-card" style="height:auto;min-height:120px;text-decoration:none;">
-        <div class="project-card-name" style="font-size:18px;">Dashboard</div>
-        <div class="project-card-desc">Project status view: selected project's health dot + name, project-scoped stats bar, column WIP breakdown (count/limit + state badge per column), Needs Attention for this project only.</div>
+      <a href="home.html" class="project-card" style="height:auto;min-height:120px;text-decoration:none;">
+        <div class="project-card-name" style="font-size:18px;">Homepage</div>
+        <div class="project-card-desc">Projects overview + switcher at /: cards grid (name, description, health dot), empty state, setup banner, ?new=1 modal trigger. Entered via the Lexa brand logo.</div>
         <span class="annotation-tag mt-2">/index.tsx</span>
+      </a>
+      <a href="dashboard.html" class="project-card" style="height:auto;min-height:120px;text-decoration:none;">
+        <div class="project-card-name" style="font-size:18px;">Project Dashboard</div>
+        <div class="project-card-desc">Per-project status view at /$slug: health dot + name, project-scoped stats bar, column WIP breakdown (count/limit + state badge per column), Needs Attention for this project only.</div>
+        <span class="annotation-tag mt-2">/$slug/board.tsx</span>
       </a>
       <a href="kanban.html" class="project-card" style="height:auto;min-height:120px;text-decoration:none;">
         <div class="project-card-name" style="font-size:18px;">Kanban Board</div>
         <div class="project-card-desc">Swimlanes (expanded/collapsed), 5 columns with WIP badges, cards with multi-assignee avatars + multi-GitHub issue badges, drag + selected state overlays.</div>
-        <span class="annotation-tag mt-2">/$slug/index.tsx</span>
+        <span class="annotation-tag mt-2">/$slug/board.tsx</span>
       </a>
       <a href="tasks.html" class="project-card" style="height:auto;min-height:120px;text-decoration:none;">
         <div class="project-card-name" style="font-size:18px;">Tasks</div>
@@ -66,12 +71,12 @@
       <a href="dashboard-new-project.html" class="project-card" style="height:auto;min-height:120px;text-decoration:none;">
         <div class="project-card-name" style="font-size:18px;">Project Settings</div>
         <div class="project-card-desc">Modal for create + edit: name, desc, GitHub repo. ⋯ button on card opens edit mode. Delete button in edit footer.</div>
-        <span class="annotation-tag mt-2">/index.tsx modal</span>
+        <span class="annotation-tag mt-2">/?new=1 modal (homepage)</span>
       </a>
       <a href="dashboard-delete-project.html" class="project-card" style="height:auto;min-height:120px;text-decoration:none;">
         <div class="project-card-name" style="font-size:18px;">Delete Confirm</div>
         <div class="project-card-desc">Confirm dialog over dimmed grid. Cascading delete warning.</div>
-        <span class="annotation-tag mt-2">/index.tsx dialog</span>
+        <span class="annotation-tag mt-2">/$slug modal (project dashboard)</span>
       </a>
     </div>
 
@@ -80,47 +85,47 @@
       <a href="kanban-column-menu.html" class="project-card" style="height:auto;min-height:120px;text-decoration:none;">
         <div class="project-card-name" style="font-size:18px;">Column Menu</div>
         <div class="project-card-desc">Dropdown on a column header: Add task, Edit column, Delete, Clear all tasks. Destructive actions open confirmation.</div>
-        <span class="annotation-tag mt-2">/$slug/index.tsx</span>
+        <span class="annotation-tag mt-2">/$slug/board.tsx</span>
       </a>
       <a href="kanban-swimlane-menu.html" class="project-card" style="height:auto;min-height:120px;text-decoration:none;">
         <div class="project-card-name" style="font-size:18px;">Swimlane Menu</div>
         <div class="project-card-desc">Dropdown on a swimlane header: Settings, Add column, Delete swimlane. Click header to expand/collapse.</div>
-        <span class="annotation-tag mt-2">/$slug/index.tsx</span>
+        <span class="annotation-tag mt-2">/$slug/board.tsx</span>
       </a>
       <a href="kanban-filter.html" class="project-card" style="height:auto;min-height:120px;text-decoration:none;">
         <div class="project-card-name" style="font-size:18px;">Filter</div>
         <div class="project-card-desc">Filter popover: Column, Priority, Type, Assignee, Swimlane. Active chips.</div>
-        <span class="annotation-tag mt-2">/$slug/index.tsx</span>
+        <span class="annotation-tag mt-2">/$slug/board.tsx</span>
       </a>
       <a href="kanban-inline-add.html" class="project-card" style="height:auto;min-height:120px;text-decoration:none;">
         <div class="project-card-name" style="font-size:18px;">Inline Add</div>
         <div class="project-card-desc">Add-task form inside a column: title, priority, type, save/cancel.</div>
-        <span class="annotation-tag mt-2">/$slug/index.tsx</span>
+        <span class="annotation-tag mt-2">/$slug/board.tsx</span>
       </a>
       <a href="kanban-empty.html" class="project-card" style="height:auto;min-height:120px;text-decoration:none;">
         <div class="project-card-name" style="font-size:18px;">Empty Board</div>
         <div class="project-card-desc">No columns, no swimlanes. Board header + empty-state CTA.</div>
-        <span class="annotation-tag mt-2">/$slug/index.tsx</span>
+        <span class="annotation-tag mt-2">/$slug/board.tsx</span>
       </a>
       <a href="kanban-settings-modal.html" class="project-card" style="height:auto;min-height:120px;text-decoration:none;">
         <div class="project-card-name" style="font-size:18px;">Board Settings</div>
         <div class="project-card-desc">Modal from the board header: columns and swimlanes management.</div>
-        <span class="annotation-tag mt-2">/$slug/index.tsx modal</span>
+        <span class="annotation-tag mt-2">/$slug/board.tsx modal</span>
       </a>
       <a href="kanban-column-settings-modal.html" class="project-card" style="height:auto;min-height:120px;text-decoration:none;">
         <div class="project-card-name" style="font-size:18px;">Column Settings</div>
         <div class="project-card-desc">Modal for create + edit column: name, color, WIP, required fields, GH state. Delete button in edit footer.</div>
-        <span class="annotation-tag mt-2">/$slug/index.tsx modal</span>
+        <span class="annotation-tag mt-2">/$slug/board.tsx modal</span>
       </a>
       <a href="kanban-swimlane-settings-modal.html" class="project-card" style="height:auto;min-height:120px;text-decoration:none;">
         <div class="project-card-name" style="font-size:18px;">Swimlane Settings</div>
         <div class="project-card-desc">Modal for create + edit swimlane: name, description. Delete button in edit footer.</div>
-        <span class="annotation-tag mt-2">/$slug/index.tsx modal</span>
+        <span class="annotation-tag mt-2">/$slug/board.tsx modal</span>
       </a>
       <a href="kanban-swimlane-desc-modal.html" class="project-card" style="height:auto;min-height:120px;text-decoration:none;">
         <div class="project-card-name" style="font-size:18px;">Swimlane Description</div>
         <div class="project-card-desc">Modal opened via "read more" on truncated swimlane desc. Full description text with Edit link.</div>
-        <span class="annotation-tag mt-2">/$slug/index.tsx modal</span>
+        <span class="annotation-tag mt-2">/$slug/board.tsx modal</span>
       </a>
     </div>
 

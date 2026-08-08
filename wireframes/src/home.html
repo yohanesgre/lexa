@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Lexa — Homepage (Projects Overview)</title>
+  <link rel="stylesheet" href="wireframes.css" />
+</head>
+<body class="bg-app color-primary" style="min-height:100vh;">
+
+  <INCLUDE navbar.html />
+
+  <main class="page-frame">
+    <div class="flex items-center justify-between mb-4">
+      <h1 class="font-display text-2xl weight-600 color-primary">Projects</h1>
+      <div class="flex items-center gap-3">
+        <button class="btn btn-primary">
+          <INCLUDE _plus-icon.html />
+          New Project
+        </button>
+      </div>
+    </div>
+    <span class="annotation-inline mt-1" style="display:block;margin-bottom:8px;">Homepage at app route <span class="font-mono">/</span> — all-projects overview + switcher. Header "New Project" opens CreateProjectModal via <span class="font-mono">?new=1</span> (see state block below).</span>
+
+    <!-- Setup-incomplete banner -->
+    <div class="flex items-center justify-between bg-lx-surface-elevated border border-lx-border-warning rounded-md px-4 py-2.5 mb-4" style="border-color:rgba(240,192,64,0.35);">
+      <div class="text-sm color-secondary">
+        <span class="weight-500 color-primary">Setup incomplete</span> — no admin email is configured.
+      </div>
+      <a href="settings.html" class="btn btn-ghost" style="height:28px;padding:0 12px;font-size:12px;">Finish setup</a>
+    </div>
+    <span class="annotation-tag mb-4">Setup-incomplete banner (amber border, lx-border-warning) — renders when <span class="font-mono">getSetupStatus()</span> reports needsAdmin. "Finish setup" → app route <span class="font-mono">/setup</span>. Fresh install (no admin, no projects, no API key) redirects <span class="font-mono">/</span> → <span class="font-mono">/setup</span> instead.</span>
+
+    <!-- State 1: cards grid (default) -->
+    <span class="annotation-tag">Card anatomy: name line = leading health dot (<span class="font-mono">health-dot-ok / approaching / exceeded</span>, worst WIP state) + <span class="font-mono">project-card-name</span> · description line <span class="font-mono">project-card-desc</span> (2-line clamp, omitted when project has no description). Card click → <span class="font-mono">/$slug</span> (project dashboard) + selects the project (useProjectSelection).</span>
+    <div class="project-cards mt-2">
+      <a href="dashboard.html" class="project-card">
+        <span class="project-card-name">
+          <span class="health-dot health-dot-exceeded"></span>
+          <span>Emberfall</span>
+        </span>
+        <span class="project-card-desc">Fast-paced roguelike with procedurally generated dungeons and a fire-based combat system.</span>
+      </a>
+      <a href="dashboard.html" class="project-card">
+        <span class="project-card-name">
+          <span class="health-dot health-dot-ok"></span>
+          <span>Void Drifter</span>
+        </span>
+        <span class="project-card-desc">Space exploration sim focused on trading routes, crew management, and derelict salvage.</span>
+      </a>
+      <a href="dashboard.html" class="project-card">
+        <span class="project-card-name">
+          <span class="health-dot health-dot-approaching"></span>
+          <span>Ironbound</span>
+        </span>
+      </a>
+      <a href="dashboard.html" class="project-card">
+        <span class="project-card-name">
+          <span class="health-dot health-dot-ok"></span>
+          <span>Pale Reach</span>
+        </span>
+        <span class="project-card-desc">Co-op fishing horror set in a shrinking arctic sea. Catch, survive, and don't look down.</span>
+      </a>
+    </div>
+    <div class="mt-3 flex items-center gap-3" style="flex-wrap:wrap;">
+      <span class="annotation-tag">4 cards across 3 health states (exceeded · ok · approaching · ok); Ironbound deliberately has NO description line (card renders name-only).</span>
+      <span class="annotation-tag">Grid = repeat(3, 1fr), gap 16px — wraps to 2/1 columns on narrow widths.</span>
+      <span class="annotation-tag">Hover: bg + border shift (no lift/shadow); focus-visible ring (cards are links).</span>
+    </div>
+
+    <!-- State 2: empty project list -->
+    <div class="tasks-state-block" style="margin-top:40px;">
+      <span class="annotation-tag">State: zero projects — canonical empty-state block (icon tile, "No projects yet", New Project CTA). Header actions stay as chrome.</span>
+      <div class="bg-column border-subtle r-lg" style="min-height:480px;display:flex;border:1px solid var(--lx-border-subtle);background:var(--lx-surface-column);border-radius:12px;">
+        <div class="empty-state flex-1">
+          <div class="empty-state-icon">
+            <svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+          </div>
+          <h2 class="font-display text-lg weight-500 color-primary mt-3">No projects yet</h2>
+          <p class="text-sm color-secondary mt-1" style="max-width:300px;">Create your first project to start tracking tasks, columns, and wiki pages — with optional two-way GitHub sync.</p>
+          <button class="btn btn-primary mt-4">
+            <INCLUDE _plus-icon.html />
+            New Project
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- State 3: ?new=1 -->
+    <div class="tasks-state-block" style="margin-top:40px;">
+      <span class="annotation-tag">State: <span class="font-mono">?new=1</span> search param (switcher "Create new project" row, or direct URL) → CreateProjectModal opens on mount; param cleared from URL afterwards (component state stays clean).</span>
+    </div>
+
+  </main>
+
+</body>
+</html>
