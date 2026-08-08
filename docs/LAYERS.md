@@ -426,6 +426,69 @@ export class AuthService extends Effect.Service<AuthService>()("AuthService", {
 }) {}
 ```
 
+### ActivityService — timeline reads + appends
+
+```typescript
+export class ActivityService extends Effect.Service<ActivityService>()("Lexa/ActivityService", {
+  dependencies: [ActivityRepo.Default, CommentRepo.Default],
+  effect: Effect.gen(function* () {
+    // append(taskId, actor, type, message) — single-statement insert (no
+    // BEGIN), so it joins any outer withTx/batch transaction on the shared
+    // connection. Callers invoke it INSIDE their mutation's transaction.
+    // listMerged(taskId, cursor, limit) — keyset (created_at, rowid) per
+    // table, in-memory merge of two bounded sets, slice to limit. Cursor
+    // format "created_at|id|kind" (kind opaque — both tables are queried
+    // with the same (created_at, id) keyset).
+  }),
+}) {}
+```
+
+### CommentService — comment lifecycle + authz
+
+```typescript
+class CommentNotFound extends Data.TaggedError("CommentNotFound")<{ id: number }> {}
+class CommentEditForbidden extends Data.TaggedError("CommentEditForbidden")<{ id: number }> {}
+class CommentDeleteForbidden extends Data.TaggedError("CommentDeleteForbidden")<{ id: number }> {}
+class CommentInvalid extends Data.TaggedError("CommentInvalid")<{ reason: string }> {}
+// → 404 / 403 / 403 / 422 via server/api/errors.ts errorCodeMap + errorToStatus
+
+export class CommentService extends Effect.Service<CommentService>()("Lexa/CommentService", {
+  dependencies: [CommentRepo.Default, ActivityRepo.Default, TaskRepo.Default, UserProjectRoleRepo.Default],
+  effect: Effect.gen(function* () {
+    // create(taskId, actor, body: TipTapDoc) → { comment, activity }
+    //   validateBody (TipTap doc + isEmptyDoc + ≤64KB) → CommentInvalid;
+    //   existence pre-check → TaskNotFound (never a raw FK violation);
+    //   comment insert + 'commented' activity in ONE withTx.
+    // edit(commentId, identity, body) → author-only (authorKind 'user' AND
+    //   authorId === identity.userId) else CommentEditForbidden. Sets
+    //   edited_at; NO activity row (marker only).
+    // remove(commentId, identity, projectId) → author OR project admin
+    //   (identity.role === 'admin' OR user_project_roles.role === 'admin');
+    //   soft delete + 'comment_deleted' activity in ONE withTx.
+    //   Ruling: under current REST plumbing every key is admin, so any key
+    //   holder may delete any comment — the user_project_roles branch is
+    //   future-proofing (dead code today, kept for member-key support).
+  }),
+}) {}
+```
+
+**Emission invariant (the core rule):** every task mutation appends
+`task_activity` row(s) in the SAME transaction as the mutation — one row per
+meaningful change (updates may emit several `field_changed` rows);
+position-only reorders emit nothing; webhook moves emit `github_synced` only
+(actor system/'github', never `moved`); archived→archived no-ops emit
+nothing. If the mutation rolls back, the activity rows roll back with it.
+Messages are frozen at write time via the catalog
+(`server/activity-messages.ts`) — never hand-rolled at call sites.
+
+**Actor resolution:** browser users (x-lxk-user header, from the SSR
+`lxk-user` meta) → users table row, kind 'user'; MCP API keys → kind 'agent'
+with the key's NAME as label and the key owner's user id (unbound keys →
+NULL); webhook moves → kind 'system', label 'github'; Forge terminal events →
+kind 'agent', label = forge agent name (agent_id fallback). The header is
+spoofable by key holders — accepted: the key already grants full access;
+role NEVER comes from the header (authz stays key-based, attribution only).
+
 ## HTTP layer — @effect/platform HttpApi
 
 Tagged errors map declaratively to statuses — no hand-rolled per-route mapping to drift from the catalog:

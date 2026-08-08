@@ -512,6 +512,49 @@ GET    /api/projects/:slug/board?includeArchived=true
   links included — subtask grouping + blocked dots render without extra fetches
 ```
 
+### Activity & Comments
+
+```
+GET    /api/projects/:slug/tasks/:id/activity?cursor&limit
+       → 200 { data: ActivityItem[], nextCursor }
+       Item = { kind:'event', id, type, actorKind, actorLabel, actorUserId, message, createdAt }
+            | { kind:'comment', id, authorKind, authorLabel, authorUserId, body: TipTapDoc,
+                editedAt, createdAt }
+       (limit default 50, max 200; ascending; cursor opaque)
+
+POST   /api/projects/:slug/tasks/:id/comments     { body: TipTapDoc }
+       → 201 { data: { comment, activity } }      # activity = 'commented' row
+       | 404 TASK_NOT_FOUND | 422 COMMENT_INVALID (empty/malformed/>64KB)
+
+PATCH  /api/projects/:slug/tasks/:id/comments/:commentId   { body }
+       → 200 { data: Comment }                    # sets edited_at; no activity row (marker only)
+       | 404 COMMENT_NOT_FOUND | 403 COMMENT_EDIT_FORBIDDEN | 422 COMMENT_INVALID
+
+DELETE /api/projects/:slug/tasks/:id/comments/:commentId
+       → 204                                      # soft delete + 'comment_deleted' row
+       | 404 COMMENT_NOT_FOUND | 403 COMMENT_DELETE_FORBIDDEN
+```
+
+- Authz: edit = author only; delete = author or project admin (`users.role='admin'`
+  or admin `user_project_roles` row).
+- Errors: `COMMENT_NOT_FOUND` 404 · `COMMENT_EDIT_FORBIDDEN` 403 ·
+  `COMMENT_DELETE_FORBIDDEN` 403 · `COMMENT_INVALID` 422.
+- Event types (the `type` field): `created` · `moved` · `field_changed`
+  (title/description/priority/type/assignees — no diffs) · `archived` ·
+  `restored` · `deleted` · `link_added` · `link_removed` · `source_added` ·
+  `source_removed` · `github_linked` · `github_unlinked` · `github_synced`
+  (webhook-driven) · `forge_completed` · `forge_failed` · `forge_cancelled` ·
+  `commented` · `comment_deleted`.
+- Messages frozen at write time (e.g. `"Maria moved from In Progress to Done"`).
+  Column renamed later → old messages keep the old name (by design).
+
+**Response envelope rule (invariant #6):** all task mutation responses include
+`activity?: ActivityEvent[]` (the rows appended by that mutation) — e.g.
+create/update/move/archive/restore return `{ data: Task, activity }`; link/source
+adds and GitHub link/unlink likewise. Clients prepend them to the timeline cache
+via `setQueryData`; never `invalidateQueries` on the mutation path. Webhook-driven
+entries appear on the next slideover open (documented).
+
 ### Task Links (subtasks, blocked-by, related)
 
 ```
