@@ -1,4 +1,4 @@
-import type { Project, Column, Swimlane, Task, Board, WikiPageMeta, WikiPage, WikiPageRevision, WikiPageRevisionSummary, TipTapDoc, ApiKey, ApiKeyCreateResult, Dashboard, FieldConfig, ForgeTask, ForgeTaskLog, ForgeTaskStatus, ForgeAgent, ForgeSkill, DocumentSource, Runtime, RuntimeEvent, Machine, TaskLink, TaskLinkSuggestion, ActivityEvent } from "../../shared/types";
+import type { Project, Column, Swimlane, Task, Board, WikiPageMeta, WikiPage, WikiPageRevision, WikiPageRevisionSummary, TipTapDoc, ApiKey, ApiKeyCreateResult, Dashboard, FieldConfig, ForgeTask, ForgeTaskLog, ForgeTaskStatus, ForgeAgent, ForgeSkill, DocumentSource, Runtime, RuntimeEvent, Machine, TaskLink, TaskLinkSuggestion, ActivityEvent, ActivityItem, TaskComment } from "../../shared/types";
 
 const BASE = "/api";
 
@@ -166,6 +166,34 @@ export function archiveTask(slug: string, id: string): Promise<TaskMutationResul
 
 export function restoreTask(slug: string, id: string): Promise<TaskMutationResult> {
   return request(`${BASE}/projects/${slug}/tasks/${id}/restore`, { method: "POST" });
+}
+
+// ── Activity timeline + comments ──
+
+export interface ActivityPage {
+  data: ActivityItem[];
+  nextCursor: string | null;
+}
+
+export function getTaskActivity(slug: string, taskId: string, cursor?: string): Promise<ActivityPage> {
+  return request(`${BASE}/projects/${slug}/tasks/${taskId}/activity${cursor ? `?cursor=${encodeURIComponent(cursor)}` : ""}`);
+}
+
+export async function createComment(slug: string, taskId: string, body: TipTapDoc): Promise<{ comment: TaskComment; activity: ActivityEvent }> {
+  // The wire wraps the pair in { data: ... } (comment create envelope) — the
+  // plan's consumers use result.comment/result.activity directly, so unwrap
+  // here, at the boundary.
+  const res = await request<{ data: { comment: TaskComment; activity: ActivityEvent } }>(`${BASE}/projects/${slug}/tasks/${taskId}/comments`, { method: "POST", body: JSON.stringify({ body }) });
+  return res.data;
+}
+
+export async function updateComment(slug: string, taskId: string, commentId: number, body: TipTapDoc): Promise<TaskComment> {
+  const res = await request<{ data: TaskComment }>(`${BASE}/projects/${slug}/tasks/${taskId}/comments/${commentId}`, { method: "PATCH", body: JSON.stringify({ body }) });
+  return res.data;
+}
+
+export function deleteComment(slug: string, taskId: string, commentId: number): Promise<void> {
+  return request<void>(`${BASE}/projects/${slug}/tasks/${taskId}/comments/${commentId}`, { method: "DELETE" });
 }
 
 export function getBoard(slug: string, includeArchived = false): Promise<Board> {
@@ -402,7 +430,7 @@ export function listSources(slug: string, documentType: "task" | "wiki", documen
   return request(`${BASE}/projects/${slug}/documents/${documentType}/${documentId}/sources`);
 }
 
-export function addSource(slug: string, documentType: "task" | "wiki", documentId: string, input: { kind: "wiki" | "external"; ref: string }): Promise<DocumentSource> {
+export function addSource(slug: string, documentType: "task" | "wiki", documentId: string, input: { kind: "wiki" | "external"; ref: string }): Promise<{ data: DocumentSource; activity: ActivityEvent[] }> {
   return request(`${BASE}/projects/${slug}/documents/${documentType}/${documentId}/sources`, { method: "POST", body: JSON.stringify(input) });
 }
 
@@ -416,7 +444,7 @@ export function listTaskLinks(slug: string, taskId: string): Promise<{ data: Tas
   return request(`${BASE}/projects/${slug}/tasks/${taskId}/links`);
 }
 
-export function addTaskLink(slug: string, taskId: string, input: { toTaskId: string; relation: "subtask_of" | "blocked_by" | "related_to" }): Promise<TaskLink> {
+export function addTaskLink(slug: string, taskId: string, input: { toTaskId: string; relation: "subtask_of" | "blocked_by" | "related_to" }): Promise<{ data: TaskLink; activity: ActivityEvent[] }> {
   return request(`${BASE}/projects/${slug}/tasks/${taskId}/links`, { method: "POST", body: JSON.stringify(input) });
 }
 
