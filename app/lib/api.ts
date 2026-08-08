@@ -16,7 +16,7 @@ function clientApiKey(): string | undefined {
 // The resolved Cloudflare Access user injected by the server next to the key
 // meta. Sent as x-lxk-user so activity rows attribute to the acting user
 // (server-side attribution only — the API key still grants the access).
-function clientLxkUser(): { email: string; name: string } | null {
+export function clientLxkUser(): { email: string; name: string } | null {
   if (typeof document !== "undefined") {
     const meta = document.querySelector('meta[name="lxk-user"]') as HTMLMetaElement | null;
     if (meta?.content) {
