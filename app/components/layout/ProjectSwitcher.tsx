@@ -6,7 +6,7 @@ import { ChevronIcon } from "./ChevronIcon";
 
 type ProjectStatus = { health: "ok" | "approaching" | "exceeded"; taskCount: number };
 
-export function ProjectSwitcher({ routeType }: { routeType: "dashboard" | "board" | "tasks" | "wiki" | "settings" }) {
+export function ProjectSwitcher({ routeType }: { routeType: "home" | "dashboard" | "board" | "tasks" | "wiki" | "settings" }) {
   const [open, setOpen] = useState(false);
   const { data: projects, isLoading } = useProjects();
   const { data: dashboard } = useDashboard();
@@ -41,7 +41,7 @@ export function ProjectSwitcher({ routeType }: { routeType: "dashboard" | "board
     : selectedProjectName ?? (projects && projects.length === 0 ? "No projects" : "Select project");
 
   const targetFor = (slug: string) => {
-    if (routeType === "dashboard") return "/" as const;
+    if (routeType === "board") return "/$slug/board" as const;
     if (routeType === "wiki") return "/$slug/wiki" as const;
     return "/$slug" as const;
   };
@@ -90,18 +90,6 @@ export function ProjectSwitcher({ routeType }: { routeType: "dashboard" | "board
                   </span>
                 </>
               );
-              if (routeType === "dashboard") {
-                return (
-                  <Link
-                    key={project.id}
-                    to="/"
-                    className={isCurrent ? "project-switcher-row active" : "project-switcher-row"}
-                    onClick={() => setSelectedSlug(project.slug)}
-                  >
-                    {rowContent}
-                  </Link>
-                );
-              }
               return (
                 <Link
                   key={project.id}

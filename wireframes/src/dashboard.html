@@ -59,7 +59,7 @@
     <div class="attention-section">
       <div class="flex items-center justify-between mb-3">
         <h2 class="font-display text-xl weight-600 color-primary">Column WIP</h2>
-        <span class="annotation-inline">Row click → board /$slug</span>
+        <span class="annotation-inline">Row click → board app route <span class="font-mono">/$slug/board</span></span>
       </div>
       <div class="status-column-row">
         <span class="status-column-name">Backlog</span>
@@ -91,14 +91,14 @@
         <div class="status-bar"><span class="status-bar-fill status-bar-ok" style="width:100%;"></span></div>
         <span class="status-badge status-badge-ok">ok</span>
       </div>
-      <span class="annotation-tag mt-2" style="display:block;">One row per column: name · task count "n / limit" (∞ = no WIP limit) · thin progress bar (fill = count/limit, colored by state) · state badge ok / approaching / exceeded / empty. Rows link to the board <span class="font-mono">/$slug</span>.</span>
+      <span class="annotation-tag mt-2" style="display:block;">One row per column: name · task count "n / limit" (∞ = no WIP limit) · thin progress bar (fill = count/limit, colored by state) · state badge ok / approaching / exceeded / empty. Rows link to the board <span class="font-mono">/$slug/board</span>.</span>
     </div>
 
     <!-- Section 3: Needs Attention — this project only -->
     <div class="attention-section">
       <div class="flex items-center justify-between mb-3">
         <h2 class="font-display text-xl weight-600 color-primary">Needs Attention</h2>
-        <span class="annotation-inline">Filtered client-side by projectSlug — items link to board / task detail</span>
+        <span class="annotation-inline">Filtered client-side by projectSlug — items link to board <span class="font-mono">/$slug/board?task=&lt;id&gt;</span> (slideover opens on the board)</span>
       </div>
       <div class="attention-grid">
         <div class="attention-card">
