@@ -245,11 +245,21 @@ const server: Server<unknown> = Bun.serve({
       // would otherwise carry a stale key).
       if (process.env.LXK_API_KEY && res.headers.get("content-type")?.includes("text/html")) {
         const html = await res.text();
-        // The resolved Access user rides the same page so the browser can
-        // attribute activity to the acting user (x-lxk-user header). Absent
-        // for API-only deployments (no Cf-Access headers → user null).
         const userMeta = user
-          ? `<meta name="lxk-user" content='${JSON.stringify({ email: user.email, name: user.name })}'>`
+          ? (() => {
+              // The serialized JSON goes into a single-quoted attribute: JSON
+              // escapes `"` but not `'` — an Access-controlled display name
+              // could otherwise break the attribute and inject markup into a
+              // page that carries the API key meta (Access user → API-key
+              // holder). Escape `&` first so the introduced entities survive;
+              // the browser decodes them at attribute-parse time, so the
+              // client's JSON.parse still sees the original email/name.
+              const userJson = JSON.stringify({ email: user.email, name: user.name })
+                .replace(/&/g, "&amp;")
+                .replace(/'/g, "&#39;")
+                .replace(/</g, "&lt;");
+              return `<meta name="lxk-user" content='${userJson}'>`;
+            })()
           : "";
         const injected = html.replace(
           "<head>",
