@@ -12,7 +12,8 @@ import Highlight from "@tiptap/extension-highlight";
 import Underline from "@tiptap/extension-underline";
 import Placeholder from "@tiptap/extension-placeholder";
 import type { WikiPage, WikiPageMeta, TipTapDoc } from "../../../shared/types";
-import { useUpdateWikiPage } from "../../lib/queries";
+import { useUpdateWikiPage, useRestoreWikiRevision } from "../../lib/queries";
+import * as api from "../../lib/api";
 import { renderDoc, extractHeadings, slugifyHeading } from "../tiptap-render";
 import { WikiEditor } from "./WikiEditor";
 import { WikiEditSplit } from "./WikiEditSplit";
@@ -108,14 +109,16 @@ function editReducer(state: EditState, action: EditAction): EditState {
 export function WikiPageViewer({ slug, page, pages }: WikiPageViewerProps) {
   const navigate = useNavigate();
   const updateWikiPage = useUpdateWikiPage(slug);
+  const restoreWikiPage = useRestoreWikiRevision(slug);
 
   const [edit, dispatch] = useReducer(editReducer, page, initEditState);
   const { isEditing, title, lastSavedPage, lastSavedAt, isDirty, isSaving } = edit;
   const [previewContent, setPreviewContent] = useState<TipTapDoc>(emptyDoc);
+  const [historyPreviewId, setHistoryPreviewId] = useState<string | null>(null);
   const [autosaveEnabled, setAutosaveEnabled] = useState(() => {
-    if (typeof window === "undefined") return true;
+    if (typeof window === "undefined") return false;
     const stored = window.localStorage.getItem("lexa-wiki-autosave");
-    return stored === null ? true : stored === "true";
+    return stored === null ? false : stored === "true";
   });
   const [autosaveDelay, setAutosaveDelay] = useState(() => {
     if (typeof window === "undefined") return 800;
@@ -141,6 +144,8 @@ export function WikiPageViewer({ slug, page, pages }: WikiPageViewerProps) {
   // While a Forge result is being reviewed, autosave is suspended — the
   // unaccepted insert must not reach the database before Accept.
   const reviewActiveRef = useRef(false);
+  const historyPreviewRef = useRef<string | null>(null);
+  const previewSnapshotRef = useRef<TipTapDoc | null>(null);
 
   useEffect(() => {
     titleRef.current = title;
@@ -181,8 +186,15 @@ export function WikiPageViewer({ slug, page, pages }: WikiPageViewerProps) {
   }, []);
 
   useEffect(() => {
+    historyPreviewRef.current = historyPreviewId;
+  }, [historyPreviewId]);
+
+  useEffect(() => {
     if (!editor) return;
     const handler = () => {
+      // A history preview owns the preview pane — live editor updates must
+      // not clobber it until Close preview hands the pane back.
+      if (historyPreviewRef.current !== null) return;
       updatePreviewRef.current(editor.getJSON() as unknown as TipTapDoc);
     };
     editor.on("update", handler);
@@ -228,6 +240,74 @@ export function WikiPageViewer({ slug, page, pages }: WikiPageViewerProps) {
     saveRef.current = save;
   });
 
+  const handleSelectRevision = async (revisionId: string) => {
+    if (historyPreviewId === revisionId) return;
+    try {
+      const { revision } = await api.getWikiRevision(slug, page.slug, revisionId);
+      const editor = editorRef.current;
+      // First preview captures the live doc (may hold unsaved typing); a
+      // revision-to-revision swap must not clobber that snapshot.
+      if (previewSnapshotRef.current === null && editor) {
+        previewSnapshotRef.current = editor.getJSON() as unknown as TipTapDoc;
+      }
+      editor?.commands.setContent(revision.content as unknown as JSONContent, { emitUpdate: false });
+      editor?.setEditable(false);
+      setHistoryPreviewId(revisionId);
+      setPreviewContent(revision.content);
+    } catch {
+      const snapshot = previewSnapshotRef.current;
+      if (snapshot) {
+        previewSnapshotRef.current = null;
+        const editor = editorRef.current;
+        editor?.commands.setContent(snapshot as unknown as JSONContent, { emitUpdate: false });
+        editor?.setEditable(true);
+      }
+      setHistoryPreviewId(null);
+    }
+  };
+
+  const handleClosePreview = () => {
+    const snapshot = previewSnapshotRef.current;
+    previewSnapshotRef.current = null;
+    setHistoryPreviewId(null);
+    const editor = editorRef.current;
+    if (editor) {
+      if (snapshot) editor.commands.setContent(snapshot as unknown as JSONContent, { emitUpdate: false });
+      editor.setEditable(true);
+      setPreviewContent(editor.getJSON() as unknown as TipTapDoc);
+    }
+  };
+
+  const handleRestore = async (revisionId: string) => {
+    if (autosaveTimer.current !== null) {
+      window.clearTimeout(autosaveTimer.current);
+      autosaveTimer.current = null;
+    }
+    try {
+      const restored = await restoreWikiPage.mutateAsync({ pageSlug: page.slug, revisionId });
+      dispatch({ type: "title", title: restored.title });
+      dispatch({ type: "saved", page: restored, at: new Date() });
+      editorRef.current?.commands.setContent((restored.content ?? emptyDoc) as unknown as JSONContent);
+      if (autosaveTimer.current !== null) {
+        window.clearTimeout(autosaveTimer.current);
+        autosaveTimer.current = null;
+      }
+      previewSnapshotRef.current = null;
+      editorRef.current?.setEditable(true);
+      setHistoryPreviewId(null);
+      setPreviewContent(restored.content ?? emptyDoc);
+      if (restored.slug !== page.slug) {
+        navigate({
+          to: "/$slug/wiki/$pageSlug",
+          params: { slug, pageSlug: restored.slug },
+          replace: true,
+        });
+      }
+    } catch {
+      // restore failed — mutation cache untouched, UI stays as-is
+    }
+  };
+
   const markDirty = useCallback(() => {
     dispatch({ type: "dirty" });
     if (reviewActiveRef.current) return;
@@ -263,8 +343,10 @@ export function WikiPageViewer({ slug, page, pages }: WikiPageViewerProps) {
       window.clearTimeout(autosaveTimer.current);
       autosaveTimer.current = null;
     }
+    previewSnapshotRef.current = null;
+    setHistoryPreviewId(null);
     dispatch({ type: "cancel", page: lastSavedPage });
-    editorRef.current?.setEditable(false);
+    editorRef.current?.setEditable(true);
     editorRef.current?.commands.setContent(lastSavedPage.content as unknown as JSONContent);
     dispatch({ type: "stopEditing" });
   };
@@ -337,7 +419,7 @@ export function WikiPageViewer({ slug, page, pages }: WikiPageViewerProps) {
             <button type="button" className="btn btn-ghost" onClick={handleCancel}>
               Cancel
             </button>
-            <button type="button" className="btn btn-primary" onClick={handleSave} disabled={isSaving}>
+            <button type="button" className="btn btn-primary" onClick={handleSave} disabled={isSaving || historyPreviewId !== null}>
               {isSaving ? "Saving..." : "Save"}
             </button>
           </div>
@@ -379,6 +461,11 @@ export function WikiPageViewer({ slug, page, pages }: WikiPageViewerProps) {
         onDelayChange={setAutosaveDelay}
         collapsed={!sidebarVisible}
         onToggle={() => setSidebarVisible(!sidebarVisible)}
+        selectedRevisionId={historyPreviewId}
+        onSelectRevision={(id) => void handleSelectRevision(id)}
+        onRestore={(id) => void handleRestore(id)}
+        onClosePreview={handleClosePreview}
+        restoring={restoreWikiPage.isPending}
       />
     </div>
   );
