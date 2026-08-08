@@ -3,18 +3,24 @@ import { GitHubClient } from "../github/client";
 import { WebhookEventRepo } from "../repos/webhook-event.repo";
 import { TaskRepo } from "../repos/task.repo";
 import { TaskService } from "./task.service";
+import { ActivityService } from "./activity.service";
 import { ColumnRepo } from "../repos/column.repo";
-import { GithubIssueAlreadyLinked, TaskNotFound } from "../api/errors";
+import { GithubIssueAlreadyLinked, TaskNotFound, GithubApiError } from "../api/errors";
+import { Sqlite, withTx, DbError, ConstraintViolation } from "../db/database";
 import { extractText } from "../../shared/tiptap-text";
+import * as msg from "../activity-messages";
+import type { Actor, ActivityEvent } from "../../shared/types";
 
 export class GitHubService extends Effect.Service<GitHubService>()("Lexa/GitHubService", {
-  dependencies: [GitHubClient.Default, WebhookEventRepo.Default, TaskRepo.Default, TaskService.Default, ColumnRepo.Default],
+  dependencies: [GitHubClient.Default, WebhookEventRepo.Default, TaskRepo.Default, TaskService.Default, ColumnRepo.Default, ActivityService.Default],
   effect: Effect.gen(function* () {
     const client = yield* GitHubClient;
     const webhookEvents = yield* WebhookEventRepo;
     const taskRepo = yield* TaskRepo;
     const taskService = yield* TaskService;
     const columnRepo = yield* ColumnRepo;
+    const activityService = yield* ActivityService;
+    const db = yield* Sqlite;
 
     return {
       // ---- Lexa → GitHub (called by ROUTES after a successful move) ----
@@ -97,7 +103,7 @@ export class GitHubService extends Effect.Service<GitHubService>()("Lexa/GitHubS
       // Create a GitHub issue from a task and link it. One task can hold
       // multiple issues but only one per repo — duplicate repo links are
       // rejected (ALREADY_LINKED).
-      createLinkedIssue: (taskId: string, repo: string) =>
+      createLinkedIssue: (actor: Actor, taskId: string, repo: string): Effect.Effect<{ issueId: string; issueNumber: number; repo: string; activity: ActivityEvent[] }, TaskNotFound | GithubIssueAlreadyLinked | GithubApiError | ConstraintViolation | DbError> =>
         Effect.gen(function* () {
           const task = yield* taskRepo.findById(taskId).pipe(
             Effect.catchTag("RowNotFound", () => new TaskNotFound({ id: taskId }))
@@ -106,12 +112,15 @@ export class GitHubService extends Effect.Service<GitHubService>()("Lexa/GitHubS
             return yield* new GithubIssueAlreadyLinked({ taskId });
           }
           const issue = yield* client.createIssue(repo, task.title, extractText(task.description));
-          yield* taskRepo.setGithubLink(taskId, {
-            issueId: issue.nodeId,
-            issueNumber: issue.number,
-            repo, // stored "owner/name" — used by all future syncs
-          });
-          return { issueId: issue.nodeId, issueNumber: issue.number, repo };
+          return yield* withTx(db, Effect.gen(function* () {
+            yield* taskRepo.setGithubLink(taskId, {
+              issueId: issue.nodeId,
+              issueNumber: issue.number,
+              repo, // stored "owner/name" — used by all future syncs
+            });
+            const ev = yield* activityService.append(taskId, actor, "github_linked", msg.githubLinked(repo, issue.number));
+            return { issueId: issue.nodeId, issueNumber: issue.number, repo, activity: [ev] };
+          }));
         }),
     };
   }),

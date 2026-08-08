@@ -7,7 +7,7 @@ import { FieldConfigRepo } from "../../repos/field-config.repo";
 import { resolveColumn } from "../resolve";
 import { optionLabel } from "../field-options";
 import { TaskNotFound } from "../../api/errors";
-import type { Swimlane, Column } from "../../../shared/types";
+import type { Swimlane, Column, Actor } from "../../../shared/types";
 
 export const tool = {
   name: "move_task",
@@ -22,13 +22,14 @@ export const tool = {
     },
     required: ["taskId", "column"],
   },
-  handler: (args: any) =>
+  handler: (args: any, ctx?: { userId: string | null; role: string }) =>
     Effect.gen(function* () {
       const taskService = yield* TaskService;
       const task = yield* taskService.getById(args.taskId);
       const column = yield* resolveColumn(task.projectId, args.column);
 
-      const moved = yield* taskService.move(args.taskId, {
+      const actor: Actor = { kind: "agent", label: "mcp", userId: ctx?.userId ?? null };
+      const { task: moved } = yield* taskService.move(actor, args.taskId, {
         columnId: column.id,
         swimlaneId: task.swimlaneId,
         beforeTaskId: args.beforeTaskId,

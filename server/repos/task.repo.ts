@@ -330,14 +330,17 @@ export class TaskRepo extends Effect.Service<TaskRepo>()("Lexa/TaskRepo", {
                 )
               : run(
                   db,
-                  `UPDATE tasks SET column_id = ?2, swimlane_id = ?3, position = ?4, updated_at = datetime('now')
-                   WHERE id = ?1
-                     AND (column_id = ?2 OR (SELECT COUNT(*) FROM tasks WHERE project_id = ?5 AND column_id = ?2 AND archived_at IS NULL) < COALESCE((SELECT wip_limit FROM columns WHERE id = ?2), 9223372036854775807))`,
-                  taskId,
+                  `UPDATE tasks SET column_id = ?, swimlane_id = ?, position = ?, updated_at = datetime('now')
+                   WHERE id = ?
+                     AND (column_id = ? OR (SELECT COUNT(*) FROM tasks WHERE project_id = ? AND column_id = ? AND archived_at IS NULL) < COALESCE((SELECT wip_limit FROM columns WHERE id = ?), 9223372036854775807))`,
                   target.columnId,
                   target.swimlaneId,
                   target.position,
-                  target.projectId
+                  taskId,
+                  target.columnId,
+                  target.projectId,
+                  target.columnId,
+                  target.columnId
                 )
           )
         );

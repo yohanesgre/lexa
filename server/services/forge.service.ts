@@ -5,10 +5,12 @@ import { TaskRepo } from "../repos/task.repo";
 import { WikiRepo } from "../repos/wiki.repo";
 import { ProjectRepo } from "../repos/project.repo";
 import { SourceService } from "./source.service";
+import { ActivityService } from "./activity.service";
 import { DbError, RowNotFound, ConstraintViolation, Sqlite, withTx } from "../db/database";
 import { ProjectNotFound, TaskNotFound, WikiPageNotFound, ForgeTaskNotFound, NoRuntimeOnline, RuntimeNotFound, AgentNotFound, SkillNotFound, ForgeBuiltinDelete, ForgeEntityInUse } from "../api/errors";
 import { docToMarkdown } from "../../shared/markdown";
-import type { ForgeTask, ForgeTaskLog, DocumentSource, TipTapDoc, ForgeAgent, ForgeSkill } from "../../shared/types";
+import * as msg from "../activity-messages";
+import type { ForgeTask, ForgeTaskLog, DocumentSource, TipTapDoc, ForgeAgent, ForgeSkill, ActivityType } from "../../shared/types";
 
 // Builtin seed defaults — mirrors migrations/0001_init.sql (fresh installs) and
 // migrations/0004_forge_pm_skills.sql (existing DBs).
@@ -37,7 +39,7 @@ const DEFAULT_SKILLS: Record<string, string> = {
 };
 
 export class ForgeService extends Effect.Service<ForgeService>()("Lexa/ForgeService", {
-  dependencies: [ForgeRepo.Default, SourceRepo.Default, SourceService.Default, TaskRepo.Default, WikiRepo.Default, ProjectRepo.Default],
+  dependencies: [ForgeRepo.Default, SourceRepo.Default, SourceService.Default, TaskRepo.Default, WikiRepo.Default, ProjectRepo.Default, ActivityService.Default],
   effect: Effect.gen(function* () {
     const repo = yield* ForgeRepo;
     const sourceRepo = yield* SourceRepo;
@@ -45,7 +47,29 @@ export class ForgeService extends Effect.Service<ForgeService>()("Lexa/ForgeServ
     const taskRepo = yield* TaskRepo;
     const wikiRepo = yield* WikiRepo;
     const projectRepo = yield* ProjectRepo;
+    const activityService = yield* ActivityService;
     const db = yield* Sqlite;
+
+    // Forge runs are unattended — the actor is the agent itself. Agent name
+    // resolved at write time; falls back to the agent id.
+    const agentName = (agentId: string): Effect.Effect<string, never> =>
+      repo.findAgentById(agentId).pipe(
+        Effect.map((a) => a.name),
+        Effect.catchAll(() => Effect.succeed(agentId))
+      );
+
+    // Terminal statuses emit a task-activity row (document_type 'task' only)
+    // in the SAME transaction as the status write. Message builds with the
+    // RESOLVED agent name.
+    const emitTerminal = (forgeTask: ForgeTask, type: ActivityType, buildMessage: (agentName: string) => string): Effect.Effect<void, never> =>
+      forgeTask.documentType === "task"
+        ? Effect.gen(function* () {
+            const name = yield* agentName(forgeTask.agentId);
+            yield* activityService.append(forgeTask.documentId, { kind: "agent", label: name }, type, buildMessage(name));
+          }).pipe(
+            Effect.catchAll(() => Effect.void) // a timeline row must never fail the daemon round-trip
+          )
+        : Effect.void;
 
     const loadDocumentContext = (
       projectId: string,
@@ -301,19 +325,31 @@ export class ForgeService extends Effect.Service<ForgeService>()("Lexa/ForgeServ
         repo.claimNextTask(runtimeId),
 
       complete: (id: string, result: string): Effect.Effect<ForgeTask, ForgeTaskNotFound | ConstraintViolation | DbError> =>
-        repo.updateTaskStatus(id, "completed", result, null).pipe(
-          Effect.catchTag("RowNotFound", () => new ForgeTaskNotFound({ id }))
-        ),
+        withTx(db, Effect.gen(function* () {
+          const updated = yield* repo.updateTaskStatus(id, "completed", result, null).pipe(
+            Effect.catchTag("RowNotFound", () => new ForgeTaskNotFound({ id }))
+          );
+          yield* emitTerminal(updated, "forge_completed", (name) => msg.forgeCompleted(name));
+          return updated;
+        })),
 
       fail: (id: string, error: string): Effect.Effect<ForgeTask, ForgeTaskNotFound | ConstraintViolation | DbError> =>
-        repo.updateTaskStatus(id, "failed", null, error).pipe(
-          Effect.catchTag("RowNotFound", () => new ForgeTaskNotFound({ id }))
-        ),
+        withTx(db, Effect.gen(function* () {
+          const updated = yield* repo.updateTaskStatus(id, "failed", null, error).pipe(
+            Effect.catchTag("RowNotFound", () => new ForgeTaskNotFound({ id }))
+          );
+          yield* emitTerminal(updated, "forge_failed", () => msg.forgeFailed());
+          return updated;
+        })),
 
       cancel: (id: string): Effect.Effect<ForgeTask, ForgeTaskNotFound | ConstraintViolation | DbError> =>
-        repo.updateTaskStatus(id, "cancelled", null, null).pipe(
-          Effect.catchTag("RowNotFound", () => new ForgeTaskNotFound({ id }))
-        ),
+        withTx(db, Effect.gen(function* () {
+          const updated = yield* repo.updateTaskStatus(id, "cancelled", null, null).pipe(
+            Effect.catchTag("RowNotFound", () => new ForgeTaskNotFound({ id }))
+          );
+          yield* emitTerminal(updated, "forge_cancelled", () => msg.forgeCancelled());
+          return updated;
+        })),
 
       // Resolve the task's agent + skill rows (claim-time rule delivery —
       // the daemon writes these as files, never via the prompt).

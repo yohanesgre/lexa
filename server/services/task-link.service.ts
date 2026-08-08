@@ -4,15 +4,18 @@ import { TaskRepo } from "../repos/task.repo";
 import { ProjectRepo } from "../repos/project.repo";
 import { DbError, RowNotFound, ConstraintViolation, Sqlite, withTx } from "../db/database";
 import { ProjectNotFound, TaskNotFound, TaskLinkNotFound, TaskLinkCycle, InvalidTaskLink } from "../api/errors";
+import { ActivityService } from "./activity.service";
+import * as msg from "../activity-messages";
 import { keyAfter } from "../../shared/positions";
-import type { TaskLink, TaskLinkRelation, TaskLinkSuggestion } from "../../shared/types";
+import type { TaskLink, TaskLinkRelation, TaskLinkSuggestion, Actor, ActivityEvent } from "../../shared/types";
 
 export class TaskLinkService extends Effect.Service<TaskLinkService>()("Lexa/TaskLinkService", {
-  dependencies: [TaskLinkRepo.Default, TaskRepo.Default, ProjectRepo.Default],
+  dependencies: [TaskLinkRepo.Default, TaskRepo.Default, ProjectRepo.Default, ActivityService.Default],
   effect: Effect.gen(function* () {
     const repo = yield* TaskLinkRepo;
     const taskRepo = yield* TaskRepo;
     const projectRepo = yield* ProjectRepo;
+    const activityService = yield* ActivityService;
     const db = yield* Sqlite;
 
     // Walk the subtask_of parent chain from a task; return the ancestor ids.
@@ -43,12 +46,12 @@ export class TaskLinkService extends Effect.Service<TaskLinkService>()("Lexa/Tas
           return yield* repo.findByTask(taskId);
         }),
 
-      add: (input: {
+      add: (actor: Actor, input: {
         projectId: string;
         fromTaskId: string;
         toTaskId: string;
         relation: TaskLinkRelation;
-      }): Effect.Effect<TaskLink, ProjectNotFound | TaskNotFound | TaskLinkCycle | InvalidTaskLink | ConstraintViolation | DbError | RowNotFound> =>
+      }): Effect.Effect<{ link: TaskLink; activity: ActivityEvent[] }, ProjectNotFound | TaskNotFound | TaskLinkCycle | InvalidTaskLink | ConstraintViolation | DbError | RowNotFound> =>
         Effect.gen(function* () {
           yield* projectRepo.findById(input.projectId).pipe(
             Effect.catchTag("RowNotFound", () => new ProjectNotFound({ identifier: input.projectId }))
@@ -90,21 +93,33 @@ export class TaskLinkService extends Effect.Service<TaskLinkService>()("Lexa/Tas
                   projectId: input.projectId,
                 });
               }
-              return yield* repo.create({
+              const link = yield* repo.create({
                 id: crypto.randomUUID(),
                 projectId: input.projectId,
                 fromTaskId: input.fromTaskId,
                 toTaskId: input.toTaskId,
                 relation: input.relation,
               });
+              const ev = yield* activityService.append(input.fromTaskId, actor, "link_added", msg.linkAdded(input.relation, to.title));
+              return { link, activity: [ev] };
             })
           );
         }),
 
-      remove: (linkId: string): Effect.Effect<void, TaskLinkNotFound | ConstraintViolation | DbError> =>
+      remove: (actor: Actor, linkId: string): Effect.Effect<{ activity: ActivityEvent[] }, TaskLinkNotFound | TaskNotFound | ConstraintViolation | DbError | RowNotFound> =>
         Effect.gen(function* () {
-          const n = yield* repo.delete(linkId);
-          if (n === 0) return yield* new TaskLinkNotFound({ id: linkId });
+          const link = yield* repo.findById(linkId).pipe(
+            Effect.catchTag("RowNotFound", () => new TaskLinkNotFound({ id: linkId }))
+          );
+          const other = yield* taskRepo.findById(link.toTaskId).pipe(
+            Effect.catchTag("RowNotFound", () => new TaskNotFound({ id: link.toTaskId }))
+          );
+          return yield* withTx(db, Effect.gen(function* () {
+            const n = yield* repo.delete(linkId);
+            if (n === 0) return yield* new TaskLinkNotFound({ id: linkId });
+            const ev = yield* activityService.append(link.fromTaskId, actor, "link_removed", msg.linkRemoved(link.relation, other.title));
+            return { activity: [ev] };
+          }));
         }),
 
       search: (projectId: string, query: string, excludeTaskId: string): Effect.Effect<TaskLinkSuggestion[], DbError> =>
