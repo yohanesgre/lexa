@@ -476,6 +476,37 @@ CREATE TABLE task_links (
 CREATE INDEX idx_task_links_from ON task_links(from_task_id);
 CREATE INDEX idx_task_links_to   ON task_links(to_task_id);
 CREATE INDEX idx_task_links_proj ON task_links(project_id);
+
+-- Task activity timeline + comments (docs/specs/ACTIVITY_COMMENTS.md)
+-- Append-only by design: rows are never pruned (contrast: webhook_events 7-day).
+-- INTEGER PRIMARY KEY: rowid is monotonic — second-granularity created_at ties
+-- order by id; UUID text ids would not order chronologically.
+CREATE TABLE task_comments (
+  id           INTEGER PRIMARY KEY AUTOINCREMENT,
+  task_id      TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+  author_id    TEXT REFERENCES users(id) ON DELETE SET NULL,  -- NULL: agent/system
+  author_kind  TEXT NOT NULL DEFAULT 'user'
+               CHECK (author_kind IN ('user','agent','system')),
+  author_label TEXT NOT NULL,        -- frozen at write time
+  body         TEXT NOT NULL,        -- TipTap JSON doc (≤64KB, non-empty)
+  edited_at    TEXT,                 -- set on edit → UI "edited" marker
+  deleted_at   TEXT,                 -- soft delete → hidden from timeline
+  created_at   TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX idx_task_comments_task ON task_comments(task_id, created_at, id);
+
+CREATE TABLE task_activity (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  task_id       TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+  actor_kind    TEXT NOT NULL CHECK (actor_kind IN ('user','agent','system')),
+  actor_label   TEXT NOT NULL,       -- frozen display name
+  actor_user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
+                                     -- agent: key owner; user: their id; NULL: unbound/system
+  type          TEXT NOT NULL,       -- enum in shared/types.ts (no CHECK — growing set)
+  message       TEXT NOT NULL,       -- frozen at write time; the record
+  created_at    TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX idx_task_activity_task ON task_activity(task_id, created_at, id);
 ```
 
 ## Design Notes
@@ -494,6 +525,31 @@ the v1 "cut subtasks" YAGNI — semantics now defined):
 - **Related-to:** symmetric display, stored once.
 - **@-autocomplete:** `GET /projects/:slug/tasks/search?q=` backs the add-link
   dropdown (title LIKE, excludes archived + self, capped at 10).
+
+### Task activity (append-only, never pruned)
+`task_activity` is the unified timeline of system events; `task_comments` holds
+human (and agent) comments, interleaved in the slideover Activity tab. Both are
+append-only — rows are never pruned (deliberate contrast with the 7-day
+`webhook_events` prune). Task delete cascades both tables (consistent with the
+existing hard delete).
+
+- **Rowid ids:** `INTEGER PRIMARY KEY AUTOINCREMENT`. `created_at` is
+  second-granularity, so same-second rows must order by insertion: rowid is
+  monotonic and supplies the tiebreak. UUID text ids would not order
+  chronologically.
+- **Frozen messages:** `message` / `author_label` / `author_label` (comments)
+  are written once, at event time. Later renames or config changes never
+  rewrite history — the row is the record.
+- **Actor model:** `actor_kind` ∈ user/agent/system. `actor_user_id` is the
+  user row for user actors, the API key owner for agent actors, NULL for
+  unbound/system. `actor_label` is the frozen display name.
+- **Backfill:** 0004 inserts one `created` row per task existing at migration
+  time (from `tasks.created_at`) plus one `archived` row per archived task
+  (from `archived_at`). Rows created after the migration get their events from
+  the services, not the backfill.
+- **Comment edits/deletes** are soft: `edited_at` (UI "edited" marker) and
+  `deleted_at` (hidden from timeline). No revision history — edit overwrites
+  `body`.
 
 ### Forge (runtime agent writing assistant)
 Forge is the AI writing button in the task/wiki editors. A **CLI listener** on a
