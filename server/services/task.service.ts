@@ -20,7 +20,7 @@ import {
 } from "../api/errors";
 import type { Task, Column, Swimlane, TipTapDoc } from "../../shared/types";
 
-function isEmptyDoc(doc: TipTapDoc): boolean {
+export function isEmptyDoc(doc: TipTapDoc): boolean {
   const hasText = (node: Record<string, unknown>): boolean => {
     if (node.type === "text") return (typeof node.text === "string" ? node.text : "").trim().length > 0;
     if (node.content && Array.isArray(node.content)) return (node.content as Record<string, unknown>[]).some(hasText);
