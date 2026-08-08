@@ -55,6 +55,13 @@ export function formatActivityMessage(type: ActivityType, payload: ActivityMessa
         case "assignees": return assigneesUpdated(p.actor ?? "");
         case "priority": return priorityChanged(p.from ?? "", p.to ?? "");
         case "type": return typeChanged(p.from ?? "", p.to ?? "");
+        // Missing/typo variant: never emit undefined (message is stored in a
+        // NOT NULL column and frozen at write time). The never-assert makes a
+        // future variant addition fail compilation here.
+        default: {
+          const _never: never = p.variant;
+          return "Task updated";
+        }
       }
     }
     case "archived": return archived((payload as { actor: string }).actor);
@@ -90,5 +97,11 @@ export function formatActivityMessage(type: ActivityType, payload: ActivityMessa
     case "forge_cancelled": return forgeCancelled();
     case "commented": return commented((payload as { actor: string }).actor);
     case "comment_deleted": return commentDeleted((payload as { actor: string }).actor);
+    // A future ActivityType must be handled explicitly — the never-assert
+    // fails compilation instead of silently returning undefined.
+    default: {
+      const _never: never = type;
+      return _never;
+    }
   }
 }
