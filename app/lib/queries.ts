@@ -427,6 +427,26 @@ export function useRevisions(slug: string, pageSlug: string, limit?: number) {
   });
 }
 
+export function useRestoreWikiRevision(slug: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ pageSlug, revisionId }: { pageSlug: string; revisionId: string }) =>
+      api.restoreWikiRevision(slug, pageSlug, revisionId),
+    onSuccess: (page, variables) => {
+      qc.setQueryData<WikiPageMeta[]>(["wiki", slug], (old) => {
+        if (!old) return old;
+        return old.map((p) => (p.id === page.id ? page : p));
+      });
+      qc.setQueryData(["wikiPage", slug, variables.pageSlug], page);
+      qc.setQueryData(["wikiPage", slug, page.slug], page);
+      void qc.fetchQuery({
+        queryKey: ["wikiRevisions", slug, variables.pageSlug, 20],
+        queryFn: () => api.listRevisions(slug, variables.pageSlug, 20).then((r) => r.revisions),
+      });
+    },
+  });
+}
+
 export function useDeleteWikiPage(slug: string) {
   const qc = useQueryClient();
   const toast = useToast();

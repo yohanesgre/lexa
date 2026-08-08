@@ -184,25 +184,18 @@
         <div class="sidebar-section">
           <div class="flex items-center justify-between mb-3">
             <span class="text-sm weight-500 font-body color-primary">Autosave</span>
-            <button class="toggle-switch is-on" aria-label="Autosave on"></button>
-          </div>
-          <div class="mb-3">
-            <span class="prop-label" style="margin-bottom:6px;display:block;">Delay</span>
-            <div class="delay-selector">
-              <button class="delay-btn">500ms</button>
-              <button class="delay-btn is-active">800ms</button>
-              <button class="delay-btn">1500ms</button>
-              <button class="delay-btn">3000ms</button>
-            </div>
+            <button class="toggle-switch" aria-label="Autosave off"></button>
           </div>
           <p class="text-xs color-secondary font-body" style="line-height:18px;">
-            Automatically saves changes while you type.
+            Autosave is disabled.
           </p>
+          <span class="annotation-tag">Autosave is OFF by default. Toggling on reveals the delay selector (500 / 800 / 1500 / 3000 ms, default 800 ms).</span>
         </div>
 
         <div class="sidebar-section" style="flex:1;display:flex;flex-direction:column;">
           <span class="sidebar-section-title">Version History</span>
           <div class="history-list">
+            <span class="annotation-tag" style="display:block;margin-bottom:6px;">Clicking a version previews its content in the editor pane; the clicked item becomes active (<span class="font-mono">history-item active</span>) and carries the "Previewing" label. Selecting another version moves the active state to it.</span>
             <div class="history-item active">
               <div class="flex flex-col gap-1">
                 <span class="text-sm weight-500 font-body color-primary">2 hours ago</span>
@@ -210,6 +203,7 @@
               </div>
               <span class="history-badge history-badge-auto">autosave</span>
             </div>
+            <span class="annotation-tag" style="display:block;margin:6px 0;">The newest version is active by default because it matches the live page content — previewing it is a no-op, hence the badge reads "Previewing" on load.</span>
             <div class="history-item">
               <span class="text-sm weight-400 font-body color-primary">3 hours ago</span>
               <span class="history-badge history-badge-manual">manual</span>
@@ -227,6 +221,8 @@
             <button class="btn btn-primary" style="flex:1;">Restore</button>
             <button class="btn btn-ghost" style="flex:1;">Close preview</button>
           </div>
+          <span class="annotation-tag" style="display:block;margin-top:6px;">Restore rewrites the page with the selected version's title/slug/content and creates a new manual version of the restored state — the restore itself is undoable via the history (the restored state becomes the newest entry).</span>
+          <span class="annotation-tag" style="display:block;margin-top:4px;">Close preview returns to editing the live page content — the "Previewing" badge disappears and the newest version is active again.</span>
         </div>
       </aside>
     </div>

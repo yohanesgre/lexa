@@ -260,6 +260,14 @@ export function listRevisions(slug: string, pageSlug: string, limit?: number): P
   return request(`${BASE}/projects/${slug}/wiki/${pageSlug}/revisions${qs}`);
 }
 
+export function getWikiRevision(slug: string, pageSlug: string, revisionId: string): Promise<{ revision: WikiPageRevision }> {
+  return request(`${BASE}/projects/${slug}/wiki/${pageSlug}/revisions/${revisionId}`);
+}
+
+export function restoreWikiRevision(slug: string, pageSlug: string, revisionId: string): Promise<WikiPage> {
+  return request(`${BASE}/projects/${slug}/wiki/${pageSlug}/restore`, { method: "POST", body: JSON.stringify({ revisionId }) });
+}
+
 
 
 export function listApiKeys(): Promise<{ data: ApiKey[] }> {

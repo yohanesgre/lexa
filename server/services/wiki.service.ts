@@ -137,26 +137,6 @@ export class WikiService extends Effect.Service<WikiService>()("Lexa/WikiService
           return updated;
         }),
 
-      saveRevision: (
-        pageId: string,
-        saveType: "autosave" | "manual"
-      ): Effect.Effect<WikiPageRevision, WikiPageNotFound | DbError | ConstraintViolation> =>
-        Effect.gen(function* () {
-          const page = yield* repo.findById(pageId).pipe(
-            Effect.catchTag("RowNotFound", () => new WikiPageNotFound({ id: pageId }))
-          );
-          const revision = yield* repo.createRevision(
-            page.id,
-            page.title,
-            page.slug,
-            JSON.stringify(page.content),
-            extractText(page.content),
-            saveType
-          );
-          yield* Effect.logInfo(`[Wiki] Saved revision for page ${page.id}`);
-          return revision;
-        }),
-
       listRevisions: (
         pageSlug: string,
         projectId: string,
