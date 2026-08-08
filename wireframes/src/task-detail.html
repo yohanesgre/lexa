@@ -91,8 +91,209 @@
       </div>
     </div>
 
+    <!-- Tab bar: Description | Activity (segmented control) -->
+    <div class="tab-bar">
+      <button class="tab-btn" type="button">Description</button>
+      <button class="tab-btn active" type="button" aria-selected="true">Activity</button>
+      <span class="annotation-inline" style="margin-left:8px;">Switching tabs swaps the body content below; active tab highlighted.</span>
+    </div>
+
     <!-- Description (TipTap rendered) -->
     <div class="slideover-body">
+      <!-- ===== Activity tab (active in this frame) ===== -->
+      <div class="activity-panel">
+        <!-- "Load older" — keyset cursor pagination, above the rail start -->
+        <button class="load-older" type="button">Load older</button>
+        <span class="annotation-inline" style="display:block;margin-top:2px;">Keyset cursor ((created_at, rowid), merged per table) — older entries prepend onto the rail as new steps; the rail start moves with the new first marker, the line never breaks. Appears whenever older entries exist.</span>
+
+        <!-- Timeline: chronological oldest → newest — steps on one vertical rail -->
+        <div class="activity-timeline">
+          <div class="activity-rail" aria-hidden="true"></div>
+
+          <!-- created -->
+          <div class="activity-row">
+            <span class="activity-dot"><span class="activity-dot-core"></span></span>
+            <div class="activity-body">
+              <span class="activity-msg">Maria created this task</span>
+              <span class="activity-time">· May 12, 09:41</span>
+            </div>
+          </div>
+
+          <!-- moved -->
+          <div class="activity-row">
+            <span class="activity-dot"><span class="activity-dot-core"></span></span>
+            <div class="activity-body">
+              <span class="activity-msg">Maria moved from Backlog to In Progress</span>
+              <span class="activity-time">· May 12, 09:47</span>
+            </div>
+          </div>
+
+          <!-- field_changed (priority) -->
+          <div class="activity-row">
+            <span class="activity-dot"><span class="activity-dot-core"></span></span>
+            <div class="activity-body">
+              <span class="activity-msg">Priority changed: Medium → High</span>
+              <span class="activity-time">· May 13, 11:02</span>
+            </div>
+          </div>
+
+          <!-- github_linked -->
+          <div class="activity-row">
+            <span class="activity-dot"><span class="activity-dot-core"></span></span>
+            <div class="activity-body">
+              <span class="activity-msg">Linked GitHub issue emberfall-godot #107</span>
+              <span class="activity-time">· May 13, 11:05</span>
+            </div>
+          </div>
+
+          <!-- Comment card — Alex Lin (admin view: Delete only) -->
+          <div class="comment-card">
+            <div class="avatar">AL</div>
+            <div class="comment-content">
+              <div class="comment-header">
+                <span class="comment-author">Alex Lin</span>
+                <span class="comment-time">May 13, 14:20</span>
+                <span class="comment-edited">edited</span>
+                <div class="comment-actions">
+                  <button class="icon-btn" style="width:20px;height:20px;" title="Delete comment" aria-label="Delete comment">
+                    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+                  </button>
+                </div>
+              </div>
+              <div class="comment-text">
+                <p>Can we confirm the <strong>async loading path</strong> also reproduces with <code>TilemapChunkLoader._loadChunk()</code>? Steps I tried:</p>
+                <ul>
+                  <li>Fresh save past 3-1 — crash reproduced</li>
+                  <li><strong>Async disabled</strong> — passes</li>
+                </ul>
+                <p><span class="mention-chip">@Maria Kim</span> can you re-run with the chunk log flag on?</p>
+              </div>
+              <span class="annotation-inline" style="display:block;margin-top:4px;">Admin view of another member's comment: Delete only, revealed on row hover — no Edit.</span>
+            </div>
+          </div>
+
+          <!-- forge_completed — agent event (bound key → owner hint) -->
+          <div class="activity-row">
+            <span class="activity-dot activity-dot-agent">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="m15 12-8.373 8.373a2.121 2.121 0 1 1-3-3L12 9m7-4 .65-.65a2.121 2.121 0 1 1 3 3L19.003 11M15 5l2 2"/><path d="M6 18 2 22"/></svg>
+            </span>
+            <div class="activity-body">
+              <div class="flex items-center" style="gap:6px;flex-wrap:wrap;">
+                <span class="agent-tag"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="m15 12-8.373 8.373a2.121 2.121 0 1 1-3-3L12 9m7-4 .65-.65a2.121 2.121 0 1 1 3 3L19.003 11M15 5l2 2"/><path d="M6 18 2 22"/></svg> agent</span>
+                <span class="agent-label">opencode-local</span>
+                <span class="agent-keyhint">(Maria's key)</span>
+              </div>
+              <div style="margin-top:2px;">
+                <span class="activity-msg">Forge: opencode completed — result ready</span>
+                <span class="activity-time">· 2h ago</span>
+              </div>
+              <span class="annotation-inline" style="display:block;margin-top:4px;">Bound API key → attributed as "opencode-local" with "(Maria's key)" owner hint. Attribution ≠ authorization: the key's owner authorizes, the agent is credited.</span>
+            </div>
+          </div>
+
+          <!-- Comment card — opencode-local (unbound key → no owner hint, no actions) -->
+          <div class="comment-card">
+            <div class="avatar agent-avatar">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="m15 12-8.373 8.373a2.121 2.121 0 1 1-3-3L12 9m7-4 .65-.65a2.121 2.121 0 1 1 3 3L19.003 11M15 5l2 2"/><path d="M6 18 2 22"/></svg>
+            </div>
+            <div class="comment-content">
+              <div class="comment-header">
+                <span class="agent-tag"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="m15 12-8.373 8.373a2.121 2.121 0 1 1-3-3L12 9m7-4 .65-.65a2.121 2.121 0 1 1 3 3L19.003 11M15 5l2 2"/><path d="M6 18 2 22"/></svg> agent</span>
+                <span class="agent-label">opencode-local</span>
+                <span class="comment-time">2h ago</span>
+              </div>
+              <div class="comment-text">
+                <p>Reproduced the crash on the <strong>sprint-6 tilemap branch</strong>. Stack trace matches the description — suggested fix is in the review result.</p>
+              </div>
+              <span class="annotation-inline" style="display:block;margin-top:4px;">Unbound key → no owner hint. Agents hold no edit/delete rights.</span>
+            </div>
+          </div>
+
+          <!-- comment_deleted — soft delete collapses to an activity entry -->
+          <div class="activity-row">
+            <span class="activity-dot"><span class="activity-dot-core"></span></span>
+            <div class="activity-body">
+              <span class="activity-msg">Maria deleted a comment</span>
+              <span class="activity-time">· 1h ago</span>
+              <span class="annotation-inline" style="display:block;margin-top:4px;">Deleted comments: soft delete — collapses to this muted activity entry (comment_deleted); the card body is never rendered.</span>
+            </div>
+          </div>
+
+          <!-- github_synced — webhook row (actor system/github), GitHub icon treatment -->
+          <div class="activity-row">
+            <span class="activity-dot">
+              <INCLUDE _github-icon.html />
+            </span>
+            <div class="activity-body">
+              <span class="font-micro text-2xs color-muted" style="text-transform:uppercase;letter-spacing:0.04em;">github</span>
+              <span class="activity-msg"> Issue #107 closed on GitHub — task moved to Done</span>
+              <span class="activity-time">· 26m ago</span>
+              <span class="annotation-inline" style="display:block;margin-top:4px;">Webhook-driven (actor system/github) — GitHub icon marker; entries appear on the next slideover open (no realtime push).</span>
+            </div>
+          </div>
+
+          <!-- Comment card — Maria Kim (author view: Edit + Delete revealed) -->
+          <div class="comment-card">
+            <div class="avatar">MK</div>
+            <div class="comment-content">
+              <div class="comment-header">
+                <span class="comment-author">Maria Kim</span>
+                <span class="comment-time">5m ago</span>
+                <span class="comment-edited">edited</span>
+                <div class="comment-actions visible">
+                  <button class="icon-btn" style="width:20px;height:20px;" title="Edit comment" aria-label="Edit comment">
+                    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+                  </button>
+                  <button class="icon-btn" style="width:20px;height:20px;" title="Delete comment" aria-label="Delete comment">
+                    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+                  </button>
+                </div>
+              </div>
+              <div class="comment-text">
+                <p>Confirmed — the off-by-one is in the <strong>zone transition math</strong>. Fix is up on <code>fix/tilemap-chunks</code>, ready for review.</p>
+                <ul>
+                  <li>Re-ran with chunk logging — boundary case reproduces at (14, 7)</li>
+                </ul>
+                <p>Marking this for the next sprint — <span class="mention-chip">@James Diaz</span> can take the review.</p>
+              </div>
+              <span class="annotation-inline" style="display:block;margin-top:4px;">Author view: Edit (pencil) + Delete (trash) revealed on row hover — author only. "edited" marker after an edit; no revision history.</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Composer: compact TipTap editor, pinned at the bottom of the timeline -->
+        <div class="composer">
+          <div class="composer-toolbar">
+            <button class="toolbar-btn" title="Bold">
+              <svg viewBox="0 0 24 24"><path d="M14 12a4 4 0 0 0 0-8H6v8"/><path d="M15 20a4 4 0 0 0 0-8H6v8Z"/></svg>
+            </button>
+            <button class="toolbar-btn" title="Italic">
+              <svg viewBox="0 0 24 24"><line x1="19" y1="4" x2="10" y2="4"/><line x1="14" y1="20" x2="5" y2="20"/><line x1="15" y1="4" x2="9" y2="20"/></svg>
+            </button>
+            <button class="toolbar-btn" title="Bullet list">
+              <svg viewBox="0 0 24 24"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>
+            </button>
+            <span class="toolbar-sep"></span>
+            <button class="toolbar-btn" title="Link">
+              <svg viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
+            </button>
+            <button class="toolbar-btn" title="Code block">
+              <svg viewBox="0 0 24 24"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
+            </button>
+          </div>
+          <div class="composer-editor" contenteditable="true" data-placeholder="Add a comment…"></div>
+          <div class="composer-footer">
+            <span class="font-micro text-2xs color-muted" style="text-transform:uppercase;letter-spacing:0.04em;">Enter to comment · Shift+Enter newline</span>
+            <button class="btn btn-primary btn-sm" type="button">Comment</button>
+          </div>
+        </div>
+        <span class="annotation-inline" style="display:block;margin-top:4px;">Composer: TipTap body ≤64KB, must be a non-empty doc (else 422 COMMENT_INVALID). Comment disabled while empty; Enter sends, Shift+Enter newline. Archived tasks: composer hidden.</span>
+      </div>
+
+      <span class="annotation-tag" style="display:block;margin-top:12px;">Description tab (default on open): wraps the existing content below — description body, Sources, Links, GitHub Issues — shown unchanged when the Description tab is active. This frame renders the Activity tab.</span>
+
+      <!-- Description tab panel (default; hidden in this frame) -->
+      <div class="description-panel" style="display:none;">
       <div style="font-size:15px;line-height:22px;color:var(--lx-text-secondary);font-family:var(--lx-font-body);">
         <p style="margin-bottom:12px;color:var(--lx-text-primary);">
           The game crashes consistently when loading level 3-2 (The Furnace Depths). This appears to be related to the new tilemap streaming system introduced in Sprint 6.
@@ -257,6 +458,7 @@
         </div>
       </div>
     </div>
+      </div>
     </div>
 
       <INCLUDE _slideover-footer-td.html />
@@ -274,6 +476,25 @@
     <span class="annotation-tag">GitHub Issues: multi-issue list with sync state + unlink per row. Diverged issue shows warning text inline: "GitHub state ≠ column. Move card to resync."</span>
     <span class="annotation-tag">Footer: Archive (ghost) + Delete (ghost danger) opens confirm dialog. No footer Close — only the header X. Archived task variant: footer shows Restore (ghost) instead of Archive, plus an "Archived" notice banner. Delete dialog's Delete button shows "Deleting…" while pending (task-detail-required-field.html shows the same dialog chrome)</span>
     <span class="annotation-tag">Stale ?task= deep link (deleted/missing task): slideover shows "Task not found" empty state with a Close button instead of rendering nothing</span>
+  </div>
+
+  <!-- Activity tab annotations (bottom-left rail) -->
+  <div style="position:fixed;bottom:24px;left:24px;z-index:55;display:flex;flex-direction:column;gap:6px;align-items:flex-start;max-width:460px;">
+    <span class="annotation-tag">Tab bar: Description | Activity — segmented control, active tab highlighted. Switching swaps the body content below; state persists while the slideover is open. Default tab on open: Description (this frame renders the Activity tab for review).</span>
+    <span class="annotation-tag">Timeline: chronological oldest → newest, newest at the bottom next to the composer (GitHub issue-timeline style).</span>
+    <span class="annotation-tag">Step rail: the history reads as a journey — each event and comment is a step on ONE continuous vertical rail (2px, --lx-border-subtle) that encodes temporal continuity. Rail starts at the first marker's center (no segment above) and ends at the last marker's center (no dangling tail).</span>
+    <span class="annotation-tag">Markers: event rows keep their type-colored dot (robot glyph for agent events, GitHub icon for webhook rows); comment cards use the AUTHOR AVATAR as the step marker — avatar and dots share the same 24px rail column, no second line. Deleted-comment and webhook rows ride the same rail with muted markers.</span>
+    <span class="annotation-tag">Step hover: hovering a step highlights the row (surface-card-hover) and brightens its marker. Keyboard focus ring on the step marker: 2–3px offset ring, 3:1 contrast.</span>
+    <span class="annotation-tag">"Load older": ghost button above the rail start — it is not a step and never breaks the line; older entries prepend onto the rail (rail start moves with the new first marker). Keyset cursor ((created_at, rowid), merged per table); hidden whenever no older entries exist.</span>
+    <span class="annotation-tag">Empty state: "No activity yet — be the first to comment." — the box replaces the timeline entirely; no rail rendered.</span>
+    <span class="annotation-tag">Event messages render as PLAIN TEXT nodes, never HTML — messages freeze user-controlled strings (column names, actor names) at write time (XSS rule).</span>
+    <span class="annotation-tag">Agent attribution: robot glyph + "agent" tag + API key name label (e.g. "opencode-local"); "(Maria's key)" owner hint shown for bound keys, omitted for unbound keys. Attribution ≠ authorization.</span>
+    <span class="annotation-tag">Comment actions: Edit (pencil) + Delete (trash) revealed on row hover — author only. Admin viewing another member's comment sees Delete only. Agents hold no edit/delete rights.</span>
+    <span class="annotation-tag">Mentions: @Name rendered as a chip over project member names in comment text nodes — highlight only, no delivery/notifications. Unknown names render plain.</span>
+    <span class="annotation-tag">"edited" marker: appears after the author edits — marker only, no revision history (PATCH sets edited_at, no activity row).</span>
+    <span class="annotation-tag">Deleted comments: soft delete — the card collapses to a muted "…deleted a comment" activity entry; the body is not rendered.</span>
+    <span class="annotation-tag">Composer: TipTap body ≤64KB, must be a non-empty doc (empty/oversized → 422 COMMENT_INVALID); Comment disabled while empty; Enter sends, Shift+Enter newline. Cache key ['project', slug, 'task', id, 'activity'] — mutation responses prepend via setQueryData, never invalidateQueries.</span>
+    <span class="annotation-tag">Archived task variant: timeline view-only — composer hidden/disabled, replaced by a muted "Comments are disabled on archived tasks" notice. No new comments on archived tasks.</span>
   </div>
 
 </body>
