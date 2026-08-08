@@ -27,23 +27,24 @@ function formatRelative(iso: string): string {
 
 function ApiKeyRevealModal({ name, fullKey, onDone }: { name: string; fullKey: string; onDone: () => void }) {
   const [copied, setCopied] = useState(false);
+  const [copyFailed, setCopyFailed] = useState(false);
 
   const handleCopyKey = async () => {
-    await copyToClipboard(fullKey);
-    setCopied(true);
+    const ok = await copyToClipboard(fullKey);
+    if (ok) {
+      setCopied(true);
+    } else {
+      setCopyFailed(true);
+    }
   };
-
-  useEffect(() => {
-    void copyToClipboard(fullKey).then(() => setCopied(true));
-  }, [fullKey]);
 
   return (
     <>
       <div className="slideover-overlay" />
       <div className="fixed inset-0 flex items-center justify-center z-50 pointer-events-none">
-        <dialog open className="dialog dialog-enter pointer-events-auto" aria-modal="true" aria-label="Dialog" style={{ maxWidth: 464 }}>
+        <dialog open className="dialog dialog-enter pointer-events-auto p-0" aria-modal="true" aria-labelledby="api-key-reveal-title" style={{ width: 440, maxWidth: "calc(100vw - 48px)" }}>
           <div className="modal-header">
-            <span className="modal-title">API Key Created</span>
+            <span className="modal-title" id="api-key-reveal-title">API Key Created</span>
             <span className="wip-badge wip-ok">NEW</span>
           </div>
 
@@ -62,12 +63,16 @@ function ApiKeyRevealModal({ name, fullKey, onDone }: { name: string; fullKey: s
                   className="btn btn-ghost flex-shrink-0"
                   style={{ height: 28, padding: "0 10px", fontSize: 12 }}
                   onClick={handleCopyKey}
+                  autoFocus
                 >
                   {copied ? <Check size={12} strokeWidth={1.5} /> : <Copy size={12} strokeWidth={1.5} />}
                   {copied ? "Copied to clipboard" : "Copy"}
                 </button>
               </div>
-              <div className="field-hint">Auto-copied to your clipboard. Keep it somewhere safe — Lexa stores only a SHA-256 hash.</div>
+              <div className="field-hint">Full key is shown here exactly once — in the table it is always masked.</div>
+              {copyFailed && (
+                <div className="field-hint field-hint-danger">Clipboard blocked — select the key below and copy it manually.</div>
+              )}
             </div>
 
             <div className="notice notice-warning">
@@ -77,7 +82,7 @@ function ApiKeyRevealModal({ name, fullKey, onDone }: { name: string; fullKey: s
           </div>
 
           <div className="modal-footer">
-            <button type="button" className="btn btn-primary" onClick={onDone}>I've saved this key</button>
+            <button type="button" className="btn btn-primary" onClick={onDone}>Done</button>
           </div>
         </dialog>
       </div>
@@ -621,6 +626,7 @@ export function SettingsPage({ slug }: { slug?: string }) {
   const [reveal, setReveal] = useState<{ name: string; key: string } | null>(null);
   const [deleting, setDeleting] = useState<{ id: string; name: string } | null>(null);
   const [demoting, setDemoting] = useState<{ id: string; name: string } | null>(null);
+  const generateBtnRef = useRef<HTMLButtonElement>(null);
 
   return (
     <main className="page-frame">
@@ -771,6 +777,7 @@ export function SettingsPage({ slug }: { slug?: string }) {
               style={{ minWidth: 240 }}
             />
             <button
+              ref={generateBtnRef}
               type="button"
               className="btn btn-primary"
               disabled={!keyName.trim() || createKey.isPending}
@@ -807,7 +814,14 @@ export function SettingsPage({ slug }: { slug?: string }) {
       {slug && <ProjectBoundSettings slug={slug} />}
 
       {reveal && (
-        <ApiKeyRevealModal name={reveal.name} fullKey={reveal.key} onDone={() => setReveal(null)} />
+        <ApiKeyRevealModal
+          name={reveal.name}
+          fullKey={reveal.key}
+          onDone={() => {
+            setReveal(null);
+            generateBtnRef.current?.focus();
+          }}
+        />
       )}
 
       {setupOpen && (
