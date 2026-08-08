@@ -1,4 +1,4 @@
-import type { Project, Column, Swimlane, Task, Board, WikiPageMeta, WikiPage, WikiPageRevision, WikiPageRevisionSummary, TipTapDoc, ApiKey, ApiKeyCreateResult, Dashboard, FieldConfig, ForgeTask, ForgeTaskLog, ForgeTaskStatus, ForgeAgent, ForgeSkill, DocumentSource, Runtime, RuntimeEvent, Machine, TaskLink, TaskLinkSuggestion } from "../../shared/types";
+import type { Project, Column, Swimlane, Task, Board, WikiPageMeta, WikiPage, WikiPageRevision, WikiPageRevisionSummary, TipTapDoc, ApiKey, ApiKeyCreateResult, Dashboard, FieldConfig, ForgeTask, ForgeTaskLog, ForgeTaskStatus, ForgeAgent, ForgeSkill, DocumentSource, Runtime, RuntimeEvent, Machine, TaskLink, TaskLinkSuggestion, ActivityEvent } from "../../shared/types";
 
 const BASE = "/api";
 
@@ -138,16 +138,21 @@ export function deleteSwimlane(slug: string, id: string): Promise<void> {
 }
 
 
-export function createTask(slug: string, input: { columnId: string; swimlaneId: string; title: string; description?: TipTapDoc; priority?: string; type?: string; parentId?: string; assignees?: string[] }): Promise<Task> {
+export interface TaskMutationResult {
+  data: Task;
+  activity: ActivityEvent[];
+}
+
+export function createTask(slug: string, input: { columnId: string; swimlaneId: string; title: string; description?: TipTapDoc; priority?: string; type?: string; parentId?: string; assignees?: string[] }): Promise<TaskMutationResult> {
   return request(`${BASE}/projects/${slug}/tasks`, { method: "POST", body: JSON.stringify(input) });
 }
 
 
-export function updateTask(slug: string, id: string, input: { title?: string; description?: TipTapDoc; priority?: string; type?: string; assignees?: string[] }): Promise<Task> {
+export function updateTask(slug: string, id: string, input: { title?: string; description?: TipTapDoc; priority?: string; type?: string; assignees?: string[] }): Promise<TaskMutationResult> {
   return request(`${BASE}/projects/${slug}/tasks/${id}`, { method: "PATCH", body: JSON.stringify(input) });
 }
 
-export function moveTask(slug: string, id: string, target: { columnId: string; swimlaneId: string; beforeTaskId?: string; afterTaskId?: string }): Promise<Task> {
+export function moveTask(slug: string, id: string, target: { columnId: string; swimlaneId: string; beforeTaskId?: string; afterTaskId?: string }): Promise<TaskMutationResult> {
   return request(`${BASE}/projects/${slug}/tasks/${id}/move`, { method: "POST", body: JSON.stringify(target) });
 }
 
@@ -155,11 +160,11 @@ export function deleteTask(slug: string, id: string): Promise<void> {
   return request(`${BASE}/projects/${slug}/tasks/${id}`, { method: "DELETE" });
 }
 
-export function archiveTask(slug: string, id: string): Promise<Task> {
+export function archiveTask(slug: string, id: string): Promise<TaskMutationResult> {
   return request(`${BASE}/projects/${slug}/tasks/${id}/archive`, { method: "POST" });
 }
 
-export function restoreTask(slug: string, id: string): Promise<Task> {
+export function restoreTask(slug: string, id: string): Promise<TaskMutationResult> {
   return request(`${BASE}/projects/${slug}/tasks/${id}/restore`, { method: "POST" });
 }
 
@@ -425,10 +430,10 @@ export function searchTasks(slug: string, q: string, exclude = ""): Promise<{ da
 
 // ── Task ↔ GitHub issue links ──
 
-export function linkGithubIssue(slug: string, taskId: string, repo: string): Promise<Task> {
+export function linkGithubIssue(slug: string, taskId: string, repo: string): Promise<TaskMutationResult> {
   return request(`${BASE}/projects/${slug}/tasks/${taskId}/github-link`, { method: "POST", body: JSON.stringify({ repo }) });
 }
 
-export function unlinkGithubIssue(slug: string, taskId: string, issueId: string): Promise<Task> {
+export function unlinkGithubIssue(slug: string, taskId: string, issueId: string): Promise<TaskMutationResult> {
   return request(`${BASE}/projects/${slug}/tasks/${taskId}/github-link/${issueId}`, { method: "DELETE" });
 }
