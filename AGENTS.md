@@ -67,6 +67,7 @@ These were each hard-won design fixes (see docs/REVIEW.md). Breaking any of them
 10. **Column→GitHub state mapping uses `columns.github_state`**, never column names.
 11. **`required_fields` is enforced on create, move, AND update**, with TipTap-aware emptiness (a doc with no text nodes is empty).
 12. **An issue links to at most one task; a task may hold several issues, one per repo** (`task_github_issues` junction PK `(task_id, issue_id)` + `UNIQUE(issue_id)` index + per-repo ALREADY_LINKED guard).
+13. **Emission invariant.** Every task mutation appends `task_activity` row(s) in the SAME transaction as the mutation — one row per meaningful change (updates may emit several `field_changed` rows); position-only reorders emit nothing; webhook moves emit `github_synced` only. Messages come from the catalog (`server/activity-messages.ts`), frozen at write time — never hand-rolled at call sites.
 
 ## Agent file boundaries
 

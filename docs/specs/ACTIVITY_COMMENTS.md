@@ -2,6 +2,11 @@
 
 Status: **Approved (all sections)** · Date: 2026-08-08 · Viz: `docs/lexa-activity-plan.html`
 
+**IMPLEMENTED** (2026-08-08, plan `2026-08-08-activity-comments`, tasks 1–18). Implementation notes / divergences:
+- **Event catalog divergence (user decision):** `forge_accepted` / `forge_rejected` were DROPPED — accept is client-side only, no server hook. The shipped 18-value `ActivityType` union omits them; the catalog line below is amended accordingly.
+- The invariant is "one row per meaningful change" — updates emit one `field_changed` row PER changed field (several rows for a multi-field update), not "exactly one row" per mutation as the original line below says.
+- Authz note (user ruling): delete = author OR project admin, but under current REST plumbing every key is admin — any key holder may delete any comment (see ARCHITECTURE.md decisions log #14).
+
 Reverses the v1 "comments-free" cut (`RELEASE_NOTES.md`, `ARCHITECTURE.md`). Drivers: missing context trail ("what happened here?"), discussion surface for a team that outgrew description-only breakdowns, and agent visibility (MCP/Forge leave a trace and read context). Comments stay in Lexa — no GitHub sync.
 
 ## Decisions (all confirmed with user)
@@ -77,9 +82,9 @@ Comment authz keys off `author_kind='user'` + acting user — agents never hold 
 - **ActivityService** (leaf — never depends on TaskService): `append(taskId, actor, type, message)`, `listMerged(taskId, cursor, limit)`.
 - **CommentService**: create/edit/delete + authz. Uses TaskRepo (existence) + ActivityService. No TaskService dependency → no cycle.
 - **TaskService**: every mutating method appends activity **in the same transaction** (`batch()`) — create, update, move (incl. webhook `bypassGuards` path), archive, restore, delete, links, sources, github link/unlink.
-- **ForgeService**: emits on terminal state (`forge_completed` / failed / cancelled) and result accept/reject.
+- **ForgeService**: emits on terminal state (`forge_completed` / failed / cancelled). (Result accept/reject dropped — client-side only, no server hook.)
 
-**New invariant:** every task mutation emits exactly one `task_activity` row in the same transaction as the mutation.
+**New invariant:** every task mutation appends `task_activity` row(s) in the same transaction as the mutation — one row per meaningful change (updates may emit several `field_changed` rows); position-only reorders emit nothing; webhook moves emit `github_synced` only.
 
 ## REST (API.md additions)
 
@@ -113,7 +118,9 @@ DELETE /api/projects/:slug/tasks/:id/comments/:commentId
 
 ## Event catalog
 
-`created` · `moved` (column/lane) · `field_changed` (title/description/priority/type/assignees — no diffs) · `archived` · `restored` · `deleted` · `link_added` · `link_removed` · `source_added` · `source_removed` · `github_linked` · `github_unlinked` · `github_synced` (webhook-driven) · `forge_completed` · `forge_failed` · `forge_cancelled` · `forge_accepted` · `forge_rejected` · `commented` · `comment_deleted`.
+`created` · `moved` (column/lane) · `field_changed` (title/description/priority/type/assignees — no diffs) · `archived` · `restored` · `deleted` · `link_added` · `link_removed` · `source_added` · `source_removed` · `github_linked` · `github_unlinked` · `github_synced` (webhook-driven) · `forge_completed` · `forge_failed` · `forge_cancelled` · `commented` · `comment_deleted`.
+
+> ~~`forge_accepted` · `forge_rejected`~~ — dropped by user decision (accept is client-side, no server hook).
 
 Messages frozen at write time (e.g. `"Maria moved from In Progress to Done"`). Column renamed later → old messages keep the old name (by design).
 

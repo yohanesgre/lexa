@@ -12,8 +12,8 @@
 - Task links: subtasks (children inherit the parent column, move cascades, cycle guard), blocked-by, related-to
 
 **Tasks**
-- Rich text descriptions (TipTap), assignees, comments-free by design — breakdown lives in the description
-- GitHub Issues section: link/unlink issues, live Synced/Diverged status
+- Rich text descriptions (TipTap), assignees, GitHub Issues section: link/unlink issues, live Synced/Diverged status
+- **Activity timeline + comments (2026-08-08):** every task change lands on an append-only timeline — moves, field changes, links, GitHub sync, Forge runs — plus Markdown-rendered comments with mention chips. Activity tab in the task slideover (Description | Activity), "Load older" keyset pagination, comment edit/delete with author-or-admin authz. Agents post comments via MCP (`add_task_comment`); mutation responses carry the appended activity rows so the timeline updates instantly.
 
 **Wiki**
 - Nested pages, full-text search (FTS5), revisions with restore, Markdown ↔ rich-text conversion
@@ -30,7 +30,7 @@
 - Out-of-sync surfaced on the card instead of silent divergence
 
 **For agents & automation**
-- MCP server (35 tools) — agents manage projects, tasks, wiki, GitHub links through the same API
+- MCP server (37 tools) — agents manage projects, tasks, wiki, GitHub links, activity & comments through the same API
 - `lexa-cli` for operators; API keys with admin/member roles
 - Humans authenticate via Cloudflare Access (no passwords to manage)
 
@@ -52,10 +52,10 @@ GitHub sync setup (GitHub App, webhook, Access bypass): `docs/GITHUB_SETUP.md`.
 
 - **Auth model:** humans = Cloudflare Access (email allowlist); machines = `lxk_` API keys. REST is Access-gated; agents use `/mcp` (bypass + key).
 - **GitHub sync is best-effort by design** — no retry queue; divergence is surfaced (Diverged dot), a re-move resyncs.
-- **No email notifications, no comments** — cut for v1 (small team, tight scope).
+- **No email notifications** — cut for v1 (small team, tight scope). Comments shipped 2026-08-08 with the activity timeline (comments live in-app; no delivery).
 - **Rate limiting** — in-process per-IP limiter on `/api/*` + `/mcp` (webhook-exempt, 600 req/10 min), added post-release 2026-08-06 (see `docs/RATE_LIMITING.md`).
 - **Migrations are squashed into one clean `0001_init.sql`** — v0.1.0 installs fresh; existing pre-release DBs continue to boot unmodified (no re-migration).
 
 ## Verification
 
-`tsc` clean · 95 unit tests · production build · backend curl suite · MCP smoke + full GitHub round-trip green on production (fresh DB).
+`tsc` clean · 208 unit tests · production build · backend curl suite · MCP smoke + full GitHub round-trip green on production (fresh DB).
