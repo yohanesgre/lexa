@@ -9,7 +9,7 @@ interface UseTaskDetailActionsArgs {
   emptyDoc: TipTapDoc;
   onLinkGithub?: (id: string, repo: string) => Promise<{ repo: string; issueNumber: number } | null | undefined>;
   onUnlinkGithub?: (id: string, issueId: string) => Promise<void>;
-  onCreate?: (input: { title: string; columnId: string; priority: string; type: string; assignees: string[]; description: TipTapDoc }) => Promise<void>;
+  onCreate?: (input: { title: string; columnId: string; priority: string; type: string; assignees: string[]; description: TipTapDoc; dueAt?: string | null }) => Promise<void>;
   onClose: () => void;
 }
 
@@ -21,6 +21,7 @@ export function useTaskDetailActions(args: UseTaskDetailActionsArgs) {
   const [createType, setCreateType] = useState<string>(fieldConfig?.types[0]?.id ?? "");
   const [createAssignees, setCreateAssignees] = useState<string[]>([]);
   const [createDescription, setCreateDescription] = useState<TipTapDoc>(emptyDoc);
+  const [createDueAt, setCreateDueAt] = useState("");
   const [creating, setCreating] = useState(false);
 
   const [prevTaskId, setPrevTaskId] = useState(task?.id ?? null);
@@ -88,6 +89,7 @@ export function useTaskDetailActions(args: UseTaskDetailActionsArgs) {
         type: createType,
         assignees: createAssignees,
         description: createDescription,
+        dueAt: createDueAt === "" ? null : createDueAt,
       });
       onClose();
     } finally {
@@ -103,6 +105,7 @@ export function useTaskDetailActions(args: UseTaskDetailActionsArgs) {
     createType, setCreateType,
     createAssignees, setCreateAssignees,
     createDescription, setCreateDescription,
+    createDueAt, setCreateDueAt,
     creating,
     linkState, setLinkState,
     linkRepo, setLinkRepo,

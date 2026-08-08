@@ -51,8 +51,9 @@ export class ProjectService extends Effect.Service<ProjectService>()("Lexa/Proje
                   swimlaneRepo.create({
                     id: crypto.randomUUID(),
                     projectId: project.id,
-                    name: "Default",
+                    name: "Backlog",
                     position: 0,
+                    kind: "backlog",
                   }),
                   fieldConfigRepo.seedDefaults(project.id),
                 ])

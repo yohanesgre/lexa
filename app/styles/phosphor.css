@@ -619,6 +619,28 @@
     flex-shrink: 0;
   }
 
+  /* ---- Card deadline chip (tasks.due_at) — ported from wireframes.css ---- */
+  .card-due {
+    display: inline-flex;
+    align-items: center;
+    height: 20px;
+    padding: 0 8px;
+    border-radius: 9999px;
+    border: 1px solid rgba(252, 211, 77, 0.35);
+    font-family: var(--lx-font-body);
+    font-size: 11px;
+    line-height: 14px;
+    color: var(--lx-text-warning);
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+
+  .card-due-overdue {
+    border-color: rgba(255, 68, 68, 0.45);
+    background: var(--lx-bg-danger-subtle);
+    color: var(--lx-text-danger);
+  }
+
   .github-badge {
     display: inline-flex;
     align-items: center;
@@ -813,6 +835,24 @@
   .swimlane-header:hover {
     background: var(--lx-surface-card-hover);
   }
+
+  /* ---- Backlog system lane: permanent, no deadline, no archive — ported from wireframes.css ---- */
+  .swimlane-backlog {
+    opacity: 0.72;
+  }
+
+  /* ---- Archived milestone lanes — ported from wireframes.css ---- */
+  .swimlane-archived {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    height: 36px;
+    padding: 0 16px;
+    background: var(--lx-surface-elevated);
+    border: 1px dashed var(--lx-border-strong);
+    border-radius: 6px;
+    opacity: 0.55;
+  }
   .swimlane-name {
     font-size: 13px;
     font-weight: 500;
@@ -825,6 +865,29 @@
     color: var(--lx-text-muted);
     margin-left: 8px;
   }
+  /* ---- Milestone deadline chip (swimlanes.due_at) — ported from wireframes.css ---- */
+  .lane-due {
+    display: inline-flex;
+    align-items: center;
+    height: 20px;
+    padding: 0 8px;
+    border-radius: 9999px;
+    border: 1px solid rgba(252, 211, 77, 0.35);
+    font-family: var(--lx-font-body);
+    font-size: 11px;
+    line-height: 14px;
+    color: var(--lx-text-warning);
+    margin-left: 10px;
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+
+  .lane-due-overdue {
+    border-color: rgba(255, 68, 68, 0.45);
+    background: var(--lx-bg-danger-subtle);
+    color: var(--lx-text-danger);
+  }
+
   .swimlane-desc {
     font-size: 11px;
     line-height: 16px;
@@ -3080,6 +3143,23 @@
     color: var(--lx-text-link-hover);
   }
 
+  /* ---- Move-confirm dialog: clear-deadline checkbox — ported from wireframes.css.
+         Defined BEFORE the filter-popover .check-row so the cascade matches the
+         wireframe file (dialog variant earlier, filter variant later wins on
+         padding/font/cursor) — same relative order as wireframes.css. ---- */
+  .check-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 13px;
+    color: var(--lx-text-secondary);
+    margin-top: 10px;
+    padding: 8px 10px;
+    border: 1px solid var(--lx-border-default);
+    border-radius: 6px;
+    background: var(--lx-surface-card);
+  }
+
   /* ---- Filter Popover Checkbox Rows ---- */
   .check-row {
     display: flex;
@@ -4216,3 +4296,158 @@
     color: var(--lx-text-secondary);
   }
   .tasks-error .btn { margin-top: 12px; }
+
+  /* =========================================================
+     Datepicker (kanban-swimlane-settings-modal, task-detail)
+     Custom calendar popover replacing input[type="date"].
+     Ported verbatim from wireframes.css.
+     ========================================================= */
+
+  .datepicker {
+    position: relative;
+    display: inline-flex;
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .datepicker-trigger {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    height: 32px;
+    min-width: 160px;
+    padding: 0 10px;
+    background: var(--lx-surface-input);
+    border: 1px solid var(--lx-border-default);
+    border-radius: 4px;
+    color: var(--lx-text-primary);
+    font-family: var(--lx-font-body);
+    font-size: 13px;
+    cursor: pointer;
+    transition: border-color 100ms, background 100ms;
+  }
+  .datepicker-trigger:hover {
+    border-color: var(--lx-border-strong);
+    background: var(--lx-surface-card-hover);
+  }
+  .datepicker-trigger svg {
+    stroke: currentColor;
+    stroke-width: 1.5;
+    fill: none;
+    flex-shrink: 0;
+    color: var(--lx-text-muted);
+  }
+
+  .datepicker-value {
+    font-family: var(--lx-font-body);
+    font-size: 13px;
+    color: var(--lx-text-primary);
+    white-space: nowrap;
+  }
+  .datepicker-value.empty {
+    color: var(--lx-text-muted);
+  }
+
+  .datepicker-popover {
+    position: absolute;
+    top: calc(100% + 6px);
+    left: 0;
+    z-index: 40;
+    width: 280px;
+    padding: 10px;
+    background: var(--lx-surface-elevated);
+    border: 1px solid var(--lx-border-default);
+    border-radius: 6px;
+    box-shadow: var(--lx-shadow-md);
+  }
+
+  .datepicker-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 8px;
+  }
+
+  .datepicker-month {
+    font-family: var(--lx-font-display);
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--lx-text-primary);
+  }
+
+  .datepicker-weekdays {
+    display: grid;
+    grid-template-columns: repeat(7, 1fr);
+    gap: 2px;
+    margin-bottom: 4px;
+  }
+  .datepicker-weekdays span {
+    font-family: var(--lx-font-micro);
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--lx-text-muted);
+    text-align: center;
+    height: 20px;
+    line-height: 20px;
+  }
+
+  .datepicker-grid {
+    display: grid;
+    grid-template-columns: repeat(7, 1fr);
+    gap: 2px;
+  }
+
+  .datepicker-day {
+    width: 32px;
+    height: 32px;
+    border: 1px solid transparent;
+    border-radius: 6px;
+    background: transparent;
+    font-family: var(--lx-font-body);
+    font-size: 12px;
+    color: var(--lx-text-secondary);
+    cursor: pointer;
+    transition: background 100ms, border-color 100ms;
+  }
+  .datepicker-day:hover {
+    background: var(--lx-surface-card-hover);
+  }
+  .datepicker-day.selected {
+    background: var(--lx-border-focus);
+    color: var(--lx-text-inverse);
+    font-weight: 600;
+  }
+  .datepicker-day.today {
+    border-color: var(--lx-border-strong);
+  }
+  .datepicker-day.muted {
+    color: var(--lx-text-muted);
+  }
+  .datepicker-day.empty {
+    cursor: default;
+  }
+
+  .datepicker-footer {
+    display: flex;
+    justify-content: flex-end;
+    margin-top: 8px;
+    padding-top: 6px;
+    border-top: 1px solid var(--lx-border-subtle);
+  }
+
+  .datepicker-clear {
+    font-size: 11px;
+    font-family: var(--lx-font-body);
+    color: var(--lx-text-link);
+    background: none;
+    border: none;
+    border-radius: 3px;
+    cursor: pointer;
+    padding: 1px 4px;
+  }
+  .datepicker-clear:hover {
+    background: var(--lx-surface-card-hover);
+    text-decoration: underline;
+  }

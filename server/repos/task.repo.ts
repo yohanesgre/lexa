@@ -27,7 +27,7 @@ const TASK_SELECT = `t.*, c.github_state as column_github_state, GROUP_CONCAT(ta
 
 // Slim variant for list/board/anchor paths — no t.description (the TipTap
 // blob is only needed for get/update/mutation responses).
-const TASK_SELECT_SLIM = `t.id, t.project_id, t.column_id, t.swimlane_id, t.title, t.priority, t.type, t.position, t.archived_at, t.github_issue_id, t.github_issue_number, t.github_repo, t.github_synced_state, t.created_at, t.updated_at, c.github_state as column_github_state, GROUP_CONCAT(ta.user_name, '||') AS assignees, COALESCE(GROUP_CONCAT(gi.issue_id || ',' || gi.issue_number || ',' || gi.repo || ',' || COALESCE(gi.synced_state,''), '||'), '') AS github_issues_raw`;
+const TASK_SELECT_SLIM = `t.id, t.project_id, t.column_id, t.swimlane_id, t.title, t.priority, t.type, t.position, t.due_at, t.archived_at, t.github_issue_id, t.github_issue_number, t.github_repo, t.github_synced_state, t.created_at, t.updated_at, c.github_state as column_github_state, GROUP_CONCAT(ta.user_name, '||') AS assignees, COALESCE(GROUP_CONCAT(gi.issue_id || ',' || gi.issue_number || ',' || gi.repo || ',' || COALESCE(gi.synced_state,''), '||'), '') AS github_issues_raw`;
 
 const TASK_FROM = `tasks t LEFT JOIN columns c ON t.column_id = c.id LEFT JOIN task_assignees ta ON ta.task_id = t.id LEFT JOIN task_github_issues gi ON gi.task_id = t.id`;
 
@@ -49,6 +49,7 @@ export class TaskRepo extends Effect.Service<TaskRepo>()("Lexa/TaskRepo", {
         type: string;
         assignees?: string[];
         position: string;
+        dueAt?: string | null;
         githubIssueId?: string;
         githubIssueNumber?: number;
         githubRepo?: string;
@@ -58,8 +59,8 @@ export class TaskRepo extends Effect.Service<TaskRepo>()("Lexa/TaskRepo", {
           yield* Effect.logDebug("[TaskRepo] create");
           yield* run(
             db,
-            `INSERT INTO tasks (id, project_id, column_id, swimlane_id, title, description, priority, type, position)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            `INSERT INTO tasks (id, project_id, column_id, swimlane_id, title, description, priority, type, position, due_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
             input.id,
             input.projectId,
             input.columnId,
@@ -68,7 +69,8 @@ export class TaskRepo extends Effect.Service<TaskRepo>()("Lexa/TaskRepo", {
             input.description,
             input.priority,
             input.type,
-            input.position
+            input.position,
+            input.dueAt ?? null
           );
           if (input.assignees && input.assignees.length > 0) {
             const stmts = input.assignees.map((name) => ({
@@ -188,13 +190,24 @@ export class TaskRepo extends Effect.Service<TaskRepo>()("Lexa/TaskRepo", {
         );
       },
 
+      // "Last" = max position across ALL tasks in the column. Archived rows
+      // still occupy their position in UNIQUE(column_id, position) — skipping
+      // them makes keyAfter() regenerate a colliding key (unresolvable: the
+      // retry re-reads the same anchor).
       findLastInColumn: (projectId: string, columnId: string): Effect.Effect<Task, RowNotFound | DbError> =>
         queryFirst<SlimTaskRow>(
           db,
-          `SELECT ${TASK_SELECT_SLIM} FROM ${TASK_FROM} WHERE t.project_id = ? AND t.column_id = ? AND t.archived_at IS NULL GROUP BY t.id ORDER BY t.position DESC LIMIT 1`,
+          `SELECT ${TASK_SELECT_SLIM} FROM ${TASK_FROM} WHERE t.project_id = ? AND t.column_id = ? GROUP BY t.id ORDER BY t.position DESC LIMIT 1`,
           projectId,
           columnId
         ).pipe(Effect.map((r) => rowToTaskSlim(r, r.column_github_state))),
+
+      findBySwimlane: (swimlaneId: string): Effect.Effect<Task[], DbError> =>
+        queryAll<SlimTaskRow>(
+          db,
+          `SELECT ${TASK_SELECT_SLIM} FROM ${TASK_FROM} WHERE t.swimlane_id = ? AND t.archived_at IS NULL GROUP BY t.id ORDER BY t.position, t.id`,
+          swimlaneId
+        ).pipe(Effect.map((rows) => rows.map((r) => rowToTaskSlim(r, r.column_github_state)))),
 
       update: (
         id: string,
@@ -204,6 +217,7 @@ export class TaskRepo extends Effect.Service<TaskRepo>()("Lexa/TaskRepo", {
           priority?: string;
           type?: string;
           assignees?: string[];
+          dueAt?: string | null;
         }
       ): Effect.Effect<Task, RowNotFound | DbError | ConstraintViolation> =>
         Effect.gen(function* () {
@@ -234,6 +248,10 @@ export class TaskRepo extends Effect.Service<TaskRepo>()("Lexa/TaskRepo", {
           if (input.type !== undefined) {
             sets.push("type = ?");
             params.push(input.type);
+          }
+          if (input.dueAt !== undefined) {
+            sets.push("due_at = ?");
+            params.push(input.dueAt);
           }
           if (sets.length === 0)
             return yield* queryFirst<TaskRow & { column_github_state: "open" | "closed" | null; github_issues_raw: string | null }>(
@@ -314,15 +332,16 @@ export class TaskRepo extends Effect.Service<TaskRepo>()("Lexa/TaskRepo", {
 
       move: (
         taskId: string,
-        target: { columnId: string; swimlaneId: string; position: string; projectId: string },
+        target: { columnId: string; swimlaneId: string; position: string; projectId: string; clearDueAt?: boolean },
         opts?: { bypassWip?: boolean }
       ): Effect.Effect<{ changes: number; task: Task }, RowNotFound | DbError | ConstraintViolation> => {
+        const clearDue = target.clearDueAt ? ", due_at = NULL" : "";
         const changes = Effect.logDebug(`[TaskRepo] move id=${taskId} columnId=${target.columnId} position=${target.position}`).pipe(
           Effect.flatMap(() =>
             opts?.bypassWip
               ? run(
                   db,
-                  `UPDATE tasks SET column_id = ?, swimlane_id = ?, position = ?, updated_at = datetime('now') WHERE id = ?`,
+                  `UPDATE tasks SET column_id = ?, swimlane_id = ?, position = ?${clearDue}, updated_at = datetime('now') WHERE id = ?`,
                   target.columnId,
                   target.swimlaneId,
                   target.position,
@@ -330,7 +349,7 @@ export class TaskRepo extends Effect.Service<TaskRepo>()("Lexa/TaskRepo", {
                 )
               : run(
                   db,
-                  `UPDATE tasks SET column_id = ?, swimlane_id = ?, position = ?, updated_at = datetime('now')
+                  `UPDATE tasks SET column_id = ?, swimlane_id = ?, position = ?${clearDue}, updated_at = datetime('now')
                    WHERE id = ?
                      AND (column_id = ? OR (SELECT COUNT(*) FROM tasks WHERE project_id = ? AND column_id = ? AND archived_at IS NULL) < COALESCE((SELECT wip_limit FROM columns WHERE id = ?), 9223372036854775807))`,
                   target.columnId,

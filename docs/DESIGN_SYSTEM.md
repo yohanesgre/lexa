@@ -373,6 +373,7 @@ Cursor:        grab
 2. **Title:** `text-base/600/Body`, 3-line clamp, margin-top 8px
 3. **Meta row:** Assignee avatars (20px circle, stacked, max 3 + overflow) + `.card-meta-spacer` (flex: 1) pushing GitHub section to right edge + GitHub link badges (stacked, max 2 + overflow, Mono font) + sync indicator dot. margin-top 8px.
 4. **Bottom row (optional):** Checklist progress `text-2xs/500/Micro`, color `--lx-text-muted`.
+5. **Due chip (optional):** Card's own deadline (only when `tasks.due_at` is set). `.card-due` — 20px pill, radius 9999px, padding 0 8px, border 1px `rgba(252, 211, 77, 0.35)`, `text-2xs` warning amber, margin-top 6px. Overdue → `.card-due-overdue`: border `rgba(255, 68, 68, 0.45)`, background `--lx-bg-danger-subtle`, text `--lx-text-danger`. Format: "Due Tue" style short label. Chips sit above the meta row.
 
 **Type Badge:**
 - Height: 18px
@@ -446,8 +447,10 @@ Margin-bottom: 12px
 - **Chevron:** 14px, `--lx-text-secondary`, rotates 90° when expanded
 - **Name:** `text-sm/500/Display`, `--lx-text-primary` (Display font gives swimlanes personality)
 - **Description:** `text-2xs/Body`, `--lx-text-secondary`, truncated to 80 chars, max-width 240px, `white-space: nowrap; overflow: hidden; text-overflow: ellipsis`. "read more" link (`text-2xs/Body`, `--lx-text-link`) opens modal with full text. Hidden when collapsed.
+- **Due chip:** Lane deadline (milestone lanes). `.lane-due` — 20px pill, radius 9999px, padding 0 8px, margin-left 10px, border 1px `rgba(252, 211, 77, 0.35)`, `text-2xs` warning amber, `white-space: nowrap`. Text = short date + countdown ("Due Fri · 3d left"). Overdue → `.lane-due-overdue`: border `rgba(255, 68, 68, 0.45)`, background `--lx-bg-danger-subtle`, text `--lx-text-danger`. No chip on Backlog lanes (no deadline).
 - **Count:** `text-2xs/500/Micro`, `--lx-text-muted`, margin-left 8px
-- **Context menu (⋮):** Settings (swimlane form — name, description), separator, Rename (inline), Add Column (ColumnForm create), Delete (confirm dialog)
+- **Context menu (⋮):** Settings (swimlane form — name, description, due date), separator, Rename (inline), Add Column (ColumnForm create), separator, Archive (cascade — lane + all live tasks in one transaction; per-task "archived" activity rows), Restore (lane only, tasks stay archived), Delete (confirm dialog). Backlog lane: no archive/restore/delete (system lane).
+- **States:** Archived lane → `.swimlane-archived`: dashed border, muted name + count. Backlog lane → `.swimlane-backlog`: muted, "System lane" tag, no due chip, no archive/restore/delete actions.
 - **Hover:** Background → `--lx-surface-card-hover`
 - **Collapsed:** Chevron points right; columns below hidden; description hidden
 
@@ -828,6 +831,63 @@ Refresh:  polls every 30s (runtimes self-register + heartbeat)
 - **Naming**: the runtimes table labels the CLI column "CLI" and the CLI persona
   field "Persona" (was "Agent"/"Agent persona") — "Agent" now always means the
   Lexa rule bundle, not the runtime's CLI.
+
+### 5.9m DatePicker
+
+Custom calendar picker replacing `input[type=date]` (swimlane form, task
+property bar, task create). Wireframe: `wireframes/src/partials/_datepicker.html`.
+
+```
+Trigger:    32px tall, min-width 160px, padding 0 10px, radius 4px,
+            --lx-surface-input bg, border 1px --lx-border-default,
+            text-13px Body; hover → border --lx-border-strong,
+            bg --lx-surface-card-hover. Calendar icon 14px, --lx-text-muted.
+            Empty value renders placeholder in --lx-text-muted.
+Popover:    280px, padding 10px, --lx-surface-elevated bg, border 1px
+            --lx-border-default, radius 6px, shadow --lx-shadow-md.
+            Rendered in a PORTAL to <body> with position: fixed anchored
+            to the trigger rect (escapes scrollable modal bodies), z-index
+            100, flips above the trigger when near the viewport bottom,
+            clamps to the right edge.
+```
+
+- **Head:** Prev/next month icon buttons (12px chevrons) + month label
+  `text-sm/500` (e.g. "August 2026").
+- **Weekdays row:** S M T W T F S, `text-2xs`, `--lx-text-muted`.
+- **Day grid:** 32×32px cells, radius 6px, `text-xs`, `--lx-text-secondary`;
+  hover bg `--lx-surface-card-hover`; `.today` → border 1px
+  `--lx-border-strong`; `.selected` → bg `--lx-border-focus`, text
+  `--lx-text-inverse`, weight 600; `.muted` (adjacent-month days) →
+  `--lx-text-muted`; empty cells are non-interactive.
+- **Footer (only when a value is set):** right-aligned "Clear" link-button,
+  margin-top 8px — clears the value and closes.
+- **Behavior:** Click outside (mousedown, both trigger and portal counted as
+  inside) or Esc closes. Day/Clear click commits `onChange` and closes.
+  Date format: YYYY-MM-DD (local). `formatDueLabel()` derives display text.
+
+### 5.9n MoveConfirmDialog
+
+Blocking confirm shown by the board when a drag crosses a deadline rule.
+
+```
+Overlay:    .dialog-overlay (fixed inset-0, --lx-surface-overlay), z-80
+Dialog:     .modal .dialog-enter, z-81, 400px, pointer-events auto
+Header:     .modal-header — title "Move task" + close (X) button
+Body:       .modal-body — message + optional conflict row
+```
+
+Two states (only one rendered at a time):
+
+- **Overdue lane:** "Lane `name` is overdue (Nd). Move anyway?" — amber
+  warning tone. Buttons: Move (primary) / Cancel (ghost).
+- **Deadline conflict:** Card's `tasks.due_at` is later than the target
+  lane's `due_at`. Message shows card due (e.g. "Due Fri") vs lane due.
+  A check-row checkbox "Clear card deadline" (checked by default) — on
+  Move, sends `clearDueAt: true` in the same atomic move; unchecked sends
+  a plain move and the server rejects with 409 `DEADLINE_AFTER_LANE`.
+  Buttons: Move / Cancel.
+
+Escape cancels; overlay click cancels.
 
 ### 5.9n Agents + Skills (Settings sections)
 

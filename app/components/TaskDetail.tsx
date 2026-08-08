@@ -62,6 +62,7 @@ interface TaskDetailProps {
     type: string;
     assignees: string[];
     description: TipTapDoc;
+    dueAt?: string | null;
   }) => Promise<void>;
 }
 
@@ -142,6 +143,7 @@ export function TaskDetail({ mode = "view", task, project, defaultColumnId, colu
     createType, setCreateType,
     createAssignees, setCreateAssignees,
     createDescription, setCreateDescription,
+    createDueAt, setCreateDueAt,
     creating,
     linkState, setLinkState,
     linkRepo, setLinkRepo,
@@ -256,7 +258,7 @@ export function TaskDetail({ mode = "view", task, project, defaultColumnId, colu
           setDraft={setDraft}
           onSaveTitle={saveTitle}
           setEditingTitle={setEditingTitle}
-          taskTitle={task!.title}
+          taskTitle={task?.title ?? ""}
         />
 
 
@@ -285,6 +287,8 @@ export function TaskDetail({ mode = "view", task, project, defaultColumnId, colu
           setCreateType={setCreateType}
           createAssignees={createAssignees}
           setCreateAssignees={setCreateAssignees}
+          createDueAt={createDueAt}
+          setCreateDueAt={setCreateDueAt}
           availableAssignees={availableAssignees}
           editingAssignees={editingAssignees}
           setEditingAssignees={setEditingAssignees}
@@ -326,6 +330,7 @@ export function TaskDetail({ mode = "view", task, project, defaultColumnId, colu
           onUpdate={onUpdate!}
         />
 
+        {!isCreate && (
         <GitHubSection
           githubs={githubs}
           taskId={task!.id}
@@ -337,9 +342,10 @@ export function TaskDetail({ mode = "view", task, project, defaultColumnId, colu
           onLink={onLinkGithub!}
           onUnlink={onUnlinkGithub!}
         />
+        )}
         </>
         ) : (
-          <ActivityTab slug={slug} taskId={task!.id} isArchived={isArchived} />
+          <ActivityTab slug={slug} taskId={task?.id ?? ""} isArchived={isArchived} />
         )}
         </div>
 
@@ -354,7 +360,7 @@ export function TaskDetail({ mode = "view", task, project, defaultColumnId, colu
           onArchive={onArchive!}
           onRestore={onRestore!}
           onDeleteClick={() => setShowDeleteDialog(true)}
-          taskId={task!.id}
+          taskId={task?.id ?? ""}
         />
 
 

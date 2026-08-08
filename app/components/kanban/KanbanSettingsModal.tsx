@@ -374,9 +374,9 @@ export function KanbanSettingsModal({ slug, isOpen, onClose }: KanbanSettingsMod
         onClose={() => setSwimlaneForm({ isOpen: false, swimlane: null })}
         onSubmit={(input) => {
           if (swimlaneForm.swimlane) {
-            updateSwimlane.mutate({ id: swimlaneForm.swimlane.id, name: input.name, description: input.description ?? undefined });
+            updateSwimlane.mutate({ id: swimlaneForm.swimlane.id, name: input.name, description: input.description ?? undefined, dueAt: input.dueAt ?? undefined });
           } else {
-            createSwimlane.mutate({ name: input.name, description: input.description ?? undefined });
+            createSwimlane.mutate({ name: input.name, description: input.description ?? undefined, dueAt: input.dueAt ?? undefined });
           }
         }}
       />

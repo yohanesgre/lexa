@@ -64,15 +64,31 @@ CREATE TABLE columns (
 );
 
 -- ============================================================
--- Swimlanes (horizontal grouping)
+-- Swimlanes (horizontal grouping) — milestones + one system Backlog
 -- ============================================================
+-- kind = 'milestone' (default) | 'backlog'. The Backlog lane is the
+-- permanent system lane: created with every project, never archived or
+-- deleted, no deadline. Identity is `kind`, not the name — renaming the
+-- Backlog lane does not demote it. Partial unique index guarantees at
+-- most one backlog lane per project.
+-- due_at: YYYY-MM-DD milestone deadline (date-only, no time-of-day).
+--   Cross-column CHECK (kind='backlog' AND due_at IS NULL) is NOT in the
+--   DDL — SQLite ALTER TABLE cannot add table-level CHECKs; enforced in
+--   SwimlaneService (update rejects backlog dueAt → BACKLOG_PROTECTED).
+-- archived_at: lane archive cascades to its live tasks (one transaction,
+--   per-task `archived` activity rows); restore brings the lane back only.
 CREATE TABLE swimlanes (
   id          TEXT PRIMARY KEY,
   project_id  TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
   name        TEXT NOT NULL,
   description TEXT NOT NULL DEFAULT '',
-  position    INTEGER NOT NULL
+  position    INTEGER NOT NULL,
+  due_at      TEXT,
+  archived_at TEXT,
+  kind        TEXT NOT NULL DEFAULT 'milestone'
+              CHECK (kind IN ('backlog','milestone'))
 );
+CREATE UNIQUE INDEX idx_swimlanes_one_backlog ON swimlanes(project_id) WHERE kind = 'backlog';
 
 -- ============================================================
 -- Task field options (per-project customizable priority/type)
@@ -127,6 +143,8 @@ CREATE TABLE tasks (
   archived_at         TEXT,                                   -- NULL = live; set to datetime('now') on archive
                                                               -- archived tasks keep column/position and are excluded
                                                               -- from board/WIP/count queries unless includeArchived
+  due_at              TEXT,                                   -- YYYY-MM-DD optional personal deadline; service-enforced
+                                                              -- <= lane due_at (DEADLINE_AFTER_LANE when later)
   github_issue_id     TEXT,                                  -- DEPRECATED — now in task_github_issues
   github_issue_number INTEGER,                              -- DEPRECATED
   github_repo         TEXT,                                  -- DEPRECATED

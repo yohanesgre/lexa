@@ -41,18 +41,21 @@ export function OptionSettingsSection({ kind, title, description, options, senso
         <div className="bg-lx-surface-card border border-lx-border rounded-lg overflow-hidden">
           <DndContext sensors={sensors} onDragEnd={onDragEnd}>
             <SortableContext items={options.map((o) => o.id)} strategy={verticalListSortingStrategy}>
-              <table className="w-full border-collapse text-[13px] font-body">
+              <table className="w-full border-collapse text-[13px] font-body" style={{ tableLayout: "fixed" }}>
                 <thead>
                   <tr className="border-b border-lx-border">
-                    <th className="w-8 py-2.5 px-3"></th>
+                    <th className="py-2.5 px-3 whitespace-nowrap" style={{ width: 44 }}></th>
                     <th className="py-2.5 px-3 text-left text-[11px] uppercase tracking-[0.05em] text-lx-text-secondary font-medium font-body">Label</th>
-                    <th className="py-2.5 px-3 text-left text-[11px] uppercase tracking-[0.05em] text-lx-text-secondary font-medium font-body">Color</th>
-                    <th className="w-[100px] py-2.5 px-3"></th>
+                    <th className="py-2.5 px-3 text-left text-[11px] uppercase tracking-[0.05em] text-lx-text-secondary font-medium font-body whitespace-nowrap" style={{ width: 130 }}>Color</th>
+                    <th className="py-2.5 px-3 whitespace-nowrap" style={{ width: 100 }}></th>
                   </tr>
                 </thead>
                 <tbody>
                   {options.map((opt) => (
                     <SortableRow key={opt.id} id={opt.id} className="border-b border-lx-border last:border-b-0">
+                      <td className="py-2.5 px-3 whitespace-nowrap">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="text-lx-text-muted cursor-grab"><circle cx="9" cy="12" r="1" /><circle cx="9" cy="5" r="1" /><circle cx="9" cy="19" r="1" /><circle cx="15" cy="12" r="1" /><circle cx="15" cy="5" r="1" /><circle cx="15" cy="19" r="1" /></svg>
+                      </td>
                       <td className="py-2.5 px-3 text-sm font-medium text-lx-text-primary">{opt.label}</td>
                       <td className="py-2.5 px-3">
                         <span className="inline-flex items-center gap-2">

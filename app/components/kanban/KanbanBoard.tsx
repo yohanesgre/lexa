@@ -16,15 +16,17 @@ import { cn } from "../ui/cn";
 import { Column } from "./Column";
 import { BoardLane } from "./BoardLane";
 import { BoardToolbar } from "./BoardToolbar";
+import { SwimlaneHeader } from "./SwimlaneHeader";
 import { TaskCard } from "./TaskCard";
 import { emptyFilters, isFilterActive, type FilterState } from "../../lib/filters";
 import { KanbanSettingsModal } from "./KanbanSettingsModal";
 import { ColumnForm } from "./ColumnForm";
+import { MoveConfirmDialog } from "./MoveConfirmDialog";
 import { useArchiveTask, useCreateColumn, useRestoreTask } from "../../lib/queries";
+import { useMoveGuard } from "../../lib/useMoveGuard";
 import { Menu } from "../ui/Menu";
 import { MoreHorizontal } from "lucide-react";
 import { Archive, Trash2 } from "lucide-react";
-import { useToast } from "../ui/Toast";
 
 export interface MoveTarget {
   columnId: string;
@@ -46,20 +48,6 @@ const byPosition = (a: Task, b: Task) => (a.position < b.position ? -1 : a.posit
 
 const cellDropId = (columnId: string, laneId: string | null) => `cell:${laneId ?? "none"}:${columnId}`;
 
-const isWipLimit = (err: unknown): boolean => {
-  if (typeof err !== "object" || err === null) return false;
-  const e = err as { code?: unknown; message?: unknown };
-  return e.code === "WIP_LIMIT" || (typeof e.message === "string" && e.message.includes("WIP_LIMIT"));
-};
-
-const isRequiredField = (err: unknown): boolean => {
-  if (typeof err !== "object" || err === null) return false;
-  const e = err as { code?: unknown; message?: unknown };
-  return e.code === "REQUIRED_FIELD" || (typeof e.message === "string" && e.message.includes("REQUIRED_FIELD"));
-};
-
-const isRejection = (err: unknown): boolean => isWipLimit(err) || isRequiredField(err);
-
 function cardProps(task: Task, board: Board) {
   return {
     id: task.id,
@@ -70,6 +58,7 @@ function cardProps(task: Task, board: Board) {
     types: board.fieldConfig?.types ?? [],
     assignees: task.assignees,
     githubs: task.githubs,
+    dueAt: task.dueAt,
   };
 }
 
@@ -144,7 +133,7 @@ export function KanbanBoard({ board, showArchived = false, onToggleArchived, onM
   const createColumn = useCreateColumn(board.project.slug);
   const archiveTask = useArchiveTask(board.project.slug);
   const restoreTask = useRestoreTask(board.project.slug);
-  const toast = useToast();
+  const { confirmMove, pending, resolve, cancel } = useMoveGuard(board.project.slug, board);
 
   useEffect(() => {
     const currentIds = new Set(localTasks.map((t) => t.id));
@@ -174,12 +163,14 @@ export function KanbanBoard({ board, showArchived = false, onToggleArchived, onM
 
   const columns = useMemo(() => board.columns.toSorted((a, b) => a.position - b.position), [board.columns]);
   const lanes = useMemo(() => board.swimlanes.toSorted((a, b) => a.position - b.position), [board.swimlanes]);
-  const hasLanes = lanes.length > 0;
+  const liveLanes = useMemo(() => lanes.filter((l) => !l.archivedAt), [lanes]);
+  const archivedLanes = useMemo(() => lanes.filter((l) => !!l.archivedAt), [lanes]);
+  const hasLanes = liveLanes.length > 0;
 
   const rows = useMemo<{ lane: Swimlane }[]>(() => {
     if (!hasLanes) return [];
-    return lanes.map((lane) => ({ lane }));
-  }, [hasLanes, lanes]);
+    return liveLanes.map((lane) => ({ lane }));
+  }, [hasLanes, liveLanes]);
 
   const tasksInCell = useCallback(
     (columnId: string, laneId: string) =>
@@ -228,7 +219,7 @@ export function KanbanBoard({ board, showArchived = false, onToggleArchived, onM
 
   const handleDragStart = (event: DragStartEvent) => setActiveId(String(event.active.id));
 
-  const handleDragEnd = async (event: DragEndEvent) => {
+  const handleDragEnd = (event: DragEndEvent) => {
     const { active, over } = event;
     setActiveId(null);
     if (!over) return;
@@ -296,45 +287,19 @@ export function KanbanBoard({ board, showArchived = false, onToggleArchived, onM
               .at(-1)?.position ?? null
           );
 
-    const snapshot = localTasks;
+    const target: MoveTarget = {
+      columnId: targetColumnId,
+      swimlaneId: targetLaneId,
+      beforeTaskId,
+      afterTaskId,
+    };
+    // The move guard fires the mutation itself on the free path; when it
+    // returns false the confirm dialog is pending and commits later (resolve)
+    // without any optimistic local state.
+    if (!confirmMove(task, target)) return;
     setLocalTasks((prev) =>
       prev.map((t) => (t.id === task.id ? { ...t, columnId: targetColumnId, swimlaneId: targetLaneId, position } : t))
     );
-
-    try {
-      await onMoveTask(task.id, { columnId: targetColumnId, swimlaneId: targetLaneId, beforeTaskId, afterTaskId });
-    } catch (err) {
-      setLocalTasks(snapshot);
-      if (isRejection(err)) {
-        setShakeTaskId(task.id);
-        if (shakeTimer.current !== null) window.clearTimeout(shakeTimer.current);
-        shakeTimer.current = window.setTimeout(() => setShakeTaskId(null), 200);
-      }
-      if (isWipLimit(err)) {
-        setFlashColumnId(targetColumnId);
-        if (flashTimer.current !== null) window.clearTimeout(flashTimer.current);
-        flashTimer.current = window.setTimeout(() => setFlashColumnId(null), 1500);
-        const column = board.columns.find((c) => c.id === targetColumnId);
-        const limit = column?.wipLimit ?? 0;
-        toast.push(
-          "warning",
-          "WIP limit exceeded",
-          `${column?.name ?? "Column"} is at ${columnTotalCount(targetColumnId)}/${limit} tasks. Move blocked.`
-        );
-      }
-      if (isRequiredField(err)) {
-        const column = board.columns.find((c) => c.id === targetColumnId);
-        const fields = (column?.requiredFields ?? []).join(", ");
-        toast.push(
-          "warning",
-          "Required fields missing",
-          `${column?.name ?? "Column"} requires: ${fields}.`
-        );
-      }
-      if (!isRejection(err)) {
-        console.error("Task move failed", err);
-      }
-    }
   };
 
   return (
@@ -383,6 +348,18 @@ export function KanbanBoard({ board, showArchived = false, onToggleArchived, onM
           ))
 
         )}
+        {showArchived && archivedLanes.length > 0 && (
+          <div style={{ margin: "16px 0", maxWidth: 640 }}>
+            {archivedLanes.map((lane) => (
+              <SwimlaneHeader
+                key={lane.id}
+                slug={board.project.slug}
+                lane={lane}
+                count={localTasks.filter((t) => t.swimlaneId === lane.id).length}
+              />
+            ))}
+          </div>
+        )}
         </div>
       </div>
       <DragOverlay dropAnimation={{ duration: 150, easing: "cubic-bezier(0.16, 1, 0.3, 1)" }}>
@@ -397,6 +374,7 @@ export function KanbanBoard({ board, showArchived = false, onToggleArchived, onM
         isOpen={isSettingsOpen}
         onClose={() => setIsSettingsOpen(false)}
       />
+      <MoveConfirmDialog board={board} pending={pending} resolve={resolve} cancel={cancel} />
       {isColumnCreateOpen && (
 <ColumnForm
         slug={board.project.slug}

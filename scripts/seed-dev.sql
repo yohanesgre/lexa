@@ -106,10 +106,10 @@ VALUES
   ('seed-col-bl-1', 'seed-proj-blank', 'In Progress', 1, '#3b82f6', 3, '["assignee"]', 'open'),
   ('seed-col-bl-2', 'seed-proj-blank', 'Done', 2, '#10b981', NULL, '[]', 'closed');
 
-INSERT INTO swimlanes (id, project_id, name, description, position)
+INSERT INTO swimlanes (id, project_id, name, description, position, kind)
 VALUES
-  ('seed-sw-bl-0', 'seed-proj-blank', 'Current Sprint', '', 0),
-  ('seed-sw-bl-1', 'seed-proj-blank', 'Backlog', 'Future work goes here.', 1);
+  ('seed-sw-bl-0', 'seed-proj-blank', 'Backlog', 'Future work goes here.', 0, 'backlog'),
+  ('seed-sw-bl-1', 'seed-proj-blank', 'Current Sprint', '', 1, 'milestone');
 
 -- ============================================================
 -- Tasks Only project — 3 columns, 5 tasks, no swimlanes
@@ -125,8 +125,8 @@ VALUES
   ('seed-col-min-2', 'seed-proj-minimal', 'Done', 2, '#10b981', NULL, '[]', 'closed');
 
 -- tasks.swimlane_id is NOT NULL since migration 0007 — give the project a default swimlane
-INSERT INTO swimlanes (id, project_id, name, description, position)
-VALUES ('seed-sw-min-0', 'seed-proj-minimal', 'Default', '', 0);
+INSERT INTO swimlanes (id, project_id, name, description, position, kind)
+VALUES ('seed-sw-min-0', 'seed-proj-minimal', 'Backlog', '', 0, 'backlog');
 
 INSERT INTO tasks (id, project_id, column_id, swimlane_id, title, description, priority, type, position)
 VALUES
@@ -159,11 +159,12 @@ VALUES
   ('seed-col-f-3', 'seed-proj-full', 'Done', 3, '#10b981', NULL, '[]', 'closed'),
   ('seed-col-f-4', 'seed-proj-full', 'Blocked', 4, '#ef4444', NULL, '["description"]', NULL);
 
-INSERT INTO swimlanes (id, project_id, name, description, position)
+INSERT INTO swimlanes (id, project_id, name, description, position, kind)
 VALUES
-  ('seed-sw-f-0', 'seed-proj-full', 'Core', 'Current sprint — furnace tilemap, combat system, AI pathfinding overhaul, boss arena mechanics, lava shader polish.', 0),
-  ('seed-sw-f-1', 'seed-proj-full', 'Art', 'Character sprites and environment tiles.', 1),
-  ('seed-sw-f-2', 'seed-proj-full', 'Audio', '', 2);
+  ('seed-sw-f-0', 'seed-proj-full', 'Backlog', '', 0, 'backlog'),
+  ('seed-sw-f-1', 'seed-proj-full', 'Core', 'Current sprint — furnace tilemap, combat system, AI pathfinding overhaul, boss arena mechanics, lava shader polish.', 1, 'milestone'),
+  ('seed-sw-f-2', 'seed-proj-full', 'Art', 'Character sprites and environment tiles.', 2, 'milestone'),
+  ('seed-sw-f-3', 'seed-proj-full', 'Audio', '', 3, 'milestone');
 
 -- Tasks — 15 tasks with assignees via junction table
 INSERT INTO tasks (id, project_id, column_id, swimlane_id, title, description, priority, type, position, github_issue_id, github_issue_number, github_repo, github_synced_state)

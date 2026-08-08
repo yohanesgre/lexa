@@ -2,13 +2,14 @@ import { useEffect, useState, useEffectEvent } from "react";
 import { createPortal } from "react-dom";
 import { Plus, Trash2, X } from "lucide-react";
 import type { Swimlane } from "../../../shared/types";
+import { DatePicker } from "../ui/DatePicker";
 
 export interface SwimlaneFormProps {
   slug: string;
   swimlane?: Swimlane | null;
   isOpen: boolean;
   onClose: () => void;
-  onSubmit: (input: { name: string; description?: string | null }) => void;
+  onSubmit: (input: { name: string; description?: string | null; dueAt?: string | null }) => void;
   zIndex?: number;
 }
 
@@ -16,6 +17,7 @@ export function SwimlaneForm({ swimlane, isOpen, onClose, onSubmit, zIndex = 70 
   const isEdit = !!swimlane;
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
+  const [dueAt, setDueAt] = useState<string | null>(swimlane?.dueAt ?? null);
   const [error, setError] = useState<string | null>(null);
 
   const onEscape = useEffectEvent((event: KeyboardEvent) => {
@@ -47,6 +49,7 @@ export function SwimlaneForm({ swimlane, isOpen, onClose, onSubmit, zIndex = 70 
     onSubmit({
       name: trimmedName,
       description: trimmedDescription === "" ? null : trimmedDescription,
+      dueAt,
     });
     onClose();
   };
@@ -116,6 +119,21 @@ export function SwimlaneForm({ swimlane, isOpen, onClose, onSubmit, zIndex = 70 
                   Shown as a subtitle under the swimlane header on the board.
                 </p>
               </div>
+
+              {!(isEdit && swimlane?.kind === "backlog") && (
+                <div className="mb-4">
+                  <label className="block text-xs font-medium text-lx-text-secondary mb-1.5 font-body" htmlFor="swimlane-due">
+                    Due date
+                    <span className="font-mono text-[10px] uppercase tracking-[0.04em] text-lx-text-muted ml-1.5">
+                      Optional · milestones only
+                    </span>
+                  </label>
+                  <DatePicker value={dueAt} onChange={setDueAt} className="w-full" />
+                  <p className="text-[11px] leading-4 text-lx-text-muted mt-1 font-body">
+                    Stored as swimlanes.due_at YYYY-MM-DD — date-only, no time-of-day. Empty = lane has no deadline.
+                  </p>
+                </div>
+              )}
             </div>
 
             <div className="flex items-center gap-2 px-4 py-3 border-t border-lx-border-subtle">

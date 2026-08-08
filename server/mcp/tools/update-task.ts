@@ -19,6 +19,7 @@ export const tool = {
       priority: { type: "string", description: "Priority label from the project's field-config" },
       type: { type: "string", description: "Type label from the project's field-config" },
       assignees: { type: "array", items: { type: "string" }, description: "Assignee names (empty array to clear)" },
+      dueAt: { type: "string", description: "Task due date (YYYY-MM-DD), must not be later than the swimlane's due date. Empty string clears it." },
     },
     required: ["taskId"],
   },
@@ -68,6 +69,7 @@ export const tool = {
         priority: priorityId,
         type: typeId,
         assignees: args.assignees,
+        dueAt: args.dueAt !== undefined ? (args.dueAt === "" ? null : args.dueAt) : undefined,
       });
 
       const columnRepo = yield* ColumnRepo;
@@ -103,6 +105,7 @@ export const tool = {
           outOfSync: g.outOfSync,
         })),
         archivedAt: task.archivedAt,
+        dueAt: task.dueAt,
         updatedAt: task.updatedAt,
         description: docToMarkdown(task.description),
         createdAt: task.createdAt,
