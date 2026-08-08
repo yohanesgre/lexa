@@ -14,6 +14,11 @@ interface EditSidebarProps {
   onDelayChange: (delay: number) => void;
   collapsed: boolean;
   onToggle: () => void;
+  selectedRevisionId: string | null;
+  onSelectRevision: (id: string) => void;
+  onRestore: (id: string) => void;
+  onClosePreview: () => void;
+  restoring?: boolean;
 }
 
 function formatRelative(iso: string): string {
@@ -39,8 +44,14 @@ export function EditSidebar({
   onDelayChange,
   collapsed,
   onToggle,
+  selectedRevisionId,
+  onSelectRevision,
+  onRestore,
+  onClosePreview,
+  restoring,
 }: EditSidebarProps) {
   const { data: revisions, isLoading, error } = useRevisions(slug, pageSlug, 20);
+  const activeRevisionId = selectedRevisionId ?? revisions?.[0]?.id ?? null;
 
   return (
     <WikiSidebar title="Page settings" collapsed={collapsed} onToggle={onToggle}>
@@ -96,37 +107,51 @@ export function EditSidebar({
         {!isLoading && !error && revisions && revisions.length > 0 && (
           <>
             <div className="history-list">
-              {revisions.map((rev, index) => (
-                <div
-                  key={rev.id}
-                  className={cn("history-item", index === 0 && "active")}
-                >
-                  <div className="flex flex-col gap-1">
-                    <span className="text-sm font-medium font-body text-lx-text-primary">
-                      {formatRelative(rev.createdAt)}
-                    </span>
-                    {index === 0 && (
-                      <span className="font-micro text-2xs text-lx-text-warning uppercase tracking-[0.04em]">
-                        Previewing
-                      </span>
-                    )}
-                  </div>
-                  <span
-                    className={cn(
-                      "history-badge",
-                      rev.saveType === "autosave" ? "history-badge-auto" : "history-badge-manual"
-                    )}
+              {revisions.map((rev) => {
+                const isActive = rev.id === activeRevisionId;
+                return (
+                  <div
+                    key={rev.id}
+                    className={cn("history-item", isActive && "active")}
+                    onClick={() => onSelectRevision(rev.id)}
                   >
-                    {rev.saveType}
-                  </span>
-                </div>
-              ))}
+                    <div className="flex flex-col gap-1">
+                      <span className={cn("text-sm font-body text-lx-text-primary", isActive && "font-medium")}>
+                        {formatRelative(rev.createdAt)}
+                      </span>
+                      {isActive && (
+                        <span className="font-micro text-2xs text-lx-text-warning uppercase tracking-[0.04em]">
+                          Previewing
+                        </span>
+                      )}
+                    </div>
+                    <span
+                      className={cn(
+                        "history-badge",
+                        rev.saveType === "autosave" ? "history-badge-auto" : "history-badge-manual"
+                      )}
+                    >
+                      {rev.saveType}
+                    </span>
+                  </div>
+                );
+              })}
             </div>
             <div className="history-actions">
-              <button type="button" className="btn btn-primary flex-1">
+              <button
+                type="button"
+                className="btn btn-primary flex-1"
+                disabled={restoring || selectedRevisionId === null}
+                onClick={() => selectedRevisionId && onRestore(selectedRevisionId)}
+              >
                 Restore
               </button>
-              <button type="button" className="btn btn-ghost flex-1">
+              <button
+                type="button"
+                className="btn btn-ghost flex-1"
+                disabled={selectedRevisionId === null}
+                onClick={onClosePreview}
+              >
                 Close preview
               </button>
             </div>
