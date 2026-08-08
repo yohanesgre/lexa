@@ -1,5 +1,6 @@
 import { type ReactNode } from "react";
 import type { TipTapDoc } from "../../shared/types";
+import { safeHref } from "../../shared/safe-href";
 import { TTNode, hasText } from "../components/tiptap-render";
 
 // Render-time mention highlight over project member names (wireframe:
@@ -47,12 +48,16 @@ function applyMarks(segment: { text: string; mention: boolean }, marks: TTNode["
     if (mark.type === "bold") el = <strong key={`${keyPrefix}-b`}>{el}</strong>;
     else if (mark.type === "italic") el = <em key={`${keyPrefix}-i`}>{el}</em>;
     else if (mark.type === "code") el = <code key={`${keyPrefix}-c`} className="td-code">{el}</code>;
-    else if (mark.type === "link")
-      el = (
-        <a key={`${keyPrefix}-l`} href={String(mark.attrs?.href ?? "#")} target="_blank" rel="noreferrer">
-          {el}
-        </a>
-      );
+    else if (mark.type === "link") {
+      // Scheme allowlist — disallowed hrefs render as plain text, no anchor.
+      const href = safeHref(mark.attrs?.href);
+      if (href)
+        el = (
+          <a key={`${keyPrefix}-l`} href={href} target="_blank" rel="noreferrer">
+            {el}
+          </a>
+        );
+    }
   }
   return el;
 }
