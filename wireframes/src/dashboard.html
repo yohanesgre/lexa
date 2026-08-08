@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Lexa — Dashboard (Health Command Center)</title>
+  <title>Lexa — Dashboard (Project Status)</title>
   <link rel="stylesheet" href="wireframes.css" />
 </head>
 <body class="bg-app color-primary" style="min-height:100vh;">
@@ -12,144 +12,93 @@
 
   <main class="page-frame">
     <div class="flex items-center justify-between mb-4">
-      <div>
-        <h1 class="font-display text-2xl weight-600 color-primary">Command Center</h1>
-        <div class="font-micro text-2xs color-muted mt-1" style="text-transform:uppercase;letter-spacing:0.04em;">Project health overview</div>
+      <div class="flex items-center gap-3">
+        <span class="health-dot health-dot-exceeded" title="WIP exceeded"></span>
+        <div>
+          <h1 class="font-display text-2xl weight-600 color-primary">Emberfall</h1>
+          <div class="font-micro text-2xs color-muted mt-1" style="text-transform:uppercase;letter-spacing:0.04em;">Project status</div>
+        </div>
       </div>
       <div class="flex items-center gap-3">
+        <span class="annotation-tag" style="margin-right:2px;">⋯ opens Project Settings modal (extracted from ProjectCard: name, description, GitHub repo, delete)</span>
+        <button class="btn btn-ghost" style="width:28px;height:28px;padding:0;" title="Project settings">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/></svg>
+        </button>
         <button class="btn btn-primary">
           <INCLUDE _plus-icon.html />
           New Project
         </button>
       </div>
     </div>
+    <span class="annotation-inline mt-1" style="display:block;margin-bottom:8px;">Header shows the selected project (useProjectSelection, localStorage-backed). Health dot = worst WIP state (ok / approaching / exceeded). "New project" opens CreateProjectModal directly; the switcher's "Create new project" row navigates to <span class="font-mono">/?new=1</span>.</span>
 
     <div class="flex gap-2 mb-4 flex-wrap">
-      <span class="annotation-tag">Section 1: Project Health Grid</span>
-      <span class="annotation-tag">Section 2: Aggregate Stats Bar</span>
-      <span class="annotation-tag">Section 3: Needs Attention</span>
+      <span class="annotation-tag">Section 1: Stats Bar (project-scoped)</span>
+      <span class="annotation-tag">Section 2: Column WIP Breakdown</span>
+      <span class="annotation-tag">Section 3: Needs Attention (this project only)</span>
     </div>
 
-    <!-- Section 1: Project Health Grid -->
-    <div class="project-grid">
-
-      <!-- Project: Emberfall -->
-      <div class="project-card health-card">
-        <div class="annotation" style="position:absolute;top:8px;left:8px;">Hover: shadow-md + translateY(-2px)</div>
-        <div class="project-card-name">Emberfall</div>
-        <div class="project-card-desc">2D action-platformer with elemental combat. Built in Godot 4. Core loop: explore, fight, upgrade.</div>
-        <div class="health-card-status-row">
-          <span class="health-dot health-dot-exceeded"></span>
-          <span class="health-metric health-metric-urgent">005 urgent</span>
-          <span class="health-metric health-metric-sync">002 sync</span>
-        </div>
-        <div class="wip-mini-bar">
-          <div class="wip-mini-segment wip-mini-segment-ok" style="flex:2;"></div>
-          <div class="wip-mini-segment wip-mini-segment-exceeded" style="flex:1.5;"></div>
-          <div class="wip-mini-segment wip-mini-segment-approaching" style="flex:1;"></div>
-          <div class="wip-mini-segment wip-mini-segment-ok" style="flex:1;"></div>
-          <div class="wip-mini-segment wip-mini-segment-empty" style="flex:0.5;"></div>
-        </div>
-        <div class="health-card-footer">
-          <div class="health-card-stats">042 tasks · 005 cols</div>
-          <div class="health-card-gh">
-            <INCLUDE _github-icon.html />
-          </div>
-        </div>
-      </div>
-
-      <!-- Project: Void Drifter — ⋯ button opens Project Settings Modal directly -->
-      <div class="project-card health-card" style="position:relative;">
-        <button class="btn btn-ghost" style="position:absolute;top:12px;right:12px;width:28px;height:28px;padding:0;" title="Project Settings">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/></svg>
-        </button>
-        <div class="project-card-name">Void Drifter</div>
-        <div class="project-card-desc">Roguelike spaceship builder. Procedural sectors, modular hulls, permadeath with persistent unlocks.</div>
-        <div class="health-card-status-row">
-          <span class="health-dot health-dot-ok"></span>
-          <span class="health-card-stats">128 tasks</span>
-        </div>
-        <div class="wip-mini-bar">
-          <div class="wip-mini-segment wip-mini-segment-ok" style="flex:2;"></div>
-          <div class="wip-mini-segment wip-mini-segment-ok" style="flex:2;"></div>
-          <div class="wip-mini-segment wip-mini-segment-ok" style="flex:1.5;"></div>
-          <div class="wip-mini-segment wip-mini-segment-ok" style="flex:1;"></div>
-          <div class="wip-mini-segment wip-mini-segment-ok" style="flex:1;"></div>
-        </div>
-        <div class="health-card-footer">
-          <div class="health-card-stats">128 tasks · 006 cols</div>
-        </div>
-      </div>
-
-      <!-- Project: Ironbound -->
-      <div class="project-card health-card">
-        <div class="project-card-name">Ironbound</div>
-        <div class="project-card-desc">Tactical grid-based RPG. Turn-based combat with environmental destruction and combo chains.</div>
-        <div class="health-card-status-row">
-          <span class="health-dot health-dot-approaching"></span>
-          <span class="health-card-stats">089 tasks</span>
-        </div>
-        <div class="wip-mini-bar">
-          <div class="wip-mini-segment wip-mini-segment-ok" style="flex:2;"></div>
-          <div class="wip-mini-segment wip-mini-segment-ok" style="flex:1.5;"></div>
-          <div class="wip-mini-segment wip-mini-segment-approaching" style="flex:1.5;"></div>
-          <div class="wip-mini-segment wip-mini-segment-ok" style="flex:1;"></div>
-        </div>
-        <div class="health-card-footer">
-          <div class="health-card-stats">089 tasks · 004 cols</div>
-          <div class="health-card-gh">
-            <INCLUDE _github-icon.html />
-          </div>
-        </div>
-      </div>
-
-      <!-- Project: Pale Reach -->
-      <div class="project-card health-card">
-        <div class="project-card-name">Pale Reach</div>
-        <div class="project-card-desc">Narrative-driven walking sim. Hand-painted backgrounds, branching dialogue, no combat.</div>
-        <div class="health-card-status-row">
-          <span class="health-dot health-dot-ok"></span>
-          <span class="health-card-stats">034 tasks</span>
-        </div>
-        <div class="wip-mini-bar">
-          <div class="wip-mini-segment wip-mini-segment-ok" style="flex:1.5;"></div>
-          <div class="wip-mini-segment wip-mini-segment-ok" style="flex:1;"></div>
-          <div class="wip-mini-segment wip-mini-segment-ok" style="flex:1;"></div>
-          <div class="wip-mini-segment wip-mini-segment-empty" style="flex:0.5;"></div>
-        </div>
-        <div class="health-card-footer">
-          <div class="health-card-stats">034 tasks · 004 cols</div>
-        </div>
-      </div>
-
-    </div>
-
-    <!-- Section 2: Aggregate Stats Bar -->
-    <div class="stats-bar mt-4">
+    <!-- Section 1: Stats Bar — project-scoped -->
+    <div class="stats-bar" style="grid-template-columns:repeat(3,1fr);">
       <div class="stat-card">
         <div class="stat-label">Total tasks</div>
-        <div class="stat-value">293</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-label">Active projects</div>
-        <div class="stat-value">004</div>
+        <div class="stat-value">042</div>
       </div>
       <div class="stat-card">
         <div class="stat-label">WIP exceeded</div>
         <div class="stat-value stat-value-danger">001</div>
       </div>
       <div class="stat-card">
-        <div class="stat-label">Out-of-sync tasks</div>
+        <div class="stat-label">Out-of-sync</div>
         <div class="stat-value stat-value-warning">002</div>
       </div>
     </div>
-    <div class="annotation-inline mt-2">Aggregate stat values pulled from the same health summary used by the cards</div>
+    <span class="annotation-inline mt-2" style="display:block;">Values from the selected project's health entry (useDashboard → projects filtered by selectedSlug). WIP exceeded / out-of-sync tint danger / warning when &gt; 0.</span>
 
-    <!-- Section 3: Needs Attention -->
+    <!-- Section 2: Column WIP Breakdown -->
+    <div class="attention-section">
+      <div class="flex items-center justify-between mb-3">
+        <h2 class="font-display text-xl weight-600 color-primary">Column WIP</h2>
+        <span class="annotation-inline">Row click → board /$slug</span>
+      </div>
+      <div class="status-column-row">
+        <span class="status-column-name">Backlog</span>
+        <span class="status-column-count">12 / ∞</span>
+        <div class="status-bar"><span class="status-bar-fill status-bar-ok" style="width:30%;"></span></div>
+        <span class="status-badge status-badge-ok">ok</span>
+      </div>
+      <div class="status-column-row">
+        <span class="status-column-name">In Progress</span>
+        <span class="status-column-count">8 / 10</span>
+        <div class="status-bar"><span class="status-bar-fill status-bar-approaching" style="width:80%;"></span></div>
+        <span class="status-badge status-badge-approaching">approaching</span>
+      </div>
+      <div class="status-column-row">
+        <span class="status-column-name">Needs Review</span>
+        <span class="status-column-count">5 / 4</span>
+        <div class="status-bar"><span class="status-bar-fill status-bar-exceeded" style="width:100%;"></span></div>
+        <span class="status-badge status-badge-exceeded">exceeded</span>
+      </div>
+      <div class="status-column-row">
+        <span class="status-column-name">Writing</span>
+        <span class="status-column-count">0 / 5</span>
+        <div class="status-bar"><span class="status-bar-fill status-bar-ok" style="width:0%;"></span></div>
+        <span class="status-badge status-badge-empty">empty</span>
+      </div>
+      <div class="status-column-row">
+        <span class="status-column-name">Done</span>
+        <span class="status-column-count">17 / ∞</span>
+        <div class="status-bar"><span class="status-bar-fill status-bar-ok" style="width:100%;"></span></div>
+        <span class="status-badge status-badge-ok">ok</span>
+      </div>
+      <span class="annotation-tag mt-2" style="display:block;">One row per column: name · task count "n / limit" (∞ = no WIP limit) · thin progress bar (fill = count/limit, colored by state) · state badge ok / approaching / exceeded / empty. Rows link to the board <span class="font-mono">/$slug</span>.</span>
+    </div>
+
+    <!-- Section 3: Needs Attention — this project only -->
     <div class="attention-section">
       <div class="flex items-center justify-between mb-3">
         <h2 class="font-display text-xl weight-600 color-primary">Needs Attention</h2>
-        <span class="annotation-inline">List items link to board / task detail</span>
+        <span class="annotation-inline">Filtered client-side by projectSlug — items link to board / task detail</span>
       </div>
       <div class="attention-grid">
         <div class="attention-card">
@@ -158,7 +107,7 @@
             <span class="attention-dot health-dot-exceeded"></span>
             <div class="attention-meta">
               <div class="attention-task-title">Fix hitbox desync during dodge roll</div>
-              <div class="attention-task-context">Emberfall · In Progress</div>
+              <div class="attention-task-context">In Progress</div>
             </div>
             <div class="attention-task-id">#EM-017</div>
           </div>
@@ -166,7 +115,7 @@
             <span class="attention-dot health-dot-exceeded"></span>
             <div class="attention-meta">
               <div class="attention-task-title">Rebalance fire sword damage curve</div>
-              <div class="attention-task-context">Emberfall · Backlog</div>
+              <div class="attention-task-context">Backlog</div>
             </div>
             <div class="attention-task-id">#EM-024</div>
           </div>
@@ -174,7 +123,7 @@
             <span class="attention-dot health-dot-exceeded"></span>
             <div class="attention-meta">
               <div class="attention-task-title">Crash on sector 7 boss transition</div>
-              <div class="attention-task-context">Emberfall · Needs Review</div>
+              <div class="attention-task-context">Needs Review</div>
             </div>
             <div class="attention-task-id">#EM-031</div>
           </div>
@@ -182,17 +131,9 @@
             <span class="attention-dot health-dot-exceeded"></span>
             <div class="attention-meta">
               <div class="attention-task-title">Write final encounter dialogue</div>
-              <div class="attention-task-context">Emberfall · Writing</div>
+              <div class="attention-task-context">Writing</div>
             </div>
             <div class="attention-task-id">#EM-038</div>
-          </div>
-          <div class="attention-item">
-            <span class="attention-dot health-dot-exceeded"></span>
-            <div class="attention-meta">
-              <div class="attention-task-title">AI pathfinding fails on destructible tiles</div>
-              <div class="attention-task-context">Ironbound · Prototype</div>
-            </div>
-            <div class="attention-task-id">#IR-052</div>
           </div>
         </div>
 
@@ -202,7 +143,7 @@
             <span class="attention-dot health-dot-approaching"></span>
             <div class="attention-meta">
               <div class="attention-task-title">Title differs from Lexa task</div>
-              <div class="attention-task-context">Emberfall · owner/emberfall #142</div>
+              <div class="attention-task-context">owner/emberfall #142</div>
             </div>
             <div class="attention-task-id">#EM-017</div>
           </div>
@@ -210,7 +151,7 @@
             <span class="attention-dot health-dot-approaching"></span>
             <div class="attention-meta">
               <div class="attention-task-title">State mismatch: closed in GitHub</div>
-              <div class="attention-task-context">Emberfall · owner/emberfall #156</div>
+              <div class="attention-task-context">owner/emberfall #156</div>
             </div>
             <div class="attention-task-id">#EM-024</div>
           </div>
