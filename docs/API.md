@@ -518,7 +518,7 @@ GET    /api/projects/:slug/board?includeArchived=true
 GET    /api/projects/:slug/tasks/:id/activity?cursor&limit
        → 200 { data: ActivityItem[], nextCursor }
        Item = { kind:'event', id, type, actorKind, actorLabel, actorUserId, message, createdAt }
-            | { kind:'comment', id, authorKind, authorLabel, authorUserId, body: TipTapDoc,
+            | { kind:'comment', id, authorKind, authorLabel, authorId, body: TipTapDoc,
                 editedAt, createdAt }
        (limit default 50, max 200; ascending; cursor opaque)
 
