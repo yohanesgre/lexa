@@ -537,7 +537,7 @@ existing hard delete).
   second-granularity, so same-second rows must order by insertion: rowid is
   monotonic and supplies the tiebreak. UUID text ids would not order
   chronologically.
-- **Frozen messages:** `message` / `author_label` / `author_label` (comments)
+- **Frozen messages:** `message` / `actor_label` (activity) / `author_label` (comments)
   are written once, at event time. Later renames or config changes never
   rewrite history — the row is the record.
 - **Actor model:** `actor_kind` ∈ user/agent/system. `actor_user_id` is the
