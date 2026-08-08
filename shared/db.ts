@@ -1,7 +1,7 @@
 // Database row types — mirror SQL column names exactly (snake_case).
 // Used by server repos/services only. Frontend never imports this file.
 
-import type { TipTapDoc, ISODate, RuntimeAgent, RuntimeModel } from "./types";
+import type { TipTapDoc, ISODate, RuntimeAgent, RuntimeModel, ActorKind, ActivityType, ActivityEvent, TaskComment } from "./types";
 
 export interface PriorityOptionRow {
   id: string;
@@ -525,5 +525,55 @@ export function rowToTaskLink(row: TaskLinkRow): {
     toTaskId: row.to_task_id,
     relation: row.relation,
     createdAt: row.created_at,
+  };
+}
+
+export interface ActivityRow {
+  id: number;
+  task_id: string;
+  actor_kind: ActorKind;
+  actor_label: string;
+  actor_user_id: string | null;
+  type: ActivityType;
+  message: string;
+  created_at: string;
+}
+
+export function rowToActivityEvent(r: ActivityRow): ActivityEvent {
+  return {
+    id: r.id,
+    taskId: r.task_id,
+    actorKind: r.actor_kind,
+    actorLabel: r.actor_label,
+    actorUserId: r.actor_user_id,
+    type: r.type,
+    message: r.message,
+    createdAt: r.created_at,
+  };
+}
+
+export interface CommentRow {
+  id: number;
+  task_id: string;
+  author_id: string | null;
+  author_kind: ActorKind;
+  author_label: string;
+  body: string;
+  edited_at: string | null;
+  deleted_at: string | null;
+  created_at: string;
+}
+
+export function rowToComment(r: CommentRow): TaskComment {
+  return {
+    id: r.id,
+    taskId: r.task_id,
+    authorId: r.author_id,
+    authorKind: r.author_kind,
+    authorLabel: r.author_label,
+    body: JSON.parse(r.body) as TipTapDoc,
+    editedAt: r.edited_at,
+    deletedAt: r.deleted_at,
+    createdAt: r.created_at,
   };
 }

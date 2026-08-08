@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { rowToProject, rowToColumn, rowToSwimlane, rowToWikiPage, rowToWikiPageMeta, rowToWikiPageRevision, rowToWikiPageRevisionSummary, rowToTask } from "./db";
-import type { ProjectRow, ColumnRow, SwimlaneRow, WikiPageRow, WikiPageRevisionRow, TaskRow } from "./db";
+import { rowToProject, rowToColumn, rowToSwimlane, rowToWikiPage, rowToWikiPageMeta, rowToWikiPageRevision, rowToWikiPageRevisionSummary, rowToTask, rowToActivityEvent, rowToComment } from "./db";
+import type { ProjectRow, ColumnRow, SwimlaneRow, WikiPageRow, WikiPageRevisionRow, TaskRow, ActivityRow, CommentRow } from "./db";
 
 const NOW = "2026-07-29T12:00:00Z";
 
@@ -114,5 +114,62 @@ describe("rowToTask", () => {
     const t = rowToTask({ ...row, archived_at: "2026-08-01 10:00:00" });
     expect(t.archivedAt).toBe("2026-08-01 10:00:00");
     expect(rowToTask(row).archivedAt).toBeNull();
+  });
+});
+
+describe("rowToActivityEvent", () => {
+  it("maps snake_case to camelCase", () => {
+    const row: ActivityRow = {
+      id: 7, task_id: "t1", actor_kind: "user", actor_label: "Alice",
+      actor_user_id: "u1", type: "moved", message: "Moved to Done", created_at: NOW,
+    };
+    expect(rowToActivityEvent(row)).toEqual({
+      id: 7, taskId: "t1", actorKind: "user", actorLabel: "Alice",
+      actorUserId: "u1", type: "moved", message: "Moved to Done", createdAt: NOW,
+    });
+  });
+
+  it("preserves all actor kinds and types", () => {
+    const base = { id: 1, task_id: "t1", actor_label: "sys", actor_user_id: null as string | null, message: "m", created_at: NOW };
+    expect(rowToActivityEvent({ ...base, actor_kind: "agent", type: "forge_completed" }).actorKind).toBe("agent");
+    expect(rowToActivityEvent({ ...base, actor_kind: "system", type: "github_synced" }).type).toBe("github_synced");
+  });
+
+  it("handles null actor_user_id", () => {
+    const row: ActivityRow = {
+      id: 2, task_id: "t1", actor_kind: "system", actor_label: "system",
+      actor_user_id: null, type: "created", message: "Task created", created_at: NOW,
+    };
+    expect(rowToActivityEvent(row).actorUserId).toBeNull();
+  });
+});
+
+describe("rowToComment", () => {
+  const row: CommentRow = {
+    id: 3, task_id: "t1", author_id: "u1", author_kind: "user", author_label: "Alice",
+    body: '{"type":"doc","content":[{"type":"paragraph","content":[{"type":"text","text":"hi"}]}]}',
+    edited_at: null, deleted_at: null, created_at: NOW,
+  };
+
+  it("maps fields and parses body as TipTapDoc", () => {
+    const c = rowToComment(row);
+    expect(c).toEqual({
+      id: 3, taskId: "t1", authorId: "u1", authorKind: "user", authorLabel: "Alice",
+      body: { type: "doc", content: [{ type: "paragraph", content: [{ type: "text", text: "hi" }] }] },
+      editedAt: null, deletedAt: null, createdAt: NOW,
+    });
+  });
+
+  it("handles null author_id / edited_at / deleted_at", () => {
+    const agent: CommentRow = { ...row, author_id: null, author_kind: "agent", author_label: "Hermes", edited_at: NOW, deleted_at: NOW };
+    const c = rowToComment(agent);
+    expect(c.authorId).toBeNull();
+    expect(c.authorKind).toBe("agent");
+    expect(c.editedAt).toBe(NOW);
+    expect(c.deletedAt).toBe(NOW);
+  });
+
+  it("parses empty doc body", () => {
+    expect(rowToComment({ ...row, body: '{"type":"doc","content":[]}' }).body).toEqual({ type: "doc", content: [] });
   });
 });
