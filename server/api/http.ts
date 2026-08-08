@@ -7,7 +7,7 @@ import { LoggerLayer } from "../logging/logger";
 import { Sqlite, withTx } from "../db/database";
 import { Database } from "bun:sqlite";
 import { getSetting, setSetting } from "../db/settings";
-import { ProjectNotFound, WikiPageNotFound, MachineNotFound, Forbidden, SetupLocked, errorResponse, errorToStatus } from "./errors";
+import { ProjectNotFound, WikiPageNotFound, MachineNotFound, Forbidden, SetupLocked, TaskNotFound, errorResponse, errorToStatus } from "./errors";
 import { AuthIdentity, actorFromIdentity } from "./auth";
 import { createApiMiddleware } from "./middleware";
 import { clampLimit, nextCursor } from "../../shared/pagination";
@@ -44,6 +44,7 @@ import { GitHubService } from "../services/github.service";
 import { ActivityService } from "../services/activity.service";
 import { ActivityRepo } from "../repos/activity.repo";
 import { CommentRepo } from "../repos/comment.repo";
+import { CommentService } from "../services/comment.service";
 import * as msg from "../activity-messages";
 import { WebhookEventRepo } from "../repos/webhook-event.repo";
 import { GitHubClient } from "../github/client";
@@ -869,6 +870,13 @@ const TaskCommentSchema = Schema.Struct({
 const ActivityItemSchema = Schema.Union(ActivityEventSchema, TaskCommentSchema);
 const ActivityPageSchema = Schema.Struct({ data: Schema.Array(ActivityItemSchema), nextCursor: Schema.NullOr(Schema.String) });
 
+const CommentPayloadSchema = Schema.Struct({ body: Schema.Any });
+const CommentIdPath = Schema.Struct({ slug: Schema.String, id: Schema.String, commentId: Schema.NumberFromString });
+const CommentCreateResponseSchema = Schema.Struct({
+  data: Schema.Struct({ comment: TaskCommentSchema, activity: ActivityEventSchema }),
+});
+const CommentUpdateResponseSchema = Schema.Struct({ data: TaskCommentSchema });
+
 const BoardSchema = Schema.Struct({
   project: ProjectSchema,
   columns: Schema.Array(ColumnSchema),
@@ -897,6 +905,12 @@ const tasksGroup = HttpApiGroup.make("tasks")
     .setPath(TaskPath).addSuccess(TaskSchema))
   .add(HttpApiEndpoint.get("taskActivity", "/projects/:slug/tasks/:id/activity")
     .setPath(TaskPath).addSuccess(ActivityPageSchema))
+  .add(HttpApiEndpoint.post("createComment", "/projects/:slug/tasks/:id/comments")
+    .setPath(TaskPath).setPayload(CommentPayloadSchema).addSuccess(CommentCreateResponseSchema, { status: 201 }))
+  .add(HttpApiEndpoint.patch("updateComment", "/projects/:slug/tasks/:id/comments/:commentId")
+    .setPath(CommentIdPath).setPayload(CommentPayloadSchema).addSuccess(CommentUpdateResponseSchema))
+  .add(HttpApiEndpoint.del("deleteComment", "/projects/:slug/tasks/:id/comments/:commentId")
+    .setPath(CommentIdPath).addSuccess(Schema.Void, { status: 204 }))
   .add(HttpApiEndpoint.post("linkGithubIssue", "/projects/:slug/tasks/:id/github-link")
     .setPath(TaskPath).setPayload(GithubLinkPayload).addSuccess(TaskSchema))
   .add(HttpApiEndpoint.del("unlinkGithubIssue", "/projects/:slug/tasks/:id/github-link/:issueId")
@@ -1963,6 +1977,41 @@ const tasksLive = HttpApiBuilder.group(LexaApi, "tasks", (handlers) =>
         return { data: page.items, nextCursor: page.nextCursor };
       }))
     )
+    .handle("createComment", (req) =>
+      respond(Effect.gen(function* () {
+        const identity = yield* AuthIdentity;
+        const commentService = yield* CommentService;
+        const projectService = yield* ProjectService;
+        yield* projectService.findBySlug(req.path.slug);
+        const result = yield* commentService.create(req.path.id, actorFromIdentity(identity), req.payload.body);
+        return {
+          data: {
+            comment: { kind: "comment" as const, ...result.comment },
+            activity: { kind: "event" as const, ...result.activity },
+          },
+        };
+      }))
+    )
+    .handle("updateComment", (req) =>
+      respond(Effect.gen(function* () {
+        const identity = yield* AuthIdentity;
+        const commentService = yield* CommentService;
+        const comment = yield* commentService.edit(req.path.commentId, identity, req.payload.body);
+        return { data: { kind: "comment" as const, ...comment } };
+      }))
+    )
+    .handle("deleteComment", (req) =>
+      respond(Effect.gen(function* () {
+        const identity = yield* AuthIdentity;
+        const commentService = yield* CommentService;
+        const taskRepo = yield* TaskRepo;
+        const task = yield* taskRepo.findById(req.path.id).pipe(
+          Effect.catchTag("RowNotFound", () => new TaskNotFound({ id: req.path.id }))
+        );
+        yield* commentService.remove(req.path.commentId, identity, task.projectId);
+        return undefined;
+      }))
+    )
     .handle("linkGithubIssue", (req) =>
       respond(Effect.gen(function* () {
         const projectService = yield* ProjectService;
@@ -2332,7 +2381,7 @@ function buildServiceLayer() {
     RuntimeMachineRepo.Default, RuntimeMachineService.Default,
     SourceRepo.Default, SourceService.Default,
     TaskLinkRepo.Default, TaskLinkService.Default,
-    ActivityRepo.Default, CommentRepo.Default, ActivityService.Default,
+    ActivityRepo.Default, CommentRepo.Default, ActivityService.Default, CommentService.Default,
     WikiRepo.Default, WikiService.Default,
     ApiKeyRepo.Default, ApiKeyService.Default,
     UserRepo.Default, UserService.Default,
