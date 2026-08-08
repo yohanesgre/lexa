@@ -33,6 +33,8 @@ export interface LexaUser {
   email: string;
   name: string;
   role: "admin" | "member";
+  createdAt: string;
+  lastSeen: string | null;
 }
 
 export function adminEmails(db: Database): string[] {
@@ -55,11 +57,21 @@ export function findOrCreateUserByIdentity(email: string, name: string, dbPath: 
   db.exec("PRAGMA journal_mode = WAL");
   db.exec("PRAGMA foreign_keys = ON");
   db.exec("PRAGMA busy_timeout = 5000");
+  // DB rows are snake_case; LexaUser is camelCase — map explicitly (a bare
+  // `as LexaUser` cast would leave createdAt/lastSeen undefined).
+  const toUser = (row: { id: string; email: string; name: string; role: "admin" | "member"; created_at: string; last_seen: string | null }): LexaUser => ({
+    id: row.id,
+    email: row.email,
+    name: row.name,
+    role: row.role,
+    createdAt: row.created_at,
+    lastSeen: row.last_seen,
+  });
   try {
-    const existing = db.prepare("SELECT id, email, name, role FROM users WHERE email = ?").get(email) as LexaUser | null;
+    const existing = db.prepare("SELECT id, email, name, role, created_at, last_seen FROM users WHERE email = ?").get(email) as { id: string; email: string; name: string; role: "admin" | "member"; created_at: string; last_seen: string | null } | null;
     if (existing) {
       db.prepare("UPDATE users SET last_seen = datetime('now') WHERE email = ?").run(email);
-      return existing;
+      return toUser(existing);
     }
 
     const role = adminEmails(db).includes(email.toLowerCase()) ? "admin" : "member";
@@ -72,11 +84,13 @@ export function findOrCreateUserByIdentity(email: string, name: string, dbPath: 
       // Duplicate-email race: another request created the user between our
       // SELECT and INSERT. Re-read instead of surfacing the raw SqliteError
       // (entry.ts calls this outside the API error mapping path).
-      const existing = db.prepare("SELECT id, email, name, role FROM users WHERE email = ?").get(email) as LexaUser | null;
-      if (existing) return existing;
+      const existing = db.prepare("SELECT id, email, name, role, created_at, last_seen FROM users WHERE email = ?").get(email) as { id: string; email: string; name: string; role: "admin" | "member"; created_at: string; last_seen: string | null } | null;
+      if (existing) return toUser(existing);
       throw e;
     }
-    return { id, email, name, role } as LexaUser;
+    const row = db.prepare("SELECT id, email, name, role, created_at, last_seen FROM users WHERE id = ?").get(id) as { id: string; email: string; name: string; role: "admin" | "member"; created_at: string; last_seen: string | null } | null;
+    if (row) return toUser(row);
+    return { id, email, name, role, createdAt: "", lastSeen: null };
   } finally {
     db.close();
   }

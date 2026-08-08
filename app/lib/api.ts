@@ -16,16 +16,35 @@ function clientApiKey(): string | undefined {
 // The resolved Cloudflare Access user injected by the server next to the key
 // meta. Sent as x-lxk-user so activity rows attribute to the acting user
 // (server-side attribution only — the API key still grants the access).
-export function clientLxkUser(): { email: string; name: string } | null {
+export interface LxkUser {
+  email: string;
+  name: string;
+  role: "admin" | "member";
+  createdAt: string;
+  lastSeen: string | null;
+}
+
+export function clientLxkUser(): LxkUser | null {
   if (typeof document !== "undefined") {
     const meta = document.querySelector('meta[name="lxk-user"]') as HTMLMetaElement | null;
     if (meta?.content) {
       try {
-        return JSON.parse(meta.content) as { email: string; name: string };
+        return JSON.parse(meta.content) as LxkUser;
       } catch {
         /* ignore malformed */
       }
     }
+  }
+  return null;
+}
+
+// Cloudflare Access logout target — only present when LXK_ACCESS_TEAM is set
+// server-side. Absent in local dev (no Access session), so the UI hides Sign
+// out. The return_to parameter is appended by the caller.
+export function clientLxkLogout(): string | null {
+  if (typeof document !== "undefined") {
+    const meta = document.querySelector('meta[name="lxk-logout"]') as HTMLMetaElement | null;
+    return meta?.content ?? null;
   }
   return null;
 }
@@ -265,6 +284,10 @@ export function listUsers(): Promise<{ data: ApiUser[] }> {
 
 export function updateUserRole(id: string, role: "admin" | "member"): Promise<ApiUser> {
   return request(`${BASE}/admin/users/${id}`, { method: "PATCH", body: JSON.stringify({ role }) });
+}
+
+export function updateMyName(name: string): Promise<ApiUser> {
+  return request(`${BASE}/me`, { method: "PATCH", body: JSON.stringify({ name }) });
 }
 
 export function listProjectMembers(slug: string): Promise<{ data: ApiUser[] }> {

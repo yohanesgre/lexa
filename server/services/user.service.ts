@@ -21,6 +21,14 @@ export class UserService extends Effect.Service<UserService>()("Lexa/UserService
           Effect.catchTag("RowNotFound", () => Effect.fail(new UserNotFound({ id })))
         ),
 
+      updateName: (id: string, name: string): Effect.Effect<UserRow, DbError | RowNotFound | UserNotFound | ConstraintViolation> =>
+        Effect.gen(function* () {
+          yield* repo.updateName(id, name);
+          return yield* repo.findById(id).pipe(
+            Effect.catchTag("RowNotFound", () => Effect.fail(new UserNotFound({ id })))
+          );
+        }),
+
       promoteToAdmin: (id: string): Effect.Effect<void, DbError | RowNotFound | UserNotFound | ConstraintViolation> =>
         Effect.gen(function* () {
           yield* repo.findById(id).pipe(

@@ -712,6 +712,23 @@ DELETE /api/admin/users/:id/projects/:projectId
 → 204 | 403 FORBIDDEN
 ```
 
+### Me (self-service profile)
+
+The acting browser user, named by the `x-lxk-user` header (the key still
+authorizes). Bare API keys without `x-lxk-user` get `400 NO_USER_CONTEXT` —
+agents have no profile to edit.
+
+```
+PATCH  /api/me      body { name*: string (trimmed, 1-80 chars) }
+→ 200 { id, email, name, role, createdAt, lastSeen }
+  | 400 NO_USER_CONTEXT | 404 USER_NOT_FOUND | 422 INVALID_NAME
+```
+
+The browser-facing identity (`<meta name="lxk-user">`) carries
+`{ email, name, role, createdAt, lastSeen }`; the "Sign out" meta
+(`<meta name="lxk-logout">`) is only emitted when `LXK_ACCESS_TEAM` is set,
+and the UI hides Sign out otherwise.
+
 ### GitHub Webhook
 
 ```
