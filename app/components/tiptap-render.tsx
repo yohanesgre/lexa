@@ -1,5 +1,6 @@
 import { type ReactNode } from "react";
 import type { TipTapDoc } from "../../shared/types";
+import { safeHref } from "../../shared/safe-href";
 import { cn } from "./ui/cn";
 
 export type TTNode = {
@@ -36,12 +37,16 @@ export function renderInline(
           ) : (
             <code>{el}</code>
           );
-        else if (mark.type === "link")
-          el = (
-            <a href={String(mark.attrs?.href ?? "#")} target="_blank" rel="noreferrer">
-              {el}
-            </a>
-          );
+        else if (mark.type === "link") {
+          // Scheme allowlist — disallowed hrefs render as plain text, no anchor.
+          const href = safeHref(mark.attrs?.href);
+          if (href)
+            el = (
+              <a href={href} target="_blank" rel="noreferrer">
+                {el}
+              </a>
+            );
+        }
       }
       return <span key={`${keyPrefix}-t-${node.text ?? ""}`}>{el}</span>;
     }

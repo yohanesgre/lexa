@@ -84,6 +84,19 @@ describe("markdownToDoc", () => {
     expect(link).toBeDefined();
   });
 
+  it("drops javascript: link hrefs at the authoring boundary", () => {
+    const doc = markdownToDoc("Click [x](javascript:alert(1)) or [safe](https://ok.dev)");
+    const para = (doc.content as Record<string, unknown>[])[0];
+    const children = para.content as Record<string, unknown>[];
+    const marks = (c: Record<string, unknown>) =>
+      (c.marks as { type: string; attrs?: Record<string, unknown> }[] | undefined)?.filter(m => m.type === "link") ?? [];
+    const xMarks = marks(children[1] as Record<string, unknown>); // "Click ", [x](js:...), " or ", [safe](...)
+    expect(xMarks).toHaveLength(1);
+    expect(xMarks[0]!.attrs?.href).toBeUndefined(); // dropped, link mark has no href
+    const safeMarks = marks(children[3] as Record<string, unknown>);
+    expect(safeMarks[0]!.attrs?.href).toBe("https://ok.dev"); // safe schemes round-trip unchanged
+  });
+
   it("maps unordered list", () => {
     const doc = markdownToDoc("- one\n- two\n- three");
     expect(hasNodeOfType(doc, "bulletList")).toBe(true);
