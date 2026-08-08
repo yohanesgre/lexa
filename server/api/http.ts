@@ -2233,7 +2233,7 @@ export function createApiHandler(dbPath: string) {
     healthLive, setupLive, projectsLive, columnsLive, swimlanesLive, fieldConfigLive, forgeLive, taskLinksLive, tasksLive, boardLive, wikiLive, apiKeysLive, adminLive, dashboardLive,
   ).pipe(Layer.provide(Layer.provide(serviceLayer, Layer.mergeAll(dbLayer, LoggerLayer))), Layer.provide(dbLayer));
   const merged = Layer.mergeAll(apiLayer, handlerLayer);
-  const finalLayer = Layer.provide(merged, createApiMiddleware(db));
+  const finalLayer = Layer.provide(merged, createApiMiddleware(db, dbPath));
   const { handler } = HttpApiBuilder.toWebHandler(finalLayer as unknown as Parameters<typeof HttpApiBuilder.toWebHandler>[0]);
   return async (req: Request) => {
     const start = Date.now();

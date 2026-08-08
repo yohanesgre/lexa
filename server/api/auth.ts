@@ -1,14 +1,32 @@
 import { Database } from "bun:sqlite";
 import { Context } from "effect";
 import { getSetting } from "../db/settings";
+import type { Actor } from "../../shared/types";
 
 // Caller identity behind a validated API key, resolved once per request by
-// the API middleware and consumed by admin-gated handlers.
+// the API middleware and consumed by admin-gated handlers. Attribution only:
+// role comes exclusively from the key (or its owner) — the x-lxk-user header
+// never changes it, it only names the acting browser user (spoofable by key
+// holders, accepted: the key already grants full access).
 export interface AuthIdentityShape {
+  keyId: string;
+  keyName: string;
   userId: string | null;
+  userName: string | null;
   role: "admin" | "member";
 }
 export class AuthIdentity extends Context.Tag("Lexa/AuthIdentity")<AuthIdentity, AuthIdentityShape>() {}
+
+// Build the activity-timeline actor for a resolved identity: browser users
+// (x-lxk-user header) attribute as 'user', bare API keys as 'agent' with the
+// key name as label.
+export function actorFromIdentity(identity: AuthIdentityShape): Actor {
+  return {
+    kind: identity.userId ? "user" : "agent",
+    label: identity.userName ?? identity.keyName,
+    userId: identity.userId,
+  };
+}
 
 export interface LexaUser {
   id: string;

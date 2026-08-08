@@ -17,7 +17,7 @@ import { apiRateLimiter, isPrivateIp } from "./rate-limit";
 const withSecurityHeaders = (resp: HttpServerResponse.HttpServerResponse) =>
   HttpServerResponse.setHeaders(resp, { "X-Content-Type-Options": "nosniff", "Cache-Control": "no-store" });
 
-export function createApiMiddleware(db: Database) {
+export function createApiMiddleware(db: Database, dbPath: string) {
   return HttpApiBuilder.middleware((httpApp) =>
     Effect.gen(function* () {
       const request = yield* HttpServerRequest;
@@ -66,7 +66,7 @@ export function createApiMiddleware(db: Database) {
       let identity: AuthIdentityShape;
       if (!isHealth && !isSetup && !daemonTokenOk) {
         const authHeader = request.headers["authorization"] ?? "";
-        const resolved = resolveApiKeyIdentity(authHeader, db);
+        const resolved = resolveApiKeyIdentity(authHeader, new Headers(request.headers), db, dbPath);
         if (!resolved) {
           const reason = authHeader.startsWith("Bearer ") ? "unknown key" : "missing or malformed key";
           console.warn(`[Auth] denied path=${path} reason=${reason}`);
@@ -86,9 +86,9 @@ export function createApiMiddleware(db: Database) {
             )
           );
         }
-        identity = { userId: resolved.userId, role: resolved.role };
+        identity = resolved;
       } else {
-        identity = { userId: null, role: "admin" };
+        identity = { keyId: "", keyName: "", userId: null, userName: null, role: "admin" };
       }
 
       const response = yield* httpApp.pipe(
