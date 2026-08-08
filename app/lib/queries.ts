@@ -1,7 +1,8 @@
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import type { Task, Project, Board, Column, Swimlane, TipTapDoc, WikiPageMeta, ApiKey, ApiKeyCreateResult, Dashboard, FieldConfig, DocumentSource, ForgeTask, TaskLink, Runtime, ForgeAgent, ForgeSkill, Machine } from "../../shared/types";
+import { useQuery, useMutation, useQueryClient, useInfiniteQuery } from "@tanstack/react-query";
+import type { QueryClient, InfiniteData } from "@tanstack/react-query";
+import type { Task, Project, Board, Column, Swimlane, TipTapDoc, WikiPageMeta, ApiKey, ApiKeyCreateResult, Dashboard, FieldConfig, DocumentSource, ForgeTask, TaskLink, Runtime, ForgeAgent, ForgeSkill, Machine, ActivityItem } from "../../shared/types";
 import * as api from "./api";
-import type { TaskMutationResult } from "./api";
+import type { TaskMutationResult, ActivityPage } from "./api";
 import type { RecentForgeTask, ForgeHistoryPage } from "./api";
 import { useToast } from "../components/ui/Toast";
 
@@ -124,6 +125,7 @@ export function useUpdateTask(slug: string) {
         if (!old) return old;
         return { ...old, tasks: old.tasks.map((t: Task) => (t.id === task.id ? task : t)) };
       });
+      if (activity?.length) prependActivity(qc, slug, task.id, activity.map((a) => ({ kind: "event" as const, ...a })));
     },
     onError: (err) => {
       toast.push("error", "Failed to save", toastMessage(err));
@@ -145,6 +147,7 @@ export function useCreateTask(slug: string) {
         if (!old) return old;
         return { ...old, tasks: [...old.tasks, task] };
       });
+      if (activity?.length) prependActivity(qc, slug, task.id, activity.map((a) => ({ kind: "event" as const, ...a })));
       toast.push("success", "Task created");
     },
     onError: (err) => {
@@ -167,6 +170,7 @@ export function useMoveTask(slug: string) {
           return { ...old, tasks: old.tasks.map((t: Task) => (t.id === task.id ? task : t)) };
         });
       }
+      if (activity?.length) prependActivity(qc, slug, task.id, activity.map((a) => ({ kind: "event" as const, ...a })));
       toast.push("success", "Task moved");
     },
     onError: (err) => {
@@ -191,6 +195,7 @@ export function useDeleteTask(slug: string) {
         return { ...old, tasks: old.tasks.filter((t: Task) => t.id !== id) };
       });
       qc.removeQueries({ queryKey: ["tasks", slug, id] });
+      qc.removeQueries({ queryKey: ["task-activity", slug, id] });
       toast.push("success", "Task deleted");
     },
     onError: (err) => {
@@ -217,6 +222,7 @@ export function useArchiveTask(slug: string) {
         return { ...old, tasks: old.tasks.map((t: Task) => (t.id === task.id ? task : t)) };
       });
       qc.setQueryData(["tasks", slug, task.id], task);
+      if (activity?.length) prependActivity(qc, slug, task.id, activity.map((a) => ({ kind: "event" as const, ...a })));
       toast.push("success", "Task archived");
     },
     onError: (err) => {
@@ -244,6 +250,7 @@ export function useRestoreTask(slug: string) {
         return { ...old, tasks: [...old.tasks, task].sort(byPosition) };
       });
       qc.setQueryData(["tasks", slug, task.id], task);
+      if (activity?.length) prependActivity(qc, slug, task.id, activity.map((a) => ({ kind: "event" as const, ...a })));
       toast.push("success", "Task restored");
     },
     onError: (err) => {
@@ -265,6 +272,7 @@ function useGithubLinkMutation(slug: string, apiFn: (slug: string, id: string, k
         });
       }
       qc.setQueryData(["tasks", slug, task.id], task);
+      if (activity?.length) prependActivity(qc, slug, task.id, activity.map((a) => ({ kind: "event" as const, ...a })));
     },
   });
 }
@@ -939,6 +947,7 @@ export function useAddSource(slug: string, documentType: "task" | "wiki", docume
   return useMutation({
     mutationFn: (input: { kind: "wiki" | "external"; ref: string }) => api.addSource(slug, documentType, documentId, input),
     onSuccess: ({ data: source, activity }) => {
+      if (documentType === "task" && activity?.length) prependActivity(qc, slug, documentId, activity.map((a) => ({ kind: "event" as const, ...a })));
       qc.setQueryData<DocumentSource[]>(["sources", slug, documentType, documentId], (old) => [...(old ?? []), source]);
       toast.push("success", "Source added");
     },
@@ -979,6 +988,7 @@ export function useAddTaskLink(slug: string, taskId: string) {
   return useMutation({
     mutationFn: (input: { toTaskId: string; relation: "subtask_of" | "blocked_by" | "related_to" }) => api.addTaskLink(slug, taskId, input),
     onSuccess: ({ data: link, activity }) => {
+      if (activity?.length) prependActivity(qc, slug, taskId, activity.map((a) => ({ kind: "event" as const, ...a })));
       qc.setQueryData<TaskLink[]>(["task-links", slug, taskId], (old) => [...(old ?? []), link]);
       // Board link maps (subtasks/blocked-by) derive from board.links.
       for (const archived of [false, true]) {
@@ -1016,5 +1026,102 @@ export function useTaskSearch(slug: string, query: string, exclude = "") {
     queryFn: () => api.searchTasks(slug, query, exclude).then((r) => r.data),
     enabled: query.trim().length >= 2,
     staleTime: 5_000,
+  });
+}
+
+// ── Activity timeline + comments ──
+
+// Timeline page 1 is prepended from mutation envelopes (invariant 6 — the
+// mutation response is authoritative, never a refetch). A modest staleTime
+// keeps the prepended rows visible; the next fetch replaces the cache with
+// server truth (including rows emitted by other clients/agents).
+export function useTaskActivity(slug: string, taskId: string) {
+  return useInfiniteQuery({
+    queryKey: ["task-activity", slug, taskId],
+    queryFn: ({ pageParam }) => api.getTaskActivity(slug, taskId, pageParam ?? undefined),
+    initialPageParam: null as string | null,
+    getNextPageParam: (last) => last.nextCursor,
+    staleTime: 30_000,
+    enabled: !!slug && !!taskId,
+  });
+}
+
+// Prepend items into page 1 of the timeline cache. No dedupe: server rows are
+// append-only and a fresh fetch replaces the whole cache, so the same row can
+// never appear twice (events and comments may share numeric ids across tables
+// but prepends only ever add rows not yet in the cache).
+export function prependActivity(qc: QueryClient, slug: string, taskId: string, items: ActivityItem[]) {
+  qc.setQueryData<InfiniteData<ActivityPage>>(["task-activity", slug, taskId], (old) => {
+    if (!old) return old;
+    return { ...old, pages: old.pages.map((p, i) => (i === 0 ? { ...p, data: [...items, ...p.data] } : p)) };
+  });
+}
+
+export function useAddComment(slug: string, taskId: string) {
+  const qc = useQueryClient();
+  const toast = useToast();
+  return useMutation({
+    mutationFn: (body: TipTapDoc) => api.createComment(slug, taskId, body),
+    onSuccess: (result) => {
+      prependActivity(qc, slug, taskId, [
+        { kind: "comment", ...result.comment },
+        { kind: "event", ...result.activity },
+      ]);
+    },
+    onError: (err) => { toast.push("error", "Failed to add comment", toastMessage(err)); },
+  });
+}
+
+export function useUpdateComment(slug: string, taskId: string) {
+  const qc = useQueryClient();
+  const toast = useToast();
+  return useMutation({
+    mutationFn: ({ commentId, body }: { commentId: number; body: TipTapDoc }) => api.updateComment(slug, taskId, commentId, body),
+    onSuccess: (comment) => {
+      qc.setQueryData<InfiniteData<ActivityPage>>(["task-activity", slug, taskId], (old) => {
+        if (!old) return old;
+        return {
+          ...old,
+          pages: old.pages.map((p) => ({
+            ...p,
+            data: p.data.map((it) => (it.kind === "comment" && it.id === comment.id ? { kind: "comment", ...comment } : it)),
+          })),
+        };
+      });
+    },
+    onError: (err) => { toast.push("error", "Failed to update comment", toastMessage(err)); },
+  });
+}
+
+export function useDeleteComment(slug: string, taskId: string) {
+  const qc = useQueryClient();
+  const toast = useToast();
+  return useMutation({
+    mutationFn: (commentId: number) => api.deleteComment(slug, taskId, commentId),
+    onSuccess: (_v, commentId) => {
+      const label = api.clientLxkUser()?.name ?? "user";
+      const now = new Date().toISOString();
+      // DELETE returns 204 with no activity payload — remove the comment card
+      // and prepend a LOCAL comment_deleted row (negative id, server row
+      // replaces it on the next refetch).
+      qc.setQueryData<InfiniteData<ActivityPage>>(["task-activity", slug, taskId], (old) => {
+        if (!old) return old;
+        const local: ActivityItem = {
+          kind: "event", id: -Date.now(), taskId, type: "comment_deleted",
+          actorKind: "user", actorLabel: label, actorUserId: null,
+          message: `${label} deleted a comment`, createdAt: now,
+        };
+        return {
+          ...old,
+          pages: old.pages.map((p, i) => ({
+            ...p,
+            data: i === 0
+              ? [local, ...p.data.filter((it) => !(it.kind === "comment" && it.id === commentId))]
+              : p.data.filter((it) => !(it.kind === "comment" && it.id === commentId)),
+          })),
+        };
+      });
+    },
+    onError: (err) => { toast.push("error", "Failed to delete comment", toastMessage(err)); },
   });
 }
