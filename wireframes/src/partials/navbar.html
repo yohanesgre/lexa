@@ -87,8 +87,8 @@
       </div>
     </div>
     <div class="project-switcher">
-      <button class="project-switcher-trigger">
-        <span class="text-sm weight-500 font-body color-primary">Emberfall</span>
+      <button class="nav-pill">
+        <span class="weight-500">Emberfall</span>
         <svg viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg>
       </button>
       <!-- Expanded dropdown: rows carry health dot + task count -->
@@ -131,17 +131,17 @@
           <INCLUDE _plus-icon.html />
           <span class="text-sm color-secondary">Create new project</span>
         </a>
-        <span class="annotation-tag" style="display:block;margin:6px 10px 2px;">Row anatomy: leading health dot (health-dot-ok / approaching / exceeded) · project name (primary) · slug (secondary) · trailing task count (font-micro, right-aligned). Active row = selected project. Data from the shared useDashboard() cache (dot + count). Row hrefs → dashboard.html (app route <span class="font-mono">/$slug</span>, the project dashboard). From the homepage (<span class="font-mono">/</span>) and project dashboard (<span class="font-mono">/$slug</span>) picking a project targets <span class="font-mono">/$slug</span>; from board (<span class="font-mono">/$slug/board</span>) rows target <span class="font-mono">/$slug/board</span>; wiki rows target <span class="font-mono">/$slug/wiki</span>. "Create new project" → <span class="font-mono">/?new=1</span>. States: loading / empty / overflow unchanged.</span>
+        <span class="annotation-tag" style="display:block;margin:6px 10px 2px;">Trigger = <span class="font-mono">nav-pill</span> (unified pill geometry with the Forge pill: 9999px radius, surface-card bg, 12px/500 type — idle neutral, hover bg/border shift, focus-visible ring). Row anatomy: leading health dot (health-dot-ok / approaching / exceeded) · project name (primary) · slug (secondary) · trailing task count (font-micro, right-aligned). Active row = selected project. Data from the shared useDashboard() cache (dot + count). Row hrefs → dashboard.html (app route <span class="font-mono">/$slug</span>, the project dashboard). From the homepage (<span class="font-mono">/</span>) and project dashboard (<span class="font-mono">/$slug</span>) picking a project targets <span class="font-mono">/$slug</span>; from board (<span class="font-mono">/$slug/board</span>) rows target <span class="font-mono">/$slug/board</span>; wiki rows target <span class="font-mono">/$slug/wiki</span>. "Create new project" → <span class="font-mono">/?new=1</span>. States: loading / empty / overflow unchanged.</span>
       </div>
     </div>
     <!-- User menu trigger — CLOSED state (default on every page) -->
     <div style="display:flex;flex-direction:column;align-items:flex-end;gap:0;">
       <span class="annotation-tag">User menu — closed</span>
       <div style="position:relative;">
-        <button style="display:flex;align-items:center;gap:8px;height:28px;padding:0 8px 0 6px;background:transparent;border:1px solid var(--lx-border-default);border-radius:6px;color:var(--lx-text-primary);cursor:pointer;">
+        <button class="nav-pill" style="gap:8px;padding:0 8px 0 6px;">
           <div class="avatar" style="width:20px;height:20px;font-size:10px;">Y</div>
-          <span class="text-sm weight-500" style="line-height:1;">Yohanes</span>
-          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="flex-shrink:0;"><path d="M6 9l6 6 6-6"/></svg>
+          <span class="weight-500" style="line-height:1;">Yohanes</span>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="flex-shrink:0;"><path d="M6 9l6 6 6-6"/></svg>
         </button>
       </div>
     </div>
@@ -150,10 +150,10 @@
     <div style="display:flex;flex-direction:column;align-items:flex-end;gap:0;">
       <span class="annotation-tag">State: menu open</span>
       <div style="position:relative;">
-        <button style="display:flex;align-items:center;gap:8px;height:28px;padding:0 8px 0 6px;background:transparent;border:1px solid var(--lx-border-default);border-radius:6px;color:var(--lx-text-primary);cursor:pointer;">
+        <button class="nav-pill" style="gap:8px;padding:0 8px 0 6px;">
           <div class="avatar" style="width:20px;height:20px;font-size:10px;">Y</div>
-          <span class="text-sm weight-500" style="line-height:1;">Yohanes</span>
-          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="flex-shrink:0;"><path d="M6 9l6 6 6-6"/></svg>
+          <span class="weight-500" style="line-height:1;">Yohanes</span>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="flex-shrink:0;"><path d="M6 9l6 6 6-6"/></svg>
         </button>
         <div class="dropdown-menu" style="position:absolute;top:calc(100% + 6px);right:0;min-width:180px;z-index:60;">
           <div class="dropdown-label">Account</div>
@@ -175,10 +175,10 @@
     <div style="display:flex;flex-direction:column;align-items:flex-end;gap:0;">
       <span class="annotation-tag">State: profile panel</span>
       <div style="position:relative;">
-        <button style="display:flex;align-items:center;gap:8px;height:28px;padding:0 8px 0 6px;background:transparent;border:1px solid var(--lx-border-default);border-radius:6px;color:var(--lx-text-primary);cursor:pointer;">
+        <button class="nav-pill" style="gap:8px;padding:0 8px 0 6px;">
           <div class="avatar" style="width:20px;height:20px;font-size:10px;">Y</div>
-          <span class="text-sm weight-500" style="line-height:1;">Yohanes</span>
-          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="flex-shrink:0;"><path d="M6 9l6 6 6-6"/></svg>
+          <span class="weight-500" style="line-height:1;">Yohanes</span>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="flex-shrink:0;"><path d="M6 9l6 6 6-6"/></svg>
         </button>
         <div class="dropdown-menu" style="position:absolute;top:calc(100% + 6px);right:0;width:280px;z-index:60;">
           <span class="annotation-tag" style="display:block;margin:6px 10px;">Panel replaces the menu — same trigger, click Profile in the menu to open.</span>
