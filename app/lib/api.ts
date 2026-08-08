@@ -13,11 +13,32 @@ function clientApiKey(): string | undefined {
   return import.meta.env.VITE_LXK_API_KEY;
 }
 
+// The resolved Cloudflare Access user injected by the server next to the key
+// meta. Sent as x-lxk-user so activity rows attribute to the acting user
+// (server-side attribution only — the API key still grants the access).
+function clientLxkUser(): { email: string; name: string } | null {
+  if (typeof document !== "undefined") {
+    const meta = document.querySelector('meta[name="lxk-user"]') as HTMLMetaElement | null;
+    if (meta?.content) {
+      try {
+        return JSON.parse(meta.content) as { email: string; name: string };
+      } catch {
+        /* ignore malformed */
+      }
+    }
+  }
+  return null;
+}
+
 async function request<T>(url: string, init?: RequestInit): Promise<T> {
   const headers: Record<string, string> = { "Content-Type": "application/json", ...init?.headers as Record<string, string> };
   const key = clientApiKey();
   if (key) {
     headers["Authorization"] = `Bearer ${key}`;
+  }
+  const lxkUser = clientLxkUser();
+  if (lxkUser?.email) {
+    headers["x-lxk-user"] = lxkUser.email;
   }
   const res = await fetch(url, { ...init, headers });
   if (!res.ok) {

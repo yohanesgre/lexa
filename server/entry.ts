@@ -245,9 +245,15 @@ const server: Server<unknown> = Bun.serve({
       // would otherwise carry a stale key).
       if (process.env.LXK_API_KEY && res.headers.get("content-type")?.includes("text/html")) {
         const html = await res.text();
+        // The resolved Access user rides the same page so the browser can
+        // attribute activity to the acting user (x-lxk-user header). Absent
+        // for API-only deployments (no Cf-Access headers → user null).
+        const userMeta = user
+          ? `<meta name="lxk-user" content='${JSON.stringify({ email: user.email, name: user.name })}'>`
+          : "";
         const injected = html.replace(
           "<head>",
-          `<head><meta name="lxk-api-key" content="${process.env.LXK_API_KEY}">`
+          `<head><meta name="lxk-api-key" content="${process.env.LXK_API_KEY}">${userMeta}`
         );
         // The key-bearing page must never be cached (browser or CDN).
         const injectedHeaders = new Headers(res.headers);
