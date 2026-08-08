@@ -171,6 +171,14 @@ bun run build
   `lexa-cli machine listen` (env: `LEXA_URL`,
   `LEXA_API_KEY` or `LXK_FORGE_DAEMON_TOKEN`, `FORGE_AGENT=opencode|hermes|command-code`).
   The listener owns per-runtime daemon children; there are no per-runtime systemd units.
+  Daemons NEVER inherit the listener's shell env: secret vars (`LXK_*`, `GITHUB_*`, `CF_*`,
+  `CLOUDFLARE_*`, `AWS_*`, `AZURE_*`, `GOOGLE_*`, or any key containing
+  SECRET/TOKEN/PRIVATE_KEY/API_KEY/PASSWORD) are scrubbed at spawn
+  (`scripts/cli/machine.ts` `scrubDaemonEnv` — closed allowlist: PATH/HOME/LANG/LC_*/TERM/TZ/
+  PWD/SHELL/USER/LOGNAME/XDG_*/BUN_*), so runtime credentials come only from the runtime env
+  file + `config.json`. Starting the listener from a shell with `.env` exported prints a boot
+  warning; a daemon whose env-file key is dead exits 3 ("API key revoked — re-run Setup runtime")
+  instead of silently authenticating via an inherited `LXK_FORGE_DAEMON_TOKEN`.
   Without a daemon, Generate returns `NO_RUNTIME_ONLINE`.
   The `command-code` provider spawns this CLI non-interactively
   (`cmd -p <prompt> --no-session --skip-onboarding --permission-mode auto-accept`).
