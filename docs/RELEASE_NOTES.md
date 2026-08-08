@@ -54,7 +54,7 @@ GitHub sync setup (GitHub App, webhook, Access bypass): `docs/GITHUB_SETUP.md`.
 - **GitHub sync is best-effort by design** — no retry queue; divergence is surfaced (Diverged dot), a re-move resyncs.
 - **No email notifications** — cut for v1 (small team, tight scope). Comments shipped 2026-08-08 with the activity timeline (comments live in-app; no delivery).
 - **Rate limiting** — in-process per-IP limiter on `/api/*` + `/mcp` (webhook-exempt, 600 req/10 min), added post-release 2026-08-06 (see `docs/RATE_LIMITING.md`).
-- **Migrations are squashed into one clean `0001_init.sql`** — v0.1.0 installs fresh; existing pre-release DBs continue to boot unmodified (no re-migration).
+- **Migrations are numbered** — `0001_init.sql` … `0004_task_activity.sql`, fresh installs run all in order; existing DBs boot unmodified (no re-migration).
 
 ## Verification
 

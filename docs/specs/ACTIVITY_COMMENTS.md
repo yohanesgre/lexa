@@ -81,7 +81,7 @@ Comment authz keys off `author_kind='user'` + acting user — agents never hold 
 
 - **ActivityService** (leaf — never depends on TaskService): `append(taskId, actor, type, message)`, `listMerged(taskId, cursor, limit)`.
 - **CommentService**: create/edit/delete + authz. Uses TaskRepo (existence) + ActivityService. No TaskService dependency → no cycle.
-- **TaskService**: every mutating method appends activity **in the same transaction** (`batch()`) — create, update, move (incl. webhook `bypassGuards` path), archive, restore, delete, links, sources, github link/unlink.
+- **TaskService**: every mutating method appends activity **in the same transaction** (`withTx`) — create, update, move (incl. webhook `bypassGuards` path), archive, restore, delete, links, sources, github link/unlink.
 - **ForgeService**: emits on terminal state (`forge_completed` / failed / cancelled). (Result accept/reject dropped — client-side only, no server hook.)
 
 **New invariant:** every task mutation appends `task_activity` row(s) in the same transaction as the mutation — one row per meaningful change (updates may emit several `field_changed` rows); position-only reorders emit nothing; webhook moves emit `github_synced` only.
@@ -92,8 +92,12 @@ Comment authz keys off `author_kind='user'` + acting user — agents never hold 
 GET    /api/projects/:slug/tasks/:id/activity?cursor&limit
        → 200 { data: ActivityItem[], nextCursor }
        Item = { kind:'event', id, type, actorKind, actorLabel, actorUserId, message, createdAt }
-            | { kind:'comment', id, authorKind, authorLabel, authorUserId, body: TipTapDoc,
-                editedAt, createdAt }
+| { kind:'comment', id, authorKind, authorLabel, authorId, body: TipTapDoc,
+    editedAt, createdAt }
+
+> Field name note: the item carries `authorId` (not `authorUserId` as the
+> original draft had) — matches the shipped `TaskComment` type and the
+> TaskCommentSchema wire shape.
 
 POST   /api/projects/:slug/tasks/:id/comments     { body: TipTapDoc }
        → 201 { data: { comment, activity } }      # activity = 'commented' row
