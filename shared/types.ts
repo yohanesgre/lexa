@@ -343,3 +343,47 @@ export interface TaskLinkSuggestion {
   type: string;         // type_options.id — resolve color via fieldConfig
   priority: string;     // priority_options.id
 }
+
+// ── Activity timeline + comments ──
+
+export type ActorKind = "user" | "agent" | "system";
+
+export type ActivityType =
+  | "created" | "moved" | "field_changed" | "archived" | "restored" | "deleted"
+  | "link_added" | "link_removed" | "source_added" | "source_removed"
+  | "github_linked" | "github_unlinked" | "github_synced"
+  | "forge_completed" | "forge_failed" | "forge_cancelled"
+  | "commented" | "comment_deleted";
+
+export interface Actor {
+  kind: ActorKind;
+  label: string;
+  userId?: string | null;
+}
+
+export interface ActivityEvent {
+  id: number;
+  taskId: string;
+  actorKind: ActorKind;
+  actorLabel: string;
+  actorUserId: string | null;
+  type: ActivityType;
+  message: string;
+  createdAt: string;
+}
+
+export interface TaskComment {
+  id: number;
+  taskId: string;
+  authorId: string | null;
+  authorKind: ActorKind;
+  authorLabel: string;
+  body: TipTapDoc;
+  editedAt: string | null;
+  deletedAt: string | null;
+  createdAt: string;
+}
+
+export type ActivityItem =
+  | ({ kind: "event" } & ActivityEvent)
+  | ({ kind: "comment" } & TaskComment);
