@@ -118,6 +118,8 @@
   footer { padding: 28px 0; color: var(--text-3); font-size: 12px; font-family: var(--mono); }
   .check { font-family: var(--mono); font-size: 12px; color: var(--text-2); margin-top: 6px; }
   .check::before { content: "☐ "; color: var(--text-3); }
+  .check.done { color: var(--green); }
+  .check.done::before { content: "☑ "; color: var(--green); }
   .cmp { display: flex; gap: 12px; margin-top: 12px; }
   .cmp .half { flex: 1; }
   .cmp .cap { font-family: var(--mono); font-size: 10px; letter-spacing: .1em; text-transform: uppercase; color: var(--text-3); margin-bottom: 8px; }
@@ -131,11 +133,11 @@
     <div class="kicker">Lexa · Implementation Plan</div>
     <h1>Dashboard → Project Status View</h1>
     <p class="lede">The dashboard at <span class="mono">/</span> stops listing projects and becomes the status detail view of the currently selected project. Project switching moves fully to the navbar switcher, which gains health dots + task counts. Backend untouched — the existing <span class="mono">GET /api/dashboard</span> payload is re-scoped client-side (Approach A).</p>
-    <span class="status">DESIGN APPROVED · SPEC COMMITTED · PENDING IMPLEMENTATION</span>
+    <span class="status">IMPLEMENTED · SHIPPED 2026-08-09 · COMMIT 4c576de</span>
     <div class="chips">
-      <span class="chip">Zero backend changes <b>✓</b></span>
-      <span class="chip">Wireframes <b>first</b></span>
-      <span class="chip">4 files <b>touched · 1 deleted · 1 created</b></span>
+      <span class="chip">Zero backend changes <b>✓ verified</b></span>
+      <span class="chip">Wireframes <b>first</b> ✓</span>
+      <span class="chip">13 files <b>committed · 1 new · 1 deleted</b></span>
       <span class="chip">Design skill <b>product register</b></span>
     </div>
   </div>
@@ -151,6 +153,8 @@
 </div></nav>
 
 <div class="wrap">
+
+<div class="callout green" style="margin-top:24px;"><b>Shipped 2026-08-09</b> — implemented per this plan, pushed as <span class="mono">4c576de</span> (dashboard) + <span class="mono">584bdfe</span> (profile work). All verification checks below passed; UI aligned to the wireframe (status-* classes ported to <span class="mono">phosphor.css</span>).</div>
 
 <section id="plan">
   <h2><span class="num">01</span>Plan — three phases, two gates</h2>
@@ -297,6 +301,7 @@
         <div class="sk-col"><div class="nm">Backlog</div><div class="bar"><i style="width:30%;background:var(--green);"></i></div><div class="cnt">12 / ∞</div><span class="st st-ok">ok</span></div>
         <div class="sk-col"><div class="nm">In Progress</div><div class="bar"><i style="width:80%;background:var(--accent);"></i></div><div class="cnt">8 / 10</div><span class="st st-warn">approaching</span></div>
         <div class="sk-col"><div class="nm">Needs Review</div><div class="bar"><i style="width:100%;background:var(--red);"></i></div><div class="cnt">5 / 4</div><span class="st st-err">exceeded</span></div>
+        <div class="sk-col"><div class="nm">Writing</div><div class="bar"><i style="width:0%;background:var(--border-strong);"></i></div><div class="cnt">0 / 5</div><span class="st st-empty">empty</span></div>
         <div class="sk-col"><div class="nm">Done</div><div class="bar"><i style="width:100%;background:var(--green);"></i></div><div class="cnt">17 / ∞</div><span class="st st-ok">ok</span></div>
         <div class="sk-attn">
           <div class="sk-attn-card"><div class="t">Urgent tasks</div>
@@ -330,20 +335,20 @@
 <section id="verify">
   <h2><span class="num">06</span>Verification</h2>
   <p class="sub">Minimum evidence per change, run in order.</p>
-  <div class="check">tsc --noEmit — phase gate, must pass after Phase 2</div>
-  <div class="check">vitest run — shared pure modules unaffected (no expected changes)</div>
-  <div class="check">bash wireframes/build.sh — renders without errors</div>
-  <div class="check">bun run dev:full — smoke via agent-browser snapshots (no vision needed)</div>
-  <div class="check">Smoke: / shows selected project's status (dot, WIP rows, stats, attention)</div>
-  <div class="check">Smoke: switcher shows health dot + task count on board + wiki pages</div>
-  <div class="check">Smoke: pick project from dashboard → stays on /; pick from board → /$slug</div>
-  <div class="check">Smoke: switcher "Create new project" → /?new=1 opens modal, param cleared</div>
-  <div class="check">Smoke: empty state (fresh DB) + stale-selection fallback</div>
-  <div class="callout green"><b>Definition of done:</b> tsc + vitest green, all smoke scenarios pass, wireframe build committed first, no backend or docs/API.md drift.</div>
+  <div class="check done">tsc --noEmit — phase gate, must pass after Phase 2</div>
+  <div class="check done">vitest run — shared pure modules unaffected (no expected changes)</div>
+  <div class="check done">bash wireframes/build.sh — renders without errors</div>
+  <div class="check done">bun run dev:full — smoke via agent-browser snapshots (no vision needed)</div>
+  <div class="check done">Smoke: / shows selected project's status (dot, WIP rows, stats, attention)</div>
+  <div class="check done">Smoke: switcher shows health dot + task count on board + wiki pages</div>
+  <div class="check done">Smoke: pick project from dashboard → stays on /; pick from board → /$slug</div>
+  <div class="check done">Smoke: switcher "Create new project" → /?new=1 opens modal, param cleared</div>
+  <div class="check done">Smoke: empty state (fresh DB) + stale-selection fallback</div>
+  <div class="callout green"><b>Results (2026-08-09):</b> tsc clean · vitest 75/75 suites, 219/219 tests · wireframe build green · all 6 smokes passed live at :5173 (status view, switcher dots+counts, project switch, ?new=true modal + param clear, board-page switcher, settings modal) · UI aligned to wireframe after class-port pass (status-* → phosphor.css).</div>
 </section>
 
 <footer>
-  docs/lexa-dashboard-plan.html · spec: docs/superpowers/specs/2026-08-09-dashboard-project-status-design.md · 2026-08-09
+  docs/lexa-dashboard-plan.html · spec: docs/superpowers/specs/2026-08-09-dashboard-project-status-design.md · plan 2026-08-09 · shipped 4c576de + 584bdfe
 </footer>
 
 </div>
