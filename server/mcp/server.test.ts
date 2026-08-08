@@ -73,10 +73,10 @@ function toolError(body: any): any {
 }
 
 describe("MCP server", () => {
-  it("tools/list returns all 35 tools", async () => {
+  it("tools/list returns all 37 tools", async () => {
     const { status, body } = await call("tools/list", {});
     expect(status).toBe(200);
-    expect(body.result.tools).toHaveLength(35);
+    expect(body.result.tools).toHaveLength(37);
   });
 
   it("valid admin key → create_project works", async () => {
