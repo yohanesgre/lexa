@@ -2273,26 +2273,37 @@
     position: relative;
     display: inline-flex;
   }
-  .project-switcher-trigger {
+
+  /* Unified navbar pill — same geometry as the Forge status pill.
+     Used by: project switcher trigger, user profile trigger. */
+  .nav-pill {
     display: inline-flex;
     align-items: center;
     gap: 6px;
     height: 28px;
     padding: 0 10px;
-    background: transparent;
+    background: var(--lx-surface-card);
     border: 1px solid var(--lx-border-default);
-    border-radius: 6px;
-    color: var(--lx-text-primary);
+    border-radius: 9999px;
+    font-family: var(--lx-font-body);
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--lx-text-secondary);
     cursor: pointer;
-    transition: background 100ms, border-color 100ms;
+    transition: background 100ms, border-color 100ms, color 100ms;
   }
-  .project-switcher-trigger:hover {
+  .nav-pill:hover {
     background: var(--lx-surface-card-hover);
     border-color: var(--lx-border-strong);
+    color: var(--lx-text-primary);
   }
-  .project-switcher-trigger svg {
-    width: 12px;
-    height: 12px;
+  .nav-pill:focus-visible {
+    outline: none;
+    box-shadow: var(--lx-focus-ring);
+  }
+  .nav-pill svg {
+    width: 10px;
+    height: 10px;
     stroke: currentColor;
     stroke-width: 1.5;
     fill: none;
@@ -2304,7 +2315,7 @@
     right: 0;
     min-width: 220px;
     max-width: 280px;
-    background: var(--lx-surface-tooltip);
+    background: var(--lx-surface-elevated);
     border: 1px solid var(--lx-border-default);
     border-radius: 6px;
     box-shadow: var(--lx-shadow-lg);
@@ -2876,7 +2887,7 @@
   /* ---- Dropdown Menu (settings user search suggestions) ---- */
   .dropdown-menu {
     min-width: 220px;
-    background: var(--lx-surface-tooltip);
+    background: var(--lx-surface-elevated);
     border: 1px solid var(--lx-border-default);
     border-radius: 6px;
     box-shadow: var(--lx-shadow-lg);

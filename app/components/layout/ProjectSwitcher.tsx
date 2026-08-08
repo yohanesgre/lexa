@@ -59,13 +59,14 @@ export function ProjectSwitcher({ routeType }: { routeType: "home" | "dashboard"
         type="button"
         aria-expanded={open}
         onClick={() => setOpen((v) => !v)}
-        className="project-switcher-trigger"
+        className="nav-pill"
       >
-        <span className="text-sm font-medium font-body text-lx-text-primary">{triggerLabel}</span>
+        <span className="font-medium">{triggerLabel}</span>
         <ChevronIcon />
       </button>
       {open && (
         <div className="project-switcher-menu" role="menu" onClick={() => setOpen(false)}>
+          <div className="dropdown-label">Projects</div>
           {!projects || isLoading ? (
             <div className="project-switcher-row">
               <span className="project-switcher-row-desc">Loading projects…</span>

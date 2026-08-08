@@ -85,16 +85,14 @@ export function UserProfile() {
       <button
         type="button"
         onClick={toggle}
-        style={{
-          display: "flex", alignItems: "center", gap: 8, height: 28,
-          padding: "0 8px 0 6px", background: "transparent",
-          border: "1px solid var(--lx-border-default)", borderRadius: 6,
-          color: "var(--lx-text-primary)", cursor: "pointer",
-        }}
+        aria-expanded={open}
+        aria-haspopup="menu"
+        className="nav-pill"
+        style={{ gap: 8, padding: "0 8px 0 6px" }}
       >
         <div className="avatar" style={{ width: 20, height: 20, fontSize: 10 }}>{initial}</div>
-        <span className="text-sm font-medium" style={{ lineHeight: 1 }}>{identity.name}</span>
-        <svg width={10} height={10} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} style={{ flexShrink: 0 }}>
+        <span className="font-medium" style={{ lineHeight: 1 }}>{identity.name}</span>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} style={{ flexShrink: 0 }}>
           <path d="M6 9l6 6 6-6" />
         </svg>
       </button>
