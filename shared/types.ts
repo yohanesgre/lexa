@@ -29,6 +29,9 @@ export interface Swimlane {
   name: string;
   description: string;
   position: number;
+  dueAt: string | null;
+  archivedAt: string | null;
+  kind: "backlog" | "milestone";
 }
 
 export interface Board {
@@ -73,6 +76,7 @@ export interface Task {
   assignees: string[];
   position: string;
   githubs: GithubIssue[];
+  dueAt: string | null;
   archivedAt: ISODate | null;
   createdAt: ISODate;
   updatedAt: ISODate;

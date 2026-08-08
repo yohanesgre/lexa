@@ -1,7 +1,7 @@
 // Database row types — mirror SQL column names exactly (snake_case).
 // Used by server repos/services only. Frontend never imports this file.
 
-import type { TipTapDoc, ISODate, RuntimeAgent, RuntimeModel, ActorKind, ActivityType, ActivityEvent, TaskComment } from "./types";
+import type { TipTapDoc, ISODate, RuntimeAgent, RuntimeModel, ActorKind, ActivityType, ActivityEvent, TaskComment, Swimlane } from "./types";
 
 export interface PriorityOptionRow {
   id: string;
@@ -86,10 +86,13 @@ export interface SwimlaneRow {
   name: string;
   description: string;
   position: number;
+  due_at: string | null;
+  archived_at: string | null;
+  kind?: "backlog" | "milestone";
 }
 
 export function rowToSwimlane(row: SwimlaneRow): {
-  id: string; projectId: string; name: string; description: string; position: number;
+  id: string; projectId: string; name: string; description: string; position: number; dueAt: string | null; archivedAt: string | null; kind: "backlog" | "milestone";
 } {
   return {
     id: row.id,
@@ -97,6 +100,9 @@ export function rowToSwimlane(row: SwimlaneRow): {
     name: row.name,
     description: row.description,
     position: row.position,
+    dueAt: row.due_at ?? null,
+    archivedAt: row.archived_at ?? null,
+    kind: (row.kind ?? "milestone") as Swimlane["kind"],
   };
 }
 
@@ -214,6 +220,7 @@ export interface TaskRow {
   github_issue_number: number | null;
   github_repo: string | null;
   github_synced_state: "open" | "closed" | null;
+  due_at: string | null;
   created_at: string;
   updated_at: string;
   column_github_state?: "open" | "closed" | null;
@@ -221,7 +228,7 @@ export interface TaskRow {
 }
 
 export function rowToTask(row: TaskRow, columnGithubState?: "open" | "closed" | null): {
-  id: string; projectId: string; columnId: string; swimlaneId: string; title: string; description: TipTapDoc; priority: string; type: string; assignees: string[]; position: string; githubs: { issueId: string; issueNumber: number; repo: string; syncedState: "open" | "closed" | null; url: string; outOfSync: boolean }[]; archivedAt: ISODate | null; createdAt: ISODate; updatedAt: ISODate;
+  id: string; projectId: string; columnId: string; swimlaneId: string; title: string; description: TipTapDoc; priority: string; type: string; assignees: string[]; position: string; dueAt: string | null; githubs: { issueId: string; issueNumber: number; repo: string; syncedState: "open" | "closed" | null; url: string; outOfSync: boolean }[]; archivedAt: ISODate | null; createdAt: ISODate; updatedAt: ISODate;
 } {
   return taskFromRow(row, columnGithubState, JSON.parse(row.description) as TipTapDoc);
 }
@@ -229,13 +236,13 @@ export function rowToTask(row: TaskRow, columnGithubState?: "open" | "closed" | 
 // Slim rows (board/list paths select no description) map to an empty doc —
 // the key stays in the response shape, the blob never ships.
 export function rowToTaskSlim(row: Omit<TaskRow, "description">, columnGithubState?: "open" | "closed" | null): {
-  id: string; projectId: string; columnId: string; swimlaneId: string; title: string; description: TipTapDoc; priority: string; type: string; assignees: string[]; position: string; githubs: { issueId: string; issueNumber: number; repo: string; syncedState: "open" | "closed" | null; url: string; outOfSync: boolean }[]; archivedAt: ISODate | null; createdAt: ISODate; updatedAt: ISODate;
+  id: string; projectId: string; columnId: string; swimlaneId: string; title: string; description: TipTapDoc; priority: string; type: string; assignees: string[]; position: string; dueAt: string | null; githubs: { issueId: string; issueNumber: number; repo: string; syncedState: "open" | "closed" | null; url: string; outOfSync: boolean }[]; archivedAt: ISODate | null; createdAt: ISODate; updatedAt: ISODate;
 } {
   return taskFromRow(row as TaskRow, columnGithubState, { type: "doc", content: [] });
 }
 
 function taskFromRow(row: TaskRow, columnGithubState: "open" | "closed" | null | undefined, description: TipTapDoc): {
-  id: string; projectId: string; columnId: string; swimlaneId: string; title: string; description: TipTapDoc; priority: string; type: string; assignees: string[]; position: string; githubs: { issueId: string; issueNumber: number; repo: string; syncedState: "open" | "closed" | null; url: string; outOfSync: boolean }[]; archivedAt: ISODate | null; createdAt: ISODate; updatedAt: ISODate;
+  id: string; projectId: string; columnId: string; swimlaneId: string; title: string; description: TipTapDoc; priority: string; type: string; assignees: string[]; position: string; dueAt: string | null; githubs: { issueId: string; issueNumber: number; repo: string; syncedState: "open" | "closed" | null; url: string; outOfSync: boolean }[]; archivedAt: ISODate | null; createdAt: ISODate; updatedAt: ISODate;
 } {
   const colState = columnGithubState ?? row.column_github_state ?? null;
   const githubs: { issueId: string; issueNumber: number; repo: string; syncedState: "open" | "closed" | null; url: string; outOfSync: boolean }[] = [];
@@ -267,6 +274,7 @@ function taskFromRow(row: TaskRow, columnGithubState: "open" | "closed" | null |
     type: row.type,
     assignees: row.assignees ? row.assignees.split("||").filter(Boolean) : [],
     position: row.position,
+    dueAt: row.due_at ?? null,
     githubs,
     archivedAt: row.archived_at,
     createdAt: row.created_at,

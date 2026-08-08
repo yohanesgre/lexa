@@ -133,6 +133,9 @@ interface Swimlane {
   name: string;
   description: string;
   position: number;
+  dueAt: string | null;       // YYYY-MM-DD — milestone deadline (date-only)
+  archivedAt: ISODate | null; // null = live; set = archived (cascade-archives its tasks)
+  kind: "backlog" | "milestone";  // Backlog = system lane (permanent, no deadline)
 }
 
 // Per-project customizable task fields. tasks.priority / tasks.type hold
@@ -171,6 +174,7 @@ interface Task {
   position: string;               // fractional-index key (opaque to clients)
   githubs: GithubIssue[];         // multiple GitHub issues per task
   archivedAt: ISODate | null;     // null = live; set = archived (keeps column/position)
+  dueAt: string | null;           // YYYY-MM-DD — optional personal deadline; never later than the lane's
   createdAt: ISODate;
   updatedAt: ISODate;
 }
@@ -443,10 +447,24 @@ DELETE /api/projects/:slug/columns/:id  (admin)
 ### Swimlanes
 
 ```
-GET    /api/projects/:slug/swimlanes        → 200 { data: Swimlane[] }
-POST   /api/projects/:slug/swimlanes   (admin)  body { name*, description?, position? } → 201 Swimlane | 403 FORBIDDEN
-PATCH  /api/projects/:slug/swimlanes/:id  (admin) body { name?, description?, position? } → 200 Swimlane | 403 FORBIDDEN
+GET    /api/projects/:slug/swimlanes        → 200 { data: Swimlane[] }   (includes archived lanes)
+POST   /api/projects/:slug/swimlanes   (admin)  body { name*, description?, position?, dueAt? } → 201 Swimlane | 403 FORBIDDEN
+PATCH  /api/projects/:slug/swimlanes/:id  (admin) body { name?, description?, position?, dueAt? } → 200 Swimlane | 403 FORBIDDEN
+  dueAt = "YYYY-MM-DD" (date-only milestone deadline); null clears.
+  Setting dueAt earlier than any live task's deadline in the lane → 409 DEADLINE_AFTER_LANE { date }
+  dueAt on the Backlog lane → 409 BACKLOG_PROTECTED
 DELETE /api/projects/:slug/swimlanes/:id  (admin) → 204 | 403 FORBIDDEN (tasks must be reassigned first — swimlane_id is NOT NULL)
+  Backlog lane → 409 BACKLOG_PROTECTED
+
+POST   /api/projects/:slug/swimlanes/:id/archive  (admin)
+→ 200 { data: Swimlane, activity: ActivityEvent[] } | 403 FORBIDDEN | 404 | 409 BACKLOG_PROTECTED
+  One transaction: lane archivedAt set + every live task in the lane archived
+  (one `archived` activity row per task). Idempotent.
+  Note: archiving tasks does NOT sync GitHub state.
+
+POST   /api/projects/:slug/swimlanes/:id/restore  (admin)
+→ 200 { data: Swimlane, activity: ActivityEvent[] } | 403 FORBIDDEN | 404
+  Lane only — tasks stay archived (restore individually). Idempotent.
 ```
 
 ### Tasks
@@ -459,12 +477,15 @@ GET    /api/projects/:slug/tasks?columnId&swimlaneId&assignee&type&limit&cursor
   task for content. Board responses behave the same.
 
 POST   /api/projects/:slug/tasks
-body { columnId*, swimlaneId*, title*, description?, priority?, type?, parentId?, assignees? }
+body { columnId*, swimlaneId?, title*, description?, priority?, type?, parentId?, assignees?, dueAt? }
   priority/type = option IDs from field-config; omitted → first option (position 0)
+  swimlaneId omitted → task lands in the project's Backlog lane
   parentId = create as subtask of that task (inherits parent's column/swimlane,
              inserts a subtask_of link)
+  dueAt = "YYYY-MM-DD" — must not be later than the lane's due date (when it has one)
 → 201 Task
   | 404 COLUMN_NOT_FOUND / SWIMLANE_NOT_FOUND / TASK_NOT_FOUND (bad parentId)
+  | 409 DEADLINE_AFTER_LANE        (dueAt later than lane due)
   | 422 REQUIRED_FIELD            (creating directly into a guarded column)
   | 422 INVALID_OPTION            (bad priority/type id)
   position: appended to end of column
@@ -473,18 +494,23 @@ GET    /api/projects/:slug/tasks/:id
 → 200 Task | 404
 
 PATCH  /api/projects/:slug/tasks/:id
-body { title?, description?, priority?, type?, assignees? }
+body { title?, description?, priority?, type?, assignees?, dueAt? }
 → 200 Task | 404 | 422 REQUIRED_FIELD   (can't clear a required field in guarded column)
   | 422 INVALID_OPTION           (bad priority/type id)
+  | 409 DEADLINE_AFTER_LANE      (dueAt later than lane due)
+  dueAt change emits a `field_changed` activity event (variant dueAt)
 
 POST   /api/projects/:slug/tasks/:id/move
-body { columnId*, swimlaneId*, beforeTaskId?, afterTaskId? }
+body { columnId*, swimlaneId*, beforeTaskId?, afterTaskId?, clearDueAt? }
   - swimlaneId required — every task belongs to a swimlane
   - beforeTaskId/afterTaskId omitted → append to end of target column
   - before/after must belong to target column
+  - clearDueAt=true → card deadline cleared in the SAME atomic UPDATE as the move
+    (required when the card's deadline is later than the target lane's)
 → 200 Task
   | 404 TASK_NOT_FOUND / COLUMN_NOT_FOUND / SWIMLANE_NOT_FOUND
   | 409 WIP_LIMIT
+  | 409 DEADLINE_AFTER_LANE      (card dueAt later than target lane due, no clearDueAt)
   | 422 REQUIRED_FIELD / NEIGHBOR_NOT_IN_COLUMN
   (within-column reorder never fails WIP)
   Side effect: if target column has githubState and task is linked,
@@ -506,10 +532,12 @@ POST   /api/projects/:slug/tasks/:id/restore
 
 GET    /api/projects/:slug/board?includeArchived=true
 → 200 Board          (unpaginated full snapshot — the kanban's single fetch)
-  includeArchived omitted/false → archived tasks excluded; true → included
-  (rendered dimmed in the UI, non-draggable, still in their original column)
+  includeArchived omitted/false → archived tasks AND archived lanes excluded; true → both included
+  (rendered dimmed in the UI, non-draggable, still in their original column/lane)
   fieldConfig included — tasks' priority/type are option IDs resolved via it
   links included — subtask grouping + blocked dots render without extra fetches
+  swimlanes carry dueAt/archivedAt/kind — the Backlog lane (kind=backlog) is the
+  permanent system lane; every project has exactly one
 ```
 
 ### Activity & Comments

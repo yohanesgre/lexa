@@ -47,6 +47,8 @@ import { tool as updateColumn } from "./tools/update-column";
 import { tool as deleteColumn } from "./tools/delete-column";
 import { tool as createSwimlane } from "./tools/create-swimlane";
 import { tool as updateSwimlane } from "./tools/update-swimlane";
+import { tool as archiveSwimlane } from "./tools/archive-swimlane";
+import { tool as restoreSwimlane } from "./tools/restore-swimlane";
 import { tool as deleteSwimlane } from "./tools/delete-swimlane";
 import { tool as listApiKeys } from "./tools/list-api-keys";
 import { tool as createApiKey } from "./tools/create-api-key";
@@ -100,6 +102,8 @@ const tools: ToolDef[] = [
   deleteColumn,
   createSwimlane,
   updateSwimlane,
+  archiveSwimlane,
+  restoreSwimlane,
   deleteSwimlane,
   listApiKeys,
   createApiKey,

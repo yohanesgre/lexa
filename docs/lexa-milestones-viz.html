@@ -1,0 +1,517 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Lexa — Milestone Deadlines + Backlog Lane + Lane Archive (Design Exploration)</title>
+<style>
+  /* PHOSPHOR tokens — real values from wireframes.css :root */
+  :root {
+    --lx-surface-app: #0C0B09;
+    --lx-surface-elevated: #141210;
+    --lx-surface-column: #12100E;
+    --lx-surface-card: #1A1714;
+    --lx-surface-card-hover: #24201C;
+    --lx-surface-input: #0C0B09;
+    --lx-surface-tooltip: #24201C;
+    --lx-surface-selected: rgba(240, 192, 64, 0.10);
+    --lx-border-default: #332E28;
+    --lx-border-subtle: #1A1714;
+    --lx-border-strong: #4A443D;
+    --lx-border-focus: #F0C040;
+    --lx-text-primary: #F5F0EB;
+    --lx-text-secondary: #948E88;
+    --lx-text-tertiary: #6B6560;
+    --lx-text-muted: #4A443D;
+    --lx-text-danger: #FF9999;
+    --lx-text-warning: #FCD34D;
+    --lx-text-success: #86EFAC;
+    --lx-bg-danger-subtle: rgba(255, 68, 68, 0.10);
+    --lx-bg-warning-subtle: rgba(240, 192, 64, 0.10);
+    --lx-bg-accent-subtle: rgba(240, 192, 64, 0.10);
+    --lx-shadow-sm: 0 1px 2px rgba(12, 11, 9, 0.5);
+    --lx-shadow-lg: 0 12px 32px rgba(0, 0, 0, 0.5);
+    --lx-font-display: "Space Grotesk", ui-sans-serif, system-ui, sans-serif;
+    --lx-font-body: "IBM Plex Sans", ui-sans-serif, system-ui, sans-serif;
+    --lx-font-mono: "JetBrains Mono", ui-monospace, monospace;
+    --lx-font-micro: "Departure Mono", ui-monospace, monospace;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: var(--lx-surface-app); color: var(--lx-text-primary); font-family: var(--lx-font-body); line-height: 1.55; padding-bottom: 80px; }
+  .wrap { max-width: 1100px; margin: 0 auto; padding: 0 24px; }
+
+  header { padding: 48px 0 28px; border-bottom: 1px solid var(--lx-border-default); }
+  .kicker { font-family: var(--lx-font-micro); font-size: 11px; letter-spacing: .12em; text-transform: uppercase; color: var(--lx-text-muted); }
+  h1 { font-family: var(--lx-font-display); font-size: 30px; font-weight: 600; letter-spacing: -0.02em; margin: 8px 0 6px; }
+  .lede { color: var(--lx-text-secondary); max-width: 780px; font-size: 14.5px; }
+  .status { display: inline-block; margin-top: 12px; font-size: 11px; font-family: var(--lx-font-micro); color: var(--lx-border-focus); background: var(--lx-bg-accent-subtle); border: 1px solid rgba(240,192,64,.3); padding: 3px 10px; border-radius: 999px; }
+
+  nav { position: sticky; top: 0; z-index: 10; background: rgba(12,11,9,.92); backdrop-filter: blur(8px); border-bottom: 1px solid var(--lx-border-default); padding: 10px 0; }
+  nav .wrap { display: flex; gap: 6px; flex-wrap: wrap; }
+  nav a { font-size: 12px; color: var(--lx-text-secondary); text-decoration: none; padding: 4px 10px; border: 1px solid transparent; border-radius: 6px; font-family: var(--lx-font-mono); }
+  nav a:hover { color: var(--lx-text-primary); border-color: var(--lx-border-strong); }
+
+  section { padding: 40px 0; border-bottom: 1px solid var(--lx-border-default); }
+  section h2 { font-family: var(--lx-font-display); font-size: 17px; font-weight: 600; letter-spacing: -0.01em; margin-bottom: 4px; }
+  section h2 .num { color: var(--lx-border-focus); font-family: var(--lx-font-mono); font-size: 13px; margin-right: 8px; }
+  .sub { color: var(--lx-text-tertiary); font-size: 13px; margin-bottom: 20px; }
+
+  /* visible annotation notes (plan-doc convention, like dashboard-plan callouts) */
+  .ann { display: block; font-size: 12px; color: var(--lx-text-secondary); background: var(--lx-bg-accent-subtle); border: 1px solid rgba(240,192,64,.3); border-radius: 6px; padding: 6px 10px; margin: 8px 0; }
+  .ann b { color: var(--lx-border-focus); font-weight: 500; }
+  .mono { font-family: var(--lx-font-mono); font-size: 12px; }
+  .dim { color: var(--lx-text-tertiary); }
+  .red { color: var(--lx-text-danger); }
+  .warn { color: var(--lx-text-warning); }
+  .ok { color: var(--lx-text-success); }
+
+  .callout { border: 1px solid; border-radius: 8px; padding: 12px 14px; font-size: 13px; margin-top: 14px; }
+  .callout.amber { border-color: rgba(240,192,64,.35); background: var(--lx-bg-accent-subtle); color: var(--lx-text-secondary); }
+  .callout.red { border-color: rgba(255,68,68,.3); background: var(--lx-bg-danger-subtle); color: var(--lx-text-secondary); }
+  .callout b { color: var(--lx-text-primary); }
+
+  /* ---- Real wireframe board classes (transcribed values from wireframes.css) ---- */
+  .board-area { background: var(--lx-surface-column); border: 1px solid var(--lx-border-default); border-radius: 12px; padding: 16px; }
+  .board-header { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; }
+  .board-header h3 { font-family: var(--lx-font-display); font-size: 15px; font-weight: 600; }
+  .board-header .sk-sub { font-size: 11px; color: var(--lx-text-tertiary); font-family: var(--lx-font-micro); }
+  .board-header .spacer { flex: 1; }
+
+  .swimlane { margin-bottom: 14px; }
+  .swimlane-header { display: flex; align-items: center; height: 36px; padding: 0 16px; background: var(--lx-surface-elevated); border: 1px solid var(--lx-border-default); border-radius: 6px; margin-bottom: 12px; transition: background 100ms; }
+  .swimlane-header.backlog { opacity: 0.72; }
+  .swimlane-header.overdue { border-color: rgba(255,68,68,.4); }
+  .swimlane-name { font-size: 13px; font-weight: 500; font-family: var(--lx-font-display); color: var(--lx-text-primary); }
+  .swimlane-count { font-family: var(--lx-font-micro); font-size: 11px; color: var(--lx-text-muted); margin-left: 8px; }
+  .swimlane-header .spacer { flex: 1; }
+
+  .due-chip { display: inline-flex; align-items: center; gap: 4px; height: 20px; padding: 0 8px; border-radius: 999px; border: 1px solid; font-family: var(--lx-font-body); font-size: 11px; line-height: 14px; margin-left: 10px; white-space: nowrap; }
+  .due-chip.normal { color: var(--lx-text-warning); border-color: rgba(252,211,77,.35); }
+  .due-chip.overdue { color: var(--lx-text-danger); border-color: rgba(255,68,68,.45); background: var(--lx-bg-danger-subtle); }
+  .due-chip.dim { color: var(--lx-text-muted); border-color: var(--lx-border-strong); }
+  .countdown { font-family: var(--lx-font-micro); font-size: 11px; color: var(--lx-text-secondary); margin-left: 8px; white-space: nowrap; }
+  .countdown.overdue { color: var(--lx-text-danger); }
+
+  .lane-action { display: inline-flex; align-items: center; height: 20px; padding: 0 8px; border-radius: 4px; border: 1px solid var(--lx-border-default); background: transparent; color: var(--lx-text-tertiary); font-family: var(--lx-font-body); font-size: 11px; cursor: pointer; margin-left: 8px; }
+  .lane-action:hover { color: var(--lx-text-secondary); border-color: var(--lx-border-strong); }
+  .lane-action.restore { color: var(--lx-text-warning); border-color: rgba(240,192,64,.35); background: var(--lx-bg-accent-subtle); }
+
+  .kanban-row { display: flex; gap: 12px; align-items: flex-start; }
+  .kanban-col { flex: 1; background: var(--lx-surface-card); border: 1px solid var(--lx-border-default); border-radius: 8px; overflow: hidden; }
+  .column-header { display: flex; align-items: center; justify-content: space-between; height: 36px; padding: 0 12px; border-bottom: 1px solid var(--lx-border-subtle); }
+  .column-name { font-size: 12px; font-weight: 500; color: var(--lx-text-secondary); text-transform: uppercase; letter-spacing: 0.05em; }
+  .column-count { font-family: var(--lx-font-micro); font-size: 11px; color: var(--lx-text-muted); }
+  .kanban-col-body { padding: 10px; display: flex; flex-direction: column; gap: 8px; min-height: 60px; }
+
+  .kanban-card { position: relative; background: var(--lx-surface-card); border: 1px solid var(--lx-border-subtle); border-radius: 6px; padding: 10px 12px; cursor: grab; transition: background 100ms, border-color 100ms; }
+  .kanban-card:hover { background: var(--lx-surface-card-hover); border-color: var(--lx-border-default); }
+  .kanban-card-title { font-size: 13px; font-weight: 500; color: var(--lx-text-primary); line-height: 18px; }
+  .kanban-card-meta { display: flex; align-items: center; gap: 6px; margin-top: 8px; flex-wrap: wrap; }
+  .kanban-card-meta .ctx { font-size: 11px; color: var(--lx-text-tertiary); }
+  .kanban-card .due-chip { margin-left: 0; }
+
+  .priority-dot { width: 8px; height: 8px; border-radius: 9999px; flex-shrink: 0; display: inline-block; }
+  .priority-urgent { background: #FF4444; }
+  .priority-high { background: #F0C040; }
+  .priority-medium { background: #22D3EE; }
+  .priority-low { width: 6px; height: 6px; border: 2px solid #6B6560; background: transparent; }
+
+  .gh-chip { display: inline-flex; align-items: center; height: 18px; padding: 0 6px; border-radius: 999px; background: var(--lx-bg-accent-subtle); border: 1px solid rgba(240,192,64,.35); color: var(--lx-border-focus); font-family: var(--lx-font-mono); font-size: 10px; }
+
+  /* ---- Dialog states ---- */
+  .dialog-box { background: var(--lx-surface-elevated); border: 1px solid var(--lx-border-default); border-radius: 10px; box-shadow: var(--lx-shadow-lg); padding: 16px; max-width: 420px; }
+  .dialog-title { font-family: var(--lx-font-display); font-size: 15px; font-weight: 600; }
+  .dialog-body { font-size: 13px; color: var(--lx-text-secondary); margin-top: 6px; }
+  .dialog-body .mono { color: var(--lx-text-primary); }
+  .dialog-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
+  .check-row { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--lx-text-secondary); margin-top: 10px; padding: 8px 10px; border: 1px solid var(--lx-border-default); border-radius: 6px; background: var(--lx-surface-card); }
+  .checkbox { width: 14px; height: 14px; border: 1px solid var(--lx-border-strong); border-radius: 3px; background: var(--lx-surface-input); display: inline-flex; align-items: center; justify-content: center; }
+  .checkbox.checked { border-color: var(--lx-border-focus); background: var(--lx-border-focus); }
+  .checkbox.checked::after { content: "✓"; font-size: 10px; color: var(--lx-surface-app); font-weight: 700; }
+
+  .btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; height: 32px; padding: 0 14px; border-radius: 6px; font-size: 13px; font-weight: 500; font-family: var(--lx-font-body); cursor: pointer; border: 1px solid transparent; }
+  .btn-primary { background: var(--lx-border-focus); color: var(--lx-surface-app); }
+  .btn-ghost { background: transparent; color: var(--lx-text-secondary); border-color: var(--lx-border-default); }
+
+  /* ---- Archived lane ---- */
+  .archived-section { margin-top: 16px; border: 1px dashed var(--lx-border-strong); border-radius: 8px; padding: 12px; }
+  .archived-section .sec-label { font-family: var(--lx-font-micro); font-size: 10px; letter-spacing: .1em; text-transform: uppercase; color: var(--lx-text-muted); margin-bottom: 8px; }
+  .swimlane-header.archived { opacity: 0.55; border-style: dashed; }
+
+  /* ---- Settings form ---- */
+  .settings-card { background: var(--lx-surface-card); border: 1px solid var(--lx-border-default); border-radius: 10px; padding: 16px; max-width: 420px; }
+  .prop-label { font-family: var(--lx-font-micro); font-size: 11px; text-transform: uppercase; letter-spacing: .04em; color: var(--lx-text-muted); margin-bottom: 4px; }
+  .prop-input { width: 100%; height: 32px; padding: 0 10px; background: var(--lx-surface-input); border: 1px solid var(--lx-border-default); border-radius: 6px; color: var(--lx-text-primary); font-family: var(--lx-font-body); font-size: 13px; }
+  .prop-input[disabled] { opacity: 0.55; cursor: not-allowed; }
+  .form-row { margin-bottom: 12px; }
+  .form-hint { font-size: 11px; color: var(--lx-text-tertiary); margin-top: 4px; }
+
+  .split { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; align-items: start; }
+  @media (max-width: 860px) { .split { grid-template-columns: 1fr; } }
+
+  footer { padding: 28px 0; color: var(--lx-text-tertiary); font-size: 12px; font-family: var(--lx-font-mono); }
+</style>
+</head>
+<body>
+  <header>
+    <div class="wrap">
+      <div class="kicker">Design exploration — not a wireframe</div>
+      <h1>Milestone Deadlines · Backlog Lane · Lane Archive</h1>
+      <p class="lede">Proposed Lexa board feature: swimlanes become milestones with optional due dates, a system Backlog lane catches unassigned tasks, and milestone lanes can be archived. Decisions locked 2026-08-09. This artifact mirrors the real PHOSPHOR board vocabulary (tokens + kanban classes) so the look is the true app look.</p>
+      <span class="status">DECISIONS LOCKED · 2026-08-09 · review artifact only</span>
+    </div>
+  </header>
+
+  <nav>
+    <div class="wrap">
+      <a href="#overview">1 Overview</a>
+      <a href="#board">2 Board</a>
+      <a href="#header">3 Lane header</a>
+      <a href="#cards">4 Cards</a>
+      <a href="#moves">5 Move dialogs</a>
+      <a href="#archive">6 Archive</a>
+      <a href="#settings">7 Settings</a>
+    </div>
+  </nav>
+
+  <section id="overview">
+    <div class="wrap">
+      <h2><span class="num">01</span>Overview — locked decisions</h2>
+      <p class="sub">Swimlanes = milestones. One system Backlog lane. Deadlines live on lane headers; cards may add their own (bounded by the lane date).</p>
+      <span class="ann"><b>Swimlane model:</b> every swimlane gets an optional <span class="mono">due_at</span> (YYYY-MM-DD, date-only, no time-of-day). A lane without a due date is allowed and renders no chip.</span>
+      <span class="ann"><b>Backlog = system lane:</b> created automatically, cannot be renamed/archived/deleted, has no deadline field. Every task without a swimlane lands here. Identity is <b>kind</b>, not name — the label is always "Backlog".</span>
+      <span class="ann"><b>Countdowns:</b> "N d left" for future deadlines, "Overdue Nd" (red) once past. Countdown computed client-side from <span class="mono">due_at</span>; the stored value is the date only.</span>
+      <span class="ann"><b>Archive:</b> only milestone lanes archive. Archiving archives the lane's live tasks in one transaction; restore brings the lane back only — tasks restore individually.</span>
+    </div>
+  </section>
+
+  <section id="board">
+    <div class="wrap">
+      <h2><span class="num">02</span>Board — Backlog lane on top, milestone lanes below</h2>
+      <p class="sub">Board with swimlanes = milestones. Backlog pinned as the first (muted) lane.</p>
+      <div class="board-area">
+        <div class="board-header">
+          <h3>Emberfall</h3>
+          <span class="sk-sub">/emberfall/board</span>
+          <span class="spacer"></span>
+          <span class="mono dim">Add lane →</span>
+        </div>
+
+        <!-- Backlog lane: muted, no due chip, no archive action -->
+        <div class="swimlane">
+          <div class="swimlane-header backlog">
+            <span class="swimlane-name">Backlog</span>
+            <span class="swimlane-count">12</span>
+            <span class="spacer"></span>
+            <span class="dim" style="font-size:11px;font-family:var(--lx-font-micro);">system lane</span>
+          </div>
+          <div class="kanban-row">
+            <div class="kanban-col">
+              <div class="column-header"><span class="column-name">Todo</span><span class="column-count">5</span></div>
+              <div class="kanban-col-body">
+                <div class="kanban-card">
+                  <div class="kanban-card-title">Rebalance fire sword damage curve</div>
+                  <div class="kanban-card-meta"><span class="priority-dot priority-high"></span><span class="ctx">High · Fire tree</span></div>
+                </div>
+                <div class="kanban-card">
+                  <div class="kanban-card-title">Write final encounter dialogue</div>
+                  <div class="kanban-card-meta"><span class="priority-dot priority-low"></span><span class="ctx">Low · Writing</span><span class="due-chip normal">Due Fri</span></div>
+                </div>
+              </div>
+            </div>
+            <div class="kanban-col">
+              <div class="column-header"><span class="column-name">Done</span><span class="column-count">7</span></div>
+              <div class="kanban-col-body">
+                <div class="kanban-card">
+                  <div class="kanban-card-title">Legacy quest tracker cleanup</div>
+                  <div class="kanban-card-meta"><span class="priority-dot priority-low"></span><span class="ctx">Low</span></div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <span class="ann"><b>Backlog lane:</b> muted styling, no deadline chip, no archive action. System lane — un-archivable, no deadline; every task without a swimlane lands here. Identity is <b>kind</b>, not name.</span>
+        </div>
+
+        <!-- Milestone lane: Demo 1, normal state -->
+        <div class="swimlane">
+          <div class="swimlane-header">
+            <span class="swimlane-name">Demo 1</span>
+            <span class="swimlane-count">8</span>
+            <span class="due-chip normal">Due Fri</span>
+            <span class="countdown">3d left</span>
+            <span class="spacer"></span>
+            <span class="lane-action">⋯</span>
+          </div>
+          <div class="kanban-row">
+            <div class="kanban-col">
+              <div class="column-header"><span class="column-name">Todo</span><span class="column-count">2</span></div>
+              <div class="kanban-col-body">
+                <div class="kanban-card">
+                  <div class="kanban-card-title">Add double-jump input buffer</div>
+                  <div class="kanban-card-meta"><span class="priority-dot priority-medium"></span><span class="ctx">Medium</span></div>
+                </div>
+              </div>
+            </div>
+            <div class="kanban-col">
+              <div class="column-header"><span class="column-name">In Progress</span><span class="column-count">3</span></div>
+              <div class="kanban-col-body">
+                <div class="kanban-card">
+                  <div class="kanban-card-title">Fix hitbox desync during dodge roll</div>
+                  <div class="kanban-card-meta"><span class="priority-dot priority-urgent"></span><span class="ctx">Urgent</span><span class="gh-chip">#142</span></div>
+                </div>
+                <div class="kanban-card">
+                  <div class="kanban-card-title">AI pathfinding on destructible tiles</div>
+                  <div class="kanban-card-meta"><span class="priority-dot priority-high"></span><span class="ctx">High</span><span class="due-chip overdue">Due Mon</span></div>
+                </div>
+              </div>
+            </div>
+            <div class="kanban-col">
+              <div class="column-header"><span class="column-name">Done</span><span class="column-count">3</span></div>
+              <div class="kanban-col-body">
+                <div class="kanban-card">
+                  <div class="kanban-card-title">Dash trail particles</div>
+                  <div class="kanban-card-meta"><span class="priority-dot priority-low"></span><span class="ctx">Low</span></div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <span class="ann"><b>Normal state:</b> "Demo 1 — due Fri · 3d left". The due chip + countdown live on the lane header, not on cards.</span>
+        </div>
+
+        <!-- Milestone lane: v1.0, overdue state -->
+        <div class="swimlane">
+          <div class="swimlane-header overdue">
+            <span class="swimlane-name">v1.0</span>
+            <span class="swimlane-count">14</span>
+            <span class="due-chip overdue">Overdue 2d</span>
+            <span class="countdown overdue">overdue 2d</span>
+            <span class="spacer"></span>
+            <span class="lane-action">⋯</span>
+          </div>
+          <div class="kanban-row">
+            <div class="kanban-col">
+              <div class="column-header"><span class="column-name">In Progress</span><span class="column-count">4</span></div>
+              <div class="kanban-col-body">
+                <div class="kanban-card">
+                  <div class="kanban-card-title">Crash on sector 7 boss transition</div>
+                  <div class="kanban-card-meta"><span class="priority-dot priority-urgent"></span><span class="ctx">Urgent</span><span class="gh-chip">#156</span></div>
+                </div>
+              </div>
+            </div>
+            <div class="kanban-col">
+              <div class="column-header"><span class="column-name">Review</span><span class="column-count">2</span></div>
+              <div class="kanban-col-body">
+                <div class="kanban-card">
+                  <div class="kanban-card-title">Balance tuning pass — fire tree</div>
+                  <div class="kanban-card-meta"><span class="priority-dot priority-high"></span><span class="ctx">High</span></div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <span class="ann"><b>Overdue state:</b> lane header gets a red chip ("Overdue 2d") + red countdown + red-tinted border. The lane date has passed; cards are still draggable but moves into the lane warn (see §5).</span>
+        </div>
+
+        <!-- Milestone lane: Sprint 12, no deadline -->
+        <div class="swimlane">
+          <div class="swimlane-header">
+            <span class="swimlane-name">Sprint 12</span>
+            <span class="swimlane-count">5</span>
+            <span class="spacer"></span>
+            <span class="lane-action">⋯</span>
+          </div>
+          <div class="kanban-row">
+            <div class="kanban-col">
+              <div class="column-header"><span class="column-name">Todo</span><span class="column-count">5</span></div>
+              <div class="kanban-col-body">
+                <div class="kanban-card">
+                  <div class="kanban-card-title">Sprint 12 planning notes</div>
+                  <div class="kanban-card-meta"><span class="priority-dot priority-medium"></span><span class="ctx">Medium</span></div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <span class="ann"><b>No deadline yet:</b> lanes can have no due date — renders no chip, no countdown, no overdue state. Cards inside may still carry their own deadlines.</span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="header">
+    <div class="wrap">
+      <h2><span class="num">03</span>Lane header anatomy</h2>
+      <p class="sub">Left: name + task count. Right: due chip + countdown (milestone lanes) and archive action (milestone lanes only).</p>
+      <div class="swimlane-header" style="max-width:640px;">
+        <span class="swimlane-name">Demo 1</span>
+        <span class="swimlane-count">8</span>
+        <span class="due-chip normal">Due Fri</span>
+        <span class="countdown">3d left</span>
+        <span class="spacer"></span>
+        <span class="lane-action">Archive</span>
+      </div>
+      <div class="swimlane-header overdue" style="max-width:640px;">
+        <span class="swimlane-name">v1.0</span>
+        <span class="swimlane-count">14</span>
+        <span class="due-chip overdue">Overdue 2d</span>
+        <span class="countdown overdue">overdue 2d</span>
+        <span class="spacer"></span>
+        <span class="lane-action">Archive</span>
+      </div>
+      <div class="swimlane-header backlog" style="max-width:640px;">
+        <span class="swimlane-name">Backlog</span>
+        <span class="swimlane-count">12</span>
+        <span class="spacer"></span>
+        <span class="dim" style="font-size:11px;font-family:var(--lx-font-micro);">no deadline · no archive</span>
+      </div>
+      <span class="ann"><b>Anatomy:</b> lane name + count · due chip ("Due Fri" amber / "Overdue 2d" red) · countdown ("3d left" / "overdue 2d") · archive action on milestone lanes only. Backlog has neither chip nor archive.</span>
+    </div>
+  </section>
+
+  <section id="cards">
+    <div class="wrap">
+      <h2><span class="num">04</span>Card deadline variants</h2>
+      <p class="sub">Cards inherit the lane date implicitly; a card may override with its own deadline chip, bounded by the lane's date.</p>
+      <div class="split">
+        <div>
+          <div class="kanban-card" style="max-width:360px;">
+            <div class="kanban-card-title">Fix hitbox desync during dodge roll</div>
+            <div class="kanban-card-meta"><span class="priority-dot priority-urgent"></span><span class="ctx">Urgent</span><span class="gh-chip">#142</span></div>
+          </div>
+          <span class="ann"><b>No own deadline:</b> card inherits the lane date implicitly — no chip on the card. The inherited lane date lives on the lane header, not the card. Moving between lanes changes the inherited date silently.</span>
+
+          <div class="kanban-card" style="max-width:360px;margin-top:12px;">
+            <div class="kanban-card-title">Write final encounter dialogue</div>
+            <div class="kanban-card-meta"><span class="priority-dot priority-low"></span><span class="ctx">Low</span><span class="due-chip normal">Due Tue</span></div>
+          </div>
+          <span class="ann"><b>Own deadline (normal):</b> explicit card chip "Due Tue" — amber. Card deadline must be ≤ lane deadline.</span>
+
+          <div class="kanban-card" style="max-width:360px;margin-top:12px;">
+            <div class="kanban-card-title">AI pathfinding on destructible tiles</div>
+            <div class="kanban-card-meta"><span class="priority-dot priority-high"></span><span class="ctx">High</span><span class="due-chip overdue">Due Mon</span></div>
+          </div>
+          <span class="ann"><b>Own deadline (past-due):</b> red chip when the card date has passed. Backlog cards may carry any deadline since Backlog itself has none — the ≤-lane rule only applies inside dated milestone lanes.</span>
+        </div>
+        <div>
+          <div class="callout amber">
+            <b>Card ≤ lane deadline rule:</b> a card deadline later than the destination lane's date is rejected on move (409 <span class="mono">DEADLINE_AFTER_LANE</span>) unless the move clears the card deadline explicitly — see §5b. Backlog (no lane date) accepts any card deadline.
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="moves">
+    <div class="wrap">
+      <h2><span class="num">05</span>Move dialog states</h2>
+      <p class="sub">Both dialogs render as the standard popover/menu treatment. Two distinct warnings exist.</p>
+      <div class="split">
+        <div>
+          <div class="dialog-box">
+            <div class="dialog-title">Overdue lane</div>
+            <div class="dialog-body">Lane <span class="mono">v1.0</span> is overdue (2d). Move anyway?</div>
+            <div class="dialog-actions">
+              <button class="btn btn-ghost">Cancel</button>
+              <button class="btn btn-primary">Move</button>
+            </div>
+          </div>
+          <span class="ann"><b>State (a) — move into overdue lane:</b> confirm dialog before the move lands. Move proceeds as a normal atomic move (position + synced-state write); no guard changes — the warning is informational, overdue is not blocking.</span>
+        </div>
+        <div>
+          <div class="dialog-box">
+            <div class="dialog-title">Deadline conflict</div>
+            <div class="dialog-body">Card is due <span class="mono">Fri</span>; lane <span class="mono">Demo 2</span> is due <span class="mono">Wed</span>. Card deadline is after the lane deadline.</div>
+            <div class="check-row">
+              <span class="checkbox checked"></span>
+              Clear card deadline (Fri → none)
+            </div>
+            <div class="dialog-actions">
+              <button class="btn btn-ghost">Cancel</button>
+              <button class="btn btn-primary">Move anyway</button>
+            </div>
+          </div>
+          <span class="ann"><b>State (b) — card deadline conflict:</b> checked "Clear card deadline (Fri → none)" sends <span class="mono">clearDueAt</span> in the same atomic move. Without the flag the server rejects with <span class="mono">409 DEADLINE_AFTER_LANE</span>.</span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="archive">
+    <div class="wrap">
+      <h2><span class="num">06</span>Archived lanes</h2>
+      <p class="sub">A muted "Archived" section below the board; archived milestone lanes live here.</p>
+      <div class="board-area">
+        <div class="board-header"><h3>Emberfall</h3><span class="spacer"></span><span class="mono dim">board — archived lanes</span></div>
+        <div class="swimlane">
+          <div class="swimlane-header backlog">
+            <span class="swimlane-name">Backlog</span><span class="swimlane-count">12</span>
+            <span class="spacer"></span><span class="dim" style="font-size:11px;font-family:var(--lx-font-micro);">system lane — never archivable</span>
+          </div>
+          <div class="kanban-row">
+            <div class="kanban-col">
+              <div class="column-header"><span class="column-name">Todo</span><span class="column-count">5</span></div>
+              <div class="kanban-col-body"><div class="kanban-card"><div class="kanban-card-title">Backlog items…</div></div></div>
+            </div>
+          </div>
+        </div>
+        <div class="archived-section">
+          <div class="sec-label">Archived</div>
+          <div class="swimlane-header archived" style="max-width:640px;">
+            <span class="swimlane-name">Demo 0</span>
+            <span class="swimlane-count">6 archived tasks</span>
+            <span class="spacer"></span>
+            <span class="lane-action restore">Restore</span>
+          </div>
+          <span class="ann"><b>Archive semantics:</b> archiving a lane archives its live tasks in one transaction. Restore brings the lane back only — its tasks restore individually (no implicit cascade). Backlog can never be archived.</span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="settings">
+    <div class="wrap">
+      <h2><span class="num">07</span>Lane settings form</h2>
+      <p class="sub">Milestone lane settings (with optional date) vs Backlog (non-editable, no date field).</p>
+      <div class="split">
+        <div>
+          <div class="settings-card">
+            <div class="form-row">
+              <div class="prop-label">Lane name</div>
+              <input class="prop-input" value="Demo 1" />
+            </div>
+            <div class="form-row">
+              <div class="prop-label">Due date <span class="dim">(optional)</span></div>
+              <input class="prop-input" value="2026-08-14" type="date" />
+              <div class="form-hint">Stored as <span class="mono">swimlanes.due_at</span> YYYY-MM-DD — date-only, no time-of-day. Empty = lane has no deadline.</div>
+            </div>
+            <div class="form-row" style="margin-bottom:0;">
+              <div class="prop-label">Archive</div>
+              <button class="btn btn-ghost" style="height:28px;font-size:12px;">Archive lane…</button>
+              <div class="form-hint">Archives lane + live tasks in one transaction (§6).</div>
+            </div>
+          </div>
+        </div>
+        <div>
+          <div class="settings-card">
+            <div class="form-row">
+              <div class="prop-label">Lane name</div>
+              <input class="prop-input" value="Backlog" disabled />
+              <div class="form-hint">System lane — name is fixed ("Backlog"), identity is kind not name.</div>
+            </div>
+            <div class="form-row" style="margin-bottom:0;">
+              <div class="prop-label">Due date</div>
+              <input class="prop-input" value="—" disabled />
+              <div class="form-hint">Backlog has no due date field — cards inside may carry any deadline.</div>
+            </div>
+          </div>
+          <span class="ann"><b>Backlog form:</b> no date input, no archive action, name non-editable. Only "kind" fields (description, color?) remain — out of scope here.</span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <footer>
+    <div class="wrap">
+      Lexa — milestone-deadline design exploration · decisions locked 2026-08-09 · review artifact, not a wireframe — wireframes/src untouched.
+    </div>
+  </footer>
+</body>
+</html>

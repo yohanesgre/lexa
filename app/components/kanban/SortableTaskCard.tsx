@@ -16,6 +16,7 @@ function cardProps(task: Task, board: Board) {
     types: board.fieldConfig?.types ?? [],
     assignees: task.assignees,
     githubs: task.githubs,
+    dueAt: task.dueAt,
   };
 }
 
