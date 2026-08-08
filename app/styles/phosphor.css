@@ -3286,6 +3286,12 @@
     color: var(--lx-text-muted);
     margin-top: 6px;
   }
+  .field-hint-danger {
+    font-size: 12px;
+    line-height: 18px;
+    color: var(--lx-text-danger);
+    margin-top: 4px;
+  }
 
   .key-display {
     display: flex;
@@ -3302,9 +3308,9 @@
     font-size: 12px;
     line-height: 16px;
     color: var(--lx-text-primary);
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    white-space: normal;
+    overflow-wrap: anywhere;
+    user-select: all;
   }
 
   .notice-warning {

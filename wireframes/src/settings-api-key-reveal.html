@@ -73,6 +73,7 @@
           </button>
         </div>
         <div class="field-hint">Full key is shown here exactly once — in the table it is always masked.</div>
+        <div class="field-hint field-hint-danger">Clipboard blocked — select the key below and copy it manually.</div>
       </div>
 
       <div class="notice notice-warning">
@@ -81,7 +82,10 @@
       </div>
 
       <div class="mt-3">
-        <span class="annotation-tag">Key: JetBrains Mono 12px · Copy writes to clipboard</span>
+        <span class="annotation-tag">Key: JetBrains Mono 12px · Copy writes to clipboard · Key text is selectable (user-select: all) as manual-copy fallback</span>
+      </div>
+      <div class="mt-1">
+        <span class="annotation-tag">Copy button label flips to "Copied" only on success; on failure the danger hint above appears instead (no false success)</span>
       </div>
     </div>
 
