@@ -37,6 +37,7 @@
 **Ops**
 - First-run setup wizard (CLI + web), sample data toggle
 - Single Bun process: SSR + REST + MCP + webhooks; SQLite (WAL) — one `docker compose` deploy behind a cloudflared tunnel
+- **Forge daemon env hardening (2026-08-08):** daemons no longer inherit the listener's shell secrets (`LXK_*`, `GITHUB_*`, …) — scrubbed at spawn; runtime credentials come only from the runtime env file + `config.json`. A daemon with a dead key now exits 3 and surfaces "API key revoked — re-run Setup runtime" instead of silently authenticating via an inherited `LXK_FORGE_DAEMON_TOKEN`. The listener warns at boot if started from a shell with `.env` exported.
 
 ## Quick start
 
