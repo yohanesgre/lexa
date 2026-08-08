@@ -1,9 +1,11 @@
 import { useEffect, useRef, useState } from "react";
 import { ChevronIcon } from "./ChevronIcon";
+import { clientLxkUser } from "../../lib/api";
 
-// Placeholder identity — production identity arrives via the
-// Cf-Access-Authenticated-User-Email header (server/api/auth.ts).
-const USER = { name: "Yohanes", email: "yohanesgre@gmail.com", role: "admin" as const };
+// Real identity from the lxk-user meta the server injects from the
+// Cf-Access-Authenticated-User-Email header (server/entry.ts). Local dev
+// without Cf-Access has no meta → neutral fallback.
+const identity = clientLxkUser() ?? { name: "You", email: "" };
 
 export function UserProfile() {
   const [open, setOpen] = useState(false);
@@ -16,7 +18,7 @@ export function UserProfile() {
     return () => document.removeEventListener("mousedown", handleClick);
   }, [open]);
 
-  const initial = USER.name[0].toUpperCase();
+  const initial = identity.name[0].toUpperCase();
 
   return (
     <div ref={ref} style={{ position: "relative" }}>
@@ -31,7 +33,7 @@ export function UserProfile() {
         }}
       >
         <div className="avatar" style={{ width: 20, height: 20, fontSize: 10 }}>{initial}</div>
-        <span className="text-sm font-medium" style={{ lineHeight: 1 }}>{USER.name}</span>
+        <span className="text-sm font-medium" style={{ lineHeight: 1 }}>{identity.name}</span>
         <svg width={10} height={10} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} style={{ flexShrink: 0 }}>
           <path d="M6 9l6 6 6-6" />
         </svg>
