@@ -1129,3 +1129,10 @@ export function useDeleteComment(slug: string, taskId: string) {
     onError: (err) => { toast.push("error", "Failed to delete comment", toastMessage(err)); },
   });
 }
+
+// Selected project's health entry from the shared dashboard cache — powers
+// the dashboard status view; the navbar switcher browses the same data.
+export function selectProjectHealth(dashboard: Dashboard | undefined, slug: string | undefined): Dashboard["projects"][number] | undefined {
+  if (!dashboard || !slug) return undefined;
+  return dashboard.projects.find((p) => p.project.slug === slug);
+}

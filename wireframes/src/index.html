@@ -31,7 +31,7 @@
     <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:16px;">
       <a href="dashboard.html" class="project-card" style="height:auto;min-height:120px;text-decoration:none;">
         <div class="project-card-name" style="font-size:18px;">Dashboard</div>
-        <div class="project-card-desc">Project health grid (4 cards, WIP bars, urgent/sync counts), aggregate stats bar, Needs Attention list with out-of-sync items.</div>
+        <div class="project-card-desc">Project status view: selected project's health dot + name, project-scoped stats bar, column WIP breakdown (count/limit + state badge per column), Needs Attention for this project only.</div>
         <span class="annotation-tag mt-2">/index.tsx</span>
       </a>
       <a href="kanban.html" class="project-card" style="height:auto;min-height:120px;text-decoration:none;">
@@ -225,7 +225,7 @@
     <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:16px;">
       <a href="navbar-project-switcher.html" class="project-card" style="height:auto;min-height:120px;text-decoration:none;">
         <div class="project-card-name" style="font-size:18px;">Project Switcher</div>
-        <div class="project-card-desc">Global nav component: dropdown with 4 projects, task counts, slugs, "Create new project".</div>
+        <div class="project-card-desc">Global nav component: dropdown rows with health dot + task count, slugs, "Create new project" → /?new=1.</div>
         <span class="annotation-tag mt-2">components/AppNav.tsx</span>
       </a>
       <a href="component-toast.html" class="project-card" style="height:auto;min-height:120px;text-decoration:none;">
