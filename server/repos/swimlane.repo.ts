@@ -71,6 +71,14 @@ export class SwimlaneRepo extends Effect.Service<SwimlaneRepo>()("Lexa/SwimlaneR
           swimlaneId,
           dueAt
         ).pipe(Effect.map((rows) => rows[0]?.c ?? 0)),
+
+      findFirstDueAfter: (swimlaneId: string, dueAt: string): Effect.Effect<{ id: string; title: string } | null, DbError> =>
+        queryAll<{ id: string; title: string }>(
+          db,
+          `SELECT id, title FROM tasks WHERE swimlane_id = ? AND due_at IS NOT NULL AND due_at > ? AND archived_at IS NULL ORDER BY due_at ASC LIMIT 1`,
+          swimlaneId,
+          dueAt
+        ).pipe(Effect.map((rows) => rows[0] ?? null)),
     };
   }),
 }) {}

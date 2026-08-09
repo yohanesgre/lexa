@@ -546,7 +546,7 @@ All list endpoints and MCP `list_*`/`search_*` tools: `?limit` (default 50, max 
 | `SwimlaneNotFound` | 404 | `SWIMLANE_NOT_FOUND` | incl. cross-project refs |
 | `WikiPageNotFound` | 404 | `PAGE_NOT_FOUND` | |
 | `WipLimitExceeded` | 409 | `WIP_LIMIT` | atomic, from conditional UPDATE (not fired by within-column reorders) |
-| `DeadlineAfterLane` | 409 | `DEADLINE_AFTER_LANE` | card dueAt later than its lane's due (create/update/move without clearDueAt; lane dueAt shrunk past a live card's deadline) — payload `{ date, taskId? }` |
+| `DeadlineAfterLane` | 409 | `DEADLINE_AFTER_LANE` | card dueAt later than its lane's due (create/update/move without clearDueAt; lane dueAt shrunk past a live card's deadline) — payload `{ date, taskId?, taskTitle? }` |
 | `BacklogProtected` | 409 | `BACKLOG_PROTECTED` | archive/delete/deadline on the system Backlog lane — payload `{ action }` |
 | `SlugTaken` | 409 | `SLUG_TAKEN` | SQLITE_CONSTRAINT on projects.slug or wiki_pages(project_id, slug); also the constraint fallback on project update/delete |
 | `HasChildren` | 409 | `HAS_CHILDREN` | column delete with tasks; wiki-page delete with children |

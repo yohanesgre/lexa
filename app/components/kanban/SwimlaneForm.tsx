@@ -35,6 +35,16 @@ export function SwimlaneForm({ swimlane, isOpen, onClose, onSubmit, zIndex = 70 
     return () => document.removeEventListener("keydown", handleKeyDown);
   }, [isOpen]);
 
+  // Re-sync fields when opening — the form stays mounted between opens, so
+  // state must be seeded from the target entity each time (create = empty).
+  useEffect(() => {
+    if (!isOpen) return;
+    setName(swimlane?.name ?? "");
+    setDescription(swimlane?.description ?? "");
+    setDueAt(swimlane?.dueAt ?? null);
+    setError(null);
+  }, [isOpen, swimlane]);
+
   if (!isOpen) return null;
 
   const handleSubmit = (event: React.FormEvent) => {
