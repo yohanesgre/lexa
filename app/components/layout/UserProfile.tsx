@@ -57,6 +57,8 @@ export function UserProfile() {
   const cancelEdit = () => {
     setDraft(identity.name);
     setError(null);
+    setView("menu");
+    setOpen(false);
   };
 
   const handleSave = () => {
