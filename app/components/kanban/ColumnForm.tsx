@@ -69,6 +69,22 @@ export function ColumnForm({ column, isOpen, onClose, onSubmit, zIndex = 70 }: C
     return () => document.removeEventListener("keydown", handleKeyDown);
   }, [isOpen]);
 
+  // Re-sync fields when opening — the form stays mounted between opens, so
+  // state must be seeded from the target entity each time (create = empty).
+  useEffect(() => {
+    if (!isOpen) return;
+    setName(column?.name ?? "");
+    setColor(column?.color ?? null);
+    setWipLimit(column?.wipLimit != null ? String(column.wipLimit) : "");
+    setRequiredFields(
+      (column?.requiredFields ?? []).filter(
+        (f): f is RequiredFieldValue => requiredFieldOptions.some((o) => o.value === f)
+      )
+    );
+    setGithubState(column?.githubState ?? null);
+    setError(null);
+  }, [isOpen, column]);
+
   if (!isOpen) return null;
 
   const handleSubmit = (event: React.FormEvent) => {

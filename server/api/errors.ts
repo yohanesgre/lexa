@@ -11,6 +11,7 @@ export class WipLimitExceeded extends Data.TaggedError("WipLimitExceeded")<{ col
 export class DeadlineAfterLane extends Data.TaggedError("DeadlineAfterLane")<{
   date: string;                    // the lane's due date (YYYY-MM-DD)
   taskId?: string;                 // first offending task (lane-shrink path)
+  taskTitle?: string;              // its title, for the message
 }> {}
 export class BacklogProtected extends Data.TaggedError("BacklogProtected")<{
   action: "archive" | "delete" | "deadline";
@@ -198,7 +199,9 @@ export function errorMessage(error: { _tag: string } & Record<string, unknown>):
     case "WipLimitExceeded":
       return `Column '${error.column}' is at its WIP limit of ${error.limit}`;
     case "DeadlineAfterLane":
-      return `Task deadline cannot be later than the lane's (lane due ${error.date})`;
+      return error.taskTitle
+        ? `Task '${error.taskTitle}' has a deadline later than the lane's (lane due ${error.date})`
+        : `Task deadline cannot be later than the lane's (lane due ${error.date})`;
     case "BacklogProtected":
       return `The Backlog lane is protected (${error.action} not allowed)`;
     case "SlugTaken":
