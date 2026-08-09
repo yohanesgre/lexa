@@ -54,8 +54,14 @@ export class SwimlaneService extends Effect.Service<SwimlaneService>()("Lexa/Swi
             return yield* new BacklogProtected({ action: "deadline" });
           if (input.dueAt !== undefined && input.dueAt !== null) {
             const overage = yield* repo.countDueAfter(id, input.dueAt);
-            if (overage > 0)
-              return yield* new DeadlineAfterLane({ date: input.dueAt });
+            if (overage > 0) {
+              const first = yield* repo.findFirstDueAfter(id, input.dueAt);
+              return yield* new DeadlineAfterLane({
+                date: input.dueAt,
+                taskId: first?.id,
+                taskTitle: first?.title,
+              });
+            }
           }
           return yield* repo.update(id, input).pipe(
             Effect.catchTags({

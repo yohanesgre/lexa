@@ -47,6 +47,15 @@ export function OptionForm({ kind, option, isOpen, onClose, onSubmit, zIndex = 8
     return () => document.removeEventListener("keydown", handleKeyDown);
   }, [isOpen]);
 
+  // Re-sync fields when opening — the form stays mounted between opens, so
+  // state must be seeded from the target entity each time (create = empty).
+  useEffect(() => {
+    if (!isOpen) return;
+    setLabel(option?.label ?? "");
+    setColor(option?.color ?? "#F0C040");
+    setError(null);
+  }, [isOpen, option, kind]);
+
   if (!isOpen) return null;
 
   const handleSubmit = (event: React.FormEvent) => {
