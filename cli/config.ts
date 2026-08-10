@@ -133,6 +133,20 @@ function saveDeployCredsSync(creds: DeployCreds, dir: string): void {
   chmodSync(path, 0o600);
 }
 
+function clearDeployCredsSync(dir: string): void {
+  const path = join(dir, "config.json");
+  try {
+    if (!existsSync(path)) return;
+    const existing = JSON.parse(readFileSync(path, "utf-8")) as Record<string, unknown>;
+    if (!("deploy" in existing)) return;
+    delete existing.deploy;
+    writeFileSync(path, JSON.stringify(existing, null, 2) + "\n", { mode: 0o600 });
+    chmodSync(path, 0o600);
+  } catch {
+    // best-effort like the other config writes
+  }
+}
+
 export class CliConfigService extends Effect.Service<CliConfigService>()("LexaCli/CliConfigService", {
   effect: Effect.gen(function* () {
     return {
@@ -143,6 +157,7 @@ export class CliConfigService extends Effect.Service<CliConfigService>()("LexaCl
       clearConfig: (): Effect.Effect<void, never> => Effect.sync(clearConfigSync),
       loadDeployCreds: (dir: string = LEXA_DIR): Effect.Effect<DeployCreds | null, never> => Effect.sync(() => loadDeployCredsSync(dir)),
       saveDeployCreds: (creds: DeployCreds, dir: string = LEXA_DIR): Effect.Effect<void, never> => Effect.sync(() => saveDeployCredsSync(creds, dir)),
+      clearDeployCreds: (dir: string = LEXA_DIR): Effect.Effect<void, never> => Effect.sync(() => clearDeployCredsSync(dir)),
     };
   }),
 }) {}

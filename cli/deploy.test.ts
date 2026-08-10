@@ -19,10 +19,15 @@ const childMocks = vi.hoisted(() => ({
 const composeMocks = vi.hoisted(() => ({ empty: false }));
 
 // CF request recorder + app-policy list override (the cmdDeploy policy
-// branch tests assert the PUT target and body).
+// branch tests assert the PUT target and body). The list overrides let
+// cmdUndeploy tests seed existing resources so the DELETE paths run.
 const cfMocks = vi.hoisted(() => ({
   requests: [] as Array<{ url: string; method: string; body: string }>,
   policyList: [] as Array<{ id: string; precedence?: number; app_count?: number; reusable?: boolean; name?: string }>,
+  dnsList: [] as Array<{ id: string }>,
+  tunnelList: [] as Array<{ id: string }>,
+  appList: [] as Array<{ id: string }>,
+  idpList: [] as Array<{ id: string; type: string; name?: string }>,
 }));
 
 vi.mock("./packed-compose", async () => {
@@ -53,6 +58,10 @@ beforeEach(() => {
   childMocks.spawnSyncStatus = 0;
   cfMocks.requests.length = 0;
   cfMocks.policyList = [];
+  cfMocks.dnsList = [];
+  cfMocks.tunnelList = [];
+  cfMocks.appList = [];
+  cfMocks.idpList = [];
   vi.resetModules();
 });
 
@@ -81,12 +90,12 @@ function stubCfApi(): void {
     if (path.includes("/access/apps/") && path.includes("/policies")) result = method === "GET" ? cfMocks.policyList : {};
     // Account-level policies endpoint — reusable policy updates land here.
     else if (path.includes("/access/policies/")) result = {};
-    else if (path.includes("/access/apps")) result = method === "GET" ? [] : { id: "app1" };
-    else if (path.includes("/access/identity_providers")) result = method === "GET" ? [] : { id: "idp1" };
+    else if (path.includes("/access/apps")) result = method === "GET" ? cfMocks.appList : { id: "app1" };
+    else if (path.includes("/access/identity_providers")) result = method === "GET" ? cfMocks.idpList : { id: "idp1" };
     else if (path.includes("/cfd_tunnel") && path.includes("/token")) result = { token: "tok1" };
     else if (path.includes("/cfd_tunnel") && path.includes("/configurations")) result = {};
-    else if (path.includes("/cfd_tunnel")) result = method === "GET" ? [] : { id: "tun1" };
-    else if (path.includes("/dns_records")) result = method === "GET" ? [] : {};
+    else if (path.includes("/cfd_tunnel")) result = method === "GET" ? cfMocks.tunnelList : { id: "tun1" };
+    else if (path.includes("/dns_records")) result = method === "GET" ? cfMocks.dnsList : {};
     else if (path.includes("/zones")) result = [{ id: "zone1" }];
     else if (path.includes("/accounts")) result = [{ id: "acc1" }];
     return Promise.resolve(cfResponse(result));
@@ -338,5 +347,126 @@ describe("cmdDeploy end-to-end", () => {
     // No account-level PUT for an app-scoped row.
     expect(cfMocks.requests.some((r) => r.method === "PUT" && r.url.includes("/access/policies/pol-app"))).toBe(false);
     expect(log).toContain("Updating existing policy: pol-app");
+  });
+});
+
+describe("cmdUndeploy", () => {
+  // isTTY is forced per test — earlier cmdDeploy TTY tests leave it true,
+  // which would route non-TTY tests into the stdin prompt and hang.
+  async function invokeUndeploy(deployDir: string, flags: Record<string, string | boolean>, positionals: string[], opts: { tty?: boolean; input?: string } = {}): Promise<string> {
+    stubCfApi();
+    Object.defineProperty(process.stdin, "isTTY", { value: opts.tty === true, configurable: true });
+    if (opts.input) process.stdin.push(opts.input);
+    const log = vi.spyOn(console, "log").mockImplementation(() => {});
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const mod = await import("./deploy");
+    const cfg = (await import("./config")).CliConfigService;
+    const svc = Effect.runSync(Effect.scoped(Layer.build(cfg.Default)));
+    let captured = "";
+    try {
+      await Effect.runPromise(
+        mod.cmdUndeploy({ ...flags, "deploy-dir": deployDir }, positionals).pipe(
+          Effect.provideService(cfg, Context.get(svc, cfg)),
+        ),
+      );
+    } finally {
+      captured = [...log.mock.calls, ...warn.mock.calls].map((c) => String(c[0])).join("\n");
+      log.mockRestore();
+      warn.mockRestore();
+    }
+    return captured;
+  }
+
+  it("full non-TTY flow with --yes: compose down, CF deletions in order, local state removed", async () => {
+    const deployDir = mkdtempSync(join(tmpdir(), "lexa-undeploy-e2e-"));
+    // A deployed flavor has its env file in the deploy dir (deploy writes it).
+    writeFileSync(join(deployDir, ".env.prod"), "LXK_ENV=prod\n");
+    // Saved login + deploy creds — teardown must keep the login, drop deploy.
+    writeFileSync(join(lexaDir, "config.json"), JSON.stringify({ url: "http://example.com", apiKey: "k", deploy: { cfToken: "cf-tok" } }));
+    cfMocks.dnsList = [{ id: "dns1" }];
+    cfMocks.tunnelList = [{ id: "tun1" }];
+    cfMocks.appList = [{ id: "app1" }];
+    cfMocks.policyList = [
+      { id: "pol-app1", precedence: 1 },
+      { id: "pol-reuse", reusable: true, app_count: 1 },
+    ];
+    cfMocks.idpList = [{ id: "idp1", type: "google", name: "Google Login (prod)" }];
+
+    const log = await invokeUndeploy(deployDir, { ...DEPLOY_FLAGS, yes: true }, ["example.com", "prod"]);
+
+    // Compose down with the flavor project name + env file.
+    const down = childMocks.spawnSyncCalls.find((c) => c.args.includes("down"));
+    expect(down?.cmd).toBe("docker");
+    expect(down?.args).toEqual(["compose", "-f", "docker-compose.yml", "-f", "docker-compose.prod.yml", "--env-file", ".env.prod", "down", "-v"]);
+    expect((down?.opts.env as Record<string, string>).COMPOSE_PROJECT_NAME).toBe("lexa-prod");
+
+    // CF deletions in order: DNS → tunnel → policies (app-scoped + reusable) → app → IdP.
+    const deletes = cfMocks.requests.filter((r) => r.method === "DELETE");
+    const dnsIdx = deletes.findIndex((r) => r.url.includes("/dns_records/dns1"));
+    const tunIdx = deletes.findIndex((r) => r.url.includes("/cfd_tunnel/tun1"));
+    const polAppIdx = deletes.findIndex((r) => r.url.includes("/access/apps/app1/policies/pol-app1"));
+    const polReuseIdx = deletes.findIndex((r) => r.url.includes("/access/policies/pol-reuse"));
+    const appIdx = deletes.findIndex((r) => r.url.includes("/access/apps/app1") && !r.url.includes("/policies"));
+    const idpIdx = deletes.findIndex((r) => r.url.includes("/identity_providers/idp1"));
+    expect(dnsIdx).toBeGreaterThanOrEqual(0);
+    expect(tunIdx).toBeGreaterThan(dnsIdx);
+    expect(polAppIdx).toBeGreaterThan(tunIdx);
+    expect(polReuseIdx).toBeGreaterThan(polAppIdx);
+    expect(appIdx).toBeGreaterThan(polReuseIdx);
+    expect(idpIdx).toBeGreaterThan(appIdx);
+
+    // Local state: deploy dir gone, login kept, deploy key dropped.
+    expect(existsSync(deployDir)).toBe(false);
+    const saved = JSON.parse(readFileSync(join(lexaDir, "config.json"), "utf-8")) as Record<string, unknown>;
+    expect(saved).toEqual({ url: "http://example.com", apiKey: "k" });
+    expect(log).toContain("Undeployed prod (lexa.example.com) — containers, volume, CF resources, and local state removed.");
+  });
+
+  it("non-TTY without --yes fails before any side effects", async () => {
+    Object.defineProperty(process.stdin, "isTTY", { value: false, configurable: true });
+    const mod = await import("./deploy");
+    const cfg = (await import("./config")).CliConfigService;
+    const svc = Effect.runSync(Effect.scoped(Layer.build(cfg.Default)));
+    const err = (await Effect.runPromise(
+      mod.cmdUndeploy({ ...DEPLOY_FLAGS }, ["example.com", "prod"]).pipe(
+        Effect.provideService(cfg, Context.get(svc, cfg)),
+      ),
+    ).catch((e) => e)) as Error;
+    expect(err.message).toMatch(/--yes/);
+    expect(childMocks.spawnSyncCalls.length).toBe(0);
+    expect(cfMocks.requests.length).toBe(0);
+  });
+
+  it("missing CF token: compose down + local state still happen, CF skipped, warning printed", async () => {
+    const deployDir = mkdtempSync(join(tmpdir(), "lexa-undeploy-e2e-"));
+    writeFileSync(join(deployDir, ".env.prod"), "LXK_ENV=prod\n");
+    const { "cf-token": _cfToken, ...noToken } = DEPLOY_FLAGS;
+    const log = await invokeUndeploy(deployDir, { ...noToken, yes: true }, ["example.com", "prod"]);
+
+    expect(childMocks.spawnSyncCalls.some((c) => c.args.includes("down"))).toBe(true);
+    expect(cfMocks.requests.length).toBe(0);
+    expect(log).toContain("No Cloudflare API token");
+    expect(existsSync(deployDir)).toBe(false);
+    expect(existsSync(join(lexaDir, "config.json"))).toBe(false);
+  });
+
+  it("TTY confirmation mismatch aborts with exit 1 before any side effects", async () => {
+    const exitSpy = vi.spyOn(process, "exit").mockImplementation(((code?: number) => { throw new Error(`exit(${code})`); }) as never);
+    Object.defineProperty(process.stdin, "isTTY", { value: true, configurable: true });
+    process.stdin.push("nope\n");
+    const log = vi.spyOn(console, "log").mockImplementation(() => {});
+    const mod = await import("./deploy");
+    const cfg = (await import("./config")).CliConfigService;
+    const svc = Effect.runSync(Effect.scoped(Layer.build(cfg.Default)));
+    await expect(
+      Effect.runPromise(mod.cmdUndeploy({ ...DEPLOY_FLAGS }, ["example.com", "prod"]).pipe(
+        Effect.provideService(cfg, Context.get(svc, cfg)),
+      )),
+    ).rejects.toThrow(/exit\(1\)/);
+    expect(log.mock.calls.map((c) => String(c[0])).join("\n")).toContain("Aborted (confirmation did not match).");
+    expect(childMocks.spawnSyncCalls.length).toBe(0);
+    expect(cfMocks.requests.length).toBe(0);
+    exitSpy.mockRestore();
+    log.mockRestore();
   });
 });
