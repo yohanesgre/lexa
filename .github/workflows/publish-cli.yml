@@ -31,4 +31,6 @@ jobs:
       - name: Create release with the binary
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh release create "${{ github.ref_name }}" bin/lexa-cli --generate-notes
+        # --clobber: retargeting/re-running a cli-v* tag must not fail on the
+        # existing release — it replaces the release + binary atomically.
+        run: gh release create "${{ github.ref_name }}" bin/lexa-cli --generate-notes --clobber
