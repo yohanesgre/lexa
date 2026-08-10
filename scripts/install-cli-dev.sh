@@ -10,6 +10,7 @@ mkdir -p "$HOME/.local/bin"
 {
   echo "#!/usr/bin/env sh"
   echo "# lexa-cli-dev — dev build: runs live repo source via bun."
+  echo "export LEXA_DIR=\"\$HOME/.lexa-dev\""
   echo "exec bun run \"$root/cli/index.ts\" \"\$@\""
 } > "$HOME/.local/bin/lexa-cli-dev"
 chmod +x "$HOME/.local/bin/lexa-cli-dev"
