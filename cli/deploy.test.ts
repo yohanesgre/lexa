@@ -245,6 +245,7 @@ describe("cmdDeploy end-to-end", () => {
     expect(env).toContain("LXK_ADMIN_EMAILS=admin@example.com");
     expect(env).toContain("LXK_ENV=prod");
     expect(env).toContain("CF_TUNNEL_TOKEN=tok1");
+    expect(env).toContain("LXK_ACCESS_TEAM=lexa");
     // Deploy creds persisted via CliConfigService.
     const saved = JSON.parse(readFileSync(join(lexaDir, "config.json"), "utf-8")) as { deploy?: unknown };
     expect(saved.deploy).toEqual({ cfToken: "cf-tok", googleClientId: "g-id", googleClientSecret: "g-sec", cfTeamDomain: "lexa.cloudflareaccess.com", emailDomain: "example.com" });
