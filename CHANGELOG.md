@@ -4,6 +4,16 @@ All notable changes to Lexa are documented here. Format based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). This project follows
 [Semantic Versioning](https://semver.org/).
 
+## [0.1.1] - 2026-08-10
+
+### Fixed
+
+- **Docker image size** — multi-stage build (builder + lean runtime with
+  production-only deps) cuts the image from 1.66GB to ~648MB (61% smaller;
+  ~280MB compressed to the registry). No behavior change; verified with a
+  full container smoke test (health, SSR, authenticated API round-trip).
+  CLI binary size unchanged (~74MB — bun compile floor).
+
 ## [0.1.0] - 2026-08-10
 
 Initial release. Self-hosted project management tool: kanban with swimlanes
