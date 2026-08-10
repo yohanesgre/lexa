@@ -105,13 +105,14 @@ const DEPLOY_FLAGS = {
 };
 
 describe("materializeCompose", () => {
-  it("writes the embedded compose files (gunzipped) to --deploy-dir", async () => {
+  it("writes only the flavor's compose files (gunzipped) to --deploy-dir", async () => {
     const mod = await import("./deploy");
     const deployDir = mkdtempSync(join(tmpdir(), "lexa-deploy-dir-"));
     const out = mod.materializeCompose("prod", { "deploy-dir": deployDir });
     expect(out).toBe(deployDir);
     const files = readdirSync(deployDir).sort();
-    expect(files).toEqual(["docker-compose.staging.yml", "docker-compose.yml", "docker-compose.prod.yml"].sort());
+    expect(files).toEqual(["docker-compose.yml", "docker-compose.prod.yml"].sort());
+    expect(existsSync(join(deployDir, "docker-compose.staging.yml"))).toBe(false);
     const base = readFileSync(join(deployDir, "docker-compose.yml"), "utf-8");
     expect(base.length).toBeGreaterThan(100);
     expect(base).toMatch(/services:/);

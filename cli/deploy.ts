@@ -1,10 +1,10 @@
 // lexa-cli deploy — Docker Compose + cloudflared tunnel + Cloudflare Access
 // provisioning. TypeScript port of the former scripts/setup.sh. Deploy
-// credentials persist in ~/.lexa-<flavor>/config.json under the `deploy` key,
-// so deploy works without a saved login (url/apiKey).
+// credentials persist in ~/.lexa/config.json (prod) or ~/.lexa-staging/config.json
+// under the `deploy` key, so deploy works without a saved login (url/apiKey).
 import { Effect, Data } from "effect";
 import { spawnSync } from "node:child_process";
-import { existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync, mkdirSync, rmSync } from "node:fs";
 import { randomBytes } from "node:crypto";
 import { gunzipSync } from "node:zlib";
 import { join } from "node:path";
@@ -32,7 +32,7 @@ function usage(): never {
   console.error("  prod    — remote, lexa.<domain>, .env.prod");
   console.error("");
   console.error("Flags (all optional — prompts fill what's missing on a TTY):");
-  console.error("  --deploy-dir <path>       compose/env working dir (default: ~/.lexa-<flavor>/deploy)");
+  console.error("  --deploy-dir <path>       compose/env working dir (default: ~/.lexa/deploy; staging: ~/.lexa-staging/deploy)");
   console.error("  --image <tag>             image tag to deploy (default: latest; staging flavor: staging)");
   console.error("  --clean                   recreate from scratch — removes the data volume (DB wiped)");
   console.error("  --cf-token <token>        Cloudflare API token (env: CF_API_TOKEN)");
@@ -212,9 +212,9 @@ export function runCompose(flavor: Flavor, opts: { imageTag?: string; clean?: bo
 
 // The deploy contract is the three compose files (image refs + volumes +
 // tunnel) — embedded in the binary (few KB) so a clean machine needs no repo.
-// Materialize them into ~/.lexa-<flavor>/deploy and work from there. When
-// running from source (dev shim, no embedded files), fall back to the local
-// repo's compose files.
+// Materialize them into ~/.lexa/deploy (prod) or ~/.lexa-staging/deploy and
+// work from there. When running from source (dev shim, no embedded files),
+// fall back to the local repo's compose files.
 export function materializeCompose(flavorName: string, flags: Record<string, string | boolean>): string {
   const deployDir = flagStr(flags, "deploy-dir") || join(lexaDirFor(flavorName as LexaFlavor), "deploy");
   const entries = Object.entries(COMPOSE_FILES);
@@ -224,8 +224,14 @@ export function materializeCompose(flavorName: string, flags: Record<string, str
     throw new Error("no embedded compose files and no docker-compose.yml in cwd (run `bun run compile:cli` or use --deploy-dir)");
   }
   mkdirSync(deployDir, { recursive: true });
+  const flavorFiles = new Set(["docker-compose.yml", `docker-compose.${flavorName}.yml`]);
   for (const [rel, packed] of entries) {
-    writeFileSync(join(deployDir, rel), gunzipSync(Buffer.from(packed, "base64")));
+    if (flavorFiles.has(rel)) {
+      writeFileSync(join(deployDir, rel), gunzipSync(Buffer.from(packed, "base64")));
+    } else {
+      // Stale override files from another flavor (pre-split CLI wrote all three).
+      rmSync(join(deployDir, rel), { force: true });
+    }
   }
   return deployDir;
 }

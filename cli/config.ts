@@ -1,8 +1,10 @@
 // lexa-cli config — login credentials stored per-user under the flavor
 // state root:
-//   ~/.lexa-<flavor>/config.json  { url, apiKey }
+//   ~/.lexa/config.json           { url, apiKey }  (prod)
+//   ~/.lexa-staging/config.json   { url, apiKey }  (staging)
+//   ~/.lexa-dev/config.json       { url, apiKey }  (dev shim)
 // Each flavor (dev/staging/prod) gets its own state root
-// (~/.lexa-dev, ~/.lexa-staging, ~/.lexa-prod; LEXA_DIR override wins):
+// (~/.lexa-dev, ~/.lexa-staging, ~/.lexa for prod; LEXA_DIR override wins):
 // config, machine-id, bootstrap env, per-runtime envs, and per-run workdirs.
 // Deploy creds live under the flavor root's config.json `deploy` key.
 //
@@ -29,12 +31,13 @@ export interface DeployCreds {
   emailDomain?: string;
 }
 
-export const LEXA_DIR = process.env.LEXA_DIR ?? join(homedir(), ".lexa-prod");
+export const LEXA_DIR = process.env.LEXA_DIR ?? join(homedir(), ".lexa");
 
 export type LexaFlavor = "dev" | "staging" | "prod";
 
 export function lexaDirFor(flavor: LexaFlavor): string {
-  return process.env.LEXA_DIR ?? join(homedir(), `.lexa-${flavor}`);
+  if (process.env.LEXA_DIR) return process.env.LEXA_DIR;
+  return join(homedir(), flavor === "prod" ? ".lexa" : `.lexa-${flavor}`);
 }
 
 const CONFIG_PATH = join(LEXA_DIR, "config.json");
