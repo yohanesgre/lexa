@@ -76,7 +76,7 @@ The image is built and pushed by CI (`.github/workflows/publish.yml`): main →
 embeds the compose files (image refs, volumes, tunnel — few KB) and pulls the
 image — **no checkout, no build, no git**. It checks docker/compose,
 provisions Cloudflare (tunnel, DNS, Access, Google IdP), writes `.env.prod`
-into `~/.lexa-prod/deploy/` (staging → `~/.lexa-staging/deploy/`), and runs
+into `~/.lexa/deploy/` (staging → `~/.lexa-staging/deploy/`), and runs
 `docker compose up`. **Redeploy = upgrade**:
 deploy always pulls the latest image; `--image <tag>` pins a specific version;
 `--clean` recreates from scratch (removes the `lexa-data` volume — DB wiped,
@@ -125,7 +125,8 @@ OAuth client ID (Web application):
 Repeat for each flavor you deploy. Note the client ID + secret (the secret is
 shown once). Pass them with `--google-client-id <id> --google-client-secret <s>`
 (or let the TTY prompt ask). They are stored per-flavor in
-`~/.lexa-<flavor>/config.json`, so re-deploys reuse them without flags.
+`~/.lexa/config.json` (staging: `~/.lexa-staging/config.json`), so re-deploys
+reuse them without flags.
 
 ### 3. What `lexa-cli deploy` provisions (per flavor)
 
@@ -140,7 +141,8 @@ All Cloudflare state is per-flavor (distinct names for staging vs prod):
 6. **Policy** `Allow @<email-domain>` (email-domain include) — pass `--email-domain <domain>`
 
 All deploy creds (CF token, Google client, team/email domain) persist in
-`~/.lexa-<flavor>/config.json` under the `deploy` key.
+`~/.lexa/config.json` (staging: `~/.lexa-staging/config.json`) under the
+`deploy` key.
 
 ### 4. After deploy — hand-set two vars
 

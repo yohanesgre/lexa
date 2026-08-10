@@ -244,7 +244,7 @@ export interface MachineInfo {
 
 // Heartbeat response extends the machine with the project index (id, name,
 // slug, description) — the listener provisions one workspace dir per project
-// under ~/.lexa-<flavor>/projects/ from it.
+// under ~/.lexa/projects/ (prod) or ~/.lexa-staging/projects/ from it.
 export interface MachineHeartbeatInfo extends MachineInfo {
   projects: Array<{ id: string; name: string; slug: string; description: string }>;
 }
