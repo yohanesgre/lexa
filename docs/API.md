@@ -61,7 +61,7 @@ All non-2xx responses share one shape:
 | 422 | `SEARCH_ERROR` | Wiki FTS5 query rejected |
 | 422 | `SOURCE_UNREACHABLE` | External source DNS/fetch failed after the SSRF guard (details: `{ url }`) |
 | 422 | `API_KEY_NAME_EMPTY` | API key name missing or blank |
-| 429 | `RATE_LIMITED` | Per-IP rate limit exceeded on `/api/*` or `/mcp` (webhook, `/api/forge/daemon/*`, `/api/forge/runtimes/register` exempt; `/api/setup*` + `/api/health` ARE limited) — `/api` enforced in the API middleware, `/mcp` in `server/entry.ts`, one shared bucket; see docs/RATE_LIMITING.md |
+| 429 | `RATE_LIMITED` | Per-IP rate limit exceeded on `/api/*` or `/mcp` (webhook, `/api/forge/daemon/*`, `/api/forge/runtimes/register` exempt; `/api/setup*` + `/api/health` ARE limited) — `/api` enforced in the API middleware, `/mcp` in `server/entry.ts`, one shared bucket |
 | 500 | `DATABASE_ERROR` / `INTERNAL` | |
 | 502 | `GITHUB_API_ERROR` | Only on explicit GitHub-linking endpoints; never on moves |
 | 502 | `SOURCE_FETCH_ERROR` | External source fetch failed upstream after the SSRF guard (details: `{ message }`) |
@@ -671,7 +671,7 @@ PATCH  /api/projects/:slug/wiki/:pageSlug
 body { title?, slug?, content?, parentId?, position?, saveType?: "autosave"|"manual" }
   saveType defaults to "autosave" — controls which revision bucket the update
   lands in.
-→ 200 WikiPage | 404 | 409 SLUG_TAKEN
+→ 200 WikiPage | 404 | 409 CONSTRAINT
 
 DELETE /api/projects/:slug/wiki/:pageSlug
 → 204 | 404 | 409 HAS_CHILDREN { count }

@@ -79,9 +79,11 @@ export function OptionSettingsSection({ kind, title, description, options, senso
           </DndContext>
         </div>
       )}
+      {/* Proper singularization: "Priorities" → "Priority" (not "Prioritie"),
+          "Types" → "Type". The section header above keeps the plural. */}
       <button type="button" className="btn btn-ghost mt-3" onClick={onAdd}>
         <Plus size={14} strokeWidth={1.5} />
-        Add {title.slice(0, -1)}
+        Add {title.endsWith("ies") ? `${title.slice(0, -3)}y` : title.slice(0, -1)}
       </button>
     </section>
   );

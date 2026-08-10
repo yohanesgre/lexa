@@ -10,6 +10,8 @@ data/
 bin/
 routeTree.gen.ts
 app/routeTree.gen.ts
+# Private working docs (html viz, specs, superpowers plans) — never published
+docs/private/
 worker-configuration.d.ts
 *.log
 .playwright-mcp/
@@ -28,3 +30,6 @@ skills-lock.json
 .agents/
 # Vendored Effect source for the effect-ts skill (version-pinned by scripts/prepare-effect.sh)
 .repos/
+
+# Deepwork session state (git-local, OpenCode-readable)
+.slim/deepwork/

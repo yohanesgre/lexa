@@ -72,9 +72,11 @@ export class SwimlaneService extends Effect.Service<SwimlaneService>()("Lexa/Swi
           );
         }),
 
-      delete: (id: string): Effect.Effect<void, SwimlaneNotFound | HasChildren | DbError> =>
+      delete: (id: string): Effect.Effect<void, SwimlaneNotFound | BacklogProtected | HasChildren | DbError> =>
         Effect.gen(function* () {
-          yield* repo.findById(id).pipe(Effect.catchTag("RowNotFound", () => new SwimlaneNotFound({ id })));
+          const lane = yield* repo.findById(id).pipe(Effect.catchTag("RowNotFound", () => new SwimlaneNotFound({ id })));
+          // The Backlog lane is permanent — it can never be deleted.
+          if (lane.kind === "backlog") return yield* new BacklogProtected({ action: "delete" });
           const count = yield* repo.countTasks(id);
           if (count > 0) return yield* new HasChildren({ count });
           yield* repo.delete(id).pipe(

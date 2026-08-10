@@ -132,7 +132,10 @@ export function ColumnForm({ column, isOpen, onClose, onSubmit, zIndex = 70 }: C
           aria-modal="true"
           aria-labelledby="column-form-title"
         >
-          <form onSubmit={handleSubmit}>
+          {/* noValidate: the WIP input carries min={1}, whose native constraint
+              validation would block the submit event before handleSubmit runs,
+              making the custom "WIP limit must be at least 1" error dead code. */}
+          <form onSubmit={handleSubmit} noValidate>
             <div className="flex items-center justify-between h-14 px-4 border-b border-lx-border-subtle flex-shrink-0">
               <h2 id="column-form-title" className="font-display text-base font-medium text-lx-text-primary">
                 {isEdit ? "Edit Column" : "Create Column"}

@@ -9,3 +9,5 @@ data
 .env.prod
 github-app.private-key.pem
 *.log
+cli
+forge
