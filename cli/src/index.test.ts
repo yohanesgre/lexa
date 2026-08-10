@@ -13,7 +13,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { NotLoggedIn } from "./index";
 
-const REPO_ROOT = join(import.meta.dirname ?? ".", "..");
+const REPO_ROOT = join(import.meta.dirname ?? ".", "..", "..");
 // Fresh per-run LEXA_DIR so subprocesses never see the real saved login.
 const isolationDirs: string[] = [];
 
@@ -31,7 +31,7 @@ interface RunResult {
 
 function runCli(args: string[], env: Record<string, string> = {}): Promise<RunResult> {
   return new Promise((resolve, reject) => {
-    const child = spawn("bun", ["cli/index.ts", ...args], {
+    const child = spawn("bun", ["cli/src/index.ts", ...args], {
       cwd: REPO_ROOT,
       env: { ...process.env, ...env, LEXA_DIR: env.LEXA_DIR ?? freshLexaDir() },
     });
@@ -69,7 +69,8 @@ describe("entry point (bun subprocess)", () => {
   it("prints the CLI version", async () => {
     const r = await runCli(["--version"]);
     expect(r.status).toBe(0);
-    expect(r.stdout.trim()).toBe("lexa-cli dev");
+    const pkg = await import("../package.json");
+    expect(r.stdout.trim()).toBe(`lexa-cli ${pkg.version}`);
   });
 
   it("rejects an unknown command with usage + exit 1", async () => {
