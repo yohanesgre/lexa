@@ -76,7 +76,8 @@ The image is built and pushed by CI (`.github/workflows/publish.yml`): main →
 embeds the compose files (image refs, volumes, tunnel — few KB) and pulls the
 image — **no checkout, no build, no git**. It checks docker/compose,
 provisions Cloudflare (tunnel, DNS, Access, Google IdP), writes `.env.prod`
-into `~/.lexa/deploy/`, and runs `docker compose up`. **Redeploy = upgrade**:
+into `~/.lexa-prod/deploy/` (staging → `~/.lexa-staging/deploy/`), and runs
+`docker compose up`. **Redeploy = upgrade**:
 deploy always pulls the latest image; `--image <tag>` pins a specific version;
 `--clean` recreates from scratch (removes the `lexa-data` volume — DB wiped,
 confirmed on a TTY). The data volume survives normal redeploys untouched.
@@ -89,6 +90,75 @@ writes `.env.prod` with `LXK_ENV=prod`, runs migrations, mirrors the admin
 email, locks setup, and seeds nothing.
 
 **GitHub sync** — see `docs/GITHUB_SETUP.md` (includes the acceptance round-trip).
+
+## Google OAuth & Cloudflare Access setup
+
+Human auth is Cloudflare Access with Google as the identity provider. `lexa-cli
+deploy` provisions the Cloudflare side (tunnel, DNS, Access app, Google IdP);
+you create the Google OAuth client(s) and hand-set two env vars after deploy.
+
+### 1. Cloudflare API token
+
+Create a token with exactly these permissions (see `lexa-cli deploy` prompt):
+
+| Scope | Permission |
+|---|---|
+| Cloudflare One | Cloudflare One Connectors — **Write** |
+| Zone | DNS — **Write** |
+| Access: Apps and Policies | **Edit** |
+| Access: Identity Providers | **Read** |
+
+Pass it with `--cf-token <token>` or `CF_API_TOKEN` / `CLOUDFLARE_API_TOKEN`.
+
+### 2. Google OAuth client — one per flavor
+
+Each flavor gets its **own Google OAuth client** (staging and prod must not
+share one — the deploy creates a per-flavor Access IdP `Google Login
+(staging)` / `Google Login (prod)` that carries that flavor's client).
+
+In Google Cloud Console → APIs & Services → Credentials → Create credentials →
+OAuth client ID (Web application):
+
+- **Authorized redirect URI:** `https://<team>.cloudflareaccess.com/cdn-cgi/access/callback`
+  (replace `<team>` with your Access team domain, e.g. `yohanesgre`)
+
+Repeat for each flavor you deploy. Note the client ID + secret (the secret is
+shown once). Pass them with `--google-client-id <id> --google-client-secret <s>`
+(or let the TTY prompt ask). They are stored per-flavor in
+`~/.lexa-<flavor>/config.json`, so re-deploys reuse them without flags.
+
+### 3. What `lexa-cli deploy` provisions (per flavor)
+
+Account = the first account on the token; zone = the one matching `<domain>`.
+All Cloudflare state is per-flavor (distinct names for staging vs prod):
+
+1. **Tunnel** `lexa-staging` / `lexa-prod` — token written to `.env.<flavor>` as `CF_TUNNEL_TOKEN`
+2. **DNS** — CNAME `<subdomain>.<domain>` → `<tunnel>.cfargotunnel.com` (proxied)
+3. **Ingress** — `<subdomain>.<domain>` → `http://app:3000` (warns on failure; add manually via Zero Trust → Tunnels → Public Hostnames if the API call fails)
+4. **Access Google IdP** `Google Login (<flavor>)` — created, or **updated** if a same-named IdP exists; each flavor owns its own, so the OAuth clients stay separate
+5. **Access app** `Lexa (<flavor>)` on `<subdomain>.<domain>`, `allowed_idps` = that flavor's IdP, `auto_redirect_to_identity`
+6. **Policy** `Allow @<email-domain>` (email-domain include) — pass `--email-domain <domain>`
+
+All deploy creds (CF token, Google client, team/email domain) persist in
+`~/.lexa-<flavor>/config.json` under the `deploy` key.
+
+### 4. After deploy — hand-set two vars
+
+| Var | Value | Effect |
+|---|---|---|
+| `LXK_ACCESS_AUD` | `https://<team>.cloudflareaccess.com/cdn-cgi/access/get-ksi` (Access audience tag) | `/api` and `/mcp` require valid Access JWTs; without it only API keys are checked. **Per-app tag**: each flavor's Access app has its own AUD — fetch it from that app's `get-ksi`, never share between flavors |
+| `LXK_ACCESS_TEAM` | `<team>` (Access team subdomain) | enables the "Sign out" (Access logout) link in the account menu |
+
+Add them to the flavor env file (`.env.staging` / `.env.prod`); the deploy's
+carry-forward keeps hand-added keys across re-deploys. Restart the container
+to apply (`docker compose restart` in the flavor deploy dir, or just redeploy).
+
+### 5. Verify
+
+- Browse `https://<subdomain>.<domain>` → redirected to the Google login of *that flavor's* OAuth client
+- Sign in with an `@<email-domain>` account → dashboard loads
+- `curl -I https://<subdomain>.<domain>/api/health` without an Access session → 302 to the Access login
+- Account menu shows **Sign out** (only when `LXK_ACCESS_TEAM` is set)
 
 ## Secrets hygiene
 
