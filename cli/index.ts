@@ -22,7 +22,7 @@
 import { Effect, Data } from "effect";
 import { LexaClient, ApiError } from "./api";
 import { CliConfigService, type CliConfig } from "./config";
-import { cmdDeploy } from "./deploy";
+import { cmdDeploy, cmdUndeploy } from "./deploy";
 import { cmdGithubStatus, cmdGithubSetup, cmdGithubCheck } from "./github";
 import { cmdUpgradeCli } from "./upgrade";
 import { CLI_VERSION } from "./version";
@@ -495,6 +495,8 @@ Deploy (Docker + cloudflared tunnel + Access):
                                            provisioning, .env.<flavor> + docker compose up
                                            (redeploy = upgrade: pulls the latest image;
                                            --image <tag> pins a version; --clean wipes the DB)
+  undeploy <domain> [staging|prod]        teardown: containers, volume, CF resources,
+                                           local state (deploy dir + creds)
 
 GitHub sync (optional integration):
   github status [--env-file <path>]       validate GITHUB_* vars in the env file
@@ -588,6 +590,7 @@ async function main(): Promise<void> {
     case "logout": program = cmdLogout(); break;
     case "status": program = cmdStatus(flags); prefix = "Status check failed"; break;
     case "deploy": program = cmdDeploy(flags, positionals.slice(1)); raw = true; break;
+    case "undeploy": program = cmdUndeploy(flags, positionals.slice(1)); raw = true; break;
 
     case "upgrade":
       if (sub !== "") usage("upgrade", sub);

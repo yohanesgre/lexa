@@ -42,6 +42,17 @@ function usage(): never {
   console.error("  --email-domain <domain>   allowed email domain for the Access policy");
   console.error("  --admin-email <email>     admin email (reuses LXK_ADMIN_EMAILS from the env file)");
   console.error("  --api-key <key>           lxk_ API key (reuses LXK_API_KEY from the env file)");
+  console.error("");
+  console.error("Usage: lexa-cli undeploy <domain> [staging|prod] [flags]");
+  console.error("  staging — remote, lexa-preview.<domain>, .env.staging");
+  console.error("  prod    — remote, lexa.<domain>, .env.prod");
+  console.error("");
+  console.error("Reverses deploy: docker compose down -v (DB wiped), Cloudflare resources");
+  console.error("(DNS, tunnel, Access app + policies, Google IdP), and local state (deploy dir + creds).");
+  console.error("Flags:");
+  console.error("  --cf-token <token>        Cloudflare API token (env: CF_API_TOKEN)");
+  console.error("  --deploy-dir <path>       compose/env working dir (default: ~/.lexa/deploy; staging: ~/.lexa-staging/deploy)");
+  console.error("  --yes                     confirm teardown without a prompt (non-TTY only)");
   process.exit(1);
 }
 
@@ -206,6 +217,24 @@ export function runCompose(flavor: Flavor, opts: { imageTag?: string; clean?: bo
     });
     if (docker.status !== 0) {
       return yield* new DeployError({ reason: `  ERROR: docker compose failed (status ${docker.status ?? docker.signal ?? "?"})` });
+    }
+  });
+}
+
+export function downCompose(flavor: Flavor): Effect.Effect<void, DeployError, never> {
+  return Effect.gen(function* () {
+    if (!existsSync(flavor.envFile)) {
+      console.log(`  No ${flavor.envFile} — never deployed, skipping compose down.`);
+      return;
+    }
+    console.log("==> Stopping containers + removing the data volume (DB wiped)...");
+    const composeEnv: Record<string, string> = { ...process.env, COMPOSE_PROJECT_NAME: flavor.composeName };
+    const down = spawnSync("docker", ["compose", ...flavor.composeFiles.split(" "), "--env-file", flavor.envFile, "down", "-v"], {
+      stdio: "inherit",
+      env: composeEnv,
+    });
+    if (down.status !== 0) {
+      return yield* new DeployError({ reason: `  ERROR: docker compose down -v failed (status ${down.status ?? down.signal ?? "?"})` });
     }
   });
 }
@@ -580,4 +609,127 @@ export const cmdDeploy = Effect.fn("LexaCli/cmdDeploy")(function* (
 
   yield* runCompose(flavor, { imageTag, clean });
   finalBanner(flavorName, fullDomain, apiKey, imageTag);
+});
+
+// Best-effort CF helpers for teardown: a failed lookup logs a warning and
+// yields nothing to delete; a failed delete logs a warning and continues —
+// teardown never aborts for a half-gone Cloudflare state.
+function listResources<T>(cfToken: string, label: string, path: string): Effect.Effect<Array<T>, never, never> {
+  return cfFetch(cfToken, path).pipe(
+    Effect.matchEffect({
+      onSuccess: (v) => Effect.succeed(v as Array<T>),
+      onFailure: (e) =>
+        Effect.sync(() => {
+          console.warn(`  ⚠ ${label} lookup failed: ${e.message.slice(0, 200)} — remove manually if needed.`);
+          return [] as Array<T>;
+        }),
+    }),
+  );
+}
+
+function deleteResource(cfToken: string, label: string, path: string): Effect.Effect<void, never, never> {
+  return cfFetch(cfToken, path, { method: "DELETE" }).pipe(
+    Effect.matchEffect({
+      onSuccess: () => Effect.sync(() => console.log(`  Deleted ${label}`)),
+      onFailure: (e) =>
+        Effect.sync(() => {
+          console.warn(`  ⚠ Delete ${label} failed: ${e.message.slice(0, 200)} — remove manually if needed.`);
+        }),
+    }),
+  );
+}
+
+function teardownCloudflare(cfToken: string, domain: string, fullDomain: string, flavor: Flavor, flavorName: string): Effect.Effect<void, never, never> {
+  return Effect.gen(function* () {
+    console.log("==> Cloudflare teardown...");
+    const accounts = yield* listResources<{ id: string }>(cfToken, "Cloudflare account", "/accounts");
+    const account = accounts[0]?.id;
+    if (!account) return;
+    const zones = yield* listResources<{ id: string }>(cfToken, "zone", `/zones?name=${domain}`);
+    const zone = zones[0]?.id;
+    if (zone) {
+      const dns = yield* listResources<{ id: string }>(cfToken, "DNS", `/zones/${zone}/dns_records?type=CNAME&name=${fullDomain}`);
+      for (const record of dns) {
+        yield* deleteResource(cfToken, `DNS ${record.id}`, `/zones/${zone}/dns_records/${record.id}`);
+      }
+      if (dns.length === 0) console.log(`  No DNS records for ${fullDomain} — nothing to delete.`);
+    } else {
+      console.warn(`  ⚠ No Cloudflare zone for "${domain}" — DNS left in place, remove manually.`);
+    }
+    const tunnels = yield* listResources<{ id: string }>(cfToken, "tunnel", `/accounts/${account}/cfd_tunnel?name=${flavor.tunnelName}&is_deleted=false`);
+    for (const tunnel of tunnels) {
+      yield* deleteResource(cfToken, `tunnel ${tunnel.id}`, `/accounts/${account}/cfd_tunnel/${tunnel.id}`);
+    }
+    if (tunnels.length === 0) console.log(`  No tunnel "${flavor.tunnelName}" — nothing to delete.`);
+    const apps = yield* listResources<{ id: string }>(cfToken, "Access app", `/accounts/${account}/access/apps?domain=${fullDomain}`);
+    for (const app of apps) {
+      const policies = yield* listResources<{ id: string; reusable?: boolean; app_count?: number }>(cfToken, "policy", `/accounts/${account}/access/apps/${app.id}/policies`);
+      for (const policy of policies) {
+        if (policy.reusable === true || policy.app_count !== undefined) {
+          yield* deleteResource(cfToken, `reusable policy ${policy.id}`, `/accounts/${account}/access/policies/${policy.id}`);
+        } else {
+          yield* deleteResource(cfToken, `policy ${policy.id}`, `/accounts/${account}/access/apps/${app.id}/policies/${policy.id}`);
+        }
+      }
+      yield* deleteResource(cfToken, `Access app ${app.id}`, `/accounts/${account}/access/apps/${app.id}`);
+    }
+    if (apps.length === 0) console.log(`  No Access app for ${fullDomain} — nothing to delete.`);
+    const idps = yield* listResources<{ id: string; type: string; name?: string }>(cfToken, "IdP", `/accounts/${account}/access/identity_providers`);
+    const idp = idps.find((i) => i.type === "google" && i.name === `Google Login (${flavorName})`);
+    if (idp) {
+      yield* deleteResource(cfToken, `IdP ${idp.id}`, `/accounts/${account}/access/identity_providers/${idp.id}`);
+    } else {
+      console.log(`  No "Google Login (${flavorName})" IdP — nothing to delete.`);
+    }
+  });
+}
+
+export const cmdUndeploy = Effect.fn("LexaCli/cmdUndeploy")(function* (
+  flags: Record<string, string | boolean>,
+  positionals: string[],
+) {
+  const config = yield* CliConfigService;
+  const domain = positionals[0] ?? "";
+  const flavorName = positionals[1] ?? "";
+  if (!domain) usage();
+  const flavor = FLAVORS[flavorName];
+  if (!flavor) usage();
+  const lexaFlavor = flavorName as LexaFlavor;
+  const isTTY = process.stdin.isTTY === true;
+
+  const fullDomain = flavor.subdomain ? `${flavor.subdomain}.${domain}` : domain;
+  console.log(`==> Undeploy ${flavorName} (${fullDomain})`);
+
+  if (isTTY) {
+    console.log("");
+    console.log("  ⚠ Undeploy removes: containers + the data volume (DB wiped), Cloudflare");
+    console.log("     resources (DNS, tunnel, Access app, IdP), and local state.");
+    const answer = yield* Effect.promise(() => prompt("  Type 'undeploy' to confirm: "));
+    if (answer !== "undeploy") {
+      console.log("  Aborted (confirmation did not match).");
+      process.exit(1);
+    }
+  } else if (flags.yes !== true) {
+    return yield* new DeployError({ reason: "  ERROR: destructive teardown requires --yes on a non-TTY (or run on a terminal to confirm)" });
+  }
+
+  const deployDir = yield* Effect.try({ try: () => materializeCompose(lexaFlavor, flags), catch: (e) => new DeployError({ reason: `  ERROR: ${(e as Error).message}` }) });
+  process.chdir(deployDir);
+  yield* downCompose(flavor);
+
+  const saved = yield* config.loadDeployCreds(lexaDirFor(lexaFlavor));
+  const cfToken = flagStr(flags, "cf-token") || process.env.CF_API_TOKEN || process.env.CLOUDFLARE_API_TOKEN || saved?.cfToken || "";
+  if (cfToken) {
+    yield* teardownCloudflare(cfToken, domain, fullDomain, flavor, flavorName);
+  } else {
+    console.warn("  ⚠ No Cloudflare API token — CF resources (DNS, tunnel, Access app, IdP) must be removed manually.");
+  }
+
+  console.log("==> Local state...");
+  if (existsSync(deployDir)) rmSync(deployDir, { recursive: true, force: true });
+  console.log(`  Removed deploy dir: ${deployDir}`);
+  yield* config.clearDeployCreds(lexaDirFor(lexaFlavor));
+  console.log(`  Removed deploy creds (${join(lexaDirFor(lexaFlavor), "config.json")})`);
+
+  console.log(`  Undeployed ${flavorName} (${fullDomain}) — containers, volume, CF resources, and local state removed.`);
 });
