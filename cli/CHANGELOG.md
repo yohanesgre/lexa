@@ -1,0 +1,69 @@
+# Changelog
+
+All notable changes to `lexa-cli` are documented here. Format based on
+[Keep a Changelog](https://keepachangelog.com/en/1.1.0/). This project follows
+[Semantic Versioning](https://semver.org/).
+
+The CLI version is INDEPENDENT of the web app version (see AGENTS.md):
+`cli-vX.Y.Z` tags release the binary; `vX.Y.Z` tags release the app image.
+The version lives in `cli/package.json` — `publish-cli.yml` verifies the tag
+matches it before compiling.
+
+## [0.1.5] - 2026-08-10
+
+### Changed
+
+- **`cli/src/` layout + own `cli/package.json`** — the CLI version's single
+  source of truth is now `cli/package.json` (read statically by
+  `cli/src/version.ts`; no more env-embedded stub). New dedicated
+  `cli/CHANGELOG.md` and `cli/README.md`. `publish-cli.yml` verifies the
+  `cli-v*` tag matches the package version and publishes release notes from
+  the changelog.
+
+### Fixed
+
+- **`upgrade` always re-downloaded** — the embedded version previously
+  included the `cli-` tag prefix (`cli-v0.1.4`), which broke version
+  comparison (`NaN`); the released CLI never reported "up to date".
+
+## [0.1.4] - 2026-08-10
+
+### Added
+
+- **`lexa-cli deploy --clean` undeploy** — full teardown per flavor
+- **Deploy derives `LXK_ACCESS_TEAM` from `--team-domain`** — no separate flag
+  needed when the Access Google IdP is per-team
+
+## [0.1.3] - 2026-08-10
+
+### Fixed
+
+- **Prod state root is `~/.lexa`** — materialize only the selected flavor's
+  compose files instead of all of them
+
+## [0.1.2] - 2026-08-10
+
+### Added
+
+- **Per-flavor state roots** — staging and prod keep separate deploy state
+- **Separate Access Google IdP per flavor** — Access policies are scoped to
+  the right IdP on deploy
+- **Docs: Google OAuth + Cloudflare Access setup guide** — `docs/DEPLOYMENT.md`
+
+### Fixed
+
+- **Deploy forwards `LXK_ACCESS_TEAM` to the container** — previously the
+  env var was set on the host but not passed through compose
+
+## [0.1.1] - 2026-08-10
+
+### Fixed
+
+- **Reusable Access policies updated via the account-level endpoint** — the
+  previous per-application endpoint could not modify reusable policies
+
+## [0.1.0] - 2026-08-10
+
+Initial release. Operator CLI wrapping the Lexa REST API with `lxk_` Bearer
+keys: `machine install|listen|start|stop|restart|status|logs|list|uninstall`,
+`task|wiki|project` CRUD, `deploy`, `upgrade`, `github status|setup|check`.

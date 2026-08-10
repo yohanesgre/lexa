@@ -19,7 +19,7 @@
  *   FORGE_POLL_MS       poll interval (default 3000)
  *
  * Run: the machine listener spawns this as a child (`lexa-cli machine listen`,
- * or `bun run cli/index.ts machine listen` from source).
+ * or `bun run cli/src/index.ts machine listen` from source).
  */
 import { spawn } from "node:child_process";
 import { hostname as osHostname } from "node:os";

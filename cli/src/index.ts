@@ -392,8 +392,8 @@ function cmdWikiGet(flags: Record<string, string | boolean>, args: string[]): Ef
     console.log("");
     // Wiki content is TipTap JSON — render to Markdown so the CLI stays
     // human-readable (same conversion the MCP boundary uses).
-    const { docToMarkdown } = yield* Effect.promise(() => import("../shared/markdown"));
-    const md = docToMarkdown(page.content as import("../shared/types").TipTapDoc);
+    const { docToMarkdown } = yield* Effect.promise(() => import("../../shared/markdown"));
+    const md = docToMarkdown(page.content as import("../../shared/types").TipTapDoc);
     console.log(md.trim() || "(empty page)");
   });
 }

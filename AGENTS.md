@@ -162,7 +162,7 @@ Key facts:
   The listener owns per-runtime daemon children; there are no per-runtime systemd units.
   Without a daemon, Generate returns `NO_RUNTIME_ONLINE`.
 - **Daemons NEVER inherit the listener's shell env:** secret vars are scrubbed
-  at spawn (`cli/machine.ts` `scrubDaemonEnv` — closed allowlist:
+  at spawn (`cli/src/machine.ts` `scrubDaemonEnv` — closed allowlist:
   PATH/HOME/LANG/LC_*/TERM/TZ/PWD/SHELL/USER/LOGNAME/XDG_*/BUN_*), so runtime
   credentials come only from the runtime env file + `config.json`. Starting the
   listener from a shell with `.env` exported prints a boot warning; a daemon
@@ -191,16 +191,18 @@ Key facts:
 ### lexa-cli — two builds, one interface, independent releases
 
 The CLI version is **independent** of the web app version:
-- **CLI:** `cli-vX.Y.Z` tags → `.github/workflows/publish-cli.yml` compiles with
-  `LXK_CLI_VERSION` (embedded into `cli/version.ts`; `lexa-cli --version` prints
-  it) and attaches `bin/lexa-cli` to the GitHub release (`install-cli.sh` and
+- **CLI:** `cli-vX.Y.Z` tags → `.github/workflows/publish-cli.yml` compiles and
+  attaches `bin/lexa-cli` to the GitHub release (`install-cli.sh` and
   `lexa-cli upgrade` resolve the newest `cli-v*` tag via the API — never
   `releases/latest`, which may be a web app release with no CLI asset).
+  The version's single source of truth is `cli/package.json` (read statically
+  by `cli/src/version.ts` — never regenerated, no env plumbing; the workflow
+  fails if the tag doesn't match it). Changelog: `cli/CHANGELOG.md`.
 - **Web app:** `vX.Y.Z` tags → image to ghcr.io (publish.yml).
 - **prod** = compiled binary (`bun run compile:cli` embeds the daemon source
-  into `cli/packed.ts` and the compose files into `cli/packed-compose.ts` →
+  into `cli/src/packed.ts` and the compose files into `cli/src/packed-compose.ts` →
   `bin/lexa-cli`; the systemd listener unit runs the binary directly).
-  `cli/packed.ts` is a build-time embed — keep the committed stub empty so dev
+  `cli/src/packed.ts` is a build-time embed — keep the committed stub empty so dev
   copies daemon.ts fresh from disk.
 - **dev** = `bun run lexa-cli-dev` or `bun run install:cli-dev` →
   `~/.local/bin/lexa-cli-dev` (shim running the live repo source via bun —
