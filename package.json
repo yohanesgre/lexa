@@ -1,6 +1,6 @@
 {
   "name": "lexa",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Self-hosted project management — Kanban with swimlanes/WIP limits, nested wiki, MCP server for AI agents, Forge AI writing assistant.",
   "scripts": {
     "test": "vitest run",
