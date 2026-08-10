@@ -29,8 +29,10 @@ jobs:
           context: .
           push: true
           # main → staging image; v* tags → latest + version-pinned (prod).
-          # The version line evaluates to empty on branch pushes and is
-          # filtered out by build-push-action's tag list parsing.
+          # NB: use explicit ternaries — `false && x` yields boolean false,
+          # which would become a literal "false" tag on branch pushes.
+          # The version line is empty on branch pushes and filtered out by
+          # build-push-action's tag list parsing.
           tags: |
-            ${{ github.ref_type == 'tag' && 'ghcr.io/yohanesgre/lexa:latest' || 'ghcr.io/yohanesgre/lexa:staging' }}
-            ${{ github.ref_type == 'tag' && format('ghcr.io/yohanesgre/lexa:{0}', github.ref_name) }}
+            ${{ github.ref_type == 'tag' ? 'ghcr.io/yohanesgre/lexa:latest' : 'ghcr.io/yohanesgre/lexa:staging' }}
+            ${{ github.ref_type == 'tag' ? format('ghcr.io/yohanesgre/lexa:{0}', github.ref_name) : '' }}
