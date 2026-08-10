@@ -18,6 +18,13 @@ const childMocks = vi.hoisted(() => ({
 // materializeCompose exercises its repo-cwd path.
 const composeMocks = vi.hoisted(() => ({ empty: false }));
 
+// CF request recorder + app-policy list override (the cmdDeploy policy
+// branch tests assert the PUT target and body).
+const cfMocks = vi.hoisted(() => ({
+  requests: [] as Array<{ url: string; method: string; body: string }>,
+  policyList: [] as Array<{ id: string; precedence?: number; app_count?: number; reusable?: boolean; name?: string }>,
+}));
+
 vi.mock("./packed-compose", async () => {
   const real = await vi.importActual<typeof import("./packed-compose")>("./packed-compose");
   // Getter reads the flag at access time — the factory result is cached per
@@ -44,6 +51,8 @@ beforeEach(() => {
   cwd = process.cwd();
   childMocks.spawnSyncCalls.length = 0;
   childMocks.spawnSyncStatus = 0;
+  cfMocks.requests.length = 0;
+  cfMocks.policyList = [];
   vi.resetModules();
 });
 
@@ -64,10 +73,14 @@ function cfResponse(result: unknown): Response {
 
 function stubCfApi(): void {
   vi.stubGlobal("fetch", (url: string | URL, init?: RequestInit) => {
+    const full = String(url);
     const path = new URL(url).pathname + new URL(url).search;
     const method = init?.method ?? "GET";
+    cfMocks.requests.push({ url: full, method, body: typeof init?.body === "string" ? init.body : "" });
     let result: unknown = {};
-    if (path.includes("/access/apps/") && path.includes("/policies")) result = method === "GET" ? [] : {};
+    if (path.includes("/access/apps/") && path.includes("/policies")) result = method === "GET" ? cfMocks.policyList : {};
+    // Account-level policies endpoint — reusable policy updates land here.
+    else if (path.includes("/access/policies/")) result = {};
     else if (path.includes("/access/apps")) result = method === "GET" ? [] : { id: "app1" };
     else if (path.includes("/access/identity_providers")) result = method === "GET" ? [] : { id: "idp1" };
     else if (path.includes("/cfd_tunnel") && path.includes("/token")) result = { token: "tok1" };
@@ -283,5 +296,45 @@ describe("cmdDeploy end-to-end", () => {
     expect(cmds.some((a) => a.includes("down -v"))).toBe(true);
     expect(cmds.some((a) => a.includes("up -d"))).toBe(true);
     rmSync(deployDir, { recursive: true, force: true });
+  });
+
+  it("updates a reusable policy via the account-level endpoint without precedence", async () => {
+    cfMocks.policyList = [{ id: "pol-reusable", app_count: 1, reusable: true, name: "Allow @gmail.com" }];
+    const { log } = await runDeploy();
+    const put = cfMocks.requests.find((r) => r.method === "PUT" && r.url.includes("/access/policies/pol-reusable"));
+    expect(put).toBeDefined();
+    expect(put?.url).toContain("/accounts/acc1/access/policies/pol-reusable");
+    const body = JSON.parse(put?.body ?? "{}") as Record<string, unknown>;
+    expect(body).toEqual({
+      name: "Allow @example.com",
+      decision: "allow",
+      include: [{ email_domain: { domain: "example.com" } }],
+    });
+    expect(body).not.toHaveProperty("precedence");
+    // No app-scoped PUT for the same row.
+    expect(cfMocks.requests.some((r) => r.method === "PUT" && r.url.includes("/access/apps/app1/policies/pol-reusable"))).toBe(false);
+    expect(log).toContain("Updating existing reusable policy: pol-reusable");
+    expect(log).toContain("Policy: allow @example.com");
+  });
+
+  it("treats a row with app_count but no reusable flag as reusable", async () => {
+    cfMocks.policyList = [{ id: "pol-multi", app_count: 3 }];
+    await runDeploy();
+    expect(cfMocks.requests.some((r) => r.method === "PUT" && r.url.includes("/access/policies/pol-multi"))).toBe(true);
+    expect(cfMocks.requests.some((r) => r.method === "PUT" && r.url.includes("/access/apps/app1/policies/pol-multi"))).toBe(false);
+  });
+
+  it("updates an app-scoped policy via the app endpoint with precedence in the body", async () => {
+    cfMocks.policyList = [{ id: "pol-app", precedence: 1 }];
+    const { log } = await runDeploy();
+    const put = cfMocks.requests.find((r) => r.method === "PUT" && r.url.includes("/access/apps/app1/policies/pol-app"));
+    expect(put).toBeDefined();
+    const body = JSON.parse(put?.body ?? "{}") as Record<string, unknown>;
+    expect(body.precedence).toBe(1);
+    expect(body.name).toBe("Allow @example.com");
+    expect((body.include as Array<Record<string, unknown>>)[0]).toEqual({ email_domain: { domain: "example.com" } });
+    // No account-level PUT for an app-scoped row.
+    expect(cfMocks.requests.some((r) => r.method === "PUT" && r.url.includes("/access/policies/pol-app"))).toBe(false);
+    expect(log).toContain("Updating existing policy: pol-app");
   });
 });
