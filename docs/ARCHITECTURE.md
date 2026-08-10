@@ -1,10 +1,6 @@
-# Lexa — Bespoke Project Management Tool (v2 — post-review)
+# Lexa — Architecture
 
-> Updated against REVIEW.md (oracle review). All 🔴 blockers resolved, all 🟡 should-fix items applied, recommended 🟢 cuts made. Changes are summarized at the bottom of this doc and in the Decisions Log.
-
-## Overview
-
-A lightweight, self-hosted project management tool built for small game development teams (2–5 people). Kanban board, issue/task ticketing, nested wiki/docs, AI agent (MCP) access, and GitHub issue sync — running on a Bun standalone server with SQLite.
+A lightweight, self-hosted project management tool. Kanban board, issue/task ticketing, nested wiki/docs, AI agent (MCP) access, and GitHub issue sync — running on a Bun standalone server with SQLite.
 
 ## Tech Stack
 
@@ -63,8 +59,6 @@ api_keys                        webhook_events
 ├── id, name, key_hash (SHA-256) ├── delivery_id (X-GitHub-Delivery, PK)
 └── timestamps                   └── received_at (pruned >7 days at boot)
 ```
-
-**Cut from v1:** labels (2 tables, 3 routes, 2 MCP tools) — `tasks.type` covers game-dev categorization. Subtasks (`parent_id`) were cut, then re-added as `task_links` relations (`subtask_of` with column inheritance + cycle guard — see REVIEW.md 🔴 #5). Column policies `restrict_roles`/`min_time` — unenforceable without roles/timestamps (see REVIEW.md 🔴 #5).
 
 ## Auth
 
@@ -135,40 +129,13 @@ applied at build time, before route matching and before body decode:
 4. **`AuthIdentity` provision** — handlers read the Context tag (no per-request DB opens)
 5. **Security headers** — nosniff + no-store on every `/api` response, including router 404s
 
-Platform quirks that shaped this: `MaxBodySize` is unenforced in
-@effect/platform 0.97 (stream cap must stay in entry), `remoteAddress` is
-unpopulated on the web-handler path (hence the IP stamp), and middleware must
-short-circuit with literal `HttpServerResponse` values — failing with
-undeclared errors hits the error encoder and 500s.
-
 ## MCP Server (Hermes/OpenCode)
 
-- **Transport:** Streamable HTTP at `/mcp`, stateless mode (no session persistence — each request self-contained, fits Workers).
+- **Transport:** Streamable HTTP at `/mcp`, stateless mode (no session persistence — each request self-contained).
 - **Auth:** `Authorization: Bearer lxk_...` — same validation as REST.
 - **Pagination:** all `list_*`/`search_*` tools accept `limit` (default 50) + `cursor` and return `nextCursor`. Protects the agent's context window.
 
-### Tools
-
-| Tool | Input (key fields) | Notes |
-|------|--------------------|-------|
-| `create_task` | project, column, title, description?, priority?, type?, assignee?, swimlane? | |
-| `list_tasks` | project, column?, swimlane?, assignee?, type?, limit?, cursor? | |
-| `get_task` | taskId | |
-| `update_task` | taskId, title?, description?, priority?, assignee? | |
-| `move_task` | taskId, columnId, beforeTaskId?, afterTaskId? | atomic; errors: WIP_LIMIT, REQUIRED_FIELD |
-| `delete_task` | taskId | |
-| `get_wiki_page` | project, pageSlug | |
-| `create_wiki_page` | project, title, content, parentSlug? | |
-| `update_wiki_page` | project, pageSlug, title?, content? | |
-| `list_wiki_pages` | project, limit?, cursor? | |
-| `search_wiki` | project, query, limit? | FTS5-backed |
-| `link_github_issue` | taskId, repo | creates GitHub issue from task; ALREADY_LINKED guard |
-| `unlink_github_issue` | taskId | |
-| `list_projects` | — | |
-| `get_project` | slug | |
-| `get_project_status` | slug | columns + task counts (board overview) |
-
-Removed from v1: `create_label`, `list_labels` (feature cut).
+Tools: `create_task`, `list_tasks`, `get_task`, `update_task`, `move_task`, `delete_task`, `get_wiki_page`, `create_wiki_page`, `update_wiki_page`, `list_wiki_pages`, `search_wiki`, `link_github_issue`, `unlink_github_issue`, `list_projects`, `get_project`, `get_project_status`. Full contract in MCP.md.
 
 ## GitHub Integration
 
@@ -186,7 +153,7 @@ Removed from v1: `create_label`, `list_labels` (feature cut).
 | Issue body ↔ task description | ❌ (link only) | ❌ |
 | Assignees | ❌ | ❌ |
 
-The asymmetry is deliberate and documented: Lexa owns the board, GitHub owns the issue text. Conflict surface is minimal because only state flows both ways.
+The asymmetry is deliberate: Lexa owns the board, GitHub owns the issue text. Conflict surface is minimal because only state flows both ways.
 
 ### Echo suppression & idempotency (the loop-killer)
 
@@ -211,7 +178,7 @@ Move in Lexa → syncStateFromLexa() → GitHub issue closed
 7. One task ↔ many issues (junction table), one per repo: duplicate repo links rejected (already-linked guard). Per-issue `UNIQUE(task_id, issue_id)`.
 8. Failed Lexa→GitHub sync diverges by design (best-effort, no retry queue). The UI surfaces it: a linked task shows "out of sync" when `synced_state` ≠ its column's `github_state`. Manual re-move resyncs.
 
-### Trust boundary (explicit decision)
+### Trust boundary
 Anyone with issue-triage permission on a linked repo can trigger webhook-driven board moves (close/reopen an issue → card moves, bypassing WIP and required_fields). This is intentional — GitHub is the source of truth for issue state (see sync matrix). On public repos, external contributors can affect the board; if that becomes a problem, the mitigation is restricting the App to private repos or filtering webhook senders — not more auth code.
 
 ## Frontend
@@ -227,50 +194,7 @@ Anyone with issue-triage permission on a linked repo can trigger webhook-driven 
 /settings                  → API keys
 ```
 
-### Key Components
-```
-KanbanBoard
-├── SwimlaneHeader (name, description truncated, "read more" modal, context menu)
-│   ├── Context menu: Expand/Collapse, Settings (swimlane form), Rename, Add Column, Delete
-│   └── Column
-│       ├── ColumnHeader (name, count, WIP badge, context menu)
-│       │   └── Context menu: Add task, Rename, Edit column (ColumnForm), Delete, Clear all tasks
-│       ├── TaskCard (draggable)
-│       ├── Column → InlineAddTask (title input, Priority/Type dropdowns, Save/Cancel)
-│       │   └── Defaults: High priority, Feature type. Enter saves, Esc cancels.
-│       └── KanbanSettingsModal (columns + swimlanes table, ColumnForm, SwimlaneForm)
-│           ├── ColumnForm: 13-color palette, wipLimit, requiredFields, githubState
-│           └── SwimlaneForm: name + description textarea
-├── TaskDetail (slideover)
-│   ├── TitleEditor (inline, click to edit)
-│   ├── DescriptionEditor (TipTap, double-click to edit, save on blur)
-│   ├── PropertyBar (Column dropdown, Priority badge, Type badge, Assignee chips)
-│   └── GitHubSection (linked issue badge, sync status dot, out-of-sync warning)
-└── BoardFilters (priority, type, assignee — floating filter bar)
-
-WikiLayout
-├── WikiSidebar (page tree — nested, collapsible, drag to reorder)
-└── WikiPage
-    ├── PageHeader (title, breadcrumb)
-    ├── TipTapEditor (full rich text)
-    └── PageMeta (last edited)
-
-Dashboard (Command Center)
-├── Header ("Command Center" + "New Project" button)
-├── ProjectGrid → ProjectCard (health card variant)
-│   ├── Health dot (green/amber/red — overall column health)
-│   ├── Urgent count badge, Sync count badge
-│   ├── WIP mini bar (colored segments per column)
-│   ├── Stats footer (task count, column count)
-│   ├── GitHub icon (if linked)
-│   └── ⋯ settings button → project settings modal
-├── StatsBar (4 aggregate stat cards: total tasks, active projects, WIP exceeded, out-of-sync)
-└── AttentionSection (two-column grid)
-    ├── Urgent tasks list (per-task rows with dot, title, project·column, task ID)
-    └── Out-of-sync GitHub issues list (same layout, amber dot)
-```
-
-Removed from v1: `SubtaskList`, `CommentThread` (ghost features — no schema backing).
+Key components: `KanbanBoard` (swimlanes → columns → task cards, inline add, settings modal), `TaskDetail` slideover (title/description editors, property bar, GitHub section), `WikiLayout` (nested collapsible sidebar + TipTap page), `Dashboard` (project cards with health dots, WIP bars, stats, attention sections).
 
 ### Mutation responses are authoritative
 SQLite is local (WAL) so reads are immediate, but the mutation response is still the single source of truth. Rule: **mutations return the updated entity and TanStack Query updates its cache from the mutation response (`setQueryData`) — no refetch on the mutation path.**
@@ -279,21 +203,10 @@ SQLite is local (WAL) so reads are immediate, but the mutation response is still
 
 ```
 lexa/
-├── app/                      # TanStack Start routes
-│   ├── __root.tsx
-│   ├── index.tsx             # Dashboard
-│   ├── $slug/
-│   │   ├── index.tsx         # Kanban
-│   │   ├── wiki/index.tsx
-│   │   ├── wiki/$page.tsx
-│   │   └── settings.tsx
-│   └── settings.tsx
-│   ├── components/
-│   │   ├── kanban/  (board, column, card, swimlane)
-│   │   ├── wiki/    (editor, sidebar, page-tree)
-│   │   ├── task/    (detail, property-bar)
-│   │   └── ui/      (toast, modal-stack, menu)
-│   └── lib/         (api.ts, queries.ts)
+├── app/                      # TanStack Start routes + components
+│   ├── routes/               # dashboard, kanban, wiki, task, settings
+│   ├── components/           # kanban/, wiki/, task/, ui/
+│   └── lib/                  # api.ts, queries.ts
 ├── server/                   # Effect-TS services
 │   ├── entry.ts              # Bun.serve — boot, webhook, /mcp, static/SSR, /api stream cap + IP stamp
 │   ├── api/                  # HttpApi app (http.ts), middleware.ts (rate/auth/headers), auth-key.ts, auth.ts, errors.ts, limits.ts
@@ -305,47 +218,7 @@ lexa/
 ├── shared/                   # types + pure functions (markdown, positions, tiptap-text)
 ├── migrations/               # *.sql applied on boot by server/db/migrate.ts
 ├── scripts/                  # cli/ (lexa-cli incl. deploy), forge/ (Forge daemon), dev.sh, seed-dev.sql, setup-cli.ts
-├── wireframes/               # src (source of truth) + dist (compiled)
+├── wireframes/               # git submodule → private repo yohanesgre/lexa-wireframes
 └── package.json
 ```
-
-Changes from v1: removed label service/repo/routes, policy.service.ts (folded into task.service.ts), subtask-list.tsx; added api-key.repo.ts, webhook-event.repo.ts; `routes/` renamed `api/` (HttpApi); runtime migrated from Cloudflare Workers/D1 to Bun + SQLite (commit 3315ca8).
-
-## Development Phases
-
-| Phase | Scope | Dependencies |
-|-------|-------|-------------|
-| **1. Foundation + spike** | SQLite schema, Effect repos/services (Project, Task), HttpApi scaffolding, **TanStack Start + Bun SSR spike** (validate SSR+SQLite in one process before building on it) | — |
-| **2. Kanban CRUD** | Column/Swimlane services, task CRUD, atomic move + WIP + required_fields | Phase 1 |
-| **3. Frontend Core** | Dashboard, kanban board (dnd-kit), task detail slideover | Phase 2 |
-| **4. Wiki** | Wiki service/repo, TipTap editor, page tree, FTS search | Phase 1 |
-| **5. MCP Server** | All tools, API-key auth, pagination | Phase 1 |
-| **6. GitHub Sync** | GitHub App, webhook receiver (dedup + echo suppression), state sync | Phase 2 |
-| **7. Polish** | Swimlanes UI, WIP warnings, settings pages, Cloudflare Access setup | Phases 3–4 |
-
-Phases 1, 4, 5 can start together (Wiki and MCP depend only on the foundation).
-
-## Decisions Log (v2 — merged)
-
-1. **Fractional indexing via `fractional-indexing` npm package** — hand-rolled key generation was wrong (duplicate keys between dense neighbors). `UNIQUE(column_id, position)` + retry-on-conflict handles concurrent creates.
-2. **Atomic move as one operation** — `{ columnId, swimlaneId, beforeTaskId, afterTaskId }` → one conditional UPDATE. WIP limit enforced inside the statement (no check-then-act race).
-3. **Cloudflare Access for human auth** — zero auth code for a self-hosted 2–5 person tool (tunneled ingress). API keys (`lxk_` format) for machines only.
-4. **Echo-suppressed GitHub sync** — `github_synced_state` comparison + delivery dedup + immediate ack. Column mapping via `columns.github_state`, never by name.
-5. **No service-to-service cycles** — TaskService has no GitHub dependency; routes orchestrate Lexa→GitHub sync. GitHubService→TaskService (webhooks) is the only service edge.
-6. **Cut: labels, subtasks, 2 of 3 column policies** — `tasks.type` covers categorization; TipTap checklists cover breakdown; `required_fields` is the only enforceable policy. Reversible: these are doc-level cuts, adding back later is a schema migration, not a redesign.
-7. **@effect/platform HttpApi** — tagged errors map declaratively to HTTP statuses + OpenAPI generation.
-8. **TipTap JSON content** (unchanged) — with app-maintained `content_text` plain-text projection for FTS5 search.
-9. **Mutation-response cache updates** — frontend never refetches on the mutation path (mutation response is authoritative).
-10. **No users table** (unchanged) — assignees are freeform strings; identity comes from Access/GitHub.
-11. **Round-2 hardening** (oracle verification pass) — within-column reorders short-circuit the WIP check; deterministic key generation mandates re-read-then-regenerate retries for create AND move; neighborless moves default to append-to-end (never `generateKeyBetween(null,null)`); webhook delivery recorded only after successful processing; `task.github_repo` stored at link time; `/board` unpaginated endpoint; `required_fields` enforced on create/move/update.
-12. **Design system: PHOSPHOR (approved)** — warm-phosphor CRT/HUD identity (see DESIGN_SYSTEM.md). Four-voice type: Space Grotesk (display), IBM Plex Sans (body), JetBrains Mono (IDs/code), Departure Mono (micro HUD labels). Brown-black `#0C0B09` surfaces, phosphor amber `#F0C040` accent, focus = amber glow ("CRT cursor"). Dark-first, density-first, gamification visual-only. First proposal (Geist/Linear-adjacent) rejected by user — no Vercel/Linear aesthetics.
-13. **Forge project workspaces (opencode-only)** — triggered by task `2244a6d9`: the agent escaped its empty ephemeral run dir (`~/.lexa/runs/<taskId>`) and browsed the whole machine (`.env`, private keys). Fix: persistent per-project workspace dirs at `~/.lexa/projects/<projectId>/`, provisioned by the listener from the heartbeat project index (`projects.json`), seeded write-once with README.md + a static orchestrator AGENTS.md. Per run the daemon (over)writes persistent rule bundles (`.agents/agents/<id>/AGENTS.md` — one dir per lexa-agent, so all agents coexist; `.agents/skills/<id>/SKILL.md` with name/description frontmatter so opencode auto-discovers it) and spawns opencode with `cwd = workspace` + a sealed per-run HOME at the workspace's `.forge/` dir (wiped + reseeded each run; daemon-owned exclusively; shared across runs is safe because one runtime per agent CLI per machine claims one task at a time). Containment is `external_directory: deny` — evaluated by opencode on the RESOLVED path for read/edit/write/glob/grep, it blocks everything outside the workspace in both relative and absolute form (verified empirically; per-tool raw deny-allow lists were abandoned because opencode matches raw strings and blocked legitimate in-workspace relative reads) — plus `bash: deny` (bash cannot be path-scoped), `skill: deny` and `webfetch: deny` (opencode discovers the host's GLOBAL skills via os.homedir — not $HOME — and the network is never needed for Forge output), and `*auth.json*: deny`. Global opencode config (permissions/MCP/plugins) never loads. Two hard-won spawn details: `PWD` must be set to the workspace (opencode resolves its session/project directory from env.PWD — a stale inherited PWD makes the workspace look "external" and `external_directory` then blocks every read), and provider auth is a copied auth.json in the sandbox. Cleanup removes the whole `.forge/` dir; the workspace and rules persist (crash-safe by construction — the next run wipes and reseeds). The server-built prompt names the active agent bundle. hermes/command-code keep the legacy ephemeral layout. Rationale: sequential runs (one runtime per CLI per machine, one task at a time) make a shared root AGENTS.md safe; true parallelism would require per-run cwd subdirs + split read/write deny zones (deferred).
-14. **Activity timeline + comments (2026-08-08, plan 2026-08-08-activity-comments)** — reverses the v1 "no comments" cut (release-notes decision). `task_activity` (append-only event ledger) + `task_comments` (soft-delete) interleaved in a slideover Activity tab.
-    - **Emission invariant** (the core rule): every task mutation appends activity row(s) in the SAME transaction as the mutation (one row per meaningful change; position-only reorders emit nothing; webhook moves emit `github_synced` only). Messages frozen at write time from the catalog (`server/activity-messages.ts`) — renames never rewrite history.
-    - **Actor model** (attribution ≠ authorization): browser users → `x-lxk-user` header (from the SSR `lxk-user` meta, resolved from Cf-Access) → `users` row, kind 'user'; MCP API keys → kind 'agent', label = key NAME, user id = key owner (unbound → NULL); webhook moves → kind 'system', label 'github'; Forge terminal events → kind 'agent', label = forge agent name (agent_id fallback).
-    - **Spoofing tradeoff (accepted):** the header is spoofable by key holders — attribution only, the key already grants full access. Role NEVER comes from the header; authz stays key-based. Identity plumbing rides SSR meta injection (no new client state).
-    - **Comment authz (user ruling, accepted + documented):** edit = author only; delete = author OR project admin. Under current REST plumbing every API key is admin, so ANY key holder may delete ANY comment — the `isProjectAdmin` `user_project_roles` branch is future-proofing for member-key support (dead under current plumbing, kept).
-    - **`deleted` activity emission is vestigial (user ruling, accepted):** `task_activity` has ON DELETE CASCADE, so the `deleted` row is erased in the same transaction; DELETE returns 204 and nothing observes it. Emission kept for matrix compliance, documented as vestigial.
-    - **Forge accept/reject dropped (user decision):** the spec's `forge_accepted`/`forge_rejected` events were cut — accept is client-side only, no server hook. The shipped 18-value `ActivityType` union omits them (spec marked with the divergence).
-    - **MCP boundary:** two new tools (`get_task_activity` Markdown timeline, `add_task_comment` Markdown→TipTap); agents have NO comment edit/delete tools (append-only from MCP).
-15. **Forge daemon env scrubbing (2026-08-08)** — daemons were spawned with `{...process.env, ...runtime.env}` (machine.ts), so with the server's `.env` exported in the listener shell, master secrets (`LXK_API_KEY`, `LXK_FORGE_DAEMON_TOKEN`, `GITHUB_*`, …) reached every daemon and every Forge agent run. The inherited `LXK_FORGE_DAEMON_TOKEN` (x-forge-token path, middleware.ts:63) also masked dead runtime keys — the exit-3 "API key revoked" relay never fired and a ghost-key daemon looked Online forever (homestation incident). Fix: `scrubDaemonEnv` at spawn (blocklist `LXK_*/GITHUB_*/CF_*/CLOUDFLARE_*/AWS_*/AZURE_*/GOOGLE_*` + SECRET/TOKEN/PRIVATE_KEY/API_KEY/PASSWORD markers; closed allowlist PATH/HOME/LANG/LC_*/TERM/TZ/PWD/SHELL/USER/LOGNAME/XDG_*/BUN_*) + listener boot warning when secrets are detected in its env. Runtime credentials now come only from the runtime env file + `config.json`; exit-3 detection restored. The server escape hatch (token on daemon paths) stays for manual runs.
+`wireframes/` is a git submodule pointing at the separate PRIVATE repo `yohanesgre/lexa-wireframes` (init with `git submodule update --init wireframes`) — see AGENTS.md.

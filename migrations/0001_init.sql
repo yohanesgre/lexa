@@ -5,6 +5,13 @@
 -- intermediate data-migration steps, just the final schema plus the Forge
 -- builtin seeds). No placeholder admin: users auto-register on first CF Access
 -- login; admin role from LXK_ADMIN_EMAILS / settings.admin_emails.
+--
+-- Re-squashed 2026-08-10, folding the former 0002..0005: machines.secret
+-- (machine→host binding secret, F1 closure), task_comments + task_activity
+-- (activity timeline, append-only), swimlanes due_at/archived_at/kind +
+-- idx_swimlanes_one_backlog, tasks.due_at. One-off data steps dropped: the
+-- dev seed-key revoke (0002), the activity backfill (0004) and the legacy
+-- Default→Backlog lane migration (0005) only ever touched pre-existing rows.
 
 CREATE TABLE api_keys (
   id           TEXT PRIMARY KEY,
@@ -103,7 +110,12 @@ CREATE TABLE machines (
   --   (JSON array of { provider, version }).
   clis        TEXT NOT NULL DEFAULT '[]',
   last_seen   TEXT,
-  created_at  TEXT NOT NULL DEFAULT (datetime('now'))
+  created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+  -- secret: machine→host binding secret, minted once at first registration
+  -- (F1 closure). Sent as x-machine-secret on runtime-event claims; legacy
+  -- rows keep '' and must be removed + re-registered. Kept LAST to match the
+  -- historical ALTER TABLE ADD COLUMN order.
+  secret      TEXT NOT NULL DEFAULT ''
 );
 
 CREATE TABLE priority_options (
@@ -164,7 +176,11 @@ CREATE TABLE swimlanes (
   project_id  TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
   name        TEXT NOT NULL,
   description TEXT NOT NULL DEFAULT '',
-  position    INTEGER NOT NULL
+  position    INTEGER NOT NULL,
+  due_at      TEXT,  -- YYYY-MM-DD, NULL = no deadline
+  archived_at TEXT,  -- NULL = live
+  kind        TEXT NOT NULL DEFAULT 'milestone'
+                CHECK (kind IN ('backlog','milestone'))
 );
 
 CREATE TABLE task_assignees (
@@ -208,7 +224,32 @@ CREATE TABLE "tasks" (
   github_synced_state TEXT CHECK (github_synced_state IN ('open','closed')),
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
-, archived_at TEXT);
+, archived_at TEXT, due_at TEXT);
+
+CREATE TABLE task_comments (
+  id           INTEGER PRIMARY KEY AUTOINCREMENT,
+  task_id      TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+  author_id    TEXT REFERENCES users(id) ON DELETE SET NULL,  -- NULL: agent/system
+  author_kind  TEXT NOT NULL DEFAULT 'user'
+               CHECK (author_kind IN ('user','agent','system')),
+  author_label TEXT NOT NULL,        -- frozen at write time
+  body         TEXT NOT NULL,        -- TipTap JSON doc (≤64KB, non-empty)
+  edited_at    TEXT,                 -- set on edit → UI "edited" marker
+  deleted_at   TEXT,                 -- soft delete → hidden from timeline
+  created_at   TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE task_activity (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  task_id       TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+  actor_kind    TEXT NOT NULL CHECK (actor_kind IN ('user','agent','system')),
+  actor_label   TEXT NOT NULL,       -- frozen display name
+  actor_user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
+                                     -- agent: key owner; user: their id; NULL: unbound/system
+  type          TEXT NOT NULL,       -- enum in shared/types.ts (no CHECK — growing set)
+  message       TEXT NOT NULL,       -- frozen at write time; the record
+  created_at    TEXT NOT NULL DEFAULT (datetime('now'))
+);
 
 CREATE TABLE type_options (
   id          TEXT PRIMARY KEY,
@@ -295,6 +336,12 @@ CREATE INDEX idx_runtimes_machine ON runtimes(machine_id);
 CREATE INDEX idx_sources_document ON document_sources(document_type, document_id);
 
 CREATE INDEX idx_swimlanes_proj  ON swimlanes(project_id, position);
+
+CREATE UNIQUE INDEX idx_swimlanes_one_backlog ON swimlanes(project_id) WHERE kind = 'backlog';
+
+CREATE INDEX idx_task_comments_task ON task_comments(task_id, created_at, id);
+
+CREATE INDEX idx_task_activity_task ON task_activity(task_id, created_at, id);
 
 CREATE UNIQUE INDEX idx_task_github_issues_issue ON task_github_issues(issue_id);  -- issue → at most one task
 

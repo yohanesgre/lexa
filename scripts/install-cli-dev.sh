@@ -5,12 +5,12 @@
 # `lexa-cli` — never overwritten by this.
 set -e
 root=$(cd "$(dirname "$0")/.." && pwd)
-test -f "$root/scripts/cli/index.ts" || { echo "lexa-cli-dev: repo layout unexpected at $root" >&2; exit 1; }
+test -f "$root/cli/index.ts" || { echo "lexa-cli-dev: repo layout unexpected at $root" >&2; exit 1; }
 mkdir -p "$HOME/.local/bin"
 {
   echo "#!/usr/bin/env sh"
   echo "# lexa-cli-dev — dev build: runs live repo source via bun."
-  echo "exec bun run \"$root/scripts/cli/index.ts\" \"\$@\""
+  echo "exec bun run \"$root/cli/index.ts\" \"\$@\""
 } > "$HOME/.local/bin/lexa-cli-dev"
 chmod +x "$HOME/.local/bin/lexa-cli-dev"
 echo "  Installed dev shim → $HOME/.local/bin/lexa-cli-dev"

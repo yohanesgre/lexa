@@ -1,6 +1,4 @@
-# SQLite Schema (v2 — post-review)
-
-> Reviewed against REVIEW.md. Changes from v1: labels & subtasks cut (YAGNI), `column_policies` table replaced by `columns.required_fields`, `columns.github_state` added for sync mapping, `tasks.github_synced_state` for echo suppression, `task_github_issues` junction (multi-issue, one per repo, `UNIQUE(issue_id)`), `UNIQUE(column_id, position)` for fractional-index integrity, FTS5 for wiki search, `webhook_events` dedup table, consolidated indexes.
+# SQLite Schema
 
 ## Full Schema
 
@@ -133,7 +131,7 @@ CREATE TABLE tasks (
   id                  TEXT PRIMARY KEY,
   project_id          TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
   column_id           TEXT NOT NULL REFERENCES columns(id),  -- no ON DELETE clause in DDL;
-                                                            -- deleting non-empty column → ColumnNotEmpty 409
+                                                             -- deleting non-empty column → HasChildren 409
   swimlane_id         TEXT NOT NULL REFERENCES swimlanes(id),
   title               TEXT NOT NULL,
   description         TEXT NOT NULL DEFAULT '{"type":"doc","content":[]}', -- TipTap JSON
@@ -184,7 +182,7 @@ CREATE TABLE task_assignees (
 -- Wiki Pages (nested, TipTap content)
 -- ============================================================
 -- parent_id ON DELETE RESTRICT: deleting a page with children fails
---   (ColumnNotEmpty-style 409) — forces explicit move/delete of children.
+--   (HasChildren-style 409) — forces explicit move/delete of children.
 --   (v1 used SET NULL which silently re-rooted children to top level.)
 -- content_text: plain-text projection of `content`, maintained by the app
 --   on every write. Backs FTS5 so search indexes real text, not JSON syntax.
@@ -495,7 +493,7 @@ CREATE INDEX idx_task_links_from ON task_links(from_task_id);
 CREATE INDEX idx_task_links_to   ON task_links(to_task_id);
 CREATE INDEX idx_task_links_proj ON task_links(project_id);
 
--- Task activity timeline + comments (docs/specs/ACTIVITY_COMMENTS.md)
+-- Task activity timeline + comments (docs/private/specs/ACTIVITY_COMMENTS.md)
 -- Append-only by design: rows are never pruned (contrast: webhook_events 7-day).
 -- INTEGER PRIMARY KEY: rowid is monotonic — second-granularity created_at ties
 -- order by id; UUID text ids would not order chronologically.
@@ -647,7 +645,7 @@ WHERE id = ?1
 
 - The `column_id = ?2` short-circuit prevents false `WipLimitExceeded` on pure reorders inside an at-limit column (the moving task would otherwise count itself).
 - Count and last-key queries include `project_id` so `idx_tasks_board` (leftmost `project_id`) applies.
-- Every task must belong to both a column and a swimlane. Columns are templates rendered inside swimlane rows. New projects get a default "Default" swimlane.
+- Every task must belong to both a column and a swimlane. Columns are templates rendered inside swimlane rows. New projects get a default "Backlog" swimlane.
 - **WIP limit is per-column total** — counts ALL tasks in the column across all swimlanes. The WIP badge in each swimlane row shows the same total, not per-swimlane count.
 
 ### Echo suppression (`synced_state`)
@@ -670,11 +668,3 @@ Every mutation is either a single statement or a SQLite transaction (`server/db/
 - SQLite is local (WAL) — reads are immediate. Frontend still updates its cache from mutation responses (TanStack Query `setQueryData`), not refetch, because the mutation response is the authoritative state.
 - No row-size limits at this scale: fine for TipTap docs.
 - `webhook_events` grows unboundedly → periodic prune (`DELETE WHERE received_at < datetime('now','-7 days')`) on a timer or at boot.
-
-## Cut from v1 (YAGNI — see REVIEW.md 🟢)
-
-| Cut | Replacement |
-|-----|-------------|
-| `labels` + `task_labels` tables, 3 routes, 2 MCP tools | `type_options` (customizable per-project task types) covers game-dev categorization |
-| ~~`tasks.parent_id` (subtasks)~~ **restored 2026-08** | Flat tasks were the v1 cut; subtasks are now first-class via `task_links(relation='subtask_of')` with defined semantics (see Design Notes) |
-| `column_policies` table (3 rule types) | `columns.required_fields` JSON array — the only enforceable policy without a roles system or column-entry timestamps |

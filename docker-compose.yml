@@ -1,14 +1,13 @@
 services:
   app:
-    build:
-      context: .
-      args:
-        VITE_LXK_API_KEY: ${VITE_LXK_API_KEY}
+    # Default = latest; `lexa-cli deploy --image <tag>` overrides via LXK_IMAGE_TAG.
+    image: ghcr.io/yohanesgre/lexa:${LXK_IMAGE_TAG:-latest}
     volumes:
       - lexa-data:/app/data
     environment:
       - DATABASE_PATH=/app/data/lexa.db
       - PORT=3000
+      - LXK_ENV=${LXK_ENV:-}
       - LXK_API_KEY=${LXK_API_KEY}
       - LXK_ADMIN_EMAILS=${LXK_ADMIN_EMAILS:-}
       - LXK_FORGE_DAEMON_TOKEN=${LXK_FORGE_DAEMON_TOKEN:-}

@@ -1,4 +1,7 @@
 services:
+  app:
+    image: ghcr.io/yohanesgre/lexa:${LXK_IMAGE_TAG:-staging}
+
   tunnel:
     image: cloudflare/cloudflared
     command: tunnel --no-autoupdate run --token ${CF_TUNNEL_TOKEN}

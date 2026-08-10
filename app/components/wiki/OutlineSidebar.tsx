@@ -40,6 +40,24 @@ function toTree(headings: HeadingOutline[]): TreeNode[] {
 
 const INDENT = 16;
 
+// Keys of every node that has children — these render expanded (the
+// wireframe shows the outline tree fully expanded by default). Shared by the
+// lazy useState initializer and the tree-change sync so mount behaves exactly
+// like every subsequent update.
+function collectExpandedKeys(nodes: TreeNode[]): Set<string> {
+  const all = new Set<string>();
+  function walk(list: TreeNode[]) {
+    for (const n of list) {
+      if (n.children.length > 0) {
+        all.add(n.key);
+        walk(n.children);
+      }
+    }
+  }
+  walk(nodes);
+  return all;
+}
+
 function TreeItems({
   nodes,
   depth,
@@ -123,23 +141,15 @@ function TreeItems({
 
 export function OutlineSidebar({ headings, collapsed, onToggle }: OutlineSidebarProps) {
   const [activeId, setActiveId] = useState<string>("");
-  const [expandedKeys, setExpandedKeys] = useState<Set<string>>(new Set());
   const tree = useMemo(() => toTree(headings), [headings]);
+  // Lazy-init from the initial tree: sections start EXPANDED on first mount,
+  // identical to the tree-change sync below (mount == update == wireframe).
+  const [expandedKeys, setExpandedKeys] = useState<Set<string>>(() => collectExpandedKeys(tree));
 
   const [prevTree, setPrevTree] = useState(tree);
   if (prevTree !== tree) {
     setPrevTree(tree);
-    const all = new Set<string>();
-    function walk(nodes: TreeNode[]) {
-      for (const n of nodes) {
-        if (n.children.length > 0) {
-          all.add(n.key);
-          walk(n.children);
-        }
-      }
-    }
-    walk(tree);
-    setExpandedKeys(all);
+    setExpandedKeys(collectExpandedKeys(tree));
   }
 
   useEffect(() => {

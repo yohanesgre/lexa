@@ -14,5 +14,5 @@
     "noEmit": true,
     "types": ["bun", "node"]
   },
-  "include": ["app", "server", "shared"]
+  "include": ["app", "server", "shared", "scripts", "cli", "forge"]
 }

@@ -1,0 +1,36 @@
+name: publish-image
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          # main → staging image; v* tags → latest + version-pinned (prod).
+          # The version line evaluates to empty on branch pushes and is
+          # filtered out by build-push-action's tag list parsing.
+          tags: |
+            ${{ github.ref_type == 'tag' && 'ghcr.io/yohanesgre/lexa:latest' || 'ghcr.io/yohanesgre/lexa:staging' }}
+            ${{ github.ref_type == 'tag' && format('ghcr.io/yohanesgre/lexa:{0}', github.ref_name) }}

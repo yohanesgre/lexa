@@ -152,7 +152,7 @@ const projectsGroup = HttpApiGroup.make("projects")
   .add(
     HttpApiEndpoint.del("deleteProject", "/projects/:slug")
       .setPath(SlugPath)
-      .addSuccess(Schema.Undefined, { status: 204 })
+      .addSuccess(Schema.Void, { status: 204 })
   );
 
 const ColumnSchema = Schema.Struct({
@@ -196,7 +196,7 @@ const columnsGroup = HttpApiGroup.make("columns")
   .add(HttpApiEndpoint.patch("updateColumn", "/projects/:slug/columns/:id")
     .setPath(ColumnPath).setPayload(ColumnUpdatePayload).addSuccess(ColumnSchema))
   .add(HttpApiEndpoint.del("deleteColumn", "/projects/:slug/columns/:id")
-    .setPath(ColumnPath)  .addSuccess(Schema.Undefined, { status: 204 }));
+    .setPath(ColumnPath)  .addSuccess(Schema.Void, { status: 204 }));
 
 const SwimlaneSchema = Schema.Struct({
   id: Schema.String,
@@ -213,6 +213,14 @@ const SwimlaneDataResponse = Schema.Struct({ data: Schema.Array(SwimlaneSchema) 
 
 const SwimlanePayload = Schema.Struct({
   name: Schema.String,
+  description: Schema.optional(Schema.String),
+  position: Schema.optional(Schema.Number),
+  dueAt: Schema.optional(Schema.NullOr(Schema.String)),
+});
+
+// PATCH is partial — name is optional here (POST keeps the strict payload).
+const SwimlaneUpdatePayload = Schema.Struct({
+  name: Schema.optional(Schema.String),
   description: Schema.optional(Schema.String),
   position: Schema.optional(Schema.Number),
   dueAt: Schema.optional(Schema.NullOr(Schema.String)),
@@ -643,7 +651,7 @@ const taskLinksGroup = HttpApiGroup.make("task-links")
     .setPath(TaskLinkPath).setPayload(AddTaskLinkInput).addSuccess(LinkMutationResponse, { status: 201 }))
   .add(HttpApiEndpoint.del("removeTaskLink", "/projects/:slug/tasks/:id/links/:linkId")
     .setPath(Schema.Struct({ slug: Schema.String, id: Schema.String, linkId: Schema.String }))
-    .addSuccess(Schema.Undefined, { status: 204 }))
+    .addSuccess(Schema.Void, { status: 204 }))
   .add(HttpApiEndpoint.get("searchTasks", "/projects/:slug/tasks/search")
     .setPath(SlugPath).addSuccess(TaskSearchResponse));
 
@@ -653,7 +661,7 @@ const forgeGroup = HttpApiGroup.make("forge")
   .add(HttpApiEndpoint.patch("updateRuntime", "/forge/runtimes/:id")
     .setPath(RuntimeIdPath).setPayload(UpdateRuntimeInput).addSuccess(RuntimeSchema))
   .add(HttpApiEndpoint.del("removeRuntime", "/forge/runtimes/:id")
-    .setPath(RuntimeIdPath).addSuccess(Schema.Undefined, { status: 204 }))
+    .setPath(RuntimeIdPath).addSuccess(Schema.Void, { status: 204 }))
   .add(HttpApiEndpoint.post("heartbeat", "/forge/daemon/heartbeat")
     .setPayload(HeartbeatInput).addSuccess(Schema.Struct({ ok: Schema.Boolean })))
   .add(HttpApiEndpoint.post("claimTask", "/forge/daemon/claim")
@@ -679,7 +687,7 @@ const forgeGroup = HttpApiGroup.make("forge")
   .add(HttpApiEndpoint.get("listMachines", "/forge/machines")
     .addSuccess(MachineListResponse))
   .add(HttpApiEndpoint.del("removeMachine", "/forge/machines/:id")
-    .setPath(MachineIdPath).addSuccess(Schema.Undefined, { status: 204 }))
+    .setPath(MachineIdPath).addSuccess(Schema.Void, { status: 204 }))
   .add(HttpApiEndpoint.get("listRuntimes", "/forge/runtimes")
     .addSuccess(Schema.Struct({ data: Schema.Array(RuntimeSchema) })))
   .add(HttpApiEndpoint.post("createForgeTask", "/forge/tasks")
@@ -711,7 +719,7 @@ const forgeGroup = HttpApiGroup.make("forge")
   .add(HttpApiEndpoint.patch("updateForgeAgent", "/forge/agents/:id")
     .setPath(ForgeAgentPath).setPayload(UpdateForgeAgentInput).addSuccess(ForgeAgentSchema))
   .add(HttpApiEndpoint.del("deleteForgeAgent", "/forge/agents/:id")
-    .setPath(ForgeAgentPath).addSuccess(Schema.Undefined, { status: 204 }))
+    .setPath(ForgeAgentPath).addSuccess(Schema.Void, { status: 204 }))
   .add(HttpApiEndpoint.put("replaceAgentSkills", "/forge/agents/:id/skills")
     .setPath(ForgeAgentPath).setPayload(ReplaceAgentSkillsInput).addSuccess(ForgeAgentSchema))
   .add(HttpApiEndpoint.post("resetForgeAgent", "/forge/agents/:id/reset")
@@ -723,7 +731,7 @@ const forgeGroup = HttpApiGroup.make("forge")
   .add(HttpApiEndpoint.patch("updateForgeSkill", "/forge/skills/:id")
     .setPath(ForgeSkillPath).setPayload(UpdateForgeSkillInput).addSuccess(ForgeSkillSchema))
   .add(HttpApiEndpoint.del("deleteForgeSkill", "/forge/skills/:id")
-    .setPath(ForgeSkillPath).addSuccess(Schema.Undefined, { status: 204 }))
+    .setPath(ForgeSkillPath).addSuccess(Schema.Void, { status: 204 }))
   .add(HttpApiEndpoint.post("resetForgeSkill", "/forge/skills/:id/reset")
     .setPath(ForgeSkillPath).addSuccess(ForgeSkillSchema))
   .add(HttpApiEndpoint.get("listSources", "/projects/:slug/documents/:type/:id/sources")
@@ -732,7 +740,7 @@ const forgeGroup = HttpApiGroup.make("forge")
     .setPath(DocumentPath).setPayload(AddSourceInput).addSuccess(SourceMutationResponse, { status: 201 }))
   .add(HttpApiEndpoint.del("removeSource", "/projects/:slug/documents/:type/:id/sources/:sourceId")
     .setPath(Schema.Struct({ slug: Schema.String, type: Schema.Literal("task", "wiki"), id: Schema.String, sourceId: Schema.String }))
-    .addSuccess(Schema.Undefined, { status: 204 }));
+    .addSuccess(Schema.Void, { status: 204 }));
 
 const WikiPageSchema = Schema.Struct({
   id: Schema.String,
@@ -822,9 +830,9 @@ const swimlanesGroup = HttpApiGroup.make("swimlanes")
   .add(HttpApiEndpoint.post("createSwimlane", "/projects/:slug/swimlanes")
     .setPath(SlugPath).setPayload(SwimlanePayload).addSuccess(SwimlaneSchema, { status: 201 }))
   .add(HttpApiEndpoint.patch("updateSwimlane", "/projects/:slug/swimlanes/:id")
-    .setPath(SwimlanePath).setPayload(SwimlanePayload).addSuccess(SwimlaneSchema))
+    .setPath(SwimlanePath).setPayload(SwimlaneUpdatePayload).addSuccess(SwimlaneSchema))
   .add(HttpApiEndpoint.del("deleteSwimlane", "/projects/:slug/swimlanes/:id")
-    .setPath(SwimlanePath)  .addSuccess(Schema.Undefined, { status: 204 }))
+    .setPath(SwimlanePath)  .addSuccess(Schema.Void, { status: 204 }))
   .add(HttpApiEndpoint.post("archiveSwimlane", "/projects/:slug/swimlanes/:id/archive")
     .setPath(SwimlanePath).addSuccess(SwimlaneMutationResponse))
   .add(HttpApiEndpoint.post("restoreSwimlane", "/projects/:slug/swimlanes/:id/restore")
@@ -933,7 +941,7 @@ const tasksGroup = HttpApiGroup.make("tasks")
   .add(HttpApiEndpoint.post("moveTask", "/projects/:slug/tasks/:id/move")
     .setPath(TaskPath).setPayload(MoveTaskPayload).addSuccess(TaskMutationResponse))
   .add(HttpApiEndpoint.del("deleteTask", "/projects/:slug/tasks/:id")
-    .setPath(TaskPath)  .addSuccess(Schema.Undefined, { status: 204 }))
+    .setPath(TaskPath)  .addSuccess(Schema.Void, { status: 204 }))
   .add(HttpApiEndpoint.post("archiveTask", "/projects/:slug/tasks/:id/archive")
     .setPath(TaskPath).addSuccess(TaskMutationResponse))
   .add(HttpApiEndpoint.post("restoreTask", "/projects/:slug/tasks/:id/restore")
@@ -1013,7 +1021,7 @@ const wikiGroup = HttpApiGroup.make("wiki")
   .add(HttpApiEndpoint.patch("updatePage", "/projects/:slug/wiki/:pageSlug")
     .setPath(PagePath).setPayload(WikiPageUpdatePayload).addSuccess(WikiPageSchema))
   .add(HttpApiEndpoint.del("deletePage", "/projects/:slug/wiki/:pageSlug")
-    .setPath(PagePath).addSuccess(Schema.Undefined, { status: 204 }))
+    .setPath(PagePath).addSuccess(Schema.Void, { status: 204 }))
   .add(HttpApiEndpoint.get("listRevisions", "/projects/:slug/wiki/:pageSlug/revisions")
     .setPath(PagePath).addSuccess(RevisionsListResponse))
   .add(HttpApiEndpoint.get("getRevision", "/projects/:slug/wiki/:pageSlug/revisions/:revisionId")
@@ -1030,7 +1038,7 @@ const apiKeysGroup = HttpApiGroup.make("api-keys")
     .setPayload(CreateApiKeyInput)
     .addSuccess(Schema.Struct({ key: ApiKeySchema, rawKey: Schema.String }), { status: 201 }))
   .add(HttpApiEndpoint.del("deleteApiKey", "/settings/api-keys/:id")
-    .setPath(ApiKeyPath).addSuccess(Schema.Undefined, { status: 204 }));
+    .setPath(ApiKeyPath).addSuccess(Schema.Void, { status: 204 }));
 
 const UserSchema = Schema.Struct({
   id: Schema.String,
@@ -1065,7 +1073,7 @@ const adminGroup = HttpApiGroup.make("admin")
   .add(HttpApiEndpoint.put("setUserProjectRole", "/admin/users/:id/projects")
     .setPath(UserPath).setPayload(SetProjectRoleInput).addSuccess(ProjectRoleEntry))
   .add(HttpApiEndpoint.del("removeUserProjectRole", "/admin/users/:id/projects/:projectId")
-    .setPath(Schema.Struct({ id: Schema.String, projectId: Schema.String })).addSuccess(Schema.Undefined, { status: 204 }));
+    .setPath(Schema.Struct({ id: Schema.String, projectId: Schema.String })).addSuccess(Schema.Void, { status: 204 }));
 
 // Self-service — no admin gate: the caller key names the user via x-lxk-user,
 // and the acting user's row is updated (see meLive). Agents with bare keys get
@@ -1217,6 +1225,8 @@ const setupLive = HttpApiBuilder.group(LexaApi, "setup", (handlers) =>
       respond(Effect.gen(function* () {
         const db = yield* Sqlite;
         if (setupLocked(db)) return yield* Effect.fail(new SetupLocked());
+        const lxkEnv = process.env.LXK_ENV;
+        if (lxkEnv && lxkEnv !== "dev") return { seeded: false as const };
         const seedFile = join(import.meta.dir, "../../scripts/seed-dev.sql");
         if (!existsSync(seedFile)) return { seeded: false as const };
         const projectCount = (db.prepare("SELECT COUNT(*) c FROM projects").get() as { c: number }).c;

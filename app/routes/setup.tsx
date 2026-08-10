@@ -10,6 +10,7 @@ export const Route = createFileRoute("/setup")({
 });
 
 const STEPS = ["Admin email", "API key", "Sample data", "Done"];
+const REMOTE_STEPS = ["Admin email", "API key", "Done"];
 
 function SetupWizard() {
   const navigate = useNavigate();
@@ -44,6 +45,7 @@ function SetupWizard() {
   }
 
   const isRemote = typeof window !== "undefined" && !["localhost", "127.0.0.1"].includes(window.location.hostname);
+  const steps = isRemote ? REMOTE_STEPS : STEPS;
 
   const submitAdmin = async () => {
     const trimmed = email.trim().toLowerCase();
@@ -113,7 +115,7 @@ function SetupWizard() {
 
         {/* Stepper */}
         <div className="flex items-center justify-center gap-2 mb-8">
-          {STEPS.map((label, i) => (
+          {steps.map((label, i) => (
             <div key={label} className="flex items-center gap-2">
               {i > 0 && <div className="w-6 h-px bg-lx-border-default" />}
               <div className={cn("flex items-center gap-1.5", i === step ? "text-lx-text-primary" : i < step ? "text-lx-text-success" : "text-lx-text-muted")}>
@@ -203,8 +205,8 @@ function SetupWizard() {
             </div>
           )}
 
-          {/* Step 2 — Sample data */}
-          {step === 2 && (
+          {/* Step 2 — Sample data (dev only) */}
+          {step === 2 && !isRemote && (
             <div>
               <div className="flex items-center gap-2 mb-3">
                 <Database size={16} strokeWidth={1.5} className="text-lx-text-link" />
@@ -231,8 +233,8 @@ function SetupWizard() {
             </div>
           )}
 
-          {/* Step 3 — Done */}
-          {step === 3 && (
+          {/* Step 3 — Done (step 2 when remote skips sample data) */}
+          {step === (isRemote ? 2 : 3) && (
             <div className="text-center py-4">
               <div className="w-12 h-12 rounded-full bg-lx-surface-selected flex items-center justify-center mx-auto mb-4">
                 <Sparkles size={20} strokeWidth={1.5} className="text-lx-text-link" />

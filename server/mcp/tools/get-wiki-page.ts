@@ -1,6 +1,5 @@
 import { Effect } from "effect";
 import { WikiService } from "../../services/wiki.service";
-import { WikiRepo } from "../../repos/wiki.repo";
 import { WikiPageNotFound } from "../../api/errors";
 import { resolveProject } from "../resolve";
 import { docToMarkdown } from "../../../shared/markdown";
@@ -23,8 +22,7 @@ export const tool = {
       const page = yield* wikiService.findBySlug(project.id, args.pageSlug).pipe(
         Effect.catchTag("WikiPageNotFound", () =>
           Effect.gen(function* () {
-            const wikiRepo = yield* WikiRepo;
-            const siblings = yield* wikiRepo.findByProject(project.id);
+            const siblings = yield* wikiService.findByProject(project.id);
             return yield* new WikiPageNotFound({
               id: args.pageSlug,
               availablePageSlugs: siblings.map((p) => p.slug),

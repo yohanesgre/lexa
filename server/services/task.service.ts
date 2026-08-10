@@ -535,6 +535,25 @@ export class TaskService extends Effect.Service<TaskService>()("Lexa/TaskService
           yield* Effect.logInfo(`[Task] Restored ${restored.task.id}`);
           return restored;
         }),
+
+      // Unlink a GitHub issue from a task (does not close/delete the GitHub
+      // issue). Idempotent: an unknown issueId is a no-op. The github_unlinked
+      // activity row lands in the SAME transaction as the unlink.
+      unlinkGithubIssue: (actor: Actor, taskId: string, issueId: string): Effect.Effect<{ unlinked: boolean }, TaskNotFound | DbError | ConstraintViolation> =>
+        Effect.gen(function* () {
+          const task = yield* taskRepo.findById(taskId).pipe(
+            Effect.catchTag("RowNotFound", () => new TaskNotFound({ id: taskId }))
+          );
+          const issue = task.githubs.find((g) => g.issueId === issueId);
+          yield* withTx(db, Effect.gen(function* () {
+            yield* taskRepo.unlinkGithubIssue(taskId, issueId);
+            if (issue) {
+              yield* activityService.append(taskId, actor, "github_unlinked", msg.githubUnlinked(issue.repo, issue.issueNumber));
+            }
+          }));
+          yield* Effect.logInfo(`[Task] Unlinked GitHub issue ${issueId} from ${taskId}`);
+          return { unlinked: true };
+        }),
     };
   }),
 }) {}

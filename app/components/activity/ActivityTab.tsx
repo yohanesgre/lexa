@@ -3,7 +3,7 @@ import { clientLxkUser } from "../../lib/api";
 import { ActivityTimeline, type CurrentUser } from "./ActivityTimeline";
 import { CommentComposer } from "./CommentComposer";
 
-// The Activity tab: step-rail timeline + composer, per wireframes/task-detail.html.
+// The Activity tab: step-rail timeline + composer, per wireframes/src/task-detail.html.
 // Identity: the Cloudflare Access user meta (email/name) resolved against the
 // project members list to get the acting user's id + role — comment actions
 // key off it (author → edit+delete, admin → delete on others, agents none).

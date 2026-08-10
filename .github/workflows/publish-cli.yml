@@ -1,0 +1,31 @@
+name: publish-cli
+
+# CLI releases are INDEPENDENT of web app releases (see publish.yml):
+#   cli-vX.Y.Z tags → build the binary + attach it to the GitHub release
+#   vX.Y.Z tags     → web app image to ghcr.io (publish.yml)
+# install-cli.sh and `lexa-cli upgrade` resolve the newest cli-v* release.
+
+on:
+  push:
+    tags: ["cli-v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Compile CLI
+        run: LXK_CLI_VERSION=${{ github.ref_name }} bun run compile:cli
+
+      - name: Create release with the binary
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release create "${{ github.ref_name }}" bin/lexa-cli --generate-notes

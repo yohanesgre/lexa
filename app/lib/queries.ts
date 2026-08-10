@@ -480,6 +480,14 @@ export function useCreateColumn(slug: string) {
         if (!old) return old;
         return [...old, column];
       });
+      // Column headers render on the board — keep both board caches in sync,
+      // or a first-column create leaves the board stuck on "No columns yet".
+      for (const archived of [false, true]) {
+        qc.setQueryData(["board", slug, archived], (old: Board | undefined) => {
+          if (!old) return old;
+          return { ...old, columns: [...old.columns, column] };
+        });
+      }
       toast.push("success", "Column created");
     },
     onError: (err) => {
@@ -499,6 +507,14 @@ export function useUpdateColumn(slug: string) {
         if (!old) return old;
         return old.map((c) => (c.id === column.id ? column : c));
       });
+      // Column headers render on the board — refresh the board caches too,
+      // or a rename shows the stale name until refetch.
+      for (const archived of [false, true]) {
+        qc.setQueryData(["board", slug, archived], (old: Board | undefined) => {
+          if (!old) return old;
+          return { ...old, columns: old.columns.map((c: Column) => (c.id === column.id ? column : c)) };
+        });
+      }
       toast.push("success", "Column updated");
     },
     onError: (err) => {

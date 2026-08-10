@@ -219,6 +219,8 @@ Errors: TASK_NOT_FOUND, COMMENT_INVALID
 Notes: The comment is Markdown; stored as rich text and rendered in the Lexa
        UI. The agent's API key name is recorded as the author. Agents have NO
        comment edit/delete tools — comments are append-only from MCP.
+       A missing/empty comment yields COMMENT_INVALID (there is no INVALID_ARGS
+       validation on this tool).
 ```
 
 ### Wiki
@@ -241,7 +243,7 @@ Errors: SLUG_TAKEN {slug}, PAGE_NOT_FOUND (bad parentSlug)
 ```json
 Input:  { project*, pageSlug*, title?, content? }
 Output: PageMeta
-Errors: PAGE_NOT_FOUND, SLUG_TAKEN
+Errors: PAGE_NOT_FOUND
 ```
 
 **`list_wiki_pages`**
