@@ -89,6 +89,14 @@ Provisioning from a checkout instead: `bun run setup --prod --admin-email x --ye
 writes `.env.prod` with `LXK_ENV=prod`, runs migrations, mirrors the admin
 email, locks setup, and seeds nothing.
 
+**Teardown:** `lexa-cli undeploy <domain> [staging|prod]` reverses a deploy for
+that flavor: `docker compose down -v` (containers + data volume, DB wiped),
+deletes the Cloudflare resources (DNS record, tunnel, Access app + policies,
+the per-flavor Google IdP), and removes the local state (flavor deploy dir +
+stored deploy creds; login stays). Prompts for confirmation on a TTY;
+non-TTY needs `--yes`. Cloudflare steps are best-effort — a missing token or
+failed API call warns and continues, so local teardown always completes.
+
 **GitHub sync** — see `docs/GITHUB_SETUP.md` (includes the acceptance round-trip).
 
 ## Google OAuth & Cloudflare Access setup
