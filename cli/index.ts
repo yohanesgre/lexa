@@ -487,7 +487,7 @@ Machine listener:
                                                   the listener first for permanent removal)
 
 Forge workspaces (local machine view):
-  machine workspace list                         per-project dirs under ~/.lexa-<flavor>/projects/
+  machine workspace list                         per-project dirs under ~/.lexa/projects/ (staging: ~/.lexa-staging)
   machine workspace sync                         re-index projects from the server + provision
 
 Deploy (Docker + cloudflared tunnel + Access):
@@ -540,7 +540,7 @@ const GROUP_HELP: Record<string, string> = {
                                                   the listener first for permanent removal)
 
 Forge workspaces (local machine view):
-  machine workspace list                         per-project dirs under ~/.lexa-<flavor>/projects/
+  machine workspace list                         per-project dirs under ~/.lexa/projects/ (staging: ~/.lexa-staging)
   machine workspace sync                         re-index projects from the server + provision`,
 
   github: `GitHub sync (optional integration):
