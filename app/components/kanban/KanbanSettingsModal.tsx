@@ -109,6 +109,15 @@ function SettingsModalHeader({ onClose }: { onClose: () => void }) {
 }
 
 export function KanbanSettingsModal({ slug, isOpen, onClose }: KanbanSettingsModalProps) {
+  // The outer component must NOT hold any data hooks: it renders null when
+  // closed, so the board never fetches columns/swimlanes/field-config until
+  // the modal actually opens. All hooks live in SettingsContent, which only
+  // mounts once isOpen is true.
+  if (!isOpen) return null;
+  return <SettingsContent slug={slug} onClose={onClose} />;
+}
+
+function SettingsContent({ slug, onClose }: { slug: string; onClose: () => void }) {
   const { data: columns = [], isLoading: columnsLoading, isError: columnsError } = useColumns(slug);
   const { data: swimlanes = [], isLoading: swimlanesLoading, isError: swimlanesError } = useSwimlanes(slug);
   const { data: fieldConfig, isLoading: configLoading, isError: configError } = useFieldConfig(slug);
@@ -243,8 +252,6 @@ export function KanbanSettingsModal({ slug, isOpen, onClose }: KanbanSettingsMod
     if (laneOrder.length === 0) return swimlanes;
     return laneOrder.flatMap((id) => { const s = swimlanes.find((s) => s.id === id); return s ? [s] : []; });
   }, [swimlanes, laneOrder]);
-
-  if (!isOpen) return null;
 
   const isLoading = columnsLoading || swimlanesLoading;
 

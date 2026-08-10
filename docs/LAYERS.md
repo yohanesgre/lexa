@@ -1,6 +1,4 @@
-# Effect-TS Layer Architecture (v2 — post-review)
-
-> Reviewed against REVIEW.md. Changes from v1: **circular dependency eliminated** (TaskService no longer depends on GitHubService — routes orchestrate Lexa→GitHub sync), **PolicyService removed** (folded into TaskService as a pure function — only `required_fields` survived the review), **atomic move + WIP enforcement**, **webhook idempotency + echo suppression**, **HttpApi with declarative error mapping**, **Cloudflare Access auth**, pagination, corrected code snippets.
+# Effect-TS Layer Architecture
 
 ## Layer Hierarchy
 
@@ -577,7 +575,7 @@ All list endpoints and MCP `list_*`/`search_*` tools: `?limit` (default 50, max 
 | `GithubWebhookError` | 400 | `GITHUB_WEBHOOK_ERROR` | bad signature → 401 |
 | `InvalidKey` / `MissingAuth` | 401 | `INVALID_API_KEY` / `MISSING_AUTH` | |
 
-## Service Dependency Map (v2 — acyclic)
+## Service Dependency Map
 
 ```
 TaskService        → TaskRepo, ColumnRepo, SwimlaneRepo, ProjectRepo, FieldConfigRepo
@@ -595,8 +593,3 @@ GitHubService      → GitHubClient, WebhookEventRepo, TaskRepo, TaskService, Co
 Routes/MCP         → all services (orchestration layer — the only place
                      TaskService and GitHubService meet)
 ```
-
-## Cut from v1
-
-- **PolicyService** — with only `required_fields` surviving, it collapsed into pure functions inside TaskService (`isEmptyDoc`, `validateRequiredFields`). One service and one repo query fewer on every move.
-- **LabelService + LabelRepo** — feature cut (see SCHEMA.md).

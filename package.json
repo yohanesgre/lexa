@@ -1,18 +1,15 @@
 {
   "name": "lexa",
   "version": "0.1.0",
-  "description": "Self-hosted project management for small game dev teams — Kanban with swimlanes/WIP limits, nested wiki, MCP server for AI agents, Forge AI writing assistant.",
+  "description": "Self-hosted project management — Kanban with swimlanes/WIP limits, nested wiki, MCP server for AI agents, Forge AI writing assistant.",
   "scripts": {
     "test": "vitest run",
     "prepare": "./scripts/prepare-effect.sh",
     "dev": "vite dev",
     "dev:server": "bun --env-file=.env run server/entry.ts",
     "dev:full": "bash scripts/dev.sh",
-    "forge:daemon": "bun run scripts/forge/daemon.ts",
-    "lexa-cli-dev": "bun run scripts/cli/index.ts",
+    "lexa-cli-dev": "bun run cli/index.ts",
     "compile:cli": "bun run scripts/compile-cli.ts",
-    "install:cli": "mkdir -p \"$HOME/.local/bin\" && install -m 755 bin/lexa-cli \"$HOME/.local/bin/lexa-cli\"",
-    "uninstall:cli": "rm -f \"$HOME/.local/bin/lexa-cli\"",
     "install:cli-dev": "bash scripts/install-cli-dev.sh",
     "uninstall:cli-dev": "rm -f \"$HOME/.local/bin/lexa-cli-dev\"",
     "setup": "bun run scripts/setup-cli.ts",
@@ -25,8 +22,8 @@
     "url": "git+https://github.com/yohanesgre/lexa.git"
   },
   "keywords": [],
-  "author": "",
-  "license": "ISC",
+  "author": "Yohanes Grethaputra",
+  "license": "MIT",
   "bugs": {
     "url": "https://github.com/yohanesgre/lexa/issues"
   },
@@ -62,11 +59,15 @@
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.3.3",
+    "@testing-library/jest-dom": "^7.0.1",
+    "@testing-library/react": "^16.3.2",
+    "@testing-library/user-event": "^14.6.3",
     "@types/better-sqlite3": "^9.6.0",
     "@types/react": "^19.2.17",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^6.0.4",
     "better-sqlite3": "^13.0.3",
+    "jsdom": "^30.0.1",
     "react-doctor": "^0.9.2",
     "tailwindcss": "^4.3.3",
     "typescript": "^7.0.2",

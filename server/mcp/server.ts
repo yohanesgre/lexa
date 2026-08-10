@@ -1,4 +1,4 @@
-import { Effect, Layer, ManagedRuntime } from "effect";
+import { Cause, Effect, Layer, ManagedRuntime } from "effect";
 import { LoggerLayer } from "../logging/logger";
 import { ApiKeyRepo } from "../repos/api-key.repo";
 import { UserRepo } from "../repos/user.repo";
@@ -139,7 +139,10 @@ function buildToolError(e: unknown): object {
   const error = e as { _tag?: string; code?: string; message?: string; details?: unknown } & Record<string, unknown>;
   const tag = error._tag;
   if (typeof tag === "string" && tag) {
-    const tagged = { ...error, _tag: tag };
+    // Error's `message` is a non-enumerable own property — the spread below
+    // drops it, so copy it explicitly (GithubApiError etc. carry useful text).
+    const message = typeof error.message === "string" && error.message !== "" ? error.message : undefined;
+    const tagged = { ...error, _tag: tag, ...(message !== undefined ? { message } : {}) };
     return {
       code: errorCodeMap[tag] ?? "INTERNAL",
       message: errorMessage(tagged),
@@ -351,17 +354,33 @@ export class McpServer extends Effect.Service<McpServer>()("Lexa/McpServer", {
         }
 
         const response = yield* dispatch(request, authContext).pipe(
-          // Unhandled tool failures (e.g. checkProjectAccess denial) must
-          // surface as a tool error envelope — never a thrown rejection/500.
-          Effect.catchAll((e) => {
-            const err = buildToolError(e as any);
-            return Effect.logWarning(`[MCP] request rejected code=${(err as any).code}`).pipe(
-              Effect.as({
-                jsonrpc: "2.0",
-                id: request.id ?? null,
-                result: { content: [{ type: "text", text: JSON.stringify(err) }], isError: true },
-              })
-            );
+          // Any failure — typed OR defect — must surface as a tool error
+          // envelope, never a thrown rejection/500. catchAllCause catches
+          // defects too (e.g. a missing service in the layer): those become
+          // an INTERNAL envelope so the JSON-RPC connection stays alive.
+          Effect.catchAllCause((cause) => {
+            const failure = Cause.failureOption(cause);
+            if (failure._tag === "Some") {
+              const err = buildToolError(failure.value as any);
+              return Effect.logWarning(`[MCP] request rejected code=${(err as any).code}`).pipe(
+                Effect.as({
+                  jsonrpc: "2.0",
+                  id: request.id ?? null,
+                  result: { content: [{ type: "text", text: JSON.stringify(err) }], isError: true },
+                })
+              );
+            }
+            for (const d of Cause.defects(cause)) {
+              console.error("[MCP] Defect:", d instanceof Error ? d.message : String(d), d instanceof Error ? d.stack : undefined);
+            }
+            return Effect.succeed({
+              jsonrpc: "2.0",
+              id: request.id ?? null,
+              result: {
+                content: [{ type: "text", text: JSON.stringify({ code: "INTERNAL", message: "Internal server error", details: {} }) }],
+                isError: true,
+              },
+            });
           })
         );
         return new Response(JSON.stringify(response), { status: 200, headers });

@@ -10,7 +10,8 @@ export default defineConfig({
     },
   },
   test: {
-    include: ["shared/**/*.test.ts", "server/**/*.test.ts", "app/**/*.test.{ts,tsx}"],
+    include: ["shared/**/*.test.ts", "server/**/*.test.ts", "app/**/*.test.{ts,tsx}", "cli/**/*.test.ts", "forge/**/*.test.ts"],
+    setupFiles: ["./vitest.setup.ts"],
     passWithNoTests: true,
   },
 });

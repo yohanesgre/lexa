@@ -3,7 +3,7 @@
 
 /* =========================================================
    Lexa — PHOSPHOR design tokens
-   Transcribed from DESIGN_SYSTEM.md §2/§3/§6/§8 and ported
+   Transcribed from wireframes/DESIGN_SYSTEM.md §2/§3/§6/§8 and ported
    from wireframes/wireframes.css (class-for-class).
    ========================================================= */
 
@@ -129,7 +129,7 @@
   --lx-pb-low: #5C554F;
 }
 
-/* ---- Tailwind v4 theme mapping (DESIGN_SYSTEM.md §8.1) ---- */
+/* ---- Tailwind v4 theme mapping (wireframes/DESIGN_SYSTEM.md §8.1) ---- */
 @theme {
   --color-lx-surface-app: var(--lx-surface-app);
   --color-lx-surface-elevated: var(--lx-surface-elevated);
