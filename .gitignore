@@ -8,8 +8,6 @@ dist/
 .env.prod
 data/
 bin/
-routeTree.gen.ts
-app/routeTree.gen.ts
 # Private working docs (html viz, specs, superpowers plans) — never published
 docs/private/
 worker-configuration.d.ts
