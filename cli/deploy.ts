@@ -439,13 +439,32 @@ export const cmdDeploy = Effect.fn("LexaCli/cmdDeploy")(function* (
     include: [{ email_domain: { domain: emailDomain } }],
     precedence: 1,
   });
-  const existingPolicies = (yield* cfFetch(cfToken, `/accounts/${account}/access/apps/${appId}/policies`)) as Array<{ id: string }>;
+  const existingPolicies = (yield* cfFetch(cfToken, `/accounts/${account}/access/apps/${appId}/policies`)) as Array<{ id: string; precedence?: number; app_count?: number; reusable?: boolean }>;
   if (existingPolicies.length > 0) {
-    console.log(`  Updating existing policy: ${existingPolicies[0].id}`);
-    yield* cfFetch(cfToken, `/accounts/${account}/access/apps/${appId}/policies/${existingPolicies[0].id}`, {
-      method: "PUT",
-      body: policyBody,
-    });
+    const row = existingPolicies[0];
+    // App-scoped policy lists include REUSABLE policies too, and reusable
+    // policies must be updated through the account-level endpoint — the
+    // app-scoped PUT rejects them (12130). Reusable rows carry app_count
+    // (and typically reusable: true) and no precedence; app-scoped rows
+    // carry precedence.
+    if (row.reusable === true || row.app_count !== undefined) {
+      console.log(`  Updating existing reusable policy: ${row.id}`);
+      yield* cfFetch(cfToken, `/accounts/${account}/access/policies/${row.id}`, {
+        method: "PUT",
+        // Reusable policy bodies have no precedence (per-app ordering only).
+        body: JSON.stringify({
+          name: `Allow @${emailDomain}`,
+          decision: "allow",
+          include: [{ email_domain: { domain: emailDomain } }],
+        }),
+      });
+    } else {
+      console.log(`  Updating existing policy: ${row.id}`);
+      yield* cfFetch(cfToken, `/accounts/${account}/access/apps/${appId}/policies/${row.id}`, {
+        method: "PUT",
+        body: policyBody,
+      });
+    }
   } else {
     yield* cfFetch(cfToken, `/accounts/${account}/access/apps/${appId}/policies`, { method: "POST", body: policyBody });
   }
