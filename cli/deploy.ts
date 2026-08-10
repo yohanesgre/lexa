@@ -515,9 +515,14 @@ export const cmdDeploy = Effect.fn("LexaCli/cmdDeploy")(function* (
   const githubAppId = preservedValue(flavor.envFile, "GITHUB_APP_ID");
   const githubWebhookSecret = preservedValue(flavor.envFile, "GITHUB_WEBHOOK_SECRET");
 
+  // LXK_ACCESS_TEAM is derived from the CF Access team domain (subdomain
+  // before .cloudflareaccess.com) so the "Sign out" link always matches the
+  // team the Access app lives under — never hand-set.
+  const accessTeam = cfTeamDomain.replace(/\.cloudflareaccess\.com$/, "");
+
   // Carry forward any hand-added keys (LOG_LEVEL, LXK_MAX_BODY_MB,
   // LXK_ACCESS_AUD, ...) — the rewrite below only owns its own set.
-  const rewrittenKeys = new Set(["LXK_API_KEY", "VITE_LXK_API_KEY", "LXK_ADMIN_EMAILS", "LXK_ENV", "CF_TUNNEL_TOKEN", "GITHUB_APP_ID", "GITHUB_PRIVATE_KEY_FILE", "GITHUB_WEBHOOK_SECRET"]);
+  const rewrittenKeys = new Set(["LXK_API_KEY", "VITE_LXK_API_KEY", "LXK_ADMIN_EMAILS", "LXK_ENV", "CF_TUNNEL_TOKEN", "GITHUB_APP_ID", "GITHUB_PRIVATE_KEY_FILE", "GITHUB_WEBHOOK_SECRET", "LXK_ACCESS_TEAM"]);
   const carried = existsSync(flavor.envFile)
     ? readFileSync(flavor.envFile, "utf-8")
         .split("\n")
@@ -535,6 +540,7 @@ export const cmdDeploy = Effect.fn("LexaCli/cmdDeploy")(function* (
     `LXK_ADMIN_EMAILS=${adminEmail}`,
     `LXK_ENV=${flavorName}`,
     `CF_TUNNEL_TOKEN=${tunnelToken}`,
+    `LXK_ACCESS_TEAM=${accessTeam}`,
     `GITHUB_APP_ID=${githubAppId}`,
     "GITHUB_PRIVATE_KEY_FILE=/app/github-app.private-key.pem",
     `GITHUB_WEBHOOK_SECRET=${githubWebhookSecret}`,

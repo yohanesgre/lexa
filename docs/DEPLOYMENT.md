@@ -32,7 +32,7 @@ logic, not seed).
 | `GITHUB_APP_ID` / `GITHUB_WEBHOOK_SECRET` | preserved across deploys; set once by hand for issue sync | only for GitHub sync |
 | `GITHUB_PRIVATE_KEY` / `GITHUB_PRIVATE_KEY_FILE` | hand-set; PEM volume-mounted read-only in prod compose | only for GitHub sync |
 | `LXK_ACCESS_AUD` | hand-set after deploy (Access audience tag) | staging/prod with Access JWT verification |
-| `LXK_ACCESS_TEAM` | hand-set | only for the Access logout link |
+| `LXK_ACCESS_TEAM` | derived by `lexa-cli deploy` from `--team-domain` | always (staging/prod); enables the Access logout link |
 | `LXK_FORGE_DAEMON_TOKEN` | hand-set (Settings alternative) | only for Forge daemons |
 | `LXK_MAX_BODY_MB` / `LOG_LEVEL` / `DATABASE_PATH` / `PORT` | defaults; tune by hand | no |
 
@@ -48,7 +48,7 @@ logic, not seed).
 | `GITHUB_WEBHOOK_SECRET` | HMAC secret for the `/api/webhooks/github` route |
 | `LOG_LEVEL` | logging level (default `info`) |
 | `LXK_ACCESS_AUD` | Cloudflare Access audience tag (`https://<team>.cloudflareaccess.com/cdn-cgi/access/get-ksi`). When set, `/api` and `/mcp` require valid Access JWTs; otherwise only API keys are checked |
-| `LXK_ACCESS_TEAM` | Access team subdomain — enables the "Sign out" (Access logout) link in the UI |
+| `LXK_ACCESS_TEAM` | Access team subdomain — enables the "Sign out" (Access logout) link in the UI; derived by `lexa-cli deploy` from `--team-domain` |
 | `LXK_ADMIN_EMAILS` | comma-separated admin emails (env OR `settings.admin_emails` is checked) |
 | `LXK_API_KEY` | server auth Bearer key (`lxk_` + 43 chars) |
 | `LXK_FORGE_DAEMON_TOKEN` | shared secret for Forge daemons (alternative to a Settings API key) |
@@ -94,8 +94,9 @@ email, locks setup, and seeds nothing.
 ## Google OAuth & Cloudflare Access setup
 
 Human auth is Cloudflare Access with Google as the identity provider. `lexa-cli
-deploy` provisions the Cloudflare side (tunnel, DNS, Access app, Google IdP);
-you create the Google OAuth client(s) and hand-set two env vars after deploy.
+deploy` provisions the Cloudflare side (tunnel, DNS, Access app, Google IdP)
+and writes `LXK_ACCESS_TEAM` automatically; you create the Google OAuth
+client(s) and hand-set one env var (`LXK_ACCESS_AUD`) after deploy.
 
 ### 1. Cloudflare API token
 
@@ -144,16 +145,17 @@ All deploy creds (CF token, Google client, team/email domain) persist in
 `~/.lexa/config.json` (staging: `~/.lexa-staging/config.json`) under the
 `deploy` key.
 
-### 4. After deploy — hand-set two vars
+### 4. After deploy — hand-set one var
 
 | Var | Value | Effect |
 |---|---|---|
 | `LXK_ACCESS_AUD` | `https://<team>.cloudflareaccess.com/cdn-cgi/access/get-ksi` (Access audience tag) | `/api` and `/mcp` require valid Access JWTs; without it only API keys are checked. **Per-app tag**: each flavor's Access app has its own AUD — fetch it from that app's `get-ksi`, never share between flavors |
-| `LXK_ACCESS_TEAM` | `<team>` (Access team subdomain) | enables the "Sign out" (Access logout) link in the account menu |
 
-Add them to the flavor env file (`.env.staging` / `.env.prod`); the deploy's
+Add it to the flavor env file (`.env.staging` / `.env.prod`); the deploy's
 carry-forward keeps hand-added keys across re-deploys. Restart the container
 to apply (`docker compose restart` in the flavor deploy dir, or just redeploy).
+`LXK_ACCESS_TEAM` needs no manual step — `lexa-cli deploy` derives it from
+`--team-domain`.
 
 ### 5. Verify
 
