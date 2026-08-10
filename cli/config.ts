@@ -1,8 +1,10 @@
-// lexa-cli config — login credentials stored per-user under the machine
+// lexa-cli config — login credentials stored per-user under the flavor
 // state root:
-//   ~/.lexa/config.json  { url, apiKey }
-// Everything the host stores lives in ~/.lexa (LEXA_DIR override): config,
-// machine-id, bootstrap env, per-runtime envs, and per-run workdirs.
+//   ~/.lexa-<flavor>/config.json  { url, apiKey }
+// Each flavor (dev/staging/prod) gets its own state root
+// (~/.lexa-dev, ~/.lexa-staging, ~/.lexa-prod; LEXA_DIR override wins):
+// config, machine-id, bootstrap env, per-runtime envs, and per-run workdirs.
+// Deploy creds live under the flavor root's config.json `deploy` key.
 //
 // Effect service: reads/writes are best-effort by design (corrupt/missing
 // files yield null, never typed failures) — the CLI treats config as
@@ -27,7 +29,14 @@ export interface DeployCreds {
   emailDomain?: string;
 }
 
-export const LEXA_DIR = process.env.LEXA_DIR ?? join(homedir(), ".lexa");
+export const LEXA_DIR = process.env.LEXA_DIR ?? join(homedir(), ".lexa-prod");
+
+export type LexaFlavor = "dev" | "staging" | "prod";
+
+export function lexaDirFor(flavor: LexaFlavor): string {
+  return process.env.LEXA_DIR ?? join(homedir(), `.lexa-${flavor}`);
+}
+
 const CONFIG_PATH = join(LEXA_DIR, "config.json");
 
 // Legacy pre-~/.lexa locations. Migrate-and-delete, no fallback: on any
@@ -93,30 +102,32 @@ function clearConfigSync(): void {
   }
 }
 
-function loadDeployCredsSync(): DeployCreds | null {
+function loadDeployCredsSync(dir: string): DeployCreds | null {
+  const path = join(dir, "config.json");
   try {
-    if (!existsSync(CONFIG_PATH)) return null;
-    const raw = JSON.parse(readFileSync(CONFIG_PATH, "utf-8")) as { deploy?: DeployCreds };
+    if (!existsSync(path)) return null;
+    const raw = JSON.parse(readFileSync(path, "utf-8")) as { deploy?: DeployCreds };
     return raw.deploy ?? null;
   } catch {
     return null;
   }
 }
 
-function saveDeployCredsSync(creds: DeployCreds): void {
+function saveDeployCredsSync(creds: DeployCreds, dir: string): void {
   migrateLegacyDirsSync();
-  mkdirSync(LEXA_DIR, { recursive: true, mode: 0o700 });
+  mkdirSync(dir, { recursive: true, mode: 0o700 });
+  const path = join(dir, "config.json");
   let existing: Record<string, unknown> = {};
   try {
-    if (existsSync(CONFIG_PATH)) {
-      existing = JSON.parse(readFileSync(CONFIG_PATH, "utf-8")) as Record<string, unknown>;
+    if (existsSync(path)) {
+      existing = JSON.parse(readFileSync(path, "utf-8")) as Record<string, unknown>;
     }
   } catch {
     existing = {};
   }
   existing.deploy = creds;
-  writeFileSync(CONFIG_PATH, JSON.stringify(existing, null, 2) + "\n", { mode: 0o600 });
-  chmodSync(CONFIG_PATH, 0o600);
+  writeFileSync(path, JSON.stringify(existing, null, 2) + "\n", { mode: 0o600 });
+  chmodSync(path, 0o600);
 }
 
 export class CliConfigService extends Effect.Service<CliConfigService>()("LexaCli/CliConfigService", {
@@ -127,8 +138,8 @@ export class CliConfigService extends Effect.Service<CliConfigService>()("LexaCl
       loadConfig: (): Effect.Effect<CliConfig | null, never> => Effect.sync(loadConfigSync),
       saveConfig: (config: CliConfig): Effect.Effect<void, never> => Effect.sync(() => saveConfigSync(config)),
       clearConfig: (): Effect.Effect<void, never> => Effect.sync(clearConfigSync),
-      loadDeployCreds: (): Effect.Effect<DeployCreds | null, never> => Effect.sync(loadDeployCredsSync),
-      saveDeployCreds: (creds: DeployCreds): Effect.Effect<void, never> => Effect.sync(() => saveDeployCredsSync(creds)),
+      loadDeployCreds: (dir: string = LEXA_DIR): Effect.Effect<DeployCreds | null, never> => Effect.sync(() => loadDeployCredsSync(dir)),
+      saveDeployCreds: (creds: DeployCreds, dir: string = LEXA_DIR): Effect.Effect<void, never> => Effect.sync(() => saveDeployCredsSync(creds, dir)),
     };
   }),
 }) {}

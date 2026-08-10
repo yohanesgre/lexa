@@ -108,7 +108,7 @@ describe("materializeCompose", () => {
   it("writes the embedded compose files (gunzipped) to --deploy-dir", async () => {
     const mod = await import("./deploy");
     const deployDir = mkdtempSync(join(tmpdir(), "lexa-deploy-dir-"));
-    const out = mod.materializeCompose({ "deploy-dir": deployDir });
+    const out = mod.materializeCompose("prod", { "deploy-dir": deployDir });
     expect(out).toBe(deployDir);
     const files = readdirSync(deployDir).sort();
     expect(files).toEqual(["docker-compose.staging.yml", "docker-compose.yml", "docker-compose.prod.yml"].sort());
@@ -118,10 +118,10 @@ describe("materializeCompose", () => {
     rmSync(deployDir, { recursive: true, force: true });
   });
 
-  it("defaults to ~/.lexa/deploy under the (redirected) HOME", async () => {
+  it("defaults to the flavor deploy dir under LEXA_DIR", async () => {
     const mod = await import("./deploy");
-    const out = mod.materializeCompose({});
-    expect(out).toBe(join(homeDir, ".lexa", "deploy"));
+    const out = mod.materializeCompose("prod", {});
+    expect(out).toBe(join(lexaDir, "deploy"));
     expect(existsSync(join(out, "docker-compose.yml"))).toBe(true);
   });
 
@@ -132,7 +132,7 @@ describe("materializeCompose", () => {
     const repo = mkdtempSync(join(tmpdir(), "lexa-deploy-repo-"));
     writeFileSync(join(repo, "docker-compose.yml"), "services: {}\n");
     process.chdir(repo);
-    expect(mod.materializeCompose({})).toBe(repo);
+    expect(mod.materializeCompose("prod", {})).toBe(repo);
     process.chdir(cwd);
     rmSync(repo, { recursive: true, force: true });
   });
@@ -143,7 +143,7 @@ describe("materializeCompose", () => {
     const mod = await import("./deploy");
     const empty = mkdtempSync(join(tmpdir(), "lexa-deploy-empty-"));
     process.chdir(empty);
-    expect(() => mod.materializeCompose({})).toThrow(/no embedded compose files/);
+    expect(() => mod.materializeCompose("prod", {})).toThrow(/no embedded compose files/);
     process.chdir(cwd);
     rmSync(empty, { recursive: true, force: true });
   });

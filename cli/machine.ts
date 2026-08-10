@@ -179,7 +179,7 @@ export const machineUninstall = (): Effect.Effect<void, MachineError> =>
       } else {
         console.log("  Listener unit not installed — nothing to remove.");
       }
-      console.log("  Local machine state (~/.lexa) kept — remove it yourself if unwanted.");
+      console.log(`  Local machine state (${LEXA_DIR}) kept — remove it yourself if unwanted.`);
       console.log("  Server-side: lexa-cli machine delete <id> (after stopping the listener).");
     },
     catch: toMachineError,
