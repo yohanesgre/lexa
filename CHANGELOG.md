@@ -4,6 +4,17 @@ All notable changes to Lexa are documented here. Format based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). This project follows
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Changed
+
+- **`lexa-cli` versioning restructured** — the CLI now has its own
+  `cli/package.json` (version source of truth), `cli/CHANGELOG.md`, and
+  `cli/README.md`. `cli/version.ts` is static; `publish-cli.yml` verifies the
+  `cli-v*` tag matches the package version. Fixes released CLIs always
+  re-downloading on `upgrade` (the embedded version previously included the
+  `cli-` tag prefix, breaking version comparison).
+
 ## [0.1.1] - 2026-08-10
 
 ### Fixed
