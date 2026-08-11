@@ -210,6 +210,10 @@ export function restoreTask(slug: string, id: string): Promise<TaskMutationResul
   return request(`${BASE}/projects/${slug}/tasks/${id}/restore`, { method: "POST" });
 }
 
+export function getTask(slug: string, taskId: string): Promise<Task> {
+  return request(`${BASE}/projects/${slug}/tasks/${taskId}`);
+}
+
 // ── Activity timeline + comments ──
 
 export interface ActivityPage {
