@@ -526,6 +526,44 @@ export const cmdDeploy = Effect.fn("LexaCli/cmdDeploy")(function* (
   }
   console.log(`  Policy: allow @${emailDomain}`);
 
+  // ── Machine-access bypass apps ──
+  // The REST API, MCP, and GitHub webhooks must be reachable without an
+  // Access session: the API key / HMAC signature is their auth (the Access
+  // layer only protects the human UI). One self-hosted app per path with a
+  // Bypass (Everyone) policy — Access picks the most specific path app.
+  for (const [path, label] of [
+    ["/api/*", "API"],
+    ["/mcp", "MCP"],
+    ["/api/webhooks/*", "Webhooks"],
+  ] as const) {
+    const bypassDomain = `${fullDomain}${path}`;
+    const existing = (yield* cfFetch(cfToken, `/accounts/${account}/access/apps?domain=${encodeURIComponent(bypassDomain)}`)) as Array<{ id: string }>;
+    let bypassAppId = existing[0]?.id;
+    if (!bypassAppId) {
+      const created = (yield* cfFetch(cfToken, `/accounts/${account}/access/apps`, {
+        method: "POST",
+        body: JSON.stringify({
+          name: `Lexa (${flavorName}) ${label} bypass`,
+          domain: bypassDomain,
+          type: "self_hosted",
+          session_duration: "24h",
+          allowed_idps: [],
+          auto_redirect_to_identity: false,
+        }),
+      })) as { id: string };
+      bypassAppId = created.id;
+      console.log(`  Created bypass app: ${bypassDomain}`);
+    }
+    const bypassPolicies = (yield* cfFetch(cfToken, `/accounts/${account}/access/apps/${bypassAppId}/policies`)) as Array<{ decision: string }>;
+    if (!bypassPolicies.some((p) => p.decision === "bypass")) {
+      yield* cfFetch(cfToken, `/accounts/${account}/access/apps/${bypassAppId}/policies`, {
+        method: "POST",
+        body: JSON.stringify({ name: "Bypass (Everyone)", decision: "bypass", include: [{ everyone: {} }], precedence: 1 }),
+      });
+      console.log(`  Policy: bypass (${label})`);
+    }
+  }
+
   // ── Admin user + API key ──
   console.log("");
   console.log("── Admin user ──");
