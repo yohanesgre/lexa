@@ -148,6 +148,16 @@ All Cloudflare state is per-flavor (distinct names for staging vs prod):
 4. **Access Google IdP** `Google Login (<flavor>)` — created, or **updated** if a same-named IdP exists; each flavor owns its own, so the OAuth clients stay separate
 5. **Access app** `Lexa (<flavor>)` on `<subdomain>.<domain>`, `allowed_idps` = that flavor's IdP, `auto_redirect_to_identity`
 6. **Policy** `Allow @<email-domain>` (email-domain include) — pass `--email-domain <domain>`
+7. **Machine-access bypass apps** — the REST API, MCP, and GitHub webhooks
+   must be reachable without an Access session (the API key / HMAC
+   signature is their auth; Access only guards the human UI). One
+   self-hosted app per path, each with a **Bypass** (Everyone) policy:
+   `Lexa (<flavor>) API` on `<subdomain>.<domain>/api/*`,
+   `Lexa (<flavor>) MCP` on `<subdomain>.<domain>/mcp`, and
+   `Lexa (<flavor>) Webhooks` on `<subdomain>.<domain>/api/webhooks/*`.
+   Access evaluates the most specific path first, so the UI stays
+   session-gated. If a path app already carries an allow policy (e.g.
+   hand-configured), the deploy converts it to bypass.
 
 All deploy creds (CF token, Google client, team/email domain) persist in
 `~/.lexa/config.json` (staging: `~/.lexa-staging/config.json`) under the
@@ -157,7 +167,7 @@ All deploy creds (CF token, Google client, team/email domain) persist in
 
 | Var | Value | Effect |
 |---|---|---|
-| `LXK_ACCESS_AUD` | `https://<team>.cloudflareaccess.com/cdn-cgi/access/get-ksi` (Access audience tag) | `/api` and `/mcp` require valid Access JWTs; without it only API keys are checked. **Per-app tag**: each flavor's Access app has its own AUD — fetch it from that app's `get-ksi`, never share between flavors |
+| `LXK_ACCESS_AUD` | `https://<team>.cloudflareaccess.com/cdn-cgi/access/get-ksi` (Access audience tag) | Verifies the `Cf-Access-Jwt-Assertion` header when present (identity/attribution); without it the Cf-Access-* headers and API key are trusted as-is. **Non-blocking**: bypassed machine requests carry no JWT and still pass on the API key. **Per-app tag**: each flavor's Access app has its own AUD — fetch it from that app's `get-ksi`, never share between flavors |
 
 Add it to the flavor env file (`.env.staging` / `.env.prod`); the deploy's
 carry-forward keeps hand-added keys across re-deploys. Restart the container
@@ -169,7 +179,10 @@ to apply (`docker compose restart` in the flavor deploy dir, or just redeploy).
 
 - Browse `https://<subdomain>.<domain>` → redirected to the Google login of *that flavor's* OAuth client
 - Sign in with an `@<email-domain>` account → dashboard loads
-- `curl -I https://<subdomain>.<domain>/api/health` without an Access session → 302 to the Access login
+- `curl https://<subdomain>.<domain>/api/health` without an Access session → **200** (the API paths are bypassed — the API key is the machine auth; the UI is not)
+- `curl -I https://<subdomain>.<domain>/` without an Access session → 302 to the Access login (UI still protected)
+- `POST <subdomain>.<domain>/mcp` and `POST <subdomain>.<domain>/api/webhooks/github` without a session → **401** from Lexa, not 302 from Access
+- `lexa-cli login --url https://<subdomain>.<domain> --key <lxk_...>` → "Logged in" (needs a key from Settings → API Keys)
 - Account menu shows **Sign out** (only when `LXK_ACCESS_TEAM` is set)
 
 ## Secrets hygiene
