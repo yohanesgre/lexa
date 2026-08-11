@@ -67,6 +67,7 @@ const webhookHandler = createWebhookHandler(DATABASE_PATH);
 function withSecurityHeaders(res: Response): Response {
   res.headers.set("X-Content-Type-Options", "nosniff");
   res.headers.set("Cache-Control", "no-store");
+  res.headers.set("Strict-Transport-Security", "max-age=31536000; includeSubDomains");
   return res;
 }
 
@@ -163,7 +164,7 @@ const server: Server<unknown> = Bun.serve({
       // parsing or processing — mismatch → 401. Ack 200 immediately, then
       // the handler processes fire-and-forget in the background.
       if (url.pathname === "/api/webhooks/github") {
-        const read = await readBodyWithLimit(req, 1_000_000);
+        const read = await readBodyWithLimit(req, 10_000_000);
         if (!read.ok) {
           console.warn(`[Webhook] body too large path=${path} declared=${req.headers.get("content-length") ?? "unknown"} bytes`);
           return tooLargeResponse();
@@ -227,7 +228,7 @@ const server: Server<unknown> = Bun.serve({
     if ((url.pathname.startsWith("/assets/") || url.pathname.startsWith("/favicon")) && !url.pathname.includes("..")) {
       const file = Bun.file(`dist/client${url.pathname}`);
       if (await file.exists()) {
-        return new Response(file);
+        return new Response(file, { headers: { "X-Content-Type-Options": "nosniff", "Strict-Transport-Security": "max-age=31536000; includeSubDomains" } });
       }
     }
 
@@ -303,12 +304,12 @@ const server: Server<unknown> = Bun.serve({
     const filePath = url.pathname;
     const file = Bun.file(`dist/client${filePath}`);
     if (!url.pathname.includes("..") && await file.exists()) {
-      return new Response(file);
+      return new Response(file, { headers: { "X-Content-Type-Options": "nosniff", "Strict-Transport-Security": "max-age=31536000; includeSubDomains" } });
     }
 
     const index = Bun.file("dist/client/index.html");
     if (await index.exists()) {
-      return new Response(index);
+      return withSecurityHeaders(new Response(index));
     }
 
     return new Response("Not found", { status: 404 });

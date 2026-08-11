@@ -1187,10 +1187,15 @@ function setupStatus(db: Database) {
 // The wizard is only for first install: once setup is complete (flag set by
 // /setup/complete) or real projects exist, the mutating endpoints lock.
 // setAdmin is wizard-only (Settings manages admins via env/API-key admin),
-// so this does not break post-install flows.
+// so this does not break post-install flows. Locked when the wizard
+// completed OR any project exists OR an API key + admin list already exist
+// (an interrupted wizard must not leave key minting open).
 function setupLocked(db: Database): boolean {
+  const adminEmails = [...(process.env.LXK_ADMIN_EMAILS || "").split(",").map((s) => s.trim()).filter(Boolean), ...(getSetting(db, "admin_emails") || "").split(",").map((s) => s.trim()).filter(Boolean)];
+  const apiKeyCount = (db.prepare("SELECT COUNT(*) c FROM api_keys").get() as { c: number }).c;
   return getSetting(db, "setup_complete") === "1" ||
-    ((db.prepare("SELECT COUNT(*) c FROM projects").get() as { c: number }).c > 0);
+    ((db.prepare("SELECT COUNT(*) c FROM projects").get() as { c: number }).c > 0) ||
+    (apiKeyCount > 0 && adminEmails.length > 0);
 }
 
 const setupLive = HttpApiBuilder.group(LexaApi, "setup", (handlers) =>
@@ -2472,7 +2477,7 @@ export function createApiHandler(dbPath: string) {
     } catch (err) {
       const e = err instanceof Error ? err : new Error(String(err));
       console.log(JSON.stringify({ level: "ERROR", service: "http", method: req.method, path: url.pathname, status: 500, duration: Date.now() - start, timestamp: new Date().toISOString(), error: e.message, stack: e.stack }));
-      return new Response(JSON.stringify({ error: { code: "INTERNAL", message: e.message } }), { status: 500, headers: { "Content-Type": "application/json" } });
+      return new Response(JSON.stringify({ error: { code: "INTERNAL", message: "Internal error" } }), { status: 500, headers: { "Content-Type": "application/json" } });
     }
   };
 }
