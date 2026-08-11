@@ -102,15 +102,21 @@ describe("entry point (bun subprocess)", () => {
     expect(r.stdout).toContain("Start the machine listener under your supervisor:");
   });
 
-  it("github status validates an env file without needing login", async () => {
+  it("github status --local validates an env file without needing login", async () => {
     const dir = mkdtempSync(join(tmpdir(), "lexa-index-"));
     const pem = join(dir, "app-key.pem");
     writeFileSync(pem, "-----BEGIN RSA PRIVATE KEY-----\nMIIE...\n", { mode: 0o600 });
     writeFileSync(join(dir, ".env"), `GITHUB_APP_ID=123\nGITHUB_PRIVATE_KEY_FILE=${pem}\nGITHUB_WEBHOOK_SECRET=0123456789abcdef\n`);
-    const r = await runCli(["github", "status", "--env-file", join(dir, ".env")]);
+    const r = await runCli(["github", "status", "--local", "--env-file", join(dir, ".env")]);
     expect(r.status).toBe(0);
     expect(r.stdout).toContain("Config looks complete");
     rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("github status without login fails pointing at login or --local", async () => {
+    const r = await runCli(["github", "status"], { LEXA_URL: "", LEXA_API_KEY: "" });
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain("Not logged in. Run: lexa-cli login [--url <base>] [--key <lxk_...>], or use --local to check the env file.");
   });
 });
 

@@ -499,9 +499,25 @@ Deploy (Docker + cloudflared tunnel + Access):
                                            local state (deploy dir + creds)
 
 GitHub sync (optional integration):
-  github status [--env-file <path>]       validate GITHUB_* vars in the env file
-  github setup [--env-file <path>]        configure App ID + PEM + webhook secret
-  github check <slug> <owner/repo>        acceptance round-trip (creates a real issue)
+  github status [--local] [--env-file <path>]
+                                       read the LIVE server state (default;
+                                       needs login — the server DB is the
+                                       source of truth); --local: validate
+                                       GITHUB_* in the LOCAL env file (offline
+                                       pre-deploy bootstrap check)
+  github setup [--local] [--env-file <path>]
+                                       configure App ID + PEM + webhook secret
+                                       (default: push to the server API —
+                                       applied immediately, REPLACES the
+                                       current server values like web Settings;
+                                       needs login; --local: write the env
+                                       file as BOOTSTRAP — imported on next
+                                       boot only while unset, never overwrites
+                                       web Settings values, inert once the
+                                       server has DB config)
+  github check <slug> <owner/repo>     acceptance round-trip against the live
+                                       server (creates a real issue; needs
+                                       login — config source irrelevant)
 
 Upgrade:
   upgrade                                self-update the CLI binary (GitHub release)
@@ -546,12 +562,28 @@ Forge workspaces (local machine view):
   machine workspace sync                         re-index projects from the server + provision`,
 
   github: `GitHub sync (optional integration):
-  github status [--env-file <path>]              validate GITHUB_* vars in the env file
-  github setup [--env-file <path>]               configure GITHUB_APP_ID + PEM + secret
-                                                  (--app-id, --pem-file, --webhook-secret
-                                                  for non-interactive runs)
-  github check <slug> <owner/repo>               Lexa→GitHub acceptance round-trip
-                                                  (creates a real issue; needs login)`,
+  github status [--local] [--env-file <path>]
+                                       read the LIVE server state (default —
+                                       needs login; the server DB is the source
+                                       of truth at runtime); --local: validate
+                                       GITHUB_* in the LOCAL env file (offline
+                                       pre-deploy bootstrap check)
+  github setup [--local] [--env-file <path>]
+                                       configure GITHUB_APP_ID + PEM + secret
+                                       (default: push to the server API —
+                                       applied immediately, REPLACES the
+                                       current server values like web Settings;
+                                       needs login; --local: write the env file
+                                       as first-boot BOOTSTRAP — imported on
+                                       the next boot only while still unset,
+                                       never overwrites web Settings values,
+                                       inert once the server has DB config;
+                                       --app-id, --pem-file, --webhook-secret
+                                       for non-interactive runs)
+  github check <slug> <owner/repo>     Lexa→GitHub acceptance round-trip
+                                       against the live server (creates a real
+                                       issue; needs login — config source
+                                       irrelevant)`,
 
   upgrade: `Upgrade:
   upgrade                                        self-update the CLI binary (GitHub release)
@@ -598,8 +630,18 @@ async function main(): Promise<void> {
 
     case "github":
       switch (sub) {
-        case "status": program = cmdGithubStatus(flags); break;
-        case "setup": program = cmdGithubSetup(flags); break;
+        case "status":
+          program = Effect.gen(function* () {
+            const config = yield* resolveConfig(flags);
+            yield* cmdGithubStatus(flags, flags.local === true ? null : (config ? new LexaClient(config) : null));
+          });
+          break;
+        case "setup":
+          program = Effect.gen(function* () {
+            const config = yield* resolveConfig(flags);
+            yield* cmdGithubSetup(flags, flags.local === true ? null : (config ? new LexaClient(config) : null));
+          });
+          break;
         case "check":
           program = Effect.gen(function* () {
             const { client } = yield* requireClient(flags);
