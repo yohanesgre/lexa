@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useDashboard, useUpdateProject, useDeleteProject, useBoard, selectProjectHealth } from "../../lib/queries";
 import { cn } from "../../components/ui/cn";
 import { ProjectSettingsModal } from "../../components/ProjectSettingsModal";
+import { ProjectDescription } from "../../components/ProjectDescription";
 import type { Dashboard, ProjectHealth } from "../../../shared/types";
 
 export const Route = createFileRoute("/$slug/")({
@@ -105,6 +106,11 @@ function ProjectDashboard() {
           </button>
         </div>
       </div>
+
+      <ProjectDescription
+        description={health.project.description || board.data.project?.description || ""}
+        onSettings={() => setShowSettings(true)}
+      />
 
       <StatusSections dashboard={dashboard} health={health} />
 

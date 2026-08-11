@@ -6,6 +6,18 @@ All notable changes to Lexa are documented here. Format based on
 
 ## [Unreleased]
 
+### Added
+
+- **Project description on `/dashboard`** — the selected project's saved
+  description renders as a card under the header, collapsing at 3 lines with a
+  **Read more / Read less** toggle that expands in place (shown only when the
+  text exceeds the limit). A settings gear next to the block opens the Project
+  Settings modal, where the description is editable; saving updates the
+  dashboard immediately (no refetch). Projects without a description show a
+  "No description yet" placeholder. Backend support already existed
+  (`PATCH /api/projects/:slug { description }`); the dashboard cache now
+  reflects project updates (`["dashboard"]` + `["board", slug]` keys).
+
 ### Fixed
 
 - **Forge review Accept replaces the document correctly** — the previous
