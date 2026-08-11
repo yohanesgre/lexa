@@ -131,7 +131,8 @@ export class ForgeService extends Effect.Service<ForgeService>()("Lexa/ForgeServ
       agent: ForgeAgent,
       skill: ForgeSkill,
       docContext: string,
-      sourcesContent: string
+      sourcesContent: string,
+      hasRepoContent: boolean
     ): string => {
       const sections: string[] = [`Task: ${skill.name}`];
       // The workspace holds every lexa-agent's rule bundle persistently
@@ -147,6 +148,9 @@ export class ForgeService extends Effect.Service<ForgeService>()("Lexa/ForgeServ
       }
       if (docContext) sections.push("", `Document context:\n${docContext}`);
       if (sourcesContent) sections.push("", `Linked sources (ground your output in these):\n${sourcesContent}`);
+      if (hasRepoContent) {
+        sections.push("", "Linked GitHub repo content is in the repo-content/ directory of your working directory (see repo-content/MANIFEST.md) — read it to ground your work in the actual code.");
+      }
       if (task.selection) sections.push("", `Selected text:\n"""\n${task.selection}\n"""`);
       sections.push(
         "",
@@ -357,11 +361,13 @@ export class ForgeService extends Effect.Service<ForgeService>()("Lexa/ForgeServ
         resolveRulesImpl(task),
 
       // Build the full prompt (with resolved sources) for the daemon.
-      buildPromptForTask: (task: ForgeTask): Effect.Effect<string, AgentNotFound | SkillNotFound | DbError | RowNotFound | WikiPageNotFound | import("../api/errors").SourceFetchError | import("../api/errors").SourceUnreachable> =>
+      // hasRepoContent: the claim handler points the agent at repo-content/
+      // only when linked-repo files actually shipped with the claim.
+      buildPromptForTask: (task: ForgeTask, hasRepoContent = false): Effect.Effect<string, AgentNotFound | SkillNotFound | DbError | RowNotFound | WikiPageNotFound | import("../api/errors").SourceFetchError | import("../api/errors").SourceUnreachable> =>
         Effect.gen(function* () {
           const { agent, skill } = yield* resolveRulesImpl(task);
           const sourcesContent = yield* loadSourcesContent(task.projectId, task.documentType, task.documentId);
-          return buildPrompt(task, agent, skill, task.docContext, sourcesContent);
+          return buildPrompt(task, agent, skill, task.docContext, sourcesContent, hasRepoContent);
         }),
 
       listForDocument: (projectId: string, documentType: "task" | "wiki", documentId: string): Effect.Effect<ForgeTask[], DbError> =>

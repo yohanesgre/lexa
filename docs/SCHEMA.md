@@ -273,6 +273,15 @@ CREATE TABLE webhook_events (
 -- ============================================================
 -- e.g. settings.admin_emails — mirrored from LXK_ADMIN_EMAILS by the
 -- setup wizard; read alongside the env var at auth time.
+-- settings.rate_limit_max / settings.rate_limit_window_ms — per-IP rate limit,
+-- read by the API middleware (DB is the single source; code defaults as
+-- fallback).
+-- settings.github_app_id / github_private_key / github_webhook_secret — GitHub
+-- App credentials, read by the GitHub client (PEM/secret are write-only over
+-- the API).
+-- Env (GITHUB_*, LXK_RATE_LIMIT_*) is a FIRST-BOOT BOOTSTRAP: mirrorSettingsFromEnv
+-- imports it into these keys once at boot when they are empty; the runtime
+-- never reads env again.
 CREATE TABLE settings (
   key        TEXT PRIMARY KEY,
   value      TEXT NOT NULL,

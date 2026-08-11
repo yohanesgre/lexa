@@ -7,8 +7,9 @@ import { createApiHandler, createWebhookHandler, createWebhookVerifier } from ".
 import { createMcpHandler } from "./mcp/server";
 import { findOrCreateUser, findOrCreateUserByIdentity, adminEmails } from "./api/auth";
 import { verifyAccessAssertion } from "./api/access-auth";
-import { getSetting, setSetting } from "./db/settings";
-import { apiRateLimiter, isPrivateIp } from "./api/rate-limit";
+import { getSetting, setSetting, mirrorSettingsFromEnv } from "./db/settings";
+import { apiRateLimiter, isPrivateIp, syncRateLimitFromDb } from "./api/rate-limit";
+import { syncGitHubConfigFromDb } from "./github/client";
 import { MAX_API_BODY, X_LEXA_REMOTE_IP } from "./api/limits";
 import type { Server } from "bun";
 
@@ -32,6 +33,22 @@ const DATABASE_PATH = process.env.DATABASE_PATH || "/app/data/lexa.db";
 mkdirSync(dirname(DATABASE_PATH), { recursive: true });
 
 runMigrations(DATABASE_PATH);
+// The settings DB is the single source of truth at runtime. Env is a
+// first-boot bootstrap only: mirror it into the DB once (when keys are
+// empty), THEN apply the DB-configured rate limits + GitHub credentials.
+{
+  const db = new Database(DATABASE_PATH);
+  try {
+    const mirrored = mirrorSettingsFromEnv(db, process.env, (p) => readFileSync(p, "utf8"));
+    if (mirrored.length > 0) {
+      console.log(`Settings mirrored from env: ${mirrored.join(", ")}`);
+    }
+    syncRateLimitFromDb(db);
+    syncGitHubConfigFromDb(db);
+  } finally {
+    db.close();
+  }
+}
 // FTS5 optimize merges deleted-row b-trees; table may be absent on a pre-0001 DB.
 try {
   const db = new Database(DATABASE_PATH);

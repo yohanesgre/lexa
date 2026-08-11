@@ -123,7 +123,7 @@ prevent spoofing — socket IP is only visible at this layer).
 Everything else runs as HttpApi middleware (`server/api/middleware.ts`),
 applied at build time, before route matching and before body decode:
 
-1. **Rate limit** — per-IP, `isPrivateIp`-gated `cf-connecting-ip` trust; `/api/setup` + `/api/health` ARE limited; `/api/forge/daemon/*` + `/api/forge/runtimes/register` exempt (token-gated); shares one bucket with `/mcp` (`apiRateLimiter`)
+1. **Rate limit** — per-IP, `isPrivateIp`-gated `cf-connecting-ip` trust; `/api/setup` + `/api/health` ARE limited; key/token-gated Forge machine surfaces exempt (`/api/forge/daemon/*` + `/api/forge/runtimes/register` + `/api/forge/machines/heartbeat` — log streams and the 3s listener heartbeat must not 429); shares one bucket with `/mcp` (`apiRateLimiter`); limits DB-configured (settings `settings.rate_limit_max` / `settings.rate_limit_window_ms`, code defaults 6000 req / 600_000 ms as fallback — `GET`/`PUT /api/settings/rate-limit`, applied at boot and on save via `syncRateLimitFromDb`)
 2. **Content-length pre-check** — declared size > `LXK_MAX_BODY_MB` → 413 fast-path (stream cap above stays authoritative)
 3. **Auth** — daemon token (`x-forge-token`, constant-time) for `/api/forge/daemon/*` + `/api/forge/runtimes/register`, else Bearer key → `resolveApiKeyIdentity` on the shared connection; setup/health auth-exempt; 401/403 envelopes byte-identical to the old dispatcher
 4. **`AuthIdentity` provision** — handlers read the Context tag (no per-request DB opens)
@@ -140,9 +140,11 @@ Tools: `create_task`, `list_tasks`, `get_task`, `update_task`, `move_task`, `del
 ## GitHub Integration
 
 ### GitHub App (pinned scope)
-- **Permissions:** Issues: Read & Write; Metadata: Read. Nothing else.
+- **Permissions:** Issues: Read & Write; Metadata: Read; **Contents: Read** (Forge repo-content context). Nothing else.
 - **Subscribed events:** `issues.closed`, `issues.reopened`, `issues.edited`. (`issues.opened` dropped — auto-creating Lexa tasks from GitHub issues is out of scope; `issues.labeled` dropped — no label feature.)
 - Installation tokens cached ~50 min (1h TTL minus margin), never minted per call.
+- **Config model — the settings DB is the single source of truth at runtime** (`GET`/`PUT /api/settings/github`, admin-only): `settings.github_app_id` / `github_private_key` / `github_webhook_secret`. Env (`GITHUB_APP_ID` / `GITHUB_PRIVATE_KEY` / `GITHUB_PRIVATE_KEY_FILE` / `GITHUB_WEBHOOK_SECRET`) is a **first-boot bootstrap only**: `mirrorSettingsFromEnv` copies it into the DB once at boot when keys are empty (inline PEM wins over the file; the file is read at mirror time), and the runtime never reads env again. **Upgrade note:** existing env-only deployments import their env config into the DB on the first boot after this change — no manual migration. `GitHubConfigLive` serves a mutable holder — `syncGitHubConfigFromDb` (boot + on save) applies DB values live, `resetGithubCaches()` drops stale installation/token caches, and the webhook verifier reads the secret per request. Secrets are write-only over the API (booleans only); GET `source` is `"settings"` (any github_* row) or `"none"` — there is no env state.
+- **Forge repo-content (best-effort):** on daemon claim, a task's linked GitHub repos (≤ 3, from `task_github_issues`) are fetched via the Contents API — default branch → recursive tree → `selectRepoFiles` (skips node_modules/dist/binaries/lockfiles; ≤ 50 files, ≤ 256 KB each, ≤ 512 KB total) → per-file base64 content. Delivered in the claim as `repoContent` (the daemon writes it into repo-content/ + MANIFEST.md; the prompt points the agent there). Every failure — unconfigured app, missing repo, network, per-file error — skips with a warn; a claim NEVER fails for missing context (`selectRepoFiles` in `server/github/repo-content.ts`, assembly in the claim handler).
 
 ### Sync matrix — what syncs, which direction, who wins
 
