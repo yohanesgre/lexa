@@ -579,6 +579,36 @@ export const cmdDeploy = Effect.fn("LexaCli/cmdDeploy")(function* (
     }
   }
 
+  // The setup wizard API is key-exempt by design but must stay session-gated
+  // (it can mint API keys pre-setup) — a more-specific allow app wins over
+  // the /api/* bypass. The wizard runs from an Access-authenticated browser.
+  const setupDomain = `${fullDomain}/api/setup/*`;
+  const existingSetup = (yield* cfFetch(cfToken, `/accounts/${account}/access/apps?domain=${encodeURIComponent(setupDomain)}`)) as Array<{ id: string }>;
+  let setupAppId = existingSetup[0]?.id;
+  if (!setupAppId) {
+    const created = (yield* cfFetch(cfToken, `/accounts/${account}/access/apps`, {
+      method: "POST",
+      body: JSON.stringify({
+        name: `Lexa (${flavorName}) Setup`,
+        domain: setupDomain,
+        type: "self_hosted",
+        session_duration: "24h",
+        allowed_idps: [idpId],
+        auto_redirect_to_identity: true,
+      }),
+    })) as { id: string };
+    setupAppId = created.id;
+    console.log(`  Created setup app: ${setupDomain}`);
+  }
+  const setupPolicies = (yield* cfFetch(cfToken, `/accounts/${account}/access/apps/${setupAppId}/policies`)) as Array<{ decision: string }>;
+  if (!setupPolicies.some((p) => p.decision === "allow")) {
+    yield* cfFetch(cfToken, `/accounts/${account}/access/apps/${setupAppId}/policies`, {
+      method: "POST",
+      body: JSON.stringify({ name: `Allow @${emailDomain}`, decision: "allow", include: [{ email_domain: { domain: emailDomain } }], precedence: 1 }),
+    });
+    console.log(`  Policy: allow @${emailDomain} (setup)`);
+  }
+
   // ── Admin user + API key ──
   console.log("");
   console.log("── Admin user ──");
