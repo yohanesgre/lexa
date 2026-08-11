@@ -1,13 +1,14 @@
 // lexa-cli github — validate, configure, and round-trip the GitHub sync
-// integration. Config lives in the server env (GITHUB_APP_ID,
-// GITHUB_PRIVATE_KEY[_FILE], GITHUB_WEBHOOK_SECRET); the server reads it at
-// boot, so changes require a restart. status validates the env file locally;
-// setup rewrites it interactively; check drives the Lexa→GitHub leg of the
-// RELEASE.md acceptance round-trip against a live server.
+// integration. The server's settings DB is the single source of truth; the
+// server env is first-boot bootstrap only (mirrored into the DB at boot when
+// unset). status/setup default to the live server via the API (login
+// required); --local reads/writes the env-file bootstrap; check drives the
+// Lexa→GitHub leg of the RELEASE.md acceptance round-trip against a live
+// server.
 import { Effect } from "effect";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { randomBytes } from "node:crypto";
-import { LexaClient } from "./api";
+import { LexaClient, type GithubSettingsInfo } from "./api";
 
 const OWNED_KEYS = new Set(["GITHUB_APP_ID", "GITHUB_PRIVATE_KEY", "GITHUB_PRIVATE_KEY_FILE", "GITHUB_WEBHOOK_SECRET"]);
 
@@ -108,25 +109,57 @@ function printStatus(env: Map<string, string>): void {
   row(secret !== "" && secret.length >= 16, "GITHUB_WEBHOOK_SECRET", secret ? `${secret.length} chars` : "missing");
 
   if (missing === 0) {
-    console.log("  Config looks complete. Changes take effect on server restart —");
-    console.log("  then run `lexa-cli github check <slug> <owner/repo>` for the round-trip.");
+    console.log("  Config looks complete — this is the first-boot BOOTSTRAP.");
+    console.log("  The server imports it only while its settings DB is unset; once");
+    console.log("  the server has DB config (web Settings, or a logged-in setup),");
+    console.log("  env-file edits are inert. Live state: lexa-cli github status");
   } else {
     console.log(`  ${missing} var(s) missing or invalid — fix with:`);
-    console.log("    lexa-cli github setup [--env-file <path>]");
+    console.log("    lexa-cli github setup        (logged in — applies via the server API)");
+    console.log("    lexa-cli github setup --local [--env-file <path>]  (env bootstrap)");
     console.log("  Full manual guide: docs/GITHUB_SETUP.md");
   }
 }
 
-export const cmdGithubStatus = Effect.fn("LexaCli/cmdGithubStatus")(function* (flags: Record<string, string | boolean>) {
-  const file = envFileFor(flags);
-  console.log(`==> Reading ${file}`);
-  yield* Effect.sync(() => printStatus(readEnv(file)));
+// The server's effective settings (from GET/PUT /api/settings/github). The
+// DB is the source of truth, so "set" means the server has a usable value.
+function printServerState(s: GithubSettingsInfo): void {
+  console.log(`  ${s.appId !== "" ? "✅" : "❌"} GitHub App ID — ${s.appId || "missing"}`);
+  console.log(`  ${s.privateKeySet ? "✅" : "❌"} Private key — ${s.privateKeySet ? "set (server DB)" : "missing"}`);
+  console.log(`  ${s.webhookSecretSet ? "✅" : "❌"} Webhook secret — ${s.webhookSecretSet ? "set (server DB)" : "missing"}`);
+  console.log(`  Config source: ${s.source} — the server DB is the source of truth.`);
+}
+
+export const cmdGithubStatus = Effect.fn("LexaCli/cmdGithubStatus")(function* (flags: Record<string, string | boolean>, client: LexaClient | null = null) {
+  if (flags.local === true) {
+    const file = envFileFor(flags);
+    console.log(`==> Reading ${file}`);
+    yield* Effect.sync(() => printStatus(readEnv(file)));
+    return;
+  }
+  // Default: the live server — the settings DB is the source of truth.
+  if (!client) throw new Error("Not logged in. Run: lexa-cli login [--url <base>] [--key <lxk_...>], or use --local to check the env file.");
+  const s = yield* client.getGithubSettings();
+  console.log("==> GitHub sync — server state (GET /api/settings/github)");
+  printServerState(s);
+  if (!s.appId || !s.privateKeySet || !s.webhookSecretSet) {
+    console.log("  Missing pieces — fix with: lexa-cli github setup");
+  } else {
+    console.log("  Config complete. Run `lexa-cli github check <slug> <owner/repo>`");
+    console.log("  for the round-trip. Changes apply immediately (no restart).");
+  }
 });
 
-export const cmdGithubSetup = Effect.fn("LexaCli/cmdGithubSetup")(function* (flags: Record<string, string | boolean>) {
+export const cmdGithubSetup = Effect.fn("LexaCli/cmdGithubSetup")(function* (flags: Record<string, string | boolean>, client: LexaClient | null = null) {
   const file = envFileFor(flags);
   const env = readEnv(file);
   const isTTY = process.stdin.isTTY === true;
+  const local = flags.local === true;
+  // Default: the live server — the settings DB is the source of truth. Fail
+  // loudly before collecting inputs; there is no silent env fallback.
+  if (!local && !client) {
+    throw new Error("Not logged in. Run: lexa-cli login [--url <base>] [--key <lxk_...>], or use --local to write the env bootstrap.");
+  }
 
   const appId = yield* Effect.gen(function* () {
     const fromFlag = flagStr(flags, "app-id");
@@ -160,7 +193,20 @@ export const cmdGithubSetup = Effect.fn("LexaCli/cmdGithubSetup")(function* (fla
   });
   if (secret.length < 16) throw new Error(`GITHUB_WEBHOOK_SECRET too short (${secret.length} chars, min 16)`);
 
-  // Rewrite the env file: keep every other key, own the GitHub block.
+  // Remote (default): the settings DB is the source of truth — push the
+  // values via the API and the server applies them immediately.
+  if (!local && client) {
+    const pemContent = readFileSync(keyFile, "utf-8");
+    const saved = yield* client.updateGithubSettings({ appId, privateKey: pemContent, webhookSecret: secret });
+    console.log("  Configured via API — applied immediately (no restart)");
+    console.log("  This REPLACES the server's previous values (like saving in web Settings).");
+    printServerState(saved);
+    return;
+  }
+
+  // --local provisioning (env-file bootstrap): rewrite the env file, keep
+  // every other key, own the GitHub block. The server imports these on its
+  // next boot when its settings DB values are unset.
   const carried: string[] = [];
   try {
     if (existsSync(file)) {
@@ -174,8 +220,15 @@ export const cmdGithubSetup = Effect.fn("LexaCli/cmdGithubSetup")(function* (fla
   writeFileSync(file, [...carried, `GITHUB_APP_ID=${appId}`, `GITHUB_PRIVATE_KEY_FILE=${keyFile}`, `GITHUB_WEBHOOK_SECRET=${secret}`, ""].join("\n"), { mode: 0o600 });
   console.log(`  Wrote ${file}`);
   console.log("");
+  console.log("  These values are the first-boot BOOTSTRAP: the server imports");
+  console.log("  them into its settings DB on the next boot ONLY when the key");
+  console.log("  is still unset — they never overwrite values already set in");
+  console.log("  web Settings (or by a logged-in github setup). Once the server");
+  console.log("  has DB config, env-file writes are inert until a fresh deploy");
+  console.log("  (deploy --clean or a new server).");
+  console.log("");
   console.log("  Next steps:");
-  console.log("    1. Restart the server (bun run dev:full / docker compose up -d).");
+  console.log("    1. Restart the server (bun run dev:full / docker compose up -d) to import.");
   console.log("    2. Point the GitHub App webhook at https://<host>/api/webhooks/github");
   console.log("       (must bypass Cloudflare Access — docs/GITHUB_SETUP.md §5).");
   console.log("    3. Verify with: lexa-cli github check <slug> <owner/repo>");
