@@ -80,6 +80,7 @@ export function Toolbar({
   forge,
   reviewActive,
   appliedTaskId,
+  rejectedTaskId,
   onReview,
 }: {
   editor: NonNullable<ReturnType<typeof useEditor>>;
@@ -90,6 +91,7 @@ export function Toolbar({
   // the Forge popover; "Review in editor" hands the result up via onReview.
   reviewActive: boolean;
   appliedTaskId: string | null;
+  rejectedTaskId: string | null;
   onReview?: (text: string, identity: ForgeReviewIdentity) => void;
 }) {
   const [forgeOpen, setForgeOpen] = useState(false);
@@ -191,6 +193,7 @@ export function Toolbar({
           }}
           reviewActive={reviewActive}
           appliedTaskId={appliedTaskId}
+          rejectedTaskId={rejectedTaskId}
           anchorRect={forgeAnchor}
         />
       )}
@@ -271,7 +274,7 @@ export function TextEditor({
     },
   });
 
-  const { review, appliedTaskId, handleReview, handleAcceptReview, handleRejectReview } = useForgeReview(editor, onReviewStateChange);
+  const { review, appliedTaskId, rejectedTaskId, handleReview, handleAcceptReview, handleRejectReview } = useForgeReview(editor, onReviewStateChange);
 
   if (!editor) return null;
 
@@ -279,7 +282,7 @@ export function TextEditor({
 
   return (
     <div className={cn("editor-wrapper", className, review && "is-reviewing")} ref={wrapperRef}>
-      <Toolbar editor={editor} headingLevel={headingLevel} forge={forge} reviewActive={review !== null} appliedTaskId={appliedTaskId} onReview={handleReview} />
+      <Toolbar editor={editor} headingLevel={headingLevel} forge={forge} reviewActive={review !== null} appliedTaskId={appliedTaskId} rejectedTaskId={rejectedTaskId} onReview={handleReview} />
       {review && (
         <ForgeReviewSurface action={review.action} runtime={review.runtime} diff={review.diff} onAccept={handleAcceptReview} onReject={handleRejectReview} />
       )}
