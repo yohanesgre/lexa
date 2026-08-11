@@ -171,16 +171,27 @@ export class LexaClient {
     return this.request<TaskInfo>(`/api/projects/${slug}/tasks/${id}`);
   }
 
+  // Task mutations respond with a { data, activity } envelope (activity is
+  // the appended timeline rows) — unwrap to the task so callers get a TaskInfo.
   createTask(slug: string, input: { columnId: string; swimlaneId: string; title: string; description?: unknown; priority?: string; type?: string }): Effect.Effect<TaskInfo, ApiError, never> {
-    return this.request<TaskInfo>(`/api/projects/${slug}/tasks`, { method: "POST", body: JSON.stringify(input) });
+    return Effect.map(
+      this.request<{ data: TaskInfo }>(`/api/projects/${slug}/tasks`, { method: "POST", body: JSON.stringify(input) }),
+      (r) => r.data
+    );
   }
 
-  updateTask(slug: string, id: string, input: { title?: string; priority?: string; type?: string }): Effect.Effect<TaskInfo, ApiError, never> {
-    return this.request<TaskInfo>(`/api/projects/${slug}/tasks/${id}`, { method: "PATCH", body: JSON.stringify(input) });
+  updateTask(slug: string, id: string, input: { title?: string; description?: unknown; priority?: string; type?: string }): Effect.Effect<TaskInfo, ApiError, never> {
+    return Effect.map(
+      this.request<{ data: TaskInfo }>(`/api/projects/${slug}/tasks/${id}`, { method: "PATCH", body: JSON.stringify(input) }),
+      (r) => r.data
+    );
   }
 
   moveTask(slug: string, id: string, target: { columnId: string; swimlaneId: string }): Effect.Effect<TaskInfo, ApiError, never> {
-    return this.request<TaskInfo>(`/api/projects/${slug}/tasks/${id}/move`, { method: "POST", body: JSON.stringify(target) });
+    return Effect.map(
+      this.request<{ data: TaskInfo }>(`/api/projects/${slug}/tasks/${id}/move`, { method: "POST", body: JSON.stringify(target) }),
+      (r) => r.data
+    );
   }
 
   // GitHub sync: create a GitHub issue from the task and link it.

@@ -278,6 +278,26 @@ function resolveSwimlane(client: LexaClient, slug: string, name: string): Effect
   });
 }
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+// Accept the full task UUID or the 8-char prefix shown by `task list`
+// (the table truncates IDs for readability). Prefixes resolve by unique
+// match against the project's tasks.
+function resolveTaskId(client: LexaClient, slug: string, id: string): Effect.Effect<string, unknown, never> {
+  return Effect.gen(function* () {
+    if (UUID_RE.test(id)) return id;
+    const tasks = yield* client.listTasks(slug, 1000);
+    const matches = tasks.filter((t) => t.id.toLowerCase().startsWith(id.toLowerCase()));
+    if (matches.length === 1) return matches[0]!.id;
+    if (matches.length === 0) {
+      console.error(`  Task "${id}" not found. Use the full id from \`lexa-cli task list --json\`.`);
+      process.exit(1);
+    }
+    console.error(`  Task id "${id}" is ambiguous (${matches.length} matches). Use a longer prefix or the full id.`);
+    process.exit(1);
+  });
+}
+
 function cmdTaskList(flags: Record<string, string | boolean>, args: string[]): Effect.Effect<void, unknown, CliConfigService> {
   return Effect.gen(function* () {
     const { client } = yield* requireClient(flags);
@@ -308,13 +328,19 @@ function cmdTaskCreate(flags: Record<string, string | boolean>): Effect.Effect<v
     const column = (typeof flags.column === "string" && flags.column) || "";
     const swimlane = (typeof flags.swimlane === "string" && flags.swimlane) || "";
     const title = (typeof flags.title === "string" && flags.title) || "";
+    const description = typeof flags.description === "string" && flags.description ? flags.description : undefined;
     if (!slug || !column || !swimlane || !title) {
-      console.error("  Usage: lexa-cli task create --project <slug> --column <name> --swimlane <name> --title <t>");
+      console.error("  Usage: lexa-cli task create --project <slug> --column <name> --swimlane <name> --title <t> [--description <markdown>]");
       process.exit(1);
     }
     const columnId = yield* resolveColumn(client, slug, column);
     const swimlaneId = yield* resolveSwimlane(client, slug, swimlane);
-    const task = yield* client.createTask(slug, { columnId, swimlaneId, title });
+    let descriptionDoc: unknown;
+    if (description) {
+      const { markdownToDoc } = yield* Effect.promise(() => import("../../shared/markdown"));
+      descriptionDoc = markdownToDoc(description);
+    }
+    const task = yield* client.createTask(slug, { columnId, swimlaneId, title, description: descriptionDoc });
     console.log(`  Created task ${task.id} — ${task.title}`);
   });
 }
@@ -332,8 +358,9 @@ function cmdTaskMove(flags: Record<string, string | boolean>, args: string[]): E
     }
     const columnId = yield* resolveColumn(client, slug, column);
     const swimlaneId = swimlane ? yield* resolveSwimlane(client, slug, swimlane) : "";
-    const task = yield* client.moveTask(slug, id, { columnId, swimlaneId });
-    console.log(`  Moved ${id} → ${column}`);
+    const taskId = yield* resolveTaskId(client, slug, id);
+    const task = yield* client.moveTask(slug, taskId, { columnId, swimlaneId });
+    console.log(`  Moved ${taskId} → ${column}`);
   });
 }
 
@@ -343,11 +370,17 @@ function cmdTaskGet(flags: Record<string, string | boolean>, args: string[]): Ef
     const slug = (typeof flags.project === "string" && flags.project) || "";
     const id = args[0] || "";
     if (!slug || !id) { console.error("  Usage: lexa-cli task get <id> --project <slug>"); process.exit(1); }
-    const t = yield* client.getTask(slug, id);
+    const taskId = yield* resolveTaskId(client, slug, id);
+    const t = yield* client.getTask(slug, taskId);
     if (flags.json === true) { console.log(JSON.stringify(t, null, 2)); return; }
     console.log(`  ${t.title}`);
     console.log(`  id: ${t.id}  priority: ${t.priority ?? "—"}  type: ${t.type ?? "—"}`);
     console.log(`  column: ${t.columnId}  swimlane: ${t.swimlaneId}`);
+    // Description is TipTap JSON — render to Markdown so agents/humans can
+    // actually read it (same conversion the MCP boundary uses).
+    const { docToMarkdown } = yield* Effect.promise(() => import("../../shared/markdown"));
+    const md = docToMarkdown(t.description as import("../../shared/types").TipTapDoc).trim();
+    console.log(`  description: ${md ? `\n${md}` : "(empty)"}`);
   });
 }
 
@@ -363,8 +396,9 @@ function cmdTaskUpdate(flags: Record<string, string | boolean>, args: string[]):
       console.error("  Usage: lexa-cli task update <id> --project <slug> [--title <t>] [--priority <p>] [--type <t>]");
       process.exit(1);
     }
-    const t = yield* client.updateTask(slug, id, { title, priority, type });
-    console.log(`  Updated ${id} — ${t.title}`);
+    const taskId = yield* resolveTaskId(client, slug, id);
+    const t = yield* client.updateTask(slug, taskId, { title, priority, type });
+    console.log(`  Updated ${taskId} — ${t.title}`);
   });
 }
 
@@ -455,7 +489,7 @@ Auth:
 
 Tasks:
   task list    --project <slug> [--limit N] [--json]
-  task create  --project <slug> --column <name> --swimlane <name> --title <t>
+  task create  --project <slug> --column <name> --swimlane <name> --title <t> [--description <md>]
   task get     <id> --project <slug> [--json]
   task move    <id> --project <slug> --column <name> [--swimlane <name>]
   task update  <id> --project <slug> [--title <t>] [--priority <p>] [--type <t>]
@@ -532,7 +566,7 @@ const GROUP_HELP: Record<string, string> = {
   project list [--json]`,
   task: `Tasks:
   task list    --project <slug> [--limit N] [--json]
-  task create  --project <slug> --column <name> --swimlane <name> --title <t>
+  task create  --project <slug> --column <name> --swimlane <name> --title <t> [--description <md>]
   task get     <id> --project <slug> [--json]
   task move    <id> --project <slug> --column <name> [--swimlane <name>]
   task update  <id> --project <slug> [--title <t>] [--priority <p>] [--type <t>]`,
