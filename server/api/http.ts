@@ -6,10 +6,13 @@ import { join } from "node:path";
 import { LoggerLayer } from "../logging/logger";
 import { Sqlite, withTx } from "../db/database";
 import { Database } from "bun:sqlite";
-import { getSetting, setSetting } from "../db/settings";
-import { ProjectNotFound, WikiPageNotFound, MachineNotFound, Forbidden, SetupLocked, TaskNotFound, InvalidName, NoUserContext, errorResponse, errorToStatus } from "./errors";
+import { getSetting, setSetting, deleteSetting } from "../db/settings";
+import { ProjectNotFound, WikiPageNotFound, MachineNotFound, Forbidden, SetupLocked, TaskNotFound, InvalidName, InvalidRateLimit, InvalidGithubSettings, NoUserContext, errorResponse, errorToStatus } from "./errors";
 import { AuthIdentity, actorFromIdentity } from "./auth";
 import { createApiMiddleware } from "./middleware";
+import { resolveRateLimitFromDbValues, syncRateLimitFromDb } from "./rate-limit";
+import { syncGitHubConfigFromDb, resetGithubCaches } from "../github/client";
+import { selectRepoFiles, REPO_CONTENT_DEFAULTS } from "../github/repo-content";
 import { clampLimit, nextCursor } from "../../shared/pagination";
 import { ProjectService } from "../services/project.service";
 import { ProjectRepo } from "../repos/project.repo";
@@ -49,7 +52,7 @@ import * as msg from "../activity-messages";
 import { WebhookEventRepo } from "../repos/webhook-event.repo";
 import { GitHubClient } from "../github/client";
 import { extractText } from "../../shared/tiptap-text";
-import type { ActivityEvent } from "../../shared/types";
+import type { ActivityEvent, ForgeTask } from "../../shared/types";
 
 const ApiKeySchema = Schema.Struct({
   id: Schema.String,
@@ -321,6 +324,19 @@ const ForgeTaskSchema = Schema.Struct({
 // .agents/<skill>/SKILL.md (files-only delivery, no host store). `skillIds`
 // is the full current skill-id set: the daemon prunes stale skill dirs from
 // the workspace so obsolete bundles never pollute opencode's discovery.
+// `repoContent` (when present) is best-effort linked-repo context the daemon
+// writes into repo-content/ (owner = owner part, repo = full "owner/repo").
+const RepoContentEntrySchema = Schema.Struct({
+  owner: Schema.String,
+  repo: Schema.String,
+  path: Schema.String,
+  content: Schema.String,
+});
+
+// `repoContent` is the best-effort linked-repo context the daemon writes into
+// repo-content/ (owner = owner part, repo = full "owner/repo"). Always an
+// array — [] when nothing shipped (the daemon writes files only when
+// non-empty).
 const ClaimResponseSchema = Schema.Struct({
   task: Schema.NullOr(ForgeTaskSchema),
   provider: Schema.Literal("opencode", "hermes", "command-code"),
@@ -333,6 +349,7 @@ const ClaimResponseSchema = Schema.Struct({
   agentMarkdown: Schema.String,
   skillMarkdown: Schema.String,
   skillIds: Schema.Array(Schema.String),
+  repoContent: Schema.Array(RepoContentEntrySchema),
 });
 
 const ForgeAgentSchema = Schema.Struct({
@@ -1031,6 +1048,42 @@ const wikiGroup = HttpApiGroup.make("wiki")
 
 const ApiKeyPath = Schema.Struct({ id: Schema.String });
 
+// Response shape is the frontend contract: envOverride is retained but env is
+// no longer a runtime source (bootstrap mirror only) — always false.
+const RateLimitSchema = Schema.Struct({
+  max: Schema.Number,
+  windowMs: Schema.Number,
+  envOverride: Schema.Boolean,
+});
+
+// Deliberately loose (optional numbers): every invalid shape — missing field,
+// non-integer, out of range — is validated in the handler and fails with the
+// same 422 INVALID_RATE_LIMIT envelope (platform schema decode errors are 400).
+const RateLimitInput = Schema.Struct({
+  max: Schema.optional(Schema.Number),
+  windowMs: Schema.optional(Schema.Number),
+});
+
+// DB is the single source of truth: source is "settings" if any github_*
+// settings row exists (mirrored from env at boot), else "none" — env is never
+// a runtime state. Only appId is returned as a value — the PEM and webhook
+// secret are write-only (booleans only).
+const GithubSettingsSchema = Schema.Struct({
+  appId: Schema.String,
+  privateKeySet: Schema.Boolean,
+  webhookSecretSet: Schema.Boolean,
+  source: Schema.Literal("settings", "none"),
+});
+
+// Loose (all optional): presence is validated in the handler so missing and
+// invalid fields share the 422 INVALID_GITHUB_SETTINGS envelope. The PEM and
+// webhook secret are write-only — the GET response never carries their values.
+const GithubSettingsInput = Schema.Struct({
+  appId: Schema.optional(Schema.String),
+  privateKey: Schema.optional(Schema.String),
+  webhookSecret: Schema.optional(Schema.String),
+});
+
 const apiKeysGroup = HttpApiGroup.make("api-keys")
   .add(HttpApiEndpoint.get("listApiKeys", "/settings/api-keys")
     .addSuccess(Schema.Struct({ data: Schema.Array(ApiKeySchema) })))
@@ -1038,7 +1091,17 @@ const apiKeysGroup = HttpApiGroup.make("api-keys")
     .setPayload(CreateApiKeyInput)
     .addSuccess(Schema.Struct({ key: ApiKeySchema, rawKey: Schema.String }), { status: 201 }))
   .add(HttpApiEndpoint.del("deleteApiKey", "/settings/api-keys/:id")
-    .setPath(ApiKeyPath).addSuccess(Schema.Void, { status: 204 }));
+    .setPath(ApiKeyPath).addSuccess(Schema.Void, { status: 204 }))
+  .add(HttpApiEndpoint.get("getRateLimit", "/settings/rate-limit")
+    .addSuccess(RateLimitSchema))
+  .add(HttpApiEndpoint.put("setRateLimit", "/settings/rate-limit")
+    .setPayload(RateLimitInput)
+    .addSuccess(RateLimitSchema))
+  .add(HttpApiEndpoint.get("getGithubSettings", "/settings/github")
+    .addSuccess(GithubSettingsSchema))
+  .add(HttpApiEndpoint.put("setGithubSettings", "/settings/github")
+    .setPayload(GithubSettingsInput)
+    .addSuccess(GithubSettingsSchema));
 
 const UserSchema = Schema.Struct({
   id: Schema.String,
@@ -1152,6 +1215,88 @@ const requireAdmin = Effect.gen(function* () {
   }
   return identity;
 });
+
+// Effective GitHub config for the response envelope — DB ONLY (env is a
+// first-boot bootstrap, mirrored into the settings table at boot). source is
+// "settings" if any github_* row exists, else "none". Only appId is returned
+// as a value — the PEM and webhook secret are write-only (booleans only).
+function githubSettingsResponse(db: Database): {
+  appId: string;
+  privateKeySet: boolean;
+  webhookSecretSet: boolean;
+  source: "settings" | "none";
+} {
+  const settings = {
+    appId: getSetting(db, "github_app_id"),
+    privateKey: getSetting(db, "github_private_key"),
+    webhookSecret: getSetting(db, "github_webhook_secret"),
+  };
+  const nonEmpty = (v: string | null): string => (v !== null && v.trim() !== "" ? v : "");
+  const anySettings = settings.appId !== null || settings.privateKey !== null || settings.webhookSecret !== null;
+  return {
+    appId: nonEmpty(settings.appId),
+    privateKeySet: nonEmpty(settings.privateKey) !== "",
+    webhookSecretSet: nonEmpty(settings.webhookSecret) !== "",
+    source: anySettings ? "settings" : "none",
+  };
+}
+
+// At most 3 linked repos per claim (task_github_issues deduped).
+const MAX_REPO_CONTENT_REPOS = 3;
+
+interface RepoContentEntry {
+  owner: string;
+  repo: string; // full "owner/repo"
+  path: string;
+  content: string;
+}
+
+// Best-effort linked-repo content for Forge context (Contents: Read). Every
+// failure — unconfigured app, missing repo, network, per-file errors — skips
+// that repo/file with a warn; the claim NEVER fails because context is
+// unavailable. Caps: ≤3 repos, ≤maxFiles files total, ≤maxTotalBytes total,
+// each file truncated to maxBytesPerFile at write.
+const loadTaskRepoContent = (task: ForgeTask): Effect.Effect<RepoContentEntry[], never, GitHubClient | TaskRepo> =>
+  Effect.gen(function* () {
+    if (task.documentType !== "task") return [];
+    const taskRepo = yield* TaskRepo;
+    const taskRow = yield* taskRepo.findById(task.documentId).pipe(
+      Effect.catchAll(() => Effect.succeed(null))
+    );
+    if (!taskRow) return [];
+    const repos = [...new Set(taskRow.githubs.map((g) => g.repo).filter(Boolean))].slice(0, MAX_REPO_CONTENT_REPOS);
+    if (repos.length === 0) return [];
+    const client = yield* GitHubClient;
+    const entries: RepoContentEntry[] = [];
+    let totalBytes = 0;
+    for (const fullRepo of repos) {
+      const [owner, name] = fullRepo.split("/");
+      if (!owner || !name) continue;
+      const branch = yield* client.getDefaultBranch(owner, name).pipe(
+        Effect.tapError((e) => Effect.logWarning(`[Forge] repo-content: skip ${fullRepo}: ${e.message}`)),
+        Effect.catchAll(() => Effect.succeed(""))
+      );
+      if (!branch) continue;
+      const tree = yield* client.getRepoFileTree(owner, name, branch).pipe(
+        Effect.tapError((e) => Effect.logWarning(`[Forge] repo-content: tree failed for ${fullRepo}: ${e.message}`)),
+        Effect.catchAll(() => Effect.succeed([] as { path: string; type: string; size?: number }[]))
+      );
+      const selected = selectRepoFiles(tree);
+      for (const file of selected) {
+        if (entries.length >= REPO_CONTENT_DEFAULTS.maxFiles) break;
+        const content = yield* client.getRepoFileContent(owner, name, file.path).pipe(
+          Effect.tapError((e) => Effect.logWarning(`[Forge] repo-content: skip ${fullRepo}:${file.path}: ${e.message}`)),
+          Effect.catchAll(() => Effect.succeed(""))
+        );
+        if (!content) continue;
+        const truncated = content.slice(0, REPO_CONTENT_DEFAULTS.maxBytesPerFile);
+        if (totalBytes + truncated.length > REPO_CONTENT_DEFAULTS.maxTotalBytes) continue;
+        totalBytes += truncated.length;
+        entries.push({ owner, repo: fullRepo, path: file.path, content: truncated });
+      }
+    }
+    return entries;
+  });
 
 const healthLive = HttpApiBuilder.group(LexaApi, "health", (handlers) =>
   handlers.handle("health", () => Effect.succeed({ ok: true as const }))
@@ -1533,12 +1678,15 @@ const forgeLive = HttpApiBuilder.group(LexaApi, "forge", (handlers) =>
       respond(Effect.gen(function* () {
         const service = yield* ForgeService;
         const task = yield* service.claimNext(req.payload.runtimeId);
-        if (!task) return { task: null, provider: "opencode" as const, agent: "", model: "", printLogs: false, logLevel: "", extraArgs: [], prompt: "", agentMarkdown: "", skillMarkdown: "", skillIds: [] };
+        if (!task) return { task: null, provider: "opencode" as const, agent: "", model: "", printLogs: false, logLevel: "", extraArgs: [], prompt: "", agentMarkdown: "", skillMarkdown: "", skillIds: [], repoContent: [] };
         const runtime = yield* service.getRuntimeConfig(req.payload.runtimeId);
+        // Best-effort linked-repo content (Contents: Read) — assembled BEFORE
+        // the prompt so the prompt can point the agent at repo-content/.
+        const repoContent = yield* loadTaskRepoContent(task);
         // Server-authoritative prompt (resolves linked sources, enforces
         // output rules). If source resolution fails, fall back to the
         // daemon's local minimal build rather than blocking the claim.
-        const prompt = yield* service.buildPromptForTask(task).pipe(
+        const prompt = yield* service.buildPromptForTask(task, repoContent.length > 0).pipe(
           Effect.catchAll(() => Effect.succeed(""))
         );
         // Claim-carried rule files: the daemon writes these into the run dir
@@ -1553,7 +1701,7 @@ const forgeLive = HttpApiBuilder.group(LexaApi, "forge", (handlers) =>
             Effect.catchAll(() => Effect.succeed([] as string[]))
           ),
         });
-        return { task, provider: runtime.provider, agent: runtime.agent, model: runtime.model, printLogs: runtime.printLogs, logLevel: runtime.logLevel, extraArgs: runtime.extraArgs, prompt, agentMarkdown: rules.agentMarkdown, skillMarkdown: rules.skillMarkdown, skillIds };
+        return { task, provider: runtime.provider, agent: runtime.agent, model: runtime.model, printLogs: runtime.printLogs, logLevel: runtime.logLevel, extraArgs: runtime.extraArgs, prompt, agentMarkdown: rules.agentMarkdown, skillMarkdown: rules.skillMarkdown, skillIds, repoContent };
       }))
     )
     // Runtime setup events — the CLI listener claims these over the same
@@ -2324,6 +2472,82 @@ const apiKeysLive = HttpApiBuilder.group(LexaApi, "api-keys", (handlers) =>
         return undefined;
       }))
     )
+    .handle("getRateLimit", () =>
+      respond(Effect.gen(function* () {
+        yield* requireAdmin;
+        const db = yield* Sqlite;
+        return {
+          ...resolveRateLimitFromDbValues({
+            settingsMax: getSetting(db, "rate_limit_max"),
+            settingsWindowMs: getSetting(db, "rate_limit_window_ms"),
+          }),
+          envOverride: false,
+        };
+      }))
+    )
+    .handle("setRateLimit", (req) =>
+      respond(Effect.gen(function* () {
+        yield* requireAdmin;
+        const { max, windowMs } = req.payload;
+        if (max === undefined || windowMs === undefined) {
+          return yield* Effect.fail(new InvalidRateLimit({ reason: "max and windowMs are required" }));
+        }
+        if (!Number.isInteger(max) || max < 1) {
+          return yield* Effect.fail(new InvalidRateLimit({ reason: "max must be a positive integer" }));
+        }
+        if (!Number.isInteger(windowMs) || windowMs < 1000) {
+          return yield* Effect.fail(new InvalidRateLimit({ reason: "windowMs must be an integer >= 1000" }));
+        }
+        const db = yield* Sqlite;
+        setSetting(db, "rate_limit_max", String(max));
+        setSetting(db, "rate_limit_window_ms", String(windowMs));
+        syncRateLimitFromDb(db);
+        return {
+          ...resolveRateLimitFromDbValues({ settingsMax: String(max), settingsWindowMs: String(windowMs) }),
+          envOverride: false,
+        };
+      }))
+    )
+    .handle("getGithubSettings", () =>
+      respond(Effect.gen(function* () {
+        yield* requireAdmin;
+        const db = yield* Sqlite;
+        return githubSettingsResponse(db);
+      }))
+    )
+    .handle("setGithubSettings", (req) =>
+      respond(Effect.gen(function* () {
+        yield* requireAdmin;
+        const { appId, privateKey, webhookSecret } = req.payload;
+        // Present field = replace; empty string = CLEAR (delete the row → not
+        // configured at runtime; env re-imports only at the next boot);
+        // omitted = unchanged (appId is required in the body). Non-empty
+        // values validate.
+        if (appId === undefined) {
+          return yield* Effect.fail(new InvalidGithubSettings({ reason: "appId is required" }));
+        }
+        if (appId.trim() !== "" && !/^\d+$/.test(appId.trim())) {
+          return yield* Effect.fail(new InvalidGithubSettings({ reason: "appId must be a GitHub App ID (digits only)" }));
+        }
+        if (privateKey !== undefined && privateKey.trim() !== "" && !privateKey.includes("-----BEGIN")) {
+          return yield* Effect.fail(new InvalidGithubSettings({ reason: "privateKey must be a PEM starting with -----BEGIN" }));
+        }
+        const db = yield* Sqlite;
+        if (appId.trim() === "") deleteSetting(db, "github_app_id");
+        else setSetting(db, "github_app_id", appId.trim());
+        if (privateKey !== undefined) {
+          if (privateKey.trim() === "") deleteSetting(db, "github_private_key");
+          else setSetting(db, "github_private_key", privateKey);
+        }
+        if (webhookSecret !== undefined) {
+          if (webhookSecret.trim() === "") deleteSetting(db, "github_webhook_secret");
+          else setSetting(db, "github_webhook_secret", webhookSecret.trim());
+        }
+        syncGitHubConfigFromDb(db);
+        resetGithubCaches();
+        return githubSettingsResponse(db);
+      }))
+    )
 );
 
 const adminLive = HttpApiBuilder.group(LexaApi, "admin", (handlers) =>
@@ -2525,6 +2749,9 @@ function buildWebhookRuntime(dbPath: string) {
 
 // HMAC-SHA-256 verification over the RAW body, constant-time compare — the
 // route calls this BEFORE any JSON parsing or processing (401 on mismatch).
+// The secret is read PER REQUEST from the mutable config holder (settings >
+// env) via GitHubClient, so a PUT /api/settings/github applies to webhook
+// verification immediately — no runtime rebuild needed.
 export function createWebhookVerifier(dbPath: string): (rawBody: ArrayBuffer, signature: string | null) => Promise<boolean> {
   const runtime = buildWebhookRuntime(dbPath);
   return (rawBody, signature) =>

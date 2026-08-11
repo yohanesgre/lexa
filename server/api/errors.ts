@@ -54,6 +54,8 @@ export class CommentEditForbidden extends Data.TaggedError("CommentEditForbidden
 export class CommentDeleteForbidden extends Data.TaggedError("CommentDeleteForbidden")<{ id: number }> {}
 export class CommentInvalid extends Data.TaggedError("CommentInvalid")<{ reason: string }> {}
 export class InvalidName extends Data.TaggedError("InvalidName")<{ reason: string }> {}
+export class InvalidRateLimit extends Data.TaggedError("InvalidRateLimit")<{ reason: string }> {}
+export class InvalidGithubSettings extends Data.TaggedError("InvalidGithubSettings")<{ reason: string }> {}
 export class NoUserContext extends Data.TaggedError("NoUserContext")<{}> {}
 export { ProjectAccessDenied } from "../services/user-project-role.service";
 
@@ -101,6 +103,8 @@ export const errorCodeMap: Record<string, string> = {
   CommentDeleteForbidden: "COMMENT_DELETE_FORBIDDEN",
   CommentInvalid: "COMMENT_INVALID",
   InvalidName: "INVALID_NAME",
+  InvalidRateLimit: "INVALID_RATE_LIMIT",
+  InvalidGithubSettings: "INVALID_GITHUB_SETTINGS",
   NoUserContext: "NO_USER_CONTEXT",
   ProjectAccessDenied: "FORBIDDEN",
   UserNotFound: "USER_NOT_FOUND",
@@ -167,6 +171,8 @@ export function errorToStatus(error: { _tag: string }): number {
     case "SourceUnreachable":
     case "CommentInvalid":
     case "InvalidName":
+    case "InvalidRateLimit":
+    case "InvalidGithubSettings":
       return 422;
     case "InvalidKey":
     case "MissingAuth":
@@ -275,6 +281,10 @@ export function errorMessage(error: { _tag: string } & Record<string, unknown>):
       return String(error.reason ?? "Invalid comment");
     case "InvalidName":
       return String(error.reason ?? "Invalid name");
+    case "InvalidRateLimit":
+      return String(error.reason ?? "Invalid rate limit");
+    case "InvalidGithubSettings":
+      return String(error.reason ?? "Invalid GitHub settings");
     case "NoUserContext":
       return "No user context — this endpoint requires the x-lxk-user header";
     case "CannotDeleteSelf":

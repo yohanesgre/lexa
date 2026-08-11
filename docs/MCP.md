@@ -35,9 +35,13 @@ Access-bypassed, TLS comes from the tunnel, and Bearer keys are the auth.
 - **One key per client machine** — create the key in Settings → API keys, keep it
   only on that machine; revocation is then per-client. An unlinked key is `admin`;
   a user-linked key inherits the user's role and project grants (see Access Control).
-- **Rate limited per client IP** — 600 req / 10 min default (`server/api/rate-limit.ts`
-  constants). Agents behind a shared egress NAT all share one bucket; raise `max`
-  if a fleet of clients trips it.
+- **Rate limited per client IP** — 6000 req / 10 min default, configurable in
+  Settings → API/Security (rate limiting): DB settings override
+  `LXK_RATE_LIMIT_MAX` / `LXK_RATE_LIMIT_WINDOW_MS` env, applied live
+  (`server/api/rate-limit.ts`). Agents behind a shared egress NAT all share one
+  bucket; raise `max` if a fleet of clients trips it. The token-gated Forge
+  machine surfaces (daemon log POSTs, runtime registration, listener heartbeat)
+  are exempt.
 - **16 MB body cap** applies; responses are JSON-RPC envelopes (never raw HTML).
 - The local `lexa-cli` path (REST + Bearer) and the remote MCP path are
   interchangeable — same keys, same authorization model.

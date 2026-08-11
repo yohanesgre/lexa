@@ -1,9 +1,19 @@
 // forge/daemon.ts — the agent child-env whitelist (buildChildEnv), model id
-// resolution, and the import.meta.main guard. The daemon's main loop
+// resolution, claim repo-content writing (writeRepoContent), and the
+// import.meta.main guard. The daemon's main loop
 // (register/heartbeat/claim/spawn) is process+network-bound and is not
 // exercised here; importing the module must be inert (guard verified below).
 import { describe, expect, it } from "vitest";
-import { buildChildEnv, resolveModelId } from "./daemon";
+import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { buildChildEnv, resolveModelId, writeRepoContent, type ForgeTask } from "./daemon";
+
+const TASK = { id: "t1" } as ForgeTask;
+
+function tmpRun(): string {
+  return mkdtempSync(join(tmpdir(), "lexa-forge-daemon-"));
+}
 
 describe("buildChildEnv", () => {
   it("keeps the base allowlist (PATH/HOME/TMPDIR/TERM/LANG) from the daemon env", () => {
@@ -64,6 +74,98 @@ describe("resolveModelId", () => {
     expect(resolveModelId("openai/gpt-4o")).toBe("openai/gpt-4o");
     expect(resolveModelId("gpt-4o")).toBe("gpt-4o");
     expect(resolveModelId("")).toBe("");
+  });
+});
+
+describe("writeRepoContent", () => {
+  it("writes claim files at <runDir>/repo-content/<owner>/<repo>/<path> (incl. nested paths) + MANIFEST", () => {
+    const dir = tmpRun();
+    try {
+      writeRepoContent(dir, TASK, [
+        { owner: "yohanesgre", repo: "lexa", path: "README.md", content: "# Lexa" },
+        { owner: "yohanesgre", repo: "lexa", path: "server/entry.ts", content: "// entry" },
+      ]);
+      expect(readFileSync(join(dir, "repo-content", "yohanesgre", "lexa", "README.md"), "utf-8")).toBe("# Lexa");
+      expect(readFileSync(join(dir, "repo-content", "yohanesgre", "lexa", "server", "entry.ts"), "utf-8")).toBe("// entry");
+      const manifest = readFileSync(join(dir, "repo-content", "MANIFEST.md"), "utf-8");
+      expect(manifest).toContain("Repo content fetched from linked GitHub repos at claim time — ground your work in these files.");
+      expect(manifest).toContain("- `yohanesgre/lexa/README.md`");
+      expect(manifest).toContain("- `yohanesgre/lexa/server/entry.ts`");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("claim without repoContent creates no repo-content dir; a stale dir is removed", () => {
+    const dir = tmpRun();
+    try {
+      writeRepoContent(dir, TASK, null);
+      expect(existsSync(join(dir, "repo-content"))).toBe(false);
+      writeRepoContent(dir, TASK, [{ owner: "a", repo: "b", path: "old.md", content: "old" }]);
+      expect(existsSync(join(dir, "repo-content", "a", "b", "old.md"))).toBe(true);
+      writeRepoContent(dir, TASK, []);
+      expect(existsSync(join(dir, "repo-content"))).toBe(false);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("a fresh claim wipes the previous claim's repo-content (persistent workspace lifecycle)", () => {
+    const dir = tmpRun();
+    try {
+      writeRepoContent(dir, TASK, [{ owner: "a", repo: "b", path: "old.md", content: "old" }]);
+      writeRepoContent(dir, TASK, [{ owner: "a", repo: "b", path: "new.md", content: "new" }]);
+      expect(existsSync(join(dir, "repo-content", "a", "b", "old.md"))).toBe(false);
+      expect(existsSync(join(dir, "repo-content", "a", "b", "new.md"))).toBe(true);
+      const manifest = readFileSync(join(dir, "repo-content", "MANIFEST.md"), "utf-8");
+      expect(manifest).not.toContain("old.md");
+      expect(manifest).toContain("- `a/b/new.md`");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("unsafe paths are skipped without a crash and nothing escapes the repo-content dir", () => {
+    const dir = tmpRun();
+    try {
+      writeRepoContent(dir, TASK, [
+        { owner: "..", repo: "lexa", path: "x", content: "evil" },
+        { owner: "yohanesgre", repo: "..", path: "x", content: "evil" },
+        { owner: "yohanesgre", repo: "a/b", path: "x", content: "evil" },
+        { owner: "yohanesgre", repo: "lexa", path: "../evil", content: "evil" },
+        { owner: "yohanesgre", repo: "lexa", path: "/etc/passwd", content: "evil" },
+        { owner: "yohanesgre", repo: "lexa", path: "a/../../b", content: "evil" },
+        { owner: "yohanesgre", repo: "lexa", path: "ok.md", content: "fine" },
+      ]);
+      expect(readFileSync(join(dir, "repo-content", "yohanesgre", "lexa", "ok.md"), "utf-8")).toBe("fine");
+      expect(existsSync(join(dir, "evil"))).toBe(false);
+      expect(existsSync(join(dir, "repo-content", "evil"))).toBe(false);
+      expect(readdirSync(join(dir, "repo-content", "yohanesgre", "lexa"))).toEqual(["ok.md"]);
+      const manifest = readFileSync(join(dir, "repo-content", "MANIFEST.md"), "utf-8");
+      expect(manifest).not.toContain("evil");
+      expect(manifest).toContain("- `yohanesgre/lexa/ok.md`");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("a failing file write logs and continues; the MANIFEST lists only written files", () => {
+    const dir = tmpRun();
+    try {
+      writeRepoContent(dir, TASK, [
+        { owner: "a", repo: "b", path: "x/y", content: "file" },
+        { owner: "a", repo: "b", path: "x/y/z", content: "nested under a file" },
+        { owner: "a", repo: "b", path: "fine.md", content: "ok" },
+      ]);
+      expect(readFileSync(join(dir, "repo-content", "a", "b", "fine.md"), "utf-8")).toBe("ok");
+      expect(existsSync(join(dir, "repo-content", "a", "b", "x", "y", "z"))).toBe(false);
+      const manifest = readFileSync(join(dir, "repo-content", "MANIFEST.md"), "utf-8");
+      expect(manifest).toContain("- `a/b/x/y`");
+      expect(manifest).toContain("- `a/b/fine.md`");
+      expect(manifest).not.toContain("x/y/z");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
 

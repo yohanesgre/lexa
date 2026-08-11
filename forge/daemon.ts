@@ -146,7 +146,7 @@ if (import.meta.main) {
   }
 }
 
-interface ForgeTask {
+export interface ForgeTask {
   id: string;
   projectId: string;
   documentType: "task" | "wiki";
@@ -160,6 +160,15 @@ interface ForgeTask {
   status: string;
   result: string | null;
   error: string | null;
+}
+
+// Optional claim payload: source files fetched from the task's linked GitHub
+// repos at claim time (server lane). Absent/null = no repo content.
+interface RepoContentEntry {
+  owner: string;
+  repo: string;
+  path: string;
+  content: string;
 }
 
 // Per-request timeouts — a stalled server must not hang registration,
@@ -334,11 +343,11 @@ const main = Effect.gen(function* () {
         });
         if (res.ok) {
           const claim = yield* Effect.tryPromise({
-            try: () => res.json() as Promise<{ task: ForgeTask | null; provider: string; agent: string; model: string; printLogs: boolean; logLevel: string; extraArgs: string[]; prompt: string; agentMarkdown: string; skillMarkdown: string; skillIds: string[] }>,
+            try: () => res.json() as Promise<{ task: ForgeTask | null; provider: string; agent: string; model: string; printLogs: boolean; logLevel: string; extraArgs: string[]; prompt: string; agentMarkdown: string; skillMarkdown: string; skillIds: string[]; repoContent: RepoContentEntry[] | null }>,
             catch: toDaemonError,
           });
           if (claim.task) {
-            yield* runTask(claim.task, claim.provider, claim.agent, claim.model, claim.logLevel, claim.extraArgs, claim.prompt, claim.agentMarkdown, claim.skillMarkdown, claim.skillIds ?? []);
+            yield* runTask(claim.task, claim.provider, claim.agent, claim.model, claim.logLevel, claim.extraArgs, claim.prompt, claim.agentMarkdown, claim.skillMarkdown, claim.skillIds ?? [], claim.repoContent ?? null);
           }
         }
       }).pipe(
@@ -442,6 +451,54 @@ function writeRuleBundles(workspace: string, task: ForgeTask, agentMarkdown: str
   }
 }
 
+// Claim-carried repo content (files from the task's linked GitHub repos):
+// written under <workdir>/repo-content/<owner>/<repo>/<path> so the agent's
+// working directory contains the linked sources, plus MANIFEST.md listing
+// every written file. The dir is daemon-owned — wiped and rewritten per
+// claim (fresh per run), and removed when the claim carries none, so a
+// persistent opencode workspace never shows stale files from an earlier run
+// (legacy providers drop the whole run dir anyway). Paths are sanitized
+// defensively (owner/repo single clean segments, path segments never ".." or
+// empty) and skipped when unsafe; a write failure only logs — the claim
+// continues. Mirrors writeRuleBundles: per-claim overwrite, never removed
+// at run end.
+export function writeRepoContent(workdir: string, task: ForgeTask, repoContent: RepoContentEntry[] | null) {
+  const dir = join(workdir, "repo-content");
+  try {
+    if (!repoContent || repoContent.length === 0) {
+      rmSync(dir, { recursive: true, force: true });
+      return;
+    }
+    rmSync(dir, { recursive: true, force: true });
+    mkdirSync(dir, { recursive: true });
+    const written: string[] = [];
+    for (const entry of repoContent) {
+      const safeSeg = (seg: string) => seg.length > 0 && seg !== "." && seg !== ".." && !seg.includes("/");
+      if (!safeSeg(entry.owner) || !safeSeg(entry.repo)) {
+        console.warn(`[task ${task.id}] skipping repo-content entry with unsafe owner/repo: ${entry.owner}/${entry.repo}`);
+        continue;
+      }
+      const pathSegs = entry.path.split("/");
+      if (pathSegs.length === 0 || !pathSegs.every(safeSeg)) {
+        console.warn(`[task ${task.id}] skipping repo-content entry with unsafe path: ${entry.owner}/${entry.repo}/${entry.path}`);
+        continue;
+      }
+      try {
+        const dest = join(dir, entry.owner, entry.repo, ...pathSegs);
+        mkdirSync(join(dir, entry.owner, entry.repo, ...pathSegs.slice(0, -1)), { recursive: true });
+        writeFileSync(dest, entry.content, { mode: 0o644 });
+        written.push(`${entry.owner}/${entry.repo}/${entry.path}`);
+      } catch (e) {
+        console.warn(`[task ${task.id}] could not write repo-content file ${entry.owner}/${entry.repo}/${entry.path}: ${(e as Error).message}`);
+      }
+    }
+    const manifest = `Repo content fetched from linked GitHub repos at claim time — ground your work in these files.\n${written.map((f) => `- \`${f}\``).join("\n")}\n`;
+    writeFileSync(join(dir, "MANIFEST.md"), manifest, { mode: 0o644 });
+  } catch (e) {
+    console.warn(`[task ${task.id}] could not write repo-content: ${(e as Error).message}`);
+  }
+}
+
 // opencode auto-discovers EVERY skill bundle under .agents/skills/, so stale
 // dirs (renamed/deleted skills) still get read into runs. The claim carries
 // the server's current skill-id set; remove any dir not in it. Race-free:
@@ -523,7 +580,7 @@ function seedSandboxHome(workspace: string): string {
   return home;
 }
 
-function runTask(task: ForgeTask, serverProvider: string, serverAgent: string, serverModel: string, serverLogLevel: string, extraArgs: string[], serverPrompt: string, agentMarkdown: string, skillMarkdown: string, skillIds: string[] = []): Effect.Effect<void, never> {
+function runTask(task: ForgeTask, serverProvider: string, serverAgent: string, serverModel: string, serverLogLevel: string, extraArgs: string[], serverPrompt: string, agentMarkdown: string, skillMarkdown: string, skillIds: string[] = [], repoContent: RepoContentEntry[] | null = null): Effect.Effect<void, never> {
   return Effect.gen(function* () {
     console.log(`\n[task ${task.id}] ${task.skillName} — ${task.documentType}:${task.documentId}`);
 
@@ -569,6 +626,10 @@ function runTask(task: ForgeTask, serverProvider: string, serverAgent: string, s
         console.warn(`[task ${task.id}] could not write rule files: ${(e as Error).message}`);
       }
     }
+
+    // Repo content lands in the same dir as the rule files — the agent's
+    // working directory — for both layouts (workspace / ephemeral run dir).
+    writeRepoContent(workdir, task, repoContent);
 
     // The server builds the authoritative prompt (resolves linked sources,
     // enforces output rules) and sends it with the claim. Fall back to a local

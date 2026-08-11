@@ -5,7 +5,7 @@ import { Database } from "bun:sqlite";
 import { AuthIdentity, AuthIdentityShape } from "./auth";
 import { constantTimeTokenEqual, resolveApiKeyIdentity } from "./auth-key";
 import { MAX_API_BODY, X_LEXA_REMOTE_IP } from "./limits";
-import { apiRateLimiter, isPrivateIp } from "./rate-limit";
+import { apiRateLimiter, isPrivateIp, isRateLimitExemptPath } from "./rate-limit";
 
 // API-level middleware wrapped around the whole HttpApi router. Applied at
 // build time; runs before route matching (incl. 404s) and before
@@ -30,15 +30,16 @@ export function createApiMiddleware(db: Database, dbPath: string) {
       const isForgeDaemon = path.startsWith("/api/forge/daemon/") || path === "/api/forge/runtimes/register";
 
       // Rate limit before auth: a blocked IP stays blocked regardless of key.
-      // Only the token-gated forge-daemon/runtimes-register surface is exempt
-      // (a chatty agent's log POSTs must not share the IP bucket); setup and
-      // health are rate-limited again. IP is resolved in entry (socket only
-      // visible there) and stamped on the reconstructed Request — any inbound
-      // x-lexa-remote-ip is deleted first.
+      // The key/token-gated forge machine surfaces are exempt (isRateLimitExemptPath:
+      // daemon log POSTs, runtime registration, the listener's 3s heartbeat — a
+      // chatty agent's traffic must not share the IP bucket); setup and health are
+      // rate-limited again. IP is resolved in entry (socket only visible there) and
+      // stamped on the reconstructed Request — any inbound x-lexa-remote-ip is
+      // deleted first.
       const stampedIp = request.headers[X_LEXA_REMOTE_IP] ?? "";
       const cfIp = request.headers["cf-connecting-ip"];
       const ip = stampedIp && isPrivateIp(stampedIp) && cfIp ? cfIp : (stampedIp || cfIp || "unknown");
-      if (!isForgeDaemon && !apiRateLimiter.check(ip)) {
+      if (!isRateLimitExemptPath(path) && !apiRateLimiter.check(ip)) {
         const retryAfter = Math.ceil(apiRateLimiter.retryAfterMs(ip) / 1000);
         console.warn(`[API] rate limited ip=${ip} retryAfter=${retryAfter}s`);
         return withSecurityHeaders(

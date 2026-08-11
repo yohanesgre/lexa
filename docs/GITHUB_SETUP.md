@@ -14,11 +14,15 @@ suppression and delivery dedup make the loop safe.
    - **Homepage URL**: any URL, e.g. `https://<your-host>`
    - **Webhook URL**: `https://<host>/api/webhooks/github` — see §3 for which host
    - **Webhook secret**: click **Generate a secret** (or type one ≥ 16 chars,
-     alphanumeric — the UI only accepts alphanumeric). **Save it** — it goes in
-     `.env` / `.env.prod` as `GITHUB_WEBHOOK_SECRET`
+      alphanumeric — the UI only accepts alphanumeric). **Save it** — it goes
+      in Settings → GitHub Sync or `.env` / `.env.prod` as `GITHUB_WEBHOOK_SECRET`
 3. **Repository permissions**:
    - **Issues**: `Read and write`
    - **Metadata**: `Read-only`
+   - **Contents**: `Read-only` — enables the Forge repo-content context
+     (the daemon gets the task's linked-repo source files as grounding; see
+     ARCHITECTURE.md → Forge repo-content). Optional: without it, Forge runs
+     just don't receive repo files.
 4. **Subscribe to events**: **Issues** only
 5. **Create GitHub App**
 
@@ -42,14 +46,43 @@ GitHub cannot reach `localhost`:
   Webhook URL: `https://<random>.trycloudflare.com/api/webhooks/github`.
   The host changes every restart — update it in the app settings when you restart the tunnel.
 
-## 4. Configure env vars
+## 4. Configure credentials
+
+The **settings DB is the single source of truth at runtime**; env vars are a
+first-boot bootstrap only (mirrored into the DB once at boot when the DB keys
+are empty — the web UI then owns the config, live, no restart). Two ways to
+provision:
+
+### 4a. Configure via Settings (runtime truth)
+
+**Settings → GitHub Sync** (admin): App ID (number, top of the app page),
+upload the `.pem` private key, and the webhook secret from §1. Saves apply
+**live** — no restart. Clearing a field (empty string) deletes the stored
+value → not configured at runtime (an env value is re-imported only at the
+next boot). The API never returns the key or secret (booleans only).
+
+**Webhook URL**: `https://<host>/api/webhooks/github` (see §3 for which host).
+
+### 4b. Configure env vars (bootstrap)
+
+Env values are imported into the settings DB at boot **only when the DB key is
+empty** — after that the DB wins and env is ignored until the key is cleared.
 
 | Var | Meaning |
 |-----|---------|
 | `GITHUB_APP_ID` | App ID (number, top of the app page) |
 | `GITHUB_PRIVATE_KEY` | Inline PEM with escaped newlines (`"-----BEGIN RSA PRIVATE KEY-----\n...\n-----END RSA PRIVATE KEY-----"`) |
-| `GITHUB_PRIVATE_KEY_FILE` | Path to a `.pem` file, read at boot — **no escaping needed** (recommended; inline wins if both set) |
+| `GITHUB_PRIVATE_KEY_FILE` | Path to a `.pem` file, read at mirror time — **no escaping needed** (recommended; inline wins if both set) |
 | `GITHUB_WEBHOOK_SECRET` | The secret from §1 (must match the App exactly) |
+
+The `lexa-cli` operator tool defaults to the live server: `github status`
+prints the server's effective settings and `github setup` pushes to the
+Settings API (applied immediately, env untouched) — both require
+`lexa-cli login`. The env-file path is explicit `--local`:
+`github setup --local` writes the bootstrap values (imported at the next
+boot only while the DB keys are unset) and `github status --local` validates
+them. When not logged in, the remote default fails with a hint to log in or
+use `--local` — there is no silent env fallback.
 
 **Local dev** (`.env`):
 ```
@@ -114,9 +147,10 @@ renames can never break sync.
 
 ## Troubleshooting
 
-- **Link fails with `GITHUB_API_ERROR: GitHub App is not configured`** — the
-  env vars aren't reaching the server (check the container env / restart after
-  editing `.env`).
+- **Link fails with `GITHUB_API_ERROR: GitHub App is not configured`** — no
+  credentials reach the server: set them in Settings → GitHub Sync (applies
+  immediately) or check the env vars (container env / restart after editing
+  `.env`).
 - **Webhook deliveries never arrive** — check the app's delivery log
   (App settings → **Advanced**): `failed to connect to host` = wrong webhook
   URL; `302` = Access bypass missing; `401` = secret mismatch.

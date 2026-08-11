@@ -712,6 +712,46 @@ body { name* }
 
 DELETE /api/settings/api-keys/:id  (admin)
 → 204 | 404
+
+GET    /api/settings/rate-limit  (admin)
+→ 200 { max: number, windowMs: number, envOverride: boolean }
+  Effective per-IP rate limit: DB settings (settings.rate_limit_max /
+  settings.rate_limit_window_ms) > code defaults (6000 / 600_000 ms). The DB
+  is the single source of truth — env (LXK_RATE_LIMIT_MAX / LXK_RATE_LIMIT_WINDOW_MS)
+  is a first-boot bootstrap, mirrored into the DB once at boot. envOverride is
+  retained for the frontend contract but is always false (env never overrides
+  at runtime).
+
+PUT    /api/settings/rate-limit  (admin)
+body { max*: integer >= 1, windowMs*: integer >= 1000 }
+→ 200 { max, windowMs, envOverride } — same shape as GET
+  | 422 INVALID_RATE_LIMIT (non-integer, out-of-range, or missing field)
+  Persists to settings.rate_limit_max / settings.rate_limit_window_ms and
+  applies live via syncRateLimitFromDb (no restart). Empty rows fall back to
+  the defaults; a cleared key is re-imported from env only at the next boot.
+
+GET    /api/settings/github  (admin)
+→ 200 { appId: string, privateKeySet: boolean, webhookSecretSet: boolean,
+        source: "settings" | "none" }
+  Effective GitHub App config: the DB is the single source of truth
+  (settings.github_app_id / settings.github_private_key /
+  settings.github_webhook_secret). Env (GITHUB_APP_ID / GITHUB_PRIVATE_KEY /
+  GITHUB_PRIVATE_KEY_FILE / GITHUB_WEBHOOK_SECRET) is a first-boot bootstrap,
+  mirrored into the DB once at boot. source = "settings" if any github_*
+  settings row exists, else "none" (no "env" state — env is never a runtime
+  source).
+  ⚠ Write-only secrets: the PEM and webhook secret are never returned —
+  only privateKeySet / webhookSecretSet booleans.
+
+PUT    /api/settings/github  (admin)
+body { appId*: string (digits, e.g. "1234567"),
+       privateKey?: string (PEM text), webhookSecret?: string }
+→ 200 same shape as GET
+  | 422 INVALID_GITHUB_SETTINGS (missing/invalid appId, privateKey not a PEM)
+  Present field = replace; empty string = CLEAR (deletes the settings row so
+  env fallback resumes); omitted field = unchanged. Applies live (holder +
+  cache reset — no restart); webhook verification picks up the new secret
+  immediately.
 ```
 
 ### Admin (users & project roles)
@@ -817,7 +857,8 @@ POST   /api/forge/daemon/claim             (daemon)
 body { runtimeId* }
 → 200 { task: ForgeTask | null, provider, agent, model: string, printLogs: boolean,
         logLevel: ""|"DEBUG"|"INFO"|"WARN"|"ERROR", extraArgs: string[], prompt: string,
-        agentMarkdown: string, skillMarkdown: string, skillIds: string[] }
+        agentMarkdown: string, skillMarkdown: string, skillIds: string[],
+        repoContent: [{ owner, repo, path, content }] }
         skillIds = full current skill-id set; the daemon prunes stale
         .agents/skills/<id> dirs not in this list (opencode auto-discovers
         every bundle in that dir)
@@ -828,7 +869,14 @@ body { runtimeId* }
   falls back to its local minimal build).
   agentMarkdown/skillMarkdown are the task's agent + skill instructions — the
   daemon writes them into the run dir as AGENTS.md + .agents/<skill>/SKILL.md
-  (files-only delivery, no host store).)
+  (files-only delivery, no host store).
+  repoContent: best-effort linked-repo files for grounding (Contents: Read) —
+  [] when the task links no GitHub repo, GitHub is unconfigured, or any fetch
+  failed (a claim never fails for missing context). The daemon writes them
+  into repo-content/ (+ MANIFEST.md) and the prompt points the agent there.
+  owner = the GitHub owner, repo = full "owner/repo", path = repo-relative
+  path, content = UTF-8 text (≤ 256 KB per file, ≤ 512 KB total, ≤ 50 files,
+  ≤ 3 repos).)
 
 # ── Runtime setup events (web wizard → machine CLI listener) ──
 POST   /api/forge/runtime-events           (browser)
