@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from "react";
-import { AlertTriangle, Check, Copy, Key, Plus, RotateCcw, Settings, Trash2, Search, UserPlus, Users } from "lucide-react";
+import { AlertTriangle, Check, Copy, Key, Plus, RotateCcw, Settings, Trash2, Search, Upload, UserPlus, Users } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
-import { useApiKeys, useCreateApiKey, useDeleteApiKey, useUsers, useUpdateUserRole, useProjectMembers, useAddProjectMember, useRemoveProjectMember, useDeleteProject, useRuntimes, useMachines, useRemoveRuntime, useRemoveMachine } from "../../lib/queries";
+import { useApiKeys, useCreateApiKey, useDeleteApiKey, useUsers, useUpdateUserRole, useProjectMembers, useAddProjectMember, useRemoveProjectMember, useDeleteProject, useRuntimes, useMachines, useRemoveRuntime, useRemoveMachine, useRateLimit, useUpdateRateLimit, useGithubSettings, useUpdateGithubSettings, useClearGithubSettings } from "../../lib/queries";
 import { RuntimeSetupModal } from "../forge/RuntimeSetupModal";
 import { RuntimeEditModal } from "../forge/RuntimeEditModal";
 import { RuntimeRestartModal } from "../forge/RuntimeRestartModal";
@@ -111,6 +111,39 @@ function DeleteKeyModal({ name, onCancel, onConfirm }: { name: string; onCancel:
             <button type="button" className="btn btn-danger-solid" onClick={onConfirm}>
               <Trash2 size={14} strokeWidth={1.5} />
               Delete
+            </button>
+          </div>
+        </dialog>
+      </div>
+    </>
+  );
+}
+
+function RemoveGithubSyncModal({ onCancel, onConfirm }: { onCancel: () => void; onConfirm: () => void }) {
+  return (
+    <>
+      <button type="button" className="slideover-overlay" onClick={onCancel} aria-label="Close" />
+      <div className="fixed inset-0 flex items-center justify-center z-50 pointer-events-none">
+        <dialog open className="dialog dialog-enter pointer-events-auto" aria-modal="true" aria-label="Dialog">
+          <h2 className="font-display text-lg font-medium text-lx-text-primary">Remove GitHub sync?</h2>
+
+          <p className="text-sm text-lx-text-secondary mt-3 leading-5">
+            This removes the stored App ID, private key, and webhook secret. GitHub sync stops immediately — already-linked issues stay linked but stop syncing. This action cannot be undone.
+          </p>
+
+          <p className="text-sm text-lx-text-secondary mt-2 leading-5">
+            If{" "}
+            <span className="font-mono text-xs text-lx-text-primary" style={{ background: "var(--lx-surface-card)", borderRadius: 4, padding: "2px 5px" }}>
+              GITHUB_*
+            </span>
+            {" "}environment variables are set on the server, they are re-imported on the next restart.
+          </p>
+
+          <div className="flex items-center gap-2 mt-4 justify-end">
+            <button type="button" className="btn btn-ghost" onClick={onCancel}>Cancel</button>
+            <button type="button" className="btn btn-danger-solid" onClick={onConfirm}>
+              <Trash2 size={14} strokeWidth={1.5} />
+              Remove
             </button>
           </div>
         </dialog>
@@ -604,6 +637,273 @@ function AdminsSection({ users, onPromote, onDemote }: { users: { id: string; em
   );
 }
 
+// Rate Limiting (app scope — admin only), per wireframes/src/settings.html.
+// Hidden for non-admins; the env override renders as a plain text note above
+// the form when an env var supplies the effective values.
+function RateLimitSection() {
+  const { data, isLoading, isError } = useRateLimit();
+  const save = useUpdateRateLimit();
+  const [max, setMax] = useState("");
+  const [windowMin, setWindowMin] = useState("");
+  const synced = useRef(false);
+
+  useEffect(() => {
+    if (data && !synced.current) {
+      synced.current = true;
+      setMax(String(data.max));
+      setWindowMin(String(data.windowMs / 60000));
+    }
+  }, [data]);
+
+  const maxNum = Number(max);
+  const windowNum = Number(windowMin);
+  // Mirrors the server validation (integers, max >= 1, windowMs >= 1000) so
+  // Save is only offered once the inputs can succeed; the server stays
+  // authoritative and surfaces 422s via the error toast.
+  const canSave = Number.isInteger(maxNum) && maxNum >= 1 && Number.isFinite(windowNum) && windowNum * 60000 >= 1000;
+
+  return (
+    <section className="mb-8">
+      <div className="flex items-center justify-between mb-3">
+        <h2 className="font-display text-lg font-medium text-lx-text-primary">Rate Limiting</h2>
+        <div className="flex items-center gap-2">
+          <span className="text-xs text-lx-text-muted">App scope</span>
+        </div>
+      </div>
+      <p className="text-sm text-lx-text-secondary mb-4" style={{ maxWidth: 560 }}>
+        Per-client-IP request budget for the API and MCP surfaces. Applies to /api and /mcp; Forge machine surfaces are exempt. Changes apply immediately — no restart needed.
+      </p>
+
+      {data?.envOverride && (
+        <p className="text-xs text-lx-text-muted mb-2">
+          Active values come from the <span className="font-mono">LXK_RATE_LIMIT_MAX</span> / <span className="font-mono">LXK_RATE_LIMIT_WINDOW_MS</span> environment variables. Saving new values below overrides them.
+        </p>
+      )}
+
+      {isLoading ? (
+        <div className="text-sm text-lx-text-muted py-8 text-center">Loading…</div>
+      ) : isError ? (
+        <div className="text-sm text-lx-text-danger py-8 text-center">Failed to load rate limit settings.</div>
+      ) : (
+        <div style={{ background: "var(--lx-surface-elevated)", border: "1px solid var(--lx-border-default)", borderRadius: 8, padding: 16 }}>
+          <h3 className="font-display text-base font-medium text-lx-text-primary mb-3">Request Budget</h3>
+          <div className="flex items-end gap-3 flex-wrap">
+            <div className="field" style={{ marginBottom: 0 }}>
+              <label className="field-label" htmlFor="rate-limit-max">Max requests</label>
+              <div className="flex items-center gap-2">
+                <input
+                  id="rate-limit-max"
+                  className="prop-input"
+                  type="number"
+                  min={1}
+                  value={max}
+                  onChange={(e) => setMax(e.target.value)}
+                  style={{ width: 96, textAlign: "right" }}
+                />
+                <span className="text-xs text-lx-text-secondary">per IP per window</span>
+              </div>
+            </div>
+            <div className="field" style={{ marginBottom: 0 }}>
+              <label className="field-label" htmlFor="rate-limit-window">Window</label>
+              <div className="flex items-center gap-2">
+                <input
+                  id="rate-limit-window"
+                  className="prop-input"
+                  type="number"
+                  value={windowMin}
+                  onChange={(e) => setWindowMin(e.target.value)}
+                  style={{ width: 96, textAlign: "right" }}
+                />
+                <span className="text-xs text-lx-text-secondary">minutes</span>
+              </div>
+            </div>
+            <button
+              type="button"
+              className="btn btn-primary"
+              disabled={!canSave || save.isPending}
+              onClick={() => save.mutate({ max: maxNum, windowMs: Math.round(windowNum * 60000) })}
+            >
+              {save.isPending ? "Saving…" : "Save"}
+            </button>
+          </div>
+        </div>
+      )}
+    </section>
+  );
+}
+
+// GitHub Sync (app scope — admin only), per wireframes/src/settings.html.
+// Hidden for non-admins; the env-source hint renders as a plain text note
+// above the form. The API never returns the key or secret — the secret input
+// is write-only (never prefilled) and the private key is file-upload only.
+function GithubSyncSection() {
+  const { data, isLoading, isError } = useGithubSettings();
+  const save = useUpdateGithubSettings();
+  const remove = useClearGithubSettings();
+  const [removing, setRemoving] = useState(false);
+  const [appId, setAppId] = useState("");
+  const [secret, setSecret] = useState("");
+  const [secretTouched, setSecretTouched] = useState(false);
+  const [pemName, setPemName] = useState("");
+  const [pemText, setPemText] = useState("");
+  const fileRef = useRef<HTMLInputElement>(null);
+  const synced = useRef(false);
+
+  useEffect(() => {
+    if (data && !synced.current) {
+      synced.current = true;
+      setAppId(data.appId);
+    }
+  }, [data]);
+
+  const handleFile = (file: File) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      setPemName(file.name);
+      setPemText(String(reader.result ?? ""));
+    };
+    reader.readAsText(file);
+  };
+
+  // The remove control only appears when something is stored — nothing to
+  // remove otherwise (per wireframes/src/settings.html annotation).
+  const configured = !!data && (data.appId !== "" || data.privateKeySet || data.webhookSecretSet);
+
+  const resetForm = () => {
+    setAppId("");
+    setSecret("");
+    setSecretTouched(false);
+    setPemName("");
+    setPemText("");
+  };
+
+  // Mirrors the server validation (appId digits, privateKey must include
+  // "-----BEGIN"); the secret never blocks save — untouched = omitted,
+  // empty = clear, typed = replace. The server stays authoritative and
+  // surfaces 422s via the error toast.
+  const appIdOk = /^\d+$/.test(appId);
+  const pemOk = pemText === "" || pemText.includes("-----BEGIN");
+  const canSave = appIdOk && pemOk;
+
+  const webhookUrl = typeof window !== "undefined" ? `${window.location.origin}/api/webhooks/github` : "";
+
+  return (
+    <section className="mb-8">
+      <div className="flex items-center justify-between mb-3">
+        <h2 className="font-display text-lg font-medium text-lx-text-primary">GitHub Sync</h2>
+        <div className="flex items-center gap-2">
+          <span className="text-xs text-lx-text-muted">App scope</span>
+        </div>
+      </div>
+      <p className="text-sm text-lx-text-secondary mb-4" style={{ maxWidth: 560 }}>
+        Two-way issue sync between GitHub and Lexa boards. Configured with GitHub App credentials; webhook deliveries are HMAC-verified against the webhook secret.
+      </p>
+
+      {data?.source === "env" && (
+        <p className="text-xs text-lx-text-muted mb-2">
+          Active values come from the <span className="font-mono">GITHUB_APP_ID</span> / <span className="font-mono">GITHUB_PRIVATE_KEY</span> / <span className="font-mono">GITHUB_PRIVATE_KEY_FILE</span> / <span className="font-mono">GITHUB_WEBHOOK_SECRET</span> environment variables. Saving new values below overrides them.
+        </p>
+      )}
+
+      {isLoading ? (
+        <div className="text-sm text-lx-text-muted py-8 text-center">Loading…</div>
+      ) : isError ? (
+        <div className="text-sm text-lx-text-danger py-8 text-center">Failed to load GitHub sync settings.</div>
+      ) : (
+        <>
+          <div style={{ background: "var(--lx-surface-elevated)", border: "1px solid var(--lx-border-default)", borderRadius: 8, padding: 16 }}>
+            <h3 className="font-display text-base font-medium text-lx-text-primary mb-3">Credentials</h3>
+            <div className="flex items-end gap-3 flex-wrap">
+              <div className="field" style={{ marginBottom: 0 }}>
+                <label className="field-label" htmlFor="github-app-id">App ID</label>
+                <input
+                  id="github-app-id"
+                  className="prop-input"
+                  value={appId}
+                  onChange={(e) => setAppId(e.target.value)}
+                  style={{ width: 110 }}
+                />
+              </div>
+              <div className="field" style={{ marginBottom: 0 }}>
+                <label className="field-label" htmlFor="github-webhook-secret">Webhook secret</label>
+                <input
+                  id="github-webhook-secret"
+                  className="prop-input font-mono"
+                  placeholder={data?.webhookSecretSet ? "••••••••••••••••" : "Set once, never displayed"}
+                  value={secret}
+                  onChange={(e) => { setSecret(e.target.value); setSecretTouched(true); }}
+                  style={{ width: 220, fontSize: 12 }}
+                />
+              </div>
+              <button
+                type="button"
+                className="btn btn-primary"
+                disabled={!canSave || save.isPending}
+                onClick={() => save.mutate({
+                  appId,
+                  ...(pemText !== "" ? { privateKey: pemText } : {}),
+                  ...(secretTouched ? { webhookSecret: secret } : {}),
+                })}
+              >
+                {save.isPending ? "Saving…" : "Save"}
+              </button>
+            </div>
+
+            <div className="field mt-4" style={{ marginBottom: 0 }}>
+              <label className="field-label" htmlFor="github-pem">Private key</label>
+              <div className="flex items-center gap-2">
+                <button type="button" className="btn btn-ghost" style={{ height: 32, padding: "0 12px", fontSize: 12 }} onClick={() => fileRef.current?.click()}>
+                  <Upload size={14} strokeWidth={1.5} />
+                  Choose .pem file
+                </button>
+                <input
+                  id="github-pem"
+                  ref={fileRef}
+                  type="file"
+                  accept=".pem,text/plain"
+                  className="hidden"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (file) handleFile(file);
+                  }}
+                />
+                <span className={`font-mono text-xs ${pemName ? "text-lx-text-secondary" : "text-lx-text-muted"}`}>{pemName || "No file chosen"}</span>
+              </div>
+              <div className="field-hint">Uploaded as a file, never pasted. The PEM is stored server-side; the API only reports whether a key is set.</div>
+            </div>
+
+            {configured && (
+              <div className="mt-4">
+                <button type="button" className="btn btn-danger" style={{ height: 28, padding: "0 12px", fontSize: 12 }} onClick={() => setRemoving(true)}>
+                  <Trash2 size={14} strokeWidth={1.5} />
+                  Remove GitHub sync
+                </button>
+              </div>
+            )}
+          </div>
+          <p className="text-xs text-lx-text-muted mt-2">
+            Webhook URL: <span className="font-mono">{webhookUrl}</span> — the GitHub App's webhook must deliver here (Content type application/json, secret = webhook secret above).
+          </p>
+        </>
+      )}
+
+      {removing && (
+        <RemoveGithubSyncModal
+          onCancel={() => setRemoving(false)}
+          onConfirm={() =>
+            remove.mutate(undefined, {
+              onSuccess: () => {
+                setRemoving(false);
+                resetForm();
+              },
+            })
+          }
+        />
+      )}
+    </section>
+  );
+}
+
 export function SettingsPage({ slug }: { slug?: string }) {
   const { data: keys = [], isLoading, isError } = useApiKeys();
   const createKey = useCreateApiKey();
@@ -621,6 +921,13 @@ export function SettingsPage({ slug }: { slug?: string }) {
   const demote = useUpdateUserRole();
   const promote = useUpdateUserRole();
   const [promoting, setPromoting] = useState<{ id: string; name: string } | null>(null);
+
+  // Admin-only sections (Rate Limiting, GitHub Sync): render when there is no
+  // known user (local dev / Access-less deployments have no lxk-user meta) or
+  // the user is admin; hide only from known members. The endpoints are
+  // admin-gated server-side, so a member's 403 surfaces via the error toast.
+  const user = api.clientLxkUser();
+  const showAdminSections = !user || user.role === "admin";
 
   const [keyName, setKeyName] = useState("");
   const [reveal, setReveal] = useState<{ name: string; key: string } | null>(null);
@@ -810,6 +1117,11 @@ export function SettingsPage({ slug }: { slug?: string }) {
         onDemote={(id, name) => setDemoting({ id, name })}
       />
 
+      {/* Rate Limiting (app scope — admin only) */}
+      {showAdminSections && <RateLimitSection />}
+
+      {/* GitHub Sync (app scope — admin only) */}
+      {showAdminSections && <GithubSyncSection />}
 
       {slug && <ProjectBoundSettings slug={slug} />}
 

@@ -305,6 +305,39 @@ export function deleteApiKey(id: string): Promise<void> {
   return request(`${BASE}/settings/api-keys/${id}`, { method: "DELETE" });
 }
 
+// ── Rate limiting (app scope — admin only) ──
+
+export interface RateLimitSettings {
+  max: number;
+  windowMs: number;
+  envOverride: boolean;
+}
+
+export function getRateLimit(): Promise<RateLimitSettings> {
+  return request(`${BASE}/settings/rate-limit`);
+}
+
+export function updateRateLimit(input: { max: number; windowMs: number }): Promise<RateLimitSettings> {
+  return request(`${BASE}/settings/rate-limit`, { method: "PUT", body: JSON.stringify(input) });
+}
+
+// ── GitHub sync settings (app scope — admin only) ──
+
+export interface GithubSettings {
+  appId: string;
+  privateKeySet: boolean;
+  webhookSecretSet: boolean;
+  source: "settings" | "env" | "none";
+}
+
+export function getGithubSettings(): Promise<GithubSettings> {
+  return request(`${BASE}/settings/github`);
+}
+
+export function updateGithubSettings(input: { appId: string; privateKey?: string; webhookSecret?: string }): Promise<GithubSettings> {
+  return request(`${BASE}/settings/github`, { method: "PUT", body: JSON.stringify(input) });
+}
+
 // ---- users & members ----
 
 type ApiUser = { id: string; email: string; name: string; role: "admin" | "member"; createdAt: string; lastSeen: string | null };

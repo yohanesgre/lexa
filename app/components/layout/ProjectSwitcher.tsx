@@ -6,7 +6,7 @@ import { ChevronIcon } from "./ChevronIcon";
 
 type ProjectStatus = { health: "ok" | "approaching" | "exceeded"; taskCount: number };
 
-export function ProjectSwitcher({ routeType }: { routeType: "home" | "dashboard" | "board" | "tasks" | "wiki" | "settings" }) {
+export function ProjectSwitcher({ routeType }: { routeType: "home" | "dashboard" | "board" | "tasks" | "wiki" | "settings" | "forge" }) {
   const [open, setOpen] = useState(false);
   const { data: projects, isLoading } = useProjects();
   const { data: dashboard } = useDashboard();

@@ -11,9 +11,13 @@ import { AppShell } from "./AppShell";
 
 // The layout components use the tanstack router surface (Link/useRouterState/
 // Outlet) and the ProjectSelectionProvider (which also needs useParams).
+// pathnameMock lets each test set the route — the AppShell routeType + active
+// states derive from it.
+const pathnameMock = vi.hoisted(() => ({ value: "/demo/board" }));
+
 vi.mock("@tanstack/react-router", () => ({
   useRouterState: ({ select }: { select?: (s: { location: { pathname: string } }) => string }) =>
-    select?.({ location: { pathname: "/demo/board" } }) ?? "/demo/board",
+    select?.({ location: { pathname: pathnameMock.value } }) ?? pathnameMock.value,
   useParams: () => ({ slug: "demo" }),
   Link: ({ to, params, search, className, activeProps, children }: any) => (
     <a href={String(to)} className={className} {...activeProps}>{children}</a>
@@ -48,6 +52,7 @@ function wrapper({ children }: { children: ReactNode }) {
 }
 
 beforeEach(() => {
+  pathnameMock.value = "/demo/board";
   vi.stubGlobal("fetch", fetchMock);
   fetchMock.mockReset();
   routes.clear();
@@ -121,6 +126,43 @@ describe("AppShell", () => {
     expect(screen.getByTestId("outlet")).toBeInTheDocument();
     // board route → the Board NavLink is active
     expect(screen.getByText("Board").className).toContain("active");
+  });
+
+  it("hides the Settings link for a known member", () => {
+    document.head.innerHTML = '<meta name="lxk-user" content=\'{"email":"m@lexa.test","name":"M","role":"member","createdAt":"t","lastSeen":null}\'>';
+    try {
+      render(<ProjectSelectionProvider><AppShell /></ProjectSelectionProvider>, { wrapper });
+      expect(screen.getByText("Lexa")).toBeInTheDocument();
+      expect(screen.getByText("Dashboard")).toBeInTheDocument();
+      expect(screen.queryByText("Settings")).not.toBeInTheDocument();
+    } finally {
+      document.head.innerHTML = "";
+    }
+  });
+
+  it("shows the Settings link when no user is known (dev / Access-less)", () => {
+    document.head.innerHTML = "";
+    render(<ProjectSelectionProvider><AppShell /></ProjectSelectionProvider>, { wrapper });
+    expect(screen.getByText("Settings")).toBeInTheDocument();
+  });
+
+  it("on /forge the brand is NOT active and the Forge link IS active", () => {
+    pathnameMock.value = "/forge";
+    render(<ProjectSelectionProvider><AppShell /></ProjectSelectionProvider>, { wrapper });
+    expect(screen.getByText("Lexa").className).not.toContain("active");
+    expect(screen.getByRole("link", { name: "Forge" }).className).toContain("active");
+    expect(screen.getByText("Dashboard").className).not.toContain("active");
+    expect(screen.getByText("Settings").className).not.toContain("active");
+  });
+
+  it("on / the brand IS active and no nav link is", () => {
+    pathnameMock.value = "/";
+    render(<ProjectSelectionProvider><AppShell /></ProjectSelectionProvider>, { wrapper });
+    expect(screen.getByText("Lexa").className).toContain("active");
+    for (const label of ["Dashboard", "Board", "Tasks", "Wiki", "Settings"]) {
+      expect(screen.getByText(label).className).not.toContain("active");
+    }
+    expect(screen.getAllByRole("link", { name: "Forge" })[0]!.className).not.toContain("active");
   });
 
   it("switches the selected project from the switcher", async () => {
