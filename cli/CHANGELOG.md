@@ -9,6 +9,23 @@ The CLI version is INDEPENDENT of the web app version (see AGENTS.md):
 The version lives in `cli/package.json` — `publish-cli.yml` verifies the tag
 matches it before compiling.
 
+## [0.1.7] - 2026-08-11
+
+### Added
+
+- **`deploy` provisions Access bypass apps** for `/api/*`, `/mcp`, and
+  `/api/webhooks/*` (Bypass policy, everyone) — the API key / HMAC
+  signature is the machine auth; the Access layer only guards the human
+  UI. Without these, `lexa-cli login` and MCP clients hit the Access
+  login page instead of the API.
+
+### Fixed
+
+- **Clearer API errors** — a non-JSON (HTML) response now reports "is the
+  host behind Cloudflare Access without an /api/* bypass policy?" instead
+  of the opaque "Failed to parse JSON".
+- **`bun run lexa-cli-dev`** pointed at the pre-restructure `cli/index.ts`.
+
 ## [0.1.6] - 2026-08-11
 
 ### Fixed

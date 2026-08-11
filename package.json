@@ -8,7 +8,7 @@
     "dev": "vite dev",
     "dev:server": "bun --env-file=.env run server/entry.ts",
     "dev:full": "bash scripts/dev.sh",
-    "lexa-cli-dev": "bun run cli/index.ts",
+    "lexa-cli-dev": "bun run cli/src/index.ts",
     "compile:cli": "bun run scripts/compile-cli.ts",
     "install:cli-dev": "bash scripts/install-cli-dev.sh",
     "uninstall:cli-dev": "rm -f \"$HOME/.local/bin/lexa-cli-dev\"",
