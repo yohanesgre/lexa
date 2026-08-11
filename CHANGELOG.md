@@ -15,6 +15,40 @@ All notable changes to Lexa are documented here. Format based on
   re-downloading on `upgrade` (the embedded version previously included the
   `cli-` tag prefix, breaking version comparison).
 
+## [0.2.0] - 2026-08-11
+
+### Added
+
+- **Rate limiting in Settings** — per-IP budget and window configurable from
+  Settings → Rate Limiting (live apply, no restart); defaults raised to 6000
+  req / 10 min; Forge machine surfaces (daemon log streams, runtime
+  registration, the 3s listener heartbeat) are exempt from throttling
+- **GitHub sync in Settings** — App ID, private key (.pem file upload), and
+  webhook secret configured from Settings → GitHub Sync with live apply;
+  secrets are write-only (never returned by the API); Remove GitHub sync flow
+  with confirmation
+- **Forge repo content context** — agent runs on tasks with linked GitHub
+  issues receive capped repo content (Contents API, ≤3 repos / 50 files /
+  512 KB) as `repo-content/` in the working directory, with a MANIFEST
+- **Machine setup key** — the Setup runtime wizard's machine step mints the
+  `lexa-cli login` key (once-only display), closing the pre-runtime dead end
+
+### Changed
+
+- **Config single source of truth** — the settings DB is the runtime source
+  for rate limit + GitHub credentials; environment variables are a first-boot
+  bootstrap, mirrored into the DB at boot only when unset (never overwriting
+  web-settings values; UI-cleared keys re-import from env at next boot)
+- **Settings is an admin-only page** — hidden from members in the nav; a
+  known member hitting the URL is redirected; server stays authoritative
+- **Navbar active states** — Forge owns its route type; the Lexa brand is
+  active only on `/`
+
+### Fixed
+
+- **Lexa brand wrongly highlighted on the Forge page** — `/forge` mapped to
+  the home route type, activating the brand alongside the Forge link
+
 ## [0.1.1] - 2026-08-10
 
 ### Fixed
