@@ -9,6 +9,18 @@ The CLI version is INDEPENDENT of the web app version (see AGENTS.md):
 The version lives in `cli/package.json` — `publish-cli.yml` verifies the tag
 matches it before compiling.
 
+## [0.1.8] - 2026-08-11
+
+### Added
+
+- **`github status` / `github setup` are remote-by-default** — they read/write
+  the live server via the Settings API (login required); `--local` explicitly
+  targets the `.env` bootstrap file (imported into the server DB on the next
+  boot only while unset, never overwriting web Settings values). Help text
+  documents both modes. `github check` unchanged.
+- **`GET/PUT /api/settings/github`** client methods (`getGithubSettings`,
+  `updateGithubSettings`) — used by the remote modes.
+
 ## [0.1.7] - 2026-08-11
 
 ### Added
