@@ -77,9 +77,13 @@ export function UserProfile() {
     });
   };
 
-  const handleSignOut = () => {
+  const handleSignOut = async () => {
     if (!logoutUrl) return;
-    window.location.href = logoutUrl + "?return_to=" + encodeURIComponent(window.location.origin + "/");
+    // The Access logout endpoint responds 200 without following return_to,
+    // so fetch it (the Set-Cookie deletes the session) and navigate home,
+    // where Access shows the login page.
+    await fetch(logoutUrl, { credentials: "include" }).catch(() => {});
+    window.location.replace(window.location.origin + "/");
   };
 
   return (
