@@ -93,7 +93,7 @@ export async function verifyAccessAssertion(req: Request): Promise<{ email: stri
   const [headerPart, payloadPart, signaturePart] = parts;
 
   let header: { kid?: string; alg?: string };
-  let payload: { iss?: string; exp?: number; nbf?: number; aud?: string; email?: string; name?: string };
+  let payload: { iss?: string; exp?: number; nbf?: number; aud?: string | string[]; email?: string; name?: string };
   try {
     header = JSON.parse(base64urlDecode(headerPart).toString("utf8")) as { kid?: string; alg?: string };
     payload = JSON.parse(base64urlDecode(payloadPart).toString("utf8")) as {
@@ -127,7 +127,9 @@ export async function verifyAccessAssertion(req: Request): Promise<{ email: stri
   const now = Math.floor(Date.now() / 1000);
   if (typeof payload.exp !== "number" || payload.exp <= now) return null;
   if (typeof payload.nbf === "number" && payload.nbf > now + 60) return null;
-  if (payload.aud !== aud) return null;
+  // Cloudflare Access JWTs carry `aud` as an array of audience tags.
+  const auds = Array.isArray(payload.aud) ? payload.aud : payload.aud ? [payload.aud] : [];
+  if (!auds.includes(aud)) return null;
   if (!payload.email) return null;
 
   return { email: payload.email, name: payload.name || payload.email.split("@")[0] };
