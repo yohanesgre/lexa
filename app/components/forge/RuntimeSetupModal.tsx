@@ -33,6 +33,9 @@ export function RuntimeSetupModal({ onClose }: { onClose: () => void }) {
   const [selectedKeyId, setSelectedKeyId] = useState<string | null>(null);
   const [newKeyName, setNewKeyName] = useState("");
   const [createdRawKey, setCreatedRawKey] = useState<string | null>(null);
+  const [machineKeyName, setMachineKeyName] = useState("");
+  const [machineKeyRaw, setMachineKeyRaw] = useState<string | null>(null);
+  const [machineKeyCopied, setMachineKeyCopied] = useState(false);
   const [eventId, setEventId] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const [sendError, setSendError] = useState<string | null>(null);
@@ -81,6 +84,26 @@ export function RuntimeSetupModal({ onClose }: { onClose: () => void }) {
         void copyToClipboard(result.rawKey).then(() => setCopied(true));
       },
     });
+  };
+
+  // Machine login key (step 0) — independent state from the runtime key above:
+  // it feeds `lexa-cli login --key` on the machine and never enables step 2's
+  // Send gate (that requires a fresh runtime key).
+  const handleCreateMachineKey = () => {
+    if (!machineKeyName.trim()) return;
+    createApiKey.mutate(machineKeyName.trim(), {
+      onSuccess: (result) => {
+        setMachineKeyRaw(result.rawKey);
+        setMachineKeyName("");
+        void copyToClipboard(result.rawKey).then(() => setMachineKeyCopied(true));
+      },
+    });
+  };
+
+  const handleCopyMachineKey = async () => {
+    if (!machineKeyRaw) return;
+    await copyToClipboard(machineKeyRaw);
+    setMachineKeyCopied(true);
   };
 
   const sendInstall = () => {
@@ -176,6 +199,36 @@ export function RuntimeSetupModal({ onClose }: { onClose: () => void }) {
 {`lexa-cli login --url <lexa-url> --key <lxk_...>
 lexa-cli machine listen`}
                 </pre>
+                {machineKeyRaw && (
+                  <div className="field-hint mt-1">Use the created key in <span className="font-mono">lexa-cli login --key</span> above.</div>
+                )}
+
+                <div className="mt-4">
+                  <h4 className="font-display text-sm font-medium text-lx-text-primary mb-1">Create an API key for this machine</h4>
+                  <p className="text-xs text-lx-text-secondary leading-5 mb-3">
+                    Used by <span className="font-mono">lexa-cli login</span> on the machine. The runtime gets its own key in the next step.
+                  </p>
+                  <div className="field mb-4">
+                    <label className="prop-label block mb-1" htmlFor="machine-key-name">Key name</label>
+                    <div className="flex gap-2">
+                      <input id="machine-key-name" className="prop-input flex-1" type="text" value={machineKeyName} onChange={(event) => setMachineKeyName(event.target.value)} placeholder="e.g. lexa-machine" onKeyDown={(event) => { if (event.key === "Enter") handleCreateMachineKey(); }} />
+                      <button type="button" className="btn btn-ghost" disabled={!machineKeyName.trim() || createApiKey.isPending} onClick={handleCreateMachineKey}>
+                        {createApiKey.isPending ? <RefreshCw size={14} strokeWidth={1.5} className="animate-spin" /> : <Check size={14} strokeWidth={1.5} />} Create
+                      </button>
+                    </div>
+                  </div>
+                  {machineKeyRaw ? (
+                    <div style={{ background: "var(--lx-surface-input)", border: "1px solid var(--lx-border-default)", borderRadius: 6, padding: 8 }}>
+                      <div className="flex items-center gap-2">
+                        <code className="font-mono text-xs text-lx-text-secondary flex-1 truncate">{machineKeyRaw}</code>
+                        <button type="button" className="btn btn-ghost flex-shrink-0" style={{ height: 24, padding: "0 8px", fontSize: 11 }} onClick={handleCopyMachineKey}>
+                          {machineKeyCopied ? <Check size={12} strokeWidth={1.5} /> : <Copy size={12} strokeWidth={1.5} />} {machineKeyCopied ? "Copied" : "Copy"}
+                        </button>
+                      </div>
+                      <div className="field-hint mt-1">Raw key is held in memory and will not be shown again.</div>
+                    </div>
+                  ) : null}
+                </div>
                 <div className="flex justify-between mt-5">
                   <button type="button" className="btn btn-ghost" onClick={onClose}>Cancel</button>
                   <button type="button" className="btn btn-primary" disabled={!machine || !isMachineListening(machine)} onClick={() => setStep(1)}>Continue</button>

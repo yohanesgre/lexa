@@ -15,6 +15,7 @@ import {
   useDeleteSwimlane, useCreateApiKey, useDeleteApiKey, useAddComment, useDeleteComment,
   useUpdateComment, useCancelForgeTask, useAddTaskLink, useRemoveTaskLink,
   useAddSource, useRemoveSource, useUpdateUserRole, useCreateForgeTask, useCreateForgeAgent,
+  useUpdateRateLimit, useUpdateGithubSettings, useClearGithubSettings,
 } from "./queries";
 
 const fetchMock = vi.fn();
@@ -296,6 +297,41 @@ describe("board-structure + settings mutations", () => {
     const { result } = renderHook(() => useCreateApiKey(), { wrapper });
     await act(async () => { await result.current.mutateAsync("ops"); });
     expect(queryClient.getQueryData(["api-keys"])).toEqual([KEY]);
+  });
+
+  it("useUpdateRateLimit replaces the cache from the authoritative response — no refetch", async () => {
+    routes.set("PUT /api/settings/rate-limit", { max: 3000, windowMs: 300000, envOverride: false });
+    queryClient.setQueryData(["rate-limit"], { max: 6000, windowMs: 600000, envOverride: false });
+    const getCallsBefore = fetchMock.mock.calls.filter((c) => String(c[0]).includes("/rate-limit") && (c[1] as RequestInit | undefined)?.method !== "PUT").length;
+    const { result } = renderHook(() => useUpdateRateLimit(), { wrapper });
+    await act(async () => { await result.current.mutateAsync({ max: 3000, windowMs: 300000 }); });
+    expect(queryClient.getQueryData(["rate-limit"])).toEqual({ max: 3000, windowMs: 300000, envOverride: false });
+    const getCallsAfter = fetchMock.mock.calls.filter((c) => String(c[0]).includes("/rate-limit") && (c[1] as RequestInit | undefined)?.method !== "PUT").length;
+    expect(getCallsAfter).toBe(getCallsBefore);
+  });
+
+  it("useUpdateGithubSettings replaces the cache from the authoritative response — no refetch", async () => {
+    routes.set("PUT /api/settings/github", { appId: "123456", privateKeySet: true, webhookSecretSet: true, source: "settings" });
+    queryClient.setQueryData(["github-settings"], { appId: "1", privateKeySet: false, webhookSecretSet: false, source: "none" });
+    const getCallsBefore = fetchMock.mock.calls.filter((c) => String(c[0]).includes("/settings/github") && (c[1] as RequestInit | undefined)?.method !== "PUT").length;
+    const { result } = renderHook(() => useUpdateGithubSettings(), { wrapper });
+    await act(async () => { await result.current.mutateAsync({ appId: "123456", webhookSecret: "" }); });
+    expect(queryClient.getQueryData(["github-settings"])).toEqual({ appId: "123456", privateKeySet: true, webhookSecretSet: true, source: "settings" });
+    const getCallsAfter = fetchMock.mock.calls.filter((c) => String(c[0]).includes("/settings/github") && (c[1] as RequestInit | undefined)?.method !== "PUT").length;
+    expect(getCallsAfter).toBe(getCallsBefore);
+  });
+
+  it("useClearGithubSettings sends the all-empty clear body and replaces the cache — no refetch", async () => {
+    routes.set("PUT /api/settings/github", { appId: "", privateKeySet: false, webhookSecretSet: false, source: "none" });
+    queryClient.setQueryData(["github-settings"], { appId: "123456", privateKeySet: true, webhookSecretSet: true, source: "settings" });
+    const getCallsBefore = fetchMock.mock.calls.filter((c) => String(c[0]).includes("/settings/github") && (c[1] as RequestInit | undefined)?.method !== "PUT").length;
+    const { result } = renderHook(() => useClearGithubSettings(), { wrapper });
+    await act(async () => { await result.current.mutateAsync(undefined); });
+    const put = fetchMock.mock.calls.find((c) => String(c[0]).includes("/settings/github") && (c[1] as RequestInit | undefined)?.method === "PUT");
+    expect(JSON.parse(String((put?.[1] as RequestInit | undefined)?.body))).toEqual({ appId: "", privateKey: "", webhookSecret: "" });
+    expect(queryClient.getQueryData(["github-settings"])).toEqual({ appId: "", privateKeySet: false, webhookSecretSet: false, source: "none" });
+    const getCallsAfter = fetchMock.mock.calls.filter((c) => String(c[0]).includes("/settings/github") && (c[1] as RequestInit | undefined)?.method !== "PUT").length;
+    expect(getCallsAfter).toBe(getCallsBefore);
   });
 
   it("useDeleteApiKey filters the row", async () => {
