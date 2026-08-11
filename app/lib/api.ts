@@ -2,14 +2,31 @@ import type { Project, Column, Swimlane, Task, Board, WikiPageMeta, WikiPage, Wi
 
 const BASE = "/api";
 
+// The server injects lxk-* metas into the SSR HTML (server/entry.ts), but
+// React's head reconciliation removes them during hydration — re-reading the
+// DOM after the first render returns nothing. Snapshot the values at module
+// load (module evaluation always runs before hydration) and never re-read.
+// Without SSR metas (plain SPA dev, tests) the snapshot is null and reads
+// fall through to the live DOM.
+function readLxkMeta(name: string): string | null {
+  if (typeof document === "undefined") return null;
+  return document.querySelector(`meta[name="${name}"]`)?.getAttribute("content") ?? null;
+}
+
+const lxkLogoutSnapshot = readLxkMeta("lxk-logout");
+const lxkApiKeySnapshot = readLxkMeta("lxk-api-key");
+const lxkUserSnapshot = readLxkMeta("lxk-user");
+
+function lxkValue(snapshot: string | null, name: string): string | null {
+  return snapshot ?? readLxkMeta(name);
+}
+
 // Prefer the key injected by the server at request time (dev:server / prod),
 // so `bun run setup` rotating the key never leaves the browser with a stale
 // build-time baked key. Falls back to the Vite build-time env var.
 function clientApiKey(): string | undefined {
-  if (typeof document !== "undefined") {
-    const meta = document.querySelector('meta[name="lxk-api-key"]') as HTMLMetaElement | null;
-    if (meta?.content) return meta.content;
-  }
+  const key = lxkValue(lxkApiKeySnapshot, "lxk-api-key");
+  if (key) return key;
   return import.meta.env.VITE_LXK_API_KEY;
 }
 
@@ -25,15 +42,12 @@ export interface LxkUser {
 }
 
 export function clientLxkUser(): LxkUser | null {
-  if (typeof document !== "undefined") {
-    const meta = document.querySelector('meta[name="lxk-user"]') as HTMLMetaElement | null;
-    if (meta?.content) {
-      try {
-        return JSON.parse(meta.content) as LxkUser;
-      } catch {
-        /* ignore malformed */
-      }
-    }
+  const raw = lxkValue(lxkUserSnapshot, "lxk-user");
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw) as LxkUser;
+  } catch {
+    /* ignore malformed */
   }
   return null;
 }
@@ -42,11 +56,7 @@ export function clientLxkUser(): LxkUser | null {
 // server-side. Absent in local dev (no Access session), so the UI hides Sign
 // out. The return_to parameter is appended by the caller.
 export function clientLxkLogout(): string | null {
-  if (typeof document !== "undefined") {
-    const meta = document.querySelector('meta[name="lxk-logout"]') as HTMLMetaElement | null;
-    return meta?.content ?? null;
-  }
-  return null;
+  return lxkValue(lxkLogoutSnapshot, "lxk-logout");
 }
 
 async function request<T>(url: string, init?: RequestInit): Promise<T> {
