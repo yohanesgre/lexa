@@ -6,6 +6,22 @@ All notable changes to Lexa are documented here. Format based on
 
 ## [Unreleased]
 
+### Fixed
+
+- **Forge review Accept replaces the document correctly** — the previous
+  `insertContentAt` call passed a full `{type:"doc"}` node, which is a schema
+  violation inside ProseMirror (doc inside doc): the accepted review silently
+  never landed, and the invalid-content fallback could replace the document
+  with an empty doc — wiping the task description. Accept now uses
+  `setContent`, the canonical full-document replace.
+- **Whitespace-only Forge results never reach the review** — a blank/empty
+  generation can no longer be offered or accepted (previously a whitespace
+  result passed the guard and could wipe the document on accept).
+- **Rejected Forge reviews are not re-offered** — rejecting in the editor
+  review surface records the task as terminal (`lxk.forge-rejected-task`), so
+  the Forge popover no longer re-attaches to the same completed task and
+  re-offers its result when reopened (mirrors the accepted-task behavior).
+
 ### Changed
 
 - **`lexa-cli` versioning restructured** — the CLI now has its own
