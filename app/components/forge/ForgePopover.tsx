@@ -36,6 +36,9 @@ interface ForgePopoverProps {
   // Task id accepted in the review banner this session — terminal state, so
   // the result is never offered for insert again (prevents duplicates).
   appliedTaskId?: string | null;
+  // Task id rejected in the editor review surface this session — terminal
+  // state, so the result isn't re-offered when the popover reopens.
+  rejectedTaskId?: string | null;
   anchorRect: DOMRect | null;
 }
 
@@ -315,7 +318,7 @@ function TaskStatusPanel(props: {
   );
 }
 
-export function ForgePopover({ editor, slug, documentType, documentId, open, onClose, onReview, reviewActive, appliedTaskId, anchorRect }: ForgePopoverProps) {
+export function ForgePopover({ editor, slug, documentType, documentId, open, onClose, onReview, reviewActive, appliedTaskId, rejectedTaskId, anchorRect }: ForgePopoverProps) {
   // Agent + dependent Skill pickers: the skill list only shows skills attached
   // to the selected agent (M2M bindings managed in Settings → Agents).
   const { data: agents = [] } = useForgeAgents();
@@ -383,11 +386,12 @@ export function ForgePopover({ editor, slug, documentType, documentId, open, onC
 
   // When the popover reopens and there's a recent task (from a background run),
   // attach to it so the user can accept/reject the finished result. Tasks the
-  // user already applied (accepted in the review banner) or explicitly
-  // dismissed are skipped — the popover starts fresh for the next Forge run.
+  // user already applied (accepted in the review banner), rejected in the
+  // editor review, or explicitly dismissed are skipped — the popover starts
+  // fresh for the next Forge run.
   const [prevAttachId, setPrevAttachId] = useState<string | null>(null);
   const attachId =
-    open && taskId === null && recent?.data && (recent.data.status === "queued" || recent.data.status === "running" || recent.data.status === "completed") && !dismissedIdsRef.has(recent.data.id) && recent.data.id !== appliedTaskId
+    open && taskId === null && recent?.data && (recent.data.status === "queued" || recent.data.status === "running" || recent.data.status === "completed") && !dismissedIdsRef.has(recent.data.id) && recent.data.id !== appliedTaskId && recent.data.id !== rejectedTaskId
       ? recent.data.id
       : null;
   if (attachId !== null && prevAttachId !== attachId) {

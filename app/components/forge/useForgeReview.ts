@@ -5,6 +5,7 @@ import { markdownToDoc } from "../../../shared/markdown";
 import { diffText, docToDiffText, type DiffResult } from "../../../shared/diff";
 
 const FORGE_APPLIED_KEY = "lxk.forge-applied-task";
+const FORGE_REJECTED_KEY = "lxk.forge-rejected-task";
 
 export interface ForgeReviewIdentity {
   action: string;
@@ -34,9 +35,15 @@ export function useForgeReview(editor: Editor | null, onReviewStateChange?: (act
   const [appliedTaskId, setAppliedTaskId] = useState<string | null>(() =>
     typeof window !== "undefined" ? sessionStorage.getItem(FORGE_APPLIED_KEY) : null
   );
+  // Rejected forge result — same terminal semantics: the popover re-attaches
+  // to the newest completed task when it reopens, and an editor-side reject
+  // must not let that task re-offer its result.
+  const [rejectedTaskId, setRejectedTaskId] = useState<string | null>(() =>
+    typeof window !== "undefined" ? sessionStorage.getItem(FORGE_REJECTED_KEY) : null
+  );
 
   const handleReview = (text: string, identity: ForgeReviewIdentity) => {
-    if (!text || !editor) return;
+    if (!text?.trim() || !editor) return;
     const docJson = editor.state.doc.toJSON() as unknown as TipTapDoc;
     const diff = diffText(docToDiffText(docJson), docToDiffText(markdownToDoc(text)));
     editor.setEditable(false);
@@ -54,10 +61,12 @@ export function useForgeReview(editor: Editor | null, onReviewStateChange?: (act
     if (!review || !editor) return;
     if (review.diff.hunks.length > 0) {
       const doc = markdownToDoc(review.result) as unknown as JSONContent;
-      // Replace the whole document content — the Forge result is the new
-      // description, not an insert at the stored selection. Same full-doc
-      // range TipTap's own setContent uses (from 0 to doc.content.size).
-      editor.chain().focus().insertContentAt({ from: 0, to: editor.state.doc.content.size }, doc).run();
+      // Full-document replace. setContent accepts the whole doc JSON — the
+      // previous insertContentAt with a {type:"doc"} NODE was a schema
+      // violation (doc inside doc): ProseMirror rejected the step, so an
+      // accepted review never landed (or the invalid-content fallback
+      // replaced the document with an empty doc, wiping the description).
+      editor.commands.setContent(doc);
     }
     editor.setEditable(true);
     // Review ended AFTER the replacement so surfaces reading the doc on
@@ -73,7 +82,11 @@ export function useForgeReview(editor: Editor | null, onReviewStateChange?: (act
     editor.setEditable(true);
     setReview(null);
     onReviewStateChange?.(false, false);
+    // Remember the rejection so the popover doesn't re-offer this result
+    // when it reopens (same terminal semantics as appliedTaskId).
+    setRejectedTaskId(review.taskId);
+    if (review.taskId) sessionStorage.setItem(FORGE_REJECTED_KEY, review.taskId);
   };
 
-  return { review, appliedTaskId, handleReview, handleAcceptReview, handleRejectReview };
+  return { review, appliedTaskId, rejectedTaskId, handleReview, handleAcceptReview, handleRejectReview };
 }
