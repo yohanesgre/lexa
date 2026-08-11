@@ -12,6 +12,7 @@ import {
   useProjectMembers, useRuntimes, useMachines, useForgeAgents, useForgeSkills,
   useRecentForgeTasks, useForgeTaskHistory, useSources, useTaskLinks, useTaskSearch,
   useTaskActivity, useForgeTask, useForgeTaskLogs, useRecentForgeTask,
+  useRateLimit, useGithubSettings,
   deriveTaskList, selectProjectHealth, prependActivity,
 } from "./queries";
 
@@ -176,6 +177,8 @@ describe("query hooks — keys + URLs", () => {
 
   it("settings/forge list hooks hit their URLs", async () => {
     routes.set("GET /api/settings/api-keys", { data: [] });
+    routes.set("GET /api/settings/rate-limit", { max: 6000, windowMs: 600000, envOverride: false });
+    routes.set("GET /api/settings/github", { appId: "123456", privateKeySet: true, webhookSecretSet: true, source: "settings" });
     routes.set("GET /api/admin/users", { data: [] });
     routes.set("GET /api/projects/demo/members", { data: [] });
     routes.set("GET /api/forge/runtimes", { data: [] });
@@ -187,7 +190,7 @@ describe("query hooks — keys + URLs", () => {
     const hooks: Array<() => unknown> = [
       () => useApiKeys(), () => useUsers(), () => useProjectMembers("demo"), () => useRuntimes(),
       () => useMachines(), () => useForgeAgents(), () => useForgeSkills(), () => useRecentForgeTasks(),
-      () => useForgeTaskHistory({}, null),
+      () => useForgeTaskHistory({}, null), () => useRateLimit(), () => useGithubSettings(),
     ];
     for (const hook of hooks) {
       const { result } = renderHook(hook as () => unknown, { wrapper });

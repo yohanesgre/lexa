@@ -708,6 +708,76 @@ export function useDeleteApiKey() {
   });
 }
 
+// ── Rate limiting (app scope — admin only) ──
+
+export function useRateLimit() {
+  return useQuery({
+    queryKey: ["rate-limit"],
+    queryFn: () => api.getRateLimit(),
+    staleTime: 60_000,
+  });
+}
+
+export function useUpdateRateLimit() {
+  const qc = useQueryClient();
+  const toast = useToast();
+  return useMutation({
+    mutationFn: (input: { max: number; windowMs: number }) => api.updateRateLimit(input),
+    onSuccess: (settings) => {
+      // Mutation response is authoritative — update the cache from it, never refetch.
+      qc.setQueryData(["rate-limit"], settings);
+      toast.push("success", "Rate limit updated");
+    },
+    onError: (err) => {
+      toast.push("error", "Failed to update rate limit", toastMessage(err));
+    },
+  });
+}
+
+// ── GitHub sync settings (app scope — admin only) ──
+
+export function useGithubSettings() {
+  return useQuery({
+    queryKey: ["github-settings"],
+    queryFn: () => api.getGithubSettings(),
+    staleTime: 60_000,
+  });
+}
+
+export function useUpdateGithubSettings() {
+  const qc = useQueryClient();
+  const toast = useToast();
+  return useMutation({
+    mutationFn: (input: { appId: string; privateKey?: string; webhookSecret?: string }) => api.updateGithubSettings(input),
+    onSuccess: (settings) => {
+      // Mutation response is authoritative — update the cache from it, never refetch.
+      qc.setQueryData(["github-settings"], settings);
+      toast.push("success", "GitHub sync settings saved");
+    },
+    onError: (err) => {
+      toast.push("error", "Failed to save GitHub sync settings", toastMessage(err));
+    },
+  });
+}
+
+// Remove GitHub sync — same PUT, all three fields as empty strings; the
+// server's clear semantics (empty string = delete the settings row).
+export function useClearGithubSettings() {
+  const qc = useQueryClient();
+  const toast = useToast();
+  return useMutation({
+    mutationFn: () => api.updateGithubSettings({ appId: "", privateKey: "", webhookSecret: "" }),
+    onSuccess: (settings) => {
+      // Mutation response is authoritative — update the cache from it, never refetch.
+      qc.setQueryData(["github-settings"], settings);
+      toast.push("success", "GitHub sync removed");
+    },
+    onError: (err) => {
+      toast.push("error", "Failed to remove GitHub sync", toastMessage(err));
+    },
+  });
+}
+
 // ---- users & project members ----
 
 type MemberUser = { id: string; email: string; name: string; role: string; createdAt: string; lastSeen: string | null };

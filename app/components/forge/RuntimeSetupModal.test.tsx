@@ -78,6 +78,51 @@ describe("RuntimeSetupModal", () => {
     expect(screen.getByRole("button", { name: "Continue" })).toBeDisabled();
   });
 
+  it("creates a machine login key on step 0 — raw key shown once with Copy", async () => {
+    const user = userEvent.setup();
+    routes.set("POST /api/settings/api-keys", {
+      key: { id: "k2", name: "lexa-machine", createdAt: "t", lastUsedAt: null },
+      rawKey: "lxk_machine123",
+    });
+    render(<RuntimeSetupModal onClose={() => {}} />, { wrapper });
+    expect(await screen.findByText("box1")).toBeInTheDocument();
+    expect(screen.getByText("Create an API key for this machine")).toBeInTheDocument();
+
+    await user.type(screen.getByLabelText("Key name"), "lexa-machine");
+    await user.click(screen.getByRole("button", { name: "Create" }));
+    expect(await screen.findByText("lxk_machine123")).toBeInTheDocument();
+    // copyToClipboard succeeds in jsdom, so the auto-copy on create flips the
+    // label to "Copied" immediately
+    expect(screen.getByRole("button", { name: "Copied" })).toBeInTheDocument();
+    expect(screen.getByText("Raw key is held in memory and will not be shown again.")).toBeInTheDocument();
+    expect(screen.getByText(/Use the created key in/)).toBeInTheDocument();
+  });
+
+  it("the machine login key does not enable the step-2 Send gate", async () => {
+    const user = userEvent.setup();
+    routes.set("POST /api/settings/api-keys", {
+      key: { id: "k2", name: "lexa-machine", createdAt: "t", lastUsedAt: null },
+      rawKey: "lxk_machine123",
+    });
+    render(<RuntimeSetupModal onClose={() => {}} />, { wrapper });
+
+    // step 0: pick the machine and create the machine login key
+    const row = (await screen.findByText("box1")).closest("button")!;
+    await user.click(row);
+    await user.type(screen.getByLabelText("Key name"), "lexa-machine");
+    await user.click(screen.getByRole("button", { name: "Create" }));
+    await screen.findByText("lxk_machine123");
+    await user.click(screen.getByRole("button", { name: "Continue" }));
+
+    // step 1: agent CLI
+    await user.click(screen.getByRole("button", { name: /opencode/ }));
+    await user.click(screen.getByRole("button", { name: "Continue" }));
+
+    // step 2: Send stays disabled — no runtime key was created (separate state)
+    expect(screen.getByText("Create key and install")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Send install event/ })).toBeDisabled();
+  });
+
   it("walks the full setup flow: machine → agent CLI → key → send install event", async () => {
     const user = userEvent.setup();
     routes.set("POST /api/settings/api-keys", {
