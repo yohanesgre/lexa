@@ -9,6 +9,18 @@ The CLI version is INDEPENDENT of the web app version (see AGENTS.md):
 The version lives in `cli/package.json` — `publish-cli.yml` verifies the tag
 matches it before compiling.
 
+## [0.1.6] - 2026-08-11
+
+### Fixed
+
+- **Deploy could pass the wrong API key to the container** — compose
+  precedence puts shell env above `--env-file`, so a stale exported
+  `LXK_API_KEY` (e.g. prod's key left in the shell when deploying
+  staging) silently overrode the flavor env file, and every API call
+  from the app 401'd. The deploy now strips the managed keys from the
+  compose environment; only `COMPOSE_PROJECT_NAME` and an explicit
+  `--image` tag pass through.
+
 ## [0.1.5] - 2026-08-10
 
 ### Changed
