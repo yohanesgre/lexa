@@ -9,6 +9,26 @@ The CLI version is INDEPENDENT of the web app version (see AGENTS.md):
 The version lives in `cli/package.json` — `publish-cli.yml` verifies the tag
 matches it before compiling.
 
+## [Unreleased]
+
+### Added
+
+- **`task create --description <markdown>`** — new tasks can be created with
+  a Markdown description (converted to rich text server-side).
+
+### Fixed
+
+- **`task get` prints the task description** — TipTap content is rendered to
+  Markdown. Previously the command only showed title/id/priority/type/column/
+  swimlane, so descriptions were invisible to agents and humans using the CLI.
+- **`task create` / `task update` / `task move` parse the mutation envelope** —
+  responses are unwrapped from `{data, activity}`. `task create` previously
+  printed `Created task undefined — undefined`; `task update` printed a blank
+  title.
+- **Short task IDs resolve** — the 8-char prefixes shown by `task list` are
+  now accepted by `task get` / `task move` / `task update` (unique prefix
+  match against the project's tasks; full UUIDs unchanged).
+
 ## [0.1.8] - 2026-08-11
 
 ### Added

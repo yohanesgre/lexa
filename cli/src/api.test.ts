@@ -38,7 +38,7 @@ beforeAll(async () => {
     const url = req.url ?? "";
     if (url === "/api/health") return json(res, 200, { ok: true });
     if (url === "/api/projects") return json(res, 200, { data: [{ id: "p1", slug: "demo", name: "Demo", description: null, githubRepo: null }] });
-    if (url === "/api/projects/demo/tasks" && req.method === "POST") return json(res, 201, { id: "t1", title: "New" });
+    if (url === "/api/projects/demo/tasks" && req.method === "POST") return json(res, 201, { data: { id: "t1", title: "New" }, activity: [] });
     if (url === "/api/forge/runtimes" && req.method === "GET") { res.writeHead(401, { "Content-Type": "text/plain" }); return res.end("nope"); }
     if (url === "/api/projects/demo/tasks/t1/github-link") return json(res, 409, { error: { code: "ALREADY_LINKED", message: "issue already linked", details: { issueId: "42" } } });
     if (url === "/api/forge/machines/heartbeat") { res.writeHead(500, { "Content-Type": "text/plain" }); return res.end("boom"); }
@@ -92,6 +92,11 @@ describe("LexaClient request building", () => {
     const req = seen.find((r) => r.url === "/api/projects/demo/tasks");
     expect(req?.method).toBe("POST");
     expect(JSON.parse(req?.body ?? "{}")).toEqual({ columnId: "c1", swimlaneId: "s1", title: "New" });
+  });
+
+  it("task mutations unwrap the { data, activity } envelope", async () => {
+    const out = await Effect.runPromise(client().createTask("demo", { columnId: "c1", swimlaneId: "s1", title: "New" }));
+    expect(out).toEqual({ id: "t1", title: "New" });
   });
 
   it("claimRuntimeEvent sends x-machine-secret", async () => {
