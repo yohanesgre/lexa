@@ -91,3 +91,18 @@ describe("create after archived last position", () => {
     expect(positions.map((r) => r.position)).toEqual(["a0", "a1", task.position]);
   });
 });
+
+describe("TaskRepo.findUrgentAcrossAllProjects", () => {
+  it("excludes tasks in a closed (done) column but keeps unmapped and open ones", () => {
+    const db = tmpDb();
+    seed(db);
+    db.prepare("INSERT INTO columns (id, project_id, name, position, github_state) VALUES ('c2','p1','Done',1,'closed')").run();
+    db.prepare("INSERT INTO columns (id, project_id, name, position, github_state) VALUES ('c3','p1','Later',2,NULL)").run();
+    db.prepare(`INSERT INTO tasks (id, project_id, column_id, swimlane_id, title, description, priority, type, position, created_at)
+                VALUES ('t-done','p1','c2','s1','Done urgent','{"type":"doc","content":[]}','prio-1','type-1','b0','2026-01-04 10:00:00'),
+                       ('t-later','p1','c3','s1','Later urgent','{"type":"doc","content":[]}','prio-1','type-1','c0','2026-01-05 10:00:00')`).run();
+    const repo = makeRepo(db);
+    const urgent = Effect.runSync(repo.findUrgentAcrossAllProjects(50));
+    expect(urgent.map((t) => t.id).sort()).toEqual(["t-later", "t-live"]);
+  });
+});
