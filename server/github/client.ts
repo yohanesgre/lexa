@@ -1,25 +1,15 @@
 import { Context, Effect, Layer } from "effect";
-import { readFileSync } from "node:fs";
+import { Database } from "bun:sqlite";
+import { getSetting } from "../db/settings";
 import { GithubApiError } from "../api/errors";
 import { createAppJwt, verifyWebhookSignature } from "./crypto";
 
-// ── Config (env) ──
-// GITHUB_PRIVATE_KEY: inline PEM (escaped \n). GITHUB_PRIVATE_KEY_FILE: path
-// to a .pem file (read at boot — no escaping needed). Inline wins if both set.
-
-function privateKeyFromEnv(): string {
-  const inline = process.env.GITHUB_PRIVATE_KEY;
-  if (inline) return inline;
-  const file = process.env.GITHUB_PRIVATE_KEY_FILE;
-  if (file) {
-    try {
-      return readFileSync(file, "utf8");
-    } catch {
-      return ""; // unreadable path surfaces as the standard "not configured" error
-    }
-  }
-  return "";
-}
+// ── Config (DB only at runtime) ──
+// The settings table (github_app_id / github_private_key / github_webhook_secret)
+// is the SINGLE source of truth. Env (GITHUB_APP_ID / GITHUB_PRIVATE_KEY /
+// GITHUB_PRIVATE_KEY_FILE / GITHUB_WEBHOOK_SECRET) is a first-boot bootstrap
+// only — mirrorSettingsFromEnv copies it into the DB once at boot, and the
+// runtime never reads env again.
 
 export class GitHubConfig extends Context.Tag("GitHubConfig")<
   GitHubConfig,
@@ -30,11 +20,36 @@ export class GitHubConfig extends Context.Tag("GitHubConfig")<
   }
 >() {}
 
-export const GitHubConfigLive = Layer.succeed(GitHubConfig, {
-  appId: process.env.GITHUB_APP_ID ?? "",
-  privateKey: privateKeyFromEnv(),
-  webhookSecret: process.env.GITHUB_WEBHOOK_SECRET ?? "",
-});
+// ── Config holder (module scope) ──
+// GitHubConfigLive serves this MUTABLE holder object (never replaced): every
+// consumer that captured the reference — GitHubClient service effects, the
+// webhook verifier runtime — reads the live fields on every call, so a
+// Settings save applies immediately without rebuilding any runtime.
+
+const configHolder: { appId: string; privateKey: string; webhookSecret: string } = {
+  appId: "",
+  privateKey: "",
+  webhookSecret: "",
+};
+
+export const GitHubConfigLive = Layer.effect(GitHubConfig, Effect.sync(() => configHolder));
+
+// Applies the DB-configured values (DB only; empty rows = not configured) to
+// the holder — called at boot (after the env mirror) and after every
+// PUT /api/settings/github.
+export function syncGitHubConfigFromDb(db: Database): void {
+  const nonEmpty = (v: string | null): string => (v !== null && v.trim() !== "" ? v : "");
+  configHolder.appId = nonEmpty(getSetting(db, "github_app_id"));
+  configHolder.privateKey = nonEmpty(getSetting(db, "github_private_key"));
+  configHolder.webhookSecret = nonEmpty(getSetting(db, "github_webhook_secret"));
+}
+
+// Drops cached installation ids and tokens — a credential/app change must not
+// keep signing with the previous app. Called after every Settings save.
+export function resetGithubCaches(): void {
+  tokenCache.clear();
+  installationCache.clear();
+}
 
 // ── JWT (RS256 via Web Crypto) — see ./crypto ──
 
@@ -74,7 +89,7 @@ async function githubFetch(config: GitHubConfig["Type"], path: string, init: Req
 function requireConfig(config: GitHubConfig["Type"]): void {
   if (!config.appId || !config.privateKey) {
     throw new GithubApiError({
-      message: "GitHub App is not configured — set GITHUB_APP_ID and GITHUB_PRIVATE_KEY (or GITHUB_PRIVATE_KEY_FILE)",
+      message: "GitHub App is not configured — set it in Settings → GitHub Sync or via GITHUB_APP_ID/GITHUB_PRIVATE_KEY env",
     });
   }
 }
@@ -184,6 +199,66 @@ export class GitHubClient extends Effect.Service<GitHubClient>()("GitHubClient",
             }
             const issue = (await res.json()) as GithubIssueApiShape;
             return { nodeId: issue.node_id, number: issue.number, state: issue.state, title: issue.title };
+          },
+          catch: (e) => (e instanceof GithubApiError ? e : new GithubApiError({ message: String(e) })),
+        }),
+
+      // ── Repo content (Forge context — Contents: Read) ──
+
+      getDefaultBranch: (owner: string, repo: string): Effect.Effect<string, GithubApiError> =>
+        Effect.tryPromise({
+          try: async () => {
+            const res = await authedFetch(`${owner}/${repo}`, `/repos/${owner}/${repo}`, { method: "GET" });
+            if (!res.ok) {
+              throw new GithubApiError({
+                message: `GitHub repo lookup failed for ${owner}/${repo}: ${res.status} ${await res.text().catch(() => "")}`,
+              });
+            }
+            const body = (await res.json()) as { default_branch?: string };
+            if (!body.default_branch) {
+              throw new GithubApiError({ message: `GitHub repo lookup returned no default_branch for ${owner}/${repo}` });
+            }
+            return body.default_branch;
+          },
+          catch: (e) => (e instanceof GithubApiError ? e : new GithubApiError({ message: String(e) })),
+        }),
+
+      // Recursive tree for the branch. `truncated` (huge repos) is tolerated —
+      // the selection caps bound what gets fetched regardless.
+      getRepoFileTree: (owner: string, repo: string, branch: string): Effect.Effect<Array<{ path: string; type: string; size?: number }>, GithubApiError> =>
+        Effect.tryPromise({
+          try: async () => {
+            const res = await authedFetch(`${owner}/${repo}`, `/repos/${owner}/${repo}/git/trees/${branch}?recursive=1`, { method: "GET" });
+            if (!res.ok) {
+              throw new GithubApiError({
+                message: `GitHub tree lookup failed for ${owner}/${repo}@${branch}: ${res.status} ${await res.text().catch(() => "")}`,
+              });
+            }
+            const body = (await res.json()) as { tree?: Array<{ path?: string; type?: string; size?: number }> };
+            return (body.tree ?? [])
+              .filter((t): t is { path: string; type: string; size?: number } => typeof t.path === "string" && typeof t.type === "string")
+              .map((t) => ({ path: t.path, type: t.type, ...(t.size !== undefined ? { size: t.size } : {}) }));
+          },
+          catch: (e) => (e instanceof GithubApiError ? e : new GithubApiError({ message: String(e) })),
+        }),
+
+      // Base64-encoded contents API (per-segment URL-encoded path).
+      getRepoFileContent: (owner: string, repo: string, path: string): Effect.Effect<string, GithubApiError> =>
+        Effect.tryPromise({
+          try: async () => {
+            const encodedPath = path.split("/").map(encodeURIComponent).join("/");
+
+            const res = await authedFetch(`${owner}/${repo}`, `/repos/${owner}/${repo}/contents/${encodedPath}`, { method: "GET" });
+            if (!res.ok) {
+              throw new GithubApiError({
+                message: `GitHub content fetch failed for ${owner}/${repo}:${path}: ${res.status} ${await res.text().catch(() => "")}`,
+              });
+            }
+            const body = (await res.json()) as { content?: string };
+            if (typeof body.content !== "string") {
+              throw new GithubApiError({ message: `GitHub content response missing base64 body for ${owner}/${repo}:${path}` });
+            }
+            return Buffer.from(body.content, "base64").toString("utf8");
           },
           catch: (e) => (e instanceof GithubApiError ? e : new GithubApiError({ message: String(e) })),
         }),

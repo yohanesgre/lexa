@@ -37,9 +37,19 @@
 export class Sqlite extends Context.Tag("Lexa/Sqlite")<Sqlite, Database>() {}
 export const initSqlite = (dbPath: string) => Layer.succeed(Sqlite, new Database(dbPath));
 
-// GitHub App credentials from env vars (LXK/GITHUB_* in .env / docker-compose).
-// GITHUB_PRIVATE_KEY: inline PEM (escaped \n) OR GITHUB_PRIVATE_KEY_FILE: path
-// to a .pem file (read at boot — no escaping needed). Inline wins if both set.
+// GitHub App credentials — the settings DB is the SINGLE source of truth at
+// runtime (settings.github_app_id / settings.github_private_key /
+// settings.github_webhook_secret). Env (GITHUB_APP_ID / GITHUB_PRIVATE_KEY /
+// GITHUB_PRIVATE_KEY_FILE / GITHUB_WEBHOOK_SECRET) is a FIRST-BOOT BOOTSTRAP
+// only: mirrorSettingsFromEnv copies it into the DB once at boot when keys
+// are empty (GITHUB_PRIVATE_KEY inline wins over the file; the file is read
+// at mirror time), and the runtime never reads env again.
+// GitHubConfigLive serves a MUTABLE module-scope holder (never replaced):
+// syncGitHubConfigFromDb (boot + PUT /api/settings/github) mutates it in
+// place, so every consumer — including the webhook verifier runtime — reads
+// live values on each call. resetGithubCaches() drops cached installation
+// ids/tokens after a save (a credential change must not keep signing with
+// the previous app).
 export class GitHubConfig extends Context.Tag("GitHubConfig")<GitHubConfig, {
   readonly appId: string;
   readonly privateKey: string;      // PEM, for JWT signing (PKCS#1 or PKCS#8 — normalized internally)
@@ -518,6 +528,14 @@ const moveHandler = (req) =>
 
 The webhook route is exempt from API-key middleware and verifies `X-Hub-Signature-256` (HMAC-SHA-256, raw body, constant-time) before parsing; acks 200 immediately and processes in the background (Bun has no `waitUntil` — the handler returns the ack, then runs the Effect fire-and-forget on a shared `ManagedRuntime`; `webhook_events` pruned at boot, >7 days).
 
+### Forge claim — repoContent delivery
+
+On `POST /api/forge/daemon/claim` the handler assembles the claim: task, runtime config, server-built prompt, agent/skill rule files, and — best-effort — the task's linked GitHub repo content (`repoContent: [{ owner, repo, path, content }]`, `[]` when none). The daemon writes those files into `repo-content/` (+ `MANIFEST.md`) and the prompt points the agent there ("Linked GitHub repo content is in the repo-content/ directory…").
+
+- **Sources:** the task's `task_github_issues` rows → unique `repo` values ("owner/repo"), capped at 3, only when `documentType === "task"`.
+- **Pipeline (per repo):** `GitHubClient.getDefaultBranch` → `getRepoFileTree(recursive=1)` → pure `selectRepoFiles` (`server/github/repo-content.ts`: skips node_modules/.git/dist/build/vendor/.next/coverage/target/.venv dirs, lockfiles, `*.min.js`/`*.min.css`/`*.map`, true binaries — svg stays; caps 50 files / 256 KB per file / 512 KB total, respecting tree sizes without fetching) → `getRepoFileContent` (per-segment URL-encoded path, base64 → UTF-8). Content truncated to 256 KB per file at assembly; total byte cap enforced across repos.
+- **Never fails the claim:** every failure (unconfigured app, missing repo, network, per-file) is caught per repo/file, logged `WARN`, and skipped — `repoContent` ends up `[]` and the claim still returns 200. The prompt's repo-content line is added only when `repoContent` is non-empty (`buildPromptForTask(task, hasRepoContent)`).
+
 ### API middleware
 
 One `HttpApiBuilder.middleware` wraps the whole router (pre-routing, before decode). Order: **rate limit → content-length pre-check → auth → security headers**. Rules:
@@ -525,8 +543,8 @@ One `HttpApiBuilder.middleware` wraps the whole router (pre-routing, before deco
 - **Literal short-circuits only.** Return `HttpServerResponse.unsafeJson(...)` for 429/413/401/403 — never `Effect.fail` with an undeclared error. In @effect/platform 0.97 the error encoder cannot encode undeclared failures → raw cause → 500 trap.
 - **`AuthIdentity` is provided, not re-fetched.** Middleware resolves the key once via `resolveApiKeyIdentity(authHeader, db)` on the *shared* Sqlite connection and `Effect.provideService`s the tag; handlers/`requireAdmin` read it. Per-request DB opens are banned (they cost 3 PRAGMAs each).
 - **Socket IP lives only in entry.** `remoteAddress` is unpopulated on the web-handler path, so entry stamps `x-lexa-remote-ip` (deleting any inbound value first — spoof guard) on the reconstructed request; middleware applies the `isPrivateIp`-gated `cf-connecting-ip` trust.
-- **Exemptions are path predicates inside the middleware**: `/api/setup*` + `/api/health` skip AUTH only (they stay rate-limited); `/api/forge/daemon/*` + `/api/forge/runtimes/register` accept the daemon token instead and are rate-limit-exempt (token-gated, log streams must not 429).
-- **Rate limiting shares one bucket with `/mcp`** (`apiRateLimiter` singleton) and runs before auth — a blocked IP stays blocked regardless of key.
+- **Exemptions are path predicates inside the middleware**: `/api/setup*` + `/api/health` skip AUTH only (they stay rate-limited); `/api/forge/daemon/*` + `/api/forge/runtimes/register` + `/api/forge/machines/heartbeat` accept the daemon token where applicable and are rate-limit-exempt (key/token-gated machine surfaces — log streams and the 3s heartbeat must not 429).
+- **Rate limiting shares one bucket with `/mcp`** (`apiRateLimiter` singleton) and runs before auth — a blocked IP stays blocked regardless of key. Limits are DB-configured (`GET`/`PUT /api/settings/rate-limit`, admin-only): **DB settings (`settings.rate_limit_max` / `settings.rate_limit_window_ms`) with the code defaults (6000 / 600_000 ms) as fallback** — `resolveRateLimitFromDbValues` in `server/api/rate-limit.ts`. The DB is the single source of truth: env (`LXK_RATE_LIMIT_MAX` / `LXK_RATE_LIMIT_WINDOW_MS`) is a first-boot bootstrap, mirrored into the DB once at boot by `mirrorSettingsFromEnv` (server/db/settings.ts) when keys are empty, and never consulted at runtime. `syncRateLimitFromDb` applies the DB values at boot (after the mirror) and on save, so changes take effect live without a restart (existing buckets keep their windowStart and expire against the new window).
 - **Router 404s** fail with `RouteNotFound` after the middleware; caught inside so 404s carry the security headers (empty body, platform-identical shape).
 - **`MaxBodySize` is unenforced in 0.97** — the authoritative body cap is entry's stream cap (`readBodyWithLimit`); the middleware pre-check is a declared-length fast-path only.
 
