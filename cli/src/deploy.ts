@@ -554,13 +554,28 @@ export const cmdDeploy = Effect.fn("LexaCli/cmdDeploy")(function* (
       bypassAppId = created.id;
       console.log(`  Created bypass app: ${bypassDomain}`);
     }
-    const bypassPolicies = (yield* cfFetch(cfToken, `/accounts/${account}/access/apps/${bypassAppId}/policies`)) as Array<{ decision: string }>;
+    const bypassPolicies = (yield* cfFetch(cfToken, `/accounts/${account}/access/apps/${bypassAppId}/policies`)) as Array<{ id: string; decision: string; precedence?: number; app_count?: number; reusable?: boolean }>;
     if (!bypassPolicies.some((p) => p.decision === "bypass")) {
-      yield* cfFetch(cfToken, `/accounts/${account}/access/apps/${bypassAppId}/policies`, {
-        method: "POST",
-        body: JSON.stringify({ name: "Bypass (Everyone)", decision: "bypass", include: [{ everyone: {} }], precedence: 1 }),
-      });
-      console.log(`  Policy: bypass (${label})`);
+      if (bypassPolicies.length > 0) {
+        // A path app carrying an allow policy (e.g. hand-configured) blocks
+        // machine access — convert it rather than stacking a second policy
+        // (precedences must be unique; reusable rows go through the
+        // account-level endpoint).
+        const row = bypassPolicies[0];
+        const body = JSON.stringify({ name: "Bypass (Everyone)", decision: "bypass", include: [{ everyone: {} }] });
+        if (row.reusable === true || row.app_count !== undefined) {
+          yield* cfFetch(cfToken, `/accounts/${account}/access/policies/${row.id}`, { method: "PUT", body });
+        } else {
+          yield* cfFetch(cfToken, `/accounts/${account}/access/apps/${bypassAppId}/policies/${row.id}`, { method: "PUT", body });
+        }
+        console.log(`  Policy: converted to bypass (${label})`);
+      } else {
+        yield* cfFetch(cfToken, `/accounts/${account}/access/apps/${bypassAppId}/policies`, {
+          method: "POST",
+          body: JSON.stringify({ name: "Bypass (Everyone)", decision: "bypass", include: [{ everyone: {} }], precedence: 1 }),
+        });
+        console.log(`  Policy: bypass (${label})`);
+      }
     }
   }
 
