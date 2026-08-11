@@ -158,6 +158,18 @@ All Cloudflare state is per-flavor (distinct names for staging vs prod):
    Access evaluates the most specific path first, so the UI stays
    session-gated. If a path app already carries an allow policy (e.g.
    hand-configured), the deploy converts it to bypass.
+8. **Setup gate** `Lexa (<flavor>) Setup` on `<subdomain>.<domain>/api/setup/*`
+   — **Allow** `@<email-domain>` (not bypass): the setup API is key-exempt,
+   so it must stay session-gated even though it sits under `/api/*`
+   (Access evaluates the most specific path first; the wizard runs from an
+   Access-authenticated browser).
+
+**Security model:** the machine paths (`/api/*`, `/mcp`, `/api/webhooks/*`)
+are bypassed by design — the API key / HMAC signature is their auth, and
+CLI, MCP agents, and GitHub cannot do Access browser flows. Keys are
+`lxk_` + 43 base62 chars (256-bit), rate-limited per IP, and revocable
+per-named-key (Settings → API Keys). The human UI (`<subdomain>.<domain>/`),
+the setup API, and every other path stay session-gated behind Access.
 
 All deploy creds (CF token, Google client, team/email domain) persist in
 `~/.lexa/config.json` (staging: `~/.lexa-staging/config.json`) under the
