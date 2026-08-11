@@ -63,6 +63,16 @@ export interface ProjectInfo {
   githubRepo: string | null;
 }
 
+// Server-side GitHub sync settings. The server's settings DB is the single
+// source of truth; `source` tells where the effective values came from
+// (e.g. "db" after bootstrap, "env" before first boot).
+export interface GithubSettingsInfo {
+  appId: string;
+  privateKeySet: boolean;
+  webhookSecretSet: boolean;
+  source: string;
+}
+
 export interface WikiPageMetaInfo {
   id: string;
   title: string;
@@ -180,6 +190,15 @@ export class LexaClient {
       method: "POST",
       body: JSON.stringify({ repo }),
     });
+  }
+
+  // ── Settings (GitHub sync) ──
+  getGithubSettings(): Effect.Effect<GithubSettingsInfo, ApiError, never> {
+    return this.request<GithubSettingsInfo>("/api/settings/github");
+  }
+
+  updateGithubSettings(input: { appId: string; privateKey?: string; webhookSecret?: string }): Effect.Effect<GithubSettingsInfo, ApiError, never> {
+    return this.request<GithubSettingsInfo>("/api/settings/github", { method: "PUT", body: JSON.stringify(input) });
   }
 
   // ── Wiki ──

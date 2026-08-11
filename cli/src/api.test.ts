@@ -45,6 +45,8 @@ beforeAll(async () => {
     if (url === "/api/projects/demo/wiki/p1") { res.writeHead(200, { "Content-Type": "application/json" }); return res.end("not json {{{"); }
     if (url === "/api/forge/runtimes/r1" && req.method === "DELETE") return res.writeHead(204).end();
     if (url === "/api/forge/runtime-events/claim") return json(res, 200, { event: null });
+    if (url === "/api/settings/github" && req.method === "GET") return json(res, 200, { appId: "123456", privateKeySet: true, webhookSecretSet: true, source: "db" });
+    if (url === "/api/settings/github" && req.method === "PUT") return json(res, 200, { appId: "123456", privateKeySet: true, webhookSecretSet: true, source: "db" });
     return json(res, 404, { error: { code: "NOT_FOUND", message: "no such route" } });
   });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
@@ -103,6 +105,33 @@ describe("LexaClient request building", () => {
   it("204 maps to undefined (deleteRuntime)", async () => {
     const out = await Effect.runPromise(client().deleteRuntime("r1"));
     expect(out).toBeUndefined();
+  });
+
+  it("getGithubSettings GETs /api/settings/github and parses the state", async () => {
+    const out = await Effect.runPromise(client().getGithubSettings());
+    expect(out).toEqual({ appId: "123456", privateKeySet: true, webhookSecretSet: true, source: "db" });
+    const req = seen.find((r) => r.url === "/api/settings/github" && r.method === "GET");
+    expect(req?.method).toBe("GET");
+    expect(req?.headers.authorization).toBe("Bearer test-key");
+  });
+
+  it("updateGithubSettings PUTs the body to /api/settings/github", async () => {
+    const input = { appId: "123456", privateKey: "-----BEGIN PRIVATE KEY-----\nMIIE...\n-----END PRIVATE KEY-----\n", webhookSecret: "0123456789abcdef" };
+    const out = await Effect.runPromise(client().updateGithubSettings(input));
+    expect(out.appId).toBe("123456");
+    expect(out.privateKeySet).toBe(true);
+    expect(out.webhookSecretSet).toBe(true);
+    expect(out.source).toBe("db");
+    const req = seen.find((r) => r.url === "/api/settings/github" && r.method === "PUT");
+    expect(req?.method).toBe("PUT");
+    expect(JSON.parse(req?.body ?? "{}")).toEqual(input);
+  });
+
+  it("updateGithubSettings sends only the provided optional fields", async () => {
+    await Effect.runPromise(client().updateGithubSettings({ appId: "123456" }));
+    const req = seen.filter((r) => r.url === "/api/settings/github" && r.method === "PUT");
+    const last = req[req.length - 1];
+    expect(JSON.parse(last?.body ?? "{}")).toEqual({ appId: "123456" });
   });
 });
 
