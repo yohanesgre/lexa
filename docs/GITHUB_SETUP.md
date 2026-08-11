@@ -72,12 +72,24 @@ from the Docker build context (`.dockerignore`) — never commit it.
 
 ## 5. Cloudflare Access bypass (prod/staging)
 
-The webhook and MCP routes cannot do Access's browser flow. In Zero Trust →
-**Access → Applications**, add a second self-hosted application scoped to
-`<host>/api/webhooks/*` with a **Bypass** policy (include: Everyone), and one
-for `<host>/mcp`. Without the webhook bypass, GitHub deliveries get a 302 and
-fail. Verify from outside: `POST <host>/api/webhooks/github` with a bad
-signature must return **401** (from Lexa), not 302 (from Access).
+The webhook, MCP, and REST API routes cannot do Access's browser flow.
+`lexa-cli deploy` (v0.1.7+) provisions these automatically as self-hosted
+Access apps with a **Bypass** (Everyone) policy:
+
+- `<host>/api/webhooks/*` — GitHub deliveries
+- `<host>/mcp` — agent clients
+- `<host>/api/*` — `lexa-cli` / operator REST access (API key is the machine auth)
+
+Access evaluates the most specific path first, so the UI
+(`<host>/` on the main `Lexa (<flavor>)` app) stays session-gated.
+
+For deployments created before v0.1.7, add them manually: Zero Trust →
+**Access → Applications**, add one self-hosted application per path above
+with a **Bypass** policy (include: Everyone).
+
+Without the webhook bypass, GitHub deliveries get a 302 and fail. Verify
+from outside: `POST <host>/api/webhooks/github` with a bad signature must
+return **401** (from Lexa), not 302 (from Access).
 
 ## 6. Map columns
 
