@@ -37,5 +37,9 @@ COPY --from=builder /app/shared ./shared
 COPY --from=builder /app/migrations ./migrations
 COPY --from=builder /app/dist ./dist
 
+# Least privilege: the bun user owns the data volume; nothing needs root.
+RUN mkdir -p /app/data && chown -R bun:bun /app/data
+
 EXPOSE 3000
+USER bun
 CMD ["bun", "server/entry.ts"]
