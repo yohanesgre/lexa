@@ -418,6 +418,7 @@ export class TaskRepo extends Effect.Service<TaskRepo>()("Lexa/TaskRepo", {
            INNER JOIN columns c ON t.column_id = c.id
            WHERE t.priority = (SELECT id FROM priority_options WHERE project_id = p.id ORDER BY position LIMIT 1)
              AND t.archived_at IS NULL
+             AND c.github_state IS NOT 'closed'
            ORDER BY t.created_at DESC
            LIMIT ?`,
           limit
