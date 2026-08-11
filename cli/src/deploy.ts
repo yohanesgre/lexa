@@ -192,13 +192,32 @@ function finalBanner(flavorName: string, fullDomain: string, apiKey: string, ima
   console.log("═══════════════════════════════════════════════════════");
 }
 
+// Keys the flavor env file owns. Compose precedence puts shell env above
+// --env-file, so a stale exported var (e.g. another flavor's LXK_API_KEY
+// still in the shell) would silently override the file — the file must be
+// authoritative. LXK_IMAGE_TAG stays explicit per-run via opts.
+const COMPOSE_MANAGED_KEYS = [
+  "LXK_API_KEY", "VITE_LXK_API_KEY", "LXK_ADMIN_EMAILS", "LXK_ENV",
+  "LXK_FORGE_DAEMON_TOKEN", "CF_TUNNEL_TOKEN", "GITHUB_APP_ID",
+  "GITHUB_PRIVATE_KEY", "GITHUB_PRIVATE_KEY_FILE", "GITHUB_WEBHOOK_SECRET",
+  "LXK_ACCESS_AUD", "LXK_ACCESS_TEAM", "LXK_MAX_BODY_MB", "LOG_LEVEL",
+  "LXK_IMAGE_TAG",
+];
+
+function composeEnvFor(flavor: Flavor, opts: { imageTag?: string } = {}): Record<string, string> {
+  const env: Record<string, string> = { ...(process.env as Record<string, string>) };
+  for (const key of COMPOSE_MANAGED_KEYS) delete env[key];
+  env.COMPOSE_PROJECT_NAME = flavor.composeName;
+  if (opts.imageTag) env.LXK_IMAGE_TAG = opts.imageTag;
+  return env;
+}
+
 export function runCompose(flavor: Flavor, opts: { imageTag?: string; clean?: boolean } = {}): Effect.Effect<void, DeployError, never> {
   return Effect.gen(function* () {
     if (!existsSync("docker-compose.yml")) {
       return yield* new DeployError({ reason: "  ERROR: run from the repo root (docker-compose.yml not found)" });
     }
-    const composeEnv: Record<string, string> = { ...process.env, COMPOSE_PROJECT_NAME: flavor.composeName };
-    if (opts.imageTag) composeEnv.LXK_IMAGE_TAG = opts.imageTag;
+    const composeEnv = composeEnvFor(flavor, { imageTag: opts.imageTag });
     if (opts.clean) {
       console.log("==> Cleaning (--clean): removing containers + the data volume...");
       const down = spawnSync("docker", ["compose", ...flavor.composeFiles.split(" "), "--env-file", flavor.envFile, "down", "-v"], {
@@ -228,7 +247,7 @@ export function downCompose(flavor: Flavor): Effect.Effect<void, DeployError, ne
       return;
     }
     console.log("==> Stopping containers + removing the data volume (DB wiped)...");
-    const composeEnv: Record<string, string> = { ...process.env, COMPOSE_PROJECT_NAME: flavor.composeName };
+    const composeEnv = composeEnvFor(flavor);
     const down = spawnSync("docker", ["compose", ...flavor.composeFiles.split(" "), "--env-file", flavor.envFile, "down", "-v"], {
       stdio: "inherit",
       env: composeEnv,
