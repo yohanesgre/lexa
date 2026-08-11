@@ -261,12 +261,17 @@ const server: Server<unknown> = Bun.serve({
               return `<meta name="lxk-user" content='${userJson}'>`;
             })()
           : "";
-        // Sign-out target: Cloudflare Access logout. Only emitted when the
-        // team subdomain is configured (LXK_ACCESS_TEAM) — local dev has no
-        // Access session, so the client hides Sign out entirely.
+        // Sign-out target: Cloudflare Access logout on the app's own
+        // hostname. Only emitted when the team subdomain is configured
+        // (LXK_ACCESS_TEAM) — local dev has no Access session, so the client
+        // hides Sign out entirely. The team-domain logout endpoint
+        // (<team>.cloudflareaccess.com) can't clear the CF_Authorization
+        // cookie Access scopes to the app hostname for self-hosted apps —
+        // /cdn-cgi/access/logout on the app hostname deletes it.
         const accessTeam = process.env.LXK_ACCESS_TEAM || "";
-        const logoutMeta = accessTeam
-          ? `<meta name="lxk-logout" content="https://${accessTeam.replace(/[^a-zA-Z0-9.-]/g, "")}.cloudflareaccess.com/cdn-cgi/access/logout">`
+        const appHost = (req.headers.get("host") || "").replace(/[^a-zA-Z0-9.:-]/g, "");
+        const logoutMeta = accessTeam && appHost
+          ? `<meta name="lxk-logout" content="https://${appHost}/cdn-cgi/access/logout">`
           : "";
         const injected = html.replace(
           "<head>",
