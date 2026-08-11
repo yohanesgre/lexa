@@ -75,6 +75,13 @@ export function useUpdateProject() {
         if (!old) return [project];
         return old.map((p) => (p.id === project.id ? project : p));
       });
+      qc.setQueryData<Dashboard>(["dashboard"], (old) => {
+        if (!old) return old;
+        return { ...old, projects: old.projects.map((h) => (h.project.id === project.id ? { ...h, project } : h)) };
+      });
+      for (const archived of [false, true]) {
+        qc.setQueryData<Board>(["board", project.slug, archived], (old) => (old ? { ...old, project } : old));
+      }
       toast.push("success", "Project updated");
     },
     onError: (err) => {
