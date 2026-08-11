@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
-import { useBoard, useTasks, useMoveTask, useUpdateTask, useDeleteTask, useArchiveTask, useRestoreTask, useLinkGithubIssue, useUnlinkGithubIssue } from "../../lib/queries";
+import { useBoard, useTask, useTasks, useMoveTask, useUpdateTask, useDeleteTask, useArchiveTask, useRestoreTask, useLinkGithubIssue, useUnlinkGithubIssue } from "../../lib/queries";
 import type { TaskListItem } from "../../lib/queries";
 import { useToast } from "../../components/ui/Toast";
 import { TaskDetail } from "../../components/TaskDetail";
@@ -74,7 +74,8 @@ function TasksPage() {
   };
 
   const selectedTaskId = search.task ?? null;
-  const selectedTask = selectedTaskId ? boardQuery.data?.tasks.find((t) => t.id === selectedTaskId) ?? null : null;
+  const { data: selectedTaskFull } = useTask(slug, selectedTaskId);
+  const selectedTask = selectedTaskFull ?? (selectedTaskId ? boardQuery.data?.tasks.find((t) => t.id === selectedTaskId) ?? null : null);
 
   const handleMove = async (taskId: string, target: MoveTarget) => {
     await moveTask.mutateAsync({ id: taskId, ...target });

@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useState } from "react";
-import { useBoard, useMoveTask, useUpdateTask, useCreateTask, useDeleteTask, useArchiveTask, useRestoreTask, useLinkGithubIssue, useUnlinkGithubIssue } from "../../lib/queries";
+import { useBoard, useTask, useMoveTask, useUpdateTask, useCreateTask, useDeleteTask, useArchiveTask, useRestoreTask, useLinkGithubIssue, useUnlinkGithubIssue } from "../../lib/queries";
 import { useToast } from "../../components/ui/Toast";
 import { KanbanBoard } from "../../components/kanban/KanbanBoard";
 import type { MoveTarget } from "../../components/kanban/KanbanBoard";
@@ -33,7 +33,8 @@ function BoardPage() {
   const [createTarget, setCreateTarget] = useState<{ columnId: string; swimlaneId: string } | null>(null);
 
   const selectedTaskId = search.task ?? null;
-  const selectedTask = selectedTaskId ? board?.tasks.find((t) => t.id === selectedTaskId) ?? null : null;
+  const { data: selectedTaskFull } = useTask(slug, selectedTaskId);
+  const selectedTask = selectedTaskFull ?? (selectedTaskId ? board?.tasks.find((t) => t.id === selectedTaskId) ?? null : null);
   const isCreating = createTarget !== null;
 
   const handleMove = async (taskId: string, target: MoveTarget) => {

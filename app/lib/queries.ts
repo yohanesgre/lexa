@@ -147,6 +147,14 @@ export function useTasks(slug: string, showArchived = false) {
   return { ...query, board, tasks };
 }
 
+export function useTask(slug: string, taskId: string | null) {
+  return useQuery({
+    queryKey: ["tasks", slug, taskId],
+    queryFn: () => api.getTask(slug, taskId as string),
+    enabled: taskId !== null,
+  });
+}
+
 export function useFieldConfig(slug: string) {
   return useQuery({ queryKey: ["field-config", slug], queryFn: () => api.getFieldConfig(slug) });
 }
@@ -231,6 +239,7 @@ export function useMoveTask(slug: string) {
           return { ...old, tasks: old.tasks.map((t: Task) => (t.id === task.id ? task : t)) };
         });
       }
+      qc.setQueryData(["tasks", slug, task.id], task);
       if (activity?.length) prependActivity(qc, slug, task.id, activity.map((a) => ({ kind: "event" as const, ...a })));
       toast.push("success", "Task moved");
     },
