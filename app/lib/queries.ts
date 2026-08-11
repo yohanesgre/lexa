@@ -787,13 +787,24 @@ export function useRemoveProjectMember(slug: string) {
 
 export function useRuntimes() {
   // Forge daemon runtimes (opencode/hermes machines). Polled so the
-  // settings page shows online/offline status.
-  return useQuery({ queryKey: ["forge-runtimes"], queryFn: () => api.listRuntimes().then((r) => r.data), staleTime: 15_000, refetchInterval: 30_000 });
+  // settings page shows online/offline status — but only while runtimes
+  // exist; a fresh install has no machines and nothing can change.
+  return useQuery({
+    queryKey: ["forge-runtimes"],
+    queryFn: () => api.listRuntimes().then((r) => r.data),
+    staleTime: 15_000,
+    refetchInterval: (query) => (query.state.data?.length ? 30_000 : false),
+  });
 }
 
 export function useMachines() {
   // Machine hosts (bound via lexa-cli login, listening via machine listen).
-  return useQuery({ queryKey: ["forge-machines"], queryFn: () => api.listMachines().then((r) => r.data), staleTime: 15_000, refetchInterval: 30_000 });
+  return useQuery({
+    queryKey: ["forge-machines"],
+    queryFn: () => api.listMachines().then((r) => r.data),
+    staleTime: 15_000,
+    refetchInterval: (query) => (query.state.data?.length ? 30_000 : false),
+  });
 }
 
 export function useUpdateRuntime() {
@@ -845,13 +856,16 @@ export function useRemoveMachine() {
 }
 
 // Recent Forge tasks across all projects — powers the navbar status pill.
+// Polls fast while a task runs, slow while idle, and not at all when no
+// tasks exist (nothing can start without a registered machine/runtime).
 export function useRecentForgeTasks() {
   return useQuery({
     queryKey: ["forge-recent-tasks"],
     queryFn: () => api.listRecentForgeTasks().then((r) => r.data),
     refetchInterval: (query) => {
-      const hasActive = (query.state.data ?? []).some((t) => t.status === "queued" || t.status === "running");
-      return hasActive ? 1500 : 15_000;
+      const rows = query.state.data ?? [];
+      const hasActive = rows.some((t) => t.status === "queued" || t.status === "running");
+      return hasActive ? 1500 : rows.length ? 15_000 : false;
     },
   });
 }
