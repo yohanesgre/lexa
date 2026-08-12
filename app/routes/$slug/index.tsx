@@ -121,7 +121,7 @@ function ProjectDashboard() {
         onClose={() => setShowSettings(false)}
         onSave={(input) => {
           updateProject.mutate(
-            { slug: health.project.slug, ...input, githubRepo: input.githubRepo || null },
+            { slug: health.project.slug, ...input },
             { onSuccess: () => setShowSettings(false) }
           );
         }}

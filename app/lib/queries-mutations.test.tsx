@@ -24,7 +24,7 @@ function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
 }
 
-const PROJECT: Project = { id: "p1", slug: "demo", name: "Demo", description: "", githubRepo: null, createdAt: "t", updatedAt: "t" };
+const PROJECT: Project = { id: "p1", slug: "demo", name: "Demo", description: "", repos: [], createdAt: "t", updatedAt: "t" };
 const PROJECT2: Project = { ...PROJECT, id: "p2", slug: "other", name: "Other" };
 const COLUMN: Column = { id: "c1", projectId: "p1", name: "Todo", position: 0, color: "#888", wipLimit: null, requiredFields: [], githubState: null };
 const SWIMLANE: Swimlane = { id: "s1", projectId: "p1", name: "Backlog", description: "", position: 0, dueAt: null, archivedAt: null, kind: "backlog" };

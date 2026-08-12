@@ -280,3 +280,12 @@ export function docToMarkdown(doc: TipTapDoc): string {
     return "";
   }
 }
+
+// Echo-comparison normalization for GitHub content sync: GitHub normalizes
+// boundary whitespace (trailing newline, CRLF) when it stores an issue body,
+// so a raw compare would flag our own push as an external edit. Trim + LF only
+// at the string edges — the Markdown structure itself is never touched.
+export function normalizeMarkdownForEcho(text: string | null): string {
+  if (!text) return "";
+  return text.replace(/\r\n/g, "\n").trim();
+}

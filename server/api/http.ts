@@ -4,10 +4,10 @@ import { createHash, randomBytes } from "node:crypto";
 import { readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { LoggerLayer } from "../logging/logger";
-import { Sqlite, withTx } from "../db/database";
+import { Sqlite, withTx, DbError } from "../db/database";
 import { Database } from "bun:sqlite";
 import { getSetting, setSetting, deleteSetting } from "../db/settings";
-import { ProjectNotFound, WikiPageNotFound, MachineNotFound, Forbidden, SetupLocked, TaskNotFound, InvalidName, InvalidRateLimit, InvalidGithubSettings, NoUserContext, errorResponse, errorToStatus } from "./errors";
+import { ProjectNotFound, WikiPageNotFound, MachineNotFound, Forbidden, SetupLocked, TaskNotFound, InvalidName, InvalidRateLimit, InvalidGithubSettings, NoUserContext, GithubApiError, errorResponse, errorToStatus } from "./errors";
 import { AuthIdentity, actorFromIdentity } from "./auth";
 import { createApiMiddleware } from "./middleware";
 import { resolveRateLimitFromDbValues, syncRateLimitFromDb } from "./rate-limit";
@@ -16,6 +16,7 @@ import { selectRepoFiles, REPO_CONTENT_DEFAULTS } from "../github/repo-content";
 import { clampLimit, nextCursor } from "../../shared/pagination";
 import { ProjectService } from "../services/project.service";
 import { ProjectRepo } from "../repos/project.repo";
+import { ProjectReposRepo } from "../repos/project-repos.repo";
 import { ColumnService } from "../services/column.service";
 import { ColumnRepo } from "../repos/column.repo";
 import { SwimlaneService } from "../services/swimlane.service";
@@ -52,7 +53,7 @@ import * as msg from "../activity-messages";
 import { WebhookEventRepo } from "../repos/webhook-event.repo";
 import { GitHubClient } from "../github/client";
 import { extractText } from "../../shared/tiptap-text";
-import type { ActivityEvent, ForgeTask } from "../../shared/types";
+import type { ActivityEvent, ForgeTask, Project, DomainProject } from "../../shared/types";
 
 const ApiKeySchema = Schema.Struct({
   id: Schema.String,
@@ -91,12 +92,40 @@ const setupGroup = HttpApiGroup.make("setup")
   .add(HttpApiEndpoint.post("seed", "/setup/seed").addSuccess(SetupSeedResponse))
   .add(HttpApiEndpoint.post("complete", "/setup/complete").addSuccess(SetupOkResponse));
 
+const ProjectRepoSchema = Schema.Struct({
+  repo: Schema.String.pipe(
+    Schema.filter((r: string) => /^[^/\s]+\/[^/\s]+$/.test(r) || "repo must be owner/name")
+  ),
+  sourceRole: Schema.Boolean,
+  workspaceRole: Schema.Boolean,
+}).pipe(
+  Schema.filter((r) => r.sourceRole || r.workspaceRole || "at least one role is required")
+);
+
+const ProjectRepoListResponse = Schema.Struct({ data: Schema.Array(ProjectRepoSchema) });
+
+const GithubIssueSummarySchema = Schema.Struct({
+  number: Schema.Number,
+  title: Schema.String,
+  state: Schema.Literal("open", "closed"),
+});
+
+const GithubIssueListResponse = Schema.Struct({ data: Schema.Array(GithubIssueSummarySchema) });
+
+const TaskFromIssuePayload = Schema.Struct({
+  repo: Schema.String,
+  issueNumber: Schema.Number,
+});
+const PutProjectReposPayload = Schema.Struct({
+  repos: Schema.Array(ProjectRepoSchema),
+});
+
 const ProjectSchema = Schema.Struct({
   id: Schema.String,
   name: Schema.String,
   slug: Schema.String,
   description: Schema.String,
-  githubRepo: Schema.NullOr(Schema.String),
+  repos: Schema.Array(ProjectRepoSchema),
   createdAt: Schema.String,
   updatedAt: Schema.String,
 });
@@ -110,7 +139,6 @@ const CreateProjectPayload = Schema.Struct({
   name: Schema.String,
   slug: Schema.optional(Schema.String),
   description: Schema.optional(Schema.String),
-  githubRepo: Schema.optional(Schema.NullOr(Schema.String)),
 });
 
 const SlugPath = Schema.Struct({ slug: Schema.String });
@@ -140,7 +168,6 @@ const membersEndpoint = HttpApiEndpoint.get("listMembers", "/projects/:slug/memb
 const ProjectUpdatePayload = Schema.Struct({
   name: Schema.optional(Schema.String),
   description: Schema.optional(Schema.String),
-  githubRepo: Schema.optional(Schema.NullOr(Schema.String)),
 });
 
 const projectsGroup = HttpApiGroup.make("projects")
@@ -151,6 +178,22 @@ const projectsGroup = HttpApiGroup.make("projects")
   .add(
     HttpApiEndpoint.patch("updateProject", "/projects/:slug")
       .setPath(SlugPath).setPayload(ProjectUpdatePayload).addSuccess(ProjectSchema)
+  )
+  .add(
+    HttpApiEndpoint.get("listRepos", "/projects/:slug/repos")
+      .setPath(SlugPath)
+      .addSuccess(ProjectRepoListResponse)
+  )
+  .add(
+    HttpApiEndpoint.get("listGithubIssues", "/projects/:slug/github/issues")
+      .setPath(SlugPath)
+      .addSuccess(GithubIssueListResponse)
+  )
+  .add(
+    HttpApiEndpoint.put("replaceRepos", "/projects/:slug/repos")
+      .setPath(SlugPath)
+      .setPayload(PutProjectReposPayload)
+      .addSuccess(ProjectRepoListResponse)
   )
   .add(
     HttpApiEndpoint.del("deleteProject", "/projects/:slug")
@@ -862,6 +905,7 @@ const GithubIssueSchema = Schema.Struct({
   syncedState: Schema.NullOr(Schema.Literal("open", "closed")),
   url: Schema.String,
   outOfSync: Schema.Boolean,
+  pushFailed: Schema.Boolean,
 });
 
 const TaskSchema = Schema.Struct({
@@ -925,6 +969,11 @@ const TaskPath = Schema.Struct({ slug: Schema.String, id: Schema.String });
 
 const GithubLinkPayload = Schema.Struct({ repo: Schema.String });
 
+const GithubLinkExistingPayload = Schema.Struct({
+  repo: Schema.String,
+  issueNumber: Schema.Number,
+});
+
 const GithubLinkPath = Schema.Struct({ slug: Schema.String, id: Schema.String, issueId: Schema.String });
 
 const ActivityItemSchema = Schema.Union(ActivityEventSchema, TaskCommentSchema);
@@ -973,8 +1022,12 @@ const tasksGroup = HttpApiGroup.make("tasks")
     .setPath(CommentIdPath).addSuccess(Schema.Void, { status: 204 }))
   .add(HttpApiEndpoint.post("linkGithubIssue", "/projects/:slug/tasks/:id/github-link")
     .setPath(TaskPath).setPayload(GithubLinkPayload).addSuccess(TaskMutationResponse))
+  .add(HttpApiEndpoint.post("linkExistingGithubIssue", "/projects/:slug/tasks/:id/github-link-existing")
+    .setPath(TaskPath).setPayload(GithubLinkExistingPayload).addSuccess(TaskMutationResponse))
   .add(HttpApiEndpoint.del("unlinkGithubIssue", "/projects/:slug/tasks/:id/github-link/:issueId")
-    .setPath(GithubLinkPath).addSuccess(TaskMutationResponse));
+    .setPath(GithubLinkPath).addSuccess(TaskMutationResponse))
+  .add(HttpApiEndpoint.post("createTaskFromIssue", "/projects/:slug/github/task-from-issue")
+    .setPath(SlugPath).setPayload(TaskFromIssuePayload).addSuccess(TaskMutationResponse, { status: 201 }));
 
 const boardGroup = HttpApiGroup.make("board")
   .add(HttpApiEndpoint.get("getBoard", "/projects/:slug/board")
@@ -1101,7 +1154,9 @@ const apiKeysGroup = HttpApiGroup.make("api-keys")
     .addSuccess(GithubSettingsSchema))
   .add(HttpApiEndpoint.put("setGithubSettings", "/settings/github")
     .setPayload(GithubSettingsInput)
-    .addSuccess(GithubSettingsSchema));
+    .addSuccess(GithubSettingsSchema))
+  .add(HttpApiEndpoint.get("searchGithubRepos", "/settings/github/search-repos")
+    .addSuccess(Schema.Struct({ data: Schema.Array(Schema.String) })));
 
 const UserSchema = Schema.Struct({
   id: Schema.String,
@@ -1241,8 +1296,9 @@ function githubSettingsResponse(db: Database): {
   };
 }
 
-// At most 3 linked repos per claim (task_github_issues deduped).
-const MAX_REPO_CONTENT_REPOS = 3;
+// At most N source repos per claim — app-level setting forge_repo_cap
+// (env bootstrap LXK_FORGE_REPO_CAP, default 3; same pattern as rate limits).
+const DEFAULT_REPO_CONTENT_REPOS = 3;
 
 interface RepoContentEntry {
   owner: string;
@@ -1256,7 +1312,7 @@ interface RepoContentEntry {
 // that repo/file with a warn; the claim NEVER fails because context is
 // unavailable. Caps: ≤3 repos, ≤maxFiles files total, ≤maxTotalBytes total,
 // each file truncated to maxBytesPerFile at write.
-const loadTaskRepoContent = (task: ForgeTask): Effect.Effect<RepoContentEntry[], never, GitHubClient | TaskRepo> =>
+const loadTaskRepoContent = (task: ForgeTask): Effect.Effect<RepoContentEntry[], never, GitHubClient | TaskRepo | ProjectReposRepo | Sqlite> =>
   Effect.gen(function* () {
     if (task.documentType !== "task") return [];
     const taskRepo = yield* TaskRepo;
@@ -1264,7 +1320,17 @@ const loadTaskRepoContent = (task: ForgeTask): Effect.Effect<RepoContentEntry[],
       Effect.catchAll(() => Effect.succeed(null))
     );
     if (!taskRow) return [];
-    const repos = [...new Set(taskRow.githubs.map((g) => g.repo).filter(Boolean))].slice(0, MAX_REPO_CONTENT_REPOS);
+    // Source: the project's SOURCE-ROLE repos (admin-controlled), capped by
+    // the forge_repo_cap setting. Task-linked repos no longer feed context.
+    const reposRepo = yield* ProjectReposRepo;
+    const projectRepos = yield* reposRepo.listByProject(taskRow.projectId).pipe(
+      Effect.catchAll(() => Effect.succeed([]))
+    );
+    const db = yield* Sqlite;
+    const capRaw = getSetting(db, "forge_repo_cap") || process.env.LXK_FORGE_REPO_CAP || "";
+    const capParsed = Number.parseInt(capRaw, 10);
+    const cap = Number.isFinite(capParsed) && capParsed > 0 ? capParsed : DEFAULT_REPO_CONTENT_REPOS;
+    const repos = projectRepos.filter((r) => r.sourceRole).map((r) => r.repo).slice(0, cap);
     if (repos.length === 0) return [];
     const client = yield* GitHubClient;
     const entries: RepoContentEntry[] = [];
@@ -1401,7 +1467,7 @@ const projectsLive = HttpApiBuilder.group(LexaApi, "projects", (handlers) =>
       respond(Effect.gen(function* () {
         const service = yield* ProjectService;
         const projects = yield* service.list();
-        return { data: projects.map(formatProject), nextCursor: null };
+        return { data: yield* Effect.forEach(projects, withRepos), nextCursor: null };
       }))
     )
     .handle("create", (req) =>
@@ -1410,16 +1476,16 @@ const projectsLive = HttpApiBuilder.group(LexaApi, "projects", (handlers) =>
         const service = yield* ProjectService;
         const project = yield* service.create({
           name: req.payload.name, slug: req.payload.slug,
-          description: req.payload.description, githubRepo: req.payload.githubRepo,
+          description: req.payload.description,
         });
-        return formatProject(project);
+        return yield* withRepos(project);
       }))
     )
     .handle("getBySlug", (req) =>
       respond(Effect.gen(function* () {
         const service = yield* ProjectService;
         const project = yield* service.findBySlug(req.path.slug);
-        return formatProject(project);
+        return yield* withRepos(project);
       }))
     )
     .handle("listMembers", (req) =>
@@ -1446,9 +1512,39 @@ const projectsLive = HttpApiBuilder.group(LexaApi, "projects", (handlers) =>
         const project = yield* service.update(req.path.slug, {
           name: req.payload.name,
           description: req.payload.description,
-          githubRepo: req.payload.githubRepo,
         });
-        return formatProject(project);
+        return yield* withRepos(project);
+      }))
+    )
+    .handle("listRepos", (req) =>
+      respond(Effect.gen(function* () {
+        yield* requireAdmin;
+        const service = yield* ProjectService;
+        const repos = yield* service.listRepos(req.path.slug);
+        return { data: repos };
+      }))
+    )
+    .handle("listGithubIssues", (req) =>
+      respond(Effect.gen(function* () {
+        const githubService = yield* GitHubService;
+        const params = searchParams(req);
+        const repo = params.get("repo") ?? "";
+        if (!repo) {
+          return yield* Effect.fail(new GithubApiError({ message: "repo query param is required (owner/name)" }));
+        }
+        const issues = yield* githubService.listWorkspaceIssues(req.path.slug, repo, params.get("q") ?? "");
+        return { data: issues };
+      }))
+    )
+    .handle("replaceRepos", (req) =>
+      respond(Effect.gen(function* () {
+        yield* requireAdmin;
+        const service = yield* ProjectService;
+        const repos = yield* service.replaceRepos(
+          req.path.slug,
+          req.payload.repos.map((r) => ({ repo: r.repo, sourceRole: r.sourceRole, workspaceRole: r.workspaceRole }))
+        );
+        return { data: repos };
       }))
     )
     .handle("deleteProject", (req) =>
@@ -2138,6 +2234,7 @@ const tasksLive = HttpApiBuilder.group(LexaApi, "tasks", (handlers) =>
     .handle("updateTask", (req) =>
       respond(Effect.gen(function* () {
         const taskService = yield* TaskService;
+        const githubService = yield* GitHubService;
         const identity = yield* AuthIdentity;
         const { task, activity } = yield* taskService.update(actorFromIdentity(identity), req.path.id, {
           title: req.payload.title, description: req.payload.description,
@@ -2145,6 +2242,20 @@ const tasksLive = HttpApiBuilder.group(LexaApi, "tasks", (handlers) =>
           assignees: req.payload.assignees ? [...req.payload.assignees] : undefined,
           dueAt: req.payload.dueAt,
         });
+        if (task.githubs.length > 0) {
+          // Best-effort content push (title+body → all linked issues). The
+          // service diffs against the last pushed values, so a save that only
+          // changed priority/type/assignees is a no-op. Non-blocking: a GitHub
+          // failure never fails the update.
+          yield* githubService.syncContentFromLexa(task.id).pipe(
+            Effect.catchTag("DbError", (e) => Effect.logWarning(`[GitHub] content sync failed for task ${task.id}`, e)),
+            Effect.catchTag("ConstraintViolation", (e) => Effect.logWarning(`[GitHub] content sync failed for task ${task.id}`, e))
+          );
+          // Re-fetch so the mutation response carries the fresh divergence
+          // flags (pushFailed) — the response is the authoritative cache.
+          const fresh = yield* taskService.getById(task.id);
+          return { data: formatTask(fresh), activity: activityPayload(activity) };
+        }
         return { data: formatTask(task), activity: activityPayload(activity) };
       }))
     )
@@ -2256,6 +2367,18 @@ const tasksLive = HttpApiBuilder.group(LexaApi, "tasks", (handlers) =>
         return { data: formatTask(task), activity: activityPayload(linked.activity) };
       }))
     )
+    .handle("linkExistingGithubIssue", (req) =>
+      respond(Effect.gen(function* () {
+        const projectService = yield* ProjectService;
+        const taskService = yield* TaskService;
+        const githubService = yield* GitHubService;
+        const identity = yield* AuthIdentity;
+        yield* projectService.findBySlug(req.path.slug);
+        const linked = yield* githubService.linkExistingIssue(actorFromIdentity(identity), req.path.id, req.payload.repo, req.payload.issueNumber);
+        const task = yield* taskService.getById(req.path.id);
+        return { data: formatTask(task), activity: activityPayload(linked.activity) };
+      }))
+    )
     .handle("unlinkGithubIssue", (req) =>
       respond(Effect.gen(function* () {
         const projectService = yield* ProjectService;
@@ -2282,6 +2405,21 @@ const tasksLive = HttpApiBuilder.group(LexaApi, "tasks", (handlers) =>
         return { data: formatTask(updated), activity: ev ? activityPayload([ev]) : [] };
       }))
     )
+    .handle("createTaskFromIssue", (req) =>
+      respond(Effect.gen(function* () {
+        const githubService = yield* GitHubService;
+        const identity = yield* AuthIdentity;
+        const { taskId, activity } = yield* githubService.createTaskFromIssue(
+          actorFromIdentity(identity),
+          req.path.slug,
+          req.payload.repo,
+          req.payload.issueNumber
+        );
+        const taskService = yield* TaskService;
+        const task = yield* taskService.getById(taskId);
+        return { data: formatTask(task), activity: activityPayload(activity) };
+      }))
+    )
 );
 
 const boardLive = HttpApiBuilder.group(LexaApi, "board", (handlers) =>
@@ -2301,7 +2439,7 @@ const boardLive = HttpApiBuilder.group(LexaApi, "board", (handlers) =>
       const links = yield* taskLinkRepo.findByProject(project.id);
       const tasks = yield* taskService.findAllByProject(project.id, { includeArchived });
       return {
-        project: formatProject(project),
+        project: yield* withRepos(project),
         columns: columns.map(formatColumn),
         swimlanes: swimlanes.map(formatSwimlane),
         fieldConfig,
@@ -2515,8 +2653,7 @@ const apiKeysLive = HttpApiBuilder.group(LexaApi, "api-keys", (handlers) =>
         return githubSettingsResponse(db);
       }))
     )
-    .handle("setGithubSettings", (req) =>
-      respond(Effect.gen(function* () {
+    .handle("setGithubSettings", (req) =>      respond(Effect.gen(function* () {
         yield* requireAdmin;
         const { appId, privateKey, webhookSecret } = req.payload;
         // Present field = replace; empty string = CLEAR (delete the row → not
@@ -2546,6 +2683,17 @@ const apiKeysLive = HttpApiBuilder.group(LexaApi, "api-keys", (handlers) =>
         syncGitHubConfigFromDb(db);
         resetGithubCaches();
         return githubSettingsResponse(db);
+      }))
+    )
+    .handle("searchGithubRepos", (req) =>
+      respond(Effect.gen(function* () {
+        yield* requireAdmin;
+        const params = searchParams(req);
+        const q = (params.get("q") ?? "").trim();
+        if (!q) return { data: [] };
+        const client = yield* GitHubClient;
+        const repos = yield* client.searchRepos(q);
+        return { data: repos };
       }))
     )
 );
@@ -2634,8 +2782,12 @@ const meLive = HttpApiBuilder.group(LexaApi, "me", (handlers) =>
     )
 );
 
-function formatProject(p: { id: string; name: string; slug: string; description: string; githubRepo: string | null; createdAt: string; updatedAt: string }) {
-  return p as any;
+function withRepos(p: DomainProject): Effect.Effect<Project, DbError, ProjectReposRepo> {
+  return Effect.gen(function* () {
+    const reposRepo = yield* ProjectReposRepo;
+    const repos = yield* reposRepo.listByProject(p.id);
+    return { ...p, repos };
+  });
 }
 
 function formatColumn(c: { id: string; projectId: string; name: string; position: number; color: string; wipLimit: number | null; requiredFields: string[]; githubState: "open" | "closed" | null }) {
@@ -2708,7 +2860,7 @@ export function createApiHandler(dbPath: string) {
 
 function buildServiceLayer() {
   return Layer.mergeAll(
-    ProjectRepo.Default, ProjectService.Default,
+    ProjectRepo.Default, ProjectService.Default, ProjectReposRepo.Default,
     ColumnRepo.Default, ColumnService.Default,
     SwimlaneRepo.Default, SwimlaneService.Default,
     TaskRepo.Default, TaskService.Default,

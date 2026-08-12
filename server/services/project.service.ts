@@ -1,11 +1,12 @@
 import { Effect } from "effect";
 import { ProjectRepo } from "../repos/project.repo";
+import { ProjectReposRepo } from "../repos/project-repos.repo";
 import { ColumnRepo } from "../repos/column.repo";
 import { SwimlaneRepo } from "../repos/swimlane.repo";
 import { FieldConfigRepo } from "../repos/field-config.repo";
 import { ConstraintViolation, DbError, RowNotFound, Sqlite, withTx } from "../db/database";
 import { ProjectNotFound, SlugTaken } from "../api/errors";
-import type { Project } from "../../shared/types";
+import type { DomainProject, ProjectRepo as ProjectRepoType } from "../../shared/types";
 
 const DEFAULT_COLUMNS = [
   { name: "Todo", color: "#6b7280", position: 1 },
@@ -16,9 +17,10 @@ const DEFAULT_COLUMNS = [
 ];
 
 export class ProjectService extends Effect.Service<ProjectService>()("Lexa/ProjectService", {
-  dependencies: [ProjectRepo.Default, ColumnRepo.Default, SwimlaneRepo.Default, FieldConfigRepo.Default],
+  dependencies: [ProjectRepo.Default, ProjectReposRepo.Default, ColumnRepo.Default, SwimlaneRepo.Default, FieldConfigRepo.Default],
   effect: Effect.gen(function* () {
     const repo = yield* ProjectRepo;
+    const reposRepo = yield* ProjectReposRepo;
     const columnRepo = yield* ColumnRepo;
     const swimlaneRepo = yield* SwimlaneRepo;
     const fieldConfigRepo = yield* FieldConfigRepo;
@@ -28,13 +30,13 @@ export class ProjectService extends Effect.Service<ProjectService>()("Lexa/Proje
       name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 60) || "project";
 
     return {
-      create: (input: { name: string; slug?: string; description?: string; githubRepo?: string | null }): Effect.Effect<Project, SlugTaken | DbError | RowNotFound> => {
+      create: (input: { name: string; slug?: string; description?: string }): Effect.Effect<DomainProject, SlugTaken | DbError | RowNotFound> => {
         const slug = input.slug || slugify(input.name);
         const id = crypto.randomUUID();
         return withTx(
           db,
           repo
-            .create({ id, name: input.name, slug, description: input.description ?? "", githubRepo: input.githubRepo ?? null })
+            .create({ id, name: input.name, slug, description: input.description ?? "" })
             .pipe(
               Effect.flatMap(() => repo.findBySlug(slug)),
               Effect.tap((project) =>
@@ -66,15 +68,15 @@ export class ProjectService extends Effect.Service<ProjectService>()("Lexa/Proje
         );
       },
 
-      findBySlug: (slug: string): Effect.Effect<Project, ProjectNotFound | DbError> =>
+      findBySlug: (slug: string): Effect.Effect<DomainProject, ProjectNotFound | DbError> =>
         repo.findBySlug(slug).pipe(Effect.catchTag("RowNotFound", () => new ProjectNotFound({ identifier: slug }))),
 
-      findById: (id: string): Effect.Effect<Project, ProjectNotFound | DbError> =>
+      findById: (id: string): Effect.Effect<DomainProject, ProjectNotFound | DbError> =>
         repo.findById(id).pipe(Effect.catchTag("RowNotFound", () => new ProjectNotFound({ identifier: id }))),
 
-      list: (): Effect.Effect<Project[], DbError> => repo.list(),
+      list: (): Effect.Effect<DomainProject[], DbError> => repo.list(),
 
-      update: (slug: string, input: { name?: string; description?: string; githubRepo?: string | null }): Effect.Effect<Project, ProjectNotFound | SlugTaken | DbError> =>
+      update: (slug: string, input: { name?: string; description?: string }): Effect.Effect<DomainProject, ProjectNotFound | SlugTaken | DbError> =>
         Effect.gen(function* () {
           const project = yield* repo.findBySlug(slug).pipe(
             Effect.catchTag("RowNotFound", () => new ProjectNotFound({ identifier: slug }))
@@ -83,6 +85,23 @@ export class ProjectService extends Effect.Service<ProjectService>()("Lexa/Proje
             Effect.catchTag("RowNotFound", () => new ProjectNotFound({ identifier: slug })),
             Effect.catchTag("ConstraintViolation", () => new SlugTaken({ slug }))
           );
+        }),
+
+      listRepos: (slug: string): Effect.Effect<ProjectRepoType[], ProjectNotFound | DbError> =>
+        Effect.gen(function* () {
+          const project = yield* repo.findBySlug(slug).pipe(
+            Effect.catchTag("RowNotFound", () => new ProjectNotFound({ identifier: slug }))
+          );
+          return yield* reposRepo.listByProject(project.id);
+        }),
+
+      replaceRepos: (slug: string, repos: { repo: string; sourceRole: boolean; workspaceRole: boolean }[]): Effect.Effect<ProjectRepoType[], ProjectNotFound | ConstraintViolation | DbError> =>
+        Effect.gen(function* () {
+          const project = yield* repo.findBySlug(slug).pipe(
+            Effect.catchTag("RowNotFound", () => new ProjectNotFound({ identifier: slug }))
+          );
+          yield* reposRepo.replace(project.id, repos);
+          return yield* reposRepo.listByProject(project.id);
         }),
 
       delete: (slug: string): Effect.Effect<void, ProjectNotFound | SlugTaken | DbError> =>

@@ -2,15 +2,25 @@ export type ID = string;
 export type ISODate = string;
 export type TipTapDoc = { type: "doc"; content: unknown[] };
 
+export interface ProjectRepo {
+  repo: string;
+  sourceRole: boolean;
+  workspaceRole: boolean;
+}
+
 export interface Project {
   id: ID;
   name: string;
   slug: string;
   description: string;
-  githubRepo: string | null;
+  repos: ProjectRepo[];
   createdAt: ISODate;
   updatedAt: ISODate;
 }
+
+// Domain shape returned by the repo/service layer (project_repos live in their
+// own table and are attached at the API boundary — see withRepos in http.ts).
+export type DomainProject = Omit<Project, "repos">;
 
 export interface Column {
   id: ID;
@@ -62,6 +72,13 @@ export interface GithubIssue {
   syncedState: "open" | "closed" | null;
   url: string;
   outOfSync: boolean;
+  pushFailed: boolean;
+}
+
+export interface GithubIssueSummary {
+  number: number;
+  title: string;
+  state: "open" | "closed";
 }
 
 export interface Task {

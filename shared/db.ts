@@ -1,7 +1,7 @@
 // Database row types — mirror SQL column names exactly (snake_case).
 // Used by server repos/services only. Frontend never imports this file.
 
-import type { TipTapDoc, ISODate, RuntimeAgent, RuntimeModel, ActorKind, ActivityType, ActivityEvent, TaskComment, Swimlane } from "./types";
+import type { TipTapDoc, ISODate, RuntimeAgent, RuntimeModel, ActorKind, ActivityType, ActivityEvent, TaskComment, Swimlane, DomainProject } from "./types";
 
 export interface PriorityOptionRow {
   id: string;
@@ -35,22 +35,35 @@ export interface ProjectRow {
   name: string;
   slug: string;
   description: string;
-  github_repo: string | null;
   created_at: string;
   updated_at: string;
 }
 
-export function rowToProject(row: ProjectRow): {
-  id: string; name: string; slug: string; description: string; githubRepo: string | null; createdAt: ISODate; updatedAt: ISODate;
-} {
+export function rowToProject(row: ProjectRow): DomainProject {
   return {
     id: row.id,
     name: row.name,
     slug: row.slug,
     description: row.description,
-    githubRepo: row.github_repo,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
+  };
+}
+
+export interface ProjectRepoRow {
+  id: string;
+  project_id: string;
+  repo: string;
+  source_role: number;
+  workspace_role: number;
+  created_at: string;
+}
+
+export function rowToProjectRepo(row: ProjectRepoRow): { repo: string; sourceRole: boolean; workspaceRole: boolean } {
+  return {
+    repo: row.repo,
+    sourceRole: row.source_role === 1,
+    workspaceRole: row.workspace_role === 1,
   };
 }
 
@@ -228,7 +241,7 @@ export interface TaskRow {
 }
 
 export function rowToTask(row: TaskRow, columnGithubState?: "open" | "closed" | null): {
-  id: string; projectId: string; columnId: string; swimlaneId: string; title: string; description: TipTapDoc; priority: string; type: string; assignees: string[]; position: string; dueAt: string | null; githubs: { issueId: string; issueNumber: number; repo: string; syncedState: "open" | "closed" | null; url: string; outOfSync: boolean }[]; archivedAt: ISODate | null; createdAt: ISODate; updatedAt: ISODate;
+  id: string; projectId: string; columnId: string; swimlaneId: string; title: string; description: TipTapDoc; priority: string; type: string; assignees: string[]; position: string; dueAt: string | null; githubs: { issueId: string; issueNumber: number; repo: string; syncedState: "open" | "closed" | null; url: string; outOfSync: boolean; pushFailed: boolean }[]; archivedAt: ISODate | null; createdAt: ISODate; updatedAt: ISODate;
 } {
   return taskFromRow(row, columnGithubState, JSON.parse(row.description) as TipTapDoc);
 }
@@ -236,20 +249,20 @@ export function rowToTask(row: TaskRow, columnGithubState?: "open" | "closed" | 
 // Slim rows (board/list paths select no description) map to an empty doc —
 // the key stays in the response shape, the blob never ships.
 export function rowToTaskSlim(row: Omit<TaskRow, "description">, columnGithubState?: "open" | "closed" | null): {
-  id: string; projectId: string; columnId: string; swimlaneId: string; title: string; description: TipTapDoc; priority: string; type: string; assignees: string[]; position: string; dueAt: string | null; githubs: { issueId: string; issueNumber: number; repo: string; syncedState: "open" | "closed" | null; url: string; outOfSync: boolean }[]; archivedAt: ISODate | null; createdAt: ISODate; updatedAt: ISODate;
+  id: string; projectId: string; columnId: string; swimlaneId: string; title: string; description: TipTapDoc; priority: string; type: string; assignees: string[]; position: string; dueAt: string | null; githubs: { issueId: string; issueNumber: number; repo: string; syncedState: "open" | "closed" | null; url: string; outOfSync: boolean; pushFailed: boolean }[]; archivedAt: ISODate | null; createdAt: ISODate; updatedAt: ISODate;
 } {
   return taskFromRow(row as TaskRow, columnGithubState, { type: "doc", content: [] });
 }
 
 function taskFromRow(row: TaskRow, columnGithubState: "open" | "closed" | null | undefined, description: TipTapDoc): {
-  id: string; projectId: string; columnId: string; swimlaneId: string; title: string; description: TipTapDoc; priority: string; type: string; assignees: string[]; position: string; dueAt: string | null; githubs: { issueId: string; issueNumber: number; repo: string; syncedState: "open" | "closed" | null; url: string; outOfSync: boolean }[]; archivedAt: ISODate | null; createdAt: ISODate; updatedAt: ISODate;
+  id: string; projectId: string; columnId: string; swimlaneId: string; title: string; description: TipTapDoc; priority: string; type: string; assignees: string[]; position: string; dueAt: string | null; githubs: { issueId: string; issueNumber: number; repo: string; syncedState: "open" | "closed" | null; url: string; outOfSync: boolean; pushFailed: boolean }[]; archivedAt: ISODate | null; createdAt: ISODate; updatedAt: ISODate;
 } {
   const colState = columnGithubState ?? row.column_github_state ?? null;
-  const githubs: { issueId: string; issueNumber: number; repo: string; syncedState: "open" | "closed" | null; url: string; outOfSync: boolean }[] = [];
+  const githubs: { issueId: string; issueNumber: number; repo: string; syncedState: "open" | "closed" | null; url: string; outOfSync: boolean; pushFailed: boolean }[] = [];
   const seen = new Set<string>();
   if (row.github_issues_raw) {
     for (const part of row.github_issues_raw.split("||")) {
-      const [issueId, issueNumberStr, repo, syncedState] = part.split(",");
+      const [issueId, issueNumberStr, repo, syncedState, pushFailed] = part.split(",");
       if (!issueId || !issueNumberStr || !repo || seen.has(issueId)) continue;
       seen.add(issueId);
       const outOfSync = !!(syncedState && colState && syncedState !== colState);
@@ -260,6 +273,7 @@ function taskFromRow(row: TaskRow, columnGithubState: "open" | "closed" | null |
         syncedState: (syncedState || null) as "open" | "closed" | null,
         url: `https://github.com/${repo}/issues/${issueNumberStr}`,
         outOfSync,
+        pushFailed: pushFailed === "1",
       });
     }
   }

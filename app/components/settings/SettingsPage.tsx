@@ -1,13 +1,13 @@
 import { useState, useRef, useEffect } from "react";
 import { AlertTriangle, Check, Copy, Key, Plus, RotateCcw, Settings, Trash2, Search, Upload, UserPlus, Users } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
-import { useApiKeys, useCreateApiKey, useDeleteApiKey, useUsers, useUpdateUserRole, useProjectMembers, useAddProjectMember, useRemoveProjectMember, useDeleteProject, useRuntimes, useMachines, useRemoveRuntime, useRemoveMachine, useRateLimit, useUpdateRateLimit, useGithubSettings, useUpdateGithubSettings, useClearGithubSettings } from "../../lib/queries";
+import { useApiKeys, useCreateApiKey, useDeleteApiKey, useUsers, useUpdateUserRole, useProjectMembers, useAddProjectMember, useRemoveProjectMember, useDeleteProject, useRuntimes, useMachines, useRemoveRuntime, useRemoveMachine, useRateLimit, useUpdateRateLimit, useGithubSettings, useUpdateGithubSettings, useClearGithubSettings, useProjects, useProjectRepos, useReplaceProjectRepos, useGithubRepoSearch } from "../../lib/queries";
 import { RuntimeSetupModal } from "../forge/RuntimeSetupModal";
 import { RuntimeEditModal } from "../forge/RuntimeEditModal";
 import { RuntimeRestartModal } from "../forge/RuntimeRestartModal";
 import { AgentsSettingsSection, SkillsSettingsSection } from "../forge/AgentSkillSettings";
 import { copyToClipboard } from "../../lib/clipboard";
-import type { Runtime, Machine } from "../../../shared/types";
+import type { Runtime, Machine, ProjectRepo } from "../../../shared/types";
 import * as api from "../../lib/api";
 import { parseApiDate } from "../../lib/date";
 
@@ -137,6 +137,41 @@ function RemoveGithubSyncModal({ onCancel, onConfirm }: { onCancel: () => void; 
               GITHUB_*
             </span>
             {" "}environment variables are set on the server, they are re-imported on the next restart.
+          </p>
+
+          <div className="flex items-center gap-2 mt-4 justify-end">
+            <button type="button" className="btn btn-ghost" onClick={onCancel}>Cancel</button>
+            <button type="button" className="btn btn-danger-solid" onClick={onConfirm}>
+              <Trash2 size={14} strokeWidth={1.5} />
+              Remove
+            </button>
+          </div>
+        </dialog>
+      </div>
+    </>
+  );
+}
+
+function RemoveLinkedRepoModal({ repo, onCancel, onConfirm }: { repo?: string; onCancel: () => void; onConfirm: () => void }) {
+  return (
+    <>
+      <button type="button" className="slideover-overlay" onClick={onCancel} aria-label="Close" />
+      <div className="fixed inset-0 flex items-center justify-center z-50 pointer-events-none">
+        <dialog open className="dialog dialog-enter pointer-events-auto" aria-modal="true" aria-label="Dialog">
+          <h2 className="font-display text-lg font-medium text-lx-text-primary">{repo ? "Remove repo?" : "Remove all repos?"}</h2>
+
+          <p className="text-sm text-lx-text-secondary mt-3 leading-5">
+            {repo ? (
+              <>
+                Remove{" "}
+                <span className="font-mono text-xs text-lx-text-primary" style={{ background: "var(--lx-surface-card)", borderRadius: 4, padding: "2px 5px" }}>
+                  {repo}
+                </span>
+                {" "}from this project? Existing task↔issue links keep syncing.
+              </>
+            ) : (
+              "Remove all repos from this project? Existing task↔issue links keep syncing."
+            )}
           </p>
 
           <div className="flex items-center gap-2 mt-4 justify-end">
@@ -904,6 +939,193 @@ function GithubSyncSection() {
   );
 }
 
+// Linked Repos (per-project, admin), per wireframes/src/settings.html.
+// All mutations are one full-replace PUT via useReplaceProjectRepos — the
+// hook owns the cache update (setQueryData from the mutation response).
+function LinkedReposSection({ slug }: { slug?: string }) {
+  const { data: projects = [] } = useProjects();
+  const [selectedSlug, setSelectedSlug] = useState(slug ?? "");
+  const { data: repos = [], isLoading } = useProjectRepos(selectedSlug);
+  const replaceRepos = useReplaceProjectRepos();
+  const [query, setQuery] = useState("");
+  const [highlight, setHighlight] = useState(0);
+  const [dropdownOpen, setDropdownOpen] = useState(false);
+  const [removingRepo, setRemovingRepo] = useState<string | null>(null);
+  const [removingAll, setRemovingAll] = useState(false);
+  const search = useGithubRepoSearch(query);
+  const dropdownRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    setHighlight(0);
+  }, [search.data]);
+
+  useEffect(() => {
+    function handleClick(e: MouseEvent) { if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) setDropdownOpen(false); }
+    document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, []);
+
+  const pickRepo = (name: string) => {
+    setQuery(name);
+    setDropdownOpen(false);
+  };
+
+  const addRepo = () => {
+    const name = query.trim();
+    if (!name || !selectedSlug) return;
+    const next = repos.some((r) => r.repo === name)
+      ? repos.map((r) => (r.repo === name ? { ...r, workspaceRole: true } : r))
+      : [...repos, { repo: name, sourceRole: false, workspaceRole: true }];
+    replaceRepos.mutate({ slug: selectedSlug, repos: next });
+    setQuery("");
+    setDropdownOpen(false);
+  };
+
+  const toggleRole = (repo: string, role: "sourceRole" | "workspaceRole") => {
+    if (!selectedSlug) return;
+    replaceRepos.mutate({ slug: selectedSlug, repos: repos.map((r) => (r.repo === repo ? { ...r, [role]: !r[role] } : r)) });
+  };
+
+  const results = search.data ?? [];
+
+  return (
+    <section className="mb-8">
+      <div className="flex items-center justify-between mb-3">
+        <h2 className="font-display text-lg font-medium text-lx-text-primary">Linked Repos</h2>
+        <span className="text-xs text-lx-text-muted">Per project</span>
+      </div>
+      <p className="text-sm text-lx-text-secondary mb-4" style={{ maxWidth: 560 }}>
+        Repos this project can read (source — Forge agent context) and sync issues with (workspace — linking, creating, and two-way state/content sync). Repos must be accessible to the installed GitHub App; the type-ahead only shows repos the App is installed on.
+      </p>
+
+      <div style={{ background: "var(--lx-surface-elevated)", border: "1px solid var(--lx-border-default)", borderRadius: 8, padding: 16 }}>
+        <div className="field" style={{ marginBottom: 0 }}>
+          <label className="field-label" htmlFor="linked-repos-project">Project</label>
+          <div className="flex items-center gap-2" style={{ flexWrap: "wrap" }}>
+            <select
+              id="linked-repos-project"
+              className="prop-input"
+              value={selectedSlug}
+              onChange={(e) => { setSelectedSlug(e.target.value); setQuery(""); setDropdownOpen(false); }}
+              style={{ minWidth: 220 }}
+            >
+              {!selectedSlug && <option value="" disabled>Select a project…</option>}
+              {projects.map((p) => (
+                <option key={p.slug} value={p.slug}>{p.name}</option>
+              ))}
+            </select>
+            <span className="font-mono text-xs text-lx-text-secondary">slug: {selectedSlug || "—"}</span>
+          </div>
+        </div>
+
+        <div className="field mt-4" style={{ marginBottom: 0 }}>
+          <label className="field-label">Repos</label>
+          {isLoading ? (
+            <div className="text-sm text-lx-text-muted py-8 text-center">Loading…</div>
+          ) : repos.length === 0 ? (
+            <p className="text-sm text-lx-text-muted">No repos linked — add one above.</p>
+          ) : (
+            repos.map((r) => (
+              <div key={r.repo} className="repo-row" style={{ display: "flex", alignItems: "center", gap: 12, background: "var(--lx-surface-card)", border: "1px solid var(--lx-border-default)", borderRadius: 6, padding: "10px 12px", marginBottom: 8, flexWrap: "wrap" }}>
+                <span className="font-mono text-sm font-medium text-lx-text-primary" style={{ minWidth: 180 }}>{r.repo}</span>
+                <div style={{ display: "flex", gap: 14, marginLeft: "auto", alignItems: "center", flexWrap: "wrap" }}>
+                  <label className="text-sm text-lx-text-secondary" style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer" }}>
+                    <input type="checkbox" checked={r.sourceRole} onChange={() => toggleRole(r.repo, "sourceRole")} style={{ accentColor: "var(--lx-text-link)" }} /> Source
+                  </label>
+                  <label className="text-sm text-lx-text-secondary" style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer" }}>
+                    <input type="checkbox" checked={r.workspaceRole} onChange={() => toggleRole(r.repo, "workspaceRole")} style={{ accentColor: "var(--lx-text-link)" }} /> Issue workspace
+                  </label>
+                  <button type="button" className="btn btn-danger btn-sm" onClick={() => setRemovingRepo(r.repo)}>Remove</button>
+                </div>
+              </div>
+            ))
+          )}
+
+          <div className="flex items-center gap-2 mt-3" style={{ flexWrap: "wrap" }}>
+            <div ref={dropdownRef} style={{ position: "relative", flex: 1, minWidth: 260 }}>
+              <input
+                className="prop-input w-full"
+                placeholder="Search repos…"
+                value={query}
+                onChange={(e) => { setQuery(e.target.value); setDropdownOpen(true); }}
+                onFocus={() => setDropdownOpen(true)}
+                onKeyDown={(e) => {
+                  if (results.length === 0) return;
+                  if (e.key === "ArrowDown") { e.preventDefault(); setHighlight((h) => (h + 1) % results.length); }
+                  else if (e.key === "ArrowUp") { e.preventDefault(); setHighlight((h) => (h - 1 + results.length) % results.length); }
+                  else if (e.key === "Enter" && dropdownOpen) { e.preventDefault(); pickRepo(results[highlight]); }
+                  else if (e.key === "Escape") { setDropdownOpen(false); }
+                }}
+                style={{ width: "100%" }}
+              />
+              {dropdownOpen && query.trim().length >= 2 && results.length > 0 && (
+                <div style={{ position: "absolute", top: "calc(100% + 4px)", left: 0, right: 0, background: "var(--lx-surface-card)", border: "1px solid var(--lx-border-default)", borderRadius: 6, zIndex: 5, overflow: "hidden" }}>
+                  {results.map((repo, i) => (
+                    <button
+                      key={repo}
+                      type="button"
+                      onClick={() => pickRepo(repo)}
+                      onMouseEnter={() => setHighlight(i)}
+                      style={{
+                        display: "block",
+                        width: "100%",
+                        textAlign: "left",
+                        padding: "8px 12px",
+                        fontFamily: "var(--lx-font-mono, monospace)",
+                        fontSize: 12,
+                        ...(i === highlight
+                          ? { background: "var(--lx-bg-accent-subtle)", color: "var(--lx-text-link)" }
+                          : { color: "var(--lx-text-secondary)" }),
+                      }}
+                    >
+                      {repo}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+            <button type="button" className="btn btn-primary" disabled={!query.trim()} onClick={addRepo}>Add repo</button>
+          </div>
+          <div className="field-hint">Type-ahead over repos the GitHub App is installed on. Each repo needs at least one role. Removing a repo does not unlink existing task↔issue links — those keep syncing.</div>
+        </div>
+
+        <div className="field mt-4" style={{ marginBottom: 0 }}>
+          <label className="field-label" htmlFor="forge-repo-cap">Forge source-repo cap</label>
+          <input id="forge-repo-cap" className="prop-input" defaultValue="3" style={{ width: 80 }} />
+          <div className="field-hint">Max source repos feeding a Forge agent claim (env bootstrap LXK_FORGE_REPO_CAP, default 3).</div>
+        </div>
+
+        <div className="mt-4">
+          <button type="button" className="btn btn-danger btn-sm" onClick={() => setRemovingAll(true)}>
+            <Trash2 size={14} strokeWidth={1.5} />
+            Remove all repos
+          </button>
+        </div>
+      </div>
+
+      {removingRepo && (
+        <RemoveLinkedRepoModal
+          repo={removingRepo}
+          onCancel={() => setRemovingRepo(null)}
+          onConfirm={() => {
+            if (selectedSlug) replaceRepos.mutate({ slug: selectedSlug, repos: repos.filter((r) => r.repo !== removingRepo) });
+            setRemovingRepo(null);
+          }}
+        />
+      )}
+      {removingAll && (
+        <RemoveLinkedRepoModal
+          onCancel={() => setRemovingAll(false)}
+          onConfirm={() => {
+            if (selectedSlug) replaceRepos.mutate({ slug: selectedSlug, repos: [] });
+            setRemovingAll(false);
+          }}
+        />
+      )}
+    </section>
+  );
+}
+
 export function SettingsPage({ slug }: { slug?: string }) {
   const { data: keys = [], isLoading, isError } = useApiKeys();
   const createKey = useCreateApiKey();
@@ -1122,6 +1344,9 @@ export function SettingsPage({ slug }: { slug?: string }) {
 
       {/* GitHub Sync (app scope — admin only) */}
       {showAdminSections && <GithubSyncSection />}
+
+      {/* Linked Repos (per-project — admin only) */}
+      {showAdminSections && <LinkedReposSection slug={slug} />}
 
       {slug && <ProjectBoundSettings slug={slug} />}
 

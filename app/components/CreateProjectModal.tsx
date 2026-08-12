@@ -5,13 +5,12 @@ interface CreateProjectModalProps {
   open: boolean;
   pending: boolean;
   onClose: () => void;
-  onSubmit: (input: { name: string; description?: string; githubRepo?: string }) => void;
+  onSubmit: (input: { name: string; description?: string }) => void;
 }
 
 export function CreateProjectModal({ open, pending, onClose, onSubmit }: CreateProjectModalProps) {
   const [name, setName] = useState("");
   const [desc, setDesc] = useState("");
-  const [githubRepo, setGithubRepo] = useState("");
 
   if (!open) return null;
 
@@ -19,11 +18,9 @@ export function CreateProjectModal({ open, pending, onClose, onSubmit }: CreateP
     onSubmit({
       name: name.trim(),
       description: desc.trim() || undefined,
-      githubRepo: githubRepo.trim() || undefined,
     });
     setName("");
     setDesc("");
-    setGithubRepo("");
   };
 
   return (
@@ -62,7 +59,7 @@ export function CreateProjectModal({ open, pending, onClose, onSubmit }: CreateP
               />
               <div className="field-hint">Shown on the dashboard and in the nav. Slug is derived from the name.</div>
             </div>
-            <div className="field" style={{ marginBottom: 16 }}>
+            <div className="field">
               <label className="field-label" htmlFor="create-project-desc">Description</label>
               <textarea
                 id="create-project-desc"
@@ -72,26 +69,6 @@ export function CreateProjectModal({ open, pending, onClose, onSubmit }: CreateP
                 rows={3}
                 disabled={pending}
               />
-            </div>
-            <div className="field">
-              <label className="field-label" htmlFor="create-project-gh">
-                GitHub Repository
-                <span
-                  className="font-micro text-2xs text-lx-text-muted"
-                  style={{ textTransform: "uppercase", letterSpacing: "0.04em", marginLeft: 6 }}
-                >
-                  Optional
-                </span>
-              </label>
-              <input
-                id="create-project-gh"
-                className="prop-input w-full"
-                value={githubRepo}
-                onChange={(e) => setGithubRepo(e.target.value)}
-                placeholder="owner/name"
-                disabled={pending}
-              />
-              <div className="field-hint">Enables two-way issue sync. Can be linked later in Settings.</div>
             </div>
           </div>
           <div className="modal-footer">

@@ -23,15 +23,26 @@ function decodeCursor(cursor: string | null): { columnId: string; position: stri
   }
 }
 
-const TASK_SELECT = `t.*, c.github_state as column_github_state, GROUP_CONCAT(ta.user_name, '||') AS assignees, COALESCE(GROUP_CONCAT(gi.issue_id || ',' || gi.issue_number || ',' || gi.repo || ',' || COALESCE(gi.synced_state,''), '||'), '') AS github_issues_raw`;
+const TASK_SELECT = `t.*, c.github_state as column_github_state, GROUP_CONCAT(ta.user_name, '||') AS assignees, COALESCE(GROUP_CONCAT(gi.issue_id || ',' || gi.issue_number || ',' || gi.repo || ',' || COALESCE(gi.synced_state,'') || ',' || COALESCE(gi.push_failed,'0'), '||'), '') AS github_issues_raw`;
 
 // Slim variant for list/board/anchor paths — no t.description (the TipTap
 // blob is only needed for get/update/mutation responses).
-const TASK_SELECT_SLIM = `t.id, t.project_id, t.column_id, t.swimlane_id, t.title, t.priority, t.type, t.position, t.due_at, t.archived_at, t.github_issue_id, t.github_issue_number, t.github_repo, t.github_synced_state, t.created_at, t.updated_at, c.github_state as column_github_state, GROUP_CONCAT(ta.user_name, '||') AS assignees, COALESCE(GROUP_CONCAT(gi.issue_id || ',' || gi.issue_number || ',' || gi.repo || ',' || COALESCE(gi.synced_state,''), '||'), '') AS github_issues_raw`;
+const TASK_SELECT_SLIM = `t.id, t.project_id, t.column_id, t.swimlane_id, t.title, t.priority, t.type, t.position, t.due_at, t.archived_at, t.github_issue_id, t.github_issue_number, t.github_repo, t.github_synced_state, t.created_at, t.updated_at, c.github_state as column_github_state, GROUP_CONCAT(ta.user_name, '||') AS assignees, COALESCE(GROUP_CONCAT(gi.issue_id || ',' || gi.issue_number || ',' || gi.repo || ',' || COALESCE(gi.synced_state,'') || ',' || COALESCE(gi.push_failed,'0'), '||'), '') AS github_issues_raw`;
 
 const TASK_FROM = `tasks t LEFT JOIN columns c ON t.column_id = c.id LEFT JOIN task_assignees ta ON ta.task_id = t.id LEFT JOIN task_github_issues gi ON gi.task_id = t.id`;
 
 type SlimTaskRow = Omit<TaskRow, "description"> & { column_github_state: "open" | "closed" | null; github_issues_raw: string | null };
+
+export interface GithubLinkRow {
+  task_id: string;
+  issue_id: string;
+  issue_number: number;
+  repo: string;
+  synced_state: "open" | "closed" | null;
+  pushed_title: string | null;
+  pushed_body: string | null;
+  push_failed: number;
+}
 
 export class TaskRepo extends Effect.Service<TaskRepo>()("Lexa/TaskRepo", {
   effect: Effect.gen(function* () {
@@ -299,6 +310,28 @@ export class TaskRepo extends Effect.Service<TaskRepo>()("Lexa/TaskRepo", {
           state,
           taskId,
           issueId
+        ).pipe(Effect.map(() => undefined)),
+
+      // Full link rows incl. content-echo columns — used by the push flow and
+      // the webhook echo check (never exposed through task payloads).
+      findGithubLinks: (taskId: string): Effect.Effect<GithubLinkRow[], DbError> =>
+        queryAll<GithubLinkRow>(
+          db,
+          `SELECT task_id, issue_id, issue_number, repo, synced_state, pushed_title, pushed_body, push_failed FROM task_github_issues WHERE task_id = ?`,
+          taskId
+        ),
+
+      // Records the content push outcome. On success stores what we pushed
+      // (echo detection) and clears push_failed; on failure only flags
+      // push_failed — pushed_* stays at the last SUCCESSFUL push so the next
+      // save's diff (against pushed_*) naturally retries.
+      setPushedContent: (taskId: string, issueId: string, title: string | null, body: string | null, failed: boolean): Effect.Effect<void, ConstraintViolation | DbError> =>
+        run(
+          db,
+          failed
+            ? `UPDATE task_github_issues SET push_failed = 1 WHERE task_id = ? AND issue_id = ?`
+            : `UPDATE task_github_issues SET pushed_title = ?, pushed_body = ?, push_failed = 0 WHERE task_id = ? AND issue_id = ?`,
+          ...(failed ? [taskId, issueId] : [title, body, taskId, issueId])
         ).pipe(Effect.map(() => undefined)),
 
       unlinkGithubIssue: (taskId: string, issueId: string): Effect.Effect<void, ConstraintViolation | DbError> =>

@@ -60,7 +60,6 @@ export interface ProjectInfo {
   slug: string;
   name: string;
   description: string | null;
-  githubRepo: string | null;
 }
 
 // Server-side GitHub sync settings. The server's settings DB is the single
