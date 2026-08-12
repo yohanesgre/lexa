@@ -36,6 +36,15 @@ export class WorkspaceInvitesService extends Effect.Service<WorkspaceInvitesServ
         const id = randomUUID();
         const normalized = email.trim().toLowerCase();
         const expiresAt = new Date(Date.now() + 7 * 24 * 3600 * 1000).toISOString();
+        // L1: an EXPIRED invite must not block re-issue (UNIQUE email) — the
+        // spec allows re-inviting; drop the dead row first. Accepted invites
+        // are kept (audit) and still block (the user exists already).
+        // expires_at is stored ISO-8601 — compare against an ISO now, not
+        // datetime('now') (mixed formats mis-compare: 'T' > ' ').
+        yield* Effect.try({
+          try: () => db.prepare("DELETE FROM workspace_invitations WHERE email = ? AND expires_at < strftime('%Y-%m-%dT%H:%M:%fZ', 'now')").run(normalized),
+          catch: (e) => new DbError({ message: String(e), cause: e }),
+        });
         yield* Effect.try({
           try: () =>
             db

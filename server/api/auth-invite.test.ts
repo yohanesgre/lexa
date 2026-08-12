@@ -95,6 +95,21 @@ describe("POST /api/auth/invite/accept", () => {
     expect(res.code).toBe("INVALID_TOKEN");
   });
 
+  it("USER_EXISTS when the email already has an account — invite stays pending (two-step: set-password link)", async () => {
+    // an account with the invite's email exists (legacy, password-less)
+    await auth.api.createUser({ body: { email: "legacy@lexa.dev", password: "password123", name: "Legacy", data: { role: "member" } } });
+    const token = seedInvite("legacy@lexa.dev");
+    const res = await acceptCode({ token, name: "X", password: "password123" });
+    expect(res.status).toBe(400);
+    expect(res.code).toBe("USER_EXISTS");
+    const db = new Database(dbPath);
+    const row = db.query("SELECT accepted_at FROM workspace_invitations WHERE token = ?").get(token) as { accepted_at: string | null } | null;
+    db.close();
+    // not stamped — the invite must stay pending so the right path (a
+    // superadmin-issued set-password link) is forced
+    expect(row?.accepted_at).toBeNull();
+  });
+
   it("rejects a too-short password before creating anything", async () => {
     const token = seedInvite("shortpw@lexa.dev");
     const res = await accept({ token, name: "X", password: "short" });

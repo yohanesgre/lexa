@@ -17,6 +17,7 @@ const WorkspaceMemberSchema = Schema.Struct({
   role: Schema.Literal("superadmin", "member"),
   createdAt: Schema.String,
   lastSeen: Schema.NullOr(Schema.String),
+  banned: Schema.Boolean,
   teams: Schema.Array(
     Schema.Struct({
       teamId: Schema.String,

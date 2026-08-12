@@ -9,7 +9,7 @@
 | Base URL | `https://<host>/api` (Bun server behind the cloudflared tunnel) |
 | Auth | Dual-channel: `Authorization: Bearer lxk_<43 base62 chars>` (machines — required by every `/api/*` route except the exempt list below, see Auth) OR a Better Auth session cookie (humans — browsers). `/api/auth/*` is mounted BEFORE the key middleware. The `x-lxk-user` header is removed. |
 | Content type | `application/json; charset=utf-8` |
-| IDs | UUID strings; users, teams (organizations), sessions and related Better Auth rows use Better Auth ids (16-char alphanumeric) |
+| IDs | UUID strings; users, teams (organizations), sessions and related Better Auth rows use Better Auth ids (32-char, `[a-zA-Z0-9]`; migrated legacy rows are 32 lowercase hex — opaque, do not pattern-match) |
 | Timestamps | ISO 8601 UTC (`2026-07-27T10:30:00Z`) |
 | Rich text | **TipTap/ProseMirror JSON object** on REST. (Markdown only exists at the MCP boundary — see MCP.md §Content Format.) |
 | Pagination | `?limit` (default 50, max 200) + `?cursor` (opaque). Response envelope: `{ "data": [...], "nextCursor": string \| null }`. **Exception: `/board` is unpaginated.** |
@@ -105,7 +105,13 @@ authenticate via the session cookie only.
   Team-admin authority comes from the org `member.role` (owner/admin) on the
   team, never from `users.role`.
 - **Exempt routes** (no API key needed):
-  - `/api/auth/*` — Better Auth handler, mounted BEFORE the key middleware
+  - `/api/auth/*` — Better Auth handler, mounted BEFORE the key middleware.
+    Keyless by design; throttled per-IP (120/min) with the same body cap as
+    `/api/*`. `LXK_PUBLIC_URL` must be set to the app's public origin —
+    it drives cookie security, `trustedOrigins` (CSRF origin checks), and the
+    invite/set-password link base. In dev (`LXK_ENV=dev`) `http://localhost:5173`
+    is trusted as well (vite proxies `/api`, cookie-bearing auth POSTs carry
+    its Origin).
   - `GET /api/health`
   - `/api/setup/*` (first-run wizard)
   - `POST /api/webhooks/github` — HMAC-SHA-256 signature over the raw body is the auth
@@ -114,9 +120,14 @@ authenticate via the session cookie only.
     daemon token (`x-forge-token: <LXK_FORGE_DAEMON_TOKEN>` header) in place of a key
     (`/api/forge/sessions` joins the daemon's PUT/DELETE and the browser's
     GET/reset)
-- **Login rate limit (R17):** failed logins on `/api/auth/*` are throttled by
-  the Better Auth rate-limit plugin (in-memory; ~5 attempts/60s per email,
-  15 min lockout). The existing per-IP `/api/*` limiter is untouched.
+- **Login rate limit (R17):** failed logins on `/api/auth/sign-in/email` are
+  throttled by an in-process limiter (5 attempts/60s per email, 15 min
+  lockout; success resets — better-auth 1.6.27 has NO rate-limit plugin, so
+  this ships instead). The whole keyless `/api/auth/*` surface additionally
+  gets a per-IP throttle (120 req/min) and the same body cap as `/api/*`.
+  Residual risk: the per-email budget lets an attacker lock out a known email
+  with 5 tries (same as any login form); the per-IP throttle bounds the blast
+  radius per source.
 
 ## Entity Schemas (TypeScript)
 
@@ -145,7 +156,7 @@ interface Project {
 // ── Auth, teams & sessions ──
 
 interface LexaUser {
-  id: ID;                     // Better Auth id (16-char alphanumeric)
+  id: ID;                     // Better Auth id (32-char, [a-zA-Z0-9])
   email: string;
   name: string;
   role: "superadmin" | "member";   // env-only superadmin — never edited at runtime
@@ -994,6 +1005,16 @@ body { email* }
   link = {baseURL}/invite?token=<secret> — shared out-of-band (no email
   transport). Expires 7d after issue. Accepting on first login sets the
   password → member account created → accepted_at stamped; re-use idempotent.
+
+POST   /api/auth/invite/accept    (keyless, session-less — the token is the auth)
+body { token*, name*, password* }    (password min 8 chars)
+→ 200 { status: true, email } | 400 { code }
+  Consumes a workspace invite: validates the token (unknown / expired /
+  already accepted → 400 `INVALID_TOKEN`; the email already has an account →
+  400 `USER_EXISTS`, invite left pending — the account needs a superadmin
+  set-password link instead). Creates the member account (credential
+  password) and stamps accepted_at. Error body is flat: `{ "code": ... }`
+  (native better-auth shape — NOT the `{ error: {...} }` REST envelope).
 
 GET    /api/workspace/invites    (superadmin)
 → 200 { data: Array<{ id, email, expiresAt }> }

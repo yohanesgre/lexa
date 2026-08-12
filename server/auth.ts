@@ -8,6 +8,34 @@ import { Database } from "bun:sqlite";
 export const DATABASE_PATH = process.env.DATABASE_PATH || "/app/data/lexa.db";
 export const PUBLIC_URL = process.env.LXK_PUBLIC_URL || "http://localhost:3000";
 
+// Dev-only trusted origin: vite dev (http://localhost:5173) proxies /api and
+// sends the Origin header on cookie-bearing auth POSTs (sign-out,
+// change-password, reset-password) — without this they 403 INVALID_ORIGIN.
+const TRUSTED_ORIGINS = process.env.LXK_ENV === "dev"
+  ? [PUBLIC_URL, "http://localhost:5173"]
+  : [PUBLIC_URL];
+
+// Per-IP throttle for the keyless /api/auth/* surface (the per-email login
+// budget only guards one email; an attacker can otherwise spam scrypt-hash
+// sign-in attempts from one IP against many emails). 120 req/min burst,
+// in-memory — single server process, like loginLimiter.
+const authIpBuckets = new Map<string, { count: number; windowStart: number }>();
+const AUTH_IP_LIMIT = 120;
+const AUTH_IP_WINDOW_MS = 60_000;
+export function authIpLimiter(ip: string): { ok: boolean; retryAfterSec: number } {
+  const now = Date.now();
+  const bucket = authIpBuckets.get(ip);
+  if (!bucket || now - bucket.windowStart >= AUTH_IP_WINDOW_MS) {
+    authIpBuckets.set(ip, { count: 1, windowStart: now });
+    return { ok: true, retryAfterSec: 0 };
+  }
+  bucket.count++;
+  if (bucket.count > AUTH_IP_LIMIT) {
+    return { ok: false, retryAfterSec: Math.ceil((bucket.windowStart + AUTH_IP_WINDOW_MS - now) / 1000) };
+  }
+  return { ok: true, retryAfterSec: 0 };
+}
+
 // ── Login rate limit (R17) ──
 // Better Auth 1.6.27 has no bundled rateLimit plugin (DECLARED DEVIATION) —
 // this is a small in-process limiter (memory storage; fine for the single
@@ -96,7 +124,11 @@ const lexaInvitesPlugin = () => ({
         if (new Date(row.expires_at).getTime() < Date.now()) throw ctx.error("BAD_REQUEST", { code: "INVALID_TOKEN" });
         const existing = authDb.prepare("SELECT id FROM users WHERE email = ?").get(row.email) as { id: string } | null;
         if (existing) {
-          authDb.prepare("UPDATE workspace_invitations SET accepted_at = datetime('now') WHERE id = ?").run(row.id);
+          // Two-step (R11): the account exists but may have no password (legacy
+          // users) — the invite cannot set it. Do NOT stamp accepted_at: the
+          // pending invite then blocks re-issue and forces the right path — a
+          // superadmin-issued set-password link. The FE invite page shows the
+          // "account exists — contact an admin" state.
           throw ctx.error("BAD_REQUEST", { code: "USER_EXISTS" });
         }
         await auth.api.createUser({
@@ -162,5 +194,5 @@ export const auth = betterAuth({
     tanstackStartCookies(),
   ],
   advanced: { useSecureCookies: true },
-  trustedOrigins: [PUBLIC_URL],
+  trustedOrigins: TRUSTED_ORIGINS,
 });

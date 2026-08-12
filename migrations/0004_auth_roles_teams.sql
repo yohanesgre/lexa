@@ -123,7 +123,7 @@ CREATE TABLE workspace_invitations (
   role        TEXT NOT NULL DEFAULT 'member',
   token       TEXT NOT NULL UNIQUE,
   expires_at  TEXT NOT NULL,
-  created_by  TEXT REFERENCES users(id),
+  created_by  TEXT REFERENCES users(id) ON DELETE SET NULL,
   created_at  TEXT NOT NULL DEFAULT (datetime('now')),
   accepted_at TEXT
 );
@@ -133,5 +133,7 @@ ALTER TABLE projects ADD COLUMN team_id TEXT REFERENCES organization(id) ON DELE
 CREATE INDEX idx_projects_team ON projects(team_id);
 
 -- ── runtimes: team scoping (NULL = global superadmin runtime) ──
-ALTER TABLE runtimes ADD COLUMN team_id TEXT REFERENCES organization(id);
+-- runtimes are ephemeral infra: a deleted team must not RESTRICT them
+-- (TEAM_HAS_PROJECTS guards projects only) — unassign instead.
+ALTER TABLE runtimes ADD COLUMN team_id TEXT REFERENCES organization(id) ON DELETE SET NULL;
 CREATE INDEX idx_runtimes_team ON runtimes(team_id);
