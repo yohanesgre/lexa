@@ -68,6 +68,16 @@ describe("WorkspaceInvitesService", () => {
     if (Either.isLeft(result)) expect(result.left).toBeInstanceOf(InviteAlreadyPending);
   });
 
+  it("re-issues when the previous invite expired (dead rows do not block)", () => {
+    const db = tmpDb();
+    const svc = makeService(db);
+    const first = Effect.runSync(svc.create("a@lexa.dev", null));
+    db.prepare("UPDATE workspace_invitations SET expires_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-1 day') WHERE id = ?").run(first.invite.id);
+    const second = Effect.runSync(Effect.either(svc.create("a@lexa.dev", null)));
+    expect(Either.isRight(second)).toBe(true);
+    if (Either.isRight(second)) expect(second.right.invite.email).toBe("a@lexa.dev");
+  });
+
   it("revokes a pending invite and refuses unknown ids", () => {
     const db = tmpDb();
     const svc = makeService(db);

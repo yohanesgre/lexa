@@ -259,9 +259,11 @@ async function main() {
   console.log(`  Database:       ${DB_PATH}`);
   console.log("");
   if (flavor === "dev") {
-    console.log("  Run the dev stack:  bun run dev:full");
-    console.log("  Frontend:           http://localhost:5173  (vite, live reload)");
-    console.log("  API (optional):     http://localhost:3000  (serves the built app)");
+  console.log("  Run the dev stack:  bun run dev:full");
+  console.log("  Frontend:           http://localhost:5173  (vite, live reload)");
+  console.log("  API (optional):     http://localhost:3000  (serves the built app)");
+  console.log("  NOTE: seeded member users have no password — log in as the");
+  console.log("        superadmin and issue set-password links from the Members UI.");
   } else {
     console.log("  Deploy:             lexa-cli deploy <domain> " + flavor);
     console.log("  (or docker compose --env-file " + envFile + " up -d --build)");

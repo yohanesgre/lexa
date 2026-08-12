@@ -1,14 +1,14 @@
 import { Effect, Data } from "effect";
-import { Sqlite, DbError } from "../db/database";
+import { Sqlite, DbError, withTx } from "../db/database";
 import { WorkspaceInvitesService } from "./workspace-invites.service";
 import { PasswordLinksService } from "./password-links.service";
 import type { LexaUser, TeamMemberRole } from "../../shared/types";
 
 export class WorkspaceUserNotFound extends Data.TaggedError("WorkspaceUserNotFound")<{ userId: string }> {}
 export class CannotDeleteSelf extends Data.TaggedError("CannotDeleteSelf")<{ message: string }> {}
-export class CannotDeactivateSelf extends Data.TaggedError("CannotDeactivateSelf")<{ message: string }> {}
 
 export interface WorkspaceMember extends LexaUser {
+  banned: boolean;
   teams: { teamId: string; teamName: string; role: TeamMemberRole }[];
 }
 
@@ -65,19 +65,24 @@ export class WorkspaceService extends Effect.Service<WorkspaceService>()("Lexa/W
             entry.push({ teamId: t.teamId, teamName: t.teamName, role: (t.role.split(",")[0].trim() || "member") as TeamMemberRole });
             byUser.set(t.userId, entry);
           }
-          return users.map((u) => ({ ...toUser(u), teams: byUser.get(u.id) ?? [] }));
+          return users.map((u) => ({ ...toUser(u), banned: u.banned === 1, teams: byUser.get(u.id) ?? [] }));
         },
         catch: (e) => new DbError({ message: String(e), cause: e }),
       });
 
     // Deactivate/reactivate (R16): the banned column is better-auth's own
-    // admin-plugin marker — setting it blocks login + new sessions.
+    // admin-plugin marker — setting it blocks login + new sessions. Existing
+    // sessions are killed explicitly (the ban hook only fires on session
+    // CREATE, so a live session would otherwise keep working).
     const setActive = (userId: string, active: boolean): Effect.Effect<LexaUser, WorkspaceUserNotFound | DbError> =>
       Effect.gen(function* () {
         const user = yield* findUser(userId);
         if (!user) return yield* Effect.fail(new WorkspaceUserNotFound({ userId }));
         yield* Effect.try({
-          try: () => db.prepare("UPDATE users SET banned = ?, banReason = ?, banExpires = NULL WHERE id = ?").run(active ? 0 : 1, active ? null : "deactivated by superadmin", userId),
+          try: () => {
+            db.prepare("UPDATE users SET banned = ?, banReason = ?, banExpires = NULL WHERE id = ?").run(active ? 0 : 1, active ? null : "deactivated by superadmin", userId);
+            if (!active) db.prepare("DELETE FROM session WHERE userId = ?").run(userId);
+          },
           catch: (e) => new DbError({ message: String(e), cause: e }),
         });
         const updated = yield* findUser(userId);
@@ -97,13 +102,15 @@ export class WorkspaceService extends Effect.Service<WorkspaceService>()("Lexa/W
             return yield* Effect.fail(new CannotDeleteSelf({ message: "Cannot delete the last superadmin" }));
           }
         }
-        yield* Effect.try({
+        // Atomic: keys + user row in one transaction (a mid-way failure must
+        // not leave the keys revoked with the user still active).
+        yield* withTx(db, Effect.try({
           try: () => {
             db.prepare("DELETE FROM api_keys WHERE user_id = ?").run(userId);
             db.prepare("DELETE FROM users WHERE id = ?").run(userId);
           },
           catch: (e) => new DbError({ message: String(e), cause: e }),
-        });
+        }));
       });
 
     const createInvite = (email: string, createdBy: string) => invites.create(email, createdBy);

@@ -207,17 +207,32 @@ describe("teams + workspace + sessions endpoints", () => {
     expect(membersLeft.c).toBe(0);
   });
 
-  it("workspace members list carries teams; deactivate blocks login, reactivate restores", async () => {
+  it("workspace members list carries teams + banned; deactivate kills sessions and blocks login, reactivate restores", async () => {
     const list = await withKey("GET", "/api/workspace/members");
     expect(list.status).toBe(200);
-    const body = (await list.json()) as { data: { email: string; role: string; teams: { teamName: string; role: string }[] }[] };
+    const body = (await list.json()) as { data: { email: string; role: string; banned: boolean; teams: { teamName: string; role: string }[] }[] };
     const sa = body.data.find((m) => m.email === "sa@lexa.test");
     expect(sa?.role).toBe("superadmin");
+    expect(sa?.banned).toBe(false);
     // sa owns the remaining team (Alpha — Team A was deleted above); the
     // members list carries team memberships
     expect(sa?.teams).toContainEqual(expect.objectContaining({ teamName: "Alpha", role: "owner" }));
+    // H2: deactivation kills EXISTING sessions too (the ban hook only fires
+    // on session CREATE) — sign in first, then deactivate, then the session
+    // must be gone and new logins blocked.
+    const preSignIn = (await auth.api.signInEmail({
+      body: { email: "member3@lexa.test", password: "password123" },
+      returnHeaders: true,
+    })) as unknown as { headers?: Headers };
+    const preCookie = (preSignIn.headers?.get?.("set-cookie") ?? "").split(";")[0];
+    expect(preCookie).toMatch(/^__Secure-better-auth\.session_token=/);
     const deactivate = await withKey("PATCH", `/api/workspace/members/${userIds["member3@lexa.test"]}`, { action: "deactivate" });
     expect(deactivate.status).toBe(200);
+    const listAfter = await withKey("GET", "/api/workspace/members");
+    const bodyAfter = (await listAfter.json()) as { data: { email: string; banned: boolean }[] };
+    expect(bodyAfter.data.find((m) => m.email === "member3@lexa.test")?.banned).toBe(true);
+    const liveSession = await auth.api.getSession({ headers: new Headers({ cookie: preCookie }) });
+    expect(liveSession).toBeNull();
     const blocked = await auth.api.signInEmail({ body: { email: "member3@lexa.test", password: "password123" } }).catch((e) => e);
     expect((blocked as { status?: string }).status ?? 200).not.toBe(200);
     const reactivate = await withKey("PATCH", `/api/workspace/members/${userIds["member3@lexa.test"]}`, { action: "reactivate" });

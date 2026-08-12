@@ -123,7 +123,13 @@ export class TeamsService extends Effect.Service<TeamsService>()("Lexa/TeamsServ
         });
         if (owned > 0) return yield* Effect.fail(new TeamHasProjects({ teamId, count: owned }));
         yield* Effect.try({
-          try: () => db.prepare("DELETE FROM organization WHERE id = ?").run(teamId),
+          try: () => {
+            // runtimes are ephemeral infra — unassign them (fresh DBs get
+            // ON DELETE SET NULL from the FK; this explicit clear also covers
+            // DBs migrated before that FK action existed).
+            db.prepare("UPDATE runtimes SET team_id = NULL WHERE team_id = ?").run(teamId);
+            db.prepare("DELETE FROM organization WHERE id = ?").run(teamId);
+          },
           catch: (e) => new DbError({ message: String(e), cause: e }),
         });
       });

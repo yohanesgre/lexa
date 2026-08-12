@@ -9,7 +9,7 @@ import { getSetting, setSetting, mirrorSettingsFromEnv } from "./db/settings";
 import { apiRateLimiter, isPrivateIp, syncRateLimitFromDb } from "./api/rate-limit";
 import { syncGitHubConfigFromDb } from "./github/client";
 import { MAX_API_BODY, X_LEXA_REMOTE_IP } from "./api/limits";
-import { auth, loginLimiter } from "./auth";
+import { auth, loginLimiter, authIpLimiter } from "./auth";
 import type { Server } from "bun";
 
 let ssrFetch: ((req: Request) => Promise<Response>) | null = null;
@@ -176,17 +176,35 @@ const server: Server<unknown> = Bun.serve({
 
     if (url.pathname.startsWith("/api/")) {
       // Better Auth — mounted BEFORE the API-key middleware. The auth handler
-      // is its own auth: keyless by design (session cookies). Login rate
-      // limiting (R17): 5 failed attempts / 60s per email, then a 15-minute
-      // lockout — small in-process limiter (1.6.27 has no rateLimit plugin;
-      // memory storage is fine for the single server process). Counted on
-      // sign-in only; successes reset the budget; the per-IP /api limiter is
-      // untouched.
+      // is its own auth: keyless by design (session cookies). The keyless
+      // surface still gets the per-IP throttle + body cap (unbounded JSON
+      // parse + scrypt cost must not bypass the /api limits).
       if (url.pathname.startsWith("/api/auth/")) {
+        const socketIp = server.requestIP(req)?.address ?? "";
+        const ip = req.headers.get("cf-connecting-ip") || socketIp || "unknown";
+        const ipVerdict = authIpLimiter(ip);
+        if (!ipVerdict.ok) {
+          return withSecurityHeaders(
+            new Response(JSON.stringify({ error: { code: "RATE_LIMITED", message: "Too many requests — try again later" } }), {
+              status: 429,
+              headers: { "Content-Type": "application/json", "Retry-After": String(ipVerdict.retryAfterSec) },
+            })
+          );
+        }
+        const read = await readBodyWithLimit(req, MAX_API_BODY);
+        if (!read.ok) {
+          console.warn(`[Auth] body too large path=${path} declared=${req.headers.get("content-length") ?? "unknown"} bytes`);
+          return tooLargeResponse();
+        }
+        const authReq = new Request(req.url, { method: req.method, headers: req.headers, body: read.bytes });
+        // Login rate limiting (R17): 5 failed attempts / 60s per email, then
+        // a 15-minute lockout — small in-process limiter (1.6.27 has no
+        // rateLimit plugin; memory storage is fine for the single server
+        // process). Counted on sign-in only; successes reset the budget.
         if (url.pathname === "/api/auth/sign-in/email" && req.method === "POST") {
           let email = "";
           try {
-            email = String(((await req.clone().json()) as { email?: unknown })?.email ?? "");
+            email = String(((await authReq.clone().json()) as { email?: unknown })?.email ?? "");
           } catch {}
           if (email) {
             const verdict = loginLimiter.check(email);
@@ -198,13 +216,13 @@ const server: Server<unknown> = Bun.serve({
                 )
               );
             }
-            const res = await auth.handler(req);
+            const res = await auth.handler(authReq);
             if (res.status === 401) loginLimiter.recordFailure(email);
             else if (res.status === 200) loginLimiter.recordSuccess(email);
             return withSecurityHeaders(res);
           }
         }
-        return withSecurityHeaders(await auth.handler(req));
+        return withSecurityHeaders(await auth.handler(authReq));
       }
       // GitHub webhook: HMAC-SHA-256 is the auth (no API-key middleware).
       // Signature verified over the RAW body, constant-time, BEFORE any
