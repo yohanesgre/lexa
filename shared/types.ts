@@ -320,6 +320,27 @@ export interface ForgeTask {
   finishedAt: ISODate | null;
 }
 
+// The warm-session mapping for one (document, runtime) pair: which
+// agent-side conversation (opencode serve session id) the next Forge task on
+// this document should continue. Agent-agnostic — hermes/command-code may
+// reuse the table later; only opencode writes rows in v1. Runtime-scoped PK:
+// a different runtime starts its own session for the same document.
+export interface ForgeSession {
+  documentType: "task" | "wiki";
+  documentId: string;
+  runtimeId: string;
+  // The runtime CLI's conversation id (opencode serve session id) — never a
+  // Lexa session id. Null verdict on claim = the daemon mints a new one.
+  runtimeSessionId: string;
+  provider: ForgeProvider;
+  // Agent/skill the mapping was created for: a changed agent/skill on the
+  // task resets continuity (claim returns runtimeSessionId: null).
+  agentId: ID;
+  skillId: ID;
+  createdAt: ISODate;
+  updatedAt: ISODate;
+}
+
 // One line of the live activity feed for a Forge task (append-only).
 export interface ForgeTaskLog {
   id: ID;

@@ -475,6 +475,42 @@ export function rowToForgeSkill(row: ForgeSkillRow): {
   };
 }
 
+export interface ForgeSessionRow {
+  document_type: "task" | "wiki";
+  document_id: string;
+  runtime_id: string;
+  runtime_session_id: string;
+  provider: "opencode" | "hermes" | "command-code";
+  agent_id: string;
+  skill_id: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export function rowToForgeSession(row: ForgeSessionRow): {
+  documentType: "task" | "wiki";
+  documentId: string;
+  runtimeId: string;
+  runtimeSessionId: string;
+  provider: "opencode" | "hermes" | "command-code";
+  agentId: string;
+  skillId: string;
+  createdAt: string;
+  updatedAt: string;
+} {
+  return {
+    documentType: row.document_type,
+    documentId: row.document_id,
+    runtimeId: row.runtime_id,
+    runtimeSessionId: row.runtime_session_id,
+    provider: row.provider,
+    agentId: row.agent_id,
+    skillId: row.skill_id,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
 export interface ForgeTaskLogRow {
   id: string;
   task_id: string;

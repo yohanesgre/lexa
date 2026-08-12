@@ -27,7 +27,10 @@ export function createApiMiddleware(db: Database, dbPath: string) {
       const isHealth = path === "/api/health";
       // Forge daemon endpoints accept the daemon token (LXK_FORGE_DAEMON_TOKEN)
       // in place of the API key — the daemon may hold its own credential.
-      const isForgeDaemon = path.startsWith("/api/forge/daemon/") || path === "/api/forge/runtimes/register";
+      // /api/forge/sessions joins them: the daemon PUTs the pre-spawn mapping
+      // and DELETEs it on cancel/timeout with x-forge-token; the browser
+      // GET/reset keep using the Bearer key.
+      const isForgeDaemon = path.startsWith("/api/forge/daemon/") || path === "/api/forge/runtimes/register" || path === "/api/forge/sessions";
 
       // Rate limit before auth: a blocked IP stays blocked regardless of key.
       // The key/token-gated forge machine surfaces are exempt (isRateLimitExemptPath:
