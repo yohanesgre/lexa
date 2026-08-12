@@ -350,7 +350,8 @@ Output: { columns: [{ name, count, wipLimit }], totalTasks }
 Input:  { name*, slug?, description?, team? }
         slug auto-generated from name if omitted.
         team = team slug (optional): assigns the project to that team
-        (projects.team_id). Unknown team slug → error with
+        (projects.team_id). Unknown team slug → error (code TBD — likely
+        TEAM_NOT_FOUND, pending the BE lane's error-map confirmation) with
         details.availableTeams.
 Output: { name, slug, description, createdAt, updatedAt, teamId }
 Errors: FORBIDDEN, SLUG_TAKEN, CONSTRAINT
