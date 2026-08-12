@@ -213,9 +213,9 @@ describe("runCompose", () => {
 });
 
 describe("cmdDeploy end-to-end", () => {
-  async function runDeploy(extra: Record<string, string | boolean> = {}): Promise<{ deployDir: string; log: string }> {
+  async function runDeploy(extra: Record<string, string | boolean> = {}, opts: { deployDir?: string } = {}): Promise<{ deployDir: string; log: string }> {
     stubCfApi();
-    const deployDir = mkdtempSync(join(tmpdir(), "lexa-deploy-e2e-"));
+    const deployDir = opts.deployDir ?? mkdtempSync(join(tmpdir(), "lexa-deploy-e2e-"));
     const log = vi.spyOn(console, "log").mockImplementation(() => {});
     const mod = await import("./deploy");
     const cfg = (await import("./config")).CliConfigService;
@@ -250,6 +250,23 @@ describe("cmdDeploy end-to-end", () => {
     // Banner shows the pinned image.
     expect(log).toContain("Image: ghcr.io/yohanesgre/lexa:v1.2.3");
     expect(log).toContain("https://lexa.example.com");
+    rmSync(deployDir, { recursive: true, force: true });
+  });
+
+  it("redeploy strips stale LXK_ACCESS_* lines but carries hand-added keys", async () => {
+    const deployDir = mkdtempSync(join(tmpdir(), "lexa-deploy-e2e-"));
+    // A previous pre-rework deploy left Access vars in the flavor env file
+    // alongside a hand-added key (LOG_LEVEL). Redeploy must drop the stale
+    // Access lines (rewrittenKeys-owned) and keep the hand-added key.
+    writeFileSync(join(deployDir, ".env.prod"), "LXK_API_KEY=old_key_1234567890123456789012345678901234567890\nLXK_ACCESS_TEAM=lexa\nLXK_ACCESS_AUD=aud1\nLOG_LEVEL=debug\n");
+    const { log } = await runDeploy({}, { deployDir });
+    const env = readFileSync(join(deployDir, ".env.prod"), "utf-8");
+    expect(env).not.toMatch(/LXK_ACCESS_TEAM=/);
+    expect(env).not.toMatch(/LXK_ACCESS_AUD=/);
+    expect(env).toContain("LOG_LEVEL=debug");
+    expect(env).toContain("LXK_API_KEY=lxk_test_key_1234567890123456789012345678901234567890");
+    expect(env).toContain("LXK_PUBLIC_URL=https://lexa.example.com");
+    expect(log).toContain("Wrote .env.prod");
     rmSync(deployDir, { recursive: true, force: true });
   });
 
