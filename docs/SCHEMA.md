@@ -434,6 +434,29 @@ CREATE TABLE forge_tasks (
 );
 CREATE INDEX idx_forge_tasks_status ON forge_tasks(status, created_at);
 
+-- Forge warm sessions: maps one (document, runtime) pair to the agent-side
+-- conversation (opencode serve session id) the next task on that document
+-- should continue. Written pre-spawn by the daemon (spec §8 step 3); dropped
+-- on cancel/timeout (daemon-side) or via the user-facing reset endpoint.
+-- runtime_session_id is deliberately agent-agnostic — the runtime session is
+-- the agent-side conversation on the machine, never a Lexa session; provider
+-- records which CLI owns it so the id stays interpretable without a join to
+-- the (deletable) runtimes row. Only opencode writes rows in v1.
+-- Agent/skill change → the daemon mints a new session and updates the row
+-- (reset semantics, no history rows).
+CREATE TABLE forge_sessions (
+  document_type   TEXT    NOT NULL CHECK (document_type IN ('task', 'wiki')),
+  document_id     TEXT    NOT NULL,
+  runtime_id      TEXT    NOT NULL,
+  runtime_session_id TEXT NOT NULL,
+  provider        TEXT    NOT NULL CHECK (provider IN ('opencode', 'hermes', 'command-code')),
+  agent_id        TEXT    NOT NULL,
+  skill_id        TEXT    NOT NULL,
+  created_at      TEXT    NOT NULL DEFAULT (datetime('now')),
+  updated_at      TEXT    NOT NULL DEFAULT (datetime('now')),
+  PRIMARY KEY (document_type, document_id, runtime_id)
+);
+
 -- ============================================================
 -- Forge agents + skills — global rule bundles
 -- ============================================================
@@ -603,8 +626,9 @@ existing hard delete).
 Forge is the AI writing button in the task/wiki editors. A **CLI listener** on a
 machine registers the machine, claims setup events, owns one daemon child per
 installed agent CLI, and reports the machine's available agents/models. Each
-daemon registers as a `runtimes` row, polls `forge_tasks`, spawns the configured
-CLI in one-shot mode per task, and reports the result.
+daemon registers as a `runtimes` row, polls `forge_tasks`, runs the configured
+CLI (warm `opencode serve` for opencode runtimes, one-shot spawn per task for
+hermes/command-code), and reports the result.
 
 - **Task lifecycle:** `queued` → (daemon claims) `running` → `completed`/`failed`.
   FIFO claim: the daemon updates the row conditionally (`WHERE status='queued'`);
@@ -618,8 +642,10 @@ CLI in one-shot mode per task, and reports the result.
   per-task `extra_prompt`).
 - **Machine state root:** everything the host stores lives in `~/.lexa/`
   (`LEXA_DIR` override): `config.json`, `machine-id`, `env`, `runtimes/<id>/env`,
-  and per-run workdirs under `runs/<taskId>/` (ephemeral — removed after every
-  run). The listener migrates the legacy `~/.config/lexa-cli` +
+  the persistent opencode sandbox at `runtimes/<id>/forge-home/`, persistent
+  project workspaces under `projects/`, and legacy per-run workdirs under
+  `runs/<taskId>/` (ephemeral — removed after every run; opencode runtimes
+  don't use it). The listener migrates the legacy `~/.config/lexa-cli` +
   `~/.config/lexa-forge` dirs into it on boot — migrate-and-delete, no fallback.
 - **`forge_task_logs`** is the append-only live status feed per task. The daemon
   streams a line per step (claimed, model, agent started, generating, done/failed);
@@ -634,8 +660,8 @@ CLI in one-shot mode per task, and reports the result.
   from Settings. The listener discovers catalogs by invoking the installed CLI
   and sends them with the machine heartbeat.
 - **Auth:** browser calls use the normal Bearer API key; daemon endpoints
-  (`/api/forge/daemon/*`, `/api/forge/runtimes/*`) accept `x-forge-token`
-  (`LXK_FORGE_DAEMON_TOKEN`) or a Bearer key.
+  (`/api/forge/daemon/*`, `/api/forge/runtimes/*`, `/api/forge/sessions`)
+  accept `x-forge-token` (`LXK_FORGE_DAEMON_TOKEN`) or a Bearer key.
 
 ### Task field options (custom priority/type)
 Priority and type are per-project option lists (`priority_options` / `type_options`), not global enums. `tasks.priority` / `tasks.type` are plain TEXT columns (DEFAULT `'medium'` / `'task'`) with **no FK** — SQLite enforces nothing; the service validates the value against the project's option rows (`InvalidOption` 422) and resolves an empty value to the first option.

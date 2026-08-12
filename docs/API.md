@@ -937,8 +937,8 @@ body { runtimeId* }
   runtimeSessionId: the warm-session continue-vs-mint verdict — the mapped
   runtime session id when a forge_sessions row exists for (documentType,
   documentId, runtimeId) AND its agent/skill match the task's, else null
-  (daemon then mints a fresh session via the runtime CLI). agentId/skillId are
-  the task's own — what a future mapping must match. Only meaningful for
+  (the daemon then mints a fresh session on its serve server). agentId/skillId
+  are the task's own — what a future mapping must match. Only meaningful for
   provider "opencode"; hermes/command-code ignore it.)
 
 # ── Forge warm sessions (document ↔ runtime agent conversation mapping) ──
@@ -954,7 +954,7 @@ PUT    /api/forge/sessions                   (daemon)
 body { documentType*, documentId*, runtimeId*, runtimeSessionId*, provider*,
        agentId*, skillId* }
 → 204
-Upsert called by the daemon BEFORE spawning the run (pre-spawn mapping write,
+Upsert called by the daemon BEFORE the run starts (pre-spawn mapping write,
 spec §8 step 3) and to rewrite the row on stale-session retry. provider is
 "opencode"|"hermes"|"command-code"; only opencode writes rows in v1.
 
