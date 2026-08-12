@@ -46,7 +46,7 @@ logic, not seed).
 | `GITHUB_PRIVATE_KEY_FILE` | App private key file path (read at boot, no escaping — recommended) |
 | `GITHUB_WEBHOOK_SECRET` | HMAC secret for the `/api/webhooks/github` route |
 | `LOG_LEVEL` | logging level (default `info`) |
-| `LXK_ADMIN_EMAILS` | comma-separated **superadmin** emails — env-only allow-list, applied at provisioning (setup wizard / first login); never edited at runtime |
+| `LXK_ADMIN_EMAILS` | comma-separated **superadmin** emails — env-only allow-list, applied at provisioning (setup wizard only); never edited at runtime |
 | `LXK_API_KEY` | server auth Bearer key (`lxk_` + 43 chars) — machines only; browser key injection removed |
 | `LXK_FORGE_DAEMON_TOKEN` | shared secret for Forge daemons (alternative to a Settings API key) |
 | `LXK_MAX_BODY_MB` | max request body for `/api` and `/mcp` in MB (default 16); webhook payloads hard-capped at 1 MB before HMAC, regardless |
@@ -94,9 +94,10 @@ email, locks setup, and seeds nothing.
 
 **Superadmin account:** after deploy (or setup), open `/setup` once — the
 wizard creates the first superadmin (email + password, email-free; the
-password is never passed as a shell flag). Later allow-list edits
-(`LXK_ADMIN_EMAILS`) affect only new users — set the env before first login.
-Members are onboarded via superadmin-issued workspace invite links (7d
+password is never passed as a shell flag). The allow-list is applied at
+account creation only: later `LXK_ADMIN_EMAILS` edits affect only users
+created after the change (Q12). Members are onboarded via
+superadmin-issued workspace invite links (7d
 expiry) and set-password links — no email transport anywhere.
 
 **Teardown:** `lexa-cli undeploy <domain> [staging|prod]` reverses a deploy for
