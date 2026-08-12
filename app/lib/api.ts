@@ -1,4 +1,4 @@
-import type { Project, ProjectRepo, Column, Swimlane, Task, Board, WikiPageMeta, WikiPage, WikiPageRevision, WikiPageRevisionSummary, TipTapDoc, ApiKey, ApiKeyCreateResult, Dashboard, FieldConfig, ForgeTask, ForgeTaskLog, ForgeTaskStatus, ForgeAgent, ForgeSkill, ForgeProvider, DocumentSource, Runtime, RuntimeEvent, Machine, TaskLink, TaskLinkSuggestion, ActivityEvent, ActivityItem, TaskComment, GithubIssueSummary } from "../../shared/types";
+import type { Project, ProjectRepo, Column, Swimlane, Task, Board, WikiPageMeta, WikiPage, WikiPageRevision, WikiPageRevisionSummary, TipTapDoc, ApiKey, ApiKeyCreateResult, Dashboard, FieldConfig, ForgeTask, ForgeTaskLog, ForgeTaskStatus, ForgeAgent, ForgeSkill, ForgeProvider, ForgeSession, DocumentSource, Runtime, RuntimeEvent, Machine, TaskLink, TaskLinkSuggestion, ActivityEvent, ActivityItem, TaskComment, GithubIssueSummary } from "../../shared/types";
 
 const BASE = "/api";
 
@@ -469,22 +469,7 @@ export function listForgeTaskHistory(filters: {
 
 // ── Forge sessions (warm opencode serve conversation mappings) ──
 
-// Mirrors the contract's ForgeSession row (shared/types.ts on the BE lane):
-// which agent-side conversation the next Forge task on this document should
-// continue, scoped per (document, runtime).
-export interface ForgeSessionRow {
-  documentType: "task" | "wiki";
-  documentId: string;
-  runtimeId: string;
-  runtimeSessionId: string;
-  provider: ForgeProvider;
-  agentId: string;
-  skillId: string;
-  createdAt: string;
-  updatedAt: string;
-}
-
-export function listForgeSessions(documentType: "task" | "wiki", documentId: string): Promise<{ data: ForgeSessionRow[] }> {
+export function listForgeSessions(documentType: "task" | "wiki", documentId: string): Promise<{ data: ForgeSession[] }> {
   return request(`${BASE}/forge/sessions?documentType=${documentType}&documentId=${encodeURIComponent(documentId)}`);
 }
 

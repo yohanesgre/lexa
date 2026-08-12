@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import * as api from "./api";
-import type { ForgeSessionRow } from "./api";
+import type { ForgeSession } from "../../shared/types";
 import { parseApiDate } from "./date";
 import { useToast } from "../components/ui/Toast";
 
@@ -35,7 +35,7 @@ export function useResetForgeSession() {
   return useMutation({
     mutationFn: api.resetForgeSession,
     onSuccess: (_res, vars) => {
-      qc.setQueryData<ForgeSessionRow[]>(["forge-sessions", vars.documentType, vars.documentId], []);
+      qc.setQueryData<ForgeSession[]>(["forge-sessions", vars.documentType, vars.documentId], []);
     },
     onError: (err) => {
       toast.push("error", "Could not reset session", toastMessage(err));
