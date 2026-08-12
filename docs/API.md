@@ -89,8 +89,11 @@ unless the `Authorization` header carries a valid key:
   - `GET /api/health`
   - `/api/setup/*` (first-run wizard)
   - `POST /api/webhooks/github` — HMAC-SHA-256 signature over the raw body is the auth
-  - `/api/forge/daemon/*` and `/api/forge/runtimes/register` — also accept the
+  - `/api/forge/daemon/*`, `/api/forge/runtimes/register`, and
+    `/api/forge/sessions` — also accept the
     daemon token (`x-forge-token: <LXK_FORGE_DAEMON_TOKEN>` header) in place of a key
+    (`/api/forge/sessions` joins the daemon's PUT/DELETE and the browser's
+    GET/reset)
 - **Cloudflare Access** protects the host at the edge. With `LXK_ACCESS_AUD` set,
   `server/api/access-auth.ts` verifies the `Cf-Access-Jwt-Assertion` against the
   team JWKS (audience must match) — an invalid assertion → 401, and the SSR path
@@ -911,7 +914,8 @@ body { runtimeId* }
 → 200 { task: ForgeTask | null, provider, agent, model: string, printLogs: boolean,
         logLevel: ""|"DEBUG"|"INFO"|"WARN"|"ERROR", extraArgs: string[], prompt: string,
         agentMarkdown: string, skillMarkdown: string, skillIds: string[],
-        repoContent: [{ owner, repo, path, content }] }
+        repoContent: [{ owner, repo, path, content }],
+        runtimeSessionId: string | null, agentId: string, skillId: string }
         skillIds = full current skill-id set; the daemon prunes stale
         .agents/skills/<id> dirs not in this list (opencode auto-discovers
         every bundle in that dir)
@@ -929,7 +933,44 @@ body { runtimeId* }
   into repo-content/ (+ MANIFEST.md) and the prompt points the agent there.
   owner = the GitHub owner, repo = full "owner/repo", path = repo-relative
   path, content = UTF-8 text (≤ 256 KB per file, ≤ 512 KB total, ≤ 50 files,
-  ≤ 3 repos).)
+  ≤ 3 repos).
+  runtimeSessionId: the warm-session continue-vs-mint verdict — the mapped
+  runtime session id when a forge_sessions row exists for (documentType,
+  documentId, runtimeId) AND its agent/skill match the task's, else null
+  (daemon then mints a fresh session via the runtime CLI). agentId/skillId are
+  the task's own — what a future mapping must match. Only meaningful for
+  provider "opencode"; hermes/command-code ignore it.)
+
+# ── Forge warm sessions (document ↔ runtime agent conversation mapping) ──
+GET    /api/forge/sessions?documentType=&documentId=   (browser)
+→ 200 { data: Array<ForgeSession> }
+ForgeSession = { documentType, documentId, runtimeId, runtimeSessionId,
+  provider, agentId, skillId, createdAt, updatedAt } (camelCase)
+The mapping tells which agent-side conversation (opencode serve session id)
+the next Forge task on this document should continue. Missing/invalid query
+params → { data: [] } (sessions are document-agnostic metadata — never 404).
+
+PUT    /api/forge/sessions                   (daemon)
+body { documentType*, documentId*, runtimeId*, runtimeSessionId*, provider*,
+       agentId*, skillId* }
+→ 204
+Upsert called by the daemon BEFORE spawning the run (pre-spawn mapping write,
+spec §8 step 3) and to rewrite the row on stale-session retry. provider is
+"opencode"|"hermes"|"command-code"; only opencode writes rows in v1.
+
+DELETE /api/forge/sessions                   (daemon)
+body { documentType*, documentId*, runtimeId* }
+→ 204
+Daemon-side drop on cancel/timeout. Always allowed — NEVER 409: the in-flight
+run is gone, nothing will re-write the row.
+
+POST   /api/forge/sessions/reset             (browser)
+body { documentType*, documentId*, runtimeId* }
+→ 204 | 409 FORGE_SESSION_ACTIVE
+User-facing reset: deletes the mapping row so the next run mints a new
+session. 409 while a task on this document+runtime is queued or running —
+otherwise the run's completion would re-write the row the user just deleted
+and silently undo the reset. Deleting a missing mapping is 204, never 404.
 
 # ── Runtime setup events (web wizard → machine CLI listener) ──
 POST   /api/forge/runtime-events           (browser)

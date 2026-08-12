@@ -393,6 +393,13 @@ const ClaimResponseSchema = Schema.Struct({
   skillMarkdown: Schema.String,
   skillIds: Schema.Array(Schema.String),
   repoContent: Schema.Array(RepoContentEntrySchema),
+  // Warm-session verdict: the runtime session id to continue, or null when
+  // there is no mapping or the mapped agent/skill no longer match the task
+  // (daemon then mints a fresh session). agentId/skillId are the task's own
+  // — for logging, they tell the daemon what the mapping must match.
+  runtimeSessionId: Schema.NullOr(Schema.String),
+  agentId: Schema.String,
+  skillId: Schema.String,
 });
 
 const ForgeAgentSchema = Schema.Struct({
@@ -414,6 +421,39 @@ const ForgeSkillSchema = Schema.Struct({
   isBuiltin: Schema.Boolean,
   createdAt: Schema.String,
   updatedAt: Schema.String,
+});
+
+// ── Forge warm sessions (document ↔ runtime agent conversation mapping) ──
+// Sessions are document-agnostic metadata: any document_id is valid, no 404s.
+const ForgeSessionSchema = Schema.Struct({
+  documentType: Schema.Literal("task", "wiki"),
+  documentId: Schema.String,
+  runtimeId: Schema.String,
+  runtimeSessionId: Schema.String,
+  provider: Schema.Literal("opencode", "hermes", "command-code"),
+  agentId: Schema.String,
+  skillId: Schema.String,
+  createdAt: Schema.String,
+  updatedAt: Schema.String,
+});
+
+const ForgeSessionListResponse = Schema.Struct({ data: Schema.Array(ForgeSessionSchema) });
+
+const ForgeSessionUpsertInput = Schema.Struct({
+  documentType: Schema.Literal("task", "wiki"),
+  documentId: Schema.String,
+  runtimeId: Schema.String,
+  runtimeSessionId: Schema.String,
+  provider: Schema.Literal("opencode", "hermes", "command-code"),
+  agentId: Schema.String,
+  skillId: Schema.String,
+});
+
+// DELETE (daemon-side drop) and POST reset share the document+runtime ref.
+const ForgeSessionRefInput = Schema.Struct({
+  documentType: Schema.Literal("task", "wiki"),
+  documentId: Schema.String,
+  runtimeId: Schema.String,
 });
 
 const CreateForgeAgentInput = Schema.Struct({
@@ -794,6 +834,17 @@ const forgeGroup = HttpApiGroup.make("forge")
     .setPath(ForgeSkillPath).addSuccess(Schema.Void, { status: 204 }))
   .add(HttpApiEndpoint.post("resetForgeSkill", "/forge/skills/:id/reset")
     .setPath(ForgeSkillPath).addSuccess(ForgeSkillSchema))
+  // Warm sessions: the daemon PUTs the pre-spawn mapping and DELETEs it on
+  // cancel/timeout; the browser GETs (popover line) and POSTs reset.
+  .add(HttpApiEndpoint.get("listForgeSessions", "/forge/sessions")
+    .addSuccess(ForgeSessionListResponse))
+  .add(HttpApiEndpoint.put("upsertForgeSession", "/forge/sessions")
+    .setPayload(ForgeSessionUpsertInput).addSuccess(Schema.Void, { status: 204 }))
+  .add(HttpApiEndpoint.del("removeForgeSession", "/forge/sessions")
+    .setPayload(ForgeSessionRefInput).addSuccess(Schema.Void, { status: 204 }))
+  .add(HttpApiEndpoint.post("resetForgeSession", "/forge/sessions/reset")
+    .setPayload(ForgeSessionRefInput).addSuccess(Schema.Void, { status: 204 })
+    .addError(Schema.Struct({ _tag: Schema.Literal("ForgeSessionActive") })))
   .add(HttpApiEndpoint.get("listSources", "/projects/:slug/documents/:type/:id/sources")
     .setPath(DocumentPath).addSuccess(SourceListResponse))
   .add(HttpApiEndpoint.post("addSource", "/projects/:slug/documents/:type/:id/sources")
@@ -1774,8 +1825,11 @@ const forgeLive = HttpApiBuilder.group(LexaApi, "forge", (handlers) =>
       respond(Effect.gen(function* () {
         const service = yield* ForgeService;
         const task = yield* service.claimNext(req.payload.runtimeId);
-        if (!task) return { task: null, provider: "opencode" as const, agent: "", model: "", printLogs: false, logLevel: "", extraArgs: [], prompt: "", agentMarkdown: "", skillMarkdown: "", skillIds: [], repoContent: [] };
+        if (!task) return { task: null, provider: "opencode" as const, agent: "", model: "", printLogs: false, logLevel: "", extraArgs: [], prompt: "", agentMarkdown: "", skillMarkdown: "", skillIds: [], repoContent: [], runtimeSessionId: null, agentId: "", skillId: "" };
         const runtime = yield* service.getRuntimeConfig(req.payload.runtimeId);
+        // Warm-session verdict: continue the mapped runtime session only when
+        // its agent/skill match the task's — otherwise null (daemon mints).
+        const runtimeSessionId = yield* service.resolveSessionForTask(task, req.payload.runtimeId);
         // Best-effort linked-repo content (Contents: Read) — assembled BEFORE
         // the prompt so the prompt can point the agent at repo-content/.
         const repoContent = yield* loadTaskRepoContent(task);
@@ -1797,7 +1851,7 @@ const forgeLive = HttpApiBuilder.group(LexaApi, "forge", (handlers) =>
             Effect.catchAll(() => Effect.succeed([] as string[]))
           ),
         });
-        return { task, provider: runtime.provider, agent: runtime.agent, model: runtime.model, printLogs: runtime.printLogs, logLevel: runtime.logLevel, extraArgs: runtime.extraArgs, prompt, agentMarkdown: rules.agentMarkdown, skillMarkdown: rules.skillMarkdown, skillIds, repoContent };
+        return { task, provider: runtime.provider, agent: runtime.agent, model: runtime.model, printLogs: runtime.printLogs, logLevel: runtime.logLevel, extraArgs: runtime.extraArgs, prompt, agentMarkdown: rules.agentMarkdown, skillMarkdown: rules.skillMarkdown, skillIds, repoContent, runtimeSessionId, agentId: task.agentId, skillId: task.skillId };
       }))
     )
     // Runtime setup events — the CLI listener claims these over the same
@@ -2132,6 +2186,40 @@ const forgeLive = HttpApiBuilder.group(LexaApi, "forge", (handlers) =>
         const service = yield* SourceService;
         const identity = yield* AuthIdentity;
         yield* service.remove(actorFromIdentity(identity), req.path.sourceId);
+        return undefined;
+      }))
+    )
+    .handle("listForgeSessions", (req) =>
+      respond(Effect.gen(function* () {
+        const service = yield* ForgeService;
+        const q = searchParams(req);
+        const documentType = q.get("documentType");
+        const documentId = q.get("documentId");
+        // Sessions are document-agnostic metadata; missing refs are just an
+        // empty list (never 404).
+        if (documentType !== "task" && documentType !== "wiki") return { data: [] };
+        if (!documentId) return { data: [] };
+        return { data: yield* service.forgeSessionList(documentType, documentId) };
+      }))
+    )
+    .handle("upsertForgeSession", (req) =>
+      respond(Effect.gen(function* () {
+        const service = yield* ForgeService;
+        yield* service.forgeSessionUpsert(req.payload);
+        return undefined;
+      }))
+    )
+    .handle("removeForgeSession", (req) =>
+      respond(Effect.gen(function* () {
+        const service = yield* ForgeService;
+        yield* service.forgeSessionRemove(req.payload.documentType, req.payload.documentId, req.payload.runtimeId);
+        return undefined;
+      }))
+    )
+    .handle("resetForgeSession", (req) =>
+      respond(Effect.gen(function* () {
+        const service = yield* ForgeService;
+        yield* service.forgeSessionReset(req.payload.documentType, req.payload.documentId, req.payload.runtimeId);
         return undefined;
       }))
     )

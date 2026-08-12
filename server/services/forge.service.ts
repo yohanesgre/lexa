@@ -1,5 +1,6 @@
 import { Effect } from "effect";
 import { ForgeRepo } from "../repos/forge.repo";
+import { ForgeSessionRepo } from "../repos/forge-session.repo";
 import { SourceRepo } from "../repos/source.repo";
 import { TaskRepo } from "../repos/task.repo";
 import { WikiRepo } from "../repos/wiki.repo";
@@ -7,10 +8,11 @@ import { ProjectRepo } from "../repos/project.repo";
 import { SourceService } from "./source.service";
 import { ActivityService } from "./activity.service";
 import { DbError, RowNotFound, ConstraintViolation, Sqlite, withTx } from "../db/database";
-import { ProjectNotFound, TaskNotFound, WikiPageNotFound, ForgeTaskNotFound, NoRuntimeOnline, RuntimeNotFound, AgentNotFound, SkillNotFound, ForgeBuiltinDelete, ForgeEntityInUse } from "../api/errors";
+import { ProjectNotFound, TaskNotFound, WikiPageNotFound, ForgeTaskNotFound, NoRuntimeOnline, RuntimeNotFound, AgentNotFound, SkillNotFound, ForgeBuiltinDelete, ForgeEntityInUse, ForgeSessionActive } from "../api/errors";
 import { docToMarkdown } from "../../shared/markdown";
 import * as msg from "../activity-messages";
-import type { ForgeTask, ForgeTaskLog, DocumentSource, TipTapDoc, ForgeAgent, ForgeSkill, ActivityType } from "../../shared/types";
+import { rowToForgeSession } from "../../shared/db";
+import type { ForgeTask, ForgeTaskLog, DocumentSource, TipTapDoc, ForgeAgent, ForgeSkill, ForgeSession, ActivityType, ForgeProvider } from "../../shared/types";
 
 // Builtin seed defaults — mirrors migrations/0001_init.sql (fresh installs) and
 // migrations/0004_forge_pm_skills.sql (existing DBs).
@@ -39,9 +41,10 @@ const DEFAULT_SKILLS: Record<string, string> = {
 };
 
 export class ForgeService extends Effect.Service<ForgeService>()("Lexa/ForgeService", {
-  dependencies: [ForgeRepo.Default, SourceRepo.Default, SourceService.Default, TaskRepo.Default, WikiRepo.Default, ProjectRepo.Default, ActivityService.Default],
+  dependencies: [ForgeRepo.Default, ForgeSessionRepo.Default, SourceRepo.Default, SourceService.Default, TaskRepo.Default, WikiRepo.Default, ProjectRepo.Default, ActivityService.Default],
   effect: Effect.gen(function* () {
     const repo = yield* ForgeRepo;
+    const sessionRepo = yield* ForgeSessionRepo;
     const sourceRepo = yield* SourceRepo;
     const sourceService = yield* SourceService;
     const taskRepo = yield* TaskRepo;
@@ -327,6 +330,52 @@ export class ForgeService extends Effect.Service<ForgeService>()("Lexa/ForgeServ
 
       claimNext: (runtimeId: string): Effect.Effect<ForgeTask | null, ConstraintViolation | DbError | RowNotFound> =>
         repo.claimNextTask(runtimeId),
+
+      // Warm-session verdict for a claimed task: continue the mapped session
+      // ONLY when the mapping exists AND its agent/skill match the task's —
+      // an agent/skill change resets continuity (null → daemon mints fresh).
+      resolveSessionForTask: (task: ForgeTask, runtimeId: string): Effect.Effect<string | null, DbError> =>
+        sessionRepo.get(task.documentType, task.documentId, runtimeId).pipe(
+          Effect.map((row) => (row && row.agent_id === task.agentId && row.skill_id === task.skillId ? row.runtime_session_id : null))
+        ),
+
+      // Pre-spawn mapping write (spec §8 step 3): the row exists before the
+      // run starts; upsert also rewrites it on stale-session retry.
+      forgeSessionUpsert: (input: {
+        documentType: "task" | "wiki";
+        documentId: string;
+        runtimeId: string;
+        runtimeSessionId: string;
+        provider: ForgeProvider;
+        agentId: string;
+        skillId: string;
+      }): Effect.Effect<void, ConstraintViolation | DbError> =>
+        sessionRepo.upsert(input),
+
+      forgeSessionList: (documentType: "task" | "wiki", documentId: string): Effect.Effect<ForgeSession[], DbError> =>
+        sessionRepo.listForDocument(documentType, documentId).pipe(
+          Effect.map((rows) => rows.map(rowToForgeSession))
+        ),
+
+      forgeSessionGet: (documentType: "task" | "wiki", documentId: string, runtimeId: string): Effect.Effect<ForgeSession | null, DbError> =>
+        sessionRepo.get(documentType, documentId, runtimeId).pipe(
+          Effect.map((row) => (row ? rowToForgeSession(row) : null))
+        ),
+
+      // Daemon-side drop on cancel/timeout — always allowed (never 409):
+      // the in-flight run is gone, nothing will re-write the row.
+      forgeSessionRemove: (documentType: "task" | "wiki", documentId: string, runtimeId: string): Effect.Effect<void, ConstraintViolation | DbError> =>
+        sessionRepo.remove(documentType, documentId, runtimeId),
+
+      // User-facing reset: 409 while a task on this document+runtime is in
+      // flight — otherwise the run's completion would re-write the row the
+      // user just deleted and silently undo the reset.
+      forgeSessionReset: (documentType: "task" | "wiki", documentId: string, runtimeId: string): Effect.Effect<void, ForgeSessionActive | ConstraintViolation | DbError> =>
+        Effect.gen(function* () {
+          const active = yield* sessionRepo.hasActiveTask(documentType, documentId, runtimeId);
+          if (active) return yield* new ForgeSessionActive();
+          yield* sessionRepo.remove(documentType, documentId, runtimeId);
+        }),
 
       complete: (id: string, result: string): Effect.Effect<ForgeTask, ForgeTaskNotFound | ConstraintViolation | DbError> =>
         withTx(db, Effect.gen(function* () {

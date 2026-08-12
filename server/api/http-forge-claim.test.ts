@@ -178,3 +178,88 @@ describe("forge claim repoContent", () => {
     expect(fetchMock).not.toHaveBeenCalled(); // requireConfig throws before any fetch
   });
 });
+
+describe("forge claim warm-session verdict", () => {
+  beforeEach(() => {
+    db.exec("DELETE FROM forge_sessions");
+  });
+  // A fresh queued task per test so each claim() has something to pick up.
+  function seedQueuedTask(id: string, documentId: string) {
+    db.prepare(
+      `INSERT INTO forge_tasks (id, project_id, document_type, document_id, agent_id, skill_id, status, created_at)
+       VALUES (?, 'p1', 'task', ?, 'a1', 'sk1', 'queued', datetime('now'))`
+    ).run(id, documentId);
+  }
+
+  function seedMapping(over: Record<string, string> = {}) {
+    db.prepare(
+      `INSERT INTO forge_sessions (document_type, document_id, runtime_id, runtime_session_id, provider, agent_id, skill_id)
+       VALUES ('task', 't1', 'r1', ?, 'opencode', ?, ?)`
+    ).run(over.runtimeSessionId ?? "sess-1", over.agentId ?? "a1", over.skillId ?? "sk1");
+  }
+
+  it("claims a task with the four session fields; no mapping → runtimeSessionId null", async () => {
+    seedQueuedTask("ft5", "t1");
+    const res = await handler(claim("r1"));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.task.id).toBe("ft5");
+    expect(body.provider).toBe("opencode");
+    expect(body.agentId).toBe("a1");
+    expect(body.skillId).toBe("sk1");
+    expect(body.runtimeSessionId).toBeNull();
+  });
+
+  it("continues the mapped session when agent/skill match the task", async () => {
+    seedMapping();
+    seedQueuedTask("ft6", "t1");
+    const res = await handler(claim("r1"));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.task.id).toBe("ft6");
+    expect(body.runtimeSessionId).toBe("sess-1");
+  });
+
+  it("returns null when the mapped agent differs from the task's agent", async () => {
+    seedMapping({ agentId: "other-agent" });
+    seedQueuedTask("ft7", "t1");
+    const res = await handler(claim("r1"));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.task.id).toBe("ft7");
+    expect(body.runtimeSessionId).toBeNull();
+  });
+
+  it("returns null when the mapped skill differs from the task's skill", async () => {
+    seedMapping({ skillId: "other-skill" });
+    seedQueuedTask("ft8", "t1");
+    const res = await handler(claim("r1"));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.task.id).toBe("ft8");
+    expect(body.runtimeSessionId).toBeNull();
+  });
+
+  it("returns null when the mapping exists for a different document", async () => {
+    db.prepare(
+      `INSERT INTO forge_sessions (document_type, document_id, runtime_id, runtime_session_id, provider, agent_id, skill_id)
+       VALUES ('wiki', 'w1', 'r1', 'sess-other', 'opencode', 'a1', 'sk1')`
+    ).run();
+    seedQueuedTask("ft9", "t1");
+    const res = await handler(claim("r1"));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.task.id).toBe("ft9");
+    expect(body.runtimeSessionId).toBeNull();
+  });
+
+  it("no task → empty claim keeps the four fields with null/empty defaults", async () => {
+    const res = await handler(claim("r1"));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.task).toBeNull();
+    expect(body.runtimeSessionId).toBeNull();
+    expect(body.agentId).toBe("");
+    expect(body.skillId).toBe("");
+  });
+});
