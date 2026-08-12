@@ -11,6 +11,14 @@ type NativeStmt = BetterDatabase.Statement;
 class Statement {
   constructor(private stmt: NativeStmt) {}
 
+  // bun:sqlite exposes the result column names — better-auth's bun:sqlite
+  // dialect checks it to decide read-vs-write statements. better-sqlite3
+  // throws columns() on non-returning statements, so gate on .reader.
+  get columnNames(): string[] {
+    if (!this.stmt.reader) return [];
+    return this.stmt.columns().map((c) => c.name);
+  }
+
   get(...params: unknown[]): unknown {
     // bun:sqlite returns null for a missing row; better-sqlite3 returns undefined.
     const row = this.stmt.get(...params);
@@ -27,19 +35,22 @@ class Statement {
 }
 
 export class Database {
-  private db: NativeDb;
+  private native: NativeDb;
 
   constructor(path: string) {
     // Low busy_timeout default so tests can observe initSqlite's pragma.
-    this.db = new BetterDatabase(path, { timeout: 100 });
+    // NOTE: the backing field must NOT be named `db` — better-auth's kysely
+    // adapter detects "db" in db as "already a Kysely instance" and would
+    // grab the raw better-sqlite3 handle (no selectFrom → TypeError).
+    this.native = new BetterDatabase(path, { timeout: 100 });
   }
 
   exec(sql: string): void {
-    this.db.exec(sql);
+    this.native.exec(sql);
   }
 
   prepare(sql: string): Statement {
-    return new Statement(this.db.prepare(sql));
+    return new Statement(this.native.prepare(sql));
   }
 
   // bun:sqlite's Database.query() — a prepared-statement-like handle.
@@ -51,17 +62,21 @@ export class Database {
   // only prepare one statement per call, so no-param calls go through exec.
   run(sql: string, ...params: unknown[]): { changes: number; lastInsertRowid: number | bigint } {
     if (params.length === 0) {
-      this.db.exec(sql);
+      this.native.exec(sql);
       return { changes: 0, lastInsertRowid: 0 };
     }
-    return this.db.prepare(sql).run(...params);
+    return this.native.prepare(sql).run(...params);
   }
 
+  // bun:sqlite detection key for better-auth's kysely adapter (it checks
+  // `"fileControl" in db` to pick the bun:sqlite dialect).
+  fileControl(): void {}
+
   transaction(fn: (...args: unknown[]) => unknown): (...args: unknown[]) => unknown {
-    return this.db.transaction(fn);
+    return this.native.transaction(fn);
   }
 
   close(): void {
-    this.db.close();
+    this.native.close();
   }
 }

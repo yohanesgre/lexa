@@ -22,6 +22,56 @@ export interface Project {
 // own table and are attached at the API boundary — see withRepos in http.ts).
 export type DomainProject = Omit<Project, "repos">;
 
+// ── Auth, teams & sessions ──
+
+export interface LexaUser {
+  id: ID;
+  email: string;
+  name: string;
+  role: "superadmin" | "member";
+  createdAt: ISODate;
+  lastSeen: ISODate | null;
+}
+
+// A team = a Better Auth organization (organization table; slug unique).
+// Team-admin authority comes from the org member role (owner/admin), never
+// from users.role.
+export interface Team {
+  id: ID;
+  name: string;
+  slug: string;
+  createdAt: string;
+}
+
+export type TeamMemberRole = "owner" | "admin" | "member";
+
+export interface TeamMember {
+  userId: ID;
+  name: string;
+  email: string;
+  role: TeamMemberRole;
+  createdAt: string;
+}
+
+// Superadmin-issued app-member invite (link-based, no email transport).
+// tokenHint = short prefix of the link secret for display; the full token is
+// never stored in the payload.
+export interface WorkspaceInvite {
+  id: ID;
+  email: string;
+  tokenHint: string;
+  expiresAt: string;
+  acceptedAt: string | null;
+}
+
+export interface SessionInfo {
+  id: ID;
+  ipAddress: string | null;
+  userAgent: string | null;
+  expiresAt: string;
+  createdAt: string;
+}
+
 export interface Column {
   id: ID;
   projectId: ID;

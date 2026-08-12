@@ -6,11 +6,10 @@
  *   bun run setup --prod                               # interactive, prod (.env.prod)
  *   bun run setup --prod --admin-email ops@x.com --api-key lxk_... --yes
  *
- * Prompts for the admin email (LXK_ADMIN_EMAILS), ensures an API key
- * (LXK_API_KEY / VITE_LXK_API_KEY) exists in the flavor env file, runs
- * migrations, and (dev only) offers sample data. Also mirrors the admin
- * email into the settings table so Docker/staging/prod web setups stay
- * consistent.
+ * Prompts for the admin email (LXK_ADMIN_EMAILS) + the superadmin password,
+ * ensures an API key (LXK_API_KEY / VITE_LXK_API_KEY) exists in the flavor
+ * env file, runs migrations, creates the superadmin account (Better Auth
+ * credential), and (dev only) offers sample data.
  *
  * Staging/prod never seeds: LXK_ENV=<flavor> is written so the server,
  * the web wizard, and later `lexa-cli deploy` runs all know sample data
@@ -22,7 +21,7 @@ import { existsSync, readFileSync, writeFileSync, mkdirSync, chmodSync } from "n
 import { resolve, dirname } from "node:path";
 import { Database } from "bun:sqlite";
 import { runMigrations } from "../server/db/migrate";
-import { getSetting, setSetting } from "../server/db/settings";
+import { setSetting } from "../server/db/settings";
 
 // ── tiny prompt helper (Bun's prompt() is line-based and interactive) ──
 function ask(question: string, fallback = ""): string {
@@ -113,7 +112,23 @@ async function main() {
     env.LXK_ADMIN_EMAILS = adminInput.split(",").map((s) => s.trim().toLowerCase()).filter(Boolean).join(",");
   }
 
-  // 2. API key
+  // 2. Superadmin password (R3: no --admin-password flag — never in shell
+  //    flags or env; interactive only). Non-interactive runs create the
+  //    superadmin account without a password; the operator then sets one via
+  //    the web /setup wizard (superadmin-issued set-password link).
+  console.log("\n── Superadmin password ──");
+  const adminEmailsList = (env.LXK_ADMIN_EMAILS || "").split(",").map((s) => s.trim().toLowerCase()).filter(Boolean);
+  const adminPassword = NON_INTERACTIVE ? "" : ask("Password for the superadmin account (min 8 chars)");
+  if (!NON_INTERACTIVE && adminPassword.length < 8) {
+    console.error("  ERROR: password must be at least 8 characters");
+    process.exit(1);
+  }
+  if (NON_INTERACTIVE && adminEmailsList.length > 0) {
+    console.log("  Non-interactive — superadmin account created without a password;");
+    console.log("  set one via the web /setup wizard or a superadmin set-password link.");
+  }
+
+  // 3. API key
   console.log("\n── API key ──");
   let apiKey = flagValue("--api-key") || env.LXK_API_KEY || "";
   if (apiKey) {
@@ -157,18 +172,40 @@ async function main() {
     db.close();
   } catch {}
 
-  // Mirror admin email into settings table (helps Docker/web-wizard parity)
+  // 5. Superadmin account (interactive only — see step 2). Created via the
+  //    same Better Auth provisioning path as the web wizard.
+  if (adminEmailsList.length > 0) {
+    process.env.DATABASE_PATH = DB_PATH;
+    const { auth } = await import("../server/auth");
+    const db = new Database(DB_PATH);
+    try {
+      for (const email of adminEmailsList) {
+        const existing = db.prepare("SELECT id FROM users WHERE email = ?").get(email) as { id: string } | null;
+        if (existing) {
+          console.log(`  Superadmin ${email} already exists — skipped.`);
+          continue;
+        }
+        await auth.api.createUser({
+          body: {
+            email,
+            password: adminPassword,
+            name: email.split("@")[0] || email,
+            data: { role: "superadmin" },
+          },
+        });
+        console.log(`  Superadmin created: ${email}${adminPassword ? "" : " (no password yet)"}`);
+      }
+    } finally {
+      db.close();
+    }
+  }
+
+  // 6. Ensure the seeded admin API key exists (entry.ts does this too, but be explicit)
   try {
     const db = new Database(DB_PATH);
     db.exec("PRAGMA journal_mode = WAL");
     db.exec("PRAGMA foreign_keys = ON");
     db.exec("PRAGMA busy_timeout = 5000");
-    if (env.LXK_ADMIN_EMAILS) {
-      const existing = getSetting(db, "admin_emails") || "";
-      const merged = [...new Set([...existing.split(",").map((s) => s.trim().toLowerCase()).filter(Boolean), ...env.LXK_ADMIN_EMAILS.split(",").map((s) => s.trim().toLowerCase())])];
-      setSetting(db, "admin_emails", merged.join(","));
-    }
-    // Ensure the seeded admin API key exists (entry.ts does this too, but be explicit)
     const keyHash = createHash("sha256").update(env.LXK_API_KEY).digest("hex");
     const row = db.prepare("SELECT id FROM api_keys WHERE key_hash = ?").get(keyHash) as { id: string } | null;
     if (!row && env.LXK_API_KEY) {
@@ -180,7 +217,7 @@ async function main() {
     console.warn(`  (settings sync skipped: ${(e as Error).message})`);
   }
 
-  // 5. Seed sample data — dev only; staging/prod always stays empty.
+  // 7. Seed sample data — dev only; staging/prod always stays empty.
   console.log("\n── Sample data ──");
   const db = new Database(DB_PATH);
   const projectCount = db.query("SELECT COUNT(*) c FROM projects").get() as { c: number };
@@ -204,13 +241,14 @@ async function main() {
       }
     }
   }
-  // 6. Lock setup — CLI-provisioned instances are complete; /api/setup/*
+  // 8. Lock setup — CLI-provisioned instances are complete; /api/setup/*
+  //    mutating endpoints stay locked from now on.
   //    mutating endpoints stay locked from now on.
   setSetting(db, "setup_complete", "1");
   console.log("  Setup marked complete — /api/setup/* is now locked.");
   db.close();
 
-  // 7. Summary
+  // 9. Summary
   console.log("\n══════════════════════════════════════════════");
   console.log("  Setup complete");
   console.log("══════════════════════════════════════════════");
@@ -221,9 +259,11 @@ async function main() {
   console.log(`  Database:       ${DB_PATH}`);
   console.log("");
   if (flavor === "dev") {
-    console.log("  Run the dev stack:  bun run dev:full");
-    console.log("  Frontend:           http://localhost:5173  (vite, live reload)");
-    console.log("  API (optional):     http://localhost:3000  (serves the built app)");
+  console.log("  Run the dev stack:  bun run dev:full");
+  console.log("  Frontend:           http://localhost:5173  (vite, live reload)");
+  console.log("  API (optional):     http://localhost:3000  (serves the built app)");
+  console.log("  NOTE: seeded member users have no password — log in as the");
+  console.log("        superadmin and issue set-password links from the Members UI.");
   } else {
     console.log("  Deploy:             lexa-cli deploy <domain> " + flavor);
     console.log("  (or docker compose --env-file " + envFile + " up -d --build)");
