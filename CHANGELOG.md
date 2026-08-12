@@ -4,6 +4,49 @@ All notable changes to Lexa are documented here. Format based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). This project follows
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+
+- **In-app human auth (Better Auth)** — email/password login at `/login`,
+  cookie sessions (7d sliding), logout, and set-password links; Better Auth
+  1.6.27 runs in-process at `/api/auth/*`. No more Cloudflare Access / Google
+  OAuth — no external IdP, no SMTP.
+- **Teams (Better Auth orgs)** — superadmin creates/deletes teams; team
+  admins (org owner/admin) manage own team's members (add workspace member
+  by email, set role owner/admin/member, remove — sole-owner removal blocked
+  with `SOLE_OWNER`), projects, and Forge runtimes. Projects carry an owning
+  `team_id`; unassigned projects are superadmin-only until assigned.
+- **Workspace members & invites** — superadmin-only surface: member list
+  (role, teams, last seen), deactivate/reactivate, delete (revokes bound API
+  keys), link-based invites (7d expiry, revocable while pending), and
+  set-password links (single-use, 7d). `users.role` narrows to
+  `superadmin | member`; superadmin is env-only (`LXK_ADMIN_EMAILS`), never
+  edited at runtime (`admin_emails` setting and the `update_user_role` MCP
+  tool removed).
+- **Self-service sessions** — `/api/sessions` lists your sessions with
+  device/IP; revoke any of them (password change revokes the others).
+- **Team-scoped Forge runtimes** — runtimes belong to a team (`team_id`),
+  claim only that team's project tasks; `NULL` = superadmin-owned global
+  runtime that serves any team.
+- **Login rate limiting** — failed logins throttled in-process (Better Auth
+  rate-limit plugin, ~5 attempts/60s per email, 15 min lockout); the
+  existing per-IP `/api/*` limiter is unchanged.
+
+### Changed
+
+- **Dual-channel API auth** — `/api/*` accepts a session cookie (humans) or
+  a Bearer `lxk_*` key (machines); the `x-lxk-user` header and the browser
+  key injection (`VITE_LXK_API_KEY` meta tag) are removed — browser calls
+  authenticate via the session cookie only. `/mcp` stays key-only.
+- **Server settings are superadmin-only** — API keys, rate limits, GitHub
+  sync, and Forge agents/skills now require superadmin (was `admin`).
+- **Deployment** — `lexa-cli deploy` no longer provisions Cloudflare Access
+  apps/IdPs and drops the `--google-client-id` / `--google-client-secret` /
+  `--team-domain` / `--email-domain` flags; it writes `LXK_PUBLIC_URL`.
+  `LXK_ACCESS_AUD` / `LXK_ACCESS_TEAM` are removed. The `/setup` wizard
+  creates the first superadmin with a password.
+
 ## [0.3.0] - 2026-08-12
 
 ### Added

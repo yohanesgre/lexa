@@ -463,21 +463,28 @@ export class GitHubService extends Effect.Service<GitHubService>()("Lexa/GitHubS
 }) {}
 ```
 
-### AuthService — Cloudflare Access + API keys
+### AuthService — in-app sessions (Better Auth) + API keys
+
+Better Auth 1.6.27 (pinned) runs in-process on the Bun server
+(`server/auth.ts` — credentials + organization + `tanstackStartCookies`
+LAST, `baseURL` = `LXK_PUBLIC_URL`, `useSecureCookies`, `trustedOrigins`),
+mounted at `/api/auth/*` BEFORE the API-key middleware. No social providers,
+no SMTP — email/password only. Two channels:
 
 ```typescript
 export class AuthService extends Effect.Service<AuthService>()("AuthService", {
   effect: Effect.gen(function* () {
     const apiKeyRepo = yield* ApiKeyRepo;
     return {
-      // HUMANS: deployment sits behind Cloudflare Access. Access enforces
-      // the identity policy (email allowlist / GitHub org) BEFORE requests
-      // reach the server. The server only reads the trusted header for
-      // identity display. No OAuth code, no sessions, no CSRF surface.
-      identityFromAccess: (headers: Headers) =>
-        Effect.succeed(headers.get("Cf-Access-Authenticated-User-Email")),
+      // HUMANS: Better Auth cookie session (mounted at /api/auth/*).
+      // try/catch is mandatory — an uncaught getSession throw crashes SSR.
+      userFromSession: (headers: Headers) =>
+        Effect.tryPromise(() => auth.api.getSession({ headers })).pipe(
+          Effect.map((s) => s?.user ?? null),
+          Effect.catchAll(() => Effect.succeed(null)),
+        ),
 
-      // MACHINES (MCP/Hermes): Authorization: Bearer lxk_<base62(32 bytes)>
+      // MACHINES (MCP/CLI/webhooks): Authorization: Bearer lxk_<base62(43)>
       // Keys have full read/write — no scopes (single-agent trust model,
       // documented). SHA-256 lookup; last_used_at sampled (only when NULL
       // or older than 1h — avoids a write per MCP call).
@@ -494,6 +501,42 @@ export class AuthService extends Effect.Service<AuthService>()("AuthService", {
   }),
   dependencies: [/* ApiKeyRepo */],
 }) {}
+```
+
+The API middleware accepts a session cookie OR a Bearer key on `/api/*`
+(session tried first, key fallback); `/mcp` stays key-only. `x-lxk-user` is
+removed — never sent by browsers, never read by the server. Browser
+attribution = the session user; machine attribution = the key name
+(`actorFromIdentity` adapts; see Attribution below).
+
+**Superadmin is env-only:** `users.role` ∈ {superadmin, member} — set from
+`LXK_ADMIN_EMAILS` at provisioning (setup wizard), never edited at runtime
+(no role-editing endpoint, no `update_user_role` MCP tool; legacy `admin` →
+`superadmin` in the migration; the `admin_emails` setting is deleted).
+Team-admin authority comes from the org `member.role` (owner/admin) on the
+team, never from `users.role`.
+
+**Login rate limit (R17):** `/api/auth/*` failed logins are throttled by the
+Better Auth rate-limit plugin (in-memory; ~5 attempts/60s per email, 15 min
+lockout). The existing per-IP `/api/*` limiter is untouched.
+
+### AuthorizationService — project access + team/settings gates
+
+The project-access decision (order is binding — superadmin > grant > team >
+deny) and the team/settings gates live in `server/services/authorization.service.ts`:
+
+```typescript
+// canAccessProject(userId, projectId):
+//   1. user.role === 'superadmin'                                  → { access: 'admin' }
+//   2. user_project_roles row for the project                      → { access: grant.role }
+//   3. member row where organization_id = project.team_id
+//        and user_id = user.id                                     → org role owner/admin ? 'admin' : 'member'
+//   4. else                                                        → denied (404-style envelope)
+// isTeamAdmin(userId, teamId): member.role ∈ {owner, admin} on that org, or superadmin
+// isSuperadmin(userId): users.role === 'superadmin'
+// Settings gate: superadmin only (R14) — API keys, rate limits, GitHub
+// config, Forge agents/skills, security are no longer 'admin'-gated;
+// team admins get 403 on every server-settings route.
 ```
 
 ### ActivityService — timeline reads + appends
@@ -533,11 +576,10 @@ export class CommentService extends Effect.Service<CommentService>()("Lexa/Comme
     //   authorId === identity.userId) else CommentEditForbidden. Sets
     //   edited_at; NO activity row (marker only).
     // remove(commentId, identity, projectId) → author OR project admin
-    //   (identity.role === 'admin' OR user_project_roles.role === 'admin');
-    //   soft delete + 'comment_deleted' activity in ONE withTx.
-    //   Ruling: under current REST plumbing every key is admin, so any key
-    //   holder may delete any comment — the user_project_roles branch is
-    //   future-proofing (dead code today, kept for member-key support).
+    //   (identity.role === 'superadmin' OR user_project_roles.role === 'admin'
+    //   OR team admin of the project's owning team — R14/Q13: superadmin all
+    //   comments, team admin own team's projects); soft delete +
+    //   'comment_deleted' activity in ONE withTx.
   }),
 }) {}
 ```
@@ -558,13 +600,14 @@ edits pulled in by the `edited` handler) DO emit `field_changed` rows (actor
 system/'github') in the same transaction as the update — the invariant holds
 in both directions.
 
-**Actor resolution:** browser users (x-lxk-user header, from the SSR
-`lxk-user` meta) → users table row, kind 'user'; MCP API keys → kind 'agent'
-with the key's NAME as label and the key owner's user id (unbound keys →
-NULL); webhook moves → kind 'system', label 'github'; Forge terminal events →
-kind 'agent', label = forge agent name (agent_id fallback). The header is
-spoofable by key holders — accepted: the key already grants full access;
-role NEVER comes from the header (authz stays key-based, attribution only).
+**Actor resolution (attribution ≠ authorization):** browser users → the
+Better Auth session user (`actorFromIdentity` maps it to kind 'user'); MCP
+API keys → kind 'agent' with the key's NAME as label and the key owner's
+user id (unbound keys → NULL); webhook moves → kind 'system', label
+'github'; Forge terminal events → kind 'agent', label = forge agent name
+(agent_id fallback). The legacy `x-lxk-user` header is gone — attribution
+comes from the authenticated channel, never from a spoofable header; role
+never comes from the browser either (authz stays server-side).
 
 ## HTTP layer — @effect/platform HttpApi
 
@@ -610,7 +653,7 @@ On `POST /api/forge/daemon/claim` the handler assembles the claim: task, runtime
 One `HttpApiBuilder.middleware` wraps the whole router (pre-routing, before decode). Order: **rate limit → content-length pre-check → auth → security headers**. Rules:
 
 - **Literal short-circuits only.** Return `HttpServerResponse.unsafeJson(...)` for 429/413/401/403 — never `Effect.fail` with an undeclared error. In @effect/platform 0.97 the error encoder cannot encode undeclared failures → raw cause → 500 trap.
-- **`AuthIdentity` is provided, not re-fetched.** Middleware resolves the key once via `resolveApiKeyIdentity(authHeader, db)` on the *shared* Sqlite connection and `Effect.provideService`s the tag; handlers/`requireAdmin` read it. Per-request DB opens are banned (they cost 3 PRAGMAs each).
+- **`AuthIdentity` is provided, not re-fetched.** Middleware resolves the caller ONCE — session cookie first (`SessionService.userFrom`, try/catch), Bearer key fallback (`resolveApiKeyIdentity(authHeader, db)`) — on the *shared* Sqlite connection and `Effect.provideService`s the tag; handlers/`requireSuperadmin` read it. Per-request DB opens are banned (they cost 3 PRAGMAs each). `/api/auth/*` is mounted BEFORE this middleware (Better Auth handler owns that path).
 - **Socket IP lives only in entry.** `remoteAddress` is unpopulated on the web-handler path, so entry stamps `x-lexa-remote-ip` (deleting any inbound value first — spoof guard) on the reconstructed request; middleware applies the `isPrivateIp`-gated `cf-connecting-ip` trust.
 - **Exemptions are path predicates inside the middleware**: `/api/setup*` + `/api/health` skip AUTH only (they stay rate-limited); `/api/forge/daemon/*` + `/api/forge/runtimes/register` + `/api/forge/machines/heartbeat` accept the daemon token where applicable and are rate-limit-exempt (key/token-gated machine surfaces — log streams and the 3s heartbeat must not 429).
 - **Rate limiting shares one bucket with `/mcp`** (`apiRateLimiter` singleton) and runs before auth — a blocked IP stays blocked regardless of key. Limits are DB-configured (`GET`/`PUT /api/settings/rate-limit`, admin-only): **DB settings (`settings.rate_limit_max` / `settings.rate_limit_window_ms`) with the code defaults (6000 / 600_000 ms) as fallback** — `resolveRateLimitFromDbValues` in `server/api/rate-limit.ts`. The DB is the single source of truth: env (`LXK_RATE_LIMIT_MAX` / `LXK_RATE_LIMIT_WINDOW_MS`) is a first-boot bootstrap, mirrored into the DB once at boot by `mirrorSettingsFromEnv` (server/db/settings.ts) when keys are empty, and never consulted at runtime. `syncRateLimitFromDb` applies the DB values at boot (after the mirror) and on save, so changes take effect live without a restart (existing buckets keep their windowStart and expire against the new window).
@@ -653,6 +696,9 @@ All list endpoints and MCP `list_*`/`search_*` tools: `?limit` (default 50, max 
 | `MachineNotFound` | 404 | `MACHINE_NOT_FOUND` | unknown machine target |
 | `MachineIdTaken` | 409 | `MACHINE_ID_TAKEN` | register: id bound to another host, legacy (no secret), or secret mismatch (details: `{ id, reason }`) |
 | `MachineSecretMismatch` | 403 | `FORBIDDEN` | runtime-event claim without a matching machine secret — identical response for missing machine/legacy/wrong secret (no existence oracle) |
+| `TeamHasProjects` | 409 | `TEAM_HAS_PROJECTS` | delete team while it owns projects — reassign first (payload `{ count }`) |
+| `SoleOwner` | 403 | `SOLE_OWNER` | demoting/removing the last owner of a team — transfer ownership first (payload `{ message }`) |
+| `CannotDeleteSelf` | 403 | `CANNOT_DELETE_SELF` | removing the last superadmin / self-removal via the workspace member routes |
 | `TaskLinkNotFound` | 404 | `TASK_LINK_NOT_FOUND` | delete a link that doesn't exist |
 | `TaskLinkCycle` | 409 | `TASK_LINK_CYCLE` | subtask_of would create a cycle |
 | `InvalidTaskLink` | 422 | `INVALID_TASK_LINK` | self-link or cross-project link |
@@ -661,6 +707,10 @@ All list endpoints and MCP `list_*`/`search_*` tools: `?limit` (default 50, max 
 | `GithubApiError` | 502 | `GITHUB_API_ERROR` | never fails a user move |
 | `GithubWebhookError` | 400 | `GITHUB_WEBHOOK_ERROR` | bad signature → 401 |
 | `InvalidKey` / `MissingAuth` | 401 | `INVALID_API_KEY` / `MISSING_AUTH` | |
+| `UserNotFound` | 404 | `USER_NOT_FOUND` | unknown user id on admin/workspace role endpoints |
+| `NoUserContext` | 400 | — | `PATCH /api/me` called with a bare API key (no session) — agents have no profile |
+
+Defined in the error map but never raised by any REST handler — do not match on them: `LAST_ADMIN_DEMOTE` (legacy user-role editing is removed — superadmin is env-only; user lifecycle goes through `/api/workspace/members`).
 
 ## Service Dependency Map
 
@@ -675,7 +725,9 @@ ProjectService     → ProjectRepo, ColumnRepo, SwimlaneRepo, FieldConfigRepo
 ColumnService      → ColumnRepo
 SwimlaneService    → SwimlaneRepo
 DashboardService   → TaskRepo, ColumnRepo, ProjectRepo, FieldConfigRepo
-AuthService        → ApiKeyRepo
+AuthService        → ApiKeyRepo, SessionService
+SessionService     → (Better Auth `auth` instance — getSession wrapper, try/catch)
+AuthorizationService → UserRepo, UserProjectRoleRepo, MemberRepo, ProjectRepo
 GitHubService      → GitHubClient, WebhookEventRepo, TaskRepo, ProjectRepo, ProjectReposRepo, TaskService, ProjectService, ColumnRepo, ActivityService
 Routes/MCP         → all services (orchestration layer — the only place
                      TaskService and GitHubService meet; content push is

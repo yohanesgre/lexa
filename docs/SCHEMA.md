@@ -11,9 +11,11 @@ CREATE TABLE projects (
   name        TEXT NOT NULL,
   slug        TEXT NOT NULL UNIQUE,                          -- duplicate → SlugTaken 409
   description TEXT NOT NULL DEFAULT '',
+  team_id     TEXT REFERENCES organization(id) ON DELETE SET NULL,  -- owning team; NULL = unassigned, superadmin-only until assigned
   created_at  TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at  TEXT NOT NULL DEFAULT (datetime('now'))        -- maintained by app on every UPDATE
 );
+CREATE INDEX idx_projects_team ON projects(team_id);
 
 -- ============================================================
 -- Project GitHub repos (roles per repo)
@@ -39,15 +41,25 @@ CREATE INDEX idx_project_repos_repo ON project_repos(repo);
 -- ============================================================
 -- Users + project roles
 -- ============================================================
--- Users auto-register on first CF Access login; the global role comes from
--- LXK_ADMIN_EMAILS / settings.admin_emails (env OR settings checked at auth).
+-- Humans authenticate in-app (Better Auth, email/password) — no Cloudflare
+-- Access, no edge identity. users.id is re-keyed to the Better Auth id
+-- format (16-char alphanumeric) by the auth migration; FK references
+-- (user_project_roles.user_id, api_keys.user_id, comments.author_id,
+-- activity.actor_user_id) are rewritten to the new ids. The global role
+-- comes from the env allow-list LXK_ADMIN_EMAILS (applied at provisioning
+-- via the setup wizard only) — never edited at runtime; legacy 'admin'
+-- values migrated to 'superadmin'; the admin_emails setting is DELETED.
+-- Team-admin authority comes from the org member role (owner/admin), never
+-- from users.role. email_verified backfilled 1 for all legacy users.
 CREATE TABLE users (
-  id         TEXT PRIMARY KEY,
-  email      TEXT NOT NULL UNIQUE,
-  name       TEXT NOT NULL,
-  role       TEXT NOT NULL DEFAULT 'member' CHECK(role IN ('admin', 'member')),
-  created_at TEXT NOT NULL DEFAULT (datetime('now')),
-  last_seen  TEXT
+  id             TEXT PRIMARY KEY,                            -- Better Auth id (16-char alphanumeric)
+  email          TEXT NOT NULL UNIQUE,
+  name           TEXT NOT NULL,
+  role           TEXT NOT NULL DEFAULT 'member' CHECK(role IN ('superadmin', 'member')),
+  email_verified INTEGER NOT NULL DEFAULT 1,                  -- legacy rows backfilled 1
+  image          TEXT,                                        -- avatar (unused by default email/password)
+  created_at     TEXT NOT NULL DEFAULT (datetime('now')),
+  last_seen      TEXT
 );
 
 -- Per-project roles. PRIMARY KEY includes role: a user holds at most one
@@ -57,6 +69,91 @@ CREATE TABLE user_project_roles (
   role       TEXT NOT NULL CHECK(role IN ('admin', 'member')),
   project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
   PRIMARY KEY (user_id, role, project_id)
+);
+
+-- ============================================================
+-- Better Auth tables (auth-roles-teams) — library-owned shapes
+-- ============================================================
+-- Email/password sessions, accounts, and verification tokens (set-password
+-- links, invite acceptance). Timestamps are INTEGER epoch ms — Better Auth's
+-- column types (unlike Lexa's TEXT datetime('now') conventions).
+-- No social providers: account.provider_id is always 'credential'.
+CREATE TABLE session (
+  id         TEXT PRIMARY KEY,
+  token      TEXT NOT NULL UNIQUE,                            -- session token (hashed)
+  user_id    TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  expires_at INTEGER NOT NULL,                                -- epoch ms; 7d sliding (updateAge 24h)
+  ip_address TEXT,
+  user_agent TEXT,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+CREATE INDEX idx_session_user ON session(user_id);
+
+CREATE TABLE account (
+  id           TEXT PRIMARY KEY,
+  user_id      TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  account_id   TEXT NOT NULL,                                 -- = user id for credentials
+  provider_id  TEXT NOT NULL,                                 -- 'credential' only
+  access_token TEXT,
+  refresh_token TEXT,
+  id_token     TEXT,
+  password     TEXT,                                          -- Better Auth scrypt hash
+  created_at   INTEGER NOT NULL,
+  updated_at   INTEGER NOT NULL
+);
+
+CREATE TABLE verification (
+  id          TEXT PRIMARY KEY,
+  identifier  TEXT NOT NULL,                                  -- set-password / invite token id
+  value       TEXT NOT NULL,                                  -- the secret value
+  expires_at  INTEGER NOT NULL,                               -- epoch ms; 7d
+  created_at  INTEGER NOT NULL,
+  updated_at  INTEGER NOT NULL
+);
+
+-- ============================================================
+-- Teams (Better Auth organizations) + membership
+-- ============================================================
+-- A team = an organization row; slug unique. Team-admin authority = the
+-- member row's org role (owner/admin) — independent per (team, user);
+-- users.role stays the global axis only (superadmin|member).
+CREATE TABLE organization (
+  id         TEXT PRIMARY KEY,
+  name       TEXT NOT NULL,
+  slug       TEXT NOT NULL UNIQUE,                            -- duplicate → SlugTaken 409
+  logo       TEXT,
+  created_at INTEGER NOT NULL,                                -- epoch ms (Better Auth)
+  metadata   TEXT
+);
+
+CREATE TABLE member (
+  id              TEXT PRIMARY KEY,
+  organization_id TEXT NOT NULL REFERENCES organization(id) ON DELETE CASCADE,
+  user_id         TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  role            TEXT NOT NULL,                              -- 'owner'|'admin'|'member' (comma-joined as Better Auth writes it)
+  created_at      INTEGER NOT NULL,                           -- epoch ms (Better Auth)
+  UNIQUE (organization_id, user_id)                           -- one row per (team, user); N teams = N rows
+);
+CREATE INDEX idx_member_org ON member(organization_id);
+CREATE INDEX idx_member_user ON member(user_id);
+
+-- ============================================================
+-- Workspace invitations (superadmin-issued app-member invites)
+-- ============================================================
+-- Link-based (no email transport): token = link secret, expires 7d after
+-- issue, revocable while pending. Accepted on first login — the invitee
+-- sets their own password → member account created → accepted_at stamped.
+-- Lexa conventions (TEXT datetime('now')) — unlike the Better Auth tables.
+CREATE TABLE workspace_invitations (
+  id          TEXT PRIMARY KEY,
+  email       TEXT NOT NULL UNIQUE,
+  role        TEXT NOT NULL DEFAULT 'member',                 -- 'member' only (superadmin-issued app-member invites)
+  token       TEXT NOT NULL UNIQUE,                           -- link secret (crypto.randomUUID())
+  expires_at  TEXT NOT NULL,                                  -- 7d after issue
+  created_by  TEXT REFERENCES users(id),                      -- superadmin who issued
+  created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+  accepted_at TEXT                                           -- NULL = pending
 );
 
 -- ============================================================
@@ -294,8 +391,9 @@ CREATE TABLE webhook_events (
 -- ============================================================
 -- Settings (app key/value store)
 -- ============================================================
--- e.g. settings.admin_emails — mirrored from LXK_ADMIN_EMAILS by the
--- setup wizard; read alongside the env var at auth time.
+-- The legacy admin_emails key is DELETED (row + code + UI) — the env
+-- allow-list LXK_ADMIN_EMAILS is the only superadmin source, applied at
+-- provisioning only, never edited at runtime.
 -- settings.rate_limit_max / settings.rate_limit_window_ms — per-IP rate limit,
 -- read by the API middleware (DB is the single source; code defaults as
 -- fallback).
@@ -324,6 +422,7 @@ CREATE INDEX idx_swimlanes_proj  ON swimlanes(project_id, position);
 CREATE INDEX idx_wiki_project    ON wiki_pages(project_id);
 CREATE INDEX idx_wiki_parent     ON wiki_pages(parent_id) WHERE parent_id IS NOT NULL;
 CREATE INDEX idx_runtimes_machine ON runtimes(machine_id);
+CREATE INDEX idx_runtimes_team ON runtimes(team_id);
 CREATE INDEX idx_task_links_from ON task_links(from_task_id);
 CREATE INDEX idx_task_links_to   ON task_links(to_task_id);
 CREATE INDEX idx_task_links_proj ON task_links(project_id);
@@ -333,7 +432,11 @@ CREATE INDEX idx_task_links_proj ON task_links(project_id);
 -- Forge: runtime agents + persisted document sources
 -- ============================================================
 -- runtimes: daemons that run agent CLIs (opencode/hermes/command-code) and poll
---   for tasks. model is the agent model id reported by the daemon (FORGE_MODEL);
+--   for tasks. team_id scopes ownership: NULL = superadmin-owned GLOBAL runtime
+--   (claims any team's project tasks); non-NULL = that team's runtime (claims
+--   only that team's project tasks). Team admin manages own team's runtimes;
+--   superadmin all (any team + global).
+--   model is the agent model id reported by the daemon (FORGE_MODEL);
 --   extra_args is server-authoritative injected CLI tokens (JSON array), applied
 --   by the daemon at spawn time (Settings → Edit runtime).
 --   models_catalog is the live provider/model list the daemon reports with its
@@ -357,6 +460,8 @@ CREATE TABLE runtimes (
   log_level      TEXT NOT NULL DEFAULT '',     -- daemon log verbosity
   agents_catalog TEXT NOT NULL DEFAULT '[]',
   machine_id     TEXT REFERENCES machines(id) ON DELETE SET NULL,
+  team_id        TEXT REFERENCES organization(id),            -- owning team; NULL = global runtime
+                                                              -- (superadmin-owned, claims any team's tasks)
   status         TEXT NOT NULL DEFAULT 'offline' CHECK (status IN ('online', 'offline')),
   hostname       TEXT NOT NULL DEFAULT '',
   last_seen      TEXT,
