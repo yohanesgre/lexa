@@ -18,16 +18,12 @@ const childMocks = vi.hoisted(() => ({
 // materializeCompose exercises its repo-cwd path.
 const composeMocks = vi.hoisted(() => ({ empty: false }));
 
-// CF request recorder + app-policy list override (the cmdDeploy policy
-// branch tests assert the PUT target and body). The list overrides let
-// cmdUndeploy tests seed existing resources so the DELETE paths run.
+// CF request recorder (the cmdUndeploy tests seed existing resources so the
+// DELETE paths run).
 const cfMocks = vi.hoisted(() => ({
   requests: [] as Array<{ url: string; method: string; body: string }>,
-  policyList: [] as Array<{ id: string; precedence?: number; app_count?: number; reusable?: boolean; name?: string }>,
   dnsList: [] as Array<{ id: string }>,
   tunnelList: [] as Array<{ id: string }>,
-  appList: [] as Array<{ id: string }>,
-  idpList: [] as Array<{ id: string; type: string; name?: string }>,
 }));
 
 vi.mock("./packed-compose", async () => {
@@ -57,11 +53,8 @@ beforeEach(() => {
   childMocks.spawnSyncCalls.length = 0;
   childMocks.spawnSyncStatus = 0;
   cfMocks.requests.length = 0;
-  cfMocks.policyList = [];
   cfMocks.dnsList = [];
   cfMocks.tunnelList = [];
-  cfMocks.appList = [];
-  cfMocks.idpList = [];
   vi.resetModules();
 });
 
@@ -87,12 +80,7 @@ function stubCfApi(): void {
     const method = init?.method ?? "GET";
     cfMocks.requests.push({ url: full, method, body: typeof init?.body === "string" ? init.body : "" });
     let result: unknown = {};
-    if (path.includes("/access/apps/") && path.includes("/policies")) result = method === "GET" ? cfMocks.policyList : {};
-    // Account-level policies endpoint — reusable policy updates land here.
-    else if (path.includes("/access/policies/")) result = {};
-    else if (path.includes("/access/apps")) result = method === "GET" ? cfMocks.appList : { id: "app1" };
-    else if (path.includes("/access/identity_providers")) result = method === "GET" ? cfMocks.idpList : { id: "idp1" };
-    else if (path.includes("/cfd_tunnel") && path.includes("/token")) result = { token: "tok1" };
+    if (path.includes("/cfd_tunnel") && path.includes("/token")) result = { token: "tok1" };
     else if (path.includes("/cfd_tunnel") && path.includes("/configurations")) result = {};
     else if (path.includes("/cfd_tunnel")) result = method === "GET" ? cfMocks.tunnelList : { id: "tun1" };
     else if (path.includes("/dns_records")) result = method === "GET" ? cfMocks.dnsList : {};
@@ -105,10 +93,6 @@ function stubCfApi(): void {
 const DEPLOY_FLAGS = {
   "deploy-dir": "", // filled per test
   "cf-token": "cf-tok",
-  "google-client-id": "g-id",
-  "google-client-secret": "g-sec",
-  "team-domain": "lexa.cloudflareaccess.com",
-  "email-domain": "example.com",
   "admin-email": "admin@example.com",
   "api-key": "lxk_test_key_1234567890123456789012345678901234567890",
 };
@@ -229,9 +213,9 @@ describe("runCompose", () => {
 });
 
 describe("cmdDeploy end-to-end", () => {
-  async function runDeploy(extra: Record<string, string | boolean> = {}): Promise<{ deployDir: string; log: string }> {
+  async function runDeploy(extra: Record<string, string | boolean> = {}, opts: { deployDir?: string } = {}): Promise<{ deployDir: string; log: string }> {
     stubCfApi();
-    const deployDir = mkdtempSync(join(tmpdir(), "lexa-deploy-e2e-"));
+    const deployDir = opts.deployDir ?? mkdtempSync(join(tmpdir(), "lexa-deploy-e2e-"));
     const log = vi.spyOn(console, "log").mockImplementation(() => {});
     const mod = await import("./deploy");
     const cfg = (await import("./config")).CliConfigService;
@@ -254,10 +238,10 @@ describe("cmdDeploy end-to-end", () => {
     expect(env).toContain("LXK_ADMIN_EMAILS=admin@example.com");
     expect(env).toContain("LXK_ENV=prod");
     expect(env).toContain("CF_TUNNEL_TOKEN=tok1");
-    expect(env).toContain("LXK_ACCESS_TEAM=lexa");
+    expect(env).toContain("LXK_PUBLIC_URL=https://lexa.example.com");
     // Deploy creds persisted via CliConfigService in the DOMAIN group dir.
     const saved = JSON.parse(readFileSync(join(lexaDir, "example.com", "config.json"), "utf-8")) as { deploy?: unknown };
-    expect(saved.deploy).toEqual({ cfToken: "cf-tok", googleClientId: "g-id", googleClientSecret: "g-sec", cfTeamDomain: "lexa.cloudflareaccess.com", emailDomain: "example.com" });
+    expect(saved.deploy).toEqual({ cfToken: "cf-tok" });
     // Compose invoked with the pinned image tag.
     const up = childMocks.spawnSyncCalls.find((c) => c.args.includes("up"));
     expect(up?.args).toContain("--env-file");
@@ -266,6 +250,23 @@ describe("cmdDeploy end-to-end", () => {
     // Banner shows the pinned image.
     expect(log).toContain("Image: ghcr.io/yohanesgre/lexa:v1.2.3");
     expect(log).toContain("https://lexa.example.com");
+    rmSync(deployDir, { recursive: true, force: true });
+  });
+
+  it("redeploy strips stale LXK_ACCESS_* lines but carries hand-added keys", async () => {
+    const deployDir = mkdtempSync(join(tmpdir(), "lexa-deploy-e2e-"));
+    // A previous pre-rework deploy left Access vars in the flavor env file
+    // alongside a hand-added key (LOG_LEVEL). Redeploy must drop the stale
+    // Access lines (rewrittenKeys-owned) and keep the hand-added key.
+    writeFileSync(join(deployDir, ".env.prod"), "LXK_API_KEY=old_key_1234567890123456789012345678901234567890\nLXK_ACCESS_TEAM=lexa\nLXK_ACCESS_AUD=aud1\nLOG_LEVEL=debug\n");
+    const { log } = await runDeploy({}, { deployDir });
+    const env = readFileSync(join(deployDir, ".env.prod"), "utf-8");
+    expect(env).not.toMatch(/LXK_ACCESS_TEAM=/);
+    expect(env).not.toMatch(/LXK_ACCESS_AUD=/);
+    expect(env).toContain("LOG_LEVEL=debug");
+    expect(env).toContain("LXK_API_KEY=lxk_test_key_1234567890123456789012345678901234567890");
+    expect(env).toContain("LXK_PUBLIC_URL=https://lexa.example.com");
+    expect(log).toContain("Wrote .env.prod");
     rmSync(deployDir, { recursive: true, force: true });
   });
 
@@ -308,46 +309,6 @@ describe("cmdDeploy end-to-end", () => {
     expect(cmds.some((a) => a.includes("up -d"))).toBe(true);
     rmSync(deployDir, { recursive: true, force: true });
   });
-
-  it("updates a reusable policy via the account-level endpoint without precedence", async () => {
-    cfMocks.policyList = [{ id: "pol-reusable", app_count: 1, reusable: true, name: "Allow @gmail.com" }];
-    const { log } = await runDeploy();
-    const put = cfMocks.requests.find((r) => r.method === "PUT" && r.url.includes("/access/policies/pol-reusable"));
-    expect(put).toBeDefined();
-    expect(put?.url).toContain("/accounts/acc1/access/policies/pol-reusable");
-    const body = JSON.parse(put?.body ?? "{}") as Record<string, unknown>;
-    expect(body).toEqual({
-      name: "Allow @example.com",
-      decision: "allow",
-      include: [{ email_domain: { domain: "example.com" } }],
-    });
-    expect(body).not.toHaveProperty("precedence");
-    // No app-scoped PUT for the same row.
-    expect(cfMocks.requests.some((r) => r.method === "PUT" && r.url.includes("/access/apps/app1/policies/pol-reusable"))).toBe(false);
-    expect(log).toContain("Updating existing reusable policy: pol-reusable");
-    expect(log).toContain("Policy: allow @example.com");
-  });
-
-  it("treats a row with app_count but no reusable flag as reusable", async () => {
-    cfMocks.policyList = [{ id: "pol-multi", app_count: 3 }];
-    await runDeploy();
-    expect(cfMocks.requests.some((r) => r.method === "PUT" && r.url.includes("/access/policies/pol-multi"))).toBe(true);
-    expect(cfMocks.requests.some((r) => r.method === "PUT" && r.url.includes("/access/apps/app1/policies/pol-multi"))).toBe(false);
-  });
-
-  it("updates an app-scoped policy via the app endpoint with precedence in the body", async () => {
-    cfMocks.policyList = [{ id: "pol-app", precedence: 1 }];
-    const { log } = await runDeploy();
-    const put = cfMocks.requests.find((r) => r.method === "PUT" && r.url.includes("/access/apps/app1/policies/pol-app"));
-    expect(put).toBeDefined();
-    const body = JSON.parse(put?.body ?? "{}") as Record<string, unknown>;
-    expect(body.precedence).toBe(1);
-    expect(body.name).toBe("Allow @example.com");
-    expect((body.include as Array<Record<string, unknown>>)[0]).toEqual({ email_domain: { domain: "example.com" } });
-    // No account-level PUT for an app-scoped row.
-    expect(cfMocks.requests.some((r) => r.method === "PUT" && r.url.includes("/access/policies/pol-app"))).toBe(false);
-    expect(log).toContain("Updating existing policy: pol-app");
-  });
 });
 
 describe("cmdUndeploy", () => {
@@ -387,12 +348,6 @@ describe("cmdUndeploy", () => {
     writeFileSync(join(lexaDir, "example.com", "config.json"), JSON.stringify({ url: "http://example.com", apiKey: "k", deploy: { cfToken: "cf-tok" } }));
     cfMocks.dnsList = [{ id: "dns1" }];
     cfMocks.tunnelList = [{ id: "tun1" }];
-    cfMocks.appList = [{ id: "app1" }];
-    cfMocks.policyList = [
-      { id: "pol-app1", precedence: 1 },
-      { id: "pol-reuse", reusable: true, app_count: 1 },
-    ];
-    cfMocks.idpList = [{ id: "idp1", type: "google", name: "Google Login (prod)" }];
 
     const log = await invokeUndeploy(deployDir, { ...DEPLOY_FLAGS, yes: true }, ["example.com", "prod"]);
 
@@ -402,20 +357,14 @@ describe("cmdUndeploy", () => {
     expect(down?.args).toEqual(["compose", "-f", "docker-compose.yml", "-f", "docker-compose.prod.yml", "--env-file", ".env.prod", "down", "-v"]);
     expect((down?.opts.env as Record<string, string>).COMPOSE_PROJECT_NAME).toBe("lexa-prod");
 
-    // CF deletions in order: DNS → tunnel → policies (app-scoped + reusable) → app → IdP.
+    // CF deletions in order: DNS → tunnel.
     const deletes = cfMocks.requests.filter((r) => r.method === "DELETE");
     const dnsIdx = deletes.findIndex((r) => r.url.includes("/dns_records/dns1"));
     const tunIdx = deletes.findIndex((r) => r.url.includes("/cfd_tunnel/tun1"));
-    const polAppIdx = deletes.findIndex((r) => r.url.includes("/access/apps/app1/policies/pol-app1"));
-    const polReuseIdx = deletes.findIndex((r) => r.url.includes("/access/policies/pol-reuse"));
-    const appIdx = deletes.findIndex((r) => r.url.includes("/access/apps/app1") && !r.url.includes("/policies"));
-    const idpIdx = deletes.findIndex((r) => r.url.includes("/identity_providers/idp1"));
     expect(dnsIdx).toBeGreaterThanOrEqual(0);
     expect(tunIdx).toBeGreaterThan(dnsIdx);
-    expect(polAppIdx).toBeGreaterThan(tunIdx);
-    expect(polReuseIdx).toBeGreaterThan(polAppIdx);
-    expect(appIdx).toBeGreaterThan(polReuseIdx);
-    expect(idpIdx).toBeGreaterThan(appIdx);
+    // No Access/IdP resources exist anymore.
+    expect(deletes.some((r) => r.url.includes("/access"))).toBe(false);
 
     // Local state: deploy dir gone, login kept, deploy key dropped.
     expect(existsSync(deployDir)).toBe(false);
