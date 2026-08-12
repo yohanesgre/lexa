@@ -11,15 +11,21 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as ForgeRouteImport } from './routes/forge'
+import { Route as InviteRouteImport } from './routes/invite'
+import { Route as LoginRouteImport } from './routes/login'
+import { Route as SetPasswordRouteImport } from './routes/set-password'
 import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as SetupRouteImport } from './routes/setup'
 import { Route as SlugIndexRouteImport } from './routes/$slug/index'
 import { Route as SlugBoardRouteImport } from './routes/$slug/board'
 import { Route as SlugSettingsRouteImport } from './routes/$slug/settings'
 import { Route as SlugTasksRouteImport } from './routes/$slug/tasks'
+import { Route as SettingsMeRouteImport } from './routes/settings/me'
+import { Route as SettingsTeamRouteImport } from './routes/settings/team'
+import { Route as SettingsWorkspaceRouteImport } from './routes/settings/workspace'
 import { Route as SlugWikiIndexRouteImport } from './routes/$slug/wiki/index'
 import { Route as SlugWikiPageSlugRouteImport } from './routes/$slug/wiki/$pageSlug'
-import { Route as ApiAuthSplatRouteImport } from './routes/api.auth.$'
+import { Route as SettingsProjectProjectIdRouteImport } from './routes/settings/project.$projectId'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -29,6 +35,21 @@ const IndexRoute = IndexRouteImport.update({
 const ForgeRoute = ForgeRouteImport.update({
   id: '/forge',
   path: '/forge',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const InviteRoute = InviteRouteImport.update({
+  id: '/invite',
+  path: '/invite',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const LoginRoute = LoginRouteImport.update({
+  id: '/login',
+  path: '/login',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const SetPasswordRoute = SetPasswordRouteImport.update({
+  id: '/set-password',
+  path: '/set-password',
   getParentRoute: () => rootRouteImport,
 } as any)
 const SettingsRoute = SettingsRouteImport.update({
@@ -61,6 +82,21 @@ const SlugTasksRoute = SlugTasksRouteImport.update({
   path: '/$slug/tasks',
   getParentRoute: () => rootRouteImport,
 } as any)
+const SettingsMeRoute = SettingsMeRouteImport.update({
+  id: '/me',
+  path: '/me',
+  getParentRoute: () => SettingsRoute,
+} as any)
+const SettingsTeamRoute = SettingsTeamRouteImport.update({
+  id: '/team',
+  path: '/team',
+  getParentRoute: () => SettingsRoute,
+} as any)
+const SettingsWorkspaceRoute = SettingsWorkspaceRouteImport.update({
+  id: '/workspace',
+  path: '/workspace',
+  getParentRoute: () => SettingsRoute,
+} as any)
 const SlugWikiIndexRoute = SlugWikiIndexRouteImport.update({
   id: '/$slug/wiki/',
   path: '/$slug/wiki/',
@@ -71,50 +107,69 @@ const SlugWikiPageSlugRoute = SlugWikiPageSlugRouteImport.update({
   path: '/$slug/wiki/$pageSlug',
   getParentRoute: () => rootRouteImport,
 } as any)
-const ApiAuthSplatRoute = ApiAuthSplatRouteImport.update({
-  id: '/api/auth/$',
-  path: '/api/auth/$',
-  getParentRoute: () => rootRouteImport,
-} as any)
+const SettingsProjectProjectIdRoute =
+  SettingsProjectProjectIdRouteImport.update({
+    id: '/project/$projectId',
+    path: '/project/$projectId',
+    getParentRoute: () => SettingsRoute,
+  } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/forge': typeof ForgeRoute
-  '/settings': typeof SettingsRoute
+  '/invite': typeof InviteRoute
+  '/login': typeof LoginRoute
+  '/set-password': typeof SetPasswordRoute
+  '/settings': typeof SettingsRouteWithChildren
   '/setup': typeof SetupRoute
   '/$slug/board': typeof SlugBoardRoute
   '/$slug/settings': typeof SlugSettingsRoute
   '/$slug/tasks': typeof SlugTasksRoute
+  '/settings/me': typeof SettingsMeRoute
+  '/settings/team': typeof SettingsTeamRoute
+  '/settings/workspace': typeof SettingsWorkspaceRoute
   '/$slug/': typeof SlugIndexRoute
   '/$slug/wiki/$pageSlug': typeof SlugWikiPageSlugRoute
-  '/api/auth/$': typeof ApiAuthSplatRoute
+  '/settings/project/$projectId': typeof SettingsProjectProjectIdRoute
   '/$slug/wiki/': typeof SlugWikiIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/forge': typeof ForgeRoute
-  '/settings': typeof SettingsRoute
+  '/invite': typeof InviteRoute
+  '/login': typeof LoginRoute
+  '/set-password': typeof SetPasswordRoute
+  '/settings': typeof SettingsRouteWithChildren
   '/setup': typeof SetupRoute
   '/$slug/board': typeof SlugBoardRoute
   '/$slug/settings': typeof SlugSettingsRoute
   '/$slug/tasks': typeof SlugTasksRoute
+  '/settings/me': typeof SettingsMeRoute
+  '/settings/team': typeof SettingsTeamRoute
+  '/settings/workspace': typeof SettingsWorkspaceRoute
   '/$slug': typeof SlugIndexRoute
   '/$slug/wiki/$pageSlug': typeof SlugWikiPageSlugRoute
-  '/api/auth/$': typeof ApiAuthSplatRoute
+  '/settings/project/$projectId': typeof SettingsProjectProjectIdRoute
   '/$slug/wiki': typeof SlugWikiIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/forge': typeof ForgeRoute
-  '/settings': typeof SettingsRoute
+  '/invite': typeof InviteRoute
+  '/login': typeof LoginRoute
+  '/set-password': typeof SetPasswordRoute
+  '/settings': typeof SettingsRouteWithChildren
   '/setup': typeof SetupRoute
   '/$slug/board': typeof SlugBoardRoute
   '/$slug/settings': typeof SlugSettingsRoute
   '/$slug/tasks': typeof SlugTasksRoute
+  '/settings/me': typeof SettingsMeRoute
+  '/settings/team': typeof SettingsTeamRoute
+  '/settings/workspace': typeof SettingsWorkspaceRoute
   '/$slug/': typeof SlugIndexRoute
   '/$slug/wiki/$pageSlug': typeof SlugWikiPageSlugRoute
-  '/api/auth/$': typeof ApiAuthSplatRoute
+  '/settings/project/$projectId': typeof SettingsProjectProjectIdRoute
   '/$slug/wiki/': typeof SlugWikiIndexRoute
 }
 export interface FileRouteTypes {
@@ -122,54 +177,74 @@ export interface FileRouteTypes {
   fullPaths:
     | '/'
     | '/forge'
+    | '/invite'
+    | '/login'
+    | '/set-password'
     | '/settings'
     | '/setup'
     | '/$slug/board'
     | '/$slug/settings'
     | '/$slug/tasks'
+    | '/settings/me'
+    | '/settings/team'
+    | '/settings/workspace'
     | '/$slug/'
     | '/$slug/wiki/$pageSlug'
-    | '/api/auth/$'
+    | '/settings/project/$projectId'
     | '/$slug/wiki/'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
     | '/forge'
+    | '/invite'
+    | '/login'
+    | '/set-password'
     | '/settings'
     | '/setup'
     | '/$slug/board'
     | '/$slug/settings'
     | '/$slug/tasks'
+    | '/settings/me'
+    | '/settings/team'
+    | '/settings/workspace'
     | '/$slug'
     | '/$slug/wiki/$pageSlug'
-    | '/api/auth/$'
+    | '/settings/project/$projectId'
     | '/$slug/wiki'
   id:
     | '__root__'
     | '/'
     | '/forge'
+    | '/invite'
+    | '/login'
+    | '/set-password'
     | '/settings'
     | '/setup'
     | '/$slug/board'
     | '/$slug/settings'
     | '/$slug/tasks'
+    | '/settings/me'
+    | '/settings/team'
+    | '/settings/workspace'
     | '/$slug/'
     | '/$slug/wiki/$pageSlug'
-    | '/api/auth/$'
+    | '/settings/project/$projectId'
     | '/$slug/wiki/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   ForgeRoute: typeof ForgeRoute
-  SettingsRoute: typeof SettingsRoute
+  InviteRoute: typeof InviteRoute
+  LoginRoute: typeof LoginRoute
+  SetPasswordRoute: typeof SetPasswordRoute
+  SettingsRoute: typeof SettingsRouteWithChildren
   SetupRoute: typeof SetupRoute
   SlugBoardRoute: typeof SlugBoardRoute
   SlugSettingsRoute: typeof SlugSettingsRoute
   SlugTasksRoute: typeof SlugTasksRoute
   SlugIndexRoute: typeof SlugIndexRoute
   SlugWikiPageSlugRoute: typeof SlugWikiPageSlugRoute
-  ApiAuthSplatRoute: typeof ApiAuthSplatRoute
   SlugWikiIndexRoute: typeof SlugWikiIndexRoute
 }
 
@@ -187,6 +262,27 @@ declare module '@tanstack/react-router' {
       path: '/forge'
       fullPath: '/forge'
       preLoaderRoute: typeof ForgeRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/invite': {
+      id: '/invite'
+      path: '/invite'
+      fullPath: '/invite'
+      preLoaderRoute: typeof InviteRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/login': {
+      id: '/login'
+      path: '/login'
+      fullPath: '/login'
+      preLoaderRoute: typeof LoginRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/set-password': {
+      id: '/set-password'
+      path: '/set-password'
+      fullPath: '/set-password'
+      preLoaderRoute: typeof SetPasswordRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/settings': {
@@ -231,6 +327,27 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof SlugTasksRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/settings/me': {
+      id: '/settings/me'
+      path: '/me'
+      fullPath: '/settings/me'
+      preLoaderRoute: typeof SettingsMeRouteImport
+      parentRoute: typeof SettingsRoute
+    }
+    '/settings/team': {
+      id: '/settings/team'
+      path: '/team'
+      fullPath: '/settings/team'
+      preLoaderRoute: typeof SettingsTeamRouteImport
+      parentRoute: typeof SettingsRoute
+    }
+    '/settings/workspace': {
+      id: '/settings/workspace'
+      path: '/workspace'
+      fullPath: '/settings/workspace'
+      preLoaderRoute: typeof SettingsWorkspaceRouteImport
+      parentRoute: typeof SettingsRoute
+    }
     '/$slug/wiki/': {
       id: '/$slug/wiki/'
       path: '/$slug/wiki'
@@ -245,27 +362,47 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof SlugWikiPageSlugRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/api/auth/$': {
-      id: '/api/auth/$'
-      path: '/api/auth/$'
-      fullPath: '/api/auth/$'
-      preLoaderRoute: typeof ApiAuthSplatRouteImport
-      parentRoute: typeof rootRouteImport
+    '/settings/project/$projectId': {
+      id: '/settings/project/$projectId'
+      path: '/project/$projectId'
+      fullPath: '/settings/project/$projectId'
+      preLoaderRoute: typeof SettingsProjectProjectIdRouteImport
+      parentRoute: typeof SettingsRoute
     }
   }
 }
 
+interface SettingsRouteChildren {
+  SettingsMeRoute: typeof SettingsMeRoute
+  SettingsTeamRoute: typeof SettingsTeamRoute
+  SettingsWorkspaceRoute: typeof SettingsWorkspaceRoute
+  SettingsProjectProjectIdRoute: typeof SettingsProjectProjectIdRoute
+}
+
+const SettingsRouteChildren: SettingsRouteChildren = {
+  SettingsMeRoute: SettingsMeRoute,
+  SettingsTeamRoute: SettingsTeamRoute,
+  SettingsWorkspaceRoute: SettingsWorkspaceRoute,
+  SettingsProjectProjectIdRoute: SettingsProjectProjectIdRoute,
+}
+
+const SettingsRouteWithChildren = SettingsRoute._addFileChildren(
+  SettingsRouteChildren,
+)
+
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   ForgeRoute: ForgeRoute,
-  SettingsRoute: SettingsRoute,
+  InviteRoute: InviteRoute,
+  LoginRoute: LoginRoute,
+  SetPasswordRoute: SetPasswordRoute,
+  SettingsRoute: SettingsRouteWithChildren,
   SetupRoute: SetupRoute,
   SlugBoardRoute: SlugBoardRoute,
   SlugSettingsRoute: SlugSettingsRoute,
   SlugTasksRoute: SlugTasksRoute,
   SlugIndexRoute: SlugIndexRoute,
   SlugWikiPageSlugRoute: SlugWikiPageSlugRoute,
-  ApiAuthSplatRoute: ApiAuthSplatRoute,
   SlugWikiIndexRoute: SlugWikiIndexRoute,
 }
 export const routeTree = rootRouteImport

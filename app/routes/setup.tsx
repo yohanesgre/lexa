@@ -99,8 +99,8 @@ function SetupWizard() {
   };
 
   const goToApp = () => {
-    // No token persistence: the server injects the current API key into the
-    // served HTML (<meta name="lxk-api-key">) and the client prefers it.
+    // No token persistence: the setup wizard provisions the superadmin
+    // account; signing in happens on /login with the session cookie.
     navigate({ to: "/" });
   };
 
