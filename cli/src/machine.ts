@@ -15,7 +15,7 @@ import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { LexaClient, ApiError, type RuntimeCatalogInfo, type RuntimeEventInfo } from "./api";
-import { CliConfigService, LEXA_DIR, type CliConfig } from "./config";
+import { CliConfigService, groupDir, flavorFor, type CliConfig, type LexaFlavor } from "./config";
 import { DAEMON_SOURCE } from "./packed";
 
 // The machine listener systemd user unit. "Listener" matches the component
@@ -31,21 +31,22 @@ export const COMPILED = (import.meta.dir ?? "").startsWith("/$bunfs");
 // to the URL-derived dir so the module is importable in tests.
 const META_DIR = import.meta.dir ?? dirname(fileURLToPath(import.meta.url));
 const INSTALL_DIR = join(homedir(), ".local", "share", "lexa-forge");
-// Runtime state root — everything the host stores lives here (config.json,
-// machine-id, env, runtimes/<id>/env, runs/). Legacy ~/.config/lexa-* dirs
-// are migrated into it on listen (migrate-and-delete, no fallback).
-const RUNTIMES_DIR = join(LEXA_DIR, "runtimes");
-// Project workspaces — one persistent dir per project under ~/.lexa/projects/,
+// Host-keyed state — everything lives under the group dir derived from the
+// server URL (~/.lexa/<host>/): config.json, machine-id, runtimes/<id>/env,
+// projects/, projects.json, runs/. Multiple servers never share state; the
+// listener passes its group dir as LEXA_DIR to the daemons it spawns.
+const runtimesDir = (dir: string) => join(dir, "runtimes");
+// Project workspaces — one persistent dir per project under <group>/projects/,
 // seeded on first sight with README.md (project context) + AGENTS.md (static
 // orchestrator). The Forge daemon runs opencode from the workspace dir with a
 // sealed per-run HOME; per-agent rule bundles live in .agents/agents/<id>/.
-const PROJECTS_DIR = join(LEXA_DIR, "projects");
-const PROJECT_INDEX_PATH = join(LEXA_DIR, "projects.json");
+const projectsDir = (dir: string) => join(dir, "projects");
+const projectIndexPath = (dir: string) => join(dir, "projects.json");
 const LISTENER_UNIT_PATH = join(homedir(), ".config", "systemd", "user", `${SERVICE_NAME}.service`);
 const DAEMON_SRC = join(META_DIR, "..", "..", "forge", "daemon.ts");
 const CLI_ENTRY = join(META_DIR, "index.ts");
-const MACHINE_ID_PATH = join(LEXA_DIR, "machine-id");
-const MACHINE_SECRET_PATH = join(LEXA_DIR, "machine-secret");
+const machineIdPath = (dir: string) => join(dir, "machine-id");
+const machineSecretPath = (dir: string) => join(dir, "machine-secret");
 const EVENT_POLL_MS = 3000;
 const CATALOG_REFRESH_MS = 10 * 60 * 1000;
 const COMMAND_TIMEOUT_MS = 30_000;
@@ -98,8 +99,13 @@ function hasSystemd(): boolean {
   }
 }
 
-function listenerUnit(): string {
-  const exec = COMPILED ? `${process.execPath} machine listen` : `bun run ${CLI_ENTRY} machine listen`;
+function listenerUnit(url: string): string {
+  // The unit is pinned to the URL of the server it was installed for — the
+  // listener derives its group from the URL at boot, so two listeners (e.g.
+  // prod + dev) can coexist via systemd.
+  const exec = COMPILED
+    ? `${process.execPath} machine listen --url ${url}`
+    : `bun run ${CLI_ENTRY} machine listen --url ${url}`;
   return `[Unit]
 Description=Lexa Forge machine listener (web wizard → runtime daemons)
 After=network-online.target
@@ -115,29 +121,30 @@ WantedBy=default.target
 `;
 }
 
-function ensureListenerUnit(): void {
+function ensureListenerUnit(url: string): void {
   mkdirSync(dirname(LISTENER_UNIT_PATH), { recursive: true });
-  writeFileSync(LISTENER_UNIT_PATH, listenerUnit());
+  writeFileSync(LISTENER_UNIT_PATH, listenerUnit(url));
   if (hasSystemd()) spawnSync("systemctl", ["--user", "daemon-reload"], { stdio: "inherit" });
 }
 
-export const machineInstall = (opts: MachineInstallOpts = {}): Effect.Effect<void, MachineError> =>
+export const machineInstall = (opts: MachineInstallOpts = {}, config: CliConfig): Effect.Effect<void, MachineError> =>
   Effect.gen(function* () {
-    yield* Effect.try({ try: () => mkdirSync(LEXA_DIR, { recursive: true, mode: 0o700 }), catch: toMachineError });
+    const dir = groupDir(config.url);
+    yield* Effect.try({ try: () => mkdirSync(dir, { recursive: true, mode: 0o700 }), catch: toMachineError });
     if (opts.noSystemd) {
       console.log("  Runtime setup is driven from the web wizard.");
       console.log("  Start the machine listener under your supervisor:");
-      console.log("    lexa-cli machine listen");
+      console.log("    lexa-cli machine listen --url " + config.url);
       return;
     }
-    yield* Effect.try({ try: () => ensureListenerUnit(), catch: toMachineError });
+    yield* Effect.try({ try: () => ensureListenerUnit(config.url), catch: toMachineError });
     console.log(`  Listener unit → ${LISTENER_UNIT_PATH}`);
     if (!hasSystemd()) {
       console.log("  systemd not available — start the listener manually:");
-      console.log("    lexa-cli machine listen");
+      console.log("    lexa-cli machine listen --url " + config.url);
       return;
     }
-    yield* machineStart();
+    yield* machineStart(config.url);
   });
 
 function sysctl(args: string[]): number {
@@ -149,10 +156,11 @@ function sysctl(args: string[]): number {
   return result.status ?? 1;
 }
 
-export const machineStart = (): Effect.Effect<void, MachineError> =>
+export const machineStart = (url: string): Effect.Effect<void, MachineError> =>
   Effect.try({
     try: () => {
-      ensureListenerUnit();
+      // Re-ensure the unit so the ExecStart keeps the URL it was pinned to.
+      ensureListenerUnit(url);
       sysctl(["enable", "--now", SERVICE_NAME]);
       console.log(`  Started ${SERVICE_NAME}.`);
     },
@@ -168,7 +176,7 @@ export const machineStop = (): Effect.Effect<void, MachineError> =>
     catch: toMachineError,
   });
 
-export const machineUninstall = (): Effect.Effect<void, MachineError> =>
+export const machineUninstall = (dir: string): Effect.Effect<void, MachineError> =>
   Effect.try({
     try: () => {
       if (existsSync(LISTENER_UNIT_PATH)) {
@@ -179,7 +187,7 @@ export const machineUninstall = (): Effect.Effect<void, MachineError> =>
       } else {
         console.log("  Listener unit not installed — nothing to remove.");
       }
-      console.log(`  Local machine state (${LEXA_DIR}) kept — remove it yourself if unwanted.`);
+      console.log(`  Local machine state (${dir}) kept — remove it yourself if unwanted.`);
       console.log("  Server-side: lexa-cli machine delete <id> (after stopping the listener).");
     },
     catch: toMachineError,
@@ -234,11 +242,12 @@ function readEnvFile(path: string): Record<string, string> {
   return result;
 }
 
-function listRuntimeEnvs(): RuntimeEnv[] {
-  if (!existsSync(RUNTIMES_DIR)) return [];
+function listRuntimeEnvs(dir: string): RuntimeEnv[] {
+  const root = runtimesDir(dir);
+  if (!existsSync(root)) return [];
   const result: RuntimeEnv[] = [];
-  for (const runtimeId of readdirSync(RUNTIMES_DIR)) {
-    const path = join(RUNTIMES_DIR, runtimeId, "env");
+  for (const runtimeId of readdirSync(root)) {
+    const path = join(root, runtimeId, "env");
     const env = readEnvFile(path);
     const agentCli = env.FORGE_AGENT;
     if (!env.FORGE_RUNTIME_ID || !isAgentCli(agentCli)) continue;
@@ -258,7 +267,7 @@ function isAgentCli(value: string | undefined): value is "opencode" | "hermes" |
 // inherited value instead of its env-file key, defeating exit-code-3
 // detection). The listener itself still reads its own env; only the spawned
 // daemon env is scrubbed. Blocklist wins over allowlist.
-const ALLOWED_ENV_KEYS = ["PATH", "HOME", "LANG", "TERM", "TZ", "PWD", "SHELL", "USER", "LOGNAME", "LEXA_DIR"];
+const ALLOWED_ENV_KEYS = ["PATH", "HOME", "LANG", "TERM", "TZ", "PWD", "SHELL", "USER", "LOGNAME", "LEXA_DIR", "LEXA_FLAVOR"];
 const ALLOWED_ENV_PREFIXES = ["LC_", "XDG_", "BUN_"];
 const SECRET_ENV_PREFIXES = ["LXK_", "GITHUB_", "CF_", "CLOUDFLARE_", "AWS_", "AZURE_", "GOOGLE_"];
 const SECRET_ENV_MARKERS = ["SECRET", "TOKEN", "PRIVATE_KEY", "API_KEY", "PASSWORD"];
@@ -282,16 +291,17 @@ export function scrubDaemonEnv(env: Record<string, string | undefined>): Record<
 
 // Machine identity: `hostname-<unique>` so machine ids are human-readable in
 // the Settings machines list (existing UUID ids keep working — opaque to the
-// server). Persisted in ~/.lexa/machine-id; never regenerated once written.
-export const getOrCreateMachineId = (): Effect.Effect<string, never> =>
+// server). Persisted in <group>/machine-id; never regenerated once written.
+export const getOrCreateMachineId = (dir: string): Effect.Effect<string, never> =>
   Effect.try(() => {
-    if (existsSync(MACHINE_ID_PATH)) {
-      const existing = readFileSync(MACHINE_ID_PATH, "utf-8").trim();
+    const path = machineIdPath(dir);
+    if (existsSync(path)) {
+      const existing = readFileSync(path, "utf-8").trim();
       if (existing) return existing;
     }
     const id = `${osHostname()}-${crypto.randomUUID().slice(0, 8)}`;
-    mkdirSync(dirname(MACHINE_ID_PATH), { recursive: true });
-    writeFileSync(MACHINE_ID_PATH, `${id}\n`, { mode: 0o600 });
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(path, `${id}\n`, { mode: 0o600 });
     return id;
   }).pipe(
     Effect.catchAll(() => Effect.succeed(`${osHostname()}-${crypto.randomUUID().slice(0, 8)}`)),
@@ -300,20 +310,22 @@ export const getOrCreateMachineId = (): Effect.Effect<string, never> =>
 // Machine binding secret: minted by the server on first registration,
 // returned exactly once and persisted here (chmod 600, alongside machine-id).
 // Sent with register (re-binding) and as x-machine-secret on claim.
-export const getOrCreateMachineSecret = (): Effect.Effect<string, never> =>
+export const getOrCreateMachineSecret = (dir: string): Effect.Effect<string, never> =>
   Effect.try(() => {
-    if (existsSync(MACHINE_SECRET_PATH)) {
-      return readFileSync(MACHINE_SECRET_PATH, "utf-8").trim();
+    const path = machineSecretPath(dir);
+    if (existsSync(path)) {
+      return readFileSync(path, "utf-8").trim();
     }
     return "";
   }).pipe(Effect.catchAll(() => Effect.succeed("")));
 
-export const saveMachineSecret = (secret: string): Effect.Effect<void, MachineError> =>
+export const saveMachineSecret = (secret: string, dir: string): Effect.Effect<void, MachineError> =>
   Effect.try({
     try: () => {
-      mkdirSync(dirname(MACHINE_SECRET_PATH), { recursive: true });
-      writeFileSync(MACHINE_SECRET_PATH, `${secret}\n`, { mode: 0o600 });
-      chmodSync(MACHINE_SECRET_PATH, 0o600);
+      const path = machineSecretPath(dir);
+      mkdirSync(dirname(path), { recursive: true });
+      writeFileSync(path, `${secret}\n`, { mode: 0o600 });
+      chmodSync(path, 0o600);
     },
     catch: toMachineError,
   });
@@ -332,25 +344,25 @@ export interface WorkspaceProjectInfo {
   description: string;
 }
 
-function writeProjectIndex(projects: WorkspaceProjectInfo[]): void {
+function writeProjectIndex(projects: WorkspaceProjectInfo[], dir: string): void {
   const index: Record<string, { name: string; slug: string; description: string }> = {};
   for (const p of projects) {
     index[p.id] = { name: p.name, slug: p.slug, description: p.description };
   }
-  const tmp = `${PROJECT_INDEX_PATH}.tmp`;
+  const tmp = `${projectIndexPath(dir)}.tmp`;
   writeFileSync(tmp, JSON.stringify(index, null, 2), { mode: 0o644 });
-  renameSync(tmp, PROJECT_INDEX_PATH);
+  renameSync(tmp, projectIndexPath(dir));
 }
 
-function provisionWorkspaces(projects: WorkspaceProjectInfo[]): { total: number; created: number } {
+function provisionWorkspaces(projects: WorkspaceProjectInfo[], dir: string): { total: number; created: number } {
   let created = 0;
   for (const p of projects) {
-    const dir = join(PROJECTS_DIR, p.id);
-    if (!existsSync(dir)) {
-      mkdirSync(dir, { recursive: true });
+    const workspace = join(projectsDir(dir), p.id);
+    if (!existsSync(workspace)) {
+      mkdirSync(workspace, { recursive: true });
       created += 1;
     }
-    const readme = join(dir, "README.md");
+    const readme = join(workspace, "README.md");
     if (!existsSync(readme)) {
       writeFileSync(readme, [
         `# ${p.name}`,
@@ -363,7 +375,7 @@ function provisionWorkspaces(projects: WorkspaceProjectInfo[]): { total: number;
         "",
       ].join("\n"), { mode: 0o644 });
     }
-    const orchestrator = join(dir, "AGENTS.md");
+    const orchestrator = join(workspace, "AGENTS.md");
     if (!existsSync(orchestrator)) {
       writeFileSync(orchestrator, [
         `# ${p.name}`,
@@ -377,7 +389,7 @@ function provisionWorkspaces(projects: WorkspaceProjectInfo[]): { total: number;
         "Work only inside this workspace directory. Project files (if any) are",
         "under `repo/`.",
         "",
-        `File access: use ABSOLUTE paths under \`${dir}/\` (e.g. \`${dir}/repo/foo\`) —`,
+        `File access: use ABSOLUTE paths under \`${workspace}/\` (e.g. \`${workspace}/repo/foo\`) —`,
         "relative paths are denied by the workspace policy. Never touch anything",
         "outside this directory.",
         "",
@@ -580,7 +592,7 @@ function killTree(pid: number): void {
   }
 }
 
-function killChild(runtimeId: string, children: Map<string, RuntimeChild>, stopping: Set<string>): Effect.Effect<void, never> {
+function killChild(runtimeId: string, children: Map<string, RuntimeChild>, stopping: Set<string>, dir: string): Effect.Effect<void, never> {
   return Effect.gen(function* () {
     const runtime = children.get(runtimeId);
     if (!runtime) return;
@@ -604,7 +616,7 @@ function killChild(runtimeId: string, children: Map<string, RuntimeChild>, stopp
     }
     // The daemon is dead — drop its pid file so the next listener boot does
     // not try to sweep it (and a fresh spawn overwrites it anyway).
-    try { rmSync(join(RUNTIMES_DIR, runtimeId, "daemon.pid"), { force: true }); } catch { /* ignore */ }
+    try { rmSync(join(runtimesDir(dir), runtimeId, "daemon.pid"), { force: true }); } catch { /* ignore */ }
   });
 }
 
@@ -613,13 +625,18 @@ function spawnRuntime(
   children: Map<string, RuntimeChild>,
   stopping: Set<string>,
   shuttingDown: () => boolean,
+  dir: string,
+  flavor: LexaFlavor,
   onAuthFailure?: (runtimeId: string) => void,
 ): void {
   ensureDaemonInstalled();
   stopping.delete(runtime.runtimeId);
   const child = spawn("bun", ["run", join(INSTALL_DIR, "daemon.js")], {
     cwd: INSTALL_DIR,
-    env: { ...scrubDaemonEnv(process.env), ...runtime.env },
+    // The group dir + derived flavor reach the daemon as LEXA_DIR/LEXA_FLAVOR
+    // (daemon code keeps reading LEXA_DIR/config.json, runtimes/, projects/);
+    // the runtime env file overrides nothing about the group itself.
+    env: { ...scrubDaemonEnv(process.env), LEXA_DIR: dir, LEXA_FLAVOR: flavor, ...runtime.env },
     stdio: "inherit",
     detached: true,
   });
@@ -630,7 +647,7 @@ function spawnRuntime(
   // restart spawns a SECOND daemon for the same runtime and both claim tasks.
   if (child.pid) {
     try {
-      writeFileSync(join(RUNTIMES_DIR, runtime.runtimeId, "daemon.pid"), `${child.pid}\n`, { mode: 0o600 });
+      writeFileSync(join(runtimesDir(dir), runtime.runtimeId, "daemon.pid"), `${child.pid}\n`, { mode: 0o600 });
     } catch { /* non-fatal — a stale daemon would linger until the next machine stop */ }
   }
   child.on("error", (error) => console.error(`  [runtime ${runtime.runtimeId}] ${error.message}`));
@@ -639,7 +656,7 @@ function spawnRuntime(
     children.delete(runtime.runtimeId);
     // Clean daemon exit — the pid file is stale now; drop it so a future
     // boot does not probe (and killTree) a dead pid.
-    try { rmSync(join(RUNTIMES_DIR, runtime.runtimeId, "daemon.pid"), { force: true }); } catch { /* ignore */ }
+    try { rmSync(join(runtimesDir(dir), runtime.runtimeId, "daemon.pid"), { force: true }); } catch { /* ignore */ }
     if (shuttingDown() || stopping.has(runtime.runtimeId)) return;
     if (code === 3) {
       // Auth failure (revoked/rotated API key): the daemon cannot work and
@@ -652,8 +669,8 @@ function spawnRuntime(
     }
     console.error(`  [runtime ${runtime.runtimeId}] daemon exited; retrying in 5s`);
     setTimeout(() => {
-      const latest = listRuntimeEnvs().find((entry) => entry.runtimeId === runtime.runtimeId);
-      if (latest && !shuttingDown()) spawnRuntime(latest, children, stopping, shuttingDown, onAuthFailure);
+      const latest = listRuntimeEnvs(dir).find((entry) => entry.runtimeId === runtime.runtimeId);
+      if (latest && !shuttingDown()) spawnRuntime(latest, children, stopping, shuttingDown, dir, flavor, onAuthFailure);
     }, 5000).unref?.();
   });
 }
@@ -668,20 +685,22 @@ function handleSetupEvent(
   children: Map<string, RuntimeChild>,
   stopping: Set<string>,
   shuttingDown: () => boolean,
+  dir: string,
+  flavor: LexaFlavor,
 ): Effect.Effect<void, never> {
   return Effect.gen(function* () {
     console.log(`\n  [event] ${event.action} agent=${event.agentCli}`);
     yield* Effect.gen(function* () {
       if (event.action === "remove") {
-        const targets = listRuntimeEnvs().filter((runtime) => runtime.agentCli === event.agentCli);
+        const targets = listRuntimeEnvs(dir).filter((runtime) => runtime.agentCli === event.agentCli);
         for (const runtime of targets) {
-          yield* killChild(runtime.runtimeId, children, stopping);
+          yield* killChild(runtime.runtimeId, children, stopping, dir);
           rmSync(dirname(runtime.path), { recursive: true, force: true });
         }
       } else {
-        const existing = listRuntimeEnvs().find((runtime) => runtime.agentCli === event.agentCli);
+        const existing = listRuntimeEnvs(dir).find((runtime) => runtime.agentCli === event.agentCli);
         const runtimeId = existing?.runtimeId ?? crypto.randomUUID();
-        const path = existing?.path ?? join(RUNTIMES_DIR, runtimeId, "env");
+        const path = existing?.path ?? join(runtimesDir(dir), runtimeId, "env");
         const env: Record<string, string> = {
           ...(existing?.env ?? {}),
           LEXA_URL: serverUrl,
@@ -694,9 +713,9 @@ function handleSetupEvent(
           if (!rawKey) return yield* Effect.fail(new Error("Install event did not include its one-time API key"));
           env.LEXA_API_KEY = rawKey;
         }
-        yield* killChild(runtimeId, children, stopping);
+        yield* killChild(runtimeId, children, stopping, dir);
         writeRuntimeEnv(path, env);
-        spawnRuntime({ runtimeId, agentCli: event.agentCli, path, env }, children, stopping, shuttingDown);
+        spawnRuntime({ runtimeId, agentCli: event.agentCli, path, env }, children, stopping, shuttingDown, dir, flavor);
       }
       yield* client.completeRuntimeEvent(event.id);
       console.log(`  [event] ${event.id} complete`);
@@ -718,8 +737,8 @@ function handleSetupEvent(
 // boot, kill each runtime's stale daemon (via the persisted daemon.pid)
 // BEFORE spawning a fresh one; otherwise two daemons claim the same runtime,
 // and repeated crashes multiply daemons.
-function killStaleDaemon(runtime: RuntimeEnv): void {
-  const pidFile = join(RUNTIMES_DIR, runtime.runtimeId, "daemon.pid");
+function killStaleDaemon(runtime: RuntimeEnv, dir: string): void {
+  const pidFile = join(runtimesDir(dir), runtime.runtimeId, "daemon.pid");
   let raw: string;
   try {
     raw = readFileSync(pidFile, "utf-8").trim();
@@ -743,11 +762,16 @@ function killStaleDaemon(runtime: RuntimeEnv): void {
 export const machineListen = (config: CliConfig): Effect.Effect<never, ListenerError, CliConfigService> =>
   Effect.gen(function* () {
     const configService = yield* CliConfigService;
+    // The listener's group is derived from the server URL at boot (--url
+    // flag or saved login): machine-id/secret, runtimes, projects, runs all
+    // live under ~/.lexa/<host>/ and are passed to daemons as LEXA_DIR.
+    const dir = groupDir(config.url);
+    const flavor = flavorFor(config.url);
     yield* configService.migrateLegacyDirs();
-    yield* Effect.sync(() => mkdirSync(LEXA_DIR, { recursive: true, mode: 0o700 }));
+    yield* Effect.sync(() => mkdirSync(dir, { recursive: true, mode: 0o700 }));
     const client = new LexaClient(config);
-    const machineId = yield* getOrCreateMachineId();
-    const machineSecret = yield* getOrCreateMachineSecret();
+    const machineId = yield* getOrCreateMachineId(dir);
+    const machineSecret = yield* getOrCreateMachineSecret(dir);
     if (!machineSecret) {
       console.error("  Machine secret missing — re-run `lexa-cli login` to re-register this machine");
       process.exit(0);
@@ -776,7 +800,7 @@ export const machineListen = (config: CliConfig): Effect.Effect<never, ListenerE
       if (refreshing) return;
       refreshing = true;
       try {
-        const envs = listRuntimeEnvs();
+        const envs = listRuntimeEnvs(dir);
         catalogs = yield* Effect.all(
           envs.map((runtime) =>
             Effect.map(discoverCatalog(runtime.agentCli), (catalog) => ({
@@ -798,17 +822,17 @@ export const machineListen = (config: CliConfig): Effect.Effect<never, ListenerE
     const shutdown = (): Effect.Effect<void, never> => {
       if (shuttingDown) return Effect.void;
       shuttingDown = true;
-      return Effect.all([...children.keys()].map((runtimeId) => killChild(runtimeId, children, stopping)), { concurrency: "unbounded" });
+      return Effect.all([...children.keys()].map((runtimeId) => killChild(runtimeId, children, stopping, dir)), { concurrency: "unbounded" });
     };
     yield* Effect.sync(() => {
       process.once("SIGTERM", () => { void Effect.runPromise(shutdown()).finally(() => process.exit(0)); });
       process.once("SIGINT", () => { void Effect.runPromise(shutdown()).finally(() => process.exit(0)); });
     });
 
-    for (const runtime of listRuntimeEnvs()) {
-      yield* Effect.sync(() => killStaleDaemon(runtime));
+    for (const runtime of listRuntimeEnvs(dir)) {
+      yield* Effect.sync(() => killStaleDaemon(runtime, dir));
       yield* Effect.try({
-        try: () => spawnRuntime(normalizeRuntimeEnv(runtime, config.url, machineId, machineHostname), children, stopping, () => shuttingDown, onAuthFailure),
+        try: () => spawnRuntime(normalizeRuntimeEnv(runtime, config.url, machineId, machineHostname), children, stopping, () => shuttingDown, dir, flavor, onAuthFailure),
         catch: (error) => new ListenerError({ reason: error instanceof Error ? error.message : String(error) }),
       });
     }
@@ -841,8 +865,8 @@ export const machineListen = (config: CliConfig): Effect.Effect<never, ListenerE
             pendingDaemonErrors.clear();
             if (catalogsDirty) catalogsDirty = false;
             if (Array.isArray(heartbeat.projects) && heartbeat.projects.length > 0) {
-              yield* Effect.sync(() => writeProjectIndex(heartbeat.projects));
-              const provisioned = yield* Effect.sync(() => provisionWorkspaces(heartbeat.projects));
+              yield* Effect.sync(() => writeProjectIndex(heartbeat.projects, dir));
+              const provisioned = yield* Effect.sync(() => provisionWorkspaces(heartbeat.projects, dir));
               if (!workspacesLogged) {
                 workspacesLogged = true;
                 console.log(`  Workspaces: ${provisioned.total} project${provisioned.total === 1 ? "" : "s"} (${provisioned.created} created)`);
@@ -851,7 +875,7 @@ export const machineListen = (config: CliConfig): Effect.Effect<never, ListenerE
           }
           const claim = yield* client.claimRuntimeEvent(machineId, machineSecret);
           if (claim) {
-            yield* handleSetupEvent(client, config.url, machineId, machineHostname, claim.event, claim.rawKey, children, stopping, () => shuttingDown);
+            yield* handleSetupEvent(client, config.url, machineId, machineHostname, claim.event, claim.rawKey, children, stopping, () => shuttingDown, dir, flavor);
             yield* refreshCatalogs;
             catalogsDirty = true;
           }
@@ -869,10 +893,10 @@ export const machineListen = (config: CliConfig): Effect.Effect<never, ListenerE
     );
   });
 
-function readProjectIndex(): Record<string, { name: string; slug: string; description: string }> {
+function readProjectIndex(dir: string): Record<string, { name: string; slug: string; description: string }> {
   try {
-    if (!existsSync(PROJECT_INDEX_PATH)) return {};
-    return JSON.parse(readFileSync(PROJECT_INDEX_PATH, "utf-8")) as Record<string, { name: string; slug: string; description: string }>;
+    if (!existsSync(projectIndexPath(dir))) return {};
+    return JSON.parse(readFileSync(projectIndexPath(dir), "utf-8")) as Record<string, { name: string; slug: string; description: string }>;
   } catch {
     return {};
   }
@@ -880,29 +904,30 @@ function readProjectIndex(): Record<string, { name: string; slug: string; descri
 
 // ── lexa-cli machine workspace ──
 
-// Local workspace view — one row per provisioned dir under ~/.lexa/projects/.
+// Local workspace view — one row per provisioned dir under <group>/projects/.
 // Orphan = dir exists but the project is gone from the server index (kept
 // deliberately, never auto-deleted — it may hold operator files).
-export const workspaceList = (): Effect.Effect<void, MachineError> =>
+export const workspaceList = (config: CliConfig): Effect.Effect<void, MachineError> =>
   Effect.try({
     try: () => {
-      const index = readProjectIndex();
-      const dirs = existsSync(PROJECTS_DIR) ? readdirSync(PROJECTS_DIR).sort() : [];
+      const dir = groupDir(config.url);
+      const index = readProjectIndex(dir);
+      const dirs = existsSync(projectsDir(dir)) ? readdirSync(projectsDir(dir)).sort() : [];
       if (dirs.length === 0) {
         console.log("  No workspaces yet — run `lexa-cli machine listen` (or `machine workspace sync`); the listener provisions them from the server heartbeat.");
         return;
       }
       const rows = dirs.map((id) => {
         const info = index[id];
-        const dir = join(PROJECTS_DIR, id);
+        const workspace = join(projectsDir(dir), id);
         let hasFiles = false;
         try {
-          hasFiles = readdirSync(dir).some((name) => !name.startsWith("."));
+          hasFiles = readdirSync(workspace).some((name) => !name.startsWith("."));
         } catch { /* unreadable dir */ }
         return {
           NAME: info?.name ?? "—",
           ID: id,
-          PATH: dir,
+          PATH: workspace,
           STATUS: info ? (hasFiles ? "provisioned" : "empty") : "orphan",
         };
       });
@@ -916,12 +941,13 @@ export const workspaceList = (): Effect.Effect<void, MachineError> =>
 // provision any missing workspace dirs.
 export const workspaceSync = (config: CliConfig): Effect.Effect<void, ApiError | MachineError> =>
   Effect.gen(function* () {
+    const dir = groupDir(config.url);
     const client = new LexaClient(config);
     const projects = yield* client.listProjects();
     const index = projects.map((p) => ({ id: p.id, name: p.name, slug: p.slug, description: p.description ?? "" }));
-    yield* Effect.try({ try: () => writeProjectIndex(index), catch: toMachineError });
-    const provisioned = yield* Effect.try({ try: () => provisionWorkspaces(index), catch: toMachineError });
-    console.log(`  Synced ${provisioned.total} project${provisioned.total === 1 ? "" : "s"} into ${PROJECTS_DIR} (${provisioned.created} workspace dir(s) created)`);
+    yield* Effect.try({ try: () => writeProjectIndex(index, dir), catch: toMachineError });
+    const provisioned = yield* Effect.try({ try: () => provisionWorkspaces(index, dir), catch: toMachineError });
+    console.log(`  Synced ${provisioned.total} project${provisioned.total === 1 ? "" : "s"} into ${projectsDir(dir)} (${provisioned.created} workspace dir(s) created)`);
   });
 
 export const listMachines = (config: CliConfig): Effect.Effect<void, never> =>

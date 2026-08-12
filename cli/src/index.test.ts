@@ -8,7 +8,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { spawn } from "node:child_process";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { NotLoggedIn } from "./index";
@@ -102,21 +102,45 @@ describe("entry point (bun subprocess)", () => {
     expect(r.stdout).toContain("Start the machine listener under your supervisor:");
   });
 
-  it("github status --local validates an env file without needing login", async () => {
+  it("github status --local without login is now gated (NotLoggedIn + exit 1)", async () => {
     const dir = mkdtempSync(join(tmpdir(), "lexa-index-"));
     const pem = join(dir, "app-key.pem");
     writeFileSync(pem, "-----BEGIN RSA PRIVATE KEY-----\nMIIE...\n", { mode: 0o600 });
     writeFileSync(join(dir, ".env"), `GITHUB_APP_ID=123\nGITHUB_PRIVATE_KEY_FILE=${pem}\nGITHUB_WEBHOOK_SECRET=0123456789abcdef\n`);
-    const r = await runCli(["github", "status", "--local", "--env-file", join(dir, ".env")]);
+    const r = await runCli(["github", "status", "--local", "--env-file", join(dir, ".env")], { LEXA_URL: "", LEXA_API_KEY: "" });
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain("Not logged in. Run: lexa-cli login");
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("github status --local validates an env file with credentials present", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "lexa-index-"));
+    const pem = join(dir, "app-key.pem");
+    writeFileSync(pem, "-----BEGIN RSA PRIVATE KEY-----\nMIIE...\n", { mode: 0o600 });
+    writeFileSync(join(dir, ".env"), `GITHUB_APP_ID=123\nGITHUB_PRIVATE_KEY_FILE=${pem}\nGITHUB_WEBHOOK_SECRET=0123456789abcdef\n`);
+    const r = await runCli(["github", "status", "--local", "--env-file", join(dir, ".env")], {
+      LEXA_URL: "http://127.0.0.1:1",
+      LEXA_API_KEY: "lxk_key_1234567890123456789012345678901234567890",
+    });
     expect(r.status).toBe(0);
     expect(r.stdout).toContain("Config looks complete");
     rmSync(dir, { recursive: true, force: true });
   });
 
-  it("github status without login fails pointing at login or --local", async () => {
+  it("github status without login fails pointing at login", async () => {
     const r = await runCli(["github", "status"], { LEXA_URL: "", LEXA_API_KEY: "" });
     expect(r.status).toBe(1);
-    expect(r.stderr).toContain("Not logged in. Run: lexa-cli login [--url <base>] [--key <lxk_...>], or use --local to check the env file.");
+    expect(r.stderr).toContain("Not logged in. Run: lexa-cli login [--url <base>] [--key <lxk_...>]");
+  });
+
+  it("newly-gated machine commands fail NotLoggedIn without credentials", async () => {
+    // machine install|uninstall|start|stop|restart|status|logs and
+    // machine workspace list require resolvable credentials (spec 4.7).
+    for (const args of [["machine", "uninstall"], ["machine", "start"], ["machine", "stop"], ["machine", "restart"], ["machine", "status"], ["machine", "logs"], ["machine", "workspace", "list"]]) {
+      const r = await runCli(args, { LEXA_URL: "", LEXA_API_KEY: "" });
+      expect(r.status, args.join(" ")).toBe(1);
+      expect(r.stderr, args.join(" ")).toContain("Not logged in. Run: lexa-cli login");
+    }
   });
 });
 
@@ -151,9 +175,13 @@ describe("requireClient resolution (env + saved-login fallbacks)", () => {
     expect(seenUrls).toContain("/api/projects");
   });
 
-  it("saved login (config.json) is used when env vars are absent", async () => {
+  it("saved login (group config.json) is used when env vars are absent", async () => {
     const lexaDir = freshLexaDir();
-    writeFileSync(join(lexaDir, "config.json"), JSON.stringify({ url: base, apiKey: "lxk_saved_key_1234567890123456789012345678901234567890" }));
+    // Saved logins live in the group of their server URL: 127.0.0.1:<port> →
+    // <LEXA_DIR>/localhost:<port>/config.json.
+    const group = join(lexaDir, `localhost:${new URL(base).port}`);
+    mkdirSync(group, { recursive: true });
+    writeFileSync(join(group, "config.json"), JSON.stringify({ url: base, apiKey: "lxk_saved_key_1234567890123456789012345678901234567890" }));
     const r = await runCli(["status"], { LEXA_URL: "", LEXA_API_KEY: "", LEXA_DIR: lexaDir });
     expect(r.status).toBe(0);
     expect(r.stdout).toContain("Server:   reachable (health ok)");
@@ -161,7 +189,9 @@ describe("requireClient resolution (env + saved-login fallbacks)", () => {
 
   it("flags override the saved login", async () => {
     const lexaDir = freshLexaDir();
-    writeFileSync(join(lexaDir, "config.json"), JSON.stringify({ url: "http://127.0.0.1:1", apiKey: "lxk_wrong_key_1234567890123456789012345678901234567890" }));
+    const group = join(lexaDir, "localhost:1");
+    mkdirSync(group, { recursive: true });
+    writeFileSync(join(group, "config.json"), JSON.stringify({ url: "http://127.0.0.1:1", apiKey: "lxk_wrong_key_1234567890123456789012345678901234567890" }));
     const r = await runCli(["status", "--url", base, "--key", "lxk_flag_key_1234567890123456789012345678901234567890"], { LEXA_DIR: lexaDir });
     expect(r.status).toBe(0);
     expect(r.stdout).toContain("Server:   reachable (health ok)");

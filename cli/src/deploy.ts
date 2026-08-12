@@ -1,14 +1,15 @@
 // lexa-cli deploy — Docker Compose + cloudflared tunnel + Cloudflare Access
 // provisioning. TypeScript port of the former scripts/setup.sh. Deploy
-// credentials persist in ~/.lexa/config.json (prod) or ~/.lexa-staging/config.json
-// under the `deploy` key, so deploy works without a saved login (url/apiKey).
+// credentials persist in ~/.lexa/<domain>/config.json (the group dir of the
+// deployed domain) under the `deploy` key, so deploy works without a saved
+// login (url/apiKey). Flavor picks only the .env.<flavor> file + image tag.
 import { Effect, Data } from "effect";
 import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync, writeFileSync, mkdirSync, rmSync } from "node:fs";
 import { randomBytes } from "node:crypto";
 import { gunzipSync } from "node:zlib";
 import { join } from "node:path";
-import { CliConfigService, lexaDirFor, type LexaFlavor } from "./config";
+import { CliConfigService, groupDir } from "./config";
 import { COMPOSE_FILES } from "./packed-compose";
 
 const CF_API = "https://api.cloudflare.com/client/v4";
@@ -32,7 +33,7 @@ function usage(): never {
   console.error("  prod    — remote, lexa.<domain>, .env.prod");
   console.error("");
   console.error("Flags (all optional — prompts fill what's missing on a TTY):");
-  console.error("  --deploy-dir <path>       compose/env working dir (default: ~/.lexa/deploy; staging: ~/.lexa-staging/deploy)");
+  console.error("  --deploy-dir <path>       compose/env working dir (default: ~/.lexa/<domain>/deploy)");
   console.error("  --image <tag>             image tag to deploy (default: latest; staging flavor: staging)");
   console.error("  --clean                   recreate from scratch — removes the data volume (DB wiped)");
   console.error("  --cf-token <token>        Cloudflare API token (env: CF_API_TOKEN)");
@@ -51,7 +52,7 @@ function usage(): never {
   console.error("(DNS, tunnel, Access app + policies, Google IdP), and local state (deploy dir + creds).");
   console.error("Flags:");
   console.error("  --cf-token <token>        Cloudflare API token (env: CF_API_TOKEN)");
-  console.error("  --deploy-dir <path>       compose/env working dir (default: ~/.lexa/deploy; staging: ~/.lexa-staging/deploy)");
+  console.error("  --deploy-dir <path>       compose/env working dir (default: ~/.lexa/<domain>/deploy)");
   console.error("  --yes                     confirm teardown without a prompt (non-TTY only)");
   process.exit(1);
 }
@@ -260,11 +261,11 @@ export function downCompose(flavor: Flavor): Effect.Effect<void, DeployError, ne
 
 // The deploy contract is the three compose files (image refs + volumes +
 // tunnel) — embedded in the binary (few KB) so a clean machine needs no repo.
-// Materialize them into ~/.lexa/deploy (prod) or ~/.lexa-staging/deploy and
-// work from there. When running from source (dev shim, no embedded files),
-// fall back to the local repo's compose files.
-export function materializeCompose(flavorName: string, flags: Record<string, string | boolean>): string {
-  const deployDir = flagStr(flags, "deploy-dir") || join(lexaDirFor(flavorName as LexaFlavor), "deploy");
+// Materialize them into ~/.lexa/<domain>/deploy and work from there. When
+// running from source (dev shim, no embedded files), fall back to the local
+// repo's compose files.
+export function materializeCompose(flavorName: string, flags: Record<string, string | boolean>, domain: string): string {
+  const deployDir = flagStr(flags, "deploy-dir") || join(groupDir(domain), "deploy");
   const entries = Object.entries(COMPOSE_FILES);
   if (entries.length === 0) {
     // Running from source: the repo's compose files are the contract.
@@ -312,7 +313,6 @@ export const cmdDeploy = Effect.fn("LexaCli/cmdDeploy")(function* (
   if (!domain) usage();
   const flavor = FLAVORS[flavorName];
   if (!flavor) usage();
-  const lexaFlavor = flavorName as LexaFlavor;
   const isTTY = process.stdin.isTTY === true;
 
   const fullDomain = flavor.subdomain ? `${flavor.subdomain}.${domain}` : "";
@@ -320,12 +320,12 @@ export const cmdDeploy = Effect.fn("LexaCli/cmdDeploy")(function* (
 
   // Clean-machine flow: the binary embeds the compose files (image refs), so
   // no repo checkout is needed. Materialize them, then verify docker.
-  const deployDir = yield* Effect.try({ try: () => materializeCompose(lexaFlavor, flags), catch: (e) => new DeployError({ reason: `  ERROR: ${(e as Error).message}` }) });
+  const deployDir = yield* Effect.try({ try: () => materializeCompose(flavorName, flags, domain), catch: (e) => new DeployError({ reason: `  ERROR: ${(e as Error).message}` }) });
   process.chdir(deployDir);
   yield* requirePrereqs();
 
   // ── Cloudflare (staging/prod) ──
-  const saved = yield* config.loadDeployCreds(lexaDirFor(lexaFlavor));
+  const saved = yield* config.loadDeployCreds(groupDir(domain));
   let cfToken = flagStr(flags, "cf-token") || process.env.CF_API_TOKEN || process.env.CLOUDFLARE_API_TOKEN || "";
   if (!cfToken && saved?.cfToken) cfToken = saved.cfToken;
   if (!cfToken) {
@@ -695,7 +695,7 @@ export const cmdDeploy = Effect.fn("LexaCli/cmdDeploy")(function* (
     googleClientSecret: googleClientSecret || undefined,
     cfTeamDomain: cfTeamDomain || undefined,
     emailDomain: emailDomain || undefined,
-  }, lexaDirFor(lexaFlavor));
+  }, groupDir(domain));
 
   const imageTag = flagStr(flags, "image") || undefined;
   const clean = flags.clean === true;
@@ -796,7 +796,6 @@ export const cmdUndeploy = Effect.fn("LexaCli/cmdUndeploy")(function* (
   if (!domain) usage();
   const flavor = FLAVORS[flavorName];
   if (!flavor) usage();
-  const lexaFlavor = flavorName as LexaFlavor;
   const isTTY = process.stdin.isTTY === true;
 
   const fullDomain = flavor.subdomain ? `${flavor.subdomain}.${domain}` : domain;
@@ -815,11 +814,11 @@ export const cmdUndeploy = Effect.fn("LexaCli/cmdUndeploy")(function* (
     return yield* new DeployError({ reason: "  ERROR: destructive teardown requires --yes on a non-TTY (or run on a terminal to confirm)" });
   }
 
-  const deployDir = yield* Effect.try({ try: () => materializeCompose(lexaFlavor, flags), catch: (e) => new DeployError({ reason: `  ERROR: ${(e as Error).message}` }) });
+  const deployDir = yield* Effect.try({ try: () => materializeCompose(flavorName, flags, domain), catch: (e) => new DeployError({ reason: `  ERROR: ${(e as Error).message}` }) });
   process.chdir(deployDir);
   yield* downCompose(flavor);
 
-  const saved = yield* config.loadDeployCreds(lexaDirFor(lexaFlavor));
+  const saved = yield* config.loadDeployCreds(groupDir(domain));
   const cfToken = flagStr(flags, "cf-token") || process.env.CF_API_TOKEN || process.env.CLOUDFLARE_API_TOKEN || saved?.cfToken || "";
   if (cfToken) {
     yield* teardownCloudflare(cfToken, domain, fullDomain, flavor, flavorName);
@@ -830,8 +829,8 @@ export const cmdUndeploy = Effect.fn("LexaCli/cmdUndeploy")(function* (
   console.log("==> Local state...");
   if (existsSync(deployDir)) rmSync(deployDir, { recursive: true, force: true });
   console.log(`  Removed deploy dir: ${deployDir}`);
-  yield* config.clearDeployCreds(lexaDirFor(lexaFlavor));
-  console.log(`  Removed deploy creds (${join(lexaDirFor(lexaFlavor), "config.json")})`);
+  yield* config.clearDeployCreds(groupDir(domain));
+  console.log(`  Removed deploy creds (${join(groupDir(domain), "config.json")})`);
 
   console.log(`  Undeployed ${flavorName} (${fullDomain}) — containers, volume, CF resources, and local state removed.`);
 });

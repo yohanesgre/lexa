@@ -21,12 +21,12 @@
  */
 import { Effect, Data } from "effect";
 import { LexaClient, ApiError } from "./api";
-import { CliConfigService, type CliConfig } from "./config";
+import { CliConfigService, groupDir, migrateFlavorRootsSync, type CliConfig } from "./config";
 import { cmdDeploy, cmdUndeploy } from "./deploy";
 import { cmdGithubStatus, cmdGithubSetup, cmdGithubCheck } from "./github";
 import { cmdUpgradeCli } from "./upgrade";
 import { CLI_VERSION } from "./version";
-import { COMPILED, getOrCreateMachineId, getOrCreateMachineSecret, saveMachineSecret } from "./machine";
+import { getOrCreateMachineId, getOrCreateMachineSecret, saveMachineSecret } from "./machine";
 import { hostname as osHostname } from "node:os";
 import { machineInstall, machineStart, machineStop, machineRestart, machineStatus, machineLogs, machineUninstall, listMachines, listRuntimes, machineListen, workspaceList, workspaceSync } from "./machine";
 
@@ -71,15 +71,18 @@ export class NotLoggedIn extends Data.TaggedError("NotLoggedIn")<{}> {
   }
 }
 
-// Resolve the active config: flags > env > saved login.
+// Resolve the active config: flags > env > saved login. The saved login
+// lives in the group of its server URL; without a URL hint the state root
+// is scanned for the first saved login (one login per machine is the norm).
 function resolveConfig(flags: Record<string, string | boolean>): Effect.Effect<CliConfig | null, never, CliConfigService> {
   return Effect.gen(function* () {
     const svc = yield* CliConfigService;
-    const saved = yield* svc.loadConfig();
-    const url = (typeof flags.url === "string" && flags.url) || ENV_URL || saved?.url || "";
+    const urlFlag = ((typeof flags.url === "string" && flags.url) || ENV_URL || "").replace(/\/+$/, "");
+    const saved = urlFlag ? yield* svc.loadConfig(groupDir(urlFlag)) : yield* svc.savedLogin();
+    const url = urlFlag || saved?.url || "";
     const apiKey = (typeof flags.key === "string" && flags.key) || ENV_KEY || saved?.apiKey || "";
     if (!url || !apiKey) return null;
-    return { url: url.replace(/\/+$/, ""), apiKey };
+    return { url, apiKey };
   });
 }
 
@@ -129,16 +132,18 @@ function printTable(rows: Record<string, string>[]): void {
 // Plain line reading in cooked mode (no readline): the terminal driver
 // handles echo and backspace, so there is no raw mode, no ANSI cursor
 // queries, and nothing that can hang on a real terminal.
-function promptLogin(question: string, fallback = ""): Promise<string> {
+// Resolves null on EOF (Ctrl-D) so callers can distinguish a cancel from an
+// empty line (an empty answer must re-prompt, not default).
+function promptLogin(question: string): Promise<string | null> {
   return new Promise((resolve) => {
-    const done = (line: string) => {
+    const done = (line: string | null) => {
       // Remove all stdin listeners — bun keeps a read interest on a TTY
       // stdin alive, which would keep the event loop running forever after
       // login; main() then exits explicitly.
       process.stdin.off("data", onData);
       process.stdin.off("end", onEnd);
       process.off("SIGINT", onSigint);
-      resolve(line.trim() || fallback);
+      resolve(line);
     };
     let buffer = "";
     const onData = (chunk: Buffer) => {
@@ -154,9 +159,9 @@ function promptLogin(question: string, fallback = ""): Promise<string> {
         line = line.slice(0, Math.max(0, bs - 1)) + line.slice(bs + 1);
       }
       buffer = "";
-      done(line);
+      done(line.trim());
     };
-    const onEnd = () => done(fallback);
+    const onEnd = () => done(null);
     const onSigint = () => {
       process.stdout.write("\n");
       process.exit(130);
@@ -168,6 +173,19 @@ function promptLogin(question: string, fallback = ""): Promise<string> {
   });
 }
 
+// TTY prompt with NO default: an empty answer prints the message and loops
+// until filled (Ctrl-C/EOF cancel, exit 130).
+function promptRequired(question: string, requiredMessage: string): Effect.Effect<string, never, never> {
+  return Effect.gen(function* () {
+    for (;;) {
+      const answer = yield* Effect.promise(() => promptLogin(question));
+      if (answer === null) process.exit(130);
+      if (answer) return answer;
+      console.log(requiredMessage);
+    }
+  });
+}
+
 function cmdLogin(flags: Record<string, string | boolean>): Effect.Effect<void, unknown, CliConfigService> {
   return Effect.gen(function* () {
     const svc = yield* CliConfigService;
@@ -175,22 +193,13 @@ function cmdLogin(flags: Record<string, string | boolean>): Effect.Effect<void, 
     let key = (typeof flags.key === "string" && flags.key) || ENV_KEY || "";
     if (!url || !key) {
       if (!process.stdin.isTTY) {
+        // Cannot loop without stdin — message + usage, exit 1.
+        console.error(`  ${url ? "API key" : "Server URL"} is required — please fill it`);
         console.error("  Usage: lexa-cli login --url <base> --key <lxk_...>");
-        console.error("  Or run `lexa-cli login` on a terminal for interactive prompts.");
         process.exit(1);
       }
-      if (!url) {
-        // Dev flavor (running from source) defaults to the local dev server;
-        // the compiled prod binary requires an explicit URL.
-        const fallback = COMPILED ? "" : "http://localhost:3000";
-        url = yield* Effect.promise(() => promptLogin(fallback ? `  Server URL (default: ${fallback}): ` : "  Server URL: ", fallback));
-        url = url.replace(/\/+$/, "");
-      }
-      if (!key) key = yield* Effect.promise(() => promptLogin("  API key — from Settings → API Keys, starts with lxk_: "));
-    }
-    if (!url || !key) {
-      console.error("  Usage: lexa-cli login --url <base> --key <lxk_...>");
-      process.exit(1);
+      if (!url) url = yield* promptRequired("  Server URL: ", "  Server URL is required — please fill it");
+      if (!key) key = yield* promptRequired("  API key — from Settings → API Keys, starts with lxk_: ", "  API key is required — please fill it");
     }
     if (!/^lxk_[0-9A-Za-z]{43}$/.test(key)) {
       console.error("  Invalid API key — must be lxk_ + 43 chars (from Settings → API Keys).");
@@ -201,15 +210,17 @@ function cmdLogin(flags: Record<string, string | boolean>): Effect.Effect<void, 
     const h = yield* client.health();
     if (!h.ok) yield* new ApiError({ status: 0, serverMessage: "health check failed" });
     yield* client.listProjects();
-    yield* svc.saveConfig({ url, apiKey: key });
+    // State lands in the group of THIS server — ~/.lexa/<host>/.
+    const dir = groupDir(url);
+    yield* svc.saveConfig({ url, apiKey: key }, dir);
     console.log(`  Logged in to ${url}`);
     // Bind the machine: registration creates the machines row (last_seen NULL
     // = "bound, not listening") so it shows up in Settings before the
     // listener ever runs. The server mints a per-machine secret on first
     // registration (returned once) — persisted for the listener's claims.
     // Non-fatal — login must succeed even if the server hiccups.
-    const machineId = yield* getOrCreateMachineId();
-    const machineSecret = yield* getOrCreateMachineSecret();
+    const machineId = yield* getOrCreateMachineId(dir);
+    const machineSecret = yield* getOrCreateMachineSecret(dir);
     const registered = yield* client.registerMachine({ id: machineId, hostname: osHostname(), secret: machineSecret }).pipe(
       Effect.catchAll((e) => {
         if (e instanceof ApiError && e.code === "MACHINE_ID_TAKEN") {
@@ -220,15 +231,22 @@ function cmdLogin(flags: Record<string, string | boolean>): Effect.Effect<void, 
         return Effect.succeed(null);
       })
     );
-    if (registered?.secret) yield* saveMachineSecret(registered.secret);
+    if (registered?.secret) yield* saveMachineSecret(registered.secret, dir);
     console.log(`  Registered machine ${machineId} — run \`lexa-cli machine listen\` to go online`);
   });
 }
 
-function cmdLogout(): Effect.Effect<void, never, CliConfigService> {
+function cmdLogout(flags: Record<string, string | boolean>): Effect.Effect<void, never, CliConfigService> {
   return Effect.gen(function* () {
     const svc = yield* CliConfigService;
-    yield* svc.clearConfig();
+    const urlFlag = ((typeof flags.url === "string" && flags.url) || ENV_URL || "").replace(/\/+$/, "");
+    const saved = urlFlag ? null : yield* svc.savedLogin();
+    const url = urlFlag || saved?.url || "";
+    if (!url) {
+      console.log("  Not logged in — nothing to remove.");
+      return;
+    }
+    yield* svc.clearConfig(groupDir(url));
   });
 }
 
@@ -471,7 +489,7 @@ function cmdMachineInstall(flags: Record<string, string | boolean>): Effect.Effe
       console.error("  Not logged in. Run: lexa-cli login first.");
       process.exit(1);
     }
-    yield* machineInstall({ noSystemd: flags["no-systemd"] === true });
+    yield* machineInstall({ noSystemd: flags["no-systemd"] === true }, config);
   });
 }
 
@@ -521,7 +539,7 @@ Machine listener:
                                                   the listener first for permanent removal)
 
 Forge workspaces (local machine view):
-  machine workspace list                         per-project dirs under ~/.lexa/projects/ (staging: ~/.lexa-staging)
+  machine workspace list                         per-project dirs under ~/.lexa/<host>/projects/ (per server)
   machine workspace sync                         re-index projects from the server + provision
 
 Deploy (Docker + cloudflared tunnel + Access):
@@ -592,7 +610,7 @@ const GROUP_HELP: Record<string, string> = {
                                                   the listener first for permanent removal)
 
 Forge workspaces (local machine view):
-  machine workspace list                         per-project dirs under ~/.lexa/projects/ (staging: ~/.lexa-staging)
+  machine workspace list                         per-project dirs under ~/.lexa/<host>/projects/ (per server)
   machine workspace sync                         re-index projects from the server + provision`,
 
   github: `GitHub sync (optional integration):
@@ -642,6 +660,9 @@ async function main(): Promise<void> {
     console.log(`lexa-cli ${CLI_VERSION}`);
     return;
   }
+  // One-shot host-keyed migration (legacy flavor roots → groups), before any
+  // command dispatches. No-op when LEXA_DIR is set or no legacy roots exist.
+  migrateFlavorRootsSync();
   const { positionals, flags } = parseArgs(argv);
   const cmd = positionals[0];
   const sub = positionals[1] ?? "";
@@ -653,7 +674,7 @@ async function main(): Promise<void> {
 
   switch (cmd) {
     case "login": program = cmdLogin(flags); prefix = "Login failed"; break;
-    case "logout": program = cmdLogout(); break;
+    case "logout": program = cmdLogout(flags); break;
     case "status": program = cmdStatus(flags); prefix = "Status check failed"; break;
     case "deploy": program = cmdDeploy(flags, positionals.slice(1)); raw = true; break;
     case "undeploy": program = cmdUndeploy(flags, positionals.slice(1)); raw = true; break;
@@ -666,14 +687,14 @@ async function main(): Promise<void> {
       switch (sub) {
         case "status":
           program = Effect.gen(function* () {
-            const config = yield* resolveConfig(flags);
-            yield* cmdGithubStatus(flags, flags.local === true ? null : (config ? new LexaClient(config) : null));
+            const { client } = yield* requireClient(flags);
+            yield* cmdGithubStatus(flags, client);
           });
           break;
         case "setup":
           program = Effect.gen(function* () {
-            const config = yield* resolveConfig(flags);
-            yield* cmdGithubSetup(flags, flags.local === true ? null : (config ? new LexaClient(config) : null));
+            const { client } = yield* requireClient(flags);
+            yield* cmdGithubSetup(flags, client);
           });
           break;
         case "check":
@@ -721,17 +742,17 @@ async function main(): Promise<void> {
       switch (sub) {
         case "list": program = Effect.gen(function* () { const { config } = yield* requireClient(flags); yield* listMachines(config); }); break;
         case "install": program = cmdMachineInstall(flags); break;
-        case "uninstall": program = machineUninstall(); break;
+        case "uninstall": program = Effect.gen(function* () { const { config } = yield* requireClient(flags); yield* machineUninstall(groupDir(config.url)); }); break;
         case "listen": program = Effect.gen(function* () { const { config } = yield* requireClient(flags); yield* machineListen(config); }); break;
-        case "start": program = machineStart(); break;
-        case "stop": program = machineStop(); break;
-        case "restart": program = machineRestart(); break;
-        case "status": program = machineStatus(); break;
-        case "logs": program = machineLogs(); break;
+        case "start": program = Effect.gen(function* () { const { config } = yield* requireClient(flags); yield* machineStart(config.url); }); break;
+        case "stop": program = Effect.gen(function* () { yield* requireClient(flags); yield* machineStop(); }); break;
+        case "restart": program = Effect.gen(function* () { yield* requireClient(flags); yield* machineRestart(); }); break;
+        case "status": program = Effect.gen(function* () { yield* requireClient(flags); yield* machineStatus(); }); break;
+        case "logs": program = Effect.gen(function* () { yield* requireClient(flags); yield* machineLogs(); }); break;
         case "delete": program = cmdMachineDelete(flags, rest); break;
         case "workspace":
           switch (rest[0]) {
-            case "list": program = workspaceList(); break;
+            case "list": program = Effect.gen(function* () { const { config } = yield* requireClient(flags); yield* workspaceList(config); }); break;
             case "sync": program = Effect.gen(function* () { const { config } = yield* requireClient(flags); yield* workspaceSync(config); }); break;
             default: usage("machine", rest[0] === undefined ? "" : `workspace ${rest[0]}`);
           }

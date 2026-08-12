@@ -117,7 +117,7 @@ describe("materializeCompose", () => {
   it("writes only the flavor's compose files (gunzipped) to --deploy-dir", async () => {
     const mod = await import("./deploy");
     const deployDir = mkdtempSync(join(tmpdir(), "lexa-deploy-dir-"));
-    const out = mod.materializeCompose("prod", { "deploy-dir": deployDir });
+    const out = mod.materializeCompose("prod", { "deploy-dir": deployDir }, "example.com");
     expect(out).toBe(deployDir);
     const files = readdirSync(deployDir).sort();
     expect(files).toEqual(["docker-compose.yml", "docker-compose.prod.yml"].sort());
@@ -128,10 +128,10 @@ describe("materializeCompose", () => {
     rmSync(deployDir, { recursive: true, force: true });
   });
 
-  it("defaults to the flavor deploy dir under LEXA_DIR", async () => {
+  it("defaults to the domain group deploy dir under LEXA_DIR", async () => {
     const mod = await import("./deploy");
-    const out = mod.materializeCompose("prod", {});
-    expect(out).toBe(join(lexaDir, "deploy"));
+    const out = mod.materializeCompose("prod", {}, "example.com");
+    expect(out).toBe(join(lexaDir, "example.com", "deploy"));
     expect(existsSync(join(out, "docker-compose.yml"))).toBe(true);
   });
 
@@ -142,7 +142,7 @@ describe("materializeCompose", () => {
     const repo = mkdtempSync(join(tmpdir(), "lexa-deploy-repo-"));
     writeFileSync(join(repo, "docker-compose.yml"), "services: {}\n");
     process.chdir(repo);
-    expect(mod.materializeCompose("prod", {})).toBe(repo);
+    expect(mod.materializeCompose("prod", {}, "example.com")).toBe(repo);
     process.chdir(cwd);
     rmSync(repo, { recursive: true, force: true });
   });
@@ -153,7 +153,7 @@ describe("materializeCompose", () => {
     const mod = await import("./deploy");
     const empty = mkdtempSync(join(tmpdir(), "lexa-deploy-empty-"));
     process.chdir(empty);
-    expect(() => mod.materializeCompose("prod", {})).toThrow(/no embedded compose files/);
+    expect(() => mod.materializeCompose("prod", {}, "example.com")).toThrow(/no embedded compose files/);
     process.chdir(cwd);
     rmSync(empty, { recursive: true, force: true });
   });
@@ -255,8 +255,8 @@ describe("cmdDeploy end-to-end", () => {
     expect(env).toContain("LXK_ENV=prod");
     expect(env).toContain("CF_TUNNEL_TOKEN=tok1");
     expect(env).toContain("LXK_ACCESS_TEAM=lexa");
-    // Deploy creds persisted via CliConfigService.
-    const saved = JSON.parse(readFileSync(join(lexaDir, "config.json"), "utf-8")) as { deploy?: unknown };
+    // Deploy creds persisted via CliConfigService in the DOMAIN group dir.
+    const saved = JSON.parse(readFileSync(join(lexaDir, "example.com", "config.json"), "utf-8")) as { deploy?: unknown };
     expect(saved.deploy).toEqual({ cfToken: "cf-tok", googleClientId: "g-id", googleClientSecret: "g-sec", cfTeamDomain: "lexa.cloudflareaccess.com", emailDomain: "example.com" });
     // Compose invoked with the pinned image tag.
     const up = childMocks.spawnSyncCalls.find((c) => c.args.includes("up"));
@@ -381,8 +381,10 @@ describe("cmdUndeploy", () => {
     const deployDir = mkdtempSync(join(tmpdir(), "lexa-undeploy-e2e-"));
     // A deployed flavor has its env file in the deploy dir (deploy writes it).
     writeFileSync(join(deployDir, ".env.prod"), "LXK_ENV=prod\n");
-    // Saved login + deploy creds — teardown must keep the login, drop deploy.
-    writeFileSync(join(lexaDir, "config.json"), JSON.stringify({ url: "http://example.com", apiKey: "k", deploy: { cfToken: "cf-tok" } }));
+    // Saved login + deploy creds in the DOMAIN group — teardown must keep the
+    // login, drop deploy.
+    mkdirSync(join(lexaDir, "example.com"), { recursive: true });
+    writeFileSync(join(lexaDir, "example.com", "config.json"), JSON.stringify({ url: "http://example.com", apiKey: "k", deploy: { cfToken: "cf-tok" } }));
     cfMocks.dnsList = [{ id: "dns1" }];
     cfMocks.tunnelList = [{ id: "tun1" }];
     cfMocks.appList = [{ id: "app1" }];
@@ -417,7 +419,7 @@ describe("cmdUndeploy", () => {
 
     // Local state: deploy dir gone, login kept, deploy key dropped.
     expect(existsSync(deployDir)).toBe(false);
-    const saved = JSON.parse(readFileSync(join(lexaDir, "config.json"), "utf-8")) as Record<string, unknown>;
+    const saved = JSON.parse(readFileSync(join(lexaDir, "example.com", "config.json"), "utf-8")) as Record<string, unknown>;
     expect(saved).toEqual({ url: "http://example.com", apiKey: "k" });
     expect(log).toContain("Undeployed prod (lexa.example.com) — containers, volume, CF resources, and local state removed.");
   });
@@ -447,7 +449,7 @@ describe("cmdUndeploy", () => {
     expect(cfMocks.requests.length).toBe(0);
     expect(log).toContain("No Cloudflare API token");
     expect(existsSync(deployDir)).toBe(false);
-    expect(existsSync(join(lexaDir, "config.json"))).toBe(false);
+    expect(existsSync(join(lexaDir, "example.com", "config.json"))).toBe(false);
   });
 
   it("TTY confirmation mismatch aborts with exit 1 before any side effects", async () => {

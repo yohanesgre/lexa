@@ -2,7 +2,8 @@
 // (machineInstall/Start/Stop/Restart/Uninstall/Status/Logs) and the listener's
 // daemon-child spawning (machineListen) — the scrubDaemonEnv-at-spawn security
 // contract. child_process is mocked; HOME/LEXA_DIR point at tmp dirs so no
-// real user state is touched.
+// real user state is touched. The listener derives its group dir from the
+// config url ("http://fake-server" → <LEXA_DIR>/fake-server).
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Effect, Layer, Context } from "effect";
 import { EventEmitter } from "node:events";
@@ -107,29 +108,33 @@ function sysctlCalls(): string[] {
 
 const SERVICE = "lexa-machine-listener";
 const UNIT_PATH = () => join(homeDir, ".config", "systemd", "user", `${SERVICE}.service`);
+// The group dir derived from the listener/install config url.
+const GROUP_DIR = () => join(dir, "fake-server");
+const CONFIG = { url: "http://fake-server", apiKey: "lxk_key" };
 
 describe("systemd unit lifecycle", () => {
   it("machineInstall --no-systemd prints supervisor instructions and touches nothing", async () => {
     const mod = await import("./machine");
     const log = vi.spyOn(console, "log").mockImplementation(() => {});
-    await Effect.runPromise(mod.machineInstall({ noSystemd: true }));
+    await Effect.runPromise(mod.machineInstall({ noSystemd: true }, CONFIG));
     const out = log.mock.calls.map((c) => String(c[0])).join("\n");
     expect(out).toContain("Start the machine listener under your supervisor:");
+    expect(out).toContain("machine listen --url http://fake-server");
     expect(sysctlCalls()).toEqual([]);
     expect(existsSync(UNIT_PATH())).toBe(false);
     log.mockRestore();
   });
 
-  it("machineInstall writes the unit and enables+starts it via systemctl", async () => {
+  it("machineInstall writes the unit (ExecStart pinned to --url) and enables+starts it via systemctl", async () => {
     childMocks.spawnSyncStatus = 0; // hasSystemd: status 0 or 1 → true
     const mod = await import("./machine");
     const log = vi.spyOn(console, "log").mockImplementation(() => {});
-    await Effect.runPromise(mod.machineInstall());
-    // Unit written under the redirected HOME.
+    await Effect.runPromise(mod.machineInstall({}, CONFIG));
+    // Unit written under the redirected HOME; the ExecStart bakes the URL so
+    // the listener derives its group from the server it was installed for.
     const unit = readFileSync(UNIT_PATH(), "utf-8");
     expect(unit).toContain("[Unit]");
-    expect(unit).toContain(`ExecStart=`);
-    expect(unit).toContain("machine listen");
+    expect(unit).toContain("machine listen --url http://fake-server");
     expect(sysctlCalls()).toContain("--user enable --now lexa-machine-listener");
     expect(sysctlCalls()).toContain("--user daemon-reload");
     log.mockRestore();
@@ -139,9 +144,10 @@ describe("systemd unit lifecycle", () => {
     childMocks.spawnSyncStatus = 3; // hasSystemd: not 0/1 → false
     const mod = await import("./machine");
     const log = vi.spyOn(console, "log").mockImplementation(() => {});
-    await Effect.runPromise(mod.machineInstall());
+    await Effect.runPromise(mod.machineInstall({}, CONFIG));
     const out = log.mock.calls.map((c) => String(c[0])).join("\n");
     expect(out).toContain("systemd not available — start the listener manually:");
+    expect(out).toContain("machine listen --url http://fake-server");
     expect(sysctlCalls()).not.toContain("--user enable --now lexa-machine-listener");
     log.mockRestore();
   });
@@ -150,7 +156,7 @@ describe("systemd unit lifecycle", () => {
     childMocks.spawnSyncStatus = 0;
     const mod = await import("./machine");
     const log = vi.spyOn(console, "log").mockImplementation(() => {});
-    await Effect.runPromise(mod.machineStart());
+    await Effect.runPromise(mod.machineStart(CONFIG.url));
     await Effect.runPromise(mod.machineStop());
     await Effect.runPromise(mod.machineRestart());
     expect(sysctlCalls()).toContain("--user enable --now lexa-machine-listener");
@@ -165,17 +171,18 @@ describe("systemd unit lifecycle", () => {
     const log = vi.spyOn(console, "log").mockImplementation(() => {});
     mkdirSync(join(homeDir, ".config", "systemd", "user"), { recursive: true });
     writeFileSync(UNIT_PATH(), "[Unit]\n");
-    await Effect.runPromise(mod.machineUninstall());
+    await Effect.runPromise(mod.machineUninstall(GROUP_DIR()));
     expect(sysctlCalls()).toContain("--user disable --now lexa-machine-listener");
     expect(sysctlCalls()).toContain("--user daemon-reload");
     expect(existsSync(UNIT_PATH())).toBe(false);
+    expect(log.mock.calls.map((c) => String(c[0])).join("\n")).toContain(GROUP_DIR());
     log.mockRestore();
   });
 
   it("machineUninstall is idempotent when no unit is installed", async () => {
     const mod = await import("./machine");
     const log = vi.spyOn(console, "log").mockImplementation(() => {});
-    await Effect.runPromise(mod.machineUninstall());
+    await Effect.runPromise(mod.machineUninstall(GROUP_DIR()));
     expect(sysctlCalls()).toEqual([]);
     expect(log.mock.calls.map((c) => String(c[0])).join("\n")).toContain("nothing to remove");
     log.mockRestore();
@@ -205,8 +212,9 @@ describe("machineListen daemon spawning", () => {
     const mod = await import("./machine");
     const cfg = (await import("./config")).CliConfigService;
     const svc = Effect.runSync(Effect.scoped(Layer.build(cfg.Default)));
-    // machineListen exits(0) without a persisted machine secret — pre-write it.
-    await Effect.runPromise(mod.saveMachineSecret("sec-1"));
+    // machineListen exits(0) without a persisted machine secret — pre-write it
+    // into the group dir derived from the config url.
+    await Effect.runPromise(mod.saveMachineSecret("sec-1", GROUP_DIR()));
     const config = { url: "http://fake-server", apiKey: "lxk_key" };
     // Race: the listener is a forever loop — let one iteration run, then
     // interrupt it via the winning sleep branch.
@@ -220,9 +228,9 @@ describe("machineListen daemon spawning", () => {
 
   function writeRuntimeEnv(agentCli: string, extra: Record<string, string> = {}): string {
     const runtimeId = extra.FORGE_RUNTIME_ID ?? "r1";
-    mkdirSync(join(dir, "runtimes", runtimeId), { recursive: true });
+    mkdirSync(join(GROUP_DIR(), "runtimes", runtimeId), { recursive: true });
     writeFileSync(
-      join(dir, "runtimes", runtimeId, "env"),
+      join(GROUP_DIR(), "runtimes", runtimeId, "env"),
       [
         `LEXA_URL=http://fake-server`,
         `FORGE_AGENT=${agentCli}`,
@@ -252,6 +260,10 @@ describe("machineListen daemon spawning", () => {
     expect(env.GITHUB_TOKEN).toBeUndefined();
     // ...allowlisted vars survive...
     expect(env.PATH).toBeDefined();
+    // ...and the listener passes its GROUP dir + derived flavor to the daemon
+    // (the daemon reads LEXA_DIR/config.json, runtimes/, projects/ as before).
+    expect(env.LEXA_DIR).toBe(GROUP_DIR());
+    expect(env.LEXA_FLAVOR).toBe("prod");
     // ...and the runtime env file is the ONLY credential source.
     expect(env.LEXA_URL).toBe("http://fake-server");
     expect(env.FORGE_AGENT).toBe("opencode");
@@ -259,7 +271,7 @@ describe("machineListen daemon spawning", () => {
     // normalizeRuntimeEnv overrides the machine id with the listener's own.
     expect(env.FORGE_MACHINE_ID).toMatch(/^[^-]+-[0-9a-f]{8}$/);
     // Daemon pid persisted for the stale-daemon sweep on next boot.
-    expect(readFileSync(join(dir, "runtimes", "r1", "daemon.pid"), "utf-8").trim()).toBe("4242");
+    expect(readFileSync(join(GROUP_DIR(), "runtimes", "r1", "daemon.pid"), "utf-8").trim()).toBe("4242");
   });
 
   it("the runtime env file may legitimately carry LEXA_API_KEY (its only credential source)", async () => {
@@ -290,10 +302,10 @@ describe("machineListen daemon spawning", () => {
     expect(env.LEXA_API_KEY).toBe("lxk_onetime");
     expect(env.FORGE_AGENT).toBe("command-code");
     expect(childMocks.completedEvents).toContain("evt-1");
-    // Env file persisted under runtimes/<id>/.
-    const envDirs = readdirSync(join(dir, "runtimes")).filter((d) => d !== "r1");
+    // Env file persisted under <group>/runtimes/<id>/.
+    const envDirs = readdirSync(join(GROUP_DIR(), "runtimes")).filter((d) => d !== "r1");
     expect(envDirs.length).toBe(1);
-    expect(readFileSync(join(dir, "runtimes", envDirs[0], "env"), "utf-8")).toContain("LEXA_API_KEY=lxk_onetime");
+    expect(readFileSync(join(GROUP_DIR(), "runtimes", envDirs[0], "env"), "utf-8")).toContain("LEXA_API_KEY=lxk_onetime");
   });
 
   it("a daemon auth-failure exit (code 3) is NOT respawned and is relayed on the next heartbeat", async () => {
