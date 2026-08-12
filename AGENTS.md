@@ -15,6 +15,15 @@ You are working on **Lexa**: a self-hosted project management tool. Kanban with 
 
 **If documents conflict, stop and report the conflict to the user. Never resolve it yourself.**
 
+## Transient design artifacts
+
+`docs/superpowers/specs/` and `docs/superpowers/plans/` are **working documents
+only** — a spec/plan lives there while its feature is being built, never
+after. Once the feature ships (or is abandoned), move its files into
+`docs/private/specs/` / `docs/private/plans/` (the archived design-review
+area) so `docs/superpowers/` stays empty and the archive stays searchable.
+Do not leave finished artifacts in `docs/superpowers/`.
+
 ## Wireframes are the frontend source of truth
 
 **Wireframes are a git submodule** — `wireframes/` points at the separate PRIVATE repo `yohanesgre/lexa-wireframes` (see `.gitmodules`). **When working on frontend, ALWAYS ensure the submodule is present first** — before any frontend task, run:

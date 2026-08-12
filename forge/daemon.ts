@@ -455,11 +455,14 @@ export function buildMessageBody(model: string, agent: string, prompt: string): 
   const idx = model.indexOf("/");
   const providerID = idx >= 0 ? model.slice(0, idx) : "";
   const modelID = idx >= 0 ? model.slice(idx + 1) : model;
-  return JSON.stringify({
-    model: { providerID, modelID },
-    agent,
+  const body: Record<string, unknown> = {
     parts: [{ type: "text", text: prompt }],
-  });
+  };
+  // Empty agent/model are omitted — serve falls back to the session's
+  // defaults (a blank runtime row must not 500 the message POST).
+  if (agent) body.agent = agent;
+  if (providerID && modelID) body.model = { providerID, modelID };
+  return JSON.stringify(body);
 }
 
 // The blocking POST response carries `parts` (text parts = the Markdown
@@ -1037,7 +1040,17 @@ function runTask(task: ForgeTask, serverProvider: string, serverAgent: string, s
         method: "POST",
         body: JSON.stringify({ result: output }),
       });
-      if (!res.ok) return yield* Effect.fail(new DaemonError({ reason: `complete failed: ${res.status}` }));
+      if (!res.ok) {
+        // Complete on a cancelled task (cancel raced completion): the server
+        // rejected the result, so the session must not survive — drop the
+        // mapping so the next run cannot continue a cancelled run's session.
+        yield* deleteMapping({
+          documentType: task.documentType,
+          documentId: task.documentId,
+          runtimeId: CONFIGURED_RUNTIME_ID || runtimeId,
+        });
+        return yield* Effect.fail(new DaemonError({ reason: `complete failed: ${res.status}` }));
+      }
       logTask(task.id, `done (${output.length} chars)`);
       console.log(`[task ${task.id}] completed (${output.length} chars)`);
     }).pipe(

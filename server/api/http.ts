@@ -1765,8 +1765,8 @@ const forgeLive = HttpApiBuilder.group(LexaApi, "forge", (handlers) =>
           name: req.payload.name,
           provider: req.payload.provider,
           machineId: req.payload.machineId,
-          agent: req.payload.agent ?? "",
-          model: req.payload.model ?? "",
+          agent: req.payload.agent?.trim() || "build",
+          model: req.payload.model?.trim() || "",
           hostname: req.payload.hostname ?? "",
         });
         // Successful registration proves the daemon's credential works —
