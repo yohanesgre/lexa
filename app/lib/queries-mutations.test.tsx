@@ -14,7 +14,7 @@ import {
   useUpdateColumn, useDeleteColumn, useCreateSwimlane, useUpdateSwimlane, useArchiveSwimlane,
   useDeleteSwimlane, useCreateApiKey, useDeleteApiKey, useAddComment, useDeleteComment,
   useUpdateComment, useCancelForgeTask, useAddTaskLink, useRemoveTaskLink,
-  useAddSource, useRemoveSource, useUpdateUserRole, useCreateForgeTask, useCreateForgeAgent,
+  useAddSource, useRemoveSource, useCreateForgeTask, useCreateForgeAgent,
   useUpdateRateLimit, useUpdateGithubSettings, useClearGithubSettings,
 } from "./queries";
 
@@ -340,16 +340,6 @@ describe("board-structure + settings mutations", () => {
     const { result } = renderHook(() => useDeleteApiKey(), { wrapper });
     await act(async () => { await result.current.mutateAsync("k1"); });
     expect(queryClient.getQueryData(["api-keys"])).toEqual([]);
-  });
-
-  it("useUpdateUserRole maps the row in users + project-members caches", async () => {
-    const user = { id: "u1", email: "a@b.c", name: "A", role: "member" as const, createdAt: "t", lastSeen: null };
-    routes.set("PATCH /api/admin/users/u1", { ...user, role: "admin" });
-    queryClient.setQueryData(["users"], [user]);
-    queryClient.setQueryData(["project-members", "demo"], [{ ...user, role: "admin" }]);
-    const { result } = renderHook(() => useUpdateUserRole(), { wrapper });
-    await act(async () => { await result.current.mutateAsync({ id: "u1", role: "admin" }); });
-    expect(queryClient.getQueryData<typeof user[]>(["users"])![0]!.role).toBe("admin");
   });
 });
 

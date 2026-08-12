@@ -19,6 +19,7 @@ vi.mock("@tanstack/react-router", () => ({
   useRouterState: ({ select }: { select?: (s: { location: { pathname: string } }) => string }) =>
     select?.({ location: { pathname: pathnameMock.value } }) ?? pathnameMock.value,
   useParams: () => ({ slug: "demo" }),
+  useNavigate: () => vi.fn(),
   Link: ({ to, params, search, className, activeProps, children }: any) => (
     <a href={String(to)} className={className} {...activeProps}>{children}</a>
   ),
@@ -64,6 +65,8 @@ beforeEach(() => {
       { project: PROJECT2, health: "exceeded", taskCount: 9 },
     ],
   });
+  routes.set("GET /api/auth/get-session", { session: null, user: null });
+  routes.set("GET /api/teams", { data: [] });
   queryClient = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
 });
 
@@ -118,9 +121,12 @@ describe("AppShell", () => {
   it("renders the nav with brand, links, and the outlet", async () => {
     render(<ProjectSelectionProvider><AppShell /></ProjectSelectionProvider>, { wrapper });
     expect(screen.getByText("Lexa")).toBeInTheDocument();
-    for (const label of ["Dashboard", "Board", "Tasks", "Wiki", "Settings"]) {
+    // Settings is no longer a nav tab — settings entry points live in the
+    // user menu and the project switcher.
+    for (const label of ["Dashboard", "Board", "Tasks", "Wiki"]) {
       expect(screen.getByText(label)).toBeInTheDocument();
     }
+    expect(screen.queryByRole("link", { name: "Settings" })).not.toBeInTheDocument();
     // "Forge" appears in the nav link and in ForgeStatus
     expect(screen.getAllByText("Forge").length).toBeGreaterThanOrEqual(1);
     expect(screen.getByTestId("outlet")).toBeInTheDocument();
@@ -128,22 +134,36 @@ describe("AppShell", () => {
     expect(screen.getByText("Board").className).toContain("active");
   });
 
-  it("hides the Settings link for a known member", () => {
-    document.head.innerHTML = '<meta name="lxk-user" content=\'{"email":"m@lexa.test","name":"M","role":"member","createdAt":"t","lastSeen":null}\'>';
-    try {
-      render(<ProjectSelectionProvider><AppShell /></ProjectSelectionProvider>, { wrapper });
-      expect(screen.getByText("Lexa")).toBeInTheDocument();
-      expect(screen.getByText("Dashboard")).toBeInTheDocument();
-      expect(screen.queryByText("Settings")).not.toBeInTheDocument();
-    } finally {
-      document.head.innerHTML = "";
-    }
+  it("shows the signed-out Log in CTA in the user menu slot when there is no session", async () => {
+    render(<ProjectSelectionProvider><AppShell /></ProjectSelectionProvider>, { wrapper });
+    expect(await screen.findByRole("link", { name: "Log in" })).toBeInTheDocument();
   });
 
-  it("shows the Settings link when no user is known (dev / Access-less)", () => {
-    document.head.innerHTML = "";
+  it("shows the user menu with role-scoped settings entries for a superadmin", async () => {
+    routes.set("GET /api/auth/get-session", {
+      session: { id: "s1", userId: "u1", expiresAt: "t", createdAt: "t" },
+      user: { id: "u1", email: "y@lexa.test", name: "Yohanes", role: "superadmin", createdAt: "t", lastSeen: null },
+    });
+    const user = userEvent.setup();
     render(<ProjectSelectionProvider><AppShell /></ProjectSelectionProvider>, { wrapper });
-    expect(screen.getByText("Settings")).toBeInTheDocument();
+    await user.click(await screen.findByRole("button", { name: /Yohanes/ }));
+    expect(screen.getByText("User settings")).toBeInTheDocument();
+    expect(screen.getByText("Team settings")).toBeInTheDocument();
+    expect(screen.getByText("Workspace settings")).toBeInTheDocument();
+    expect(screen.getByText("Log out")).toBeInTheDocument();
+  });
+
+  it("shows User settings only for a plain member", async () => {
+    routes.set("GET /api/auth/get-session", {
+      session: { id: "s1", userId: "u1", expiresAt: "t", createdAt: "t" },
+      user: { id: "u1", email: "m@lexa.test", name: "M", role: "member", createdAt: "t", lastSeen: null },
+    });
+    const user = userEvent.setup();
+    render(<ProjectSelectionProvider><AppShell /></ProjectSelectionProvider>, { wrapper });
+    await user.click(await screen.findByRole("button", { name: /M/ }));
+    expect(screen.getByText("User settings")).toBeInTheDocument();
+    expect(screen.queryByText("Team settings")).not.toBeInTheDocument();
+    expect(screen.queryByText("Workspace settings")).not.toBeInTheDocument();
   });
 
   it("on /forge the brand is NOT active and the Forge link IS active", () => {
@@ -152,14 +172,13 @@ describe("AppShell", () => {
     expect(screen.getByText("Lexa").className).not.toContain("active");
     expect(screen.getByRole("link", { name: "Forge" }).className).toContain("active");
     expect(screen.getByText("Dashboard").className).not.toContain("active");
-    expect(screen.getByText("Settings").className).not.toContain("active");
   });
 
   it("on / the brand IS active and no nav link is", () => {
     pathnameMock.value = "/";
     render(<ProjectSelectionProvider><AppShell /></ProjectSelectionProvider>, { wrapper });
     expect(screen.getByText("Lexa").className).toContain("active");
-    for (const label of ["Dashboard", "Board", "Tasks", "Wiki", "Settings"]) {
+    for (const label of ["Dashboard", "Board", "Tasks", "Wiki"]) {
       expect(screen.getByText(label).className).not.toContain("active");
     }
     expect(screen.getAllByRole("link", { name: "Forge" })[0]!.className).not.toContain("active");

@@ -1,74 +1,9 @@
-import type { Project, ProjectRepo, Column, Swimlane, Task, Board, WikiPageMeta, WikiPage, WikiPageRevision, WikiPageRevisionSummary, TipTapDoc, ApiKey, ApiKeyCreateResult, Dashboard, FieldConfig, ForgeTask, ForgeTaskLog, ForgeTaskStatus, ForgeAgent, ForgeSkill, ForgeProvider, ForgeSession, DocumentSource, Runtime, RuntimeEvent, Machine, TaskLink, TaskLinkSuggestion, ActivityEvent, ActivityItem, TaskComment, GithubIssueSummary } from "../../shared/types";
+import type { Project, ProjectRepo, Column, Swimlane, Task, Board, WikiPageMeta, WikiPage, WikiPageRevision, WikiPageRevisionSummary, TipTapDoc, ApiKey, ApiKeyCreateResult, Dashboard, FieldConfig, ForgeTask, ForgeTaskLog, ForgeTaskStatus, ForgeAgent, ForgeSkill, ForgeProvider, ForgeSession, DocumentSource, Runtime, RuntimeEvent, Machine, TaskLink, TaskLinkSuggestion, ActivityEvent, ActivityItem, TaskComment, GithubIssueSummary, Team, TeamMember, TeamMemberRole, WorkspaceInvite, SessionInfo, LexaUser } from "../../shared/types";
 
 const BASE = "/api";
 
-// The server injects lxk-* metas into the SSR HTML (server/entry.ts), but
-// React's head reconciliation removes them during hydration — re-reading the
-// DOM after the first render returns nothing. Snapshot the values at module
-// load (module evaluation always runs before hydration) and never re-read.
-// Without SSR metas (plain SPA dev, tests) the snapshot is null and reads
-// fall through to the live DOM.
-function readLxkMeta(name: string): string | null {
-  if (typeof document === "undefined") return null;
-  return document.querySelector(`meta[name="${name}"]`)?.getAttribute("content") ?? null;
-}
-
-const lxkLogoutSnapshot = readLxkMeta("lxk-logout");
-const lxkApiKeySnapshot = readLxkMeta("lxk-api-key");
-const lxkUserSnapshot = readLxkMeta("lxk-user");
-
-function lxkValue(snapshot: string | null, name: string): string | null {
-  return snapshot ?? readLxkMeta(name);
-}
-
-// Prefer the key injected by the server at request time (dev:server / prod),
-// so `bun run setup` rotating the key never leaves the browser with a stale
-// build-time baked key. Falls back to the Vite build-time env var.
-function clientApiKey(): string | undefined {
-  const key = lxkValue(lxkApiKeySnapshot, "lxk-api-key");
-  if (key) return key;
-  return import.meta.env.VITE_LXK_API_KEY;
-}
-
-// The resolved Cloudflare Access user injected by the server next to the key
-// meta. Sent as x-lxk-user so activity rows attribute to the acting user
-// (server-side attribution only — the API key still grants the access).
-export interface LxkUser {
-  email: string;
-  name: string;
-  role: "admin" | "member";
-  createdAt: string;
-  lastSeen: string | null;
-}
-
-export function clientLxkUser(): LxkUser | null {
-  const raw = lxkValue(lxkUserSnapshot, "lxk-user");
-  if (!raw) return null;
-  try {
-    return JSON.parse(raw) as LxkUser;
-  } catch {
-    /* ignore malformed */
-  }
-  return null;
-}
-
-// Cloudflare Access logout target — only present when LXK_ACCESS_TEAM is set
-// server-side. Absent in local dev (no Access session), so the UI hides Sign
-// out. The return_to parameter is appended by the caller.
-export function clientLxkLogout(): string | null {
-  return lxkValue(lxkLogoutSnapshot, "lxk-logout");
-}
-
 async function request<T>(url: string, init?: RequestInit): Promise<T> {
   const headers: Record<string, string> = { "Content-Type": "application/json", ...init?.headers as Record<string, string> };
-  const key = clientApiKey();
-  if (key) {
-    headers["Authorization"] = `Bearer ${key}`;
-  }
-  const lxkUser = clientLxkUser();
-  if (lxkUser?.email) {
-    headers["x-lxk-user"] = lxkUser.email;
-  }
   const res = await fetch(url, { ...init, headers });
   if (!res.ok) {
     const body = await res.json().catch(() => ({})) as { error?: { code?: string; message?: string; details?: unknown } };
@@ -374,24 +309,101 @@ export function updateGithubSettings(input: { appId: string; privateKey?: string
   return request(`${BASE}/settings/github`, { method: "PUT", body: JSON.stringify(input) });
 }
 
-// ---- users & members ----
+// ---- teams (Better Auth organizations) ----
 
-type ApiUser = { id: string; email: string; name: string; role: "admin" | "member"; createdAt: string; lastSeen: string | null };
-
-export function listUsers(): Promise<{ data: ApiUser[] }> {
-  return request(`${BASE}/admin/users`);
+export function listTeams(): Promise<{ data: Team[] }> {
+  return request(`${BASE}/teams`);
 }
 
-export function updateUserRole(id: string, role: "admin" | "member"): Promise<ApiUser> {
-  return request(`${BASE}/admin/users/${id}`, { method: "PATCH", body: JSON.stringify({ role }) });
+export function createTeam(input: { name: string; slug?: string }): Promise<Team> {
+  return request(`${BASE}/teams`, { method: "POST", body: JSON.stringify(input) });
 }
 
-export function updateMyName(name: string): Promise<ApiUser> {
+export function deleteTeam(teamId: string): Promise<void> {
+  return request(`${BASE}/teams/${teamId}`, { method: "DELETE" });
+}
+
+export function listTeamMembers(teamId: string): Promise<{ data: TeamMember[] }> {
+  return request(`${BASE}/teams/${teamId}/members`);
+}
+
+export function addTeamMember(teamId: string, input: { email: string; role: TeamMemberRole }): Promise<TeamMember> {
+  return request(`${BASE}/teams/${teamId}/members`, { method: "POST", body: JSON.stringify(input) });
+}
+
+export function updateTeamMemberRole(teamId: string, userId: string, role: TeamMemberRole): Promise<TeamMember> {
+  return request(`${BASE}/teams/${teamId}/members/${userId}`, { method: "PATCH", body: JSON.stringify({ role }) });
+}
+
+export function removeTeamMember(teamId: string, userId: string): Promise<void> {
+  return request(`${BASE}/teams/${teamId}/members/${userId}`, { method: "DELETE" });
+}
+
+// ---- workspace members / invites (superadmin) ----
+
+export interface WorkspaceMember extends LexaUser {
+  teams: Array<{ teamId: string; teamName: string; role: TeamMemberRole }>;
+}
+
+export function listWorkspaceMembers(): Promise<{ data: WorkspaceMember[] }> {
+  return request(`${BASE}/workspace/members`);
+}
+
+export function updateWorkspaceMember(userId: string, action: "deactivate" | "reactivate"): Promise<LexaUser> {
+  return request(`${BASE}/workspace/members/${userId}`, { method: "PATCH", body: JSON.stringify({ action }) });
+}
+
+export function deleteWorkspaceMember(userId: string): Promise<void> {
+  return request(`${BASE}/workspace/members/${userId}`, { method: "DELETE" });
+}
+
+export function createWorkspaceInvite(email: string): Promise<{ link: string }> {
+  return request(`${BASE}/workspace/invites`, { method: "POST", body: JSON.stringify({ email }) });
+}
+
+// Not in the contract surface (POST/DELETE only) — the wireframe's pending
+// invites table needs a list; the FE calls it defensively and degrades to
+// mutation-seeded rows when the endpoint is absent.
+export function listWorkspaceInvites(): Promise<{ data: WorkspaceInvite[] }> {
+  return request(`${BASE}/workspace/invites`);
+}
+
+export function revokeWorkspaceInvite(inviteId: string): Promise<void> {
+  return request(`${BASE}/workspace/invites/${inviteId}`, { method: "DELETE" });
+}
+
+export function createSetPasswordLink(userId: string): Promise<{ link: string }> {
+  return request(`${BASE}/workspace/members/${userId}/set-password-link`, { method: "POST" });
+}
+
+// ---- sessions (own only) ----
+
+export function listSessions(): Promise<{ data: SessionInfo[] }> {
+  return request(`${BASE}/sessions`);
+}
+
+export function revokeSession(sessionId: string): Promise<void> {
+  return request(`${BASE}/sessions/${sessionId}/revoke`, { method: "POST" });
+}
+
+// ---- project → team assignment (superadmin any; team admin own team) ----
+
+export function updateProjectTeam(projectId: string, teamId: string | null): Promise<Project> {
+  return request(`${BASE}/projects/${projectId}/team`, { method: "PATCH", body: JSON.stringify({ teamId }) });
+}
+
+export function updateMyName(name: string): Promise<LexaUser> {
   return request(`${BASE}/me`, { method: "PATCH", body: JSON.stringify({ name }) });
 }
 
-export function listProjectMembers(slug: string): Promise<{ data: ApiUser[] }> {
+export function listProjectMembers(slug: string): Promise<{ data: LexaUser[] }> {
   return request(`${BASE}/projects/${slug}/members`);
+}
+
+// Full user list — still the source for the project-members type-ahead
+// (workspace-scoped member management lives on /api/workspace/members).
+export function listUsers(): Promise<{ data: LexaUser[] }> {
+  return request(`${BASE}/admin/users`);
 }
 
 export function addProjectMember(userId: string, projectId: string): Promise<{ projectId: string; projectSlug: string; role: string }> {
@@ -526,8 +538,9 @@ export function resetForgeSkill(id: string): Promise<ForgeSkill> {
   return request(`${BASE}/forge/skills/${id}/reset`, { method: "POST" });
 }
 
-export function listRuntimes(): Promise<{ data: Runtime[] }> {
-  return request(`${BASE}/forge/runtimes`);
+export function listRuntimes(teamId?: string): Promise<{ data: Runtime[] }> {
+  const qs = teamId ? `?teamId=${encodeURIComponent(teamId)}` : "";
+  return request(`${BASE}/forge/runtimes${qs}`);
 }
 
 export function updateRuntime(id: string, patch: { name?: string; provider?: "opencode" | "hermes" | "command-code"; agent?: string; model?: string; printLogs?: boolean; logLevel?: "" | "DEBUG" | "INFO" | "WARN" | "ERROR"; extraArgs?: string[] }): Promise<Runtime> {

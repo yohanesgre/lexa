@@ -10,7 +10,7 @@ beforeEach(() => {
   vi.stubGlobal("fetch", fetchMock);
   fetchMock.mockReset();
   document.head.innerHTML = "";
-  vi.stubEnv("VITE_LXK_API_KEY", "env-key");
+
 });
 
 afterEach(() => {
@@ -100,7 +100,6 @@ describe("api error mapping", () => {
   });
 
   it("no key → the request still goes out without Authorization (server rejects)", async () => {
-    vi.stubEnv("VITE_LXK_API_KEY", "");
     fetchMock.mockResolvedValue(envelope("UNAUTHORIZED", "Invalid or missing API key"));
     const err = await failureOf(api.listProjects());
     expect(err.code).toBe("UNAUTHORIZED");

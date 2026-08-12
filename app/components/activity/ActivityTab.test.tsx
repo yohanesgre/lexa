@@ -100,12 +100,12 @@ describe("ActivityTab", () => {
 
   it("the admin member sees the delete action on another user's comment and the DELETE mutation fires", async () => {
     const user = userEvent.setup();
-    // The acting identity comes from the lxk-user meta tag (Cloudflare Access
-    // user) — the members route then resolves role from it.
-    const meta = document.createElement("meta");
-    meta.name = "lxk-user";
-    meta.content = JSON.stringify({ email: "maria@lexa.test", name: "Maria", role: "admin", createdAt: "t", lastSeen: null });
-    document.head.appendChild(meta);
+    // The acting identity comes from the session (GET /api/auth/get-session)
+    // — the members route then resolves role from it.
+    routes.set("GET /api/auth/get-session", {
+      session: { id: "s1", userId: "u1", expiresAt: "2026-01-10T10:00:00.000Z", createdAt: "2026-01-01T10:00:00.000Z" },
+      user: { id: "u1", email: "maria@lexa.test", name: "Maria", role: "admin", createdAt: "t", lastSeen: null },
+    });
     routes.set("DELETE /api/projects/demo/tasks/t1/comments/9", 204);
     queryClient.setQueryData(["task-activity", "demo", "t1"], {
       pages: [{ data: [EVENT, COMMENT], nextCursor: null }],

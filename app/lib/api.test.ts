@@ -15,7 +15,7 @@ beforeEach(() => {
   vi.stubGlobal("fetch", fetchMock);
   fetchMock.mockReset();
   document.head.innerHTML = "";
-  vi.stubEnv("VITE_LXK_API_KEY", "env-key");
+
 });
 
 afterEach(() => {
@@ -88,7 +88,6 @@ const cases: Case[] = [
   { name: "getGithubSettings", call: () => api.getGithubSettings(), method: "GET", url: "/api/settings/github", response: { appId: "123456", privateKeySet: true, webhookSecretSet: true, source: "settings" } },
   { name: "updateGithubSettings", call: () => api.updateGithubSettings({ appId: "123456", webhookSecret: "" }), method: "PUT", url: "/api/settings/github", body: { appId: "123456", webhookSecret: "" }, response: { appId: "123456", privateKeySet: true, webhookSecretSet: false, source: "settings" } },
   { name: "listUsers", call: () => api.listUsers(), method: "GET", url: "/api/admin/users", response: { data: [] } },
-  { name: "updateUserRole", call: () => api.updateUserRole("u1", "admin"), method: "PATCH", url: "/api/admin/users/u1", body: { role: "admin" }, response: { id: "u1", email: "a@b.c", name: "A", role: "admin", createdAt: "t", lastSeen: null } },
   { name: "updateMyName", call: () => api.updateMyName("Maria"), method: "PATCH", url: "/api/me", body: { name: "Maria" }, response: { id: "u1", email: "a@b.c", name: "Maria", role: "member", createdAt: "t", lastSeen: null } },
   { name: "listProjectMembers", call: () => api.listProjectMembers("demo"), method: "GET", url: "/api/projects/demo/members", response: { data: [] } },
   { name: "addProjectMember", call: () => api.addProjectMember("u1", "p1"), method: "PUT", url: "/api/admin/users/u1/projects", body: { projectId: "p1", role: "member" }, response: { projectId: "p1", projectSlug: "demo", role: "member" } },
@@ -161,50 +160,17 @@ describe("api request building matrix", () => {
   });
 });
 
-describe("api key + user header resolution", () => {
-  it("uses the lxk-api-key meta tag when present (server-injected key wins)", async () => {
-    document.head.innerHTML = '<meta name="lxk-api-key" content="meta-key">';
+describe("request headers", () => {
+  // Session-based auth: no bearer key, no x-lxk-user header — the session
+  // cookie is the only credential (same-origin fetch sends it automatically).
+  it("sends no Authorization header and no x-lxk-user header", async () => {
     fetchMock.mockResolvedValue(jsonResponse({ data: [], nextCursor: null }));
     await api.listProjects();
     const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
-    expect((init.headers as Record<string, string>).Authorization).toBe("Bearer meta-key");
-  });
-
-  it("falls back to VITE_LXK_API_KEY when no meta tag exists", async () => {
-    fetchMock.mockResolvedValue(jsonResponse({ data: [], nextCursor: null }));
-    await api.listProjects();
-    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
-    expect((init.headers as Record<string, string>).Authorization).toBe("Bearer env-key");
-  });
-
-  it("sends no Authorization header when neither key source exists", async () => {
-    vi.stubEnv("VITE_LXK_API_KEY", "");
-    fetchMock.mockResolvedValue(jsonResponse({ data: [], nextCursor: null }));
-    await api.listProjects();
-    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
-    expect((init.headers as Record<string, string>).Authorization).toBeUndefined();
-  });
-
-  it("sends x-lxk-user from the lxk-user meta tag", async () => {
-    document.head.innerHTML = '<meta name="lxk-user" content=\'{"email":"maria@lexa.test","name":"Maria","role":"member","createdAt":"t","lastSeen":null}\'>';
-    fetchMock.mockResolvedValue(jsonResponse({ data: [], nextCursor: null }));
-    await api.listProjects();
-    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
-    expect((init.headers as Record<string, string>)["x-lxk-user"]).toBe("maria@lexa.test");
-  });
-
-  it("clientLxkUser parses the meta tag and tolerates malformed JSON", () => {
-    expect(api.clientLxkUser()).toBeNull();
-    document.head.innerHTML = '<meta name="lxk-user" content=\'{"email":"a@b.c","name":"A","role":"admin","createdAt":"t","lastSeen":null}\'>';
-    expect(api.clientLxkUser()).toMatchObject({ email: "a@b.c", role: "admin" });
-    document.head.innerHTML = '<meta name="lxk-user" content="not json">';
-    expect(api.clientLxkUser()).toBeNull();
-  });
-
-  it("clientLxkLogout returns the meta content or null", () => {
-    expect(api.clientLxkLogout()).toBeNull();
-    document.head.innerHTML = '<meta name="lxk-logout" content="https://team.cloudflareaccess.com/logout">';
-    expect(api.clientLxkLogout()).toBe("https://team.cloudflareaccess.com/logout");
+    const headers = init.headers as Record<string, string>;
+    expect(headers.Authorization).toBeUndefined();
+    expect(headers["x-lxk-user"]).toBeUndefined();
+    expect(headers["Content-Type"]).toBe("application/json");
   });
 
   it("merges caller-provided init headers with the default content-type", async () => {

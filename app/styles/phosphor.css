@@ -3517,6 +3517,21 @@
     font-family: var(--lx-font-body);
   }
 
+  .notice-danger {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    background: var(--lx-bg-danger-subtle);
+    border: 1px solid rgba(255, 68, 68, 0.15);
+    border-radius: 6px;
+    color: var(--lx-text-danger);
+    padding: 10px 12px;
+    font-size: 13px;
+    line-height: 20px;
+    font-family: var(--lx-font-body);
+  }
+  .notice svg { width: 14px; height: 14px; flex-shrink: 0; margin-top: 1px; }
+
   /* ---- Wiki edit settings sidebar ---- */
   .wiki-edit-workspace {
     display: flex;

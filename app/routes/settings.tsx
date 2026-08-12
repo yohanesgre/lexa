@@ -1,18 +1,24 @@
 import { createFileRoute, Navigate } from "@tanstack/react-router";
-import { SettingsPage } from "../components/settings/SettingsPage";
-import { useProjectSelection } from "../lib/project-selection";
-import { clientLxkUser } from "../lib/api";
+import { useSession, useTeams } from "../lib/queries";
 
-function RouteComponent() {
-  const { selectedSlug } = useProjectSelection();
-  // Admin-only page: redirect known members away (null user = dev / Access-less
-  // = allowed; the server enforces with 403 on member keys regardless).
-  if (clientLxkUser()?.role === "member") {
-    return <Navigate to="/" replace />;
-  }
-  return <SettingsPage slug={selectedSlug} />;
+// /settings → role-redirect landing. Never rendered to a signed-in user.
+// superadmin → /settings/workspace · team admin → /settings/team ·
+// member → /settings/me. No session → /login (root guard).
+function SettingsRedirect() {
+  const { data: session, isLoading } = useSession();
+  const { data: teams } = useTeams();
+
+  if (isLoading) return null;
+  if (!session?.user) return <Navigate to="/login" replace />;
+
+  const isSuperadmin = session.user.role === "superadmin";
+  const isTeamAdmin = isSuperadmin || (teams && teams.length > 0);
+
+  if (isSuperadmin) return <Navigate to="/settings/workspace" replace />;
+  if (isTeamAdmin) return <Navigate to="/settings/team" replace />;
+  return <Navigate to="/settings/me" replace />;
 }
 
 export const Route = createFileRoute("/settings")({
-  component: RouteComponent,
+  component: SettingsRedirect,
 });
