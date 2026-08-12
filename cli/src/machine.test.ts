@@ -38,6 +38,12 @@ describe("scrubDaemonEnv", () => {
     expect(mod.scrubDaemonEnv(env)).toEqual(env);
   });
 
+  it("allows LEXA_DIR through the daemon env scrub (flavor roots)", async () => {
+    const mod = await import("./machine");
+    const env = { PATH: "/usr/bin", LEXA_DIR: "/home/u/.lexa-staging" };
+    expect(mod.scrubDaemonEnv(env)).toEqual({ PATH: "/usr/bin", LEXA_DIR: "/home/u/.lexa-staging" });
+  });
+
   it("keeps allowlisted prefixes (LC_/XDG_/BUN_)", async () => {
     const mod = await import("./machine");
     const env = { LC_ALL: "C", XDG_CONFIG_HOME: "/x/c", BUN_INSTALL: "/bun" };

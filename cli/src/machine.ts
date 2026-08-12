@@ -258,7 +258,7 @@ function isAgentCli(value: string | undefined): value is "opencode" | "hermes" |
 // inherited value instead of its env-file key, defeating exit-code-3
 // detection). The listener itself still reads its own env; only the spawned
 // daemon env is scrubbed. Blocklist wins over allowlist.
-const ALLOWED_ENV_KEYS = ["PATH", "HOME", "LANG", "TERM", "TZ", "PWD", "SHELL", "USER", "LOGNAME"];
+const ALLOWED_ENV_KEYS = ["PATH", "HOME", "LANG", "TERM", "TZ", "PWD", "SHELL", "USER", "LOGNAME", "LEXA_DIR"];
 const ALLOWED_ENV_PREFIXES = ["LC_", "XDG_", "BUN_"];
 const SECRET_ENV_PREFIXES = ["LXK_", "GITHUB_", "CF_", "CLOUDFLARE_", "AWS_", "AZURE_", "GOOGLE_"];
 const SECRET_ENV_MARKERS = ["SECRET", "TOKEN", "PRIVATE_KEY", "API_KEY", "PASSWORD"];

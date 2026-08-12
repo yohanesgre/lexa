@@ -26,7 +26,7 @@ import { hostname as osHostname } from "node:os";
 import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync, readdirSync } from "node:fs";
 import { classifyLogLine } from "../shared/forge-log";
 import { join } from "node:path";
-import { Effect, Data } from "effect";
+import { Effect, Data, Fiber } from "effect";
 
 // ── Machine state root ──
 // Everything the host stores lives under LEXA_DIR (~/.lexa by default):
@@ -208,7 +208,10 @@ function api(path: string, init?: RequestInit): Effect.Effect<Response, DaemonEr
       if (res.status === 401) {
         // The runtime's API key was revoked/rotated. The listener won't respawn
         // us (exit code 3 = auth failure); re-run Setup runtime for a fresh key.
+        // Kill serve first (SIGTERM) so it never orphans on the runtime machine;
+        // sessions persist for the next boot.
         console.error("  API key revoked or invalid (HTTP 401) — re-run Setup runtime (Settings → Forge Runtimes).");
+        killServeTree();
         process.exit(3);
       }
       return res;
@@ -307,6 +310,24 @@ const main = Effect.gen(function* () {
     ),
   );
   console.log(`  Registered: ${runtimeId}`);
+  // Warm serve runtime: spawn after the stale-pid sweep; respawns with
+  // backoff on crash. SIGTERM (listener stop) kills serve, then exits.
+  yield* Effect.sync(() => {
+    void startServe(runtimeId);
+    process.on("SIGTERM", () => {
+      serveState.shuttingDown = true;
+      const pid = serveState.child?.pid;
+      if (pid) {
+        try { process.kill(pid, "SIGTERM"); } catch { /* already gone */ }
+        setTimeout(() => {
+          killProcessTree(pid);
+          process.exit(0);
+        }, 1500);
+      } else {
+        process.exit(0);
+      }
+    });
+  });
   if (NEEDS_MCP) {
     const mcpErr = yield* checkMcpConnection();
     console.log(`  MCP: ${mcpErr ? `not connected (${mcpErr})` : "connected"}`);
@@ -343,11 +364,11 @@ const main = Effect.gen(function* () {
         });
         if (res.ok) {
           const claim = yield* Effect.tryPromise({
-            try: () => res.json() as Promise<{ task: ForgeTask | null; provider: string; agent: string; model: string; printLogs: boolean; logLevel: string; extraArgs: string[]; prompt: string; agentMarkdown: string; skillMarkdown: string; skillIds: string[]; repoContent: RepoContentEntry[] | null }>,
+            try: () => res.json() as Promise<{ task: ForgeTask | null; provider: string; agent: string; model: string; printLogs: boolean; logLevel: string; extraArgs: string[]; prompt: string; agentMarkdown: string; skillMarkdown: string; skillIds: string[]; repoContent: RepoContentEntry[] | null; runtimeSessionId?: string | null }>,
             catch: toDaemonError,
           });
           if (claim.task) {
-            yield* runTask(claim.task, claim.provider, claim.agent, claim.model, claim.logLevel, claim.extraArgs, claim.prompt, claim.agentMarkdown, claim.skillMarkdown, claim.skillIds ?? [], claim.repoContent ?? null);
+            yield* runTask(claim.task, claim.provider, claim.agent, claim.model, claim.logLevel, claim.extraArgs, claim.prompt, claim.agentMarkdown, claim.skillMarkdown, claim.skillIds ?? [], claim.repoContent ?? null, runtimeId, claim.runtimeSessionId ?? null);
           }
         }
       }).pipe(
@@ -370,6 +391,121 @@ const main = Effect.gen(function* () {
 export function resolveModelId(model: string): string {
   if (!model || model.includes("/")) return model;
   return model;
+}
+
+// ── Warm opencode serve (persistent runtime) ──
+// One `opencode serve` per runtime, spawned by the daemon and driven over
+// pure HTTP (spike: the `run --attach` client is unreliable on 1.18.11 — it
+// exits without mirroring text parts, so the daemon never spawns it).
+// Sessions are minted per-workspace via POST /session?directory= and survive
+// serve restarts (the session DB lives in the persistent forge-home).
+
+const SERVE_PORT_OVERRIDE = process.env.FORGE_SERVE_PORT ?? "";
+const SERVE_READY_TIMEOUT_MS = 30_000;
+const SERVE_READY_POLL_MS = 500;
+const SERVE_BACKOFF_MIN_MS = 5_000;
+const SERVE_BACKOFF_MAX_MS = 30_000;
+// Live-log poll cadence while a message POST is in flight (spike design
+// delta §"Live logs": tee newly-completed text parts to the task log).
+const LIVE_POLL_MS = 3_000;
+
+const serveState = {
+  child: null as ReturnType<typeof spawn> | null,
+  port: 0,
+  ready: false,
+  lastError: "",
+  backoffMs: SERVE_BACKOFF_MIN_MS,
+  shuttingDown: false,
+};
+
+// Flavor-separated port bases keep dev/staging/prod listeners on one machine
+// from colliding by construction (one listener per flavor per machine).
+export function flavorBaseFor(lexaDir: string): number {
+  const base = lexaDir.split("/").pop() ?? "";
+  if (base === ".lexa-staging") return 4196;
+  if (base === ".lexa-dev") return 4296;
+  return 4096;
+}
+
+export function deriveServePort(runtimeId: string, flavorBase: number, override?: string): number[] {
+  const forced = override ? Number(override) : NaN;
+  if (Number.isFinite(forced)) return [forced];
+  let hash = 2166136261;
+  for (const ch of runtimeId) {
+    hash ^= ch.charCodeAt(0);
+    hash = Math.imul(hash, 16777619);
+  }
+  const base = flavorBase + (hash >>> 0) % 32;
+  return [base, base + 1, base + 2, base + 3, base + 4];
+}
+
+function servePidPath(runtimeId: string): string {
+  return join(LEXA_DIR, "runtimes", runtimeId, "serve.pid");
+}
+
+function forgeHomePath(runtimeId: string): string {
+  return join(LEXA_DIR, "runtimes", runtimeId, "forge-home");
+}
+
+// ── HTTP message client (pure) ──
+// The model must be an OBJECT {providerID, modelID} — a "provider/model"
+// string is rejected with BadRequest by serve (spike-verified).
+
+export function buildMessageBody(model: string, agent: string, prompt: string): string {
+  const idx = model.indexOf("/");
+  const providerID = idx >= 0 ? model.slice(0, idx) : "";
+  const modelID = idx >= 0 ? model.slice(idx + 1) : model;
+  return JSON.stringify({
+    model: { providerID, modelID },
+    agent,
+    parts: [{ type: "text", text: prompt }],
+  });
+}
+
+// The blocking POST response carries `parts` (text parts = the Markdown
+// result; step-start/step-finish/reasoning filtered) + `error` (null on
+// success; message under error.data.message). An aborted message resolves
+// with truncated parts and error null — callers only abort on cancel/timeout
+// and fail those paths regardless of the POST outcome.
+export function parseMessageResponse(json: string): { result: string | null; error: string | null } {
+  const body = JSON.parse(json) as { parts?: Array<{ type: string; text?: string }>; error?: { name?: string; data?: { message?: string } } | null };
+  if (body.error) {
+    const err = body.error;
+    const message = err.data?.message || err.name || null;
+    return { result: null, error: message };
+  }
+  const joined = (body.parts ?? []).filter((p) => p.type === "text" && typeof p.text === "string").map((p) => p.text as string).join("\n");
+  const cap = 1024 * 1024;
+  return { result: joined.length > cap ? joined.slice(-cap) : joined, error: null };
+}
+
+export function buildMessageUrl(port: number, sessionId: string): string {
+  return `http://127.0.0.1:${port}/session/${sessionId}/message`;
+}
+
+export function pollMessageUrl(port: number, sessionId: string): string {
+  return buildMessageUrl(port, sessionId);
+}
+
+export function abortUrl(port: number, sessionId: string): string {
+  return `http://127.0.0.1:${port}/session/${sessionId}/abort`;
+}
+
+// ── Session mint helpers (pure) ──
+// The directory query binds the session to the workspace at creation; the
+// returned Info.directory must equal the workspace or the mint fails loudly.
+
+export function buildMintUrl(port: number, workspace: string): string {
+  return `http://127.0.0.1:${port}/session?directory=${encodeURIComponent(workspace).replace(/%2F/gi, "/")}`;
+}
+
+export function parseSessionInfo(json: string, workspace: string): { id: string } {
+  const info = JSON.parse(json) as { id?: string; directory?: string };
+  if (!info.id) throw new Error("session mint returned no id");
+  if (info.directory !== workspace) {
+    throw new Error(`session mint bound to ${info.directory ?? "unknown"} directory, expected ${workspace}`);
+  }
+  return { id: info.id };
 }
 
 // The agent env is a WHITELIST — the daemon's own env is never inherited
@@ -521,66 +657,228 @@ function pruneStaleSkillDirs(workspace: string, skillIds: string[]) {
   }
 }
 
-// Sealed per-run HOME at the workspace's .forge/ dir: the only config
-// opencode loads is the deny-rule opencode.json — the global config
-// (permission: allow, MCP servers, plugins) never reaches the agent — and
-// provider auth is copied from the real HOME so runs can authenticate.
-// .forge/ is daemon-owned exclusively (workspace root is operator-owned,
-// .agents/ + seeds persist); it is wiped before seeding so every run starts
-// pristine even after a crash, and removed when the run ends. Safe to share
-// across runs: one runtime per agent CLI per machine claims one task at a
-// time, so .forge/ is never in use concurrently.
-function seedSandboxHome(workspace: string): string {
-  const home = join(workspace, ".forge");
-  rmSync(home, { recursive: true, force: true });
+// Persistent per-runtime sandbox HOME at
+// <LEXA_DIR>/runtimes/<runtimeId>/forge-home/: the only config serve (and
+// every session it hosts) loads is the deny-rule opencode.json — the global
+// config (permission: allow, MCP servers, plugins) never reaches the agent —
+// and provider auth is copied from the real HOME. Seeded once, write-once;
+// never wiped by the daemon (removed only when the runtime is uninstalled).
+// Containment model (empirically verified against opencode 1.18.11):
+// `external_directory: deny` is the geometric boundary — evaluated on the
+// RESOLVED path for read/edit/write/glob/grep, it blocks everything outside
+// the session's bound workspace regardless of relative/absolute form (spike
+// gate 2: server root ≠ workspace still allowed workspace reads, blocked
+// /etc). File tools are therefore permissive inside (relative paths work);
+// bash cannot be path-scoped so it is fully denied. The `skill` tool is
+// denied because opencode discovers the host's GLOBAL skills (~/.agents,
+// ~/.config/opencode — resolved via os.homedir, not $HOME) into every run:
+// hiding them keeps the personal skill library out of Forge context (the
+// run's skill is read from the workspace directly). `webfetch` is denied —
+// Forge output is the document text; the model has no reason to touch the
+// network. auth.json copies are the only sensitive file in the sandbox —
+// explicitly denied.
+function seedForgeHome(runtimeId: string): string {
+  const home = forgeHomePath(runtimeId);
   const configDir = join(home, ".config", "opencode");
   const dataDir = join(home, ".local", "share", "opencode");
   mkdirSync(configDir, { recursive: true });
   mkdirSync(dataDir, { recursive: true });
-  // Containment model (empirically verified against opencode 1.18.11):
-  // `external_directory: deny` is the geometric boundary — evaluated on the
-  // RESOLVED path for read/edit/write/glob/grep, it blocks everything outside
-  // the workspace regardless of relative/absolute form. File tools are
-  // therefore permissive inside (relative paths work); bash cannot be
-  // path-scoped so it is fully denied. The `skill` tool is denied because
-  // opencode discovers the host's GLOBAL skills (~/.agents, ~/.config/opencode
-  // — resolved via os.homedir, not $HOME) into every run: hiding them keeps
-  // the personal skill library out of Forge context (the run's skill is read
-  // from the workspace directly). `webfetch` is denied — Forge output is the
-  // document text; the model has no reason to touch the network.
-  // auth.json copies are the only sensitive file inside the workspace —
-  // explicitly denied.
-  writeFileSync(
-    join(configDir, "opencode.json"),
-    JSON.stringify(
-      {
-        permission: {
-          bash: { "*": "deny" },
-          skill: { "*": "deny" },
-          webfetch: "deny",
-          read: { "*auth.json*": "deny", "*": "allow" },
-          edit: { "*": "allow" },
-          write: { "*": "allow" },
-          glob: { "*": "allow" },
-          grep: { "*": "allow" },
-          external_directory: "deny",
+  if (!existsSync(join(configDir, "opencode.json"))) {
+    writeFileSync(
+      join(configDir, "opencode.json"),
+      JSON.stringify(
+        {
+          permission: {
+            bash: { "*": "deny" },
+            skill: { "*": "deny" },
+            webfetch: "deny",
+            read: { "*auth.json*": "deny", "*": "allow" },
+            edit: { "*": "allow" },
+            write: { "*": "allow" },
+            glob: { "*": "allow" },
+            grep: { "*": "allow" },
+            external_directory: "deny",
+          },
         },
-      },
-      null,
-      2
-    ),
-    { mode: 0o644 }
-  );
-  const realAuth = join(process.env.HOME ?? "", ".local", "share", "opencode", "auth.json");
-  try {
-    if (existsSync(realAuth)) copyFileSync(realAuth, join(dataDir, "auth.json"));
-  } catch (e) {
-    console.warn(`  [sandbox] auth copy failed: ${(e as Error).message}`);
+        null,
+        2
+      ),
+      { mode: 0o644 }
+    );
   }
+  refreshSandboxAuth(home);
   return home;
 }
 
-function runTask(task: ForgeTask, serverProvider: string, serverAgent: string, serverModel: string, serverLogLevel: string, extraArgs: string[], serverPrompt: string, agentMarkdown: string, skillMarkdown: string, skillIds: string[] = [], repoContent: RepoContentEntry[] | null = null): Effect.Effect<void, never> {
+// Fresh provider auth per claim (parity with the old per-run copy): a login
+// or key rotation made while serve runs must reach the next task. Best-effort
+// — a missing/unreadable host auth.json only logs.
+export function refreshSandboxAuth(sandboxHome: string): void {
+  const realAuth = join(process.env.HOME ?? "", ".local", "share", "opencode", "auth.json");
+  try {
+    if (existsSync(realAuth)) {
+      const dest = join(sandboxHome, ".local", "share", "opencode", "auth.json");
+      mkdirSync(join(dest, ".."), { recursive: true });
+      copyFileSync(realAuth, dest);
+    }
+  } catch (e) {
+    console.warn(`  [sandbox] auth copy failed: ${(e as Error).message}`);
+  }
+}
+
+// Kill the process and its whole descendant tree — agent CLIs (opencode,
+// cmd) and serve spawn their own tool processes. We walk /proc for
+// descendants rather than relying on process groups, which are unreliable
+// depending on how the daemon itself was launched (nohup, setsid, ...).
+function killProcessTree(pid: number) {
+  const collect = (root: number): number[] => {
+    const out: number[] = [];
+    for (const entry of readdirSync("/proc")) {
+      if (!/^\d+$/.test(entry)) continue;
+      let ppid = -1;
+      try {
+        ppid = Number(readFileSync(`/proc/${entry}/stat`, "utf8").split(" ")[3]);
+      } catch { continue; }
+      if (ppid === root) out.push(Number(entry), ...collect(Number(entry)));
+    }
+    return out;
+  };
+  const all = [pid, ...collect(pid)];
+  for (const p of all.reverse()) {
+    try { process.kill(p, "SIGKILL"); } catch { /* already gone */ }
+  }
+}
+
+function killWithGrace(pid: number) {
+  try { process.kill(pid, "SIGTERM"); } catch { /* already gone */ }
+  setTimeout(() => {
+    killProcessTree(pid);
+  }, 1500).unref?.();
+}
+
+// Daemon boot: a stale serve.pid means serve was orphaned by a SIGKILL/power
+// loss. Kill that pid (SIGTERM → 1.5s → SIGKILL tree, mirroring the
+// listener's killStaleDaemon shape) and delete the pid file.
+export function sweepStaleServe(runtimeId: string, lexaDir = LEXA_DIR): void {
+  const path = join(lexaDir, "runtimes", runtimeId, "serve.pid");
+  try {
+    const raw = readTextFile(path);
+    const pid = raw ? Number(raw) : NaN;
+    if (Number.isFinite(pid) && pid > 0) {
+      console.log(`[serve] sweeping stale serve pid ${pid}`);
+      killWithGrace(pid);
+    }
+  } catch { /* no pid file */ }
+  try { rmSync(path, { force: true }); } catch { /* ignore */ }
+}
+
+async function isServeReady(port: number): Promise<boolean> {
+  try {
+    const res = await fetch(`http://127.0.0.1:${port}/session`, { signal: AbortSignal.timeout(2_000) });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
+function scheduleServeRespawn(runtimeId: string) {
+  if (serveState.shuttingDown) return;
+  const delay = serveState.backoffMs;
+  serveState.backoffMs = Math.min(serveState.backoffMs * 2, SERVE_BACKOFF_MAX_MS);
+  setTimeout(() => {
+    void startServe(runtimeId);
+  }, delay).unref?.();
+}
+
+// Spawn serve on one candidate port and wait for readiness (GET /session,
+// the spike gate-8 winner — side-effect-free, 200 only once fully up).
+// The probe doubles as bind verification; a child that exits before ready
+// (port taken, broken binary) fails that candidate and the loop moves on.
+async function trySpawnServe(runtimeId: string, port: number, sandboxHome: string): Promise<ReturnType<typeof spawn> | null> {
+  const child = spawn("opencode", ["serve", "--port", String(port), "--hostname", "127.0.0.1"], {
+    cwd: process.cwd(),
+    env: buildChildEnv(process.env, process.cwd(), sandboxHome) as NodeJS.ProcessEnv,
+    detached: true,
+    stdio: "inherit",
+  });
+  let gone = false;
+  child.once("close", () => { gone = true; });
+  child.once("error", (e) => {
+    serveState.lastError = `spawn opencode serve: ${e.message}`;
+    gone = true;
+  });
+  const deadline = Date.now() + SERVE_READY_TIMEOUT_MS;
+  while (!gone && Date.now() < deadline) {
+    if (await isServeReady(port)) return child;
+    await new Promise((resolve) => setTimeout(resolve, SERVE_READY_POLL_MS));
+  }
+  if (!gone) killWithGrace(child.pid ?? 0);
+  return null;
+}
+
+// Boot + respawn entry: sweep any stale pid, seed the persistent sandbox,
+// try candidate ports (FORGE_SERVE_PORT override first). On success record
+// { pid, port } and persist serve.pid; on failure keep retrying with the
+// 5s→30s backoff — never give up, never exit the daemon.
+async function startServe(runtimeId: string) {
+  if (serveState.shuttingDown) return;
+  sweepStaleServe(runtimeId);
+  const sandboxHome = seedForgeHome(runtimeId);
+  const candidates = deriveServePort(runtimeId, flavorBaseFor(LEXA_DIR), SERVE_PORT_OVERRIDE);
+  for (const port of candidates) {
+    const child = await trySpawnServe(runtimeId, port, sandboxHome);
+    if (!child) continue;
+    serveState.child = child;
+    serveState.port = port;
+    serveState.ready = true;
+    serveState.lastError = "";
+    serveState.backoffMs = SERVE_BACKOFF_MIN_MS;
+    try { writeFileSync(servePidPath(runtimeId), String(child.pid ?? ""), { mode: 0o644 }); } catch (e) {
+      console.warn(`  [serve] could not write serve.pid: ${(e as Error).message}`);
+    }
+    console.log(`[serve] opencode serve ready on 127.0.0.1:${port} (pid ${child.pid})`);
+    child.once("close", (code) => {
+      if (serveState.child === child) {
+        serveState.child = null;
+        serveState.ready = false;
+        serveState.port = 0;
+        try { rmSync(servePidPath(runtimeId), { force: true }); } catch { /* ignore */ }
+        if (serveState.shuttingDown) { process.exit(0); return; }
+        console.error(`[serve] opencode serve exited (code ${code}) — respawning in ${serveState.backoffMs}ms`);
+        scheduleServeRespawn(runtimeId);
+      }
+    });
+    return;
+  }
+  serveState.lastError = serveState.lastError || "all serve ports exhausted";
+  console.error(`[serve] opencode serve did not start (${serveState.lastError}) — retrying with backoff`);
+  scheduleServeRespawn(runtimeId);
+}
+
+function killServeTree() {
+  const pid = serveState.child?.pid;
+  if (pid) killWithGrace(pid);
+}
+
+// Report a task failure to the server (or just log a user cancel — the row
+// is already 'cancelled' server-side, so a cancel skips the fail round-trip).
+function failTask(task: ForgeTask, msg: string): Effect.Effect<void, never> {
+  return Effect.gen(function* () {
+    if (msg === "cancelled") {
+      console.log(`[task ${task.id}] cancelled`);
+      logTask(task.id, "cancelled");
+      return;
+    }
+    console.error(`[task ${task.id}] failed: ${msg}`);
+    logTask(task.id, `failed: ${msg.slice(0, 200)}`);
+    yield* api(`/api/forge/daemon/tasks/${task.id}/fail`, {
+      method: "POST",
+      body: JSON.stringify({ error: msg }),
+    }).pipe(Effect.catchAll(() => Effect.void));
+  });
+}
+
+function runTask(task: ForgeTask, serverProvider: string, serverAgent: string, serverModel: string, serverLogLevel: string, extraArgs: string[], serverPrompt: string, agentMarkdown: string, skillMarkdown: string, skillIds: string[] = [], repoContent: RepoContentEntry[] | null = null, runtimeId = "", claimRuntimeSessionId: string | null = null): Effect.Effect<void, never> {
   return Effect.gen(function* () {
     console.log(`\n[task ${task.id}] ${task.skillName} — ${task.documentType}:${task.documentId}`);
 
@@ -595,11 +893,10 @@ function runTask(task: ForgeTask, serverProvider: string, serverAgent: string, s
     console.log(`  Config: ${provider}${agentFlag ? ` --agent ${agentFlag}` : ""} · ${model}${extraArgs.length ? ` + ${extraArgs.join(" ")}` : ""}`);
 
     // opencode runs from the persistent project workspace (rules as static
-    // bundles, sealed per-run HOME); other providers keep the legacy
-    // ephemeral run-dir layout.
+    // bundles) against the warm serve runtime; other providers keep the
+    // legacy ephemeral run-dir layout.
     const isOpencode = provider === "opencode";
     let workdir: string;
-    let sandboxHome: string | null = null;
     if (isOpencode) {
       workdir = join(WORKSPACE_ROOT, task.projectId);
       mkdirSync(workdir, { recursive: true });
@@ -607,7 +904,6 @@ function runTask(task: ForgeTask, serverProvider: string, serverAgent: string, s
       console.log(`  Workspace: ${task.projectId}${projName ? ` (${projName})` : ""}`);
       pruneStaleSkillDirs(workdir, skillIds);
       writeRuleBundles(workdir, task, agentMarkdown, skillMarkdown);
-      sandboxHome = seedSandboxHome(workdir);
     } else {
       workdir = join(WORKDIR_ROOT, task.id);
       mkdirSync(workdir, { recursive: true });
@@ -647,16 +943,92 @@ function runTask(task: ForgeTask, serverProvider: string, serverAgent: string, s
       "Never wrap the whole output in a markdown fence.",
     ].filter(Boolean).join("\n\n");
 
+    // opencode session resolution (spec §8 step 3): the claim payload carries
+    // the server's continue-vs-mint verdict (runtimeSessionId or null). Null
+    // → mint POST /session?directory=<workspace> on serve (asserting the
+    // returned Info.directory), then persist the mapping BEFORE the run.
     yield* Effect.gen(function* () {
       logTask(task.id, `claimed by ${RUNTIME_NAME}`);
       logTask(task.id, `model ${model}`);
+      // opencode session resolution (spec §8 step 3): the claim payload
+      // carries the server's continue-vs-mint verdict (runtimeSessionId or
+      // null). Null → mint POST /session?directory=<workspace> on serve
+      // (asserting the returned Info.directory), then persist the mapping
+      // BEFORE the run.
+      let sessionId = "";
+      let servePort = 0;
+      let mintAndMap: Effect.Effect<string, DaemonError> | null = null;
+      if (isOpencode) {
+        // Bounded wait for serve: the first claim after daemon boot can race
+        // serve's spawn, and a crashed serve is respawning on the 5s→30s
+        // backoff. Give it the readiness budget; only then fail the task.
+        const serveUp = yield* Effect.gen(function* () {
+          const deadline = Date.now() + SERVE_READY_TIMEOUT_MS;
+          while (!serveState.ready && !serveState.shuttingDown && Date.now() < deadline) {
+            yield* Effect.sleep(SERVE_READY_POLL_MS);
+          }
+          return serveState.ready;
+        });
+        if (!serveUp) {
+          return yield* Effect.fail(new DaemonError({ reason: `Forge runtime unavailable — opencode serve did not start (${serveState.lastError || "not ready"})` }));
+        }
+        servePort = serveState.port;
+        refreshSandboxAuth(forgeHomePath(runtimeId));
+        const mapping: SessionMapping = {
+          documentType: task.documentType,
+          documentId: task.documentId,
+          runtimeId,
+          provider: "opencode",
+          agentId: task.agentId,
+          skillId: task.skillId,
+        };
+        mintAndMap = Effect.gen(function* () {
+          const minted = yield* mintSession(servePort, workdir);
+          yield* upsertMapping({ ...mapping, runtimeSessionId: minted.id }).pipe(
+            Effect.catchAll((e) => Effect.sync(() => console.warn(`[task ${task.id}] mapping upsert failed: ${e.message}`))),
+          );
+          return minted.id;
+        });
+        if (claimRuntimeSessionId) {
+          sessionId = claimRuntimeSessionId;
+          console.log(`  Session: continuing ${sessionId}`);
+        } else {
+          sessionId = yield* mintAndMap;
+          console.log(`  Session: new ${sessionId}`);
+        }
+        logTask(task.id, claimRuntimeSessionId ? "continuing session" : "new session");
+      }
       logTask(task.id, "agent started");
       logTask(task.id, "reading document context");
       // Poll the task's status while the agent runs so a server-side cancel
-      // (user clicked Cancel in the UI) aborts the child process instead of
-      // letting it run to completion and discard the result.
+      // (user clicked Cancel in the UI) aborts the run instead of letting it
+      // run to completion and discard the result.
       const CANCEL_POLL_MS = 2000;
-      const output = yield* runAgentWithCancel(prompt, workdir, provider, agentFlag, model, serverLogLevel, extraArgs, task.id, sandboxHome, CANCEL_POLL_MS);
+      const runOpts = {
+        port: servePort,
+        sessionId,
+        model,
+        agent: agentFlag,
+        prompt,
+        taskId: task.id,
+        mapping: { documentType: task.documentType, documentId: task.documentId, runtimeId },
+        pollMs: CANCEL_POLL_MS,
+      };
+      const output = isOpencode
+        ? yield* runHttpTask(runOpts).pipe(
+            // Stale-session retry (spec §12): mint a fresh session, rewrite
+            // the mapping, retry once.
+            Effect.catchAll((e) => {
+              if (!claimRuntimeSessionId || !mintAndMap || !isSessionNotFound(e.message)) return Effect.fail(e);
+              console.log(`[task ${task.id}] stale session ${sessionId} — minting a fresh session and retrying once`);
+              logTask(task.id, "stale session — minting fresh and retrying once");
+              return mintAndMap.pipe(
+                Effect.flatMap((sid) => runHttpTask({ ...runOpts, sessionId: sid })),
+                Effect.mapError((m) => m instanceof AgentError ? m : new AgentError({ reason: m.message })),
+              );
+            }),
+          )
+        : yield* runAgentWithCancel(prompt, workdir, provider, agentFlag, model, serverLogLevel, extraArgs, task.id, CANCEL_POLL_MS);
       if (output.startsWith("ERROR_MCP_UNAVAILABLE")) {
         return yield* Effect.fail(new DaemonError({ reason: output }));
       }
@@ -669,34 +1041,18 @@ function runTask(task: ForgeTask, serverProvider: string, serverAgent: string, s
       logTask(task.id, `done (${output.length} chars)`);
       console.log(`[task ${task.id}] completed (${output.length} chars)`);
     }).pipe(
-      Effect.catchAllCause((cause) =>
-        Effect.gen(function* () {
-          const failure = cause._tag === "Fail" ? cause.error : cause._tag === "Die" ? cause.defect : null;
-          const msg = failure === null ? "unknown error" : failure instanceof Error ? failure.message : String(failure);
-          // A user cancel is not a failure — the row is already 'cancelled'
-          // server-side, so skip the fail round-trip and log the cancel.
-          if (msg === "cancelled") {
-            console.log(`[task ${task.id}] cancelled — agent process killed`);
-            logTask(task.id, "cancelled");
-            return;
-          }
-          console.error(`[task ${task.id}] failed: ${msg}`);
-          logTask(task.id, `failed: ${msg.slice(0, 200)}`);
-          yield* api(`/api/forge/daemon/tasks/${task.id}/fail`, {
-            method: "POST",
-            body: JSON.stringify({ error: msg }),
-          }).pipe(Effect.catchAll(() => Effect.void));
-        }),
-      ),
+      Effect.catchAllCause((cause) => {
+        const failure = cause._tag === "Fail" ? cause.error : cause._tag === "Die" ? cause.defect : null;
+        const msg = failure === null ? "unknown error" : failure instanceof Error ? failure.message : String(failure);
+        return failTask(task, msg);
+      }),
       Effect.ensuring(
         Effect.sync(() => {
-          // opencode: remove the sealed sandbox HOME (.forge/ — daemon-owned, wiped
-          // + reseeded each run) — the workspace root, seeds, and persistent rule
-          // bundles stay. Legacy providers: the whole ephemeral run dir is removed
-          // (Artifact retention is backlogged).
-          if (sandboxHome) {
-            rmSync(sandboxHome, { recursive: true, force: true });
-          } else {
+          // opencode: no cleanup — the workspace root, seeds, and the
+          // persistent forge-home sandbox stay (spec §8 step 9: no .forge/
+          // wipe anymore). Legacy providers: the whole ephemeral run dir is
+          // removed (Artifact retention is backlogged).
+          if (!isOpencode) {
             rmSync(workdir, { recursive: true, force: true });
           }
         }),
@@ -705,22 +1061,12 @@ function runTask(task: ForgeTask, serverProvider: string, serverAgent: string, s
   });
 }
 
-function runAgent(prompt: string, cwd: string, provider: "opencode" | "hermes" | "command-code", agent: string, model: string, logLevel: string, extraArgs: string[], taskId: string, sandboxHome: string | null, onSpawn?: (child: ReturnType<typeof spawn>) => void): Effect.Effect<string, AgentError> {
+function runAgent(prompt: string, cwd: string, provider: "opencode" | "hermes" | "command-code", agent: string, model: string, logLevel: string, extraArgs: string[], taskId: string, onSpawn?: (child: ReturnType<typeof spawn>) => void): Effect.Effect<string, AgentError> {
   return Effect.tryPromise({
     try: () => new Promise<string>((resolve, reject) => {
       let bin: string = provider;
       let args: string[];
-      if (provider === "opencode") {
-        // opencode ≥1.18: `run` is the non-interactive one-shot (--print was
-        // removed). Full "provider/model" ids are accepted by --model; --agent
-        // selects the agent persona (build, plan, ...) when configured.
-        // --print-logs + --log-level are server-configured logging flags.
-        args = ["run", prompt, ...(agent ? ["--agent", agent] : []), ...(model ? ["--model", model] : [])];
-        // Forge always captures opencode's diagnostic stderr stream into the
-        // activity log. `--log-level` only changes its verbosity.
-        args.push("--print-logs");
-        if (logLevel) args.push("--log-level", logLevel);
-      } else if (provider === "command-code") {
+      if (provider === "command-code") {
         // Command Code: non-interactive print mode, no session persistence,
         // skip onboarding, auto-accept so it doesn't stall on permission prompts.
         bin = CMD_BIN;
@@ -738,7 +1084,7 @@ function runAgent(prompt: string, cwd: string, provider: "opencode" | "hermes" |
       logTask(taskId, `$ ${bin} ${cmdline}`);
       // buildChildEnv whitelists the agent env (see its doc comment): the
       // daemon's own env is never inherited wholesale.
-      const childEnv = buildChildEnv(process.env, cwd, sandboxHome);
+      const childEnv = buildChildEnv(process.env, cwd, null);
       const child = spawn(bin, args, {
         cwd,
         env: childEnv as NodeJS.ProcessEnv,
@@ -842,45 +1188,211 @@ function runAgent(prompt: string, cwd: string, provider: "opencode" | "hermes" |
   });
 }
 
+// ── HTTP run path (opencode, pure HTTP — no run client) ──
+// The daemon never spawns a run client (spike gate 6: the attach client on
+// 1.18.11 exits without mirroring text, so it is unusable as a result
+// source). A task is one blocking POST /session/:id/message against serve;
+// cancel/timeout POST /session/:id/abort (best-effort — it unblocks the
+// blocked POST server-side) and drop the mapping row unconditionally.
+
+interface SessionMapping {
+  documentType: string;
+  documentId: string;
+  runtimeId: string;
+  runtimeSessionId?: string;
+  provider: "opencode";
+  agentId: string;
+  skillId: string;
+}
+
+// Pre-spawn mapping write (spec §8 step 3): the forge_sessions row exists
+// before the run starts, so crash-resume and complete-failure retention work.
+// A failed upsert only logs — the task still runs; the next claim mints a
+// fresh session instead of continuing.
+function upsertMapping(mapping: SessionMapping): Effect.Effect<void, DaemonError> {
+  return Effect.gen(function* () {
+    const res = yield* api("/api/forge/sessions", { method: "PUT", body: JSON.stringify(mapping) });
+    if (!res.ok) return yield* Effect.fail(new DaemonError({ reason: `sessions PUT failed: ${res.status}` }));
+  });
+}
+
+// Daemon-side mapping drop on cancel/timeout — always attempted, never a 409
+// (that is the user-facing reset endpoint's job). Best-effort: a failure only
+// logs; a fresh session can never inherit the aborted run's damage.
+function deleteMapping(mapping: Pick<SessionMapping, "documentType" | "documentId" | "runtimeId">): Effect.Effect<void, never> {
+  return api("/api/forge/sessions", { method: "DELETE", body: JSON.stringify(mapping) }).pipe(
+    Effect.flatMap((res) => res.ok ? Effect.void : Effect.fail(new DaemonError({ reason: `sessions DELETE failed: ${res.status}` }))),
+    Effect.catchAllCause((e) => Effect.sync(() => console.warn("  [serve] mapping drop failed:", e._tag === "Fail" ? e.error.message : "error"))),
+  );
+}
+
+function mintSession(port: number, workspace: string): Effect.Effect<{ id: string }, DaemonError> {
+  return Effect.tryPromise({
+    try: async () => {
+      const res = await fetch(buildMintUrl(port, workspace), { method: "POST", signal: AbortSignal.timeout(HTTP_TIMEOUT_MS) });
+      if (!res.ok) throw new Error(`session mint HTTP ${res.status}`);
+      return parseSessionInfo(await res.text(), workspace);
+    },
+    catch: (error) => new DaemonError({ reason: error instanceof Error ? error.message : String(error) }),
+  });
+}
+
+// Stale-session retry trigger (spec §12): the sandbox DB was wiped manually
+// or the session died server-side — mint a fresh session and rewrite the
+// mapping, at most once per task.
+const SESSION_NOT_FOUND_RE = /session.*(not found|does not exist|no longer exists|missing)/i;
+
+function isSessionNotFound(message: string): boolean {
+  return SESSION_NOT_FOUND_RE.test(message);
+}
+
+// Best-effort server-side abort — unblocks the blocked message POST. Never
+// throws: cancel/timeout must not fail because the abort POST failed.
+function abortSession(port: number, sessionId: string): Effect.Effect<void, never> {
+  return Effect.tryPromise(async () => {
+    await fetch(abortUrl(port, sessionId), { method: "POST", signal: AbortSignal.timeout(HTTP_TIMEOUT_MS) });
+  }).pipe(Effect.catchAllCause(() => Effect.void));
+}
+
+// GET /session/:id/message returns the conversation history (the POST body
+// shape: { parts, error }); the poll normalizes both shapes defensively.
+function normalizeParts(body: unknown): Array<{ id?: string; type: string; text?: string }> {
+  if (!body || typeof body !== "object") return [];
+  const b = body as { parts?: unknown; messages?: unknown };
+  let parts: unknown = b.parts;
+  if (!Array.isArray(parts) && Array.isArray(b.messages)) {
+    parts = b.messages.flatMap((m) => {
+      const mp = (m as { parts?: unknown }).parts;
+      return Array.isArray(mp) ? mp : [];
+    });
+  }
+  return Array.isArray(parts) ? (parts as Array<{ id?: string; type: string; text?: string }>) : [];
+}
+
+// Tee newly-completed text parts to the task log while the message POST is in
+// flight (preserves the live-streaming UX without a client). Dedupe by part
+// id; poll failures are non-fatal.
+function pollLiveLogs(port: number, sessionId: string, taskId: string, seen: Set<string>): Effect.Effect<void, never> {
+  return Effect.tryPromise(async () => {
+    const res = await fetch(pollMessageUrl(port, sessionId), { signal: AbortSignal.timeout(5_000) });
+    if (!res.ok) return;
+    const parts = normalizeParts(await res.json());
+    for (const part of parts) {
+      if (part.type !== "text" || typeof part.text !== "string" || !part.text) continue;
+      const key = part.id ?? `${part.type}:${part.text}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      logTask(taskId, `▸ ${part.text}`, { stream: "out", level: classifyLogLine("out", part.text).level });
+    }
+  }).pipe(Effect.catchAllCause(() => Effect.void));
+}
+
+export interface HttpRunOptions {
+  port: number;
+  sessionId: string;
+  model: string;
+  agent: string;
+  prompt: string;
+  taskId: string;
+  mapping: Pick<SessionMapping, "documentType" | "documentId" | "runtimeId">;
+  pollMs: number;
+}
+
+export function runHttpTask(opts: HttpRunOptions): Effect.Effect<string, AgentError> {
+  return Effect.gen(function* () {
+    let aborted = false;
+    const seenParts = new Set<string>();
+
+    const poller = yield* Effect.fork(
+      Effect.gen(function* () {
+        while (!aborted) {
+          yield* Effect.sleep(LIVE_POLL_MS);
+          yield* pollLiveLogs(opts.port, opts.sessionId, opts.taskId, seenParts);
+        }
+      }).pipe(Effect.catchAllCause(() => Effect.void)),
+    );
+
+    const cancelRun = (reason: string) =>
+      Effect.gen(function* () {
+        aborted = true;
+        yield* abortSession(opts.port, opts.sessionId);
+        yield* deleteMapping(opts.mapping);
+        return yield* Effect.fail(new AgentError({ reason }));
+      });
+
+    // Cancel poll — the server-side cancel (user clicked Cancel) wins over a
+    // late completion. Poll failures are non-fatal.
+    const cancelPoll = Effect.forever(
+      Effect.gen(function* () {
+        yield* Effect.sleep(opts.pollMs);
+        const cancelled = yield* Effect.gen(function* () {
+          const res = yield* api(`/api/forge/daemon/tasks/${opts.taskId}/status`);
+          if (!res.ok) return false;
+          const body = yield* Effect.tryPromise({ try: () => res.json() as Promise<{ status: string }>, catch: toDaemonError });
+          return body.status === "cancelled";
+        }).pipe(Effect.catchAllCause(() => Effect.succeed(false)));
+        if (cancelled) yield* cancelRun("cancelled");
+      }),
+    );
+
+    // The blocking message POST — response arrives when the message completes
+    // (or is aborted). Fetch timeout = RUN_TIMEOUT_MS; an abort mid-message
+    // resolves with truncated parts and error null, but the aborted flag set
+    // by cancelRun/timeout turns that into a failure — never a success.
+    const messagePost = Effect.tryPromise({
+      try: async () => {
+        const res = await fetch(buildMessageUrl(opts.port, opts.sessionId), {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: buildMessageBody(opts.model, opts.agent, opts.prompt),
+          signal: AbortSignal.timeout(RUN_TIMEOUT_MS),
+        });
+        if (aborted) throw new Error("cancelled");
+        if (res.status === 404) throw new Error("session not found");
+        if (!res.ok) {
+          let detail = `message POST HTTP ${res.status}`;
+          try {
+            const errBody = parseMessageResponse(await res.text());
+            if (errBody.error) detail = errBody.error;
+          } catch { /* keep the HTTP status detail */ }
+          throw new Error(detail);
+        }
+        const text = await res.text();
+        if (aborted) throw new Error("cancelled");
+        const parsed = parseMessageResponse(text);
+        if (parsed.error) throw new Error(parsed.error);
+        return parsed.result ?? "";
+      },
+      catch: (error) => new AgentError({ reason: error instanceof Error ? error.message : String(error) }),
+    });
+
+    // Wall-clock timeout — abort the server-side session and drop the mapping
+    // exactly like a cancel (a timed-out run is as poisoned as an aborted one).
+    const timeout = Effect.gen(function* () {
+      yield* Effect.sleep(RUN_TIMEOUT_MS);
+      return yield* cancelRun(`run timed out after ${Math.round(RUN_TIMEOUT_MS / 1000)}s`);
+    });
+
+    try {
+      return yield* Effect.raceFirst(Effect.raceFirst(messagePost, timeout), cancelPoll);
+    } finally {
+      aborted = true;
+      void Fiber.interrupt(poller);
+    }
+  });
+}
+
 // Run the agent, racing its completion against a wall-clock timeout and a
-// server cancel poll. When the user cancels the task (POST
-// /api/forge/tasks/:id/cancel flips the row to 'cancelled') or the timeout
-// fires, SIGTERM the child, schedule a force-kill of the whole tree 1500ms
-// later, and fail — runTask's catch then logs it and skips the complete/fail
-// round-trips (the "cancelled" message keeps its special handling).
-function runAgentWithCancel(prompt: string, cwd: string, provider: "opencode" | "hermes" | "command-code", agent: string, model: string, logLevel: string, extraArgs: string[], taskId: string, sandboxHome: string | null, pollMs: number): Effect.Effect<string, AgentError> {
+// server cancel poll (legacy providers — hermes/command-code keep the spawn
+// path; opencode runs over HTTP via runHttpTask). When the user cancels the
+// task (POST /api/forge/tasks/:id/cancel flips the row to 'cancelled') or the
+// timeout fires, SIGTERM the child, schedule a force-kill of the whole tree
+// 1500ms later, and fail — runTask's catch then logs it and skips the
+// complete/fail round-trips (the "cancelled" message keeps its special
+// handling).
+function runAgentWithCancel(prompt: string, cwd: string, provider: "opencode" | "hermes" | "command-code", agent: string, model: string, logLevel: string, extraArgs: string[], taskId: string, pollMs: number): Effect.Effect<string, AgentError> {
   return Effect.gen(function* () {
     let child: ReturnType<typeof spawn> | null = null;
-
-    // Kill the child and its whole descendant tree — agent CLIs (opencode,
-    // cmd) spawn their own tool processes. We walk /proc for descendants
-    // rather than relying on process groups, which are unreliable depending
-    // on how the daemon itself was launched (nohup, setsid, ...).
-    const killTree = (pid: number) => {
-      const collect = (root: number): number[] => {
-        const out: number[] = [];
-        for (const entry of readdirSync("/proc")) {
-          if (!/^\d+$/.test(entry)) continue;
-          let ppid = -1;
-          try {
-            ppid = Number(readFileSync(`/proc/${entry}/stat`, "utf8").split(" ")[3]);
-          } catch { continue; }
-          if (ppid === root) out.push(Number(entry), ...collect(Number(entry)));
-        }
-        return out;
-      };
-      const all = [pid, ...collect(pid)];
-      for (const p of all.reverse()) {
-        try { process.kill(p, "SIGKILL"); } catch { /* already gone */ }
-      }
-    };
-    const killWithGrace = (pid: number) => {
-      try { process.kill(pid, "SIGTERM"); } catch { /* already gone */ }
-      // Grace for the agent to clean up, then force-kill the tree.
-      setTimeout(() => {
-        killTree(pid);
-      }, 1500).unref?.();
-    };
 
     const timeout = Effect.gen(function* () {
       yield* Effect.sleep(RUN_TIMEOUT_MS);
@@ -909,7 +1421,7 @@ function runAgentWithCancel(prompt: string, cwd: string, provider: "opencode" | 
 
     return yield* Effect.raceFirst(
       Effect.raceFirst(
-        runAgent(prompt, cwd, provider, agent, model, logLevel, extraArgs, taskId, sandboxHome, (c) => { child = c; }),
+        runAgent(prompt, cwd, provider, agent, model, logLevel, extraArgs, taskId, (c) => { child = c; }),
         timeout,
       ),
       cancelPoll,
