@@ -893,16 +893,14 @@ export function useSession() {
 
 export function useSignIn() {
   const qc = useQueryClient();
-  const toast = useToast();
   return useMutation({
     mutationFn: ({ email, password }: { email: string; password: string }) => auth.signInEmail({ email, password }),
     onSuccess: (res) => {
       // Mutation response is authoritative — update the session cache from it.
       qc.setQueryData(["session"], res);
     },
-    onError: (err) => {
-      toast.push("error", "Sign in failed", toastMessage(err));
-    },
+    // No onError toast: the login page renders the single inline notice
+    // (wireframe: generic "Invalid email or password." copy).
   });
 }
 
@@ -951,7 +949,9 @@ export function useChangePassword() {
 // ---- teams ----
 
 export function useTeams() {
-  return useQuery({ queryKey: ["teams"], queryFn: () => api.listTeams().then((r) => r.data) });
+  // retry:false — plain members typically get 403 (no teams to administer);
+  // the UserMenu mounts on every page and must not retry + log noise.
+  return useQuery({ queryKey: ["teams"], queryFn: () => api.listTeams().then((r) => r.data), retry: false });
 }
 
 export function useCreateTeam() {
