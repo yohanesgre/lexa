@@ -475,14 +475,11 @@ no SMTP — email/password only. Two channels:
 export class AuthService extends Effect.Service<AuthService>()("AuthService", {
   effect: Effect.gen(function* () {
     const apiKeyRepo = yield* ApiKeyRepo;
+    const sessionService = yield* SessionService;
     return {
-      // HUMANS: Better Auth cookie session (mounted at /api/auth/*).
-      // try/catch is mandatory — an uncaught getSession throw crashes SSR.
-      userFromSession: (headers: Headers) =>
-        Effect.tryPromise(() => auth.api.getSession({ headers })).pipe(
-          Effect.map((s) => s?.user ?? null),
-          Effect.catchAll(() => Effect.succeed(null)),
-        ),
+      // HUMANS: delegated to SessionService.userFrom — the Better Auth
+      // getSession wrapper (try/catch mandatory — an uncaught getSession
+      // throw crashes SSR). See SessionService for the implementation.
 
       // MACHINES (MCP/CLI/webhooks): Authorization: Bearer lxk_<base62(43)>
       // Keys have full read/write — no scopes (single-agent trust model,
@@ -499,7 +496,7 @@ export class AuthService extends Effect.Service<AuthService>()("AuthService", {
         }),
     };
   }),
-  dependencies: [/* ApiKeyRepo */],
+  dependencies: [ApiKeyRepo, SessionService],
 }) {}
 ```
 
@@ -519,6 +516,27 @@ team, never from `users.role`.
 **Login rate limit (R17):** `/api/auth/*` failed logins are throttled by the
 Better Auth rate-limit plugin (in-memory; ~5 attempts/60s per email, 15 min
 lockout). The existing per-IP `/api/*` limiter is untouched.
+
+### SessionService — Better Auth session wrapper
+
+Single owner of `auth.api.getSession`; the middleware and AuthService call
+`userFrom` (never `auth.api.getSession` directly — the try/catch must live in
+one place):
+
+```typescript
+export class SessionService extends Effect.Service<SessionService>()("Lexa/SessionService", {
+  effect: Effect.gen(function* () {
+    return {
+      // try/catch is mandatory — an uncaught getSession throw crashes SSR.
+      userFrom: (headers: Headers) =>
+        Effect.tryPromise(() => auth.api.getSession({ headers })).pipe(
+          Effect.map((s) => s?.user ?? null),
+          Effect.catchAll(() => Effect.succeed(null)),
+        ),
+    };
+  }),
+}) {}
+```
 
 ### AuthorizationService — project access + team/settings gates
 
@@ -706,11 +724,11 @@ All list endpoints and MCP `list_*`/`search_*` tools: `?limit` (default 50, max 
 | `DbError` | 500 | `DATABASE_ERROR` | |
 | `GithubApiError` | 502 | `GITHUB_API_ERROR` | never fails a user move |
 | `GithubWebhookError` | 400 | `GITHUB_WEBHOOK_ERROR` | bad signature → 401 |
-| `InvalidKey` / `MissingAuth` | 401 | `INVALID_API_KEY` / `MISSING_AUTH` | |
+| `InvalidKey` / `MissingAuth` | 401 | `INVALID_API_KEY` / `MISSING_AUTH` | REST emits `UNAUTHORIZED` instead (see note below); MCP raises them natively |
 | `UserNotFound` | 404 | `USER_NOT_FOUND` | unknown user id on admin/workspace role endpoints |
 | `NoUserContext` | 400 | — | `PATCH /api/me` called with a bare API key (no session) — agents have no profile |
 
-Defined in the error map but never raised by any REST handler — do not match on them: `LAST_ADMIN_DEMOTE` (legacy user-role editing is removed — superadmin is env-only; user lifecycle goes through `/api/workspace/members`).
+Defined in the error map but never raised by any REST handler — do not match on them: `INVALID_API_KEY` / `MISSING_AUTH` (the auth middleware emits `UNAUTHORIZED` — see the Auth section), `LAST_ADMIN_DEMOTE` (legacy user-role editing is removed — superadmin is env-only; user lifecycle goes through `/api/workspace/members`).
 
 ## Service Dependency Map
 
