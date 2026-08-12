@@ -5,6 +5,7 @@ import type { Editor } from "@tiptap/core";
 import { cn } from "../ui/cn";
 import { docToMarkdown } from "../../../shared/markdown";
 import { useCreateForgeTask, useForgeTask, useRuntimes, useRecentForgeTask, useCancelForgeTask, useForgeTaskLogs, useForgeAgents, useForgeSkills } from "../../lib/queries";
+import { useForgeSession, useResetForgeSession, formatSessionAge } from "../../lib/use-forge-session";
 import { parseApiDate } from "../../lib/date";
 import { ForgeTaskLogModal, classifyLogLine } from "./ForgeTaskLogModal";
 import type { ForgeAgent, ForgeSkill, ForgeTask, ForgeTaskLog, Runtime } from "../../../shared/types";
@@ -339,6 +340,11 @@ export function ForgePopover({ editor, slug, documentType, documentId, open, onC
   const onlineRuntimes = runtimes.filter((r) => r.status === "online");
   const createTask = useCreateForgeTask();
   const cancelTask = useCancelForgeTask();
+  // Warm-session mapping for this document: which opencode serve conversation
+  // the next Generate would continue, per runtime. Refetched on open so a
+  // background run that minted a session is reflected.
+  const sessions = useForgeSession(documentType, documentId, open);
+  const resetSession = useResetForgeSession();
   const task = useForgeTask(taskId, open && taskId !== null);
   // Live "what is it doing" feed — polls while the task is queued/running.
   const logs = useForgeTaskLogs(taskId, open && taskId !== null);
@@ -462,6 +468,12 @@ export function ForgePopover({ editor, slug, documentType, documentId, open, onC
   const done = taskData?.status === "completed";
   const failed = taskData?.status === "failed";
 
+  // Session mapping for the selected runtime — the next Generate continues it
+  // ("New session" when none). Reset is disabled while any task for this
+  // document is running (the endpoint 409s in that case).
+  const sessionRow = sessions.data?.find((s) => s.runtimeId === runtimeId) ?? null;
+  const taskRunning = running || recent.data?.status === "queued" || recent.data?.status === "running";
+
   const popoverStyle: React.CSSProperties = anchorRect
     ? {
         position: "fixed",
@@ -512,6 +524,22 @@ export function ForgePopover({ editor, slug, documentType, documentId, open, onC
         onlineRuntimes={onlineRuntimes}
       />
 
+      {/* Session line — continuing conversation mapped to this document on the selected runtime */}
+      <div style={{ padding: "8px 12px", borderBottom: "1px solid var(--lx-border-default)", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+        <span className="text-xs text-lx-text-muted" style={{ fontSize: 11 }}>
+          {sessionRow ? `Continuing session from ${formatSessionAge(sessionRow.updatedAt)}` : "New session"}
+        </span>
+        <button
+          type="button"
+          className="btn btn-ghost"
+          style={{ height: 22, padding: "0 8px", fontSize: 11 }}
+          onClick={() => resetSession.mutate({ documentType, documentId, runtimeId })}
+          disabled={resetSession.isPending || taskRunning || !runtimeId}
+          title={taskRunning ? "running task" : undefined}
+        >
+          New session
+        </button>
+      </div>
 
       <div style={{ padding: "10px 12px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
         <span className="font-micro text-2xs text-lx-text-muted uppercase tracking-[0.04em]">
