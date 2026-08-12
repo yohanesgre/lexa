@@ -127,6 +127,8 @@ export const errorCodeMap: Record<string, string> = {
   InviteAlreadyPending: "INVITE_PENDING",
   SessionNotFound: "SESSION_NOT_FOUND",
   TeamSlugTaken: "SLUG_TAKEN",
+  WorkspaceUserNotFound: "USER_NOT_FOUND",
+  PasswordLinkIssueFailed: "PASSWORD_LINK_FAILED",
 };
 
 export function errorToStatus(error: { _tag: string }): number {
