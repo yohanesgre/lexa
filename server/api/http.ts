@@ -8,7 +8,12 @@ import { Sqlite, withTx, DbError } from "../db/database";
 import { Database } from "bun:sqlite";
 import { getSetting, setSetting, deleteSetting } from "../db/settings";
 import { ProjectNotFound, WikiPageNotFound, MachineNotFound, Forbidden, SetupLocked, TaskNotFound, InvalidName, InvalidRateLimit, InvalidGithubSettings, NoUserContext, GithubApiError, errorResponse, errorToStatus } from "./errors";
+import { respond } from "./http-helpers";
 import { AuthIdentity, actorFromIdentity } from "./auth";
+import { teamsGroup, createTeamsLive } from "./teams";
+import { workspaceGroup, createWorkspaceLive } from "./workspace";
+import { sessionsGroup, createSessionsLive } from "./sessions";
+import { auth } from "../auth";
 import { createApiMiddleware } from "./middleware";
 import { resolveRateLimitFromDbValues, syncRateLimitFromDb } from "./rate-limit";
 import { syncGitHubConfigFromDb, resetGithubCaches } from "../github/client";
@@ -32,6 +37,11 @@ import { UserRepo } from "../repos/user.repo";
 import { UserProjectRoleService } from "../services/user-project-role.service";
 import { UserProjectRoleRepo } from "../repos/user-project-role.repo";
 import { DashboardService } from "../services/dashboard.service";
+import { TeamsService, TeamNotFound } from "../services/teams.service";
+import { WorkspaceService } from "../services/workspace.service";
+import { AuthorizationService } from "../services/authorization.service";
+import { WorkspaceInvitesService } from "../services/workspace-invites.service";
+import { PasswordLinksService } from "../services/password-links.service";
 import { FieldConfigService } from "../services/field-config.service";
 import { FieldConfigRepo } from "../repos/field-config.repo";
 import { ForgeService } from "../services/forge.service";
@@ -80,7 +90,7 @@ const SetupStatusSchema = Schema.Struct({
   hasProjects: Schema.Boolean,
   hasUsers: Schema.Boolean,
 });
-const SetupAdminInput = Schema.Struct({ email: Schema.String });
+const SetupAdminInput = Schema.Struct({ email: Schema.String, password: Schema.String });
 const SetupApiKeyResponse = Schema.Struct({ key: Schema.String });
 const SetupSeedResponse = Schema.Struct({ seeded: Schema.Boolean });
 const SetupOkResponse = Schema.Struct({ ok: Schema.Boolean });
@@ -126,6 +136,8 @@ const ProjectSchema = Schema.Struct({
   slug: Schema.String,
   description: Schema.String,
   repos: Schema.Array(ProjectRepoSchema),
+  // owning team (organization id); null = unassigned (superadmin-only until assigned)
+  teamId: Schema.NullOr(Schema.String),
   createdAt: Schema.String,
   updatedAt: Schema.String,
 });
@@ -170,6 +182,12 @@ const ProjectUpdatePayload = Schema.Struct({
   description: Schema.optional(Schema.String),
 });
 
+const SetProjectTeamPayload = Schema.Struct({
+  teamId: Schema.NullOr(Schema.String),
+});
+
+const ProjectIdPath = Schema.Struct({ projectId: Schema.String });
+
 const projectsGroup = HttpApiGroup.make("projects")
   .add(listEndpoint)
   .add(createEndpoint)
@@ -178,6 +196,12 @@ const projectsGroup = HttpApiGroup.make("projects")
   .add(
     HttpApiEndpoint.patch("updateProject", "/projects/:slug")
       .setPath(SlugPath).setPayload(ProjectUpdatePayload).addSuccess(ProjectSchema)
+  )
+  .add(
+    // Team assignment: superadmin any team; team admin own team only.
+    // teamId null = unassigned (superadmin-only until assigned).
+    HttpApiEndpoint.patch("setProjectTeam", "/projects/:projectId/team")
+      .setPath(ProjectIdPath).setPayload(SetProjectTeamPayload).addSuccess(ProjectSchema)
   )
   .add(
     HttpApiEndpoint.get("listRepos", "/projects/:slug/repos")
@@ -322,6 +346,8 @@ const RuntimeSchema = Schema.Struct({
   name: Schema.String,
   provider: Schema.Literal("opencode", "hermes", "command-code"),
   machineId: Schema.NullOr(Schema.String),
+  // owning team; null = global runtime (claims any team's tasks)
+  teamId: Schema.NullOr(Schema.String),
   agent: Schema.String,
   model: Schema.String,
   printLogs: Schema.Boolean,
@@ -501,6 +527,7 @@ const RegisterRuntimeInput = Schema.Struct({
   name: Schema.String,
   provider: Schema.Literal("opencode", "hermes", "command-code"),
   machineId: Schema.String,
+  teamId: Schema.optional(Schema.NullOr(Schema.String)),
   agent: Schema.optional(Schema.String),
   model: Schema.optional(Schema.String),
   hostname: Schema.optional(Schema.String),
@@ -1244,9 +1271,9 @@ const adminGroup = HttpApiGroup.make("admin")
   .add(HttpApiEndpoint.del("removeUserProjectRole", "/admin/users/:id/projects/:projectId")
     .setPath(Schema.Struct({ id: Schema.String, projectId: Schema.String })).addSuccess(Schema.Void, { status: 204 }));
 
-// Self-service — no admin gate: the caller key names the user via x-lxk-user,
-// and the acting user's row is updated (see meLive). Agents with bare keys get
-// NO_USER_CONTEXT: they have no profile to edit.
+// Self-service — no admin gate: the acting user comes from the session cookie
+// or a key-bound user (middleware → AuthIdentity.userId). Agents with bare
+// keys get NO_USER_CONTEXT: they have no profile to edit.
 const UpdateMyNameInput = Schema.Struct({ name: Schema.String });
 
 const meGroup = HttpApiGroup.make("me")
@@ -1270,6 +1297,9 @@ export const LexaApi = HttpApi.make("lexa")
   .add(apiKeysGroup)
   .add(adminGroup)
   .add(meGroup)
+  .add(teamsGroup)
+  .add(workspaceGroup)
+  .add(sessionsGroup)
   .prefix("/api");
 
 const apiLayer = HttpApiBuilder.api(LexaApi);
@@ -1279,37 +1309,6 @@ const apiLayer = HttpApiBuilder.api(LexaApi);
 // from that instead of calling `new URL(req.request.url)` (which throws).
 const searchParams = (req: { request: { originalUrl: string } }): URLSearchParams =>
   URL.parse(req.request.originalUrl)?.searchParams ?? new URLSearchParams();
-
-const respond = <A, E, R>(eff: Effect.Effect<A, E, R>): Effect.Effect<A | HttpServerResponse.HttpServerResponse, never, R> =>
-  eff.pipe(
-    Effect.catchAllCause((cause) => {
-      const failure = Cause.failureOption(cause);
-      if (failure._tag === "Some") {
-        const err = failure.value as { _tag: string } & Record<string, unknown>;
-        const resp = errorResponse(err);
-        const status = errorToStatus(err);
-        // Raw message/cause stay server-side (client response is scrubbed by
-        // errorResponse/errorDetails). Embedded in the message — the HttpApi
-        // handler path drops annotateLogs annotations.
-        const rawMessage = err.message !== undefined ? String(err.message) : "";
-        const rawCause = err.cause instanceof Error ? err.cause.message : err.cause !== undefined ? String(err.cause) : "";
-        const raw = rawCause ? `${rawMessage} (cause: ${rawCause})` : rawMessage;
-        return Effect.logError(`[HTTP] ${status} ${resp.error.code}: ${resp.error.message} [raw: ${raw}]`).pipe(
-          Effect.annotateLogs({ code: resp.error.code, status, ...resp.error.details, rawMessage, rawCause }),
-          Effect.as(HttpServerResponse.unsafeJson(resp, { status })),
-        );
-      }
-      for (const d of Cause.defects(cause)) {
-        console.error("[API] Defect:", d instanceof Error ? d.message : String(d), d instanceof Error ? d.stack : undefined);
-      }
-      return Effect.succeed(
-        HttpServerResponse.unsafeJson(
-          { error: { code: "INTERNAL", message: "Internal error" } },
-          { status: 500 }
-        )
-      );
-    })
-  );
 
 // Admin-only gate: consumes the caller identity resolved by the API
 // middleware (member keys are 403'd there already — this is belt-and-braces
@@ -1435,11 +1434,12 @@ function setupStatus(db: Database) {
   const apiKeyCount = (db.prepare("SELECT COUNT(*) c FROM api_keys").get() as { c: number }).c;
   const projectCount = (db.prepare("SELECT COUNT(*) c FROM projects").get() as { c: number }).c;
   const userCount = (db.prepare("SELECT COUNT(*) c FROM users").get() as { c: number }).c;
-  const adminEmails = [...(process.env.LXK_ADMIN_EMAILS || "").split(",").map((s) => s.trim()).filter(Boolean), ...(getSetting(db, "admin_emails") || "").split(",").map((s) => s.trim()).filter(Boolean)];
+  const superadminCount = (db.prepare("SELECT COUNT(*) c FROM users WHERE role = 'superadmin'").get() as { c: number }).c;
+  const adminEmails = (process.env.LXK_ADMIN_EMAILS || "").split(",").map((s) => s.trim()).filter(Boolean);
   const setupComplete = getSetting(db, "setup_complete") === "1";
   return {
-    configured: setupComplete || (apiKeyCount > 0 && adminEmails.length > 0),
-    needsAdmin: adminEmails.length === 0,
+    configured: setupComplete || (apiKeyCount > 0 && superadminCount > 0),
+    needsAdmin: superadminCount === 0,
     hasApiKey: apiKeyCount > 0,
     hasProjects: projectCount > 0,
     hasUsers: userCount > 0,
@@ -1448,12 +1448,21 @@ function setupStatus(db: Database) {
 
 // The wizard is only for first install: once setup is complete (flag set by
 // /setup/complete) or real projects exist, the mutating endpoints lock.
-// setAdmin is wizard-only (Settings manages admins via env/API-key admin),
-// so this does not break post-install flows. Locked when the wizard
-// completed OR any project exists OR an API key + admin list already exist
-// (an interrupted wizard must not leave key minting open).
+// setAdmin (superadmin account creation) stays open while the env-provided
+// key exists but no superadmin ACCOUNT does — the web wizard is the only way
+// to set the superadmin password (no --admin-password flag, R3).
+function setupAdminLocked(db: Database): boolean {
+  const apiKeyCount = (db.prepare("SELECT COUNT(*) c FROM api_keys").get() as { c: number }).c;
+  const superadminCount = (db.prepare("SELECT COUNT(*) c FROM users WHERE role = 'superadmin'").get() as { c: number }).c;
+  return getSetting(db, "setup_complete") === "1" ||
+    ((db.prepare("SELECT COUNT(*) c FROM projects").get() as { c: number }).c > 0) ||
+    (apiKeyCount > 0 && superadminCount > 0);
+}
+
+// api-key minting / seed / complete lock like before: an instance configured
+// entirely via env (LXK_ADMIN_EMAILS + a key) must not leave key minting open.
 function setupLocked(db: Database): boolean {
-  const adminEmails = [...(process.env.LXK_ADMIN_EMAILS || "").split(",").map((s) => s.trim()).filter(Boolean), ...(getSetting(db, "admin_emails") || "").split(",").map((s) => s.trim()).filter(Boolean)];
+  const adminEmails = (process.env.LXK_ADMIN_EMAILS || "").split(",").map((s) => s.trim()).filter(Boolean);
   const apiKeyCount = (db.prepare("SELECT COUNT(*) c FROM api_keys").get() as { c: number }).c;
   return getSetting(db, "setup_complete") === "1" ||
     ((db.prepare("SELECT COUNT(*) c FROM projects").get() as { c: number }).c > 0) ||
@@ -1471,10 +1480,25 @@ const setupLive = HttpApiBuilder.group(LexaApi, "setup", (handlers) =>
     .handle("setAdmin", (req) =>
       respond(Effect.gen(function* () {
         const db = yield* Sqlite;
-        if (setupLocked(db)) return yield* Effect.fail(new SetupLocked());
-        const existing = getSetting(db, "admin_emails") || "";
-        const emails = [...new Set([...existing.split(",").map((s) => s.trim().toLowerCase()).filter(Boolean), req.payload.email.trim().toLowerCase()])];
-        setSetting(db, "admin_emails", emails.join(","));
+        if (setupAdminLocked(db)) return yield* Effect.fail(new SetupLocked());
+        // Allow-list at provisioning only (Q12): when LXK_ADMIN_EMAILS is set,
+        // only those emails may become superadmin; empty env = bootstrap (first
+        // operator picks freely). Never written back to the setting — env-only.
+        const allowlist = (process.env.LXK_ADMIN_EMAILS || "").split(",").map((s) => s.trim().toLowerCase()).filter(Boolean);
+        const email = req.payload.email.trim().toLowerCase();
+        if (allowlist.length > 0 && !allowlist.includes(email)) {
+          return yield* Effect.fail(new Forbidden({ message: "Email is not in the LXK_ADMIN_EMAILS allow-list" }));
+        }
+        const existing = db.prepare("SELECT id FROM users WHERE email = ?").get(email) as { id: string } | null;
+        if (!existing) {
+          yield* Effect.tryPromise(() =>
+            auth.api.createUser({
+              body: { email, password: req.payload.password, name: email.split("@")[0] || email, data: { role: "superadmin" } },
+            })
+          ).pipe(
+            Effect.mapError(() => new Forbidden({ message: "Superadmin account creation failed" }))
+          );
+        }
         return { ok: true as const };
       }))
     )
@@ -1537,6 +1561,30 @@ const projectsLive = HttpApiBuilder.group(LexaApi, "projects", (handlers) =>
         const service = yield* ProjectService;
         const project = yield* service.findBySlug(req.path.slug);
         return yield* withRepos(project);
+      }))
+    )
+    .handle("setProjectTeam", (req) =>
+      respond(Effect.gen(function* () {
+        const identity = yield* AuthIdentity;
+        const projectService = yield* ProjectService;
+        const teams = yield* TeamsService;
+        const authz = yield* AuthorizationService;
+        yield* projectService.findById(req.path.projectId); // 404 oracle
+        const teamId = req.payload.teamId;
+        if (teamId === null) {
+          // Unassigning = superadmin-only until assigned
+          if (identity.role !== "admin") return yield* Effect.fail(new Forbidden({ message: "Admin role required" }));
+        } else {
+          const team = yield* teams.findById(teamId);
+          if (!team) return yield* Effect.fail(new TeamNotFound({ teamId }));
+          if (identity.role !== "admin") {
+            if (!identity.userId) return yield* Effect.fail(new Forbidden({ message: "Admin role required" }));
+            const ok = yield* authz.canManageTeam(identity.userId, teamId);
+            if (!ok) return yield* Effect.fail(new Forbidden({ message: "Admin role required" }));
+          }
+        }
+        const updated = yield* projectService.setTeam(req.path.projectId, teamId);
+        return yield* withRepos(updated);
       }))
     )
     .handle("listMembers", (req) =>
@@ -1765,6 +1813,7 @@ const forgeLive = HttpApiBuilder.group(LexaApi, "forge", (handlers) =>
           name: req.payload.name,
           provider: req.payload.provider,
           machineId: req.payload.machineId,
+          teamId: req.payload.teamId ?? null,
           agent: req.payload.agent?.trim() || "build",
           model: req.payload.model?.trim() || "",
           hostname: req.payload.hostname ?? "",
@@ -1961,10 +2010,26 @@ const forgeLive = HttpApiBuilder.group(LexaApi, "forge", (handlers) =>
         return { data: machines };
       }))
     )
-    .handle("listRuntimes", () =>
+    .handle("listRuntimes", (req) =>
       respond(Effect.gen(function* () {
+        const identity = yield* AuthIdentity;
         const service = yield* ForgeService;
-        const runtimes = yield* service.listRuntimes();
+        let runtimes = yield* service.listRuntimes();
+        // Team gating: team admin sees own-team + global runtimes; keys and
+        // superadmin sessions see all. ?teamId= narrows the result.
+        const teamFilter = searchParams(req).get("teamId");
+        if (identity.role !== "admin") {
+          if (!identity.userId) return yield* Effect.fail(new Forbidden({ message: "Admin role required" }));
+          const authz = yield* AuthorizationService;
+          const visible: (typeof runtimes)[number][] = [];
+          for (const r of runtimes) {
+            if (r.teamId === null || (yield* authz.isTeamAdmin(identity.userId, r.teamId))) visible.push(r);
+          }
+          runtimes = visible;
+        }
+        if (teamFilter) {
+          runtimes = runtimes.filter((r) => r.teamId === teamFilter);
+        }
         return { data: runtimes };
       }))
     )
@@ -2542,7 +2607,16 @@ const dashboardLive = HttpApiBuilder.group(LexaApi, "dashboard", (handlers) =>
   handlers.handle("getDashboard", () =>
     respond(Effect.gen(function* () {
       const service = yield* DashboardService;
-      return yield* service.getDashboard();
+      const dash = yield* service.getDashboard();
+      // The shared ProjectHealth type is team-free; the wire Project carries
+      // teamId (the domain project already has it from the row mapping).
+      return {
+        ...dash,
+        projects: dash.projects.map((ph) => ({
+          ...ph,
+          project: { ...ph.project, teamId: (ph.project as unknown as { teamId?: string | null }).teamId ?? null },
+        })),
+      };
     }))
   )
 );
@@ -2848,9 +2922,9 @@ const adminLive = HttpApiBuilder.group(LexaApi, "admin", (handlers) =>
     )
 );
 
-// Self-service profile: the browser's x-lxk-user header (resolved by the
-// middleware into AuthIdentity.userId) names the acting user. Bare API keys
-// have no user context — agents have no profile to edit.
+// Self-service profile: the acting user comes from the session cookie (or a
+// key-bound user), resolved by the middleware into AuthIdentity.userId. Bare
+// API keys have no user context — agents have no profile to edit.
 const meLive = HttpApiBuilder.group(LexaApi, "me", (handlers) =>
   handlers
     .handle("updateMe", (req) =>
@@ -2870,11 +2944,11 @@ const meLive = HttpApiBuilder.group(LexaApi, "me", (handlers) =>
     )
 );
 
-function withRepos(p: DomainProject): Effect.Effect<Project, DbError, ProjectReposRepo> {
+function withRepos(p: DomainProject): Effect.Effect<Project & { teamId: string | null }, DbError, ProjectReposRepo> {
   return Effect.gen(function* () {
     const reposRepo = yield* ProjectReposRepo;
     const repos = yield* reposRepo.listByProject(p.id);
-    return { ...p, repos };
+    return { ...p, repos, teamId: (p as unknown as { teamId?: string | null }).teamId ?? null };
   });
 }
 
@@ -2926,6 +3000,7 @@ export function createApiHandler(dbPath: string) {
   const serviceLayer = buildServiceLayer();
   const handlerLayer = Layer.mergeAll(
     healthLive, setupLive, projectsLive, columnsLive, swimlanesLive, fieldConfigLive, forgeLive, taskLinksLive, tasksLive, boardLive, wikiLive, apiKeysLive, adminLive, meLive, dashboardLive,
+    createTeamsLive(LexaApi), createWorkspaceLive(LexaApi), createSessionsLive(LexaApi),
   ).pipe(Layer.provide(Layer.provide(serviceLayer, Layer.mergeAll(dbLayer, LoggerLayer))), Layer.provide(dbLayer));
   const merged = Layer.mergeAll(apiLayer, handlerLayer);
   const finalLayer = Layer.provide(merged, createApiMiddleware(db, dbPath));
@@ -2966,6 +3041,8 @@ function buildServiceLayer() {
     WebhookEventRepo.Default,
     GitHubClient.Default, GitHubService.Default,
     DashboardService.Default,
+    TeamsService.Default, WorkspaceService.Default, AuthorizationService.Default,
+    WorkspaceInvitesService.Default, PasswordLinksService.Default,
   );
 }
 

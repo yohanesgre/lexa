@@ -5,12 +5,11 @@ import { createHash, randomBytes } from "node:crypto";
 import { Database } from "bun:sqlite";
 import { createApiHandler, createWebhookHandler, createWebhookVerifier } from "./api/http";
 import { createMcpHandler } from "./mcp/server";
-import { findOrCreateUser, findOrCreateUserByIdentity, adminEmails } from "./api/auth";
-import { verifyAccessAssertion } from "./api/access-auth";
 import { getSetting, setSetting, mirrorSettingsFromEnv } from "./db/settings";
 import { apiRateLimiter, isPrivateIp, syncRateLimitFromDb } from "./api/rate-limit";
 import { syncGitHubConfigFromDb } from "./github/client";
 import { MAX_API_BODY, X_LEXA_REMOTE_IP } from "./api/limits";
+import { auth, loginLimiter } from "./auth";
 import type { Server } from "bun";
 
 let ssrFetch: ((req: Request) => Promise<Response>) | null = null;
@@ -71,10 +70,6 @@ if (process.env.LXK_SEED_DEV === "1") {
   seedDevData(DATABASE_PATH);
 }
 
-if (!process.env.LXK_ACCESS_AUD) {
-  console.warn("Access JWT verification disabled (LXK_ACCESS_AUD unset) — Cf-Access-* headers trusted as-is");
-}
-
 const apiHandlerRaw = createApiHandler(DATABASE_PATH) as unknown as { handler?: (req: Request) => Promise<Response> } | ((req: Request) => Promise<Response>);
 const apiHandler: (req: Request) => Promise<Response> = typeof apiHandlerRaw === "function" ? apiHandlerRaw : apiHandlerRaw.handler!;
 const mcpHandler = createMcpHandler(DATABASE_PATH);
@@ -120,14 +115,18 @@ async function readBodyWithLimit(req: Request, maxBytes: number): Promise<{ ok: 
 
 // Instances configured entirely via env (LXK_ADMIN_EMAILS + a key, no web
 // wizard) would leave /api/setup/* key-minting unlocked forever. Lock it at
-// boot: setup_complete=1 iff a key exists AND merged admin emails are set.
+// boot: setup_complete=1 iff a key exists AND a superadmin account exists.
+// (LXK_ADMIN_EMAILS alone no longer counts — the superadmin password can only
+// be set through the web wizard, so it must stay open until the account is
+// created; the allow-list gates who may become superadmin.)
 function autoLockSetupIfConfigured(dbPath: string) {
   const db = new Database(dbPath);
   try {
     if (getSetting(db, "setup_complete") === "1") return;
     const apiKeyCount = (db.prepare("SELECT COUNT(*) c FROM api_keys").get() as { c: number } | null)?.c ?? 0;
     if (apiKeyCount === 0) return;
-    if (adminEmails(db).length === 0) return;
+    const superadminCount = (db.prepare("SELECT COUNT(*) c FROM users WHERE role = 'superadmin'").get() as { c: number } | null)?.c ?? 0;
+    if (superadminCount === 0) return;
     setSetting(db, "setup_complete", "1");
     console.log("Setup auto-locked (configured via env)");
   } finally {
@@ -176,6 +175,37 @@ const server: Server<unknown> = Bun.serve({
     }
 
     if (url.pathname.startsWith("/api/")) {
+      // Better Auth — mounted BEFORE the API-key middleware. The auth handler
+      // is its own auth: keyless by design (session cookies). Login rate
+      // limiting (R17): 5 failed attempts / 60s per email, then a 15-minute
+      // lockout — small in-process limiter (1.6.27 has no rateLimit plugin;
+      // memory storage is fine for the single server process). Counted on
+      // sign-in only; successes reset the budget; the per-IP /api limiter is
+      // untouched.
+      if (url.pathname.startsWith("/api/auth/")) {
+        if (url.pathname === "/api/auth/sign-in/email" && req.method === "POST") {
+          let email = "";
+          try {
+            email = String(((await req.clone().json()) as { email?: unknown })?.email ?? "");
+          } catch {}
+          if (email) {
+            const verdict = loginLimiter.check(email);
+            if (!verdict.ok) {
+              return withSecurityHeaders(
+                new Response(
+                  JSON.stringify({ error: { code: "RATE_LIMITED", message: "Too many login attempts — try again later" } }),
+                  { status: 429, headers: { "Content-Type": "application/json", "Retry-After": String(verdict.retryAfterSec) } }
+                )
+              );
+            }
+            const res = await auth.handler(req);
+            if (res.status === 401) loginLimiter.recordFailure(email);
+            else if (res.status === 200) loginLimiter.recordSuccess(email);
+            return withSecurityHeaders(res);
+          }
+        }
+        return withSecurityHeaders(await auth.handler(req));
+      }
       // GitHub webhook: HMAC-SHA-256 is the auth (no API-key middleware).
       // Signature verified over the RAW body, constant-time, BEFORE any
       // parsing or processing — mismatch → 401. Ack 200 immediately, then
@@ -223,17 +253,6 @@ const server: Server<unknown> = Bun.serve({
       }
     }
 
-    let user: ReturnType<typeof findOrCreateUser>;
-    if (process.env.LXK_ACCESS_AUD) {
-      const claims = await verifyAccessAssertion(req);
-      if (!claims) {
-        return withSecurityHeaders(new Response(JSON.stringify({ error: { code: "UNAUTHORIZED", message: "Invalid Access assertion" } }), { status: 401, headers: { "Content-Type": "application/json" } }));
-      }
-      user = findOrCreateUserByIdentity(claims.email, claims.name, DATABASE_PATH);
-    } else {
-      user = findOrCreateUser(req, DATABASE_PATH);
-    }
-
     if (url.pathname === "/health") {
       return new Response(JSON.stringify({ ok: true }), {
         headers: { "Content-Type": "application/json" },
@@ -260,40 +279,14 @@ const server: Server<unknown> = Bun.serve({
       // Inject the server's current API key into the HTML so the browser can
       // authenticate without a build-time baked key. This keeps :3000 working
       // even after `bun run setup` rotates the key in .env (the built bundle
-      // would otherwise carry a stale key).
+      // would otherwise carry a stale key). (The x-lxk-user / lxk-logout meta
+      // tags are removed with the Cloudflare Access flow — browser identity
+      // comes from the session cookie.)
       if (process.env.LXK_API_KEY && res.headers.get("content-type")?.includes("text/html")) {
         const html = await res.text();
-        const userMeta = user
-          ? (() => {
-              // The serialized JSON goes into a single-quoted attribute: JSON
-              // escapes `"` but not `'` — an Access-controlled display name
-              // could otherwise break the attribute and inject markup into a
-              // page that carries the API key meta (Access user → API-key
-              // holder). Escape `&` first so the introduced entities survive;
-              // the browser decodes them at attribute-parse time, so the
-              // client's JSON.parse still sees the original email/name.
-              const userJson = JSON.stringify({ email: user.email, name: user.name, role: user.role, createdAt: user.createdAt, lastSeen: user.lastSeen })
-                .replace(/&/g, "&amp;")
-                .replace(/'/g, "&#39;")
-                .replace(/</g, "&lt;");
-              return `<meta name="lxk-user" content='${userJson}'>`;
-            })()
-          : "";
-        // Sign-out target: Cloudflare Access logout on the app's own
-        // hostname. Only emitted when the team subdomain is configured
-        // (LXK_ACCESS_TEAM) — local dev has no Access session, so the client
-        // hides Sign out entirely. The team-domain logout endpoint
-        // (<team>.cloudflareaccess.com) can't clear the CF_Authorization
-        // cookie Access scopes to the app hostname for self-hosted apps —
-        // /cdn-cgi/access/logout on the app hostname deletes it.
-        const accessTeam = process.env.LXK_ACCESS_TEAM || "";
-        const appHost = (req.headers.get("host") || "").replace(/[^a-zA-Z0-9.:-]/g, "");
-        const logoutMeta = accessTeam && appHost
-          ? `<meta name="lxk-logout" content="https://${appHost}/cdn-cgi/access/logout">`
-          : "";
         const injected = html.replace(
           "<head>",
-          `<head><meta name="lxk-api-key" content="${process.env.LXK_API_KEY}">${userMeta}${logoutMeta}`
+          `<head><meta name="lxk-api-key" content="${process.env.LXK_API_KEY}">`
         );
         // The key-bearing page must never be cached (browser or CDN).
         const injectedHeaders = new Headers(res.headers);

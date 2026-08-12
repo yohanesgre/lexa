@@ -1,6 +1,6 @@
 import { Effect } from "effect";
 import { Sqlite, queryAll, queryFirst, run, withTx, DbError, RowNotFound, ConstraintViolation } from "../db/database";
-import { RuntimeRow, ForgeTaskRow, ForgeTaskLogRow, ForgeAgentRow, ForgeSkillRow, rowToRuntime, rowToForgeTask, rowToForgeTaskLog, rowToForgeAgent, rowToForgeSkill } from "../../shared/db";
+import { RuntimeRow, RuntimeWithTeam, ForgeTaskRow, ForgeTaskLogRow, ForgeAgentRow, ForgeSkillRow, rowToRuntime, rowToForgeTask, rowToForgeTaskLog, rowToForgeAgent, rowToForgeSkill } from "../../shared/db";
 import type { Runtime, ForgeTask, ForgeTaskLog, ForgeProvider, ForgeTaskStatus, ForgeAgent, ForgeSkill } from "../../shared/types";
 
 // Hard cap for a task's activity log: a verbose agent run can emit hundreds
@@ -33,16 +33,17 @@ export class ForgeRepo extends Effect.Service<ForgeRepo>()("Lexa/ForgeRepo", {
 
     return {
       // ── Runtimes ──
-      registerRuntime: (input: { id: string; name: string; provider: ForgeProvider; machineId: string; agent: string; model: string; hostname: string }): Effect.Effect<Runtime, ConstraintViolation | DbError> =>
+      registerRuntime: (input: { id: string; name: string; provider: ForgeProvider; machineId: string; agent: string; model: string; hostname: string; teamId: string | null }): Effect.Effect<RuntimeWithTeam, ConstraintViolation | DbError> =>
         Effect.gen(function* () {
           yield* run(
             db,
-            `INSERT INTO runtimes (id, name, provider, machine_id, agent, model, status, hostname, last_seen)
-             VALUES (?, ?, ?, ?, ?, ?, 'online', ?, datetime('now'))
+            `INSERT INTO runtimes (id, name, provider, machine_id, team_id, agent, model, status, hostname, last_seen)
+             VALUES (?, ?, ?, ?, ?, ?, ?, 'online', ?, datetime('now'))
              ON CONFLICT(id) DO UPDATE SET
                name = excluded.name,
                provider = excluded.provider,
                machine_id = excluded.machine_id,
+               team_id = excluded.team_id,
                status = 'online',
                hostname = excluded.hostname,
                last_seen = datetime('now')`,
@@ -50,6 +51,7 @@ export class ForgeRepo extends Effect.Service<ForgeRepo>()("Lexa/ForgeRepo", {
             input.name,
             input.provider,
             input.machineId,
+            input.teamId,
             input.agent,
             input.model,
             input.hostname
@@ -70,7 +72,7 @@ export class ForgeRepo extends Effect.Service<ForgeRepo>()("Lexa/ForgeRepo", {
           Effect.map(() => undefined)
         ),
 
-      findRuntimeById: (id: string): Effect.Effect<Runtime, RowNotFound | DbError> =>
+      findRuntimeById: (id: string): Effect.Effect<RuntimeWithTeam, RowNotFound | DbError> =>
         queryFirst<RuntimeRow>(db, `SELECT * FROM runtimes WHERE id = ?`, id).pipe(Effect.map(rowToRuntime)),
 
       deleteRuntime: (id: string): Effect.Effect<void, RowNotFound | ConstraintViolation | DbError> =>
@@ -109,7 +111,7 @@ export class ForgeRepo extends Effect.Service<ForgeRepo>()("Lexa/ForgeRepo", {
           Effect.map(() => undefined)
         ),
 
-      updateRuntime: (id: string, patch: { name?: string; provider?: ForgeProvider; agent?: string; model?: string; printLogs?: boolean; logLevel?: string; extraArgs?: string[] }): Effect.Effect<Runtime, RowNotFound | ConstraintViolation | DbError> =>
+      updateRuntime: (id: string, patch: { name?: string; provider?: ForgeProvider; agent?: string; model?: string; printLogs?: boolean; logLevel?: string; extraArgs?: string[] }): Effect.Effect<RuntimeWithTeam, RowNotFound | ConstraintViolation | DbError> =>
         Effect.gen(function* () {
           const sets: string[] = [];
           const params: unknown[] = [];
@@ -174,7 +176,7 @@ export class ForgeRepo extends Effect.Service<ForgeRepo>()("Lexa/ForgeRepo", {
           input.agentCli
         ).pipe(Effect.map(() => undefined)),
 
-      listRuntimes: (): Effect.Effect<Runtime[], DbError> =>
+      listRuntimes: (): Effect.Effect<RuntimeWithTeam[], DbError> =>
         queryAll<RuntimeRow>(db, `SELECT * FROM runtimes ORDER BY created_at`).pipe(
           Effect.map((rows) => rows.map(rowToRuntime))
         ),
@@ -327,16 +329,22 @@ export class ForgeRepo extends Effect.Service<ForgeRepo>()("Lexa/ForgeRepo", {
       // Claim a queued task for a runtime. A task pinned to a specific runtime
       // (runtime_id set at create) may ONLY be claimed by that runtime.
       // Unpinned tasks (runtime_id null) are claimable by anyone, FIFO.
-      claimNextTask: (runtimeId: string): Effect.Effect<ForgeTask | null, ConstraintViolation | DbError | RowNotFound> =>
+      // Team scoping: a runtime scoped to a team (team_id set) may only claim
+      // tasks whose project belongs to that team; global runtimes (team_id
+      // null) claim any team's tasks (claim rule: team_id IS NULL OR = project.team_id).
+      claimNextTask: (runtimeId: string, teamId: string | null): Effect.Effect<ForgeTask | null, ConstraintViolation | DbError | RowNotFound> =>
         Effect.gen(function* () {
           const rows = yield* queryAll<ForgeTaskRow>(
             db,
             `${TASK_SELECT}
              WHERE ft.status = 'queued'
                AND (ft.runtime_id IS NULL OR ft.runtime_id = ?)
+               AND (? IS NULL OR (SELECT p.team_id FROM projects p WHERE p.id = ft.project_id) = ?)
              ORDER BY (ft.runtime_id = ?) DESC, ft.created_at
              LIMIT 1`,
             runtimeId,
+            teamId,
+            teamId,
             runtimeId
           );
           const task = rows[0];

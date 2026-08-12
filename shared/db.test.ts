@@ -6,9 +6,14 @@ const NOW = "2026-07-29T12:00:00Z";
 
 describe("rowToProject", () => {
   it("maps snake_case to camelCase", () => {
-    const row: ProjectRow = { id: "p1", name: "Test", slug: "test", description: "desc", created_at: NOW, updated_at: NOW };
+    const row: ProjectRow = { id: "p1", name: "Test", slug: "test", description: "desc", created_at: NOW, updated_at: NOW, team_id: null };
     const p = rowToProject(row);
-    expect(p).toEqual({ id: "p1", name: "Test", slug: "test", description: "desc", createdAt: NOW, updatedAt: NOW });
+    expect(p).toEqual({ id: "p1", name: "Test", slug: "test", description: "desc", createdAt: NOW, updatedAt: NOW, teamId: null });
+  });
+
+  it("maps team_id", () => {
+    const p = rowToProject({ id: "p1", name: "Test", slug: "test", description: "desc", created_at: NOW, updated_at: NOW, team_id: "team-1" });
+    expect(p.teamId).toBe("team-1");
   });
 });
 

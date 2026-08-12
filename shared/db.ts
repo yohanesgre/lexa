@@ -1,7 +1,13 @@
 // Database row types — mirror SQL column names exactly (snake_case).
 // Used by server repos/services only. Frontend never imports this file.
 
-import type { TipTapDoc, ISODate, RuntimeAgent, RuntimeModel, ActorKind, ActivityType, ActivityEvent, TaskComment, Swimlane, DomainProject } from "./types";
+import type { TipTapDoc, ISODate, RuntimeAgent, RuntimeModel, ActorKind, ActivityType, ActivityEvent, TaskComment, Swimlane, DomainProject, Runtime } from "./types";
+
+// Runtime with the owning team exposed (wire-only — the shared Runtime type
+// stays team-free per the contract; the FE reads teamId off the wire).
+export interface RuntimeWithTeam extends Runtime {
+  teamId: string | null;
+}
 
 export interface PriorityOptionRow {
   id: string;
@@ -37,9 +43,10 @@ export interface ProjectRow {
   description: string;
   created_at: string;
   updated_at: string;
+  team_id: string | null;
 }
 
-export function rowToProject(row: ProjectRow): DomainProject {
+export function rowToProject(row: ProjectRow): DomainProject & { teamId: string | null } {
   return {
     id: row.id,
     name: row.name,
@@ -47,6 +54,7 @@ export function rowToProject(row: ProjectRow): DomainProject {
     description: row.description,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
+    teamId: row.team_id ?? null,
   };
 }
 
@@ -301,6 +309,7 @@ export interface RuntimeRow {
   name: string;
   provider: "opencode" | "hermes" | "command-code";
   machine_id: string | null;
+  team_id: string | null;
   agent: string;
   model: string;
   print_logs: number;
@@ -354,14 +363,13 @@ function parseAgentsCatalog(raw: string | null): RuntimeAgent[] {
   }
 }
 
-export function rowToRuntime(row: RuntimeRow): {
-  id: string; name: string; provider: "opencode" | "hermes" | "command-code"; machineId: string | null; agent: string; model: string; printLogs: boolean; logLevel: "" | "DEBUG" | "INFO" | "WARN" | "ERROR"; extraArgs: string[]; modelsCatalog: RuntimeModel[]; agentsCatalog: RuntimeAgent[]; status: "online" | "offline"; mcpConnected: boolean; lastError: string | null; hostname: string; lastSeen: string | null; createdAt: string;
-} {
+export function rowToRuntime(row: RuntimeRow): RuntimeWithTeam {
   return {
     id: row.id,
     name: row.name,
     provider: row.provider,
     machineId: row.machine_id ?? null,
+    teamId: row.team_id ?? null,
     agent: row.agent ?? "",
     model: row.model,
     printLogs: (row.print_logs ?? 0) === 1,

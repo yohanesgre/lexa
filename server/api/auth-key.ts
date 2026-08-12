@@ -1,6 +1,5 @@
 import { createHash, timingSafeEqual } from "node:crypto";
 import { Database } from "bun:sqlite";
-import { findOrCreateUserByIdentity } from "./auth";
 
 export interface ApiKeyIdentity {
   keyId: string;
@@ -13,11 +12,8 @@ export interface ApiKeyIdentity {
 // Resolve the caller behind an Authorization header against a shared
 // connection: key → user (null user means a setup/seeded key — admin).
 // Mirrors the MCP auth rule so REST and MCP enforce the same role model.
-// Attribution enrichment: the browser sends x-lxk-user (the Cloudflare
-// Access email) so activity rows can be attributed to the acting user —
-// role NEVER comes from the header (authz stays key-based; the header only
-// names the actor. Spoofable by key holders, accepted: the key already
-// grants full access).
+// Attribution comes from the key owner only — the x-lxk-user header is
+// removed (R5); browser calls authenticate via session cookie instead.
 export function resolveApiKeyIdentity(authHeader: string, headers: Headers, db: Database, dbPath: string): ApiKeyIdentity | null {
   if (!authHeader.startsWith("Bearer ")) return null;
   const key = authHeader.slice(7);
@@ -33,18 +29,12 @@ export function resolveApiKeyIdentity(authHeader: string, headers: Headers, db: 
     let userName: string | null = null;
     let role: "admin" | "member" = "admin";
     if (row.user_id) {
-      const user = db.prepare("SELECT role FROM users WHERE id = ?").get(row.user_id) as { role: "admin" | "member" } | undefined;
+      const user = db.prepare("SELECT role FROM users WHERE id = ?").get(row.user_id) as { role: "superadmin" | "member" } | undefined;
       if (!user) return null;
-      role = user.role;
+      role = user.role === "superadmin" ? "admin" : "member";
       userId = row.user_id;
-    }
-    const headerEmail = headers.get("x-lxk-user")?.trim() ?? "";
-    if (headerEmail) {
-      const user = findOrCreateUserByIdentity(headerEmail, headerEmail.split("@")[0], dbPath);
-      if (user) {
-        userId = user.id;
-        userName = user.name;
-      }
+      const named = db.prepare("SELECT name FROM users WHERE id = ?").get(row.user_id) as { name: string } | undefined;
+      userName = named?.name ?? null;
     }
     return { keyId: row.id, keyName: row.name, userId, userName, role };
   } catch {

@@ -30,13 +30,13 @@ export class ProjectService extends Effect.Service<ProjectService>()("Lexa/Proje
       name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 60) || "project";
 
     return {
-      create: (input: { name: string; slug?: string; description?: string }): Effect.Effect<DomainProject, SlugTaken | DbError | RowNotFound> => {
+      create: (input: { name: string; slug?: string; description?: string; teamId?: string | null }): Effect.Effect<DomainProject, SlugTaken | DbError | RowNotFound> => {
         const slug = input.slug || slugify(input.name);
         const id = crypto.randomUUID();
         return withTx(
           db,
           repo
-            .create({ id, name: input.name, slug, description: input.description ?? "" })
+            .create({ id, name: input.name, slug, description: input.description ?? "", teamId: input.teamId ?? null })
             .pipe(
               Effect.flatMap(() => repo.findBySlug(slug)),
               Effect.tap((project) =>
@@ -86,6 +86,13 @@ export class ProjectService extends Effect.Service<ProjectService>()("Lexa/Proje
             Effect.catchTag("ConstraintViolation", () => new SlugTaken({ slug }))
           );
         }),
+
+      // Team assignment (superadmin any team / team admin own team; null =
+      // unassigned). The gate lives in the API layer — this is the data op.
+      setTeam: (projectId: string, teamId: string | null): Effect.Effect<DomainProject, ProjectNotFound | DbError | ConstraintViolation> =>
+        repo.update(projectId, { teamId }).pipe(
+          Effect.catchTag("RowNotFound", () => new ProjectNotFound({ identifier: projectId }))
+        ),
 
       listRepos: (slug: string): Effect.Effect<ProjectRepoType[], ProjectNotFound | DbError> =>
         Effect.gen(function* () {

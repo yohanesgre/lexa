@@ -43,8 +43,9 @@ INSERT INTO type_options (id, project_id, label, color, position) VALUES ('tp-bu
 INSERT INTO tasks (id, project_id, column_id, swimlane_id, title, position, priority, type) VALUES ('t1', 'p1', 'c1', 's1', 'Task One', 'a0', 'pr-high', 'tp-feature');
 INSERT INTO tasks (id, project_id, column_id, swimlane_id, title, position, priority, type) VALUES ('t2', 'p1', 'c1', 's1', 'Task Two', 'a1', 'pr-high', 'tp-feature');
 INSERT INTO users (id, email, name, role) VALUES ('u1', 'member@lexa.test', 'Member', 'member');
-INSERT INTO users (id, email, name, role) VALUES ('u2', 'admin@lexa.test', 'Admin', 'admin');
+INSERT INTO users (id, email, name, role) VALUES ('u2', 'admin@lexa.test', 'Admin', 'superadmin');
 INSERT INTO user_project_roles (user_id, role, project_id) VALUES ('u1', 'member', 'p1');
+INSERT INTO organization (id, name, slug, createdAt) VALUES ('team-1', 'Team One', 'team-1', '2026-01-01T00:00:00.000Z');
 INSERT INTO api_keys (id, name, key_hash) VALUES ('k-admin', 'admin', '${adminHash}');
 INSERT INTO api_keys (id, name, key_hash, user_id) VALUES ('k-member', 'member', '${memberHash}', 'u1');
 `);
@@ -73,10 +74,10 @@ function toolError(body: any): any {
 }
 
 describe("MCP server", () => {
-  it("tools/list returns all 39 tools", async () => {
+  it("tools/list returns all tools", async () => {
     const { status, body } = await call("tools/list", {});
     expect(status).toBe(200);
-    expect(body.result.tools).toHaveLength(43);
+    expect(body.result.tools).toHaveLength(42);
   });
 
   it("valid admin key → create_project works", async () => {
@@ -87,6 +88,32 @@ describe("MCP server", () => {
     expect(status).toBe(200);
     expect(body.result.isError).toBeUndefined();
     expect(JSON.parse(body.result.content[0].text).slug).toBe("new-proj");
+  });
+
+  it("create_project with a team slug assigns projects.team_id", async () => {
+    const { status, body } = await call("tools/call", {
+      name: "create_project",
+      arguments: { name: "Scoped Project", slug: "scoped-proj", team: "team-1" },
+    });
+    expect(status).toBe(200);
+    expect(body.result.isError).toBeUndefined();
+    expect(JSON.parse(body.result.content[0].text).slug).toBe("scoped-proj");
+    const db = new Database(join(dir, "test.db"));
+    const row = db.prepare("SELECT team_id FROM projects WHERE slug = 'scoped-proj'").get() as { team_id: string | null };
+    db.close();
+    expect(row.team_id).toBe("team-1");
+  });
+
+  it("create_project with an unknown team slug → INVALID_TEAM + details.availableTeams", async () => {
+    const { status, body } = await call("tools/call", {
+      name: "create_project",
+      arguments: { name: "Ghost", team: "no-such-team" },
+    });
+    expect(status).toBe(200);
+    expect(body.result.isError).toBe(true);
+    const err = toolError(body);
+    expect(err.code).toBe("INVALID_TEAM");
+    expect(err.details.availableTeams).toEqual(["team-1"]);
   });
 
   it("missing/malformed key → HTTP 401 with JSON-RPC -32001", async () => {

@@ -19,6 +19,7 @@ import { Route as SlugSettingsRouteImport } from './routes/$slug/settings'
 import { Route as SlugTasksRouteImport } from './routes/$slug/tasks'
 import { Route as SlugWikiIndexRouteImport } from './routes/$slug/wiki/index'
 import { Route as SlugWikiPageSlugRouteImport } from './routes/$slug/wiki/$pageSlug'
+import { Route as ApiAuthSplatRouteImport } from './routes/api.auth.$'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -70,6 +71,11 @@ const SlugWikiPageSlugRoute = SlugWikiPageSlugRouteImport.update({
   path: '/$slug/wiki/$pageSlug',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiAuthSplatRoute = ApiAuthSplatRouteImport.update({
+  id: '/api/auth/$',
+  path: '/api/auth/$',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -81,6 +87,7 @@ export interface FileRoutesByFullPath {
   '/$slug/tasks': typeof SlugTasksRoute
   '/$slug/': typeof SlugIndexRoute
   '/$slug/wiki/$pageSlug': typeof SlugWikiPageSlugRoute
+  '/api/auth/$': typeof ApiAuthSplatRoute
   '/$slug/wiki/': typeof SlugWikiIndexRoute
 }
 export interface FileRoutesByTo {
@@ -93,6 +100,7 @@ export interface FileRoutesByTo {
   '/$slug/tasks': typeof SlugTasksRoute
   '/$slug': typeof SlugIndexRoute
   '/$slug/wiki/$pageSlug': typeof SlugWikiPageSlugRoute
+  '/api/auth/$': typeof ApiAuthSplatRoute
   '/$slug/wiki': typeof SlugWikiIndexRoute
 }
 export interface FileRoutesById {
@@ -106,6 +114,7 @@ export interface FileRoutesById {
   '/$slug/tasks': typeof SlugTasksRoute
   '/$slug/': typeof SlugIndexRoute
   '/$slug/wiki/$pageSlug': typeof SlugWikiPageSlugRoute
+  '/api/auth/$': typeof ApiAuthSplatRoute
   '/$slug/wiki/': typeof SlugWikiIndexRoute
 }
 export interface FileRouteTypes {
@@ -120,6 +129,7 @@ export interface FileRouteTypes {
     | '/$slug/tasks'
     | '/$slug/'
     | '/$slug/wiki/$pageSlug'
+    | '/api/auth/$'
     | '/$slug/wiki/'
   fileRoutesByTo: FileRoutesByTo
   to:
@@ -132,6 +142,7 @@ export interface FileRouteTypes {
     | '/$slug/tasks'
     | '/$slug'
     | '/$slug/wiki/$pageSlug'
+    | '/api/auth/$'
     | '/$slug/wiki'
   id:
     | '__root__'
@@ -144,6 +155,7 @@ export interface FileRouteTypes {
     | '/$slug/tasks'
     | '/$slug/'
     | '/$slug/wiki/$pageSlug'
+    | '/api/auth/$'
     | '/$slug/wiki/'
   fileRoutesById: FileRoutesById
 }
@@ -157,6 +169,7 @@ export interface RootRouteChildren {
   SlugTasksRoute: typeof SlugTasksRoute
   SlugIndexRoute: typeof SlugIndexRoute
   SlugWikiPageSlugRoute: typeof SlugWikiPageSlugRoute
+  ApiAuthSplatRoute: typeof ApiAuthSplatRoute
   SlugWikiIndexRoute: typeof SlugWikiIndexRoute
 }
 
@@ -232,6 +245,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof SlugWikiPageSlugRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/auth/$': {
+      id: '/api/auth/$'
+      path: '/api/auth/$'
+      fullPath: '/api/auth/$'
+      preLoaderRoute: typeof ApiAuthSplatRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
@@ -245,6 +265,7 @@ const rootRouteChildren: RootRouteChildren = {
   SlugTasksRoute: SlugTasksRoute,
   SlugIndexRoute: SlugIndexRoute,
   SlugWikiPageSlugRoute: SlugWikiPageSlugRoute,
+  ApiAuthSplatRoute: ApiAuthSplatRoute,
   SlugWikiIndexRoute: SlugWikiIndexRoute,
 }
 export const routeTree = rootRouteImport
