@@ -9,6 +9,54 @@ The CLI version is INDEPENDENT of the web app version (see AGENTS.md):
 The version lives in `cli/package.json` — `publish-cli.yml` verifies the tag
 matches it before compiling.
 
+## [0.3.0] - 2026-08-12
+
+### Added
+
+- **Host-keyed state layout** — one `~/.lexa/` root grouped per server host
+  (`~/.lexa/<host>/`: config.json, machine-id/secret, runtimes/, projects/,
+  projects.json, runs/, deploy/). State follows the server, not the binary:
+  the same host can serve prod + staging + dev listeners/daemons with zero
+  cross-talk. Host normalization (`normalizeHost`) strips schemes, lowercases,
+  drops default ports (80/443) while keeping explicit ones, maps loopback
+  (localhost, 127.0.0.0/8, ::1) to `localhost`, and strips IPv6 brackets.
+- **`machine listen --url <base>`** — the listener derives its group from
+  the URL at boot (saved login otherwise). `machine install` bakes the URL
+  into the systemd unit's ExecStart, so two listeners (e.g. prod + dev) can
+  coexist via systemd on one machine — the single shared unit is pinned to
+  the server it was installed for.
+- **Login requires an explicit URL** — the dev-flavor `http://localhost:3000`
+  default is gone. TTY prompts have no default: empty answers print "Server
+  URL is required — please fill it" (and the API-key equivalent) and re-prompt
+  until filled (Ctrl-C/EOF cancels, exit 130); non-TTY prints the message +
+  usage and exits 1.
+- **Credential gating** — every command requires resolvable credentials
+  (saved login, `--url`/`--key` flags, or env) except `login`, `logout`,
+  `deploy`, `undeploy`, `upgrade`. Newly gated: `machine install|uninstall|
+  start|stop|restart|status|logs`, `machine workspace list`, and
+  `github status|setup --local` (offline env-file checks included).
+- **One-shot migration** of the legacy flavor roots — `~/.lexa-staging`,
+  `~/.lexa-dev`, and old-layout `~/.lexa` each move into the group named by
+  their `config.json` url at startup (idempotent, skipped when `LEXA_DIR` is
+  set; a root without a url is skipped with a warning). Legacy
+  `~/.config/lexa-cli|lexa-forge` state migrates into its config-url group.
+
+### Changed
+
+- **Flavor is a derived label, never a state location** — `flavorFor(host)`:
+  loopback → `dev`, otherwise `prod` (`LEXA_FLAVOR` env overrides, e.g. a
+  non-loopback staging server). Used for exactly one thing: the daemon
+  serve-port base (`flavorBaseFor` reads `LEXA_FLAVOR`, path-basename parse
+  kept as fallback). The listener passes its group dir as `LEXA_DIR` and the
+  flavor as `LEXA_FLAVOR` to the daemons it spawns (scrub allowlist updated).
+- **Deploy state is domain-keyed** — `deploy <domain> [staging|prod]` writes
+  to `~/.lexa/<domain>/deploy/` and deploy creds to
+  `~/.lexa/<domain>/config.json`; flavor keeps two jobs only: the
+  `.env.<flavor>` filename and the image tag. `undeploy` removes both.
+- **Dev shim is a pure source wrapper** — `scripts/install-cli-dev.sh` no
+  longer exports `LEXA_DIR`; `lexa-cli` and `lexa-cli-dev` share every state
+  path and behavior.
+
 ## [0.2.0] - 2026-08-12
 
 ### Added

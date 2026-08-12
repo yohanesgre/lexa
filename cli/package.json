@@ -1,6 +1,6 @@
 {
   "name": "lexa-cli",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
   "description": "Lexa operator CLI. Version is INDEPENDENT of the web app version and is the source of truth for cli-v* releases (see AGENTS.md)."
 }
