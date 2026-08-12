@@ -7,7 +7,7 @@ import { describe, expect, it } from "vitest";
 import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { buildChildEnv, resolveModelId, writeRepoContent, type ForgeTask } from "./daemon";
+import { buildChildEnv, resolveModelId, writeRepoContent, deriveServePort, flavorBaseFor, buildMessageBody, parseMessageResponse, buildMessageUrl, abortUrl, buildMintUrl, parseSessionInfo, type ForgeTask } from "./daemon";
 
 const TASK = { id: "t1" } as ForgeTask;
 
@@ -175,5 +175,101 @@ describe("import.meta.main guard", () => {
     // process (no credentials/machine-id) or started polling the network.
     expect(typeof buildChildEnv).toBe("function");
     expect(typeof resolveModelId).toBe("function");
+  });
+});
+
+describe("flavorBaseFor", () => {
+  it("maps flavor roots to bases", () => {
+    expect(flavorBaseFor("/home/u/.lexa")).toBe(4096);
+    expect(flavorBaseFor("/home/u/.lexa-staging")).toBe(4196);
+    expect(flavorBaseFor("/home/u/.lexa-dev")).toBe(4296);
+    expect(flavorBaseFor("/custom/lexa-root")).toBe(4096);
+  });
+});
+
+describe("deriveServePort", () => {
+  it("override wins and is first candidate", () => {
+    const ports = deriveServePort("rt-abc", 4096, "4250");
+    expect(ports[0]).toBe(4250);
+  });
+  it("defaults to flavor base + fnv1a(runtimeId)%32, then +1..+4", () => {
+    const ports = deriveServePort("rt-abc", 4096);
+    expect(ports[0]).toBeGreaterThanOrEqual(4096);
+    expect(ports[0]).toBeLessThan(4128);
+    expect(ports).toEqual([ports[0], ports[0] + 1, ports[0] + 2, ports[0] + 3, ports[0] + 4]);
+  });
+  it("stable per runtime id", () => {
+    expect(deriveServePort("rt-abc", 4096)[0]).toBe(deriveServePort("rt-abc", 4096)[0]);
+  });
+});
+
+describe("buildMessageBody", () => {
+  it("splits provider/model into an object (string form is rejected by serve)", () => {
+    const body = JSON.parse(buildMessageBody("opencode-go/deepseek-v4-flash", "build", "hi")) as {
+      model: { providerID: string; modelID: string };
+      agent: string;
+      parts: Array<{ type: string; text: string }>;
+    };
+    expect(body.model).toEqual({ providerID: "opencode-go", modelID: "deepseek-v4-flash" });
+    expect(body.agent).toBe("build");
+    expect(body.parts).toEqual([{ type: "text", text: "hi" }]);
+  });
+  it("bare model id keeps modelID whole with an empty providerID", () => {
+    const body = JSON.parse(buildMessageBody("gpt-4o", "", "hi")) as { model: { providerID: string; modelID: string } };
+    expect(body.model).toEqual({ providerID: "", modelID: "gpt-4o" });
+  });
+});
+
+describe("parseMessageResponse", () => {
+  it("joins text parts and ignores step-start/step-finish/reasoning", () => {
+    const json = JSON.stringify({
+      parts: [
+        { type: "step-start" },
+        { type: "text", text: "## A" },
+        { type: "text", text: "line" },
+        { type: "step-finish" },
+        { type: "reasoning", text: "hmm" },
+      ],
+      error: null,
+    });
+    expect(parseMessageResponse(json)).toEqual({ result: "## A\nline", error: null });
+  });
+  it("surfaces errors from error.data.message", () => {
+    const json = JSON.stringify({ parts: [], error: { name: "Error", data: { message: "boom" } } });
+    expect(parseMessageResponse(json)).toEqual({ result: null, error: "boom" });
+  });
+  it("falls back to error.name when data.message is absent", () => {
+    const json = JSON.stringify({ parts: [], error: { name: "SessionNotFoundError" } });
+    expect(parseMessageResponse(json)).toEqual({ result: null, error: "SessionNotFoundError" });
+  });
+  it("caps the joined result at 1MB tail", () => {
+    const big = "x".repeat(1024 * 1024 + 100);
+    const json = JSON.stringify({ parts: [{ type: "text", text: big }], error: null });
+    const { result } = parseMessageResponse(json);
+    expect(result?.length).toBe(1024 * 1024);
+  });
+});
+
+describe("buildMessageUrl", () => {
+  it("targets the session", () => {
+    expect(buildMessageUrl(4100, "s1")).toBe("http://127.0.0.1:4100/session/s1/message");
+  });
+});
+
+describe("abortUrl", () => {
+  it("targets the session abort endpoint", () => {
+    expect(abortUrl(4100, "s1")).toBe("http://127.0.0.1:4100/session/s1/abort");
+  });
+});
+
+describe("mint helpers", () => {
+  it("builds the mint URL with the directory query (URL-encoded)", () => {
+    expect(buildMintUrl(4100, "/ws/proj")).toBe("http://127.0.0.1:4100/session?directory=/ws/proj");
+    expect(buildMintUrl(4100, "/ws/a b")).toBe("http://127.0.0.1:4100/session?directory=/ws/a%20b");
+  });
+  it("parses Session.Info and validates the directory", () => {
+    expect(parseSessionInfo(`{"id":"s1","directory":"/ws/proj"}`, "/ws/proj")).toEqual({ id: "s1" });
+    expect(() => parseSessionInfo(`{"id":"s1","directory":"/elsewhere"}`, "/ws/proj")).toThrow(/directory/i);
+    expect(() => parseSessionInfo(`{}`, "/ws/proj")).toThrow(/session/i);
   });
 });
