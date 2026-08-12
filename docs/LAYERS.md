@@ -16,7 +16,7 @@
 │                   Service Layer                          │
 │  TaskService  WikiService  ProjectService               │
 │  ColumnService  SwimlaneService  AuthService            │
-│  GitHubService ──depends on──▶ TaskService (webhooks)   │
+│  GitHubService ──depends on──▶ TaskService + ProjectService (webhooks)   │
 ├─────────────────────────────────────────────────────────┤
 │                 Repository Layer                         │
 │  TaskRepo  ProjectRepo  WikiRepo  ColumnRepo            │
@@ -27,7 +27,7 @@
 └─────────────────────────────────────────────────────────┘
 ```
 
-**The v1 cycle is gone:** `TaskService` has no GitHub dependency. `GitHubService → TaskService` is the only service-to-service edge, used by webhook handling. Lexa→GitHub sync is orchestrated by the route layer after a successful move.
+**The v1 cycle is gone:** `TaskService` has no GitHub dependency. `GitHubService → TaskService` is the only service-to-service edge, used by webhook handling. Lexa→GitHub sync is orchestrated by the route layer after a successful move. GitHubService also depends on `ProjectService` (workspace-repo validation, issue listing); content push is service-internal but stays GitHub-side — the route layer still owns move-time state sync.
 
 ## Infrastructure
 
@@ -291,17 +291,18 @@ export class TaskService extends Effect.Service<TaskService>()("TaskService", {
 }) {}
 ```
 
-### GitHubService — depends on TaskService (webhook direction only)
+### GitHubService — depends on TaskService + ProjectService (GitHub-side sync)
 
 ```typescript
 export class GitHubService extends Effect.Service<GitHubService>()("Lexa/GitHubService", {
-  dependencies: [GitHubClient.Default, WebhookEventRepo.Default, TaskRepo.Default, TaskService.Default, ColumnRepo.Default],
+  dependencies: [GitHubClient.Default, WebhookEventRepo.Default, TaskRepo.Default, ProjectRepo.Default, ProjectReposRepo.Default, TaskService.Default, ProjectService.Default, ColumnRepo.Default, ActivityService.Default],
   effect: Effect.gen(function* () {
     const client = yield* GitHubClient;
     const webhookEvents = yield* WebhookEventRepo;
     const taskRepo = yield* TaskRepo;
     const taskService = yield* TaskService;
     const columnRepo = yield* ColumnRepo;
+    const projectService = yield* ProjectService;
 
     return {
       // ---- Lexa → GitHub (called by ROUTES after a successful move) ----
@@ -315,10 +316,46 @@ export class GitHubService extends Effect.Service<GitHubService>()("Lexa/GitHubS
           for (const issue of task.githubs) {
             // repo comes from the STORED link ("owner/name" captured at link
             // time) — never parsed out of an html_url, never assumed to be
-            // project.github_repo
+            // a project repo row
             yield* client.updateIssueState(issue.repo, issue.issueNumber, columnGithubState);
             yield* taskRepo.setGithubSyncedState(taskId, issue.issueId, columnGithubState);
           }
+        }),
+
+      // Lexa → GitHub content push (title + body, TipTap → Markdown). Runs
+      // AFTER the mutation commits, best-effort, non-blocking — called from
+      // REST updateTask + MCP update_task when title/description changed.
+      // Per link: skip when pushed_title/pushed_body already match
+      // (normalizeMarkdownForEcho — trim + CRLF→LF); PATCH title+body; on
+      // success write pushed_title/pushed_body/push_failed=false, on failure
+      // push_failed=true (no retry queue — the next save retries naturally).
+      // The push itself emits NO activity — the mutation's field_changed
+      // rows stand.
+      syncContentFromLexa: (taskId: string) => Effect.gen(function* () { /* ... */ }),
+
+      // Workspace-repo validation for link/create/list paths.
+      linkExistingIssue: (actor: Actor, taskId: string, repo: string, issueNumber: number) =>
+        Effect.gen(function* () {
+          // repo ∈ project workspace repos (else GithubApiError); already-linked
+          // guard (issue → any task, or task → same repo); returns
+          // { issueId, issueNumber, repo, activity } — link row + activity in
+          // the same transaction; pushed_* seeded on first content push
+        }),
+
+      createTaskFromIssue: (actor: Actor, slug: string, repo: string, issueNumber: number) =>
+        Effect.gen(function* () {
+          // creates task in first/Backlog column from issue (Markdown → TipTap),
+          // auto-links, respects required_fields like a normal create; returns
+          // { taskId, activity }
+        }),
+
+      // Per-repo issue listing for the autocomplete; ~60s cache; exact
+      // #number → direct issue GET fallback; already-linked excluded.
+      listWorkspaceIssues: (slug: string, repo: string, query?: string) =>
+        Effect.gen(function* () {
+          // repo ∈ project workspace repos (else GithubApiError); returns
+          // recent issues filtered by query (per_page=100, no search-API
+          // dependency)
         }),
 
       // ---- GitHub → Lexa (webhook processing) ----
@@ -351,9 +388,33 @@ export class GitHubService extends Effect.Service<GitHubService>()("Lexa/GitHubS
           if (!task) return;                                   // issue not linked to any task
 
           if (action === "edited") {
-            // Title sync is GitHub → Lexa only (documented asymmetry).
-            const title = payload.issue?.title;
-            if (title) yield* taskRepo.update(task.id, { title });
+            // CONTENT SYNC (GitHub → Lexa, echo-safe). The edited payload
+            // carries the new title but NOT the body (only changes.body.from),
+            // so every body sync needs an API fetch.
+            // 1. Echo check: GET the issue; compare fetched title+body against
+            //    pushed_title/pushed_body via normalizeMarkdownForEcho (trim +
+            //    CRLF→LF at string edges). Both match → our own push → record
+            //    delivery, skip. A title match alone is NOT proof of echo (we
+            //    always push title+body together).
+            // 2. GET failure fallback: compare payload title vs pushed_title —
+            //    differ → apply title only (payload has it), skip body;
+            //    match → skip entirely.
+            // 3. Non-echo: taskService.update(actor { kind:'system', label:
+            //    'github' }, task.id, { title, description: markdownToDoc(body) })
+            //    — external edits win; the update emits field_changed rows in
+            //    the SAME transaction (emission invariant).
+            const link = task.githubs.find((g) => g.issueId === nodeId);
+            const fetched = yield* client.getIssue(link.repo, link.issueNumber).pipe(
+              Effect.catchAll(() => Effect.succeed(null)));
+            if (fetched && !isEcho(link, fetched)) {
+              yield* taskService.update({ kind: "system", label: "github", userId: null }, task.id, {
+                title: fetched.title,
+                description: markdownToDoc(fetched.body),
+              }).pipe(Effect.catchAll((e) => Effect.logWarning("webhook edit apply failed", e)));
+            } else if (!fetched && normalizeMarkdownForEcho(link.pushed_title) !== normalizeMarkdownForEcho(payload.issue?.title)) {
+              yield* taskService.update({ kind: "system", label: "github", userId: null }, task.id, { title: payload.issue?.title });
+            }
+            yield* webhookEvents.recordDelivery(deliveryId);
             return;
           }
 
@@ -382,8 +443,9 @@ export class GitHubService extends Effect.Service<GitHubService>()("Lexa/GitHubS
 
       // Create a GitHub issue from a task and link it. One task can hold
       // multiple issues but only one per repo — duplicate repo links are
-      // rejected (ALREADY_LINKED).
-      createLinkedIssue: (taskId: string, repo: string) =>
+      // rejected (ALREADY_LINKED). Repo must be a WORKSPACE repo of the
+      // task's project (workspace validation, else GithubApiError → 502).
+      createLinkedIssue: (actor: Actor, taskId: string, repo: string) =>
         Effect.gen(function* () {
           const task = yield* taskRepo.findById(taskId);
           if (task.githubs.some((g) => g.repo === repo))
@@ -394,7 +456,7 @@ export class GitHubService extends Effect.Service<GitHubService>()("Lexa/GitHubS
             issueNumber: issue.number,
             repo,                       // stored "owner/name" — used by all future syncs
           });
-          return { issueId: issue.nodeId, issueNumber: issue.number, repo };
+          return { issueId: issue.nodeId, issueNumber: issue.number, repo, activity: [] };
         }),
     };
   }),
@@ -489,6 +551,13 @@ nothing. If the mutation rolls back, the activity rows roll back with it.
 Messages are frozen at write time via the catalog
 (`server/activity-messages.ts`) — never hand-rolled at call sites.
 
+**Content-sync emission:** the Lexa→GitHub content push (`syncContentFromLexa`)
+emits NOTHING — it runs after the mutation commits and the mutation's
+`field_changed` rows stand alone. Webhook-applied edits (external GitHub
+edits pulled in by the `edited` handler) DO emit `field_changed` rows (actor
+system/'github') in the same transaction as the update — the invariant holds
+in both directions.
+
 **Actor resolution:** browser users (x-lxk-user header, from the SSR
 `lxk-user` meta) → users table row, kind 'user'; MCP API keys → kind 'agent'
 with the key's NAME as label and the key owner's user id (unbound keys →
@@ -532,7 +601,7 @@ The webhook route is exempt from API-key middleware and verifies `X-Hub-Signatur
 
 On `POST /api/forge/daemon/claim` the handler assembles the claim: task, runtime config, server-built prompt, agent/skill rule files, and — best-effort — the task's linked GitHub repo content (`repoContent: [{ owner, repo, path, content }]`, `[]` when none). The daemon writes those files into `repo-content/` (+ `MANIFEST.md`) and the prompt points the agent there ("Linked GitHub repo content is in the repo-content/ directory…").
 
-- **Sources:** the task's `task_github_issues` rows → unique `repo` values ("owner/repo"), capped at 3, only when `documentType === "task"`.
+- **Sources:** the project's `project_repos` rows with `source_role = 1` → repo values ("owner/repo"), capped at the `forge_repo_cap` setting (env bootstrap `LXK_FORGE_REPO_CAP`, default 3), only when `documentType === "task"`. Task-linked issue repos no longer feed context.
 - **Pipeline (per repo):** `GitHubClient.getDefaultBranch` → `getRepoFileTree(recursive=1)` → pure `selectRepoFiles` (`server/github/repo-content.ts`: skips node_modules/.git/dist/build/vendor/.next/coverage/target/.venv dirs, lockfiles, `*.min.js`/`*.min.css`/`*.map`, true binaries — svg stays; caps 50 files / 256 KB per file / 512 KB total, respecting tree sizes without fetching) → `getRepoFileContent` (per-segment URL-encoded path, base64 → UTF-8). Content truncated to 256 KB per file at assembly; total byte cap enforced across repos.
 - **Never fails the claim:** every failure (unconfigured app, missing repo, network, per-file) is caught per repo/file, logged `WARN`, and skipped — `repoContent` ends up `[]` and the claim still returns 200. The prompt's repo-content line is added only when `repoContent` is non-empty (`buildPromptForTask(task, hasRepoContent)`).
 
@@ -607,7 +676,8 @@ ColumnService      → ColumnRepo
 SwimlaneService    → SwimlaneRepo
 DashboardService   → TaskRepo, ColumnRepo, ProjectRepo, FieldConfigRepo
 AuthService        → ApiKeyRepo
-GitHubService      → GitHubClient, WebhookEventRepo, TaskRepo, TaskService, ColumnRepo, ProjectRepo
+GitHubService      → GitHubClient, WebhookEventRepo, TaskRepo, ProjectRepo, ProjectReposRepo, TaskService, ProjectService, ColumnRepo, ActivityService
 Routes/MCP         → all services (orchestration layer — the only place
-                     TaskService and GitHubService meet)
+                     TaskService and GitHubService meet; content push is
+                     called from REST updateTask + MCP update_task)
 ```

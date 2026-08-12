@@ -8,7 +8,7 @@ import { emptyFilters, type FilterState } from "../../lib/filters";
 import type { Board } from "../../../shared/types";
 
 const BOARD: Board = {
-  project: { id: "p1", slug: "demo", name: "Demo", description: "", githubRepo: null, createdAt: "t", updatedAt: "t" },
+  project: { id: "p1", slug: "demo", name: "Demo", description: "", repos: [], createdAt: "t", updatedAt: "t" },
   columns: [
     { id: "c1", projectId: "p1", name: "Todo", position: 0, color: "#888", wipLimit: null, requiredFields: [], githubState: null },
     { id: "c2", projectId: "p1", name: "Done", position: 1, color: "#888", wipLimit: null, requiredFields: [], githubState: null },

@@ -58,6 +58,8 @@ beforeEach(() => {
   routes.set("GET /api/projects/demo/tasks/t1/links", { data: [] });
   routes.set("GET /api/projects/demo/documents/task/t1/sources", { data: [] });
   routes.set("GET /api/projects/demo/wiki", { data: [] });
+  // GitHubSection fetches the project's repos on mount (empty → workspace hint)
+  routes.set("GET /api/projects/demo/repos", { data: [] });
   // Activity tab
   routes.set("GET /api/projects/demo/tasks/t1/activity", { data: [EVENT], nextCursor: null });
   routes.set("GET /api/projects/demo/members", { data: [] });

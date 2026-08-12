@@ -1,7 +1,7 @@
 import { useQuery, useMutation, useQueryClient, useInfiniteQuery } from "@tanstack/react-query";
 import { useMemo } from "react";
 import type { QueryClient, InfiniteData } from "@tanstack/react-query";
-import type { Task, Project, Board, Column, Swimlane, TipTapDoc, WikiPageMeta, ApiKey, ApiKeyCreateResult, Dashboard, FieldConfig, DocumentSource, ForgeTask, TaskLink, Runtime, ForgeAgent, ForgeSkill, Machine, ActivityItem, ActivityEvent } from "../../shared/types";
+import type { Task, Project, ProjectRepo, Board, Column, Swimlane, TipTapDoc, WikiPageMeta, ApiKey, ApiKeyCreateResult, Dashboard, FieldConfig, DocumentSource, ForgeTask, TaskLink, Runtime, ForgeAgent, ForgeSkill, Machine, ActivityItem, ActivityEvent } from "../../shared/types";
 import * as api from "./api";
 import type { TaskMutationResult, ActivityPage } from "./api";
 import type { RecentForgeTask, ForgeHistoryPage } from "./api";
@@ -69,7 +69,7 @@ export function useUpdateProject() {
   const qc = useQueryClient();
   const toast = useToast();
   return useMutation({
-    mutationFn: ({ slug, ...input }: { slug: string; name?: string; description?: string; githubRepo?: string | null }) => api.updateProject(slug, input),
+    mutationFn: ({ slug, ...input }: { slug: string; name?: string; description?: string }) => api.updateProject(slug, input),
     onSuccess: (project) => {
       qc.setQueryData<Project[]>(["projects"], (old) => {
         if (!old) return [project];
@@ -92,6 +92,92 @@ export function useUpdateProject() {
 
 export function useBoard(slug: string, includeArchived = false) {
   return useQuery({ queryKey: ["board", slug, includeArchived], queryFn: () => api.getBoard(slug, includeArchived) });
+}
+
+// ── GitHub repo linking ──
+
+export function useProjectRepos(slug: string) {
+  return useQuery({
+    queryKey: ["project-repos", slug],
+    queryFn: () => api.listProjectRepos(slug).then((r) => r.data),
+    enabled: !!slug,
+  });
+}
+
+export function useReplaceProjectRepos() {
+  const qc = useQueryClient();
+  const toast = useToast();
+  return useMutation({
+    mutationFn: ({ slug, repos }: { slug: string; repos: ProjectRepo[] }) => api.replaceProjectRepos(slug, repos),
+    onSuccess: (res, { slug }) => {
+      qc.setQueryData<ProjectRepo[]>(["project-repos", slug], res.data);
+      toast.push("success", "Linked repos updated");
+    },
+    onError: (err) => {
+      toast.push("error", "Failed to update linked repos", toastMessage(err));
+    },
+  });
+}
+
+export function useGithubRepoSearch(q: string) {
+  return useQuery({
+    queryKey: ["github-repo-search", q],
+    queryFn: () => api.searchGithubRepos(q).then((r) => r.data),
+    enabled: q.trim().length >= 2,
+    staleTime: 60_000,
+  });
+}
+
+export function useGithubIssueSearch(slug: string, repo: string, q: string) {
+  return useQuery({
+    queryKey: ["github-issues", slug, repo, q],
+    queryFn: () => api.listGithubIssues(slug, repo, q || undefined).then((r) => r.data),
+    enabled: !!slug && !!repo,
+    staleTime: 30_000,
+  });
+}
+
+export function useCreateTaskFromIssue(slug: string) {
+  const qc = useQueryClient();
+  const toast = useToast();
+  return useMutation({
+    mutationFn: ({ repo, issueNumber }: { repo: string; issueNumber: number }) => api.createTaskFromIssue(slug, repo, issueNumber),
+    onSuccess: ({ data: task, activity }) => {
+      qc.setQueryData(["board", slug, false], (old: Board | undefined) => {
+        if (!old) return old;
+        return { ...old, tasks: [...old.tasks, task] };
+      });
+      if (activity?.length) prependActivity(qc, slug, task.id, activity.map((a) => ({ kind: "event" as const, ...a })));
+      toast.push("success", "Task created from issue");
+    },
+    onError: (err) => {
+      toast.push("error", "Failed to create task from issue", toastMessage(err));
+    },
+  });
+}
+
+// Link an EXISTING GitHub issue to the task (autocomplete flow). The board
+// cache is updated from the mutation response (setQueryData — no invalidate).
+export function useLinkExistingIssue(slug: string) {
+  const qc = useQueryClient();
+  const toast = useToast();
+  return useMutation({
+    mutationFn: ({ taskId, repo, issueNumber }: { taskId: string; repo: string; issueNumber: number }) =>
+      api.linkExistingIssue(slug, taskId, repo, issueNumber),
+    onSuccess: ({ data: task, activity }) => {
+      for (const archived of [false, true]) {
+        qc.setQueryData<Board>(["board", slug, archived], (old) => {
+          if (!old) return old;
+          return { ...old, tasks: old.tasks.map((t) => (t.id === task.id ? task : t)) };
+        });
+      }
+      if (activity?.length) prependActivity(qc, slug, task.id, activity.map((a) => ({ kind: "event" as const, ...a })));
+      toast.push("success", "Issue linked");
+    },
+    onError: (err) => {
+      toast.push("error", "Failed to link issue", toastMessage(err));
+    },
+  });
 }
 
 export interface TaskListItem {

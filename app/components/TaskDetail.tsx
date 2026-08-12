@@ -41,7 +41,7 @@ interface TaskDetailProps {
   task?: Task;
   project?: { name: string };
   defaultColumnId?: string;
-  columns?: { id: string; name: string }[];
+  columns?: { id: string; name: string; githubState?: "open" | "closed" | null }[];
   swimlanes?: { id: string; name: string }[];
   columnRequiredFields?: { columnId: string; fields: string[] }[];
   availableAssignees?: string[];
@@ -145,9 +145,6 @@ export function TaskDetail({ mode = "view", task, project, defaultColumnId, colu
     createDescription, setCreateDescription,
     createDueAt, setCreateDueAt,
     creating,
-    linkState, setLinkState,
-    linkRepo, setLinkRepo,
-    linkedIssue, setLinkedIssue,
     handleCreate,
   } = useTaskDetailActions({
     task,
@@ -332,13 +329,10 @@ export function TaskDetail({ mode = "view", task, project, defaultColumnId, colu
 
         {!isCreate && (
         <GitHubSection
-          githubs={githubs}
+          slug={slug ?? ""}
           taskId={task!.id}
-          linkState={linkState}
-          linkRepo={linkRepo}
-          linkedIssue={linkedIssue}
-          setLinkState={setLinkState}
-          setLinkRepo={setLinkRepo}
+          githubs={githubs}
+          columnGithubState={columns?.find((column) => column.id === currentColumnId)?.githubState ?? null}
           onLink={onLinkGithub!}
           onUnlink={onUnlinkGithub!}
         />

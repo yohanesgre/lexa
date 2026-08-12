@@ -20,7 +20,7 @@ const TASK: Task = {
   assignees: [], position: "a0", githubs: [], dueAt: null, archivedAt: null,
   createdAt: "t", updatedAt: "t",
 };
-const BOARD: Board = { project: { id: "p1", slug: "demo", name: "Demo", description: "", githubRepo: null, createdAt: "t", updatedAt: "t" }, columns: [COLUMN], swimlanes: [LANE, LANE_OVERDUE, LANE_FUTURE], fieldConfig: FIELD_CONFIG, links: [], tasks: [TASK] };
+const BOARD: Board = { project: { id: "p1", slug: "demo", name: "Demo", description: "", repos: [], createdAt: "t", updatedAt: "t" }, columns: [COLUMN], swimlanes: [LANE, LANE_OVERDUE, LANE_FUTURE], fieldConfig: FIELD_CONFIG, links: [], tasks: [TASK] };
 
 const MOVE_TARGET = { columnId: "c1", swimlaneId: "s-future" };
 

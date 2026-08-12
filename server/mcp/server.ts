@@ -3,6 +3,7 @@ import { LoggerLayer } from "../logging/logger";
 import { ApiKeyRepo } from "../repos/api-key.repo";
 import { UserRepo } from "../repos/user.repo";
 import { ProjectRepo } from "../repos/project.repo";
+import { ProjectReposRepo } from "../repos/project-repos.repo";
 import { ColumnRepo } from "../repos/column.repo";
 import { SwimlaneRepo } from "../repos/swimlane.repo";
 import { TaskRepo } from "../repos/task.repo";
@@ -20,6 +21,10 @@ import { GitHubService } from "../services/github.service";
 import { initSqlite } from "../db/database";
 import { errorCodeMap, errorMessage, errorDetails } from "../api/errors";
 import { tool as createTask } from "./tools/create-task";
+import { tool as createTaskFromIssue } from "./tools/create-task-from-issue";
+import { tool as listGithubIssues } from "./tools/list-github-issues";
+import { tool as linkProjectRepo } from "./tools/link-project-repo";
+import { tool as unlinkProjectRepo } from "./tools/unlink-project-repo";
 import { tool as listTasks } from "./tools/list-tasks";
 import { tool as getTask } from "./tools/get-task";
 import { tool as updateTask } from "./tools/update-task";
@@ -75,6 +80,10 @@ interface ToolDef {
 
 const tools: ToolDef[] = [
   createTask,
+  createTaskFromIssue,
+  listGithubIssues,
+  linkProjectRepo,
+  unlinkProjectRepo,
   listTasks,
   getTask,
   updateTask,
@@ -162,6 +171,7 @@ export class McpServer extends Effect.Service<McpServer>()("Lexa/McpServer", {
     ApiKeyRepo.Default,
     UserRepo.Default,
     ProjectRepo.Default,
+    ProjectReposRepo.Default,
     ColumnRepo.Default,
     SwimlaneRepo.Default,
     TaskRepo.Default,
@@ -394,6 +404,7 @@ const serviceLayer = Layer.mergeAll(
   ApiKeyRepo.Default,
   UserRepo.Default,
   ProjectRepo.Default,
+  ProjectReposRepo.Default,
   UserProjectRoleRepo.Default,
   ColumnRepo.Default,
   SwimlaneRepo.Default,

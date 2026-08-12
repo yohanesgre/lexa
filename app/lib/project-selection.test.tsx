@@ -14,8 +14,8 @@ vi.mock("@tanstack/react-router", () => ({
 }));
 
 const PROJECTS: Project[] = [
-  { id: "p1", slug: "alpha", name: "Alpha", description: "", githubRepo: null, createdAt: "t", updatedAt: "t" },
-  { id: "p2", slug: "beta", name: "Beta", description: "", githubRepo: null, createdAt: "t", updatedAt: "t" },
+  { id: "p1", slug: "alpha", name: "Alpha", description: "", repos: [], createdAt: "t", updatedAt: "t" },
+  { id: "p2", slug: "beta", name: "Beta", description: "", repos: [], createdAt: "t", updatedAt: "t" },
 ];
 
 function Probe() {

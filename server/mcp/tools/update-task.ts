@@ -1,5 +1,6 @@
 import { Effect } from "effect";
 import { TaskService } from "../../services/task.service";
+import { GitHubService } from "../../services/github.service";
 import { ColumnRepo } from "../../repos/column.repo";
 import { SwimlaneRepo } from "../../repos/swimlane.repo";
 import { FieldConfigRepo } from "../../repos/field-config.repo";
@@ -71,6 +72,15 @@ export const tool = {
         assignees: args.assignees,
         dueAt: args.dueAt !== undefined ? (args.dueAt === "" ? null : args.dueAt) : undefined,
       });
+
+      if (task.githubs.length > 0) {
+        // Best-effort content push — same semantics as the REST update route.
+        const githubService = yield* GitHubService;
+        yield* githubService.syncContentFromLexa(task.id).pipe(
+          Effect.catchTag("DbError", (e) => Effect.logWarning(`[GitHub] content sync failed for task ${task.id}`, e)),
+          Effect.catchTag("ConstraintViolation", (e) => Effect.logWarning(`[GitHub] content sync failed for task ${task.id}`, e))
+        );
+      }
 
       const columnRepo = yield* ColumnRepo;
       let column: Column = { name: "unknown" } as Column;

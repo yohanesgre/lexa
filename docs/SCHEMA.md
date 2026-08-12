@@ -11,10 +11,30 @@ CREATE TABLE projects (
   name        TEXT NOT NULL,
   slug        TEXT NOT NULL UNIQUE,                          -- duplicate → SlugTaken 409
   description TEXT NOT NULL DEFAULT '',
-  github_repo TEXT,                                          -- "owner/repo"
   created_at  TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at  TEXT NOT NULL DEFAULT (datetime('now'))        -- maintained by app on every UPDATE
 );
+
+-- ============================================================
+-- Project GitHub repos (roles per repo)
+-- ============================================================
+-- Replaces the dropped projects.github_repo column. A project links N repos,
+-- each with independent role flags (a repo can be source, workspace, or both):
+--   source_role    → Forge agent context (claim-time repo-content) + project label
+--   workspace_role → issue linking/creation/sync for that repo
+-- Removing a role gates NEW links only — existing task↔issue links keep syncing.
+-- Migrated at boot: legacy projects.github_repo → both roles; repos seen in
+-- task_github_issues → workspace role.
+CREATE TABLE project_repos (
+  id              TEXT PRIMARY KEY,                          -- UUID
+  project_id      TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  repo            TEXT NOT NULL,                             -- "owner/name"
+  source_role     INTEGER NOT NULL DEFAULT 0,                -- Forge context + project label
+  workspace_role  INTEGER NOT NULL DEFAULT 0,                -- issue link/create/sync
+  created_at      TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE UNIQUE INDEX idx_project_repos_unique ON project_repos(project_id, repo);
+CREATE INDEX idx_project_repos_repo ON project_repos(repo);
 
 -- ============================================================
 -- Users + project roles
@@ -164,6 +184,9 @@ CREATE TABLE task_github_issues (
   issue_number  INTEGER NOT NULL,
   repo          TEXT NOT NULL,                              -- "owner/name"
   synced_state  TEXT CHECK (synced_state IN ('open','closed')),
+  pushed_title  TEXT,                                       -- last title we pushed (webhook echo detection)
+  pushed_body   TEXT,                                       -- last body we pushed (Markdown)
+  push_failed   INTEGER NOT NULL DEFAULT 0,                 -- last content push failed (badge reason)
   PRIMARY KEY (task_id, issue_id)
 );
 
@@ -659,6 +682,9 @@ WHERE id = ?1
 
 ### Echo suppression (`synced_state`)
 Every Lexa→GitHub state sync writes the state we pushed to `task_github_issues.synced_state` for that specific issue. The webhook handler compares the payload's issue state against `synced_state`: equal → our own echo → skip. Without this, every move triggers a self-reinforcing webhook storm.
+
+### Content echo suppression (`pushed_title` / `pushed_body`)
+Content sync (title + description) is asymmetric: Lexa pushes on task save (TipTap → Markdown), GitHub pushes back via the `edited` webhook (Markdown → TipTap). The webhook echo check fetches the issue and skips only when the fetched title **and** body both match `pushed_title`/`pushed_body` after trimming + CRLF→LF normalization (our pushes always send title+body together, so a title match alone is not proof of echo). `push_failed` records a failed Lexa→GitHub content push for the inline divergence badge ("out of sync — edit not pushed").
 
 ### One task ↔ many issues
 Multiple GitHub issues can link to one task. Each link has its own `synced_state` for per-issue echo suppression. The webhook looks up by `issue_id` in `task_github_issues` to find the task.

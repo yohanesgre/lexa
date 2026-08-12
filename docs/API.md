@@ -106,12 +106,18 @@ type ID = string;                 // UUID
 type ISODate = string;
 type TipTapDoc = { type: "doc"; content: unknown[] };
 
+interface ProjectRepo {
+  repo: string;                   // "owner/name"
+  sourceRole: boolean;            // Forge context + project label
+  workspaceRole: boolean;         // issue link/create/sync
+}
+
 interface Project {
   id: ID;
   name: string;
   slug: string;
   description: string;
-  githubRepo: string | null;      // "owner/name"
+  repos: ProjectRepo[];           // linked repos with roles (replaces githubRepo)
   createdAt: ISODate;
   updatedAt: ISODate;
 }
@@ -158,8 +164,11 @@ interface GithubIssue {
   repo: string;                 // "owner/name"
   syncedState: "open" | "closed" | null;
   url: string;                  // derived: github.com/<repo>/issues/<n>
-  outOfSync: boolean;           // derived: syncedState !== column's githubState
+  outOfSync: boolean;           // derived: syncedState !== column's githubState (state divergence)
+  pushFailed: boolean;          // last Lexa→GitHub content push failed (content divergence)
 }
+// Divergence text on a linked row = outOfSync ("out of sync — state") +
+// pushFailed ("— edit not pushed"); both → "— both".
 
 interface Task {
   id: ID;
@@ -392,18 +401,30 @@ GET    /api/projects
 → 200 { data: Project[], nextCursor }   (nextCursor always null — unpaginated)
 
 POST   /api/projects          (admin)
-body { name*, slug?, description?, githubRepo? }
+body { name*, slug?, description? }
 → 201 Project | 403 FORBIDDEN | 409 SLUG_TAKEN
 
 GET    /api/projects/:slug
 → 200 Project | 404
 
 PATCH  /api/projects/:slug   (admin)
-body { name?, description?, githubRepo? }
+body { name?, description? }
 → 200 Project | 403 FORBIDDEN | 404
 
 DELETE /api/projects/:slug   (admin)
 → 204 | 403 FORBIDDEN | 404 | 409 SLUG_TAKEN (constraint fallback)   (cascades: columns, swimlanes, tasks, wiki)
+
+GET    /api/projects/:slug/repos  (admin)
+→ 200 { data: [{ repo, sourceRole, workspaceRole }] } | 403 FORBIDDEN | 404
+  Repo rows with roles (project_repos). Repos are managed here — the Project
+  payload's repos[] is read-only (no repo fields on create/update).
+
+PUT    /api/projects/:slug/repos  (admin)   — FULL REPLACE of the repo list
+body { repos*: [{ repo*, sourceRole?, workspaceRole? }] }
+  repo = "owner/name". At least one role per repo (sourceRole/workspaceRole
+  default false; both false → 422). Rows missing from the payload are removed.
+→ 200 { data: [{ repo, sourceRole, workspaceRole }] }
+  | 403 FORBIDDEN | 404 | 422 INVALID_REPO_ROLES (no roles, bad format, duplicates)
 
 GET    /api/dashboard
 → 200 Dashboard     (unpaginated full snapshot — health cards, stats, attention lists)
@@ -640,11 +661,37 @@ Notes:
 ### Task ↔ GitHub link
 
 ```
+GET    /api/projects/:slug/github/issues?repo=owner/name&q=
+→ 200 { data: [{ issueNumber, title, state, url }] } | 404 | 502 GITHUB_API_ERROR
+  Autocomplete backing for the task-detail issue picker. repo* must be a
+  workspace repo of the project (422 otherwise). q optional — filter over the
+  recent issues list (per_page=100; no GitHub search-API dependency); exact
+  `#number` (q = "#123") does a direct issue GET fallback. Server-side cache
+  ~60s TTL (new issues appear after ≤ TTL). Already-linked issues (linked to
+  any task) are excluded.
+
+POST   /api/projects/:slug/github/task-from-issue
+body { repo*, issueNumber* }
+→ 201 Task mutation response ({ data: Task, activity }) | 404 | 409 ALREADY_LINKED | 422 REQUIRED_FIELD | 502 GITHUB_API_ERROR
+  Creates a task from an existing GitHub issue: task lands in the project's
+  first column (Backlog), title + description seeded from the issue (Markdown
+  → TipTap), issue auto-linked. repo must be a workspace repo. required_fields
+  enforced like a normal create. ALREADY_LINKED when the issue is already
+  linked to any task.
+
 POST   /api/projects/:slug/tasks/:id/github-link
 body { repo* }                   ("owner/name" — creates a GitHub issue from the task)
 → 200 Task (with github populated) | 404 | 409 ALREADY_LINKED | 502 GITHUB_API_ERROR
+  repo must be a WORKSPACE repo of the project — otherwise 502 GITHUB_API_ERROR.
   ALREADY_LINKED fires when the task already has an issue in the same repo
   (multi-issue: one link per repo per task).
+
+POST   /api/projects/:slug/tasks/:id/github-link-existing
+body { repo*, issueNumber* }
+→ 200 Task (with github populated) | 404 | 409 ALREADY_LINKED | 502 GITHUB_API_ERROR
+  Links an EXISTING GitHub issue to the task (no issue created). repo must be
+  a workspace repo of the project. ALREADY_LINKED when the issue is already
+  linked to any task, or the task already has an issue in that repo.
 
 DELETE /api/projects/:slug/tasks/:id/github-link/:issueId
 → 200 Task | 404 TASK_NOT_FOUND
@@ -752,6 +799,12 @@ body { appId*: string (digits, e.g. "1234567"),
   env fallback resumes); omitted field = unchanged. Applies live (holder +
   cache reset — no restart); webhook verification picks up the new secret
   immediately.
+
+GET    /api/settings/github/search-repos?q=  (admin)
+→ 200 { data: ["owner/repo", ...] } | 403 FORBIDDEN | 502 GITHUB_API_ERROR
+  Linked Repos type-ahead: repos the GitHub App is INSTALLED on, filtered by q
+  (owner or repo name substring). Only sees installed repos — "Only select
+  repositories" installs silently shrink the results.
 ```
 
 ### Admin (users & project roles)

@@ -1,4 +1,4 @@
-import type { Project, Column, Swimlane, Task, Board, WikiPageMeta, WikiPage, WikiPageRevision, WikiPageRevisionSummary, TipTapDoc, ApiKey, ApiKeyCreateResult, Dashboard, FieldConfig, ForgeTask, ForgeTaskLog, ForgeTaskStatus, ForgeAgent, ForgeSkill, DocumentSource, Runtime, RuntimeEvent, Machine, TaskLink, TaskLinkSuggestion, ActivityEvent, ActivityItem, TaskComment } from "../../shared/types";
+import type { Project, ProjectRepo, Column, Swimlane, Task, Board, WikiPageMeta, WikiPage, WikiPageRevision, WikiPageRevisionSummary, TipTapDoc, ApiKey, ApiKeyCreateResult, Dashboard, FieldConfig, ForgeTask, ForgeTaskLog, ForgeTaskStatus, ForgeAgent, ForgeSkill, DocumentSource, Runtime, RuntimeEvent, Machine, TaskLink, TaskLinkSuggestion, ActivityEvent, ActivityItem, TaskComment, GithubIssueSummary } from "../../shared/types";
 
 const BASE = "/api";
 
@@ -118,7 +118,7 @@ export function getDashboard(): Promise<Dashboard> {
   return request(`${BASE}/dashboard`);
 }
 
-export function createProject(input: { name: string; slug?: string; description?: string; githubRepo?: string | null }): Promise<Project> {
+export function createProject(input: { name: string; slug?: string; description?: string }): Promise<Project> {
   return request(`${BASE}/projects`, { method: "POST", body: JSON.stringify(input) });
 }
 
@@ -130,8 +130,40 @@ export function deleteProject(slug: string): Promise<void> {
   return request(`${BASE}/projects/${slug}`, { method: "DELETE" });
 }
 
-export function updateProject(slug: string, input: { name?: string; description?: string; githubRepo?: string | null }): Promise<Project> {
+export function updateProject(slug: string, input: { name?: string; description?: string }): Promise<Project> {
   return request(`${BASE}/projects/${slug}`, { method: "PATCH", body: JSON.stringify(input) });
+}
+
+export function listProjectRepos(slug: string): Promise<{ data: ProjectRepo[] }> {
+  return request(`${BASE}/projects/${slug}/repos`);
+}
+
+export function replaceProjectRepos(slug: string, repos: ProjectRepo[]): Promise<{ data: ProjectRepo[] }> {
+  return request(`${BASE}/projects/${slug}/repos`, { method: "PUT", body: JSON.stringify({ repos }) });
+}
+
+export function searchGithubRepos(q: string): Promise<{ data: string[] }> {
+  return request(`${BASE}/settings/github/search-repos?q=${encodeURIComponent(q)}`);
+}
+
+export function listGithubIssues(slug: string, repo: string, q?: string): Promise<{ data: GithubIssueSummary[] }> {
+  const qs = new URLSearchParams({ repo });
+  if (q) qs.set("q", q);
+  return request(`${BASE}/projects/${slug}/github/issues?${qs.toString()}`);
+}
+
+export function createTaskFromIssue(slug: string, repo: string, issueNumber: number): Promise<TaskMutationResult> {
+  return request(`${BASE}/projects/${slug}/github/task-from-issue`, {
+    method: "POST",
+    body: JSON.stringify({ repo, issueNumber }),
+  });
+}
+
+export function linkExistingIssue(slug: string, taskId: string, repo: string, issueNumber: number): Promise<TaskMutationResult> {
+  return request(`${BASE}/projects/${slug}/tasks/${taskId}/github-link-existing`, {
+    method: "POST",
+    body: JSON.stringify({ repo, issueNumber }),
+  });
 }
 
 export function listColumns(slug: string): Promise<{ data: Column[] }> {

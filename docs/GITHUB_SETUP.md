@@ -20,9 +20,11 @@ suppression and delivery dedup make the loop safe.
    - **Issues**: `Read and write`
    - **Metadata**: `Read-only`
    - **Contents**: `Read-only` — enables the Forge repo-content context
-     (the daemon gets the task's linked-repo source files as grounding; see
+     (the daemon gets the project's source-role repo files as grounding; see
      ARCHITECTURE.md → Forge repo-content). Optional: without it, Forge runs
      just don't receive repo files.
+   **No permission changes needed for repo linking** — the same scopes cover
+   linking, issue creation, content sync, and the autocomplete.
 4. **Subscribe to events**: **Issues** only
 5. **Create GitHub App**
 
@@ -32,6 +34,12 @@ suppression and delivery dedup make the loop safe.
    `lexa-github-app.<date>.private-key.pem` (PKCS#1 format — handled internally)
 2. **Install** the app → pick your account → **Only select repositories** → the
    repo(s) to sync (e.g. `owner/repo`) → **Install**
+
+   **Install scope note:** **"All repositories" is recommended** — the
+   Settings type-ahead (Linked Repos) and the task-detail issue autocomplete
+   only see repos the App is INSTALLED on. "Only select repositories"
+   silently limits both pickers, and every new repo link requires editing the
+   install in GitHub.
 
 ## 3. Choose the webhook host
 
@@ -132,8 +140,7 @@ renames can never break sync.
 
 ## 7. Acceptance round-trip
 
-1. Create a task → Task detail → **GitHub Issues** → type `owner/repo` → **Create issue**.
-   The card shows `repo #N` with a Synced dot.
+1. Link the project's repo first: Settings → GitHub Sync → **Linked Repos** → pick the project → add the repo (type-ahead) with **Issue workspace** checked. Create a task → Task detail → **GitHub Issues** → pick the repo in the dropdown → **+ New issue** → confirm. The card shows `repo #N` with a Synced dot.
 2. Move the task to the closed-mapped column → the issue closes on GitHub
    within seconds. The resulting webhook is an **echo** (we pushed that state) —
    the task does not move again.

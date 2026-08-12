@@ -1,14 +1,16 @@
 import { Effect } from "effect";
 import { ProjectRepo } from "../repos/project.repo";
+import { ProjectReposRepo } from "../repos/project-repos.repo";
 import { ColumnRepo } from "../repos/column.repo";
 import { TaskRepo } from "../repos/task.repo";
 import type { Dashboard } from "../../shared/types";
 import { DbError } from "../db/database";
 
 export class DashboardService extends Effect.Service<DashboardService>()("Lexa/DashboardService", {
-  dependencies: [ProjectRepo.Default, ColumnRepo.Default, TaskRepo.Default],
+  dependencies: [ProjectRepo.Default, ProjectReposRepo.Default, ColumnRepo.Default, TaskRepo.Default],
   effect: Effect.gen(function* () {
     const projectRepo = yield* ProjectRepo;
+    const projectReposRepo = yield* ProjectReposRepo;
     const columnRepo = yield* ColumnRepo;
     const taskRepo = yield* TaskRepo;
 
@@ -20,6 +22,7 @@ export class DashboardService extends Effect.Service<DashboardService>()("Lexa/D
           const projectHealths = yield* Effect.forEach(projects, (project) =>
             Effect.gen(function* () {
               const columns = yield* columnRepo.findByProject(project.id);
+              const repos = yield* projectReposRepo.listByProject(project.id);
               const [taskCount, urgentCount, syncCount] = yield* Effect.all([
                 taskRepo.countByProject(project.id),
                 taskRepo.countUrgent(project.id),
@@ -52,7 +55,7 @@ export class DashboardService extends Effect.Service<DashboardService>()("Lexa/D
               }
 
               return {
-                project,
+                project: { ...project, repos },
                 taskCount,
                 columnCount: columns.length,
                 urgentCount,

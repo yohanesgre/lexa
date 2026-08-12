@@ -15,7 +15,7 @@ const TASK: Task = {
 };
 
 const BOARD: Board = {
-  project: { id: "p1", slug: "demo", name: "Demo", description: "", githubRepo: null, createdAt: "t", updatedAt: "t" },
+  project: { id: "p1", slug: "demo", name: "Demo", description: "", repos: [], createdAt: "t", updatedAt: "t" },
   columns: [{ id: "c1", projectId: "p1", name: "Todo", position: 0, color: "#888", wipLimit: null, requiredFields: [], githubState: null }],
   swimlanes: [
     { id: "s1", projectId: "p1", name: "Main", description: "", position: 0, dueAt: "2099-08-01", archivedAt: null, kind: "milestone" },

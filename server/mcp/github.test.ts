@@ -68,6 +68,7 @@ INSERT INTO tasks (id, project_id, column_id, swimlane_id, title, position, prio
   ('t1', 'p1', 'c1', 's1', 'Linked Task', 'a0', 'pr-1', 'tp-1', '2026-01-01 10:00:00'),
   ('t2', 'p1', 'c1', 's1', 'Plain Task', 'a1', 'pr-1', 'tp-1', '2026-01-01 10:00:00');
 INSERT INTO task_github_issues (task_id, issue_id, issue_number, repo, synced_state) VALUES ('t1', 'ghi1', 7, 'owner/repo', 'open');
+INSERT INTO project_repos (id, project_id, repo, source_role, workspace_role) VALUES ('pr1', 'p1', 'owner/repo', 1, 1);
 INSERT INTO api_keys (id, name, key_hash) VALUES ('k-admin', 'admin', '${adminHash}');
 `);
   db.close();

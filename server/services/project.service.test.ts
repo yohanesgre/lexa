@@ -51,21 +51,19 @@ describe("ProjectService.create", () => {
       expect(created.right.slug).toBe("acme-widgets");
       expect(created.right.name).toBe("Acme Widgets");
       expect(created.right.description).toBe("");
-      expect(created.right.githubRepo).toBeNull();
     }
   });
 
-  it("accepts an explicit slug, description, and githubRepo", () => {
+  it("accepts an explicit slug and description", () => {
     const db = tmpDb();
     const svc = makeService(db);
     const created = Effect.runSync(
-      Effect.either(svc.create({ name: "Whatever", slug: "my-project", description: "d", githubRepo: "owner/repo" }))
+      Effect.either(svc.create({ name: "Whatever", slug: "my-project", description: "d" }))
     );
     expect(Either.isRight(created)).toBe(true);
     if (Either.isRight(created)) {
       expect(created.right.slug).toBe("my-project");
       expect(created.right.description).toBe("d");
-      expect(created.right.githubRepo).toBe("owner/repo");
     }
   });
 
@@ -125,23 +123,19 @@ describe("ProjectService.find", () => {
 });
 
 describe("ProjectService.update", () => {
-  it("updates name/description/githubRepo without touching the slug", () => {
+  it("updates name/description without touching the slug", () => {
     const db = tmpDb();
     const svc = makeService(db);
     const created = Effect.runSync(svc.create({ name: "Acme" }));
     const updated = Effect.runSync(
-      Effect.either(svc.update("acme", { name: "Acme 2", description: "new", githubRepo: "o/r" }))
+      Effect.either(svc.update("acme", { name: "Acme 2", description: "new" }))
     );
     expect(Either.isRight(updated)).toBe(true);
     if (Either.isRight(updated)) {
       expect(updated.right.name).toBe("Acme 2");
       expect(updated.right.description).toBe("new");
-      expect(updated.right.githubRepo).toBe("o/r");
       expect(updated.right.slug).toBe("acme");
     }
-    const cleared = Effect.runSync(Effect.either(svc.update("acme", { githubRepo: null })));
-    expect(Either.isRight(cleared)).toBe(true);
-    if (Either.isRight(cleared)) expect(cleared.right.githubRepo).toBeNull();
   });
 
   it("missing slug → ProjectNotFound", () => {

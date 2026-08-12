@@ -17,7 +17,7 @@ function json(body: unknown, status = 200): Response {
 const LANE: Swimlane = { id: "s1", projectId: "p1", name: "Main", description: "", position: 0, dueAt: null, archivedAt: null, kind: "milestone" };
 const BACKLOG: Swimlane = { id: "s2", projectId: "p1", name: "Backlog", description: "", position: 1, dueAt: null, archivedAt: null, kind: "backlog" };
 const BOARD: Board = {
-  project: { id: "p1", slug: "demo", name: "Demo", description: "", githubRepo: null, createdAt: "t", updatedAt: "t" },
+  project: { id: "p1", slug: "demo", name: "Demo", description: "", repos: [], createdAt: "t", updatedAt: "t" },
   columns: [],
   swimlanes: [LANE, BACKLOG],
   fieldConfig: { priorities: [], types: [] },

@@ -319,7 +319,7 @@ describe("KanbanSettingsModal integration (option + column mutations)", () => {
     });
     queryClient.setQueryData(["field-config", "demo"], { priorities: [PRIORITY], types: [TYPE] });
     queryClient.setQueryData(["board", "demo", false], {
-      project: { id: "p1", slug: "demo", name: "Demo", description: "", githubRepo: null, createdAt: "t", updatedAt: "t" },
+      project: { id: "p1", slug: "demo", name: "Demo", description: "", repos: [], createdAt: "t", updatedAt: "t" },
       columns: [COLUMN], swimlanes: [LANE],
       fieldConfig: { priorities: [PRIORITY], types: [TYPE] }, links: [], tasks: [],
     });

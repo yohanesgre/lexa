@@ -3,10 +3,10 @@ import { Check, X, Trash2 } from "lucide-react";
 
 interface ProjectSettingsModalProps {
   open: boolean;
-  project: { id: string; name: string; description: string | null; githubRepo: string | null };
+  project: { id: string; name: string; description: string | null };
   pending: boolean;
   onClose: () => void;
-  onSave: (input: { name: string; description: string; githubRepo: string }) => void;
+  onSave: (input: { name: string; description: string }) => void;
   onDelete: () => void;
 }
 
@@ -14,13 +14,11 @@ export function ProjectSettingsModal({ open, project, pending, onClose, onSave, 
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [name, setName] = useState(project.name);
   const [description, setDescription] = useState(project.description ?? "");
-  const [githubRepo, setGithubRepo] = useState(project.githubRepo ?? "");
 
   useEffect(() => {
     if (!open) return;
     setName(project.name);
     setDescription(project.description ?? "");
-    setGithubRepo(project.githubRepo ?? "");
     setDeleteOpen(false);
   }, [open, project]);
 
@@ -30,7 +28,6 @@ export function ProjectSettingsModal({ open, project, pending, onClose, onSave, 
     onSave({
       name: name.trim(),
       description: description.trim(),
-      githubRepo: githubRepo.trim(),
     });
   };
 
@@ -77,25 +74,6 @@ export function ProjectSettingsModal({ open, project, pending, onClose, onSave, 
               </span>
               {" "}and wiki pages. This action cannot be undone.
             </p>
-            {project.githubRepo ? (
-              <p className="text-sm text-lx-text-secondary mt-2 leading-5">
-                The linked GitHub repository{" "}
-                <span
-                  className="font-mono text-xs"
-                  style={{
-                    background: "var(--lx-surface-card)",
-                    borderRadius: 4,
-                    padding: "2px 5px",
-                    color: "var(--lx-text-primary)",
-                  }}
-                >
-                  {project.githubRepo}
-                </span>
-                {" "}and its issues will not be affected.
-              </p>
-            ) : (
-              <p className="text-sm text-lx-text-secondary mt-2 leading-5">No linked GitHub repository will be affected.</p>
-            )}
             <div className="flex items-center gap-2 mt-4 justify-end">
               <button
                 type="button"
@@ -169,21 +147,6 @@ export function ProjectSettingsModal({ open, project, pending, onClose, onSave, 
                 onChange={(e) => setDescription(e.target.value)}
                 disabled={pending}
               />
-            </div>
-            <div>
-              <label className="field-label" htmlFor="project-settings-gh">
-                GitHub Repository
-                <span className="font-micro text-2xs text-lx-text-muted uppercase tracking-[0.04em] ml-1.5">Optional</span>
-              </label>
-              <input
-                id="project-settings-gh"
-                className="prop-input w-full"
-                value={githubRepo}
-                onChange={(e) => setGithubRepo(e.target.value)}
-                placeholder="owner/repo"
-                disabled={pending}
-              />
-              <div className="field-hint">Enables two-way issue sync. Can be linked later in Settings.</div>
             </div>
           </div>
           <div className="modal-footer">

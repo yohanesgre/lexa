@@ -1,5 +1,6 @@
 import { Effect } from "effect";
 import { ProjectService } from "../../services/project.service";
+import { ProjectReposRepo } from "../../repos/project-repos.repo";
 
 export const tool = {
   name: "create_project",
@@ -10,7 +11,6 @@ export const tool = {
       name: { type: "string", description: "Project name" },
       slug: { type: "string", description: "Optional URL-friendly slug (auto-generated from name if omitted)" },
       description: { type: "string", description: "Project description" },
-      githubRepo: { type: "string", description: "GitHub repo (owner/name)" },
     },
     required: ["name"],
   },
@@ -20,17 +20,18 @@ export const tool = {
         return { isError: true, error: { code: "FORBIDDEN", message: "Admin access required" } };
       }
       const service = yield* ProjectService;
+      const reposRepo = yield* ProjectReposRepo;
       const project = yield* service.create({
         name: args.name,
         slug: args.slug,
         description: args.description,
-        githubRepo: args.githubRepo ?? null,
       });
+      const repos = yield* reposRepo.listByProject(project.id);
       return {
         name: project.name,
         slug: project.slug,
         description: project.description,
-        githubRepo: project.githubRepo,
+        repos,
         createdAt: project.createdAt,
         updatedAt: project.updatedAt,
       };
