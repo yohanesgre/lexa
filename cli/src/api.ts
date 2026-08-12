@@ -115,11 +115,9 @@ export class LexaClient {
         const res = await fetch(`${this.config.url}${path}`, { ...init, headers });
         const contentType = res.headers.get("content-type") ?? "";
         if (contentType.includes("text/html")) {
-          // Access (or a proxy) answered with its login page — the host is
-          // reachable but the API path is session-gated. The API key is the
-          // machine auth; the deployed Access app needs bypass policies for
-          // /api/* (provisioned by `lexa-cli deploy`).
-          throw new ApiError({ status: res.status, serverMessage: "Server returned an HTML page — is the host behind Cloudflare Access without an /api/* bypass policy?" });
+          // A proxy answered with an HTML page (login page or error) — the
+          // host is reachable but the API path returned non-JSON.
+          throw new ApiError({ status: res.status, serverMessage: "Server returned an HTML page — is the host behind a proxy or serving the wrong app?" });
         }
         if (!res.ok) {
           let code: string | undefined;

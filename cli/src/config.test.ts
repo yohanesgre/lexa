@@ -187,7 +187,7 @@ describe("CliConfigService", () => {
     const svc = await loadService();
     const g = await groupFor("http://example.com");
     await Effect.runPromise(svc.saveConfig({ url: "http://example.com", apiKey: "k" }, g));
-    const creds = { cfToken: "cf-t", googleClientId: "g-id", googleClientSecret: "g-sec", cfTeamDomain: "lexa.cloudflareaccess.com", emailDomain: "example.com" };
+    const creds = { cfToken: "cf-t" };
     await Effect.runPromise(svc.saveDeployCreds(creds, g));
     expect(await Effect.runPromise(svc.loadDeployCreds(g))).toEqual(creds);
     // The login must survive the deploy-creds write.
@@ -205,9 +205,9 @@ describe("CliConfigService", () => {
     mkdirSync(g, { recursive: true });
     writeFileSync(join(g, "config.json"), "{corrupt");
     const svc = await loadService();
-    await Effect.runPromise(svc.saveDeployCreds({ emailDomain: "example.com" }, g));
+    await Effect.runPromise(svc.saveDeployCreds({ cfToken: "cf-t" }, g));
     const raw = JSON.parse(readFileSync(join(g, "config.json"), "utf-8")) as { deploy?: unknown };
-    expect(raw.deploy).toEqual({ emailDomain: "example.com" });
+    expect(raw.deploy).toEqual({ cfToken: "cf-t" });
   });
   it("savedLogin finds the login in a group dir", async () => {
     const svc = await loadService();

@@ -9,6 +9,32 @@ The CLI version is INDEPENDENT of the web app version (see AGENTS.md):
 The version lives in `cli/package.json` — `publish-cli.yml` verifies the tag
 matches it before compiling.
 
+## [0.3.0] - 2026-08-13
+
+### Added
+
+- **`deploy` writes `LXK_PUBLIC_URL`** — the public deploy domain
+  (`https://<subdomain>.<domain>`) is now written into the flavor env file;
+  the auth layer reads it for cookies / trusted origins.
+
+### Removed
+
+- **Google OAuth + Cloudflare Access provisioning dropped from `deploy`** —
+  `--google-client-id`, `--google-client-secret`, `--team-domain`,
+  `--email-domain` flags are gone along with the Access provisioning code
+  (Google IdP, Access app, email-domain policies, `/api/*` + `/mcp` +
+  webhook bypass apps, setup-wizard app). Login is email/password; the
+  superadmin account is created by the web `/setup` wizard from
+  `LXK_ADMIN_EMAILS` (env-only bootstrap).
+- **`undeploy` no longer tears down Access resources** — it removes DNS +
+  tunnel only; Access apps/policies/IdP were only ever created by deploy and
+  are gone with it.
+- **`LXK_ACCESS_TEAM` / `LXK_ACCESS_AUD` no longer managed** — the env write
+  and compose env scrubbing dropped the Access vars; stale values are not
+  carried forward.
+- **Non-JSON API error no longer hints at Access bypass** — the "behind
+  Cloudflare Access" wording was removed.
+
 ## [0.2.0] - 2026-08-12
 
 ### Added

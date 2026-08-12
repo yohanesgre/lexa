@@ -21,14 +21,10 @@ export interface CliConfig {
   apiKey: string;
 }
 
-// Deploy credentials (Cloudflare + Google OAuth) persisted alongside the
-// login so `lexa-cli deploy` works without a saved url/apiKey.
+// Deploy credentials (Cloudflare) persisted alongside the login so
+// `lexa-cli deploy` works without a saved url/apiKey.
 export interface DeployCreds {
   cfToken?: string;
-  googleClientId?: string;
-  googleClientSecret?: string;
-  cfTeamDomain?: string;
-  emailDomain?: string;
 }
 
 export const LEXA_DIR = process.env.LEXA_DIR ?? join(homedir(), ".lexa");

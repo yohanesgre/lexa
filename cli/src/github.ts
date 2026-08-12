@@ -230,7 +230,6 @@ export const cmdGithubSetup = Effect.fn("LexaCli/cmdGithubSetup")(function* (fla
   console.log("  Next steps:");
   console.log("    1. Restart the server (bun run dev:full / docker compose up -d) to import.");
   console.log("    2. Point the GitHub App webhook at https://<host>/api/webhooks/github");
-  console.log("       (must bypass Cloudflare Access — docs/GITHUB_SETUP.md §5).");
   console.log("    3. Verify with: lexa-cli github check <slug> <owner/repo>");
 });
 

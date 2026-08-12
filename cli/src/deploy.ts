@@ -1,8 +1,8 @@
-// lexa-cli deploy — Docker Compose + cloudflared tunnel + Cloudflare Access
-// provisioning. TypeScript port of the former scripts/setup.sh. Deploy
-// credentials persist in ~/.lexa/<domain>/config.json (the group dir of the
-// deployed domain) under the `deploy` key, so deploy works without a saved
-// login (url/apiKey). Flavor picks only the .env.<flavor> file + image tag.
+// lexa-cli deploy — Docker Compose + cloudflared tunnel provisioning.
+// TypeScript port of the former scripts/setup.sh. Deploy credentials persist
+// in ~/.lexa/<domain>/config.json (the group dir of the deployed domain)
+// under the `deploy` key, so deploy works without a saved login (url/apiKey).
+// Flavor picks only the .env.<flavor> file + image tag.
 import { Effect, Data } from "effect";
 import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync, writeFileSync, mkdirSync, rmSync } from "node:fs";
@@ -37,10 +37,6 @@ function usage(): never {
   console.error("  --image <tag>             image tag to deploy (default: latest; staging flavor: staging)");
   console.error("  --clean                   recreate from scratch — removes the data volume (DB wiped)");
   console.error("  --cf-token <token>        Cloudflare API token (env: CF_API_TOKEN)");
-  console.error("  --google-client-id <id>   Google OAuth client ID");
-  console.error("  --google-client-secret <s> Google OAuth client secret");
-  console.error("  --team-domain <domain>    CF Access team domain (env: CF_TEAM_DOMAIN)");
-  console.error("  --email-domain <domain>   allowed email domain for the Access policy");
   console.error("  --admin-email <email>     admin email (reuses LXK_ADMIN_EMAILS from the env file)");
   console.error("  --api-key <key>           lxk_ API key (reuses LXK_API_KEY from the env file)");
   console.error("");
@@ -49,7 +45,7 @@ function usage(): never {
   console.error("  prod    — remote, lexa.<domain>, .env.prod");
   console.error("");
   console.error("Reverses deploy: docker compose down -v (DB wiped), Cloudflare resources");
-  console.error("(DNS, tunnel, Access app + policies, Google IdP), and local state (deploy dir + creds).");
+  console.error("(DNS, tunnel), and local state (deploy dir + creds).");
   console.error("Flags:");
   console.error("  --cf-token <token>        Cloudflare API token (env: CF_API_TOKEN)");
   console.error("  --deploy-dir <path>       compose/env working dir (default: ~/.lexa/<domain>/deploy)");
@@ -201,7 +197,7 @@ const COMPOSE_MANAGED_KEYS = [
   "LXK_API_KEY", "VITE_LXK_API_KEY", "LXK_ADMIN_EMAILS", "LXK_ENV",
   "LXK_FORGE_DAEMON_TOKEN", "CF_TUNNEL_TOKEN", "GITHUB_APP_ID",
   "GITHUB_PRIVATE_KEY", "GITHUB_PRIVATE_KEY_FILE", "GITHUB_WEBHOOK_SECRET",
-  "LXK_ACCESS_AUD", "LXK_ACCESS_TEAM", "LXK_MAX_BODY_MB", "LOG_LEVEL",
+  "LXK_PUBLIC_URL", "LXK_MAX_BODY_MB", "LOG_LEVEL",
   "LXK_IMAGE_TAG",
 ];
 
@@ -335,8 +331,6 @@ export const cmdDeploy = Effect.fn("LexaCli/cmdDeploy")(function* (
     console.log("── Cloudflare API Token ──");
     console.log("  Permissions: Cloudflare One → Cloudflare One Connectors (Write)");
     console.log("               Zone → DNS (Write)");
-    console.log("               Access: Apps and Policies → Edit");
-    console.log("               Access: Identity Providers → Read");
     cfToken = yield* Effect.promise(() => prompt("  Paste token: "));
     if (!cfToken) {
       return yield* new DeployError({ reason: "  ERROR: CF API token required" });
@@ -406,215 +400,14 @@ export const cmdDeploy = Effect.fn("LexaCli/cmdDeploy")(function* (
     }),
   );
 
-  // ── Access (auth guard) ──
-  console.log("==> Access (auth guard)...");
-
-  let googleClientId = flagStr(flags, "google-client-id") || process.env.GOOGLE_CLIENT_ID || saved?.googleClientId || "";
-  if (!googleClientId) {
-    if (!isTTY) {
-      return yield* new DeployError({ reason: "  ERROR: GOOGLE_CLIENT_ID required — set it or run on a terminal" });
-    }
-    googleClientId = yield* Effect.promise(() => prompt("  Google OAuth Client ID (.apps.googleusercontent.com): "));
-  }
-  let googleClientSecret = flagStr(flags, "google-client-secret") || process.env.GOOGLE_CLIENT_SECRET || saved?.googleClientSecret || "";
-  if (!googleClientSecret) {
-    if (!isTTY) {
-      return yield* new DeployError({ reason: "  ERROR: GOOGLE_CLIENT_SECRET required — set it or run on a terminal" });
-    }
-    googleClientSecret = yield* Effect.promise(() => prompt("  Google OAuth Client Secret: "));
-  }
-  let cfTeamDomain = flagStr(flags, "team-domain") || process.env.CF_TEAM_DOMAIN || saved?.cfTeamDomain || "";
-  if (!cfTeamDomain) {
-    if (!isTTY) {
-      return yield* new DeployError({ reason: "  ERROR: CF_TEAM_DOMAIN required — set it or run on a terminal" });
-    }
-    console.log("  Your CF Access team domain: Zero Trust → Settings → Custom Pages → Team domain");
-    cfTeamDomain = yield* Effect.promise(() => prompt("  e.g. lexa.cloudflareaccess.com: "));
-  }
-  const redirectUri = `https://${cfTeamDomain}/cdn-cgi/access/callback`;
-  console.log(`  Redirect URI: ${redirectUri}`);
-  console.log("  (verify this matches your Google OAuth redirect in console)");
-
-  // Google identity provider — per-flavor: staging and prod use different
-  // Google OAuth clients, so each flavor owns its own named IdP.
-  const idps = (yield* cfFetch(cfToken, `/accounts/${account}/access/identity_providers`)) as Array<{ id: string; type: string; name?: string }>;
-  const idpName = `Google Login (${flavorName})`;
-  const existingIdp = idps.find((i) => i.type === "google" && i.name === idpName);
-  const idpBody = JSON.stringify({
-    name: idpName,
-    type: "google",
-    config: { client_id: googleClientId, client_secret: googleClientSecret },
-  });
-  let idpId: string;
-  if (existingIdp) {
-    idpId = existingIdp.id;
-    console.log(`  Updating existing Google IdP: ${idpId}`);
-    yield* cfFetch(cfToken, `/accounts/${account}/access/identity_providers/${idpId}`, { method: "PUT", body: idpBody });
-  } else {
-    const created = (yield* cfFetch(cfToken, `/accounts/${account}/access/identity_providers`, {
-      method: "POST",
-      body: idpBody,
-    })) as { id: string };
-    idpId = created.id;
-    console.log(`  Created Google IdP: ${idpId}`);
-  }
-
-  // Access application — reuse if domain already exists
-  const existingApps = (yield* cfFetch(cfToken, `/accounts/${account}/access/apps?domain=${fullDomain}`)) as Array<{ id: string }>;
-  let appId: string;
-  if (existingApps.length > 0) {
-    appId = existingApps[0].id;
-    console.log(`  Using existing Access app: ${appId}`);
-  } else {
-    const created = (yield* cfFetch(cfToken, `/accounts/${account}/access/apps`, {
-      method: "POST",
-      body: JSON.stringify({
-        name: `Lexa (${flavorName})`,
-        domain: fullDomain,
-        type: "self_hosted",
-        session_duration: "24h",
-        allowed_idps: [idpId],
-        auto_redirect_to_identity: true,
-      }),
-    })) as { id: string };
-    appId = created.id;
-    console.log(`  Created Access app: ${appId}`);
-  }
-
-  // Policy — restrict to email domain, reuse if exists
-  let emailDomain = flagStr(flags, "email-domain") || saved?.emailDomain || "";
-  if (!emailDomain) {
-    if (!isTTY) {
-      return yield* new DeployError({ reason: "  ERROR: allowed email domain required — run on a terminal or save it via a previous deploy" });
-    }
-    emailDomain = yield* Effect.promise(() => prompt("  Allowed email domain (e.g. yohanesgre.com): "));
-  }
-  const policyBody = JSON.stringify({
-    name: `Allow @${emailDomain}`,
-    decision: "allow",
-    include: [{ email_domain: { domain: emailDomain } }],
-    precedence: 1,
-  });
-  const existingPolicies = (yield* cfFetch(cfToken, `/accounts/${account}/access/apps/${appId}/policies`)) as Array<{ id: string; precedence?: number; app_count?: number; reusable?: boolean }>;
-  if (existingPolicies.length > 0) {
-    const row = existingPolicies[0];
-    // App-scoped policy lists include REUSABLE policies too, and reusable
-    // policies must be updated through the account-level endpoint — the
-    // app-scoped PUT rejects them (12130). Reusable rows carry app_count
-    // (and typically reusable: true) and no precedence; app-scoped rows
-    // carry precedence.
-    if (row.reusable === true || row.app_count !== undefined) {
-      console.log(`  Updating existing reusable policy: ${row.id}`);
-      yield* cfFetch(cfToken, `/accounts/${account}/access/policies/${row.id}`, {
-        method: "PUT",
-        // Reusable policy bodies have no precedence (per-app ordering only).
-        body: JSON.stringify({
-          name: `Allow @${emailDomain}`,
-          decision: "allow",
-          include: [{ email_domain: { domain: emailDomain } }],
-        }),
-      });
-    } else {
-      console.log(`  Updating existing policy: ${row.id}`);
-      yield* cfFetch(cfToken, `/accounts/${account}/access/apps/${appId}/policies/${row.id}`, {
-        method: "PUT",
-        body: policyBody,
-      });
-    }
-  } else {
-    yield* cfFetch(cfToken, `/accounts/${account}/access/apps/${appId}/policies`, { method: "POST", body: policyBody });
-  }
-  console.log(`  Policy: allow @${emailDomain}`);
-
-  // ── Machine-access bypass apps ──
-  // The REST API, MCP, and GitHub webhooks must be reachable without an
-  // Access session: the API key / HMAC signature is their auth (the Access
-  // layer only protects the human UI). One self-hosted app per path with a
-  // Bypass (Everyone) policy — Access picks the most specific path app.
-  for (const [path, label] of [
-    ["/api/*", "API"],
-    ["/mcp", "MCP"],
-    ["/api/webhooks/*", "Webhooks"],
-  ] as const) {
-    const bypassDomain = `${fullDomain}${path}`;
-    const existing = (yield* cfFetch(cfToken, `/accounts/${account}/access/apps?domain=${encodeURIComponent(bypassDomain)}`)) as Array<{ id: string }>;
-    let bypassAppId = existing[0]?.id;
-    if (!bypassAppId) {
-      const created = (yield* cfFetch(cfToken, `/accounts/${account}/access/apps`, {
-        method: "POST",
-        body: JSON.stringify({
-          name: `Lexa (${flavorName}) ${label} bypass`,
-          domain: bypassDomain,
-          type: "self_hosted",
-          session_duration: "24h",
-          allowed_idps: [],
-          auto_redirect_to_identity: false,
-        }),
-      })) as { id: string };
-      bypassAppId = created.id;
-      console.log(`  Created bypass app: ${bypassDomain}`);
-    }
-    const bypassPolicies = (yield* cfFetch(cfToken, `/accounts/${account}/access/apps/${bypassAppId}/policies`)) as Array<{ id: string; decision: string; precedence?: number; app_count?: number; reusable?: boolean }>;
-    if (!bypassPolicies.some((p) => p.decision === "bypass")) {
-      if (bypassPolicies.length > 0) {
-        // A path app carrying an allow policy (e.g. hand-configured) blocks
-        // machine access — convert it rather than stacking a second policy
-        // (precedences must be unique; reusable rows go through the
-        // account-level endpoint).
-        const row = bypassPolicies[0];
-        const body = JSON.stringify({ name: "Bypass (Everyone)", decision: "bypass", include: [{ everyone: {} }] });
-        if (row.reusable === true || row.app_count !== undefined) {
-          yield* cfFetch(cfToken, `/accounts/${account}/access/policies/${row.id}`, { method: "PUT", body });
-        } else {
-          yield* cfFetch(cfToken, `/accounts/${account}/access/apps/${bypassAppId}/policies/${row.id}`, { method: "PUT", body });
-        }
-        console.log(`  Policy: converted to bypass (${label})`);
-      } else {
-        yield* cfFetch(cfToken, `/accounts/${account}/access/apps/${bypassAppId}/policies`, {
-          method: "POST",
-          body: JSON.stringify({ name: "Bypass (Everyone)", decision: "bypass", include: [{ everyone: {} }], precedence: 1 }),
-        });
-        console.log(`  Policy: bypass (${label})`);
-      }
-    }
-  }
-
-  // The setup wizard API is key-exempt by design but must stay session-gated
-  // (it can mint API keys pre-setup) — a more-specific allow app wins over
-  // the /api/* bypass. The wizard runs from an Access-authenticated browser.
-  const setupDomain = `${fullDomain}/api/setup/*`;
-  const existingSetup = (yield* cfFetch(cfToken, `/accounts/${account}/access/apps?domain=${encodeURIComponent(setupDomain)}`)) as Array<{ id: string }>;
-  let setupAppId = existingSetup[0]?.id;
-  if (!setupAppId) {
-    const created = (yield* cfFetch(cfToken, `/accounts/${account}/access/apps`, {
-      method: "POST",
-      body: JSON.stringify({
-        name: `Lexa (${flavorName}) Setup`,
-        domain: setupDomain,
-        type: "self_hosted",
-        session_duration: "24h",
-        allowed_idps: [idpId],
-        auto_redirect_to_identity: true,
-      }),
-    })) as { id: string };
-    setupAppId = created.id;
-    console.log(`  Created setup app: ${setupDomain}`);
-  }
-  const setupPolicies = (yield* cfFetch(cfToken, `/accounts/${account}/access/apps/${setupAppId}/policies`)) as Array<{ decision: string }>;
-  if (!setupPolicies.some((p) => p.decision === "allow")) {
-    yield* cfFetch(cfToken, `/accounts/${account}/access/apps/${setupAppId}/policies`, {
-      method: "POST",
-      body: JSON.stringify({ name: `Allow @${emailDomain}`, decision: "allow", include: [{ email_domain: { domain: emailDomain } }], precedence: 1 }),
-    });
-    console.log(`  Policy: allow @${emailDomain} (setup)`);
-  }
-
   // ── Admin user + API key ──
   console.log("");
   console.log("── Admin user ──");
-  console.log("  First Google login with this email will be auto-promoted to admin.");
-  // Prefer values already written by `bun run setup --prod` so re-deploys
-  // don't clobber a provisioned key or admin list.
+  // The superadmin account is created by the web /setup wizard (email +
+  // password) or the setup-cli bootstrap. LXK_ADMIN_EMAILS is the env-only
+  // superadmin bootstrap list the wizard reads.
+  console.log("  The web /setup wizard creates the superadmin account from this");
+  console.log("  email on first boot (email + password login, no OAuth).");
   const existingAdmin = preservedValue(flavor.envFile, "LXK_ADMIN_EMAILS");
   const existingKey = preservedValue(flavor.envFile, "LXK_API_KEY");
   let adminEmail = flagStr(flags, "admin-email") || existingAdmin || "";
@@ -646,14 +439,9 @@ export const cmdDeploy = Effect.fn("LexaCli/cmdDeploy")(function* (
   const githubAppId = preservedValue(flavor.envFile, "GITHUB_APP_ID");
   const githubWebhookSecret = preservedValue(flavor.envFile, "GITHUB_WEBHOOK_SECRET");
 
-  // LXK_ACCESS_TEAM is derived from the CF Access team domain (subdomain
-  // before .cloudflareaccess.com) so the "Sign out" link always matches the
-  // team the Access app lives under — never hand-set.
-  const accessTeam = cfTeamDomain.replace(/\.cloudflareaccess\.com$/, "");
-
-  // Carry forward any hand-added keys (LOG_LEVEL, LXK_MAX_BODY_MB,
-  // LXK_ACCESS_AUD, ...) — the rewrite below only owns its own set.
-  const rewrittenKeys = new Set(["LXK_API_KEY", "VITE_LXK_API_KEY", "LXK_ADMIN_EMAILS", "LXK_ENV", "CF_TUNNEL_TOKEN", "GITHUB_APP_ID", "GITHUB_PRIVATE_KEY_FILE", "GITHUB_WEBHOOK_SECRET", "LXK_ACCESS_TEAM"]);
+  // Carry forward any hand-added keys (LOG_LEVEL, LXK_MAX_BODY_MB, ...) —
+  // the rewrite below only owns its own set.
+  const rewrittenKeys = new Set(["LXK_API_KEY", "VITE_LXK_API_KEY", "LXK_ADMIN_EMAILS", "LXK_ENV", "CF_TUNNEL_TOKEN", "GITHUB_APP_ID", "GITHUB_PRIVATE_KEY_FILE", "GITHUB_WEBHOOK_SECRET", "LXK_PUBLIC_URL"]);
   const carried = existsSync(flavor.envFile)
     ? readFileSync(flavor.envFile, "utf-8")
         .split("\n")
@@ -670,8 +458,8 @@ export const cmdDeploy = Effect.fn("LexaCli/cmdDeploy")(function* (
     `VITE_LXK_API_KEY=${apiKey}`,
     `LXK_ADMIN_EMAILS=${adminEmail}`,
     `LXK_ENV=${flavorName}`,
+    `LXK_PUBLIC_URL=https://${fullDomain}`,
     `CF_TUNNEL_TOKEN=${tunnelToken}`,
-    `LXK_ACCESS_TEAM=${accessTeam}`,
     `GITHUB_APP_ID=${githubAppId}`,
     "GITHUB_PRIVATE_KEY_FILE=/app/github-app.private-key.pem",
     `GITHUB_WEBHOOK_SECRET=${githubWebhookSecret}`,
@@ -691,10 +479,6 @@ export const cmdDeploy = Effect.fn("LexaCli/cmdDeploy")(function* (
   // ── Start ──
   yield* config.saveDeployCreds({
     cfToken: cfToken || undefined,
-    googleClientId: googleClientId || undefined,
-    googleClientSecret: googleClientSecret || undefined,
-    cfTeamDomain: cfTeamDomain || undefined,
-    emailDomain: emailDomain || undefined,
   }, groupDir(domain));
 
   const imageTag = flagStr(flags, "image") || undefined;
@@ -741,7 +525,7 @@ function deleteResource(cfToken: string, label: string, path: string): Effect.Ef
   );
 }
 
-function teardownCloudflare(cfToken: string, domain: string, fullDomain: string, flavor: Flavor, flavorName: string): Effect.Effect<void, never, never> {
+function teardownCloudflare(cfToken: string, domain: string, fullDomain: string, flavor: Flavor): Effect.Effect<void, never, never> {
   return Effect.gen(function* () {
     console.log("==> Cloudflare teardown...");
     const accounts = yield* listResources<{ id: string }>(cfToken, "Cloudflare account", "/accounts");
@@ -763,26 +547,6 @@ function teardownCloudflare(cfToken: string, domain: string, fullDomain: string,
       yield* deleteResource(cfToken, `tunnel ${tunnel.id}`, `/accounts/${account}/cfd_tunnel/${tunnel.id}`);
     }
     if (tunnels.length === 0) console.log(`  No tunnel "${flavor.tunnelName}" — nothing to delete.`);
-    const apps = yield* listResources<{ id: string }>(cfToken, "Access app", `/accounts/${account}/access/apps?domain=${fullDomain}`);
-    for (const app of apps) {
-      const policies = yield* listResources<{ id: string; reusable?: boolean; app_count?: number }>(cfToken, "policy", `/accounts/${account}/access/apps/${app.id}/policies`);
-      for (const policy of policies) {
-        if (policy.reusable === true || policy.app_count !== undefined) {
-          yield* deleteResource(cfToken, `reusable policy ${policy.id}`, `/accounts/${account}/access/policies/${policy.id}`);
-        } else {
-          yield* deleteResource(cfToken, `policy ${policy.id}`, `/accounts/${account}/access/apps/${app.id}/policies/${policy.id}`);
-        }
-      }
-      yield* deleteResource(cfToken, `Access app ${app.id}`, `/accounts/${account}/access/apps/${app.id}`);
-    }
-    if (apps.length === 0) console.log(`  No Access app for ${fullDomain} — nothing to delete.`);
-    const idps = yield* listResources<{ id: string; type: string; name?: string }>(cfToken, "IdP", `/accounts/${account}/access/identity_providers`);
-    const idp = idps.find((i) => i.type === "google" && i.name === `Google Login (${flavorName})`);
-    if (idp) {
-      yield* deleteResource(cfToken, `IdP ${idp.id}`, `/accounts/${account}/access/identity_providers/${idp.id}`);
-    } else {
-      console.log(`  No "Google Login (${flavorName})" IdP — nothing to delete.`);
-    }
   });
 }
 
@@ -804,7 +568,7 @@ export const cmdUndeploy = Effect.fn("LexaCli/cmdUndeploy")(function* (
   if (isTTY) {
     console.log("");
     console.log("  ⚠ Undeploy removes: containers + the data volume (DB wiped), Cloudflare");
-    console.log("     resources (DNS, tunnel, Access app, IdP), and local state.");
+    console.log("     resources (DNS, tunnel), and local state.");
     const answer = yield* Effect.promise(() => prompt("  Type 'undeploy' to confirm: "));
     if (answer !== "undeploy") {
       console.log("  Aborted (confirmation did not match).");
@@ -821,9 +585,9 @@ export const cmdUndeploy = Effect.fn("LexaCli/cmdUndeploy")(function* (
   const saved = yield* config.loadDeployCreds(groupDir(domain));
   const cfToken = flagStr(flags, "cf-token") || process.env.CF_API_TOKEN || process.env.CLOUDFLARE_API_TOKEN || saved?.cfToken || "";
   if (cfToken) {
-    yield* teardownCloudflare(cfToken, domain, fullDomain, flavor, flavorName);
+    yield* teardownCloudflare(cfToken, domain, fullDomain, flavor);
   } else {
-    console.warn("  ⚠ No Cloudflare API token — CF resources (DNS, tunnel, Access app, IdP) must be removed manually.");
+    console.warn("  ⚠ No Cloudflare API token — CF resources (DNS, tunnel) must be removed manually.");
   }
 
   console.log("==> Local state...");
