@@ -11,6 +11,7 @@ export function ProjectSwitcher({ routeType }: { routeType: "home" | "dashboard"
   const { data: projects, isLoading } = useProjects();
   const { data: dashboard } = useDashboard();
   const { selectedSlug, selectedProjectName, setSelectedSlug } = useProjectSelection();
+  const selectedProjectId = projects?.find((p) => p.slug === selectedSlug)?.id;
   const containerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -105,6 +106,17 @@ export function ProjectSwitcher({ routeType }: { routeType: "home" | "dashboard"
             })
           )}
           <div className="project-switcher-separator" />
+          {selectedSlug && selectedProjectId && (
+            <Link
+              to="/settings/project/$projectId"
+              params={{ projectId: selectedProjectId ?? "" }}
+              className="project-switcher-row"
+              activeProps={{ className: "project-switcher-row" }}
+              onClick={() => setOpen(false)}
+            >
+              <span className="project-switcher-row-name">Project settings</span>
+            </Link>
+          )}
           <Link
             to="/"
             search={{ new: true } as never}

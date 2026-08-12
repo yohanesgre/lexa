@@ -1,8 +1,9 @@
 import { useQuery, useMutation, useQueryClient, useInfiniteQuery } from "@tanstack/react-query";
 import { useMemo } from "react";
 import type { QueryClient, InfiniteData } from "@tanstack/react-query";
-import type { Task, Project, ProjectRepo, Board, Column, Swimlane, TipTapDoc, WikiPageMeta, ApiKey, ApiKeyCreateResult, Dashboard, FieldConfig, DocumentSource, ForgeTask, TaskLink, Runtime, ForgeAgent, ForgeSkill, Machine, ActivityItem, ActivityEvent } from "../../shared/types";
+import type { Task, Project, ProjectRepo, Board, Column, Swimlane, TipTapDoc, WikiPageMeta, ApiKey, ApiKeyCreateResult, Dashboard, FieldConfig, DocumentSource, ForgeTask, TaskLink, Runtime, ForgeAgent, ForgeSkill, Machine, ActivityItem, ActivityEvent, Team, TeamMember, TeamMemberRole, SessionInfo, WorkspaceInvite } from "../../shared/types";
 import * as api from "./api";
+import * as auth from "./auth";
 import type { TaskMutationResult, ActivityPage } from "./api";
 import type { RecentForgeTask, ForgeHistoryPage } from "./api";
 import { useToast } from "../components/ui/Toast";
@@ -880,7 +881,302 @@ export function useClearGithubSettings() {
   });
 }
 
-// ---- users & project members ----
+// ---- session (Better Auth) ----
+
+export function useSession() {
+  return useQuery({
+    queryKey: ["session"],
+    queryFn: () => auth.getSession(),
+    staleTime: 5 * 60_000,
+  });
+}
+
+export function useSignIn() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ email, password }: { email: string; password: string }) => auth.signInEmail({ email, password }),
+    onSuccess: (res) => {
+      // Mutation response is authoritative — update the session cache from it.
+      qc.setQueryData(["session"], res);
+    },
+    // No onError toast: the login page renders the single inline notice
+    // (wireframe: generic "Invalid email or password." copy).
+  });
+}
+
+export function useSignOut() {
+  const qc = useQueryClient();
+  const toast = useToast();
+  return useMutation({
+    mutationFn: () => auth.signOut(),
+    onSuccess: () => {
+      qc.setQueryData(["session"], { session: null, user: null });
+    },
+    onError: (err) => {
+      toast.push("error", "Sign out failed", toastMessage(err));
+    },
+  });
+}
+
+export function useSetPassword() {
+  const qc = useQueryClient();
+  const toast = useToast();
+  return useMutation({
+    mutationFn: ({ newPassword, token }: { newPassword: string; token: string }) => auth.setPassword({ newPassword, token }),
+    onSuccess: (res) => {
+      qc.setQueryData(["session"], res);
+      toast.push("success", "Password set — you're signed in");
+    },
+    onError: (err) => {
+      toast.push("error", "Could not set password", toastMessage(err));
+    },
+  });
+}
+
+export function useChangePassword() {
+  const toast = useToast();
+  return useMutation({
+    mutationFn: ({ currentPassword, newPassword }: { currentPassword: string; newPassword: string }) => auth.changePassword({ currentPassword, newPassword }),
+    onSuccess: () => {
+      toast.push("success", "Password updated");
+    },
+    onError: (err) => {
+      toast.push("error", "Could not change password", toastMessage(err));
+    },
+  });
+}
+
+// ---- teams ----
+
+export function useTeams() {
+  // retry:false — plain members typically get 403 (no teams to administer);
+  // the UserMenu mounts on every page and must not retry + log noise.
+  return useQuery({ queryKey: ["teams"], queryFn: () => api.listTeams().then((r) => r.data), retry: false });
+}
+
+export function useCreateTeam() {
+  const qc = useQueryClient();
+  const toast = useToast();
+  return useMutation({
+    mutationFn: (input: { name: string; slug?: string }) => api.createTeam(input),
+    onSuccess: (team) => {
+      qc.setQueryData<Team[]>(["teams"], (old) => (old ? [team, ...old] : [team]));
+      toast.push("success", "Team created");
+    },
+    onError: (err) => {
+      toast.push("error", "Failed to create team", toastMessage(err));
+    },
+  });
+}
+
+export function useDeleteTeam() {
+  const qc = useQueryClient();
+  const toast = useToast();
+  return useMutation({
+    mutationFn: (teamId: string) => api.deleteTeam(teamId),
+    onSuccess: (_v, teamId) => {
+      qc.setQueryData<Team[]>(["teams"], (old) => (old ?? []).filter((t) => t.id !== teamId));
+      toast.push("success", "Team deleted");
+    },
+    onError: (err) => {
+      toast.push("error", "Failed to delete team", toastMessage(err));
+    },
+  });
+}
+
+export function useTeamMembers(teamId: string | undefined) {
+  return useQuery({
+    queryKey: ["team-members", teamId],
+    queryFn: () => api.listTeamMembers(teamId!).then((r) => r.data),
+    enabled: !!teamId,
+  });
+}
+
+export function useAddTeamMember(teamId: string | undefined) {
+  const qc = useQueryClient();
+  const toast = useToast();
+  return useMutation({
+    mutationFn: (input: { email: string; role: TeamMemberRole }) => api.addTeamMember(teamId!, input),
+    onSuccess: (member) => {
+      qc.setQueryData<TeamMember[]>(["team-members", teamId], (old) => (old ? [...old, member] : [member]));
+      toast.push("success", "Member added");
+    },
+    onError: (err) => {
+      toast.push("error", "Failed to add member", toastMessage(err));
+    },
+  });
+}
+
+export function useUpdateTeamMemberRole(teamId: string | undefined) {
+  const qc = useQueryClient();
+  const toast = useToast();
+  return useMutation({
+    mutationFn: ({ userId, role }: { userId: string; role: TeamMemberRole }) => api.updateTeamMemberRole(teamId!, userId, role),
+    onSuccess: (member) => {
+      qc.setQueryData<TeamMember[]>(["team-members", teamId], (old) => (old ?? []).map((m) => (m.userId === member.userId ? member : m)));
+      toast.push("success", "Role updated");
+    },
+    onError: (err) => {
+      toast.push("error", "Failed to update role", toastMessage(err));
+    },
+  });
+}
+
+export function useRemoveTeamMember(teamId: string | undefined) {
+  const qc = useQueryClient();
+  const toast = useToast();
+  return useMutation({
+    mutationFn: (userId: string) => api.removeTeamMember(teamId!, userId),
+    onSuccess: (_v, userId) => {
+      qc.setQueryData<TeamMember[]>(["team-members", teamId], (old) => (old ?? []).filter((m) => m.userId !== userId));
+      toast.push("success", "Member removed");
+    },
+    onError: (err) => {
+      toast.push("error", "Failed to remove member", toastMessage(err));
+    },
+  });
+}
+
+// ---- workspace members, invites, set-password links (superadmin) ----
+
+export function useWorkspaceMembers() {
+  return useQuery({ queryKey: ["workspace-members"], queryFn: () => api.listWorkspaceMembers().then((r) => r.data) });
+}
+
+export function useUpdateWorkspaceMember() {
+  const qc = useQueryClient();
+  const toast = useToast();
+  return useMutation({
+    mutationFn: ({ userId, action }: { userId: string; action: "deactivate" | "reactivate" }) => api.updateWorkspaceMember(userId, action),
+    onSuccess: (user) => {
+      qc.setQueryData<api.WorkspaceMember[]>(["workspace-members"], (old) => (old ?? []).map((m) => (m.id === user.id ? { ...m, ...user } : m)));
+      toast.push("success", "Member updated");
+    },
+    onError: (err) => {
+      toast.push("error", "Failed to update member", toastMessage(err));
+    },
+  });
+}
+
+export function useDeleteWorkspaceMember() {
+  const qc = useQueryClient();
+  const toast = useToast();
+  return useMutation({
+    mutationFn: (userId: string) => api.deleteWorkspaceMember(userId),
+    onSuccess: (_v, userId) => {
+      qc.setQueryData<api.WorkspaceMember[]>(["workspace-members"], (old) => (old ?? []).filter((m) => m.id !== userId));
+      toast.push("success", "Member deleted");
+    },
+    onError: (err) => {
+      toast.push("error", "Failed to delete member", toastMessage(err));
+    },
+  });
+}
+
+export function useWorkspaceInvites() {
+  // retry:false — GET /api/workspace/invites is not in the contract surface;
+  // when the server lacks it the table degrades to mutation-seeded rows.
+  return useQuery({
+    queryKey: ["workspace-invites"],
+    queryFn: () => api.listWorkspaceInvites().then((r) => r.data),
+    retry: false,
+  });
+}
+
+export function useCreateWorkspaceInvite() {
+  const qc = useQueryClient();
+  const toast = useToast();
+  return useMutation({
+    mutationFn: (email: string) => api.createWorkspaceInvite(email),
+    onSuccess: (result, email) => {
+      // No row in the response ({ link } only) — seed the cache with a
+      // pending row built from the inputs; the server list replaces it.
+      qc.setQueryData<WorkspaceInvite[]>(["workspace-invites"], (old) => {
+        const row: WorkspaceInvite = {
+          id: `pending-${Date.now()}`,
+          email,
+          tokenHint: "",
+          expiresAt: new Date(Date.now() + 7 * 24 * 3600 * 1000).toISOString(),
+          acceptedAt: null,
+        };
+        return old ? [row, ...old] : [row];
+      });
+      toast.push("success", "Invite created", result.link);
+    },
+    onError: (err) => {
+      toast.push("error", "Failed to send invite", toastMessage(err));
+    },
+  });
+}
+
+export function useRevokeWorkspaceInvite() {
+  const qc = useQueryClient();
+  const toast = useToast();
+  return useMutation({
+    mutationFn: (inviteId: string) => api.revokeWorkspaceInvite(inviteId),
+    onSuccess: (_v, inviteId) => {
+      qc.setQueryData<WorkspaceInvite[]>(["workspace-invites"], (old) => (old ?? []).filter((i) => i.id !== inviteId));
+      toast.push("success", "Invite revoked");
+    },
+    onError: (err) => {
+      toast.push("error", "Failed to revoke invite", toastMessage(err));
+    },
+  });
+}
+
+export function useCreateSetPasswordLink() {
+  const toast = useToast();
+  return useMutation({
+    mutationFn: (userId: string) => api.createSetPasswordLink(userId),
+    onSuccess: () => {
+      toast.push("success", "Set-password link created");
+    },
+    onError: (err) => {
+      toast.push("error", "Failed to create link", toastMessage(err));
+    },
+  });
+}
+
+// ---- sessions (own only) ----
+
+export function useSessions() {
+  return useQuery({ queryKey: ["sessions"], queryFn: () => api.listSessions().then((r) => r.data) });
+}
+
+export function useRevokeSession() {
+  const qc = useQueryClient();
+  const toast = useToast();
+  return useMutation({
+    mutationFn: (sessionId: string) => api.revokeSession(sessionId),
+    onSuccess: (_v, sessionId) => {
+      qc.setQueryData<SessionInfo[]>(["sessions"], (old) => (old ?? []).filter((s) => s.id !== sessionId));
+      toast.push("success", "Session revoked");
+    },
+    onError: (err) => {
+      toast.push("error", "Failed to revoke session", toastMessage(err));
+    },
+  });
+}
+
+// ---- project → team assignment ----
+
+export function useUpdateProjectTeam() {
+  const qc = useQueryClient();
+  const toast = useToast();
+  return useMutation({
+    mutationFn: ({ projectId, teamId }: { projectId: string; teamId: string | null }) => api.updateProjectTeam(projectId, teamId),
+    onSuccess: (project, { teamId }) => {
+      qc.setQueryData<Project[]>(["projects"], (old) => (old ?? []).map((p) => (p.id === project.id ? { ...p, teamId } : p)));
+      qc.setQueryData<Project>(["project", project.slug], (old) => (old ? { ...old, teamId } : old));
+      toast.push("success", "Project team updated");
+    },
+    onError: (err) => {
+      toast.push("error", "Failed to update project team", toastMessage(err));
+    },
+  });
+}
+
+// ---- project members ----
 
 type MemberUser = { id: string; email: string; name: string; role: string; createdAt: string; lastSeen: string | null };
 
@@ -888,30 +1184,33 @@ export function useUsers() {
   return useQuery({ queryKey: ["users"], queryFn: () => api.listUsers().then((r) => r.data) });
 }
 
-export function useUpdateUserRole() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: ({ id, role }: { id: string; role: "admin" | "member" }) => api.updateUserRole(id, role),
-    onSuccess: (user) => {
-      qc.setQueryData<MemberUser[]>(["users"], (old) => {
-        if (!old) return old;
-        return old.map((u) => (u.id === user.id ? user : u));
-      });
-      qc.setQueriesData<MemberUser[]>({ queryKey: ["project-members"] }, (old) => old?.map((u) => (u.id === user.id ? user : u)));
-    },
+export function useTeamRuntimes(teamId: string | undefined) {
+  return useQuery({
+    queryKey: ["forge-runtimes", teamId],
+    queryFn: () => api.listRuntimes(teamId).then((r) => r.data),
+    enabled: !!teamId,
+    staleTime: 15_000,
+    refetchInterval: (query) => (query.state.data?.length ? 30_000 : false),
   });
 }
 
 export function useUpdateMyName() {
   const qc = useQueryClient();
+  const toast = useToast();
   return useMutation({
     mutationFn: (name: string) => api.updateMyName(name),
     onSuccess: (user) => {
-      qc.setQueryData<MemberUser[]>(["users"], (old) => {
+      // Mutation response is authoritative — update the session user + any
+      // project-members rows from it, never refetch.
+      qc.setQueryData<{ session: unknown; user: unknown }>(["session"], (old) => {
         if (!old) return old;
-        return old.map((u) => (u.id === user.id ? user : u));
+        return { ...old, user };
       });
       qc.setQueriesData<MemberUser[]>({ queryKey: ["project-members"] }, (old) => old?.map((u) => (u.id === user.id ? user : u)));
+      toast.push("success", "Profile saved");
+    },
+    onError: (err) => {
+      toast.push("error", "Failed to save profile", toastMessage(err));
     },
   });
 }
@@ -1461,10 +1760,11 @@ export function useUpdateComment(slug: string, taskId: string) {
 export function useDeleteComment(slug: string, taskId: string) {
   const qc = useQueryClient();
   const toast = useToast();
+  const { data: session } = useSession();
+  const label = session?.user?.name ?? "user";
   return useMutation({
     mutationFn: (commentId: number) => api.deleteComment(slug, taskId, commentId),
     onSuccess: (_v, commentId) => {
-      const label = api.clientLxkUser()?.name ?? "user";
       const now = new Date().toISOString();
       // DELETE returns 204 with no activity payload — remove the comment card
       // and prepend a LOCAL comment_deleted row (negative id, server row
