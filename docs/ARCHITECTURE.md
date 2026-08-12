@@ -10,8 +10,8 @@ A lightweight, self-hosted project management tool. Kanban board, issue/task tic
 | Backend      | Effect-TS + @effect/platform HttpApi | Typed errors, DI, declarative error→HTTP mapping, OpenAPI for free |
 | Database     | SQLite via bun:sqlite (WAL)   | Local file, zero-ops, transactional batch helper for atomic mutations |
 | Runtime      | Bun standalone HTTP server (Docker) | One process for SSR + REST + MCP + webhooks; simple deploys |
-| Human auth   | Cloudflare Access (via cloudflared tunnel) | Zero auth code — email allowlist in CF dashboard, server reads identity header |
-| Machine auth | API keys (`lxk_` + base62(32B)) | Hermes/MCP: Bearer key → SHA-256 lookup |
+| Human auth   | In-process Better Auth 1.6.27 (pinned) | Email/password login + cookie sessions at `/api/auth/*`; no edge auth, no external IdP, no SMTP |
+| Machine auth | API keys (`lxk_` + base62(43B)) | Hermes/MCP/CLI/webhooks: Bearer key → SHA-256 lookup |
 | MCP Server   | Built into the Bun server     | Streamable HTTP, stateless, shares Effect services with REST |
 | GitHub Sync  | GitHub App + Webhooks         | Issues r/w + Metadata read only; echo-suppressed two-way state sync |
 | Styling      | Tailwind                      | Fast, tree-shaken |
@@ -26,6 +26,7 @@ See SCHEMA.md for the full SQL. Conceptual view:
 ```
 projects
 ├── id, name, slug (UNIQUE), description, timestamps
+├── team_id (owning team — organization id; NULL = unassigned, superadmin-only)
 │
 project_repos (N repos per project, each with roles)
 ├── id, project_id, repo ("owner/name", UNIQUE per project)
@@ -68,26 +69,64 @@ api_keys                        webhook_events
 
 ## Auth
 
-### Humans → Cloudflare Access
-The app hostname sits behind Cloudflare Access (via the cloudflared tunnel) with an email allowlist (or GitHub org policy) managed in the CF dashboard. The Bun server reads `Cf-Access-Authenticated-User-Email` from the tunneled request for identity (assignee suggestions, display). **No OAuth code, no sessions, no cookies, no CSRF surface, no auth routes.**
+### Humans → in-app sessions (Better Auth)
+Better Auth 1.6.27 (pinned, MIT) runs **in-process** on the Bun server
+(`server/auth.ts` — credentials + organization plugins,
+`tanstackStartCookies` LAST, `baseURL` = `LXK_PUBLIC_URL`, secure cookies,
+trusted origins). Mounted at `/api/auth/*` **before** the API-key
+middleware. Email/password only — no social providers, no Google OAuth
+clients, no callback URIs, no SMTP anywhere.
 
-Two deployment rules make this sound (both mandatory):
-
-1. **Serve only on the Access-protected hostname through the tunnel** — no public bypass. The tunnel is the only ingress; there is no `workers.dev` route to disable.
-2. **Machine endpoints can't do Access's browser flow.** Add Access "bypass" policies scoped to `/mcp` and `/api/webhooks/*` — they authenticate via API key and HMAC signature respectively (both already designed). Optional alternative for Hermes: a CF service token.
+- **Login/logout/set-password** — `/login`, `/set-password` pages; sessions
+  are cookie-based, **7d sliding** (Better Auth defaults `expiresIn` 7d /
+  `updateAge` 24h); logout, deactivate, and password change revoke sessions.
+- **Provisioning** — the `/setup` wizard creates the first superadmin
+  (email + password, no email needed); superadmin-issued **workspace invite
+  links** and **set-password links** onboard members (link-based, 7d expiry,
+  shared out-of-band — no email transport).
+- **Roles** — `users.role` ∈ {superadmin, member}; superadmin is **env-only**
+  (`LXK_ADMIN_EMAILS`, applied at provisioning), never edited at runtime.
+  Team-admin authority comes from the org `member.role` (owner/admin) on the
+  team. Teams = Better Auth organizations; projects carry `team_id`;
+  runtimes are team-scoped (`team_id` NULL = superadmin-owned global).
+- **Authorization order (project access):** superadmin > explicit
+  `user_project_roles` grant > team membership > deny (see LAYERS.md →
+  AuthorizationService).
 
 ### Machines → API keys
-`Authorization: Bearer lxk_<base62(32 random bytes)>`. Server: `SHA-256(raw)` → `api_keys.key_hash` lookup. Keys are full read/write — **no scopes** (single-agent trust model, explicit). `last_used_at` updated only when NULL or stale >1h.
+`Authorization: Bearer lxk_<base62(43 random bytes)>`. Server: `SHA-256(raw)` → `api_keys.key_hash` lookup. Keys are full read/write — **no scopes** (single-agent trust model, explicit). `last_used_at` updated only when NULL or stale >1h. MCP/CLI/webhooks unchanged.
 
 The webhook route is exempt from API-key middleware — it authenticates via `X-Hub-Signature-256` (HMAC-SHA-256 over the raw body, constant-time compare, verified before parsing).
 
+### Dual channel + attribution
+`/api/*` accepts a session cookie OR a Bearer key (session first, key
+fallback); `/mcp` is key-only — **sessions never cross the MCP boundary**.
+The `x-lxk-user` header is removed, as is the `<meta name="lxk-api-key">`
+injection / `VITE_LXK_API_KEY` — browsers authenticate via the cookie only.
+Attribution: browser actor = session user; machine actor = key name.
+
 ## API Routes (REST)
 
-All list endpoints paginate: `?limit` (default 50, max 200) + opaque cursor — **except `/board`**, which returns the complete board snapshot. Auth: Access header (humans) or Bearer key (machines); implemented as HttpApi middleware.
+All list endpoints paginate: `?limit` (default 50, max 200) + opaque cursor — **except `/board`**, which returns the complete board snapshot. Auth: session cookie (humans) or Bearer key (machines), implemented as HttpApi middleware; `/api/auth/*` is mounted before it. See API.md for the full contract.
 
 ```
+Auth              GET/POST            /api/auth/*        (Better Auth handler — pre-middleware)
+
 Projects          GET/POST            /api/projects
                   GET/PATCH/DELETE    /api/projects/:slug
+                  PATCH               /api/projects/:projectId/team   { teamId: string | null }
+
+Teams             GET/POST            /api/teams
+                  DELETE              /api/teams/:teamId
+                  GET/POST            /api/teams/:teamId/members
+                  PATCH/DELETE        /api/teams/:teamId/members/:userId
+
+Workspace         GET/PATCH/DELETE    /api/workspace/members[/:userId]
+                  POST/DELETE         /api/workspace/invites[/:inviteId]
+                  POST                /api/workspace/members/:userId/set-password-link
+
+Sessions          GET                 /api/sessions
+                  POST                /api/sessions/:sessionId/revoke
 
 Columns           GET/POST            /api/projects/:slug/columns
                   PATCH/DELETE        /api/projects/:slug/columns/:id
@@ -129,9 +168,9 @@ prevent spoofing — socket IP is only visible at this layer).
 Everything else runs as HttpApi middleware (`server/api/middleware.ts`),
 applied at build time, before route matching and before body decode:
 
-1. **Rate limit** — per-IP, `isPrivateIp`-gated `cf-connecting-ip` trust; `/api/setup` + `/api/health` ARE limited; key/token-gated Forge machine surfaces exempt (`/api/forge/daemon/*` + `/api/forge/runtimes/register` + `/api/forge/machines/heartbeat` — log streams and the 3s listener heartbeat must not 429); shares one bucket with `/mcp` (`apiRateLimiter`); limits DB-configured (settings `settings.rate_limit_max` / `settings.rate_limit_window_ms`, code defaults 6000 req / 600_000 ms as fallback — `GET`/`PUT /api/settings/rate-limit`, applied at boot and on save via `syncRateLimitFromDb`)
+1. **Rate limit** — per-IP, `isPrivateIp`-gated `cf-connecting-ip` trust; `/api/setup` + `/api/health` ARE limited; key/token-gated Forge machine surfaces exempt (`/api/forge/daemon/*` + `/api/forge/runtimes/register` + `/api/forge/machines/heartbeat` — log streams and the 3s listener heartbeat must not 429); shares one bucket with `/mcp` (`apiRateLimiter`); limits DB-configured (settings `settings.rate_limit_max` / `settings.rate_limit_window_ms`, code defaults 6000 req / 600_000 ms as fallback — `GET`/`PUT /api/settings/rate-limit`, applied at boot and on save via `syncRateLimitFromDb`). Failed logins on `/api/auth/*` are separately throttled by the Better Auth rate-limit plugin (in-memory, ~5 attempts/60s per email, 15 min lockout)
 2. **Content-length pre-check** — declared size > `LXK_MAX_BODY_MB` → 413 fast-path (stream cap above stays authoritative)
-3. **Auth** — daemon token (`x-forge-token`, constant-time) for `/api/forge/daemon/*` + `/api/forge/runtimes/register`, else Bearer key → `resolveApiKeyIdentity` on the shared connection; setup/health auth-exempt; 401/403 envelopes byte-identical to the old dispatcher
+3. **Auth** — dual-channel: session cookie first (`SessionService.userFrom`, try/catch), then daemon token (`x-forge-token`, constant-time) for `/api/forge/daemon/*` + `/api/forge/runtimes/register`, else Bearer key → `resolveApiKeyIdentity` on the shared connection; `/api/auth/*` bypasses this middleware entirely; setup/health auth-exempt; 401/403 envelopes byte-identical to the old dispatcher
 4. **`AuthIdentity` provision** — handlers read the Context tag (no per-request DB opens)
 5. **Security headers** — nosniff + no-store on every `/api` response, including router 404s
 
@@ -198,12 +237,17 @@ Anyone with issue-triage permission on a linked repo can trigger webhook-driven 
 ### Routes (TanStack Start)
 ```
 /                          → Dashboard (all projects)
+/login                     → login (email + password)
+/set-password              → set/forgot password (admin-issued link token)
 /:slug                     → Kanban board
 /:slug/tasks/:id           → Task detail (slideover)
 /:slug/wiki                → Wiki index
 /:slug/wiki/:pageSlug      → Wiki page
-/:slug/settings            → Project settings (columns, swimlanes, GitHub link)
-/settings                  → API keys
+/:slug/settings            → Project settings (columns, swimlanes, GitHub link, team assignment)
+/settings                  → role-redirect landing
+/settings/me               → profile, password change, sessions
+/settings/team             → team profile, members, projects, runtimes (team admin)
+/settings/workspace        → members, invites, teams, API keys, machines, rate limits, GitHub, Forge (superadmin)
 ```
 
 Key components: `KanbanBoard` (swimlanes → columns → task cards, inline add, settings modal), `TaskDetail` slideover (title/description editors, property bar, GitHub section), `WikiLayout` (nested collapsible sidebar + TipTap page), `Dashboard` (project cards with health dots, WIP bars, stats, attention sections).
@@ -221,8 +265,9 @@ lexa/
 │   └── lib/                  # api.ts, queries.ts
 ├── server/                   # Effect-TS services
 │   ├── entry.ts              # Bun.serve — boot, webhook, /mcp, static/SSR, /api stream cap + IP stamp
+│   ├── auth.ts               # Better Auth instance (credentials + organization + tanstackStartCookies)
 │   ├── api/                  # HttpApi app (http.ts), middleware.ts (rate/auth/headers), auth-key.ts, auth.ts, errors.ts, limits.ts
-│   ├── services/             # task, project, wiki, column, swimlane, ...
+│   ├── services/             # task, project, wiki, column, swimlane, session, authorization, workspace-invites, password-links, ...
 │   ├── repos/                # task.repo.ts, project.repo.ts, ...
 │   ├── db/                   # database.ts (bun:sqlite layer), migrate.ts
 │   ├── mcp/                  # server.ts + tools/
