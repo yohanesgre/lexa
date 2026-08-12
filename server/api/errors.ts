@@ -57,6 +57,7 @@ export class InvalidName extends Data.TaggedError("InvalidName")<{ reason: strin
 export class InvalidRateLimit extends Data.TaggedError("InvalidRateLimit")<{ reason: string }> {}
 export class InvalidGithubSettings extends Data.TaggedError("InvalidGithubSettings")<{ reason: string }> {}
 export class NoUserContext extends Data.TaggedError("NoUserContext")<{}> {}
+export class ForgeSessionActive extends Data.TaggedError("ForgeSessionActive")<{}> {}
 export { ProjectAccessDenied } from "../services/user-project-role.service";
 
 export const errorCodeMap: Record<string, string> = {
@@ -114,6 +115,7 @@ export const errorCodeMap: Record<string, string> = {
   Forbidden: "FORBIDDEN",
   SetupLocked: "SETUP_LOCKED",
   SearchError: "SEARCH_ERROR",
+  ForgeSessionActive: "FORGE_SESSION_ACTIVE",
   ConstraintViolation: "CONSTRAINT",
   DbError: "DATABASE_ERROR",
 };
@@ -157,6 +159,7 @@ export function errorToStatus(error: { _tag: string }): number {
     case "NoRuntimeOnline":
     case "TaskLinkCycle":
     case "ForgeEntityInUse":
+    case "ForgeSessionActive":
     case "ConstraintViolation":
     case "LastAdminDemote":
     case "MachineIdTaken":
@@ -260,6 +263,8 @@ export function errorMessage(error: { _tag: string } & Record<string, unknown>):
       return `API key not found`;
     case "NoRuntimeOnline":
       return `No Forge runtime is online. Start the daemon (bun run forge:daemon) and try again.`;
+    case "ForgeSessionActive":
+      return `A Forge task is still running for this document — start a new session once it finishes`;
     case "TaskLinkNotFound":
       return `Task link not found`;
     case "TaskLinkCycle":
