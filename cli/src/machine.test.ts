@@ -1,9 +1,8 @@
 // cli/machine.ts — pure fs parts: scrubDaemonEnv (closed allowlist + secret
 // blocklist), machine-id/machine-secret persistence, and the workspace
-// listing. All paths derive from LEXA_DIR at module load, so tests re-import
-// the module against a fresh tmp dir. Process-bound pieces (machineListen,
-// probeClis, systemd install, daemon spawn) are skipped — they spawn real
-// children.
+// listing. Paths are group-dir functions, so tests pass a tmp dir directly.
+// Process-bound pieces (machineListen, probeClis, systemd install, daemon
+// spawn) are skipped — they spawn real children.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Effect } from "effect";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
@@ -38,10 +37,10 @@ describe("scrubDaemonEnv", () => {
     expect(mod.scrubDaemonEnv(env)).toEqual(env);
   });
 
-  it("allows LEXA_DIR through the daemon env scrub (flavor roots)", async () => {
+  it("allows LEXA_DIR and LEXA_FLAVOR through the daemon env scrub (group-dir pass-through)", async () => {
     const mod = await import("./machine");
-    const env = { PATH: "/usr/bin", LEXA_DIR: "/home/u/.lexa-staging" };
-    expect(mod.scrubDaemonEnv(env)).toEqual({ PATH: "/usr/bin", LEXA_DIR: "/home/u/.lexa-staging" });
+    const env = { PATH: "/usr/bin", LEXA_DIR: "/home/u/.lexa/lexa.example.com", LEXA_FLAVOR: "prod" };
+    expect(mod.scrubDaemonEnv(env)).toEqual({ PATH: "/usr/bin", LEXA_DIR: "/home/u/.lexa/lexa.example.com", LEXA_FLAVOR: "prod" });
   });
 
   it("keeps allowlisted prefixes (LC_/XDG_/BUN_)", async () => {
@@ -86,9 +85,10 @@ describe("scrubDaemonEnv", () => {
 });
 
 describe("getOrCreateMachineId", () => {
-  it("creates <hostname>-<hex8> in LEXA_DIR with chmod 600", async () => {
+  // `dir` acts as the group dir — machine identity paths are <group>/machine-id.
+  it("creates <hostname>-<hex8> in the group dir with chmod 600", async () => {
     const mod = await import("./machine");
-    const id = await Effect.runPromise(mod.getOrCreateMachineId());
+    const id = await Effect.runPromise(mod.getOrCreateMachineId(dir));
     expect(id).toMatch(/^[^-]+-[0-9a-f]{8}$/);
     expect(readFileSync(join(dir, "machine-id"), "utf-8").trim()).toBe(id);
     expect(mode(join(dir, "machine-id"))).toBe(0o600);
@@ -96,26 +96,24 @@ describe("getOrCreateMachineId", () => {
 
   it("is stable across calls — never regenerates once written", async () => {
     const mod = await import("./machine");
-    const first = await Effect.runPromise(mod.getOrCreateMachineId());
-    const second = await Effect.runPromise(mod.getOrCreateMachineId());
+    const first = await Effect.runPromise(mod.getOrCreateMachineId(dir));
+    const second = await Effect.runPromise(mod.getOrCreateMachineId(dir));
     expect(second).toBe(first);
   });
 
   it("reuses an existing machine-id file", async () => {
     writeFileSync(join(dir, "machine-id"), "host-abc123\n");
     const mod = await import("./machine");
-    expect(await Effect.runPromise(mod.getOrCreateMachineId())).toBe("host-abc123");
+    expect(await Effect.runPromise(mod.getOrCreateMachineId(dir))).toBe("host-abc123");
   });
 
   it("does not crash on unwritable dir — falls back to a fresh id", async () => {
-    // NOTE: an unwritable LEXA_DIR via /proc hangs node's recursive
+    // NOTE: an unwritable group dir via /proc hangs node's recursive
     // mkdirSync (kernel quirk, verified) — use a chmod-000 dir instead.
     const locked = mkdtempSync(join(tmpdir(), "lexa-machine-locked-"));
     chmodSync(locked, 0o000);
-    process.env.LEXA_DIR = locked;
-    vi.resetModules();
     const mod = await import("./machine");
-    const id = await Effect.runPromise(mod.getOrCreateMachineId());
+    const id = await Effect.runPromise(mod.getOrCreateMachineId(locked));
     chmodSync(locked, 0o700);
     rmSync(locked, { recursive: true, force: true });
     expect(id).toMatch(/^[^-]+-[0-9a-f]{8}$/);
@@ -125,46 +123,48 @@ describe("getOrCreateMachineId", () => {
 describe("machine secret", () => {
   it("getOrCreateMachineSecret returns '' when absent", async () => {
     const mod = await import("./machine");
-    expect(await Effect.runPromise(mod.getOrCreateMachineSecret())).toBe("");
+    expect(await Effect.runPromise(mod.getOrCreateMachineSecret(dir))).toBe("");
   });
 
   it("saveMachineSecret persists chmod 600 and is read back", async () => {
     const mod = await import("./machine");
-    await Effect.runPromise(mod.saveMachineSecret("sec-1"));
+    await Effect.runPromise(mod.saveMachineSecret("sec-1", dir));
     const path = join(dir, "machine-secret");
     expect(readFileSync(path, "utf-8")).toBe("sec-1\n");
     expect(mode(path)).toBe(0o600);
-    expect(await Effect.runPromise(mod.getOrCreateMachineSecret())).toBe("sec-1");
+    expect(await Effect.runPromise(mod.getOrCreateMachineSecret(dir))).toBe("sec-1");
   });
 
   it("saveMachineSecret overwrites the previous secret", async () => {
     const mod = await import("./machine");
-    await Effect.runPromise(mod.saveMachineSecret("sec-1"));
-    await Effect.runPromise(mod.saveMachineSecret("sec-2"));
-    expect(await Effect.runPromise(mod.getOrCreateMachineSecret())).toBe("sec-2");
+    await Effect.runPromise(mod.saveMachineSecret("sec-1", dir));
+    await Effect.runPromise(mod.saveMachineSecret("sec-2", dir));
+    expect(await Effect.runPromise(mod.getOrCreateMachineSecret(dir))).toBe("sec-2");
   });
 });
 
 describe("workspaceList", () => {
+  const cfg = { url: "http://fake-server", apiKey: "lxk_key" };
+
   it("prints the empty hint when no workspace dirs exist", async () => {
     const log = vi.spyOn(console, "log").mockImplementation(() => {});
     const mod = await import("./machine");
-    await Effect.runPromise(mod.workspaceList());
+    await Effect.runPromise(mod.workspaceList(cfg));
     const lines = log.mock.calls.map((c) => String(c[0])).join("\n");
     expect(lines).toContain("No workspaces yet");
     log.mockRestore();
   });
 
   it("lists provisioned, empty, and orphan workspaces from the project index", async () => {
-    mkdirSync(join(dir, "projects", "p1"), { recursive: true });
-    writeFileSync(join(dir, "projects", "p1", "README.md"), "# P1");
-    mkdirSync(join(dir, "projects", "p2"), { recursive: true }); // empty
-    mkdirSync(join(dir, "projects", "p3"), { recursive: true }); // not in index → orphan
-    writeFileSync(join(dir, "projects.json"), JSON.stringify({ p1: { name: "One", slug: "one", description: "" }, p2: { name: "Two", slug: "two", description: "" } }));
+    mkdirSync(join(dir, "fake-server", "projects", "p1"), { recursive: true });
+    writeFileSync(join(dir, "fake-server", "projects", "p1", "README.md"), "# P1");
+    mkdirSync(join(dir, "fake-server", "projects", "p2"), { recursive: true }); // empty
+    mkdirSync(join(dir, "fake-server", "projects", "p3"), { recursive: true }); // not in index → orphan
+    writeFileSync(join(dir, "fake-server", "projects.json"), JSON.stringify({ p1: { name: "One", slug: "one", description: "" }, p2: { name: "Two", slug: "two", description: "" } }));
 
     const log = vi.spyOn(console, "log").mockImplementation(() => {});
     const mod = await import("./machine");
-    await Effect.runPromise(mod.workspaceList());
+    await Effect.runPromise(mod.workspaceList(cfg));
     const lines = log.mock.calls.map((c) => String(c[0])).join("\n");
     expect(lines).toContain("One");
     expect(lines).toContain("provisioned");
@@ -176,11 +176,11 @@ describe("workspaceList", () => {
   });
 
   it("survives a corrupt project index (degrades to orphan rows)", async () => {
-    mkdirSync(join(dir, "projects", "p1"), { recursive: true });
-    writeFileSync(join(dir, "projects.json"), "{corrupt");
+    mkdirSync(join(dir, "fake-server", "projects", "p1"), { recursive: true });
+    writeFileSync(join(dir, "fake-server", "projects.json"), "{corrupt");
     const log = vi.spyOn(console, "log").mockImplementation(() => {});
     const mod = await import("./machine");
-    await Effect.runPromise(mod.workspaceList());
+    await Effect.runPromise(mod.workspaceList(cfg));
     const lines = log.mock.calls.map((c) => String(c[0])).join("\n");
     expect(lines).toContain("orphan");
     log.mockRestore();
