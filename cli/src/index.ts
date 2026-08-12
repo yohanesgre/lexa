@@ -542,9 +542,9 @@ Forge workspaces (local machine view):
   machine workspace list                         per-project dirs under ~/.lexa/<host>/projects/ (per server)
   machine workspace sync                         re-index projects from the server + provision
 
-Deploy (Docker + cloudflared tunnel + Access):
-  deploy <domain> [staging|prod]          Cloudflare tunnel, Access + Google IdP
-                                           provisioning, .env.<flavor> + docker compose up
+Deploy (Docker + cloudflared tunnel):
+  deploy <domain> [staging|prod]          Cloudflare tunnel provisioning,
+                                           .env.<flavor> + docker compose up
                                            (redeploy = upgrade: pulls the latest image;
                                            --image <tag> pins a version; --clean wipes the DB)
   undeploy <domain> [staging|prod]        teardown: containers, volume, CF resources,
