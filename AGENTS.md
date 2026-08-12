@@ -172,18 +172,19 @@ Key facts:
   Without a daemon, Generate returns `NO_RUNTIME_ONLINE`.
 - **Daemons NEVER inherit the listener's shell env:** secret vars are scrubbed
   at spawn (`cli/src/machine.ts` `scrubDaemonEnv` — closed allowlist:
-  PATH/HOME/LANG/LC_*/TERM/TZ/PWD/SHELL/USER/LOGNAME/XDG_*/BUN_*/LEXA_DIR), so
-  runtime credentials come only from the runtime env file + `config.json`.
-  `LEXA_DIR` passes through so the daemon resolves the flavor root the
-  listener runs (`~/.lexa` prod / `~/.lexa-staging` / `~/.lexa-dev`) — without
-  it, staging/dev daemons would build their sandboxes inside the prod root.
-  Starting the listener from a shell with `.env` exported prints a boot
-  warning; a daemon whose env-file key is dead exits 3 ("API key revoked —
-  re-run Setup runtime").
+  PATH/HOME/LANG/LC_*/TERM/TZ/PWD/SHELL/USER/LOGNAME/XDG_*/BUN_*/LEXA_DIR/LEXA_FLAVOR),
+  so runtime credentials come only from the runtime env file + `config.json`.
+  The listener passes its group dir as `LEXA_DIR` and the host's flavor as
+  `LEXA_FLAVOR`, so the daemon resolves state inside the right server group
+  (`~/.lexa/<host>/`) — without it, staging/dev daemons would build their
+  sandboxes inside the prod root. Starting the listener from a shell with
+  `.env` exported prints a boot warning; a daemon whose env-file key is dead
+  exits 3 ("API key revoked — re-run Setup runtime").
 - Every run picks an **agent** (rule bundle, default "Lexa") + a dependent
   **skill** (operation bundle) in the popover; the claim carries their
   instructions (`agentMarkdown`/`skillMarkdown`) — files-only, no host store.
-  All host state lives under `~/.lexa/` (`LEXA_DIR`).
+  All host state lives under `~/.lexa/` (`LEXA_DIR`), grouped per server host
+  (`~/.lexa/<host>/`).
 - **Warm opencode runtimes (opencode only):** the daemon owns one `opencode
   serve` per runtime and drives every task over pure HTTP — no `run` client is
   ever spawned (the attach client is unreliable on 1.18.11: it exits without
@@ -206,10 +207,12 @@ Key facts:
   no history rows). Auto-compaction is server-side (`compaction.auto` in the
   serve session loop) — long-lived sessions compact themselves, no Lexa work.
 - **Serve lifecycle:** serve binds `127.0.0.1` on a flavor-separated port —
-  prod 4096–4127, staging 4196–4227, dev 4296–4327 (`flavorBaseFor(LEXA_DIR)`
+  prod 4096–4127, staging 4196–4227, dev 4296–4327 (`flavorBaseFor(LEXA_FLAVOR)`
   + `fnv1a(runtimeId) % 32`, +1..+4 fallback candidates, `FORGE_SERVE_PORT`
   override in the runtime env file first), readiness probed via `GET /session`
-  (200 = fully up). The daemon sweeps a stale `serve.pid` at boot
+  (200 = fully up). Flavor is a derived label only (loopback → `dev`, else
+  `prod`; `LEXA_FLAVOR`/`--flavor` override) used for exactly this serve-port
+  base — never for state paths. The daemon sweeps a stale `serve.pid` at boot
   (SIGKILL/power-loss orphans), respawns crashed serve with a 5s→30s backoff
   (never gives up, sessions survive — the session DB lives in the persistent
   sandbox), kills serve on its SIGTERM (listener stop) and on the exit-3
@@ -217,13 +220,14 @@ Key facts:
   runtime unavailable — opencode serve did not start" — no legacy cold-`run`
   fallback.
 - **Persistent sandbox + workspace (opencode only):** every project gets a
-  persistent workspace dir at `~/.lexa/projects/<projectId>/` (seeded
+  persistent workspace dir at `~/.lexa/<host>/projects/<projectId>/` (seeded
   write-once with README.md + a static orchestrator AGENTS.md); per run the
   daemon (over)writes `.agents/agents/<agentId>/AGENTS.md` (the selected
   lexa-agent's rules) and `.agents/skills/<skillId>/SKILL.md`. The sealed
   per-run `.forge/` HOME is replaced by a persistent per-runtime sandbox at
-  `<LEXA_DIR>/runtimes/<runtimeId>/forge-home/` (seeded once, never wiped —
-  removed only with the runtime; contains the deny-rule `opencode.json`:
+  the group's `<LEXA_DIR>/runtimes/<runtimeId>/forge-home/` (seeded once, never
+  wiped — removed only with the runtime; contains the deny-rule
+  `opencode.json`:
   bash fully denied, `external_directory: deny`, `*auth.json*` denied,
   `skill`/`webfetch` denied + a copy of
   `~/.local/share/opencode/auth.json` chmod 600, refreshed at serve boot AND
@@ -235,7 +239,7 @@ Key facts:
   session after wiping a workspace. Global opencode config — permissions,
   MCP servers, plugins — never loads into Forge runs.
   `lexa-cli machine workspace list|sync` inspects/re-syncs local workspaces.
-  hermes/command-code keep the legacy ephemeral `~/.lexa/runs/` layout.
+  hermes/command-code keep the legacy ephemeral `~/.lexa/<host>/runs/` layout.
 
 ### lexa-cli — two builds, one interface, independent releases
 
@@ -254,11 +258,15 @@ The CLI version is **independent** of the web app version:
   `cli/src/packed.ts` is a build-time embed — keep the committed stub empty so dev
   copies daemon.ts fresh from disk.
 - **dev** = `bun run lexa-cli-dev` or `bun run install:cli-dev` →
-  `~/.local/bin/lexa-cli-dev` (shim running the live repo source via bun —
-  never overwrites the prod name).
+  `~/.local/bin/lexa-cli-dev` (a pure "run repo source via bun" wrapper — no
+  `LEXA_DIR` export or flavor logic, identical behavior and state paths to the
+  compiled binary; never overwrites the prod name).
 - The operator CLI wraps the REST API with `lxk_` Bearer keys.
-  `lexa-cli login --url … --key …` stores creds in `~/.lexa/config.json`
-  (chmod 600); env fallbacks `LEXA_URL`/`LEXA_API_KEY`. Commands: `machine
+  `lexa-cli login --url … --key …` stores creds in `~/.lexa/<host>/config.json`
+  (chmod 600); the URL is required — no default, empty TTY input re-prompts,
+  non-TTY exits with a message. Env fallbacks `LEXA_URL`/`LEXA_API_KEY`. Every
+  command except `login`, `logout`, `deploy`, `undeploy`, `upgrade` requires
+  resolvable credentials. Commands: `machine
   install|listen|start|stop|restart|status|logs|list|uninstall` (the listener
   is the machine-level supervisor), `task|wiki|project` for CRUD, `deploy`,
   `upgrade`, `github status|setup|check`. Agent skill:
@@ -267,15 +275,21 @@ The CLI version is **independent** of the web app version:
 - **Runtime setup wizard → CLI listener:** the web Settings wizard (Settings →
   Forge Runtimes → Setup runtime) lists registered machines from
   `GET /api/forge/machines`, then sends only machine + agent CLI + a fresh key
-  through `POST /api/forge/runtime-events`. The listener persists its machine id
-  at `~/.lexa/machine-id` and the per-machine secret at `~/.lexa/machine-secret`
-  (both chmod 600), heartbeats every 3s, claims only its own events (sending
-  `x-machine-secret`), and owns one daemon child per runtime under
-  `~/.lexa/runtimes/<runtime-id>/env` (chmod 600). `machine install` is a thin
+  through `POST /api/forge/runtime-events`. The listener derives its group
+  from the server URL at boot (`machine listen --url <base>`; `machine install`
+  bakes the URL into the systemd unit ExecStart). It persists its machine id
+  at `~/.lexa/<host>/machine-id` and the per-machine secret at
+  `~/.lexa/<host>/machine-secret` (both chmod 600), heartbeats every 3s,
+  claims only its own events (sending `x-machine-secret`), and owns one daemon
+  child per runtime under `~/.lexa/<host>/runtimes/<runtime-id>/env`
+  (chmod 600). `machine install` is a thin
   listener alias; `--no-systemd` writes no daemon files and runs the listener
   under your own supervisor.
 - **`lexa-cli deploy <domain> [staging|prod]`** is for remote deployment
-  (Docker + cloudflared tunnel + Access; see `docs/DEPLOYMENT.md`). The image is
+  (Docker + cloudflared tunnel + Access; see `docs/DEPLOYMENT.md`). Deploy
+  state lives at `~/.lexa/<domain>/deploy/` (one flavor per domain —
+  subdomains are separate flavors) with creds in `~/.lexa/<domain>/config.json`.
+  The image is
   built and pushed by CI: main → `ghcr.io/yohanesgre/lexa:staging`, `v*` tags →
   `:latest` (prod). `deploy` embeds only the compose files (few KB) and pulls
   the image — **no checkout, no build, no git**. **Redeploy = upgrade**: it
