@@ -2,6 +2,7 @@ import { Effect } from "effect";
 import { ColumnService } from "../../services/column.service";
 import { SwimlaneService } from "../../services/swimlane.service";
 import { FieldConfigService } from "../../services/field-config.service";
+import { ProjectReposRepo } from "../../repos/project-repos.repo";
 import { resolveProject } from "../resolve";
 
 export const tool = {
@@ -20,16 +21,18 @@ export const tool = {
       const columnService = yield* ColumnService;
       const swimlaneService = yield* SwimlaneService;
       const fieldConfigService = yield* FieldConfigService;
+      const reposRepo = yield* ProjectReposRepo;
 
       const columns = yield* columnService.findByProject(project.id);
       const swimlanes = yield* swimlaneService.findByProject(project.id);
       const config = yield* fieldConfigService.findByProject(project.id);
+      const repos = yield* reposRepo.listByProject(project.id);
 
       return {
         name: project.name,
         slug: project.slug,
         description: project.description,
-        githubRepo: project.githubRepo,
+        repos,
         columns: columns.map((c) => ({
           name: c.name,
           wipLimit: c.wipLimit,

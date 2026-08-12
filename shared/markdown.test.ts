@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { docToMarkdown, markdownToDoc } from "./markdown";
+import { docToMarkdown, markdownToDoc, normalizeMarkdownForEcho } from "./markdown";
 import type { TipTapDoc } from "./types";
 
 function rd(md: string): string {
@@ -315,5 +315,29 @@ describe("round-trip", () => {
     const doc = markdownToDoc("| a | b |\n|---|---|\n| 1 | 2 |");
     const content = doc.content as Record<string, unknown>[];
     expect(content[0]).toMatchObject({ type: "codeBlock" });
+  });
+});
+
+describe("normalizeMarkdownForEcho", () => {
+  it("trims edge whitespace and converts CRLF to LF (GitHub boundary normalization)", () => {
+    expect(normalizeMarkdownForEcho("  hello\n")).toBe("hello");
+    expect(normalizeMarkdownForEcho("a\r\nb\r\n")).toBe("a\nb");
+    expect(normalizeMarkdownForEcho("\r\n# Title\r\n\r\nbody\r\n")).toBe("# Title\n\nbody");
+  });
+
+  it("leaves the internal structure untouched — only string edges change", () => {
+    const md = "  - [x] done\n\n  | a | b |\n  |---|---|\n  | 1 | 2 |\n\n";
+    expect(normalizeMarkdownForEcho(md)).toBe("- [x] done\n\n  | a | b |\n  |---|---|\n  | 1 | 2 |");
+  });
+
+  it("treats null and empty as equal", () => {
+    expect(normalizeMarkdownForEcho(null)).toBe("");
+    expect(normalizeMarkdownForEcho("")).toBe("");
+    expect(normalizeMarkdownForEcho(null)).toBe(normalizeMarkdownForEcho(""));
+  });
+
+  it("is idempotent", () => {
+    const md = " x \r\n ";
+    expect(normalizeMarkdownForEcho(normalizeMarkdownForEcho(md))).toBe(normalizeMarkdownForEcho(md));
   });
 });

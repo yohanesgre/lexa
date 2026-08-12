@@ -6,14 +6,9 @@ const NOW = "2026-07-29T12:00:00Z";
 
 describe("rowToProject", () => {
   it("maps snake_case to camelCase", () => {
-    const row: ProjectRow = { id: "p1", name: "Test", slug: "test", description: "desc", github_repo: "owner/repo", created_at: NOW, updated_at: NOW };
+    const row: ProjectRow = { id: "p1", name: "Test", slug: "test", description: "desc", created_at: NOW, updated_at: NOW };
     const p = rowToProject(row);
-    expect(p).toEqual({ id: "p1", name: "Test", slug: "test", description: "desc", githubRepo: "owner/repo", createdAt: NOW, updatedAt: NOW });
-  });
-
-  it("handles null github_repo", () => {
-    const row: ProjectRow = { id: "p1", name: "T", slug: "t", description: "", github_repo: null, created_at: NOW, updated_at: NOW };
-    expect(rowToProject(row).githubRepo).toBeNull();
+    expect(p).toEqual({ id: "p1", name: "Test", slug: "test", description: "desc", createdAt: NOW, updatedAt: NOW });
   });
 });
 
@@ -93,30 +88,30 @@ describe("rowToTask", () => {
   });
 
   it("builds githubs array from raw concat string", () => {
-    const linked: TaskRow = { ...row, github_issues_raw: "ghi1,42,owner/repo,open" };
+    const linked: TaskRow = { ...row, github_issues_raw: "ghi1,42,owner/repo,open,0" };
     const t = rowToTask(linked);
     expect(t.githubs).toEqual([{
       issueId: "ghi1", issueNumber: 42, repo: "owner/repo",
       url: "https://github.com/owner/repo/issues/42",
-      syncedState: "open", outOfSync: false,
+      syncedState: "open", outOfSync: false, pushFailed: false,
     }]);
   });
 
   it("builds multiple githubs", () => {
-    const linked: TaskRow = { ...row, github_issues_raw: "ghi1,1,r1,open||ghi2,2,r2,closed" };
+    const linked: TaskRow = { ...row, github_issues_raw: "ghi1,1,r1,open,0||ghi2,2,r2,closed,0" };
     const t = rowToTask(linked);
     expect(t.githubs).toHaveLength(2);
     expect(t.githubs[1]).toMatchObject({ issueId: "ghi2", issueNumber: 2, repo: "r2", syncedState: "closed" });
   });
 
   it("detects outOfSync when column githubState differs", () => {
-    const linked: TaskRow = { ...row, github_issues_raw: "ghi1,1,r,open" };
+    const linked: TaskRow = { ...row, github_issues_raw: "ghi1,1,r,open,0" };
     const t = rowToTask(linked, "closed");
     expect(t.githubs[0].outOfSync).toBe(true);
   });
 
   it("uses column_github_state from row when arg not provided", () => {
-    const linked: TaskRow = { ...row, github_issues_raw: "ghi1,1,r,closed", column_github_state: "open" };
+    const linked: TaskRow = { ...row, github_issues_raw: "ghi1,1,r,closed,0", column_github_state: "open" };
     const t = rowToTask(linked);
     expect(t.githubs[0].outOfSync).toBe(true);
   });

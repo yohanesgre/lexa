@@ -31,8 +31,8 @@ function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
 }
 
-const PROJECT = { id: "p1", slug: "demo", name: "Demo", description: "", githubRepo: null, createdAt: "t", updatedAt: "t" };
-const PROJECT2 = { id: "p2", slug: "other", name: "Other", description: "", githubRepo: null, createdAt: "t", updatedAt: "t" };
+const PROJECT = { id: "p1", slug: "demo", name: "Demo", description: "", repos: [], createdAt: "t", updatedAt: "t" };
+const PROJECT2 = { id: "p2", slug: "other", name: "Other", description: "", repos: [], createdAt: "t", updatedAt: "t" };
 
 const routes = new Map<string, unknown>();
 function mockFetch(): void {

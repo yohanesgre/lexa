@@ -37,7 +37,7 @@ beforeAll(async () => {
     seen.push({ method: req.method ?? "", url: req.url ?? "", headers: req.headers, body });
     const url = req.url ?? "";
     if (url === "/api/health") return json(res, 200, { ok: true });
-    if (url === "/api/projects") return json(res, 200, { data: [{ id: "p1", slug: "demo", name: "Demo", description: null, githubRepo: null }] });
+    if (url === "/api/projects") return json(res, 200, { data: [{ id: "p1", slug: "demo", name: "Demo", description: null }] });
     if (url === "/api/projects/demo/tasks" && req.method === "POST") return json(res, 201, { data: { id: "t1", title: "New" }, activity: [] });
     if (url === "/api/forge/runtimes" && req.method === "GET") { res.writeHead(401, { "Content-Type": "text/plain" }); return res.end("nope"); }
     if (url === "/api/projects/demo/tasks/t1/github-link") return json(res, 409, { error: { code: "ALREADY_LINKED", message: "issue already linked", details: { issueId: "42" } } });
@@ -84,7 +84,7 @@ describe("LexaClient request building", () => {
 
   it("listProjects unwraps the data envelope", async () => {
     const out = await Effect.runPromise(client().listProjects());
-    expect(out).toEqual([{ id: "p1", slug: "demo", name: "Demo", description: null, githubRepo: null }]);
+    expect(out).toEqual([{ id: "p1", slug: "demo", name: "Demo", description: null }]);
   });
 
   it("POST sends the JSON body", async () => {

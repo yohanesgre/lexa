@@ -90,6 +90,8 @@ INSERT INTO tasks (id, project_id, column_id, swimlane_id, title, description, p
   ('t2', 'p1', 'c1', 's1', 'Plain Task', '{"type":"doc","content":[]}', 'pr-1', 'tp-1', 'a1', '2026-01-01 10:00:00');
 INSERT INTO task_github_issues (task_id, issue_id, issue_number, repo, synced_state) VALUES
   ('t1', 'ghi1', 7, 'owner/repo', 'open');
+INSERT INTO project_repos (id, project_id, repo, source_role, workspace_role) VALUES
+  ('pr1', 'p1', 'owner/repo', 1, 1);
 INSERT INTO settings (key, value) VALUES
   ('github_app_id', '12345'),
   ('github_private_key', '-----BEGIN RSA PRIVATE KEY-----\nfake\n-----END RSA PRIVATE KEY-----'),
@@ -98,10 +100,16 @@ INSERT INTO forge_agents (id, name, description, instructions, is_builtin) VALUE
   ('a1', 'Test Agent', '', 'Agent instructions', 0);
 INSERT INTO forge_skills (id, name, description, instructions, is_builtin) VALUES
   ('sk1', 'Test Skill', '', 'Skill instructions', 0);
+-- p2 has no source repos — tasks there get no repoContent.
+INSERT INTO projects (id, name, slug) VALUES ('p2', 'P2', 'p2');
+INSERT INTO columns (id, project_id, name, position) VALUES ('c2', 'p2', 'Todo', 0);
+INSERT INTO swimlanes (id, project_id, name, position, kind) VALUES ('s2', 'p2', 'Main', 0, 'backlog');
+INSERT INTO tasks (id, project_id, column_id, swimlane_id, title, description, priority, type, position, created_at) VALUES
+  ('t3', 'p2', 'c2', 's2', 'NoRepo Task', '{"type":"doc","content":[]}', 'pr-1', 'tp-1', 'a0', '2026-01-01 10:00:00');
 INSERT INTO forge_tasks (id, project_id, document_type, document_id, agent_id, skill_id, selection, doc_context, status, created_at) VALUES
   ('ft1', 'p1', 'task', 't1', 'a1', 'sk1', '', 'Task: Linked Task', 'queued', '2026-01-01 10:00:00'),
   ('ft2', 'p1', 'task', 't1', 'a1', 'sk1', '', 'Task: Linked Task', 'queued', '2026-01-01 10:00:01'),
-  ('ft3', 'p1', 'task', 't2', 'a1', 'sk1', '', 'Task: Plain Task', 'queued', '2026-01-01 10:00:02'),
+  ('ft3', 'p2', 'task', 't3', 'a1', 'sk1', '', 'Task: NoRepo Task', 'queued', '2026-01-01 10:00:02'),
   ('ft4', 'p1', 'task', 't1', 'a1', 'sk1', '', 'Task: Linked Task', 'queued', '2026-01-01 10:00:03');
 `);
   handler = createApiHandler(dbPath);

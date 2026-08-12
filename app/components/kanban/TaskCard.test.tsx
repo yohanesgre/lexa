@@ -19,7 +19,7 @@ const FIELD_OPTIONS = {
 };
 
 const BOARD: Board = {
-  project: { id: "p1", slug: "demo", name: "Demo", description: "", githubRepo: null, createdAt: "t", updatedAt: "t" },
+  project: { id: "p1", slug: "demo", name: "Demo", description: "", repos: [], createdAt: "t", updatedAt: "t" },
   columns: [{ id: "c1", projectId: "p1", name: "Todo", position: 0, color: "#888", wipLimit: null, requiredFields: [], githubState: null }],
   swimlanes: [{ id: "s1", projectId: "p1", name: "Backlog", description: "", position: 0, dueAt: null, archivedAt: null, kind: "backlog" }],
   fieldConfig: FIELD_OPTIONS,
@@ -31,7 +31,7 @@ const TASK: Task = {
   id: "t1", projectId: "p1", columnId: "c1", swimlaneId: "s1", title: "Task One",
   description: { type: "doc", content: [] }, priority: "pr-high", type: "tp-feature",
   assignees: ["Maria", "Joao", "Ana", "Pedro"], position: "a0", githubs: [
-    { issueId: "ghi1", issueNumber: 7, repo: "owner/repo", syncedState: "open", url: "https://github.com/owner/repo/issues/7", outOfSync: false },
+    { issueId: "ghi1", issueNumber: 7, repo: "owner/repo", syncedState: "open", url: "https://github.com/owner/repo/issues/7", outOfSync: false, pushFailed: false },
   ], dueAt: null, archivedAt: null, createdAt: "t", updatedAt: "t",
 };
 

@@ -25,7 +25,12 @@ See SCHEMA.md for the full SQL. Conceptual view:
 
 ```
 projects
-├── id, name, slug (UNIQUE), description, github_repo ("owner/repo"), timestamps
+├── id, name, slug (UNIQUE), description, timestamps
+│
+project_repos (N repos per project, each with roles)
+├── id, project_id, repo ("owner/name", UNIQUE per project)
+├── source_role (Forge context + project label), workspace_role (issue link/create/sync)
+└── created_at — at least one role per row
 │
 columns (per project, ordered)
 ├── id, name, position, color, wip_limit
@@ -44,7 +49,8 @@ tasks
 │
 task_github_issues (junction — one task ↔ many issues, one per repo)
 ├── task_id, issue_id (GitHub node_id, UNIQUE per task), issue_number, repo ("owner/name")
-└── synced_state (last known issue state — per-issue echo suppression)
+├── synced_state (last known issue state — per-issue echo suppression)
+└── pushed_title / pushed_body / push_failed (content-sync echo + divergence)
 │
 task_links (subtask_of / blocked_by / related_to)
 └── id, project_id, from_task_id, to_task_id, relation
@@ -135,7 +141,7 @@ applied at build time, before route matching and before body decode:
 - **Auth:** `Authorization: Bearer lxk_...` — same validation as REST.
 - **Pagination:** all `list_*`/`search_*` tools accept `limit` (default 50) + `cursor` and return `nextCursor`. Protects the agent's context window.
 
-Tools: `create_task`, `list_tasks`, `get_task`, `update_task`, `move_task`, `delete_task`, `get_wiki_page`, `create_wiki_page`, `update_wiki_page`, `list_wiki_pages`, `search_wiki`, `link_github_issue`, `unlink_github_issue`, `list_projects`, `get_project`, `get_project_status`. Full contract in MCP.md.
+Tools: `create_task`, `list_tasks`, `get_task`, `update_task`, `move_task`, `delete_task`, `get_wiki_page`, `create_wiki_page`, `update_wiki_page`, `list_wiki_pages`, `search_wiki`, `link_github_issue`, `unlink_github_issue`, `list_github_issues`, `create_task_from_github_issue`, `link_project_repo`, `unlink_project_repo`, `list_projects`, `get_project`, `get_project_status`. Full contract in MCP.md.
 
 ## GitHub Integration
 
@@ -144,18 +150,20 @@ Tools: `create_task`, `list_tasks`, `get_task`, `update_task`, `move_task`, `del
 - **Subscribed events:** `issues.closed`, `issues.reopened`, `issues.edited`. (`issues.opened` dropped — auto-creating Lexa tasks from GitHub issues is out of scope; `issues.labeled` dropped — no label feature.)
 - Installation tokens cached ~50 min (1h TTL minus margin), never minted per call.
 - **Config model — the settings DB is the single source of truth at runtime** (`GET`/`PUT /api/settings/github`, admin-only): `settings.github_app_id` / `github_private_key` / `github_webhook_secret`. Env (`GITHUB_APP_ID` / `GITHUB_PRIVATE_KEY` / `GITHUB_PRIVATE_KEY_FILE` / `GITHUB_WEBHOOK_SECRET`) is a **first-boot bootstrap only**: `mirrorSettingsFromEnv` copies it into the DB once at boot when keys are empty (inline PEM wins over the file; the file is read at mirror time), and the runtime never reads env again. **Upgrade note:** existing env-only deployments import their env config into the DB on the first boot after this change — no manual migration. `GitHubConfigLive` serves a mutable holder — `syncGitHubConfigFromDb` (boot + on save) applies DB values live, `resetGithubCaches()` drops stale installation/token caches, and the webhook verifier reads the secret per request. Secrets are write-only over the API (booleans only); GET `source` is `"settings"` (any github_* row) or `"none"` — there is no env state.
-- **Forge repo-content (best-effort):** on daemon claim, a task's linked GitHub repos (≤ 3, from `task_github_issues`) are fetched via the Contents API — default branch → recursive tree → `selectRepoFiles` (skips node_modules/dist/binaries/lockfiles; ≤ 50 files, ≤ 256 KB each, ≤ 512 KB total) → per-file base64 content. Delivered in the claim as `repoContent` (the daemon writes it into repo-content/ + MANIFEST.md; the prompt points the agent there). Every failure — unconfigured app, missing repo, network, per-file error — skips with a warn; a claim NEVER fails for missing context (`selectRepoFiles` in `server/github/repo-content.ts`, assembly in the claim handler).
+- **Forge repo-content (best-effort):** on daemon claim, the project's **source-role repos** (≤ `settings.forge_repo_cap`, default 3, env bootstrap `LXK_FORGE_REPO_CAP` — same pattern as rate limits) are fetched via the Contents API — default branch → recursive tree → `selectRepoFiles` (skips node_modules/dist/binaries/lockfiles; ≤ 50 files, ≤ 256 KB each, ≤ 512 KB total) → per-file base64 content. Delivered in the claim as `repoContent` (the daemon writes it into repo-content/ + MANIFEST.md; the prompt points the agent there). Every failure — unconfigured app, missing repo, network, per-file error — skips with a warn; a claim NEVER fails for missing context (`selectRepoFiles` in `server/github/repo-content.ts`, assembly in the claim handler).
 
 ### Sync matrix — what syncs, which direction, who wins
 
 | Data | Lexa → GitHub | GitHub → Lexa |
 |------|:---:|:---:|
 | Issue state ↔ column (via `columns.github_state`) | ✅ on task move (best-effort, non-blocking) | ✅ on webhook |
-| Issue title | ❌ | ✅ on `issues.edited` (GitHub wins) |
-| Issue body ↔ task description | ❌ (link only) | ❌ |
+| Issue title + body (content, asymmetric) | ✅ on task save when title/description changed (best-effort, after commit; echo columns `pushed_title`/`pushed_body`; failure → `push_failed`) | ✅ on `issues.edited` via API fetch (echo-checked, GitHub wins) |
+| Issue body ↔ task description | (same row above — content sync) | (same row above — content sync) |
 | Assignees | ❌ | ❌ |
 
-The asymmetry is deliberate: Lexa owns the board, GitHub owns the issue text. Conflict surface is minimal because only state flows both ways.
+The asymmetry is deliberate: Lexa owns the board, GitHub owns the issue text. State flows both ways (echo-suppressed); content flows both ways but **asymmetrically** — Lexa pushes on save (TipTap → Markdown), GitHub edits pull back via `edited` (Markdown → TipTap), and the webhook skips our own pushes by comparing fetched title **and** body against `pushed_*` after trim + CRLF→LF normalization.
+
+**Repo roles:** a project links N repos via `project_repos`, each with independent `source_role` (Forge context + project label) and `workspace_role` (issue link/create/sync) booleans — at least one per row. Workspace-role repos gate NEW issue links; removing a role never freezes existing links. Forge context sources from the project's source-role repos (cap `settings.forge_repo_cap`, default 3).
 
 ### Echo suppression & idempotency (the loop-killer)
 
@@ -179,6 +187,8 @@ Move in Lexa → syncStateFromLexa() → GitHub issue closed
 6. `move()` early-returns on no-op (same column, no reposition).
 7. One task ↔ many issues (junction table), one per repo: duplicate repo links rejected (already-linked guard). Per-issue `UNIQUE(task_id, issue_id)`.
 8. Failed Lexa→GitHub sync diverges by design (best-effort, no retry queue). The UI surfaces it: a linked task shows "out of sync" when `synced_state` ≠ its column's `github_state`. Manual re-move resyncs.
+9. **Content sync is asymmetric + echo-safe.** Lexa pushes title+body on task save (only when changed, after the mutation commits; diffed against `pushed_title`/`pushed_body`; the push itself emits no activity). The webhook `edited` handler GETs the issue, skips when fetched title+body both match `pushed_*` (trim + CRLF→LF via `normalizeMarkdownForEcho`; GET failure → title-only compare fallback), else applies title + description (Markdown → TipTap) emitting `field_changed` (actor system/'github') in the same transaction. `push_failed` drives the "edit not pushed" divergence reason.
+10. **Repo roles gate new links only.** `source_role` (Forge context + label) and `workspace_role` (issue link/create/sync) are independent; removing a role never freezes existing task↔issue links — they keep syncing.
 
 ### Trust boundary
 Anyone with issue-triage permission on a linked repo can trigger webhook-driven board moves (close/reopen an issue → card moves, bypassing WIP and required_fields). This is intentional — GitHub is the source of truth for issue state (see sync matrix). On public repos, external contributors can affect the board; if that becomes a problem, the mitigation is restricting the App to private repos or filtering webhook senders — not more auth code.

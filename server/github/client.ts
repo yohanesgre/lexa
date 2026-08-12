@@ -79,6 +79,7 @@ interface GithubIssueApiShape {
   number: number;
   state: "open" | "closed";
   title: string;
+  body?: string;
 }
 
 async function githubFetch(config: GitHubConfig["Type"], path: string, init: RequestInit): Promise<Response> {
@@ -188,7 +189,23 @@ export class GitHubClient extends Effect.Service<GitHubClient>()("GitHubClient",
           catch: (e) => (e instanceof GithubApiError ? e : new GithubApiError({ message: String(e) })),
         }),
 
-      getIssue: (repo: string, issueNumber: number): Effect.Effect<{ nodeId: string; number: number; state: "open" | "closed"; title: string }, GithubApiError> =>
+      updateIssueContent: (repo: string, issueNumber: number, content: { title: string; body: string }): Effect.Effect<void, GithubApiError> =>
+        Effect.tryPromise({
+          try: async () => {
+            const res = await authedFetch(repo, `/repos/${repo}/issues/${issueNumber}`, {
+              method: "PATCH",
+              body: JSON.stringify(content),
+            });
+            if (!res.ok) {
+              throw new GithubApiError({
+                message: `GitHub update issue content failed: ${res.status} ${await res.text().catch(() => "")}`,
+              });
+            }
+          },
+          catch: (e) => (e instanceof GithubApiError ? e : new GithubApiError({ message: String(e) })),
+        }),
+
+      getIssue: (repo: string, issueNumber: number): Effect.Effect<{ nodeId: string; number: number; state: "open" | "closed"; title: string; body: string }, GithubApiError> =>
         Effect.tryPromise({
           try: async () => {
             const res = await authedFetch(repo, `/repos/${repo}/issues/${issueNumber}`, { method: "GET" });
@@ -198,7 +215,48 @@ export class GitHubClient extends Effect.Service<GitHubClient>()("GitHubClient",
               });
             }
             const issue = (await res.json()) as GithubIssueApiShape;
-            return { nodeId: issue.node_id, number: issue.number, state: issue.state, title: issue.title };
+            return { nodeId: issue.node_id, number: issue.number, state: issue.state, title: issue.title, body: issue.body ?? "" };
+          },
+          catch: (e) => (e instanceof GithubApiError ? e : new GithubApiError({ message: String(e) })),
+        }),
+
+      // Recent issues of a repo (open + closed), newest first, capped at
+      // per_page=100 — the autocomplete backing. Core API (not the search
+      // API): no index lag, no 30/min search quota. Pull requests are
+      // excluded (the /issues endpoint includes them with a pull_request key).
+      listIssues: (owner: string, repo: string): Effect.Effect<{ number: number; title: string; state: "open" | "closed" }[], GithubApiError> =>
+        Effect.tryPromise({
+          try: async () => {
+            const res = await authedFetch(`${owner}/${repo}`, `/repos/${owner}/${repo}/issues?state=all&per_page=100&sort=created&direction=desc`, {
+              method: "GET",
+            });
+            if (!res.ok) {
+              throw new GithubApiError({
+                message: `GitHub list issues failed: ${res.status} ${await res.text().catch(() => "")}`,
+              });
+            }
+            const items = (await res.json()) as { number: number; title: string; state: "open" | "closed"; pull_request?: unknown }[];
+            return items.filter((i) => !i.pull_request).map((i) => ({ number: i.number, title: i.title, state: i.state }));
+          },
+          catch: (e) => (e instanceof GithubApiError ? e : new GithubApiError({ message: String(e) })),
+        }),
+
+      // Type-ahead repo search for the Settings Linked Repos add-row. Search
+      // API (30 req/min authed) — debounced client-side; only repos the App
+      // is installed on appear (the App never sees beyond its install scope).
+      searchRepos: (query: string): Effect.Effect<string[], GithubApiError> =>
+        Effect.tryPromise({
+          try: async () => {
+            const res = await githubFetch(config, `/search/repositories?q=${encodeURIComponent(query)}&per_page=8&sort=stars`, {
+              method: "GET",
+            });
+            if (!res.ok) {
+              throw new GithubApiError({
+                message: `GitHub search repos failed: ${res.status} ${await res.text().catch(() => "")}`,
+              });
+            }
+            const body = (await res.json()) as { items?: { full_name: string }[] };
+            return (body.items ?? []).map((i) => i.full_name);
           },
           catch: (e) => (e instanceof GithubApiError ? e : new GithubApiError({ message: String(e) })),
         }),

@@ -22,7 +22,7 @@ function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
 }
 
-const PROJECT: Project = { id: "p1", slug: "demo", name: "Demo", description: "", githubRepo: null, createdAt: "t", updatedAt: "t" };
+const PROJECT: Project = { id: "p1", slug: "demo", name: "Demo", description: "", repos: [], createdAt: "t", updatedAt: "t" };
 const COLUMN: Column = { id: "c1", projectId: "p1", name: "Todo", position: 0, color: "#888", wipLimit: null, requiredFields: [], githubState: null };
 const SWIMLANE: Swimlane = { id: "s1", projectId: "p1", name: "Backlog", description: "", position: 0, dueAt: null, archivedAt: null, kind: "backlog" };
 const FIELD_CONFIG: FieldConfig = {
@@ -236,7 +236,7 @@ describe("deriveTaskList", () => {
       columns: [],
       swimlanes: [],
       fieldConfig: { priorities: [], types: [] },
-      tasks: [{ ...TASK, columnId: "c-x", swimlaneId: "s-x", priority: "prio-x", type: "type-x", githubs: [{ issueId: "g", issueNumber: 7, repo: "r", syncedState: null, url: "u", outOfSync: false }] }],
+      tasks: [{ ...TASK, columnId: "c-x", swimlaneId: "s-x", priority: "prio-x", type: "type-x", githubs: [{ issueId: "g", issueNumber: 7, repo: "r", syncedState: null, url: "u", outOfSync: false, pushFailed: false }] }],
     });
     expect(bare[0]).toMatchObject({
       columnName: "Unknown column",

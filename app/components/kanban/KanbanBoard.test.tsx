@@ -31,7 +31,7 @@ const TASK2: Task = {
 
 function makeBoard(columns: Column[], lanes: Board["swimlanes"], tasks: Task[]): Board {
   return {
-    project: { id: "p1", slug: "demo", name: "Demo", description: "", githubRepo: null, createdAt: "t", updatedAt: "t" },
+    project: { id: "p1", slug: "demo", name: "Demo", description: "", repos: [], createdAt: "t", updatedAt: "t" },
     columns,
     swimlanes: lanes,
     fieldConfig: {

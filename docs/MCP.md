@@ -55,9 +55,10 @@ Keys are **not** blanket read/write. Access is role-scoped per project:
   - Tools with a `project` argument (project slug) resolve the project, then check access.
   - `get_project` / `get_project_status` take `slug` — same check.
   - `get_task` / `update_task` / `move_task` / `delete_task` / `archive_task` / `restore_task` / `link_github_issue` / `unlink_github_issue` / `get_task_activity` / `add_task_comment` take `taskId` — the owning project is resolved from the task, then checked.
+  - `list_github_issues` / `create_task_from_github_issue` take `project` — same check.
   - Denied → tool error `FORBIDDEN` (details carry the reason). A non-admin referencing an unknown project also gets `FORBIDDEN`, not `PROJECT_NOT_FOUND`.
 - `list_projects`: admins see all projects; members see only granted projects.
-- **Admin-only tools** (enforced in the handler — `FORBIDDEN` unless the key's role is `admin`): `create_project`/`update_project`/`delete_project`, `create_column`/`update_column`/`delete_column`, `create_swimlane`/`update_swimlane`/`delete_swimlane`, `list_api_keys`/`create_api_key`/`delete_api_key`, `list_users`/`update_user_role`, `list_user_project_roles`/`set_user_project_role`/`remove_user_project_role`.
+- **Admin-only tools** (enforced in the handler — `FORBIDDEN` unless the key's role is `admin`): `create_project`/`update_project`/`delete_project`, `link_project_repo`/`unlink_project_repo`, `create_column`/`update_column`/`delete_column`, `create_swimlane`/`update_swimlane`/`delete_swimlane`, `list_api_keys`/`create_api_key`/`delete_api_key`, `list_users`/`update_user_role`, `list_user_project_roles`/`set_user_project_role`/`remove_user_project_role`.
 
 ## Content Format
 
@@ -272,13 +273,37 @@ Input:  { taskId*, repo* }        repo = "owner/name" — creates a GitHub issue
 Output: { issueNumber, url }
 Errors: TASK_NOT_FOUND, ALREADY_LINKED, GITHUB_API_ERROR
 Notes: a task may hold several GitHub issues, one per repo — linking a second
-       issue to the same repo fails with ALREADY_LINKED.
+       issue to the same repo fails with ALREADY_LINKED. repo must be a
+       WORKSPACE repo of the task's project — otherwise GITHUB_API_ERROR
+       (workspace validation runs first).
 ```
 
 **`unlink_github_issue`**
 ```json
 Input:  { taskId*, issueId* }     issueId = GitHub node_id to unlink
 Output: { unlinked: true }        (GitHub issue is NOT closed or deleted)
+```
+
+**`list_github_issues`**
+```json
+Input:  { project*, repo*, query? }
+        repo = "owner/name" and must be a WORKSPACE repo of the project
+        (otherwise GITHUB_API_ERROR). query optional — filters the recent
+        issues list (per_page=100; exact "#number" does a direct issue GET
+        fallback). Already-linked issues excluded.
+Output: { issues: [{ issueNumber, title, state, url }] }
+Errors: PROJECT_NOT_FOUND, GITHUB_API_ERROR
+```
+
+**`create_task_from_github_issue`**
+```json
+Input:  { project*, repo*, issueNumber* }
+        repo must be a WORKSPACE repo of the project. Creates a task in the
+        project's first column (Backlog) from the issue — title + description
+        seeded (Markdown), issue auto-linked. required_fields enforced like a
+        normal create.
+Output: { taskId, issueNumber, url }
+Errors: PROJECT_NOT_FOUND, GITHUB_API_ERROR, ALREADY_LINKED, REQUIRED_FIELD
 ```
 
 ### Projects
@@ -293,7 +318,8 @@ Notes: admins see all projects; members see only granted projects.
 **`get_project`**
 ```json
 Input:  { slug* }
-Output: { name, slug, description, githubRepo,
+Output: { name, slug, description,
+          repos: [{ repo, sourceRole, workspaceRole }],   // linked repos with roles
           columns: [{ name, wipLimit, requiredFields, githubState }],
           swimlanes: [{ name }],
           priorities: [{ id, label, color, position }],
@@ -313,17 +339,36 @@ Output: { columns: [{ name, count, wipLimit }], totalTasks }
 
 **`create_project`** — Admin only
 ```json
-Input:  { name*, slug?, description?, githubRepo? }
+Input:  { name*, slug?, description? }
         slug auto-generated from name if omitted.
-Output: { name, slug, description, githubRepo, createdAt, updatedAt }
+Output: { name, slug, description, createdAt, updatedAt }
 Errors: FORBIDDEN, SLUG_TAKEN, CONSTRAINT
 ```
 
 **`update_project`** — Admin only
 ```json
-Input:  { slug*, name?, description?, githubRepo? }
-Output: { name, slug, description, githubRepo, createdAt, updatedAt }
+Input:  { slug*, name?, description? }
+Output: { name, slug, description, createdAt, updatedAt }
 Errors: FORBIDDEN, PROJECT_NOT_FOUND
+```
+
+**`link_project_repo`** — Admin only
+```json
+Input:  { project*, repo*, sourceRole?, workspaceRole? }
+        repo = "owner/name". At least one role required (both omitted → error).
+        Roles are booleans; a repo can be source, workspace, or both. Idempotent
+        — re-linking an existing repo updates its roles.
+Output: { repo, sourceRole, workspaceRole }
+Errors: FORBIDDEN, PROJECT_NOT_FOUND, INVALID_ARGS
+```
+
+**`unlink_project_repo`** — Admin only
+```json
+Input:  { project*, repo* }      repo = "owner/name"
+Output: { unlinked: true }
+Errors: FORBIDDEN, PROJECT_NOT_FOUND, INVALID_ARGS (+availableRepos)
+Notes: removes the repo row entirely (both roles). Existing task↔issue links
+       keep syncing — roles gate NEW links only.
 ```
 
 **`delete_project`** — Admin only
