@@ -15,14 +15,17 @@ You are working on **Lexa**: a self-hosted project management tool. Kanban with 
 
 **If documents conflict, stop and report the conflict to the user. Never resolve it yourself.**
 
-## Transient design artifacts
+## Design artifacts (superpowers docs)
 
-`docs/superpowers/specs/` and `docs/superpowers/plans/` are **working documents
-only** — a spec/plan lives there while its feature is being built, never
-after. Once the feature ships (or is abandoned), move its files into
-`docs/private/specs/` / `docs/private/plans/` (the archived design-review
-area) so `docs/superpowers/` stays empty and the archive stays searchable.
-Do not leave finished artifacts in `docs/superpowers/`.
+All specs and plans live directly in the private design area — there is no
+`docs/superpowers/`:
+
+- `docs/private/specs/` — feature specs / design docs
+- `docs/private/plans/` — implementation plans
+
+`docs/private/` is gitignored (`.gitignore`): design artifacts are private,
+never committed. Committed design authority stays in the top-level `docs/*.md`
+(SCHEMA / LAYERS / API / MCP / ARCHITECTURE).
 
 ## Wireframes are the frontend source of truth
 
