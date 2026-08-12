@@ -9,12 +9,32 @@ The CLI version is INDEPENDENT of the web app version (see AGENTS.md):
 The version lives in `cli/package.json` — `publish-cli.yml` verifies the tag
 matches it before compiling.
 
-## [Unreleased]
+## [0.2.0] - 2026-08-12
 
 ### Added
 
+- **Warm opencode serve runtime** — `machine listen` spawns one persistent
+  `opencode serve` per opencode runtime (sealed sandbox HOME, deny rules
+  unchanged; per-flavor port bases 4096/4196/4296 + `FORGE_SERVE_PORT`
+  override; crash respawn with 5s→30s backoff; stale `serve.pid` sweep).
+  Tasks run over pure HTTP (`POST /session?directory=<workspace>` mint,
+  blocking `POST /session/:id/message`, `POST /session/:id/abort` on
+  cancel/timeout) — no per-task process spawn, no cold MCP/config load.
+- **Persistent sessions per (document, runtime)** — the mapping is written
+  to the server's `forge_sessions` before spawn, so crash-resume and
+  complete-failure retention work; cancel/timeout drops the mapping
+  unconditionally; agent/skill change mints a fresh session.
 - **`task create --description <markdown>`** — new tasks can be created with
   a Markdown description (converted to rich text server-side).
+
+### Changed
+
+- **Daemon flavor roots** — `LEXA_DIR` now propagates through the daemon env
+  scrub, so staging/dev listeners (`~/.lexa-staging` / `~/.lexa-dev`) no
+  longer resolve the prod root.
+- **Dev listener bundles the daemon from disk source** — `cli/src/packed.ts`
+  is the empty stub again (a regenerated embed made dev listeners run a
+  stale daemon) and the daemon source path resolves correctly.
 
 ### Fixed
 
