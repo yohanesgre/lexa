@@ -4,9 +4,25 @@ All notable changes to Lexa are documented here. Format based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). This project follows
 [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [0.3.0] - 2026-08-12
 
 ### Added
+
+- **Forge warm opencode serve runtime** — each machine runtime now owns a
+  persistent `opencode serve` (sealed sandbox HOME at
+  `LEXA_DIR/runtimes/<id>/forge-home/`, per-flavor ports with
+  `FORGE_SERVE_PORT` override) so MCP/config load happens once, not per task.
+  Tasks drive the server over pure HTTP (`POST /session?directory=`,
+  blocking `POST /session/:id/message`), eliminating cold starts.
+- **Persistent agent sessions** — a task/wiki page keeps its conversation
+  across runs: the mapping lives in the new `forge_sessions` table
+  (`GET/PUT/DELETE /api/forge/sessions`, `POST /api/forge/sessions/reset`
+  409s while a task runs). Agent or skill change starts a new session;
+  cancel/timeout aborts the server-side session and drops the mapping; a
+  serve crash respawns in 5s and sessions survive on disk.
+- **Forge popover session line** — "Continuing session from <relative
+  time>" (or "New session") with a **New session** button, disabled while a
+  task for the document is running.
 
 - **Project description on `/dashboard`** — the selected project's saved
   description renders as a card under the header, collapsing at 3 lines with a
