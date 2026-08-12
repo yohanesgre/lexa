@@ -1,16 +1,16 @@
-import { useTaskActivity, useProjectMembers, useUpdateComment, useDeleteComment } from "../../lib/queries";
-import { clientLxkUser } from "../../lib/api";
+import { useTaskActivity, useProjectMembers, useUpdateComment, useDeleteComment, useSession } from "../../lib/queries";
 import { ActivityTimeline, type CurrentUser } from "./ActivityTimeline";
 import { CommentComposer } from "./CommentComposer";
 
 // The Activity tab: step-rail timeline + composer, per wireframes/src/task-detail.html.
-// Identity: the Cloudflare Access user meta (email/name) resolved against the
+// Identity: the session user (GET /api/auth/get-session) resolved against the
 // project members list to get the acting user's id + role — comment actions
 // key off it (author → edit+delete, admin → delete on others, agents none).
 
 function useCurrentUser(slug: string | undefined): CurrentUser {
   const members = useProjectMembers(slug ?? "");
-  const lxk = clientLxkUser();
+  const { data: session } = useSession();
+  const lxk = session?.user ?? null;
   const member = members.data?.find((m) => m.email === lxk?.email) ?? null;
   return {
     id: member?.id ?? null,
