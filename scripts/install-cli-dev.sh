@@ -9,8 +9,8 @@ test -f "$root/cli/src/index.ts" || { echo "lexa-cli-dev: repo layout unexpected
 mkdir -p "$HOME/.local/bin"
 {
   echo "#!/usr/bin/env sh"
-  echo "# lexa-cli-dev — dev build: runs live repo source via bun."
-  echo "export LEXA_DIR=\"\$HOME/.lexa-dev\""
+  echo "# lexa-cli-dev — dev build: runs live repo source via bun (no env hacks:"
+  echo "# state follows the server URL, same as the compiled binary)."
   echo "exec bun run \"$root/cli/src/index.ts\" \"\$@\""
 } > "$HOME/.local/bin/lexa-cli-dev"
 chmod +x "$HOME/.local/bin/lexa-cli-dev"

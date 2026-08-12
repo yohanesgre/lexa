@@ -3,7 +3,7 @@
 // import.meta.main guard. The daemon's main loop
 // (register/heartbeat/claim/spawn) is process+network-bound and is not
 // exercised here; importing the module must be inert (guard verified below).
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -179,11 +179,33 @@ describe("import.meta.main guard", () => {
 });
 
 describe("flavorBaseFor", () => {
-  it("maps flavor roots to bases", () => {
+  afterEach(() => {
+    delete process.env.LEXA_FLAVOR;
+  });
+
+  it("maps legacy flavor roots to bases (path fallback)", () => {
     expect(flavorBaseFor("/home/u/.lexa")).toBe(4096);
     expect(flavorBaseFor("/home/u/.lexa-staging")).toBe(4196);
     expect(flavorBaseFor("/home/u/.lexa-dev")).toBe(4296);
     expect(flavorBaseFor("/custom/lexa-root")).toBe(4096);
+  });
+
+  it("LEXA_FLAVOR env wins over the path fallback (host-keyed groups)", () => {
+    process.env.LEXA_FLAVOR = "dev";
+    expect(flavorBaseFor("/home/u/.lexa/localhost")).toBe(4296);
+    process.env.LEXA_FLAVOR = "staging";
+    expect(flavorBaseFor("/home/u/.lexa/localhost")).toBe(4196);
+    process.env.LEXA_FLAVOR = "prod";
+    expect(flavorBaseFor("/home/u/.lexa/lexa.example.com")).toBe(4096);
+    // The env also wins over the legacy basename.
+    process.env.LEXA_FLAVOR = "dev";
+    expect(flavorBaseFor("/home/u/.lexa-staging")).toBe(4296);
+  });
+
+  it("an invalid LEXA_FLAVOR falls back to the path parse", () => {
+    process.env.LEXA_FLAVOR = "bogus";
+    expect(flavorBaseFor("/home/u/.lexa")).toBe(4096);
+    expect(flavorBaseFor("/home/u/.lexa-dev")).toBe(4296);
   });
 });
 
