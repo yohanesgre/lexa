@@ -29,13 +29,10 @@ import { join } from "node:path";
 import { Effect, Data, Fiber } from "effect";
 
 // ── Machine state root ──
-// Everything the host stores lives under LEXA_DIR (~/.lexa by default):
-// config.json (login creds), machine-id, env (bootstrap), runtimes/<id>/env
-// (per-runtime, written by the listener), projects/ (per-project workspaces,
-// provisioned by the listener from the heartbeat project index), and runs/
-// (legacy per-task workdirs for non-opencode providers).
-// The listener migrates the legacy ~/.config/lexa-cli + ~/.config/lexa-forge
-// dirs into here on boot (migrate-and-delete, no fallback).
+// Everything the host stores lives under LEXA_DIR. The CLI listener now
+// passes its GROUP dir as LEXA_DIR (~/.lexa/<host>/), so this module keeps
+// reading LEXA_DIR/config.json, LEXA_DIR/runtimes/…, LEXA_DIR/projects/…
+// unchanged; ~/.lexa is only the default when a daemon runs standalone.
 const LEXA_DIR = process.env.LEXA_DIR ?? join(process.env.HOME ?? "", ".lexa");
 
 // ── Credential resolution ──
@@ -420,7 +417,14 @@ const serveState = {
 
 // Flavor-separated port bases keep dev/staging/prod listeners on one machine
 // from colliding by construction (one listener per flavor per machine).
+// The listener passes its derived flavor as LEXA_FLAVOR (flavorFor(host) in
+// the CLI); the LEXA_DIR basename parse below is the pre-host-keyed fallback,
+// kept for compat with existing daemons and tests.
 export function flavorBaseFor(lexaDir: string): number {
+  const envFlavor = process.env.LEXA_FLAVOR;
+  if (envFlavor === "dev") return 4296;
+  if (envFlavor === "staging") return 4196;
+  if (envFlavor === "prod") return 4096;
   const base = lexaDir.split("/").pop() ?? "";
   if (base === ".lexa-staging") return 4196;
   if (base === ".lexa-dev") return 4296;
