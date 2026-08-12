@@ -106,7 +106,7 @@ export function ProjectSwitcher({ routeType }: { routeType: "home" | "dashboard"
             })
           )}
           <div className="project-switcher-separator" />
-          {selectedSlug && (
+          {selectedSlug && selectedProjectId && (
             <Link
               to="/settings/project/$projectId"
               params={{ projectId: selectedProjectId ?? "" }}
