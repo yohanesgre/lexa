@@ -37,45 +37,44 @@ afterEach(() => {
 });
 
 describe("resolveApiKeyIdentity", () => {
-  it("returns keyName and resolves x-lxk-user to a user", () => {
+  it("returns keyName for an unowned key (admin, no user context)", () => {
     const { db, path } = tmpDb();
     db.prepare("INSERT INTO api_keys (id, name, key_hash, user_id) VALUES ('k1', 'opencode-local', ?, NULL)").run(KEY_HASH);
-    db.prepare("INSERT INTO users (id, email, name, role) VALUES ('u1', 'maria@lexa.test', 'Maria', 'member')").run();
-    const res = resolveApiKeyIdentity(`Bearer ${RAW_KEY}`, new Headers({ "x-lxk-user": "maria@lexa.test" }), db, path);
+    const res = resolveApiKeyIdentity(`Bearer ${RAW_KEY}`, new Headers(), db, path);
     expect(res).not.toBeNull();
     expect(res!.keyId).toBe("k1");
     expect(res!.keyName).toBe("opencode-local");
-    expect(res!.userId).toBe("u1");
-    expect(res!.userName).toBe("Maria");
-  });
-
-  it("keeps role from the key, never from the header", () => {
-    // unowned key → admin; header must not change role even though it
-    // names a member user.
-    const { db, path } = tmpDb();
-    db.prepare("INSERT INTO api_keys (id, name, key_hash, user_id) VALUES ('k1', 'opencode-local', ?, NULL)").run(KEY_HASH);
-    db.prepare("INSERT INTO users (id, email, name, role) VALUES ('u1', 'maria@lexa.test', 'Maria', 'member')").run();
-    const res = resolveApiKeyIdentity(`Bearer ${RAW_KEY}`, new Headers({ "x-lxk-user": "maria@lexa.test" }), db, path);
+    expect(res!.userId).toBeNull();
+    expect(res!.userName).toBeNull();
     expect(res!.role).toBe("admin");
   });
 
-  it("without the header keeps the key owner as the actor", () => {
+  it("a key bound to a member user carries the member role and owner name", () => {
     const { db, path } = tmpDb();
     db.prepare("INSERT INTO users (id, email, name, role) VALUES ('u1', 'maria@lexa.test', 'Maria', 'member')").run();
     db.prepare("INSERT INTO api_keys (id, name, key_hash, user_id) VALUES ('k1', 'opencode-local', ?, 'u1')").run(KEY_HASH);
     const res = resolveApiKeyIdentity(`Bearer ${RAW_KEY}`, new Headers(), db, path);
     expect(res!.userId).toBe("u1");
-    expect(res!.userName).toBeNull();
+    expect(res!.userName).toBe("Maria");
     expect(res!.role).toBe("member");
   });
 
-  it("creates the user when the header names an unknown email", () => {
+  it("a key bound to a superadmin user maps to the admin role", () => {
+    const { db, path } = tmpDb();
+    db.prepare("INSERT INTO users (id, email, name, role) VALUES ('u1', 'sa@lexa.test', 'SA', 'superadmin')").run();
+    db.prepare("INSERT INTO api_keys (id, name, key_hash, user_id) VALUES ('k1', 'opencode-local', ?, 'u1')").run(KEY_HASH);
+    const res = resolveApiKeyIdentity(`Bearer ${RAW_KEY}`, new Headers(), db, path);
+    expect(res!.userId).toBe("u1");
+    expect(res!.role).toBe("admin");
+  });
+
+  it("ignores the removed x-lxk-user header entirely (no upsert)", () => {
     const { db, path } = tmpDb();
     db.prepare("INSERT INTO api_keys (id, name, key_hash, user_id) VALUES ('k1', 'opencode-local', ?, NULL)").run(KEY_HASH);
     const res = resolveApiKeyIdentity(`Bearer ${RAW_KEY}`, new Headers({ "x-lxk-user": "new@lexa.test" }), db, path);
-    expect(res!.userName).toBe("new");
-    const created = db.prepare("SELECT id FROM users WHERE email = 'new@lexa.test'").get() as { id: string } | undefined;
-    expect(created?.id).toBe(res!.userId);
+    expect(res!.userId).toBeNull();
+    const created = db.prepare("SELECT id FROM users WHERE email = 'new@lexa.test'").get() as { id: string } | null;
+    expect(created).toBeNull();
   });
 
   it("returns null for an unknown key", () => {

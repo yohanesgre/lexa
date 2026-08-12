@@ -38,9 +38,11 @@ All non-2xx responses share one shape:
 | 403 | `SETUP_LOCKED` | Mutating `/api/setup/*` call after setup is complete or projects exist |
 | 403 | `SOLE_OWNER` | Demoting or removing the last owner of a team (details: `{ message }` — transfer ownership first) |
 | 403 | `CANNOT_DELETE_SELF` | Removing the last superadmin / self-removal via the workspace member routes (details: `{ message }`) |
-| 404 | `USER_NOT_FOUND` | Unknown user id on admin role endpoints |
+| 404 | `USER_NOT_FOUND` | Unknown user id on admin/workspace/team-member endpoints |
+| 404 | `TEAM_NOT_FOUND` `INVITE_NOT_FOUND` `SESSION_NOT_FOUND` | Unknown team / invite / own-session id |
 | 404 | `PROJECT_NOT_FOUND` `COLUMN_NOT_FOUND` `SWIMLANE_NOT_FOUND` `TASK_NOT_FOUND` `PAGE_NOT_FOUND` `SOURCE_NOT_FOUND` `FORGE_TASK_NOT_FOUND` `TASK_LINK_NOT_FOUND` `MACHINE_NOT_FOUND` `RUNTIME_NOT_FOUND` `RUNTIME_EVENT_NOT_FOUND` `API_KEY_NOT_FOUND` `AGENT_NOT_FOUND` `SKILL_NOT_FOUND` | |
-| 409 | `SLUG_TAKEN` | Duplicate project slug or wiki slug (details: `{ slug }`); also the constraint fallback on project update/delete |
+| 409 | `SLUG_TAKEN` | Duplicate project slug, wiki slug, or team slug (details: `{ slug }`); also the constraint fallback on project update/delete |
+| 409 | `INVITE_PENDING` | An invite is already pending for that email (details: `{ email }`) |
 | 409 | `MACHINE_ID_TAKEN` | Machine id already registered to another host, legacy (no secret), or secret mismatch (details: `{ id, reason: "hostname" \| "legacy" \| "secret_mismatch" }`) |
 | 409 | `TASK_HAS_CHILDREN` | Task delete hits a constraint (defensive — subtask links cascade on delete) |
 | 409 | `NO_RUNTIME_ONLINE` | Create Forge task with no daemon online |
@@ -61,6 +63,7 @@ All non-2xx responses share one shape:
 | 422 | `SEARCH_ERROR` | Wiki FTS5 query rejected |
 | 422 | `SOURCE_UNREACHABLE` | External source DNS/fetch failed after the SSRF guard (details: `{ url }`) |
 | 422 | `API_KEY_NAME_EMPTY` | API key name missing or blank |
+| 422 | `NOT_WORKSPACE_MEMBER` | Team-member add targets an email that is not a workspace member (details: `{ email, available }` — invite via the superadmin first) |
 | 429 | `RATE_LIMITED` | Per-IP rate limit exceeded on `/api/*` or `/mcp` (webhook, `/api/forge/daemon/*`, `/api/forge/runtimes/register` exempt; `/api/setup*` + `/api/health` ARE limited) — `/api` enforced in the API middleware, `/mcp` in `server/entry.ts`, one shared bucket |
 | 500 | `DATABASE_ERROR` / `INTERNAL` | |
 | 502 | `GITHUB_API_ERROR` | Only on explicit GitHub-linking endpoints; never on moves |
@@ -991,6 +994,11 @@ body { email* }
   link = {baseURL}/invite?token=<secret> — shared out-of-band (no email
   transport). Expires 7d after issue. Accepting on first login sets the
   password → member account created → accepted_at stamped; re-use idempotent.
+
+GET    /api/workspace/invites    (superadmin)
+→ 200 { data: Array<{ id, email, expiresAt }> }
+  Pending invites only (accepted_at IS NULL) — the Members UI renders the
+  revoke list from this. | 403 FORBIDDEN
 
 DELETE /api/workspace/invites/:inviteId   (superadmin; pending only)
 → 204 | 403 FORBIDDEN | 404 | 409 (already accepted — cannot revoke)

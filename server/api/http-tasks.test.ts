@@ -30,8 +30,8 @@ beforeAll(async () => {
   const adminHash = await sha256(ADMIN_KEY);
   db = new Database(dbPath);
   db.exec(`
-INSERT INTO api_keys (id, name, key_hash, user_id) VALUES ('k1', 'test-admin', '${adminHash}', NULL);
-INSERT INTO users (id, email, name, role) VALUES ('u1', 'maria@lexa.test', 'Maria', 'member');
+INSERT INTO users (id, email, name, role) VALUES ('u1', 'maria@lexa.test', 'Maria', 'superadmin');
+INSERT INTO api_keys (id, name, key_hash, user_id) VALUES ('k1', 'test-admin', '${adminHash}', 'u1');
 INSERT INTO projects (id, name, slug) VALUES ('p1', 'P', 'p1');
 INSERT INTO columns (id, project_id, name, position) VALUES ('c1', 'p1', 'Todo', 0), ('c2', 'p1', 'Done', 1);
 INSERT INTO swimlanes (id, project_id, name, position, kind, due_at) VALUES ('s-backlog', 'p1', 'Backlog', 0, 'backlog', NULL);
@@ -54,7 +54,6 @@ const json = (method: string, path: string, body?: unknown) =>
     method,
     headers: {
       authorization: `Bearer ${ADMIN_KEY}`,
-      "x-lxk-user": "maria@lexa.test",
       ...(body !== undefined ? { "content-type": "application/json" } : {}),
     },
     ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
