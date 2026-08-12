@@ -6,16 +6,37 @@ import { AuthIdentity, AuthIdentityShape } from "./auth";
 import { constantTimeTokenEqual, resolveApiKeyIdentity } from "./auth-key";
 import { MAX_API_BODY, X_LEXA_REMOTE_IP } from "./limits";
 import { apiRateLimiter, isPrivateIp, isRateLimitExemptPath } from "./rate-limit";
+import { auth } from "../auth";
 
 // API-level middleware wrapped around the whole HttpApi router. Applied at
 // build time; runs before route matching (incl. 404s) and before
 // decodePath/decodePayload/decodeHeaders. Checks in order: rate limit →
-// content-length pre-check → auth (daemon-token/setup/health exempt) →
-// security headers on every /api response. `db` is the shared Sqlite
-// connection (http.ts's Layer.succeed(Sqlite, db)) — never open per-request
-// databases.
+// content-length pre-check → auth (session cookie OR Bearer key;
+// daemon-token/setup/health exempt) → security headers on every /api
+// response. `db` is the shared Sqlite connection (http.ts's
+// Layer.succeed(Sqlite, db)) — never open per-request databases.
 const withSecurityHeaders = (resp: HttpServerResponse.HttpServerResponse) =>
   HttpServerResponse.setHeaders(resp, { "X-Content-Type-Options": "nosniff", "Cache-Control": "no-store" });
+
+// Session caller → identity. The session user's role maps superadmin→admin
+// so the legacy requireAdmin gates stay correct until the authorization
+// service replaces them (R14). Every getSession is try/catch'd (R1 — an
+// uncaught throw would crash the request).
+const sessionIdentity = (headers: Headers): Effect.Effect<AuthIdentityShape | null, never> =>
+  Effect.tryPromise(() => auth.api.getSession({ headers })).pipe(
+    Effect.map((session) => {
+      const user = session?.user;
+      if (!user) return null;
+      return {
+        keyId: "",
+        keyName: user.name,
+        userId: user.id,
+        userName: user.name,
+        role: user.role === "superadmin" ? ("admin" as const) : ("member" as const),
+      };
+    }),
+    Effect.catchAll(() => Effect.succeed(null))
+  );
 
 export function createApiMiddleware(db: Database, dbPath: string) {
   return HttpApiBuilder.middleware((httpApp) =>
@@ -69,28 +90,35 @@ export function createApiMiddleware(db: Database, dbPath: string) {
         : false;
       let identity: AuthIdentityShape;
       if (!isHealth && !isSetup && !daemonTokenOk) {
-        const authHeader = request.headers["authorization"] ?? "";
-        const resolved = resolveApiKeyIdentity(authHeader, new Headers(request.headers), db, dbPath);
-        if (!resolved) {
-          const reason = authHeader.startsWith("Bearer ") ? "unknown key" : "missing or malformed key";
-          console.warn(`[Auth] denied path=${path} reason=${reason}`);
-          return withSecurityHeaders(
-            HttpServerResponse.unsafeJson(
-              { error: { code: "UNAUTHORIZED", message: "Invalid or missing API key" } },
-              { status: 401 }
-            )
-          );
+        // Dual-channel (R4): session cookie first (browsers), Bearer key
+        // second (machines). The x-lxk-user header is removed — never read.
+        const session = yield* sessionIdentity(new Headers(request.headers));
+        if (session) {
+          identity = session;
+        } else {
+          const authHeader = request.headers["authorization"] ?? "";
+          const resolved = resolveApiKeyIdentity(authHeader, new Headers(request.headers), db, dbPath);
+          if (!resolved) {
+            const reason = authHeader.startsWith("Bearer ") ? "unknown key" : "missing or malformed key";
+            console.warn(`[Auth] denied path=${path} reason=${reason}`);
+            return withSecurityHeaders(
+              HttpServerResponse.unsafeJson(
+                { error: { code: "UNAUTHORIZED", message: "Invalid or missing API key" } },
+                { status: 401 }
+              )
+            );
+          }
+          if (resolved.userId !== null && resolved.role === "member") {
+            console.warn(`[Auth] denied path=${path} reason=member key`);
+            return withSecurityHeaders(
+              HttpServerResponse.unsafeJson(
+                { error: { code: "FORBIDDEN", message: "Member API keys are not supported on the REST API yet" } },
+                { status: 403 }
+              )
+            );
+          }
+          identity = resolved;
         }
-        if (resolved.userId !== null && resolved.role !== "admin") {
-          console.warn(`[Auth] denied path=${path} reason=member key`);
-          return withSecurityHeaders(
-            HttpServerResponse.unsafeJson(
-              { error: { code: "FORBIDDEN", message: "Member API keys are not supported on the REST API yet" } },
-              { status: 403 }
-            )
-          );
-        }
-        identity = resolved;
       } else {
         identity = { keyId: "", keyName: "", userId: null, userName: null, role: "admin" };
       }

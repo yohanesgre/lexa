@@ -17,6 +17,7 @@ import { WikiService } from "../services/wiki.service";
 import { ApiKeyService } from "../services/api-key.service";
 import { UserService } from "../services/user.service";
 import { UserProjectRoleService } from "../services/user-project-role.service";
+import { TeamsService } from "../services/teams.service";
 import { GitHubService } from "../services/github.service";
 import { initSqlite } from "../db/database";
 import { errorCodeMap, errorMessage, errorDetails } from "../api/errors";
@@ -59,7 +60,6 @@ import { tool as listApiKeys } from "./tools/list-api-keys";
 import { tool as createApiKey } from "./tools/create-api-key";
 import { tool as deleteApiKey } from "./tools/delete-api-key";
 import { tool as listUsers } from "./tools/list-users";
-import { tool as updateUserRole } from "./tools/update-user-role";
 import { tool as listUserProjectRoles } from "./tools/list-user-project-roles";
 import { tool as setUserProjectRole } from "./tools/set-user-project-role";
 import { tool as removeUserProjectRole } from "./tools/remove-user-project-role";
@@ -118,7 +118,6 @@ const tools: ToolDef[] = [
   createApiKey,
   deleteApiKey,
   listUsers,
-  updateUserRole,
   listUserProjectRoles,
   setUserProjectRole,
   removeUserProjectRole,
@@ -188,6 +187,7 @@ export class McpServer extends Effect.Service<McpServer>()("Lexa/McpServer", {
     GitHubService.Default,
     ActivityService.Default,
     CommentService.Default,
+    TeamsService.Default,
   ],
   effect: Effect.gen(function* () {
     const apiKeyRepo = yield* ApiKeyRepo;
@@ -424,6 +424,7 @@ const serviceLayer = Layer.mergeAll(
   UserService.Default,
   UserProjectRoleService.Default,
   GitHubService.Default,
+  TeamsService.Default,
 );
 
 function createMcpLayer(dbPath: string): Layer.Layer<McpServer> {

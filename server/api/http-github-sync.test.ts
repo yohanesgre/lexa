@@ -97,7 +97,6 @@ function api(method: string, path: string, body?: unknown) {
       method,
       headers: {
         authorization: `Bearer ${ADMIN_KEY}`,
-        "x-lxk-user": "maria@lexa.test",
         ...(body !== undefined ? { "content-type": "application/json" } : {}),
       },
       ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
