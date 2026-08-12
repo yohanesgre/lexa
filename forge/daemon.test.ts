@@ -214,9 +214,10 @@ describe("buildMessageBody", () => {
     expect(body.agent).toBe("build");
     expect(body.parts).toEqual([{ type: "text", text: "hi" }]);
   });
-  it("bare model id keeps modelID whole with an empty providerID", () => {
-    const body = JSON.parse(buildMessageBody("gpt-4o", "", "hi")) as { model: { providerID: string; modelID: string } };
-    expect(body.model).toEqual({ providerID: "", modelID: "gpt-4o" });
+  it("omits an unparseable model (bare id without provider) and empty agent", () => {
+    const body = JSON.parse(buildMessageBody("gpt-4o", "", "hi")) as { model?: unknown; agent?: string };
+    expect(body.model).toBeUndefined();
+    expect(body.agent).toBeUndefined();
   });
 });
 
