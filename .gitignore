@@ -31,3 +31,6 @@ skills-lock.json
 
 # Deepwork session state (git-local, OpenCode-readable)
 .slim/deepwork/
+
+# lexa-swarm lane status files (heartbeats, PLAN.md) — ephemeral orchestration state
+status/
