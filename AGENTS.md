@@ -163,28 +163,68 @@ Key facts:
   Without a daemon, Generate returns `NO_RUNTIME_ONLINE`.
 - **Daemons NEVER inherit the listener's shell env:** secret vars are scrubbed
   at spawn (`cli/src/machine.ts` `scrubDaemonEnv` — closed allowlist:
-  PATH/HOME/LANG/LC_*/TERM/TZ/PWD/SHELL/USER/LOGNAME/XDG_*/BUN_*), so runtime
-  credentials come only from the runtime env file + `config.json`. Starting the
-  listener from a shell with `.env` exported prints a boot warning; a daemon
-  whose env-file key is dead exits 3 ("API key revoked — re-run Setup runtime").
+  PATH/HOME/LANG/LC_*/TERM/TZ/PWD/SHELL/USER/LOGNAME/XDG_*/BUN_*/LEXA_DIR), so
+  runtime credentials come only from the runtime env file + `config.json`.
+  `LEXA_DIR` passes through so the daemon resolves the flavor root the
+  listener runs (`~/.lexa` prod / `~/.lexa-staging` / `~/.lexa-dev`) — without
+  it, staging/dev daemons would build their sandboxes inside the prod root.
+  Starting the listener from a shell with `.env` exported prints a boot
+  warning; a daemon whose env-file key is dead exits 3 ("API key revoked —
+  re-run Setup runtime").
 - Every run picks an **agent** (rule bundle, default "Lexa") + a dependent
   **skill** (operation bundle) in the popover; the claim carries their
   instructions (`agentMarkdown`/`skillMarkdown`) — files-only, no host store.
   All host state lives under `~/.lexa/` (`LEXA_DIR`).
-- **Forge project workspaces (opencode only):** every project gets a persistent
-  workspace dir at `~/.lexa/projects/<projectId>/` (seeded write-once with
-  README.md + a static orchestrator AGENTS.md). Per run the daemon (over)writes
-  `.agents/agents/<agentId>/AGENTS.md` (the selected lexa-agent's rules) and
-  `.agents/skills/<skillId>/SKILL.md`, seeds a sealed per-run HOME at the
-  workspace's `.forge/` (wiped + reseeded each run — contains a deny-rule
-  `opencode.json`: bash fully denied, `external_directory: deny`, `*auth.json*`
-  denied, `skill`/`webfetch` denied + a copy of
-  `~/.local/share/opencode/auth.json` chmod 600), spawns opencode with
-  `cwd = workspace`, `HOME`/`XDG_*` = sandbox, and `PWD = workspace` (opencode
-  resolves its session/project directory from env.PWD — a stale inherited PWD
-  makes the real workspace look "external" and blocks all reads), then
-  `rm -rf`s `.forge/` when done (rules and workspace persist; global opencode
-  config — permissions, MCP servers, plugins — never loads into Forge runs).
+- **Warm opencode runtimes (opencode only):** the daemon owns one `opencode
+  serve` per runtime and drives every task over pure HTTP — no `run` client is
+  ever spawned (the attach client is unreliable on 1.18.11: it exits without
+  mirroring text parts — spike-verified, design in
+  `docs/superpowers/specs/2026-08-12-opencode-serve-sessions-design.md`). The
+  claim payload carries the continue-vs-mint verdict: `runtimeSessionId`
+  (continue the mapped conversation) or `null` (mint
+  `POST /session?directory=<workspace>` on serve, assert the bound directory,
+  then persist the mapping in `forge_sessions` BEFORE the run). Runs are
+  blocking `POST /session/:id/message` (model as `{providerID, modelID}` —
+  a `"provider/model"` string is rejected), live logs tee via 3s polling of
+  `GET /session/:id/message`, the result is the joined text parts, and
+  `session.error` fails the task. Cancel/timeout = `POST /session/:id/abort`
+  (best effort — unblocks the message POST) + **drop the mapping row
+  unconditionally** (`DELETE /api/forge/sessions`; an aborted session is
+  poisoned and must never be continued). The popover's "New session" uses the
+  user-facing `POST /api/forge/sessions/reset` (409 while the document has an
+  active task on that runtime). Agent/skill change → the server returns `null`
+  → the daemon mints a fresh session and rewrites the row (reset semantics,
+  no history rows). Auto-compaction is server-side (`compaction.auto` in the
+  serve session loop) — long-lived sessions compact themselves, no Lexa work.
+- **Serve lifecycle:** serve binds `127.0.0.1` on a flavor-separated port —
+  prod 4096–4127, staging 4196–4227, dev 4296–4327 (`flavorBaseFor(LEXA_DIR)`
+  + `fnv1a(runtimeId) % 32`, +1..+4 fallback candidates, `FORGE_SERVE_PORT`
+  override in the runtime env file first), readiness probed via `GET /session`
+  (200 = fully up). The daemon sweeps a stale `serve.pid` at boot
+  (SIGKILL/power-loss orphans), respawns crashed serve with a 5s→30s backoff
+  (never gives up, sessions survive — the session DB lives in the persistent
+  sandbox), kills serve on its SIGTERM (listener stop) and on the exit-3
+  auth-failure path. If serve cannot boot, claimed tasks fail with "Forge
+  runtime unavailable — opencode serve did not start" — no legacy cold-`run`
+  fallback.
+- **Persistent sandbox + workspace (opencode only):** every project gets a
+  persistent workspace dir at `~/.lexa/projects/<projectId>/` (seeded
+  write-once with README.md + a static orchestrator AGENTS.md); per run the
+  daemon (over)writes `.agents/agents/<agentId>/AGENTS.md` (the selected
+  lexa-agent's rules) and `.agents/skills/<skillId>/SKILL.md`. The sealed
+  per-run `.forge/` HOME is replaced by a persistent per-runtime sandbox at
+  `<LEXA_DIR>/runtimes/<runtimeId>/forge-home/` (seeded once, never wiped —
+  removed only with the runtime; contains the deny-rule `opencode.json`:
+  bash fully denied, `external_directory: deny`, `*auth.json*` denied,
+  `skill`/`webfetch` denied + a copy of
+  `~/.local/share/opencode/auth.json` chmod 600, refreshed at serve boot AND
+  at every claim). `external_directory: deny` is evaluated on the resolved
+  path, so the serve root ≠ workspace is safe: reads inside the session's
+  bound workspace work, everything outside is blocked. Sessions bind to their
+  workspace at mint and keep it on continuation; a re-provisioned workspace
+  (listener sync / manual wipe) leaves a stale file context — reset the
+  session after wiping a workspace. Global opencode config — permissions,
+  MCP servers, plugins — never loads into Forge runs.
   `lexa-cli machine workspace list|sync` inspects/re-syncs local workspaces.
   hermes/command-code keep the legacy ephemeral `~/.lexa/runs/` layout.
 
