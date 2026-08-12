@@ -8,14 +8,15 @@ export class ProjectRepo extends Effect.Service<ProjectRepo>()("Lexa/ProjectRepo
     const db = yield* Sqlite;
 
     return {
-      create: (input: { id: string; name: string; slug: string; description: string }): Effect.Effect<void, ConstraintViolation | DbError> =>
+      create: (input: { id: string; name: string; slug: string; description: string; teamId?: string | null }): Effect.Effect<void, ConstraintViolation | DbError> =>
         run(
           db,
-          `INSERT INTO projects (id, name, slug, description) VALUES (?, ?, ?, ?)`,
+          `INSERT INTO projects (id, name, slug, description, team_id) VALUES (?, ?, ?, ?, ?)`,
           input.id,
           input.name,
           input.slug,
-          input.description
+          input.description,
+          input.teamId ?? null
         ).pipe(Effect.map(() => undefined)),
 
       findBySlug: (slug: string): Effect.Effect<DomainProject, RowNotFound | DbError> =>
@@ -29,7 +30,7 @@ export class ProjectRepo extends Effect.Service<ProjectRepo>()("Lexa/ProjectRepo
           Effect.map((rows) => rows.map(rowToProject))
         ),
 
-      update: (id: string, input: { name?: string; description?: string }): Effect.Effect<DomainProject, RowNotFound | DbError | ConstraintViolation> => {
+      update: (id: string, input: { name?: string; description?: string; teamId?: string | null }): Effect.Effect<DomainProject, RowNotFound | DbError | ConstraintViolation> => {
         const sets: string[] = [];
         const params: unknown[] = [];
         if (input.name !== undefined) {
@@ -39,6 +40,10 @@ export class ProjectRepo extends Effect.Service<ProjectRepo>()("Lexa/ProjectRepo
         if (input.description !== undefined) {
           sets.push("description = ?");
           params.push(input.description);
+        }
+        if (input.teamId !== undefined) {
+          sets.push("team_id = ?");
+          params.push(input.teamId);
         }
         if (sets.length === 0)
           return queryFirst<ProjectRow>(db, `SELECT * FROM projects WHERE id = ?`, id).pipe(Effect.map(rowToProject));

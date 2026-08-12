@@ -11,7 +11,7 @@ import { DbError, RowNotFound, ConstraintViolation, Sqlite, withTx } from "../db
 import { ProjectNotFound, TaskNotFound, WikiPageNotFound, ForgeTaskNotFound, NoRuntimeOnline, RuntimeNotFound, AgentNotFound, SkillNotFound, ForgeBuiltinDelete, ForgeEntityInUse, ForgeSessionActive } from "../api/errors";
 import { docToMarkdown } from "../../shared/markdown";
 import * as msg from "../activity-messages";
-import { rowToForgeSession } from "../../shared/db";
+import { rowToForgeSession, RuntimeWithTeam } from "../../shared/db";
 import type { ForgeTask, ForgeTaskLog, DocumentSource, TipTapDoc, ForgeAgent, ForgeSkill, ForgeSession, ActivityType, ForgeProvider } from "../../shared/types";
 
 // Builtin seed defaults — mirrors migrations/0001_init.sql (fresh installs) and
@@ -328,8 +328,15 @@ export class ForgeService extends Effect.Service<ForgeService>()("Lexa/ForgeServ
       getById: (id: string): Effect.Effect<ForgeTask, ForgeTaskNotFound | DbError> =>
         repo.findTaskById(id).pipe(Effect.catchTag("RowNotFound", () => new ForgeTaskNotFound({ id }))),
 
-      claimNext: (runtimeId: string): Effect.Effect<ForgeTask | null, ConstraintViolation | DbError | RowNotFound> =>
-        repo.claimNextTask(runtimeId),
+      claimNext: (runtimeId: string): Effect.Effect<ForgeTask | null, ConstraintViolation | DbError | RowNotFound | RuntimeNotFound> =>
+        Effect.gen(function* () {
+          // Team scoping: the runtime's team_id gates what it may claim
+          // (NULL = global). The runtime must exist to resolve its scope.
+          const runtime = yield* repo.findRuntimeById(runtimeId).pipe(
+            Effect.catchTag("RowNotFound", () => new RuntimeNotFound({ id: runtimeId }))
+          );
+          return yield* repo.claimNextTask(runtimeId, runtime.teamId);
+        }),
 
       // Warm-session verdict for a claimed task: continue the mapped session
       // ONLY when the mapping exists AND its agent/skill match the task's —
@@ -470,19 +477,19 @@ export class ForgeService extends Effect.Service<ForgeService>()("Lexa/ForgeServ
         repo.listLogs(taskId),
 
       // Runtimes
-      registerRuntime: (input: { id?: string; name: string; provider: "opencode" | "hermes" | "command-code"; machineId: string; agent: string; model: string; hostname: string }): Effect.Effect<import("../../shared/types").Runtime, ConstraintViolation | DbError> =>
+      registerRuntime: (input: { id?: string; name: string; provider: "opencode" | "hermes" | "command-code"; machineId: string; agent: string; model: string; hostname: string; teamId?: string | null }): Effect.Effect<RuntimeWithTeam, ConstraintViolation | DbError> =>
         Effect.gen(function* () {
           const id = input.id ?? crypto.randomUUID();
-          return yield* repo.registerRuntime({ ...input, id });
+          return yield* repo.registerRuntime({ ...input, id, teamId: input.teamId ?? null });
         }),
 
       // Server-authoritative config: edits apply on the daemon's next claim/spawn.
-      updateRuntime: (id: string, patch: { name?: string; provider?: "opencode" | "hermes" | "command-code"; agent?: string; model?: string; printLogs?: boolean; logLevel?: string; extraArgs?: string[] }): Effect.Effect<import("../../shared/types").Runtime, RuntimeNotFound | ConstraintViolation | DbError> =>
+      updateRuntime: (id: string, patch: { name?: string; provider?: "opencode" | "hermes" | "command-code"; agent?: string; model?: string; printLogs?: boolean; logLevel?: string; extraArgs?: string[] }): Effect.Effect<RuntimeWithTeam, RuntimeNotFound | ConstraintViolation | DbError> =>
         repo.updateRuntime(id, patch).pipe(
           Effect.catchTag("RowNotFound", () => new RuntimeNotFound({ id }))
         ),
 
-      getRuntimeConfig: (id: string): Effect.Effect<import("../../shared/types").Runtime, RuntimeNotFound | DbError> =>
+      getRuntimeConfig: (id: string): Effect.Effect<RuntimeWithTeam, RuntimeNotFound | DbError> =>
         repo.findRuntimeById(id).pipe(
           Effect.catchTag("RowNotFound", () => new RuntimeNotFound({ id }))
         ),
@@ -544,7 +551,7 @@ export class ForgeService extends Effect.Service<ForgeService>()("Lexa/ForgeServ
           agents: catalog.agents,
         })).pipe(Effect.map(() => undefined)),
 
-      listRuntimes: (): Effect.Effect<import("../../shared/types").Runtime[], ConstraintViolation | DbError> =>
+      listRuntimes: (): Effect.Effect<RuntimeWithTeam[], ConstraintViolation | DbError> =>
         Effect.gen(function* () {
           yield* repo.markRuntimesOffline();
           return yield* repo.listRuntimes();

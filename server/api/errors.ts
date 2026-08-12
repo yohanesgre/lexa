@@ -118,6 +118,17 @@ export const errorCodeMap: Record<string, string> = {
   ForgeSessionActive: "FORGE_SESSION_ACTIVE",
   ConstraintViolation: "CONSTRAINT",
   DbError: "DATABASE_ERROR",
+  TeamNotFound: "TEAM_NOT_FOUND",
+  TeamHasProjects: "TEAM_HAS_PROJECTS",
+  SoleOwner: "SOLE_OWNER",
+  TeamMemberNotFound: "USER_NOT_FOUND",
+  MemberNotInWorkspace: "NOT_WORKSPACE_MEMBER",
+  InviteNotFound: "INVITE_NOT_FOUND",
+  InviteAlreadyPending: "INVITE_PENDING",
+  SessionNotFound: "SESSION_NOT_FOUND",
+  TeamSlugTaken: "SLUG_TAKEN",
+  WorkspaceUserNotFound: "USER_NOT_FOUND",
+  PasswordLinkIssueFailed: "PASSWORD_LINK_FAILED",
 };
 
 export function errorToStatus(error: { _tag: string }): number {
@@ -131,6 +142,7 @@ export function errorToStatus(error: { _tag: string }): number {
     case "MachineSecretMismatch":
     case "CommentEditForbidden":
     case "CommentDeleteForbidden":
+    case "SoleOwner":
       return 403;
     case "TaskNotFound":
     case "ProjectNotFound":
@@ -147,11 +159,17 @@ export function errorToStatus(error: { _tag: string }): number {
     case "ApiKeyNotFound":
     case "TaskLinkNotFound":
     case "CommentNotFound":
+    case "TeamNotFound":
+    case "TeamMemberNotFound":
+    case "InviteNotFound":
+    case "WorkspaceUserNotFound":
+    case "SessionNotFound":
       return 404;
     case "WipLimitExceeded":
     case "DeadlineAfterLane":
     case "BacklogProtected":
     case "SlugTaken":
+    case "TeamSlugTaken":
     case "HasChildren":
     case "TaskHasChildren":
     case "GithubIssueAlreadyLinked":
@@ -163,6 +181,8 @@ export function errorToStatus(error: { _tag: string }): number {
     case "ConstraintViolation":
     case "LastAdminDemote":
     case "MachineIdTaken":
+    case "TeamHasProjects":
+    case "InviteAlreadyPending":
       return 409;
     case "RequiredFieldMissing":
     case "NeighborNotInColumn":
@@ -176,6 +196,7 @@ export function errorToStatus(error: { _tag: string }): number {
     case "InvalidName":
     case "InvalidRateLimit":
     case "InvalidGithubSettings":
+    case "MemberNotInWorkspace":
       return 422;
     case "InvalidKey":
     case "MissingAuth":
@@ -291,7 +312,7 @@ export function errorMessage(error: { _tag: string } & Record<string, unknown>):
     case "InvalidGithubSettings":
       return String(error.reason ?? "Invalid GitHub settings");
     case "NoUserContext":
-      return "No user context — this endpoint requires the x-lxk-user header";
+      return "No user context — this endpoint needs a session or a key bound to a user";
     case "CannotDeleteSelf":
       return "Cannot modify your own account";
     case "LastAdminDemote":
@@ -302,6 +323,20 @@ export function errorMessage(error: { _tag: string } & Record<string, unknown>):
       return `Access denied to project '${error.project}'`;
     case "Forbidden":
       return "Admin role required";
+    case "SoleOwner":
+      return String(error.message ?? "Cannot modify the last owner — transfer ownership first");
+    case "TeamHasProjects":
+      return `Team still owns ${error.count} project(s) — reassign them first`;
+    case "TeamNotFound":
+      return "Team not found";
+    case "MemberNotInWorkspace":
+      return `'${error.email}' is not a workspace member — invite them via the superadmin first`;
+    case "InviteNotFound":
+      return "Invite not found";
+    case "InviteAlreadyPending":
+      return `An invite is already pending for '${error.email}'`;
+    case "SessionNotFound":
+      return "Session not found";
     case "SetupLocked":
       return "Setup is already complete — the wizard only runs on first install";
     case "SearchError":
