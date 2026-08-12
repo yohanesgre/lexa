@@ -7,10 +7,9 @@
 | Concern | Convention |
 |---------|-----------|
 | Base URL | `https://<host>/api` (Bun server behind the cloudflared tunnel) |
-| Auth (machine) | `Authorization: Bearer lxk_<43 base62 chars>` — required by every `/api/*` route except `/api/health`, `/api/setup/*`, the GitHub webhook (HMAC), and `/api/forge/runtimes/register` + `/api/forge/daemon/*` routes carrying `x-forge-token` (see Auth) |
-| Auth (human) | Cloudflare Access terminates at the edge (Google OAuth). With `LXK_ACCESS_AUD` set, the server verifies the `Cf-Access-Jwt-Assertion` against the team JWKS (`server/api/access-auth.ts`) and upserts users from the claims; without it, it trusts `Cf-Access-Authenticated-User-Email` / `Cf-Access-Authenticated-User-Name` headers (tunnel-authenticated, boot warning). Page (SSR) user provisioning only — the REST API itself is machine-key only. |
+| Auth | Dual-channel: `Authorization: Bearer lxk_<43 base62 chars>` (machines — required by every `/api/*` route except the exempt list below, see Auth) OR a Better Auth session cookie (humans — browsers). `/api/auth/*` is mounted BEFORE the key middleware. The `x-lxk-user` header is removed. |
 | Content type | `application/json; charset=utf-8` |
-| IDs | UUID strings |
+| IDs | UUID strings; users, teams (organizations), sessions and related Better Auth rows use Better Auth ids (16-char alphanumeric) |
 | Timestamps | ISO 8601 UTC (`2026-07-27T10:30:00Z`) |
 | Rich text | **TipTap/ProseMirror JSON object** on REST. (Markdown only exists at the MCP boundary — see MCP.md §Content Format.) |
 | Pagination | `?limit` (default 50, max 200) + `?cursor` (opaque). Response envelope: `{ "data": [...], "nextCursor": string \| null }`. **Exception: `/board` is unpaginated.** |
@@ -33,11 +32,12 @@ All non-2xx responses share one shape:
 | HTTP | Code | When |
 |------|------|------|
 | 400 | — | Payload schema validation failures are rejected by the platform before handlers run; the body is the platform's response, not the envelope above. No domain code maps to 400. |
-| 401 | `UNAUTHORIZED` | Missing or invalid API key (auth middleware in `server/api/middleware.ts`; see Auth) |
+| 401 | `UNAUTHORIZED` | Missing or invalid API key or session cookie (auth middleware in `server/api/middleware.ts`; see Auth) |
 | 401 | `GITHUB_WEBHOOK_ERROR` | Webhook signature mismatch (before body parsing) |
-| 403 | `FORBIDDEN` | Admin-only endpoint called by a non-admin, project access denied (details: `{ message }`), or machine-secret mismatch on runtime-event claim |
+| 403 | `FORBIDDEN` | Superadmin- or team-admin-gated endpoint called without authority, project access denied (details: `{ message }`), or machine-secret mismatch on runtime-event claim |
 | 403 | `SETUP_LOCKED` | Mutating `/api/setup/*` call after setup is complete or projects exist |
-| 403 | `CANNOT_DELETE_SELF` | Demoting or removing the last admin via the admin user routes (details: `{ message }`) |
+| 403 | `SOLE_OWNER` | Demoting or removing the last owner of a team (details: `{ message }` — transfer ownership first) |
+| 403 | `CANNOT_DELETE_SELF` | Removing the last superadmin / self-removal via the workspace member routes (details: `{ message }`) |
 | 404 | `USER_NOT_FOUND` | Unknown user id on admin role endpoints |
 | 404 | `PROJECT_NOT_FOUND` `COLUMN_NOT_FOUND` `SWIMLANE_NOT_FOUND` `TASK_NOT_FOUND` `PAGE_NOT_FOUND` `SOURCE_NOT_FOUND` `FORGE_TASK_NOT_FOUND` `TASK_LINK_NOT_FOUND` `MACHINE_NOT_FOUND` `RUNTIME_NOT_FOUND` `RUNTIME_EVENT_NOT_FOUND` `API_KEY_NOT_FOUND` `AGENT_NOT_FOUND` `SKILL_NOT_FOUND` | |
 | 409 | `SLUG_TAKEN` | Duplicate project slug or wiki slug (details: `{ slug }`); also the constraint fallback on project update/delete |
@@ -50,8 +50,8 @@ All non-2xx responses share one shape:
 | 409 | `ALREADY_LINKED` | Task already has a GitHub issue in that repo |
 | 409 | `OPTION_IN_USE` | Delete priority/type option still referenced by tasks (details: `{ optionId, label }`) |
 | 409 | `FORGE_ENTITY_IN_USE` | Delete agent/skill still used by forge tasks (details: `{ kind, name, count }`) |
+| 409 | `TEAM_HAS_PROJECTS` | Delete team while it owns projects (details: `{ count }` — reassign projects first) |
 | 409 | `CONSTRAINT` | Generic constraint-violation fallback (typed codes like `SLUG_TAKEN` / `HAS_CHILDREN` / `OPTION_IN_USE` are raised whenever possible) |
-| 409 | `LAST_ADMIN_DEMOTE` | Demote/remove would leave the instance with no admin |
 | 413 | `BODY_TOO_LARGE` | Request body exceeds `LXK_MAX_BODY_MB` (default 16) — early gates, before auth: stream cap in `server/entry.ts` (chunked/CL-less bodies included) + declared-length pre-check in the API middleware |
 | 422 | `REQUIRED_FIELD` | Column's `required_fields` not satisfied (details: `{ field, column }`) |
 | 422 | `NEIGHBOR_NOT_IN_COLUMN` | `beforeTaskId`/`afterTaskId` not in target column (details: `{ taskId }`) |
@@ -68,24 +68,41 @@ All non-2xx responses share one shape:
 
 Defined in the error map but never raised by any REST handler — do not match on them:
 - `MISSING_AUTH` / `INVALID_API_KEY` — the auth middleware emits `UNAUTHORIZED` instead (MCP raises them natively).
+- `LAST_ADMIN_DEMOTE` — legacy user-role editing is removed (superadmin is env-only; user lifecycle goes through `/api/workspace/members`).
 
 ## Auth
 
 Every `/api/*` request except the exempt routes below is rejected with
 `401 { "error": { "code": "UNAUTHORIZED", "message": "Invalid or missing API key" } }`
-unless the `Authorization` header carries a valid key:
+unless it authenticates via one of two channels:
 
-- Format: `Authorization: Bearer lxk_<43 base62 chars>` (regex `^lxk_[0-9A-Za-z]{43}$`).
-- The key is SHA-256-hashed and looked up in `api_keys`; `last_used_at` is
-  bumped at most hourly. Keys created without a user (`user_id` NULL — the
-  seeded `LXK_API_KEY` and setup-wizard keys) resolve to **admin**; keys bound
-  to a user carry that user's `role`.
-- **Admin vs member:** a `requireAdmin` gate (403 `FORBIDDEN`) protects project
+- **Session cookie (humans):** browser pages and `/api/*` calls carry the
+  Better Auth session cookie (mounted at `/api/auth/*`, `tanstackStartCookies`).
+  Identity = the session user (id, name, email, role).
+- **Bearer API key (machines):** `Authorization: Bearer lxk_<43 base62 chars>`
+  (regex `^lxk_[0-9A-Za-z]{43}$`). The key is SHA-256-hashed and looked up in
+  `api_keys`; `last_used_at` is bumped at most hourly. Keys created without a
+  user (`user_id` NULL — the seeded `LXK_API_KEY` and setup-wizard keys)
+  resolve to **admin**; keys bound to a user carry that user's role. Key auth
+  for MCP/CLI/webhooks is unchanged.
+
+**Attribution (R5):** the actor is the session user for browser calls and the
+key name for machine calls. The `x-lxk-user` header is **removed** — never
+sent by browsers, never read by the server. The `<meta name="lxk-api-key">`
+injection and `VITE_LXK_API_KEY` are removed — browser `/api/*` calls
+authenticate via the session cookie only.
+
+- **Superadmin vs member:** `users.role` ∈ {superadmin, member} — superadmin is
+  env-only (`LXK_ADMIN_EMAILS`, applied at provisioning via the setup wizard),
+  never edited at runtime (no role-editing endpoint; legacy `admin` → `superadmin`).
+  A `requireSuperadmin` gate (403 `FORBIDDEN`) protects project
   create/update/delete, column and swimlane mutations, `PUT field-config`, all
-  `/api/settings/api-keys/*`, all `/api/admin/*`, and Forge agent/skill CRUD +
-  reset + skill binding. Everything else (reads, task/wiki/board operations,
-  Forge task creation) works for any valid key.
+  `/api/settings/*`, all `/api/admin/*`, Forge agent/skill CRUD + reset + skill
+  binding, and the teams/workspace lifecycle endpoints (see Teams & Workspace).
+  Team-admin authority comes from the org `member.role` (owner/admin) on the
+  team, never from `users.role`.
 - **Exempt routes** (no API key needed):
+  - `/api/auth/*` — Better Auth handler, mounted BEFORE the key middleware
   - `GET /api/health`
   - `/api/setup/*` (first-run wizard)
   - `POST /api/webhooks/github` — HMAC-SHA-256 signature over the raw body is the auth
@@ -94,13 +111,9 @@ unless the `Authorization` header carries a valid key:
     daemon token (`x-forge-token: <LXK_FORGE_DAEMON_TOKEN>` header) in place of a key
     (`/api/forge/sessions` joins the daemon's PUT/DELETE and the browser's
     GET/reset)
-- **Cloudflare Access** protects the host at the edge. With `LXK_ACCESS_AUD` set,
-  `server/api/access-auth.ts` verifies the `Cf-Access-Jwt-Assertion` against the
-  team JWKS (audience must match) — an invalid assertion → 401, and the SSR path
-  upserts a user from the verified claims. Without `LXK_ACCESS_AUD`, identity
-  headers are trusted as-is (tunnel-authenticated; boot warning logged). Admins
-  come from `LXK_ADMIN_EMAILS` env or the `admin_emails` setting. API requests
-  are never authenticated by Access.
+- **Login rate limit (R17):** failed logins on `/api/auth/*` are throttled by
+  the Better Auth rate-limit plugin (in-memory; ~5 attempts/60s per email,
+  15 min lockout). The existing per-IP `/api/*` limiter is untouched.
 
 ## Entity Schemas (TypeScript)
 
@@ -120,9 +133,54 @@ interface Project {
   name: string;
   slug: string;
   description: string;
+  teamId: ID | null;          // owning team (organization id); null = unassigned, superadmin-only until assigned
   repos: ProjectRepo[];           // linked repos with roles (replaces githubRepo)
   createdAt: ISODate;
   updatedAt: ISODate;
+}
+
+// ── Auth, teams & sessions ──
+
+interface LexaUser {
+  id: ID;                     // Better Auth id (16-char alphanumeric)
+  email: string;
+  name: string;
+  role: "superadmin" | "member";   // env-only superadmin — never edited at runtime
+  createdAt: ISODate;
+  lastSeen: ISODate | null;
+}
+
+interface Team {              // = Better Auth organization; slug unique
+  id: ID;
+  name: string;
+  slug: string;
+  createdAt: string;
+}
+
+type TeamMemberRole = "owner" | "admin" | "member";   // org role — the team-admin axis
+
+interface TeamMember {
+  userId: ID;
+  name: string;
+  email: string;
+  role: TeamMemberRole;
+  createdAt: string;
+}
+
+interface WorkspaceInvite {   // superadmin-issued app-member invite (link-based)
+  id: ID;
+  email: string;
+  tokenHint: string;          // short prefix of the link secret (display only)
+  expiresAt: string;          // 7d after issue
+  acceptedAt: string | null;
+}
+
+interface SessionInfo {
+  id: ID;
+  ipAddress: string | null;
+  userAgent: string | null;
+  expiresAt: string;
+  createdAt: string;
 }
 
 interface Column {
@@ -227,6 +285,7 @@ interface Runtime {
   name: string;
   provider: "opencode" | "hermes" | "command-code";
   machineId: ID | null;
+  teamId: ID | null;           // owning team; null = global runtime (superadmin-owned, claims any team's tasks)
   agent: string;           // CLI persona flag (opencode --agent); "" = default
   model: string;           // full "provider/model" id — passed verbatim to --model
   printLogs: boolean;
@@ -376,9 +435,12 @@ GET    /api/setup/status
         hasProjects: boolean, hasUsers: boolean }
   API-key exempt. configured = setup_complete flag OR (api key + admin emails present).
 
-POST   /api/setup/admin        body { email* }
+POST   /api/setup/admin        body { email*, password* }
 → 200 { ok: true } | 403 SETUP_LOCKED
-  Appends the email to settings.admin_emails (env LXK_ADMIN_EMAILS is also honored).
+  Creates the first superadmin account (users.role = 'superadmin') with the
+  given password (Better Auth credential hash). The legacy admin_emails
+  setting is DELETED — the env allow-list (LXK_ADMIN_EMAILS) is the only
+  superadmin source, applied at provisioning only, never edited at runtime.
 
 POST   /api/setup/api-key
 → 200 { key: "lxk_..." }
@@ -417,6 +479,12 @@ body { name?, description? }
 DELETE /api/projects/:slug   (admin)
 → 204 | 403 FORBIDDEN | 404 | 409 SLUG_TAKEN (constraint fallback)   (cascades: columns, swimlanes, tasks, wiki)
 
+PATCH  /api/projects/:projectId/team   (superadmin any team; team admin own team)
+body { teamId*: string | null }
+→ 200 Project | 403 FORBIDDEN | 404
+  teamId null = unassigned (superadmin-only until assigned). A team admin may
+  only assign their own team. Projects gain teamId on the Project payload.
+
 GET    /api/projects/:slug/repos  (admin)
 → 200 { data: [{ repo, sourceRole, workspaceRole }] } | 403 FORBIDDEN | 404
   Repo rows with roles (project_repos). Repos are managed here — the Project
@@ -444,8 +512,9 @@ GET    /api/dashboard
 ```
 GET    /api/projects/:slug/members
 → 200 { data: [{ name, email, role: "admin"|"member" }] }
-  Users holding an explicit project role (user_project_roles rows). Global
-  admins are filtered out. Membership changes are made via
+  Users holding an explicit project role (user_project_roles rows — the
+  cross-team grant mechanism; role values unchanged). Superadmins and plain
+  team members are filtered out. Membership changes are made via
   /api/admin/users/:id/projects — there are no project-scoped write endpoints.
 ```
 
@@ -812,20 +881,20 @@ GET    /api/settings/github/search-repos?q=  (admin)
 
 ### Admin (users & project roles)
 
-All endpoints require an admin caller — members get `403 FORBIDDEN`.
+All endpoints require a superadmin caller (env-only) — everyone else gets
+`403 FORBIDDEN`. Role editing is **removed**: `users.role` derives solely from
+the env allow-list, never from a runtime endpoint (the legacy
+`PATCH /api/admin/users/:id { role }` is deleted — user lifecycle goes through
+`/api/workspace/members`).
 
 ```
 GET    /api/admin/users
-→ 200 { data: [{ id, email, name, role, createdAt, lastSeen }] }
-
-PATCH  /api/admin/users/:id       body { role*: "admin"|"member" }
-→ 200 { id, email, name, role, createdAt, lastSeen }
-  | 403 FORBIDDEN | 404 USER_NOT_FOUND | 403 CANNOT_DELETE_SELF
-  (demote-to-member on self → `CANNOT_DELETE_SELF`; the caller identity comes
-  from the API key, not a placeholder)
+→ 200 { data: [{ id, email, name, role, createdAt, lastSeen }] }   (role: "superadmin"|"member")
 
 GET    /api/admin/users/:id/projects
 → 200 { data: [{ projectId, projectSlug, role: "admin"|"member" }] }
+  (project grant roles stay "admin"|"member" — user_project_roles is the
+  cross-team explicit-grant mechanism, unchanged)
 
 PUT    /api/admin/users/:id/projects    body { projectId*, role*: "admin"|"member" }
 → 200 { projectId, projectSlug, role }
@@ -838,9 +907,8 @@ DELETE /api/admin/users/:id/projects/:projectId
 
 ### Me (self-service profile)
 
-The acting browser user, named by the `x-lxk-user` header (the key still
-authorizes). Bare API keys without `x-lxk-user` get `400 NO_USER_CONTEXT` —
-agents have no profile to edit.
+The acting user is the session user (cookie); bare API keys without a session
+get `400 NO_USER_CONTEXT` — agents have no profile to edit.
 
 ```
 PATCH  /api/me      body { name*: string (trimmed, 1-80 chars) }
@@ -848,10 +916,103 @@ PATCH  /api/me      body { name*: string (trimmed, 1-80 chars) }
   | 400 NO_USER_CONTEXT | 404 USER_NOT_FOUND | 422 INVALID_NAME
 ```
 
-The browser-facing identity (`<meta name="lxk-user">`) carries
-`{ email, name, role, createdAt, lastSeen }`; the "Sign out" meta
-(`<meta name="lxk-logout">`) is only emitted when `LXK_ACCESS_TEAM` is set,
-and the UI hides Sign out otherwise.
+Password change is a Better Auth endpoint (`/api/auth/change-password`,
+revokes other sessions) — see the auth route surface. Identity for the UI
+comes from `GET /api/auth/get-session`; the `lxk-user` / `lxk-logout` meta
+tags are removed.
+
+### Teams (auth-roles-teams)
+
+A team is a Better Auth organization (`organization` table, slug unique);
+membership is one `member` row per (team, user) with an independent org role.
+Team admin = org member with role `owner` | `admin`; team admins manage own
+team only, the superadmin manages all teams. There are no email invites at
+team level — membership is granted by adding an existing workspace member.
+
+```
+GET    /api/teams
+→ 200 { data: Team[] }     (team admin: own teams; superadmin: all teams)
+
+POST   /api/teams          (superadmin only)
+body { name*, slug? }
+→ 201 Team | 403 FORBIDDEN | 409 SLUG_TAKEN
+  Creator becomes the org owner (member role 'owner').
+
+DELETE /api/teams/:teamId  (superadmin only)
+→ 204 | 403 FORBIDDEN | 404
+  | 409 TEAM_HAS_PROJECTS { count }   (blocked while the team owns projects — reassign first)
+  Cascades: memberships; owning projects' team_id → NULL.
+
+GET    /api/teams/:teamId/members     (team admin own team / superadmin)
+→ 200 { data: TeamMember[] }
+
+POST   /api/teams/:teamId/members     (team admin own team / superadmin)
+body { email*, role*: "owner"|"admin"|"member" }
+→ 201 TeamMember | 403 FORBIDDEN | 404
+  | 422 — email is not an existing workspace member: error carries a
+    details.available* hint (invite via superadmin first)
+  Adds an EXISTING workspace member — no accept step, no team-level invites.
+
+PATCH  /api/teams/:teamId/members/:userId   (team admin own team / superadmin)
+body { role*: "owner"|"admin"|"member" }
+→ 200 TeamMember | 403 FORBIDDEN | 404
+  | 403 SOLE_OWNER   (demoting/removing the last owner — transfer first)
+
+DELETE /api/teams/:teamId/members/:userId   (team admin own team / superadmin)
+→ 204 | 403 FORBIDDEN | 404 | 403 SOLE_OWNER
+  Removes that team's access immediately; other teams unaffected.
+```
+
+### Workspace (members, invites, set-password links)
+
+Superadmin-only surfaces. The workspace = the app's member base (all users),
+before and across team placement.
+
+```
+GET    /api/workspace/members   (superadmin)
+→ 200 { data: Array<LexaUser & { teams: Array<{ teamId, teamName, role }> }> }
+  All users with role, team memberships, and last seen.
+
+PATCH  /api/workspace/members/:userId   (superadmin)
+body { action*: "deactivate" | "reactivate" }
+→ 200 LexaUser | 403 FORBIDDEN | 404 USER_NOT_FOUND
+  Deactivate = ban: blocks login and rejects existing sessions on the next
+  check. Role/grants are preserved for reactivation.
+
+DELETE /api/workspace/members/:userId   (superadmin)
+→ 204 | 403 FORBIDDEN | 404 USER_NOT_FOUND
+  Removes memberships + project grants and REVOKES the user's bound API keys
+  (a deleted user's key must not survive unbound). Activity/comments keep
+  their rows (author_id → NULL).
+
+POST   /api/workspace/invites    (superadmin)
+body { email* }
+→ 201 { link } | 403 FORBIDDEN | 409 (invite already pending for that email)
+  link = {baseURL}/invite?token=<secret> — shared out-of-band (no email
+  transport). Expires 7d after issue. Accepting on first login sets the
+  password → member account created → accepted_at stamped; re-use idempotent.
+
+DELETE /api/workspace/invites/:inviteId   (superadmin; pending only)
+→ 204 | 403 FORBIDDEN | 404 | 409 (already accepted — cannot revoke)
+  Revoked links die.
+
+POST   /api/workspace/members/:userId/set-password-link   (superadmin)
+→ 201 { link } | 403 FORBIDDEN | 404 USER_NOT_FOUND
+  link = {baseURL}/set-password?token=<secret> — verification table token,
+  single-use, 7d expiry. Covers forgotten/no passwords (legacy users).
+```
+
+### Sessions (self-service)
+
+```
+GET    /api/sessions
+→ 200 { data: SessionInfo[] }     (own sessions only, newest first)
+
+POST   /api/sessions/:sessionId/revoke
+→ 204 | 404
+  Own sessions only — revoking another user's session id → 404 (no existence
+  oracle). Logout / password change / deactivate also revoke sessions.
+```
 
 ### GitHub Webhook
 
@@ -870,13 +1031,17 @@ Handled: event "issues" with payload.action closed | reopened | edited
 
 ```
 POST   /api/forge/runtimes/register        (daemon child; x-forge-token or Bearer)
-body { id?, name*, provider*: "opencode"|"hermes"|"command-code", machineId*, model?, hostname? }
+body { id?, name*, provider*: "opencode"|"hermes"|"command-code", machineId*, model?, hostname?, teamId? }
 → 201 Runtime
+  teamId omitted/NULL = global runtime (superadmin-owned; claims any team's
+  project tasks). A non-null teamId scopes the runtime to that team's tasks.
+  (R13: team admin registers for own team; superadmin any team + global.)
 
 PATCH  /api/forge/runtimes/:id              (browser)
 body { name?, provider?, agent?, model?, printLogs?, logLevel?, extraArgs?: string[] }   (server-authoritative config)
 → 200 Runtime
   | 404 RUNTIME_NOT_FOUND
+  (team admin: own team's runtimes only; superadmin: all + global)
 Edits apply to the daemon's next claim — no restart needed. provider switches
 which CLI the daemon spawns (the daemon machine must have it installed);
 agent is the CLI's internal persona flag (opencode --agent build/plan; empty =
@@ -886,11 +1051,15 @@ agents (rule bundles). extraArgs are appended verbatim to the agent CLI spawn
 passed verbatim
 to --model. hostname/status are daemon-reported and not editable.
 
-GET    /api/forge/runtimes
+GET    /api/forge/runtimes?teamId=
 → 200 { data: Runtime[] }                  (offline if last_seen > 2 min ago)
+  ?teamId= filter: team admin — own team only; superadmin — any team, plus
+  global (team_id NULL) runtimes. Claim rule: a runtime claims a forge task
+  only when team_id IS NULL (global) OR team_id = the task's project.team_id.
 
 DELETE /api/forge/runtimes/:id              (browser)
 → 204 | 404 RUNTIME_NOT_FOUND
+  (team admin: own team's runtimes only; superadmin: all + global)
 Removal never blocks: it queues a machine-scoped `remove` event (delivered
 whenever the machine's listener next heartbeats — the listener kills the
 matching child + env directory) and deletes the runtime row. A machine hosts
@@ -1172,4 +1341,4 @@ Notes:
 
 - **Mutation responses are authoritative.** Every mutating endpoint returns the updated entity. The frontend updates TanStack Query cache from the response (`setQueryData`) and never refetches on the mutation path — the response is the authoritative state.
 - **`position` is opaque.** Clients never read or write it directly; ordering is expressed via `beforeTaskId`/`afterTaskId` (tasks) or `position` integer reassignment (columns/swimlanes/wiki siblings).
-- **`:slug` in task routes is routing context**, not an authorization boundary in v1 (single-tenant, Access-gated). Task IDs are globally unique UUIDs.
+- **`:slug` in task routes is routing context**, not an authorization boundary. Project access is enforced by the authorization service (superadmin > explicit `user_project_roles` grant > team membership > deny); team admins act within their own teams only. Task IDs are globally unique UUIDs.
