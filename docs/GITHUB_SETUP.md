@@ -46,7 +46,8 @@ suppression and delivery dedup make the loop safe.
 GitHub cannot reach `localhost`:
 
 - **Prod/staging**: use the deployed host, e.g. `https://lexa.<domain>/api/webhooks/github`.
-  The path must **bypass Cloudflare Access** (see §5) or GitHub gets 302s and deliveries fail.
+  The route is key-exempt but HMAC-protected — no edge gate in the way; the
+  webhook authenticates with the `X-Hub-Signature-256` header only.
 - **Local dev**: run a quick tunnel and point the app's webhook URL at it:
   ```bash
   cloudflared tunnel --url http://localhost:3000   # → https://<random>.trycloudflare.com
@@ -111,34 +112,13 @@ GITHUB_WEBHOOK_SECRET=...
 the env file. The key file is gitignored (`*.private-key.pem`) and excluded
 from the Docker build context (`.dockerignore`) — never commit it.
 
-## 5. Cloudflare Access bypass (prod/staging)
-
-The webhook, MCP, and REST API routes cannot do Access's browser flow.
-`lexa-cli deploy` (v0.1.7+) provisions these automatically as self-hosted
-Access apps with a **Bypass** (Everyone) policy:
-
-- `<host>/api/webhooks/*` — GitHub deliveries
-- `<host>/mcp` — agent clients
-- `<host>/api/*` — `lexa-cli` / operator REST access (API key is the machine auth)
-
-Access evaluates the most specific path first, so the UI
-(`<host>/` on the main `Lexa (<flavor>)` app) stays session-gated.
-
-For deployments created before v0.1.7, add them manually: Zero Trust →
-**Access → Applications**, add one self-hosted application per path above
-with a **Bypass** policy (include: Everyone).
-
-Without the webhook bypass, GitHub deliveries get a 302 and fail. Verify
-from outside: `POST <host>/api/webhooks/github` with a bad signature must
-return **401** (from Lexa), not 302 (from Access).
-
-## 6. Map columns
+## 5. Map columns
 
 In the board's column settings, set a column to `github_state: open` (e.g.
 Todo) and one to `closed` (e.g. Done). Mapping is by explicit state — column
 renames can never break sync.
 
-## 7. Acceptance round-trip
+## 6. Acceptance round-trip
 
 1. Link the project's repo first: Settings → GitHub Sync → **Linked Repos** → pick the project → add the repo (type-ahead) with **Issue workspace** checked. Create a task → Task detail → **GitHub Issues** → pick the repo in the dropdown → **+ New issue** → confirm. The card shows `repo #N` with a Synced dot.
 2. Move the task to the closed-mapped column → the issue closes on GitHub
@@ -160,7 +140,7 @@ renames can never break sync.
   `.env`).
 - **Webhook deliveries never arrive** — check the app's delivery log
   (App settings → **Advanced**): `failed to connect to host` = wrong webhook
-  URL; `302` = Access bypass missing; `401` = secret mismatch.
+  URL; `401` = secret mismatch.
 - **Closing an already-closed issue sends no webhook** — GitHub doesn't
   deliver no-op state changes. Reopen first to re-trigger.
 - **A task that was moved while the issue was closed looks "Diverged"** —

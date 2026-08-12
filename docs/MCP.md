@@ -10,15 +10,15 @@
 | Method | **POST only** — any other method returns HTTP 405 |
 | Protocol | MCP over **Streamable HTTP**, **stateless mode** (no session persistence — each request self-contained). `initialize` reports protocol `2025-03-26`, capabilities `{ tools: {} }`. Batch requests are rejected (`-32600` "Batch requests are not supported") |
 | Auth | `Authorization: Bearer lxk_<base62(43)>` (must match `^lxk_[0-9A-Za-z]{43}$`) — same keys as REST. Missing/malformed/unknown key → HTTP 401 with JSON-RPC error code `-32001` ("Missing authorization" / "Invalid API key") |
-| Access bypass | `/mcp` is on a Cloudflare Access **bypass** policy — Bearer key is the only auth on this route |
+| Sessions | **Never cross the MCP boundary** — `/mcp` is key-only; Better Auth cookie sessions exist only on REST/SSR (`/api/auth/*`, browser pages). No session cookie is accepted on `/mcp` |
 
 ## Remote MCP (client machines)
 
 Use this when the agent runs on a machine that does **not** have `lexa-cli`
 installed — e.g. a client workstation that only reads/updates tasks. The hosting
 machine itself can just as well use `lexa-cli` locally; the MCP endpoint is for
-agents without the CLI. No extra server-side setup: `/mcp` is already
-Access-bypassed, TLS comes from the tunnel, and Bearer keys are the auth.
+agents without the CLI. No extra server-side setup: `/mcp` is key-only (Bearer
+keys are the auth), TLS comes from the tunnel.
 
 ```json
 {
@@ -33,8 +33,9 @@ Access-bypassed, TLS comes from the tunnel, and Bearer keys are the auth.
 ```
 
 - **One key per client machine** — create the key in Settings → API keys, keep it
-  only on that machine; revocation is then per-client. An unlinked key is `admin`;
-  a user-linked key inherits the user's role and project grants (see Access Control).
+  only on that machine; revocation is then per-client. An unlinked key acts as
+  admin; a user-linked key carries its user's id + role (attribution/runtime
+  scoping only — see Access Control).
 - **Rate limited per client IP** — 6000 req / 10 min default, configurable in
   Settings → API/Security (rate limiting): DB settings override
   `LXK_RATE_LIMIT_MAX` / `LXK_RATE_LIMIT_WINDOW_MS` env, applied live
@@ -48,17 +49,20 @@ Access-bypassed, TLS comes from the tunnel, and Bearer keys are the auth.
 
 ## Access Control
 
-Keys are **not** blanket read/write. Access is role-scoped per project:
+Keys are full read/write — **no scopes** (single-agent trust model, unchanged
+by the auth rework). The old role-gated checks referencing `users.role` are
+removed: every valid key may use every tool, including project mutations.
+Key-owner identity (`api_keys.user_id` + `users.role`) is used only for
+runtime scoping (team-scoped Forge runtimes), never for MCP authorization.
 
-- API keys are stored hashed; a key may be **user-linked** (`api_keys.user_id`). An **unlinked key acts as `admin`**. A linked key inherits its user's global role: `admin` (global — every project, plus the admin-only tools below) or `member` (only projects the user is granted via user-project-role).
-- Project-scoped checks run **before** the tool handler:
-  - Tools with a `project` argument (project slug) resolve the project, then check access.
-  - `get_project` / `get_project_status` take `slug` — same check.
-  - `get_task` / `update_task` / `move_task` / `delete_task` / `archive_task` / `restore_task` / `link_github_issue` / `unlink_github_issue` / `get_task_activity` / `add_task_comment` take `taskId` — the owning project is resolved from the task, then checked.
-  - `list_github_issues` / `create_task_from_github_issue` take `project` — same check.
-  - Denied → tool error `FORBIDDEN` (details carry the reason). A non-admin referencing an unknown project also gets `FORBIDDEN`, not `PROJECT_NOT_FOUND`.
-- `list_projects`: admins see all projects; members see only granted projects.
-- **Admin-only tools** (enforced in the handler — `FORBIDDEN` unless the key's role is `admin`): `create_project`/`update_project`/`delete_project`, `link_project_repo`/`unlink_project_repo`, `create_column`/`update_column`/`delete_column`, `create_swimlane`/`update_swimlane`/`delete_swimlane`, `list_api_keys`/`create_api_key`/`delete_api_key`, `list_users`/`update_user_role`, `list_user_project_roles`/`set_user_project_role`/`remove_user_project_role`.
+- API keys are stored hashed; a key may be **user-linked** (`api_keys.user_id`).
+  An **unlinked key acts as admin** (user_id NULL — the seeded `LXK_API_KEY`
+  and setup-wizard keys). A linked key carries its user's id + role for
+  attribution/runtime scoping.
+- `update_user_role` is **removed** — `users.role` (superadmin|member)
+  derives solely from the env allow-list (`LXK_ADMIN_EMAILS`, applied at
+  provisioning), never edited at runtime. There is no MCP tool to change it.
+- Denied → tool error `FORBIDDEN` (details carry the reason).
 
 ## Content Format
 
@@ -96,7 +100,11 @@ Tool failures return MCP-standard `isError: true` with a JSON text payload:
 }
 ```
 
-Codes mirror the REST catalog: `PROJECT_NOT_FOUND`, `COLUMN_NOT_FOUND`, `SWIMLANE_NOT_FOUND`, `TASK_NOT_FOUND`, `PAGE_NOT_FOUND`, `SLUG_TAKEN`, `HAS_CHILDREN`, `WIP_LIMIT`, `ALREADY_LINKED`, `REQUIRED_FIELD`, `NEIGHBOR_NOT_IN_COLUMN`, `OPTION_IN_USE`, `INVALID_OPTION`, `INVALID_ARGS`, `INVALID_API_KEY`, `MISSING_AUTH`, `FORBIDDEN`, `USER_NOT_FOUND`, `API_KEY_NOT_FOUND`, `CANNOT_DELETE_SELF`, `LAST_ADMIN_DEMOTE`, `GITHUB_API_ERROR`, `DATABASE_ERROR`, `CONSTRAINT`, `INTERNAL`.
+Codes mirror the REST catalog: `PROJECT_NOT_FOUND`, `COLUMN_NOT_FOUND`, `SWIMLANE_NOT_FOUND`, `TASK_NOT_FOUND`, `PAGE_NOT_FOUND`, `SLUG_TAKEN`, `HAS_CHILDREN`, `WIP_LIMIT`, `ALREADY_LINKED`, `REQUIRED_FIELD`, `NEIGHBOR_NOT_IN_COLUMN`, `OPTION_IN_USE`, `INVALID_OPTION`, `INVALID_ARGS`, `INVALID_API_KEY`, `MISSING_AUTH`, `FORBIDDEN`, `USER_NOT_FOUND`, `API_KEY_NOT_FOUND`, `GITHUB_API_ERROR`, `DATABASE_ERROR`, `CONSTRAINT`, `INTERNAL`.
+
+`LAST_ADMIN_DEMOTE` / `CANNOT_DELETE_SELF` are not raised on MCP — legacy
+user-role editing is removed (`update_user_role` deleted; superadmin is
+env-only).
 
 ## Response Shapes
 
@@ -312,7 +320,7 @@ Errors: PROJECT_NOT_FOUND, GITHUB_API_ERROR, ALREADY_LINKED, REQUIRED_FIELD
 ```json
 Input:  {}
 Output: { projects: [{ name, slug, description, taskCount }] }
-Notes: admins see all projects; members see only granted projects.
+Notes: all projects (keys are global full-access).
 ```
 
 **`get_project`**
@@ -337,22 +345,25 @@ Output: { columns: [{ name, count, wipLimit }], totalTasks }
          Dashboard health aggregation is the REST GET /api/dashboard endpoint.
 ```
 
-**`create_project`** — Admin only
+**`create_project`**
 ```json
-Input:  { name*, slug?, description? }
+Input:  { name*, slug?, description?, team? }
         slug auto-generated from name if omitted.
-Output: { name, slug, description, createdAt, updatedAt }
+        team = team slug (optional): assigns the project to that team
+        (projects.team_id). Unknown team slug → error with
+        details.availableTeams.
+Output: { name, slug, description, createdAt, updatedAt, teamId }
 Errors: FORBIDDEN, SLUG_TAKEN, CONSTRAINT
 ```
 
-**`update_project`** — Admin only
+**`update_project`**
 ```json
 Input:  { slug*, name?, description? }
 Output: { name, slug, description, createdAt, updatedAt }
 Errors: FORBIDDEN, PROJECT_NOT_FOUND
 ```
 
-**`link_project_repo`** — Admin only
+**`link_project_repo`**
 ```json
 Input:  { project*, repo*, sourceRole?, workspaceRole? }
         repo = "owner/name". At least one role required (both omitted → error).
@@ -362,7 +373,7 @@ Output: { repo, sourceRole, workspaceRole }
 Errors: FORBIDDEN, PROJECT_NOT_FOUND, INVALID_ARGS
 ```
 
-**`unlink_project_repo`** — Admin only
+**`unlink_project_repo`**
 ```json
 Input:  { project*, repo* }      repo = "owner/name"
 Output: { unlinked: true }
@@ -371,7 +382,7 @@ Notes: removes the repo row entirely (both roles). Existing task↔issue links
        keep syncing — roles gate NEW links only.
 ```
 
-**`delete_project`** — Admin only
+**`delete_project`**
 ```json
 Input:  { slug* }
 Output: { deleted: true }
@@ -381,7 +392,7 @@ Notes: removes all tasks, wiki pages, columns, and swimlanes.
 
 ### Board Structure (columns & swimlanes)
 
-**`create_column`** — Admin only
+**`create_column`**
 ```json
 Input:  { project*, name*, color?, wipLimit?, requiredFields?, githubState? }
         githubState: "open" | "closed" (GitHub issue state mapping).
@@ -389,7 +400,7 @@ Output: { id, name, wipLimit, requiredFields, githubState, position }
 Errors: FORBIDDEN, PROJECT_NOT_FOUND
 ```
 
-**`update_column`** — Admin only
+**`update_column`**
 ```json
 Input:  { project*, column*, name?, color?, wipLimit?, requiredFields?, githubState? }
         column = name (case-insensitive). wipLimit: null removes the limit.
@@ -397,7 +408,7 @@ Output: { id, name, wipLimit, requiredFields, githubState, position }
 Errors: FORBIDDEN, PROJECT_NOT_FOUND, COLUMN_NOT_FOUND (+availableColumns)
 ```
 
-**`delete_column`** — Admin only
+**`delete_column`**
 ```json
 Input:  { project*, column* }     column = name (case-insensitive)
 Output: { deleted: true }
@@ -405,7 +416,7 @@ Errors: FORBIDDEN, PROJECT_NOT_FOUND, COLUMN_NOT_FOUND, HAS_CHILDREN
 Notes: column must be empty (no tasks).
 ```
 
-**`create_swimlane`** — Admin only
+**`create_swimlane`**
 ```json
 Input:  { project*, name*, description?, dueAt? }
         dueAt = "YYYY-MM-DD" milestone deadline; empty string clears. Lanes are
@@ -414,7 +425,7 @@ Output: { id, name, description, position }
 Errors: FORBIDDEN, PROJECT_NOT_FOUND
 ```
 
-**`update_swimlane`** — Admin only
+**`update_swimlane`**
 ```json
 Input:  { project*, swimlane*, name?, description?, dueAt? }
         swimlane = name (case-insensitive). dueAt: empty string clears.
@@ -424,7 +435,7 @@ Output: { id, name, description, position }
 Errors: FORBIDDEN, PROJECT_NOT_FOUND, SWIMLANE_NOT_FOUND, DEADLINE_AFTER_LANE {date}, BACKLOG_PROTECTED
 ```
 
-**`delete_swimlane`** — Admin only
+**`delete_swimlane`**
 ```json
 Input:  { project*, swimlane* }   swimlane = name (case-insensitive)
 Output: { deleted: true }
@@ -432,7 +443,7 @@ Errors: FORBIDDEN, PROJECT_NOT_FOUND, SWIMLANE_NOT_FOUND, HAS_CHILDREN, BACKLOG_
 Notes: swimlane must be empty (no tasks). The Backlog lane cannot be deleted.
 ```
 
-**`archive_swimlane`** — Admin only
+**`archive_swimlane`**
 ```json
 Input:  { project*, swimlane* }   swimlane = name (case-insensitive)
 Output: { message: 'Archived swimlane "<name>" (<n> tasks archived)' }
@@ -441,7 +452,7 @@ Notes: one transaction — the lane AND all its live tasks are archived (per-tas
        `archived` activity rows). Idempotent. The Backlog lane cannot be archived.
 ```
 
-**`restore_swimlane`** — Admin only
+**`restore_swimlane`**
 ```json
 Input:  { project*, swimlane* }   swimlane = name (case-insensitive)
 Output: { message: 'Restored swimlane "<name>"' }
@@ -451,49 +462,42 @@ Notes: lane only — tasks stay archived (restore individually). Idempotent.
 
 ### Administration (API keys, users, project grants)
 
-**`list_api_keys`** — Admin only
+**`list_api_keys`**
 ```json
 Input:  {}
 Output: { data: [{ id, name, createdAt, lastUsedAt }] }
 Notes: key hashes are never returned — metadata only.
 ```
 
-**`create_api_key`** — Admin only
+**`create_api_key`**
 ```json
 Input:  { name* }
 Output: { key: { id, name, createdAt }, rawKey }
 Notes: rawKey is shown once — save it immediately.
 ```
 
-**`delete_api_key`** — Admin only
+**`delete_api_key`**
 ```json
 Input:  { id* }
 Output: { deleted: true }
 Errors: FORBIDDEN, API_KEY_NOT_FOUND
 ```
 
-**`list_users`** — Admin only
+**`list_users`**
 ```json
 Input:  {}
 Output: { users: [{ id, email, name, role, createdAt, lastSeen }] }
+        role: "superadmin" | "member" — env-only, read-only via MCP
 ```
 
-**`update_user_role`** — Admin only
-```json
-Input:  { userId*, role* }        role: "admin" | "member"
-Output: { id, email, name, role }
-Errors: FORBIDDEN, USER_NOT_FOUND, CANNOT_DELETE_SELF
-Notes: demoting yourself fails with CANNOT_DELETE_SELF.
-```
-
-**`list_user_project_roles`** — Admin only
+**`list_user_project_roles`**
 ```json
 Input:  { userId* }
 Output: { data: [{ projectId, projectSlug, role }] }
 Errors: FORBIDDEN, USER_NOT_FOUND
 ```
 
-**`set_user_project_role`** — Admin only
+**`set_user_project_role`**
 ```json
 Input:  { userId*, project*, role* }
         project = slug. role: "admin" | "member".
@@ -501,7 +505,7 @@ Output: { userId, projectSlug, role }
 Errors: FORBIDDEN, USER_NOT_FOUND, PROJECT_NOT_FOUND
 ```
 
-**`remove_user_project_role`** — Admin only
+**`remove_user_project_role`**
 ```json
 Input:  { userId*, project* }     project = slug
 Output: { removed: true }
@@ -516,4 +520,6 @@ Errors: FORBIDDEN, PROJECT_NOT_FOUND
 4. **Self-correcting errors** — when a name lookup fails, the error's `details.available*` lists the valid options. Retry with one of those.
 5. **`get_project_status` before batch work** — check WIP headroom before planning a set of moves.
 6. **GitHub sync is best-effort** — after `move_task`, inspect `githubIssue.outOfSync`; if true, the board is correct and GitHub will converge later (or re-move to retry).
-7. **Access is role-scoped** — a member key sees only granted projects and gets `FORBIDDEN` on anything else. Admin-only tools (project/column/swimlane/API-key/user/role management) require an admin key.
+7. **Keys are global** — every valid key can use every tool (single-agent
+   trust model); there are no role gates on MCP. Key-owner identity is used
+   only for Forge runtime scoping. Human sessions (cookies) never reach `/mcp`.
