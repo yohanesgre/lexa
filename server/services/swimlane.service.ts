@@ -72,7 +72,12 @@ export class SwimlaneService extends Effect.Service<SwimlaneService>()("Lexa/Swi
           const lane = yield* repo.findById(id).pipe(Effect.catchTag("RowNotFound", () => new SwimlaneNotFound({ id })));
           if (lane.kind === "backlog" && (input.dueAt !== undefined || input.startAt !== undefined || input.milestoneId !== undefined))
             return yield* new BacklogProtected({ action: "deadline" });
-          yield* validateDates(input.startAt, input.dueAt);
+          // Partial PATCH: validate the merged dates (payload value wins,
+          // lane's current value stands in for the untouched field) so a lone
+          // startAt/dueAt can't sneak past the lane's other bound.
+          if (input.startAt !== undefined || input.dueAt !== undefined) {
+            yield* validateDates(input.startAt ?? lane.startAt, input.dueAt ?? lane.dueAt);
+          }
           yield* ensureMilestone(input.milestoneId, lane.projectId);
           if (input.dueAt !== undefined && input.dueAt !== null) {
             const overage = yield* repo.countDueAfter(id, input.dueAt);
