@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useBoard, useTask, useTasks, useMoveTask, useUpdateTask, useDeleteTask, useArchiveTask, useRestoreTask, useLinkGithubIssue, useUnlinkGithubIssue } from "../../lib/queries";
 import { parseSwimlaneParam } from "../../lib/filters";
 import type { TaskListItem } from "../../lib/queries";
@@ -32,6 +32,12 @@ export function TasksPage() {
   const [assignee, setAssignee] = useState("");
   const [swimlaneId, setSwimlaneId] = useState(() => parseSwimlaneParam(search.swimlane));
   const [sortKey, setSortKey] = useState<SortKey>("board");
+
+  // Keep the filter in sync when the ?swimlane= param changes while mounted
+  // (e.g. "View tasks" links from the swimlanes page while already here).
+  useEffect(() => {
+    setSwimlaneId(parseSwimlaneParam(search.swimlane));
+  }, [search.swimlane]);
 
   const { board, tasks, isLoading, error, refetch } = useTasks(slug, showArchived);
   const boardQuery = useBoard(slug, showArchived);

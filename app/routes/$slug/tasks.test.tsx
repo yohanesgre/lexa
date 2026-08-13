@@ -95,4 +95,15 @@ describe("tasks route swimlane param", () => {
     expect(await screen.findByText("Task in Sprint 7")).toBeInTheDocument();
     expect(screen.getByText("Task in Sprint 8")).toBeInTheDocument();
   });
+
+  it("param change while mounted syncs the filter state (stale badge avoided)", async () => {
+    const { rerender } = render(<TasksPage />, { wrapper });
+    await screen.findByText("Task in Sprint 7");
+    // simulate in-app navigation: ?swimlane=sp1 lands while the page is mounted
+    searchMock.value = { task: undefined, swimlane: "sp1" };
+    rerender(<TasksPage />);
+    expect(await screen.findByText("Task in Sprint 7")).toBeInTheDocument();
+    expect(screen.queryByText("Task in Sprint 8")).not.toBeInTheDocument();
+    expect(screen.getByText("Sprint: Sprint 7")).toBeInTheDocument();
+  });
 });
