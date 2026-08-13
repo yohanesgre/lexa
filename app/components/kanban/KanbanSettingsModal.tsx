@@ -358,6 +358,7 @@ function SettingsContent({ slug, onClose }: { slug: string; onClose: () => void 
               requiredFields: input.requiredFields,
               color: input.color ?? undefined,
               githubState: (input.githubState as "open" | "closed" | null | undefined) ?? undefined,
+              isDone: input.isDone ?? false,
             });
           } else {
             createColumn.mutate({
@@ -366,6 +367,7 @@ function SettingsContent({ slug, onClose }: { slug: string; onClose: () => void 
               requiredFields: input.requiredFields,
               color: input.color ?? undefined,
               githubState: (input.githubState as "open" | "closed" | null | undefined) ?? undefined,
+              isDone: input.isDone ?? false,
             });
           }
         }}
@@ -381,9 +383,9 @@ function SettingsContent({ slug, onClose }: { slug: string; onClose: () => void 
         onClose={() => setSwimlaneForm({ isOpen: false, swimlane: null })}
         onSubmit={(input) => {
           if (swimlaneForm.swimlane) {
-            updateSwimlane.mutate({ id: swimlaneForm.swimlane.id, name: input.name, description: input.description ?? undefined, dueAt: input.dueAt ?? undefined });
+            updateSwimlane.mutate({ id: swimlaneForm.swimlane.id, name: input.name, description: input.description ?? undefined, dueAt: input.dueAt ?? undefined, startAt: input.startAt ?? undefined, milestoneId: input.milestoneId ?? undefined });
           } else {
-            createSwimlane.mutate({ name: input.name, description: input.description ?? undefined, dueAt: input.dueAt ?? undefined });
+            createSwimlane.mutate({ name: input.name, description: input.description ?? undefined, dueAt: input.dueAt ?? undefined, startAt: input.startAt ?? undefined, milestoneId: input.milestoneId ?? undefined });
           }
         }}
       />

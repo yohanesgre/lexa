@@ -15,6 +15,7 @@ export interface ColumnFormProps {
     wipLimit?: number | null;
     requiredFields?: string[];
     githubState?: string | null;
+    isDone?: boolean;
   }) => void;
   zIndex?: number;
 }
@@ -50,6 +51,7 @@ export function ColumnForm({ column, isOpen, onClose, onSubmit, zIndex = 70 }: C
   const [wipLimit, setWipLimit] = useState("");
   const [requiredFields, setRequiredFields] = useState<RequiredFieldValue[]>([]);
   const [githubState, setGithubState] = useState<"open" | "closed" | null>(null);
+  const [isDone, setIsDone] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const onCloseRef = useRef(onClose);
@@ -82,6 +84,7 @@ export function ColumnForm({ column, isOpen, onClose, onSubmit, zIndex = 70 }: C
       )
     );
     setGithubState(column?.githubState ?? null);
+    setIsDone(column?.isDone ?? false);
     setError(null);
   }, [isOpen, column]);
 
@@ -106,6 +109,7 @@ export function ColumnForm({ column, isOpen, onClose, onSubmit, zIndex = 70 }: C
       wipLimit: parsedWip,
       requiredFields,
       githubState,
+      isDone,
     });
     onClose();
   };
@@ -248,6 +252,25 @@ export function ColumnForm({ column, isOpen, onClose, onSubmit, zIndex = 70 }: C
                 </div>
                 <p className="text-[11px] leading-4 text-lx-text-muted mt-1 font-body">
                   Enforced on task create, move into this column, and update.
+                </p>
+              </div>
+
+              <div className="mb-4">
+                <div className="block text-xs font-medium text-lx-text-secondary mb-1.5 font-body">
+                  Done column
+                </div>
+                <button
+                  type="button"
+                  className="check-row w-full"
+                  onClick={() => setIsDone((v) => !v)}
+                  aria-pressed={isDone}
+                >
+                  <span className={cn("checkbox", isDone && "checked")} />
+                  <span className="text-sm text-lx-text-primary font-body">Tasks in this column count as done</span>
+                  <span className="check-meta">stored as columns.is_done</span>
+                </button>
+                <p className="text-[11px] leading-4 text-lx-text-muted mt-1 font-body">
+                  Multiple done columns allowed (e.g. Done + Released), independent of GitHub state mapping. A task counts as done for sprint progress when it sits in a done column OR is archived.
                 </p>
               </div>
 

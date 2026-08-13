@@ -3,21 +3,25 @@ import { createPortal } from "react-dom";
 import { Plus, Trash2, X } from "lucide-react";
 import type { Swimlane } from "../../../shared/types";
 import { DatePicker } from "../ui/DatePicker";
+import { useMilestones } from "../../lib/queries";
 
 export interface SwimlaneFormProps {
   slug: string;
   swimlane?: Swimlane | null;
   isOpen: boolean;
   onClose: () => void;
-  onSubmit: (input: { name: string; description?: string | null; dueAt?: string | null }) => void;
+  onSubmit: (input: { name: string; description?: string | null; dueAt?: string | null; startAt?: string | null; milestoneId?: string | null }) => void;
   zIndex?: number;
 }
 
-export function SwimlaneForm({ swimlane, isOpen, onClose, onSubmit, zIndex = 70 }: SwimlaneFormProps) {
+export function SwimlaneForm({ slug, swimlane, isOpen, onClose, onSubmit, zIndex = 70 }: SwimlaneFormProps) {
   const isEdit = !!swimlane;
+  const { data: milestones = [] } = useMilestones(slug);
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [dueAt, setDueAt] = useState<string | null>(swimlane?.dueAt ?? null);
+  const [startAt, setStartAt] = useState<string | null>(swimlane?.startAt ?? null);
+  const [milestoneId, setMilestoneId] = useState<string | null>(swimlane?.milestoneId ?? null);
   const [error, setError] = useState<string | null>(null);
 
   const onEscape = useEffectEvent((event: KeyboardEvent) => {
@@ -42,6 +46,8 @@ export function SwimlaneForm({ swimlane, isOpen, onClose, onSubmit, zIndex = 70 
     setName(swimlane?.name ?? "");
     setDescription(swimlane?.description ?? "");
     setDueAt(swimlane?.dueAt ?? null);
+    setStartAt(swimlane?.startAt ?? null);
+    setMilestoneId(swimlane?.milestoneId ?? null);
     setError(null);
   }, [isOpen, swimlane]);
 
@@ -54,15 +60,23 @@ export function SwimlaneForm({ swimlane, isOpen, onClose, onSubmit, zIndex = 70 
       setError("Name is required");
       return;
     }
+    if (startAt && dueAt && startAt > dueAt) {
+      setError("Start date must be before the due date");
+      return;
+    }
     setError(null);
     const trimmedDescription = description.trim();
     onSubmit({
       name: trimmedName,
       description: trimmedDescription === "" ? null : trimmedDescription,
       dueAt,
+      startAt,
+      milestoneId,
     });
     onClose();
   };
+
+  const isBacklog = isEdit && swimlane?.kind === "backlog";
 
   return createPortal(
     <>
@@ -130,12 +144,54 @@ export function SwimlaneForm({ swimlane, isOpen, onClose, onSubmit, zIndex = 70 
                 </p>
               </div>
 
-              {!(isEdit && swimlane?.kind === "backlog") && (
+              {!isBacklog && (
+                <div className="mb-4">
+                  <label className="block text-xs font-medium text-lx-text-secondary mb-1.5 font-body" htmlFor="swimlane-milestone">
+                    Milestone
+                    <span className="font-mono text-[10px] uppercase tracking-[0.04em] text-lx-text-muted ml-1.5">
+                      Optional
+                    </span>
+                  </label>
+                  <select
+                    id="swimlane-milestone"
+                    className="prop-input w-full"
+                    value={milestoneId ?? ""}
+                    onChange={(e) => setMilestoneId(e.target.value === "" ? null : e.target.value)}
+                  >
+                    <option value="">None — loose sprint</option>
+                    {milestones.map((m) => (
+                      <option key={m.id} value={m.id}>
+                        {m.name}{m.archivedAt ? " (archived)" : ""}
+                      </option>
+                    ))}
+                  </select>
+                  <p className="text-[11px] leading-4 text-lx-text-muted mt-1 font-body">
+                    Stored as swimlanes.milestone_id. &ldquo;None&rdquo; = loose sprint (no milestone).
+                  </p>
+                </div>
+              )}
+
+              {!isBacklog && (
+                <div className="mb-4">
+                  <label className="block text-xs font-medium text-lx-text-secondary mb-1.5 font-body" htmlFor="swimlane-start">
+                    Start date
+                    <span className="font-mono text-[10px] uppercase tracking-[0.04em] text-lx-text-muted ml-1.5">
+                      Optional
+                    </span>
+                  </label>
+                  <DatePicker value={startAt} onChange={setStartAt} className="w-full" />
+                  <p className="text-[11px] leading-4 text-lx-text-muted mt-1 font-body">
+                    Stored as swimlanes.start_at YYYY-MM-DD. Validated start &le; due on save.
+                  </p>
+                </div>
+              )}
+
+              {!isBacklog && (
                 <div className="mb-4">
                   <label className="block text-xs font-medium text-lx-text-secondary mb-1.5 font-body" htmlFor="swimlane-due">
                     Due date
                     <span className="font-mono text-[10px] uppercase tracking-[0.04em] text-lx-text-muted ml-1.5">
-                      Optional · milestones only
+                      Optional
                     </span>
                   </label>
                   <DatePicker value={dueAt} onChange={setDueAt} className="w-full" />
