@@ -56,7 +56,7 @@ INSERT INTO columns (id, project_id, name, position, wip_limit, required_fields,
   ('c2', 'p1', 'Done', 1, NULL, '["description"]', 'closed'),
   ('c3', 'p1', 'Review', 2, NULL, '[]', NULL);
 INSERT INTO swimlanes (id, project_id, name, position, kind) VALUES
-  ('s1', 'p1', 'Main', 0, 'milestone'),
+  ('s1', 'p1', 'Main', 0, 'sprint'),
   ('s2', 'p1', 'Backlog', 1, 'backlog');
 INSERT INTO priority_options (id, project_id, label, color, position) VALUES ('pr-high', 'p1', 'High', '#FF4444', 0), ('pr-low', 'p1', 'Low', '#6B6560', 1);
 INSERT INTO type_options (id, project_id, label, color, position) VALUES ('tp-feature', 'p1', 'Feature', '#4ADE80', 0), ('tp-bug', 'p1', 'Bug', '#FF4444', 1);
