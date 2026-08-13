@@ -16,11 +16,12 @@ const TASK: Task = {
 
 const BOARD: Board = {
   project: { id: "p1", slug: "demo", name: "Demo", description: "", repos: [], createdAt: "t", updatedAt: "t" },
-  columns: [{ id: "c1", projectId: "p1", name: "Todo", position: 0, color: "#888", wipLimit: null, requiredFields: [], githubState: null }],
+  columns: [{ id: "c1", projectId: "p1", name: "Todo", position: 0, color: "#888", wipLimit: null, requiredFields: [], githubState: null, isDone: false }],
   swimlanes: [
-    { id: "s1", projectId: "p1", name: "Main", description: "", position: 0, dueAt: "2099-08-01", archivedAt: null, kind: "milestone" },
-    { id: "s2", projectId: "p1", name: "Old", description: "", position: 1, dueAt: "2000-01-01", archivedAt: null, kind: "milestone" },
+    { id: "s1", projectId: "p1", name: "Main", description: "", position: 0, dueAt: "2099-08-01", archivedAt: null, startAt: null, milestoneId: null, kind: "sprint" },
+    { id: "s2", projectId: "p1", name: "Old", description: "", position: 1, dueAt: "2000-01-01", archivedAt: null, startAt: null, milestoneId: null, kind: "sprint" },
   ],
+  milestones: [],
   fieldConfig: { priorities: [], types: [] },
   links: [],
   tasks: [TASK],
