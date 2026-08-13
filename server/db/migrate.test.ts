@@ -36,7 +36,7 @@ describe("runMigrations", () => {
   it("applies the real migrations dir and records _migrations", () => {
     const dbPath = join(tmpDir(), "app.db");
     runMigrations(dbPath, MIGRATIONS);
-    expect(appliedMigrations(dbPath)).toEqual(["0001_init.sql", "0002_project_repos.sql", "0003_forge_sessions.sql", "0004_auth_roles_teams.sql"]);
+    expect(appliedMigrations(dbPath)).toEqual(["0001_init.sql", "0002_project_repos.sql", "0003_forge_sessions.sql", "0004_auth_roles_teams.sql", "0005_milestones_sprints.sql"]);
     const db = new Database(dbPath);
     expect(tableExists(db, "tasks")).toBe(true);
     expect(tableExists(db, "_migrations")).toBe(true);
@@ -47,7 +47,7 @@ describe("runMigrations", () => {
     const dbPath = join(tmpDir(), "app.db");
     runMigrations(dbPath, MIGRATIONS);
     runMigrations(dbPath, MIGRATIONS);
-    expect(appliedMigrations(dbPath)).toEqual(["0001_init.sql", "0002_project_repos.sql", "0003_forge_sessions.sql", "0004_auth_roles_teams.sql"]);
+    expect(appliedMigrations(dbPath)).toEqual(["0001_init.sql", "0002_project_repos.sql", "0003_forge_sessions.sql", "0004_auth_roles_teams.sql", "0005_milestones_sprints.sql"]);
   });
 
   it("rolls back a failed migration atomically (no partial schema, no _migrations row)", () => {
@@ -74,11 +74,10 @@ describe("runMigrations", () => {
   it("keeps the default migrations dir (prod behavior)", () => {
     const dbPath = join(tmpDir(), "app.db");
     runMigrations(dbPath);
-    expect(appliedMigrations(dbPath)).toEqual(["0001_init.sql", "0002_project_repos.sql", "0003_forge_sessions.sql", "0004_auth_roles_teams.sql"]);
+    expect(appliedMigrations(dbPath)).toEqual(["0001_init.sql", "0002_project_repos.sql", "0003_forge_sessions.sql", "0004_auth_roles_teams.sql", "0005_milestones_sprints.sql"]);
   });
 
-  it("migrates legacy github_repo and task-linked repos into project_repos with roles", () => {
-    // Simulate a pre-0002 database: schema 0001 applied + legacy data.
+  it("migrates legacy github_repo and task-linked repos into project_repos with roles", () => {    // Simulate a pre-0002 database: schema 0001 applied + legacy data.
     const dir = tmpDir();
     const dbPath = join(dir, "app.db");
     const db = new Database(dbPath);
@@ -121,5 +120,46 @@ describe("runMigrations", () => {
     const tgiCols = (migrated.prepare("PRAGMA table_info(task_github_issues)").all() as { name: string }[]).map((c) => c.name);
     expect(tgiCols).toEqual(expect.arrayContaining(["pushed_title", "pushed_body", "push_failed"]));
     migrated.close();
+  });
+
+  it("0005 upgrades a pre-sprint swimlanes table: milestone→sprint, loose lanes, columns.is_done", () => {
+    // Simulate a pre-0005 database: full schema applied + legacy 'milestone'-kind lanes.
+    const dir = tmpDir();
+    const dbPath = join(dir, "app.db");
+    const db = new Database(dbPath);
+    db.exec(readFileSync(join(MIGRATIONS, "0001_init.sql"), "utf-8"));
+    db.exec("CREATE TABLE _migrations (name TEXT PRIMARY KEY, applied_at TEXT DEFAULT (datetime('now')))");
+    db.prepare("INSERT INTO _migrations (name) VALUES ('0001_init.sql')").run();
+    db.prepare("INSERT INTO projects (id, name, slug, description) VALUES ('p1', 'P', 'p1', '')").run();
+    db.prepare("INSERT INTO columns (id, project_id, name, position) VALUES ('c1', 'p1', 'Todo', 0)").run();
+    // Pre-0005 shape: kind CHECK ('backlog','milestone'), no milestone_id/start_at.
+    db.exec("DROP TABLE swimlanes");
+    db.exec(`CREATE TABLE swimlanes (
+      id TEXT PRIMARY KEY, project_id TEXT NOT NULL, name TEXT NOT NULL,
+      description TEXT NOT NULL DEFAULT '', position INTEGER NOT NULL,
+      due_at TEXT, archived_at TEXT,
+      kind TEXT NOT NULL DEFAULT 'milestone' CHECK (kind IN ('backlog','milestone'))
+    )`);
+    db.prepare("INSERT INTO swimlanes (id, project_id, name, position, kind, due_at) VALUES ('s1', 'p1', 'Sprint 7', 1, 'milestone', '2026-08-30')").run();
+    db.prepare("INSERT INTO swimlanes (id, project_id, name, position, kind) VALUES ('b1', 'p1', 'Backlog', 0, 'backlog')").run();
+    db.prepare("INSERT INTO tasks (id, project_id, column_id, swimlane_id, title, position) VALUES ('t1', 'p1', 'c1', 's1', 'T', 'a0')").run();
+    db.close();
+
+    runMigrations(dbPath, MIGRATIONS);
+
+    const upgraded = new Database(dbPath);
+    const lanes = upgraded.prepare("SELECT id, kind, milestone_id, start_at FROM swimlanes ORDER BY position").all() as { id: string; kind: string; milestone_id: string | null; start_at: string | null }[];
+    expect(lanes).toEqual([
+      { id: "b1", kind: "backlog", milestone_id: null, start_at: null },
+      { id: "s1", kind: "sprint", milestone_id: null, start_at: null },
+    ]);
+    const colNames = (upgraded.prepare("PRAGMA table_info(columns)").all() as { name: string }[]).map((c) => c.name);
+    expect(colNames).toContain("is_done");
+    const idxNames = (upgraded.prepare("PRAGMA index_list(swimlanes)").all() as { name: string }[]).map((i) => i.name);
+    expect(idxNames).toEqual(expect.arrayContaining(["idx_swimlanes_one_backlog", "idx_swimlanes_proj", "idx_swimlanes_milestone"]));
+    // Task still references its lane (data survived the rebuild).
+    const t = upgraded.prepare("SELECT swimlane_id FROM tasks WHERE id = 't1'").get() as { swimlane_id: string };
+    expect(t.swimlane_id).toBe("s1");
+    upgraded.close();
   });
 });

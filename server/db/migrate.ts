@@ -12,6 +12,12 @@ export function runMigrations(dbPath: string, migrationsDir = DEFAULT_MIGRATIONS
   const db = new Database(dbPath) as any;
   try { chmodSync(dbPath, 0o600); } catch {}
   (db as any).exec("PRAGMA busy_timeout = 5000");
+  // FK enforcement OFF during migrations, matching bun:sqlite's production
+  // default (the vitest shim defaults it ON). Rebuilds like 0004/0005 drop
+  // parent tables that children still reference — defer_foreign_keys cannot
+  // help (the implicit DELETE is re-checked at COMMIT), so enforcement is
+  // disabled for the whole run. Apps re-enable it via initSqlite.
+  (db as any).exec("PRAGMA foreign_keys = OFF");
 
   (db as any).run("CREATE TABLE IF NOT EXISTS _migrations (name TEXT PRIMARY KEY, applied_at TEXT DEFAULT (datetime('now')))");
 
