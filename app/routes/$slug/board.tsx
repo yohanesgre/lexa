@@ -8,8 +8,10 @@ import { TaskDetail } from "../../components/TaskDetail";
 import type { Task, TipTapDoc } from "../../../shared/types";
 
 export const Route = createFileRoute("/$slug/board")({
-  validateSearch: (search: Record<string, unknown>): { task?: string } => ({
+  validateSearch: (search: Record<string, unknown>): { task?: string; swimlane?: string; milestone?: string } => ({
     task: typeof search.task === "string" ? search.task : undefined,
+    swimlane: typeof search.swimlane === "string" ? search.swimlane : undefined,
+    milestone: typeof search.milestone === "string" ? search.milestone : undefined,
   }),
   component: BoardPage,
 });
@@ -31,6 +33,16 @@ function BoardPage() {
   const unlinkGithubIssue = useUnlinkGithubIssue(slug);
 
   const [createTarget, setCreateTarget] = useState<{ columnId: string; swimlaneId: string } | null>(null);
+
+  // Milestone selection: ?milestone= param wins; default = first non-archived
+  // milestone (the board's active focus). Passed down to the KanbanBoard.
+  const milestoneParam = search.milestone ?? null;
+  const defaultMilestone = (board?.milestones ?? []).find((m) => !m.archivedAt)?.id ?? null;
+  const effectiveMilestone = milestoneParam ?? defaultMilestone;
+
+  const handleMilestoneChange = (id: string | null) => {
+    navigate({ search: { milestone: id ?? undefined }, replace: true } as never);
+  };
 
   const selectedTaskId = search.task ?? null;
   const { data: selectedTaskFull } = useTask(slug, selectedTaskId);
@@ -171,6 +183,8 @@ function BoardPage() {
         onMoveTask={handleMove}
         onSelectTask={handleSelectTask}
         onOpenCreateTask={handleOpenCreateTask}
+        milestoneId={effectiveMilestone}
+        onMilestoneChange={handleMilestoneChange}
       />
       {(selectedTaskId !== null || isCreating) && (
         <TaskDetail

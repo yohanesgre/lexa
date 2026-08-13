@@ -20,6 +20,7 @@ import { SwimlaneHeader } from "./SwimlaneHeader";
 import { TaskCard } from "./TaskCard";
 import { emptyFilters, isFilterActive, type FilterState } from "../../lib/filters";
 import { KanbanSettingsModal } from "./KanbanSettingsModal";
+import { MilestoneSelector } from "./MilestoneSelector";
 import { ColumnForm } from "./ColumnForm";
 import { MoveConfirmDialog } from "./MoveConfirmDialog";
 import { useArchiveTask, useCreateColumn, useRestoreTask } from "../../lib/queries";
@@ -42,6 +43,8 @@ interface KanbanBoardProps {
   onMoveTask: (taskId: string, target: MoveTarget) => Promise<void>;
   onSelectTask?: (task: Task) => void;
   onOpenCreateTask?: (columnId: string, swimlaneId?: string) => void;
+  milestoneId?: string | null;
+  onMilestoneChange?: (id: string | null) => void;
 }
 
 const byPosition = (a: Task, b: Task) => (a.position < b.position ? -1 : a.position > b.position ? 1 : 0);
@@ -115,7 +118,7 @@ function BoardEmptyState({ onAddColumn }: { onAddColumn: () => void }) {
   );
 }
 
-export function KanbanBoard({ board, showArchived = false, onToggleArchived, onMoveTask, onSelectTask, onOpenCreateTask }: KanbanBoardProps) {
+export function KanbanBoard({ board, showArchived = false, onToggleArchived, onMoveTask, onSelectTask, onOpenCreateTask, milestoneId = null, onMilestoneChange }: KanbanBoardProps) {
   const [localTasks, setLocalTasks] = useState<Task[]>(board.tasks);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [flashColumnId, setFlashColumnId] = useState<string | null>(null);
@@ -165,12 +168,18 @@ export function KanbanBoard({ board, showArchived = false, onToggleArchived, onM
   const lanes = useMemo(() => board.swimlanes.toSorted((a, b) => a.position - b.position), [board.swimlanes]);
   const liveLanes = useMemo(() => lanes.filter((l) => !l.archivedAt), [lanes]);
   const archivedLanes = useMemo(() => lanes.filter((l) => !!l.archivedAt), [lanes]);
-  const hasLanes = liveLanes.length > 0;
+  // Milestone filter: the Backlog lane is always visible; sprint lanes render
+  // only when they match the selection ("No milestone" shows loose sprints).
+  const visibleLiveLanes = useMemo(() => {
+    if (milestoneId === null) return liveLanes.filter((l) => l.kind === "backlog" || l.milestoneId === null);
+    return liveLanes.filter((l) => l.kind === "backlog" || l.milestoneId === milestoneId);
+  }, [liveLanes, milestoneId]);
+  const hasLanes = visibleLiveLanes.length > 0;
 
   const rows = useMemo<{ lane: Swimlane }[]>(() => {
     if (!hasLanes) return [];
-    return liveLanes.map((lane) => ({ lane }));
-  }, [hasLanes, liveLanes]);
+    return visibleLiveLanes.map((lane) => ({ lane }));
+  }, [hasLanes, visibleLiveLanes]);
 
   const tasksInCell = useCallback(
     (columnId: string, laneId: string) =>
@@ -312,6 +321,16 @@ export function KanbanBoard({ board, showArchived = false, onToggleArchived, onM
           onToggleArchived={onToggleArchived!}
           onFiltersChange={setFilters}
           onOpenSettings={() => setIsSettingsOpen(true)}
+          milestoneSelector={
+            onMilestoneChange ? (
+              <MilestoneSelector
+                milestones={board.milestones}
+                value={milestoneId}
+                onChange={onMilestoneChange}
+                slug={board.project.slug}
+              />
+            ) : undefined
+          }
         />
 
         <div className={cn("board-scroll", columns.length === 0 && "items-center justify-center")}>
@@ -388,6 +407,7 @@ export function KanbanBoard({ board, showArchived = false, onToggleArchived, onM
             requiredFields: input.requiredFields,
             color: input.color ?? undefined,
             githubState: (input.githubState as "open" | "closed" | null | undefined) ?? undefined,
+            isDone: input.isDone ?? false,
           });
         }}
       />
