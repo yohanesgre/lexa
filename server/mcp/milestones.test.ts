@@ -40,10 +40,6 @@ function toolResult(body: any): any {
   return typeof text === "string" ? JSON.parse(text) : null;
 }
 
-function toolError(body: any): any {
-  const text = body.result?.content?.[0]?.text;
-  return typeof text === "string" ? JSON.parse(text) : null;
-}
 
 beforeAll(async () => {
   dir = mkdtempSync(join(tmpdir(), "lexa-mcp-milestones-"));
@@ -89,7 +85,7 @@ describe("MCP milestone tools", () => {
   it("create_milestone without admin → FORBIDDEN", async () => {
     const res = await call("create_milestone", { project: "p1", name: "x" }, MEMBER_KEY);
     expect(res.result.isError).toBe(true);
-    expect(toolError(res).code).toBe("FORBIDDEN");
+    expect(toolResult(res).code).toBe("FORBIDDEN");
   });
 
   it("archive_milestone cascades a linked sprint with a live task; restore brings milestone back only", async () => {
@@ -114,7 +110,7 @@ describe("MCP milestone tools", () => {
     expect(linked.error).toBeUndefined();
     const blocked = await call("delete_milestone", { project: "p1", milestone: "v1" });
     expect(blocked.result.isError).toBe(true);
-    expect(toolError(blocked).code).toBe("HAS_CHILDREN");
+    expect(toolResult(blocked).code).toBe("HAS_CHILDREN");
     const created = await call("create_milestone", { project: "p1", name: "empty" });
     const ok = await call("delete_milestone", { project: "p1", milestone: "empty" });
     expect(ok.result.isError).toBeUndefined();
@@ -124,7 +120,7 @@ describe("MCP milestone tools", () => {
   it("unknown milestone → MILESTONE_NOT_FOUND + availableMilestones", async () => {
     const res = await call("update_milestone", { project: "p1", milestone: "Ghost" });
     expect(res.result.isError).toBe(true);
-    const err = toolError(res);
+    const err = toolResult(res);
     expect(err.code).toBe("MILESTONE_NOT_FOUND");
     expect(err.details.availableMilestones).toContain("v1");
   });
@@ -150,6 +146,6 @@ describe("MCP swimlane milestone/startAt args", () => {
   it("create_swimlane with unknown milestone → MILESTONE_NOT_FOUND", async () => {
     const res = await call("create_swimlane", { project: "p1", name: "Bad", milestone: "Ghost" });
     expect(res.result.isError).toBe(true);
-    expect(toolError(res).code).toBe("MILESTONE_NOT_FOUND");
+    expect(toolResult(res).code).toBe("MILESTONE_NOT_FOUND");
   });
 });
