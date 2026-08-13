@@ -9,9 +9,9 @@ import { useMoveGuard } from "./useMoveGuard";
 
 const fetchMock = vi.fn();
 
-const COLUMN: Column = { id: "c1", projectId: "p1", name: "Todo", position: 0, color: "", wipLimit: null, requiredFields: [], githubState: null };
+const COLUMN: Column = { id: "c1", projectId: "p1", name: "Todo", position: 0, color: "", wipLimit: null, requiredFields: [], githubState: null, isDone: false };
 const FIELD_CONFIG: FieldConfig = { priorities: [], types: [] };
-const LANE: Swimlane = { id: "s1", projectId: "p1", name: "Backlog", description: "", position: 0, dueAt: null, archivedAt: null, kind: "backlog" };
+const LANE: Swimlane = { id: "s1", projectId: "p1", name: "Backlog", description: "", position: 0, dueAt: null, archivedAt: null, startAt: null, milestoneId: null, kind: "backlog" };
 const LANE_OVERDUE: Swimlane = { ...LANE, id: "s-old", dueAt: "2020-01-01" };
 const LANE_FUTURE: Swimlane = { ...LANE, id: "s-future", dueAt: "2099-01-01" };
 const TASK: Task = {
@@ -20,7 +20,7 @@ const TASK: Task = {
   assignees: [], position: "a0", githubs: [], dueAt: null, archivedAt: null,
   createdAt: "t", updatedAt: "t",
 };
-const BOARD: Board = { project: { id: "p1", slug: "demo", name: "Demo", description: "", repos: [], createdAt: "t", updatedAt: "t" }, columns: [COLUMN], swimlanes: [LANE, LANE_OVERDUE, LANE_FUTURE], fieldConfig: FIELD_CONFIG, links: [], tasks: [TASK] };
+const BOARD: Board = { project: { id: "p1", slug: "demo", name: "Demo", description: "", repos: [], createdAt: "t", updatedAt: "t" }, columns: [COLUMN], swimlanes: [LANE, LANE_OVERDUE, LANE_FUTURE], milestones: [], fieldConfig: FIELD_CONFIG, links: [], tasks: [TASK] };
 
 const MOVE_TARGET = { columnId: "c1", swimlaneId: "s-future" };
 

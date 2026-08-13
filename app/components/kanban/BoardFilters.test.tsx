@@ -10,10 +10,11 @@ import type { Board } from "../../../shared/types";
 const BOARD: Board = {
   project: { id: "p1", slug: "demo", name: "Demo", description: "", repos: [], createdAt: "t", updatedAt: "t" },
   columns: [
-    { id: "c1", projectId: "p1", name: "Todo", position: 0, color: "#888", wipLimit: null, requiredFields: [], githubState: null },
-    { id: "c2", projectId: "p1", name: "Done", position: 1, color: "#888", wipLimit: null, requiredFields: [], githubState: null },
+    { id: "c1", projectId: "p1", name: "Todo", position: 0, color: "#888", wipLimit: null, requiredFields: [], githubState: null, isDone: false },
+    { id: "c2", projectId: "p1", name: "Done", position: 1, color: "#888", wipLimit: null, requiredFields: [], githubState: null, isDone: false },
   ],
-  swimlanes: [{ id: "s1", projectId: "p1", name: "Backlog", description: "", position: 0, dueAt: null, archivedAt: null, kind: "backlog" }],
+  swimlanes: [{ id: "s1", projectId: "p1", name: "Backlog", description: "", position: 0, dueAt: null, archivedAt: null, startAt: null, milestoneId: null, kind: "backlog" }],
+  milestones: [],
   fieldConfig: {
     priorities: [{ id: "pr-high", label: "High", color: "#FF4444", position: 0 }, { id: "pr-low", label: "Low", color: "#6B6560", position: 1 }],
     types: [{ id: "tp-feature", label: "Feature", color: "#4ADE80", position: 0 }, { id: "tp-bug", label: "Bug", color: "#FF4444", position: 1 }],

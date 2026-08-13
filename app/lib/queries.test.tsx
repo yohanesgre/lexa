@@ -23,8 +23,8 @@ function json(body: unknown, status = 200): Response {
 }
 
 const PROJECT: Project = { id: "p1", slug: "demo", name: "Demo", description: "", repos: [], createdAt: "t", updatedAt: "t" };
-const COLUMN: Column = { id: "c1", projectId: "p1", name: "Todo", position: 0, color: "#888", wipLimit: null, requiredFields: [], githubState: null };
-const SWIMLANE: Swimlane = { id: "s1", projectId: "p1", name: "Backlog", description: "", position: 0, dueAt: null, archivedAt: null, kind: "backlog" };
+const COLUMN: Column = { id: "c1", projectId: "p1", name: "Todo", position: 0, color: "#888", wipLimit: null, requiredFields: [], githubState: null, isDone: false };
+const SWIMLANE: Swimlane = { id: "s1", projectId: "p1", name: "Backlog", description: "", position: 0, dueAt: null, archivedAt: null, startAt: null, milestoneId: null, kind: "backlog" };
 const FIELD_CONFIG: FieldConfig = {
   priorities: [{ id: "prio-1", label: "Medium", color: "#888", position: 0 }],
   types: [{ id: "type-1", label: "Bug", color: "#f00", position: 0 }],
@@ -35,7 +35,7 @@ const TASK: Task = {
   assignees: ["Maria"], position: "a0", githubs: [], dueAt: null, archivedAt: null,
   createdAt: "t", updatedAt: "t",
 };
-const BOARD: Board = { project: PROJECT, columns: [COLUMN], swimlanes: [SWIMLANE], fieldConfig: FIELD_CONFIG, links: [], tasks: [TASK] };
+const BOARD: Board = { project: PROJECT, columns: [COLUMN], swimlanes: [SWIMLANE], milestones: [], fieldConfig: FIELD_CONFIG, links: [], tasks: [TASK] };
 
 // Mock fetch keyed by "METHOD url" (query part included).
 const routes = new Map<string, unknown>();

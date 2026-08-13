@@ -26,8 +26,8 @@ function json(body: unknown, status = 200): Response {
 
 const PROJECT: Project = { id: "p1", slug: "demo", name: "Demo", description: "", repos: [], createdAt: "t", updatedAt: "t" };
 const PROJECT2: Project = { ...PROJECT, id: "p2", slug: "other", name: "Other" };
-const COLUMN: Column = { id: "c1", projectId: "p1", name: "Todo", position: 0, color: "#888", wipLimit: null, requiredFields: [], githubState: null };
-const SWIMLANE: Swimlane = { id: "s1", projectId: "p1", name: "Backlog", description: "", position: 0, dueAt: null, archivedAt: null, kind: "backlog" };
+const COLUMN: Column = { id: "c1", projectId: "p1", name: "Todo", position: 0, color: "#888", wipLimit: null, requiredFields: [], githubState: null, isDone: false };
+const SWIMLANE: Swimlane = { id: "s1", projectId: "p1", name: "Backlog", description: "", position: 0, dueAt: null, archivedAt: null, startAt: null, milestoneId: null, kind: "backlog" };
 const FIELD_CONFIG: FieldConfig = { priorities: [{ id: "prio-1", label: "Medium", color: "#888", position: 0 }], types: [{ id: "type-1", label: "Bug", color: "#f00", position: 0 }] };
 const TASK: Task = {
   id: "t1", projectId: "p1", columnId: "c1", swimlaneId: "s1", title: "T1",
@@ -37,7 +37,7 @@ const TASK: Task = {
 };
 const MOVED_TASK: Task = { ...TASK, columnId: "c2", position: "a1" };
 const ARCHIVED_TASK: Task = { ...TASK, archivedAt: "2026-03-01T00:00:00.000Z" };
-const BOARD: Board = { project: PROJECT, columns: [COLUMN], swimlanes: [SWIMLANE], fieldConfig: FIELD_CONFIG, links: [], tasks: [TASK] };
+const BOARD: Board = { project: PROJECT, columns: [COLUMN], swimlanes: [SWIMLANE], milestones: [], fieldConfig: FIELD_CONFIG, links: [], tasks: [TASK] };
 const BOARD2: Board = { ...BOARD, columns: [...BOARD.columns, { ...COLUMN, id: "c2", name: "Done", position: 1 }] };
 const PAGE: WikiPage = { id: "w1", projectId: "p1", title: "Home", slug: "home", parentId: null, position: 0, updatedAt: "t", content: { type: "doc", content: [] }, createdAt: "t" };
 const PAGE2: WikiPage = { ...PAGE, id: "w2", slug: "other", title: "Other" };
