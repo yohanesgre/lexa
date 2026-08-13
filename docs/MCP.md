@@ -81,6 +81,7 @@ runtime scoping (team-scoped Forge runtimes), never for MCP authorization.
 | Project | `slug` (e.g. `"emberfall"`) | `PROJECT_NOT_FOUND` + `availableProjects` list |
 | Column | **Name**, case-insensitive (e.g. `"in progress"`) | `COLUMN_NOT_FOUND` + `availableColumns` list |
 | Swimlane | Name, case-insensitive | `SWIMLANE_NOT_FOUND` + list |
+| Milestone | Name, case-insensitive | `MILESTONE_NOT_FOUND` + `availableMilestones` list |
 | Task | UUID (from `create_task`/`list_tasks` output) | `TASK_NOT_FOUND` |
 | Wiki page | `pageSlug` | `PAGE_NOT_FOUND` + `availablePageSlugs` list |
 
@@ -100,7 +101,7 @@ Tool failures return MCP-standard `isError: true` with a JSON text payload:
 }
 ```
 
-Codes mirror the REST catalog: `PROJECT_NOT_FOUND`, `COLUMN_NOT_FOUND`, `SWIMLANE_NOT_FOUND`, `TASK_NOT_FOUND`, `PAGE_NOT_FOUND`, `SLUG_TAKEN`, `HAS_CHILDREN`, `WIP_LIMIT`, `ALREADY_LINKED`, `REQUIRED_FIELD`, `NEIGHBOR_NOT_IN_COLUMN`, `OPTION_IN_USE`, `INVALID_OPTION`, `INVALID_ARGS`, `INVALID_API_KEY`, `MISSING_AUTH`, `FORBIDDEN`, `USER_NOT_FOUND`, `API_KEY_NOT_FOUND`, `GITHUB_API_ERROR`, `DATABASE_ERROR`, `CONSTRAINT`, `INTERNAL`.
+Codes mirror the REST catalog: `PROJECT_NOT_FOUND`, `COLUMN_NOT_FOUND`, `SWIMLANE_NOT_FOUND`, `MILESTONE_NOT_FOUND`, `TASK_NOT_FOUND`, `PAGE_NOT_FOUND`, `SLUG_TAKEN`, `HAS_CHILDREN`, `WIP_LIMIT`, `ALREADY_LINKED`, `REQUIRED_FIELD`, `NEIGHBOR_NOT_IN_COLUMN`, `OPTION_IN_USE`, `INVALID_OPTION`, `INVALID_ARGS`, `INVALID_API_KEY`, `MISSING_AUTH`, `FORBIDDEN`, `USER_NOT_FOUND`, `API_KEY_NOT_FOUND`, `GITHUB_API_ERROR`, `DATABASE_ERROR`, `CONSTRAINT`, `INTERNAL`.
 
 `LAST_ADMIN_DEMOTE` / `CANNOT_DELETE_SELF` are not raised on MCP — legacy
 user-role editing is removed (`update_user_role` deleted; superadmin is
@@ -419,21 +420,28 @@ Notes: column must be empty (no tasks).
 
 **`create_swimlane`**
 ```json
-Input:  { project*, name*, description?, dueAt? }
-        dueAt = "YYYY-MM-DD" milestone deadline; empty string clears. Lanes are
-        always created as kind 'milestone' — the Backlog lane is system-seeded.
+Input:  { project*, name*, description?, dueAt?, startAt?, milestone? }
+        dueAt = "YYYY-MM-DD" sprint deadline; empty string clears.
+        startAt = "YYYY-MM-DD" sprint start; empty string clears.
+        milestone = name (case-insensitive); omit for a loose sprint. Lanes
+        are always created as kind 'sprint' — the Backlog lane is
+        system-seeded. startAt later than dueAt → INVALID_ARGS.
 Output: { id, name, description, position }
-Errors: FORBIDDEN, PROJECT_NOT_FOUND
+Errors: FORBIDDEN, PROJECT_NOT_FOUND, MILESTONE_NOT_FOUND (+availableMilestones), INVALID_ARGS
 ```
 
 **`update_swimlane`**
 ```json
-Input:  { project*, swimlane*, name?, description?, dueAt? }
-        swimlane = name (case-insensitive). dueAt: empty string clears.
+Input:  { project*, swimlane*, name?, description?, dueAt?, startAt?, milestone? }
+        swimlane = name (case-insensitive). dueAt/startAt: empty string clears.
+        milestone = name (case-insensitive); must belong to the project;
+        empty string clears (lane becomes a loose sprint).
         Setting dueAt earlier than a live task's deadline → DEADLINE_AFTER_LANE.
-        dueAt on the Backlog lane → BACKLOG_PROTECTED.
+        startAt later than dueAt → INVALID_ARGS.
+        dueAt/startAt/milestone on the Backlog lane → BACKLOG_PROTECTED.
 Output: { id, name, description, position }
-Errors: FORBIDDEN, PROJECT_NOT_FOUND, SWIMLANE_NOT_FOUND, DEADLINE_AFTER_LANE {date}, BACKLOG_PROTECTED
+Errors: FORBIDDEN, PROJECT_NOT_FOUND, SWIMLANE_NOT_FOUND, MILESTONE_NOT_FOUND (+availableMilestones),
+        DEADLINE_AFTER_LANE {date}, INVALID_ARGS, BACKLOG_PROTECTED
 ```
 
 **`delete_swimlane`**
@@ -459,6 +467,56 @@ Input:  { project*, swimlane* }   swimlane = name (case-insensitive)
 Output: { message: 'Restored swimlane "<name>"' }
 Errors: FORBIDDEN, PROJECT_NOT_FOUND, SWIMLANE_NOT_FOUND
 Notes: lane only — tasks stay archived (restore individually). Idempotent.
+```
+
+### Milestones
+
+Milestones are goal wrappers holding one or more sprints (via
+`swimlanes.milestoneId`). Referenced by name, case-insensitive, with
+`availableMilestones` on failure. All milestone tools are admin-gated.
+
+**`create_milestone`**
+```json
+Input:  { project*, name*, description?, dueAt? }
+        dueAt = "YYYY-MM-DD" target date; empty string clears.
+Output: { id, name, description, position }
+Errors: FORBIDDEN, PROJECT_NOT_FOUND
+```
+
+**`update_milestone`**
+```json
+Input:  { project*, milestone*, name?, description?, dueAt? }
+        milestone = name (case-insensitive). dueAt: empty string clears.
+Output: { id, name, description, position, sprintCount, archivedSprintCount }
+Errors: FORBIDDEN, PROJECT_NOT_FOUND, MILESTONE_NOT_FOUND (+availableMilestones)
+```
+
+**`delete_milestone`**
+```json
+Input:  { project*, milestone* }   milestone = name (case-insensitive)
+Output: { message: 'Deleted milestone "<name>"' }
+Errors: FORBIDDEN, PROJECT_NOT_FOUND, MILESTONE_NOT_FOUND (+availableMilestones), HAS_CHILDREN {count}
+Notes: blocked while the milestone still holds sprints — loosen or reassign
+       them first (swimlane.milestoneId → null).
+```
+
+**`archive_milestone`**
+```json
+Input:  { project*, milestone* }   milestone = name (case-insensitive)
+Output: { message: 'Archived milestone "<name>" (<n> activity rows)' }
+Errors: FORBIDDEN, PROJECT_NOT_FOUND, MILESTONE_NOT_FOUND (+availableMilestones)
+Notes: one transaction — the milestone AND its sprints AND each sprint's
+       live tasks are archived (per-task `archived` activity rows).
+       Idempotent — an already-archived milestone returns unchanged.
+```
+
+**`restore_milestone`**
+```json
+Input:  { project*, milestone* }   milestone = name (case-insensitive)
+Output: { message: 'Restored milestone "<name>"' }
+Errors: FORBIDDEN, PROJECT_NOT_FOUND, MILESTONE_NOT_FOUND (+availableMilestones)
+Notes: milestone only — its sprints stay archived (restore individually).
+       Idempotent.
 ```
 
 ### Administration (API keys, users, project grants)
