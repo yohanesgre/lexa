@@ -56,6 +56,15 @@ export function GanttChart({ lanes, milestones, today, onRescheduleLane, onResch
   const [dragMode, setDragMode] = useState<DragMode | null>(null);
   const [lanePreview, setLanePreview] = useState<{ id: string; startAt: string | null; dueAt: string | null } | null>(null);
   const [milestonePreview, setMilestonePreview] = useState<{ id: string; dueAt: string } | null>(null);
+  const [collapsedGroups, setCollapsedGroups] = useState<ReadonlySet<string>>(new Set());
+
+  const toggleGroup = (id: string) =>
+    setCollapsedGroups((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
 
   const todayX = xForDay(todayDate, axisStart);
   const todayClamped = todayX >= 0 && todayX <= canvasW;
@@ -195,16 +204,22 @@ export function GanttChart({ lanes, milestones, today, onRescheduleLane, onResch
             const sprints = lanes.filter((l) => l.lane.milestoneId === m.id && !l.lane.archivedAt && (l.lane.startAt || l.lane.dueAt));
             const due = milestoneDue(m);
             const dueChip = due ? formatDueChip(due) : null;
+            const collapsed = collapsedGroups.has(m.id);
             return (
               <div key={m.id}>
                 <div className="tl-row" style={groupProps}>
-                  <div className="tl-label group">
-                    <svg className="chevron" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6" /></svg>
+                  <button
+                    type="button"
+                    className={cn("tl-label group tl-group-toggle")}
+                    onClick={() => toggleGroup(m.id)}
+                    aria-expanded={!collapsed}
+                  >
+                    <svg className={cn("chevron", collapsed && "collapsed")} viewBox="0 0 24 24"><path d="M6 9l6 6 6-6" /></svg>
                     {m.name}
                     <span className="lane-ready" style={{ marginLeft: 6 }}>
                       {m.archivedSprintCount}/{m.sprintCount} sprints archived
                     </span>
-                  </div>
+                  </button>
                   <div className="tl-lane group">
                     {due && (
                       <span
@@ -221,7 +236,7 @@ export function GanttChart({ lanes, milestones, today, onRescheduleLane, onResch
                     )}
                   </div>
                 </div>
-                {sprints.map(sprintRow)}
+                {!collapsed && sprints.map(sprintRow)}
               </div>
             );
           })}
@@ -229,14 +244,19 @@ export function GanttChart({ lanes, milestones, today, onRescheduleLane, onResch
           {looseLanes.length > 0 && (
             <div>
               <div className="tl-row" style={groupProps}>
-                <div className="tl-label group">
-                  <svg className="chevron" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6" /></svg>
+                <button
+                  type="button"
+                  className={cn("tl-label group tl-group-toggle")}
+                  onClick={() => toggleGroup("__loose__")}
+                  aria-expanded={!collapsedGroups.has("__loose__")}
+                >
+                  <svg className={cn("chevron", collapsedGroups.has("__loose__") && "collapsed")} viewBox="0 0 24 24"><path d="M6 9l6 6 6-6" /></svg>
                   Loose sprints
                   <span className="sl-group-meta" style={{ fontFamily: "var(--lx-font-micro)", fontSize: 11, color: "var(--lx-text-muted)", marginLeft: 6 }}>no milestone</span>
-                </div>
+                </button>
                 <div className="tl-lane group" />
               </div>
-              {looseLanes.map(sprintRow)}
+              {!collapsedGroups.has("__loose__") && looseLanes.map(sprintRow)}
             </div>
           )}
 
