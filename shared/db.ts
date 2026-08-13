@@ -1,7 +1,7 @@
 // Database row types — mirror SQL column names exactly (snake_case).
 // Used by server repos/services only. Frontend never imports this file.
 
-import type { TipTapDoc, ISODate, RuntimeAgent, RuntimeModel, ActorKind, ActivityType, ActivityEvent, TaskComment, Swimlane, DomainProject, Runtime } from "./types";
+import type { TipTapDoc, ISODate, RuntimeAgent, RuntimeModel, ActorKind, ActivityType, ActivityEvent, TaskComment, Swimlane, Milestone, DomainProject, Runtime } from "./types";
 
 // Runtime with the owning team exposed (wire-only — the shared Runtime type
 // stays team-free per the contract; the FE reads teamId off the wire).
@@ -84,10 +84,11 @@ export interface ColumnRow {
   wip_limit: number | null;
   required_fields: string;
   github_state: "open" | "closed" | null;
+  is_done?: number;
 }
 
 export function rowToColumn(row: ColumnRow): {
-  id: string; projectId: string; name: string; position: number; color: string; wipLimit: number | null; requiredFields: string[]; githubState: "open" | "closed" | null;
+  id: string; projectId: string; name: string; position: number; color: string; wipLimit: number | null; requiredFields: string[]; githubState: "open" | "closed" | null; isDone: boolean;
 } {
   return {
     id: row.id,
@@ -98,6 +99,7 @@ export function rowToColumn(row: ColumnRow): {
     wipLimit: row.wip_limit,
     requiredFields: JSON.parse(row.required_fields) as string[],
     githubState: row.github_state,
+    isDone: (row.is_done ?? 0) === 1,
   };
 }
 
@@ -109,12 +111,12 @@ export interface SwimlaneRow {
   position: number;
   due_at: string | null;
   archived_at: string | null;
-  kind?: "backlog" | "milestone";
+  start_at: string | null;
+  kind?: "backlog" | "sprint";
+  milestone_id: string | null;
 }
 
-export function rowToSwimlane(row: SwimlaneRow): {
-  id: string; projectId: string; name: string; description: string; position: number; dueAt: string | null; archivedAt: string | null; kind: "backlog" | "milestone";
-} {
+export function rowToSwimlane(row: SwimlaneRow): Swimlane {
   return {
     id: row.id,
     projectId: row.project_id,
@@ -123,7 +125,35 @@ export function rowToSwimlane(row: SwimlaneRow): {
     position: row.position,
     dueAt: row.due_at ?? null,
     archivedAt: row.archived_at ?? null,
-    kind: (row.kind ?? "milestone") as Swimlane["kind"],
+    startAt: row.start_at ?? null,
+    kind: (row.kind ?? "sprint") as Swimlane["kind"],
+    milestoneId: row.milestone_id ?? null,
+  };
+}
+
+export interface MilestoneRow {
+  id: string;
+  project_id: string;
+  name: string;
+  description: string;
+  position: number;
+  due_at: string | null;
+  archived_at: string | null;
+  sprint_count?: number;
+  archived_sprint_count?: number;
+}
+
+export function rowToMilestone(row: MilestoneRow): Milestone {
+  return {
+    id: row.id,
+    projectId: row.project_id,
+    name: row.name,
+    description: row.description,
+    position: row.position,
+    dueAt: row.due_at ?? null,
+    archivedAt: row.archived_at ?? null,
+    sprintCount: row.sprint_count ?? 0,
+    archivedSprintCount: row.archived_sprint_count ?? 0,
   };
 }
 
