@@ -86,20 +86,20 @@ export function UserMenu() {
           <Link to="/settings/me" className="dropdown-item" style={{ height: 32, textDecoration: "none" }} onClick={() => setOpen(false)}>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5}><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" /><circle cx="12" cy="7" r="4" /></svg>
             <span className="text-sm color-secondary">User settings</span>
-            <span className="font-micro" style={{ marginLeft: "auto", fontSize: 10, color: "var(--lx-text-muted)" }}>/settings/me</span>
+            
           </Link>
           {isTeamAdmin && (
             <Link to="/settings/team" className="dropdown-item" style={{ height: 32, textDecoration: "none" }} onClick={() => setOpen(false)}>
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5}><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="M23 21v-2a4 4 0 0 0-3-3.87" /><path d="M16 3.13a4 4 0 0 1 0 7.75" /></svg>
               <span className="text-sm color-secondary">Team settings</span>
-              <span className="font-micro" style={{ marginLeft: "auto", fontSize: 10, color: "var(--lx-text-muted)" }}>/settings/team</span>
+              
             </Link>
           )}
           {isSuperadmin && (
             <Link to="/settings/workspace" className="dropdown-item" style={{ height: 32, textDecoration: "none" }} onClick={() => setOpen(false)}>
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5}><rect x="2" y="7" width="20" height="14" rx="2" /><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16" /></svg>
               <span className="text-sm color-secondary">Workspace settings</span>
-              <span className="font-micro" style={{ marginLeft: "auto", fontSize: 10, color: "var(--lx-text-muted)" }}>/settings/workspace</span>
+              
             </Link>
           )}
           <div className="dropdown-separator" />

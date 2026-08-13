@@ -107,10 +107,7 @@ function ProjectDashboard() {
         </div>
       </div>
 
-      <ProjectDescription
-        description={health.project.description || board.data.project?.description || ""}
-        onSettings={() => setShowSettings(true)}
-      />
+      <ProjectDescription description={health.project.description || board.data.project?.description || ""} />
 
       <StatusSections dashboard={dashboard} health={health} />
 
