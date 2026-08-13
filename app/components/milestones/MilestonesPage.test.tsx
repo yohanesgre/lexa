@@ -142,4 +142,15 @@ describe("MilestonesPage (list tab)", () => {
     await userEvent.setup().click(btn);
     expect(fetchMock.mock.calls.filter((c) => String(c[0]).includes("DELETE")).length).toBe(0);
   });
+
+  it("collapse toggle hides the milestone's sprint sub-rows", async () => {
+    const user = userEvent.setup();
+    render(<MilestonesPage slug="demo" tab="list" />, { wrapper });
+    await screen.findByText("Sprint 7 — Core");
+    await user.click(screen.getByRole("button", { name: /Collapse v1.0 launch sprints/ }));
+    expect(screen.queryByText("Sprint 7 — Core")).not.toBeInTheDocument();
+    expect(screen.queryByText("Sprint 6 — Ash & Bone")).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /Expand v1.0 launch sprints/ }));
+    expect(screen.getByText("Sprint 7 — Core")).toBeInTheDocument();
+  });
 });

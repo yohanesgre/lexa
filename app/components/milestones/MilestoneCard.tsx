@@ -36,7 +36,13 @@ export function MilestoneCard({ slug, milestone, board }: MilestoneCardProps) {
               <span className="font-micro text-2xs color-muted" style={{ textTransform: "uppercase", letterSpacing: "0.04em" }}>
                 Active milestone
               </span>
-              {due && <span className={cn("milestone-due", overdue && "milestone-due-overdue")}>{due.text}</span>}
+              {due ? (
+                <span className={cn("milestone-due", overdue && "milestone-due-overdue")}>{due.text}</span>
+              ) : (
+                <span className="milestone-due" style={{ borderColor: "var(--lx-border-default)", color: "var(--lx-text-muted)" }}>
+                  no due date
+                </span>
+              )}
             </div>
             <div className="milestone-name" style={{ marginTop: 4 }}>{milestone.name}</div>
             <MilestoneProgress
