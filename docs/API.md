@@ -40,14 +40,14 @@ All non-2xx responses share one shape:
 | 403 | `CANNOT_DELETE_SELF` | Removing the last superadmin / self-removal via the workspace member routes (details: `{ message }`) |
 | 404 | `USER_NOT_FOUND` | Unknown user id on admin/workspace/team-member endpoints |
 | 404 | `TEAM_NOT_FOUND` `INVITE_NOT_FOUND` `SESSION_NOT_FOUND` | Unknown team / invite / own-session id |
-| 404 | `PROJECT_NOT_FOUND` `COLUMN_NOT_FOUND` `SWIMLANE_NOT_FOUND` `TASK_NOT_FOUND` `PAGE_NOT_FOUND` `SOURCE_NOT_FOUND` `FORGE_TASK_NOT_FOUND` `TASK_LINK_NOT_FOUND` `MACHINE_NOT_FOUND` `RUNTIME_NOT_FOUND` `RUNTIME_EVENT_NOT_FOUND` `API_KEY_NOT_FOUND` `AGENT_NOT_FOUND` `SKILL_NOT_FOUND` | |
+| 404 | `PROJECT_NOT_FOUND` `COLUMN_NOT_FOUND` `SWIMLANE_NOT_FOUND` `MILESTONE_NOT_FOUND` `TASK_NOT_FOUND` `PAGE_NOT_FOUND` `SOURCE_NOT_FOUND` `FORGE_TASK_NOT_FOUND` `TASK_LINK_NOT_FOUND` `MACHINE_NOT_FOUND` `RUNTIME_NOT_FOUND` `RUNTIME_EVENT_NOT_FOUND` `API_KEY_NOT_FOUND` `AGENT_NOT_FOUND` `SKILL_NOT_FOUND` | |
 | 409 | `SLUG_TAKEN` | Duplicate project slug, wiki slug, or team slug (details: `{ slug }`); also the constraint fallback on project update/delete |
 | 409 | `INVITE_PENDING` | An invite is already pending for that email (details: `{ email }`) |
 | 409 | `MACHINE_ID_TAKEN` | Machine id already registered to another host, legacy (no secret), or secret mismatch (details: `{ id, reason: "hostname" \| "legacy" \| "secret_mismatch" }`) |
 | 409 | `TASK_HAS_CHILDREN` | Task delete hits a constraint (defensive — subtask links cascade on delete) |
 | 409 | `NO_RUNTIME_ONLINE` | Create Forge task with no daemon online |
 | 409 | `TASK_LINK_CYCLE` | subtask_of link would create a cycle (details: `{ message }`) |
-| 409 | `HAS_CHILDREN` | Delete column with tasks / wiki page with children (details: `{ count }`) |
+| 409 | `HAS_CHILDREN` | Delete column with tasks / wiki page with children / milestone with sprints (details: `{ count }`) |
 | 409 | `WIP_LIMIT` | Move would exceed column WIP limit |
 | 409 | `ALREADY_LINKED` | Task already has a GitHub issue in that repo |
 | 409 | `OPTION_IN_USE` | Delete priority/type option still referenced by tasks (details: `{ optionId, label }`) |
@@ -64,6 +64,7 @@ All non-2xx responses share one shape:
 | 422 | `SOURCE_UNREACHABLE` | External source DNS/fetch failed after the SSRF guard (details: `{ url }`) |
 | 422 | `API_KEY_NAME_EMPTY` | API key name missing or blank |
 | 422 | `NOT_WORKSPACE_MEMBER` | Team-member add targets an email that is not a workspace member (details: `{ email, available }` — invite via the superadmin first) |
+| 422 | `INVALID_ARGS` | Sprint start date later than its due date (details: `{ reason }`) |
 | 429 | `RATE_LIMITED` | Per-IP rate limit exceeded on `/api/*` or `/mcp` (webhook, `/api/forge/daemon/*`, `/api/forge/runtimes/register` exempt; `/api/setup*` + `/api/health` ARE limited) — `/api` enforced in the API middleware, `/mcp` in `server/entry.ts`, one shared bucket |
 | 500 | `DATABASE_ERROR` / `INTERNAL` | |
 | 502 | `GITHUB_API_ERROR` | Only on explicit GitHub-linking endpoints; never on moves |
@@ -206,6 +207,7 @@ interface Column {
   wipLimit: number | null;
   requiredFields: string[];       // subset of ["title","description","assignee"]
   githubState: "open" | "closed" | null;
+  isDone: boolean;                // done marker — independent of githubState mapping; multiple done columns allowed
 }
 
 interface Swimlane {
@@ -214,9 +216,26 @@ interface Swimlane {
   name: string;
   description: string;
   position: number;
-  dueAt: string | null;       // YYYY-MM-DD — milestone deadline (date-only)
+  dueAt: string | null;       // YYYY-MM-DD — sprint deadline (date-only)
   archivedAt: ISODate | null; // null = live; set = archived (cascade-archives its tasks)
-  kind: "backlog" | "milestone";  // Backlog = system lane (permanent, no deadline)
+  startAt: string | null;     // YYYY-MM-DD — sprint start (date-only); null = unset
+  kind: "backlog" | "sprint"; // Backlog = system lane (permanent, no deadline); sprint = time-boxed lane
+  milestoneId: string | null; // owning milestone id; null = loose sprint (not in any milestone)
+}
+
+// Goal wrapper above sprints (e.g. "v1.0 launch"). A milestone holds one or
+// more sprints; deleting a milestone loosens its sprints (they become
+// milestoneId = null, ON DELETE SET NULL). sprintCount includes archived.
+interface Milestone {
+  id: ID;
+  projectId: ID;
+  name: string;
+  description: string;
+  position: number;
+  dueAt: string | null;           // YYYY-MM-DD target date; null = no deadline
+  archivedAt: string | null;      // null = live; set = archived (cascades to its sprints)
+  sprintCount: number;            // total sprints (incl. archived) in this milestone
+  archivedSprintCount: number;    // archived sprints
 }
 
 // Per-project customizable task fields. tasks.priority / tasks.type hold
@@ -390,6 +409,7 @@ interface Board {                 // GET /board — full snapshot, unpaginated
   project: Project;
   columns: Column[];              // ordered by position
   swimlanes: Swimlane[];          // ordered by position
+  milestones: Milestone[];        // ordered by position (incl. archived when includeArchived=true)
   fieldConfig: FieldConfig;       // priority + type option lists (labels/colors)
   links: TaskLink[];              // all task links in the project
   tasks: Task[];                  // ALL tasks, ordered by (columnId, position)
@@ -553,13 +573,22 @@ DELETE /api/projects/:slug/columns/:id  (admin)
 
 ### Swimlanes
 
+Swimlanes are sprint-aware: every non-backlog lane is a **sprint** (kind
+`sprint`), optionally belonging to a milestone (`milestoneId`) and carrying
+start/end dates (`startAt`, `dueAt`). The Backlog lane (kind `backlog`) is the
+permanent system lane — one per project, never in a milestone, and it rejects
+`dueAt`/`startAt`/`milestoneId`.
+
 ```
 GET    /api/projects/:slug/swimlanes        → 200 { data: Swimlane[] }   (includes archived lanes)
-POST   /api/projects/:slug/swimlanes   (admin)  body { name*, description?, position?, dueAt? } → 201 Swimlane | 403 FORBIDDEN
-PATCH  /api/projects/:slug/swimlanes/:id  (admin) body { name?, description?, position?, dueAt? } → 200 Swimlane | 403 FORBIDDEN
-  dueAt = "YYYY-MM-DD" (date-only milestone deadline); null clears.
+POST   /api/projects/:slug/swimlanes   (admin)  body { name*, description?, position?, dueAt?, startAt?, milestoneId? } → 201 Swimlane | 403 FORBIDDEN
+PATCH  /api/projects/:slug/swimlanes/:id  (admin) body { name?, description?, position?, dueAt?, startAt?, milestoneId? } → 200 Swimlane | 403 FORBIDDEN
+  dueAt = "YYYY-MM-DD" (date-only sprint deadline); null clears.
+  startAt = "YYYY-MM-DD" (sprint start); null clears.
+  milestoneId must reference a milestone in the same project → 404 MILESTONE_NOT_FOUND
+  startAt later than dueAt → 422 INVALID_ARGS
   Setting dueAt earlier than any live task's deadline in the lane → 409 DEADLINE_AFTER_LANE { date }
-  dueAt on the Backlog lane → 409 BACKLOG_PROTECTED
+  dueAt/startAt/milestoneId on the Backlog lane → 409 BACKLOG_PROTECTED
 DELETE /api/projects/:slug/swimlanes/:id  (admin) → 204 | 403 FORBIDDEN (tasks must be reassigned first — swimlane_id is NOT NULL)
   Backlog lane → 409 BACKLOG_PROTECTED
 
@@ -572,6 +601,33 @@ POST   /api/projects/:slug/swimlanes/:id/archive  (admin)
 POST   /api/projects/:slug/swimlanes/:id/restore  (admin)
 → 200 { data: Swimlane, activity: ActivityEvent[] } | 403 FORBIDDEN | 404
   Lane only — tasks stay archived (restore individually). Idempotent.
+```
+
+### Milestones
+
+A milestone is a goal wrapper holding one or more sprints (via
+`swimlanes.milestoneId`). Deleting a milestone loosens its sprints
+(`milestoneId` → null); they surface as loose sprints. Archived milestones keep
+their sprints (see archive cascade below).
+
+```
+GET    /api/projects/:slug/milestones → 200 { data: Milestone[] }
+       (includes archived milestones; each carries sprintCount + archivedSprintCount)
+POST   /api/projects/:slug/milestones   (admin)  body { name*, description?, position?, dueAt? } → 201 Milestone | 403 FORBIDDEN
+PATCH  /api/projects/:slug/milestones/:id  (admin) body { name?, description?, position?, dueAt? } → 200 Milestone | 403 FORBIDDEN | 404
+  dueAt = "YYYY-MM-DD" (target date); null clears.
+DELETE /api/projects/:slug/milestones/:id  (admin) → 204 | 403 FORBIDDEN | 404
+  | 409 HAS_CHILDREN { count }   (sprints must be loosened/reassigned first — milestone_id has ON DELETE SET NULL)
+
+POST   /api/projects/:slug/milestones/:id/archive  (admin)
+→ 200 { data: Milestone, activity: ActivityEvent[] } | 403 FORBIDDEN | 404
+  One transaction: milestone archivedAt set + every sprint in the milestone
+  archived, each archiving its live tasks (one `archived` activity row per
+  task). Idempotent — an already-archived milestone returns unchanged.
+
+POST   /api/projects/:slug/milestones/:id/restore  (admin)
+→ 200 { data: Milestone, activity: ActivityEvent[] } | 403 FORBIDDEN | 404
+  Milestone only — its sprints stay archived (restore individually). Idempotent.
 ```
 
 ### Tasks
@@ -643,8 +699,10 @@ GET    /api/projects/:slug/board?includeArchived=true
   (rendered dimmed in the UI, non-draggable, still in their original column/lane)
   fieldConfig included — tasks' priority/type are option IDs resolved via it
   links included — subtask grouping + blocked dots render without extra fetches
-  swimlanes carry dueAt/archivedAt/kind — the Backlog lane (kind=backlog) is the
-  permanent system lane; every project has exactly one
+  swimlanes carry dueAt/startAt/archivedAt/kind/milestoneId — the Backlog lane
+  (kind=backlog) is the permanent system lane; every project has exactly one
+  milestones: Milestone[] included (archived milestones included when
+  includeArchived=true; sprintCount/archivedSprintCount always present)
 ```
 
 ### Activity & Comments

@@ -21,7 +21,9 @@ describe("rowToColumn", () => {
   it("maps snake_case + parses required_fields JSON", () => {
     const row: ColumnRow = { id: "c1", project_id: "p1", name: "Todo", position: 0, color: "#fff", wip_limit: 5, required_fields: '["title"]', github_state: null };
     const c = rowToColumn(row);
-    expect(c).toEqual({ id: "c1", projectId: "p1", name: "Todo", position: 0, color: "#fff", wipLimit: 5, requiredFields: ["title"], githubState: null });
+    expect(c).toEqual({ id: "c1", projectId: "p1", name: "Todo", position: 0, color: "#fff", wipLimit: 5, requiredFields: ["title"], githubState: null, isDone: false });
+    const done = rowToColumn({ ...row, is_done: 1 });
+    expect(done.isDone).toBe(true);
   });
 
   it("handles null wip_limit", () => {
@@ -33,13 +35,18 @@ describe("rowToColumn", () => {
 
 describe("rowToSwimlane", () => {
   it("maps fields", () => {
-    const row: SwimlaneRow = { id: "s1", project_id: "p1", name: "Backend", description: "server work", position: 1, due_at: null, archived_at: null };
-    expect(rowToSwimlane(row)).toEqual({ id: "s1", projectId: "p1", name: "Backend", description: "server work", position: 1, dueAt: null, archivedAt: null, kind: "milestone" });
+    const row: SwimlaneRow = { id: "s1", project_id: "p1", name: "Backend", description: "server work", position: 1, due_at: null, archived_at: null, start_at: null, milestone_id: null };
+    expect(rowToSwimlane(row)).toEqual({ id: "s1", projectId: "p1", name: "Backend", description: "server work", position: 1, dueAt: null, archivedAt: null, startAt: null, kind: "sprint", milestoneId: null });
   });
 
-  it("defaults kind to milestone and maps due fields", () => {
-    const row: SwimlaneRow = { id: "s1", project_id: "p1", name: "Backlog", description: "", position: 0, due_at: "2026-08-14", archived_at: "2026-08-01T00:00:00Z", kind: "backlog" };
-    expect(rowToSwimlane(row)).toEqual({ id: "s1", projectId: "p1", name: "Backlog", description: "", position: 0, dueAt: "2026-08-14", archivedAt: "2026-08-01T00:00:00Z", kind: "backlog" });
+  it("defaults kind to sprint and maps due fields", () => {
+    const row: SwimlaneRow = { id: "s1", project_id: "p1", name: "Backlog", description: "", position: 0, due_at: "2026-08-14", archived_at: "2026-08-01T00:00:00Z", kind: "backlog", start_at: null, milestone_id: null };
+    expect(rowToSwimlane(row)).toEqual({ id: "s1", projectId: "p1", name: "Backlog", description: "", position: 0, dueAt: "2026-08-14", archivedAt: "2026-08-01T00:00:00Z", startAt: null, kind: "backlog", milestoneId: null });
+  });
+
+  it("maps start_at and milestone_id", () => {
+    const row: SwimlaneRow = { id: "s1", project_id: "p1", name: "Sprint 7", description: "", position: 0, due_at: "2026-08-30", archived_at: null, start_at: "2026-08-10", kind: "sprint", milestone_id: "ms1" };
+    expect(rowToSwimlane(row)).toMatchObject({ startAt: "2026-08-10", kind: "sprint", milestoneId: "ms1" });
   });
 });
 

@@ -81,6 +81,7 @@ export interface Column {
   wipLimit: number | null;
   requiredFields: string[];
   githubState: "open" | "closed" | null;
+  isDone: boolean;            // done marker — independent of githubState mapping
 }
 
 export interface Swimlane {
@@ -91,13 +92,30 @@ export interface Swimlane {
   position: number;
   dueAt: string | null;
   archivedAt: string | null;
-  kind: "backlog" | "milestone";
+  startAt: string | null;     // YYYY-MM-DD sprint start
+  kind: "backlog" | "sprint"; // Backlog = system lane (permanent); sprint = time-boxed lane
+  milestoneId: string | null; // owning milestone; null = loose sprint
+}
+
+// Goal wrapper above sprints (e.g. "v1.0 launch"). A milestone holds one or
+// more sprints; deleting it loosens them (ON DELETE SET NULL).
+export interface Milestone {
+  id: ID;
+  projectId: ID;
+  name: string;
+  description: string;
+  position: number;
+  dueAt: string | null;          // YYYY-MM-DD target date; null = no deadline
+  archivedAt: string | null;     // null = live; set = archived (cascades to its sprints)
+  sprintCount: number;           // total sprints (incl. archived) in this milestone
+  archivedSprintCount: number;   // archived sprints
 }
 
 export interface Board {
   project: Project;
   columns: Column[];
   swimlanes: Swimlane[];
+  milestones: Milestone[];
   fieldConfig: FieldConfig;
   links: TaskLink[];
   tasks: Task[];
