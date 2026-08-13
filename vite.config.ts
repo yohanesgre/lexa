@@ -18,4 +18,9 @@ export default defineConfig({
       "/mcp": "http://localhost:3000",
     },
   },
+  ssr: {
+    // server/auth.ts runs in the Bun API server, never in vite SSR; keep
+    // its bun: imports out of the node-based SSR loader.
+    external: ["bun:sqlite"],
+  },
 });
