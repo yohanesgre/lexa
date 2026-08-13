@@ -20,3 +20,9 @@ export const isFilterActive = (filters: FilterState) =>
   filters.types.size > 0 ||
   filters.assignees.size > 0 ||
   filters.swimlanes.size > 0;
+
+// ?swimlane=<id> search-param parsing — drives the tasks page lane filter.
+// Any non-string (missing, ?swimlane=, arrays) → "" (all lanes).
+export function parseSwimlaneParam(raw: unknown): string {
+  return typeof raw === "string" && raw.length > 0 ? raw : "";
+}

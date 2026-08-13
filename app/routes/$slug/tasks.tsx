@@ -1,6 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
 import { useBoard, useTask, useTasks, useMoveTask, useUpdateTask, useDeleteTask, useArchiveTask, useRestoreTask, useLinkGithubIssue, useUnlinkGithubIssue } from "../../lib/queries";
+import { parseSwimlaneParam } from "../../lib/filters";
 import type { TaskListItem } from "../../lib/queries";
 import { useToast } from "../../components/ui/Toast";
 import { TaskDetail } from "../../components/TaskDetail";
@@ -8,15 +9,16 @@ import type { MoveTarget } from "../../components/kanban/KanbanBoard";
 import type { Task, TipTapDoc } from "../../../shared/types";
 
 export const Route = createFileRoute("/$slug/tasks")({
-  validateSearch: (search: Record<string, unknown>): { task?: string } => ({
+  validateSearch: (search: Record<string, unknown>): { task?: string; swimlane?: string } => ({
     task: typeof search.task === "string" ? search.task : undefined,
+    swimlane: typeof search.swimlane === "string" ? search.swimlane : undefined,
   }),
   component: TasksPage,
 });
 
 type SortKey = "board" | "priority" | "created";
 
-function TasksPage() {
+export function TasksPage() {
   const { slug } = Route.useParams();
   const search = Route.useSearch();
   const navigate = Route.useNavigate();
@@ -28,6 +30,7 @@ function TasksPage() {
   const [typeId, setTypeId] = useState("");
   const [priorityId, setPriorityId] = useState("");
   const [assignee, setAssignee] = useState("");
+  const [swimlaneId, setSwimlaneId] = useState(() => parseSwimlaneParam(search.swimlane));
   const [sortKey, setSortKey] = useState<SortKey>("board");
 
   const { board, tasks, isLoading, error, refetch } = useTasks(slug, showArchived);
@@ -45,7 +48,7 @@ function TasksPage() {
   const linkGithubIssue = useLinkGithubIssue(slug);
   const unlinkGithubIssue = useUnlinkGithubIssue(slug);
 
-  const hasActiveFilters = query !== "" || columnId !== "" || typeId !== "" || priorityId !== "" || assignee !== "";
+  const hasActiveFilters = query !== "" || columnId !== "" || typeId !== "" || priorityId !== "" || assignee !== "" || swimlaneId !== "";
 
   const filtered = useMemo(() => {
     let list = tasks ?? [];
@@ -55,6 +58,7 @@ function TasksPage() {
     if (typeId) list = list.filter((t) => t.typeId === typeId);
     if (priorityId) list = list.filter((t) => t.priorityId === priorityId);
     if (assignee) list = list.filter((t) => t.assignees.includes(assignee));
+    if (swimlaneId) list = list.filter((t) => t.swimlaneId === swimlaneId);
     if (showArchived) list = list.filter((t) => t.archivedAt !== null);
     const priorityPos = new Map((fieldConfig?.priorities ?? []).map((o) => [o.id, o.position]));
     if (sortKey === "priority") {
@@ -63,7 +67,7 @@ function TasksPage() {
       list = [...list].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
     }
     return list;
-  }, [tasks, fieldConfig, query, columnId, typeId, priorityId, assignee, showArchived, sortKey]);
+  }, [tasks, fieldConfig, query, columnId, typeId, priorityId, assignee, swimlaneId, showArchived, sortKey]);
 
   const clearFilters = () => {
     setQuery("");
@@ -71,6 +75,8 @@ function TasksPage() {
     setTypeId("");
     setPriorityId("");
     setAssignee("");
+    setSwimlaneId("");
+    navigate({ search: { swimlane: undefined }, replace: true } as never);
   };
 
   const selectedTaskId = search.task ?? null;
@@ -204,6 +210,16 @@ function TasksPage() {
             <option key={name} value={name}>{name}</option>
           ))}
         </select>
+        <select className="tasks-select" value={swimlaneId} onChange={(e) => {
+          const v = e.target.value;
+          setSwimlaneId(v);
+          navigate({ search: { swimlane: v || undefined }, replace: true } as never);
+        }} aria-label="Swimlane filter">
+          <option value="">All swimlanes</option>
+          {swimlanes.map((l) => (
+            <option key={l.id} value={l.id}>{l.name}</option>
+          ))}
+        </select>
         <select className="tasks-select" value={sortKey} onChange={(e) => setSortKey(e.target.value as SortKey)}>
           <option value="board">Board order</option>
           <option value="priority">Priority</option>
@@ -247,10 +263,17 @@ function TasksPage() {
             >
               {t.priorityColor !== "" && <span className="task-row-accent" style={{ background: t.priorityColor }} />}
               <span className="task-row-title">{t.title}</span>
-              <span className="task-row-meta">
-                <span className="task-row-where">
-                  {t.columnName} · {t.swimlaneName}
-                </span>
+                <span className="task-row-meta">
+                  {swimlaneId && (
+                    <span className="task-row-where">
+                      <span className="task-chip type" style={{ color: "var(--lx-text-link)", borderColor: "var(--lx-text-link)" }}>
+                        Sprint: {swimlanes.find((l) => l.id === swimlaneId)?.name ?? swimlaneId}
+                      </span>
+                    </span>
+                  )}
+                  <span className="task-row-where">
+                    {t.columnName} · {t.swimlaneName}
+                  </span>
                 <span className="task-row-status">
                   <span className="task-chip type" style={t.typeColor ? { color: t.typeColor, borderColor: t.typeColor } : undefined}>
                     {t.typeLabel}

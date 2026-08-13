@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { emptyFilters, isFilterActive, type FilterState } from "./filters";
+import { emptyFilters, isFilterActive, parseSwimlaneParam, type FilterState } from "./filters";
 
 describe("emptyFilters", () => {
   it("returns five empty sets", () => {
@@ -34,5 +34,19 @@ describe("isFilterActive", () => {
     expect(isFilterActive(assignees)).toBe(true);
     const swimlanes: FilterState = { ...emptyFilters(), swimlanes: new Set(["s1"]) };
     expect(isFilterActive(swimlanes)).toBe(true);
+  });
+});
+
+describe("parseSwimlaneParam", () => {
+  it("passes a string id through", () => {
+    expect(parseSwimlaneParam("sp1")).toBe("sp1");
+  });
+
+  it("returns empty string for missing/empty/non-string values", () => {
+    expect(parseSwimlaneParam(undefined)).toBe("");
+    expect(parseSwimlaneParam(null)).toBe("");
+    expect(parseSwimlaneParam("")).toBe("");
+    expect(parseSwimlaneParam(42)).toBe("");
+    expect(parseSwimlaneParam(["sp1"])).toBe("");
   });
 });
