@@ -24,7 +24,10 @@ export async function fetchSessionServer(): Promise<SessionResponse> {
     }
     const res = await fetch(url, { credentials: "include", headers });
     if (!res.ok) return { session: null, user: null };
-    return (await res.json()) as SessionResponse;
+    // Unauthenticated get-session returns HTTP 200 with body null — normalize
+    // it so SSR callers can read `.session` without a crash.
+    const data = (await res.json()) as SessionResponse | null;
+    return data ?? { session: null, user: null };
   } catch {
     return { session: null, user: null };
   }

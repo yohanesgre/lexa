@@ -27,7 +27,10 @@ async function fetchSessionClient(): Promise<SessionResponse> {
   try {
     const res = await fetch(`${AUTH_BASE}/get-session`, { credentials: "include" });
     if (!res.ok) return { session: null, user: null };
-    return (await res.json()) as SessionResponse;
+    // Unauthenticated get-session returns HTTP 200 with body null — normalize
+    // it so callers can read `.session` without a crash.
+    const data = (await res.json()) as SessionResponse | null;
+    return data ?? { session: null, user: null };
   } catch {
     return { session: null, user: null };
   }
