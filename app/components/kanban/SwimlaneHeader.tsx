@@ -4,9 +4,11 @@ import { cn } from "../ui/cn";
 import { Menu } from "../ui/Menu";
 import { useUpdateSwimlane, useDeleteSwimlane, useCreateColumn, useArchiveSwimlane, useRestoreSwimlane } from "../../lib/queries";
 import { formatDueLabel } from "../../lib/dates";
+import { sprintProgress } from "../../lib/progress";
 import { SwimlaneForm } from "./SwimlaneForm";
 import { ColumnForm } from "./ColumnForm";
-import type { Swimlane } from "../../../shared/types";
+import { SprintProgress } from "../milestones/SprintProgress";
+import type { Board, Swimlane } from "../../../shared/types";
 
 interface SwimlaneHeaderProps {
   slug: string;
@@ -14,9 +16,10 @@ interface SwimlaneHeaderProps {
   count?: number;
   collapsed?: boolean;
   onToggle?: () => void;
+  board?: Board;
 }
 
-export function SwimlaneHeader({ slug, lane, count, collapsed = false, onToggle }: SwimlaneHeaderProps) {
+export function SwimlaneHeader({ slug, lane, count, collapsed = false, onToggle, board }: SwimlaneHeaderProps) {
   const updateSwimlane = useUpdateSwimlane(slug);
   const deleteSwimlane = useDeleteSwimlane(slug);
   const createColumn = useCreateColumn(slug);
@@ -108,9 +111,18 @@ export function SwimlaneHeader({ slug, lane, count, collapsed = false, onToggle 
           <span className="swimlane-name">{lane.name}</span>
         )}
         {count !== undefined && <span className="swimlane-count">{String(count).padStart(3, "0")}</span>}
+        {lane.kind === "sprint" && lane.startAt && lane.dueAt && !lane.archivedAt && (
+          <span className="lane-dates">
+            {formatShortDate(lane.startAt)} → {formatShortDate(lane.dueAt)}
+          </span>
+        )}
         {due && lane.kind !== "backlog" && !lane.archivedAt && (
           <span className={cn("lane-due", due.overdue && "lane-due-overdue")}>{due.text}</span>
         )}
+        {lane.kind === "sprint" && !lane.archivedAt && board && (() => {
+          const p = sprintProgress(board, lane.id);
+          return p.total > 0 ? <SprintProgress done={p.done} total={p.total} /> : null;
+        })()}
         {lane.kind === "backlog" && !collapsed && (
           <span
             style={{
@@ -177,7 +189,7 @@ export function SwimlaneHeader({ slug, lane, count, collapsed = false, onToggle 
               <Plus size={14} />
               Add column
             </button>
-            {!lane.archivedAt && lane.kind === "milestone" && (
+            {!lane.archivedAt && lane.kind === "sprint" && (
               <>
                 <div className="menu-separator" />
                 <button
@@ -223,6 +235,9 @@ export function SwimlaneHeader({ slug, lane, count, collapsed = false, onToggle 
             id: lane.id,
             name: input.name,
             description: input.description ?? undefined,
+            dueAt: input.dueAt ?? undefined,
+            startAt: input.startAt ?? undefined,
+            milestoneId: input.milestoneId ?? undefined,
           });
           setIsSettingsOpen(false);
         }}
@@ -242,6 +257,7 @@ export function SwimlaneHeader({ slug, lane, count, collapsed = false, onToggle 
             requiredFields: input.requiredFields,
             color: input.color ?? undefined,
             githubState: (input.githubState as "open" | "closed" | null | undefined) ?? undefined,
+            isDone: input.isDone ?? false,
           });
           setIsAddColumnOpen(false);
         }}
@@ -297,8 +313,12 @@ export function SwimlaneHeader({ slug, lane, count, collapsed = false, onToggle 
   );
 }
 
-const BOLD_RE = /\*\*(.+?)\*\*/g;
-const ITALIC_RE = /(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)/g;
+function formatShortDate(iso: string): string {
+  const [y, m, d] = iso.split("-").map(Number);
+  return new Date(Date.UTC(y, m - 1, d)).toLocaleDateString("en-US", { month: "short", day: "numeric" });
+}
+
+const BOLD_RE = /\*\*(.+?)\*\*/g;const ITALIC_RE = /(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)/g;
 const CODE_RE = /`(.+?)`/g;
 
 function renderInline(text: string): React.ReactNode[] {
