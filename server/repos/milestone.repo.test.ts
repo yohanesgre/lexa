@@ -76,6 +76,24 @@ describe("MilestoneRepo", () => {
     expect(res).toMatchObject({ _tag: "Left", left: expect.objectContaining({ _tag: "RowNotFound" }) });
   });
 
+  it("update and setArchived readbacks carry real sprint counts", async () => {
+    setup();
+    await Effect.runPromise(repo.create({ id: "ms1", projectId: "p1", name: "v1", position: 0 }));
+    db.exec(`INSERT INTO swimlanes (id, project_id, name, position, kind, milestone_id, archived_at)
+             VALUES ('sp1','p1','Sprint 1',0,'sprint','ms1',NULL),
+                    ('sp2','p1','Sprint 2',1,'sprint','ms1','2026-09-01 00:00:00')`);
+    const updated = await Effect.runPromise(repo.update("ms1", { name: "v1.0" }));
+    expect(updated.sprintCount).toBe(2);
+    expect(updated.archivedSprintCount).toBe(1);
+    const archived = await Effect.runPromise(repo.setArchived("ms1", "2026-09-02 00:00:00"));
+    expect(archived.archivedAt).toBe("2026-09-02 00:00:00");
+    expect(archived.sprintCount).toBe(2);
+    expect(archived.archivedSprintCount).toBe(1);
+    const noop = await Effect.runPromise(repo.update("ms1", {}));
+    expect(noop.sprintCount).toBe(2);
+    expect(noop.archivedSprintCount).toBe(1);
+  });
+
   it("delete removes the row; maxPosition tracks ordering", async () => {
     setup();
     await Effect.runPromise(repo.create({ id: "ms1", projectId: "p1", name: "v1", position: 0 }));
