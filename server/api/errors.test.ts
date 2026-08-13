@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { DbError, ConstraintViolation } from "../db/database";
-import { TaskNotFound, TaskHasChildren, errorToStatus, errorMessage, errorDetails, errorResponse } from "./errors";
+import { TaskNotFound, TaskHasChildren, MilestoneNotFound, InvalidArgs, errorToStatus, errorMessage, errorDetails, errorResponse } from "./errors";
 import { CommentNotFound, CommentEditForbidden, CommentDeleteForbidden, CommentInvalid } from "./errors";
 
 const RAW = "UNIQUE constraint failed: tasks.column_id, tasks.position";
@@ -37,6 +37,21 @@ describe("errorToStatus", () => {
     const resp = errorResponse(asCatalogError(new CommentInvalid({ reason: "comment body is empty" })));
     expect(resp.error.code).toBe("COMMENT_INVALID");
     expect(resp.error.message).toBe("comment body is empty");
+  });
+
+  it("maps MilestoneNotFound to 404 / MILESTONE_NOT_FOUND", () => {
+    expect(errorToStatus(new MilestoneNotFound({ id: "ms1" }))).toBe(404);
+    const resp = errorResponse(asCatalogError(new MilestoneNotFound({ id: "ms1", availableMilestones: ["v1", "v2"] })));
+    expect(resp.error.code).toBe("MILESTONE_NOT_FOUND");
+    expect(resp.error.message).toBe("Milestone not found");
+    expect(resp.error.details).toEqual({ id: "ms1", availableMilestones: ["v1", "v2"] });
+  });
+
+  it("maps InvalidArgs to 422 / INVALID_ARGS with the reason as message", () => {
+    expect(errorToStatus(new InvalidArgs({ reason: "startAt cannot be later than dueAt" }))).toBe(422);
+    const resp = errorResponse(asCatalogError(new InvalidArgs({ reason: "startAt cannot be later than dueAt" })));
+    expect(resp.error.code).toBe("INVALID_ARGS");
+    expect(resp.error.message).toBe("startAt cannot be later than dueAt");
   });
 });
 

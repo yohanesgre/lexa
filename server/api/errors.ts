@@ -6,6 +6,8 @@ export class TaskNotFound extends Data.TaggedError("TaskNotFound")<{ id: string 
 export class ProjectNotFound extends Data.TaggedError("ProjectNotFound")<{ identifier: string }> {}
 export class ColumnNotFound extends Data.TaggedError("ColumnNotFound")<{ id: string }> {}
 export class SwimlaneNotFound extends Data.TaggedError("SwimlaneNotFound")<{ id: string; availableSwimlanes?: string[] }> {}
+export class MilestoneNotFound extends Data.TaggedError("MilestoneNotFound")<{ id: string; availableMilestones?: string[] }> {}
+export class InvalidArgs extends Data.TaggedError("InvalidArgs")<{ reason: string }> {}
 export class WikiPageNotFound extends Data.TaggedError("WikiPageNotFound")<{ id: string }> {}
 export class WipLimitExceeded extends Data.TaggedError("WipLimitExceeded")<{ column: string; limit: number; current: number }> {}
 export class DeadlineAfterLane extends Data.TaggedError("DeadlineAfterLane")<{
@@ -65,6 +67,8 @@ export const errorCodeMap: Record<string, string> = {
   ProjectNotFound: "PROJECT_NOT_FOUND",
   ColumnNotFound: "COLUMN_NOT_FOUND",
   SwimlaneNotFound: "SWIMLANE_NOT_FOUND",
+  MilestoneNotFound: "MILESTONE_NOT_FOUND",
+  InvalidArgs: "INVALID_ARGS",
   WikiPageNotFound: "PAGE_NOT_FOUND",
   WipLimitExceeded: "WIP_LIMIT",
   DeadlineAfterLane: "DEADLINE_AFTER_LANE",
@@ -148,6 +152,7 @@ export function errorToStatus(error: { _tag: string }): number {
     case "ProjectNotFound":
     case "ColumnNotFound":
     case "SwimlaneNotFound":
+    case "MilestoneNotFound":
     case "WikiPageNotFound":
     case "SourceNotFound":
     case "ForgeTaskNotFound":
@@ -194,6 +199,7 @@ export function errorToStatus(error: { _tag: string }): number {
     case "SourceUnreachable":
     case "CommentInvalid":
     case "InvalidName":
+    case "InvalidArgs":
     case "InvalidRateLimit":
     case "InvalidGithubSettings":
     case "MemberNotInWorkspace":
@@ -224,6 +230,10 @@ export function errorMessage(error: { _tag: string } & Record<string, unknown>):
       return `Column not found`;
     case "SwimlaneNotFound":
       return `Swimlane not found`;
+    case "MilestoneNotFound":
+      return `Milestone not found`;
+    case "InvalidArgs":
+      return String(error.reason ?? "Invalid arguments");
     case "WikiPageNotFound":
       return `Page not found`;
     case "WipLimitExceeded":
