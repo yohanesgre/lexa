@@ -15,7 +15,7 @@ VALUES
   ('seed-user-03', 'qa@lexa.local', 'QA Lead', 'member'),
   ('seed-user-04', 'designer@lexa.local', 'Designer Bob', 'member'),
   ('seed-user-05', 'writer@lexa.local', 'Carol Writer', 'member'),
-  ('seed-user-06', 'pm@lexa.local', 'PM Alex', 'admin');
+  ('seed-user-06', 'pm@lexa.local', 'PM Alex', 'superadmin');
 
 -- ============================================================
 -- Projects — 4 projects covering empty, minimal, and full
@@ -106,7 +106,7 @@ DELETE FROM columns WHERE project_id = 'seed-proj-blank';
 
 INSERT INTO columns (id, project_id, name, position, color, wip_limit, required_fields, github_state)
 VALUES
-  ('seed-col-bl-0', 'seed-proj-blank', 'Backlog', 0, '#6b7280', NULL, '[]'),
+  ('seed-col-bl-0', 'seed-proj-blank', 'Backlog', 0, '#6b7280', NULL, '[]', NULL),
   ('seed-col-bl-1', 'seed-proj-blank', 'In Progress', 1, '#3b82f6', 3, '["assignee"]', 'open'),
   ('seed-col-bl-2', 'seed-proj-blank', 'Done', 2, '#10b981', NULL, '[]', 'closed');
 
@@ -124,8 +124,8 @@ DELETE FROM columns WHERE project_id = 'seed-proj-minimal';
 
 INSERT INTO columns (id, project_id, name, position, color, wip_limit, required_fields, github_state)
 VALUES
-  ('seed-col-min-0', 'seed-proj-minimal', 'Backlog', 0, '#6b7280', NULL, '[]'),
-  ('seed-col-min-1', 'seed-proj-minimal', 'In Progress', 1, '#3b82f6', 2, '["assignee"]'),
+  ('seed-col-min-0', 'seed-proj-minimal', 'Backlog', 0, '#6b7280', NULL, '[]', NULL),
+  ('seed-col-min-1', 'seed-proj-minimal', 'In Progress', 1, '#3b82f6', 2, '["assignee"]', NULL),
   ('seed-col-min-2', 'seed-proj-minimal', 'Done', 2, '#10b981', NULL, '[]', 'closed');
 
 -- tasks.swimlane_id is NOT NULL since migration 0007 — give the project a default swimlane
@@ -157,7 +157,7 @@ DELETE FROM columns WHERE project_id = 'seed-proj-full';
 
 INSERT INTO columns (id, project_id, name, position, color, wip_limit, required_fields, github_state)
 VALUES
-  ('seed-col-f-0', 'seed-proj-full', 'Todo', 0, '#6b7280', NULL, '[]'),
+  ('seed-col-f-0', 'seed-proj-full', 'Todo', 0, '#6b7280', NULL, '[]', NULL),
   ('seed-col-f-1', 'seed-proj-full', 'In Progress', 1, '#3b82f6', 3, '["assignee"]', 'open'),
   ('seed-col-f-2', 'seed-proj-full', 'Review', 2, '#f59e0b', 2, '["description","assignee"]', 'open'),
   ('seed-col-f-3', 'seed-proj-full', 'Done', 3, '#10b981', NULL, '[]', 'closed'),
@@ -176,12 +176,12 @@ VALUES
   ('seed-task-f-01', 'seed-proj-full', 'seed-col-f-0', 'seed-sw-f-0',
    'Critical crash on dashboard load',
    '{"type":"doc","content":[{"type":"paragraph","content":[{"type":"text","text":"App crashes when opening the dashboard with a large board. "},{"type":"text","marks":[{"type":"bold"}],"text":"100% repro rate"},{"type":"text","text":" on all browsers."}]},{"type":"paragraph","content":[{"type":"text","text":"Stack trace points to the task-list virtualizer."}]}]}',
-   'seed-prio-full-0', 'seed-type-full-1', 'a0', NULL, NULL, NULL),
+   'seed-prio-full-0', 'seed-type-full-1', 'a0', NULL, NULL, NULL, NULL),
 
   ('seed-task-f-02', 'seed-proj-full', 'seed-col-f-0', 'seed-sw-f-0',
    'Design onboarding flow',
    '{"type":"doc","content":[{"type":"heading","attrs":{"level":2},"content":[{"type":"text","text":"Onboarding Flow Design"}]},{"type":"paragraph","content":[{"type":"text","text":"Define the welcome sequence from signup to first board."}]},{"type":"bulletList","content":[{"type":"listItem","content":[{"type":"paragraph","content":[{"type":"text","text":"Welcome email: 1 day after signup"}]}]},{"type":"listItem","content":[{"type":"paragraph","content":[{"type":"text","text":"First-project wizard: 3 steps"}]}]},{"type":"listItem","content":[{"type":"paragraph","content":[{"type":"text","text":"Invite prompt: after first task created"}]}]}]}]}',
-   'seed-prio-full-1', 'seed-type-full-0', 'a1', NULL, NULL, NULL),
+   'seed-prio-full-1', 'seed-type-full-0', 'a1', NULL, NULL, NULL, NULL),
 
   ('seed-task-f-03', 'seed-proj-full', 'seed-col-f-0', 'seed-sw-f-1',
    'Create landing page illustrations',
@@ -190,32 +190,32 @@ VALUES
 
   ('seed-task-f-04', 'seed-proj-full', 'seed-col-f-0', 'seed-sw-f-0',
    'Empty description task', '{"type":"doc","content":[]}',
-   'seed-prio-full-3', 'seed-type-full-2', 'a3', NULL, NULL, NULL),
+   'seed-prio-full-3', 'seed-type-full-2', 'a3', NULL, NULL, NULL, NULL),
 
   ('seed-task-f-05', 'seed-proj-full', 'seed-col-f-0', 'seed-sw-f-2',
    'Write launch blog post',
    '{"type":"doc","content":[{"type":"paragraph","content":[{"type":"text","text":"Announcement post covering the kanban board, wiki, and AI assistant. 800-1200 words."}]}]}',
-   'seed-prio-full-3', 'seed-type-full-3', 'a4', NULL, NULL, NULL),
+   'seed-prio-full-3', 'seed-type-full-3', 'a4', NULL, NULL, NULL, NULL),
 
   ('seed-task-f-06', 'seed-proj-full', 'seed-col-f-1', 'seed-sw-f-0',
    'Fix memory leak in notification queue',
    '{"type":"doc","content":[{"type":"paragraph","content":[{"type":"text","text":"Queue grows unbounded under high activity (>30 events/sec)."}]},{"type":"codeBlock","attrs":{"language":"ts"},"content":[{"type":"text","text":"// Current problematic code\nif (queue.size() > MAX_QUEUE) {\n    queue.back()->Retire();  // callback re-triggers enqueue!\n    queue.pop_back();\n}"}]},{"type":"paragraph","content":[{"type":"text","text":"Solution: orphan the entry first, then Retire() outside the queue lock."}]}]}',
-   'seed-prio-full-0', 'seed-type-full-1', 'a0', NULL, NULL, NULL),
+   'seed-prio-full-0', 'seed-type-full-1', 'a0', NULL, NULL, NULL, NULL),
 
   ('seed-task-f-07', 'seed-proj-full', 'seed-col-f-1', 'seed-sw-f-1',
    'Implement keyboard navigation',
    '{"type":"doc","content":[{"type":"paragraph","content":[{"type":"text","text":"Full arrow-key board navigation with screen-reader labels."}]}]}',
-   'seed-prio-full-1', 'seed-type-full-0', 'a1', NULL, NULL, NULL),
+   'seed-prio-full-1', 'seed-type-full-0', 'a1', NULL, NULL, NULL, NULL),
 
   ('seed-task-f-08', 'seed-proj-full', 'seed-col-f-1', 'seed-sw-f-0',
    'Refactor task-list pagination',
    '{"type":"doc","content":[{"type":"paragraph","content":[{"type":"text","text":"Current offset pagination is O(n) on large boards. Needs cursor-based keyset pagination."}]}]}',
-   'seed-prio-full-2', 'seed-type-full-2', 'a2', NULL, NULL, NULL),
+   'seed-prio-full-2', 'seed-type-full-2', 'a2', NULL, NULL, NULL, NULL),
 
   ('seed-task-f-09', 'seed-proj-full', 'seed-col-f-2', 'seed-sw-f-0',
    'Role-based access control',
    '{"type":"doc","content":[{"type":"heading","attrs":{"level":3},"content":[{"type":"text","text":"Review Checklist"}]},{"type":"taskList","content":[{"type":"taskItem","attrs":{"checked":true},"content":[{"type":"paragraph","content":[{"type":"text","text":"Admins can invite members"}]}]},{"type":"taskItem","attrs":{"checked":true},"content":[{"type":"paragraph","content":[{"type":"text","text":"Members can edit tasks and wiki pages"}]}]},{"type":"taskItem","attrs":{"checked":false},"content":[{"type":"paragraph","content":[{"type":"text","text":"Add tests for role escalation"}]}]}]}]}',
-   'seed-prio-full-1', 'seed-type-full-0', 'a0', NULL, NULL, NULL),
+   'seed-prio-full-1', 'seed-type-full-0', 'a0', NULL, NULL, NULL, NULL),
 
   ('seed-task-f-10', 'seed-proj-full', 'seed-col-f-2', 'seed-sw-f-2',
    'Email links broken in shared sessions',
@@ -225,11 +225,11 @@ VALUES
   ('seed-task-f-11', 'seed-proj-full', 'seed-col-f-3', 'seed-sw-f-0',
    'Dark mode toggle',
    '{"type":"doc","content":[{"type":"paragraph","content":[{"type":"text","text":"Full theme switch with persisted preference. Shipped in v0.3."}]}]}',
-   'seed-prio-full-2', 'seed-type-full-0', 'a0', NULL, NULL, NULL),
+   'seed-prio-full-2', 'seed-type-full-0', 'a0', NULL, NULL, NULL, NULL),
 
   ('seed-task-f-12', 'seed-proj-full', 'seed-col-f-3', 'seed-sw-f-1',
    'Export OpenAPI 3.1 spec', '{"type":"doc","content":[]}',
-   'seed-prio-full-3', 'seed-type-full-2', 'a1', NULL, NULL, NULL),
+   'seed-prio-full-3', 'seed-type-full-2', 'a1', NULL, NULL, NULL, NULL),
 
   ('seed-task-f-13', 'seed-proj-full', 'seed-col-f-3', 'seed-sw-f-2',
    'Design system color tokens',
@@ -239,11 +239,11 @@ VALUES
   ('seed-task-f-14', 'seed-proj-full', 'seed-col-f-4', 'seed-sw-f-0',
    'Integrate new billing provider',
    '{"type":"doc","content":[{"type":"paragraph","content":[{"type":"text","text":"Waiting for the payments team to deliver sandbox keys (ETA next sprint)."}]},{"type":"paragraph","content":[{"type":"text","text":"All code is ready — just need credentials."}]}]}',
-   'seed-prio-full-1', 'seed-type-full-2', 'a0', NULL, NULL, NULL),
+   'seed-prio-full-1', 'seed-type-full-2', 'a0', NULL, NULL, NULL, NULL),
 
-  ('seed-task-f-15', 'seed-proj-full', 'seed-col-f-4', 'seed-sw-f-0',
-   'Unblocked but no owner', '{"type":"doc","content":[]}',
-   'seed-prio-full-2', 'seed-type-full-1', 'a1', NULL, NULL, NULL, NULL);
+   ('seed-task-f-15', 'seed-proj-full', 'seed-col-f-4', 'seed-sw-f-0',
+    'Unblocked but no owner', '{"type":"doc","content":[]}',
+    'seed-prio-full-2', 'seed-type-full-1', 'a1', NULL, NULL, NULL, NULL);
 
 INSERT INTO task_assignees (task_id, user_name)
 VALUES
