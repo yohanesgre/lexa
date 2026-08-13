@@ -55,7 +55,7 @@ beforeAll(async () => {
 INSERT INTO projects (id, name, slug) VALUES ('p1', 'P', 'p1');
 INSERT INTO columns (id, project_id, name, position) VALUES ('c1', 'p1', 'Todo', 0);
 INSERT INTO swimlanes (id, project_id, name, position, kind) VALUES
-  ('s1', 'p1', 'Main', 0, 'milestone'),
+  ('s1', 'p1', 'Main', 0, 'sprint'),
   ('s2', 'p1', 'Backlog', 1, 'backlog');
 INSERT INTO tasks (id, project_id, column_id, swimlane_id, title, position, priority, type, created_at) VALUES
   ('t1', 'p1', 'c1', 's1', 'Task One', 'a0', 'pr-1', 'tp-1', '2026-01-01 10:00:00'),
@@ -128,5 +128,17 @@ describe("MCP swimlane archive/restore tools", () => {
     const restore = await call("restore_swimlane", { project: "p1", swimlane: "Main" }, MEMBER_KEY);
     expect(restore.result.isError).toBe(true);
     expect(toolError(restore).code).toBe("FORBIDDEN");
+  });
+
+  it("delete_swimlane succeeds on an empty lane; fails HAS_CHILDREN with tasks", async () => {
+    const created = await call("create_swimlane", { project: "p1", name: "Empty Lane" });
+    expect(created.error).toBeUndefined();
+    const lane = toolResult(created);
+    const ok = await call("delete_swimlane", { project: "p1", swimlane: "Empty Lane" });
+    expect(ok.result.isError).toBeUndefined();
+    expect(toolResult(ok)).toEqual({ deleted: true });
+    const blocked = await call("delete_swimlane", { project: "p1", swimlane: "Main" });
+    expect(blocked.result.isError).toBe(true);
+    expect(toolError(blocked).code).toBe("HAS_CHILDREN");
   });
 });

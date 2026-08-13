@@ -77,7 +77,7 @@ describe("MCP server", () => {
   it("tools/list returns all tools", async () => {
     const { status, body } = await call("tools/list", {});
     expect(status).toBe(200);
-    expect(body.result.tools).toHaveLength(42);
+    expect(body.result.tools).toHaveLength(47);
   });
 
   it("valid admin key → create_project works", async () => {
