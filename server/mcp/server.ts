@@ -56,6 +56,11 @@ import { tool as updateSwimlane } from "./tools/update-swimlane";
 import { tool as archiveSwimlane } from "./tools/archive-swimlane";
 import { tool as restoreSwimlane } from "./tools/restore-swimlane";
 import { tool as deleteSwimlane } from "./tools/delete-swimlane";
+import { tool as createMilestone } from "./tools/create-milestone";
+import { tool as updateMilestone } from "./tools/update-milestone";
+import { tool as deleteMilestone } from "./tools/delete-milestone";
+import { tool as archiveMilestone } from "./tools/archive-milestone";
+import { tool as restoreMilestone } from "./tools/restore-milestone";
 import { tool as listApiKeys } from "./tools/list-api-keys";
 import { tool as createApiKey } from "./tools/create-api-key";
 import { tool as deleteApiKey } from "./tools/delete-api-key";
@@ -70,6 +75,8 @@ import { ActivityService } from "../services/activity.service";
 import { CommentService } from "../services/comment.service";
 import { checkProjectAccess } from "./auth";
 import { resolveTaskProject } from "./resolve";
+import { MilestoneRepo } from "../repos/milestone.repo";
+import { MilestoneService } from "../services/milestone.service";
 
 interface ToolDef {
   name: string;
@@ -114,6 +121,11 @@ const tools: ToolDef[] = [
   archiveSwimlane,
   restoreSwimlane,
   deleteSwimlane,
+  createMilestone,
+  updateMilestone,
+  deleteMilestone,
+  archiveMilestone,
+  restoreMilestone,
   listApiKeys,
   createApiKey,
   deleteApiKey,
@@ -173,11 +185,13 @@ export class McpServer extends Effect.Service<McpServer>()("Lexa/McpServer", {
     ProjectReposRepo.Default,
     ColumnRepo.Default,
     SwimlaneRepo.Default,
+    MilestoneRepo.Default,
     TaskRepo.Default,
     FieldConfigRepo.Default,
     ProjectService.Default,
     ColumnService.Default,
     SwimlaneService.Default,
+    MilestoneService.Default,
     TaskService.Default,
     FieldConfigService.Default,
     WikiService.Default,
@@ -408,6 +422,7 @@ const serviceLayer = Layer.mergeAll(
   UserProjectRoleRepo.Default,
   ColumnRepo.Default,
   SwimlaneRepo.Default,
+  MilestoneRepo.Default,
   TaskRepo.Default,
   FieldConfigRepo.Default,
   ActivityRepo.Default,
@@ -417,6 +432,7 @@ const serviceLayer = Layer.mergeAll(
   ProjectService.Default,
   ColumnService.Default,
   SwimlaneService.Default,
+  MilestoneService.Default,
   TaskService.Default,
   FieldConfigService.Default,
   WikiService.Default,

@@ -3,7 +3,8 @@ import { ProjectRepo } from "../repos/project.repo";
 import { ColumnRepo } from "../repos/column.repo";
 import { SwimlaneRepo } from "../repos/swimlane.repo";
 import { TaskRepo } from "../repos/task.repo";
-import { ProjectNotFound, ColumnNotFound, SwimlaneNotFound, TaskNotFound } from "../api/errors";
+import { MilestoneRepo } from "../repos/milestone.repo";
+import { ProjectNotFound, ColumnNotFound, SwimlaneNotFound, TaskNotFound, MilestoneNotFound } from "../api/errors";
 import { DbError } from "../db/database";
 
 export function resolveProject(projectSlug: string) {
@@ -55,6 +56,23 @@ export function resolveSwimlane(projectId: string, swimlaneName: string) {
       } as any);
     }
     return swimlane;
+  });
+}
+
+export function resolveMilestone(projectId: string, milestoneName: string) {
+  return Effect.gen(function* () {
+    const milestoneRepo = yield* MilestoneRepo;
+    const milestones = yield* milestoneRepo.findByProject(projectId);
+    const milestone = milestones.find(
+      (m) => m.name.toLowerCase() === milestoneName.toLowerCase()
+    );
+    if (!milestone) {
+      return yield* new MilestoneNotFound({
+        id: milestoneName,
+        availableMilestones: milestones.map((m) => m.name),
+      } as any);
+    }
+    return milestone;
   });
 }
 
