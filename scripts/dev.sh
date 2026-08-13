@@ -22,6 +22,9 @@ set +a
 
 # Sample data on every boot (dev convenience). Delete data/lexa.db* to reset.
 export LXK_SEED_DEV="${LXK_SEED_DEV:-1}"
+# Dev flavor — enables the vite dev origin in Better Auth trustedOrigins
+# (cookie-bearing auth POSTs through the :5173 proxy) regardless of .env state.
+export LXK_ENV="${LXK_ENV:-dev}"
 
 cleanup() {
   echo ""
