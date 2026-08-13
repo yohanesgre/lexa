@@ -14,12 +14,13 @@ function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
 }
 
-const LANE: Swimlane = { id: "s1", projectId: "p1", name: "Main", description: "", position: 0, dueAt: null, archivedAt: null, kind: "milestone" };
-const BACKLOG: Swimlane = { id: "s2", projectId: "p1", name: "Backlog", description: "", position: 1, dueAt: null, archivedAt: null, kind: "backlog" };
+const LANE: Swimlane = { id: "s1", projectId: "p1", name: "Main", description: "", position: 0, dueAt: null, archivedAt: null, startAt: null, milestoneId: null, kind: "sprint" };
+const BACKLOG: Swimlane = { id: "s2", projectId: "p1", name: "Backlog", description: "", position: 1, dueAt: null, archivedAt: null, startAt: null, milestoneId: null, kind: "backlog" };
 const BOARD: Board = {
   project: { id: "p1", slug: "demo", name: "Demo", description: "", repos: [], createdAt: "t", updatedAt: "t" },
   columns: [],
   swimlanes: [LANE, BACKLOG],
+  milestones: [],
   fieldConfig: { priorities: [], types: [] },
   links: [],
   tasks: [{ id: "t1", projectId: "p1", columnId: "c1", swimlaneId: "s1", title: "T1", description: { type: "doc", content: [] }, priority: "p", type: "t", assignees: [], position: "a0", githubs: [], dueAt: null, archivedAt: null, createdAt: "t", updatedAt: "t" }],
@@ -84,6 +85,27 @@ describe("SwimlaneHeader", () => {
     expect(screen.getByText("system lane")).toBeInTheDocument();
     await user.click(screen.getByTitle("Swimlane menu"));
     expect(screen.queryByRole("button", { name: "Archive swimlane" })).not.toBeInTheDocument();
+  });
+
+  it("sprint lane renders the progress pill and dates chip from the board", () => {
+    // c1 is the done column; t1 sits in it → 1/1 done → green + Ready to archive
+    const doneBoard: Board = { ...BOARD, columns: [{ id: "c1", projectId: "p1", name: "Done", position: 0, color: "", wipLimit: null, requiredFields: [], githubState: null, isDone: true }] };
+    render(<SwimlaneHeader slug="demo" lane={{ ...LANE, startAt: "2026-08-04", dueAt: "2026-08-25" }} count={1} board={doneBoard} onToggle={() => {}} />, { wrapper });
+    expect(screen.getByText("1/1 done")).toBeInTheDocument();
+    expect(screen.getByText("Ready to archive")).toBeInTheDocument();
+    expect(screen.getByText("Aug 4 → Aug 25")).toBeInTheDocument();
+  });
+
+  it("sprint lane with partial progress shows the running pill and no Ready chip", () => {
+    // c1 NOT done; t1 in c1 → 0/1
+    render(<SwimlaneHeader slug="demo" lane={LANE} count={1} board={BOARD} onToggle={() => {}} />, { wrapper });
+    expect(screen.getByText("0/1 done")).toBeInTheDocument();
+    expect(screen.queryByText("Ready to archive")).not.toBeInTheDocument();
+  });
+
+  it("archived lanes never render the progress pill", () => {
+    render(<SwimlaneHeader slug="demo" lane={ARCHIVED_LANE} count={1} board={BOARD} />, { wrapper });
+    expect(screen.queryByText(/done/)).not.toBeInTheDocument();
   });
 
   it("archive flow: mutation fires once and the board cache updates from the response — zero refetch", async () => {
