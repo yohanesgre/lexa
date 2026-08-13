@@ -1,4 +1,4 @@
-import type { Project, ProjectRepo, Column, Swimlane, Task, Board, WikiPageMeta, WikiPage, WikiPageRevision, WikiPageRevisionSummary, TipTapDoc, ApiKey, ApiKeyCreateResult, Dashboard, FieldConfig, ForgeTask, ForgeTaskLog, ForgeTaskStatus, ForgeAgent, ForgeSkill, ForgeProvider, ForgeSession, DocumentSource, Runtime, RuntimeEvent, Machine, TaskLink, TaskLinkSuggestion, ActivityEvent, ActivityItem, TaskComment, GithubIssueSummary, Team, TeamMember, TeamMemberRole, WorkspaceInvite, SessionInfo, LexaUser } from "../../shared/types";
+import type { Project, ProjectRepo, Column, Swimlane, Task, Board, Milestone, WikiPageMeta, WikiPage, WikiPageRevision, WikiPageRevisionSummary, TipTapDoc, ApiKey, ApiKeyCreateResult, Dashboard, FieldConfig, ForgeTask, ForgeTaskLog, ForgeTaskStatus, ForgeAgent, ForgeSkill, ForgeProvider, ForgeSession, DocumentSource, Runtime, RuntimeEvent, Machine, TaskLink, TaskLinkSuggestion, ActivityEvent, ActivityItem, TaskComment, GithubIssueSummary, Team, TeamMember, TeamMemberRole, WorkspaceInvite, SessionInfo, LexaUser } from "../../shared/types";
 
 const BASE = "/api";
 
@@ -105,11 +105,11 @@ export function listColumns(slug: string): Promise<{ data: Column[] }> {
   return request(`${BASE}/projects/${slug}/columns`);
 }
 
-export function createColumn(slug: string, input: { name: string; wipLimit?: number | null; requiredFields?: string[]; color?: string; githubState?: "open" | "closed" | null }): Promise<Column> {
+export function createColumn(slug: string, input: { name: string; wipLimit?: number | null; requiredFields?: string[]; color?: string; githubState?: "open" | "closed" | null; isDone?: boolean }): Promise<Column> {
   return request(`${BASE}/projects/${slug}/columns`, { method: "POST", body: JSON.stringify(input) });
 }
 
-export function updateColumn(slug: string, id: string, input: { name?: string; wipLimit?: number | null; requiredFields?: string[]; color?: string; position?: number; githubState?: "open" | "closed" | null }): Promise<Column> {
+export function updateColumn(slug: string, id: string, input: { name?: string; wipLimit?: number | null; requiredFields?: string[]; color?: string; position?: number; githubState?: "open" | "closed" | null; isDone?: boolean }): Promise<Column> {
   return request(`${BASE}/projects/${slug}/columns/${id}`, { method: "PATCH", body: JSON.stringify(input) });
 }
 
@@ -121,11 +121,11 @@ export function listSwimlanes(slug: string): Promise<{ data: Swimlane[] }> {
   return request(`${BASE}/projects/${slug}/swimlanes`);
 }
 
-export function createSwimlane(slug: string, input: { name: string; description?: string; dueAt?: string | null }): Promise<Swimlane> {
+export function createSwimlane(slug: string, input: { name: string; description?: string; dueAt?: string | null; startAt?: string | null; milestoneId?: string | null }): Promise<Swimlane> {
   return request(`${BASE}/projects/${slug}/swimlanes`, { method: "POST", body: JSON.stringify(input) });
 }
 
-export function updateSwimlane(slug: string, id: string, input: { name?: string; position?: number; description?: string; dueAt?: string | null }): Promise<Swimlane> {
+export function updateSwimlane(slug: string, id: string, input: { name?: string; position?: number; description?: string; dueAt?: string | null; startAt?: string | null; milestoneId?: string | null }): Promise<Swimlane> {
   return request(`${BASE}/projects/${slug}/swimlanes/${id}`, { method: "PATCH", body: JSON.stringify(input) });
 }
 
@@ -144,6 +144,35 @@ export function archiveSwimlane(slug: string, id: string): Promise<SwimlaneMutat
 
 export function restoreSwimlane(slug: string, id: string): Promise<SwimlaneMutationResult> {
   return request(`${BASE}/projects/${slug}/swimlanes/${id}/restore`, { method: "POST" });
+}
+
+export function listMilestones(slug: string): Promise<{ data: Milestone[] }> {
+  return request(`${BASE}/projects/${slug}/milestones`);
+}
+
+export function createMilestone(slug: string, input: { name: string; description?: string; position?: number; dueAt?: string | null }): Promise<Milestone> {
+  return request(`${BASE}/projects/${slug}/milestones`, { method: "POST", body: JSON.stringify(input) });
+}
+
+export function updateMilestone(slug: string, id: string, input: { name?: string; description?: string; position?: number; dueAt?: string | null }): Promise<Milestone> {
+  return request(`${BASE}/projects/${slug}/milestones/${id}`, { method: "PATCH", body: JSON.stringify(input) });
+}
+
+export function deleteMilestone(slug: string, id: string): Promise<void> {
+  return request(`${BASE}/projects/${slug}/milestones/${id}`, { method: "DELETE" });
+}
+
+export interface MilestoneMutationResult {
+  data: Milestone;
+  activity: ActivityEvent[];
+}
+
+export function archiveMilestone(slug: string, id: string): Promise<MilestoneMutationResult> {
+  return request(`${BASE}/projects/${slug}/milestones/${id}/archive`, { method: "POST" });
+}
+
+export function restoreMilestone(slug: string, id: string): Promise<MilestoneMutationResult> {
+  return request(`${BASE}/projects/${slug}/milestones/${id}/restore`, { method: "POST" });
 }
 
 

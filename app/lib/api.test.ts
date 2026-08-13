@@ -26,8 +26,9 @@ afterEach(() => {
 const PROJECT = { id: "p1", slug: "demo", name: "Demo", description: "", repos: [], createdAt: "t", updatedAt: "t" };
 const TASK = { id: "t1", projectId: "p1", columnId: "c1", swimlaneId: "s1", title: "T", description: { type: "doc", content: [] }, priority: "prio-1", type: "type-1", assignees: [], position: "a0", githubs: [], dueAt: null, archivedAt: null, createdAt: "t", updatedAt: "t" };
 const EV = { id: 1, taskId: "t1", actorKind: "user", actorLabel: "Maria", actorUserId: null, type: "created", message: "m", createdAt: "t" };
-const COLUMN = { id: "c1", projectId: "p1", name: "C", position: 0, color: "", wipLimit: null, requiredFields: [], githubState: null };
-const SWIMLANE = { id: "m1", projectId: "p1", name: "M1", description: "", position: 1, dueAt: null, archivedAt: null, kind: "milestone" };
+const COLUMN = { id: "c1", projectId: "p1", name: "C", position: 0, color: "", wipLimit: null, requiredFields: [], githubState: null, isDone: false };
+const SWIMLANE = { id: "m1", projectId: "p1", name: "M1", description: "", position: 1, dueAt: null, archivedAt: null, startAt: null, milestoneId: null, kind: "sprint" };
+const MILESTONE = { id: "m1", projectId: "p1", name: "M1", description: "", position: 0, dueAt: null, archivedAt: null, sprintCount: 0, archivedSprintCount: 0 };
 const PAGE = { id: "w1", projectId: "p1", title: "Home", slug: "home", parentId: null, position: 0, updatedAt: "t", content: { type: "doc", content: [] }, createdAt: "t" };
 const KEY = { id: "k1", name: "ops", createdAt: "t", lastUsedAt: null };
 
@@ -61,6 +62,12 @@ const cases: Case[] = [
   { name: "updateSwimlane", call: () => api.updateSwimlane("demo", "m1", { dueAt: null }), method: "PATCH", url: "/api/projects/demo/swimlanes/m1", body: { dueAt: null }, response: SWIMLANE },
   { name: "archiveSwimlane", call: () => api.archiveSwimlane("demo", "m1"), method: "POST", url: "/api/projects/demo/swimlanes/m1/archive", response: { data: SWIMLANE, activity: [] } },
   { name: "restoreSwimlane", call: () => api.restoreSwimlane("demo", "m1"), method: "POST", url: "/api/projects/demo/swimlanes/m1/restore", response: { data: SWIMLANE, activity: [] } },
+  { name: "listMilestones", call: () => api.listMilestones("demo"), method: "GET", url: "/api/projects/demo/milestones", response: { data: [] } },
+  { name: "createMilestone", call: () => api.createMilestone("demo", { name: "v1", dueAt: "2026-09-01" }), method: "POST", url: "/api/projects/demo/milestones", body: { name: "v1", dueAt: "2026-09-01" }, response: MILESTONE },
+  { name: "updateMilestone", call: () => api.updateMilestone("demo", "m1", { dueAt: null }), method: "PATCH", url: "/api/projects/demo/milestones/m1", body: { dueAt: null }, response: MILESTONE },
+  { name: "deleteMilestone", call: () => api.deleteMilestone("demo", "m1"), method: "DELETE", url: "/api/projects/demo/milestones/m1", response: 204 },
+  { name: "archiveMilestone", call: () => api.archiveMilestone("demo", "m1"), method: "POST", url: "/api/projects/demo/milestones/m1/archive", response: { data: MILESTONE, activity: [EV] } },
+  { name: "restoreMilestone", call: () => api.restoreMilestone("demo", "m1"), method: "POST", url: "/api/projects/demo/milestones/m1/restore", response: { data: MILESTONE, activity: [EV] } },
   { name: "createTask", call: () => api.createTask("demo", { columnId: "c1", title: "New", priority: "prio-1" }), method: "POST", url: "/api/projects/demo/tasks", body: { columnId: "c1", title: "New", priority: "prio-1" }, response: { data: TASK, activity: [EV] } },
   { name: "updateTask", call: () => api.updateTask("demo", "t1", { title: "X" }), method: "PATCH", url: "/api/projects/demo/tasks/t1", body: { title: "X" }, response: { data: TASK, activity: [] } },
   { name: "moveTask", call: () => api.moveTask("demo", "t1", { columnId: "c2", swimlaneId: "s1", clearDueAt: true }), method: "POST", url: "/api/projects/demo/tasks/t1/move", body: { columnId: "c2", swimlaneId: "s1", clearDueAt: true }, response: { data: TASK, activity: [] } },
@@ -68,8 +75,8 @@ const cases: Case[] = [
   { name: "restoreTask", call: () => api.restoreTask("demo", "t1"), method: "POST", url: "/api/projects/demo/tasks/t1/restore", response: { data: TASK, activity: [EV] } },
   { name: "getTaskActivity", call: () => api.getTaskActivity("demo", "t1"), method: "GET", url: "/api/projects/demo/tasks/t1/activity", response: { data: [], nextCursor: null } },
   { name: "getTaskActivity cursor", call: () => api.getTaskActivity("demo", "t1", "c|u r"), method: "GET", url: "/api/projects/demo/tasks/t1/activity?cursor=c%7Cu%20r", response: { data: [], nextCursor: null } },
-  { name: "getBoard", call: () => api.getBoard("demo"), method: "GET", url: "/api/projects/demo/board", response: { project: PROJECT, columns: [], swimlanes: [], fieldConfig: { priorities: [], types: [] }, links: [], tasks: [] } },
-  { name: "getBoard includeArchived", call: () => api.getBoard("demo", true), method: "GET", url: "/api/projects/demo/board?includeArchived=true", response: { project: PROJECT, columns: [], swimlanes: [], fieldConfig: { priorities: [], types: [] }, links: [], tasks: [] } },
+  { name: "getBoard", call: () => api.getBoard("demo"), method: "GET", url: "/api/projects/demo/board", response: { project: PROJECT, columns: [], swimlanes: [], milestones: [], fieldConfig: { priorities: [], types: [] }, links: [], tasks: [] } },
+  { name: "getBoard includeArchived", call: () => api.getBoard("demo", true), method: "GET", url: "/api/projects/demo/board?includeArchived=true", response: { project: PROJECT, columns: [], swimlanes: [], milestones: [], fieldConfig: { priorities: [], types: [] }, links: [], tasks: [] } },
   { name: "getFieldConfig", call: () => api.getFieldConfig("demo"), method: "GET", url: "/api/projects/demo/field-config", response: { priorities: [], types: [] } },
   { name: "updateFieldConfig", call: () => api.updateFieldConfig("demo", { priorities: [{ label: "P" }], types: [] }), method: "PUT", url: "/api/projects/demo/field-config", body: { priorities: [{ label: "P" }], types: [] }, response: { priorities: [], types: [] } },
   { name: "listWikiPages", call: () => api.listWikiPages("demo"), method: "GET", url: "/api/projects/demo/wiki", response: { data: [] } },
