@@ -123,7 +123,7 @@ describe("AppShell", () => {
     expect(screen.getByText("Lexa")).toBeInTheDocument();
     // Settings is no longer a nav tab — settings entry points live in the
     // user menu and the project switcher.
-    for (const label of ["Dashboard", "Board", "Tasks", "Wiki"]) {
+    for (const label of ["Dashboard", "Board", "Tasks", "Wiki", "Milestones", "Swimlanes"]) {
       expect(screen.getByText(label)).toBeInTheDocument();
     }
     expect(screen.queryByRole("link", { name: "Settings" })).not.toBeInTheDocument();
@@ -178,7 +178,7 @@ describe("AppShell", () => {
     pathnameMock.value = "/";
     render(<ProjectSelectionProvider><AppShell /></ProjectSelectionProvider>, { wrapper });
     expect(screen.getByText("Lexa").className).toContain("active");
-    for (const label of ["Dashboard", "Board", "Tasks", "Wiki"]) {
+    for (const label of ["Dashboard", "Board", "Tasks", "Wiki", "Milestones", "Swimlanes"]) {
       expect(screen.getByText(label).className).not.toContain("active");
     }
     expect(screen.getAllByRole("link", { name: "Forge" })[0]!.className).not.toContain("active");
