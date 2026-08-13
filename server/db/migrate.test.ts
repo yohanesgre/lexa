@@ -77,7 +77,8 @@ describe("runMigrations", () => {
     expect(appliedMigrations(dbPath)).toEqual(["0001_init.sql", "0002_project_repos.sql", "0003_forge_sessions.sql", "0004_auth_roles_teams.sql", "0005_milestones_sprints.sql"]);
   });
 
-  it("migrates legacy github_repo and task-linked repos into project_repos with roles", () => {    // Simulate a pre-0002 database: schema 0001 applied + legacy data.
+  it("migrates legacy github_repo and task-linked repos into project_repos with roles", () => {
+    // Simulate a pre-0002 database: schema 0001 applied + legacy data.
     const dir = tmpDir();
     const dbPath = join(dir, "app.db");
     const db = new Database(dbPath);
