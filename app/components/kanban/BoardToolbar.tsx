@@ -3,19 +3,21 @@ import { FilterButton, ActiveFilterBar } from "./BoardFilters";
 import { isFilterActive, type FilterState } from "../../lib/filters";
 import type { Board } from "../../../shared/types";
 
-export function BoardToolbar({ board, showArchived, filters, onToggleArchived, onFiltersChange, onOpenSettings }: {
+export function BoardToolbar({ board, showArchived, filters, onToggleArchived, onFiltersChange, onOpenSettings, milestoneSelector }: {
   board: Board;
   showArchived: boolean;
   filters: FilterState;
   onToggleArchived: (v: boolean) => void;
   onFiltersChange: (f: FilterState) => void;
   onOpenSettings: () => void;
+  milestoneSelector?: React.ReactNode;
 }) {
   return (
     <>
       <div className="board-header">
         <div className="flex items-center gap-3">
           <h1 className="font-display text-xl font-semibold text-lx-text-primary">{board.project.name}</h1>
+          {milestoneSelector}
         </div>
         <div className="flex items-center gap-2">
           <button
