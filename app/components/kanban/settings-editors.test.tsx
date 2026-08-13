@@ -22,9 +22,9 @@ function json(body: unknown, status = 200): Response {
 
 const PRIORITY: FieldOption = { id: "pr-high", label: "High", color: "#FF4444", position: 0 };
 const TYPE: FieldOption = { id: "tp-bug", label: "Bug", color: "#FF4444", position: 0 };
-const COLUMN: Column = { id: "c1", projectId: "p1", name: "Todo", position: 0, color: "#888", wipLimit: 3, requiredFields: ["description"], githubState: "open" };
-const LANE: Swimlane = { id: "s1", projectId: "p1", name: "Backlog", description: "system lane", position: 0, dueAt: null, archivedAt: null, kind: "backlog" };
-const MILESTONE: Swimlane = { id: "s2", projectId: "p1", name: "Sprint 8", description: "", position: 1, dueAt: "2026-09-01", archivedAt: null, kind: "milestone" };
+const COLUMN: Column = { id: "c1", projectId: "p1", name: "Todo", position: 0, color: "#888", wipLimit: 3, requiredFields: ["description"], githubState: "open", isDone: false };
+const LANE: Swimlane = { id: "s1", projectId: "p1", name: "Backlog", description: "system lane", position: 0, dueAt: null, archivedAt: null, startAt: null, milestoneId: null, kind: "backlog" };
+const MILESTONE: Swimlane = { id: "s2", projectId: "p1", name: "Sprint 8", description: "", position: 1, dueAt: "2026-09-01", archivedAt: null, startAt: null, milestoneId: null, kind: "sprint" };
 
 function WithSensors({ children }: { children: ReactNode }) {
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
@@ -142,7 +142,7 @@ describe("ColumnsSettingsSection", () => {
   });
 
   it("shows dashes for columns without color/wip/github state", () => {
-    const plain: Column = { ...COLUMN, color: null as never, wipLimit: null, requiredFields: [], githubState: null };
+    const plain: Column = { ...COLUMN, color: null as never, wipLimit: null, requiredFields: [], githubState: null, isDone: false };
     render(
       <WithSensors>
         <ColumnsSettingsSection
@@ -197,11 +197,27 @@ describe("SwimlanesSettingsSection", () => {
 });
 
 describe("SwimlaneForm", () => {
+  let queryClient: QueryClient;
+
+  beforeEach(() => {
+    vi.stubGlobal("fetch", fetchMock);
+    fetchMock.mockReset();
+    fetchMock.mockResolvedValue(json({ data: [] }));
+    queryClient = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    queryClient.clear();
+  });
+
   function renderForm(props: Partial<Parameters<typeof SwimlaneForm>[0]> = {}) {
     const onSubmit = vi.fn();
     const onClose = vi.fn();
     render(
-      <SwimlaneForm slug="demo" swimlane={null} isOpen onSubmit={onSubmit} onClose={onClose} {...props} />
+      <QueryClientProvider client={queryClient}>
+        <SwimlaneForm slug="demo" swimlane={null} isOpen onSubmit={onSubmit} onClose={onClose} {...props} />
+      </QueryClientProvider>
     );
     return { onSubmit, onClose };
   }
@@ -219,8 +235,9 @@ describe("SwimlaneForm", () => {
     const { onSubmit } = renderForm();
     await user.type(screen.getByLabelText("Name"), "Sprint 9");
     await user.type(screen.getByLabelText(/Description/), "Release track");
-    // due date via the embedded DatePicker
-    await user.click(screen.getByRole("button", { name: "No due date" }));
+    // due date via the embedded DatePicker (second picker = Due date)
+    const duePicker = screen.getAllByRole("button", { name: "No due date" })[1]!;
+    await user.click(duePicker);
     const day = (await screen.findAllByRole("button", { name: "15" }))[0]!;
     await user.click(day);
     await user.click(screen.getByRole("button", { name: "Create Swimlane" }));
@@ -228,13 +245,17 @@ describe("SwimlaneForm", () => {
       name: "Sprint 9",
       description: "Release track",
       dueAt: expect.stringMatching(/^\d{4}-\d{2}-15$/) as never,
+      startAt: null,
+      milestoneId: null,
     });
   });
 
-  it("edit mode seeds fields; the Backlog lane hides the due-date field", () => {
+  it("edit mode seeds fields; the Backlog lane hides the date/milestone fields", () => {
     renderForm({ swimlane: LANE });
     expect((screen.getByLabelText("Name") as HTMLInputElement).value).toBe("Backlog");
     expect(screen.queryByText(/Due date/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Start date/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Milestone/)).not.toBeInTheDocument();
   });
 
   it("milestone edit shows the seeded due date", () => {
@@ -347,7 +368,7 @@ describe("KanbanSettingsModal integration (option + column mutations)", () => {
 
   it("adding a column via the modal POSTs and updates the columns cache", async () => {
     const user = userEvent.setup();
-    const newColumn: Column = { id: "c9", projectId: "p1", name: "Review", position: 2, color: "#22c55e", wipLimit: null, requiredFields: [], githubState: null };
+    const newColumn: Column = { id: "c9", projectId: "p1", name: "Review", position: 2, color: "#22c55e", wipLimit: null, requiredFields: [], githubState: null, isDone: false };
     routes.set("POST /api/projects/demo/columns", newColumn);
     queryClient.setQueryData(["projects", "demo", "columns"], [COLUMN]);
     render(<KanbanSettingsModal slug="demo" isOpen onClose={() => {}} />, { wrapper });

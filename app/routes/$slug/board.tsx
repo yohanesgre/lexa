@@ -8,13 +8,19 @@ import { TaskDetail } from "../../components/TaskDetail";
 import type { Task, TipTapDoc } from "../../../shared/types";
 
 export const Route = createFileRoute("/$slug/board")({
-  validateSearch: (search: Record<string, unknown>): { task?: string } => ({
+  validateSearch: (search: Record<string, unknown>): { task?: string; milestone?: string } => ({
     task: typeof search.task === "string" ? search.task : undefined,
+    milestone: typeof search.milestone === "string" ? search.milestone : undefined,
   }),
   component: BoardPage,
 });
 
-function BoardPage() {
+// ?milestone=none is the explicit "No milestone" choice — without it the
+// selection falls back to the first non-archived milestone, so an active
+// milestone would make the loose-sprint view unreachable from the UI.
+const MILESTONE_NONE = "none";
+
+export function BoardPage() {
   const { slug } = Route.useParams();
   const search = Route.useSearch();
   const navigate = Route.useNavigate();
@@ -31,6 +37,17 @@ function BoardPage() {
   const unlinkGithubIssue = useUnlinkGithubIssue(slug);
 
   const [createTarget, setCreateTarget] = useState<{ columnId: string; swimlaneId: string } | null>(null);
+
+  // Milestone selection: ?milestone= param wins; default = first non-archived
+  // milestone (the board's active focus). The "none" sentinel is an explicit
+  // user choice that sticks (loose sprints + Backlog), never falling back.
+  const milestoneParam = search.milestone ?? null;
+  const defaultMilestone = (board?.milestones ?? []).find((m) => !m.archivedAt)?.id ?? null;
+  const effectiveMilestone = milestoneParam === MILESTONE_NONE ? null : (milestoneParam ?? defaultMilestone);
+
+  const handleMilestoneChange = (id: string | null) => {
+    navigate({ search: { milestone: id === null ? MILESTONE_NONE : id }, replace: true } as never);
+  };
 
   const selectedTaskId = search.task ?? null;
   const { data: selectedTaskFull } = useTask(slug, selectedTaskId);
@@ -171,6 +188,8 @@ function BoardPage() {
         onMoveTask={handleMove}
         onSelectTask={handleSelectTask}
         onOpenCreateTask={handleOpenCreateTask}
+        milestoneId={effectiveMilestone}
+        onMilestoneChange={handleMilestoneChange}
       />
       {(selectedTaskId !== null || isCreating) && (
         <TaskDetail

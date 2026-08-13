@@ -14,9 +14,9 @@ function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
 }
 
-const COL1: Column = { id: "c1", projectId: "p1", name: "Todo", position: 0, color: "#888", wipLimit: 1, requiredFields: [], githubState: null };
-const COL2: Column = { id: "c2", projectId: "p1", name: "Done", position: 1, color: "#888", wipLimit: null, requiredFields: [], githubState: null };
-const NEW_COL: Column = { id: "c9", projectId: "p1", name: "Review", position: 2, color: "#888", wipLimit: null, requiredFields: [], githubState: null };
+const COL1: Column = { id: "c1", projectId: "p1", name: "Todo", position: 0, color: "#888", wipLimit: 1, requiredFields: [], githubState: null, isDone: false };
+const COL2: Column = { id: "c2", projectId: "p1", name: "Done", position: 1, color: "#888", wipLimit: null, requiredFields: [], githubState: null, isDone: false };
+const NEW_COL: Column = { id: "c9", projectId: "p1", name: "Review", position: 2, color: "#888", wipLimit: null, requiredFields: [], githubState: null, isDone: false };
 
 const TASK1: Task = {
   id: "t1", projectId: "p1", columnId: "c1", swimlaneId: "s1", title: "Task One",
@@ -34,6 +34,7 @@ function makeBoard(columns: Column[], lanes: Board["swimlanes"], tasks: Task[]):
     project: { id: "p1", slug: "demo", name: "Demo", description: "", repos: [], createdAt: "t", updatedAt: "t" },
     columns,
     swimlanes: lanes,
+    milestones: [],
     fieldConfig: {
       priorities: [{ id: "p1", label: "High", color: "#FF4444", position: 0 }],
       types: [{ id: "t1", label: "Feature", color: "#4ADE80", position: 0 }],
@@ -43,8 +44,8 @@ function makeBoard(columns: Column[], lanes: Board["swimlanes"], tasks: Task[]):
   };
 }
 
-const LANE: Board["swimlanes"][number] = { id: "s1", projectId: "p1", name: "Backlog", description: "", position: 0, dueAt: null, archivedAt: null, kind: "backlog" };
-const ARCHIVED_LANE: Board["swimlanes"][number] = { ...LANE, id: "s2", name: "Old Sprint", position: 1, kind: "milestone", archivedAt: "2026-03-01T00:00:00.000Z" };
+const LANE: Board["swimlanes"][number] = { id: "s1", projectId: "p1", name: "Backlog", description: "", position: 0, dueAt: null, archivedAt: null, startAt: null, milestoneId: null, kind: "backlog" };
+const ARCHIVED_LANE: Board["swimlanes"][number] = { ...LANE, id: "s2", name: "Old Sprint", position: 1, kind: "sprint", archivedAt: "2026-03-01T00:00:00.000Z" };
 
 // Per-route counter for the settings modal's data queries (columns/swimlanes/field-config).
 function settingsCalls(): Array<{ url: string; method: string }> {

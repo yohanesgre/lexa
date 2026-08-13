@@ -112,6 +112,7 @@ export function ColumnHeader({ slug, column, taskCount, wipLimit, wipFlash = fal
             requiredFields: input.requiredFields,
             color: input.color ?? undefined,
             githubState: input.githubState as "open" | "closed" | undefined,
+            isDone: input.isDone ?? false,
           });
           setIsEditOpen(false);
         }}

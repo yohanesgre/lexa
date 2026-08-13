@@ -52,6 +52,7 @@ export function BoardLane({
         count={laneTaskCount}
         collapsed={isCollapsed}
         onToggle={() => toggleLane(lane.id)}
+        board={board}
       />
       {!isCollapsed && (
         <div className="columns-row">
