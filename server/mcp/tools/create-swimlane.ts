@@ -1,17 +1,19 @@
 import { Effect } from "effect";
 import { SwimlaneService } from "../../services/swimlane.service";
-import { resolveProject } from "../resolve";
+import { resolveProject, resolveMilestone } from "../resolve";
 
 export const tool = {
   name: "create_swimlane",
-  description: "Create a new swimlane in a project. Admin only.",
+  description: "Create a new sprint swimlane in a project. Optionally attach it to a milestone. Admin only.",
   inputSchema: {
     type: "object",
     properties: {
       project: { type: "string", description: "Project slug" },
       name: { type: "string", description: "Swimlane name" },
       description: { type: "string", description: "Swimlane description" },
-      dueAt: { type: "string", description: "Milestone due date (YYYY-MM-DD). Omit to leave unchanged; empty string clears it." },
+      dueAt: { type: "string", description: "Sprint due date (YYYY-MM-DD). Omit to leave unchanged; empty string clears it." },
+      startAt: { type: "string", description: "Sprint start date (YYYY-MM-DD). Empty string clears it." },
+      milestone: { type: "string", description: "Milestone name (case-insensitive). Omit for a loose sprint." },
     },
     required: ["project", "name"],
   },
@@ -23,11 +25,16 @@ export const tool = {
 
       const project = yield* resolveProject(args.project);
       const swimlaneService = yield* SwimlaneService;
+      const milestoneId = args.milestone
+        ? (yield* resolveMilestone(project.id, args.milestone)).id
+        : undefined;
       const swimlane = yield* swimlaneService.create({
         projectId: project.id,
         name: args.name,
         description: args.description,
         dueAt: args.dueAt === "" ? null : args.dueAt,
+        startAt: args.startAt === "" ? null : args.startAt,
+        milestoneId,
       });
 
       return {
