@@ -1,10 +1,11 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { MoreHorizontal } from "lucide-react";
 import { useState } from "react";
-import { useDashboard, useUpdateProject, useDeleteProject, useBoard, selectProjectHealth } from "../../lib/queries";
+import { useDashboard, useUpdateProject, useDeleteProject, useBoard, useMilestones, selectProjectHealth } from "../../lib/queries";
 import { cn } from "../../components/ui/cn";
 import { ProjectSettingsModal } from "../../components/ProjectSettingsModal";
 import { ProjectDescription } from "../../components/ProjectDescription";
+import { MilestoneCard } from "../../components/milestones/MilestoneCard";
 import type { Dashboard, ProjectHealth } from "../../../shared/types";
 
 export const Route = createFileRoute("/$slug/")({
@@ -32,6 +33,8 @@ function ProjectDashboard() {
   const updateProject = useUpdateProject();
   const deleteProject = useDeleteProject();
   const board = useBoard(slug);
+  const { data: milestones = [] } = useMilestones(slug);
+  const activeMilestone = milestones.find((m) => !m.archivedAt) ?? null;
   const [showSettings, setShowSettings] = useState(false);
 
   if (isLoading) {
@@ -109,6 +112,7 @@ function ProjectDashboard() {
 
       <ProjectDescription description={health.project.description || board.data.project?.description || ""} />
 
+      <MilestoneCard slug={slug} milestone={activeMilestone} board={board.data} />
       <StatusSections dashboard={dashboard} health={health} />
 
       <ProjectSettingsModal
