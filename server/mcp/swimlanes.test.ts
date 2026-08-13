@@ -129,4 +129,16 @@ describe("MCP swimlane archive/restore tools", () => {
     expect(restore.result.isError).toBe(true);
     expect(toolError(restore).code).toBe("FORBIDDEN");
   });
+
+  it("delete_swimlane succeeds on an empty lane; fails HAS_CHILDREN with tasks", async () => {
+    const created = await call("create_swimlane", { project: "p1", name: "Empty Lane" });
+    expect(created.error).toBeUndefined();
+    const lane = toolResult(created);
+    const ok = await call("delete_swimlane", { project: "p1", swimlane: "Empty Lane" });
+    expect(ok.result.isError).toBeUndefined();
+    expect(toolResult(ok)).toEqual({ deleted: true });
+    const blocked = await call("delete_swimlane", { project: "p1", swimlane: "Main" });
+    expect(blocked.result.isError).toBe(true);
+    expect(toolError(blocked).code).toBe("HAS_CHILDREN");
+  });
 });

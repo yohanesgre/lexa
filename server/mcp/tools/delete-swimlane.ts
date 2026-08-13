@@ -1,4 +1,4 @@
-import { Effect } from "effect";
+import { Effect, Either } from "effect";
 import { SwimlaneService } from "../../services/swimlane.service";
 import { resolveProject, resolveSwimlane } from "../resolve";
 
@@ -22,16 +22,16 @@ export const tool = {
       const project = yield* resolveProject(args.project);
       const swimlane = yield* resolveSwimlane(project.id, args.swimlane);
       const swimlaneService = yield* SwimlaneService;
-      const result = yield* swimlaneService.delete(swimlane.id).pipe(
-        Effect.catchTag("HasChildren", (e) =>
-          Effect.succeed({
+      const result = yield* Effect.either(swimlaneService.delete(swimlane.id));
+      if (Either.isLeft(result)) {
+        if (result.left._tag === "HasChildren") {
+          return {
             isError: true,
-            error: { code: "HAS_CHILDREN", message: `Swimlane has ${e.count} tasks — move them first` },
-          })
-        )
-      );
-
-      if ((result as any).isError) return result;
+            error: { code: "HAS_CHILDREN", message: `Swimlane has ${result.left.count} tasks — move them first` },
+          };
+        }
+        return yield* Effect.fail(result.left);
+      }
       return { deleted: true };
     }),
 };
