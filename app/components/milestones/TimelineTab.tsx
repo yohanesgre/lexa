@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
+import { useQueryClient } from "@tanstack/react-query";
 import { useUpdateSwimlane, useUpdateMilestone, useBoard } from "../../lib/queries";
 import { sprintProgress } from "../../lib/progress";
 import type { Board, Milestone, Swimlane } from "../../../shared/types";
@@ -9,6 +10,7 @@ import { SwimlaneForm } from "../kanban/SwimlaneForm";
 
 export function TimelineTab({ slug, board, milestones }: { slug: string; board: Board | undefined; milestones: Milestone[] }) {
   const navigate = useNavigate();
+  const qc = useQueryClient();
   const { data: boardData } = useBoard(slug);
   const b = board ?? boardData;
   const updateSwimlane = useUpdateSwimlane(slug);
@@ -27,7 +29,51 @@ export function TimelineTab({ slug, board, milestones }: { slug: string; board: 
       });
   }, [b]);
 
-  const milestoneById = useMemo(() => new Map(milestones.map((m) => [m.id, m])), [milestones]);
+  // Optimistic drag commit: write the dragged dates into the board cache
+  // immediately (bar stays put on drop), roll back to the pre-drag dates on
+  // error. Mirrors the move-task optimistic pattern — the mutation response
+  // remains authoritative via useUpdateSwimlane's onSuccess setQueryData.
+  const rescheduleLane = (id: string, dates: { startAt: string | null; dueAt: string | null }) => {
+    const prev = qc.getQueryData<Board>(["board", slug, false]);
+    const prevLane = prev?.swimlanes.find((l) => l.id === id);
+    if (!prevLane) return;
+    for (const archived of [false, true]) {
+      qc.setQueryData<Board>(["board", slug, archived], (old) =>
+        old ? { ...old, swimlanes: old.swimlanes.map((l) => (l.id === id ? { ...l, startAt: dates.startAt, dueAt: dates.dueAt } : l)) } : old
+      );
+    }
+    updateSwimlane.mutate(
+      { id, ...dates },
+      {
+        onError: () => {
+          for (const archived of [false, true]) {
+            qc.setQueryData<Board>(["board", slug, archived], (old) =>
+              old ? { ...old, swimlanes: old.swimlanes.map((l) => (l.id === id ? { ...l, startAt: prevLane.startAt, dueAt: prevLane.dueAt } : l)) } : old
+            );
+          }
+        },
+      }
+    );
+  };
+
+  const rescheduleMilestone = (id: string, dueAt: string) => {
+    const prev = qc.getQueryData<Milestone[]>(["milestones", slug]);
+    const prevMilestone = prev?.find((m) => m.id === id);
+    if (!prevMilestone) return;
+    qc.setQueryData<Milestone[]>(["milestones", slug], (old) =>
+      old ? old.map((m) => (m.id === id ? { ...m, dueAt } : m)) : old
+    );
+    updateMilestone.mutate(
+      { id, dueAt },
+      {
+        onError: () => {
+          qc.setQueryData<Milestone[]>(["milestones", slug], (old) =>
+            old ? old.map((m) => (m.id === id ? { ...m, dueAt: prevMilestone.dueAt } : m)) : old
+          );
+        },
+      }
+    );
+  };
 
   const hasCanvasItems = b?.swimlanes.some((l) => !l.archivedAt && (l.startAt || l.dueAt)) ||
     milestones.some((m) => !m.archivedAt && m.dueAt);
@@ -57,9 +103,9 @@ export function TimelineTab({ slug, board, milestones }: { slug: string; board: 
         lanes={lanes}
         milestones={milestones}
         today={new Date().toISOString().slice(0, 10)}
-        onRescheduleLane={(id, dates) => updateSwimlane.mutate({ id, ...dates })}
-        onRescheduleMilestone={(id, dueAt) => updateMilestone.mutate({ id, dueAt })}
-        onOpenBoard={(laneId) => navigate({ to: "/$slug/board", params: { slug }, search: { swimlane: laneId } } as never)}
+        onRescheduleLane={rescheduleLane}
+        onRescheduleMilestone={rescheduleMilestone}
+        onOpenBoard={(laneId) => navigate({ to: "/$slug/board", params: { slug }, search: {} } as never)}
         onShowMilestoneList={() => navigate({ to: "/$slug/milestones", params: { slug }, search: {} } as never)}
       />
 

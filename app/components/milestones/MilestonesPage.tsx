@@ -39,13 +39,6 @@ export function MilestonesPage({ slug, tab }: { slug: string; tab: "list" | "tim
       return next;
     });
 
-  const laneDates = (lane: Swimlane) => {
-    if (lane.startAt && lane.dueAt) return `${lane.startAt.slice(5).replace("-", "/")} → ${lane.dueAt.slice(5).replace("-", "/")}`;
-    if (lane.startAt) return `${lane.startAt.slice(5).replace("-", "/")} → (open)`;
-    if (lane.dueAt) return `end ${lane.dueAt.slice(5).replace("-", "/")}`;
-    return null;
-  };
-
   if (isLoading) {
     return (
       <main className="page-frame">
@@ -239,6 +232,19 @@ function MilestoneCard({ milestone, isActive, board, collapsed, onToggleCollapse
   return (
     <div className={cn("milestone-card", isCurrent && "active-callout", archived && "archived")}>
       <div className="milestone-head">
+        {lanes.length > 0 && (
+          <button
+            type="button"
+            className="chevron-btn"
+            onClick={onToggleCollapsed}
+            aria-label={collapsed ? `Expand ${milestone.name} sprints` : `Collapse ${milestone.name} sprints`}
+            aria-expanded={!collapsed}
+          >
+            <svg className={cn("chevron", collapsed && "collapsed")} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+              <path d="M6 9l6 6 6-6" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          </button>
+        )}
         <span className="milestone-name">{milestone.name}</span>
         {isCurrent && <span className="milestone-badge-active">Active</span>}
         {due && <span className={cn("milestone-due", due.overdue && "milestone-due-overdue")}>{due.text}</span>}
@@ -258,7 +264,7 @@ function MilestoneCard({ milestone, isActive, board, collapsed, onToggleCollapse
         tasksTotal={tasks.total}
       />
 
-      {lanes.length > 0 && (
+      {lanes.length > 0 && !collapsed && (
         <div className="milestone-sprints">
           {lanes
             .toSorted((a, b) => a.position - b.position)
@@ -274,7 +280,7 @@ function MilestoneCard({ milestone, isActive, board, collapsed, onToggleCollapse
                   </span>
                   {!lane.archivedAt && p.total > 0 && <SprintProgress done={p.done} total={p.total} />}
                   <span className="flex-1" />
-                  <Link to="/$slug/board" params={{ slug: board?.project.slug ?? "" }} search={{ swimlane: lane.id }} className="sl-link-btn">
+                  <Link to="/$slug/board" params={{ slug: board?.project.slug ?? "" }} search={{}} className="sl-link-btn">
                     View on board
                   </Link>
                 </div>
