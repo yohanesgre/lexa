@@ -1,7 +1,7 @@
 import { useQuery, useMutation, useQueryClient, useInfiniteQuery } from "@tanstack/react-query";
 import { useMemo } from "react";
 import type { QueryClient, InfiniteData } from "@tanstack/react-query";
-import type { Task, Project, ProjectRepo, Board, Column, Swimlane, TipTapDoc, WikiPageMeta, ApiKey, ApiKeyCreateResult, Dashboard, FieldConfig, DocumentSource, ForgeTask, TaskLink, Runtime, ForgeAgent, ForgeSkill, Machine, ActivityItem, ActivityEvent, Team, TeamMember, TeamMemberRole, SessionInfo, WorkspaceInvite } from "../../shared/types";
+import type { Task, Project, ProjectRepo, Board, Column, Swimlane, Milestone, TipTapDoc, WikiPageMeta, ApiKey, ApiKeyCreateResult, Dashboard, FieldConfig, DocumentSource, ForgeTask, TaskLink, Runtime, ForgeAgent, ForgeSkill, Machine, ActivityItem, ActivityEvent, Team, TeamMember, TeamMemberRole, SessionInfo, WorkspaceInvite } from "../../shared/types";
 import * as api from "./api";
 import * as auth from "./auth";
 import type { TaskMutationResult, ActivityPage } from "./api";
@@ -192,6 +192,7 @@ export interface TaskListItem {
   typeColor: string;
   columnId: string;
   columnName: string;
+  swimlaneId: string;
   swimlaneName: string;
   assignees: string[];
   githubNumber: number | null;
@@ -221,6 +222,7 @@ export function deriveTaskList(board: Board): TaskListItem[] {
       typeColor: ty?.color ?? "",
       columnId: t.columnId,
       columnName: columnName.get(t.columnId) ?? "Unknown column",
+      swimlaneId: t.swimlaneId,
       swimlaneName: swimlaneName.get(t.swimlaneId) ?? "Unknown swimlane",
       assignees: t.assignees,
       githubNumber: t.githubs[0]?.issueNumber ?? null,
@@ -763,6 +765,126 @@ export function useDeleteSwimlane(slug: string) {
     },
     onError: (err) => {
       toast.push("error", "Failed to delete swimlane", toastMessage(err));
+    },
+  });
+}
+
+// ── Milestones ──
+
+export function useMilestones(slug: string) {
+  return useQuery({
+    queryKey: ["milestones", slug],
+    queryFn: () => api.listMilestones(slug).then((r) => r.data),
+    enabled: !!slug,
+  });
+}
+
+export function useCreateMilestone(slug: string) {
+  const qc = useQueryClient();
+  const toast = useToast();
+  return useMutation({
+    mutationFn: (input: Parameters<typeof api.createMilestone>[1]) => api.createMilestone(slug, input),
+    onSuccess: (milestone) => {
+      qc.setQueryData(["milestones", slug], (old: Milestone[] | undefined) => {
+        if (!old) return old;
+        return [...old, milestone].sort((a, b) => a.position - b.position);
+      });
+      toast.push("success", "Milestone created");
+    },
+    onError: (err) => {
+      toast.push("error", "Failed to create milestone", toastMessage(err));
+    },
+  });
+}
+
+export function useUpdateMilestone(slug: string) {
+  const qc = useQueryClient();
+  const toast = useToast();
+  return useMutation({
+    mutationFn: ({ id, ...input }: { id: string } & Parameters<typeof api.updateMilestone>[2]) =>
+      api.updateMilestone(slug, id, input),
+    onSuccess: (milestone) => {
+      qc.setQueryData(["milestones", slug], (old: Milestone[] | undefined) => {
+        if (!old) return old;
+        return old.map((m) => (m.id === milestone.id ? milestone : m));
+      });
+      toast.push("success", "Milestone updated");
+    },
+    onError: (err) => {
+      toast.push("error", "Failed to update milestone", toastMessage(err));
+    },
+  });
+}
+
+export function useDeleteMilestone(slug: string) {
+  const qc = useQueryClient();
+  const toast = useToast();
+  return useMutation({
+    mutationFn: ({ id }: { id: string }) => api.deleteMilestone(slug, id),
+    onSuccess: (_, { id }) => {
+      qc.setQueryData(["milestones", slug], (old: Milestone[] | undefined) => {
+        if (!old) return old;
+        return old.filter((m) => m.id !== id);
+      });
+      toast.push("success", "Milestone deleted");
+    },
+    onError: (err) => {
+      toast.push("error", "Failed to delete milestone", toastMessage(err));
+    },
+  });
+}
+
+export function useArchiveMilestone(slug: string) {
+  const qc = useQueryClient();
+  const toast = useToast();
+  return useMutation({
+    mutationFn: ({ id }: { id: string }) => api.archiveMilestone(slug, id),
+    onSuccess: ({ data: milestone, activity }) => {
+      // Cascade archive touches lanes + tasks — the board cache carries all
+      // of them, so mirror the mutation response there too.
+      qc.setQueryData(["milestones", slug], (old: Milestone[] | undefined) => {
+        if (!old) return old;
+        return old.map((m) => (m.id === milestone.id ? milestone : m));
+      });
+      for (const archived of [false, true]) {
+        qc.setQueryData(["board", slug, archived], (old: Board | undefined) => {
+          if (!old) return old;
+          return {
+            ...old,
+            swimlanes: old.swimlanes.map((l: Swimlane) =>
+              l.milestoneId === milestone.id ? { ...l, archivedAt: milestone.archivedAt } : l
+            ),
+            tasks: old.tasks.map((t: Task) =>
+              activity.some((a) => a.taskId === t.id && a.type === "archived")
+                ? { ...t, archivedAt: milestone.archivedAt }
+                : t
+            ),
+          };
+        });
+      }
+      toast.push("success", "Milestone completed");
+    },
+    onError: (err) => {
+      toast.push("error", "Failed to complete milestone", toastMessage(err));
+    },
+  });
+}
+
+export function useRestoreMilestone(slug: string) {
+  const qc = useQueryClient();
+  const toast = useToast();
+  return useMutation({
+    mutationFn: ({ id }: { id: string }) => api.restoreMilestone(slug, id),
+    onSuccess: ({ data: milestone }) => {
+      // Milestone only — its sprints stay archived (restore individually).
+      qc.setQueryData(["milestones", slug], (old: Milestone[] | undefined) => {
+        if (!old) return old;
+        return old.map((m) => (m.id === milestone.id ? milestone : m));
+      });
+      toast.push("success", "Milestone restored");
+    },
+    onError: (err) => {
+      toast.push("error", "Failed to restore milestone", toastMessage(err));
     },
   });
 }
