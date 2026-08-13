@@ -13,12 +13,14 @@ export function AppShell() {
   const pathname = useRouterState({ select: (s) => s.location.pathname });
   const { selectedSlug } = useProjectSelection();
 
-  const routeType: "home" | "dashboard" | "board" | "tasks" | "wiki" | "settings" | "forge" = useMemo(() => {
+  const routeType: "home" | "dashboard" | "board" | "tasks" | "wiki" | "milestones" | "swimlanes" | "settings" | "forge" = useMemo(() => {
     if (pathname === "/") return "home";
     if (pathname === "/forge") return "forge";
     if (pathname === "/settings" || pathname.startsWith("/settings/")) return "settings";
     if (pathname.match(/^\/[^/]+\/board$/)) return "board";
     if (pathname.match(/^\/[^/]+\/tasks$/)) return "tasks";
+    if (pathname.match(/^\/[^/]+\/milestones$/)) return "milestones";
+    if (pathname.match(/^\/[^/]+\/swimlanes$/)) return "swimlanes";
     if (pathname.match(/^\/[^/]+\/wiki(?:\/.*)?$/)) return "wiki";
     if (pathname.match(/^\/[^/]+$/)) return "dashboard";
     return "home";
@@ -30,10 +32,14 @@ export function AppShell() {
   const boardTo = selectedSlug ? "/$slug/board" : "/";
   const wikiTo = selectedSlug ? "/$slug/wiki" : "/";
   const tasksTo = selectedSlug ? "/$slug/tasks" : "/";
+  const milestonesTo = selectedSlug ? "/$slug/milestones" : "/";
+  const swimlanesTo = selectedSlug ? "/$slug/swimlanes" : "/";
   const dashboardParams = selectedSlug ? { slug: selectedSlug } : undefined;
   const boardParams = selectedSlug ? { slug: selectedSlug } : undefined;
   const wikiParams = selectedSlug ? { slug: selectedSlug } : undefined;
   const tasksParams = selectedSlug ? { slug: selectedSlug } : undefined;
+  const milestonesParams = selectedSlug ? { slug: selectedSlug } : undefined;
+  const swimlanesParams = selectedSlug ? { slug: selectedSlug } : undefined;
 
   return (
     <>
@@ -54,6 +60,12 @@ export function AppShell() {
             </NavLink>
             <NavLink to={wikiTo} params={wikiParams} active={routeType === "wiki"}>
               Wiki
+            </NavLink>
+            <NavLink to={milestonesTo} params={milestonesParams} active={routeType === "milestones"} exact>
+              Milestones
+            </NavLink>
+            <NavLink to={swimlanesTo} params={swimlanesParams} active={routeType === "swimlanes"} exact>
+              Swimlanes
             </NavLink>
             <NavLink to="/forge" active={routeType === "forge"}>Forge</NavLink>
           </div>
