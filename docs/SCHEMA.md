@@ -166,6 +166,10 @@ CREATE TABLE workspace_invitations (
 -- github_state: maps this column to a GitHub issue state for sync.
 --   Exactly one column per project should map to 'closed' (e.g. Done).
 --   Renaming a column never breaks sync — the mapping is explicit.
+-- is_done: explicit done marker — independent of github_state. Multiple
+--   done columns per project are allowed (e.g. Done + Released). Progress
+--   (sprint X/Y) counts a task as done when it sits in a done column OR is
+--   archived — derived at read time, never stored.
 CREATE TABLE columns (
   id              TEXT PRIMARY KEY,
   project_id      TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
@@ -175,21 +179,58 @@ CREATE TABLE columns (
   color           TEXT NOT NULL DEFAULT '#6b7280',
   wip_limit       INTEGER,                                   -- NULL = no limit
   required_fields TEXT NOT NULL DEFAULT '[]',
-  github_state    TEXT CHECK (github_state IN ('open','closed'))
+  github_state    TEXT CHECK (github_state IN ('open','closed')),
+  is_done         INTEGER NOT NULL DEFAULT 0
 );
 
 -- ============================================================
--- Swimlanes (horizontal grouping) — milestones + one system Backlog
+-- Milestones (goal wrapper above sprints)
 -- ============================================================
--- kind = 'milestone' (default) | 'backlog'. The Backlog lane is the
--- permanent system lane: created with every project, never archived or
--- deleted, no deadline. Identity is `kind`, not the name — renaming the
--- Backlog lane does not demote it. Partial unique index guarantees at
--- most one backlog lane per project.
--- due_at: YYYY-MM-DD milestone deadline (date-only, no time-of-day).
---   Cross-column CHECK (kind='backlog' AND due_at IS NULL) is NOT in the
---   DDL — SQLite ALTER TABLE cannot add table-level CHECKs; enforced in
---   SwimlaneService (update rejects backlog dueAt → BACKLOG_PROTECTED).
+-- A milestone is a goal wrapper (e.g. "v1.0 launch") holding one or more
+-- sprints via swimlanes.milestone_id. Plain wrapper — no kind, no system
+-- lanes. due_at is the target date (YYYY-MM-DD, date-only); NULL = no
+-- deadline. Deleting a milestone with sprints is blocked (HAS_CHILDREN
+-- 409, details { count }) — sprints must be loosened/reassigned first;
+-- ON DELETE SET NULL on swimlanes.milestone_id is the safety net for
+-- direct DB writes only. Archive cascade (milestone → its sprints → their
+-- live tasks) is service-level, one transaction, per-task `archived`
+-- activity rows; restore brings the milestone back only.
+CREATE TABLE milestones (
+  id          TEXT PRIMARY KEY,
+  project_id  TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  name        TEXT NOT NULL,
+  description TEXT NOT NULL DEFAULT '',
+  position    INTEGER NOT NULL,
+  due_at      TEXT,
+  archived_at TEXT,
+  created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX idx_milestones_proj ON milestones(project_id, position);
+
+-- ============================================================
+-- Swimlanes (horizontal grouping) — sprints + one system Backlog
+-- ============================================================
+-- kind = 'sprint' (default) | 'backlog'. Every non-backlog lane is a
+-- sprint: time-boxed (start_at → due_at) and optionally belonging to a
+-- milestone (milestone_id); NULL milestone_id = loose sprint. The Backlog
+-- lane is the permanent system lane: created with every project, never
+-- archived or deleted, no dates, never in a milestone. Identity is `kind`,
+-- not the name — renaming the Backlog lane does not demote it. Partial
+-- unique index guarantees at most one backlog lane per project.
+-- due_at: YYYY-MM-DD sprint deadline (date-only). start_at: YYYY-MM-DD
+--   sprint start; NULL = unset (a due-only sprint renders as a ◆ marker on
+--   the timeline until start_at is set).
+-- milestone_id: FK to milestones(id) ON DELETE SET NULL — deleting a
+--   milestone loosens its sprints (they surface as "No milestone" sprints).
+-- Cross-column CHECKs (kind='backlog' AND due_at/start_at/milestone_id
+--   IS NULL; start_at <= due_at) are NOT in the DDL — SQLite ALTER TABLE
+--   cannot add table-level CHECKs; enforced in SwimlaneService (backlog
+--   rejects dueAt/startAt/milestoneId → BACKLOG_PROTECTED; start_at later
+--   than due_at → INVALID_ARGS).
+-- Migration 0005 rebuilt this table (CHECK change) using the 0004
+--   create-_new / copy / drop / rename pattern: existing 'milestone' rows
+--   became loose sprints (kind 'sprint', milestone_id NULL); due_at survived.
 -- archived_at: lane archive cascades to its live tasks (one transaction,
 --   per-task `archived` activity rows); restore brings the lane back only.
 CREATE TABLE swimlanes (
@@ -200,8 +241,10 @@ CREATE TABLE swimlanes (
   position    INTEGER NOT NULL,
   due_at      TEXT,
   archived_at TEXT,
-  kind        TEXT NOT NULL DEFAULT 'milestone'
-              CHECK (kind IN ('backlog','milestone'))
+  start_at    TEXT,
+  kind        TEXT NOT NULL DEFAULT 'sprint'
+              CHECK (kind IN ('backlog','sprint')),
+  milestone_id TEXT REFERENCES milestones(id) ON DELETE SET NULL
 );
 CREATE UNIQUE INDEX idx_swimlanes_one_backlog ON swimlanes(project_id) WHERE kind = 'backlog';
 
@@ -419,6 +462,7 @@ CREATE UNIQUE INDEX idx_tasks_position ON tasks(column_id, position);           
 CREATE UNIQUE INDEX idx_task_github_issues_issue ON task_github_issues(issue_id);  -- issue → at most one task
 CREATE INDEX idx_columns_project ON columns(project_id, position);
 CREATE INDEX idx_swimlanes_proj  ON swimlanes(project_id, position);
+CREATE INDEX idx_swimlanes_milestone ON swimlanes(project_id, milestone_id, position);
 CREATE INDEX idx_wiki_project    ON wiki_pages(project_id);
 CREATE INDEX idx_wiki_parent     ON wiki_pages(parent_id) WHERE parent_id IS NOT NULL;
 CREATE INDEX idx_runtimes_machine ON runtimes(machine_id);

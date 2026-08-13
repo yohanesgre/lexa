@@ -32,6 +32,22 @@ All notable changes to Lexa are documented here. Format based on
 - **Login rate limiting** — failed logins throttled in-process (Better Auth
   rate-limit plugin, ~5 attempts/60s per email, 15 min lockout); the
   existing per-IP `/api/*` limiter is unchanged.
+- **Milestones** — goal wrappers above sprints (e.g. "v1.0 launch") with an
+  optional target date; each milestone holds one or more sprints. New
+  `/$slug/milestones` page (list with sprint sub-rows + progress bars,
+  create/edit/archive/restore, "Complete milestone" cascade), milestone
+  selector on the board, read-only active-milestone card on the project
+  home, and a timeline tab with a week-granular gantt (milestone ◆ due
+  markers, sprint bars with done-fill, drag to reschedule).
+- **Sprint swimlanes** — every non-backlog lane is now a **sprint** with
+  optional start/end dates and optional milestone membership (loose sprints
+  allowed); sprint headers show a progress pill (X/Y done, green + "Ready to
+  archive" at 100%). New `/$slug/swimlanes` page: flat lane list with
+  milestone/state filters and "View tasks" deep links.
+- **Done columns** — columns gain a "Done column" flag (`columns.is_done`),
+  independent of the GitHub state mapping; multiple done columns are
+  allowed (e.g. Done + Released). Sprint progress counts a task as done
+  when it sits in a done column or is archived.
 
 ### Changed
 
@@ -46,6 +62,10 @@ All notable changes to Lexa are documented here. Format based on
   `--team-domain` / `--email-domain` flags; it writes `LXK_PUBLIC_URL`.
   `LXK_ACCESS_AUD` / `LXK_ACCESS_TEAM` are removed. The `/setup` wizard
   creates the first superadmin with a password.
+- **Swimlane kinds renamed** — the old `milestone` swimlane kind is now
+  `sprint`; existing milestone lanes become loose sprints on upgrade (no
+  milestone, dates kept). Sprint-kind lane headers read "Sprint"; the
+  Backlog remains the one permanent system lane.
 
 ## [0.3.0] - 2026-08-12
 

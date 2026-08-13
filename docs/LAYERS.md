@@ -15,12 +15,13 @@
 ├─────────────────────────────────────────────────────────┤
 │                   Service Layer                          │
 │  TaskService  WikiService  ProjectService               │
-│  ColumnService  SwimlaneService  AuthService            │
-│  GitHubService ──depends on──▶ TaskService + ProjectService (webhooks)   │
+│  ColumnService  SwimlaneService  MilestoneService        │
+│  AuthService  GitHubService ──depends on──▶ TaskService  │
+│                        + ProjectService (webhooks)       │
 ├─────────────────────────────────────────────────────────┤
 │                 Repository Layer                         │
 │  TaskRepo  ProjectRepo  WikiRepo  ColumnRepo            │
-│  SwimlaneRepo  ApiKeyRepo  WebhookEventRepo            │
+│  SwimlaneRepo  MilestoneRepo  ApiKeyRepo  WebhookEventRepo │
 ├─────────────────────────────────────────────────────────┤
 │               Infrastructure Layer                       │
 │  Sqlite (bun:sqlite)   GitHubClient   Config (env)      │
@@ -626,6 +627,44 @@ user id (unbound keys → NULL); webhook moves → kind 'system', label
 (agent_id fallback). The legacy `x-lxk-user` header is gone — attribution
 comes from the authenticated channel, never from a spoofable header; role
 never comes from the browser either (authz stays server-side).
+
+### MilestoneService — goal wrapper above sprints (cascade archive)
+
+```typescript
+class MilestoneNotFound extends Data.TaggedError("MilestoneNotFound")<{ id: string }> {}
+class HasChildren extends Data.TaggedError("HasChildren")<{ count: number }> {}
+// → 404 / 409 via server/api/errors.ts errorCodeMap + errorToStatus
+
+export class MilestoneService extends Effect.Service<MilestoneService>()("Lexa/MilestoneService", {
+  dependencies: [MilestoneRepo.Default, SwimlaneRepo.Default, TaskRepo.Default, ProjectRepo.Default, ActivityService.Default],
+  effect: Effect.gen(function* () {
+    // create({ projectId, name, description?, dueAt? }) → Milestone
+    //   (ProjectNotFound; position = max+1). getById / update →
+    //   MilestoneNotFound (update also surfaces ConstraintViolation).
+    // delete(id) → MilestoneNotFound | HasChildren — blocked while sprints
+    //   reference the milestone (countSprints > 0); ON DELETE SET NULL on
+    //   swimlanes.milestone_id is the safety net for direct DB writes only.
+    // archive(actor, id) → { milestone, activity } — CASCADE in ONE withTx:
+    //   milestone archivedAt + every sprint archived + each sprint's live
+    //   tasks archived, one `archived` activity row per task + one per
+    //   sprint + one per milestone (catalog msg.archived). Idempotent —
+    //   an already-archived milestone returns unchanged, no rows.
+    //   NO nested withTx (txDepth guard), NO service-to-service calls —
+    //   deps are repos + ActivityService only (TaskService/SwimlaneService
+    //   each wrap their own withTx; calling them here would nest).
+    // restore(actor, id) → milestone only; its sprints stay archived
+    //   (restore individually, mirroring lane-restore semantics).
+    //   Idempotent.
+  }),
+}) {}
+```
+
+SwimlaneService (create/update) validates the sprint fields: `milestoneId` must
+reference a milestone in the same project (`MilestoneNotFound` 404),
+`startAt <= dueAt` (`InvalidArgs` 422), and the Backlog lane rejects
+`dueAt` / `startAt` / `milestoneId` (`BacklogProtected` 409). Lanes are
+created as kind `'sprint'`; the Backlog stays `'backlog'` (system-seeded,
+one per project).
 
 ## HTTP layer — @effect/platform HttpApi
 
