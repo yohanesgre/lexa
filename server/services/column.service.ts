@@ -60,6 +60,7 @@ export class ColumnService extends Effect.Service<ColumnService>()("Lexa/ColumnS
           color?: string;
           position?: number;
           githubState?: "open" | "closed" | null;
+          isDone?: boolean;
         }
       ): Effect.Effect<Column, ColumnNotFound | DbError | ConstraintViolation> =>
         repo.update(id, input).pipe(

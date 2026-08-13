@@ -57,6 +57,7 @@ export class ColumnRepo extends Effect.Service<ColumnRepo>()("Lexa/ColumnRepo", 
           wipLimit?: number | null;
           requiredFields?: string[];
           githubState?: "open" | "closed" | null;
+          isDone?: boolean;
         }
       ): Effect.Effect<Column, RowNotFound | DbError | ConstraintViolation> => {
         const sets: string[] = [];
@@ -84,6 +85,10 @@ export class ColumnRepo extends Effect.Service<ColumnRepo>()("Lexa/ColumnRepo", 
         if (input.githubState !== undefined) {
           sets.push("github_state = ?");
           params.push(input.githubState);
+        }
+        if (input.isDone !== undefined) {
+          sets.push("is_done = ?");
+          params.push(input.isDone ? 1 : 0);
         }
         if (sets.length === 0)
           return queryFirst<ColumnRow>(db, `SELECT * FROM columns WHERE id = ?`, id).pipe(Effect.map(rowToColumn));

@@ -3,8 +3,8 @@ import { SwimlaneRepo } from "../repos/swimlane.repo";
 import { ProjectRepo } from "../repos/project.repo";
 import { TaskRepo } from "../repos/task.repo";
 import { ActivityService } from "./activity.service";
-import { DbError, ConstraintViolation, withTx, Sqlite } from "../db/database";
-import { ProjectNotFound, SwimlaneNotFound, HasChildren, BacklogProtected, DeadlineAfterLane, TaskNotFound } from "../api/errors";
+import { queryAll, DbError, ConstraintViolation, withTx, Sqlite } from "../db/database";
+import { ProjectNotFound, SwimlaneNotFound, HasChildren, BacklogProtected, DeadlineAfterLane, TaskNotFound, MilestoneNotFound, InvalidArgs } from "../api/errors";
 import * as msg from "../activity-messages";
 import type { Swimlane, Actor, ActivityEvent } from "../../shared/types";
 
@@ -17,15 +17,35 @@ export class SwimlaneService extends Effect.Service<SwimlaneService>()("Lexa/Swi
     const activityService = yield* ActivityService;
     const db = yield* Sqlite;
 
+    // start_at must not be later than due_at (both YYYY-MM-DD — string compare is fine).
+    const validateDates = (startAt?: string | null, dueAt?: string | null): Effect.Effect<void, InvalidArgs> =>
+      startAt && dueAt && startAt > dueAt
+        ? Effect.fail(new InvalidArgs({ reason: "startAt cannot be later than dueAt" }))
+        : Effect.void;
+
+    // milestoneId must reference a milestone in the SAME project.
+    const ensureMilestone = (milestoneId: string | null | undefined, projectId: string): Effect.Effect<void, MilestoneNotFound | DbError> =>
+      milestoneId ? Effect.gen(function* () {
+        const count = yield* queryAll<{ c: number }>(
+          db,
+          `SELECT COUNT(*) as c FROM milestones WHERE id = ? AND project_id = ?`,
+          milestoneId,
+          projectId
+        );
+        if ((count[0]?.c ?? 0) === 0) return yield* new MilestoneNotFound({ id: milestoneId });
+      }) : Effect.void;
+
     return {
-      create: (input: { projectId: string; name: string; description?: string; dueAt?: string | null }): Effect.Effect<Swimlane, ProjectNotFound | DbError> =>
+      create: (input: { projectId: string; name: string; description?: string; position?: number; dueAt?: string | null; startAt?: string | null; milestoneId?: string | null }): Effect.Effect<Swimlane, ProjectNotFound | MilestoneNotFound | InvalidArgs | DbError> =>
         Effect.gen(function* () {
           yield* projectRepo.findById(input.projectId).pipe(
             Effect.catchTag("RowNotFound", () => new ProjectNotFound({ identifier: input.projectId }))
           );
+          yield* validateDates(input.startAt, input.dueAt);
+          yield* ensureMilestone(input.milestoneId, input.projectId);
           const maxPos = yield* repo.maxPosition(input.projectId);
           const id = crypto.randomUUID();
-          const lane = yield* repo.create({ id, projectId: input.projectId, name: input.name, description: input.description, position: maxPos + 1, kind: "milestone", dueAt: input.dueAt ?? null }).pipe(
+          const lane = yield* repo.create({ id, projectId: input.projectId, name: input.name, description: input.description, position: maxPos + 1, kind: "sprint", dueAt: input.dueAt ?? null, startAt: input.startAt ?? null, milestoneId: input.milestoneId ?? null }).pipe(
             Effect.catchTags({
               ConstraintViolation: (e) => new DbError({ message: "Database error", cause: e }),
               RowNotFound: (e) => new DbError({ message: "Database error", cause: e }),
@@ -47,11 +67,13 @@ export class SwimlaneService extends Effect.Service<SwimlaneService>()("Lexa/Swi
       getById: (id: string): Effect.Effect<Swimlane, SwimlaneNotFound | DbError> =>
         repo.findById(id).pipe(Effect.catchTag("RowNotFound", () => new SwimlaneNotFound({ id }))),
 
-      update: (id: string, input: { name?: string; description?: string; position?: number; dueAt?: string | null }): Effect.Effect<Swimlane, SwimlaneNotFound | BacklogProtected | DeadlineAfterLane | DbError> =>
+      update: (id: string, input: { name?: string; description?: string; position?: number; dueAt?: string | null; startAt?: string | null; milestoneId?: string | null }): Effect.Effect<Swimlane, SwimlaneNotFound | BacklogProtected | DeadlineAfterLane | MilestoneNotFound | InvalidArgs | DbError> =>
         Effect.gen(function* () {
           const lane = yield* repo.findById(id).pipe(Effect.catchTag("RowNotFound", () => new SwimlaneNotFound({ id })));
-          if (lane.kind === "backlog" && input.dueAt !== undefined)
+          if (lane.kind === "backlog" && (input.dueAt !== undefined || input.startAt !== undefined || input.milestoneId !== undefined))
             return yield* new BacklogProtected({ action: "deadline" });
+          yield* validateDates(input.startAt, input.dueAt);
+          yield* ensureMilestone(input.milestoneId, lane.projectId);
           if (input.dueAt !== undefined && input.dueAt !== null) {
             const overage = yield* repo.countDueAfter(id, input.dueAt);
             if (overage > 0) {
