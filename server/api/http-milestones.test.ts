@@ -115,6 +115,7 @@ describe("milestones routes", () => {
     expect(archived.status).toBe(200);
     const aBody = await archived.json();
     expect(aBody.data.archivedAt).not.toBeNull();
+    expect(aBody.data.sprintCount).toBe(1); // mutation responses carry real counts
     expect(aBody.activity.map((a: { type: string }) => a.type)).toEqual(["archived"]);
     expect(aBody.activity[0]).toMatchObject({ actorLabel: "Maria", message: "Maria archived this task" });
     const lane = db.prepare("SELECT archived_at FROM swimlanes WHERE id = 'sp2'").get() as { archived_at: string | null };
