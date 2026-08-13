@@ -3,6 +3,14 @@ import { Sqlite, queryAll, queryFirst, run, DbError, RowNotFound, ConstraintViol
 import { MilestoneRow, SwimlaneRow, rowToMilestone, rowToSwimlane } from "../../shared/db";
 import type { Milestone, Swimlane } from "../../shared/types";
 
+// Every milestone read (list AND mutation readbacks) carries the sprint
+// counts so mutation responses never clobber list-derived FE cache state.
+const MILESTONE_SELECT_WITH_COUNTS = `
+  SELECT m.*,
+    (SELECT COUNT(*) FROM swimlanes s WHERE s.milestone_id = m.id) AS sprint_count,
+    (SELECT COUNT(*) FROM swimlanes s WHERE s.milestone_id = m.id AND s.archived_at IS NOT NULL) AS archived_sprint_count
+  FROM milestones m`;
+
 export class MilestoneRepo extends Effect.Service<MilestoneRepo>()("Lexa/MilestoneRepo", {
   effect: Effect.gen(function* () {
     const db = yield* Sqlite;
@@ -14,22 +22,16 @@ export class MilestoneRepo extends Effect.Service<MilestoneRepo>()("Lexa/Milesto
             `INSERT INTO milestones (id, project_id, name, description, position, due_at) VALUES (?, ?, ?, ?, ?, ?)`,
             input.id, input.projectId, input.name, input.description ?? "", input.position, input.dueAt ?? null
           );
-          return yield* queryFirst<MilestoneRow>(db, `SELECT * FROM milestones WHERE id = ?`, input.id)
+          return yield* queryFirst<MilestoneRow>(db, `${MILESTONE_SELECT_WITH_COUNTS} WHERE m.id = ?`, input.id)
             .pipe(Effect.map(rowToMilestone));
         }),
 
       findById: (id: string): Effect.Effect<Milestone, RowNotFound | DbError> =>
-        queryFirst<MilestoneRow>(db, `SELECT * FROM milestones WHERE id = ?`, id).pipe(Effect.map(rowToMilestone)),
+        queryFirst<MilestoneRow>(db, `${MILESTONE_SELECT_WITH_COUNTS} WHERE m.id = ?`, id).pipe(Effect.map(rowToMilestone)),
 
       findByProject: (projectId: string): Effect.Effect<Milestone[], DbError> =>
-        queryAll<MilestoneRow>(
-          db,
-          `SELECT m.*,
-                  (SELECT COUNT(*) FROM swimlanes s WHERE s.milestone_id = m.id) AS sprint_count,
-                  (SELECT COUNT(*) FROM swimlanes s WHERE s.milestone_id = m.id AND s.archived_at IS NOT NULL) AS archived_sprint_count
-           FROM milestones m WHERE m.project_id = ? ORDER BY m.position`,
-          projectId
-        ).pipe(Effect.map((rows) => rows.map(rowToMilestone))),
+        queryAll<MilestoneRow>(db, `${MILESTONE_SELECT_WITH_COUNTS} WHERE m.project_id = ? ORDER BY m.position`, projectId)
+          .pipe(Effect.map((rows) => rows.map(rowToMilestone))),
 
       update: (id: string, input: { name?: string; description?: string; position?: number; dueAt?: string | null }): Effect.Effect<Milestone, RowNotFound | DbError | ConstraintViolation> => {
         const sets: string[] = [];
@@ -39,10 +41,10 @@ export class MilestoneRepo extends Effect.Service<MilestoneRepo>()("Lexa/Milesto
         if (input.position !== undefined) { sets.push("position = ?"); params.push(input.position); }
         if (input.dueAt !== undefined) { sets.push("due_at = ?"); params.push(input.dueAt); }
         if (sets.length === 0)
-          return queryFirst<MilestoneRow>(db, `SELECT * FROM milestones WHERE id = ?`, id).pipe(Effect.map(rowToMilestone));
+          return queryFirst<MilestoneRow>(db, `${MILESTONE_SELECT_WITH_COUNTS} WHERE m.id = ?`, id).pipe(Effect.map(rowToMilestone));
         params.push(id);
         return run(db, `UPDATE milestones SET ${sets.join(", ")}, updated_at = datetime('now') WHERE id = ?`, ...params)
-          .pipe(Effect.flatMap(() => queryFirst<MilestoneRow>(db, `SELECT * FROM milestones WHERE id = ?`, id)))
+          .pipe(Effect.flatMap(() => queryFirst<MilestoneRow>(db, `${MILESTONE_SELECT_WITH_COUNTS} WHERE m.id = ?`, id)))
           .pipe(Effect.map(rowToMilestone));
       },
 
@@ -53,7 +55,7 @@ export class MilestoneRepo extends Effect.Service<MilestoneRepo>()("Lexa/Milesto
         run(db, `UPDATE milestones SET archived_at = ?, updated_at = datetime('now') WHERE id = ?`, archivedAt, id)
           .pipe(
             Effect.catchTag("ConstraintViolation", (e) => new DbError({ message: "Database error", cause: e })),
-            Effect.flatMap(() => queryFirst<MilestoneRow>(db, `SELECT * FROM milestones WHERE id = ?`, id))
+            Effect.flatMap(() => queryFirst<MilestoneRow>(db, `${MILESTONE_SELECT_WITH_COUNTS} WHERE m.id = ?`, id))
           )
           .pipe(Effect.map(rowToMilestone)),
 
