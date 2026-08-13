@@ -159,6 +159,19 @@ describe("ColumnService.update", () => {
     expect(Either.isLeft(res)).toBe(true);
     if (Either.isLeft(res)) expect(res.left).toBeInstanceOf(ColumnNotFound);
   });
+
+  it("update sets and clears isDone", () => {
+    const db = tmpDb();
+    seed(db);
+    db.prepare("INSERT INTO columns (id, project_id, name, position) VALUES ('c1','p1','Done',0)").run();
+    const svc = makeService(db);
+    const set = Effect.runSync(Effect.either(svc.update("c1", { isDone: true })));
+    expect(Either.isRight(set)).toBe(true);
+    if (Either.isRight(set)) expect(set.right.isDone).toBe(true);
+    const cleared = Effect.runSync(Effect.either(svc.update("c1", { isDone: false })));
+    expect(Either.isRight(cleared)).toBe(true);
+    if (Either.isRight(cleared)) expect(cleared.right.isDone).toBe(false);
+  });
 });
 
 describe("ColumnService.delete", () => {

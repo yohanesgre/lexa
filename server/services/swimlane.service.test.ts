@@ -14,6 +14,8 @@ import {
   HasChildren,
   BacklogProtected,
   DeadlineAfterLane,
+  MilestoneNotFound,
+  InvalidArgs,
 } from "../api/errors";
 import type { Actor } from "../../shared/types";
 
@@ -36,7 +38,7 @@ function tmpDb(): Database {
 function seed(db: Database) {
   db.prepare("INSERT INTO projects (id, name, slug) VALUES ('p1','P','p1')").run();
   db.prepare("INSERT INTO swimlanes (id, project_id, name, position, kind) VALUES ('s-backlog','p1','Backlog',0,'backlog')").run();
-  db.prepare("INSERT INTO swimlanes (id, project_id, name, position, kind, due_at) VALUES ('m1','p1','Milestone 1',1,'milestone','2026-06-01')").run();
+  db.prepare("INSERT INTO swimlanes (id, project_id, name, position, kind, due_at) VALUES ('m1','p1','Milestone 1',1,'sprint','2026-06-01')").run();
   db.prepare("INSERT INTO swimlanes (id, project_id, name, position) VALUES ('m2','p1','Milestone 2',2)").run();
   db.prepare("INSERT INTO columns (id, project_id, name, position) VALUES ('c1','p1','Todo',0)").run();
   db.prepare("INSERT INTO users (id, email, name, role) VALUES ('u1','maria@lexa.test','Maria','member')").run();
@@ -62,19 +64,60 @@ afterEach(() => {
 });
 
 describe("SwimlaneService create", () => {
-  it("creates a milestone lane with dueAt appended after the last position", () => {
+  it("creates a sprint lane with dueAt appended after the last position", () => {
     const db = tmpDb();
     seed(db);
     const svc = makeService(db);
     Effect.runSync(
       Effect.gen(function* () {
-        const lane = yield* svc.create({ projectId: "p1", name: "Milestone 3", dueAt: "2026-08-01" });
-        expect(lane.kind).toBe("milestone");
+        const lane = yield* svc.create({ projectId: "p1", name: "Sprint 3", dueAt: "2026-08-01" });
+        expect(lane.kind).toBe("sprint");
         expect(lane.dueAt).toBe("2026-08-01");
         expect(lane.position).toBe(3);
         expect(lane.projectId).toBe("p1");
       })
     );
+  });
+
+  it("creates a loose sprint by default; milestoneId + startAt persist when given", () => {
+    const db = tmpDb();
+    seed(db);
+    const svc = makeService(db);
+    db.prepare("INSERT INTO milestones (id, project_id, name, position) VALUES ('ms1','p1','v1',0)").run();
+    Effect.runSync(
+      Effect.gen(function* () {
+        const lane = yield* svc.create({ projectId: "p1", name: "Sprint A", startAt: "2026-08-10", dueAt: "2026-08-30", milestoneId: "ms1" });
+        expect(lane.kind).toBe("sprint");
+        expect(lane.startAt).toBe("2026-08-10");
+        expect(lane.milestoneId).toBe("ms1");
+        const loose = yield* svc.create({ projectId: "p1", name: "Loose" });
+        expect(loose.milestoneId).toBeNull();
+        expect(loose.startAt).toBeNull();
+      })
+    );
+  });
+
+  it("rejects startAt later than dueAt (INVALID_ARGS)", () => {
+    const db = tmpDb();
+    seed(db);
+    const svc = makeService(db);
+    const result = Effect.runSync(Effect.either(svc.create({ projectId: "p1", name: "Bad", startAt: "2026-09-01", dueAt: "2026-08-01" })));
+    expect(Either.isLeft(result)).toBe(true);
+    if (Either.isLeft(result)) expect(result.left).toBeInstanceOf(InvalidArgs);
+  });
+
+  it("rejects an unknown or cross-project milestoneId (MILESTONE_NOT_FOUND)", () => {
+    const db = tmpDb();
+    seed(db);
+    const svc = makeService(db);
+    db.prepare("INSERT INTO projects (id, name, slug) VALUES ('p2','P2','p2')").run();
+    db.prepare("INSERT INTO milestones (id, project_id, name, position) VALUES ('ms-p2','p2','other',0)").run();
+    const unknown = Effect.runSync(Effect.either(svc.create({ projectId: "p1", name: "S", milestoneId: "nope" })));
+    expect(Either.isLeft(unknown)).toBe(true);
+    if (Either.isLeft(unknown)) expect(unknown.left).toBeInstanceOf(MilestoneNotFound);
+    const cross = Effect.runSync(Effect.either(svc.create({ projectId: "p1", name: "S", milestoneId: "ms-p2" })));
+    expect(Either.isLeft(cross)).toBe(true);
+    if (Either.isLeft(cross)) expect(cross.left).toBeInstanceOf(MilestoneNotFound);
   });
 
   it("rejects a missing project", () => {
@@ -150,6 +193,53 @@ describe("SwimlaneService update", () => {
         expect(lane.position).toBe(5);
       })
     );
+  });
+
+  it("update rejects startAt > dueAt on an existing lane (INVALID_ARGS)", () => {
+    const db = tmpDb();
+    seed(db);
+    const svc = makeService(db);
+    const result = Effect.runSync(Effect.either(svc.update("m1", { startAt: "2026-09-01", dueAt: "2026-08-01" })));
+    expect(Either.isLeft(result)).toBe(true);
+    if (Either.isLeft(result)) expect(result.left).toBeInstanceOf(InvalidArgs);
+  });
+
+  it("update persists startAt/milestoneId and clears them with null", () => {
+    const db = tmpDb();
+    seed(db);
+    const svc = makeService(db);
+    db.prepare("INSERT INTO milestones (id, project_id, name, position) VALUES ('ms1','p1','v1',0)").run();
+    Effect.runSync(
+      Effect.gen(function* () {
+        const lane = yield* svc.update("m1", { startAt: "2026-08-10", milestoneId: "ms1" });
+        expect(lane.startAt).toBe("2026-08-10");
+        expect(lane.milestoneId).toBe("ms1");
+        const cleared = yield* svc.update("m1", { startAt: null, milestoneId: null });
+        expect(cleared.startAt).toBeNull();
+        expect(cleared.milestoneId).toBeNull();
+      })
+    );
+  });
+
+  it("update rejects unknown milestoneId on an existing lane", () => {
+    const db = tmpDb();
+    seed(db);
+    const svc = makeService(db);
+    const result = Effect.runSync(Effect.either(svc.update("m1", { milestoneId: "nope" })));
+    expect(Either.isLeft(result)).toBe(true);
+    if (Either.isLeft(result)) expect(result.left).toBeInstanceOf(MilestoneNotFound);
+  });
+
+  it("backlog lane rejects startAt/milestoneId too (BACKLOG_PROTECTED)", () => {
+    const db = tmpDb();
+    seed(db);
+    const svc = makeService(db);
+    const result = Effect.runSync(Effect.either(svc.update("s-backlog", { startAt: "2026-01-01" })));
+    expect(Either.isLeft(result)).toBe(true);
+    if (Either.isLeft(result)) {
+      expect(result.left).toBeInstanceOf(BacklogProtected);
+      expect((result.left as BacklogProtected).action).toBe("deadline");
+    }
   });
 });
 
@@ -291,7 +381,7 @@ describe("SwimlaneService queries", () => {
     Effect.runSync(
       Effect.gen(function* () {
         const lane = yield* svc.getById("m1");
-        expect(lane.kind).toBe("milestone");
+        expect(lane.kind).toBe("sprint");
         const missing = yield* Effect.either(svc.getById("nope"));
         expect(Either.isLeft(missing)).toBe(true);
         if (Either.isLeft(missing)) expect(missing.left).toBeInstanceOf(SwimlaneNotFound);

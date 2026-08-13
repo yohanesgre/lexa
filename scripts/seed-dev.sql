@@ -113,7 +113,7 @@ VALUES
 INSERT INTO swimlanes (id, project_id, name, description, position, kind)
 VALUES
   ('seed-sw-bl-0', 'seed-proj-blank', 'Backlog', 'Future work goes here.', 0, 'backlog'),
-  ('seed-sw-bl-1', 'seed-proj-blank', 'Current Sprint', '', 1, 'milestone');
+  ('seed-sw-bl-1', 'seed-proj-blank', 'Current Sprint', '', 1, 'sprint');
 
 -- ============================================================
 -- Tasks Only project — 3 columns, 5 tasks, no swimlanes
@@ -166,9 +166,9 @@ VALUES
 INSERT INTO swimlanes (id, project_id, name, description, position, kind)
 VALUES
   ('seed-sw-f-0', 'seed-proj-full', 'Backlog', '', 0, 'backlog'),
-  ('seed-sw-f-1', 'seed-proj-full', 'Core', 'Current sprint — dashboard refactor, auth flows, API pagination, billing UI, onboarding polish.', 1, 'milestone'),
-  ('seed-sw-f-2', 'seed-proj-full', 'Design', 'UI mockups and design tokens.', 2, 'milestone'),
-  ('seed-sw-f-3', 'seed-proj-full', 'QA', '', 3, 'milestone');
+  ('seed-sw-f-1', 'seed-proj-full', 'Core', 'Current sprint — dashboard refactor, auth flows, API pagination, billing UI, onboarding polish.', 1, 'sprint'),
+  ('seed-sw-f-2', 'seed-proj-full', 'Design', 'UI mockups and design tokens.', 2, 'sprint'),
+  ('seed-sw-f-3', 'seed-proj-full', 'QA', '', 3, 'sprint');
 
 -- Tasks — 15 tasks with assignees via junction table
 INSERT INTO tasks (id, project_id, column_id, swimlane_id, title, description, priority, type, position, github_issue_id, github_issue_number, github_repo, github_synced_state)

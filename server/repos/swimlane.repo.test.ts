@@ -29,7 +29,7 @@ function seed(db: Database) {
   db.prepare("INSERT INTO projects (id, name, slug) VALUES ('p1','P','p1')").run();
   db.prepare("INSERT INTO projects (id, name, slug) VALUES ('p2','P2','p2')").run();
   db.prepare("INSERT INTO swimlanes (id, project_id, name, position, kind) VALUES ('s-backlog','p1','Backlog',0,'backlog')").run();
-  db.prepare("INSERT INTO swimlanes (id, project_id, name, position, kind, due_at) VALUES ('m1','p1','Milestone 1',1,'milestone','2026-06-01')").run();
+  db.prepare("INSERT INTO swimlanes (id, project_id, name, position, kind, due_at) VALUES ('m1','p1','Milestone 1',1,'sprint','2026-06-01')").run();
   db.prepare("INSERT INTO swimlanes (id, project_id, name, position) VALUES ('m2','p1','Milestone 2',2)").run();
   db.prepare("INSERT INTO columns (id, project_id, name, position) VALUES ('c1','p1','Todo',0)").run();
   db.prepare("INSERT INTO tasks (id, project_id, column_id, swimlane_id, title, position, due_at, created_at) VALUES ('t1','p1','c1','m1','T1','a0','2026-07-01','2026-01-01 10:00:00')").run();
@@ -60,11 +60,11 @@ describe("SwimlaneRepo CRUD", () => {
     const repo = makeRepo(db);
     Effect.runSync(
       Effect.gen(function* () {
-        const lane = yield* repo.create({ id: "m3", projectId: "p1", name: "M3", description: "d", position: 3, kind: "milestone", dueAt: "2026-09-01" });
+        const lane = yield* repo.create({ id: "m3", projectId: "p1", name: "M3", description: "d", position: 3, kind: "sprint", dueAt: "2026-09-01" });
         expect(lane.id).toBe("m3");
         expect(lane.name).toBe("M3");
         expect(lane.description).toBe("d");
-        expect(lane.kind).toBe("milestone");
+        expect(lane.kind).toBe("sprint");
         expect(lane.dueAt).toBe("2026-09-01");
         expect(lane.position).toBe(3);
       })

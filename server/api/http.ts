@@ -26,6 +26,8 @@ import { ColumnService } from "../services/column.service";
 import { ColumnRepo } from "../repos/column.repo";
 import { SwimlaneService } from "../services/swimlane.service";
 import { SwimlaneRepo } from "../repos/swimlane.repo";
+import { MilestoneService } from "../services/milestone.service";
+import { MilestoneRepo } from "../repos/milestone.repo";
 import { TaskService } from "../services/task.service";
 import { TaskRepo } from "../repos/task.repo";
 import { WikiService } from "../services/wiki.service";
@@ -234,6 +236,7 @@ const ColumnSchema = Schema.Struct({
   wipLimit: Schema.NullOr(Schema.Number),
   requiredFields: Schema.Array(Schema.String),
   githubState: Schema.NullOr(Schema.Literal("open", "closed")),
+  isDone: Schema.Boolean,
 });
 
 const ColumnDataResponse = Schema.Struct({ data: Schema.Array(ColumnSchema) });
@@ -254,6 +257,7 @@ const ColumnUpdatePayload = Schema.Struct({
   wipLimit: Schema.optional(Schema.NullOr(Schema.Number)),
   requiredFields: Schema.optional(Schema.Array(Schema.String)),
   githubState: Schema.optional(Schema.NullOr(Schema.Literal("open", "closed"))),
+  isDone: Schema.optional(Schema.Boolean),
 });
 
 const ColumnPath = Schema.Struct({ slug: Schema.String, id: Schema.String });
@@ -276,7 +280,9 @@ const SwimlaneSchema = Schema.Struct({
   position: Schema.Number,
   dueAt: Schema.NullOr(Schema.String),
   archivedAt: Schema.NullOr(Schema.String),
-  kind: Schema.Literal("backlog", "milestone"),
+  startAt: Schema.NullOr(Schema.String),
+  kind: Schema.Literal("backlog", "sprint"),
+  milestoneId: Schema.NullOr(Schema.String),
 });
 
 const SwimlaneDataResponse = Schema.Struct({ data: Schema.Array(SwimlaneSchema) });
@@ -286,6 +292,8 @@ const SwimlanePayload = Schema.Struct({
   description: Schema.optional(Schema.String),
   position: Schema.optional(Schema.Number),
   dueAt: Schema.optional(Schema.NullOr(Schema.String)),
+  startAt: Schema.optional(Schema.NullOr(Schema.String)),
+  milestoneId: Schema.optional(Schema.NullOr(Schema.String)),
 });
 
 // PATCH is partial — name is optional here (POST keeps the strict payload).
@@ -294,9 +302,41 @@ const SwimlaneUpdatePayload = Schema.Struct({
   description: Schema.optional(Schema.String),
   position: Schema.optional(Schema.Number),
   dueAt: Schema.optional(Schema.NullOr(Schema.String)),
+  startAt: Schema.optional(Schema.NullOr(Schema.String)),
+  milestoneId: Schema.optional(Schema.NullOr(Schema.String)),
 });
 
 const SwimlanePath = Schema.Struct({ slug: Schema.String, id: Schema.String });
+
+const MilestoneSchema = Schema.Struct({
+  id: Schema.String,
+  projectId: Schema.String,
+  name: Schema.String,
+  description: Schema.String,
+  position: Schema.Number,
+  dueAt: Schema.NullOr(Schema.String),
+  archivedAt: Schema.NullOr(Schema.String),
+  sprintCount: Schema.Number,
+  archivedSprintCount: Schema.Number,
+});
+
+const MilestoneDataResponse = Schema.Struct({ data: Schema.Array(MilestoneSchema) });
+
+const MilestonePayload = Schema.Struct({
+  name: Schema.String,
+  description: Schema.optional(Schema.String),
+  position: Schema.optional(Schema.Number),
+  dueAt: Schema.optional(Schema.NullOr(Schema.String)),
+});
+
+const MilestoneUpdatePayload = Schema.Struct({
+  name: Schema.optional(Schema.String),
+  description: Schema.optional(Schema.String),
+  position: Schema.optional(Schema.Number),
+  dueAt: Schema.optional(Schema.NullOr(Schema.String)),
+});
+
+const MilestonePath = Schema.Struct({ slug: Schema.String, id: Schema.String });
 
 const FieldOptionSchema = Schema.Struct({
   id: Schema.String,
@@ -962,6 +1002,25 @@ const SwimlaneMutationResponse = Schema.Struct({
   activity: Schema.Array(ActivityEventSchema),
 });
 
+const MilestoneMutationResponse = Schema.Struct({
+  data: MilestoneSchema,
+  activity: Schema.Array(ActivityEventSchema),
+});
+
+const milestonesGroup = HttpApiGroup.make("milestones")
+  .add(HttpApiEndpoint.get("listMilestones", "/projects/:slug/milestones")
+    .setPath(SlugPath).addSuccess(MilestoneDataResponse))
+  .add(HttpApiEndpoint.post("createMilestone", "/projects/:slug/milestones")
+    .setPath(SlugPath).setPayload(MilestonePayload).addSuccess(MilestoneSchema, { status: 201 }))
+  .add(HttpApiEndpoint.patch("updateMilestone", "/projects/:slug/milestones/:id")
+    .setPath(MilestonePath).setPayload(MilestoneUpdatePayload).addSuccess(MilestoneSchema))
+  .add(HttpApiEndpoint.del("deleteMilestone", "/projects/:slug/milestones/:id")
+    .setPath(MilestonePath).addSuccess(Schema.Void, { status: 204 }))
+  .add(HttpApiEndpoint.post("archiveMilestone", "/projects/:slug/milestones/:id/archive")
+    .setPath(MilestonePath).addSuccess(MilestoneMutationResponse))
+  .add(HttpApiEndpoint.post("restoreMilestone", "/projects/:slug/milestones/:id/restore")
+    .setPath(MilestonePath).addSuccess(MilestoneMutationResponse));
+
 const swimlanesGroup = HttpApiGroup.make("swimlanes")
   .add(HttpApiEndpoint.get("listSwimlanes", "/projects/:slug/swimlanes")
     .setPath(SlugPath).addSuccess(SwimlaneDataResponse))
@@ -1068,6 +1127,7 @@ const BoardSchema = Schema.Struct({
   project: ProjectSchema,
   columns: Schema.Array(ColumnSchema),
   swimlanes: Schema.Array(SwimlaneSchema),
+  milestones: Schema.Array(MilestoneSchema),
   fieldConfig: FieldConfigSchema,
   links: Schema.Array(TaskLinkSchema),
   tasks: Schema.Array(TaskSchema),
@@ -1287,6 +1347,7 @@ export const LexaApi = HttpApi.make("lexa")
   .add(projectsGroup)
   .add(columnsGroup)
   .add(swimlanesGroup)
+  .add(milestonesGroup)
   .add(fieldConfigGroup)
   .add(forgeGroup)
   .add(taskLinksGroup)
@@ -1724,7 +1785,7 @@ const swimlanesLive = HttpApiBuilder.group(LexaApi, "swimlanes", (handlers) =>
         const project = yield* projectService.findBySlug(req.path.slug);
         const swimlane = yield* swimlaneService.create({
           projectId: project.id, name: req.payload.name, description: req.payload.description,
-          dueAt: req.payload.dueAt,
+          dueAt: req.payload.dueAt, startAt: req.payload.startAt, milestoneId: req.payload.milestoneId,
         });
         return formatSwimlane(swimlane);
       }))
@@ -1735,7 +1796,7 @@ const swimlanesLive = HttpApiBuilder.group(LexaApi, "swimlanes", (handlers) =>
         const swimlaneService = yield* SwimlaneService;
         const swimlane = yield* swimlaneService.update(req.path.id, {
           name: req.payload.name, description: req.payload.description, position: req.payload.position,
-          dueAt: req.payload.dueAt,
+          dueAt: req.payload.dueAt, startAt: req.payload.startAt, milestoneId: req.payload.milestoneId,
         });
         return formatSwimlane(swimlane);
       }))
@@ -1768,8 +1829,68 @@ const swimlanesLive = HttpApiBuilder.group(LexaApi, "swimlanes", (handlers) =>
     )
 );
 
-const fieldConfigLive = HttpApiBuilder.group(LexaApi, "field-config", (handlers) =>
+const milestonesLive = HttpApiBuilder.group(LexaApi, "milestones", (handlers) =>
   handlers
+    .handle("listMilestones", (req) =>
+      respond(Effect.gen(function* () {
+        const projectService = yield* ProjectService;
+        const milestoneService = yield* MilestoneService;
+        const project = yield* projectService.findBySlug(req.path.slug);
+        const milestones = yield* milestoneService.findByProject(project.id, { includeArchived: true });
+        return { data: milestones.map(formatMilestone) };
+      }))
+    )
+    .handle("createMilestone", (req) =>
+      respond(Effect.gen(function* () {
+        yield* requireAdmin;
+        const projectService = yield* ProjectService;
+        const milestoneService = yield* MilestoneService;
+        const project = yield* projectService.findBySlug(req.path.slug);
+        const milestone = yield* milestoneService.create({
+          projectId: project.id, name: req.payload.name, description: req.payload.description, dueAt: req.payload.dueAt,
+        });
+        return formatMilestone(milestone);
+      }))
+    )
+    .handle("updateMilestone", (req) =>
+      respond(Effect.gen(function* () {
+        yield* requireAdmin;
+        const milestoneService = yield* MilestoneService;
+        const milestone = yield* milestoneService.update(req.path.id, {
+          name: req.payload.name, description: req.payload.description, position: req.payload.position, dueAt: req.payload.dueAt,
+        });
+        return formatMilestone(milestone);
+      }))
+    )
+    .handle("deleteMilestone", (req) =>
+      respond(Effect.gen(function* () {
+        yield* requireAdmin;
+        const milestoneService = yield* MilestoneService;
+        yield* milestoneService.delete(req.path.id);
+        return undefined;
+      }))
+    )
+    .handle("archiveMilestone", (req) =>
+      respond(Effect.gen(function* () {
+        yield* requireAdmin;
+        const milestoneService = yield* MilestoneService;
+        const identity = yield* AuthIdentity;
+        const result = yield* milestoneService.archive(actorFromIdentity(identity), req.path.id);
+        return { data: formatMilestone(result.milestone), activity: activityPayload(result.activity) };
+      }))
+    )
+    .handle("restoreMilestone", (req) =>
+      respond(Effect.gen(function* () {
+        yield* requireAdmin;
+        const milestoneService = yield* MilestoneService;
+        const identity = yield* AuthIdentity;
+        const result = yield* milestoneService.restore(actorFromIdentity(identity), req.path.id);
+        return { data: formatMilestone(result.milestone), activity: activityPayload(result.activity) };
+      }))
+    )
+);
+
+const fieldConfigLive = HttpApiBuilder.group(LexaApi, "field-config", (handlers) =>  handlers
     .handle("getFieldConfig", (req) =>
       respond(Effect.gen(function* () {
         const projectService = yield* ProjectService;
@@ -2581,6 +2702,7 @@ const boardLive = HttpApiBuilder.group(LexaApi, "board", (handlers) =>
       const projectService = yield* ProjectService;
       const columnService = yield* ColumnService;
       const swimlaneService = yield* SwimlaneService;
+      const milestoneService = yield* MilestoneService;
       const taskService = yield* TaskService;
       const fieldConfigService = yield* FieldConfigService;
       const taskLinkRepo = yield* TaskLinkRepo;
@@ -2588,6 +2710,7 @@ const boardLive = HttpApiBuilder.group(LexaApi, "board", (handlers) =>
       const includeArchived = searchParams(req).get("includeArchived") === "true";
       const columns = yield* columnService.findByProject(project.id);
       const swimlanes = yield* swimlaneService.findByProject(project.id, { includeArchived });
+      const milestones = yield* milestoneService.findByProject(project.id, { includeArchived });
       const fieldConfig = yield* fieldConfigService.findByProject(project.id);
       const links = yield* taskLinkRepo.findByProject(project.id);
       const tasks = yield* taskService.findAllByProject(project.id, { includeArchived });
@@ -2595,6 +2718,7 @@ const boardLive = HttpApiBuilder.group(LexaApi, "board", (handlers) =>
         project: yield* withRepos(project),
         columns: columns.map(formatColumn),
         swimlanes: swimlanes.map(formatSwimlane),
+        milestones: milestones.map(formatMilestone),
         fieldConfig,
         links,
         tasks: tasks.map(formatTask),
@@ -2960,6 +3084,10 @@ function formatSwimlane(s: { id: string; projectId: string; name: string; descri
   return s as any;
 }
 
+function formatMilestone(m: { id: string; projectId: string; name: string; description: string; position: number; dueAt: string | null; archivedAt: string | null; sprintCount: number; archivedSprintCount: number }) {
+  return m as any;
+}
+
 function formatTask(t: { id: string; projectId: string; columnId: string; swimlaneId: string; title: string; description: any; priority: string; type: string; assignees: string[]; position: string; githubs: any[]; createdAt: string; updatedAt: string }) {
   return t as any;
 }
@@ -2999,7 +3127,7 @@ export function createApiHandler(dbPath: string) {
 
   const serviceLayer = buildServiceLayer();
   const handlerLayer = Layer.mergeAll(
-    healthLive, setupLive, projectsLive, columnsLive, swimlanesLive, fieldConfigLive, forgeLive, taskLinksLive, tasksLive, boardLive, wikiLive, apiKeysLive, adminLive, meLive, dashboardLive,
+    healthLive, setupLive, projectsLive, columnsLive, swimlanesLive, milestonesLive, fieldConfigLive, forgeLive, taskLinksLive, tasksLive, boardLive, wikiLive, apiKeysLive, adminLive, meLive, dashboardLive,
     createTeamsLive(LexaApi), createWorkspaceLive(LexaApi), createSessionsLive(LexaApi),
   ).pipe(Layer.provide(Layer.provide(serviceLayer, Layer.mergeAll(dbLayer, LoggerLayer))), Layer.provide(dbLayer));
   const merged = Layer.mergeAll(apiLayer, handlerLayer);
@@ -3026,6 +3154,7 @@ function buildServiceLayer() {
     ProjectRepo.Default, ProjectService.Default, ProjectReposRepo.Default,
     ColumnRepo.Default, ColumnService.Default,
     SwimlaneRepo.Default, SwimlaneService.Default,
+    MilestoneRepo.Default, MilestoneService.Default,
     TaskRepo.Default, TaskService.Default,
     FieldConfigRepo.Default, FieldConfigService.Default,
     ForgeRepo.Default, ForgeService.Default,

@@ -8,11 +8,11 @@ export class SwimlaneRepo extends Effect.Service<SwimlaneRepo>()("Lexa/SwimlaneR
     const db = yield* Sqlite;
 
     return {
-      create: (input: { id: string; projectId: string; name: string; description?: string; position: number; kind?: "backlog" | "milestone"; dueAt?: string | null }): Effect.Effect<Swimlane, ConstraintViolation | DbError | RowNotFound> =>
+      create: (input: { id: string; projectId: string; name: string; description?: string; position: number; kind?: "backlog" | "sprint"; dueAt?: string | null; startAt?: string | null; milestoneId?: string | null }): Effect.Effect<Swimlane, ConstraintViolation | DbError | RowNotFound> =>
         Effect.gen(function* () {
           yield* run(db,
-            `INSERT INTO swimlanes (id, project_id, name, description, position, kind, due_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-            input.id, input.projectId, input.name, input.description ?? "", input.position, input.kind ?? "milestone", input.dueAt ?? null
+            `INSERT INTO swimlanes (id, project_id, name, description, position, kind, due_at, start_at, milestone_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            input.id, input.projectId, input.name, input.description ?? "", input.position, input.kind ?? "sprint", input.dueAt ?? null, input.startAt ?? null, input.milestoneId ?? null
           );
           return yield* queryFirst<SwimlaneRow>(db, `SELECT * FROM swimlanes WHERE id = ?`, input.id)
             .pipe(Effect.map(rowToSwimlane));
@@ -29,13 +29,15 @@ export class SwimlaneRepo extends Effect.Service<SwimlaneRepo>()("Lexa/SwimlaneR
         queryAll<SwimlaneRow>(db, `SELECT * FROM swimlanes WHERE project_id = ? ORDER BY position`, projectId)
           .pipe(Effect.map((rows) => rows.map(rowToSwimlane))),
 
-      update: (id: string, input: { name?: string; description?: string; position?: number; dueAt?: string | null }): Effect.Effect<Swimlane, RowNotFound | DbError | ConstraintViolation> => {
+      update: (id: string, input: { name?: string; description?: string; position?: number; dueAt?: string | null; startAt?: string | null; milestoneId?: string | null }): Effect.Effect<Swimlane, RowNotFound | DbError | ConstraintViolation> => {
         const sets: string[] = [];
         const params: unknown[] = [];
         if (input.name !== undefined) { sets.push("name = ?"); params.push(input.name); }
         if (input.description !== undefined) { sets.push("description = ?"); params.push(input.description); }
         if (input.position !== undefined) { sets.push("position = ?"); params.push(input.position); }
         if (input.dueAt !== undefined) { sets.push("due_at = ?"); params.push(input.dueAt); }
+        if (input.startAt !== undefined) { sets.push("start_at = ?"); params.push(input.startAt); }
+        if (input.milestoneId !== undefined) { sets.push("milestone_id = ?"); params.push(input.milestoneId); }
         if (sets.length === 0)
           return queryFirst<SwimlaneRow>(db, `SELECT * FROM swimlanes WHERE id = ?`, id).pipe(Effect.map(rowToSwimlane));
         params.push(id);
