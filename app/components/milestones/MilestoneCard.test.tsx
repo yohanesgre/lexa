@@ -45,6 +45,13 @@ describe("MilestoneCard", () => {
     expect(screen.getByText(/Overdue/).className).toContain("milestone-due-overdue");
   });
 
+  it("shows a muted no-due pill when the milestone has no due date", () => {
+    render(<MilestoneCard slug="demo" milestone={{ ...MILESTONE, dueAt: null }} board={makeBoard()} />);
+    expect(screen.getByText("no due date")).toBeInTheDocument();
+    expect(screen.getByText("no due date").className).toContain("milestone-due");
+    expect(screen.queryByText(/Due/)).not.toBeInTheDocument();
+  });
+
   it("renders nothing when no milestone is provided", () => {
     const { container } = render(<MilestoneCard slug="demo" milestone={null} board={makeBoard()} />);
     expect(container.firstChild).toBeNull();
