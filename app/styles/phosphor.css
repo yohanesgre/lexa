@@ -4814,6 +4814,16 @@
   font-family: var(--lx-font-display);
   font-weight: 600;
 }
+.tl-group-toggle {
+  width: 100%;
+  background: none;
+  border: none;
+  text-align: left;
+  cursor: pointer;
+}
+.tl-group-toggle:hover {
+  background: var(--lx-surface-card-hover);
+}
 .tl-label.sprint { padding-left: 32px; }
 .tl-label.caption {
   color: var(--lx-text-muted);
