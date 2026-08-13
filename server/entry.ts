@@ -196,7 +196,14 @@ const server: Server<unknown> = Bun.serve({
           console.warn(`[Auth] body too large path=${path} declared=${req.headers.get("content-length") ?? "unknown"} bytes`);
           return tooLargeResponse();
         }
-        const authReq = new Request(req.url, { method: req.method, headers: req.headers, body: read.bytes });
+        const authReq = new Request(req.url, {
+          method: req.method,
+          headers: req.headers,
+          // Never attach an empty body to bodyless requests — better-call
+          // treats a present-but-empty body as a body and 415s GETs (e.g.
+          // get-session) for missing Content-Type.
+          body: req.body ? read.bytes : undefined,
+        });
         // Login rate limiting (R17): 5 failed attempts / 60s per email, then
         // a 15-minute lockout — small in-process limiter (1.6.27 has no
         // rateLimit plugin; memory storage is fine for the single server
