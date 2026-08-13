@@ -204,6 +204,29 @@ describe("SwimlaneService update", () => {
     if (Either.isLeft(result)) expect(result.left).toBeInstanceOf(InvalidArgs);
   });
 
+  it("partial PATCH validates against the lane's other bound (startAt vs dueAt)", () => {
+    const db = tmpDb();
+    seed(db);
+    const svc = makeService(db);
+    // m2: no dates, no tasks → set a consistent range first.
+    Effect.runSync(svc.update("m2", { startAt: "2026-08-10", dueAt: "2026-08-30" }));
+    // Lone startAt later than the lane's dueAt → InvalidArgs.
+    const startLate = Effect.runSync(Effect.either(svc.update("m2", { startAt: "2026-09-01" })));
+    expect(Either.isLeft(startLate)).toBe(true);
+    if (Either.isLeft(startLate)) expect(startLate.left).toBeInstanceOf(InvalidArgs);
+    // Lone dueAt earlier than the lane's startAt → InvalidArgs.
+    const dueEarly = Effect.runSync(Effect.either(svc.update("m2", { dueAt: "2026-07-01" })));
+    expect(Either.isLeft(dueEarly)).toBe(true);
+    if (Either.isLeft(dueEarly)) expect(dueEarly.left).toBeInstanceOf(InvalidArgs);
+    // A valid lone startAt passes and persists.
+    const ok = Effect.runSync(Effect.either(svc.update("m2", { startAt: "2026-07-15" })));
+    expect(Either.isRight(ok)).toBe(true);
+    if (Either.isRight(ok)) {
+      expect(ok.right.startAt).toBe("2026-07-15");
+      expect(ok.right.dueAt).toBe("2026-08-30");
+    }
+  });
+
   it("update persists startAt/milestoneId and clears them with null", () => {
     const db = tmpDb();
     seed(db);
@@ -211,8 +234,8 @@ describe("SwimlaneService update", () => {
     db.prepare("INSERT INTO milestones (id, project_id, name, position) VALUES ('ms1','p1','v1',0)").run();
     Effect.runSync(
       Effect.gen(function* () {
-        const lane = yield* svc.update("m1", { startAt: "2026-08-10", milestoneId: "ms1" });
-        expect(lane.startAt).toBe("2026-08-10");
+        const lane = yield* svc.update("m1", { startAt: "2026-05-10", milestoneId: "ms1" });
+        expect(lane.startAt).toBe("2026-05-10");
         expect(lane.milestoneId).toBe("ms1");
         const cleared = yield* svc.update("m1", { startAt: null, milestoneId: null });
         expect(cleared.startAt).toBeNull();
