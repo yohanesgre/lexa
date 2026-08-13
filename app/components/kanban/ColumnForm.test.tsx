@@ -8,7 +8,7 @@ import type { Column } from "../../../shared/types";
 
 const COLUMN: Column = {
   id: "c1", projectId: "p1", name: "Done", position: 1, color: "#22c55e",
-  wipLimit: 4, requiredFields: ["description"], githubState: "closed",
+  wipLimit: 4, requiredFields: ["description"], githubState: "closed", isDone: false,
 };
 
 function renderForm(props: Partial<Parameters<typeof ColumnForm>[0]> = {}) {
@@ -44,6 +44,7 @@ describe("ColumnForm (create)", () => {
       wipLimit: 3,
       requiredFields: ["description"],
       githubState: "open",
+      isDone: false,
     });
   });
 
@@ -86,6 +87,7 @@ describe("ColumnForm (edit)", () => {
       wipLimit: 4,
       requiredFields: ["description"],
       githubState: "closed",
+      isDone: false,
     });
   });
 
