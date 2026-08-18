@@ -1,41 +1,57 @@
 import { describe, expect, it } from "vitest";
-import { parseDay, formatDay, weekStart, addDays, buildRange, dayForX, xForDay, axisDays, clampDate, DAY_WIDTH_PX } from "./gantt";
+import { parseDay, formatDay, addDays, buildRange, dayForX, xForDay, axisDays, clampDate, DAY_WIDTH_PX } from "./gantt";
 
 describe("gantt date math", () => {
   it("parseDay/formatDay round-trip without TZ shift", () => {
     expect(formatDay(parseDay("2026-08-13"))).toBe("2026-08-13");
   });
-  it("weekStart lands on Monday", () => {
-    expect(formatDay(weekStart(parseDay("2026-08-13")))).toBe("2026-08-10"); // Thu → Mon
-  });
-  it("weekStart on a Sunday lands on the previous Monday", () => {
-    expect(formatDay(weekStart(parseDay("2026-08-16")))).toBe("2026-08-10");
-  });
   it("addDays crosses month and year boundaries", () => {
     expect(formatDay(addDays(parseDay("2026-12-30"), 5))).toBe("2027-01-04");
   });
-  it("buildRange covers all items and always includes today", () => {
+  it("buildRange covers all items with day padding and includes today", () => {
+    // earliest 2026-08-03 − 4 lead days = 2026-07-30; latest 2026-08-14 + 5 trail = 2026-08-19
     const r = buildRange([{ startAt: "2026-08-03", dueAt: "2026-08-14" }], "2026-08-13");
-    expect(formatDay(r.from)).toBe("2026-07-27"); // padded week before
-    expect(formatDay(r.to)).toBe("2026-08-24");   // padded week after
+    expect(formatDay(r.from)).toBe("2026-07-30");
+    expect(formatDay(r.to)).toBe("2026-08-19");
   });
   it("buildRange includes today even when items are in the past", () => {
     const r = buildRange([{ startAt: null, dueAt: "2026-01-01" }], "2026-08-13");
-    expect(formatDay(r.to)).toBe("2026-08-24");
+    // from = earliest item 2026-01-01 − 4 = 2025-12-28; to = max(latest item, today) + 5 = 2026-08-18
+    expect(formatDay(r.from)).toBe("2025-12-28");
+    expect(formatDay(r.to)).toBe("2026-08-18");
   });
   it("buildRange handles empty items with only today", () => {
     const r = buildRange([], "2026-08-13");
-    expect(formatDay(r.from)).toBe("2026-08-03");
-    expect(formatDay(r.to)).toBe("2026-08-24");
+    expect(formatDay(r.from)).toBe("2026-08-09");
+    expect(formatDay(r.to)).toBe("2026-08-18");
   });
-  it("axisDays returns Monday-aligned weeks covering the range", () => {
-    const days = axisDays(parseDay("2026-07-27"), parseDay("2026-08-24"));
-    expect(days).toHaveLength(29); // 4 weeks + 1 inclusive
-    expect(formatDay(days[0])).toBe("2026-07-27");
+  it("buildRange is day-aligned, not week-aligned — short data-driven window", () => {
+    const r = buildRange([{ startAt: "2026-08-18", dueAt: "2026-08-29" }], "2026-08-18");
+    expect(formatDay(r.from)).toBe("2026-08-14");
+    expect(formatDay(r.to)).toBe("2026-09-03");
   });
-  it("axisDays aligns the start to the range's week start even mid-week", () => {
-    const days = axisDays(parseDay("2026-08-13"), parseDay("2026-08-13"));
+  it("buildRange extends the end with future days to fill a min width", () => {
+    // from = 08-14; minDays 40 → to = 08-14 + 39 = 09-22
+    const r = buildRange([{ startAt: "2026-08-18", dueAt: "2026-08-29" }], "2026-08-18", { minDays: 40 });
+    expect(formatDay(r.from)).toBe("2026-08-14");
+    expect(formatDay(r.to)).toBe("2026-09-22");
+    expect(axisDays(r.from, r.to)).toHaveLength(40);
+  });
+  it("buildRange minDays never trims a wider data-driven range", () => {
+    // data range 08-14 → 09-03 = 21 days; minDays 10 should not shrink it
+    const r = buildRange([{ startAt: "2026-08-18", dueAt: "2026-08-29" }], "2026-08-18", { minDays: 10 });
+    expect(formatDay(r.to)).toBe("2026-09-03");
+  });
+  it("axisDays returns every day in the range inclusive", () => {
+    const days = axisDays(parseDay("2026-08-10"), parseDay("2026-08-13"));
+    expect(days).toHaveLength(4);
     expect(formatDay(days[0])).toBe("2026-08-10");
+    expect(formatDay(days[3])).toBe("2026-08-13");
+  });
+  it("axisDays does not week-align a mid-week start", () => {
+    const days = axisDays(parseDay("2026-08-13"), parseDay("2026-08-13"));
+    expect(days).toHaveLength(1);
+    expect(formatDay(days[0])).toBe("2026-08-13");
   });
   it("xForDay/dayForX round-trip snaps to day", () => {
     const start = parseDay("2026-07-27");

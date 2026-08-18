@@ -69,7 +69,7 @@ export function SwimlanesPage({ slug }: { slug: string }) {
   if (isLoading) {
     return (
       <main className="page-frame">
-        <div style={{ maxWidth: 760 }}>
+        <div>
           <div className="skeleton" style={{ width: 160, height: 24 }} />
           <div className="skeleton mt-2" style={{ width: 100, height: 12 }} />
           <div className="tasks-filter mt-3">
@@ -102,7 +102,7 @@ export function SwimlanesPage({ slug }: { slug: string }) {
 
   return (
     <main className="page-frame">
-      <div style={{ maxWidth: 760 }}>
+      <div>
         <div className="flex items-center justify-between mb-2">
           <div>
             <h1 className="font-display text-2xl weight-600 color-primary">Swimlanes</h1>

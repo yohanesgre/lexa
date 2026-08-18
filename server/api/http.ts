@@ -396,7 +396,6 @@ const RuntimeSchema = Schema.Struct({
   modelsCatalog: Schema.Array(RuntimeModelSchema),
   agentsCatalog: Schema.Array(RuntimeAgentSchema),
   status: Schema.Literal("online", "offline"),
-  mcpConnected: Schema.Boolean,
   lastError: Schema.NullOr(Schema.String),
   hostname: Schema.String,
   lastSeen: Schema.NullOr(Schema.String),
@@ -668,9 +667,6 @@ const UpdateRuntimeInput = Schema.Struct({
 
 const HeartbeatInput = Schema.Struct({
   runtimeId: Schema.String,
-  // Daemon-verified Lexa MCP connectivity (initialize+ping vs /mcp). Older
-  // daemons never send it → treated as false (blocked from Forge tasks).
-  mcpConnected: Schema.optionalWith(Schema.Boolean, { default: () => false }),
 });
 const ClaimInput = Schema.Struct({ runtimeId: Schema.String });
 const ClaimRuntimeEventInput = Schema.Struct({ machineId: Schema.String });
@@ -1306,7 +1302,6 @@ const UserSchema = Schema.Struct({
 });
 
 const UserPath = Schema.Struct({ id: Schema.String });
-const UpdateUserRoleInput = Schema.Struct({ role: Schema.Literal("admin", "member") });
 
 const ProjectRoleEntry = Schema.Struct({
   projectId: Schema.String,
@@ -1322,8 +1317,6 @@ const SetProjectRoleInput = Schema.Struct({
 const adminGroup = HttpApiGroup.make("admin")
   .add(HttpApiEndpoint.get("listUsers", "/admin/users")
     .addSuccess(Schema.Struct({ data: Schema.Array(UserSchema) })))
-  .add(HttpApiEndpoint.patch("updateUserRole", "/admin/users/:id")
-    .setPath(UserPath).setPayload(UpdateUserRoleInput).addSuccess(UserSchema))
   .add(HttpApiEndpoint.get("listUserProjectRoles", "/admin/users/:id/projects")
     .setPath(UserPath).addSuccess(Schema.Struct({ data: Schema.Array(ProjectRoleEntry) })))
   .add(HttpApiEndpoint.put("setUserProjectRole", "/admin/users/:id/projects")
@@ -1981,10 +1974,7 @@ const forgeLive = HttpApiBuilder.group(LexaApi, "forge", (handlers) =>
     .handle("heartbeat", (req) =>
       respond(Effect.gen(function* () {
         const service = yield* ForgeService;
-        yield* service.heartbeat(
-          req.payload.runtimeId,
-          req.payload.mcpConnected
-        );
+        yield* service.heartbeat(req.payload.runtimeId);
         // A live heartbeat proves the credential works — clear any
         // previously reported auth failure.
         yield* service.clearRuntimeLastError(req.payload.runtimeId);
@@ -2992,19 +2982,6 @@ const adminLive = HttpApiBuilder.group(LexaApi, "admin", (handlers) =>
         const service = yield* UserService;
         const users = yield* service.list();
         return { data: users.map((u) => ({ id: u.id, email: u.email, name: u.name, role: u.role, createdAt: u.created_at, lastSeen: u.last_seen })) };
-      }))
-    )
-    .handle("updateUserRole", (req) =>
-      respond(Effect.gen(function* () {
-        const identity = yield* requireAdmin;
-        const service = yield* UserService;
-        if (req.payload.role === "admin") {
-          yield* service.promoteToAdmin(req.path.id);
-        } else {
-          yield* service.demoteToMember(req.path.id, identity.userId ?? "");
-        }
-        const user = yield* service.getById(req.path.id);
-        return { id: user.id, email: user.email, name: user.name, role: user.role, createdAt: user.created_at, lastSeen: user.last_seen };
       }))
     )
     .handle("listUserProjectRoles", (req) =>

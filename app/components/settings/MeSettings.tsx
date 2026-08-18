@@ -12,7 +12,7 @@ export function MeSettings() {
   if (!user) return null;
 
   return (
-    <main className="page-frame">
+    <main className="page-frame page-frame-narrow">
       <h1 className="font-display text-2xl font-semibold text-lx-text-primary mb-6">User settings</h1>
 
       <ProfileSection />

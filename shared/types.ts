@@ -323,9 +323,6 @@ export interface Runtime {
   modelsCatalog: RuntimeModel[];
   agentsCatalog: RuntimeAgent[];
   status: "online" | "offline";
-  // Daemon-verified Lexa MCP connectivity (initialize+ping on every
-  // heartbeat). Runtimes without it are blocked from Forge tasks.
-  mcpConnected: boolean;
   // Last daemon failure reported via the machine heartbeat — e.g.
   // "API key revoked" after the daemon exited with code 3. Cleared on
   // daemon register/heartbeat success. Null = no known failure.

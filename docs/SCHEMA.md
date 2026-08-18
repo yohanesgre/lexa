@@ -43,7 +43,8 @@ CREATE INDEX idx_project_repos_repo ON project_repos(repo);
 -- ============================================================
 -- Humans authenticate in-app (Better Auth, email/password) — no Cloudflare
 -- Access, no edge identity. users.id is re-keyed to the Better Auth id
--- format (16-char alphanumeric) by the auth migration; FK references
+-- format (32 lowercase hex chars via lower(hex(randomblob(16)))) by the
+-- auth migration; FK references
 -- (user_project_roles.user_id, api_keys.user_id, comments.author_id,
 -- activity.actor_user_id) are rewritten to the new ids. The global role
 -- comes from the env allow-list LXK_ADMIN_EMAILS (applied at provisioning
@@ -52,14 +53,20 @@ CREATE INDEX idx_project_repos_repo ON project_repos(repo);
 -- Team-admin authority comes from the org member role (owner/admin), never
 -- from users.role. email_verified backfilled 1 for all legacy users.
 CREATE TABLE users (
-  id             TEXT PRIMARY KEY,                            -- Better Auth id (16-char alphanumeric)
+  id             TEXT PRIMARY KEY,                            -- Better Auth id (lower(hex(randomblob(16))) = 32 lowercase hex chars)
   email          TEXT NOT NULL UNIQUE,
   name           TEXT NOT NULL,
   role           TEXT NOT NULL DEFAULT 'member' CHECK(role IN ('superadmin', 'member')),
+  created_at     TEXT NOT NULL DEFAULT (datetime('now')),
+  last_seen      TEXT,
   email_verified INTEGER NOT NULL DEFAULT 1,                  -- legacy rows backfilled 1
   image          TEXT,                                        -- avatar (unused by default email/password)
-  created_at     TEXT NOT NULL DEFAULT (datetime('now')),
-  last_seen      TEXT
+  updated_at     TEXT NOT NULL DEFAULT (datetime('now')),
+  -- admin plugin (R16 user lifecycle: ban = deactivate) — camelCase columns,
+  -- the plugin queries them verbatim
+  banned         INTEGER NOT NULL DEFAULT 0,
+  banReason      TEXT,
+  banExpires     TEXT
 );
 
 -- Per-project roles. PRIMARY KEY includes role: a user holds at most one
@@ -75,42 +82,49 @@ CREATE TABLE user_project_roles (
 -- Better Auth tables (auth-roles-teams) — library-owned shapes
 -- ============================================================
 -- Email/password sessions, accounts, and verification tokens (set-password
--- links, invite acceptance). Timestamps are INTEGER epoch ms — Better Auth's
--- column types (unlike Lexa's TEXT datetime('now') conventions).
--- No social providers: account.provider_id is always 'credential'.
+-- links, invite acceptance). Timestamps are TEXT — the kysely adapter
+-- serializes Date as ISO 8601 strings (spike-verified), unlike Lexa's
+-- TEXT datetime('now') conventions.
+-- No social providers: account.providerId is always 'credential'.
 CREATE TABLE session (
-  id         TEXT PRIMARY KEY,
-  token      TEXT NOT NULL UNIQUE,                            -- session token (hashed)
-  user_id    TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  expires_at INTEGER NOT NULL,                                -- epoch ms; 7d sliding (updateAge 24h)
-  ip_address TEXT,
-  user_agent TEXT,
-  created_at INTEGER NOT NULL,
-  updated_at INTEGER NOT NULL
+  id                    TEXT PRIMARY KEY,
+  expiresAt             TEXT NOT NULL,                        -- ISO 8601; 7d sliding (updateAge 24h)
+  token                 TEXT NOT NULL UNIQUE,                 -- session token (hashed)
+  createdAt             TEXT NOT NULL,
+  updatedAt             TEXT NOT NULL,
+  ipAddress             TEXT,
+  userAgent             TEXT,
+  userId                TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  activeOrganizationId  TEXT                                  -- organization plugin; NULL = no active team
 );
-CREATE INDEX idx_session_user ON session(user_id);
+CREATE INDEX session_userId_idx ON session(userId);
 
 CREATE TABLE account (
-  id           TEXT PRIMARY KEY,
-  user_id      TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  account_id   TEXT NOT NULL,                                 -- = user id for credentials
-  provider_id  TEXT NOT NULL,                                 -- 'credential' only
-  access_token TEXT,
-  refresh_token TEXT,
-  id_token     TEXT,
-  password     TEXT,                                          -- Better Auth scrypt hash
-  created_at   INTEGER NOT NULL,
-  updated_at   INTEGER NOT NULL
+  id                    TEXT PRIMARY KEY,
+  accountId             TEXT NOT NULL,                        -- = user id for credentials
+  providerId            TEXT NOT NULL,                        -- 'credential' only
+  userId                TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  accessToken           TEXT,
+  refreshToken          TEXT,
+  idToken               TEXT,
+  accessTokenExpiresAt  TEXT,
+  refreshTokenExpiresAt TEXT,
+  scope                 TEXT,
+  password              TEXT,                                 -- Better Auth scrypt hash
+  createdAt             TEXT NOT NULL,
+  updatedAt             TEXT NOT NULL
 );
+CREATE INDEX account_userId_idx ON account(userId);
 
 CREATE TABLE verification (
   id          TEXT PRIMARY KEY,
   identifier  TEXT NOT NULL,                                  -- set-password / invite token id
   value       TEXT NOT NULL,                                  -- the secret value
-  expires_at  INTEGER NOT NULL,                               -- epoch ms; 7d
-  created_at  INTEGER NOT NULL,
-  updated_at  INTEGER NOT NULL
+  expiresAt   TEXT NOT NULL,                                  -- ISO 8601; 7d
+  createdAt   TEXT NOT NULL,
+  updatedAt   TEXT NOT NULL
 );
+CREATE INDEX verification_identifier_idx ON verification(identifier);
 
 -- ============================================================
 -- Teams (Better Auth organizations) + membership
@@ -123,20 +137,20 @@ CREATE TABLE organization (
   name       TEXT NOT NULL,
   slug       TEXT NOT NULL UNIQUE,                            -- duplicate → SlugTaken 409
   logo       TEXT,
-  created_at INTEGER NOT NULL,                                -- epoch ms (Better Auth)
+  createdAt  TEXT NOT NULL,                                   -- ISO 8601 (Better Auth)
   metadata   TEXT
 );
 
 CREATE TABLE member (
-  id              TEXT PRIMARY KEY,
-  organization_id TEXT NOT NULL REFERENCES organization(id) ON DELETE CASCADE,
-  user_id         TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  role            TEXT NOT NULL,                              -- 'owner'|'admin'|'member' (comma-joined as Better Auth writes it)
-  created_at      INTEGER NOT NULL,                           -- epoch ms (Better Auth)
-  UNIQUE (organization_id, user_id)                           -- one row per (team, user); N teams = N rows
+  id             TEXT PRIMARY KEY,
+  organizationId TEXT NOT NULL REFERENCES organization(id) ON DELETE CASCADE,
+  userId         TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  role           TEXT NOT NULL,                               -- 'owner'|'admin'|'member' (comma-joined as Better Auth writes it)
+  createdAt      TEXT NOT NULL,                               -- ISO 8601 (Better Auth)
+  UNIQUE(organizationId, userId)                              -- one row per (team, user); N teams = N rows
 );
-CREATE INDEX idx_member_org ON member(organization_id);
-CREATE INDEX idx_member_user ON member(user_id);
+CREATE INDEX member_organizationId_idx ON member(organizationId);
+CREATE INDEX member_userId_idx ON member(userId);
 
 -- ============================================================
 -- Workspace invitations (superadmin-issued app-member invites)
@@ -151,7 +165,7 @@ CREATE TABLE workspace_invitations (
   role        TEXT NOT NULL DEFAULT 'member',                 -- 'member' only (superadmin-issued app-member invites)
   token       TEXT NOT NULL UNIQUE,                           -- link secret (crypto.randomUUID())
   expires_at  TEXT NOT NULL,                                  -- 7d after issue
-  created_by  TEXT REFERENCES users(id),                      -- superadmin who issued
+  created_by  TEXT REFERENCES users(id) ON DELETE SET NULL,   -- superadmin who issued
   created_at  TEXT NOT NULL DEFAULT (datetime('now')),
   accepted_at TEXT                                           -- NULL = pending
 );
@@ -363,7 +377,7 @@ CREATE TABLE wiki_pages (
   UNIQUE(project_id, slug)
 );
 
--- FTS5 external-content table for wiki search (MCP search_wiki tool).
+-- FTS5 external-content table for wiki search.
 CREATE VIRTUAL TABLE wiki_fts USING fts5(
   title,
   content_text,
@@ -405,13 +419,13 @@ CREATE TABLE wiki_page_revisions (
 CREATE INDEX idx_revisions_page ON wiki_page_revisions(page_id, created_at DESC);
 
 -- ============================================================
--- API Keys (MCP / Hermes auth)
+-- API Keys (machine auth)
 -- ============================================================
 -- Raw key format: "lxk_" + base62(32 random bytes) — high entropy by
 -- construction, so unsalted SHA-256 of the raw key is a sound storage hash.
 -- key_hash UNIQUE also serves as the lookup index.
 -- last_used_at: updated only when NULL or older than 1 hour (sampled,
---   avoids a SQLite write on every MCP call).
+--   avoids a SQLite write on every API call).
 CREATE TABLE api_keys (
   id           TEXT PRIMARY KEY,
   name         TEXT NOT NULL,                                -- "hermes", "opencode-local"
@@ -498,7 +512,6 @@ CREATE TABLE runtimes (
   model          TEXT NOT NULL DEFAULT '',
   extra_args     TEXT NOT NULL DEFAULT '[]',
   models_catalog TEXT NOT NULL DEFAULT '[]',
-  mcp_connected  INTEGER NOT NULL DEFAULT 0,   -- daemon MCP link up (0/1)
   agent          TEXT NOT NULL DEFAULT '',     -- bound agent (rule bundle) id
   print_logs     INTEGER NOT NULL DEFAULT 0,   -- print run logs toggle
   log_level      TEXT NOT NULL DEFAULT '',     -- daemon log verbosity
@@ -581,6 +594,7 @@ CREATE TABLE forge_tasks (
   started_at    TEXT,
   finished_at   TEXT
 );
+CREATE INDEX idx_forge_tasks_created ON forge_tasks(created_at DESC, id DESC);
 CREATE INDEX idx_forge_tasks_status ON forge_tasks(status, created_at);
 
 -- Forge warm sessions: maps one (document, runtime) pair to the agent-side
@@ -727,6 +741,9 @@ CREATE TABLE task_activity (
   created_at    TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE INDEX idx_task_activity_task ON task_activity(task_id, created_at, id);
+
+-- Migration bookkeeping (server/db/migrate.ts):
+-- _migrations (name TEXT PRIMARY KEY, applied_at TEXT) — applied migration files.
 ```
 
 ## Design Notes

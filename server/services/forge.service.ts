@@ -532,9 +532,9 @@ export class ForgeService extends Effect.Service<ForgeService>()("Lexa/ForgeServ
           return requeued + removed;
         }),
 
-      heartbeat: (id: string, mcpConnected: boolean): Effect.Effect<void, ConstraintViolation | DbError> =>
+      heartbeat: (id: string): Effect.Effect<void, ConstraintViolation | DbError> =>
         Effect.gen(function* () {
-          yield* repo.updateRuntimeHeartbeat(id, mcpConnected);
+          yield* repo.updateRuntimeHeartbeat(id);
         }),
 
       syncCatalogs: (machineId: string, catalogs: Array<{

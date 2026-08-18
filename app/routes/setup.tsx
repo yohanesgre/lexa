@@ -172,7 +172,7 @@ function SetupWizard() {
                 <h2 className="font-display text-lg font-medium text-lx-text-primary">API key</h2>
               </div>
               <p className="text-sm text-lx-text-secondary leading-5 mb-4">
-                Machine access (MCP agents, scripts) authenticates with a Bearer key. Generate one now — you'll see it only once.
+                Machine access (agents, scripts) authenticates with a Bearer key. Generate one now — you'll see it only once.
               </p>
               {apiKey ? (
                 <div className="flex items-center gap-2">
@@ -189,7 +189,7 @@ function SetupWizard() {
               )}
               {apiKey && (
                 <p className="text-xs text-lx-text-muted mt-3 leading-4">
-                  Copy it now. It won't be shown again. Add it to MCP clients as <code className="font-mono">Bearer {apiKey.slice(0, 6)}…</code>
+                  Copy it now. It won't be shown again. Add it to clients as <code className="font-mono">Bearer {apiKey.slice(0, 6)}…</code>
                 </p>
               )}
               <div className="flex justify-between mt-5">

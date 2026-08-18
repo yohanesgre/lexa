@@ -32,7 +32,7 @@ export function TeamSettings() {
 
   if (teamsLoading) {
     return (
-      <main className="page-frame">
+      <main className="page-frame page-frame-narrow">
         <div className="skeleton" style={{ width: 220, height: 28 }} />
         <div className="skeleton mt-3" style={{ width: 120, height: 14 }} />
       </main>
@@ -41,7 +41,7 @@ export function TeamSettings() {
 
   if (!team) {
     return (
-      <main className="page-frame">
+      <main className="page-frame page-frame-narrow">
         <h1 className="font-display text-2xl font-semibold text-lx-text-primary mb-4">Team settings</h1>
         <div className="empty-box">
           <div className="text-sm font-medium text-lx-text-primary">No team</div>
@@ -54,7 +54,7 @@ export function TeamSettings() {
   }
 
   return (
-    <main className="page-frame">
+    <main className="page-frame page-frame-narrow">
       <div className="flex items-center justify-between mb-4">
         <h1 className="font-display text-2xl font-semibold text-lx-text-primary mb-0">Team settings</h1>
         {isSuperadmin && teams.length > 1 && (

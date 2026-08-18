@@ -191,7 +191,6 @@ describe("isRateLimitExemptPath", () => {
     expect(isRateLimitExemptPath("/api/forge/tasks/history")).toBe(false);
     expect(isRateLimitExemptPath("/api/projects")).toBe(false);
     expect(isRateLimitExemptPath("/api/setup")).toBe(false);
-    expect(isRateLimitExemptPath("/mcp")).toBe(false);
   });
 });
 

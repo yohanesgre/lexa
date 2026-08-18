@@ -395,7 +395,7 @@ function cmdTaskGet(flags: Record<string, string | boolean>, args: string[]): Ef
     console.log(`  id: ${t.id}  priority: ${t.priority ?? "—"}  type: ${t.type ?? "—"}`);
     console.log(`  column: ${t.columnId}  swimlane: ${t.swimlaneId}`);
     // Description is TipTap JSON — render to Markdown so agents/humans can
-    // actually read it (same conversion the MCP boundary uses).
+    // actually read it.
     const { docToMarkdown } = yield* Effect.promise(() => import("../../shared/markdown"));
     const md = docToMarkdown(t.description as import("../../shared/types").TipTapDoc).trim();
     console.log(`  description: ${md ? `\n${md}` : "(empty)"}`);
@@ -443,7 +443,7 @@ function cmdWikiGet(flags: Record<string, string | boolean>, args: string[]): Ef
     console.log(`# ${page.title}`);
     console.log("");
     // Wiki content is TipTap JSON — render to Markdown so the CLI stays
-    // human-readable (same conversion the MCP boundary uses).
+    // human-readable.
     const { docToMarkdown } = yield* Effect.promise(() => import("../../shared/markdown"));
     const md = docToMarkdown(page.content as import("../../shared/types").TipTapDoc);
     console.log(md.trim() || "(empty page)");

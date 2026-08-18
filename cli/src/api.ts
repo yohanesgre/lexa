@@ -88,7 +88,6 @@ export interface RuntimeInfo {
   agent: string;
   model: string;
   status: "online" | "offline";
-  mcpConnected: boolean;
   lastError: string | null;
   hostname: string;
   lastSeen: string | null;

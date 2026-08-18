@@ -110,7 +110,7 @@ export function MilestonesPage({ slug, tab }: { slug: string; tab: "list" | "tim
       {tab === "timeline" ? (
         <TimelineTab slug={slug} board={board ?? undefined} milestones={milestones} />
       ) : (
-        <div style={{ maxWidth: 720 }}>
+        <div>
           {milestones.length === 0 && (
             <div className="empty-state" style={{ padding: 24 }}>
               <div className="empty-state-icon">

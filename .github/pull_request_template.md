@@ -28,7 +28,7 @@ fixes #
 - [ ] `tsc --noEmit` passes
 - [ ] `vitest run` passes
 - [ ] Migration SQL added + tested against an existing `data/lexa.db` (if schema changed)
-- [ ] Docs updated if schema/API/MCP/GitHub-sync contract changed (SCHEMA.md, API.md, MCP.md, docs/GITHUB_SETUP.md)
+- [ ] Docs updated if schema/API/GitHub-sync contract changed (SCHEMA.md, API.md, docs/GITHUB_SETUP.md)
 - [ ] Wireframes updated and rebuilt if UI changed
 - [ ] Tests added for service/API changes (if applicable)
 - [ ] No unrelated changes
