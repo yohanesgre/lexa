@@ -6,13 +6,13 @@ const NOW = "2026-07-29T12:00:00Z";
 
 describe("rowToProject", () => {
   it("maps snake_case to camelCase", () => {
-    const row: ProjectRow = { id: "p1", name: "Test", slug: "test", description: "desc", created_at: NOW, updated_at: NOW, team_id: null };
+    const row: ProjectRow = { id: "p1", name: "Test", slug: "test", key: "EG", description: "desc", created_at: NOW, updated_at: NOW, team_id: null };
     const p = rowToProject(row);
-    expect(p).toEqual({ id: "p1", name: "Test", slug: "test", description: "desc", createdAt: NOW, updatedAt: NOW, teamId: null });
+    expect(p).toEqual({ id: "p1", name: "Test", slug: "test", key: "EG", description: "desc", createdAt: NOW, updatedAt: NOW, teamId: null });
   });
 
   it("maps team_id", () => {
-    const p = rowToProject({ id: "p1", name: "Test", slug: "test", description: "desc", created_at: NOW, updated_at: NOW, team_id: "team-1" });
+    const p = rowToProject({ id: "p1", name: "Test", slug: "test", key: "EG", description: "desc", created_at: NOW, updated_at: NOW, team_id: "team-1" });
     expect(p.teamId).toBe("team-1");
   });
 });
@@ -80,7 +80,7 @@ describe("rowToWikiPageRevision / rowToWikiPageRevisionSummary", () => {
 });
 
 describe("rowToTask", () => {
-  const row: TaskRow = { id: "t1", project_id: "p1", column_id: "c1", swimlane_id: "s1", title: "Fix bug", description: '{"type":"doc","content":[]}', priority: "prio-opt-1", type: "type-opt-1", assignees: "alice", position: "a0", due_at: null, archived_at: null, github_issue_id: null, github_issue_number: null, github_repo: null, github_synced_state: null, created_at: NOW, updated_at: NOW, github_issues_raw: null };
+  const row: TaskRow = { id: "t1", key: "EG-1", project_id: "p1", column_id: "c1", swimlane_id: "s1", title: "Fix bug", description: '{"type":"doc","content":[]}', priority: "prio-opt-1", type: "type-opt-1", assignees: "alice", position: "a0", due_at: null, archived_at: null, github_issue_id: null, github_issue_number: null, github_repo: null, github_synced_state: null, created_at: NOW, updated_at: NOW, github_issues_raw: null };
 
   it("maps all fields", () => {
     const t = rowToTask(row);

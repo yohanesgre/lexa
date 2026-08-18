@@ -24,7 +24,7 @@ function json(body: unknown, status = 200): Response {
 }
 
 const TASK: Task = {
-  id: "t1", projectId: "p1", columnId: "c1", swimlaneId: "s1", title: "Task One",
+  id: "t1", key: "EG-1", projectId: "p1", columnId: "c1", swimlaneId: "s1", title: "Task One",
   description: { type: "doc", content: [{ type: "paragraph", content: [{ type: "text", text: "hello body" }] }] },
   priority: "pr-high", type: "tp-feature",
   assignees: [], position: "a0", githubs: [], dueAt: null, archivedAt: null, createdAt: "t", updatedAt: "t",
@@ -113,6 +113,25 @@ describe("TaskDetail (view mode)", () => {
     expect(screen.getByText("hello body")).toBeInTheDocument();
     expect(screen.getByText("High")).toBeInTheDocument();
     expect(screen.getByText("Feature")).toBeInTheDocument();
+  });
+
+  it("renders the ticket key first in the header with a copy button", () => {
+    renderDetail();
+    const header = screen.getByText("Task One").closest(".slideover-title")!;
+    const key = header.querySelector(".task-key");
+    expect(key).not.toBeNull();
+    expect(key!.textContent).toBe("EG-1");
+    expect(header.textContent!.indexOf("EG-1")).toBeLessThan(header.textContent!.indexOf("Task One"));
+    expect(screen.getByRole("button", { name: "Copy key" })).toBeInTheDocument();
+  });
+
+  it("copies the key to the clipboard on click", async () => {
+    const user = userEvent.setup();
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
+    renderDetail();
+    await user.click(screen.getByRole("button", { name: "Copy key" }));
+    expect(writeText).toHaveBeenCalledWith("EG-1");
   });
 
   it("shows the missing-fields warning for the task's column", async () => {

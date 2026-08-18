@@ -19,19 +19,19 @@ const COL2: Column = { id: "c2", projectId: "p1", name: "Done", position: 1, col
 const NEW_COL: Column = { id: "c9", projectId: "p1", name: "Review", position: 2, color: "#888", wipLimit: null, requiredFields: [], githubState: null, isDone: false };
 
 const TASK1: Task = {
-  id: "t1", projectId: "p1", columnId: "c1", swimlaneId: "s1", title: "Task One",
+  id: "t1", key: "EG-1", projectId: "p1", columnId: "c1", swimlaneId: "s1", title: "Task One",
   description: { type: "doc", content: [] }, priority: "p1", type: "t1",
   assignees: [], position: "a0", githubs: [], dueAt: null, archivedAt: null, createdAt: "t", updatedAt: "t",
 };
 const TASK2: Task = {
-  id: "t2", projectId: "p1", columnId: "c1", swimlaneId: "s1", title: "Task Two",
+  id: "t2", key: "EG-1", projectId: "p1", columnId: "c1", swimlaneId: "s1", title: "Task Two",
   description: { type: "doc", content: [] }, priority: "p1", type: "t1",
   assignees: [], position: "a1", githubs: [], dueAt: null, archivedAt: null, createdAt: "t", updatedAt: "t",
 };
 
 function makeBoard(columns: Column[], lanes: Board["swimlanes"], tasks: Task[]): Board {
   return {
-    project: { id: "p1", slug: "demo", name: "Demo", description: "", repos: [], createdAt: "t", updatedAt: "t" },
+    project: { id: "p1", slug: "demo", key: "EG", name: "Demo", description: "", repos: [], createdAt: "t", updatedAt: "t" },
     columns,
     swimlanes: lanes,
     milestones: [],

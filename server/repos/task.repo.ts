@@ -27,7 +27,7 @@ const TASK_SELECT = `t.*, c.github_state as column_github_state, GROUP_CONCAT(ta
 
 // Slim variant for list/board/anchor paths — no t.description (the TipTap
 // blob is only needed for get/update/mutation responses).
-const TASK_SELECT_SLIM = `t.id, t.project_id, t.column_id, t.swimlane_id, t.title, t.priority, t.type, t.position, t.due_at, t.archived_at, t.github_issue_id, t.github_issue_number, t.github_repo, t.github_synced_state, t.created_at, t.updated_at, c.github_state as column_github_state, GROUP_CONCAT(ta.user_name, '||') AS assignees, COALESCE(GROUP_CONCAT(gi.issue_id || ',' || gi.issue_number || ',' || gi.repo || ',' || COALESCE(gi.synced_state,'') || ',' || COALESCE(gi.push_failed,'0'), '||'), '') AS github_issues_raw`;
+const TASK_SELECT_SLIM = `t.id, t.key, t.project_id, t.column_id, t.swimlane_id, t.title, t.priority, t.type, t.position, t.due_at, t.archived_at, t.github_issue_id, t.github_issue_number, t.github_repo, t.github_synced_state, t.created_at, t.updated_at, c.github_state as column_github_state, GROUP_CONCAT(ta.user_name, '||') AS assignees, COALESCE(GROUP_CONCAT(gi.issue_id || ',' || gi.issue_number || ',' || gi.repo || ',' || COALESCE(gi.synced_state,'') || ',' || COALESCE(gi.push_failed,'0'), '||'), '') AS github_issues_raw`;
 
 const TASK_FROM = `tasks t LEFT JOIN columns c ON t.column_id = c.id LEFT JOIN task_assignees ta ON ta.task_id = t.id LEFT JOIN task_github_issues gi ON gi.task_id = t.id`;
 
@@ -61,6 +61,8 @@ export class TaskRepo extends Effect.Service<TaskRepo>()("Lexa/TaskRepo", {
         assignees?: string[];
         position: string;
         dueAt?: string | null;
+        number: number;
+        key: string;
         githubIssueId?: string;
         githubIssueNumber?: number;
         githubRepo?: string;
@@ -70,8 +72,8 @@ export class TaskRepo extends Effect.Service<TaskRepo>()("Lexa/TaskRepo", {
           yield* Effect.logDebug("[TaskRepo] create");
           yield* run(
             db,
-            `INSERT INTO tasks (id, project_id, column_id, swimlane_id, title, description, priority, type, position, due_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            `INSERT INTO tasks (id, project_id, column_id, swimlane_id, title, description, priority, type, position, due_at, number, key)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
             input.id,
             input.projectId,
             input.columnId,
@@ -81,7 +83,9 @@ export class TaskRepo extends Effect.Service<TaskRepo>()("Lexa/TaskRepo", {
             input.priority,
             input.type,
             input.position,
-            input.dueAt ?? null
+            input.dueAt ?? null,
+            input.number,
+            input.key
           );
           if (input.assignees && input.assignees.length > 0) {
             const stmts = input.assignees.map((name) => ({

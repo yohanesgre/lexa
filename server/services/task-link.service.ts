@@ -100,7 +100,7 @@ export class TaskLinkService extends Effect.Service<TaskLinkService>()("Lexa/Tas
                 toTaskId: input.toTaskId,
                 relation: input.relation,
               });
-              const ev = yield* activityService.append(input.fromTaskId, actor, "link_added", msg.linkAdded(input.relation, to.title));
+              const ev = yield* activityService.append(input.fromTaskId, actor, "link_added", msg.linkAdded(input.relation, to.key, to.title));
               return { link, activity: [ev] };
             })
           );
@@ -117,7 +117,7 @@ export class TaskLinkService extends Effect.Service<TaskLinkService>()("Lexa/Tas
           return yield* withTx(db, Effect.gen(function* () {
             const n = yield* repo.delete(linkId);
             if (n === 0) return yield* new TaskLinkNotFound({ id: linkId });
-            const ev = yield* activityService.append(link.fromTaskId, actor, "link_removed", msg.linkRemoved(link.relation, other.title));
+            const ev = yield* activityService.append(link.fromTaskId, actor, "link_removed", msg.linkRemoved(link.relation, other.key, other.title));
             return { activity: [ev] };
           }));
         }),

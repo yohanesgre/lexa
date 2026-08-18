@@ -8,7 +8,7 @@ import { emptyFilters, type FilterState } from "../../lib/filters";
 import type { Board } from "../../../shared/types";
 
 const BOARD: Board = {
-  project: { id: "p1", slug: "demo", name: "Demo", description: "", repos: [], createdAt: "t", updatedAt: "t" },
+  project: { id: "p1", slug: "demo", key: "EG", name: "Demo", description: "", repos: [], createdAt: "t", updatedAt: "t" },
   columns: [
     { id: "c1", projectId: "p1", name: "Todo", position: 0, color: "#888", wipLimit: null, requiredFields: [], githubState: null, isDone: false },
     { id: "c2", projectId: "p1", name: "Done", position: 1, color: "#888", wipLimit: null, requiredFields: [], githubState: null, isDone: false },
@@ -21,8 +21,8 @@ const BOARD: Board = {
   },
   links: [],
   tasks: [
-    { id: "t1", projectId: "p1", columnId: "c1", swimlaneId: "s1", title: "T1", description: { type: "doc", content: [] }, priority: "pr-high", type: "tp-feature", assignees: ["Maria"], position: "a0", githubs: [], dueAt: null, archivedAt: null, createdAt: "t", updatedAt: "t" },
-    { id: "t2", projectId: "p1", columnId: "c2", swimlaneId: "s1", title: "T2", description: { type: "doc", content: [] }, priority: "pr-low", type: "tp-bug", assignees: [], position: "a1", githubs: [], dueAt: null, archivedAt: null, createdAt: "t", updatedAt: "t" },
+    { id: "t1", key: "EG-1", projectId: "p1", columnId: "c1", swimlaneId: "s1", title: "T1", description: { type: "doc", content: [] }, priority: "pr-high", type: "tp-feature", assignees: ["Maria"], position: "a0", githubs: [], dueAt: null, archivedAt: null, createdAt: "t", updatedAt: "t" },
+    { id: "t2", key: "EG-1", projectId: "p1", columnId: "c2", swimlaneId: "s1", title: "T2", description: { type: "doc", content: [] }, priority: "pr-low", type: "tp-bug", assignees: [], position: "a1", githubs: [], dueAt: null, archivedAt: null, createdAt: "t", updatedAt: "t" },
   ],
 };
 

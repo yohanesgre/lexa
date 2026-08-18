@@ -330,6 +330,7 @@ function cmdTaskList(flags: Record<string, string | boolean>, args: string[]): E
     const columns = yield* client.listColumns(slug);
     const colName = new Map(columns.map((c) => [c.id, c.name]));
     printTable(tasks.map((t) => ({
+      KEY: t.key ?? "",
       ID: t.id.slice(0, 8),
       TITLE: t.title,
       COLUMN: colName.get(t.columnId) ?? t.columnId,
@@ -391,7 +392,7 @@ function cmdTaskGet(flags: Record<string, string | boolean>, args: string[]): Ef
     const taskId = yield* resolveTaskId(client, slug, id);
     const t = yield* client.getTask(slug, taskId);
     if (flags.json === true) { console.log(JSON.stringify(t, null, 2)); return; }
-    console.log(`  ${t.title}`);
+    console.log(`  ${t.key} — ${t.title}`);
     console.log(`  id: ${t.id}  priority: ${t.priority ?? "—"}  type: ${t.type ?? "—"}`);
     console.log(`  column: ${t.columnId}  swimlane: ${t.swimlaneId}`);
     // Description is TipTap JSON — render to Markdown so agents/humans can

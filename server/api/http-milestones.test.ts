@@ -32,7 +32,7 @@ beforeAll(async () => {
   db.exec(`
 INSERT INTO users (id, email, name, role) VALUES ('u1', 'maria@lexa.test', 'Maria', 'superadmin');
 INSERT INTO api_keys (id, name, key_hash, user_id) VALUES ('k1', 'test-admin', '${adminHash}', 'u1');
-INSERT INTO projects (id, name, slug) VALUES ('p1', 'P', 'p1');
+INSERT INTO projects (id, name, slug, key, next_task_number) VALUES ('p1', 'P', 'p1', 'EG', 1);
 INSERT INTO columns (id, project_id, name, position) VALUES ('c1', 'p1', 'Todo', 0), ('c2', 'p1', 'Done', 1);
 INSERT INTO swimlanes (id, project_id, name, position, kind) VALUES ('s-backlog', 'p1', 'Backlog', 0, 'backlog');
 INSERT INTO milestones (id, project_id, name, position) VALUES ('ms-seed', 'p1', 'v0', 0);
@@ -110,7 +110,7 @@ describe("milestones routes", () => {
     const created = await handler(json("POST", "/api/projects/p1/milestones", { name: "v2" }));
     const m = await created.json();
     db.prepare("INSERT INTO swimlanes (id, project_id, name, position, kind, milestone_id) VALUES ('sp2','p1','Sprint 2',1,'sprint',?)").run(m.id);
-    db.prepare("INSERT INTO tasks (id, project_id, column_id, swimlane_id, title, position, created_at) VALUES ('t-ar','p1','c1','sp2','T','a0','2026-01-01 10:00:00')").run();
+    db.prepare("INSERT INTO tasks (id, project_id, column_id, swimlane_id, title, position, created_at, key, number) VALUES ('t-ar','p1','c1','sp2','T','a0','2026-01-01 10:00:00','EG-1',1)").run();
     const archived = await handler(json("POST", `/api/projects/p1/milestones/${m.id}/archive`));
     expect(archived.status).toBe(200);
     const aBody = await archived.json();
