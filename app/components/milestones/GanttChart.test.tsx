@@ -1,10 +1,22 @@
 // @vitest-environment jsdom
 import "@testing-library/jest-dom/vitest";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi, beforeAll } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 import { GanttChart, type TimelineLane } from "./GanttChart";
 import { DAY_WIDTH_PX } from "../../lib/gantt";
 import type { Milestone, Swimlane } from "../../../shared/types";
+
+// jsdom lacks ResizeObserver; GanttChart uses it to measure the container
+// width for fill-to-width range extension. In tests the width is 0 → data
+// range only.
+beforeAll(() => {
+  class RO {
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+  }
+  (globalThis as any).ResizeObserver = RO;
+});
 
 const TODAY = "2026-08-13";
 
@@ -39,7 +51,8 @@ describe("GanttChart", () => {
     render(<GanttChart {...PROPS} />);
     expect(screen.getByText("v1.0 launch")).toBeInTheDocument();
     expect(screen.getByText("1/2 sprints archived")).toBeInTheDocument();
-    expect(screen.getByText("s1")).toBeInTheDocument();
+    // name renders in the left column and as the in-bar chip
+    expect(screen.getAllByText("s1")).toHaveLength(2);
     expect(screen.getByText("Loose sprints")).toBeInTheDocument();
     expect(screen.getByText("Backlog")).toBeInTheDocument();
     expect(screen.getByText("Today")).toBeInTheDocument();
@@ -48,10 +61,11 @@ describe("GanttChart", () => {
 
   it("positions the bar at the day-accurate x and fills done/total", () => {
     render(<GanttChart {...PROPS} />);
-    // range: min start 07-14 → padded from 07-06 (Mon); s2 bar: 07-14 → 08-01
+    // day-aligned range: earliest item start 07-14 → from = 07-14 − 4 = 07-10
     const s2bar = screen.getByTitle(/s2/).closest(".tl-bar")! as HTMLElement;
-    expect(s2bar.style.left).toBe(`${8 * DAY_WIDTH_PX}px`); // Jul 14 is 8 days after Jul 6
-    expect(s2bar.style.width).toBe(`${18 * DAY_WIDTH_PX}px`); // Jul 14 → Aug 1 = 18 days
+    expect(s2bar.style.left).toBe(`${4 * DAY_WIDTH_PX}px`); // Jul 14 is 4 days after Jul 10
+    // Jul 14 → Aug 1 = 18 intervals + 1 (end-day column included) = 19 columns
+    expect(s2bar.style.width).toBe(`${19 * DAY_WIDTH_PX}px`);
     const fill = s2bar.querySelector(".tl-fill")! as HTMLElement;
     expect(fill.style.width).toBe("100%");
   });
@@ -61,7 +75,8 @@ describe("GanttChart", () => {
     const startOnly = screen.getByTitle(/Start only/);
     expect(startOnly).toBeInTheDocument();
     const dueOnly = screen.getByTitle(/End only/);
-    expect(dueOnly.textContent).toContain("◆");
+    expect(dueOnly).toHaveClass("tl-marker");
+    expect(dueOnly.textContent).toContain("Ends");
     // s5 (no dates) is not in the canvas — UNSET section handled by TimelineTab
     expect(screen.queryByText("s5")).not.toBeInTheDocument();
   });

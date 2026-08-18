@@ -122,8 +122,7 @@ export function createRateLimiter(opts?: RateLimiterOptions): RateLimiter {
   };
 }
 
-// Shared instance across surfaces (API middleware + entry's /mcp path) so
-// buckets count traffic from the same IP against one window. Initialized with
-// the code-level defaults; the boot sync applies the DB-configured limits
-// before serving.
+// Shared instance across surfaces (API middleware) so buckets count traffic
+// from the same IP against one window. Initialized with the code-level
+// defaults; the boot sync applies the DB-configured limits before serving.
 export const apiRateLimiter = createRateLimiter({ max: DEFAULT_RATE_LIMIT_MAX, windowMs: DEFAULT_RATE_LIMIT_WINDOW_MS });

@@ -86,10 +86,6 @@ const isApiKey = (v: string) => v.startsWith("lxk_");
 const BEARER_KEY = API_KEY || (DAEMON_TOKEN && isApiKey(DAEMON_TOKEN) ? DAEMON_TOKEN : "");
 const X_FORGE_TOKEN = DAEMON_TOKEN && !isApiKey(DAEMON_TOKEN) ? DAEMON_TOKEN : "";
 const AGENT = (process.env.FORGE_AGENT ?? "opencode") as "opencode" | "hermes" | "command-code";
-// MCP is the cloud-agent surface (hermes drives Lexa through the `lexa` MCP
-// server). Local CLI agents (opencode, command-code) run Forge on the CLI
-// directly — for them the MCP probe is noise and is skipped entirely.
-const NEEDS_MCP = AGENT === "hermes";
 const MODEL = process.env.FORGE_MODEL ?? "";
 const RUNTIME_NAME = process.env.FORGE_RUNTIME_NAME ?? `${osHostname()}-${AGENT}`;
 const MACHINE_ID = process.env.FORGE_MACHINE_ID || persistedMachineId;
@@ -169,9 +165,8 @@ interface RepoContentEntry {
 }
 
 // Per-request timeouts — a stalled server must not hang registration,
-// heartbeats, claims, or the MCP probe forever.
+// heartbeats, or claims forever.
 const HTTP_TIMEOUT_MS = 15_000;
-const MCP_TIMEOUT_MS = 5_000;
 
 // Typed failures. `reason` carries the message the imperative version threw
 // or logged, so callers that read `error.message` reproduce the output.
@@ -215,58 +210,6 @@ function api(path: string, init?: RequestInit): Effect.Effect<Response, DaemonEr
     },
     catch: toDaemonError,
   });
-}
-
-// Streamable-HTTP MCP handshake against the Lexa server — the runtime
-// agent's only way to touch Lexa is the `lexa` MCP server, so it must be
-// connected before any task runs. Returns an error string when the endpoint
-// is unreachable or rejects auth, null when it responds. Skipped when the
-// daemon only has a shared token (nothing to authenticate to /mcp with) —
-// the agent-side ERROR_MCP_UNAVAILABLE sentinel still guards those runs.
-function checkMcpConnection(): Effect.Effect<string | null, never> {
-  if (!BEARER_KEY) return Effect.succeed(null);
-  const url = `${SERVER}/mcp`;
-  const headers = {
-    "Content-Type": "application/json",
-    Authorization: `Bearer ${BEARER_KEY}`,
-  };
-  return Effect.gen(function* () {
-    const init = yield* Effect.tryPromise({
-      try: () => fetch(url, {
-        method: "POST",
-        headers,
-        body: JSON.stringify({
-          jsonrpc: "2.0",
-          id: 1,
-          method: "initialize",
-          params: {
-            protocolVersion: "2025-03-26",
-            capabilities: {},
-            clientInfo: { name: "lexa-forge-daemon", version: "0.1.0" },
-          },
-        }),
-        signal: AbortSignal.timeout(MCP_TIMEOUT_MS),
-      }),
-      catch: toDaemonError,
-    });
-    if (!init.ok) return `initialize HTTP ${init.status}`;
-    const parsed = yield* Effect.tryPromise({
-      try: () => init.json() as Promise<{ error?: { message?: string } }>,
-      catch: toDaemonError,
-    });
-    if (parsed.error) return parsed.error.message ?? "initialize rejected";
-    const ping = yield* Effect.tryPromise({
-      try: () => fetch(url, {
-        method: "POST",
-        headers,
-        body: JSON.stringify({ jsonrpc: "2.0", id: 2, method: "ping" }),
-        signal: AbortSignal.timeout(MCP_TIMEOUT_MS),
-      }),
-      catch: toDaemonError,
-    });
-    if (!ping.ok) return `ping HTTP ${ping.status}`;
-    return null;
-  }).pipe(Effect.catchAll((e) => Effect.succeed(e.message)));
 }
 
 const main = Effect.gen(function* () {
@@ -325,22 +268,14 @@ const main = Effect.gen(function* () {
       }
     });
   });
-  if (NEEDS_MCP) {
-    const mcpErr = yield* checkMcpConnection();
-    console.log(`  MCP: ${mcpErr ? `not connected (${mcpErr})` : "connected"}`);
-  } else {
-    console.log("  MCP: skipped (CLI agent)");
-  }
-
-  // Heartbeat loop — reports liveness and the daemon's Lexa MCP connectivity.
-  // Catalog discovery belongs to the parent lexa-cli listener.
+  // Heartbeat loop — reports liveness. Catalog discovery belongs to the
+  // parent lexa-cli listener.
   yield* Effect.fork(
     Effect.forever(
       Effect.gen(function* () {
         yield* Effect.sleep(15_000);
         yield* Effect.gen(function* () {
           const body: Record<string, unknown> = { runtimeId };
-          body.mcpConnected = NEEDS_MCP ? (yield* checkMcpConnection()) === null : false;
           yield* api("/api/forge/daemon/heartbeat", {
             method: "POST",
             body: JSON.stringify(body),
@@ -521,8 +456,8 @@ export function parseSessionInfo(json: string, workspace: string): { id: string 
 // fails with "Unexpected server error"), and LXK_FORGE_DAEMON_TOKEN /
 // LXK_API_KEY / LEXA_URL / LEXA_DIR would leak the server credential to
 // unsandboxed hermes/command-code runs (they read the real HOME, incl.
-// ~/.lexa/config.json). Forge runs on the prompt alone (no Lexa MCP tool
-// calls), so the agent needs no Lexa env at all. No provider reads
+// ~/.lexa/config.json). Forge runs on the prompt alone, so the agent needs
+// no Lexa env at all. No provider reads
 // FORGE_* either — FORGE_CMD_BIN only picks the binary the daemon spawns.
 export function buildChildEnv(
   env: Record<string, string | undefined>,
@@ -545,8 +480,8 @@ export function buildChildEnv(
   childEnv.PWD = cwd;
   // Sealed per-run HOME (opencode): agent config/state/auth live inside the
   // sandbox and die with the run. The global opencode config — permissions,
-  // MCP servers, plugins — never loads; the deny-rule opencode.json seeded
-  // into the sandbox is the only config the agent gets.
+  // plugins — never loads; the deny-rule opencode.json seeded into the
+  // sandbox is the only config the agent gets.
   if (sandboxHome) {
     childEnv.HOME = sandboxHome;
     childEnv.XDG_CONFIG_HOME = join(sandboxHome, ".config");
@@ -1036,9 +971,6 @@ function runTask(task: ForgeTask, serverProvider: string, serverAgent: string, s
             }),
           )
         : yield* runAgentWithCancel(prompt, workdir, provider, agentFlag, model, serverLogLevel, extraArgs, task.id, CANCEL_POLL_MS);
-      if (output.startsWith("ERROR_MCP_UNAVAILABLE")) {
-        return yield* Effect.fail(new DaemonError({ reason: output }));
-      }
       logTask(task.id, "generating text…");
       const res = yield* api(`/api/forge/daemon/tasks/${task.id}/complete`, {
         method: "POST",

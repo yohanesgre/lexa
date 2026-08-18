@@ -296,8 +296,8 @@ export function ForgeControlPanel() {
     return runtimes.data?.find((r) => r.id === id)?.name ?? "—";
   };
 
-  // Copy the task id to the clipboard (for debugging — daemon logs, API,
-  // MCP tools). Shows a transient check on the row, like the navbar panel.
+  // Copy the task id to the clipboard (for debugging — daemon logs, API).
+  // Shows a transient check on the row, like the navbar panel.
   const copyTaskId = (id: string) => {
     void copyToClipboard(id).then(() => {
       setCopiedId(id);

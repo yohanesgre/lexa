@@ -1,6 +1,6 @@
 # REST API Contract (v1)
 
-> Derived from ARCHITECTURE.md (v2.1) routes and LAYERS.md (v2.1) services. This is the frontend↔backend contract. For the agent-facing contract see MCP.md.
+> Derived from ARCHITECTURE.md (v2.1) routes and LAYERS.md (v2.1) services. This is the frontend↔backend contract.
 
 ## Conventions
 
@@ -11,7 +11,7 @@
 | Content type | `application/json; charset=utf-8` |
 | IDs | UUID strings; users, teams (organizations), sessions and related Better Auth rows use Better Auth ids (32-char, `[a-zA-Z0-9]`; migrated legacy rows are 32 lowercase hex — opaque, do not pattern-match) |
 | Timestamps | ISO 8601 UTC (`2026-07-27T10:30:00Z`) |
-| Rich text | **TipTap/ProseMirror JSON object** on REST. (Markdown only exists at the MCP boundary — see MCP.md §Content Format.) |
+| Rich text | **TipTap/ProseMirror JSON object** on REST. |
 | Pagination | `?limit` (default 50, max 200) + `?cursor` (opaque). Response envelope: `{ "data": [...], "nextCursor": string \| null }`. **Exception: `/board` is unpaginated.** |
 | Slug generation | Server auto-slugifies `title`/`name` when `slug` is omitted; collisions → `SlugTaken` (client may retry with explicit slug) |
 
@@ -49,6 +49,8 @@ All non-2xx responses share one shape:
 | 409 | `TASK_LINK_CYCLE` | subtask_of link would create a cycle (details: `{ message }`) |
 | 409 | `HAS_CHILDREN` | Delete column with tasks / wiki page with children / milestone with sprints (details: `{ count }`) |
 | 409 | `WIP_LIMIT` | Move would exceed column WIP limit |
+| 409 | `BACKLOG_PROTECTED` | Archive/delete or deadline changes on the system Backlog lane (details: `{ action }`) |
+| 409 | `DEADLINE_AFTER_LANE` | Task deadline later than its lane's due date (details: `{ date }`) |
 | 409 | `ALREADY_LINKED` | Task already has a GitHub issue in that repo |
 | 409 | `OPTION_IN_USE` | Delete priority/type option still referenced by tasks (details: `{ optionId, label }`) |
 | 409 | `FORGE_ENTITY_IN_USE` | Delete agent/skill still used by forge tasks (details: `{ kind, name, count }`) |
@@ -65,13 +67,14 @@ All non-2xx responses share one shape:
 | 422 | `API_KEY_NAME_EMPTY` | API key name missing or blank |
 | 422 | `NOT_WORKSPACE_MEMBER` | Team-member add targets an email that is not a workspace member (details: `{ email, available }` — invite via the superadmin first) |
 | 422 | `INVALID_ARGS` | Sprint start date later than its due date (details: `{ reason }`) |
-| 429 | `RATE_LIMITED` | Per-IP rate limit exceeded on `/api/*` or `/mcp` (webhook, `/api/forge/daemon/*`, `/api/forge/runtimes/register` exempt; `/api/setup*` + `/api/health` ARE limited) — `/api` enforced in the API middleware, `/mcp` in `server/entry.ts`, one shared bucket |
+| 429 | `RATE_LIMITED` | Per-IP rate limit exceeded on `/api/*` (webhook, `/api/forge/daemon/*`, `/api/forge/runtimes/register` exempt; `/api/setup*` + `/api/health` ARE limited) — enforced in the API middleware, one shared bucket |
 | 500 | `DATABASE_ERROR` / `INTERNAL` | |
+| 500 | `PASSWORD_LINK_FAILED` | Admin-issued set-password link could not be issued (details: `{ message }`) |
 | 502 | `GITHUB_API_ERROR` | Only on explicit GitHub-linking endpoints; never on moves |
 | 502 | `SOURCE_FETCH_ERROR` | External source fetch failed upstream after the SSRF guard (details: `{ message }`) |
 
 Defined in the error map but never raised by any REST handler — do not match on them:
-- `MISSING_AUTH` / `INVALID_API_KEY` — the auth middleware emits `UNAUTHORIZED` instead (MCP raises them natively).
+- `MISSING_AUTH` / `INVALID_API_KEY` — the auth middleware emits `UNAUTHORIZED` instead.
 - `LAST_ADMIN_DEMOTE` — legacy user-role editing is removed (superadmin is env-only; user lifecycle goes through `/api/workspace/members`).
 
 ## Auth
@@ -88,13 +91,15 @@ unless it authenticates via one of two channels:
   `api_keys`; `last_used_at` is bumped at most hourly. Keys created without a
   user (`user_id` NULL — the seeded `LXK_API_KEY` and setup-wizard keys)
   resolve to **admin**; keys bound to a user carry that user's role. Key auth
-  for MCP/CLI/webhooks is unchanged.
+  for CLI/webhooks is unchanged.
 
 **Attribution (R5):** the actor is the session user for browser calls and the
 key name for machine calls. The `x-lxk-user` header is **removed** — never
 sent by browsers, never read by the server. The `<meta name="lxk-api-key">`
-injection and `VITE_LXK_API_KEY` are removed — browser `/api/*` calls
-authenticate via the session cookie only.
+injection and `VITE_LXK_API_KEY` are still live — the server injects its
+current `LXK_API_KEY` into the served HTML (meta) and the client prefers it
+over the build-time baked key; browser `/api/*` calls otherwise authenticate
+via the session cookie.
 
 - **Superadmin vs member:** `users.role` ∈ {superadmin, member} — superadmin is
   env-only (`LXK_ADMIN_EMAILS`, applied at provisioning via the setup wizard),
@@ -327,7 +332,6 @@ interface Runtime {
   modelsCatalog: RuntimeModel[];  // live list from lexa-cli; [] = offline/hermes/failure
   agentsCatalog: Array<{ id: string; name: string }>; // reported by lexa-cli
   status: "online" | "offline";
-  mcpConnected: boolean;      // daemon-reported /mcp reachability
   lastError: string | null;   // last daemon failure (e.g. revoked key); cleared on live heartbeat/register
   hostname: string;
   lastSeen: ISODate | null;
@@ -529,7 +533,7 @@ body { repos*: [{ repo*, sourceRole?, workspaceRole? }] }
   repo = "owner/name". At least one role per repo (sourceRole/workspaceRole
   default false; both false → 422). Rows missing from the payload are removed.
 → 200 { data: [{ repo, sourceRole, workspaceRole }] }
-  | 403 FORBIDDEN | 404 | 422 INVALID_REPO_ROLES (no roles, bad format, duplicates)
+  | 403 FORBIDDEN | 404 | 400 (bad repo format or no role set — payload schema) | 409 CONSTRAINT (DB-level failure on replace)
 
 GET    /api/dashboard
 → 200 Dashboard     (unpaginated full snapshot — health cards, stats, attention lists)
@@ -564,7 +568,7 @@ body { name*, position?, color?, wipLimit?, requiredFields?, githubState? }
   position omitted → appended to end
 
 PATCH  /api/projects/:slug/columns/:id  (admin)
-body { name?, color?, wipLimit?, requiredFields?, githubState?, position? }
+body { name?, color?, wipLimit?, requiredFields?, githubState?, isDone?, position? }
 → 200 Column | 403 FORBIDDEN | 404
 
 DELETE /api/projects/:slug/columns/:id  (admin)
@@ -589,7 +593,7 @@ PATCH  /api/projects/:slug/swimlanes/:id  (admin) body { name?, description?, po
   startAt later than dueAt → 422 INVALID_ARGS
   Setting dueAt earlier than any live task's deadline in the lane → 409 DEADLINE_AFTER_LANE { date }
   dueAt/startAt/milestoneId on the Backlog lane → 409 BACKLOG_PROTECTED
-DELETE /api/projects/:slug/swimlanes/:id  (admin) → 204 | 403 FORBIDDEN (tasks must be reassigned first — swimlane_id is NOT NULL)
+DELETE /api/projects/:slug/swimlanes/:id  (admin) → 204 | 403 FORBIDDEN | 409 HAS_CHILDREN { count } (tasks must be reassigned first — swimlane_id is NOT NULL)
   Backlog lane → 409 BACKLOG_PROTECTED
 
 POST   /api/projects/:slug/swimlanes/:id/archive  (admin)
@@ -806,9 +810,10 @@ Notes:
 
 ```
 GET    /api/projects/:slug/github/issues?repo=owner/name&q=
-→ 200 { data: [{ issueNumber, title, state, url }] } | 404 | 502 GITHUB_API_ERROR
+→ 200 { data: [{ number, title, state }] } | 404 | 502 GITHUB_API_ERROR
   Autocomplete backing for the task-detail issue picker. repo* must be a
-  workspace repo of the project (422 otherwise). q optional — filter over the
+  workspace repo of the project — a non-workspace repo → 502 GITHUB_API_ERROR.
+  q optional — filter over the
   recent issues list (per_page=100; no GitHub search-API dependency); exact
   `#number` (q = "#123") does a direct issue GET fallback. Server-side cache
   ~60s TTL (new issues appear after ≤ TTL). Already-linked issues (linked to
@@ -1155,9 +1160,9 @@ removed — keeping host state consistent with the provider-scoped event.
 Runtimes without a machine are deleted directly.
 
 POST   /api/forge/daemon/heartbeat         (daemon child)
-body { runtimeId*, mcpConnected? }
+body { runtimeId* }
 → 200 { ok: true }
-The daemon reports liveness and MCP status. `lexa-cli machine listen` discovers
+The daemon reports liveness. `lexa-cli machine listen` discovers
 agent/model catalogs and sends them through the machine heartbeat. A live
 heartbeat clears the runtime's last_error. A revoked runtime key makes every
 daemon call return 401 — the daemon exits with code 3 and the listener does
@@ -1269,7 +1274,7 @@ hostname + secret match → idempotent no-op, secret never re-returned. Known id
 with mismatched/wrong secret or a legacy '' secret → 409 (remove the machine
 and re-register). Machine ids are `hostname-<unique>` (new machines; legacy
 UUID ids keep working). The listener persists the secret at
-`~/.lexa/machine-secret` (chmod 600).
+`~/.lexa/<host>/machine-secret` (chmod 600).
 
 POST   /api/forge/machines/heartbeat          (listener)
 body { id*, hostname?, clis?: [{ provider, version }],
@@ -1277,9 +1282,9 @@ body { id*, hostname?, clis?: [{ provider, version }],
        daemonErrors?: [{ runtimeId, error }] }
 → 200 Machine & { projects: [{ id, name, slug, description }] }
   projects = full project index; the listener provisions one workspace dir
-  per project under ~/.lexa/projects/ and keeps its local lookup fresh.
+  per project under ~/.lexa/<host>/projects/ and keeps its local lookup fresh.
 Upserts a machine row (marks it listening). The CLI persists id in
-~/.lexa/machine-id. clis = installed agent CLIs probed at listener start
+~/.lexa/<host>/machine-id. clis = installed agent CLIs probed at listener start
 (opencode/cmd --version; hermes skipped). daemonErrors relay daemon failures
 the daemon itself can't report (revoked key → exit code 3) — stored on the
 matching runtime row as last_error. Also runs the stuck-task sweep: 'running'
@@ -1406,7 +1411,8 @@ POST   /api/projects/:slug/documents/:type/:id/sources
 body { kind*: "wiki"|"external", ref* }   (wiki = page slug; external = URL)
 → 201 DocumentSource
   | 404 PAGE_NOT_FOUND                     (wiki slug unknown)
-  | 422 SOURCE_FETCH_ERROR                 (bad URL / private-IP block)
+  | 502 SOURCE_FETCH_ERROR                 (bad URL / private-IP block / fetch failed upstream)
+  | 422 SOURCE_UNREACHABLE                 (DNS or connection failure after the SSRF guard)
 
 DELETE /api/projects/:slug/documents/:type/:id/sources/:sourceId
 → 204 | 404 SOURCE_NOT_FOUND
@@ -1421,7 +1427,7 @@ Notes:
   `/api/forge/machines/*`.
 - **SSRF guard:** external sources resolve DNS and reject private/loopback/
   link-local/CGNAT addresses before fetching.
-- **MCP loop:** the spawned agent CLI receives a server-built prompt; the
+- **Forge loop:** the spawned agent CLI receives a server-built prompt; the
   one-shot result is returned to the editor for accept/reject.
 
 ## Notes

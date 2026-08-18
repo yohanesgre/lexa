@@ -996,7 +996,6 @@ export const listRuntimes = (config: CliConfig): Effect.Effect<void, never> =>
       MODEL: runtime.model || "—",
       HOST: runtime.hostname || "—",
       STATUS: runtime.lastError ? `offline (${runtime.lastError.slice(0, 40)})` : runtime.status,
-      MCP: runtime.mcpConnected ? "connected" : "not set",
       "LAST SEEN": runtime.lastSeen ? runtime.lastSeen.slice(0, 19).replace("T", " ") : "never",
     })));
   });

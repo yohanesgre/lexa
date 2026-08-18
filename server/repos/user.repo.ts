@@ -18,28 +18,11 @@ export class UserRepo extends Effect.Service<UserRepo>()("Lexa/UserRepo", {
       listAll: (): Effect.Effect<UserRow[], DbError> =>
         queryAll<UserRow>(db, `SELECT * FROM users ORDER BY created_at DESC`),
 
-      updateRole: (id: string, role: "admin" | "member"): Effect.Effect<void, DbError | RowNotFound | ConstraintViolation> =>
-        Effect.gen(function* () {
-          yield* queryFirst<{ id: string }>(db, `SELECT id FROM users WHERE id = ?`, id);
-          yield* run(db, `UPDATE users SET role = ? WHERE id = ?`, role, id);
-        }),
-
       updateName: (id: string, name: string): Effect.Effect<void, DbError | RowNotFound | ConstraintViolation> =>
         Effect.gen(function* () {
           yield* queryFirst<{ id: string }>(db, `SELECT id FROM users WHERE id = ?`, id);
           yield* run(db, `UPDATE users SET name = ? WHERE id = ?`, name, id);
         }),
-
-      // Atomic last-admin guard: the COUNT and the role write are one
-      // statement — returns 0 when the demote would leave no admin.
-      demoteIfNotLastAdmin: (id: string): Effect.Effect<number, ConstraintViolation | DbError> =>
-        run(
-          db,
-          `UPDATE users SET role = 'member', updated_at = datetime('now')
-           WHERE id = ? AND role = 'admin'
-             AND (SELECT COUNT(*) FROM users WHERE role = 'admin') > 1`,
-          id
-        ),
 
       deleteById: (id: string): Effect.Effect<void, DbError | RowNotFound | ConstraintViolation> =>
         Effect.gen(function* () {
