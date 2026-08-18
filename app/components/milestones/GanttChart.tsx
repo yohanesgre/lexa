@@ -179,6 +179,55 @@ export function GanttChart({ lanes, milestones, today, onRescheduleLane, onResch
 
   if (!hasCanvasItems) return null;
 
+  // Sprint range guidelines — canvas-level (like the TODAY line): one dashed
+  // vertical per start/end edge, spanning from the DAY-NUMBER header row
+  // (canvas-relative top −22 = 64px header − 42px year+month rows) down to
+  // each sprint's OWN row bottom. Never into the year/month rows, never past
+  // the sprint's row. Preview-aware so they follow a drag.
+  const ROW_H = 56; // .tl-lane height (border-box) — matches .tl-row
+  const rowBottoms = (() => {
+    // Canvas-relative row count at each sprint's row — mirrors the render
+    // order (milestone groups + their sprints, loose group, backlog).
+    const map = new Map<string, number>();
+    let rows = 0;
+    const bump = () => { rows++; };
+    for (const m of milestones) {
+      if (m.archivedAt || collapsedGroups.has(m.id)) continue;
+      bump(); // group row
+      for (const l of lanes) {
+        if (l.lane.milestoneId === m.id && !l.lane.archivedAt && (l.lane.startAt || l.lane.dueAt)) {
+          bump();
+          map.set(l.lane.id, rows);
+        }
+      }
+    }
+    if (looseLanes.length > 0 && !collapsedGroups.has("__loose__")) {
+      bump(); // loose group row
+      for (const l of looseLanes) {
+        bump();
+        map.set(l.lane.id, rows);
+      }
+    }
+    if (backlogLanes.length > 0) bump(); // backlog row
+    return { map, totalRows: rows };
+  })();
+  const guidelineXs = (() => {
+    const xs: { left: number; bottom: number }[] = [];
+    for (const t of sprintPlan) {
+      const { startAt, dueAt } = barFor(t.lane.id);
+      if (!startAt || !dueAt) continue;
+      const rowIdx = rowBottoms.map.get(t.lane.id);
+      if (rowIdx === undefined) continue;
+      const bottom = ROW_H * (rowBottoms.totalRows - rowIdx);
+      const s = clampDate(parseDay(startAt), axisStart, to);
+      const e2 = clampDate(parseDay(dueAt), axisStart, to);
+      const x = xForDay(s, axisStart);
+      const w = Math.max(xForDay(e2, axisStart) - x + DAY_WIDTH_PX, DAY_WIDTH_PX);
+      xs.push({ left: x, bottom }, { left: x + w, bottom });
+    }
+    return xs;
+  })();
+
   const gridCols = `${LABEL_W}px repeat(${days.length}, ${DAY_WIDTH_PX}px)`;
   const groupProps = {
     gridTemplateColumns: gridCols,
@@ -250,7 +299,7 @@ export function GanttChart({ lanes, milestones, today, onRescheduleLane, onResch
           </>
         )}
         <div className="tl-grid" style={{ gridTemplateColumns: gridCols }}>
-          <div className="tl-head-cell" style={{ gridRow: "span 3", fontWeight: 600, color: "var(--lx-text-primary)", alignItems: "flex-start" }}>Milestone / Sprint</div>
+          <div className="tl-head-cell" style={{ gridRow: "span 3", fontWeight: 600, color: "var(--lx-text-primary)", alignItems: "flex-center" }}>Milestone / Sprint</div>
           {headerSpans.years.map((y) => (
             <div key={y.label} className="tl-head-year" style={{ gridColumn: `span ${y.days}` }}>{y.label}</div>
           ))}
@@ -263,6 +312,9 @@ export function GanttChart({ lanes, milestones, today, onRescheduleLane, onResch
         </div>
 
         <div ref={canvasRef} className="tl-canvas" style={{ position: "relative" }}>
+          {guidelineXs.map((g, i) => (
+            <span key={i} className="tl-guideline" style={{ left: g.left + LABEL_W, top: -22, bottom: g.bottom }} aria-hidden="true" />
+          ))}
           {milestones.filter((m) => !m.archivedAt).map((m) => {
             const sprints = lanes.filter((l) => l.lane.milestoneId === m.id && !l.lane.archivedAt && (l.lane.startAt || l.lane.dueAt));
             const due = milestoneDue(m);
