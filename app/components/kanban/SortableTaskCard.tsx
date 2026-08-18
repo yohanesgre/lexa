@@ -9,6 +9,7 @@ import { Menu } from "../ui/Menu";
 function cardProps(task: Task, board: Board) {
   return {
     id: task.id,
+    taskKey: task.key,
     title: task.title,
     priority: task.priority,
     type: task.type,

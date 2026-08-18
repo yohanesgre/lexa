@@ -12,7 +12,7 @@ function lane(id: string, milestoneId: string | null = null): Swimlane {
 
 function task(id: string, swimlaneId: string, columnId: string, archivedAt: string | null = null): Task {
   return {
-    id, projectId: "p1", columnId, swimlaneId, title: id, description: { type: "doc", content: [] },
+    id, key: "EG-1", projectId: "p1", columnId, swimlaneId, title: id, description: { type: "doc", content: [] },
     priority: "p", type: "t", assignees: [], position: "a0", githubs: [], dueAt: null,
     archivedAt, createdAt: "t", updatedAt: "t",
   };
@@ -20,7 +20,7 @@ function task(id: string, swimlaneId: string, columnId: string, archivedAt: stri
 
 function board(columns: Column[], swimlanes: Swimlane[], tasks: Task[]): Board {
   return {
-    project: { id: "p1", slug: "demo", name: "Demo", description: "", repos: [], createdAt: "t", updatedAt: "t" },
+    project: { id: "p1", slug: "demo", key: "EG", name: "Demo", description: "", repos: [], createdAt: "t", updatedAt: "t" },
     columns, swimlanes, milestones: [], fieldConfig: { priorities: [], types: [] }, links: [], tasks,
   };
 }

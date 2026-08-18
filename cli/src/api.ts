@@ -36,6 +36,7 @@ export interface SwimlaneInfo {
 
 export interface TaskInfo {
   id: string;
+  key: string;
   title: string;
   priority: string | null;
   type: string | null;

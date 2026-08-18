@@ -6,6 +6,7 @@ import { SwimlaneRepo } from "../repos/swimlane.repo";
 import { FieldConfigRepo } from "../repos/field-config.repo";
 import { ConstraintViolation, DbError, RowNotFound, Sqlite, withTx } from "../db/database";
 import { ProjectNotFound, SlugTaken } from "../api/errors";
+import { generateTaskKey } from "../task-key";
 import type { DomainProject, ProjectRepo as ProjectRepoType } from "../../shared/types";
 
 const DEFAULT_COLUMNS = [
@@ -33,10 +34,11 @@ export class ProjectService extends Effect.Service<ProjectService>()("Lexa/Proje
       create: (input: { name: string; slug?: string; description?: string; teamId?: string | null }): Effect.Effect<DomainProject, SlugTaken | DbError | RowNotFound> => {
         const slug = input.slug || slugify(input.name);
         const id = crypto.randomUUID();
-        return withTx(
-          db,
-          repo
-            .create({ id, name: input.name, slug, description: input.description ?? "", teamId: input.teamId ?? null })
+        const doCreate = Effect.gen(function* () {
+          const taken = new Set((yield* repo.listKeys()).map((k) => k));
+          const key = generateTaskKey(slug, (c) => taken.has(c));
+          return yield* repo
+            .create({ id, name: input.name, slug, key, description: input.description ?? "", teamId: input.teamId ?? null })
             .pipe(
               Effect.flatMap(() => repo.findBySlug(slug)),
               Effect.tap((project) =>
@@ -60,8 +62,15 @@ export class ProjectService extends Effect.Service<ProjectService>()("Lexa/Proje
                   fieldConfigRepo.seedDefaults(project.id),
                 ])
               )
-            )
-        ).pipe(
+            );
+        });
+        return withTx(db, doCreate).pipe(
+          // Key collision race — regenerate once (slug collisions fall through
+          // to SlugTaken below).
+          Effect.catchIf(
+            (e) => e instanceof ConstraintViolation,
+            () => withTx(db, doCreate)
+          ),
           Effect.tap((project) => Effect.logInfo(`[Project] Created ${project.id} slug=${project.slug}`)),
           Effect.catchTag("ConstraintViolation", () => new SlugTaken({ slug })),
           Effect.catchTag("RowNotFound", () => new SlugTaken({ slug }))

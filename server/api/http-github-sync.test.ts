@@ -64,13 +64,13 @@ beforeAll(async () => {
   db = new Database(dbPath);
   db.exec(`
 INSERT INTO api_keys (id, name, key_hash, user_id) VALUES ('k1', 'test-admin', '${adminHash}', NULL);
-INSERT INTO projects (id, name, slug) VALUES ('p1', 'P', 'p1');
+INSERT INTO projects (id, name, slug, key, next_task_number) VALUES ('p1', 'P', 'p1', 'EG', 1);
 INSERT INTO columns (id, project_id, name, position, github_state) VALUES ('c1', 'p1', 'Todo', 0, 'open'), ('c2', 'p1', 'Done', 1, 'closed');
 INSERT INTO swimlanes (id, project_id, name, position, kind) VALUES ('s-backlog', 'p1', 'Backlog', 0, 'backlog');
 INSERT INTO priority_options (id, project_id, label, color, position) VALUES ('prio-1', 'p1', 'Medium', '#888', 0);
 INSERT INTO type_options (id, project_id, label, color, position) VALUES ('type-1', 'p1', 'Bug', '#f00', 0);
-INSERT INTO tasks (id, project_id, column_id, swimlane_id, title, description, priority, type, position, created_at) VALUES
-  ('t1', 'p1', 'c1', 's-backlog', 'T1', '{"type":"doc","content":[]}', 'prio-1', 'type-1', 'a0', '2026-01-01 10:00:00');
+INSERT INTO tasks (id, project_id, column_id, swimlane_id, title, description, priority, type, position, created_at, key, number) VALUES
+  ('t1', 'p1', 'c1', 's-backlog', 'T1', '{"type":"doc","content":[]}', 'prio-1', 'type-1', 'a0', '2026-01-01 10:00:00', 'EG-1', 1);
 INSERT INTO task_github_issues (task_id, issue_id, issue_number, repo, synced_state) VALUES ('t1', 'ghi1', 7, 'owner/repo', 'open');
 INSERT INTO project_repos (id, project_id, repo, source_role, workspace_role) VALUES ('pr1', 'p1', 'owner/repo', 0, 1);
 INSERT INTO settings (key, value) VALUES ('github_app_id', '12345');

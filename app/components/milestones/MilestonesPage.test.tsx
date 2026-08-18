@@ -36,14 +36,14 @@ const LANES = [
   { id: "s9", projectId: "p1", name: "Backlog", description: "", position: 3, dueAt: null, archivedAt: null, startAt: null, kind: "backlog" as const, milestoneId: null },
 ];
 const TASKS = [
-  { id: "t1", projectId: "p1", columnId: "c2", swimlaneId: "s1", title: "T1", description: { type: "doc" as const, content: [] }, priority: "p", type: "t", assignees: [], position: "a0", githubs: [], dueAt: null, archivedAt: null, createdAt: "t", updatedAt: "t" },
-  { id: "t2", projectId: "p1", columnId: "c1", swimlaneId: "s1", title: "T2", description: { type: "doc" as const, content: [] }, priority: "p", type: "t", assignees: [], position: "a1", githubs: [], dueAt: null, archivedAt: null, createdAt: "t", updatedAt: "t" },
-  { id: "t3", projectId: "p1", columnId: "c2", swimlaneId: "s2", title: "T3", description: { type: "doc" as const, content: [] }, priority: "p", type: "t", assignees: [], position: "a2", githubs: [], dueAt: null, archivedAt: "2026-08-01T00:00:00.000Z", createdAt: "t", updatedAt: "t" },
+  { id: "t1", key: "EG-1", projectId: "p1", columnId: "c2", swimlaneId: "s1", title: "T1", description: { type: "doc" as const, content: [] }, priority: "p", type: "t", assignees: [], position: "a0", githubs: [], dueAt: null, archivedAt: null, createdAt: "t", updatedAt: "t" },
+  { id: "t2", key: "EG-1", projectId: "p1", columnId: "c1", swimlaneId: "s1", title: "T2", description: { type: "doc" as const, content: [] }, priority: "p", type: "t", assignees: [], position: "a1", githubs: [], dueAt: null, archivedAt: null, createdAt: "t", updatedAt: "t" },
+  { id: "t3", key: "EG-1", projectId: "p1", columnId: "c2", swimlaneId: "s2", title: "T3", description: { type: "doc" as const, content: [] }, priority: "p", type: "t", assignees: [], position: "a2", githubs: [], dueAt: null, archivedAt: "2026-08-01T00:00:00.000Z", createdAt: "t", updatedAt: "t" },
 ];
 
 function makeBoard(): Board {
   return {
-    project: { id: "p1", slug: "demo", name: "Demo", description: "", repos: [], createdAt: "t", updatedAt: "t" },
+    project: { id: "p1", slug: "demo", key: "EG", name: "Demo", description: "", repos: [], createdAt: "t", updatedAt: "t" },
     columns: COLUMNS,
     swimlanes: LANES,
     milestones: MILESTONES,

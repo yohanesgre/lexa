@@ -4,11 +4,13 @@ import { createHash, randomBytes } from "node:crypto";
 import { readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { LoggerLayer } from "../logging/logger";
-import { Sqlite, withTx, DbError } from "../db/database";
+import { Sqlite, withTx, DbError, queryFirst } from "../db/database";
 import { Database } from "bun:sqlite";
 import { getSetting, setSetting, deleteSetting } from "../db/settings";
 import { ProjectNotFound, WikiPageNotFound, MachineNotFound, Forbidden, SetupLocked, TaskNotFound, InvalidName, InvalidRateLimit, InvalidGithubSettings, NoUserContext, GithubApiError, errorResponse, errorToStatus } from "./errors";
 import { respond } from "./http-helpers";
+import { resolveTaskId } from "./task-id";
+import { parseTaskKey } from "../task-key";
 import { AuthIdentity, actorFromIdentity } from "./auth";
 import { teamsGroup, createTeamsLive } from "./teams";
 import { workspaceGroup, createWorkspaceLive } from "./workspace";
@@ -136,6 +138,7 @@ const ProjectSchema = Schema.Struct({
   id: Schema.String,
   name: Schema.String,
   slug: Schema.String,
+  key: Schema.String,
   description: Schema.String,
   repos: Schema.Array(ProjectRepoSchema),
   // owning team (organization id); null = unassigned (superadmin-only until assigned)
@@ -404,6 +407,7 @@ const RuntimeSchema = Schema.Struct({
 
 const ForgeTaskSchema = Schema.Struct({
   id: Schema.String,
+  key: Schema.String,
   runtimeId: Schema.NullOr(Schema.String),
   projectId: Schema.String,
   documentType: Schema.Literal("task", "wiki"),
@@ -1043,6 +1047,7 @@ const GithubIssueSchema = Schema.Struct({
 
 const TaskSchema = Schema.Struct({
   id: Schema.String,
+  key: Schema.String,
   projectId: Schema.String,
   columnId: Schema.String,
   swimlaneId: Schema.NullOr(Schema.String),
@@ -2408,7 +2413,8 @@ const taskLinksLive = HttpApiBuilder.group(LexaApi, "task-links", (handlers) =>
         const projectService = yield* ProjectService;
         const service = yield* TaskLinkService;
         const project = yield* projectService.findBySlug(req.path.slug);
-        const links = yield* service.findByTask(project.id, req.path.id);
+        const id = yield* resolveTaskId(req.path.id, req.path.slug);
+        const links = yield* service.findByTask(project.id, id);
         return { data: links };
       }))
     )
@@ -2418,9 +2424,10 @@ const taskLinksLive = HttpApiBuilder.group(LexaApi, "task-links", (handlers) =>
         const service = yield* TaskLinkService;
         const identity = yield* AuthIdentity;
         const project = yield* projectService.findBySlug(req.path.slug);
+        const id = yield* resolveTaskId(req.path.id, req.path.slug);
         const { link, activity } = yield* service.add(actorFromIdentity(identity), {
           projectId: project.id,
-          fromTaskId: req.path.id,
+          fromTaskId: id,
           toTaskId: req.payload.toTaskId,
           relation: req.payload.relation,
         });
@@ -2442,6 +2449,25 @@ const taskLinksLive = HttpApiBuilder.group(LexaApi, "task-links", (handlers) =>
         const project = yield* projectService.findBySlug(req.path.slug);
         const q = searchParams(req).get("q") ?? "";
         const exclude = searchParams(req).get("exclude") ?? "";
+        // Exact KEY-N pre-check before FTS: a ticket key is a first-class
+        // lookup, so a query that IS a key returns the exact task first.
+        const parsed = parseTaskKey(q);
+        if (parsed) {
+          const db = yield* Sqlite;
+          const exact = yield* queryFirst<{ id: string; title: string; column_name: string; type: string; priority: string }>(
+            db,
+            `SELECT t.id, t.title, c.name AS column_name, t.type, t.priority
+             FROM tasks t JOIN columns c ON t.column_id = c.id
+             WHERE t.key = ? AND t.project_id = ? AND t.archived_at IS NULL`,
+            q.toUpperCase(),
+            project.id
+          ).pipe(Effect.catchTag("RowNotFound", () => Effect.succeed(null)));
+          if (exact && exact.id !== exclude) {
+            return {
+              data: [{ id: exact.id, title: exact.title, columnName: exact.column_name, type: exact.type, priority: exact.priority }],
+            };
+          }
+        }
         const suggestions = yield* service.search(project.id, q, exclude);
         return { data: suggestions };
       }))
@@ -2491,7 +2517,8 @@ const tasksLive = HttpApiBuilder.group(LexaApi, "tasks", (handlers) =>
     .handle("getTask", (req) =>
       respond(Effect.gen(function* () {
         const taskService = yield* TaskService;
-        const task = yield* taskService.getById(req.path.id);
+        const id = yield* resolveTaskId(req.path.id, req.path.slug);
+        const task = yield* taskService.getById(id);
         return formatTask(task);
       }))
     )
@@ -2500,7 +2527,8 @@ const tasksLive = HttpApiBuilder.group(LexaApi, "tasks", (handlers) =>
         const taskService = yield* TaskService;
         const githubService = yield* GitHubService;
         const identity = yield* AuthIdentity;
-        const { task, activity } = yield* taskService.update(actorFromIdentity(identity), req.path.id, {
+        const id = yield* resolveTaskId(req.path.id, req.path.slug);
+        const { task, activity } = yield* taskService.update(actorFromIdentity(identity), id, {
           title: req.payload.title, description: req.payload.description,
           priority: req.payload.priority, type: req.payload.type,
           assignees: req.payload.assignees ? [...req.payload.assignees] : undefined,
@@ -2529,7 +2557,8 @@ const tasksLive = HttpApiBuilder.group(LexaApi, "tasks", (handlers) =>
         const columnService = yield* ColumnService;
         const githubService = yield* GitHubService;
         const identity = yield* AuthIdentity;
-        const { task, activity } = yield* taskService.move(actorFromIdentity(identity), req.path.id, {
+        const id = yield* resolveTaskId(req.path.id, req.path.slug);
+        const { task, activity } = yield* taskService.move(actorFromIdentity(identity), id, {
           columnId: req.payload.columnId, swimlaneId: req.payload.swimlaneId,
           beforeTaskId: req.payload.beforeTaskId, afterTaskId: req.payload.afterTaskId,
           clearDueAt: req.payload.clearDueAt,
@@ -2553,7 +2582,8 @@ const tasksLive = HttpApiBuilder.group(LexaApi, "tasks", (handlers) =>
       respond(Effect.gen(function* () {
         const taskService = yield* TaskService;
         const identity = yield* AuthIdentity;
-        yield* taskService.delete(actorFromIdentity(identity), req.path.id);
+        const id = yield* resolveTaskId(req.path.id, req.path.slug);
+        yield* taskService.delete(actorFromIdentity(identity), id);
         return undefined;
       }))
     )
@@ -2561,7 +2591,8 @@ const tasksLive = HttpApiBuilder.group(LexaApi, "tasks", (handlers) =>
       respond(Effect.gen(function* () {
         const taskService = yield* TaskService;
         const identity = yield* AuthIdentity;
-        const { task, activity } = yield* taskService.archive(actorFromIdentity(identity), req.path.id);
+        const id = yield* resolveTaskId(req.path.id, req.path.slug);
+        const { task, activity } = yield* taskService.archive(actorFromIdentity(identity), id);
         return { data: formatTask(task), activity: activityPayload(activity) };
       }))
     )
@@ -2569,7 +2600,8 @@ const tasksLive = HttpApiBuilder.group(LexaApi, "tasks", (handlers) =>
       respond(Effect.gen(function* () {
         const taskService = yield* TaskService;
         const identity = yield* AuthIdentity;
-        const { task, activity } = yield* taskService.restore(actorFromIdentity(identity), req.path.id);
+        const id = yield* resolveTaskId(req.path.id, req.path.slug);
+        const { task, activity } = yield* taskService.restore(actorFromIdentity(identity), id);
         return { data: formatTask(task), activity: activityPayload(activity) };
       }))
     )
@@ -2578,9 +2610,10 @@ const tasksLive = HttpApiBuilder.group(LexaApi, "tasks", (handlers) =>
         const projectService = yield* ProjectService;
         const activityService = yield* ActivityService;
         yield* projectService.findBySlug(req.path.slug);
+        const id = yield* resolveTaskId(req.path.id, req.path.slug);
         const q = searchParams(req);
         const limit = clampLimit(q.get("limit"));
-        const page = yield* activityService.listMerged(req.path.id, q.get("cursor") ?? null, limit);
+        const page = yield* activityService.listMerged(id, q.get("cursor") ?? null, limit);
         return { data: page.items, nextCursor: page.nextCursor };
       }))
     )
@@ -2590,7 +2623,8 @@ const tasksLive = HttpApiBuilder.group(LexaApi, "tasks", (handlers) =>
         const commentService = yield* CommentService;
         const projectService = yield* ProjectService;
         yield* projectService.findBySlug(req.path.slug);
-        const result = yield* commentService.create(req.path.id, actorFromIdentity(identity), req.payload.body);
+        const id = yield* resolveTaskId(req.path.id, req.path.slug);
+        const result = yield* commentService.create(id, actorFromIdentity(identity), req.payload.body);
         return {
           data: {
             comment: { kind: "comment" as const, ...result.comment },
@@ -2612,7 +2646,8 @@ const tasksLive = HttpApiBuilder.group(LexaApi, "tasks", (handlers) =>
         const identity = yield* AuthIdentity;
         const commentService = yield* CommentService;
         const taskRepo = yield* TaskRepo;
-        const task = yield* taskRepo.findById(req.path.id).pipe(
+        const id = yield* resolveTaskId(req.path.id, req.path.slug);
+        const task = yield* taskRepo.findById(id).pipe(
           Effect.catchTag("RowNotFound", () => new TaskNotFound({ id: req.path.id }))
         );
         yield* commentService.remove(req.path.commentId, identity, task.projectId);
@@ -2626,8 +2661,9 @@ const tasksLive = HttpApiBuilder.group(LexaApi, "tasks", (handlers) =>
         const githubService = yield* GitHubService;
         const identity = yield* AuthIdentity;
         yield* projectService.findBySlug(req.path.slug);
-        const linked = yield* githubService.createLinkedIssue(actorFromIdentity(identity), req.path.id, req.payload.repo);
-        const task = yield* taskService.getById(req.path.id);
+        const id = yield* resolveTaskId(req.path.id, req.path.slug);
+        const linked = yield* githubService.createLinkedIssue(actorFromIdentity(identity), id, req.payload.repo);
+        const task = yield* taskService.getById(id);
         return { data: formatTask(task), activity: activityPayload(linked.activity) };
       }))
     )
@@ -2638,8 +2674,9 @@ const tasksLive = HttpApiBuilder.group(LexaApi, "tasks", (handlers) =>
         const githubService = yield* GitHubService;
         const identity = yield* AuthIdentity;
         yield* projectService.findBySlug(req.path.slug);
-        const linked = yield* githubService.linkExistingIssue(actorFromIdentity(identity), req.path.id, req.payload.repo, req.payload.issueNumber);
-        const task = yield* taskService.getById(req.path.id);
+        const id = yield* resolveTaskId(req.path.id, req.path.slug);
+        const linked = yield* githubService.linkExistingIssue(actorFromIdentity(identity), id, req.payload.repo, req.payload.issueNumber);
+        const task = yield* taskService.getById(id);
         return { data: formatTask(task), activity: activityPayload(linked.activity) };
       }))
     )
@@ -2651,21 +2688,22 @@ const tasksLive = HttpApiBuilder.group(LexaApi, "tasks", (handlers) =>
         const activityService = yield* ActivityService;
         const identity = yield* AuthIdentity;
         yield* projectService.findBySlug(req.path.slug);
-        const task = yield* taskService.getById(req.path.id);
+        const id = yield* resolveTaskId(req.path.id, req.path.slug);
+        const task = yield* taskService.getById(id);
         const issue = task.githubs.find((g) => g.issueId === req.path.issueId);
         const db = yield* Sqlite;
         // Does NOT close or delete the GitHub issue.
         const ev = yield* withTx(db, Effect.gen(function* () {
-          yield* taskRepo.unlinkGithubIssue(req.path.id, req.path.issueId);
+          yield* taskRepo.unlinkGithubIssue(id, req.path.issueId);
           if (issue) {
             // Handler-level emission — the unlink lives in the route, not a
             // service (documented deviation: services-only rule).
-            return yield* activityService.append(req.path.id, actorFromIdentity(identity), "github_unlinked",
+            return yield* activityService.append(id, actorFromIdentity(identity), "github_unlinked",
               msg.githubUnlinked(issue.repo, issue.issueNumber));
           }
           return null;
         }));
-        const updated = yield* taskService.getById(req.path.id);
+        const updated = yield* taskService.getById(id);
         return { data: formatTask(updated), activity: ev ? activityPayload([ev]) : [] };
       }))
     )

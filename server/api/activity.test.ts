@@ -31,10 +31,10 @@ beforeAll(async () => {
   db.exec(`
 INSERT INTO users (id, email, name, role) VALUES ('u1', 'maria@lexa.test', 'Maria', 'superadmin');
 INSERT INTO api_keys (id, name, key_hash, user_id) VALUES ('k1', 'test-admin', '${adminHash}', 'u1');
-INSERT INTO projects (id, name, slug) VALUES ('p1', 'P', 'p1');
+INSERT INTO projects (id, name, slug, key, next_task_number) VALUES ('p1', 'P', 'p1', 'EG', 1);
 INSERT INTO columns (id, project_id, name, position) VALUES ('c1', 'p1', 'Todo', 0);
 INSERT INTO swimlanes (id, project_id, name, position) VALUES ('s1', 'p1', 'Default', 0);
-INSERT INTO tasks (id, project_id, column_id, swimlane_id, title, position, created_at) VALUES ('t1', 'p1', 'c1', 's1', 'T', 'a0', '2026-01-01 10:00:00');
+INSERT INTO tasks (id, project_id, column_id, swimlane_id, title, position, created_at, key, number) VALUES ('t1', 'p1', 'c1', 's1', 'T', 'a0', '2026-01-01 10:00:00', 'EG-1', 1);
 INSERT INTO task_activity (task_id, actor_kind, actor_label, actor_user_id, type, message, created_at) VALUES ('t1', 'user', 'Maria', 'u1', 'created', 'Maria created this task', '2026-01-01 10:00:00');
 INSERT INTO task_comments (task_id, author_id, author_kind, author_label, body, created_at) VALUES ('t1', 'u1', 'user', 'Maria', '{"type":"doc","content":[]}', '2026-01-02 10:00:00');
 `);

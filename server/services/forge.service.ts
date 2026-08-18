@@ -87,7 +87,7 @@ export class ForgeService extends Effect.Service<ForgeService>()("Lexa/ForgeServ
           // Context is Markdown so the agent sees the document's structure
           // (headings, lists, formatting) and mirrors it in its output.
           const desc = docToMarkdown(task.description as TipTapDoc);
-          return `Task: ${task.title}\n${desc ? `Description:\n${desc}` : ""}`.trim();
+          return `Task: ${task.key} — ${task.title}\n${desc ? `Description:\n${desc}` : ""}`.trim();
         }
         const page = yield* wikiRepo.findBySlug(projectId, documentId).pipe(
           Effect.catchTag("RowNotFound", () => new WikiPageNotFound({ id: documentId }))

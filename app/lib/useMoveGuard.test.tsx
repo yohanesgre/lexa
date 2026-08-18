@@ -15,12 +15,12 @@ const LANE: Swimlane = { id: "s1", projectId: "p1", name: "Backlog", description
 const LANE_OVERDUE: Swimlane = { ...LANE, id: "s-old", dueAt: "2020-01-01" };
 const LANE_FUTURE: Swimlane = { ...LANE, id: "s-future", dueAt: "2099-01-01" };
 const TASK: Task = {
-  id: "t1", projectId: "p1", columnId: "c1", swimlaneId: "s1", title: "T1",
+  id: "t1", key: "EG-1", projectId: "p1", columnId: "c1", swimlaneId: "s1", title: "T1",
   description: { type: "doc", content: [] }, priority: "prio-1", type: "type-1",
   assignees: [], position: "a0", githubs: [], dueAt: null, archivedAt: null,
   createdAt: "t", updatedAt: "t",
 };
-const BOARD: Board = { project: { id: "p1", slug: "demo", name: "Demo", description: "", repos: [], createdAt: "t", updatedAt: "t" }, columns: [COLUMN], swimlanes: [LANE, LANE_OVERDUE, LANE_FUTURE], milestones: [], fieldConfig: FIELD_CONFIG, links: [], tasks: [TASK] };
+const BOARD: Board = { project: { id: "p1", slug: "demo", key: "EG", name: "Demo", description: "", repos: [], createdAt: "t", updatedAt: "t" }, columns: [COLUMN], swimlanes: [LANE, LANE_OVERDUE, LANE_FUTURE], milestones: [], fieldConfig: FIELD_CONFIG, links: [], tasks: [TASK] };
 
 const MOVE_TARGET = { columnId: "c1", swimlaneId: "s-future" };
 

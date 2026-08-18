@@ -32,14 +32,14 @@ beforeAll(async () => {
   db.exec(`
 INSERT INTO users (id, email, name, role) VALUES ('u1', 'maria@lexa.test', 'Maria', 'superadmin');
 INSERT INTO api_keys (id, name, key_hash, user_id) VALUES ('k1', 'test-admin', '${adminHash}', 'u1');
-INSERT INTO projects (id, name, slug) VALUES ('p1', 'P', 'p1');
+INSERT INTO projects (id, name, slug, key, next_task_number) VALUES ('p1', 'P', 'p1', 'EG', 2);
 INSERT INTO columns (id, project_id, name, position) VALUES ('c1', 'p1', 'Todo', 0), ('c2', 'p1', 'Done', 1);
 INSERT INTO swimlanes (id, project_id, name, position, kind, due_at) VALUES ('s-backlog', 'p1', 'Backlog', 0, 'backlog', NULL);
 INSERT INTO swimlanes (id, project_id, name, position, kind, due_at) VALUES ('m1', 'p1', 'Milestone 1', 1, 'sprint', '2026-06-01');
 INSERT INTO priority_options (id, project_id, label, color, position) VALUES ('prio-1', 'p1', 'Medium', '#888', 0), ('prio-2', 'p1', 'High', '#f00', 1);
 INSERT INTO type_options (id, project_id, label, color, position) VALUES ('type-1', 'p1', 'Bug', '#f00', 0), ('type-2', 'p1', 'Feature', '#0f0', 1);
-INSERT INTO tasks (id, project_id, column_id, swimlane_id, title, position, due_at, created_at) VALUES ('t1', 'p1', 'c1', 'm1', 'T1', 'a0', '2026-06-15', '2026-01-01 10:00:00');
-INSERT INTO tasks (id, project_id, column_id, swimlane_id, title, position, created_at) VALUES ('t2', 'p1', 'c2', 's-backlog', 'T2', 'a0', '2026-01-01 10:00:00');
+INSERT INTO tasks (id, project_id, column_id, swimlane_id, title, position, due_at, created_at, key, number) VALUES ('t1', 'p1', 'c1', 'm1', 'T1', 'a0', '2026-06-15', '2026-01-01 10:00:00', 'EG-1', 1);
+INSERT INTO tasks (id, project_id, column_id, swimlane_id, title, position, created_at, key, number) VALUES ('t2', 'p1', 'c2', 's-backlog', 'T2', 'a0', '2026-01-01 10:00:00', 'EG-2', 2);
 `);
   handler = createApiHandler(dbPath);
 });
@@ -189,14 +189,57 @@ describe("task move routes", () => {
   });
 });
 
+describe("task ticket key routes", () => {
+  beforeAll(() => {
+    db.prepare("INSERT INTO projects (id, name, slug, key) VALUES ('p-key', 'Key', 'p-key', 'EMB')").run();
+    db.prepare("INSERT INTO projects (id, name, slug, key) VALUES ('p-key2', 'Key2', 'p-key2', 'WC')").run();
+    db.prepare("INSERT INTO columns (id, project_id, name, position) VALUES ('ck1', 'p-key', 'Todo', 0)").run();
+    db.prepare("INSERT INTO swimlanes (id, project_id, name, position, kind) VALUES ('sk', 'p-key', 'Backlog', 0, 'backlog')").run();
+    db.prepare("INSERT INTO tasks (id, project_id, column_id, swimlane_id, title, position, key, number, created_at) VALUES ('tk1', 'p-key', 'ck1', 'sk', 'Key Task', 'a0', 'EMB-1', 1, '2026-01-01 10:00:00')").run();
+  });
+
+  it("GET by ticket key resolves the task", async () => {
+    const res = await handler(json("GET", "/api/projects/p-key/tasks/EMB-1"));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.key).toBe("EMB-1");
+  });
+
+  it("GET by lowercase key works", async () => {
+    const res = await handler(json("GET", "/api/projects/p-key/tasks/emb-1"));
+    expect(res.status).toBe(200);
+  });
+
+  it("unknown key → 404 echoing the raw param", async () => {
+    const res = await handler(json("GET", "/api/projects/p-key/tasks/EMB-999"));
+    expect(res.status).toBe(404);
+    const body = await res.json();
+    expect(body.error.code).toBe("TASK_NOT_FOUND");
+  });
+
+  it("key from another project with wrong slug → 404", async () => {
+    const res = await handler(json("GET", "/api/projects/p-key2/tasks/EMB-1"));
+    expect(res.status).toBe(404);
+    expect((await res.json()).error.code).toBe("TASK_NOT_FOUND");
+  });
+
+  it("search pre-checks exact key match", async () => {
+    const res = await handler(json("GET", "/api/projects/p-key/tasks/search?q=EMB-1"));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.data).toHaveLength(1);
+    expect(body.data[0].id).toBe("tk1");
+  });
+});
+
 describe("board route", () => {
   it("GET /api/projects/:slug/board returns the full snapshot", async () => {
     // Self-contained project so earlier move tests cannot pollute the snapshot.
-    db.prepare("INSERT INTO projects (id, name, slug) VALUES ('p-board', 'Board', 'p-board')").run();
+    db.prepare("INSERT INTO projects (id, name, slug, key, next_task_number) VALUES ('p-board', 'Board', 'p-board', 'PB', 2)").run();
     db.prepare("INSERT INTO columns (id, project_id, name, position) VALUES ('cb1', 'p-board', 'Todo', 0), ('cb2', 'p-board', 'Done', 1)").run();
     db.prepare("INSERT INTO swimlanes (id, project_id, name, position, kind) VALUES ('sb', 'p-board', 'Backlog', 0, 'backlog')").run();
-    db.prepare("INSERT INTO tasks (id, project_id, column_id, swimlane_id, title, position, created_at) VALUES ('tb1', 'p-board', 'cb1', 'sb', 'B1', 'a0', '2026-01-01 10:00:00')").run();
-    db.prepare("INSERT INTO tasks (id, project_id, column_id, swimlane_id, title, position, archived_at, created_at) VALUES ('tb-arch', 'p-board', 'cb2', 'sb', 'Arch', 'a0', '2026-02-01 10:00:00', '2026-01-01 10:00:00')").run();
+    db.prepare("INSERT INTO tasks (id, project_id, column_id, swimlane_id, title, position, created_at, key, number) VALUES ('tb1', 'p-board', 'cb1', 'sb', 'B1', 'a0', '2026-01-01 10:00:00', 'PB-1', 1)").run();
+    db.prepare("INSERT INTO tasks (id, project_id, column_id, swimlane_id, title, position, archived_at, created_at, key, number) VALUES ('tb-arch', 'p-board', 'cb2', 'sb', 'Arch', 'a0', '2026-02-01 10:00:00', '2026-01-01 10:00:00', 'PB-2', 2)").run();
     const res = await handler(json("GET", "/api/projects/p-board/board"));
     expect(res.status).toBe(200);
     const body = await res.json();

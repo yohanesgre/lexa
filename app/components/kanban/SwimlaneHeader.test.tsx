@@ -17,13 +17,13 @@ function json(body: unknown, status = 200): Response {
 const LANE: Swimlane = { id: "s1", projectId: "p1", name: "Main", description: "", position: 0, dueAt: null, archivedAt: null, startAt: null, milestoneId: null, kind: "sprint" };
 const BACKLOG: Swimlane = { id: "s2", projectId: "p1", name: "Backlog", description: "", position: 1, dueAt: null, archivedAt: null, startAt: null, milestoneId: null, kind: "backlog" };
 const BOARD: Board = {
-  project: { id: "p1", slug: "demo", name: "Demo", description: "", repos: [], createdAt: "t", updatedAt: "t" },
+  project: { id: "p1", slug: "demo", key: "EG", name: "Demo", description: "", repos: [], createdAt: "t", updatedAt: "t" },
   columns: [],
   swimlanes: [LANE, BACKLOG],
   milestones: [],
   fieldConfig: { priorities: [], types: [] },
   links: [],
-  tasks: [{ id: "t1", projectId: "p1", columnId: "c1", swimlaneId: "s1", title: "T1", description: { type: "doc", content: [] }, priority: "p", type: "t", assignees: [], position: "a0", githubs: [], dueAt: null, archivedAt: null, createdAt: "t", updatedAt: "t" }],
+  tasks: [{ id: "t1", key: "EG-1", projectId: "p1", columnId: "c1", swimlaneId: "s1", title: "T1", description: { type: "doc", content: [] }, priority: "p", type: "t", assignees: [], position: "a0", githubs: [], dueAt: null, archivedAt: null, createdAt: "t", updatedAt: "t" }],
 };
 const ARCHIVED_LANE: Swimlane = { ...LANE, archivedAt: "2026-03-01T00:00:00.000Z" };
 const ARCHIVE_EVENT: ActivityEvent = { id: 1, taskId: "t1", actorKind: "agent", actorLabel: "mcp", actorUserId: null, type: "archived", message: "mcp archived this task", createdAt: "t" };

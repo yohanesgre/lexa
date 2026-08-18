@@ -183,6 +183,7 @@ export function useLinkExistingIssue(slug: string) {
 
 export interface TaskListItem {
   id: string;
+  key: string;
   title: string;
   priorityId: string;
   priorityLabel: string;
@@ -213,6 +214,7 @@ export function deriveTaskList(board: Board): TaskListItem[] {
     const ty = type.get(t.type);
     return {
       id: t.id,
+      key: t.key,
       title: t.title,
       priorityId: t.priority,
       priorityLabel: p?.label ?? t.priority,

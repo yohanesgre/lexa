@@ -19,7 +19,7 @@ const FIELD_OPTIONS = {
 };
 
 const BOARD: Board = {
-  project: { id: "p1", slug: "demo", name: "Demo", description: "", repos: [], createdAt: "t", updatedAt: "t" },
+  project: { id: "p1", slug: "demo", key: "EG", name: "Demo", description: "", repos: [], createdAt: "t", updatedAt: "t" },
   columns: [{ id: "c1", projectId: "p1", name: "Todo", position: 0, color: "#888", wipLimit: null, requiredFields: [], githubState: null, isDone: false }],
   swimlanes: [{ id: "s1", projectId: "p1", name: "Backlog", description: "", position: 0, dueAt: null, archivedAt: null, startAt: null, milestoneId: null, kind: "backlog" }],
   milestones: [],
@@ -29,7 +29,7 @@ const BOARD: Board = {
 };
 
 const TASK: Task = {
-  id: "t1", projectId: "p1", columnId: "c1", swimlaneId: "s1", title: "Task One",
+  id: "t1", key: "EG-1", projectId: "p1", columnId: "c1", swimlaneId: "s1", title: "Task One",
   description: { type: "doc", content: [] }, priority: "pr-high", type: "tp-feature",
   assignees: ["Maria", "Joao", "Ana", "Pedro"], position: "a0", githubs: [
     { issueId: "ghi1", issueNumber: 7, repo: "owner/repo", syncedState: "open", url: "https://github.com/owner/repo/issues/7", outOfSync: false, pushFailed: false },
@@ -38,16 +38,27 @@ const TASK: Task = {
 
 describe("TaskCard", () => {
   it("renders type label, title, and github issue chips", () => {
-    render(<TaskCard {...TASK} priorities={FIELD_OPTIONS.priorities} types={FIELD_OPTIONS.types} />);
+    render(<TaskCard {...TASK} taskKey={TASK.key} priorities={FIELD_OPTIONS.priorities} types={FIELD_OPTIONS.types} />);
     expect(screen.getByText("Feature")).toBeInTheDocument();
     expect(screen.getByText("Task One")).toBeInTheDocument();
     expect(screen.getByText("#7")).toBeInTheDocument();
     expect(screen.getByText("+1")).toBeInTheDocument(); // 4 assignees → overflow
   });
 
+  it("renders the ticket key before the title", () => {
+    const { container } = render(
+      <TaskCard {...TASK} taskKey={TASK.key} priorities={FIELD_OPTIONS.priorities} types={FIELD_OPTIONS.types} />
+    );
+    const key = container.querySelector(".task-key");
+    expect(key).not.toBeNull();
+    expect(key!.textContent).toBe("EG-1");
+    const title = container.querySelector(".card-title")!;
+    expect(title.textContent!.indexOf("EG-1")).toBeLessThan(title.textContent!.indexOf("Task One"));
+  });
+
   it("marks an overdue due date with the overdue style", () => {
     const { container } = render(
-      <TaskCard {...TASK} dueAt="2000-01-01" priorities={FIELD_OPTIONS.priorities} types={FIELD_OPTIONS.types} />
+      <TaskCard {...TASK} taskKey={TASK.key} dueAt="2000-01-01" priorities={FIELD_OPTIONS.priorities} types={FIELD_OPTIONS.types} />
     );
     expect(screen.getByText(/Overdue/)).toBeInTheDocument();
     expect(container.querySelector(".card-due-overdue")).not.toBeNull();
@@ -57,6 +68,7 @@ describe("TaskCard", () => {
     const { container } = render(
       <TaskCard
         {...TASK}
+        taskKey={TASK.key}
         priorities={FIELD_OPTIONS.priorities}
         types={FIELD_OPTIONS.types}
         githubs={[{ ...TASK.githubs[0]!, outOfSync: true }]}
@@ -67,7 +79,7 @@ describe("TaskCard", () => {
   });
 
   it("renders the blocked-by tooltip when blockers are present", () => {
-    render(<TaskCard {...TASK} priorities={FIELD_OPTIONS.priorities} types={FIELD_OPTIONS.types} blockedBy={["Blocker Task"]} />);
+    render(<TaskCard {...TASK} taskKey={TASK.key} priorities={FIELD_OPTIONS.priorities} types={FIELD_OPTIONS.types} blockedBy={["Blocker Task"]} />);
     expect(screen.getByTitle("Blocked by: Blocker Task")).toBeInTheDocument();
   });
 });

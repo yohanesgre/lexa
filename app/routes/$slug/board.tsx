@@ -204,6 +204,7 @@ export function BoardPage() {
           }))}
           availableAssignees={[...new Set(board.tasks.flatMap((t) => t.assignees))] as string[]}
           taskTitles={new Map(board.tasks.map((t) => [t.id, t.title]))}
+          taskKeys={new Map(board.tasks.map((t) => [t.id, t.key]))}
           fieldConfig={board.fieldConfig}
           onClose={handleClose}
           onUpdate={handleUpdate}

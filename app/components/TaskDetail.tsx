@@ -46,6 +46,7 @@ interface TaskDetailProps {
   columnRequiredFields?: { columnId: string; fields: string[] }[];
   availableAssignees?: string[];
   taskTitles?: Map<string, string>;    // taskId → title, for link display
+  taskKeys?: Map<string, string>;      // taskId → key, for link display
   fieldConfig?: { priorities: { id: string; label: string; color: string }[]; types: { id: string; label: string; color: string }[] };
   onClose: () => void;
   onUpdate?: (id: string, data: Partial<Task>) => void;
@@ -88,7 +89,7 @@ function getMissingRequiredFields(
 }
 
 
-export function TaskDetail({ mode = "view", task, project, defaultColumnId, columns, swimlanes, columnRequiredFields, availableAssignees, taskTitles, fieldConfig, onClose, onUpdate, onMove, onDelete, onArchive, onRestore, onLinkGithub, onUnlinkGithub, onCreate }: TaskDetailProps) {
+export function TaskDetail({ mode = "view", task, project, defaultColumnId, columns, swimlanes, columnRequiredFields, availableAssignees, taskTitles, taskKeys, fieldConfig, onClose, onUpdate, onMove, onDelete, onArchive, onRestore, onLinkGithub, onUnlinkGithub, onCreate }: TaskDetailProps) {
   const params = useParams({ strict: false }) as { slug?: string };
   const slug = params.slug;
   const isCreate = mode === "create";
@@ -256,6 +257,7 @@ export function TaskDetail({ mode = "view", task, project, defaultColumnId, colu
           onSaveTitle={saveTitle}
           setEditingTitle={setEditingTitle}
           taskTitle={task?.title ?? ""}
+          taskKey={task?.key ?? ""}
         />
 
 
@@ -321,6 +323,7 @@ export function TaskDetail({ mode = "view", task, project, defaultColumnId, colu
           task={task ?? null}
           emptyDoc={emptyDoc}
           taskTitles={taskTitles}
+          taskKeys={taskKeys}
           editingDescription={editingDescription}
           setEditingDescription={setEditingDescription}
           setCreateDescription={setCreateDescription}

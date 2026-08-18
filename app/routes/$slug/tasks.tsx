@@ -18,6 +18,9 @@ export const Route = createFileRoute("/$slug/tasks")({
 
 type SortKey = "board" | "priority" | "created";
 
+// Ticket-key pattern: project prefix (2–6 chars) + dash + number — e.g. "EG-12".
+const KEY_PATTERN = /^[A-Z0-9]{2,6}-\d+$/i;
+
 export function TasksPage() {
   const { slug } = Route.useParams();
   const search = Route.useSearch();
@@ -56,10 +59,17 @@ export function TasksPage() {
 
   const hasActiveFilters = query !== "" || columnId !== "" || typeId !== "" || priorityId !== "" || assignee !== "" || swimlaneId !== "";
 
+  // Key-pattern search: the task whose key matches the query exactly.
+  const exactMatchId = useMemo(() => {
+    const q = query.trim();
+    if (!KEY_PATTERN.test(q)) return null;
+    return tasks?.find((t) => t.key.toLowerCase() === q.toLowerCase())?.id ?? null;
+  }, [query, tasks]);
+
   const filtered = useMemo(() => {
     let list = tasks ?? [];
     const q = query.trim().toLowerCase();
-    if (q) list = list.filter((t) => t.title.toLowerCase().includes(q));
+    if (q) list = list.filter((t) => t.title.toLowerCase().includes(q) || t.key.toLowerCase().includes(q));
     if (columnId) list = list.filter((t) => t.columnId === columnId);
     if (typeId) list = list.filter((t) => t.typeId === typeId);
     if (priorityId) list = list.filter((t) => t.priorityId === priorityId);
@@ -72,8 +82,17 @@ export function TasksPage() {
     } else if (sortKey === "created") {
       list = [...list].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
     }
+    // Key-pattern search: surface the exact key match first (server pre-checks the same way).
+    if (exactMatchId) {
+      const idx = list.findIndex((t) => t.id === exactMatchId);
+      if (idx > 0) {
+        list = [...list]; // never mutate the cached tasks array
+        const [exact] = list.splice(idx, 1);
+        list = [exact, ...list];
+      }
+    }
     return list;
-  }, [tasks, fieldConfig, query, columnId, typeId, priorityId, assignee, swimlaneId, showArchived, sortKey]);
+  }, [tasks, fieldConfig, query, columnId, typeId, priorityId, assignee, swimlaneId, showArchived, sortKey, exactMatchId]);
 
   const clearFilters = () => {
     setQuery("");
@@ -268,6 +287,7 @@ export function TasksPage() {
               onClick={() => handleSelectTask(t)}
             >
               {t.priorityColor !== "" && <span className="task-row-accent" style={{ background: t.priorityColor }} />}
+              <span className="task-key">{t.key}</span>
               <span className="task-row-title">{t.title}</span>
                 <span className="task-row-meta">
                   {swimlaneId && (
@@ -281,6 +301,11 @@ export function TasksPage() {
                     {t.columnName} · {t.swimlaneName}
                   </span>
                 <span className="task-row-status">
+                  {t.id === exactMatchId && (
+                    <span className="task-chip type" style={{ color: "var(--lx-text-link)", borderColor: "var(--lx-text-link)" }}>
+                      exact match
+                    </span>
+                  )}
                   <span className="task-chip type" style={t.typeColor ? { color: t.typeColor, borderColor: t.typeColor } : undefined}>
                     {t.typeLabel}
                   </span>
@@ -308,6 +333,7 @@ export function TasksPage() {
           }))}
           availableAssignees={[...new Set(board.tasks.flatMap((t) => t.assignees))] as string[]}
           taskTitles={new Map(board.tasks.map((t) => [t.id, t.title]))}
+          taskKeys={new Map(board.tasks.map((t) => [t.id, t.key]))}
           fieldConfig={board.fieldConfig}
           onClose={handleClose}
           onUpdate={handleUpdate}

@@ -66,13 +66,13 @@ INSERT INTO member (id, organizationId, userId, role, createdAt) VALUES
 INSERT INTO runtimes (id, name, provider, model, status, agent, print_logs, log_level, team_id) VALUES
   ('r-a', 'team runtime', 'opencode', 'claude', 'online', 'lexa', 0, 'INFO', 'team-a'),
   ('r-g', 'global runtime', 'opencode', 'claude', 'online', 'lexa', 0, 'INFO', NULL);
-INSERT INTO projects (id, name, slug, team_id) VALUES ('p-a', 'PA', 'p-a', 'team-a'), ('p-b', 'PB', 'p-b', 'team-b'), ('p-g', 'PG', 'p-g', NULL);
+INSERT INTO projects (id, name, slug, key, next_task_number, team_id) VALUES ('p-a', 'PA', 'p-a', 'PA', 1, 'team-a'), ('p-b', 'PB', 'p-b', 'PB', 1, 'team-b'), ('p-g', 'PG', 'p-g', 'PG', 1, NULL);
 INSERT INTO columns (id, project_id, name, position) VALUES ('c-a', 'p-a', 'Todo', 0), ('c-b', 'p-b', 'Todo', 0), ('c-g', 'p-g', 'Todo', 0);
 INSERT INTO swimlanes (id, project_id, name, position, kind) VALUES ('s-a', 'p-a', 'Main', 0, 'backlog'), ('s-b', 'p-b', 'Main', 0, 'backlog'), ('s-g', 'p-g', 'Main', 0, 'backlog');
-INSERT INTO tasks (id, project_id, column_id, swimlane_id, title, position, created_at) VALUES
-  ('ta', 'p-a', 'c-a', 's-a', 'TA', 'a0', '2026-01-01 10:00:00'),
-  ('tb', 'p-b', 'c-b', 's-b', 'TB', 'a0', '2026-01-01 10:00:00'),
-  ('tg', 'p-g', 'c-g', 's-g', 'TG', 'a0', '2026-01-01 10:00:00');
+INSERT INTO tasks (id, project_id, column_id, swimlane_id, title, position, created_at, key, number) VALUES
+  ('ta', 'p-a', 'c-a', 's-a', 'TA', 'a0', '2026-01-01 10:00:00', 'PA-1', 1),
+  ('tb', 'p-b', 'c-b', 's-b', 'TB', 'a0', '2026-01-01 10:00:00', 'PB-1', 1),
+  ('tg', 'p-g', 'c-g', 's-g', 'TG', 'a0', '2026-01-01 10:00:00', 'PG-1', 1);
 INSERT INTO forge_agents (id, name, description, instructions, is_builtin) VALUES ('a1', 'A', '', '', 0);
 INSERT INTO forge_skills (id, name, description, instructions, is_builtin) VALUES ('sk1', 'S', '', '', 0);
 INSERT INTO forge_tasks (id, project_id, document_type, document_id, agent_id, skill_id, selection, doc_context, status, created_at) VALUES

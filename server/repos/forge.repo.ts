@@ -13,6 +13,8 @@ const TASK_SELECT = `
   SELECT ft.*,
          CASE WHEN ft.document_type = 'task' THEN (SELECT title FROM tasks WHERE id = ft.document_id)
               ELSE (SELECT title FROM wiki_pages WHERE slug = ft.document_id) END AS document_title,
+         CASE WHEN ft.document_type = 'task' THEN COALESCE((SELECT key FROM tasks WHERE id = ft.document_id), '')
+              ELSE '' END AS key,
          fa.name AS agent_name,
          fs.name AS skill_name
   FROM forge_tasks ft
@@ -462,6 +464,8 @@ export class ForgeRepo extends Effect.Service<ForgeRepo>()("Lexa/ForgeRepo", {
           `SELECT ft.*, p.name AS project_name,
                   CASE WHEN ft.document_type = 'task' THEN (SELECT title FROM tasks WHERE id = ft.document_id)
                        ELSE (SELECT title FROM wiki_pages WHERE slug = ft.document_id) END AS document_title,
+                  CASE WHEN ft.document_type = 'task' THEN COALESCE((SELECT key FROM tasks WHERE id = ft.document_id), '')
+                       ELSE '' END AS key,
                   fa.name AS agent_name,
                   fs.name AS skill_name
            FROM forge_tasks ft
@@ -512,6 +516,8 @@ export class ForgeRepo extends Effect.Service<ForgeRepo>()("Lexa/ForgeRepo", {
         const sql = `SELECT ft.*, p.name AS project_name,
                             CASE WHEN ft.document_type = 'task' THEN (SELECT title FROM tasks WHERE id = ft.document_id)
                                  ELSE (SELECT title FROM wiki_pages WHERE slug = ft.document_id) END AS document_title,
+                            CASE WHEN ft.document_type = 'task' THEN COALESCE((SELECT key FROM tasks WHERE id = ft.document_id), '')
+                                 ELSE '' END AS key,
                             fa.name AS agent_name,
                             fs.name AS skill_name
                      FROM forge_tasks ft

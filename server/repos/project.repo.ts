@@ -8,16 +8,22 @@ export class ProjectRepo extends Effect.Service<ProjectRepo>()("Lexa/ProjectRepo
     const db = yield* Sqlite;
 
     return {
-      create: (input: { id: string; name: string; slug: string; description: string; teamId?: string | null }): Effect.Effect<void, ConstraintViolation | DbError> =>
+      create: (input: { id: string; name: string; slug: string; key: string; description: string; teamId?: string | null }): Effect.Effect<void, ConstraintViolation | DbError> =>
         run(
           db,
-          `INSERT INTO projects (id, name, slug, description, team_id) VALUES (?, ?, ?, ?, ?)`,
+          `INSERT INTO projects (id, name, slug, key, description, team_id) VALUES (?, ?, ?, ?, ?, ?)`,
           input.id,
           input.name,
           input.slug,
+          input.key,
           input.description,
           input.teamId ?? null
         ).pipe(Effect.map(() => undefined)),
+
+      listKeys: (): Effect.Effect<string[], DbError> =>
+        queryAll<{ key: string }>(db, `SELECT key FROM projects WHERE key IS NOT NULL`).pipe(
+          Effect.map((rows) => rows.map((r) => r.key))
+        ),
 
       findBySlug: (slug: string): Effect.Effect<DomainProject, RowNotFound | DbError> =>
         queryFirst<ProjectRow>(db, `SELECT * FROM projects WHERE slug = ?`, slug).pipe(Effect.map(rowToProject)),

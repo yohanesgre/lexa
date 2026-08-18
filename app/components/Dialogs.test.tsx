@@ -9,13 +9,13 @@ import { MoveConfirmDialog, type PendingMove } from "./kanban/MoveConfirmDialog"
 import type { Board, Task } from "../../shared/types";
 
 const TASK: Task = {
-  id: "t1", projectId: "p1", columnId: "c1", swimlaneId: "s1", title: "Task One",
+  id: "t1", key: "EG-1", projectId: "p1", columnId: "c1", swimlaneId: "s1", title: "Task One",
   description: { type: "doc", content: [] }, priority: "p", type: "t",
   assignees: [], position: "a0", githubs: [], dueAt: null, archivedAt: null, createdAt: "t", updatedAt: "t",
 };
 
 const BOARD: Board = {
-  project: { id: "p1", slug: "demo", name: "Demo", description: "", repos: [], createdAt: "t", updatedAt: "t" },
+  project: { id: "p1", slug: "demo", key: "EG", name: "Demo", description: "", repos: [], createdAt: "t", updatedAt: "t" },
   columns: [{ id: "c1", projectId: "p1", name: "Todo", position: 0, color: "#888", wipLimit: null, requiredFields: [], githubState: null, isDone: false }],
   swimlanes: [
     { id: "s1", projectId: "p1", name: "Main", description: "", position: 0, dueAt: "2099-08-01", archivedAt: null, startAt: null, milestoneId: null, kind: "sprint" },

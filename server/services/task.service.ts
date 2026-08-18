@@ -4,7 +4,7 @@ import { ProjectRepo } from "../repos/project.repo";
 import { ColumnRepo } from "../repos/column.repo";
 import { SwimlaneRepo } from "../repos/swimlane.repo";
 import { FieldConfigRepo } from "../repos/field-config.repo";
-import { ConstraintViolation, DbError, RowNotFound, Sqlite, withTx } from "../db/database";
+import { ConstraintViolation, DbError, RowNotFound, Sqlite, withTx, queryFirst } from "../db/database";
 import { keyAfter } from "../../shared/positions";
 import { keyBetween } from "../../shared/positions";
 import {
@@ -45,7 +45,7 @@ function validateRequiredFields(
     } else {
       empty = !taskLike[field];
     }
-    if (empty) return Effect.fail(new RequiredFieldMissing({ field, column: column.name }));
+    if (empty) return Effect.fail(new RequiredFieldMissing({ field, columnName: column.name }));
   }
   return Effect.void;
 }
@@ -168,6 +168,13 @@ export class TaskService extends Effect.Service<TaskService>()("Lexa/TaskService
             );
             const position = keyAfter(last?.position ?? null);
             const taskId = crypto.randomUUID();
+            const counter = yield* queryFirst<{ next_task_number: number }>(
+              db,
+              `UPDATE projects SET next_task_number = next_task_number + 1 WHERE id = ? RETURNING next_task_number`,
+              input.projectId
+            );
+            const number = counter.next_task_number;
+            const key = `${project.key}-${number}`;
             yield* taskRepo.create({
               id: taskId,
               projectId: input.projectId,
@@ -180,6 +187,8 @@ export class TaskService extends Effect.Service<TaskService>()("Lexa/TaskService
               assignees: input.assignees ?? [],
               position,
               dueAt: input.dueAt ?? null,
+              number,
+              key,
             });
             if (parent) {
               yield* taskRepo.createSubtaskLink(input.projectId, taskId, parent.id);
@@ -390,7 +399,7 @@ export class TaskService extends Effect.Service<TaskService>()("Lexa/TaskService
             }, { bypassWip: opts?.bypassGuards });
             if (result.changes === 0) {
               const count = yield* taskRepo.countByColumn(task.projectId, target.columnId);
-              return yield* new WipLimitExceeded({ column: column.name, limit: column.wipLimit ?? 0, current: count });
+              return yield* new WipLimitExceeded({ columnName: column.name, limit: column.wipLimit ?? 0, current: count });
             }
             return result.task;
           });

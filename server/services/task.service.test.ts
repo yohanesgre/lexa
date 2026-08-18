@@ -28,12 +28,14 @@ function tmpDb(): Database {
 }
 
 function seed(db: Database) {
-  db.prepare("INSERT INTO projects (id, name, slug) VALUES ('p1','P','p1')").run();
-  db.prepare("INSERT INTO columns (id, project_id, name, position, github_state) VALUES ('c-todo','p1','Todo',0,'open'), ('c-done','p1','Done',1,'closed')").run();
-  db.prepare("INSERT INTO swimlanes (id, project_id, name, position) VALUES ('s1','p1','Default',0)").run();
+  db.prepare("INSERT INTO projects (id, name, slug, key) VALUES ('p1','P','p1','EG')").run();
+  db.prepare("INSERT INTO projects (id, name, slug, key) VALUES ('p2','P2','p2','WC')").run();
+  db.prepare("INSERT INTO columns (id, project_id, name, position, github_state) VALUES ('c-todo','p1','Todo',0,'open'), ('c-done','p1','Done',1,'closed'), ('c-p2','p2','Todo',0,'open')").run();
+  db.prepare("INSERT INTO swimlanes (id, project_id, name, position, kind) VALUES ('s1','p1','Default',0,'backlog')").run();
+  db.prepare("INSERT INTO swimlanes (id, project_id, name, position, kind) VALUES ('s-p2','p2','Backlog',0,'backlog')").run();
   db.prepare("INSERT INTO users (id, email, name, role) VALUES ('u1','maria@lexa.test','Maria','member')").run();
-  db.prepare("INSERT INTO priority_options (id, project_id, label, color, position) VALUES ('prio-1','p1','Medium','#888',0), ('prio-2','p1','High','#f00',1)").run();
-  db.prepare("INSERT INTO type_options (id, project_id, label, color, position) VALUES ('type-1','p1','Bug','#f00',0), ('type-2','p1','Feature','#0f0',1)").run();
+  db.prepare("INSERT INTO priority_options (id, project_id, label, color, position) VALUES ('prio-1','p1','Medium','#888',0), ('prio-2','p1','High','#f00',1), ('prio-p2','p2','Medium','#888',0)").run();
+  db.prepare("INSERT INTO type_options (id, project_id, label, color, position) VALUES ('type-1','p1','Bug','#f00',0), ('type-2','p1','Feature','#0f0',1), ('type-p2','p2','Task','#0f0',0)").run();
   db.prepare("INSERT INTO tasks (id, project_id, column_id, swimlane_id, title, description, priority, type, position, created_at) VALUES ('t1','p1','c-todo','s1','T','{\"type\":\"doc\",\"content\":[]}','prio-1','type-1','a0','2026-01-01 10:00:00')").run();
 }
 
@@ -180,7 +182,7 @@ describe("TaskService WIP + positions", () => {
         if (Either.isLeft(result)) {
           expect(result.left).toBeInstanceOf(WipLimitExceeded);
           const wip = result.left as WipLimitExceeded;
-          expect(wip.column).toBe("Todo");
+          expect(wip.columnName).toBe("Todo");
           expect(wip.limit).toBe(1);
           expect(wip.current).toBe(2); // t1 + t3 occupy c-todo
         }
@@ -301,7 +303,7 @@ describe("TaskService required fields", () => {
           expect(empty.left).toBeInstanceOf(RequiredFieldMissing);
           const req = empty.left as RequiredFieldMissing;
           expect(req.field).toBe("description");
-          expect(req.column).toBe("Todo");
+          expect(req.columnName).toBe("Todo");
         }
         const ws = yield* Effect.either(svc.create(maria, { projectId: "p1", columnId: "c-todo", swimlaneId: "s1", title: "X", description: WS_DOC }));
         expect(Either.isLeft(ws)).toBe(true);
@@ -472,6 +474,34 @@ describe("TaskService swimlane + deadline", () => {
           expect(result.left).toBeInstanceOf(SwimlaneNotFound);
           expect((result.left as SwimlaneNotFound).id).toBe("m1");
         }
+      })
+    );
+  });
+});
+
+describe("TaskService ticket keys", () => {
+  it("assigns sequential per-project numbers with composed keys", () => {
+    const db = tmpDb();
+    seed(db);
+    const svc = makeService(db);
+    Effect.runSync(
+      Effect.gen(function* () {
+        const { task: t1 } = yield* svc.create(maria, { projectId: "p1", columnId: "c-todo", title: "One" });
+        const { task: t2 } = yield* svc.create(maria, { projectId: "p1", columnId: "c-todo", title: "Two" });
+        expect(t1.key).toBe("EG-1");
+        expect(t2.key).toBe("EG-2");
+      })
+    );
+  });
+
+  it("numbers are per-project", () => {
+    const db = tmpDb();
+    seed(db);
+    const svc = makeService(db);
+    Effect.runSync(
+      Effect.gen(function* () {
+        const { task: t } = yield* svc.create(maria, { projectId: "p2", columnId: "c-p2", title: "Other" });
+        expect(t.key).toBe("WC-1");
       })
     );
   });

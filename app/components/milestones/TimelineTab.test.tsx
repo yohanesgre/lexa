@@ -32,7 +32,7 @@ const MILESTONES: Milestone[] = [{ id: "m1", projectId: "p1", name: "v1.0 launch
 
 function makeBoard(): Board {
   return {
-    project: { id: "p1", slug: "demo", name: "Demo", description: "", repos: [], createdAt: "t", updatedAt: "t" },
+    project: { id: "p1", slug: "demo", key: "EG", name: "Demo", description: "", repos: [], createdAt: "t", updatedAt: "t" },
     columns: [],
     swimlanes: [LANE],
     milestones: MILESTONES,
