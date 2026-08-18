@@ -352,7 +352,7 @@ function AgentsSkillsSections() {
 
 export function WorkspaceSettings() {
   return (
-    <main className="page-frame">
+    <main className="page-frame page-frame-narrow">
       <h1 className="font-display text-2xl font-semibold text-lx-text-primary mb-4">Workspace settings</h1>
       <p className="text-sm text-lx-text-secondary mb-6" style={{ maxWidth: 560 }}>
         Superadmin-only surface. Members, invites, teams, machines &amp; runtimes, API keys, rate limiting, GitHub sync, Forge agents &amp; skills. Superadmin is env-provisioned (LXK_ADMIN_EMAILS) — there is no in-app promotion UI.

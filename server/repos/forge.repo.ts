@@ -62,8 +62,8 @@ export class ForgeRepo extends Effect.Service<ForgeRepo>()("Lexa/ForgeRepo", {
           return rowToRuntime(row);
         }),
 
-      updateRuntimeHeartbeat: (id: string, mcpConnected: boolean): Effect.Effect<void, ConstraintViolation | DbError> =>
-        run(db, `UPDATE runtimes SET status = 'online', mcp_connected = ?, last_seen = datetime('now') WHERE id = ?`, mcpConnected ? 1 : 0, id).pipe(
+      updateRuntimeHeartbeat: (id: string): Effect.Effect<void, ConstraintViolation | DbError> =>
+        run(db, `UPDATE runtimes SET status = 'online', last_seen = datetime('now') WHERE id = ?`, id).pipe(
           Effect.map(() => undefined)
         ),
 

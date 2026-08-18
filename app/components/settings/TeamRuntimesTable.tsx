@@ -47,7 +47,7 @@ export function TeamSettingsRuntimesTable({ teamId, runtimes, isLoading, isError
         <div style={{ background: "var(--lx-surface-card)", border: "1px solid var(--lx-border-default)", borderRadius: 8, overflow: "hidden" }}>
           <table className="settings-table">
             <thead>
-              <tr><th>Name</th><th>CLI</th><th>Model</th><th>Hostname</th><th>Status</th><th>MCP</th><th /></tr>
+              <tr><th>Name</th><th>CLI</th><th>Model</th><th>Hostname</th><th>Status</th><th /></tr>
             </thead>
             <tbody>
               {runtimes.map((r) => (
@@ -57,7 +57,6 @@ export function TeamSettingsRuntimesTable({ teamId, runtimes, isLoading, isError
                   <td className="font-mono text-xs text-lx-text-secondary">{r.model || "—"}</td>
                   <td className="font-mono text-xs text-lx-text-secondary">{r.hostname || "—"}</td>
                   <td><span className="flex items-center gap-2"><span className={r.status === "online" ? "sync-dot sync-synced" : "sync-dot sync-unlinked"} /><span className={`font-micro text-2xs uppercase tracking-[0.04em] ${r.status === "online" ? "text-lx-text-success" : "text-lx-text-muted"}`}>{r.status === "online" ? "Online" : "Offline"}</span></span>{r.lastError && <span className="block text-xs mt-1" style={{ color: "var(--lx-text-warning)" }}>{r.lastError.toLowerCase().includes("api key") ? "API key revoked — re-run Setup runtime" : r.lastError}</span>}</td>
-                  <td><span className={`font-micro text-2xs uppercase tracking-[0.04em] ${r.mcpConnected ? "text-lx-text-success" : "text-lx-text-muted"}`}>{r.mcpConnected ? "Connected" : "Not set"}</span></td>
                   <td style={{ textAlign: "right", whiteSpace: "nowrap" }}>
                     {r.status === "offline" && <button type="button" className="btn btn-ghost" style={{ width: 28, height: 28, padding: 0 }} onClick={() => setRestarting(r)} aria-label={`Restart ${r.name}`} title="Restart guide"><RotateCcw size={14} strokeWidth={1.5} /></button>}
                     <button type="button" className="btn btn-ghost" style={{ width: 28, height: 28, padding: 0 }} onClick={() => setEditing(r)} aria-label={`Edit ${r.name}`} title="Edit runtime"><Settings size={14} strokeWidth={1.5} /></button>

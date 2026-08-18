@@ -15,7 +15,7 @@ VALUES
   ('seed-user-03', 'qa@lexa.local', 'QA Lead', 'member'),
   ('seed-user-04', 'designer@lexa.local', 'Designer Bob', 'member'),
   ('seed-user-05', 'writer@lexa.local', 'Carol Writer', 'member'),
-  ('seed-user-06', 'pm@lexa.local', 'PM Alex', 'superadmin');
+  ('seed-user-06', 'pm@lexa.local', 'PM Alex', 'member');
 
 -- ============================================================
 -- Projects — 4 projects covering empty, minimal, and full

@@ -32,7 +32,7 @@ git submodule update --init wireframes
 ## What to work on
 
 - **Bugs and backend fixes** — no wireframe dependency, fully open.
-- **API/MCP/docs** — the contracts in `docs/` are authoritative; docs changes
+- **API/docs** — the contracts in `docs/` are authoritative; docs changes
   must stay consistent with them.
 - **Frontend UI** — possible only with wireframes access (see above); the
   app transcribes the wireframes exactly, so a wireframe change must land
@@ -46,7 +46,7 @@ by design.
 
 1. **Docs are the authority.** Read the relevant sections before touching
    code, in this order: `docs/SCHEMA.md` → `docs/LAYERS.md` → `docs/API.md` →
-   `docs/MCP.md` → `docs/ARCHITECTURE.md`. Names, error codes, route paths,
+   `docs/ARCHITECTURE.md`. Names, error codes, route paths,
    and tool shapes must match them verbatim. If a doc conflicts with another,
    stop and ask — don't resolve it yourself.
 2. **No scope creep.** If a feature, table, column, endpoint, or tool is not

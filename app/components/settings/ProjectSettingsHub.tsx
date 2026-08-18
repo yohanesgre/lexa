@@ -18,7 +18,7 @@ export function ProjectSettingsHub({ projectId }: { projectId: string }) {
 
   if (projectsLoading) {
     return (
-      <main className="page-frame">
+      <main className="page-frame page-frame-narrow">
         <div className="skeleton" style={{ width: 240, height: 28 }} />
         <div className="skeleton mt-3" style={{ width: 140, height: 14 }} />
       </main>
@@ -27,7 +27,7 @@ export function ProjectSettingsHub({ projectId }: { projectId: string }) {
 
   if (!project) {
     return (
-      <main className="page-frame">
+      <main className="page-frame page-frame-narrow">
         <div className="empty-box">
           <div className="text-sm font-medium text-lx-text-primary">Project not found</div>
           <p className="text-xs text-lx-text-secondary">It may have been deleted or you don't have access.</p>
@@ -38,7 +38,7 @@ export function ProjectSettingsHub({ projectId }: { projectId: string }) {
   }
 
   return (
-    <main className="page-frame">
+    <main className="page-frame page-frame-narrow">
       <div className="flex items-center justify-between mb-6">
         <div>
           <h1 className="font-display text-2xl font-semibold text-lx-text-primary mb-0">Project settings</h1>

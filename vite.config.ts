@@ -13,9 +13,6 @@ export default defineConfig({
     host: "0.0.0.0",
     proxy: {
       "/api": "http://localhost:3000",
-      // MCP is server-side only (not part of the SPA) — proxy it so the
-      // daemon can use the same LEXA_URL as the browser (:5173).
-      "/mcp": "http://localhost:3000",
     },
   },
   ssr: {

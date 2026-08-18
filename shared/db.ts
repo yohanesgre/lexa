@@ -348,7 +348,6 @@ export interface RuntimeRow {
   models_catalog: string;
   agents_catalog: string;
   status: "online" | "offline";
-  mcp_connected: number;
   last_error: string | null;
   hostname: string;
   last_seen: string | null;
@@ -408,7 +407,6 @@ export function rowToRuntime(row: RuntimeRow): RuntimeWithTeam {
     modelsCatalog: parseModelsCatalog(row.models_catalog),
     agentsCatalog: parseAgentsCatalog(row.agents_catalog),
     status: row.status,
-    mcpConnected: row.mcp_connected === 1,
     lastError: row.last_error ?? null,
     hostname: row.hostname,
     lastSeen: row.last_seen,

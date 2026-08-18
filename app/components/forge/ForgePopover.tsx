@@ -336,7 +336,7 @@ export function ForgePopover({ editor, slug, documentType, documentId, open, onC
   const logBodyRef = useRef<HTMLDivElement>(null);
   const { data: runtimes = [] } = useRuntimes();
   // Any online runtime can run tasks — Forge uses the daemon's agent CLI
-  // directly (the claim carries all context), no Lexa MCP connection needed.
+  // directly; the claim carries all context.
   const onlineRuntimes = runtimes.filter((r) => r.status === "online");
   const createTask = useCreateForgeTask();
   const cancelTask = useCancelForgeTask();

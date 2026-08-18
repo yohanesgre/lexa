@@ -251,7 +251,7 @@ export function ApiKeysSection() {
     <section className="mb-8">
       <h2 className="font-display text-lg font-medium text-lx-text-primary mb-2">API Keys</h2>
       <p className="text-sm text-lx-text-secondary mb-4" style={{ maxWidth: 560 }}>
-        Machine authentication for MCP agents and integrations. Keys are hashed with SHA-256 before storage. Only the full key is shown once on creation.
+        Machine authentication for agents and integrations. Keys are hashed with SHA-256 before storage. Only the full key is shown once on creation.
       </p>
 
       {isLoading ? (
@@ -263,7 +263,7 @@ export function ApiKeysSection() {
           <Key size={20} strokeWidth={1.5} className="text-lx-text-muted" />
           <div className="text-sm font-medium text-lx-text-primary mt-1">No API keys yet</div>
           <p className="text-xs text-lx-text-secondary" style={{ maxWidth: 360 }}>
-            Generate a key below to connect Hermes, OpenCode, or other MCP agents to this project.
+            Generate a key below to connect Hermes, OpenCode, or other agents to this project.
           </p>
         </div>
       ) : (
@@ -391,7 +391,7 @@ export function RateLimitSection() {
         <span className="text-xs text-lx-text-muted">Workspace scope</span>
       </div>
       <p className="text-sm text-lx-text-secondary mb-4" style={{ maxWidth: 560 }}>
-        Per-client-IP request budget for the API and MCP surfaces. Applies to /api and /mcp; Forge machine surfaces are exempt. Changes apply immediately — no restart needed.
+        Per-client-IP request budget for the API surface. Applies to /api; Forge machine surfaces are exempt. Changes apply immediately — no restart needed.
       </p>
 
       {data?.envOverride && (
@@ -695,7 +695,7 @@ export function MachinesRuntimesSection({ showTeamColumn = false }: { showTeamCo
       ) : (
         <div style={{ background: "var(--lx-surface-card)", border: "1px solid var(--lx-border-default)", borderRadius: 8, overflow: "hidden" }}>
           <table className="settings-table">
-            <thead><tr><th>Name</th><th>CLI</th><th>Model</th><th>Hostname</th>{showTeamColumn && <th>Team</th>}<th>Status</th><th>MCP</th><th /></tr></thead>
+            <thead><tr><th>Name</th><th>CLI</th><th>Model</th><th>Hostname</th>{showTeamColumn && <th>Team</th>}<th>Status</th><th /></tr></thead>
             <tbody>
               {runtimes.map((r) => {
                 const teamId = teamIdOf(r);
@@ -715,7 +715,6 @@ export function MachinesRuntimesSection({ showTeamColumn = false }: { showTeamCo
                       </td>
                     )}
                     <td><span className="flex items-center gap-2"><span className={r.status === "online" ? "sync-dot sync-synced" : "sync-dot sync-unlinked"} /><span className={`font-micro text-2xs uppercase tracking-[0.04em] ${r.status === "online" ? "text-lx-text-success" : "text-lx-text-muted"}`}>{r.status === "online" ? "Online" : "Offline"}</span></span>{r.lastError && <span className="block text-xs mt-1" style={{ color: "var(--lx-text-warning)" }}>{r.lastError.toLowerCase().includes("api key") ? "API key revoked — re-run Setup runtime" : r.lastError}</span>}</td>
-                    <td><span className={`font-micro text-2xs uppercase tracking-[0.04em] ${r.mcpConnected ? "text-lx-text-success" : "text-lx-text-muted"}`}>{r.mcpConnected ? "Connected" : "Not set"}</span></td>
                     <td style={{ textAlign: "right", whiteSpace: "nowrap" }}>{r.status === "offline" && <button type="button" className="btn btn-ghost" style={{ width: 28, height: 28, padding: 0 }} onClick={() => setRestarting(r)} aria-label={`Restart ${r.name}`} title="Restart guide"><RotateCcw size={14} strokeWidth={1.5} /></button>}<button type="button" className="btn btn-ghost" style={{ width: 28, height: 28, padding: 0 }} onClick={() => setEditing(r)} aria-label={`Edit ${r.name}`} title="Edit runtime"><Settings size={14} strokeWidth={1.5} /></button><button type="button" className="btn btn-danger" style={{ width: 28, height: 28, padding: 0 }} onClick={() => setRemoving(r)} aria-label={`Remove ${r.name}`} title="Remove runtime"><Trash2 size={14} strokeWidth={1.5} /></button></td>
                   </tr>
                 );

@@ -4,9 +4,9 @@
 
 ```
 ┌─────────────────────────────────────────────────────────┐
-│              API / MCP / Webhook Layer                   │
+│              API / Webhook Layer                           │
 │  HttpApi routes (projects, columns, swimlanes, tasks,   │
-│  wiki, settings)   McpServer   GitHubWebhookRoute       │
+│  wiki, settings)   GitHubWebhookRoute                   │
 │                                                         │
 │  Orchestration lives HERE: TasksRoute calls             │
 │  taskService.move() THEN githubService.syncState()      │
@@ -16,7 +16,7 @@
 │                   Service Layer                          │
 │  TaskService  WikiService  ProjectService               │
 │  ColumnService  SwimlaneService  MilestoneService        │
-│  AuthService  GitHubService ──depends on──▶ TaskService  │
+│  GitHubService ──depends on──▶ TaskService               │
 │                        + ProjectService (webhooks)       │
 ├─────────────────────────────────────────────────────────┤
 │                 Repository Layer                         │
@@ -28,7 +28,7 @@
 └─────────────────────────────────────────────────────────┘
 ```
 
-**The v1 cycle is gone:** `TaskService` has no GitHub dependency. `GitHubService → TaskService` is the only service-to-service edge, used by webhook handling. Lexa→GitHub sync is orchestrated by the route layer after a successful move. GitHubService also depends on `ProjectService` (workspace-repo validation, issue listing); content push is service-internal but stays GitHub-side — the route layer still owns move-time state sync.
+**The v1 cycle is gone — no bidirectional service cycles:** `TaskService` never depends on `GitHubService`. The service-to-service edges that exist are all one-way: `GitHubService → TaskService` (+ `ProjectService`, used by webhook handling); `WorkspaceService → WorkspaceInvitesService, PasswordLinksService`; `RuntimeMachineService → RuntimeEventService`; `ForgeService → SourceService`; and `TaskService`, `TaskLinkService`, `SourceService` (+ `GitHubService`) → `ActivityService`. Lexa→GitHub sync is orchestrated by the route layer after a successful move. GitHubService also depends on `ProjectService` (workspace-repo validation, issue listing); content push is service-internal but stays GitHub-side — the route layer still owns move-time state sync.
 
 ## Infrastructure
 
@@ -325,7 +325,7 @@ export class GitHubService extends Effect.Service<GitHubService>()("Lexa/GitHubS
 
       // Lexa → GitHub content push (title + body, TipTap → Markdown). Runs
       // AFTER the mutation commits, best-effort, non-blocking — called from
-      // REST updateTask + MCP update_task when title/description changed.
+      // REST updateTask when title/description changed.
       // Per link: skip when pushed_title/pushed_body already match
       // (normalizeMarkdownForEcho — trim + CRLF→LF); PATCH title+body; on
       // success write pushed_title/pushed_body/push_failed=false, on failure
@@ -464,52 +464,43 @@ export class GitHubService extends Effect.Service<GitHubService>()("Lexa/GitHubS
 }) {}
 ```
 
-### AuthService — in-app sessions (Better Auth) + API keys
+### API-key auth — plain functions, not an Effect service
 
-Better Auth 1.6.27 (pinned) runs in-process on the Bun server
-(`server/auth.ts` — credentials + organization + `tanstackStartCookies`
-LAST, `baseURL` = `LXK_PUBLIC_URL`, `useSecureCookies`, `trustedOrigins`),
-mounted at `/api/auth/*` BEFORE the API-key middleware. No social providers,
-no SMTP — email/password only. Two channels:
+There is no `AuthService` service. Auth is plain functions in
+`server/api/auth-key.ts` + `server/api/middleware.ts` (no Effect layer, no
+repos — raw SQL against the shared Sqlite connection). Better Auth 1.6.27
+(pinned) runs in-process on the Bun server (`server/auth.ts` — credentials +
+organization + `tanstackStartCookies` LAST, `baseURL` = `LXK_PUBLIC_URL`,
+`useSecureCookies`, `trustedOrigins`), mounted at `/api/auth/*` BEFORE the
+API-key middleware. No social providers, no SMTP — email/password only. Two
+channels:
 
 ```typescript
-export class AuthService extends Effect.Service<AuthService>()("AuthService", {
-  effect: Effect.gen(function* () {
-    const apiKeyRepo = yield* ApiKeyRepo;
-    const sessionService = yield* SessionService;
-    return {
-      // HUMANS: delegated to SessionService.userFrom — the Better Auth
-      // getSession wrapper (try/catch mandatory — an uncaught getSession
-      // throw crashes SSR). See SessionService for the implementation.
-
-      // MACHINES (MCP/CLI/webhooks): Authorization: Bearer lxk_<base62(43)>
-      // Keys have full read/write — no scopes (single-agent trust model,
-      // documented). SHA-256 lookup; last_used_at sampled (only when NULL
-      // or older than 1h — avoids a write per MCP call).
-      validateApiKey: (rawKey: string) =>
-        Effect.gen(function* () {
-          if (!rawKey.startsWith("lxk_")) return yield* new InvalidKey();
-          const hash = hexSha256(rawKey);                    // Web Crypto
-          const key = yield* apiKeyRepo.findByHash(hash).pipe(
-            Effect.catchTag("RowNotFound", () => new InvalidKey()));
-          yield* apiKeyRepo.touchIfStale(key.id, "1 hour");
-          return key;
-        }),
-    };
-  }),
-  dependencies: [ApiKeyRepo, SessionService],
-}) {}
+// server/api/auth-key.ts:17 — resolveApiKeyIdentity(authHeader, headers, db, dbPath)
+// MACHINES (CLI/webhooks): Authorization: Bearer lxk_<base62(43)>.
+// Keys have full read/write — no scopes (single-agent trust model,
+// documented). SHA-256 lookup; last_used_at sampled (only when NULL or
+// older than 1h — avoids a write per API call).
+export function resolveApiKeyIdentity(authHeader: string, headers: Headers, db: Database, dbPath: string): ApiKeyIdentity | null {
+  // "lxk_" prefix + /^lxk_[0-9A-Za-z]{43}$/ shape check → sha256 →
+  // api_keys.key_hash lookup; unbound keys (no user_id) resolve to role
+  // 'admin'. Returns null on any failure → the middleware denies 401.
+}
 ```
 
+The dual-channel flow lives in `createApiMiddleware` (`server/api/middleware.ts`):
+session cookie first (`auth.api.getSession` via the try/catch'd
+`sessionIdentity`), Bearer key fallback (`resolveApiKeyIdentity`).
+
 The API middleware accepts a session cookie OR a Bearer key on `/api/*`
-(session tried first, key fallback); `/mcp` stays key-only. `x-lxk-user` is
+(session tried first, key fallback). `x-lxk-user` is
 removed — never sent by browsers, never read by the server. Browser
 attribution = the session user; machine attribution = the key name
 (`actorFromIdentity` adapts; see Attribution below).
 
 **Superadmin is env-only:** `users.role` ∈ {superadmin, member} — set from
 `LXK_ADMIN_EMAILS` at provisioning (setup wizard), never edited at runtime
-(no role-editing endpoint, no `update_user_role` MCP tool; legacy `admin` →
+(no role-editing endpoint; legacy `admin` →
 `superadmin` in the migration; the `admin_emails` setting is deleted).
 Team-admin authority comes from the org `member.role` (owner/admin) on the
 team, never from `users.role`.
@@ -620,8 +611,8 @@ system/'github') in the same transaction as the update — the invariant holds
 in both directions.
 
 **Actor resolution (attribution ≠ authorization):** browser users → the
-Better Auth session user (`actorFromIdentity` maps it to kind 'user'); MCP
-API keys → kind 'agent' with the key's NAME as label and the key owner's
+Better Auth session user (`actorFromIdentity` maps it to kind 'user'); API
+keys → kind 'agent' with the key's NAME as label and the key owner's
 user id (unbound keys → NULL); webhook moves → kind 'system', label
 'github'; Forge terminal events → kind 'agent', label = forge agent name
 (agent_id fallback). The legacy `x-lxk-user` header is gone — attribution
@@ -713,80 +704,113 @@ One `HttpApiBuilder.middleware` wraps the whole router (pre-routing, before deco
 - **`AuthIdentity` is provided, not re-fetched.** Middleware resolves the caller ONCE — session cookie first (`SessionService.userFrom`, try/catch), Bearer key fallback (`resolveApiKeyIdentity(authHeader, db)`) — on the *shared* Sqlite connection and `Effect.provideService`s the tag; handlers/`requireSuperadmin` read it. Per-request DB opens are banned (they cost 3 PRAGMAs each). `/api/auth/*` is mounted BEFORE this middleware (Better Auth handler owns that path).
 - **Socket IP lives only in entry.** `remoteAddress` is unpopulated on the web-handler path, so entry stamps `x-lexa-remote-ip` (deleting any inbound value first — spoof guard) on the reconstructed request; middleware applies the `isPrivateIp`-gated `cf-connecting-ip` trust.
 - **Exemptions are path predicates inside the middleware**: `/api/setup*` + `/api/health` skip AUTH only (they stay rate-limited); `/api/forge/daemon/*` + `/api/forge/runtimes/register` + `/api/forge/machines/heartbeat` accept the daemon token where applicable and are rate-limit-exempt (key/token-gated machine surfaces — log streams and the 3s heartbeat must not 429).
-- **Rate limiting shares one bucket with `/mcp`** (`apiRateLimiter` singleton) and runs before auth — a blocked IP stays blocked regardless of key. Limits are DB-configured (`GET`/`PUT /api/settings/rate-limit`, admin-only): **DB settings (`settings.rate_limit_max` / `settings.rate_limit_window_ms`) with the code defaults (6000 / 600_000 ms) as fallback** — `resolveRateLimitFromDbValues` in `server/api/rate-limit.ts`. The DB is the single source of truth: env (`LXK_RATE_LIMIT_MAX` / `LXK_RATE_LIMIT_WINDOW_MS`) is a first-boot bootstrap, mirrored into the DB once at boot by `mirrorSettingsFromEnv` (server/db/settings.ts) when keys are empty, and never consulted at runtime. `syncRateLimitFromDb` applies the DB values at boot (after the mirror) and on save, so changes take effect live without a restart (existing buckets keep their windowStart and expire against the new window).
+- **Rate limiting shares one bucket** (`apiRateLimiter` singleton) and runs before auth — a blocked IP stays blocked regardless of key. Limits are DB-configured (`GET`/`PUT /api/settings/rate-limit`, admin-only): **DB settings (`settings.rate_limit_max` / `settings.rate_limit_window_ms`) with the code defaults (6000 / 600_000 ms) as fallback** — `resolveRateLimitFromDbValues` in `server/api/rate-limit.ts`. The DB is the single source of truth: env (`LXK_RATE_LIMIT_MAX` / `LXK_RATE_LIMIT_WINDOW_MS`) is a first-boot bootstrap, mirrored into the DB once at boot by `mirrorSettingsFromEnv` (server/db/settings.ts) when keys are empty, and never consulted at runtime. `syncRateLimitFromDb` applies the DB values at boot (after the mirror) and on save, so changes take effect live without a restart (existing buckets keep their windowStart and expire against the new window).
 - **Router 404s** fail with `RouteNotFound` after the middleware; caught inside so 404s carry the security headers (empty body, platform-identical shape).
 - **`MaxBodySize` is unenforced in 0.97** — the authoritative body cap is entry's stream cap (`readBodyWithLimit`); the middleware pre-check is a declared-length fast-path only.
 
 ## Pagination
 
-All list endpoints and MCP `list_*`/`search_*` tools: `?limit` (default 50, max 200) + cursor (opaque: `"<columnId>:<position>:<taskId>"` for tasks). Unbounded lists would blow the MCP context window and server memory.
+All list endpoints: `?limit` (default 50, max 200) + cursor (opaque: `"<columnId>:<position>:<taskId>"` for tasks). Unbounded lists would blow the server memory.
 
 ## TaggedErrors Catalog (v2)
 
-| Error | HTTP | MCP code | Notes |
-|-------|------|----------|-------|
-| `TaskNotFound` | 404 | `TASK_NOT_FOUND` | |
-| `ProjectNotFound` | 404 | `PROJECT_NOT_FOUND` | |
-| `ColumnNotFound` | 404 | `COLUMN_NOT_FOUND` | |
-| `SwimlaneNotFound` | 404 | `SWIMLANE_NOT_FOUND` | incl. cross-project refs |
-| `WikiPageNotFound` | 404 | `PAGE_NOT_FOUND` | |
-| `WipLimitExceeded` | 409 | `WIP_LIMIT` | atomic, from conditional UPDATE (not fired by within-column reorders) |
-| `DeadlineAfterLane` | 409 | `DEADLINE_AFTER_LANE` | card dueAt later than its lane's due (create/update/move without clearDueAt; lane dueAt shrunk past a live card's deadline) — payload `{ date, taskId?, taskTitle? }` |
-| `BacklogProtected` | 409 | `BACKLOG_PROTECTED` | archive/delete/deadline on the system Backlog lane — payload `{ action }` |
-| `SlugTaken` | 409 | `SLUG_TAKEN` | SQLITE_CONSTRAINT on projects.slug or wiki_pages(project_id, slug); also the constraint fallback on project update/delete |
-| `HasChildren` | 409 | `HAS_CHILDREN` | column delete with tasks; wiki-page delete with children |
-| `TaskHasChildren` | 409 | `TASK_HAS_CHILDREN` | task delete hits a constraint (defensive — subtask links CASCADE) |
-| `NeighborNotInColumn` | 422 | `NEIGHBOR_NOT_IN_COLUMN` | beforeTaskId/afterTaskId not in target column |
-| `GithubIssueAlreadyLinked` | 409 | `ALREADY_LINKED` | |
-| `RequiredFieldMissing` | 422 | `REQUIRED_FIELD` | TipTap-aware emptiness; enforced on create/move/update |
-| `OptionInUse` | 409 | `OPTION_IN_USE` | delete priority/type option still referenced by tasks |
-| `InvalidOption` | 422 | `INVALID_OPTION` | unknown/foreign option id, duplicate label, or empty list |
-| `SourceNotFound` | 404 | `SOURCE_NOT_FOUND` | delete a source that doesn't exist |
-| `SourceFetchError` | 422 | `SOURCE_FETCH_ERROR` | bad URL / SSRF-guard block / unreadable page |
-| `SourceUnreachable` | 422 | `SOURCE_UNREACHABLE` | fetch failed (timeout, DNS, network) |
-| `ForgeTaskNotFound` | 404 | `FORGE_TASK_NOT_FOUND` | |
-| `AgentNotFound` | 404 | `AGENT_NOT_FOUND` | unknown forge agent (task create / claim resolve) |
-| `SkillNotFound` | 404 | `SKILL_NOT_FOUND` | unknown forge skill (task create / bindings) |
-| `ForgeBuiltinDelete` | 422 | `FORGE_BUILTIN_DELETE` | delete/reset-guard on a builtin agent/skill |
-| `ForgeEntityInUse` | 409 | `FORGE_ENTITY_IN_USE` | delete agent/skill still referenced by forge tasks |
-| `NoRuntimeOnline` | 409 | `NO_RUNTIME_ONLINE` | create Forge task with no daemon up |
-| `MachineNotFound` | 404 | `MACHINE_NOT_FOUND` | unknown machine target |
-| `MachineIdTaken` | 409 | `MACHINE_ID_TAKEN` | register: id bound to another host, legacy (no secret), or secret mismatch (details: `{ id, reason }`) |
-| `MachineSecretMismatch` | 403 | `FORBIDDEN` | runtime-event claim without a matching machine secret — identical response for missing machine/legacy/wrong secret (no existence oracle) |
-| `TeamHasProjects` | 409 | `TEAM_HAS_PROJECTS` | delete team while it owns projects — reassign first (payload `{ count }`) |
-| `SoleOwner` | 403 | `SOLE_OWNER` | demoting/removing the last owner of a team — transfer ownership first (payload `{ message }`) |
-| `CannotDeleteSelf` | 403 | `CANNOT_DELETE_SELF` | removing the last superadmin / self-removal via the workspace member routes |
-| `TaskLinkNotFound` | 404 | `TASK_LINK_NOT_FOUND` | delete a link that doesn't exist |
-| `TaskLinkCycle` | 409 | `TASK_LINK_CYCLE` | subtask_of would create a cycle |
-| `InvalidTaskLink` | 422 | `INVALID_TASK_LINK` | self-link or cross-project link |
-| `ConstraintViolation` | 500 | `CONSTRAINT` | internal; `isPositionConflict` variants are retried (create/move) before surfacing |
-| `DbError` | 500 | `DATABASE_ERROR` | |
-| `GithubApiError` | 502 | `GITHUB_API_ERROR` | never fails a user move |
-| `GithubWebhookError` | 400 | `GITHUB_WEBHOOK_ERROR` | bad signature → 401 |
-| `InvalidKey` / `MissingAuth` | 401 | `INVALID_API_KEY` / `MISSING_AUTH` | REST emits `UNAUTHORIZED` instead (see note below); MCP raises them natively |
-| `UserNotFound` | 404 | `USER_NOT_FOUND` | unknown user id on admin/workspace role endpoints |
-| `NoUserContext` | 400 | — | `PATCH /api/me` called with a bare API key (no session) — agents have no profile |
+| Error | HTTP | Notes |
+|-------|------|-------|
+| `TaskNotFound` | 404 | |
+| `ProjectNotFound` | 404 | |
+| `ColumnNotFound` | 404 | |
+| `SwimlaneNotFound` | 404 | incl. cross-project refs |
+| `WikiPageNotFound` | 404 | |
+| `WipLimitExceeded` | 409 | atomic, from conditional UPDATE (not fired by within-column reorders) |
+| `DeadlineAfterLane` | 409 | card dueAt later than its lane's due (create/update/move without clearDueAt; lane dueAt shrunk past a live card's deadline) — payload `{ date, taskId?, taskTitle? }` |
+| `BacklogProtected` | 409 | archive/delete/deadline on the system Backlog lane — payload `{ action }` |
+| `SlugTaken` | 409 | SQLITE_CONSTRAINT on projects.slug or wiki_pages(project_id, slug); also the constraint fallback on project update/delete |
+| `HasChildren` | 409 | column delete with tasks; wiki-page delete with children |
+| `TaskHasChildren` | 409 | task delete hits a constraint (defensive — subtask links CASCADE) |
+| `NeighborNotInColumn` | 422 | beforeTaskId/afterTaskId not in target column |
+| `GithubIssueAlreadyLinked` | 409 | |
+| `RequiredFieldMissing` | 422 | TipTap-aware emptiness; enforced on create/move/update |
+| `OptionInUse` | 409 | delete priority/type option still referenced by tasks |
+| `InvalidOption` | 422 | unknown/foreign option id, duplicate label, or empty list |
+| `SourceNotFound` | 404 | delete a source that doesn't exist |
+| `SourceFetchError` | 422 | bad URL / SSRF-guard block / unreadable page |
+| `SourceUnreachable` | 422 | fetch failed (timeout, DNS, network) |
+| `ForgeTaskNotFound` | 404 | |
+| `AgentNotFound` | 404 | unknown forge agent (task create / claim resolve) |
+| `SkillNotFound` | 404 | unknown forge skill (task create / bindings) |
+| `ForgeBuiltinDelete` | 422 | delete/reset-guard on a builtin agent/skill |
+| `ForgeEntityInUse` | 409 | delete agent/skill still referenced by forge tasks |
+| `NoRuntimeOnline` | 409 | create Forge task with no daemon up |
+| `MachineNotFound` | 404 | unknown machine target |
+| `MachineIdTaken` | 409 | register: id bound to another host, legacy (no secret), or secret mismatch (details: `{ id, reason }`) |
+| `MachineSecretMismatch` | 403 | runtime-event claim without a matching machine secret — identical response for missing machine/legacy/wrong secret (no existence oracle) |
+| `TeamHasProjects` | 409 | delete team while it owns projects — reassign first (payload `{ count }`) |
+| `SoleOwner` | 403 | demoting/removing the last owner of a team — transfer ownership first (payload `{ message }`) |
+| `CannotDeleteSelf` | 403 | removing the last superadmin / self-removal via the workspace member routes |
+| `TaskLinkNotFound` | 404 | delete a link that doesn't exist |
+| `TaskLinkCycle` | 409 | subtask_of would create a cycle |
+| `InvalidTaskLink` | 422 | self-link or cross-project link |
+| `ConstraintViolation` | 409 | internal; `isPositionConflict` variants are retried (create/move) before surfacing |
+| `DbError` | 500 | |
+| `GithubApiError` | 502 | never fails a user move |
+| `GithubWebhookError` | 400 | bad signature → 401 |
+| `InvalidKey` / `MissingAuth` | 401 | REST emits `UNAUTHORIZED` instead (see note below) |
+| `UserNotFound` | 404 | unknown user id on admin/workspace role endpoints |
+| `NoUserContext` | 400 | `PATCH /api/me` called with a bare API key (no session) — agents have no profile |
+| `MilestoneNotFound` | 404 | incl. cross-project refs (swimlane sprint fields) |
+| `InvalidArgs` | 422 | swimlane sprint validation: `startAt > dueAt` |
+| `RuntimeNotFound` | 404 | unknown forge runtime target |
+| `RuntimeEventNotFound` | 404 | unknown runtime setup event |
+| `ApiKeyNotFound` | 404 | settings — key id that doesn't exist |
+| `ApiKeyNameEmpty` | 422 | create key with no name (`server/services/api-key.service.ts`) |
+| `Forbidden` | 403 | admin/settings gates — also the code for `ProjectAccessDenied` / `MachineSecretMismatch` |
+| `SetupLocked` | 403 | wizard on an already-configured install |
+| `SearchError` | 422 | invalid search query |
+| `ForgeSessionActive` | 409 | document already has an active forge task |
+| `TeamNotFound` | 404 | |
+| `TeamMemberNotFound` | 404 | unknown user on team membership routes |
+| `MemberNotInWorkspace` | 422 | add a non-member to a team |
+| `InviteNotFound` | 404 | unknown/expired workspace invite |
+| `InviteAlreadyPending` | 409 | duplicate invite for the same email |
+| `SessionNotFound` | 404 | unknown session id on session routes |
+| `TeamSlugTaken` | 409 | team slug collision |
+| `WorkspaceUserNotFound` | 404 | unknown user on workspace routes |
+| `PasswordLinkIssueFailed` | 500 | admin set-password link issue failed — no `errorToStatus` case, falls to default 500 |
+| `InvalidName` | 422 | invalid team/user name |
+| `InvalidRateLimit` | 422 | bad rate-limit settings payload |
+| `InvalidGithubSettings` | 422 | bad GitHub App settings payload |
+| `ProjectAccessDenied` | 403 | `user_project_roles`/team grant check failed |
+| `CommentNotFound` | 404 | |
+| `CommentEditForbidden` | 403 | edit another user's comment |
+| `CommentDeleteForbidden` | 403 | delete without author/admin authority |
+| `CommentInvalid` | 422 | invalid body (empty TipTap doc / >64KB) |
 
-Defined in the error map but never raised by any REST handler — do not match on them: `INVALID_API_KEY` / `MISSING_AUTH` (the auth middleware emits `UNAUTHORIZED` — see the Auth section), `LAST_ADMIN_DEMOTE` (legacy user-role editing is removed — superadmin is env-only; user lifecycle goes through `/api/workspace/members`).
+Note: `RowNotFound` (server/db/database.ts) is a repo-level error with no
+`errorCodeMap` entry — if it ever reaches the HTTP error encoder it falls to
+`INTERNAL` / 500.
+
+Defined in the error map but never raised by any REST handler — do not match on them: `INVALID_API_KEY` / `MISSING_AUTH` (the auth middleware emits `UNAUTHORIZED` — see the Auth section).
 
 ## Service Dependency Map
 
 ```
-TaskService        → TaskRepo, ColumnRepo, SwimlaneRepo, ProjectRepo, FieldConfigRepo
+TaskService        → TaskRepo, ColumnRepo, SwimlaneRepo, ProjectRepo, FieldConfigRepo, ActivityService
 FieldConfigService → FieldConfigRepo, ProjectRepo
-ForgeService       → ForgeRepo, SourceRepo, SourceService, TaskRepo, WikiRepo, ProjectRepo
-SourceService      → SourceRepo, ProjectRepo, WikiRepo
-TaskLinkService    → TaskLinkRepo, TaskRepo, ProjectRepo
+ForgeService       → ForgeRepo, ForgeSessionRepo, SourceRepo, SourceService, TaskRepo, WikiRepo, ProjectRepo, ActivityService
+SourceService      → SourceRepo, ProjectRepo, WikiRepo, ActivityService
+TaskLinkService    → TaskLinkRepo, TaskRepo, ProjectRepo, ActivityService
 WikiService        → WikiRepo, ProjectRepo
-ProjectService     → ProjectRepo, ColumnRepo, SwimlaneRepo, FieldConfigRepo
-ColumnService      → ColumnRepo
-SwimlaneService    → SwimlaneRepo
-DashboardService   → TaskRepo, ColumnRepo, ProjectRepo, FieldConfigRepo
-AuthService        → ApiKeyRepo, SessionService
+ProjectService     → ProjectRepo, ProjectReposRepo, ColumnRepo, SwimlaneRepo, FieldConfigRepo
+ColumnService      → ColumnRepo, ProjectRepo
+SwimlaneService    → SwimlaneRepo, ProjectRepo, TaskRepo, ActivityService
+MilestoneService   → MilestoneRepo, SwimlaneRepo, TaskRepo, ProjectRepo, ActivityService
+ActivityService    → ActivityRepo, CommentRepo
+CommentService     → CommentRepo, ActivityRepo, TaskRepo, UserProjectRoleRepo
+DashboardService   → ProjectRepo, ProjectReposRepo, ColumnRepo, TaskRepo
 SessionService     → (Better Auth `auth` instance — getSession wrapper, try/catch)
-AuthorizationService → UserRepo, UserProjectRoleRepo, MemberRepo, ProjectRepo
+AuthorizationService → (no service/repo deps — raw SQLite only)
 GitHubService      → GitHubClient, WebhookEventRepo, TaskRepo, ProjectRepo, ProjectReposRepo, TaskService, ProjectService, ColumnRepo, ActivityService
-Routes/MCP         → all services (orchestration layer — the only place
+Routes            → all services (orchestration layer — the only place
                      TaskService and GitHubService meet; content push is
-                     called from REST updateTask + MCP update_task)
+                     called from REST updateTask)
 ```

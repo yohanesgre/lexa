@@ -75,8 +75,8 @@ export function ForgeStatus() {
   const panelRef = useRef<HTMLDivElement>(null);
   const [popoverStyle, setPopoverStyle] = useState<React.CSSProperties>({});
 
-  // Copy the task id to the clipboard (for debugging — daemon logs, API,
-  // MCP tools). Shows a transient check on the row.
+  // Copy the task id to the clipboard (for debugging — daemon logs, API).
+  // Shows a transient check on the row.
   const copyTaskId = (id: string) => {
     void copyToClipboard(id).then(() => {
       setCopiedId(id);

@@ -1,6 +1,6 @@
 # Lexa — Architecture
 
-A lightweight, self-hosted project management tool. Kanban board, issue/task ticketing, nested wiki/docs, AI agent (MCP) access, and GitHub issue sync — running on a Bun standalone server with SQLite.
+A lightweight, self-hosted project management tool. Kanban board, issue/task ticketing, nested wiki/docs, and GitHub issue sync — running on a Bun standalone server with SQLite.
 
 ## Tech Stack
 
@@ -9,13 +9,12 @@ A lightweight, self-hosted project management tool. Kanban board, issue/task tic
 | Frontend     | React + Vite + TanStack Start | SSR for initial load, SPA-like after, file-based routing |
 | Backend      | Effect-TS + @effect/platform HttpApi | Typed errors, DI, declarative error→HTTP mapping, OpenAPI for free |
 | Database     | SQLite via bun:sqlite (WAL)   | Local file, zero-ops, transactional batch helper for atomic mutations |
-| Runtime      | Bun standalone HTTP server (Docker) | One process for SSR + REST + MCP + webhooks; simple deploys |
+| Runtime      | Bun standalone HTTP server (Docker) | One process for SSR + REST + webhooks; simple deploys |
 | Human auth   | In-process Better Auth 1.6.27 (pinned) | Email/password login + cookie sessions at `/api/auth/*`; no edge auth, no external IdP, no SMTP |
-| Machine auth | API keys (`lxk_` + base62(43B)) | Hermes/MCP/CLI/webhooks: Bearer key → SHA-256 lookup |
-| MCP Server   | Built into the Bun server     | Streamable HTTP, stateless, shares Effect services with REST |
+| Machine auth | API keys (`lxk_` + base62(43B)) | Hermes/CLI/webhooks: Bearer key → SHA-256 lookup |
 | GitHub Sync  | GitHub App + Webhooks         | Issues r/w + Metadata read only; echo-suppressed two-way state sync |
 | Styling      | Tailwind                      | Fast, tree-shaken |
-| Rich Text    | TipTap (ProseMirror)          | Structured JSON, React integration, MCP-friendly |
+| Rich Text    | TipTap (ProseMirror)          | Structured JSON, React integration |
 | Drag & Drop  | @dnd-kit                      | Accessible, works with fractional-index positions |
 | Ordering     | `fractional-indexing` (npm)   | `generateKeyBetween` — correct, tiny, Workers-safe |
 
@@ -94,15 +93,16 @@ clients, no callback URIs, no SMTP anywhere.
   AuthorizationService).
 
 ### Machines → API keys
-`Authorization: Bearer lxk_<base62(43 random bytes)>`. Server: `SHA-256(raw)` → `api_keys.key_hash` lookup. Keys are full read/write — **no scopes** (single-agent trust model, explicit). `last_used_at` updated only when NULL or stale >1h. MCP/CLI/webhooks unchanged.
+`Authorization: Bearer lxk_<base62(43 random bytes)>`. Server: `SHA-256(raw)` → `api_keys.key_hash` lookup. Keys are full read/write — **no scopes** (single-agent trust model, explicit). `last_used_at` updated only when NULL or stale >1h. CLI/webhooks unchanged.
 
 The webhook route is exempt from API-key middleware — it authenticates via `X-Hub-Signature-256` (HMAC-SHA-256 over the raw body, constant-time compare, verified before parsing).
 
 ### Dual channel + attribution
 `/api/*` accepts a session cookie OR a Bearer key (session first, key
-fallback); `/mcp` is key-only — **sessions never cross the MCP boundary**.
-The `x-lxk-user` header is removed, as is the `<meta name="lxk-api-key">`
-injection / `VITE_LXK_API_KEY` — browsers authenticate via the cookie only.
+fallback). The `x-lxk-user` header is removed. The `<meta name="lxk-api-key">`
+injection / `VITE_LXK_API_KEY` remain — the server injects its current
+`LXK_API_KEY` into the served HTML and the client prefers it over the
+build-time baked key; browsers otherwise authenticate via the cookie.
 Attribution: browser actor = session user; machine actor = key name.
 
 ## API Routes (REST)
@@ -159,7 +159,7 @@ Settings          GET/POST/DELETE     /api/settings/api-keys[/:id]
 ### Request pipeline
 
 `server/entry.ts` is the Bun.serve edge: boot/migrations, the webhook branch
-(HMAC before parse), `/mcp` (rate check + stream cap + handler), static/SSR,
+(HMAC before parse), static/SSR,
 and the `/api` **stream cap** (`readBodyWithLimit` — chunked bodies cannot
 bypass `LXK_MAX_BODY_MB`; the request is reconstructed and the resolved
 socket IP is stamped as `x-lexa-remote-ip`, inbound header deleted first to
@@ -168,19 +168,11 @@ prevent spoofing — socket IP is only visible at this layer).
 Everything else runs as HttpApi middleware (`server/api/middleware.ts`),
 applied at build time, before route matching and before body decode:
 
-1. **Rate limit** — per-IP, `isPrivateIp`-gated `cf-connecting-ip` trust; `/api/setup` + `/api/health` ARE limited; key/token-gated Forge machine surfaces exempt (`/api/forge/daemon/*` + `/api/forge/runtimes/register` + `/api/forge/machines/heartbeat` — log streams and the 3s listener heartbeat must not 429); shares one bucket with `/mcp` (`apiRateLimiter`); limits DB-configured (settings `settings.rate_limit_max` / `settings.rate_limit_window_ms`, code defaults 6000 req / 600_000 ms as fallback — `GET`/`PUT /api/settings/rate-limit`, applied at boot and on save via `syncRateLimitFromDb`). Failed logins on `/api/auth/*` are separately throttled by the Better Auth rate-limit plugin (in-memory, ~5 attempts/60s per email, 15 min lockout)
+1. **Rate limit** — per-IP, `isPrivateIp`-gated `cf-connecting-ip` trust; `/api/setup` + `/api/health` ARE limited; key/token-gated Forge machine surfaces exempt (`/api/forge/daemon/*` + `/api/forge/runtimes/register` + `/api/forge/machines/heartbeat` — log streams and the 3s listener heartbeat must not 429); shares one bucket (`apiRateLimiter`); limits DB-configured (settings `settings.rate_limit_max` / `settings.rate_limit_window_ms`, code defaults 6000 req / 600_000 ms as fallback — `GET`/`PUT /api/settings/rate-limit`, applied at boot and on save via `syncRateLimitFromDb`). Failed logins on `/api/auth/*` are separately throttled by the Better Auth rate-limit plugin (in-memory, ~5 attempts/60s per email, 15 min lockout)
 2. **Content-length pre-check** — declared size > `LXK_MAX_BODY_MB` → 413 fast-path (stream cap above stays authoritative)
 3. **Auth** — dual-channel: session cookie first (`SessionService.userFrom`, try/catch), then daemon token (`x-forge-token`, constant-time) for `/api/forge/daemon/*` + `/api/forge/runtimes/register`, else Bearer key → `resolveApiKeyIdentity` on the shared connection; `/api/auth/*` bypasses this middleware entirely; setup/health auth-exempt; 401/403 envelopes byte-identical to the old dispatcher
 4. **`AuthIdentity` provision** — handlers read the Context tag (no per-request DB opens)
 5. **Security headers** — nosniff + no-store on every `/api` response, including router 404s
-
-## MCP Server (Hermes/OpenCode)
-
-- **Transport:** Streamable HTTP at `/mcp`, stateless mode (no session persistence — each request self-contained).
-- **Auth:** `Authorization: Bearer lxk_...` — same validation as REST.
-- **Pagination:** all `list_*`/`search_*` tools accept `limit` (default 50) + `cursor` and return `nextCursor`. Protects the agent's context window.
-
-Tools: `create_task`, `list_tasks`, `get_task`, `update_task`, `move_task`, `delete_task`, `get_wiki_page`, `create_wiki_page`, `update_wiki_page`, `list_wiki_pages`, `search_wiki`, `link_github_issue`, `unlink_github_issue`, `list_github_issues`, `create_task_from_github_issue`, `link_project_repo`, `unlink_project_repo`, `list_projects`, `get_project`, `get_project_status`. Full contract in MCP.md.
 
 ## GitHub Integration
 
@@ -261,20 +253,21 @@ SQLite is local (WAL) so reads are immediate, but the mutation response is still
 lexa/
 ├── app/                      # TanStack Start routes + components
 │   ├── routes/               # dashboard, kanban, wiki, task, settings
-│   ├── components/           # kanban/, wiki/, task/, ui/
+│   ├── components/           # activity/, auth/, forge/, kanban/, layout/, milestones/, settings/, swimlanes/, ui/, wiki/ + flat task components (TaskDetail.tsx, TaskPropertyBar.tsx, TaskTitleInput.tsx)
 │   └── lib/                  # api.ts, queries.ts
 ├── server/                   # Effect-TS services
-│   ├── entry.ts              # Bun.serve — boot, webhook, /mcp, static/SSR, /api stream cap + IP stamp
+│   ├── entry.ts              # Bun.serve — boot, webhook, static/SSR, /api stream cap + IP stamp
 │   ├── auth.ts               # Better Auth instance (credentials + organization + tanstackStartCookies)
 │   ├── api/                  # HttpApi app (http.ts), middleware.ts (rate/auth/headers), auth-key.ts, auth.ts, errors.ts, limits.ts
 │   ├── services/             # task, project, wiki, column, swimlane, session, authorization, workspace-invites, password-links, ...
 │   ├── repos/                # task.repo.ts, project.repo.ts, ...
 │   ├── db/                   # database.ts (bun:sqlite layer), migrate.ts
-│   ├── mcp/                  # server.ts + tools/
 │   └── github/               # GitHub App client + webhook
 ├── shared/                   # types + pure functions (markdown, positions, tiptap-text)
 ├── migrations/               # *.sql applied on boot by server/db/migrate.ts
-├── scripts/                  # cli/ (lexa-cli incl. deploy), forge/ (Forge daemon), dev.sh, seed-dev.sql, setup-cli.ts
+├── cli/                      # lexa-cli (operator CLI incl. deploy)
+├── forge/                    # Forge daemon
+├── scripts/                  # compile-cli.ts, dev.sh, install-cli-dev.sh, install-cli.sh, prepare-effect.sh, seed-dev.sql, setup-cli.ts
 ├── wireframes/               # git submodule → private repo yohanesgre/lexa-wireframes
 └── package.json
 ```

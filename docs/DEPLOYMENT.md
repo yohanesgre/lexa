@@ -47,22 +47,24 @@ logic, not seed).
 | `GITHUB_WEBHOOK_SECRET` | HMAC secret for the `/api/webhooks/github` route |
 | `LOG_LEVEL` | logging level (default `info`) |
 | `LXK_ADMIN_EMAILS` | comma-separated **superadmin** emails — env-only allow-list, applied at provisioning (setup wizard only); never edited at runtime |
-| `LXK_API_KEY` | server auth Bearer key (`lxk_` + 43 chars) — machines only; browser key injection removed |
+| `LXK_API_KEY` | server auth Bearer key (`lxk_` + 43 chars) — machines use it directly; also injected into the served HTML as `<meta name="lxk-api-key">` for browsers |
 | `LXK_FORGE_DAEMON_TOKEN` | shared secret for Forge daemons (alternative to a Settings API key) |
-| `LXK_MAX_BODY_MB` | max request body for `/api` and `/mcp` in MB (default 16); webhook payloads hard-capped at 1 MB before HMAC, regardless |
+| `LXK_MAX_BODY_MB` | max request body for `/api` in MB (default 16); webhook payloads hard-capped at 1 MB before HMAC, regardless |
 | `LXK_PUBLIC_URL` | public base URL of this flavor (e.g. `https://lexa.example.com`) — Better Auth `baseURL` + `trustedOrigins`; written by `lexa-cli deploy` from the deploy domain; hand-set in dev |
 | `LXK_SEED_DEV` | dev-only boot-time sample data (`1` enables; set by `scripts/dev.sh`) |
 | `PORT` | server port (default 3000) |
 
-**Removed:** `LXK_ACCESS_AUD` / `LXK_ACCESS_TEAM` (Cloudflare Access),
-`VITE_LXK_API_KEY` (browser key injection). **Never exist:** Google OAuth
+**Unused by the server:** `LXK_ACCESS_AUD` / `LXK_ACCESS_TEAM` (Cloudflare
+Access) — the server reads them nowhere, but docker-compose still passes both
+into the container and `lexa-cli deploy` still rewrites them. **Still live:**
+`VITE_LXK_API_KEY` (browser key injection — served as `<meta name="lxk-api-key">`). **Never exist:** Google OAuth
 envs, SMTP envs — human auth is in-app email/password (Better Auth).
 
 ## Bootstrap
 
 **Local dev:** `bun run setup` (CLI wizard: admin email, API key, migrations,
 optional sample data) then `bun run dev:full` (API :3000 + vite :5173, vite
-proxies `/api` and `/mcp`). `dev:full` sets `LXK_SEED_DEV=1` for boot-time
+proxies `/api`). `dev:full` sets `LXK_SEED_DEV=1` for boot-time
 sample data. Dev also sets `LXK_PUBLIC_URL=http://localhost:5173` (the
 Better Auth base URL + cookie domain for the local flow). See the repository
 README.
@@ -79,7 +81,8 @@ The image is built and pushed by CI (`.github/workflows/publish.yml`): main →
 embeds the compose files (image refs, volumes, tunnel — few KB) and pulls the
 image — **no checkout, no build, no git**. It checks docker/compose,
 provisions Cloudflare (tunnel, DNS), writes `.env.prod`
-into `~/.lexa/deploy/` (staging → `~/.lexa-staging/deploy/`), and runs
+into `~/.lexa/<domain>/deploy/` (the `~/.lexa-staging` root is the legacy
+flavor layout, migrated into host-keyed groups), and runs
 `docker compose up`. **Redeploy = upgrade**:
 deploy always pulls the latest image; `--image <tag>` pins a specific version;
 `--clean` recreates from scratch (removes the `lexa-data` volume — DB wiped,
@@ -143,14 +146,14 @@ configuration. The deploy also writes `LXK_PUBLIC_URL=https://<subdomain>.<domai
 into the flavor env (Better Auth base URL + trusted origin).
 
 **Security model:** `/api/*` accepts a session cookie OR a Bearer key
-(dual-channel); `/mcp` and `/api/webhooks/*` are key/HMAC-only — no edge
+(dual-channel); `/api/webhooks/*` is HMAC-only — no edge
 gate exists, so there is nothing to bypass. Keys are `lxk_` + 43 base62
 chars (256-bit), rate-limited per IP, and revocable per-named-key (Settings →
 API Keys). Failed logins on `/api/auth/*` are throttled in-process (Better
 Auth rate-limit plugin; ~5 attempts/60s per email, 15 min lockout).
 
 Deploy creds (CF token) persist in
-`~/.lexa/config.json` (staging: `~/.lexa-staging/config.json`) under the
+`~/.lexa/<host>/config.json` under the
 `deploy` key.
 
 ### 3. After deploy — create the superadmin
@@ -172,7 +175,6 @@ exists.
 - Sign in with the superadmin email + password → dashboard loads
 - `curl https://<subdomain>.<domain>/api/health` → **200** (key-exempt probe)
 - `curl -i https://<subdomain>.<domain>/api/projects` → **401** (no key, no session)
-- `POST <subdomain>.<domain>/mcp` without a key → **401** from Lexa (JSON-RPC error)
 - `lexa-cli login --url https://<subdomain>.<domain> --key <lxk_...>` → "Logged in" (needs a key from Settings → API Keys)
 - Account menu (top right) shows the signed-in identity + **Log out**
 

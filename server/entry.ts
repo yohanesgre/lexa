@@ -4,9 +4,8 @@ import { dirname, join } from "node:path";
 import { createHash, randomBytes } from "node:crypto";
 import { Database } from "bun:sqlite";
 import { createApiHandler, createWebhookHandler, createWebhookVerifier } from "./api/http";
-import { createMcpHandler } from "./mcp/server";
 import { getSetting, setSetting, mirrorSettingsFromEnv } from "./db/settings";
-import { apiRateLimiter, isPrivateIp, syncRateLimitFromDb } from "./api/rate-limit";
+import { syncRateLimitFromDb } from "./api/rate-limit";
 import { syncGitHubConfigFromDb } from "./github/client";
 import { MAX_API_BODY, X_LEXA_REMOTE_IP } from "./api/limits";
 import { auth, loginLimiter, authIpLimiter } from "./auth";
@@ -72,7 +71,6 @@ if (process.env.LXK_SEED_DEV === "1") {
 
 const apiHandlerRaw = createApiHandler(DATABASE_PATH) as unknown as { handler?: (req: Request) => Promise<Response> } | ((req: Request) => Promise<Response>);
 const apiHandler: (req: Request) => Promise<Response> = typeof apiHandlerRaw === "function" ? apiHandlerRaw : apiHandlerRaw.handler!;
-const mcpHandler = createMcpHandler(DATABASE_PATH);
 const verifyWebhook = createWebhookVerifier(DATABASE_PATH);
 const webhookHandler = createWebhookHandler(DATABASE_PATH);
 
@@ -140,39 +138,6 @@ const server: Server<unknown> = Bun.serve({
     const url = new URL(req.url);
 
     const path = url.pathname;
-
-    if (url.pathname === "/mcp") {
-      // /api rate limiting lives in the HttpApi middleware; /mcp is not
-      // HttpApi, so its limiter call stays here (shared bucket).
-      const socketIp = server.requestIP(req)?.address;
-      const cfIp = req.headers.get("cf-connecting-ip");
-      const ip = socketIp && isPrivateIp(socketIp) && cfIp ? cfIp : (socketIp ?? cfIp ?? "unknown");
-      if (!apiRateLimiter.check(ip)) {
-        const retryAfter = Math.ceil(apiRateLimiter.retryAfterMs(ip) / 1000);
-        console.warn(`[API] rate limited ip=${ip} retryAfter=${retryAfter}s`);
-        return withSecurityHeaders(
-          new Response(JSON.stringify({ error: { code: "RATE_LIMITED", message: "Rate limit exceeded" } }), {
-            status: 429,
-            headers: { "Content-Type": "application/json", "Retry-After": String(retryAfter) },
-          })
-        );
-      }
-      if (req.method !== "POST") {
-        return withSecurityHeaders(new Response(JSON.stringify({ error: { code: "METHOD_NOT_ALLOWED", message: "Only POST is accepted" } }), { status: 405, headers: { "Content-Type": "application/json" } }));
-      }
-      const read = await readBodyWithLimit(req, MAX_API_BODY);
-      if (!read.ok) {
-        console.warn(`[MCP] body too large path=${path} declared=${req.headers.get("content-length") ?? "unknown"} bytes`);
-        return tooLargeResponse();
-      }
-      const mcpReq = new Request(req.url, { method: "POST", headers: req.headers, body: read.bytes });
-      try {
-        return withSecurityHeaders(await mcpHandler(mcpReq));
-      } catch (err) {
-        console.error("[MCP] Uncaught:", err);
-        throw err;
-      }
-    }
 
     if (url.pathname.startsWith("/api/")) {
       // Better Auth — mounted BEFORE the API-key middleware. The auth handler
@@ -333,7 +298,6 @@ const server: Server<unknown> = Bun.serve({
 <h1>Lexa</h1>
 <p>Self-hosted project management for small teams.</p>
 <p>API: <a href="/api/health"><code>/api/health</code></a> · <a href="/api/projects"><code>/api/projects</code></a></p>
-<p>MCP: <code>/mcp</code> (streamable HTTP, Bearer key)</p>
 </main></body></html>`, { headers: { "Content-Type": "text/html", "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff" } });
     }
     const filePath = url.pathname;

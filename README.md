@@ -1,6 +1,6 @@
 # Lexa
 
-Self-hosted project management for small teams. Kanban with swimlanes and WIP limits, rich task descriptions, a nested wiki, an MCP server so AI agents can manage tasks, a Forge AI writing assistant, and two-way GitHub issue sync.
+Self-hosted project management for small teams. Kanban with swimlanes and WIP limits, rich task descriptions, a nested wiki, a Forge AI writing assistant, and two-way GitHub issue sync.
 
 Stack: **Bun + SQLite + TanStack Start (React) + Effect-TS + Tailwind**, served behind a cloudflared tunnel.
 
@@ -9,7 +9,6 @@ Stack: **Bun + SQLite + TanStack Start (React) + Effect-TS + Tailwind**, served 
 - **Kanban board** — swimlanes, WIP limits enforced atomically, drag-and-drop reorder, archive/restore, per-project priority/type field config
 - **Tasks** — rich TipTap descriptions, assignees, activity timeline + comments, required-field gates per column, subtasks / blocked-by / related links
 - **Nested wiki** — hierarchical pages, FTS5 full-text search, revisions
-- **MCP server** — AI agents (Hermes/OpenCode) manage tasks by name, Markdown at the agent boundary
 - **Two-way GitHub sync** — link tasks to issues, echo-suppressed webhooks, column ↔ issue-state mapping, out-of-sync surfacing
 - **Forge** — AI writing assistant with agents + skills rule bundles, pluggable runtimes (OpenCode / Hermes / Command Code)
 - **Auth** — Cloudflare Access (Google OAuth) for humans, `lxk_` API keys for machines
@@ -88,7 +87,6 @@ Design and API docs live in [`docs/`](docs/):
 | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | Big picture: stack, auth, sync, request pipeline |
 | [`docs/SCHEMA.md`](docs/SCHEMA.md) | SQL schema and data invariants |
 | [`docs/API.md`](docs/API.md) | REST contract |
-| [`docs/MCP.md`](docs/MCP.md) | Agent-facing MCP tool contract |
 | [`docs/LAYERS.md`](docs/LAYERS.md) | Effect service patterns, error catalog, webhook/auth flows |
 | [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) | Deploy contract: flavors, env reference, bootstrap |
 | [`docs/GITHUB_SETUP.md`](docs/GITHUB_SETUP.md) | GitHub App setup: webhook URL/secret, private key, Access bypass |

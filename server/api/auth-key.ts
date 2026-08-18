@@ -11,7 +11,6 @@ export interface ApiKeyIdentity {
 
 // Resolve the caller behind an Authorization header against a shared
 // connection: key → user (null user means a setup/seeded key — admin).
-// Mirrors the MCP auth rule so REST and MCP enforce the same role model.
 // Attribution comes from the key owner only — the x-lxk-user header is
 // removed (R5); browser calls authenticate via session cookie instead.
 export function resolveApiKeyIdentity(authHeader: string, headers: Headers, db: Database, dbPath: string): ApiKeyIdentity | null {

@@ -1,6 +1,6 @@
 # Lexa — Agent Rules
 
-You are working on **Lexa**: a self-hosted project management tool. Kanban with swimlanes/WIP limits, tasks with rich descriptions, nested wiki, an MCP server so AI agents (Hermes/OpenCode) can manage tasks, and two-way GitHub issue sync. Bun server + SQLite database behind cloudflared tunnel. Stack: TanStack Start + React + Effect-TS + Tailwind.
+You are working on **Lexa**: a self-hosted project management tool. Kanban with swimlanes/WIP limits, tasks with rich descriptions, nested wiki, and two-way GitHub issue sync. Bun server + SQLite database behind cloudflared tunnel. Stack: TanStack Start + React + Effect-TS + Tailwind.
 
 **This project was fully designed before implementation. Your job is to execute the design, not to design.**
 
@@ -9,9 +9,8 @@ You are working on **Lexa**: a self-hosted project management tool. Kanban with 
 1. `docs/SCHEMA.md` — SQL and data invariants. Copy verbatim.
 2. `docs/LAYERS.md` — Effect service patterns, error catalog, webhook/auth flows.
 3. `docs/API.md` — REST contract. Endpoint shapes are exact.
-4. `docs/MCP.md` — Agent-facing tool contract. Tool shapes are exact.
-5. `wireframes/DESIGN_SYSTEM.md` + the wireframes submodule (`wireframes/`) — all visual decisions.
-6. `docs/ARCHITECTURE.md` — context and rationale only.
+4. `wireframes/DESIGN_SYSTEM.md` + the wireframes submodule (`wireframes/`) — all visual decisions.
+5. `docs/ARCHITECTURE.md` — context and rationale only.
 
 **If documents conflict, stop and report the conflict to the user. Never resolve it yourself.**
 
@@ -25,7 +24,7 @@ All specs and plans live directly in the private design area — there is no
 
 `docs/private/` is gitignored (`.gitignore`): design artifacts are private,
 never committed. Committed design authority stays in the top-level `docs/*.md`
-(SCHEMA / LAYERS / API / MCP / ARCHITECTURE).
+(SCHEMA / LAYERS / API / ARCHITECTURE).
 
 ## Wireframes are the frontend source of truth
 
@@ -60,7 +59,7 @@ When asked to implement frontend, do NOT design or invent. Read the relevant wir
 
 ## Non-negotiable rules
 
-1. **No scope creep.** If a feature, table, column, endpoint, MCP tool, or error code is not in the design docs, it does not get built. If you believe something is missing, report it — don't add it.
+1. **No scope creep.** If a feature, table, column, endpoint, or error code is not in the design docs, it does not get built. If you believe something is missing, report it — don't add it.
 2. **Names are exact.** Table names, column names, error codes, route paths, tool names, and config keys must match the docs verbatim.
 3. **Phase gates.** Complete a phase's acceptance checks (paste outputs) before starting the next phase. `tsc --noEmit` must pass at every gate.
 4. **No commits** unless the user explicitly asks.
@@ -78,13 +77,12 @@ These were each hard-won design fixes (see the archived design-review history in
 4. **Positions are fractional-index keys.** Generation is deterministic — retries must re-read anchors before regenerating. Neighborless moves append to end; never `generateKeyBetween(null, null)` into a non-empty column. Retry only on `isPositionConflict`, at most once.
 5. **WIP limit is enforced inside the conditional UPDATE** (atomic), with the within-column-reorder short-circuit (`column_id = ?2 OR count < limit`).
 6. **Mutation responses are authoritative.** Frontend updates TanStack Query cache via `setQueryData` from the mutation response. Never `invalidateQueries` on the mutation path.
-7. **MCP boundary speaks Markdown; REST boundary speaks TipTap JSON.** Conversion happens only in `shared/markdown.ts` and `server/mcp/`. Agents never see ProseMirror JSON; the frontend never sees Markdown.
-8. **MCP takes names, not UUIDs** (columns/swimlanes by name, projects by slug). Failed lookups return `details.available*` with valid choices.
-9. **Webhook route has no API-key middleware** — HMAC-SHA-256 signature verification over the raw body is the auth, and it runs before JSON parsing.
-10. **Column→GitHub state mapping uses `columns.github_state`**, never column names.
-11. **`required_fields` is enforced on create, move, AND update**, with TipTap-aware emptiness (a doc with no text nodes is empty).
-12. **An issue links to at most one task; a task may hold several issues, one per repo** (`task_github_issues` junction PK `(task_id, issue_id)` + `UNIQUE(issue_id)` index + per-repo ALREADY_LINKED guard).
-13. **Emission invariant.** Every task mutation appends `task_activity` row(s) in the SAME transaction as the mutation — one row per meaningful change (updates may emit several `field_changed` rows); position-only reorders emit nothing; webhook moves emit `github_synced` only. Messages come from the catalog (`server/activity-messages.ts`), frozen at write time — never hand-rolled at call sites.
+7. **REST boundary speaks TipTap JSON.** Markdown conversion lives only in `shared/markdown.ts` (used by GitHub sync, Forge, CLI); the frontend never sees Markdown.
+8. **Webhook route has no API-key middleware** — HMAC-SHA-256 signature verification over the raw body is the auth, and it runs before JSON parsing.
+9. **Column→GitHub state mapping uses `columns.github_state`**, never column names.
+10. **`required_fields` is enforced on create, move, AND update**, with TipTap-aware emptiness (a doc with no text nodes is empty).
+11. **An issue links to at most one task; a task may hold several issues, one per repo** (`task_github_issues` junction PK `(task_id, issue_id)` + `UNIQUE(issue_id)` index + per-repo ALREADY_LINKED guard).
+12. **Emission invariant.** Every task mutation appends `task_activity` row(s) in the SAME transaction as the mutation — one row per meaningful change (updates may emit several `field_changed` rows); position-only reorders emit nothing; webhook moves emit `github_synced` only. Messages come from the catalog (`server/activity-messages.ts`), frozen at write time — never hand-rolled at call sites.
 
 ## Agent file boundaries
 
@@ -97,10 +95,10 @@ These rules are non-negotiable and apply to every agent working on Lexa:
   - `app/lib/` (client-side query hooks and utilities — never server libs)
   - `wireframes/DESIGN_SYSTEM.md` and `wireframes/src/design-system.css` (the wireframes submodule)
 - **@designer must never touch:**
-  - `server/` (any backend code: repos, services, MCP, API, DB, GitHub)
+  - `server/` (any backend code: repos, services, API, DB, GitHub)
   - `shared/types.ts` (schema types — read-only)
   - `shared/` except pure frontend utilities explicitly in scope
-  - `docs/` (design docs: `SCHEMA.md`, `LAYERS.md`, `API.md`, `MCP.md`, `ARCHITECTURE.md`)
+  - `docs/` (design docs: `SCHEMA.md`, `LAYERS.md`, `API.md`, `ARCHITECTURE.md`)
   - `package.json`, `tsconfig.json`, `app.config.ts`
 - **@fixer scope is per-task** — specify exact files; same constraints apply unless the task explicitly includes backend files.
 - If an agent discovers a need for a new backend endpoint or shared type, it must report back to the orchestrator — never add it itself.
@@ -111,7 +109,7 @@ These rules are non-negotiable and apply to every agent working on Lexa:
 - **Repos are thin.** Raw SQLite prepared statements via bun:sqlite. No business logic in repos. `updated_at = datetime('now')` inside every UPDATE statement.
 - **Routes are thinner.** `@effect/platform` HttpApi groups; parse → call service → return. Error→status mapping is declarative (`.addError`), from the catalog — no hand-rolled try/catch responses.
 - **Frontend:** TanStack Query for all server state; components match `wireframes/src/*.html` structure and `wireframes/DESIGN_SYSTEM.md` tokens exactly. PHOSPHOR tokens are CSS variables — no raw hex outside `phosphor.css`.
-- **File placement:** `app/` (TanStack Start routes + components), `server/` (db/repos/services/api/mcp/github), `shared/` (types + pure functions). Nothing else at root except config.
+- **File placement:** `app/` (TanStack Start routes + components), `server/` (db/repos/services/api/github), `shared/` (types + pure functions). Nothing else at root except config.
 
 ## Verification
 
@@ -135,7 +133,7 @@ bun run dev:full       # API (:3000) + vite frontend (:5173) together, Ctrl-C st
 ```
 
 `scripts/dev.sh` (what `dev:full` runs) loads `.env` into the shell, boots
-`server/entry.ts` on :3000 and `vite dev` on :5173 (vite proxies `/api` and `/mcp` → :3000),
+`server/entry.ts` on :3000 and `vite dev` on :5173 (vite proxies `/api` → :3000),
 and sets `LXK_SEED_DEV=1` for sample data on every boot. Delete `data/lexa.db*`
 to start fresh. DB lives at `data/lexa.db` (SQLite WAL). Health check:
 `curl http://localhost:3000/api/health` → `{"ok":true}`.
@@ -149,7 +147,7 @@ Key facts:
   build-time baked key. Re-running `bun run setup` (which may rotate the key)
   never breaks the browser — no rebuild required.
 - **`bun run dev:server` alone** serves the **built** app from `dist/` on :3000
-  (frontend changes require `bun run build` first). Use it only for API/MCP work
+  (frontend changes require `bun run build` first). Use it only for API work
   or to preview the production build; use `dev:full` for day-to-day development.
 - **Setup wizard** (`scripts/setup-cli.ts` / web wizard `/setup`): prompts for
   admin email (`LXK_ADMIN_EMAILS`), keeps/generates `LXK_API_KEY`, runs
@@ -163,7 +161,7 @@ Key facts:
 - **GitHub sync:** full setup guide in `docs/GITHUB_SETUP.md` — GitHub App
   creation, webhook URL/secret, `GITHUB_APP_ID` / `GITHUB_PRIVATE_KEY` (inline
   PEM) or `GITHUB_PRIVATE_KEY_FILE` (path — recommended), prod volume mount,
-  Access bypass policies for `/api/webhooks/*` and `/mcp`. Without the bypass,
+  Access bypass policy for `/api/webhooks/*`. Without the bypass,
   GitHub deliveries 302 on Access.
 
 ### Forge (AI writing assistant)
@@ -240,7 +238,7 @@ Key facts:
   workspace at mint and keep it on continuation; a re-provisioned workspace
   (listener sync / manual wipe) leaves a stale file context — reset the
   session after wiping a workspace. Global opencode config — permissions,
-  MCP servers, plugins — never loads into Forge runs.
+  plugins — never loads into Forge runs.
   `lexa-cli machine workspace list|sync` inspects/re-syncs local workspaces.
   hermes/command-code keep the legacy ephemeral `~/.lexa/<host>/runs/` layout.
 
@@ -273,8 +271,7 @@ The CLI version is **independent** of the web app version:
   install|listen|start|stop|restart|status|logs|list|uninstall` (the listener
   is the machine-level supervisor), `task|wiki|project` for CRUD, `deploy`,
   `upgrade`, `github status|setup|check`. Agent skill:
-  `~/.agents/skills/lexa-cli/SKILL.md`. MCP remains the agent surface (cloud
-  agentic AI); the CLI is for humans/operators.
+  `~/.agents/skills/lexa-cli/SKILL.md`. The CLI is for humans/operators.
 - **Runtime setup wizard → CLI listener:** the web Settings wizard (Settings →
   Forge Runtimes → Setup runtime) lists registered machines from
   `GET /api/forge/machines`, then sends only machine + agent CLI + a fresh key

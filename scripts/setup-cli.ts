@@ -272,7 +272,6 @@ async function main() {
     console.log("                      OAuth consent screen, and to the CF Access allow policy.");
   }
   console.log("");
-  console.log("  MCP (optional):  point your agent at https://<host>/mcp with an lxk_ API key");
 }
 
 main().catch((e) => {
