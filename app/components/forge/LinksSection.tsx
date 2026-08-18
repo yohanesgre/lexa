@@ -14,10 +14,11 @@ interface LinksSectionProps {
   slug: string;
   taskId: string;
   taskTitleById?: Map<string, string>;  // from the board — for link display
+  taskKeyById?: Map<string, string>;    // from the board — for link display
   className?: string;
 }
 
-export function LinksSection({ slug, taskId, taskTitleById, className }: LinksSectionProps) {
+export function LinksSection({ slug, taskId, taskTitleById, taskKeyById, className }: LinksSectionProps) {
   const { data: links = [] } = useTaskLinks(slug, taskId);
   const addLink = useAddTaskLink(slug, taskId);
   const removeLink = useRemoveTaskLink(slug, taskId);
@@ -44,6 +45,8 @@ export function LinksSection({ slug, taskId, taskTitleById, className }: LinksSe
     return s?.title ?? otherTaskId.slice(0, 8);
   };
 
+  const displayKey = (otherTaskId: string) => taskKeyById?.get(otherTaskId);
+
   return (
     <div className={cn(className)}>
       <div className="flex items-center gap-2 mb-2">
@@ -69,7 +72,15 @@ export function LinksSection({ slug, taskId, taskTitleById, className }: LinksSe
           >
             <div className="flex items-center gap-2" style={{ minWidth: 0 }}>
               <span className="font-micro text-2xs text-lx-text-muted uppercase tracking-[0.04em]">{RELATION_LABELS[link.relation]}</span>
-              <span className="text-sm text-lx-text-secondary truncate">{displayTitle(info.otherTaskId)}</span>
+              <span className="text-sm text-lx-text-secondary truncate">
+                {displayKey(info.otherTaskId) && (
+                  <>
+                    <span className="task-key">{displayKey(info.otherTaskId)}</span>
+                    {" · "}
+                  </>
+                )}
+                {displayTitle(info.otherTaskId)}
+              </span>
             </div>
             <button
               type="button"

@@ -4,6 +4,7 @@ import type { GithubIssue, FieldOption } from "../../../shared/types";
 
 interface TaskCardProps {
   id: string;
+  taskKey: string;                // "EG-12" — stable ticket identifier
   title: string;
   priority: string;               // priority_options.id
   type: string;                   // type_options.id
@@ -32,7 +33,7 @@ function GithubMark({ size = 12 }: { size?: number }) {
   );
 }
 
-export function TaskCard({ title, priority, type, priorities, types, assignees, githubs, dueAt, isDragging = false, dimmed = false, archived = false, isSubtask = false, blockedBy = [], subtaskCount = 0, onToggleSubtasks, subtasksCollapsed = false, action, className }: TaskCardProps) {
+export function TaskCard({ taskKey, title, priority, type, priorities, types, assignees, githubs, dueAt, isDragging = false, dimmed = false, archived = false, isSubtask = false, blockedBy = [], subtaskCount = 0, onToggleSubtasks, subtasksCollapsed = false, action, className }: TaskCardProps) {
   const typeOpt = types.find((t) => t.id === type);
   const prioOpt = priorities.find((p) => p.id === priority);
   const typeLabel = typeOpt?.label ?? type;
@@ -84,6 +85,8 @@ export function TaskCard({ title, priority, type, priorities, types, assignees, 
             </svg>
           </button>
         )}
+        {taskKey && <span className="task-key">{taskKey}</span>}
+        {" "}
         {title}
         {subtaskCount > 0 && <span className="font-micro text-2xs text-lx-text-muted" style={{ marginLeft: 6 }}>{String(subtaskCount).padStart(2, "0")}</span>}
       </div>

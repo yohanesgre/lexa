@@ -9,7 +9,7 @@ export class SwimlaneNotFound extends Data.TaggedError("SwimlaneNotFound")<{ id:
 export class MilestoneNotFound extends Data.TaggedError("MilestoneNotFound")<{ id: string; availableMilestones?: string[] }> {}
 export class InvalidArgs extends Data.TaggedError("InvalidArgs")<{ reason: string }> {}
 export class WikiPageNotFound extends Data.TaggedError("WikiPageNotFound")<{ id: string }> {}
-export class WipLimitExceeded extends Data.TaggedError("WipLimitExceeded")<{ column: string; limit: number; current: number }> {}
+export class WipLimitExceeded extends Data.TaggedError("WipLimitExceeded")<{ columnName: string; limit: number; current: number }> {}
 export class DeadlineAfterLane extends Data.TaggedError("DeadlineAfterLane")<{
   date: string;                    // the lane's due date (YYYY-MM-DD)
   taskId?: string;                 // first offending task (lane-shrink path)
@@ -23,7 +23,7 @@ export class HasChildren extends Data.TaggedError("HasChildren")<{ count: number
 export class TaskHasChildren extends Data.TaggedError("TaskHasChildren")<{ taskId: string }> {}
 export class NeighborNotInColumn extends Data.TaggedError("NeighborNotInColumn")<{ taskId: string }> {}
 export class GithubIssueAlreadyLinked extends Data.TaggedError("GithubIssueAlreadyLinked")<{ taskId: string }> {}
-export class RequiredFieldMissing extends Data.TaggedError("RequiredFieldMissing")<{ field: string; column: string }> {}
+export class RequiredFieldMissing extends Data.TaggedError("RequiredFieldMissing")<{ field: string; columnName: string }> {}
 export class OptionInUse extends Data.TaggedError("OptionInUse")<{ optionId: string; label: string }> {}
 export class InvalidOption extends Data.TaggedError("InvalidOption")<{ optionId?: string; message?: string }> {}
 export class InvalidKey extends Data.TaggedError("InvalidKey")<{}> {}
@@ -235,7 +235,7 @@ export function errorMessage(error: { _tag: string } & Record<string, unknown>):
     case "WikiPageNotFound":
       return `Page not found`;
     case "WipLimitExceeded":
-      return `Column '${error.column}' is at its WIP limit of ${error.limit}`;
+      return `Column '${error.columnName}' is at its WIP limit of ${error.limit}`;
     case "DeadlineAfterLane":
       return error.taskTitle
         ? `Task '${error.taskTitle}' has a deadline later than the lane's (lane due ${error.date})`
@@ -253,7 +253,7 @@ export function errorMessage(error: { _tag: string } & Record<string, unknown>):
     case "GithubIssueAlreadyLinked":
       return `Task already has a GitHub issue`;
     case "RequiredFieldMissing":
-      return `Field '${error.field}' is required in column '${error.column}'`;
+      return `Field '${error.field}' is required in column '${error.columnName}'`;
     case "OptionInUse":
       return `Option '${error.label}' is still used by tasks. Reassign those tasks first.`;
     case "InvalidOption":
@@ -367,6 +367,13 @@ export function errorDetails(error: { _tag: string } & Record<string, unknown>):
     // Scrub raw SQLite text (message/cause) from client-visible details; raw
     // detail is preserved in server logs via http.ts respond()'s rawMessage.
     return _tag === "ConstraintViolation" ? { isPositionConflict: rest.isPositionConflict ?? false } : {};
+  }
+  if (_tag === "WipLimitExceeded" || _tag === "RequiredFieldMissing") {
+    // Effect's Data.TaggedError drops a field literally named `column` from
+    // own enumerable keys (JSON/spread lose it). The internal field is
+    // `columnName`; map it back to the public `column` contract here.
+    const { columnName, ...rest2 } = rest;
+    return { ...rest2, column: columnName };
   }
   return rest;
 }

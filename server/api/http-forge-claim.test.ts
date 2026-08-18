@@ -82,12 +82,12 @@ beforeAll(async () => {
 INSERT INTO api_keys (id, name, key_hash) VALUES ('k1', 'test-admin', '${adminHash}');
 INSERT INTO runtimes (id, name, provider, model, status, agent, print_logs, log_level) VALUES
   ('r1', 'dev', 'opencode', 'claude', 'online', 'lexa', 0, 'INFO');
-INSERT INTO projects (id, name, slug) VALUES ('p1', 'P', 'p1');
+INSERT INTO projects (id, name, slug, key, next_task_number) VALUES ('p1', 'P', 'p1', 'EG', 2);
 INSERT INTO columns (id, project_id, name, position) VALUES ('c1', 'p1', 'Todo', 0);
 INSERT INTO swimlanes (id, project_id, name, position, kind) VALUES ('s1', 'p1', 'Main', 0, 'backlog');
-INSERT INTO tasks (id, project_id, column_id, swimlane_id, title, description, priority, type, position, created_at) VALUES
-  ('t1', 'p1', 'c1', 's1', 'Linked Task', '{"type":"doc","content":[]}', 'pr-1', 'tp-1', 'a0', '2026-01-01 10:00:00'),
-  ('t2', 'p1', 'c1', 's1', 'Plain Task', '{"type":"doc","content":[]}', 'pr-1', 'tp-1', 'a1', '2026-01-01 10:00:00');
+INSERT INTO tasks (id, project_id, column_id, swimlane_id, title, description, priority, type, position, created_at, key, number) VALUES
+  ('t1', 'p1', 'c1', 's1', 'Linked Task', '{"type":"doc","content":[]}', 'pr-1', 'tp-1', 'a0', '2026-01-01 10:00:00', 'EG-1', 1),
+  ('t2', 'p1', 'c1', 's1', 'Plain Task', '{"type":"doc","content":[]}', 'pr-1', 'tp-1', 'a1', '2026-01-01 10:00:00', 'EG-2', 2);
 INSERT INTO task_github_issues (task_id, issue_id, issue_number, repo, synced_state) VALUES
   ('t1', 'ghi1', 7, 'owner/repo', 'open');
 INSERT INTO project_repos (id, project_id, repo, source_role, workspace_role) VALUES
@@ -101,11 +101,11 @@ INSERT INTO forge_agents (id, name, description, instructions, is_builtin) VALUE
 INSERT INTO forge_skills (id, name, description, instructions, is_builtin) VALUES
   ('sk1', 'Test Skill', '', 'Skill instructions', 0);
 -- p2 has no source repos — tasks there get no repoContent.
-INSERT INTO projects (id, name, slug) VALUES ('p2', 'P2', 'p2');
+INSERT INTO projects (id, name, slug, key, next_task_number) VALUES ('p2', 'P2', 'p2', 'WC', 1);
 INSERT INTO columns (id, project_id, name, position) VALUES ('c2', 'p2', 'Todo', 0);
 INSERT INTO swimlanes (id, project_id, name, position, kind) VALUES ('s2', 'p2', 'Main', 0, 'backlog');
-INSERT INTO tasks (id, project_id, column_id, swimlane_id, title, description, priority, type, position, created_at) VALUES
-  ('t3', 'p2', 'c2', 's2', 'NoRepo Task', '{"type":"doc","content":[]}', 'pr-1', 'tp-1', 'a0', '2026-01-01 10:00:00');
+INSERT INTO tasks (id, project_id, column_id, swimlane_id, title, description, priority, type, position, created_at, key, number) VALUES
+  ('t3', 'p2', 'c2', 's2', 'NoRepo Task', '{"type":"doc","content":[]}', 'pr-1', 'tp-1', 'a0', '2026-01-01 10:00:00', 'WC-1', 1);
 INSERT INTO forge_tasks (id, project_id, document_type, document_id, agent_id, skill_id, selection, doc_context, status, created_at) VALUES
   ('ft1', 'p1', 'task', 't1', 'a1', 'sk1', '', 'Task: Linked Task', 'queued', '2026-01-01 10:00:00'),
   ('ft2', 'p1', 'task', 't1', 'a1', 'sk1', '', 'Task: Linked Task', 'queued', '2026-01-01 10:00:01'),

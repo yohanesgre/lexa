@@ -313,6 +313,7 @@ describe("cmdGithubCheck", () => {
   function stubClient(moveSyncedState: "open" | "closed" | null): LexaClient {
     const base = {
       id: "t1",
+      key: "EG-1",
       title: "GitHub sync check",
       priority: null,
       type: null,

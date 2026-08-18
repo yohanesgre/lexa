@@ -1,4 +1,4 @@
-import { ArchiveIcon } from "./icons";
+import { useToast } from "./ui/Toast";
 
 interface TaskTitleInputProps {
   isArchived: boolean;
@@ -13,10 +13,20 @@ interface TaskTitleInputProps {
   onSaveTitle: () => void;
   setEditingTitle: (v: boolean) => void;
   taskTitle: string;
+  taskKey: string;
 }
 
 export function TaskTitleInput(props: TaskTitleInputProps) {
-  const { isArchived, isCreate, createTitle, setCreateTitle, onCreate, onClose, editingTitle, draft, setDraft, onSaveTitle, setEditingTitle, taskTitle } = props;
+  const { isArchived, isCreate, createTitle, setCreateTitle, onCreate, onClose, editingTitle, draft, setDraft, onSaveTitle, setEditingTitle, taskTitle, taskKey } = props;
+  const toast = useToast();
+  const copyKey = async () => {
+    try {
+      await navigator.clipboard.writeText(taskKey);
+      toast.push("success", "Key copied", taskKey);
+    } catch {
+      toast.push("error", "Failed to copy key");
+    }
+  };
   return (
   <>
 {isCreate ? (
@@ -53,18 +63,39 @@ export function TaskTitleInput(props: TaskTitleInputProps) {
     }}
   />
 ) : (
-  <button
-    type="button"
+  <div
     className="slideover-title"
-    style={{ border: "none", background: "none", padding: 0, textAlign: "left", cursor: "pointer" }}
+    style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", border: "none", background: "none", padding: 0, textAlign: "left" }}
+    role="button"
+    tabIndex={0}
+    title="Click to edit"
     onClick={() => {
       setDraft(taskTitle);
       setEditingTitle(true);
     }}
-    title="Click to edit"
+    onKeyDown={(e) => {
+      if (e.key === "Enter" || e.key === " ") {
+        e.preventDefault();
+        setDraft(taskTitle);
+        setEditingTitle(true);
+      }
+    }}
   >
-    {taskTitle}
-  </button>
+    {taskKey && <span className="task-key">{taskKey}</span>}
+    <span>{taskTitle}</span>
+    <button
+      type="button"
+      className="icon-btn"
+      title="Copy key"
+      aria-label="Copy key"
+      onClick={(e) => {
+        e.stopPropagation();
+        copyKey();
+      }}
+    >
+      ⧉
+    </button>
+  </div>
 )}
   </>
   );

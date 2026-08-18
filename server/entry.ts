@@ -1,4 +1,5 @@
 import { runMigrations } from "./db/migrate";
+import { backfillTaskKeys } from "./db/task-keys-backfill";
 import { mkdirSync, existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { createHash, randomBytes } from "node:crypto";
@@ -67,6 +68,16 @@ setInterval(() => {
 // Boot-time seeding only for explicit dev opt-in (LXK_SEED_DEV=1).
 if (process.env.LXK_SEED_DEV === "1") {
   seedDevData(DATABASE_PATH);
+}
+// Task ticket keys: backfill legacy + seeded rows (idempotent, NULL-only).
+// Runs after seeding so dev sample data gets keys too.
+{
+  const db = new Database(DATABASE_PATH);
+  try {
+    backfillTaskKeys(db);
+  } finally {
+    db.close();
+  }
 }
 
 const apiHandlerRaw = createApiHandler(DATABASE_PATH) as unknown as { handler?: (req: Request) => Promise<Response> } | ((req: Request) => Promise<Response>);

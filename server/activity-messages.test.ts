@@ -10,9 +10,9 @@ describe("activity messages", () => {
     expect(m.moved("Maria", "Backlog", "Backlog", null, "Sprint 6")).toBe("Maria moved to Sprint 6 in Backlog");
     expect(m.moved("Maria", "Backlog", "Backlog", "Sprint 6", "Sprint 6")).toBe("Maria moved");
     expect(m.priorityChanged("Medium", "High")).toBe("Priority changed: Medium → High");
-    expect(m.linkAdded("subtask_of", "Auto-save on zone transition")).toBe("Linked subtask: Auto-save on zone transition");
-    expect(m.linkRemoved("blocked_by", "Boss arena trigger zones")).toBe("Removed blocked-by: Boss arena trigger zones");
-    expect(m.linkAdded("unknown_rel", "X")).toBe("Linked unknown_rel: X");
+    expect(m.linkAdded("subtask_of", "EMB-15", "Auto-save on zone transition")).toBe("Linked subtask: EMB-15 · Auto-save on zone transition");
+    expect(m.linkRemoved("blocked_by", "EMB-22", "Boss arena trigger zones")).toBe("Removed blocked-by: EMB-22 · Boss arena trigger zones");
+    expect(m.linkAdded("unknown_rel", "X", "Y")).toBe("Linked unknown_rel: X · Y");
     expect(m.githubSynced(107, "closed", "Done")).toBe("Issue #107 closed on GitHub — task moved to Done");
     expect(m.forgeCompleted("opencode")).toBe("Forge: opencode completed — result ready");
     expect(m.commentDeleted("Maria")).toBe("Maria deleted a comment");
@@ -43,8 +43,8 @@ describe("activity messages", () => {
       ["archived", { actor: "Maria" }, "Maria archived this task"],
       ["restored", { actor: "Maria" }, "Maria restored this task"],
       ["deleted", { actor: "Maria" }, "Maria deleted this task"],
-      ["link_added", { relation: "subtask_of", title: "X" }, "Linked subtask: X"],
-      ["link_removed", { relation: "blocked_by", title: "X" }, "Removed blocked-by: X"],
+      ["link_added", { relation: "subtask_of", key: "EMB-1", title: "X" }, "Linked subtask: EMB-1 · X"],
+      ["link_removed", { relation: "blocked_by", key: "EMB-2", title: "X" }, "Removed blocked-by: EMB-2 · X"],
       ["source_added", { label: "Home", kind: "wiki" }, "Added source: Home (wiki)"],
       ["source_removed", { label: "Home" }, "Removed source: Home"],
       ["github_linked", { repo: "owner/repo", number: 1 }, "Linked GitHub issue owner/repo #1"],

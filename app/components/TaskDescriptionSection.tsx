@@ -10,13 +10,14 @@ interface TaskDescriptionSectionProps {
   task: { id: string; description: TipTapDoc } | null;
   emptyDoc: TipTapDoc;
   taskTitles: Map<string, string> | undefined;
+  taskKeys: Map<string, string> | undefined;
   editingDescription: boolean;
   setEditingDescription: (v: boolean) => void;
   setCreateDescription: (v: TipTapDoc) => void;
   onUpdate: (id: string, data: { description: TipTapDoc }) => void;
 }
 
-export function TaskDescriptionSection({ isCreate, slug, task, emptyDoc, taskTitles, editingDescription, setEditingDescription, setCreateDescription, onUpdate }: TaskDescriptionSectionProps) {
+export function TaskDescriptionSection({ isCreate, slug, task, emptyDoc, taskTitles, taskKeys, editingDescription, setEditingDescription, setCreateDescription, onUpdate }: TaskDescriptionSectionProps) {
   return (
 <>
 {isCreate ? (
@@ -61,6 +62,7 @@ export function TaskDescriptionSection({ isCreate, slug, task, emptyDoc, taskTit
         slug={slug}
         taskId={task!.id}
         taskTitleById={taskTitles}
+        taskKeyById={taskKeys}
         className="mt-4 pt-4 border-t border-lx-border-subtle"
       />
     )}

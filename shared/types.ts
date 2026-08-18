@@ -12,6 +12,7 @@ export interface Project {
   id: ID;
   name: string;
   slug: string;
+  key: string;            // ticket prefix, e.g. "EMB"
   description: string;
   repos: ProjectRepo[];
   createdAt: ISODate;
@@ -151,6 +152,7 @@ export interface GithubIssueSummary {
 
 export interface Task {
   id: ID;
+  key: string;            // "EMB-12" — stable ticket identifier
   projectId: ID;
   columnId: ID;
   swimlaneId: ID;
@@ -369,6 +371,7 @@ export interface ForgeTask {
   projectId: ID;
   documentType: "task" | "wiki";
   documentId: string;
+  key: string;
   documentTitle: string;
   agentId: ID;
   skillId: ID;

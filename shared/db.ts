@@ -40,6 +40,7 @@ export interface ProjectRow {
   id: string;
   name: string;
   slug: string;
+  key: string;
   description: string;
   created_at: string;
   updated_at: string;
@@ -51,6 +52,7 @@ export function rowToProject(row: ProjectRow): DomainProject & { teamId: string 
     id: row.id,
     name: row.name,
     slug: row.slug,
+    key: row.key,
     description: row.description,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -257,6 +259,7 @@ export interface ApiKeyRow {
 
 export interface TaskRow {
   id: string;
+  key: string;
   project_id: string;
   column_id: string;
   swimlane_id: string;
@@ -279,7 +282,7 @@ export interface TaskRow {
 }
 
 export function rowToTask(row: TaskRow, columnGithubState?: "open" | "closed" | null): {
-  id: string; projectId: string; columnId: string; swimlaneId: string; title: string; description: TipTapDoc; priority: string; type: string; assignees: string[]; position: string; dueAt: string | null; githubs: { issueId: string; issueNumber: number; repo: string; syncedState: "open" | "closed" | null; url: string; outOfSync: boolean; pushFailed: boolean }[]; archivedAt: ISODate | null; createdAt: ISODate; updatedAt: ISODate;
+  id: string; key: string; projectId: string; columnId: string; swimlaneId: string; title: string; description: TipTapDoc; priority: string; type: string; assignees: string[]; position: string; dueAt: string | null; githubs: { issueId: string; issueNumber: number; repo: string; syncedState: "open" | "closed" | null; url: string; outOfSync: boolean; pushFailed: boolean }[]; archivedAt: ISODate | null; createdAt: ISODate; updatedAt: ISODate;
 } {
   return taskFromRow(row, columnGithubState, JSON.parse(row.description) as TipTapDoc);
 }
@@ -287,13 +290,13 @@ export function rowToTask(row: TaskRow, columnGithubState?: "open" | "closed" | 
 // Slim rows (board/list paths select no description) map to an empty doc —
 // the key stays in the response shape, the blob never ships.
 export function rowToTaskSlim(row: Omit<TaskRow, "description">, columnGithubState?: "open" | "closed" | null): {
-  id: string; projectId: string; columnId: string; swimlaneId: string; title: string; description: TipTapDoc; priority: string; type: string; assignees: string[]; position: string; dueAt: string | null; githubs: { issueId: string; issueNumber: number; repo: string; syncedState: "open" | "closed" | null; url: string; outOfSync: boolean; pushFailed: boolean }[]; archivedAt: ISODate | null; createdAt: ISODate; updatedAt: ISODate;
+  id: string; key: string; projectId: string; columnId: string; swimlaneId: string; title: string; description: TipTapDoc; priority: string; type: string; assignees: string[]; position: string; dueAt: string | null; githubs: { issueId: string; issueNumber: number; repo: string; syncedState: "open" | "closed" | null; url: string; outOfSync: boolean; pushFailed: boolean }[]; archivedAt: ISODate | null; createdAt: ISODate; updatedAt: ISODate;
 } {
   return taskFromRow(row as TaskRow, columnGithubState, { type: "doc", content: [] });
 }
 
 function taskFromRow(row: TaskRow, columnGithubState: "open" | "closed" | null | undefined, description: TipTapDoc): {
-  id: string; projectId: string; columnId: string; swimlaneId: string; title: string; description: TipTapDoc; priority: string; type: string; assignees: string[]; position: string; dueAt: string | null; githubs: { issueId: string; issueNumber: number; repo: string; syncedState: "open" | "closed" | null; url: string; outOfSync: boolean; pushFailed: boolean }[]; archivedAt: ISODate | null; createdAt: ISODate; updatedAt: ISODate;
+  id: string; key: string; projectId: string; columnId: string; swimlaneId: string; title: string; description: TipTapDoc; priority: string; type: string; assignees: string[]; position: string; dueAt: string | null; githubs: { issueId: string; issueNumber: number; repo: string; syncedState: "open" | "closed" | null; url: string; outOfSync: boolean; pushFailed: boolean }[]; archivedAt: ISODate | null; createdAt: ISODate; updatedAt: ISODate;
 } {
   const colState = columnGithubState ?? row.column_github_state ?? null;
   const githubs: { issueId: string; issueNumber: number; repo: string; syncedState: "open" | "closed" | null; url: string; outOfSync: boolean; pushFailed: boolean }[] = [];
@@ -317,6 +320,7 @@ function taskFromRow(row: TaskRow, columnGithubState: "open" | "closed" | null |
   }
   return {
     id: row.id,
+    key: row.key,
     projectId: row.project_id,
     columnId: row.column_id,
     swimlaneId: row.swimlane_id,
@@ -416,6 +420,7 @@ export function rowToRuntime(row: RuntimeRow): RuntimeWithTeam {
 
 export interface ForgeTaskRow {
   id: string;
+  key: string;
   runtime_id: string | null;
   project_id: string;
   document_type: "task" | "wiki";
@@ -437,10 +442,11 @@ export interface ForgeTaskRow {
 }
 
 export function rowToForgeTask(row: ForgeTaskRow): {
-  id: string; runtimeId: string | null; projectId: string; documentType: "task" | "wiki"; documentId: string; documentTitle: string; agentId: string; skillId: string; agentName: string; skillName: string; extraPrompt: string; selection: string; docContext: string; status: "queued" | "running" | "completed" | "failed" | "cancelled"; result: string | null; error: string | null; createdAt: string; startedAt: string | null; finishedAt: string | null;
+  id: string; key: string; runtimeId: string | null; projectId: string; documentType: "task" | "wiki"; documentId: string; documentTitle: string; agentId: string; skillId: string; agentName: string; skillName: string; extraPrompt: string; selection: string; docContext: string; status: "queued" | "running" | "completed" | "failed" | "cancelled"; result: string | null; error: string | null; createdAt: string; startedAt: string | null; finishedAt: string | null;
 } {
   return {
     id: row.id,
+    key: row.key,
     runtimeId: row.runtime_id,
     projectId: row.project_id,
     documentType: row.document_type,

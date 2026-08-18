@@ -93,6 +93,15 @@ describe("ProjectService.create", () => {
     const types = db.prepare("SELECT label FROM type_options WHERE project_id = ? ORDER BY position").all(created.id) as { label: string }[];
     expect(types.map((t) => t.label)).toEqual(["Feature", "Bug", "Task", "Asset"]);
   });
+
+  it("assigns a collision-resolved ticket key at creation", async () => {
+    const db = tmpDb();
+    const svc = makeService(db);
+    const a = await Effect.runPromise(svc.create({ name: "Web Client", slug: "web-client" }));
+    expect(a.key).toBe("WC");
+    const b = await Effect.runPromise(svc.create({ name: "Web Crawler", slug: "web-crawler" }));
+    expect(b.key).toBe("WCR");
+  });
 });
 
 describe("ProjectService.find", () => {
