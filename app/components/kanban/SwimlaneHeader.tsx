@@ -113,7 +113,14 @@ export function SwimlaneHeader({ slug, lane, count, collapsed = false, onToggle,
         {count !== undefined && <span className="swimlane-count">{String(count).padStart(3, "0")}</span>}
         {lane.kind === "sprint" && lane.startAt && lane.dueAt && !lane.archivedAt && (
           <span className="lane-dates">
-            {formatShortDate(lane.startAt)} → {formatShortDate(lane.dueAt)}
+            <span className="lane-dates-text">
+              {formatShortDate(lane.startAt)} → {formatShortDate(lane.dueAt)}
+            </span>
+            <span className="lane-dates-range" aria-hidden="true">
+              <span className="lane-dates-tick lane-dates-tick-start" />
+              <span className="lane-dates-line" />
+              <span className="lane-dates-tick lane-dates-tick-end" />
+            </span>
           </span>
         )}
         {due && lane.kind !== "backlog" && !lane.archivedAt && (

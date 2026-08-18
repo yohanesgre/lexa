@@ -90,10 +90,15 @@ describe("SwimlaneHeader", () => {
   it("sprint lane renders the progress pill and dates chip from the board", () => {
     // c1 is the done column; t1 sits in it → 1/1 done → green + Ready to archive
     const doneBoard: Board = { ...BOARD, columns: [{ id: "c1", projectId: "p1", name: "Done", position: 0, color: "", wipLimit: null, requiredFields: [], githubState: null, isDone: true }] };
-    render(<SwimlaneHeader slug="demo" lane={{ ...LANE, startAt: "2026-08-04", dueAt: "2026-08-25" }} count={1} board={doneBoard} onToggle={() => {}} />, { wrapper });
+    const { container } = render(<SwimlaneHeader slug="demo" lane={{ ...LANE, startAt: "2026-08-04", dueAt: "2026-08-25" }} count={1} board={doneBoard} onToggle={() => {}} />, { wrapper });
     expect(screen.getByText("1/1 done")).toBeInTheDocument();
     expect(screen.getByText("Ready to archive")).toBeInTheDocument();
     expect(screen.getByText("Aug 4 → Aug 25")).toBeInTheDocument();
+    // The dates chip carries the mini-gantt range strip: start tick · line · end tick
+    const range = container.querySelector(".lane-dates-range");
+    expect(range).not.toBeNull();
+    expect(range!.querySelectorAll(".lane-dates-tick")).toHaveLength(2);
+    expect(range!.querySelector(".lane-dates-line")).not.toBeNull();
   });
 
   it("sprint lane with partial progress shows the running pill and no Ready chip", () => {

@@ -70,6 +70,35 @@ describe("GanttChart", () => {
     expect(fill.style.width).toBe("100%");
   });
 
+  it("renders start/end range guidelines from the day header to each sprint's own row bottom", () => {
+    const { container } = render(<GanttChart {...PROPS} />);
+    const canvas = container.querySelector(".tl-canvas")!;
+    const guides = canvas.querySelectorAll(".tl-guideline");
+    // s1 + s2 (both have start+due) → 2 edges each; start-only/due-only contribute none
+    expect(guides).toHaveLength(4);
+    // aligned with s2's bar edges, offset by the label column (bars live in
+    // .tl-lane after the 264px label; canvas-level guidelines add LABEL_W)
+    const s2bar = screen.getByTitle(/s2/).closest(".tl-bar")! as HTMLElement;
+    const barLeft = parseFloat(s2bar.style.left);
+    const barRight = barLeft + parseFloat(s2bar.style.width);
+    const xs = [...guides].map((g) => parseFloat((g as HTMLElement).style.left)).sort((a, b) => a - b);
+    expect(xs).toContain(barLeft + 264);
+    expect(xs).toContain(barRight + 264);
+    // top reaches the day-number header row: canvas-relative −22 (64px header − 42px year+month rows)
+    for (const g of guides) {
+      expect((g as HTMLElement).style.top).toBe("-22px");
+    }
+    // bottoms are per-sprint: s1 (first sprint row) hangs lower than s2 (second)
+    const bottoms = [...guides].map((g) => parseFloat((g as HTMLElement).style.bottom));
+    expect(bottoms[0]).toBe(bottoms[1]); // s1's start/end pair
+    expect(bottoms[2]).toBe(bottoms[3]); // s2's pair
+    expect(bottoms[0]).toBeGreaterThan(bottoms[2]);
+    // no guidelines inside lanes — they live at the canvas level
+    for (const lane of canvas.querySelectorAll(".tl-lane")) {
+      expect(lane.querySelectorAll(".tl-guideline")).toHaveLength(0);
+    }
+  });
+
   it("renders a start-only bar and a due-only marker; unset lane absent from canvas", () => {
     render(<GanttChart {...PROPS} />);
     const startOnly = screen.getByTitle(/Start only/);

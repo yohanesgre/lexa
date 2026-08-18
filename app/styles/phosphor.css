@@ -4480,13 +4480,18 @@
    timeline gantt, swimlanes list page.
    ========================================================= */
 
-/* ---- Lane header: date range chip (sprint start_at → due_at) ---- */
+/* ---- Lane header: date range chip (sprint start_at → due_at) ----
+   Two-row chip: dates text on top, a mini-gantt range strip below —
+   accent ticks at both ends over a muted connector line. The strip is
+   decorative (aria-hidden in the app); the text stays the source of truth. */
 .lane-dates {
   display: inline-flex;
-  align-items: center;
-  height: 20px;
-  padding: 0 8px;
-  border-radius: 9999px;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 3px;
+  height: auto;
+  padding: 3px 8px 4px;
+  border-radius: 6px;
   border: 1px solid var(--lx-border-default);
   font-family: var(--lx-font-micro);
   font-size: 11px;
@@ -4495,6 +4500,27 @@
   margin-left: 10px;
   white-space: nowrap;
   flex-shrink: 0;
+}
+.lane-dates-text {
+  white-space: nowrap;
+}
+.lane-dates-range {
+  display: flex;
+  align-items: center;
+  height: 4px;
+}
+.lane-dates-line {
+  flex: 1;
+  height: 2px;
+  border-radius: 1px;
+  background: var(--lx-border-strong);
+}
+.lane-dates-tick {
+  width: 2px;
+  height: 5px;
+  flex-shrink: 0;
+  border-radius: 1px;
+  background: var(--lx-text-link);
 }
 
 /* ---- Lane header: sprint progress pill (X/Y done) ---- */
@@ -4917,6 +4943,21 @@
   background-size: 28px 100%;
 }
 .tl-lane.group { height: 56px; }
+/* Sprint range guidelines: thin dashed verticals at the bar's start and end
+   edges. Rendered at the canvas level with inline top/bottom: they span from
+   the DAY-NUMBER header row down to each sprint's own row bottom — never
+   into the year/month header rows, never past the sprint's row. Above the
+   bars (visible over the bar's left edge), below the TODAY line; never
+   captures pointer events. */
+.tl-guideline {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 0;
+  border-left: 1px dashed var(--lx-border-strong);
+  pointer-events: none;
+  z-index: 4;
+}
 .tl-bar {
   position: absolute;
   top: 0;

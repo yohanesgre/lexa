@@ -99,10 +99,10 @@ export function MilestonesPage({ slug, tab }: { slug: string; tab: "list" | "tim
       </div>
 
       <div className="ms-tabs">
-        <Link to="/$slug/milestones" params={{ slug }} search={{}} className={cn("ms-tab", tab === "list" && "active")}>
+        <Link to="/$slug/milestones" params={{ slug }} search={{}} activeProps={{ className: "" }} className={cn("ms-tab", tab === "list" && "active")}>
           Milestones
         </Link>
-        <Link to="/$slug/milestones" params={{ slug }} search={{ tab: "timeline" }} className={cn("ms-tab", tab === "timeline" && "active")}>
+        <Link to="/$slug/milestones" params={{ slug }} search={{ tab: "timeline" }} activeProps={{ className: "" }} className={cn("ms-tab", tab === "timeline" && "active")}>
           Timeline
         </Link>
       </div>
