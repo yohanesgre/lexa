@@ -158,7 +158,7 @@ export function TasksPage() {
 
   if (isLoading) {
     return (
-      <main className="page-frame">
+      <main className="page-frame page-frame-narrow">
         <div className="tasks-page">
           <div className="tasks-header">
             <div className="skeleton" style={{ width: 140, height: 22 }} />
@@ -176,7 +176,7 @@ export function TasksPage() {
   }
   if (error) {
     return (
-      <main className="page-frame">
+      <main className="page-frame page-frame-narrow">
         <div className="tasks-error">
           <div className="tasks-error-title">Failed to load tasks</div>
           <div className="tasks-error-sub">{(error as Error).message}</div>
@@ -187,12 +187,12 @@ export function TasksPage() {
       </main>
     );
   }
-  if (!board || !tasks) return <main className="page-frame"><div className="tasks-error">Project not found</div></main>;
+  if (!board || !tasks) return <main className="page-frame page-frame-narrow"><div className="tasks-error">Project not found</div></main>;
 
   const emptyProject = board.tasks.length === 0;
 
   return (
-    <main className="page-frame">
+    <main className="page-frame page-frame-narrow">
       <div className="tasks-page">
         <div className="tasks-header">
           <div>
@@ -297,9 +297,20 @@ export function TasksPage() {
                       </span>
                     </span>
                   )}
-                  <span className="task-row-where">
-                    {t.columnName} · {t.swimlaneName}
-                  </span>
+                <span className="task-row-where">
+                  {t.columnColor ? (
+                    <span
+                      className="task-row-where-chip"
+                      style={{ color: t.columnColor, background: `${t.columnColor}1a` }}
+                    >
+                      <span className="dot" style={{ background: t.columnColor }} />
+                      {t.columnName}
+                    </span>
+                  ) : (
+                    <span className="task-row-where-chip">{t.columnName}</span>
+                  )}
+                  <span>{t.swimlaneName}</span>
+                </span>
                 <span className="task-row-status">
                   {t.id === exactMatchId && (
                     <span className="task-chip type" style={{ color: "var(--lx-text-link)", borderColor: "var(--lx-text-link)" }}>
