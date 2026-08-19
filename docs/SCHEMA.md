@@ -10,12 +10,15 @@ CREATE TABLE projects (
   id          TEXT PRIMARY KEY,                              -- UUID (crypto.randomUUID())
   name        TEXT NOT NULL,
   slug        TEXT NOT NULL UNIQUE,                          -- duplicate → SlugTaken 409
+  key         TEXT,                                          -- ticket-key prefix (e.g. "NIM"); UNIQUE, nullable — backfilled at boot
+  next_task_number INTEGER NOT NULL DEFAULT 0,               -- per-project ticket counter (monotonic, never reused)
   description TEXT NOT NULL DEFAULT '',
   team_id     TEXT REFERENCES organization(id) ON DELETE SET NULL,  -- owning team; NULL = unassigned, superadmin-only until assigned
   created_at  TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at  TEXT NOT NULL DEFAULT (datetime('now'))        -- maintained by app on every UPDATE
 );
 CREATE INDEX idx_projects_team ON projects(team_id);
+CREATE UNIQUE INDEX idx_projects_key ON projects(key);
 
 -- ============================================================
 -- Project GitHub repos (roles per repo)
@@ -312,6 +315,8 @@ CREATE TABLE tasks (
   priority            TEXT NOT NULL DEFAULT 'medium',        -- label string — no FK
   type                TEXT NOT NULL DEFAULT 'task',          -- label string — no FK
   position            TEXT NOT NULL,                         -- fractional-index key
+  key                 TEXT,                                  -- ticket key "PREFIX-n" (e.g. "NIM-12"); nullable — backfilled at boot
+  number              INTEGER,                               -- per-project ticket number; UNIQUE(project_id, number) — never reused
   archived_at         TEXT,                                   -- NULL = live; set to datetime('now') on archive
                                                               -- archived tasks keep column/position and are excluded
                                                               -- from board/WIP/count queries unless includeArchived
@@ -324,6 +329,7 @@ CREATE TABLE tasks (
   created_at          TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at          TEXT NOT NULL DEFAULT (datetime('now'))   -- maintained by app
 );
+CREATE UNIQUE INDEX idx_tasks_project_number ON tasks(project_id, number);
 
 -- ============================================================
 -- Task GitHub Issues (multi-issue junction table)
@@ -711,7 +717,7 @@ CREATE INDEX idx_task_links_from ON task_links(from_task_id);
 CREATE INDEX idx_task_links_to   ON task_links(to_task_id);
 CREATE INDEX idx_task_links_proj ON task_links(project_id);
 
--- Task activity timeline + comments (docs/private/specs/ACTIVITY_COMMENTS.md)
+-- Task activity timeline + comments
 -- Append-only by design: rows are never pruned (contrast: webhook_events 7-day).
 -- INTEGER PRIMARY KEY: rowid is monotonic — second-granularity created_at ties
 -- order by id; UUID text ids would not order chronologically.
@@ -842,6 +848,9 @@ Priority and type are per-project option lists (`priority_options` / `type_optio
 `tasks.position` uses the `fractional-indexing` npm package (Workers-safe, ~2KB). The library exports `generateKeyBetween(a, b)` and `generateNKeysBetween(a, b, n)` only — define wrappers: `generateKeyAfter(x) = generateKeyBetween(x, null)`, `generateKeyBefore(x) = generateKeyBetween(null, x)`.
 
 Key generation is **deterministic** — regenerating with the same inputs yields the same key. Every retry path must therefore RE-READ the anchor rows before regenerating (the concurrent winner's row is now visible). The retry fires only on the `UNIQUE(column_id, position)` violation — never on FK/NOT NULL failures. At most one retry, then surface the error.
+
+### Task ticket keys — prefix + monotonic number, immutable once written
+Every project gets a ticket-key prefix (`projects.key`, unique — e.g. "NIM" from the slug, derived by `server/task-key.ts`), and every task gets a stable key `PREFIX-n` (`tasks.key`, e.g. "NIM-12") with a per-project monotonic `tasks.number` (`UNIQUE(project_id, number)`). Keys are written once at create, immutable, never reused — the counter `projects.next_task_number` advances atomically (read-modify-write with a uniqueness backstop). The columns are nullable only for the boot-time backfill (`server/db/task-keys-backfill.ts`); the app enforces non-null on write. `PREFIX-n` is accepted as a lookup alias wherever a task id is accepted.
 
 - **Create:** read last key in column → `generateKeyAfter(last)` → insert. On position conflict: re-read last, regenerate, insert.
 - **Move with neighbors** (`beforeTaskId`/`afterTaskId` given): read both neighbors (validated to be in the TARGET column of the same project) → `generateKeyBetween(before, after)`. Position is always reassigned on move — never carried over from the source column.
