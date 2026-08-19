@@ -128,7 +128,7 @@ function SetupWizard() {
           ))}
         </div>
 
-        <div className="bg-lx-surface-card border border-lx-border-subtle rounded-lg p-6">
+        <div className="card-panel">
           {/* Step 0 — Admin email */}
           {step === 0 && (
             <div>

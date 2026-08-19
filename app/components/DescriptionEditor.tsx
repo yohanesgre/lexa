@@ -155,7 +155,7 @@ export function DescriptionEditor({
           </div>
         </div>
       )}
-      <div style={{ display: "flex", alignItems: "center", borderBottom: "1px solid var(--lx-border-default)" }}>
+      <div style={{ display: "flex", alignItems: "center", background: "var(--lx-surface-card)", borderRadius: "6px 6px 0 0" }}>
         <Toolbar editor={editor} headingLevel={headingLevel} forge={forge} reviewActive={review !== null} appliedTaskId={appliedTaskId} rejectedTaskId={rejectedTaskId} onReview={handleReview} />
       </div>
       {review && (

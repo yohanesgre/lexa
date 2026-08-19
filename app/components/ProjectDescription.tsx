@@ -26,7 +26,7 @@ export function ProjectDescription({ description }: ProjectDescriptionProps) {
   if (!text) {
     return (
       <div className="mb-4">
-        <div className="bg-lx-surface-card border border-lx-border-default rounded-xl p-4">
+        <div className="card-panel">
           <div className="flex items-center justify-between mb-2.5">
             <span className="font-micro text-2xs text-lx-text-muted uppercase tracking-[0.04em]">About this project</span>
           </div>
@@ -38,7 +38,7 @@ export function ProjectDescription({ description }: ProjectDescriptionProps) {
 
   return (
     <div className="mb-4">
-      <div className="bg-lx-surface-card border border-lx-border-default rounded-xl p-4">
+      <div className="card-panel">
         <div className="flex items-center justify-between mb-2.5">
           <span className="font-micro text-2xs text-lx-text-muted uppercase tracking-[0.04em]">About this project</span>
         </div>

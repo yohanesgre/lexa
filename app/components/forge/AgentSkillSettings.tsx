@@ -49,7 +49,7 @@ export function AgentsSettingsSection() {
       ) : isError ? (
         <div className="text-sm text-lx-text-danger py-8 text-center">Failed to load agents.</div>
       ) : agents.length === 0 ? (
-        <div className="flex flex-col items-center gap-1.5 text-center mb-4" style={{ background: "var(--lx-surface-card)", border: "1px dashed var(--lx-border-strong)", borderRadius: 8, padding: 24 }}>
+        <div className="card-panel flex flex-col items-center gap-1.5 text-center mb-4" style={{ borderStyle: "dashed", borderColor: "var(--lx-border-strong)", padding: 24 }}>
           <div className="text-sm font-medium text-lx-text-primary mt-1">No agents yet</div>
           <p className="text-xs text-lx-text-secondary" style={{ maxWidth: 380 }}>
             Create one to tune what Forge sends to your runtimes. The builtin "Lexa" is seeded on a fresh install.
@@ -60,7 +60,7 @@ export function AgentsSettingsSection() {
           </button>
         </div>
       ) : (
-        <div style={{ background: "var(--lx-surface-card)", border: "1px solid var(--lx-border-default)", borderRadius: 8, overflow: "hidden" }}>
+        <div className="card-panel" style={{ overflow: "hidden" }}>
           <table className="settings-table">
             <thead>
               <tr><th>Name</th><th>Description</th><th>Skills</th><th>Builtin</th><th>Updated</th><th></th></tr>
@@ -148,7 +148,7 @@ export function SkillsSettingsSection() {
       ) : isError ? (
         <div className="text-sm text-lx-text-danger py-8 text-center">Failed to load skills.</div>
       ) : skills.length === 0 ? (
-        <div className="flex flex-col items-center gap-1.5 text-center mb-4" style={{ background: "var(--lx-surface-card)", border: "1px dashed var(--lx-border-strong)", borderRadius: 8, padding: 24 }}>
+        <div className="card-panel flex flex-col items-center gap-1.5 text-center mb-4" style={{ borderStyle: "dashed", borderColor: "var(--lx-border-strong)", padding: 24 }}>
           <div className="text-sm font-medium text-lx-text-primary mt-1">No skills yet</div>
           <p className="text-xs text-lx-text-secondary" style={{ maxWidth: 380 }}>
             Create an operation bundle (continue, rewrite, summarize…) and attach it to an agent to make it available in the Forge popover.
@@ -159,7 +159,7 @@ export function SkillsSettingsSection() {
           </button>
         </div>
       ) : (
-        <div style={{ background: "var(--lx-surface-card)", border: "1px solid var(--lx-border-default)", borderRadius: 8, overflow: "hidden" }}>
+        <div className="card-panel" style={{ overflow: "hidden" }}>
           <table className="settings-table">
             <thead>
               <tr><th>Name</th><th>Description</th><th>Used by</th><th>Builtin</th><th>Updated</th><th></th></tr>

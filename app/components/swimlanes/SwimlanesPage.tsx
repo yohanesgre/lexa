@@ -130,13 +130,6 @@ export function SwimlanesPage({ slug }: { slug: string }) {
             <option value="active">Active</option>
             <option value="archived">Archived</option>
           </select>
-          <button
-            type="button"
-            className={cn("tasks-archive-toggle", stateFilter === "archived" && "on")}
-            onClick={() => setStateFilter((v) => (v === "active" ? "archived" : "active"))}
-          >
-            Archived
-          </button>
         </div>
 
         {filtered.length === 0 && (
@@ -167,39 +160,50 @@ export function SwimlanesPage({ slug }: { slug: string }) {
               {g.label}
               <span className="sl-group-meta">{g.meta}</span>
             </div>
-            {g.lanes.map((lane) => (
-              <LaneRow
-                key={lane.id}
-                lane={lane}
-                board={board}
-                isAdmin={isAdmin}
-                onEdit={() => { setEditing(lane); setIsFormOpen(true); }}
-                onArchive={() => archiveSwimlane.mutate({ id: lane.id })}
-                onRestore={() => restoreSwimlane.mutate({ id: lane.id })}
-                onDelete={() => setDeleteTarget(lane)}
-              />
-            ))}
+            <div className="sl-grid">
+              {g.lanes.map((lane) => (
+                <LaneRow
+                  key={lane.id}
+                  lane={lane}
+                  board={board}
+                  isAdmin={isAdmin}
+                  onEdit={() => { setEditing(lane); setIsFormOpen(true); }}
+                  onArchive={() => archiveSwimlane.mutate({ id: lane.id })}
+                  onRestore={() => restoreSwimlane.mutate({ id: lane.id })}
+                  onDelete={() => setDeleteTarget(lane)}
+                />
+              ))}
+            </div>
           </div>
         ))}
 
         {stateFilter === "active" && backlog && (
           <div className="sl-group">
-            <div className="sl-row system">
-              <span className="sl-kind-chip backlog">Backlog</span>
-              <span className="sl-row-name">{backlog.name}</span>
-              <span className="dim" style={{ fontSize: 11, fontFamily: "var(--lx-font-micro)", marginLeft: 4, textTransform: "uppercase", letterSpacing: "0.04em" }}>
-                system lane
-              </span>
-              <span className="sl-row-actions">
-                <Link to="/$slug/tasks" params={{ slug }} search={{ swimlane: backlog.id }} className="sl-link-btn">
-                  View tasks
-                </Link>
-                {isAdmin && (
-                  <button type="button" className="btn btn-ghost btn-sm" onClick={() => { setEditing(backlog); setIsFormOpen(true); }}>
-                    Edit
-                  </button>
-                )}
-              </span>
+            <div className="sl-grid">
+              <div className="sl-row system">
+                <div className="sl-row-main">
+                  <span className="sl-kind-chip backlog">Backlog</span>
+                  <span className="sl-row-name">{backlog.name}</span>
+                  <span className="dim" style={{ fontSize: 11, fontFamily: "var(--lx-font-micro)", marginLeft: 4, textTransform: "uppercase", letterSpacing: "0.04em" }}>
+                    system lane
+                  </span>
+                </div>
+                <span className="sl-row-actions">
+                  <span className="ms-actions-left">
+                    <Link to="/$slug/tasks" params={{ slug }} search={{ swimlane: backlog.id }} className="sl-link-btn">
+                      View tasks
+                    </Link>
+                  </span>
+                  <span className="ms-actions-spacer" />
+                  <span className="ms-actions-right">
+                    {isAdmin && (
+                      <button type="button" className="btn btn-ghost btn-sm" onClick={() => { setEditing(backlog); setIsFormOpen(true); }}>
+                        Edit
+                      </button>
+                    )}
+                  </span>
+                </span>
+              </div>
             </div>
           </div>
         )}
@@ -209,18 +213,20 @@ export function SwimlanesPage({ slug }: { slug: string }) {
             <div className="font-micro text-2xs color-muted" style={{ textTransform: "uppercase", letterSpacing: "0.04em", marginBottom: 8 }}>
               Archived lanes
             </div>
-            {archivedLanes.map((lane) => (
-              <LaneRow
-                key={lane.id}
-                lane={lane}
-                board={board}
-                isAdmin={isAdmin}
-                onEdit={() => { setEditing(lane); setIsFormOpen(true); }}
-                onArchive={() => archiveSwimlane.mutate({ id: lane.id })}
-                onRestore={() => restoreSwimlane.mutate({ id: lane.id })}
-                onDelete={() => setDeleteTarget(lane)}
-              />
-            ))}
+            <div className="sl-grid">
+              {archivedLanes.map((lane) => (
+                <LaneRow
+                  key={lane.id}
+                  lane={lane}
+                  board={board}
+                  isAdmin={isAdmin}
+                  onEdit={() => { setEditing(lane); setIsFormOpen(true); }}
+                  onArchive={() => archiveSwimlane.mutate({ id: lane.id })}
+                  onRestore={() => restoreSwimlane.mutate({ id: lane.id })}
+                  onDelete={() => setDeleteTarget(lane)}
+                />
+              ))}
+            </div>
           </div>
         )}
       </div>
@@ -292,30 +298,38 @@ function LaneRow({ lane, board, isAdmin, onEdit, onArchive, onRestore, onDelete 
 
   return (
     <div className={cn("sl-row", !!lane.archivedAt && "archived")}>
-      <span className="sl-kind-chip">Sprint</span>
-      <span className="sl-row-name">{lane.name}</span>
-      {dateLabel ? (
-        <span className="sl-dates">{dateLabel}</span>
-      ) : (
-        <span className="sl-dates" style={{ color: "var(--lx-text-muted)" }}>no dates set</span>
-      )}
-      {!lane.archivedAt && p.total > 0 && <SprintProgress done={p.done} total={p.total} />}
+      <div className="sl-row-main">
+        <span className="sl-kind-chip">Sprint</span>
+        <span className="sl-row-name">{lane.name}</span>
+        {dateLabel ? (
+          <span className="sl-dates">{dateLabel}</span>
+        ) : (
+          <span className="sl-dates" style={{ color: "var(--lx-text-muted)" }}>no dates set</span>
+        )}
+        {!lane.archivedAt && p.total > 0 && <SprintProgress done={p.done} total={p.total} />}
+      </div>
+      {lane.description && <div className="sl-row-desc">{lane.description}</div>}
       <span className="sl-row-actions">
-        <Link to="/$slug/tasks" params={{ slug: board.project.slug }} search={{ swimlane: lane.id }} className="sl-link-btn">
-          View tasks
-        </Link>
-        {isAdmin && !lane.archivedAt && (
-          <>
-            <button type="button" className="btn btn-ghost btn-sm" onClick={onEdit}>Edit</button>
-            <button type="button" className="btn btn-ghost btn-sm" onClick={onArchive}>Archive</button>
-          </>
-        )}
-        {isAdmin && lane.archivedAt && (
-          <>
-            <button type="button" className="btn btn-ghost btn-sm" onClick={onRestore}>Restore</button>
-            <button type="button" className="btn btn-ghost btn-sm" style={{ color: "var(--lx-text-danger)" }} onClick={onDelete}>Delete</button>
-          </>
-        )}
+        <span className="ms-actions-left">
+          <Link to="/$slug/tasks" params={{ slug: board.project.slug }} search={{ swimlane: lane.id }} className="sl-link-btn">
+            View tasks
+          </Link>
+        </span>
+        <span className="ms-actions-spacer" />
+        <span className="ms-actions-right">
+          {isAdmin && !lane.archivedAt && (
+            <>
+              <button type="button" className="btn btn-ghost btn-sm" onClick={onEdit}>Edit</button>
+              <button type="button" className="btn btn-ghost btn-sm" onClick={onArchive}>Archive</button>
+            </>
+          )}
+          {isAdmin && lane.archivedAt && (
+            <>
+              <button type="button" className="btn btn-ghost btn-sm" onClick={onRestore}>Restore</button>
+              <button type="button" className="btn btn-ghost btn-sm" style={{ color: "var(--lx-text-danger)" }} onClick={onDelete}>Delete</button>
+            </>
+          )}
+        </span>
       </span>
     </div>
   );

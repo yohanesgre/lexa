@@ -55,7 +55,9 @@ describe("GanttChart", () => {
     expect(screen.getAllByText("s1")).toHaveLength(2);
     expect(screen.getByText("Loose sprints")).toBeInTheDocument();
     expect(screen.getByText("Backlog")).toBeInTheDocument();
-    expect(screen.getByText("Today")).toBeInTheDocument();
+    // The "Today" shortcut button (when today is off-screen in the test's 0-width
+    // wrap) plus the today line label both render the word "Today".
+    expect(screen.getAllByText("Today").length).toBeGreaterThanOrEqual(1);
     expect(screen.getByText("Milestone / Sprint")).toBeInTheDocument();
   });
 
@@ -153,5 +155,18 @@ describe("GanttChart", () => {
     fireEvent.pointerMove(edge, { clientX: 200 });
     fireEvent.pointerUp(edge);
     expect(onRescheduleLane).toHaveBeenCalledWith("s1", { startAt: "2026-08-04", dueAt: "2026-08-05" });
+  });
+
+  it("Today button scrolls the wrap so the today line centers", () => {
+    const scrollTo = vi.fn();
+    // jsdom has no layout: the wrap has zero width, so today is never
+    // "visible" and the shortcut always renders. The click must center the
+    // today line in the wrap.
+    render(<GanttChart {...PROPS} />);
+    const btn = screen.getByRole("button", { name: "Today" });
+    const wrap = btn.closest(".timeline-wrap")!;
+    Object.defineProperty(wrap, "scrollTo", { value: scrollTo, configurable: true });
+    fireEvent.click(btn);
+    expect(scrollTo).toHaveBeenCalledWith(expect.objectContaining({ behavior: "smooth" }));
   });
 });

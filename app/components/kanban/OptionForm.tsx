@@ -2,6 +2,7 @@ import { useEffect, useState, useEffectEvent } from "react";
 import { createPortal } from "react-dom";
 import { X } from "lucide-react";
 import { cn } from "../ui/cn";
+import { OPTION_COLORS } from "../../lib/option-colors";
 import type { FieldOption } from "../../../shared/types";
 
 export interface OptionFormProps {
@@ -13,18 +14,7 @@ export interface OptionFormProps {
   zIndex?: number;
 }
 
-const swatches: { value: string; label: string }[] = [
-  { value: "#FF4444", label: "Red" },
-  { value: "#FF8844", label: "Orange" },
-  { value: "#F0C040", label: "Amber" },
-  { value: "#A3E635", label: "Lime" },
-  { value: "#4ADE80", label: "Green" },
-  { value: "#22D3EE", label: "Cyan" },
-  { value: "#3B82F6", label: "Blue" },
-  { value: "#A78BFA", label: "Violet" },
-  { value: "#F472B6", label: "Pink" },
-  { value: "#6B6560", label: "Gray" },
-];
+const swatches: { value: string; label: string }[] = OPTION_COLORS;
 
 export function OptionForm({ kind, option, isOpen, onClose, onSubmit, zIndex = 80 }: OptionFormProps) {
   const isEdit = !!option;

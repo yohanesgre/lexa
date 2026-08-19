@@ -52,7 +52,7 @@ export function ColumnsSettingsSection({ columns, sensors, onDragEnd, onEdit, on
       {columns.length === 0 ? (
         <div className="text-sm text-lx-text-muted py-4">No columns configured.</div>
       ) : (
-        <div className="bg-lx-surface-card border border-lx-border rounded-lg overflow-hidden">
+        <div className="card-panel" style={{ overflow: "hidden" }}>
           <DndContext sensors={sensors} onDragEnd={onDragEnd}>
             <SortableContext items={columns.map((c) => c.id)} strategy={verticalListSortingStrategy}>
               <table className="w-full border-collapse text-[13px] font-body" style={{ tableLayout: "fixed" }}>

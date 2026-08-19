@@ -1,0 +1,5826 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Lexa — PHOSPHOR Design System</title>
+  <style>
+/* =========================================================
+   Lexa — PHOSPHOR Wireframe Styles
+   Shared CSS for all wireframe surfaces.
+   No framework. Hand-rolled to match DESIGN_SYSTEM.md exactly.
+   ========================================================= */
+
+/* ---- Font Imports ---- */
+@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600&family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;1,400&family=JetBrains+Mono:wght@400;500&family=Departure+Mono&display=swap');
+
+/* ---- CSS Custom Properties (PHOSPHOR Dark) ---- */
+:root {
+  --lx-surface-app: #0C0B09;
+  --lx-surface-elevated: #141210;
+  --lx-surface-column: #12100E;
+  --lx-surface-card: #1A1714;
+  --lx-surface-card-hover: #24201C;
+  --lx-surface-card-active: #2E2A24;
+  --lx-surface-card-dragging: #24201C;
+  --lx-surface-input: #0C0B09;
+  --lx-surface-overlay: rgba(12, 11, 9, 0.85);
+  --lx-surface-tooltip: #24201C;
+  --lx-surface-selected: rgba(240, 192, 64, 0.10);
+
+  --lx-border-default: #332E28;
+  --lx-border-subtle: #1A1714;
+  --lx-border-strong: #4A443D;
+  --lx-border-focus: #F0C040;
+
+  --lx-text-primary: #F5F0EB;
+  --lx-text-secondary: #948E88;
+  --lx-text-tertiary: #6B6560;
+  --lx-text-muted: #4A443D;
+  --lx-text-inverse: #12100E;
+  --lx-text-link: #F0C040;
+  --lx-text-link-hover: #F5D76A;
+  --lx-text-danger: #FF9999;
+  --lx-text-warning: #FCD34D;
+  --lx-text-success: #86EFAC;
+
+  --lx-bg-danger-subtle: rgba(255, 68, 68, 0.10);
+  --lx-bg-warning-subtle: rgba(240, 192, 64, 0.10);
+  --lx-bg-success-subtle: rgba(74, 222, 128, 0.10);
+  --lx-bg-accent-subtle: rgba(240, 192, 64, 0.10);
+
+  --lx-shadow-sm: 0 1px 2px rgba(12, 11, 9, 0.5);
+  --lx-shadow-md: 0 4px 12px rgba(12, 11, 9, 0.6);
+  --lx-shadow-lg: 0 12px 32px rgba(12, 11, 9, 0.7);
+  --lx-shadow-drag: 0 8px 24px rgba(12, 11, 9, 0.8), 0 0 0 1px rgba(240, 192, 64, 0.25);
+  --lx-shadow-slideover: -4px 0 24px rgba(12, 11, 9, 0.7);
+
+  --lx-focus-ring: 0 0 0 2px var(--lx-surface-app), 0 0 0 4px var(--lx-border-focus);
+  --lx-focus-glow: 0 0 12px rgba(240, 192, 64, 0.20);
+
+  --lx-scrollbar-track: var(--lx-surface-app);
+  --lx-scrollbar-thumb: #332E28;
+  --lx-scrollbar-thumb-hover: #4A443D;
+
+  --lx-font-display: "Space Grotesk", -apple-system, BlinkMacSystemFont, sans-serif;
+  --lx-font-body: "IBM Plex Sans", -apple-system, BlinkMacSystemFont, sans-serif;
+  --lx-font-mono: "JetBrains Mono", "SF Mono", "Fira Code", monospace;
+  --lx-font-micro: "Departure Mono", "JetBrains Mono", monospace;
+
+  --lx-ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --lx-ease-in-out: cubic-bezier(0.45, 0, 0.55, 1);
+}
+
+/* ---- Reset & Base ---- */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+html { font-size: 16px; }
+
+body {
+  font-family: var(--lx-font-body);
+  font-size: 14px;
+  line-height: 20px;
+  color: var(--lx-text-primary);
+  background: var(--lx-surface-app);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+a { color: var(--lx-text-link); text-decoration: none; }
+a:hover { color: var(--lx-text-link-hover); }
+
+/* ---- Scrollbar ---- */
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: var(--lx-scrollbar-track); }
+::-webkit-scrollbar-thumb { background: var(--lx-scrollbar-thumb); border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: var(--lx-scrollbar-thumb-hover); }
+
+/* ---- Typography Helpers ---- */
+.font-display { font-family: var(--lx-font-display); }
+.font-body    { font-family: var(--lx-font-body); }
+.font-mono    { font-family: var(--lx-font-mono); }
+.font-micro   { font-family: var(--lx-font-micro); }
+
+.text-2xs  { font-size: 11px; line-height: 14px; letter-spacing: 0.02em; }
+.text-xs   { font-size: 12px; line-height: 16px; }
+.text-sm   { font-size: 13px; line-height: 18px; letter-spacing: -0.01em; }
+.text-base { font-size: 14px; line-height: 20px; letter-spacing: -0.01em; }
+.text-md   { font-size: 15px; line-height: 22px; letter-spacing: -0.01em; }
+.text-lg   { font-size: 16px; line-height: 24px; letter-spacing: -0.02em; }
+.text-xl   { font-size: 18px; line-height: 26px; letter-spacing: -0.02em; }
+.text-2xl  { font-size: 24px; line-height: 30px; letter-spacing: -0.03em; }
+.text-3xl  { font-size: 30px; line-height: 36px; letter-spacing: -0.03em; }
+
+.weight-400 { font-weight: 400; }
+.weight-500 { font-weight: 500; }
+.weight-600 { font-weight: 600; }
+
+/* ---- Layout Primitives ---- */
+.flex { display: flex; }
+.flex-col { display: flex; flex-direction: column; }
+.items-center { align-items: center; }
+.items-end { align-items: flex-end; }
+.justify-between { justify-content: space-between; }
+.justify-center { justify-content: center; }
+.gap-1 { gap: 4px; }
+.gap-2 { gap: 8px; }
+.gap-3 { gap: 12px; }
+.gap-4 { gap: 16px; }
+.flex-1 { flex: 1; }
+.shrink-0 { flex-shrink: 0; }
+
+.p-2 { padding: 8px; }
+.p-3 { padding: 12px; }
+.p-4 { padding: 16px; }
+.p-5 { padding: 20px; }
+
+.py-2 { padding-top: 8px; padding-bottom: 8px; }
+.py-3 { padding-top: 12px; padding-bottom: 12px; }
+.px-3 { padding-left: 12px; padding-right: 12px; }
+.px-4 { padding-left: 16px; padding-right: 16px; }
+
+.mt-1 { margin-top: 4px; }
+.mt-2 { margin-top: 8px; }
+.mt-3 { margin-top: 12px; }
+.mt-4 { margin-top: 16px; }
+
+.mb-1 { margin-bottom: 4px; }
+.mb-2 { margin-bottom: 8px; }
+.mb-3 { margin-bottom: 12px; }
+.mb-4 { margin-bottom: 16px; }
+.mb-8 { margin-bottom: 32px; }
+
+.ml-1 { margin-left: 4px; }
+.ml-2 { margin-left: 8px; }
+.mr-1 { margin-right: 4px; }
+.mr-2 { margin-right: 8px; }
+
+/* ---- Colors ---- */
+.color-primary   { color: var(--lx-text-primary); }
+.color-secondary { color: var(--lx-text-secondary); }
+.color-tertiary  { color: var(--lx-text-tertiary); }
+.color-muted     { color: var(--lx-text-muted); }
+.color-link      { color: var(--lx-text-link); }
+.color-danger    { color: var(--lx-text-danger); }
+.color-warning   { color: var(--lx-text-warning); }
+.color-success   { color: var(--lx-text-success); }
+
+/* ---- Surfaces ---- */
+.bg-app      { background: var(--lx-surface-app); }
+.bg-elevated { background: var(--lx-surface-elevated); }
+.bg-column   { background: var(--lx-surface-column); }
+.bg-card     { background: var(--lx-surface-card); }
+.bg-card-hover { background: var(--lx-surface-card-hover); }
+.bg-input    { background: var(--lx-surface-input); }
+.bg-selected { background: var(--lx-surface-selected); }
+.bg-overlay  { background: var(--lx-surface-overlay); }
+
+/* ---- Borders ---- */
+.border-default { border: 1px solid var(--lx-border-default); }
+.border-subtle  { border: 1px solid var(--lx-border-subtle); }
+.border-strong  { border: 1px solid var(--lx-border-strong); }
+.border-focus   { border-color: var(--lx-border-focus); }
+
+.border-b-default { border-bottom: 1px solid var(--lx-border-default); }
+.border-b-subtle  { border-bottom: 1px solid var(--lx-border-subtle); }
+.border-l-focus   { border-left: 2px solid var(--lx-border-focus); }
+.border-r-default { border-right: 1px solid var(--lx-border-default); }
+.border-t-default { border-top: 1px solid var(--lx-border-default); }
+
+/* ---- Radius ---- */
+.r-sm  { border-radius: 4px; }
+.r-md  { border-radius: 6px; }
+.r-lg  { border-radius: 8px; }
+.r-xl  { border-radius: 12px; }
+.r-full { border-radius: 9999px; }
+
+/* ---- Shadows ---- */
+.shadow-sm { box-shadow: var(--lx-shadow-sm); }
+.shadow-md { box-shadow: var(--lx-shadow-md); }
+.shadow-lg { box-shadow: var(--lx-shadow-lg); }
+.shadow-drag { box-shadow: var(--lx-shadow-drag); }
+.shadow-slideover { box-shadow: var(--lx-shadow-slideover); }
+
+/* ---- Annotations (wireframe-only) ---- */
+.annotation {
+  font-family: var(--lx-font-micro);
+  font-size: 10px;
+  line-height: 12px;
+  color: var(--lx-border-focus);
+  opacity: 0.6;
+  letter-spacing: 0.04em;
+  pointer-events: none;
+  user-select: none;
+}
+
+.annotation-inline {
+  display: inline-block;
+  font-family: var(--lx-font-micro);
+  font-size: 10px;
+  line-height: 12px;
+  color: var(--lx-border-focus);
+  opacity: 0.55;
+  letter-spacing: 0.04em;
+  margin-left: 6px;
+  vertical-align: middle;
+}
+
+.annotation-tag {
+  display: inline-flex;
+  align-items: center;
+  font-family: var(--lx-font-micro);
+  font-size: 10px;
+  line-height: 12px;
+  color: var(--lx-border-focus);
+  background: rgba(240, 192, 64, 0.08);
+  border: 1px solid rgba(240, 192, 64, 0.15);
+  border-radius: 4px;
+  padding: 2px 5px;
+  letter-spacing: 0.04em;
+  pointer-events: none;
+  user-select: none;
+}
+
+.annotation-rail {
+  position: absolute;
+  left: 4px;
+  top: 50%;
+  transform: translateY(-50%);
+  font-family: var(--lx-font-micro);
+  font-size: 10px;
+  color: var(--lx-border-focus);
+  opacity: 0.5;
+  writing-mode: vertical-rl;
+  letter-spacing: 0.06em;
+  pointer-events: none;
+}
+
+/* ---- Avatar ---- */
+.avatar {
+  width: 20px;
+  height: 20px;
+  border-radius: 9999px;
+  background: var(--lx-surface-column);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  font-weight: 500;
+  color: var(--lx-text-secondary);
+  flex-shrink: 0;
+}
+
+/* ---- Badges ---- */
+.type-badge {
+  display: inline-flex;
+  align-items: center;
+  height: 18px;
+  padding: 0 6px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 500;
+  font-family: var(--lx-font-body);
+  line-height: 14px;
+}
+
+.type-feature { background: rgba(74, 222, 128, 0.10); color: #4ADE80; }
+.type-bug     { background: rgba(255, 68, 68, 0.10); color: #FF9999; }
+.type-task    { background: rgba(34, 211, 238, 0.10); color: #67E8F9; }
+.type-asset   { background: rgba(244, 114, 182, 0.10); color: #F9A8D4; }
+
+.wip-badge {
+  display: inline-flex;
+  align-items: center;
+  height: 20px;
+  padding: 0 6px;
+  border-radius: 4px;
+  font-family: var(--lx-font-micro);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 14px;
+}
+
+.wip-ok         { background: var(--lx-bg-success-subtle); color: var(--lx-text-success); }
+.wip-approaching{ background: var(--lx-bg-warning-subtle); color: var(--lx-text-warning); }
+.wip-exceeded   { background: var(--lx-bg-danger-subtle); color: var(--lx-text-danger); }
+
+.priority-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 9999px;
+  flex-shrink: 0;
+}
+.priority-urgent  { background: #FF4444; }
+.priority-high    { background: #F0C040; }
+.priority-medium  { background: #22D3EE; }
+.priority-low     { width: 6px; height: 6px; border: 2px solid #6B6560; background: transparent; }
+
+.priority-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 22px;
+  padding: 0 8px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 500;
+  font-family: var(--lx-font-body);
+}
+
+.pb-urgent   { background: var(--lx-bg-danger-subtle); color: var(--lx-text-danger); }
+.pb-high     { background: var(--lx-bg-warning-subtle); color: var(--lx-text-warning); }
+.pb-medium   { background: rgba(34, 211, 238, 0.10); color: #67E8F9; }
+.pb-low      { background: rgba(107, 101, 96, 0.10); color: #B8B2AB; }
+
+/* ---- Kanban Card ---- */
+/* ── Card primitives — density scale ────────────────────────────────────
+   Rows (6px) for dense lists/menus/selectable rows · Panels (12px) for
+   page-level sections · Tiles (12px) for navigation grids · Chips (4px).
+   Semantic classes (kanban-card, project-card, …) use these exact values. */
+.card-row {
+  background: var(--lx-surface-card);
+  border: 1px solid var(--lx-border-default);
+  border-radius: 6px;
+  padding: 8px 12px;
+  transition: background 100ms, border-color 100ms, box-shadow 100ms;
+}
+.card-row:hover {
+  background: var(--lx-surface-card-hover);
+  border-color: var(--lx-border-default);
+}
+.card-row.state-selected {
+  background: var(--lx-surface-selected);
+  box-shadow: var(--lx-focus-ring), var(--lx-focus-glow);
+}
+.card-row.state-dragging {
+  background: var(--lx-surface-card-dragging);
+  border-color: var(--lx-border-focus);
+  box-shadow: var(--lx-shadow-drag);
+  cursor: grabbing;
+}
+.card-row--dense {
+  padding: 4px 8px;
+}
+.card-panel {
+  background: var(--lx-surface-card);
+  border: 1px solid var(--lx-border-default);
+  border-radius: 12px;
+  padding: 16px;
+}
+.card-panel--elevated {
+  background: var(--lx-surface-elevated);
+}
+.card-tile {
+  background: var(--lx-surface-card);
+  border: 1px solid var(--lx-border-default);
+  border-radius: 12px;
+  padding: 16px;
+  transition: background 100ms, border-color 100ms;
+}
+.card-tile:hover {
+  background: var(--lx-surface-card-hover);
+  border-color: var(--lx-border-strong);
+}
+.card-tile:focus-visible {
+  outline: none;
+  box-shadow: var(--lx-focus-ring);
+}
+.chip {
+  display: inline-block;
+  background: var(--lx-surface-card);
+  border-radius: 4px;
+  padding: 2px 5px;
+  color: var(--lx-text-primary);
+}
+.kanban-card {
+  position: relative;
+  background: var(--lx-surface-card);
+  border: 1px solid var(--lx-border-subtle);
+  border-radius: 6px;
+  padding: 8px 12px;
+  cursor: grab;
+  transition: background 100ms, border-color 100ms, box-shadow 100ms;
+}
+
+.kanban-card:hover {
+  background: var(--lx-surface-card-hover);
+  border-color: var(--lx-border-default);
+  box-shadow: var(--lx-shadow-sm);
+}
+
+/* Subtask child card — indented under parent, slightly dimmed */
+.kanban-card-subtask {
+  margin-left: 16px;
+  opacity: 0.85;
+  cursor: grab;
+}
+
+.kanban-card.state-dragging {
+  background: var(--lx-surface-card-dragging);
+  border-color: var(--lx-border-focus);
+  box-shadow: var(--lx-shadow-drag);
+  opacity: 0.95;
+  transform: rotate(1deg) scale(1.01);
+  cursor: grabbing;
+}
+
+.kanban-card.state-selected {
+  background: var(--lx-surface-selected);
+  box-shadow: var(--lx-focus-ring), var(--lx-focus-glow);
+}
+
+/* Archived card: dimmed, non-interactive */
+.kanban-card.state-archived {
+  opacity: 0.45;
+  filter: saturate(0.4);
+  cursor: default;
+}
+.kanban-card.state-archived:hover {
+  background: var(--lx-surface-card);
+  border-color: var(--lx-border-subtle);
+  box-shadow: none;
+}
+
+/* Archived tag (inline chip on archived cards) */
+.archived-tag {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--lx-text-muted);
+  border: 1px solid var(--lx-border-subtle);
+  border-radius: 4px;
+  padding: 1px 6px;
+  white-space: nowrap;
+}
+
+.card-title {
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 20px;
+  color: var(--lx-text-primary);
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.task-key { font-family: var(--lx-font-mono); font-size: 14px; font-weight: 600; color: var(--lx-text-link); letter-spacing: 0.02em; }
+
+.card-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+}
+.card-meta-spacer {
+  flex: 1;
+}
+.card-assignees {
+  display: flex;
+  align-items: center;
+}
+.card-assignees .avatar {
+  position: relative;
+}
+.card-assignees .avatar:first-child { z-index: 3; }
+.card-assignees .avatar:nth-child(2) { z-index: 2; }
+.card-assignees .avatar:nth-child(3) { z-index: 1; }
+.card-assignees .avatar + .avatar {
+  margin-left: -6px;
+}
+.card-assignees-overflow {
+  width: 20px;
+  height: 20px;
+  font-size: 10px;
+  font-weight: 500;
+  font-family: var(--lx-font-micro);
+  color: var(--lx-text-secondary);
+  background: var(--lx-surface-column);
+  border-radius: 9999px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-left: 2px;
+  flex-shrink: 0;
+}
+.card-gh-overflow {
+  width: 20px;
+  height: 20px;
+  font-size: 10px;
+  font-weight: 500;
+  font-family: var(--lx-font-micro);
+  color: var(--lx-text-secondary);
+  background: var(--lx-surface-column);
+  border-radius: 9999px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.card-gh-issues {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.github-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-family: var(--lx-font-mono);
+  font-size: 11px;
+  color: var(--lx-text-secondary);
+  background: var(--lx-surface-column);
+  border-radius: 9999px;
+  padding: 1px 5px;
+}
+
+.github-badge svg {
+  width: 12px;
+  height: 12px;
+  stroke: currentColor;
+  stroke-width: 1.5;
+  fill: none;
+}
+
+.sync-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 9999px;
+  flex-shrink: 0;
+}
+.sync-synced   { background: var(--lx-text-success); }
+.sync-diverged { background: var(--lx-text-warning); }
+
+/* ---- Column ---- */
+.column {
+  width: 280px;
+  flex-shrink: 0;
+  background: var(--lx-surface-column);
+  border: 1px solid var(--lx-border-subtle);
+  border-radius: 8px;
+  display: flex;
+  flex-direction: column;
+  padding-bottom: 12px;
+  position: relative;
+}
+
+.column-strip {
+  height: 3px;
+  border-radius: 8px 8px 0 0;
+  flex-shrink: 0;
+}
+
+.column-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 44px;
+  padding: 0 12px;
+  flex-shrink: 0;
+}
+
+.column-header.has-cards {
+  border-bottom: 1px solid var(--lx-border-subtle);
+}
+
+.column-name {
+  font-size: 12px;
+  font-weight: 500;
+  font-family: var(--lx-font-body);
+  color: var(--lx-text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.column-count {
+  font-family: var(--lx-font-micro);
+  font-size: 11px;
+  color: var(--lx-text-muted);
+  margin-left: 6px;
+}
+
+
+.column-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px 10px 0;
+  overflow-y: auto;
+  flex: 1;
+}
+
+.add-task-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 32px;
+  width: 100%;
+  background: transparent;
+  border: none;
+  border-radius: 4px;
+  color: var(--lx-text-muted);
+  font-size: 13px;
+  font-family: var(--lx-font-body);
+  cursor: pointer;
+  margin-top: 4px;
+  transition: background 100ms;
+}
+.add-task-btn:hover { background: var(--lx-surface-card-hover); }
+
+/* ---- Swimlane ---- */
+.swimlane-header {
+  display: flex;
+  align-items: center;
+  height: 36px;
+  padding: 0 16px;
+  background: var(--lx-surface-elevated);
+  border: 1px solid var(--lx-border-default);
+  border-radius: 6px;
+  margin-bottom: 12px;
+  cursor: pointer;
+  transition: background 100ms;
+}
+.swimlane-header:hover { background: var(--lx-surface-card-hover); }
+
+.swimlane-name {
+  font-size: 13px;
+  font-weight: 500;
+  font-family: var(--lx-font-display);
+  color: var(--lx-text-primary);
+}
+
+.swimlane-count {
+  font-family: var(--lx-font-micro);
+  font-size: 11px;
+  color: var(--lx-text-muted);
+  margin-left: 8px;
+}
+
+.swimlane-desc {
+  font-size: 11px;
+  line-height: 16px;
+  color: var(--lx-text-secondary);
+  font-family: var(--lx-font-body);
+  margin-left: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 240px;
+  flex-shrink: 1;
+}
+.swimlane-desc-more {
+  font-size: 11px;
+  font-family: var(--lx-font-body);
+  color: var(--lx-text-link);
+  background: none;
+  border: none;
+  border-radius: 3px;
+  cursor: pointer;
+  padding: 1px 4px;
+  margin-left: 4px;
+  flex-shrink: 0;
+}
+.swimlane-desc-more:hover {
+  background: var(--lx-surface-card-hover);
+  text-decoration: underline;
+}
+
+/* ---- Milestone deadlines (swimlanes.due_at) ---- */
+.lane-due {
+  display: inline-flex;
+  align-items: center;
+  height: 20px;
+  padding: 0 8px;
+  border-radius: 9999px;
+  border: 1px solid rgba(252, 211, 77, 0.35);
+  font-family: var(--lx-font-body);
+  font-size: 11px;
+  line-height: 14px;
+  color: var(--lx-text-warning);
+  margin-left: 10px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.lane-due-overdue {
+  border-color: rgba(255, 68, 68, 0.45);
+  background: var(--lx-bg-danger-subtle);
+  color: var(--lx-text-danger);
+}
+
+/* ---- Card deadline chip (tasks.due_at) ---- */
+.card-due {
+  display: inline-flex;
+  align-items: center;
+  height: 20px;
+  padding: 0 8px;
+  border-radius: 9999px;
+  border: 1px solid rgba(252, 211, 77, 0.35);
+  font-family: var(--lx-font-body);
+  font-size: 11px;
+  line-height: 14px;
+  color: var(--lx-text-warning);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.card-due-overdue {
+  border-color: rgba(255, 68, 68, 0.45);
+  background: var(--lx-bg-danger-subtle);
+  color: var(--lx-text-danger);
+}
+
+/* ---- Backlog system lane: permanent, no deadline, no archive ---- */
+.swimlane-backlog {
+  opacity: 0.72;
+}
+
+/* ---- Archived milestone lanes ---- */
+.swimlane-archived {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 36px;
+  padding: 0 16px;
+  background: var(--lx-surface-elevated);
+  border: 1px dashed var(--lx-border-strong);
+  border-radius: 6px;
+  opacity: 0.55;
+}
+
+/* ---- Move-confirm dialog: clear-deadline checkbox ---- */
+.check-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--lx-text-secondary);
+  margin-top: 10px;
+  padding: 8px 12px;
+  border: 1px solid var(--lx-border-default);
+  border-radius: 6px;
+  background: var(--lx-surface-card);
+}
+
+.checkbox {
+  width: 14px;
+  height: 14px;
+  border: 1px solid var(--lx-border-strong);
+  border-radius: 3px;
+  background: var(--lx-surface-input);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.checkbox.checked {
+  border-color: var(--lx-border-focus);
+  background: var(--lx-border-focus);
+}
+.checkbox.checked::after {
+  content: "✓";
+  font-size: 10px;
+  color: var(--lx-surface-app);
+  font-weight: 700;
+}
+
+.chevron {
+  width: 14px;
+  height: 14px;
+  stroke: var(--lx-text-secondary);
+  stroke-width: 2;
+  fill: none;
+  margin-right: 6px;
+  flex-shrink: 0;
+}
+.chevron.collapsed { transform: rotate(-90deg); }
+
+/* ---- Board Layout ---- */
+.board-area {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  overflow: hidden;
+}
+
+.board-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 56px;
+  padding: 0 16px;
+  border-bottom: 1px solid var(--lx-border-default);
+  flex-shrink: 0;
+}
+
+.board-scroll {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 16px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  flex: 1;
+}
+
+.columns-row {
+  display: flex;
+  gap: 12px;
+}
+
+/* ---- Slideover ---- */
+.slideover {
+  position: fixed;
+  top: 0;
+  right: 0;
+  width: 480px;
+  height: 100vh;
+  background: var(--lx-surface-elevated);
+  border-left: 1px solid var(--lx-border-default);
+  box-shadow: var(--lx-shadow-slideover);
+  z-index: 50;
+  display: flex;
+  flex-direction: column;
+}
+
+.slideover.slideover-expanded {
+  width: calc(100vw - 48px);
+}
+
+.slideover-overlay {
+  position: fixed;
+  inset: 0;
+  background: var(--lx-surface-overlay);
+  z-index: 40;
+}
+
+.slideover-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 56px;
+  padding: 0 16px;
+  flex-shrink: 0;
+}
+
+.slideover-title {
+  font-size: 18px;
+  font-weight: 600;
+  font-family: var(--lx-font-display);
+  color: var(--lx-text-primary);
+  line-height: 26px;
+}
+
+.slideover-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 0 16px 16px;
+}
+
+.property-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--lx-border-subtle);
+  flex-wrap: wrap;
+}
+
+.prop-field {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.prop-label {
+  font-size: 11px;
+  font-family: var(--lx-font-micro);
+  color: var(--lx-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.prop-input {
+  height: 32px;
+  padding: 0 10px;
+  background: var(--lx-surface-input);
+  border: 1px solid var(--lx-border-default);
+  border-radius: 4px;
+  color: var(--lx-text-primary);
+  font-family: var(--lx-font-body);
+  font-size: 13px;
+  outline: none;
+}
+.prop-input:focus {
+  border-color: var(--lx-border-focus);
+  box-shadow: var(--lx-focus-glow);
+}
+
+.github-section {
+  border-top: 1px solid var(--lx-border-subtle);
+}
+
+/* GitHub issue rows — same flat bordered-row treatment as Links/Sources */
+.github-issue-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  border: 1px solid var(--lx-border-default);
+  border-radius: 6px;
+  background: var(--lx-surface-elevated);
+  margin-bottom: 4px;
+}
+.github-issue-row.github-warning {
+  background: var(--lx-bg-warning-subtle);
+  border: 1px solid rgba(240, 192, 64, 0.15);
+}
+
+.slideover-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 48px;
+  padding: 0 16px;
+  border-top: 1px solid var(--lx-border-subtle);
+  flex-shrink: 0;
+}
+
+/* ---- Wiki ---- */
+.wiki-layout {
+  display: flex;
+  height: 100vh;
+  overflow: hidden;
+}
+
+.wiki-sidebar {
+  width: 260px;
+  flex-shrink: 0;
+  background: var(--lx-surface-elevated);
+  border-right: 1px solid var(--lx-border-default);
+  padding: 16px 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+}
+
+.wiki-content {
+  flex: 1;
+  overflow-y: auto;
+  padding: 32px 48px;
+}
+
+.wiki-prose {
+  max-width: 720px;
+  margin: 0 auto;
+  font-size: 15px;
+  line-height: 26px;
+  color: var(--lx-text-primary);
+}
+
+.wiki-prose h1 {
+  font-size: 24px;
+  font-weight: 600;
+  font-family: var(--lx-font-display);
+  line-height: 30px;
+  letter-spacing: -0.03em;
+  margin-bottom: 16px;
+}
+
+.wiki-prose h2 {
+  font-size: 18px;
+  font-weight: 600;
+  font-family: var(--lx-font-display);
+  line-height: 26px;
+  letter-spacing: -0.02em;
+  margin-top: 32px;
+  margin-bottom: 12px;
+}
+
+.wiki-prose h3 {
+  font-size: 16px;
+  font-weight: 500;
+  font-family: var(--lx-font-display);
+  line-height: 24px;
+  letter-spacing: -0.02em;
+  margin-top: 24px;
+  margin-bottom: 8px;
+}
+
+.wiki-prose p {
+  margin-bottom: 12px;
+  color: var(--lx-text-primary);
+}
+
+.wiki-prose code {
+  font-family: var(--lx-font-mono);
+  font-size: 12px;
+  background: var(--lx-surface-elevated);
+  padding: 2px 4px;
+  border-radius: 4px;
+  color: var(--lx-text-secondary);
+}
+
+.wiki-prose pre {
+  background: var(--lx-surface-elevated);
+  border: 1px solid var(--lx-border-default);
+  border-radius: 6px;
+  padding: 12px 16px;
+  overflow-x: auto;
+  margin: 12px 0;
+}
+
+.wiki-prose pre code {
+  background: transparent;
+  padding: 0;
+}
+
+.wiki-prose table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 16px 0;
+  font-size: 13px;
+}
+
+.wiki-prose th,
+.wiki-prose td {
+  text-align: left;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--lx-border-default);
+}
+
+.wiki-prose th {
+  font-weight: 500;
+  color: var(--lx-text-secondary);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-family: var(--lx-font-body);
+}
+
+.wiki-prose ul,
+.wiki-prose ol {
+  margin: 8px 0 12px 20px;
+}
+
+.wiki-prose li {
+  margin-bottom: 4px;
+}
+
+.tree-item {
+  display: flex;
+  align-items: center;
+  height: 32px;
+  padding: 0 12px;
+  color: var(--lx-text-secondary);
+  font-size: 13px;
+  font-family: var(--lx-font-body);
+  border-radius: 4px;
+  margin: 0 8px;
+  cursor: pointer;
+  transition: background 100ms;
+}
+.tree-item:hover { background: var(--lx-surface-card-hover); }
+
+.tree-item.active {
+  color: var(--lx-text-primary);
+  font-weight: 500;
+  background: var(--lx-surface-selected);
+  border-left: 2px solid var(--lx-border-focus);
+  border-radius: 0 4px 4px 0;
+  margin-left: 6px;
+  padding-left: 10px;
+}
+
+.tree-item .chevron-small {
+  width: 12px;
+  height: 12px;
+  stroke: var(--lx-text-muted);
+  stroke-width: 2;
+  fill: none;
+  margin-right: 4px;
+  flex-shrink: 0;
+}
+
+.tree-indent-1 { padding-left: 28px; }
+.tree-indent-2 { padding-left: 44px; }
+.tree-indent-3 { padding-left: 60px; }
+
+/* ---- Dashboard ---- */
+.project-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 16px;
+}
+
+.project-cards {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 16px;
+}
+
+.project-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 16px;
+  background: var(--lx-surface-card);
+  border: 1px solid var(--lx-border-default);
+  border-radius: 12px;
+  color: inherit;
+  text-decoration: none;
+  cursor: pointer;
+  transition: background 100ms, border-color 100ms;
+}
+
+.project-card:hover {
+  background: var(--lx-surface-card-hover);
+  border-color: var(--lx-border-strong);
+}
+
+.project-card:focus-visible {
+  outline: none;
+  box-shadow: var(--lx-focus-ring);
+}
+
+.project-card-name {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 16px;
+  font-weight: 600;
+  font-family: var(--lx-font-display);
+  line-height: 22px;
+  letter-spacing: -0.02em;
+  color: var(--lx-text-primary);
+}
+
+.project-card-desc {
+  font-size: 13px;
+  line-height: 18px;
+  color: var(--lx-text-secondary);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.project-card-stats {
+  position: absolute;
+  bottom: 16px;
+  left: 20px;
+  font-family: var(--lx-font-micro);
+  font-size: 11px;
+  color: var(--lx-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.project-card-gh {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  color: var(--lx-text-muted);
+}
+.project-card-gh svg {
+  width: 14px;
+  height: 14px;
+  stroke: currentColor;
+  stroke-width: 1.5;
+  fill: none;
+}
+
+/* ---- Settings ---- */
+.settings-table {
+  width: 100%;
+  table-layout: fixed;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.settings-table th,
+.settings-table td {
+  text-align: left;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--lx-border-default);
+}
+
+.settings-table th {
+  font-weight: 500;
+  color: var(--lx-text-secondary);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-family: var(--lx-font-body);
+}
+
+.settings-table td {
+  color: var(--lx-text-primary);
+  font-family: var(--lx-font-body);
+}
+
+.color-swatch {
+  width: 14px;
+  height: 14px;
+  border-radius: 4px;
+  display: inline-block;
+  border: 1px solid var(--lx-border-default);
+}
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 14px;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 500;
+  font-family: var(--lx-font-body);
+  cursor: pointer;
+  border: 1px solid transparent;
+  transition: background 100ms, border-color 100ms;
+}
+
+.btn-primary {
+  background: var(--lx-border-focus);
+  color: var(--lx-text-inverse);
+}
+.btn-primary:hover { background: var(--lx-text-link-hover); }
+
+.btn-ghost {
+  background: transparent;
+  color: var(--lx-text-secondary);
+  border-color: var(--lx-border-default);
+}
+.btn-ghost:hover { background: var(--lx-surface-card-hover); }
+
+.btn-danger {
+  background: transparent;
+  color: var(--lx-text-danger);
+  border-color: var(--lx-border-default);
+}
+.btn-danger:hover { background: var(--lx-bg-danger-subtle); }
+
+/* Compact action buttons: consistent 28px height for paired Cancel/Save rows */
+.btn-sm {
+  height: 28px;
+  padding: 0 10px;
+  font-size: 12px;
+}
+.btn-icon-sm {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  flex-shrink: 0;
+}
+.btn-icon-sm svg {
+  width: 13px;
+  height: 13px;
+}
+
+/* ---- Nav / App Shell ---- */
+.app-nav {
+    display: flex;
+    align-items: center;
+    gap: 24px;
+    height: 48px;
+    padding: 0 16px;
+    border-bottom: 1px solid var(--lx-border-default);
+    background: var(--lx-surface-elevated);
+    flex-shrink: 0;
+  }
+  .nav-spacer {
+    flex: 1;
+  }
+  .nav-links {
+    display: flex;
+    align-items: center;
+    gap: 24px;
+  }
+  .nav-right {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+.nav-brand {
+    font-family: var(--lx-font-display);
+    font-size: 16px;
+    font-weight: 600;
+    color: var(--lx-text-primary);
+    letter-spacing: -0.02em;
+    text-decoration: none;
+  }
+
+.nav-brand.active {
+    color: var(--lx-text-link);
+    text-decoration: underline;
+    text-underline-offset: 4px;
+  }
+
+.nav-link {
+  font-size: 13px;
+  color: var(--lx-text-secondary);
+  font-family: var(--lx-font-body);
+  transition: color 100ms;
+}
+.nav-link:hover, .nav-link.active { color: var(--lx-text-primary); }
+
+.page-frame {
+  max-width: none;
+  margin: 0 auto;
+  padding: 32px 24px;
+}
+
+/* Form-heavy surfaces (settings) keep a readable line-length while the rest
+   of the app uses full width. */
+.page-frame-narrow {
+  max-width: 1200px;
+}
+
+/* ---- Checklist (TipTap style) ---- */
+.checklist {
+  list-style: none;
+  margin: 8px 0;
+  padding: 0;
+}
+
+.checklist li {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 4px 0;
+  font-size: 14px;
+  line-height: 20px;
+  color: var(--lx-text-primary);
+}
+
+.checklist li.checked {
+  color: var(--lx-text-muted);
+  text-decoration: line-through;
+}
+
+.checkbox {
+  width: 14px;
+  height: 14px;
+  border: 1px solid var(--lx-border-strong);
+  border-radius: 3px;
+  margin-top: 3px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.checkbox.checked {
+  background: var(--lx-border-focus);
+  border-color: var(--lx-border-focus);
+}
+
+.checkbox.checked::after {
+  content: "";
+  width: 6px;
+  height: 3px;
+  border-left: 1.5px solid var(--lx-text-inverse);
+  border-bottom: 1.5px solid var(--lx-text-inverse);
+  transform: rotate(-45deg) translateY(-1px);
+}
+
+/* ---- Responsive Note Block ---- */
+.responsive-note {
+  background: var(--lx-surface-elevated);
+  border: 1px solid var(--lx-border-default);
+  border-radius: 6px;
+  padding: 12px 16px;
+  margin-top: 16px;
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--lx-text-secondary);
+}
+.responsive-note strong {
+  color: var(--lx-text-primary);
+  font-weight: 500;
+}
+
+/* =========================================================
+   Wiki Extensions — added for wiki-* variant wireframes
+   (page menu, edit mode, empty, search results, not-found,
+   deep nesting, create modal, mobile)
+   ========================================================= */
+
+/* Context / dropdown menu (DS §8.2: DropdownMenuContent padding → 16px, radius-md, z-dropdown 30) */
+.menu {
+  min-width: 180px;
+  background: var(--lx-surface-elevated);
+  border: 1px solid var(--lx-border-default);
+  border-radius: 6px;
+  padding: 16px;
+  box-shadow: var(--lx-shadow-lg);
+  z-index: 30;
+}
+
+.menu-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 32px;
+  padding: 0 8px;
+  border-radius: 4px;
+  font-size: 13px;
+  font-family: var(--lx-font-body);
+  color: var(--lx-text-secondary);
+  cursor: pointer;
+  transition: background 100ms;
+}
+.menu-item:hover {
+  background: var(--lx-surface-card-hover);
+  color: var(--lx-text-primary);
+}
+.menu-item.active {
+  background: var(--lx-surface-selected);
+  color: var(--lx-text-primary);
+}
+.menu-item svg {
+  width: 14px;
+  height: 14px;
+  stroke: currentColor;
+  stroke-width: 1.5;
+  fill: none;
+  flex-shrink: 0;
+}
+.menu-item.danger { color: var(--lx-text-danger); }
+.menu-item.danger:hover { background: var(--lx-bg-danger-subtle); }
+
+.menu-separator {
+  height: 1px;
+  background: var(--lx-border-subtle);
+  margin: 4px 0;
+}
+
+/* Modal dialog — structural variant (header/body/footer) defined below in the
+   modal/empty-state additions block. Simple confirms use .dialog (component-confirm). */
+
+/* TipTap editor toolbar + editing surface */
+.editor-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 6px 8px;
+  background: var(--lx-surface-elevated);
+  border: 1px solid var(--lx-border-default);
+  border-radius: 6px 6px 0 0;
+}
+
+/* Two-row wiki toolbar host */
+.editor-toolbar.wiki-toolbar-host {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0;
+}
+
+.wiki-toolbar-row {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex-wrap: wrap;
+}
+
+.wiki-toolbar-row + .wiki-toolbar-row {
+  border-top: 1px solid var(--lx-border-default);
+  padding-top: 4px;
+  margin-top: 4px;
+}
+
+.toolbar-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 28px;
+  height: 28px;
+  padding: 0 6px;
+  gap: 4px;
+  background: transparent;
+  border: none;
+  border-radius: 4px;
+  color: var(--lx-text-secondary);
+  font-size: 12px;
+  font-weight: 600;
+  font-family: var(--lx-font-body);
+  cursor: pointer;
+  transition: background 100ms, color 100ms;
+}
+.toolbar-btn:hover { background: var(--lx-surface-card-hover); color: var(--lx-text-primary); }
+.toolbar-btn.active { background: var(--lx-surface-selected); color: var(--lx-text-link); }
+.toolbar-btn svg {
+  width: 14px;
+  height: 14px;
+  stroke: currentColor;
+  stroke-width: 1.5;
+  fill: none;
+}
+
+.toolbar-divider,
+.toolbar-sep {
+  width: 1px;
+  height: 16px;
+  background: var(--lx-border-default);
+  margin: 0 6px;
+  flex-shrink: 0;
+}
+
+.editor-area {
+  background: var(--lx-surface-input);
+  border: 1px solid var(--lx-border-default);
+  border-top: none;
+  border-radius: 0 0 6px 6px;
+  padding: 16px 20px;
+}
+
+/* Sidebar FTS search result item */
+.search-result {
+  display: block;
+  padding: 8px 12px;
+  margin: 0 8px 2px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background 100ms;
+}
+.search-result:hover { background: var(--lx-surface-card-hover); }
+
+/* FTS highlight (snippet marks) */
+mark {
+  background: rgba(240, 192, 64, 0.16);
+  color: var(--lx-text-warning);
+  border-radius: 2px;
+  padding: 0 2px;
+}
+
+/* Deeper page-tree indents (16px per level, continuing tree-indent-1..3) */
+.tree-indent-4 { padding-left: 76px; }
+.tree-indent-5 { padding-left: 92px; }
+
+/* Keep active page aligned at deep indents (.tree-item.active wins specificity over .tree-indent-*,
+   so each active indent needs the 2px left border deducted, matching base 12px → 10px) */
+.tree-item.active.tree-indent-1 { padding-left: 26px; }
+.tree-item.active.tree-indent-2 { padding-left: 42px; }
+.tree-item.active.tree-indent-3 { padding-left: 58px; }
+.tree-item.active.tree-indent-4 { padding-left: 74px; }
+.tree-item.active.tree-indent-5 { padding-left: 90px; }
+
+/* Wireframe-only: 375px device frame for mobile previews */
+.mobile-frame {
+  position: relative;
+  width: 375px;
+  height: 700px;
+  flex-shrink: 0;
+  background: var(--lx-surface-app);
+  border: 1px solid var(--lx-border-strong);
+  border-radius: 12px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+/* ---- Utility ---- */
+.line-clamp-2 {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.line-clamp-3 {
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.truncate {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* =========================================================
+   v2 — Reusable Component Patterns
+   Added for component-*.html + page-404.html wireframes:
+   light theme tokens, toasts, dialog, dropdown, skeleton,
+   empty state, icon button, mobile nav, theme pane.
+   ========================================================= */
+
+/* ---- Light Theme Tokens (DESIGN_SYSTEM.md §2.2, verbatim) ----
+   Inert unless an ancestor sets data-theme="light". */
+[data-theme="light"] {
+  --lx-surface-app: #F5F0EB;
+  --lx-surface-elevated: #FFFFFF;
+  --lx-surface-column: #EBE5DE;
+  --lx-surface-card: #FFFFFF;
+  --lx-surface-card-hover: #F5F0EB;
+  --lx-surface-card-active: #EBE5DE;
+  --lx-surface-card-dragging: #FFFFFF;
+  --lx-surface-input: #FFFFFF;
+  --lx-surface-overlay: rgba(26, 23, 20, 0.35);
+  --lx-surface-tooltip: #1A1714;
+  --lx-surface-selected: rgba(212, 160, 23, 0.10);
+
+  --lx-border-default: #DDD5CC;
+  --lx-border-subtle: #EBE5DE;
+  --lx-border-strong: #C4BAB0;
+  --lx-border-focus: #D4A017;
+
+  --lx-text-primary: #1A1714;
+  --lx-text-secondary: #5C554F;
+  --lx-text-tertiary: #7A7169;
+  --lx-text-muted: #9C9187;
+  --lx-text-inverse: #FFFFFF;
+  --lx-text-link: #B8931A;
+  --lx-text-link-hover: #D4A017;
+  --lx-text-danger: #991B1B;
+  --lx-text-warning: #92400E;
+  --lx-text-success: #166534;
+
+  --lx-bg-danger-subtle: rgba(220, 38, 38, 0.08);
+  --lx-bg-warning-subtle: rgba(212, 160, 23, 0.08);
+  --lx-bg-success-subtle: rgba(22, 163, 74, 0.08);
+  --lx-bg-accent-subtle: rgba(212, 160, 23, 0.08);
+
+  --lx-shadow-sm: 0 1px 2px rgba(26, 23, 20, 0.08);
+  --lx-shadow-md: 0 4px 12px rgba(26, 23, 20, 0.10);
+  --lx-shadow-lg: 0 12px 32px rgba(26, 23, 20, 0.14);
+  --lx-shadow-drag: 0 8px 24px rgba(26, 23, 20, 0.18), 0 0 0 1px rgba(212, 160, 23, 0.25);
+  --lx-shadow-slideover: -4px 0 24px rgba(26, 23, 20, 0.12);
+
+  --lx-focus-ring: 0 0 0 2px var(--lx-surface-app), 0 0 0 4px var(--lx-border-focus);
+  --lx-focus-glow: 0 0 12px rgba(212, 160, 23, 0.15);
+
+  --lx-scrollbar-track: var(--lx-surface-app);
+  --lx-scrollbar-thumb: #C4BAB0;
+  --lx-scrollbar-thumb-hover: #9C9187;
+}
+
+/* ---- Reduced Motion (DESIGN_SYSTEM.md §6.8, verbatim) ---- */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* ---- Nav Icon Button (32px nav chrome: hamburger, theme toggle) ----
+   Distinct from .icon-btn (24px kanban-header kebab, defined below).
+   Meets the 32px minimum touch target (§9). */
+.nav-icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border-radius: 6px;
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--lx-text-secondary);
+  cursor: pointer;
+  transition: background 100ms, color 100ms;
+}
+.nav-icon-btn:hover { background: var(--lx-surface-card-hover); color: var(--lx-text-primary); }
+.nav-icon-btn.active { color: var(--lx-border-focus); }
+.nav-icon-btn svg { width: 18px; height: 18px; stroke: currentColor; stroke-width: 1.5; fill: none; }
+
+/* ---- Toast (§6.2: enter 300ms slide from top-right, leave 150ms fade) ---- */
+.toast-stack {
+  position: fixed;
+  top: 16px;
+  right: 16px;
+  z-index: 60;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 360px;
+}
+
+.toast {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  background: var(--lx-surface-tooltip);
+  border: 1px solid var(--lx-border-default);
+  border-radius: 6px;
+  padding: 12px 14px;
+  box-shadow: var(--lx-shadow-lg);
+}
+
+.toast-success { border-left: 3px solid #4ADE80; }
+.toast-warning { border-left: 3px solid #F0C040; }
+.toast-error   { border-left: 3px solid #FF4444; }
+
+.toast-icon { flex-shrink: 0; margin-top: 1px; display: inline-flex; }
+.toast-icon svg { width: 16px; height: 16px; stroke: currentColor; stroke-width: 1.5; fill: none; }
+.toast-success .toast-icon { color: #4ADE80; }
+.toast-warning .toast-icon { color: #F0C040; }
+.toast-error   .toast-icon { color: #FF4444; }
+
+.toast-title { font-size: 13px; font-weight: 500; line-height: 18px; color: var(--lx-text-primary); }
+.toast-body  { font-size: 12px; line-height: 16px; color: var(--lx-text-secondary); margin-top: 2px; }
+
+.toast-close {
+  width: 20px;
+  height: 20px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  border-radius: 4px;
+  color: var(--lx-text-muted);
+  cursor: pointer;
+  flex-shrink: 0;
+  margin-left: auto;
+  transition: background 100ms, color 100ms;
+}
+.toast-close:hover { color: var(--lx-text-primary); background: var(--lx-surface-card-hover); }
+.toast-close svg { width: 12px; height: 12px; stroke: currentColor; stroke-width: 1.5; fill: none; }
+
+.toast-enter { animation: lx-toast-enter 300ms var(--lx-ease-out) both; }
+@keyframes lx-toast-enter {
+  from { transform: translateX(100%); opacity: 0; }
+  to   { transform: translateX(0);    opacity: 1; }
+}
+
+/* ---- Dialog (§6.2: modal 150ms scale + fade) ---- */
+.dialog {
+  width: 400px;
+  background: var(--lx-surface-elevated);
+  border: 1px solid var(--lx-border-default);
+  border-radius: 8px;
+  box-shadow: var(--lx-shadow-lg);
+  padding: 20px;
+}
+
+.dialog-enter { animation: lx-dialog-enter 150ms var(--lx-ease-out) both; }
+@keyframes lx-dialog-enter {
+  from { scale: 0.97; opacity: 0; }
+  to   { scale: 1;    opacity: 1; }
+}
+
+/* Solid danger button — canonical definition at end of file (single source). */
+
+/* ---- Empty State ---- */
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 48px 24px;
+}
+
+.empty-state-icon {
+  width: 48px;
+  height: 48px;
+  margin-bottom: 12px;
+  border-radius: 12px;
+  background: var(--lx-surface-card);
+  border: 1px solid var(--lx-border-default);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--lx-text-muted);
+}
+.empty-state-icon svg { width: 24px; height: 24px; stroke: currentColor; stroke-width: 1.5; fill: none; }
+
+/* ---- Loading Skeleton ----
+   Pulse mirrors the "alive like a CRT" feel at low contrast.
+   Reduced-motion media query above flattens it to static. */
+.skeleton {
+  background: var(--lx-surface-card-hover);
+  border-radius: 4px;
+  animation: lx-skeleton-pulse 1.6s var(--lx-ease-in-out) infinite;
+}
+.skeleton-circle { border-radius: 9999px; }
+@keyframes lx-skeleton-pulse {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.45; }
+}
+
+/* ---- Dropdown Menu ---- */
+.dropdown-menu {
+  min-width: 220px;
+  background: var(--lx-surface-elevated);
+  border: 1px solid var(--lx-border-default);
+  border-radius: 6px;
+  box-shadow: var(--lx-shadow-lg);
+  padding: 4px;
+}
+
+.dropdown-label {
+  font-family: var(--lx-font-micro);
+  font-size: 11px;
+  line-height: 14px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--lx-text-muted);
+  padding: 6px 10px 2px;
+}
+
+.dropdown-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 32px;
+  padding: 0 10px;
+  border-radius: 4px;
+  font-size: 13px;
+  font-family: var(--lx-font-body);
+  color: var(--lx-text-secondary);
+  cursor: pointer;
+}
+
+/* Forge status pill in the navbar (running / done states) */
+.forge-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 10px;
+  border-radius: 9999px;
+  font-family: var(--lx-font-body);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 100ms, border-color 100ms;
+}
+.dropdown-item svg { width: 16px; height: 16px; stroke: currentColor; stroke-width: 1.5; fill: none; flex-shrink: 0; }
+.dropdown-item:hover { background: var(--lx-surface-selected); color: var(--lx-text-primary); }
+
+/* Keyboard focus position — selected bg + phosphor focus ring (§6.7) */
+.dropdown-item.focused {
+  background: var(--lx-surface-selected);
+  color: var(--lx-text-primary);
+  box-shadow: var(--lx-focus-ring);
+}
+
+.dropdown-item.danger { color: var(--lx-text-danger); }
+.dropdown-item.danger:hover { background: var(--lx-bg-danger-subtle); }
+
+.dropdown-separator { height: 1px; background: var(--lx-border-subtle); margin: 4px 6px; }
+
+.dropdown-shortcut {
+  margin-left: auto;
+  font-family: var(--lx-font-mono);
+  font-size: 11px;
+  color: var(--lx-text-muted);
+}
+
+/* ---- Mobile Nav (≤768px breakpoint) ---- */
+.mobile-frame {
+  width: 390px;
+  border: 1px solid var(--lx-border-default);
+  border-radius: 12px;
+  overflow: hidden;
+  position: relative;
+  background: var(--lx-surface-app);
+  flex-shrink: 0;
+}
+
+.mobile-nav-panel {
+  position: absolute;
+  top: 48px;
+  left: 0;
+  right: 0;
+  background: var(--lx-surface-elevated);
+  border-bottom: 1px solid var(--lx-border-default);
+  box-shadow: var(--lx-shadow-lg);
+  padding: 8px;
+  z-index: 30;
+}
+
+.mobile-nav-link {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 40px;
+  padding: 0 12px;
+  border-radius: 6px;
+  font-size: 14px;
+  font-family: var(--lx-font-body);
+  color: var(--lx-text-secondary);
+  text-decoration: none;
+}
+.mobile-nav-link:hover { background: var(--lx-surface-card-hover); color: var(--lx-text-primary); }
+.mobile-nav-link.active {
+  background: var(--lx-surface-selected);
+  color: var(--lx-text-primary);
+  font-weight: 500;
+  box-shadow: inset 2px 0 0 var(--lx-border-focus);
+}
+.mobile-nav-link svg { width: 18px; height: 18px; stroke: currentColor; stroke-width: 1.5; fill: none; flex-shrink: 0; }
+
+/* ---- Theme Pane (theme-toggle demo shell) ---- */
+.theme-pane {
+  border: 1px solid var(--lx-border-default);
+  border-radius: 12px;
+  overflow: hidden;
+  background: var(--lx-surface-app);
+}
+
+/* =========================================================
+   ADDED (kanban state wireframes): dropdown menus, filter
+   UI, inline add-task form, mini option chips, icon buttons.
+   Used by kanban-column-menu / kanban-swimlane-menu /
+   kanban-filter / kanban-inline-add. All values route
+   through existing PHOSPHOR tokens above.
+   ========================================================= */
+
+/* ---- Popover / Dropdown Menu ---- */
+.menu-popover {
+  position: absolute;
+  min-width: 180px;
+  background: var(--lx-surface-elevated);
+  border: 1px solid var(--lx-border-default);
+  border-radius: 6px;
+  padding: 4px;
+  box-shadow: var(--lx-shadow-lg);
+  z-index: 30;
+}
+
+.menu-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 30px;
+  padding: 0 10px;
+  border-radius: 4px;
+  font-size: 13px;
+  font-family: var(--lx-font-body);
+  color: var(--lx-text-primary);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 100ms;
+}
+.menu-item:hover { background: var(--lx-surface-card-hover); }
+.menu-item.danger { color: var(--lx-text-danger); }
+.menu-item.danger:hover { background: var(--lx-bg-danger-subtle); }
+.menu-item svg {
+  width: 14px;
+  height: 14px;
+  stroke: currentColor;
+  stroke-width: 1.5;
+  fill: none;
+  flex-shrink: 0;
+}
+
+.menu-separator {
+  height: 1px;
+  background: var(--lx-border-subtle);
+  margin: 4px 6px;
+}
+
+/* ---- Icon button (header kebabs) ---- */
+.icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--lx-text-muted);
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background 100ms, color 100ms;
+}
+.icon-btn:hover { background: var(--lx-surface-card-hover); color: var(--lx-text-secondary); }
+.icon-btn.active { background: var(--lx-surface-card-hover); color: var(--lx-border-focus); }
+
+/* ---- Filter bar + active filter chips ---- */
+.filter-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 40px;
+  padding: 6px 16px;
+  border-bottom: 1px solid var(--lx-border-subtle);
+  flex-shrink: 0;
+}
+
+.filter-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 24px;
+  padding: 0 4px 0 8px;
+  background: var(--lx-surface-selected);
+  border: 1px solid rgba(240, 192, 64, 0.25);
+  border-radius: 4px;
+  font-size: 12px;
+  font-family: var(--lx-font-body);
+  color: var(--lx-text-primary);
+}
+
+.filter-chip-label { color: var(--lx-text-secondary); }
+
+/* Status chips (forge history filter): one segmented control, status color as identity */
+.status-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 24px;
+  padding: 0 10px;
+  background: transparent;
+  border: 1px solid var(--lx-border-default);
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 500;
+  font-family: var(--lx-font-body);
+  color: var(--lx-text-secondary);
+  cursor: pointer;
+}
+.status-chip:hover { background: var(--lx-surface-card-hover); }
+.status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.filter-chip-x {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border: none;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--lx-text-muted);
+  cursor: pointer;
+}
+.filter-chip-x:hover { color: var(--lx-text-danger); background: var(--lx-bg-danger-subtle); }
+.filter-chip-x svg {
+  width: 10px;
+  height: 10px;
+  stroke: currentColor;
+  stroke-width: 2;
+  fill: none;
+}
+
+/* ---- Assignee chip (task detail slideover) ---- */
+.assignee-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 4px 0 4px;
+  background: var(--lx-surface-elevated);
+  border: 1px solid var(--lx-border-default);
+  border-radius: 6px;
+  font-size: 13px;
+  font-family: var(--lx-font-body);
+  color: var(--lx-text-primary);
+}
+
+.assignee-chip .avatar {
+  width: 20px;
+  height: 20px;
+  font-size: 9px;
+}
+
+.assignee-chip-x {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--lx-text-muted);
+  cursor: pointer;
+}
+.assignee-chip-x:hover { color: var(--lx-text-danger); background: var(--lx-bg-danger-subtle); }
+.assignee-chip-x svg {
+  width: 12px;
+  height: 12px;
+  stroke: currentColor;
+  stroke-width: 1.5;
+  fill: none;
+}
+
+.assignee-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  align-items: center;
+}
+
+.assignee-add-input {
+  border: none;
+  background: transparent;
+  font-size: 13px;
+  font-family: var(--lx-font-body);
+  color: var(--lx-text-secondary);
+  outline: none;
+  min-width: 120px;
+  padding: 2px 4px;
+}
+.assignee-add-input::placeholder { color: var(--lx-text-muted); }
+.assignee-add-input:focus { color: var(--lx-text-primary); }
+
+/* ---- Filter popover rows ---- */
+.filter-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 5px 8px;
+}
+
+.filter-select {
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  height: 26px;
+  min-width: 128px;
+  padding: 0 8px;
+  background: var(--lx-surface-input);
+  border: 1px solid var(--lx-border-default);
+  border-radius: 4px;
+  font-size: 12px;
+  font-family: var(--lx-font-body);
+  color: var(--lx-text-tertiary);
+  cursor: pointer;
+  transition: border-color 100ms;
+}
+.filter-select:hover { border-color: var(--lx-border-strong); }
+.filter-select.has-value { color: var(--lx-text-primary); border-color: rgba(240, 192, 64, 0.35); }
+.filter-select svg {
+  width: 12px;
+  height: 12px;
+  stroke: currentColor;
+  stroke-width: 1.5;
+  fill: none;
+  flex-shrink: 0;
+}
+
+/* ---- Inline add-task form ---- */
+.inline-add-form {
+  background: var(--lx-surface-card);
+  border: 1px solid var(--lx-border-focus);
+  border-radius: 6px;
+  padding: 10px 12px;
+  box-shadow: var(--lx-focus-glow);
+}
+
+.inline-add-input {
+  width: 100%;
+  background: var(--lx-surface-input);
+  border: 1px solid var(--lx-border-default);
+  border-radius: 4px;
+  color: var(--lx-text-primary);
+  font-family: var(--lx-font-body);
+  font-size: 14px;
+  line-height: 20px;
+  padding: 6px 8px;
+  outline: none;
+}
+
+/* ---- Mini option chips (priority/type pickers) ---- */
+.option-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 22px;
+  min-width: 22px;
+  padding: 0 4px;
+  border-radius: 4px;
+  border: 1px solid transparent;
+  cursor: pointer;
+  transition: background 100ms;
+}
+.option-chip:hover { background: var(--lx-surface-card-hover); }
+.option-chip.selected {
+  background: var(--lx-surface-selected);
+  border-color: rgba(240, 192, 64, 0.35);
+}
+
+/* =========================================================
+   Additions for modal / empty-section wireframes
+   Used by: dashboard-new-project, settings-column-modal,
+   settings-api-key-reveal, settings-empty
+   Notes:
+   - Simple confirm dialogs use .dialog (see component-confirm)
+   - Empty states use .empty-state (see component-empty-state)
+   - Menus use .menu/.menu-item (see kanban-column-menu)
+   - Solid danger button: single .btn-danger-solid def at EOF
+   ========================================================= */
+
+/* ---- Modal / Dialog ----
+   440px centered dialog. Overlay reuses .slideover-overlay. */
+.modal {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 440px;
+  max-width: calc(100vw - 48px);
+  background: var(--lx-surface-elevated);
+  border: 1px solid var(--lx-border-default);
+  border-radius: 8px;
+  box-shadow: var(--lx-shadow-lg);
+  z-index: 50;
+  display: flex;
+  flex-direction: column;
+}
+
+.modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 56px;
+  padding: 0 16px;
+  border-bottom: 1px solid var(--lx-border-subtle);
+  flex-shrink: 0;
+}
+
+.modal-title {
+  font-family: var(--lx-font-display);
+  font-size: 16px;
+  font-weight: 500;
+  line-height: 24px;
+  letter-spacing: -0.02em;
+  color: var(--lx-text-primary);
+}
+
+.modal-body { padding: 16px; }
+
+.modal-footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 12px 16px;
+  border-top: 1px solid var(--lx-border-subtle);
+  flex-shrink: 0;
+}
+
+/* Compact dashed empty state for settings sections */
+.empty-box {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 32px 24px;
+  background: var(--lx-surface-card);
+  border: 1px dashed var(--lx-border-strong);
+  border-radius: 8px;
+  text-align: center;
+}
+
+/* ---- Form Fields (modal forms) ---- */
+.field { margin-bottom: 16px; }
+.field:last-child { margin-bottom: 0; }
+
+.field-label {
+  display: block;
+  font-size: 12px;
+  font-weight: 500;
+  font-family: var(--lx-font-body);
+  color: var(--lx-text-secondary);
+  margin-bottom: 6px;
+}
+
+.field-hint {
+  font-size: 11px;
+  line-height: 14px;
+  color: var(--lx-text-muted);
+  margin-top: 4px;
+}
+
+.w-full { width: 100%; }
+
+textarea.prop-input {
+  height: auto;
+  min-height: 72px;
+  padding: 8px 10px;
+  resize: vertical;
+  line-height: 18px;
+}
+
+/* ---- Swatch Picker (column color) ---- */
+.swatch-grid { display: flex; gap: 8px; flex-wrap: wrap; }
+
+.swatch-option {
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  border: 1px solid var(--lx-border-default);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.swatch-option.selected {
+  border-color: var(--lx-border-focus);
+  box-shadow: 0 0 0 2px var(--lx-surface-elevated), 0 0 0 4px var(--lx-border-focus);
+}
+
+/* ---- Checkbox rows (required fields multi-select) ---- */
+.check-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 8px;
+  font-size: 13px;
+  font-family: var(--lx-font-body);
+  color: var(--lx-text-primary);
+  cursor: pointer;
+}
+.check-row .checkbox { margin-top: 0; }
+.check-row .check-meta {   font-size: 11px;
+  color: var(--lx-text-secondary);
+}
+
+/* ---- Key Display (API key reveal) ---- */
+.key-display {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--lx-surface-input);
+  border: 1px solid var(--lx-border-default);
+  border-radius: 6px;
+  padding: 10px 12px;
+}
+.key-display code {
+  flex: 1;
+  font-family: var(--lx-font-mono);
+  font-size: 12px;
+  line-height: 16px;
+  color: var(--lx-text-primary);
+  word-break: break-all;
+}
+
+/* ---- Notice (inline warning/danger callout) ---- */
+.notice {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 6px;
+  font-size: 12px;
+  line-height: 16px;
+}
+.notice svg { width: 14px; height: 14px; flex-shrink: 0; margin-top: 1px; }
+.notice-warning { background: var(--lx-bg-warning-subtle); border: 1px solid rgba(240, 192, 64, 0.15); color: var(--lx-text-warning); }
+.notice-danger  { background: var(--lx-bg-danger-subtle);  border: 1px solid rgba(255, 68, 68, 0.15);  color: var(--lx-text-danger); }
+
+/* =========================================================
+   Task Detail state variants (added for task-detail-* wireframes)
+   ========================================================= */
+
+/* ---- TitleEditor input (inline title editing / create mode) ---- */
+.title-input {
+  width: 100%;
+  font-family: var(--lx-font-display);
+  font-size: 18px;
+  font-weight: 600;
+  line-height: 26px;
+  letter-spacing: -0.02em;
+  color: var(--lx-text-primary);
+  background: var(--lx-surface-input);
+  border: 1px solid var(--lx-border-default);
+  border-radius: 6px;
+  padding: 12px;
+  outline: none;
+}
+.title-input::placeholder {
+  color: var(--lx-text-muted);
+  font-weight: 400;
+}
+.title-input:focus,
+.title-input.is-focused {
+  border-color: var(--lx-border-focus);
+  box-shadow: var(--lx-focus-glow);
+}
+
+/* Static focus/open state for inputs in no-JS wireframes */
+.prop-input.is-focused {
+  border-color: var(--lx-border-focus);
+  box-shadow: var(--lx-focus-glow);
+}
+
+/* ---- Dropdown menu (open state) ---- */
+.dropdown-menu {
+  background: var(--lx-surface-elevated);
+  border: 1px solid var(--lx-border-default);
+  border-radius: 6px;
+  box-shadow: var(--lx-shadow-lg);
+  padding: 4px;
+  min-width: 160px;
+}
+
+.dropdown-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 32px;
+  padding: 0 10px;
+  border-radius: 4px;
+  font-size: 13px;
+  font-family: var(--lx-font-body);
+  color: var(--lx-text-secondary);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.dropdown-item:hover {
+  background: var(--lx-surface-card-hover);
+  color: var(--lx-text-primary);
+}
+.dropdown-item.active {
+  background: var(--lx-surface-selected);
+  color: var(--lx-text-primary);
+}
+
+/* ---- Confirmation dialog overlay (dims slideovers too) ----
+   The .dialog shell itself is defined once above (canonical, unpositioned);
+   wireframes center it with an explicit flex wrapper. */
+.dialog-overlay {
+  position: fixed;
+  inset: 0;
+  background: var(--lx-surface-overlay);
+  z-index: 60;
+}
+
+/* ---- Validation banner ---- */
+.banner-warning {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  background: var(--lx-bg-warning-subtle);
+  border: 1px solid rgba(240, 192, 64, 0.25);
+  border-radius: 6px;
+  color: var(--lx-text-warning);
+  font-size: 13px;
+  line-height: 18px;
+  font-family: var(--lx-font-body);
+}
+
+/* ---- Editor placeholder text ---- */
+.editor-placeholder {
+  color: var(--lx-text-muted);
+  font-size: 15px;
+  line-height: 22px;
+  font-family: var(--lx-font-body);
+}
+
+/* ---- Loading spinner (CSS-only) ---- */
+@keyframes lx-spin {
+  to { transform: rotate(360deg); }
+}
+
+.spinner {
+  width: 14px;
+  height: 14px;
+  border-radius: 9999px;
+  border: 2px solid rgba(148, 142, 136, 0.3);
+  border-top-color: var(--lx-border-focus);
+  animation: lx-spin 0.8s linear infinite;
+  flex-shrink: 0;
+}
+
+/* ---- Solid danger button (destructive confirmations) ---- */
+.btn-danger-solid {
+  background: #FF4444;
+  color: var(--lx-text-primary);
+  border-color: transparent;
+}
+.btn-danger-solid:hover { background: #E03A3A; }
+
+/* ---- Unlinked sync dot (completes sync-dot set per spec 2.5) ---- */
+.sync-unlinked { background: #6B6560; }
+
+/* =========================================================
+   Project Switcher
+   Replaces the static "Project: Name" label in .app-nav.
+   ========================================================= */
+
+.project-switcher {
+    position: relative;
+    display: inline-flex;
+  }
+
+/* Unified navbar pill — same geometry as the Forge status pill.
+   Used by: project switcher trigger, user profile trigger. */
+.nav-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 10px;
+  background: var(--lx-surface-card);
+  border: 1px solid var(--lx-border-default);
+  border-radius: 9999px;
+  font-family: var(--lx-font-body);
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--lx-text-secondary);
+  cursor: pointer;
+  transition: background 100ms, border-color 100ms, color 100ms;
+}
+
+.nav-pill:hover {
+  background: var(--lx-surface-card-hover);
+  border-color: var(--lx-border-strong);
+  color: var(--lx-text-primary);
+}
+
+.nav-pill:focus-visible {
+  outline: none;
+  box-shadow: var(--lx-focus-ring);
+}
+
+.nav-pill svg {
+  width: 10px;
+  height: 10px;
+  stroke: currentColor;
+  stroke-width: 1.5;
+  fill: none;
+  flex-shrink: 0;
+}
+
+.project-switcher-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  min-width: 220px;
+  max-width: 280px;
+  padding: 4px;
+}
+
+.project-switcher-row {
+  height: 40px;
+  padding: 0 10px;
+  justify-content: flex-start;
+  gap: 10px;
+}
+
+.project-switcher-row.active {
+  background: var(--lx-surface-selected);
+}
+
+.project-switcher-row-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.project-switcher-row-name {
+  font-size: 13px;
+  font-weight: 500;
+  font-family: var(--lx-font-body);
+  color: var(--lx-text-primary);
+  line-height: 18px;
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.project-switcher-row-desc {
+  font-size: 11px;
+  line-height: 14px;
+  color: var(--lx-text-muted);
+  font-family: var(--lx-font-body);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.project-switcher-row-count {
+  font-family: var(--lx-font-micro);
+  font-size: 11px;
+  line-height: 14px;
+  color: var(--lx-text-muted);
+  letter-spacing: 0.02em;
+  flex-shrink: 0;
+  margin-left: auto;
+}
+
+/* =========================================================
+   Dashboard Health Grid (dashboard.html)
+   Project health cards, WIP mini bars, aggregate stats,
+   and needs-attention lists.
+   ========================================================= */
+
+/* ---- Health Card ---- */
+.health-card {
+  height: auto;
+  min-height: 200px;
+  padding: 16px;
+}
+
+.health-card-status-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 12px;
+  flex-wrap: wrap;
+}
+
+.health-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 9999px;
+  flex-shrink: 0;
+}
+.health-dot-ok { background: var(--lx-text-success); }
+.health-dot-approaching { background: var(--lx-text-warning); }
+.health-dot-exceeded { background: var(--lx-text-danger); }
+
+.health-metric {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-family: var(--lx-font-micro);
+  font-size: 11px;
+  line-height: 14px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 4px;
+}
+.health-metric-urgent { color: var(--lx-text-danger); background: var(--lx-bg-danger-subtle); }
+.health-metric-sync { color: var(--lx-text-warning); background: var(--lx-bg-warning-subtle); }
+
+.wip-mini-bar {
+  display: flex;
+  gap: 3px;
+  height: 4px;
+  margin-top: 12px;
+  border-radius: 2px;
+  overflow: hidden;
+}
+.wip-mini-segment {
+  flex: 1;
+  min-width: 8px;
+  border-radius: 1px;
+}
+.wip-mini-segment-ok { background: var(--lx-text-success); }
+.wip-mini-segment-approaching { background: var(--lx-text-warning); }
+.wip-mini-segment-exceeded { background: var(--lx-text-danger); }
+.wip-mini-segment-empty { background: var(--lx-border-default); }
+
+.health-card-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: auto;
+  padding-top: 16px;
+}
+
+.health-card-stats {
+  font-family: var(--lx-font-micro);
+  font-size: 11px;
+  color: var(--lx-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.health-card-gh {
+  color: var(--lx-text-muted);
+}
+.health-card-gh svg {
+  width: 14px;
+  height: 14px;
+  stroke: currentColor;
+  stroke-width: 1.5;
+  fill: none;
+}
+
+/* ---- Aggregate Stats Bar ---- */
+.stats-bar {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 16px;
+}
+
+.stat-card {
+  background: var(--lx-surface-card);
+  border: 1px solid var(--lx-border-default);
+  border-radius: 12px;
+  padding: 20px;
+}
+
+.stat-label {
+  font-family: var(--lx-font-micro);
+  font-size: 11px;
+  color: var(--lx-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-bottom: 6px;
+}
+
+.stat-value {
+  font-family: var(--lx-font-display);
+  font-size: 36px;
+  font-weight: 600;
+  line-height: 40px;
+  color: var(--lx-text-primary);
+  letter-spacing: -0.03em;
+}
+
+.stat-value-danger { color: var(--lx-text-danger); }
+.stat-value-warning { color: var(--lx-text-warning); }
+
+/* ---- Column WIP Breakdown (dashboard project status view) ---- */
+.status-column-row {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--lx-border-subtle);
+}
+.status-column-row:last-child { border-bottom: none; }
+
+.status-column-name {
+  width: 160px;
+  flex-shrink: 0;
+  font-size: 13px;
+  font-weight: 500;
+  font-family: var(--lx-font-body);
+  color: var(--lx-text-primary);
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.status-column-count {
+  width: 88px;
+  flex-shrink: 0;
+  font-family: var(--lx-font-micro);
+  font-size: 11px;
+  line-height: 14px;
+  color: var(--lx-text-muted);
+  letter-spacing: 0.02em;
+}
+
+.status-bar {
+  flex: 1;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--lx-surface-elevated);
+  overflow: hidden;
+}
+
+.status-bar-fill {
+  display: block;
+  height: 100%;
+  border-radius: 2px;
+}
+
+.status-bar-ok { background: var(--lx-text-success); }
+.status-bar-approaching { background: var(--lx-text-warning); }
+.status-bar-exceeded { background: var(--lx-text-danger); }
+
+.status-badge {
+  flex-shrink: 0;
+  min-width: 84px;
+  text-align: center;
+  font-family: var(--lx-font-micro);
+  font-size: 10px;
+  line-height: 14px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid;
+}
+.status-badge-ok { color: var(--lx-text-success); border-color: rgba(134, 238, 172, 0.35); }
+.status-badge-approaching { color: var(--lx-text-warning); border-color: rgba(252, 211, 77, 0.35); }
+.status-badge-exceeded { color: var(--lx-text-danger); border-color: rgba(255, 153, 153, 0.4); }
+.status-badge-empty { color: var(--lx-text-muted); border-color: var(--lx-border-default); }
+
+/* ---- Needs Attention ---- */
+.attention-section {
+  margin-top: 32px;
+}
+
+.attention-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 16px;
+}
+
+.attention-card {
+  background: var(--lx-surface-card);
+  border: 1px solid var(--lx-border-default);
+  border-radius: 12px;
+  padding: 16px;
+}
+
+.attention-title {
+  font-family: var(--lx-font-display);
+  font-size: 16px;
+  font-weight: 500;
+  line-height: 24px;
+  color: var(--lx-text-primary);
+  margin-bottom: 12px;
+}
+
+.attention-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--lx-border-default);
+}
+.attention-item:last-child { border-bottom: none; }
+
+.attention-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 9999px;
+  flex-shrink: 0;
+  margin-top: 5px;
+}
+
+.attention-meta {
+  flex: 1;
+  min-width: 0;
+}
+
+.attention-task-title {
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 20px;
+  color: var(--lx-text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.attention-task-context {
+  font-size: 12px;
+  line-height: 16px;
+  color: var(--lx-text-secondary);
+  margin-top: 2px;
+}
+
+.attention-task-id {
+  font-family: var(--lx-font-mono);
+  font-size: 11px;
+  color: var(--lx-text-secondary);
+  flex-shrink: 0;
+}
+
+/* =========================================================
+   Wiki Edit Settings Sidebar
+   Right-hand panel inside the wiki content area.
+   ========================================================= */
+
+.wiki-edit-workspace {
+  display: flex;
+  padding: 0;
+  overflow: hidden;
+}
+
+.wiki-edit-main {
+  flex: 1;
+  overflow-y: auto;
+  padding: 32px 48px;
+  min-width: 0;
+}
+
+.wiki-edit-sidebar {
+  width: 280px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--lx-surface-elevated);
+  border-left: 1px solid var(--lx-border-default);
+  box-shadow: var(--lx-shadow-slideover);
+  overflow: hidden;
+}
+
+.wiki-edit-sidebar-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 48px;
+  padding: 0 12px 0 16px;
+  border-bottom: 1px solid var(--lx-border-subtle);
+  flex-shrink: 0;
+}
+
+.sidebar-section {
+  padding: 16px;
+  border-bottom: 1px solid var(--lx-border-subtle);
+}
+
+.sidebar-section:last-child {
+  border-bottom: none;
+}
+
+.sidebar-section-title {
+  display: block;
+  font-size: 12px;
+  font-weight: 500;
+  font-family: var(--lx-font-body);
+  color: var(--lx-text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: 12px;
+}
+
+/* Toggle switch */
+.toggle-switch {
+  width: 36px;
+  height: 20px;
+  border-radius: 9999px;
+  background: var(--lx-surface-card-hover);
+  border: 1px solid var(--lx-border-strong);
+  position: relative;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background 100ms, border-color 100ms;
+}
+
+.toggle-switch::after {
+  content: "";
+  position: absolute;
+  top: 1px;
+  left: 1px;
+  width: 16px;
+  height: 16px;
+  border-radius: 9999px;
+  background: var(--lx-text-secondary);
+  transition: transform 100ms, background 100ms;
+}
+
+.toggle-switch.is-on {
+  background: var(--lx-border-focus);
+  border-color: var(--lx-border-focus);
+}
+
+.toggle-switch.is-on::after {
+  transform: translateX(16px);
+  background: var(--lx-text-inverse);
+}
+
+/* Delay selector */
+.delay-selector {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+.delay-btn {
+  height: 24px;
+  padding: 0 8px;
+  border-radius: 4px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--lx-text-secondary);
+  font-family: var(--lx-font-mono);
+  font-size: 11px;
+  line-height: 14px;
+  cursor: pointer;
+  transition: background 100ms, border-color 100ms, color 100ms;
+}
+
+.delay-btn:hover {
+  background: var(--lx-surface-card-hover);
+  color: var(--lx-text-primary);
+}
+
+.delay-btn.is-active {
+  background: var(--lx-surface-selected);
+  border-color: rgba(240, 192, 64, 0.35);
+  color: var(--lx-text-primary);
+}
+
+/* Version history list */
+.history-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 240px;
+  overflow-y: auto;
+  margin-bottom: 12px;
+}
+
+.history-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: 4px;
+  border-left: 2px solid transparent;
+  cursor: pointer;
+  transition: background 100ms;
+}
+
+.history-item:hover {
+  background: var(--lx-surface-card-hover);
+}
+
+.history-item.active {
+  background: var(--lx-surface-selected);
+  border-left-color: var(--lx-border-focus);
+}
+
+.history-badge {
+  display: inline-flex;
+  align-items: center;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 3px;
+  font-family: var(--lx-font-micro);
+  font-size: 10px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  flex-shrink: 0;
+}
+
+.history-badge-auto {
+  background: rgba(34, 211, 238, 0.10);
+  color: #67E8F9;
+}
+
+.history-badge-manual {
+  background: rgba(240, 192, 64, 0.10);
+  color: #FCD34D;
+}
+
+.history-actions {
+  display: flex;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.history-empty {
+  padding: 24px 16px;
+  text-align: center;
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--lx-text-muted);
+  font-family: var(--lx-font-body);
+}
+
+/* =========================================================
+   Task Activity tab (task-detail.html — timeline + comments)
+   Same flat language as status-chip / assignee-chip: 6px
+   radii, PHOSPHOR tokens only, 11–14px type.
+   ========================================================= */
+
+/* ---- Tab bar: segmented control under the property bar ---- */
+.tab-bar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 10px 16px 0;
+  border-bottom: 1px solid var(--lx-border-subtle);
+  flex-shrink: 0;
+}
+
+.tab-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 26px;
+  padding: 0 12px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: transparent;
+  font-size: 12px;
+  font-weight: 500;
+  font-family: var(--lx-font-body);
+  color: var(--lx-text-secondary);
+  cursor: pointer;
+  transition: background 100ms, color 100ms, border-color 100ms;
+}
+.tab-btn:hover { background: var(--lx-surface-card-hover); color: var(--lx-text-primary); }
+.tab-btn.active {
+  background: var(--lx-surface-selected);
+  border-color: var(--lx-border-focus);
+  color: var(--lx-text-primary);
+}
+
+/* ---- Activity panel ---- */
+.activity-panel {
+  padding-top: 8px;
+  display: flex;
+  flex-direction: column;
+}
+
+/* ---- Timeline rows + vertical step rail ---- */
+.activity-timeline {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Vertical step rail — one continuous line through all step markers.
+   Starts at the first marker's center (no segment above the first step),
+   ends at the last marker's center (no dangling tail). Markers — event
+   dots, comment avatars — share the same 24px rail column, centered on
+   this line. The "Load older" button sits above the rail start. */
+.activity-rail {
+  position: absolute;
+  left: 12px;         /* center of the 24px rail column */
+  top: 16px;          /* first marker center — "created" event dot */
+  bottom: 24px;       /* last marker center — author comment avatar */
+  width: 2px;
+  margin-left: -1px;
+  background: var(--lx-border-subtle);
+  pointer-events: none;
+}
+
+/* "Load older" ghost button — keyset cursor pagination */
+.load-older {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  width: 100%;
+  height: 28px;
+  margin: 2px 0 4px;
+  background: transparent;
+  border: 1px dashed var(--lx-border-strong);
+  border-radius: 6px;
+  color: var(--lx-text-secondary);
+  font-size: 12px;
+  font-family: var(--lx-font-body);
+  cursor: pointer;
+  transition: background 100ms, color 100ms;
+}
+.load-older:hover { background: var(--lx-surface-card-hover); color: var(--lx-text-primary); }
+
+.activity-row {
+  display: flex;
+  gap: 10px;
+  padding: 7px 0;
+}
+
+.activity-dot {
+  width: 24px;          /* shares the rail column with comment avatars */
+  flex-shrink: 0;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: 2px;     /* keeps the marker centered on the rail line */
+  color: var(--lx-text-muted);
+}
+.activity-dot svg {
+  width: 14px;
+  height: 14px;
+  stroke: currentColor;
+  stroke-width: 1.5;
+  fill: none;
+  flex-shrink: 0;
+}
+.activity-dot-core {
+  width: 8px;
+  height: 8px;
+  border-radius: 9999px;
+  background: var(--lx-text-muted);
+  margin-top: 3px;
+  flex-shrink: 0;
+}
+.activity-dot-agent { color: var(--lx-text-warning); }
+
+/* Markers sit above the rail — opaque, they cover the line where they cross */
+.activity-row .activity-dot,
+.comment-card .avatar {
+  position: relative;
+  z-index: 1;
+}
+
+/* Step hover: row highlight + marker brighten (existing hover language) */
+.activity-row:hover,
+.comment-card:hover {
+  background: var(--lx-surface-card-hover);
+}
+.activity-row:hover .activity-dot-core { background: var(--lx-text-secondary); }
+
+.activity-body {
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
+  line-height: 18px;
+  font-family: var(--lx-font-body);
+  color: var(--lx-text-secondary);
+}
+.activity-msg { color: var(--lx-text-secondary); }
+.activity-time {
+  color: var(--lx-text-muted);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+/* ---- Agent attribution ---- */
+.agent-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-family: var(--lx-font-micro);
+  color: var(--lx-text-warning);
+  background: var(--lx-bg-warning-subtle);
+  border: 1px solid rgba(240, 192, 64, 0.25);
+  border-radius: 4px;
+  padding: 1px 5px;
+  flex-shrink: 0;
+}
+.agent-tag svg {
+  width: 10px;
+  height: 10px;
+  stroke: currentColor;
+  stroke-width: 1.5;
+  fill: none;
+}
+.agent-label {
+  font-family: var(--lx-font-mono);
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--lx-text-primary);
+}
+.agent-keyhint {
+  font-size: 11px;
+  font-style: italic;
+  color: var(--lx-text-muted);
+}
+
+/* ---- Comment cards ---- */
+.comment-card {
+  display: flex;
+  gap: 10px;
+  padding: 12px 0;
+}
+.comment-card .avatar {
+  width: 24px;
+  height: 24px;
+  font-size: 10px;
+}
+
+.agent-avatar {
+  background: var(--lx-bg-warning-subtle);
+  border: 1px solid rgba(240, 192, 64, 0.25);
+  color: var(--lx-text-warning);
+  border-radius: 9999px;
+}
+.agent-avatar svg {
+  width: 12px;
+  height: 12px;
+  stroke: currentColor;
+  stroke-width: 1.5;
+  fill: none;
+}
+
+.comment-content {
+  flex: 1;
+  min-width: 0;
+}
+
+.comment-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.comment-author {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--lx-text-primary);
+  white-space: nowrap;
+}
+.comment-time {
+  font-size: 11px;
+  color: var(--lx-text-muted);
+  white-space: nowrap;
+}
+.comment-edited {
+  font-size: 11px;
+  font-style: italic;
+  color: var(--lx-text-muted);
+  white-space: nowrap;
+}
+
+/* Author/admin actions — revealed on row hover */
+.comment-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: auto;
+  opacity: 0;
+  transition: opacity 100ms;
+  flex-shrink: 0;
+}
+.comment-actions.visible { opacity: 1; }
+.comment-card:hover .comment-actions { opacity: 1; }
+
+/* TipTap-rendered comment body */
+.comment-text {
+  margin-top: 4px;
+  font-size: 14px;
+  line-height: 21px;
+  color: var(--lx-text-secondary);
+  font-family: var(--lx-font-body);
+}
+.comment-text p { margin-bottom: 6px; color: var(--lx-text-primary); }
+.comment-text p:last-child { margin-bottom: 0; }
+.comment-text ul,
+.comment-text ol {
+  margin: 4px 0 8px 18px;
+  padding: 0;
+}
+.comment-text li { margin-bottom: 2px; }
+.comment-text strong { color: var(--lx-text-primary); font-weight: 600; }
+.comment-text code {
+  font-family: var(--lx-font-mono);
+  font-size: 12px;
+  background: var(--lx-surface-elevated);
+  padding: 1px 4px;
+  border-radius: 4px;
+  color: var(--lx-text-secondary);
+}
+
+/* Mention chip — render-time highlight over project member names */
+.mention-chip {
+  display: inline;
+  background: var(--lx-surface-selected);
+  border-radius: 4px;
+  padding: 1px 4px;
+  color: var(--lx-text-link);
+  font-weight: 500;
+}
+
+/* ---- Composer (pinned at the bottom of the timeline) ---- */
+.composer {
+  margin-top: 12px;
+  border: 1px solid var(--lx-border-default);
+  border-radius: 6px;
+  background: var(--lx-surface-input);
+  transition: border-color 100ms, box-shadow 100ms;
+}
+.composer:focus-within {
+  border-color: var(--lx-border-focus);
+  box-shadow: var(--lx-focus-glow);
+}
+
+.composer-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 4px 6px;
+  border-bottom: 1px solid var(--lx-border-subtle);
+}
+
+.composer-editor {
+  padding: 10px 12px;
+  min-height: 64px;
+  font-size: 14px;
+  line-height: 20px;
+  color: var(--lx-text-primary);
+  font-family: var(--lx-font-body);
+  outline: none;
+}
+.composer-editor:empty::before {
+  content: attr(data-placeholder);
+  color: var(--lx-text-muted);
+}
+
+.composer-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 10px;
+  border-top: 1px solid var(--lx-border-subtle);
+}
+
+/* =========================================================
+   Tasks List (tasks.html)
+   Per-project flat task list: header, filter bar, rows,
+   empty/no-match/error states, archived toggle.
+   ========================================================= */
+
+.tasks-page {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.tasks-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.tasks-title {
+  font-family: var(--lx-font-display);
+  font-size: 24px;
+  font-weight: 600;
+  line-height: 30px;
+  letter-spacing: -0.03em;
+  color: var(--lx-text-primary);
+}
+
+.tasks-sub {
+  font-family: var(--lx-font-micro);
+  font-size: 11px;
+  line-height: 14px;
+  color: var(--lx-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-top: 4px;
+}
+
+.tasks-filter {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.tasks-search {
+  flex: 1;
+  min-width: 200px;
+  height: 28px;
+  padding: 0 10px;
+  background: var(--lx-surface-input);
+  border: 1px solid var(--lx-border-default);
+  border-radius: 4px;
+  color: var(--lx-text-primary);
+  font-family: var(--lx-font-body);
+  font-size: 13px;
+  outline: none;
+  transition: border-color 100ms;
+}
+.tasks-search::placeholder { color: var(--lx-text-muted); }
+.tasks-search:focus { border-color: var(--lx-border-focus); }
+
+.tasks-select {
+  height: 28px;
+  max-width: 140px;
+  padding: 0 8px;
+  background: var(--lx-surface-input);
+  border: 1px solid var(--lx-border-default);
+  border-radius: 4px;
+  color: var(--lx-text-secondary);
+  font-family: var(--lx-font-body);
+  font-size: 12px;
+  cursor: pointer;
+  transition: border-color 100ms;
+}
+.tasks-select:hover { border-color: var(--lx-border-strong); }
+
+.tasks-archive-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 10px;
+  background: transparent;
+  border: 1px solid var(--lx-border-default);
+  border-radius: 4px;
+  color: var(--lx-text-secondary);
+  font-family: var(--lx-font-body);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 100ms, border-color 100ms;
+}
+.tasks-archive-toggle:hover { background: var(--lx-surface-card-hover); }
+.tasks-archive-toggle.on {
+  color: var(--lx-text-primary);
+  border-color: rgba(240, 192, 64, 0.35);
+  background: var(--lx-bg-accent-subtle);
+}
+
+.tasks-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.task-row {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+  width: 100%;
+  padding: 12px 16px;
+  background: var(--lx-surface-card);
+  border: 1px solid var(--lx-border-default);
+  border-radius: 12px;
+  text-align: left;
+  font: inherit;
+  cursor: pointer;
+  transition: background 100ms, border-color 100ms;
+}
+.task-row:hover {
+  background: var(--lx-surface-card-hover);
+  border-color: var(--lx-border-strong);
+}
+.task-row:focus-visible {
+  outline: none;
+  box-shadow: var(--lx-focus-ring);
+}
+
+/* Left priority accent bar — colored inline from fieldConfig (never hardcoded) */
+.task-row-accent {
+  position: absolute;
+  left: 0;
+  top: 10px;
+  bottom: 10px;
+  width: 3px;
+  border-radius: 0 2px 2px 0;
+  pointer-events: none;
+}
+
+.task-row.archived { opacity: 0.55; }
+.task-row.archived .task-row-title { color: var(--lx-text-muted); }
+
+.task-row-title {
+  flex: 1;
+  min-width: 0;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 20px;
+  color: var(--lx-text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.task-row-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+}
+
+/* "Where" — column · swimlane as quiet flat text, left, flexes to fill */
+.task-row-where {
+  flex: 1;
+  min-width: 0;
+  font-size: 12px;
+  line-height: 16px;
+  color: var(--lx-text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* "What" — type/priority chips + github + date, right-aligned group */
+.task-row-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.task-chip {
+  display: inline-flex;
+  align-items: center;
+  height: 20px;
+  padding: 0 8px;
+  border-radius: 9999px;
+  border: 1px solid var(--lx-border-default);
+  font-family: var(--lx-font-body);
+  font-size: 11px;
+  line-height: 14px;
+  color: var(--lx-text-secondary);
+  white-space: nowrap;
+}
+.task-chip.type { border-color: transparent; color: var(--lx-text-muted); }
+.task-chip.priority { border-color: transparent; }
+
+.task-gh {
+  display: inline-flex;
+  align-items: center;
+  height: 20px;
+  padding: 0 8px;
+  border-radius: 9999px;
+  background: var(--lx-bg-accent-subtle);
+  border: 1px solid rgba(240, 192, 64, 0.35);
+  color: var(--lx-text-link);
+  font-family: var(--lx-font-mono);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.task-row-date {
+  font-family: var(--lx-font-micro);
+  font-size: 11px;
+  line-height: 14px;
+  color: var(--lx-text-muted);
+  white-space: nowrap;
+}
+
+.tasks-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 48px 16px;
+  background: var(--lx-surface-card);
+  border: 1px solid var(--lx-border-default);
+  border-radius: 12px;
+  text-align: center;
+}
+.tasks-empty-title {
+  font-family: var(--lx-font-display);
+  font-size: 18px;
+  font-weight: 500;
+  line-height: 26px;
+  color: var(--lx-text-primary);
+}
+.tasks-empty-sub {
+  font-size: 13px;
+  line-height: 18px;
+  color: var(--lx-text-secondary);
+}
+.tasks-empty .btn { margin-top: 12px; }
+
+.tasks-error {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 24px 16px;
+  background: var(--lx-surface-card);
+  border: 1px solid var(--lx-border-default);
+  border-radius: 12px;
+  text-align: center;
+}
+.tasks-error-title {
+  font-family: var(--lx-font-display);
+  font-size: 16px;
+  font-weight: 500;
+  line-height: 24px;
+  color: var(--lx-text-danger);
+}
+.tasks-error-sub {
+  font-size: 13px;
+  line-height: 18px;
+  color: var(--lx-text-secondary);
+}
+.tasks-error .btn { margin-top: 12px; }
+
+.tasks-state-block {
+  margin-top: 32px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* =========================================================
+   Datepicker (kanban-swimlane-settings-modal, task-detail)
+   Custom calendar popover replacing input[type="date"].
+   ========================================================= */
+
+.datepicker {
+  position: relative;
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-start;
+}
+
+.datepicker-trigger {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  height: 32px;
+  min-width: 160px;
+  padding: 0 10px;
+  background: var(--lx-surface-input);
+  border: 1px solid var(--lx-border-default);
+  border-radius: 4px;
+  color: var(--lx-text-primary);
+  font-family: var(--lx-font-body);
+  font-size: 13px;
+  cursor: pointer;
+  transition: border-color 100ms, background 100ms;
+}
+.datepicker-trigger:hover {
+  border-color: var(--lx-border-strong);
+  background: var(--lx-surface-card-hover);
+}
+.datepicker-trigger svg {
+  stroke: currentColor;
+  stroke-width: 1.5;
+  fill: none;
+  flex-shrink: 0;
+  color: var(--lx-text-muted);
+}
+
+.datepicker-value {
+  font-family: var(--lx-font-body);
+  font-size: 13px;
+  color: var(--lx-text-primary);
+  white-space: nowrap;
+}
+.datepicker-value.empty {
+  color: var(--lx-text-muted);
+}
+
+.datepicker-popover {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: 40;
+  width: 280px;
+  padding: 10px;
+  background: var(--lx-surface-elevated);
+  border: 1px solid var(--lx-border-default);
+  border-radius: 6px;
+  box-shadow: var(--lx-shadow-md);
+}
+
+.datepicker-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.datepicker-month {
+  font-family: var(--lx-font-display);
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--lx-text-primary);
+}
+
+.datepicker-weekdays {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 2px;
+  margin-bottom: 4px;
+}
+.datepicker-weekdays span {
+  font-family: var(--lx-font-micro);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--lx-text-muted);
+  text-align: center;
+  height: 20px;
+  line-height: 20px;
+}
+
+.datepicker-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 2px;
+}
+
+.datepicker-day {
+  width: 32px;
+  height: 32px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  font-family: var(--lx-font-body);
+  font-size: 12px;
+  color: var(--lx-text-secondary);
+  cursor: pointer;
+  transition: background 100ms, border-color 100ms;
+}
+.datepicker-day:hover {
+  background: var(--lx-surface-card-hover);
+}
+.datepicker-day.selected {
+  background: var(--lx-border-focus);
+  color: var(--lx-text-inverse);
+  font-weight: 600;
+}
+.datepicker-day.today {
+  border-color: var(--lx-border-strong);
+}
+.datepicker-day.muted {
+  color: var(--lx-text-muted);
+}
+.datepicker-day.empty {
+  cursor: default;
+}
+
+.datepicker-footer {
+  display: flex;
+  align-items: center;
+  margin-top: 8px;
+  padding-top: 6px;
+  border-top: 1px solid var(--lx-border-subtle);
+}
+
+.datepicker-today {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  font-family: var(--lx-font-body);
+  color: var(--lx-text-secondary);
+  background: none;
+  border: none;
+  border-radius: 3px;
+  cursor: pointer;
+  padding: 2px 6px;
+}
+.datepicker-today:hover {
+  background: var(--lx-surface-card-hover);
+  color: var(--lx-text-primary);
+}
+
+.datepicker-clear {
+  font-size: 11px;
+  font-family: var(--lx-font-body);
+  color: var(--lx-text-link);
+  background: none;
+  border: none;
+  border-radius: 3px;
+  cursor: pointer;
+  padding: 1px 4px;
+}
+.datepicker-clear:hover {
+  background: var(--lx-surface-card-hover);
+  text-decoration: underline;
+}
+
+/* =========================================================
+   ADDED (milestones & sprints wireframes): lane progress
+   pills, board-header milestone selector, milestones page,
+   timeline gantt, swimlanes list page.
+   ========================================================= */
+
+/* ---- Lane header: date range chip (sprint start_at → due_at) ----
+   Two-row chip: dates text on top, a mini-gantt range strip below —
+   accent ticks at both ends over a muted connector line. The strip is
+   decorative (aria-hidden in the app); the text stays the source of truth. */
+.lane-dates {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 3px;
+  height: auto;
+  padding: 3px 8px 4px;
+  border-radius: 6px;
+  border: 1px solid var(--lx-border-default);
+  font-family: var(--lx-font-micro);
+  font-size: 11px;
+  line-height: 14px;
+  color: var(--lx-text-secondary);
+  margin-left: 10px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.lane-dates-text {
+  white-space: nowrap;
+}
+.lane-dates-range {
+  display: flex;
+  align-items: center;
+  height: 4px;
+}
+.lane-dates-line {
+  flex: 1;
+  height: 2px;
+  border-radius: 1px;
+  background: var(--lx-border-strong);
+}
+.lane-dates-tick {
+  width: 2px;
+  height: 5px;
+  flex-shrink: 0;
+  border-radius: 1px;
+  background: var(--lx-text-link);
+}
+
+/* ---- Lane header: sprint progress pill (X/Y done) ---- */
+.lane-progress {
+  display: inline-flex;
+  align-items: center;
+  height: 20px;
+  padding: 0 8px;
+  border-radius: 4px;
+  font-family: var(--lx-font-micro);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 14px;
+  margin-left: 8px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.lane-progress-running {
+  background: var(--lx-bg-warning-subtle);
+  color: var(--lx-text-warning);
+}
+.lane-progress-done {
+  background: var(--lx-bg-success-subtle);
+  color: var(--lx-text-success);
+}
+
+/* ---- Lane header: "Ready to archive" highlight ---- */
+.lane-ready {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+  height: 20px;
+  padding: 0 8px;
+  border-radius: 9999px;
+  border: 1px solid rgba(134, 238, 172, 0.35);
+  background: var(--lx-bg-success-subtle);
+  font-family: var(--lx-font-body);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 14px;
+  color: var(--lx-text-success);
+  margin-left: 8px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+/* ---- Board header: milestone selector ---- */
+.ms-selector {
+  position: relative;
+}
+.ms-selector-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 32px;
+  padding: 0 12px;
+  border: 1px solid var(--lx-border-default);
+  border-radius: 6px;
+  background: var(--lx-surface-elevated);
+  font-family: var(--lx-font-body);
+  font-size: 13px;
+  color: var(--lx-text-primary);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.ms-selector-trigger:hover {
+  background: var(--lx-surface-card-hover);
+}
+.ms-selector-popover {
+  position: absolute;
+  top: 38px;
+  left: 0;
+  min-width: 260px;
+  max-height: 320px;
+  overflow-y: auto;
+  background: var(--lx-surface-elevated);
+  border: 1px solid var(--lx-border-default);
+  border-radius: 6px;
+  padding: 4px;
+  box-shadow: var(--lx-shadow-lg);
+  z-index: 30;
+}
+.ms-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 32px;
+  padding: 0 10px;
+  border-radius: 4px;
+  font-size: 13px;
+  font-family: var(--lx-font-body);
+  color: var(--lx-text-primary);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.ms-option:hover { background: var(--lx-surface-card-hover); }
+.ms-option.active { background: var(--lx-surface-selected); }
+.ms-option.archived { opacity: 0.55; }
+.ms-option .ms-count {
+  margin-left: auto;
+  font-family: var(--lx-font-micro);
+  font-size: 11px;
+  color: var(--lx-text-muted);
+}
+
+/* ---- Milestones page ---- */
+.ms-tabs {
+  display: flex;
+  gap: 2px;
+  border-bottom: 1px solid var(--lx-border-default);
+  margin-bottom: 20px;
+}
+.ms-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 36px;
+  padding: 0 14px;
+  border: none;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  font-family: var(--lx-font-body);
+  font-size: 13px;
+  color: var(--lx-text-secondary);
+  cursor: pointer;
+}
+.ms-tab:hover { color: var(--lx-text-primary); }
+.ms-tab.active {
+  color: var(--lx-text-primary);
+  border-bottom-color: var(--lx-border-focus);
+  font-weight: 500;
+}
+
+.milestone-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(480px, 1fr));
+  gap: 16px;
+  align-items: stretch;
+}
+.milestone-grid .milestone-card {
+  display: flex;
+  flex-direction: column;
+  margin-bottom: 0;
+}
+.milestone-grid .milestone-card .milestone-sprints {
+  margin-top: auto;
+}
+.milestone-card-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.milestone-grid .milestone-card .milestone-card-actions {
+  margin-top: auto;
+}
+.ms-actions-left,
+.ms-actions-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.ms-actions-spacer {
+  flex: 1;
+}
+.milestone-card {
+  background: var(--lx-surface-card);
+  border: 1px solid var(--lx-border-default);
+  border-radius: 12px;
+  padding: 16px;
+  margin-bottom: 16px;
+}
+.milestone-card.active-callout {
+  border-color: var(--lx-border-focus);
+  box-shadow: var(--lx-focus-glow);
+}
+.milestone-card.archived {
+  opacity: 0.55;
+}
+.milestone-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.milestone-name {
+  font-family: var(--lx-font-display);
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--lx-text-primary);
+}
+.milestone-badge-active {
+  display: inline-flex;
+  align-items: center;
+  height: 18px;
+  padding: 0 8px;
+  border-radius: 999px;
+  background: var(--lx-bg-success-subtle);
+  color: var(--lx-text-success);
+  font-family: var(--lx-font-micro);
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+.milestone-due {
+  display: inline-flex;
+  align-items: center;
+  height: 20px;
+  padding: 0 8px;
+  border-radius: 9999px;
+  border: 1px solid rgba(252, 211, 77, 0.35);
+  font-family: var(--lx-font-body);
+  font-size: 11px;
+  line-height: 14px;
+  color: var(--lx-text-warning);
+  white-space: nowrap;
+}
+.milestone-due-overdue {
+  border-color: rgba(255, 68, 68, 0.45);
+  background: var(--lx-bg-danger-subtle);
+  color: var(--lx-text-danger);
+}
+.milestone-desc {
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--lx-text-secondary);
+  margin-top: 6px;
+}
+.ms-progress-block {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  margin-top: 12px;
+}
+.ms-progress-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--lx-font-micro);
+  font-size: 11px;
+  color: var(--lx-text-muted);
+  white-space: nowrap;
+}
+.ms-bar {
+  flex: 1;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--lx-surface-elevated);
+  overflow: hidden;
+}
+.ms-bar-fill {
+  display: block;
+  height: 100%;
+  border-radius: 2px;
+  background: var(--lx-text-success);
+}
+.ms-bar-fill.partial {
+  background: var(--lx-text-warning);
+}
+.ms-bar-fill.zero {
+  background: var(--lx-border-strong);
+}
+
+.milestone-sprints {
+  margin-top: 12px;
+  border-top: 1px dashed var(--lx-border-default);
+  padding-top: 8px;
+}
+.milestone-sprint-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 32px;
+  padding: 0 8px;
+  border-radius: 6px;
+  font-size: 13px;
+  color: var(--lx-text-primary);
+}
+.milestone-sprint-row:hover { background: var(--lx-surface-card-hover); }
+.milestone-sprint-row.archived { opacity: 0.55; }
+.milestone-sprint-row .sl-dates {
+  font-family: var(--lx-font-micro);
+  font-size: 11px;
+  color: var(--lx-text-muted);
+}
+.milestone-sprint-row .sl-milestone-tag {
+  font-family: var(--lx-font-micro);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--lx-text-muted);
+}
+
+/* Narrow grid columns: below the 1fr column's ~480px minimum the card can't
+   fit the horizontal sprint-row layout, so rows wrap — the dates and progress
+   pill drop below the name instead of squeezing beside it. */
+@media (max-width: 560px) {
+  .milestone-grid .milestone-sprint-row {
+    flex-wrap: wrap;
+    height: auto;
+    min-height: 32px;
+    padding: 6px 8px;
+    row-gap: 2px;
+  }
+  .milestone-grid .milestone-sprint-row .sl-dates {
+    order: 3;
+    width: 100%;
+  }
+  .milestone-grid .milestone-sprint-row .sl-link-btn {
+    order: 4;
+  }
+  .milestone-grid .ms-progress-block {
+    grid-template-columns: 1fr;
+    gap: 8px;
+  }
+}
+
+/* ---- Timeline (gantt) ---- */
+.timeline-wrap {
+  width: 100%;
+  overflow-x: auto;
+  border: 1px solid var(--lx-border-default);
+  border-radius: 12px;
+  background: var(--lx-surface-card);
+  min-height: 120px;
+  position: relative;
+  /* Clearly visible horizontal scrollbar — the day grid is wide and must be
+     discoverable. Light thumb against the dark card track. */
+  scrollbar-color: var(--lx-text-tertiary) var(--lx-surface-card);
+  scrollbar-width: auto;
+}
+.tl-today-btn {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 10;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 28px;
+  padding: 0 10px;
+  border-radius: 6px;
+  border: 1px solid var(--lx-border-default);
+  background: var(--lx-surface-card);
+  color: var(--lx-text-secondary);
+  font-family: var(--lx-font-body);
+  font-size: 12px;
+  cursor: pointer;
+  box-shadow: var(--lx-focus-glow);
+}
+.tl-today-btn:hover {
+  background: var(--lx-surface-card-hover);
+  color: var(--lx-text-primary);
+}
+.timeline-wrap::-webkit-scrollbar {
+  height: 12px;
+}
+.timeline-wrap::-webkit-scrollbar-track {
+  background: var(--lx-surface-card);
+}
+.timeline-wrap::-webkit-scrollbar-thumb {
+  background: var(--lx-text-tertiary);
+  border-radius: 6px;
+  border: 2px solid var(--lx-surface-card);
+}
+.timeline-wrap::-webkit-scrollbar-thumb:hover {
+  background: var(--lx-text-secondary);
+}
+.timeline {
+  position: relative;
+  /* Responsive: fill the wrap when it's wider than the grid; stretch to the
+     grid's natural width (max-content) when it overflows and must scroll.
+     The grid ends flush at the container's right edge — no trailing bleed. */
+  width: max-content;
+  min-width: 100%;
+  border-bottom: 1px solid var(--lx-border-default);
+}
+.tl-grid {
+  display: grid;
+  grid-template-columns: 264px repeat(42, 24px);
+}
+.tl-head-cell {
+  height: 44px;
+  display: flex;
+  align-items: center;
+  padding: 0 12px;
+  font-family: var(--lx-font-micro);
+  font-size: 11px;
+  color: var(--lx-text-muted);
+  border-bottom: 1px solid var(--lx-border-default);
+  white-space: nowrap;
+}
+.tl-week-cell {
+  border-bottom: 1px solid var(--lx-border-default);
+  border-left: 1px solid var(--lx-border-default);
+  font-family: var(--lx-font-micro);
+  font-size: 11px;
+  color: var(--lx-text-muted);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+/* Three-level day axis header: Year (top), Month (middle), Day (bottom).
+   Year/Month cells span the day columns they cover via grid-column: span N. */
+.tl-head-year {
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--lx-font-micro);
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--lx-text-muted);
+  border-bottom: 1px solid var(--lx-border-default);
+  border-left: 1px solid var(--lx-border-default);
+  white-space: nowrap;
+}
+.tl-head-month {
+  height: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--lx-font-micro);
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--lx-text-secondary);
+  border-bottom: 1px solid var(--lx-border-default);
+  border-left: 1px solid var(--lx-border-default);
+  white-space: nowrap;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.tl-head-day {
+  height: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--lx-font-micro);
+  font-size: 10px;
+  color: var(--lx-text-muted);
+  border-bottom: 1px solid var(--lx-border-default);
+  border-left: 1px solid var(--lx-border-default);
+}
+.tl-row {
+  display: grid;
+  grid-template-columns: 264px repeat(42, 24px);
+  border-bottom: 1px solid var(--lx-border-default);
+}
+/* Zebra banding — the `.striped` class is applied per row index from the
+   renderer so bands alternate across the whole gantt regardless of how rows
+   are grouped (milestone + its sprints, loose group, backlog). */
+.tl-row.striped {
+  background: var(--lx-surface-elevated);
+}
+.tl-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 12px;
+  height: 56px;
+  font-size: 13px;
+  color: var(--lx-text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  position: relative;
+}
+.tl-label.group {
+  font-family: var(--lx-font-display);
+  font-weight: 600;
+}
+/* Milestone name truncates with ellipsis so the "sprints archived" pill
+   (flex-shrink: 0) always fits un-clipped. */
+.tl-label-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.tl-label.sprint { padding-left: 32px; }
+.tl-label.caption {
+  color: var(--lx-text-muted);
+  font-size: 12px;
+}
+.tl-lane {
+  position: relative;
+  height: 56px;
+  border-left: 1px solid var(--lx-border-default);
+  background-image: linear-gradient(to right, var(--lx-border-strong) 1px, transparent 1px);
+  background-size: 24px 100%;
+}
+.tl-lane.group { height: 56px; }
+/* Sprint range guidelines: thin dashed verticals at the bar's start and end
+   edges. Rendered at the chart level with inline top/bottom: they span from
+   the DAY-NUMBER header row down to each sprint's own row bottom — never
+   into the year/month header rows, never past the sprint's row. Above the
+   bars (visible over the bar's left edge), below the TODAY line; never
+   captures pointer events. */
+.tl-guideline {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 0;
+  border-left: 1px dashed var(--lx-border-strong);
+  pointer-events: none;
+  z-index: 4;
+}
+.tl-bar {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  border-radius: 3px;
+  background: var(--lx-surface-card-hover);
+  border: 1px solid var(--lx-border-strong);
+  overflow: hidden;
+  cursor: grab;
+}
+.tl-bar .tl-fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  background: var(--lx-text-success);
+  opacity: 0.85;
+}
+.tl-bar.overdue { border-color: rgba(255, 68, 68, 0.5); }
+.tl-bar.overdue .tl-fill { background: var(--lx-text-danger); }
+.tl-bar.archived { opacity: 0.45; }
+/* In-bar sprint name chip — chip bg mirrors the bar surface so it only
+   becomes visible against the progress fill; pointer-events pass through
+   to the bar's drag/resize handles. */
+.tl-bar-label {
+  position: absolute;
+  left: 5px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: flex;
+  align-items: center;
+  max-width: calc(100% - 10px);
+  padding: 0 4px;
+  border-radius: 3px;
+  font-family: var(--lx-font-micro);
+  font-size: 10px;
+  line-height: 14px;
+  color: var(--lx-text-primary);
+  background: var(--lx-surface-card-hover);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  pointer-events: none;
+}
+.tl-bar .tl-resize-edge {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 8px;
+  cursor: ew-resize;
+  background: transparent;
+}
+.tl-marker {
+  position: absolute;
+  top: 50%;
+  width: 13px;
+  height: 13px;
+  transform: translate(-50%, -50%) rotate(45deg);
+  background: var(--lx-text-warning);
+  /* Card-colored halo + outer ring + soft shadow → a crafted milestone
+     diamond that stands off the grid. Centered on its due day column. */
+  box-shadow: 0 0 0 2px var(--lx-surface-card), 0 0 0 3px var(--lx-border-strong), 0 2px 6px rgba(0, 0, 0, 0.45);
+  cursor: pointer;
+  user-select: none;
+}
+.tl-marker.overdue {
+  background: var(--lx-text-danger);
+  box-shadow: 0 0 0 2px var(--lx-surface-card), 0 0 0 3px rgba(255, 68, 68, 0.5), 0 2px 6px rgba(0, 0, 0, 0.45);
+}
+.tl-marker .tl-marker-flag {
+  display: none;
+  position: absolute;
+  top: calc(100% + 8px);
+  left: -65px;
+  width: 130px;
+  padding: 6px 8px;
+  background: var(--lx-surface-elevated);
+  border: 1px solid var(--lx-border-default);
+  border-radius: 6px;
+  box-shadow: var(--lx-shadow-lg);
+  font-family: var(--lx-font-body);
+  font-size: 11px;
+  color: var(--lx-text-primary);
+  text-align: left;
+}
+.tl-marker:hover .tl-marker-flag { display: block; }
+.tl-tooltip {
+  position: absolute;
+  z-index: 40;
+  min-width: 150px;
+  padding: 8px 10px;
+  background: var(--lx-surface-elevated);
+  border: 1px solid var(--lx-border-default);
+  border-radius: 6px;
+  box-shadow: var(--lx-shadow-lg);
+  font-family: var(--lx-font-body);
+  font-size: 11px;
+  color: var(--lx-text-primary);
+  pointer-events: none;
+}
+.tl-tooltip .tt-title { font-weight: 600; color: var(--lx-text-primary); }
+.tl-tooltip .tt-line { color: var(--lx-text-secondary); margin-top: 2px; }
+.tl-today {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: var(--lx-text-link);
+  z-index: 5;
+}
+.tl-today::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: -4px;
+  border: 4px solid transparent;
+  border-top-color: var(--lx-text-link);
+  border-bottom: none;
+}
+.tl-today-label {
+  position: absolute;
+  top: 2px;
+  left: 6px;
+  font-family: var(--lx-font-micro);
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--lx-text-link);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  background: var(--lx-surface-card);
+  padding: 1px 4px;
+  border-radius: 3px;
+  border: 1px solid var(--lx-border-default);
+}
+.tl-caption-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 36px;
+  padding: 0 12px;
+  border-bottom: 1px solid var(--lx-border-subtle);
+  font-size: 12px;
+  color: var(--lx-text-muted);
+}
+.tl-unset {
+  margin-top: 16px;
+  border: 1px dashed var(--lx-border-strong);
+  border-radius: 12px;
+  padding: 12px 16px;
+  background: var(--lx-surface-card);
+}
+.tl-unset-title {
+  font-family: var(--lx-font-micro);
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--lx-text-muted);
+  margin-bottom: 8px;
+}
+.tl-unset-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 30px;
+  font-size: 13px;
+  color: var(--lx-text-primary);
+}
+
+/* ---- Swimlanes page ---- */
+.sl-group {
+  margin-top: 20px;
+}
+.sl-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(520px, 1fr));
+  gap: 6px;
+  align-items: stretch;
+}
+.sl-grid .sl-row {
+  margin-bottom: 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 10px;
+  height: auto;
+  padding: 12px;
+}
+.sl-row-main {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+.sl-row-desc {
+  font-size: 12px;
+  line-height: 17px;
+  color: var(--lx-text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sl-grid .sl-row-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+}
+.sl-grid .sl-row .lane-ready {
+  flex-shrink: 0;
+}
+.sl-grid .sl-row-actions {
+  margin-left: 0;
+  justify-content: flex-start;
+  margin-top: auto;
+  padding-top: 10px;
+  border-top: 1px dashed var(--lx-border-default);
+}
+.sl-group-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--lx-font-display);
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--lx-text-primary);
+  margin-bottom: 8px;
+}
+.sl-group-title .sl-group-meta {
+  font-family: var(--lx-font-micro);
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--lx-text-muted);
+}
+.sl-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 44px;
+  padding: 0 12px;
+  background: var(--lx-surface-card);
+  border: 1px solid var(--lx-border-default);
+  border-radius: 8px;
+  margin-bottom: 6px;
+  font-size: 13px;
+  color: var(--lx-text-primary);
+}
+.sl-row:hover { background: var(--lx-surface-card-hover); }
+.sl-row.archived { opacity: 0.55; }
+.sl-row.system { opacity: 0.72; }
+.sl-kind-chip {
+  font-family: var(--lx-font-micro);
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: 2px 7px;
+  border-radius: 4px;
+  background: rgba(34, 211, 238, 0.10);
+  color: #67E8F9;
+}
+.sl-kind-chip.backlog {
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--lx-text-muted);
+}
+.sl-row-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+  flex-shrink: 0;
+}
+.sl-link-btn {
+  font-size: 12px;
+  font-family: var(--lx-font-body);
+  color: var(--lx-text-link);
+  background: none;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  padding: 4px 6px;
+}
+.sl-link-btn:hover { background: var(--lx-surface-card-hover); text-decoration: underline; }
+
+/* ---- Standalone (context-free) variants ----
+   Swimlanes rows are the FE transcription source of truth; these
+   must render styled wherever used, not only inside nested parents. */
+.sl-dates {
+  font-family: var(--lx-font-micro);
+  font-size: 11px;
+  color: var(--lx-text-muted);
+  white-space: nowrap;
+}
+.sl-row-name {
+  font-size: 13px;
+  color: var(--lx-text-primary);
+}
+.milestone-sprint-name {
+  font-size: 13px;
+  color: var(--lx-text-primary);
+}
+.sl-milestone-tag {
+  font-family: var(--lx-font-micro);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--lx-text-muted);
+}
+.sl-group-meta {
+  font-family: var(--lx-font-micro);
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--lx-text-muted);
+}
+
+</style>
+  <style>
+    /* Page-scoped layout only — no design tokens defined here */
+    .token-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(180px,1fr)); gap:12px; margin:12px 0 24px; }
+    .token-cell { background:var(--lx-surface-elevated); border:1px solid var(--lx-border-subtle); border-radius:6px; padding:10px; }
+    .swatch { height:40px; border-radius:4px; margin-bottom:8px; }
+    .block-shell { background:var(--lx-surface-elevated); border:1px solid var(--lx-border-subtle); border-radius:8px; padding:16px; margin:16px 0 32px; }
+    .state-row { display:flex; flex-wrap:wrap; gap:12px; align-items:center; padding:12px; border-bottom:1px solid var(--lx-border-subtle); }
+    .state-row:last-of-type { border-bottom:none; }
+    .state-label { font-family:var(--lx-font-micro); font-size:11px; text-transform:uppercase; letter-spacing:0.06em; color:var(--lx-text-muted); width:100%; }
+    .code-block { background:var(--lx-surface-input); border:1px solid var(--lx-border-subtle); border-radius:6px; padding:12px; overflow-x:auto; font-family:var(--lx-font-mono); font-size:12px; line-height:1.6; color:var(--lx-text-primary); position:relative; margin-top:12px; }
+    .copy-btn { position:absolute; top:8px; right:8px; }
+    .token-contract { margin-top:8px; font-family:var(--lx-font-mono); font-size:11px; color:var(--lx-text-muted); }
+    .block-desc { margin-bottom:12px; padding:10px 12px; background:var(--lx-surface-input); border:1px solid var(--lx-border-subtle); border-radius:6px; font-size:12px; line-height:1.6; color:var(--lx-text-secondary); }
+    .block-desc strong { color:var(--lx-text-primary); font-weight:600; }
+  </style>
+</head>
+<body class="bg-app color-primary" style="min-height:100vh;">
+  <main class="page-frame" style="max-width:1100px;padding-top:40px;">
+    <header class="flex items-center justify-between" style="margin-bottom:8px;">
+      <div>
+        <h1 class="font-display text-2xl weight-600 color-primary">PHOSPHOR Design System</h1>
+        <p class="text-sm color-secondary mt-1" style="max-width:640px;">Primitives + canonical markup. Consult before any UI work — copy from here, never hand-write. Spec: DESIGN_SYSTEM.md</p>
+      </div>
+      <button id="theme-toggle" class="btn btn-ghost btn-sm">Light</button>
+    </header>
+
+    <section id="colors">
+      <h2 class="font-display text-xl weight-600 color-primary">Colors</h2>
+
+      <h3 class="font-display text-base weight-600 color-primary">Surfaces</h3>
+      <div class="token-grid">
+        <div class="token-cell">
+          <div class="swatch" style="background:var(--lx-surface-app);border:1px solid var(--lx-border-subtle);"></div>
+          <div class="token-name font-mono text-xs">--lx-surface-app</div>
+          <div class="token-value text-2xs color-muted">#0C0B09 / #F5F0EB</div>
+        </div>
+        <div class="token-cell">
+          <div class="swatch" style="background:var(--lx-surface-elevated);border:1px solid var(--lx-border-subtle);"></div>
+          <div class="token-name font-mono text-xs">--lx-surface-elevated</div>
+          <div class="token-value text-2xs color-muted">#141210 / #FFFFFF</div>
+        </div>
+        <div class="token-cell">
+          <div class="swatch" style="background:var(--lx-surface-column);border:1px solid var(--lx-border-subtle);"></div>
+          <div class="token-name font-mono text-xs">--lx-surface-column</div>
+          <div class="token-value text-2xs color-muted">#12100E / #EBE5DE</div>
+        </div>
+        <div class="token-cell">
+          <div class="swatch" style="background:var(--lx-surface-card);border:1px solid var(--lx-border-subtle);"></div>
+          <div class="token-name font-mono text-xs">--lx-surface-card</div>
+          <div class="token-value text-2xs color-muted">#1A1714 / #FFFFFF</div>
+        </div>
+        <div class="token-cell">
+          <div class="swatch" style="background:var(--lx-surface-card-hover);border:1px solid var(--lx-border-subtle);"></div>
+          <div class="token-name font-mono text-xs">--lx-surface-card-hover</div>
+          <div class="token-value text-2xs color-muted">#24201C / #F5F0EB</div>
+        </div>
+        <div class="token-cell">
+          <div class="swatch" style="background:var(--lx-surface-card-active);border:1px solid var(--lx-border-subtle);"></div>
+          <div class="token-name font-mono text-xs">--lx-surface-card-active</div>
+          <div class="token-value text-2xs color-muted">#2E2A24 / #EBE5DE</div>
+        </div>
+        <div class="token-cell">
+          <div class="swatch" style="background:var(--lx-surface-card-dragging);border:1px solid var(--lx-border-subtle);"></div>
+          <div class="token-name font-mono text-xs">--lx-surface-card-dragging</div>
+          <div class="token-value text-2xs color-muted">#24201C / #FFFFFF</div>
+        </div>
+        <div class="token-cell">
+          <div class="swatch" style="background:var(--lx-surface-input);border:1px solid var(--lx-border-subtle);"></div>
+          <div class="token-name font-mono text-xs">--lx-surface-input</div>
+          <div class="token-value text-2xs color-muted">#0C0B09 / #FFFFFF</div>
+        </div>
+        <div class="token-cell">
+          <div class="swatch" style="background:var(--lx-surface-overlay);border:1px solid var(--lx-border-subtle);"></div>
+          <div class="token-name font-mono text-xs">--lx-surface-overlay</div>
+          <div class="token-value text-2xs color-muted">rgba(12,11,9,.85) / rgba(26,23,20,.35)</div>
+        </div>
+        <div class="token-cell">
+          <div class="swatch" style="background:var(--lx-surface-tooltip);border:1px solid var(--lx-border-subtle);"></div>
+          <div class="token-name font-mono text-xs">--lx-surface-tooltip</div>
+          <div class="token-value text-2xs color-muted">#24201C / #1A1714</div>
+        </div>
+        <div class="token-cell">
+          <div class="swatch" style="background:var(--lx-surface-selected);border:1px solid var(--lx-border-subtle);"></div>
+          <div class="token-name font-mono text-xs">--lx-surface-selected</div>
+          <div class="token-value text-2xs color-muted">rgba(240,192,64,.10) / rgba(212,160,23,.10)</div>
+        </div>
+      </div>
+
+      <h3 class="font-display text-base weight-600 color-primary">Borders</h3>
+      <div class="token-grid">
+        <div class="token-cell">
+          <div class="swatch" style="background:var(--lx-border-default);"></div>
+          <div class="token-name font-mono text-xs">--lx-border-default</div>
+          <div class="token-value text-2xs color-muted">#332E28 / #DDD5CC</div>
+        </div>
+        <div class="token-cell">
+          <div class="swatch" style="background:var(--lx-border-subtle);"></div>
+          <div class="token-name font-mono text-xs">--lx-border-subtle</div>
+          <div class="token-value text-2xs color-muted">#1A1714 / #EBE5DE</div>
+        </div>
+        <div class="token-cell">
+          <div class="swatch" style="background:var(--lx-border-strong);"></div>
+          <div class="token-name font-mono text-xs">--lx-border-strong</div>
+          <div class="token-value text-2xs color-muted">#4A443D / #C4BAB0</div>
+        </div>
+        <div class="token-cell">
+          <div class="swatch" style="background:var(--lx-border-focus);"></div>
+          <div class="token-name font-mono text-xs">--lx-border-focus</div>
+          <div class="token-value text-2xs color-muted">#F0C040 / #D4A017</div>
+        </div>
+      </div>
+
+      <h3 class="font-display text-base weight-600 color-primary">Text</h3>
+      <div class="token-grid">
+        <div class="token-cell">
+          <div class="swatch" style="background:var(--lx-text-primary);"></div>
+          <div class="token-name font-mono text-xs">--lx-text-primary</div>
+          <div class="token-value text-2xs color-muted">#F5F0EB / #1A1714</div>
+        </div>
+        <div class="token-cell">
+          <div class="swatch" style="background:var(--lx-text-secondary);"></div>
+          <div class="token-name font-mono text-xs">--lx-text-secondary</div>
+          <div class="token-value text-2xs color-muted">#948E88 / #5C554F</div>
+        </div>
+        <div class="token-cell">
+          <div class="swatch" style="background:var(--lx-text-tertiary);"></div>
+          <div class="token-name font-mono text-xs">--lx-text-tertiary</div>
+          <div class="token-value text-2xs color-muted">#6B6560 / #7A7169</div>
+        </div>
+        <div class="token-cell">
+          <div class="swatch" style="background:var(--lx-text-muted);"></div>
+          <div class="token-name font-mono text-xs">--lx-text-muted</div>
+          <div class="token-value text-2xs color-muted">#4A443D / #9C9187</div>
+        </div>
+        <div class="token-cell">
+          <div class="swatch" style="background:var(--lx-text-inverse);"></div>
+          <div class="token-name font-mono text-xs">--lx-text-inverse</div>
+          <div class="token-value text-2xs color-muted">#12100E / #FFFFFF</div>
+        </div>
+        <div class="token-cell">
+          <div class="swatch" style="background:var(--lx-text-link);"></div>
+          <div class="token-name font-mono text-xs">--lx-text-link</div>
+          <div class="token-value text-2xs color-muted">#F0C040 / #B8931A</div>
+        </div>
+        <div class="token-cell">
+          <div class="swatch" style="background:var(--lx-text-link-hover);"></div>
+          <div class="token-name font-mono text-xs">--lx-text-link-hover</div>
+          <div class="token-value text-2xs color-muted">#F5D76A / #D4A017</div>
+        </div>
+        <div class="token-cell">
+          <div class="swatch" style="background:var(--lx-text-danger);"></div>
+          <div class="token-name font-mono text-xs">--lx-text-danger</div>
+          <div class="token-value text-2xs color-muted">#FF9999 / #991B1B</div>
+        </div>
+        <div class="token-cell">
+          <div class="swatch" style="background:var(--lx-text-warning);"></div>
+          <div class="token-name font-mono text-xs">--lx-text-warning</div>
+          <div class="token-value text-2xs color-muted">#FCD34D / #92400E</div>
+        </div>
+        <div class="token-cell">
+          <div class="swatch" style="background:var(--lx-text-success);"></div>
+          <div class="token-name font-mono text-xs">--lx-text-success</div>
+          <div class="token-value text-2xs color-muted">#86EFAC / #166534</div>
+        </div>
+      </div>
+
+      <h3 class="font-display text-base weight-600 color-primary">Status backgrounds</h3>
+      <div class="token-grid">
+        <div class="token-cell">
+          <div class="swatch" style="background:var(--lx-bg-danger-subtle);border:1px solid var(--lx-border-subtle);"></div>
+          <div class="token-name font-mono text-xs">--lx-bg-danger-subtle</div>
+          <div class="token-value text-2xs color-muted">rgba(255,68,68,.10) / rgba(220,38,38,.08)</div>
+        </div>
+        <div class="token-cell">
+          <div class="swatch" style="background:var(--lx-bg-warning-subtle);border:1px solid var(--lx-border-subtle);"></div>
+          <div class="token-name font-mono text-xs">--lx-bg-warning-subtle</div>
+          <div class="token-value text-2xs color-muted">rgba(240,192,64,.10) / rgba(212,160,23,.08)</div>
+        </div>
+        <div class="token-cell">
+          <div class="swatch" style="background:var(--lx-bg-success-subtle);border:1px solid var(--lx-border-subtle);"></div>
+          <div class="token-name font-mono text-xs">--lx-bg-success-subtle</div>
+          <div class="token-value text-2xs color-muted">rgba(74,222,128,.10) / rgba(22,163,74,.08)</div>
+        </div>
+        <div class="token-cell">
+          <div class="swatch" style="background:var(--lx-bg-accent-subtle);border:1px solid var(--lx-border-subtle);"></div>
+          <div class="token-name font-mono text-xs">--lx-bg-accent-subtle</div>
+          <div class="token-value text-2xs color-muted">rgba(240,192,64,.10) / rgba(212,160,23,.08)</div>
+        </div>
+      </div>
+
+      <h3 class="font-display text-base weight-600 color-primary">Data palettes</h3>
+      <span class="annotation-tag">Priority/Type = default palette — user-configurable per project (Board Settings §5.9i), not hardcoded. Status/Accent = fixed (map to --color-lx-status-* / --color-lx-accent).</span>
+      <div class="token-grid">
+        <div class="token-cell">
+          <div class="swatch" style="background:#FF4444;"></div>
+          <div class="token-name font-mono text-xs">Priority · urgent</div>
+          <div class="token-value text-2xs color-muted">#FF4444</div>
+        </div>
+        <div class="token-cell">
+          <div class="swatch" style="background:#F0C040;"></div>
+          <div class="token-name font-mono text-xs">Priority · high</div>
+          <div class="token-value text-2xs color-muted">#F0C040</div>
+        </div>
+        <div class="token-cell">
+          <div class="swatch" style="background:#22D3EE;"></div>
+          <div class="token-name font-mono text-xs">Priority · medium</div>
+          <div class="token-value text-2xs color-muted">#22D3EE</div>
+        </div>
+        <div class="token-cell">
+          <div class="swatch" style="border:2px solid #6B6560;background:transparent;"></div>
+          <div class="token-name font-mono text-xs">Priority · low</div>
+          <div class="token-value text-2xs color-muted">#6B6560 (hollow ring)</div>
+        </div>
+        <div class="token-cell">
+          <div class="swatch" style="background:#4ADE80;"></div>
+          <div class="token-name font-mono text-xs">Type · feature</div>
+          <div class="token-value text-2xs color-muted">#4ADE80</div>
+        </div>
+        <div class="token-cell">
+          <div class="swatch" style="background:#FF4444;"></div>
+          <div class="token-name font-mono text-xs">Type · bug</div>
+          <div class="token-value text-2xs color-muted">#FF4444</div>
+        </div>
+        <div class="token-cell">
+          <div class="swatch" style="background:#22D3EE;"></div>
+          <div class="token-name font-mono text-xs">Type · task</div>
+          <div class="token-value text-2xs color-muted">#22D3EE</div>
+        </div>
+        <div class="token-cell">
+          <div class="swatch" style="background:#F472B6;"></div>
+          <div class="token-name font-mono text-xs">Type · asset</div>
+          <div class="token-value text-2xs color-muted">#F472B6</div>
+        </div>
+        <div class="token-cell">
+          <div class="swatch" style="background:#4ADE80;"></div>
+          <div class="token-name font-mono text-xs">Status · success</div>
+          <div class="token-value text-2xs color-muted">#4ADE80</div>
+        </div>
+        <div class="token-cell">
+          <div class="swatch" style="background:#F0C040;"></div>
+          <div class="token-name font-mono text-xs">Status · warning</div>
+          <div class="token-value text-2xs color-muted">#F0C040</div>
+        </div>
+        <div class="token-cell">
+          <div class="swatch" style="background:#FF4444;"></div>
+          <div class="token-name font-mono text-xs">Status · danger</div>
+          <div class="token-value text-2xs color-muted">#FF4444</div>
+        </div>
+        <div class="token-cell">
+          <div class="swatch" style="background:#22D3EE;"></div>
+          <div class="token-name font-mono text-xs">Status · info</div>
+          <div class="token-value text-2xs color-muted">#22D3EE</div>
+        </div>
+        <div class="token-cell">
+          <div class="swatch" style="background:#F0C040;"></div>
+          <div class="token-name font-mono text-xs">Accent</div>
+          <div class="token-value text-2xs color-muted">#F0C040</div>
+        </div>
+        <div class="token-cell">
+          <div class="swatch" style="background:#F5D76A;"></div>
+          <div class="token-name font-mono text-xs">Accent · hover</div>
+          <div class="token-value text-2xs color-muted">#F5D76A</div>
+        </div>
+        <div class="token-cell">
+          <div class="swatch" style="background:#8A7020;"></div>
+          <div class="token-name font-mono text-xs">Accent · muted</div>
+          <div class="token-value text-2xs color-muted">#8A7020</div>
+        </div>
+      </div>
+    </section>
+
+    <section id="typography">
+      <h2 class="font-display text-xl weight-600 color-primary">Typography <a href="../wireframes/DESIGN_SYSTEM.md" class="color-link text-sm">§3 spec</a></h2>
+      <h3 class="font-display text-base weight-600 color-primary">Fonts — voice rules</h3>
+      <div class="token-grid">
+        <div class="token-cell">
+          <div class="token-name font-mono text-xs">--lx-font-display</div>
+          <div class="font-display text-xl" style="margin-top:6px;">Space Grotesk</div>
+          <div class="token-value text-2xs color-muted" style="margin-top:6px;">Page titles, dashboard project names, empty-state headings, swimlane names. Never below 16px.</div>
+        </div>
+        <div class="token-cell">
+          <div class="token-name font-mono text-xs">--lx-font-body</div>
+          <div class="font-body text-base" style="margin-top:6px;">IBM Plex Sans</div>
+          <div class="token-value text-2xs color-muted" style="margin-top:6px;">UI labels, buttons, card titles, wiki prose, descriptions. The workhorse.</div>
+        </div>
+        <div class="token-cell">
+          <div class="token-name font-mono text-xs">--lx-font-mono</div>
+          <div class="font-mono text-sm" style="margin-top:6px;">JetBrains Mono</div>
+          <div class="token-value text-2xs color-muted" style="margin-top:6px;">Task IDs, GitHub issue numbers, API keys, timestamps, inline code.</div>
+        </div>
+        <div class="token-cell">
+          <div class="token-name font-mono text-xs">--lx-font-micro</div>
+          <div class="font-micro text-sm" style="margin-top:6px;">Departure Mono</div>
+          <div class="token-value text-2xs color-muted" style="margin-top:6px;">Tiny HUD labels, WIP counters, priority abbreviations. 10–11px only.</div>
+        </div>
+      </div>
+      <h3 class="font-display text-base weight-600 color-primary">Type scale — when to use</h3>
+      <div class="token-grid">
+        <div class="token-cell"><span class="font-mono text-xs">text-2xs · 11px</span><div class="text-2xs" style="margin-top:6px;">The quick brown fox</div><div class="token-value text-2xs color-muted" style="margin-top:6px;">WIP counters, timestamps, HUD labels</div></div>
+        <div class="token-cell"><span class="font-mono text-xs">text-xs · 12px</span><div class="text-xs" style="margin-top:6px;">The quick brown fox</div><div class="token-value text-2xs color-muted" style="margin-top:6px;">Column headers, meta, IDs</div></div>
+        <div class="token-cell"><span class="font-mono text-xs">text-sm · 13px</span><div class="text-sm" style="margin-top:6px;">The quick brown fox</div><div class="token-value text-2xs color-muted" style="margin-top:6px;">UI chrome, buttons, nav</div></div>
+        <div class="token-cell"><span class="font-mono text-xs">text-base · 14px</span><div class="text-base" style="margin-top:6px;">The quick brown fox</div><div class="token-value text-2xs color-muted" style="margin-top:6px;">Task card titles, default body</div></div>
+        <div class="token-cell"><span class="font-mono text-xs">text-md · 15px</span><div class="text-md" style="margin-top:6px;">The quick brown fox</div><div class="token-value text-2xs color-muted" style="margin-top:6px;">Wiki body text</div></div>
+        <div class="token-cell"><span class="font-mono text-xs">text-lg · 16px</span><div class="text-lg" style="margin-top:6px;">The quick brown fox</div><div class="token-value text-2xs color-muted" style="margin-top:6px;">Modal titles, section headers</div></div>
+        <div class="token-cell"><span class="font-mono text-xs">text-xl · 18px</span><div class="text-xl" style="margin-top:6px;">The quick brown fox</div><div class="token-value text-2xs color-muted" style="margin-top:6px;">Page titles</div></div>
+        <div class="token-cell"><span class="font-mono text-xs">text-2xl · 24px</span><div class="text-2xl" style="margin-top:6px;">The quick brown fox</div><div class="token-value text-2xs color-muted" style="margin-top:6px;">Dashboard project names</div></div>
+        <div class="token-cell"><span class="font-mono text-xs">text-3xl · 30px</span><div class="text-3xl" style="margin-top:6px;">The quick brown fox</div><div class="token-value text-2xs color-muted" style="margin-top:6px;">Marketing / empty states</div></div>
+      </div>
+      <h3 class="font-display text-base weight-600 color-primary">Weight rules</h3>
+      <div class="token-grid">
+        <div class="token-cell"><div class="token-name font-mono text-xs">400 Regular</div><div class="token-value text-2xs color-muted" style="margin-top:6px;">Body text, descriptions, wiki prose, UI labels, card content</div></div>
+        <div class="token-cell"><div class="token-name font-mono text-xs">500 Medium</div><div class="token-value text-2xs color-muted" style="margin-top:6px;">Column headers, button labels, badges, micro labels</div></div>
+        <div class="token-cell"><div class="token-name font-mono text-xs">600 Semibold</div><div class="token-value text-2xs color-muted" style="margin-top:6px;">Task titles, page titles, swimlane names, active nav</div></div>
+        <div class="token-cell"><div class="token-name font-mono text-xs">700 Bold</div><div class="token-value text-2xs color-muted" style="margin-top:6px;">Never used — 600 is the ceiling</div></div>
+      </div>
+    </section>
+
+    <section id="space">
+      <h2 class="font-display text-xl weight-600 color-primary">Space, radii, shadows, focus, motion</h2>
+      <h3 class="font-display text-base weight-600 color-primary">Radii</h3>
+      <div class="token-grid">
+        <div class="token-cell"><div style="height:40px;border:1px solid var(--lx-border-default);border-radius:4px;"></div><div class="token-name font-mono text-xs">radius-sm · 4px</div></div>
+        <div class="token-cell"><div style="height:40px;border:1px solid var(--lx-border-default);border-radius:6px;"></div><div class="token-name font-mono text-xs">radius-md · 6px</div></div>
+        <div class="token-cell"><div style="height:40px;border:1px solid var(--lx-border-default);border-radius:8px;"></div><div class="token-name font-mono text-xs">radius-lg · 8px</div></div>
+        <div class="token-cell"><div style="height:40px;border:1px solid var(--lx-border-default);border-radius:12px;"></div><div class="token-name font-mono text-xs">radius-xl · 12px</div></div>
+      </div>
+      <h3 class="font-display text-base weight-600 color-primary">Shadows</h3>
+      <div class="token-grid">
+        <div class="token-cell"><div style="height:40px;border:1px solid var(--lx-border-subtle);box-shadow:var(--lx-shadow-sm);"></div><div class="token-name font-mono text-xs">--lx-shadow-sm</div></div>
+        <div class="token-cell"><div style="height:40px;border:1px solid var(--lx-border-subtle);box-shadow:var(--lx-shadow-md);"></div><div class="token-name font-mono text-xs">--lx-shadow-md</div></div>
+        <div class="token-cell"><div style="height:40px;border:1px solid var(--lx-border-subtle);box-shadow:var(--lx-shadow-lg);"></div><div class="token-name font-mono text-xs">--lx-shadow-lg</div></div>
+        <div class="token-cell"><div style="height:40px;border:1px solid var(--lx-border-subtle);box-shadow:var(--lx-shadow-drag);"></div><div class="token-name font-mono text-xs">--lx-shadow-drag</div></div>
+        <div class="token-cell"><div style="height:40px;border:1px solid var(--lx-border-subtle);box-shadow:var(--lx-shadow-slideover);"></div><div class="token-name font-mono text-xs">--lx-shadow-slideover</div></div>
+      </div>
+      <h3 class="font-display text-base weight-600 color-primary">Focus</h3>
+      <div class="block-shell">
+        <div class="state-row">
+          <span class="state-label">Focus ring + glow</span>
+          <button class="btn btn-primary" style="box-shadow:var(--lx-focus-ring),var(--lx-focus-glow);">Focused button</button>
+          <span class="token-contract">Tokens: --lx-focus-ring, --lx-focus-glow</span>
+        </div>
+      </div>
+      <h3 class="font-display text-base weight-600 color-primary">Motion</h3>
+      <div class="token-grid">
+        <div class="token-cell"><div class="token-name font-mono text-xs">--lx-ease-out</div><div class="token-value text-2xs color-muted">cubic-bezier(0.16, 1, 0.3, 1)</div></div>
+        <div class="token-cell"><div class="token-name font-mono text-xs">--lx-ease-in-out</div><div class="token-value text-2xs color-muted">cubic-bezier(0.65, 0, 0.35, 1)</div></div>
+      </div>
+    </section>
+
+    <section id="card">
+      <h2 class="font-display text-xl weight-600 color-primary">Cards</h2>
+      <div class="block-shell">
+        <div class="block-desc">
+          <strong>Use</strong> — the card primitives for discrete content units, sized by role: <span class="font-mono">.card-row</span> for dense lists/menus/selectable rows (6px radius, 8×12 padding) · <span class="font-mono">.card-panel</span> for page-level sections — settings, dashboard, auth (12px radius, 16px padding, static) · <span class="font-mono">.card-tile</span> for navigation grids — projects (12px, 16px, hover lift + focus ring) · <span class="font-mono">.chip</span> for inline code refs (4px, 2×5).<br/>
+          <strong>Avoid</strong> — nesting a card inside another card (use <span class="font-mono">.card-panel--elevated</span> for the inner surface); new radii or paddings outside this scale.<br/>
+          <strong>Instead</strong> — flat rows with dividers for continuous lists; <span class="font-mono">.github-issue-row</span> keeps its elevated surface because it sits on a card (documented exception).
+        </div>
+        <div class="state-row">
+          <span class="state-label">Card row · default</span>
+          <div class="card-row" style="width:280px;">
+            <div class="text-sm weight-500 color-primary">Runtime row</div>
+            <div class="text-xs color-secondary">Selectable row example</div>
+          </div>
+        </div>
+        <div class="state-row">
+          <span class="state-label">Card row · hover</span>
+          <div class="card-row" style="width:280px;background:var(--lx-surface-card-hover);border-color:var(--lx-border-default);">
+            <div class="text-sm weight-500 color-primary">Runtime row</div>
+          </div>
+        </div>
+        <div class="state-row">
+          <span class="state-label">Card row · selected</span>
+          <div class="card-row state-selected" style="width:280px;">
+            <div class="text-sm weight-500 color-primary">Runtime row</div>
+          </div>
+        </div>
+        <div class="state-row">
+          <span class="state-label">Card row · dense (menus)</span>
+          <div class="card-row card-row--dense" style="width:280px;">
+            <span class="checkbox"></span><span class="text-sm color-primary">Filter option</span>
+          </div>
+        </div>
+        <div class="state-row">
+          <span class="state-label">Card panel · static</span>
+          <div class="card-panel" style="width:280px;">
+            <div class="font-micro text-2xs color-muted" style="text-transform:uppercase;letter-spacing:0.04em;margin-bottom:8px;">About this project</div>
+            <div class="text-sm color-secondary">Section content, page-level.</div>
+          </div>
+        </div>
+        <div class="state-row">
+          <span class="state-label">Card tile · default</span>
+          <div class="card-tile" style="width:280px;">
+            <div class="flex items-center gap-2">
+              <span class="health-dot health-dot-exceeded"></span>
+              <span class="project-card-name">Nimbus</span>
+            </div>
+          </div>
+        </div>
+        <div class="state-row">
+          <span class="state-label">Card tile · hover</span>
+          <div class="card-tile" style="width:280px;background:var(--lx-surface-card-hover);border-color:var(--lx-border-strong);">
+            <span class="project-card-name">Nimbus</span>
+          </div>
+        </div>
+        <pre class="code-block" id="code-card-row">&lt;div class="card-row"&gt;…&lt;/div&gt;
+&lt;div class="card-row card-row--dense"&gt;…&lt;/div&gt;  &lt;!-- menus --&gt;
+&lt;div class="card-panel"&gt;…&lt;/div&gt;              &lt;!-- sections --&gt;
+&lt;div class="card-panel card-panel--elevated"&gt;…&lt;/div&gt;
+&lt;div class="card-tile"&gt;…&lt;/div&gt;              &lt;!-- navigation --&gt;
+&lt;span class="chip"&gt;…&lt;/span&gt;                 &lt;!-- inline code --&gt;</pre>
+        <button class="btn btn-ghost btn-sm copy-btn" data-copy="code-card-row">Copy</button>
+        <div class="token-contract">Tokens: --lx-surface-card, --lx-surface-card-hover, --lx-surface-card-dragging, --lx-surface-elevated, --lx-surface-selected, --lx-border-default, --lx-border-strong, --lx-border-focus, --lx-shadow-sm, --lx-shadow-drag, --lx-focus-ring, --lx-focus-glow</div>
+      </div>
+      <div class="block-shell">
+        <div class="block-desc">
+          <strong>Mapping</strong> — semantic classes are value-aliases of the primitives (same numbers, own anatomy).<br/>
+          <span class="font-mono">.kanban-card</span> ≡ <span class="font-mono">.card-row</span> + accent bar, states, subtask dimming · <span class="font-mono">.check-row</span> ≡ <span class="font-mono">.card-row</span> + checkbox (bordered) or <span class="font-mono">.card-row--dense</span> (menus) · <span class="font-mono">.github-issue-row</span> ≡ <span class="font-mono">.card-row</span> + elevated surface (exception) · <span class="font-mono">.project-card</span> / <span class="font-mono">.health-card</span> ≡ <span class="font-mono">.card-tile</span>.
+        </div>
+      </div>
+    </section>
+
+    <section id="buttons">
+      <h2 class="font-display text-xl weight-600 color-primary">Buttons</h2>
+
+      <div class="block-shell">
+        <div class="block-desc">
+          <strong>Use</strong> — `.btn-primary` for the single primary action per view; `.btn-ghost` for secondary/inline actions; `.btn-danger-solid` for destructive confirms (delete/clear/revoke).<br/>
+          <strong>Avoid</strong> — multiple `.btn-primary`s in one view (dilutes the primary); `.btn-danger-solid` for non-destructive actions.<br/>
+          <strong>Instead</strong> — `.btn-danger` (quiet outline) for destructive-but-secondary actions; `.btn-ghost` for cancel.
+        </div>
+        <div class="state-row">
+          <span class="state-label">Variants</span>
+          <button class="btn">Base</button>
+          <button class="btn btn-primary">Primary</button>
+          <button class="btn btn-ghost">Ghost</button>
+          <button class="btn btn-danger">Danger</button>
+          <button class="btn btn-danger-solid">Delete</button>
+          <span class="annotation-tag">No .btn-secondary class exists — use .btn-ghost for secondary actions.</span>
+        </div>
+        <pre class="code-block" id="code-buttons-variants">&lt;button class="btn"&gt;Base&lt;/button&gt;
+&lt;button class="btn btn-primary"&gt;Primary&lt;/button&gt;
+&lt;button class="btn btn-ghost"&gt;Ghost&lt;/button&gt;
+&lt;button class="btn btn-danger"&gt;Danger&lt;/button&gt;
+&lt;button class="btn btn-danger-solid"&gt;Delete&lt;/button&gt;</pre>
+        <button class="btn btn-ghost btn-sm copy-btn" data-copy="code-buttons-variants">Copy</button>
+        <div class="token-contract">Tokens: --lx-border-focus, --lx-text-inverse, --lx-text-secondary, --lx-text-danger, --lx-bg-danger-subtle</div>
+      </div>
+
+      <div class="block-shell">
+        <div class="block-desc">
+          <strong>Use</strong> — `.btn-sm` (28px) for compact paired Cancel/Save rows and dense toolbars; `.btn-icon-sm` (28×28) for icon-only actions.<br/>
+          <strong>Avoid</strong> — `.btn-sm` for the primary CTA of a surface; full-height buttons inside dense filter bars.<br/>
+          <strong>Instead</strong> — default `.btn` (32px) for standalone primary actions.
+        </div>
+        <div class="state-row">
+          <span class="state-label">Sizes</span>
+          <button class="btn btn-primary btn-sm">Small</button>
+          <button class="btn btn-ghost btn-icon-sm" title="Icon 28×28">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 5v14M5 12h14"/></svg>
+          </button>
+          <span class="annotation-tag">No .btn-icon (32×32) class exists — only .btn-icon-sm (28×28).</span>
+        </div>
+        <pre class="code-block" id="code-buttons-sizes">&lt;button class="btn btn-primary btn-sm"&gt;Small&lt;/button&gt;
+&lt;button class="btn btn-ghost btn-icon-sm" title="Icon 28×28"&gt;
+  &lt;svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"&gt;&lt;path d="M12 5v14M5 12h14"/&gt;&lt;/svg&gt;
+&lt;/button&gt;</pre>
+        <button class="btn btn-ghost btn-sm copy-btn" data-copy="code-buttons-sizes">Copy</button>
+        <div class="token-contract">Tokens: --lx-border-focus, --lx-text-inverse, --lx-text-secondary</div>
+      </div>
+
+      <div class="block-shell">
+        <div class="block-desc">
+          <strong>Use</strong> — `disabled` for unavailable actions; spinner + disabled for pending mutations, with the label flipped to the gerund ("Saving…").<br/>
+          <strong>Avoid</strong> — leaving a button enabled while its mutation is in flight (double-submit); disabling without a pending indicator.<br/>
+          <strong>Instead</strong> — keep the form open and disable both buttons during pending; show the spinner inside the trigger.
+        </div>
+        <div class="state-row">
+          <span class="state-label">Disabled</span>
+          <button class="btn btn-primary" disabled>Primary</button>
+          <button class="btn btn-ghost" disabled>Ghost</button>
+        </div>
+        <div class="state-row">
+          <span class="state-label">Pending</span>
+          <button class="btn btn-primary btn-sm" disabled><span class="spinner" style="width:12px;height:12px;border-width:2px;"></span>Saving…</button>
+          <span class="annotation-tag">Pending: spinner + disabled, double-submit guarded.</span>
+        </div>
+        <pre class="code-block" id="code-buttons-states">&lt;button class="btn btn-primary" disabled&gt;Primary&lt;/button&gt;
+&lt;button class="btn btn-ghost" disabled&gt;Ghost&lt;/button&gt;
+&lt;button class="btn btn-primary btn-sm" disabled&gt;&lt;span class="spinner" style="width:12px;height:12px;border-width:2px;"&gt;&lt;/span&gt;Saving…&lt;/button&gt;</pre>
+        <button class="btn btn-ghost btn-sm copy-btn" data-copy="code-buttons-states">Copy</button>
+        <div class="token-contract">Tokens: --lx-border-focus, --lx-text-inverse, --lx-text-secondary, --lx-border-focus (spinner)</div>
+      </div>
+    </section>
+
+    <section id="inputs">
+      <h2 class="font-display text-xl weight-600 color-primary">Inputs &amp; Controls</h2>
+
+      <div class="block-shell">
+        <div class="block-desc">
+          <strong>Use</strong> — `.prop-input w-full` for single-line text/email entry with a `.field-label`; error state = red border + `.notice notice-danger` message.<br/>
+          <strong>Avoid</strong> — a bare input without a label; inline error text in muted gray (must read as danger).<br/>
+          <strong>Instead</strong> — `.notice notice-danger` for the error message; `.field-hint` for neutral helper text.
+        </div>
+        <div class="state-row">
+          <span class="state-label">Text input</span>
+          <div style="width:100%;max-width:320px;">
+            <label class="field-label" for="ds-input">Email</label>
+            <input id="ds-input" class="prop-input w-full" type="email" placeholder="you@example.com" />
+          </div>
+        </div>
+        <div class="state-row">
+          <span class="state-label">Text input · error</span>
+          <div style="width:100%;max-width:320px;">
+            <label class="field-label" for="ds-input-err">Email</label>
+            <input id="ds-input-err" class="prop-input w-full" type="email" value="dani@emberfall.dev" style="border-color:var(--lx-text-danger);" />
+            <div class="notice notice-danger mt-2">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+              <span>Invalid email or password.</span>
+            </div>
+          </div>
+        </div>
+        <pre class="code-block" id="code-inputs-text">&lt;label class="field-label" for="email"&gt;Email&lt;/label&gt;
+&lt;input id="email" class="prop-input w-full" type="email" placeholder="you@example.com" /&gt;
+&lt;!-- error state: red border + notice-danger message --&gt;
+&lt;input class="prop-input w-full" style="border-color:var(--lx-text-danger);" /&gt;
+&lt;div class="notice notice-danger"&gt;…&lt;/div&gt;</pre>
+        <button class="btn btn-ghost btn-sm copy-btn" data-copy="code-inputs-text">Copy</button>
+        <div class="token-contract">Tokens: --lx-text-danger, --lx-border-focus (focus)</div>
+      </div>
+
+      <div class="block-shell">
+        <div class="block-desc">
+          <strong>Use</strong> — `.prop-input w-full` with `resize:vertical` for multi-line plain text (project description, sprint notes).<br/>
+          <strong>Avoid</strong> — a fixed-height textarea that clips long content; `resize:none` for user-authored text.<br/>
+          <strong>Instead</strong> — the TipTap editor (`.editor-area`) for rich/structured content; textarea for plain text only.
+        </div>
+        <div class="state-row">
+          <span class="state-label">Textarea</span>
+          <textarea class="prop-input w-full" rows="3" style="resize:vertical;min-height:80px;">Roguelike spaceship builder with procedural sectors, modular hulls, and permadeath.</textarea>
+        </div>
+        <pre class="code-block" id="code-inputs-textarea">&lt;textarea class="prop-input w-full" rows="3" style="resize:vertical;min-height:80px;"&gt;…&lt;/textarea&gt;</pre>
+        <button class="btn btn-ghost btn-sm copy-btn" data-copy="code-inputs-textarea">Copy</button>
+        <div class="token-contract">Tokens: --lx-border-focus (focus)</div>
+      </div>
+
+      <div class="block-shell">
+        <div class="block-desc">
+          <strong>Use</strong> — `.prop-input` with colored `●` prefix options for priority/type pickers; selected color via `color` on the `&lt;select&gt;` element.<br/>
+          <strong>Avoid</strong> — option colors that drift from the canonical palette; applying color on `&lt;option&gt;` (renders inconsistently across browsers).<br/>
+          <strong>Instead</strong> — canonical data hexes: priority #FF4444/#F0C040/#22D3EE/#6B6560, type #4ADE80/#FF4444/#22D3EE/#F472B6.
+        </div>
+        <div class="state-row">
+          <span class="state-label">Select · colored ● prefix</span>
+          <div style="width:100%;max-width:320px;">
+            <span class="prop-label">Priority</span>
+            <select class="prop-input" style="width:140px;color:#F0C040;">
+              <option style="color:#FF4444;">● Urgent</option>
+              <option selected style="color:#F0C040;">● High</option>
+              <option style="color:#22D3EE;">● Medium</option>
+              <option style="color:#6B6560;">● Low</option>
+            </select>
+          </div>
+        </div>
+        <pre class="code-block" id="code-inputs-select">&lt;select class="prop-input" style="width:140px;color:#F0C040;"&gt;
+  &lt;option style="color:#FF4444;"&gt;● Urgent&lt;/option&gt;
+  &lt;option selected style="color:#F0C040;"&gt;● High&lt;/option&gt;
+  &lt;option style="color:#22D3EE;"&gt;● Medium&lt;/option&gt;
+  &lt;option style="color:#6B6560;"&gt;● Low&lt;/option&gt;
+&lt;/select&gt;</pre>
+        <button class="btn btn-ghost btn-sm copy-btn" data-copy="code-inputs-select">Copy</button>
+        <div class="token-contract">Data colors (canonical hex): #FF4444, #F0C040, #22D3EE, #6B6560</div>
+      </div>
+
+      <div class="block-shell">
+        <div class="block-desc">
+          <strong>Use</strong> — `.tasks-search` for filter-bar search across tasks/wiki.<br/>
+          <strong>Avoid</strong> — `.tasks-search` for a general text input (it is search-specific); a full-width search where a compact one fits.<br/>
+          <strong>Instead</strong> — `.prop-input` for non-search text entry.
+        </div>
+        <div class="state-row">
+          <span class="state-label">Search</span>
+          <input class="tasks-search" type="search" placeholder="Search tasks…" style="width:100%;max-width:320px;" />
+        </div>
+        <pre class="code-block" id="code-inputs-search">&lt;input class="tasks-search" type="search" placeholder="Search tasks…" /&gt;</pre>
+        <button class="btn btn-ghost btn-sm copy-btn" data-copy="code-inputs-search">Copy</button>
+        <div class="token-contract">Tokens: --lx-border-focus (focus)</div>
+      </div>
+
+      <div class="block-shell">
+        <div class="block-desc">
+          <strong>Use</strong> — `.checkbox` (+ `.checked`) for multi-select rows (required fields, filters); `.toggle-switch` for a single on/off setting (autosave, show archived).<br/>
+          <strong>Avoid</strong> — a toggle for a multi-option choice; a checkbox for a persistent on/off preference.<br/>
+          <strong>Instead</strong> — `.toggle-switch` for binary settings; `.checkbox` rows for multi-select lists.
+        </div>
+        <div class="state-row">
+          <span class="state-label">Checkbox</span>
+          <div class="check-row"><div class="checkbox checked"></div> Title</div>
+          <div class="check-row"><div class="checkbox"></div> Description</div>
+        </div>
+        <div class="state-row">
+          <span class="state-label">Toggle</span>
+          <button class="toggle-switch" aria-label="Autosave off"></button>
+          <span class="text-sm color-secondary">Autosave</span>
+        </div>
+        <pre class="code-block" id="code-inputs-check">&lt;div class="check-row"&gt;&lt;div class="checkbox checked"&gt;&lt;/div&gt; Title&lt;/div&gt;
+&lt;button class="toggle-switch" aria-label="Autosave off"&gt;&lt;/button&gt;</pre>
+        <button class="btn btn-ghost btn-sm copy-btn" data-copy="code-inputs-check">Copy</button>
+        <div class="token-contract">Tokens: --lx-border-focus (checked/toggle on). No .radio class exists — skipped.</div>
+      </div>
+    </section>
+
+    <section id="badges">
+      <h2 class="font-display text-xl weight-600 color-primary">Badges &amp; Indicators</h2>
+
+      <div class="block-shell">
+        <div class="block-desc">
+          <strong>Use</strong> — for a column's WIP count/limit (e.g. "05/08"), with `wip-ok`/`wip-approaching`/`wip-exceeded` by threshold.<br/>
+          <strong>Avoid</strong> — for task counts that aren't WIP-limited; a badge when `wip_limit` is NULL (hide it).<br/>
+          <strong>Instead</strong> — a plain count/text for non-WIP counts.
+        </div>
+        <div class="state-row">
+          <span class="state-label">WipBadge</span>
+          <span class="wip-badge wip-ok">05/08</span>
+          <span class="wip-badge wip-approaching">07/08</span>
+          <span class="wip-badge wip-exceeded">05/04</span>
+        </div>
+        <pre class="code-block" id="code-badges-wip">&lt;span class="wip-badge wip-ok"&gt;05/08&lt;/span&gt;
+&lt;span class="wip-badge wip-approaching"&gt;07/08&lt;/span&gt;
+&lt;span class="wip-badge wip-exceeded"&gt;05/04&lt;/span&gt;</pre>
+        <button class="btn btn-ghost btn-sm copy-btn" data-copy="code-badges-wip">Copy</button>
+        <div class="token-contract">Tokens: --lx-bg-success-subtle/--lx-text-success, --lx-bg-warning-subtle/--lx-text-warning, --lx-bg-danger-subtle/--lx-text-danger</div>
+      </div>
+
+      <div class="block-shell">
+        <div class="block-desc">
+          <strong>Use</strong> — for priority in the task detail property bar and filters.<br/>
+          <strong>Avoid</strong> — rendering the hollow-ring Low as a solid dot.<br/>
+          <strong>Instead</strong> — keep the hollow ring for Low (§5.5).
+        </div>
+        <div class="state-row">
+          <span class="state-label">PriorityBadge</span>
+          <span class="priority-dot priority-urgent" title="Urgent priority"></span>
+          <span class="priority-dot priority-high" title="High priority"></span>
+          <span class="priority-dot priority-medium" title="Medium priority"></span>
+          <span class="priority-dot priority-low" title="Low priority"></span>
+          <span class="annotation-tag">Low = hollow ring, never solid (§5.5)</span>
+        </div>
+        <pre class="code-block" id="code-badges-priority">&lt;span class="priority-dot priority-urgent" title="Urgent priority"&gt;&lt;/span&gt;
+&lt;span class="priority-dot priority-high" title="High priority"&gt;&lt;/span&gt;
+&lt;span class="priority-dot priority-medium" title="Medium priority"&gt;&lt;/span&gt;
+&lt;span class="priority-dot priority-low" title="Low priority"&gt;&lt;/span&gt;</pre>
+        <button class="btn btn-ghost btn-sm copy-btn" data-copy="code-badges-priority">Copy</button>
+        <div class="token-contract">Data colors (canonical hex): #FF4444, #F0C040, #22D3EE, #6B6560 (low = hollow ring)</div>
+      </div>
+
+      <div class="block-shell">
+        <div class="block-desc">
+          <strong>Use</strong> — for task type (feature/bug/task/asset) on cards and rows.<br/>
+          <strong>Avoid</strong> — inventing new type colors; using the type badge for priority.<br/>
+          <strong>Instead</strong> — canonical type hexes; `.priority-dot` for priority.
+        </div>
+        <div class="state-row">
+          <span class="state-label">TypeBadge</span>
+          <span class="type-badge type-feature">Feature</span>
+          <span class="type-badge type-bug">Bug</span>
+          <span class="type-badge type-task">Task</span>
+          <span class="type-badge type-asset">Asset</span>
+        </div>
+        <pre class="code-block" id="code-badges-type">&lt;span class="type-badge type-feature"&gt;Feature&lt;/span&gt;
+&lt;span class="type-badge type-bug"&gt;Bug&lt;/span&gt;
+&lt;span class="type-badge type-task"&gt;Task&lt;/span&gt;
+&lt;span class="type-badge type-asset"&gt;Asset&lt;/span&gt;</pre>
+        <button class="btn btn-ghost btn-sm copy-btn" data-copy="code-badges-type">Copy</button>
+        <div class="token-contract">Data colors (canonical hex): #4ADE80, #FF4444, #22D3EE, #F472B6</div>
+      </div>
+
+      <div class="block-shell">
+        <div class="block-desc">
+          <strong>Use</strong> — `.status-chip` + `.status-dot` for forge/task run states (queued/running/done/failed/cancelled).<br/>
+          <strong>Avoid</strong> — a status chip for a persistent field value; color alone without a label.<br/>
+          <strong>Instead</strong> — `.type-badge`/`.priority-dot` for task fields; keep label + dot for status.
+        </div>
+        <div class="state-row">
+          <span class="state-label">StatusBadge</span>
+          <button class="status-chip" aria-pressed="false"><span class="status-dot" style="background:var(--lx-text-success);"></span>Done</button>
+          <button class="status-chip" aria-pressed="false"><span class="status-dot" style="background:var(--lx-text-warning);"></span>Running</button>
+          <button class="status-chip" aria-pressed="false"><span class="status-dot" style="background:var(--lx-text-danger);"></span>Failed</button>
+          <button class="status-chip" aria-pressed="false"><span class="status-dot" style="background:var(--lx-text-muted);"></span>Cancelled</button>
+        </div>
+        <pre class="code-block" id="code-badges-status">&lt;button class="status-chip" aria-pressed="false"&gt;&lt;span class="status-dot" style="background:var(--lx-text-success);"&gt;&lt;/span&gt;Done&lt;/button&gt;
+&lt;button class="status-chip" aria-pressed="false"&gt;&lt;span class="status-dot" style="background:var(--lx-text-warning);"&gt;&lt;/span&gt;Running&lt;/button&gt;
+&lt;button class="status-chip" aria-pressed="false"&gt;&lt;span class="status-dot" style="background:var(--lx-text-danger);"&gt;&lt;/span&gt;Failed&lt;/button&gt;</pre>
+        <button class="btn btn-ghost btn-sm copy-btn" data-copy="code-badges-status">Copy</button>
+        <div class="token-contract">Tokens: --lx-text-success, --lx-text-warning, --lx-text-danger, --lx-text-muted</div>
+      </div>
+
+      <div class="block-shell">
+        <div class="block-desc">
+          <strong>Use</strong> — `.health-dot` for project health; `.priority-dot` for priority; `.column-strip` (3px top strip) for column color; `.milestone-due` for due dates.<br/>
+          <strong>Avoid</strong> — a health dot for a task-level state; a column strip where a solid fill is needed.<br/>
+          <strong>Instead</strong> — match the indicator to the data (health vs priority vs due).
+        </div>
+        <div class="state-row">
+          <span class="state-label">Indicators</span>
+          <span class="health-dot health-dot-ok"></span>
+          <span class="health-dot health-dot-approaching"></span>
+          <span class="health-dot health-dot-exceeded"></span>
+          <span class="priority-dot priority-high" title="High priority"></span>
+          <span class="milestone-due">Due Sep 21</span>
+          <span class="milestone-due milestone-due-overdue">Overdue 3d</span>
+        </div>
+        <div class="state-row">
+          <span class="state-label">Column strip</span>
+          <div style="width:120px;height:3px;background:#22D3EE;"></div>
+          <div style="width:120px;height:3px;background:#F0C040;"></div>
+          <div style="width:120px;height:3px;background:transparent;"></div>
+        </div>
+        <pre class="code-block" id="code-badges-indicators">&lt;span class="health-dot health-dot-ok"&gt;&lt;/span&gt;
+&lt;span class="priority-dot priority-high" title="High priority"&gt;&lt;/span&gt;
+&lt;span class="milestone-due"&gt;Due Sep 21&lt;/span&gt;
+&lt;span class="milestone-due milestone-due-overdue"&gt;Overdue 3d&lt;/span&gt;
+&lt;div class="column-strip" style="background:#22D3EE;"&gt;&lt;/div&gt;</pre>
+        <button class="btn btn-ghost btn-sm copy-btn" data-copy="code-badges-indicators">Copy</button>
+        <div class="token-contract">Tokens: --lx-text-danger (overdue). Data colors: #22D3EE, #F0C040 (column strips)</div>
+      </div>
+    </section>
+
+    <section id="feedback">
+      <h2 class="font-display text-xl weight-600 color-primary">Feedback</h2>
+
+      <div class="block-shell">
+        <div class="block-desc">
+          <strong>Use</strong> — for transient mutation feedback (success/warning/error), stacked top-right, auto-dismiss 5s (errors persist until dismissed).<br/>
+          <strong>Avoid</strong> — toasts for persistent state or blocking decisions; more than 3 stacked.<br/>
+          <strong>Instead</strong> — `.notice` inline for in-form errors; a modal for blocking decisions.
+        </div>
+        <div class="state-row">
+          <span class="state-label">Toast</span>
+          <div class="toast toast-success">
+            <span class="toast-icon"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="m9 12 2 2 4-4"/></svg></span>
+            <div class="flex-1">
+              <div class="toast-title">Task moved</div>
+              <div class="toast-body font-mono" style="font-size:11px;">#042 → Done</div>
+            </div>
+            <button class="toast-close"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M18 6L6 18M6 6l12 12"/></svg></button>
+          </div>
+          <div class="toast toast-warning">
+            <span class="toast-icon"><svg viewBox="0 0 24 24"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg></span>
+            <div class="flex-1">
+              <div class="toast-title">WIP limit exceeded</div>
+              <div class="toast-body">In Progress is at <span class="font-mono" style="font-size:11px;">09/08</span> tasks.</div>
+            </div>
+            <button class="toast-close"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M18 6L6 18M6 6l12 12"/></svg></button>
+          </div>
+          <div class="toast toast-error">
+            <span class="toast-icon"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="m15 9-6 6"/><path d="m9 9 6 6"/></svg></span>
+            <div class="flex-1">
+              <div class="toast-title">Failed to save</div>
+              <div class="toast-body">Your changes weren't saved.</div>
+            </div>
+            <button class="toast-close"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M18 6L6 18M6 6l12 12"/></svg></button>
+          </div>
+        </div>
+        <pre class="code-block" id="code-feedback-toast">&lt;div class="toast toast-success"&gt;
+  &lt;span class="toast-icon"&gt;…&lt;/span&gt;
+  &lt;div class="flex-1"&gt;
+    &lt;div class="toast-title"&gt;Task moved&lt;/div&gt;
+    &lt;div class="toast-body"&gt;#042 → Done&lt;/div&gt;
+  &lt;/div&gt;
+  &lt;button class="toast-close"&gt;…&lt;/button&gt;
+&lt;/div&gt;
+&lt;!-- toast-warning / toast-error for the other variants --&gt;</pre>
+        <button class="btn btn-ghost btn-sm copy-btn" data-copy="code-feedback-toast">Copy</button>
+        <div class="token-contract">Tokens: --lx-bg-success-subtle/--lx-text-success, --lx-bg-warning-subtle/--lx-text-warning, --lx-bg-danger-subtle/--lx-text-danger</div>
+      </div>
+
+      <div class="block-shell">
+        <div class="block-desc">
+          <strong>Use</strong> — `.skeleton` blocks mirroring the final layout on initial query loads only.<br/>
+          <strong>Avoid</strong> — skeletons on mutations (TanStack Query updates the cache from the response); spinners; borders on skeleton blocks.<br/>
+          <strong>Instead</strong> — pending button states for mutations; nothing for cache updates.
+        </div>
+        <div class="state-row">
+          <span class="state-label">Loading skeleton · card list</span>
+          <div style="width:300px;display:flex;flex-direction:column;gap:8px;">
+            <div class="card-row">
+              <div class="skeleton" style="width:56px;height:18px;"></div>
+              <div class="skeleton mt-2" style="width:85%;height:14px;"></div>
+              <div class="skeleton mt-1" style="width:60%;height:14px;"></div>
+              <div class="flex items-center gap-2 mt-2">
+                <div class="skeleton skeleton-circle" style="width:20px;height:20px;"></div>
+                <div class="skeleton" style="width:72px;height:12px;"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <pre class="code-block" id="code-feedback-skeleton">&lt;div class="card-row"&gt;
+  &lt;div class="skeleton" style="width:56px;height:18px;"&gt;&lt;/div&gt;
+  &lt;div class="skeleton mt-2" style="width:85%;height:14px;"&gt;&lt;/div&gt;
+  &lt;div class="skeleton skeleton-circle" style="width:20px;height:20px;"&gt;&lt;/div&gt;
+&lt;/div&gt;</pre>
+        <button class="btn btn-ghost btn-sm copy-btn" data-copy="code-feedback-skeleton">Copy</button>
+        <div class="token-contract">Tokens: --lx-surface-card, --lx-border-subtle</div>
+      </div>
+
+      <div class="block-shell">
+        <div class="block-desc">
+          <strong>Use</strong> — full `.empty-state` (icon tile + heading + subtext + CTA) for empty surfaces; compact (icon + one line + add button) for empty columns.<br/>
+          <strong>Avoid</strong> — an empty state with no CTA; a full empty state in a compact column.<br/>
+          <strong>Instead</strong> — compact variant for columns; full variant for whole surfaces.
+        </div>
+        <div class="state-row">
+          <span class="state-label">Empty state · full</span>
+          <div class="empty-state" style="width:100%;max-width:400px;padding:32px 16px;">
+            <div class="empty-state-icon">
+              <svg viewBox="0 0 24 24"><path d="M22 12h-6l-2 3h-4l-2-3H2"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/></svg>
+            </div>
+            <h2 class="font-display text-lg weight-500 color-primary mt-3">No tasks yet</h2>
+            <p class="text-sm color-secondary mt-1" style="max-width:300px;">Create your first task to start tracking work on this board.</p>
+            <button class="btn btn-primary mt-4">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 5v14m-7-7h14"/></svg>
+              
+              New Task
+            </button>
+          </div>
+        </div>
+        <div class="state-row">
+          <span class="state-label">Empty state · compact</span>
+          <div style="display:flex;flex-direction:column;align-items:center;gap:8px;padding:16px;">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="color:var(--lx-text-muted);"><path d="M22 12h-6l-2 3h-4l-2-3H2"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/></svg>
+            <span class="text-xs color-tertiary">Nothing here yet</span>
+            <button class="add-task-btn">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 5v14m-7-7h14"/></svg>
+              
+              Add task...
+            </button>
+          </div>
+        </div>
+        <pre class="code-block" id="code-feedback-empty">&lt;div class="empty-state"&gt;
+  &lt;div class="empty-state-icon"&gt;…&lt;/div&gt;
+  &lt;h2 class="font-display text-lg weight-500 color-primary"&gt;No tasks yet&lt;/h2&gt;
+  &lt;p class="text-sm color-secondary"&gt;…&lt;/p&gt;
+  &lt;button class="btn btn-primary"&gt;New Task&lt;/button&gt;
+&lt;/div&gt;
+&lt;!-- compact: icon 20px + one line + add-task-btn --&gt;</pre>
+        <button class="btn btn-ghost btn-sm copy-btn" data-copy="code-feedback-empty">Copy</button>
+        <div class="token-contract">Tokens: --lx-text-muted, --lx-text-secondary</div>
+      </div>
+    </section>
+
+    <section id="overlays">
+      <h2 class="font-display text-xl weight-600 color-primary">Overlays</h2>
+
+      <div class="block-shell">
+        <div class="block-desc">
+          <strong>Use</strong> — `.dialog` for blocking decisions (confirm delete, promote) over a dimmed backdrop.<br/>
+          <strong>Avoid</strong> — a modal for a non-blocking filter; a modal for quick inline edits.<br/>
+          <strong>Instead</strong> — `.menu-popover` for lightweight filters; slideover for detail/edit panels.
+        </div>
+        <div class="state-row">
+          <span class="state-label">Modal · destructive</span>
+          <div class="dialog">
+            <div class="flex items-center justify-between">
+              <h2 class="font-display text-lg weight-500 color-primary">Delete task?</h2>
+            </div>
+            <p class="text-sm color-secondary mt-3" style="line-height:20px;">This will permanently delete <span class="font-mono text-xs" style="background:var(--lx-surface-card);border-radius:4px;padding:2px 5px;color:var(--lx-text-primary);">#042</span> and its description. This action cannot be undone.</p>
+            <div class="flex items-center gap-2 mt-4" style="justify-content:flex-end;">
+              <button class="btn btn-ghost btn-sm">Cancel</button>
+              <button class="btn btn-danger-solid">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+                
+                Delete task
+              </button>
+            </div>
+          </div>
+        </div>
+        <div class="state-row">
+          <span class="state-label">Modal · default</span>
+          <div class="dialog">
+            <h2 class="font-display text-lg weight-500 color-primary">Promote to admin?</h2>
+            <p class="text-sm color-secondary mt-3" style="line-height:20px;">Promote <span class="font-mono text-xs" style="background:var(--lx-surface-card);border-radius:4px;padding:2px 5px;color:var(--lx-text-primary);">Dani</span> to global admin?</p>
+            <div class="flex items-center gap-2 mt-4" style="justify-content:flex-end;">
+              <button class="btn btn-ghost btn-sm">Cancel</button>
+              <button class="btn btn-primary btn-sm">Promote</button>
+            </div>
+          </div>
+        </div>
+        <pre class="code-block" id="code-overlays-modal">&lt;div class="dialog"&gt;
+  &lt;h2 class="font-display text-lg weight-500 color-primary"&gt;Delete task?&lt;/h2&gt;
+  &lt;p class="text-sm color-secondary mt-3"&gt;…&lt;/p&gt;
+  &lt;div class="flex items-center gap-2 mt-4" style="justify-content:flex-end;"&gt;
+    &lt;button class="btn btn-ghost btn-sm"&gt;Cancel&lt;/button&gt;
+    &lt;button class="btn btn-danger-solid"&gt;Delete task&lt;/button&gt;
+  &lt;/div&gt;
+&lt;/div&gt;
+&lt;!-- backdrop: &lt;div class="slideover-overlay"&gt;&lt;/div&gt; --&gt;</pre>
+        <button class="btn btn-ghost btn-sm copy-btn" data-copy="code-overlays-modal">Copy</button>
+        <div class="token-contract">Tokens: --lx-surface-overlay (backdrop), --lx-shadow-lg</div>
+      </div>
+
+      <div class="block-shell">
+        <div class="block-desc">
+          <strong>Use</strong> — `.dropdown-menu` for action menus anchored to a trigger (card kebab, user menu), with labels, separators, shortcuts, `.focused`, and a pinned `.danger` item.<br/>
+          <strong>Avoid</strong> — a dropdown for a multi-select filter; nesting dropdowns.<br/>
+          <strong>Instead</strong> — `.menu-popover` for filter checklists; a modal for blocking confirms.
+        </div>
+        <div class="state-row">
+          <span class="state-label">Dropdown menu</span>
+          <div class="dropdown-menu" style="position:relative;width:224px;">
+            <div class="dropdown-label">Task #042</div>
+            <div class="dropdown-item">
+              <svg viewBox="0 0 24 24"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/><path d="m15 5 4 4"/></svg>
+              Edit task
+              <span class="dropdown-shortcut">E</span>
+            </div>
+            <div class="dropdown-item">
+              <svg viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
+              Copy link
+              <span class="dropdown-shortcut">⌘C</span>
+            </div>
+            <div class="dropdown-separator"></div>
+            <div class="dropdown-label">Move to</div>
+            <div class="dropdown-item focused">
+              <span style="width:8px;height:8px;border-radius:9999px;background:#22D3EE;flex-shrink:0;"></span>
+              In Progress
+              <svg viewBox="0 0 24 24" style="margin-left:auto;width:14px;height:14px;color:var(--lx-border-focus);"><path d="M20 6 9 17l-5-5"/></svg>
+            </div>
+            <div class="dropdown-separator"></div>
+            <div class="dropdown-item danger">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+              
+              Delete task
+              <span class="dropdown-shortcut">⌫</span>
+            </div>
+          </div>
+        </div>
+        <pre class="code-block" id="code-overlays-dropdown">&lt;div class="dropdown-menu"&gt;
+  &lt;div class="dropdown-label"&gt;Task #042&lt;/div&gt;
+  &lt;div class="dropdown-item"&gt;…&lt;span class="dropdown-shortcut"&gt;E&lt;/span&gt;&lt;/div&gt;
+  &lt;div class="dropdown-separator"&gt;&lt;/div&gt;
+  &lt;div class="dropdown-item focused"&gt;…&lt;/div&gt;
+  &lt;div class="dropdown-item danger"&gt;…&lt;/div&gt;
+&lt;/div&gt;</pre>
+        <button class="btn btn-ghost btn-sm copy-btn" data-copy="code-overlays-dropdown">Copy</button>
+        <div class="token-contract">Tokens: --lx-surface-elevated, --lx-border-focus (focused), --lx-text-danger (danger)</div>
+      </div>
+
+      <div class="block-shell">
+        <div class="block-desc">
+          <strong>Use</strong> — `.menu-popover` for lightweight filters/checklists anchored to a control (board filter).<br/>
+          <strong>Avoid</strong> — a popover for a blocking decision; a popover that needs long scrollable content.<br/>
+          <strong>Instead</strong> — `.dialog` modal for blocking decisions; slideover for detail panels.
+        </div>
+        <div class="state-row">
+          <span class="state-label">Popover</span>
+          <div class="menu-popover" style="position:relative;min-width:256px;">
+            <div class="prop-label" style="padding:6px 10px 2px;">Column</div>
+            <div class="check-row" style="padding-left:10px;padding-right:10px;">
+              <span class="checkbox"></span>
+              <span class="priority-dot" style="background:transparent;border:2px solid #6B6560;width:6px;height:6px;"></span>
+              Backlog
+            </div>
+            <div class="check-row" style="padding-left:10px;padding-right:10px;">
+              <span class="checkbox checked"></span>
+              <span class="priority-dot" style="background:#F0C040;"></span>
+              In Progress
+            </div>
+          </div>
+        </div>
+        <pre class="code-block" id="code-overlays-popover">&lt;div class="menu-popover"&gt;
+  &lt;div class="prop-label"&gt;Column&lt;/div&gt;
+  &lt;div class="check-row"&gt;&lt;span class="checkbox"&gt;&lt;/span&gt; Backlog&lt;/div&gt;
+&lt;/div&gt;</pre>
+        <button class="btn btn-ghost btn-sm copy-btn" data-copy="code-overlays-popover">Copy</button>
+        <div class="token-contract">Tokens: --lx-surface-elevated, --lx-shadow-lg</div>
+      </div>
+
+      <div class="block-shell">
+        <div class="block-desc">
+          <strong>Use</strong> — `.slideover` (480px, right) for detail/edit panels (task detail) over a dimmed backdrop.<br/>
+          <strong>Avoid</strong> — a slideover for a quick confirm; a slideover for a lightweight filter.<br/>
+          <strong>Instead</strong> — `.dialog` for confirms; `.menu-popover` for filters.
+        </div>
+        <div class="state-row">
+          <span class="state-label">Slideover</span>
+          <div class="slideover" style="position:relative;width:100%;max-width:520px;">
+            <div class="slideover-header border-b-subtle">
+              <div class="flex items-center gap-2">
+                <span class="text-xs color-muted font-body">Nimbus / Board</span>
+              </div>
+            </div>
+            <div class="px-4 pt-4">
+              <h2 class="slideover-title" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+                <span class="task-key">EG-18</span>
+                <span class="detail-title">Crash on large board load</span>
+              </h2>
+            </div>
+          </div>
+        </div>
+        <pre class="code-block" id="code-overlays-slideover">&lt;div class="slideover-overlay"&gt;&lt;/div&gt;
+&lt;div class="slideover"&gt;
+  &lt;div class="slideover-header border-b-subtle"&gt;…&lt;/div&gt;
+  &lt;div class="px-4 pt-4"&gt;…&lt;/div&gt;
+&lt;/div&gt;</pre>
+        <button class="btn btn-ghost btn-sm copy-btn" data-copy="code-overlays-slideover">Copy</button>
+        <div class="token-contract">Tokens: --lx-surface-overlay (backdrop), --lx-shadow-slideover</div>
+      </div>
+    </section>
+
+    <section id="misc">
+      <h2 class="font-display text-xl weight-600 color-primary">Misc</h2>
+
+      <div class="block-shell">
+        <div class="block-desc">
+          <strong>Use</strong> — `.avatar` for user identity (initials), sized by context (20px nav, 28px menu, 24px comments).<br/>
+          <strong>Avoid</strong> — an avatar for a non-user entity; oversized avatars in dense rows.<br/>
+          <strong>Instead</strong> — `.health-dot`/`.priority-dot` for status/priority indicators.
+        </div>
+        <div class="state-row">
+          <span class="state-label">Avatar</span>
+          <div class="avatar" style="width:20px;height:20px;font-size:10px;">Y</div>
+          <div class="avatar" style="width:28px;height:28px;font-size:12px;">MK</div>
+          <div class="avatar" style="width:32px;height:32px;font-size:13px;">JD</div>
+        </div>
+        <pre class="code-block" id="code-misc-avatar">&lt;div class="avatar" style="width:20px;height:20px;font-size:10px;"&gt;Y&lt;/div&gt;
+&lt;div class="avatar" style="width:28px;height:28px;font-size:12px;"&gt;MK&lt;/div&gt;</pre>
+        <button class="btn btn-ghost btn-sm copy-btn" data-copy="code-misc-avatar">Copy</button>
+        <div class="token-contract">Tokens: --lx-surface-card-hover (bg), --lx-text-secondary</div>
+      </div>
+
+      <div class="block-shell">
+        <div class="block-desc">
+          <strong>Use</strong> — `.dropdown-separator` / `.menu-separator` to group menu items.<br/>
+          <strong>Avoid</strong> — a divider as a layout spacer between unrelated sections.<br/>
+          <strong>Instead</strong> — spacing/margins for layout separation.
+        </div>
+        <div class="state-row">
+          <span class="state-label">Divider</span>
+          <div class="dropdown-separator" style="width:200px;"></div>
+          <div class="menu-separator" style="width:200px;"></div>
+        </div>
+        <pre class="code-block" id="code-misc-divider">&lt;div class="dropdown-separator"&gt;&lt;/div&gt;
+&lt;div class="menu-separator"&gt;&lt;/div&gt;</pre>
+        <button class="btn btn-ghost btn-sm copy-btn" data-copy="code-misc-divider">Copy</button>
+        <div class="token-contract">Tokens: --lx-border-subtle</div>
+      </div>
+
+      <div class="block-shell">
+        <div class="block-desc">
+          <strong>Use</strong> — `--lx-focus-ring` + `--lx-focus-glow` for keyboard focus on interactive elements.<br/>
+          <strong>Avoid</strong> — focus glow on hover (it is focus-only); removing the ring for mouse users.<br/>
+          <strong>Instead</strong> — `--lx-surface-selected`/border for hover states.
+        </div>
+        <div class="state-row">
+          <span class="state-label">Focus ring</span>
+          <button class="btn btn-primary" style="box-shadow:var(--lx-focus-ring),var(--lx-focus-glow);">Focused</button>
+          <span class="annotation-tag">Scrollbar is styled globally via ::-webkit-scrollbar (8px, --lx-scrollbar-track/thumb) — no class.</span>
+        </div>
+        <pre class="code-block" id="code-misc-focus">box-shadow: var(--lx-focus-ring), var(--lx-focus-glow);</pre>
+        <button class="btn btn-ghost btn-sm copy-btn" data-copy="code-misc-focus">Copy</button>
+        <div class="token-contract">Tokens: --lx-focus-ring, --lx-focus-glow</div>
+      </div>
+    </section>
+  </main>
+  <script>
+    // Theme toggle — flips [data-theme="light"] on <html>
+    const toggle = document.getElementById('theme-toggle');
+    toggle.addEventListener('click', () => {
+      const root = document.documentElement;
+      if (root.dataset.theme === 'light') { delete root.dataset.theme; toggle.textContent = 'Light'; }
+      else { root.dataset.theme = 'light'; toggle.textContent = 'Dark'; }
+    });
+    // Copy buttons — delegated, reads data-copy → <pre id>
+    document.addEventListener('click', (e) => {
+      const btn = e.target.closest('[data-copy]');
+      if (!btn) return;
+      const pre = document.getElementById(btn.dataset.copy);
+      if (pre) navigator.clipboard.writeText(pre.textContent);
+    });
+  </script>
+</body>
+</html>

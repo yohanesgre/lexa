@@ -281,7 +281,7 @@ export function GitHubSection({ taskId, slug, githubs, columnGithubState, onLink
               </button>
             </div>
             {query.trim() && results.length > 0 && (
-              <div className="mt-1" style={{ background: "var(--lx-surface-card)", border: "1px solid var(--lx-border-default)", borderRadius: 6, overflow: "hidden" }}>
+              <div className="mt-1 card-row" style={{ overflow: "hidden" }}>
                 {results.map((r, i) => (
                   <button
                     type="button"

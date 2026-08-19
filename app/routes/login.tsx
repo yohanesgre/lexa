@@ -46,7 +46,7 @@ function LoginPage() {
         <div className="font-display text-xl weight-600 mb-1" style={{ textAlign: "center", fontSize: 24 }}>Lexa</div>
         <p className="text-sm text-lx-text-secondary mb-4" style={{ textAlign: "center" }}>Sign in to your workspace</p>
 
-        <form onSubmit={handleSubmit} style={{ background: "var(--lx-surface-card)", border: "1px solid var(--lx-border-default)", borderRadius: 10, padding: 24, boxShadow: "0 1px 0 rgba(0,0,0,0.2)" }}>
+        <form onSubmit={handleSubmit} className="card-panel" style={{ boxShadow: "var(--lx-shadow-sm)" }}>
           {error && (
             <div className="notice notice-danger mb-4">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5}><circle cx="12" cy="12" r="10" /><line x1="12" y1="8" x2="12" y2="12" /><line x1="12" y1="16" x2="12.01" y2="16" /></svg>

@@ -38,13 +38,13 @@ export function TeamSettingsRuntimesTable({ teamId, runtimes, isLoading, isError
       ) : isError ? (
         <div className="text-sm text-lx-text-danger py-8 text-center">Failed to load runtimes.</div>
       ) : runtimes.length === 0 ? (
-        <div className="flex flex-col items-center gap-1.5 text-center mb-4" style={{ background: "var(--lx-surface-card)", border: "1px dashed var(--lx-border-strong)", borderRadius: 8, padding: 24 }}>
+        <div className="card-panel flex flex-col items-center gap-1.5 text-center mb-4" style={{ borderStyle: "dashed", borderColor: "var(--lx-border-strong)", padding: 24 }}>
           <div className="text-sm font-medium text-lx-text-primary">No runtimes in this team</div>
           <p className="text-xs text-lx-text-secondary" style={{ maxWidth: 380 }}>Connect a machine with opencode, hermes, or command-code installed, then set up a runtime for this team.</p>
           <button type="button" className="btn btn-primary" style={{ height: 28, padding: "0 12px", fontSize: 12, marginTop: 8 }} onClick={() => setSetupOpen(true)}><Plus size={14} strokeWidth={1.5} />Setup runtime</button>
         </div>
       ) : (
-        <div style={{ background: "var(--lx-surface-card)", border: "1px solid var(--lx-border-default)", borderRadius: 8, overflow: "hidden" }}>
+        <div className="card-panel" style={{ overflow: "hidden" }}>
           <table className="settings-table">
             <thead>
               <tr><th>Name</th><th>CLI</th><th>Model</th><th>Hostname</th><th>Status</th><th /></tr>

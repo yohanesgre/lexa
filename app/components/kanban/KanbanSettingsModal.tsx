@@ -27,6 +27,7 @@ import {
   useUpdateFieldConfig,
 } from "../../lib/queries";
 import { cn } from "../ui/cn";
+import { OPTION_COLORS } from "../../lib/option-colors";
 import { ColumnForm } from "./ColumnForm";
 import { SwimlaneForm } from "./SwimlaneForm";
 import { OptionForm } from "./OptionForm";
@@ -43,20 +44,8 @@ const formatWipLimit = (limit: number | null) => (limit === null ? "—" : Strin
 
 
 function colorName(color: string): string {
-  const names: Record<string, string> = {
-    "#6B7280": "Gray",
-    "#3B82F6": "Blue",
-    "#F0C040": "Amber",
-    "#F59E0B": "Amber",
-    "#4ADE80": "Green",
-    "#10B981": "Green",
-    "#22D3EE": "Cyan",
-    "#FF4444": "Red",
-    "#EF4444": "Red",
-    "#F472B6": "Pink",
-    "#A855F7": "Purple",
-  };
-  return names[color.toUpperCase()] ?? color;
+  const name = OPTION_COLORS.find((c) => c.value.toUpperCase() === color.toUpperCase())?.label;
+  return name ?? color;
 }
 
 

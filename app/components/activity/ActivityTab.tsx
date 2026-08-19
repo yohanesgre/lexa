@@ -65,8 +65,8 @@ export function ActivityTab({ slug, taskId, isArchived }: ActivityTabProps) {
       )}
       {isArchived ? (
         <div
-          className="font-micro text-2xs text-lx-text-muted uppercase tracking-[0.04em]"
-          style={{ marginTop: 12, padding: "8px 12px", border: "1px solid var(--lx-border-default)", borderRadius: 6, background: "var(--lx-surface-elevated)" }}
+          className="card-row font-micro text-2xs text-lx-text-muted uppercase tracking-[0.04em]"
+          style={{ marginTop: 12, background: "var(--lx-surface-elevated)" }}
         >
           Comments are disabled on archived tasks
         </div>

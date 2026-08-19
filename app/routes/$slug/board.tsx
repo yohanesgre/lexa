@@ -156,7 +156,7 @@ export function BoardPage() {
                     </div>
                     <div className="column-body">
                       {[0, 1].map((card) => (
-                        <div key={card} className="bg-lx-surface-card border border-lx-border-subtle rounded-md" style={{ padding: "10px 12px" }}>
+                        <div key={card} className="card-row">
                           <div className="skeleton" style={{ width: card === 0 ? 56 : 40, height: 18 }} />
                           <div className="skeleton mt-2" style={{ width: card === 0 ? "85%" : "92%", height: 14 }} />
                           <div className="skeleton mt-1" style={{ width: card === 0 ? "60%" : "45%", height: 14 }} />

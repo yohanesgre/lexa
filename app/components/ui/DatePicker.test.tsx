@@ -80,6 +80,24 @@ describe("DatePicker", () => {
     expect(withoutValue.onChange).not.toHaveBeenCalled();
   });
 
+  it("Today calls onChange with the current date and closes the popover", async () => {
+    const user = userEvent.setup();
+    const { onChange } = renderPicker({ value: "2026-08-15" });
+    await open(user, /2026-08-15/);
+    const now = new Date();
+    const expected = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+    await user.click(await screen.findByRole("button", { name: "Today" }));
+    expect(onChange).toHaveBeenCalledWith(expected);
+    expect(screen.queryByRole("dialog", { name: "Pick a date" })).not.toBeInTheDocument();
+  });
+
+  it("Today renders even when no value is set", async () => {
+    const user = userEvent.setup();
+    renderPicker({ value: null });
+    await user.click(screen.getByRole("button", { name: "No due date" }));
+    expect(await screen.findByRole("button", { name: "Today" })).toBeInTheDocument();
+  });
+
   it("Escape closes the popover", async () => {
     const user = userEvent.setup();
     renderPicker({ value: "2026-08-15" });

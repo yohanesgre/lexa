@@ -6,6 +6,7 @@ You are working on **Lexa**: a self-hosted project management tool. Kanban with 
 
 ## Document authority (read in this order before touching code)
 
+0. `docs/design-system.html` — PHOSPHOR primitives: tokens + canonical component markup. **Before any UI work, open this file and copy primitive markup from it verbatim — never hand-write a primitive.** For primitive work it precedes the surface wireframes; for composite/surface work read it first, then the relevant `wireframes/src/*.html`.
 1. `docs/SCHEMA.md` — SQL and data invariants. Copy verbatim.
 2. `docs/LAYERS.md` — Effect service patterns, error catalog, webhook/auth flows.
 3. `docs/API.md` — REST contract. Endpoint shapes are exact.
@@ -39,6 +40,8 @@ This retains the wireframe-first flow on any clone: `wireframes/src/` is the des
 **Wireframe-first rule (non-negotiable):** Any UI/UX design change — new states, layout changes, component changes, copy changes, motion changes — must be made in the wireframes FIRST (edit `wireframes/src/`, run `bash wireframes/build.sh`), then implemented in code. Never change the app's UI without the wireframes reflecting the change first. If code and wireframes drift, the wireframe is the source of truth.
 
 **Delegation sequencing rule (non-negotiable):** When UI/UX work is divided across multiple agents, the wireframe lane MUST complete (edit `wireframes/src/`, run `bash wireframes/build.sh`, pass its gate) BEFORE any React implementation lane is dispatched. Never run wireframe work and frontend implementation in parallel — parallel lanes drift from the wireframe's actual classes, structure, and copy even when the spec looks fully pinned. React implementation transcribes the completed wireframe, including porting any new wireframe CSS classes into the app stylesheet (`app/styles/phosphor.css`) — wireframe classes do not exist in the app until ported.
+
+Every UI task brief to @designer/@fixer must include: "Consult `docs/design-system.html` first; copy primitive markup verbatim."
 
 **Annotation rule:** All notes, specs, behaviors, and design decisions inside wireframes use annotation notes — `<span class="annotation">` for inline element notes, `<span class="annotation-tag">` for behavior/spec tags. Never document wireframe decisions in plain HTML comments or invisible markup; notes must be visible in the rendered wireframe.
 

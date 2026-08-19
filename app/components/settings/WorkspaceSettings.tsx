@@ -89,7 +89,7 @@ function WorkspaceMembersSection() {
       {isLoading ? (
         <div className="text-sm text-lx-text-muted py-8 text-center">Loading…</div>
       ) : (
-        <div style={{ background: "var(--lx-surface-card)", border: "1px solid var(--lx-border-default)", borderRadius: 8, overflow: "hidden" }}>
+        <div className="card-panel" style={{ overflow: "hidden" }}>
           <table className="settings-table">
             <thead>
               <tr><th style={{ width: "auto" }}>User</th><th style={{ width: "auto" }}>Email</th><th style={{ width: 90 }}>Role</th><th style={{ width: "auto" }}>Teams</th><th style={{ width: "auto" }}>Last seen</th><th style={{ width: "auto" }} /></tr>
@@ -143,7 +143,7 @@ function WorkspaceMembersSection() {
       )}
 
       {/* Invites */}
-      <div className="mt-4 p-4" style={{ background: "var(--lx-surface-elevated)", border: "1px solid var(--lx-border-default)", borderRadius: 8 }}>
+      <div className="card-panel card-panel--elevated mt-4">
         <h3 className="font-display text-base font-medium text-lx-text-primary mb-3">Invites</h3>
         <div className="flex items-center gap-3 flex-wrap">
           <input
@@ -162,7 +162,7 @@ function WorkspaceMembersSection() {
         <div className="field-hint" style={{ marginTop: 8 }}>Creates a single-use invite link (7-day expiry) delivered out-of-band — no SMTP is configured. Accepting opens /invite → member account.</div>
 
         {pendingInvites.length > 0 && (
-          <div style={{ background: "var(--lx-surface-card)", border: "1px solid var(--lx-border-default)", borderRadius: 8, overflow: "hidden", marginTop: 12 }}>
+          <div className="card-panel" style={{ overflow: "hidden", marginTop: 12 }}>
             <table className="settings-table">
               <thead>
                 <tr><th style={{ width: "auto" }}>Email</th><th style={{ width: "auto" }}>Link hint</th><th style={{ width: "auto" }}>Expires</th><th style={{ width: 80 }} /></tr>
@@ -209,7 +209,7 @@ function MemberDeleteModal({ name, onCancel, onConfirm }: { name: string; onCanc
           <h2 className="font-display text-lg font-medium text-lx-text-primary">Delete member?</h2>
           <p className="text-sm text-lx-text-secondary mt-3 leading-5">
             Delete{" "}
-            <span className="font-mono text-xs text-lx-text-primary" style={{ background: "var(--lx-surface-card)", borderRadius: 4, padding: "2px 5px" }}>
+            <span className="chip font-mono text-xs text-lx-text-primary">
               {name}
             </span>
             {" "}from the workspace? Their API keys are revoked and team memberships and project grants are cleared. Activity and comments keep their rows. This cannot be undone.
@@ -248,7 +248,7 @@ function TeamsSection() {
         Teams group members, projects, and runtimes. Every project and runtime belongs to exactly one team (or none — "Global"). Team admins manage their own team from /settings/team.
       </p>
 
-      <div className="p-4" style={{ background: "var(--lx-surface-elevated)", border: "1px solid var(--lx-border-default)", borderRadius: 8, marginBottom: 12 }}>
+      <div className="card-panel card-panel--elevated" style={{ marginBottom: 12 }}>
         <h3 className="font-display text-base font-medium text-lx-text-primary mb-3">Create team</h3>
         <div className="flex items-end gap-3 flex-wrap">
           <div className="field" style={{ marginBottom: 0 }}>
@@ -273,7 +273,7 @@ function TeamsSection() {
       {isLoading ? (
         <div className="text-sm text-lx-text-muted py-8 text-center">Loading…</div>
       ) : (
-        <div style={{ background: "var(--lx-surface-card)", border: "1px solid var(--lx-border-default)", borderRadius: 8, overflow: "hidden" }}>
+        <div className="card-panel" style={{ overflow: "hidden" }}>
           <table className="settings-table">
             <thead>
               <tr><th>Team</th><th>Members</th><th>Created</th><th /></tr>
@@ -322,7 +322,7 @@ function TeamDeleteModal({ name, onCancel, onConfirm }: { name: string; onCancel
           <h2 className="font-display text-lg font-medium text-lx-text-primary">Delete team?</h2>
           <p className="text-sm text-lx-text-secondary mt-3 leading-5">
             Delete{" "}
-            <span className="font-mono text-xs text-lx-text-primary" style={{ background: "var(--lx-surface-card)", borderRadius: 4, padding: "2px 5px" }}>
+            <span className="chip font-mono text-xs text-lx-text-primary">
               {name}
             </span>
             {" "}? Teams owning projects are refused with 409 TEAM_HAS_PROJECTS — re-assign or delete those projects first. Memberships are removed; projects become Global.

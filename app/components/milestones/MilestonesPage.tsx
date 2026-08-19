@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { Link } from "@tanstack/react-router";
-import { MoreHorizontal, Plus, X } from "lucide-react";
+import { Plus, X } from "lucide-react";
 import { useMilestones, useCreateMilestone, useUpdateMilestone, useDeleteMilestone, useArchiveMilestone, useRestoreMilestone, useBoard, useSession } from "../../lib/queries";
 import { sprintProgress, milestoneTaskProgress } from "../../lib/progress";
 import { formatDueChip } from "../../lib/dates";
@@ -135,41 +135,45 @@ export function MilestonesPage({ slug, tab }: { slug: string; tab: "list" | "tim
             </div>
           )}
 
-          {active.map((m, i) => (
-            <MilestoneCard
-              key={m.id}
-              milestone={m}
-              isActive={i === 0}
-              board={board ?? undefined}
-              collapsed={collapsed.has(m.id)}
-              onToggleCollapsed={() => toggleCollapsed(m.id)}
-              isAdmin={isAdmin}
-              onEdit={() => { setEditing(m); setIsFormOpen(true); }}
-              onArchive={() => setArchiving(m)}
-              onDelete={() => deleteMilestone.mutate({ id: m.id })}
-            />
-          ))}
+          <div className="milestone-grid">
+            {active.map((m, i) => (
+              <MilestoneCard
+                key={m.id}
+                milestone={m}
+                isActive={i === 0}
+                board={board ?? undefined}
+                collapsed={collapsed.has(m.id)}
+                onToggleCollapsed={() => toggleCollapsed(m.id)}
+                isAdmin={isAdmin}
+                onEdit={() => { setEditing(m); setIsFormOpen(true); }}
+                onArchive={() => setArchiving(m)}
+                onDelete={() => deleteMilestone.mutate({ id: m.id })}
+              />
+            ))}
+          </div>
 
           {archived.length > 0 && (
             <>
               <div className="font-micro text-2xs color-muted" style={{ textTransform: "uppercase", letterSpacing: "0.04em", margin: "20px 0 8px" }}>
                 Archived milestones
               </div>
-              {archived.map((m) => (
-                <MilestoneCard
-                  key={m.id}
-                  milestone={m}
-                  isActive={false}
-                  board={board ?? undefined}
-                  collapsed={false}
-                  onToggleCollapsed={() => {}}
-                  isAdmin={isAdmin}
-                  onEdit={() => { setEditing(m); setIsFormOpen(true); }}
-                  onArchive={() => {}}
-                  onRestore={() => restoreMilestone.mutate({ id: m.id })}
-                  onDelete={() => deleteMilestone.mutate({ id: m.id })}
-                />
-              ))}
+              <div className="milestone-grid">
+                {archived.map((m) => (
+                  <MilestoneCard
+                    key={m.id}
+                    milestone={m}
+                    isActive={false}
+                    board={board ?? undefined}
+                    collapsed={false}
+                    onToggleCollapsed={() => {}}
+                    isAdmin={isAdmin}
+                    onEdit={() => { setEditing(m); setIsFormOpen(true); }}
+                    onArchive={() => {}}
+                    onRestore={() => restoreMilestone.mutate({ id: m.id })}
+                    onDelete={() => deleteMilestone.mutate({ id: m.id })}
+                  />
+                ))}
+              </div>
             </>
           )}
         </div>
@@ -249,11 +253,6 @@ function MilestoneCard({ milestone, isActive, board, collapsed, onToggleCollapse
         {isCurrent && <span className="milestone-badge-active">Active</span>}
         {due && <span className={cn("milestone-due", due.overdue && "milestone-due-overdue")}>{due.text}</span>}
         <span className="flex-1" />
-        {isAdmin && (
-          <div className="relative inline-flex">
-            <MenuTrigger title="Milestone menu" />
-          </div>
-        )}
       </div>
       {milestone.description && <div className="milestone-desc">{milestone.description}</div>}
 
@@ -290,36 +289,46 @@ function MilestoneCard({ milestone, isActive, board, collapsed, onToggleCollapse
       )}
 
       {isAdmin && (
-        <div className="flex items-center gap-2" style={{ marginTop: 14, borderTop: "1px dashed var(--lx-border-default)", paddingTop: 12 }}>
+        <div className="milestone-card-actions" style={{ marginTop: 14, borderTop: "1px dashed var(--lx-border-default)", paddingTop: 12 }}>
           {!archived ? (
             <>
-              <button type="button" className="btn btn-primary btn-sm" onClick={onArchive}>
-                Complete milestone
-              </button>
-              <button type="button" className="btn btn-ghost btn-sm" onClick={onArchive}>
-                Archive
-              </button>
-              <button type="button" className="btn btn-ghost btn-sm" onClick={onEdit}>
-                Edit
-              </button>
-              <button
-                type="button"
-                className="btn btn-ghost btn-sm"
-                disabled={!canDelete}
-                title={canDelete ? undefined : "409 HAS_CHILDREN — loosen or archive sprints first"}
-                onClick={onDelete}
-              >
-                Delete
-              </button>
+              <div className="ms-actions-left">
+                <button type="button" className="btn btn-primary btn-sm" onClick={onArchive}>
+                  Complete milestone
+                </button>
+                <button type="button" className="btn btn-ghost btn-sm" onClick={onEdit}>
+                  Edit
+                </button>
+              </div>
+              <span className="ms-actions-spacer" />
+              <div className="ms-actions-right">
+                <button type="button" className="btn btn-ghost btn-sm" onClick={onArchive}>
+                  Archive
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-ghost btn-sm"
+                  disabled={!canDelete}
+                  title={canDelete ? undefined : "409 HAS_CHILDREN — loosen or archive sprints first"}
+                  onClick={onDelete}
+                >
+                  Delete
+                </button>
+              </div>
             </>
           ) : (
             <>
-              <button type="button" className="btn btn-ghost btn-sm" onClick={onRestore}>
-                Restore
-              </button>
-              <button type="button" className="btn btn-ghost btn-sm" style={{ color: "var(--lx-text-danger)" }} onClick={onDelete}>
-                Delete
-              </button>
+              <div className="ms-actions-left">
+                <button type="button" className="btn btn-ghost btn-sm" onClick={onRestore}>
+                  Restore
+                </button>
+              </div>
+              <span className="ms-actions-spacer" />
+              <div className="ms-actions-right">
+                <button type="button" className="btn btn-ghost btn-sm" style={{ color: "var(--lx-text-danger)" }} onClick={onDelete}>
+                  Delete
+                </button>
+              </div>
             </>
           )}
         </div>
@@ -334,14 +343,6 @@ function laneDatesText(lane: Swimlane): string | null {
   if (lane.startAt) return `${short(lane.startAt)} → (open)`;
   if (lane.dueAt) return `end ${short(lane.dueAt)}`;
   return null;
-}
-
-function MenuTrigger({ title }: { title: string }) {
-  return (
-    <button type="button" className="icon-btn" title={title}>
-      <MoreHorizontal size={14} />
-    </button>
-  );
 }
 
 function CompleteMilestoneDialog({ milestone, laneCount, liveTaskCount, onCancel, onConfirm }: {

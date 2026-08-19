@@ -122,7 +122,7 @@ export function DeleteKeyModal({ name, onCancel, onConfirm }: { name: string; on
 
           <p className="text-sm text-lx-text-secondary mt-3 leading-5">
             This will permanently delete{" "}
-            <span className="font-mono text-xs text-lx-text-primary" style={{ background: "var(--lx-surface-card)", borderRadius: 4, padding: "2px 5px" }}>
+            <span className="chip font-mono text-xs text-lx-text-primary">
               {name}
             </span>
             {" "}— agents and integrations using this key will lose access immediately. This action cannot be undone.
@@ -155,7 +155,7 @@ export function RemoveGithubSyncModal({ onCancel, onConfirm }: { onCancel: () =>
 
           <p className="text-sm text-lx-text-secondary mt-2 leading-5">
             If{" "}
-            <span className="font-mono text-xs text-lx-text-primary" style={{ background: "var(--lx-surface-card)", borderRadius: 4, padding: "2px 5px" }}>
+            <span className="chip font-mono text-xs text-lx-text-primary">
               GITHUB_*
             </span>
             {" "}environment variables are set on the server, they are re-imported on the next restart.
@@ -184,7 +184,7 @@ export function RemoveRuntimeModal({ name, hostname, onCancel, onConfirm }: { na
 
           <p className="text-sm text-lx-text-secondary mt-3 leading-5">
             Remove{" "}
-            <span className="font-mono text-xs text-lx-text-primary" style={{ background: "var(--lx-surface-card)", borderRadius: 4, padding: "2px 5px" }}>
+            <span className="chip font-mono text-xs text-lx-text-primary">
               {name}
             </span>
             {hostname ? ` (${hostname})` : ""} from the runtimes list? The server queues a remove event — the machine's listener stops the daemon and cleans up its runtime files on its next heartbeat.
@@ -213,7 +213,7 @@ export function RemoveMachineModal({ id, runtimeCount, onCancel, onConfirm }: { 
 
           <p className="text-sm text-lx-text-secondary mt-3 leading-5">
             Remove{" "}
-            <span className="font-mono text-xs text-lx-text-primary" style={{ background: "var(--lx-surface-card)", borderRadius: 4, padding: "2px 5px" }}>
+            <span className="chip font-mono text-xs text-lx-text-primary">
               {id}
             </span>
             {runtimeCount > 0 ? ` and its ${runtimeCount} runtime${runtimeCount === 1 ? "" : "s"}` : ""}?
@@ -259,7 +259,7 @@ export function ApiKeysSection() {
       ) : isError ? (
         <div className="text-sm text-lx-text-danger py-8 text-center">Failed to load API keys.</div>
       ) : keys.length === 0 ? (
-        <div className="flex flex-col items-center gap-1.5 text-center mb-4" style={{ background: "var(--lx-surface-card)", border: "1px dashed var(--lx-border-strong)", borderRadius: 8, padding: 32 }}>
+        <div className="card-panel flex flex-col items-center gap-1.5 text-center mb-4" style={{ borderStyle: "dashed", borderColor: "var(--lx-border-strong)", padding: 32 }}>
           <Key size={20} strokeWidth={1.5} className="text-lx-text-muted" />
           <div className="text-sm font-medium text-lx-text-primary mt-1">No API keys yet</div>
           <p className="text-xs text-lx-text-secondary" style={{ maxWidth: 360 }}>
@@ -267,7 +267,7 @@ export function ApiKeysSection() {
           </p>
         </div>
       ) : (
-        <div style={{ background: "var(--lx-surface-card)", border: "1px solid var(--lx-border-default)", borderRadius: 8, overflow: "hidden", marginBottom: 16 }}>
+        <div className="card-panel" style={{ overflow: "hidden", marginBottom: 16 }}>
           <table className="settings-table">
             <thead>
               <tr>
@@ -306,7 +306,7 @@ export function ApiKeysSection() {
         </div>
       )}
 
-      <div style={{ background: "var(--lx-surface-elevated)", border: "1px solid var(--lx-border-default)", borderRadius: 8, padding: 16 }}>
+      <div className="card-panel card-panel--elevated">
         <h3 className="font-display text-base font-medium text-lx-text-primary mb-3">Create New Key</h3>
         <div className="flex items-center gap-3 flex-wrap">
           <input
@@ -405,7 +405,7 @@ export function RateLimitSection() {
       ) : isError ? (
         <div className="text-sm text-lx-text-danger py-8 text-center">Failed to load rate limit settings.</div>
       ) : (
-        <div style={{ background: "var(--lx-surface-elevated)", border: "1px solid var(--lx-border-default)", borderRadius: 8, padding: 16 }}>
+        <div className="card-panel card-panel--elevated">
           <h3 className="font-display text-base font-medium text-lx-text-primary mb-3">Request Budget</h3>
           <div className="flex items-end gap-3 flex-wrap">
             <div className="field" style={{ marginBottom: 0 }}>
@@ -520,7 +520,7 @@ export function GithubSyncSection() {
         <div className="text-sm text-lx-text-danger py-8 text-center">Failed to load GitHub sync settings.</div>
       ) : (
         <>
-          <div style={{ background: "var(--lx-surface-elevated)", border: "1px solid var(--lx-border-default)", borderRadius: 8, padding: 16 }}>
+          <div className="card-panel card-panel--elevated">
             <h3 className="font-display text-base font-medium text-lx-text-primary mb-3">Credentials</h3>
             <div className="flex items-end gap-3 flex-wrap">
               <div className="field" style={{ marginBottom: 0 }}>
@@ -641,7 +641,7 @@ export function MachinesRuntimesSection({ showTeamColumn = false }: { showTeamCo
       </p>
 
       {machines.length > 0 && (
-        <div className="mb-4" style={{ background: "var(--lx-surface-card)", border: "1px solid var(--lx-border-default)", borderRadius: 8, overflow: "hidden" }}>
+        <div className="mb-4 card-panel" style={{ overflow: "hidden" }}>
           <div className="flex items-center justify-between" style={{ padding: "10px 12px 0" }}>
             <h3 className="font-display text-sm font-medium text-lx-text-primary">Machines</h3>
             <span className="font-micro text-2xs text-lx-text-muted uppercase tracking-[0.04em]">Hosts</span>
@@ -687,13 +687,13 @@ export function MachinesRuntimesSection({ showTeamColumn = false }: { showTeamCo
       ) : runtimesError ? (
         <div className="text-sm text-lx-text-danger py-8 text-center">Failed to load runtimes.</div>
       ) : runtimes.length === 0 ? (
-        <div className="flex flex-col items-center gap-1.5 text-center mb-4" style={{ background: "var(--lx-surface-card)", border: "1px dashed var(--lx-border-strong)", borderRadius: 8, padding: 24 }}>
+        <div className="card-panel flex flex-col items-center gap-1.5 text-center mb-4" style={{ borderStyle: "dashed", borderColor: "var(--lx-border-strong)", padding: 24 }}>
           <div className="text-sm font-medium text-lx-text-primary">No runtimes yet</div>
           <p className="text-xs text-lx-text-secondary" style={{ maxWidth: 380 }}>Connect a machine with opencode, hermes, or command-code installed, then set up a runtime.</p>
           <button type="button" className="btn btn-primary" style={{ height: 28, padding: "0 12px", fontSize: 12, marginTop: 8 }} onClick={() => setSetupOpen(true)}><Plus size={14} strokeWidth={1.5} />Setup runtime</button>
         </div>
       ) : (
-        <div style={{ background: "var(--lx-surface-card)", border: "1px solid var(--lx-border-default)", borderRadius: 8, overflow: "hidden" }}>
+        <div className="card-panel" style={{ overflow: "hidden" }}>
           <table className="settings-table">
             <thead><tr><th>Name</th><th>CLI</th><th>Model</th><th>Hostname</th>{showTeamColumn && <th>Team</th>}<th>Status</th><th /></tr></thead>
             <tbody>
