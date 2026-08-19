@@ -74,9 +74,11 @@ export function signOut(): Promise<void> {
 // admin-issued set-password links (/set-password?token=) and workspace
 // invitation links (/invite?token=): the server resolves the token to the
 // account (invite accept mints the member account) and establishes the
-// session cookie.
+// session cookie. The token row is minted with the native
+// `reset-password:<token>` identifier (server/services/password-links.service.ts),
+// so consumption goes through better-auth's native /reset-password endpoint.
 export function setPassword(input: { newPassword: string; token: string }): Promise<SessionResponse> {
-  return authRequest("/set-password", input) as Promise<SessionResponse>;
+  return authRequest("/reset-password", input) as Promise<SessionResponse>;
 }
 
 export function changePassword(input: { currentPassword: string; newPassword: string }): Promise<void> {

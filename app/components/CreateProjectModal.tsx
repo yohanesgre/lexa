@@ -1,16 +1,19 @@
 import { useState } from "react";
 import { Plus, X } from "lucide-react";
+import { useTeams } from "../lib/queries";
 
 interface CreateProjectModalProps {
   open: boolean;
   pending: boolean;
   onClose: () => void;
-  onSubmit: (input: { name: string; description?: string }) => void;
+  onSubmit: (input: { name: string; description?: string; teamId: string | null }) => void;
 }
 
 export function CreateProjectModal({ open, pending, onClose, onSubmit }: CreateProjectModalProps) {
+  const { data: teams = [], isLoading: teamsLoading } = useTeams();
   const [name, setName] = useState("");
   const [desc, setDesc] = useState("");
+  const [teamId, setTeamId] = useState<string>("");
 
   if (!open) return null;
 
@@ -18,9 +21,11 @@ export function CreateProjectModal({ open, pending, onClose, onSubmit }: CreateP
     onSubmit({
       name: name.trim(),
       description: desc.trim() || undefined,
+      teamId: teamId || null,
     });
     setName("");
     setDesc("");
+    setTeamId("");
   };
 
   return (
@@ -59,6 +64,25 @@ export function CreateProjectModal({ open, pending, onClose, onSubmit }: CreateP
               />
               <div className="field-hint">Shown on the dashboard and in the nav. Slug is derived from the name.</div>
             </div>
+            <div className="field" style={{ marginBottom: 16 }}>
+              <label className="field-label" htmlFor="create-project-team">Team</label>
+              <select
+                id="create-project-team"
+                className="prop-input w-full"
+                value={teamId}
+                onChange={(e) => setTeamId(e.target.value)}
+                disabled={pending || teamsLoading}
+                aria-label="Project team"
+              >
+                <option value="">Select a team…</option>
+                {teams.map((t) => (
+                  <option key={t.id} value={t.id}>{t.name} ({t.slug})</option>
+                ))}
+              </select>
+              <div className="field-hint">
+                The owning team scopes who can see and use the project. Unassigned (no team) is superadmin-only.
+              </div>
+            </div>
             <div className="field">
               <label className="field-label" htmlFor="create-project-desc">Description</label>
               <textarea
@@ -75,7 +99,12 @@ export function CreateProjectModal({ open, pending, onClose, onSubmit }: CreateP
             <button type="button" className="btn btn-ghost" onClick={onClose} disabled={pending}>
               Cancel
             </button>
-            <button type="button" className="btn btn-primary" disabled={pending || !name.trim()} onClick={handleCreate}>
+            <button
+              type="button"
+              className="btn btn-primary"
+              disabled={pending || !name.trim() || !teamId}
+              onClick={handleCreate}
+            >
               <Plus size={14} strokeWidth={1.5} />
               Create Project
             </button>

@@ -1,6 +1,6 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate } from "@tanstack/react-router";
-import { Plus, Trash2, Users } from "lucide-react";
+import { Trash2, Users } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { useProjects, useProjectMembers, useAddProjectMember, useRemoveProjectMember, useDeleteProject, useUpdateProject, useProjectRepos, useReplaceProjectRepos, useGithubRepoSearch, useUsers, useTeams, useUpdateProjectTeam, useSession } from "../../lib/queries";
 import * as api from "../../lib/api";
@@ -76,7 +76,7 @@ function TeamAssignmentSection({ project }: { project: Project }) {
         <h2 className="font-display text-lg font-medium text-lx-text-primary">Team</h2>
         <span className="text-xs text-lx-text-muted">Team assignment</span>
       </div>
-      <div className="card-panel card-panel--elevated mt-4" style={{ maxWidth: 560 }}>
+      <div className="card-panel card-panel--elevated mt-4">
         <p className="text-sm text-lx-text-secondary mb-3" style={{ marginTop: 0 }}>
           The owning team scopes Forge claims: a task can only run on a runtime of the same team (Global runtimes accept any team). Unassigned projects are Global.
           {!isSuperadmin && " As a team admin you can assign this project to your own team only."}
@@ -116,7 +116,7 @@ function ProjectBasicSection({ project }: { project: Project }) {
   return (
     <section className="mb-8">
       <h2 className="font-display text-lg font-medium text-lx-text-primary mb-3">Project</h2>
-      <div className="card-panel card-panel--elevated mt-4" style={{ maxWidth: 560 }}>
+      <div className="card-panel card-panel--elevated mt-4">
         <div className="field" style={{ marginBottom: 12 }}>
           <label className="field-label" htmlFor="project-name">Name</label>
           <input id="project-name" className="prop-input w-full" value={name} onChange={(e) => { setName(e.target.value); setSaved(false); }} />
@@ -147,9 +147,13 @@ function ProjectBasicSection({ project }: { project: Project }) {
   );
 }
 
-// Linked Repos — full-replace PUT via useReplaceProjectRepos.
+// Linked Repos — full-replace PUT via useReplaceProjectRepos. The typeahead
+// shows repos already linked elsewhere in the workspace (from useProjects —
+// every project payload carries its repos[]) plus GitHub App search results.
+// Selecting a suggestion links the repo to this project immediately.
 function LinkedReposSection({ slug }: { slug: string }) {
   const { data: repos = [], isLoading } = useProjectRepos(slug);
+  const { data: projects = [] } = useProjects();
   const replaceRepos = useReplaceProjectRepos();
   const [query, setQuery] = useState("");
   const [highlight, setHighlight] = useState(0);
@@ -159,9 +163,32 @@ function LinkedReposSection({ slug }: { slug: string }) {
   const search = useGithubRepoSearch(query);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
+  // Repos already linked to ANY project in the workspace (deduped, excluding
+  // this project's own current list).
+  const workspaceRepos = useMemo(() => {
+    const linked = new Set<string>();
+    for (const p of projects) {
+      for (const r of p.repos ?? []) linked.add(r.repo);
+    }
+    return [...linked].sort();
+  }, [projects]);
+
+  const alreadyLinked = useMemo(() => new Set(repos.map((r) => r.repo)), [repos]);
+
+  // Workspace-linked suggestions matching the query (or all when empty).
+  const workspaceSuggestions = useMemo(
+    () => workspaceRepos.filter((name) => name.toLowerCase().includes(query.trim().toLowerCase()) && !alreadyLinked.has(name)),
+    [workspaceRepos, query, alreadyLinked]
+  );
+
+  // GitHub App search results (query >= 2 chars), excluding already-linked.
+  const githubResults = (search.data ?? []).filter((name) => !alreadyLinked.has(name));
+
+  const suggestions = [...workspaceSuggestions, ...githubResults.filter((n) => !workspaceSuggestions.includes(n))];
+
   useEffect(() => {
     setHighlight(0);
-  }, [search.data]);
+  }, [suggestions.length]);
 
   useEffect(() => {
     function handleClick(e: MouseEvent) { if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) setDropdownOpen(false); }
@@ -169,13 +196,7 @@ function LinkedReposSection({ slug }: { slug: string }) {
     return () => document.removeEventListener("mousedown", handleClick);
   }, []);
 
-  const pickRepo = (name: string) => {
-    setQuery(name);
-    setDropdownOpen(false);
-  };
-
-  const addRepo = () => {
-    const name = query.trim();
+  const addRepo = (name: string) => {
     if (!name) return;
     const next = repos.some((r) => r.repo === name)
       ? repos.map((r) => (r.repo === name ? { ...r, workspaceRole: true } : r))
@@ -189,8 +210,6 @@ function LinkedReposSection({ slug }: { slug: string }) {
     replaceRepos.mutate({ slug, repos: repos.map((r) => (r.repo === repo ? { ...r, [role]: !r[role] } : r)) });
   };
 
-  const results = search.data ?? [];
-
   return (
     <section className="mb-8">
       <div className="flex items-center justify-between mb-3">
@@ -198,7 +217,7 @@ function LinkedReposSection({ slug }: { slug: string }) {
         <span className="text-xs text-lx-text-muted">Per project</span>
       </div>
       <p className="text-sm text-lx-text-secondary mb-4" style={{ maxWidth: 560 }}>
-        Repos this project can read (source — Forge agent context) and sync issues with (workspace — linking, creating, and two-way state/content sync). Repos must be accessible to the installed GitHub App; the type-ahead only shows repos the App is installed on.
+        Repos this project can read (source — Forge agent context) and sync issues with (workspace — linking, creating, and two-way state/content sync). Repos must be accessible to the installed GitHub App; the type-ahead shows repos already linked in the workspace plus GitHub App search results.
       </p>
 
       <div style={{ position: "relative", maxWidth: 420, marginBottom: 16 }} ref={dropdownRef}>
@@ -209,33 +228,50 @@ function LinkedReposSection({ slug }: { slug: string }) {
           onChange={(e) => { setQuery(e.target.value); setDropdownOpen(true); }}
           onFocus={() => setDropdownOpen(true)}
           onKeyDown={(e) => {
-            if (!dropdownOpen || results.length === 0) return;
-            if (e.key === "ArrowDown") { e.preventDefault(); setHighlight((h) => (h + 1) % results.length); }
-            if (e.key === "ArrowUp") { e.preventDefault(); setHighlight((h) => (h - 1 + results.length) % results.length); }
-            if (e.key === "Enter") { e.preventDefault(); const item = results[highlight]; if (item) pickRepo(item); }
+            if (!dropdownOpen || suggestions.length === 0) return;
+            if (e.key === "ArrowDown") { e.preventDefault(); setHighlight((h) => (h + 1) % suggestions.length); }
+            if (e.key === "ArrowUp") { e.preventDefault(); setHighlight((h) => (h - 1 + suggestions.length) % suggestions.length); }
+            if (e.key === "Enter") { e.preventDefault(); const item = suggestions[highlight]; if (item) addRepo(item); }
           }}
           style={{ width: "100%" }}
           aria-label="Search GitHub repos"
         />
-        <button type="button" className="btn btn-primary" style={{ height: 32, padding: "0 12px", fontSize: 12, position: "absolute", right: 6, top: 3 }} onClick={addRepo} disabled={!query.trim() || replaceRepos.isPending}>
-          <Plus size={14} strokeWidth={1.5} />
-          Add
-        </button>
-        {dropdownOpen && results.length > 0 && (
+        {dropdownOpen && (suggestions.length > 0 || workspaceSuggestions.length > 0) && (
           <div className="dropdown-menu" style={{ position: "absolute", top: "100%", left: 0, marginTop: 4, zIndex: 10, width: "100%" }}>
-            <div className="dropdown-label">GitHub repos</div>
-            {results.map((name, i) => (
-              <button
-                key={name}
-                type="button"
-                className="dropdown-item w-full text-left"
-                style={i === highlight ? { background: "var(--lx-surface-card-hover)" } : undefined}
-                onMouseEnter={() => setHighlight(i)}
-                onClick={() => { pickRepo(name); }}
-              >
-                <span className="font-mono text-xs">{name}</span>
-              </button>
-            ))}
+            {workspaceSuggestions.length > 0 && (
+              <>
+                <div className="dropdown-label">Linked in workspace</div>
+                {workspaceSuggestions.map((name) => (
+                  <button
+                    key={name}
+                    type="button"
+                    className="dropdown-item w-full text-left"
+                    style={name === suggestions[highlight] ? { background: "var(--lx-surface-card-hover)" } : undefined}
+                    onMouseEnter={() => setHighlight(suggestions.indexOf(name))}
+                    onClick={() => { addRepo(name); }}
+                  >
+                    <span className="font-mono text-xs">{name}</span>
+                  </button>
+                ))}
+              </>
+            )}
+            {githubResults.length > 0 && (
+              <>
+                <div className="dropdown-label">GitHub repos</div>
+                {githubResults.map((name) => (
+                  <button
+                    key={name}
+                    type="button"
+                    className="dropdown-item w-full text-left"
+                    style={name === suggestions[highlight] ? { background: "var(--lx-surface-card-hover)" } : undefined}
+                    onMouseEnter={() => setHighlight(suggestions.indexOf(name))}
+                    onClick={() => { addRepo(name); }}
+                  >
+                    <span className="font-mono text-xs">{name}</span>
+                  </button>
+                ))}
+              </>
+            )}
           </div>
         )}
       </div>
@@ -243,7 +279,7 @@ function LinkedReposSection({ slug }: { slug: string }) {
       {isLoading ? (
         <div className="text-sm text-lx-text-muted py-8 text-center">Loading…</div>
       ) : repos.length === 0 ? (
-        <div className="card-panel flex flex-col items-center gap-1.5 text-center mb-4" style={{ borderStyle: "dashed", borderColor: "var(--lx-border-strong)", padding: 24 }}>
+        <div className="empty-box mb-4">
           <div className="text-sm font-medium text-lx-text-primary">No linked repos</div>
           <p className="text-xs text-lx-text-secondary" style={{ maxWidth: 380 }}>Link a repo to let Forge read it and to sync issues with the board.</p>
         </div>

@@ -1,9 +1,7 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { Settings } from "lucide-react";
-import { useState } from "react";
-import { useDashboard, useUpdateProject, useDeleteProject, useBoard, useMilestones, selectProjectHealth } from "../../lib/queries";
+import { useDashboard, useBoard, useMilestones, selectProjectHealth } from "../../lib/queries";
 import { cn } from "../../components/ui/cn";
-import { ProjectSettingsModal } from "../../components/ProjectSettingsModal";
 import { ProjectDescription } from "../../components/ProjectDescription";
 import { MilestoneCard } from "../../components/milestones/MilestoneCard";
 import type { Dashboard, ProjectHealth } from "../../../shared/types";
@@ -30,12 +28,9 @@ function ProjectDashboard() {
   const navigate = useNavigate();
   const { slug } = Route.useParams();
   const { data: dashboard, isLoading } = useDashboard();
-  const updateProject = useUpdateProject();
-  const deleteProject = useDeleteProject();
   const board = useBoard(slug);
   const { data: milestones = [] } = useMilestones(slug);
   const activeMilestone = milestones.find((m) => !m.archivedAt) ?? null;
-  const [showSettings, setShowSettings] = useState(false);
 
   if (isLoading) {
     return (
@@ -103,7 +98,7 @@ function ProjectDashboard() {
             style={{ width: 28, height: 28, padding: 0 }}
             aria-label="Project settings"
             title="Project settings"
-            onClick={() => setShowSettings(true)}
+            onClick={() => navigate({ to: "/settings/project/$projectId", params: { projectId: health.project.id } })}
           >
             <Settings size={16} strokeWidth={1.5} />
           </button>
@@ -114,25 +109,6 @@ function ProjectDashboard() {
 
       <MilestoneCard slug={slug} milestone={activeMilestone} board={board.data} />
       <StatusSections dashboard={dashboard} health={health} />
-
-      <ProjectSettingsModal
-        open={showSettings}
-        project={health.project}
-        pending={updateProject.isPending || deleteProject.isPending}
-        onClose={() => setShowSettings(false)}
-        onSave={(input) => {
-          updateProject.mutate(
-            { slug: health.project.slug, ...input },
-            { onSuccess: () => setShowSettings(false) }
-          );
-        }}
-        onDelete={() => {
-          setShowSettings(false);
-          deleteProject.mutate(health.project.slug, {
-            onSuccess: () => navigate({ to: "/" }),
-          });
-        }}
-      />
     </main>
   );
 }

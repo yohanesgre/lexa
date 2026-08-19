@@ -3,9 +3,13 @@
 -- Idempotent — deletes old seed rows then re-inserts.
 
 -- ============================================================
--- Users — beyond migration default admin
+-- Teams — 2 orgs emulating real team ownership. member.role follows the
+-- Better Auth org plugin vocabulary: owner / admin / member (comma-joined
+-- allowed). isTeamAdmin = role contains owner|admin.
 -- ============================================================
 DELETE FROM user_project_roles WHERE user_id IN (SELECT id FROM users WHERE email IN ('dev1@lexa.local', 'dev2@lexa.local', 'qa@lexa.local', 'designer@lexa.local', 'writer@lexa.local', 'pm@lexa.local'));
+DELETE FROM member WHERE userId IN (SELECT id FROM users WHERE email IN ('dev1@lexa.local', 'dev2@lexa.local', 'qa@lexa.local', 'designer@lexa.local', 'writer@lexa.local', 'pm@lexa.local'));
+DELETE FROM organization WHERE slug IN ('platform', 'design');
 DELETE FROM users WHERE email IN ('dev1@lexa.local', 'dev2@lexa.local', 'qa@lexa.local', 'designer@lexa.local', 'writer@lexa.local', 'pm@lexa.local');
 
 INSERT INTO users (id, email, name, role)
@@ -17,8 +21,24 @@ VALUES
   ('seed-user-05', 'writer@lexa.local', 'Carol Writer', 'member'),
   ('seed-user-06', 'pm@lexa.local', 'PM Alex', 'member');
 
+INSERT INTO organization (id, name, slug, createdAt) VALUES
+  ('team-platform', 'Platform', 'platform', '2026-01-01T00:00:00.000Z'),
+  ('team-design', 'Design', 'design', '2026-01-01T00:00:00.000Z');
+
+INSERT INTO member (id, organizationId, userId, role, createdAt) VALUES
+  -- Platform: devs + QA + PM; pm and qa are team admins
+  ('seed-mem-plat-01', 'team-platform', 'seed-user-01', 'member', '2026-01-01T00:00:00.000Z'),
+  ('seed-mem-plat-02', 'team-platform', 'seed-user-02', 'member', '2026-01-01T00:00:00.000Z'),
+  ('seed-mem-plat-03', 'team-platform', 'seed-user-03', 'admin', '2026-01-01T00:00:00.000Z'),
+  ('seed-mem-plat-04', 'team-platform', 'seed-user-06', 'admin', '2026-01-01T00:00:00.000Z'),
+  -- Design: designer (admin) + writer
+  ('seed-mem-des-01', 'team-design', 'seed-user-04', 'admin', '2026-01-01T00:00:00.000Z'),
+  ('seed-mem-des-02', 'team-design', 'seed-user-05', 'member', '2026-01-01T00:00:00.000Z');
+
 -- ============================================================
--- Projects — 4 projects covering empty, minimal, and full
+-- Projects — 4 projects covering empty, minimal, and full.
+-- nimbus → Platform team, tasks-only → Design team; empty/blank stay
+-- unassigned (team_id NULL = superadmin-only until assigned).
 -- ============================================================
 -- Delete tasks BEFORE options: tasks FK-reference option rows, so removing
 -- an option with live tasks would violate the FK (RESTRICT default).
@@ -32,12 +52,12 @@ DELETE FROM columns WHERE project_id IN (SELECT id FROM projects WHERE slug IN (
 DELETE FROM user_project_roles WHERE project_id IN (SELECT id FROM projects WHERE slug IN ('empty','blank','tasks-only','nimbus'));
 DELETE FROM projects WHERE slug IN ('empty','blank','tasks-only','nimbus');
 
-INSERT OR IGNORE INTO projects (id, name, slug, description)
+INSERT INTO projects (id, name, slug, description, team_id)
 VALUES
-  ('seed-proj-empty', 'Empty Project', 'empty', 'No columns, no tasks, no wiki — validates truly empty project rendering.'),
-  ('seed-proj-blank', 'Blank Board', 'blank', 'Has columns and swimlanes but zero tasks — validates empty board state.'),
-  ('seed-proj-minimal', 'Tasks Only', 'tasks-only', 'Has columns and tasks but no wiki and no swimlanes.'),
-  ('seed-proj-full', 'Nimbus', 'nimbus', 'Full product project with columns, swimlanes, tasks, wiki, GitHub links, and rich descriptions.');
+  ('seed-proj-empty', 'Empty Project', 'empty', 'No columns, no tasks, no wiki — validates truly empty project rendering.', NULL),
+  ('seed-proj-blank', 'Blank Board', 'blank', 'Has columns and swimlanes but zero tasks — validates empty board state.', NULL),
+  ('seed-proj-minimal', 'Tasks Only', 'tasks-only', 'Has columns and tasks but no wiki and no swimlanes.', 'team-design'),
+  ('seed-proj-full', 'Nimbus', 'nimbus', 'Full product project with columns, swimlanes, tasks, wiki, GitHub links, and rich descriptions.', 'team-platform');
 
 INSERT OR IGNORE INTO project_repos (id, project_id, repo, source_role, workspace_role)
 VALUES
@@ -83,19 +103,16 @@ INSERT INTO type_options (id, project_id, label, color, position) VALUES
   ('seed-type-em-3', 'seed-proj-empty', 'Asset', '#F472B6', 3);
 
 -- ============================================================
--- User-project roles
+-- User-project roles — explicit cross-team grants ONLY. Team ownership is
+-- expressed via member rows + projects.team_id; a grant here is the
+-- exception, not the rule (e.g. a designer helping on the engineering team).
 -- ============================================================
 DELETE FROM user_project_roles WHERE project_id LIKE 'seed-%';
 
 INSERT INTO user_project_roles (user_id, role, project_id)
 VALUES
-  ('seed-user-01', 'member', 'seed-proj-full'),
-  ('seed-user-02', 'member', 'seed-proj-full'),
-  ('seed-user-03', 'member', 'seed-proj-full'),
-  ('seed-user-04', 'member', 'seed-proj-full'),
-  ('seed-user-05', 'member', 'seed-proj-full'),
-  ('seed-user-06', 'admin', 'seed-proj-full'),
-  ('seed-user-06', 'admin', 'seed-proj-minimal');
+  -- Designer Bob has a member grant on the Platform-owned Nimbus project
+  ('seed-user-04', 'member', 'seed-proj-full');
 
 -- ============================================================
 -- Blank Board project — columns + swimlanes but ZERO tasks
