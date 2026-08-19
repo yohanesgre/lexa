@@ -46,14 +46,21 @@ export function GanttChart({ lanes, milestones, today, onRescheduleLane, onResch
   // right edge — no trailing bleed.
   const wrapRef = useRef<HTMLDivElement>(null);
   const [wrapWidth, setWrapWidth] = useState(0);
+  const [scrollLeft, setScrollLeft] = useState(0);
   useLayoutEffect(() => {
     const el = wrapRef.current;
     if (!el) return;
     const update = () => setWrapWidth(el.clientWidth);
+    const onScroll = () => setScrollLeft(el.scrollLeft);
     update();
+    onScroll();
     const ro = new ResizeObserver(update);
     ro.observe(el);
-    return () => ro.disconnect();
+    el.addEventListener("scroll", onScroll, { passive: true });
+    return () => {
+      ro.disconnect();
+      el.removeEventListener("scroll", onScroll);
+    };
   }, []);
   const minDays = wrapWidth > 0 ? Math.max(0, Math.ceil((wrapWidth - LABEL_W) / DAY_WIDTH_PX)) : 0;
   const { from, to } = useMemo(() => buildRange(items, today, { minDays }), [items, today, minDays]);
@@ -78,6 +85,18 @@ export function GanttChart({ lanes, milestones, today, onRescheduleLane, onResch
 
   const todayX = xForDay(todayDate, axisStart);
   const todayClamped = todayX >= 0 && todayX <= canvasW;
+
+  // "Today" shortcut: scroll the wrap horizontally so the TODAY line centers
+  // in view. Hidden while today is already fully visible.
+  const scrollToToday = () => {
+    const wrap = wrapRef.current;
+    if (!wrap) return;
+    const x = todayX + LABEL_W;
+    wrap.scrollTo({ left: x - wrap.clientWidth / 2, behavior: "smooth" });
+  };
+  const todayVisible =
+    !todayClamped ||
+    (wrapWidth > 0 && todayX + LABEL_W >= scrollLeft && todayX + LABEL_W <= scrollLeft + wrapWidth);
 
   const beginDrag = (e: React.PointerEvent, id: string, mode: DragMode) => {
     e.preventDefault();
@@ -291,6 +310,12 @@ export function GanttChart({ lanes, milestones, today, onRescheduleLane, onResch
 
   return (
     <div className="timeline-wrap" ref={wrapRef}>
+      {!todayVisible && (
+        <button type="button" className="tl-today-btn" onClick={scrollToToday}>
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="9" /><path d="M12 8v4l3 3" /></svg>
+          Today
+        </button>
+      )}
       <div className="timeline">
         {todayClamped && (
           <>

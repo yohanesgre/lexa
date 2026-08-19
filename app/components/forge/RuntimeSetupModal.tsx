@@ -171,8 +171,8 @@ export function RuntimeSetupModal({ onClose }: { onClose: () => void }) {
                           type="button"
                           disabled={!listening}
                           onClick={() => setMachine(candidate)}
-                          className="flex items-center gap-3 text-left w-full"
-                          style={{ opacity: listening ? 1 : 0.55, background: "var(--lx-surface-card)", border: `1px solid ${machine?.id === candidate.id ? "var(--lx-border-focus)" : "var(--lx-border-default)"}`, borderRadius: 6, padding: "10px 12px", cursor: listening ? "pointer" : "not-allowed" }}
+                          className="card-row flex items-center gap-3 text-left w-full"
+                          style={{ opacity: listening ? 1 : 0.55, borderColor: machine?.id === candidate.id ? "var(--lx-border-focus)" : "var(--lx-border-default)", cursor: listening ? "pointer" : "not-allowed" }}
                         >
                           <Monitor size={16} strokeWidth={1.5} className={listening ? "text-lx-text-link" : "text-lx-text-muted"} />
                           <span className="flex-1">
@@ -242,7 +242,7 @@ lexa-cli machine listen`}
                 <p className="text-xs text-lx-text-secondary leading-5 mb-4">This selects the CLI the new runtime will manage. Provider/model, agent, and logging are configured after setup.</p>
                 <div className="flex flex-col gap-2">
                   {AGENTS.map((agent) => (
-                    <button key={agent.id} type="button" onClick={() => setAgentCli(agent.id)} className="flex items-start gap-3 text-left w-full" style={{ background: "var(--lx-surface-card)", border: `1px solid ${agentCli === agent.id ? "var(--lx-border-focus)" : "var(--lx-border-default)"}`, borderRadius: 6, padding: "10px 12px" }}>
+                    <button key={agent.id} type="button" onClick={() => setAgentCli(agent.id)} className="card-row flex items-start gap-3 text-left w-full" style={{ borderColor: agentCli === agent.id ? "var(--lx-border-focus)" : "var(--lx-border-default)" }}>
                       <Terminal size={16} strokeWidth={1.5} className={cn("flex-shrink-0 mt-0.5", agentCli === agent.id ? "text-lx-text-link" : "text-lx-text-muted")} />
                       <span className="flex-1">
                         <span className="block text-sm font-medium text-lx-text-primary">{agent.name}</span>
@@ -285,8 +285,8 @@ lexa-cli machine listen`}
                   </div>
                 ) : <div className="notice notice-warning mb-4">Create a fresh key to continue.</div>}
                 <div className="flex flex-col gap-2 mb-4">
-                  <div className="flex items-center justify-between" style={{ background: "var(--lx-surface-card)", border: "1px solid var(--lx-border-default)", borderRadius: 6, padding: "10px 12px" }}><span className="text-sm text-lx-text-primary">Machine</span><span className="font-mono text-xs text-lx-text-secondary">{machine?.hostname || "—"}</span></div>
-                  <div className="flex items-center justify-between" style={{ background: "var(--lx-surface-card)", border: "1px solid var(--lx-border-default)", borderRadius: 6, padding: "10px 12px" }}><span className="text-sm text-lx-text-primary">Agent CLI</span><span className="font-mono text-xs text-lx-text-secondary">{agentCli || "—"}</span></div>
+                  <div className="card-row flex items-center justify-between"><span className="text-sm text-lx-text-primary">Machine</span><span className="font-mono text-xs text-lx-text-secondary">{machine?.hostname || "—"}</span></div>
+                  <div className="card-row flex items-center justify-between"><span className="text-sm text-lx-text-primary">Agent CLI</span><span className="font-mono text-xs text-lx-text-secondary">{agentCli || "—"}</span></div>
                 </div>
                 {sendError && <div className="notice notice-warning mb-3">{sendError}</div>}
                 <button type="button" className="btn btn-primary w-full" disabled={!canSend} onClick={sendInstall}>Send install event</button>

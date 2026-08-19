@@ -109,11 +109,11 @@ describe("SwimlanesPage", () => {
     expect(screen.getByText("Hack week")).toBeInTheDocument();
   });
 
-  it("archived toggle shows the archived-only view with Restore", async () => {
+  it("archived state filter shows the archived-only view with Restore", async () => {
     const user = userEvent.setup();
     render(<SwimlanesPage slug="demo" />, { wrapper });
     await screen.findByText("Sprint 7 — Core");
-    await user.click(screen.getByRole("button", { name: "Archived" }));
+    await user.selectOptions(screen.getByLabelText("State filter"), "archived");
     expect(await screen.findByRole("button", { name: "Restore" })).toBeInTheDocument();
     expect(screen.queryByText("Sprint 7 — Core")).not.toBeInTheDocument();
   });

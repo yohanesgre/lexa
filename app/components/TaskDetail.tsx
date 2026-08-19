@@ -235,8 +235,8 @@ export function TaskDetail({ mode = "view", task, project, defaultColumnId, colu
         <div className="px-4 pt-4">
           {isArchived && (
             <div
-              className="flex items-center gap-2"
-              style={{ background: "var(--lx-surface-elevated)", border: "1px solid var(--lx-border-default)", borderRadius: 6, padding: "8px 12px", marginBottom: 12 }}
+              className="card-row flex items-center gap-2"
+              style={{ background: "var(--lx-surface-elevated)", marginBottom: 12 }}
             >
               <ArchiveIcon size={14} />
               <span className="font-micro text-2xs text-lx-text-muted uppercase tracking-[0.04em]">

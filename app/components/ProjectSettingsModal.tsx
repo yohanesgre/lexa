@@ -150,32 +150,37 @@ export function ProjectSettingsModal({ open, project, pending, onClose, onSave, 
             </div>
           </div>
           <div className="modal-footer">
-            <button
-              type="button"
-              className="btn btn-ghost"
-              onClick={onClose}
-              disabled={pending}
-            >
-              Cancel
-            </button>
-            <button
-              type="button"
-              className="btn btn-danger-solid"
-              style={{ marginRight: "auto" }}
-              onClick={() => setDeleteOpen(true)}
-              disabled={pending}
-            >
-              <Trash2 size={14} strokeWidth={1.5} />
-              Delete Project
-            </button>
-            <button
-              type="submit"
-              className="btn btn-primary"
-              disabled={pending || !name.trim()}
-            >
-              <Check size={14} strokeWidth={1.5} />
-              Save Changes
-            </button>
+            <div className="ms-actions-left">
+              <button
+                type="button"
+                className="btn btn-ghost"
+                style={{ color: "var(--lx-text-danger)" }}
+                onClick={() => setDeleteOpen(true)}
+                disabled={pending}
+              >
+                <Trash2 size={14} strokeWidth={1.5} />
+                Delete Project
+              </button>
+            </div>
+            <span className="ms-actions-spacer" />
+            <div className="ms-actions-right">
+              <button
+                type="button"
+                className="btn btn-ghost"
+                onClick={onClose}
+                disabled={pending}
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                className="btn btn-primary"
+                disabled={pending || !name.trim()}
+              >
+                <Check size={14} strokeWidth={1.5} />
+                Save Changes
+              </button>
+            </div>
           </div>
           </form>
         </dialog>

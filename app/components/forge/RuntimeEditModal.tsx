@@ -77,7 +77,7 @@ export function RuntimeEditModal({ runtime, onClose }: { runtime: Runtime; onClo
 
           <div className="modal-body">
             {/* Identity (daemon-reported, read-only) */}
-            <div className="flex items-center gap-3 mb-5" style={{ background: "var(--lx-surface-input)", border: "1px solid var(--lx-border-default)", borderRadius: 6, padding: "10px 12px" }}>
+            <div className="card-row flex items-center gap-3 mb-5" style={{ background: "var(--lx-surface-input)" }}>
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} className="text-lx-text-muted flex-shrink-0"><rect x="4" y="4" width="16" height="16" rx="2" /><rect x="9" y="9" width="6" height="6" /></svg>
               <div className="flex-1">
                 <div className="text-sm font-medium text-lx-text-primary">{runtime.name}</div>

@@ -23,12 +23,8 @@ export function MilestoneCard({ slug, milestone, board }: MilestoneCardProps) {
   return (
     <div style={{ marginBottom: 16 }}>
       <div
-        className={cn(
-          "rounded-xl p-4",
-          overdue
-            ? "bg-lx-surface-card border border-lx-border-default"
-            : "bg-lx-surface-card border border-lx-border-focus shadow-[var(--lx-focus-glow)]"
-        )}
+        className={cn("card-panel")}
+        style={!overdue ? { borderColor: "var(--lx-border-focus)", boxShadow: "var(--lx-focus-glow)" } : undefined}
       >
         <div className="flex items-center gap-3">
           <div style={{ flex: 1, minWidth: 0 }}>

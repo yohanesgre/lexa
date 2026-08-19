@@ -1,5 +1,5 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
-import { MoreHorizontal } from "lucide-react";
+import { Settings } from "lucide-react";
 import { useState } from "react";
 import { useDashboard, useUpdateProject, useDeleteProject, useBoard, useMilestones, selectProjectHealth } from "../../lib/queries";
 import { cn } from "../../components/ui/cn";
@@ -105,7 +105,7 @@ function ProjectDashboard() {
             title="Project settings"
             onClick={() => setShowSettings(true)}
           >
-            <MoreHorizontal size={16} strokeWidth={1.5} />
+            <Settings size={16} strokeWidth={1.5} />
           </button>
         </div>
       </div>

@@ -37,8 +37,10 @@ export function TaskCard({ taskKey, title, priority, type, priorities, types, as
   const typeOpt = types.find((t) => t.id === type);
   const prioOpt = priorities.find((p) => p.id === priority);
   const typeLabel = typeOpt?.label ?? type;
-  const typeColor = typeOpt?.color ?? "#6b7280";
-  const prioColor = prioOpt?.color ?? "#6b6560";
+  const typeColor = typeOpt?.color ?? "#6B6560";
+  const prioColor = prioOpt?.color ?? "#6B6560";
+  // Legacy default Low renders as a hollow ring, never a solid dot (§5.5/§5.9i).
+  const isLowPriority = prioColor.toUpperCase() === "#6B6560";
   const hasOutOfSync = githubs.some(g => g.outOfSync);
   const due = dueAt ? formatDueLabel(dueAt) : null;
   return (
@@ -61,8 +63,8 @@ export function TaskCard({ taskKey, title, priority, type, priorities, types, as
           )}
           <span
             className="priority-dot"
-            style={{ background: prioColor }}
-            title={`${typeLabel} · ${prioColor}`}
+            style={isLowPriority ? { border: "2px solid #6B6560", background: "transparent" } : { background: prioColor }}
+            title={`${typeLabel} · ${prioOpt?.label ?? priority}`}
           />
           {action}
         </span>

@@ -100,7 +100,7 @@ export function Toolbar({
 
   return (
     <>
-      <div className="editor-toolbar wiki-toolbar-host" style={{ borderBottom: "1px solid var(--lx-border-default)", borderRadius: "6px 6px 0 0" }}>
+      <div className="editor-toolbar wiki-toolbar-host">
         <div className="wiki-toolbar-row">
         <ToolbarButton command={() => editor.chain().focus().undo().run()} isActive={false} title="Undo" disabled={!editor.can().undo()}>
           <i className="ph ph-arrow-arc-left" />

@@ -149,7 +149,7 @@ function TeamProfileSection({ team }: { team: Team }) {
   return (
     <section className="mb-8">
       <h2 className="font-display text-lg font-medium text-lx-text-primary mb-3">Profile</h2>
-      <div className="mt-4 p-4" style={{ background: "var(--lx-surface-elevated)", border: "1px solid var(--lx-border-default)", borderRadius: 8 }}>
+      <div className="card-panel card-panel--elevated mt-4">
         <div className="flex items-end gap-3 flex-wrap">
           <div className="field" style={{ marginBottom: 0 }}>
             <label className="field-label" htmlFor="team-profile-name">Name</label>
@@ -248,7 +248,7 @@ function TeamMembersSection({ teamId, isSuperadmin }: { teamId: string; isSupera
       {isLoading ? (
         <div className="text-sm text-lx-text-muted py-8 text-center">Loading…</div>
       ) : (
-        <div style={{ background: "var(--lx-surface-card)", border: "1px solid var(--lx-border-default)", borderRadius: 8, overflow: "hidden" }}>
+        <div className="card-panel" style={{ overflow: "hidden" }}>
           <table className="settings-table">
             <thead>
               <tr><th style={{ width: "auto" }}>User</th><th style={{ width: "auto" }}>Email</th><th style={{ width: 120 }}>Role</th><th style={{ width: 80 }} /></tr>
@@ -312,7 +312,7 @@ function TeamProjectsSection({ teamId }: { teamId: string }) {
         <h2 className="font-display text-lg font-medium text-lx-text-primary">Projects</h2>
         <span className="text-xs text-lx-text-muted">Read-only</span>
       </div>
-      <div style={{ background: "var(--lx-surface-card)", border: "1px solid var(--lx-border-default)", borderRadius: 8, overflow: "hidden" }}>
+      <div className="card-panel" style={{ overflow: "hidden" }}>
         <table className="settings-table">
           <thead>
             <tr><th>Project</th><th>Slug</th></tr>
