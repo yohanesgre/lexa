@@ -74,6 +74,21 @@ function setLink(editor: NonNullable<ReturnType<typeof useEditor>>) {
   editor.chain().focus().extendMarkRange("link").setLink({ href }).run();
 }
 
+function setImage(editor: NonNullable<ReturnType<typeof useEditor>>) {
+  const url = window.prompt("Image URL");
+  if (url === null) return;
+  const trimmed = url.trim();
+  // Same scheme allowlist as stored images (shared/safe-href.ts): only
+  // http(s) can be inserted — anything else is rejected at the authoring
+  // boundary so a bad src never lands in the doc.
+  if (!/^https?:\/\//i.test(trimmed)) {
+    window.alert("Not a valid image URL — must start with http:// or https://");
+    return;
+  }
+  const alt = window.prompt("Alt text (optional)")?.trim() ?? "";
+  editor.chain().focus().setImage({ src: trimmed, alt: alt || undefined }).run();
+}
+
 export function Toolbar({
   editor,
   headingLevel,
@@ -157,9 +172,19 @@ export function Toolbar({
         <ToolbarButton command={() => editor.chain().focus().setHorizontalRule().run()} isActive={false} title="Horizontal rule">
           <i className="ph ph-minus" />
         </ToolbarButton>
+        <ToolbarButton
+          command={() => editor.chain().focus().insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run()}
+          isActive={editor.isActive("table")}
+          title="Insert table"
+        >
+          <i className="ph ph-table" />
+        </ToolbarButton>
         <ToolbarSeparator />
         <ToolbarButton command={() => setLink(editor)} isActive={editor.isActive("link")} title="Link">
           <i className="ph ph-link" />
+        </ToolbarButton>
+        <ToolbarButton command={() => setImage(editor)} isActive={false} title="Image">
+          <i className="ph ph-image" />
         </ToolbarButton>
         <ToolbarSeparator />
         <button

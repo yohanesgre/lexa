@@ -10,6 +10,11 @@ import TaskItem from "@tiptap/extension-task-item";
 import Link from "@tiptap/extension-link";
 import Highlight from "@tiptap/extension-highlight";
 import Underline from "@tiptap/extension-underline";
+import Image from "@tiptap/extension-image";
+import { Table } from "@tiptap/extension-table";
+import { TableRow } from "@tiptap/extension-table-row";
+import { TableHeader } from "@tiptap/extension-table-header";
+import { TableCell } from "@tiptap/extension-table-cell";
 import Placeholder from "@tiptap/extension-placeholder";
 import type { WikiPage, WikiPageMeta, TipTapDoc } from "../../../shared/types";
 import { useUpdateWikiPage, useRestoreWikiRevision } from "../../lib/queries";
@@ -163,6 +168,13 @@ export function WikiPageViewer({ slug, page, pages }: WikiPageViewerProps) {
       Link.configure({ openOnClick: false }),
       Highlight,
       Underline,
+      // Image + table nodes must be in the schema for stored pages to open
+      // without ProseMirror dropping the nodes (unknown nodes are stripped).
+      Image.configure({ inline: true, allowBase64: false }),
+      Table.configure({ resizable: false }),
+      TableRow,
+      TableHeader,
+      TableCell,
       Placeholder.configure({ placeholder: "Start writing..." }),
     ],
     content: (page.content ?? emptyDoc) as unknown as JSONContent,

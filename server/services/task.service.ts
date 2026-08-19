@@ -24,12 +24,21 @@ import * as msg from "../activity-messages";
 import type { Task, Column, Swimlane, TipTapDoc, Actor, ActivityEvent, ActivityType } from "../../shared/types";
 
 export function isEmptyDoc(doc: TipTapDoc): boolean {
-  const hasText = (node: Record<string, unknown>): boolean => {
-    if (node.type === "text") return (typeof node.text === "string" ? node.text : "").trim().length > 0;
-    if (node.content && Array.isArray(node.content)) return (node.content as Record<string, unknown>[]).some(hasText);
-    return false;
+  // A doc is empty when it holds no text and no meaningful content nodes
+  // (image, horizontalRule, table). Container nodes (paragraph, heading,
+  // blockquote, list) always recurse — a paragraph of whitespace is empty.
+  const hasContent = (node: Record<string, unknown>): boolean => {
+    const children = node.content as Record<string, unknown>[] | undefined;
+    if (node.type === "text") {
+      return (typeof node.text === "string" ? node.text : "").trim().length > 0;
+    }
+    if (children && children.length > 0) {
+      return children.some(hasContent);
+    }
+    // Leaf node that is not text: image, horizontalRule, table, checkbox, etc.
+    return node.type !== "paragraph" && node.type !== "doc";
   };
-  return !hasText(doc as unknown as Record<string, unknown>);
+  return !hasContent(doc as unknown as Record<string, unknown>);
 }
 
 function validateRequiredFields(

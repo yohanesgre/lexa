@@ -70,7 +70,21 @@ function flattenInline(tokens: Token[], parentMarks: TipTapMark[] = []): TipTapN
         out.push({ type: "hardBreak" });
         break;
       }
-      case "image":
+      case "image": {
+        flush();
+        // Same scheme allowlist as links, applied at the authoring boundary:
+        // a stored image src that can't render as http(s) is dropped entirely.
+        // `javascript:` in src is inert in an <img>, but data: / file: can
+        // carry tracking or huge payloads, so the allowlist still applies.
+        const src = safeHref(t.href);
+        if (!src) break;
+        const attrs: Record<string, unknown> = { src };
+        // marked puts the alt text in t.text, not an attrs field.
+        if (t.text) attrs.alt = t.text;
+        if (t.title) attrs.title = t.title;
+        out.push({ type: "image", attrs });
+        break;
+      }
       case "html": {
         flush();
         out.push({ type: "text", text: t.raw, marks: parentMarks.length ? [...parentMarks] : undefined });
@@ -137,10 +151,41 @@ function mapOne(t: Token): TipTapNode | null {
     case "hr": {
       return { type: "horizontalRule" };
     }
-    case "table":
-    case "image":
+    case "table": {
+      // GFM table: header cells + row cells, each with inline tokens.
+      // Alignments (left/center/right) are carried per column; a column with
+      // no alignment marker maps to undefined (renderer emits unaligned).
+      const mapCells = (cells: Tokens.TableCell[], isHeader: boolean): TipTapNode[] =>
+        cells.map((cell, i) => {
+          const content = flattenInline(cell.tokens ?? []);
+          if (!content.length) content.push({ type: "text", text: cell.text ?? "" });
+          // Table cells require block+ content in the TipTap schema — bare
+          // inline nodes get dropped when the doc loads in the editor. Wrap
+          // the inline content in a paragraph so the round-trip holds.
+          return {
+            type: isHeader ? "tableHeader" : "tableCell",
+            attrs: t.align[i] ? { align: t.align[i] } : undefined,
+            content: [{ type: "paragraph", content }],
+          };
+        });
+      const headerRow = t.header.length
+        ? [{ type: "tableRow", content: mapCells(t.header, true) }]
+        : [];
+      const bodyRows = (t.rows ?? []).map((row: Tokens.TableCell[]) => ({
+        type: "tableRow",
+        content: mapCells(row, false),
+      }));
+      if (!headerRow.length && bodyRows.length === 0) return null;
+      return { type: "table", attrs: undefined, content: [...headerRow, ...bodyRows] };
+    }
     case "html": {
       return { type: "codeBlock", content: [{ type: "text", text: t.raw }] };
+    }
+    case "image": {
+      // Images are inline tokens (they carry no block semantics on their
+      // own), so block-level standalone images arrive via flattenInline in
+      // the enclosing paragraph — this case is a safety net.
+      return null;
     }
     case "checkbox":
     case "space": {
@@ -184,6 +229,15 @@ function renderInlineNode(node: TipTapNode): string {
     }
     return result;
   }
+  if (node.type === "image") {
+    // Round-trips back through the allowlist — a stored image whose src has
+    // since become non-http(s) is not re-emitted.
+    const src = safeHref(node.attrs?.src);
+    if (!src) return "";
+    const alt = node.attrs?.alt ? String(node.attrs.alt) : "";
+    const title = node.attrs?.title ? ` "${String(node.attrs.title)}"` : "";
+    return `![${alt}](${src}${title})`;
+  }
   if (node.type === "hardBreak") return "  \\\n";
   return node.text ?? "";
 }
@@ -201,6 +255,14 @@ function applyMark(mark: TipTapMark, inner: string): string {
     }
     default: return inner;
   }
+}
+
+// Pad a table cell so the cell's alignment carries through the pipe-split
+// round-trip: right/center-aligned cells get leading/trailing spaces, which
+// marked's table parser discards before splitting on pipes.
+function alignCell(text: string, align: string | null): string {
+  if (!align || align === "left") return text;
+  return align === "right" ? ` ${text}` : ` ${text} `;
 }
 
 function renderBlock(nodes: TipTapNode[]): string {
@@ -241,6 +303,72 @@ function renderNode(node: TipTapNode): string {
       return renderBlock(node.content ?? []);
     case "horizontalRule":
       return "---";
+    case "table": {
+      const rows = (node.content ?? []).filter((n) => n.type === "tableRow");
+      const header = rows[0];
+      const body = rows.slice(1);
+      const colspan = (c: TipTapNode) => {
+        const n = Number(c.attrs?.colspan ?? 1);
+        return Number.isFinite(n) && n >= 1 ? n : 1;
+      };
+      // Table dimensions: the row with the most cells (each cell spanning
+      // `colspan` columns) sets the column count. Plain cells carry no
+      // colstart, so counting cells directly is the reliable measure.
+      const columnCount = Math.max(
+        1,
+        ...rows.map((r) =>
+          (r.content ?? []).reduce((sum, c) => sum + colspan(c), 0)
+        )
+      );
+      // Per-column alignment comes from the header cells only; body cells
+      // inherit via colstart so `| :--- | ---: |` maps col 2 right.
+      const align: Record<number, string> = {};
+      const headerCells = (header?.content ?? []).filter(
+        (n) => n.type === "tableHeader" || n.type === "tableCell"
+      );
+      let headerCol = 1;
+      for (const c of headerCells) {
+        const a = c.attrs?.align ? String(c.attrs.align) : "";
+        align[headerCol] = a;
+        headerCol += colspan(c);
+      }
+      const renderCells = (cells: TipTapNode[]): string => {
+        // Alignment follows the header column position: track the running
+        // column index (cells with colspan occupy multiple columns) so a
+        // right-aligned header column aligns its body cells too.
+        let col = 1;
+        return cells
+          .map((c) => {
+            const a = align[col] || "";
+            col += colspan(c);
+            // Cell content is paragraph-wrapped (schema requires block+);
+            // unwrap the single paragraph so the pipe-split rendering stays
+            // flat — a nested paragraph block would emit blank lines.
+            const inline = (c.content ?? []).flatMap((n) =>
+              n.type === "paragraph" ? (n.content ?? []) : [n]
+            );
+            return alignCell(renderInline(inline), a);
+          })
+          .join(" | ");
+      };
+      const line = (row?: TipTapNode) => `| ${renderCells((row?.content ?? []).filter((n) => n.type === "tableHeader" || n.type === "tableCell"))} |`;
+      const delimiter = `| ${Array.from({ length: columnCount }, (_, i) => {
+        const a = align[i + 1] || "";
+        return a === "center" ? ":---:" : a === "right" ? "---:" : a === "left" ? ":---" : "---";
+      }).join(" | ")} |`;
+      const out: string[] = [];
+      if (header) out.push(line(header), delimiter);
+      for (const r of body) out.push(line(r));
+      return out.join("\n");
+    }
+    case "tableRow": {
+      // A row outside a table (shouldn't happen) falls back to its cells.
+      return renderBlock(node.content ?? []);
+    }
+    case "image":
+      // Top-level images are wrapped in a paragraph so the renderer emits
+      // valid CommonMark (a bare ![..] line is a paragraph in the lexer).
+      return renderInline(node.content ?? []) + renderInlineNode(node);
     case "hardBreak":
       return "  \\\n";
     default: {
