@@ -7,7 +7,7 @@ import { LoggerLayer } from "../logging/logger";
 import { Sqlite, withTx, DbError, queryFirst } from "../db/database";
 import { Database } from "bun:sqlite";
 import { getSetting, setSetting, deleteSetting } from "../db/settings";
-import { ProjectNotFound, WikiPageNotFound, MachineNotFound, Forbidden, SetupLocked, TaskNotFound, InvalidName, InvalidRateLimit, InvalidGithubSettings, NoUserContext, GithubApiError, errorResponse, errorToStatus } from "./errors";
+import { ProjectNotFound, WikiPageNotFound, MachineNotFound, Forbidden, SetupLocked, TaskNotFound, InvalidName, InvalidRateLimit, InvalidGithubSettings, NoUserContext, GithubApiError, errorResponse, errorToStatus, ProjectAccessDenied } from "./errors";
 import { respond } from "./http-helpers";
 import { resolveTaskId } from "./task-id";
 import { parseTaskKey } from "../task-key";
@@ -156,6 +156,10 @@ const CreateProjectPayload = Schema.Struct({
   name: Schema.String,
   slug: Schema.optional(Schema.String),
   description: Schema.optional(Schema.String),
+  // Owning team (organization id); null = unassigned (superadmin-only until
+  // assigned). Only superadmins may create an unassigned project — a team
+  // admin's create is forced to their own team (enforced in the handler).
+  teamId: Schema.optional(Schema.NullOr(Schema.String)),
 });
 
 const SlugPath = Schema.Struct({ slug: Schema.String });
@@ -1380,6 +1384,25 @@ const requireAdmin = Effect.gen(function* () {
   return identity;
 });
 
+// Resolve a project by slug AND gate read access (R8): superadmin > explicit
+// user_project_roles grant > team membership > deny. Admin identity (role
+// "admin") covers session superadmins, bare API keys, and daemon/setup calls
+// (userId null) — those see everything. Member sessions are the only callers
+// filtered; member-bound keys are already 403'd in the middleware. Returns
+// the project, or 403 PROJECT_ACCESS_DENIED (FORBIDDEN) when the caller is
+// not a member of the owning team and holds no explicit grant.
+const requireProjectRead = (slug: string): Effect.Effect<DomainProject, ProjectNotFound | DbError | ProjectAccessDenied, AuthIdentity | ProjectService | AuthorizationService> =>
+  Effect.gen(function* () {
+    const identity = yield* AuthIdentity;
+    const projectService = yield* ProjectService;
+    const project = yield* projectService.findBySlug(slug);
+    if (identity.role === "admin" || !identity.userId) return project;
+    const authz = yield* AuthorizationService;
+    const access = yield* authz.projectAccess(identity.userId, project.id);
+    if (!access) return yield* Effect.fail(new ProjectAccessDenied({ project: slug, role: "member" }));
+    return project;
+  });
+
 // Effective GitHub config for the response envelope — DB ONLY (env is a
 // first-boot bootstrap, mirrored into the settings table at boot). source is
 // "settings" if any github_* row exists, else "none". Only appId is returned
@@ -1599,8 +1622,20 @@ const projectsLive = HttpApiBuilder.group(LexaApi, "projects", (handlers) =>
   handlers
     .handle("list", (req) =>
       respond(Effect.gen(function* () {
+        const identity = yield* AuthIdentity;
         const service = yield* ProjectService;
-        const projects = yield* service.list();
+        let projects = yield* service.list();
+        // Member sessions see only projects they can access (superadmin >
+        // user_project_roles grant > team membership). Admins (incl. bare API
+        // keys) see everything.
+        if (identity.role !== "admin" && identity.userId) {
+          const authz = yield* AuthorizationService;
+          const visible: DomainProject[] = [];
+          for (const p of projects) {
+            if (yield* authz.projectAccess(identity.userId, p.id)) visible.push(p);
+          }
+          projects = visible;
+        }
         return { data: yield* Effect.forEach(projects, withRepos), nextCursor: null };
       }))
     )
@@ -1608,17 +1643,22 @@ const projectsLive = HttpApiBuilder.group(LexaApi, "projects", (handlers) =>
       respond(Effect.gen(function* () {
         yield* requireAdmin;
         const service = yield* ProjectService;
+        const teams = yield* TeamsService;
+        const teamId = req.payload.teamId ?? null;
+        if (teamId !== null) {
+          const team = yield* teams.findById(teamId);
+          if (!team) return yield* Effect.fail(new TeamNotFound({ teamId }));
+        }
         const project = yield* service.create({
           name: req.payload.name, slug: req.payload.slug,
-          description: req.payload.description,
+          description: req.payload.description, teamId,
         });
         return yield* withRepos(project);
       }))
     )
     .handle("getBySlug", (req) =>
       respond(Effect.gen(function* () {
-        const service = yield* ProjectService;
-        const project = yield* service.findBySlug(req.path.slug);
+        const project = yield* requireProjectRead(req.path.slug);
         return yield* withRepos(project);
       }))
     )
@@ -1651,7 +1691,7 @@ const projectsLive = HttpApiBuilder.group(LexaApi, "projects", (handlers) =>
         const projectService = yield* ProjectService;
         const roleRepo = yield* UserProjectRoleRepo;
         const userRepo = yield* UserRepo;
-        const project = yield* projectService.findBySlug(req.path.slug);
+        const project = yield* requireProjectRead(req.path.slug);
         const roles = yield* roleRepo.findByProjectId(project.id);
         const members = yield* Effect.forEach(roles, (r) =>
           Effect.gen(function* () {
@@ -1684,13 +1724,14 @@ const projectsLive = HttpApiBuilder.group(LexaApi, "projects", (handlers) =>
     )
     .handle("listGithubIssues", (req) =>
       respond(Effect.gen(function* () {
+        const project = yield* requireProjectRead(req.path.slug);
         const githubService = yield* GitHubService;
         const params = searchParams(req);
         const repo = params.get("repo") ?? "";
         if (!repo) {
           return yield* Effect.fail(new GithubApiError({ message: "repo query param is required (owner/name)" }));
         }
-        const issues = yield* githubService.listWorkspaceIssues(req.path.slug, repo, params.get("q") ?? "");
+        const issues = yield* githubService.listWorkspaceIssues(project.slug, repo, params.get("q") ?? "");
         return { data: issues };
       }))
     )
@@ -1719,9 +1760,8 @@ const columnsLive = HttpApiBuilder.group(LexaApi, "columns", (handlers) =>
   handlers
     .handle("listColumns", (req) =>
       respond(Effect.gen(function* () {
-        const projectService = yield* ProjectService;
         const columnService = yield* ColumnService;
-        const project = yield* projectService.findBySlug(req.path.slug);
+        const project = yield* requireProjectRead(req.path.slug);
         const columns = yield* columnService.findByProject(project.id);
         return { data: columns.map(formatColumn) };
       }))
@@ -1768,9 +1808,8 @@ const swimlanesLive = HttpApiBuilder.group(LexaApi, "swimlanes", (handlers) =>
   handlers
     .handle("listSwimlanes", (req) =>
       respond(Effect.gen(function* () {
-        const projectService = yield* ProjectService;
         const swimlaneService = yield* SwimlaneService;
-        const project = yield* projectService.findBySlug(req.path.slug);
+        const project = yield* requireProjectRead(req.path.slug);
         const swimlanes = yield* swimlaneService.findByProject(project.id, { includeArchived: true });
         return { data: swimlanes.map(formatSwimlane) };
       }))
@@ -1831,9 +1870,8 @@ const milestonesLive = HttpApiBuilder.group(LexaApi, "milestones", (handlers) =>
   handlers
     .handle("listMilestones", (req) =>
       respond(Effect.gen(function* () {
-        const projectService = yield* ProjectService;
         const milestoneService = yield* MilestoneService;
-        const project = yield* projectService.findBySlug(req.path.slug);
+        const project = yield* requireProjectRead(req.path.slug);
         const milestones = yield* milestoneService.findByProject(project.id, { includeArchived: true });
         return { data: milestones.map(formatMilestone) };
       }))
@@ -1891,9 +1929,8 @@ const milestonesLive = HttpApiBuilder.group(LexaApi, "milestones", (handlers) =>
 const fieldConfigLive = HttpApiBuilder.group(LexaApi, "field-config", (handlers) =>  handlers
     .handle("getFieldConfig", (req) =>
       respond(Effect.gen(function* () {
-        const projectService = yield* ProjectService;
         const service = yield* FieldConfigService;
-        const project = yield* projectService.findBySlug(req.path.slug);
+        const project = yield* requireProjectRead(req.path.slug);
         return yield* service.findByProject(project.id);
       }))
     )
@@ -2151,9 +2188,8 @@ const forgeLive = HttpApiBuilder.group(LexaApi, "forge", (handlers) =>
     )
     .handle("createForgeTask", (req) =>
       respond(Effect.gen(function* () {
-        const projectService = yield* ProjectService;
         const service = yield* ForgeService;
-        const project = yield* projectService.findBySlug(req.payload.slug);
+        const project = yield* requireProjectRead(req.payload.slug);
         const task = yield* service.create({
           projectId: project.id,
           documentType: req.payload.documentType,
@@ -2339,19 +2375,17 @@ const forgeLive = HttpApiBuilder.group(LexaApi, "forge", (handlers) =>
     )
     .handle("listSources", (req) =>
       respond(Effect.gen(function* () {
-        const projectService = yield* ProjectService;
         const service = yield* SourceService;
-        const project = yield* projectService.findBySlug(req.path.slug);
+        const project = yield* requireProjectRead(req.path.slug);
         const sources = yield* service.findByDocument(project.id, req.path.type, req.path.id);
         return { data: sources };
       }))
     )
     .handle("addSource", (req) =>
       respond(Effect.gen(function* () {
-        const projectService = yield* ProjectService;
         const service = yield* SourceService;
         const identity = yield* AuthIdentity;
-        const project = yield* projectService.findBySlug(req.path.slug);
+        const project = yield* requireProjectRead(req.path.slug);
         const { source, activity } = yield* service.add(actorFromIdentity(identity), {
           projectId: project.id,
           documentType: req.path.type,
@@ -2410,9 +2444,8 @@ const taskLinksLive = HttpApiBuilder.group(LexaApi, "task-links", (handlers) =>
   handlers
     .handle("listTaskLinks", (req) =>
       respond(Effect.gen(function* () {
-        const projectService = yield* ProjectService;
         const service = yield* TaskLinkService;
-        const project = yield* projectService.findBySlug(req.path.slug);
+        const project = yield* requireProjectRead(req.path.slug);
         const id = yield* resolveTaskId(req.path.id, req.path.slug);
         const links = yield* service.findByTask(project.id, id);
         return { data: links };
@@ -2420,10 +2453,9 @@ const taskLinksLive = HttpApiBuilder.group(LexaApi, "task-links", (handlers) =>
     )
     .handle("addTaskLink", (req) =>
       respond(Effect.gen(function* () {
-        const projectService = yield* ProjectService;
         const service = yield* TaskLinkService;
         const identity = yield* AuthIdentity;
-        const project = yield* projectService.findBySlug(req.path.slug);
+        const project = yield* requireProjectRead(req.path.slug);
         const id = yield* resolveTaskId(req.path.id, req.path.slug);
         const { link, activity } = yield* service.add(actorFromIdentity(identity), {
           projectId: project.id,
@@ -2444,9 +2476,8 @@ const taskLinksLive = HttpApiBuilder.group(LexaApi, "task-links", (handlers) =>
     )
     .handle("searchTasks", (req) =>
       respond(Effect.gen(function* () {
-        const projectService = yield* ProjectService;
         const service = yield* TaskLinkService;
-        const project = yield* projectService.findBySlug(req.path.slug);
+        const project = yield* requireProjectRead(req.path.slug);
         const q = searchParams(req).get("q") ?? "";
         const exclude = searchParams(req).get("exclude") ?? "";
         // Exact KEY-N pre-check before FTS: a ticket key is a first-class
@@ -2478,9 +2509,8 @@ const tasksLive = HttpApiBuilder.group(LexaApi, "tasks", (handlers) =>
   handlers
     .handle("listTasks", (req) =>
       respond(Effect.gen(function* () {
-        const projectService = yield* ProjectService;
         const taskService = yield* TaskService;
-        const project = yield* projectService.findBySlug(req.path.slug);
+        const project = yield* requireProjectRead(req.path.slug);
         const q = searchParams(req);
         const limit = clampLimit(q.get("limit"));
         const cursor = q.get("cursor") ?? undefined;
@@ -2499,10 +2529,9 @@ const tasksLive = HttpApiBuilder.group(LexaApi, "tasks", (handlers) =>
     )
     .handle("createTask", (req) =>
       respond(Effect.gen(function* () {
-        const projectService = yield* ProjectService;
         const taskService = yield* TaskService;
         const identity = yield* AuthIdentity;
-        const project = yield* projectService.findBySlug(req.path.slug);
+        const project = yield* requireProjectRead(req.path.slug);
         const { task, activity } = yield* taskService.create(actorFromIdentity(identity), {
           projectId: project.id, columnId: req.payload.columnId,
           swimlaneId: req.payload.swimlaneId, title: req.payload.title,
@@ -2516,6 +2545,7 @@ const tasksLive = HttpApiBuilder.group(LexaApi, "tasks", (handlers) =>
     )
     .handle("getTask", (req) =>
       respond(Effect.gen(function* () {
+        yield* requireProjectRead(req.path.slug);
         const taskService = yield* TaskService;
         const id = yield* resolveTaskId(req.path.id, req.path.slug);
         const task = yield* taskService.getById(id);
@@ -2607,9 +2637,8 @@ const tasksLive = HttpApiBuilder.group(LexaApi, "tasks", (handlers) =>
     )
     .handle("taskActivity", (req) =>
       respond(Effect.gen(function* () {
-        const projectService = yield* ProjectService;
         const activityService = yield* ActivityService;
-        yield* projectService.findBySlug(req.path.slug);
+        yield* requireProjectRead(req.path.slug);
         const id = yield* resolveTaskId(req.path.id, req.path.slug);
         const q = searchParams(req);
         const limit = clampLimit(q.get("limit"));
@@ -2621,8 +2650,7 @@ const tasksLive = HttpApiBuilder.group(LexaApi, "tasks", (handlers) =>
       respond(Effect.gen(function* () {
         const identity = yield* AuthIdentity;
         const commentService = yield* CommentService;
-        const projectService = yield* ProjectService;
-        yield* projectService.findBySlug(req.path.slug);
+        yield* requireProjectRead(req.path.slug);
         const id = yield* resolveTaskId(req.path.id, req.path.slug);
         const result = yield* commentService.create(id, actorFromIdentity(identity), req.payload.body);
         return {
@@ -2656,11 +2684,10 @@ const tasksLive = HttpApiBuilder.group(LexaApi, "tasks", (handlers) =>
     )
     .handle("linkGithubIssue", (req) =>
       respond(Effect.gen(function* () {
-        const projectService = yield* ProjectService;
         const taskService = yield* TaskService;
         const githubService = yield* GitHubService;
         const identity = yield* AuthIdentity;
-        yield* projectService.findBySlug(req.path.slug);
+        yield* requireProjectRead(req.path.slug);
         const id = yield* resolveTaskId(req.path.id, req.path.slug);
         const linked = yield* githubService.createLinkedIssue(actorFromIdentity(identity), id, req.payload.repo);
         const task = yield* taskService.getById(id);
@@ -2669,11 +2696,10 @@ const tasksLive = HttpApiBuilder.group(LexaApi, "tasks", (handlers) =>
     )
     .handle("linkExistingGithubIssue", (req) =>
       respond(Effect.gen(function* () {
-        const projectService = yield* ProjectService;
         const taskService = yield* TaskService;
         const githubService = yield* GitHubService;
         const identity = yield* AuthIdentity;
-        yield* projectService.findBySlug(req.path.slug);
+        yield* requireProjectRead(req.path.slug);
         const id = yield* resolveTaskId(req.path.id, req.path.slug);
         const linked = yield* githubService.linkExistingIssue(actorFromIdentity(identity), id, req.payload.repo, req.payload.issueNumber);
         const task = yield* taskService.getById(id);
@@ -2682,12 +2708,11 @@ const tasksLive = HttpApiBuilder.group(LexaApi, "tasks", (handlers) =>
     )
     .handle("unlinkGithubIssue", (req) =>
       respond(Effect.gen(function* () {
-        const projectService = yield* ProjectService;
         const taskService = yield* TaskService;
         const taskRepo = yield* TaskRepo;
         const activityService = yield* ActivityService;
         const identity = yield* AuthIdentity;
-        yield* projectService.findBySlug(req.path.slug);
+        yield* requireProjectRead(req.path.slug);
         const id = yield* resolveTaskId(req.path.id, req.path.slug);
         const task = yield* taskService.getById(id);
         const issue = task.githubs.find((g) => g.issueId === req.path.issueId);
@@ -2709,6 +2734,7 @@ const tasksLive = HttpApiBuilder.group(LexaApi, "tasks", (handlers) =>
     )
     .handle("createTaskFromIssue", (req) =>
       respond(Effect.gen(function* () {
+        yield* requireProjectRead(req.path.slug);
         const githubService = yield* GitHubService;
         const identity = yield* AuthIdentity;
         const { taskId, activity } = yield* githubService.createTaskFromIssue(
@@ -2727,14 +2753,13 @@ const tasksLive = HttpApiBuilder.group(LexaApi, "tasks", (handlers) =>
 const boardLive = HttpApiBuilder.group(LexaApi, "board", (handlers) =>
   handlers.handle("getBoard", (req) =>
     respond(Effect.gen(function* () {
-      const projectService = yield* ProjectService;
       const columnService = yield* ColumnService;
       const swimlaneService = yield* SwimlaneService;
       const milestoneService = yield* MilestoneService;
       const taskService = yield* TaskService;
       const fieldConfigService = yield* FieldConfigService;
       const taskLinkRepo = yield* TaskLinkRepo;
-      const project = yield* projectService.findBySlug(req.path.slug);
+      const project = yield* requireProjectRead(req.path.slug);
       const includeArchived = searchParams(req).get("includeArchived") === "true";
       const columns = yield* columnService.findByProject(project.id);
       const swimlanes = yield* swimlaneService.findByProject(project.id, { includeArchived });
@@ -2758,8 +2783,37 @@ const boardLive = HttpApiBuilder.group(LexaApi, "board", (handlers) =>
 const dashboardLive = HttpApiBuilder.group(LexaApi, "dashboard", (handlers) =>
   handlers.handle("getDashboard", () =>
     respond(Effect.gen(function* () {
+      const identity = yield* AuthIdentity;
       const service = yield* DashboardService;
       const dash = yield* service.getDashboard();
+      // Member sessions see only their teams'/grants' projects. The health
+      // cards, totals, and attention lists (urgent / out-of-sync) are all
+      // filtered to the visible set — a project you cannot open never leaks
+      // into your dashboard.
+      if (identity.role !== "admin" && identity.userId) {
+        const authz = yield* AuthorizationService;
+        const visible: typeof dash.projects = [];
+        for (const ph of dash.projects) {
+          if (yield* authz.projectAccess(identity.userId, ph.project.id)) visible.push(ph);
+        }
+        const visibleSlugs = new Set(visible.map((ph) => ph.project.slug));
+        const urgentTasks = dash.urgentTasks.filter((t) => visibleSlugs.has(t.projectSlug));
+        const outOfSyncTasks = dash.outOfSyncTasks.filter((t) => visibleSlugs.has(t.projectSlug));
+        return {
+          projects: visible.map((ph) => ({
+            ...ph,
+            project: { ...ph.project, teamId: (ph.project as unknown as { teamId?: string | null }).teamId ?? null },
+          })),
+          stats: {
+            totalTasks: visible.reduce((s, ph) => s + ph.taskCount, 0),
+            activeProjects: visible.length,
+            wipExceeded: visible.filter((ph) => ph.health === "exceeded").length,
+            outOfSync: visible.reduce((s, ph) => s + ph.syncCount, 0),
+          },
+          urgentTasks,
+          outOfSyncTasks,
+        };
+      }
       // The shared ProjectHealth type is team-free; the wire Project carries
       // teamId (the domain project already has it from the row mapping).
       return {
@@ -2777,9 +2831,8 @@ const wikiLive = HttpApiBuilder.group(LexaApi, "wiki", (handlers) =>
   handlers
     .handle("listPages", (req) =>
       respond(Effect.gen(function* () {
-        const projectService = yield* ProjectService;
         const wikiService = yield* WikiService;
-        const project = yield* projectService.findBySlug(req.path.slug);
+        const project = yield* requireProjectRead(req.path.slug);
         const pages = yield* wikiService.findByProject(project.id);
         const parentIds = new Set(pages.map((p) => p.parentId).filter((id): id is string => id !== null));
         return { data: pages.map((p) => formatWikiPageMeta(p, parentIds)) };
@@ -2787,9 +2840,8 @@ const wikiLive = HttpApiBuilder.group(LexaApi, "wiki", (handlers) =>
     )
     .handle("createPage", (req) =>
       respond(Effect.gen(function* () {
-        const projectService = yield* ProjectService;
         const wikiService = yield* WikiService;
-        const project = yield* projectService.findBySlug(req.path.slug);
+        const project = yield* requireProjectRead(req.path.slug);
         const contentText = req.payload.content ? extractText(req.payload.content) : undefined;
         const page = yield* wikiService.create(project.id, {
           title: req.payload.title,
@@ -2803,9 +2855,8 @@ const wikiLive = HttpApiBuilder.group(LexaApi, "wiki", (handlers) =>
     )
     .handle("searchPages", (req) =>
       respond(Effect.gen(function* () {
-        const projectService = yield* ProjectService;
         const wikiService = yield* WikiService;
-        const project = yield* projectService.findBySlug(req.path.slug);
+        const project = yield* requireProjectRead(req.path.slug);
         const q = searchParams(req).get("q");
         if (!q) return { data: [] as any[] };
         const results = yield* wikiService.search(project.id, q);
@@ -2814,18 +2865,16 @@ const wikiLive = HttpApiBuilder.group(LexaApi, "wiki", (handlers) =>
     )
     .handle("getPage", (req) =>
       respond(Effect.gen(function* () {
-        const projectService = yield* ProjectService;
         const wikiService = yield* WikiService;
-        const project = yield* projectService.findBySlug(req.path.slug);
+        const project = yield* requireProjectRead(req.path.slug);
         const page = yield* wikiService.findBySlug(project.id, req.path.pageSlug);
         return formatWikiPage(page);
       }))
     )
     .handle("listChildren", (req) =>
       respond(Effect.gen(function* () {
-        const projectService = yield* ProjectService;
         const wikiService = yield* WikiService;
-        const project = yield* projectService.findBySlug(req.path.slug);
+        const project = yield* requireProjectRead(req.path.slug);
         const page = yield* wikiService.findBySlug(project.id, req.path.pageSlug);
         const children = yield* wikiService.findChildren(project.id, page.id);
         const allPages = yield* wikiService.findByProject(project.id);
@@ -2835,9 +2884,8 @@ const wikiLive = HttpApiBuilder.group(LexaApi, "wiki", (handlers) =>
     )
     .handle("updatePage", (req) =>
       respond(Effect.gen(function* () {
-        const projectService = yield* ProjectService;
         const wikiService = yield* WikiService;
-        const project = yield* projectService.findBySlug(req.path.slug);
+        const project = yield* requireProjectRead(req.path.slug);
         const page = yield* wikiService.findBySlug(project.id, req.path.pageSlug);
         const updateInput: Record<string, unknown> = {};
         if (req.payload.title !== undefined) updateInput.title = req.payload.title;
@@ -2855,9 +2903,8 @@ const wikiLive = HttpApiBuilder.group(LexaApi, "wiki", (handlers) =>
     )
     .handle("deletePage", (req) =>
       respond(Effect.gen(function* () {
-        const projectService = yield* ProjectService;
         const wikiService = yield* WikiService;
-        const project = yield* projectService.findBySlug(req.path.slug);
+        const project = yield* requireProjectRead(req.path.slug);
         const page = yield* wikiService.findBySlug(project.id, req.path.pageSlug);
         yield* wikiService.delete(page.id);
         return undefined;
@@ -2865,9 +2912,8 @@ const wikiLive = HttpApiBuilder.group(LexaApi, "wiki", (handlers) =>
     )
     .handle("listRevisions", (req) =>
       respond(Effect.gen(function* () {
-        const projectService = yield* ProjectService;
         const wikiService = yield* WikiService;
-        const project = yield* projectService.findBySlug(req.path.slug);
+        const project = yield* requireProjectRead(req.path.slug);
         const q = searchParams(req);
         const limit = q.get("limit") ? clampLimit(q.get("limit")!) : undefined;
         const revisions = yield* wikiService.listRevisions(req.path.pageSlug, project.id, limit);
@@ -2876,9 +2922,8 @@ const wikiLive = HttpApiBuilder.group(LexaApi, "wiki", (handlers) =>
     )
     .handle("getRevision", (req) =>
       respond(Effect.gen(function* () {
-        const projectService = yield* ProjectService;
         const wikiService = yield* WikiService;
-        const project = yield* projectService.findBySlug(req.path.slug);
+        const project = yield* requireProjectRead(req.path.slug);
         const page = yield* wikiService.findBySlug(project.id, req.path.pageSlug);
         const revision = yield* wikiService.getRevision(req.path.revisionId);
         if (revision.pageId !== page.id) {
@@ -2889,9 +2934,8 @@ const wikiLive = HttpApiBuilder.group(LexaApi, "wiki", (handlers) =>
     )
     .handle("restoreRevision", (req) =>
       respond(Effect.gen(function* () {
-        const projectService = yield* ProjectService;
         const wikiService = yield* WikiService;
-        const project = yield* projectService.findBySlug(req.path.slug);
+        const project = yield* requireProjectRead(req.path.slug);
         const page = yield* wikiService.restoreRevision(req.payload.revisionId, req.path.pageSlug, project.id);
         return formatWikiPage(page);
       }))

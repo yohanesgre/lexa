@@ -67,7 +67,7 @@ setInterval(() => {
 // Sample data is the setup wizard's job (CLI `bun run setup` or web `/setup`).
 // Boot-time seeding only for explicit dev opt-in (LXK_SEED_DEV=1).
 if (process.env.LXK_SEED_DEV === "1") {
-  seedDevData(DATABASE_PATH);
+  void seedDevData(DATABASE_PATH);
 }
 // Task ticket keys: backfill legacy + seeded rows (idempotent, NULL-only).
 // Runs after seeding so dev sample data gets keys too.
@@ -374,19 +374,47 @@ function seedAdminKey(dbPath: string) {
   }
 }
 
-function seedDevData(dbPath: string) {
+async function seedDevAccounts(db: Database): Promise<void> {
+  // The SQL seed inserts users directly (no Better Auth account rows), so
+  // they cannot sign in. Provision credential accounts for every seed user
+  // with the documented dev password. Idempotent: skip users that already
+  // have a credential account (re-running the seed must not clobber a
+  // password the developer changed).
+  const { hashPassword } = await import("better-auth/crypto");
+  const rows = db
+    .query("SELECT u.id, u.email FROM users u WHERE u.email LIKE '%@lexa.local'")
+    .all() as { id: string; email: string }[];
+  for (const u of rows) {
+    const existing = db
+      .prepare("SELECT 1 FROM account WHERE providerId = 'credential' AND userId = ?")
+      .get(u.id);
+    if (existing) continue;
+    const password = await hashPassword("password123");
+    db.prepare(
+      `INSERT INTO account (id, accountId, providerId, userId, password, createdAt, updatedAt)
+       VALUES (?, ?, 'credential', ?, ?, datetime('now'), datetime('now'))`
+    ).run(crypto.randomUUID(), u.id, u.id, password);
+  }
+  if (rows.length > 0) console.log(`Seeded ${rows.length} dev login account(s) (password: password123)`);
+}
+
+async function seedDevData(dbPath: string) {
   const seedFile = join(import.meta.dir, "..", "scripts", "seed-dev.sql");
   if (!existsSync(seedFile)) return;
 
   const db = new Database(dbPath);
   try {
     const row = db.prepare("SELECT COUNT(*) as cnt FROM projects").get() as { cnt: number } | null;
-    if (row && row.cnt > 0) return;
-
-    console.log("Seeding dev data...");
-    const sql = readFileSync(seedFile, "utf-8");
-    db.exec(sql);
-    console.log("Seed complete");
+    if (!(row && row.cnt > 0)) {
+      console.log("Seeding dev data...");
+      const sql = readFileSync(seedFile, "utf-8");
+      db.exec(sql);
+      console.log("Seed complete");
+    }
+    // Provision login accounts for seed users even when the SQL seed was
+    // skipped (existing dev DB): idempotent, never clobbers existing
+    // passwords.
+    await seedDevAccounts(db);
   } catch (err) {
     console.error("Seed failed:", (err as Error).message);
   } finally {
