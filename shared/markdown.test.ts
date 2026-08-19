@@ -138,10 +138,41 @@ describe("markdownToDoc", () => {
     expect(content[0]).toMatchObject({ type: "horizontalRule" });
   });
 
-  it("degrades tables to codeBlock", () => {
+  it("maps tables to table nodes", () => {
     const doc = markdownToDoc("| a | b |\n|---|---|\n| 1 | 2 |");
     const content = doc.content as Record<string, unknown>[];
-    expect(content[0]).toMatchObject({ type: "codeBlock" });
+    expect(content[0]).toMatchObject({ type: "table" });
+    const rows = content[0].content as Record<string, unknown>[];
+    expect(rows[0]).toMatchObject({ type: "tableRow" });
+    const header = rows[0].content as Record<string, unknown>[];
+    expect(header[0]).toMatchObject({ type: "tableHeader" });
+    expect(header[1]).toMatchObject({ type: "tableHeader" });
+    const body = rows[1].content as Record<string, unknown>[];
+    expect(body[0]).toMatchObject({ type: "tableCell" });
+  });
+
+  it("wraps table cell content in paragraphs (schema requires block+)", () => {
+    const doc = markdownToDoc("| a | b |\n|---|---|\n| 1 | 2 |");
+    const rows = (doc.content as Record<string, unknown>[])[0].content as Record<string, unknown>[];
+    const header = rows[0].content as Record<string, unknown>[];
+    expect(header[0]).toMatchObject({
+      type: "tableHeader",
+      content: [{ type: "paragraph", content: [{ type: "text", text: "a" }] }],
+    });
+    const body = rows[1].content as Record<string, unknown>[];
+    expect(body[0]).toMatchObject({
+      type: "tableCell",
+      content: [{ type: "paragraph", content: [{ type: "text", text: "1" }] }],
+    });
+  });
+
+  it("maps table alignment", () => {
+    const doc = markdownToDoc("| a | b | c |\n|:--|:-:|--:|\n| 1 | 2 | 3 |");
+    const rows = (doc.content as Record<string, unknown>[])[0].content as Record<string, unknown>[];
+    const header = rows[0].content as Record<string, unknown>[];
+    expect(header[0]).toMatchObject({ type: "tableHeader", attrs: { align: "left" } });
+    expect(header[1]).toMatchObject({ type: "tableHeader", attrs: { align: "center" } });
+    expect(header[2]).toMatchObject({ type: "tableHeader", attrs: { align: "right" } });
   });
 
   it("degrades raw HTML to codeBlock", () => {
@@ -150,11 +181,20 @@ describe("markdownToDoc", () => {
     expect(content[0]).toMatchObject({ type: "codeBlock" });
   });
 
-  it("degrades images to codeBlock", () => {
+  it("maps images to image nodes", () => {
     const doc = markdownToDoc("Look: ![alt](https://example.com/img.png)");
-    // blocks are paragraph, image inline degrades to text
-    const content = doc.content as Record<string, unknown>[];
-    expect(content[0]).toMatchObject({ type: "paragraph" });
+    const para = (doc.content as Record<string, unknown>[])[0];
+    const image = (para.content as Record<string, unknown>[]).find(c => c.type === "image");
+    expect(image).toBeDefined();
+    expect(image).toMatchObject({ attrs: { src: "https://example.com/img.png" } });
+  });
+
+  it("drops non-http image srcs at the authoring boundary", () => {
+    const doc = markdownToDoc("![bad](javascript:alert(1)) ![ok](https://ok.dev/img.png)");
+    const para = (doc.content as Record<string, unknown>[])[0];
+    const images = (para.content as Record<string, unknown>[]).filter(c => c.type === "image");
+    expect(images).toHaveLength(1);
+    expect(images[0]).toMatchObject({ attrs: { src: "https://ok.dev/img.png" } });
   });
 
   it("never throws on garbage input", () => {
@@ -279,6 +319,72 @@ describe("docToMarkdown", () => {
     expect(docToMarkdown(doc)).toBe("---");
   });
 
+  it("emits images", () => {
+    const doc: TipTapDoc = {
+      type: "doc",
+      content: [
+        {
+          type: "paragraph",
+          content: [{ type: "image", attrs: { src: "https://x.com/i.png", alt: "a photo" } }],
+        },
+      ],
+    };
+    expect(docToMarkdown(doc)).toBe("![a photo](https://x.com/i.png)");
+  });
+
+  it("skips images with a dropped src", () => {
+    const doc: TipTapDoc = {
+      type: "doc",
+      content: [
+        {
+          type: "paragraph",
+          content: [
+            { type: "text", text: "before " },
+            { type: "image", attrs: { src: "javascript:alert(1)" } },
+            { type: "text", text: " after" },
+          ],
+        },
+      ],
+    };
+    expect(docToMarkdown(doc)).toBe("before  after");
+  });
+
+  it("emits tables with alignment", () => {
+    const doc: TipTapDoc = {
+      type: "doc",
+      content: [
+        {
+          type: "table",
+          content: [
+            {
+              type: "tableRow",
+              content: [
+                {
+                  type: "tableHeader",
+                  attrs: { align: "left" },
+                  content: [{ type: "paragraph", content: [{ type: "text", text: "a" }] }],
+                },
+                {
+                  type: "tableHeader",
+                  attrs: { align: "center" },
+                  content: [{ type: "paragraph", content: [{ type: "text", text: "b" }] }],
+                },
+              ],
+            },
+            {
+              type: "tableRow",
+              content: [
+                { type: "tableCell", content: [{ type: "paragraph", content: [{ type: "text", text: "1" }] }] },
+                { type: "tableCell", content: [{ type: "paragraph", content: [{ type: "text", text: "2" }] }] },
+              ],
+            },
+          ],
+        },
+      ],
+    };
+    expect(docToMarkdown(doc)).toBe("| a |  b  |\n| :--- | :---: |\n| 1 |  2  |");
+  });
+
   it("emits unknown node as fenced code block", () => {
     const doc: TipTapDoc = { type: "doc", content: [{ type: "customBlock", content: [{ type: "text", text: "hello" }] }] };
     expect(docToMarkdown(doc)).toBe("```\nhello\n```");
@@ -311,10 +417,20 @@ describe("round-trip", () => {
     expect(result).toBe("- [ ] todo\n- [x] done");
   });
 
-  it("table degrades to codeBlock", () => {
-    const doc = markdownToDoc("| a | b |\n|---|---|\n| 1 | 2 |");
-    const content = doc.content as Record<string, unknown>[];
-    expect(content[0]).toMatchObject({ type: "codeBlock" });
+  it("image round-trip", () => {
+    expect(rd("![alt](https://x.com/i.png)")).toBe("![alt](https://x.com/i.png)");
+  });
+
+  it("inline image round-trip inside text", () => {
+    expect(rd("See ![diagram](https://x.com/d.png) below")).toBe("See ![diagram](https://x.com/d.png) below");
+  });
+
+  it("table round-trip", () => {
+    expect(rd("| a | b |\n| --- | --- |\n| 1 | 2 |")).toBe("| a | b |\n| --- | --- |\n| 1 | 2 |");
+  });
+
+  it("aligned table round-trip", () => {
+    expect(rd("| a | b |\n| :--- | ---: |\n| 1 | 2 |")).toBe("| a |  b |\n| :--- | ---: |\n| 1 |  2 |");
   });
 });
 
