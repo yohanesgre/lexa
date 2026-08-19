@@ -260,7 +260,12 @@ VALUES
 
    ('seed-task-f-15', 'seed-proj-full', 'seed-col-f-4', 'seed-sw-f-0',
     'Unblocked but no owner', '{"type":"doc","content":[]}',
-    'seed-prio-full-2', 'seed-type-full-1', 'a1', NULL, NULL, NULL, NULL);
+    'seed-prio-full-2', 'seed-type-full-1', 'a1', NULL, NULL, NULL, NULL),
+
+  ('seed-task-f-16', 'seed-proj-full', 'seed-col-f-1', 'seed-sw-f-1',
+   'Document the auth flow with screenshots',
+   '{"type":"doc","content":[{"type":"paragraph","content":[{"type":"text","text":"Sign-in sequence with the new team-scoped project picker:"}]},{"type":"paragraph","content":[{"type":"image","attrs":{"src":"https://images.unsplash.com/photo-1551288049-bebda4e38f71?w=1200&q=60","alt":"Team sign-in flow diagram"}}]},{"type":"paragraph","content":[{"type":"text","text":"The picker only lists projects owned by your team. Cross-team grants appear under a separate section."}]}]}',
+   'seed-prio-full-1', 'seed-type-full-2', 'a3', NULL, NULL, NULL, NULL);
 
 INSERT INTO task_assignees (task_id, user_name)
 VALUES
@@ -340,7 +345,13 @@ VALUES
    'Empty Page', 'empty-page',
    '{"type":"doc","content":[]}',
    '',
-   'seed-wiki-01', 0);
+   'seed-wiki-01', 0),
+
+  ('seed-wiki-09', 'seed-proj-full',
+   'Release Checklist', 'release-checklist',
+   '{"type":"doc","content":[{"type":"heading","attrs":{"level":2},"content":[{"type":"text","text":"Release Checklist"}]},{"type":"paragraph","content":[{"type":"text","text":"Every release runs through these gates. The table tracks owners and status; the diagram below is the release pipeline."}]},{"type":"table","content":[{"type":"tableRow","content":[{"type":"tableHeader","content":[{"type":"paragraph","content":[{"type":"text","text":"Gate"}]}]},{"type":"tableHeader","content":[{"type":"paragraph","content":[{"type":"text","text":"Owner"}]}]},{"type":"tableHeader","content":[{"type":"paragraph","content":[{"type":"text","text":"Status"}]}]}]},{"type":"tableRow","content":[{"type":"tableCell","content":[{"type":"paragraph","content":[{"type":"text","text":"Changelog entries"}]}]},{"type":"tableCell","content":[{"type":"paragraph","content":[{"type":"text","text":"PM"}]}]},{"type":"tableCell","content":[{"type":"paragraph","content":[{"type":"text","marks":[{"type":"bold"}],"text":"Done"}]}]}]},{"type":"tableRow","content":[{"type":"tableCell","content":[{"type":"paragraph","content":[{"type":"text","text":"Wireframes committed"}]}]},{"type":"tableCell","content":[{"type":"paragraph","content":[{"type":"text","text":"Design"}]}]},{"type":"tableCell","content":[{"type":"paragraph","content":[{"type":"text","marks":[{"type":"bold"}],"text":"Done"}]}]}]},{"type":"tableRow","content":[{"type":"tableCell","content":[{"type":"paragraph","content":[{"type":"text","text":"tsc + vitest green"}]}]},{"type":"tableCell","content":[{"type":"paragraph","content":[{"type":"text","text":"Eng"}]}]},{"type":"tableCell","content":[{"type":"paragraph","content":[{"type":"text","text":"Pending"}]}]}]}]},{"type":"paragraph","content":[{"type":"image","attrs":{"src":"https://images.unsplash.com/photo-1454165804606-c3d57bc86b40?w=1200&q=60","alt":"Release pipeline diagram"}}]}]}',
+   'Release Checklist\nEvery release runs through these gates. The table tracks owners and status; the diagram below is the release pipeline.\nGate Owner Status\nChangelog entries PM Done\nWireframes committed Design Done\ntsc + vitest green Eng Pending',
+   'seed-wiki-00', 3);
 
 -- ============================================================
 -- Wiki page revisions — simulate edit history for 3 pages

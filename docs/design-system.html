@@ -1064,6 +1064,21 @@ a:hover { color: var(--lx-text-link-hover); }
   font-family: var(--lx-font-body);
 }
 
+.wiki-prose img {
+  max-width: 100%;
+  height: auto;
+  border-radius: 6px;
+  display: block;
+  margin: 12px 0;
+}
+
+/* Inserted-image selection state in the editor (mirrors the app's
+   .ProseMirror-selectednode treatment: dashed focus-colored outline). */
+.editor-area img {
+  outline: 2px dashed var(--lx-border-focus);
+  outline-offset: 2px;
+}
+
 .wiki-prose ul,
 .wiki-prose ol {
   margin: 8px 0 12px 20px;

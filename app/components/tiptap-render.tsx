@@ -51,8 +51,27 @@ export function renderInline(
       return <span key={`${keyPrefix}-t-${node.text ?? ""}`}>{el}</span>;
     }
     if (node.type === "hardBreak") return <br key={nodeKey} />;
+    if (node.type === "image") {
+      // Inline images (e.g. `text ![alt](src)` inside a paragraph): render
+      // only the allowlisted src — disallowed schemes become nothing, never
+      // a broken <img> carrying a `javascript:`/`data:` value.
+      const src = safeHref(node.attrs?.src);
+      if (!src) return null;
+      const alt = typeof node.attrs?.alt === "string" ? node.attrs.alt : "";
+      return <img key={nodeKey} src={src} alt={alt} loading="lazy" />;
+    }
     return renderNode(node, nodeKey, variant);
   });
+}
+
+// Render a node's children as block nodes (used for table cells, whose
+// content is paragraph-wrapped per the TipTap schema).
+function renderBlocks(
+  nodes: TTNode[] | undefined,
+  keyPrefix: string,
+  variant: "task" | "wiki"
+): ReactNode {
+  return (nodes ?? []).map((node, i) => renderNode(node, `${keyPrefix}-b${i}`, variant));
 }
 
 export function renderNode(
@@ -129,6 +148,48 @@ export function renderNode(
       );
     case "horizontalRule":
       return <hr key={key} className={isWiki ? undefined : "td-hr"} />;
+    case "table":
+      return (
+        <div key={key} className={isWiki ? "table-wrap" : "td-table-wrap"}>
+          <table className={isWiki ? undefined : "td-table"}>
+            {renderInline(node.content, key, variant)}
+          </table>
+        </div>
+      );
+    case "tableRow":
+      return <tr key={key}>{renderInline(node.content, key, variant)}</tr>;
+    case "tableHeader": {
+      const align = typeof node.attrs?.align === "string" ? (node.attrs.align as "left" | "center" | "right") : undefined;
+      return (
+        <th key={key} align={align}>
+          {renderBlocks(node.content, key, variant)}
+        </th>
+      );
+    }
+    case "tableCell": {
+      const align = typeof node.attrs?.align === "string" ? (node.attrs.align as "left" | "center" | "right") : undefined;
+      return (
+        <td key={key} align={align}>
+          {renderBlocks(node.content, key, variant)}
+        </td>
+      );
+    }
+    case "image": {
+      // Block-level image (top-level node in a doc, or a list/quote child).
+      // Same allowlist as inline images — no scheme, no render.
+      const src = safeHref(node.attrs?.src);
+      if (!src) return null;
+      const alt = typeof node.attrs?.alt === "string" ? node.attrs.alt : "";
+      return (
+        <img
+          key={key}
+          src={src}
+          alt={alt}
+          loading="lazy"
+          className={isWiki ? undefined : "td-img"}
+        />
+      );
+    }
     default:
       return node.content ? <div key={key}>{renderInline(node.content, key, variant)}</div> : null;
   }

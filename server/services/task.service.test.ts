@@ -7,7 +7,7 @@ import { Effect, Layer, Context, Either } from "effect";
 import { Database } from "bun:sqlite";
 import { runMigrations } from "../db/migrate";
 import { Sqlite, initSqlite, ConstraintViolation } from "../db/database";
-import { TaskService } from "./task.service";
+import { TaskService, isEmptyDoc } from "./task.service";
 import { WipLimitExceeded, RequiredFieldMissing, DeadlineAfterLane, SwimlaneNotFound } from "../api/errors";
 import type { Actor, TipTapDoc } from "../../shared/types";
 
@@ -291,6 +291,15 @@ describe("TaskService WIP + positions", () => {
 });
 
 describe("TaskService required fields", () => {
+  it("isEmptyDoc treats an image-only description as non-empty", () => {
+    const IMG_DOC: TipTapDoc = {
+      type: "doc",
+      content: [{ type: "paragraph", content: [{ type: "image", attrs: { src: "https://x.com/i.png" } }] }],
+    };
+    expect(isEmptyDoc(IMG_DOC)).toBe(false);
+    expect(isEmptyDoc(EMPTY_DOC)).toBe(true);
+  });
+
   it("create rejects an empty or whitespace-only description (TipTap-aware)", () => {
     const db = tmpDb();
     seedRequired(db);

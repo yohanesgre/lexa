@@ -1341,6 +1341,35 @@
     border-top: 1px solid var(--lx-border-default);
     margin: 16px 0;
   }
+  .td-img {
+    max-width: 100%;
+    height: auto;
+    border-radius: 6px;
+    display: block;
+    margin: 12px 0;
+  }
+  .td-table-wrap {
+    overflow-x: auto;
+    margin: 12px 0;
+  }
+  .td-table {
+    border-collapse: collapse;
+    width: 100%;
+    font-size: 13px;
+    line-height: 20px;
+  }
+  .td-table th,
+  .td-table td {
+    border: 1px solid var(--lx-border-default);
+    padding: 6px 10px;
+    text-align: left;
+    vertical-align: top;
+  }
+  .td-table th {
+    background: var(--lx-surface-elevated);
+    font-weight: 500;
+    font-size: 12px;
+  }
 
   /* ---- TipTap editor (task description) ---- */
   .editor-wrapper {
@@ -1647,6 +1676,59 @@
     height: 14px;
     accent-color: var(--lx-border-focus);
     cursor: pointer;
+  }
+  .editor-content .ProseMirror img {
+    max-width: 100%;
+    height: auto;
+    border-radius: 6px;
+    display: inline-block;
+    vertical-align: middle;
+  }
+  .editor-content .ProseMirror img.ProseMirror-selectednode {
+    outline: 2px dashed var(--lx-border-focus);
+    outline-offset: 2px;
+  }
+  .editor-content .ProseMirror table {
+    border-collapse: collapse;
+    table-layout: fixed;
+    width: 100%;
+    margin: 12px 0;
+    overflow: hidden;
+  }
+  .editor-content .ProseMirror th,
+  .editor-content .ProseMirror td {
+    border: 1px solid var(--lx-border-default);
+    padding: 6px 10px;
+    vertical-align: top;
+    position: relative;
+  }
+  .editor-content .ProseMirror th {
+    background: var(--lx-surface-elevated);
+    font-weight: 500;
+    text-align: left;
+  }
+  .editor-content .ProseMirror th p,
+  .editor-content .ProseMirror td p {
+    margin: 0;
+  }
+  .editor-content .ProseMirror .selectedCell:after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: var(--lx-surface-selected);
+    pointer-events: none;
+  }
+  .editor-content .ProseMirror .column-resize-handle {
+    background: var(--lx-border-focus);
+    bottom: -2px;
+    position: absolute;
+    right: -2px;
+    top: 0;
+    width: 4px;
+    pointer-events: none;
+  }
+  .editor-content .ProseMirror.resize-cursor {
+    cursor: col-resize;
   }
 
   /* ---- Wiki edit mode ---- */
@@ -2258,6 +2340,14 @@
     text-transform: uppercase;
     letter-spacing: 0.05em;
     font-family: var(--lx-font-body);
+  }
+
+  .wiki-prose img {
+    max-width: 100%;
+    height: auto;
+    border-radius: 6px;
+    display: block;
+    margin: 12px 0;
   }
 
   .wiki-prose ul,
