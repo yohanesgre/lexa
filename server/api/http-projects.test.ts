@@ -34,6 +34,7 @@ beforeAll(async () => {
 INSERT INTO users (id, email, name, role) VALUES ('u1', 'maria@lexa.test', 'Maria', 'member'), ('u3', 'pam@lexa.test', 'Pam', 'member');
 INSERT INTO api_keys (id, name, key_hash, user_id) VALUES ('k1', 'test-admin', '${adminHash}', NULL);
 INSERT INTO api_keys (id, name, key_hash, user_id) VALUES ('k2', 'test-member', '${memberHash}', 'u3');
+INSERT INTO organization (id, name, slug, createdAt) VALUES ('team-a', 'Team A', 'team-a', '2026-01-01T00:00:00.000Z');
 INSERT INTO projects (id, name, slug, key, next_task_number) VALUES ('p1', 'P', 'p1', 'EG', 2);
 INSERT INTO columns (id, project_id, name, position) VALUES ('c1', 'p1', 'Todo', 0), ('c2', 'p1', 'Done', 1);
 INSERT INTO swimlanes (id, project_id, name, position, kind, due_at) VALUES ('s-backlog', 'p1', 'Backlog', 0, 'backlog', NULL);
@@ -78,6 +79,20 @@ describe("projects routes", () => {
     expect(body).toMatchObject({ name: "Second", slug: "second", description: "" });
     expect(body.id).toBeTruthy();
     expect(body.createdAt).toBeTruthy();
+  });
+
+  it("POST /api/projects with teamId assigns the owning team (201)", async () => {
+    const res = await handler(json("POST", "/api/projects", { name: "Teamed", slug: "teamed", teamId: "team-a" }));
+    expect(res.status).toBe(201);
+    const body = await res.json();
+    expect(body).toMatchObject({ slug: "teamed", teamId: "team-a" });
+  });
+
+  it("POST /api/projects with an unknown teamId → 404 TEAM_NOT_FOUND", async () => {
+    const res = await handler(json("POST", "/api/projects", { name: "Ghost", slug: "ghost-team", teamId: "team-ghost" }));
+    expect(res.status).toBe(404);
+    const body = await res.json();
+    expect(body.error.code).toBe("TEAM_NOT_FOUND");
   });
 
   it("POST /api/projects with a taken slug → 409 SLUG_TAKEN", async () => {

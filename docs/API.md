@@ -502,13 +502,23 @@ any project exists — the wizard only runs on first install.
 ```
 GET    /api/projects
 → 200 { data: Project[], nextCursor }   (nextCursor always null — unpaginated)
+  Access: superadmin (and bare API keys) see all projects; a member session
+  sees only projects it can access (explicit user_project_roles grant, else
+  membership of the project's owning team). Unassigned projects (teamId null)
+  are superadmin-only until assigned.
 
 POST   /api/projects          (admin)
-body { name*, slug?, description? }
-→ 201 Project | 403 FORBIDDEN | 409 SLUG_TAKEN
+body { name*, slug?, description?, teamId? }
+→ 201 Project | 403 FORBIDDEN | 404 TEAM_NOT_FOUND | 409 SLUG_TAKEN
+  teamId = owning team (organization id); omitted/null = unassigned
+  (superadmin-only until assigned). An unknown teamId → 404 TEAM_NOT_FOUND.
 
 GET    /api/projects/:slug
-→ 200 Project | 404
+→ 200 Project | 403 PROJECT_ACCESS_DENIED | 404
+  The same access rule as the list: a member session without a grant or team
+  membership gets 403 (FORBIDDEN, code PROJECT_ACCESS_DENIED). This gate also
+  applies to every /projects/:slug/* read and to create/move/comment/etc. —
+  you cannot touch a project you cannot open.
 
 PATCH  /api/projects/:slug   (admin)
 body { name?, description? }
@@ -543,6 +553,9 @@ GET    /api/dashboard
   - urgentCount: tasks WHERE priority = (first priority option for the project) AND column_id IN (project columns)
   - syncCount: tasks WHERE github.outOfSync = true
   urgentTasks/outOfSyncTasks capped at 50 items each
+  Member sessions see only their accessible projects: health cards, stats
+  totals, and the urgent/out-of-sync attention lists are all filtered to that
+  set. Superadmin and bare API keys see the full snapshot.
 ```
 
 ### Project Members

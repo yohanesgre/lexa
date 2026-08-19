@@ -53,7 +53,7 @@ export function getDashboard(): Promise<Dashboard> {
   return request(`${BASE}/dashboard`);
 }
 
-export function createProject(input: { name: string; slug?: string; description?: string }): Promise<Project> {
+export function createProject(input: { name: string; slug?: string; description?: string; teamId?: string | null }): Promise<Project> {
   return request(`${BASE}/projects`, { method: "POST", body: JSON.stringify(input) });
 }
 
