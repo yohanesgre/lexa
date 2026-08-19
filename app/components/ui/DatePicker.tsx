@@ -164,8 +164,25 @@ export function DatePicker({ value, onChange, placeholder = "No due date", class
               );
             })}
           </div>
-          {value && (
-            <div className="datepicker-footer">
+          <div className="datepicker-footer">
+            <button
+              type="button"
+              className="datepicker-today"
+              onClick={() => {
+                const now = new Date();
+                setView({ year: now.getFullYear(), month: now.getMonth() });
+                onChange(isoToday());
+                setOpen(false);
+              }}
+            >
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <circle cx="12" cy="12" r="9" />
+                <path d="M12 8v4l3 3" />
+              </svg>
+              Today
+            </button>
+            <span className="flex-1" />
+            {value && (
               <button
                 type="button"
                 className="datepicker-clear"
@@ -176,8 +193,8 @@ export function DatePicker({ value, onChange, placeholder = "No due date", class
               >
                 Clear
               </button>
-            </div>
-          )}
+            )}
+          </div>
           </div>,
           document.body
         )}

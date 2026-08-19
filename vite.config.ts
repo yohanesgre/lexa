@@ -5,7 +5,12 @@ import react from "@vitejs/plugin-react";
 
 export default defineConfig({
   plugins: [
-    tanstackStart({ srcDirectory: "app" }),
+    tanstackStart({
+      srcDirectory: "app",
+      router: {
+        routeFileIgnorePattern: "\\.test\\.",
+      },
+    }),
     react(),
     tailwindcss(),
   ],

@@ -61,14 +61,7 @@ export function LinksSection({ slug, taskId, taskTitleById, taskKeyById, classNa
         return (
           <div
             key={link.id}
-            className="flex items-center justify-between"
-            style={{
-              padding: "6px 10px",
-              background: link.relation === "blocked_by" ? "var(--lx-bg-warning-subtle)" : "var(--lx-surface-elevated)",
-              border: "1px solid var(--lx-border-default)",
-              borderRadius: 6,
-              marginBottom: 4,
-            }}
+            className={cn("github-issue-row", link.relation === "blocked_by" && "github-warning")}
           >
             <div className="flex items-center gap-2" style={{ minWidth: 0 }}>
               <span className="font-micro text-2xs text-lx-text-muted uppercase tracking-[0.04em]">{RELATION_LABELS[link.relation]}</span>

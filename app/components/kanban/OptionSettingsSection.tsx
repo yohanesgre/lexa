@@ -38,7 +38,7 @@ export function OptionSettingsSection({ kind, title, description, options, senso
       {options.length === 0 ? (
         <div className="text-sm text-lx-text-muted py-4">No {title.toLowerCase()} configured.</div>
       ) : (
-        <div className="bg-lx-surface-card border border-lx-border rounded-lg overflow-hidden">
+        <div className="card-panel" style={{ overflow: "hidden" }}>
           <DndContext sensors={sensors} onDragEnd={onDragEnd}>
             <SortableContext items={options.map((o) => o.id)} strategy={verticalListSortingStrategy}>
               <table className="w-full border-collapse text-[13px] font-body" style={{ tableLayout: "fixed" }}>

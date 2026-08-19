@@ -76,7 +76,7 @@ function TeamAssignmentSection({ project }: { project: Project }) {
         <h2 className="font-display text-lg font-medium text-lx-text-primary">Team</h2>
         <span className="text-xs text-lx-text-muted">Team assignment</span>
       </div>
-      <div className="mt-4 p-4" style={{ background: "var(--lx-surface-elevated)", border: "1px solid var(--lx-border-default)", borderRadius: 8, maxWidth: 560 }}>
+      <div className="card-panel card-panel--elevated mt-4" style={{ maxWidth: 560 }}>
         <p className="text-sm text-lx-text-secondary mb-3" style={{ marginTop: 0 }}>
           The owning team scopes Forge claims: a task can only run on a runtime of the same team (Global runtimes accept any team). Unassigned projects are Global.
           {!isSuperadmin && " As a team admin you can assign this project to your own team only."}
@@ -116,7 +116,7 @@ function ProjectBasicSection({ project }: { project: Project }) {
   return (
     <section className="mb-8">
       <h2 className="font-display text-lg font-medium text-lx-text-primary mb-3">Project</h2>
-      <div className="mt-4 p-4" style={{ background: "var(--lx-surface-elevated)", border: "1px solid var(--lx-border-default)", borderRadius: 8, maxWidth: 560 }}>
+      <div className="card-panel card-panel--elevated mt-4" style={{ maxWidth: 560 }}>
         <div className="field" style={{ marginBottom: 12 }}>
           <label className="field-label" htmlFor="project-name">Name</label>
           <input id="project-name" className="prop-input w-full" value={name} onChange={(e) => { setName(e.target.value); setSaved(false); }} />
@@ -243,12 +243,12 @@ function LinkedReposSection({ slug }: { slug: string }) {
       {isLoading ? (
         <div className="text-sm text-lx-text-muted py-8 text-center">Loading…</div>
       ) : repos.length === 0 ? (
-        <div className="flex flex-col items-center gap-1.5 text-center mb-4" style={{ background: "var(--lx-surface-card)", border: "1px dashed var(--lx-border-strong)", borderRadius: 8, padding: 24 }}>
+        <div className="card-panel flex flex-col items-center gap-1.5 text-center mb-4" style={{ borderStyle: "dashed", borderColor: "var(--lx-border-strong)", padding: 24 }}>
           <div className="text-sm font-medium text-lx-text-primary">No linked repos</div>
           <p className="text-xs text-lx-text-secondary" style={{ maxWidth: 380 }}>Link a repo to let Forge read it and to sync issues with the board.</p>
         </div>
       ) : (
-        <div style={{ background: "var(--lx-surface-card)", border: "1px solid var(--lx-border-default)", borderRadius: 8, overflow: "hidden" }}>
+        <div className="card-panel" style={{ overflow: "hidden" }}>
           <table className="settings-table">
             <thead>
               <tr><th>Repository</th><th>Source</th><th>Workspace</th><th style={{ width: 80 }} /></tr>
@@ -321,7 +321,7 @@ function RemoveRepoModal({ repo, onCancel, onConfirm }: { repo?: string; onCance
             {repo ? (
               <>
                 Remove{" "}
-                <span className="font-mono text-xs text-lx-text-primary" style={{ background: "var(--lx-surface-card)", borderRadius: 4, padding: "2px 5px" }}>
+                <span className="chip font-mono text-xs text-lx-text-primary">
                   {repo}
                 </span>
                 {" "}from this project? Existing task↔issue links keep syncing.
@@ -405,7 +405,7 @@ function ProjectMembersSection({ slug }: { slug: string }) {
           <p className="text-xs text-lx-text-secondary" style={{ maxWidth: 300 }}>Add members below to grant them access.</p>
         </div>
       ) : (
-        <div style={{ background: "var(--lx-surface-card)", border: "1px solid var(--lx-border-default)", borderRadius: 8, overflow: "hidden" }}>
+        <div className="card-panel" style={{ overflow: "hidden" }}>
           <table className="settings-table">
             <thead>
               <tr><th style={{ width: "auto" }}>User</th><th style={{ width: "auto" }}>Email</th><th style={{ width: 80 }}>Role</th><th style={{ width: 80 }} /></tr>
@@ -460,7 +460,7 @@ function RemoveMemberModal({ name, onCancel, onConfirm }: { name: string; onCanc
           <h2 className="font-display text-lg font-medium text-lx-text-primary">Remove member?</h2>
           <p className="text-sm text-lx-text-secondary mt-3 leading-5">
             Remove{" "}
-            <span className="font-mono text-xs text-lx-text-primary" style={{ background: "var(--lx-surface-card)", borderRadius: 4, padding: "2px 5px" }}>
+            <span className="chip font-mono text-xs text-lx-text-primary">
               {name}
             </span>
             {" "}from this project? They will lose access immediately.
@@ -503,7 +503,7 @@ function ProjectDangerSection({ project }: { project: Project }) {
               <h2 className="font-display text-lg font-medium text-lx-text-primary">Delete project?</h2>
               <p className="text-sm text-lx-text-secondary mt-3 leading-5">
                 This permanently deletes{" "}
-                <span className="font-mono text-xs text-lx-text-primary" style={{ background: "var(--lx-surface-card)", borderRadius: 4, padding: "2px 5px" }}>
+                <span className="chip font-mono text-xs text-lx-text-primary">
                   {project.name}
                 </span>
                 {" "}and all its tasks, columns, swimlanes, wiki pages, and member assignments. This action cannot be undone.

@@ -495,13 +495,73 @@
     color: var(--lx-pb-low);
   }
 
+  /* ── Card primitives — density scale ────────────────────────────────────
+     Rows (6px) for dense lists/menus/selectable rows · Panels (12px) for
+     page-level sections · Tiles (12px) for navigation grids · Chips (4px).
+     Semantic classes (kanban-card, project-card, …) use these exact values. */
+  .card-row {
+    background: var(--lx-surface-card);
+    border: 1px solid var(--lx-border-default);
+    border-radius: 6px;
+    padding: 8px 12px;
+    transition: background 100ms, border-color 100ms, box-shadow 100ms;
+  }
+  .card-row:hover {
+    background: var(--lx-surface-card-hover);
+    border-color: var(--lx-border-default);
+  }
+  .card-row.state-selected {
+    background: var(--lx-surface-selected);
+    box-shadow: var(--lx-focus-ring), var(--lx-focus-glow);
+  }
+  .card-row.state-dragging {
+    background: var(--lx-surface-card-dragging);
+    border-color: var(--lx-border-focus);
+    box-shadow: var(--lx-shadow-drag);
+    cursor: grabbing;
+  }
+  .card-row--dense {
+    padding: 4px 8px;
+  }
+  .card-panel {
+    background: var(--lx-surface-card);
+    border: 1px solid var(--lx-border-default);
+    border-radius: 12px;
+    padding: 16px;
+  }
+  .card-panel--elevated {
+    background: var(--lx-surface-elevated);
+  }
+  .card-tile {
+    background: var(--lx-surface-card);
+    border: 1px solid var(--lx-border-default);
+    border-radius: 12px;
+    padding: 16px;
+    transition: background 100ms, border-color 100ms;
+  }
+  .card-tile:hover {
+    background: var(--lx-surface-card-hover);
+    border-color: var(--lx-border-strong);
+  }
+  .card-tile:focus-visible {
+    outline: none;
+    box-shadow: var(--lx-focus-ring);
+  }
+  .chip {
+    display: inline-block;
+    background: var(--lx-surface-card);
+    border-radius: 4px;
+    padding: 2px 5px;
+    color: var(--lx-text-primary);
+  }
+
   /* Kanban card */
   .kanban-card {
     position: relative;
     background: var(--lx-surface-card);
     border: 1px solid var(--lx-border-subtle);
     border-radius: 6px;
-    padding: 10px 12px;
+    padding: 8px 12px;
     cursor: grab;
     transition:
       background 100ms,
@@ -1127,7 +1187,7 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 6px 10px;
+    padding: 8px 12px;
     border: 1px solid var(--lx-border-default);
     border-radius: 6px;
     background: var(--lx-surface-elevated);
@@ -1286,6 +1346,7 @@
   .editor-wrapper {
     border: 1px solid var(--lx-border-default);
     border-radius: 6px;
+    overflow: hidden;
     transition: border-color 100ms, box-shadow 100ms;
   }
   .editor-wrapper:focus-within {
@@ -1427,7 +1488,6 @@
     gap: 2px;
     padding: 6px 8px;
     border-bottom: 1px solid var(--lx-border-default);
-    border-radius: 6px 6px 0 0;
     background: var(--lx-surface-card);
   }
   .toolbar-btn {
@@ -2459,7 +2519,7 @@
     flex-direction: column;
     height: auto;
     min-height: 200px;
-    padding: 20px;
+    padding: 16px;
   }
   .health-card-status-row {
     display: flex;
@@ -3162,7 +3222,7 @@
     font-size: 13px;
     color: var(--lx-text-secondary);
     margin-top: 10px;
-    padding: 8px 10px;
+    padding: 8px 12px;
     border: 1px solid var(--lx-border-default);
     border-radius: 6px;
     background: var(--lx-surface-card);
@@ -4454,10 +4514,28 @@
 
   .datepicker-footer {
     display: flex;
-    justify-content: flex-end;
+    align-items: center;
     margin-top: 8px;
     padding-top: 6px;
     border-top: 1px solid var(--lx-border-subtle);
+  }
+
+  .datepicker-today {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 11px;
+    font-family: var(--lx-font-body);
+    color: var(--lx-text-secondary);
+    background: none;
+    border: none;
+    border-radius: 3px;
+    cursor: pointer;
+    padding: 2px 6px;
+  }
+  .datepicker-today:hover {
+    background: var(--lx-surface-card-hover);
+    color: var(--lx-text-primary);
   }
 
   .datepicker-clear {
@@ -4664,6 +4742,37 @@
   font-weight: 500;
 }
 
+.milestone-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(480px, 1fr));
+  gap: 16px;
+  align-items: stretch;
+}
+.milestone-grid .milestone-card {
+  display: flex;
+  flex-direction: column;
+  margin-bottom: 0;
+}
+.milestone-grid .milestone-card .milestone-sprints {
+  margin-top: auto;
+}
+.milestone-card-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.milestone-grid .milestone-card .milestone-card-actions {
+  margin-top: auto;
+}
+.ms-actions-left,
+.ms-actions-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.ms-actions-spacer {
+  flex: 1;
+}
 .milestone-card {
   background: var(--lx-surface-card);
   border: 1px solid var(--lx-border-default);
@@ -4792,6 +4901,30 @@
   color: var(--lx-text-muted);
 }
 
+/* Narrow grid columns: below the 1fr column's ~480px minimum the card can't
+   fit the horizontal sprint-row layout, so rows wrap — the dates and progress
+   pill drop below the name instead of squeezing beside it. */
+@media (max-width: 560px) {
+  .milestone-grid .milestone-sprint-row {
+    flex-wrap: wrap;
+    height: auto;
+    min-height: 32px;
+    padding: 6px 8px;
+    row-gap: 2px;
+  }
+  .milestone-grid .milestone-sprint-row .sl-dates {
+    order: 3;
+    width: 100%;
+  }
+  .milestone-grid .milestone-sprint-row .sl-link-btn {
+    order: 4;
+  }
+  .milestone-grid .ms-progress-block {
+    grid-template-columns: 1fr;
+    gap: 8px;
+  }
+}
+
 /* ---- Timeline (gantt) ---- */
 .timeline-wrap {
   width: 100%;
@@ -4800,10 +4933,34 @@
   border-radius: 12px;
   background: var(--lx-surface-card);
   min-height: 120px;
+  position: relative;
   /* Clearly visible horizontal scrollbar — the day grid is wide and must be
      discoverable. Light thumb against the dark card track. */
   scrollbar-color: var(--lx-text-tertiary) var(--lx-surface-card);
   scrollbar-width: auto;
+}
+.tl-today-btn {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 10;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 28px;
+  padding: 0 10px;
+  border-radius: 6px;
+  border: 1px solid var(--lx-border-default);
+  background: var(--lx-surface-card);
+  color: var(--lx-text-secondary);
+  font-family: var(--lx-font-body);
+  font-size: 12px;
+  cursor: pointer;
+  box-shadow: var(--lx-focus-glow);
+}
+.tl-today-btn:hover {
+  background: var(--lx-surface-card-hover);
+  color: var(--lx-text-primary);
 }
 .timeline-wrap::-webkit-scrollbar {
   height: 12px;
@@ -5129,6 +5286,53 @@
 /* ---- Swimlanes page ---- */
 .sl-group {
   margin-top: 20px;
+}
+.sl-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(520px, 1fr));
+  gap: 6px;
+  align-items: stretch;
+}
+.sl-grid .sl-row {
+  margin-bottom: 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 10px;
+  height: auto;
+  padding: 12px;
+}
+.sl-row-main {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+.sl-row-desc {
+  font-size: 12px;
+  line-height: 17px;
+  color: var(--lx-text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sl-grid .sl-row-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+}
+.sl-grid .sl-row .lane-ready {
+  flex-shrink: 0;
+}
+.sl-grid .sl-row-actions {
+  margin-left: 0;
+  justify-content: flex-start;
+  margin-top: auto;
+  padding-top: 10px;
+  border-top: 1px dashed var(--lx-border-default);
 }
 .sl-group-title {
   display: flex;

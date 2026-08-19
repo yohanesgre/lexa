@@ -70,7 +70,7 @@ export function RuntimeRestartModal({ runtime, onClose }: { runtime: Runtime; on
             <button type="button" className="btn btn-ghost" style={{ width: 32, height: 32, padding: 0 }} onClick={onClose} aria-label="Close"><X size={16} strokeWidth={1.5} /></button>
           </div>
           <div className="modal-body">
-            <div className="flex items-start gap-3 mb-4" style={{ background: machineOnline ? "var(--lx-bg-warning-subtle)" : "var(--lx-bg-danger-subtle)", border: "1px solid var(--lx-border-default)", borderRadius: 6, padding: "10px 12px" }}>
+            <div className="card-row flex items-start gap-3 mb-4" style={{ background: machineOnline ? "var(--lx-bg-warning-subtle)" : "var(--lx-bg-danger-subtle)" }}>
               <RefreshCw size={16} strokeWidth={1.5} className="text-lx-text-link flex-shrink-0" style={{ marginTop: 1 }} />
               <div>
                 <div className="text-sm font-medium text-lx-text-primary">{machineOnline ? "Machine listener is online" : "Machine listener is offline"}</div>
@@ -94,7 +94,7 @@ export function RuntimeRestartModal({ runtime, onClose }: { runtime: Runtime; on
             {sendError && <div className="notice notice-warning mt-3">{sendError}</div>}
             {event?.status === "failed" && <div className="notice notice-warning mt-3">{event.error || "The listener could not restart the runtime."}</div>}
             {eventComplete && backOnline ? (
-              <div className="flex items-center gap-3 mt-4" style={{ background: "var(--lx-bg-success-subtle)", border: "1px solid var(--lx-border-default)", borderRadius: 6, padding: "10px 12px" }}><span className="sync-dot sync-synced" /><span className="text-xs font-medium text-lx-text-primary">{runtime.name} is back online</span></div>
+              <div className="card-row flex items-center gap-3 mt-4" style={{ background: "var(--lx-bg-success-subtle)" }}><span className="sync-dot sync-synced" /><span className="text-xs font-medium text-lx-text-primary">{runtime.name} is back online</span></div>
             ) : eventId ? (
               <div className="flex items-center gap-3 mt-4" style={{ background: "var(--lx-surface-input)", border: "1px solid var(--lx-border-default)", borderRadius: 6, padding: "10px 12px" }}><span className="spinner" style={{ width: 14, height: 14, borderWidth: 2 }} /><span className="text-xs text-lx-text-secondary">Waiting for the listener to restart the child…</span></div>
             ) : null}

@@ -79,8 +79,7 @@ export function SourcesSection({ slug, documentType, documentId, className }: So
       {sources.map((s) => (
         <div
           key={s.id}
-          className="flex items-center justify-between"
-          style={{ padding: "6px 10px", background: "var(--lx-surface-elevated)", border: "1px solid var(--lx-border-default)", borderRadius: 6, marginBottom: 4 }}
+          className="github-issue-row"
         >
           <div className="flex items-center gap-2" style={{ minWidth: 0 }}>
             {s.kind === "wiki" ? (

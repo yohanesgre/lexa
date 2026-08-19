@@ -49,7 +49,7 @@ function ProfileSection() {
   return (
     <section className="mb-8">
       <h2 className="font-display text-lg font-medium text-lx-text-primary mb-3">Profile</h2>
-      <div className="mt-4 p-4" style={{ background: "var(--lx-surface-elevated)", border: "1px solid var(--lx-border-default)", borderRadius: 8 }}>
+      <div className="card-panel card-panel--elevated mt-4">
         <div className="flex items-start gap-4 flex-wrap">
           <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 6 }}>
             <div className="avatar" style={{ width: 48, height: 48, fontSize: 18 }}>{initial}</div>
@@ -117,7 +117,7 @@ function PasswordSection() {
   return (
     <section className="mb-8">
       <h2 className="font-display text-lg font-medium text-lx-text-primary mb-3">Password</h2>
-      <form onSubmit={handleSubmit} className="mt-4 p-4" style={{ background: "var(--lx-surface-elevated)", border: "1px solid var(--lx-border-default)", borderRadius: 8, maxWidth: 560 }}>
+      <form onSubmit={handleSubmit} className="card-panel card-panel--elevated mt-4" style={{ maxWidth: 560 }}>
         <div className="field" style={{ marginBottom: 12 }}>
           <label className="field-label" htmlFor="pw-current">Current password</label>
           <input id="pw-current" className="prop-input w-full" type="password" placeholder="••••••••••••" autoComplete="current-password" value={current} onChange={(e) => { setCurrent(e.target.value); setError(null); }} />
@@ -162,7 +162,7 @@ function SessionsSection({ currentSessionId }: { currentSessionId: string | null
       ) : isError ? (
         <div className="text-sm text-lx-text-danger py-8 text-center">Failed to load sessions.</div>
       ) : (
-        <div style={{ background: "var(--lx-surface-card)", border: "1px solid var(--lx-border-default)", borderRadius: 8, overflow: "hidden" }}>
+        <div className="card-panel" style={{ overflow: "hidden" }}>
           <table className="settings-table">
             <thead>
               <tr><th>Device</th><th>IP</th><th>Signed in</th><th>Expires</th><th /></tr>

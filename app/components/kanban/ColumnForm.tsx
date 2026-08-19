@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Plus, X } from "lucide-react";
 import { cn } from "../ui/cn";
+import { OPTION_COLORS } from "../../lib/option-colors";
 import type { Column } from "../../../shared/types";
 
 export interface ColumnFormProps {
@@ -22,18 +23,7 @@ export interface ColumnFormProps {
 
 const colors: { value: string | null; label: string; hex: string }[] = [
   { value: null, label: "None", hex: "transparent" },
-  { value: "#71717a", label: "Zinc", hex: "#71717a" },
-  { value: "#ef4444", label: "Red", hex: "#ef4444" },
-  { value: "#f97316", label: "Orange", hex: "#f97316" },
-  { value: "#f59e0b", label: "Amber", hex: "#f59e0b" },
-  { value: "#a3e635", label: "Lime", hex: "#a3e635" },
-  { value: "#22c55e", label: "Green", hex: "#22c55e" },
-  { value: "#10b981", label: "Emerald", hex: "#10b981" },
-  { value: "#06b6d4", label: "Cyan", hex: "#06b6d4" },
-  { value: "#3b82f6", label: "Blue", hex: "#3b82f6" },
-  { value: "#6366f1", label: "Indigo", hex: "#6366f1" },
-  { value: "#a78bfa", label: "Violet", hex: "#a78bfa" },
-  { value: "#ec4899", label: "Pink", hex: "#ec4899" },
+  ...OPTION_COLORS.map((c) => ({ value: c.value, label: c.label, hex: c.value })),
 ];
 
 const requiredFieldOptions = [

@@ -58,14 +58,14 @@ export function AppShell() {
             <NavLink to={tasksTo} params={tasksParams} active={routeType === "tasks"} exact>
               Tasks
             </NavLink>
-            <NavLink to={wikiTo} params={wikiParams} active={routeType === "wiki"}>
-              Wiki
-            </NavLink>
             <NavLink to={milestonesTo} params={milestonesParams} active={routeType === "milestones"} exact>
               Milestones
             </NavLink>
             <NavLink to={swimlanesTo} params={swimlanesParams} active={routeType === "swimlanes"} exact>
               Swimlanes
+            </NavLink>
+            <NavLink to={wikiTo} params={wikiParams} active={routeType === "wiki"}>
+              Wiki
             </NavLink>
             <NavLink to="/forge" active={routeType === "forge"}>Forge</NavLink>
           </div>
