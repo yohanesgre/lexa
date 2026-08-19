@@ -37,12 +37,18 @@ columns (per project, ordered)
 ├── required_fields (JSON array — the only column policy)
 └── github_state ('open'|'closed'|NULL — explicit sync mapping)
 │
-swimlanes (per project, ordered)
-└── id, name, position
+swimlanes (per project, ordered — sprint lanes + one permanent Backlog)
+├── id, name, position, kind ('backlog'|'sprint'), milestone_id (nullable)
+├── start_at / due_at (sprint dates), archived_at (soft archive)
+│
+milestones (goal wrapper above sprints)
+├── id, name, description, position, due_at, archived_at
+└── ON DELETE SET NULL on swimlanes.milestone_id — deleting loosens sprints
 │
 tasks
-├── id, column_id, swimlane_id (nullable), project_id
+├── id, column_id, swimlane_id (NOT NULL — every task belongs to a lane), project_id
 ├── title, description (TipTap JSON), priority, type (option ids — field-config)
+├── key (ticket key "PREFIX-n", immutable), number (per-project, never reused)
 ├── assignee (freeform string), archived_at (soft archive)
 ├── position (fractional-index key, UNIQUE per column)
 └── timestamps
@@ -82,7 +88,12 @@ clients, no callback URIs, no SMTP anywhere.
 - **Provisioning** — the `/setup` wizard creates the first superadmin
   (email + password, no email needed); superadmin-issued **workspace invite
   links** and **set-password links** onboard members (link-based, 7d expiry,
-  shared out-of-band — no email transport).
+  shared out-of-band — no email transport). **No public signup** — signup is
+  disabled (`disableSignUp`); provisioning is admin-curated (allow-list
+  bootstrap + workspace invites). Teams are **intra-server workspaces, not
+  multi-tenancy** — one server, one DB, one superadmin. Email addresses are
+  immutable (no verification without SMTP) — changing one means delete +
+  re-invite.
 - **Roles** — `users.role` ∈ {superadmin, member}; superadmin is **env-only**
   (`LXK_ADMIN_EMAILS`, applied at provisioning), never edited at runtime.
   Team-admin authority comes from the org `member.role` (owner/admin) on the
@@ -135,6 +146,11 @@ Columns           GET/POST            /api/projects/:slug/columns
 Swimlanes         GET/POST            /api/projects/:slug/swimlanes
                   PATCH/DELETE        /api/projects/:slug/swimlanes/:id
 
+Milestones        GET/POST            /api/projects/:slug/milestones
+                  GET/PATCH/DELETE    /api/projects/:slug/milestones/:id
+                  POST                /api/projects/:slug/milestones/:id/archive
+                  POST                /api/projects/:slug/milestones/:id/restore
+
 Tasks             GET/POST            /api/projects/:slug/tasks
                   GET/PATCH/DELETE    /api/projects/:slug/tasks/:id
                   POST                /api/projects/:slug/tasks/:id/move
@@ -168,7 +184,7 @@ prevent spoofing — socket IP is only visible at this layer).
 Everything else runs as HttpApi middleware (`server/api/middleware.ts`),
 applied at build time, before route matching and before body decode:
 
-1. **Rate limit** — per-IP, `isPrivateIp`-gated `cf-connecting-ip` trust; `/api/setup` + `/api/health` ARE limited; key/token-gated Forge machine surfaces exempt (`/api/forge/daemon/*` + `/api/forge/runtimes/register` + `/api/forge/machines/heartbeat` — log streams and the 3s listener heartbeat must not 429); shares one bucket (`apiRateLimiter`); limits DB-configured (settings `settings.rate_limit_max` / `settings.rate_limit_window_ms`, code defaults 6000 req / 600_000 ms as fallback — `GET`/`PUT /api/settings/rate-limit`, applied at boot and on save via `syncRateLimitFromDb`). Failed logins on `/api/auth/*` are separately throttled by the Better Auth rate-limit plugin (in-memory, ~5 attempts/60s per email, 15 min lockout)
+1. **Rate limit** — per-IP, `isPrivateIp`-gated `cf-connecting-ip` trust; `/api/setup` + `/api/health` ARE limited; key/token-gated Forge machine surfaces exempt (`/api/forge/daemon/*` + `/api/forge/runtimes/register` + `/api/forge/machines/heartbeat` — log streams and the 3s listener heartbeat must not 429); shares one bucket (`apiRateLimiter`); limits DB-configured (settings `settings.rate_limit_max` / `settings.rate_limit_window_ms`, code defaults 6000 req / 600_000 ms as fallback — `GET`/`PUT /api/settings/rate-limit`, applied at boot and on save via `syncRateLimitFromDb`). Failed logins on `/api/auth/*` are separately throttled by a small in-process memory limiter around `POST /api/auth/sign-in/email` (~5 attempts/60s per email, 15 min lockout, success resets) — Better Auth 1.6.27 has no bundled rate-limit plugin (declared deviation, `server/auth.ts`); the per-IP limiter above is untouched.
 2. **Content-length pre-check** — declared size > `LXK_MAX_BODY_MB` → 413 fast-path (stream cap above stays authoritative)
 3. **Auth** — dual-channel: session cookie first (`SessionService.userFrom`, try/catch), then daemon token (`x-forge-token`, constant-time) for `/api/forge/daemon/*` + `/api/forge/runtimes/register`, else Bearer key → `resolveApiKeyIdentity` on the shared connection; `/api/auth/*` bypasses this middleware entirely; setup/health auth-exempt; 401/403 envelopes byte-identical to the old dispatcher
 4. **`AuthIdentity` provision** — handlers read the Context tag (no per-request DB opens)
@@ -228,18 +244,23 @@ Anyone with issue-triage permission on a linked repo can trigger webhook-driven 
 
 ### Routes (TanStack Start)
 ```
-/                          → Dashboard (all projects)
+/                          → Homepage (all projects, team-scoped)
 /login                     → login (email + password)
 /set-password              → set/forgot password (admin-issued link token)
-/:slug                     → Kanban board
-/:slug/tasks/:id           → Task detail (slideover)
+/:slug                     → Project dashboard (health, WIP status, attention)
+/:slug/board               → Kanban board (swimlanes → columns → task cards)
+/:slug/tasks               → Task list (flat, filterable, key-first rows)
+/:slug/milestones          → Milestones (list + timeline/gantt)
+/:slug/swimlanes           → Swimlanes (sprints grouped by milestone)
 /:slug/wiki                → Wiki index
 /:slug/wiki/:pageSlug      → Wiki page
 /:slug/settings            → Project settings (columns, swimlanes, GitHub link, team assignment)
 /settings                  → role-redirect landing
 /settings/me               → profile, password change, sessions
 /settings/team             → team profile, members, projects, runtimes (team admin)
+/settings/project/:projectId → project settings hub (admin)
 /settings/workspace        → members, invites, teams, API keys, machines, rate limits, GitHub, Forge (superadmin)
+/forge                     → Forge run history (all projects)
 ```
 
 Key components: `KanbanBoard` (swimlanes → columns → task cards, inline add, settings modal), `TaskDetail` slideover (title/description editors, property bar, GitHub section), `WikiLayout` (nested collapsible sidebar + TipTap page), `Dashboard` (project cards with health dots, WIP bars, stats, attention sections).
@@ -252,7 +273,7 @@ SQLite is local (WAL) so reads are immediate, but the mutation response is still
 ```
 lexa/
 ├── app/                      # TanStack Start routes + components
-│   ├── routes/               # dashboard, kanban, wiki, task, settings
+│   ├── routes/               # dashboard, kanban, tasks, milestones, swimlanes, wiki, settings, forge
 │   ├── components/           # activity/, auth/, forge/, kanban/, layout/, milestones/, settings/, swimlanes/, ui/, wiki/ + flat task components (TaskDetail.tsx, TaskPropertyBar.tsx, TaskTitleInput.tsx)
 │   └── lib/                  # api.ts, queries.ts
 ├── server/                   # Effect-TS services

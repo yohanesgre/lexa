@@ -15,17 +15,12 @@ You are working on **Lexa**: a self-hosted project management tool. Kanban with 
 
 **If documents conflict, stop and report the conflict to the user. Never resolve it yourself.**
 
-## Design artifacts (superpowers docs)
+## Design authority
 
-All specs and plans live directly in the private design area — there is no
-`docs/superpowers/`:
-
-- `docs/private/specs/` — feature specs / design docs
-- `docs/private/plans/` — implementation plans
-
-`docs/private/` is gitignored (`.gitignore`): design artifacts are private,
-never committed. Committed design authority stays in the top-level `docs/*.md`
-(SCHEMA / LAYERS / API / ARCHITECTURE).
+Committed design authority lives in the top-level `docs/*.md` — SCHEMA
+(SQL + data invariants), LAYERS (service patterns, error catalog), API (REST
+contract), ARCHITECTURE (context + rationale). There is no private design area;
+historical specs/plans were archived and removed.
 
 ## Wireframes are the frontend source of truth
 
@@ -72,7 +67,7 @@ When asked to implement frontend, do NOT design or invent. Read the relevant wir
 
 ## Architectural invariants — never violate these
 
-These were each hard-won design fixes (see the archived design-review history in `docs/private/ARCHITECTURE-history.md`). Breaking any of them reintroduces a known bug:
+These were each hard-won design fixes (rationale lives in `docs/ARCHITECTURE.md` and the design notes in `docs/SCHEMA.md`). Breaking any of them reintroduces a known bug:
 
 1. **No service-to-service cycles.** `TaskService` must never depend on `GitHubService`. Lexa→GitHub sync is orchestrated by route handlers only.
 2. **Echo suppression.** Every Lexa→GitHub state sync writes `github_synced_state`; the webhook skips payloads matching it. Webhook delivery is recorded **after** successful processing, never before.
@@ -86,6 +81,8 @@ These were each hard-won design fixes (see the archived design-review history in
 10. **`required_fields` is enforced on create, move, AND update**, with TipTap-aware emptiness (a doc with no text nodes is empty).
 11. **An issue links to at most one task; a task may hold several issues, one per repo** (`task_github_issues` junction PK `(task_id, issue_id)` + `UNIQUE(issue_id)` index + per-repo ALREADY_LINKED guard).
 12. **Emission invariant.** Every task mutation appends `task_activity` row(s) in the SAME transaction as the mutation — one row per meaningful change (updates may emit several `field_changed` rows); position-only reorders emit nothing; webhook moves emit `github_synced` only. Messages come from the catalog (`server/activity-messages.ts`), frozen at write time — never hand-rolled at call sites.
+13. **Ticket keys are immutable.** `projects.key` (prefix) + `tasks.number` are written once at create and never reused; `PREFIX-n` is accepted as a task lookup alias everywhere a task id is. The counter (`projects.next_task_number`) advances atomically — the `UNIQUE(project_id, number)` index is the backstop, never a license to reuse.
+14. **Milestone/sprint rules.** A milestone with sprints can't be deleted (`HAS_CHILDREN`); deleting a milestone loosens its sprints (`ON DELETE SET NULL`), it never cascades; archiving a milestone archives its sprints; there is exactly one Backlog per project (partial unique index), and it can't be archived or deleted. Sprint progress counts a task done when its column is a done column OR it is archived.
 
 ## Agent file boundaries
 
@@ -158,14 +155,15 @@ Key facts:
   data is **dev-only**: when `LXK_ENV` is set and not `dev`, seeding is skipped
   (prod stays empty — the Backlog swimlane and default columns appear when a
   project is created). `/api/setup/*` endpoints are API-key exempt.
-- **Human auth** is Cloudflare Access (Google OAuth) on staging/prod. In Google
-  OAuth **internal test mode**, only tester emails can log in — the admin email
-  must be a tester and inside the Access allow-domain policy or the first login fails.
+- **Human auth** is in-process Better Auth (email/password, cookie sessions
+  at `/api/auth/*`) — no Cloudflare Access, no Google OAuth, no SMTP.
+  Provisioning is admin-curated: `/setup` wizard creates the first superadmin;
+  workspace invite links + set-password links onboard members. No public
+  signup. See `docs/ARCHITECTURE.md` → Auth.
 - **GitHub sync:** full setup guide in `docs/GITHUB_SETUP.md` — GitHub App
   creation, webhook URL/secret, `GITHUB_APP_ID` / `GITHUB_PRIVATE_KEY` (inline
-  PEM) or `GITHUB_PRIVATE_KEY_FILE` (path — recommended), prod volume mount,
-  Access bypass policy for `/api/webhooks/*`. Without the bypass,
-  GitHub deliveries 302 on Access.
+  PEM) or `GITHUB_PRIVATE_KEY_FILE` (path — recommended), prod volume mount.
+  Webhook auth is HMAC-SHA-256 over the raw body — no Access bypass needed.
 
 ### Forge (AI writing assistant)
 
@@ -192,8 +190,7 @@ Key facts:
 - **Warm opencode runtimes (opencode only):** the daemon owns one `opencode
   serve` per runtime and drives every task over pure HTTP — no `run` client is
   ever spawned (the attach client is unreliable on 1.18.11: it exits without
-  mirroring text parts — spike-verified, design in
-  `docs/superpowers/specs/2026-08-12-opencode-serve-sessions-design.md`). The
+  mirroring text parts — spike-verified). The
   claim payload carries the continue-vs-mint verdict: `runtimeSessionId`
   (continue the mapped conversation) or `null` (mint
   `POST /session?directory=<workspace>` on serve, assert the bound directory,
@@ -289,7 +286,7 @@ The CLI version is **independent** of the web app version:
   listener alias; `--no-systemd` writes no daemon files and runs the listener
   under your own supervisor.
 - **`lexa-cli deploy <domain> [staging|prod]`** is for remote deployment
-  (Docker + cloudflared tunnel + Access; see `docs/DEPLOYMENT.md`). Deploy
+  (Docker + cloudflared tunnel; see `docs/DEPLOYMENT.md`). Deploy
   state lives at `~/.lexa/<domain>/deploy/` (one flavor per domain —
   subdomains are separate flavors) with creds in `~/.lexa/<domain>/config.json`.
   The image is
@@ -303,8 +300,7 @@ The CLI version is **independent** of the web app version:
   `curl -fsSL https://raw.githubusercontent.com/yohanesgre/lexa/main/scripts/install-cli.sh | bash`
   (downloads the prebuilt binary from the newest `cli-v*` GitHub release →
   `~/.local/bin/lexa-cli`). Non-interactive flags: `--cf-token`,
-  `--google-client-id`, `--google-client-secret`, `--team-domain`,
-  `--email-domain`, `--admin-email`, `--api-key`. Deploy reuses
+  `--admin-email`, `--api-key`. Deploy reuses
   `LXK_API_KEY`/`LXK_ADMIN_EMAILS` from the flavor env file when present. The
   server-side gate (`/api/setup/seed` + web wizard) keeps `LXK_ENV` non-dev
   deployments empty of sample data.
@@ -383,5 +379,5 @@ Use this to verify wireframe layout, spacing, and structure before implementing.
 ## When you're stuck
 
 1. Re-read the relevant design doc section — the answer is usually there.
-2. If you're tempted to change an invariant, check the archived design-review history in `docs/private/ARCHITECTURE-history.md` (it explains why each exists).
+2. If you're tempted to change an invariant, re-read its rationale in `docs/ARCHITECTURE.md` and the design notes in `docs/SCHEMA.md` (they explain why each exists).
 3. If genuinely blocked or docs are ambiguous: **stop and ask the user.** State what's ambiguous and what you would otherwise do. Do not guess on architecture.
