@@ -152,6 +152,7 @@ interface Project {
   id: ID;
   name: string;
   slug: string;
+  key: string;                // ticket-key prefix (e.g. "NIM") — unique per project
   description: string;
   teamId: ID | null;          // owning team (organization id); null = unassigned, superadmin-only until assigned
   repos: ProjectRepo[];           // linked repos with roles (replaces githubRepo)
@@ -271,6 +272,7 @@ interface GithubIssue {
 
 interface Task {
   id: ID;
+  key: string;                // ticket key "PREFIX-n" (e.g. "NIM-12") — immutable, unique per project
   projectId: ID;
   columnId: ID;
   swimlaneId: ID;
@@ -672,6 +674,8 @@ body { columnId*, swimlaneId?, title*, description?, priority?, type?, parentId?
 
 GET    /api/projects/:slug/tasks/:id
 → 200 Task | 404
+  `:id` accepts the ticket key (PREFIX-N, e.g. "NIM-12") as a lookup alias —
+  resolved via the project's key prefix + number (server/api/task-id.ts).
 
 PATCH  /api/projects/:slug/tasks/:id
 body { title?, description?, priority?, type?, assignees?, dueAt? }
@@ -784,6 +788,8 @@ DELETE /api/projects/:slug/tasks/:id/links/:linkId
 GET    /api/projects/:slug/tasks/search?q&exclude
 → 200 { data: TaskLinkSuggestion[] }   // @-autocomplete; title LIKE, cap 10
   exclude = task id to skip (the current task)
+  When q matches the PREFIX-N ticket-key pattern, the exact key match is
+  surfaced first (server pre-checks the same way the UI does)
 ```
 
 Notes:

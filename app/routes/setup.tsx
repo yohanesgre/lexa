@@ -153,7 +153,7 @@ function SetupWizard() {
               {emailError && <p className="text-xs text-lx-text-danger mt-2">{emailError}</p>}
               {isRemote && (
                 <p className="text-xs text-lx-text-warning mt-3 leading-4">
-                  Staging/prod: this email must be a tester in your Google Cloud OAuth consent screen (internal test mode) and inside the Cloudflare Access allow policy, or the first login will fail.
+                  This email becomes the first superadmin. Keep it reachable — no email sending is used; teammates join via workspace invites and set-password links.
                 </p>
               )}
               <div className="flex justify-end mt-5">
@@ -241,7 +241,7 @@ function SetupWizard() {
               </div>
               <h2 className="font-display text-lg font-medium text-lx-text-primary">You're all set</h2>
               <p className="text-sm text-lx-text-secondary mt-2 leading-5" style={{ maxWidth: 340, margin: "0 auto" }}>
-                Lexa is configured. Open the dashboard to create projects, or add teammates once they've logged in via Cloudflare Access.
+                Lexa is configured. Open the dashboard to create projects, or invite teammates from workspace settings.
               </p>
               <button type="button" className="btn btn-primary mt-5" onClick={goToApp}>
                 Open dashboard <ArrowRight size={14} strokeWidth={2} />
