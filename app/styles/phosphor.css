@@ -623,6 +623,9 @@
 
   .task-key { font-family: var(--lx-font-mono); font-size: 14px; font-weight: 600; color: var(--lx-text-link); letter-spacing: 0.02em; }
 
+  /* Dense single-line task rows: key reads smaller than the board-card key */
+  .task-row .task-key { font-size: 12px; letter-spacing: 0.01em; }
+
   .card-meta {
     display: flex;
     align-items: center;
@@ -4307,14 +4310,13 @@
   .task-row {
     position: relative;
     display: flex;
-    flex-direction: column;
-    align-items: stretch;
-    gap: 8px;
+    align-items: center;
+    gap: 12px;
     width: 100%;
-    padding: 12px 16px;
+    padding: 9px 14px;
     background: var(--lx-surface-card);
     border: 1px solid var(--lx-border-default);
-    border-radius: 12px;
+    border-radius: 10px;
     text-align: left;
     font: inherit;
     cursor: pointer;
@@ -4333,8 +4335,8 @@
   .task-row-accent {
     position: absolute;
     left: 0;
-    top: 10px;
-    bottom: 10px;
+    top: 7px;
+    bottom: 7px;
     width: 3px;
     border-radius: 0 2px 2px 0;
     pointer-events: none;
@@ -4346,9 +4348,9 @@
   .task-row-title {
     flex: 1;
     min-width: 0;
-    font-size: 14px;
+    font-size: 13px;
     font-weight: 600;
-    line-height: 20px;
+    line-height: 18px;
     color: var(--lx-text-primary);
     white-space: nowrap;
     overflow: hidden;
@@ -4357,15 +4359,19 @@
 
   .task-row-meta {
     display: flex;
-    flex-wrap: wrap;
+    flex-wrap: nowrap;
     align-items: center;
-    gap: 8px 12px;
+    gap: 12px;
   }
 
-  /* "Where" — column · swimlane as quiet flat text, left, flexes to fill */
+  /* "Where" — column chip (tinted with column color) + swimlane as quiet
+     flat text, left, flexes to fill */
   .task-row-where {
     flex: 1;
     min-width: 0;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
     font-size: 12px;
     line-height: 16px;
     color: var(--lx-text-secondary);
@@ -4374,24 +4380,45 @@
     text-overflow: ellipsis;
   }
 
+  /* Column chip — tinted with the column color (inline from board.columns),
+     text carries the same hue; neutral when a column has no color set. */
+  .task-row-where-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    height: 18px;
+    padding: 0 7px;
+    border-radius: 9999px;
+    font-size: 11px;
+    font-weight: 500;
+    line-height: 12px;
+    white-space: nowrap;
+  }
+  .task-row-where-chip .dot {
+    width: 5px;
+    height: 5px;
+    border-radius: 9999px;
+    flex-shrink: 0;
+  }
+
   /* "What" — type/priority chips + github + date, right-aligned group */
   .task-row-status {
     display: inline-flex;
     align-items: center;
-    gap: 8px;
+    gap: 6px;
     flex-shrink: 0;
   }
 
   .task-chip {
     display: inline-flex;
     align-items: center;
-    height: 20px;
-    padding: 0 8px;
+    height: 18px;
+    padding: 0 7px;
     border-radius: 9999px;
     border: 1px solid var(--lx-border-default);
     font-family: var(--lx-font-body);
     font-size: 11px;
-    line-height: 14px;
+    line-height: 12px;
     color: var(--lx-text-secondary);
     white-space: nowrap;
   }
@@ -4401,8 +4428,8 @@
   .task-gh {
     display: inline-flex;
     align-items: center;
-    height: 20px;
-    padding: 0 8px;
+    height: 18px;
+    padding: 0 7px;
     border-radius: 9999px;
     background: var(--lx-bg-accent-subtle);
     border: 1px solid rgba(240, 192, 64, 0.35);

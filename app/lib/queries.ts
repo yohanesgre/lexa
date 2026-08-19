@@ -193,6 +193,7 @@ export interface TaskListItem {
   typeColor: string;
   columnId: string;
   columnName: string;
+  columnColor: string;
   swimlaneId: string;
   swimlaneName: string;
   assignees: string[];
@@ -206,6 +207,7 @@ export interface TaskListItem {
 // cache (same key as useBoard) so board and list never double-fetch.
 export function deriveTaskList(board: Board): TaskListItem[] {
   const columnName = new Map(board.columns.map((c) => [c.id, c.name]));
+  const columnColor = new Map(board.columns.map((c) => [c.id, c.color]));
   const swimlaneName = new Map(board.swimlanes.map((s) => [s.id, s.name]));
   const priority = new Map(board.fieldConfig.priorities.map((o) => [o.id, o]));
   const type = new Map(board.fieldConfig.types.map((o) => [o.id, o]));
@@ -224,6 +226,7 @@ export function deriveTaskList(board: Board): TaskListItem[] {
       typeColor: ty?.color ?? "",
       columnId: t.columnId,
       columnName: columnName.get(t.columnId) ?? "Unknown column",
+      columnColor: columnColor.get(t.columnId) ?? "",
       swimlaneId: t.swimlaneId,
       swimlaneName: swimlaneName.get(t.swimlaneId) ?? "Unknown swimlane",
       assignees: t.assignees,
