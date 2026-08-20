@@ -1,0 +1,50 @@
+import { createContext, useContext, useId } from "react";
+
+export interface FieldContextValue {
+  error: React.ReactNode;
+  invalid: boolean;
+  descId: string | undefined;
+}
+
+const FieldContext = createContext<FieldContextValue | null>(null);
+
+export function useFieldContext(): FieldContextValue {
+  // Safe default outside a Field so standalone controls can pass `invalid`
+  // directly (human ruling: context defaults, no throw).
+  return useContext(FieldContext) ?? { error: undefined, invalid: false, descId: undefined };
+}
+
+export interface FieldProps {
+  label?: React.ReactNode;
+  htmlFor?: string;
+  hint?: React.ReactNode;
+  error?: React.ReactNode;
+  children: React.ReactNode;
+  className?: string;
+}
+
+export function Field({ label, htmlFor, hint, error, children, className }: FieldProps) {
+  const descId = useId();
+  const invalid = error != null && error !== "";
+  return (
+    <div className={className}>
+      {label && (
+        <label className="field-label" htmlFor={htmlFor}>
+          {label}
+        </label>
+      )}
+      <FieldContext.Provider value={{ error, invalid, descId }}>
+        {children}
+      </FieldContext.Provider>
+      {invalid ? (
+        <div id={descId} className="field-hint-danger">
+          {error}
+        </div>
+      ) : hint != null && hint !== "" ? (
+        <div id={descId} className="field-hint">
+          {hint}
+        </div>
+      ) : null}
+    </div>
+  );
+}
