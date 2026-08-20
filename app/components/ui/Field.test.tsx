@@ -35,4 +35,35 @@ describe("Field", () => {
     );
     expect(screen.getByLabelText("Name")).toBeInTheDocument();
   });
+
+  it("treats error={false} as valid with no danger hint", () => {
+    const { container } = render(
+      <Field label="Name" error={false}>
+        <TextInput value="" onChange={() => {}} />
+      </Field>
+    );
+    const input = screen.getByRole("textbox");
+    expect(input).not.toHaveAttribute("aria-invalid");
+    expect(container.querySelector(".field-hint-danger")).not.toBeInTheDocument();
+  });
+
+  it("omits aria-describedby without a hint or error", () => {
+    render(
+      <Field label="Name">
+        <TextInput value="" onChange={() => {}} />
+      </Field>
+    );
+    expect(screen.getByRole("textbox")).not.toHaveAttribute("aria-describedby");
+  });
+
+  it("points aria-describedby at the hint element when a hint is present", () => {
+    render(
+      <Field label="Name" hint="Shown on the dashboard.">
+        <TextInput value="" onChange={() => {}} />
+      </Field>
+    );
+    const input = screen.getByRole("textbox");
+    const hint = screen.getByText("Shown on the dashboard.");
+    expect(input).toHaveAttribute("aria-describedby", hint.id);
+  });
 });
