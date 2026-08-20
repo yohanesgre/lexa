@@ -7,6 +7,8 @@ import { useTeamSelection } from "../../lib/team-selection";
 import { TeamSettingsRuntimesTable } from "./TeamRuntimesTable";
 import type { Team, TeamMember, TeamMemberRole, Project } from "../../../shared/types";
 import type { WorkspaceMember } from "../../lib/api";
+import { Field } from "../ui/Field";
+import { TextInput } from "../ui/TextInput";
 
 const ROLES: TeamMemberRole[] = ["owner", "admin", "member"];
 
@@ -160,17 +162,15 @@ function TeamProfileSection({ team }: { team: Team }) {
       <h2 className="font-display text-lg font-medium text-lx-text-primary mb-3">Profile</h2>
       <div className="card-panel card-panel--elevated mt-4">
         <div className="flex items-end gap-3 flex-wrap">
-          <div className="field" style={{ marginBottom: 0 }}>
-            <label className="field-label" htmlFor="team-profile-name">Name</label>
-            <input id="team-profile-name" className="prop-input" value={name} onChange={(e) => { setName(e.target.value); setSaved(false); }} style={{ minWidth: 220 }} />
-          </div>
-          <div className="field" style={{ marginBottom: 0 }}>
-            <label className="field-label" htmlFor="team-profile-slug">Slug</label>
+          <Field label="Name" htmlFor="team-profile-name" className="field mb-0">
+            <TextInput id="team-profile-name" value={name} onChange={(v) => { setName(v); setSaved(false); }} style={{ minWidth: 220 }} />
+          </Field>
+          <Field label="Slug" htmlFor="team-profile-slug" className="field mb-0">
             <div className="flex items-center gap-2">
               <input id="team-profile-slug" className="prop-input font-mono" value={team.slug} disabled style={{ minWidth: 160 }} />
               <span className="text-xs text-lx-text-muted">read-only</span>
             </div>
-          </div>
+          </Field>
           <button type="button" className="btn btn-primary" onClick={handleSave} disabled={saving || !name.trim()}>
             {saving ? "Saving…" : "Save"}
           </button>
