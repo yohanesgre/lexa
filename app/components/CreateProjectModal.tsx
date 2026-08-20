@@ -1,6 +1,10 @@
 import { useState } from "react";
 import { Plus, X } from "lucide-react";
 import { useTeams } from "../lib/queries";
+import { Field } from "./ui/Field";
+import { TextInput } from "./ui/TextInput";
+import { TextArea } from "./ui/TextArea";
+import { SelectInput } from "./ui/SelectInput";
 
 interface CreateProjectModalProps {
   open: boolean;
@@ -51,49 +55,22 @@ export function CreateProjectModal({ open, pending, onClose, onSubmit }: CreateP
             </button>
           </div>
           <div className="modal-body">
-            <div className="field" style={{ marginBottom: 16 }}>
-              <label className="field-label" htmlFor="create-project-name">Name</label>
-              <input
-                id="create-project-name"
-                className="prop-input w-full"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                autoFocus
-                placeholder=""
-                disabled={pending}
-              />
-              <div className="field-hint">Shown on the dashboard and in the nav. Slug is derived from the name.</div>
-            </div>
-            <div className="field" style={{ marginBottom: 16 }}>
-              <label className="field-label" htmlFor="create-project-team">Team</label>
-              <select
-                id="create-project-team"
-                className="prop-input w-full"
-                value={teamId}
-                onChange={(e) => setTeamId(e.target.value)}
-                disabled={pending || teamsLoading}
-                aria-label="Project team"
-              >
+            <Field label="Name" htmlFor="create-project-name" hint="Shown on the dashboard and in the nav. Slug is derived from the name." className="field">
+              <TextInput id="create-project-name" value={name} onChange={setName} autoFocus disabled={pending} />
+            </Field>
+
+            <Field label="Team" htmlFor="create-project-team" hint="The owning team scopes who can see and use the project. Unassigned (no team) is superadmin-only." className="field">
+              <SelectInput id="create-project-team" value={teamId} onChange={setTeamId} disabled={pending || teamsLoading} aria-label="Project team" className="w-full">
                 <option value="">Select a team…</option>
                 {teams.map((t) => (
                   <option key={t.id} value={t.id}>{t.name} ({t.slug})</option>
                 ))}
-              </select>
-              <div className="field-hint">
-                The owning team scopes who can see and use the project. Unassigned (no team) is superadmin-only.
-              </div>
-            </div>
-            <div className="field">
-              <label className="field-label" htmlFor="create-project-desc">Description</label>
-              <textarea
-                id="create-project-desc"
-                className="prop-input w-full"
-                value={desc}
-                onChange={(e) => setDesc(e.target.value)}
-                rows={3}
-                disabled={pending}
-              />
-            </div>
+              </SelectInput>
+            </Field>
+
+            <Field label="Description" htmlFor="create-project-desc" className="field">
+              <TextArea id="create-project-desc" value={desc} onChange={setDesc} rows={3} disabled={pending} />
+            </Field>
           </div>
           <div className="modal-footer">
             <button type="button" className="btn btn-ghost" onClick={onClose} disabled={pending}>
