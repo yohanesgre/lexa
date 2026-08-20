@@ -1413,6 +1413,30 @@ a:hover { color: var(--lx-text-link-hover); }
   transform: rotate(-45deg) translateY(-1px);
 }
 
+.radio {
+  width: 14px;
+  height: 14px;
+  border: 1px solid var(--lx-border-strong);
+  border-radius: 9999px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.radio.checked {
+  background: var(--lx-border-focus);
+  border-color: var(--lx-border-focus);
+}
+
+.radio.checked::after {
+  content: "";
+  width: 5px;
+  height: 5px;
+  border-radius: 9999px;
+  background: var(--lx-text-inverse);
+}
+
 /* ---- Responsive Note Block ---- */
 .responsive-note {
   background: var(--lx-surface-elevated);
@@ -5387,10 +5411,14 @@ textarea.prop-input {
           <button class="toggle-switch" aria-label="Autosave off"></button>
           <span class="text-sm color-secondary">Autosave</span>
         </div>
+        <div class="state-row">
+          <span class="state-label">Radio</span>
+          <div class="check-row"><div class="radio checked"></div> Owner</div>
+          <div class="check-row"><div class="radio"></div> Member</div>
+        </div>
         <pre class="code-block" id="code-inputs-check">&lt;div class="check-row"&gt;&lt;div class="checkbox checked"&gt;&lt;/div&gt; Title&lt;/div&gt;
 &lt;button class="toggle-switch" aria-label="Autosave off"&gt;&lt;/button&gt;</pre>
         <button class="btn btn-ghost btn-sm copy-btn" data-copy="code-inputs-check">Copy</button>
-        <div class="token-contract">Tokens: --lx-border-focus (checked/toggle on). No .radio class exists — skipped.</div>
       </div>
     </section>
 
