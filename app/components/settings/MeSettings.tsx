@@ -2,6 +2,8 @@ import { useEffect, useState } from "react";
 import { useSession, useSessions, useRevokeSession, useUpdateMyName, useChangePassword } from "../../lib/queries";
 import { formatRelative } from "../../lib/relative-time";
 import type { SessionInfo } from "../../../shared/types";
+import { Field } from "../ui/Field";
+import { TextInput } from "../ui/TextInput";
 
 // /settings/me — EVERY signed-in user. Own data only; nothing here is gated
 // by role.
@@ -62,19 +64,15 @@ function ProfileSection() {
             <div className="avatar" style={{ width: 48, height: 48, fontSize: 18 }}>{initial}</div>
           </div>
           <div style={{ flex: 1, minWidth: 260 }}>
-            <div className="field" style={{ marginBottom: 12 }}>
-              <label className="field-label" htmlFor="me-name">Name</label>
-              <input id="me-name" className="prop-input w-full" value={name} onChange={(e) => { setName(e.target.value); if (error) setError(null); }} />
-              <div className="field-hint">Initials avatar derives from the name. Save → PATCH /api/me; the user-menu trigger updates from the response.</div>
-            </div>
-            <div className="field" style={{ marginBottom: 0 }}>
-              <label className="field-label" htmlFor="me-email">Email</label>
+            <Field label="Name" htmlFor="me-name" hint="Initials avatar derives from the name. Save → PATCH /api/me; the user-menu trigger updates from the response." className="field mb-3">
+              <TextInput id="me-name" value={name} onChange={(v) => { setName(v); if (error) setError(null); }} />
+            </Field>
+            <Field label="Email" htmlFor="me-email" hint="Email is the login identity — changing it is a provisioning-level action (contact your admin)." className="field mb-0">
               <div className="flex items-center gap-2">
                 <input id="me-email" className="prop-input w-full" value={user.email} disabled style={{ opacity: 0.6 }} />
                 <span className="text-xs text-lx-text-muted">read-only</span>
               </div>
-              <div className="field-hint">Email is the login identity — changing it is a provisioning-level action (contact your admin).</div>
-            </div>
+            </Field>
           </div>
         </div>
         {error && <div className="field-hint-danger mt-3">{error}</div>}
@@ -125,19 +123,17 @@ function PasswordSection() {
     <section className="mb-8">
       <h2 className="font-display text-lg font-medium text-lx-text-primary mb-3">Password</h2>
       <form onSubmit={handleSubmit} className="card-panel card-panel--elevated mt-4" style={{ maxWidth: 560 }}>
-        <div className="field" style={{ marginBottom: 12 }}>
-          <label className="field-label" htmlFor="pw-current">Current password</label>
-          <input id="pw-current" className="prop-input w-full" type="password" placeholder="••••••••••••" autoComplete="current-password" value={current} onChange={(e) => { setCurrent(e.target.value); setError(null); }} />
-        </div>
-        <div className="field" style={{ marginBottom: 12 }}>
-          <label className="field-label" htmlFor="pw-new">New password</label>
-          <input id="pw-new" className="prop-input w-full" type="password" placeholder="••••••••••••" autoComplete="new-password" value={next} onChange={(e) => { setNext(e.target.value); setError(null); }} />
-          <div className={tooShort ? "field-hint-danger" : "field-hint"}>At least 8 characters.</div>
-        </div>
-        <div className="field" style={{ marginBottom: 0 }}>
-          <label className="field-label" htmlFor="pw-confirm">Confirm new password</label>
-          <input id="pw-confirm" className="prop-input w-full" type="password" placeholder="••••••••••••" autoComplete="new-password" value={confirm} onChange={(e) => { setConfirm(e.target.value); setError(null); }} />
-        </div>
+        <Field label="Current password" htmlFor="pw-current" className="field mb-3">
+          <TextInput id="pw-current" type="password" placeholder="••••••••••••" autoComplete="current-password" value={current} onChange={(v) => { setCurrent(v); setError(null); }} />
+        </Field>
+
+        <Field label="New password" htmlFor="pw-new" hint="At least 8 characters." error={tooShort ? "At least 8 characters." : undefined} className="field mb-3">
+          <TextInput id="pw-new" type="password" placeholder="••••••••••••" autoComplete="new-password" value={next} onChange={(v) => { setNext(v); setError(null); }} />
+        </Field>
+
+        <Field label="Confirm new password" htmlFor="pw-confirm" className="field mb-0">
+          <TextInput id="pw-confirm" type="password" placeholder="••••••••••••" autoComplete="new-password" value={confirm} onChange={(v) => { setConfirm(v); setError(null); }} />
+        </Field>
         {error && <div className="field-hint-danger mt-2">{error}</div>}
         {success && <div className="field-hint mt-2" style={{ color: "var(--lx-text-success)" }}>Password updated. Other sessions stay valid — revoke them below.</div>}
         <div className="flex justify-end mt-4">
