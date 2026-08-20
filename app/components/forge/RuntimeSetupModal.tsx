@@ -3,6 +3,8 @@ import { useQuery } from "@tanstack/react-query";
 import { Check, Copy, Monitor, RefreshCw, Terminal, X } from "lucide-react";
 import * as api from "../../lib/api";
 import { copyToClipboard } from "../../lib/clipboard";
+import { Field } from "../ui/Field";
+import { TextInput } from "../ui/TextInput";
 import { cn } from "../ui/cn";
 import { useCreateApiKey } from "../../lib/queries";
 import { parseApiDate } from "../../lib/date";
@@ -114,15 +116,14 @@ lexa-cli machine listen`}
         <p className="text-xs text-lx-text-secondary leading-5 mb-3">
           Used by <span className="font-mono">lexa-cli login</span> on the machine. The runtime gets its own key in the next step.
         </p>
-        <div className="field mb-4">
-          <label className="prop-label block mb-1" htmlFor="machine-key-name">Key name</label>
+        <Field label="Key name" htmlFor="machine-key-name" className="mb-4">
           <div className="flex gap-2">
-            <input id="machine-key-name" className="prop-input flex-1" type="text" value={machineKeyName} onChange={(event) => setMachineKeyName(event.target.value)} placeholder="e.g. lexa-machine" onKeyDown={(event) => { if (event.key === "Enter") handleCreateMachineKey(); }} />
+            <TextInput id="machine-key-name" value={machineKeyName} onChange={setMachineKeyName} placeholder="e.g. lexa-machine" className="flex-1" onKeyDown={(event) => { if (event.key === "Enter") handleCreateMachineKey(); }} />
             <button type="button" className="btn btn-ghost" disabled={!machineKeyName.trim() || createApiKey.isPending} onClick={handleCreateMachineKey}>
               {createApiKey.isPending ? <RefreshCw size={14} strokeWidth={1.5} className="animate-spin" /> : <Check size={14} strokeWidth={1.5} />} Create
             </button>
           </div>
-        </div>
+        </Field>
         {machineKeyRaw ? (
           <div style={{ background: "var(--lx-surface-input)", border: "1px solid var(--lx-border-default)", borderRadius: 6, padding: 8 }}>
             <div className="flex items-center gap-2">
@@ -193,15 +194,14 @@ function StepKeySend({ machine, agentCli, newKeyName, createdRawKey, copied, can
     <div>
       <h3 className="font-display text-base font-medium text-lx-text-primary mb-1">Create key and install</h3>
       <p className="text-xs text-lx-text-secondary leading-5 mb-4">The fresh key is delivered once to the selected machine listener. Runtime settings become available after its first heartbeat.</p>
-      <div className="field mb-4">
-        <label className="prop-label block mb-1" htmlFor="runtime-key-name">Key name</label>
+      <Field label="Key name" htmlFor="runtime-key-name" className="mb-4">
         <div className="flex gap-2">
-          <input id="runtime-key-name" className="prop-input flex-1" type="text" value={newKeyName} onChange={(event) => onKeyNameChange(event.target.value)} placeholder="e.g. forge-opencode" onKeyDown={(event) => { if (event.key === "Enter") onCreateKey(); }} />
+          <TextInput id="runtime-key-name" value={newKeyName} onChange={onKeyNameChange} placeholder="e.g. forge-opencode" className="flex-1" onKeyDown={(event) => { if (event.key === "Enter") onCreateKey(); }} />
           <button type="button" className="btn btn-ghost" disabled={!newKeyName.trim() || createApiKey.isPending} onClick={onCreateKey}>
             {createApiKey.isPending ? <RefreshCw size={14} strokeWidth={1.5} className="animate-spin" /> : <Check size={14} strokeWidth={1.5} />} Create
           </button>
         </div>
-      </div>
+      </Field>
       {createdRawKey ? (
         <div className="mb-4" style={{ background: "var(--lx-surface-input)", border: "1px solid var(--lx-border-default)", borderRadius: 6, padding: 8 }}>
           <div className="flex items-center gap-2">
