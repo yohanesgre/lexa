@@ -24,8 +24,10 @@ export interface FieldProps {
 }
 
 export function Field({ label, htmlFor, hint, error, children, className }: FieldProps) {
-  const descId = useId();
-  const invalid = error != null && error !== "";
+  // useId must be called unconditionally (hooks rules); only pass it down when a desc element renders.
+  const id = useId();
+  const invalid = error != null && error !== "" && error !== false;
+  const descId = invalid || (hint != null && hint !== "") ? id : undefined;
   return (
     <div className={className}>
       {label && (
