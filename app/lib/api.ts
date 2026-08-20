@@ -2,9 +2,35 @@ import type { Project, ProjectRepo, Column, Swimlane, Task, Board, Milestone, Wi
 
 const BASE = "/api";
 
+// SSR: resolve the request's origin + cookie so a server-side prefetch (route
+// loader during SSR) hits the same REST API the browser uses. Safe because
+// vite.config.ts excludes @tanstack/react-start-server from the client dep
+// optimizer. Client-side this is never called — fetch stays same-origin and
+// the session cookie flows implicitly.
+async function serverRequestContext(): Promise<{ origin: string; cookie?: string }> {
+  const origin =
+    typeof process !== "undefined"
+      ? (process.env.LXK_PUBLIC_URL ?? "http://localhost:3000")
+      : "http://localhost:3000";
+  try {
+    const { getRequest } = await import("@tanstack/react-start-server");
+    const req = getRequest();
+    return { origin, cookie: req?.headers.get("cookie") ?? undefined };
+  } catch {
+    // No request context (unit tests) — fetch absolute, no cookie.
+    return { origin, cookie: undefined };
+  }
+}
+
 async function request<T>(url: string, init?: RequestInit): Promise<T> {
   const headers: Record<string, string> = { "Content-Type": "application/json", ...init?.headers as Record<string, string> };
-  const res = await fetch(url, { ...init, headers });
+  let target = url;
+  if (typeof window === "undefined") {
+    const { origin, cookie } = await serverRequestContext();
+    target = `${origin}${url}`;
+    if (cookie) headers.cookie = cookie;
+  }
+  const res = await fetch(target, { ...init, headers });
   if (!res.ok) {
     const body = await res.json().catch(() => ({})) as { error?: { code?: string; message?: string; details?: unknown } };
     const err = new Error(body.error?.message ?? `HTTP ${res.status}`) as Error & { code?: string; details?: unknown };

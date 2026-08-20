@@ -70,7 +70,7 @@ function renderInlineNodes(nodes: TTNode[] | undefined, members: string[], keyPr
       const segments = splitMentions(node.text ?? "", members);
       return (
         <span key={`${nodeKey}-t`}>
-          {segments.map((s, j) => applyMarks(s, node.marks, `${nodeKey}-s${j}`))}
+          {segments.map((s, j) => applyMarks(s, node.marks, `${nodeKey}-s${j}-${s.text}`))}
         </span>
       );
     }

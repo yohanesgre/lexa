@@ -1,8 +1,6 @@
 const VOWELS = new Set(["a", "e", "i", "o", "u"]);
 const MAX_LEN = 6;
 
-export const TASK_KEY_RE = /^[A-Z0-9]{2,6}-\d+$/;
-
 export function generateTaskKey(slug: string, taken: (candidate: string) => boolean): string {
   const words = slug.toLowerCase().split("-").filter(Boolean);
   const lastWord = words[words.length - 1] ?? "";

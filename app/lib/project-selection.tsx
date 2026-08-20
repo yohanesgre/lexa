@@ -1,8 +1,12 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
-import { useParams } from "@tanstack/react-router";
+import { useParams, useRouterState } from "@tanstack/react-router";
 import { useProjects } from "./queries";
 
 const STORAGE_KEY = "lexa:selectedProject";
+
+// Auth/setup surfaces render without app chrome and never have a session —
+// fetching the project list there would 401 (and retry-spam the console).
+const PUBLIC_PATHS = new Set(["/login", "/set-password", "/invite", "/setup"]);
 
 interface ProjectSelectionContextValue {
   selectedSlug: string | undefined;
@@ -15,7 +19,11 @@ const ProjectSelectionContext = createContext<ProjectSelectionContextValue | nul
 export function ProjectSelectionProvider({ children }: { children: React.ReactNode }) {
   const [selectedSlug, setSelectedSlug] = useState<string | undefined>(undefined);
   const [hydrated, setHydrated] = useState(false);
-  const { data: projects, isLoading } = useProjects();
+  const pathname = useRouterState({ select: (s) => s.location.pathname });
+  const isPublic = PUBLIC_PATHS.has(pathname);
+  // On public pages there is no session, so the project list would 401 — skip
+  // the fetch entirely (the provider isn't consumed by bare surfaces anyway).
+  const { data: projects, isLoading } = useProjects({ enabled: !isPublic });
   const params = useParams({ strict: false }) as { slug?: string };
   const routeSlug = params?.slug;
 

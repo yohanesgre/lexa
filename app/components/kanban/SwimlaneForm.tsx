@@ -17,12 +17,24 @@ export interface SwimlaneFormProps {
 export function SwimlaneForm({ slug, swimlane, isOpen, onClose, onSubmit, zIndex = 70 }: SwimlaneFormProps) {
   const isEdit = !!swimlane;
   const { data: milestones = [] } = useMilestones(slug);
-  const [name, setName] = useState("");
-  const [description, setDescription] = useState("");
-  const [dueAt, setDueAt] = useState<string | null>(swimlane?.dueAt ?? null);
-  const [startAt, setStartAt] = useState<string | null>(swimlane?.startAt ?? null);
-  const [milestoneId, setMilestoneId] = useState<string | null>(swimlane?.milestoneId ?? null);
+
+  interface FormState {
+    name: string;
+    description: string;
+    dueAt: string | null;
+    startAt: string | null;
+    milestoneId: string | null;
+  }
+  const [state, setState] = useState<FormState>({
+    name: "",
+    description: "",
+    dueAt: null,
+    startAt: null,
+    milestoneId: null,
+  });
   const [error, setError] = useState<string | null>(null);
+  const set = (patch: Partial<FormState> | ((s: FormState) => FormState)) =>
+    setState((s) => (typeof patch === "function" ? patch(s) : { ...s, ...patch }));
 
   const onEscape = useEffectEvent((event: KeyboardEvent) => {
     if (event.key === "Escape") {
@@ -39,39 +51,46 @@ export function SwimlaneForm({ slug, swimlane, isOpen, onClose, onSubmit, zIndex
     return () => document.removeEventListener("keydown", handleKeyDown);
   }, [isOpen]);
 
-  // Re-sync fields when opening — the form stays mounted between opens, so
-  // state must be seeded from the target entity each time (create = empty).
-  useEffect(() => {
-    if (!isOpen) return;
-    setName(swimlane?.name ?? "");
-    setDescription(swimlane?.description ?? "");
-    setDueAt(swimlane?.dueAt ?? null);
-    setStartAt(swimlane?.startAt ?? null);
-    setMilestoneId(swimlane?.milestoneId ?? null);
-    setError(null);
-  }, [isOpen, swimlane]);
+  // Seed fields when the form opens — it stays mounted between opens, so
+  // state is re-seeded from the target entity each time (create = empty).
+  // Adjusted during render (not in an effect) so a stale close→reopen with a
+  // different swimlane never carries over previous values.
+  const [prevKey, setPrevKey] = useState<{ swimlane: Swimlane | null | undefined; isOpen: boolean }>({ swimlane, isOpen });
+  if (prevKey.swimlane !== swimlane || prevKey.isOpen !== isOpen) {
+    setPrevKey({ swimlane, isOpen });
+    if (isOpen) {
+      setState({
+        name: swimlane?.name ?? "",
+        description: swimlane?.description ?? "",
+        dueAt: swimlane?.dueAt ?? null,
+        startAt: swimlane?.startAt ?? null,
+        milestoneId: swimlane?.milestoneId ?? null,
+      });
+      setError(null);
+    }
+  }
 
   if (!isOpen) return null;
 
   const handleSubmit = (event: React.FormEvent) => {
     event.preventDefault();
-    const trimmedName = name.trim();
+    const trimmedName = state.name.trim();
     if (trimmedName === "") {
       setError("Name is required");
       return;
     }
-    if (startAt && dueAt && startAt > dueAt) {
+    if (state.startAt && state.dueAt && state.startAt > state.dueAt) {
       setError("Start date must be before the due date");
       return;
     }
     setError(null);
-    const trimmedDescription = description.trim();
+    const trimmedDescription = state.description.trim();
     onSubmit({
       name: trimmedName,
       description: trimmedDescription === "" ? null : trimmedDescription,
-      dueAt,
-      startAt,
-      milestoneId,
+      dueAt: state.dueAt,
+      startAt: state.startAt,
+      milestoneId: state.milestoneId,
     });
     onClose();
   };
@@ -117,8 +136,8 @@ export function SwimlaneForm({ slug, swimlane, isOpen, onClose, onSubmit, zIndex
                 <input
                   id="swimlane-name"
                   className="prop-input w-full"
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
+                  value={state.name}
+                  onChange={(e) => set({ name: e.target.value })}
                   placeholder="e.g. Sprint 8 — The Hollow Crown"
                   autoFocus
                 />
@@ -134,8 +153,8 @@ export function SwimlaneForm({ slug, swimlane, isOpen, onClose, onSubmit, zIndex
                 <textarea
                   id="swimlane-description"
                   className="prop-input w-full"
-                  value={description}
-                  onChange={(e) => setDescription(e.target.value)}
+                  value={state.description}
+                  onChange={(e) => set({ description: e.target.value })}
                   placeholder="e.g. Release track, team, or sprint goal"
                   rows={4}
                 />
@@ -155,8 +174,8 @@ export function SwimlaneForm({ slug, swimlane, isOpen, onClose, onSubmit, zIndex
                   <select
                     id="swimlane-milestone"
                     className="prop-input w-full"
-                    value={milestoneId ?? ""}
-                    onChange={(e) => setMilestoneId(e.target.value === "" ? null : e.target.value)}
+                    value={state.milestoneId ?? ""}
+                    onChange={(e) => set({ milestoneId: e.target.value === "" ? null : e.target.value })}
                   >
                     <option value="">None — loose sprint</option>
                     {milestones.map((m) => (
@@ -179,7 +198,7 @@ export function SwimlaneForm({ slug, swimlane, isOpen, onClose, onSubmit, zIndex
                       Optional
                     </span>
                   </label>
-                  <DatePicker value={startAt} onChange={setStartAt} className="w-full" />
+                  <DatePicker value={state.startAt} onChange={(v) => set({ startAt: v })} className="w-full" />
                   <p className="text-[11px] leading-4 text-lx-text-muted mt-1 font-body">
                     Stored as swimlanes.start_at YYYY-MM-DD. Validated start &le; due on save.
                   </p>
@@ -194,7 +213,7 @@ export function SwimlaneForm({ slug, swimlane, isOpen, onClose, onSubmit, zIndex
                       Optional
                     </span>
                   </label>
-                  <DatePicker value={dueAt} onChange={setDueAt} className="w-full" />
+                  <DatePicker value={state.dueAt} onChange={(v) => set({ dueAt: v })} className="w-full" />
                   <p className="text-[11px] leading-4 text-lx-text-muted mt-1 font-body">
                     Stored as swimlanes.due_at YYYY-MM-DD — date-only, no time-of-day. Empty = lane has no deadline.
                   </p>

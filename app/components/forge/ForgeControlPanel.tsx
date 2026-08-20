@@ -2,12 +2,14 @@ import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { Check, ChevronRight, Copy, LayoutGrid, Maximize, X } from "lucide-react";
 import { Link, useSearch } from "@tanstack/react-router";
+import type { UseQueryResult } from "@tanstack/react-query";
 import { cn } from "../ui/cn";
 import { parseApiDate } from "../../lib/date";
 import { copyToClipboard } from "../../lib/clipboard";
 import { useCancelForgeTask, useForgeTask, useForgeTaskHistory, useForgeTaskLogs, useForgeSkills, useProjects, useRuntimes } from "../../lib/queries";
-import { ForgeTaskLogModal, classifyLogLine } from "./ForgeTaskLogModal";
-import type { ForgeTask, ForgeTaskStatus } from "../../../shared/types";
+import { ForgeTaskLogModal } from "./ForgeTaskLogModal";
+import { classifyLogLine } from "../../lib/forge-log-line";
+import type { ForgeTask, ForgeTaskLog, ForgeTaskStatus, Runtime } from "../../../shared/types";
 
 const STATUS_ORDER: ForgeTaskStatus[] = ["queued", "running", "completed", "failed", "cancelled"];
 
@@ -255,6 +257,158 @@ function HistoryTable({ tasks, copiedId, onCopyId, onSelect, onCancel, runtimeNa
   );
 }
 
+function TaskDetailSlideover({ detail, detailProjectSlug, runtimes, logs, runtimeName, onClose, onExpandLogs }: {
+  detail: (ForgeTask & { projectName?: string }) | null;
+  detailProjectSlug: string | undefined;
+  runtimes: Runtime[];
+  logs: ForgeTaskLog[] | undefined;
+  runtimeName: (id: string | null) => string;
+  onClose: () => void;
+  onExpandLogs: () => void;
+}) {
+  return (
+    <>
+      <button type="button" className="slideover-overlay" onClick={onClose} aria-label="Close" />
+      <dialog open className="slideover" aria-modal="true" aria-label="Forge task details" style={{ width: 520 }}>
+        <div className="slideover-header border-b border-lx-border-subtle">
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-lx-text-muted font-body">
+              {detail ? `${detail.projectName || "Forge"} / ${detail.documentType === "wiki" ? "Wiki" : "Tasks"}` : "Forge"}
+            </span>
+          </div>
+          <button type="button" className="btn btn-ghost !w-8 !h-8 !p-0" onClick={onClose} aria-label="Close">
+            <X size={18} strokeWidth={1.5} />
+          </button>
+        </div>
+
+        {detail ? (
+          <>
+            <div className="px-4 pt-4">
+              <h2 className="slideover-title">
+                {detail.skillName || detail.skillId} · "{detail.documentTitle}"
+              </h2>
+              <div className="flex items-center gap-2 mt-1">
+                <span className="font-micro text-2xs text-lx-text-muted" style={{ textTransform: "uppercase", letterSpacing: "0.04em" }}>Task {detail.id.slice(0, 6)}</span>
+                <span className={cn("font-micro text-2xs", STATUS_META[detail.status].color)} style={{ textTransform: "uppercase", letterSpacing: "0.04em" }}>
+                  {STATUS_META[detail.status].label} · {durationLabel(detail)}
+                </span>
+              </div>
+            </div>
+
+            {/* Task meta */}
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px 16px", padding: "16px 16px 0" }}>
+              <div>
+                <span className="prop-label">Document</span>
+                <div className="text-sm text-lx-text-primary">{detail.documentTitle}</div>
+                <Link to={openDocumentPath(detail, detailProjectSlug)} style={{ fontSize: 12, color: "var(--lx-text-link)", textDecoration: "none" }} onClick={onClose}>
+                  Open document →
+                </Link>
+              </div>
+              <div>
+                <span className="prop-label">Skill</span>
+                <div className="text-sm text-lx-text-primary">{detail.skillName || detail.skillId}</div>
+              </div>
+              <div>
+                <span className="prop-label">Runtime</span>
+                <div className="text-sm text-lx-text-primary">{detail.runtimeId ? runtimeName(detail.runtimeId) : "—"}</div>
+                {detail.runtimeId && (
+                  <div className="font-mono text-2xs text-lx-text-muted">
+                    {(() => {
+                      const r = runtimes.find((x) => x.id === detail.runtimeId);
+                      return r ? `${r.provider} · ${r.model}` : "";
+                    })()}
+                  </div>
+                )}
+              </div>
+              <div>
+                <span className="prop-label">Timeline</span>
+                <div className="text-xs text-lx-text-secondary">{timelineLabel(detail)}</div>
+              </div>
+            </div>
+
+            {/* Activity log — live while queued/running, static once finished */}
+            <div className="slideover-body">
+              <div className="flex items-center justify-between" style={{ marginBottom: 8 }}>
+                <span className="font-micro text-2xs text-lx-text-muted" style={{ textTransform: "uppercase", letterSpacing: "0.04em" }}>Activity</span>
+                <button type="button" className="btn btn-ghost" style={{ height: 22, padding: "0 8px", fontSize: 11 }} onClick={onExpandLogs}>
+                  <Maximize size={11} strokeWidth={1.5} />
+                  <span style={{ marginLeft: 5 }}>Expand</span>
+                </button>
+              </div>
+              <div className="forge-task-log">
+                <div className="forge-task-log-head">
+                  {(() => {
+                    const logActive = detail.status === "queued" || detail.status === "running";
+                    const count = logs?.length ?? 0;
+                    return (
+                      <span className={cn("forge-task-log-live", !logActive && "is-static")}>
+                        {logActive ? "Live" : "Log"} · {count} {count === 1 ? "line" : "lines"}
+                      </span>
+                    );
+                  })()}
+                </div>
+                {(logs?.length ?? 0) === 0 ? (
+                  <div className="forge-task-log-empty">
+                    {detail.status === "queued" ? "Queued — waiting for a runtime to claim it." : "No activity recorded for this task."}
+                  </div>
+                ) : (
+                  <div className="forge-task-log-body">
+                    {(logs ?? []).map((line, i) => {
+                      const { level, display } = classifyLogLine(line);
+                      const isLast = i === (logs?.length ?? 0) - 1;
+                      return (
+                        <div key={line.id} className={cn("forge-task-log-line", level === "error" && "stderr", level === "warn" && "warn", (detail.status === "queued" || detail.status === "running") && isLast && "current")}>
+                          <span className="forge-task-log-dot" aria-hidden="true">{level === "info" ? "●" : "!"}</span>
+                          <span className="forge-task-log-time">{formatLogTime(line.createdAt)}</span>
+                          <span className="forge-task-log-msg">{display}</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+
+              {/* Result (completed) */}
+              {detail.status === "completed" && (
+                <>
+                  <div className="font-micro text-2xs text-lx-text-muted" style={{ textTransform: "uppercase", letterSpacing: "0.04em", margin: "16px 0 8px" }}>Result</div>
+                  <div style={{ background: "var(--lx-bg-success-subtle)", border: "1px solid rgba(74,222,128,0.25)", borderRadius: 6, padding: "12px 16px", fontSize: 14, lineHeight: "22px", color: "var(--lx-text-primary)", whiteSpace: "pre-wrap", fontFamily: "var(--lx-font-body)" }}>
+                    {detail.result || "No result returned."}
+                  </div>
+                </>
+              )}
+
+              {/* Failure details */}
+              {detail.status === "failed" && (
+                <>
+                  <div className="font-micro text-2xs text-lx-text-muted" style={{ textTransform: "uppercase", letterSpacing: "0.04em", margin: "16px 0 8px" }}>Error</div>
+                  <div className="border rounded-md p-3 text-[13px] leading-5 font-body whitespace-pre-wrap max-h-56 overflow-y-auto text-lx-text-danger bg-lx-bg-danger-subtle border-lx-border-default">
+                    {detail.error || "Task failed without an error message."}
+                  </div>
+                </>
+              )}
+            </div>
+          </>
+        ) : (
+          <div className="slideover-body flex items-center justify-center" style={{ flexDirection: "column", gap: 12 }}>
+            <div className="empty-state-icon">
+              <svg width={24} height={24} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="12" cy="12" r="10" />
+                <path d="M12 8v4M12 16h.01" />
+              </svg>
+            </div>
+            <div className="empty-state-title">Task not found</div>
+            <div className="empty-state-desc">This Forge task was deleted or is no longer visible.</div>
+            <button type="button" className="btn btn-primary" style={{ marginTop: 8 }} onClick={onClose}>
+              Close
+            </button>
+          </div>
+        )}
+      </dialog>
+    </>
+  );
+}
+
 export function ForgeControlPanel() {
   const portalTarget = typeof document !== "undefined" ? document.body : null;
   // ?task=<id> deep-link (navbar Forge dropdown rows) — opens the record.
@@ -405,145 +559,15 @@ export function ForgeControlPanel() {
       {/* Slideover: task record */}
       {selectedId !== null && portalTarget !== null &&
         createPortal(
-          <>
-            <button type="button" className="slideover-overlay" onClick={() => setSelectedId(null)} aria-label="Close" />
-            <dialog open className="slideover" aria-modal="true" aria-label="Forge task details" style={{ width: 520 }}>
-              <div className="slideover-header border-b border-lx-border-subtle">
-                <div className="flex items-center gap-2">
-                  <span className="text-xs text-lx-text-muted font-body">
-                    {detail ? `${detail.projectName || "Forge"} / ${detail.documentType === "wiki" ? "Wiki" : "Tasks"}` : "Forge"}
-                  </span>
-                </div>
-                <button type="button" className="btn btn-ghost !w-8 !h-8 !p-0" onClick={() => setSelectedId(null)} aria-label="Close">
-                  <X size={18} strokeWidth={1.5} />
-                </button>
-              </div>
-
-              {detail ? (
-                <>
-                  <div className="px-4 pt-4">
-                    <h2 className="slideover-title">
-                      {detail.skillName || detail.skillId} · "{detail.documentTitle}"
-                    </h2>
-                    <div className="flex items-center gap-2 mt-1">
-                      <span className="font-micro text-2xs text-lx-text-muted" style={{ textTransform: "uppercase", letterSpacing: "0.04em" }}>Task {detail.id.slice(0, 6)}</span>
-                      <span className={cn("font-micro text-2xs", STATUS_META[detail.status].color)} style={{ textTransform: "uppercase", letterSpacing: "0.04em" }}>
-                        {STATUS_META[detail.status].label} · {durationLabel(detail)}
-                      </span>
-                    </div>
-                  </div>
-
-                  {/* Task meta */}
-                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px 16px", padding: "16px 16px 0" }}>
-                    <div>
-                      <span className="prop-label">Document</span>
-                      <div className="text-sm text-lx-text-primary">{detail.documentTitle}</div>
-                      <Link to={openDocumentPath(detail, detailProjectSlug)} style={{ fontSize: 12, color: "var(--lx-text-link)", textDecoration: "none" }} onClick={() => setSelectedId(null)}>
-                        Open document →
-                      </Link>
-                    </div>
-                    <div>
-                      <span className="prop-label">Skill</span>
-                      <div className="text-sm text-lx-text-primary">{detail.skillName || detail.skillId}</div>
-                    </div>
-                    <div>
-                      <span className="prop-label">Runtime</span>
-                      <div className="text-sm text-lx-text-primary">{detail.runtimeId ? runtimeName(detail.runtimeId) : "—"}</div>
-                      {detail.runtimeId && (
-                        <div className="font-mono text-2xs text-lx-text-muted">
-                          {(() => {
-                            const r = runtimes.data?.find((x) => x.id === detail.runtimeId);
-                            return r ? `${r.provider} · ${r.model}` : "";
-                          })()}
-                        </div>
-                      )}
-                    </div>
-                    <div>
-                      <span className="prop-label">Timeline</span>
-                      <div className="text-xs text-lx-text-secondary">{timelineLabel(detail)}</div>
-                    </div>
-                  </div>
-
-                    {/* Activity log — live while queued/running, static once finished */}
-                    <div className="slideover-body">
-                      <div className="flex items-center justify-between" style={{ marginBottom: 8 }}>
-                        <span className="font-micro text-2xs text-lx-text-muted" style={{ textTransform: "uppercase", letterSpacing: "0.04em" }}>Activity</span>
-                        <button type="button" className="btn btn-ghost" style={{ height: 22, padding: "0 8px", fontSize: 11 }} onClick={() => setLogModalOpen(true)}>
-                          <Maximize size={11} strokeWidth={1.5} />
-                          <span style={{ marginLeft: 5 }}>Expand</span>
-                        </button>
-                      </div>
-                      <div className="forge-task-log">
-                        <div className="forge-task-log-head">
-                          {(() => {
-                            const logActive = detail.status === "queued" || detail.status === "running";
-                            const count = logs.data?.length ?? 0;
-                            return (
-                              <span className={cn("forge-task-log-live", !logActive && "is-static")}>
-                                {logActive ? "Live" : "Log"} · {count} {count === 1 ? "line" : "lines"}
-                              </span>
-                            );
-                          })()}
-                        </div>
-                        {(logs.data?.length ?? 0) === 0 ? (
-                          <div className="forge-task-log-empty">
-                            {detail.status === "queued" ? "Queued — waiting for a runtime to claim it." : "No activity recorded for this task."}
-                          </div>
-                        ) : (
-                          <div className="forge-task-log-body">
-                        {(logs.data ?? []).map((line, i) => {
-                          const { level, display } = classifyLogLine(line);
-                          const isLast = i === (logs.data?.length ?? 0) - 1;
-                          return (
-                            <div key={line.id} className={cn("forge-task-log-line", level === "error" && "stderr", level === "warn" && "warn", (detail.status === "queued" || detail.status === "running") && isLast && "current")}>
-                              <span className="forge-task-log-dot" aria-hidden="true">{level === "info" ? "●" : "!"}</span>
-                              <span className="forge-task-log-time">{formatLogTime(line.createdAt)}</span>
-                              <span className="forge-task-log-msg">{display}</span>
-                            </div>
-                          );
-                        })}
-                          </div>
-                        )}
-                      </div>
-
-                    {/* Result (completed) */}
-                    {detail.status === "completed" && (
-                      <>
-                        <div className="font-micro text-2xs text-lx-text-muted" style={{ textTransform: "uppercase", letterSpacing: "0.04em", margin: "16px 0 8px" }}>Result</div>
-                        <div style={{ background: "var(--lx-bg-success-subtle)", border: "1px solid rgba(74,222,128,0.25)", borderRadius: 6, padding: "12px 16px", fontSize: 14, lineHeight: "22px", color: "var(--lx-text-primary)", whiteSpace: "pre-wrap", fontFamily: "var(--lx-font-body)" }}>
-                          {detail.result || "No result returned."}
-                        </div>
-                      </>
-                    )}
-
-                    {/* Failure details */}
-                    {detail.status === "failed" && (
-                      <>
-                        <div className="font-micro text-2xs text-lx-text-muted" style={{ textTransform: "uppercase", letterSpacing: "0.04em", margin: "16px 0 8px" }}>Error</div>
-                        <div className="border rounded-md p-3 text-[13px] leading-5 font-body whitespace-pre-wrap max-h-56 overflow-y-auto text-lx-text-danger bg-lx-bg-danger-subtle border-lx-border-default">
-                          {detail.error || "Task failed without an error message."}
-                        </div>
-                      </>
-                    )}
-                  </div>
-                </>
-              ) : (
-                <div className="slideover-body flex items-center justify-center" style={{ flexDirection: "column", gap: 12 }}>
-                  <div className="empty-state-icon">
-                    <svg width={24} height={24} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round">
-                      <circle cx="12" cy="12" r="10" />
-                      <path d="M12 8v4M12 16h.01" />
-                    </svg>
-                  </div>
-                  <div className="empty-state-title">Task not found</div>
-                  <div className="empty-state-desc">This Forge task was deleted or is no longer visible.</div>
-                  <button type="button" className="btn btn-primary" style={{ marginTop: 8 }} onClick={() => setSelectedId(null)}>
-                    Close
-                  </button>
-                </div>
-              )}
-            </dialog>
-          </>,
+          <TaskDetailSlideover
+            detail={detail}
+            detailProjectSlug={detailProjectSlug}
+            runtimes={runtimes.data ?? []}
+            logs={logs.data}
+            runtimeName={runtimeName}
+            onClose={() => setSelectedId(null)}
+            onExpandLogs={() => setLogModalOpen(true)}
+          />,
           portalTarget
         )}
       </main>

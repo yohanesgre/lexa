@@ -66,32 +66,26 @@ export function TaskTitleInput(props: TaskTitleInputProps) {
   <div
     className="slideover-title"
     style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", border: "none", background: "none", padding: 0, textAlign: "left" }}
-    role="button"
-    tabIndex={0}
-    title="Click to edit"
-    onClick={() => {
-      setDraft(taskTitle);
-      setEditingTitle(true);
-    }}
-    onKeyDown={(e) => {
-      if (e.key === "Enter" || e.key === " ") {
-        e.preventDefault();
+  >
+    <button
+      type="button"
+      className="slideover-title-text"
+      style={{ border: "none", background: "none", padding: 0, textAlign: "left", color: "inherit", font: "inherit", cursor: "pointer" }}
+      title="Click to edit"
+      onClick={() => {
         setDraft(taskTitle);
         setEditingTitle(true);
-      }
-    }}
-  >
-    {taskKey && <span className="task-key">{taskKey}</span>}
-    <span>{taskTitle}</span>
+      }}
+    >
+      {taskKey && <span className="task-key">{taskKey}</span>}
+      <span>{taskTitle}</span>
+    </button>
     <button
       type="button"
       className="icon-btn"
       title="Copy key"
       aria-label="Copy key"
-      onClick={(e) => {
-        e.stopPropagation();
-        copyKey();
-      }}
+      onClick={copyKey}
     >
       ⧉
     </button>

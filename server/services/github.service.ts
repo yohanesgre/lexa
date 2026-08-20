@@ -323,7 +323,7 @@ export class GitHubService extends Effect.Service<GitHubService>()("Lexa/GitHubS
           if (columns.length === 0) {
             return yield* new ColumnNotFound({ id: "first" });
           }
-          const first = [...columns].sort((a, b) => a.position - b.position)[0];
+          const first = columns.toSorted((a, b) => a.position - b.position)[0];
           const { task } = yield* taskService.create(actor, {
             projectId: project.id,
             columnId: first.id,

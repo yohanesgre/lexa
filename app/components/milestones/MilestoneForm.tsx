@@ -17,7 +17,7 @@ export function MilestoneForm({ milestone, isOpen, onClose, onSubmit, zIndex = 7
   const isEdit = !!milestone;
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
-  const [dueAt, setDueAt] = useState<string | null>(milestone?.dueAt ?? null);
+  const [dueAt, setDueAt] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const onEscape = useEffectEvent((event: KeyboardEvent) => {
@@ -35,15 +35,20 @@ export function MilestoneForm({ milestone, isOpen, onClose, onSubmit, zIndex = 7
     return () => document.removeEventListener("keydown", handleKeyDown);
   }, [isOpen]);
 
-  // Re-sync fields when opening — the form stays mounted between opens, so
-  // state must be seeded from the target entity each time (create = empty).
-  useEffect(() => {
-    if (!isOpen) return;
-    setName(milestone?.name ?? "");
-    setDescription(milestone?.description ?? "");
-    setDueAt(milestone?.dueAt ?? null);
-    setError(null);
-  }, [isOpen, milestone]);
+  // Seed fields when the form opens — it stays mounted between opens, so
+  // state is re-seeded from the target entity each time (create = empty).
+  // Adjusted during render (not in an effect) so a stale close→reopen with a
+  // different milestone never carries over previous values.
+  const [prevKey, setPrevKey] = useState<{ milestone: Milestone | null | undefined; isOpen: boolean }>({ milestone, isOpen });
+  if (prevKey.milestone !== milestone || prevKey.isOpen !== isOpen) {
+    setPrevKey({ milestone, isOpen });
+    if (isOpen) {
+      setName(milestone?.name ?? "");
+      setDescription(milestone?.description ?? "");
+      setDueAt(milestone?.dueAt ?? null);
+      setError(null);
+    }
+  }
 
   if (!isOpen) return null;
 

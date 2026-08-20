@@ -309,7 +309,7 @@ export class TaskService extends Effect.Service<TaskService>()("Lexa/TaskService
             const label = (optionId: string) => opts.find((o) => o.id === optionId)?.label ?? optionId;
             rows.push({ type: "field_changed", message: msg.typeChanged(label(task.type), label(input.type)) });
           }
-          if (input.assignees !== undefined && [...input.assignees].sort().join("\u0000") !== [...task.assignees].sort().join("\u0000")) {
+          if (input.assignees !== undefined && input.assignees.toSorted().join("\u0000") !== task.assignees.toSorted().join("\u0000")) {
             rows.push({ type: "field_changed", message: msg.assigneesUpdated(actor.label) });
           }
           if (input.dueAt !== undefined && input.dueAt !== task.dueAt) {

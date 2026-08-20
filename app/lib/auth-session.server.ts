@@ -9,6 +9,11 @@ const AUTH_BASE = "/api/auth";
 // resolves the real state.
 export async function fetchSessionServer(): Promise<SessionResponse> {
   try {
+    // The literal specifier form trips vite's client dep optimizer (it
+    // statically scans literal imports and tries to pre-bundle
+    // @tanstack/react-start-server, which references the unresolved
+    // #tanstack-router-entry virtual). The variable-held form is opaque to the
+    // scanner, so this server-only module stays out of the client graph.
     const serverPkg = "@tanstack/react-start-server";
     let url = `${AUTH_BASE}/get-session`;
     const headers: Record<string, string> = {};

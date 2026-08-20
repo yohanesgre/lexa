@@ -1,7 +1,8 @@
 import { useState } from "react";
 import { Plus, RotateCcw, Settings, Trash2 } from "lucide-react";
 import { useRemoveRuntime } from "../../lib/queries";
-import { RemoveRuntimeModal, formatRelative } from "./SettingsSections";
+import { RemoveRuntimeModal } from "./SettingsSections";
+import { formatRelative } from "../../lib/relative-time";
 import { RuntimeSetupModal } from "../forge/RuntimeSetupModal";
 import { RuntimeEditModal } from "../forge/RuntimeEditModal";
 import { RuntimeRestartModal } from "../forge/RuntimeRestartModal";
