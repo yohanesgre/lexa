@@ -2225,6 +2225,27 @@
     border-bottom: 1.5px solid var(--lx-text-inverse);
     transform: rotate(-45deg) translateY(-1px);
   }
+  .radio {
+    width: 14px;
+    height: 14px;
+    border: 1px solid var(--lx-border-strong);
+    border-radius: 9999px;
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .radio.checked {
+    background: var(--lx-border-focus);
+    border-color: var(--lx-border-focus);
+  }
+  .radio.checked::after {
+    content: "";
+    width: 5px;
+    height: 5px;
+    border-radius: 9999px;
+    background: var(--lx-text-inverse);
+  }
 
   /* Wiki layout + tree + prose (ported from wireframes.css) */
   .wiki-layout {
