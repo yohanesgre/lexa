@@ -1,6 +1,8 @@
 import { useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import { useSetPassword } from "../../lib/queries";
+import { Field } from "../ui/Field";
+import { TextInput } from "../ui/TextInput";
 
 // Shared accept form for both token links: admin-issued set-password links
 // (/set-password?token=…) and workspace invitation links (/invite?token=…).
@@ -51,33 +53,13 @@ export function SetPasswordForm({ token }: { token: string }) {
     <form onSubmit={handleSubmit} className="card-panel" style={{ boxShadow: "var(--lx-shadow-sm)" }}>
       <p className="text-sm text-lx-text-secondary mb-4" style={{ marginTop: 0 }}>Set a password for your account. Minimum 8 characters.</p>
 
-      <div className="field" style={{ marginBottom: 12 }}>
-        <label className="field-label" htmlFor="sp-password">Password</label>
-        <input
-          id="sp-password"
-          className="prop-input w-full"
-          type="password"
-          placeholder="••••••••••••"
-          autoComplete="new-password"
-          value={password}
-          onChange={(e) => { setPasswordValue(e.target.value); setConfirmError(null); }}
-        />
-        <div className={tooShort ? "field-hint-danger" : "field-hint"}>{tooShort ? "At least 8 characters." : "At least 8 characters."}</div>
-      </div>
+      <Field label="Password" htmlFor="sp-password" hint="At least 8 characters." error={tooShort ? "At least 8 characters." : undefined} className="field mb-3">
+        <TextInput id="sp-password" type="password" placeholder="••••••••••••" autoComplete="new-password" value={password} onChange={(v) => { setPasswordValue(v); setConfirmError(null); }} />
+      </Field>
 
-      <div className="field" style={{ marginBottom: 16 }}>
-        <label className="field-label" htmlFor="sp-confirm">Confirm password</label>
-        <input
-          id="sp-confirm"
-          className="prop-input w-full"
-          type="password"
-          placeholder="••••••••••••"
-          autoComplete="new-password"
-          value={confirm}
-          onChange={(e) => { setConfirm(e.target.value); setConfirmError(null); }}
-        />
-        {confirmError && <div className="field-hint-danger">{confirmError}</div>}
-      </div>
+      <Field label="Confirm password" htmlFor="sp-confirm" error={confirmError ?? undefined} className="field mb-4">
+        <TextInput id="sp-confirm" type="password" placeholder="••••••••••••" autoComplete="new-password" value={confirm} onChange={(v) => { setConfirm(v); setConfirmError(null); }} />
+      </Field>
 
       <button type="submit" className="btn btn-primary w-full" style={{ height: 36 }} disabled={!canSubmit || setPassword.isPending}>
         {setPassword.isPending ? "Setting password…" : "Set password"}
