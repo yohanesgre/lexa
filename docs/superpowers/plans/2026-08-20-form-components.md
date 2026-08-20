@@ -178,15 +178,15 @@ import { createContext, useContext, useId } from "react";
 export interface FieldContextValue {
   error: React.ReactNode;
   invalid: boolean;
-  descId: string;
+  descId: string | undefined;
 }
 
 const FieldContext = createContext<FieldContextValue | null>(null);
 
 export function useFieldContext(): FieldContextValue {
-  const value = useContext(FieldContext);
-  if (!value) throw new Error("Field context missing");
-  return value;
+  // Safe default outside a Field so standalone controls can pass `invalid`
+  // directly (human ruling: context defaults, no throw).
+  return useContext(FieldContext) ?? { error: undefined, invalid: false, descId: undefined };
 }
 
 export interface FieldProps {
@@ -225,7 +225,7 @@ export function Field({ label, htmlFor, hint, error, children, className }: Fiel
 }
 ```
 
-Note: `useId()` gives each Field's hint/error a unique `id`; controls reference it via `aria-describedby`. TextInput must receive the desc id through the context so multiple hinted Fields in one form don't collide. The FieldContext carries `{ error, invalid, descId }` — extend the context value type and the `useFieldContext` return type accordingly (`{ error: React.ReactNode; invalid: boolean; descId: string }`), and have TextInput use `field.descId` for `aria-describedby`.
+Note: `useId()` gives each Field's hint/error a unique `id`; controls reference it via `aria-describedby`. `descId` is `string | undefined` — a standalone control outside a `Field` gets `undefined` and omits the attribute. Hint and error are mutually exclusive per render (error wins); the "hint always visible" pattern (SetPasswordForm) passes a static `hint` plus a conditional `error`, so the message shows muted normally and danger when the error is set.
 
 - [ ] **Step 4: Implement TextInput**
 
@@ -251,14 +251,14 @@ export function TextInput({ value, onChange, invalid, className, ...rest }: Text
       value={value}
       onChange={(e) => onChange(e.target.value)}
       aria-invalid={isInvalid || undefined}
-      aria-describedby={field.descId}
+      aria-describedby={field.descId ?? rest["aria-describedby"]}
       style={isInvalid ? { borderColor: "var(--lx-text-danger)" } : rest.style}
     />
   );
 }
 ```
 
-Note: `aria-describedby={field.descId}` always points at the Field's hint/error element (which always exists when inside a `Field`). For standalone use outside a `Field`, `useFieldContext` throws — so standalone usage must pass `invalid` and omit `aria-describedby` by rendering outside a Field (acceptable: the control just has no hint).
+Note: standalone use outside a `Field` works — `useFieldContext` returns a safe default (`descId: undefined`), so the caller's `aria-describedby` (if any) survives, and the `invalid` prop carries the danger border.
 
 - [ ] **Step 5: Run test to verify it passes**
 
@@ -580,7 +580,7 @@ git commit -m "refactor: CreateProjectModal uses form components"
 The password field's conditional hint (`tooShort ? danger : normal`, both branches identical text "At least 8 characters.") becomes `error={tooShort ? "At least 8 characters." : undefined}`. Confirm field keeps the identical text and behavior.
 
 ```tsx
-<Field label="Password" htmlFor="sp-password" error={tooShort ? "At least 8 characters." : undefined}>
+<Field label="Password" htmlFor="sp-password" hint="At least 8 characters." error={tooShort ? "At least 8 characters." : undefined}>
   <TextInput id="sp-password" type="password" placeholder="••••••••••••" autoComplete="new-password" value={password} onChange={(v) => { setPasswordValue(v); setConfirmError(null); }} />
 </Field>
 
@@ -588,6 +588,8 @@ The password field's conditional hint (`tooShort ? danger : normal`, both branch
   <TextInput id="sp-confirm" type="password" placeholder="••••••••••••" autoComplete="new-password" value={confirm} onChange={(v) => { setConfirm(v); setConfirmError(null); }} />
 </Field>
 ```
+
+Note: `hint` + conditional `error` keeps the "At least 8 characters." message always visible (muted normally, danger when too short) — per human ruling.
 
 - [ ] **Step 2: Update imports and verify behavior**
 
@@ -644,7 +646,7 @@ Keep the read-only treatment (disabled + opacity) — use a plain `<input>` insi
   <TextInput id="pw-current" type="password" placeholder="••••••••••••" autoComplete="current-password" value={current} onChange={(v) => { setCurrent(v); setError(null); }} />
 </Field>
 
-<Field label="New password" htmlFor="pw-new" error={tooShort ? "At least 8 characters." : undefined}>
+<Field label="New password" htmlFor="pw-new" hint="At least 8 characters." error={tooShort ? "At least 8 characters." : undefined}>
   <TextInput id="pw-new" type="password" placeholder="••••••••••••" autoComplete="new-password" value={next} onChange={(v) => { setNext(v); setError(null); }} />
 </Field>
 
