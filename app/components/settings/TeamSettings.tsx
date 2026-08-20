@@ -121,6 +121,15 @@ function TeamProfileSection({ team }: { team: Team }) {
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
 
+  // Team switch while mounted → re-seed the editable name (render-time adjust).
+  const [prevTeamId, setPrevTeamId] = useState(team.id);
+  if (prevTeamId !== team.id) {
+    setPrevTeamId(team.id);
+    setName(team.name);
+    setSaved(false);
+    setError(null);
+  }
+
   const handleSave = async () => {
     const trimmed = name.trim();
     if (!trimmed) return;
@@ -270,6 +279,7 @@ function TeamMembersSection({ teamId, isSuperadmin }: { teamId: string; isSupera
                         className="prop-input"
                         value={m.role}
                         disabled={soleOwner}
+                        aria-label={`Role for ${m.name ?? m.email}`}
                         title={soleOwner ? "Sole owner — cannot be demoted" : undefined}
                         onChange={(e) => updateRole.mutate({ userId: m.userId, role: e.target.value as TeamMemberRole })}
                         style={{ height: 28, fontSize: 12, padding: "0 24px 0 8px", width: "100%" }}

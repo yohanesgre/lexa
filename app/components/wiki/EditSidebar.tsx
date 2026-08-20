@@ -113,7 +113,15 @@ export function EditSidebar({
                   <div
                     key={rev.id}
                     className={cn("history-item", isActive && "active")}
+                    role="button"
+                    tabIndex={0}
                     onClick={() => onSelectRevision(rev.id)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault();
+                        onSelectRevision(rev.id);
+                      }
+                    }}
                   >
                     <div className="flex flex-col gap-1">
                       <span className={cn("text-sm font-body text-lx-text-primary", isActive && "font-medium")}>

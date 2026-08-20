@@ -3,6 +3,7 @@ import { Check, Copy, X } from "lucide-react";
 import { cn } from "../ui/cn";
 import { copyToClipboard } from "../../lib/clipboard";
 import { parseApiDate } from "../../lib/date";
+import { classifyLogLine } from "../../lib/forge-log-line";
 import type { ForgeTask, ForgeTaskLog, ForgeTaskStatus, Runtime } from "../../../shared/types";
 
 const STATUS_META: Record<ForgeTaskStatus, { label: string; color: string }> = {
@@ -27,27 +28,6 @@ function formatLogTime(iso: string): string {
 // "HH:MM:SS message" per line — what the Copy button puts on the clipboard.
 function logToText(lines: ForgeTaskLog[]): string {
   return lines.map((l) => `${formatLogTime(l.createdAt)} ${l.message}`).join("\n");
-}
-
-// Line presentation: the daemon classifies severity ONCE at write time
-// (shared/forge-log.ts) and stores stream + level on the row — the UI renders
-// the stored level and never re-classifies. Fallback: pre-v2 rows default to
-// stream 'out' / level 'info', so rows that still carry the old [stderr]
-// marker (a legacy stderr line with a default level) go through the shared
-// classifier. The [stderr]/▸ transport markers are stripped visually either
-// way; Copy keeps the raw message.
-import { classifyLogLine as classifyFallback, type LogLevel } from "../../../shared/forge-log";
-const STDERR_STRIP = "[stderr]";
-export function classifyLogLine(line: {
-  message: string;
-  stream: "out" | "err";
-  level: "info" | "warn" | "error";
-}): { level: "info" | "warn" | "error"; display: string } {
-  const isStderr = line.message.startsWith(STDERR_STRIP);
-  const display = isStderr ? line.message.slice(STDERR_STRIP.length).trimStart() : line.message.replace(/^\u25B8\s*/, "");
-  const legacy = isStderr && line.level === "info" && line.stream === "out";
-  const level: LogLevel = legacy ? classifyFallback("err", line.message).level : line.level;
-  return { level, display };
 }
 
 function durationLabel(task: ForgeTask): string {

@@ -58,7 +58,7 @@ export function renderInline(
       const src = safeHref(node.attrs?.src);
       if (!src) return null;
       const alt = typeof node.attrs?.alt === "string" ? node.attrs.alt : "";
-      return <img key={nodeKey} src={src} alt={alt} loading="lazy" />;
+      return <img key={`${nodeKey}-${src}`} src={src} alt={alt} loading="lazy" />;
     }
     return renderNode(node, nodeKey, variant);
   });

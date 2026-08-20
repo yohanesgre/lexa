@@ -184,11 +184,16 @@ function LinkedReposSection({ slug }: { slug: string }) {
   // GitHub App search results (query >= 2 chars), excluding already-linked.
   const githubResults = (search.data ?? []).filter((name) => !alreadyLinked.has(name));
 
-  const suggestions = [...workspaceSuggestions, ...githubResults.filter((n) => !workspaceSuggestions.includes(n))];
+  const suggestionSet = useMemo(() => new Set(workspaceSuggestions), [workspaceSuggestions]);
+  const suggestions = [...workspaceSuggestions, ...githubResults.filter((n) => !suggestionSet.has(n))];
 
-  useEffect(() => {
+  // Reset the dropdown highlight when the suggestion list length changes —
+  // adjusted during render (React docs pattern), not in an effect.
+  const [prevLen, setPrevLen] = useState(suggestions.length);
+  if (prevLen !== suggestions.length) {
+    setPrevLen(suggestions.length);
     setHighlight(0);
-  }, [suggestions.length]);
+  }
 
   useEffect(() => {
     function handleClick(e: MouseEvent) { if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) setDropdownOpen(false); }

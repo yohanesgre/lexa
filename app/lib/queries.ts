@@ -13,8 +13,12 @@ function toastMessage(err: unknown): string {
   return e.message || "Something went wrong";
 }
 
-export function useProjects() {
-  return useQuery({ queryKey: ["projects"], queryFn: () => api.listProjects().then((r) => r.data) });
+export function useProjects(opts?: { enabled?: boolean }) {
+  return useQuery({
+    queryKey: ["projects"],
+    queryFn: () => api.listProjects().then((r) => r.data),
+    enabled: opts?.enabled ?? true,
+  });
 }
 
 export function useDashboard() {
@@ -135,25 +139,6 @@ export function useGithubIssueSearch(slug: string, repo: string, q: string) {
     queryFn: () => api.listGithubIssues(slug, repo, q || undefined).then((r) => r.data),
     enabled: !!slug && !!repo,
     staleTime: 30_000,
-  });
-}
-
-export function useCreateTaskFromIssue(slug: string) {
-  const qc = useQueryClient();
-  const toast = useToast();
-  return useMutation({
-    mutationFn: ({ repo, issueNumber }: { repo: string; issueNumber: number }) => api.createTaskFromIssue(slug, repo, issueNumber),
-    onSuccess: ({ data: task, activity }) => {
-      qc.setQueryData(["board", slug, false], (old: Board | undefined) => {
-        if (!old) return old;
-        return { ...old, tasks: [...old.tasks, task] };
-      });
-      if (activity?.length) prependActivity(qc, slug, task.id, activity.map((a) => ({ kind: "event" as const, ...a })));
-      toast.push("success", "Task created from issue");
-    },
-    onError: (err) => {
-      toast.push("error", "Failed to create task from issue", toastMessage(err));
-    },
   });
 }
 

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useLayoutEffect, useRef, useState } from "react";
 import { cn } from "./ui/cn";
 
 interface ProjectDescriptionProps {
@@ -11,16 +11,16 @@ export function ProjectDescription({ description }: ProjectDescriptionProps) {
   const [overflows, setOverflows] = useState(false);
   const ref = useRef<HTMLParagraphElement>(null);
 
-  // New description (settings save) → collapse again and re-measure.
-  useEffect(() => {
+  // New description (settings save) → collapse again. Re-measure in the
+  // layout effect so the read happens after the DOM updates.
+  const [prevText, setPrevText] = useState(text);
+  if (prevText !== text) {
+    setPrevText(text);
     setExpanded(false);
-    setOverflows(false);
-  }, [text]);
-
-  useEffect(() => {
-    if (expanded) return;
+  }
+  useLayoutEffect(() => {
     const el = ref.current;
-    if (el) setOverflows(el.scrollHeight > el.clientHeight);
+    if (el && !expanded) setOverflows(el.scrollHeight > el.clientHeight);
   }, [text, expanded]);
 
   if (!text) {

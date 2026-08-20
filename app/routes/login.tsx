@@ -12,17 +12,14 @@ export const Route = createFileRoute("/login")({
 function LoginPage() {
   const { data: session, isLoading } = useSession();
   const navigate = useNavigate();
-  const { redirect: redirectParam } = Route.useSearch();
   const signIn = useSignIn();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
 
-  if (isLoading) return null;
-  if (session?.user) return <Navigate to="/" replace />;
-
-  const target = (redirectParam || "/").startsWith("/") ? redirectParam! : "/";
-
+  // Fresh sign-in completes → always land on home. Simpler and reliable:
+  // avoids dynamic-path navigation entirely (the ?redirect= param stays in
+  // the URL but home is the single landing point).
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!email.trim() || !password) return;
@@ -31,7 +28,7 @@ function LoginPage() {
       { email: email.trim(), password },
       {
         onSuccess: () => {
-          navigate({ to: target as never });
+          void navigate({ to: "/" });
         },
         onError: (err) => {
           setError(err.message || "Invalid email or password.");
@@ -39,6 +36,10 @@ function LoginPage() {
       }
     );
   };
+
+  if (isLoading) return null;
+  // Already signed in — leave the login page for home.
+  if (session?.user) return <Navigate to="/" replace />;
 
   return (
     <main style={{ minHeight: "100vh", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: 24 }}>
@@ -83,7 +84,7 @@ function LoginPage() {
             />
           </div>
 
-          <button className="btn btn-primary w-full" style={{ height: 36 }} disabled={signIn.isPending}>
+          <button type="submit" className="btn btn-primary w-full" style={{ height: 36 }} disabled={signIn.isPending}>
             {signIn.isPending ? "Logging in…" : "Log in"}
           </button>
 

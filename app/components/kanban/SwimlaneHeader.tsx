@@ -320,9 +320,11 @@ export function SwimlaneHeader({ slug, lane, count, collapsed = false, onToggle,
   );
 }
 
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
 function formatShortDate(iso: string): string {
   const [y, m, d] = iso.split("-").map(Number);
-  return new Date(Date.UTC(y, m - 1, d)).toLocaleDateString("en-US", { month: "short", day: "numeric" });
+  return `${MONTHS[m - 1]} ${d}`;
 }
 
 const BOLD_RE = /\*\*(.+?)\*\*/g;const ITALIC_RE = /(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)/g;

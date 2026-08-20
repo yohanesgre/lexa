@@ -91,6 +91,9 @@ function cfFetch(token: string, path: string, init?: RequestInit): Effect.Effect
           ...(init?.headers ?? {}),
         },
       });
+      if (!res.ok) {
+        throw new CfApiError({ status: res.status, cfMessage: `HTTP ${res.status}`, code: undefined });
+      }
       const body = (await res.json()) as CfEnvelope;
       if (!body.success) {
         const e = body.errors?.[0];

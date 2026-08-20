@@ -1,10 +1,17 @@
 import { useEffect, useState } from "react";
 import { useSession, useSessions, useRevokeSession, useUpdateMyName, useChangePassword } from "../../lib/queries";
-import { formatRelative } from "./SettingsSections";
+import { formatRelative } from "../../lib/relative-time";
 import type { SessionInfo } from "../../../shared/types";
 
 // /settings/me — EVERY signed-in user. Own data only; nothing here is gated
 // by role.
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+function shortDate(iso: string): string {
+  const d = new Date(iso);
+  return `${MONTHS[d.getMonth()]} ${d.getDate()}`;
+}
+
 export function MeSettings() {
   const { data: session } = useSession();
   const user = session?.user;
@@ -146,6 +153,8 @@ function PasswordSection() {
 function SessionsSection({ currentSessionId }: { currentSessionId: string | null }) {
   const { data: sessions = [], isLoading, isError } = useSessions();
   const revoke = useRevokeSession();
+  // One "now" per render so every session row shares the same expiry baseline.
+  const nowMs = Date.now();
 
   return (
     <section className="mb-8">
@@ -170,7 +179,10 @@ function SessionsSection({ currentSessionId }: { currentSessionId: string | null
             <tbody>
               {sessions.map((s: SessionInfo) => {
                 const isCurrent = s.id === currentSessionId;
-                const expired = s.expiresAt && new Date(s.expiresAt).getTime() < Date.now();
+                const expired = s.expiresAt && new Date(s.expiresAt).getTime() < nowMs;
+                const expiresLabel = s.expiresAt && !expired
+                  ? shortDate(s.expiresAt)
+                  : null;
                 return (
                   <tr key={s.id} style={expired ? { opacity: 0.5 } : undefined}>
                     <td>
@@ -182,7 +194,7 @@ function SessionsSection({ currentSessionId }: { currentSessionId: string | null
                     </td>
                     <td className="font-mono text-xs text-lx-text-secondary">{s.ipAddress ?? "—"}</td>
                     <td className="text-xs text-lx-text-secondary">{s.createdAt ? formatRelative(s.createdAt) : "—"}</td>
-                    <td className="text-xs text-lx-text-secondary">{s.expiresAt ? (expired ? <span className="text-lx-text-muted">expired</span> : new Date(s.expiresAt).toLocaleDateString("en-US", { month: "short", day: "numeric" })) : "—"}</td>
+                    <td className="text-xs text-lx-text-secondary">{s.expiresAt ? (expired ? <span className="text-lx-text-muted">expired</span> : expiresLabel) : "—"}</td>
                     <td style={{ textAlign: "right" }}>
                       {isCurrent ? (
                         <span className="text-xs text-lx-text-muted">Log out instead</span>

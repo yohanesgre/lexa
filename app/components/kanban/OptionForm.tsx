@@ -37,14 +37,19 @@ export function OptionForm({ kind, option, isOpen, onClose, onSubmit, zIndex = 8
     return () => document.removeEventListener("keydown", handleKeyDown);
   }, [isOpen]);
 
-  // Re-sync fields when opening — the form stays mounted between opens, so
-  // state must be seeded from the target entity each time (create = empty).
-  useEffect(() => {
-    if (!isOpen) return;
-    setLabel(option?.label ?? "");
-    setColor(option?.color ?? "#F0C040");
-    setError(null);
-  }, [isOpen, option, kind]);
+  // Seed fields when the form opens — it stays mounted between opens, so
+  // state is re-seeded from the target entity each time (create = empty).
+  // Adjusted during render (not in an effect) so a stale close→reopen with a
+  // different option never carries over previous values.
+  const [prevKey, setPrevKey] = useState<{ option: FieldOption | null | undefined; isOpen: boolean; kind: "priority" | "type" }>({ option, isOpen, kind });
+  if (prevKey.option !== option || prevKey.isOpen !== isOpen || prevKey.kind !== kind) {
+    setPrevKey({ option, isOpen, kind });
+    if (isOpen) {
+      setLabel(option?.label ?? "");
+      setColor(option?.color ?? "#F0C040");
+      setError(null);
+    }
+  }
 
   if (!isOpen) return null;
 
