@@ -1,10 +1,18 @@
 import { createFileRoute, Navigate } from "@tanstack/react-router";
+import { listWikiPages } from "../../../lib/api";
 import { WikiLayout } from "../../../components/wiki/WikiLayout";
 import { WikiEmptyState } from "../../../components/wiki/WikiEmptyState";
 import { firstRootPage } from "../../../lib/wiki";
 import type { WikiPageMeta } from "../../../../shared/types";
 
 export const Route = createFileRoute("/$slug/wiki/")({
+  loader: async ({ context, params }) => {
+    const { slug } = params;
+    await context.queryClient.prefetchQuery({
+      queryKey: ["wiki", slug],
+      queryFn: () => listWikiPages(slug).then((r) => r.data),
+    });
+  },
   component: WikiIndexPage,
 });
 

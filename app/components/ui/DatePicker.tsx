@@ -11,6 +11,7 @@ interface DatePickerProps {
 }
 
 const WEEKDAYS = ["S", "M", "T", "W", "T", "F", "S"];
+const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 
 function toISODate(y: number, m: number, d: number): string {
   return `${y}-${String(m + 1).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
@@ -28,7 +29,7 @@ export function DatePicker({ value, onChange, placeholder = "No due date", class
     return { year: base.getFullYear(), month: base.getMonth() };
   });
   const rootRef = useRef<HTMLDivElement>(null);
-  const popoverRef = useRef<HTMLDivElement>(null);
+  const popoverRef = useRef<HTMLDialogElement>(null);
   const [popoverStyle, setPopoverStyle] = useState<React.CSSProperties>({});
 
   useEffect(() => {
@@ -93,7 +94,7 @@ export function DatePicker({ value, onChange, placeholder = "No due date", class
   }
 
   const today = isoToday();
-  const monthLabel = new Date(view.year, view.month, 1).toLocaleDateString("en-US", { month: "long", year: "numeric" });
+  const monthLabel = `${MONTHS[view.month]} ${view.year}`;
 
   const prevMonth = () => {
     setView((v) => (v.month === 0 ? { year: v.year - 1, month: 11 } : { year: v.year, month: v.month - 1 }));
@@ -119,7 +120,13 @@ export function DatePicker({ value, onChange, placeholder = "No due date", class
       </button>
       {open &&
         createPortal(
-          <div ref={popoverRef} className="datepicker-popover" role="dialog" aria-label="Pick a date" style={popoverStyle}>
+          <dialog
+            ref={popoverRef}
+            open
+            className="datepicker-popover"
+            aria-label="Pick a date"
+            style={popoverStyle}
+          >
           <div className="datepicker-head">
             <button type="button" className="icon-btn" aria-label="Previous month" onClick={prevMonth}>
               <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
@@ -140,13 +147,13 @@ export function DatePicker({ value, onChange, placeholder = "No due date", class
           </div>
           <div className="datepicker-grid">
             {cells.map((cell, i) => {
-              if (cell.day === 0) return <span key={i} className="datepicker-day empty" />;
+              if (cell.day === 0) return <span key={`empty-${i}`} className="datepicker-day empty" />;
               const iso = toISODate(view.year, view.month, cell.day);
               const isToday = iso === today;
               const isSelected = iso === value;
               return (
                 <button
-                  key={i}
+                  key={iso}
                   type="button"
                   className={cn(
                     "datepicker-day",
@@ -195,7 +202,7 @@ export function DatePicker({ value, onChange, placeholder = "No due date", class
               </button>
             )}
           </div>
-          </div>,
+          </dialog>,
           document.body
         )}
     </div>

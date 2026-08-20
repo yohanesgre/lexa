@@ -34,15 +34,44 @@ const requiredFieldOptions = [
 
 type RequiredFieldValue = (typeof requiredFieldOptions)[number]["value"];
 
+interface ColumnFormState {
+  name: string;
+  color: string | null;
+  wipLimit: string;
+  requiredFields: RequiredFieldValue[];
+  githubState: "open" | "closed" | null;
+  isDone: boolean;
+}
+
+const EMPTY_STATE: ColumnFormState = {
+  name: "",
+  color: null,
+  wipLimit: "",
+  requiredFields: [],
+  githubState: null,
+  isDone: false,
+};
+
+function seedState(column: Column | null | undefined): ColumnFormState {
+  return {
+    name: column?.name ?? "",
+    color: column?.color ?? null,
+    wipLimit: column?.wipLimit != null ? String(column.wipLimit) : "",
+    requiredFields: (column?.requiredFields ?? []).filter(
+      (f): f is RequiredFieldValue => requiredFieldOptions.some((o) => o.value === f)
+    ),
+    githubState: column?.githubState ?? null,
+    isDone: column?.isDone ?? false,
+  };
+}
+
 export function ColumnForm({ column, isOpen, onClose, onSubmit, zIndex = 70 }: ColumnFormProps) {
   const isEdit = !!column;
-  const [name, setName] = useState("");
-  const [color, setColor] = useState<string | null>(null);
-  const [wipLimit, setWipLimit] = useState("");
-  const [requiredFields, setRequiredFields] = useState<RequiredFieldValue[]>([]);
-  const [githubState, setGithubState] = useState<"open" | "closed" | null>(null);
-  const [isDone, setIsDone] = useState(false);
+  const [state, setState] = useState<ColumnFormState>(EMPTY_STATE);
   const [error, setError] = useState<string | null>(null);
+
+  const set = (patch: Partial<ColumnFormState> | ((s: ColumnFormState) => ColumnFormState)) =>
+    setState((s) => (typeof patch === "function" ? patch(s) : { ...s, ...patch }));
 
   const onCloseRef = useRef(onClose);
   useEffect(() => {
@@ -61,33 +90,29 @@ export function ColumnForm({ column, isOpen, onClose, onSubmit, zIndex = 70 }: C
     return () => document.removeEventListener("keydown", handleKeyDown);
   }, [isOpen]);
 
-  // Re-sync fields when opening — the form stays mounted between opens, so
-  // state must be seeded from the target entity each time (create = empty).
-  useEffect(() => {
-    if (!isOpen) return;
-    setName(column?.name ?? "");
-    setColor(column?.color ?? null);
-    setWipLimit(column?.wipLimit != null ? String(column.wipLimit) : "");
-    setRequiredFields(
-      (column?.requiredFields ?? []).filter(
-        (f): f is RequiredFieldValue => requiredFieldOptions.some((o) => o.value === f)
-      )
-    );
-    setGithubState(column?.githubState ?? null);
-    setIsDone(column?.isDone ?? false);
-    setError(null);
-  }, [isOpen, column]);
+  // Seed fields when the form opens — it stays mounted between opens, so
+  // state is re-seeded from the target entity each time (create = empty).
+  // Adjusted during render (not in an effect) so a stale close→reopen with a
+  // different column never carries over previous values.
+  const [prevKey, setPrevKey] = useState<{ column: Column | null | undefined; isOpen: boolean }>({ column, isOpen });
+  if (prevKey.column !== column || prevKey.isOpen !== isOpen) {
+    setPrevKey({ column, isOpen });
+    if (isOpen) {
+      setState(seedState(column));
+      setError(null);
+    }
+  }
 
   if (!isOpen) return null;
 
   const handleSubmit = (event: React.FormEvent) => {
     event.preventDefault();
-    const trimmedName = name.trim();
+    const trimmedName = state.name.trim();
     if (trimmedName === "") {
       setError("Name is required");
       return;
     }
-    const parsedWip = wipLimit.trim() === "" ? null : Number(wipLimit);
+    const parsedWip = state.wipLimit.trim() === "" ? null : Number(state.wipLimit);
     if (parsedWip !== null && (Number.isNaN(parsedWip) || parsedWip < 1)) {
       setError("WIP limit must be at least 1");
       return;
@@ -95,19 +120,22 @@ export function ColumnForm({ column, isOpen, onClose, onSubmit, zIndex = 70 }: C
     setError(null);
     onSubmit({
       name: trimmedName,
-      color,
+      color: state.color,
       wipLimit: parsedWip,
-      requiredFields,
-      githubState,
-      isDone,
+      requiredFields: state.requiredFields,
+      githubState: state.githubState,
+      isDone: state.isDone,
     });
     onClose();
   };
 
   const toggleRequiredField = (field: RequiredFieldValue) => {
-    setRequiredFields((prev) =>
-      prev.includes(field) ? prev.filter((f) => f !== field) : [...prev, field]
-    );
+    setState((s) => ({
+      ...s,
+      requiredFields: s.requiredFields.includes(field)
+        ? s.requiredFields.filter((f) => f !== field)
+        : [...s.requiredFields, field],
+    }));
   };
 
   return createPortal(
@@ -158,8 +186,8 @@ export function ColumnForm({ column, isOpen, onClose, onSubmit, zIndex = 70 }: C
                 <input
                   id="column-form-name"
                   className="prop-input w-full"
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
+                  value={state.name}
+                  onChange={(e) => set({ name: e.target.value })}
                   placeholder="e.g. In Progress"
                   autoFocus
                 />
@@ -171,7 +199,7 @@ export function ColumnForm({ column, isOpen, onClose, onSubmit, zIndex = 70 }: C
                 </div>
                 <div className="flex flex-wrap gap-2">
                   {colors.map((c) => {
-                    const selected = color === c.value;
+                    const selected = state.color === c.value;
                     return (
                       <button
                         key={c.label}
@@ -182,7 +210,7 @@ export function ColumnForm({ column, isOpen, onClose, onSubmit, zIndex = 70 }: C
                         )}
                         style={{ background: c.hex }}
                         title={c.label}
-                        onClick={() => setColor(c.value)}
+                        onClick={() => set({ color: c.value })}
                         aria-label={`Select ${c.label}`}
                         aria-pressed={selected}
                       >
@@ -210,8 +238,8 @@ export function ColumnForm({ column, isOpen, onClose, onSubmit, zIndex = 70 }: C
                   className="prop-input"
                   type="number"
                   min={1}
-                  value={wipLimit}
-                  onChange={(e) => setWipLimit(e.target.value)}
+                  value={state.wipLimit}
+                  onChange={(e) => set({ wipLimit: e.target.value })}
                   placeholder="—"
                   style={{ width: 96, textAlign: "right" }}
                 />
@@ -226,7 +254,7 @@ export function ColumnForm({ column, isOpen, onClose, onSubmit, zIndex = 70 }: C
                 </div>
                 <div className="space-y-1">
                   {requiredFieldOptions.map((field) => {
-                    const checked = requiredFields.includes(field.value);
+                    const checked = state.requiredFields.includes(field.value);
                     return (
                       <button
                         key={field.value}
@@ -252,10 +280,10 @@ export function ColumnForm({ column, isOpen, onClose, onSubmit, zIndex = 70 }: C
                 <button
                   type="button"
                   className="check-row w-full"
-                  onClick={() => setIsDone((v) => !v)}
-                  aria-pressed={isDone}
+                  onClick={() => set((s) => ({ ...s, isDone: !s.isDone }))}
+                  aria-pressed={state.isDone}
                 >
-                  <span className={cn("checkbox", isDone && "checked")} />
+                  <span className={cn("checkbox", state.isDone && "checked")} />
                   <span className="text-sm text-lx-text-primary font-body">Tasks in this column count as done</span>
                   <span className="check-meta">stored as columns.is_done</span>
                 </button>
@@ -271,10 +299,10 @@ export function ColumnForm({ column, isOpen, onClose, onSubmit, zIndex = 70 }: C
                 <select
                   className="prop-input w-full"
                   aria-label="GitHub state mapping"
-                  value={githubState ?? ""}
+                  value={state.githubState ?? ""}
                   onChange={(e) => {
                     const value = e.target.value;
-                    setGithubState(value === "" ? null : (value as "open" | "closed"));
+                    set({ githubState: value === "" ? null : (value as "open" | "closed") });
                   }}
                 >
                   <option value="">None</option>

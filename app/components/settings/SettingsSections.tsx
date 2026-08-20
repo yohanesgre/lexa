@@ -5,24 +5,17 @@ import { RuntimeSetupModal } from "../forge/RuntimeSetupModal";
 import { RuntimeEditModal } from "../forge/RuntimeEditModal";
 import { RuntimeRestartModal } from "../forge/RuntimeRestartModal";
 import { copyToClipboard } from "../../lib/clipboard";
-import type { Runtime, Machine } from "../../../shared/types";
+import { formatRelative } from "../../lib/relative-time";
 import { parseApiDate } from "../../lib/date";
+import type { Runtime, Machine } from "../../../shared/types";
 
 // Workspace-scope settings sections, extracted from the old monolithic
 // SettingsPage. All superadmin-gated server-side.
 
-export function formatRelative(iso: string): string {
-  const then = parseApiDate(iso).getTime();
-  const now = Date.now();
-  const diff = Math.max(0, now - then);
-  const m = Math.floor(diff / 60000);
-  if (m < 1) return "just now";
-  if (m < 60) return `${m}m ago`;
-  const h = Math.floor(m / 60);
-  if (h < 24) return `${h}h ago`;
-  const d = Math.floor(h / 24);
-  if (d === 1) return "Yesterday";
-  return `${d}d ago`;
+// team_id is a BE-side runtime column; the contract commit didn't widen the
+// shared Runtime type — read it defensively.
+function teamIdOf(r: Runtime): string | null {
+  return (r as Runtime & { teamId?: string | null }).teamId ?? null;
 }
 
 export function InlineDropdown({ items, onSelect, onClose }: { items: { name: string; email: string }[]; onSelect: (email: string) => void; onClose: () => void }) {
@@ -47,7 +40,7 @@ export function InlineDropdown({ items, onSelect, onClose }: { items: { name: st
   );
 }
 
-export function ApiKeyRevealModal({ name, fullKey, onDone }: { name: string; fullKey: string; onDone: () => void }) {
+function ApiKeyRevealModal({ name, fullKey, onDone }: { name: string; fullKey: string; onDone: () => void }) {
   const [copied, setCopied] = useState(false);
   const [copyFailed, setCopyFailed] = useState(false);
 
@@ -112,7 +105,7 @@ export function ApiKeyRevealModal({ name, fullKey, onDone }: { name: string; ful
   );
 }
 
-export function DeleteKeyModal({ name, onCancel, onConfirm }: { name: string; onCancel: () => void; onConfirm: () => void }) {
+function DeleteKeyModal({ name, onCancel, onConfirm }: { name: string; onCancel: () => void; onConfirm: () => void }) {
   return (
     <>
       <button type="button" className="slideover-overlay" onClick={onCancel} aria-label="Close" />
@@ -141,7 +134,7 @@ export function DeleteKeyModal({ name, onCancel, onConfirm }: { name: string; on
   );
 }
 
-export function RemoveGithubSyncModal({ onCancel, onConfirm }: { onCancel: () => void; onConfirm: () => void }) {
+function RemoveGithubSyncModal({ onCancel, onConfirm }: { onCancel: () => void; onConfirm: () => void }) {
   return (
     <>
       <button type="button" className="slideover-overlay" onClick={onCancel} aria-label="Close" />
@@ -203,7 +196,7 @@ export function RemoveRuntimeModal({ name, hostname, onCancel, onConfirm }: { na
   );
 }
 
-export function RemoveMachineModal({ id, runtimeCount, onCancel, onConfirm }: { id: string; runtimeCount: number; onCancel: () => void; onConfirm: () => void }) {
+function RemoveMachineModal({ id, runtimeCount, onCancel, onConfirm }: { id: string; runtimeCount: number; onCancel: () => void; onConfirm: () => void }) {
   return (
     <>
       <button type="button" className="slideover-overlay" onClick={onCancel} aria-label="Close" />
@@ -460,7 +453,7 @@ export function GithubSyncSection() {
   const [removing, setRemoving] = useState(false);
   const [appId, setAppId] = useState("");
   const [secret, setSecret] = useState("");
-  const [secretTouched, setSecretTouched] = useState(false);
+  const secretTouched = useRef(false);
   const [pemName, setPemName] = useState("");
   const [pemText, setPemText] = useState("");
   const fileRef = useRef<HTMLInputElement>(null);
@@ -487,7 +480,7 @@ export function GithubSyncSection() {
   const resetForm = () => {
     setAppId("");
     setSecret("");
-    setSecretTouched(false);
+    secretTouched.current = false;
     setPemName("");
     setPemText("");
   };
@@ -540,7 +533,7 @@ export function GithubSyncSection() {
                   className="prop-input font-mono"
                   placeholder={data?.webhookSecretSet ? "••••••••••••••••" : "Set once, never displayed"}
                   value={secret}
-                  onChange={(e) => { setSecret(e.target.value); setSecretTouched(true); }}
+                  onChange={(e) => { setSecret(e.target.value); secretTouched.current = true; }}
                   style={{ width: 220, fontSize: 12 }}
                 />
               </div>
@@ -551,7 +544,7 @@ export function GithubSyncSection() {
                 onClick={() => save.mutate({
                   appId,
                   ...(pemText !== "" ? { privateKey: pemText } : {}),
-                  ...(secretTouched ? { webhookSecret: secret } : {}),
+                  ...(secretTouched.current ? { webhookSecret: secret } : {}),
                 })}
               >
                 {save.isPending ? "Saving…" : "Save"}
@@ -625,10 +618,8 @@ export function MachinesRuntimesSection({ showTeamColumn = false }: { showTeamCo
   const [restarting, setRestarting] = useState<Runtime | null>(null);
   const [removing, setRemoving] = useState<Runtime | null>(null);
   const [removingMachine, setRemovingMachine] = useState<Machine | null>(null);
-
-  // team_id is a BE-side runtime column; the contract commit didn't widen the
-  // shared Runtime type — read it defensively.
-  const teamIdOf = (r: Runtime): string | null => (r as Runtime & { teamId?: string | null }).teamId ?? null;
+  // One "now" per render so every machine row shares the same last-seen cutoff.
+  const nowMs = Date.now();
 
   return (
     <>
@@ -650,7 +641,7 @@ export function MachinesRuntimesSection({ showTeamColumn = false }: { showTeamCo
             <thead><tr><th>Machine</th><th>State</th><th>Runtimes</th><th>CLIs</th><th>Last seen</th><th /></tr></thead>
             <tbody>
               {machines.map((m) => {
-                const listening = !!m.lastSeen && Date.now() - parseApiDate(m.lastSeen).getTime() < 2 * 60 * 1000;
+                const listening = !!m.lastSeen && nowMs - parseApiDate(m.lastSeen).getTime() < 2 * 60 * 1000;
                 const runtimeCount = runtimes.filter((r) => r.machineId === m.id).length;
                 return (
                   <tr key={m.id}>

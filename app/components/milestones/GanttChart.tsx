@@ -5,6 +5,93 @@ import type { Milestone, Swimlane } from "../../../shared/types";
 
 const LABEL_W = 264;
 
+// Canvas-relative row count at each sprint's row — mirrors the render order
+// (milestone groups + their sprints, loose group, backlog).
+function computeRowBottoms(
+  milestones: Milestone[],
+  lanes: TimelineLane[],
+  looseLanes: TimelineLane[],
+  backlogLanes: TimelineLane[],
+  collapsedGroups: ReadonlySet<string>
+): { map: Map<string, number>; totalRows: number } {
+  const map = new Map<string, number>();
+  let rows = 0;
+  const bump = () => { rows++; };
+  for (const m of milestones) {
+    if (m.archivedAt || collapsedGroups.has(m.id)) continue;
+    bump(); // group row
+    for (const l of lanes) {
+      if (l.lane.milestoneId === m.id && !l.lane.archivedAt && (l.lane.startAt || l.lane.dueAt)) {
+        bump();
+        map.set(l.lane.id, rows);
+      }
+    }
+  }
+  if (looseLanes.length > 0 && !collapsedGroups.has("__loose__")) {
+    bump(); // loose group row
+    for (const l of looseLanes) {
+      bump();
+      map.set(l.lane.id, rows);
+    }
+  }
+  if (backlogLanes.length > 0) bump(); // backlog row
+  return { map, totalRows: rows };
+}
+
+function computeGuidelineXs(
+  sprintPlan: TimelineLane[],
+  rowBottoms: { map: Map<string, number>; totalRows: number },
+  barFor: (laneId: string) => { startAt: string | null; dueAt: string | null },
+  axisStart: Date,
+  to: Date,
+  rowH: number
+): { left: number; bottom: number }[] {
+  const xs: { left: number; bottom: number }[] = [];
+  for (const t of sprintPlan) {
+    const { startAt, dueAt } = barFor(t.lane.id);
+    if (!startAt || !dueAt) continue;
+    const rowIdx = rowBottoms.map.get(t.lane.id);
+    if (rowIdx === undefined) continue;
+    const bottom = rowH * (rowBottoms.totalRows - rowIdx);
+    const s = clampDate(parseDay(startAt), axisStart, to);
+    const e2 = clampDate(parseDay(dueAt), axisStart, to);
+    const x = xForDay(s, axisStart);
+    const w = Math.max(xForDay(e2, axisStart) - x + DAY_WIDTH_PX, DAY_WIDTH_PX);
+    xs.push({ left: x, bottom }, { left: x + w, bottom });
+  }
+  return xs;
+}
+
+// Three-level day axis header: group consecutive days into month spans and
+// consecutive months into year spans.
+function computeHeaderSpans(days: Date[]): { months: { label: string; days: number }[]; years: { label: string; days: number }[] } {
+  const months: { label: string; days: number }[] = [];
+  const years: { label: string; days: number }[] = [];
+  let curMonth = "";
+  let curYear = "";
+  let monthDays = 0;
+  let yearDays = 0;
+  for (const d of days) {
+    const month = d.toLocaleDateString("en-US", { month: "short", timeZone: "UTC" });
+    const year = d.getUTCFullYear().toString();
+    if (month !== curMonth) {
+      if (curMonth) months.push({ label: curMonth, days: monthDays });
+      curMonth = month;
+      monthDays = 0;
+    }
+    if (year !== curYear) {
+      if (curYear) years.push({ label: curYear, days: yearDays });
+      curYear = year;
+      yearDays = 0;
+    }
+    monthDays++;
+    yearDays++;
+  }
+  months.push({ label: curMonth, days: monthDays });
+  years.push({ label: curYear, days: yearDays });
+  return { months, years };
+}
+
 export interface TimelineLane {
   lane: Swimlane;
   done: number;
@@ -194,58 +281,13 @@ export function GanttChart({ lanes, milestones, today, onRescheduleLane, onResch
     }
     if (!collapsedGroups.has("__loose__")) for (const l of looseLanes) add(l);
     return plan;
-  }, [lanes, milestones, collapsedGroups]);
-
-  if (!hasCanvasItems) return null;
+  }, [lanes, milestones, collapsedGroups, looseLanes, activeMilestones]);
 
   // Sprint range guidelines — canvas-level (like the TODAY line): one dashed
-  // vertical per start/end edge, spanning from the DAY-NUMBER header row
-  // (canvas-relative top −22 = 64px header − 42px year+month rows) down to
-  // each sprint's OWN row bottom. Never into the year/month rows, never past
-  // the sprint's row. Preview-aware so they follow a drag.
+  // vertical per start/end edge. Preview-aware so they follow a drag.
   const ROW_H = 56; // .tl-lane height (border-box) — matches .tl-row
-  const rowBottoms = (() => {
-    // Canvas-relative row count at each sprint's row — mirrors the render
-    // order (milestone groups + their sprints, loose group, backlog).
-    const map = new Map<string, number>();
-    let rows = 0;
-    const bump = () => { rows++; };
-    for (const m of milestones) {
-      if (m.archivedAt || collapsedGroups.has(m.id)) continue;
-      bump(); // group row
-      for (const l of lanes) {
-        if (l.lane.milestoneId === m.id && !l.lane.archivedAt && (l.lane.startAt || l.lane.dueAt)) {
-          bump();
-          map.set(l.lane.id, rows);
-        }
-      }
-    }
-    if (looseLanes.length > 0 && !collapsedGroups.has("__loose__")) {
-      bump(); // loose group row
-      for (const l of looseLanes) {
-        bump();
-        map.set(l.lane.id, rows);
-      }
-    }
-    if (backlogLanes.length > 0) bump(); // backlog row
-    return { map, totalRows: rows };
-  })();
-  const guidelineXs = (() => {
-    const xs: { left: number; bottom: number }[] = [];
-    for (const t of sprintPlan) {
-      const { startAt, dueAt } = barFor(t.lane.id);
-      if (!startAt || !dueAt) continue;
-      const rowIdx = rowBottoms.map.get(t.lane.id);
-      if (rowIdx === undefined) continue;
-      const bottom = ROW_H * (rowBottoms.totalRows - rowIdx);
-      const s = clampDate(parseDay(startAt), axisStart, to);
-      const e2 = clampDate(parseDay(dueAt), axisStart, to);
-      const x = xForDay(s, axisStart);
-      const w = Math.max(xForDay(e2, axisStart) - x + DAY_WIDTH_PX, DAY_WIDTH_PX);
-      xs.push({ left: x, bottom }, { left: x + w, bottom });
-    }
-    return xs;
-  })();
+  const rowBottoms = computeRowBottoms(milestones, lanes, looseLanes, backlogLanes, collapsedGroups);
+  const guidelineXs = computeGuidelineXs(sprintPlan, rowBottoms, barFor, axisStart, to, ROW_H);
 
   const gridCols = `${LABEL_W}px repeat(${days.length}, ${DAY_WIDTH_PX}px)`;
   const groupProps = {
@@ -254,59 +296,9 @@ export function GanttChart({ lanes, milestones, today, onRescheduleLane, onResch
 
   // Three-level day axis header: group consecutive days into month spans and
   // consecutive months into year spans.
-  const headerSpans = useMemo(() => {
-    const months: { label: string; days: number }[] = [];
-    const years: { label: string; days: number }[] = [];
-    let curMonth = "";
-    let curYear = "";
-    let monthDays = 0;
-    let yearDays = 0;
-    for (const d of days) {
-      const month = d.toLocaleDateString("en-US", { month: "short", timeZone: "UTC" });
-      const year = d.getUTCFullYear().toString();
-      if (month !== curMonth) {
-        if (curMonth) months.push({ label: curMonth, days: monthDays });
-        curMonth = month;
-        monthDays = 0;
-      }
-      if (year !== curYear) {
-        if (curYear) years.push({ label: curYear, days: yearDays });
-        curYear = year;
-        yearDays = 0;
-      }
-      monthDays++;
-      yearDays++;
-    }
-    months.push({ label: curMonth, days: monthDays });
-    years.push({ label: curYear, days: yearDays });
-    return { months, years };
-  }, [days]);
+  const headerSpans = useMemo(() => computeHeaderSpans(days), [days]);
 
-  let planIdx = 0;
-  let zebra = 0;
-  const sprintRow = (t: TimelineLane) => {
-    const p = sprintPlan[planIdx++]!;
-    const bar = barFor(t.lane.id);
-    const striped = (zebra++ % 2) === 1;
-    return (
-      <SprintRow
-        key={t.lane.id}
-        t={t}
-        axisStart={axisStart}
-        to={to}
-        today={todayDate}
-        bar={bar}
-        striped={striped}
-        dragging={dragMode !== null}
-        onPointerDown={(e, mode) => beginLaneDrag(e, t.lane.id, mode)}
-        onPointerMove={onPointerMove}
-        onPointerUp={endDrag}
-        onOpenBoard={onOpenBoard}
-        isJustDragged={() => justDragged.current}
-        gridCols={gridCols}
-      />
-    );
-  };
+  if (!hasCanvasItems) return null;
 
   return (
     <div className="timeline-wrap" ref={wrapRef}>
@@ -323,94 +315,173 @@ export function GanttChart({ lanes, milestones, today, onRescheduleLane, onResch
             <span className="tl-today-label" style={{ left: todayX + LABEL_W + 6, top: 4 }}>Today</span>
           </>
         )}
-        <div className="tl-grid" style={{ gridTemplateColumns: gridCols }}>
-          <div className="tl-head-cell" style={{ gridRow: "span 3", fontWeight: 600, color: "var(--lx-text-primary)", alignItems: "flex-center" }}>Milestone / Sprint</div>
-          {headerSpans.years.map((y) => (
-            <div key={y.label} className="tl-head-year" style={{ gridColumn: `span ${y.days}` }}>{y.label}</div>
-          ))}
-          {headerSpans.months.map((m) => (
-            <div key={m.label} className="tl-head-month" style={{ gridColumn: `span ${m.days}` }}>{m.label}</div>
-          ))}
-          {days.map((d, i) => (
-            <div key={i} className="tl-head-day">{d.getUTCDate()}</div>
-          ))}
-        </div>
+        <TimelineHeader days={days} headerSpans={headerSpans} gridCols={gridCols} />
 
-        <div ref={canvasRef} className="tl-canvas" style={{ position: "relative" }}>
-          {guidelineXs.map((g, i) => (
-            <span key={i} className="tl-guideline" style={{ left: g.left + LABEL_W, top: -22, bottom: g.bottom }} aria-hidden="true" />
-          ))}
-          {milestones.filter((m) => !m.archivedAt).map((m) => {
-            const sprints = lanes.filter((l) => l.lane.milestoneId === m.id && !l.lane.archivedAt && (l.lane.startAt || l.lane.dueAt));
-            const due = milestoneDue(m);
-            const dueChip = due ? formatDueChip(due) : null;
-            const collapsed = collapsedGroups.has(m.id);
-            return (
-              <div key={m.id}>
-                <div className={cn("tl-row", (zebra++ % 2) === 1 && "striped")} style={groupProps}>
-                  <button
-                    type="button"
-                    className={cn("tl-label group tl-group-toggle")}
-                    onClick={() => toggleGroup(m.id)}
-                    aria-expanded={!collapsed}
-                  >
-                    <svg className={cn("chevron", collapsed && "collapsed")} viewBox="0 0 24 24"><path d="M6 9l6 6 6-6" /></svg>
-                    <span className="tl-label-name">{m.name}</span>
-                    <span className="lane-ready" style={{ marginLeft: 6 }}>
-                      {m.archivedSprintCount}/{m.sprintCount} sprints archived
-                    </span>
-                  </button>
-                  <div className="tl-lane group">
-                    {due && (
-                      <span
-                        className={cn("tl-marker", dueChip?.overdue && "overdue")}
-                        style={{ left: xForDay(parseDay(due), axisStart) + DAY_WIDTH_PX / 2 }}
-                        title="Due — drag to reschedule"
-                        onPointerDown={(e) => beginDrag(e, m.id, "milestone")}
-                        onPointerMove={onPointerMove}
-                        onPointerUp={endDrag}
-                        onClick={() => { if (!justDragged.current) onShowMilestoneList(); }}
-                      >
-                        <span className="tl-marker-flag">{dueChip?.overdue ? `Due ${dueChip.text} · Overdue · drag ◆ = move due date` : `${dueChip?.text} · drag ◆ = move due date`}</span>
-                      </span>
-                    )}
-                  </div>
-                </div>
-                {!collapsed && sprints.map(sprintRow)}
-              </div>
-            );
-          })}
-
-          {looseLanes.length > 0 && (
-            <div>
-              <div className={cn("tl-row", (zebra++ % 2) === 1 && "striped")} style={groupProps}>
-                <button
-                  type="button"
-                  className={cn("tl-label group tl-group-toggle")}
-                  onClick={() => toggleGroup("__loose__")}
-                  aria-expanded={!collapsedGroups.has("__loose__")}
-                >
-                  <svg className={cn("chevron", collapsedGroups.has("__loose__") && "collapsed")} viewBox="0 0 24 24"><path d="M6 9l6 6 6-6" /></svg>
-                  Loose sprints
-                  <span className="sl-group-meta" style={{ fontFamily: "var(--lx-font-micro)", fontSize: 11, color: "var(--lx-text-muted)", marginLeft: 6 }}>no milestone</span>
-                </button>
-                <div className="tl-lane group" />
-              </div>
-              {!collapsedGroups.has("__loose__") && looseLanes.map(sprintRow)}
-            </div>
-          )}
-
-          {backlogLanes.length > 0 && (
-            <div className={cn("tl-row", (zebra++ % 2) === 1 && "striped")} style={{ ...groupProps, borderBottom: "none" }}>
-              <div className="tl-label caption">
-                Backlog
-                <span className="sl-group-meta" style={{ fontFamily: "var(--lx-font-micro)", fontSize: 11, color: "var(--lx-text-muted)", marginLeft: 6 }}>system lane</span>
-              </div>
-              <div className="tl-lane" style={{ borderBottom: "none" }} />
-            </div>
-          )}
-        </div>
+        <TimelineCanvas
+          canvasRef={canvasRef}
+          guidelineXs={guidelineXs}
+          milestones={milestones}
+          lanes={lanes}
+          looseLanes={looseLanes}
+          backlogLanes={backlogLanes}
+          collapsedGroups={collapsedGroups}
+          gridCols={gridCols}
+          groupProps={groupProps}
+          axisStart={axisStart}
+          to={to}
+          today={todayDate}
+          sprintPlan={sprintPlan}
+          barFor={barFor}
+          milestoneDue={milestoneDue}
+          onToggle={toggleGroup}
+          onMarkerPointerDown={(e, id) => beginDrag(e, id, "milestone")}
+          onMarkerPointerMove={onPointerMove}
+          onMarkerPointerUp={endDrag}
+          onMarkerClick={onShowMilestoneList}
+          isJustDragged={() => justDragged.current}
+          onSprintPointerDown={(e, id, mode) => beginLaneDrag(e, id, mode)}
+          sprintRowProps={{ dragMode, onPointerMove, onPointerUp: endDrag, onOpenBoard }}
+        />
       </div>
+    </div>
+  );
+}
+
+function TimelineCanvas({ canvasRef, guidelineXs, milestones, lanes, looseLanes, backlogLanes, collapsedGroups, gridCols, groupProps, axisStart, to, today, sprintPlan, barFor, milestoneDue, onToggle, onMarkerPointerDown, onMarkerPointerMove, onMarkerPointerUp, onMarkerClick, isJustDragged, onSprintPointerDown, sprintRowProps }: {
+  canvasRef: React.RefObject<HTMLDivElement | null>;
+  guidelineXs: { left: number; bottom: number }[];
+  milestones: Milestone[];
+  lanes: TimelineLane[];
+  looseLanes: TimelineLane[];
+  backlogLanes: TimelineLane[];
+  collapsedGroups: ReadonlySet<string>;
+  gridCols: string;
+  groupProps: { gridTemplateColumns: string };
+  axisStart: Date;
+  to: Date;
+  today: Date;
+  sprintPlan: TimelineLane[];
+  barFor: (laneId: string) => { startAt: string | null; dueAt: string | null };
+  milestoneDue: (m: Milestone) => string | null;
+  onToggle: (id: string) => void;
+  onMarkerPointerDown: (e: React.PointerEvent, id: string) => void;
+  onMarkerPointerMove: (e: React.PointerEvent) => void;
+  onMarkerPointerUp: () => void;
+  onMarkerClick: () => void;
+  isJustDragged: () => boolean;
+  onSprintPointerDown: (e: React.PointerEvent, id: string, mode: "body" | "edge") => void;
+  sprintRowProps: {
+    dragMode: DragMode | null;
+    onPointerMove: (e: React.PointerEvent) => void;
+    onPointerUp: () => void;
+    onOpenBoard: (laneId: string) => void;
+  };
+}) {
+  let planIdx = 0;
+  let zebra = 0;
+  const sprintRow = (t: TimelineLane) => {
+    const p = sprintPlan[planIdx++]!;
+    void p;
+    const bar = barFor(t.lane.id);
+    const striped = (zebra++ % 2) === 1;
+    return (
+      <SprintRow
+        key={t.lane.id}
+        t={t}
+        axisStart={axisStart}
+        to={to}
+        today={today}
+        bar={bar}
+        striped={striped}
+        dragging={sprintRowProps.dragMode !== null}
+        onPointerDown={(e, mode) => onSprintPointerDown(e, t.lane.id, mode)}
+        onPointerMove={sprintRowProps.onPointerMove}
+        onPointerUp={sprintRowProps.onPointerUp}
+        onOpenBoard={sprintRowProps.onOpenBoard}
+        isJustDragged={isJustDragged}
+        gridCols={gridCols}
+      />
+    );
+  };
+
+  return (
+    <div ref={canvasRef} className="tl-canvas" style={{ position: "relative" }}>
+      {guidelineXs.map((g, i) => (
+        <span key={i} className="tl-guideline" style={{ left: g.left + LABEL_W, top: -22, bottom: g.bottom }} aria-hidden="true" />
+      ))}
+      {milestones.map((m) => {
+        if (m.archivedAt) return null;
+        const sprints = lanes.filter((l) => l.lane.milestoneId === m.id && !l.lane.archivedAt && (l.lane.startAt || l.lane.dueAt));
+        const due = milestoneDue(m);
+        const collapsed = collapsedGroups.has(m.id);
+        return (
+          <MilestoneGroupRow
+            key={m.id}
+            m={m}
+            sprints={sprints}
+            due={due}
+            axisStart={axisStart}
+            collapsed={collapsed}
+            striped={(zebra++ % 2) === 1}
+            gridCols={gridCols}
+            onToggle={() => onToggle(m.id)}
+            onMarkerPointerDown={(e) => onMarkerPointerDown(e, m.id)}
+            onMarkerPointerMove={onMarkerPointerMove}
+            onMarkerPointerUp={onMarkerPointerUp}
+            onMarkerClick={onMarkerClick}
+            renderSprint={sprintRow}
+          />
+        );
+      })}
+
+      {looseLanes.length > 0 && (
+        <LooseGroupRow
+          looseLanes={looseLanes}
+          collapsed={collapsedGroups.has("__loose__")}
+          onToggle={() => onToggle("__loose__")}
+          striped={(zebra++ % 2) === 1}
+          groupProps={groupProps}
+          renderSprint={sprintRow}
+        />
+      )}
+
+      {backlogLanes.length > 0 && (
+        <div className={cn("tl-row", (zebra++ % 2) === 1 && "striped")} style={{ ...groupProps, borderBottom: "none" }}>
+          <div className="tl-label caption">
+            Backlog
+            <span className="sl-group-meta" style={{ fontFamily: "var(--lx-font-micro)", fontSize: 11, color: "var(--lx-text-muted)", marginLeft: 6 }}>system lane</span>
+          </div>
+          <div className="tl-lane" style={{ borderBottom: "none" }} />
+        </div>
+      )}
+    </div>
+  );
+}
+
+function LooseGroupRow({ looseLanes, collapsed, onToggle, striped, groupProps, renderSprint }: {
+  looseLanes: TimelineLane[];
+  collapsed: boolean;
+  onToggle: () => void;
+  striped: boolean;
+  groupProps: { gridTemplateColumns: string };
+  renderSprint: (t: TimelineLane) => React.ReactNode;
+}) {
+  return (
+    <div>
+      <div className={cn("tl-row", striped && "striped")} style={groupProps}>
+        <button
+          type="button"
+          className={cn("tl-label group tl-group-toggle")}
+          onClick={onToggle}
+          aria-expanded={!collapsed}
+        >
+          <svg className={cn("chevron", collapsed && "collapsed")} viewBox="0 0 24 24"><path d="M6 9l6 6 6-6" /></svg>
+          Loose sprints
+          <span className="sl-group-meta" style={{ fontFamily: "var(--lx-font-micro)", fontSize: 11, color: "var(--lx-text-muted)", marginLeft: 6 }}>no milestone</span>
+        </button>
+        <div className="tl-lane group" />
+      </div>
+      {!collapsed && looseLanes.map(renderSprint)}
     </div>
   );
 }
@@ -446,7 +517,8 @@ function SprintRow({ t, axisStart, to, today, bar, striped, dragging, onPointerD
     const w = Math.max(xForDay(e2, axisStart) - x + DAY_WIDTH_PX, DAY_WIDTH_PX);
     const overdue = parseDay(dueAt!) < today;
     body = (
-      <div
+      <button
+        type="button"
         className={cn("tl-bar", overdue && "overdue")}
         style={{ left: x, width: w, touchAction: "none" }}
         title={`${t.lane.name} — drag body = shift · right edge = resize end`}
@@ -458,7 +530,7 @@ function SprintRow({ t, axisStart, to, today, bar, striped, dragging, onPointerD
         <span className="tl-fill" style={{ width: `${fillPct}%` }} />
         <span className="tl-bar-label">{t.lane.name}</span>
         <span className="tl-resize-edge" onPointerDown={(e) => { e.stopPropagation(); onPointerDown(e, "edge"); }} />
-      </div>
+      </button>
     );
   } else if (hasStart) {
     const s = clampDate(parseDay(startAt!), axisStart, to);
@@ -466,7 +538,8 @@ function SprintRow({ t, axisStart, to, today, bar, striped, dragging, onPointerD
     const x = xForDay(s, axisStart);
     const w = Math.max(xForDay(e2, axisStart) - x + DAY_WIDTH_PX, DAY_WIDTH_PX);
     body = (
-      <div
+      <button
+        type="button"
         className="tl-bar"
         style={{ left: x, width: w, touchAction: "none", borderRightStyle: "dashed" }}
         title="Start only — bar runs to today (live edge)"
@@ -477,7 +550,7 @@ function SprintRow({ t, axisStart, to, today, bar, striped, dragging, onPointerD
       >
         <span className="tl-fill" style={{ width: `${fillPct}%` }} />
         <span className="tl-bar-label">{t.lane.name}</span>
-      </div>
+      </button>
     );
   } else if (hasDue) {
     body = (
@@ -508,6 +581,80 @@ function SprintRow({ t, axisStart, to, today, bar, striped, dragging, onPointerD
       <div className="tl-lane" style={{ userSelect: dragging ? "none" : undefined }}>
         {body}
       </div>
+    </div>
+  );
+}
+
+function TimelineHeader({ days, headerSpans, gridCols }: {
+  days: Date[];
+  headerSpans: { months: { label: string; days: number }[]; years: { label: string; days: number }[] };
+  gridCols: string;
+}) {
+  return (
+    <div className="tl-grid" style={{ gridTemplateColumns: gridCols }}>
+      <div className="tl-head-cell" style={{ gridRow: "span 3", fontWeight: 600, color: "var(--lx-text-primary)", alignItems: "flex-center" }}>Milestone / Sprint</div>
+      {headerSpans.years.map((y) => (
+        <div key={y.label} className="tl-head-year" style={{ gridColumn: `span ${y.days}` }}>{y.label}</div>
+      ))}
+      {headerSpans.months.map((m) => (
+        <div key={m.label} className="tl-head-month" style={{ gridColumn: `span ${m.days}` }}>{m.label}</div>
+      ))}
+      {days.map((d) => (
+        <div key={d.toISOString()} className="tl-head-day">{d.getUTCDate()}</div>
+      ))}
+    </div>
+  );
+}
+
+function MilestoneGroupRow({ m, sprints, due, axisStart, collapsed, striped, gridCols, onToggle, onMarkerPointerDown, onMarkerPointerMove, onMarkerPointerUp, onMarkerClick, renderSprint }: {
+  m: Milestone;
+  sprints: TimelineLane[];
+  due: string | null;
+  axisStart: Date;
+  collapsed: boolean;
+  striped: boolean;
+  gridCols: string;
+  onToggle: () => void;
+  onMarkerPointerDown: (e: React.PointerEvent) => void;
+  onMarkerPointerMove: (e: React.PointerEvent) => void;
+  onMarkerPointerUp: () => void;
+  onMarkerClick: () => void;
+  renderSprint: (t: TimelineLane) => React.ReactNode;
+}) {
+  const dueChip = due ? formatDueChip(due) : null;
+  return (
+    <div>
+      <div className={cn("tl-row", striped && "striped")} style={{ gridTemplateColumns: gridCols }}>
+        <button
+          type="button"
+          className={cn("tl-label group tl-group-toggle")}
+          onClick={onToggle}
+          aria-expanded={!collapsed}
+        >
+          <svg className={cn("chevron", collapsed && "collapsed")} viewBox="0 0 24 24"><path d="M6 9l6 6 6-6" /></svg>
+          <span className="tl-label-name">{m.name}</span>
+          <span className="lane-ready" style={{ marginLeft: 6 }}>
+            {m.archivedSprintCount}/{m.sprintCount} sprints archived
+          </span>
+        </button>
+        <div className="tl-lane group">
+          {due && (
+            <button
+              type="button"
+              className={cn("tl-marker", dueChip?.overdue && "overdue")}
+              style={{ left: xForDay(parseDay(due), axisStart) + DAY_WIDTH_PX / 2 }}
+              title="Due — drag to reschedule"
+              onPointerDown={onMarkerPointerDown}
+              onPointerMove={onMarkerPointerMove}
+              onPointerUp={onMarkerPointerUp}
+              onClick={onMarkerClick}
+            >
+              <span className="tl-marker-flag">{dueChip?.overdue ? `Due ${dueChip.text} · Overdue · drag ◆ = move due date` : `${dueChip?.text} · drag ◆ = move due date`}</span>
+            </button>
+          )}
+        </div>
+      </div>
+      {!collapsed && sprints.map(renderSprint)}
     </div>
   );
 }

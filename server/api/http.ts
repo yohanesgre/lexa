@@ -1462,12 +1462,16 @@ const loadTaskRepoContent = (task: ForgeTask): Effect.Effect<RepoContentEntry[],
     const capRaw = getSetting(db, "forge_repo_cap") || process.env.LXK_FORGE_REPO_CAP || "";
     const capParsed = Number.parseInt(capRaw, 10);
     const cap = Number.isFinite(capParsed) && capParsed > 0 ? capParsed : DEFAULT_REPO_CONTENT_REPOS;
-    const repos = projectRepos.filter((r) => r.sourceRole).map((r) => r.repo).slice(0, cap);
-    if (repos.length === 0) return [];
+    const repos: string[] = [];
+    for (const r of projectRepos) {
+      if (r.sourceRole) repos.push(r.repo);
+    }
+    const capped = repos.slice(0, cap);
+    if (capped.length === 0) return [];
     const client = yield* GitHubClient;
     const entries: RepoContentEntry[] = [];
     let totalBytes = 0;
-    for (const fullRepo of repos) {
+    for (const fullRepo of capped) {
       const [owner, name] = fullRepo.split("/");
       if (!owner || !name) continue;
       const branch = yield* client.getDefaultBranch(owner, name).pipe(

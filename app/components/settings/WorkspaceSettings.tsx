@@ -1,7 +1,8 @@
 import { useState } from "react";
 import { Check, Copy, Plus, Trash2, Users } from "lucide-react";
 import { useSession, useWorkspaceMembers, useUpdateWorkspaceMember, useDeleteWorkspaceMember, useWorkspaceInvites, useCreateWorkspaceInvite, useRevokeWorkspaceInvite, useCreateSetPasswordLink, useTeams, useCreateTeam, useDeleteTeam } from "../../lib/queries";
-import { ApiKeysSection, GithubSyncSection, MachinesRuntimesSection, RateLimitSection, formatRelative } from "./SettingsSections";
+import { ApiKeysSection, GithubSyncSection, MachinesRuntimesSection, RateLimitSection } from "./SettingsSections";
+import { formatRelative } from "../../lib/relative-time";
 import { AgentsSettingsSection, SkillsSettingsSection } from "../forge/AgentSkillSettings";
 import { copyToClipboard } from "../../lib/clipboard";
 import type { WorkspaceInvite } from "../../../shared/types";

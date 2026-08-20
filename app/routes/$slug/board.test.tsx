@@ -5,17 +5,14 @@ import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactNode } from "react";
-import { BoardPage } from "./board";
+import { BoardPage } from "../../components/kanban/BoardPage";
 
 const searchMock = vi.hoisted(() => ({ value: { task: undefined as string | undefined, milestone: undefined as string | undefined } }));
 const navigateMock = vi.hoisted(() => vi.fn());
 
 vi.mock("@tanstack/react-router", () => ({
-  createFileRoute: () => () => ({
-    useParams: () => ({ slug: "demo" }),
-    useSearch: () => searchMock.value,
-    useNavigate: () => navigateMock,
-  }),
+  createFileRoute: () => () => ({}),
+  useNavigate: () => navigateMock,
   Link: ({ to, params, search, className, children }: any) => (
     <a href={`${to}`} className={className}>{children}</a>
   ),
@@ -64,7 +61,7 @@ function wrapper({ children }: { children: ReactNode }) {
 }
 
 function BoardPageWrapper() {
-  return <BoardPage />;
+  return <BoardPage slug="demo" search={searchMock.value} />;
 }
 
 beforeEach(() => {

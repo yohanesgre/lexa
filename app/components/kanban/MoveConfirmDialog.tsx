@@ -68,20 +68,13 @@ export function MoveConfirmDialog({ board, pending, resolve, cancel }: MoveConfi
               <label
                 className="check-row"
                 style={{ cursor: "pointer" }}
-                role="checkbox"
-                aria-checked={checked}
-                tabIndex={0}
-                onClick={(e) => {
-                  e.preventDefault();
-                  setChecked((v) => !v);
-                }}
-                onKeyDown={(e) => {
-                  if (e.key === " " || e.key === "Enter") {
-                    e.preventDefault();
-                    setChecked((v) => !v);
-                  }
-                }}
               >
+                <input
+                  type="checkbox"
+                  className="checkbox-input"
+                  checked={checked}
+                  onChange={(e) => setChecked(e.target.checked)}
+                />
                 <span className={cn("checkbox", checked && "checked")} />
                 Clear card deadline ({taskDue?.text} → none)
               </label>

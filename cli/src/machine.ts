@@ -516,7 +516,10 @@ function discoverCatalog(agentCli: RuntimeEnv["agentCli"]): Effect.Effect<Pick<R
 function writeRuntimeEnv(path: string, env: Record<string, string>): void {
   const dir = dirname(path);
   mkdirSync(dir, { recursive: true });
-  const lines = Object.entries(env).filter(([key]) => key !== "").map(([key, value]) => `${key}=${value}`);
+  const lines: string[] = [];
+  for (const [key, value] of Object.entries(env)) {
+    if (key !== "") lines.push(`${key}=${value}`);
+  }
   writeFileSync(path, `${lines.join("\n")}\n`, { mode: 0o600 });
   chmodSync(path, 0o600);
 }

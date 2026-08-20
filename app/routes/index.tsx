@@ -2,7 +2,7 @@ import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { LayoutGrid, Plus } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useDashboard, useCreateProject } from "../lib/queries";
-import { getSetupStatus } from "../lib/api";
+import { getSetupStatus, getDashboard } from "../lib/api";
 import { CreateProjectModal } from "../components/CreateProjectModal";
 import { useProjectSelection } from "../lib/project-selection";
 
@@ -10,6 +10,14 @@ export const Route = createFileRoute("/")({
   validateSearch: (search: Record<string, unknown>): { new?: boolean } => ({
     new: search.new === "1" || search.new === true ? true : undefined,
   }),
+  loader: async ({ context }) => {
+    // Prefetch the dashboard so the first paint renders content instead of
+    // skeletons — the same key/queryFn the component's useDashboard reads.
+    await context.queryClient.prefetchQuery({
+      queryKey: ["dashboard"],
+      queryFn: () => getDashboard(),
+    });
+  },
   component: Home,
 });
 

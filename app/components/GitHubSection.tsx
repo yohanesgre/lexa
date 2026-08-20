@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { GithubIssue, GithubIssueSummary } from "../../shared/types";
 import { cn } from "./ui/cn";
 import { X } from "lucide-react";
@@ -21,9 +21,211 @@ function divergence(g: GithubIssue): { label: string; diverged: boolean } {
   return { label: "Out of sync — edit not pushed", diverged: true };
 }
 
+function LinkedIssuesList({ githubs, onUnlinkClick }: { githubs: GithubIssue[]; onUnlinkClick: (g: GithubIssue) => void }) {
+  const hasDiverged = githubs.some((g) => g.outOfSync || g.pushFailed);
+  return (
+    <div>
+      {githubs.map((g) => {
+        const d = divergence(g);
+        return (
+          <div
+            key={g.issueId}
+            className="github-section"
+            style={{
+              padding: "10px 14px",
+              marginBottom: 8,
+              borderRadius: 6,
+              border: d.diverged ? "1px solid rgba(248,81,73,0.3)" : "1px solid rgba(74,222,128,0.2)",
+              background: d.diverged ? "var(--lx-bg-danger-subtle)" : "var(--lx-bg-success-subtle)",
+            }}
+          >
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2 min-w-0">
+                <GithubMark size={14} className="text-lx-text-link shrink-0" />
+                <a href={g.url} target="_blank" rel="noreferrer" className="font-mono text-sm font-medium text-lx-text-link whitespace-nowrap">
+                  {g.repo} #{g.issueNumber}
+                </a>
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
+                <span
+                  className="sync-dot"
+                  style={d.diverged ? { background: "var(--lx-text-danger)" } : undefined}
+                />
+                <span
+                  className={cn(
+                    "font-micro text-2xs uppercase tracking-[0.04em]",
+                    d.diverged ? "text-lx-text-danger" : "text-lx-text-success"
+                  )}
+                >
+                  {d.label}
+                </span>
+                <button
+                  type="button"
+                  className="btn btn-ghost !w-6 !h-6 !p-0"
+                  title="Unlink issue"
+                  onClick={() => onUnlinkClick(g)}
+                >
+                  <X size={12} strokeWidth={1.5} />
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })}
+      {hasDiverged && (
+        <p className="text-xs text-lx-text-muted mt-1 leading-4">
+          Divergence reasons: <span className="font-mono">— state</span> (fix: move the task to the mapped column) · <span className="font-mono">— edit not pushed</span> (fix: the next task edit re-pushes) · <span className="font-mono">— both</span>.
+        </p>
+      )}
+    </div>
+  );
+}
+
+function IssueSearchResults({ results, activeIndex, onHover, onPick }: {
+  results: GithubIssueSummary[];
+  activeIndex: number;
+  onHover: (i: number) => void;
+  onPick: (r: GithubIssueSummary) => void;
+}) {
+  return (
+    <div className="mt-1 card-row" style={{ overflow: "hidden" }}>
+      {results.map((r, i) => (
+        <button
+          type="button"
+          key={r.number}
+          className="flex items-center gap-2 w-full text-left"
+          style={{
+            padding: "8px 12px",
+            background: i === activeIndex ? "rgba(88,166,255,0.12)" : undefined,
+            borderLeft: i === activeIndex ? "2px solid var(--lx-accent)" : "2px solid transparent",
+          }}
+          onMouseEnter={() => onHover(i)}
+          onClick={() => onPick(r)}
+        >
+          <span className="font-mono text-xs text-lx-text-link shrink-0">#{r.number}</span>
+          <span className="text-sm text-lx-text-primary truncate">{r.title}</span>
+          <span className={cn("text-2xs font-micro uppercase tracking-[0.04em] ml-auto shrink-0", r.state === "open" ? "text-lx-text-success" : "text-lx-text-muted")}>
+            {r.state}
+          </span>
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function LinkFlowPanel({ repos, selectedRepo, onRepoChange, query, onQueryChange, onKeyDown, results, activeIndex, onHoverIndex, onPick, onNewIssue }: {
+  repos: string[];
+  selectedRepo: string;
+  onRepoChange: (repo: string) => void;
+  query: string;
+  onQueryChange: (query: string) => void;
+  onKeyDown: (e: React.KeyboardEvent<HTMLInputElement>) => void;
+  results: GithubIssueSummary[];
+  activeIndex: number;
+  onHoverIndex: (index: number) => void;
+  onPick: (result: GithubIssueSummary) => void;
+  onNewIssue: () => void;
+}) {
+  const searchRef = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    searchRef.current?.focus();
+  }, []);
+  return (
+    <div className="mt-3">
+      <div className="flex items-center gap-2" style={{ alignItems: "stretch" }}>
+        <select
+          className="prop-input"
+          style={{ minWidth: 170 }}
+          aria-label="GitHub repository"
+          value={selectedRepo}
+          onChange={(e) => onRepoChange(e.target.value)}
+        >
+          {repos.map((r) => (
+            <option key={r} value={r}>{r}</option>
+          ))}
+        </select>
+        <input
+          ref={searchRef}
+          className="prop-input font-mono flex-1"
+          aria-label="Search issue number or title"
+          placeholder="Search issue # or title…"
+          value={query}
+          onChange={(e) => onQueryChange(e.target.value)}
+          onKeyDown={onKeyDown}
+        />
+        <button type="button" className="btn btn-ghost shrink-0" style={{ borderColor: "var(--lx-border-default)", color: "var(--lx-accent)" }} onClick={onNewIssue}>
+          + New issue
+        </button>
+      </div>
+      {query.trim() && results.length > 0 && (
+        <IssueSearchResults
+          results={results}
+          activeIndex={activeIndex}
+          onHover={onHoverIndex}
+          onPick={onPick}
+        />
+      )}
+      <p className="text-xs text-lx-text-muted mt-2 leading-4">
+        Search runs in the selected repo only (#number or title). Picking one links it — two-way state sync starts immediately.
+      </p>
+    </div>
+  );
+}
+
+function NewIssuePanel({ repos, selectedRepo, onRepoChange, onCreate, onCancel, creating }: {
+  repos: string[];
+  selectedRepo: string;
+  onRepoChange: (repo: string) => void;
+  onCreate: () => void;
+  onCancel: () => void;
+  creating: boolean;
+}) {
+  return (
+    <div className="mt-3">
+      <div className="flex items-center gap-2">
+        <select
+          className="prop-input"
+          style={{ minWidth: 170 }}
+          aria-label="GitHub repository"
+          value={selectedRepo}
+          onChange={(e) => onRepoChange(e.target.value)}
+        >
+          {repos.map((r) => (
+            <option key={r} value={r}>{r}</option>
+          ))}
+        </select>
+        <button type="button" className="btn btn-primary shrink-0" onClick={onCreate} disabled={creating}>
+          {creating ? (
+            <>
+              <span className="spinner" />
+              Creating...
+            </>
+          ) : (
+            "Create issue"
+          )}
+        </button>
+        <button
+          type="button"
+          className="btn btn-ghost shrink-0"
+          onClick={onCancel}
+        >
+          Cancel
+        </button>
+      </div>
+      <p className="text-xs text-lx-text-muted mt-2 leading-4">
+        Creates a GitHub issue from this task and links it. Title + description are seeded from the task. Confirmation modal confirms the external side effect.
+      </p>
+    </div>
+  );
+}
+
 export function GitHubSection({ taskId, slug, githubs, columnGithubState, onLink, onUnlink }: GitHubSectionProps) {
   const { data: repos } = useProjectRepos(slug);
-  const workspaceRepos = useMemo(() => (repos ?? []).filter((r) => r.workspaceRole).map((r) => r.repo), [repos]);
+  const workspaceRepos = useMemo(() => {
+    const out: string[] = [];
+    for (const r of repos ?? []) if (r.workspaceRole) out.push(r.repo);
+    return out;
+  }, [repos]);
 
   const [flowOpen, setFlowOpen] = useState(false);
   const [flowMode, setFlowMode] = useState<"link" | "newIssue">("link");
@@ -34,10 +236,15 @@ export function GitHubSection({ taskId, slug, githubs, columnGithubState, onLink
   const [creating, setCreating] = useState(false);
   const [confirmUnlink, setConfirmUnlink] = useState<GithubIssue | null>(null);
 
-  useEffect(() => {
-    if (workspaceRepos.length === 0) return;
-    setSelectedRepo((prev) => (prev && workspaceRepos.includes(prev) ? prev : workspaceRepos[0]));
-  }, [workspaceRepos]);
+  // Keep the selected repo valid when the workspace repo list arrives or
+  // changes — adjust during render (React docs pattern), not in an effect.
+  const [prevRepos, setPrevRepos] = useState(workspaceRepos);
+  if (prevRepos !== workspaceRepos) {
+    setPrevRepos(workspaceRepos);
+    if (workspaceRepos.length > 0 && !workspaceRepos.includes(selectedRepo)) {
+      setSelectedRepo(workspaceRepos[0]);
+    }
+  }
 
   const issueSearch = useGithubIssueSearch(slug, selectedRepo, query);
   const linkExisting = useLinkExistingIssue(slug);
@@ -139,8 +346,6 @@ export function GitHubSection({ taskId, slug, githubs, columnGithubState, onLink
     }
   };
 
-  const hasDiverged = githubs.some((g) => g.outOfSync || g.pushFailed);
-
   return (
     <div className="github-section mt-4 pt-4">
       <div className="flex items-center gap-2 mb-2">
@@ -165,60 +370,7 @@ export function GitHubSection({ taskId, slug, githubs, columnGithubState, onLink
       </div>
 
       {githubs.length > 0 && (
-        <div>
-          {githubs.map((g) => {
-            const d = divergence(g);
-            return (
-              <div
-                key={g.issueId}
-                className="github-section"
-                style={{
-                  padding: "10px 14px",
-                  marginBottom: 8,
-                  borderRadius: 6,
-                  border: d.diverged ? "1px solid rgba(248,81,73,0.3)" : "1px solid rgba(74,222,128,0.2)",
-                  background: d.diverged ? "var(--lx-bg-danger-subtle)" : "var(--lx-bg-success-subtle)",
-                }}
-              >
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2 min-w-0">
-                    <GithubMark size={14} className="text-lx-text-link shrink-0" />
-                    <a href={g.url} target="_blank" rel="noreferrer" className="font-mono text-sm font-medium text-lx-text-link whitespace-nowrap">
-                      {g.repo} #{g.issueNumber}
-                    </a>
-                  </div>
-                  <div className="flex items-center gap-2 shrink-0">
-                    <span
-                      className="sync-dot"
-                      style={d.diverged ? { background: "var(--lx-text-danger)" } : undefined}
-                    />
-                    <span
-                      className={cn(
-                        "font-micro text-2xs uppercase tracking-[0.04em]",
-                        d.diverged ? "text-lx-text-danger" : "text-lx-text-success"
-                      )}
-                    >
-                      {d.label}
-                    </span>
-                    <button
-                      type="button"
-                      className="btn btn-ghost !w-6 !h-6 !p-0"
-                      title="Unlink issue"
-                      onClick={() => setConfirmUnlink(g)}
-                    >
-                      <X size={12} strokeWidth={1.5} />
-                    </button>
-                  </div>
-                </div>
-              </div>
-            );
-          })}
-          {hasDiverged && (
-            <p className="text-xs text-lx-text-muted mt-1 leading-4">
-              Divergence reasons: <span className="font-mono">— state</span> (fix: move the task to the mapped column) · <span className="font-mono">— edit not pushed</span> (fix: the next task edit re-pushes) · <span className="font-mono">— both</span>.
-            </p>
-          )}
-        </div>
+        <LinkedIssuesList githubs={githubs} onUnlinkClick={setConfirmUnlink} />
       )}
 
       {githubs.length === 0 && !flowOpen && (
@@ -251,102 +403,34 @@ export function GitHubSection({ taskId, slug, githubs, columnGithubState, onLink
             No workspace repos — add one in Settings → GitHub Sync
           </p>
         ) : flowMode === "link" ? (
-          <div className="mt-3">
-            <div className="flex items-center gap-2" style={{ alignItems: "stretch" }}>
-              <select
-                className="prop-input"
-                style={{ minWidth: 170 }}
-                aria-label="GitHub repository"
-                value={selectedRepo}
-                onChange={(e) => changeRepo(e.target.value)}
-              >
-                {workspaceRepos.map((r) => (
-                  <option key={r} value={r}>{r}</option>
-                ))}
-              </select>
-              <input
-                className="prop-input font-mono flex-1"
-                aria-label="Search issue number or title"
-                placeholder="Search issue # or title…"
-                value={query}
-                onChange={(e) => {
-                  setQuery(e.target.value);
-                  setActiveIndex(0);
-                }}
-                onKeyDown={handleSearchKeyDown}
-                autoFocus
-              />
-              <button type="button" className="btn btn-ghost shrink-0" style={{ borderColor: "var(--lx-border-default)", color: "var(--lx-accent)" }} onClick={() => openFlow("newIssue")}>
-                + New issue
-              </button>
-            </div>
-            {query.trim() && results.length > 0 && (
-              <div className="mt-1 card-row" style={{ overflow: "hidden" }}>
-                {results.map((r, i) => (
-                  <button
-                    type="button"
-                    key={r.number}
-                    className="flex items-center gap-2 w-full text-left"
-                    style={{
-                      padding: "8px 12px",
-                      background: i === activeIndex ? "rgba(88,166,255,0.12)" : undefined,
-                      borderLeft: i === activeIndex ? "2px solid var(--lx-accent)" : "2px solid transparent",
-                    }}
-                    onMouseEnter={() => setActiveIndex(i)}
-                    onClick={() => void handlePick(r)}
-                  >
-                    <span className="font-mono text-xs text-lx-text-link shrink-0">#{r.number}</span>
-                    <span className="text-sm text-lx-text-primary truncate">{r.title}</span>
-                    <span className={cn("text-2xs font-micro uppercase tracking-[0.04em] ml-auto shrink-0", r.state === "open" ? "text-lx-text-success" : "text-lx-text-muted")}>
-                      {r.state}
-                    </span>
-                  </button>
-                ))}
-              </div>
-            )}
-            <p className="text-xs text-lx-text-muted mt-2 leading-4">
-              Search runs in the selected repo only (#number or title). Picking one links it — two-way state sync starts immediately.
-            </p>
-          </div>
+          <LinkFlowPanel
+            repos={workspaceRepos}
+            selectedRepo={selectedRepo}
+            onRepoChange={changeRepo}
+            query={query}
+            onQueryChange={(q) => {
+              setQuery(q);
+              setActiveIndex(0);
+            }}
+            onKeyDown={handleSearchKeyDown}
+            results={results}
+            activeIndex={activeIndex}
+            onHoverIndex={setActiveIndex}
+            onPick={(r) => void handlePick(r)}
+            onNewIssue={() => openFlow("newIssue")}
+          />
         ) : (
-          <div className="mt-3">
-            <div className="flex items-center gap-2">
-              <select
-                className="prop-input"
-                style={{ minWidth: 170 }}
-                aria-label="GitHub repository"
-                value={selectedRepo}
-                onChange={(e) => changeRepo(e.target.value)}
-              >
-                {workspaceRepos.map((r) => (
-                  <option key={r} value={r}>{r}</option>
-                ))}
-              </select>
-              <button type="button" className="btn btn-primary shrink-0" onClick={() => setConfirmCreate(true)} disabled={creating}>
-                {creating ? (
-                  <>
-                    <span className="spinner" />
-                    Creating...
-                  </>
-                ) : (
-                  "Create issue"
-                )}
-              </button>
-              <button
-                type="button"
-                className="btn btn-ghost shrink-0"
-                onClick={() => {
-                  setFlowMode("link");
-                  setQuery("");
-                }}
-              >
-                Cancel
-              </button>
-            </div>
-            <p className="text-xs text-lx-text-muted mt-2 leading-4">
-              Creates a GitHub issue from this task and links it. Title + description are seeded from the task. Confirmation modal confirms the external side effect.
-            </p>
-          </div>
+          <NewIssuePanel
+            repos={workspaceRepos}
+            selectedRepo={selectedRepo}
+            onRepoChange={changeRepo}
+            onCreate={() => setConfirmCreate(true)}
+            onCancel={() => {
+              setFlowMode("link");
+              setQuery("");
+            }}
+            creating={creating}
+          />
         ))}
 
       {confirmCreate && (

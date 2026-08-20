@@ -7,7 +7,8 @@ import { docToMarkdown } from "../../../shared/markdown";
 import { useCreateForgeTask, useForgeTask, useRuntimes, useRecentForgeTask, useCancelForgeTask, useForgeTaskLogs, useForgeAgents, useForgeSkills } from "../../lib/queries";
 import { useForgeSession, useResetForgeSession, formatSessionAge } from "../../lib/use-forge-session";
 import { parseApiDate } from "../../lib/date";
-import { ForgeTaskLogModal, classifyLogLine } from "./ForgeTaskLogModal";
+import { ForgeTaskLogModal } from "./ForgeTaskLogModal";
+import { classifyLogLine } from "../../lib/forge-log-line";
 import type { ForgeAgent, ForgeSkill, ForgeTask, ForgeTaskLog, Runtime } from "../../../shared/types";
 
 // Task ids the user rejected this session — never re-attach to them on

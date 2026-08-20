@@ -384,18 +384,18 @@ async function seedDevAccounts(db: Database): Promise<void> {
   const rows = db
     .query("SELECT u.id, u.email FROM users u WHERE u.email LIKE '%@lexa.local'")
     .all() as { id: string; email: string }[];
-  for (const u of rows) {
-    const existing = db
-      .prepare("SELECT 1 FROM account WHERE providerId = 'credential' AND userId = ?")
-      .get(u.id);
-    if (existing) continue;
-    const password = await hashPassword("password123");
-    db.prepare(
-      `INSERT INTO account (id, accountId, providerId, userId, password, createdAt, updatedAt)
-       VALUES (?, ?, 'credential', ?, ?, datetime('now'), datetime('now'))`
-    ).run(crypto.randomUUID(), u.id, u.id, password);
+  const missing = rows.filter((u) => !db.prepare("SELECT 1 FROM account WHERE providerId = 'credential' AND userId = ?").get(u.id));
+  if (missing.length === 0) return;
+  // All dev accounts get the same password — hash once, reuse for every row.
+  const password = await hashPassword("password123");
+  const insert = db.prepare(
+    `INSERT INTO account (id, accountId, providerId, userId, password, createdAt, updatedAt)
+     VALUES (?, ?, 'credential', ?, ?, datetime('now'), datetime('now'))`
+  );
+  for (const u of missing) {
+    insert.run(crypto.randomUUID(), u.id, u.id, password);
   }
-  if (rows.length > 0) console.log(`Seeded ${rows.length} dev login account(s) (password: password123)`);
+  console.log(`Seeded ${missing.length} dev login account(s) (password: password123)`);
 }
 
 async function seedDevData(dbPath: string) {

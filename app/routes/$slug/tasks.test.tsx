@@ -4,18 +4,13 @@ import { describe, expect, it, beforeEach, afterEach, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactNode } from "react";
-import { TasksPage } from "./tasks";
+import { TasksPage } from "../../components/tasks/TasksPage";
 
 const searchMock = vi.hoisted(() => ({ value: { task: undefined as string | undefined, swimlane: undefined as string | undefined } }));
 
 vi.mock("@tanstack/react-router", () => ({
-  // createFileRoute(path) returns a callable that consumes the route options;
-  // expose the hooks the page component uses through it.
-  createFileRoute: () => () => ({
-    useParams: () => ({ slug: "demo" }),
-    useSearch: () => searchMock.value,
-    useNavigate: () => vi.fn(),
-  }),
+  createFileRoute: () => () => ({}),
+  useNavigate: () => vi.fn(),
   Link: ({ to, params, search, className, children }: any) => (
     <a href={`${to}`} className={className}>{children}</a>
   ),
@@ -83,7 +78,7 @@ afterEach(() => {
 describe("tasks route swimlane param", () => {
   it("?swimlane=sp1 pre-filters the list to that lane", async () => {
     searchMock.value = { task: undefined, swimlane: "sp1" };
-    render(<TasksPage />, { wrapper });
+    render(<TasksPage slug="demo" search={searchMock.value} />, { wrapper });
     expect(await screen.findByText("Task in Sprint 7")).toBeInTheDocument();
     expect(screen.queryByText("Task in Sprint 8")).not.toBeInTheDocument();
     expect(screen.getByText("Sprint: Sprint 7")).toBeInTheDocument();
@@ -91,17 +86,17 @@ describe("tasks route swimlane param", () => {
   });
 
   it("without the param all lanes render", async () => {
-    render(<TasksPage />, { wrapper });
+    render(<TasksPage slug="demo" search={searchMock.value} />, { wrapper });
     expect(await screen.findByText("Task in Sprint 7")).toBeInTheDocument();
     expect(screen.getByText("Task in Sprint 8")).toBeInTheDocument();
   });
 
   it("param change while mounted syncs the filter state (stale badge avoided)", async () => {
-    const { rerender } = render(<TasksPage />, { wrapper });
+    const { rerender } = render(<TasksPage slug="demo" search={searchMock.value} />, { wrapper });
     await screen.findByText("Task in Sprint 7");
     // simulate in-app navigation: ?swimlane=sp1 lands while the page is mounted
     searchMock.value = { task: undefined, swimlane: "sp1" };
-    rerender(<TasksPage />);
+    rerender(<TasksPage slug="demo" search={searchMock.value} />);
     expect(await screen.findByText("Task in Sprint 7")).toBeInTheDocument();
     expect(screen.queryByText("Task in Sprint 8")).not.toBeInTheDocument();
     expect(screen.getByText("Sprint: Sprint 7")).toBeInTheDocument();

@@ -1,12 +1,28 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { Settings } from "lucide-react";
 import { useDashboard, useBoard, useMilestones, selectProjectHealth } from "../../lib/queries";
+import { getDashboard, getBoard, listMilestones } from "../../lib/api";
 import { cn } from "../../components/ui/cn";
 import { ProjectDescription } from "../../components/ProjectDescription";
 import { MilestoneCard } from "../../components/milestones/MilestoneCard";
 import type { Dashboard, ProjectHealth } from "../../../shared/types";
 
 export const Route = createFileRoute("/$slug/")({
+  loader: async ({ context, params }) => {
+    const { slug } = params;
+    await context.queryClient.prefetchQuery({
+      queryKey: ["dashboard"],
+      queryFn: () => getDashboard(),
+    });
+    await context.queryClient.prefetchQuery({
+      queryKey: ["board", slug, false],
+      queryFn: () => getBoard(slug, false),
+    });
+    await context.queryClient.prefetchQuery({
+      queryKey: ["milestones", slug],
+      queryFn: () => listMilestones(slug).then((r) => r.data),
+    });
+  },
   component: ProjectDashboard,
 });
 

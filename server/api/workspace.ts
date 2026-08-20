@@ -7,8 +7,6 @@ import { respond } from "./http-helpers";
 import { WorkspaceService, WorkspaceUserNotFound } from "../services/workspace.service";
 import { InviteAlreadyPending } from "../services/workspace-invites.service";
 import { PasswordLinkIssueFailed } from "../services/password-links.service";
-import { RowNotFound } from "../db/database";
-import type { TeamMemberRole } from "../../shared/types";
 
 const WorkspaceMemberSchema = Schema.Struct({
   id: Schema.String,
@@ -133,10 +131,7 @@ export const createWorkspaceLive = (api: typeof LexaApi) =>
             Effect.catchTag("RowNotFound", () => Effect.fail(new WorkspaceUserNotFound({ userId: req.path.userId })))
           );
           return { link };
-        }))
+         }))
       )
   );
 
-// Re-exported so the http.ts error map can reach these tags.
-export { WorkspaceUserNotFound, InviteAlreadyPending, PasswordLinkIssueFailed };
-export type { TeamMemberRole };

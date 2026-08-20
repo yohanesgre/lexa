@@ -416,7 +416,11 @@ export function parseMessageResponse(json: string): { result: string | null; err
     const message = err.data?.message || err.name || null;
     return { result: null, error: message };
   }
-  const joined = (body.parts ?? []).filter((p) => p.type === "text" && typeof p.text === "string").map((p) => p.text as string).join("\n");
+  const textParts: string[] = [];
+  for (const p of body.parts ?? []) {
+    if (p.type === "text" && typeof p.text === "string") textParts.push(p.text as string);
+  }
+  const joined = textParts.join("\n");
   const cap = 1024 * 1024;
   return { result: joined.length > cap ? joined.slice(-cap) : joined, error: null };
 }

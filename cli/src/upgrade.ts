@@ -33,6 +33,7 @@ export function compareVersions(a: string, b: string): number {
 async function latestCliTag(): Promise<string | null> {
   try {
     const res = await fetch(GH_API, { headers: { "User-Agent": "lexa-cli", Accept: "application/vnd.github+json" } });
+    if (!res.ok) return null;
     const releases = (await res.json()) as Array<{ tag_name: string }>;
     const tags = releases.map((r) => r.tag_name).filter((t) => cliTagToVersion(t) !== null);
     if (tags.length === 0) return null;

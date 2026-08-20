@@ -21,13 +21,18 @@ export function TimelineTab({ slug, board, milestones }: { slug: string; board: 
 
   const lanes: TimelineLane[] = useMemo(() => {
     if (!b) return [];
-    return b.swimlanes
-      .filter((l) => !l.archivedAt && l.kind === "sprint")
-      .map((lane) => {
-        const p = sprintProgress(b, lane.id);
-        return { lane, done: p.done, total: p.total };
-      });
+    const out: TimelineLane[] = [];
+    for (const lane of b.swimlanes) {
+      if (lane.archivedAt || lane.kind !== "sprint") continue;
+      const p = sprintProgress(b, lane.id);
+      out.push({ lane, done: p.done, total: p.total });
+    }
+    return out;
   }, [b]);
+
+  // One "today" per session — resolved once, so SSR and the first client
+  // paint agree (no hydration mismatch, no post-mount flash).
+  const [todayIso] = useState(() => new Date().toISOString().slice(0, 10));
 
   // Optimistic drag commit: write the dragged dates into the board cache
   // immediately (bar stays put on drop), roll back to the pre-drag dates on
@@ -102,7 +107,7 @@ export function TimelineTab({ slug, board, milestones }: { slug: string; board: 
       <GanttChart
         lanes={lanes}
         milestones={milestones}
-        today={new Date().toISOString().slice(0, 10)}
+        today={todayIso}
         onRescheduleLane={rescheduleLane}
         onRescheduleMilestone={rescheduleMilestone}
         onOpenBoard={(laneId) => navigate({ to: "/$slug/board", params: { slug }, search: {} } as never)}

@@ -79,7 +79,7 @@ export function SetPasswordForm({ token }: { token: string }) {
         {confirmError && <div className="field-hint-danger">{confirmError}</div>}
       </div>
 
-      <button className="btn btn-primary w-full" style={{ height: 36 }} disabled={!canSubmit || setPassword.isPending}>
+      <button type="submit" className="btn btn-primary w-full" style={{ height: 36 }} disabled={!canSubmit || setPassword.isPending}>
         {setPassword.isPending ? "Setting password…" : "Set password"}
       </button>
     </form>

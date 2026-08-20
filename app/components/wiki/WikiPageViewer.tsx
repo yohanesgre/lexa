@@ -1,30 +1,12 @@
-import { useCallback, useEffect, useReducer, useRef, useState } from "react";
-import { useNavigate } from "@tanstack/react-router";
+import { useState } from "react";
 import { Pencil } from "lucide-react";
-import { useEditor } from "@tiptap/react";
-import type { Editor, JSONContent } from "@tiptap/core";
-import StarterKit from "@tiptap/starter-kit";
-import Code from "@tiptap/extension-code";
-import TaskList from "@tiptap/extension-task-list";
-import TaskItem from "@tiptap/extension-task-item";
-import Link from "@tiptap/extension-link";
-import Highlight from "@tiptap/extension-highlight";
-import Underline from "@tiptap/extension-underline";
-import Image from "@tiptap/extension-image";
-import { Table } from "@tiptap/extension-table";
-import { TableRow } from "@tiptap/extension-table-row";
-import { TableHeader } from "@tiptap/extension-table-header";
-import { TableCell } from "@tiptap/extension-table-cell";
-import Placeholder from "@tiptap/extension-placeholder";
 import type { WikiPage, WikiPageMeta, TipTapDoc } from "../../../shared/types";
-import { useUpdateWikiPage, useRestoreWikiRevision } from "../../lib/queries";
-import * as api from "../../lib/api";
 import { renderDoc, extractHeadings, slugifyHeading } from "../tiptap-render";
-import { WikiEditor } from "./WikiEditor";
 import { WikiEditSplit } from "./WikiEditSplit";
 import { EditSidebar } from "./EditSidebar";
 import { OutlineSidebar } from "./OutlineSidebar";
 import { SourcesSection } from "../forge/SourcesSection";
+import { useWikiEditor } from "./useWikiEditor";
 import { parseApiDate } from "../../lib/date";
 
 const emptyDoc: TipTapDoc = { type: "doc", content: [] };
@@ -67,389 +49,166 @@ interface WikiPageViewerProps {
   pages: WikiPageMeta[];
 }
 
-type EditState = {
-  isEditing: boolean;
-  title: string;
-  lastSavedPage: WikiPage;
-  lastSavedAt: Date | null;
-  isDirty: boolean;
-  isSaving: boolean;
-};
-
-type EditAction =
-  | { type: "start"; page: WikiPage }
-  | { type: "title"; title: string }
-  | { type: "dirty" }
-  | { type: "saving" }
-  | { type: "saved"; page: WikiPage; at: Date }
-  | { type: "cancel"; page: WikiPage }
-  | { type: "stopEditing" }
-  | { type: "done" };
-
-function initEditState(page: WikiPage): EditState {
-  return { isEditing: false, title: page.title, lastSavedPage: page, lastSavedAt: null, isDirty: false, isSaving: false };
+function PageViewHeader({ breadcrumb, onEdit }: { breadcrumb: string; onEdit: () => void }) {
+  return (
+    <div className="flex items-center justify-between" style={{ marginBottom: 16 }}>
+      <span className="font-micro text-2xs text-lx-text-muted uppercase tracking-[0.04em]">{breadcrumb}</span>
+      <button type="button" className="btn btn-ghost" style={{ height: 28, padding: "0 10px", fontSize: 12 }} onClick={onEdit}>
+        <Pencil size={13} strokeWidth={1.5} />
+        Edit
+      </button>
+    </div>
+  );
 }
 
-function editReducer(state: EditState, action: EditAction): EditState {
-  switch (action.type) {
-    case "start":
-      return { ...state, isEditing: true, title: action.page.title, lastSavedPage: action.page, lastSavedAt: null, isDirty: false };
-    case "title":
-      return { ...state, title: action.title };
-    case "dirty":
-      return { ...state, isDirty: true };
-    case "saving":
-      return { ...state, isSaving: true };
-    case "saved":
-      return { ...state, isSaving: false, lastSavedPage: action.page, lastSavedAt: action.at, isDirty: false };
-    case "cancel":
-      return { ...state, isEditing: false, title: action.page.title, lastSavedPage: action.page, isDirty: false, isSaving: false };
-    case "stopEditing":
-      return { ...state, isEditing: false, isSaving: false };
-    case "done":
-      return { ...state, isSaving: false };
-  }
+function WikiReadView({ breadcrumb, title, content, updatedAt, headings, outlineVisible, onToggleOutline, onEdit, slug, pageSlug }: {
+  breadcrumb: string;
+  title: string;
+  content: TipTapDoc | undefined;
+  updatedAt: string;
+  headings: { level: number; text: string; id: string }[];
+  outlineVisible: boolean;
+  onToggleOutline: () => void;
+  onEdit: () => void;
+  slug: string;
+  pageSlug: string;
+}) {
+  return (
+    <div className="wiki-content wiki-edit-workspace">
+      <div className="flex flex-1 min-w-0">
+        <div className="flex-1 overflow-y-auto" style={{ padding: "32px 48px" }}>
+          <div className="wiki-prose">
+            <PageViewHeader breadcrumb={breadcrumb} onEdit={onEdit} />
+            <h1 id={slugifyHeading(title)}>{title}</h1>
+            <div>{renderDoc(content ?? emptyDoc, "wiki")}</div>
+            <SourcesSection
+              slug={slug}
+              documentType="wiki"
+              documentId={pageSlug}
+              className="mt-8 pt-4 border-t border-lx-border-subtle"
+            />
+            <div className="mt-8 pt-4 border-t border-lx-border-subtle">
+              <span className="font-micro text-2xs text-lx-text-muted uppercase tracking-[0.04em]">
+                Last edited {formatRelative(updatedAt)}
+              </span>
+            </div>
+          </div>
+        </div>
+        <OutlineSidebar headings={headings} collapsed={!outlineVisible} onToggle={onToggleOutline} />
+      </div>
+    </div>
+  );
+}
+
+function EditHeader({ breadcrumb, title, isSaving, historyPreviewId, onCancel, onSave, onTitleChange }: {
+  breadcrumb: string;
+  title: string;
+  isSaving: boolean;
+  historyPreviewId: string | null;
+  onCancel: () => void;
+  onSave: () => void;
+  onTitleChange: (title: string) => void;
+}) {
+  return (
+    <>
+      <div
+        className="flex items-center justify-between"
+        style={{ padding: "12px 16px", borderBottom: "1px solid var(--lx-border-subtle)" }}
+      >
+        <div className="flex items-center gap-2">
+          <span className="text-xs text-lx-text-muted font-body">{breadcrumb}</span>
+          <span className="font-micro text-2xs text-lx-text-warning uppercase tracking-[0.04em]">Editing</span>
+        </div>
+        <div className="flex items-center gap-2">
+          <button type="button" className="btn btn-ghost" onClick={onCancel}>
+            Cancel
+          </button>
+          <button type="button" className="btn btn-primary" onClick={onSave} disabled={isSaving || historyPreviewId !== null}>
+            {isSaving ? "Saving..." : "Save"}
+          </button>
+        </div>
+      </div>
+
+      <div style={{ padding: "12px 16px 0" }}>
+        <input
+          className="wiki-title-input"
+          aria-label="Page title"
+          value={title}
+          onChange={(e) => onTitleChange(e.target.value)}
+          placeholder="Page title"
+        />
+      </div>
+    </>
+  );
 }
 
 export function WikiPageViewer({ slug, page, pages }: WikiPageViewerProps) {
-  const navigate = useNavigate();
-  const updateWikiPage = useUpdateWikiPage(slug);
-  const restoreWikiPage = useRestoreWikiRevision(slug);
+  const {
+    editor,
+    isEditing,
+    title,
+    lastSavedPage,
+    lastSavedAt,
+    isDirty,
+    isSaving,
+    restoring,
+    previewContent,
+    historyPreviewId,
+    autosaveEnabled,
+    autosaveDelay,
+    setAutosaveEnabled,
+    setAutosaveDelay,
+    handleStartEditing,
+    handleCancel,
+    handleSave,
+    handleSelectRevision,
+    handleClosePreview,
+    handleRestore,
+    handleReviewStateChange,
+    handleTitleChange,
+  } = useWikiEditor({ slug, page });
 
-  const [edit, dispatch] = useReducer(editReducer, page, initEditState);
-  const { isEditing, title, lastSavedPage, lastSavedAt, isDirty, isSaving } = edit;
-  const [previewContent, setPreviewContent] = useState<TipTapDoc>(emptyDoc);
-  const [historyPreviewId, setHistoryPreviewId] = useState<string | null>(null);
-  const [autosaveEnabled, setAutosaveEnabled] = useState(() => {
-    if (typeof window === "undefined") return false;
-    const stored = window.localStorage.getItem("lexa-wiki-autosave");
-    return stored === null ? false : stored === "true";
-  });
-  const [autosaveDelay, setAutosaveDelay] = useState(() => {
-    if (typeof window === "undefined") return 800;
-    const stored = window.localStorage.getItem("lexa-wiki-autosave-delay");
-    return stored === null ? 800 : Number(stored) || 800;
-  });
   const [sidebarVisible, setSidebarVisible] = useState(true);
   const [outlineVisible, setOutlineVisible] = useState(true);
-
-
-  useEffect(() => {
-    window.localStorage.setItem("lexa-wiki-autosave", String(autosaveEnabled));
-  }, [autosaveEnabled]);
-
-  useEffect(() => {
-    window.localStorage.setItem("lexa-wiki-autosave-delay", String(autosaveDelay));
-  }, [autosaveDelay]);
-
-  const editorRef = useRef<Editor | null>(null);
-  const titleRef = useRef(title);
-  const autosaveTimer = useRef<number | null>(null);
-  const markDirtyRef = useRef<() => void>(() => {});
-  // While a Forge result is being reviewed, autosave is suspended — the
-  // unaccepted insert must not reach the database before Accept.
-  const reviewActiveRef = useRef(false);
-  const historyPreviewRef = useRef<string | null>(null);
-  const previewSnapshotRef = useRef<TipTapDoc | null>(null);
-
-  useEffect(() => {
-    titleRef.current = title;
-  }, [title]);
-
-  const editor = useEditor({
-    immediatelyRender: false,
-    extensions: [
-      StarterKit.configure({ heading: { levels: [2, 3, 4, 5] }, code: false }),
-      // Code must combine with other marks (bold+code is valid CommonMark,
-      // common in Forge results) or accepting such a result throws.
-      Code.extend({ excludes: "" }),
-      TaskList,
-      TaskItem.configure({ nested: true }),
-      Link.configure({ openOnClick: false }),
-      Highlight,
-      Underline,
-      // Image + table nodes must be in the schema for stored pages to open
-      // without ProseMirror dropping the nodes (unknown nodes are stripped).
-      Image.configure({ inline: true, allowBase64: false }),
-      Table.configure({ resizable: false }),
-      TableRow,
-      TableHeader,
-      TableCell,
-      Placeholder.configure({ placeholder: "Start writing..." }),
-    ],
-    content: (page.content ?? emptyDoc) as unknown as JSONContent,
-    editable: isEditing,
-    onUpdate: () => markDirtyRef.current?.(),
-    editorProps: {
-      attributes: {
-        style: "line-height: 26px",
-      },
-    },
-  });
-
-  useEffect(() => {
-    editorRef.current = editor ?? null;
-  }, [editor]);
-
-  const updatePreviewRef = useRef<(json: TipTapDoc) => void>(() => {});
-
-  useEffect(() => {
-    updatePreviewRef.current = (json: TipTapDoc) => setPreviewContent(json);
-  }, []);
-
-  useEffect(() => {
-    historyPreviewRef.current = historyPreviewId;
-  }, [historyPreviewId]);
-
-  useEffect(() => {
-    if (!editor) return;
-    const handler = () => {
-      // A history preview owns the preview pane — live editor updates must
-      // not clobber it until Close preview hands the pane back.
-      if (historyPreviewRef.current !== null) return;
-      updatePreviewRef.current(editor.getJSON() as unknown as TipTapDoc);
-    };
-    editor.on("update", handler);
-    return () => {
-      editor.off("update", handler);
-    };
-  }, [editor]);
 
   const breadcrumb = buildAncestors(pages, page)
     .map((a) => a.title)
     .join(" / ");
 
-  const save = async (saveType: "autosave" | "manual" = "manual") => {
-    const editor = editorRef.current;
-    if (!editor) return;
-    if (autosaveTimer.current !== null) {
-      window.clearTimeout(autosaveTimer.current);
-      autosaveTimer.current = null;
-    }
-    dispatch({ type: "saving" });
-    try {
-      const savedPage = await updateWikiPage.mutateAsync({
-        pageSlug: page.slug,
-        title: titleRef.current,
-        content: editor.getJSON() as unknown as TipTapDoc,
-        saveType,
-      });
-      dispatch({ type: "saved", page: savedPage, at: new Date() });
-      if (savedPage.slug !== page.slug) {
-        navigate({
-          to: "/$slug/wiki/$pageSlug",
-          params: { slug, pageSlug: savedPage.slug },
-          replace: true,
-        });
-      }
-    } finally {
-      dispatch({ type: "done" });
-    }
-  };
-
-  const saveRef = useRef(save);
-  useEffect(() => {
-    saveRef.current = save;
-  });
-
-  const handleSelectRevision = async (revisionId: string) => {
-    if (historyPreviewId === revisionId) return;
-    try {
-      const { revision } = await api.getWikiRevision(slug, page.slug, revisionId);
-      const editor = editorRef.current;
-      // First preview captures the live doc (may hold unsaved typing); a
-      // revision-to-revision swap must not clobber that snapshot.
-      if (previewSnapshotRef.current === null && editor) {
-        previewSnapshotRef.current = editor.getJSON() as unknown as TipTapDoc;
-      }
-      editor?.commands.setContent(revision.content as unknown as JSONContent, { emitUpdate: false });
-      editor?.setEditable(false);
-      setHistoryPreviewId(revisionId);
-      setPreviewContent(revision.content);
-    } catch {
-      const snapshot = previewSnapshotRef.current;
-      if (snapshot) {
-        previewSnapshotRef.current = null;
-        const editor = editorRef.current;
-        editor?.commands.setContent(snapshot as unknown as JSONContent, { emitUpdate: false });
-        editor?.setEditable(true);
-      }
-      setHistoryPreviewId(null);
-    }
-  };
-
-  const handleClosePreview = () => {
-    const snapshot = previewSnapshotRef.current;
-    previewSnapshotRef.current = null;
-    setHistoryPreviewId(null);
-    const editor = editorRef.current;
-    if (editor) {
-      if (snapshot) editor.commands.setContent(snapshot as unknown as JSONContent, { emitUpdate: false });
-      editor.setEditable(true);
-      setPreviewContent(editor.getJSON() as unknown as TipTapDoc);
-    }
-  };
-
-  const handleRestore = async (revisionId: string) => {
-    if (autosaveTimer.current !== null) {
-      window.clearTimeout(autosaveTimer.current);
-      autosaveTimer.current = null;
-    }
-    try {
-      const restored = await restoreWikiPage.mutateAsync({ pageSlug: page.slug, revisionId });
-      dispatch({ type: "title", title: restored.title });
-      dispatch({ type: "saved", page: restored, at: new Date() });
-      editorRef.current?.commands.setContent((restored.content ?? emptyDoc) as unknown as JSONContent);
-      if (autosaveTimer.current !== null) {
-        window.clearTimeout(autosaveTimer.current);
-        autosaveTimer.current = null;
-      }
-      previewSnapshotRef.current = null;
-      editorRef.current?.setEditable(true);
-      setHistoryPreviewId(null);
-      setPreviewContent(restored.content ?? emptyDoc);
-      if (restored.slug !== page.slug) {
-        navigate({
-          to: "/$slug/wiki/$pageSlug",
-          params: { slug, pageSlug: restored.slug },
-          replace: true,
-        });
-      }
-    } catch {
-      // restore failed — mutation cache untouched, UI stays as-is
-    }
-  };
-
-  const markDirty = useCallback(() => {
-    dispatch({ type: "dirty" });
-    if (reviewActiveRef.current) return;
-    if (!autosaveEnabled) return;
-    if (autosaveTimer.current !== null) window.clearTimeout(autosaveTimer.current);
-    autosaveTimer.current = window.setTimeout(() => {
-      void saveRef.current("autosave");
-    }, autosaveDelay);
-  }, [autosaveEnabled, autosaveDelay]);
-
-  const handleReviewStateChange = (active: boolean, _accepted: boolean) => {
-    reviewActiveRef.current = active;
-    if (!active) {
-      // Accept/Reject ended the review — persist whatever the doc holds now
-      // (the accepted result, or the restored pre-review snapshot).
-      markDirtyRef.current?.();
-    }
-  };
-
-  useEffect(() => {
-    markDirtyRef.current = markDirty;
-  }, [markDirty]);
-
-  const handleStartEditing = () => {
-    dispatch({ type: "start", page });
-    setPreviewContent(page.content ?? emptyDoc);
-    editorRef.current?.setEditable(true);
-    editorRef.current?.commands.setContent((page.content ?? emptyDoc) as unknown as JSONContent);
-  };
-
-  const handleCancel = () => {
-    if (autosaveTimer.current !== null) {
-      window.clearTimeout(autosaveTimer.current);
-      autosaveTimer.current = null;
-    }
-    previewSnapshotRef.current = null;
-    setHistoryPreviewId(null);
-    dispatch({ type: "cancel", page: lastSavedPage });
-    editorRef.current?.setEditable(true);
-    editorRef.current?.commands.setContent(lastSavedPage.content as unknown as JSONContent);
-    dispatch({ type: "stopEditing" });
-  };
-
-  const handleSave = async () => {
-    if (isDirty) await saveRef.current("manual");
-    editorRef.current?.setEditable(false);
-    dispatch({ type: "stopEditing" });
-  };
-
-  useEffect(() => {
-    return () => {
-      if (autosaveTimer.current !== null) window.clearTimeout(autosaveTimer.current);
-    };
-  }, []);
-
   if (!isEditing) {
     const rawHeadings = extractHeadings(page.content as unknown as import("../tiptap-render").TTNode);
-    const pageTitleId = slugifyHeading(page.title);
     const headings = [
-      { level: 1, text: page.title, id: pageTitleId },
+      { level: 1, text: page.title, id: slugifyHeading(page.title) },
       ...rawHeadings.filter((h) => h.level >= 2),
     ];
     return (
-      <div className="wiki-content wiki-edit-workspace">
-        <div className="flex flex-1 min-w-0">
-          <div className="flex-1 overflow-y-auto" style={{ padding: "32px 48px" }}>
-            <div className="wiki-prose">
-              <div className="flex items-center justify-between mb-1">
-                <span className="text-xs text-lx-text-muted font-body">{breadcrumb}</span>
-                <button type="button" className="btn btn-ghost h-7 px-2.5 text-xs" onClick={handleStartEditing}>
-                  <Pencil size={14} strokeWidth={1.5} />
-                  Edit
-                </button>
-              </div>
-              <h1 id={pageTitleId}>{page.title}</h1>
-              <div>{renderDoc(page.content, "wiki")}</div>
-              <SourcesSection
-                slug={slug}
-                documentType="wiki"
-                documentId={page.slug}
-                className="mt-8 pt-4 border-t border-lx-border-subtle"
-              />
-              <div className="mt-8 pt-4 border-t border-lx-border-subtle">
-                <span className="font-micro text-2xs text-lx-text-muted uppercase tracking-[0.04em]">
-                  Last edited {formatRelative(page.updatedAt)}
-                </span>
-              </div>
-            </div>
-          </div>
-          <OutlineSidebar headings={headings} collapsed={!outlineVisible} onToggle={() => setOutlineVisible(!outlineVisible)} />
-        </div>
-      </div>
+      <WikiReadView
+        breadcrumb={breadcrumb}
+        title={page.title}
+        content={page.content}
+        updatedAt={page.updatedAt}
+        headings={headings}
+        outlineVisible={outlineVisible}
+        onToggleOutline={() => setOutlineVisible(!outlineVisible)}
+        onEdit={handleStartEditing}
+        slug={slug}
+        pageSlug={page.slug}
+      />
     );
   }
 
   return (
     <div className="wiki-content wiki-edit-workspace">
       <div className="wiki-edit-main flex flex-col" style={{ padding: 0, overflow: "hidden" }}>
-        {/* Header */}
-        <div
-          className="flex items-center justify-between"
-          style={{ padding: "12px 16px", borderBottom: "1px solid var(--lx-border-subtle)" }}
-        >
-          <div className="flex items-center gap-2">
-            <span className="text-xs text-lx-text-muted font-body">{breadcrumb}</span>
-            <span className="font-micro text-2xs text-lx-text-warning uppercase tracking-[0.04em]">Editing</span>
-          </div>
-          <div className="flex items-center gap-2">
-            <button type="button" className="btn btn-ghost" onClick={handleCancel}>
-              Cancel
-            </button>
-            <button type="button" className="btn btn-primary" onClick={handleSave} disabled={isSaving || historyPreviewId !== null}>
-              {isSaving ? "Saving..." : "Save"}
-            </button>
-          </div>
-        </div>
-
-        {/* Title input */}
-        <div style={{ padding: "12px 16px 0" }}>
-          <input
-            className="wiki-title-input"
-            aria-label="Page title"
-            value={title}
-            onChange={(e) => {
-              dispatch({ type: "title", title: e.target.value });
-              markDirty();
-            }}
-            placeholder="Page title"
-          />
-        </div>
+        <EditHeader
+          breadcrumb={breadcrumb}
+          title={title}
+          isSaving={isSaving}
+          historyPreviewId={historyPreviewId}
+          onCancel={handleCancel}
+          onSave={handleSave}
+          onTitleChange={handleTitleChange}
+        />
 
         <WikiEditSplit
           editor={editor}
@@ -477,7 +236,7 @@ export function WikiPageViewer({ slug, page, pages }: WikiPageViewerProps) {
         onSelectRevision={(id) => void handleSelectRevision(id)}
         onRestore={(id) => void handleRestore(id)}
         onClosePreview={handleClosePreview}
-        restoring={restoreWikiPage.isPending}
+        restoring={restoring}
       />
     </div>
   );

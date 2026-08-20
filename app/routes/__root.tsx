@@ -1,6 +1,5 @@
-import { HeadContent, Outlet, Scripts, createRootRoute, redirect } from "@tanstack/react-router";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { useState } from "react";
+import { HeadContent, Outlet, Scripts, createRootRouteWithContext, redirect } from "@tanstack/react-router";
+import { QueryClientProvider } from "@tanstack/react-query";
 import phosphorCss from "../styles/phosphor.css?url";
 import { ModalStackProvider } from "../components/ui/ModalStack";
 import { ToastProvider } from "../components/ui/Toast";
@@ -8,15 +7,20 @@ import { ProjectSelectionProvider } from "../lib/project-selection";
 import { TeamSelectionProvider } from "../lib/team-selection";
 import { AppShell } from "../components/layout/AppShell";
 import { getSession } from "../lib/auth";
+import type { RouterContext } from "../router";
 
 // Public/auth surfaces — everything else requires a session. The guard runs
 // on the server too (SSR cookie forwarding in getSession, try/catch inside);
 // a missing/invalid session bounces to /login with the target remembered.
 const PUBLIC_PATHS = new Set(["/login", "/set-password", "/invite", "/setup"]);
 
-export const Route = createRootRoute({
+export const Route = createRootRouteWithContext<RouterContext>()({
   beforeLoad: async ({ location }) => {
     if (PUBLIC_PATHS.has(location.pathname)) return;
+    // Direct fetch, not the query cache: the guard must reflect the real
+    // session cookie on every navigation, and seeding the cache here
+    // interacts badly with useSession's staleTime (perpetual-loading / loop
+    // on the login page). The client's useSession will populate the cache.
     const res = await getSession();
     if (!res.session) {
       throw redirect({ to: "/login", search: { redirect: location.href } });
@@ -38,7 +42,7 @@ export const Route = createRootRoute({
 });
 
 function RootComponent() {
-  const [queryClient] = useState(() => new QueryClient());
+  const { queryClient } = Route.useRouteContext();
   return (
     <html lang="en" data-theme="dark">
       <head>

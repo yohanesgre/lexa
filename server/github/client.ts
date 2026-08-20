@@ -236,7 +236,11 @@ export class GitHubClient extends Effect.Service<GitHubClient>()("GitHubClient",
               });
             }
             const items = (await res.json()) as { number: number; title: string; state: "open" | "closed"; pull_request?: unknown }[];
-            return items.filter((i) => !i.pull_request).map((i) => ({ number: i.number, title: i.title, state: i.state }));
+            const out: { number: number; title: string; state: "open" | "closed" }[] = [];
+            for (const i of items) {
+              if (!i.pull_request) out.push({ number: i.number, title: i.title, state: i.state });
+            }
+            return out;
           },
           catch: (e) => (e instanceof GithubApiError ? e : new GithubApiError({ message: String(e) })),
         }),
