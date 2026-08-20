@@ -11,7 +11,7 @@ export function Toggle({ checked, onChange, label, disabled, className }: Toggle
     <div className={className}>
       <button
         type="button"
-        className="toggle-switch"
+        className={`toggle-switch${checked ? " is-on" : ""}`}
         aria-pressed={checked}
         aria-label={typeof label === "string" ? label : undefined}
         disabled={disabled}
