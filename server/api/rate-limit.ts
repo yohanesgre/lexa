@@ -126,3 +126,11 @@ export function createRateLimiter(opts?: RateLimiterOptions): RateLimiter {
 // from the same IP against one window. Initialized with the code-level
 // defaults; the boot sync applies the DB-configured limits before serving.
 export const apiRateLimiter = createRateLimiter({ max: DEFAULT_RATE_LIMIT_MAX, windowMs: DEFAULT_RATE_LIMIT_WINDOW_MS });
+
+// Public /api/share/* surface: unauthenticated by design, so a much stricter
+// fixed per-IP bucket applies (abuse magnet). Deliberately NOT DB-configurable
+// and NOT shared with the general API bucket — a flood on share links must not
+// degrade authenticated traffic, and vice versa.
+export const SHARE_RATE_LIMIT_MAX = 30;
+export const SHARE_RATE_LIMIT_WINDOW_MS = 60_000;
+export const shareRateLimiter = createRateLimiter({ max: SHARE_RATE_LIMIT_MAX, windowMs: SHARE_RATE_LIMIT_WINDOW_MS });

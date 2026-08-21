@@ -1025,6 +1025,22 @@ const WikiShareCreatePayload = Schema.Struct({
 
 const ShareLinkPath = Schema.Struct({ slug: Schema.String, linkId: Schema.String });
 
+// Public share surface: children typed loosely — the service owns the
+// recursive shape; content follows the same TipTap-JSON boundary as
+// WikiPageSchema (Schema.Any precedent).
+const SharedPageNodeSchema = Schema.Struct({
+  id: Schema.String,
+  title: Schema.String,
+  slug: Schema.String,
+  content: Schema.Any,
+  updatedAt: Schema.String,
+  children: Schema.Array(Schema.Any),
+});
+
+const WikiSharePublicResponse = Schema.Struct({ root: SharedPageNodeSchema });
+
+const ShareTokenPath = Schema.Struct({ token: Schema.String });
+
 const SwimlaneMutationResponse = Schema.Struct({
   data: SwimlaneSchema,
   activity: Schema.Array(ActivityEventSchema),
@@ -1272,6 +1288,12 @@ const wikiGroup = HttpApiGroup.make("wiki")
   .add(HttpApiEndpoint.del("revokeShareLink", "/projects/:slug/wiki/share/:linkId")
     .setPath(ShareLinkPath).addSuccess(Schema.Void, { status: 204 }));
 
+// PUBLIC surface — token IS the auth. Middleware skips AUTH for /api/share/*
+// (stricter rate bucket instead); the handler consumes NO AuthIdentity.
+const publicShareGroup = HttpApiGroup.make("publicShare")
+  .add(HttpApiEndpoint.get("getSharedWiki", "/share/:token")
+    .setPath(ShareTokenPath).addSuccess(WikiSharePublicResponse));
+
 const ApiKeyPath = Schema.Struct({ id: Schema.String });
 
 // Response shape is the frontend contract: envOverride is retained but env is
@@ -1393,6 +1415,7 @@ export const LexaApi = HttpApi.make("lexa")
   .add(teamsGroup)
   .add(workspaceGroup)
   .add(sessionsGroup)
+  .add(publicShareGroup)
   .prefix("/api");
 
 const apiLayer = HttpApiBuilder.api(LexaApi);
@@ -3019,8 +3042,20 @@ const wikiLive = HttpApiBuilder.group(LexaApi, "wiki", (handlers) =>
     )
 );
 
-const apiKeysLive = HttpApiBuilder.group(LexaApi, "api-keys", (handlers) =>
-  handlers
+// PUBLIC group handler — token-scoped read only. Deliberately consumes NO
+// AuthIdentity: exempt paths receive a synthetic admin identity from the
+// middleware, and honoring it here would make every token equivalent to
+// full read access.
+const publicShareLive = HttpApiBuilder.group(LexaApi, "publicShare", (handlers) =>
+  handlers.handle("getSharedWiki", (req) =>
+    respond(Effect.gen(function* () {
+      const shareService = yield* WikiShareService;
+      return yield* shareService.resolvePublic(req.path.token);
+    }))
+  )
+);
+
+const apiKeysLive = HttpApiBuilder.group(LexaApi, "api-keys", (handlers) =>  handlers
     .handle("listApiKeys", (req) =>
       respond(Effect.gen(function* () {
         yield* requireAdmin;
@@ -3263,7 +3298,7 @@ export function createApiHandler(dbPath: string) {
 
   const serviceLayer = buildServiceLayer();
   const handlerLayer = Layer.mergeAll(
-    healthLive, setupLive, projectsLive, columnsLive, swimlanesLive, milestonesLive, fieldConfigLive, forgeLive, taskLinksLive, tasksLive, boardLive, wikiLive, apiKeysLive, adminLive, meLive, dashboardLive,
+    healthLive, setupLive, projectsLive, columnsLive, swimlanesLive, milestonesLive, fieldConfigLive, forgeLive, taskLinksLive, tasksLive, boardLive, wikiLive, publicShareLive, apiKeysLive, adminLive, meLive, dashboardLive,
     createTeamsLive(LexaApi), createWorkspaceLive(LexaApi), createSessionsLive(LexaApi),
   ).pipe(Layer.provide(Layer.provide(serviceLayer, Layer.mergeAll(dbLayer, LoggerLayer))), Layer.provide(dbLayer));
   const merged = Layer.mergeAll(apiLayer, handlerLayer);

@@ -5,7 +5,7 @@ import { Database } from "bun:sqlite";
 import { AuthIdentity, AuthIdentityShape } from "./auth";
 import { constantTimeTokenEqual, resolveApiKeyIdentity } from "./auth-key";
 import { MAX_API_BODY, X_LEXA_REMOTE_IP } from "./limits";
-import { apiRateLimiter, isPrivateIp, isRateLimitExemptPath } from "./rate-limit";
+import { apiRateLimiter, isPrivateIp, isRateLimitExemptPath, shareRateLimiter } from "./rate-limit";
 import { auth } from "../auth";
 
 // API-level middleware wrapped around the whole HttpApi router. Applied at
@@ -46,6 +46,10 @@ export function createApiMiddleware(db: Database, dbPath: string) {
 
       const isSetup = path.startsWith("/api/setup");
       const isHealth = path === "/api/health";
+      // Public wiki share reads: token IS the auth (capability URL). Skipped by
+      // AUTH below but still rate-limited — with the dedicated stricter
+      // shareRateLimiter bucket instead of the general API bucket.
+      const isPublicShare = path.startsWith("/api/share/");
       // Forge daemon endpoints accept the daemon token (LXK_FORGE_DAEMON_TOKEN)
       // in place of the API key — the daemon may hold its own credential.
       // /api/forge/sessions joins them: the daemon PUTs the pre-spawn mapping
@@ -63,8 +67,9 @@ export function createApiMiddleware(db: Database, dbPath: string) {
       const stampedIp = request.headers[X_LEXA_REMOTE_IP] ?? "";
       const cfIp = request.headers["cf-connecting-ip"];
       const ip = stampedIp && isPrivateIp(stampedIp) && cfIp ? cfIp : (stampedIp || cfIp || "unknown");
-      if (!isRateLimitExemptPath(path) && !apiRateLimiter.check(ip)) {
-        const retryAfter = Math.ceil(apiRateLimiter.retryAfterMs(ip) / 1000);
+      const limiter = isPublicShare ? shareRateLimiter : apiRateLimiter;
+      if (!isRateLimitExemptPath(path) && !limiter.check(ip)) {
+        const retryAfter = Math.ceil(limiter.retryAfterMs(ip) / 1000);
         console.warn(`[API] rate limited ip=${ip} retryAfter=${retryAfter}s`);
         return withSecurityHeaders(
           HttpServerResponse.unsafeJson(
@@ -89,7 +94,7 @@ export function createApiMiddleware(db: Database, dbPath: string) {
         ? constantTimeTokenEqual(request.headers["x-forge-token"] ?? "", process.env.LXK_FORGE_DAEMON_TOKEN)
         : false;
       let identity: AuthIdentityShape;
-      if (!isHealth && !isSetup && !daemonTokenOk) {
+      if (!isHealth && !isSetup && !daemonTokenOk && !isPublicShare) {
         // Dual-channel (R4): session cookie first (browsers), Bearer key
         // second (machines). The x-lxk-user header is removed — never read.
         const session = yield* sessionIdentity(new Headers(request.headers));
