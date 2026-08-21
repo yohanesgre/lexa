@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Check, Copy, Plus, Share2, X } from "lucide-react";
+import { Check, Copy, Link as LinkIcon, Plus, Share2, X } from "lucide-react";
 import { useCreateWikiShareLink, useRevokeWikiShareLink, useWikiShareLinks } from "../../lib/queries";
 import type { WikiShareLink } from "../../lib/api";
 import { parseApiDate } from "../../lib/date";
@@ -42,9 +42,15 @@ export function ShareDialog({ slug, pageSlug, isOpen, onClose }: ShareDialogProp
     try {
       const { link } = await createLink.mutateAsync(expiry === "" ? undefined : expiry);
       setExpiry("");
-      await navigator.clipboard.writeText(link.url);
-      setCopiedId(link.id);
-      window.setTimeout(() => setCopiedId((current) => (current === link.id ? null : current)), 2000);
+      // Auto-copy is best-effort — a clipboard rejection must not surface as
+      // an API failure.
+      try {
+        await navigator.clipboard.writeText(link.url);
+        setCopiedId(link.id);
+        window.setTimeout(() => setCopiedId((current) => (current === link.id ? null : current)), 2000);
+      } catch {
+        /* link created; user can copy manually */
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to create link");
     }
@@ -81,7 +87,7 @@ export function ShareDialog({ slug, pageSlug, isOpen, onClose }: ShareDialogProp
               <div key={link.id} className="github-issue-row" title={link.url}>
                 <div style={{ minWidth: 0 }}>
                   <div className="flex items-center gap-2">
-                    <Share2 size={12} strokeWidth={1.5} className="text-lx-text-muted shrink-0" />
+                    <LinkIcon size={12} strokeWidth={1.5} className="text-lx-text-muted shrink-0" />
                     <span className="font-mono text-xs text-lx-text-primary truncate">{link.url}</span>
                   </div>
                   <div className="flex items-center gap-2 mt-1">
