@@ -159,9 +159,9 @@ POST /api/projects/:slug/wiki/pages/:pageSlug/share
   201 { "link": { "id", "url", "expiresAt", "createdAt" } }
       url = `${PUBLIC_URL}/share/${token}`           // token itself NEVER returned after create
 GET  /api/projects/:slug/wiki/pages/:pageSlug/share
-  200 { "links": [ { "id", "url", "expiresAt", "createdAt" } ] }
+  200 { "data": [ { "id", "url", "expiresAt", "createdAt" } ] }
 DELETE /api/projects/:slug/wiki/share/:linkId
-  200 { "ok": true }        // match existing DELETE response shape in http.ts
+  204                       // match neighboring DELETEs — respond(undefined) → 204
   404 SHARE_LINK_NOT_FOUND
 ```
 
