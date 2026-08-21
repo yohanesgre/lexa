@@ -92,6 +92,16 @@ describe("SharedWikiPage", () => {
     expect(document.querySelector('meta[name="robots"][content="noindex"]')).toBeTruthy();
   });
 
+  it("theme toggle flips data-theme on the document", () => {
+    localStorage.setItem("lexa:theme", "dark");
+    render(<SharedWikiPage tree={tree} token="tok" />);
+    const toggle = screen.getByRole("button", { name: "Switch to light theme" });
+    fireEvent.click(toggle);
+    expect(document.documentElement.dataset.theme).toBe("light");
+    expect(localStorage.getItem("lexa:theme")).toBe("light");
+    expect(screen.getByRole("button", { name: "Switch to dark theme" })).toBeTruthy();
+  });
+
   it("renders an empty page (content:{}) without crashing", () => {
     const emptyTree = {
       root: {
