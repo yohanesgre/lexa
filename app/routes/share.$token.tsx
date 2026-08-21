@@ -42,7 +42,14 @@ export function SharedWikiPage({ tree, token }: { tree: SharedTree | null; token
     return (
       <main style={{ maxWidth: 720, margin: "0 auto", padding: "48px 24px" }}>
         <div className="empty-box">
-          <div className="flex justify-center mb-3">{fileIcon}</div>
+          <div className="flex justify-center mb-3">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} style={{ color: "var(--lx-text-muted)" }}>
+              <path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z" />
+              <polyline points="14 2 14 8 20 8" />
+              <line x1="9.5" x2="14.5" y1="12.5" y2="17.5" />
+              <line x1="14.5" x2="9.5" y1="12.5" y2="17.5" />
+            </svg>
+          </div>
           <h2 className="font-display text-xl font-semibold text-lx-text-primary mb-2">Page not available</h2>
           <p className="text-sm text-lx-text-secondary mb-2" style={{ lineHeight: 20, maxWidth: 400 }}>
             This shared link is invalid, has expired, or was revoked by the owner.
@@ -67,6 +74,12 @@ export function SharedWikiPage({ tree, token }: { tree: SharedTree | null; token
   };
   walk(tree.root);
   const current = (currentId !== null && byId.get(currentId)) || tree.root;
+  // Empty pages arrive as content:{} — normalize so renderDoc never sees a
+  // doc without a content array.
+  const doc: TipTapDoc =
+    current.content && typeof current.content === "object" && Array.isArray((current.content as TipTapDoc).content)
+      ? (current.content as TipTapDoc)
+      : { type: "doc", content: [] };
 
   return (
     <>
@@ -85,7 +98,7 @@ export function SharedWikiPage({ tree, token }: { tree: SharedTree | null; token
       <main style={{ padding: "0 24px 32px" }}>
         <div className="wiki-prose">
           <h1>{current.title}</h1>
-          <div>{renderDoc(current.content as TipTapDoc, "wiki")}</div>
+          <div>{renderDoc(doc, "wiki")}</div>
 
           {current.children.length > 0 && (
             <div style={{ marginTop: 32, paddingTop: 16, borderTop: "1px solid var(--lx-border-subtle)" }}>
@@ -105,7 +118,10 @@ export function SharedWikiPage({ tree, token }: { tree: SharedTree | null; token
                   onClick={() => setCurrentId(child.id)}
                 >
                   <div className="flex items-center gap-2" style={{ minWidth: 0 }}>
-                    {fileIcon}
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} style={{ color: "var(--lx-text-muted)", flexShrink: 0 }}>
+                      <path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z" />
+                      <polyline points="14 2 14 8 20 8" />
+                    </svg>
                     <span className="text-sm text-lx-text-primary">{child.title}</span>
                   </div>
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} style={{ color: "var(--lx-text-muted)", flexShrink: 0 }}>
@@ -134,12 +150,16 @@ function SharePage() {
 
   useEffect(() => {
     let cancelled = false;
-    fetchSharedTree(token).then((result) => {
-      if (!cancelled) {
-        setTree(result);
-        setLoaded(true);
-      }
-    });
+    // Any failure (network error, malformed body) resolves to the dead-link
+    // state — a visitor must never see a permanent blank page.
+    fetchSharedTree(token)
+      .catch(() => null)
+      .then((result) => {
+        if (!cancelled) {
+          setTree(result);
+          setLoaded(true);
+        }
+      });
     return () => {
       cancelled = true;
     };
