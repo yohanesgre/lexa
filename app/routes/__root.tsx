@@ -44,7 +44,7 @@ export const Route = createRootRouteWithContext<RouterContext>()({
 function RootComponent() {
   const { queryClient } = Route.useRouteContext();
   return (
-    <html lang="en" data-theme="dark">
+    <html lang="en">
       <head>
         <HeadContent />
       </head>

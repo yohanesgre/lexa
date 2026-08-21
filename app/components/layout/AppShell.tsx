@@ -4,6 +4,7 @@ import { useProjectSelection } from "../../lib/project-selection";
 import { ForgeStatus } from "../forge/ForgeStatus";
 import { NavLink } from "./NavLink";
 import { ProjectSwitcher } from "./ProjectSwitcher";
+import { ThemeToggle } from "./ThemeToggle";
 import { UserMenu } from "./UserMenu";
 
 // Full-screen surfaces with no app chrome: auth pages + the setup wizard.
@@ -71,6 +72,7 @@ export function AppShell() {
           </div>
           <div className="nav-spacer" />
           <div className="nav-right">
+            <ThemeToggle />
             <ForgeStatus />
             <ProjectSwitcher routeType={routeType} />
             <UserMenu />
