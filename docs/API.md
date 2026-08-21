@@ -920,15 +920,15 @@ body { revisionId* }
 
 POST   /api/projects/:slug/wiki/pages/:pageSlug/share
 body { expiresAt? }              (UTC ISO-8601; {} or omitted = never expires)
-→ 201 { link: { id, url, expiresAt, createdAt } } | 404 PAGE_NOT_FOUND | 403
+→ 201 { link: { id, url, expiresAt, createdAt } } | 404 PAGE_NOT_FOUND | 403 PROJECT_ACCESS_DENIED
   url = `${PUBLIC_URL}/share/${token}` — the token itself is NEVER returned
   after create (capability: only the URL carries it).
 
 GET    /api/projects/:slug/wiki/pages/:pageSlug/share
-→ 200 { links: [{ id, url, expiresAt, createdAt }] } | 404 PAGE_NOT_FOUND | 403
+→ 200 { links: [{ id, url, expiresAt, createdAt }] } | 404 PAGE_NOT_FOUND | 403 PROJECT_ACCESS_DENIED
 
 DELETE /api/projects/:slug/wiki/share/:linkId
-→ 200 { ok: true } | 404 SHARE_LINK_NOT_FOUND | 403
+→ 200 { ok: true } | 404 SHARE_LINK_NOT_FOUND | 403 PROJECT_ACCESS_DENIED
   Revocation = row deletion; the link stops resolving immediately.
 ```
 
