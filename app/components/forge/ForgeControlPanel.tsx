@@ -372,7 +372,7 @@ function TaskDetailSlideover({ detail, detailProjectSlug, runtimes, logs, runtim
               {detail.status === "completed" && (
                 <>
                   <div className="font-micro text-2xs text-lx-text-muted" style={{ textTransform: "uppercase", letterSpacing: "0.04em", margin: "16px 0 8px" }}>Result</div>
-                  <div style={{ background: "var(--lx-bg-success-subtle)", border: "1px solid rgba(74,222,128,0.25)", borderRadius: 6, padding: "12px 16px", fontSize: 14, lineHeight: "22px", color: "var(--lx-text-primary)", whiteSpace: "pre-wrap", fontFamily: "var(--lx-font-body)" }}>
+                  <div className="card-panel card-panel--success" style={{ whiteSpace: "pre-wrap" }}>
                     {detail.result || "No result returned."}
                   </div>
                 </>
@@ -498,7 +498,7 @@ export function ForgeControlPanel() {
           <div style={{ height: 12, borderRadius: 4, background: "var(--lx-surface-elevated)", width: "62%" }} />
         </div>
       ) : history.isError ? (
-        <div className="mt-8" style={{ background: "var(--lx-bg-danger-subtle)", border: "1px solid rgba(255,68,68,0.25)", borderRadius: 8, padding: "16px 20px", display: "flex", alignItems: "center", gap: 12 }}>
+        <div className="notice notice-danger mt-8">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" style={{ color: "var(--lx-text-danger)", flexShrink: 0 }}>
             <path d="M12 9v4m0 4h.01" />
             <path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />

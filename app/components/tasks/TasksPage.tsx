@@ -246,7 +246,7 @@ export function TasksPage({ slug, search }: TasksPageProps) {
                 <span className="task-row-meta">
                   {swimlaneId && (
                     <span className="task-row-where">
-                      <span className="task-chip type" style={{ color: "var(--lx-text-link)", borderColor: "var(--lx-text-link)" }}>
+                      <span className="task-chip gh">
                         Sprint: {swimlanes.find((l) => l.id === swimlaneId)?.name ?? swimlaneId}
                       </span>
                     </span>
@@ -267,7 +267,7 @@ export function TasksPage({ slug, search }: TasksPageProps) {
                 </span>
                 <span className="task-row-status">
                   {t.id === exactMatchId && (
-                    <span className="task-chip type" style={{ color: "var(--lx-text-link)", borderColor: "var(--lx-text-link)" }}>
+                    <span className="task-chip gh">
                       exact match
                     </span>
                   )}

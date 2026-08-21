@@ -220,7 +220,7 @@ function SetupWizard() {
                   <div className="text-sm font-medium text-lx-text-primary">Include sample data</div>
                   <div className="text-xs text-lx-text-muted mt-0.5">4 projects, 15 tasks, wiki tree, GitHub link examples</div>
                 </div>
-                <input type="checkbox" className="w-4 h-4 accent-[var(--lx-accent)]" checked={seed} onChange={(e) => setSeed(e.target.checked)} />
+                <input type="checkbox" className="w-4 h-4 accent-[var(--lx-text-link)]" checked={seed} onChange={(e) => setSeed(e.target.checked)} />
               </label>
               <div className="flex justify-between mt-5">
                 <button type="button" className="btn btn-ghost" onClick={() => setStep(1)}>

@@ -179,7 +179,7 @@ export function TaskPropertyBar(props: TaskPropertyBarProps) {
         trigger={({ toggle }) => {
           const opt = (fieldConfig?.types ?? []).find((t) => t.id === createType);
           return (
-            <button type="button" className="type-badge" onClick={toggle} style={{ background: `${opt?.color ?? "#6b7280"}1a`, color: opt?.color ?? "#6b7280", boxShadow: "var(--lx-focus-glow)", borderRadius: 4 }}>
+            <button type="button" className="type-badge" onClick={toggle} style={{ background: `${opt?.color ?? "#6B6560"}1a`, color: opt?.color ?? "#6B6560", boxShadow: "var(--lx-focus-glow)", borderRadius: 4 }}>
               {opt?.label ?? "—"}
             </button>
           );
@@ -200,7 +200,7 @@ export function TaskPropertyBar(props: TaskPropertyBarProps) {
         trigger={({ toggle }) => {
           const opt = (fieldConfig?.types ?? []).find((t) => t.id === task!.type);
           return (
-            <button type="button" className="type-badge" onClick={toggle} style={{ background: `${opt?.color ?? "#6b7280"}1a`, color: opt?.color ?? "#6b7280" }}>
+            <button type="button" className="type-badge" onClick={toggle} style={{ background: `${opt?.color ?? "#6B6560"}1a`, color: opt?.color ?? "#6B6560" }}>
               {opt?.label ?? "—"}
             </button>
           );

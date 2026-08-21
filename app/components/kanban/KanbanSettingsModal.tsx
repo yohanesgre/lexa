@@ -11,25 +11,19 @@ import { CSS } from "@dnd-kit/utilities";
 import { GripVertical, Plus, Trash2, X } from "lucide-react";
 import { ColumnsSettingsSection } from "./ColumnsSettingsSection";
 import { OptionSettingsSection } from "./OptionSettingsSection";
-import { SwimlanesSettingsSection } from "./SwimlanesSettingsSection";
-import { ModalPortal, useModalStack } from "../ui/ModalStack";
-import type { Column, Swimlane, FieldConfig, FieldOption } from "../../../shared/types";
+import { ModalPortal } from "../ui/ModalStack";
+import type { Column, FieldConfig, FieldOption } from "../../../shared/types";
 import {
   useColumns,
   useCreateColumn,
   useUpdateColumn,
   useDeleteColumn,
-  useSwimlanes,
-  useCreateSwimlane,
-  useUpdateSwimlane,
-  useDeleteSwimlane,
   useFieldConfig,
   useUpdateFieldConfig,
 } from "../../lib/queries";
 import { cn } from "../ui/cn";
 import { OPTION_COLORS } from "../../lib/option-colors";
 import { ColumnForm } from "./ColumnForm";
-import { SwimlaneForm } from "./SwimlaneForm";
 import { OptionForm } from "./OptionForm";
 
 interface KanbanSettingsModalProps {
@@ -68,22 +62,6 @@ function ConfirmDeleteDialog({ title, body, onCancel, onConfirm }: { title: stri
   );
 }
 
-function DescriptionModal({ target, onClose, overlayZ, dialogZ }: { target: Swimlane; onClose: () => void; overlayZ: number; dialogZ: number }) {
-  return (
-    <ModalPortal overlayZ={overlayZ} dialogZ={dialogZ}>
-      <dialog open className="dialog dialog-enter pointer-events-auto" aria-modal="true" aria-label="Confirm" style={{ maxWidth: 440 }}>
-        <h2 className="font-display text-lg font-medium text-lx-text-primary">{target.name}</h2>
-        <div className="text-sm text-lx-text-secondary font-body leading-5 mt-3 whitespace-pre-wrap">
-          {target.description || "No description."}
-        </div>
-        <div className="flex items-center justify-end gap-2 mt-4">
-          <button type="button" className="btn btn-ghost" onClick={onClose}>Close</button>
-        </div>
-      </dialog>
-    </ModalPortal>
-  );
-}
-
 function SettingsModalHeader({ onClose }: { onClose: () => void }) {
   return (
     <div className="flex items-center justify-between h-14 px-4 border-b border-lx-border-subtle flex-shrink-0">
@@ -108,18 +86,12 @@ export function KanbanSettingsModal({ slug, isOpen, onClose }: KanbanSettingsMod
 
 function SettingsContent({ slug, onClose }: { slug: string; onClose: () => void }) {
   const { data: columns = [], isLoading: columnsLoading, isError: columnsError } = useColumns(slug);
-  const { data: swimlanes = [], isLoading: swimlanesLoading, isError: swimlanesError } = useSwimlanes(slug);
   const { data: fieldConfig, isLoading: configLoading, isError: configError } = useFieldConfig(slug);
   const updateFieldConfig = useUpdateFieldConfig(slug);
-  const base = useModalStack();
 
   const createColumn = useCreateColumn(slug);
   const updateColumn = useUpdateColumn(slug);
   const deleteColumn = useDeleteColumn(slug);
-
-  const createSwimlane = useCreateSwimlane(slug);
-  const updateSwimlane = useUpdateSwimlane(slug);
-  const deleteSwimlane = useDeleteSwimlane(slug);
 
   const [optionForm, setOptionForm] = useState<{ kind: "priority" | "type"; isOpen: boolean; option?: FieldOption | null }>({ kind: "priority", isOpen: false, option: null });
   const [optionOrder, setOptionOrder] = useState<{ priorities: string[]; types: string[] }>({ priorities: [], types: [] });
@@ -191,22 +163,14 @@ function SettingsContent({ slug, onClose }: { slug: string; onClose: () => void 
   };
 
   const [columnForm, setColumnForm] = useState<{ isOpen: boolean; column?: Column | null }>({ isOpen: false, column: null });
-  const [swimlaneForm, setSwimlaneForm] = useState<{ isOpen: boolean; swimlane?: Swimlane | null }>({ isOpen: false, swimlane: null });
   const [deleteColumnTarget, setDeleteColumnTarget] = useState<Column | null>(null);
-  const [deleteSwimlaneTarget, setDeleteSwimlaneTarget] = useState<Swimlane | null>(null);
-  const [descModalTarget, setDescModalTarget] = useState<Swimlane | null>(null);
 
   // DnD state — track local item order, sync positions on drop
   const [colOrder, setColOrder] = useState<string[]>([]);
-  const [laneOrder, setLaneOrder] = useState<string[]>([]);
 
   useEffect(() => {
     if (columns.length > 0) setColOrder(columns.map((c) => c.id));
   }, [columns]);
-
-  useEffect(() => {
-    if (swimlanes.length > 0) setLaneOrder(swimlanes.map((s) => s.id));
-  }, [swimlanes]);
 
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
 
@@ -221,28 +185,12 @@ function SettingsContent({ slug, onClose }: { slug: string; onClose: () => void 
     });
   };
 
-  const handleSwimlaneDragEnd = (event: DragEndEvent) => {
-    const oldIndex = laneOrder.indexOf(event.active.id as string);
-    const newIndex = laneOrder.indexOf(event.over!.id as string);
-    if (oldIndex === newIndex) return;
-    const reordered = arrayMove(laneOrder, oldIndex, newIndex);
-    setLaneOrder(reordered);
-    reordered.forEach((id, i) => {
-      updateSwimlane.mutate({ id, position: i });
-    });
-  };
-
   const orderedColumns = useMemo(() => {
     if (colOrder.length === 0) return columns;
     return colOrder.flatMap((id) => { const c = columns.find((c) => c.id === id); return c ? [c] : []; });
   }, [columns, colOrder]);
 
-  const orderedSwimlanes = useMemo(() => {
-    if (laneOrder.length === 0) return swimlanes;
-    return laneOrder.flatMap((id) => { const s = swimlanes.find((s) => s.id === id); return s ? [s] : []; });
-  }, [swimlanes, laneOrder]);
-
-  const isLoading = columnsLoading || swimlanesLoading;
+  const isLoading = columnsLoading;
 
   return (
     <>
@@ -264,7 +212,7 @@ function SettingsContent({ slug, onClose }: { slug: string; onClose: () => void 
           <div className="px-5 py-4 overflow-y-auto" style={{ maxHeight: "calc(100vh - 140px)" }}>
             {isLoading || configLoading ? (
               <div className="text-sm text-lx-text-muted py-8 text-center">Loading settings…</div>
-            ) : columnsError || swimlanesError || configError ? (
+            ) : columnsError || configError ? (
               <div className="text-sm text-lx-text-danger py-8 text-center">Failed to load settings.</div>
             ) : (
               <>
@@ -301,17 +249,6 @@ function SettingsContent({ slug, onClose }: { slug: string; onClose: () => void 
                   onEdit={(opt) => setOptionForm({ kind: "type", isOpen: true, option: opt })}
                   onDelete={(opt) => deleteOption("type", opt)}
                   onAdd={() => setOptionForm({ kind: "type", isOpen: true, option: null })}
-                />
-
-
-                <SwimlanesSettingsSection
-                  swimlanes={orderedSwimlanes}
-                  sensors={sensors}
-                  onDragEnd={handleSwimlaneDragEnd}
-                  onEdit={(sw) => setSwimlaneForm({ isOpen: true, swimlane: sw })}
-                  onDelete={setDeleteSwimlaneTarget}
-                  onAdd={() => setSwimlaneForm({ isOpen: true, swimlane: null })}
-                  onShowDescription={setDescModalTarget}
                 />
 
               </>
@@ -363,23 +300,6 @@ function SettingsContent({ slug, onClose }: { slug: string; onClose: () => void 
       />
       )}
 
-      {swimlaneForm.isOpen && (
-<SwimlaneForm
-        slug={slug}
-        swimlane={swimlaneForm.swimlane ?? null}
-        isOpen={swimlaneForm.isOpen}
-        zIndex={80}
-        onClose={() => setSwimlaneForm({ isOpen: false, swimlane: null })}
-        onSubmit={(input) => {
-          if (swimlaneForm.swimlane) {
-            updateSwimlane.mutate({ id: swimlaneForm.swimlane.id, name: input.name, description: input.description ?? undefined, dueAt: input.dueAt ?? undefined, startAt: input.startAt ?? undefined, milestoneId: input.milestoneId ?? undefined });
-          } else {
-            createSwimlane.mutate({ name: input.name, description: input.description ?? undefined, dueAt: input.dueAt ?? undefined, startAt: input.startAt ?? undefined, milestoneId: input.milestoneId ?? undefined });
-          }
-        }}
-      />
-      )}
-
       {deleteColumnTarget && (
         <ConfirmDeleteDialog
           title={`Delete ‘${deleteColumnTarget.name}’?`}
@@ -387,21 +307,6 @@ function SettingsContent({ slug, onClose }: { slug: string; onClose: () => void 
           onCancel={() => setDeleteColumnTarget(null)}
           onConfirm={() => { deleteColumn.mutate({ id: deleteColumnTarget.id }); setDeleteColumnTarget(null); }}
         />
-      )}
-
-      {deleteSwimlaneTarget && (
-        <ConfirmDeleteDialog
-          title={`Delete ‘${deleteSwimlaneTarget.name}’?`}
-          body="This will unassign all tasks in this swimlane. This action cannot be undone."
-          onCancel={() => setDeleteSwimlaneTarget(null)}
-          onConfirm={() => { deleteSwimlane.mutate({ id: deleteSwimlaneTarget.id }); setDeleteSwimlaneTarget(null); }}
-        />
-      )}
-
-      
-
-      {descModalTarget && (
-        <DescriptionModal target={descModalTarget} onClose={() => setDescModalTarget(null)} overlayZ={base.overlayZ} dialogZ={base.dialogZ} />
       )}
     </>
   );

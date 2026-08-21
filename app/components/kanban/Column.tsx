@@ -83,7 +83,7 @@ export function Column({ id, children, data, isEmpty, slug, columnId, swimlaneId
           <div className="flex flex-col gap-2 mt-2">
             <div className="flex items-center justify-between">
               <span className="prop-label">Priority</span>
-              <select className="prop-input" aria-label="Priority" style={{ width: 140, color: priorities.find((p) => p.id === priority)?.color ?? "#A0A0A0" }} value={priority} onChange={(e) => setPriority(e.target.value)}>
+              <select className="prop-input" aria-label="Priority" style={{ width: 140, color: priorities.find((p) => p.id === priority)?.color ?? "var(--lx-text-muted)" }} value={priority} onChange={(e) => setPriority(e.target.value)}>
                 {priorities.map((p) => (
                   <option key={p.id} value={p.id} style={{ color: p.color }}>● {p.label}</option>
                 ))}
@@ -91,7 +91,7 @@ export function Column({ id, children, data, isEmpty, slug, columnId, swimlaneId
             </div>
             <div className="flex items-center justify-between">
               <span className="prop-label">Type</span>
-              <select className="prop-input" aria-label="Type" style={{ width: 140, color: types.find((t) => t.id === type)?.color ?? "#A0A0A0" }} value={type} onChange={(e) => setType(e.target.value)}>
+              <select className="prop-input" aria-label="Type" style={{ width: 140, color: types.find((t) => t.id === type)?.color ?? "var(--lx-text-muted)" }} value={type} onChange={(e) => setType(e.target.value)}>
                 {types.map((t) => (
                   <option key={t.id} value={t.id} style={{ color: t.color }}>● {t.label}</option>
                 ))}

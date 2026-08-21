@@ -369,8 +369,9 @@ function CompleteMilestoneDialog({ milestone, laneCount, liveTaskCount, onCancel
               {laneCount > 0 && <> — plus their <b>{liveTaskCount} live {liveTaskCount === 1 ? "task" : "tasks"}</b></>}.
               The milestone is complete when all its sprints are archived.
             </p>
-            <div className="text-sm" style={{ marginTop: 12, padding: "10px 12px", border: "1px solid rgba(255,153,153,0.4)", borderRadius: 6, background: "var(--lx-bg-danger-subtle)", color: "var(--lx-text-danger)" }}>
-              Archive is reversible: Restore brings the milestone back, sprints restore individually.
+            <div className="notice notice-danger" style={{ marginTop: 12 }}>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5}><circle cx="12" cy="12" r="10" /><line x1="12" y1="8" x2="12" y2="12" /><line x1="12" y1="16" x2="12.01" y2="16" /></svg>
+              <span>Archive is reversible: Restore brings the milestone back, sprints restore individually.</span>
             </div>
           </div>
           <div className="modal-footer">

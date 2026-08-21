@@ -5,6 +5,7 @@ import * as api from "../../lib/api";
 import { copyToClipboard } from "../../lib/clipboard";
 import { useRuntimes } from "../../lib/queries";
 import { parseApiDate } from "../../lib/date";
+import { cn } from "../ui/cn";
 import type { Runtime } from "../../../shared/types";
 
 const USER_TIME_ZONE = typeof window !== "undefined" ? Intl.DateTimeFormat().resolvedOptions().timeZone : "UTC";
@@ -70,7 +71,7 @@ export function RuntimeRestartModal({ runtime, onClose }: { runtime: Runtime; on
             <button type="button" className="btn btn-ghost" style={{ width: 32, height: 32, padding: 0 }} onClick={onClose} aria-label="Close"><X size={16} strokeWidth={1.5} /></button>
           </div>
           <div className="modal-body">
-            <div className="card-row flex items-start gap-3 mb-4" style={{ background: machineOnline ? "var(--lx-bg-warning-subtle)" : "var(--lx-bg-danger-subtle)" }}>
+            <div className={cn("card-row flex items-start gap-3 mb-4", machineOnline ? "card-row--warning" : "card-row--danger")}>
               <RefreshCw size={16} strokeWidth={1.5} className="text-lx-text-link flex-shrink-0" style={{ marginTop: 1 }} />
               <div>
                 <div className="text-sm font-medium text-lx-text-primary">{machineOnline ? "Machine listener is online" : "Machine listener is offline"}</div>

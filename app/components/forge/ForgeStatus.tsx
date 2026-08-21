@@ -141,19 +141,13 @@ export function ForgeStatus() {
     <div ref={containerRef} style={{ position: "relative" }}>
       <button
         type="button"
-        className="forge-status"
+        className={cn(
+          "forge-status",
+          active ? "forge-status--warning" : failedCount > 0 ? "forge-status--danger" : idle ? "forge-status--idle" : "forge-status--ok"
+        )}
         onClick={toggle}
         aria-expanded={open}
         aria-haspopup="menu"
-        style={
-          active
-            ? { background: "var(--lx-surface-card)", borderColor: "rgba(240,192,64,0.35)", color: "var(--lx-text-primary)" }
-            : failedCount > 0
-              ? { background: "var(--lx-bg-danger-subtle)", borderColor: "rgba(255,68,68,0.25)", color: "var(--lx-text-danger)" }
-              : idle
-                ? { background: "var(--lx-surface-card)", borderColor: "var(--lx-border-default)", color: "var(--lx-text-secondary)" }
-                : { background: "var(--lx-bg-success-subtle)", borderColor: "rgba(74,222,128,0.25)", color: "var(--lx-text-success)" }
-        }
       >
         {active ? (
           <>

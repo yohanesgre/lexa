@@ -11,10 +11,10 @@ function toggleSet<T>(set: Set<T>, value: T): Set<T> {
   return next;
 }
 
-function FilterSection({ label, children }: { label: string; children: React.ReactNode }) {
+function FilterSection({ label, first, children }: { label: string; first?: boolean; children: React.ReactNode }) {
   return (
     <>
-      <div className="prop-label" style={{ padding: "6px 10px 2px" }}>
+      <div className="prop-label" style={{ padding: first ? "6px 10px 2px" : "0 10px 2px" }}>
         {label}
       </div>
       {children}
@@ -69,8 +69,8 @@ function FilterPopover({
   const types = board.fieldConfig?.types ?? [];
 
   return (
-    <div className="menu-popover right" style={{ top: 40, minWidth: 256, maxHeight: "calc(100vh - 120px)", overflowY: "auto" }}>
-      <FilterSection label="Column">
+    <div className="menu-popover right filter-popover" style={{ top: 40, minWidth: 256, maxHeight: "calc(100vh - 120px)", overflowY: "auto" }}>
+      <FilterSection label="Column" first>
         {board.columns.map((col) => (
           <FilterCheckbox
             key={col.id}
@@ -207,7 +207,6 @@ export function FilterButton({ board, filters, onChange }: { board: Board; filte
       <button
         type="button"
         className={cn("btn btn-ghost text-sm", active && "border-lx-border-focus text-lx-text-primary")}
-        style={active ? { borderColor: "rgba(240, 192, 64, 0.35)" } : undefined}
         onClick={() => setOpen((v) => !v)}
       >
         <Filter size={14} strokeWidth={1.5} />
