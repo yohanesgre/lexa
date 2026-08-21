@@ -425,6 +425,26 @@ CREATE TABLE wiki_page_revisions (
 CREATE INDEX idx_revisions_page ON wiki_page_revisions(page_id, created_at DESC);
 
 -- ============================================================
+-- Wiki Share Links (public, revocable read links)
+-- ============================================================
+-- token = capability: random base64url, stored plaintext, UNIQUE (the UNIQUE
+--   index doubles as the public lookup index). The API returns the full URL
+--   once at create; the raw token is never sent again afterwards.
+-- expires_at: UTC ISO-8601 or NULL (= never expires), compared lexically
+--   server-side. Revocation is row deletion; deleting a page cascades its
+--   links. Public reads resolve the descendant tree at request time, and
+--   missing/expired/revoked links are indistinguishable externally.
+CREATE TABLE wiki_share_links (
+  id          TEXT PRIMARY KEY,
+  page_id     TEXT NOT NULL REFERENCES wiki_pages(id) ON DELETE CASCADE,
+  token       TEXT NOT NULL UNIQUE,
+  expires_at  TEXT,
+  created_by  TEXT NOT NULL REFERENCES users(id),
+  created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- ============================================================
 -- API Keys (machine auth)
 -- ============================================================
 -- Raw key format: "lxk_" + base62(32 random bytes) — high entropy by

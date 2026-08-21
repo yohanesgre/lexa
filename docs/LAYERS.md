@@ -16,12 +16,14 @@
 │                   Service Layer                          │
 │  TaskService  WikiService  ProjectService               │
 │  ColumnService  SwimlaneService  MilestoneService        │
+│  WikiShareService                                        │
 │  GitHubService ──depends on──▶ TaskService               │
 │                        + ProjectService (webhooks)       │
 ├─────────────────────────────────────────────────────────┤
 │                 Repository Layer                         │
 │  TaskRepo  ProjectRepo  WikiRepo  ColumnRepo            │
 │  SwimlaneRepo  MilestoneRepo  ApiKeyRepo  WebhookEventRepo │
+│  WikiShareRepo                                           │
 ├─────────────────────────────────────────────────────────┤
 │               Infrastructure Layer                       │
 │  Sqlite (bun:sqlite)   GitHubClient   Config (env)      │
@@ -703,8 +705,8 @@ One `HttpApiBuilder.middleware` wraps the whole router (pre-routing, before deco
 - **Literal short-circuits only.** Return `HttpServerResponse.unsafeJson(...)` for 429/413/401/403 — never `Effect.fail` with an undeclared error. In @effect/platform 0.97 the error encoder cannot encode undeclared failures → raw cause → 500 trap.
 - **`AuthIdentity` is provided, not re-fetched.** Middleware resolves the caller ONCE — session cookie first (`SessionService.userFrom`, try/catch), Bearer key fallback (`resolveApiKeyIdentity(authHeader, db)`) — on the *shared* Sqlite connection and `Effect.provideService`s the tag; handlers/`requireSuperadmin` read it. Per-request DB opens are banned (they cost 3 PRAGMAs each). `/api/auth/*` is mounted BEFORE this middleware (Better Auth handler owns that path).
 - **Socket IP lives only in entry.** `remoteAddress` is unpopulated on the web-handler path, so entry stamps `x-lexa-remote-ip` (deleting any inbound value first — spoof guard) on the reconstructed request; middleware applies the `isPrivateIp`-gated `cf-connecting-ip` trust.
-- **Exemptions are path predicates inside the middleware**: `/api/setup*` + `/api/health` skip AUTH only (they stay rate-limited); `/api/forge/daemon/*` + `/api/forge/runtimes/register` + `/api/forge/machines/heartbeat` accept the daemon token where applicable and are rate-limit-exempt (key/token-gated machine surfaces — log streams and the 3s heartbeat must not 429).
-- **Rate limiting shares one bucket** (`apiRateLimiter` singleton) and runs before auth — a blocked IP stays blocked regardless of key. Limits are DB-configured (`GET`/`PUT /api/settings/rate-limit`, admin-only): **DB settings (`settings.rate_limit_max` / `settings.rate_limit_window_ms`) with the code defaults (6000 / 600_000 ms) as fallback** — `resolveRateLimitFromDbValues` in `server/api/rate-limit.ts`. The DB is the single source of truth: env (`LXK_RATE_LIMIT_MAX` / `LXK_RATE_LIMIT_WINDOW_MS`) is a first-boot bootstrap, mirrored into the DB once at boot by `mirrorSettingsFromEnv` (server/db/settings.ts) when keys are empty, and never consulted at runtime. `syncRateLimitFromDb` applies the DB values at boot (after the mirror) and on save, so changes take effect live without a restart (existing buckets keep their windowStart and expire against the new window).
+- **Exemptions are path predicates inside the middleware**: `/api/setup*` + `/api/health` skip AUTH only (they stay rate-limited); `/api/share/*` skips AUTH only too (public wiki-share capability URLs — still rate-limited with a dedicated stricter bucket, security headers kept; handlers must not consume `AuthIdentity`, since exempt paths receive a synthetic identity); `/api/forge/daemon/*` + `/api/forge/runtimes/register` + `/api/forge/machines/heartbeat` accept the daemon token where applicable and are rate-limit-exempt (key/token-gated machine surfaces — log streams and the 3s heartbeat must not 429).
+- **Rate limiting shares one bucket** (`apiRateLimiter` singleton; `/api/share/*` excepted — it applies a dedicated stricter per-IP bucket so the public unauthenticated surface cannot exhaust the shared one) and runs before auth — a blocked IP stays blocked regardless of key. Limits are DB-configured (`GET`/`PUT /api/settings/rate-limit`, admin-only): **DB settings (`settings.rate_limit_max` / `settings.rate_limit_window_ms`) with the code defaults (6000 / 600_000 ms) as fallback** — `resolveRateLimitFromDbValues` in `server/api/rate-limit.ts`. The DB is the single source of truth: env (`LXK_RATE_LIMIT_MAX` / `LXK_RATE_LIMIT_WINDOW_MS`) is a first-boot bootstrap, mirrored into the DB once at boot by `mirrorSettingsFromEnv` (server/db/settings.ts) when keys are empty, and never consulted at runtime. `syncRateLimitFromDb` applies the DB values at boot (after the mirror) and on save, so changes take effect live without a restart (existing buckets keep their windowStart and expire against the new window).
 - **Router 404s** fail with `RouteNotFound` after the middleware; caught inside so 404s carry the security headers (empty body, platform-identical shape).
 - **`MaxBodySize` is unenforced in 0.97** — the authoritative body cap is entry's stream cap (`readBodyWithLimit`); the middleware pre-check is a declared-length fast-path only.
 
@@ -784,6 +786,7 @@ All list endpoints: `?limit` (default 50, max 200) + cursor (opaque: `"<columnId
 | `CommentEditForbidden` | 403 | edit another user's comment |
 | `CommentDeleteForbidden` | 403 | delete without author/admin authority |
 | `CommentInvalid` | 422 | invalid body (empty TipTap doc / >64KB) |
+| `ShareLinkNotFound` | 404 | wiki share link resolve/revoke: unknown, expired, and revoked all fail identically (no existence oracle) |
 
 Note: `RowNotFound` (server/db/database.ts) is a repo-level error with no
 `errorCodeMap` entry — if it ever reaches the HTTP error encoder it falls to
@@ -800,6 +803,7 @@ ForgeService       → ForgeRepo, ForgeSessionRepo, SourceRepo, SourceService, T
 SourceService      → SourceRepo, ProjectRepo, WikiRepo, ActivityService
 TaskLinkService    → TaskLinkRepo, TaskRepo, ProjectRepo, ActivityService
 WikiService        → WikiRepo, ProjectRepo
+WikiShareService   → WikiShareRepo, WikiRepo
 ProjectService     → ProjectRepo, ProjectReposRepo, ColumnRepo, SwimlaneRepo, FieldConfigRepo
 ColumnService      → ColumnRepo, ProjectRepo
 SwimlaneService    → SwimlaneRepo, ProjectRepo, TaskRepo, ActivityService
