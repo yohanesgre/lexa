@@ -40,7 +40,11 @@ export function ShareDialog({ slug, pageSlug, isOpen, onClose }: ShareDialogProp
     if (createLink.isPending) return;
     setError(null);
     try {
-      const { link } = await createLink.mutateAsync(expiry === "" ? undefined : expiry);
+      // <input type="date"> yields YYYY-MM-DD; the API contract requires a
+      // full ISO-8601 UTC instant — end-of-day UTC matches "expires on that
+      // date" intent.
+      const wireExpiry = expiry === "" ? undefined : new Date(`${expiry}T23:59:59.999Z`).toISOString();
+      const { link } = await createLink.mutateAsync(wireExpiry);
       setExpiry("");
       // Auto-copy is best-effort — a clipboard rejection must not surface as
       // an API failure.

@@ -64,12 +64,12 @@ describe("ShareDialog", () => {
     expect(revokeMutate).toHaveBeenCalledWith("l2");
   });
 
-  it("create calls the mutation with the picked expiry and auto-copies the new URL", async () => {
+  it("create converts the picked date to an end-of-day UTC ISO instant for the wire", async () => {
     const { createMutateAsync } = setupHooks();
     render(<ShareDialog slug="p1" pageSlug="home" isOpen onClose={() => {}} />);
     fireEvent.change(screen.getByLabelText("Expiry date (optional)"), { target: { value: "2026-12-31" } });
     fireEvent.click(screen.getByRole("button", { name: /Create link/ }));
-    await vi.waitFor(() => expect(createMutateAsync).toHaveBeenCalledWith("2026-12-31"));
+    await vi.waitFor(() => expect(createMutateAsync).toHaveBeenCalledWith("2026-12-31T23:59:59.999Z"));
     await vi.waitFor(() => expect(navigator.clipboard.writeText).toHaveBeenCalledWith("http://lexa.test/share/aaaa"));
   });
 
