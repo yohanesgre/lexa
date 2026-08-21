@@ -64,12 +64,17 @@ describe("ShareDialog", () => {
     expect(revokeMutate).toHaveBeenCalledWith("l2");
   });
 
-  it("create converts the picked date to an end-of-day UTC ISO instant for the wire", async () => {
+  it("create converts the picked calendar date to an end-of-day UTC ISO instant for the wire", async () => {
     const { createMutateAsync } = setupHooks();
     render(<ShareDialog slug="p1" pageSlug="home" isOpen onClose={() => {}} />);
-    fireEvent.change(screen.getByLabelText("Expiry date (optional)"), { target: { value: "2026-12-31" } });
+    fireEvent.click(screen.getByRole("button", { name: /No expiry/ }));
+    // Popover opens on the current month — pick day 15 (exists in every month).
+    const day15 = await screen.findAllByRole("button", { name: "15" });
+    fireEvent.click(day15[0]);
     fireEvent.click(screen.getByRole("button", { name: /Create link/ }));
-    await vi.waitFor(() => expect(createMutateAsync).toHaveBeenCalledWith("2026-12-31T23:59:59.999Z"));
+    const now = new Date();
+    const iso = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-15`;
+    await vi.waitFor(() => expect(createMutateAsync).toHaveBeenCalledWith(`${iso}T23:59:59.999Z`));
     await vi.waitFor(() => expect(navigator.clipboard.writeText).toHaveBeenCalledWith("http://lexa.test/share/aaaa"));
   });
 

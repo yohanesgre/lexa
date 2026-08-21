@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Check, Copy, Link as LinkIcon, Plus, Share2, X } from "lucide-react";
+import { DatePicker } from "../ui/DatePicker";
 import { useCreateWikiShareLink, useRevokeWikiShareLink, useWikiShareLinks } from "../../lib/queries";
 import type { WikiShareLink } from "../../lib/api";
 import { parseApiDate } from "../../lib/date";
@@ -20,7 +21,7 @@ export function ShareDialog({ slug, pageSlug, isOpen, onClose }: ShareDialogProp
   const createLink = useCreateWikiShareLink(slug, pageSlug);
   const revokeLink = useRevokeWikiShareLink(slug, pageSlug);
 
-  const [expiry, setExpiry] = useState("");
+  const [expiry, setExpiry] = useState<string | null>(null);
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -40,10 +41,10 @@ export function ShareDialog({ slug, pageSlug, isOpen, onClose }: ShareDialogProp
     if (createLink.isPending) return;
     setError(null);
     try {
-      // <input type="date"> yields YYYY-MM-DD; the API contract requires a
-      // full ISO-8601 UTC instant — end-of-day UTC matches "expires on that
-      // date" intent.
-      const wireExpiry = expiry === "" ? undefined : new Date(`${expiry}T23:59:59.999Z`).toISOString();
+      // DatePicker emits YYYY-MM-DD (or null = never); the API contract
+      // requires a full ISO-8601 UTC instant — end-of-day UTC matches
+      // "expires on that date" intent.
+      const wireExpiry = expiry === null ? undefined : new Date(`${expiry}T23:59:59.999Z`).toISOString();
       const { link } = await createLink.mutateAsync(wireExpiry);
       setExpiry("");
       // Auto-copy is best-effort — a clipboard rejection must not surface as
@@ -129,15 +130,9 @@ export function ShareDialog({ slug, pageSlug, isOpen, onClose }: ShareDialogProp
                 Create link
               </label>
               <div className="flex items-center gap-2">
-                <input
-                  id="share-expiry-input"
-                  type="date"
-                  className="prop-input"
-                  value={expiry}
-                  onChange={(e) => setExpiry(e.target.value)}
-                  style={{ width: 170, height: 32 }}
-                  aria-label="Expiry date (optional)"
-                />
+                <div style={{ width: 170 }}>
+                  <DatePicker value={expiry} onChange={setExpiry} placeholder="No expiry" />
+                </div>
                 <button type="button" className="btn btn-primary" style={{ flex: 1 }} disabled={createLink.isPending} onClick={() => void handleCreate()}>
                   <Plus size={14} strokeWidth={1.5} />
                   Create link
