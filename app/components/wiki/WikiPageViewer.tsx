@@ -85,7 +85,7 @@ function WikiReadView({ breadcrumb, title, content, updatedAt, headings, outline
     <div className="wiki-content wiki-edit-workspace">
       <div className="flex flex-1 min-w-0">
         <div className="flex-1 overflow-y-auto" style={{ padding: "32px 48px" }}>
-          <div className="wiki-prose">
+          <div className="wiki-prose" style={{ maxWidth: 760, margin: "0 auto" }}>
             <PageViewHeader breadcrumb={breadcrumb} onEdit={onEdit} onShare={onShare} />
             <h1 id={slugifyHeading(title)}>{title}</h1>
             <div>{renderDoc(content ?? emptyDoc, "wiki")}</div>
