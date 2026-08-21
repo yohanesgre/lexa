@@ -439,7 +439,7 @@ CREATE TABLE wiki_share_links (
   page_id     TEXT NOT NULL REFERENCES wiki_pages(id) ON DELETE CASCADE,
   token       TEXT NOT NULL UNIQUE,
   expires_at  TEXT,
-  created_by  TEXT NOT NULL REFERENCES users(id),
+  created_by  TEXT REFERENCES users(id),                       -- NULL = created via unbound admin API key
   created_at  TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
 );

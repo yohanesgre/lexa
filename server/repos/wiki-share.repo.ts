@@ -48,7 +48,7 @@ export class WikiShareRepo extends Effect.Service<WikiShareRepo>()("Lexa/WikiSha
         pageId: string;
         token: string;
         expiresAt?: string | null;
-        createdBy: string;
+        createdBy: string | null;
       }): Effect.Effect<void, ConstraintViolation | DbError> =>
         run(
           db,

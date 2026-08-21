@@ -45,7 +45,7 @@ CREATE TABLE wiki_share_links (
   page_id     TEXT NOT NULL REFERENCES wiki_pages(id) ON DELETE CASCADE,
   token       TEXT NOT NULL UNIQUE,
   expires_at  TEXT,
-  created_by  TEXT NOT NULL REFERENCES users(id),
+  created_by  TEXT REFERENCES users(id),
   created_at  TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
 );
@@ -73,7 +73,7 @@ Add data-invariant note: expiry is UTC ISO-8601 or NULL (never expires); revocat
 ```ts
 export interface WikiShareLinkRow {
   id: string; page_id: string; token: string;
-  expires_at: string | null; created_by: string;
+  expires_at: string | null; created_by: string | null;
   created_at: string; updated_at: string;
 }
 export class WikiShareRepo extends Effect.Service<WikiShareRepo>()("Lexa/WikiShareRepo") {
