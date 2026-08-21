@@ -35,7 +35,7 @@ export class WikiShareService extends Effect.Service<WikiShareService>()("Lexa/W
         projectId: string;
         pageId: string;
         expiresAt: string | null;
-        createdBy: string;
+        createdBy: string | null;
       }): Effect.Effect<WikiShareLinkRow, WikiPageNotFound | DbError> =>
         Effect.gen(function* () {
           const page = yield* wikiRepo.findById(input.pageId).pipe(

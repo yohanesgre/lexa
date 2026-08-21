@@ -15,7 +15,7 @@ import { AuthIdentity, actorFromIdentity } from "./auth";
 import { teamsGroup, createTeamsLive } from "./teams";
 import { workspaceGroup, createWorkspaceLive } from "./workspace";
 import { sessionsGroup, createSessionsLive } from "./sessions";
-import { auth } from "../auth";
+import { auth, PUBLIC_URL } from "../auth";
 import { createApiMiddleware } from "./middleware";
 import { resolveRateLimitFromDbValues, syncRateLimitFromDb } from "./rate-limit";
 import { syncGitHubConfigFromDb, resetGithubCaches } from "../github/client";
@@ -34,6 +34,9 @@ import { TaskService } from "../services/task.service";
 import { TaskRepo } from "../repos/task.repo";
 import { WikiService } from "../services/wiki.service";
 import { WikiRepo } from "../repos/wiki.repo";
+import { WikiShareService } from "../services/wiki-share.service";
+import { WikiShareRepo } from "../repos/wiki-share.repo";
+import type { WikiShareLinkRow } from "../repos/wiki-share.repo";
 import { ApiKeyService } from "../services/api-key.service";
 import { ApiKeyRepo } from "../repos/api-key.repo";
 import { UserService } from "../services/user.service";
@@ -1001,6 +1004,27 @@ const RevisionResponse = Schema.Struct({ revision: WikiPageRevisionSchema });
 
 const RestorePayload = Schema.Struct({ revisionId: Schema.String });
 
+const WikiShareLinkSchema = Schema.Struct({
+  id: Schema.String,
+  url: Schema.String,
+  expiresAt: Schema.NullOr(Schema.String),
+  createdAt: Schema.String,
+});
+
+const WikiShareCreateResponse = Schema.Struct({ link: WikiShareLinkSchema });
+
+const WikiShareListResponse = Schema.Struct({ data: Schema.Array(WikiShareLinkSchema) });
+
+// ISO-8601 UTC only — malformed strings fail schema decode (400) instead of
+// reaching the service, whose Date normalization would throw a RangeError.
+const WikiShareCreatePayload = Schema.Struct({
+  expiresAt: Schema.optional(
+    Schema.String.pipe(Schema.pattern(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{3})?Z$/))
+  ),
+});
+
+const ShareLinkPath = Schema.Struct({ slug: Schema.String, linkId: Schema.String });
+
 const SwimlaneMutationResponse = Schema.Struct({
   data: SwimlaneSchema,
   activity: Schema.Array(ActivityEventSchema),
@@ -1240,7 +1264,13 @@ const wikiGroup = HttpApiGroup.make("wiki")
   .add(HttpApiEndpoint.get("getRevision", "/projects/:slug/wiki/:pageSlug/revisions/:revisionId")
     .setPath(RevisionPath).addSuccess(RevisionResponse))
   .add(HttpApiEndpoint.post("restoreRevision", "/projects/:slug/wiki/:pageSlug/restore")
-    .setPath(PagePath).setPayload(RestorePayload).addSuccess(WikiPageSchema));
+    .setPath(PagePath).setPayload(RestorePayload).addSuccess(WikiPageSchema))
+  .add(HttpApiEndpoint.post("createShareLink", "/projects/:slug/wiki/pages/:pageSlug/share")
+    .setPath(PagePath).setPayload(WikiShareCreatePayload).addSuccess(WikiShareCreateResponse, { status: 201 }))
+  .add(HttpApiEndpoint.get("listShareLinks", "/projects/:slug/wiki/pages/:pageSlug/share")
+    .setPath(PagePath).addSuccess(WikiShareListResponse))
+  .add(HttpApiEndpoint.del("revokeShareLink", "/projects/:slug/wiki/share/:linkId")
+    .setPath(ShareLinkPath).addSuccess(Schema.Void, { status: 204 }));
 
 const ApiKeyPath = Schema.Struct({ id: Schema.String });
 
@@ -2831,6 +2861,15 @@ const dashboardLive = HttpApiBuilder.group(LexaApi, "dashboard", (handlers) =>
   )
 );
 
+function formatWikiShareLink(row: WikiShareLinkRow): Schema.Schema.Type<typeof WikiShareLinkSchema> {
+  return {
+    id: row.id,
+    url: `${PUBLIC_URL}/share/${row.token}`,
+    expiresAt: row.expires_at,
+    createdAt: row.created_at,
+  };
+}
+
 const wikiLive = HttpApiBuilder.group(LexaApi, "wiki", (handlers) =>
   handlers
     .handle("listPages", (req) =>
@@ -2942,6 +2981,40 @@ const wikiLive = HttpApiBuilder.group(LexaApi, "wiki", (handlers) =>
         const project = yield* requireProjectRead(req.path.slug);
         const page = yield* wikiService.restoreRevision(req.payload.revisionId, req.path.pageSlug, project.id);
         return formatWikiPage(page);
+      }))
+    )
+    .handle("createShareLink", (req) =>
+      respond(Effect.gen(function* () {
+        const shareService = yield* WikiShareService;
+        const wikiService = yield* WikiService;
+        const identity = yield* AuthIdentity;
+        const project = yield* requireProjectRead(req.path.slug);
+        const page = yield* wikiService.findBySlug(project.id, req.path.pageSlug);
+        const row = yield* shareService.create({
+          projectId: project.id,
+          pageId: page.id,
+          expiresAt: req.payload.expiresAt ?? null,
+          createdBy: identity.userId,
+        });
+        return { link: formatWikiShareLink(row) };
+      }))
+    )
+    .handle("listShareLinks", (req) =>
+      respond(Effect.gen(function* () {
+        const shareService = yield* WikiShareService;
+        const wikiService = yield* WikiService;
+        const project = yield* requireProjectRead(req.path.slug);
+        const page = yield* wikiService.findBySlug(project.id, req.path.pageSlug);
+        const rows = yield* shareService.list(page.id);
+        return { data: rows.map(formatWikiShareLink) };
+      }))
+    )
+    .handle("revokeShareLink", (req) =>
+      respond(Effect.gen(function* () {
+        const shareService = yield* WikiShareService;
+        yield* requireProjectRead(req.path.slug);
+        yield* shareService.revoke(req.path.linkId);
+        return undefined;
       }))
     )
 );
@@ -3227,6 +3300,7 @@ function buildServiceLayer() {
     TaskLinkRepo.Default, TaskLinkService.Default,
     ActivityRepo.Default, CommentRepo.Default, ActivityService.Default, CommentService.Default,
     WikiRepo.Default, WikiService.Default,
+    WikiShareRepo.Default, WikiShareService.Default,
     ApiKeyRepo.Default, ApiKeyService.Default,
     UserRepo.Default, UserService.Default,
     UserProjectRoleRepo.Default, UserProjectRoleService.Default,
