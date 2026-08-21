@@ -17,11 +17,16 @@ interface SharedTree {
 }
 
 // Plain fetch — the token IS the credential; the keyed API client must not
-// attach an Authorization header to this surface.
+// attach an Authorization header to this surface. Total: any failure
+// (network error, malformed body) resolves to null → dead-link state.
 export async function fetchSharedTree(token: string): Promise<SharedTree | null> {
-  const res = await fetch(`/api/share/${encodeURIComponent(token)}`);
-  if (!res.ok) return null;
-  return (await res.json()) as SharedTree;
+  try {
+    const res = await fetch(`/api/share/${encodeURIComponent(token)}`);
+    if (!res.ok) return null;
+    return (await res.json()) as SharedTree;
+  } catch {
+    return null;
+  }
 }
 
 function formatDate(iso: string): string {
