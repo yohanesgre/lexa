@@ -9,6 +9,7 @@ export class SwimlaneNotFound extends Data.TaggedError("SwimlaneNotFound")<{ id:
 export class MilestoneNotFound extends Data.TaggedError("MilestoneNotFound")<{ id: string; availableMilestones?: string[] }> {}
 export class InvalidArgs extends Data.TaggedError("InvalidArgs")<{ reason: string }> {}
 export class WikiPageNotFound extends Data.TaggedError("WikiPageNotFound")<{ id: string }> {}
+export class ShareLinkNotFound extends Data.TaggedError("ShareLinkNotFound")<{}> {}
 export class WipLimitExceeded extends Data.TaggedError("WipLimitExceeded")<{ columnName: string; limit: number; current: number }> {}
 export class DeadlineAfterLane extends Data.TaggedError("DeadlineAfterLane")<{
   date: string;                    // the lane's due date (YYYY-MM-DD)
@@ -70,6 +71,7 @@ export const errorCodeMap: Record<string, string> = {
   MilestoneNotFound: "MILESTONE_NOT_FOUND",
   InvalidArgs: "INVALID_ARGS",
   WikiPageNotFound: "PAGE_NOT_FOUND",
+  ShareLinkNotFound: "SHARE_LINK_NOT_FOUND",
   WipLimitExceeded: "WIP_LIMIT",
   DeadlineAfterLane: "DEADLINE_AFTER_LANE",
   BacklogProtected: "BACKLOG_PROTECTED",
@@ -153,6 +155,7 @@ export function errorToStatus(error: { _tag: string }): number {
     case "SwimlaneNotFound":
     case "MilestoneNotFound":
     case "WikiPageNotFound":
+    case "ShareLinkNotFound":
     case "SourceNotFound":
     case "ForgeTaskNotFound":
     case "AgentNotFound":
@@ -234,6 +237,8 @@ export function errorMessage(error: { _tag: string } & Record<string, unknown>):
       return String(error.reason ?? "Invalid arguments");
     case "WikiPageNotFound":
       return `Page not found`;
+    case "ShareLinkNotFound":
+      return `Share link not found`;
     case "WipLimitExceeded":
       return `Column '${error.columnName}' is at its WIP limit of ${error.limit}`;
     case "DeadlineAfterLane":
