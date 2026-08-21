@@ -1,6 +1,8 @@
 import { createFileRoute, Navigate, useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
 import { useSession, useSignIn } from "../lib/queries";
+import { Field } from "../components/ui/Field";
+import { TextInput } from "../components/ui/TextInput";
 
 export const Route = createFileRoute("/login")({
   validateSearch: (search: Record<string, unknown>): { redirect?: string } => ({
@@ -55,20 +57,11 @@ function LoginPage() {
             </div>
           )}
 
-          <div className="field" style={{ marginBottom: 12 }}>
-            <label className="field-label" htmlFor="login-email">Email</label>
-            <input
-              id="login-email"
-              className="prop-input w-full"
-              type="email"
-              placeholder="you@example.com"
-              autoComplete="username"
-              value={email}
-              onChange={(e) => { setEmail(e.target.value); if (error) setError(null); }}
-            />
-          </div>
+          <Field label="Email" htmlFor="login-email" className="field mb-3">
+            <TextInput id="login-email" type="email" placeholder="you@example.com" autoComplete="username" value={email} onChange={(v) => { setEmail(v); if (error) setError(null); }} />
+          </Field>
 
-          <div className="field" style={{ marginBottom: 16 }}>
+          <div className="field mb-4">
             <div className="flex items-center justify-between">
               <label className="field-label" htmlFor="login-password">Password</label>
               <span className="text-xs text-lx-text-muted" style={{ fontSize: 11 }}>Forgot password? Contact your admin</span>

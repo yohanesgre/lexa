@@ -5,6 +5,8 @@ import { ApiKeysSection, GithubSyncSection, MachinesRuntimesSection, RateLimitSe
 import { formatRelative } from "../../lib/relative-time";
 import { AgentsSettingsSection, SkillsSettingsSection } from "../forge/AgentSkillSettings";
 import { copyToClipboard } from "../../lib/clipboard";
+import { Field } from "../ui/Field";
+import { TextInput } from "../ui/TextInput";
 import type { WorkspaceInvite } from "../../../shared/types";
 import type { WorkspaceMember } from "../../lib/api";
 
@@ -252,14 +254,12 @@ function TeamsSection() {
       <div className="card-panel card-panel--elevated" style={{ marginBottom: 12 }}>
         <h3 className="font-display text-base font-medium text-lx-text-primary mb-3">Create team</h3>
         <div className="flex items-end gap-3 flex-wrap">
-          <div className="field" style={{ marginBottom: 0 }}>
-            <label className="field-label" htmlFor="team-name">Name</label>
-            <input id="team-name" className="prop-input" placeholder="Platform" value={name} onChange={(e) => setName(e.target.value)} style={{ minWidth: 200 }} />
-          </div>
-          <div className="field" style={{ marginBottom: 0 }}>
-            <label className="field-label" htmlFor="team-slug">Slug</label>
-            <input id="team-slug" className="prop-input font-mono" placeholder="platform" value={slug} onChange={(e) => setSlug(e.target.value)} style={{ minWidth: 160 }} />
-          </div>
+          <Field label="Name" htmlFor="team-name" className="field mb-0">
+            <TextInput id="team-name" placeholder="Platform" value={name} onChange={setName} style={{ minWidth: 200 }} />
+          </Field>
+          <Field label="Slug" htmlFor="team-slug" className="field mb-0">
+            <TextInput id="team-slug" className="font-mono" placeholder="platform" value={slug} onChange={setSlug} style={{ minWidth: 160 }} />
+          </Field>
           <button
             type="button"
             className="btn btn-primary"

@@ -7,6 +7,7 @@ import { RuntimeRestartModal } from "../forge/RuntimeRestartModal";
 import { copyToClipboard } from "../../lib/clipboard";
 import { formatRelative } from "../../lib/relative-time";
 import { parseApiDate } from "../../lib/date";
+import { Field } from "../ui/Field";
 import type { Runtime, Machine } from "../../../shared/types";
 
 // Workspace-scope settings sections, extracted from the old monolithic
@@ -401,8 +402,7 @@ export function RateLimitSection() {
         <div className="card-panel card-panel--elevated">
           <h3 className="font-display text-base font-medium text-lx-text-primary mb-3">Request Budget</h3>
           <div className="flex items-end gap-3 flex-wrap">
-            <div className="field" style={{ marginBottom: 0 }}>
-              <label className="field-label" htmlFor="rate-limit-max">Max requests</label>
+            <Field label="Max requests" htmlFor="rate-limit-max" className="field mb-0">
               <div className="flex items-center gap-2">
                 <input
                   id="rate-limit-max"
@@ -415,9 +415,8 @@ export function RateLimitSection() {
                 />
                 <span className="text-xs text-lx-text-secondary">per IP per window</span>
               </div>
-            </div>
-            <div className="field" style={{ marginBottom: 0 }}>
-              <label className="field-label" htmlFor="rate-limit-window">Window</label>
+            </Field>
+            <Field label="Window" htmlFor="rate-limit-window" className="field mb-0">
               <div className="flex items-center gap-2">
                 <input
                   id="rate-limit-window"
@@ -429,7 +428,7 @@ export function RateLimitSection() {
                 />
                 <span className="text-xs text-lx-text-secondary">minutes</span>
               </div>
-            </div>
+            </Field>
             <button
               type="button"
               className="btn btn-primary"
@@ -516,8 +515,7 @@ export function GithubSyncSection() {
           <div className="card-panel card-panel--elevated">
             <h3 className="font-display text-base font-medium text-lx-text-primary mb-3">Credentials</h3>
             <div className="flex items-end gap-3 flex-wrap">
-              <div className="field" style={{ marginBottom: 0 }}>
-                <label className="field-label" htmlFor="github-app-id">App ID</label>
+              <Field label="App ID" htmlFor="github-app-id" className="field mb-0">
                 <input
                   id="github-app-id"
                   className="prop-input"
@@ -525,9 +523,8 @@ export function GithubSyncSection() {
                   onChange={(e) => setAppId(e.target.value)}
                   style={{ width: 110 }}
                 />
-              </div>
-              <div className="field" style={{ marginBottom: 0 }}>
-                <label className="field-label" htmlFor="github-webhook-secret">Webhook secret</label>
+              </Field>
+              <Field label="Webhook secret" htmlFor="github-webhook-secret" className="field mb-0">
                 <input
                   id="github-webhook-secret"
                   className="prop-input font-mono"
@@ -536,7 +533,7 @@ export function GithubSyncSection() {
                   onChange={(e) => { setSecret(e.target.value); secretTouched.current = true; }}
                   style={{ width: 220, fontSize: 12 }}
                 />
-              </div>
+              </Field>
               <button
                 type="button"
                 className="btn btn-primary"
@@ -551,8 +548,7 @@ export function GithubSyncSection() {
               </button>
             </div>
 
-            <div className="field mt-4" style={{ marginBottom: 0 }}>
-              <label className="field-label" htmlFor="github-pem">Private key</label>
+            <Field label="Private key" htmlFor="github-pem" hint="Uploaded as a file, never pasted. The PEM is stored server-side; the API only reports whether a key is set." className="field mt-4">
               <div className="flex items-center gap-2">
                 <button type="button" className="btn btn-ghost" style={{ height: 32, padding: "0 12px", fontSize: 12 }} onClick={() => fileRef.current?.click()}>
                   <Upload size={14} strokeWidth={1.5} />
@@ -571,8 +567,7 @@ export function GithubSyncSection() {
                 />
                 <span className={`font-mono text-xs ${pemName ? "text-lx-text-secondary" : "text-lx-text-muted"}`}>{pemName || "No file chosen"}</span>
               </div>
-              <div className="field-hint">Uploaded as a file, never pasted. The PEM is stored server-side; the API only reports whether a key is set.</div>
-            </div>
+            </Field>
 
             {configured && (
               <div className="mt-4">

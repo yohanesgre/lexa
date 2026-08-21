@@ -1,6 +1,8 @@
 import { useMemo, useState } from "react";
 import { Info, Trash2, X } from "lucide-react";
 import { useUpdateRuntime } from "../../lib/queries";
+import { Field } from "../ui/Field";
+import { TextInput } from "../ui/TextInput";
 import type { Runtime } from "../../../shared/types";
 
 const PRESETS: Record<string, string[]> = {
@@ -91,11 +93,9 @@ export function RuntimeEditModal({ runtime, onClose }: { runtime: Runtime; onClo
               <span className="font-micro text-2xs text-lx-text-muted uppercase tracking-[0.04em]">Daemon-reported</span>
             </div>
 
-            <div className="field">
-              <label className="field-label" htmlFor="runtime-name">Name</label>
-              <input id="runtime-name" className="prop-input w-full" type="text" value={name} onChange={(e) => setName(e.target.value)} />
-              <div className="field-hint">Display name only. The daemon keeps its own FORGE_RUNTIME_NAME.</div>
-            </div>
+            <Field label="Name" htmlFor="runtime-name" hint="Display name only. The daemon keeps its own FORGE_RUNTIME_NAME." className="field">
+              <TextInput id="runtime-name" value={name} onChange={setName} />
+            </Field>
 
             <div className="field">
               <div className="field-label">Agent CLI</div>
