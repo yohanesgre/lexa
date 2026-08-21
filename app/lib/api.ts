@@ -317,6 +317,25 @@ export function restoreWikiRevision(slug: string, pageSlug: string, revisionId: 
   return request(`${BASE}/projects/${slug}/wiki/${pageSlug}/restore`, { method: "POST", body: JSON.stringify({ revisionId }) });
 }
 
+export interface WikiShareLink {
+  id: string;
+  url: string;
+  expiresAt: string | null;
+  createdAt: string;
+}
+
+export function createWikiShareLink(slug: string, pageSlug: string, expiresAt?: string): Promise<{ link: WikiShareLink }> {
+  return request(`${BASE}/projects/${slug}/wiki/pages/${pageSlug}/share`, { method: "POST", body: JSON.stringify(expiresAt ? { expiresAt } : {}) });
+}
+
+export function listWikiShareLinks(slug: string, pageSlug: string): Promise<{ data: WikiShareLink[] }> {
+  return request(`${BASE}/projects/${slug}/wiki/pages/${pageSlug}/share`);
+}
+
+export function revokeWikiShareLink(slug: string, linkId: string): Promise<void> {
+  return request(`${BASE}/projects/${slug}/wiki/share/${linkId}`, { method: "DELETE" });
+}
+
 
 
 export function listApiKeys(): Promise<{ data: ApiKey[] }> {
