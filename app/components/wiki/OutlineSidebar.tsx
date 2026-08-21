@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
-import { ChevronRight } from "lucide-react";
+import { ChevronRight, PanelRight } from "lucide-react";
 import { cn } from "../ui/cn";
-import { WikiSidebar } from "./WikiSidebar";
 import type { HeadingOutline } from "../tiptap-render";
 
 interface OutlineSidebarProps {
@@ -177,27 +176,75 @@ export function OutlineSidebar({ headings, collapsed, onToggle }: OutlineSidebar
     return () => observer.disconnect();
   }, [headings]);
 
-  if (headings.length === 0) return null;
+  // Persistent third column — pages without headings show an empty state
+  // instead of collapsing the layout back to two columns.
+  const isEmpty = headings.length === 0;
+  const isCollapsed = collapsed ?? false;
+
+  if (isCollapsed) {
+    return (
+      <aside
+        className="flex-shrink-0 flex flex-col bg-lx-surface-elevated"
+        style={{
+          width: 36,
+          minWidth: 36,
+          borderLeft: "1px solid var(--lx-border-default)",
+          display: "flex",
+          flexDirection: "column",
+          alignItems: "center",
+          paddingTop: 8,
+        }}
+      >
+        <button
+          type="button"
+          className="w-7 h-7 p-0 flex items-center justify-center text-lx-text-secondary hover:text-lx-text-primary rounded"
+          onClick={onToggle}
+          aria-label="Expand sidebar"
+          title="Contents"
+        >
+          <PanelRight size={14} strokeWidth={1.5} />
+        </button>
+      </aside>
+    );
+  }
 
   return (
-    <WikiSidebar title="Contents" collapsed={collapsed ?? false} onToggle={onToggle ?? (() => {})} width={220}>
-      <div className="flex-1 overflow-y-auto" style={{ padding: "8px 0" }}>
-        <TreeItems
-          nodes={tree}
-          depth={0}
-          activeId={activeId}
-          expandedKeys={expandedKeys}
-          onToggleExpand={(key) =>
-            setExpandedKeys((prev) => {
-              const next = new Set(prev);
-              if (next.has(key)) next.delete(key);
-              else next.add(key);
-              return next;
-            })
-          }
-          onClick={(node) => setActiveId(node.key)}
-        />
+    <aside
+      className="flex-shrink-0 flex flex-col bg-lx-surface-elevated"
+      style={{ width: 220, overflow: "hidden", borderLeft: "1px solid var(--lx-border-default)" }}
+    >
+      <div className="sidebar-header">
+        <button
+          type="button"
+          className="w-7 h-7 p-0 flex items-center justify-center text-lx-text-secondary hover:text-lx-text-primary flex-shrink-0 rounded"
+          onClick={onToggle}
+          aria-label="Collapse sidebar"
+        >
+          <PanelRight size={14} strokeWidth={1.5} />
+        </button>
+        <span className="text-xs font-medium font-body uppercase tracking-[0.05em] text-lx-text-secondary">Contents</span>
       </div>
-    </WikiSidebar>
+      <div className="flex-1 overflow-y-auto" style={{ padding: "8px 0" }}>
+        {isEmpty ? (
+          <div className="px-4 py-3 text-xs text-lx-text-muted">No headings yet</div>
+        ) : (
+          <TreeItems
+            nodes={tree}
+            depth={0}
+            activeId={activeId}
+            expandedKeys={expandedKeys}
+            onToggleExpand={(key) =>
+              setExpandedKeys((prev) => {
+                const next = new Set(prev);
+                if (next.has(key)) next.delete(key);
+                else next.add(key);
+                return next;
+              })
+            }
+            onClick={(node) => setActiveId(node.key)}
+          />
+        )}
+      </div>
+    </aside>
   );
 }

@@ -83,9 +83,10 @@ describe("OutlineSidebar", () => {
     expect(screen.getByText("Sub")).toBeInTheDocument();
   });
 
-  it("returns null without headings", () => {
+  it("renders an empty state without headings (column stays persistent)", () => {
     render(<OutlineSidebar headings={[]} />);
-    expect(screen.queryByText("Contents")).not.toBeInTheDocument();
+    expect(screen.getByText("Contents")).toBeInTheDocument();
+    expect(screen.getByText("No headings yet")).toBeInTheDocument();
   });
 });
 
