@@ -124,7 +124,7 @@ export function SharedWikiPage({ tree, token, pageId, onSelectPage }: { tree: Sh
                   style={{ display: "flex", width: "100%", maxWidth: 560, textAlign: "left", cursor: "pointer" }}
                   onClick={() => {
                     setCurrentId(child.id);
-                    onSelectPage(child.id);
+                    onSelectPage?.(child.id);
                   }}
                 >
                   <div className="flex items-center gap-2" style={{ minWidth: 0 }}>
