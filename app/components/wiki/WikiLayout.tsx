@@ -1,6 +1,6 @@
 import { Link, useNavigate } from "@tanstack/react-router";
 import { useEffect, useMemo, useState, useCallback, useRef } from "react";
-import { Search, ChevronRight, Plus, X, Pencil, FolderInput, Trash2 } from "lucide-react";
+import { Search, ChevronRight, Plus, X, Pencil, FolderInput, Trash2, PanelLeft } from "lucide-react";
 import { useWikiPages, useSearchWikiPages, useDeleteWikiPage } from "../../lib/queries";
 import type { WikiPageMeta } from "../../../shared/types";
 import { cn } from "../ui/cn";
@@ -310,17 +310,49 @@ export function WikiLayout({ slug, activePageSlug, children }: WikiLayoutProps) 
   const { data: results = [], isLoading: searching } = useSearchWikiPages(slug, debouncedQuery);
 
   const showResults = query.length > 0;
+  // Narrow screens start collapsed so the tree never starves the content.
+  const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(() =>
+    typeof window !== "undefined" && typeof window.matchMedia === "function"
+      ? window.matchMedia("(max-width: 767px)").matches
+      : false
+  );
 
   return (
     <div className="wiki-layout">
+      {sidebarCollapsed ? (
+        <aside
+          className="wiki-sidebar"
+          style={{ width: 36, minWidth: 36, padding: "8px 0", alignItems: "center" }}
+        >
+          <button
+            type="button"
+            className="w-7 h-7 p-0 flex items-center justify-center text-lx-text-secondary hover:text-lx-text-primary rounded"
+            onClick={() => setSidebarCollapsed(false)}
+            aria-label="Expand sidebar"
+            title="Pages"
+          >
+            <PanelLeft size={14} strokeWidth={1.5} />
+          </button>
+        </aside>
+      ) : (
       <aside className="wiki-sidebar">
-        <div className="px-4 mb-3">
-          <WikiSearchBox
-            query={query}
-            focused={isSearchFocused}
-            onQueryChange={setQuery}
-            onFocusedChange={setIsSearchFocused}
-          />
+        <div className="sidebar-header">
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <WikiSearchBox
+              query={query}
+              focused={isSearchFocused}
+              onQueryChange={setQuery}
+              onFocusedChange={setIsSearchFocused}
+            />
+          </div>
+          <button
+            type="button"
+            className="w-7 h-7 p-0 flex items-center justify-center text-lx-text-secondary hover:text-lx-text-primary flex-shrink-0 rounded"
+            onClick={() => setSidebarCollapsed(true)}
+            aria-label="Collapse sidebar"
+          >
+            <PanelLeft size={14} strokeWidth={1.5} />
+          </button>
         </div>
 
         <div className="flex-1 overflow-y-auto">
@@ -402,6 +434,7 @@ export function WikiLayout({ slug, activePageSlug, children }: WikiLayoutProps) 
           </button>
         </div>
       </aside>
+      )}
 
       {newPageModal.isOpen && (
 <NewPageModal
