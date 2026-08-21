@@ -4,7 +4,7 @@ import type { QueryClient, InfiniteData } from "@tanstack/react-query";
 import type { Task, Project, ProjectRepo, Board, Column, Swimlane, Milestone, TipTapDoc, WikiPageMeta, ApiKey, ApiKeyCreateResult, Dashboard, FieldConfig, DocumentSource, ForgeTask, TaskLink, Runtime, ForgeAgent, ForgeSkill, Machine, ActivityItem, ActivityEvent, Team, TeamMember, TeamMemberRole, SessionInfo, WorkspaceInvite } from "../../shared/types";
 import * as api from "./api";
 import * as auth from "./auth";
-import type { TaskMutationResult, ActivityPage } from "./api";
+import type { TaskMutationResult, ActivityPage, WikiShareLink } from "./api";
 import type { RecentForgeTask, ForgeHistoryPage } from "./api";
 import { useToast } from "../components/ui/Toast";
 
@@ -557,6 +557,39 @@ export function useDeleteWikiPage(slug: string) {
     },
     onError: (err) => {
       toast.push("error", "Failed to delete page", toastMessage(err));
+    },
+  });
+}
+
+export function useWikiShareLinks(slug: string, pageSlug: string) {
+  return useQuery({
+    queryKey: ["wikiShareLinks", slug, pageSlug],
+    queryFn: () => api.listWikiShareLinks(slug, pageSlug).then((r) => r.data),
+  });
+}
+
+export function useCreateWikiShareLink(slug: string, pageSlug: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (expiresAt?: string) => api.createWikiShareLink(slug, pageSlug, expiresAt),
+    onSuccess: ({ link }) => {
+      qc.setQueryData<WikiShareLink[]>(["wikiShareLinks", slug, pageSlug], (old) => {
+        if (!old) return [link];
+        return [...old, link];
+      });
+    },
+  });
+}
+
+export function useRevokeWikiShareLink(slug: string, pageSlug: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (linkId: string) => api.revokeWikiShareLink(slug, linkId),
+    onSuccess: (_data, linkId) => {
+      qc.setQueryData<WikiShareLink[]>(["wikiShareLinks", slug, pageSlug], (old) => {
+        if (!old) return old;
+        return old.filter((l) => l.id !== linkId);
+      });
     },
   });
 }
