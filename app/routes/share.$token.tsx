@@ -40,7 +40,7 @@ const fileIcon = (
   </svg>
 );
 
-export function SharedWikiPage({ tree, token }: { tree: SharedTree | null; token: string }) {
+export function SharedWikiPage({ tree, token, pageId, onSelectPage }: { tree: SharedTree | null; token: string; pageId?: string; onSelectPage?: (id: string) => void }) {
   const [currentId, setCurrentId] = useState<string | null>(null);
 
   if (!tree) {
@@ -78,7 +78,9 @@ export function SharedWikiPage({ tree, token }: { tree: SharedTree | null; token
     node.children.forEach(walk);
   };
   walk(tree.root);
-  const current = (currentId !== null && byId.get(currentId)) || tree.root;
+  // URL param wins over local state so browser Back/Forward and deep links
+  // select the right node.
+  const current = (pageId && byId.get(pageId)) || (currentId !== null && byId.get(currentId)) || tree.root;
   // Empty pages arrive as content:{} — normalize so renderDoc never sees a
   // doc without a content array.
   const doc: TipTapDoc =
@@ -120,7 +122,10 @@ export function SharedWikiPage({ tree, token }: { tree: SharedTree | null; token
                   type="button"
                   className="github-issue-row"
                   style={{ display: "flex", width: "100%", maxWidth: 560, textAlign: "left", cursor: "pointer" }}
-                  onClick={() => setCurrentId(child.id)}
+                  onClick={() => {
+                    setCurrentId(child.id);
+                    onSelectPage(child.id);
+                  }}
                 >
                   <div className="flex items-center gap-2" style={{ minWidth: 0 }}>
                     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} style={{ color: "var(--lx-text-muted)", flexShrink: 0 }}>
@@ -150,6 +155,8 @@ export function SharedWikiPage({ tree, token }: { tree: SharedTree | null; token
 
 function SharePage() {
   const { token } = Route.useParams();
+  const { page } = Route.useSearch();
+  const navigate = Route.useNavigate();
   const [tree, setTree] = useState<SharedTree | null>(null);
   const [loaded, setLoaded] = useState(false);
 
@@ -171,9 +178,19 @@ function SharePage() {
   }, [token]);
 
   if (!loaded) return <main style={{ minHeight: "100vh" }} />;
-  return <SharedWikiPage tree={tree} token={token} />;
+  return (
+    <SharedWikiPage
+      tree={tree}
+      token={token}
+      pageId={page}
+      onSelectPage={(id) => navigate({ search: { page: id } })}
+    />
+  );
 }
 
 export const Route = createFileRoute("/share/$token")({
+  validateSearch: (search: Record<string, unknown>): { page?: string } => ({
+    page: typeof search.page === "string" && search.page ? search.page : undefined,
+  }),
   component: SharePage,
 });
