@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { PanelLeft } from "lucide-react";
 import { createFileRoute } from "@tanstack/react-router";
 import { renderDoc } from "../components/tiptap-render";
 import type { TipTapDoc } from "../../shared/types";
@@ -42,6 +43,12 @@ const fileIcon = (
 
 export function SharedWikiPage({ tree, token, pageId, onSelectPage }: { tree: SharedTree | null; token: string; pageId?: string; onSelectPage?: (id: string) => void }) {
   const [currentId, setCurrentId] = useState<string | null>(null);
+  // Narrow screens start collapsed so the sidebar never starves the content.
+  const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(() =>
+    typeof window !== "undefined" && typeof window.matchMedia === "function"
+      ? window.matchMedia("(max-width: 767px)").matches
+      : false
+  );
 
   if (!tree) {
     return (
@@ -88,6 +95,15 @@ export function SharedWikiPage({ tree, token, pageId, onSelectPage }: { tree: Sh
       ? (current.content as TipTapDoc)
       : { type: "doc", content: [] };
 
+  // Sidebar nav lists the WHOLE shared subtree (root row first) so visitors
+  // can navigate back up without browser Back.
+  const navNodes: { id: string; title: string; depth: number }[] = [];
+  const walkNav = (node: SharedPageNode, depth: number) => {
+    navNodes.push({ id: node.id, title: node.title, depth });
+    node.children.forEach((child) => walkNav(child, depth + 1));
+  };
+  walkNav(tree.root, 0);
+
   return (
     <>
       <meta name="robots" content="noindex" />
@@ -102,53 +118,90 @@ export function SharedWikiPage({ tree, token, pageId, onSelectPage }: { tree: Sh
         <span className="status-badge status-badge-empty">Shared read-only</span>
       </header>
 
-      <main style={{ padding: "0 24px 32px" }}>
-        <div className="wiki-prose">
-          <h1>{current.title}</h1>
-          <div>{renderDoc(doc, "wiki")}</div>
-
-          {current.children.length > 0 && (
-            <div style={{ marginTop: 32, paddingTop: 16, borderTop: "1px solid var(--lx-border-subtle)" }}>
-              <div className="flex items-center gap-2 mb-3">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} style={{ color: "var(--lx-text-muted)" }}>
-                  <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
-                  <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" />
-                </svg>
-                <span className="text-xs text-lx-text-secondary font-body uppercase tracking-[0.05em]">Child pages</span>
-              </div>
-              {current.children.map((child) => (
-                <button
-                  key={child.id}
-                  type="button"
-                  className="github-issue-row"
-                  style={{ display: "flex", width: "100%", maxWidth: 560, textAlign: "left", cursor: "pointer" }}
-                  onClick={() => {
-                    setCurrentId(child.id);
-                    onSelectPage?.(child.id);
-                  }}
-                >
-                  <div className="flex items-center gap-2" style={{ minWidth: 0 }}>
-                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} style={{ color: "var(--lx-text-muted)", flexShrink: 0 }}>
-                      <path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z" />
-                      <polyline points="14 2 14 8 20 8" />
-                    </svg>
-                    <span className="text-sm text-lx-text-primary">{child.title}</span>
-                  </div>
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} style={{ color: "var(--lx-text-muted)", flexShrink: 0 }}>
-                    <path d="M9 18l6-6-6-6" />
-                  </svg>
-                </button>
-              ))}
+      <div style={{ display: "flex", alignItems: "stretch", minHeight: "calc(100vh - 49px)" }}>
+        {sidebarCollapsed ? (
+          <aside
+            style={{
+              width: 36,
+              minWidth: 36,
+              flexShrink: 0,
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "center",
+              paddingTop: 8,
+              background: "var(--lx-surface-elevated)",
+              borderRight: "1px solid var(--lx-border-default)",
+            }}
+          >
+            <button
+              type="button"
+              className="w-7 h-7 p-0 flex items-center justify-center text-lx-text-secondary hover:text-lx-text-primary rounded"
+              onClick={() => setSidebarCollapsed(false)}
+              aria-label="Expand sidebar"
+              title="Child pages"
+            >
+              <PanelLeft size={14} strokeWidth={1.5} />
+            </button>
+          </aside>
+        ) : (
+          <aside
+            className="flex-shrink-0 flex flex-col bg-lx-surface-elevated"
+            style={{ width: 220, overflow: "hidden", borderRight: "1px solid var(--lx-border-default)" }}
+          >
+            <div
+              className="flex items-center flex-shrink-0 gap-2"
+              style={{ height: 40, padding: "0 8px 0 12px", borderBottom: "1px solid var(--lx-border-subtle)" }}
+            >
+              <button
+                type="button"
+                className="w-7 h-7 p-0 flex items-center justify-center text-lx-text-secondary hover:text-lx-text-primary flex-shrink-0 rounded"
+                onClick={() => setSidebarCollapsed(true)}
+                aria-label="Collapse sidebar"
+              >
+                <PanelLeft size={14} strokeWidth={1.5} />
+              </button>
+              <span className="text-xs font-medium font-body uppercase tracking-[0.05em] text-lx-text-secondary">Child pages</span>
             </div>
-          )}
+            <nav style={{ flex: 1, overflowY: "auto", padding: "8px 0" }} aria-label="Child pages">
+              {navNodes.map((node) => {
+                const isActive = node.id === current.id;
+                return (
+                  <button
+                    key={node.id}
+                    type="button"
+                    onClick={() => {
+                      setCurrentId(node.id);
+                      onSelectPage?.(node.id);
+                    }}
+                    aria-current={isActive ? "page" : undefined}
+                    className={
+                      isActive
+                        ? "flex items-center w-full text-sm font-body cursor-pointer select-none text-lx-text-primary font-medium bg-lx-surface-selected border-l-2 border-lx-border-focus"
+                        : "flex items-center w-full text-sm font-body cursor-pointer select-none text-lx-text-secondary border-l-2 border-transparent hover:bg-lx-surface-card-hover hover:text-lx-text-primary"
+                    }
+                    style={{ height: 32, paddingLeft: 12 + node.depth * 16, paddingRight: 12, textAlign: "left" }}
+                  >
+                    {node.title}
+                  </button>
+                );
+              })}
+            </nav>
+          </aside>
+        )}
 
-          <div style={{ marginTop: 32, paddingTop: 16, borderTop: "1px solid var(--lx-border-subtle)" }}>
-            <span className="font-micro text-2xs text-lx-text-muted uppercase tracking-[0.04em]">
-              Last edited {formatDate(current.updatedAt)} · Published via Lexa share link
-            </span>
+        <main style={{ flex: 1, minWidth: 0, padding: "0 24px 32px" }}>
+          <div className="wiki-prose">
+            <h1>{current.title}</h1>
+            <div>{renderDoc(doc, "wiki")}</div>
+
+            <div style={{ marginTop: 32, paddingTop: 16, borderTop: "1px solid var(--lx-border-subtle)" }}>
+              <span className="font-micro text-2xs text-lx-text-muted uppercase tracking-[0.04em]">
+                Last edited {formatDate(current.updatedAt)} · Published via Lexa share link
+              </span>
+            </div>
           </div>
-        </div>
-      </main>
+        </main>
+      </div>
     </>
   );
 }

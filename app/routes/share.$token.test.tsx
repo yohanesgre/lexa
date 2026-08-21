@@ -39,12 +39,15 @@ describe("fetchSharedTree", () => {
 });
 
 describe("SharedWikiPage", () => {
-  it("renders header badge, title, and child-pages nav from the payload", () => {
+  it("renders header badge, title, and child-pages sidebar from the payload", () => {
     render(<SharedWikiPage tree={tree} token="tok" />);
     expect(screen.getByText("Shared read-only")).toBeTruthy();
     expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("API Reference");
-    expect(screen.getByText("Child pages")).toBeTruthy();
-    expect(screen.getByRole("button", { name: /Child/ })).toBeTruthy();
+    expect(screen.getByLabelText("Child pages")).toBeTruthy();
+    // Sidebar lists the whole subtree — root row first, then children.
+    const rootRow = screen.getByRole("button", { name: "API Reference" });
+    expect(rootRow.getAttribute("aria-current")).toBe("page");
+    expect(screen.getByRole("button", { name: "Child" })).toBeTruthy();
     expect(screen.getByText(/Last edited Aug 21, 2026 · Published via Lexa share link/)).toBeTruthy();
   });
 
@@ -69,7 +72,19 @@ describe("SharedWikiPage", () => {
   it("pageId prop selects the rendered node (URL param drives deep links + Back)", () => {
     render(<SharedWikiPage tree={tree} token="tok" pageId="w2" />);
     expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("Child");
-    expect(screen.queryByRole("button", { name: /Child/ })).toBeNull();
+    // Sidebar keeps the whole subtree visible; the selected row is marked.
+    expect(screen.getByRole("button", { name: "Child" }).getAttribute("aria-current")).toBe("page");
+    expect(screen.getByRole("button", { name: "API Reference" }).getAttribute("aria-current")).toBeNull();
+  });
+
+  it("sidebar collapses to an icon rail and expands again", () => {
+    render(<SharedWikiPage tree={tree} token="tok" />);
+    expect(screen.getByRole("navigation", { name: "Child pages" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Collapse sidebar" }));
+    expect(screen.queryByRole("navigation", { name: "Child pages" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Expand sidebar" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Expand sidebar" }));
+    expect(screen.getByRole("navigation", { name: "Child pages" })).toBeTruthy();
   });
 
   it("emits a noindex robots meta", () => {
