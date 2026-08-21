@@ -7,6 +7,8 @@ const STORAGE_KEY = "lexa:selectedProject";
 // Auth/setup surfaces render without app chrome and never have a session —
 // fetching the project list there would 401 (and retry-spam the console).
 const PUBLIC_PATHS = new Set(["/login", "/set-password", "/invite", "/setup"]);
+// Public wiki share reads: token-authenticated, no session — same 401 logic.
+const PUBLIC_PREFIXES = ["/share/"];
 
 interface ProjectSelectionContextValue {
   selectedSlug: string | undefined;
@@ -20,7 +22,7 @@ export function ProjectSelectionProvider({ children }: { children: React.ReactNo
   const [selectedSlug, setSelectedSlug] = useState<string | undefined>(undefined);
   const [hydrated, setHydrated] = useState(false);
   const pathname = useRouterState({ select: (s) => s.location.pathname });
-  const isPublic = PUBLIC_PATHS.has(pathname);
+  const isPublic = PUBLIC_PATHS.has(pathname) || PUBLIC_PREFIXES.some((prefix) => pathname.startsWith(prefix));
   // On public pages there is no session, so the project list would 401 — skip
   // the fetch entirely (the provider isn't consumed by bare surfaces anyway).
   const { data: projects, isLoading } = useProjects({ enabled: !isPublic });
