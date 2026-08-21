@@ -25,6 +25,7 @@ import { Route as SlugTasksRouteImport } from './routes/$slug/tasks'
 import { Route as SettingsMeRouteImport } from './routes/settings/me'
 import { Route as SettingsTeamRouteImport } from './routes/settings/team'
 import { Route as SettingsWorkspaceRouteImport } from './routes/settings/workspace'
+import { Route as ShareTokenRouteImport } from './routes/share.$token'
 import { Route as SlugWikiIndexRouteImport } from './routes/$slug/wiki/index'
 import { Route as SlugWikiPageSlugRouteImport } from './routes/$slug/wiki/$pageSlug'
 import { Route as ApiAuthSplatRouteImport } from './routes/api.auth.$'
@@ -110,6 +111,11 @@ const SettingsWorkspaceRoute = SettingsWorkspaceRouteImport.update({
   path: '/workspace',
   getParentRoute: () => SettingsRoute,
 } as any)
+const ShareTokenRoute = ShareTokenRouteImport.update({
+  id: '/share/$token',
+  path: '/share/$token',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const SlugWikiIndexRoute = SlugWikiIndexRouteImport.update({
   id: '/$slug/wiki/',
   path: '/$slug/wiki/',
@@ -148,6 +154,7 @@ export interface FileRoutesByFullPath {
   '/settings/me': typeof SettingsMeRoute
   '/settings/team': typeof SettingsTeamRoute
   '/settings/workspace': typeof SettingsWorkspaceRoute
+  '/share/$token': typeof ShareTokenRoute
   '/$slug/': typeof SlugIndexRoute
   '/$slug/wiki/$pageSlug': typeof SlugWikiPageSlugRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
@@ -170,6 +177,7 @@ export interface FileRoutesByTo {
   '/settings/me': typeof SettingsMeRoute
   '/settings/team': typeof SettingsTeamRoute
   '/settings/workspace': typeof SettingsWorkspaceRoute
+  '/share/$token': typeof ShareTokenRoute
   '/$slug': typeof SlugIndexRoute
   '/$slug/wiki/$pageSlug': typeof SlugWikiPageSlugRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
@@ -193,6 +201,7 @@ export interface FileRoutesById {
   '/settings/me': typeof SettingsMeRoute
   '/settings/team': typeof SettingsTeamRoute
   '/settings/workspace': typeof SettingsWorkspaceRoute
+  '/share/$token': typeof ShareTokenRoute
   '/$slug/': typeof SlugIndexRoute
   '/$slug/wiki/$pageSlug': typeof SlugWikiPageSlugRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
@@ -217,6 +226,7 @@ export interface FileRouteTypes {
     | '/settings/me'
     | '/settings/team'
     | '/settings/workspace'
+    | '/share/$token'
     | '/$slug/'
     | '/$slug/wiki/$pageSlug'
     | '/api/auth/$'
@@ -239,6 +249,7 @@ export interface FileRouteTypes {
     | '/settings/me'
     | '/settings/team'
     | '/settings/workspace'
+    | '/share/$token'
     | '/$slug'
     | '/$slug/wiki/$pageSlug'
     | '/api/auth/$'
@@ -261,6 +272,7 @@ export interface FileRouteTypes {
     | '/settings/me'
     | '/settings/team'
     | '/settings/workspace'
+    | '/share/$token'
     | '/$slug/'
     | '/$slug/wiki/$pageSlug'
     | '/api/auth/$'
@@ -281,6 +293,7 @@ export interface RootRouteChildren {
   SlugSettingsRoute: typeof SlugSettingsRoute
   SlugSwimlanesRoute: typeof SlugSwimlanesRoute
   SlugTasksRoute: typeof SlugTasksRoute
+  ShareTokenRoute: typeof ShareTokenRoute
   SlugIndexRoute: typeof SlugIndexRoute
   SlugWikiPageSlugRoute: typeof SlugWikiPageSlugRoute
   ApiAuthSplatRoute: typeof ApiAuthSplatRoute
@@ -401,6 +414,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof SettingsWorkspaceRouteImport
       parentRoute: typeof SettingsRoute
     }
+    '/share/$token': {
+      id: '/share/$token'
+      path: '/share/$token'
+      fullPath: '/share/$token'
+      preLoaderRoute: typeof ShareTokenRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/$slug/wiki/': {
       id: '/$slug/wiki/'
       path: '/$slug/wiki'
@@ -463,6 +483,7 @@ const rootRouteChildren: RootRouteChildren = {
   SlugSettingsRoute: SlugSettingsRoute,
   SlugSwimlanesRoute: SlugSwimlanesRoute,
   SlugTasksRoute: SlugTasksRoute,
+  ShareTokenRoute: ShareTokenRoute,
   SlugIndexRoute: SlugIndexRoute,
   SlugWikiPageSlugRoute: SlugWikiPageSlugRoute,
   ApiAuthSplatRoute: ApiAuthSplatRoute,
