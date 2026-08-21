@@ -39,9 +39,10 @@ export function OptionForm({ kind, option, isOpen, onClose, onSubmit, zIndex = 8
 
   // Seed fields when the form opens — it stays mounted between opens, so
   // state is re-seeded from the target entity each time (create = empty).
-  // Adjusted during render (not in an effect) so a stale close→reopen with a
-  // different option never carries over previous values.
-  const [prevKey, setPrevKey] = useState<{ option: FieldOption | null | undefined; isOpen: boolean; kind: "priority" | "type" }>({ option, isOpen, kind });
+  // prevKey starts as isOpen:false so the first open render always seeds
+  // (the old useEffect ran on mount); the render-time adjust handles
+  // close→reopen with a different option.
+  const [prevKey, setPrevKey] = useState<{ option: FieldOption | null | undefined; isOpen: boolean; kind: "priority" | "type" }>({ option: undefined, isOpen: false, kind });
   if (prevKey.option !== option || prevKey.isOpen !== isOpen || prevKey.kind !== kind) {
     setPrevKey({ option, isOpen, kind });
     if (isOpen) {

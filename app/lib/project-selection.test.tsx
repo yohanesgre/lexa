@@ -7,10 +7,12 @@ import type { Project } from "../../shared/types";
 
 const fetchMock = vi.fn();
 
-// The router is not part of this unit — the provider only reads params.slug.
+// The router is not part of this unit — the provider only reads params.slug
+// and the pathname (to skip public pages). Tests run on private paths.
 let routeSlug: string | undefined;
 vi.mock("@tanstack/react-router", () => ({
   useParams: () => ({ slug: routeSlug }),
+  useRouterState: () => ({ location: { pathname: "/demo" } }),
 }));
 
 const PROJECTS: Project[] = [
