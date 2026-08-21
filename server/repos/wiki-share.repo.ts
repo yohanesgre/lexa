@@ -68,10 +68,13 @@ export class WikiShareRepo extends Effect.Service<WikiShareRepo>()("Lexa/WikiSha
           pageId
         ),
 
-      deleteById: (id: string): Effect.Effect<boolean, ConstraintViolation | DbError> =>
-        run(db, `DELETE FROM wiki_share_links WHERE id = ?`, id).pipe(
-          Effect.map((changes) => changes > 0)
-        ),
+      deleteByIdInProject: (id: string, projectId: string): Effect.Effect<boolean, ConstraintViolation | DbError> =>
+        run(
+          db,
+          `DELETE FROM wiki_share_links WHERE id = ? AND page_id IN (SELECT id FROM wiki_pages WHERE project_id = ?)`,
+          id,
+          projectId
+        ).pipe(Effect.map((changes) => changes > 0)),
 
       findByToken: (token: string): Effect.Effect<WikiShareLinkRow | null, DbError> =>
         queryFirst<WikiShareLinkRow>(
