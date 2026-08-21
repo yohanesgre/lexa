@@ -12,7 +12,10 @@ const fetchMock = vi.fn();
 let routeSlug: string | undefined;
 vi.mock("@tanstack/react-router", () => ({
   useParams: () => ({ slug: routeSlug }),
-  useRouterState: () => ({ location: { pathname: "/demo" } }),
+  useRouterState: (opts?: { select?: (s: { location: { pathname: string } }) => unknown }) =>
+    opts?.select
+      ? opts.select({ location: { pathname: "/demo" } })
+      : { location: { pathname: "/demo" } },
 }));
 
 const PROJECTS: Project[] = [
