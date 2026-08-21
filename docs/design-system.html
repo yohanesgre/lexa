@@ -5407,8 +5407,13 @@ textarea.prop-input {
           <div class="check-row"><div class="checkbox"></div> Description</div>
         </div>
         <div class="state-row">
-          <span class="state-label">Toggle</span>
+          <span class="state-label">Toggle · off</span>
           <button class="toggle-switch" aria-label="Autosave off"></button>
+          <span class="text-sm color-secondary">Autosave</span>
+        </div>
+        <div class="state-row">
+          <span class="state-label">Toggle · on</span>
+          <button class="toggle-switch is-on" aria-label="Autosave on"></button>
           <span class="text-sm color-secondary">Autosave</span>
         </div>
         <div class="state-row">
@@ -5417,7 +5422,9 @@ textarea.prop-input {
           <div class="check-row"><div class="radio"></div> Member</div>
         </div>
         <pre class="code-block" id="code-inputs-check">&lt;div class="check-row"&gt;&lt;div class="checkbox checked"&gt;&lt;/div&gt; Title&lt;/div&gt;
-&lt;button class="toggle-switch" aria-label="Autosave off"&gt;&lt;/button&gt;</pre>
+&lt;div class="check-row"&gt;&lt;div class="checkbox"&gt;&lt;/div&gt; Description&lt;/div&gt;
+&lt;button class="toggle-switch" aria-label="Autosave off"&gt;&lt;/button&gt;
+&lt;button class="toggle-switch is-on" aria-label="Autosave on"&gt;&lt;/button&gt;</pre>
         <button class="btn btn-ghost btn-sm copy-btn" data-copy="code-inputs-check">Copy</button>
         <div class="token-contract">Tokens: --lx-border-focus (checked/toggle on). Radio ships as a design-system primitive only — no React component yet.</div>
       </div>
