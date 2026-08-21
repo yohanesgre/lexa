@@ -925,10 +925,10 @@ body { expiresAt? }              (UTC ISO-8601; {} or omitted = never expires)
   after create (capability: only the URL carries it).
 
 GET    /api/projects/:slug/wiki/pages/:pageSlug/share
-→ 200 { links: [{ id, url, expiresAt, createdAt }] } | 404 PAGE_NOT_FOUND | 403 PROJECT_ACCESS_DENIED
+→ 200 { data: [{ id, url, expiresAt, createdAt }] } | 404 PAGE_NOT_FOUND | 403 PROJECT_ACCESS_DENIED
 
 DELETE /api/projects/:slug/wiki/share/:linkId
-→ 200 { ok: true } | 404 SHARE_LINK_NOT_FOUND | 403 PROJECT_ACCESS_DENIED
+→ 204 | 404 SHARE_LINK_NOT_FOUND | 403 PROJECT_ACCESS_DENIED
   Revocation = row deletion; the link stops resolving immediately.
 ```
 
