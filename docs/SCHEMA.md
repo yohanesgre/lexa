@@ -444,6 +444,8 @@ CREATE TABLE wiki_share_links (
   updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+CREATE INDEX idx_wiki_share_links_page ON wiki_share_links(page_id);
+
 -- ============================================================
 -- API Keys (machine auth)
 -- ============================================================
