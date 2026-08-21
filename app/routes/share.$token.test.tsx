@@ -56,13 +56,20 @@ describe("SharedWikiPage", () => {
     expect(screen.queryByText("Shared read-only")).toBeNull();
   });
 
-  it("child click renders that child from the SAME payload — no second fetch", () => {
+  it("child click reports selection via onSelectPage — no second fetch", () => {
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
-    render(<SharedWikiPage tree={tree} token="tok" />);
+    const onSelectPage = vi.fn();
+    render(<SharedWikiPage tree={tree} token="tok" onSelectPage={onSelectPage} />);
     fireEvent.click(screen.getByRole("button", { name: /Child/ }));
-    expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("Child");
+    expect(onSelectPage).toHaveBeenCalledWith("w2");
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("pageId prop selects the rendered node (URL param drives deep links + Back)", () => {
+    render(<SharedWikiPage tree={tree} token="tok" pageId="w2" />);
+    expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("Child");
+    expect(screen.queryByRole("button", { name: /Child/ })).toBeNull();
   });
 
   it("emits a noindex robots meta", () => {
