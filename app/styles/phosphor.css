@@ -129,6 +129,30 @@
   --lx-pb-low: #5C554F;
 }
 
+/* ---- Elevated surfaces in light mode ----
+   Toasts follow the ambient theme: light surface + light text tokens in
+   light mode (they read as elevated cards). Tooltips stay dark for
+   contrast (--lx-surface-tooltip), so their text is pinned to dark-mode
+   values — otherwise light text tokens would be dark-on-dark. */
+[data-theme="light"] .toast {
+  background: var(--lx-surface-elevated);
+  /* Per-side reset — a border-color shorthand here would also repaint the
+     variant left-accent (this rule out-specifies .toast-success/-warning/
+     -error/-neutral). */
+  border-top-color: var(--lx-border-default);
+  border-right-color: var(--lx-border-default);
+  border-bottom-color: var(--lx-border-default);
+}
+[data-theme="light"] .tl-tooltip {
+  border-color: #332E28;
+}
+[data-theme="light"] .tl-tooltip .tt-title {
+  color: #F5F0EB;
+}
+[data-theme="light"] .tl-tooltip .tt-line {
+  color: #948E88;
+}
+
 /* ---- Tailwind v4 theme mapping (wireframes/DESIGN_SYSTEM.md §8.1) ---- */
 @theme {
   --color-lx-surface-app: var(--lx-surface-app);
@@ -532,6 +556,11 @@
   .card-panel--elevated {
     background: var(--lx-surface-elevated);
   }
+  /* Status accents — full-height 3px left border, same treatment as toasts */
+  .card-row.card-row--success, .card-panel--success { border-left: 3px solid #4ADE80; }
+  .card-row.card-row--warning, .card-panel--warning { border-left: 3px solid #F0C040; }
+  .card-row.card-row--danger,  .card-panel--danger  { border-left: 3px solid #FF4444; }
+  .card-row.card-row--neutral, .card-panel--neutral { border-left: 3px solid #4A443D; }
   .card-tile {
     background: var(--lx-surface-card);
     border: 1px solid var(--lx-border-default);
@@ -1897,7 +1926,7 @@
     align-items: center;
     justify-content: center;
     gap: 6px;
-    height: 32px;
+    height: 36px;
     padding: 0 14px;
     border-radius: 6px;
     font-size: 13px;
@@ -1932,18 +1961,55 @@
   .btn-danger:hover {
     background: var(--lx-bg-danger-subtle);
   }
+  .btn-ghost-accent {
+    background: transparent;
+    color: var(--lx-text-link);
+    border-color: var(--lx-border-default);
+  }
+  .btn-ghost-accent:hover {
+    background: var(--lx-bg-accent-subtle);
+  }
 
-  /* Compact action buttons: consistent 28px height for paired Cancel/Save rows */
+  /* Size scale: sm 32 · md (base) 36 · lg 44 */
   .btn-sm {
-    height: 28px;
+    height: 32px;
     padding: 0 10px;
     font-size: 12px;
   }
   .btn-icon-sm {
-    width: 28px;
-    height: 28px;
+    width: 32px;
+    height: 32px;
     padding: 0;
     flex-shrink: 0;
+  }
+  .btn-icon-sm svg {
+    width: 14px;
+    height: 14px;
+  }
+  .btn-icon {
+    width: 36px;
+    height: 36px;
+    padding: 0;
+    flex-shrink: 0;
+  }
+  .btn-icon svg {
+    width: 14px;
+    height: 14px;
+  }
+  .btn-lg {
+    height: 44px;
+    padding: 0 18px;
+    font-size: 14px;
+  }
+  .btn-icon-lg {
+    width: 44px;
+    height: 44px;
+    padding: 0;
+    flex-shrink: 0;
+  }
+  .btn-icon-lg svg {
+    width: 16px;
+    height: 16px;
   }
 
   /* Nav / page frame */
@@ -1986,6 +2052,10 @@
     cursor: pointer;
     transition: background 100ms, border-color 100ms;
   }
+  .forge-status--idle    { background: var(--lx-surface-card); border-color: var(--lx-border-default); color: var(--lx-text-secondary); }
+  .forge-status--warning { background: var(--lx-surface-card); border-color: rgba(240, 192, 64, 0.35); color: var(--lx-text-primary); }
+  .forge-status--danger  { background: var(--lx-bg-danger-subtle); border-color: rgba(255, 68, 68, 0.25); color: var(--lx-text-danger); }
+  .forge-status--ok      { background: var(--lx-bg-success-subtle); border-color: rgba(74, 222, 128, 0.25); color: var(--lx-text-success); }
   /* Dismiss (X) on finished tasks in the Forge status panel */
   .forge-dismiss {
     display: inline-flex;
@@ -3343,11 +3413,15 @@
   }
 
   /* ---- Filter Popover Checkbox Rows ---- */
+  .filter-popover .menu-separator {
+    margin: 6px 4px;
+  }
   .check-row {
     display: flex;
     align-items: center;
     gap: 8px;
-    padding: 4px 10px;
+    padding: 4px 8px;
+    margin: 2px 4px;
     font-size: 13px;
     font-family: var(--lx-font-body);
     color: var(--lx-text-primary);
@@ -3419,6 +3493,7 @@
   .toast-success { border-left: 3px solid #4ADE80; }
   .toast-warning { border-left: 3px solid #F0C040; }
   .toast-error   { border-left: 3px solid #FF4444; }
+  .toast-neutral { border-left: 3px solid #4A443D; }
 
   .toast-icon {
     flex-shrink: 0;
@@ -3435,6 +3510,7 @@
   .toast-success .toast-icon { color: #4ADE80; }
   .toast-warning .toast-icon { color: #F0C040; }
   .toast-error   .toast-icon { color: #FF4444; }
+  .toast-neutral .toast-icon { color: var(--lx-text-secondary); }
 
   .toast-title {
     font-size: 13px;
@@ -3791,7 +3867,7 @@
     transition: transform 100ms, background 100ms;
   }
   .toggle-switch.is-on {
-    background: var(--lx-surface-selected);
+    background: var(--lx-border-focus);
     border-color: var(--lx-border-focus);
   }
   .toggle-switch.is-on::after {
@@ -4445,6 +4521,7 @@
   }
   .task-chip.type { border-color: transparent; color: var(--lx-text-muted); }
   .task-chip.priority { border-color: transparent; }
+  .task-chip.gh { color: var(--lx-text-link); border-color: var(--lx-text-link); }
 
   .task-gh {
     display: inline-flex;

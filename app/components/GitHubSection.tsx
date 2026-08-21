@@ -30,14 +30,8 @@ function LinkedIssuesList({ githubs, onUnlinkClick }: { githubs: GithubIssue[]; 
         return (
           <div
             key={g.issueId}
-            className="github-section"
-            style={{
-              padding: "10px 14px",
-              marginBottom: 8,
-              borderRadius: 6,
-              border: d.diverged ? "1px solid rgba(248,81,73,0.3)" : "1px solid rgba(74,222,128,0.2)",
-              background: d.diverged ? "var(--lx-bg-danger-subtle)" : "var(--lx-bg-success-subtle)",
-            }}
+            className={cn("card-row", d.diverged ? "card-row--danger" : "card-row--success")}
+            style={{ marginBottom: 8 }}
           >
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2 min-w-0">
@@ -96,8 +90,8 @@ function IssueSearchResults({ results, activeIndex, onHover, onPick }: {
           className="flex items-center gap-2 w-full text-left"
           style={{
             padding: "8px 12px",
-            background: i === activeIndex ? "rgba(88,166,255,0.12)" : undefined,
-            borderLeft: i === activeIndex ? "2px solid var(--lx-accent)" : "2px solid transparent",
+            background: i === activeIndex ? "var(--lx-surface-selected)" : undefined,
+            borderLeft: i === activeIndex ? "2px solid var(--lx-text-link)" : "2px solid transparent",
           }}
           onMouseEnter={() => onHover(i)}
           onClick={() => onPick(r)}
@@ -153,7 +147,7 @@ function LinkFlowPanel({ repos, selectedRepo, onRepoChange, query, onQueryChange
           onChange={(e) => onQueryChange(e.target.value)}
           onKeyDown={onKeyDown}
         />
-        <button type="button" className="btn btn-ghost shrink-0" style={{ borderColor: "var(--lx-border-default)", color: "var(--lx-accent)" }} onClick={onNewIssue}>
+        <button type="button" className="btn btn-ghost-accent shrink-0" onClick={onNewIssue}>
           + New issue
         </button>
       </div>

@@ -370,6 +370,14 @@ a:hover { color: var(--lx-text-link-hover); }
 .card-panel--elevated {
   background: var(--lx-surface-elevated);
 }
+/* Status-accent variants — full-height 3px left border, same language as
+   toasts (.toast-success/-warning/-error). Chained to the base class so the
+   accent survives .card-row:hover's border-color reset (equal specificity,
+   later source order wins). */
+.card-row.card-row--success, .card-panel--success { border-left: 3px solid #4ADE80; }
+.card-row.card-row--warning, .card-panel--warning { border-left: 3px solid #F0C040; }
+.card-row.card-row--danger,  .card-panel--danger  { border-left: 3px solid #FF4444; }
+.card-row.card-row--neutral, .card-panel--neutral { border-left: 3px solid #4A443D; }
 .card-tile {
   background: var(--lx-surface-card);
   border: 1px solid var(--lx-border-default);
@@ -1257,7 +1265,7 @@ a:hover { color: var(--lx-text-link-hover); }
   align-items: center;
   justify-content: center;
   gap: 6px;
-  height: 32px;
+  height: 36px;
   padding: 0 14px;
   border-radius: 6px;
   font-size: 13px;
@@ -1288,21 +1296,56 @@ a:hover { color: var(--lx-text-link-hover); }
 }
 .btn-danger:hover { background: var(--lx-bg-danger-subtle); }
 
-/* Compact action buttons: consistent 28px height for paired Cancel/Save rows */
+/* Accent-forward ghost: ghost anatomy + accent text (e.g. "+ New issue").
+   Hover tints the accent-subtle bg; text stays accent, matching siblings
+   (no variant changes text color on hover). */
+.btn-ghost-accent {
+  background: transparent;
+  color: var(--lx-text-link);
+  border-color: var(--lx-border-default);
+}
+.btn-ghost-accent:hover { background: var(--lx-bg-accent-subtle); }
+
+/* Size scale: sm 32 · md (base) 36 · lg 44 */
 .btn-sm {
-  height: 28px;
+  height: 32px;
   padding: 0 10px;
   font-size: 12px;
 }
 .btn-icon-sm {
-  width: 28px;
-  height: 28px;
+  width: 32px;
+  height: 32px;
   padding: 0;
   flex-shrink: 0;
 }
 .btn-icon-sm svg {
-  width: 13px;
-  height: 13px;
+  width: 14px;
+  height: 14px;
+}
+.btn-icon {
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  flex-shrink: 0;
+}
+.btn-icon svg {
+  width: 14px;
+  height: 14px;
+}
+.btn-lg {
+  height: 44px;
+  padding: 0 18px;
+  font-size: 14px;
+}
+.btn-icon-lg {
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  flex-shrink: 0;
+}
+.btn-icon-lg svg {
+  width: 16px;
+  height: 16px;
 }
 
 /* ---- Nav / App Shell ---- */
@@ -1710,6 +1753,30 @@ mark {
   --lx-scrollbar-thumb-hover: #9C9187;
 }
 
+/* ---- Elevated surfaces in light mode ----
+   Toasts follow the ambient theme: light surface + light text tokens in
+   light mode (they read as elevated cards). Tooltips stay dark for
+   contrast (--lx-surface-tooltip), so their text is pinned to dark-mode
+   values — otherwise light text tokens would be dark-on-dark. */
+[data-theme="light"] .toast {
+  background: var(--lx-surface-elevated);
+  /* Per-side reset — a border-color shorthand here would also repaint the
+     variant left-accent (this rule out-specifies .toast-success/-warning/
+     -error/-neutral). */
+  border-top-color: var(--lx-border-default);
+  border-right-color: var(--lx-border-default);
+  border-bottom-color: var(--lx-border-default);
+}
+[data-theme="light"] .tl-tooltip {
+  border-color: #332E28;
+}
+[data-theme="light"] .tl-tooltip .tt-title {
+  color: #F5F0EB;
+}
+[data-theme="light"] .tl-tooltip .tt-line {
+  color: #948E88;
+}
+
 /* ---- Reduced Motion (DESIGN_SYSTEM.md §6.8, verbatim) ---- */
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
@@ -1765,12 +1832,14 @@ mark {
 .toast-success { border-left: 3px solid #4ADE80; }
 .toast-warning { border-left: 3px solid #F0C040; }
 .toast-error   { border-left: 3px solid #FF4444; }
+.toast-neutral { border-left: 3px solid #4A443D; }
 
 .toast-icon { flex-shrink: 0; margin-top: 1px; display: inline-flex; }
 .toast-icon svg { width: 16px; height: 16px; stroke: currentColor; stroke-width: 1.5; fill: none; }
 .toast-success .toast-icon { color: #4ADE80; }
 .toast-warning .toast-icon { color: #F0C040; }
 .toast-error   .toast-icon { color: #FF4444; }
+.toast-neutral .toast-icon { color: var(--lx-text-secondary); }
 
 .toast-title { font-size: 13px; font-weight: 500; line-height: 18px; color: var(--lx-text-primary); }
 .toast-body  { font-size: 12px; line-height: 16px; color: var(--lx-text-secondary); margin-top: 2px; }
@@ -4821,16 +4890,20 @@ textarea.prop-input {
     .token-contract { margin-top:8px; font-family:var(--lx-font-mono); font-size:11px; color:var(--lx-text-muted); }
     .block-desc { margin-bottom:12px; padding:10px 12px; background:var(--lx-surface-input); border:1px solid var(--lx-border-subtle); border-radius:6px; font-size:12px; line-height:1.6; color:var(--lx-text-secondary); }
     .block-desc strong { color:var(--lx-text-primary); font-weight:600; }
+    /* Floating doc tooling — sections rail (left) + theme toggle (bottom-right) */
+    .ds-nav { position:fixed; left:16px; top:50%; transform:translateY(-50%); display:flex; flex-direction:column; gap:2px; padding:10px; background:var(--lx-surface-elevated); border:1px solid var(--lx-border-subtle); border-radius:8px; box-shadow:var(--lx-shadow-sm); z-index:50; }
+    .ds-nav-title { font-family:var(--lx-font-micro); font-size:10px; text-transform:uppercase; letter-spacing:0.06em; color:var(--lx-text-muted); margin-bottom:6px; padding:0 8px; }
+    .ds-nav a { font-family:var(--lx-font-mono); font-size:11px; line-height:1.4; color:var(--lx-text-secondary); text-decoration:none; padding:3px 8px; border-radius:4px; }
+    .ds-nav a:hover, .ds-nav a.active { background:var(--lx-surface-card-hover); color:var(--lx-text-primary); }
+    @media (max-width:1500px) { .ds-nav { display:none; } }
+    .ds-theme-toggle { position:fixed; right:16px; bottom:16px; z-index:50; box-shadow:var(--lx-shadow-lg); }
   </style>
 </head>
 <body class="bg-app color-primary" style="min-height:100vh;">
   <main class="page-frame" style="max-width:1100px;padding-top:40px;">
-    <header class="flex items-center justify-between" style="margin-bottom:8px;">
-      <div>
-        <h1 class="font-display text-2xl weight-600 color-primary">PHOSPHOR Design System</h1>
-        <p class="text-sm color-secondary mt-1" style="max-width:640px;">Primitives + canonical markup. Consult before any UI work — copy from here, never hand-write. Spec: DESIGN_SYSTEM.md</p>
-      </div>
-      <button id="theme-toggle" class="btn btn-ghost btn-sm">Light</button>
+    <header style="margin-bottom:8px;">
+      <h1 class="font-display text-2xl weight-600 color-primary">PHOSPHOR Design System</h1>
+      <p class="text-sm color-secondary mt-1" style="max-width:640px;">Primitives + canonical markup. Consult before any UI work — copy from here, never hand-write. Spec: DESIGN_SYSTEM.md</p>
     </header>
 
     <section id="colors">
@@ -5222,6 +5295,56 @@ textarea.prop-input {
       </div>
       <div class="block-shell">
         <div class="block-desc">
+          <strong>Use</strong> — status-accent variants (<span class="font-mono">.card-row--neutral</span> / <span class="font-mono">--success</span> / <span class="font-mono">--warning</span> / <span class="font-mono">--danger</span>; same modifiers on <span class="font-mono">.card-panel</span>) when the card itself reports state: sync health panels, runtime/daemon status, warning banners. <span class="font-mono">--neutral</span> marks informational/no-status state (queued, idle, in-progress). Full-height 3px left border — same treatment as toasts.<br/>
+          <strong>Avoid</strong> — accents as decoration on every card; status colors on kanban task cards (priority/type dots own color there); accent hues outside the status palette.<br/>
+          <strong>Instead</strong> — neutral primitives for content that isn't stateful; <span class="font-mono">.toast</span> for transient feedback; <span class="font-mono">.notice</span> for inline form errors.
+        </div>
+        <div class="state-row">
+          <span class="state-label">Card row · neutral</span>
+          <div class="card-row card-row--neutral" style="width:280px;">
+            <div class="text-sm weight-500 color-primary">Queued for sync</div>
+            <div class="text-xs color-secondary">Waiting for the next poll interval</div>
+          </div>
+        </div>
+        <div class="state-row">
+          <span class="state-label">Card row · success</span>
+          <div class="card-row card-row--success" style="width:280px;">
+            <div class="text-sm weight-500 color-primary">Sync healthy</div>
+            <div class="text-xs color-secondary">Last webhook received 2m ago</div>
+          </div>
+        </div>
+        <div class="state-row">
+          <span class="state-label">Card row · warning</span>
+          <div class="card-row card-row--warning" style="width:280px;">
+            <div class="text-sm weight-500 color-primary">Token expiring</div>
+            <div class="text-xs color-secondary">GitHub App token refreshes in 3 days</div>
+          </div>
+        </div>
+        <div class="state-row">
+          <span class="state-label">Card row · danger</span>
+          <div class="card-row card-row--danger" style="width:280px;">
+            <div class="text-sm weight-500 color-primary">Daemon offline</div>
+            <div class="text-xs color-secondary">Forge runtime unreachable since 14:02</div>
+          </div>
+        </div>
+        <div class="state-row">
+          <span class="state-label">Card panel · warning</span>
+          <div class="card-panel card-panel--warning" style="width:280px;">
+            <div class="font-micro text-2xs color-muted" style="text-transform:uppercase;letter-spacing:0.04em;margin-bottom:8px;">GitHub sync</div>
+            <div class="text-sm color-secondary">Webhook secret rotated — reconnect the app to resume sync.</div>
+          </div>
+          <span class="annotation-tag">Accent = stateful signal only — never decoration; kanban task cards keep priority/type colors.</span>
+        </div>
+        <pre class="code-block" id="code-card-status">&lt;div class="card-row card-row--neutral"&gt;…&lt;/div&gt;
+&lt;div class="card-row card-row--success"&gt;…&lt;/div&gt;
+&lt;div class="card-row card-row--warning"&gt;…&lt;/div&gt;
+&lt;div class="card-row card-row--danger"&gt;…&lt;/div&gt;
+&lt;div class="card-panel card-panel--warning"&gt;…&lt;/div&gt;  &lt;!-- .card-panel also has --neutral/--success/--danger --&gt;</pre>
+        <button class="btn btn-ghost btn-sm copy-btn" data-copy="code-card-status">Copy</button>
+        <div class="token-contract">Tokens: --lx-surface-card, --lx-border-default · Data colors (canonical hex): #4ADE80, #F0C040, #FF4444 · Neutral accent: --lx-border-strong (#4A443D) — same 3px full-height left border as .toast-success / .toast-warning / .toast-error / .toast-neutral</div>
+      </div>
+      <div class="block-shell">
+        <div class="block-desc">
           <strong>Mapping</strong> — semantic classes are value-aliases of the primitives (same numbers, own anatomy).<br/>
           <span class="font-mono">.kanban-card</span> ≡ <span class="font-mono">.card-row</span> + accent bar, states, subtask dimming · <span class="font-mono">.check-row</span> ≡ <span class="font-mono">.card-row</span> + checkbox (bordered) or <span class="font-mono">.card-row--dense</span> (menus) · <span class="font-mono">.github-issue-row</span> ≡ <span class="font-mono">.card-row</span> + elevated surface (exception) · <span class="font-mono">.project-card</span> / <span class="font-mono">.health-card</span> ≡ <span class="font-mono">.card-tile</span>.
         </div>
@@ -5233,8 +5356,8 @@ textarea.prop-input {
 
       <div class="block-shell">
         <div class="block-desc">
-          <strong>Use</strong> — `.btn-primary` for the single primary action per view; `.btn-ghost` for secondary/inline actions; `.btn-danger-solid` for destructive confirms (delete/clear/revoke).<br/>
-          <strong>Avoid</strong> — multiple `.btn-primary`s in one view (dilutes the primary); `.btn-danger-solid` for non-destructive actions.<br/>
+          <strong>Use</strong> — `.btn-primary` for the single primary action per view; `.btn-ghost` for secondary/inline actions; `.btn-ghost-accent` for an accent-forward secondary action tied to the brand accent ("+ New issue" in the GitHub panel); `.btn-danger-solid` for destructive confirms (delete/clear/revoke).<br/>
+          <strong>Avoid</strong> — multiple `.btn-primary`s in one view (dilutes the primary); `.btn-danger-solid` for non-destructive actions; `.btn-ghost-accent` as decoration on neutral actions.<br/>
           <strong>Instead</strong> — `.btn-danger` (quiet outline) for destructive-but-secondary actions; `.btn-ghost` for cancel.
         </div>
         <div class="state-row">
@@ -5242,39 +5365,77 @@ textarea.prop-input {
           <button class="btn">Base</button>
           <button class="btn btn-primary">Primary</button>
           <button class="btn btn-ghost">Ghost</button>
+          <button class="btn btn-ghost-accent">+ New issue</button>
           <button class="btn btn-danger">Danger</button>
           <button class="btn btn-danger-solid">Delete</button>
-          <span class="annotation-tag">No .btn-secondary class exists — use .btn-ghost for secondary actions.</span>
+          <span class="annotation-tag">No .btn-secondary class exists — use .btn-ghost for secondary actions. .btn-ghost-accent = ghost anatomy + --lx-text-link text; hover tints --lx-bg-accent-subtle, text stays accent.</span>
         </div>
         <pre class="code-block" id="code-buttons-variants">&lt;button class="btn"&gt;Base&lt;/button&gt;
 &lt;button class="btn btn-primary"&gt;Primary&lt;/button&gt;
 &lt;button class="btn btn-ghost"&gt;Ghost&lt;/button&gt;
+&lt;button class="btn btn-ghost-accent"&gt;+ New issue&lt;/button&gt;
 &lt;button class="btn btn-danger"&gt;Danger&lt;/button&gt;
 &lt;button class="btn btn-danger-solid"&gt;Delete&lt;/button&gt;</pre>
         <button class="btn btn-ghost btn-sm copy-btn" data-copy="code-buttons-variants">Copy</button>
-        <div class="token-contract">Tokens: --lx-border-focus, --lx-text-inverse, --lx-text-secondary, --lx-text-danger, --lx-bg-danger-subtle</div>
+        <div class="token-contract">Tokens: --lx-border-focus, --lx-text-inverse, --lx-text-secondary, --lx-text-link, --lx-bg-accent-subtle, --lx-text-danger, --lx-bg-danger-subtle</div>
       </div>
 
       <div class="block-shell">
         <div class="block-desc">
-          <strong>Use</strong> — `.btn-sm` (28px) for compact paired Cancel/Save rows and dense toolbars; `.btn-icon-sm` (28×28) for icon-only actions.<br/>
-          <strong>Avoid</strong> — `.btn-sm` for the primary CTA of a surface; full-height buttons inside dense filter bars.<br/>
-          <strong>Instead</strong> — default `.btn` (32px) for standalone primary actions.
+          <strong>Use</strong> — `.btn-sm` (32px) for compact paired Cancel/Save rows and dense toolbars; default `.btn` (36px) for standard UI actions; `.btn-lg` (44px) for page-level primary actions and empty-state CTAs. Icon-only: `.btn-icon-sm` (32×32), `.btn-icon` (36×36), `.btn-icon-lg` (44×44).<br/>
+          <strong>Avoid</strong> — `.btn-sm` for the primary CTA of a surface; `.btn-lg` inside dense rows or modals; mixing sizes in one action row.<br/>
+          <strong>Instead</strong> — pick one size per action row; default `.btn` when unsure.
         </div>
         <div class="state-row">
           <span class="state-label">Sizes</span>
-          <button class="btn btn-primary btn-sm">Small</button>
-          <button class="btn btn-ghost btn-icon-sm" title="Icon 28×28">
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 5v14M5 12h14"/></svg>
+          <button class="btn btn-primary btn-sm">Small 32</button>
+          <button class="btn btn-primary">Medium 36</button>
+          <button class="btn btn-primary btn-lg">Large 44</button>
+          <span class="annotation-tag">Scale: sm 32 · md 36 (default) · lg 44. Icon-only squares match each step: .btn-icon-sm 32×32 · .btn-icon 36×36 · .btn-icon-lg 44×44. Icon svg: 14 / 14 / 16.</span>
+        </div>
+        <div class="state-row">
+          <span class="state-label">Icon sizes</span>
+          <button class="btn btn-ghost btn-icon-sm" title="Icon 32×32">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 5v14M5 12h14"/></svg>
           </button>
-          <span class="annotation-tag">No .btn-icon (32×32) class exists — only .btn-icon-sm (28×28).</span>
+          <button class="btn btn-ghost btn-icon" title="Icon 36×36">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 5v14M5 12h14"/></svg>
+          </button>
+          <button class="btn btn-ghost btn-icon-lg" title="Icon 44×44">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 5v14M5 12h14"/></svg>
+          </button>
         </div>
         <pre class="code-block" id="code-buttons-sizes">&lt;button class="btn btn-primary btn-sm"&gt;Small&lt;/button&gt;
-&lt;button class="btn btn-ghost btn-icon-sm" title="Icon 28×28"&gt;
-  &lt;svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"&gt;&lt;path d="M12 5v14M5 12h14"/&gt;&lt;/svg&gt;
-&lt;/button&gt;</pre>
+&lt;button class="btn btn-primary"&gt;Medium&lt;/button&gt;
+&lt;button class="btn btn-primary btn-lg"&gt;Large&lt;/button&gt;
+&lt;button class="btn btn-ghost btn-icon-sm" title="Icon 32×32"&gt;
+  &lt;svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"&gt;&lt;path d="M12 5v14M5 12h14"/&gt;&lt;/svg&gt;
+&lt;/button&gt;
+&lt;!-- .btn-icon (36×36) and .btn-icon-lg (44×44) for the other steps --&gt;</pre>
         <button class="btn btn-ghost btn-sm copy-btn" data-copy="code-buttons-sizes">Copy</button>
         <div class="token-contract">Tokens: --lx-border-focus, --lx-text-inverse, --lx-text-secondary</div>
+      </div>
+
+      <div class="block-shell">
+        <div class="block-desc">
+          <strong>Use</strong> — a leading 14×14 icon inside `.btn` when the action benefits from a visual anchor (Save with check, Delete with trash, Restore with archive box); the label is always present.<br/>
+          <strong>Avoid</strong> — trailing icons (no sanctioned use); icons larger than the label's line-height; an icon on every button (icon noise).<br/>
+          <strong>Instead</strong> — `.btn-icon-sm` for icon-only compact actions; plain text buttons for low-emphasis actions.
+        </div>
+        <div class="state-row">
+          <span class="state-label">Icon + text</span>
+          <button class="btn btn-primary"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M20 6L9 17l-5-5"/></svg>Save Changes</button>
+          <button class="btn btn-ghost"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M8 4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>Restore</button>
+          <button class="btn btn-danger"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>Delete</button>
+          <span class="annotation-tag">Anatomy: leading svg 14×14 (viewBox 24, stroke currentColor, stroke-width 1.5) before the label — 6px gap comes from .btn's own gap, no helper class. Icon inherits the variant's text color.</span>
+        </div>
+        <pre class="code-block" id="code-buttons-icon-text">&lt;button class="btn btn-primary"&gt;
+  &lt;svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"&gt;&lt;path d="M20 6L9 17l-5-5"/&gt;&lt;/svg&gt;
+  Save Changes
+&lt;/button&gt;
+&lt;!-- same anatomy on .btn-ghost / .btn-danger / .btn-ghost-accent --&gt;</pre>
+        <button class="btn btn-ghost btn-sm copy-btn" data-copy="code-buttons-icon-text">Copy</button>
+        <div class="token-contract">Tokens: inherits the chosen variant's tokens · icon strokes currentColor · 6px gap via .btn</div>
       </div>
 
       <div class="block-shell">
@@ -5581,6 +5742,14 @@ textarea.prop-input {
             </div>
             <button class="toast-close"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M18 6L6 18M6 6l12 12"/></svg></button>
           </div>
+          <div class="toast toast-neutral">
+            <span class="toast-icon"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg></span>
+            <div class="flex-1">
+              <div class="toast-title">Sync started</div>
+              <div class="toast-body">Fetching issues from GitHub.</div>
+            </div>
+            <button class="toast-close"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M18 6L6 18M6 6l12 12"/></svg></button>
+          </div>
         </div>
         <pre class="code-block" id="code-feedback-toast">&lt;div class="toast toast-success"&gt;
   &lt;span class="toast-icon"&gt;…&lt;/span&gt;
@@ -5590,9 +5759,9 @@ textarea.prop-input {
   &lt;/div&gt;
   &lt;button class="toast-close"&gt;…&lt;/button&gt;
 &lt;/div&gt;
-&lt;!-- toast-warning / toast-error for the other variants --&gt;</pre>
+&lt;!-- toast-warning / toast-error / toast-neutral for the other variants --&gt;</pre>
         <button class="btn btn-ghost btn-sm copy-btn" data-copy="code-feedback-toast">Copy</button>
-        <div class="token-contract">Tokens: --lx-bg-success-subtle/--lx-text-success, --lx-bg-warning-subtle/--lx-text-warning, --lx-bg-danger-subtle/--lx-text-danger</div>
+        <div class="token-contract">Tokens: --lx-bg-success-subtle/--lx-text-success, --lx-bg-warning-subtle/--lx-text-warning, --lx-bg-danger-subtle/--lx-text-danger · neutral: --lx-border-strong accent, --lx-text-secondary icon</div>
       </div>
 
       <div class="block-shell">
@@ -5883,6 +6052,20 @@ textarea.prop-input {
       </div>
     </section>
   </main>
+  <nav class="ds-nav" aria-label="Sections">
+    <span class="ds-nav-title">Sections</span>
+    <a href="#colors">colors</a>
+    <a href="#typography">typography</a>
+    <a href="#space">space</a>
+    <a href="#card">card</a>
+    <a href="#buttons">buttons</a>
+    <a href="#inputs">inputs</a>
+    <a href="#badges">badges</a>
+    <a href="#feedback">feedback</a>
+    <a href="#overlays">overlays</a>
+    <a href="#misc">misc</a>
+  </nav>
+  <button id="theme-toggle" class="btn btn-ghost btn-sm ds-theme-toggle">Light</button>
   <script>
     // Theme toggle — flips [data-theme="light"] on <html>
     const toggle = document.getElementById('theme-toggle');
@@ -5898,6 +6081,16 @@ textarea.prop-input {
       const pre = document.getElementById(btn.dataset.copy);
       if (pre) navigator.clipboard.writeText(pre.textContent);
     });
+    // Sections rail — highlight the section nearest the top of the viewport
+    const navLinks = [...document.querySelectorAll('.ds-nav a')];
+    const sections = navLinks.map((a) => document.querySelector(a.getAttribute('href')));
+    const spy = new IntersectionObserver((entries) => {
+      entries.forEach((entry) => {
+        if (!entry.isIntersecting) return;
+        navLinks.forEach((a) => a.classList.toggle('active', a.getAttribute('href') === '#' + entry.target.id));
+      });
+    }, { rootMargin: '-20% 0px -70% 0px' });
+    sections.forEach((s) => s && spy.observe(s));
   </script>
 </body>
 </html>
