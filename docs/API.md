@@ -41,6 +41,7 @@ All non-2xx responses share one shape:
 | 404 | `USER_NOT_FOUND` | Unknown user id on admin/workspace/team-member endpoints |
 | 404 | `TEAM_NOT_FOUND` `INVITE_NOT_FOUND` `SESSION_NOT_FOUND` | Unknown team / invite / own-session id |
 | 404 | `PROJECT_NOT_FOUND` `COLUMN_NOT_FOUND` `SWIMLANE_NOT_FOUND` `MILESTONE_NOT_FOUND` `TASK_NOT_FOUND` `PAGE_NOT_FOUND` `SOURCE_NOT_FOUND` `FORGE_TASK_NOT_FOUND` `TASK_LINK_NOT_FOUND` `MACHINE_NOT_FOUND` `RUNTIME_NOT_FOUND` `RUNTIME_EVENT_NOT_FOUND` `API_KEY_NOT_FOUND` `AGENT_NOT_FOUND` `SKILL_NOT_FOUND` | |
+| 404 | `SHARE_LINK_NOT_FOUND` | Wiki share link unknown, expired, or revoked — all three return this identical envelope (no existence oracle) |
 | 409 | `SLUG_TAKEN` | Duplicate project slug, wiki slug, or team slug (details: `{ slug }`); also the constraint fallback on project update/delete |
 | 409 | `INVITE_PENDING` | An invite is already pending for that email (details: `{ email }`) |
 | 409 | `MACHINE_ID_TAKEN` | Machine id already registered to another host, legacy (no secret), or secret mismatch (details: `{ id, reason: "hostname" \| "legacy" \| "secret_mismatch" }`) |
@@ -67,7 +68,7 @@ All non-2xx responses share one shape:
 | 422 | `API_KEY_NAME_EMPTY` | API key name missing or blank |
 | 422 | `NOT_WORKSPACE_MEMBER` | Team-member add targets an email that is not a workspace member (details: `{ email, available }` — invite via the superadmin first) |
 | 422 | `INVALID_ARGS` | Sprint start date later than its due date (details: `{ reason }`) |
-| 429 | `RATE_LIMITED` | Per-IP rate limit exceeded on `/api/*` (webhook, `/api/forge/daemon/*`, `/api/forge/runtimes/register` exempt; `/api/setup*` + `/api/health` ARE limited) — enforced in the API middleware, one shared bucket |
+| 429 | `RATE_LIMITED` | Per-IP rate limit exceeded on `/api/*` (webhook, `/api/forge/daemon/*`, `/api/forge/runtimes/register` exempt; `/api/setup*` + `/api/health` ARE limited; `/api/share/*` uses a dedicated stricter bucket) — enforced in the API middleware, otherwise one shared bucket |
 | 500 | `DATABASE_ERROR` / `INTERNAL` | |
 | 500 | `PASSWORD_LINK_FAILED` | Admin-issued set-password link could not be issued (details: `{ message }`) |
 | 502 | `GITHUB_API_ERROR` | Only on explicit GitHub-linking endpoints; never on moves |
@@ -120,6 +121,10 @@ via the session cookie.
     its Origin).
   - `GET /api/health`
   - `/api/setup/*` (first-run wizard)
+  - `GET /api/share/:token` — public wiki share links (capability URL: no key,
+    no session). Still IP-rate-limited with a dedicated stricter bucket;
+    security headers unchanged. Unknown/expired/revoked tokens return the
+    identical generic 404 (no existence oracle).
   - `POST /api/webhooks/github` — HMAC-SHA-256 signature over the raw body is the auth
   - `/api/forge/daemon/*`, `/api/forge/runtimes/register`, and
     `/api/forge/sessions` — also accept the
@@ -912,6 +917,32 @@ POST   /api/projects/:slug/wiki/:pageSlug/restore
 body { revisionId* }
 → 200 WikiPage  | 404 PAGE_NOT_FOUND (unknown page or revision)
   Rolls the page back to that revision (records a new revision).
+
+POST   /api/projects/:slug/wiki/pages/:pageSlug/share
+body { expiresAt? }              (UTC ISO-8601; {} or omitted = never expires)
+→ 201 { link: { id, url, expiresAt, createdAt } } | 404 PAGE_NOT_FOUND | 403
+  url = `${PUBLIC_URL}/share/${token}` — the token itself is NEVER returned
+  after create (capability: only the URL carries it).
+
+GET    /api/projects/:slug/wiki/pages/:pageSlug/share
+→ 200 { links: [{ id, url, expiresAt, createdAt }] } | 404 PAGE_NOT_FOUND | 403
+
+DELETE /api/projects/:slug/wiki/share/:linkId
+→ 200 { ok: true } | 404 SHARE_LINK_NOT_FOUND | 403
+  Revocation = row deletion; the link stops resolving immediately.
+```
+
+### Wiki share — public
+
+```
+GET    /api/share/:token          (PUBLIC — no auth; dedicated stricter rate-limit bucket)
+→ 200 { root: { id, title, slug, content: TipTapDoc, updatedAt,
+                children: [ <same shape, recursive> ] } }
+  One request returns the root page plus its FULL descendant subtree,
+  resolved at request time (later page edits are visible through the same
+  link; navigation is limited to the subtree).
+| 404 SHARE_LINK_NOT_FOUND    (missing == expired == revoked — identical envelope)
+| 429                         (bucket exhaustion)
 ```
 
 ### Settings
