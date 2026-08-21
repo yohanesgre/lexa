@@ -3,9 +3,12 @@ import { textEditorExtensions } from "./tiptap";
 
 describe("textEditorExtensions", () => {
   it("exports the full extension stack", () => {
-    expect(textEditorExtensions).toHaveLength(7);
+    expect(textEditorExtensions).toHaveLength(12);
     const names = textEditorExtensions.map((e) => e.name);
-    expect(names).toEqual(["starterKit", "code", "underline", "highlight", "taskList", "taskItem", "placeholder"]);
+    expect(names).toEqual([
+      "starterKit", "code", "underline", "highlight", "taskList", "taskItem",
+      "image", "table", "tableRow", "tableHeader", "tableCell", "placeholder",
+    ]);
   });
 
   it("StarterKit is configured with 2-5 heading levels and no bare code", () => {
@@ -23,7 +26,7 @@ describe("textEditorExtensions", () => {
   });
 
   it("placeholder is configured with the starter text", () => {
-    const placeholder = textEditorExtensions[6]!;
+    const placeholder = textEditorExtensions[11]!;
     expect(placeholder.name).toBe("placeholder");
     expect((placeholder as unknown as { options: { placeholder?: string } }).options.placeholder).toBe("Start writing...");
   });
