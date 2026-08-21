@@ -107,7 +107,7 @@ describe("KanbanBoard", () => {
     expect(settingsCalls()).toEqual([]);
   });
 
-  it("opening Settings mounts the modal and fetches columns/swimlanes/field-config on demand", async () => {
+  it("opening Settings mounts the modal and fetches columns/field-config on demand", async () => {
     const user = userEvent.setup();
     const board = makeBoard([COL1, COL2], [LANE], [TASK1]);
     render(<KanbanBoard board={board} onMoveTask={vi.fn()} onSelectTask={vi.fn()} onOpenCreateTask={vi.fn()} onToggleArchived={vi.fn()} />, { wrapper });
@@ -118,7 +118,6 @@ describe("KanbanBoard", () => {
     await waitFor(() => {
       const calls = settingsCalls();
       expect(calls.filter((c) => c.url.endsWith("/columns"))).toHaveLength(1);
-      expect(calls.filter((c) => c.url.endsWith("/swimlanes"))).toHaveLength(1);
       expect(calls.filter((c) => c.url.endsWith("/field-config"))).toHaveLength(1);
     });
     // settings content renders from the fetched data

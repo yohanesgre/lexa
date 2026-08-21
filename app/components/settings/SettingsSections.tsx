@@ -213,7 +213,7 @@ function RemoveMachineModal({ id, runtimeCount, onCancel, onConfirm }: { id: str
             {runtimeCount > 0 ? ` and its ${runtimeCount} runtime${runtimeCount === 1 ? "" : "s"}` : ""}?
             Their daemons are stopped by the machine listener on its next heartbeat.
           </p>
-          <p className="text-sm mt-2 leading-5" style={{ color: "var(--lx-text-warning, #d97706)" }}>
+          <p className="text-sm mt-2 leading-5" style={{ color: "var(--lx-text-warning)" }}>
             If the listener is still running on that machine, it will reappear within seconds — run{" "}
             <span className="font-mono text-xs">lexa-cli machine stop</span> there first for permanent removal.
           </p>

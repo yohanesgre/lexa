@@ -1,7 +1,7 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { createPortal } from "react-dom";
 
-export type ToastVariant = "success" | "warning" | "error";
+export type ToastVariant = "success" | "warning" | "error" | "neutral";
 
 interface ToastItem {
   id: number;
@@ -28,6 +28,7 @@ const AUTO_DISMISS: Record<ToastVariant, number | null> = {
   success: 5000,
   warning: 5000,
   error: null,
+  neutral: 5000,
 };
 
 const MAX_VISIBLE = 3;
@@ -49,6 +50,15 @@ function Icon({ variant }: { variant: ToastVariant }) {
         <path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z" strokeLinecap="round" strokeLinejoin="round" />
         <path d="M12 9v4" strokeLinecap="round" />
         <path d="M12 17h.01" strokeLinecap="round" />
+      </svg>
+    );
+  }
+  if (variant === "neutral") {
+    return (
+      <svg viewBox="0 0 24 24">
+        <circle cx="12" cy="12" r="10" />
+        <path d="M12 16v-4" strokeLinecap="round" />
+        <path d="M12 8h.01" strokeLinecap="round" />
       </svg>
     );
   }
@@ -109,7 +119,7 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
                 <span className="toast-icon">
                   <Icon variant={toast.variant} />
                 </span>
-                <div style={{ flex: 1, minWidth: 0 }}>
+                <div className="flex-1">
                   <div className="toast-title">{toast.title}</div>
                   {toast.body !== undefined && <div className="toast-body">{toast.body}</div>}
                 </div>

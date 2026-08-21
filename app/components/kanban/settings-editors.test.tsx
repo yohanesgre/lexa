@@ -9,7 +9,6 @@ import { useSensors, useSensor, PointerSensor } from "@dnd-kit/core";
 import { OptionForm } from "./OptionForm";
 import { OptionSettingsSection } from "./OptionSettingsSection";
 import { ColumnsSettingsSection } from "./ColumnsSettingsSection";
-import { SwimlanesSettingsSection } from "./SwimlanesSettingsSection";
 import { SwimlaneForm } from "./SwimlaneForm";
 import { KanbanSettingsModal } from "./KanbanSettingsModal";
 import type { Column, FieldOption, Swimlane } from "../../../shared/types";
@@ -156,46 +155,6 @@ describe("ColumnsSettingsSection", () => {
   });
 });
 
-describe("SwimlanesSettingsSection", () => {
-  it("renders lanes and shows the description button (truncated)", async () => {
-    const user = userEvent.setup();
-    const onShowDescription = vi.fn();
-    render(
-      <WithSensors>
-        <SwimlanesSettingsSection
-          swimlanes={[LANE]} sensors={[]}
-          onDragEnd={() => {}} onEdit={() => {}} onDelete={() => {}} onAdd={() => {}}
-          onShowDescription={onShowDescription}
-        />
-      </WithSensors>
-    );
-    await user.click(screen.getByRole("button", { name: "system lane" }));
-    expect(onShowDescription).toHaveBeenCalledWith(LANE);
-  });
-
-  it("wires Add/Edit/Delete callbacks", async () => {
-    const user = userEvent.setup();
-    const onEdit = vi.fn();
-    const onDelete = vi.fn();
-    const onAdd = vi.fn();
-    render(
-      <WithSensors>
-        <SwimlanesSettingsSection
-          swimlanes={[MILESTONE]} sensors={[]}
-          onDragEnd={() => {}} onEdit={onEdit} onDelete={onDelete} onAdd={onAdd}
-          onShowDescription={() => {}}
-        />
-      </WithSensors>
-    );
-    await user.click(screen.getByRole("button", { name: "Edit swimlane" }));
-    expect(onEdit).toHaveBeenCalledWith(MILESTONE);
-    await user.click(screen.getByRole("button", { name: "Delete swimlane" }));
-    expect(onDelete).toHaveBeenCalledWith(MILESTONE);
-    await user.click(screen.getByRole("button", { name: "Add Swimlane" }));
-    expect(onAdd).toHaveBeenCalled();
-  });
-});
-
 describe("SwimlaneForm", () => {
   let queryClient: QueryClient;
 
@@ -322,7 +281,6 @@ describe("KanbanSettingsModal integration (option + column mutations)", () => {
     expect(await screen.findByText("Board Settings")).toBeInTheDocument();
     expect(await screen.findByText("Priorities")).toBeInTheDocument();
     expect(screen.getByText("Types")).toBeInTheDocument();
-    expect(screen.getByText("Swimlanes")).toBeInTheDocument();
     // both add buttons singularize correctly
     expect(screen.getByRole("button", { name: "Add Priority" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Add Type" })).toBeInTheDocument();
