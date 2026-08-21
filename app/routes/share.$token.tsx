@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { PanelLeft } from "lucide-react";
 import { createFileRoute } from "@tanstack/react-router";
 import { renderDoc } from "../components/tiptap-render";
+import { ThemeToggle } from "../components/layout/ThemeToggle";
 import type { TipTapDoc } from "../../shared/types";
 
 interface SharedPageNode {
@@ -115,7 +116,10 @@ export function SharedWikiPage({ tree, token, pageId, onSelectPage }: { tree: Sh
           {fileIcon}
           <span className="font-display truncate" style={{ fontSize: 16, fontWeight: 500 }}>{current.title}</span>
         </div>
-        <span className="status-badge status-badge-empty">Shared read-only</span>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <span className="status-badge status-badge-empty">Shared read-only</span>
+          <ThemeToggle />
+        </div>
       </header>
 
       <div style={{ display: "flex", alignItems: "stretch", minHeight: "calc(100vh - 49px)" }}>
