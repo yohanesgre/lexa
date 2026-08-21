@@ -69,4 +69,22 @@ describe("SharedWikiPage", () => {
     render(<SharedWikiPage tree={tree} token="tok" />);
     expect(document.querySelector('meta[name="robots"][content="noindex"]')).toBeTruthy();
   });
+
+  it("renders an empty page (content:{}) without crashing", () => {
+    const emptyTree = {
+      root: {
+        id: "w9", title: "Empty", slug: "empty",
+        content: {},
+        updatedAt: "2026-08-21T10:00:00.000Z",
+        children: [],
+      },
+    };
+    render(<SharedWikiPage tree={emptyTree} token="tok" />);
+    expect(screen.getByRole("heading", { level: 1 }).textContent).toBe("Empty");
+  });
+
+  it("fetch rejection resolves to the dead-link state, never a blank page", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("network down")));
+    await expect(fetchSharedTree("tok")).resolves.toBeNull();
+  });
 });
