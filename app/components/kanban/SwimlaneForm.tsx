@@ -53,9 +53,10 @@ export function SwimlaneForm({ slug, swimlane, isOpen, onClose, onSubmit, zIndex
 
   // Seed fields when the form opens — it stays mounted between opens, so
   // state is re-seeded from the target entity each time (create = empty).
-  // Adjusted during render (not in an effect) so a stale close→reopen with a
-  // different swimlane never carries over previous values.
-  const [prevKey, setPrevKey] = useState<{ swimlane: Swimlane | null | undefined; isOpen: boolean }>({ swimlane, isOpen });
+  // prevKey starts as isOpen:false so the first open render always seeds
+  // (the old useEffect ran on mount); the render-time adjust handles
+  // close→reopen with a different swimlane.
+  const [prevKey, setPrevKey] = useState<{ swimlane: Swimlane | null | undefined; isOpen: boolean }>({ swimlane: undefined, isOpen: false });
   if (prevKey.swimlane !== swimlane || prevKey.isOpen !== isOpen) {
     setPrevKey({ swimlane, isOpen });
     if (isOpen) {
