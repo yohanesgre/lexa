@@ -110,7 +110,7 @@ export function SharedWikiPage({ tree, token, pageId, onSelectPage }: { tree: Sh
       <meta name="robots" content="noindex" />
       <header
         className="flex items-center justify-between"
-        style={{ height: 48, padding: "0 24px", borderBottom: "1px solid var(--lx-border-subtle)" }}
+        style={{ height: 48, padding: "0 24px", borderBottom: "1px solid var(--lx-border-subtle)", background: "var(--lx-surface-elevated)" }}
       >
         <div className="flex items-center gap-2" style={{ minWidth: 0 }}>
           {fileIcon}
