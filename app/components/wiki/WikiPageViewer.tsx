@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Pencil } from "lucide-react";
+import { Pencil, Share2 } from "lucide-react";
 import type { WikiPage, WikiPageMeta, TipTapDoc } from "../../../shared/types";
 import { renderDoc, extractHeadings, slugifyHeading } from "../tiptap-render";
 import { WikiEditSplit } from "./WikiEditSplit";
@@ -8,6 +8,7 @@ import { OutlineSidebar } from "./OutlineSidebar";
 import { SourcesSection } from "../forge/SourcesSection";
 import { useWikiEditor } from "./useWikiEditor";
 import { parseApiDate } from "../../lib/date";
+import { ShareDialog } from "./ShareDialog";
 
 const emptyDoc: TipTapDoc = { type: "doc", content: [] };
 
@@ -49,19 +50,25 @@ interface WikiPageViewerProps {
   pages: WikiPageMeta[];
 }
 
-function PageViewHeader({ breadcrumb, onEdit }: { breadcrumb: string; onEdit: () => void }) {
+function PageViewHeader({ breadcrumb, onEdit, onShare }: { breadcrumb: string; onEdit: () => void; onShare: () => void }) {
   return (
     <div className="flex items-center justify-between" style={{ marginBottom: 16 }}>
       <span className="font-micro text-2xs text-lx-text-muted uppercase tracking-[0.04em]">{breadcrumb}</span>
-      <button type="button" className="btn btn-ghost" style={{ height: 28, padding: "0 10px", fontSize: 12 }} onClick={onEdit}>
-        <Pencil size={13} strokeWidth={1.5} />
-        Edit
-      </button>
+      <span className="flex items-center gap-2">
+        <button type="button" className="btn btn-ghost" style={{ height: 28, padding: "0 10px", fontSize: 12 }} onClick={onEdit}>
+          <Pencil size={13} strokeWidth={1.5} />
+          Edit
+        </button>
+        <button type="button" className="btn btn-ghost-accent" style={{ height: 28, padding: "0 10px", fontSize: 12 }} onClick={onShare}>
+          <Share2 size={13} strokeWidth={1.5} />
+          Share
+        </button>
+      </span>
     </div>
   );
 }
 
-function WikiReadView({ breadcrumb, title, content, updatedAt, headings, outlineVisible, onToggleOutline, onEdit, slug, pageSlug }: {
+function WikiReadView({ breadcrumb, title, content, updatedAt, headings, outlineVisible, onToggleOutline, onEdit, onShare, slug, pageSlug }: {
   breadcrumb: string;
   title: string;
   content: TipTapDoc | undefined;
@@ -70,6 +77,7 @@ function WikiReadView({ breadcrumb, title, content, updatedAt, headings, outline
   outlineVisible: boolean;
   onToggleOutline: () => void;
   onEdit: () => void;
+  onShare: () => void;
   slug: string;
   pageSlug: string;
 }) {
@@ -78,7 +86,7 @@ function WikiReadView({ breadcrumb, title, content, updatedAt, headings, outline
       <div className="flex flex-1 min-w-0">
         <div className="flex-1 overflow-y-auto" style={{ padding: "32px 48px" }}>
           <div className="wiki-prose">
-            <PageViewHeader breadcrumb={breadcrumb} onEdit={onEdit} />
+            <PageViewHeader breadcrumb={breadcrumb} onEdit={onEdit} onShare={onShare} />
             <h1 id={slugifyHeading(title)}>{title}</h1>
             <div>{renderDoc(content ?? emptyDoc, "wiki")}</div>
             <SourcesSection
@@ -170,6 +178,7 @@ export function WikiPageViewer({ slug, page, pages }: WikiPageViewerProps) {
 
   const [sidebarVisible, setSidebarVisible] = useState(true);
   const [outlineVisible, setOutlineVisible] = useState(true);
+  const [shareOpen, setShareOpen] = useState(false);
 
   const breadcrumb = buildAncestors(pages, page)
     .map((a) => a.title)
@@ -182,18 +191,22 @@ export function WikiPageViewer({ slug, page, pages }: WikiPageViewerProps) {
       ...rawHeadings.filter((h) => h.level >= 2),
     ];
     return (
-      <WikiReadView
-        breadcrumb={breadcrumb}
-        title={page.title}
-        content={page.content}
-        updatedAt={page.updatedAt}
-        headings={headings}
-        outlineVisible={outlineVisible}
-        onToggleOutline={() => setOutlineVisible(!outlineVisible)}
-        onEdit={handleStartEditing}
-        slug={slug}
-        pageSlug={page.slug}
-      />
+      <>
+        <WikiReadView
+          breadcrumb={breadcrumb}
+          title={page.title}
+          content={page.content}
+          updatedAt={page.updatedAt}
+          headings={headings}
+          outlineVisible={outlineVisible}
+          onToggleOutline={() => setOutlineVisible(!outlineVisible)}
+          onEdit={handleStartEditing}
+          onShare={() => setShareOpen(true)}
+          slug={slug}
+          pageSlug={page.slug}
+        />
+        <ShareDialog slug={slug} pageSlug={page.slug} isOpen={shareOpen} onClose={() => setShareOpen(false)} />
+      </>
     );
   }
 
