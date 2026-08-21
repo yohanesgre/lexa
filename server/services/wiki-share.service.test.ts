@@ -145,7 +145,7 @@ describe("WikiShareService.revoke", () => {
     const svc = makeService(db);
     const created = createLink(svc);
     if (!Either.isRight(created)) throw new Error("create failed");
-    const revoked = Effect.runSync(Effect.either(svc.revoke(created.right.id)));
+    const revoked = Effect.runSync(Effect.either(svc.revoke(created.right.id, "p1")));
     expect(Either.isRight(revoked)).toBe(true);
     const n = (db.prepare("SELECT COUNT(*) AS n FROM wiki_share_links WHERE id = ?").get(created.right.id) as { n: number }).n;
     expect(n).toBe(0);
@@ -158,7 +158,7 @@ describe("WikiShareService.revoke", () => {
     const db = tmpDb();
     seed(db);
     const svc = makeService(db);
-    const res = Effect.runSync(Effect.either(svc.revoke("nope")));
+    const res = Effect.runSync(Effect.either(svc.revoke("nope", "p1")));
     expect(Either.isLeft(res)).toBe(true);
     if (Either.isLeft(res)) expect(res.left).toBeInstanceOf(ShareLinkNotFound);
   });

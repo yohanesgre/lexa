@@ -14,11 +14,13 @@ const MIGRATIONS = fileURLToPath(new URL("../../migrations", import.meta.url));
 const SEED = `
 INSERT INTO users (id, email, name) VALUES ('u1', 'u1@lexa.local', 'User One');
 INSERT INTO projects (id, name, slug) VALUES ('p1', 'P', 'p1');
+INSERT INTO projects (id, name, slug) VALUES ('p2', 'Q', 'q');
 INSERT INTO wiki_pages (id, project_id, title, slug, parent_id, position) VALUES
   ('w1', 'p1', 'Root',       'root',       NULL, 0),
   ('w2', 'p1', 'Child',      'child',      'w1', 0),
   ('w3', 'p1', 'Grandchild', 'grandchild', 'w2', 0),
-  ('w4', 'p1', 'Other',      'other',      NULL, 1);
+  ('w4', 'p1', 'Other',      'other',      NULL, 1),
+  ('w5', 'p2', 'Foreign',    'foreign',    NULL, 0);
 `;
 
 let dirs: string[] = [];
@@ -81,12 +83,22 @@ describe("WikiShareRepo", () => {
     } finally { close(); }
   });
 
-  it("deleteById returns true once then false", () => {
+  it("deleteByIdInProject returns true once then false within the project", () => {
     const { repo, close } = makeRepo();
     try {
       insertLink(repo);
-      expect(Effect.runSync(repo.deleteById("l1"))).toBe(true);
-      expect(Effect.runSync(repo.deleteById("l1"))).toBe(false);
+      expect(Effect.runSync(repo.deleteByIdInProject("l1", "p1"))).toBe(true);
+      expect(Effect.runSync(repo.deleteByIdInProject("l1", "p1"))).toBe(false);
+    } finally { close(); }
+  });
+
+  it("deleteByIdInProject does not touch links of other projects", () => {
+    const { repo, close } = makeRepo();
+    try {
+      insertLink(repo);
+      expect(Effect.runSync(repo.deleteByIdInProject("l1", "p2"))).toBe(false);
+      expect(Effect.runSync(repo.findByToken("tok-1"))?.id).toBe("l1");
+      expect(Effect.runSync(repo.deleteByIdInProject("l1", "p1"))).toBe(true);
     } finally { close(); }
   });
 
