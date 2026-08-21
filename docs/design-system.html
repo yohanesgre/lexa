@@ -6013,16 +6013,23 @@ textarea.prop-input {
 
       <div class="block-shell">
         <div class="block-desc">
-          <strong>Use</strong> — `.slideover` (480px, right) for detail/edit panels (task detail) over a dimmed backdrop.<br/>
+          <strong>Use</strong> — `.slideover` (480px, right) for detail/edit panels (task detail) over a dimmed backdrop. `.slideover-expanded` widens to full width for long-form editing.<br/>
           <strong>Avoid</strong> — a slideover for a quick confirm; a slideover for a lightweight filter.<br/>
-          <strong>Instead</strong> — `.dialog` for confirms; `.menu-popover` for filters.
+          <strong>Instead</strong> — `.dialog` for confirms; `.menu-popover` for filters.<br/>
+          <strong>States</strong> — open / `.slideover-expanded` / `.slideover-closed` (+ `.overlay-closed` on the backdrop). Header carries breadcrumb left; expand-width and close controls right. Body = property bar → `.tab-bar` (Description/Activity) → `.slideover-body`.
         </div>
         <div class="state-row">
-          <span class="state-label">Slideover</span>
+          <span class="state-label">Slideover · default 480px</span>
           <div class="slideover" style="position:relative;width:100%;max-width:520px;">
             <div class="slideover-header border-b-subtle">
-              <div class="flex items-center gap-2">
-                <span class="text-xs color-muted font-body">Nimbus / Board</span>
+              <span class="text-xs color-muted font-body">Nimbus / Board</span>
+              <div class="flex items-center gap-1">
+                <button type="button" class="btn btn-ghost btn-sm" title="Toggle width (480px → full width)" style="width:32px;height:32px;padding:0;justify-content:center;">
+                  <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/></svg>
+                </button>
+                <button type="button" class="btn btn-ghost btn-sm" aria-label="Close" style="width:32px;height:32px;padding:0;justify-content:center;">
+                  <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M18 6L6 18M6 6l12 12"/></svg>
+                </button>
               </div>
             </div>
             <div class="px-4 pt-4">
@@ -6031,15 +6038,45 @@ textarea.prop-input {
                 <span class="detail-title">Crash on large board load</span>
               </h2>
             </div>
+            <div class="tab-bar" style="margin-top:12px;">
+              <button type="button" class="tab-btn active">Description</button>
+              <button type="button" class="tab-btn">Activity</button>
+            </div>
+            <div class="slideover-body"></div>
           </div>
         </div>
-        <pre class="code-block" id="code-overlays-slideover">&lt;div class="slideover-overlay"&gt;&lt;/div&gt;
-&lt;div class="slideover"&gt;
-  &lt;div class="slideover-header border-b-subtle"&gt;…&lt;/div&gt;
-  &lt;div class="px-4 pt-4"&gt;…&lt;/div&gt;
+        <div class="state-row">
+          <span class="state-label">Slideover · expanded (full width)</span>
+          <div class="slideover slideover-expanded" style="position:relative;width:100%;">
+            <div class="slideover-header border-b-subtle">
+              <span class="text-xs color-muted font-body">Nimbus / Board</span>
+              <div class="flex items-center gap-1">
+                <button type="button" class="btn btn-ghost btn-sm" title="Toggle width (full width → 480px)" style="width:32px;height:32px;padding:0;justify-content:center;">
+                  <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M4 14h6v6M20 10h-6V4M14 14l7-7M10 10l-7 7"/></svg>
+                </button>
+              </div>
+            </div>
+            <div class="slideover-body"></div>
+          </div>
+        </div>
+        <pre class="code-block" id="code-overlays-slideover">&lt;div class="slideover-overlay"&gt;&lt;/div&gt;  &lt;!-- .overlay-closed when hidden --&gt;
+&lt;div class="slideover"&gt;  &lt;!-- + .slideover-expanded | .slideover-closed --&gt;
+  &lt;div class="slideover-header border-b-subtle"&gt;
+    &lt;span class="text-xs font-body text-lx-text-muted"&gt;Nimbus / Board&lt;/span&gt;
+    &lt;div style="display:flex;align-items:center;gap:4px;"&gt;
+      &lt;button class="btn btn-ghost" aria-label="Expand width"&gt;&lt;/button&gt;  &lt;!-- toggle --&gt;
+      &lt;button class="btn btn-ghost" aria-label="Close"&gt;&lt;/button&gt;
+    &lt;/div&gt;
+  &lt;/div&gt;
+  &lt;div class="px-4 pt-4"&gt;title + property bar&lt;/div&gt;
+  &lt;div class="tab-bar"&gt;
+    &lt;button class="tab-btn active"&gt;Description&lt;/button&gt;
+    &lt;button class="tab-btn"&gt;Activity&lt;/button&gt;
+  &lt;/div&gt;
+  &lt;div class="slideover-body pt-4"&gt;…&lt;/div&gt;
 &lt;/div&gt;</pre>
         <button class="btn btn-ghost btn-sm copy-btn" data-copy="code-overlays-slideover">Copy</button>
-        <div class="token-contract">Tokens: --lx-surface-overlay (backdrop), --lx-shadow-slideover</div>
+        <div class="token-contract">Tokens: --lx-surface-overlay (backdrop), --lx-shadow-slideover. React: SlideoverHeader (expand-width toggle + close).</div>
       </div>
     </section>
 
