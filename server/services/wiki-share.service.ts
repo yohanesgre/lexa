@@ -68,8 +68,8 @@ export class WikiShareService extends Effect.Service<WikiShareService>()("Lexa/W
       list: (pageId: string): Effect.Effect<WikiShareLinkRow[], DbError> =>
         shareRepo.listByPage(pageId),
 
-      revoke: (linkId: string): Effect.Effect<void, ShareLinkNotFound | DbError> =>
-        shareRepo.deleteById(linkId).pipe(
+      revoke: (linkId: string, projectId: string): Effect.Effect<void, ShareLinkNotFound | DbError> =>
+        shareRepo.deleteByIdInProject(linkId, projectId).pipe(
           Effect.catchTag(
             "ConstraintViolation",
             () => new DbError({ message: "Failed to revoke share link" })

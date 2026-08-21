@@ -125,4 +125,14 @@ describe("wiki share-link routes", () => {
     expect(res.status).toBe(404);
     expect((await res.json()).error.code).toBe("SHARE_LINK_NOT_FOUND");
   });
+
+  it("DELETE via another project's path does not revoke the link (no cross-project IDOR)", async () => {
+    const created = await handler(json("POST", "/api/projects/p1/wiki/pages/home/share", {}));
+    const { link } = await created.json();
+    const wrongProject = await handler(json("DELETE", `/api/projects/p2/wiki/share/${link.id}`));
+    expect(wrongProject.status).toBe(404);
+    expect((await wrongProject.json()).error.code).toBe("SHARE_LINK_NOT_FOUND");
+    const stillListed = await handler(json("GET", "/api/projects/p1/wiki/pages/home/share"));
+    expect(((await stillListed.json()) as { data: unknown[] }).data.length).toBeGreaterThan(0);
+  });
 });

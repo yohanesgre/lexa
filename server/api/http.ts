@@ -3012,8 +3012,8 @@ const wikiLive = HttpApiBuilder.group(LexaApi, "wiki", (handlers) =>
     .handle("revokeShareLink", (req) =>
       respond(Effect.gen(function* () {
         const shareService = yield* WikiShareService;
-        yield* requireProjectRead(req.path.slug);
-        yield* shareService.revoke(req.path.linkId);
+        const project = yield* requireProjectRead(req.path.slug);
+        yield* shareService.revoke(req.path.linkId, project.id);
         return undefined;
       }))
     )
