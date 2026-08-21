@@ -50,24 +50,6 @@ interface WikiPageViewerProps {
   pages: WikiPageMeta[];
 }
 
-function PageViewHeader({ breadcrumb, onEdit, onShare }: { breadcrumb: string; onEdit: () => void; onShare: () => void }) {
-  return (
-    <div className="flex items-center justify-between" style={{ marginBottom: 16 }}>
-      <span className="font-micro text-2xs text-lx-text-muted uppercase tracking-[0.04em]">{breadcrumb}</span>
-      <span className="flex items-center gap-2">
-        <button type="button" className="btn btn-ghost" style={{ height: 28, padding: "0 10px", fontSize: 12 }} onClick={onEdit}>
-          <Pencil size={13} strokeWidth={1.5} />
-          Edit
-        </button>
-        <button type="button" className="btn btn-ghost-accent" style={{ height: 28, padding: "0 10px", fontSize: 12 }} onClick={onShare}>
-          <Share2 size={13} strokeWidth={1.5} />
-          Share
-        </button>
-      </span>
-    </div>
-  );
-}
-
 function WikiReadView({ breadcrumb, title, content, updatedAt, headings, outlineVisible, onToggleOutline, onEdit, onShare, slug, pageSlug }: {
   breadcrumb: string;
   title: string;
@@ -82,29 +64,41 @@ function WikiReadView({ breadcrumb, title, content, updatedAt, headings, outline
   pageSlug: string;
 }) {
   return (
-    <div className="wiki-content wiki-edit-workspace">
-      <div className="flex flex-1 min-w-0">
-        <div className="flex-1 overflow-y-auto" style={{ padding: "32px 48px" }}>
-          <div className="wiki-prose" style={{ maxWidth: 760, margin: "0 auto" }}>
-            <PageViewHeader breadcrumb={breadcrumb} onEdit={onEdit} onShare={onShare} />
-            <h1 id={slugifyHeading(title)}>{title}</h1>
-            <div>{renderDoc(content ?? emptyDoc, "wiki")}</div>
-            <SourcesSection
-              slug={slug}
-              documentType="wiki"
-              documentId={pageSlug}
-              className="mt-8 pt-4 border-t border-lx-border-subtle"
-            />
-            <div className="mt-8 pt-4 border-t border-lx-border-subtle">
-              <span className="font-micro text-2xs text-lx-text-muted uppercase tracking-[0.04em]">
-                Last edited {formatRelative(updatedAt)}
-              </span>
-            </div>
+    <>
+      <div className="wiki-content">
+        <div className="wiki-prose" style={{ maxWidth: 760, margin: "0 auto" }}>
+          <div className="font-micro text-2xs text-lx-text-muted uppercase tracking-[0.04em]" style={{ marginBottom: 4 }}>
+            {breadcrumb}
+          </div>
+          <div className="flex items-center justify-between gap-4">
+            <h1 id={slugifyHeading(title)} style={{ minWidth: 0 }}>{title}</h1>
+            <span className="flex items-center gap-2 flex-shrink-0">
+              <button type="button" className="btn btn-ghost" style={{ height: 28, padding: "0 10px", fontSize: 12 }} onClick={onEdit}>
+                <Pencil size={13} strokeWidth={1.5} />
+                Edit
+              </button>
+              <button type="button" className="btn btn-ghost-accent" style={{ height: 28, padding: "0 10px", fontSize: 12 }} onClick={onShare}>
+                <Share2 size={13} strokeWidth={1.5} />
+                Share
+              </button>
+            </span>
+          </div>
+          <div>{renderDoc(content ?? emptyDoc, "wiki")}</div>
+          <SourcesSection
+            slug={slug}
+            documentType="wiki"
+            documentId={pageSlug}
+            className="mt-8 pt-4 border-t border-lx-border-subtle"
+          />
+          <div className="mt-8 pt-4 border-t border-lx-border-subtle">
+            <span className="font-micro text-2xs text-lx-text-muted uppercase tracking-[0.04em]">
+              Last edited {formatRelative(updatedAt)}
+            </span>
           </div>
         </div>
-        <OutlineSidebar headings={headings} collapsed={!outlineVisible} onToggle={onToggleOutline} />
       </div>
-    </div>
+      <OutlineSidebar headings={headings} collapsed={!outlineVisible} onToggle={onToggleOutline} />
+    </>
   );
 }
 

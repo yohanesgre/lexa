@@ -2329,7 +2329,6 @@
     flex-shrink: 0;
     background: var(--lx-surface-elevated);
     border-right: 1px solid var(--lx-border-default);
-    padding: 16px 0;
     overflow-y: auto;
     display: flex;
     flex-direction: column;
