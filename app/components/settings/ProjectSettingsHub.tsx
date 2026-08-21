@@ -5,6 +5,9 @@ import { useQuery } from "@tanstack/react-query";
 import { useProjects, useProjectMembers, useAddProjectMember, useRemoveProjectMember, useDeleteProject, useUpdateProject, useProjectRepos, useReplaceProjectRepos, useGithubRepoSearch, useUsers, useTeams, useUpdateProjectTeam, useSession } from "../../lib/queries";
 import * as api from "../../lib/api";
 import { InlineDropdown } from "./SettingsSections";
+import { Field } from "../ui/Field";
+import { TextInput } from "../ui/TextInput";
+import { TextArea } from "../ui/TextArea";
 import type { Project } from "../../../shared/types";
 
 // /settings/project/$projectId — the project settings surface reached from
@@ -117,15 +120,12 @@ function ProjectBasicSection({ project }: { project: Project }) {
     <section className="mb-8">
       <h2 className="font-display text-lg font-medium text-lx-text-primary mb-3">Project</h2>
       <div className="card-panel card-panel--elevated mt-4">
-        <div className="field" style={{ marginBottom: 12 }}>
-          <label className="field-label" htmlFor="project-name">Name</label>
-          <input id="project-name" className="prop-input w-full" value={name} onChange={(e) => { setName(e.target.value); setSaved(false); }} />
-          <div className="field-hint">Shown on the dashboard and in the nav. Slug is fixed.</div>
-        </div>
-        <div className="field" style={{ marginBottom: 0 }}>
-          <label className="field-label" htmlFor="project-desc">Description</label>
-          <textarea id="project-desc" className="prop-input w-full" value={description} onChange={(e) => { setDescription(e.target.value); setSaved(false); }} />
-        </div>
+        <Field label="Name" htmlFor="project-name" hint="Shown on the dashboard and in the nav. Slug is fixed." className="field mb-3">
+          <TextInput id="project-name" value={name} onChange={(v) => { setName(v); setSaved(false); }} />
+        </Field>
+        <Field label="Description" htmlFor="project-desc" className="field">
+          <TextArea id="project-desc" value={description} onChange={(v) => { setDescription(v); setSaved(false); }} />
+        </Field>
         <div className="flex justify-end mt-4">
           <button
             type="button"
