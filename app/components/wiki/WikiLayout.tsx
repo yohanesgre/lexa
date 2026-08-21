@@ -355,7 +355,7 @@ export function WikiLayout({ slug, activePageSlug, children }: WikiLayoutProps) 
           </button>
         </div>
 
-        <div className="flex-1 overflow-y-auto">
+        <div className="flex-1 overflow-y-auto pt-2">
           {isLoading && <div className="px-4 text-xs text-lx-text-muted">Loading pages…</div>}
           {error && <div className="px-4 text-xs text-lx-text-danger">Failed to load pages</div>}
 
