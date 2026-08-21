@@ -160,7 +160,7 @@ export function TasksPage({ slug, search }: TasksPageProps) {
           </div>
           <div className="tasks-list">
             {[0, 1, 2, 3, 4].map((i) => (
-              <div key={i} className="task-row">
+              <div key={i} className="card-row">
                 <div className="skeleton" style={{ width: i === 0 ? "55%" : `${40 + i * 9}%`, height: 14 }} />
               </div>
             ))}
@@ -237,10 +237,10 @@ export function TasksPage({ slug, search }: TasksPageProps) {
             <button
               key={t.id}
               type="button"
-              className={t.archivedAt ? "task-row archived" : "task-row"}
+              className={t.archivedAt ? "card-row archived" : "card-row"}
+              style={t.priorityColor !== "" ? { borderLeft: `3px solid ${t.priorityColor}` } : undefined}
               onClick={() => handleSelectTask(t)}
             >
-              {t.priorityColor !== "" && <span className="task-row-accent" style={{ background: t.priorityColor }} />}
               <span className="task-key">{t.key}</span>
               <span className="task-row-title">{t.title}</span>
                 <span className="task-row-meta">

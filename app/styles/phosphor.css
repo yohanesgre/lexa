@@ -4404,43 +4404,23 @@
     gap: 12px;
   }
 
-  .task-row {
+  /* Layout glue — visual surface comes from .card-row */
+  .tasks-list .card-row {
     position: relative;
     display: flex;
     align-items: center;
     gap: 12px;
     width: 100%;
-    padding: 9px 14px;
-    background: var(--lx-surface-card);
-    border: 1px solid var(--lx-border-default);
-    border-radius: 10px;
     text-align: left;
     font: inherit;
     cursor: pointer;
-    transition: background 100ms, border-color 100ms;
   }
-  .task-row:hover {
-    background: var(--lx-surface-card-hover);
-    border-color: var(--lx-border-strong);
-  }
-  .task-row:focus-visible {
+  .tasks-list .card-row:focus-visible {
     outline: none;
     box-shadow: var(--lx-focus-ring);
   }
-
-  /* Left priority accent bar — colored inline from fieldConfig (never hardcoded) */
-  .task-row-accent {
-    position: absolute;
-    left: 0;
-    top: 7px;
-    bottom: 7px;
-    width: 3px;
-    border-radius: 0 2px 2px 0;
-    pointer-events: none;
-  }
-
-  .task-row.archived { opacity: 0.55; }
-  .task-row.archived .task-row-title { color: var(--lx-text-muted); }
+  .tasks-list .card-row.archived { opacity: 0.55; }
+  .tasks-list .card-row.archived .task-row-title { color: var(--lx-text-muted); }
 
   .task-row-title {
     flex: 1;
