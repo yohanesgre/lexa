@@ -193,7 +193,7 @@ export function SharedWikiPage({ tree, token, pageId, onSelectPage }: { tree: Sh
           </aside>
         )}
 
-        <main style={{ flex: 1, minWidth: 0, padding: "0 24px 32px" }}>
+        <main style={{ flex: 1, minWidth: 0, padding: "24px 24px 32px" }}>
           <div className="wiki-prose">
             <h1>{current.title}</h1>
             <div>{renderDoc(doc, "wiki")}</div>
