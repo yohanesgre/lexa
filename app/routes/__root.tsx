@@ -14,9 +14,15 @@ import type { RouterContext } from "../router";
 // a missing/invalid session bounces to /login with the target remembered.
 const PUBLIC_PATHS = new Set(["/login", "/set-password", "/invite", "/setup"]);
 
+// Public wiki share reads: the token IS the credential (server enforces it
+// per-request) — no session required. Prefix match because the token is a
+// path param.
+const PUBLIC_PREFIXES = ["/share/"];
+
 export const Route = createRootRouteWithContext<RouterContext>()({
   beforeLoad: async ({ location }) => {
     if (PUBLIC_PATHS.has(location.pathname)) return;
+    if (PUBLIC_PREFIXES.some((prefix) => location.pathname.startsWith(prefix))) return;
     // Direct fetch, not the query cache: the guard must reflect the real
     // session cookie on every navigation, and seeding the cache here
     // interacts badly with useSession's staleTime (perpetual-loading / loop

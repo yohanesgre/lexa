@@ -10,6 +10,9 @@ import { UserMenu } from "./UserMenu";
 // Full-screen surfaces with no app chrome: auth pages + the setup wizard.
 const BARE_PATHS = new Set(["/setup", "/login", "/set-password", "/invite"]);
 
+// Public wiki share reads render zero app chrome (token IS the credential).
+const BARE_PREFIXES = ["/share/"];
+
 export function AppShell() {
   const pathname = useRouterState({ select: (s) => s.location.pathname });
   const { selectedSlug } = useProjectSelection();
@@ -27,7 +30,7 @@ export function AppShell() {
     return "home";
   }, [pathname]);
 
-  const isBare = BARE_PATHS.has(pathname);
+  const isBare = BARE_PATHS.has(pathname) || BARE_PREFIXES.some((prefix) => pathname.startsWith(prefix));
 
   const dashboardTo = selectedSlug ? "/$slug" : "/";
   const boardTo = selectedSlug ? "/$slug/board" : "/";
