@@ -10,6 +10,7 @@ import { ProjectService } from "./project.service";
 import { ActivityService } from "./activity.service";
 import { GithubIssueAlreadyLinked, TaskNotFound, GithubApiError, ProjectNotFound, ColumnNotFound, SwimlaneNotFound, RequiredFieldMissing, InvalidOption, DeadlineAfterLane } from "../api/errors";
 import { Sqlite, withTx, DbError, ConstraintViolation, RowNotFound } from "../db/database";
+import { PUBLIC_URL } from "../auth";
 import { extractText } from "../../shared/tiptap-text";
 import { docToMarkdown, markdownToDoc, normalizeMarkdownForEcho } from "../../shared/markdown";
 import * as msg from "../activity-messages";
@@ -64,7 +65,10 @@ export class GitHubService extends Effect.Service<GitHubService>()("Lexa/GitHubS
           const task = yield* taskRepo.findById(taskId).pipe(
             Effect.catchTag("RowNotFound", () => new TaskNotFound({ id: taskId }))
           );
-          const body = docToMarkdown(task.description);
+          // Attachment image srcs are absolutized so pushed issue bodies
+          // carry absolute URLs (GitHub renders them; echo suppression is
+          // unaffected — pushed_body stores exactly this string).
+          const body = docToMarkdown(task.description, { baseUrl: PUBLIC_URL });
           const links = yield* taskRepo.findGithubLinks(taskId);
           for (const link of links) {
             const titleChanged = normalizeMarkdownForEcho(link.pushed_title) !== normalizeMarkdownForEcho(task.title);

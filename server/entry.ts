@@ -9,6 +9,8 @@ import { getSetting, setSetting, mirrorSettingsFromEnv } from "./db/settings";
 import { syncRateLimitFromDb } from "./api/rate-limit";
 import { syncGitHubConfigFromDb } from "./github/client";
 import { MAX_API_BODY, X_LEXA_REMOTE_IP } from "./api/limits";
+import { bodyCapFor, resolveStorageConfig } from "./storage/config";
+import { runBackup, createBackupDriver, DEFAULT_BACKUP_RETENTION } from "./storage/backup";
 import { auth, loginLimiter, authIpLimiter } from "./auth";
 import type { Server } from "bun";
 
@@ -28,6 +30,7 @@ const rawPort = Number(process.env.PORT ?? 3000);
 const PORT = Number.isInteger(rawPort) && rawPort > 0 ? rawPort : 3000;
 if (PORT !== rawPort) console.warn(`Invalid PORT (${process.env.PORT}) — falling back to ${PORT}`);
 const DATABASE_PATH = process.env.DATABASE_PATH || "/app/data/lexa.db";
+const STORAGE_CFG = resolveStorageConfig(process.env, dirname(DATABASE_PATH));
 
 mkdirSync(dirname(DATABASE_PATH), { recursive: true });
 
@@ -64,6 +67,25 @@ setInterval(() => {
     pruneRuntimeEvents(DATABASE_PATH);
   } catch {}
 }, 3600_000).unref();
+// DB backups (docs/BACKUPS.md): snapshot + gzip + blob-dir copy into the
+// storage driver under backups/, retention-pruned. Opt-in via env; runs once
+// at boot then every 24h. Failures never crash the server.
+if (process.env.LXK_BACKUP_ENABLED === "1") {
+  const backupDriver = createBackupDriver(STORAGE_CFG);
+  const parsedRetention = Number(process.env.LXK_BACKUP_RETENTION);
+  const retention =
+    Number.isFinite(parsedRetention) && parsedRetention > 0
+      ? Math.floor(parsedRetention)
+      : DEFAULT_BACKUP_RETENTION;
+  const runBackupSafe = () => {
+    runBackup(DATABASE_PATH, STORAGE_CFG, backupDriver, { retention }).then(
+      ({ key }) => console.log(`[Backup] wrote ${key}`),
+      (e) => console.error("[Backup] failed:", e instanceof Error ? e.message : String(e))
+    );
+  };
+  void runBackupSafe();
+  setInterval(runBackupSafe, 24 * 3600_000).unref();
+}
 // Sample data is the setup wizard's job (CLI `bun run setup` or web `/setup`).
 // Boot-time seeding only for explicit dev opt-in (LXK_SEED_DEV=1).
 if (process.env.LXK_SEED_DEV === "1") {
@@ -230,7 +252,9 @@ const server: Server<unknown> = Bun.serve({
       }
       // Stream-cap every other /api body — a chunked/CL-less request must not
       // bypass the cap (/api/setup/* is an unauthenticated surface).
-      const read = await readBodyWithLimit(req, MAX_API_BODY);
+      // Attachment-upload paths get the raised upload cap (route enforces the
+      // exact per-file limit afterwards).
+      const read = await readBodyWithLimit(req, bodyCapFor(path, STORAGE_CFG, MAX_API_BODY));
       if (!read.ok) {
         console.warn(`[API] body too large path=${path} declared=${req.headers.get("content-length") ?? "unknown"} bytes`);
         return tooLargeResponse();

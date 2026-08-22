@@ -457,3 +457,50 @@ describe("normalizeMarkdownForEcho", () => {
     expect(normalizeMarkdownForEcho(normalizeMarkdownForEcho(md))).toBe(normalizeMarkdownForEcho(md));
   });
 });
+
+describe("attachment image srcs", () => {
+  const UUID = "3f2504e0-4f89-11d3-9a0c-0305e82c3301";
+  const REL = `/api/attachments/${UUID}`;
+  const img = (src: string): TipTapDoc => ({
+    type: "doc",
+    content: [{ type: "paragraph", content: [{ type: "image", attrs: { src, alt: "pic" } }] }],
+  });
+
+  it("docToMarkdown with baseUrl absolutizes attachment srcs", () => {
+    expect(docToMarkdown(img(REL), { baseUrl: "https://lexa.example" })).toBe(
+      `![pic](https://lexa.example${REL})`
+    );
+  });
+
+  it("docToMarkdown without baseUrl keeps attachment srcs relative", () => {
+    expect(docToMarkdown(img(REL))).toBe(`![pic](${REL})`);
+  });
+
+  it("non-attachment relative srcs are dropped (both directions)", () => {
+    expect(docToMarkdown(img("/etc/passwd"))).not.toContain("![");
+    // Pull side: not tokenized as an image at all — inert plain text.
+    expect(hasNodeOfType(markdownToDoc(`![x](/etc/passwd)`), "image")).toBe(false);
+  });
+
+  it("javascript: srcs stay dropped", () => {
+    expect(docToMarkdown(img("javascript:alert(1)"))).toBe("");
+    expect(hasNodeOfType(markdownToDoc(`![x](javascript:alert(1))`), "image")).toBe(false);
+  });
+
+  it("pull direction: absolute http(s) attachment URLs are accepted host-agnostically", () => {
+    const doc = markdownToDoc(`![shot](https://any-host.example${REL})`);
+    expect(hasNodeOfType(doc, "image")).toBe(true);
+    expect(docToMarkdown(doc)).toContain(`https://any-host.example${REL}`);
+  });
+
+  it("relative attachment srcs survive the pull round-trip", () => {
+    const doc = markdownToDoc(`![shot](${REL})`);
+    expect(hasNodeOfType(doc, "image")).toBe(true);
+    expect(docToMarkdown(doc)).toBe(`![shot](${REL})`);
+  });
+
+  it("absolute non-attachment https images keep working (existing behavior)", () => {
+    const doc = markdownToDoc("![logo](https://cdn.example/logo.png)");
+    expect(hasNodeOfType(doc, "image")).toBe(true);
+  });
+});

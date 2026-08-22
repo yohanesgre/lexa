@@ -56,6 +56,9 @@ export class CommentNotFound extends Data.TaggedError("CommentNotFound")<{ id: n
 export class CommentEditForbidden extends Data.TaggedError("CommentEditForbidden")<{ id: number }> {}
 export class CommentDeleteForbidden extends Data.TaggedError("CommentDeleteForbidden")<{ id: number }> {}
 export class CommentInvalid extends Data.TaggedError("CommentInvalid")<{ reason: string }> {}
+export class AttachmentNotFound extends Data.TaggedError("AttachmentNotFound")<{ id: string }> {}
+export class PayloadTooLarge extends Data.TaggedError("PayloadTooLarge")<{ size: number; maxBytes: number }> {}
+export class AttachmentDeleteForbidden extends Data.TaggedError("AttachmentDeleteForbidden")<{ id: string }> {}
 export class InvalidName extends Data.TaggedError("InvalidName")<{ reason: string }> {}
 export class InvalidRateLimit extends Data.TaggedError("InvalidRateLimit")<{ reason: string }> {}
 export class InvalidGithubSettings extends Data.TaggedError("InvalidGithubSettings")<{ reason: string }> {}
@@ -109,6 +112,9 @@ export const errorCodeMap: Record<string, string> = {
   CommentEditForbidden: "COMMENT_EDIT_FORBIDDEN",
   CommentDeleteForbidden: "COMMENT_DELETE_FORBIDDEN",
   CommentInvalid: "COMMENT_INVALID",
+  AttachmentNotFound: "ATTACHMENT_NOT_FOUND",
+  PayloadTooLarge: "PAYLOAD_TOO_LARGE",
+  AttachmentDeleteForbidden: "ATTACHMENT_DELETE_FORBIDDEN",
   InvalidName: "INVALID_NAME",
   InvalidRateLimit: "INVALID_RATE_LIMIT",
   InvalidGithubSettings: "INVALID_GITHUB_SETTINGS",
@@ -147,8 +153,11 @@ export function errorToStatus(error: { _tag: string }): number {
     case "MachineSecretMismatch":
     case "CommentEditForbidden":
     case "CommentDeleteForbidden":
+    case "AttachmentDeleteForbidden":
     case "SoleOwner":
       return 403;
+    case "PayloadTooLarge":
+      return 413;
     case "TaskNotFound":
     case "ProjectNotFound":
     case "ColumnNotFound":
@@ -166,6 +175,7 @@ export function errorToStatus(error: { _tag: string }): number {
     case "ApiKeyNotFound":
     case "TaskLinkNotFound":
     case "CommentNotFound":
+    case "AttachmentNotFound":
     case "TeamNotFound":
     case "TeamMemberNotFound":
     case "InviteNotFound":
@@ -318,6 +328,12 @@ export function errorMessage(error: { _tag: string } & Record<string, unknown>):
       return "You can only delete your own comments (or an admin's)";
     case "CommentInvalid":
       return String(error.reason ?? "Invalid comment");
+    case "AttachmentNotFound":
+      return "Attachment not found";
+    case "PayloadTooLarge":
+      return `Attachment exceeds the ${Math.round(Number(error.maxBytes ?? 0) / (1024 * 1024))} MB upload limit`;
+    case "AttachmentDeleteForbidden":
+      return "You can only delete your own attachments (or an admin's)";
     case "InvalidName":
       return String(error.reason ?? "Invalid name");
     case "InvalidRateLimit":

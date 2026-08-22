@@ -1,4 +1,4 @@
-import type { Project, ProjectRepo, Column, Swimlane, Task, Board, Milestone, WikiPageMeta, WikiPage, WikiPageRevision, WikiPageRevisionSummary, TipTapDoc, ApiKey, ApiKeyCreateResult, Dashboard, FieldConfig, ForgeTask, ForgeTaskLog, ForgeTaskStatus, ForgeAgent, ForgeSkill, ForgeProvider, ForgeSession, DocumentSource, Runtime, RuntimeEvent, Machine, TaskLink, TaskLinkSuggestion, ActivityEvent, ActivityItem, TaskComment, GithubIssueSummary, Team, TeamMember, TeamMemberRole, WorkspaceInvite, SessionInfo, LexaUser } from "../../shared/types";
+import type { Project, ProjectRepo, Column, Swimlane, Task, Board, Milestone, WikiPageMeta, WikiPage, WikiPageRevision, WikiPageRevisionSummary, TipTapDoc, ApiKey, ApiKeyCreateResult, Dashboard, FieldConfig, ForgeTask, ForgeTaskLog, ForgeTaskStatus, ForgeAgent, ForgeSkill, ForgeProvider, ForgeSession, DocumentSource, Runtime, RuntimeEvent, Machine, TaskLink, TaskLinkSuggestion, ActivityEvent, ActivityItem, TaskComment, GithubIssueSummary, Team, TeamMember, TeamMemberRole, WorkspaceInvite, SessionInfo, LexaUser, Attachment } from "../../shared/types";
 
 const BASE = "/api";
 
@@ -23,7 +23,10 @@ async function serverRequestContext(): Promise<{ origin: string; cookie?: string
 }
 
 async function request<T>(url: string, init?: RequestInit): Promise<T> {
-  const headers: Record<string, string> = { "Content-Type": "application/json", ...init?.headers as Record<string, string> };
+  // FormData bodies must reach the browser untouched — it supplies the
+  // multipart boundary via Content-Type; a JSON override breaks the upload.
+  const isForm = typeof FormData !== "undefined" && init?.body instanceof FormData;
+  const headers: Record<string, string> = { ...(isForm ? {} : { "Content-Type": "application/json" }), ...init?.headers as Record<string, string> };
   let target = url;
   if (typeof window === "undefined") {
     const { origin, cookie } = await serverRequestContext();
@@ -687,4 +690,89 @@ export function linkGithubIssue(slug: string, taskId: string, repo: string): Pro
 
 export function unlinkGithubIssue(slug: string, taskId: string, issueId: string): Promise<TaskMutationResult> {
   return request(`${BASE}/projects/${slug}/tasks/${taskId}/github-link/${issueId}`, { method: "DELETE" });
+}
+
+// ── Attachments ──
+
+export interface AttachmentMutationResult {
+  data: Attachment;
+  activity: ActivityEvent[];
+}
+
+export function listTaskAttachments(slug: string, taskId: string): Promise<{ data: Attachment[] }> {
+  return request(`${BASE}/projects/${slug}/tasks/${taskId}/attachments`);
+}
+
+export function listWikiAttachments(slug: string, pageSlug: string): Promise<{ data: Attachment[] }> {
+  return request(`${BASE}/projects/${slug}/wiki/pages/${pageSlug}/attachments`);
+}
+
+// Plain fetch upload (no progress) — used by editor paste/drop embeds.
+export async function uploadTaskAttachment(slug: string, taskId: string, file: File): Promise<AttachmentMutationResult> {
+  const form = new FormData();
+  form.append("file", file);
+  return request(`${BASE}/projects/${slug}/tasks/${taskId}/attachments`, { method: "POST", body: form });
+}
+
+export async function uploadWikiAttachment(slug: string, pageSlug: string, file: File): Promise<{ data: Attachment }> {
+  const form = new FormData();
+  form.append("file", file);
+  return request(`${BASE}/projects/${slug}/wiki/pages/${pageSlug}/attachments`, { method: "POST", body: form });
+}
+
+export function deleteAttachment(id: string): Promise<void> {
+  return request(`${BASE}/attachments/${id}`, { method: "DELETE" });
+}
+
+// XHR upload — fetch has no upload progress and no in-flight abort, both of
+// which the panel's uploading row needs (determinate bar + cancel). Client-
+// only: uploads never run during SSR. Resolves with the raw envelope so the
+// task path's activity rows survive (dedupe hits arrive with activity: []).
+export interface UploadHandle {
+  promise: Promise<{ data: Attachment; activity?: ActivityEvent[] }>;
+  abort: () => void;
+}
+
+type UploadScope = { kind: "task"; taskId: string } | { kind: "wiki"; pageSlug: string };
+
+export function uploadAttachmentWithProgress(
+  slug: string,
+  scope: UploadScope,
+  file: File,
+  onProgress?: (percent: number) => void
+): UploadHandle {
+  const path = scope.kind === "task"
+    ? `${BASE}/projects/${slug}/tasks/${scope.taskId}/attachments`
+    : `${BASE}/projects/${slug}/wiki/pages/${scope.pageSlug}/attachments`;
+  const form = new FormData();
+  form.append("file", file);
+  const xhr = new XMLHttpRequest();
+  const promise = new Promise<{ data: Attachment; activity?: ActivityEvent[] }>((resolve, reject) => {
+    xhr.open("POST", path);
+    xhr.responseType = "json";
+    xhr.onload = () => {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        resolve((xhr.response ?? {}) as { data: Attachment; activity?: ActivityEvent[] });
+        return;
+      }
+      const body = (xhr.response ?? {}) as { error?: { code?: string; message?: string; details?: unknown } };
+      const err = new Error(body.error?.message ?? `HTTP ${xhr.status}`) as Error & { code?: string; details?: unknown };
+      err.code = body.error?.code;
+      err.details = body.error?.details;
+      reject(err);
+    };
+    xhr.onerror = () => reject(new Error("Network error during upload"));
+    xhr.onabort = () => {
+      const err = new Error("Upload cancelled") as Error & { code?: string };
+      err.code = "UPLOAD_CANCELLED";
+      reject(err);
+    };
+    if (onProgress) {
+      xhr.upload.onprogress = (e) => {
+        if (e.lengthComputable) onProgress(Math.round((e.loaded / e.total) * 100));
+      };
+    }
+    xhr.send(form);
+  });
+  return { promise, abort: () => xhr.abort() };
 }

@@ -4,6 +4,7 @@ import type { JSONContent } from "@tiptap/core";
 import { Check, X } from "lucide-react";
 import type { TipTapDoc } from "../../shared/types";
 import { textEditorExtensions } from "../lib/tiptap";
+import { useAttachmentEmbeds } from "../lib/useAttachmentEmbeds";
 import { cn } from "./ui/cn";
 import { TextEditor, Toolbar } from "./TextEditor";
 import { ForgeReviewSurface } from "./forge/ForgeReviewSurface";
@@ -18,6 +19,9 @@ interface DescriptionEditorProps {
   placeholder?: string;
   editable?: boolean;
   forge?: { slug: string; documentType: "task" | "wiki"; documentId: string };
+  // Paste/drop-to-embed uploads (attachments API). Absent in create mode —
+  // there is no taskId to attach to yet.
+  attachments?: { slug: string; documentId: string };
   onReviewStateChange?: (active: boolean) => void;
 }
 
@@ -30,6 +34,7 @@ export function DescriptionEditor({
   placeholder,
   editable = true,
   forge,
+  attachments,
   onReviewStateChange,
 }: DescriptionEditorProps) {
   const onBlurRef = useRef(onBlur);
@@ -65,6 +70,15 @@ export function DescriptionEditor({
     return () => document.removeEventListener("pointerdown", onPointerDown, true);
   }, []);
 
+  // Hooks run unconditionally — empty options when attachments wiring is
+  // absent (create mode); handlers only spread while active.
+  const embeds = useAttachmentEmbeds(
+    attachments
+      ? { slug: attachments.slug, documentType: "task", documentId: attachments.documentId }
+      : { slug: "", documentType: "task", documentId: "" }
+  );
+  const embedsActive = !!(attachments && attachments.slug && attachments.documentId);
+
   const editor = useEditor({
     immediatelyRender: false,
     extensions: textEditorExtensions,
@@ -95,6 +109,7 @@ export function DescriptionEditor({
         }
         return false;
       },
+      ...(embedsActive ? { handlePaste: embeds.handlePaste, handleDrop: embeds.handleDrop } : {}),
       handleDOMEvents: {
         // Returning true stops ProseMirror's focusEvents plugin, so the
         // editor never reports a blur when focus moves within its own chrome

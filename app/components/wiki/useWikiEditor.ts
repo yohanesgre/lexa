@@ -17,6 +17,7 @@ import { TableCell } from "@tiptap/extension-table-cell";
 import Placeholder from "@tiptap/extension-placeholder";
 import type { WikiPage, TipTapDoc } from "../../../shared/types";
 import { useUpdateWikiPage, useRestoreWikiRevision } from "../../lib/queries";
+import { useAttachmentEmbeds } from "../../lib/useAttachmentEmbeds";
 import * as api from "../../lib/api";
 
 const emptyDoc: TipTapDoc = { type: "doc", content: [] };
@@ -102,6 +103,9 @@ export function useWikiEditor({ slug, page }: { slug: string; page: WikiPage }) 
 
   const editorRef = useRef<Editor | null>(null);
   const titleRef = useRef(title);
+  // Paste/drop-to-embed: images upload via the attachments API and insert
+  // with src=/api/attachments/<id>; other types upload as plain attachments.
+  const embeds = useAttachmentEmbeds({ slug, documentType: "wiki", documentId: page.slug });
   const autosaveTimer = useRef<number | null>(null);
   const markDirtyRef = useRef<() => void>(() => {});
   // While a Forge result is being reviewed, autosave is suspended — the
@@ -142,6 +146,8 @@ export function useWikiEditor({ slug, page }: { slug: string; page: WikiPage }) 
       attributes: {
         style: "line-height: 26px",
       },
+      handlePaste: embeds.handlePaste,
+      handleDrop: embeds.handleDrop,
     },
   });
 

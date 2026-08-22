@@ -1,7 +1,7 @@
 import { useQuery, useMutation, useQueryClient, useInfiniteQuery } from "@tanstack/react-query";
 import { useMemo } from "react";
 import type { QueryClient, InfiniteData } from "@tanstack/react-query";
-import type { Task, Project, ProjectRepo, Board, Column, Swimlane, Milestone, TipTapDoc, WikiPageMeta, ApiKey, ApiKeyCreateResult, Dashboard, FieldConfig, DocumentSource, ForgeTask, TaskLink, Runtime, ForgeAgent, ForgeSkill, Machine, ActivityItem, ActivityEvent, Team, TeamMember, TeamMemberRole, SessionInfo, WorkspaceInvite } from "../../shared/types";
+import type { Task, Project, ProjectRepo, Board, Column, Swimlane, Milestone, TipTapDoc, WikiPageMeta, ApiKey, ApiKeyCreateResult, Dashboard, FieldConfig, DocumentSource, ForgeTask, TaskLink, Runtime, ForgeAgent, ForgeSkill, Machine, ActivityItem, ActivityEvent, Team, TeamMember, TeamMemberRole, SessionInfo, WorkspaceInvite, Attachment } from "../../shared/types";
 import * as api from "./api";
 import * as auth from "./auth";
 import type { TaskMutationResult, ActivityPage, WikiShareLink } from "./api";
@@ -1941,4 +1941,80 @@ export function useDeleteComment(slug: string, taskId: string) {
 export function selectProjectHealth(dashboard: Dashboard | undefined, slug: string | undefined): Dashboard["projects"][number] | undefined {
   if (!dashboard || !slug) return undefined;
   return dashboard.projects.find((p) => p.project.slug === slug);
+}
+
+// ── Attachments ──
+
+// The list endpoint returns created_at ASC; the wireframe renders newest
+// first, so the cache stores newest-first (one reverse at fetch) and upload
+// mutations PREPEND — cache order and display order stay identical.
+export function useTaskAttachments(slug: string, taskId: string) {
+  return useQuery({
+    queryKey: ["task-attachments", slug, taskId],
+    queryFn: () => api.listTaskAttachments(slug, taskId).then((r) => [...r.data].reverse()),
+    enabled: !!slug && !!taskId,
+  });
+}
+
+export function useWikiAttachments(slug: string, pageSlug: string) {
+  return useQuery({
+    queryKey: ["wiki-attachments", slug, pageSlug],
+    queryFn: () => api.listWikiAttachments(slug, pageSlug).then((r) => [...r.data].reverse()),
+    enabled: !!slug && !!pageSlug,
+  });
+}
+
+type UploadInput = {
+  file: File;
+  onProgress?: (percent: number) => void;
+  onHandle?: (handle: { abort: () => void }) => void;
+};
+
+export function useUploadAttachment(slug: string, documentType: "task" | "wiki", documentId: string) {
+  const qc = useQueryClient();
+  const toast = useToast();
+  return useMutation({
+    mutationFn: ({ file, onProgress, onHandle }: UploadInput) => {
+      const handle = api.uploadAttachmentWithProgress(
+        slug,
+        documentType === "task" ? { kind: "task", taskId: documentId } : { kind: "wiki", pageSlug: documentId },
+        file,
+        onProgress
+      );
+      onHandle?.(handle);
+      return handle.promise;
+    },
+    onSuccess: (result) => {
+      // Invariant 6 — the mutation response is authoritative. Dedupe hits
+      // arrive as 201 with activity: [] and land identically (same row,
+      // no second activity entry).
+      qc.setQueryData<Attachment[]>([documentType === "task" ? "task-attachments" : "wiki-attachments", slug, documentId], (old) =>
+        old ? [result.data, ...old] : [result.data]
+      );
+      if (documentType === "task" && result.activity?.length) {
+        prependActivity(qc, slug, documentId, result.activity.map((a) => ({ kind: "event" as const, ...a })));
+      }
+    },
+    onError: (err) => {
+      if ((err as { code?: string }).code === "UPLOAD_CANCELLED") return;
+      toast.push("error", "Upload failed", toastMessage(err));
+    },
+  });
+}
+
+export function useDeleteAttachment(slug: string, documentType: "task" | "wiki", documentId: string) {
+  const qc = useQueryClient();
+  const toast = useToast();
+  return useMutation({
+    mutationFn: (id: string) => api.deleteAttachment(id),
+    onSuccess: (_, id) => {
+      // 204 with no body — filter the authoritative list cache by id.
+      qc.setQueryData<Attachment[]>([documentType === "task" ? "task-attachments" : "wiki-attachments", slug, documentId], (old) =>
+        (old ?? []).filter((a) => a.id !== id)
+      );
+    },
+    onError: (err) => {
+      toast.push("error", "Failed to delete attachment", toastMessage(err));
+    },
+  });
 }

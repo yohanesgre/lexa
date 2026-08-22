@@ -2,9 +2,11 @@ import { HttpApiBuilder, HttpServerResponse } from "@effect/platform";
 import { HttpServerRequest } from "@effect/platform/HttpServerRequest";
 import { Cause, Effect } from "effect";
 import { Database } from "bun:sqlite";
+import { dirname } from "node:path";
 import { AuthIdentity, AuthIdentityShape } from "./auth";
 import { constantTimeTokenEqual, resolveApiKeyIdentity } from "./auth-key";
 import { MAX_API_BODY, X_LEXA_REMOTE_IP } from "./limits";
+import { bodyCapFor, resolveStorageConfig } from "../storage/config";
 import { apiRateLimiter, isPrivateIp, isRateLimitExemptPath, shareRateLimiter } from "./rate-limit";
 import { auth } from "../auth";
 
@@ -39,6 +41,10 @@ const sessionIdentity = (headers: Headers): Effect.Effect<AuthIdentityShape | nu
   );
 
 export function createApiMiddleware(db: Database, dbPath: string) {
+  // Boot-time env (like DATABASE_PATH): the upload cap raises the declared
+  // body pre-check on attachment-upload paths so a legit large upload reaches
+  // the route, which enforces the exact per-file cap.
+  const storageCfg = resolveStorageConfig(process.env, dirname(dbPath));
   return HttpApiBuilder.middleware((httpApp) =>
     Effect.gen(function* () {
       const request = yield* HttpServerRequest;
@@ -80,7 +86,8 @@ export function createApiMiddleware(db: Database, dbPath: string) {
       }
 
       const declared = Number(request.headers["content-length"] ?? 0);
-      if (declared > MAX_API_BODY) {
+      const bodyCap = bodyCapFor(path, storageCfg, MAX_API_BODY);
+      if (declared > bodyCap) {
         console.warn(`[API] body too large path=${path} declared=${request.headers["content-length"] ?? "unknown"} bytes`);
         return withSecurityHeaders(
           HttpServerResponse.unsafeJson(

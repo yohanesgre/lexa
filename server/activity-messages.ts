@@ -37,6 +37,8 @@ export function forgeFailed() { return "Forge run failed"; }
 export function forgeCancelled() { return "Forge run cancelled"; }
 export function commented(actor: string) { return `${actor} commented`; }
 export function commentDeleted(actor: string) { return `${actor} deleted a comment`; }
+export function attachmentAdded(actor: string, filename: string) { return `${actor} attached ${filename}`; }
+export function attachmentRemoved(actor: string, filename: string) { return `${actor} removed attachment ${filename}`; }
 
 // Dispatcher for emission points (Task 6+): one call per ActivityType.
 // payload is shaped per type (fields match the per-type functions above);
@@ -101,6 +103,14 @@ export function formatActivityMessage(type: ActivityType, payload: ActivityMessa
     case "forge_cancelled": return forgeCancelled();
     case "commented": return commented((payload as { actor: string }).actor);
     case "comment_deleted": return commentDeleted((payload as { actor: string }).actor);
+    case "attachment_added": {
+      const p = payload as { actor: string; filename: string };
+      return attachmentAdded(p.actor, p.filename);
+    }
+    case "attachment_removed": {
+      const p = payload as { actor: string; filename: string };
+      return attachmentRemoved(p.actor, p.filename);
+    }
     // A future ActivityType must be handled explicitly — the never-assert
     // fails compilation instead of silently returning undefined.
     default: {

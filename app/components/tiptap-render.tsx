@@ -3,6 +3,19 @@ import type { TipTapDoc } from "../../shared/types";
 import { safeHref } from "../../shared/safe-href";
 import { cn } from "./ui/cn";
 
+// Root-relative attachment srcs render because cookie auth covers the GET —
+// same exact-shape uuid rule as shared/markdown.ts (safeImageSrc). Local copy:
+// importing markdown.ts would pull the marked parser into every render surface.
+const ATTACHMENT_SRC_RE = /^\/api\/attachments\/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
+
+function safeImageSrc(src: unknown): string | null {
+  if (typeof src !== "string") return null;
+  const trimmed = src.trim();
+  if (!trimmed) return null;
+  if (ATTACHMENT_SRC_RE.test(trimmed)) return trimmed;
+  return safeHref(trimmed);
+}
+
 export type TTNode = {
   type: string;
   content?: TTNode[];
@@ -55,7 +68,7 @@ export function renderInline(
       // Inline images (e.g. `text ![alt](src)` inside a paragraph): render
       // only the allowlisted src — disallowed schemes become nothing, never
       // a broken <img> carrying a `javascript:`/`data:` value.
-      const src = safeHref(node.attrs?.src);
+      const src = safeImageSrc(node.attrs?.src);
       if (!src) return null;
       const alt = typeof node.attrs?.alt === "string" ? node.attrs.alt : "";
       return <img key={`${nodeKey}-${src}`} src={src} alt={alt} loading="lazy" />;
@@ -177,7 +190,7 @@ export function renderNode(
     case "image": {
       // Block-level image (top-level node in a doc, or a list/quote child).
       // Same allowlist as inline images — no scheme, no render.
-      const src = safeHref(node.attrs?.src);
+      const src = safeImageSrc(node.attrs?.src);
       if (!src) return null;
       const alt = typeof node.attrs?.alt === "string" ? node.attrs.alt : "";
       return (
