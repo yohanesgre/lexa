@@ -70,12 +70,19 @@ All non-2xx responses share one shape:
 | 422 | `SOURCE_UNREACHABLE` | External source DNS/fetch failed after the SSRF guard (details: `{ url }`) |
 | 422 | `API_KEY_NAME_EMPTY` | API key name missing or blank |
 | 422 | `NOT_WORKSPACE_MEMBER` | Team-member add targets an email that is not a workspace member (details: `{ email, available }` — invite via the superadmin first) |
-| 422 | `INVALID_ARGS` | Sprint start date later than its due date (details: `{ reason }`) |
+| 422 | `INVALID_ARGS` | Sprint start date later than its due date (details: `{ reason }`); Herald provider settings first save without an apiKey (`apiKey required on first save`); Herald attachment scope/cap violations |
 | 429 | `RATE_LIMITED` | Per-IP rate limit exceeded on `/api/*` (webhook, `/api/forge/daemon/*`, `/api/forge/runtimes/register` exempt; `/api/setup*` + `/api/health` ARE limited; `/api/share/*` uses a dedicated stricter bucket) — enforced in the API middleware, otherwise one shared bucket |
 | 500 | `DATABASE_ERROR` / `INTERNAL` | |
 | 500 | `PASSWORD_LINK_FAILED` | Admin-issued set-password link could not be issued (details: `{ message }`) |
 | 502 | `GITHUB_API_ERROR` | Only on explicit GitHub-linking endpoints; never on moves |
 | 502 | `SOURCE_FETCH_ERROR` | External source fetch failed upstream after the SSRF guard (details: `{ message }`) |
+| 409 | `PROVIDER_NOT_CONFIGURED` | Herald generate/test/chat without saved provider settings for the project |
+| 502 | `PROVIDER_AUTH_FAILED` | Upstream 401/403 from the provider or Exa |
+| 502 | `PROVIDER_UNREACHABLE` | Provider network/timeout/DNS failure |
+| 502 | `HERALD_GENERATION_FAILED` | RUN_ERROR catch-all, malformed stream |
+| 502 | `HERALD_TOOL_BUDGET_EXCEEDED` | Tool round cap hit (`MAX_TOOL_ROUNDS=4`) |
+| 409 | `HERALD_TASK_ACTIVE` | Thread reset or second chat stream while a Herald stream is running |
+| 404 | `HERALD_THREAD_NOT_FOUND` | Missing Herald thread row |
 
 Defined in the error map but never raised by any REST handler — do not match on them:
 - `MISSING_AUTH` / `INVALID_API_KEY` — the auth middleware emits `UNAUTHORIZED` instead.
@@ -388,6 +395,7 @@ interface ForgeTask {
   status: "queued" | "running" | "completed" | "failed" | "cancelled";
   result: string | null;
   error: string | null;
+  kind: "blacksmith" | "herald";  // queue discriminator — daemons claim only blacksmith
   createdAt: ISODate;
   startedAt: ISODate | null;
   finishedAt: ISODate | null;
@@ -842,8 +850,24 @@ adds and GitHub link/unlink likewise. Clients prepend them to the timeline cache
 via `setQueryData`; never `invalidateQueries` on the mutation path. Webhook-driven
 entries appear on the next slideover open (documented).
 
-### Task Links (subtasks, blocked-by, related)
+### Mentions (@-autocomplete)
 
+```
+GET    /api/projects/:slug/mentions?q=
+→ 200 { data: { tasks: [{ id, key, title }],
+                wikiPages: [{ id, slug, title }] } }
+  Case-insensitive substring match on task key + title and wiki title +
+  slug. Archived tasks are excluded (task-link search precedent). Tasks
+  come first; ~8 results total (wiki fills the remainder after tasks).
+  Empty q → empty arrays (no unbounded listing).
+  | 404 PROJECT_ACCESS_DENIED
+```
+
+Mention model (user-ruled split):
+- **TipTap documents** carry mention NODES `{ type: "mention", attrs: { refType: "task"|"wiki", refId, label } }` — links only, never context injection. Pushed to GitHub as absolute deep links (`${PUBLIC_URL}/{slug}/tasks?task={id}` / `${PUBLIC_URL}/{slug}/wiki/{slug}`) with the label as link text.
+- **Herald chat** uses plain `@token` strings in the textarea; the server resolves them at send into ephemeral context (see the chat/stream contract above).
+
+### Task Links (subtasks, blocked-by, related)
 ```
 GET    /api/projects/:slug/tasks/:id/links
 → 200 { data: TaskLink[] }        // all relations involving the task
@@ -1484,44 +1508,48 @@ the strip describes the system, the table is the view. The frontend polls
 this endpoint every 1.5s while any row on the page is queued/running, else
 on a 15s idle heartbeat.
 
-# ── Forge agents & skills (global rule bundles; browser, Bearer) ──
-# All mutations are admin-only (403 FORBIDDEN for members).
-GET    /api/forge/agents
-→ 200 { data: ForgeAgent[] }   (agent = { id, name, description, instructions,
+# ── Lexa Agents & Skills catalog (global rule bundles; browser, Bearer) ──
+# Moved from /api/forge/agents|skills… in migration 0010 — hard cutover, no
+# aliases (sole consumer is the bundled web app). The catalog is the behavioral
+# spec for BOTH Forge tiers: prompt injection renders it for Herald, .agents/
+# file writing renders it for Blacksmith. All mutations are admin-only
+# (403 FORBIDDEN for members).
+GET    /api/agents
+→ 200 { data: LexaAgent[] }   (agent = { id, name, description, instructions,
   isBuiltin, skillIds[], createdAt, updatedAt })
 
-POST   /api/forge/agents        (admin)  body { name*, description?, instructions* }
-→ 201 ForgeAgent  | 403 FORBIDDEN | 409 CONSTRAINT (duplicate name)
+POST   /api/agents        (admin)  body { name*, description?, instructions* }
+→ 201 LexaAgent  | 403 FORBIDDEN | 409 CONSTRAINT (duplicate name)
 
-PATCH  /api/forge/agents/:id    (admin)  body { name?, description?, instructions? }
-→ 200 ForgeAgent  | 403 FORBIDDEN | 404 AGENT_NOT_FOUND | 409 CONSTRAINT
+PATCH  /api/agents/:id    (admin)  body { name?, description?, instructions? }
+→ 200 LexaAgent  | 403 FORBIDDEN | 404 AGENT_NOT_FOUND | 409 CONSTRAINT
 
-DELETE /api/forge/agents/:id    (admin)
+DELETE /api/agents/:id    (admin)
 → 204 | 403 FORBIDDEN | 404 AGENT_NOT_FOUND | 422 FORGE_BUILTIN_DELETE | 409 FORGE_ENTITY_IN_USE
   (builtins can't be deleted; an agent still used by forge tasks can't either)
 
-PUT    /api/forge/agents/:id/skills  (admin)  body { skillIds*: string[] }  (full replace)
-→ 200 ForgeAgent  | 403 FORBIDDEN | 404 AGENT_NOT_FOUND / SKILL_NOT_FOUND
+PUT    /api/agents/:id/skills  (admin)  body { skillIds*: string[] }  (full replace)
+→ 200 LexaAgent  | 403 FORBIDDEN | 404 AGENT_NOT_FOUND / SKILL_NOT_FOUND
   (M2M bindings; the Forge popover only offers the attached skills)
 
-POST   /api/forge/agents/:id/reset  (admin; builtin only)
-→ 200 ForgeAgent  (restores the seeded instructions + full builtin skill set)
+POST   /api/agents/:id/reset  (admin; builtin only)
+→ 200 LexaAgent  (restores the seeded instructions + full builtin skill set)
   | 403 FORBIDDEN | 404 AGENT_NOT_FOUND | 422 FORGE_BUILTIN_DELETE
 
-GET    /api/forge/skills
-→ 200 { data: ForgeSkill[] }   (skill = { id, name, description, instructions, isBuiltin, createdAt, updatedAt })
+GET    /api/skills
+→ 200 { data: LexaSkill[] }   (skill = { id, name, description, instructions, isBuiltin, createdAt, updatedAt })
 
-POST   /api/forge/skills        (admin)  body { name*, description?, instructions* }
-→ 201 ForgeSkill  | 403 FORBIDDEN | 409 CONSTRAINT
+POST   /api/skills        (admin)  body { name*, description?, instructions* }
+→ 201 LexaSkill  | 403 FORBIDDEN | 409 CONSTRAINT
 
-PATCH  /api/forge/skills/:id    (admin)  body { name?, description?, instructions? }
-→ 200 ForgeSkill  | 403 FORBIDDEN | 404 SKILL_NOT_FOUND | 409 CONSTRAINT
+PATCH  /api/skills/:id    (admin)  body { name?, description?, instructions? }
+→ 200 LexaSkill  | 403 FORBIDDEN | 404 SKILL_NOT_FOUND | 409 CONSTRAINT
 
-DELETE /api/forge/skills/:id    (admin)
+DELETE /api/skills/:id    (admin)
 → 204 | 403 FORBIDDEN | 404 SKILL_NOT_FOUND | 422 FORGE_BUILTIN_DELETE | 409 FORGE_ENTITY_IN_USE
 
-POST   /api/forge/skills/:id/reset  (admin; builtin only)
-→ 200 ForgeSkill  | 403 FORBIDDEN | 404 SKILL_NOT_FOUND | 422 FORGE_BUILTIN_DELETE
+POST   /api/skills/:id/reset  (admin; builtin only)
+→ 200 LexaSkill  | 403 FORBIDDEN | 404 SKILL_NOT_FOUND | 422 FORGE_BUILTIN_DELETE
 
 POST   /api/forge/daemon/tasks/:id/log         (daemon)  body { message*, stream? ("out"|"err"), level? ("info"|"warn"|"error") } → 200 ForgeTaskLog
 (appends one activity line — claim, model, agent start, generating, done/failed;
@@ -1556,6 +1584,175 @@ Notes:
   link-local/CGNAT addresses before fetching.
 - **Forge loop:** the spawned agent CLI receives a server-built prompt; the
   one-shot result is returned to the editor for accept/reject.
+
+### Herald (AI assistant tier)
+
+Server-side TanStack AI `chat()` assistant beside Blacksmith under the Forge
+umbrella (ADR-0001, `docs/HERALD_PLAN.md`). Per-project provider settings;
+keys are server-side only and never serialized (masked view). Settings
+mutations + test/models are superadmin (`403 FORBIDDEN` otherwise); reads,
+tasks, chat, and memory follow normal project access; chat additionally
+requires a session user (bare API key → `400 NO_USER_CONTEXT`).
+
+```
+GET    /api/herald/settings/:projectId
+→ 200 { projectId, kind: "openai_compatible"|"anthropic_compatible", baseUrl,
+        model, hasKey: boolean, keyMask: string|null ("sk-…abcd"),
+        searchProvider: "exa"|null, hasSearchKey: boolean,
+        urlAllowlist: string|null }
+  Masked view — api_key/search_api_key never serialized.
+  | 404 PROJECT_NOT_FOUND | 409 PROVIDER_NOT_CONFIGURED (no row yet)
+
+PUT    /api/herald/settings/:projectId   (admin)
+body { kind*, baseUrl*, model*, apiKey?, searchProvider?, searchApiKey?,
+       urlAllowlist? }
+  Omitted apiKey/searchApiKey keep the stored values; first save without an
+  apiKey → 422 INVALID_ARGS ("apiKey required on first save").
+→ 200 masked view (same shape as GET)
+
+POST   /api/herald/settings/:projectId/test   (admin)
+body same as PUT — UNSAVED submitted values (never persists); an omitted
+  apiKey falls back to the stored one so testing a saved config doesn't
+  require re-entering the key.
+→ 200 { ok: true, latencyMs } | 502 PROVIDER_AUTH_FAILED | 502 PROVIDER_UNREACHABLE
+  Minimal completion ping (+ Exa ping when configured).
+
+POST   /api/herald/settings/:projectId/models   (admin)
+body same as test
+→ 200 { models: [{ id }] } | 502 PROVIDER_AUTH_FAILED / PROVIDER_UNREACHABLE
+  Lists models from the provider using submitted unsaved values (per-kind wire
+  format, base URL normalized per kind). Some compat endpoints lack the route
+  — manual model entry is always available as fallback.
+
+POST   /api/herald/tasks
+body { slug*, documentType*: "task"|"wiki", documentId*, prompt*, agentId*,
+       skillId*, selection?,
+       attachments?: [{ storageKey*, mimeType*, name* }] }
+  Creates a forge_tasks row with kind='herald' (queued) — no runtime-online
+  guard. attachments are image refs into the project's attachment storage
+  (cross-project keys → 422); caps ≤5 images/message, ≤5MB each,
+  png/jpeg/gif/webp only.
+→ 201 ForgeTask
+  | 404 PROJECT_NOT_FOUND / TASK_NOT_FOUND / PAGE_NOT_FOUND / AGENT_NOT_FOUND / SKILL_NOT_FOUND
+  | 409 PROVIDER_NOT_CONFIGURED          (no saved settings for the project)
+  | 422 INVALID_ARGS                     (attachment scope/caps)
+
+POST   /api/herald/tasks/:id/stream      (SSE — POST + fetch-stream, not EventSource)
+→ 200 text/event-stream
+  Frames (exactly one terminal frame — error|done):
+    event: start  data: {"taskId":"…","threadId":"…"}
+    event: delta  data: {"text":"…"}
+    event: tool   data: {"phase":"call"|"result","name":"…"}
+    event: error  data: {"code":"HERALD_GENERATION_FAILED","message":"…"}
+    event: done   data: {"taskId":"…","text":"…","usage":{"in":n,"out":n}}
+  Heartbeat comment ": ping" every 15s (proxy buffering). Client disconnect
+  aborts the run (task → cancelled, "aborted" log). Stop button = client
+  abort + cancel below.
+  | 404 FORGE_TASK_NOT_FOUND | 409 HERALD_TASK_ACTIVE (already claimed/running)
+
+POST   /api/herald/tasks/:id/cancel
+→ 200 { ok: true }
+  Aborts an in-flight stream or cancels a queued task.
+
+DELETE /api/herald/threads/:documentType/:documentId
+→ 204 | 404 HERALD_THREAD_NOT_FOUND | 409 HERALD_TASK_ACTIVE
+  Resets the document thread — next run starts fresh.
+
+POST   /api/herald/chat/stream           (freeform chat — no queue row)
+body { projectId*, chatId*, message*, agentId?, skillId?,
+       attachments?: [{ storageKey*, mimeType*, name* }],
+       fromIndex?: number }
+  One persistent thread per (project, user), ownership enforced (another
+  user's chatId → 404). Direct synchronous SSE — same frames as the task
+  stream minus taskId (frames carry chatId). Second concurrent stream on the
+  same chatId → 409 HERALD_TASK_ACTIVE. Image caps tighter than
+  document-Herald: ≤3/message, ≤1.5MB total request.
+  | 400 NO_USER_CONTEXT | 409 PROVIDER_NOT_CONFIGURED / HERALD_TASK_ACTIVE
+  | 422 INVALID_ARGS
+
+  Edit/regenerate/retry semantics (fromIndex):
+  | fromIndex                    | effect
+  |------------------------------|--------------------------------------------------
+  | omitted or === messages.length | plain append — new turn after the transcript
+  | < messages.length            | truncate transcript to fromIndex, then append
+  |                                | `message` as the new turn (edit / regenerate /
+  |                                | retry-after-error all reduce to this)
+  Validation: integer, 0 ≤ N ≤ messages.length, else 422 INVALID_ARGS. The
+  entry AT fromIndex (the one being replaced) must be a user-role message
+  with string content — image-part entries are rejected in v1. Truncation
+  happens BEFORE the new turn is generated; the thread title and pin survive.
+  A failed turn persists as an assistant entry with an `error` meta block
+  (catalog code); retrying means re-sending from the preceding user index,
+  which drops the failed entry.
+
+  Citations: when Herald's web_search/fetch_url tools produce sources, the
+  persisted assistant entry carries a `citations` meta list ({title, url},
+  ≤10 per turn, URL-deduped, https-only) alongside the text.
+
+  @-mention resolution (chat send contract): the plain-text message may
+  contain `@KEY` (project task keys, case-insensitive) and `@slug` (project
+  wiki slugs) tokens. The server resolves them AT SEND and injects the
+  referenced content (task: key + title + description text; wiki page: title
+  + content text) as an EPHEMERAL context block in the system prompts —
+  NEVER into the persisted user message (the thread transcript stores the
+  message verbatim; clients render chips from the raw tokens). Caps are
+  enforced by silent truncation, never errors: ≤5 resolved mentions per
+  message, ≤4000 chars of extracted text per referenced document,
+  ≤20000 chars total context. Task-key grammar wins on ambiguity (a token
+  that parses as a task key is never tried as a wiki slug); duplicate
+  references to the same task/page resolve once; unknown tokens are ignored.
+
+GET    /api/herald/chat/:chatId
+→ 200 { chatId, projectId, ownerUserId, agentId, skillId, messages, summary,
+        summarizedCount, createdAt, updatedAt } | 404 HERALD_THREAD_NOT_FOUND
+  Transcript for reload/scrollback. Persisted entries carry optional meta:
+  user entries a `ts` timestamp; assistant entries `ts`, `citations`, and on
+  failure an `error` {code,message} block or a `stopped:true` marker (client
+  abort with partial text).
+
+DELETE /api/herald/chat/:chatId
+→ 204 | 404 HERALD_THREAD_NOT_FOUND | 409 HERALD_TASK_ACTIVE
+  Deletes the chat thread outright ("Reset" on a multi-thread chat = delete
+  current). 409 while a stream is in flight on that chatId; next "New chat"
+  starts fresh.
+
+GET    /api/herald/chats/:projectId?q=
+→ 200 { data: [{ chatId, title, pinned, snippet, createdAt, updatedAt }] }
+  | 404 PROJECT_NOT_FOUND
+  The caller's own chat threads for the project (owner-scoped — other users'
+  threads are invisible), pinned threads first, then updatedAt DESC; capped
+  at 100, flat. Optional `q` prefilter: case-exact LIKE substring over title
+  or transcript text (% and _ escaped). `snippet` is a short window around
+  the first transcript match (null for title-only matches). `title` is null
+  until derived from the first text message or set via rename; first
+  messages that are image-only arrays stay null until the next send.
+
+PATCH  /api/herald/chat/:chatId     body { title?, pinned? }
+→ 200 { chatId, title, pinned } | 404 HERALD_THREAD_NOT_FOUND | 422 INVALID_ARGS
+  Updates an owned thread's metadata — at least one field must be present,
+  else 422. `title`: 1–200 chars after trim (a later stream save keeps it —
+  COALESCE backfill only fills NULL). `pinned`: boolean; pinned threads sort
+  first in the list regardless of recency.
+
+GET    /api/herald/chat/:chatId/export
+→ 200 text/markdown (attachment, filename "<sanitized-title|chat>-<YYYYMMDD>.md")
+  | 404 HERALD_THREAD_NOT_FOUND
+  Owner-scoped markdown transcript: `# title` header, `**You**`/`**Herald**`
+  blocks (· ts suffix when the entry carries one), `[failed turn: CODE]` and
+  `[stopped]` markers, citation lists under the turns that produced them.
+
+GET    /api/herald/memory/:projectId
+→ 200 { data: [{ id, projectId, content, source: "manual"|"herald",
+                createdAt, updatedAt }] }
+  Curated judgment-type facts injected into Herald prompts (FTS5-matched at
+  enqueue; K=5 hits, 2000-char cap).
+
+POST   /api/herald/memory/:projectId     body { content* }
+→ 201 memory entry
+
+DELETE /api/herald/memory/:projectId/:memoryId
+→ 204
+```
 
 ## Notes
 

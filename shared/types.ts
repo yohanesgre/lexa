@@ -270,7 +270,7 @@ export type SourceKind = "wiki" | "external";
 // A named rule bundle defined in Lexa. Its instructions are written into the
 // run dir as AGENTS.md at claim time. Distinct from a runtime's CLI agent
 // (Runtime.agent — the CLI persona flag).
-export interface ForgeAgent {
+export interface LexaAgent {
   id: ID;
   name: string;
   // Display-only — never sent to the runtime agent.
@@ -284,7 +284,7 @@ export interface ForgeAgent {
 
 // A named operation bundle attached to agents (M2M). Its instructions are
 // written into the run dir as .agents/<skill>/SKILL.md at claim time.
-export interface ForgeSkill {
+export interface LexaSkill {
   id: ID;
   name: string;
   description: string;
@@ -383,6 +383,7 @@ export interface ForgeTask {
   status: ForgeTaskStatus;
   result: string | null;
   error: string | null;
+  kind: "blacksmith" | "herald";
   createdAt: ISODate;
   startedAt: ISODate | null;
   finishedAt: ISODate | null;

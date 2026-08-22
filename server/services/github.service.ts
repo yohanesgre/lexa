@@ -65,10 +65,14 @@ export class GitHubService extends Effect.Service<GitHubService>()("Lexa/GitHubS
           const task = yield* taskRepo.findById(taskId).pipe(
             Effect.catchTag("RowNotFound", () => new TaskNotFound({ id: taskId }))
           );
-          // Attachment image srcs are absolutized so pushed issue bodies
-          // carry absolute URLs (GitHub renders them; echo suppression is
-          // unaffected — pushed_body stores exactly this string).
-          const body = docToMarkdown(task.description, { baseUrl: PUBLIC_URL });
+          // Mention deep links need the project slug in the URL.
+          const project = yield* projectRepo.findById(task.projectId).pipe(
+            Effect.catchTag("RowNotFound", () => Effect.succeed(null))
+          );
+          const body = docToMarkdown(task.description, {
+            baseUrl: PUBLIC_URL,
+            projectSlug: project && "slug" in project ? String((project as { slug: string }).slug) : undefined,
+          });
           const links = yield* taskRepo.findGithubLinks(taskId);
           for (const link of links) {
             const titleChanged = normalizeMarkdownForEcho(link.pushed_title) !== normalizeMarkdownForEcho(task.title);

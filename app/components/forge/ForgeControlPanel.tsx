@@ -6,7 +6,7 @@ import type { UseQueryResult } from "@tanstack/react-query";
 import { cn } from "../ui/cn";
 import { parseApiDate } from "../../lib/date";
 import { copyToClipboard } from "../../lib/clipboard";
-import { useCancelForgeTask, useForgeTask, useForgeTaskHistory, useForgeTaskLogs, useForgeSkills, useProjects, useRuntimes } from "../../lib/queries";
+import { useCancelForgeTask, useForgeTask, useForgeTaskHistory, useForgeTaskLogs, useSkills, useProjects, useRuntimes } from "../../lib/queries";
 import { ForgeTaskLogModal } from "./ForgeTaskLogModal";
 import { classifyLogLine } from "../../lib/forge-log-line";
 import type { ForgeTask, ForgeTaskLog, ForgeTaskStatus, Runtime } from "../../../shared/types";
@@ -425,7 +425,7 @@ export function ForgeControlPanel() {
     if (search.task) setSelectedId(search.task);
   }, [search.task]);
 
-  const skills = useForgeSkills();
+  const skills = useSkills();
   const history = useForgeTaskHistory({ slug: slug || undefined, status: status ?? undefined, skillId: skillId || undefined }, cursor);
   const runtimes = useRuntimes();
   const projects = useProjects();

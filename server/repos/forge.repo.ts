@@ -1,7 +1,7 @@
 import { Effect } from "effect";
 import { Sqlite, queryAll, queryFirst, run, withTx, DbError, RowNotFound, ConstraintViolation } from "../db/database";
 import { RuntimeRow, RuntimeWithTeam, ForgeTaskRow, ForgeTaskLogRow, ForgeAgentRow, ForgeSkillRow, rowToRuntime, rowToForgeTask, rowToForgeTaskLog, rowToForgeAgent, rowToForgeSkill } from "../../shared/db";
-import type { Runtime, ForgeTask, ForgeTaskLog, ForgeProvider, ForgeTaskStatus, ForgeAgent, ForgeSkill } from "../../shared/types";
+import type { Runtime, ForgeTask, ForgeTaskLog, ForgeProvider, ForgeTaskStatus, LexaAgent, LexaSkill } from "../../shared/types";
 
 // Hard cap for a task's activity log: a verbose agent run can emit hundreds
 // of lines, so trim each task's log to the newest LOG_CAP rows (FIFO).
@@ -18,15 +18,15 @@ const TASK_SELECT = `
          fa.name AS agent_name,
          fs.name AS skill_name
   FROM forge_tasks ft
-  LEFT JOIN forge_agents fa ON fa.id = ft.agent_id
-  LEFT JOIN forge_skills fs ON fs.id = ft.skill_id
+  LEFT JOIN lexa_agents fa ON fa.id = ft.agent_id
+  LEFT JOIN lexa_skills fs ON fs.id = ft.skill_id
 `;
 
 // Comma-joined attached skill ids for an agent row (agents list endpoint).
 const AGENT_SELECT = `
   SELECT fa.*,
-         (SELECT GROUP_CONCAT(skill_id) FROM forge_agent_skills WHERE agent_id = fa.id) AS skill_ids
-  FROM forge_agents fa
+         (SELECT GROUP_CONCAT(skill_id) FROM lexa_agent_skills WHERE agent_id = fa.id) AS skill_ids
+  FROM lexa_agents fa
 `;
 
 export class ForgeRepo extends Effect.Service<ForgeRepo>()("Lexa/ForgeRepo", {
@@ -184,21 +184,21 @@ export class ForgeRepo extends Effect.Service<ForgeRepo>()("Lexa/ForgeRepo", {
         ),
 
       // ── Agents & skills (global rule bundles) ──
-      listAgents: (): Effect.Effect<ForgeAgent[], DbError> =>
+      listAgents: (): Effect.Effect<LexaAgent[], DbError> =>
         queryAll<ForgeAgentRow & { skill_ids: string | null }>(db, `${AGENT_SELECT} ORDER BY fa.is_builtin DESC, fa.created_at`).pipe(
           Effect.map((rows) => rows.map((r) => rowToForgeAgent(r, (r.skill_ids ?? "").split(",").filter(Boolean))))
         ),
 
-      findAgentById: (id: string): Effect.Effect<ForgeAgent, RowNotFound | DbError> =>
+      findAgentById: (id: string): Effect.Effect<LexaAgent, RowNotFound | DbError> =>
         queryFirst<ForgeAgentRow & { skill_ids: string | null }>(db, `${AGENT_SELECT} WHERE fa.id = ?`, id).pipe(
           Effect.map((r) => rowToForgeAgent(r, (r.skill_ids ?? "").split(",").filter(Boolean)))
         ),
 
-      createAgent: (input: { id: string; name: string; description: string; instructions: string }): Effect.Effect<ForgeAgent, ConstraintViolation | DbError> =>
+      createAgent: (input: { id: string; name: string; description: string; instructions: string }): Effect.Effect<LexaAgent, ConstraintViolation | DbError> =>
         Effect.gen(function* () {
           yield* run(
             db,
-            `INSERT INTO forge_agents (id, name, description, instructions, is_builtin) VALUES (?, ?, ?, ?, 0)`,
+            `INSERT INTO lexa_agents (id, name, description, instructions, is_builtin) VALUES (?, ?, ?, ?, 0)`,
             input.id,
             input.name,
             input.description,
@@ -210,7 +210,7 @@ export class ForgeRepo extends Effect.Service<ForgeRepo>()("Lexa/ForgeRepo", {
           return rowToForgeAgent(row, []);
         }),
 
-      updateAgent: (id: string, patch: { name?: string; description?: string; instructions?: string }): Effect.Effect<ForgeAgent, RowNotFound | ConstraintViolation | DbError> =>
+      updateAgent: (id: string, patch: { name?: string; description?: string; instructions?: string }): Effect.Effect<LexaAgent, RowNotFound | ConstraintViolation | DbError> =>
         Effect.gen(function* () {
           const sets: string[] = [];
           const params: unknown[] = [];
@@ -224,53 +224,53 @@ export class ForgeRepo extends Effect.Service<ForgeRepo>()("Lexa/ForgeRepo", {
           }
           sets.push("updated_at = datetime('now')");
           params.push(id);
-          yield* run(db, `UPDATE forge_agents SET ${sets.join(", ")} WHERE id = ?`, ...params);
+          yield* run(db, `UPDATE lexa_agents SET ${sets.join(", ")} WHERE id = ?`, ...params);
           return yield* queryFirst<ForgeAgentRow & { skill_ids: string | null }>(db, `${AGENT_SELECT} WHERE fa.id = ?`, id).pipe(
             Effect.map((r) => rowToForgeAgent(r, (r.skill_ids ?? "").split(",").filter(Boolean)))
           );
         }),
 
       deleteAgent: (id: string): Effect.Effect<void, RowNotFound | ConstraintViolation | DbError> =>
-        run(db, `DELETE FROM forge_agents WHERE id = ?`, id).pipe(
-          Effect.flatMap((changes) => (changes === 0 ? Effect.fail(new RowNotFound({ table: "forge_agents" })) : Effect.void))
+        run(db, `DELETE FROM lexa_agents WHERE id = ?`, id).pipe(
+          Effect.flatMap((changes) => (changes === 0 ? Effect.fail(new RowNotFound({ table: "lexa_agents" })) : Effect.void))
         ),
 
       replaceAgentSkills: (agentId: string, skillIds: string[]): Effect.Effect<void, ConstraintViolation | DbError> =>
         withTx(
           db,
           Effect.gen(function* () {
-            yield* run(db, `DELETE FROM forge_agent_skills WHERE agent_id = ?`, agentId);
+            yield* run(db, `DELETE FROM lexa_agent_skills WHERE agent_id = ?`, agentId);
             for (const skillId of skillIds) {
-              yield* run(db, `INSERT INTO forge_agent_skills (agent_id, skill_id) VALUES (?, ?)`, agentId, skillId);
+              yield* run(db, `INSERT INTO lexa_agent_skills (agent_id, skill_id) VALUES (?, ?)`, agentId, skillId);
             }
           })
         ),
 
-      listSkills: (): Effect.Effect<ForgeSkill[], DbError> =>
-        queryAll<ForgeSkillRow>(db, `SELECT * FROM forge_skills ORDER BY is_builtin DESC, created_at`).pipe(
+      listSkills: (): Effect.Effect<LexaSkill[], DbError> =>
+        queryAll<ForgeSkillRow>(db, `SELECT * FROM lexa_skills ORDER BY is_builtin DESC, created_at`).pipe(
           Effect.map((rows) => rows.map(rowToForgeSkill))
         ),
 
-      findSkillById: (id: string): Effect.Effect<ForgeSkill, RowNotFound | DbError> =>
-        queryFirst<ForgeSkillRow>(db, `SELECT * FROM forge_skills WHERE id = ?`, id).pipe(Effect.map(rowToForgeSkill)),
+      findSkillById: (id: string): Effect.Effect<LexaSkill, RowNotFound | DbError> =>
+        queryFirst<ForgeSkillRow>(db, `SELECT * FROM lexa_skills WHERE id = ?`, id).pipe(Effect.map(rowToForgeSkill)),
 
-      createSkill: (input: { id: string; name: string; description: string; instructions: string }): Effect.Effect<ForgeSkill, ConstraintViolation | DbError> =>
+      createSkill: (input: { id: string; name: string; description: string; instructions: string }): Effect.Effect<LexaSkill, ConstraintViolation | DbError> =>
         Effect.gen(function* () {
           yield* run(
             db,
-            `INSERT INTO forge_skills (id, name, description, instructions, is_builtin) VALUES (?, ?, ?, ?, 0)`,
+            `INSERT INTO lexa_skills (id, name, description, instructions, is_builtin) VALUES (?, ?, ?, ?, 0)`,
             input.id,
             input.name,
             input.description,
             input.instructions
           );
-          const row = yield* queryFirst<ForgeSkillRow>(db, `SELECT * FROM forge_skills WHERE id = ?`, input.id).pipe(
+          const row = yield* queryFirst<ForgeSkillRow>(db, `SELECT * FROM lexa_skills WHERE id = ?`, input.id).pipe(
             Effect.catchTag("RowNotFound", () => new DbError({ message: "skill row missing after create" }))
           );
           return rowToForgeSkill(row);
         }),
 
-      updateSkill: (id: string, patch: { name?: string; description?: string; instructions?: string }): Effect.Effect<ForgeSkill, RowNotFound | ConstraintViolation | DbError> =>
+      updateSkill: (id: string, patch: { name?: string; description?: string; instructions?: string }): Effect.Effect<LexaSkill, RowNotFound | ConstraintViolation | DbError> =>
         Effect.gen(function* () {
           const sets: string[] = [];
           const params: unknown[] = [];
@@ -278,17 +278,17 @@ export class ForgeRepo extends Effect.Service<ForgeRepo>()("Lexa/ForgeRepo", {
           if (patch.description !== undefined) { sets.push("description = ?"); params.push(patch.description); }
           if (patch.instructions !== undefined) { sets.push("instructions = ?"); params.push(patch.instructions); }
           if (sets.length === 0) {
-            return yield* queryFirst<ForgeSkillRow>(db, `SELECT * FROM forge_skills WHERE id = ?`, id).pipe(Effect.map(rowToForgeSkill));
+            return yield* queryFirst<ForgeSkillRow>(db, `SELECT * FROM lexa_skills WHERE id = ?`, id).pipe(Effect.map(rowToForgeSkill));
           }
           sets.push("updated_at = datetime('now')");
           params.push(id);
-          yield* run(db, `UPDATE forge_skills SET ${sets.join(", ")} WHERE id = ?`, ...params);
-          return yield* queryFirst<ForgeSkillRow>(db, `SELECT * FROM forge_skills WHERE id = ?`, id).pipe(Effect.map(rowToForgeSkill));
+          yield* run(db, `UPDATE lexa_skills SET ${sets.join(", ")} WHERE id = ?`, ...params);
+          return yield* queryFirst<ForgeSkillRow>(db, `SELECT * FROM lexa_skills WHERE id = ?`, id).pipe(Effect.map(rowToForgeSkill));
         }),
 
       deleteSkill: (id: string): Effect.Effect<void, RowNotFound | ConstraintViolation | DbError> =>
-        run(db, `DELETE FROM forge_skills WHERE id = ?`, id).pipe(
-          Effect.flatMap((changes) => (changes === 0 ? Effect.fail(new RowNotFound({ table: "forge_skills" })) : Effect.void))
+        run(db, `DELETE FROM lexa_skills WHERE id = ?`, id).pipe(
+          Effect.flatMap((changes) => (changes === 0 ? Effect.fail(new RowNotFound({ table: "lexa_skills" })) : Effect.void))
         ),
 
       // ── Tasks ──
@@ -303,12 +303,13 @@ export class ForgeRepo extends Effect.Service<ForgeRepo>()("Lexa/ForgeRepo", {
         selection: string;
         docContext: string;
         runtimeId?: string;          // preferred runtime (set at claim time if omitted)
+        kind?: "blacksmith" | "herald";
       }): Effect.Effect<ForgeTask, ConstraintViolation | DbError | RowNotFound> =>
         Effect.gen(function* () {
           yield* run(
             db,
-            `INSERT INTO forge_tasks (id, project_id, document_type, document_id, agent_id, skill_id, extra_prompt, selection, doc_context, status, runtime_id)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'queued', ?)`,
+            `INSERT INTO forge_tasks (id, project_id, document_type, document_id, agent_id, skill_id, extra_prompt, selection, doc_context, status, runtime_id, kind)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'queued', ?, ?)`,
             input.id,
             input.projectId,
             input.documentType,
@@ -318,7 +319,8 @@ export class ForgeRepo extends Effect.Service<ForgeRepo>()("Lexa/ForgeRepo", {
             input.extraPrompt,
             input.selection,
             input.docContext,
-            input.runtimeId ?? null
+            input.runtimeId ?? null,
+            input.kind ?? "blacksmith"
           );
           return yield* queryFirst<ForgeTaskRow>(db, `${TASK_SELECT} WHERE ft.id = ?`, input.id).pipe(
             Effect.map(rowToForgeTask)
@@ -340,6 +342,7 @@ export class ForgeRepo extends Effect.Service<ForgeRepo>()("Lexa/ForgeRepo", {
             db,
             `${TASK_SELECT}
              WHERE ft.status = 'queued'
+               AND ft.kind = 'blacksmith'
                AND (ft.runtime_id IS NULL OR ft.runtime_id = ?)
                AND (? IS NULL OR (SELECT p.team_id FROM projects p WHERE p.id = ft.project_id) = ?)
              ORDER BY (ft.runtime_id = ?) DESC, ft.created_at
@@ -362,6 +365,26 @@ export class ForgeRepo extends Effect.Service<ForgeRepo>()("Lexa/ForgeRepo", {
           );
           // If the conditional update lost the race, return null (someone else claimed it).
           return updated.status === "running" && updated.runtimeId === runtimeId ? updated : null;
+        }),
+
+      // Herald stream handler claims its task with a conditional UPDATE —
+      // kind-scoped so a blacksmith row can never be claimed here, and
+      // status-scoped so a double claim (retry, concurrent stream) loses the
+      // race and surfaces as ConstraintViolation.
+      claimHeraldTask: (taskId: string): Effect.Effect<ForgeTask, ConstraintViolation | DbError | RowNotFound> =>
+        Effect.gen(function* () {
+          const changes = yield* run(
+            db,
+            `UPDATE forge_tasks SET status = 'running', started_at = datetime('now')
+             WHERE id = ? AND kind = 'herald' AND status = 'queued'`,
+            taskId
+          );
+          if (changes === 0) {
+            return yield* Effect.fail(new ConstraintViolation({ message: `task ${taskId} is not a queued herald task`, isPositionConflict: false }));
+          }
+          return yield* queryFirst<ForgeTaskRow>(db, `${TASK_SELECT} WHERE ft.id = ?`, taskId).pipe(
+            Effect.map(rowToForgeTask)
+          );
         }),
 
       // Re-queue `running` tasks whose runner is gone: started > 10 min ago
@@ -470,8 +493,8 @@ export class ForgeRepo extends Effect.Service<ForgeRepo>()("Lexa/ForgeRepo", {
                   fs.name AS skill_name
            FROM forge_tasks ft
            INNER JOIN projects p ON p.id = ft.project_id
-           LEFT JOIN forge_agents fa ON fa.id = ft.agent_id
-           LEFT JOIN forge_skills fs ON fs.id = ft.skill_id
+           LEFT JOIN lexa_agents fa ON fa.id = ft.agent_id
+           LEFT JOIN lexa_skills fs ON fs.id = ft.skill_id
            ORDER BY ft.created_at DESC
            LIMIT ?`,
           limit
@@ -522,8 +545,8 @@ export class ForgeRepo extends Effect.Service<ForgeRepo>()("Lexa/ForgeRepo", {
                             fs.name AS skill_name
                      FROM forge_tasks ft
                      INNER JOIN projects p ON p.id = ft.project_id
-                     LEFT JOIN forge_agents fa ON fa.id = ft.agent_id
-                     LEFT JOIN forge_skills fs ON fs.id = ft.skill_id
+                     LEFT JOIN lexa_agents fa ON fa.id = ft.agent_id
+                     LEFT JOIN lexa_skills fs ON fs.id = ft.skill_id
                      ${where}
                      ORDER BY ft.created_at DESC, ft.id DESC
                      LIMIT ?`;

@@ -64,8 +64,8 @@ beforeEach(() => {
   routes.set("GET /api/projects/demo/tasks/t1/activity", { data: [EVENT], nextCursor: null });
   routes.set("GET /api/projects/demo/members", { data: [] });
   // ForgePopover (mounted in create mode) fetches agents/skills/runtimes
-  routes.set("GET /api/forge/agents", { data: [] });
-  routes.set("GET /api/forge/skills", { data: [] });
+  routes.set("GET /api/agents", { data: [] });
+  routes.set("GET /api/skills", { data: [] });
   routes.set("GET /api/forge/runtimes", { data: [] });
   queryClient = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
 });

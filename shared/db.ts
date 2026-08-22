@@ -436,13 +436,14 @@ export interface ForgeTaskRow {
   status: "queued" | "running" | "completed" | "failed" | "cancelled";
   result: string | null;
   error: string | null;
+  kind: "blacksmith" | "herald";
   created_at: string;
   started_at: string | null;
   finished_at: string | null;
 }
 
 export function rowToForgeTask(row: ForgeTaskRow): {
-  id: string; key: string; runtimeId: string | null; projectId: string; documentType: "task" | "wiki"; documentId: string; documentTitle: string; agentId: string; skillId: string; agentName: string; skillName: string; extraPrompt: string; selection: string; docContext: string; status: "queued" | "running" | "completed" | "failed" | "cancelled"; result: string | null; error: string | null; createdAt: string; startedAt: string | null; finishedAt: string | null;
+  id: string; key: string; runtimeId: string | null; projectId: string; documentType: "task" | "wiki"; documentId: string; documentTitle: string; agentId: string; skillId: string; agentName: string; skillName: string; extraPrompt: string; selection: string; docContext: string; status: "queued" | "running" | "completed" | "failed" | "cancelled"; result: string | null; error: string | null; kind: "blacksmith" | "herald"; createdAt: string; startedAt: string | null; finishedAt: string | null;
 } {
   return {
     id: row.id,
@@ -462,6 +463,7 @@ export function rowToForgeTask(row: ForgeTaskRow): {
     status: row.status,
     result: row.result,
     error: row.error,
+    kind: row.kind,
     createdAt: row.created_at,
     startedAt: row.started_at,
     finishedAt: row.finished_at,

@@ -315,7 +315,7 @@ export function TaskDetail({ mode = "view", task, project, defaultColumnId, colu
           </div>
         )}
 
-        <div className="slideover-body pt-4">
+        <div className={cn("slideover-body pt-4", !isCreate && tab === "description" && editingDescription && "editor-flush")}>
         {tab === "description" ? (
         <>
         <TaskDescriptionSection

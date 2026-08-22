@@ -12,6 +12,8 @@ import { TableRow } from "@tiptap/extension-table-row";
 import { TableHeader } from "@tiptap/extension-table-header";
 import { TableCell } from "@tiptap/extension-table-cell";
 import Placeholder from "@tiptap/extension-placeholder";
+import type { Extensions } from "@tiptap/core";
+import { createMentionExtension } from "./mention-suggestion";
 
 export const textEditorExtensions = [
   StarterKit.configure({
@@ -42,3 +44,15 @@ export const textEditorExtensions = [
   TableCell,
   Placeholder.configure({ placeholder: "Start writing..." }),
 ];
+
+// Mentions ride per-editor closures, never the module-level list (extension
+// instances are stateful; CommentCard clones this array per editor). Surfaces
+// with a project slug append through this helper.
+export function extensionsWithMentions(
+  extensions: typeof textEditorExtensions,
+  slug: string | undefined
+): Extensions {
+  if (!slug) return extensions;
+  const withoutMention = extensions.filter((e) => (e as { name?: string } | null)?.name !== "mention");
+  return [...withoutMention, createMentionExtension({ slug })];
+}

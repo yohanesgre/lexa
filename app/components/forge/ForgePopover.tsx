@@ -4,12 +4,25 @@ import { Check, Hammer, Maximize } from "lucide-react";
 import type { Editor } from "@tiptap/core";
 import { cn } from "../ui/cn";
 import { docToMarkdown } from "../../../shared/markdown";
-import { useCreateForgeTask, useForgeTask, useRuntimes, useRecentForgeTask, useCancelForgeTask, useForgeTaskLogs, useForgeAgents, useForgeSkills } from "../../lib/queries";
+import { useCreateForgeTask, useForgeTask, useRuntimes, useRecentForgeTask, useCancelForgeTask, useForgeTaskLogs, useAgents, useSkills } from "../../lib/queries";
 import { useForgeSession, useResetForgeSession, formatSessionAge } from "../../lib/use-forge-session";
 import { parseApiDate } from "../../lib/date";
 import { ForgeTaskLogModal } from "./ForgeTaskLogModal";
 import { classifyLogLine } from "../../lib/forge-log-line";
-import type { ForgeAgent, ForgeSkill, ForgeTask, ForgeTaskLog, Runtime } from "../../../shared/types";
+import { HeraldModePicker } from "./herald/HeraldModePicker";
+import type { ForgeMode } from "./herald/HeraldModePicker";
+import { HeraldPanel } from "./herald/HeraldPanel";
+import type { LexaAgent, LexaSkill, ForgeTask, ForgeTaskLog, Runtime } from "../../../shared/types";
+
+// Per-run tier choice defaults to the last used mode for this user
+// (herald-popover.html State 1 annotation).
+function loadLastMode(): ForgeMode {
+  try {
+    return window.localStorage.getItem("lexa-forge-mode") === "blacksmith" ? "blacksmith" : "herald";
+  } catch {
+    return "herald";
+  }
+}
 
 // Task ids the user rejected this session — never re-attach to them on
 // reopen, so a rejected result isn't offered again in this session.
@@ -321,10 +334,19 @@ function TaskStatusPanel(props: {
 }
 
 export function ForgePopover({ editor, slug, documentType, documentId, open, onClose, onReview, reviewActive, appliedTaskId, rejectedTaskId, anchorRect }: ForgePopoverProps) {
+  const [mode, setMode] = useState<ForgeMode>(loadLastMode);
+  const changeMode = (next: ForgeMode) => {
+    setMode(next);
+    try {
+      window.localStorage.setItem("lexa-forge-mode", next);
+    } catch {
+      // storage unavailable — per-run default only
+    }
+  };
   // Agent + dependent Skill pickers: the skill list only shows skills attached
   // to the selected agent (M2M bindings managed in Settings → Agents).
-  const { data: agents = [] } = useForgeAgents();
-  const { data: skills = [] } = useForgeSkills();
+  const { data: agents = [] } = useAgents();
+  const { data: skills = [] } = useSkills();
   const [agentId, setAgentId] = useState("");
   const [skillId, setSkillId] = useState("");
   const [extraPrompt, setExtraPrompt] = useState("");
@@ -359,11 +381,11 @@ export function ForgePopover({ editor, slug, documentType, documentId, open, onC
   // first agent) and its first attached skill. Changing the agent resets the
   // skill by falling back to the first attached skill of the new agent.
   const effectiveAgentId = agentId !== "" ? agentId : (agents.find((a) => a.id === "lexa")?.id ?? agents[0]?.id ?? "");
-  const selectedAgent: ForgeAgent | null = agents.find((a) => a.id === effectiveAgentId) ?? null;
+  const selectedAgent: LexaAgent | null = agents.find((a) => a.id === effectiveAgentId) ?? null;
   const agentSkillIds = new Set(selectedAgent?.skillIds ?? []);
-  const agentSkills: ForgeSkill[] = selectedAgent ? skills.filter((s) => agentSkillIds.has(s.id)) : [];
+  const agentSkills: LexaSkill[] = selectedAgent ? skills.filter((s) => agentSkillIds.has(s.id)) : [];
   const effectiveSkillId = agentSkillIds.has(skillId) ? skillId : (agentSkills[0]?.id ?? "");
-  const selectedSkill: ForgeSkill | null = agentSkills.find((s) => s.id === effectiveSkillId) ?? null;
+  const selectedSkill: LexaSkill | null = agentSkills.find((s) => s.id === effectiveSkillId) ?? null;
 
   // Auto-select the first online runtime.
   useEffect(() => {
@@ -398,7 +420,7 @@ export function ForgePopover({ editor, slug, documentType, documentId, open, onC
   // fresh for the next Forge run.
   const [prevAttachId, setPrevAttachId] = useState<string | null>(null);
   const attachId =
-    open && taskId === null && recent?.data && (recent.data.status === "queued" || recent.data.status === "running" || recent.data.status === "completed") && !dismissedIdsRef.has(recent.data.id) && recent.data.id !== appliedTaskId && recent.data.id !== rejectedTaskId
+    open && taskId === null && recent?.data && recent.data.kind === "blacksmith" && (recent.data.status === "queued" || recent.data.status === "running" || recent.data.status === "completed") && !dismissedIdsRef.has(recent.data.id) && recent.data.id !== appliedTaskId && recent.data.id !== rejectedTaskId
       ? recent.data.id
       : null;
   if (attachId !== null && prevAttachId !== attachId) {
@@ -490,13 +512,29 @@ export function ForgePopover({ editor, slug, documentType, documentId, open, onC
   const portalTarget = typeof document !== "undefined" ? document.body : null;
   if (!portalTarget) return null;
 
+  // Herald tier — full panel per herald-popover.html (own header states).
+  if (mode === "herald") {
+    return createPortal(
+      <div ref={containerRef} className="menu-popover" data-forge-popover style={popoverStyle}>
+        <HeraldPanel
+          editor={editor}
+          slug={slug}
+          documentType={documentType}
+          documentId={documentId}
+          onModeChange={changeMode}
+          onClose={onClose}
+        />
+      </div>,
+      portalTarget
+    );
+  }
+
   return createPortal(
     <div ref={containerRef} className="menu-popover" data-forge-popover style={popoverStyle}>
       <div className="flex items-center justify-between" style={{ padding: "10px 12px", borderBottom: "1px solid var(--lx-border-default)" }}>
         <span className="text-sm font-medium text-lx-text-primary font-body">Forge</span>
-        <span className={cn("font-micro text-2xs uppercase tracking-[0.04em]", running ? "text-lx-text-warning" : "text-lx-text-muted")}>
-          {running ? "Running…" : "AI writing assistant"}
-        </span>
+        {/* Mode picker: switching mid-run is blocked until the terminal frame. */}
+        <HeraldModePicker mode={mode} onChange={changeMode} disabled={taskRunning} />
       </div>
 
       {/* Agent picker — rule bundle, distinct from the runtime's CLI agent */}

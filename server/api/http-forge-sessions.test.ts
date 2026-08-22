@@ -57,9 +57,9 @@ INSERT INTO columns (id, project_id, name, position) VALUES ('c1', 'p1', 'Todo',
 INSERT INTO swimlanes (id, project_id, name, position, kind) VALUES ('s1', 'p1', 'Main', 0, 'backlog');
 INSERT INTO tasks (id, project_id, column_id, swimlane_id, title, description, priority, type, position, created_at) VALUES
   ('t1', 'p1', 'c1', 's1', 'T1', '{"type":"doc","content":[]}', 'pr-1', 'tp-1', 'a0', '2026-01-01 10:00:00');
-INSERT INTO forge_agents (id, name, description, instructions, is_builtin) VALUES
+INSERT INTO lexa_agents (id, name, description, instructions, is_builtin) VALUES
   ('a1', 'Test Agent', '', 'Agent instructions', 0);
-INSERT INTO forge_skills (id, name, description, instructions, is_builtin) VALUES
+INSERT INTO lexa_skills (id, name, description, instructions, is_builtin) VALUES
   ('sk1', 'Test Skill', '', 'Skill instructions', 0);
 `);
   handler = createApiHandler(dbPath);

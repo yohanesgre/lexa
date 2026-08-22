@@ -80,6 +80,13 @@ function flattenInline(tokens: Token[], parentMarks: TipTapMark[] = []): TipTapN
         // Scheme allowlist at the authoring boundary: disallowed hrefs are
         // dropped entirely — a stored javascript: href would execute in any
         // viewer's session (see shared/safe-href.ts).
+        // Pulled mention deep links (${base}/{slug}/tasks?task=… |
+        // ${base}/{slug}/wiki/…) deliberately stay PLAIN LINKS — they are NOT
+        // mapped back to mention nodes. Echo suppression requires the next
+        // push to reproduce pushed_body byte-for-byte after normalization;
+        // GitHub may rewrite URLs (scheme, trailing slash, encoding), so any
+        // mention re-mapping risks permanent outOfSync churn. A plain link is
+        // lossless for echo and still navigates.
         const href = safeHref(t.href);
         const attrs: Record<string, unknown> = {};
         if (href) attrs.href = href;
@@ -265,6 +272,24 @@ function renderInlineNode(node: TipTapNode, opts?: DocToMarkdownOptions): string
     return `![${alt}](${src}${title})`;
   }
   if (node.type === "hardBreak") return "  \\\n";
+  if (node.type === "mention") {
+    // Mention nodes are LINKS only — never context injection. With
+    // baseUrl + projectSlug they render as absolute deep links (GitHub-safe);
+    // without them the bare label is emitted (no broken relative href).
+    const attrs = node.attrs ?? {};
+    const refId = typeof attrs.refId === "string" ? attrs.refId.trim() : "";
+    const label = typeof attrs.label === "string" ? attrs.label.trim() : "";
+    if (!refId || !label) return "";
+    if (opts?.baseUrl && opts?.projectSlug) {
+      const base = `${opts.baseUrl.replace(/\/+$/, "")}/${opts.projectSlug}`;
+      const href =
+        attrs.refType === "wiki"
+          ? `${base}/wiki/${encodeURIComponent(refId)}`
+          : `${base}/tasks?task=${encodeURIComponent(refId)}`;
+      return `[${label}](${href})`;
+    }
+    return label;
+  }
   return node.text ?? "";
 }
 
@@ -432,6 +457,9 @@ export interface DocToMarkdownOptions {
   // srcs are absolutized so pushed GitHub issue bodies carry absolute URLs.
   // Pure option — no env access here; the call site passes the value.
   baseUrl?: string;
+  // Project slug — required together with baseUrl to build mention deep links
+  // (${baseUrl}/{slug}/tasks?task={id} | ${baseUrl}/{slug}/wiki/{slug}).
+  projectSlug?: string;
 }
 
 export function docToMarkdown(doc: TipTapDoc, opts?: DocToMarkdownOptions): string {

@@ -40,6 +40,7 @@ INSERT INTO priority_options (id, project_id, label, color, position) VALUES ('p
 INSERT INTO type_options (id, project_id, label, color, position) VALUES ('type-1', 'p1', 'Bug', '#f00', 0), ('type-2', 'p1', 'Feature', '#0f0', 1);
 INSERT INTO tasks (id, project_id, column_id, swimlane_id, title, position, due_at, created_at, key, number) VALUES ('t1', 'p1', 'c1', 'm1', 'T1', 'a0', '2026-06-15', '2026-01-01 10:00:00', 'EG-1', 1);
 INSERT INTO tasks (id, project_id, column_id, swimlane_id, title, position, created_at, key, number) VALUES ('t2', 'p1', 'c2', 's-backlog', 'T2', 'a0', '2026-01-01 10:00:00', 'EG-2', 2);
+INSERT INTO wiki_pages (id, project_id, title, slug, content, content_text, position) VALUES ('w1', 'p1', 'Roadmap', 'roadmap', '{"type":"doc","content":[]}', '', 0);
 `);
   handler = createApiHandler(dbPath);
 });
@@ -254,6 +255,23 @@ describe("board route", () => {
     const withArchived = await handler(json("GET", "/api/projects/p-board/board?includeArchived=true"));
     const archivedBody = await withArchived.json();
     expect(archivedBody.tasks.some((t: { id: string }) => t.id === "tb-arch")).toBe(true);
+  });
+
+  it("GET /api/projects/:slug/mentions matches task key + title, wiki title/slug; empty q → empty", async () => {
+    // Runs after earlier describes renamed t1 ("Renamed") and deleted t2 —
+    // assert against the mutated fixtures.
+    const byKey = await handler(json("GET", "/api/projects/p1/mentions?q=eg-1"));
+    expect(byKey.status).toBe(200);
+    expect(await byKey.json()).toEqual({ data: { tasks: [{ id: "t1", key: "EG-1", title: "Renamed" }], wikiPages: [] } });
+
+    const byTitle = await handler(json("GET", "/api/projects/p1/mentions?q=renamed"));
+    expect((await byTitle.json()).data.tasks.map((t: { id: string }) => t.id)).toEqual(["t1"]);
+
+    const byWiki = await handler(json("GET", "/api/projects/p1/mentions?q=road"));
+    expect((await byWiki.json()).data.wikiPages).toEqual([{ id: "w1", slug: "roadmap", title: "Roadmap" }]);
+
+    const empty = await handler(json("GET", "/api/projects/p1/mentions?q="));
+    expect(await empty.json()).toEqual({ data: { tasks: [], wikiPages: [] } });
   });
 
   it("GET board for an unknown project → 404", async () => {

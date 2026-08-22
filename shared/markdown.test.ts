@@ -504,3 +504,47 @@ describe("attachment image srcs", () => {
     expect(hasNodeOfType(doc, "image")).toBe(true);
   });
 });
+
+describe("mention nodes", () => {
+  const UUID = "3f2504e0-4f89-11d3-9a0c-0305e82c3301";
+  const mentionDoc = (refType: string, refId: string, label: string): TipTapDoc => ({
+    type: "doc",
+    content: [{ type: "paragraph", content: [{ type: "mention", attrs: { refType, refId, label } }] }],
+  });
+  const opts = { baseUrl: "https://lexa.example", projectSlug: "demo" };
+
+  it("task mentions render as absolute deep links with the label as text", () => {
+    expect(docToMarkdown(mentionDoc("task", UUID, "LEX-42"), opts)).toBe(
+      `[LEX-42](https://lexa.example/demo/tasks?task=${UUID})`
+    );
+  });
+
+  it("wiki mentions render as absolute deep links", () => {
+    expect(docToMarkdown(mentionDoc("wiki", "home", "Home"), opts)).toBe(
+      "[Home](https://lexa.example/demo/wiki/home)"
+    );
+  });
+
+  it("without baseUrl/projectSlug the bare label is emitted (no broken href)", () => {
+    expect(docToMarkdown(mentionDoc("task", UUID, "LEX-42"))).toBe("LEX-42");
+    expect(docToMarkdown(mentionDoc("task", UUID, "LEX-42"), { baseUrl: "https://x" })).toBe("LEX-42");
+  });
+
+  it("malformed mention attrs render empty", () => {
+    expect(docToMarkdown(mentionDoc("task", "", "X"), opts)).toBe("");
+    expect(docToMarkdown(mentionDoc("task", UUID, ""), opts)).toBe("");
+  });
+
+  it("echo round-trip stability: pushed link re-renders identically on the next push", () => {
+    const md1 = docToMarkdown(mentionDoc("task", UUID, "LEX-42"), opts);
+    const pulled = markdownToDoc(md1);
+    // Pull direction degrades to a plain link node — never a mention node.
+    const para = (pulled.content as Record<string, unknown>[])[0];
+    const linkText = JSON.stringify(para);
+    expect(linkText).not.toContain('"mention"');
+    expect(linkText).toContain("/demo/tasks?task=");
+    const md2 = docToMarkdown(pulled, opts);
+    expect(md2).toBe(md1);
+    expect(normalizeMarkdownForEcho(md2)).toBe(normalizeMarkdownForEcho(md1));
+  });
+});

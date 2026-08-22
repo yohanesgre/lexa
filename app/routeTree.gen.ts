@@ -18,6 +18,7 @@ import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as SetupRouteImport } from './routes/setup'
 import { Route as SlugIndexRouteImport } from './routes/$slug/index'
 import { Route as SlugBoardRouteImport } from './routes/$slug/board'
+import { Route as SlugChatRouteImport } from './routes/$slug/chat'
 import { Route as SlugMilestonesRouteImport } from './routes/$slug/milestones'
 import { Route as SlugSettingsRouteImport } from './routes/$slug/settings'
 import { Route as SlugSwimlanesRouteImport } from './routes/$slug/swimlanes'
@@ -74,6 +75,11 @@ const SlugIndexRoute = SlugIndexRouteImport.update({
 const SlugBoardRoute = SlugBoardRouteImport.update({
   id: '/$slug/board',
   path: '/$slug/board',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const SlugChatRoute = SlugChatRouteImport.update({
+  id: '/$slug/chat',
+  path: '/$slug/chat',
   getParentRoute: () => rootRouteImport,
 } as any)
 const SlugMilestonesRoute = SlugMilestonesRouteImport.update({
@@ -147,6 +153,7 @@ export interface FileRoutesByFullPath {
   '/settings': typeof SettingsRouteWithChildren
   '/setup': typeof SetupRoute
   '/$slug/board': typeof SlugBoardRoute
+  '/$slug/chat': typeof SlugChatRoute
   '/$slug/milestones': typeof SlugMilestonesRoute
   '/$slug/settings': typeof SlugSettingsRoute
   '/$slug/swimlanes': typeof SlugSwimlanesRoute
@@ -170,6 +177,7 @@ export interface FileRoutesByTo {
   '/settings': typeof SettingsRouteWithChildren
   '/setup': typeof SetupRoute
   '/$slug/board': typeof SlugBoardRoute
+  '/$slug/chat': typeof SlugChatRoute
   '/$slug/milestones': typeof SlugMilestonesRoute
   '/$slug/settings': typeof SlugSettingsRoute
   '/$slug/swimlanes': typeof SlugSwimlanesRoute
@@ -194,6 +202,7 @@ export interface FileRoutesById {
   '/settings': typeof SettingsRouteWithChildren
   '/setup': typeof SetupRoute
   '/$slug/board': typeof SlugBoardRoute
+  '/$slug/chat': typeof SlugChatRoute
   '/$slug/milestones': typeof SlugMilestonesRoute
   '/$slug/settings': typeof SlugSettingsRoute
   '/$slug/swimlanes': typeof SlugSwimlanesRoute
@@ -219,6 +228,7 @@ export interface FileRouteTypes {
     | '/settings'
     | '/setup'
     | '/$slug/board'
+    | '/$slug/chat'
     | '/$slug/milestones'
     | '/$slug/settings'
     | '/$slug/swimlanes'
@@ -242,6 +252,7 @@ export interface FileRouteTypes {
     | '/settings'
     | '/setup'
     | '/$slug/board'
+    | '/$slug/chat'
     | '/$slug/milestones'
     | '/$slug/settings'
     | '/$slug/swimlanes'
@@ -265,6 +276,7 @@ export interface FileRouteTypes {
     | '/settings'
     | '/setup'
     | '/$slug/board'
+    | '/$slug/chat'
     | '/$slug/milestones'
     | '/$slug/settings'
     | '/$slug/swimlanes'
@@ -289,6 +301,7 @@ export interface RootRouteChildren {
   SettingsRoute: typeof SettingsRouteWithChildren
   SetupRoute: typeof SetupRoute
   SlugBoardRoute: typeof SlugBoardRoute
+  SlugChatRoute: typeof SlugChatRoute
   SlugMilestonesRoute: typeof SlugMilestonesRoute
   SlugSettingsRoute: typeof SlugSettingsRoute
   SlugSwimlanesRoute: typeof SlugSwimlanesRoute
@@ -363,6 +376,13 @@ declare module '@tanstack/react-router' {
       path: '/$slug/board'
       fullPath: '/$slug/board'
       preLoaderRoute: typeof SlugBoardRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/$slug/chat': {
+      id: '/$slug/chat'
+      path: '/$slug/chat'
+      fullPath: '/$slug/chat'
+      preLoaderRoute: typeof SlugChatRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/$slug/milestones': {
@@ -479,6 +499,7 @@ const rootRouteChildren: RootRouteChildren = {
   SettingsRoute: SettingsRouteWithChildren,
   SetupRoute: SetupRoute,
   SlugBoardRoute: SlugBoardRoute,
+  SlugChatRoute: SlugChatRoute,
   SlugMilestonesRoute: SlugMilestonesRoute,
   SlugSettingsRoute: SlugSettingsRoute,
   SlugSwimlanesRoute: SlugSwimlanesRoute,

@@ -2,12 +2,12 @@ import { useEffect, useState } from "react";
 import { X } from "lucide-react";
 import { cn } from "../ui/cn";
 import { useCreateForgeAgent, useCreateForgeSkill, useDeleteForgeAgent, useDeleteForgeSkill, useReplaceAgentSkills, useResetForgeAgent, useResetForgeSkill, useUpdateForgeAgent, useUpdateForgeSkill } from "../../lib/queries";
-import type { ForgeAgent, ForgeSkill } from "../../../shared/types";
+import type { LexaAgent, LexaSkill } from "../../../shared/types";
 
 interface PromptEditorModalProps {
   kind: "agent" | "skill";
-  entity: ForgeAgent | ForgeSkill | null;
-  allSkills?: ForgeSkill[];
+  entity: LexaAgent | LexaSkill | null;
+  allSkills?: LexaSkill[];
   onClose: () => void;
 }
 
@@ -17,8 +17,8 @@ interface PromptEditorModalProps {
 export function PromptEditorModal({ kind, entity, allSkills = [], onClose }: PromptEditorModalProps) {
   const isNew = entity === null;
   const isAgent = kind === "agent";
-  const agent = isAgent ? (entity as ForgeAgent | null) : null;
-  const skill = !isAgent ? (entity as ForgeSkill | null) : null;
+  const agent = isAgent ? (entity as LexaAgent | null) : null;
+  const skill = !isAgent ? (entity as LexaSkill | null) : null;
   const isBuiltin = (isAgent ? agent?.isBuiltin : skill?.isBuiltin) ?? false;
 
   const [name, setName] = useState(entity?.name ?? "");

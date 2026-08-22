@@ -3,7 +3,7 @@ import { useEditor, EditorContent } from "@tiptap/react";
 import type { JSONContent } from "@tiptap/core";
 import { Check, X } from "lucide-react";
 import type { TipTapDoc } from "../../shared/types";
-import { textEditorExtensions } from "../lib/tiptap";
+import { textEditorExtensions, extensionsWithMentions } from "../lib/tiptap";
 import { useAttachmentEmbeds } from "../lib/useAttachmentEmbeds";
 import { cn } from "./ui/cn";
 import { TextEditor, Toolbar } from "./TextEditor";
@@ -81,7 +81,10 @@ export function DescriptionEditor({
 
   const editor = useEditor({
     immediatelyRender: false,
-    extensions: textEditorExtensions,
+    extensions: extensionsWithMentions(
+      textEditorExtensions,
+      attachments?.slug ?? forge?.slug
+    ),
     content: initialContent as unknown as JSONContent,
     editable,
     onUpdate: ({ editor: nextEditor }) => {
@@ -138,19 +141,43 @@ export function DescriptionEditor({
     onDoneRef.current?.(editor.getJSON() as unknown as TipTapDoc);
   };
 
+  const toolbar = (
+    <Toolbar editor={editor} headingLevel={headingLevel} forge={forge} reviewActive={review !== null} appliedTaskId={appliedTaskId} rejectedTaskId={rejectedTaskId} onReview={handleReview} />
+  );
+  const reviewSurface = review ? (
+    <ForgeReviewSurface action={review.action} runtime={review.runtime} diff={review.diff} onAccept={handleAcceptReview} onReject={handleRejectReview} />
+  ) : null;
+
+  // Create mode (no onDone): legacy inset card — toolbar + document inside
+  // the bordered wrapper, unchanged from before the edit-mode restructure.
+  if (!onDone) {
+    return (
+      <div className={cn("editor-wrapper", review && "is-reviewing")} ref={wrapperRef}>
+        <div style={{ display: "flex", alignItems: "center", background: "var(--lx-surface-card)", borderRadius: "6px 6px 0 0" }}>
+          {toolbar}
+        </div>
+        {reviewSurface}
+        <EditorContent editor={editor} className="editor-content" />
+      </div>
+    );
+  }
+
+  // Edit mode (task-detail-edit.html): chrome band — header strip + toolbar —
+  // renders full-bleed OUTSIDE the bordered card; the card wraps only the
+  // document so focus border + glow stay inset. wrapperRef still spans both,
+  // so blur inside the chrome never exits edit mode.
   return (
-    <div className={cn("editor-wrapper", review && "is-reviewing")} ref={wrapperRef}>
-      {onDone && (
+    <div className="task-editor-host" ref={wrapperRef}>
+      <div className="task-editor-chrome">
         <div
           className="flex items-center justify-between"
-          style={{ padding: "6px 8px 6px 12px", borderBottom: "1px solid var(--lx-border-default)", borderRadius: "6px 6px 0 0", background: "var(--lx-surface-card)" }}
+          style={{ padding: "6px 16px", borderBottom: "1px solid var(--lx-border-default)" }}
         >
           <span className="font-micro text-2xs text-lx-text-muted uppercase tracking-[0.04em]">Editing description</span>
           <div className="flex items-center gap-2">
             <button
               type="button"
               className="btn btn-ghost btn-icon-sm"
-              style={{ width: 28, height: 28, padding: 0 }}
               onClick={() => onCancelRef.current?.()}
               title="Revert changes (Esc)"
               aria-label="Revert changes"
@@ -160,7 +187,6 @@ export function DescriptionEditor({
             <button
               type="button"
               className="btn btn-primary btn-icon-sm"
-              style={{ width: 28, height: 28, padding: 0 }}
               onClick={handleDone}
               title="Save and finish (Enter)"
               aria-label="Save and finish editing"
@@ -169,14 +195,14 @@ export function DescriptionEditor({
             </button>
           </div>
         </div>
-      )}
-      <div style={{ display: "flex", alignItems: "center", background: "var(--lx-surface-card)", borderRadius: "6px 6px 0 0" }}>
-        <Toolbar editor={editor} headingLevel={headingLevel} forge={forge} reviewActive={review !== null} appliedTaskId={appliedTaskId} rejectedTaskId={rejectedTaskId} onReview={handleReview} />
+        <div style={{ display: "flex", alignItems: "center", background: "var(--lx-surface-card)", borderBottom: "1px solid var(--lx-border-default)" }}>
+          {toolbar}
+        </div>
       </div>
-      {review && (
-        <ForgeReviewSurface action={review.action} runtime={review.runtime} diff={review.diff} onAccept={handleAcceptReview} onReject={handleRejectReview} />
-      )}
-      <EditorContent editor={editor} className="editor-content" />
+      <div className={cn("editor-wrapper", review && "is-reviewing")}>
+        {reviewSurface}
+        <EditorContent editor={editor} className="editor-content" />
+      </div>
     </div>
   );
 }

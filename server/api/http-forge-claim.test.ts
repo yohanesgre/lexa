@@ -96,9 +96,9 @@ INSERT INTO settings (key, value) VALUES
   ('github_app_id', '12345'),
   ('github_private_key', '-----BEGIN RSA PRIVATE KEY-----\nfake\n-----END RSA PRIVATE KEY-----'),
   ('github_webhook_secret', 'whsec');
-INSERT INTO forge_agents (id, name, description, instructions, is_builtin) VALUES
+INSERT INTO lexa_agents (id, name, description, instructions, is_builtin) VALUES
   ('a1', 'Test Agent', '', 'Agent instructions', 0);
-INSERT INTO forge_skills (id, name, description, instructions, is_builtin) VALUES
+INSERT INTO lexa_skills (id, name, description, instructions, is_builtin) VALUES
   ('sk1', 'Test Skill', '', 'Skill instructions', 0);
 -- p2 has no source repos — tasks there get no repoContent.
 INSERT INTO projects (id, name, slug, key, next_task_number) VALUES ('p2', 'P2', 'p2', 'WC', 1);

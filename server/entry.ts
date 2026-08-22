@@ -167,6 +167,9 @@ function autoLockSetupIfConfigured(dbPath: string) {
 
 const server: Server<unknown> = Bun.serve({
   port: PORT,
+  // SSE streams go quiet between provider frames and heartbeats (15s) —
+  // Bun's 10s default idle timeout would kill them mid-flight.
+  idleTimeout: 60,
   async fetch(req) {
     const url = new URL(req.url);
 
@@ -260,8 +263,9 @@ const server: Server<unknown> = Bun.serve({
         return tooLargeResponse();
       }
       // Reconstruct: the original req's stream is consumed — apiHandler must
-      // see the buffered body, not an empty one.
-      const apiReq = new Request(req.url, { method: req.method, headers: req.headers, body: read.bytes });
+      // see the buffered body, not an empty one. signal is forwarded so SSE
+      // handlers observe client disconnects.
+      const apiReq = new Request(req.url, { method: req.method, headers: req.headers, body: read.bytes, signal: req.signal });
       // The middleware resolves the caller IP from this header (socket IPs are
       // only visible here). Delete any inbound value first so clients can't
       // spoof a fresh bucket.

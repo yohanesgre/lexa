@@ -6,7 +6,7 @@ import { ChevronIcon } from "./ChevronIcon";
 
 type ProjectStatus = { health: "ok" | "approaching" | "exceeded"; taskCount: number };
 
-export function ProjectSwitcher({ routeType }: { routeType: "home" | "dashboard" | "board" | "tasks" | "wiki" | "milestones" | "swimlanes" | "settings" | "forge" }) {
+export function ProjectSwitcher({ routeType }: { routeType: "home" | "dashboard" | "board" | "tasks" | "wiki" | "chat" | "milestones" | "swimlanes" | "settings" | "forge" }) {
   const [open, setOpen] = useState(false);
   const { data: projects, isLoading } = useProjects();
   const { data: dashboard } = useDashboard();
@@ -44,6 +44,7 @@ export function ProjectSwitcher({ routeType }: { routeType: "home" | "dashboard"
   const targetFor = (slug: string) => {
     if (routeType === "board") return "/$slug/board" as const;
     if (routeType === "wiki") return "/$slug/wiki" as const;
+    if (routeType === "chat") return "/$slug/chat" as const;
     return "/$slug" as const;
   };
 

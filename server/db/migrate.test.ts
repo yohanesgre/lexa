@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach } from "vitest";
-import { mkdtempSync, rmSync, writeFileSync, copyFileSync, readdirSync, readFileSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync, copyFileSync, readdirSync, readFileSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -36,7 +36,7 @@ describe("runMigrations", () => {
   it("applies the real migrations dir and records _migrations", () => {
     const dbPath = join(tmpDir(), "app.db");
     runMigrations(dbPath, MIGRATIONS);
-    expect(appliedMigrations(dbPath)).toEqual(["0001_init.sql", "0002_project_repos.sql", "0003_forge_sessions.sql", "0004_auth_roles_teams.sql", "0005_milestones_sprints.sql", "0006_drop_mcp_connected.sql", "0007_task_keys.sql", "0008_wiki_share_links.sql", "0009_attachments.sql"]);
+    expect(appliedMigrations(dbPath)).toEqual(["0001_init.sql", "0002_project_repos.sql", "0003_forge_sessions.sql", "0004_auth_roles_teams.sql", "0005_milestones_sprints.sql", "0006_drop_mcp_connected.sql", "0007_task_keys.sql", "0008_wiki_share_links.sql", "0009_attachments.sql", "0010_herald.sql", "0011_chat_threads.sql", "0012_chat_pins.sql"]);
     const db = new Database(dbPath);
     expect(tableExists(db, "tasks")).toBe(true);
     expect(tableExists(db, "_migrations")).toBe(true);
@@ -47,7 +47,7 @@ describe("runMigrations", () => {
     const dbPath = join(tmpDir(), "app.db");
     runMigrations(dbPath, MIGRATIONS);
     runMigrations(dbPath, MIGRATIONS);
-    expect(appliedMigrations(dbPath)).toEqual(["0001_init.sql", "0002_project_repos.sql", "0003_forge_sessions.sql", "0004_auth_roles_teams.sql", "0005_milestones_sprints.sql", "0006_drop_mcp_connected.sql", "0007_task_keys.sql", "0008_wiki_share_links.sql", "0009_attachments.sql"]);
+    expect(appliedMigrations(dbPath)).toEqual(["0001_init.sql", "0002_project_repos.sql", "0003_forge_sessions.sql", "0004_auth_roles_teams.sql", "0005_milestones_sprints.sql", "0006_drop_mcp_connected.sql", "0007_task_keys.sql", "0008_wiki_share_links.sql", "0009_attachments.sql", "0010_herald.sql", "0011_chat_threads.sql", "0012_chat_pins.sql"]);
   });
 
   it("rolls back a failed migration atomically (no partial schema, no _migrations row)", () => {
@@ -74,7 +74,86 @@ describe("runMigrations", () => {
   it("keeps the default migrations dir (prod behavior)", () => {
     const dbPath = join(tmpDir(), "app.db");
     runMigrations(dbPath);
-    expect(appliedMigrations(dbPath)).toEqual(["0001_init.sql", "0002_project_repos.sql", "0003_forge_sessions.sql", "0004_auth_roles_teams.sql", "0005_milestones_sprints.sql", "0006_drop_mcp_connected.sql", "0007_task_keys.sql", "0008_wiki_share_links.sql", "0009_attachments.sql"]);
+    expect(appliedMigrations(dbPath)).toEqual(["0001_init.sql", "0002_project_repos.sql", "0003_forge_sessions.sql", "0004_auth_roles_teams.sql", "0005_milestones_sprints.sql", "0006_drop_mcp_connected.sql", "0007_task_keys.sql", "0008_wiki_share_links.sql", "0009_attachments.sql", "0010_herald.sql", "0011_chat_threads.sql", "0012_chat_pins.sql"]);
+  });
+
+  it("0011 backfills chat titles from the first text message; image-array first messages stay NULL", () => {
+    // Simulate a pre-0011 database: apply 0001–0010 from a staged dir, seed
+    // chat rows, then run the real dir so ONLY 0011 applies over the data.
+    const dir = tmpDir();
+    const pre = join(dir, "pre");
+    mkdirSync(pre);
+    for (const name of readdirSync(MIGRATIONS).filter((n) => n < "0011")) {
+      copyFileSync(join(MIGRATIONS, name), join(pre, name));
+    }
+    const dbPath = join(dir, "app.db");
+    runMigrations(dbPath, pre);
+    expect(appliedMigrations(dbPath)).not.toContain("0011_chat_threads.sql");
+
+    const db = new Database(dbPath);
+    db.exec(`
+INSERT INTO projects (id, name, slug) VALUES ('p1', 'P', 'p1');
+INSERT INTO users (id, email, name, role) VALUES ('u1', 'u1@x', 'U1', 'superadmin');
+-- Text first message → title derived (newlines collapsed, ≤60 chars).
+INSERT INTO herald_threads (document_type, document_id, project_id, owner_user_id, messages)
+VALUES ('chat', 'c-text', 'p1', 'u1', '[{"role":"user","content":"Fix the login bug\r\nthen verify sessions"}]');
+-- Image-ref array first message → title stays NULL.
+INSERT INTO herald_threads (document_type, document_id, project_id, owner_user_id, messages)
+VALUES ('chat', 'c-img', 'p1', 'u1', '[{"role":"user","content":[{"type":"image-ref","storageKey":"k","mimeType":"image/png"}]}]');
+-- Empty transcript → NULL.
+INSERT INTO herald_threads (document_type, document_id, project_id, owner_user_id, messages)
+VALUES ('chat', 'c-empty', 'p1', 'u1', '[]');
+-- Document threads are never touched by the chat backfill.
+INSERT INTO herald_threads (document_type, document_id, project_id, agent_id, skill_id, messages)
+VALUES ('task', 't1', 'p1', 'a1', 's1', '[{"role":"user","content":"should not be titled"}]');
+`);
+    db.close();
+
+    runMigrations(dbPath, MIGRATIONS);
+    expect(appliedMigrations(dbPath)).toContain("0011_chat_threads.sql");
+
+    const migrated = new Database(dbPath);
+    const rows = migrated.prepare(
+      `SELECT document_id, title FROM herald_threads ORDER BY document_id`
+    ).all() as { document_id: string; title: string | null }[];
+    const byId = Object.fromEntries(rows.map((r) => [r.document_id, r.title]));
+    // Backfill swaps CR and LF each for a space (CRLF → two spaces) — the
+    // whitespace-collapse refinement happens only in deriveChatTitle.
+    expect(byId["c-text"]).toBe("Fix the login bug  then verify sessions");
+    expect(byId["c-img"]).toBeNull();
+    expect(byId["c-empty"]).toBeNull();
+    expect(byId["t1"]).toBeNull();
+    // Chat list index exists (0012 later replaces the 0011 name — either
+    // variant proves the partial index landed).
+    const idx = migrated.prepare(
+      `SELECT name FROM sqlite_master WHERE type='index' AND name IN ('idx_herald_threads_chat_owner','idx_herald_threads_chat_list')`
+    ).get();
+    expect(idx).toBeTruthy();
+    const colNames = (migrated.prepare("PRAGMA table_info(herald_threads)").all() as { name: string }[]).map((c) => c.name);
+    expect(colNames).toContain("title");
+    migrated.close();
+  });
+
+  it("0012 adds the pinned column and swaps the chat list index", () => {
+    const dbPath = join(tmpDir(), "app.db");
+    runMigrations(dbPath, MIGRATIONS);
+    const db = new Database(dbPath);
+    const colNames = (db.prepare("PRAGMA table_info(herald_threads)").all() as { name: string }[]).map((c) => c.name);
+    expect(colNames).toContain("pinned");
+    // Fresh rows default to unpinned.
+    db.exec(`
+INSERT INTO projects (id, name, slug) VALUES ('p1', 'P', 'p1');
+INSERT INTO users (id, email, name, role) VALUES ('u1', 'u1@x', 'U1', 'superadmin');
+INSERT INTO herald_threads (document_type, document_id, project_id, owner_user_id, messages)
+VALUES ('chat', 'c1', 'p1', 'u1', '[]');
+`);
+    const row = db.prepare(`SELECT pinned FROM herald_threads WHERE document_id = 'c1'`).get() as { pinned: number };
+    expect(row.pinned).toBe(0);
+    // New list index present, old owner index gone.
+    const idxNames = (db.prepare("PRAGMA index_list(herald_threads)").all() as { name: string }[]).map((i) => i.name);
+    expect(idxNames).toContain("idx_herald_threads_chat_list");
+    expect(idxNames).not.toContain("idx_herald_threads_chat_owner");
+    db.close();
   });
 
   it("migrates legacy github_repo and task-linked repos into project_repos with roles", () => {
