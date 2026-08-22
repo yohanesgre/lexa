@@ -17,7 +17,7 @@ export function AppShell() {
   const pathname = useRouterState({ select: (s) => s.location.pathname });
   const { selectedSlug } = useProjectSelection();
 
-  const routeType: "home" | "dashboard" | "board" | "tasks" | "wiki" | "milestones" | "swimlanes" | "settings" | "forge" = useMemo(() => {
+  const routeType: "home" | "dashboard" | "board" | "tasks" | "wiki" | "chat" | "milestones" | "swimlanes" | "settings" | "forge" = useMemo(() => {
     if (pathname === "/") return "home";
     if (pathname === "/forge") return "forge";
     if (pathname === "/settings" || pathname.startsWith("/settings/")) return "settings";
@@ -26,6 +26,7 @@ export function AppShell() {
     if (pathname.match(/^\/[^/]+\/milestones$/)) return "milestones";
     if (pathname.match(/^\/[^/]+\/swimlanes$/)) return "swimlanes";
     if (pathname.match(/^\/[^/]+\/wiki(?:\/.*)?$/)) return "wiki";
+    if (pathname.match(/^\/[^/]+\/chat$/)) return "chat";
     if (pathname.match(/^\/[^/]+$/)) return "dashboard";
     return "home";
   }, [pathname]);
@@ -35,12 +36,14 @@ export function AppShell() {
   const dashboardTo = selectedSlug ? "/$slug" : "/";
   const boardTo = selectedSlug ? "/$slug/board" : "/";
   const wikiTo = selectedSlug ? "/$slug/wiki" : "/";
+  const chatTo = selectedSlug ? "/$slug/chat" : "/";
   const tasksTo = selectedSlug ? "/$slug/tasks" : "/";
   const milestonesTo = selectedSlug ? "/$slug/milestones" : "/";
   const swimlanesTo = selectedSlug ? "/$slug/swimlanes" : "/";
   const dashboardParams = selectedSlug ? { slug: selectedSlug } : undefined;
   const boardParams = selectedSlug ? { slug: selectedSlug } : undefined;
   const wikiParams = selectedSlug ? { slug: selectedSlug } : undefined;
+  const chatParams = selectedSlug ? { slug: selectedSlug } : undefined;
   const tasksParams = selectedSlug ? { slug: selectedSlug } : undefined;
   const milestonesParams = selectedSlug ? { slug: selectedSlug } : undefined;
   const swimlanesParams = selectedSlug ? { slug: selectedSlug } : undefined;
@@ -70,6 +73,9 @@ export function AppShell() {
             </NavLink>
             <NavLink to={wikiTo} params={wikiParams} active={routeType === "wiki"}>
               Wiki
+            </NavLink>
+            <NavLink to={chatTo} params={chatParams} active={routeType === "chat"}>
+              Chat
             </NavLink>
             <NavLink to="/forge" active={routeType === "forge"}>Forge</NavLink>
           </div>

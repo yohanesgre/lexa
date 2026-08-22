@@ -1,4 +1,5 @@
-import type { Project, ProjectRepo, Column, Swimlane, Task, Board, Milestone, WikiPageMeta, WikiPage, WikiPageRevision, WikiPageRevisionSummary, TipTapDoc, ApiKey, ApiKeyCreateResult, Dashboard, FieldConfig, ForgeTask, ForgeTaskLog, ForgeTaskStatus, ForgeAgent, ForgeSkill, ForgeProvider, ForgeSession, DocumentSource, Runtime, RuntimeEvent, Machine, TaskLink, TaskLinkSuggestion, ActivityEvent, ActivityItem, TaskComment, GithubIssueSummary, Team, TeamMember, TeamMemberRole, WorkspaceInvite, SessionInfo, LexaUser, Attachment } from "../../shared/types";
+import type { Project, ProjectRepo, Column, Swimlane, Task, Board, Milestone, WikiPageMeta, WikiPage, WikiPageRevision, WikiPageRevisionSummary, TipTapDoc, ApiKey, ApiKeyCreateResult, Dashboard, FieldConfig, ForgeTask, ForgeTaskLog, ForgeTaskStatus, LexaAgent, LexaSkill, ForgeProvider, ForgeSession, DocumentSource, Runtime, RuntimeEvent, Machine, TaskLink, TaskLinkSuggestion, ActivityEvent, ActivityItem, TaskComment, GithubIssueSummary, Team, TeamMember, TeamMemberRole, WorkspaceInvite, SessionInfo, LexaUser, Attachment } from "../../shared/types";
+import type { HeraldSettingsMasked, HeraldSettingsInput, HeraldChatTranscript, ModelListResult } from "../../shared/herald";
 
 const BASE = "/api";
 
@@ -569,50 +570,51 @@ export function resetForgeSession(input: { documentType: "task" | "wiki"; docume
   return request(`${BASE}/forge/sessions/reset`, { method: "POST", body: JSON.stringify(input) });
 }
 
-// ── Forge agents & skills (global rule bundles) ──
+// ── Lexa Agents & Skills (global rule bundles, shared by both Forge tiers) ──
+// Routes moved off /forge/* in migration 0010 (S14 hard cutover).
 
-export function listForgeAgents(): Promise<{ data: ForgeAgent[] }> {
-  return request(`${BASE}/forge/agents`);
+export function listForgeAgents(): Promise<{ data: LexaAgent[] }> {
+  return request(`${BASE}/agents`);
 }
 
-export function createForgeAgent(input: { name: string; description?: string; instructions: string }): Promise<ForgeAgent> {
-  return request(`${BASE}/forge/agents`, { method: "POST", body: JSON.stringify(input) });
+export function createForgeAgent(input: { name: string; description?: string; instructions: string }): Promise<LexaAgent> {
+  return request(`${BASE}/agents`, { method: "POST", body: JSON.stringify(input) });
 }
 
-export function updateForgeAgent(id: string, patch: { name?: string; description?: string; instructions?: string }): Promise<ForgeAgent> {
-  return request(`${BASE}/forge/agents/${id}`, { method: "PATCH", body: JSON.stringify(patch) });
+export function updateForgeAgent(id: string, patch: { name?: string; description?: string; instructions?: string }): Promise<LexaAgent> {
+  return request(`${BASE}/agents/${id}`, { method: "PATCH", body: JSON.stringify(patch) });
 }
 
 export function deleteForgeAgent(id: string): Promise<void> {
-  return request(`${BASE}/forge/agents/${id}`, { method: "DELETE" });
+  return request(`${BASE}/agents/${id}`, { method: "DELETE" });
 }
 
-export function replaceAgentSkills(id: string, skillIds: string[]): Promise<ForgeAgent> {
-  return request(`${BASE}/forge/agents/${id}/skills`, { method: "PUT", body: JSON.stringify({ skillIds }) });
+export function replaceAgentSkills(id: string, skillIds: string[]): Promise<LexaAgent> {
+  return request(`${BASE}/agents/${id}/skills`, { method: "PUT", body: JSON.stringify({ skillIds }) });
 }
 
-export function resetForgeAgent(id: string): Promise<ForgeAgent> {
-  return request(`${BASE}/forge/agents/${id}/reset`, { method: "POST" });
+export function resetForgeAgent(id: string): Promise<LexaAgent> {
+  return request(`${BASE}/agents/${id}/reset`, { method: "POST" });
 }
 
-export function listForgeSkills(): Promise<{ data: ForgeSkill[] }> {
-  return request(`${BASE}/forge/skills`);
+export function listForgeSkills(): Promise<{ data: LexaSkill[] }> {
+  return request(`${BASE}/skills`);
 }
 
-export function createForgeSkill(input: { name: string; description?: string; instructions: string }): Promise<ForgeSkill> {
-  return request(`${BASE}/forge/skills`, { method: "POST", body: JSON.stringify(input) });
+export function createForgeSkill(input: { name: string; description?: string; instructions: string }): Promise<LexaSkill> {
+  return request(`${BASE}/skills`, { method: "POST", body: JSON.stringify(input) });
 }
 
-export function updateForgeSkill(id: string, patch: { name?: string; description?: string; instructions?: string }): Promise<ForgeSkill> {
-  return request(`${BASE}/forge/skills/${id}`, { method: "PATCH", body: JSON.stringify(patch) });
+export function updateForgeSkill(id: string, patch: { name?: string; description?: string; instructions?: string }): Promise<LexaSkill> {
+  return request(`${BASE}/skills/${id}`, { method: "PATCH", body: JSON.stringify(patch) });
 }
 
 export function deleteForgeSkill(id: string): Promise<void> {
-  return request(`${BASE}/forge/skills/${id}`, { method: "DELETE" });
+  return request(`${BASE}/skills/${id}`, { method: "DELETE" });
 }
 
-export function resetForgeSkill(id: string): Promise<ForgeSkill> {
-  return request(`${BASE}/forge/skills/${id}/reset`, { method: "POST" });
+export function resetForgeSkill(id: string): Promise<LexaSkill> {
+  return request(`${BASE}/skills/${id}/reset`, { method: "POST" });
 }
 
 export function listRuntimes(teamId?: string): Promise<{ data: Runtime[] }> {
@@ -690,6 +692,128 @@ export function linkGithubIssue(slug: string, taskId: string, repo: string): Pro
 
 export function unlinkGithubIssue(slug: string, taskId: string, issueId: string): Promise<TaskMutationResult> {
   return request(`${BASE}/projects/${slug}/tasks/${taskId}/github-link/${issueId}`, { method: "DELETE" });
+}
+
+// ── Herald (server-side assistant tier) ──
+
+export interface HeraldMemoryEntry {
+  id: string;
+  projectId: string;
+  content: string;
+  source: "manual" | "herald";
+  createdAt: string;
+  updatedAt: string;
+}
+
+export function getHeraldSettings(projectId: string): Promise<HeraldSettingsMasked> {
+  return request(`${BASE}/herald/settings/${projectId}`);
+}
+
+export function putHeraldSettings(projectId: string, input: HeraldSettingsInput): Promise<HeraldSettingsMasked> {
+  return request(`${BASE}/herald/settings/${projectId}`, { method: "PUT", body: JSON.stringify(input) });
+}
+
+export function testHeraldSettings(projectId: string, input: HeraldSettingsInput): Promise<{ ok: boolean; latencyMs: number }> {
+  return request(`${BASE}/herald/settings/${projectId}/test`, { method: "POST", body: JSON.stringify(input) });
+}
+
+export function listHeraldModels(projectId: string, input: HeraldSettingsInput): Promise<ModelListResult> {
+  return request(`${BASE}/herald/settings/${projectId}/models`, { method: "POST", body: JSON.stringify(input) });
+}
+
+export function createHeraldTask(input: {
+  slug: string;
+  documentType: "task" | "wiki";
+  documentId: string;
+  prompt: string;
+  agentId: string;
+  skillId: string;
+  selection?: string;
+  attachments?: { storageKey: string; mimeType: string; name: string }[];
+}): Promise<ForgeTask> {
+  return request(`${BASE}/herald/tasks`, { method: "POST", body: JSON.stringify(input) });
+}
+
+export function cancelHeraldTask(id: string): Promise<{ ok: boolean }> {
+  return request(`${BASE}/herald/tasks/${id}/cancel`, { method: "POST" });
+}
+
+export function resetHeraldThread(documentType: "task" | "wiki", documentId: string): Promise<void> {
+  return request(`${BASE}/herald/threads/${documentType}/${documentId}`, { method: "DELETE" });
+}
+
+export function getHeraldChat(chatId: string): Promise<HeraldChatTranscript> {
+  return request(`${BASE}/herald/chat/${chatId}`);
+}
+
+// Thread summary for the History dropdown (pinned-first then updated_at
+// DESC, cap 100). Title is null until the server derives it from the first
+// send; null renders as "New chat". snippet is a short window around the
+// first ?q= match (null for title-only matches or unfiltered lists).
+export interface HeraldChatThreadSummary {
+  chatId: string;
+  title: string | null;
+  pinned: boolean;
+  snippet?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export function listHeraldChats(projectId: string, q?: string): Promise<{ data: HeraldChatThreadSummary[] }> {
+  const qs = q && q.trim() ? `?q=${encodeURIComponent(q.trim())}` : "";
+  return request(`${BASE}/herald/chats/${projectId}${qs}`);
+}
+
+export function updateHeraldChatMeta(
+  chatId: string,
+  patch: { title?: string; pinned?: boolean }
+): Promise<{ chatId: string; title?: string; pinned?: boolean }> {
+  return request(`${BASE}/herald/chat/${chatId}`, { method: "PATCH", body: JSON.stringify(patch) });
+}
+
+export function renameHeraldChat(chatId: string, title: string): Promise<{ chatId: string; title?: string }> {
+  return updateHeraldChatMeta(chatId, { title });
+}
+
+// Markdown attachment download (GET /herald/chat/:chatId/export →
+// text/markdown). Frontend-only: blob → programmatic <a download> click.
+// Filename prefers the Content-Disposition header, falls back to chatId.
+export async function exportHeraldChat(chatId: string): Promise<void> {
+  const res = await fetch(`${BASE}/herald/chat/${chatId}/export`);
+  if (!res.ok) {
+    const body = (await res.json().catch(() => ({}))) as { error?: { code?: string; message?: string } };
+    const err = new Error(body.error?.message ?? `HTTP ${res.status}`) as Error & { code?: string };
+    err.code = body.error?.code;
+    throw err;
+  }
+  const blob = await res.blob();
+  const dispo = res.headers.get("Content-Disposition") ?? "";
+  const match = /filename\*?=(?:UTF-8'')?"?([^";]+)"?/i.exec(dispo);
+  const name = match ? decodeURIComponent(match[1].trim()) : `herald-chat-${chatId}.md`;
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = name;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  URL.revokeObjectURL(url);
+}
+
+export function resetHeraldChat(chatId: string): Promise<void> {
+  return request(`${BASE}/herald/chat/${chatId}`, { method: "DELETE" });
+}
+
+export function listHeraldMemory(projectId: string): Promise<{ data: HeraldMemoryEntry[] }> {
+  return request(`${BASE}/herald/memory/${projectId}`);
+}
+
+export function addHeraldMemory(projectId: string, content: string): Promise<HeraldMemoryEntry> {
+  return request(`${BASE}/herald/memory/${projectId}`, { method: "POST", body: JSON.stringify({ content }) });
+}
+
+export function removeHeraldMemory(projectId: string, memoryId: string): Promise<void> {
+  return request(`${BASE}/herald/memory/${projectId}/${memoryId}`, { method: "DELETE" });
 }
 
 // ── Attachments ──

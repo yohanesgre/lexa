@@ -119,6 +119,53 @@ export class TaskRepo extends Effect.Service<TaskRepo>()("Lexa/TaskRepo", {
           id
         ).pipe(Effect.map((r) => rowToTask(r))),
 
+      // PREFIX-n alias lookup (invariant #13) — accepted anywhere a task id is.
+      findByKey: (key: string): Effect.Effect<Task, RowNotFound | DbError> =>
+        queryFirst<TaskRow & { column_github_state: "open" | "closed" | null; github_issues_raw: string | null }>(
+          db,
+          `SELECT ${TASK_SELECT} FROM ${TASK_FROM} WHERE t.key = ? GROUP BY t.id`,
+          key
+        ).pipe(Effect.map((r) => rowToTask(r))),
+
+      searchByTitle: (projectId: string, query: string, limit = 10): Effect.Effect<Task[], DbError> => {
+        const q = query.trim();
+        if (q === "") return Effect.succeed([]);
+        return queryAll<TaskRow & { column_github_state: "open" | "closed" | null; github_issues_raw: string | null }>(
+          db,
+          `SELECT ${TASK_SELECT} FROM ${TASK_FROM}
+           WHERE t.project_id = ? AND t.title LIKE ? ESCAPE '\\'
+           ORDER BY t.archived_at IS NOT NULL, t.updated_at DESC
+           LIMIT ?`,
+          projectId,
+          `%${q.replace(/[\\%_]/g, (c) => `\\${c}`)}%`,
+          limit
+        ).pipe(Effect.map((rows) => rows.map((r) => rowToTask(r))));
+      },
+
+      // @-mention autocomplete: key OR title substring, archived excluded.
+      // Slim projection — id/key/title only.
+      searchByKeyOrTitle: (
+        projectId: string,
+        query: string,
+        limit = 8
+      ): Effect.Effect<Array<{ id: string; key: string | null; title: string }>, DbError> => {
+        const q = query.trim();
+        if (q === "") return Effect.succeed([]);
+        const like = `%${q.replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
+        return queryAll<{ id: string; key: string | null; title: string }>(
+          db,
+          `SELECT t.id, t.key, t.title FROM tasks t
+           WHERE t.project_id = ? AND t.archived_at IS NULL
+             AND (t.key LIKE ? ESCAPE '\\' OR t.title LIKE ? ESCAPE '\\')
+           ORDER BY t.updated_at DESC
+           LIMIT ?`,
+          projectId,
+          like,
+          like,
+          limit
+        );
+      },
+
       findByProject: (
         projectId: string,
         filters?: TaskFilters,

@@ -643,8 +643,8 @@ CREATE TABLE forge_tasks (
   project_id    TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
   document_type TEXT NOT NULL CHECK (document_type IN ('task', 'wiki')),
   document_id   TEXT NOT NULL,
-  agent_id      TEXT NOT NULL REFERENCES forge_agents(id),
-  skill_id      TEXT NOT NULL REFERENCES forge_skills(id),
+  agent_id      TEXT NOT NULL REFERENCES lexa_agents(id),
+  skill_id      TEXT NOT NULL REFERENCES lexa_skills(id),
   extra_prompt  TEXT NOT NULL DEFAULT '',
   selection     TEXT NOT NULL DEFAULT '',
   doc_context   TEXT NOT NULL DEFAULT '',
@@ -658,6 +658,12 @@ CREATE TABLE forge_tasks (
 );
 CREATE INDEX idx_forge_tasks_created ON forge_tasks(created_at DESC, id DESC);
 CREATE INDEX idx_forge_tasks_status ON forge_tasks(status, created_at);
+
+-- Herald (0010): task tier — 'blacksmith' (daemon runtime lane) vs the
+-- server-side assistant tier. Existing rows default to 'blacksmith'.
+ALTER TABLE forge_tasks ADD COLUMN kind TEXT NOT NULL DEFAULT 'blacksmith';
+
+CREATE INDEX idx_forge_tasks_kind_status ON forge_tasks(kind, status);
 
 -- Forge warm sessions: maps one (document, runtime) pair to the agent-side
 -- conversation (opencode serve session id) the next task on that document
@@ -691,7 +697,9 @@ CREATE TABLE forge_sessions (
 -- Bindings are many-to-many. "Lexa" (the default agent) and the five
 -- original assistant actions (continue/rewrite/summarize/expand/grammar)
 -- are seeded builtins; builtins are editable + resettable but not deletable.
-CREATE TABLE forge_agents (
+-- Renamed from forge_* by migration 0010 (Herald) — column definitions
+-- unchanged; both tiers share these catalogs.
+CREATE TABLE lexa_agents (
   id           TEXT PRIMARY KEY,
   name         TEXT NOT NULL UNIQUE,
   description  TEXT NOT NULL DEFAULT '',
@@ -701,7 +709,7 @@ CREATE TABLE forge_agents (
   updated_at   TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
-CREATE TABLE forge_skills (
+CREATE TABLE lexa_skills (
   id           TEXT PRIMARY KEY,
   name         TEXT NOT NULL UNIQUE,
   description  TEXT NOT NULL DEFAULT '',
@@ -711,11 +719,80 @@ CREATE TABLE forge_skills (
   updated_at   TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
-CREATE TABLE forge_agent_skills (
-  agent_id TEXT NOT NULL REFERENCES forge_agents(id) ON DELETE CASCADE,
-  skill_id TEXT NOT NULL REFERENCES forge_skills(id) ON DELETE CASCADE,
+CREATE TABLE lexa_agent_skills (
+  agent_id TEXT NOT NULL REFERENCES lexa_agents(id) ON DELETE CASCADE,
+  skill_id TEXT NOT NULL REFERENCES lexa_skills(id) ON DELETE CASCADE,
   PRIMARY KEY (agent_id, skill_id)
 );
+
+-- ============================================================
+-- Herald assistant tier (migration 0010)
+-- ============================================================
+-- Per-project model endpoint settings for the Herald assistant tier
+-- (server-side chat() path — see docs/CLOUDFLARE_WORKERS.md). One row per
+-- project; search credentials optional.
+CREATE TABLE herald_settings (
+  project_id TEXT PRIMARY KEY REFERENCES projects(id) ON DELETE CASCADE,
+  kind TEXT NOT NULL CHECK (kind IN ('openai_compatible','anthropic_compatible')),
+  base_url TEXT NOT NULL,
+  api_key TEXT NOT NULL,
+  model TEXT NOT NULL,
+  search_provider TEXT,
+  search_api_key TEXT,
+  url_allowlist TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- Herald thread transcripts: one persisted conversation per document
+-- (ModelMessage[] JSON in `messages`). Long threads roll into `summary`
+-- (`summarized_count` = messages folded into it) — explicit replacement for
+-- opencode's auto-compaction. document_type 'chat' rows are keyed by a chat
+-- id and scoped to `owner_user_id`.
+--
+-- Multi-thread chat: chat rows are N-per-(project_id, owner_user_id), each
+-- keyed by its own chat id. `title` is the list label — derived once from the
+-- first text message (CRLF→space, whitespace collapsed, ≤60 chars) or set by
+-- rename; saves backfill with COALESCE so a rename survives later writes.
+-- Backfill caveat: a first message that is an image-ref array has no text
+-- content, so its title stays NULL until the next send derives it.
+-- `pinned` pins a thread to the top of the owner's list (pinned DESC, then
+-- updated_at DESC). Per-turn metadata (user `ts`, assistant `ts`/`citations`/
+-- `error`/`stopped`) lives INLINE in the messages JSON — no meta table, no
+-- migration churn when the meta shape evolves.
+CREATE TABLE herald_threads (
+  document_type TEXT NOT NULL CHECK (document_type IN ('task','wiki','chat')),
+  document_id TEXT NOT NULL,
+  project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  owner_user_id TEXT,
+  title TEXT,
+  pinned INTEGER NOT NULL DEFAULT 0,
+  agent_id TEXT,
+  skill_id TEXT,
+  messages TEXT NOT NULL DEFAULT '[]',
+  summary TEXT,
+  summarized_count INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+  PRIMARY KEY (document_type, document_id)
+);
+CREATE INDEX idx_herald_threads_chat_list ON herald_threads(project_id, owner_user_id, pinned DESC, updated_at DESC)
+  WHERE document_type = 'chat';
+
+-- Curated project memory: judgment-type facts only (live truth always comes
+-- from DB reads, never memorized). `source` ∈ manual/herald (no CHECK in DDL).
+-- FTS5 external-content index below; kept in sync by the repo on
+-- insert/delete (no triggers).
+CREATE TABLE project_memory (
+  id TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  content TEXT NOT NULL,
+  source TEXT NOT NULL DEFAULT 'manual',
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE VIRTUAL TABLE project_memory_fts USING fts5(content, content='project_memory', content_rowid='rowid');
 
 CREATE TABLE document_sources (
   id            TEXT PRIMARY KEY,
@@ -956,6 +1033,9 @@ Two-level model: `attachments` rows are scoped to a project (UNIQUE(project_id, 
 
 ### FTS5 for `search_wiki`
 The `wiki_fts` external-content table + triggers keep the index in sync automatically. The app maintains `content_text` (plain-text projection of TipTap JSON) on every wiki write — searching raw TipTap JSON would match syntax tokens, not words.
+
+### Mentions are document nodes, not rows
+A mention is a TipTap node `{ type: "mention", attrs: { refType: "task"|"wiki", refId, label } }` living inside the existing description/content JSON — no table, column, index, or notification rows. Autocomplete is served by a read-only cross-repo search (`MentionService`, cap 8); GitHub push renders mentions as absolute deep links (`${PUBLIC_URL}/{slug}/...`) while pull degrades them back to plain links, keeping `pushed_body` byte-stable for echo suppression.
 
 ### `updated_at` is app-maintained
 Every repo `update*` method sets `updated_at = datetime('now')` in the same statement. No triggers — the write path is already centralized in repositories.

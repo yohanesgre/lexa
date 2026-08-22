@@ -1585,6 +1585,43 @@ a:hover { color: var(--lx-text-link-hover); }
   margin-top: 4px;
 }
 
+/* Task detail edit — editor chrome band full-bleed to the slideover edges */
+.slideover-body.editor-flush {
+  padding-left: 0;
+  padding-right: 0;
+}
+
+.task-editor-chrome {
+  background: var(--lx-surface-card);
+}
+
+/* Shared toolbar partial: drop side/top/bottom borders + corner radius inside
+   the band — the toolbar's wrapper div draws the full-width bottom edge
+   (the partial's inline radius is overridden here on purpose) */
+.task-editor-chrome .editor-toolbar {
+  border-top: none;
+  border-left: none;
+  border-right: none;
+  border-bottom: none;
+  border-radius: 0 !important;
+}
+
+/* Wide band: each separator becomes an auto-margin boundary, so button groups
+   spread evenly across the full width and the last group (Forge) terminates
+   flush right. Compact band (< ~760px, row wraps): distribution off — dense
+   base gaps so wrapped lines never justify into sparse uneven spacing. */
+.task-editor-chrome .toolbar-sep {
+  margin-left: auto;
+  margin-right: 12px;
+}
+
+@container (max-width: 759px) {
+  .task-editor-chrome .toolbar-sep {
+    margin-left: 0;
+    margin-right: 4px;
+  }
+}
+
 .toolbar-btn {
   display: inline-flex;
   align-items: center;

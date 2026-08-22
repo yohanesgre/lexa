@@ -240,6 +240,37 @@ Move in Lexa → syncStateFromLexa() → GitHub issue closed
 ### Trust boundary
 Anyone with issue-triage permission on a linked repo can trigger webhook-driven board moves (close/reopen an issue → card moves, bypassing WIP and required_fields). This is intentional — GitHub is the source of truth for issue state (see sync matrix). On public repos, external contributors can affect the board; if that becomes a problem, the mitigation is restricting the App to private repos or filtering webhook senders — not more auth code.
 
+## Forge — two active AI tiers
+
+Forge is the umbrella for both AI execution tiers. Both are ACTIVE and
+co-exist; the run popover picks per-run. Design rationale: `docs/ADR-0001-two-tier-ai-architecture.md`; implementation plan + decisions log:
+`docs/HERALD_PLAN.md`.
+
+| | Herald | Blacksmith |
+|---|---|---|
+| Role | Writing + PM assistant | Coding agent |
+| Engine | Server-side TanStack AI `chat()` (`server/herald/provider.ts`) | listener/daemon/warm `opencode serve` |
+| Queue consumer | HTTP stream handler, in-process | daemons via `claimNextTask` |
+| Thread state | `herald_threads` (ModelMessage[] JSON, rolling summary) | `forge_sessions` |
+| Agents/skills render | prompt injection via systemPrompts | `.agents/` file writes |
+
+- **Shared queue with a discriminator:** both tiers ride `forge_tasks`;
+  `kind` ∈ `'herald' | 'blacksmith'`. `claimNextTask` carries
+  `AND kind='blacksmith'` — daemons can never claim Herald tasks; Herald
+  streams claim via a kind-scoped conditional UPDATE.
+- **Catalog renamed Lexa Agents/Skills** (`lexa_agents` / `lexa_skills` /
+  `lexa_agent_skills`, migration 0010): it is the behavioral spec for BOTH
+  renderers — prompt injection renders it for Herald, `.agents/` file writing
+  renders it for Blacksmith. Routes `/api/agents` + `/api/skills` (hard
+  cutover from the forge-prefixed paths); claim-payload field names
+  (`agentMarkdown`/`skillMarkdown`) frozen for daemon wire compatibility.
+- **Herald** runs per-project provider settings (`herald_settings`, custom
+  OpenAI-/Anthropic-compatible endpoints), server-side tools v1 (Exa web
+  search, SSRF-guarded `fetch_url`, `read_s3_file`, PM reads), curated
+  `project_memory` FTS5 facts, and a freeform chat surface on the same engine.
+- **Blacksmith** is unchanged: machine/listener/daemon infrastructure remains
+  deliberately for coding work (shell, file edits, sandboxes).
+
 ## Frontend
 
 ### Routes (TanStack Start)

@@ -16,6 +16,41 @@ function safeImageSrc(src: unknown): string | null {
   return safeHref(trimmed);
 }
 
+// Mention chips link internally only. Both hrefs are CONSTRUCTED from
+// validated segments (charset-checked + encodeURIComponent) — never taken
+// from doc content verbatim, so javascript:/external values cannot survive.
+const MENTION_REF_RE = /^[A-Za-z0-9._~-]+$/;
+
+export function mentionHref(refType: string | null | undefined, refId: unknown, slug: string | undefined): string | null {
+  if (!slug || typeof refId !== "string" || !refId || !MENTION_REF_RE.test(refId)) return null;
+  const s = encodeURIComponent(slug);
+  if (refType === "wiki") return `/${s}/wiki/${encodeURIComponent(refId)}`;
+  return `/${s}/board?task=${encodeURIComponent(refId)}`;
+}
+
+export function renderMention(
+  attrs: Record<string, unknown> | undefined,
+  key: string,
+  slug: string | undefined,
+  variant: "task" | "wiki"
+): ReactNode {
+  const refType = typeof attrs?.refType === "string" ? attrs.refType : "task";
+  const label = typeof attrs?.label === "string" && attrs.label ? attrs.label : typeof attrs?.refId === "string" ? attrs.refId : "";
+  if (!label) return null;
+  const href = mentionHref(refType, attrs?.refId, slug);
+  const inner = refType === "task" ? <span className="task-key">@{label}</span> : `@${label}`;
+  if (!href) {
+    // No project context or unresolvable ref — chip without a link.
+    return <span key={key} className="mention-chip">{inner}</span>;
+  }
+  void variant;
+  return (
+    <a key={key} href={href} className="mention-chip">
+      {inner}
+    </a>
+  );
+}
+
 export type TTNode = {
   type: string;
   content?: TTNode[];
@@ -34,7 +69,8 @@ export const hasText = (nodes: TTNode[]): boolean =>
 export function renderInline(
   nodes: TTNode[] | undefined,
   keyPrefix: string,
-  variant: "task" | "wiki" = "task"
+  variant: "task" | "wiki" = "task",
+  slug?: string
 ): ReactNode {
   if (!nodes) return null;
   return nodes.map((node, i) => {
@@ -64,6 +100,7 @@ export function renderInline(
       return <span key={`${keyPrefix}-t-${node.text ?? ""}`}>{el}</span>;
     }
     if (node.type === "hardBreak") return <br key={nodeKey} />;
+    if (node.type === "mention") return renderMention(node.attrs, nodeKey, slug, variant);
     if (node.type === "image") {
       // Inline images (e.g. `text ![alt](src)` inside a paragraph): render
       // only the allowlisted src — disallowed schemes become nothing, never
@@ -73,7 +110,7 @@ export function renderInline(
       const alt = typeof node.attrs?.alt === "string" ? node.attrs.alt : "";
       return <img key={`${nodeKey}-${src}`} src={src} alt={alt} loading="lazy" />;
     }
-    return renderNode(node, nodeKey, variant);
+    return renderNode(node, nodeKey, variant, slug);
   });
 }
 
@@ -82,22 +119,24 @@ export function renderInline(
 function renderBlocks(
   nodes: TTNode[] | undefined,
   keyPrefix: string,
-  variant: "task" | "wiki"
+  variant: "task" | "wiki",
+  slug?: string
 ): ReactNode {
-  return (nodes ?? []).map((node, i) => renderNode(node, `${keyPrefix}-b${i}`, variant));
+  return (nodes ?? []).map((node, i) => renderNode(node, `${keyPrefix}-b${i}`, variant, slug));
 }
 
 export function renderNode(
   node: TTNode,
   key: string,
-  variant: "task" | "wiki" = "task"
+  variant: "task" | "wiki" = "task",
+  slug?: string
 ): ReactNode {
   const isWiki = variant === "wiki";
   switch (node.type) {
     case "paragraph":
       return (
         <p key={key} className={isWiki ? undefined : "td-p"}>
-          {renderInline(node.content, key, variant)}
+          {renderInline(node.content, key, variant, slug)}
         </p>
       );
     case "heading": {
@@ -114,28 +153,28 @@ export function renderNode(
       const id = slugifyHeading(headingText);
       return (
         <Tag key={key} className={cls} id={id}>
-          {renderInline(node.content, key, variant)}
+          {renderInline(node.content, key, variant, slug)}
         </Tag>
       );
     }
     case "bulletList":
       return (
         <ul key={key} className={isWiki ? undefined : "td-ul"}>
-          {renderInline(node.content, key, variant)}
+          {renderInline(node.content, key, variant, slug)}
         </ul>
       );
     case "orderedList":
       return (
         <ol key={key} className={isWiki ? undefined : "td-ol"}>
-          {renderInline(node.content, key, variant)}
+          {renderInline(node.content, key, variant, slug)}
         </ol>
       );
     case "listItem":
-      return <li key={key}>{renderInline(node.content, key, variant)}</li>;
+      return <li key={key}>{renderInline(node.content, key, variant, slug)}</li>;
     case "taskList":
       return (
         <ul key={key} className="checklist">
-          {renderInline(node.content, key, variant)}
+          {renderInline(node.content, key, variant, slug)}
         </ul>
       );
     case "taskItem": {
@@ -143,7 +182,7 @@ export function renderNode(
       return (
         <li key={key} className={cn(checked && "checked")}>
           <span className={cn("checkbox", checked && "checked")} />
-          <span>{renderInline(node.content, key, variant)}</span>
+          <span>{renderInline(node.content, key, variant, slug)}</span>
         </li>
       );
     }
@@ -156,7 +195,7 @@ export function renderNode(
     case "blockquote":
       return (
         <blockquote key={key} className={isWiki ? undefined : "td-quote"}>
-          {renderInline(node.content, key, variant)}
+          {renderInline(node.content, key, variant, slug)}
         </blockquote>
       );
     case "horizontalRule":
@@ -165,17 +204,17 @@ export function renderNode(
       return (
         <div key={key} className={isWiki ? "table-wrap" : "td-table-wrap"}>
           <table className={isWiki ? undefined : "td-table"}>
-            {renderInline(node.content, key, variant)}
+            {renderInline(node.content, key, variant, slug)}
           </table>
         </div>
       );
     case "tableRow":
-      return <tr key={key}>{renderInline(node.content, key, variant)}</tr>;
+      return <tr key={key}>{renderInline(node.content, key, variant, slug)}</tr>;
     case "tableHeader": {
       const align = typeof node.attrs?.align === "string" ? (node.attrs.align as "left" | "center" | "right") : undefined;
       return (
         <th key={key} align={align}>
-          {renderBlocks(node.content, key, variant)}
+          {renderBlocks(node.content, key, variant, slug)}
         </th>
       );
     }
@@ -183,7 +222,7 @@ export function renderNode(
       const align = typeof node.attrs?.align === "string" ? (node.attrs.align as "left" | "center" | "right") : undefined;
       return (
         <td key={key} align={align}>
-          {renderBlocks(node.content, key, variant)}
+          {renderBlocks(node.content, key, variant, slug)}
         </td>
       );
     }
@@ -204,7 +243,7 @@ export function renderNode(
       );
     }
     default:
-      return node.content ? <div key={key}>{renderInline(node.content, key, variant)}</div> : null;
+      return node.content ? <div key={key}>{renderInline(node.content, key, variant, slug)}</div> : null;
   }
 }
 
@@ -249,7 +288,7 @@ export function extractHeadings(node: TTNode): HeadingOutline[] {
   return results;
 }
 
-export function renderDoc(doc: TipTapDoc, variant: "task" | "wiki" = "task"): ReactNode {
+export function renderDoc(doc: TipTapDoc, variant: "task" | "wiki" = "task", slug?: string): ReactNode {
   const nodes = doc.content as TTNode[];
   if (!hasText(nodes)) {
     return variant === "task" ? (
@@ -262,5 +301,5 @@ export function renderDoc(doc: TipTapDoc, variant: "task" | "wiki" = "task"): Re
     if (node.type === "heading") return hasText(node.content ?? []);
     return true;
   });
-  return visibleNodes.map((node, i) => renderNode(node, `n${i}`, variant));
+  return visibleNodes.map((node, i) => renderNode(node, `n${i}`, variant, slug));
 }

@@ -1,7 +1,9 @@
 import { useQuery, useMutation, useQueryClient, useInfiniteQuery } from "@tanstack/react-query";
 import { useMemo } from "react";
 import type { QueryClient, InfiniteData } from "@tanstack/react-query";
-import type { Task, Project, ProjectRepo, Board, Column, Swimlane, Milestone, TipTapDoc, WikiPageMeta, ApiKey, ApiKeyCreateResult, Dashboard, FieldConfig, DocumentSource, ForgeTask, TaskLink, Runtime, ForgeAgent, ForgeSkill, Machine, ActivityItem, ActivityEvent, Team, TeamMember, TeamMemberRole, SessionInfo, WorkspaceInvite, Attachment } from "../../shared/types";
+import type { Task, Project, ProjectRepo, Board, Column, Swimlane, Milestone, TipTapDoc, WikiPageMeta, ApiKey, ApiKeyCreateResult, Dashboard, FieldConfig, DocumentSource, ForgeTask, TaskLink, Runtime, LexaAgent, LexaSkill, Machine, ActivityItem, ActivityEvent, Team, TeamMember, TeamMemberRole, SessionInfo, WorkspaceInvite, Attachment } from "../../shared/types";
+import type { HeraldSettingsMasked, HeraldSettingsInput } from "../../shared/herald";
+import type { HeraldMemoryEntry } from "./api";
 import * as api from "./api";
 import * as auth from "./auth";
 import type { TaskMutationResult, ActivityPage, WikiShareLink } from "./api";
@@ -1548,19 +1550,19 @@ export function useForgeTaskHistory(
   });
 }
 
-// ── Forge agents & skills (global rule bundles) ──
+// ── Lexa Agents & Skills (global rule bundles, shared by both tiers) ──
 
-export function useForgeAgents() {
+export function useAgents() {
   return useQuery({
-    queryKey: ["forge-agents"],
+    queryKey: ["agents"],
     queryFn: () => api.listForgeAgents().then((r) => r.data),
     staleTime: 30_000,
   });
 }
 
-export function useForgeSkills() {
+export function useSkills() {
   return useQuery({
-    queryKey: ["forge-skills"],
+    queryKey: ["skills"],
     queryFn: () => api.listForgeSkills().then((r) => r.data),
     staleTime: 30_000,
   });
@@ -1572,7 +1574,7 @@ export function useCreateForgeAgent() {
   return useMutation({
     mutationFn: api.createForgeAgent,
     onSuccess: (agent) => {
-      qc.setQueryData<ForgeAgent[]>(["forge-agents"], (rows) => [...(rows ?? []), agent]);
+      qc.setQueryData<LexaAgent[]>(["agents"], (rows) => [...(rows ?? []), agent]);
       toast.push("success", `Agent '${agent.name}' created`);
     },
     onError: (err) => {
@@ -1587,7 +1589,7 @@ export function useUpdateForgeAgent() {
   return useMutation({
     mutationFn: ({ id, patch }: { id: string; patch: { name?: string; description?: string; instructions?: string } }) => api.updateForgeAgent(id, patch),
     onSuccess: (agent) => {
-      qc.setQueryData<ForgeAgent[]>(["forge-agents"], (rows) => rows?.map((r) => (r.id === agent.id ? agent : r)));
+      qc.setQueryData<LexaAgent[]>(["agents"], (rows) => rows?.map((r) => (r.id === agent.id ? agent : r)));
       toast.push("success", `Agent '${agent.name}' saved`);
     },
     onError: (err) => {
@@ -1602,7 +1604,7 @@ export function useDeleteForgeAgent() {
   return useMutation({
     mutationFn: (id: string) => api.deleteForgeAgent(id),
     onSuccess: (_v, id) => {
-      qc.setQueryData<ForgeAgent[]>(["forge-agents"], (rows) => rows?.filter((r) => r.id !== id));
+      qc.setQueryData<LexaAgent[]>(["agents"], (rows) => rows?.filter((r) => r.id !== id));
       toast.push("success", "Agent deleted");
     },
     onError: (err) => {
@@ -1617,7 +1619,7 @@ export function useReplaceAgentSkills() {
   return useMutation({
     mutationFn: ({ id, skillIds }: { id: string; skillIds: string[] }) => api.replaceAgentSkills(id, skillIds),
     onSuccess: (agent) => {
-      qc.setQueryData<ForgeAgent[]>(["forge-agents"], (rows) => rows?.map((r) => (r.id === agent.id ? agent : r)));
+      qc.setQueryData<LexaAgent[]>(["agents"], (rows) => rows?.map((r) => (r.id === agent.id ? agent : r)));
       toast.push("success", `Skills updated for '${agent.name}'`);
     },
     onError: (err) => {
@@ -1632,7 +1634,7 @@ export function useResetForgeAgent() {
   return useMutation({
     mutationFn: (id: string) => api.resetForgeAgent(id),
     onSuccess: (agent) => {
-      qc.setQueryData<ForgeAgent[]>(["forge-agents"], (rows) => rows?.map((r) => (r.id === agent.id ? agent : r)));
+      qc.setQueryData<LexaAgent[]>(["agents"], (rows) => rows?.map((r) => (r.id === agent.id ? agent : r)));
       toast.push("success", `Agent '${agent.name}' reset to default`);
     },
     onError: (err) => {
@@ -1647,7 +1649,7 @@ export function useCreateForgeSkill() {
   return useMutation({
     mutationFn: api.createForgeSkill,
     onSuccess: (skill) => {
-      qc.setQueryData<ForgeSkill[]>(["forge-skills"], (rows) => [...(rows ?? []), skill]);
+      qc.setQueryData<LexaSkill[]>(["skills"], (rows) => [...(rows ?? []), skill]);
       toast.push("success", `Skill '${skill.name}' created`);
     },
     onError: (err) => {
@@ -1662,7 +1664,7 @@ export function useUpdateForgeSkill() {
   return useMutation({
     mutationFn: ({ id, patch }: { id: string; patch: { name?: string; description?: string; instructions?: string } }) => api.updateForgeSkill(id, patch),
     onSuccess: (skill) => {
-      qc.setQueryData<ForgeSkill[]>(["forge-skills"], (rows) => rows?.map((r) => (r.id === skill.id ? skill : r)));
+      qc.setQueryData<LexaSkill[]>(["skills"], (rows) => rows?.map((r) => (r.id === skill.id ? skill : r)));
       toast.push("success", `Skill '${skill.name}' saved`);
     },
     onError: (err) => {
@@ -1677,7 +1679,7 @@ export function useDeleteForgeSkill() {
   return useMutation({
     mutationFn: (id: string) => api.deleteForgeSkill(id),
     onSuccess: (_v, id) => {
-      qc.setQueryData<ForgeSkill[]>(["forge-skills"], (rows) => rows?.filter((r) => r.id !== id));
+      qc.setQueryData<LexaSkill[]>(["skills"], (rows) => rows?.filter((r) => r.id !== id));
       toast.push("success", "Skill deleted");
     },
     onError: (err) => {
@@ -1692,7 +1694,7 @@ export function useResetForgeSkill() {
   return useMutation({
     mutationFn: (id: string) => api.resetForgeSkill(id),
     onSuccess: (skill) => {
-      qc.setQueryData<ForgeSkill[]>(["forge-skills"], (rows) => rows?.map((r) => (r.id === skill.id ? skill : r)));
+      qc.setQueryData<LexaSkill[]>(["skills"], (rows) => rows?.map((r) => (r.id === skill.id ? skill : r)));
       toast.push("success", `Skill '${skill.name}' reset to default`);
     },
     onError: (err) => {
@@ -2015,6 +2017,205 @@ export function useDeleteAttachment(slug: string, documentType: "task" | "wiki",
     },
     onError: (err) => {
       toast.push("error", "Failed to delete attachment", toastMessage(err));
+    },
+  });
+}
+
+// ── Herald (server-side assistant tier) ──
+
+// Masked provider settings for a project. A missing row is the "not
+// configured" state, not an error — surfaced as null so surfaces can swap
+// in their empty state (PROVIDER_NOT_CONFIGURED).
+// ── Herald chat history (multi-thread) ──
+
+export function useHeraldChatList(projectId: string | undefined, q?: string) {
+  const query = q && q.trim() ? q.trim() : undefined;
+  return useQuery({
+    queryKey: ["herald-chats", projectId, query ?? null],
+    queryFn: () => api.listHeraldChats(projectId!, query).then((r) => r.data),
+    enabled: !!projectId,
+  });
+}
+
+function sortThreads(threads: api.HeraldChatThreadSummary[]): api.HeraldChatThreadSummary[] {
+  return [...threads].sort((a, b) => {
+    if (a.pinned !== b.pinned) return a.pinned ? -1 : 1;
+    return b.updatedAt.localeCompare(a.updatedAt);
+  });
+}
+
+// PATCH /herald/chat/:chatId ({title?, pinned?}). The response body is not
+// part of the pinned contract, so the cache is patched from the request
+// args (deterministic — the caller knows what it sent). A pin toggle also
+// re-sorts locally (pinned-first then updatedAt DESC, the server's list
+// ordering) so no refetch is needed.
+export function useUpdateHeraldChatMeta(projectId: string | undefined) {
+  const qc = useQueryClient();
+  const toast = useToast();
+  return useMutation({
+    mutationFn: ({ chatId, ...patch }: { chatId: string; title?: string; pinned?: boolean }) =>
+      api.updateHeraldChatMeta(chatId, patch),
+    onSuccess: (_result, { chatId, title, pinned }) => {
+      qc.setQueriesData<api.HeraldChatThreadSummary[]>({ queryKey: ["herald-chats", projectId] }, (old) => {
+        if (!old?.some((t) => t.chatId === chatId)) return old;
+        return sortThreads(
+          old.map((t) =>
+            t.chatId === chatId
+              ? { ...t, ...(title !== undefined ? { title } : {}), ...(pinned !== undefined ? { pinned } : {}) }
+              : t
+          )
+        );
+      });
+    },
+    onError: (err) => toast.push("error", "Update failed", toastMessage(err)),
+  });
+}
+
+export function useRenameHeraldChat(projectId: string | undefined) {
+  const meta = useUpdateHeraldChatMeta(projectId);
+  const toast = useToast();
+  return useMutation({
+    mutationFn: ({ chatId, title }: { chatId: string; title: string }) =>
+      meta.mutateAsync({ chatId, title }),
+    onError: (err) => toast.push("error", "Rename failed", toastMessage(err)),
+  });
+}
+
+export function useDeleteHeraldChat(projectId: string | undefined) {
+  const qc = useQueryClient();
+  const toast = useToast();
+  return useMutation({
+    mutationFn: ({ chatId }: { chatId: string }) => api.resetHeraldChat(chatId),
+    onSuccess: (_, { chatId }) => {
+      // 204 — drop the row from every cached list variant and evict the
+      // transcript entry (cache hygiene for a deleted entity, not a refetch).
+      qc.setQueriesData<api.HeraldChatThreadSummary[]>({ queryKey: ["herald-chats", projectId] }, (old) =>
+        (old ?? []).filter((t) => t.chatId !== chatId)
+      );
+      qc.removeQueries({ queryKey: ["herald-chat", chatId] });
+    },
+    onError: (err) => toast.push("error", "Delete failed", toastMessage(err)),
+  });
+}
+
+export function useHeraldSettings(projectId: string | undefined) {  return useQuery({
+    queryKey: ["herald-settings", projectId],
+    queryFn: async () => {
+      try {
+        return await api.getHeraldSettings(projectId!);
+      } catch (err) {
+        if ((err as { code?: string }).code === "PROVIDER_NOT_CONFIGURED") return null;
+        throw err;
+      }
+    },
+    enabled: !!projectId,
+    staleTime: 30_000,
+  });
+}
+
+// PUT returns the fresh masked view — cache it directly (invariant 6).
+export function useSaveHeraldSettings(projectId: string) {
+  const qc = useQueryClient();
+  const toast = useToast();
+  return useMutation({
+    mutationFn: (input: HeraldSettingsInput) => api.putHeraldSettings(projectId, input),
+    onSuccess: (masked) => {
+      qc.setQueryData<HeraldSettingsMasked | null>(["herald-settings", projectId], masked);
+      toast.push("success", "Herald provider saved");
+    },
+    onError: (err) => {
+      toast.push("error", "Failed to save Herald provider", toastMessage(err));
+    },
+  });
+}
+
+// Test + models-list consume UNSAVED form values and persist nothing — no
+// cache writes, results render inline.
+export function useTestHeraldSettings(projectId: string) {
+  const toast = useToast();
+  return useMutation({
+    mutationFn: (input: HeraldSettingsInput) => api.testHeraldSettings(projectId, input),
+    onError: (err) => {
+      if (!toastMessage(err).includes("PROVIDER_")) {
+        toast.push("error", "Test connection failed", toastMessage(err));
+      }
+    },
+  });
+}
+
+export function useFetchHeraldModels(projectId: string) {
+  return useMutation({
+    mutationFn: (input: HeraldSettingsInput) => api.listHeraldModels(projectId, input),
+  });
+}
+
+export function useCreateHeraldTask() {
+  const qc = useQueryClient();
+  const toast = useToast();
+  return useMutation({
+    mutationFn: api.createHeraldTask,
+    onSuccess: (task) => {
+      const projects = qc.getQueryData<Project[]>(["projects"]);
+      const project = projects?.find((p) => p.id === task.projectId);
+      qc.setQueryData<RecentForgeTask[]>(["forge-recent-tasks"], (rows) => [
+        { ...task, projectName: project?.name ?? "" },
+        ...(rows ?? []),
+      ]);
+    },
+    onError: (err) => {
+      toast.push("error", "Herald unavailable", toastMessage(err));
+    },
+  });
+}
+
+export function useCancelHeraldTask() {
+  const toast = useToast();
+  return useMutation({
+    mutationFn: (id: string) => api.cancelHeraldTask(id),
+    onSuccess: () => {
+      toast.push("success", "Herald run stopped");
+    },
+    onError: (err) => {
+      toast.push("error", "Failed to stop Herald run", toastMessage(err));
+    },
+  });
+}
+
+export function useHeraldMemory(projectId: string | undefined) {
+  return useQuery({
+    queryKey: ["herald-memory", projectId],
+    queryFn: () => api.listHeraldMemory(projectId!).then((r) => r.data),
+    enabled: !!projectId,
+  });
+}
+
+export function useAddHeraldMemory(projectId: string) {
+  const qc = useQueryClient();
+  const toast = useToast();
+  return useMutation({
+    mutationFn: (content: string) => api.addHeraldMemory(projectId, content),
+    onSuccess: (entry) => {
+      // Newest-first display order matches the wireframe rows.
+      qc.setQueryData<HeraldMemoryEntry[]>(["herald-memory", projectId], (rows) => [entry, ...(rows ?? [])]);
+      toast.push("success", "Memory added");
+    },
+    onError: (err) => {
+      toast.push("error", "Failed to add memory", toastMessage(err));
+    },
+  });
+}
+
+export function useRemoveHeraldMemory(projectId: string) {
+  const qc = useQueryClient();
+  const toast = useToast();
+  return useMutation({
+    mutationFn: (memoryId: string) => api.removeHeraldMemory(projectId, memoryId),
+    onSuccess: (_, memoryId) => {
+      qc.setQueryData<HeraldMemoryEntry[]>(["herald-memory", projectId], (rows) => (rows ?? []).filter((m) => m.id !== memoryId));
+      toast.push("success", "Memory deleted");
+    },
+    onError: (err) => {
+      toast.push("error", "Failed to delete memory", toastMessage(err));
     },
   });
 }

@@ -64,6 +64,13 @@ export class InvalidRateLimit extends Data.TaggedError("InvalidRateLimit")<{ rea
 export class InvalidGithubSettings extends Data.TaggedError("InvalidGithubSettings")<{ reason: string }> {}
 export class NoUserContext extends Data.TaggedError("NoUserContext")<{}> {}
 export class ForgeSessionActive extends Data.TaggedError("ForgeSessionActive")<{}> {}
+export class ProviderNotConfigured extends Data.TaggedError("ProviderNotConfigured")<{ projectId: string }> {}
+export class ProviderAuthFailed extends Data.TaggedError("ProviderAuthFailed")<{ message?: string }> {}
+export class ProviderUnreachable extends Data.TaggedError("ProviderUnreachable")<{ message?: string }> {}
+export class HeraldGenerationFailed extends Data.TaggedError("HeraldGenerationFailed")<{ message: string }> {}
+export class HeraldToolBudgetExceeded extends Data.TaggedError("HeraldToolBudgetExceeded")<{ rounds: number }> {}
+export class HeraldTaskActive extends Data.TaggedError("HeraldTaskActive")<{}> {}
+export class HeraldThreadNotFound extends Data.TaggedError("HeraldThreadNotFound")<{ documentType: string; documentId: string }> {}
 export { ProjectAccessDenied } from "../services/user-project-role.service";
 
 export const errorCodeMap: Record<string, string> = {
@@ -127,6 +134,14 @@ export const errorCodeMap: Record<string, string> = {
   SetupLocked: "SETUP_LOCKED",
   SearchError: "SEARCH_ERROR",
   ForgeSessionActive: "FORGE_SESSION_ACTIVE",
+  ProviderNotConfigured: "PROVIDER_NOT_CONFIGURED",
+  ProviderAuthFailed: "PROVIDER_AUTH_FAILED",
+  ProviderUnreachable: "PROVIDER_UNREACHABLE",
+  HeraldGenerationFailed: "HERALD_GENERATION_FAILED",
+  HeraldToolBudgetExceeded: "HERALD_TOOL_BUDGET_EXCEEDED",
+  HeraldTaskActive: "HERALD_TASK_ACTIVE",
+  HeraldThreadNotFound: "HERALD_THREAD_NOT_FOUND",
+  RowNotFound: "NOT_FOUND",
   ConstraintViolation: "CONSTRAINT",
   DbError: "DATABASE_ERROR",
   TeamNotFound: "TEAM_NOT_FOUND",
@@ -181,6 +196,8 @@ export function errorToStatus(error: { _tag: string }): number {
     case "InviteNotFound":
     case "WorkspaceUserNotFound":
     case "SessionNotFound":
+    case "HeraldThreadNotFound":
+    case "RowNotFound":
       return 404;
     case "WipLimitExceeded":
     case "DeadlineAfterLane":
@@ -195,6 +212,8 @@ export function errorToStatus(error: { _tag: string }): number {
     case "TaskLinkCycle":
     case "ForgeEntityInUse":
     case "ForgeSessionActive":
+    case "ProviderNotConfigured":
+    case "HeraldTaskActive":
     case "ConstraintViolation":
     case "MachineIdTaken":
     case "TeamHasProjects":
@@ -223,6 +242,10 @@ export function errorToStatus(error: { _tag: string }): number {
       return 400;
     case "GithubApiError":
     case "SourceFetchError":
+    case "ProviderAuthFailed":
+    case "ProviderUnreachable":
+    case "HeraldGenerationFailed":
+    case "HeraldToolBudgetExceeded":
       return 502;
     case "DbError":
       return 500;
@@ -342,6 +365,22 @@ export function errorMessage(error: { _tag: string } & Record<string, unknown>):
       return String(error.reason ?? "Invalid GitHub settings");
     case "NoUserContext":
       return "No user context — this endpoint needs a session or a key bound to a user";
+    case "ProviderNotConfigured":
+      return `Herald provider is not configured for this project — set it up in Settings`;
+    case "ProviderAuthFailed":
+      return typeof error.message === "string" && error.message ? error.message : "The AI provider rejected the API key";
+    case "ProviderUnreachable":
+      return typeof error.message === "string" && error.message ? error.message : "The AI provider could not be reached";
+    case "HeraldGenerationFailed":
+      return String(error.message ?? "Herald generation failed");
+    case "HeraldToolBudgetExceeded":
+      return `Herald exceeded its tool budget (${error.rounds} rounds)`;
+    case "HeraldTaskActive":
+      return `A Herald task is still running for this document — reset once it finishes`;
+    case "HeraldThreadNotFound":
+      return `No Herald thread exists for ${error.documentType} '${error.documentId}'`;
+    case "RowNotFound":
+      return "Resource not found";
     case "CannotDeleteSelf":
       return "Cannot modify your own account";
     case "ApiKeyNameEmpty":

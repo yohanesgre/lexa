@@ -9,7 +9,7 @@ import type { Board, Task, Project, Swimlane, Column, FieldConfig } from "../../
 import {
   useProjects, useDashboard, useBoard, useTasks, useFieldConfig, useWikiPages, useWikiPage,
   useSearchWikiPages, useRevisions, useColumns, useSwimlanes, useApiKeys, useUsers,
-  useProjectMembers, useRuntimes, useMachines, useForgeAgents, useForgeSkills,
+  useProjectMembers, useRuntimes, useMachines, useAgents, useSkills,
   useRecentForgeTasks, useForgeTaskHistory, useSources, useTaskLinks, useTaskSearch,
   useTaskActivity, useForgeTask, useForgeTaskLogs, useRecentForgeTask,
   useRateLimit, useGithubSettings,
@@ -183,13 +183,13 @@ describe("query hooks — keys + URLs", () => {
     routes.set("GET /api/projects/demo/members", { data: [] });
     routes.set("GET /api/forge/runtimes", { data: [] });
     routes.set("GET /api/forge/machines", { data: [] });
-    routes.set("GET /api/forge/agents", { data: [] });
-    routes.set("GET /api/forge/skills", { data: [] });
+    routes.set("GET /api/agents", { data: [] });
+    routes.set("GET /api/skills", { data: [] });
     routes.set("GET /api/forge/tasks/recent", { data: [] });
     routes.set("GET /api/forge/tasks/history", { data: [], nextCursor: null, summary: { queued: 0, running: 0, completed: 0, failed: 0, cancelled: 0 } });
     const hooks: Array<() => unknown> = [
       () => useApiKeys(), () => useUsers(), () => useProjectMembers("demo"), () => useRuntimes(),
-      () => useMachines(), () => useForgeAgents(), () => useForgeSkills(), () => useRecentForgeTasks(),
+      () => useMachines(), () => useAgents(), () => useSkills(), () => useRecentForgeTasks(),
       () => useForgeTaskHistory({}, null), () => useRateLimit(), () => useGithubSettings(),
     ];
     for (const hook of hooks) {

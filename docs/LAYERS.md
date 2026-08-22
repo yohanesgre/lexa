@@ -725,6 +725,29 @@ reference a milestone in the same project (`MilestoneNotFound` 404),
 created as kind `'sprint'`; the Backlog stays `'backlog'` (system-seeded,
 one per project).
 
+### MentionService — @-autocomplete search (read-only cross-repo lookup)
+
+```typescript
+export class MentionService extends Effect.Service<MentionService>()("Lexa/Mention", {
+  dependencies: [TaskRepo.Default, WikiRepo.Default],
+  effect: Effect.gen(function* () {
+    // search(projectId, q) → { tasks: [{id, key, title}], wikiPages: [{id, slug, title}] }
+    //   (DbError only). Case-insensitive substring on task key + title
+    //   (archived excluded — task-link search precedent) and wiki title +
+    //   slug. MENTION_RESULTS_CAP = 8: tasks first, wiki fills the
+    //   remainder. Empty q → empty arrays (no unbounded listing).
+  }),
+}) {}
+```
+
+**Deliberately NOT folded into HeraldService:** this is a plain project-scoped
+read with no provider/thread coupling; folding it in would give MentionService
+transitive provider deps for zero benefit. Chat-side @-token resolution is
+herald-domain logic and lives in HeraldService's chat branch instead. The
+service adds zero TaggedErrors — the only failure surface is `DbError`, and
+access control happens at the route (`PROJECT_ACCESS_DENIED` 404), matching
+every other project-scoped read.
+
 ## HTTP layer — @effect/platform HttpApi
 
 Tagged errors map declaratively to statuses — no hand-rolled per-route mapping to drift from the catalog:
@@ -763,6 +786,84 @@ On `POST /api/forge/daemon/claim` the handler assembles the claim: task, runtime
 - **Sources:** the project's `project_repos` rows with `source_role = 1` → repo values ("owner/repo"), capped at the `forge_repo_cap` setting (env bootstrap `LXK_FORGE_REPO_CAP`, default 3), only when `documentType === "task"`. Task-linked issue repos no longer feed context.
 - **Pipeline (per repo):** `GitHubClient.getDefaultBranch` → `getRepoFileTree(recursive=1)` → pure `selectRepoFiles` (`server/github/repo-content.ts`: skips node_modules/.git/dist/build/vendor/.next/coverage/target/.venv dirs, lockfiles, `*.min.js`/`*.min.css`/`*.map`, true binaries — svg stays; caps 50 files / 256 KB per file / 512 KB total, respecting tree sizes without fetching) → `getRepoFileContent` (per-segment URL-encoded path, base64 → UTF-8). Content truncated to 256 KB per file at assembly; total byte cap enforced across repos.
 - **Never fails the claim:** every failure (unconfigured app, missing repo, network, per-file) is caught per repo/file, logged `WARN`, and skipped — `repoContent` ends up `[]` and the claim still returns 200. The prompt's repo-content line is added only when `repoContent` is non-empty (`buildPromptForTask(task, hasRepoContent)`).
+
+### Lexa/Herald — assistant tier (server-side TanStack AI)
+
+```typescript
+export class HeraldService extends Effect.Service<HeraldService>()("Lexa/Herald", {
+  dependencies: [ForgeRepo.Default, HeraldSettingsRepo.Default, HeraldThreadRepo.Default,
+                 ProjectMemoryRepo.Default, ForgeService.Default, Storage.Default,
+                 TaskRepo.Default, WikiRepo.Default, ProjectReposRepo.Default],
+  effect: Effect.gen(function* () {
+    return {
+      // enqueue: guard provider configured (ProviderNotConfigured), validate
+      //   agent/skill/document/attachments, then forgeRepo.createTask with
+      //   kind='herald' (queued). Runtime-online guard deliberately skipped.
+      // runStream(taskId) → ReadableStream<StreamFrame>: claimHeraldTask
+      //   (conditional UPDATE queued→running, kind-scoped), assemble prompt,
+      //   stream chat(), persist at terminal points.
+      // runChatStream(chatId, userId, req): same engine, no queue row; one
+      //   thread per (project, user); second concurrent stream → HeraldTaskActive.
+      // resetThread / testConnection / abortStream / abortChat.
+    };
+  }),
+}) {}
+```
+
+- **Provider seam:** `@tanstack/ai` is imported in exactly one file —
+  `server/herald/provider.ts` (adapters `openai_compatible` |
+  `anthropic_compatible`, both custom-`baseURL`-capable; `streamChat`,
+  `completeText`, `listModels`, `testConnection`, `translateRunError`).
+  Routes and services never import the SDK; an upgrade touches two files.
+  Pinned exact (`0.47.x`, no caret).
+- **Prompt assembly** (`server/herald/prompt.ts`, cache-friendly order):
+  `systemPrompts[0]` identity + markdown contract + `project_memory` block
+  (Anthropic `cache_control` breakpoint), `[1]` agent+skill markdown
+  (breakpoint), `[2]` prefetched repo content + document context; user
+  message carries the instruction (+ rolling-summary segment when present).
+  Object form `{content, metadata}` carries `cache_control`.
+- **Tools** (`server/herald/tools.ts`) are declared with
+  `toolDefinition().server(fn)` — v1 reads only: `web_search` (Exa),
+  SSRF-guarded `fetch_url` (allowlist-enforced, PDF-capable),
+  `read_s3_file` via `Lexa/Storage`, PM reads (`get_task` accepts the
+  `PREFIX-n` alias, `search_tasks`). Write tools deferred until approval UX
+  exists. Round cap `MAX_TOOL_ROUNDS=4` → `HeraldToolBudgetExceeded`.
+- **SSE bridge** (`sseHttpResponse` in `server/api/http.ts`): encodes
+  StreamFrames as `event:`/`data:` pairs over a raw `HttpServerResponse.stream`
+  (bypasses the JSON encoder) with a 15s `: ping` heartbeat comment. Exactly
+  one terminal frame (`error`|`done`). Disconnect→abort: the request signal
+  is wired into the service's `Map<taskId|chatId, AbortController>`; abort
+  discards the partial message and cancels/fails via `ForgeService`.
+- **RUN_ERROR translation:** a `RUN_ERROR` chunk inside the stream is thrown
+  through `translateRunError` — recognizable upstream failures map to catalog
+  codes (`PROVIDER_AUTH_FAILED`, `PROVIDER_UNREACHABLE`), everything else to
+  `HERALD_GENERATION_FAILED`; the frame carries the mapped code, the task is
+  failed via `ForgeService.fail`. Upstream bodies never echoed raw.
+- **Thread persistence floor:** `herald_threads` rows are read/written only
+  through `HeraldThreadRepo.loadThread(doc)` / `saveThread(doc, patch)` —
+  called directly at the terminal points (post-`done` persist, enqueue-time
+  attachment pre-save, reset). A future D1 swap touches the repo only.
+  Continue-vs-fresh: same doc + same agentId+skillId + existing row →
+  continue; anything else → fresh overwrite. Model/provider changes never
+  reset a thread.
+- **No new services for chat upgrades:** edit/regenerate/retry
+  (`truncateChatFrom`), pinning/list metadata (`updateChatMeta`, `listChats`)
+  and citation collection stay INSIDE `HeraldService` +
+  `HeraldThreadRepo` — no new Effect services/layers. Citations ride the
+  existing tool deps (`HeraldToolDeps.onCitation` callback) and are persisted
+  inline in the transcript JSON; there is no citations table.
+- **Rolling summary:** after `done`, if messages >40 entries or >64KB text
+  bytes → summarize all-but-last-8 into `summary` (cheap completion call),
+  truncate the window to the last 8. Summary failure logs and skips — retried
+  next turn, never blocks `done`.
+- **Chat mention resolution:** the composer sends plain `@token` strings; the
+  server scans them at send (`scanMentionTokens`) and resolves each to a task
+  (key or `PREFIX-n` alias) or wiki page in the sender's project — on
+  ambiguity the task-key reading wins. Caps (`MENTION_CAPS`: ≤5 resolved
+  mentions per message, ≤4000 chars per document, ≤20000 total) are enforced
+  by silent truncation, never errors. Resolved context rides an ephemeral
+  system-prompt segment — never persisted to the thread, so transcripts stay
+  byte-stable across turns.
 
 ### API middleware
 
@@ -856,6 +957,13 @@ All list endpoints: `?limit` (default 50, max 200) + cursor (opaque: `"<columnId
 | `PayloadTooLarge` | 413 | upload exceeds `LXK_MAX_UPLOAD_MB` (default 25) — route-level cap; the global body cap stays `BODY_TOO_LARGE` |
 | `AttachmentDeleteForbidden` | 403 | delete without uploader/admin authority |
 | `ShareLinkNotFound` | 404 | wiki share link resolve/revoke: unknown, expired, and revoked all fail identically (no existence oracle) |
+| `ProviderNotConfigured` | 409 | Herald generate/test/chat without saved provider settings for the project |
+| `ProviderAuthFailed` | 502 | upstream 401/403 (provider or Exa) |
+| `ProviderUnreachable` | 502 | provider network/timeout/DNS failure |
+| `HeraldGenerationFailed` | 502 | RUN_ERROR catch-all, malformed stream |
+| `HeraldToolBudgetExceeded` | 502 | tool round cap hit (`MAX_TOOL_ROUNDS=4`) |
+| `HeraldTaskActive` | 409 | thread reset or second chat stream while a Herald stream is running |
+| `HeraldThreadNotFound` | 404 | missing thread row (`herald_threads`) |
 
 Note: `RowNotFound` (server/db/database.ts) is a repo-level error with no
 `errorCodeMap` entry — if it ever reaches the HTTP error encoder it falls to
@@ -869,6 +977,7 @@ Defined in the error map but never raised by any REST handler — do not match o
 TaskService        → TaskRepo, ColumnRepo, SwimlaneRepo, ProjectRepo, FieldConfigRepo, ActivityService
 FieldConfigService → FieldConfigRepo, ProjectRepo
 ForgeService       → ForgeRepo, ForgeSessionRepo, SourceRepo, SourceService, TaskRepo, WikiRepo, ProjectRepo, ActivityService
+HeraldService      → ForgeRepo, HeraldSettingsRepo, HeraldThreadRepo, ProjectMemoryRepo, ForgeService, Storage, TaskRepo, WikiRepo, ProjectReposRepo
 SourceService      → SourceRepo, ProjectRepo, WikiRepo, ActivityService
 TaskLinkService    → TaskLinkRepo, TaskRepo, ProjectRepo, ActivityService
 WikiService        → WikiRepo, ProjectRepo

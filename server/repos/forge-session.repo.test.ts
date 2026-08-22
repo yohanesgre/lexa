@@ -33,8 +33,8 @@ function seed(db: Database) {
     INSERT INTO projects (id, name, slug) VALUES ('p1', 'P', 'p1');
     INSERT INTO columns (id, project_id, name, position) VALUES ('c1', 'p1', 'Todo', 0);
     INSERT INTO swimlanes (id, project_id, name, position, kind) VALUES ('s1', 'p1', 'Main', 0, 'backlog');
-    INSERT INTO forge_agents (id, name, description, instructions, is_builtin) VALUES ('a1', 'A', '', '', 0);
-    INSERT INTO forge_skills (id, name, description, instructions, is_builtin) VALUES ('sk1', 'S', '', '', 0);
+    INSERT INTO lexa_agents (id, name, description, instructions, is_builtin) VALUES ('a1', 'A', '', '', 0);
+    INSERT INTO lexa_skills (id, name, description, instructions, is_builtin) VALUES ('sk1', 'S', '', '', 0);
   `);
 }
 

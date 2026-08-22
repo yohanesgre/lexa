@@ -18,6 +18,7 @@ import Placeholder from "@tiptap/extension-placeholder";
 import type { WikiPage, TipTapDoc } from "../../../shared/types";
 import { useUpdateWikiPage, useRestoreWikiRevision } from "../../lib/queries";
 import { useAttachmentEmbeds } from "../../lib/useAttachmentEmbeds";
+import { createMentionExtension } from "../../lib/mention-suggestion";
 import * as api from "../../lib/api";
 
 const emptyDoc: TipTapDoc = { type: "doc", content: [] };
@@ -138,6 +139,8 @@ export function useWikiEditor({ slug, page }: { slug: string; page: WikiPage }) 
       TableHeader,
       TableCell,
       Placeholder.configure({ placeholder: "Start writing..." }),
+      // Per-editor mention plugin (project-scoped "@" autocomplete).
+      createMentionExtension({ slug }),
     ],
     content: (page.content ?? emptyDoc) as unknown as JSONContent,
     editable: isEditing,

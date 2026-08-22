@@ -54,7 +54,7 @@ export function TaskDescriptionSection({ isCreate, slug, task, emptyDoc, taskTit
       />
     ) : (
       <div className="td-prose" onDoubleClick={() => setEditingDescription(true)}>
-        {renderDoc(task!.description, "task")}
+        {renderDoc(task!.description, "task", slug)}
       </div>
     )}
 

@@ -12,7 +12,7 @@ import { ProjectNotFound, TaskNotFound, WikiPageNotFound, ForgeTaskNotFound, NoR
 import { docToMarkdown } from "../../shared/markdown";
 import * as msg from "../activity-messages";
 import { rowToForgeSession, RuntimeWithTeam } from "../../shared/db";
-import type { ForgeTask, ForgeTaskLog, DocumentSource, TipTapDoc, ForgeAgent, ForgeSkill, ForgeSession, ActivityType, ForgeProvider } from "../../shared/types";
+import type { ForgeTask, ForgeTaskLog, DocumentSource, TipTapDoc, LexaAgent, LexaSkill, ForgeSession, ActivityType, ForgeProvider } from "../../shared/types";
 
 // Builtin seed defaults — mirrors migrations/0001_init.sql (fresh installs) and
 // migrations/0004_forge_pm_skills.sql (existing DBs).
@@ -131,8 +131,8 @@ export class ForgeService extends Effect.Service<ForgeService>()("Lexa/ForgeServ
 
     const buildPrompt = (
       task: ForgeTask,
-      agent: ForgeAgent,
-      skill: ForgeSkill,
+      agent: LexaAgent,
+      skill: LexaSkill,
       docContext: string,
       sourcesContent: string,
       hasRepoContent: boolean
@@ -172,7 +172,7 @@ export class ForgeService extends Effect.Service<ForgeService>()("Lexa/ForgeServ
 
     const resolveRulesImpl = (
       task: ForgeTask
-    ): Effect.Effect<{ agent: ForgeAgent; skill: ForgeSkill }, AgentNotFound | SkillNotFound | DbError> =>
+    ): Effect.Effect<{ agent: LexaAgent; skill: LexaSkill }, AgentNotFound | SkillNotFound | DbError> =>
       Effect.gen(function* () {
         const agent = yield* repo.findAgentById(task.agentId).pipe(
           Effect.catchTag("RowNotFound", () => new AgentNotFound({ id: task.agentId }))
@@ -185,12 +185,12 @@ export class ForgeService extends Effect.Service<ForgeService>()("Lexa/ForgeServ
 
     return {
       // ── Agents ──
-      listAgents: (): Effect.Effect<ForgeAgent[], DbError> => repo.listAgents(),
+      listAgents: (): Effect.Effect<LexaAgent[], DbError> => repo.listAgents(),
 
-      createAgent: (input: { name: string; description: string; instructions: string }): Effect.Effect<ForgeAgent, ConstraintViolation | DbError> =>
+      createAgent: (input: { name: string; description: string; instructions: string }): Effect.Effect<LexaAgent, ConstraintViolation | DbError> =>
         repo.createAgent({ ...input, id: crypto.randomUUID() }),
 
-      updateAgent: (id: string, patch: { name?: string; description?: string; instructions?: string }): Effect.Effect<ForgeAgent, AgentNotFound | ConstraintViolation | DbError> =>
+      updateAgent: (id: string, patch: { name?: string; description?: string; instructions?: string }): Effect.Effect<LexaAgent, AgentNotFound | ConstraintViolation | DbError> =>
         repo.updateAgent(id, patch).pipe(Effect.catchTag("RowNotFound", () => new AgentNotFound({ id }))),
 
       deleteAgent: (id: string): Effect.Effect<void, AgentNotFound | ForgeBuiltinDelete | ForgeEntityInUse | ConstraintViolation | DbError> =>
@@ -208,7 +208,7 @@ export class ForgeService extends Effect.Service<ForgeService>()("Lexa/ForgeServ
           );
         }),
 
-      replaceAgentSkills: (agentId: string, skillIds: string[]): Effect.Effect<ForgeAgent, AgentNotFound | SkillNotFound | ConstraintViolation | DbError> =>
+      replaceAgentSkills: (agentId: string, skillIds: string[]): Effect.Effect<LexaAgent, AgentNotFound | SkillNotFound | ConstraintViolation | DbError> =>
         Effect.gen(function* () {
           yield* repo.findAgentById(agentId).pipe(Effect.catchTag("RowNotFound", () => new AgentNotFound({ id: agentId })));
           const skills = yield* repo.listSkills();
@@ -223,7 +223,7 @@ export class ForgeService extends Effect.Service<ForgeService>()("Lexa/ForgeServ
         }),
 
       // Builtin-only: restore the seeded instructions + the full builtin skill set.
-      resetAgentToDefault: (id: string): Effect.Effect<ForgeAgent, AgentNotFound | ForgeBuiltinDelete | ConstraintViolation | DbError> =>
+      resetAgentToDefault: (id: string): Effect.Effect<LexaAgent, AgentNotFound | ForgeBuiltinDelete | ConstraintViolation | DbError> =>
         Effect.gen(function* () {
           const agent = yield* repo.findAgentById(id).pipe(Effect.catchTag("RowNotFound", () => new AgentNotFound({ id })));
           if (!agent.isBuiltin || agent.id !== DEFAULT_AGENT.id) {
@@ -241,12 +241,12 @@ export class ForgeService extends Effect.Service<ForgeService>()("Lexa/ForgeServ
           );
         }),
       // ── Skills ──
-      listSkills: (): Effect.Effect<ForgeSkill[], DbError> => repo.listSkills(),
+      listSkills: (): Effect.Effect<LexaSkill[], DbError> => repo.listSkills(),
 
-      createSkill: (input: { name: string; description: string; instructions: string }): Effect.Effect<ForgeSkill, ConstraintViolation | DbError> =>
+      createSkill: (input: { name: string; description: string; instructions: string }): Effect.Effect<LexaSkill, ConstraintViolation | DbError> =>
         repo.createSkill({ ...input, id: crypto.randomUUID() }),
 
-      updateSkill: (id: string, patch: { name?: string; description?: string; instructions?: string }): Effect.Effect<ForgeSkill, SkillNotFound | ConstraintViolation | DbError> =>
+      updateSkill: (id: string, patch: { name?: string; description?: string; instructions?: string }): Effect.Effect<LexaSkill, SkillNotFound | ConstraintViolation | DbError> =>
         repo.updateSkill(id, patch).pipe(Effect.catchTag("RowNotFound", () => new SkillNotFound({ id }))),
 
       deleteSkill: (id: string): Effect.Effect<void, SkillNotFound | ForgeBuiltinDelete | ForgeEntityInUse | ConstraintViolation | DbError> =>
@@ -264,7 +264,7 @@ export class ForgeService extends Effect.Service<ForgeService>()("Lexa/ForgeServ
           );
         }),
 
-      resetSkillToDefault: (id: string): Effect.Effect<ForgeSkill, SkillNotFound | ForgeBuiltinDelete | ConstraintViolation | DbError> =>
+      resetSkillToDefault: (id: string): Effect.Effect<LexaSkill, SkillNotFound | ForgeBuiltinDelete | ConstraintViolation | DbError> =>
         Effect.gen(function* () {
           const skill = yield* repo.findSkillById(id).pipe(Effect.catchTag("RowNotFound", () => new SkillNotFound({ id })));
           const instructions = DEFAULT_SKILLS[skill.id];
@@ -413,7 +413,7 @@ export class ForgeService extends Effect.Service<ForgeService>()("Lexa/ForgeServ
 
       // Resolve the task's agent + skill rows (claim-time rule delivery —
       // the daemon writes these as files, never via the prompt).
-      resolveRules: (task: ForgeTask): Effect.Effect<{ agent: ForgeAgent; skill: ForgeSkill }, AgentNotFound | SkillNotFound | DbError> =>
+      resolveRules: (task: ForgeTask): Effect.Effect<{ agent: LexaAgent; skill: LexaSkill }, AgentNotFound | SkillNotFound | DbError> =>
         resolveRulesImpl(task),
 
       // Build the full prompt (with resolved sources) for the daemon.

@@ -73,8 +73,8 @@ INSERT INTO tasks (id, project_id, column_id, swimlane_id, title, position, crea
   ('ta', 'p-a', 'c-a', 's-a', 'TA', 'a0', '2026-01-01 10:00:00', 'PA-1', 1),
   ('tb', 'p-b', 'c-b', 's-b', 'TB', 'a0', '2026-01-01 10:00:00', 'PB-1', 1),
   ('tg', 'p-g', 'c-g', 's-g', 'TG', 'a0', '2026-01-01 10:00:00', 'PG-1', 1);
-INSERT INTO forge_agents (id, name, description, instructions, is_builtin) VALUES ('a1', 'A', '', '', 0);
-INSERT INTO forge_skills (id, name, description, instructions, is_builtin) VALUES ('sk1', 'S', '', '', 0);
+INSERT INTO lexa_agents (id, name, description, instructions, is_builtin) VALUES ('a1', 'A', '', '', 0);
+INSERT INTO lexa_skills (id, name, description, instructions, is_builtin) VALUES ('sk1', 'S', '', '', 0);
 INSERT INTO forge_tasks (id, project_id, document_type, document_id, agent_id, skill_id, selection, doc_context, status, created_at) VALUES
   ('ft-a', 'p-a', 'task', 'ta', 'a1', 'sk1', '', 'TA', 'queued', '2026-01-01 10:00:00'),
   ('ft-b', 'p-b', 'task', 'tb', 'a1', 'sk1', '', 'TB', 'queued', '2026-01-01 10:00:01'),

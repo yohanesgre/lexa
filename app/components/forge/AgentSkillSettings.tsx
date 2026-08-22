@@ -1,9 +1,9 @@
 import { useState } from "react";
 import { Plus, Settings, Trash2 } from "lucide-react";
 import { cn } from "../ui/cn";
-import { useForgeAgents, useForgeSkills } from "../../lib/queries";
+import { useAgents, useSkills } from "../../lib/queries";
 import { PromptEditorModal } from "./PromptEditorModal";
-import type { ForgeAgent, ForgeSkill } from "../../../shared/types";
+import type { LexaAgent, LexaSkill } from "../../../shared/types";
 
 function BuiltinBadge() {
   return (
@@ -30,14 +30,14 @@ function formatUpdated(iso: string): string {
 // Settings → Agents (global rule bundles). Each agent's instructions become
 // AGENTS.md in the run dir at claim time; skills attach via M2M bindings.
 export function AgentsSettingsSection() {
-  const { data: agents = [], isLoading, isError } = useForgeAgents();
-  const { data: skills = [] } = useForgeSkills();
-  const [editing, setEditing] = useState<ForgeAgent | "new" | null>(null);
+  const { data: agents = [], isLoading, isError } = useAgents();
+  const { data: skills = [] } = useSkills();
+  const [editing, setEditing] = useState<LexaAgent | "new" | null>(null);
 
   return (
     <section className="mb-8">
       <div className="flex items-center justify-between mb-3">
-        <h2 className="font-display text-lg font-medium text-lx-text-primary">Agents</h2>
+        <h2 className="font-display text-lg font-medium text-lx-text-primary">Lexa Agents</h2>
         <span className="font-micro text-2xs text-lx-text-muted uppercase tracking-[0.04em]">Global scope</span>
       </div>
       <p className="text-sm text-lx-text-secondary mb-4" style={{ maxWidth: 560 }}>
@@ -121,9 +121,9 @@ export function AgentsSettingsSection() {
 // .agents/<skill>/SKILL.md at claim time; attachments are managed from the
 // agent editor.
 export function SkillsSettingsSection() {
-  const { data: skills = [], isLoading, isError } = useForgeSkills();
-  const { data: agents = [] } = useForgeAgents();
-  const [editing, setEditing] = useState<ForgeSkill | "new" | null>(null);
+  const { data: skills = [], isLoading, isError } = useSkills();
+  const { data: agents = [] } = useAgents();
+  const [editing, setEditing] = useState<LexaSkill | "new" | null>(null);
 
   const usedBy = (skillId: string): string => {
     let names = "";
@@ -136,7 +136,7 @@ export function SkillsSettingsSection() {
   return (
     <section className="mb-8">
       <div className="flex items-center justify-between mb-3">
-        <h2 className="font-display text-lg font-medium text-lx-text-primary">Skills</h2>
+        <h2 className="font-display text-lg font-medium text-lx-text-primary">Lexa Skills</h2>
         <span className="font-micro text-2xs text-lx-text-muted uppercase tracking-[0.04em]">Global scope</span>
       </div>
       <p className="text-sm text-lx-text-secondary mb-4" style={{ maxWidth: 560 }}>

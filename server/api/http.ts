@@ -6,10 +6,10 @@ import { createHash, randomBytes } from "node:crypto";
 import { readFileSync, existsSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { LoggerLayer } from "../logging/logger";
-import { Sqlite, withTx, DbError, queryFirst } from "../db/database";
+import { Sqlite, withTx, DbError, queryFirst, RowNotFound } from "../db/database";
 import { Database } from "bun:sqlite";
 import { getSetting, setSetting, deleteSetting } from "../db/settings";
-import { ProjectNotFound, WikiPageNotFound, MachineNotFound, Forbidden, SetupLocked, TaskNotFound, InvalidName, InvalidRateLimit, InvalidGithubSettings, NoUserContext, InvalidArgs, GithubApiError, errorResponse, errorToStatus, ProjectAccessDenied } from "./errors";
+import { ProjectNotFound, WikiPageNotFound, MachineNotFound, Forbidden, SetupLocked, TaskNotFound, InvalidName, InvalidRateLimit, InvalidGithubSettings, NoUserContext, InvalidArgs, GithubApiError, errorResponse, errorToStatus, ProjectAccessDenied, HeraldTaskActive, HeraldThreadNotFound, ProviderNotConfigured, ProviderAuthFailed, ProviderUnreachable, HeraldGenerationFailed } from "./errors";
 import { respond } from "./http-helpers";
 import { resolveTaskId } from "./task-id";
 import { parseTaskKey } from "../task-key";
@@ -21,7 +21,7 @@ import { auth, PUBLIC_URL } from "../auth";
 import { createApiMiddleware } from "./middleware";
 import { resolveRateLimitFromDbValues, syncRateLimitFromDb } from "./rate-limit";
 import { syncGitHubConfigFromDb, resetGithubCaches } from "../github/client";
-import { selectRepoFiles, REPO_CONTENT_DEFAULTS } from "../github/repo-content";
+import { loadTaskRepoContent } from "../services/forge-repo-content";
 import { clampLimit, nextCursor } from "../../shared/pagination";
 import { ProjectService } from "../services/project.service";
 import { ProjectRepo } from "../repos/project.repo";
@@ -59,6 +59,12 @@ import { PasswordLinksService } from "../services/password-links.service";
 import { FieldConfigService } from "../services/field-config.service";
 import { FieldConfigRepo } from "../repos/field-config.repo";
 import { ForgeService } from "../services/forge.service";
+import { HeraldService } from "../services/herald.service";
+import { HeraldSettingsRepo } from "../repos/herald-settings.repo";
+import { HeraldThreadRepo } from "../repos/herald-thread.repo";
+import { buildChatExport } from "../services/herald.service";
+import { ProjectMemoryRepo } from "../repos/project-memory.repo";
+import { listModels, type ProviderConfig } from "../herald/provider";
 import { RuntimeEventService } from "../services/runtime-event.service";
 import { ForgeRepo } from "../repos/forge.repo";
 import { RuntimeEventRepo } from "../repos/runtime-event.repo";
@@ -67,6 +73,7 @@ import { RuntimeMachineService } from "../services/runtime-machine.service";
 import { SourceService } from "../services/source.service";
 import { SourceRepo } from "../repos/source.repo";
 import { TaskLinkService } from "../services/task-link.service";
+import { MentionService } from "../services/mention.service";
 import { TaskLinkRepo } from "../repos/task-link.repo";
 import { GitHubService } from "../services/github.service";
 import { ActivityService } from "../services/activity.service";
@@ -78,6 +85,7 @@ import { WebhookEventRepo } from "../repos/webhook-event.repo";
 import { GitHubClient } from "../github/client";
 import { extractText } from "../../shared/tiptap-text";
 import type { ActivityEvent, ForgeTask, Project, DomainProject } from "../../shared/types";
+import type { StreamFrame } from "../../shared/herald";
 
 const ApiKeySchema = Schema.Struct({
   id: Schema.String,
@@ -435,6 +443,7 @@ const ForgeTaskSchema = Schema.Struct({
   selection: Schema.String,
   docContext: Schema.String,
   status: Schema.Literal("queued", "running", "completed", "failed", "cancelled"),
+  kind: Schema.Literal("blacksmith", "herald"),
   result: Schema.NullOr(Schema.String),
   error: Schema.NullOr(Schema.String),
   createdAt: Schema.String,
@@ -826,8 +835,13 @@ const SourceMutationResponse = Schema.Struct({
 
 const TaskLinkPath = Schema.Struct({ slug: Schema.String, id: Schema.String });
 
-const taskLinksGroup = HttpApiGroup.make("task-links")
-  .add(HttpApiEndpoint.get("listTaskLinks", "/projects/:slug/tasks/:id/links")
+const MentionTaskHitSchema = Schema.Struct({ id: Schema.String, key: Schema.String, title: Schema.String });
+const MentionWikiHitSchema = Schema.Struct({ id: Schema.String, slug: Schema.String, title: Schema.String });
+const MentionsResponse = Schema.Struct({
+  data: Schema.Struct({ tasks: Schema.Array(MentionTaskHitSchema), wikiPages: Schema.Array(MentionWikiHitSchema) }),
+});
+
+const taskLinksGroup = HttpApiGroup.make("task-links")  .add(HttpApiEndpoint.get("listTaskLinks", "/projects/:slug/tasks/:id/links")
     .setPath(TaskLinkPath).addSuccess(TaskLinkListResponse))
   .add(HttpApiEndpoint.post("addTaskLink", "/projects/:slug/tasks/:id/links")
     .setPath(TaskLinkPath).setPayload(AddTaskLinkInput).addSuccess(LinkMutationResponse, { status: 201 }))
@@ -835,7 +849,9 @@ const taskLinksGroup = HttpApiGroup.make("task-links")
     .setPath(Schema.Struct({ slug: Schema.String, id: Schema.String, linkId: Schema.String }))
     .addSuccess(Schema.Void, { status: 204 }))
   .add(HttpApiEndpoint.get("searchTasks", "/projects/:slug/tasks/search")
-    .setPath(SlugPath).addSuccess(TaskSearchResponse));
+    .setPath(SlugPath).addSuccess(TaskSearchResponse))
+  .add(HttpApiEndpoint.get("searchMentions", "/projects/:slug/mentions")
+    .setPath(SlugPath).addSuccess(MentionsResponse));
 
 const forgeGroup = HttpApiGroup.make("forge")
   .add(HttpApiEndpoint.post("registerRuntime", "/forge/runtimes/register")
@@ -894,28 +910,6 @@ const forgeGroup = HttpApiGroup.make("forge")
     .setPath(ForgeTaskPath).addSuccess(ForgeTaskLogListResponse))
   .add(HttpApiEndpoint.post("appendForgeTaskLog", "/forge/daemon/tasks/:id/log")
     .setPath(ForgeTaskPath).setPayload(AppendLogInput).addSuccess(ForgeTaskLogSchema))
-  .add(HttpApiEndpoint.get("listForgeAgents", "/forge/agents")
-    .addSuccess(Schema.Struct({ data: Schema.Array(ForgeAgentSchema) })))
-  .add(HttpApiEndpoint.post("createForgeAgent", "/forge/agents")
-    .setPayload(CreateForgeAgentInput).addSuccess(ForgeAgentSchema, { status: 201 }))
-  .add(HttpApiEndpoint.patch("updateForgeAgent", "/forge/agents/:id")
-    .setPath(ForgeAgentPath).setPayload(UpdateForgeAgentInput).addSuccess(ForgeAgentSchema))
-  .add(HttpApiEndpoint.del("deleteForgeAgent", "/forge/agents/:id")
-    .setPath(ForgeAgentPath).addSuccess(Schema.Void, { status: 204 }))
-  .add(HttpApiEndpoint.put("replaceAgentSkills", "/forge/agents/:id/skills")
-    .setPath(ForgeAgentPath).setPayload(ReplaceAgentSkillsInput).addSuccess(ForgeAgentSchema))
-  .add(HttpApiEndpoint.post("resetForgeAgent", "/forge/agents/:id/reset")
-    .setPath(ForgeAgentPath).addSuccess(ForgeAgentSchema))
-  .add(HttpApiEndpoint.get("listForgeSkills", "/forge/skills")
-    .addSuccess(Schema.Struct({ data: Schema.Array(ForgeSkillSchema) })))
-  .add(HttpApiEndpoint.post("createForgeSkill", "/forge/skills")
-    .setPayload(CreateForgeSkillInput).addSuccess(ForgeSkillSchema, { status: 201 }))
-  .add(HttpApiEndpoint.patch("updateForgeSkill", "/forge/skills/:id")
-    .setPath(ForgeSkillPath).setPayload(UpdateForgeSkillInput).addSuccess(ForgeSkillSchema))
-  .add(HttpApiEndpoint.del("deleteForgeSkill", "/forge/skills/:id")
-    .setPath(ForgeSkillPath).addSuccess(Schema.Void, { status: 204 }))
-  .add(HttpApiEndpoint.post("resetForgeSkill", "/forge/skills/:id/reset")
-    .setPath(ForgeSkillPath).addSuccess(ForgeSkillSchema))
   // Warm sessions: the daemon PUTs the pre-spawn mapping and DELETEs it on
   // cancel/timeout; the browser GETs (popover line) and POSTs reset.
   .add(HttpApiEndpoint.get("listForgeSessions", "/forge/sessions")
@@ -934,6 +928,180 @@ const forgeGroup = HttpApiGroup.make("forge")
   .add(HttpApiEndpoint.del("removeSource", "/projects/:slug/documents/:type/:id/sources/:sourceId")
     .setPath(Schema.Struct({ slug: Schema.String, type: Schema.Literal("task", "wiki"), id: Schema.String, sourceId: Schema.String }))
     .addSuccess(Schema.Void, { status: 204 }));
+
+// Lexa Agents/Skills catalog (S14) — top-level groups, hard cutover from the
+// old forge-prefixed paths (no aliases).
+const agentsGroup = HttpApiGroup.make("agents")
+  .add(HttpApiEndpoint.get("listAgents", "/agents")
+    .addSuccess(Schema.Struct({ data: Schema.Array(ForgeAgentSchema) })))
+  .add(HttpApiEndpoint.post("createAgent", "/agents")
+    .setPayload(CreateForgeAgentInput).addSuccess(ForgeAgentSchema, { status: 201 }))
+  .add(HttpApiEndpoint.patch("updateAgent", "/agents/:id")
+    .setPath(ForgeAgentPath).setPayload(UpdateForgeAgentInput).addSuccess(ForgeAgentSchema))
+  .add(HttpApiEndpoint.del("deleteAgent", "/agents/:id")
+    .setPath(ForgeAgentPath).addSuccess(Schema.Void, { status: 204 }))
+  .add(HttpApiEndpoint.put("replaceAgentSkills", "/agents/:id/skills")
+    .setPath(ForgeAgentPath).setPayload(ReplaceAgentSkillsInput).addSuccess(ForgeAgentSchema))
+  .add(HttpApiEndpoint.post("resetAgent", "/agents/:id/reset")
+    .setPath(ForgeAgentPath).addSuccess(ForgeAgentSchema));
+
+const skillsGroup = HttpApiGroup.make("skills")
+  .add(HttpApiEndpoint.get("listSkills", "/skills")
+    .addSuccess(Schema.Struct({ data: Schema.Array(ForgeSkillSchema) })))
+  .add(HttpApiEndpoint.post("createSkill", "/skills")
+    .setPayload(CreateForgeSkillInput).addSuccess(ForgeSkillSchema, { status: 201 }))
+  .add(HttpApiEndpoint.patch("updateSkill", "/skills/:id")
+    .setPath(ForgeSkillPath).setPayload(UpdateForgeSkillInput).addSuccess(ForgeSkillSchema))
+  .add(HttpApiEndpoint.del("deleteSkill", "/skills/:id")
+    .setPath(ForgeSkillPath).addSuccess(Schema.Void, { status: 204 }))
+  .add(HttpApiEndpoint.post("resetSkill", "/skills/:id/reset")
+    .setPath(ForgeSkillPath).addSuccess(ForgeSkillSchema));
+
+// ── Herald assistant tier (S3/S5/S9/S15) ──
+const ProviderKindSchema = Schema.Literal("openai_compatible", "anthropic_compatible");
+
+const HeraldSettingsPath = Schema.Struct({ projectId: Schema.String });
+
+// Keys are write-only: omitted apiKey/searchApiKey keep the stored values.
+const HeraldSettingsInputPayload = Schema.Struct({
+  kind: ProviderKindSchema,
+  baseUrl: Schema.String,
+  model: Schema.String,
+  apiKey: Schema.optional(Schema.String),
+  searchProvider: Schema.optional(Schema.NullOr(Schema.Literal("exa"))),
+  searchApiKey: Schema.optional(Schema.NullOr(Schema.String)),
+  urlAllowlist: Schema.optional(Schema.NullOr(Schema.String)),
+});
+
+const HeraldSettingsMaskedSchema = Schema.Struct({
+  projectId: Schema.String,
+  kind: ProviderKindSchema,
+  baseUrl: Schema.String,
+  model: Schema.String,
+  hasKey: Schema.Boolean,
+  keyMask: Schema.NullOr(Schema.String),
+  searchProvider: Schema.NullOr(Schema.Literal("exa")),
+  hasSearchKey: Schema.Boolean,
+  urlAllowlist: Schema.NullOr(Schema.String),
+});
+
+// test/models take UNSAVED submitted values (never persist); an omitted
+// apiKey falls back to the stored one so testing a saved config doesn't
+// require re-entering the key.
+const HeraldSettingsTestPayload = HeraldSettingsInputPayload;
+
+const ModelListResponse = Schema.Struct({ models: Schema.Array(Schema.Struct({ id: Schema.String })) });
+
+const HeraldAttachmentRef = Schema.Struct({
+  storageKey: Schema.String,
+  mimeType: Schema.String,
+  name: Schema.String,
+});
+
+const CreateHeraldTaskInput = Schema.Struct({
+  slug: Schema.String,
+  documentType: Schema.Literal("task", "wiki"),
+  documentId: Schema.String,
+  prompt: Schema.String,
+  agentId: Schema.String,
+  skillId: Schema.String,
+  selection: Schema.optional(Schema.String),
+  attachments: Schema.optional(Schema.Array(HeraldAttachmentRef)),
+});
+
+const HeraldThreadPath = Schema.Struct({ documentType: Schema.Literal("task", "wiki"), documentId: Schema.String });
+
+const HeraldChatStreamInput = Schema.Struct({
+  projectId: Schema.String,
+  chatId: Schema.String,
+  message: Schema.String,
+  agentId: Schema.optional(Schema.String),
+  skillId: Schema.optional(Schema.String),
+  attachments: Schema.optional(Schema.Array(HeraldAttachmentRef)),
+  fromIndex: Schema.optional(Schema.Number),
+});
+
+const HeraldChatPath = Schema.Struct({ chatId: Schema.String });
+
+const HeraldChatTranscriptSchema = Schema.Struct({
+  chatId: Schema.String,
+  projectId: Schema.String,
+  ownerUserId: Schema.NullOr(Schema.String),
+  agentId: Schema.NullOr(Schema.String),
+  skillId: Schema.NullOr(Schema.String),
+  messages: Schema.Array(Schema.Any),
+  summary: Schema.NullOr(Schema.String),
+  summarizedCount: Schema.Number,
+  createdAt: Schema.String,
+  updatedAt: Schema.String,
+});
+
+const MemoryEntrySchema = Schema.Struct({
+  id: Schema.String,
+  projectId: Schema.String,
+  content: Schema.String,
+  source: Schema.Literal("manual", "herald"),
+  createdAt: Schema.String,
+  updatedAt: Schema.String,
+});
+
+const MemoryListResponse = Schema.Struct({ data: Schema.Array(MemoryEntrySchema) });
+const MemoryCreatePayload = Schema.Struct({ content: Schema.String });
+const MemoryProjectPath = Schema.Struct({ projectId: Schema.String });
+const MemoryDeletePath = Schema.Struct({ projectId: Schema.String, memoryId: Schema.String });
+
+const HeraldChatThreadSummarySchema = Schema.Struct({
+  chatId: Schema.String,
+  title: Schema.NullOr(Schema.String),
+  pinned: Schema.Boolean,
+  snippet: Schema.NullOr(Schema.String),
+  createdAt: Schema.String,
+  updatedAt: Schema.String,
+});
+
+const HeraldChatListResponse = Schema.Struct({ data: Schema.Array(HeraldChatThreadSummarySchema) });
+const ChatMetaPayload = Schema.Struct({
+  title: Schema.optional(Schema.String),
+  pinned: Schema.optional(Schema.Boolean),
+});
+const ChatMetaResponse = Schema.Struct({ chatId: Schema.String, title: Schema.NullOr(Schema.String), pinned: Schema.Boolean });
+
+const heraldGroup = HttpApiGroup.make("herald")
+  .add(HttpApiEndpoint.get("getHeraldSettings", "/herald/settings/:projectId")
+    .setPath(HeraldSettingsPath).addSuccess(HeraldSettingsMaskedSchema))
+  .add(HttpApiEndpoint.put("putHeraldSettings", "/herald/settings/:projectId")
+    .setPath(HeraldSettingsPath).setPayload(HeraldSettingsInputPayload).addSuccess(HeraldSettingsMaskedSchema))
+  .add(HttpApiEndpoint.post("testHeraldSettings", "/herald/settings/:projectId/test")
+    .setPath(HeraldSettingsPath).setPayload(HeraldSettingsTestPayload)
+    .addSuccess(Schema.Struct({ ok: Schema.Boolean, latencyMs: Schema.Number })))
+  .add(HttpApiEndpoint.post("listHeraldModels", "/herald/settings/:projectId/models")
+    .setPath(HeraldSettingsPath).setPayload(HeraldSettingsTestPayload).addSuccess(ModelListResponse))
+  .add(HttpApiEndpoint.post("createHeraldTask", "/herald/tasks")
+    .setPayload(CreateHeraldTaskInput).addSuccess(ForgeTaskSchema, { status: 201 }))
+  .add(HttpApiEndpoint.post("streamHeraldTask", "/herald/tasks/:id/stream")
+    .setPath(ForgeTaskPath).addSuccess(Schema.Void))
+  .add(HttpApiEndpoint.post("cancelHeraldTask", "/herald/tasks/:id/cancel")
+    .setPath(ForgeTaskPath).addSuccess(Schema.Struct({ ok: Schema.Boolean })))
+  .add(HttpApiEndpoint.del("resetHeraldThread", "/herald/threads/:documentType/:documentId")
+    .setPath(HeraldThreadPath).addSuccess(Schema.Void, { status: 204 }))
+  .add(HttpApiEndpoint.post("streamHeraldChat", "/herald/chat/stream")
+    .setPayload(HeraldChatStreamInput).addSuccess(Schema.Void))
+  .add(HttpApiEndpoint.get("getHeraldChat", "/herald/chat/:chatId")
+    .setPath(HeraldChatPath).addSuccess(HeraldChatTranscriptSchema))
+  .add(HttpApiEndpoint.del("resetHeraldChat", "/herald/chat/:chatId")
+    .setPath(HeraldChatPath).addSuccess(Schema.Void, { status: 204 }))
+  .add(HttpApiEndpoint.get("listHeraldChats", "/herald/chats/:projectId")
+    .setPath(MemoryProjectPath).addSuccess(HeraldChatListResponse))
+  .add(HttpApiEndpoint.patch("renameHeraldChat", "/herald/chat/:chatId")
+    .setPath(HeraldChatPath).setPayload(ChatMetaPayload).addSuccess(ChatMetaResponse))
+  .add(HttpApiEndpoint.get("exportHeraldChat", "/herald/chat/:chatId/export")
+    .setPath(HeraldChatPath).addSuccess(Schema.Void))
+  .add(HttpApiEndpoint.get("listHeraldMemory", "/herald/memory/:projectId")
+    .setPath(MemoryProjectPath).addSuccess(MemoryListResponse))
+  .add(HttpApiEndpoint.post("addHeraldMemory", "/herald/memory/:projectId")
+    .setPath(MemoryProjectPath).setPayload(MemoryCreatePayload).addSuccess(MemoryEntrySchema, { status: 201 }))
+  .add(HttpApiEndpoint.del("removeHeraldMemory", "/herald/memory/:projectId/:memoryId")
+    .setPath(MemoryDeletePath).addSuccess(Schema.Void, { status: 204 }));
 
 const WikiPageSchema = Schema.Struct({
   id: Schema.String,
@@ -1457,6 +1625,9 @@ export const LexaApi = HttpApi.make("lexa")
   .add(milestonesGroup)
   .add(fieldConfigGroup)
   .add(forgeGroup)
+  .add(agentsGroup)
+  .add(skillsGroup)
+  .add(heraldGroup)
   .add(taskLinksGroup)
   .add(tasksGroup)
   .add(boardGroup)
@@ -1510,6 +1681,20 @@ const requireProjectRead = (slug: string): Effect.Effect<DomainProject, ProjectN
     return project;
   });
 
+// Same gate as requireProjectRead but keyed by project id (herald settings,
+// memory, and chat paths carry ids, not slugs).
+const requireProjectReadById = (projectId: string): Effect.Effect<DomainProject, ProjectNotFound | DbError | ProjectAccessDenied, AuthIdentity | ProjectService | AuthorizationService> =>
+  Effect.gen(function* () {
+    const identity = yield* AuthIdentity;
+    const projectService = yield* ProjectService;
+    const project = yield* projectService.findById(projectId);
+    if (identity.role === "admin" || !identity.userId) return project;
+    const authz = yield* AuthorizationService;
+    const access = yield* authz.projectAccess(identity.userId, project.id);
+    if (!access) return yield* Effect.fail(new ProjectAccessDenied({ project: project.slug, role: "member" }));
+    return project;
+  });
+
 // Effective GitHub config for the response envelope — DB ONLY (env is a
 // first-boot bootstrap, mirrored into the settings table at boot). source is
 // "settings" if any github_* row exists, else "none". Only appId is returned
@@ -1534,78 +1719,6 @@ function githubSettingsResponse(db: Database): {
     source: anySettings ? "settings" : "none",
   };
 }
-
-// At most N source repos per claim — app-level setting forge_repo_cap
-// (env bootstrap LXK_FORGE_REPO_CAP, default 3; same pattern as rate limits).
-const DEFAULT_REPO_CONTENT_REPOS = 3;
-
-interface RepoContentEntry {
-  owner: string;
-  repo: string; // full "owner/repo"
-  path: string;
-  content: string;
-}
-
-// Best-effort linked-repo content for Forge context (Contents: Read). Every
-// failure — unconfigured app, missing repo, network, per-file errors — skips
-// that repo/file with a warn; the claim NEVER fails because context is
-// unavailable. Caps: ≤3 repos, ≤maxFiles files total, ≤maxTotalBytes total,
-// each file truncated to maxBytesPerFile at write.
-const loadTaskRepoContent = (task: ForgeTask): Effect.Effect<RepoContentEntry[], never, GitHubClient | TaskRepo | ProjectReposRepo | Sqlite> =>
-  Effect.gen(function* () {
-    if (task.documentType !== "task") return [];
-    const taskRepo = yield* TaskRepo;
-    const taskRow = yield* taskRepo.findById(task.documentId).pipe(
-      Effect.catchAll(() => Effect.succeed(null))
-    );
-    if (!taskRow) return [];
-    // Source: the project's SOURCE-ROLE repos (admin-controlled), capped by
-    // the forge_repo_cap setting. Task-linked repos no longer feed context.
-    const reposRepo = yield* ProjectReposRepo;
-    const projectRepos = yield* reposRepo.listByProject(taskRow.projectId).pipe(
-      Effect.catchAll(() => Effect.succeed([]))
-    );
-    const db = yield* Sqlite;
-    const capRaw = getSetting(db, "forge_repo_cap") || process.env.LXK_FORGE_REPO_CAP || "";
-    const capParsed = Number.parseInt(capRaw, 10);
-    const cap = Number.isFinite(capParsed) && capParsed > 0 ? capParsed : DEFAULT_REPO_CONTENT_REPOS;
-    const repos: string[] = [];
-    for (const r of projectRepos) {
-      if (r.sourceRole) repos.push(r.repo);
-    }
-    const capped = repos.slice(0, cap);
-    if (capped.length === 0) return [];
-    const client = yield* GitHubClient;
-    const entries: RepoContentEntry[] = [];
-    let totalBytes = 0;
-    for (const fullRepo of capped) {
-      const [owner, name] = fullRepo.split("/");
-      if (!owner || !name) continue;
-      const branch = yield* client.getDefaultBranch(owner, name).pipe(
-        Effect.tapError((e) => Effect.logWarning(`[Forge] repo-content: skip ${fullRepo}: ${e.message}`)),
-        Effect.catchAll(() => Effect.succeed(""))
-      );
-      if (!branch) continue;
-      const tree = yield* client.getRepoFileTree(owner, name, branch).pipe(
-        Effect.tapError((e) => Effect.logWarning(`[Forge] repo-content: tree failed for ${fullRepo}: ${e.message}`)),
-        Effect.catchAll(() => Effect.succeed([] as { path: string; type: string; size?: number }[]))
-      );
-      const selected = selectRepoFiles(tree);
-      for (const file of selected) {
-        if (entries.length >= REPO_CONTENT_DEFAULTS.maxFiles) break;
-        const content = yield* client.getRepoFileContent(owner, name, file.path).pipe(
-          Effect.tapError((e) => Effect.logWarning(`[Forge] repo-content: skip ${fullRepo}:${file.path}: ${e.message}`)),
-          Effect.catchAll(() => Effect.succeed(""))
-        );
-        if (!content) continue;
-        const truncated = content.slice(0, REPO_CONTENT_DEFAULTS.maxBytesPerFile);
-        if (totalBytes + truncated.length > REPO_CONTENT_DEFAULTS.maxTotalBytes) continue;
-        totalBytes += truncated.length;
-        entries.push({ owner, repo: fullRepo, path: file.path, content: truncated });
-      }
-    }
-    return entries;
-  });
 
 const healthLive = HttpApiBuilder.group(LexaApi, "health", (handlers) =>
   handlers.handle("health", () => Effect.succeed({ ok: true as const }))
@@ -2405,85 +2518,6 @@ const forgeLive = HttpApiBuilder.group(LexaApi, "forge", (handlers) =>
         return yield* service.appendLog(req.path.id, req.payload.message, req.payload.stream ?? "out", req.payload.level ?? "info");
       }))
     )
-    .handle("listForgeAgents", () =>
-      respond(Effect.gen(function* () {
-        const service = yield* ForgeService;
-        const agents = yield* service.listAgents();
-        return { data: agents };
-      }))
-    )
-    .handle("createForgeAgent", (req) =>
-      respond(Effect.gen(function* () {
-        yield* requireAdmin;
-        const service = yield* ForgeService;
-        return yield* service.createAgent(req.payload);
-      }))
-    )
-    .handle("updateForgeAgent", (req) =>
-      respond(Effect.gen(function* () {
-        yield* requireAdmin;
-        const service = yield* ForgeService;
-        return yield* service.updateAgent(req.path.id, req.payload);
-      }))
-    )
-    .handle("deleteForgeAgent", (req) =>
-      respond(Effect.gen(function* () {
-        yield* requireAdmin;
-        const service = yield* ForgeService;
-        yield* service.deleteAgent(req.path.id);
-        return undefined;
-      }))
-    )
-    .handle("replaceAgentSkills", (req) =>
-      respond(Effect.gen(function* () {
-        yield* requireAdmin;
-        const service = yield* ForgeService;
-        return yield* service.replaceAgentSkills(req.path.id, [...req.payload.skillIds]);
-      }))
-    )
-    .handle("resetForgeAgent", (req) =>
-      respond(Effect.gen(function* () {
-        yield* requireAdmin;
-        const service = yield* ForgeService;
-        return yield* service.resetAgentToDefault(req.path.id);
-      }))
-    )
-    .handle("listForgeSkills", () =>
-      respond(Effect.gen(function* () {
-        const service = yield* ForgeService;
-        const skills = yield* service.listSkills();
-        return { data: skills };
-      }))
-    )
-    .handle("createForgeSkill", (req) =>
-      respond(Effect.gen(function* () {
-        yield* requireAdmin;
-        const service = yield* ForgeService;
-        return yield* service.createSkill(req.payload);
-      }))
-    )
-    .handle("updateForgeSkill", (req) =>
-      respond(Effect.gen(function* () {
-        yield* requireAdmin;
-        const service = yield* ForgeService;
-        return yield* service.updateSkill(req.path.id, req.payload);
-      }))
-    )
-    .handle("deleteForgeSkill", (req) =>
-      respond(Effect.gen(function* () {
-        yield* requireAdmin;
-        const service = yield* ForgeService;
-        yield* service.deleteSkill(req.path.id);
-        return undefined;
-      }))
-    )
-    .handle("resetForgeSkill", (req) =>
-      respond(Effect.gen(function* () {
-        yield* requireAdmin;
-        const service = yield* ForgeService;
-        return yield* service.resetSkillToDefault(req.path.id);
-      }))
-    )
     .handle("listSources", (req) =>
       respond(Effect.gen(function* () {
         const service = yield* SourceService;
@@ -2551,6 +2585,303 @@ const forgeLive = HttpApiBuilder.group(LexaApi, "forge", (handlers) =>
     )
 );
 
+const agentsLive = HttpApiBuilder.group(LexaApi, "agents", (handlers) =>
+  handlers
+    .handle("listAgents", () =>
+      respond(Effect.gen(function* () {
+        const service = yield* ForgeService;
+        const agents = yield* service.listAgents();
+        return { data: agents };
+      }))
+    )
+    .handle("createAgent", (req) =>
+      respond(Effect.gen(function* () {
+        yield* requireAdmin;
+        const service = yield* ForgeService;
+        return yield* service.createAgent(req.payload);
+      }))
+    )
+    .handle("updateAgent", (req) =>
+      respond(Effect.gen(function* () {
+        yield* requireAdmin;
+        const service = yield* ForgeService;
+        return yield* service.updateAgent(req.path.id, req.payload);
+      }))
+    )
+    .handle("deleteAgent", (req) =>
+      respond(Effect.gen(function* () {
+        yield* requireAdmin;
+        const service = yield* ForgeService;
+        yield* service.deleteAgent(req.path.id);
+        return undefined;
+      }))
+    )
+    .handle("replaceAgentSkills", (req) =>
+      respond(Effect.gen(function* () {
+        yield* requireAdmin;
+        const service = yield* ForgeService;
+        return yield* service.replaceAgentSkills(req.path.id, [...req.payload.skillIds]);
+      }))
+    )
+    .handle("resetAgent", (req) =>
+      respond(Effect.gen(function* () {
+        yield* requireAdmin;
+        const service = yield* ForgeService;
+        return yield* service.resetAgentToDefault(req.path.id);
+      }))
+    )
+);
+
+const skillsLive = HttpApiBuilder.group(LexaApi, "skills", (handlers) =>
+  handlers
+    .handle("listSkills", () =>
+      respond(Effect.gen(function* () {
+        const service = yield* ForgeService;
+        const skills = yield* service.listSkills();
+        return { data: skills };
+      }))
+    )
+    .handle("createSkill", (req) =>
+      respond(Effect.gen(function* () {
+        yield* requireAdmin;
+        const service = yield* ForgeService;
+        return yield* service.createSkill(req.payload);
+      }))
+    )
+    .handle("updateSkill", (req) =>
+      respond(Effect.gen(function* () {
+        yield* requireAdmin;
+        const service = yield* ForgeService;
+        return yield* service.updateSkill(req.path.id, req.payload);
+      }))
+    )
+    .handle("deleteSkill", (req) =>
+      respond(Effect.gen(function* () {
+        yield* requireAdmin;
+        const service = yield* ForgeService;
+        yield* service.deleteSkill(req.path.id);
+        return undefined;
+      }))
+    )
+    .handle("resetSkill", (req) =>
+      respond(Effect.gen(function* () {
+        yield* requireAdmin;
+        const service = yield* ForgeService;
+        return yield* service.resetSkillToDefault(req.path.id);
+      }))
+    )
+);
+
+const heraldLive = HttpApiBuilder.group(LexaApi, "herald", (handlers) =>
+  handlers
+    .handle("getHeraldSettings", (req) =>
+      respond(Effect.gen(function* () {
+        yield* requireProjectReadById(req.path.projectId);
+        const repo = yield* HeraldSettingsRepo;
+        return yield* repo.maskedView(req.path.projectId).pipe(
+          Effect.catchTag("RowNotFound", () => new ProviderNotConfigured({ projectId: req.path.projectId }))
+        );
+      }))
+    )
+    .handle("putHeraldSettings", (req) =>
+      respond(Effect.gen(function* () {
+        yield* requireAdmin;
+        const repo = yield* HeraldSettingsRepo;
+        yield* repo.upsert(req.path.projectId, req.payload);
+        return yield* repo.maskedView(req.path.projectId);
+      }))
+    )
+    .handle("testHeraldSettings", (req) =>
+      respond(Effect.gen(function* () {
+        yield* requireAdmin;
+        const service = yield* HeraldService;
+        const config = yield* resolveProviderConfig(req.path.projectId, req.payload);
+        return yield* service.testConnection(config);
+      }))
+    )
+    .handle("listHeraldModels", (req) =>
+      respond(Effect.gen(function* () {
+        yield* requireAdmin;
+        const config = yield* resolveProviderConfig(req.path.projectId, req.payload);
+        return yield* Effect.tryPromise({
+          try: () => listModels(config),
+          catch: (e) => e as ProviderAuthFailed | ProviderUnreachable,
+        });
+      }))
+    )
+    .handle("createHeraldTask", (req) =>
+      respond(Effect.gen(function* () {
+        const project = yield* requireProjectRead(req.payload.slug);
+        const service = yield* HeraldService;
+        return yield* service.enqueue({
+          projectId: project.id,
+          documentType: req.payload.documentType,
+          documentId: req.payload.documentId,
+          prompt: req.payload.prompt,
+          agentId: req.payload.agentId,
+          skillId: req.payload.skillId,
+          selection: req.payload.selection,
+          attachments: req.payload.attachments ? [...req.payload.attachments] : undefined,
+        });
+      }))
+    )
+    .handle("streamHeraldTask", (req) =>
+      respond(Effect.gen(function* () {
+        const identity = yield* AuthIdentity;
+        const forgeService = yield* ForgeService;
+        const task = yield* forgeService.getById(req.path.id);
+        if (identity.role !== "admin" && identity.userId) {
+          const authz = yield* AuthorizationService;
+          const access = yield* authz.projectAccess(identity.userId, task.projectId);
+          if (!access) return yield* new ProjectAccessDenied({ project: task.projectId, role: "member" });
+        }
+        const service = yield* HeraldService;
+        const frames = yield* service.runStream(req.path.id);
+        wireDisconnectAbort(yield* HttpServerRequest, () => service.abortStream(req.path.id));
+        return sseHttpResponse(frames);
+      }))
+    )
+    .handle("cancelHeraldTask", (req) =>
+      respond(Effect.gen(function* () {
+        const service = yield* HeraldService;
+        const forgeService = yield* ForgeService;
+        if (!service.abortStream(req.path.id)) {
+          yield* forgeService.cancel(req.path.id);
+        }
+        return { ok: true as const };
+      }))
+    )
+    .handle("resetHeraldThread", (req) =>
+      respond(Effect.gen(function* () {
+        const threadRepo = yield* HeraldThreadRepo;
+        const thread = yield* threadRepo.loadThread(req.path.documentType, req.path.documentId).pipe(
+          Effect.catchTag("RowNotFound", () => new HeraldThreadNotFound({ documentType: req.path.documentType, documentId: req.path.documentId }))
+        );
+        yield* requireProjectReadById(thread.projectId);
+        const service = yield* HeraldService;
+        yield* service.resetThread(thread.projectId, req.path.documentType, req.path.documentId);
+        return undefined;
+      }))
+    )
+    .handle("streamHeraldChat", (req) =>
+      respond(Effect.gen(function* () {
+        const identity = yield* AuthIdentity;
+        if (!identity.userId) return yield* new NoUserContext();
+        yield* requireProjectReadById(req.payload.projectId);
+        const service = yield* HeraldService;
+        const frames = yield* service.runChatStream(req.payload.chatId, identity.userId, {
+          projectId: req.payload.projectId,
+          chatId: req.payload.chatId,
+          message: req.payload.message,
+          agentId: req.payload.agentId,
+          skillId: req.payload.skillId,
+          ...(req.payload.attachments ? { attachments: [...req.payload.attachments] } : {}),
+          ...(req.payload.fromIndex !== undefined ? { fromIndex: req.payload.fromIndex } : {}),
+        });
+        wireDisconnectAbort(yield* HttpServerRequest, () => service.abortChat(req.payload.chatId));
+        return sseHttpResponse(frames);
+      }))
+    )
+    .handle("getHeraldChat", (req) =>
+      respond(Effect.gen(function* () {
+        const identity = yield* AuthIdentity;
+        if (!identity.userId) return yield* new NoUserContext();
+        const threadRepo = yield* HeraldThreadRepo;
+        const t = yield* threadRepo.loadChat(req.path.chatId, identity.userId).pipe(
+          Effect.catchTag("RowNotFound", () => new HeraldThreadNotFound({ documentType: "chat", documentId: req.path.chatId }))
+        );
+        return {
+          chatId: t.documentId,
+          projectId: t.projectId,
+          ownerUserId: t.ownerUserId,
+          agentId: t.agentId,
+          skillId: t.skillId,
+          messages: t.messages,
+          summary: t.summary,
+          summarizedCount: t.summarizedCount,
+          createdAt: t.createdAt,
+          updatedAt: t.updatedAt,
+        };
+      }))
+    )
+    .handle("resetHeraldChat", (req) =>
+      respond(Effect.gen(function* () {
+        const identity = yield* AuthIdentity;
+        if (!identity.userId) return yield* new NoUserContext();
+        const service = yield* HeraldService;
+        if (service.chatActive(req.path.chatId)) return yield* new HeraldTaskActive();
+        const threadRepo = yield* HeraldThreadRepo;
+        yield* threadRepo.loadChat(req.path.chatId, identity.userId).pipe(
+          Effect.catchTag("RowNotFound", () => new HeraldThreadNotFound({ documentType: "chat", documentId: req.path.chatId }))
+        );
+        yield* threadRepo.resetThread("chat", req.path.chatId);
+        return undefined;
+      }))
+    )
+    .handle("listHeraldChats", (req) =>
+      respond(Effect.gen(function* () {
+        const identity = yield* AuthIdentity;
+        if (!identity.userId) return yield* new NoUserContext();
+        const project = yield* requireProjectReadById(req.path.projectId);
+        const service = yield* HeraldService;
+        const q = searchParams(req).get("q") ?? undefined;
+        return { data: yield* service.listChats(project.id, identity.userId, { q }) };
+      }))
+    )
+    .handle("renameHeraldChat", (req) =>
+      respond(Effect.gen(function* () {
+        const identity = yield* AuthIdentity;
+        if (!identity.userId) return yield* new NoUserContext();
+        const service = yield* HeraldService;
+        const t = yield* service
+          .updateChatMeta(req.path.chatId, identity.userId, { title: req.payload.title, pinned: req.payload.pinned })
+          .pipe(
+            Effect.catchTag("RowNotFound", () => new HeraldThreadNotFound({ documentType: "chat", documentId: req.path.chatId }))
+          );
+        return { chatId: t.documentId, title: t.title, pinned: t.pinned };
+      }))
+    )
+    .handle("exportHeraldChat", (req) =>
+      respond(Effect.gen(function* () {
+        const identity = yield* AuthIdentity;
+        if (!identity.userId) return yield* new NoUserContext();
+        const threadRepo = yield* HeraldThreadRepo;
+        const t = yield* threadRepo.loadChat(req.path.chatId, identity.userId).pipe(
+          Effect.catchTag("RowNotFound", () => new HeraldThreadNotFound({ documentType: "chat", documentId: req.path.chatId }))
+        );
+        return chatExportHttpResponse(t);
+      }))
+    )
+    .handle("listHeraldMemory", (req) =>
+      respond(Effect.gen(function* () {
+        const project = yield* requireProjectReadById(req.path.projectId);
+        const repo = yield* ProjectMemoryRepo;
+        return { data: yield* repo.list(project.id) };
+      }))
+    )
+    .handle("addHeraldMemory", (req) =>
+      respond(Effect.gen(function* () {
+        const project = yield* requireProjectReadById(req.path.projectId);
+        const repo = yield* ProjectMemoryRepo;
+        return yield* repo.create({ id: crypto.randomUUID(), projectId: project.id, content: req.payload.content });
+      }))
+    )
+    .handle("removeHeraldMemory", (req) =>
+      respond(Effect.gen(function* () {
+        const project = yield* requireProjectReadById(req.path.projectId);
+        const repo = yield* ProjectMemoryRepo;
+        const entry = yield* repo.get(req.path.memoryId).pipe(
+          Effect.catchTag("RowNotFound", () => new RowNotFound({ table: "project_memory" }))
+        );
+        if (entry.projectId !== project.id) {
+          return yield* new RowNotFound({ table: "project_memory" });
+        }
+        yield* repo.remove(req.path.memoryId);
+        return undefined;
+      }))
+    )
+);
+
 const taskLinksLive = HttpApiBuilder.group(LexaApi, "task-links", (handlers) =>
   handlers
     .handle("listTaskLinks", (req) =>
@@ -2612,6 +2943,14 @@ const taskLinksLive = HttpApiBuilder.group(LexaApi, "task-links", (handlers) =>
         }
         const suggestions = yield* service.search(project.id, q, exclude);
         return { data: suggestions };
+      }))
+    )
+    .handle("searchMentions", (req) =>
+      respond(Effect.gen(function* () {
+        const mentionService = yield* MentionService;
+        const project = yield* requireProjectRead(req.path.slug);
+        const q = searchParams(req).get("q") ?? "";
+        return { data: yield* mentionService.search(project.id, q) };
       }))
     )
 );
@@ -3156,6 +3495,90 @@ function attachmentHttpResponse(serve: ServeAttachment): HttpServerResponse.Http
   });
 }
 
+// Markdown transcript download: text/markdown attachment named after the
+// (sanitized) thread title or "chat", suffixed with the updatedAt date.
+function chatExportHttpResponse(t: { title: string | null; messages: unknown[]; updatedAt: string }): HttpServerResponse.HttpServerResponse {
+  const sanitized = t.title?.replace(/[^A-Za-z0-9._-]+/g, "-").replace(/^-+|-+$/g, "") || "chat";
+  const day = t.updatedAt.slice(0, 10).replaceAll("-", "");
+  const markdown = buildChatExport(t);
+  return HttpServerResponse.raw(markdown, {
+    contentType: "text/markdown; charset=utf-8",
+    headers: { "Content-Disposition": `attachment; filename="${sanitized}-${day}.md"` },
+  });
+}
+
+// SSE response bypasses the JSON encoder: StreamFrames are encoded as
+// server-sent events with a 15s heartbeat comment to defeat proxy buffering.
+function sseHttpResponse(frames: ReadableStream<StreamFrame>): HttpServerResponse.HttpServerResponse {
+  const encoder = new TextEncoder();
+  let interval: ReturnType<typeof setInterval> | null = null;
+  let reader: ReadableStreamDefaultReader<StreamFrame> | null = null;
+  const stream = new ReadableStream<Uint8Array>({
+    start(controller) {
+      let closed = false;
+      const push = (chunk: string) => {
+        if (!closed) controller.enqueue(encoder.encode(chunk));
+      };
+      interval = setInterval(() => push(": ping\n\n"), 15_000);
+      reader = frames.getReader();
+      void (async () => {
+        try {
+          for (;;) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            push(`event: ${value.type}\ndata: ${JSON.stringify(value)}\n\n`);
+          }
+        } catch {
+          // upstream died mid-stream — close cleanly, client sees EOF
+        } finally {
+          closed = true;
+          if (interval) clearInterval(interval);
+          try {
+            controller.close();
+          } catch {
+            // client cancelled mid-stream — controller already closed
+          }
+        }
+      })();
+    },
+    cancel() {
+      if (interval) clearInterval(interval);
+      void reader?.cancel().catch(() => {});
+    },
+  });
+  return HttpServerResponse.stream(
+    Stream.fromReadableStream(() => stream, () => new HeraldGenerationFailed({ message: "SSE encode failed" })),
+    { contentType: "text/event-stream", headers: { "Cache-Control": "no-cache" } }
+  );
+}
+
+// Disconnect→abort (S5): the browser killing the fetch aborts the in-flight
+// generation via the service's AbortController registry.
+function wireDisconnectAbort(request: HttpServerRequest, abort: () => boolean): void {
+  // `source` is the adapter's raw platform request (web Request here) — the
+  // typed surface doesn't expose the abort signal.
+  const signal = (request.source as { signal?: AbortSignal } | null | undefined)?.signal;
+  if (!signal) return;
+  signal.addEventListener("abort", () => abort());
+}
+
+// test/models take UNSAVED submitted values; an omitted apiKey falls back to
+// the stored one so testing a saved config doesn't require re-entering the key.
+const resolveProviderConfig = (
+  projectId: string,
+  payload: { kind: "openai_compatible" | "anthropic_compatible"; baseUrl: string; model: string; apiKey?: string }
+): Effect.Effect<ProviderConfig, ProviderNotConfigured | DbError | RowNotFound, HeraldSettingsRepo> =>
+  Effect.gen(function* () {
+    const repo = yield* HeraldSettingsRepo;
+    const stored = yield* repo.getByProject(projectId).pipe(Effect.catchTag("RowNotFound", () => Effect.succeed(null)));
+    return {
+      kind: payload.kind,
+      baseUrl: payload.baseUrl,
+      model: payload.model,
+      apiKey: payload.apiKey ?? stored?.api_key ?? "",
+    };
+  });
+
 const attachmentsLive = HttpApiBuilder.group(LexaApi, "attachments", (handlers) =>
   handlers
     .handle("uploadTaskAttachment", (req) =>
@@ -3494,7 +3917,7 @@ export function createApiHandler(dbPath: string) {
 
   const serviceLayer = buildServiceLayer(dbPath);
   const handlerLayer = Layer.mergeAll(
-    healthLive, setupLive, projectsLive, columnsLive, swimlanesLive, milestonesLive, fieldConfigLive, forgeLive, taskLinksLive, tasksLive, boardLive, wikiLive, publicShareLive, attachmentsLive, apiKeysLive, adminLive, meLive, dashboardLive,
+    healthLive, setupLive, projectsLive, columnsLive, swimlanesLive, milestonesLive, fieldConfigLive, forgeLive, agentsLive, skillsLive, heraldLive, taskLinksLive, tasksLive, boardLive, wikiLive, publicShareLive, attachmentsLive, apiKeysLive, adminLive, meLive, dashboardLive,
     createTeamsLive(LexaApi), createWorkspaceLive(LexaApi), createSessionsLive(LexaApi),
   ).pipe(Layer.provide(Layer.provide(serviceLayer, Layer.mergeAll(dbLayer, LoggerLayer))), Layer.provide(dbLayer));
   const merged = Layer.mergeAll(apiLayer, handlerLayer);
@@ -3526,10 +3949,15 @@ function buildServiceLayer(dbPath: string) {
     TaskRepo.Default, TaskService.Default,
     FieldConfigRepo.Default, FieldConfigService.Default,
     ForgeRepo.Default, ForgeService.Default,
+    HeraldSettingsRepo.Default, HeraldThreadRepo.Default, ProjectMemoryRepo.Default,
+    HeraldService.Default.pipe(
+      Layer.provide(Layer.mergeAll(storageLayerFor(storageCfg), Layer.succeed(StorageConfig, storageCfg)))
+    ),
     RuntimeEventRepo.Default, RuntimeEventService.Default,
     RuntimeMachineRepo.Default, RuntimeMachineService.Default,
     SourceRepo.Default, SourceService.Default,
     TaskLinkRepo.Default, TaskLinkService.Default,
+    MentionService.Default,
     ActivityRepo.Default, CommentRepo.Default, ActivityService.Default, CommentService.Default,
     WikiRepo.Default, WikiService.Default,
     WikiShareRepo.Default, WikiShareService.Default,

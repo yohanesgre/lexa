@@ -6,7 +6,7 @@ import { cn } from "./ui/cn";
 import { ForgePopover } from "./forge/ForgePopover";
 import { ForgeReviewSurface } from "./forge/ForgeReviewSurface";
 import { useForgeReview, type ForgeReviewIdentity } from "./forge/useForgeReview";
-import { textEditorExtensions } from "../lib/tiptap";
+import { textEditorExtensions, extensionsWithMentions } from "../lib/tiptap";
 import { useAttachmentEmbeds } from "../lib/useAttachmentEmbeds";
 import Placeholder from "@tiptap/extension-placeholder";
 
@@ -268,14 +268,20 @@ export function TextEditor({
 
   const finalExtensions = useMemo(() => {
     const base = extensions ?? textEditorExtensions;
-    if (!placeholder) return base;
-    return base.map((e: any) => {
-      if (typeof e === "object" && (e as any)?.name === "placeholder") {
-        return Placeholder.configure({ placeholder });
-      }
-      return e;
-    });
-  }, [extensions, placeholder]);
+    let withPlaceholder = base;
+    if (placeholder) {
+      withPlaceholder = base.map((e: any) => {
+        if (typeof e === "object" && (e as any)?.name === "placeholder") {
+          return Placeholder.configure({ placeholder });
+        }
+        return e;
+      });
+    }
+    // Mentions need the project slug — available when forge or attachments
+    // wiring exists. Absent both, the editor carries no mention plugin.
+    const mentionSlug = attachments?.slug ?? forge?.slug;
+    return extensionsWithMentions(withPlaceholder, mentionSlug);
+  }, [extensions, placeholder, attachments?.slug, forge?.slug]);
 
   // Hooks run unconditionally — empty options when attachments wiring is
   // absent (create mode); handlers only spread while active.

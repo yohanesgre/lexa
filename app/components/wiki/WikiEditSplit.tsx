@@ -33,7 +33,7 @@ export function WikiEditSplit({ editor, slug, pageSlug, previewContent, isSaving
           className="wiki-prose flex-1 overflow-y-auto"
           style={{ padding: "16px 20px", background: "var(--lx-bg-page)" }}
         >
-          {renderDoc(previewContent, "wiki")}
+          {renderDoc(previewContent, "wiki", slug)}
         </div>
       </div>
 

@@ -83,7 +83,7 @@ function WikiReadView({ breadcrumb, title, content, updatedAt, headings, outline
               </button>
             </span>
           </div>
-          <div>{renderDoc(content ?? emptyDoc, "wiki")}</div>
+          <div>{renderDoc(content ?? emptyDoc, "wiki", slug)}</div>
           <SourcesSection
             slug={slug}
             documentType="wiki"
