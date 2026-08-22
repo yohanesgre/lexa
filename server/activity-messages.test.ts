@@ -55,6 +55,8 @@ describe("activity messages", () => {
       ["forge_cancelled", {}, "Forge run cancelled"],
       ["commented", { actor: "Maria" }, "Maria commented"],
       ["comment_deleted", { actor: "Maria" }, "Maria deleted a comment"],
+      ["attachment_added", { actor: "Maria", filename: "spec.pdf" }, "Maria attached spec.pdf"],
+      ["attachment_removed", { actor: "Maria", filename: "spec.pdf" }, "Maria removed attachment spec.pdf"],
     ];
     for (const [t, payload, expected] of cases) {
       expect(m.formatActivityMessage(t, payload), `type=${t}`).toBe(expected);

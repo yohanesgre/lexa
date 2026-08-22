@@ -15,6 +15,28 @@ function rawToken(t: Token): string {
   return "raw" in t ? String((t as { raw: unknown }).raw) : JSON.stringify(t);
 }
 
+// Attachment image srcs are root-relative Lexa URLs. Relative srcs are only
+// accepted for this exact shape (uuid v4); every other relative src is
+// dropped, as are non-http(s) schemes (javascript:, data:, file:).
+const ATTACHMENT_SRC_RE = /^\/api\/attachments\/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
+
+export function safeImageSrc(src: unknown): string | null {
+  if (typeof src !== "string") return null;
+  const trimmed = src.trim();
+  if (!trimmed) return null;
+  if (ATTACHMENT_SRC_RE.test(trimmed)) return trimmed;
+  return safeHref(trimmed);
+}
+
+function absolutizeAttachmentSrc(src: string, baseUrl: string | undefined): string {
+  if (!baseUrl || !ATTACHMENT_SRC_RE.test(src)) return src;
+  try {
+    return new URL(src, baseUrl).toString();
+  } catch {
+    return src;
+  }
+}
+
 function flattenInline(tokens: Token[], parentMarks: TipTapMark[] = []): TipTapNode[] {
   const out: TipTapNode[] = [];
   let buf = "";
@@ -76,7 +98,9 @@ function flattenInline(tokens: Token[], parentMarks: TipTapMark[] = []): TipTapN
         // a stored image src that can't render as http(s) is dropped entirely.
         // `javascript:` in src is inert in an <img>, but data: / file: can
         // carry tracking or huge payloads, so the allowlist still applies.
-        const src = safeHref(t.href);
+        // Root-relative /api/attachments/<uuid> srcs are accepted so pulled
+        // issue bodies keep their Lexa attachment references (host-agnostic).
+        const src = safeImageSrc(t.href);
         if (!src) break;
         const attrs: Record<string, unknown> = { src };
         // marked puts the alt text in t.text, not an attrs field.
@@ -216,11 +240,11 @@ export function markdownToDoc(md: string): TipTapDoc {
   }
 }
 
-function renderInline(nodes: TipTapNode[]): string {
-  return nodes.map(renderInlineNode).join("");
+function renderInline(nodes: TipTapNode[], opts?: DocToMarkdownOptions): string {
+  return nodes.map((node) => renderInlineNode(node, opts)).join("");
 }
 
-function renderInlineNode(node: TipTapNode): string {
+function renderInlineNode(node: TipTapNode, opts?: DocToMarkdownOptions): string {
   if (node.type === "text") {
     let result = node.text ?? "";
     const marks = node.marks ?? [];
@@ -231,9 +255,11 @@ function renderInlineNode(node: TipTapNode): string {
   }
   if (node.type === "image") {
     // Round-trips back through the allowlist — a stored image whose src has
-    // since become non-http(s) is not re-emitted.
-    const src = safeHref(node.attrs?.src);
-    if (!src) return "";
+    // since become non-http(s) is not re-emitted. With baseUrl, attachment
+    // srcs are absolutized so pushed GitHub issue bodies carry absolute URLs.
+    const raw = safeImageSrc(node.attrs?.src);
+    if (!raw) return "";
+    const src = absolutizeAttachmentSrc(raw, opts?.baseUrl);
     const alt = node.attrs?.alt ? String(node.attrs.alt) : "";
     const title = node.attrs?.title ? ` "${String(node.attrs.title)}"` : "";
     return `![${alt}](${src}${title})`;
@@ -265,22 +291,22 @@ function alignCell(text: string, align: string | null): string {
   return align === "right" ? ` ${text}` : ` ${text} `;
 }
 
-function renderBlock(nodes: TipTapNode[]): string {
-  return nodes.map(renderNode).join("\n\n");
+function renderBlock(nodes: TipTapNode[], opts?: DocToMarkdownOptions): string {
+  return nodes.map((node) => renderNode(node, opts)).join("\n\n");
 }
 
-function renderNode(node: TipTapNode): string {
+function renderNode(node: TipTapNode, opts?: DocToMarkdownOptions): string {
   switch (node.type) {
     case "doc":
-      return renderBlock(node.content ?? []);
+      return renderBlock(node.content ?? [], opts);
     case "heading": {
       const level = Math.min(6, Math.max(1, Number(node.attrs?.level) || 1));
-      return `${"#".repeat(level)} ${renderInline(node.content ?? [])}`;
+      return `${"#".repeat(level)} ${renderInline(node.content ?? [], opts)}`;
     }
     case "paragraph":
-      return renderInline(node.content ?? []);
+      return renderInline(node.content ?? [], opts);
     case "blockquote": {
-      const inner = renderBlock(node.content ?? []);
+      const inner = renderBlock(node.content ?? [], opts);
       return inner
         .split("\n")
         .map(l => `> ${l}`)
@@ -288,15 +314,15 @@ function renderNode(node: TipTapNode): string {
     }
     case "codeBlock": {
       const lang = node.attrs?.language ? String(node.attrs.language) : "";
-      const text = renderInline(node.content ?? []);
+      const text = renderInline(node.content ?? [], opts);
       return `\`\`\`${lang}\n${text}\n\`\`\``;
     }
     case "bulletList":
-      return (node.content ?? []).map(item => renderListItem(item, "-")).join("\n");
+      return (node.content ?? []).map(item => renderListItem(item, "-", opts)).join("\n");
     case "orderedList":
-      return (node.content ?? []).map(item => renderListItem(item, "1.")).join("\n");
+      return (node.content ?? []).map(item => renderListItem(item, "1.", opts)).join("\n");
     case "taskList":
-      return (node.content ?? []).map(item => renderTaskItem(item)).join("\n");
+      return (node.content ?? []).map(item => renderTaskItem(item, opts)).join("\n");
     case "listItem":
       return renderBlock(node.content ?? []);
     case "taskItem":
@@ -347,7 +373,7 @@ function renderNode(node: TipTapNode): string {
             const inline = (c.content ?? []).flatMap((n) =>
               n.type === "paragraph" ? (n.content ?? []) : [n]
             );
-            return alignCell(renderInline(inline), a);
+            return alignCell(renderInline(inline, opts), a);
           })
           .join(" | ");
       };
@@ -363,12 +389,12 @@ function renderNode(node: TipTapNode): string {
     }
     case "tableRow": {
       // A row outside a table (shouldn't happen) falls back to its cells.
-      return renderBlock(node.content ?? []);
+      return renderBlock(node.content ?? [], opts);
     }
     case "image":
       // Top-level images are wrapped in a paragraph so the renderer emits
       // valid CommonMark (a bare ![..] line is a paragraph in the lexer).
-      return renderInline(node.content ?? []) + renderInlineNode(node);
+      return renderInline(node.content ?? [], opts) + renderInlineNode(node, opts);
     case "hardBreak":
       return "  \\\n";
     default: {
@@ -378,16 +404,16 @@ function renderNode(node: TipTapNode): string {
   }
 }
 
-function renderListItem(item: TipTapNode, marker: string): string {
-  const blocks = renderBlock(item.content ?? []).split("\n\n");
+function renderListItem(item: TipTapNode, marker: string, opts?: DocToMarkdownOptions): string {
+  const blocks = renderBlock(item.content ?? [], opts).split("\n\n");
   return blocks
     .map((b, i) => (i === 0 ? `${marker} ${b}` : `  ${b}`))
     .join("\n\n");
 }
 
-function renderTaskItem(item: TipTapNode): string {
+function renderTaskItem(item: TipTapNode, opts?: DocToMarkdownOptions): string {
   const checked = Boolean(item.attrs?.checked) ? "x" : " ";
-  const blocks = renderBlock(item.content ?? []).split("\n\n");
+  const blocks = renderBlock(item.content ?? [], opts).split("\n\n");
   return blocks
     .map((b, i) => (i === 0 ? `- [${checked}] ${b}` : `  ${b}`))
     .join("\n\n");
@@ -401,9 +427,16 @@ function collectText(node: TipTapNode): string {
   return "";
 }
 
-export function docToMarkdown(doc: TipTapDoc): string {
+export interface DocToMarkdownOptions {
+  // Public origin (e.g. PUBLIC_URL). When set, root-relative attachment image
+  // srcs are absolutized so pushed GitHub issue bodies carry absolute URLs.
+  // Pure option — no env access here; the call site passes the value.
+  baseUrl?: string;
+}
+
+export function docToMarkdown(doc: TipTapDoc, opts?: DocToMarkdownOptions): string {
   try {
-    return renderBlock(doc.content as TipTapNode[]);
+    return renderBlock(doc.content as TipTapNode[], opts);
   } catch {
     return "";
   }

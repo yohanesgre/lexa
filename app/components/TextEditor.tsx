@@ -7,6 +7,7 @@ import { ForgePopover } from "./forge/ForgePopover";
 import { ForgeReviewSurface } from "./forge/ForgeReviewSurface";
 import { useForgeReview, type ForgeReviewIdentity } from "./forge/useForgeReview";
 import { textEditorExtensions } from "../lib/tiptap";
+import { useAttachmentEmbeds } from "../lib/useAttachmentEmbeds";
 import Placeholder from "@tiptap/extension-placeholder";
 
 interface TextEditorProps {
@@ -20,6 +21,13 @@ interface TextEditorProps {
   extensions?: typeof textEditorExtensions;
   // Forge (AI writing assistant) wiring
   forge?: {
+    slug: string;
+    documentType: "task" | "wiki";
+    documentId: string;
+  };
+  // Paste/drop-to-embed uploads (attachments API). Absent in create mode —
+  // there is no taskId to attach to yet.
+  attachments?: {
     slug: string;
     documentType: "task" | "wiki";
     documentId: string;
@@ -236,6 +244,7 @@ export function TextEditor({
   className,
   extensions,
   forge,
+  attachments,
   onReviewStateChange,
 }: TextEditorProps) {
   const onBlurRef = useRef(onBlur);
@@ -268,13 +277,19 @@ export function TextEditor({
     });
   }, [extensions, placeholder]);
 
+  // Hooks run unconditionally — empty options when attachments wiring is
+  // absent (create mode); handlers only spread while active.
+  const embeds = useAttachmentEmbeds(attachments ?? { slug: "", documentType: "task", documentId: "" });
+  const embedsActive = !!(attachments && attachments.slug && attachments.documentId);
+
   const editor = useEditor({
     immediatelyRender: false,
     extensions: finalExtensions,
     content: initialContent as unknown as JSONContent,
     editable,
     editorProps: {
-      ...editorProps,
+      ...(editorProps as Record<string, unknown>),
+      ...(embedsActive ? { handlePaste: embeds.handlePaste, handleDrop: embeds.handleDrop } : {}),
       handleDOMEvents: {
         ...(editorProps as Record<string, any> | undefined)?.handleDOMEvents,
         // Returning true stops ProseMirror's focusEvents plugin, so the

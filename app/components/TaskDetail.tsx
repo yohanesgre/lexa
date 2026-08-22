@@ -18,6 +18,7 @@ import { DeleteTaskDialog } from "./DeleteTaskDialog";
 import { MissingFieldsWarning } from "./MissingFieldsWarning";
 import { TaskPropertyBar } from "./TaskPropertyBar";
 import { GitHubSection } from "./GitHubSection";
+import { AttachmentsPanel } from "./AttachmentsPanel";
 import { TaskFooter } from "./TaskFooter";
 import { Toolbar } from "./TextEditor";
 import { textEditorExtensions } from "../lib/tiptap";
@@ -339,6 +340,9 @@ export function TaskDetail({ mode = "view", task, project, defaultColumnId, colu
           onLink={onLinkGithub!}
           onUnlink={onUnlinkGithub!}
         />
+        )}
+        {!isCreate && slug && (
+          <AttachmentsPanel slug={slug} taskId={task!.id} />
         )}
         </>
         ) : (

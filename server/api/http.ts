@@ -1,13 +1,15 @@
 import { HttpApi, HttpApiBuilder, HttpApiEndpoint, HttpApiGroup, HttpMiddleware, HttpServerResponse } from "@effect/platform";
-import { Cause, Effect, Layer, ManagedRuntime, Schema } from "effect";
+import { HttpServerRequest } from "@effect/platform/HttpServerRequest";
+import * as Multipart from "@effect/platform/Multipart";
+import { Cause, Effect, Layer, ManagedRuntime, Schema, Stream } from "effect";
 import { createHash, randomBytes } from "node:crypto";
 import { readFileSync, existsSync } from "node:fs";
-import { join } from "node:path";
+import { join, dirname } from "node:path";
 import { LoggerLayer } from "../logging/logger";
 import { Sqlite, withTx, DbError, queryFirst } from "../db/database";
 import { Database } from "bun:sqlite";
 import { getSetting, setSetting, deleteSetting } from "../db/settings";
-import { ProjectNotFound, WikiPageNotFound, MachineNotFound, Forbidden, SetupLocked, TaskNotFound, InvalidName, InvalidRateLimit, InvalidGithubSettings, NoUserContext, GithubApiError, errorResponse, errorToStatus, ProjectAccessDenied } from "./errors";
+import { ProjectNotFound, WikiPageNotFound, MachineNotFound, Forbidden, SetupLocked, TaskNotFound, InvalidName, InvalidRateLimit, InvalidGithubSettings, NoUserContext, InvalidArgs, GithubApiError, errorResponse, errorToStatus, ProjectAccessDenied } from "./errors";
 import { respond } from "./http-helpers";
 import { resolveTaskId } from "./task-id";
 import { parseTaskKey } from "../task-key";
@@ -37,6 +39,11 @@ import { WikiRepo } from "../repos/wiki.repo";
 import { WikiShareService } from "../services/wiki-share.service";
 import { WikiShareRepo } from "../repos/wiki-share.repo";
 import type { WikiShareLinkRow } from "../repos/wiki-share.repo";
+import { AttachmentService } from "../services/attachment.service";
+import type { ServeAttachment } from "../services/attachment.service";
+import { AttachmentRepo } from "../repos/attachment.repo";
+import { Storage, StorageConfig } from "../storage/storage";
+import { resolveStorageConfig, bodyCapFor } from "../storage/config";
 import { ApiKeyService } from "../services/api-key.service";
 import { ApiKeyRepo } from "../repos/api-key.repo";
 import { UserService } from "../services/user.service";
@@ -791,7 +798,8 @@ const ActivityEventSchema = Schema.Struct({
     "link_added", "link_removed", "source_added", "source_removed",
     "github_linked", "github_unlinked", "github_synced",
     "forge_completed", "forge_failed", "forge_cancelled",
-    "commented", "comment_deleted"),
+    "commented", "comment_deleted",
+    "attachment_added", "attachment_removed"),
   message: Schema.String,
   createdAt: Schema.String,
 });
@@ -1040,6 +1048,8 @@ const SharedPageNodeSchema = Schema.Struct({
 const WikiSharePublicResponse = Schema.Struct({ root: SharedPageNodeSchema });
 
 const ShareTokenPath = Schema.Struct({ token: Schema.String });
+
+const ShareAttachmentPath = Schema.Struct({ token: Schema.String, id: Schema.String });
 
 const SwimlaneMutationResponse = Schema.Struct({
   data: SwimlaneSchema,
@@ -1292,7 +1302,50 @@ const wikiGroup = HttpApiGroup.make("wiki")
 // (stricter rate bucket instead); the handler consumes NO AuthIdentity.
 const publicShareGroup = HttpApiGroup.make("publicShare")
   .add(HttpApiEndpoint.get("getSharedWiki", "/share/:token")
-    .setPath(ShareTokenPath).addSuccess(WikiSharePublicResponse));
+    .setPath(ShareTokenPath).addSuccess(WikiSharePublicResponse))
+  .add(HttpApiEndpoint.get("getSharedAttachment", "/share/:token/attachments/:id")
+    .setPath(ShareAttachmentPath).addSuccess(Schema.Void, { status: 200 }));
+
+// ── Attachments ──
+const AttachmentSchema = Schema.Struct({
+  id: Schema.String,
+  projectId: Schema.String,
+  taskId: Schema.NullOr(Schema.String),
+  wikiPageId: Schema.NullOr(Schema.String),
+  filename: Schema.String,
+  mimeType: Schema.String,
+  sizeBytes: Schema.Number,
+  sha256: Schema.String,
+  uploadedBy: Schema.NullOr(Schema.String),
+  uploadedByLabel: Schema.NullOr(Schema.String),
+  createdAt: Schema.String,
+});
+
+const AttachmentResponse = Schema.Struct({ data: AttachmentSchema });
+
+const AttachmentListResponse = Schema.Struct({ data: Schema.Array(AttachmentSchema) });
+
+const AttachmentMutationResponse = Schema.Struct({
+  data: AttachmentSchema,
+  activity: Schema.Array(ActivityEventSchema),
+});
+
+const AttachmentIdPath = Schema.Struct({ id: Schema.String });
+const TaskAttachmentPath = Schema.Struct({ slug: Schema.String, taskId: Schema.String });
+
+const attachmentsGroup = HttpApiGroup.make("attachments")
+  .add(HttpApiEndpoint.post("uploadTaskAttachment", "/projects/:slug/tasks/:taskId/attachments")
+    .setPath(TaskAttachmentPath).addSuccess(AttachmentMutationResponse, { status: 201 }))
+  .add(HttpApiEndpoint.get("listTaskAttachments", "/projects/:slug/tasks/:taskId/attachments")
+    .setPath(TaskAttachmentPath).addSuccess(AttachmentListResponse))
+  .add(HttpApiEndpoint.post("uploadWikiAttachment", "/projects/:slug/wiki/pages/:pageSlug/attachments")
+    .setPath(PagePath).addSuccess(AttachmentResponse, { status: 201 }))
+  .add(HttpApiEndpoint.get("listWikiAttachments", "/projects/:slug/wiki/pages/:pageSlug/attachments")
+    .setPath(PagePath).addSuccess(AttachmentListResponse))
+  .add(HttpApiEndpoint.get("getAttachment", "/attachments/:id")
+    .setPath(AttachmentIdPath).addSuccess(Schema.Void, { status: 200 }))
+  .add(HttpApiEndpoint.del("deleteAttachment", "/attachments/:id")
+    .setPath(AttachmentIdPath).addSuccess(Schema.Void, { status: 204 }));
 
 const ApiKeyPath = Schema.Struct({ id: Schema.String });
 
@@ -1416,6 +1469,7 @@ export const LexaApi = HttpApi.make("lexa")
   .add(workspaceGroup)
   .add(sessionsGroup)
   .add(publicShareGroup)
+  .add(attachmentsGroup)
   .prefix("/api");
 
 const apiLayer = HttpApiBuilder.api(LexaApi);
@@ -3053,6 +3107,148 @@ const publicShareLive = HttpApiBuilder.group(LexaApi, "publicShare", (handlers) 
       return yield* shareService.resolvePublic(req.path.token);
     }))
   )
+  .handle("getSharedAttachment", (req) =>
+    respond(Effect.gen(function* () {
+      const attachmentService = yield* AttachmentService;
+      const serve = yield* attachmentService.resolveShare(req.path.token, req.path.id);
+      return attachmentHttpResponse(serve);
+    }))
+  )
+);
+
+// ── Attachments ──
+
+// First File part of the multipart body. Non-multipart content types and
+// missing file fields fail with InvalidArgs (422), not a raw parse error.
+const readMultipartFile = (): Effect.Effect<
+  { filename: string; bytes: Uint8Array },
+  InvalidArgs | Multipart.MultipartError,
+  HttpServerRequest
+> =>
+  Effect.gen(function* () {
+    const request = yield* HttpServerRequest;
+    const contentType = String(request.headers["content-type"] ?? "");
+    if (!contentType.startsWith("multipart/form-data")) {
+      return yield* new InvalidArgs({ reason: "expected multipart/form-data with a 'file' field" });
+    }
+    const parts = Array.from(yield* Stream.runCollect(request.multipartStream));
+    for (const part of parts) {
+      if (part._tag === "File") {
+        const bytes = yield* part.contentEffect;
+        return { filename: part.name || part.key || "file", bytes };
+      }
+    }
+    return yield* new InvalidArgs({ reason: "multipart file field 'file' is required" });
+  });
+
+// RFC 6266 disposition: ASCII fallback + RFC 5987 UTF-8 form for unicode names.
+function contentDisposition(inline: boolean, filename: string): string {
+  const ascii = filename.replace(/[^\x20-\x7e]/g, "_").replace(/["\\]/g, "_") || "file";
+  const type = inline ? "inline" : "attachment";
+  return `${type}; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(filename)}`;
+}
+
+// Binary response bypasses the JSON encoder (raw HttpServerResponse passthrough).
+function attachmentHttpResponse(serve: ServeAttachment): HttpServerResponse.HttpServerResponse {
+  return HttpServerResponse.raw(serve.bytes, {
+    contentType: serve.row.mime_type,
+    headers: { "Content-Disposition": contentDisposition(serve.inline, serve.row.filename) },
+  });
+}
+
+const attachmentsLive = HttpApiBuilder.group(LexaApi, "attachments", (handlers) =>
+  handlers
+    .handle("uploadTaskAttachment", (req) =>
+      respond(Effect.gen(function* () {
+        const identity = yield* AuthIdentity;
+        const attachmentService = yield* AttachmentService;
+        const taskService = yield* TaskService;
+        const project = yield* requireProjectRead(req.path.slug);
+        const taskId = yield* resolveTaskId(req.path.taskId, req.path.slug);
+        const task = yield* taskService.getById(taskId);
+        if (task.projectId !== project.id) {
+          return yield* new TaskNotFound({ id: req.path.taskId });
+        }
+        const file = yield* readMultipartFile();
+        const result = yield* attachmentService.upload({
+          projectId: project.id,
+          taskId: task.id,
+          wikiPageId: null,
+          filename: file.filename,
+          bytes: file.bytes,
+          actor: actorFromIdentity(identity),
+        });
+        return {
+          data: result.attachment,
+          activity: result.activity ? activityPayload([result.activity]) : [],
+        };
+      }))
+    )
+    .handle("uploadWikiAttachment", (req) =>
+      respond(Effect.gen(function* () {
+        const identity = yield* AuthIdentity;
+        const attachmentService = yield* AttachmentService;
+        const wikiService = yield* WikiService;
+        const project = yield* requireProjectRead(req.path.slug);
+        const page = yield* wikiService.findBySlug(project.id, req.path.pageSlug);
+        const file = yield* readMultipartFile();
+        // Wiki-page uploads emit NO activity — wiki has no timeline.
+        const result = yield* attachmentService.upload({
+          projectId: project.id,
+          taskId: null,
+          wikiPageId: page.id,
+          filename: file.filename,
+          bytes: file.bytes,
+          actor: actorFromIdentity(identity),
+        });
+        return { data: result.attachment };
+      }))
+    )
+    .handle("listTaskAttachments", (req) =>
+      respond(Effect.gen(function* () {
+        const attachmentService = yield* AttachmentService;
+        const taskService = yield* TaskService;
+        const project = yield* requireProjectRead(req.path.slug);
+        const taskId = yield* resolveTaskId(req.path.taskId, req.path.slug);
+        const task = yield* taskService.getById(taskId);
+        if (task.projectId !== project.id) {
+          return yield* new TaskNotFound({ id: req.path.taskId });
+        }
+        return { data: yield* attachmentService.listForTask(task.id, project.id) };
+      }))
+    )
+    .handle("listWikiAttachments", (req) =>
+      respond(Effect.gen(function* () {
+        const attachmentService = yield* AttachmentService;
+        const wikiService = yield* WikiService;
+        const project = yield* requireProjectRead(req.path.slug);
+        const page = yield* wikiService.findBySlug(project.id, req.path.pageSlug);
+        return { data: yield* attachmentService.listForWikiPage(page.id, project.id) };
+      }))
+    )
+    .handle("getAttachment", (req) =>
+      respond(Effect.gen(function* () {
+        const identity = yield* AuthIdentity;
+        const attachmentService = yield* AttachmentService;
+        const serve = yield* attachmentService.serve(req.path.id);
+        if (identity.role !== "admin" && identity.userId) {
+          const authz = yield* AuthorizationService;
+          const access = yield* authz.projectAccess(identity.userId, serve.row.project_id);
+          if (!access) {
+            return yield* new ProjectAccessDenied({ project: serve.row.project_id, role: "member" });
+          }
+        }
+        return attachmentHttpResponse(serve);
+      }))
+    )
+    .handle("deleteAttachment", (req) =>
+      respond(Effect.gen(function* () {
+        const identity = yield* AuthIdentity;
+        const attachmentService = yield* AttachmentService;
+        yield* attachmentService.remove(req.path.id, identity);
+        return undefined;
+      }))
+    )
 );
 
 const apiKeysLive = HttpApiBuilder.group(LexaApi, "api-keys", (handlers) =>  handlers
@@ -3296,9 +3492,9 @@ export function createApiHandler(dbPath: string) {
   db.exec("PRAGMA busy_timeout = 5000");
   const dbLayer = Layer.succeed(Sqlite, db);
 
-  const serviceLayer = buildServiceLayer();
+  const serviceLayer = buildServiceLayer(dbPath);
   const handlerLayer = Layer.mergeAll(
-    healthLive, setupLive, projectsLive, columnsLive, swimlanesLive, milestonesLive, fieldConfigLive, forgeLive, taskLinksLive, tasksLive, boardLive, wikiLive, publicShareLive, apiKeysLive, adminLive, meLive, dashboardLive,
+    healthLive, setupLive, projectsLive, columnsLive, swimlanesLive, milestonesLive, fieldConfigLive, forgeLive, taskLinksLive, tasksLive, boardLive, wikiLive, publicShareLive, attachmentsLive, apiKeysLive, adminLive, meLive, dashboardLive,
     createTeamsLive(LexaApi), createWorkspaceLive(LexaApi), createSessionsLive(LexaApi),
   ).pipe(Layer.provide(Layer.provide(serviceLayer, Layer.mergeAll(dbLayer, LoggerLayer))), Layer.provide(dbLayer));
   const merged = Layer.mergeAll(apiLayer, handlerLayer);
@@ -3320,7 +3516,8 @@ export function createApiHandler(dbPath: string) {
   };
 }
 
-function buildServiceLayer() {
+function buildServiceLayer(dbPath: string) {
+  const storageCfg = resolveStorageConfig(process.env, dirname(dbPath));
   return Layer.mergeAll(
     ProjectRepo.Default, ProjectService.Default, ProjectReposRepo.Default,
     ColumnRepo.Default, ColumnService.Default,
@@ -3336,6 +3533,7 @@ function buildServiceLayer() {
     ActivityRepo.Default, CommentRepo.Default, ActivityService.Default, CommentService.Default,
     WikiRepo.Default, WikiService.Default,
     WikiShareRepo.Default, WikiShareService.Default,
+    AttachmentRepo.Default, AttachmentService.Default.pipe(Layer.provide(storageLayerFor(storageCfg)), Layer.provide(Layer.succeed(StorageConfig, storageCfg))),
     ApiKeyRepo.Default, ApiKeyService.Default,
     UserRepo.Default, UserService.Default,
     UserProjectRoleRepo.Default, UserProjectRoleService.Default,
@@ -3345,6 +3543,12 @@ function buildServiceLayer() {
     TeamsService.Default, WorkspaceService.Default, AuthorizationService.Default,
     WorkspaceInvitesService.Default, PasswordLinksService.Default,
   );
+}
+
+// Boot-time env config (like DATABASE_PATH): fs root under the DB volume,
+// s3 credentials + upload cap from env. Resolved once per handler build.
+function storageLayerFor(cfg: ReturnType<typeof resolveStorageConfig>) {
+  return Storage.Default.pipe(Layer.provide(Layer.succeed(StorageConfig, cfg)));
 }
 
 // Webhook route — OUTSIDE the HttpApi app (HttpApi reads the body before
@@ -3359,7 +3563,7 @@ function buildWebhookRuntime(dbPath: string) {
   db.exec("PRAGMA busy_timeout = 5000");
   return ManagedRuntime.make(
     Layer.provideMerge(
-      buildServiceLayer(),
+      buildServiceLayer(dbPath),
       Layer.mergeAll(Layer.succeed(Sqlite, db), LoggerLayer),
     )
   );

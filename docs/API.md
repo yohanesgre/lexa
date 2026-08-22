@@ -42,6 +42,7 @@ All non-2xx responses share one shape:
 | 404 | `TEAM_NOT_FOUND` `INVITE_NOT_FOUND` `SESSION_NOT_FOUND` | Unknown team / invite / own-session id |
 | 404 | `PROJECT_NOT_FOUND` `COLUMN_NOT_FOUND` `SWIMLANE_NOT_FOUND` `MILESTONE_NOT_FOUND` `TASK_NOT_FOUND` `PAGE_NOT_FOUND` `SOURCE_NOT_FOUND` `FORGE_TASK_NOT_FOUND` `TASK_LINK_NOT_FOUND` `MACHINE_NOT_FOUND` `RUNTIME_NOT_FOUND` `RUNTIME_EVENT_NOT_FOUND` `API_KEY_NOT_FOUND` `AGENT_NOT_FOUND` `SKILL_NOT_FOUND` | |
 | 404 | `SHARE_LINK_NOT_FOUND` | Wiki share link unknown, expired, or revoked — all three return this identical envelope (no existence oracle) |
+| 404 | `ATTACHMENT_NOT_FOUND` | Unknown attachment id, blob missing, or attachment outside the shared subtree on the share route |
 | 409 | `SLUG_TAKEN` | Duplicate project slug, wiki slug, or team slug (details: `{ slug }`); also the constraint fallback on project update/delete |
 | 409 | `INVITE_PENDING` | An invite is already pending for that email (details: `{ email }`) |
 | 409 | `MACHINE_ID_TAKEN` | Machine id already registered to another host, legacy (no secret), or secret mismatch (details: `{ id, reason: "hostname" \| "legacy" \| "secret_mismatch" }`) |
@@ -57,7 +58,9 @@ All non-2xx responses share one shape:
 | 409 | `FORGE_ENTITY_IN_USE` | Delete agent/skill still used by forge tasks (details: `{ kind, name, count }`) |
 | 409 | `TEAM_HAS_PROJECTS` | Delete team while it owns projects (details: `{ count }` — reassign projects first) |
 | 409 | `CONSTRAINT` | Generic constraint-violation fallback (typed codes like `SLUG_TAKEN` / `HAS_CHILDREN` / `OPTION_IN_USE` are raised whenever possible) |
-| 413 | `BODY_TOO_LARGE` | Request body exceeds `LXK_MAX_BODY_MB` (default 16) — early gates, before auth: stream cap in `server/entry.ts` (chunked/CL-less bodies included) + declared-length pre-check in the API middleware |
+| 413 | `BODY_TOO_LARGE` | Request body exceeds `LXK_MAX_BODY_MB` (default 16) — early gates, before auth: stream cap in `server/entry.ts` (chunked/CL-less bodies included) + declared-length pre-check in the API middleware. Attachment-upload paths get a raised cap (`LXK_MAX_UPLOAD_MB` + multipart slack) so legit uploads reach the route. |
+| 413 | `PAYLOAD_TOO_LARGE` | Uploaded file exceeds `LXK_MAX_UPLOAD_MB` (default 25) — enforced at the route after multipart parse (details: `{ size, maxBytes }`) |
+| 403 | `ATTACHMENT_DELETE_FORBIDDEN` | Attachment delete without uploader/admin authority |
 | 422 | `REQUIRED_FIELD` | Column's `required_fields` not satisfied (details: `{ field, column }`) |
 | 422 | `NEIGHBOR_NOT_IN_COLUMN` | `beforeTaskId`/`afterTaskId` not in target column (details: `{ taskId }`) |
 | 422 | `INVALID_OPTION` | Unknown priority/type option id, duplicate label, or empty option list (details: `{ optionId? }`) |
@@ -124,7 +127,9 @@ via the session cookie.
   - `GET /api/share/:token` — public wiki share links (capability URL: no key,
     no session). Still IP-rate-limited with a dedicated stricter bucket;
     security headers unchanged. Unknown/expired/revoked tokens return the
-    identical generic 404 (no existence oracle).
+    identical generic 404 (no existence oracle). `GET
+    /api/share/:token/attachments/:id` joins this exemption — same bucket,
+    token validated per request.
   - `POST /api/webhooks/github` — HMAC-SHA-256 signature over the raw body is the auth
   - `/api/forge/daemon/*`, `/api/forge/runtimes/register`, and
     `/api/forge/sessions` — also accept the
@@ -415,6 +420,25 @@ interface TaskLinkSuggestion {
   type: ID;             // type_options.id
   priority: ID;         // priority_options.id
 }
+
+interface Attachment {
+  id: ID;
+  projectId: ID;
+  taskId: ID | null;      // exactly one of taskId / wikiPageId
+  wikiPageId: ID | null;
+  filename: string;       // sanitized (basename, control chars stripped, ≤255)
+  mimeType: string;       // SERVER-SNIFFED at upload — client mime never stored
+  sizeBytes: number;
+  sha256: string;         // hex; dedupe key per project — UNIQUE(project_id, sha256)
+  uploadedBy: ID | null;  // session user or key owner; NULL = unbound key
+  uploadedByLabel: string | null;  // users.name resolved server-side
+  createdAt: ISODate;
+}
+// Upload dedupe: re-uploading identical bytes to the same project returns the
+// EXISTING row unchanged (no second activity row, no blob rewrite). Blobs are
+// content-addressed globally by sha256 and deleted when the last referencing
+// row goes. Serving: inline ONLY for image/* + application/pdf — everything
+// else downloads via Content-Disposition: attachment (+ nosniff always).
 
 interface Board {                 // GET /board — full snapshot, unpaginated
   project: Project;
@@ -731,6 +755,50 @@ GET    /api/projects/:slug/board?includeArchived=true
   includeArchived=true; sprintCount/archivedSprintCount always present)
 ```
 
+### Attachments
+
+Multipart upload (`multipart/form-data`, single file field `file`). Sizes are
+small-medium; downloads stream through the Bun server proxy — NO presigned
+URLs anywhere. Upload cap: `LXK_MAX_UPLOAD_MB` (default 25) → 413
+`PAYLOAD_TOO_LARGE`. The global body cap (`BODY_TOO_LARGE`) is raised on the
+upload paths so a legit large upload never trips it first.
+
+```
+POST   /api/projects/:slug/tasks/:taskId/attachments      (multipart, field "file")
+→ 201 Attachment | 404 TASK_NOT_FOUND / PROJECT_ACCESS_DENIED | 413 PAYLOAD_TOO_LARGE
+  Task attachments emit an `attachment_added` activity row in the same
+  transaction (returned as `activity` per the mutation-response rule).
+  Dedupe hit (same project + sha256) → 201 Attachment with the EXISTING row
+  unchanged and `activity: []` (no second activity row, no blob rewrite).
+
+GET    /api/projects/:slug/tasks/:taskId/attachments
+→ 200 { data: Attachment[] } — oldest first (created_at ASC, id ASC)
+| 404 TASK_NOT_FOUND / PROJECT_ACCESS_DENIED
+
+POST   /api/projects/:slug/wiki/pages/:pageSlug/attachments   (multipart, field "file")
+→ 201 Attachment | 404 PAGE_NOT_FOUND / PROJECT_ACCESS_DENIED | 413 PAYLOAD_TOO_LARGE
+  Wiki-page uploads emit NO activity (wiki has no timeline). Same dedupe rule.
+
+GET    /api/projects/:slug/wiki/pages/:pageSlug/attachments
+→ 200 { data: Attachment[] } — oldest first (created_at ASC, id ASC)
+| 404 PAGE_NOT_FOUND / PROJECT_ACCESS_DENIED
+
+GET    /api/attachments/:id
+→ 200 binary (Content-Type = sniffed mime; Content-Disposition inline for
+   image/* + application/pdf, attachment otherwise; X-Content-Type-Options:
+   nosniff always)
+| 404 ATTACHMENT_NOT_FOUND (unknown id or blob missing) | 403 PROJECT_ACCESS_DENIED
+
+DELETE /api/attachments/:id
+→ 204 | 404 ATTACHMENT_NOT_FOUND | 403 ATTACHMENT_DELETE_FORBIDDEN
+  Authority: uploader OR project admin (superadmin / project grant admin /
+  team admin of the owning org). Task attachments emit `attachment_removed`
+  in the same transaction. The blob is deleted only when no other row
+  references its storage_key.
+```
+
+Event types added: `attachment_added` · `attachment_removed`.
+
 ### Activity & Comments
 
 ```
@@ -943,6 +1011,15 @@ GET    /api/share/:token          (PUBLIC — no auth; dedicated stricter rate-l
   link; navigation is limited to the subtree).
 | 404 SHARE_LINK_NOT_FOUND    (missing == expired == revoked — identical envelope)
 | 429                         (bucket exhaustion)
+
+GET    /api/share/:token/attachments/:id   (PUBLIC — same bucket + rules)
+→ 200 binary (same sniffed-mime / disposition / nosniff rules as
+   GET /api/attachments/:id)
+| 404 SHARE_LINK_NOT_FOUND    (token missing/expired/revoked — validated per request;
+                               revoking the link kills attachment access immediately)
+| 404 ATTACHMENT_NOT_FOUND    (unknown id, or attachment not in the shared subtree)
+  Only wiki-page attachments whose page lies inside the shared subtree are
+  reachable; task attachments are never exposed through share links.
 ```
 
 ### Settings
