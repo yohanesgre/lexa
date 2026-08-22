@@ -362,6 +362,40 @@ CREATE TABLE task_assignees (
 );
 
 -- ============================================================
+-- Attachments (per-project rows over content-addressed blobs)
+-- ============================================================
+-- Rows are per-project: UNIQUE(project_id, sha256) dedupes re-uploads of the
+-- same bytes within one project (a dedupe hit returns the existing row
+-- unchanged — no second activity row, no blob rewrite). The blob itself is
+-- content-addressed GLOBALLY by sha256 (storage_key = "blobs/<sha256>"), so
+-- identical files across projects share one stored object; the blob is
+-- deleted when the last referencing row goes.
+-- Insert-only row — no updated_at (task_github_issues precedent).
+-- Exactly one of task_id / wiki_page_id is set (CHECK); task attachments emit
+-- attachment_added / attachment_removed activity rows in the same transaction
+-- as the mutation; wiki-page uploads emit nothing (wiki has no timeline).
+-- mime_type is SERVER-SNIFFED at upload (magic bytes) — the client-declared
+-- content type is never trusted or stored.
+CREATE TABLE attachments (
+  id            TEXT PRIMARY KEY,
+  project_id    TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  task_id       TEXT REFERENCES tasks(id) ON DELETE CASCADE,
+  wiki_page_id  TEXT REFERENCES wiki_pages(id) ON DELETE CASCADE,
+  filename      TEXT NOT NULL,
+  mime_type     TEXT NOT NULL,
+  size_bytes    INTEGER NOT NULL,
+  sha256        TEXT NOT NULL,
+  storage_key   TEXT NOT NULL,
+  uploaded_by   TEXT REFERENCES users(id) ON DELETE SET NULL,
+  created_at    TEXT NOT NULL DEFAULT (datetime('now')),
+  CHECK ((task_id IS NULL) != (wiki_page_id IS NULL)),
+  UNIQUE(project_id, sha256)
+);
+CREATE INDEX idx_attachments_task ON attachments(task_id);
+CREATE INDEX idx_attachments_wiki_page ON attachments(wiki_page_id);
+CREATE INDEX idx_attachments_storage_key ON attachments(storage_key);
+
+-- ============================================================
 -- Wiki Pages (nested, TipTap content)
 -- ============================================================
 -- parent_id ON DELETE RESTRICT: deleting a page with children fails
@@ -911,6 +945,14 @@ Content sync (title + description) is asymmetric: Lexa pushes on task save (TipT
 
 ### One task ↔ many issues
 Multiple GitHub issues can link to one task. Each link has its own `synced_state` for per-issue echo suppression. The webhook looks up by `issue_id` in `task_github_issues` to find the task.
+
+### Attachments — per-project rows, global blobs
+Two-level model: `attachments` rows are scoped to a project (UNIQUE(project_id, sha256) — the dedupe key), while the bytes live in ONE content-addressed object per sha256 (`storage_key = "blobs/<sha256>"`) shared across projects. Consequences:
+
+- **Dedupe hit** (same project, same bytes): the upload returns the EXISTING row unchanged — no new row, no second activity row, no blob rewrite.
+- **Blob lifecycle:** a blob is deleted only when the last `attachments` row referencing its storage_key goes (refcount query at delete time). Delete authority: uploader OR project admin.
+- **Orphan blobs are possible and harmless:** FK cascades (project/task/page delete) remove rows without app-level blob cleanup, as does a crash between blob write and row insert. Re-uploading the same bytes re-links the orphan. Periodic GC is out of scope.
+- **mime_type is server-derived** from magic-byte sniffing at upload; serving inline is allowed ONLY for image/* and application/pdf — everything else downloads via Content-Disposition: attachment with X-Content-Type-Options: nosniff.
 
 ### FTS5 for `search_wiki`
 The `wiki_fts` external-content table + triggers keep the index in sync automatically. The app maintains `content_text` (plain-text projection of TipTap JSON) on every wiki write — searching raw TipTap JSON would match syntax tokens, not words.

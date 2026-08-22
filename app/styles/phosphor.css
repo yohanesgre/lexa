@@ -5603,3 +5603,38 @@
   padding: 4px 6px;
 }
 .sl-link-btn:hover { background: var(--lx-surface-card-hover); text-decoration: underline; }
+
+/* ---- Attachments panel (task-detail-attachments wireframe) ---- */
+.attachments-dropzone {
+  border-radius: 6px;
+  transition: background 150ms ease-out, border-color 150ms ease-out;
+}
+.attachments-dropzone.active {
+  /* Drag-drop active: dashed focus border + accent tint over the panel */
+  border: 2px dashed var(--lx-border-focus);
+  background: var(--lx-bg-accent-subtle);
+}
+.attachments-thumb {
+  width: 28px;
+  height: 28px;
+  border-radius: 4px;
+  background: var(--lx-surface-column);
+  border: 1px solid var(--lx-border-default);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--lx-text-muted);
+  flex-shrink: 0;
+}
+.attachments-progress {
+  flex: 1;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--lx-surface-column);
+  overflow: hidden;
+}
+.attachments-progress-fill {
+  height: 100%;
+  border-radius: 2px;
+  background: var(--lx-text-link);
+}

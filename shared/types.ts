@@ -463,12 +463,29 @@ export type ActivityType =
   | "link_added" | "link_removed" | "source_added" | "source_removed"
   | "github_linked" | "github_unlinked" | "github_synced"
   | "forge_completed" | "forge_failed" | "forge_cancelled"
-  | "commented" | "comment_deleted";
+  | "commented" | "comment_deleted"
+  | "attachment_added" | "attachment_removed";
 
 export interface Actor {
   kind: ActorKind;
   label: string;
   userId?: string | null;
+}
+
+// Attachment row as served by the API. uploadedByLabel is resolved
+// server-side (users.name) so the UI shows a name without extra fetches.
+export interface Attachment {
+  id: ID;
+  projectId: ID;
+  taskId: ID | null;      // exactly one of taskId / wikiPageId
+  wikiPageId: ID | null;
+  filename: string;       // sanitized (basename, control chars stripped, ≤255)
+  mimeType: string;       // SERVER-SNIFFED at upload — client mime never stored
+  sizeBytes: number;
+  sha256: string;         // hex; dedupe key per project — UNIQUE(project_id, sha256)
+  uploadedBy: ID | null;  // session user or key owner; NULL = unbound key
+  uploadedByLabel: string | null;
+  createdAt: ISODate;
 }
 
 export interface ActivityEvent {

@@ -39,6 +39,7 @@ export function TaskDescriptionSection({ isCreate, slug, task, emptyDoc, taskTit
         initialContent={task!.description}
         editable={true}
         forge={slug ? { slug, documentType: "task", documentId: task!.id } : undefined}
+        attachments={slug ? { slug, documentId: task!.id } : undefined}
         onBlur={(doc) => {
           onUpdate?.(task!.id, { description: doc });
           setEditingDescription(false);

@@ -16,17 +16,18 @@
 │                   Service Layer                          │
 │  TaskService  WikiService  ProjectService               │
 │  ColumnService  SwimlaneService  MilestoneService        │
-│  WikiShareService                                        │
+│  WikiShareService  AttachmentService                     │
 │  GitHubService ──depends on──▶ TaskService               │
 │                        + ProjectService (webhooks)       │
 ├─────────────────────────────────────────────────────────┤
 │                 Repository Layer                         │
 │  TaskRepo  ProjectRepo  WikiRepo  ColumnRepo            │
 │  SwimlaneRepo  MilestoneRepo  ApiKeyRepo  WebhookEventRepo │
-│  WikiShareRepo                                           │
+│  WikiShareRepo  AttachmentRepo                           │
 ├─────────────────────────────────────────────────────────┤
 │               Infrastructure Layer                       │
 │  Sqlite (bun:sqlite)   GitHubClient   Config (env)      │
+│  Storage (fs | Bun.S3Client)                             │
 └─────────────────────────────────────────────────────────┘
 ```
 
@@ -83,6 +84,34 @@ export class GitHubClient extends Effect.Service<GitHubClient>()("GitHubClient",
     };
   }),
   dependencies: [/* ConfigLive */],
+}) {}
+
+// Blob storage (attachments + DB backups). Config is BOOT-TIME ENV like
+// DATABASE_PATH — never the settings DB:
+//   LXK_STORAGE_DRIVER=fs|s3          (default fs)
+//   fs root = <dirname(DATABASE_PATH)>/blobs/
+//   LXK_S3_ENDPOINT / LXK_S3_BUCKET / LXK_S3_ACCESS_KEY_ID /
+//   LXK_S3_SECRET_ACCESS_KEY           (s3 driver; Bun.S3Client)
+//   LXK_MAX_UPLOAD_MB                  (default 25 — upload cap, enforced at
+//                                       route level AND as entry/middleware
+//                                       body-cap raise for upload paths)
+// The service is driver-agnostic: put/get/delete/stat/list over opaque keys
+// ("blobs/<sha256>", "backups/<name>"). Drivers are plain factories
+// (createFsDriver/createS3Driver) so backup.ts and tests can use them
+// without an Effect runtime.
+export class StorageConfig extends Context.Tag("Lexa/StorageConfig")<StorageConfig, StorageConfigShape>() {}
+export class Storage extends Effect.Service<Storage>()("Lexa/Storage", {
+  effect: Effect.gen(function* () {
+    const cfg = yield* StorageConfig;
+    const driver = cfg.driver === "s3" ? createS3Driver(cfg.s3) : createFsDriver(cfg.fsRoot);
+    return {
+      put: (key: string, data: Uint8Array) => ...,   // Effect<void, StorageError>
+      get: (key: string) => ...,                     // Effect<Uint8Array, StorageError | KeyNotFound>
+      delete: (key: string) => ...,                  // Effect<void, StorageError>
+      stat: (key: string) => ...,                    // Effect<{ size } | null, StorageError>
+      list: (prefix: string) => ...,                 // Effect<string[], StorageError>
+    };
+  }),
 }) {}
 ```
 
@@ -612,6 +641,43 @@ edits pulled in by the `edited` handler) DO emit `field_changed` rows (actor
 system/'github') in the same transaction as the update — the invariant holds
 in both directions.
 
+### AttachmentService — uploads over content-addressed blobs
+
+```typescript
+class AttachmentNotFound extends Data.TaggedError("AttachmentNotFound")<{ id: string }> {}
+class PayloadTooLarge extends Data.TaggedError("PayloadTooLarge")<{ size: number; maxBytes: number }> {}
+class AttachmentDeleteForbidden extends Data.TaggedError("AttachmentDeleteForbidden")<{ id: string }> {}
+// → 404 / 413 PAYLOAD_TOO_LARGE / 403 via server/api/errors.ts errorCodeMap + errorToStatus
+
+export class AttachmentService extends Effect.Service<AttachmentService>()("Lexa/AttachmentService", {
+  dependencies: [AttachmentRepo.Default, Storage.Default, TaskRepo.Default, WikiRepo.Default,
+                 UserProjectRoleRepo.Default, ActivityService.Default],
+  effect: Effect.gen(function* () {
+    // upload({ projectId, taskId?, wikiPageId?, filename, bytes, declaredMime, actor })
+    //   1. size cap → PayloadTooLarge (413) BEFORE any write.
+    //   2. sha256 hex + magic-byte mime sniff (client mime NEVER stored).
+    //   3. Dedupe lookup UNIQUE(project_id, sha256): hit → existing row
+    //      UNCHANGED — no blob rewrite, no activity row.
+    //   4. Miss → storage.put("blobs/<sha256>") OUTSIDE the tx, then ONE
+    //      withTx: attachments INSERT + attachment_added activity row
+    //      (task attachments only — wiki-page uploads emit nothing).
+    //   5. filename sanitized (basename, control chars stripped, ≤255 chars).
+    // remove(attachmentId, identity)
+    //   Authority = uploader OR project admin (mirror CommentService.remove:
+    //   superadmin / user_project_roles admin / team admin of owning org).
+    //   ONE withTx: DELETE row + attachment_removed activity (task only);
+    //   AFTER commit, refcount(storage_key) === 0 → storage.delete best-effort
+    //   (failure logs a warn — orphan blobs are harmless by design).
+    // serve(attachmentId) → { row, bytes } for GET routes; missing blob →
+    //   AttachmentNotFound (+ warn log). Inline ONLY image/* + application/pdf;
+    //   everything else Content-Disposition: attachment (nosniff is global).
+    // resolveShare(token, attachmentId) → validates share link per request
+    //   (missing == expired == revoked → ShareLinkNotFound), then requires
+    //   attachment.wiki_page_id ∈ subtree(link.page_id) else AttachmentNotFound.
+  }),
+}) {}
+```
+
 **Actor resolution (attribution ≠ authorization):** browser users → the
 Better Auth session user (`actorFromIdentity` maps it to kind 'user'); API
 keys → kind 'agent' with the key's NAME as label and the key owner's
@@ -786,6 +852,9 @@ All list endpoints: `?limit` (default 50, max 200) + cursor (opaque: `"<columnId
 | `CommentEditForbidden` | 403 | edit another user's comment |
 | `CommentDeleteForbidden` | 403 | delete without author/admin authority |
 | `CommentInvalid` | 422 | invalid body (empty TipTap doc / >64KB) |
+| `AttachmentNotFound` | 404 | unknown attachment id, or blob missing, or attachment outside the shared subtree on the share route |
+| `PayloadTooLarge` | 413 | upload exceeds `LXK_MAX_UPLOAD_MB` (default 25) — route-level cap; the global body cap stays `BODY_TOO_LARGE` |
+| `AttachmentDeleteForbidden` | 403 | delete without uploader/admin authority |
 | `ShareLinkNotFound` | 404 | wiki share link resolve/revoke: unknown, expired, and revoked all fail identically (no existence oracle) |
 
 Note: `RowNotFound` (server/db/database.ts) is a repo-level error with no
@@ -810,6 +879,7 @@ SwimlaneService    → SwimlaneRepo, ProjectRepo, TaskRepo, ActivityService
 MilestoneService   → MilestoneRepo, SwimlaneRepo, TaskRepo, ProjectRepo, ActivityService
 ActivityService    → ActivityRepo, CommentRepo
 CommentService     → CommentRepo, ActivityRepo, TaskRepo, UserProjectRoleRepo
+AttachmentService  → AttachmentRepo, Storage, TaskRepo, WikiRepo, UserRepo, UserProjectRoleRepo, ActivityService
 DashboardService   → ProjectRepo, ProjectReposRepo, ColumnRepo, TaskRepo
 SessionService     → (Better Auth `auth` instance — getSession wrapper, try/catch)
 AuthorizationService → (no service/repo deps — raw SQLite only)
