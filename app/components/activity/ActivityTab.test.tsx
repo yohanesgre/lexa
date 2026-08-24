@@ -16,16 +16,16 @@ function json(body: unknown, status = 200): Response {
 
 const EVENT: ActivityItem = {
   kind: "event", id: 1, taskId: "t1", actorKind: "user", actorLabel: "Maria", actorUserId: null,
-  type: "created", message: "Maria created this task", createdAt: "2026-01-01T10:00:00.000Z",
+  type: "created", message: "Maria created this task", viaHerald: false, createdAt: "2026-01-01T10:00:00.000Z",
 };
 const AGENT_EVENT: ActivityItem = {
   kind: "event", id: 2, taskId: "t1", actorKind: "agent", actorLabel: "opencode", actorUserId: null,
-  type: "moved" as const, message: "opencode updated this task", createdAt: "2026-01-02T10:00:00.000Z",
+  type: "moved" as const, message: "opencode updated this task", viaHerald: false, createdAt: "2026-01-02T10:00:00.000Z",
 };
 const COMMENT: ActivityItem = {
   kind: "comment", id: 9, taskId: "t1", authorId: "u1", authorKind: "user", authorLabel: "Maria",
   body: { type: "doc", content: [{ type: "paragraph", content: [{ type: "text", text: "hello @Joao" }] }] },
-  editedAt: null, deletedAt: null, createdAt: "2026-01-03T10:00:00.000Z",
+  viaHerald: false, editedAt: null, deletedAt: null, createdAt: "2026-01-03T10:00:00.000Z",
 };
 
 const routes = new Map<string, unknown>();

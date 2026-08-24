@@ -244,3 +244,46 @@ describe("use-herald-stream reasoning frames", () => {
     expect(latest!.reasoningMs).toBeNull();
   });
 });
+
+describe("use-herald-stream write approvals", () => {
+  const fetchMock = vi.fn();
+
+  beforeEach(() => {
+    vi.stubGlobal("fetch", fetchMock);
+  });
+
+  afterEach(() => {
+    act(() => latest?.reset());
+    latest = null;
+    vi.unstubAllGlobals();
+  });
+
+  function sendAndRecord(key: string, res: Response) {
+    fetchMock.mockReturnValue(Promise.resolve(res));
+    render(<Harness k={key} />);
+    act(() => latest!.send("/api/herald/chat/stream", {}));
+  }
+
+  it("tool_pending frames accumulate as seq-sorted chips; suspended is a terminal status carrying the batchId", async () => {
+    sendAndRecord(
+      "approvals-suspend",
+      sseStream([
+        { type: "start", threadId: "t" },
+        { type: "delta", text: "Working…" },
+        { type: "tool_pending", approvalId: "a2", batchId: "b1", seq: 1, name: "move_task", diff: { type: "task_move", taskRef: "LEX-12", taskTitle: "T", fromColumn: "Backlog", toColumn: "In Progress" } },
+        { type: "tool_pending", approvalId: "a1", batchId: "b1", seq: 0, name: "create_task", diff: { type: "task_create", title: "Fix", fields: {} } },
+        { type: "suspended", batchId: "b1" },
+      ])
+    );
+
+    await waitFor(() => expect(latest!.status).toBe("suspended"));
+    expect(latest!.suspendedBatchId).toBe("b1");
+    // Seq order wins over arrival order; diff payloads ride through intact.
+    expect(latest!.pending.map((p) => p.approvalId)).toEqual(["a1", "a2"]);
+    expect(latest!.pending[0].diff).toMatchObject({ type: "task_create", title: "Fix" });
+    expect(latest!.pending[1].diff).toMatchObject({ type: "task_move", toColumn: "In Progress" });
+    expect(latest!.text).toBe("Working…");
+    // Stream end after `suspended` is NOT an error (terminal contract).
+    expect(latest!.error).toBeNull();
+  });
+});

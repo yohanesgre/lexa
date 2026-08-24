@@ -97,19 +97,19 @@ describe("POST /api/herald/tasks engine routing", () => {
     expect(res.status).toBe(201);
     const task = await res.json();
     expect(task.kind).toBe("blacksmith");
-    const row = db.prepare("SELECT doc_context FROM forge_tasks WHERE id = ?").get(task.id) as { doc_context: string };
+    const row = db.prepare("SELECT doc_context FROM hearth_tasks WHERE id = ?").get(task.id) as { doc_context: string };
     expect(row.doc_context).toContain("Task: HE-1");
   });
 
   it("engine=blacksmith + no online runtime → 409 NO_RUNTIME_ONLINE, no queue row", async () => {
     setEngine("blacksmith");
     setRuntime("offline");
-    const before = (db.prepare("SELECT COUNT(*) AS n FROM forge_tasks WHERE project_id = 'p1' AND kind = 'blacksmith'").get() as { n: number }).n;
+    const before = (db.prepare("SELECT COUNT(*) AS n FROM hearth_tasks WHERE project_id = 'p1' AND kind = 'blacksmith'").get() as { n: number }).n;
     const res = await handler(authed("POST", "/api/herald/tasks", taskBody({ agentId: "hearth-blacksmith" })));
     expect(res.status).toBe(409);
     const body = await res.json();
     expect(body.error.code).toBe("NO_RUNTIME_ONLINE");
-    const count = db.prepare("SELECT COUNT(*) AS n FROM forge_tasks WHERE project_id = 'p1' AND kind = 'blacksmith'").get() as { n: number };
+    const count = db.prepare("SELECT COUNT(*) AS n FROM hearth_tasks WHERE project_id = 'p1' AND kind = 'blacksmith'").get() as { n: number };
     expect(count.n).toBe(before);
   });
 
@@ -173,7 +173,7 @@ describe("vision chain gating on POST /api/herald/tasks", () => {
   it("attachments without any vision capability → 409 VISION_NOT_CONFIGURED, no queue row / thread write", async () => {
     setEngine("herald");
     db.exec(`UPDATE herald_settings SET primary_supports_images = 0, vision_model = NULL WHERE project_id = 'p1'`);
-    const beforeTasks = (db.prepare("SELECT COUNT(*) AS n FROM forge_tasks WHERE project_id = 'p1'").get() as { n: number }).n;
+    const beforeTasks = (db.prepare("SELECT COUNT(*) AS n FROM hearth_tasks WHERE project_id = 'p1'").get() as { n: number }).n;
     const beforeThreads = (db.prepare("SELECT COUNT(*) AS n FROM herald_threads WHERE document_type = 'task' AND document_id = 't1'").get() as { n: number }).n;
     const res = await handler(
       authed("POST", "/api/herald/tasks", taskBody({
@@ -183,7 +183,7 @@ describe("vision chain gating on POST /api/herald/tasks", () => {
     expect(res.status).toBe(409);
     const body = await res.json();
     expect(body.error.code).toBe("VISION_NOT_CONFIGURED");
-    const tasks = db.prepare("SELECT COUNT(*) AS n FROM forge_tasks WHERE project_id = 'p1'").get() as { n: number };
+    const tasks = db.prepare("SELECT COUNT(*) AS n FROM hearth_tasks WHERE project_id = 'p1'").get() as { n: number };
     const threads = db.prepare("SELECT COUNT(*) AS n FROM herald_threads WHERE document_type = 'task' AND document_id = 't1'").get() as { n: number };
     expect(tasks.n).toBe(beforeTasks);
     expect(threads.n).toBe(beforeThreads);

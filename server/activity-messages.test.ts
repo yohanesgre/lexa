@@ -14,7 +14,7 @@ describe("activity messages", () => {
     expect(m.linkRemoved("blocked_by", "EMB-22", "Boss arena trigger zones")).toBe("Removed blocked-by: EMB-22 · Boss arena trigger zones");
     expect(m.linkAdded("unknown_rel", "X", "Y")).toBe("Linked unknown_rel: X · Y");
     expect(m.githubSynced(107, "closed", "Done")).toBe("Issue #107 closed on GitHub — task moved to Done");
-    expect(m.forgeCompleted("opencode")).toBe("Forge: opencode completed — result ready");
+    expect(m.hearthCompleted("opencode")).toBe("Hearth: opencode completed — result ready");
     expect(m.commentDeleted("Maria")).toBe("Maria deleted a comment");
   });
 
@@ -27,8 +27,8 @@ describe("activity messages", () => {
     expect(m.formatActivityMessage("field_changed", { variant: "type", from: "Bug", to: "Feature" })).toBe("Type changed: Bug → Feature");
     expect(m.formatActivityMessage("field_changed", { variant: "assignees", actor: "Maria" })).toBe("Maria updated assignees");
     expect(m.formatActivityMessage("github_synced", { number: 107, state: "closed", toCol: "Done" })).toBe("Issue #107 closed on GitHub — task moved to Done");
-    expect(m.formatActivityMessage("forge_completed", { agent: "opencode" })).toBe("Forge: opencode completed — result ready");
-    expect(m.formatActivityMessage("forge_failed", {})).toBe("Forge run failed");
+    expect(m.formatActivityMessage("hearth_completed", { agent: "opencode" })).toBe("Hearth: opencode completed — result ready");
+    expect(m.formatActivityMessage("hearth_failed", {})).toBe("Hearth run failed");
   });
 
   it("formatActivityMessage covers every ActivityType with valid payloads", () => {
@@ -50,9 +50,9 @@ describe("activity messages", () => {
       ["github_linked", { repo: "owner/repo", number: 1 }, "Linked GitHub issue owner/repo #1"],
       ["github_unlinked", { repo: "owner/repo", number: 1 }, "Unlinked GitHub issue owner/repo #1"],
       ["github_synced", { number: 107, state: "closed", toCol: "Done" }, "Issue #107 closed on GitHub — task moved to Done"],
-      ["forge_completed", { agent: "opencode" }, "Forge: opencode completed — result ready"],
-      ["forge_failed", {}, "Forge run failed"],
-      ["forge_cancelled", {}, "Forge run cancelled"],
+      ["hearth_completed", { agent: "opencode" }, "Hearth: opencode completed — result ready"],
+      ["hearth_failed", {}, "Hearth run failed"],
+      ["hearth_cancelled", {}, "Hearth run cancelled"],
       ["commented", { actor: "Maria" }, "Maria commented"],
       ["comment_deleted", { actor: "Maria" }, "Maria deleted a comment"],
       ["attachment_added", { actor: "Maria", filename: "spec.pdf" }, "Maria attached spec.pdf"],

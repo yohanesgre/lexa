@@ -87,6 +87,17 @@ export function HeraldActivity({ items, tools, reasoningActive, reasoningMs, don
   }
 
   // Streaming: every element expanded, chronological, no folding.
+  // Pre-first-token window: no frames yet — a lone caret keeps the bubble
+  // visibly alive instead of rendering empty space while STREAMING runs.
+  if (items.length === 0) {
+    return (
+      <div className="bubble-md">
+        <span className="herald-stream-caret" aria-hidden="true">
+          ▍
+        </span>
+      </div>
+    );
+  }
   const lastReasoningItem = items.findLast((it) => it.kind === "reasoning");
   return (
     <>

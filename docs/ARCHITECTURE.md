@@ -29,7 +29,7 @@ projects
 │
 project_repos (N repos per project, each with roles)
 ├── id, project_id, repo ("owner/name", UNIQUE per project)
-├── source_role (Forge context + project label), workspace_role (issue link/create/sync)
+├── source_role (Hearth context + project label), workspace_role (issue link/create/sync)
 └── created_at — at least one role per row
 │
 columns (per project, ordered)
@@ -184,20 +184,20 @@ prevent spoofing — socket IP is only visible at this layer).
 Everything else runs as HttpApi middleware (`server/api/middleware.ts`),
 applied at build time, before route matching and before body decode:
 
-1. **Rate limit** — per-IP, `isPrivateIp`-gated `cf-connecting-ip` trust; `/api/setup` + `/api/health` ARE limited; key/token-gated Forge machine surfaces exempt (`/api/forge/daemon/*` + `/api/forge/runtimes/register` + `/api/forge/machines/heartbeat` — log streams and the 3s listener heartbeat must not 429); shares one bucket (`apiRateLimiter`); limits DB-configured (settings `settings.rate_limit_max` / `settings.rate_limit_window_ms`, code defaults 6000 req / 600_000 ms as fallback — `GET`/`PUT /api/settings/rate-limit`, applied at boot and on save via `syncRateLimitFromDb`). Failed logins on `/api/auth/*` are separately throttled by a small in-process memory limiter around `POST /api/auth/sign-in/email` (~5 attempts/60s per email, 15 min lockout, success resets) — Better Auth 1.6.27 has no bundled rate-limit plugin (declared deviation, `server/auth.ts`); the per-IP limiter above is untouched.
+1. **Rate limit** — per-IP, `isPrivateIp`-gated `cf-connecting-ip` trust; `/api/setup` + `/api/health` ARE limited; key/token-gated Hearth machine surfaces exempt (`/api/hearth/daemon/*` + `/api/hearth/runtimes/register` + `/api/hearth/machines/heartbeat` — log streams and the 3s listener heartbeat must not 429); shares one bucket (`apiRateLimiter`); limits DB-configured (settings `settings.rate_limit_max` / `settings.rate_limit_window_ms`, code defaults 6000 req / 600_000 ms as fallback — `GET`/`PUT /api/settings/rate-limit`, applied at boot and on save via `syncRateLimitFromDb`). Failed logins on `/api/auth/*` are separately throttled by a small in-process memory limiter around `POST /api/auth/sign-in/email` (~5 attempts/60s per email, 15 min lockout, success resets) — Better Auth 1.6.27 has no bundled rate-limit plugin (declared deviation, `server/auth.ts`); the per-IP limiter above is untouched.
 2. **Content-length pre-check** — declared size > `LXK_MAX_BODY_MB` → 413 fast-path (stream cap above stays authoritative)
-3. **Auth** — dual-channel: session cookie first (`SessionService.userFrom`, try/catch), then daemon token (`x-forge-token`, constant-time) for `/api/forge/daemon/*` + `/api/forge/runtimes/register`, else Bearer key → `resolveApiKeyIdentity` on the shared connection; `/api/auth/*` bypasses this middleware entirely; setup/health auth-exempt; 401/403 envelopes byte-identical to the old dispatcher
+3. **Auth** — dual-channel: session cookie first (`SessionService.userFrom`, try/catch), then daemon token (`x-hearth-token`, constant-time) for `/api/hearth/daemon/*` + `/api/hearth/runtimes/register`, else Bearer key → `resolveApiKeyIdentity` on the shared connection; `/api/auth/*` bypasses this middleware entirely; setup/health auth-exempt; 401/403 envelopes byte-identical to the old dispatcher
 4. **`AuthIdentity` provision** — handlers read the Context tag (no per-request DB opens)
 5. **Security headers** — nosniff + no-store on every `/api` response, including router 404s
 
 ## GitHub Integration
 
 ### GitHub App (pinned scope)
-- **Permissions:** Issues: Read & Write; Metadata: Read; **Contents: Read** (Forge repo-content context). Nothing else.
+- **Permissions:** Issues: Read & Write; Metadata: Read; **Contents: Read** (Hearth repo-content context). Nothing else.
 - **Subscribed events:** `issues.closed`, `issues.reopened`, `issues.edited`. (`issues.opened` dropped — auto-creating Lexa tasks from GitHub issues is out of scope; `issues.labeled` dropped — no label feature.)
 - Installation tokens cached ~50 min (1h TTL minus margin), never minted per call.
 - **Config model — the settings DB is the single source of truth at runtime** (`GET`/`PUT /api/settings/github`, admin-only): `settings.github_app_id` / `github_private_key` / `github_webhook_secret`. Env (`GITHUB_APP_ID` / `GITHUB_PRIVATE_KEY` / `GITHUB_PRIVATE_KEY_FILE` / `GITHUB_WEBHOOK_SECRET`) is a **first-boot bootstrap only**: `mirrorSettingsFromEnv` copies it into the DB once at boot when keys are empty (inline PEM wins over the file; the file is read at mirror time), and the runtime never reads env again. **Upgrade note:** existing env-only deployments import their env config into the DB on the first boot after this change — no manual migration. `GitHubConfigLive` serves a mutable holder — `syncGitHubConfigFromDb` (boot + on save) applies DB values live, `resetGithubCaches()` drops stale installation/token caches, and the webhook verifier reads the secret per request. Secrets are write-only over the API (booleans only); GET `source` is `"settings"` (any github_* row) or `"none"` — there is no env state.
-- **Forge repo-content (best-effort):** on daemon claim, the project's **source-role repos** (≤ `settings.forge_repo_cap`, default 3, env bootstrap `LXK_FORGE_REPO_CAP` — same pattern as rate limits) are fetched via the Contents API — default branch → recursive tree → `selectRepoFiles` (skips node_modules/dist/binaries/lockfiles; ≤ 50 files, ≤ 256 KB each, ≤ 512 KB total) → per-file base64 content. Delivered in the claim as `repoContent` (the daemon writes it into repo-content/ + MANIFEST.md; the prompt points the agent there). Every failure — unconfigured app, missing repo, network, per-file error — skips with a warn; a claim NEVER fails for missing context (`selectRepoFiles` in `server/github/repo-content.ts`, assembly in the claim handler).
+- **Hearth repo-content (best-effort):** on daemon claim, the project's **source-role repos** (≤ `settings.hearth_repo_cap`, default 3, env bootstrap `LXK_HEARTH_REPO_CAP` — same pattern as rate limits) are fetched via the Contents API — default branch → recursive tree → `selectRepoFiles` (skips node_modules/dist/binaries/lockfiles; ≤ 50 files, ≤ 256 KB each, ≤ 512 KB total) → per-file base64 content. Delivered in the claim as `repoContent` (the daemon writes it into repo-content/ + MANIFEST.md; the prompt points the agent there). Every failure — unconfigured app, missing repo, network, per-file error — skips with a warn; a claim NEVER fails for missing context (`selectRepoFiles` in `server/github/repo-content.ts`, assembly in the claim handler).
 
 ### Sync matrix — what syncs, which direction, who wins
 
@@ -210,7 +210,7 @@ applied at build time, before route matching and before body decode:
 
 The asymmetry is deliberate: Lexa owns the board, GitHub owns the issue text. State flows both ways (echo-suppressed); content flows both ways but **asymmetrically** — Lexa pushes on save (TipTap → Markdown), GitHub edits pull back via `edited` (Markdown → TipTap), and the webhook skips our own pushes by comparing fetched title **and** body against `pushed_*` after trim + CRLF→LF normalization.
 
-**Repo roles:** a project links N repos via `project_repos`, each with independent `source_role` (Forge context + project label) and `workspace_role` (issue link/create/sync) booleans — at least one per row. Workspace-role repos gate NEW issue links; removing a role never freezes existing links. Forge context sources from the project's source-role repos (cap `settings.forge_repo_cap`, default 3).
+**Repo roles:** a project links N repos via `project_repos`, each with independent `source_role` (Hearth context + project label) and `workspace_role` (issue link/create/sync) booleans — at least one per row. Workspace-role repos gate NEW issue links; removing a role never freezes existing links. Hearth context sources from the project's source-role repos (cap `settings.hearth_repo_cap`, default 3).
 
 ### Echo suppression & idempotency (the loop-killer)
 
@@ -235,16 +235,16 @@ Move in Lexa → syncStateFromLexa() → GitHub issue closed
 7. One task ↔ many issues (junction table), one per repo: duplicate repo links rejected (already-linked guard). Per-issue `UNIQUE(task_id, issue_id)`.
 8. Failed Lexa→GitHub sync diverges by design (best-effort, no retry queue). The UI surfaces it: a linked task shows "out of sync" when `synced_state` ≠ its column's `github_state`. Manual re-move resyncs.
 9. **Content sync is asymmetric + echo-safe.** Lexa pushes title+body on task save (only when changed, after the mutation commits; diffed against `pushed_title`/`pushed_body`; the push itself emits no activity). The webhook `edited` handler GETs the issue, skips when fetched title+body both match `pushed_*` (trim + CRLF→LF via `normalizeMarkdownForEcho`; GET failure → title-only compare fallback), else applies title + description (Markdown → TipTap) emitting `field_changed` (actor system/'github') in the same transaction. `push_failed` drives the "edit not pushed" divergence reason.
-10. **Repo roles gate new links only.** `source_role` (Forge context + label) and `workspace_role` (issue link/create/sync) are independent; removing a role never freezes existing task↔issue links — they keep syncing.
+10. **Repo roles gate new links only.** `source_role` (Hearth context + label) and `workspace_role` (issue link/create/sync) are independent; removing a role never freezes existing task↔issue links — they keep syncing.
 
 ### Trust boundary
 Anyone with issue-triage permission on a linked repo can trigger webhook-driven board moves (close/reopen an issue → card moves, bypassing WIP and required_fields). This is intentional — GitHub is the source of truth for issue state (see sync matrix). On public repos, external contributors can affect the board; if that becomes a problem, the mitigation is restricting the App to private repos or filtering webhook senders — not more auth code.
 
 ## Hearth — two active AI tiers
 
-Hearth is the umbrella for both AI execution tiers (renamed from Forge —
-UI/docs/wireframes this cycle; internal identifiers `forge_tasks`/
-`forge_sessions`/`/api/forge/*`/`FORGE_*`/CLI keep their names until a
+Hearth is the umbrella for both AI execution tiers (renamed from Hearth —
+UI/docs/wireframes this cycle; internal identifiers `hearth_tasks`/
+`hearth_sessions`/`/api/hearth/*`/`HEARTH_*`/CLI keep their names until a
 deferred identifier migration). Both tiers are ACTIVE and
 co-exist; the run popover picks per-run. Design rationale: `docs/ADR-0001-two-tier-ai-architecture.md`; implementation plan + decisions log:
 `docs/HERALD_PLAN.md`.
@@ -254,7 +254,7 @@ co-exist; the run popover picks per-run. Design rationale: `docs/ADR-0001-two-ti
 | Role | Writing + PM assistant | Coding agent |
 | Engine | Server-side TanStack AI `chat()` (`server/herald/provider.ts`) | listener/daemon/warm `opencode serve` |
 | Queue consumer | HTTP stream handler, in-process | daemons via `claimNextTask` |
-| Thread state | `herald_threads` (ModelMessage[] JSON, rolling summary) | `forge_sessions` |
+| Thread state | `herald_threads` (ModelMessage[] JSON, rolling summary) | `hearth_sessions` |
 | Agents/skills render | prompt injection via systemPrompts | `.agents/` file writes |
 | Engine switching | default lane; freeform chat always herald | per-project `engine='blacksmith'`: document threads + Generate route here (runtime-online guard, `.agents/` claim bundles); chat → 409 `ENGINE_NOT_SUPPORTED_FOR_CHAT` |
 
@@ -269,7 +269,7 @@ retired); skill availability per agent = junction rows only. Vision:
 `vision_model` → internal `analyze_image` delegation (frame suppressed from
 member UI); else attachments rejected up front (`VISION_NOT_CONFIGURED`).
 
-- **Shared queue with a discriminator:** both tiers ride `forge_tasks`;
+- **Shared queue with a discriminator:** both tiers ride `hearth_tasks`;
   `kind` ∈ `'herald' | 'blacksmith'`. `claimNextTask` carries
   `AND kind='blacksmith'` — daemons can never claim Herald tasks; Herald
   streams claim via a kind-scoped conditional UPDATE.
@@ -277,7 +277,7 @@ member UI); else attachments rejected up front (`VISION_NOT_CONFIGURED`).
   `lexa_agent_skills`, migration 0010): it is the behavioral spec for BOTH
   renderers — prompt injection renders it for Herald, `.agents/` file writing
   renders it for Blacksmith. Routes `/api/agents` + `/api/skills` (hard
-  cutover from the forge-prefixed paths); claim-payload field names
+  cutover from the hearth-prefixed paths); claim-payload field names
   (`agentMarkdown`/`skillMarkdown`) frozen for daemon wire compatibility.
 - **Herald** runs per-project provider settings (`herald_settings`, custom
   OpenAI-/Anthropic-compatible endpoints), server-side tools v1 (Exa web
@@ -305,8 +305,8 @@ member UI); else attachments rejected up front (`VISION_NOT_CONFIGURED`).
 /settings/me               → profile, password change, sessions
 /settings/team             → team profile, members, projects, runtimes (team admin)
 /settings/project/:projectId → project settings hub (admin)
-/settings/workspace        → members, invites, teams, API keys, machines, rate limits, GitHub, Forge (superadmin)
-/forge                     → Forge run history (all projects)
+/settings/workspace        → members, invites, teams, API keys, machines, rate limits, GitHub, Hearth (superadmin)
+/hearth                     → Hearth run history (all projects)
 ```
 
 Key components: `KanbanBoard` (swimlanes → columns → task cards, inline add, settings modal), `TaskDetail` slideover (title/description editors, property bar, GitHub section), `WikiLayout` (nested collapsible sidebar + TipTap page), `Dashboard` (project cards with health dots, WIP bars, stats, attention sections).
@@ -319,8 +319,8 @@ SQLite is local (WAL) so reads are immediate, but the mutation response is still
 ```
 lexa/
 ├── app/                      # TanStack Start routes + components
-│   ├── routes/               # dashboard, kanban, tasks, milestones, swimlanes, wiki, settings, forge
-│   ├── components/           # activity/, auth/, forge/, kanban/, layout/, milestones/, settings/, swimlanes/, ui/, wiki/ + flat task components (TaskDetail.tsx, TaskPropertyBar.tsx, TaskTitleInput.tsx)
+│   ├── routes/               # dashboard, kanban, tasks, milestones, swimlanes, wiki, settings, hearth
+│   ├── components/           # activity/, auth/, hearth/, kanban/, layout/, milestones/, settings/, swimlanes/, ui/, wiki/ + flat task components (TaskDetail.tsx, TaskPropertyBar.tsx, TaskTitleInput.tsx)
 │   └── lib/                  # api.ts, queries.ts
 ├── server/                   # Effect-TS services
 │   ├── entry.ts              # Bun.serve — boot, webhook, static/SSR, /api stream cap + IP stamp
@@ -333,7 +333,7 @@ lexa/
 ├── shared/                   # types + pure functions (markdown, positions, tiptap-text)
 ├── migrations/               # *.sql applied on boot by server/db/migrate.ts
 ├── cli/                      # lexa-cli (operator CLI incl. deploy)
-├── forge/                    # Forge daemon
+├── hearth/                    # Hearth daemon
 ├── scripts/                  # compile-cli.ts, dev.sh, install-cli-dev.sh, install-cli.sh, prepare-effect.sh, seed-dev.sql, setup-cli.ts
 ├── wireframes/               # git submodule → private repo yohanesgre/lexa-wireframes
 └── package.json

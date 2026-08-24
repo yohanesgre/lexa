@@ -2,7 +2,7 @@ import { useCallback, useState } from "react";
 import type { HearthEngine, HeraldSettingsMasked } from "../../shared/herald";
 
 // Member-facing personal engine overlay (settings-project-herald.html Engine
-// section + forge-popover.html annotations): merely SHOWS the toggle in the
+// section + hearth-popover.html annotations): merely SHOWS the toggle in the
 // Hearth popover header; the choice is a client-side preference persisted per
 // project that overrides the DISPLAYED default — it never writes
 // herald_settings.engine (that column stays the admin-written project

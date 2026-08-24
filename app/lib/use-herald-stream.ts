@@ -1,5 +1,5 @@
-import { useState, useSyncExternalStore } from "react";
-import type { StreamFrame } from "../../shared/herald";
+import { useCallback, useState, useSyncExternalStore } from "react";
+import type { HeraldWriteDiff, StreamFrame } from "../../shared/herald";
 
 // Fetch-based SSE reader for Herald's POST stream endpoints (S5). Sessions
 // live in a module-level store keyed by taskId/chatId so a closed popover or
@@ -22,7 +22,19 @@ export interface HeraldToolChip {
   resultDetail?: string;
 }
 
-export type HeraldStreamStatus = "idle" | "connecting" | "streaming" | "done" | "error" | "aborted";
+export type HeraldStreamStatus = "idle" | "connecting" | "streaming" | "suspended" | "done" | "error" | "aborted";
+
+// One proposed write from a `tool_pending` frame (herald-write-approvals.html).
+// Chips arrive in seq order right before the terminal `suspended` frame and
+// stay in session memory until the page freezes them into the transcript view.
+export interface HeraldPendingChip {
+  approvalId: string;
+  batchId: string;
+  seq: number;
+  name: string;
+  detail?: string;
+  diff: HeraldWriteDiff;
+}
 
 // Chronological reply timeline (herald-chat.html): one entry per content
 // element in FRAME ARRIVAL ORDER — reasoning bursts, tool calls and text
@@ -51,6 +63,11 @@ export interface HeraldStreamSnapshot {
   // Accumulated wall time of completed reasoning bursts (null while none
   // has closed yet) — feeds the "Thought for Ns" label.
   reasoningMs: number | null;
+  // Write proposals from `tool_pending` frames, sorted by seq. Non-empty
+  // only while the turn is heading toward (or sits at) `suspended`.
+  pending: HeraldPendingChip[];
+  // Set by the terminal `suspended` frame — the batch awaiting decisions.
+  suspendedBatchId: string | null;
   error: { code: string; message: string } | null;
   usage: { in: number; out: number } | null;
 }
@@ -64,6 +81,8 @@ const IDLE: HeraldStreamSnapshot = Object.freeze({
   reasoningText: "",
   reasoningActive: false,
   reasoningMs: null,
+  pending: [],
+  suspendedBatchId: null,
   error: null,
   usage: null,
 });
@@ -90,7 +109,11 @@ function frameDetail(frame: StreamFrame): string | undefined {
 
 class HeraldStreamSession {
   private snapshot: HeraldStreamSnapshot = { ...IDLE, frames: [], tools: [] };
-  private listeners = new Set<() => void>();
+  // Listeners receive `coalesce=true` for high-frequency content frames
+  // (delta/reasoning) so React-facing subscribers can batch them to one
+  // render per animation frame; every status-bearing frame notifies
+  // synchronously. Raw observers just ignore the argument.
+  private listeners = new Set<(coalesce?: boolean) => void>();
   readonly controller = new AbortController();
 
   constructor(
@@ -101,14 +124,14 @@ class HeraldStreamSession {
 
   getSnapshot = (): HeraldStreamSnapshot => this.snapshot;
 
-  subscribe = (listener: () => void): (() => void) => {
+  subscribe = (listener: (coalesce?: boolean) => void): (() => void) => {
     this.listeners.add(listener);
     return () => this.listeners.delete(listener);
   };
 
-  private emit(patch: Partial<HeraldStreamSnapshot>) {
+  private emit(patch: Partial<HeraldStreamSnapshot>, coalesce = false) {
     this.snapshot = { ...this.snapshot, ...patch };
-    for (const listener of this.listeners) listener();
+    for (const listener of this.listeners) listener(coalesce);
   }
 
   abort() {
@@ -170,6 +193,7 @@ class HeraldStreamSession {
     let reasoningActive = false;
     let reasoningMs = this.snapshot.reasoningMs;
     let burstStart = 0;
+    let pending: HeraldPendingChip[] = this.snapshot.status === "idle" ? [] : [...this.snapshot.pending];
 
     // Bank the open burst: aggregate ms for the summary label + per-item ms
     // for the row's own "Thought for Ns" label.
@@ -200,7 +224,7 @@ class HeraldStreamSession {
             items = [...items, { kind: "reasoning", text: frame.delta, ms: null }];
           }
           reasoningText += frame.delta;
-          this.emit({ frames: [...frames], items: [...items], reasoningText, reasoningActive: true });
+          this.emit({ frames: [...frames], items: [...items], reasoningText, reasoningActive: true }, true);
         }
         return;
       }
@@ -218,7 +242,7 @@ class HeraldStreamSession {
           } else {
             items = [...items, { kind: "text", text: frame.text }];
           }
-          this.emit({ frames: [...frames], ...burstPatch, text, items: [...items] });
+          this.emit({ frames: [...frames], ...burstPatch, text, items: [...items] }, true);
           break;
         }
         case "tool": {
@@ -242,6 +266,24 @@ class HeraldStreamSession {
           this.emit({ frames: [...frames], ...burstPatch, tools: [...tools], items: [...items] });
           break;
         }
+        case "tool_pending": {
+          // One proposal per frame, seq order guaranteed server-side — keep
+          // the array sorted anyway so rendering never depends on arrival.
+          const chip: HeraldPendingChip = {
+            approvalId: frame.approvalId,
+            batchId: frame.batchId,
+            seq: frame.seq,
+            name: frame.name,
+            ...(frameDetail(frame) ? { detail: frameDetail(frame) } : {}),
+            diff: frame.diff,
+          };
+          pending = [...pending.filter((p) => p.approvalId !== chip.approvalId), chip].sort((a, b) => a.seq - b.seq);
+          this.emit({ frames: [...frames], ...burstPatch, pending: [...pending] });
+          break;
+        }
+        case "suspended":
+          this.emit({ frames: [...frames], status: "suspended", suspendedBatchId: frame.batchId, ...burstPatch });
+          break;
         case "error":
           this.emit({ frames: [...frames], status: "error", error: { code: frame.code, message: frame.message }, ...burstPatch });
           break;
@@ -278,7 +320,7 @@ class HeraldStreamSession {
           } catch {
             // Malformed chunk — skip, never kill the stream.
           }
-          if (this.snapshot.status === "error" || this.snapshot.status === "done") return;
+          if (this.snapshot.status === "error" || this.snapshot.status === "done" || this.snapshot.status === "suspended") return;
         }
       }
       // Stream closed without a terminal frame.
@@ -305,17 +347,53 @@ export interface HeraldStream extends HeraldStreamSnapshot {
   reset: () => void;
   // Raw store surface — external observers (tests, devtools) can record
   // every emitted snapshot without relying on React render batching.
-  subscribe: (listener: () => void) => () => void;
+  subscribe: (listener: (coalesce?: boolean) => void) => () => void;
   getSnapshot: () => HeraldStreamSnapshot;
 }
 
 // Subscribe to the session for `key`. A fresh key renders idle; send() boots
-// the POST stream and every delta re-renders subscribers.
+// the POST stream and every delta re-renders subscribers. Coalescible frames
+// (delta/reasoning) batch React notifications to one per animation frame —
+// markdown re-parse + reconciliation must not run per SSE chunk (tables and
+// lists lag otherwise). Status-bearing frames notify synchronously. The raw
+// session.subscribe surface stays unthrottled for observers.
 export function useHeraldStream(key: string | null): HeraldStream {
   const [, setSessionEpoch] = useState(0);
   const session = key ? getSession(key) : null;
+  const subscribeThrottled = useCallback(
+    (listener: () => void) => {
+      if (!session) return noopSubscribe(listener);
+      let scheduled = false;
+      let raf = 0;
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const flush = () => {
+        scheduled = false;
+        listener();
+      };
+      const wrapped = (coalesce?: boolean) => {
+        if (!coalesce) {
+          cancelAnimationFrame(raf);
+          clearTimeout(timer);
+          scheduled = false;
+          listener();
+          return;
+        }
+        if (scheduled) return;
+        scheduled = true;
+        if (typeof requestAnimationFrame === "function") raf = requestAnimationFrame(flush);
+        else timer = setTimeout(flush, 16);
+      };
+      const unsubscribe = session.subscribe(wrapped);
+      return () => {
+        cancelAnimationFrame(raf);
+        clearTimeout(timer);
+        unsubscribe();
+      };
+    },
+    [session]
+  );
   const snapshot = useSyncExternalStore(
-    session?.subscribe ?? noopSubscribe,
+    subscribeThrottled,
     session?.getSnapshot ?? (() => IDLE)
   );
   return {

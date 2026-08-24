@@ -1,4 +1,4 @@
-import { Children, cloneElement, isValidElement, memo, useMemo, type ReactNode } from "react";
+import { Children, cloneElement, isValidElement, memo, useMemo, useRef, type ReactNode } from "react";
 import { marked, type Token, type Tokens } from "marked";
 import hljs from "highlight.js/lib/common";
 
@@ -188,11 +188,53 @@ interface MarkdownContentProps extends MarkdownRenderOptions {
   trailing?: ReactNode;
 }
 
+// Content-address key for a completed top-level block. Index is part of the
+// key so identical raw blocks never share one cached element (duplicate
+// React keys).
+function blockCacheKey(index: number, type: string, raw: string): string {
+  let h = 5381;
+  for (let i = 0; i < raw.length; i++) h = ((h << 5) + h + raw.charCodeAt(i)) | 0;
+  return `${index}:${type}:${h.toString(36)}:${raw.length}`;
+}
+
 // Memoized per text so progressive stream deltas re-render only the changed
-// turn, not every sibling bubble.
+// turn, not every sibling bubble. Within a turn, COMPLETED blocks (every
+// token before the last) are content-addressed and keep their ReactNode
+// reference across frames — React bails out on an unchanged element
+// reference, so per-delta work shrinks to lexing + re-rendering the trailing
+// partial block instead of the whole reply. This is what keeps tables/lists
+// from lagging behind the token stream.
 export const MarkdownContent = memo(function MarkdownContent({ md, renderText, trailing }: MarkdownContentProps) {
+  const cacheRef = useRef<Map<string, ReactNode>>(new Map());
+  const renderTextRef = useRef(renderText);
   const nodes = useMemo(() => {
-    const out = markdownToReact(md, { renderText });
+    const cache = cacheRef.current;
+    if (renderTextRef.current !== renderText) {
+      // Cached nodes embed the previous hook's output — drop them all.
+      renderTextRef.current = renderText;
+      cache.clear();
+    }
+    const opts = { renderText };
+    const tokens = marked.lexer(md);
+    const out: ReactNode[] = [];
+    const liveKeys = new Set<string>();
+    const lastIdx = tokens.length - 1;
+    tokens.forEach((t, i) => {
+      if (t.type === "space" || t.type === "def") return;
+      if (i < lastIdx) {
+        const key = blockCacheKey(i, t.type, t.raw);
+        liveKeys.add(key);
+        let node = cache.get(key);
+        if (node === undefined) {
+          node = renderBlock(t, opts, i);
+          cache.set(key, node);
+        }
+        out.push(node);
+        return;
+      }
+      out.push(renderBlock(t, opts, i));
+    });
+    for (const k of cache.keys()) if (!liveKeys.has(k)) cache.delete(k);
     if (!trailing) return out;
     let idx = -1;
     for (let i = out.length - 1; i >= 0; i--) {

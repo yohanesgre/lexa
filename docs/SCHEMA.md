@@ -25,7 +25,7 @@ CREATE UNIQUE INDEX idx_projects_key ON projects(key);
 -- ============================================================
 -- Replaces the dropped projects.github_repo column. A project links N repos,
 -- each with independent role flags (a repo can be source, workspace, or both):
---   source_role    → Forge agent context (claim-time repo-content) + project label
+--   source_role    → Hearth agent context (claim-time repo-content) + project label
 --   workspace_role → issue linking/creation/sync for that repo
 -- Removing a role gates NEW links only — existing task↔issue links keep syncing.
 -- Migrated at boot: legacy projects.github_repo → both roles; repos seen in
@@ -34,7 +34,7 @@ CREATE TABLE project_repos (
   id              TEXT PRIMARY KEY,                          -- UUID
   project_id      TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
   repo            TEXT NOT NULL,                             -- "owner/name"
-  source_role     INTEGER NOT NULL DEFAULT 0,                -- Forge context + project label
+  source_role     INTEGER NOT NULL DEFAULT 0,                -- Hearth context + project label
   workspace_role  INTEGER NOT NULL DEFAULT 0,                -- issue link/create/sync
   created_at      TEXT NOT NULL DEFAULT (datetime('now'))
 );
@@ -549,24 +549,24 @@ CREATE INDEX idx_task_links_proj ON task_links(project_id);
 -- api_keys.key_hash is indexed by its UNIQUE constraint.
 
 -- ============================================================
--- Forge: runtime agents + persisted document sources
+-- Hearth: runtime agents + persisted document sources
 -- ============================================================
 -- runtimes: daemons that run agent CLIs (opencode/hermes/command-code) and poll
 --   for tasks. team_id scopes ownership: NULL = superadmin-owned GLOBAL runtime
 --   (claims any team's project tasks); non-NULL = that team's runtime (claims
 --   only that team's project tasks). Team admin manages own team's runtimes;
 --   superadmin all (any team + global).
---   model is the agent model id reported by the daemon (FORGE_MODEL);
+--   model is the agent model id reported by the daemon (HEARTH_MODEL);
 --   extra_args is server-authoritative injected CLI tokens (JSON array), applied
 --   by the daemon at spawn time (Settings → Edit runtime).
 --   models_catalog is the live provider/model list the daemon reports with its
 --   machine listener heartbeat after each refresh (boot + every ~10 min); []
 --   when offline or the agent has no scriptable model list (hermes). Powers
 --   the Settings picker. agents_catalog follows the same rule for personas.
--- forge_tasks: the writing-assist queue (created from editors, claimed by a
+-- hearth_tasks: the writing-assist queue (created from editors, claimed by a
 --   runtime, streamed/completed by the daemon).
 -- document_sources: persisted per-document sources (wiki page or external URL)
---   that Forge grounds its output in.
+--   that Hearth grounds its output in.
 CREATE TABLE runtimes (
   id             TEXT PRIMARY KEY,
   name           TEXT NOT NULL,
@@ -594,7 +594,7 @@ CREATE TABLE runtimes (
 -- reuses the env on install; remove events are provider-scoped).
 
 -- ============================================================
--- Forge: machine registry + setup events
+-- Hearth: machine registry + setup events
 -- ============================================================
 CREATE TABLE machines (
   id          TEXT PRIMARY KEY,
@@ -637,7 +637,7 @@ CREATE TABLE runtime_events (
 CREATE INDEX idx_runtime_events_machine ON runtime_events(machine_id, status);
 CREATE INDEX idx_runtime_events_status ON runtime_events(status, created_at);
 
-CREATE TABLE forge_tasks (
+CREATE TABLE hearth_tasks (
   id            TEXT PRIMARY KEY,
   runtime_id    TEXT REFERENCES runtimes(id) ON DELETE SET NULL,
   project_id    TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
@@ -656,16 +656,16 @@ CREATE TABLE forge_tasks (
   started_at    TEXT,
   finished_at   TEXT
 );
-CREATE INDEX idx_forge_tasks_created ON forge_tasks(created_at DESC, id DESC);
-CREATE INDEX idx_forge_tasks_status ON forge_tasks(status, created_at);
+CREATE INDEX idx_hearth_tasks_created ON hearth_tasks(created_at DESC, id DESC);
+CREATE INDEX idx_hearth_tasks_status ON hearth_tasks(status, created_at);
 
 -- Herald (0010): task tier — 'blacksmith' (daemon runtime lane) vs the
 -- server-side assistant tier. Existing rows default to 'blacksmith'.
-ALTER TABLE forge_tasks ADD COLUMN kind TEXT NOT NULL DEFAULT 'blacksmith';
+ALTER TABLE hearth_tasks ADD COLUMN kind TEXT NOT NULL DEFAULT 'blacksmith';
 
-CREATE INDEX idx_forge_tasks_kind_status ON forge_tasks(kind, status);
+CREATE INDEX idx_hearth_tasks_kind_status ON hearth_tasks(kind, status);
 
--- Forge warm sessions: maps one (document, runtime) pair to the agent-side
+-- Hearth warm sessions: maps one (document, runtime) pair to the agent-side
 -- conversation (opencode serve session id) the next task on that document
 -- should continue. Written pre-spawn by the daemon (spec §8 step 3); dropped
 -- on cancel/timeout (daemon-side) or via the user-facing reset endpoint.
@@ -675,7 +675,7 @@ CREATE INDEX idx_forge_tasks_kind_status ON forge_tasks(kind, status);
 -- the (deletable) runtimes row. Only opencode writes rows in v1.
 -- Agent/skill change → the daemon mints a new session and updates the row
 -- (reset semantics, no history rows).
-CREATE TABLE forge_sessions (
+CREATE TABLE hearth_sessions (
   document_type   TEXT    NOT NULL CHECK (document_type IN ('task', 'wiki')),
   document_id     TEXT    NOT NULL,
   runtime_id      TEXT    NOT NULL,
@@ -689,7 +689,7 @@ CREATE TABLE forge_sessions (
 );
 
 -- ============================================================
--- Forge agents + skills — global rule bundles
+-- Hearth agents + skills — global rule bundles
 -- ============================================================
 -- Agents are named rule bundles: their instructions become AGENTS.md in the
 -- run dir at claim time (claim-carried, no host store). Skills are named
@@ -765,14 +765,14 @@ ALTER TABLE herald_settings ADD COLUMN primary_supports_images INTEGER NOT NULL 
 ALTER TABLE herald_settings ADD COLUMN vision_model TEXT;
 
 -- Agent catalog rebinding (0013, single transaction — atomic):
--- Herald Agent gets a NEW internal id; forge_tasks.agent_id FKs and any
+-- Herald Agent gets a NEW internal id; hearth_tasks.agent_id FKs and any
 -- lexa_agent_skills junction rows are rebound in the same tx. One-time
 -- consequence: existing threads keyed on agentId reset once (continue-vs-
 -- fresh sees an unknown agentId → fresh overwrite).
 UPDATE lexa_agents SET id = 'hearth-herald', name = 'Herald Agent',
   instructions = <companion-persona instructions>
 WHERE id = 'lexa';
-UPDATE forge_tasks SET agent_id = 'hearth-herald' WHERE agent_id = 'lexa';
+UPDATE hearth_tasks SET agent_id = 'hearth-herald' WHERE agent_id = 'lexa';
 UPDATE lexa_agent_skills SET agent_id = 'hearth-herald' WHERE agent_id = 'lexa';
 INSERT INTO lexa_agents (id, name, description, instructions, is_builtin)
 VALUES ('hearth-blacksmith', 'Blacksmith Agent', '', <coding-agent instructions>, 1);
@@ -818,6 +818,48 @@ CREATE TABLE herald_threads (
 CREATE INDEX idx_herald_threads_chat_list ON herald_threads(project_id, owner_user_id, pinned DESC, updated_at DESC)
   WHERE document_type = 'chat';
 
+-- Herald write tools v2 (0016): per-write approval queue. Write-tool proposals
+-- persist here at proposal time; the owner approves or rejects each row; resume
+-- executes approved rows in seq order. TTL is lazy (flipped to 'expired' on
+-- decide/resume/transcript reads) — no timer.
+--
+-- Lifecycle: status starts 'pending'; decideApproval moves it to
+-- 'approved'/'rejected' via a conditional UPDATE (WHERE status='pending'
+-- RETURNING * — second decisions return null, a guard not an error); rows past
+-- expires_at flip to 'expired' lazily via expireIfDue/sweepExpired. Resume
+-- refuses while any row in the batch is still pending (APPROVALS_PENDING),
+-- executes approved rows in seq order, and records per-row failures in
+-- execution_error ('CODE: message') without aborting the batch.
+--
+-- Attribution: executed writes run as the herald actor with the pending row's
+-- owner_user_id; task_activity/task_comments rows written by an approved write
+-- carry via_herald=1 so the timeline can mark them as Herald-proposed,
+-- owner-approved actions.
+CREATE TABLE herald_pending_writes (
+  id TEXT PRIMARY KEY,
+  project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  document_type TEXT NOT NULL CHECK (document_type IN ('task','wiki','chat')),
+  document_id TEXT NOT NULL,
+  owner_user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  batch_id TEXT NOT NULL,
+  seq INTEGER NOT NULL,
+  tool_name TEXT NOT NULL,
+  args TEXT NOT NULL,
+  diff TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','approved','rejected','expired')),
+  execution_error TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  expires_at TEXT NOT NULL,
+  decided_at TEXT,
+  FOREIGN KEY (document_type, document_id) REFERENCES herald_threads(document_type, document_id) ON DELETE CASCADE
+);
+CREATE INDEX idx_herald_pending_batch ON herald_pending_writes(batch_id, seq);
+CREATE INDEX idx_herald_pending_thread ON herald_pending_writes(document_type, document_id, status);
+
+ALTER TABLE task_activity ADD COLUMN via_herald INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE task_comments ADD COLUMN via_herald INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE herald_settings ADD COLUMN write_tools TEXT NOT NULL DEFAULT '';
+
 -- Curated project memory: judgment-type facts only (live truth always comes
 -- from DB reads, never memorized). `source` ∈ manual/herald (no CHECK in DDL).
 -- FTS5 external-content index below; kept in sync by the repo on
@@ -847,21 +889,21 @@ CREATE TABLE document_sources (
 CREATE INDEX idx_sources_document ON document_sources(document_type, document_id);
 
 -- ============================================================
--- Forge task activity log
+-- Hearth task activity log
 -- ============================================================
 -- Append-only live status feed per task: the daemon streams lines
 -- (claimed by <runtime>, model <id>, agent started, generating,
 -- done/failed) so the UI can show what a task is doing right now.
-CREATE TABLE forge_task_logs (
+CREATE TABLE hearth_task_logs (
   id         TEXT PRIMARY KEY,
-  task_id    TEXT NOT NULL REFERENCES forge_tasks(id) ON DELETE CASCADE,
+  task_id    TEXT NOT NULL REFERENCES hearth_tasks(id) ON DELETE CASCADE,
   message    TEXT NOT NULL,
   stream     TEXT NOT NULL DEFAULT 'out',  -- no CHECK in DDL
   level      TEXT NOT NULL DEFAULT 'info', -- no CHECK in DDL
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
-CREATE INDEX idx_forge_task_logs_task ON forge_task_logs(task_id, created_at);
--- Levels are classified ONCE by the daemon at write time (shared/forge-log.ts
+CREATE INDEX idx_hearth_task_logs_task ON hearth_task_logs(task_id, created_at);
+-- Levels are classified ONCE by the daemon at write time (shared/hearth-log.ts
 -- — stderr ≠ error; retries/rate-limits → warn) and stored; the UI renders
 -- the stored level, never re-classifies. Legacy rows default out/info; the UI
 -- falls back to the shared classifier for rows still carrying the old
@@ -966,11 +1008,11 @@ existing hard delete).
   `deleted_at` (hidden from timeline). No revision history — edit overwrites
   `body`.
 
-### Forge (runtime agent writing assistant)
-Forge is the AI writing button in the task/wiki editors. A **CLI listener** on a
+### Hearth (runtime agent writing assistant)
+Hearth is the AI writing button in the task/wiki editors. A **CLI listener** on a
 machine registers the machine, claims setup events, owns one daemon child per
 installed agent CLI, and reports the machine's available agents/models. Each
-daemon registers as a `runtimes` row, polls `forge_tasks`, runs the configured
+daemon registers as a `runtimes` row, polls `hearth_tasks`, runs the configured
 CLI (warm `opencode serve` for opencode runtimes, one-shot spawn per task for
 hermes/command-code), and reports the result.
 
@@ -986,17 +1028,17 @@ hermes/command-code), and reports the result.
   per-task `extra_prompt`).
 - **Machine state root:** everything the host stores lives in `~/.lexa/`
   (`LEXA_DIR` override): `config.json`, `machine-id`, `env`, `runtimes/<id>/env`,
-  the persistent opencode sandbox at `runtimes/<id>/forge-home/`, persistent
+  the persistent opencode sandbox at `runtimes/<id>/hearth-home/`, persistent
   project workspaces under `projects/`, and legacy per-run workdirs under
   `runs/<taskId>/` (ephemeral — removed after every run; opencode runtimes
   don't use it). The listener migrates the legacy `~/.config/lexa-cli` +
   `~/.config/lexa-forge` dirs into it on boot — migrate-and-delete, no fallback.
-- **`forge_task_logs`** is the append-only live status feed per task. The daemon
+- **`hearth_task_logs`** is the append-only live status feed per task. The daemon
   streams a line per step (claimed, model, agent started, generating, done/failed);
-  the UI polls `GET /api/forge/tasks/:id/logs` while a task is active to show
+  the UI polls `GET /api/hearth/tasks/:id/logs` while a task is active to show
   what it's doing right now.
 - **`document_sources`** persist per document (task or wiki page). `kind=wiki`
-  stores the wiki page **slug** in `ref`; `kind=external` stores the URL. Forge
+  stores the wiki page **slug** in `ref`; `kind=external` stores the URL. Hearth
   resolves wiki sources to page content server-side; external URLs are fetched
   with an **SSRF guard** (DNS resolve → reject private/loopback/link-local/CGNAT).
 - **Setup:** the web wizard sends only machine + agent CLI + a fresh one-time key.
@@ -1004,11 +1046,11 @@ hermes/command-code), and reports the result.
   from Settings. The listener discovers catalogs by invoking the installed CLI
   and sends them with the machine heartbeat.
 - **Auth:** browser calls use the normal Bearer API key; daemon endpoints
-  (`/api/forge/daemon/*`, `/api/forge/runtimes/*`, `/api/forge/sessions`)
-  accept `x-forge-token` (`LXK_FORGE_DAEMON_TOKEN`) or a Bearer key.
+  (`/api/hearth/daemon/*`, `/api/hearth/runtimes/*`, `/api/hearth/sessions`)
+  accept `x-hearth-token` (`LXK_HEARTH_DAEMON_TOKEN`) or a Bearer key.
 
 ### Hearth — two agents, per-project engine, vision chain
-Umbrella renamed **Hearth** (UI/docs/wireframes this cycle; internal identifiers `forge_tasks`/`forge_sessions`/`/api/forge/*`/`FORGE_*`/CLI are deferred — they keep their names).
+Umbrella renamed **Hearth**; full identifier rename (tables `hearth_tasks`/`hearth_task_logs`/`hearth_sessions`, routes `/api/hearth/*`, header `x-hearth-token`, env `HEARTH_*`, CLI state dir/unit) executed 2026-08-24 via migration 0015.
 
 - **Exactly two builtin agents** (`lexa_agents`, migration 0013): `hearth-herald` ("Herald Agent") and `hearth-blacksmith` ("Blacksmith Agent") — same PM-assistant role, different execution architecture. The generic `lexa` entry is retired; its id is NOT reused.
 - **Skill availability = junction rows only.** Which skills an agent offers is whatever `lexa_agent_skills` says — admin-editable, no JSON columns on the agent rows.

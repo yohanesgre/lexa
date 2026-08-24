@@ -1,12 +1,12 @@
 import { Effect } from "effect";
 import { Sqlite, queryAll, queryFirst, run, DbError, RowNotFound, ConstraintViolation } from "../db/database";
-import type { RuntimeEvent, RuntimeEventAction, ForgeProvider } from "../../shared/types";
+import type { RuntimeEvent, RuntimeEventAction, HearthProvider } from "../../shared/types";
 
 export interface RuntimeEventRow {
   id: string;
   machine_id: string;
   action: RuntimeEventAction;
-  agent_cli: ForgeProvider;
+  agent_cli: HearthProvider;
   api_key_id: string | null;
   status: RuntimeEvent["status"];
   error: string | null;
@@ -53,7 +53,7 @@ export class RuntimeEventRepo extends Effect.Service<RuntimeEventRepo>()("Lexa/R
         id: string;
         machineId: string;
         action: RuntimeEventAction;
-        agentCli: ForgeProvider;
+        agentCli: HearthProvider;
         apiKeyId: string | null;
       }): Effect.Effect<RuntimeEvent, ConstraintViolation | DbError> =>
         Effect.gen(function* () {

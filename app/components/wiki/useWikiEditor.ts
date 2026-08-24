@@ -109,7 +109,7 @@ export function useWikiEditor({ slug, page }: { slug: string; page: WikiPage }) 
   const embeds = useAttachmentEmbeds({ slug, documentType: "wiki", documentId: page.slug });
   const autosaveTimer = useRef<number | null>(null);
   const markDirtyRef = useRef<() => void>(() => {});
-  // While a Forge result is being reviewed, autosave is suspended — the
+  // While a Hearth result is being reviewed, autosave is suspended — the
   // unaccepted insert must not reach the database before Accept.
   const reviewActiveRef = useRef(false);
   const historyPreviewRef = useRef<string | null>(null);
@@ -124,7 +124,7 @@ export function useWikiEditor({ slug, page }: { slug: string; page: WikiPage }) 
     extensions: [
       StarterKit.configure({ heading: { levels: [2, 3, 4, 5] }, code: false }),
       // Code must combine with other marks (bold+code is valid CommonMark,
-      // common in Forge results) or accepting such a result throws.
+      // common in Hearth results) or accepting such a result throws.
       Code.extend({ excludes: "" }),
       TaskList,
       TaskItem.configure({ nested: true }),

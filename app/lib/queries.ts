@@ -1,13 +1,13 @@
 import { useQuery, useMutation, useQueryClient, useInfiniteQuery } from "@tanstack/react-query";
 import { useMemo } from "react";
 import type { QueryClient, InfiniteData } from "@tanstack/react-query";
-import type { Task, Project, ProjectRepo, Board, Column, Swimlane, Milestone, TipTapDoc, WikiPageMeta, ApiKey, ApiKeyCreateResult, Dashboard, FieldConfig, DocumentSource, ForgeTask, TaskLink, Runtime, LexaAgent, LexaSkill, Machine, ActivityItem, ActivityEvent, Team, TeamMember, TeamMemberRole, SessionInfo, WorkspaceInvite, Attachment } from "../../shared/types";
+import type { Task, Project, ProjectRepo, Board, Column, Swimlane, Milestone, TipTapDoc, WikiPageMeta, ApiKey, ApiKeyCreateResult, Dashboard, FieldConfig, DocumentSource, HearthTask, TaskLink, Runtime, LexaAgent, LexaSkill, Machine, ActivityItem, ActivityEvent, Team, TeamMember, TeamMemberRole, SessionInfo, WorkspaceInvite, Attachment } from "../../shared/types";
 import type { HeraldSettingsMasked, HeraldSettingsInput } from "../../shared/herald";
 import type { HeraldMemoryEntry } from "./api";
 import * as api from "./api";
 import * as auth from "./auth";
 import type { TaskMutationResult, ActivityPage, WikiShareLink } from "./api";
-import type { RecentForgeTask, ForgeHistoryPage } from "./api";
+import type { RecentHearthTask, HearthHistoryPage } from "./api";
 import { useToast } from "../components/ui/Toast";
 
 function toastMessage(err: unknown): string {
@@ -63,7 +63,7 @@ export function useDeleteProject() {
       qc.removeQueries({ queryKey: ["task-links", slug] });
       qc.removeQueries({ queryKey: ["task-search", slug] });
       qc.removeQueries({ queryKey: ["sources", slug] });
-      qc.removeQueries({ queryKey: ["forge-recent", slug] });
+      qc.removeQueries({ queryKey: ["hearth-recent", slug] });
       toast.push("success", "Project deleted");
     },
     onError: (err) => {
@@ -1333,7 +1333,7 @@ export function useUsers() {
 
 export function useTeamRuntimes(teamId: string | undefined) {
   return useQuery({
-    queryKey: ["forge-runtimes", teamId],
+    queryKey: ["hearth-runtimes", teamId],
     queryFn: () => api.listRuntimes(teamId).then((r) => r.data),
     enabled: !!teamId,
     staleTime: 15_000,
@@ -1401,14 +1401,14 @@ export function useRemoveProjectMember(slug: string) {
   });
 }
 
-// ── Forge (AI writing assistant) ──
+// ── Hearth (AI writing assistant) ──
 
 export function useRuntimes() {
-  // Forge daemon runtimes (opencode/hermes machines). Polled so the
+  // Hearth daemon runtimes (opencode/hermes machines). Polled so the
   // settings page shows online/offline status — but only while runtimes
   // exist; a fresh install has no machines and nothing can change.
   return useQuery({
-    queryKey: ["forge-runtimes"],
+    queryKey: ["hearth-runtimes"],
     queryFn: () => api.listRuntimes().then((r) => r.data),
     staleTime: 15_000,
     refetchInterval: (query) => (query.state.data?.length ? 30_000 : false),
@@ -1418,7 +1418,7 @@ export function useRuntimes() {
 export function useMachines() {
   // Machine hosts (bound via lexa-cli login, listening via machine listen).
   return useQuery({
-    queryKey: ["forge-machines"],
+    queryKey: ["hearth-machines"],
     queryFn: () => api.listMachines().then((r) => r.data),
     staleTime: 15_000,
     refetchInterval: (query) => (query.state.data?.length ? 30_000 : false),
@@ -1431,8 +1431,8 @@ export function useUpdateRuntime() {
   return useMutation({
     mutationFn: ({ id, patch }: { id: string; patch: { name?: string; provider?: "opencode" | "hermes" | "command-code"; agent?: string; model?: string; printLogs?: boolean; logLevel?: "" | "DEBUG" | "INFO" | "WARN" | "ERROR"; extraArgs?: string[] } }) => api.updateRuntime(id, patch),
     onSuccess: (runtime) => {
-      qc.setQueryData<Runtime[]>(["forge-runtimes"], (rows) => rows?.map((r) => (r.id === runtime.id ? runtime : r)));
-      toast.push("success", "Runtime updated — applies on the next Forge task");
+      qc.setQueryData<Runtime[]>(["hearth-runtimes"], (rows) => rows?.map((r) => (r.id === runtime.id ? runtime : r)));
+      toast.push("success", "Runtime updated — applies on the next Hearth task");
     },
     onError: (err) => {
       toast.push("error", "Failed to update runtime", toastMessage(err));
@@ -1446,7 +1446,7 @@ export function useRemoveRuntime() {
   return useMutation({
     mutationFn: (id: string) => api.removeRuntime(id),
     onSuccess: (_, id) => {
-      qc.setQueryData<Runtime[]>(["forge-runtimes"], (rows) => rows?.filter((r) => r.id !== id));
+      qc.setQueryData<Runtime[]>(["hearth-runtimes"], (rows) => rows?.filter((r) => r.id !== id));
       toast.push("success", "Runtime removed");
     },
     onError: (err) => {
@@ -1461,10 +1461,10 @@ export function useRemoveMachine() {
   return useMutation({
     mutationFn: (id: string) => api.removeMachine(id),
     onSuccess: (_, id) => {
-      qc.setQueryData<Machine[]>(["forge-machines"], (rows) => rows?.filter((m) => m.id !== id));
+      qc.setQueryData<Machine[]>(["hearth-machines"], (rows) => rows?.filter((m) => m.id !== id));
       // The machine's runtimes are removed server-side (cascade) — drop them
       // from the runtimes cache too so the table doesn't show stale rows.
-      qc.setQueryData<Runtime[]>(["forge-runtimes"], (rows) => rows?.filter((r) => r.machineId !== id));
+      qc.setQueryData<Runtime[]>(["hearth-runtimes"], (rows) => rows?.filter((r) => r.machineId !== id));
       toast.push("success", "Machine removed");
     },
     onError: (err) => {
@@ -1473,13 +1473,13 @@ export function useRemoveMachine() {
   });
 }
 
-// Recent Forge tasks across all projects — powers the navbar status pill.
+// Recent Hearth tasks across all projects — powers the navbar status pill.
 // Polls fast while a task runs, slow while idle, and not at all when no
 // tasks exist (nothing can start without a registered machine/runtime).
-export function useRecentForgeTasks() {
+export function useRecentHearthTasks() {
   return useQuery({
-    queryKey: ["forge-recent-tasks"],
-    queryFn: () => api.listRecentForgeTasks().then((r) => r.data),
+    queryKey: ["hearth-recent-tasks"],
+    queryFn: () => api.listRecentHearthTasks().then((r) => r.data),
     refetchInterval: (query) => {
       const rows = query.state.data ?? [];
       const hasActive = rows.some((t) => t.status === "queued" || t.status === "running");
@@ -1488,60 +1488,60 @@ export function useRecentForgeTasks() {
   });
 }
 
-export function useCreateForgeTask() {
+export function useCreateHearthTask() {
   const qc = useQueryClient();
   const toast = useToast();
   return useMutation({
-    mutationFn: api.createForgeTask,
+    mutationFn: api.createHearthTask,
     onSuccess: (task) => {
       // Reflect the new task in the navbar pill immediately — the recent
       // list polls every 15s when idle, which feels like a missing status.
       const projects = qc.getQueryData<Project[]>(["projects"]);
       const project = projects?.find((p) => p.id === task.projectId);
-      qc.setQueryData<RecentForgeTask[]>(["forge-recent-tasks"], (rows) => [
+      qc.setQueryData<RecentHearthTask[]>(["hearth-recent-tasks"], (rows) => [
         { ...task, projectName: project?.name ?? "" },
         ...(rows ?? []),
       ]);
     },
     onError: (err) => {
-      toast.push("error", "Forge unavailable", toastMessage(err));
+      toast.push("error", "Hearth unavailable", toastMessage(err));
     },
   });
 }
 
-// Cancel a queued/running Forge task from the popover or the navbar panel.
+// Cancel a queued/running Hearth task from the popover or the navbar panel.
 // Updates the recent-tasks list and every cached history page from the
 // authoritative mutation response (never invalidate on the mutation path).
-export function useCancelForgeTask() {
+export function useCancelHearthTask() {
   const qc = useQueryClient();
   const toast = useToast();
   return useMutation({
-    mutationFn: (id: string) => api.cancelForgeTask(id),
+    mutationFn: (id: string) => api.cancelHearthTask(id),
     onSuccess: (task) => {
-      qc.setQueryData<ForgeTask[]>(["forge-recent-tasks"], (rows) =>
+      qc.setQueryData<HearthTask[]>(["hearth-recent-tasks"], (rows) =>
         rows?.map((r) => (r.id === task.id ? { ...r, status: task.status } : r))
       );
-      qc.setQueriesData<ForgeHistoryPage>({ queryKey: ["forge-task-history"] }, (page) =>
+      qc.setQueriesData<HearthHistoryPage>({ queryKey: ["hearth-task-history"] }, (page) =>
         page ? { ...page, data: page.data.map((r) => (r.id === task.id ? { ...r, status: task.status } : r)) } : page
       );
-      toast.push("success", "Forge task cancelled");
+      toast.push("success", "Hearth task cancelled");
     },
     onError: (err) => {
-      toast.push("error", "Failed to cancel Forge task", toastMessage(err));
+      toast.push("error", "Failed to cancel Hearth task", toastMessage(err));
     },
   });
 }
 
-// Full Forge task history for the control panel: filterable, cursor-paginated.
+// Full Hearth task history for the control panel: filterable, cursor-paginated.
 // Polls while any row on the current page is queued/running so active runs
 // update in place; idle pages refresh on a slow heartbeat.
-export function useForgeTaskHistory(
-  filters: { slug?: string; status?: ForgeTask["status"]; skillId?: string; documentType?: "task" | "wiki"; limit?: number },
+export function useHearthTaskHistory(
+  filters: { slug?: string; status?: HearthTask["status"]; skillId?: string; documentType?: "task" | "wiki"; limit?: number },
   cursor: string | null
 ) {
   return useQuery({
-    queryKey: ["forge-task-history", filters, cursor],
-    queryFn: () => api.listForgeTaskHistory({ ...filters, cursor: cursor ?? undefined }),
+    queryKey: ["hearth-task-history", filters, cursor],
+    queryFn: () => api.listHearthTaskHistory({ ...filters, cursor: cursor ?? undefined }),
     staleTime: 30_000,
     refetchInterval: (query) => {
       const hasActive = (query.state.data?.data ?? []).some((t) => t.status === "queued" || t.status === "running");
@@ -1555,7 +1555,7 @@ export function useForgeTaskHistory(
 export function useAgents() {
   return useQuery({
     queryKey: ["agents"],
-    queryFn: () => api.listForgeAgents().then((r) => r.data),
+    queryFn: () => api.listHearthAgents().then((r) => r.data),
     staleTime: 30_000,
   });
 }
@@ -1563,16 +1563,16 @@ export function useAgents() {
 export function useSkills() {
   return useQuery({
     queryKey: ["skills"],
-    queryFn: () => api.listForgeSkills().then((r) => r.data),
+    queryFn: () => api.listHearthSkills().then((r) => r.data),
     staleTime: 30_000,
   });
 }
 
-export function useCreateForgeAgent() {
+export function useCreateHearthAgent() {
   const qc = useQueryClient();
   const toast = useToast();
   return useMutation({
-    mutationFn: api.createForgeAgent,
+    mutationFn: api.createHearthAgent,
     onSuccess: (agent) => {
       qc.setQueryData<LexaAgent[]>(["agents"], (rows) => [...(rows ?? []), agent]);
       toast.push("success", `Agent '${agent.name}' created`);
@@ -1583,11 +1583,11 @@ export function useCreateForgeAgent() {
   });
 }
 
-export function useUpdateForgeAgent() {
+export function useUpdateHearthAgent() {
   const qc = useQueryClient();
   const toast = useToast();
   return useMutation({
-    mutationFn: ({ id, patch }: { id: string; patch: { name?: string; description?: string; instructions?: string } }) => api.updateForgeAgent(id, patch),
+    mutationFn: ({ id, patch }: { id: string; patch: { name?: string; description?: string; instructions?: string } }) => api.updateHearthAgent(id, patch),
     onSuccess: (agent) => {
       qc.setQueryData<LexaAgent[]>(["agents"], (rows) => rows?.map((r) => (r.id === agent.id ? agent : r)));
       toast.push("success", `Agent '${agent.name}' saved`);
@@ -1598,11 +1598,11 @@ export function useUpdateForgeAgent() {
   });
 }
 
-export function useDeleteForgeAgent() {
+export function useDeleteHearthAgent() {
   const qc = useQueryClient();
   const toast = useToast();
   return useMutation({
-    mutationFn: (id: string) => api.deleteForgeAgent(id),
+    mutationFn: (id: string) => api.deleteHearthAgent(id),
     onSuccess: (_v, id) => {
       qc.setQueryData<LexaAgent[]>(["agents"], (rows) => rows?.filter((r) => r.id !== id));
       toast.push("success", "Agent deleted");
@@ -1628,11 +1628,11 @@ export function useReplaceAgentSkills() {
   });
 }
 
-export function useResetForgeAgent() {
+export function useResetHearthAgent() {
   const qc = useQueryClient();
   const toast = useToast();
   return useMutation({
-    mutationFn: (id: string) => api.resetForgeAgent(id),
+    mutationFn: (id: string) => api.resetHearthAgent(id),
     onSuccess: (agent) => {
       qc.setQueryData<LexaAgent[]>(["agents"], (rows) => rows?.map((r) => (r.id === agent.id ? agent : r)));
       toast.push("success", `Agent '${agent.name}' reset to default`);
@@ -1643,11 +1643,11 @@ export function useResetForgeAgent() {
   });
 }
 
-export function useCreateForgeSkill() {
+export function useCreateHearthSkill() {
   const qc = useQueryClient();
   const toast = useToast();
   return useMutation({
-    mutationFn: api.createForgeSkill,
+    mutationFn: api.createHearthSkill,
     onSuccess: (skill) => {
       qc.setQueryData<LexaSkill[]>(["skills"], (rows) => [...(rows ?? []), skill]);
       toast.push("success", `Skill '${skill.name}' created`);
@@ -1658,11 +1658,11 @@ export function useCreateForgeSkill() {
   });
 }
 
-export function useUpdateForgeSkill() {
+export function useUpdateHearthSkill() {
   const qc = useQueryClient();
   const toast = useToast();
   return useMutation({
-    mutationFn: ({ id, patch }: { id: string; patch: { name?: string; description?: string; instructions?: string } }) => api.updateForgeSkill(id, patch),
+    mutationFn: ({ id, patch }: { id: string; patch: { name?: string; description?: string; instructions?: string } }) => api.updateHearthSkill(id, patch),
     onSuccess: (skill) => {
       qc.setQueryData<LexaSkill[]>(["skills"], (rows) => rows?.map((r) => (r.id === skill.id ? skill : r)));
       toast.push("success", `Skill '${skill.name}' saved`);
@@ -1673,11 +1673,11 @@ export function useUpdateForgeSkill() {
   });
 }
 
-export function useDeleteForgeSkill() {
+export function useDeleteHearthSkill() {
   const qc = useQueryClient();
   const toast = useToast();
   return useMutation({
-    mutationFn: (id: string) => api.deleteForgeSkill(id),
+    mutationFn: (id: string) => api.deleteHearthSkill(id),
     onSuccess: (_v, id) => {
       qc.setQueryData<LexaSkill[]>(["skills"], (rows) => rows?.filter((r) => r.id !== id));
       toast.push("success", "Skill deleted");
@@ -1688,11 +1688,11 @@ export function useDeleteForgeSkill() {
   });
 }
 
-export function useResetForgeSkill() {
+export function useResetHearthSkill() {
   const qc = useQueryClient();
   const toast = useToast();
   return useMutation({
-    mutationFn: (id: string) => api.resetForgeSkill(id),
+    mutationFn: (id: string) => api.resetHearthSkill(id),
     onSuccess: (skill) => {
       qc.setQueryData<LexaSkill[]>(["skills"], (rows) => rows?.map((r) => (r.id === skill.id ? skill : r)));
       toast.push("success", `Skill '${skill.name}' reset to default`);
@@ -1703,10 +1703,10 @@ export function useResetForgeSkill() {
   });
 }
 
-export function useForgeTask(id: string | null, enabled: boolean) {
+export function useHearthTask(id: string | null, enabled: boolean) {
   return useQuery({
-    queryKey: ["forge-task", id],
-    queryFn: () => api.getForgeTask(id!),
+    queryKey: ["hearth-task", id],
+    queryFn: () => api.getHearthTask(id!),
     enabled: enabled && id !== null,
     refetchInterval: (query) => {
       const status = query.state.data?.status;
@@ -1715,23 +1715,23 @@ export function useForgeTask(id: string | null, enabled: boolean) {
   });
 }
 
-// Live activity feed for a Forge task. Polls fast while the task is active
+// Live activity feed for a Hearth task. Polls fast while the task is active
 // so the "what is it doing now" log stays current.
-export function useForgeTaskLogs(id: string | null, enabled: boolean) {
+export function useHearthTaskLogs(id: string | null, enabled: boolean) {
   return useQuery({
-    queryKey: ["forge-task-logs", id],
-    queryFn: () => api.listForgeTaskLogs(id!).then((r) => r.data),
+    queryKey: ["hearth-task-logs", id],
+    queryFn: () => api.listHearthTaskLogs(id!).then((r) => r.data),
     enabled: enabled && id !== null,
     refetchInterval: enabled ? 1500 : false,
   });
 }
 
-// Most recent Forge task for a document — used to resume a run that finished
+// Most recent Hearth task for a document — used to resume a run that finished
 // after the popover was closed (background work keeps running server-side).
-export function useRecentForgeTask(slug: string, documentType: "task" | "wiki", documentId: string, enabled: boolean) {
+export function useRecentHearthTask(slug: string, documentType: "task" | "wiki", documentId: string, enabled: boolean) {
   return useQuery({
-    queryKey: ["forge-recent", slug, documentType, documentId],
-    queryFn: () => api.listForgeTasks(slug, documentType, documentId).then((r) => r.data[0] ?? null),
+    queryKey: ["hearth-recent", slug, documentType, documentId],
+    queryFn: () => api.listHearthTasks(slug, documentType, documentId).then((r) => r.data[0] ?? null),
     enabled: enabled && !!documentId,
     refetchInterval: (query) => {
       const status = query.state.data?.status;
@@ -1921,7 +1921,7 @@ export function useDeleteComment(slug: string, taskId: string) {
         const local: ActivityItem = {
           kind: "event", id: -Date.now(), taskId, type: "comment_deleted",
           actorKind: "user", actorLabel: label, actorUserId: null,
-          message: `${label} deleted a comment`, createdAt: now,
+          message: `${label} deleted a comment`, viaHerald: false, createdAt: now,
         };
         return {
           ...old,
@@ -2129,6 +2129,24 @@ export function useSaveHeraldSettings(projectId: string) {
   });
 }
 
+// Write-tools gate (herald-write-approvals.html State 4): PUT rides on the
+// stored masked provider fields; only writeTools changes. Response is the
+// fresh masked view — cached directly (invariant 6).
+export function useSaveHeraldWriteTools(projectId: string) {
+  const qc = useQueryClient();
+  const toast = useToast();
+  return useMutation({
+    mutationFn: (input: HeraldSettingsInput) => api.putHeraldSettings(projectId, input),
+    onSuccess: (masked) => {
+      qc.setQueryData<HeraldSettingsMasked | null>(["herald-settings", projectId], masked);
+      toast.push("success", "Herald write tools saved");
+    },
+    onError: (err) => {
+      toast.push("error", "Failed to save Herald write tools", toastMessage(err));
+    },
+  });
+}
+
 // Test + models-list consume UNSAVED form values and persist nothing — no
 // cache writes, results render inline.
 export function useTestHeraldSettings(projectId: string) {
@@ -2157,7 +2175,7 @@ export function useCreateHeraldTask() {
     onSuccess: (task) => {
       const projects = qc.getQueryData<Project[]>(["projects"]);
       const project = projects?.find((p) => p.id === task.projectId);
-      qc.setQueryData<RecentForgeTask[]>(["forge-recent-tasks"], (rows) => [
+      qc.setQueryData<RecentHearthTask[]>(["hearth-recent-tasks"], (rows) => [
         { ...task, projectName: project?.name ?? "" },
         ...(rows ?? []),
       ]);

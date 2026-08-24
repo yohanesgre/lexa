@@ -39,12 +39,12 @@ beforeAll(async () => {
     if (url === "/api/health") return json(res, 200, { ok: true });
     if (url === "/api/projects") return json(res, 200, { data: [{ id: "p1", slug: "demo", name: "Demo", description: null }] });
     if (url === "/api/projects/demo/tasks" && req.method === "POST") return json(res, 201, { data: { id: "t1", title: "New" }, activity: [] });
-    if (url === "/api/forge/runtimes" && req.method === "GET") { res.writeHead(401, { "Content-Type": "text/plain" }); return res.end("nope"); }
+    if (url === "/api/hearth/runtimes" && req.method === "GET") { res.writeHead(401, { "Content-Type": "text/plain" }); return res.end("nope"); }
     if (url === "/api/projects/demo/tasks/t1/github-link") return json(res, 409, { error: { code: "ALREADY_LINKED", message: "issue already linked", details: { issueId: "42" } } });
-    if (url === "/api/forge/machines/heartbeat") { res.writeHead(500, { "Content-Type": "text/plain" }); return res.end("boom"); }
+    if (url === "/api/hearth/machines/heartbeat") { res.writeHead(500, { "Content-Type": "text/plain" }); return res.end("boom"); }
     if (url === "/api/projects/demo/wiki/p1") { res.writeHead(200, { "Content-Type": "application/json" }); return res.end("not json {{{"); }
-    if (url === "/api/forge/runtimes/r1" && req.method === "DELETE") return res.writeHead(204).end();
-    if (url === "/api/forge/runtime-events/claim") return json(res, 200, { event: null });
+    if (url === "/api/hearth/runtimes/r1" && req.method === "DELETE") return res.writeHead(204).end();
+    if (url === "/api/hearth/runtime-events/claim") return json(res, 200, { event: null });
     if (url === "/api/settings/github" && req.method === "GET") return json(res, 200, { appId: "123456", privateKeySet: true, webhookSecretSet: true, source: "db" });
     if (url === "/api/settings/github" && req.method === "PUT") return json(res, 200, { appId: "123456", privateKeySet: true, webhookSecretSet: true, source: "db" });
     return json(res, 404, { error: { code: "NOT_FOUND", message: "no such route" } });
@@ -102,7 +102,7 @@ describe("LexaClient request building", () => {
   it("claimRuntimeEvent sends x-machine-secret", async () => {
     const out = await Effect.runPromise(client().claimRuntimeEvent("m1", "s3cret"));
     expect(out).toEqual({ event: null });
-    const req = seen.find((r) => r.url === "/api/forge/runtime-events/claim");
+    const req = seen.find((r) => r.url === "/api/hearth/runtime-events/claim");
     expect(req?.headers["x-machine-secret"]).toBe("s3cret");
     expect(JSON.parse(req?.body ?? "{}")).toEqual({ machineId: "m1" });
   });

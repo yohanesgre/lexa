@@ -4,9 +4,9 @@ import { useEditor, EditorContent } from "@tiptap/react";
 import type { TipTapDoc } from "../../shared/types";
 import type { JSONContent } from "@tiptap/core";
 import { cn } from "./ui/cn";
-import { ForgePopover } from "./forge/ForgePopover";
-import { ForgeReviewSurface } from "./forge/ForgeReviewSurface";
-import { useForgeReview, type ForgeReviewIdentity } from "./forge/useForgeReview";
+import { HearthPopover } from "./hearth/HearthPopover";
+import { HearthReviewSurface } from "./hearth/HearthReviewSurface";
+import { useHearthReview, type HearthReviewIdentity } from "./hearth/useHearthReview";
 import { textEditorExtensions, extensionsWithMentions } from "../lib/tiptap";
 import { useAttachmentEmbeds } from "../lib/useAttachmentEmbeds";
 import Placeholder from "@tiptap/extension-placeholder";
@@ -20,8 +20,8 @@ interface TextEditorProps {
   editorProps?: Record<string, unknown>;
   className?: string;
   extensions?: typeof textEditorExtensions;
-  // Forge (AI writing assistant) wiring
-  forge?: {
+  // Hearth (AI writing assistant) wiring
+  hearth?: {
     slug: string;
     documentType: "task" | "wiki";
     documentId: string;
@@ -33,7 +33,7 @@ interface TextEditorProps {
     documentType: "task" | "wiki";
     documentId: string;
   };
-  // Fired when a Forge review enters/exits the editor (used by surfaces to
+  // Fired when a Hearth review enters/exits the editor (used by surfaces to
   // suspend autosave while a result is under review — the document itself is
   // never modified until Accept, so nothing unaccepted can be saved).
   onReviewStateChange?: (active: boolean) => void;
@@ -101,7 +101,7 @@ function setImage(editor: NonNullable<ReturnType<typeof useEditor>>) {
 export function Toolbar({
   editor,
   headingLevel,
-  forge,
+  hearth,
   reviewActive,
   appliedTaskId,
   rejectedTaskId,
@@ -109,18 +109,18 @@ export function Toolbar({
 }: {
   editor: NonNullable<ReturnType<typeof useEditor>>;
   headingLevel: number;
-  forge?: TextEditorProps["forge"];
-  // Forge review-in-editor: the review surface is rendered by the editing
+  hearth?: TextEditorProps["hearth"];
+  // Hearth review-in-editor: the review surface is rendered by the editing
   // surfaces in the editor body, not by the toolbar. The toolbar only opens
-  // the Forge popover; "Review in editor" hands the result up via onReview.
+  // the Hearth popover; "Review in editor" hands the result up via onReview.
   reviewActive: boolean;
   appliedTaskId: string | null;
   rejectedTaskId: string | null;
-  onReview?: (text: string, identity: ForgeReviewIdentity) => void;
+  onReview?: (text: string, identity: HearthReviewIdentity) => void;
 }) {
-  const [forgeOpen, setForgeOpen] = useState(false);
-  const [forgeAnchor, setForgeAnchor] = useState<DOMRect | null>(null);
-  const forgeBtnRef = useRef<HTMLButtonElement>(null);
+  const [hearthOpen, setHearthOpen] = useState(false);
+  const [hearthAnchor, setHearthAnchor] = useState<DOMRect | null>(null);
+  const hearthBtnRef = useRef<HTMLButtonElement>(null);
 
   return (
     <>
@@ -197,15 +197,15 @@ export function Toolbar({
         </ToolbarButton>
         <ToolbarSeparator />
         <button
-          ref={forgeBtnRef}
+          ref={hearthBtnRef}
           type="button"
-          className={cn("toolbar-btn", forgeOpen && "active")}
-          title={forge ? "AI project assistant (Hearth)" : "AI writing assistant (coming soon)"}
+          className={cn("toolbar-btn", hearthOpen && "active")}
+          title={hearth ? "AI project assistant (Hearth)" : "AI writing assistant (coming soon)"}
           aria-label="Hearth AI writing assistant"
-          disabled={!forge}
+          disabled={!hearth}
           onClick={() => {
-            setForgeAnchor(forgeBtnRef.current?.getBoundingClientRect() ?? null);
-            setForgeOpen((v) => !v);
+            setHearthAnchor(hearthBtnRef.current?.getBoundingClientRect() ?? null);
+            setHearthOpen((v) => !v);
           }}
         >
           <Flame size={16} strokeWidth={1.5} />
@@ -213,22 +213,22 @@ export function Toolbar({
         </button>
       </div>
       </div>
-      {forge && forgeOpen && (
-        <ForgePopover
+      {hearth && hearthOpen && (
+        <HearthPopover
           editor={editor}
-          slug={forge.slug}
-          documentType={forge.documentType}
-          documentId={forge.documentId}
-          open={forgeOpen}
-          onClose={() => setForgeOpen(false)}
+          slug={hearth.slug}
+          documentType={hearth.documentType}
+          documentId={hearth.documentId}
+          open={hearthOpen}
+          onClose={() => setHearthOpen(false)}
           onReview={(text, identity) => {
-            setForgeOpen(false);
+            setHearthOpen(false);
             onReview?.(text, identity);
           }}
           reviewActive={reviewActive}
           appliedTaskId={appliedTaskId}
           rejectedTaskId={rejectedTaskId}
-          anchorRect={forgeAnchor}
+          anchorRect={hearthAnchor}
         />
       )}
     </>
@@ -244,7 +244,7 @@ export function TextEditor({
   editorProps,
   className,
   extensions,
-  forge,
+  hearth,
   attachments,
   onReviewStateChange,
 }: TextEditorProps) {
@@ -261,7 +261,7 @@ export function TextEditor({
     const onPointerDown = (e: PointerEvent) => {
       const target = e.target as HTMLElement | null;
       lastPointerDownInside.current =
-        wrapperRef.current?.contains(target) === true || target?.closest("[data-forge-popover]") !== null;
+        wrapperRef.current?.contains(target) === true || target?.closest("[data-hearth-popover]") !== null;
     };
     document.addEventListener("pointerdown", onPointerDown, true);
     return () => document.removeEventListener("pointerdown", onPointerDown, true);
@@ -278,11 +278,11 @@ export function TextEditor({
         return e;
       });
     }
-    // Mentions need the project slug — available when forge or attachments
+    // Mentions need the project slug — available when hearth or attachments
     // wiring exists. Absent both, the editor carries no mention plugin.
-    const mentionSlug = attachments?.slug ?? forge?.slug;
+    const mentionSlug = attachments?.slug ?? hearth?.slug;
     return extensionsWithMentions(withPlaceholder, mentionSlug);
-  }, [extensions, placeholder, attachments?.slug, forge?.slug]);
+  }, [extensions, placeholder, attachments?.slug, hearth?.slug]);
 
   // Hooks run unconditionally — empty options when attachments wiring is
   // absent (create mode); handlers only spread while active.
@@ -307,7 +307,7 @@ export function TextEditor({
         blur: (_view, event) => {
           const related = (event as FocusEvent).relatedTarget as HTMLElement | null;
           if (related !== null) {
-            return wrapperRef.current?.contains(related) === true || related?.closest("[data-forge-popover]") !== null;
+            return wrapperRef.current?.contains(related) === true || related?.closest("[data-hearth-popover]") !== null;
           }
           return lastPointerDownInside.current;
         },
@@ -321,7 +321,7 @@ export function TextEditor({
     },
   });
 
-  const { review, appliedTaskId, rejectedTaskId, handleReview, handleAcceptReview, handleRejectReview } = useForgeReview(editor, onReviewStateChange);
+  const { review, appliedTaskId, rejectedTaskId, handleReview, handleAcceptReview, handleRejectReview } = useHearthReview(editor, onReviewStateChange);
 
   if (!editor) return null;
 
@@ -329,9 +329,9 @@ export function TextEditor({
 
   return (
     <div className={cn("editor-wrapper", className, review && "is-reviewing")} ref={wrapperRef}>
-      <Toolbar editor={editor} headingLevel={headingLevel} forge={forge} reviewActive={review !== null} appliedTaskId={appliedTaskId} rejectedTaskId={rejectedTaskId} onReview={handleReview} />
+      <Toolbar editor={editor} headingLevel={headingLevel} hearth={hearth} reviewActive={review !== null} appliedTaskId={appliedTaskId} rejectedTaskId={rejectedTaskId} onReview={handleReview} />
       {review && (
-        <ForgeReviewSurface action={review.action} runtime={review.runtime} diff={review.diff} onAccept={handleAcceptReview} onReject={handleRejectReview} />
+        <HearthReviewSurface action={review.action} runtime={review.runtime} diff={review.diff} onAccept={handleAcceptReview} onReject={handleRejectReview} />
       )}
       <EditorContent editor={editor} className="editor-content" />
     </div>

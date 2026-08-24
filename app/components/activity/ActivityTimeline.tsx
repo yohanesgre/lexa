@@ -27,6 +27,10 @@ function formatTime(iso: string): string {
 function EventRow({ item, ownerName }: { item: ActivityEvent; ownerName: string | null }) {
   const isAgent = item.actorKind === "agent";
   const isWebhook = item.type === "github_synced";
+  // Provenance pill (herald-write-approvals.html State 5): marks rows WRITTEN
+  // THROUGH an approved Herald write tool. Read defensively — viaHerald rides
+  // the API payload only when the backend serializes it.
+  const viaHerald = (item as { viaHerald?: unknown }).viaHerald === true;
   return (
     <div className="activity-row" style={{ "--marker-center": "16px" } as CSSProperties}>
       <span className={cn("activity-dot", isAgent && "activity-dot-agent")}>
@@ -45,6 +49,7 @@ function EventRow({ item, ownerName }: { item: ActivityEvent; ownerName: string 
         <div style={isAgent ? { marginTop: 2 } : undefined}>
           {isWebhook && <span className="font-micro text-2xs text-lx-text-muted uppercase tracking-[0.04em]">github </span>}
           <span className="activity-msg">{item.message}</span>
+          {viaHerald && <span className="via-pill" style={{ marginLeft: 6 }}>via Herald</span>}
           <span className="activity-time"> · {formatTime(item.createdAt)}</span>
         </div>
       </div>

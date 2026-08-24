@@ -308,11 +308,16 @@ describe("HeraldChatPage affordances", () => {
 
     fireEvent.change(screen.getByPlaceholderText(/ask herald anything/i), { target: { value: "go" } });
     fireEvent.click(screen.getByRole("button", { name: /^send$/i }));
-    expect(trigger).toBeDisabled();
 
-    await waitFor(() => expect(trigger).toBeEnabled());
+    // While streaming, the composer-footer swaps Send → Stop and the effort
+    // picker is no longer rendered. The previous ref is detached.
+    expect(screen.getByRole("button", { name: /^stop$/i })).toBeInTheDocument();
+
+    // After done, footer returns to idle with the picker mounted again.
+    const reTrigger = await screen.findByRole("button", { name: "Thinking effort" });
+    expect(reTrigger).toBeEnabled();
     // One-shot override: the send consumed it.
-    await waitFor(() => expect(trigger).toHaveTextContent("default (medium)"));
+    await waitFor(() => expect(reTrigger).toHaveTextContent("default (medium)"));
 
     // Thread switch (rerender with a different ?thread=) resets the pick too.
     rerender(<HeraldChatPage slug="demo" thread="t-effort-next" />);
@@ -586,6 +591,84 @@ describe("Herald activity strip", () => {
     stubMetrics(scroller, 400, 600, 200);
     fireEvent.scroll(scroller);
     expect(screen.queryByRole("button", { name: "Jump to latest" })).toBeNull();
+  });
+
+  it("write approvals: tool_pending frames freeze into chips; decisions POST per approvalId; last decision triggers resume", async () => {
+    const decideCalls: Array<{ id: string; verdict: string }> = [];
+    let resumed = false;
+    fetchMock.mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const key = `${init?.method ?? "GET"} ${url.split("?")[0]}`;
+      if (key.startsWith("POST /api/herald/approvals/") && key.endsWith("/decide")) {
+        const id = url.split("/")[4];
+        const verdict = (JSON.parse(String(init?.body)) as { verdict: string }).verdict;
+        decideCalls.push({ id, verdict });
+        return Promise.resolve(new Response(JSON.stringify({ approvalId: id, batchId: "b1", status: verdict === "approve" ? "approved" : "rejected", remaining: 0 }), { status: 200 }));
+      }
+      if (key.startsWith("POST /api/herald/chat/t-susp/resume")) {
+        resumed = true;
+        return Promise.resolve(sse([{ type: "start", threadId: "t-susp" }, { type: "done", text: "Done — created the task.", usage: { in: 2, out: 3 } }]));
+      }
+      if (key.startsWith("POST /api/herald/chat/stream")) {
+        return Promise.resolve(
+          sse([
+            { type: "start", threadId: "t-susp" },
+            { type: "tool_pending", approvalId: "a1", batchId: "b1", seq: 0, name: "create_task", diff: { type: "task_create", title: "Fix retries", fields: {} } },
+            { type: "tool_pending", approvalId: "a2", batchId: "b1", seq: 1, name: "move_task", diff: { type: "task_move", taskRef: "LEX-12", taskTitle: "T", fromColumn: "Backlog", toColumn: "In Progress" } },
+            { type: "suspended", batchId: "b1" },
+          ])
+        );
+      }
+      if (key.startsWith("GET /api/herald/chat/t-susp")) {
+        const messages = resumed ? [u("do the thing"), a("", { pendingBatch: "b1" }), a("Done — created the task.")] : [];
+        return Promise.resolve(new Response(JSON.stringify({ chatId: "t-susp", projectId: "p1", ownerUserId: null, agentId: null, skillId: null, messages, summary: null, summarizedCount: 0, createdAt: "t", updatedAt: "t" }), { status: 200 }));
+      }
+      if (key === "GET /api/projects") return Promise.resolve(new Response(JSON.stringify({ data: [PROJECT], nextCursor: null }), { status: 200 }));
+      if (key === "GET /api/herald/settings/p1") return Promise.resolve(new Response(JSON.stringify(currentSettings), { status: 200 }));
+      if (key === "GET /api/herald/chats/p1") return Promise.resolve(new Response(JSON.stringify({ data: [] }), { status: 200 }));
+      if (key === "GET /api/agents") return Promise.resolve(new Response(JSON.stringify({ data: [{ id: "hearth-herald", name: "Herald Agent", description: "", instructions: "", skillIds: [] }] }), { status: 200 }));
+      if (key === "GET /api/skills") return Promise.resolve(new Response(JSON.stringify({ data: [] }), { status: 200 }));
+      return Promise.reject(new Error(`unmocked: ${key}`));
+    });
+
+    render(<HeraldChatPage slug="demo" thread="t-susp" />, { wrapper });
+    const composer = await screen.findByPlaceholderText(/ask herald anything/i);
+    fireEvent.change(composer, { target: { value: "do the thing" } });
+    fireEvent.click(screen.getByRole("button", { name: /^send$/i }));
+
+    // Suspended: batch header + waiting indicator + locked composer tally.
+    await screen.findByPlaceholderText(/decide the pending changes above/i);
+    expect(document.querySelectorAll(".approval-batch")).toHaveLength(1);
+    expect(document.querySelector(".approval-batch")!.textContent).toContain("Herald proposes 2 changes");
+    expect(screen.getByText(/waiting for your approval/i)).toBeInTheDocument();
+    const locked = screen.getByPlaceholderText(/decide the pending changes above/i);
+    expect(locked).toBeDisabled();
+    expect(screen.getByText(/turn suspended — 2 pending/i)).toBeInTheDocument();
+
+    // Per-chip decisions — one POST each keyed by approvalId.
+    fireEvent.click(screen.getAllByRole("button", { name: "Approve" })[0]);
+    await waitFor(() => expect(decideCalls).toEqual([{ id: "a1", verdict: "approve" }]));
+    // Decided chip collapses to its status line; the batch survives (session
+    // memory is not clobbered by transcript fetches mid-flow).
+    await waitFor(() => expect(document.querySelector(".approval-chip")?.textContent).toContain("Approved"));
+    fireEvent.click(screen.getByRole("button", { name: "Reject" }));
+    await waitFor(() => expect(decideCalls).toHaveLength(2));
+
+    // Last terminal chip re-opens the stream for the batch (resume endpoint).
+    await waitFor(() => {
+      const resumeCalls = fetchMock.mock.calls.filter((c) => String(c[0]).includes("/resume"));
+      expect(resumeCalls).toHaveLength(1);
+    });
+    // Resumed turn renders as a fresh entry.
+    expect(await screen.findByText("Done — created the task.")).toBeInTheDocument();
+  });
+
+  it("reload mid-suspension: transcript pendingBatch marker renders the waiting state and locks the composer", async () => {
+    transcripts.set("t-mark", [u("do the thing"), a("", { pendingBatch: "b1" })]);
+    render(<HeraldChatPage slug="demo" thread="t-mark" />, { wrapper });
+    expect(await screen.findByText(/waiting for your approval/i)).toBeInTheDocument();
+    expect(screen.getByPlaceholderText(/decide the pending changes above/i)).toBeDisabled();
+    expect(screen.getByText(/turn suspended/i)).toBeInTheDocument();
   });
 });
 

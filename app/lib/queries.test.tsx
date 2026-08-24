@@ -10,8 +10,8 @@ import {
   useProjects, useDashboard, useBoard, useTasks, useFieldConfig, useWikiPages, useWikiPage,
   useSearchWikiPages, useRevisions, useColumns, useSwimlanes, useApiKeys, useUsers,
   useProjectMembers, useRuntimes, useMachines, useAgents, useSkills,
-  useRecentForgeTasks, useForgeTaskHistory, useSources, useTaskLinks, useTaskSearch,
-  useTaskActivity, useForgeTask, useForgeTaskLogs, useRecentForgeTask,
+  useRecentHearthTasks, useHearthTaskHistory, useSources, useTaskLinks, useTaskSearch,
+  useTaskActivity, useHearthTask, useHearthTaskLogs, useRecentHearthTask,
   useRateLimit, useGithubSettings,
   deriveTaskList, selectProjectHealth, prependActivity,
 } from "./queries";
@@ -155,49 +155,49 @@ describe("query hooks — keys + URLs", () => {
     await waitFor(() => expect(l2.result.current.isSuccess).toBe(true));
   });
 
-  it("useForgeTask / useForgeTaskLogs / useRecentForgeTask respect the enabled flag + null id", async () => {
-    routes.set("GET /api/forge/tasks/ft1", { id: "ft1", status: "queued" });
-    routes.set("GET /api/forge/tasks/ft1/logs", { data: [] });
-    routes.set("GET /api/forge/tasks?slug=demo&documentType=task&documentId=t1", { data: [] });
-    const off = renderHook(() => useForgeTask("ft1", false), { wrapper });
+  it("useHearthTask / useHearthTaskLogs / useRecentHearthTask respect the enabled flag + null id", async () => {
+    routes.set("GET /api/hearth/tasks/ft1", { id: "ft1", status: "queued" });
+    routes.set("GET /api/hearth/tasks/ft1/logs", { data: [] });
+    routes.set("GET /api/hearth/tasks?slug=demo&documentType=task&documentId=t1", { data: [] });
+    const off = renderHook(() => useHearthTask("ft1", false), { wrapper });
     await waitFor(() => expect(off.result.current.isPending).toBe(true));
-    const nullId = renderHook(() => useForgeTask(null, true), { wrapper });
+    const nullId = renderHook(() => useHearthTask(null, true), { wrapper });
     await waitFor(() => expect(nullId.result.current.isPending).toBe(true));
-    const on = renderHook(() => useForgeTask("ft1", true), { wrapper });
+    const on = renderHook(() => useHearthTask("ft1", true), { wrapper });
     await waitFor(() => expect(on.result.current.isSuccess).toBe(true));
-    const logs = renderHook(() => useForgeTaskLogs("ft1", true), { wrapper });
+    const logs = renderHook(() => useHearthTaskLogs("ft1", true), { wrapper });
     await waitFor(() => expect(logs.result.current.isSuccess).toBe(true));
-    const recent = renderHook(() => useRecentForgeTask("demo", "task", "", true), { wrapper });
+    const recent = renderHook(() => useRecentHearthTask("demo", "task", "", true), { wrapper });
     await waitFor(() => expect(recent.result.current.isPending).toBe(true));
-    expect(fetchMock).not.toHaveBeenCalledWith("/api/forge/tasks?slug=demo&documentType=task&documentId=t1", expect.anything());
-    const recentOn = renderHook(() => useRecentForgeTask("demo", "task", "t1", true), { wrapper });
+    expect(fetchMock).not.toHaveBeenCalledWith("/api/hearth/tasks?slug=demo&documentType=task&documentId=t1", expect.anything());
+    const recentOn = renderHook(() => useRecentHearthTask("demo", "task", "t1", true), { wrapper });
     await waitFor(() => expect(recentOn.result.current.isSuccess).toBe(true));
-    expect(fetchMock).toHaveBeenCalledWith("/api/forge/tasks?slug=demo&documentType=task&documentId=t1", expect.anything());
+    expect(fetchMock).toHaveBeenCalledWith("/api/hearth/tasks?slug=demo&documentType=task&documentId=t1", expect.anything());
   });
 
-  it("settings/forge list hooks hit their URLs", async () => {
+  it("settings/hearth list hooks hit their URLs", async () => {
     routes.set("GET /api/settings/api-keys", { data: [] });
     routes.set("GET /api/settings/rate-limit", { max: 6000, windowMs: 600000, envOverride: false });
     routes.set("GET /api/settings/github", { appId: "123456", privateKeySet: true, webhookSecretSet: true, source: "settings" });
     routes.set("GET /api/admin/users", { data: [] });
     routes.set("GET /api/projects/demo/members", { data: [] });
-    routes.set("GET /api/forge/runtimes", { data: [] });
-    routes.set("GET /api/forge/machines", { data: [] });
+    routes.set("GET /api/hearth/runtimes", { data: [] });
+    routes.set("GET /api/hearth/machines", { data: [] });
     routes.set("GET /api/agents", { data: [] });
     routes.set("GET /api/skills", { data: [] });
-    routes.set("GET /api/forge/tasks/recent", { data: [] });
-    routes.set("GET /api/forge/tasks/history", { data: [], nextCursor: null, summary: { queued: 0, running: 0, completed: 0, failed: 0, cancelled: 0 } });
+    routes.set("GET /api/hearth/tasks/recent", { data: [] });
+    routes.set("GET /api/hearth/tasks/history", { data: [], nextCursor: null, summary: { queued: 0, running: 0, completed: 0, failed: 0, cancelled: 0 } });
     const hooks: Array<() => unknown> = [
       () => useApiKeys(), () => useUsers(), () => useProjectMembers("demo"), () => useRuntimes(),
-      () => useMachines(), () => useAgents(), () => useSkills(), () => useRecentForgeTasks(),
-      () => useForgeTaskHistory({}, null), () => useRateLimit(), () => useGithubSettings(),
+      () => useMachines(), () => useAgents(), () => useSkills(), () => useRecentHearthTasks(),
+      () => useHearthTaskHistory({}, null), () => useRateLimit(), () => useGithubSettings(),
     ];
     for (const hook of hooks) {
       const { result } = renderHook(hook as () => unknown, { wrapper });
       await waitFor(() => expect((result.current as { isSuccess?: boolean }).isSuccess).toBe(true));
     }
     expect(queryClient.getQueryCache().findAll({ queryKey: ["api-keys"], exact: true })).toHaveLength(1);
-    expect(queryClient.getQueryCache().findAll({ queryKey: ["forge-runtimes"], exact: true })).toHaveLength(1);
+    expect(queryClient.getQueryCache().findAll({ queryKey: ["hearth-runtimes"], exact: true })).toHaveLength(1);
   });
 
   it("useTaskActivity is an infinite query — page 1 without cursor, next page with the cursor", async () => {
@@ -266,12 +266,12 @@ describe("prependActivity", () => {
   it("appends items to the end of page 1 only", () => {
     queryClient.setQueryData(["task-activity", "demo", "t1"], {
       pages: [
-        { data: [{ kind: "event" as const, id: 1, taskId: "t1", actorKind: "user" as const, actorLabel: "A", actorUserId: null, type: "created" as const, message: "m1", createdAt: "t1" }], nextCursor: "c1" },
+        { data: [{ kind: "event" as const, id: 1, taskId: "t1", actorKind: "user" as const, actorLabel: "A", actorUserId: null, type: "created" as const, message: "m1", viaHerald: false, createdAt: "t1" }], nextCursor: "c1" },
         { data: [], nextCursor: null },
       ],
       pageParams: [null, "c1"],
     });
-    prependActivity(queryClient, "demo", "t1", [{ kind: "event" as const, id: 2, taskId: "t1", actorKind: "user" as const, actorLabel: "A", actorUserId: null, type: "moved" as const, message: "m2", createdAt: "t2" }]);
+    prependActivity(queryClient, "demo", "t1", [{ kind: "event" as const, id: 2, taskId: "t1", actorKind: "user" as const, actorLabel: "A", actorUserId: null, type: "moved" as const, message: "m2", viaHerald: false, createdAt: "t2" }]);
     const cached = queryClient.getQueryData(["task-activity", "demo", "t1"]) as { pages: { data: unknown[] }[] };
     expect(cached.pages[0].data).toHaveLength(2);
     expect(cached.pages[1].data).toHaveLength(0);

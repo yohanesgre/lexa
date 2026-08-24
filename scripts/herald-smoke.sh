@@ -142,7 +142,7 @@ created=$(api_body "${auth[@]}" -X POST "$BASE_URL/api/herald/tasks" \
 TASK_ID=$(echo "$created" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
 echo "-- frames:"
 curl -sS -N --max-time 30 "${auth[@]}" -X POST "$BASE_URL/api/herald/tasks/$TASK_ID/stream" | head -20
-status=$(api_body "${auth[@]}" "$BASE_URL/api/forge/tasks/$TASK_ID")
+status=$(api_body "${auth[@]}" "$BASE_URL/api/hearth/tasks/$TASK_ID")
 echo "-- task after stream:"
 echo "$status" | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d["status"], "| result:", d.get("result"))'
 echo "$status" | grep -q '"completed"' || fail "task not done"

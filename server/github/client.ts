@@ -265,7 +265,7 @@ export class GitHubClient extends Effect.Service<GitHubClient>()("GitHubClient",
           catch: (e) => (e instanceof GithubApiError ? e : new GithubApiError({ message: String(e) })),
         }),
 
-      // ── Repo content (Forge context — Contents: Read) ──
+      // ── Repo content (Hearth context — Contents: Read) ──
 
       getDefaultBranch: (owner: string, repo: string): Effect.Effect<string, GithubApiError> =>
         Effect.tryPromise({

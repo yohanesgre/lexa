@@ -1643,7 +1643,7 @@ a:hover { color: var(--lx-text-link-hover); }
 }
 
 /* Wide band: each separator becomes an auto-margin boundary, so button groups
-   spread evenly across the full width and the last group (Forge) terminates
+   spread evenly across the full width and the last group (Hearth) terminates
    flush right. Compact band (< ~760px, row wraps): distribution off — dense
    base gaps so wrapped lines never justify into sparse uneven spacing. */
 .task-editor-chrome .toolbar-sep {
@@ -2220,8 +2220,8 @@ mark {
   cursor: pointer;
 }
 
-/* Forge status pill in the navbar (running / done states) */
-.forge-status {
+/* Hearth status pill in the navbar (running / done states) */
+.hearth-status {
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -2405,7 +2405,7 @@ mark {
 
 .filter-chip-label { color: var(--lx-text-secondary); }
 
-/* Status chips (forge history filter): one segmented control, status color as identity */
+/* Status chips (hearth history filter): one segmented control, status color as identity */
 .status-chip {
   display: inline-flex;
   align-items: center;
@@ -2898,7 +2898,7 @@ textarea.prop-input {
     display: inline-flex;
   }
 
-/* Unified navbar pill — same geometry as the Forge status pill.
+/* Unified navbar pill — same geometry as the Hearth status pill.
    Used by: project switcher trigger, user profile trigger. */
 .nav-pill {
   display: inline-flex;
@@ -5669,7 +5669,7 @@ textarea.prop-input {
           <span class="state-label">Card row · danger</span>
           <div class="card-row card-row--danger" style="width:280px;">
             <div class="text-sm weight-500 color-primary">Daemon offline</div>
-            <div class="text-xs color-secondary">Forge runtime unreachable since 14:02</div>
+            <div class="text-xs color-secondary">Hearth runtime unreachable since 14:02</div>
           </div>
         </div>
         <div class="state-row">
@@ -6003,7 +6003,7 @@ textarea.prop-input {
 
       <div class="block-shell">
         <div class="block-desc">
-          <strong>Use</strong> — `.status-chip` + `.status-dot` for forge/task run states (queued/running/done/failed/cancelled).<br/>
+          <strong>Use</strong> — `.status-chip` + `.status-dot` for hearth/task run states (queued/running/done/failed/cancelled).<br/>
           <strong>Avoid</strong> — a status chip for a persistent field value; color alone without a label.<br/>
           <strong>Instead</strong> — `.type-badge`/`.priority-dot` for task fields; keep label + dot for status.
         </div>

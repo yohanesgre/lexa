@@ -127,6 +127,16 @@ export class TaskRepo extends Effect.Service<TaskRepo>()("Lexa/TaskRepo", {
           key
         ).pipe(Effect.map((r) => rowToTask(r))),
 
+      listByProject: (projectId: string): Effect.Effect<Task[], DbError> =>
+        queryAll<TaskRow & { column_github_state: "open" | "closed" | null; github_issues_raw: string | null }>(
+          db,
+          `SELECT ${TASK_SELECT} FROM ${TASK_FROM}
+           WHERE t.project_id = ?
+           GROUP BY t.id
+           ORDER BY t.archived_at IS NOT NULL, t.number ASC`,
+          projectId
+        ).pipe(Effect.map((rows) => rows.map((r) => rowToTask(r)))),
+
       searchByTitle: (projectId: string, query: string, limit = 10): Effect.Effect<Task[], DbError> => {
         const q = query.trim();
         if (q === "") return Effect.succeed([]);

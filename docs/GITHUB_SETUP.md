@@ -19,9 +19,9 @@ suppression and delivery dedup make the loop safe.
 3. **Repository permissions**:
    - **Issues**: `Read and write`
    - **Metadata**: `Read-only`
-   - **Contents**: `Read-only` — enables the Forge repo-content context
+   - **Contents**: `Read-only` — enables the Hearth repo-content context
      (the daemon gets the project's source-role repo files as grounding; see
-     ARCHITECTURE.md → Forge repo-content). Optional: without it, Forge runs
+     ARCHITECTURE.md → Hearth repo-content). Optional: without it, Hearth runs
      just don't receive repo files.
    **No permission changes needed for repo linking** — the same scopes cover
    linking, issue creation, content sync, and the autocomplete.

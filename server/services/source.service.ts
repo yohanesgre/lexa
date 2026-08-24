@@ -7,7 +7,7 @@ import { ProjectNotFound, WikiPageNotFound, SourceNotFound, SourceFetchError, So
 import { ActivityService } from "./activity.service";
 import * as msg from "../activity-messages";
 import { extractText } from "../../shared/tiptap-text";
-import { isPrivateIp, isPublicUrl } from "../forge-ssrf";
+import { isPrivateIp, isPublicUrl } from "../hearth-ssrf";
 import type { DocumentSource, TipTapDoc, Actor, ActivityEvent } from "../../shared/types";
 
 export class SourceService extends Effect.Service<SourceService>()("Lexa/SourceService", {
@@ -42,7 +42,7 @@ export class SourceService extends Effect.Service<SourceService>()("Lexa/SourceS
     // ── SSRF guard ──
     // Resolve DNS and reject any IP that is private, loopback, link-local,
     // or otherwise non-public. Lexa is self-hosted behind a tunnel; without
-    // this an admin could point Forge at internal services.
+    // this an admin could point Hearth at internal services.
     const assertPublicUrl = (rawUrl: string): Effect.Effect<void, SourceFetchError> =>
       Effect.gen(function* () {
         const check = isPublicUrl(rawUrl);
@@ -69,7 +69,7 @@ export class SourceService extends Effect.Service<SourceService>()("Lexa/SourceS
         for (let hops = 0; hops <= 5; hops++) {
           const res = yield* Effect.promise(() =>
             fetch(currentUrl, {
-              headers: { "User-Agent": "Lexa-Forge/0.1" },
+              headers: { "User-Agent": "Lexa-Hearth/0.1" },
               redirect: "manual",
               signal: AbortSignal.timeout(10_000),
             })
@@ -192,7 +192,7 @@ export class SourceService extends Effect.Service<SourceService>()("Lexa/SourceS
           }));
         }),
 
-      // Resolve a source's content as plain text (used by the Forge prompt).
+      // Resolve a source's content as plain text (used by the Hearth prompt).
       resolveContent: (projectId: string, source: DocumentSource): Effect.Effect<string, DbError | RowNotFound | WikiPageNotFound | SourceFetchError | SourceUnreachable> =>
         Effect.gen(function* () {
           if (source.kind === "wiki") {

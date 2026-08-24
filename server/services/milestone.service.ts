@@ -66,7 +66,7 @@ export class MilestoneService extends Effect.Service<MilestoneService>()("Lexa/M
           yield* Effect.logInfo(`[Milestone] Deleted ${id}`);
         }),
 
-      archive: (actor: Actor, id: string): Effect.Effect<{ milestone: Milestone; activity: ActivityEvent[] },
+      archive: (actor: Actor, id: string, opts?: { viaHerald?: boolean }): Effect.Effect<{ milestone: Milestone; activity: ActivityEvent[] },
         MilestoneNotFound | TaskNotFound | DbError | ConstraintViolation> =>
         Effect.gen(function* () {
           const milestone = yield* repo.findById(id).pipe(Effect.catchTag("RowNotFound", () => new MilestoneNotFound({ id })));
@@ -89,7 +89,7 @@ export class MilestoneService extends Effect.Service<MilestoneService>()("Lexa/M
                 // task_activity.task_id has an FK to tasks(id) — activity rows
                 // are emitted per task only (deviation from design doc §5.2's
                 // per-sprint/per-milestone rows, which the FK forbids).
-                events.push(yield* activityService.append(t.id, actor, "archived", msg.archived(actor.label)));
+                events.push(yield* activityService.append(t.id, actor, "archived", msg.archived(actor.label), { viaHerald: opts?.viaHerald === true }));
               }
             }
             return { milestone: a, activity: events };

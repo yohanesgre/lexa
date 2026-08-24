@@ -8,11 +8,11 @@
 
 ## Context
 
-Hearth (formerly the Forge umbrella — UI/docs/wireframes renamed this cycle;
-internal identifiers `forge_tasks`/`forge_sessions`/`/api/forge/*`/`FORGE_*`/
-CLI are deferred) — the AI assistant surface — executed every generation
+Hearth (umbrella formerly "Forge"; full identifier rename — tables, routes,
+env, CLI state — executed 2026-08-24 via migration 0015) — the AI assistant
+surface — executed every generation
 through the
-opencode harness: web app → `forge_tasks` queue → CLI listener → daemon → warm
+opencode harness: web app → `hearth_tasks` queue → CLI listener → daemon → warm
 `opencode serve` driven over private HTTP. This bought real things (agentic file
 access, provider-subscription auth, sandboxing) at a structural cost:
 
@@ -46,7 +46,7 @@ umbrella:
    path, unchanged and active. Harness capabilities (shell, file edits,
    sandboxes) remain here deliberately.
 
-Shared: the `forge_tasks` queue (Herald tasks ride it via a `kind` discriminator
+Shared: the `hearth_tasks` queue (Herald tasks ride it via a `kind` discriminator
 — daemons can never claim them), and the catalog, renamed **Lexa Agents/Skills**
 (`lexa_agents`/`lexa_skills`/`lexa_agent_skills`) because it is the behavioral
 spec for both tiers: prompt injection renders it for Herald; `.agents/` file
@@ -59,7 +59,7 @@ daemon wire compatibility.
    `hearth-herald` ("Herald Agent") and `hearth-blacksmith` ("Blacksmith
    Agent") — same PM-assistant role, different execution architecture. The
    generic `lexa` entry is retired. Migration 0013 gives Herald Agent a NEW
-   internal id and rebinds `forge_tasks.agent_id` FKs + junction rows
+   internal id and rebinds `hearth_tasks.agent_id` FKs + junction rows
    atomically. One-time consequence: existing threads keyed on agentId reset
    once (continue-vs-fresh sees an unknown agentId → fresh overwrite).
 2. **Per-project engine switching.** `herald_settings.engine` ∈
@@ -81,6 +81,18 @@ daemon wire compatibility.
    *Amendment:* vision merged into the provider config — delegation runs on
    the primary provider (same kind/api_key/base_url), only the model
    differs. No separate vision credentials or cross-provider vision.
+
+## Amendments (2026-08-24 — full identifier rename)
+
+The Forge→Hearth umbrella rename was completed end-to-end: DB tables
+(`hearth_tasks`/`hearth_task_logs`/`hearth_sessions`, migration 0015), REST
+routes `/api/hearth/*`, daemon auth header `x-hearth-token`, env vars
+`HEARTH_*` / `LXK_HEARTH_DAEMON_TOKEN`, activity types `hearth_*`, error codes
+`HEARTH_*`, service/file names (`HearthService`, `hearth/daemon.ts`,
+`app/components/hearth/`), and CLI state (`~/.local/share/lexa-hearth`, unit
+`lexa-hearth-listen`). The earlier deferral of internal identifiers is retired.
+Breaking change for deployed machines: old daemons/listeners must be
+reinstalled (`lexa-cli machine uninstall && lexa-cli machine install`).
 
 ## Alternatives considered
 
@@ -120,7 +132,7 @@ daemon wire compatibility.
 ## Compliance notes
 
 - Emission invariant (#12) preserved: Herald task completion/failure flows
-  through the same `ForgeService` lifecycle; chat emits no activity rows (not a
+  through the same `HearthService` lifecycle; chat emits no activity rows (not a
   document mutation).
 - Lexa→GitHub sync remains route-orchestrated only (#1); Herald tools are reads.
 - REST boundary stays TipTap JSON (#7); markdown conversion only via
