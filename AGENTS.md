@@ -9,23 +9,16 @@ Before editing files for a substantial task:
 - Multiple matches: prefer the most specific local skill for the package or concern you are changing; load additional skills only when the task spans multiple packages or concerns.
 <!-- intent-skills:end -->
 
-## You are the fe lane (frontend)
-Scope: app/ ONLY (routes, components, styles, app/lib). Never: server/, shared/types.ts, docs/, package.json, tsconfig.json, app.config.ts.
-- Gates before you may start: wireframe lane DONE (orchestrator confirms) AND BE contract commit exists. Wait otherwise.
-- Read the relevant wireframes/src/*.html and transcribe exactly: structure, spacing, copy. Wireframe is source of truth.
-- New wireframe CSS classes must be ported into app/styles/phosphor.css.
-- TanStack Query for all server state; update cache via setQueryData from mutation responses — never invalidateQueries on the mutation path.
-- Verify: tsc --noEmit  (then vitest run if you touched shared/ — you normally don't)
-
 You are working on **Lexa**: a self-hosted project management tool. Kanban with swimlanes/WIP limits, tasks with rich descriptions, nested wiki, and two-way GitHub issue sync. Bun server + SQLite database behind cloudflared tunnel. Stack: TanStack Start + React + Effect-TS + Tailwind.
 
 ## Status protocol + report contract
-You are the auth-roles-teams lane in the lexa-swarm orchestrator.
-- Your requirements are the BRIEF file: <repo>/status/briefs/<lane>.md (replace <repo> with /home/yohanes/projects/lexa, <lane> with your lane name). Read it FIRST — it is the single source of requirements; the dispatch prompt is only context.
-- Lane status: <repo>/status/<lane>.md — 'state: <PLAN|WAIT|WORKING|DONE|FAILED>' + 'ts: <epoch>' + 'msg: <message>'. Heartbeat on every significant action (fresh ts).
-- REPORT file: <repo>/status/reports/<lane>.md — write your FULL report there (what you did, tests run with output, deviations, concerns). Reply in the chat ONLY with: state, commit sha, one-line test summary, concerns (if any). Do not paste the report into chat.
-- DONE requires: tsc --noEmit green (where applicable) + lane tests + report file written + status file DONE. DONE does NOT mean reviewed — the orchestrator reviews after you.
-- If blocked on the BE contract commit, write state: WAIT and stop; the orchestrator pings the BE lane.
+
+For lane-orchestrated multi-track work, the lexa-swarm orchestration uses:
+- **Brief:** `status/briefs/<lane>.md` — single source of requirements (read FIRST; the dispatch prompt is only context).
+- **Status:** `status/<lane>.md` — `state: <PLAN|WAIT|WORKING|DONE|FAILED>` + `ts: <epoch>` + `msg: <message>`. Heartbeat on every significant action (fresh ts).
+- **Report:** `status/reports/<lane>.md` — full report (what you did, tests with output, deviations, concerns). Reply in chat ONLY with: state, commit sha, one-line test summary, concerns (if any).
+- **DONE** requires: `tsc --noEmit` green (where applicable) + lane tests + report file written + status file DONE. DONE does NOT mean reviewed — the orchestrator reviews after you.
+- If blocked on the BE contract commit, write `state: WAIT` and stop; the orchestrator pings the BE lane.
 - Never touch files outside your lane scope. If you need a backend endpoint or shared type, report it to the orchestrator — never add it yourself.
 - No commits unless the orchestrator/user explicitly asks. Do not push. Do not merge.
 
@@ -92,22 +85,24 @@ When asked to implement frontend, do NOT design or invent. Read the relevant wir
 
 ## Architectural invariants — never violate these
 
-These were each hard-won design fixes (rationale lives in `docs/ARCHITECTURE.md` and the design notes in `docs/SCHEMA.md`). Breaking any of them reintroduces a known bug:
+Each is a hard-won design fix; rationale lives in `docs/ARCHITECTURE.md` and the design notes in `docs/SCHEMA.md`. Breaking any reintroduces a known bug. See ARCHITECTURE.md for full rationale.
 
-1. **No service-to-service cycles.** `TaskService` must never depend on `GitHubService`. Lexa→GitHub sync is orchestrated by route handlers only.
-2. **Echo suppression.** Every Lexa→GitHub state sync writes `github_synced_state`; the webhook skips payloads matching it. Webhook delivery is recorded **after** successful processing, never before.
-3. **Webhook moves bypass guards** (`bypassGuards: true`) and run as one atomic transaction (move + synced-state write). Webhook acks 200 immediately, processes in `waitUntil`.
-4. **Positions are fractional-index keys.** Generation is deterministic — retries must re-read anchors before regenerating. Neighborless moves append to end; never `generateKeyBetween(null, null)` into a non-empty column. Retry only on `isPositionConflict`, at most once.
-5. **WIP limit is enforced inside the conditional UPDATE** (atomic), with the within-column-reorder short-circuit (`column_id = ?2 OR count < limit`).
-6. **Mutation responses are authoritative.** Frontend updates TanStack Query cache via `setQueryData` from the mutation response. Never `invalidateQueries` on the mutation path.
-7. **REST boundary speaks TipTap JSON.** Markdown conversion lives only in `shared/markdown.ts` (used by GitHub sync, Hearth, CLI); the frontend never sees Markdown.
-8. **Webhook route has no API-key middleware** — HMAC-SHA-256 signature verification over the raw body is the auth, and it runs before JSON parsing.
-9. **Column→GitHub state mapping uses `columns.github_state`**, never column names.
-10. **`required_fields` is enforced on create, move, AND update**, with TipTap-aware emptiness (a doc with no text nodes is empty).
-11. **An issue links to at most one task; a task may hold several issues, one per repo** (`task_github_issues` junction PK `(task_id, issue_id)` + `UNIQUE(issue_id)` index + per-repo ALREADY_LINKED guard).
-12. **Emission invariant.** Every task mutation appends `task_activity` row(s) in the SAME transaction as the mutation — one row per meaningful change (updates may emit several `field_changed` rows); position-only reorders emit nothing; webhook moves emit `github_synced` only. Messages come from the catalog (`server/activity-messages.ts`), frozen at write time — never hand-rolled at call sites.
-13. **Ticket keys are immutable.** `projects.key` (prefix) + `tasks.number` are written once at create and never reused; `PREFIX-n` is accepted as a task lookup alias everywhere a task id is. The counter (`projects.next_task_number`) advances atomically — the `UNIQUE(project_id, number)` index is the backstop, never a license to reuse.
-14. **Milestone/sprint rules.** A milestone with sprints can't be deleted (`HAS_CHILDREN`); deleting a milestone loosens its sprints (`ON DELETE SET NULL`), it never cascades; archiving a milestone archives its sprints; there is exactly one Backlog per project (partial unique index), and it can't be archived or deleted. Sprint progress counts a task done when its column is a done column OR it is archived.
+| # | Invariant | Why it matters |
+|---|---|---|
+| 1 | No service-to-service cycles. `TaskService` must never depend on `GitHubService`. | Lexa→GitHub sync is orchestrated by route handlers only. |
+| 2 | Echo suppression. Every Lexa→GitHub state sync writes `github_synced_state`; webhook skips matching payloads. Webhook delivery recorded AFTER successful processing, never before. | Prevents feedback loops. |
+| 3 | Webhook moves bypass guards (`bypassGuards: true`), run as one atomic transaction (move + synced-state write). Webhook acks 200 immediately, processes in `waitUntil`. | Atomicity + low latency. |
+| 4 | Positions are fractional-index keys. Generation is deterministic — retries must re-read anchors before regenerating. Neighborless moves append to end; never `generateKeyBetween(null, null)` into a non-empty column. Retry only on `isPositionConflict`, at most once. | Stable ordering under concurrent reorders. |
+| 5 | WIP limit enforced inside the conditional UPDATE (atomic), with within-column-reorder short-circuit (`column_id = ?2 OR count < limit`). | Race-free enforcement. |
+| 6 | Mutation responses are authoritative. Frontend updates TanStack Query cache via `setQueryData` from the mutation response. Never `invalidateQueries` on the mutation path. | Cache consistency. |
+| 7 | REST boundary speaks TipTap JSON. Markdown conversion lives only in `shared/markdown.ts` (used by GitHub sync, Hearth, CLI); the frontend never sees Markdown. | Single conversion surface. |
+| 8 | Webhook route has no API-key middleware — HMAC-SHA-256 signature verification over the raw body is the auth, and it runs before JSON parsing. | Webhook auth is signature, not bearer. |
+| 9 | Column→GitHub state mapping uses `columns.github_state`, never column names. | Decouples labels from identifiers. |
+| 10 | `required_fields` enforced on create, move, AND update, with TipTap-aware emptiness (a doc with no text nodes is empty). | No silent bypass. |
+| 11 | An issue links to at most one task; a task may hold several issues, one per repo (`task_github_issues` PK `(task_id, issue_id)` + `UNIQUE(issue_id)` + per-repo ALREADY_LINKED guard). | One-way link integrity. |
+| 12 | Emission invariant. Every task mutation appends `task_activity` row(s) in the SAME transaction — one row per meaningful change (updates may emit several `field_changed` rows); position-only reorders emit nothing; webhook moves emit `github_synced` only. Messages come from the catalog (`server/activity-messages.ts`), frozen at write time — never hand-rolled at call sites. | Audit log + copy consistency. |
+| 13 | Ticket keys are immutable. `projects.key` (prefix) + `tasks.number` written once at create, never reused. `PREFIX-n` accepted as task lookup alias everywhere a task id is. `projects.next_task_number` advances atomically; `UNIQUE(project_id, number)` index is the backstop, never a license to reuse. | Stable identifiers. |
+| 14 | Milestone/sprint rules. A milestone with sprints can't be deleted (`HAS_CHILDREN`); deleting a milestone loosens its sprints (`ON DELETE SET NULL`), never cascades; archiving a milestone archives its sprints; exactly one Backlog per project (partial unique index), can't be archived or deleted. Sprint progress counts a task done when its column is a done column OR it is archived. | Backlog + sprint integrity. |
 
 ## Agent file boundaries
 
@@ -133,7 +128,7 @@ These rules are non-negotiable and apply to every agent working on Lexa:
 - **Effect-TS everywhere on the backend.** Services/repos use `Effect.Service<Name>()("Lexa/Name", { effect: Effect.gen(...) })`. Domain errors are `Data.TaggedError`. Repos surface `RowNotFound | DbError | ConstraintViolation`; services map to domain errors per the catalog.
 - **Repos are thin.** Raw SQLite prepared statements via bun:sqlite. No business logic in repos. `updated_at = datetime('now')` inside every UPDATE statement.
 - **Routes are thinner.** `@effect/platform` HttpApi groups; parse → call service → return. Error→status mapping is declarative (`.addError`), from the catalog — no hand-rolled try/catch responses.
-- **Frontend:** TanStack Query for all server state; components match `wireframes/src/*.html` structure and `wireframes/DESIGN_SYSTEM.md` tokens exactly. PHOSPHOR tokens are CSS variables — no raw hex outside `phosphor.css`.
+- **Frontend:** TanStack Query for all server state; components match `wireframes/src/*.html` structure and `wireframes/DESIGN_SYSTEM.md` tokens exactly. PHOSPHOR tokens are CSS variables — no raw hex outside `phosphor.css`. Update cache via `setQueryData` from mutation responses only; never `invalidateQueries` on the mutation path.
 - **File placement:** `app/` (TanStack Start routes + components), `server/` (db/repos/services/api/github), `shared/` (types + pure functions). Nothing else at root except config.
 
 ## Verification
@@ -190,216 +185,18 @@ Key facts:
   PEM) or `GITHUB_PRIVATE_KEY_FILE` (path — recommended), prod volume mount.
   Webhook auth is HMAC-SHA-256 over the raw body — no Access bypass needed.
 
-### Hearth (AI writing assistant)
+## Reference (read the linked doc/skill, don't inline it here)
 
-- The Hearth button in the task/wiki editors needs at least one online daemon
-  child, managed by `lexa-cli machine listen` (env: `LEXA_URL`,
-  `LEXA_API_KEY` or `LXK_HEARTH_DAEMON_TOKEN`, `HEARTH_AGENT=opencode|hermes|command-code`).
-  The listener owns per-runtime daemon children; there are no per-runtime systemd units.
-  Without a daemon, Generate returns `NO_RUNTIME_ONLINE`.
-- **Daemons NEVER inherit the listener's shell env:** secret vars are scrubbed
-  at spawn (`cli/src/machine.ts` `scrubDaemonEnv` — closed allowlist:
-  PATH/HOME/LANG/LC_*/TERM/TZ/PWD/SHELL/USER/LOGNAME/XDG_*/BUN_*/LEXA_DIR/LEXA_FLAVOR),
-  so runtime credentials come only from the runtime env file + `config.json`.
-  The listener passes its group dir as `LEXA_DIR` and the host's flavor as
-  `LEXA_FLAVOR`, so the daemon resolves state inside the right server group
-  (`~/.lexa/<host>/`) — without it, staging/dev daemons would build their
-  sandboxes inside the prod root. Starting the listener from a shell with
-  `.env` exported prints a boot warning; a daemon whose env-file key is dead
-  exits 3 ("API key revoked — re-run Setup runtime").
-- Every run picks an **agent** (rule bundle, default "Lexa") + a dependent
-  **skill** (operation bundle) in the popover; the claim carries their
-  instructions (`agentMarkdown`/`skillMarkdown`) — files-only, no host store.
-  All host state lives under `~/.lexa/` (`LEXA_DIR`), grouped per server host
-  (`~/.lexa/<host>/`).
-- **Warm opencode runtimes (opencode only):** the daemon owns one `opencode
-  serve` per runtime and drives every task over pure HTTP — no `run` client is
-  ever spawned (the attach client is unreliable on 1.18.11: it exits without
-  mirroring text parts — spike-verified). The
-  claim payload carries the continue-vs-mint verdict: `runtimeSessionId`
-  (continue the mapped conversation) or `null` (mint
-  `POST /session?directory=<workspace>` on serve, assert the bound directory,
-  then persist the mapping in `hearth_sessions` BEFORE the run). Runs are
-  blocking `POST /session/:id/message` (model as `{providerID, modelID}` —
-  a `"provider/model"` string is rejected), live logs tee via 3s polling of
-  `GET /session/:id/message`, the result is the joined text parts, and
-  `session.error` fails the task. Cancel/timeout = `POST /session/:id/abort`
-  (best effort — unblocks the message POST) + **drop the mapping row
-  unconditionally** (`DELETE /api/hearth/sessions`; an aborted session is
-  poisoned and must never be continued). The popover's "New session" uses the
-  user-facing `POST /api/hearth/sessions/reset` (409 while the document has an
-  active task on that runtime). Agent/skill change → the server returns `null`
-  → the daemon mints a fresh session and rewrites the row (reset semantics,
-  no history rows). Auto-compaction is server-side (`compaction.auto` in the
-  serve session loop) — long-lived sessions compact themselves, no Lexa work.
-- **Serve lifecycle:** serve binds `127.0.0.1` on a flavor-separated port —
-  prod 4096–4127, staging 4196–4227, dev 4296–4327 (`flavorBaseFor(LEXA_FLAVOR)`
-  + `fnv1a(runtimeId) % 32`, +1..+4 fallback candidates, `HEARTH_SERVE_PORT`
-  override in the runtime env file first), readiness probed via `GET /session`
-  (200 = fully up). Flavor is a derived label only (loopback → `dev`, else
-  `prod`; `LEXA_FLAVOR`/`--flavor` override) used for exactly this serve-port
-  base — never for state paths. The daemon sweeps a stale `serve.pid` at boot
-  (SIGKILL/power-loss orphans), respawns crashed serve with a 5s→30s backoff
-  (never gives up, sessions survive — the session DB lives in the persistent
-  sandbox), kills serve on its SIGTERM (listener stop) and on the exit-3
-  auth-failure path. If serve cannot boot, claimed tasks fail with "Hearth
-  runtime unavailable — opencode serve did not start" — no legacy cold-`run`
-  fallback.
-- **Persistent sandbox + workspace (opencode only):** every project gets a
-  persistent workspace dir at `~/.lexa/<host>/projects/<projectId>/` (seeded
-  write-once with README.md + a static orchestrator AGENTS.md); per run the
-  daemon (over)writes `.agents/agents/<agentId>/AGENTS.md` (the selected
-  lexa-agent's rules) and `.agents/skills/<skillId>/SKILL.md`. The sealed
-  per-run `.hearth/` HOME is replaced by a persistent per-runtime sandbox at
-  the group's `<LEXA_DIR>/runtimes/<runtimeId>/hearth-home/` (seeded once, never
-  wiped — removed only with the runtime; contains the deny-rule
-  `opencode.json`:
-  bash fully denied, `external_directory: deny`, `*auth.json*` denied,
-  `skill`/`webfetch` denied + a copy of
-  `~/.local/share/opencode/auth.json` chmod 600, refreshed at serve boot AND
-  at every claim). `external_directory: deny` is evaluated on the resolved
-  path, so the serve root ≠ workspace is safe: reads inside the session's
-  bound workspace work, everything outside is blocked. Sessions bind to their
-  workspace at mint and keep it on continuation; a re-provisioned workspace
-  (listener sync / manual wipe) leaves a stale file context — reset the
-  session after wiping a workspace. Global opencode config — permissions,
-  plugins — never loads into Hearth runs.
-  `lexa-cli machine workspace list|sync` inspects/re-syncs local workspaces.
-  hermes/command-code keep the legacy ephemeral `~/.lexa/<host>/runs/` layout.
-
-### lexa-cli — two builds, one interface, independent releases
-
-The CLI version is **independent** of the web app version:
-- **CLI:** `cli-vX.Y.Z` tags → `.github/workflows/publish-cli.yml` compiles and
-  attaches `bin/lexa-cli` to the GitHub release (`install-cli.sh` and
-  `lexa-cli upgrade` resolve the newest `cli-v*` tag via the API — never
-  `releases/latest`, which may be a web app release with no CLI asset).
-  The version's single source of truth is `cli/package.json` (read statically
-  by `cli/src/version.ts` — never regenerated, no env plumbing; the workflow
-  fails if the tag doesn't match it). Changelog: `cli/CHANGELOG.md`.
-- **Web app:** `vX.Y.Z` tags → image to ghcr.io (publish.yml).
-- **prod** = compiled binary (`bun run compile:cli` embeds the daemon source
-  into `cli/src/packed.ts` and the compose files into `cli/src/packed-compose.ts` →
-  `bin/lexa-cli`; the systemd listener unit runs the binary directly).
-  `cli/src/packed.ts` is a build-time embed — keep the committed stub empty so dev
-  copies daemon.ts fresh from disk.
-- **dev** = `bun run lexa-cli-dev` or `bun run install:cli-dev` →
-  `~/.local/bin/lexa-cli-dev` (a pure "run repo source via bun" wrapper — no
-  `LEXA_DIR` export or flavor logic, identical behavior and state paths to the
-  compiled binary; never overwrites the prod name).
-- The operator CLI wraps the REST API with `lxk_` Bearer keys.
-  `lexa-cli login --url … --key …` stores creds in `~/.lexa/<host>/config.json`
-  (chmod 600); the URL is required — no default, empty TTY input re-prompts,
-  non-TTY exits with a message. Env fallbacks `LEXA_URL`/`LEXA_API_KEY`. Every
-  command except `login`, `logout`, `deploy`, `undeploy`, `upgrade` requires
-  resolvable credentials. Commands: `machine
-  install|listen|start|stop|restart|status|logs|list|uninstall` (the listener
-  is the machine-level supervisor), `task|wiki|project` for CRUD, `deploy`,
-  `upgrade`, `github status|setup|check`. Agent skill:
-  `~/.agents/skills/lexa-cli/SKILL.md`. The CLI is for humans/operators.
-- **Runtime setup wizard → CLI listener:** the web Settings wizard (Settings →
-  Hearth Runtimes → Setup runtime) lists registered machines from
-  `GET /api/hearth/machines`, then sends only machine + agent CLI + a fresh key
-  through `POST /api/hearth/runtime-events`. The listener derives its group
-  from the server URL at boot (`machine listen --url <base>`; `machine install`
-  bakes the URL into the systemd unit ExecStart). It persists its machine id
-  at `~/.lexa/<host>/machine-id` and the per-machine secret at
-  `~/.lexa/<host>/machine-secret` (both chmod 600), heartbeats every 3s,
-  claims only its own events (sending `x-machine-secret`), and owns one daemon
-  child per runtime under `~/.lexa/<host>/runtimes/<runtime-id>/env`
-  (chmod 600). `machine install` is a thin
-  listener alias; `--no-systemd` writes no daemon files and runs the listener
-  under your own supervisor.
-- **`lexa-cli deploy <domain> [staging|prod]`** is for remote deployment
-  (Docker + cloudflared tunnel; see `docs/DEPLOYMENT.md`). Deploy
-  state lives at `~/.lexa/<domain>/deploy/` (one flavor per domain —
-  subdomains are separate flavors) with creds in `~/.lexa/<domain>/config.json`.
-  The image is
-  built and pushed by CI: main → `ghcr.io/yohanesgre/lexa:staging`, `v*` tags →
-  `:latest` (prod). `deploy` embeds only the compose files (few KB) and pulls
-  the image — **no checkout, no build, no git**. **Redeploy = upgrade**: it
-  always pulls the latest image; `--image <tag>` pins a version; `--clean`
-  recreates from scratch (removes the `lexa-data` volume — DB wiped, confirmed
-  on a TTY). `upgrade` self-updates only the CLI binary (web app upgrades go
-  through `deploy`). Install the binary on a machine without bun via
-  `curl -fsSL https://raw.githubusercontent.com/yohanesgre/lexa/main/scripts/install-cli.sh | bash`
-  (downloads the prebuilt binary from the newest `cli-v*` GitHub release →
-  `~/.local/bin/lexa-cli`). Non-interactive flags: `--cf-token`,
-  `--admin-email`, `--api-key`. Deploy reuses
-  `LXK_API_KEY`/`LXK_ADMIN_EMAILS` from the flavor env file when present. The
-  server-side gate (`/api/setup/seed` + web wizard) keeps `LXK_ENV` non-dev
-  deployments empty of sample data.
-
-## Release prep (mandatory checklist before any release commit/tag)
-
-1. **Both changelogs, always.** The web app (`CHANGELOG.md`, root) and the CLI
-   (`cli/CHANGELOG.md`) are separate release artifacts with separate versions.
-   A version bump without its changelog entry is an incomplete release — before
-   tagging, verify the new version has a dated section (`## [X.Y.Z] - YYYY-MM-DD`,
-   Keep a Changelog) in BOTH files that cover their respective changes.
-2. **Versions.** Web app: bump `package.json`, tag `vX.Y.Z`. CLI: bump
-   `cli/package.json` (single source of truth), tag `cli-vX.Y.Z` —
-   `publish-cli.yml` fails if the tag doesn't match it. CLI and web versions
-   are independent.
-3. **Wireframes submodule.** Commit `wireframes/` changes INSIDE the submodule
-   first; the parent release commit then records the new pointer. The
-   submodule must be pushed for clones to resolve the pointer.
-4. **Build artifacts.** `cli/src/packed.ts` / `packed-compose.ts` are
-   regenerated by `bun run compile:cli`; the documented committed state is a
-   stub (see the compile script header). If you commit a regenerated embed
-   (e.g. shipping a daemon change), say so explicitly in the commit.
-5. **Gate.** `tsc --noEmit`, full `vitest run`, and `bash wireframes/build.sh`
-   green before tagging. Tags are annotated: `git tag -a vX.Y.Z -m "<one-line
-   summary>"`.
-6. **Release commit.** One `chore(release): vX.Y.Z, cli-vX.Y.Z` commit
-   containing the version bumps + both changelog entries, then the tags.
-
-## Agent-browser usage — Snapshot-First (No Vision Required)
-
-DeepSeek V4 Pro cannot see images. Always use text-based accessibility-tree snapshots for debugging. Never `screenshot` with a blind model — use `snapshot -i` instead.
-
-When using agent-browser for testing, QA, or review, divide the scenario into smaller, focused tasks:
-
-1. **Open and snapshot first** — `agent-browser snapshot -i` to confirm page loaded.
-2. **Test one feature at a time** — don't chain clicks across components in one pass.
-3. **Prefer semantic locators** — `find role|text button click --name "..."` over `@eN` ref clicks. Refs stale after any DOM change; semantic locators survive re-renders.
-4. **Snapshot after each interaction** — `snapshot -i` to confirm expected state. Never guess.
-5. **Extract text and state** — `get text @e1`, `eval "...textContent"`, `console` for debugging.
-6. **Check console** — `agent-browser console` or `eval` when a click produces no visible result.
-7. **Close overlays before continuing** — modals/dropdowns/menus may block underlying elements.
-
-### Key commands
-
-```bash
-agent-browser snapshot -i              # interactive elements only (~200-400 tokens)
-agent-browser snapshot -i -d 3         # cap depth
-agent-browser snapshot -s "#main"      # scope to CSS selector
-agent-browser find text "Error"        # locate text on page
-agent-browser find role alert          # find ARIA alerts/toasts
-agent-browser get text @e1             # full visible text of element
-agent-browser eval "document.querySelector('.error')?.textContent"
-agent-browser console                  # dump console output
-```
-
-### Testing wireframes
-
-Wireframes are static HTML files with no JavaScript. To preview them with agent-browser:
-
-```bash
-# Start a Python HTTP server in the wireframes directory (always use nohup)
-cd wireframes && nohup python3 -m http.server 8080 &
-
-# Open the wireframe
-agent-browser open http://localhost:8080/wiki-edit.html
-
-# Inspect (text-based — no vision model needed)
-agent-browser snapshot -i -d 5
-
-# Clean up when done
-pkill -f "http.server 8080"
-```
-
-Use this to verify wireframe layout, spacing, and structure before implementing. Wireframe files live in the submodule at `wireframes/src/` and use `wireframes/src/wireframes.css` for styles.
+- **Hearth (AI runtime):** `docs/HEARTH.md` — tier table, daemon/listener, run claim flow, warm opencode serve, persistent sandbox/workspace.
+- **Releasing:** `docs/RELEASING.md` — version policy, pre-tag checklist, image flow, CLI build flow, deploy state.
+- **lexa-cli operator tool:** the `lexa-cli` skill (auto-discovered; the
+  project ships one at `~/.agents/skills/lexa-cli/SKILL.md`). Load it before
+  any CLI work.
+- **Browser automation:** the `agent-browser` skill (auto-discovered; at
+  `~/.agents/skills/agent-browser/SKILL.md`). Load it before any browser
+  work. If the active model lacks vision, the skill defaults to snapshot-
+  first debugging (text-based accessibility tree, semantic locators) instead
+  of screenshots.
 
 ## When you're stuck
 
