@@ -1,13 +1,22 @@
 # Herald implementation plan — AI revamp
 
 > **Status:** approved-direction spec + phased plan. Implementation not started.
+> **Superseded in part** by the Hearth refactor plan (docs change set, 2026-08-23):
+> umbrella renamed Forge → Hearth; exactly two builtin agents (`hearth-herald`,
+> `hearth-blacksmith` — migration 0013 id rebind, generic 'lexa' retired);
+> per-project engine switching (`herald_settings.engine`) with personal-overlay
+> member toggle; vision chain (`primary_supports_images` / `vision_model` /
+> `VISION_NOT_CONFIGURED`); chat guard `ENGINE_NOT_SUPPORTED_FOR_CHAT`.
+> Where this doc conflicts with those decisions or with
+> `docs/ADR-0001-two-tier-ai-architecture.md` (Amendments 2026-08-23),
+> the Hearth refactor wins.
 > Companion research: `docs/CLOUDFLARE_WORKERS.md` ("Assistant path via TanStack AI").
 > Decided 2026-08-22.
 
 ## Goal
 
 Add **Herald** assistant tier (server-side TanStack AI `chat()`) beside the active
-**Blacksmith** coding tier under the Forge umbrella. Blacksmith path untouched.
+**Blacksmith** coding tier under the Hearth umbrella. Blacksmith path untouched.
 Both tiers co-exist; popover picks per-run.
 
 **Stack:** `@tanstack/ai` 0.47.x pinned · Effect-TS services · bun:sqlite repos · SSE · TanStack Query.
@@ -35,7 +44,7 @@ Both tiers co-exist; popover picks per-run.
 | Thread state | `herald_threads` (ModelMessage[] JSON) | `forge_sessions` |
 | Agents/skills render | prompt injection via systemPrompts | `.agents/` file writes |
 
-Shared: `forge_tasks` queue, **Lexa Agents/Skills** catalog (tables `lexa_agents`/`lexa_skills`/`lexa_agent_skills` — renamed from `forge_*` in 0010; routes `/api/agents`, `/api/skills`), popover entry, logs/activity machinery. Umbrella = Forge. Both tiers ACTIVE — no dormant wording anywhere.
+Shared: `forge_tasks` queue, **Lexa Agents/Skills** catalog (tables `lexa_agents`/`lexa_skills`/`lexa_agent_skills` — renamed from `forge_*` in 0010; routes `/api/agents`, `/api/skills`), popover entry, logs/activity machinery. Umbrella = Hearth (internal `forge_*` identifiers deferred). Both tiers ACTIVE — no dormant wording anywhere.
 
 ## S2. Herald execution path
 
@@ -236,7 +245,7 @@ ALTER TABLE forge_skills RENAME TO lexa_skills;
 ALTER TABLE forge_agent_skills RENAME TO lexa_agent_skills;
 ```
 
-- Other `forge_*` tables keep names (`forge_tasks`, logs, sessions, runtimes/events/machines) — queue stays Forge umbrella. Indexes follow tables; legacy index names left as-is.
+- Other `forge_*` tables keep names (`forge_tasks`, logs, sessions, runtimes/events/machines) — queue stays under the Hearth umbrella (identifier rename deferred). Indexes follow tables; legacy index names left as-is.
 - Route moves — hard cutover, no aliases (sole consumer is bundled web app): `/api/forge/agents…` → **`/api/agents…`**, `/api/forge/skills…` → **`/api/skills…`** incl. junction subpaths.
 - **Kept:** claim payload field names `agentMarkdown`/`skillMarkdown` (wire compat with compiled prod daemons during rolling upgrades); `AgentSkillSettings.tsx` filename.
 - **Renamed:** `shared/types.ts` `ForgeAgent`/`ForgeSkill` → `LexaAgent`/`LexaSkill`; hooks `useForgeAgents/useForgeSkills` → `useAgents/useSkills`, query keys `['agents']`/`['skills']`; UI labels "Lexa Agents"/"Lexa Skills" everywhere.
@@ -349,4 +358,4 @@ Gate: grep confirms no stale tier wording; cross-refs valid.
 - Review outcomes (2026-08-22): keys plaintext at rest · provider config **per-project** · Herald tasks visible+badged in Forge surfaces · threads kept forever (no prune)
 - Model picker: fetch models from provider endpoint (per-kind wire format, base-URL normalized); free-text fallback always available
 - Defaults taken (no user input needed): no sampling params in settings v1 (provider defaults) · PM read tools tasks-only v1 (wiki later) · settings surface mount point = designer's call during P1
-- Tiers: Herald + Blacksmith both ACTIVE, co-exist; Forge umbrella
+- Tiers: Herald + Blacksmith both ACTIVE, co-exist; Hearth umbrella (renamed from Forge, 2026-08-23)

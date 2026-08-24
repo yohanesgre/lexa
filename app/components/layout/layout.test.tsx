@@ -127,8 +127,8 @@ describe("AppShell", () => {
       expect(screen.getByText(label)).toBeInTheDocument();
     }
     expect(screen.queryByRole("link", { name: "Settings" })).not.toBeInTheDocument();
-    // "Forge" appears in the nav link and in ForgeStatus
-    expect(screen.getAllByText("Forge").length).toBeGreaterThanOrEqual(1);
+    // "Hearth" appears in the nav link and in ForgeStatus
+    expect(screen.getAllByText("Hearth").length).toBeGreaterThanOrEqual(1);
     expect(screen.getByTestId("outlet")).toBeInTheDocument();
     // board route → the Board NavLink is active
     expect(screen.getByText("Board").className).toContain("active");
@@ -166,11 +166,11 @@ describe("AppShell", () => {
     expect(screen.queryByText("Workspace settings")).not.toBeInTheDocument();
   });
 
-  it("on /forge the brand is NOT active and the Forge link IS active", () => {
+  it("on /forge the brand is NOT active and the Hearth link IS active", () => {
     pathnameMock.value = "/forge";
     render(<ProjectSelectionProvider><AppShell /></ProjectSelectionProvider>, { wrapper });
     expect(screen.getByText("Lexa").className).not.toContain("active");
-    expect(screen.getByRole("link", { name: "Forge" }).className).toContain("active");
+    expect(screen.getByRole("link", { name: "Hearth" }).className).toContain("active");
     expect(screen.getByText("Dashboard").className).not.toContain("active");
   });
 
@@ -181,7 +181,7 @@ describe("AppShell", () => {
     for (const label of ["Dashboard", "Board", "Tasks", "Wiki", "Milestones", "Swimlanes"]) {
       expect(screen.getByText(label).className).not.toContain("active");
     }
-    expect(screen.getAllByRole("link", { name: "Forge" })[0]!.className).not.toContain("active");
+    expect(screen.getAllByRole("link", { name: "Hearth" })[0]!.className).not.toContain("active");
   });
 
   it("switches the selected project from the switcher", async () => {

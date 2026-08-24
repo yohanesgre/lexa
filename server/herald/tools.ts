@@ -9,12 +9,16 @@ import {
   UrlBlocked,
   validateUrl,
 } from "./ssrf";
+import { docToMarkdown } from "../../shared/markdown";
+import type { TipTapDoc } from "../../shared/types";
 
-export const MAX_TOOL_ROUNDS = 4;
+export const MAX_TOOL_ROUNDS = 12;
+export const MAX_CHAT_TOOL_ROUNDS = 24;
 
 const SNIPPET_CAP = 500;
 const S3_FILE_CAP = 5 * 1024 * 1024;
 const PDF_PAGE_CAP = 50;
+export const WIKI_READ_CAP = 8000;
 
 export type FetchLike = typeof fetch;
 
@@ -28,6 +32,18 @@ export interface TaskRef {
   markdown: string;
 }
 
+export interface WikiSearchHit {
+  title: string;
+  slug: string;
+  snippet: string;
+}
+
+export interface WikiPageContent {
+  title: string;
+  slug: string;
+  content: TipTapDoc;
+}
+
 export interface HeraldToolDeps {
   projectId: string;
   allowlist: string | null;
@@ -37,6 +53,8 @@ export interface HeraldToolDeps {
   projectOwnsStorageKey: (projectId: string, key: string) => Promise<boolean>;
   findTaskByRef: (ref: string) => Promise<TaskRef | null>;
   searchTasksByTitle: (query: string, limit?: number) => Promise<TaskRef[]>;
+  searchWikiPages: (query: string, limit?: number) => Promise<WikiSearchHit[]>;
+  findWikiPageBySlug: (slug: string) => Promise<WikiPageContent | null>;
   // Chat citation collection: fired for web_search results and successful
   // fetch_url targets. The collector (service side) enforces cap/dedupe/https.
   onCitation?: (citation: { title: string | null; url: string }) => void;
@@ -224,6 +242,44 @@ export function buildHeraldTools(deps: HeraldToolDeps) {
     })
   );
 
+  tools.push(
+    toolDefinition({
+      name: "search_wiki",
+      description:
+        "Full-text search this project's wiki pages. Returns at most 10 matches with title, slug and a highlighted snippet.",
+      inputSchema: z.object({ query: z.string().min(1), limit: z.number().int().min(1).max(10).optional() }),
+      outputSchema: z.object({
+        pages: z.array(z.object({ title: z.string(), slug: z.string(), snippet: z.string() })),
+      }),
+    }).server(async ({ query, limit }) => {
+      const pages = await deps.searchWikiPages(query, limit ?? 10);
+      return { pages };
+    })
+  );
+
+  tools.push(
+    toolDefinition({
+      name: "read_wiki_page",
+      description:
+        "Read one wiki page by slug. Returns the title and the content converted to markdown (capped at ~8k characters).",
+      inputSchema: z.object({ slug: z.string().min(1).describe("Wiki page slug") }),
+      outputSchema: z.object({
+        page: z.object({ title: z.string(), slug: z.string(), markdown: z.string() }).nullable(),
+        error: z.string().optional(),
+      }),
+    }).server(async ({ slug }) => {
+      const page = await deps.findWikiPageBySlug(slug);
+      if (!page) return { page: null, error: "wiki page not found" };
+      return {
+        page: {
+          title: page.title,
+          slug: page.slug,
+          markdown: docToMarkdown(page.content).slice(0, WIKI_READ_CAP),
+        },
+      };
+    })
+  );
+
   return tools;
 }
 
@@ -236,4 +292,55 @@ function summarizeTaskShape() {
     dueAt: z.string().nullable(),
     archived: z.boolean(),
   };
+}
+
+const DETAIL_CAP = 80;
+
+// Human-readable summary of a tool call's INPUT, shown on the tool stream
+// frames. Built from the validated args at call time; unknown tools or
+// missing fields yield undefined (frame renders name only).
+export function toolCallDetail(name: string, rawArgs: unknown): string | undefined {
+  const args = (typeof rawArgs === "object" && rawArgs !== null ? rawArgs : {}) as Record<string, unknown>;
+  const str = (key: string): string | null =>
+    typeof args[key] === "string" && args[key] !== "" ? (args[key] as string) : null;
+  const quoted = (prefix: string, value: string | null) => (value ? `${prefix} "${value}"` : undefined);
+  let detail: string | undefined;
+  switch (name) {
+    case "search_wiki":
+      detail = quoted("Searching wiki for", str("query"));
+      break;
+    case "read_wiki_page":
+      detail = quoted("Reading wiki page", str("slug"));
+      break;
+    case "search_tasks":
+      detail = quoted("Searching tasks for", str("query"));
+      break;
+    case "get_task": {
+      const ref = str("ref");
+      if (ref) detail = `Looking up task ${ref}`;
+      break;
+    }
+    case "web_search":
+      detail = quoted("Searching the web for", str("query"));
+      break;
+    case "fetch_url": {
+      const url = str("url");
+      if (url) {
+        try {
+          detail = `Fetching ${new URL(url).hostname}`;
+        } catch {
+          // invalid URL — no detail
+        }
+      }
+      break;
+    }
+    case "read_s3_file":
+    case "analyze_image": {
+      const key = str("storageKey") ?? str("key");
+      if (key) detail = `Reading attachment ${key.split("/").pop()}`;
+      break;
+    }
+  }
+  if (detail === undefined) return undefined;
+  return detail.length > DETAIL_CAP ? `${detail.slice(0, DETAIL_CAP - 1)}…` : detail;
 }

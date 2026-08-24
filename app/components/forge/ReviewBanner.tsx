@@ -29,7 +29,7 @@ export function ReviewBanner({ action, runtime, diff, onAccept, onReject }: Revi
       <div className="forge-review-banner">
         <div className="forge-review-identity">
           <span className="forge-review-title">
-            Forge · {action}
+            Hearth · {action}
             {runtime ? ` · ${runtime}` : ""}
           </span>
           <span className="forge-review-note">Nothing is changed until you accept</span>
@@ -48,7 +48,7 @@ export function ReviewBanner({ action, runtime, diff, onAccept, onReject }: Revi
             className="btn btn-ghost"
             style={{ height: 28, padding: "0 10px", fontSize: 12 }}
             title="Discard the result — the document is untouched"
-            aria-label="Reject Forge result"
+            aria-label="Reject Hearth result"
             onMouseDown={(e) => e.preventDefault()}
             onClick={onReject}
           >
@@ -60,7 +60,7 @@ export function ReviewBanner({ action, runtime, diff, onAccept, onReject }: Revi
             className="btn btn-primary"
             style={{ height: 28, padding: "0 10px", fontSize: 12 }}
             title="Replace the document with the result"
-            aria-label="Accept Forge result"
+            aria-label="Accept Hearth result"
             onMouseDown={(e) => e.preventDefault()}
             onClick={onAccept}
           >

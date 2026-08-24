@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Check, EyeOff, Plus, RefreshCw, Trash2, X, Zap } from "lucide-react";
-import type { ProviderKind } from "../../../shared/herald";
+import { cn } from "../ui/cn";
+import type { ProviderKind, HearthEngine, HeraldReasoningEffort } from "../../../shared/herald";
 import {
   useHeraldSettings,
   useSaveHeraldSettings,
@@ -9,15 +10,27 @@ import {
   useHeraldMemory,
   useAddHeraldMemory,
   useRemoveHeraldMemory,
+  useAgents,
+  useSkills,
+  useReplaceAgentSkills,
 } from "../../lib/queries";
+import { ENGINE_AGENT_IDS } from "../../lib/use-hearth-engine";
+import type { HeraldSettingsMasked, HeraldSettingsInput } from "../../../shared/herald";
 import type { HeraldMemoryEntry } from "../../lib/api";
 import { formatRelative } from "../../lib/relative-time";
 import type { Project } from "../../../shared/types";
 
-// Per-project Herald provider + memory curation — transcribed from
+// Per-project Herald provider (incl. vision fields) + engine + skill
+// availability + memory curation — transcribed from
 // wireframes/src/settings-project-herald.html. Keys are write-only: the GET
 // returns a masked view and PUT omits untouched key fields (stored values
 // kept server-side).
+
+// PUT requires kind/baseUrl/model — partial saves (engine, vision) ride on
+// the stored masked values so only the touched fields actually change.
+function storedBaseInput(settings: HeraldSettingsMasked): HeraldSettingsInput {
+  return { kind: settings.kind, baseUrl: settings.baseUrl, model: settings.model };
+}
 
 export function HeraldProviderSection({ project }: { project: Project }) {
   const { data: settings, isLoading } = useHeraldSettings(project.id);
@@ -29,11 +42,17 @@ export function HeraldProviderSection({ project }: { project: Project }) {
   const [baseUrl, setBaseUrl] = useState("");
   const [model, setModel] = useState("");
   const [apiKey, setApiKey] = useState("");
+  const [reasoningEffort, setReasoningEffort] = useState<HeraldReasoningEffort | "">("");
+  const [supportsImages, setSupportsImages] = useState(false);
+  const [visionModel, setVisionModel] = useState("");
   const [searchProvider, setSearchProvider] = useState<"exa" | "none">("exa");
   const [replacingSearchKey, setReplacingSearchKey] = useState(false);
   const [searchApiKey, setSearchApiKey] = useState("");
   const [urlAllowlist, setUrlAllowlist] = useState("");
   const [modelsOpen, setModelsOpen] = useState(false);
+  const [modelFilter, setModelFilter] = useState("");
+  const [visionModelsOpen, setVisionModelsOpen] = useState(false);
+  const [visionModelFilter, setVisionModelFilter] = useState("");
   const [hydratedProjectId, setHydratedProjectId] = useState<string | null>(null);
 
   // Hydrate the form once per project from the masked view.
@@ -42,6 +61,9 @@ export function HeraldProviderSection({ project }: { project: Project }) {
       setKind(settings.kind);
       setBaseUrl(settings.baseUrl);
       setModel(settings.model);
+      setReasoningEffort(settings.reasoningEffort ?? "");
+      setSupportsImages(settings.primarySupportsImages);
+      setVisionModel(settings.visionModel ?? "");
       setSearchProvider(settings.searchProvider === "exa" ? "exa" : "none");
       setUrlAllowlist(settings.urlAllowlist ?? "");
       setHydratedProjectId(project.id);
@@ -56,6 +78,9 @@ export function HeraldProviderSection({ project }: { project: Project }) {
     baseUrl: baseUrl.trim(),
     model: model.trim(),
     ...(apiKey.trim() ? { apiKey: apiKey.trim() } : {}),
+    reasoningEffort: (reasoningEffort || null) as HeraldReasoningEffort | null,
+    primarySupportsImages: supportsImages,
+    visionModel: visionModel.trim() || null,
     searchProvider: searchProvider === "exa" ? ("exa" as const) : null,
     ...(searchApiKey.trim() ? { searchApiKey: searchApiKey.trim() } : replacingSearchKey && searchProvider === "exa" ? { searchApiKey: null } : {}),
     urlAllowlist: urlAllowlist.trim() || null,
@@ -75,7 +100,7 @@ export function HeraldProviderSection({ project }: { project: Project }) {
 
   const handleFetchModels = () =>
     fetchModels.mutate(formInput(), {
-      onSuccess: () => setModelsOpen(true),
+      onSuccess: () => { setModelsOpen(true); setModelFilter(""); },
     });
 
   const testState: "idle" | "pending" | "ok" | "fail" = test.isPending
@@ -102,7 +127,7 @@ export function HeraldProviderSection({ project }: { project: Project }) {
         <span className="text-xs text-lx-text-muted">Per project</span>
       </div>
       <p className="text-sm text-lx-text-secondary mb-4" style={{ maxWidth: 640 }}>
-        Herald (the writing assistant in the Forge popover) runs against an OpenAI-compatible or Anthropic-compatible endpoint. Keys live server-side only and are never serialized back to the browser.
+        Herald (the writing assistant in the Hearth popover) runs against an OpenAI-compatible or Anthropic-compatible endpoint. Keys live server-side only and are never serialized back to the browser.
       </p>
 
       <div className="card-panel card-panel--elevated">
@@ -180,10 +205,25 @@ export function HeraldProviderSection({ project }: { project: Project }) {
                 Fetch models
               </button>
             </div>
-            {modelsOpen && (
+            {modelsOpen && (() => {
+              const allModels = fetchModels.data?.models ?? [];
+              const visible = allModels.filter((m) => m.id.toLowerCase().includes(modelFilter.toLowerCase()));
+              return (
               <div className="menu" style={{ position: "absolute", top: "calc(100% + 4px)", left: 0, right: 0, zIndex: 30, padding: 8, display: "flex", flexDirection: "column", gap: 2 }}>
                 <div className="font-micro text-2xs text-lx-text-muted uppercase tracking-[0.04em]" style={{ padding: "4px 8px" }}>Fetched from provider · GET {"{base}"}/models</div>
-                {(fetchModels.data?.models ?? []).map((m) => (
+                <input
+                  className="prop-input w-full font-mono"
+                  type="text"
+                  value={modelFilter}
+                  onChange={(e) => setModelFilter(e.target.value)}
+                  placeholder="Search models…"
+                  aria-label="Search models"
+                  style={{ height: 28, fontSize: 12, marginBottom: 4 }}
+                />
+                <div style={{ maxHeight: 264, overflowY: "auto", display: "flex", flexDirection: "column", gap: 2 }}>
+                {visible.length === 0 ? (
+                  <div className="text-xs text-lx-text-muted" style={{ padding: "8px 8px" }}>No models match &quot;{modelFilter}&quot;</div>
+                ) : visible.map((m) => (
                   <button
                     key={m.id}
                     type="button"
@@ -200,6 +240,8 @@ export function HeraldProviderSection({ project }: { project: Project }) {
                     {model === m.id && <Check size={12} strokeWidth={2.5} />}
                   </button>
                 ))}
+                </div>
+                <div className="font-micro text-2xs text-lx-text-muted" style={{ padding: "4px 8px" }}>{visible.length} of {allModels.length} models</div>
                 <div className="menu-separator" style={{ margin: "4px 0" }} />
                 <button
                   type="button"
@@ -210,17 +252,132 @@ export function HeraldProviderSection({ project }: { project: Project }) {
                   Use &quot;{model || "my-custom-model-id"}&quot; anyway (free text)
                 </button>
                 <div className="flex justify-end" style={{ padding: "2px 4px" }}>
-                  <button type="button" className="btn btn-ghost btn-icon-sm" aria-label="Close model list" onClick={() => setModelsOpen(false)}>
+                  <button type="button" className="btn btn-ghost btn-icon-sm" aria-label="Close model list" onClick={() => { setModelsOpen(false); setModelFilter(""); }}>
                     <X size={12} strokeWidth={1.5} />
                   </button>
                 </div>
               </div>
-            )}
+              );
+            })()}
           </div>
           <div className="field-hint">Fetch lists models from the provider using the form's current (unsaved) values — OpenAI wire: GET {"{base}"}/models; Anthropic wire: GET {"{base}"}/v1/models with x-api-key + anthropic-version. Pick from the dropdown or type any id free-text; manual entry always available because some compat endpoints lack the route.</div>
           {fetchModels.isError && (
             <div className="field-hint field-hint-danger">Couldn't list models — check base URL / key. You can still save a hand-typed model id.</div>
           )}
+        </div>
+
+        {/* Thinking effort (settings-project-herald.html) */}
+        <div className="field">
+          <label className="field-label" htmlFor="herald-reasoning-effort">Thinking effort</label>
+          <select
+            id="herald-reasoning-effort"
+            className="prop-input"
+            aria-label="Thinking effort"
+            value={reasoningEffort}
+            onChange={(e) => setReasoningEffort(e.target.value as HeraldReasoningEffort | "")}
+            style={{ width: 200, height: 32, fontSize: 12 }}
+          >
+            <option value="">Default (none set)</option>
+            <option value="minimal">Minimal</option>
+            <option value="low">Low</option>
+            <option value="medium">Medium</option>
+            <option value="high">High</option>
+          </select>
+          <div className="field-hint">Requests more or less reasoning from the model. Models that ignore it are unaffected.</div>
+        </div>
+
+        {/* Vision — folded into provider config (no standalone section) */}
+        <div className="field">
+          <label className="field-label">Primary model vision</label>
+          <label className="check-row" style={{ cursor: "pointer", display: "inline-flex", alignItems: "flex-start", gap: 4 }}>
+            <input
+              type="checkbox"
+              checked={supportsImages}
+              onChange={(e) => setSupportsImages(e.target.checked)}
+              aria-label="Primary model accepts images directly"
+            />
+            <span className="text-sm text-lx-text-secondary">&nbsp;Primary model accepts images directly (inline image parts)</span>
+          </label>
+          <div className="field-hint">Tick when the configured model is multimodal — images ride inline in the same request, no second provider needed.</div>
+        </div>
+
+        {/* Vision model */}
+        <div className="field">
+          <label className="field-label" htmlFor="herald-vision-model">Vision model</label>
+          <div style={{ position: "relative", maxWidth: 480 }}>
+            <div className="flex items-center gap-2">
+              <input
+                id="herald-vision-model"
+                className="prop-input flex-1 font-mono"
+                type="text"
+                value={visionModel}
+                onChange={(e) => setVisionModel(e.target.value)}
+                placeholder="vision model id…"
+              />
+              <button type="button" className="btn btn-ghost btn-sm" style={{ flexShrink: 0 }} onClick={handleFetchModels} disabled={fetchModels.isPending || !baseUrl.trim()}>
+                <RefreshCw size={12} strokeWidth={1.5} className={fetchModels.isPending ? "animate-spin" : undefined} />
+                Fetch models
+              </button>
+            </div>
+            {visionModelsOpen && (() => {
+              const allModels = fetchModels.data?.models ?? [];
+              const visible = allModels.filter((m) => m.id.toLowerCase().includes(visionModelFilter.toLowerCase()));
+              return (
+              <div className="menu" style={{ position: "absolute", top: "calc(100% + 4px)", left: 0, right: 0, zIndex: 30, padding: 8, display: "flex", flexDirection: "column", gap: 2 }}>
+                <div className="font-micro text-2xs text-lx-text-muted uppercase tracking-[0.04em]" style={{ padding: "4px 8px" }}>Fetched from provider · GET {"{base}"}/models</div>
+                <input
+                  className="prop-input w-full font-mono"
+                  type="text"
+                  value={visionModelFilter}
+                  onChange={(e) => setVisionModelFilter(e.target.value)}
+                  placeholder="Search models…"
+                  aria-label="Search vision models"
+                  style={{ height: 28, fontSize: 12, marginBottom: 4 }}
+                />
+                <div style={{ maxHeight: 264, overflowY: "auto", display: "flex", flexDirection: "column", gap: 2 }}>
+                {visible.length === 0 ? (
+                  <div className="text-xs text-lx-text-muted" style={{ padding: "8px 8px" }}>No models match &quot;{visionModelFilter}&quot;</div>
+                ) : visible.map((m) => (
+                  <button
+                    key={m.id}
+                    type="button"
+                    className="menu-item font-mono"
+                    style={{
+                      height: 28,
+                      fontSize: 12,
+                      justifyContent: "space-between",
+                      ...(visionModel === m.id ? { background: "var(--lx-surface-selected)", color: "var(--lx-text-primary)" } : {}),
+                    }}
+                    onClick={() => { setVisionModel(m.id); setVisionModelsOpen(false); setVisionModelFilter(""); }}
+                  >
+                    <span>{m.id}</span>
+                    {visionModel === m.id && <Check size={12} strokeWidth={2.5} />}
+                  </button>
+                ))}
+                </div>
+                <div className="font-micro text-2xs text-lx-text-muted" style={{ padding: "4px 8px" }}>{visible.length} of {allModels.length} models</div>
+                <div className="menu-separator" style={{ margin: "4px 0" }} />
+                <button
+                  type="button"
+                  className="menu-item"
+                  style={{ height: 28, color: "var(--lx-text-link)" }}
+                  onClick={() => setVisionModelsOpen(false)}
+                >
+                  Use &quot;{visionModel || "my-custom-model-id"}&quot; anyway (free text)
+                </button>
+                <div className="flex justify-end" style={{ padding: "2px 4px" }}>
+                  <button type="button" className="btn btn-ghost btn-icon-sm" aria-label="Close vision model list" onClick={() => { setVisionModelsOpen(false); setVisionModelFilter(""); }}>
+                    <X size={12} strokeWidth={1.5} />
+                  </button>
+                </div>
+              </div>
+              );
+            })()}
+          </div>
+          <div className="field-hint">Used for internal analyze_image delegation — the tool frame is suppressed from member UI.</div>
+          <div className="field-hint">
+            Resolution order: primary supports images → inline; vision model set → delegated analysis; neither → attachments disabled with <span className="font-mono">VISION_NOT_CONFIGURED</span>.
+          </div>
         </div>
 
         {/* Web search */}
@@ -402,5 +559,163 @@ function MemoryRow({ memory, onDelete, deleting }: { memory: HeraldMemoryEntry; 
         <Trash2 size={14} strokeWidth={1.5} />
       </button>
     </div>
+  );
+}
+
+// ── Engine section (settings-project-herald.html) ──
+
+export function HeraldEngineSection({ project }: { project: Project }) {
+  const { data: settings } = useHeraldSettings(project.id);
+  const save = useSaveHeraldSettings(project.id);
+  const [engine, setEngine] = useState<HearthEngine>("herald");
+  const [switcher, setSwitcher] = useState(false);
+  const [hydratedProjectId, setHydratedProjectId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (settings && hydratedProjectId !== project.id) {
+      setEngine(settings.engine);
+      setSwitcher(settings.engineSwitcherEnabled);
+      setHydratedProjectId(project.id);
+    }
+  }, [settings, project.id, hydratedProjectId]);
+
+  // Controls persist immediately (PUT with the stored base fields); the
+  // mutation response refreshes the settings cache via setQueryData.
+  const persist = (patch: Partial<HeraldSettingsInput>) => {
+    if (!settings) return;
+    save.mutate({ ...storedBaseInput(settings), ...patch });
+  };
+
+  const optionStyle = (selected: boolean): React.CSSProperties => ({
+    height: 24,
+    padding: "0 12px",
+    fontSize: 12,
+    ...(selected
+      ? { background: "var(--lx-surface-selected)", borderColor: "var(--lx-border-focus)", color: "var(--lx-text-primary)" }
+      : { color: "var(--lx-text-secondary)" }),
+  });
+
+  return (
+    <section className="mb-8">
+      <h2 className="font-display text-lg font-medium text-lx-text-primary mb-3">Engine</h2>
+      <p className="text-sm text-lx-text-secondary mb-4" style={{ maxWidth: 640 }}>
+        Which execution tier document threads and Generate use for this project: Herald (server-side writing assistant) or Blacksmith (daemon coding agent). Freeform chat always runs the Herald lane.
+      </p>
+
+      <div className="card-panel card-panel--elevated">
+        <div className="field">
+          <label className="field-label">Default engine</label>
+          <div
+            className="flex items-center"
+            role="radiogroup"
+            aria-label="Default engine"
+            style={{ background: "var(--lx-surface-input)", border: "1px solid var(--lx-border-default)", borderRadius: 6, padding: 2, width: "max-content" }}
+          >
+            <button type="button" role="radio" aria-checked={engine === "herald"} className="btn btn-sm" style={optionStyle(engine === "herald")} onClick={() => { setEngine("herald"); persist({ engine: "herald" }); }}>
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+                <path d="M13 2 3 14h7l-1 8 10-12h-7l1-8z" />
+              </svg>
+              Herald
+            </button>
+            <button type="button" role="radio" aria-checked={engine === "blacksmith"} className="btn btn-sm" style={optionStyle(engine === "blacksmith")} onClick={() => { setEngine("blacksmith"); persist({ engine: "blacksmith" }); }} disabled={!settings}>
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+                <path d="M14 4v10.54a4 4 0 1 1-4 0V4a2 2 0 0 1 4 0z" />
+              </svg>
+              Blacksmith
+            </button>
+          </div>
+          <div className="field-hint">Applies to document threads + Generate as soon as it is saved. Blacksmith additionally requires a claim-eligible runtime online (NO_RUNTIME_ONLINE 409 otherwise).</div>
+        </div>
+
+        <div className="field">
+          <label className="field-label">Show engine switcher to members</label>
+          <div className="flex items-center gap-3">
+            <button
+              type="button"
+              role="switch"
+              aria-checked={switcher}
+              aria-label={switcher ? "Engine switcher on" : "Engine switcher off"}
+              className={cn("toggle-switch", switcher && "is-on")}
+              onClick={() => { const next = !switcher; setSwitcher(next); persist({ engineSwitcherEnabled: next }); }}
+            />
+            <span className="text-sm text-lx-text-secondary">Members get a personal Herald | Blacksmith toggle in the Hearth popover header</span>
+          </div>
+          <div className="field-hint">Off (default) = members never see a toggle; every run uses the default engine above.</div>
+        </div>
+
+        <div className="text-xs text-lx-text-secondary" style={{ border: "1px solid var(--lx-border-default)", borderRadius: 6, padding: "10px 12px", maxWidth: 640, lineHeight: "18px" }}>
+          <strong className="font-medium text-lx-text-primary">Chat gate.</strong> Freeform chat ALWAYS runs the Herald lane regardless of this setting; under engine=&apos;blacksmith&apos; chat streams fail with <span className="font-mono">ENGINE_NOT_SUPPORTED_FOR_CHAT</span> (409).
+        </div>
+      </div>
+    </section>
+  );
+}
+
+// ── Agent skill availability (settings-project-herald.html) ──
+
+function AgentSkillColumn({ agentId, agents, skills, onToggle }: {
+  agentId: string;
+  agents: { id: string; name: string; skillIds: string[] }[];
+  skills: { id: string; name: string }[];
+  onToggle: (agentId: string, skillIds: string[]) => void;
+}) {
+  const agent = agents.find((a) => a.id === agentId);
+  const attached = new Set(agent?.skillIds ?? []);
+  if (!agent) return null;
+  return (
+    <div>
+      <div className="flex items-center gap-2 mb-3">
+        <span className="text-sm font-medium text-lx-text-primary">{agent.name}</span>
+        <span className="font-micro text-2xs uppercase tracking-[0.04em]" style={{ background: "var(--lx-bg-accent-subtle)", color: "var(--lx-text-link)", padding: "2px 8px", borderRadius: 9999, fontSize: 10 }}>builtin</span>
+      </div>
+      <div style={{ background: "var(--lx-surface-input)", border: "1px solid var(--lx-border-default)", borderRadius: 6, padding: "10px 12px", display: "flex", flexDirection: "column", gap: 6 }}>
+        {skills.map((skill) => (
+          <label key={skill.id} className="check-row" style={{ cursor: "pointer", display: "flex", alignItems: "center", gap: 4 }}>
+            <input
+              type="checkbox"
+              checked={attached.has(skill.id)}
+              onChange={(e) => {
+                const next = e.target.checked ? [...attached, skill.id] : [...attached].filter((id) => id !== skill.id);
+                onToggle(agent.id, next);
+              }}
+              aria-label={`${skill.name} — ${agent.name}`}
+            />
+            <span className="text-sm text-lx-text-secondary">&nbsp;{skill.name}</span>
+          </label>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+export function AgentSkillAvailabilitySection({ projectId }: { projectId: string }) {
+  const { data: agents = [] } = useAgents();
+  const { data: skills = [] } = useSkills();
+  const replaceSkills = useReplaceAgentSkills();
+
+  // Checkbox writes PUT /api/forge/agents/:id/skills immediately (junction
+  // insert/delete); the mutation response refreshes the agents cache via
+  // setQueryData.
+  const handleToggle = (agentId: string, skillIds: string[]) => {
+    replaceSkills.mutate({ id: agentId, skillIds });
+  };
+
+  return (
+    <section className="mb-8">
+      <h2 className="font-display text-lg font-medium text-lx-text-primary mb-3">Agent skill availability</h2>
+      <p className="text-sm text-lx-text-secondary mb-4" style={{ maxWidth: 640 }}>
+        Which skills each builtin agent offers. Availability is junction rows only — no JSON columns on the agent rows. Popover and chat skill chips filter to the active engine agent&apos;s list.
+      </p>
+
+      <div className="card-panel card-panel--elevated">
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 24 }}>
+          <AgentSkillColumn agentId={ENGINE_AGENT_IDS.herald} agents={agents} skills={skills} onToggle={handleToggle} />
+          <AgentSkillColumn agentId={ENGINE_AGENT_IDS.blacksmith} agents={agents} skills={skills} onToggle={handleToggle} />
+        </div>
+        <div className="field-hint" style={{ marginTop: 10 }}>
+          Checkbox writes apply immediately. An agent with zero attached skills can&apos;t generate — the popover shows its empty-skills state with Generate disabled. Both agents are editable + Reset-to-default in Settings → Agents &amp; Skills; never deletable.
+        </div>
+      </div>
+    </section>
   );
 }

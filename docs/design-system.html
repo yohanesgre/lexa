@@ -933,6 +933,42 @@ a:hover { color: var(--lx-text-link-hover); }
   box-shadow: var(--lx-focus-glow);
 }
 
+/* ---- Input with trailing affix (password visibility toggle) ---- */
+.input-affix {
+  position: relative;
+}
+.input-affix .prop-input {
+  padding-right: 34px;
+}
+.password-toggle {
+  position: absolute;
+  top: 50%;
+  right: 4px;
+  transform: translateY(-50%);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--lx-text-muted);
+  cursor: pointer;
+  transition: background 100ms, color 100ms;
+}
+.password-toggle:hover {
+  background: var(--lx-surface-card-hover);
+  color: var(--lx-text-secondary);
+}
+.password-toggle svg {
+  width: 16px;
+  height: 16px;
+  stroke: currentColor;
+  fill: none;
+}
+
 .github-section {
   border-top: 1px solid var(--lx-border-subtle);
 }
@@ -1960,6 +1996,196 @@ mark {
   0%, 100% { opacity: 1; }
   50%      { opacity: 0.45; }
 }
+
+/* ---- Herald Streaming Cursor ----
+   Blinking block caret appended after the streaming assistant bubble text.
+   Rendered only while the stream is in progress; removed on done/error.
+   Deeper blink than .skeleton / lx-wip-pulse — a cursor is an attention
+   beat, not ambient life. Reduced-motion flattens it via the global
+   media query above. */
+.herald-stream-caret {
+  color: var(--lx-border-focus);
+  animation: lx-herald-caret-blink 1.2s var(--lx-ease-in-out) infinite;
+}
+@keyframes lx-herald-caret-blink {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.2; }
+}
+
+/* ---- Herald Activity Strip ----
+   Streaming-process surface inside the assistant bubble (codex/opencode-style
+   verbose tool transcript): a collapsible Thinking row fed by live reasoning
+   deltas + one always-visible mono line per tool call — `[tool_name] detail…`
+   with a blinking caret while running, dimmed once done, and an optional
+   `↳ result` line beneath completed calls. The strip is EPHEMERAL by
+   contract — driven only by live SSE frames, never persisted; a fetched
+   transcript renders no strip. After done it folds to one subtle summary
+   line ("Thought for 6s · 3 tools"), expandable. Tokens only. */
+.herald-activity {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 8px;
+}
+.herald-activity-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: none;
+  border: none;
+  padding: 0;
+  font-family: var(--lx-font-micro);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--lx-text-muted);
+  cursor: pointer;
+  text-align: left;
+}
+.herald-activity-toggle:hover { color: var(--lx-text-secondary); }
+.herald-activity-chevron {
+  width: 11px;
+  height: 11px;
+  stroke: currentColor;
+  stroke-width: 2;
+  fill: none;
+  flex-shrink: 0;
+  transition: transform 0.15s var(--lx-ease-out);
+}
+.herald-activity-chevron.collapsed { transform: rotate(-90deg); }
+.herald-activity-reasoning {
+  margin: 2px 0 2px 17px;
+  padding: 6px 10px;
+  background: var(--lx-surface-elevated);
+  border-left: 2px solid var(--lx-border-default);
+  border-radius: 0 6px 6px 0;
+  font-family: var(--lx-font-mono);
+  font-size: 11px;
+  line-height: 17px;
+  font-style: italic;
+  color: var(--lx-text-muted);
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 160px;
+  overflow-y: auto;
+}
+.herald-activity-tool {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  padding-left: 17px;
+  font-family: var(--lx-font-mono);
+  font-size: 11px;
+  line-height: 17px;
+  letter-spacing: normal;
+  color: var(--lx-text-primary);
+  min-width: 0;
+}
+.herald-activity-tool.done { color: var(--lx-text-muted); }
+.herald-activity-tool-name {
+  flex-shrink: 0;
+  font-weight: 500;
+  color: var(--lx-text-secondary);
+}
+.herald-activity-tool.done .herald-activity-tool-name { color: var(--lx-text-muted); }
+/* Process sentence (frame `detail`) — ellipsized to one line after the
+   bracketed name; falls back to the humanized verb phrase when absent. */
+.herald-activity-tool-detail {
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.herald-activity-caret {
+  flex-shrink: 0;
+  color: var(--lx-text-muted);
+  animation: lx-herald-caret-blink 1.2s var(--lx-ease-in-out) infinite;
+}
+/* Compact result marker under a completed call — result-frame `detail`
+   truncated to one muted mono line. */
+.herald-activity-result {
+  margin-left: 17px;
+  padding-left: 12px;
+  border-left: 2px solid var(--lx-border-subtle);
+  font-family: var(--lx-font-mono);
+  font-size: 10px;
+  line-height: 15px;
+  color: var(--lx-text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ---- Herald Chat — assistant bubble markdown ----
+   Assistant turns render markdown client-side (no raw HTML injection).
+   Scoped to .bubble-md so user bubbles stay plain text. Headings are
+   demoted to bubble-appropriate sizes; code blocks reuse the input
+   surface; inline code renders as a chip. Tokens only. */
+.bubble-md {
+  font-size: 13px;
+  line-height: 20px;
+  color: var(--lx-text-primary);
+}
+.bubble-md > *:first-child { margin-top: 0; }
+.bubble-md > *:last-child { margin-bottom: 0; }
+.bubble-md p { margin: 0 0 8px; }
+.bubble-md h1, .bubble-md h2, .bubble-md h3, .bubble-md h4 {
+  font-family: var(--lx-font-display);
+  font-weight: 600;
+  color: var(--lx-text-primary);
+  margin: 10px 0 6px;
+}
+.bubble-md h1 { font-size: 15px; line-height: 20px; }
+.bubble-md h2 { font-size: 14px; line-height: 19px; }
+.bubble-md h3 { font-size: 13px; line-height: 18px; }
+.bubble-md h4 { font-size: 13px; line-height: 18px; font-weight: 500; }
+.bubble-md ul, .bubble-md ol {
+  margin: 0 0 8px;
+  padding-left: 18px;
+}
+.bubble-md li { margin: 2px 0; }
+.bubble-md li::marker { color: var(--lx-text-tertiary); }
+.bubble-md li > input[type="checkbox"] {
+  margin-right: 5px;
+  vertical-align: -1px;
+  accent-color: var(--lx-border-focus);
+}
+.bubble-md code {
+  font-family: var(--lx-font-mono);
+  font-size: 12px;
+  background: var(--lx-surface-elevated);
+  padding: 1px 4px;
+  border-radius: 4px;
+  color: var(--lx-text-secondary);
+}
+.bubble-md pre {
+  background: var(--lx-surface-input);
+  border: 1px solid var(--lx-border-default);
+  border-radius: 6px;
+  padding: 8px 10px;
+  margin: 0 0 8px;
+  overflow-x: auto;
+}
+.bubble-md pre code {
+  background: none;
+  border: none;
+  padding: 0;
+  font-size: 12px;
+  line-height: 20px;
+  color: var(--lx-text-secondary);
+}
+.bubble-md blockquote {
+  margin: 0 0 8px;
+  padding: 2px 10px;
+  border-left: 2px solid var(--lx-border-default);
+  color: var(--lx-text-secondary);
+}
+.bubble-md hr {
+  border: none;
+  border-top: 1px solid var(--lx-border-subtle);
+  margin: 10px 0;
+}
+.bubble-md a { color: var(--lx-text-link); }
 
 /* ---- Dropdown Menu ---- */
 .dropdown-menu {
@@ -4893,6 +5119,107 @@ textarea.prop-input {
   color: var(--lx-text-muted);
 }
 
+/* ---- Herald chat — Threads sidebar (herald-chat.html) ---- */
+.threads-sidebar {
+  width: 260px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--lx-surface-elevated);
+  border-right: 1px solid var(--lx-border-default);
+  overflow: hidden;
+}
+
+.threads-sidebar-header {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  border-bottom: 1px solid var(--lx-border-subtle);
+  flex-shrink: 0;
+}
+
+.threads-search {
+  height: 28px;
+  padding: 0 10px;
+  font-size: 12px;
+  font-family: var(--lx-font-body);
+  color: var(--lx-text-primary);
+  background: var(--lx-surface-input);
+  border: 1px solid var(--lx-border-default);
+  border-radius: 6px;
+}
+
+.threads-search::placeholder { color: var(--lx-text-muted); }
+
+.threads-search:focus { outline: none; border-color: var(--lx-border-focus); }
+
+.threads-sidebar-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.thread-row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.thread-row:hover { background: var(--lx-surface-card-hover); }
+
+.thread-row.active { background: var(--lx-bg-accent-subtle); }
+
+.thread-pin {
+  flex-shrink: 0;
+  display: inline-flex;
+  color: var(--lx-text-muted);
+}
+
+.thread-snippet {
+  font-family: var(--lx-font-micro);
+  font-size: 10px;
+  color: var(--lx-text-muted);
+  line-height: 14px;
+}
+
+.thread-meta {
+  font-family: var(--lx-font-micro);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--lx-text-muted);
+  line-height: 14px;
+}
+
+/* Hover-revealed inline actions; focus-within keeps them keyboard-reachable */
+.thread-row-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+
+.thread-row:hover .thread-row-actions,
+.thread-row:focus-within .thread-row-actions { opacity: 1; }
+
+/* Collapsed: 36px icon rail carrying the restore control (mirrors wiki sidebar) */
+.threads-sidebar.collapsed {
+  width: 36px;
+  min-width: 36px;
+  padding: 8px 0;
+  align-items: center;
+}
+
 </style>
   <style>
     /* Page-scoped layout only — no design tokens defined here */
@@ -6015,6 +6342,175 @@ textarea.prop-input {
       </div>
     </section>
 
+    <section id="prose">
+      <h2 class="font-display text-xl weight-600 color-primary">Markdown / rich-text prose</h2>
+      <p class="text-sm color-secondary" style="max-width:640px;margin-bottom:16px;">Canonical spec for rendered markdown (assistant replies, wiki pages, task descriptions). One heading scale, one code/pre treatment, one list rhythm — every prose surface copies these values; do not re-derive.</p>
+
+      <span class="annotation-tag" style="display:block;margin-bottom:16px;">Consumers: <span class="font-mono">.wiki-prose</span> (wiki pages) · <span class="font-mono">.td-*</span> (task detail TipTap read-mode) · <span class="font-mono">.bubble-md</span> (Herald chat). Intentional deltas — do NOT "unify" blindly: wiki base reads 15px/26px line-height vs chat+task 15px/22px (long-form reading vs narrow columns); chat trims the first/last child margins at bubble edges (<span class="font-mono">.bubble-md &gt; *:first-child/last-child</span>) because bubbles sit flush in the transcript; task detail ships per-element classes instead of a scoped wrapper.</span>
+
+      <!-- Headings -->
+      <div class="block-shell">
+        <div class="block-desc">
+          <strong>Use</strong> — display font, weights 600/500, negative tracking; fixed top-margin 20px so headings never collapse against each other.<br/>
+          <strong>Avoid</strong> — re-scaling headings per surface; skipping levels for visual effect.
+        </div>
+        <div class="state-row" style="display:block;">
+          <span class="state-label">Heading scale</span>
+          <h1 style="font-size:24px;font-weight:600;font-family:var(--lx-font-display);line-height:30px;letter-spacing:-0.03em;color:var(--lx-text-primary);margin:0 0 4px;">Heading 1 · 24px / 600 / 30lh / −0.03em</h1>
+          <h2 style="font-size:18px;font-weight:600;font-family:var(--lx-font-display);line-height:26px;letter-spacing:-0.02em;color:var(--lx-text-primary);margin:0 0 4px;">Heading 2 · 18px / 600 / 26lh / −0.02em</h2>
+          <h3 style="font-size:16px;font-weight:500;font-family:var(--lx-font-display);line-height:24px;letter-spacing:-0.02em;color:var(--lx-text-primary);margin:0 0 4px;">Heading 3 · 16px / 500 / 24lh / −0.02em</h3>
+          <h4 style="font-size:16px;font-weight:500;font-family:var(--lx-font-display);line-height:24px;letter-spacing:-0.02em;color:var(--lx-text-primary);margin:0;">Heading 4 = Heading 3 values (renderer caps depth at h4)</h4>
+          <span class="annotation-tag" style="display:block;margin-top:8px;">Margins: h1 20px top / 12px bottom · h2–h4 20px top / 8px bottom. Markdown renderers cap heading depth at h4 — deeper levels demote to h4.</span>
+        </div>
+        <pre class="code-block" id="code-prose-headings">h1 { font-size:24px; font-weight:600; line-height:30px; letter-spacing:-0.03em; margin:20px 0 12px; }
+h2 { font-size:18px; font-weight:600; line-height:26px; letter-spacing:-0.02em; margin:20px 0 8px; }
+h3, h4 { font-size:16px; font-weight:500; line-height:24px; letter-spacing:-0.02em; margin:20px 0 8px; } /* font-family: var(--lx-font-display); color: var(--lx-text-primary); */</pre>
+        <button class="btn btn-ghost btn-sm copy-btn" data-copy="code-prose-headings">Copy</button>
+        <div class="token-contract">Tokens: --lx-font-display, --lx-text-primary</div>
+      </div>
+
+      <!-- Paragraph rhythm -->
+      <div class="block-shell">
+        <div class="block-desc">
+          <strong>Use</strong> — 15px body, 22px line-height (chat/task) or 26px (wiki long-form), 12px paragraph gap.<br/>
+          <strong>Avoid</strong> — zeroing paragraph margins without an edge-trim rule; mixed line-heights inside one surface.
+        </div>
+        <div class="state-row" style="display:block;">
+          <span class="state-label">Paragraph</span>
+          <p style="font-size:15px;line-height:22px;color:var(--lx-text-primary);margin:0 0 12px;max-width:560px;">Body text carries the surface's base size and rhythm. Consecutive paragraphs separate by exactly 12px — never double-gap.</p>
+          <p style="font-size:15px;line-height:22px;color:var(--lx-text-primary);margin:0;max-width:560px;">Second paragraph proves the rhythm.</p>
+        </div>
+        <pre class="code-block" id="code-prose-p">p { font-size:15px; line-height:22px; margin-bottom:12px; color: var(--lx-text-primary); }</pre>
+        <button class="btn btn-ghost btn-sm copy-btn" data-copy="code-prose-p">Copy</button>
+        <div class="token-contract">Tokens: --lx-text-primary · wiki delta: line-height 26px</div>
+      </div>
+
+      <!-- Inline code -->
+      <div class="block-shell">
+        <div class="block-desc">
+          <strong>Use</strong> — mono chip on the elevated surface for inline code and keycaps of literal values.<br/>
+          <strong>Avoid</strong> — coloring inline code with accent hues; it stays quiet secondary.
+        </div>
+        <div class="state-row">
+          <span class="state-label">Inline code chip</span>
+          <span style="font-size:15px;color:var(--lx-text-primary);">run <code style="font-family:var(--lx-font-mono);font-size:12px;background:var(--lx-surface-elevated);padding:2px 4px;border-radius:4px;color:var(--lx-text-secondary);">bun test</code> now</span>
+        </div>
+        <pre class="code-block" id="code-prose-code">code { font-family: var(--lx-font-mono); font-size:12px; background: var(--lx-surface-elevated); padding:2px 4px; border-radius:4px; color: var(--lx-text-secondary); }</pre>
+        <button class="btn btn-ghost btn-sm copy-btn" data-copy="code-prose-code">Copy</button>
+        <div class="token-contract">Tokens: --lx-font-mono, --lx-surface-elevated, --lx-text-secondary</div>
+      </div>
+
+      <!-- Code block -->
+      <div class="block-shell">
+        <div class="block-desc">
+          <strong>Use</strong> — elevated pre with border-default for fenced code; identical values across surfaces so code never changes shape mid-product.<br/>
+          <strong>Avoid</strong> — input-surface backgrounds or tighter padding than 12/16.<br/>
+          <strong>Instead</strong> — for syntax-highlighted variants see the Highlighted code block primitive (Misc): same surface plus chrome row and `.hljs-theme` tokens.
+        </div>
+        <div class="state-row" style="display:block;">
+          <span class="state-label">Code block</span>
+          <pre style="background:var(--lx-surface-elevated);border:1px solid var(--lx-border-default);border-radius:6px;padding:12px 16px;margin:0;overflow-x:auto;font-family:var(--lx-font-mono);font-size:12px;line-height:20px;color:var(--lx-text-secondary);"><code>plain fenced body — transparent code chip, white-space preserved</code></pre>
+        </div>
+        <pre class="code-block" id="code-prose-pre">pre { background: var(--lx-surface-elevated); border:1px solid var(--lx-border-default); border-radius:6px; padding:12px 16px; overflow-x:auto; margin:12px 0; }
+pre code { background:transparent; padding:0; font-size:12px; line-height:20px; white-space:pre; color: var(--lx-text-secondary); }</pre>
+        <button class="btn btn-ghost btn-sm copy-btn" data-copy="code-prose-pre">Copy</button>
+        <div class="token-contract">Tokens: --lx-surface-elevated, --lx-border-default, --lx-font-mono, --lx-text-secondary</div>
+      </div>
+
+      <!-- Lists -->
+      <div class="block-shell">
+        <div class="block-desc">
+          <strong>Use</strong> — markers live in a 20px left gutter; 4px item gap; nesting swaps disc → circle.<br/>
+          <strong>Avoid</strong> — shipping a prose surface WITHOUT restoring list-style (see annotation).<br/>
+          <strong>Instead</strong> — nothing; this is mandatory.
+        </div>
+        <div class="state-row" style="display:flex;align-items:flex-start;">
+          <span class="state-label">Ordered · unordered · nested · task</span>
+          <ol style="list-style:decimal;margin:0 0 12px 20px;padding-left:2px;font-size:15px;line-height:22px;color:var(--lx-text-primary);">
+            <li style="margin-bottom:4px;">first numbered item</li>
+            <li style="margin-bottom:4px;">second numbered item</li>
+          </ol>
+          <ul style="list-style:disc;margin:0 0 12px 20px;padding-left:2px;font-size:15px;line-height:22px;color:var(--lx-text-primary);">
+            <li style="margin-bottom:4px;">bulleted item
+              <ul style="list-style:circle;margin:4px 0 0 20px;padding-left:2px;">
+                <li style="margin-bottom:4px;">nested level — circle marker</li>
+              </ul>
+            </li>
+            <li style="margin-bottom:0;"><input type="checkbox" checked disabled style="margin-right:5px;vertical-align:-1px;accent-color:var(--lx-border-focus);" /> done task item</li>
+          </ul>
+        </div>
+        <span class="annotation-tag" style="display:block;margin:12px 0;">CRITICAL — Tailwind v4 preflight sets <span class="font-mono">ol, ul, menu &#123; list-style: none &#125;</span> in @layer base. EVERY prose surface MUST explicitly restore markers under its own scope (<span class="font-mono">ul &#123; list-style: disc &#125;</span>, <span class="font-mono">ul ul &#123; circle &#125;</span>, <span class="font-mono">ol &#123; decimal &#125;</span>) or bullets and numbering vanish in BOTH themes. This bit Herald chat already; restore it in any new consumer.</span>
+        <pre class="code-block" id="code-prose-lists">ul   { list-style: disc;    margin:0 0 12px 20px; padding-left:2px; }
+ul ul{ list-style: circle; }
+ol   { list-style: decimal; }
+li   { margin-bottom:4px; }
+li::marker { color: var(--lx-text-secondary); }
+li &gt; input[type="checkbox"] { margin-right:5px; vertical-align:-1px; accent-color: var(--lx-border-focus); }</pre>
+        <button class="btn btn-ghost btn-sm copy-btn" data-copy="code-prose-lists">Copy</button>
+        <div class="token-contract">Tokens: --lx-text-secondary (marker), --lx-border-focus (checkbox accent)</div>
+      </div>
+
+      <!-- Blockquote + hr -->
+      <div class="block-shell">
+        <div class="block-desc">
+          <strong>Use</strong> — strong left rule for quotes; hairline default rule for hr.<br/>
+          <strong>Avoid</strong> — subtle borders on either (they disappear on elevated surfaces).
+        </div>
+        <div class="state-row" style="display:block;">
+          <span class="state-label">Blockquote · hr · links</span>
+          <blockquote style="border-left:2px solid var(--lx-border-strong);padding-left:12px;margin:0 0 12px;color:var(--lx-text-secondary);font-size:15px;line-height:22px;">Quoted material keeps sentence case and drops to secondary.</blockquote>
+          <hr style="border:none;border-top:1px solid var(--lx-border-default);margin:16px 0;" />
+          <p style="margin:0;font-size:15px;line-height:22px;"><a href="#" onclick="return false;" style="color:var(--lx-text-link);text-decoration:none;">A link</a> — link color, underline only on hover, https-only targets in chat.</p>
+        </div>
+        <pre class="code-block" id="code-prose-quote">blockquote { border-left:2px solid var(--lx-border-strong); padding-left:12px; margin:12px 0; color: var(--lx-text-secondary); }
+hr         { border:none; border-top:1px solid var(--lx-border-default); margin:16px 0; }
+a          { color: var(--lx-text-link); }</pre>
+        <button class="btn btn-ghost btn-sm copy-btn" data-copy="code-prose-quote">Copy</button>
+        <div class="token-contract">Tokens: --lx-border-strong, --lx-border-default, --lx-text-secondary, --lx-text-link</div>
+      </div>
+
+      <!-- Table -->
+      <div class="block-shell">
+        <div class="block-desc">
+          <strong>Use</strong> — full-width collapsed table, bordered cells, micro-caps header row on the elevated surface.<br/>
+          <strong>Avoid</strong> — zebra striping; oversized cell padding.
+        </div>
+        <div class="state-row" style="display:block;">
+          <span class="state-label">Table</span>
+          <table style="width:100%;border-collapse:collapse;margin:0;font-size:13px;line-height:20px;">
+            <thead>
+              <tr>
+                <th style="text-align:left;padding:6px 10px;border:1px solid var(--lx-border-default);font-weight:500;color:var(--lx-text-secondary);font-size:11px;text-transform:uppercase;letter-spacing:0.05em;font-family:var(--lx-font-body);background:var(--lx-surface-elevated);">Column</th>
+                <th style="text-align:left;padding:6px 10px;border:1px solid var(--lx-border-default);font-weight:500;color:var(--lx-text-secondary);font-size:11px;text-transform:uppercase;letter-spacing:0.05em;font-family:var(--lx-font-body);background:var(--lx-surface-elevated);">Value</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td style="padding:6px 10px;border:1px solid var(--lx-border-default);text-align:left;vertical-align:top;color:var(--lx-text-primary);">cell</td>
+                <td style="padding:6px 10px;border:1px solid var(--lx-border-default);text-align:left;vertical-align:top;color:var(--lx-text-primary);">cell</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <pre class="code-block" id="code-prose-table">table { width:100%; border-collapse:collapse; margin:12px 0; font-size:13px; line-height:20px; }
+th, td { text-align:left; vertical-align:top; padding:6px 10px; border:1px solid var(--lx-border-default); }
+th { font-weight:500; color: var(--lx-text-secondary); font-size:11px; text-transform:uppercase; letter-spacing:0.05em; background: var(--lx-surface-elevated); }</pre>
+        <button class="btn btn-ghost btn-sm copy-btn" data-copy="code-prose-table">Copy</button>
+        <div class="token-contract">Tokens: --lx-border-default, --lx-surface-elevated, --lx-text-secondary, --lx-font-body</div>
+      </div>
+
+      <!-- Image -->
+      <div class="block-shell">
+        <div class="block-desc">
+          <strong>Use</strong> — block image, contained to the column, rounded like cards. Chat collapses images to alt text (untrusted markdown); wiki renders them.<br/>
+          <strong>Avoid</strong> — uncontained widths breaking the column.
+        </div>
+        <pre class="code-block" id="code-prose-img">img { max-width:100%; height:auto; border-radius:6px; display:block; margin:12px 0; }</pre>
+        <button class="btn btn-ghost btn-sm copy-btn" data-copy="code-prose-img">Copy</button>
+        <div class="token-contract">Tokens: radius 6 (card step)</div>
+      </div>
+    </section>
+
     <section id="misc">
       <h2 class="font-display text-xl weight-600 color-primary">Misc</h2>
 
@@ -6034,6 +6530,34 @@ textarea.prop-input {
 &lt;div class="avatar" style="width:28px;height:28px;font-size:12px;"&gt;MK&lt;/div&gt;</pre>
         <button class="btn btn-ghost btn-sm copy-btn" data-copy="code-misc-avatar">Copy</button>
         <div class="token-contract">Tokens: --lx-surface-card-hover (bg), --lx-text-secondary</div>
+      </div>
+
+      <!-- Highlighted code block (Herald chat fenced segments) -->
+      <div class="block-shell">
+        <div class="block-desc">
+          <strong>Use</strong> — `.herald-codeblock` for Herald chat done-turn fenced code: elevated surface matching `.bubble-md pre`, micro-caps language label + copy button in the top-right chrome row, body highlighted by highlight.js and themed through the opt-in `.hljs-theme` class on the `code` element.<br/>
+          <strong>Avoid</strong> — raw hex token colors or extra hljs scopes outside `.hljs-theme`; labels in sentence case inside the text (caps come from CSS).<br/>
+          <strong>Instead</strong> — plain `.bubble-md pre` for streaming/inline code (no chrome, same surface).
+        </div>
+        <div class="state-row" style="display:block;">
+          <span class="state-label">Highlighted code</span>
+          <div style="position:relative;background:var(--lx-surface-elevated);border:1px solid var(--lx-border-default);border-radius:6px;padding:12px 16px;margin-top:12px;font-family:var(--lx-font-mono);font-size:12px;line-height:20px;color:var(--lx-text-secondary);">
+            <span style="position:absolute;top:4px;right:4px;display:flex;align-items:center;gap:4px;">
+              <span style="font-family:var(--lx-font-micro);font-size:10px;text-transform:uppercase;letter-spacing:0.05em;color:var(--lx-text-tertiary);">ts</span>
+            </span>
+            <span class="annotation-inline" style="display:block;margin:0 0 4px;">chrome row: language label + copy button, absolute top-right</span>
+            <code><span style="color:var(--lx-text-link);">const</span> <span style="color:var(--lx-badge-task);">greet</span> = (<span style="color:var(--lx-text-secondary);">name</span>) <span style="color:var(--lx-text-link);">=&gt;</span> <span style="color:var(--lx-text-success);">"hi "</span> + name; <span style="color:var(--lx-text-tertiary);font-style:italic;">// gold keywords · cyan fns · green strings</span></code>
+          </div>
+          <span class="annotation-tag" style="display:block;margin-top:8px;">Token mapping (.hljs-theme): keywords/literals → --lx-text-link · strings/additions → --lx-text-success · numbers/deletions → --lx-text-danger · functions → --lx-badge-task · types/built-ins → --lx-badge-asset · attributes → --lx-text-warning · comments → --lx-text-tertiary italic. Unknown fence languages fall back to highlightAuto; grammar errors fall back to escaped plain text (streaming-safe).</span>
+        </div>
+        <pre class="code-block" id="code-misc-codeblock">&lt;div class="herald-codeblock"&gt;
+  &lt;span class="herald-codeblock-chrome"&gt;
+    &lt;span class="herald-codeblock-lang"&gt;ts&lt;/span&gt;
+  &lt;/span&gt;
+  &lt;code class="hljs-theme"&gt;…highlight.js output…&lt;/code&gt;
+&lt;/div&gt;</pre>
+        <button class="btn btn-ghost btn-sm copy-btn" data-copy="code-misc-codeblock">Copy</button>
+        <div class="token-contract">Tokens: --lx-surface-elevated (bg), --lx-border-default, --lx-text-tertiary (label), --lx-font-mono / --lx-font-micro, token palette per .hljs-theme mapping above</div>
       </div>
 
       <div class="block-shell">
@@ -6081,6 +6605,7 @@ textarea.prop-input {
     <a href="#badges">badges</a>
     <a href="#feedback">feedback</a>
     <a href="#overlays">overlays</a>
+    <a href="#prose">prose</a>
     <a href="#misc">misc</a>
   </nav>
   <button id="theme-toggle" class="btn btn-ghost btn-sm ds-theme-toggle">Light</button>

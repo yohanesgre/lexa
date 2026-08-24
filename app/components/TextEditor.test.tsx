@@ -33,14 +33,14 @@ describe("TextEditor", () => {
     expect(screen.getByRole("button", { name: "Link" })).toBeInTheDocument();
   });
 
-  it("disables the Forge button when no forge config is provided", async () => {
+  it("disables the Hearth button when no forge config is provided", async () => {
     render(
       <QueryClientProvider client={makeClient()}>
         <TextEditor initialContent={DOC} />
       </QueryClientProvider>
     );
     await waitFor(() => expect(document.querySelector(".ProseMirror")).not.toBeNull());
-    expect(screen.getByRole("button", { name: "Forge AI writing assistant" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Hearth AI writing assistant" })).toBeDisabled();
   });
 });
 

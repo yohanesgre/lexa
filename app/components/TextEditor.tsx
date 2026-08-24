@@ -1,4 +1,5 @@
 import { useRef, useMemo, useState, useEffect } from "react";
+import { Flame } from "lucide-react";
 import { useEditor, EditorContent } from "@tiptap/react";
 import type { TipTapDoc } from "../../shared/types";
 import type { JSONContent } from "@tiptap/core";
@@ -199,16 +200,16 @@ export function Toolbar({
           ref={forgeBtnRef}
           type="button"
           className={cn("toolbar-btn", forgeOpen && "active")}
-          title={forge ? "AI writing assistant (Forge)" : "AI writing assistant (coming soon)"}
-          aria-label="Forge AI writing assistant"
+          title={forge ? "AI project assistant (Hearth)" : "AI writing assistant (coming soon)"}
+          aria-label="Hearth AI writing assistant"
           disabled={!forge}
           onClick={() => {
             setForgeAnchor(forgeBtnRef.current?.getBoundingClientRect() ?? null);
             setForgeOpen((v) => !v);
           }}
         >
-          <i className="ph ph-hammer" style={{ fontSize: 16 }} />
-          Forge
+          <Flame size={16} strokeWidth={1.5} />
+          Hearth
         </button>
       </div>
       </div>

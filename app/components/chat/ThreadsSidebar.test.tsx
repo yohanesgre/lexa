@@ -1,16 +1,16 @@
 // @vitest-environment jsdom
 import "@testing-library/jest-dom/vitest";
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, fireEvent, waitFor, cleanup } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor, cleanup, within } from "@testing-library/react";
 import type { HeraldChatThreadSummary } from "../../lib/api";
-import { ChatHistoryDropdown, highlightSnippet } from "./ChatHistoryDropdown";
+import { ThreadsSidebar, highlightSnippet } from "./ThreadsSidebar";
 
 const THREADS: HeraldChatThreadSummary[] = [
   { chatId: "c1", title: "Payments migration questions", pinned: false, snippet: null, createdAt: "2026-08-22T09:00:00Z", updatedAt: "2026-08-22T10:00:00Z" },
   { chatId: "c2", title: null, pinned: true, snippet: null, createdAt: "2026-08-21T09:00:00Z", updatedAt: "2026-08-21T11:00:00Z" },
 ];
 
-function setup(overrides?: Partial<Parameters<typeof ChatHistoryDropdown>[0]>) {
+function setup(overrides?: Partial<Parameters<typeof ThreadsSidebar>[0]>) {
   const props = {
     threads: THREADS,
     activeChatId: "c1",
@@ -19,21 +19,33 @@ function setup(overrides?: Partial<Parameters<typeof ChatHistoryDropdown>[0]>) {
     onSelect: vi.fn(),
     onNewChat: vi.fn(),
     onPinToggle: vi.fn().mockResolvedValue(undefined),
-    onExport: vi.fn().mockResolvedValue(undefined),
     onRename: vi.fn().mockResolvedValue(undefined),
     onDelete: vi.fn().mockResolvedValue(undefined),
     ...overrides,
   };
-  render(<ChatHistoryDropdown {...props} />);
+  render(<ThreadsSidebar {...props} />);
   return props;
 }
 
-function openPanel() {
-  fireEvent.click(screen.getByRole("button", { name: /history/i }));
+function rowFor(title: string): HTMLElement {
+  const list = document.querySelector(".threads-sidebar-list") as HTMLElement;
+  return within(list).getByText(title).closest(".thread-row") as HTMLElement;
 }
 
 beforeEach(() => {
   vi.clearAllMocks();
+  // jsdom has no matchMedia — stub mobile so drawer-dismiss tests keep their
+  // <900px semantics.
+  window.matchMedia = ((query: string) => ({
+    matches: query.includes("max-width"),
+    media: query,
+    onchange: null,
+    addListener: () => {},
+    removeListener: () => {},
+    addEventListener: () => {},
+    removeEventListener: () => {},
+    dispatchEvent: () => false,
+  })) as unknown as typeof window.matchMedia;
 });
 
 afterEach(() => {
@@ -55,121 +67,90 @@ describe("highlightSnippet", () => {
   });
 });
 
-describe("ChatHistoryDropdown", () => {
-  it("renders rows with titles (null → New chat), relative time, active tint + New chat pinned top", async () => {
+describe("ThreadsSidebar", () => {
+  it("renders rows with titles (null → New chat), relative time, active highlight, New chat + search pinned top", () => {
     setup();
-    openPanel();
-    expect(screen.getByRole("button", { name: "New chat" })).toBeInTheDocument(); // pinned button
+    expect(screen.getByRole("button", { name: "New chat" })).toBeInTheDocument();
+    expect(screen.getByLabelText("Search threads")).toBeInTheDocument();
     expect(screen.getByText("Payments migration questions")).toBeInTheDocument();
     // Null title renders the fallback.
     expect(screen.getByTitle("New chat")).toBeInTheDocument();
-    // Active row shows the accent tint + Active now label; inactive shows relative time.
-    const activeRow = screen.getByText("Active now").closest("div[role='menuitem']") as HTMLElement;
-    expect(activeRow.style.background).toContain("accent-subtle");
-    expect(screen.getAllByText(/ago|yesterday/i).length).toBeGreaterThan(0);
+    // Active row carries the .active class and the Active now label; inactive shows relative time.
+    const activeRow = rowFor("Payments migration questions");
+    expect(activeRow.className).toContain("active");
+    expect(activeRow.textContent).toContain("Active now");
+    expect(rowFor("New chat").textContent).toMatch(/ago|yesterday/i);
   });
 
-  it("empty state: No chats yet — start one below", () => {
+  it("empty state: No threads yet — start a conversation", () => {
     setup({ threads: [] });
-    openPanel();
-    expect(screen.getByText("No chats yet — start one below")).toBeInTheDocument();
+    expect(screen.getByText("No threads yet — start a conversation")).toBeInTheDocument();
   });
 
-  it("selecting a row calls onSelect; New chat calls onNewChat; both close the panel", () => {
+  it("selecting a row calls onSelect then onClose; New chat calls onNewChat", () => {
     const onSelect = vi.fn();
     const onNewChat = vi.fn();
-    setup({ onSelect, onNewChat });
-    const toggle = () => openPanel();
-    toggle();
+    const onClose = vi.fn();
+    setup({ onSelect, onNewChat, onClose });
     fireEvent.click(screen.getByText("Payments migration questions"));
     expect(onSelect).toHaveBeenCalledWith("c1");
-    expect(screen.queryByRole("menu")).toBeNull();
+    expect(onClose).toHaveBeenCalled();
 
-    toggle();
     fireEvent.click(screen.getByRole("button", { name: "New chat" }));
     expect(onNewChat).toHaveBeenCalled();
-    expect(screen.queryByRole("menu")).toBeNull();
   });
 
-  it("search input sits directly below New chat and routes keystrokes to onSearchChange", () => {
+  it("search input routes keystrokes to onSearchChange", () => {
     const onSearchChange = vi.fn();
     setup({ onSearchChange });
-    openPanel();
-    const input = screen.getByLabelText("Search chats") as HTMLInputElement;
-    const panel = input.closest(".dropdown-menu") as HTMLElement;
-    const newChat = screen.getByRole("button", { name: "New chat" });
-    // Input renders after (below) the New chat button in DOM order.
-    expect(panel.contains(newChat)).toBe(true);
-    expect(newChat.compareDocumentPosition(input) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    fireEvent.change(input, { target: { value: "runbook" } });
+    fireEvent.change(screen.getByLabelText("Search threads"), { target: { value: "runbook" } });
     expect(onSearchChange).toHaveBeenCalledWith("runbook");
   });
 
-  it("searching shows Pinned / Recent section headers", () => {
-    setup({ search: "runbook" });
-    openPanel();
+  it("searching shows Pinned / Recent section headers; empty query hides them", () => {
+    const base = { activeChatId: "c1", onSearchChange: vi.fn(), onSelect: vi.fn(), onNewChat: vi.fn(), onPinToggle: vi.fn(), onRename: vi.fn(), onDelete: vi.fn() };
+    setup({ ...base, threads: THREADS, search: "runbook" });
     expect(screen.getByText("Pinned")).toBeInTheDocument();
     expect(screen.getByText("Recent")).toBeInTheDocument();
-  });
+    cleanup();
 
-  it("empty query hides both section headers and lists normally", () => {
-    setup({ search: "" });
-    openPanel();
+    setup({ ...base, threads: THREADS, search: "" });
     expect(screen.queryByText("Pinned")).not.toBeInTheDocument();
     expect(screen.queryByText("Recent")).not.toBeInTheDocument();
   });
 
-  it("snippet rows render under titles with the query bolded while searching", () => {
+  it("snippet rows render under titles with the query bolded while searching; hidden when empty", () => {
     const threads: HeraldChatThreadSummary[] = [
       { ...THREADS[0], snippet: "…cross-check the rollback runbook before Friday…" },
     ];
     setup({ threads, search: "runbook" });
-    openPanel();
     const bolded = screen.getByText("runbook");
     expect(bolded.tagName).toBe("STRONG");
-    // The plain segments around it stay in the same snippet line.
     expect(bolded.parentElement?.textContent).toBe("…cross-check the rollback runbook before Friday…");
-  });
+    cleanup();
 
-  it("snippets are hidden when the query is empty", () => {
-    const threads: HeraldChatThreadSummary[] = [
-      { ...THREADS[0], snippet: "…cross-check the rollback runbook before Friday…" },
-    ];
     setup({ threads, search: "" });
-    openPanel();
     expect(screen.queryByText(/cross-check/)).not.toBeInTheDocument();
   });
 
-  it("kebab gains Pin/Unpin + Export .md alongside Rename/Delete; toggling passes the inverted flag", async () => {
+  it("pinned rows show a pin glyph; hover actions toggle pin with the inverted flag", () => {
     const onPinToggle = vi.fn().mockResolvedValue(undefined);
     setup({ onPinToggle });
-    openPanel();
-    // c2 is pinned → Unpin.
-    fireEvent.click(screen.getByRole("button", { name: /actions for new chat/i }));
-    fireEvent.click(screen.getByRole("menuitem", { name: /unpin/i }));
+    // c2 is pinned → pin glyph + Unpin action.
+    const pinnedRow = rowFor("New chat");
+    expect(pinnedRow.querySelector(".thread-pin")).not.toBeNull();
+    fireEvent.click(within(pinnedRow).getByRole("button", { name: /unpin new chat/i }));
     expect(onPinToggle).toHaveBeenCalledWith("c2", false);
 
     // c1 is not pinned → Pin.
-    fireEvent.click(screen.getByRole("button", { name: /actions for payments migration questions/i }));
-    fireEvent.click(screen.getByRole("menuitem", { name: /^pin$/i }));
+    fireEvent.click(within(rowFor("Payments migration questions")).getByRole("button", { name: /pin payments migration questions/i }));
     expect(onPinToggle).toHaveBeenCalledWith("c1", true);
   });
 
-  it("Export .md routes through onExport with the chatId", async () => {
-    const onExport = vi.fn().mockResolvedValue(undefined);
-    setup({ onExport });
-    openPanel();
-    fireEvent.click(screen.getByRole("button", { name: /actions for payments migration questions/i }));
-    fireEvent.click(screen.getByRole("menuitem", { name: /export \.md/i }));
-    expect(onExport).toHaveBeenCalledWith("c1");
-  });
-
-  it("rename inline: kebab → Rename swaps to input; Enter commits trimmed title; empty commit is a no-op", async () => {
+  it("rename inline: Rename swaps to input; Enter commits trimmed title; empty commit is a no-op; Esc cancels", async () => {
     const onRename = vi.fn().mockResolvedValue(undefined);
     setup({ onRename });
-    openPanel();
-    fireEvent.click(screen.getByRole("button", { name: /actions for payments migration questions/i }));
-    fireEvent.click(screen.getByRole("menuitem", { name: /rename/i }));
+    fireEvent.click(within(rowFor("Payments migration questions")).getByRole("button", { name: /rename payments/i }));
     const input = screen.getByLabelText("Rename chat") as HTMLInputElement;
     expect(input.value).toBe("Payments migration questions");
     // Empty commit no-op.
@@ -181,8 +162,7 @@ describe("ChatHistoryDropdown", () => {
     fireEvent.keyDown(input, { key: "Enter" });
     await waitFor(() => expect(onRename).toHaveBeenCalledWith("c1", "Rollback runbook draft"));
     // Esc cancels without committing.
-    fireEvent.click(screen.getByRole("button", { name: /actions for payments migration questions/i }));
-    fireEvent.click(screen.getByRole("menuitem", { name: /rename/i }));
+    fireEvent.click(within(rowFor("Payments migration questions")).getByRole("button", { name: /rename payments/i }));
     const input2 = screen.getByLabelText("Rename chat");
     fireEvent.keyDown(input2, { key: "Escape" });
     expect(screen.queryByLabelText("Rename chat")).toBeNull();
@@ -191,9 +171,7 @@ describe("ChatHistoryDropdown", () => {
   it("delete flow: confirm dialog → onDelete; rejection keeps dialog open with the code", async () => {
     const onDelete = vi.fn().mockRejectedValueOnce(Object.assign(new Error("busy"), { code: "HERALD_TASK_ACTIVE" }));
     setup({ onDelete });
-    openPanel();
-    fireEvent.click(screen.getByRole("button", { name: /actions for payments migration questions/i }));
-    fireEvent.click(screen.getByRole("menuitem", { name: /delete/i }));
+    fireEvent.click(within(rowFor("Payments migration questions")).getByRole("button", { name: /delete payments/i }));
     expect(screen.getByRole("dialog", { name: /delete this chat/i })).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: /^delete chat$/i }));
     await waitFor(() => expect(onDelete).toHaveBeenCalledWith("c1"));
@@ -205,5 +183,35 @@ describe("ChatHistoryDropdown", () => {
     onDelete.mockResolvedValueOnce(undefined);
     fireEvent.click(screen.getByRole("button", { name: /^delete chat$/i }));
     await waitFor(() => expect(screen.queryByRole("dialog", { name: /delete this chat/i })).toBeNull());
+  });
+
+  it("drawer Esc-dismiss fires onClose only outside inline edit/delete states", () => {
+    const onClose = vi.fn();
+    setup({ open: true, onClose });
+    // While renaming, Esc cancels the rename instead of closing the drawer.
+    fireEvent.click(within(rowFor("Payments migration questions")).getByRole("button", { name: /rename payments/i }));
+    fireEvent.keyDown(screen.getByLabelText("Rename chat"), { key: "Escape" });
+    expect(screen.queryByLabelText("Rename chat")).toBeNull();
+    expect(onClose).not.toHaveBeenCalled();
+    // Free Esc closes the drawer.
+    fireEvent.keyDown(document, { key: "Escape", bubbles: true });
+    expect(onClose).toHaveBeenCalled();
+  });
+
+  it("collapse control sits inside the sidebar header; collapsed renders the restore rail (wiki affordance)", () => {
+    const onToggle = vi.fn();
+    setup({ open: true, onToggle, onClose: vi.fn() });
+    const collapse = screen.getByRole("button", { name: "Collapse sidebar" });
+    expect(collapse.closest(".threads-sidebar-header")).not.toBeNull();
+    fireEvent.click(collapse);
+    expect(onToggle).toHaveBeenCalledTimes(1);
+    cleanup();
+
+    setup({ open: false, onToggle, onClose: vi.fn() });
+    expect(document.querySelector(".threads-sidebar.collapsed")).not.toBeNull();
+    // Rail keeps the expand affordance; no drawer backdrop while collapsed.
+    expect(screen.queryByLabelText("Close threads")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Expand sidebar" }));
+    expect(onToggle).toHaveBeenCalledTimes(2);
   });
 });

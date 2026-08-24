@@ -1,10 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { Check, ChevronRight, Copy, Hammer, List, X } from "lucide-react";
+import { Check, ChevronRight, Copy, Flame, List, X } from "lucide-react";
 import { Link } from "@tanstack/react-router";
 import { cn } from "../ui/cn";
 import { copyToClipboard } from "../../lib/clipboard";
-import { useRecentForgeTasks, useRuntimes, useCancelForgeTask, useForgeTaskLogs } from "../../lib/queries";
+import { useRecentForgeTasks, useRuntimes, useCancelForgeTask, useForgeTaskLogs, useSession } from "../../lib/queries";
 import type { RecentForgeTask } from "../../lib/api";
 
 const STATUS_LABEL: Record<string, string> = {
@@ -64,6 +64,10 @@ export function ForgeStatus() {
   const { data: tasks = [] } = useRecentForgeTasks();
   const { data: runtimes = [] } = useRuntimes();
   const cancelTask = useCancelForgeTask();
+  // Log/detail internals are ADMIN-GATED — the live log line under an active
+  // row renders for admins only; members get status + timestamps.
+  const { data: session } = useSession();
+  const isAdmin = session?.user?.role === "superadmin";
   const [open, setOpen] = useState(false);
   const [dismissed, setDismissed] = useState<Set<string>>(loadDismissed);
   const dismissedRef = useRef(dismissed);
@@ -89,7 +93,7 @@ export function ForgeStatus() {
   // Live status of the active (queued/running) task — the last log line is
   // shown under its row in the panel.
   const active = visible.find((t) => t.status === "queued" || t.status === "running");
-  const activeLogs = useForgeTaskLogs(active?.id ?? null, open && !!active);
+  const activeLogs = useForgeTaskLogs(active?.id ?? null, open && !!active && isAdmin);
 
   const doneCount = visible.filter((t) => t.status === "completed").length;
   const failedCount = visible.filter((t) => t.status === "failed").length;
@@ -133,7 +137,7 @@ export function ForgeStatus() {
     }
   };
 
-  // The pill is ALWAYS visible — idle shows a neutral "Forge" so the Forge
+  // The pill is ALWAYS visible — idle shows a neutral "Hearth" so the Hearth
   // entry point (and its panel) is reachable even with no recent tasks.
   const idle = !active && doneCount === 0 && failedCount === 0;
 
@@ -152,17 +156,17 @@ export function ForgeStatus() {
         {active ? (
           <>
             <span className="spinner" style={{ width: 10, height: 10, borderWidth: 2 }} />
-            Forge · {active.skillName || active.skillId}
+            Hearth · {active.skillName || active.skillId}
           </>
         ) : failedCount > 0 ? (
           <>
-            <Hammer size={12} strokeWidth={1.5} />
+            <Flame size={12} strokeWidth={1.5} />
             {doneCount > 0 ? `${doneCount} done · ${failedCount} failed` : `${failedCount} failed`}
           </>
         ) : idle ? (
           <>
-            <Hammer size={12} strokeWidth={1.5} />
-            Forge
+            <Flame size={12} strokeWidth={1.5} />
+            Hearth
           </>
         ) : (
           <>
@@ -174,10 +178,10 @@ export function ForgeStatus() {
 
       {open &&
         createPortal(
-          <div className="menu-popover" role="menu" aria-label="Forge tasks" ref={panelRef} style={popoverStyle}>
-            <div className="dropdown-label">Forge · recent</div>
+          <div className="menu-popover" role="menu" aria-label="Hearth tasks" ref={panelRef} style={popoverStyle}>
+            <div className="dropdown-label">Hearth · recent</div>
             {visible.length === 0 ? (
-              <div className="text-xs text-lx-text-muted px-3 py-3">No Forge tasks yet.</div>
+              <div className="text-xs text-lx-text-muted px-3 py-3">No Hearth tasks yet.</div>
             ) : (
               visible.slice(0, 6).map((t) => {
                 const runtime = runtimes.find((r) => r.id === t.runtimeId);
@@ -202,7 +206,7 @@ export function ForgeStatus() {
                         <TaskRowMain t={t} navigable />
                       </div>
                       <span className="font-micro text-2xs text-lx-text-muted">{meta}</span>
-                      {isActive && activeLogs.data && activeLogs.data.length > 0 && (
+                      {isAdmin && isActive && activeLogs.data && activeLogs.data.length > 0 && (
                         <span
                           className="font-mono"
                           style={{ fontSize: 10, color: "var(--lx-text-muted)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: "100%", display: "inline-flex", alignItems: "center", gap: 6 }}
@@ -233,8 +237,8 @@ export function ForgeStatus() {
                         <button
                           type="button"
                           className="forge-dismiss"
-                          aria-label="Cancel Forge task"
-                          title="Cancel this Forge task"
+                          aria-label="Cancel Hearth task"
+                          title="Cancel this Hearth task"
                           onClick={() => {
                             cancelTask.mutate(t.id);
                             dismiss(t.id);
@@ -268,7 +272,7 @@ export function ForgeStatus() {
               style={{ height: 28, textDecoration: "none" }}
             >
               <List size={14} strokeWidth={1.5} />
-              <span className="text-xs text-lx-text-secondary">Forge control panel</span>
+              <span className="text-xs text-lx-text-secondary">Hearth control panel</span>
             </Link>
             <div className="dropdown-separator" />
             <Link
@@ -278,8 +282,8 @@ export function ForgeStatus() {
               className="dropdown-item"
               style={{ height: 28, textDecoration: "none" }}
             >
-              <Hammer size={14} strokeWidth={1.5} />
-              <span className="text-xs text-lx-text-secondary">Forge runtimes</span>
+              <Flame size={14} strokeWidth={1.5} />
+              <span className="text-xs text-lx-text-secondary">Hearth runtimes</span>
             </Link>
           </div>,
           document.body

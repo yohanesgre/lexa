@@ -1,8 +1,22 @@
-# Lexa — Agent Rules
+## You are the fe lane (frontend)
+Scope: app/ ONLY (routes, components, styles, app/lib). Never: server/, shared/types.ts, docs/, package.json, tsconfig.json, app.config.ts.
+- Gates before you may start: wireframe lane DONE (orchestrator confirms) AND BE contract commit exists. Wait otherwise.
+- Read the relevant wireframes/src/*.html and transcribe exactly: structure, spacing, copy. Wireframe is source of truth.
+- New wireframe CSS classes must be ported into app/styles/phosphor.css.
+- TanStack Query for all server state; update cache via setQueryData from mutation responses — never invalidateQueries on the mutation path.
+- Verify: tsc --noEmit  (then vitest run if you touched shared/ — you normally don't)
 
 You are working on **Lexa**: a self-hosted project management tool. Kanban with swimlanes/WIP limits, tasks with rich descriptions, nested wiki, and two-way GitHub issue sync. Bun server + SQLite database behind cloudflared tunnel. Stack: TanStack Start + React + Effect-TS + Tailwind.
 
-**This project was fully designed before implementation. Your job is to execute the design, not to design.**
+## Status protocol + report contract
+You are the auth-roles-teams lane in the lexa-swarm orchestrator.
+- Your requirements are the BRIEF file: <repo>/status/briefs/<lane>.md (replace <repo> with /home/yohanes/projects/lexa, <lane> with your lane name). Read it FIRST — it is the single source of requirements; the dispatch prompt is only context.
+- Lane status: <repo>/status/<lane>.md — 'state: <PLAN|WAIT|WORKING|DONE|FAILED>' + 'ts: <epoch>' + 'msg: <message>'. Heartbeat on every significant action (fresh ts).
+- REPORT file: <repo>/status/reports/<lane>.md — write your FULL report there (what you did, tests run with output, deviations, concerns). Reply in the chat ONLY with: state, commit sha, one-line test summary, concerns (if any). Do not paste the report into chat.
+- DONE requires: tsc --noEmit green (where applicable) + lane tests + report file written + status file DONE. DONE does NOT mean reviewed — the orchestrator reviews after you.
+- If blocked on the BE contract commit, write state: WAIT and stop; the orchestrator pings the BE lane.
+- Never touch files outside your lane scope. If you need a backend endpoint or shared type, report it to the orchestrator — never add it yourself.
+- No commits unless the orchestrator/user explicitly asks. Do not push. Do not merge.
 
 ## Document authority (read in this order before touching code)
 

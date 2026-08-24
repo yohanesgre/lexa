@@ -240,9 +240,12 @@ Move in Lexa → syncStateFromLexa() → GitHub issue closed
 ### Trust boundary
 Anyone with issue-triage permission on a linked repo can trigger webhook-driven board moves (close/reopen an issue → card moves, bypassing WIP and required_fields). This is intentional — GitHub is the source of truth for issue state (see sync matrix). On public repos, external contributors can affect the board; if that becomes a problem, the mitigation is restricting the App to private repos or filtering webhook senders — not more auth code.
 
-## Forge — two active AI tiers
+## Hearth — two active AI tiers
 
-Forge is the umbrella for both AI execution tiers. Both are ACTIVE and
+Hearth is the umbrella for both AI execution tiers (renamed from Forge —
+UI/docs/wireframes this cycle; internal identifiers `forge_tasks`/
+`forge_sessions`/`/api/forge/*`/`FORGE_*`/CLI keep their names until a
+deferred identifier migration). Both tiers are ACTIVE and
 co-exist; the run popover picks per-run. Design rationale: `docs/ADR-0001-two-tier-ai-architecture.md`; implementation plan + decisions log:
 `docs/HERALD_PLAN.md`.
 
@@ -253,6 +256,18 @@ co-exist; the run popover picks per-run. Design rationale: `docs/ADR-0001-two-ti
 | Queue consumer | HTTP stream handler, in-process | daemons via `claimNextTask` |
 | Thread state | `herald_threads` (ModelMessage[] JSON, rolling summary) | `forge_sessions` |
 | Agents/skills render | prompt injection via systemPrompts | `.agents/` file writes |
+| Engine switching | default lane; freeform chat always herald | per-project `engine='blacksmith'`: document threads + Generate route here (runtime-online guard, `.agents/` claim bundles); chat → 409 `ENGINE_NOT_SUPPORTED_FOR_CHAT` |
+
+Engine switching rationale: one project may want the zero-infrastructure
+assistant lane while another routes generation through daemon runtimes —
+`herald_settings.engine` is the admin-written project default; the member
+toggle is a personal overlay (client-side session preference) shown only when
+`engine_switcher_enabled=1`. Exactly two builtin agents exist after migration
+0013 (`hearth-herald`, `hearth-blacksmith` — id rebind, generic 'lexa'
+retired); skill availability per agent = junction rows only. Vision:
+`primary_supports_images=1` → inline image parts; else configured
+`vision_model` → internal `analyze_image` delegation (frame suppressed from
+member UI); else attachments rejected up front (`VISION_NOT_CONFIGURED`).
 
 - **Shared queue with a discriminator:** both tiers ride `forge_tasks`;
   `kind` ∈ `'herald' | 'blacksmith'`. `claimNextTask` carries

@@ -27,7 +27,7 @@ beforeAll(async () => {
   const dbPath = join(dir, "test.db");
   runMigrations(dbPath, MIGRATIONS);
   process.env.DATABASE_PATH = dbPath;
-  process.env.LXK_PUBLIC_URL = "http://localhost:3000";
+  process.env.LXK_PUBLIC_URL = "https://localhost:3000";
   const keyHash = await sha256(KEY);
   const db = new Database(dbPath);
   db.exec(`

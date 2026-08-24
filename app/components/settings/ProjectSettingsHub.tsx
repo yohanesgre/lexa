@@ -5,7 +5,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useProjects, useProjectMembers, useAddProjectMember, useRemoveProjectMember, useDeleteProject, useUpdateProject, useProjectRepos, useReplaceProjectRepos, useGithubRepoSearch, useUsers, useTeams, useUpdateProjectTeam, useSession } from "../../lib/queries";
 import * as api from "../../lib/api";
 import { InlineDropdown } from "./SettingsSections";
-import { HeraldProviderSection, ProjectMemorySection } from "./HeraldSettingsSection";
+import { HeraldProviderSection, HeraldEngineSection, AgentSkillAvailabilitySection, ProjectMemorySection } from "./HeraldSettingsSection";
 import { Field } from "../ui/Field";
 import { TextInput } from "../ui/TextInput";
 import { TextArea } from "../ui/TextArea";
@@ -56,6 +56,8 @@ export function ProjectSettingsHub({ projectId }: { projectId: string }) {
       <TeamAssignmentSection project={project} />
       <ProjectBasicSection project={project} />
       <HeraldProviderSection project={project} />
+      <HeraldEngineSection project={project} />
+      <AgentSkillAvailabilitySection projectId={project.id} />
       <ProjectMemorySection projectId={project.id} />
       <LinkedReposSection slug={project.slug} />
       <ProjectMembersSection slug={project.slug} />
@@ -84,7 +86,7 @@ function TeamAssignmentSection({ project }: { project: Project }) {
       </div>
       <div className="card-panel card-panel--elevated mt-4">
         <p className="text-sm text-lx-text-secondary mb-3" style={{ marginTop: 0 }}>
-          The owning team scopes Forge claims: a task can only run on a runtime of the same team (Global runtimes accept any team). Unassigned projects are Global.
+          The owning team scopes Hearth claims: a task can only run on a runtime of the same team (Global runtimes accept any team). Unassigned projects are Global.
           {!isSuperadmin && " As a team admin you can assign this project to your own team only."}
         </p>
         <div className="flex items-center gap-3 flex-wrap">
@@ -225,7 +227,7 @@ function LinkedReposSection({ slug }: { slug: string }) {
         <span className="text-xs text-lx-text-muted">Per project</span>
       </div>
       <p className="text-sm text-lx-text-secondary mb-4" style={{ maxWidth: 560 }}>
-        Repos this project can read (source — Forge agent context) and sync issues with (workspace — linking, creating, and two-way state/content sync). Repos must be accessible to the installed GitHub App; the type-ahead shows repos already linked in the workspace plus GitHub App search results.
+        Repos this project can read (source — Hearth agent context) and sync issues with (workspace — linking, creating, and two-way state/content sync). Repos must be accessible to the installed GitHub App; the type-ahead shows repos already linked in the workspace plus GitHub App search results.
       </p>
 
       <div style={{ position: "relative", maxWidth: 420, marginBottom: 16 }} ref={dropdownRef}>
@@ -289,7 +291,7 @@ function LinkedReposSection({ slug }: { slug: string }) {
       ) : repos.length === 0 ? (
         <div className="empty-box mb-4">
           <div className="text-sm font-medium text-lx-text-primary">No linked repos</div>
-          <p className="text-xs text-lx-text-secondary" style={{ maxWidth: 380 }}>Link a repo to let Forge read it and to sync issues with the board.</p>
+          <p className="text-xs text-lx-text-secondary" style={{ maxWidth: 380 }}>Link a repo to let Hearth read it and to sync issues with the board.</p>
         </div>
       ) : (
         <div className="card-panel" style={{ overflow: "hidden" }}>

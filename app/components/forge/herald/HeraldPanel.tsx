@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { Editor } from "@tiptap/core";
 import { Link } from "@tanstack/react-router";
-import { Check, RefreshCw, Square, Zap } from "lucide-react";
+import { Check, RefreshCw, Square } from "lucide-react";
 import { markdownToDoc, docToMarkdown } from "../../../../shared/markdown";
 import type { Attachment, TipTapDoc } from "../../../../shared/types";
 import type { HeraldSettingsMasked } from "../../../../shared/herald";
@@ -15,16 +15,19 @@ import {
   useTaskAttachments,
   useWikiAttachments,
 } from "../../../lib/queries";
+import { ENGINE_AGENT_IDS } from "../../../lib/use-hearth-engine";
 import { useHeraldStream } from "../../../lib/use-herald-stream";
-import { AgentSkillPicker } from "./AgentSkillPicker";
-import { HeraldModePicker } from "./HeraldModePicker";
-import { HeraldToolChips } from "./HeraldToolChips";
+import { SkillPicker } from "./SkillPicker";
+import { EngineToggle } from "./HeraldModePicker";
 import type { ForgeMode } from "./HeraldModePicker";
+import { HeraldToolChips } from "./HeraldToolChips";
 
-// Herald tier panel inside the Forge popover — transcribed from
-// wireframes/src/herald-popover.html (States 1–7). Streaming sessions live
-// in the module-level stream store: closing the popover does NOT stop the
-// run; reopening reattaches to the live/final state.
+// Herald tier panel inside the Hearth popover — transcribed from
+// wireframes/src/herald-popover.html (States 1–7). No agent picker: the
+// persona is the project's configured Herald Agent (Project Settings →
+// Herald); only the skill is picked here. Streaming sessions live in the
+// module-level stream store: closing the popover does NOT stop the run;
+// reopening reattaches to the live/final state.
 
 // Embedded /api/attachments/<uuid> image nodes in the open document are the
 // only image source for a Herald run (herald-popover.html State 1/5) — same
@@ -50,22 +53,36 @@ function docAttachmentIds(editor: Editor): string[] {
   return ids;
 }
 
-export function HeraldPanel({ editor, slug, documentType, documentId, onModeChange, onClose }: {
+// Hearth header flame glyph (herald-popover.html / forge-popover.html
+// headers) — shared with the popover shell.
+export function HearthFlameIcon({ size = 14 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5}>
+      <path d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.072-2.143-.224-4.054 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.153.433-2.294 1-3a2.5 2.5 0 0 0 2.5 2.5z" />
+    </svg>
+  );
+}
+
+export function HeraldPanel({ editor, slug, documentType, documentId, engineSwitcherEnabled, onModeChange, onClose }: {
   editor: Editor;
   slug: string;
   documentType: "task" | "wiki";
   documentId: string;
+  // Member engine toggle renders ONLY when the project enables the switcher;
+  // picking Blacksmith hands the popover back to the parent shell.
+  engineSwitcherEnabled: boolean;
   onModeChange: (mode: ForgeMode) => void;
   onClose: () => void;
 }) {
   const { data: projects = [] } = useProjects();
   const projectId = projects.find((p) => p.slug === slug)?.id;
-  const { data: agents = [] } = useAgents();
-  const { data: skills = [] } = useSkills();
   // null after load = PROVIDER_NOT_CONFIGURED → empty state + disabled Generate.
   const { data: settings, isLoading: settingsLoading } = useHeraldSettings(projectId);
-
-  const [selection, setSelection] = useState({ agentId: "", skillId: "" });
+  // No agent picker: the persona is the project's configured Herald Agent —
+  // its junction rows are the only skills offered here.
+  const { data: agents = [] } = useAgents();
+  const { data: skills = [] } = useSkills();
+  const [skillId, setSkillId] = useState("");
   const [prompt, setPrompt] = useState("");
   const [taskId, setTaskId] = useState<string | null>(null);
   const createTask = useCreateHeraldTask();
@@ -83,11 +100,9 @@ export function HeraldPanel({ editor, slug, documentType, documentId, onModeChan
       .filter((a): a is Attachment => a !== undefined);
   }, [editor, attachmentRows]);
 
-  const effectiveAgentId = selection.agentId !== "" ? selection.agentId : (agents.find((a) => a.id === "lexa")?.id ?? agents[0]?.id ?? "");
-  const agentSkillIds = new Set(agents.find((a) => a.id === effectiveAgentId)?.skillIds ?? []);
-  const effectiveSkillId = agentSkillIds.has(selection.skillId)
-    ? selection.skillId
-    : skills.find((s) => agentSkillIds.has(s.id))?.id ?? "";
+  const heraldSkillIds = new Set(agents.find((a) => a.id === ENGINE_AGENT_IDS.herald)?.skillIds ?? []);
+  const agentSkills = skills.filter((s) => heraldSkillIds.has(s.id));
+  const effectiveSkillId = heraldSkillIds.has(skillId) ? skillId : (agentSkills[0]?.id ?? "");
 
   const streamKey = taskId ? `herald-task:${taskId}` : null;
   const stream = useHeraldStream(streamKey);
@@ -109,14 +124,14 @@ export function HeraldPanel({ editor, slug, documentType, documentId, onModeChan
   const selectionMarkdown = selectionText ? selectionToMarkdown(editor) : "";
 
   const handleGenerate = () => {
-    if (!effectiveAgentId || !effectiveSkillId) return;
+    if (!effectiveSkillId) return;
     createTask.mutate(
       {
         slug,
         documentType,
         documentId,
         prompt: prompt.trim(),
-        agentId: effectiveAgentId,
+        agentId: ENGINE_AGENT_IDS.herald,
         skillId: effectiveSkillId,
         ...(selectionMarkdown ? { selection: selectionMarkdown } : {}),
         // Attachment rows expose sha256 but not storage_key; Lexa/Storage
@@ -159,14 +174,19 @@ export function HeraldPanel({ editor, slug, documentType, documentId, onModeChan
     <span className="font-micro text-2xs text-lx-text-success uppercase tracking-[0.04em]">Ready</span>
   ) : failed ? (
     <span className="font-micro text-2xs text-lx-text-danger uppercase tracking-[0.04em]">Failed</span>
+  ) : engineSwitcherEnabled ? (
+    <EngineToggle enabled mode="herald" onChange={onModeChange} disabled={running} />
   ) : (
-    <HeraldModePicker mode="herald" onChange={onModeChange} />
+    <span className="font-micro text-2xs text-lx-text-muted uppercase tracking-[0.04em]">Herald · AI project assistant</span>
   );
 
   return (
     <>
       <div className="flex items-center justify-between" style={{ padding: "10px 12px", borderBottom: "1px solid var(--lx-border-default)" }}>
-        <span className="text-sm font-medium text-lx-text-primary font-body">Forge</span>
+        <span className="text-sm font-medium text-lx-text-primary font-body" style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+          <HearthFlameIcon />
+          Hearth
+        </span>
         {headerRight}
       </div>
 
@@ -174,7 +194,7 @@ export function HeraldPanel({ editor, slug, documentType, documentId, onModeChan
         <>
           <div className="empty-state" style={{ padding: "32px 20px" }}>
             <div className="empty-state-icon">
-              <Zap size={24} strokeWidth={1.5} />
+              <HearthFlameIcon size={24} />
             </div>
             <div className="text-sm font-medium text-lx-text-primary">No AI provider configured</div>
             <p className="text-xs text-lx-text-secondary mt-1" style={{ maxWidth: 240 }}>
@@ -271,13 +291,7 @@ export function HeraldPanel({ editor, slug, documentType, documentId, onModeChan
 
       {!providerMissing && !running && !done && !failed && (
         <>
-          <AgentSkillPicker
-            agents={agents}
-            skills={skills}
-            selection={{ agentId: effectiveAgentId, skillId: effectiveSkillId }}
-            onChange={(next) => setSelection({ agentId: next.agentId, skillId: next.skillId })}
-          />
-          <div style={{ padding: "10px 12px", borderBottom: "1px solid var(--lx-border-default)" }}>
+          <SkillPicker skills={agentSkills} skillId={effectiveSkillId} onSkillChange={setSkillId} />          <div style={{ padding: "10px 12px", borderBottom: "1px solid var(--lx-border-default)" }}>
             <span className="prop-label" style={{ display: "block", marginBottom: 6 }}>
               Additional prompt <span className="font-micro text-2xs text-lx-text-muted uppercase tracking-[0.04em]" style={{ marginLeft: 4 }}>Optional</span>
             </span>
@@ -327,9 +341,9 @@ export function HeraldPanel({ editor, slug, documentType, documentId, onModeChan
               type="button"
               className="btn btn-primary btn-sm"
               onClick={handleGenerate}
-              disabled={createTask.isPending || !settings || !effectiveAgentId || !effectiveSkillId}
+              disabled={createTask.isPending || !settings || !effectiveSkillId}
             >
-              <Zap size={12} strokeWidth={1.5} />
+              <HearthFlameIcon size={12} />
               {createTask.isPending ? "Starting…" : "Generate"}
             </button>
           </div>

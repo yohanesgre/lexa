@@ -52,7 +52,7 @@ beforeAll(async () => {
   dbPath = join(dir, "test.db");
   runMigrations(dbPath, MIGRATIONS);
   process.env.DATABASE_PATH = dbPath;
-  process.env.LXK_PUBLIC_URL = "http://localhost:3000";
+  process.env.LXK_PUBLIC_URL = "https://localhost:3000";
   ({ auth } = await import("../auth"));
 
   // Provision accounts through better-auth (real credential rows) so
@@ -264,7 +264,7 @@ describe("teams + workspace + sessions endpoints", () => {
     const created = await withKey("POST", "/api/workspace/invites", { email: "newbie@lexa.dev" });
     expect(created.status).toBe(201);
     const { link } = (await created.json()) as { link: string };
-    expect(link).toMatch(/^http:\/\/localhost:3000\/invite\?token=/);
+    expect(link).toMatch(/^https:\/\/localhost:3000\/invite\?token=/);
     const token = link.split("token=")[1];
     const dup = await withKey("POST", "/api/workspace/invites", { email: "newbie@lexa.dev" });
     expect(dup.status).toBe(409);
@@ -312,7 +312,7 @@ describe("teams + workspace + sessions endpoints", () => {
     const res = await withKey("POST", `/api/workspace/members/${userIds["member2@lexa.test"]}/set-password-link`);
     expect(res.status).toBe(201);
     const { link } = (await res.json()) as { link: string };
-    expect(link).toMatch(/^http:\/\/localhost:3000\/set-password\?token=/);
+    expect(link).toMatch(/^https:\/\/localhost:3000\/set-password\?token=/);
     const missing = await withKey("POST", "/api/workspace/members/ghost/set-password-link");
     expect(missing.status).toBe(404);
   });

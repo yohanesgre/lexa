@@ -105,7 +105,7 @@ export function ForgeTaskLogModal({
     <>
       <button type="button" className="slideover-overlay" onClick={onClose} aria-label="Close" />
       <div className="fixed inset-0 flex items-center justify-center z-50 pointer-events-none">
-        <dialog open className="dialog dialog-enter forge-log-modal pointer-events-auto" aria-modal="true" aria-label="Forge task log">
+        <dialog open className="dialog dialog-enter forge-log-modal pointer-events-auto" aria-modal="true" aria-label="Hearth task log">
           <div className="modal-header">
             <div style={{ minWidth: 0 }}>
               <div className="modal-title" style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>

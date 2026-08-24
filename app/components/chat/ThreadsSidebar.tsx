@@ -1,17 +1,20 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { PanelLeft } from "lucide-react";
 import type { HeraldChatThreadSummary } from "../../lib/api";
 import { formatRelative } from "../../lib/relative-time";
-import { Menu } from "../ui/Menu";
 
-// Transcribed from herald-chat-history.html + herald-chat-upgrades.html:
-// 320px dropdown panel — "New chat" pinned top, search input directly below
-// it (server-side ?q= filter, debounced upstream), Pinned section above
-// Recent when searching, snippet rows with the query bolded client-side,
-// rows (title truncate · relative time · kebab Pin/Unpin + Export .md +
-// Rename/Delete), active thread accent tint + semibold, rename-inline
-// (input + ✓/✕, Enter commits Esc cancels, empty-commit no-op), delete
-// confirm dialog, empty-box state.
-interface ChatHistoryDropdownProps {
+// Transcribed from herald-chat.html (Threads sidebar) +
+// herald-chat-upgrades.html: persistent left column — collapse control +
+// "New chat" pinned top (wiki arrangement), search below, thread rows ordered
+// pinned-first then most-recent, active row accent-tinted. Rows carry
+// hover/focus-within-revealed inline actions (Pin/Unpin · Rename inline ·
+// Delete confirm); searching splits into Pinned/Recent sections with
+// client-side snippet bolding over the server-filtered (?q=) snippet.
+// Collapsed (`open=false`) swaps the column for a 36px icon rail whose panel
+// button restores it — the wiki sidebar's exact affordance, at every viewport
+// width. Below 900px the expanded column is an overlay drawer — `open`
+// toggles it, backdrop/Esc dismiss.
+interface ThreadsSidebarProps {
   threads: HeraldChatThreadSummary[];
   activeChatId: string;
   search: string;
@@ -19,43 +22,31 @@ interface ChatHistoryDropdownProps {
   onSelect: (chatId: string) => void;
   onNewChat: () => void;
   onPinToggle: (chatId: string, pinned: boolean) => Promise<unknown> | unknown;
-  onExport: (chatId: string) => Promise<unknown> | unknown;
   onRename: (chatId: string, title: string) => Promise<unknown> | unknown;
   onDelete: (chatId: string) => Promise<unknown> | unknown;
+  open?: boolean;
+  onToggle?: () => void;
+  onClose?: () => void;
 }
 
-function KebabIcon() {
-  return (
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" stroke="none">
-      <circle cx="12" cy="5" r="1.5" />
-      <circle cx="12" cy="12" r="1.5" />
-      <circle cx="12" cy="19" r="1.5" />
-    </svg>
-  );
+// Drawer dismissal is a <900px affordance — desktop collapse is owned by the
+// header toggle alone. Safe under jsdom (no matchMedia → desktop).
+function isMobileViewport(): boolean {
+  return typeof window.matchMedia === "function" && window.matchMedia("(max-width: 899.98px)").matches;
 }
 
 function PinIcon() {
   return (
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
       <path d="M12 17v5m-5-9.5A5.5 5.5 0 1 1 17 12.5" />
       <path d="M12 17a5 5 0 1 0-5-5" />
     </svg>
   );
 }
 
-function ExportIcon() {
-  return (
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
-      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-      <polyline points="7 10 12 15 17 10" />
-      <line x1="12" y1="15" x2="12" y2="3" />
-    </svg>
-  );
-}
-
 function RenameIcon() {
   return (
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
       <path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z" />
     </svg>
   );
@@ -63,7 +54,7 @@ function RenameIcon() {
 
 function DeleteIcon() {
   return (
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
       <path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
     </svg>
   );
@@ -87,7 +78,7 @@ export function highlightSnippet(snippet: string, q: string): { text: string; bo
   return out.length > 0 ? out : [{ text: snippet, bold: false }];
 }
 
-export function ChatHistoryDropdown({
+export function ThreadsSidebar({
   threads,
   activeChatId,
   search,
@@ -95,33 +86,28 @@ export function ChatHistoryDropdown({
   onSelect,
   onNewChat,
   onPinToggle,
-  onExport,
   onRename,
   onDelete,
-}: ChatHistoryDropdownProps) {
-  const [open, setOpen] = useState(false);
+  open = true,
+  onToggle,
+  onClose,
+}: ThreadsSidebarProps) {
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameDraft, setRenameDraft] = useState("");
   const [confirmTarget, setConfirmTarget] = useState<HeraldChatThreadSummary | null>(null);
   const [confirmError, setConfirmError] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
-  const containerRef = useRef<HTMLDivElement>(null);
 
+  // Drawer Esc-dismiss (<900px). Skipped while an inline edit or the delete
+  // dialog owns Escape.
   useEffect(() => {
-    if (!open) return;
-    function onMouseDown(event: MouseEvent) {
-      if (!containerRef.current?.contains(event.target as Node)) setOpen(false);
-    }
+    if (!open || !onClose) return;
     function onKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape") setOpen(false);
+      if (event.key === "Escape" && isMobileViewport() && renamingId === null && confirmTarget === null) onClose?.();
     }
-    document.addEventListener("mousedown", onMouseDown);
     document.addEventListener("keydown", onKeyDown);
-    return () => {
-      document.removeEventListener("mousedown", onMouseDown);
-      document.removeEventListener("keydown", onKeyDown);
-    };
-  }, [open]);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, [open, onClose, renamingId, confirmTarget]);
 
   const startRename = (thread: HeraldChatThreadSummary) => {
     setRenamingId(thread.chatId);
@@ -188,140 +174,127 @@ export function ChatHistoryDropdown({
     return (
       <div
         key={thread.chatId}
-        role="menuitem"
+        role="button"
         tabIndex={0}
+        className={`thread-row ${isActive ? "active" : ""}`}
         onClick={() => {
           onSelect(thread.chatId);
-          setOpen(false);
+          if (isMobileViewport()) onClose?.();
         }}
         onKeyDown={(e) => {
           if (e.key === "Enter") {
             onSelect(thread.chatId);
-            setOpen(false);
+            if (isMobileViewport()) onClose?.();
           }
         }}
-        style={{
-          display: "flex",
-          alignItems: "flex-start",
-          gap: 8,
-          padding: "8px 10px",
-          cursor: "pointer",
-          ...(isActive ? { background: "var(--lx-bg-accent-subtle)" } : {}),
-        }}
       >
+        {thread.pinned && (
+          <span className="thread-pin" title="Pinned">
+            <PinIcon />
+          </span>
+        )}
         <div style={{ flex: 1, minWidth: 0 }}>
           <div className={`text-sm truncate ${isActive ? "font-semibold" : "font-medium"} text-lx-text-primary`} style={{ lineHeight: "18px" }} title={title}>
             {title}
           </div>
           {searching && thread.snippet && (
-            <div className="font-micro text-2xs text-lx-text-muted truncate" style={{ lineHeight: "14px" }}>
+            <div className="thread-snippet truncate">
               {highlightSnippet(thread.snippet, search).map((seg, i) =>
                 seg.bold ? <strong key={i}>{seg.text}</strong> : <span key={i}>{seg.text}</span>
               )}
             </div>
           )}
-          <div className="font-micro text-2xs text-lx-text-muted uppercase tracking-[0.04em]">
-            {isActive ? "Active now" : formatRelative(thread.updatedAt)}
-          </div>
+          <div className="thread-meta">{isActive ? "Active now" : formatRelative(thread.updatedAt)}</div>
         </div>
-        <div onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
-          <Menu
-            trigger={({ toggle }) => (
-              <button type="button" className="icon-btn" title="Thread actions" aria-label={`Actions for ${title}`} onClick={toggle}>
-                <KebabIcon />
-              </button>
-            )}
+        <div className="thread-row-actions" onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
+          <button type="button" className="icon-btn" title={thread.pinned ? "Unpin" : "Pin"} aria-label={thread.pinned ? `Unpin ${title}` : `Pin ${title}`} onClick={() => void onPinToggle(thread.chatId, !thread.pinned)}>
+            <PinIcon />
+          </button>
+          <button type="button" className="icon-btn" title="Rename" aria-label={`Rename ${title}`} onClick={() => startRename(thread)}>
+            <RenameIcon />
+          </button>
+          <button
+            type="button"
+            className="icon-btn"
+            title="Delete"
+            aria-label={`Delete ${title}`}
+            onClick={() => {
+              setConfirmTarget(thread);
+              setConfirmError(null);
+            }}
           >
-            <button type="button" className="menu-item" role="menuitem" onClick={() => void onPinToggle(thread.chatId, !thread.pinned)}>
-              <PinIcon />
-              {thread.pinned ? "Unpin" : "Pin"}
-            </button>
-            <button type="button" className="menu-item" role="menuitem" onClick={() => void onExport(thread.chatId)}>
-              <ExportIcon />
-              Export .md
-            </button>
-            <div className="menu-separator" />
-            <button type="button" className="menu-item" role="menuitem" onClick={() => startRename(thread)}>
-              <RenameIcon />
-              Rename
-            </button>
-            <button
-              type="button"
-              className="menu-item danger"
-              role="menuitem"
-              onClick={() => {
-                setConfirmTarget(thread);
-                setConfirmError(null);
-              }}
-            >
-              <DeleteIcon />
-              Delete
-            </button>
-          </Menu>
+            <DeleteIcon />
+          </button>
         </div>
       </div>
     );
   };
 
+  // Collapsed: 36px icon rail with the restore control — wiki sidebar's
+  // exact affordance (WikiLayout.tsx), kept at every viewport width so
+  // re-expansion never depends on a control outside the sidebar.
+  if (!open) {
+    return (
+      <aside className="threads-sidebar collapsed" aria-label="Threads">
+        <button
+          type="button"
+          className="w-7 h-7 p-0 flex items-center justify-center text-lx-text-secondary hover:text-lx-text-primary rounded"
+          onClick={onToggle}
+          aria-label="Expand sidebar"
+          title="Threads"
+        >
+          <PanelLeft size={14} strokeWidth={1.5} />
+        </button>
+      </aside>
+    );
+  }
+
   return (
-    <div ref={containerRef} style={{ position: "relative", display: "inline-flex" }}>
-      <button
-        type="button"
-        className="btn btn-ghost btn-sm"
-        style={open ? { borderColor: "var(--lx-border-focus)" } : undefined}
-        aria-haspopup="menu"
-        aria-expanded={open}
-        onClick={() => setOpen((v) => !v)}
-      >
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
-          <circle cx="12" cy="12" r="10" />
-          <polyline points="12 6 12 12 16 14" />
-        </svg>
-        History
-      </button>
-
-      {open && (
-        <div className="dropdown-menu" role="menu" style={{ position: "absolute", top: "calc(100% + 6px)", right: 0, width: 320, zIndex: 60 }}>
-          <div style={{ padding: 8, display: "flex", flexDirection: "column", gap: 6 }}>
-            <button
-              type="button"
-              className="btn btn-ghost-accent btn-sm w-full"
-              style={{ justifyContent: "center" }}
-              onClick={() => {
-                setOpen(false);
-                onNewChat();
-              }}
-            >
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M12 5v14m-7-7h14" /></svg>
-              New chat
-            </button>
-            <input
-              value={search}
-              onChange={(e) => onSearchChange(e.target.value)}
-              placeholder="Search chats…"
-              aria-label="Search chats"
-              style={{ height: 26, padding: "0 8px", fontSize: 12, fontFamily: "var(--lx-font-body)", color: "var(--lx-text-primary)", background: "var(--lx-surface-input)", border: "1px solid var(--lx-border-default)", borderRadius: 4 }}
-            />
-          </div>
-          <div className="dropdown-separator" />
-
-          {threads.length === 0 ? (
-            <div className="empty-box" style={{ padding: "24px 16px" }}>
-              <span className="text-xs text-lx-text-secondary">{searching ? "No chats match your search" : "No chats yet — start one below"}</span>
-            </div>
-          ) : searching ? (
-            <>
-              {pinned.length > 0 && <div className="dropdown-label">Pinned</div>}
-              {pinned.map(renderRow)}
-              {pinned.length > 0 && recent.length > 0 && <div className="dropdown-separator" />}
-              {recent.length > 0 && <div className="dropdown-label">Recent</div>}
-              {recent.map(renderRow)}
-            </>
-          ) : (
-            threads.map(renderRow)
-          )}
+    <>
+      {open && <button type="button" className="threads-sidebar-backdrop" aria-label="Close threads" onClick={() => onClose?.()} />}
+      <aside className={`threads-sidebar ${open ? "open" : "collapsed"}`} aria-label="Threads">
+      <div className="threads-sidebar-header">
+        {/* Collapse control lives INSIDE the sidebar (top of header) — mirrors wiki.html */}
+        <div className="flex items-center gap-2">
+          <button type="button" className="btn btn-ghost-accent btn-sm" style={{ flex: 1, justifyContent: "center" }} onClick={onNewChat}>
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M12 5v14m-7-7h14" /></svg>
+            New chat
+          </button>
+          <button
+            type="button"
+            className="w-7 h-7 p-0 flex items-center justify-center text-lx-text-secondary hover:text-lx-text-primary flex-shrink-0 rounded"
+            onClick={onToggle}
+            aria-label="Collapse sidebar"
+            title="Collapse sidebar"
+          >
+            <PanelLeft size={14} strokeWidth={1.5} />
+          </button>
         </div>
-      )}
+        <input
+          className="threads-search w-full"
+          value={search}
+          onChange={(e) => onSearchChange(e.target.value)}
+          placeholder="Search threads…"
+          aria-label="Search threads"
+        />
+      </div>
+
+      <div className="threads-sidebar-list">
+        {threads.length === 0 ? (
+          <div className="empty-box" style={{ margin: 8, border: "none", background: "transparent", padding: "24px 16px" }}>
+            <span className="text-xs text-lx-text-secondary">{searching ? "No chats match your search" : "No threads yet — start a conversation"}</span>
+          </div>
+        ) : searching ? (
+          <>
+            {pinned.length > 0 && <div className="dropdown-label">Pinned</div>}
+            {pinned.map(renderRow)}
+            {pinned.length > 0 && recent.length > 0 && <div className="dropdown-label" style={{ marginTop: 6 }}>Recent</div>}
+            {recent.map(renderRow)}
+          </>
+        ) : (
+          threads.map(renderRow)
+        )}
+      </div>
 
       {/* Delete confirm — reset-confirm dialog anatomy from herald-chat.html */}
       {confirmTarget && (
@@ -351,6 +324,7 @@ export function ChatHistoryDropdown({
           </div>
         </>
       )}
-    </div>
+    </aside>
+    </>
   );
 }

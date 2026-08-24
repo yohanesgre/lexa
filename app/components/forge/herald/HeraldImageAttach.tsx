@@ -56,8 +56,10 @@ export function acceptImageFiles(files: File[], current: HeraldImage[], caps: He
 
 // Image attach affordance (herald-popover.html State 1 + State 5 detail,
 // herald-chat.html composer): pick or paste, thumbnails with remove ×,
-// dashed add tile, caps enforced client-side with inline rejection.
-export function HeraldImageAttach({ images, onChange, caps, hint, compact }: {
+// dashed add tile, caps enforced client-side with inline rejection. When
+// `disabled` (VISION_NOT_CONFIGURED resolution), the attach button renders
+// disabled with a tooltip pointing at Project Settings → Herald vision.
+export function HeraldImageAttach({ images, onChange, caps, hint, compact, disabled, disabledTitle }: {
   images: HeraldImage[];
   onChange: (images: HeraldImage[]) => void;
   caps: HeraldImageCaps;
@@ -65,11 +67,14 @@ export function HeraldImageAttach({ images, onChange, caps, hint, compact }: {
   // Chat composer variant: bare icon button while empty (herald-chat.html
   // composer-footer).
   compact?: boolean;
+  disabled?: boolean;
+  disabledTitle?: string;
 }) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [rejection, setRejection] = useState<string | null>(null);
 
   const acceptFiles = (files: FileList | File[]) => {
+    if (disabled) return;
     const result = acceptImageFiles(Array.from(files), images, caps);
     setRejection(result.rejection);
     onChange(result.images);
@@ -99,15 +104,18 @@ export function HeraldImageAttach({ images, onChange, caps, hint, compact }: {
         <button
           type="button"
           className="btn btn-ghost btn-icon-sm"
-          title="Attach images — or paste into the composer"
-          aria-label="Attach images"
+          title={disabled ? disabledTitle : "Attach images — or paste into the composer"}
+          aria-label={disabled ? "Attach images (disabled)" : "Attach images"}
+          aria-disabled={disabled || undefined}
+          disabled={disabled}
+          style={disabled ? { opacity: 0.45, cursor: "not-allowed" } : undefined}
           onClick={() => fileInputRef.current?.click()}
         >
           <ImagePlus size={14} strokeWidth={1.5} />
         </button>
       ) : images.length === 0 ? (
         <div className="flex items-center justify-between" style={{ marginTop: 8 }}>
-          <button type="button" className="btn btn-ghost btn-sm" style={{ fontSize: 11 }} onClick={() => fileInputRef.current?.click()}>
+          <button type="button" className="btn btn-ghost btn-sm" style={{ fontSize: 11 }} onClick={() => fileInputRef.current?.click()} disabled={disabled}>
             <ImagePlus size={12} strokeWidth={1.5} />
             Attach images
           </button>
