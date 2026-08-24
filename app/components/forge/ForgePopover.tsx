@@ -1,27 +1,26 @@
 import { useEffect, useLayoutEffect, useRef, useState, useEffectEvent } from "react";
 import { createPortal } from "react-dom";
-import { Check, Hammer, Maximize } from "lucide-react";
+import { Check, Flame, Maximize } from "lucide-react";
 import type { Editor } from "@tiptap/core";
 import { cn } from "../ui/cn";
 import { docToMarkdown } from "../../../shared/markdown";
-import { useCreateForgeTask, useForgeTask, useRuntimes, useRecentForgeTask, useCancelForgeTask, useForgeTaskLogs, useAgents, useSkills } from "../../lib/queries";
+import { useCreateForgeTask, useForgeTask, useRuntimes, useRecentForgeTask, useCancelForgeTask, useForgeTaskLogs, useAgents, useSkills, useProjects, useHeraldSettings, useSession } from "../../lib/queries";
 import { useForgeSession, useResetForgeSession, formatSessionAge } from "../../lib/use-forge-session";
 import { parseApiDate } from "../../lib/date";
+import { saveEngineOverlay, resolveActiveEngine, ENGINE_AGENT_IDS } from "../../lib/use-hearth-engine";
 import { ForgeTaskLogModal } from "./ForgeTaskLogModal";
 import { classifyLogLine } from "../../lib/forge-log-line";
-import { HeraldModePicker } from "./herald/HeraldModePicker";
+import { EngineToggle } from "./herald/HeraldModePicker";
 import type { ForgeMode } from "./herald/HeraldModePicker";
-import { HeraldPanel } from "./herald/HeraldPanel";
-import type { LexaAgent, LexaSkill, ForgeTask, ForgeTaskLog, Runtime } from "../../../shared/types";
+import { HeraldPanel, HearthFlameIcon } from "./herald/HeraldPanel";
+import type { LexaSkill, ForgeTask, ForgeTaskLog, Runtime } from "../../../shared/types";
 
-// Per-run tier choice defaults to the last used mode for this user
-// (herald-popover.html State 1 annotation).
-function loadLastMode(): ForgeMode {
-  try {
-    return window.localStorage.getItem("lexa-forge-mode") === "blacksmith" ? "blacksmith" : "herald";
-  } catch {
-    return "herald";
-  }
+// The active engine is the admin-written project default; a member's
+// personal overlay (localStorage hearth-engine-overlay:<projectId>) wins
+// only when the project enabled the switcher. It never writes settings.
+function changeModeFor(projectId: string | undefined, next: ForgeMode): ForgeMode {
+  if (projectId) saveEngineOverlay(projectId, next);
+  return next;
 }
 
 // Task ids the user rejected this session — never re-attach to them on
@@ -173,6 +172,8 @@ function TaskStatusPanel(props: {
   setFollowLog: (updater: (prev: boolean) => boolean) => void;
   logBodyRef: React.RefObject<HTMLDivElement | null>;
   logs: { data?: ForgeTaskLog[] };
+  // Log/detail internals are ADMIN-GATED — members get brief status rows only.
+  canViewLogs: boolean;
   setLogModalOpen: (v: boolean) => void;
   dismissedIdsRef: Set<string>;
   cancelTask: { mutate: (id: string) => void; isPending: boolean };
@@ -180,7 +181,7 @@ function TaskStatusPanel(props: {
   runtimes: Runtime[];
   onReview: (text: string, identity: { action: string; runtimeName: string | null; provider: string | null; taskId: string }) => void;
 }) {
-  const { taskId, taskData, running, failed, done, reviewActive, followLog, setFollowLog, logBodyRef, logs, setLogModalOpen, dismissedIdsRef, cancelTask, setTaskId, runtimes, onReview } = props;
+  const { taskId, taskData, running, failed, done, reviewActive, followLog, setFollowLog, logBodyRef, logs, canViewLogs, setLogModalOpen, dismissedIdsRef, cancelTask, setTaskId, runtimes, onReview } = props;
   const logLines = (logs.data ?? []).slice(-50);
   return (
   <div style={{ padding: "0 12px 12px" }}>
@@ -204,13 +205,13 @@ function TaskStatusPanel(props: {
             }
           }}
           disabled={cancelTask.isPending}
-          title="Cancel this Forge task — it stops working server-side"
+          title="Cancel this Hearth task — it stops working server-side"
         >
           Cancel
         </button>
       </div>
     )}
-    {running && (
+    {running && canViewLogs && (
       <div className="forge-task-log" style={{ marginBottom: 8 }}>
         <div className="slideover-body" style={{ padding: 0 }}>
           <div className="flex items-center justify-between" style={{ marginBottom: 8 }}>
@@ -334,23 +335,32 @@ function TaskStatusPanel(props: {
 }
 
 export function ForgePopover({ editor, slug, documentType, documentId, open, onClose, onReview, reviewActive, appliedTaskId, rejectedTaskId, anchorRect }: ForgePopoverProps) {
-  const [mode, setMode] = useState<ForgeMode>(loadLastMode);
+  const { data: projects = [] } = useProjects();
+  const projectId = projects.find((p) => p.slug === slug)?.id;
+  // null after load = PROVIDER_NOT_CONFIGURED — the herald lane swaps in its
+  // empty state; the blacksmith lane is unaffected.
+  const { data: settings } = useHeraldSettings(projectId);
+  const switcherEnabled = settings?.engineSwitcherEnabled === true;
+
+  // Active engine = project default, overridden by the member's personal
+  // overlay (only when the project shows the switcher). The override lives
+  // in localStorage and NEVER touches herald_settings.engine.
+  const [modeOverride, setModeOverride] = useState<ForgeMode | null>(null);
+  const mode: ForgeMode = modeOverride ?? resolveActiveEngine(settings, projectId);
   const changeMode = (next: ForgeMode) => {
-    setMode(next);
-    try {
-      window.localStorage.setItem("lexa-forge-mode", next);
-    } catch {
-      // storage unavailable — per-run default only
-    }
+    setModeOverride(changeModeFor(projectId, next));
+    // Switching engines resets the skill to the first attached of the new
+    // engine agent (forge-popover.html annotations).
+    setSkillId("");
   };
-  // Agent + dependent Skill pickers: the skill list only shows skills attached
-  // to the selected agent (M2M bindings managed in Settings → Agents).
+
+  // Skills are filtered to the ACTIVE ENGINE agent's junction list
+  // (lexa_agent_skills) — no agent picker exists; the persona resolves
+  // server-side from the engine.
   const { data: agents = [] } = useAgents();
   const { data: skills = [] } = useSkills();
-  const [agentId, setAgentId] = useState("");
   const [skillId, setSkillId] = useState("");
   const [extraPrompt, setExtraPrompt] = useState("");
-  const [agentMenuOpen, setAgentMenuOpen] = useState(false);
   const [skillMenuOpen, setSkillMenuOpen] = useState(false);
   const [runtimeId, setRuntimeId] = useState<string>("");
   const [taskId, setTaskId] = useState<string | null>(null);
@@ -358,33 +368,35 @@ export function ForgePopover({ editor, slug, documentType, documentId, open, onC
   const [followLog, setFollowLog] = useState(true);
   const logBodyRef = useRef<HTMLDivElement>(null);
   const { data: runtimes = [] } = useRuntimes();
-  // Any online runtime can run tasks — Forge uses the daemon's agent CLI
-  // directly; the claim carries all context.
+  // Any online runtime can run tasks — Hearth uses the daemon's agent CLI
+  // directly; the claim carries all context. Empty picker + disabled
+  // Generate IS the NO_RUNTIME_ONLINE surface for the blacksmith engine.
   const onlineRuntimes = runtimes.filter((r) => r.status === "online");
   const createTask = useCreateForgeTask();
   const cancelTask = useCancelForgeTask();
   // Warm-session mapping for this document: which opencode serve conversation
   // the next Generate would continue, per runtime. Refetched on open so a
   // background run that minted a session is reflected.
-  const sessions = useForgeSession(documentType, documentId, open);
+  const sessions = useForgeSession(documentType, documentId, open && mode === "blacksmith");
   const resetSession = useResetForgeSession();
   const task = useForgeTask(taskId, open && taskId !== null);
   // Live "what is it doing" feed — polls while the task is queued/running.
-  const logs = useForgeTaskLogs(taskId, open && taskId !== null);
+  // ADMIN-GATED: members don't fetch log internals (403 server-side).
+  const { data: session } = useSession();
+  const isAdmin = session?.user?.role === "superadmin";
+  const logs = useForgeTaskLogs(taskId, open && taskId !== null && isAdmin);
   // Background resume: if a task for this doc is running/completed from a
   // previous popover session, surface it instead of losing it. Tasks the
   // user explicitly dismissed (Reject) are not re-attached.
   const recent = useRecentForgeTask(slug, documentType, documentId, open && taskId === null);
   const containerRef = useRef<HTMLDivElement>(null);
 
-  // Default selection derives during render: the builtin "Lexa" agent (or the
-  // first agent) and its first attached skill. Changing the agent resets the
-  // skill by falling back to the first attached skill of the new agent.
-  const effectiveAgentId = agentId !== "" ? agentId : (agents.find((a) => a.id === "lexa")?.id ?? agents[0]?.id ?? "");
-  const selectedAgent: LexaAgent | null = agents.find((a) => a.id === effectiveAgentId) ?? null;
-  const agentSkillIds = new Set(selectedAgent?.skillIds ?? []);
-  const agentSkills: LexaSkill[] = selectedAgent ? skills.filter((s) => agentSkillIds.has(s.id)) : [];
-  const effectiveSkillId = agentSkillIds.has(skillId) ? skillId : (agentSkills[0]?.id ?? "");
+  // Effective skill: the active engine agent's junction rows only; an empty
+  // selection falls back to the first attached skill of that agent.
+  const activeAgentId = ENGINE_AGENT_IDS[mode];
+  const activeSkillIds = new Set(agents.find((a) => a.id === activeAgentId)?.skillIds ?? []);
+  const agentSkills: LexaSkill[] = skills.filter((s) => activeSkillIds.has(s.id));
+  const effectiveSkillId = activeSkillIds.has(skillId) ? skillId : (agentSkills[0]?.id ?? "");
   const selectedSkill: LexaSkill | null = agentSkills.find((s) => s.id === effectiveSkillId) ?? null;
 
   // Auto-select the first online runtime.
@@ -417,7 +429,7 @@ export function ForgePopover({ editor, slug, documentType, documentId, open, onC
   // attach to it so the user can accept/reject the finished result. Tasks the
   // user already applied (accepted in the review banner), rejected in the
   // editor review, or explicitly dismissed are skipped — the popover starts
-  // fresh for the next Forge run.
+  // fresh for the next Hearth run.
   const [prevAttachId, setPrevAttachId] = useState<string | null>(null);
   const attachId =
     open && taskId === null && recent?.data && recent.data.kind === "blacksmith" && (recent.data.status === "queued" || recent.data.status === "running" || recent.data.status === "completed") && !dismissedIdsRef.has(recent.data.id) && recent.data.id !== appliedTaskId && recent.data.id !== rejectedTaskId
@@ -470,13 +482,13 @@ export function ForgePopover({ editor, slug, documentType, documentId, open, onC
   } as import("../../../shared/types").TipTapDoc);
 
   const handleGenerate = () => {
-    if (!selectedAgent || !selectedSkill) return;
+    if (!selectedSkill) return;
     createTask.mutate(
       {
         slug,
         documentType,
         documentId,
-        agentId: selectedAgent.id,
+        agentId: ENGINE_AGENT_IDS[mode],
         skillId: selectedSkill.id,
         extraPrompt: extraPrompt || undefined,
         selection: selectionMarkdown || selectionText,
@@ -521,6 +533,7 @@ export function ForgePopover({ editor, slug, documentType, documentId, open, onC
           slug={slug}
           documentType={documentType}
           documentId={documentId}
+          engineSwitcherEnabled={switcherEnabled}
           onModeChange={changeMode}
           onClose={onClose}
         />
@@ -532,21 +545,23 @@ export function ForgePopover({ editor, slug, documentType, documentId, open, onC
   return createPortal(
     <div ref={containerRef} className="menu-popover" data-forge-popover style={popoverStyle}>
       <div className="flex items-center justify-between" style={{ padding: "10px 12px", borderBottom: "1px solid var(--lx-border-default)" }}>
-        <span className="text-sm font-medium text-lx-text-primary font-body">Forge</span>
-        {/* Mode picker: switching mid-run is blocked until the terminal frame. */}
-        <HeraldModePicker mode={mode} onChange={changeMode} disabled={taskRunning} />
+        <span className="text-sm font-medium text-lx-text-primary font-body" style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+          <HearthFlameIcon />
+          Hearth
+        </span>
+        {/* Engine toggle renders ONLY when the project enables the switcher;
+            switching mid-run is blocked until the terminal frame. */}
+        {switcherEnabled ? (
+          <EngineToggle enabled mode={mode} onChange={changeMode} disabled={taskRunning} />
+        ) : (
+          <span className="font-micro text-2xs text-lx-text-muted uppercase tracking-[0.04em]">AI project assistant</span>
+        )}
       </div>
 
-      {/* Agent picker — rule bundle, distinct from the runtime's CLI agent */}
-      <div style={{ padding: "10px 12px", borderBottom: "1px solid var(--lx-border-default)" }}>
-        <span className="prop-label" style={{ display: "block", marginBottom: 6 }}>Agent</span>
-        {renderChips(agents, effectiveAgentId, setAgentId, (a) => a.name, (a) => a.id, agentMenuOpen, setAgentMenuOpen)}
-      </div>
-
-      {/* Skill picker — only the selected agent's attached skills */}
+      {/* Skill picker — only the active engine agent's attached skills */}
       <div style={{ padding: "10px 12px", borderBottom: "1px solid var(--lx-border-default)" }}>
         <span className="prop-label" style={{ display: "block", marginBottom: 6 }}>Skill</span>
-        {selectedAgent && agentSkills.length > 0 ? (
+        {agentSkills.length > 0 ? (
           renderChips(agentSkills, effectiveSkillId, setSkillId, (s) => s.name, (s) => s.id, skillMenuOpen, setSkillMenuOpen)
         ) : (
           <div style={{ background: "var(--lx-surface-input)", border: "1px solid var(--lx-border-default)", borderRadius: 6, padding: "8px 10px" }}>
@@ -585,8 +600,8 @@ export function ForgePopover({ editor, slug, documentType, documentId, open, onC
           {selectionText ? `Selection: ${selectionText.length} chars` : "No selection"}
         </span>
         {!taskId && (
-          <button type="button" className="btn btn-primary" style={{ height: 28, padding: "0 12px", fontSize: 12 }} onClick={handleGenerate} disabled={createTask.isPending || onlineRuntimes.length === 0 || !selectedAgent || !selectedSkill}>
-            <Hammer size={12} strokeWidth={1.5} />
+          <button type="button" className="btn btn-primary" style={{ height: 28, padding: "0 12px", fontSize: 12 }} onClick={handleGenerate} disabled={createTask.isPending || onlineRuntimes.length === 0 || !selectedSkill}>
+            <Flame size={12} strokeWidth={1.5} />
             {createTask.isPending ? "Starting…" : "Generate"}
           </button>
         )}
@@ -604,6 +619,7 @@ export function ForgePopover({ editor, slug, documentType, documentId, open, onC
           setFollowLog={setFollowLog}
           logBodyRef={logBodyRef}
           logs={logs}
+          canViewLogs={isAdmin}
           setLogModalOpen={setLogModalOpen}
           dismissedIdsRef={dismissedIdsRef}
           cancelTask={cancelTask}

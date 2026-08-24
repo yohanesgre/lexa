@@ -71,6 +71,8 @@ export class HeraldGenerationFailed extends Data.TaggedError("HeraldGenerationFa
 export class HeraldToolBudgetExceeded extends Data.TaggedError("HeraldToolBudgetExceeded")<{ rounds: number }> {}
 export class HeraldTaskActive extends Data.TaggedError("HeraldTaskActive")<{}> {}
 export class HeraldThreadNotFound extends Data.TaggedError("HeraldThreadNotFound")<{ documentType: string; documentId: string }> {}
+export class VisionNotConfigured extends Data.TaggedError("VisionNotConfigured")<{}> {}
+export class EngineNotSupportedForChat extends Data.TaggedError("EngineNotSupportedForChat")<{ engine: string }> {}
 export { ProjectAccessDenied } from "../services/user-project-role.service";
 
 export const errorCodeMap: Record<string, string> = {
@@ -141,6 +143,8 @@ export const errorCodeMap: Record<string, string> = {
   HeraldToolBudgetExceeded: "HERALD_TOOL_BUDGET_EXCEEDED",
   HeraldTaskActive: "HERALD_TASK_ACTIVE",
   HeraldThreadNotFound: "HERALD_THREAD_NOT_FOUND",
+  VisionNotConfigured: "VISION_NOT_CONFIGURED",
+  EngineNotSupportedForChat: "ENGINE_NOT_SUPPORTED_FOR_CHAT",
   RowNotFound: "NOT_FOUND",
   ConstraintViolation: "CONSTRAINT",
   DbError: "DATABASE_ERROR",
@@ -214,6 +218,8 @@ export function errorToStatus(error: { _tag: string }): number {
     case "ForgeSessionActive":
     case "ProviderNotConfigured":
     case "HeraldTaskActive":
+    case "VisionNotConfigured":
+    case "EngineNotSupportedForChat":
     case "ConstraintViolation":
     case "MachineIdTaken":
     case "TeamHasProjects":
@@ -379,6 +385,10 @@ export function errorMessage(error: { _tag: string } & Record<string, unknown>):
       return `A Herald task is still running for this document — reset once it finishes`;
     case "HeraldThreadNotFound":
       return `No Herald thread exists for ${error.documentType} '${error.documentId}'`;
+    case "VisionNotConfigured":
+      return `Image attachments need vision — enable primary image support or configure a vision model in Settings`;
+    case "EngineNotSupportedForChat":
+      return `Freeform chat runs on the Herald engine — this project's engine is '${error.engine}'`;
     case "RowNotFound":
       return "Resource not found";
     case "CannotDeleteSelf":

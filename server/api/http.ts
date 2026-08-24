@@ -960,6 +960,8 @@ const skillsGroup = HttpApiGroup.make("skills")
 // ── Herald assistant tier (S3/S5/S9/S15) ──
 const ProviderKindSchema = Schema.Literal("openai_compatible", "anthropic_compatible");
 
+const HeraldReasoningEffortSchema = Schema.Literal("minimal", "low", "medium", "high");
+
 const HeraldSettingsPath = Schema.Struct({ projectId: Schema.String });
 
 // Keys are write-only: omitted apiKey/searchApiKey keep the stored values.
@@ -971,6 +973,11 @@ const HeraldSettingsInputPayload = Schema.Struct({
   searchProvider: Schema.optional(Schema.NullOr(Schema.Literal("exa"))),
   searchApiKey: Schema.optional(Schema.NullOr(Schema.String)),
   urlAllowlist: Schema.optional(Schema.NullOr(Schema.String)),
+  engine: Schema.optional(Schema.Literal("herald", "blacksmith")),
+  engineSwitcherEnabled: Schema.optional(Schema.Boolean),
+  primarySupportsImages: Schema.optional(Schema.Boolean),
+  visionModel: Schema.optional(Schema.NullOr(Schema.String)),
+  reasoningEffort: Schema.optional(Schema.NullOr(HeraldReasoningEffortSchema)),
 });
 
 const HeraldSettingsMaskedSchema = Schema.Struct({
@@ -983,6 +990,11 @@ const HeraldSettingsMaskedSchema = Schema.Struct({
   searchProvider: Schema.NullOr(Schema.Literal("exa")),
   hasSearchKey: Schema.Boolean,
   urlAllowlist: Schema.NullOr(Schema.String),
+  engine: Schema.Literal("herald", "blacksmith"),
+  engineSwitcherEnabled: Schema.Boolean,
+  primarySupportsImages: Schema.Boolean,
+  visionModel: Schema.NullOr(Schema.String),
+  reasoningEffort: Schema.NullOr(HeraldReasoningEffortSchema),
 });
 
 // test/models take UNSAVED submitted values (never persist); an omitted
@@ -1019,6 +1031,7 @@ const HeraldChatStreamInput = Schema.Struct({
   skillId: Schema.optional(Schema.String),
   attachments: Schema.optional(Schema.Array(HeraldAttachmentRef)),
   fromIndex: Schema.optional(Schema.Number),
+  reasoningEffort: Schema.optional(Schema.NullOr(HeraldReasoningEffortSchema)),
 });
 
 const HeraldChatPath = Schema.Struct({ chatId: Schema.String });
@@ -2777,6 +2790,7 @@ const heraldLive = HttpApiBuilder.group(LexaApi, "herald", (handlers) =>
           skillId: req.payload.skillId,
           ...(req.payload.attachments ? { attachments: [...req.payload.attachments] } : {}),
           ...(req.payload.fromIndex !== undefined ? { fromIndex: req.payload.fromIndex } : {}),
+          ...(req.payload.reasoningEffort !== undefined ? { reasoningEffort: req.payload.reasoningEffort } : {}),
         });
         wireDisconnectAbort(yield* HttpServerRequest, () => service.abortChat(req.payload.chatId));
         return sseHttpResponse(frames);

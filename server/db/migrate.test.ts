@@ -36,7 +36,7 @@ describe("runMigrations", () => {
   it("applies the real migrations dir and records _migrations", () => {
     const dbPath = join(tmpDir(), "app.db");
     runMigrations(dbPath, MIGRATIONS);
-    expect(appliedMigrations(dbPath)).toEqual(["0001_init.sql", "0002_project_repos.sql", "0003_forge_sessions.sql", "0004_auth_roles_teams.sql", "0005_milestones_sprints.sql", "0006_drop_mcp_connected.sql", "0007_task_keys.sql", "0008_wiki_share_links.sql", "0009_attachments.sql", "0010_herald.sql", "0011_chat_threads.sql", "0012_chat_pins.sql"]);
+    expect(appliedMigrations(dbPath)).toEqual(["0001_init.sql", "0002_project_repos.sql", "0003_forge_sessions.sql", "0004_auth_roles_teams.sql", "0005_milestones_sprints.sql", "0006_drop_mcp_connected.sql", "0007_task_keys.sql", "0008_wiki_share_links.sql", "0009_attachments.sql", "0010_herald.sql", "0011_chat_threads.sql", "0012_chat_pins.sql", "0013_hearth_engine.sql", "0014_herald_reasoning_effort.sql"]);
     const db = new Database(dbPath);
     expect(tableExists(db, "tasks")).toBe(true);
     expect(tableExists(db, "_migrations")).toBe(true);
@@ -47,7 +47,7 @@ describe("runMigrations", () => {
     const dbPath = join(tmpDir(), "app.db");
     runMigrations(dbPath, MIGRATIONS);
     runMigrations(dbPath, MIGRATIONS);
-    expect(appliedMigrations(dbPath)).toEqual(["0001_init.sql", "0002_project_repos.sql", "0003_forge_sessions.sql", "0004_auth_roles_teams.sql", "0005_milestones_sprints.sql", "0006_drop_mcp_connected.sql", "0007_task_keys.sql", "0008_wiki_share_links.sql", "0009_attachments.sql", "0010_herald.sql", "0011_chat_threads.sql", "0012_chat_pins.sql"]);
+    expect(appliedMigrations(dbPath)).toEqual(["0001_init.sql", "0002_project_repos.sql", "0003_forge_sessions.sql", "0004_auth_roles_teams.sql", "0005_milestones_sprints.sql", "0006_drop_mcp_connected.sql", "0007_task_keys.sql", "0008_wiki_share_links.sql", "0009_attachments.sql", "0010_herald.sql", "0011_chat_threads.sql", "0012_chat_pins.sql", "0013_hearth_engine.sql", "0014_herald_reasoning_effort.sql"]);
   });
 
   it("rolls back a failed migration atomically (no partial schema, no _migrations row)", () => {
@@ -74,7 +74,7 @@ describe("runMigrations", () => {
   it("keeps the default migrations dir (prod behavior)", () => {
     const dbPath = join(tmpDir(), "app.db");
     runMigrations(dbPath);
-    expect(appliedMigrations(dbPath)).toEqual(["0001_init.sql", "0002_project_repos.sql", "0003_forge_sessions.sql", "0004_auth_roles_teams.sql", "0005_milestones_sprints.sql", "0006_drop_mcp_connected.sql", "0007_task_keys.sql", "0008_wiki_share_links.sql", "0009_attachments.sql", "0010_herald.sql", "0011_chat_threads.sql", "0012_chat_pins.sql"]);
+    expect(appliedMigrations(dbPath)).toEqual(["0001_init.sql", "0002_project_repos.sql", "0003_forge_sessions.sql", "0004_auth_roles_teams.sql", "0005_milestones_sprints.sql", "0006_drop_mcp_connected.sql", "0007_task_keys.sql", "0008_wiki_share_links.sql", "0009_attachments.sql", "0010_herald.sql", "0011_chat_threads.sql", "0012_chat_pins.sql", "0013_hearth_engine.sql", "0014_herald_reasoning_effort.sql"]);
   });
 
   it("0011 backfills chat titles from the first text message; image-array first messages stay NULL", () => {
@@ -154,6 +154,75 @@ VALUES ('chat', 'c1', 'p1', 'u1', '[]');
     expect(idxNames).toContain("idx_herald_threads_chat_list");
     expect(idxNames).not.toContain("idx_herald_threads_chat_owner");
     db.close();
+  });
+
+  it("0013 seeds exactly two builtin agents on a fresh database", () => {
+    const dbPath = join(tmpDir(), "app.db");
+    runMigrations(dbPath, MIGRATIONS);
+    const db = new Database(dbPath);
+    const cols = (db.prepare("PRAGMA table_info(herald_settings)").all() as { name: string }[]).map((c) => c.name);
+    expect(cols).toEqual(
+      expect.arrayContaining(["engine", "engine_switcher_enabled", "primary_supports_images", "vision_model"])
+    );
+    const agents = db.prepare("SELECT id, name FROM lexa_agents WHERE is_builtin = 1 ORDER BY id").all() as Array<{ id: string; name: string }>;
+    expect(agents).toEqual([
+      { id: "hearth-blacksmith", name: "Blacksmith Agent" },
+      { id: "hearth-herald", name: "Herald Agent" },
+    ]);
+    const heraldSkills = db
+      .prepare("SELECT skill_id FROM lexa_agent_skills WHERE agent_id = 'hearth-herald' ORDER BY skill_id")
+      .all() as Array<{ skill_id: string }>;
+    const builtins = (db.prepare("SELECT id FROM lexa_skills WHERE is_builtin = 1 ORDER BY id").all() as Array<{ id: string }>).map((r) => r.id);
+    expect(heraldSkills.map((r) => r.skill_id)).toEqual(builtins);
+    const bsSkills = db
+      .prepare("SELECT skill_id FROM lexa_agent_skills WHERE agent_id = 'hearth-blacksmith' ORDER BY skill_id")
+      .all() as Array<{ skill_id: string }>;
+    expect(bsSkills).toEqual([{ skill_id: "definition-of-done" }, { skill_id: "requirements" }, { skill_id: "review" }]);
+    db.close();
+  });
+
+  it("0013 rebinds the lexa agent, its forge tasks and junction rows to hearth-herald", () => {
+    const dir = tmpDir();
+    const pre = join(dir, "pre");
+    mkdirSync(pre);
+    for (const name of readdirSync(MIGRATIONS).filter((n) => n < "0013")) {
+      copyFileSync(join(MIGRATIONS, name), join(pre, name));
+    }
+    const dbPath = join(dir, "app.db");
+    runMigrations(dbPath, pre);
+    expect(appliedMigrations(dbPath)).not.toContain("0013_hearth_engine.sql");
+
+    const db = new Database(dbPath);
+    db.exec(`
+INSERT INTO projects (id, name, slug) VALUES ('p1', 'P', 'p1');
+INSERT INTO lexa_agents (id, name, description, instructions) VALUES ('custom', 'Custom', '', 'x');
+INSERT INTO lexa_skills (id, name, description, instructions) VALUES ('skill-x', 'X', '', 'x');
+INSERT INTO lexa_agent_skills (agent_id, skill_id) VALUES ('lexa', 'skill-x'), ('custom', 'skill-x');
+INSERT INTO forge_tasks (id, project_id, document_type, document_id, agent_id, skill_id)
+VALUES ('ft1', 'p1', 'task', 't1', 'lexa', 'skill-x');
+`);
+    db.close();
+
+    runMigrations(dbPath, MIGRATIONS);
+    expect(appliedMigrations(dbPath)).toContain("0013_hearth_engine.sql");
+
+    const m = new Database(dbPath);
+    expect(m.prepare("SELECT COUNT(*) AS n FROM lexa_agents WHERE id = 'lexa'").get()).toEqual({ n: 0 });
+    expect(m.prepare("SELECT agent_id FROM forge_tasks WHERE id = 'ft1'").get()).toEqual({ agent_id: "hearth-herald" });
+    const heraldHasCustom = m
+      .prepare("SELECT COUNT(*) AS n FROM lexa_agent_skills WHERE agent_id = 'hearth-herald' AND skill_id = 'skill-x'")
+      .get();
+    expect(heraldHasCustom).toEqual({ n: 1 });
+    const heraldBuiltinCount = m
+      .prepare(
+        "SELECT COUNT(*) AS n FROM lexa_agent_skills WHERE agent_id = 'hearth-herald' AND skill_id IN (SELECT id FROM lexa_skills WHERE is_builtin = 1)"
+      )
+      .get();
+    expect(heraldBuiltinCount).toEqual({ n: 6 });
+    // Non-lexa agents keep their bindings untouched.
+    const customKept = m.prepare("SELECT COUNT(*) AS n FROM lexa_agent_skills WHERE agent_id = 'custom'").get();
+    expect(customKept).toEqual({ n: 1 });
+    m.close();
   });
 
   it("migrates legacy github_repo and task-linked repos into project_repos with roles", () => {

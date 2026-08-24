@@ -129,7 +129,7 @@ export function RuntimeEditModal({ runtime, onClose }: { runtime: Runtime; onClo
                 ) : (
                   <input className="prop-input w-full font-mono" type="text" value={agent} onChange={(e) => setAgent(e.target.value)} placeholder="build (default)" aria-label="Agent persona" />
                 )}
-                <div className="field-hint">The CLI listener reports available agents after setup. Empty = the CLI default. Applies on the next Forge task.</div>
+                <div className="field-hint">The CLI listener reports available agents after setup. Empty = the CLI default. Applies on the next Hearth task.</div>
               </div>
             )}
 
@@ -153,7 +153,7 @@ export function RuntimeEditModal({ runtime, onClose }: { runtime: Runtime; onClo
                     <option key={l} value={l}>{l}</option>
                   ))}
                 </select>
-                <div className="field-hint">Controls the always-on opencode diagnostic stderr stream. The activity log captures stdout and stderr separately, with stored info/warn/error levels. Applies on the next Forge task — no daemon restart needed.</div>
+                <div className="field-hint">Controls the always-on opencode diagnostic stderr stream. The activity log captures stdout and stderr separately, with stored info/warn/error levels. Applies on the next Hearth task — no daemon restart needed.</div>
               </div>
             )}
 
@@ -293,7 +293,7 @@ export function RuntimeEditModal({ runtime, onClose }: { runtime: Runtime; onClo
 
             <div className="notice mt-2 flex items-center gap-2">
               <Info size={16} strokeWidth={1.5} className="text-lx-text-link flex-shrink-0" />
-              <span className="text-xs text-lx-text-secondary">Applies to the next Forge task on this runtime. No daemon restart needed.</span>
+              <span className="text-xs text-lx-text-secondary">Applies to the next Hearth task on this runtime. No daemon restart needed.</span>
             </div>
 
             <div className="flex justify-end mt-5" style={{ gap: 8 }}>

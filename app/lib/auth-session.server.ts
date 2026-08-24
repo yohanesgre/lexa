@@ -18,7 +18,7 @@ export async function fetchSessionServer(): Promise<SessionResponse> {
     let url = `${AUTH_BASE}/get-session`;
     const headers: Record<string, string> = {};
     try {
-      const { getRequest } = await import(serverPkg);
+      const { getRequest } = await import(/* @vite-ignore */ serverPkg);
       const request = getRequest();
       const cookie = request?.headers.get("cookie");
       if (cookie) headers.cookie = cookie;

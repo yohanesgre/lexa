@@ -1,5 +1,5 @@
 import { Effect } from "effect";
-import type { ModelMessage } from "@tanstack/ai";
+import type { ModelMessage, StreamChunk } from "@tanstack/ai";
 import {
   completeText,
   streamChat,
@@ -16,19 +16,20 @@ import {
   memoryBlockFromHits,
   type CacheablePrompt,
 } from "../herald/prompt";
-import { buildHeraldTools, MAX_TOOL_ROUNDS, type TaskRef } from "../herald/tools";
+import { buildHeraldTools, MAX_CHAT_TOOL_ROUNDS, MAX_TOOL_ROUNDS, toolCallDetail, type TaskRef } from "../herald/tools";
 import { ForgeRepo } from "../repos/forge.repo";
 import { HeraldSettingsRepo, type HeraldSettingsRow } from "../repos/herald-settings.repo";
 import { HeraldThreadRepo, type HeraldThread } from "../repos/herald-thread.repo";
 import { ProjectMemoryRepo } from "../repos/project-memory.repo";
 import { TaskRepo } from "../repos/task.repo";
 import { WikiRepo } from "../repos/wiki.repo";
-import { ForgeService } from "./forge.service";
+import { ForgeService, BLACKSMITH_AGENT, HERALD_AGENT } from "./forge.service";
 import { loadTaskRepoContent } from "./forge-repo-content";
 import { Storage } from "../storage/storage";
 import { Sqlite, DbError, RowNotFound } from "../db/database";
 import {
   AgentNotFound,
+  EngineNotSupportedForChat,
   errorCodeMap,
   ForgeTaskNotFound,
   HeraldGenerationFailed,
@@ -36,11 +37,13 @@ import {
   HeraldThreadNotFound,
   HeraldToolBudgetExceeded,
   InvalidArgs,
+  NoRuntimeOnline,
   ProviderAuthFailed,
   ProviderNotConfigured,
   ProviderUnreachable,
   SkillNotFound,
   TaskNotFound,
+  VisionNotConfigured,
   WikiPageNotFound,
 } from "../api/errors";
 import { GitHubClient } from "../github/client";
@@ -49,8 +52,9 @@ import { docToMarkdown } from "../../shared/markdown";
 import { extractText } from "../../shared/tiptap-text";
 import { parseTaskKey } from "../task-key";
 import type { TipTapDoc, Task } from "../../shared/types";
-import type { Citation, HeraldChatStreamRequest, StreamFrame } from "../../shared/herald";
+import type { Citation, HeraldChatStreamRequest, HeraldReasoningEffort, StreamFrame } from "../../shared/herald";
 import { deriveChatTitle } from "../../shared/herald";
+import { buildAnalyzeImageTool, resolveVisionMode, type VisionMode } from "../herald/vision";
 
 export const SUMMARY_THRESHOLD_MESSAGES = 40;
 export const SUMMARY_THRESHOLD_BYTES = 64 * 1024;
@@ -309,6 +313,31 @@ export async function hydrateImageParts(
   return out;
 }
 
+// Vision-delegation mode: the primary model cannot see images, so image-ref
+// parts become text placeholders and the model inspects them via the
+// (frame-suppressed) analyze_image tool.
+export async function replaceImageRefsWithPlaceholders(messages: unknown[]): Promise<ModelMessage[]> {
+  const out: ModelMessage[] = [];
+  for (const message of messages) {
+    const msg = message as ModelMessage;
+    if (!Array.isArray(msg.content)) {
+      out.push(msg);
+      continue;
+    }
+    const parts: unknown[] = [];
+    for (const raw of msg.content) {
+      const candidate: unknown = raw;
+      if (!isStoredImageRef(candidate)) {
+        parts.push(raw);
+        continue;
+      }
+      parts.push({ type: "text", content: `[attached image: ${candidate.storageKey}]` });
+    }
+    out.push({ ...msg, content: parts } as ModelMessage);
+  }
+  return out;
+}
+
 export function needsSummary(messages: unknown[]): boolean {
   if (messages.length > SUMMARY_THRESHOLD_MESSAGES) return true;
   try {
@@ -321,7 +350,34 @@ export function needsSummary(messages: unknown[]): boolean {
 const activeTasks = new Map<string, AbortController>();
 const activeChats = new Map<string, AbortController>();
 
-interface StreamRunContext {
+// Internal vision-delegation tool — its frames are suppressed from the
+// member-facing stream (docs/SCHEMA.md Hearth: vision chain outcome 2).
+const INTERNAL_TOOL = "analyze_image";
+
+// Stall watchdog: a provider connection that delivers no chunk (of any type)
+// for this long is treated as dead — aborted and failed so the UI shows a
+// failed turn with Retry instead of an infinite spinner.
+export const STREAM_STALL_TIMEOUT_MS = 90_000;
+export const STREAM_STALL_MESSAGE = "stream stalled — no response from provider";
+
+export function shouldEmitToolFrame(name: string): boolean {
+  return name !== INTERNAL_TOOL;
+}
+
+// Per-turn override wins; absent/null falls back to the project default;
+// both unset → null (no reasoning_effort param sent upstream).
+export function resolveReasoningEffort(
+  rowEffort: HeraldReasoningEffort | null,
+  override?: HeraldReasoningEffort | null
+): HeraldReasoningEffort | null {
+  return override ?? rowEffort ?? null;
+}
+
+export function modelOptionsForEffort(effort: HeraldReasoningEffort | null): Record<string, unknown> | undefined {
+  return effort === null ? undefined : { reasoning_effort: effort };
+}
+
+export interface StreamRunContext {
   keyId: string;
   idField: "taskId" | "chatId";
   threadId: string;
@@ -333,16 +389,19 @@ interface StreamRunContext {
   getCitations: () => Array<{ title: string | null; url: string }>;
   userContent: string | unknown[];
   tools: ReadonlyArray<unknown>;
+  toolRoundCap: number;
   loadImageBase64: (key: string) => Promise<string | null>;
+  imageMode: VisionMode;
   historySummary: () => string | null;
   historySummarizedCount: () => number;
   persist: (messages: unknown[], summary: string | null, summarizedCount: number) => Promise<void>;
   onDone: (text: string) => Promise<void>;
   onFail: (message: string) => Promise<void>;
   onCancel: () => Promise<void>;
+  modelOptions?: Record<string, unknown>;
 }
 
-function buildStream(ctx: StreamRunContext): ReadableStream<StreamFrame> {
+export function buildStream(ctx: StreamRunContext): ReadableStream<StreamFrame> {
   return new ReadableStream<StreamFrame>({
     start(controller) {
       const abort = new AbortController();
@@ -355,6 +414,9 @@ function buildStream(ctx: StreamRunContext): ReadableStream<StreamFrame> {
         let text = "";
         let usageIn = 0;
         let usageOut = 0;
+        // Set when the STALL watchdog fired — its abort must not be
+        // misclassified as a client abort in the catch below.
+        let stalled = false;
         const userEntry = { role: "user", content: ctx.userContent, ts: ctx.userTs };
         // Failure/abort terminal persist — runs BEFORE onFail/onCancel so a
         // retry can drop the failed entry by re-sending from its index.
@@ -371,40 +433,109 @@ function buildStream(ctx: StreamRunContext): ReadableStream<StreamFrame> {
         };
         try {
           push({ type: "start", [ctx.idField]: ctx.keyId, threadId: ctx.threadId } as StreamFrame);
-          const hydrated = await hydrateImageParts(
-            [...ctx.history, userEntry],
-            ctx.loadImageBase64
-          );
-          const chunks = streamChat({
-            config: ctx.config,
-            systemPrompts: ctx.systemPrompts,
-            messages: hydrated,
-            tools: ctx.tools,
-            abortController: abort,
-          });
+          const prepared = ctx.imageMode === "delegate"
+            ? await replaceImageRefsWithPlaceholders([...ctx.history, userEntry])
+            : await hydrateImageParts([...ctx.history, userEntry], ctx.loadImageBase64);
           let toolRounds = 0;
-          for await (const chunk of chunks) {
-            if (chunk.type === "TEXT_MESSAGE_CONTENT") {
-              text += chunk.delta;
-              push({ type: "delta", text: chunk.delta });
-            } else if (chunk.type === "TOOL_CALL_START") {
-              push({ type: "tool", phase: "call", name: chunk.toolCallName ?? chunk.toolName ?? "" });
-            } else if (chunk.type === "TOOL_CALL_END") {
-              toolRounds += 1;
-              push({ type: "tool", phase: "result", name: chunk.toolCallName ?? chunk.toolName ?? "" });
-              if (toolRounds > MAX_TOOL_ROUNDS) {
-                abort.abort();
-                throw new HeraldToolBudgetExceeded({ rounds: MAX_TOOL_ROUNDS });
+          // Accumulated tool-call args per toolCallId: TOOL_CALL_START carries
+          // only the name; the args stream in via TOOL_CALL_ARGS chunks.
+          const pendingCalls = new Map<string, { name: string; args: string }>();
+          const consume = async (tools: ReadonlyArray<unknown> | undefined) => {
+            const chunks = streamChat({
+              config: ctx.config,
+              systemPrompts: ctx.systemPrompts,
+              messages: prepared,
+              tools,
+              abortController: abort,
+              ...(ctx.modelOptions !== undefined ? { modelOptions: ctx.modelOptions } : {}),
+            });
+            const iterator = chunks[Symbol.asyncIterator]();
+            for (;;) {
+              // Stall watchdog: race each chunk against a fresh timer, reset
+              // on every chunk (any type). On timeout abort the provider
+              // request and fail the turn — never spin forever.
+              const next = iterator.next();
+              next.catch(() => {});
+              let result: IteratorResult<StreamChunk>;
+              let stallTimer: ReturnType<typeof setTimeout> | undefined;
+              try {
+                result = await Promise.race([
+                  next,
+                  new Promise<never>((_, reject) => {
+                    stallTimer = setTimeout(() => {
+                      stalled = true;
+                      abort.abort();
+                      reject(new HeraldGenerationFailed({ message: STREAM_STALL_MESSAGE }));
+                    }, STREAM_STALL_TIMEOUT_MS);
+                  }),
+                ]);
+              } finally {
+                clearTimeout(stallTimer);
               }
-            } else if (chunk.type === "RUN_FINISHED") {
-              const u = chunk.usage as
-                | { input?: number; output?: number; promptTokens?: number; completionTokens?: number }
-                | undefined;
-              usageIn = Number(u?.input ?? u?.promptTokens ?? usageIn);
-              usageOut = Number(u?.output ?? u?.completionTokens ?? usageOut);
-            } else if (chunk.type === "RUN_ERROR") {
-              throw translateRunError(new Error(chunk.message));
+              if (result.done) break;
+              const chunk = result.value;
+              if (chunk.type === "TEXT_MESSAGE_CONTENT") {
+                text += chunk.delta;
+                push({ type: "delta", text: chunk.delta });
+              } else if (chunk.type === "REASONING_MESSAGE_CONTENT") {
+                // Ephemeral chain-of-thought — streamed, never persisted.
+                push({ type: "reasoning", delta: chunk.delta });
+              } else if (chunk.type === "TOOL_CALL_START") {
+                const id = chunk.toolCallId !== undefined ? String(chunk.toolCallId) : "";
+                pendingCalls.set(id, { name: chunk.toolCallName ?? chunk.toolName ?? "", args: "" });
+              } else if (chunk.type === "TOOL_CALL_ARGS") {
+                const pending = pendingCalls.get(chunk.toolCallId !== undefined ? String(chunk.toolCallId) : "");
+                if (pending) {
+                  const piece = typeof chunk.args === "string" ? chunk.args : typeof chunk.delta === "string" ? chunk.delta : "";
+                  pending.args += piece;
+                }
+              } else if (chunk.type === "TOOL_CALL_END") {
+                toolRounds += 1;
+                const id = chunk.toolCallId !== undefined ? String(chunk.toolCallId) : "";
+                const pending = pendingCalls.get(id);
+                pendingCalls.delete(id);
+                const name = chunk.toolCallName ?? chunk.toolName ?? pending?.name ?? "";
+                let detail: string | undefined;
+                // Single-shot adapters skip TOOL_CALL_ARGS and deliver the
+                // full input on END — fall back to it when nothing streamed.
+                const streamedArgs = (() => {
+                  if (!pending || pending.args === "") return undefined;
+                  try {
+                    return JSON.parse(pending.args) as unknown;
+                  } catch {
+                    return undefined;
+                  }
+                })();
+                const finalArgs =
+                  streamedArgs ?? (chunk.input !== undefined && typeof chunk.input === "object" ? chunk.input : undefined);
+                if (finalArgs !== undefined) {
+                  detail = toolCallDetail(name, finalArgs);
+                }
+                if (shouldEmitToolFrame(name)) {
+                  push(detail === undefined ? { type: "tool", phase: "call", name } : { type: "tool", phase: "call", name, detail });
+                  push(detail === undefined ? { type: "tool", phase: "result", name } : { type: "tool", phase: "result", name, detail });
+                }
+                if (toolRounds > ctx.toolRoundCap) {
+                  abort.abort();
+                  throw new HeraldToolBudgetExceeded({ rounds: ctx.toolRoundCap });
+                }
+              } else if (chunk.type === "RUN_FINISHED") {
+                const u = chunk.usage as
+                  | { input?: number; output?: number; promptTokens?: number; completionTokens?: number }
+                  | undefined;
+                usageIn = Number(u?.input ?? u?.promptTokens ?? usageIn);
+                usageOut = Number(u?.output ?? u?.completionTokens ?? usageOut);
+              } else if (chunk.type === "RUN_ERROR") {
+                throw translateRunError(new Error(chunk.message));
+              }
             }
+          };
+          await consume(ctx.tools);
+          // Some OpenAI-compatible providers/models reject function calling
+          // with a normal finish and empty content (no RUN_ERROR). One
+          // degraded retry without tools beats a silent empty reply.
+          if (text === "" && ctx.tools && ctx.tools.length > 0) {
+            await consume(undefined);
           }
           const citations = ctx.getCitations();
           const finalMessages = [
@@ -434,7 +565,7 @@ function buildStream(ctx: StreamRunContext): ReadableStream<StreamFrame> {
             }).catch(() => {});
             await ctx.onFail(`Herald exceeded its tool budget (${e.rounds} rounds)`).catch(() => {});
             push({ type: "error", code: "HERALD_TOOL_BUDGET_EXCEEDED", message: `Herald exceeded its tool budget (${e.rounds} rounds)` });
-          } else if (abort.signal.aborted) {
+          } else if (abort.signal.aborted && !stalled) {
             // Client abort with partial text → keep the fragment, marked
             // stopped. No text → nothing gained, persist nothing.
             if (text !== "") {
@@ -511,6 +642,27 @@ export class HeraldService extends Effect.Service<HeraldService>()("Lexa/Herald"
       apiKey: row.api_key,
       model: row.model,
     });
+
+    // Vision delegation runs on the PRIMARY provider (same kind/base_url/
+    // api_key) — only the model differs.
+    const visionConfigOf = (row: HeraldSettingsRow): ProviderConfig => ({
+      kind: row.kind,
+      baseUrl: row.base_url,
+      apiKey: row.api_key,
+      model: row.vision_model ?? "",
+    });
+
+    const resolveMimeType = (projectId: string, key: string): Promise<string> =>
+      Promise.resolve(
+        (
+          db.prepare(`SELECT mime_type FROM attachments WHERE project_id = ? AND storage_key = ? LIMIT 1`).get(projectId, key) as
+            | { mime_type?: string }
+            | undefined
+        )?.mime_type ?? "image/png"
+      );
+
+    const skillJunctionBound = (agentId: string, skillId: string): boolean =>
+      db.prepare(`SELECT 1 FROM lexa_agent_skills WHERE agent_id = ? AND skill_id = ? LIMIT 1`).get(agentId, skillId) !== null;
 
     const getSettingsOrFail = (projectId: string) =>
       settingsRepo.getByProject(projectId).pipe(
@@ -651,6 +803,15 @@ export class HeraldService extends Effect.Service<HeraldService>()("Lexa/Herald"
         const rows = await Effect.runPromise(taskRepo.searchByTitle(projectId, query, limit)).catch(() => [] as Task[]);
         return rows.map(taskRefOf);
       },
+      searchWikiPages: async (query: string, limit = 10) => {
+        const rows = await Effect.runPromise(wikiRepo.search(projectId, query, limit)).catch(() => []);
+        return rows.map((p) => ({ title: p.title, slug: p.slug, snippet: p.snippet }));
+      },
+      findWikiPageBySlug: async (slug: string) => {
+        const page = await Effect.runPromise(wikiRepo.findBySlug(projectId, slug)).catch(() => null);
+        if (!page) return null;
+        return { title: page.title, slug: page.slug, content: page.content as TipTapDoc };
+      },
     });
 
     return {
@@ -666,13 +827,18 @@ export class HeraldService extends Effect.Service<HeraldService>()("Lexa/Herald"
         attachments?: Array<{ storageKey: string; mimeType: string; name: string }>;
       }) =>
         Effect.gen(function* () {
-          yield* getSettingsOrFail(input.projectId);
+          const settingsRow = yield* getSettingsOrFail(input.projectId);
           yield* forgeRepo.findAgentById(input.agentId).pipe(
             Effect.catchTag("RowNotFound", () => new AgentNotFound({ id: input.agentId }))
           );
           yield* forgeRepo.findSkillById(input.skillId).pipe(
             Effect.catchTag("RowNotFound", () => new SkillNotFound({ id: input.skillId }))
           );
+          const engine = settingsRow.engine;
+          const engineAgentId = engine === "blacksmith" ? BLACKSMITH_AGENT.id : HERALD_AGENT.id;
+          if (!skillJunctionBound(engineAgentId, input.skillId)) {
+            return yield* new SkillNotFound({ id: input.skillId });
+          }
           if (input.documentType === "task") {
             yield* taskRepo.findById(input.documentId).pipe(
               Effect.catchTag("RowNotFound", () => new TaskNotFound({ id: input.documentId }))
@@ -682,9 +848,18 @@ export class HeraldService extends Effect.Service<HeraldService>()("Lexa/Herald"
               Effect.catchTag("RowNotFound", () => new WikiPageNotFound({ id: input.documentId }))
             );
           }
+          if (engine === "blacksmith") {
+            const runtimes = yield* forgeRepo.listRuntimes();
+            if (!runtimes.some((r) => r.status === "online")) {
+              return yield* new NoRuntimeOnline();
+            }
+          }
           const attachments = input.attachments ?? [];
           if (attachments.length > 0) {
             yield* validateAttachments(input.projectId, attachments, DOC_IMAGE_CAPS);
+            if (resolveVisionMode(settingsRow) === "none") {
+              return yield* new VisionNotConfigured();
+            }
             const existing = yield* threadRepo.loadThread(input.documentType, input.documentId).pipe(
               Effect.catchTag("RowNotFound", () => Effect.succeed(null))
             );
@@ -704,6 +879,11 @@ export class HeraldService extends Effect.Service<HeraldService>()("Lexa/Herald"
               summarizedCount: verdict.summarizedCount,
             });
           }
+          // Blacksmith rows carry document context like ForgeService.create —
+          // the daemon builds its prompt from the claim payload alone.
+          const docContext = engine === "blacksmith"
+            ? (yield* loadDocContext(input.projectId, input.documentType, input.documentId)).context
+            : "";
           return yield* forgeRepo.createTask({
             id: crypto.randomUUID(),
             projectId: input.projectId,
@@ -713,8 +893,8 @@ export class HeraldService extends Effect.Service<HeraldService>()("Lexa/Herald"
             skillId: input.skillId,
             extraPrompt: input.prompt,
             selection: input.selection ?? "",
-            docContext: "",
-            kind: "herald",
+            docContext,
+            kind: engine,
           });
         }),
 
@@ -781,7 +961,20 @@ export class HeraldService extends Effect.Service<HeraldService>()("Lexa/Herald"
             docContext: doc.context,
           });
 
-          const tools = buildHeraldTools(buildToolDeps(task.projectId, settingsRow.url_allowlist, settingsRow.search_api_key));
+          const imageMode = resolveVisionMode(settingsRow);
+          const baseTools = buildHeraldTools(buildToolDeps(task.projectId, settingsRow.url_allowlist, settingsRow.search_api_key));
+          const tools =
+            imageMode === "delegate"
+              ? [
+                  ...baseTools,
+                  buildAnalyzeImageTool({
+                    config: visionConfigOf(settingsRow),
+                    loadImageBase64,
+                    resolveMimeType: (key) => resolveMimeType(task.projectId, key),
+                    fetchImpl: fetch,
+                  }),
+                ]
+              : baseTools;
 
           const instruction = [
             task.selection ? `Selected text:\n"""\n${task.selection}\n"""` : null,
@@ -805,11 +998,14 @@ export class HeraldService extends Effect.Service<HeraldService>()("Lexa/Herald"
             history: verdict.messages,
             userTs: new Date().toISOString(),
             getCitations: () => [],
+            modelOptions: modelOptionsForEffort(resolveReasoningEffort(settingsRow.reasoning_effort)),
             historySummary: () => verdict.summary,
             historySummarizedCount: () => verdict.summarizedCount,
             userContent,
             tools,
+            toolRoundCap: MAX_TOOL_ROUNDS,
             loadImageBase64,
+            imageMode,
             persist: (messages, summary, summarizedCount) =>
               Effect.runPromise(
                 threadRepo.saveThread(task.documentType, task.documentId, {
@@ -842,10 +1038,23 @@ export class HeraldService extends Effect.Service<HeraldService>()("Lexa/Herald"
         Effect.gen(function* () {
           if (activeChats.has(chatId)) return yield* new HeraldTaskActive();
           const settingsRow = yield* getSettingsOrFail(req.projectId);
+          // Freeform chat ALWAYS runs the herald lane — a blacksmith project
+          // default fails the send before any thread write or stream start.
+          if (settingsRow.engine === "blacksmith") {
+            return yield* new EngineNotSupportedForChat({ engine: settingsRow.engine });
+          }
           const config = configFromRow(settingsRow);
 
+          if (req.skillId !== undefined && !skillJunctionBound(HERALD_AGENT.id, req.skillId)) {
+            return yield* new SkillNotFound({ id: req.skillId });
+          }
+
           const attachments = req.attachments ?? [];
+          const imageMode = resolveVisionMode(settingsRow);
           yield* validateAttachments(req.projectId, attachments, CHAT_IMAGE_CAPS);
+          if (attachments.length > 0 && imageMode === "none") {
+            return yield* new VisionNotConfigured();
+          }
 
           // @-mention resolution at send: task-key grammar wins on ambiguity,
           // duplicates resolve once, unknown tokens are ignored. The resolved
@@ -903,14 +1112,32 @@ export class HeraldService extends Effect.Service<HeraldService>()("Lexa/Herald"
             history: verdict.messages,
             userTs: new Date().toISOString(),
             getCitations: () => citations,
+            modelOptions: modelOptionsForEffort(
+              resolveReasoningEffort(settingsRow.reasoning_effort, req.reasoningEffort)
+            ),
             userContent,
-            tools: buildHeraldTools({
-              ...buildToolDeps(req.projectId, settingsRow.url_allowlist, settingsRow.search_api_key),
-              onCitation: (c) => {
-                citations = collectCitation(citations, c);
-              },
-            }),
+            tools: (() => {
+              const base = buildHeraldTools({
+                ...buildToolDeps(req.projectId, settingsRow.url_allowlist, settingsRow.search_api_key),
+                onCitation: (c) => {
+                  citations = collectCitation(citations, c);
+                },
+              });
+              return imageMode === "delegate" && attachments.length > 0
+                ? [
+                    ...base,
+                    buildAnalyzeImageTool({
+                      config: visionConfigOf(settingsRow),
+                      loadImageBase64,
+                      resolveMimeType: (key) => resolveMimeType(req.projectId, key),
+                      fetchImpl: fetch,
+                    }),
+                  ]
+                : base;
+            })(),
+            toolRoundCap: MAX_CHAT_TOOL_ROUNDS,
             loadImageBase64,
+            imageMode: attachments.length > 0 ? imageMode : "inline",
             historySummary: () => verdict.summary,
             historySummarizedCount: () => verdict.summarizedCount,
             persist: (messages, summary, summarizedCount) =>

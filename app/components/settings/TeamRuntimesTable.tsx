@@ -31,7 +31,7 @@ export function TeamSettingsRuntimesTable({ teamId, runtimes, isLoading, isError
         </div>
       </div>
       <p className="text-sm text-lx-text-secondary mb-4" style={{ maxWidth: 560 }}>
-        Daemons this team can claim Forge tasks on. Setup picks this team as the runtime's owner. Runtimes created by other teams are invisible here.
+        Daemons this team can claim Hearth tasks on. Setup picks this team as the runtime's owner. Runtimes created by other teams are invisible here.
       </p>
 
       {isLoading ? (

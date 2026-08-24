@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { DbError, ConstraintViolation } from "../db/database";
-import { TaskNotFound, TaskHasChildren, MilestoneNotFound, InvalidArgs, errorToStatus, errorMessage, errorDetails, errorResponse } from "./errors";
+import { TaskNotFound, TaskHasChildren, MilestoneNotFound, InvalidArgs, VisionNotConfigured, EngineNotSupportedForChat, errorToStatus, errorMessage, errorDetails, errorResponse } from "./errors";
 import { CommentNotFound, CommentEditForbidden, CommentDeleteForbidden, CommentInvalid } from "./errors";
 
 const RAW = "UNIQUE constraint failed: tasks.column_id, tasks.position";
@@ -52,6 +52,19 @@ describe("errorToStatus", () => {
     const resp = errorResponse(asCatalogError(new InvalidArgs({ reason: "startAt cannot be later than dueAt" })));
     expect(resp.error.code).toBe("INVALID_ARGS");
     expect(resp.error.message).toBe("startAt cannot be later than dueAt");
+  });
+
+  it("maps VisionNotConfigured to 409 / VISION_NOT_CONFIGURED", () => {
+    expect(errorToStatus(new VisionNotConfigured())).toBe(409);
+    const resp = errorResponse(asCatalogError(new VisionNotConfigured()));
+    expect(resp.error.code).toBe("VISION_NOT_CONFIGURED");
+  });
+
+  it("maps EngineNotSupportedForChat to 409 / ENGINE_NOT_SUPPORTED_FOR_CHAT", () => {
+    expect(errorToStatus(new EngineNotSupportedForChat({ engine: "blacksmith" }))).toBe(409);
+    const resp = errorResponse(asCatalogError(new EngineNotSupportedForChat({ engine: "blacksmith" })));
+    expect(resp.error.code).toBe("ENGINE_NOT_SUPPORTED_FOR_CHAT");
+    expect(resp.error.message).toContain("blacksmith");
   });
 });
 

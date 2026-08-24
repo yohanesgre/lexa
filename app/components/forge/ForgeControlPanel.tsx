@@ -6,7 +6,7 @@ import type { UseQueryResult } from "@tanstack/react-query";
 import { cn } from "../ui/cn";
 import { parseApiDate } from "../../lib/date";
 import { copyToClipboard } from "../../lib/clipboard";
-import { useCancelForgeTask, useForgeTask, useForgeTaskHistory, useForgeTaskLogs, useSkills, useProjects, useRuntimes } from "../../lib/queries";
+import { useCancelForgeTask, useForgeTask, useForgeTaskHistory, useForgeTaskLogs, useSkills, useProjects, useRuntimes, useSession } from "../../lib/queries";
 import { ForgeTaskLogModal } from "./ForgeTaskLogModal";
 import { classifyLogLine } from "../../lib/forge-log-line";
 import type { ForgeTask, ForgeTaskLog, ForgeTaskStatus, Runtime } from "../../../shared/types";
@@ -235,7 +235,7 @@ function HistoryTable({ tasks, copiedId, onCopyId, onSelect, onCancel, runtimeNa
                     <button type="button"
                       className="btn btn-ghost"
                       aria-label="Cancel task"
-                      title="Cancel this Forge task"
+                      title="Cancel this Hearth task"
                       style={{ width: 26, height: 26, padding: 0 }}
                       onClick={(e) => {
                         e.stopPropagation();
@@ -257,11 +257,14 @@ function HistoryTable({ tasks, copiedId, onCopyId, onSelect, onCancel, runtimeNa
   );
 }
 
-function TaskDetailSlideover({ detail, detailProjectSlug, runtimes, logs, runtimeName, onClose, onExpandLogs }: {
+function TaskDetailSlideover({ detail, detailProjectSlug, runtimes, logs, canViewDetails, runtimeName, onClose, onExpandLogs }: {
   detail: (ForgeTask & { projectName?: string }) | null;
   detailProjectSlug: string | undefined;
   runtimes: Runtime[];
   logs: ForgeTaskLog[] | undefined;
+  // Detail internals (activity feed, result text, failure details) are
+  // ADMIN-GATED — members get the meta grid + status rows only.
+  canViewDetails: boolean;
   runtimeName: (id: string | null) => string;
   onClose: () => void;
   onExpandLogs: () => void;
@@ -269,11 +272,11 @@ function TaskDetailSlideover({ detail, detailProjectSlug, runtimes, logs, runtim
   return (
     <>
       <button type="button" className="slideover-overlay" onClick={onClose} aria-label="Close" />
-      <dialog open className="slideover" aria-modal="true" aria-label="Forge task details" style={{ width: 520 }}>
+      <dialog open className="slideover" aria-modal="true" aria-label="Hearth task details" style={{ width: 520 }}>
         <div className="slideover-header border-b border-lx-border-subtle">
           <div className="flex items-center gap-2">
             <span className="text-xs text-lx-text-muted font-body">
-              {detail ? `${detail.projectName || "Forge"} / ${detail.documentType === "wiki" ? "Wiki" : "Tasks"}` : "Forge"}
+              {detail ? `${detail.projectName || "Hearth"} / ${detail.documentType === "wiki" ? "Wiki" : "Tasks"}` : "Hearth"}
             </span>
           </div>
           <button type="button" className="btn btn-ghost !w-8 !h-8 !p-0" onClick={onClose} aria-label="Close">
@@ -326,8 +329,11 @@ function TaskDetailSlideover({ detail, detailProjectSlug, runtimes, logs, runtim
               </div>
             </div>
 
-            {/* Activity log — live while queued/running, static once finished */}
+            {/* Activity log — live while queued/running, static once finished.
+                ADMIN-GATED detail internal. */}
             <div className="slideover-body">
+              {canViewDetails && (
+              <>
               <div className="flex items-center justify-between" style={{ marginBottom: 8 }}>
                 <span className="font-micro text-2xs text-lx-text-muted" style={{ textTransform: "uppercase", letterSpacing: "0.04em" }}>Activity</span>
                 <button type="button" className="btn btn-ghost" style={{ height: 22, padding: "0 8px", fontSize: 11 }} onClick={onExpandLogs}>
@@ -368,8 +374,8 @@ function TaskDetailSlideover({ detail, detailProjectSlug, runtimes, logs, runtim
                 )}
               </div>
 
-              {/* Result (completed) */}
-              {detail.status === "completed" && (
+              {/* Result (completed) — ADMIN-GATED detail internal */}
+              {canViewDetails && detail.status === "completed" && (
                 <>
                   <div className="font-micro text-2xs text-lx-text-muted" style={{ textTransform: "uppercase", letterSpacing: "0.04em", margin: "16px 0 8px" }}>Result</div>
                   <div className="card-panel card-panel--success" style={{ whiteSpace: "pre-wrap" }}>
@@ -378,14 +384,16 @@ function TaskDetailSlideover({ detail, detailProjectSlug, runtimes, logs, runtim
                 </>
               )}
 
-              {/* Failure details */}
-              {detail.status === "failed" && (
+              {/* Failure details — ADMIN-GATED detail internal */}
+              {canViewDetails && detail.status === "failed" && (
                 <>
                   <div className="font-micro text-2xs text-lx-text-muted" style={{ textTransform: "uppercase", letterSpacing: "0.04em", margin: "16px 0 8px" }}>Error</div>
                   <div className="border rounded-md p-3 text-[13px] leading-5 font-body whitespace-pre-wrap max-h-56 overflow-y-auto text-lx-text-danger bg-lx-bg-danger-subtle border-lx-border-default">
                     {detail.error || "Task failed without an error message."}
                   </div>
                 </>
+              )}
+              </>
               )}
             </div>
           </>
@@ -398,7 +406,7 @@ function TaskDetailSlideover({ detail, detailProjectSlug, runtimes, logs, runtim
               </svg>
             </div>
             <div className="empty-state-title">Task not found</div>
-            <div className="empty-state-desc">This Forge task was deleted or is no longer visible.</div>
+            <div className="empty-state-desc">This Hearth task was deleted or is no longer visible.</div>
             <button type="button" className="btn btn-primary" style={{ marginTop: 8 }} onClick={onClose}>
               Close
             </button>
@@ -411,7 +419,7 @@ function TaskDetailSlideover({ detail, detailProjectSlug, runtimes, logs, runtim
 
 export function ForgeControlPanel() {
   const portalTarget = typeof document !== "undefined" ? document.body : null;
-  // ?task=<id> deep-link (navbar Forge dropdown rows) — opens the record.
+  // ?task=<id> deep-link (navbar Hearth dropdown rows) — opens the record.
   const search = useSearch({ from: "/forge" });
   const [status, setStatus] = useState<ForgeTaskStatus | null>(null);
   const [slug, setSlug] = useState("");
@@ -430,7 +438,10 @@ export function ForgeControlPanel() {
   const runtimes = useRuntimes();
   const projects = useProjects();
   const selected = useForgeTask(selectedId, selectedId !== null);
-  const logs = useForgeTaskLogs(selectedId, selectedId !== null);
+  // Log internals are ADMIN-GATED — members never fetch the feed (403).
+  const { data: session } = useSession();
+  const isAdmin = session?.user?.role === "superadmin";
+  const logs = useForgeTaskLogs(selectedId, selectedId !== null && isAdmin);
   const cancelTask = useCancelForgeTask();
 
   const page = history.data?.data ?? [];
@@ -469,11 +480,11 @@ export function ForgeControlPanel() {
     <>
       <main className="page-frame">
       <div className="flex items-center justify-between mb-3">
-        <h1 className="font-display text-2xl weight-600 text-lx-text-primary mb-0">Forge</h1>
+        <h1 className="font-display text-2xl weight-600 text-lx-text-primary mb-0">Hearth</h1>
         <div className="flex items-center gap-3">
           <Link to="/settings" className="btn btn-ghost" style={{ height: 28, padding: "0 12px", fontSize: 12, textDecoration: "none", display: "inline-flex", alignItems: "center", gap: 6 }}>
             <LayoutGrid size={14} strokeWidth={1.5} />
-            Forge runtimes
+            Hearth runtimes
           </Link>
         </div>
       </div>
@@ -504,7 +515,7 @@ export function ForgeControlPanel() {
             <path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
           </svg>
           <div style={{ flex: 1, minWidth: 0 }}>
-            <div className="text-sm weight-500 text-lx-text-primary">Could not load Forge history</div>
+            <div className="text-sm weight-500 text-lx-text-primary">Could not load Hearth history</div>
             <div className="text-xs text-lx-text-secondary">The server may be unreachable. Check that the daemon and API are running.</div>
           </div>
           <button type="button" className="btn btn-ghost" style={{ height: 28, padding: "0 12px", fontSize: 12, flexShrink: 0 }} onClick={() => history.refetch()}>
@@ -518,14 +529,14 @@ export function ForgeControlPanel() {
             <path d="M6 18 2 22" />
           </svg>
           <div className="text-sm weight-500 text-lx-text-primary">
-            {status || slug || skillId ? "No runs match the current filters" : cursor !== null ? "No older runs" : "No Forge runs yet"}
+            {status || slug || skillId ? "No runs match the current filters" : cursor !== null ? "No older runs" : "No Hearth runs yet"}
           </div>
           <p className="text-xs text-lx-text-secondary" style={{ maxWidth: 380 }}>
             {status || slug || skillId
               ? "Try widening the filters — for example by clearing the status chip or choosing another project."
               : cursor !== null
                 ? "You've reached the end of the run history."
-                : "Forge tasks are created from the editor toolbar in any task or wiki page. Open a document and press the Forge button to start your first run."}
+                : "Hearth tasks are created from the editor toolbar in any task or wiki page. Open a document and press the Hearth button to start your first run."}
           </p>
         </div>
       ) : (
@@ -564,6 +575,7 @@ export function ForgeControlPanel() {
             detailProjectSlug={detailProjectSlug}
             runtimes={runtimes.data ?? []}
             logs={logs.data}
+            canViewDetails={isAdmin}
             runtimeName={runtimeName}
             onClose={() => setSelectedId(null)}
             onExpandLogs={() => setLogModalOpen(true)}

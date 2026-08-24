@@ -1,9 +1,10 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   assertAttachmentCaps,
   buildChatExport,
   buildChatSnippet,
   buildMentionContextBlock,
+  buildStream,
   CHAT_CITATION_CAP,
   CHAT_IMAGE_CAPS,
   collectCitation,
@@ -11,17 +12,65 @@ import {
   hydrateImageParts,
   isStoredImageRef,
   MENTION_CAPS,
+  modelOptionsForEffort,
   needsSummary,
   ResolvedMention,
   resolveChatTitle,
   resolveHeraldThread,
+  resolveReasoningEffort,
   scanMentionTokens,
+  STREAM_STALL_MESSAGE,
+  STREAM_STALL_TIMEOUT_MS,
+  StreamRunContext,
   SUMMARY_THRESHOLD_MESSAGES,
   type StoredImageRef,
   validateChatFromIndex,
 } from "./herald.service";
 import { buildSystemPrompts } from "../herald/prompt";
+import { buildHeraldTools, MAX_CHAT_TOOL_ROUNDS, MAX_TOOL_ROUNDS, toolCallDetail, type HeraldToolDeps } from "../herald/tools";
 import type { HeraldThread } from "../repos/herald-thread.repo";
+import type { StreamFrame } from "../../shared/herald";
+
+const providerMock = vi.hoisted(() => ({
+  script: [] as Array<Record<string, unknown>>,
+  calls: [] as Array<{ input?: { modelOptions?: Record<string, unknown> } }>,
+}));
+
+vi.mock("../herald/provider", () => ({
+  streamChat: async function* (input?: { modelOptions?: Record<string, unknown> }) {
+    providerMock.calls.push({ input });
+    for (const chunk of providerMock.script) {
+      if (typeof chunk.delayMs === "number") await new Promise((r) => setTimeout(r, chunk.delayMs as number));
+      if (chunk.hang === true) await new Promise<void>(() => {});
+      yield chunk;
+    }
+  },
+  completeText: async () => {
+    throw new Error("unexpected summarize call");
+  },
+  testConnection: async () => undefined,
+  translateRunError: (e: unknown) => e,
+}));
+
+describe("Herald toolset", () => {
+  const baseDeps: HeraldToolDeps = {
+    projectId: "p1",
+    allowlist: null,
+    searchApiKey: null,
+    fetchImpl: fetch,
+    storageGet: async () => new Uint8Array(),
+    projectOwnsStorageKey: async () => true,
+    findTaskByRef: async () => null,
+    searchTasksByTitle: async () => [],
+    searchWikiPages: async () => [],
+    findWikiPageBySlug: async () => null,
+  };
+
+  it("includes the wiki tools alongside the PM reads", () => {
+    const names = buildHeraldTools(baseDeps).map((t) => t.name);
+    expect(names).toEqual(expect.arrayContaining(["search_wiki", "read_wiki_page", "get_task", "search_tasks"]));
+  });
+});
 
 function thread(overrides: Partial<HeraldThread> = {}): HeraldThread {
   return {
@@ -435,5 +484,363 @@ describe("buildChatExport", () => {
     expect(md.startsWith("# chat\n")).toBe(true);
     expect(md).toContain("with picture");
     expect(md).toContain("[image]");
+  });
+});
+
+const toolEnd = (name = "search_wiki"): Record<string, unknown> => ({ type: "TOOL_CALL_END", toolCallName: name });
+
+async function drain(s: ReadableStream<StreamFrame>): Promise<StreamFrame[]> {
+  const out: StreamFrame[] = [];
+  const reader = s.getReader();
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    out.push(value);
+  }
+  return out;
+}
+
+describe("Herald tool budget", () => {
+  const baseCtx = (toolRoundCap: number): StreamRunContext => ({
+    keyId: "c1",
+    idField: "chatId",
+    threadId: "c1",
+    registry: new Map(),
+    config: { kind: "openai_compatible", baseUrl: "https://x.example", apiKey: "k", model: "m" },
+    systemPrompts: [],
+    history: [],
+    userTs: "2026-08-24T00:00:00Z",
+    getCitations: () => [],
+    userContent: "hi",
+    tools: [],
+    toolRoundCap,
+    loadImageBase64: async () => null,
+    imageMode: "inline",
+    historySummary: () => null,
+    historySummarizedCount: () => 0,
+    persist: async () => {},
+    onDone: async () => {},
+    onFail: async () => {},
+    onCancel: async () => {},
+  });
+
+  it("freeform chat cap allows MAX_CHAT_TOOL_ROUNDS rounds before tripping", async () => {
+    providerMock.script = Array.from({ length: MAX_CHAT_TOOL_ROUNDS }, () => toolEnd()).concat([{ type: "RUN_FINISHED" }]);
+    const frames = await drain(buildStream(baseCtx(MAX_CHAT_TOOL_ROUNDS)));
+    expect(frames.at(-1)?.type).toBe("done");
+    expect(frames.some((f) => f.type === "error")).toBe(false);
+  });
+
+  it("freeform chat cap trips at MAX_CHAT_TOOL_ROUNDS + 1 with HERALD_TOOL_BUDGET_EXCEEDED", async () => {
+    providerMock.script = Array.from({ length: MAX_CHAT_TOOL_ROUNDS + 1 }, () => toolEnd());
+    const frames = await drain(buildStream(baseCtx(MAX_CHAT_TOOL_ROUNDS)));
+    const err = frames.find((f) => f.type === "error") as { code?: string; message?: string } | undefined;
+    expect(err?.code).toBe("HERALD_TOOL_BUDGET_EXCEEDED");
+    expect(err?.message).toContain(`(${MAX_CHAT_TOOL_ROUNDS} rounds)`);
+  });
+
+  it("document-task cap still trips at MAX_TOOL_ROUNDS + 1 and allows exactly MAX_TOOL_ROUNDS", async () => {
+    providerMock.script = Array.from({ length: MAX_TOOL_ROUNDS }, () => toolEnd()).concat([{ type: "RUN_FINISHED" }]);
+    const okFrames = await drain(buildStream(baseCtx(MAX_TOOL_ROUNDS)));
+    expect(okFrames.at(-1)?.type).toBe("done");
+
+    providerMock.script = Array.from({ length: MAX_TOOL_ROUNDS + 1 }, () => toolEnd());
+    const frames = await drain(buildStream(baseCtx(MAX_TOOL_ROUNDS)));
+    const err = frames.find((f) => f.type === "error") as { code?: string; message?: string } | undefined;
+    expect(err?.code).toBe("HERALD_TOOL_BUDGET_EXCEEDED");
+    expect(err?.message).toContain(`(${MAX_TOOL_ROUNDS} rounds)`);
+  });
+});
+
+describe("buildStream reasoning frames", () => {
+  const baseCtx = (): StreamRunContext & { persistCalls: unknown[][] } => {
+    const persistCalls: unknown[][] = [];
+    return {
+      keyId: "c1",
+      idField: "chatId",
+      threadId: "c1",
+      registry: new Map(),
+      config: { kind: "openai_compatible", baseUrl: "https://x.example", apiKey: "k", model: "m" },
+      systemPrompts: [],
+      history: [],
+      userTs: "2026-08-24T00:00:00Z",
+      getCitations: () => [],
+      userContent: "hi",
+      tools: [],
+      toolRoundCap: MAX_CHAT_TOOL_ROUNDS,
+      loadImageBase64: async () => null,
+      imageMode: "inline",
+      historySummary: () => null,
+      historySummarizedCount: () => 0,
+      persist: async (messages) => {
+        persistCalls.push(messages);
+      },
+      persistCalls,
+      onDone: async () => {},
+      onFail: async () => {},
+      onCancel: async () => {},
+    };
+  };
+
+  it("reasoning chunks yield reasoning frames in order, interleaved with deltas", async () => {
+    providerMock.script = [
+      { type: "REASONING_MESSAGE_START" },
+      { type: "REASONING_MESSAGE_CONTENT", delta: "think " },
+      { type: "REASONING_MESSAGE_CONTENT", delta: "hard" },
+      { type: "TEXT_MESSAGE_START" },
+      { type: "TEXT_MESSAGE_CONTENT", delta: "answer" },
+      { type: "RUN_FINISHED" },
+    ];
+    const frames = await drain(buildStream(baseCtx()));
+    const streamFrames = frames.filter((f) => f.type === "reasoning" || f.type === "delta");
+    expect(streamFrames).toEqual([
+      { type: "reasoning", delta: "think " },
+      { type: "reasoning", delta: "hard" },
+      { type: "delta", text: "answer" },
+    ]);
+    expect(frames.at(-1)?.type).toBe("done");
+  });
+
+  it("reasoning content is never persisted into the transcript", async () => {
+    providerMock.script = [
+      { type: "REASONING_MESSAGE_CONTENT", delta: "secret thoughts" },
+      { type: "TEXT_MESSAGE_CONTENT", delta: "public answer" },
+      { type: "RUN_FINISHED" },
+    ];
+    const ctx = baseCtx();
+    const frames = await drain(buildStream(ctx));
+    expect(frames.at(-1)?.type).toBe("done");
+    expect(ctx.persistCalls.length).toBe(1);
+    for (const messages of ctx.persistCalls) {
+      const assistant = (messages as Array<{ role: string; content: unknown }>).at(-1);
+      expect(assistant?.role).toBe("assistant");
+      expect(assistant?.content).toBe("public answer");
+      expect(JSON.stringify(messages)).not.toContain("secret thoughts");
+    }
+  });
+
+  it("models without reasoning emit no reasoning frames", async () => {
+    providerMock.script = [
+      { type: "TEXT_MESSAGE_CONTENT", delta: "plain" },
+      { type: "RUN_FINISHED" },
+    ];
+    const frames = await drain(buildStream(baseCtx()));
+    expect(frames.some((f) => f.type === "reasoning")).toBe(false);
+  });
+});
+
+describe("tool frame detail", () => {
+  const baseCtx = (): StreamRunContext => ({
+    keyId: "c1",
+    idField: "chatId",
+    threadId: "c1",
+    registry: new Map(),
+    config: { kind: "openai_compatible", baseUrl: "https://x.example", apiKey: "k", model: "m" },
+    systemPrompts: [],
+    history: [],
+    userTs: "2026-08-24T00:00:00Z",
+    getCitations: () => [],
+    userContent: "hi",
+    tools: [],
+    toolRoundCap: MAX_CHAT_TOOL_ROUNDS,
+    loadImageBase64: async () => null,
+    imageMode: "inline",
+    historySummary: () => null,
+    historySummarizedCount: () => 0,
+    persist: async () => {},
+    onDone: async () => {},
+    onFail: async () => {},
+    onCancel: async () => {},
+  });
+
+  it("call and result frames carry the detail built from the streamed args", async () => {
+    providerMock.script = [
+      { type: "TOOL_CALL_START", toolCallId: "t1", toolCallName: "search_wiki" },
+      { type: "TOOL_CALL_ARGS", toolCallId: "t1", args: '{"query":"auth flow"}' },
+      { type: "TOOL_CALL_END", toolCallId: "t1" },
+      { type: "RUN_FINISHED" },
+    ];
+    const frames = await drain(buildStream(baseCtx()));
+    const toolFrames = frames.filter((f) => f.type === "tool") as Array<{ phase: string; name: string; detail?: string }>;
+    expect(toolFrames).toEqual([
+      { type: "tool", phase: "call", name: "search_wiki", detail: 'Searching wiki for "auth flow"' },
+      { type: "tool", phase: "result", name: "search_wiki", detail: 'Searching wiki for "auth flow"' },
+    ]);
+  });
+
+  it("END without START/ARGS still emits bare frames (no detail)", async () => {
+    providerMock.script = [toolEnd(), { type: "RUN_FINISHED" }];
+    const frames = await drain(buildStream(baseCtx()));
+    const toolFrames = frames.filter((f) => f.type === "tool") as Array<{ detail?: string }>;
+    expect(toolFrames).toHaveLength(2);
+    for (const f of toolFrames) expect(f.detail).toBeUndefined();
+  });
+
+  it("unparseable args yield no detail", async () => {
+    providerMock.script = [
+      { type: "TOOL_CALL_START", toolCallId: "t1", toolCallName: "get_task" },
+      { type: "TOOL_CALL_ARGS", toolCallId: "t1", args: "{not json" },
+      { type: "TOOL_CALL_END", toolCallId: "t1" },
+      { type: "RUN_FINISHED" },
+    ];
+    const frames = await drain(buildStream(baseCtx()));
+    const toolFrames = frames.filter((f) => f.type === "tool") as Array<{ detail?: string }>;
+    expect(toolFrames).toHaveLength(2);
+    for (const f of toolFrames) expect(f.detail).toBeUndefined();
+  });
+
+  it("details truncate to ~80 chars with an ellipsis", async () => {
+    const long = toolCallDetail("search_wiki", { query: "x".repeat(200) })!;
+    expect(long.length).toBe(80);
+    expect(long).toMatch(/…$/);
+  });
+});
+
+describe("stream stall watchdog", () => {
+  const baseCtx = (): StreamRunContext & { persistCalls: unknown[][] } => {
+    const persistCalls: unknown[][] = [];
+    return {
+      keyId: "c1",
+      idField: "chatId",
+      threadId: "c1",
+      registry: new Map(),
+      config: { kind: "openai_compatible", baseUrl: "https://x.example", apiKey: "k", model: "m" },
+      systemPrompts: [],
+      history: [],
+      userTs: "2026-08-24T00:00:00Z",
+      getCitations: () => [],
+      userContent: "hi",
+      tools: [],
+      toolRoundCap: MAX_CHAT_TOOL_ROUNDS,
+      loadImageBase64: async () => null,
+      imageMode: "inline",
+      historySummary: () => null,
+      historySummarizedCount: () => 0,
+      persist: async (messages) => {
+        persistCalls.push(messages);
+      },
+      persistCalls,
+      onDone: async () => {},
+      onFail: async () => {},
+      onCancel: async () => {},
+    };
+  };
+
+  it("trips at 90s of silence → HERALD_GENERATION_FAILED + partial text persisted", async () => {
+    vi.useFakeTimers();
+    try {
+      providerMock.script = [{ type: "TEXT_MESSAGE_CONTENT", delta: "par" }, { hang: true }];
+      const ctx = baseCtx();
+      const pending = drain(buildStream(ctx));
+      await vi.advanceTimersByTimeAsync(STREAM_STALL_TIMEOUT_MS);
+      const frames = await pending;
+      const err = frames.find((f) => f.type === "error") as { code?: string; message?: string } | undefined;
+      expect(err?.code).toBe("HERALD_GENERATION_FAILED");
+      expect(err?.message).toBe("stream stalled — no response from provider");
+      const last = (ctx.persistCalls.at(-1) as Array<{ role?: string; content?: unknown; error?: unknown }>).at(-1);
+      expect(last).toMatchObject({
+        role: "assistant",
+        content: "par",
+        error: { code: "HERALD_GENERATION_FAILED", message: "stream stalled — no response from provider" },
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("a chunk before the deadline resets the timer (trips only after a fresh 90s)", async () => {
+    vi.useFakeTimers();
+    try {
+      providerMock.script = [
+        { type: "TEXT_MESSAGE_CONTENT", delta: "a", delayMs: 50_000 },
+        { type: "TEXT_MESSAGE_CONTENT", delta: "b", delayMs: 50_000 },
+        { hang: true },
+      ];
+      const ctx = baseCtx();
+      const pending = drain(buildStream(ctx));
+      await vi.advanceTimersByTimeAsync(50_000); // chunk 1 lands at t=50s, timer resets
+      await vi.advanceTimersByTimeAsync(50_000); // chunk 2 lands at t=100s, timer resets
+      await vi.advanceTimersByTimeAsync(90_000); // trips at t=190s (90s after the last chunk)
+      const frames = await pending;
+      expect(frames.some((f) => f.type === "error")).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("normal streams finish without tripping the watchdog", async () => {
+    vi.useFakeTimers();
+    try {
+      providerMock.script = [
+        { type: "TEXT_MESSAGE_CONTENT", delta: "ok" },
+        { type: "RUN_FINISHED" },
+      ];
+      const pending = drain(buildStream(baseCtx()));
+      await vi.advanceTimersByTimeAsync(STREAM_STALL_TIMEOUT_MS * 2);
+      const frames = await pending;
+      expect(frames.at(-1)?.type).toBe("done");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
+describe("reasoning effort resolution", () => {
+  it("per-turn override beats the project default", () => {
+    expect(resolveReasoningEffort("high", "low")).toBe("low");
+    expect(resolveReasoningEffort(null, "minimal")).toBe("minimal");
+  });
+
+  it("absent/null override falls back to the project default", () => {
+    expect(resolveReasoningEffort("medium", undefined)).toBe("medium");
+    expect(resolveReasoningEffort("medium", null)).toBe("medium");
+  });
+
+  it("both unset → null (no param sent)", () => {
+    expect(resolveReasoningEffort(null, undefined)).toBeNull();
+    expect(resolveReasoningEffort(null, null)).toBeNull();
+  });
+
+  it("modelOptionsForEffort: null → undefined; effort → reasoning_effort body key", () => {
+    expect(modelOptionsForEffort(null)).toBeUndefined();
+    expect(modelOptionsForEffort("high")).toEqual({ reasoning_effort: "high" });
+  });
+
+  it("buildStream forwards modelOptions into streamChat; absent → no modelOptions", async () => {
+    providerMock.script = [
+      { type: "TEXT_MESSAGE_CONTENT", delta: "ok" },
+      { type: "RUN_FINISHED" },
+    ];
+    const baseCtx = (modelOptions?: Record<string, unknown>): StreamRunContext => ({
+      keyId: "c1",
+      idField: "chatId",
+      threadId: "c1",
+      registry: new Map(),
+      config: { kind: "openai_compatible", baseUrl: "https://x.example", apiKey: "k", model: "m" },
+      systemPrompts: [],
+      history: [],
+      userTs: "2026-08-24T00:00:00Z",
+      getCitations: () => [],
+      userContent: "hi",
+      tools: [],
+      toolRoundCap: MAX_CHAT_TOOL_ROUNDS,
+      loadImageBase64: async () => null,
+      imageMode: "inline",
+      historySummary: () => null,
+      historySummarizedCount: () => 0,
+      persist: async () => {},
+      onDone: async () => {},
+      onFail: async () => {},
+      onCancel: async () => {},
+      ...(modelOptions !== undefined ? { modelOptions } : {}),
+    });
+
+    providerMock.calls = [];
+    await drain(buildStream(baseCtx({ reasoning_effort: "high" })));
+    expect(providerMock.calls.at(-1)?.input?.modelOptions).toEqual({ reasoning_effort: "high" });
+
+    providerMock.calls = [];
+    await drain(buildStream(baseCtx()));
+    expect(providerMock.calls.at(-1)?.input?.modelOptions).toBeUndefined();
   });
 });

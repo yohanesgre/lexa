@@ -80,9 +80,11 @@ All non-2xx responses share one shape:
 | 502 | `PROVIDER_AUTH_FAILED` | Upstream 401/403 from the provider or Exa |
 | 502 | `PROVIDER_UNREACHABLE` | Provider network/timeout/DNS failure |
 | 502 | `HERALD_GENERATION_FAILED` | RUN_ERROR catch-all, malformed stream |
-| 502 | `HERALD_TOOL_BUDGET_EXCEEDED` | Tool round cap hit (`MAX_TOOL_ROUNDS=4`) |
+| 502 | `HERALD_TOOL_BUDGET_EXCEEDED` | Tool round cap hit (document tasks `MAX_TOOL_ROUNDS=4`, freeform chat `MAX_CHAT_TOOL_ROUNDS=8`) |
 | 409 | `HERALD_TASK_ACTIVE` | Thread reset or second chat stream while a Herald stream is running |
 | 404 | `HERALD_THREAD_NOT_FOUND` | Missing Herald thread row |
+| 409 | `VISION_NOT_CONFIGURED` | Attachments submitted while `primary_supports_images=0` AND `vision_model IS NULL` |
+| 409 | `ENGINE_NOT_SUPPORTED_FOR_CHAT` | Freeform chat while the project engine is `blacksmith` (chat always runs the herald lane) |
 
 Defined in the error map but never raised by any REST handler — do not match on them:
 - `MISSING_AUTH` / `INVALID_API_KEY` — the auth middleware emits `UNAUTHORIZED` instead.
@@ -1587,27 +1589,39 @@ Notes:
 
 ### Herald (AI assistant tier)
 
-Server-side TanStack AI `chat()` assistant beside Blacksmith under the Forge
+Server-side TanStack AI `chat()` assistant beside Blacksmith under the Hearth
 umbrella (ADR-0001, `docs/HERALD_PLAN.md`). Per-project provider settings;
 keys are server-side only and never serialized (masked view). Settings
 mutations + test/models are superadmin (`403 FORBIDDEN` otherwise); reads,
 tasks, chat, and memory follow normal project access; chat additionally
 requires a session user (bare API key → `400 NO_USER_CONTEXT`).
 
+Visibility: Forge task brief info (status, timestamps) is member-visible;
+detail/log internals (result text, `forge_task_logs` streams) are
+admin-gated.
+
 ```
 GET    /api/herald/settings/:projectId
 → 200 { projectId, kind: "openai_compatible"|"anthropic_compatible", baseUrl,
         model, hasKey: boolean, keyMask: string|null ("sk-…abcd"),
         searchProvider: "exa"|null, hasSearchKey: boolean,
-        urlAllowlist: string|null }
+        urlAllowlist: string|null,
+        engine: "herald"|"blacksmith", engineSwitcherEnabled: boolean,
+        primarySupportsImages: boolean,
+        visionModel: string|null }
   Masked view — api_key/search_api_key never serialized.
   | 404 PROJECT_NOT_FOUND | 409 PROVIDER_NOT_CONFIGURED (no row yet)
 
 PUT    /api/herald/settings/:projectId   (admin)
 body { kind*, baseUrl*, model*, apiKey?, searchProvider?, searchApiKey?,
-       urlAllowlist? }
-  Omitted apiKey/searchApiKey keep the stored values; first save without an
-  apiKey → 422 INVALID_ARGS ("apiKey required on first save").
+       urlAllowlist?,
+       engine?: "herald"|"blacksmith", engineSwitcherEnabled?: boolean,
+       primarySupportsImages?: boolean,
+       visionModel?: string }
+  Omitted apiKey/searchApiKey keep the stored values; first save
+  without an apiKey → 422 INVALID_ARGS ("apiKey required on first save").
+  Vision shares the primary provider (kind/api_key/base_url) — only
+  `visionModel` differs; no separate vision credentials exist.
 → 200 masked view (same shape as GET)
 
 POST   /api/herald/settings/:projectId/test   (admin)
@@ -1628,13 +1642,23 @@ POST   /api/herald/tasks
 body { slug*, documentType*: "task"|"wiki", documentId*, prompt*, agentId*,
        skillId*, selection?,
        attachments?: [{ storageKey*, mimeType*, name* }] }
-  Creates a forge_tasks row with kind='herald' (queued) — no runtime-online
-  guard. attachments are image refs into the project's attachment storage
+  Engine routing: the project's `herald_settings.engine` is resolved once per
+  request. engine='herald' → forge_tasks row kind='herald' (queued), no
+  runtime-online guard (unchanged). engine='blacksmith' → forge_tasks row
+  kind='blacksmith' + runtime-online guard (`NO_RUNTIME_ONLINE` 409); the
+  claim payload carries `.agents/` bundles (agentMarkdown/skillMarkdown) as
+  for any Blacksmith task. skillId must be bound to the resolved engine's
+  agent via lexa_agent_skills — else SKILL_NOT_FOUND.
+  attachments are image refs into the project's attachment storage
   (cross-project keys → 422); caps ≤5 images/message, ≤5MB each,
-  png/jpeg/gif/webp only.
+  png/jpeg/gif/webp only. Attachments require vision capability:
+  primary_supports_images=1 → inline parts; else vision_model configured →
+  internal analyze_image delegation; else 409 VISION_NOT_CONFIGURED.
 → 201 ForgeTask
   | 404 PROJECT_NOT_FOUND / TASK_NOT_FOUND / PAGE_NOT_FOUND / AGENT_NOT_FOUND / SKILL_NOT_FOUND
   | 409 PROVIDER_NOT_CONFIGURED          (no saved settings for the project)
+  | 409 NO_RUNTIME_ONLINE                (engine=blacksmith, no daemon online)
+  | 409 VISION_NOT_CONFIGURED            (attachments, no vision chain)
   | 422 INVALID_ARGS                     (attachment scope/caps)
 
 POST   /api/herald/tasks/:id/stream      (SSE — POST + fetch-stream, not EventSource)
@@ -1662,12 +1686,17 @@ POST   /api/herald/chat/stream           (freeform chat — no queue row)
 body { projectId*, chatId*, message*, agentId?, skillId?,
        attachments?: [{ storageKey*, mimeType*, name* }],
        fromIndex?: number }
+  ALWAYS runs the herald lane regardless of project engine — under
+  engine='blacksmith' → 409 ENGINE_NOT_SUPPORTED_FOR_CHAT.
   One persistent thread per (project, user), ownership enforced (another
   user's chatId → 404). Direct synchronous SSE — same frames as the task
   stream minus taskId (frames carry chatId). Second concurrent stream on the
   same chatId → 409 HERALD_TASK_ACTIVE. Image caps tighter than
-  document-Herald: ≤3/message, ≤1.5MB total request.
+  document-Herald: ≤3/message, ≤1.5MB total request; vision resolution as on
+  task create (inline parts / analyze_image delegation / 409
+  VISION_NOT_CONFIGURED).
   | 400 NO_USER_CONTEXT | 409 PROVIDER_NOT_CONFIGURED / HERALD_TASK_ACTIVE
+  | 409 ENGINE_NOT_SUPPORTED_FOR_CHAT / VISION_NOT_CONFIGURED
   | 422 INVALID_ARGS
 
   Edit/regenerate/retry semantics (fromIndex):

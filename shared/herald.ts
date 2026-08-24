@@ -2,6 +2,10 @@ import type { ID, ISODate } from "./types";
 
 export type ProviderKind = "openai_compatible" | "anthropic_compatible";
 
+export type HearthEngine = "herald" | "blacksmith";
+
+export type HeraldReasoningEffort = "minimal" | "low" | "medium" | "high";
+
 export interface HeraldSettingsMasked {
   projectId: ID;
   kind: ProviderKind;
@@ -12,6 +16,11 @@ export interface HeraldSettingsMasked {
   searchProvider: "exa" | null;
   hasSearchKey: boolean;
   urlAllowlist: string | null;
+  engine: HearthEngine;
+  engineSwitcherEnabled: boolean;
+  primarySupportsImages: boolean;
+  visionModel: string | null;
+  reasoningEffort: HeraldReasoningEffort | null;
 }
 
 export interface HeraldSettingsInput {
@@ -22,12 +31,23 @@ export interface HeraldSettingsInput {
   searchProvider?: "exa" | null;
   searchApiKey?: string | null;
   urlAllowlist?: string | null;
+  engine?: HearthEngine;
+  engineSwitcherEnabled?: boolean;
+  primarySupportsImages?: boolean;
+  visionModel?: string | null;
+  reasoningEffort?: HeraldReasoningEffort | null;
 }
 
 export type StreamFrame =
   | { type: "start"; taskId?: string; chatId?: string; threadId: string }
   | { type: "delta"; text: string }
-  | { type: "tool"; phase: "call" | "result"; name: string; arg?: string }
+  // Ephemeral chain-of-thought from reasoning models (REASONING_MESSAGE_CONTENT
+  // chunks). Streamed live, never persisted into herald_threads.
+  | { type: "reasoning"; delta: string }
+  // detail: short human-readable summary of the call INPUT (e.g.
+  // `Searching wiki for "auth"`), built server-side from the validated args.
+  // Present on both the call and result frames for easy rendering.
+  | { type: "tool"; phase: "call" | "result"; name: string; arg?: string; detail?: string }
   | { type: "error"; code: string; message: string }
   | { type: "done"; taskId?: string; chatId?: string; text: string; usage: { in: number; out: number } };
 
@@ -43,6 +63,10 @@ export interface HeraldChatStreamRequest {
   // Edit/regenerate/retry: truncate the transcript to this index before
   // appending the new turn. Omitted or === messages.length → plain append.
   fromIndex?: number;
+  // Per-turn reasoning effort override; absent/null falls back to the
+  // project default (herald_settings.reasoning_effort). Both unset → the
+  // provider request carries no reasoning_effort param.
+  reasoningEffort?: HeraldReasoningEffort | null;
 }
 
 export interface HeraldChatAttachment {

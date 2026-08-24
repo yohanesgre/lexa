@@ -73,7 +73,7 @@ export function SourcesSection({ slug, documentType, documentId, className }: So
       <div className="flex items-center gap-2 mb-2">
         <BookOpen size={14} strokeWidth={1.5} className="text-lx-text-muted" />
         <span className="prop-label">Sources</span>
-        <span className="font-micro text-2xs text-lx-text-muted uppercase tracking-[0.04em]">used by Forge</span>
+        <span className="font-micro text-2xs text-lx-text-muted uppercase tracking-[0.04em]">used by Hearth</span>
       </div>
 
       {sources.map((s) => (
@@ -105,7 +105,7 @@ export function SourcesSection({ slug, documentType, documentId, className }: So
 
       {sources.length === 0 && (
         <div className="text-xs text-lx-text-muted mb-2">
-          No sources yet. Type @ to pick a wiki page, or paste a URL — Forge grounds its writing in these.
+          No sources yet. Type @ to pick a wiki page, or paste a URL — Hearth grounds its writing in these.
         </div>
       )}
 

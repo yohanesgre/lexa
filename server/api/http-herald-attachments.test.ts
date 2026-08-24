@@ -72,6 +72,7 @@ INSERT INTO swimlanes (id, project_id, name, position, kind, due_at) VALUES ('s-
 INSERT INTO tasks (id, project_id, column_id, swimlane_id, title, position, created_at, key, number) VALUES ('t1', 'p1', 'c1', 's-backlog', 'T1', 'a0', '2026-01-01 10:00:00', 'HG-1', 1);
 INSERT INTO lexa_agents (id, name, description, instructions) VALUES ('agent-t1', 'Test Agent', '', 'be helpful');
 INSERT INTO lexa_skills (id, name, description, instructions) VALUES ('skill-t1', 'Describe image', '', 'look at the image');
+INSERT INTO lexa_agent_skills (agent_id, skill_id) VALUES ('hearth-herald', 'skill-t1');
 `);
   handler = createApiHandler(dbPath);
 });
@@ -103,6 +104,7 @@ describe("PUT /api/herald/settings/:projectId", () => {
         baseUrl: "http://localhost:9/v1",
         model: "mock-mini",
         apiKey: "sk-test-1234",
+        primarySupportsImages: true,
       })
     );
     expect(res.status).toBe(200);

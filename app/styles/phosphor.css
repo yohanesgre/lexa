@@ -365,6 +365,20 @@
   }
 }
 
+/* Herald streaming cursor — blinking block caret appended after the
+   streaming assistant bubble text; rendered only while the stream is in
+   progress, removed on done/error. Deeper blink than lx-wip-pulse — a
+   cursor is an attention beat, not ambient life. */
+@keyframes lx-herald-caret-blink {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.2;
+  }
+}
+
 @keyframes lx-card-enter {
   from {
     opacity: 0;
@@ -1206,6 +1220,40 @@
   .prop-input.is-focused {
     border-color: var(--lx-border-focus);
     box-shadow: var(--lx-focus-glow);
+  }
+  .input-affix {
+    position: relative;
+  }
+  .input-affix .prop-input {
+    padding-right: 34px;
+  }
+  .password-toggle {
+    position: absolute;
+    top: 50%;
+    right: 4px;
+    transform: translateY(-50%);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 24px;
+    height: 24px;
+    padding: 0;
+    border: none;
+    border-radius: 4px;
+    background: transparent;
+    color: var(--lx-text-muted);
+    cursor: pointer;
+    transition: background 100ms, color 100ms;
+  }
+  .password-toggle:hover {
+    background: var(--lx-surface-card-hover);
+    color: var(--lx-text-secondary);
+  }
+  .password-toggle svg {
+    width: 16px;
+    height: 16px;
+    stroke: currentColor;
+    fill: none;
   }
   .prop-field button.is-focused {
     border-radius: 4px;
@@ -2506,6 +2554,18 @@
     border-radius: 6px;
     display: block;
     margin: 12px 0;
+  }
+
+  .wiki-prose ul {
+    list-style: disc;
+  }
+
+  .wiki-prose ul ul {
+    list-style: circle;
+  }
+
+  .wiki-prose ol {
+    list-style: decimal;
   }
 
   .wiki-prose ul,
@@ -5700,15 +5760,40 @@
 }
 
 /* ---- Herald Chat (herald-chat.html) — page-scoped layout glue ---- */
+.chat-layout {
+  display: flex;
+  height: calc(100vh - 48px);
+  min-height: 0;
+}
 .chat-shell {
+  flex: 1;
+  min-width: 0;
   display: flex;
   flex-direction: column;
-  height: calc(100vh - 48px);
+  position: relative;
+}
+.chat-transcript {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
 }
 .chat-scroll {
   flex: 1;
   overflow-y: auto;
   padding: 24px 24px 8px;
+}
+/* Scroll-to-bottom affordance — canonical .btn.btn-ghost.btn-icon-sm made
+   circular + elevated so it reads as floating over bubbles. */
+.chat-jump-bottom {
+  position: absolute;
+  right: 20px;
+  bottom: 12px;
+  border-radius: 50%;
+  background: var(--lx-surface-elevated);
+  box-shadow: var(--lx-shadow-md);
+  z-index: 5;
 }
 .chat-column {
   max-width: 760px;
@@ -5720,8 +5805,8 @@
 .bubble-user {
   align-self: flex-end;
   max-width: 80%;
-  background: var(--lx-bg-accent-subtle);
-  border: 1px solid rgba(240, 192, 64, 0.25);
+  background: var(--lx-surface-card);
+  border: 1px solid var(--lx-border-default);
   border-radius: 12px 12px 4px 12px;
   padding: 10px 14px;
 }
@@ -5741,9 +5826,316 @@
   color: var(--lx-text-muted);
   margin-bottom: 6px;
 }
+/* Streaming-only assistant bubble caret — mounted/unmounted with the
+   streaming turn, so it never renders on done/error turns. */
+.herald-stream-caret {
+  color: var(--lx-border-focus);
+  animation: lx-herald-caret-blink 1.2s ease-in-out infinite;
+}
 
-/* ---- Herald chat upgrades (herald-chat-upgrades.html) ---- */
-/* Hover affordance row under user bubbles — pointer-only (hidden until
+/* ---- Herald Activity Strip ----
+   Streaming-process surface inside the assistant bubble (codex/opencode-style
+   verbose tool transcript): a collapsible Thinking row fed by live reasoning
+   deltas + one always-visible mono line per tool call — `[tool_name]
+   detail…` with a blinking caret while running, dimmed once done, and an
+   optional `↳ result` line beneath completed calls. The strip is EPHEMERAL
+   by contract — driven only by live SSE frames, never persisted; a fetched
+   transcript renders no strip. After done it folds to one subtle summary
+   line ("Thought for 6s · 3 tools"), expandable. Tokens only. */
+.herald-activity {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 8px;
+}
+.herald-activity-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: none;
+  border: none;
+  padding: 0;
+  font-family: var(--lx-font-micro);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--lx-text-muted);
+  cursor: pointer;
+  text-align: left;
+}
+.herald-activity-toggle:hover { color: var(--lx-text-secondary); }
+.herald-activity-chevron {
+  width: 11px;
+  height: 11px;
+  stroke: currentColor;
+  stroke-width: 2;
+  fill: none;
+  flex-shrink: 0;
+  transition: transform 0.15s var(--lx-ease-out);
+}
+.herald-activity-chevron.collapsed { transform: rotate(-90deg); }
+.herald-activity-reasoning {
+  margin: 2px 0 2px 17px;
+  padding: 6px 10px;
+  background: var(--lx-surface-elevated);
+  border-left: 2px solid var(--lx-border-default);
+  border-radius: 0 6px 6px 0;
+  font-family: var(--lx-font-mono);
+  font-size: 11px;
+  line-height: 17px;
+  font-style: italic;
+  color: var(--lx-text-muted);
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 160px;
+  overflow-y: auto;
+}
+.herald-activity-tool {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  padding-left: 17px;
+  font-family: var(--lx-font-mono);
+  font-size: 11px;
+  line-height: 17px;
+  letter-spacing: normal;
+  color: var(--lx-text-primary);
+  min-width: 0;
+}
+.herald-activity-tool.done { color: var(--lx-text-muted); }
+.herald-activity-tool-name {
+  flex-shrink: 0;
+  font-weight: 500;
+  color: var(--lx-text-secondary);
+}
+.herald-activity-tool.done .herald-activity-tool-name { color: var(--lx-text-muted); }
+/* Process sentence (frame `detail`) — ellipsized to one line after the
+   bracketed name; falls back to the humanized verb phrase when absent. */
+.herald-activity-tool-detail {
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.herald-activity-caret {
+  flex-shrink: 0;
+  color: var(--lx-text-muted);
+  animation: lx-herald-caret-blink 1.2s ease-in-out infinite;
+}
+/* Compact result marker under a completed call — result-frame `detail`
+   truncated to one muted mono line. */
+.herald-activity-result {
+  margin-left: 17px;
+  padding-left: 12px;
+  border-left: 2px solid var(--lx-border-subtle);
+  font-family: var(--lx-font-mono);
+  font-size: 10px;
+  line-height: 15px;
+  color: var(--lx-text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ---- Herald Chat — assistant bubble markdown ----
+   Assistant turns render markdown client-side (no raw HTML injection).
+   Scoped to .bubble-md so user bubbles stay plain text. Element styles
+   mirror the TipTap read-mode prose used by wiki pages (.wiki-prose) and
+   task descriptions (.td-*) — same heading scale, code/pre surfaces,
+   list rhythm, blockquote/hr — trimmed at the bubble edges via the
+   first/last-child rules. Tokens only. */
+.bubble-md {
+  font-size: 15px;
+  line-height: 22px;
+  color: var(--lx-text-primary);
+}
+.bubble-md > *:first-child { margin-top: 0; }
+.bubble-md > *:last-child { margin-bottom: 0; }
+.bubble-md p { margin: 0 0 12px; }
+.bubble-md h1 {
+  font-size: 24px;
+  font-weight: 600;
+  font-family: var(--lx-font-display);
+  line-height: 30px;
+  letter-spacing: -0.03em;
+  color: var(--lx-text-primary);
+  margin: 20px 0 12px;
+}
+.bubble-md h2 {
+  font-size: 18px;
+  font-weight: 600;
+  font-family: var(--lx-font-display);
+  line-height: 26px;
+  letter-spacing: -0.02em;
+  color: var(--lx-text-primary);
+  margin: 20px 0 8px;
+}
+.bubble-md h3,
+.bubble-md h4 {
+  font-size: 16px;
+  font-weight: 500;
+  font-family: var(--lx-font-display);
+  line-height: 24px;
+  letter-spacing: -0.02em;
+  color: var(--lx-text-primary);
+  margin: 20px 0 8px;
+}
+.bubble-md ul,
+.bubble-md ol {
+  margin: 0 0 12px 20px;
+  padding-left: 2px;
+}
+/* Tailwind preflight strips list-style globally (@layer base) — restore
+   marker semantics per level; markers live in the 20px list gutter. */
+.bubble-md ul { list-style: disc; }
+.bubble-md ul ul { list-style: circle; }
+.bubble-md ol { list-style: decimal; }
+.bubble-md li { margin-bottom: 4px; }
+.bubble-md li::marker { color: var(--lx-text-secondary); }
+.bubble-md li > input[type="checkbox"] {
+  margin-right: 5px;
+  vertical-align: -1px;
+  accent-color: var(--lx-border-focus);
+}
+.bubble-md code {
+  font-family: var(--lx-font-mono);
+  font-size: 12px;
+  background: var(--lx-surface-elevated);
+  padding: 2px 4px;
+  border-radius: 4px;
+  color: var(--lx-text-secondary);
+}
+.bubble-md pre {
+  background: var(--lx-surface-elevated);
+  border: 1px solid var(--lx-border-default);
+  border-radius: 6px;
+  padding: 12px 16px;
+  margin: 0 0 12px;
+  overflow-x: auto;
+}
+.bubble-md pre code {
+  background: transparent;
+  padding: 0;
+  font-size: 12px;
+  line-height: 20px;
+  white-space: pre;
+  color: var(--lx-text-secondary);
+}
+.bubble-md blockquote {
+  margin: 12px 0;
+  padding-left: 12px;
+  border-left: 2px solid var(--lx-border-strong);
+  color: var(--lx-text-secondary);
+}
+.bubble-md hr {
+  border: none;
+  border-top: 1px solid var(--lx-border-default);
+  margin: 16px 0;
+}
+.bubble-md table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 12px 0;
+  font-size: 13px;
+  line-height: 20px;
+}
+.bubble-md th,
+.bubble-md td {
+  text-align: left;
+  vertical-align: top;
+  padding: 6px 10px;
+  border: 1px solid var(--lx-border-default);
+}
+.bubble-md th {
+  font-weight: 500;
+  color: var(--lx-text-secondary);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-family: var(--lx-font-body);
+  background: var(--lx-surface-elevated);
+}
+.bubble-md a { color: var(--lx-text-link); }
+
+/* ---- Herald chat — highlighted code block (done-turn fenced segments) ----
+   Same elevated surface as .bubble-md pre, plus a chrome row: micro-caps
+   language label + copy button, top-right. Body is highlight.js output
+   themed by .hljs-theme below. Tokens only. */
+.herald-codeblock {
+  position: relative;
+  background: var(--lx-surface-elevated);
+  border: 1px solid var(--lx-border-default);
+  border-radius: 6px;
+  padding: 12px 16px;
+  margin: 12px 0;
+  font-family: var(--lx-font-mono);
+  font-size: 12px;
+  line-height: 20px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--lx-text-secondary);
+  overflow-x: auto;
+}
+.herald-codeblock:first-child { margin-top: 0; }
+.herald-codeblock-chrome {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.herald-codeblock-lang {
+  font-family: var(--lx-font-micro);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--lx-text-tertiary);
+}
+
+/* highlight.js token theme — PHOSPHOR vars mapped to the semantic palette:
+   gold accent = keywords, success = strings, danger = numbers/deletions,
+   cyan/pink badge hues = functions/types, warning = attributes. Opt-in via
+   the .hljs-theme class on the code element so nothing leaks. */
+.hljs-theme { color: inherit; }
+.hljs-theme .hljs-comment,
+.hljs-theme .hljs-quote { color: var(--lx-text-tertiary); font-style: italic; }
+.hljs-theme .hljs-keyword,
+.hljs-theme .hljs-selector-tag,
+.hljs-theme .hljs-literal,
+.hljs-theme .hljs-section,
+.hljs-theme .hljs-doctag,
+.hljs-theme .hljs-name { color: var(--lx-text-link); }
+.hljs-theme .hljs-string,
+.hljs-theme .hljs-regexp,
+.hljs-theme .hljs-addition,
+.hljs-theme .hljs-meta .hljs-string { color: var(--lx-text-success); }
+.hljs-theme .hljs-number,
+.hljs-theme .hljs-symbol,
+.hljs-theme .hljs-bullet,
+.hljs-theme .hljs-deletion,
+.hljs-theme .hljs-template-variable { color: var(--lx-text-danger); }
+.hljs-theme .hljs-title,
+.hljs-theme .hljs-title.function_ { color: var(--lx-badge-task); }
+.hljs-theme .hljs-title.class_,
+.hljs-theme .hljs-built_in,
+.hljs-theme .hljs-type { color: var(--lx-badge-asset); }
+.hljs-theme .hljs-attr,
+.hljs-theme .hljs-attribute,
+.hljs-theme .hljs-selector-attr,
+.hljs-theme .hljs-selector-class,
+.hljs-theme .hljs-selector-id { color: var(--lx-text-warning); }
+.hljs-theme .hljs-variable,
+.hljs-theme .hljs-property,
+.hljs-theme .hljs-operator,
+.hljs-theme .hljs-punctuation,
+.hljs-theme .hljs-params,
+.hljs-theme .hljs-meta,
+.hljs-theme .hljs-subst { color: var(--lx-text-secondary); }
+.hljs-theme .hljs-emphasis { font-style: italic; }
+.hljs-theme .hljs-strong { font-weight: 600; }
+
+/* ---- Herald chat upgrades (herald-chat-upgrades.html) ---- *//* Hover affordance row under user bubbles — pointer-only (hidden until
    hover/focus-within so icon buttons are never focus-invisible). */
 .bubble-actions {
   display: flex;
@@ -5751,25 +6143,11 @@
   gap: 2px;
   justify-content: flex-end;
   margin-top: 6px;
-  opacity: 0;
-  transition: opacity 120ms;
 }
-.bubble-user:hover .bubble-actions,
-.bubble-user:focus-within .bubble-actions {
-  opacity: 1;
-}
-/* Assistant copy icon floats right inside the meta row; same reveal. */
+/* Assistant copy icon floats right inside the meta row; always visible. */
 .bubble-meta-copy {
   float: right;
   margin-top: -2px;
-}
-.bubble-ai .bubble-meta .icon-btn {
-  opacity: 0;
-  transition: opacity 120ms;
-}
-.bubble-ai:hover .bubble-meta .icon-btn,
-.bubble-ai:focus-within .bubble-meta .icon-btn {
-  opacity: 1;
 }
 .chat-composer {
   flex-shrink: 0;
@@ -5778,6 +6156,137 @@
 .chat-composer-inner {
   max-width: 760px;
   margin: 0 auto;
+}
+
+/* ---- Herald chat — Threads sidebar (herald-chat.html) ---- */
+.threads-sidebar {
+  width: 260px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--lx-surface-elevated);
+  border-right: 1px solid var(--lx-border-default);
+  overflow: hidden;
+}
+.threads-sidebar-header {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  border-bottom: 1px solid var(--lx-border-subtle);
+  flex-shrink: 0;
+}
+.threads-search {
+  height: 28px;
+  padding: 0 10px;
+  font-size: 12px;
+  font-family: var(--lx-font-body);
+  color: var(--lx-text-primary);
+  background: var(--lx-surface-input);
+  border: 1px solid var(--lx-border-default);
+  border-radius: 6px;
+}
+.threads-search::placeholder {
+  color: var(--lx-text-muted);
+}
+.threads-search:focus {
+  outline: none;
+  border-color: var(--lx-border-focus);
+}
+.threads-sidebar-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.thread-row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.thread-row:hover {
+  background: var(--lx-surface-card-hover);
+}
+.thread-row.active {
+  background: var(--lx-bg-accent-subtle);
+}
+.thread-pin {
+  flex-shrink: 0;
+  display: inline-flex;
+  color: var(--lx-text-muted);
+}
+.thread-snippet {
+  font-family: var(--lx-font-micro);
+  font-size: 10px;
+  color: var(--lx-text-muted);
+  line-height: 14px;
+}
+.thread-meta {
+  font-family: var(--lx-font-micro);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--lx-text-muted);
+  line-height: 14px;
+}
+/* Hover-revealed inline actions; focus-within keeps them keyboard-reachable */
+.thread-row-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+.thread-row:hover .thread-row-actions,
+.thread-row:focus-within .thread-row-actions {
+  opacity: 1;
+}
+.threads-sidebar-backdrop {
+  display: none;
+}
+/* Collapsed: 36px icon rail carrying the restore control (mirrors the wiki
+   sidebar). Kept at every viewport width so re-expansion never depends on a
+   control outside the sidebar. */
+.threads-sidebar.collapsed {
+  width: 36px;
+  min-width: 36px;
+  padding: 8px 0;
+  align-items: center;
+}
+@media (max-width: 899.98px) {
+  .threads-sidebar {
+    position: fixed;
+    top: 48px;
+    bottom: 0;
+    left: 0;
+    z-index: 70;
+    transform: translateX(-100%);
+    transition: transform 160ms ease;
+    box-shadow: var(--lx-shadow-slideover);
+  }
+  .threads-sidebar.open {
+    transform: none;
+  }
+  .threads-sidebar.collapsed {
+    transform: none;
+  }
+  .threads-sidebar-backdrop {
+    display: block;
+    position: fixed;
+    top: 48px;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    background: rgba(0, 0, 0, 0.4);
+    z-index: 65;
+  }
 }
 
 /* ---- Mentions autocomplete (mentions-autocomplete.html) ---- */

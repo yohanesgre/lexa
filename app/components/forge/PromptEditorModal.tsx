@@ -8,13 +8,14 @@ interface PromptEditorModalProps {
   kind: "agent" | "skill";
   entity: LexaAgent | LexaSkill | null;
   allSkills?: LexaSkill[];
+  allAgents?: LexaAgent[];
   onClose: () => void;
 }
 
-// Settings editor for Forge agents + skills (global rule bundles). The
+// Settings editor for Hearth agents + skills (global rule bundles). The
 // instructions become files in the run dir at claim time (AGENTS.md /
 // .agents/<skill>/SKILL.md) — the preview shows exactly what ships.
-export function PromptEditorModal({ kind, entity, allSkills = [], onClose }: PromptEditorModalProps) {
+export function PromptEditorModal({ kind, entity, allSkills = [], allAgents = [], onClose }: PromptEditorModalProps) {
   const isNew = entity === null;
   const isAgent = kind === "agent";
   const agent = isAgent ? (entity as LexaAgent | null) : null;
@@ -130,7 +131,7 @@ export function PromptEditorModal({ kind, entity, allSkills = [], onClose }: Pro
             style={{ fontSize: 12, lineHeight: 1.6, resize: "vertical" }}
           />
           <div className="field-hint">
-            Written to the run dir as {isAgent ? <span className="font-mono">AGENTS.md</span> : <span className="font-mono">.agents/&lt;skill&gt;/SKILL.md</span>} at claim time — the runtime CLI reads it natively (opencode). Edits apply to the very next run; no host store, nothing to sync.
+            Written to the run dir as {isAgent ? <span className="font-mono">AGENTS.md</span> : <span className="font-mono">.agents/&lt;skill&gt;/SKILL.md</span>} at claim time. The runtime CLI reads it natively (opencode). Edits apply to the very next run — no host store, nothing to sync.
           </div>
         </div>
 
@@ -155,7 +156,25 @@ export function PromptEditorModal({ kind, entity, allSkills = [], onClose }: Pro
                 ))
               )}
             </div>
-            <div className="field-hint">The Forge popover only offers skills attached here. An agent with none can't generate.</div>
+            <div className="field-hint">The Hearth popover only offers skills attached here. An agent with none can't generate.</div>
+          </div>
+        )}
+
+        {!isAgent && allAgents.length > 0 && (
+          <div className="field">
+            <span className="field-label">Used by</span>
+            <div style={{ background: "var(--lx-surface-input)", border: "1px solid var(--lx-border-default)", borderRadius: 6, padding: "10px 12px", display: "flex", flexDirection: "column", gap: 6 }}>
+              {allAgents.filter((a) => a.skillIds.includes(skill?.id ?? "")).length === 0 ? (
+                <span className="text-xs text-lx-text-muted">No agents use this skill yet.</span>
+              ) : (
+                allAgents
+                  .filter((a) => a.skillIds.includes(skill?.id ?? ""))
+                  .map((a) => (
+                    <span key={a.id} className="text-xs" style={{ color: "var(--lx-text-secondary)" }}>{a.name}</span>
+                  ))
+              )}
+            </div>
+            <div className="field-hint">Read-only — bindings are managed from the agent editor.</div>
           </div>
         )}
 

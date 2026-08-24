@@ -63,6 +63,9 @@ export interface StreamChatInput {
   messages: ModelMessage[];
   tools?: ReadonlyArray<unknown>;
   abortController?: AbortController;
+  // Merged verbatim into the provider request body by the adapter's
+  // mapOptionsToRequest (e.g. { reasoning_effort: "high" }).
+  modelOptions?: Record<string, unknown>;
 }
 
 // The ONLY file that imports chat() (S12). Everything provider-shaped goes
@@ -74,6 +77,7 @@ export function streamChat(input: StreamChatInput): AsyncIterable<StreamChunk> {
     messages: input.messages,
     tools: input.tools as never,
     abortController: input.abortController,
+    ...(input.modelOptions !== undefined ? { modelOptions: input.modelOptions } : {}),
   }) as AsyncIterable<StreamChunk>;
 }
 

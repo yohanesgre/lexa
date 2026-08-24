@@ -77,7 +77,7 @@ export function AppShell() {
             <NavLink to={chatTo} params={chatParams} active={routeType === "chat"}>
               Chat
             </NavLink>
-            <NavLink to="/forge" active={routeType === "forge"}>Forge</NavLink>
+            <NavLink to="/forge" active={routeType === "forge"}>Hearth</NavLink>
           </div>
           <div className="nav-spacer" />
           <div className="nav-right">

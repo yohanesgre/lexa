@@ -1,6 +1,5 @@
 import { useState } from "react";
 import { Plus, Settings, Trash2 } from "lucide-react";
-import { cn } from "../ui/cn";
 import { useAgents, useSkills } from "../../lib/queries";
 import { PromptEditorModal } from "./PromptEditorModal";
 import type { LexaAgent, LexaSkill } from "../../../shared/types";
@@ -27,38 +26,29 @@ function formatUpdated(iso: string): string {
   return `${days}d ago`;
 }
 
-// Settings → Agents (global rule bundles). Each agent's instructions become
-// AGENTS.md in the run dir at claim time; skills attach via M2M bindings.
+// Workspace settings → Hearth Agents & Skills. Agents are global rule bundles;
+// each agent's instructions become AGENTS.md in the run dir at claim time.
+// Exactly two permanent builtins exist (hearth-herald, hearth-blacksmith) —
+// editable + resettable, never deletable, and no custom agent is creatable.
 export function AgentsSettingsSection() {
   const { data: agents = [], isLoading, isError } = useAgents();
   const { data: skills = [] } = useSkills();
-  const [editing, setEditing] = useState<LexaAgent | "new" | null>(null);
+  const [editing, setEditing] = useState<LexaAgent | null>(null);
 
   return (
     <section className="mb-8">
       <div className="flex items-center justify-between mb-3">
-        <h2 className="font-display text-lg font-medium text-lx-text-primary">Lexa Agents</h2>
+        <h2 className="font-display text-lg font-medium text-lx-text-primary">Agents</h2>
         <span className="font-micro text-2xs text-lx-text-muted uppercase tracking-[0.04em]">Global scope</span>
       </div>
       <p className="text-sm text-lx-text-secondary mb-4" style={{ maxWidth: 560 }}>
-        Named rule bundles sent to the runtime agent on every Forge run (as AGENTS.md). The agent's instructions define behavior; skills define what it can do. Not to be confused with a runtime's CLI agent — that's the CLI/Persona on the runtime row.
+        Named rule bundles sent to the runtime agent on every Hearth run (as AGENTS.md). The agent's instructions define behavior; skills define what it can do. Not to be confused with a runtime's CLI agent — that's the CLI/Persona on the runtime row. Exactly two builtin agents exist; custom agents are not creatable.
       </p>
 
       {isLoading ? (
         <div className="text-sm text-lx-text-muted py-8 text-center">Loading agents…</div>
       ) : isError ? (
         <div className="text-sm text-lx-text-danger py-8 text-center">Failed to load agents.</div>
-      ) : agents.length === 0 ? (
-        <div className="card-panel flex flex-col items-center gap-1.5 text-center mb-4" style={{ borderStyle: "dashed", borderColor: "var(--lx-border-strong)", padding: 24 }}>
-          <div className="text-sm font-medium text-lx-text-primary mt-1">No agents yet</div>
-          <p className="text-xs text-lx-text-secondary" style={{ maxWidth: 380 }}>
-            Create one to tune what Forge sends to your runtimes. The builtin "Lexa" is seeded on a fresh install.
-          </p>
-          <button type="button" className="btn btn-primary" style={{ height: 28, padding: "0 12px", fontSize: 12, marginTop: 8 }} onClick={() => setEditing("new")}>
-            <Plus size={14} strokeWidth={1.5} />
-            New agent
-          </button>
-        </div>
       ) : (
         <div className="card-panel" style={{ overflow: "hidden" }}>
           <table className="settings-table">
@@ -77,17 +67,6 @@ export function AgentsSettingsSection() {
                     <button type="button" className="btn btn-ghost" style={{ width: 28, height: 28, padding: 0, fontSize: 12 }} onClick={() => setEditing(a)} aria-label={`Edit ${a.name}`} title="Edit agent">
                       <Settings size={14} strokeWidth={1.5} />
                     </button>
-                    <button
-                      type="button"
-                      className="btn btn-danger"
-                      style={{ width: 28, height: 28, padding: 0, fontSize: 12, opacity: a.isBuiltin ? 0.45 : 1 }}
-                      disabled={a.isBuiltin}
-                      onClick={() => setEditing(a)}
-                      aria-label={a.isBuiltin ? "Builtin agents can't be deleted" : `Delete ${a.name}`}
-                      title={a.isBuiltin ? "Builtin agents can't be deleted" : "Delete agent"}
-                    >
-                      <Trash2 size={14} strokeWidth={1.5} />
-                    </button>
                   </td>
                 </tr>
               ))}
@@ -96,19 +75,10 @@ export function AgentsSettingsSection() {
         </div>
       )}
 
-      {!isLoading && !isError && agents.length > 0 && (
-        <div className="mt-4" style={{ display: "flex", justifyContent: "flex-end" }}>
-          <button type="button" className="btn btn-primary" style={{ height: 28, padding: "0 12px", fontSize: 12 }} onClick={() => setEditing("new")}>
-            <Plus size={14} strokeWidth={1.5} />
-            New agent
-          </button>
-        </div>
-      )}
-
       {editing !== null && (
         <PromptEditorModal
           kind="agent"
-          entity={editing === "new" ? null : editing}
+          entity={editing}
           allSkills={skills}
           onClose={() => setEditing(null)}
         />
@@ -117,9 +87,9 @@ export function AgentsSettingsSection() {
   );
 }
 
-// Settings → Skills (global operation bundles). Instructions become
-// .agents/<skill>/SKILL.md at claim time; attachments are managed from the
-// agent editor.
+// Skills are global operation bundles; instructions become
+// .agents/<skill>/SKILL.md at claim time. Builtins are never deleted;
+// bindings live on the agent editor.
 export function SkillsSettingsSection() {
   const { data: skills = [], isLoading, isError } = useSkills();
   const { data: agents = [] } = useAgents();
@@ -136,28 +106,17 @@ export function SkillsSettingsSection() {
   return (
     <section className="mb-8">
       <div className="flex items-center justify-between mb-3">
-        <h2 className="font-display text-lg font-medium text-lx-text-primary">Lexa Skills</h2>
+        <h2 className="font-display text-lg font-medium text-lx-text-primary">Skills</h2>
         <span className="font-micro text-2xs text-lx-text-muted uppercase tracking-[0.04em]">Global scope</span>
       </div>
       <p className="text-sm text-lx-text-secondary mb-4" style={{ maxWidth: 560 }}>
-        Named operation bundles attached to agents. On a Forge run the chosen skill's instructions become <span className="font-mono text-2xs">.agents/&lt;skill&gt;/SKILL.md</span> in the run dir. Builtins cover the original assistant actions.
+        Named operation bundles attached to agents. On a Hearth run the chosen skill's instructions become <span className="font-mono text-2xs">.agents/&lt;skill&gt;/SKILL.md</span> in the run dir. Builtins: Requirements · Deliverables · Review · Definition of done · Status · Polish.
       </p>
 
       {isLoading ? (
         <div className="text-sm text-lx-text-muted py-8 text-center">Loading skills…</div>
       ) : isError ? (
         <div className="text-sm text-lx-text-danger py-8 text-center">Failed to load skills.</div>
-      ) : skills.length === 0 ? (
-        <div className="card-panel flex flex-col items-center gap-1.5 text-center mb-4" style={{ borderStyle: "dashed", borderColor: "var(--lx-border-strong)", padding: 24 }}>
-          <div className="text-sm font-medium text-lx-text-primary mt-1">No skills yet</div>
-          <p className="text-xs text-lx-text-secondary" style={{ maxWidth: 380 }}>
-            Create an operation bundle (continue, rewrite, summarize…) and attach it to an agent to make it available in the Forge popover.
-          </p>
-          <button type="button" className="btn btn-primary" style={{ height: 28, padding: "0 12px", fontSize: 12, marginTop: 8 }} onClick={() => setEditing("new")}>
-            <Plus size={14} strokeWidth={1.5} />
-            New skill
-          </button>
-        </div>
       ) : (
         <div className="card-panel" style={{ overflow: "hidden" }}>
           <table className="settings-table">
@@ -176,17 +135,18 @@ export function SkillsSettingsSection() {
                     <button type="button" className="btn btn-ghost" style={{ width: 28, height: 28, padding: 0, fontSize: 12 }} onClick={() => setEditing(s)} aria-label={`Edit ${s.name}`} title="Edit skill">
                       <Settings size={14} strokeWidth={1.5} />
                     </button>
-                    <button
-                      type="button"
-                      className="btn btn-danger"
-                      style={{ width: 28, height: 28, padding: 0, fontSize: 12, opacity: s.isBuiltin ? 0.45 : 1 }}
-                      disabled={s.isBuiltin}
-                      onClick={() => setEditing(s)}
-                      aria-label={s.isBuiltin ? "Builtin skills can't be deleted" : `Delete ${s.name}`}
-                      title={s.isBuiltin ? "Builtin skills can't be deleted" : "Delete skill"}
-                    >
-                      <Trash2 size={14} strokeWidth={1.5} />
-                    </button>
+                    {!s.isBuiltin && (
+                      <button
+                        type="button"
+                        className="btn btn-danger"
+                        style={{ width: 28, height: 28, padding: 0, fontSize: 12 }}
+                        onClick={() => setEditing(s)}
+                        aria-label={`Delete ${s.name}`}
+                        title="Delete skill"
+                      >
+                        <Trash2 size={14} strokeWidth={1.5} />
+                      </button>
+                    )}
                   </td>
                 </tr>
               ))}
@@ -195,19 +155,18 @@ export function SkillsSettingsSection() {
         </div>
       )}
 
-      {!isLoading && !isError && skills.length > 0 && (
-        <div className="mt-4" style={{ display: "flex", justifyContent: "flex-end" }}>
-          <button type="button" className="btn btn-primary" style={{ height: 28, padding: "0 12px", fontSize: 12 }} onClick={() => setEditing("new")}>
-            <Plus size={14} strokeWidth={1.5} />
-            New skill
-          </button>
-        </div>
-      )}
+      <div className="mt-4" style={{ display: "flex", justifyContent: "flex-end" }}>
+        <button type="button" className="btn btn-primary" style={{ height: 28, padding: "0 12px", fontSize: 12 }} onClick={() => setEditing("new")}>
+          <Plus size={14} strokeWidth={1.5} />
+          New skill
+        </button>
+      </div>
 
       {editing !== null && (
         <PromptEditorModal
           kind="skill"
           entity={editing === "new" ? null : editing}
+          allAgents={agents}
           onClose={() => setEditing(null)}
         />
       )}

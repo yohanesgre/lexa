@@ -1,7 +1,7 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate } from "@tanstack/react-router";
-import { Zap, Send, Square } from "lucide-react";
+import { Send, Square, ArrowDown } from "lucide-react";
 import * as api from "../../lib/api";
 import {
   useProjects,
@@ -13,6 +13,7 @@ import {
   useDeleteHeraldChat,
   useUpdateHeraldChatMeta,
 } from "../../lib/queries";
+import { ENGINE_AGENT_IDS, hasVisionCapability } from "../../lib/use-hearth-engine";
 import { useToast } from "../ui/Toast";
 import { useHeraldStream } from "../../lib/use-herald-stream";
 import { useDebouncedValue } from "../../lib/useDebouncedValue";
@@ -20,11 +21,26 @@ import { resendIndex } from "../../lib/resendIndex";
 import { copyToClipboard } from "../../lib/clipboard";
 import { useMentionTokens } from "../../lib/useMentionTokens";
 import { renderTokenized } from "../../lib/tokenizeTranscript";
-import { ChatHistoryDropdown } from "./ChatHistoryDropdown";
-import { AgentSkillPicker } from "../forge/herald/AgentSkillPicker";
-import { HeraldToolChips } from "../forge/herald/HeraldToolChips";
+import { MarkdownContent, highlightCode } from "../../lib/markdownToReact";
+import { ThreadsSidebar } from "./ThreadsSidebar";
+import { SkillPicker } from "../forge/herald/SkillPicker";
+import { HearthFlameIcon } from "../forge/herald/HeraldPanel";
 import { HeraldImageAttach, acceptImageFiles } from "../forge/herald/HeraldImageAttach";
 import type { HeraldImage } from "../forge/herald/HeraldImageAttach";
+import { HeraldActivity } from "./HeraldActivity";
+import { EffortPicker } from "./EffortPicker";
+import type { HeraldTimelineItem, HeraldToolChip } from "../../lib/use-herald-stream";
+import type { HeraldReasoningEffort } from "../../../shared/herald";
+
+// Herald Chat — dedicated /$slug/chat route (herald-chat.html +
+// herald-chat-upgrades.html). Multi-thread per (project, user): the History
+// dropdown lists threads (?thread= deep link), each thread keeps a client
+// uuid in document_id; "last visited" persists in localStorage
+// lexa-chat-last:<projectId>. No queue row — streams are direct SSE.
+// No agent picker: the persona mirrors the project's configured Herald Agent
+// (read-only); only the optional skill is picked per message. Transcript
+// affordances (hover copy/edit/regenerate, citation chips,
+// failed/interrupted treatments) transcribe herald-chat-upgrades.html.
 
 // Herald Chat — dedicated /$slug/chat route (herald-chat.html +
 // herald-chat-upgrades.html). Multi-thread per (project, user): the History
@@ -53,6 +69,15 @@ interface ChatTurn {
   citations?: CitationView[];
   error?: { code: string; message: string };
   stopped?: boolean;
+}
+
+// Post-stream activity summary shown on the trailing done turn — sourced from
+// the live stream session's memory only; transcript-loaded turns never get
+// one (reasoning is never persisted).
+interface ActivityView {
+  items: HeraldTimelineItem[];
+  tools: HeraldToolChip[];
+  reasoningMs: number | null;
 }
 
 // HTTPS-ONLY: http:// sources never render as chips (mixed-content +
@@ -95,11 +120,16 @@ const GUIDANCE_BODY: Record<string, string> = {
 };
 
 // Split stored text on ``` fences → plain / fenced segments. Fenced bodies
-// render as a mono block with their own copy button (frontend-only).
-export function splitFences(text: string): { fenced: boolean; body: string }[] {
+// render as a highlighted mono block with a language label + copy button.
+export function splitFences(text: string): { fenced: boolean; body: string; lang?: string }[] {
   const parts = text.split("```");
   return parts
-    .map((body, i) => ({ fenced: i % 2 === 1, body: i % 2 === 1 ? body.replace(/^[a-zA-Z0-9_-]*\n/, "") : body }))
+    .map((body, i) => {
+      if (i % 2 === 0) return { fenced: false, body };
+      const m = body.match(/^([a-zA-Z0-9_-]*)\n/);
+      const lang = m && m[1] ? m[1] : undefined;
+      return { fenced: true, body: m ? body.slice(m[0].length) : body, ...(lang ? { lang } : {}) };
+    })
     .filter((seg) => seg.body.length > 0);
 }
 
@@ -198,13 +228,33 @@ export function HeraldChatPage({ slug, thread }: { slug: string; thread?: string
   const navigate = useNavigate({ from: "/$slug/chat" });
   const { data: projects = [] } = useProjects();
   const projectFromList = projects.find((p) => p.slug === slug);
-  const { data: project } = useQuery({
+  const { data: project, isError: projectError } = useQuery({
     queryKey: ["project", slug],
     queryFn: () => api.getProject(slug),
     enabled: !projectFromList,
+    // Invalid slug must fall back fast — no retry ladder (default is 3
+    // attempts ≈7s of dead shell before the redirect).
+    retry: false,
   });
   const resolved = projectFromList ?? project;
   const projectId = resolved?.id;
+
+  // Invalid slug (deleted project / stale bookmark): fall back to the first
+  // available workspace project instead of rendering a dead shell. Waits for
+  // resolution to settle (list miss + detail query error) before redirecting;
+  // ?thread= rides along.
+  useEffect(() => {
+    if (resolved || projects.length === 0) return;
+    if (!projectFromList && !projectError && project === undefined) return;
+    const fallback = projects[0];
+    if (fallback.slug === slug) return;
+    void navigate({
+      to: "/$slug/chat",
+      params: { slug: fallback.slug },
+      search: thread ? { thread } : {},
+      replace: true,
+    });
+  }, [resolved, projects, projectFromList, projectError, project, slug, thread, navigate]);
 
   // chatId resolution order: ?thread= > localStorage lexa-chat-last >
   // history list head > "" (fresh empty state). Every applied selection is
@@ -228,6 +278,31 @@ export function HeraldChatPage({ slug, thread }: { slug: string; thread?: string
   const [chatSearch, setChatSearch] = useState("");
   const debouncedSearch = useDebouncedValue(chatSearch, 250);
   const listQuery = useHeraldChatList(projectId, debouncedSearch);
+  // Sidebar visibility — the collapse control lives INSIDE the sidebar
+  // (herald-chat.html, mirroring the wiki sidebar): ≥900px it swaps the
+  // docked column for a 36px restore rail, <900px the rail button opens the
+  // overlay drawer. The collapsed choice persists globally in localStorage
+  // lexa-chat-sidebar ("0" = collapsed); hydrated client-side (SSR-safe —
+  // no window access during render).
+  const [sidebarOpen, setSidebarOpen] = useState(true);
+  useEffect(() => {
+    try {
+      if (window.localStorage.getItem("lexa-chat-sidebar") === "0") setSidebarOpen(false);
+    } catch {
+      // non-fatal
+    }
+  }, []);
+  const toggleSidebar = useCallback(() => {
+    setSidebarOpen((v) => {
+      const next = !v;
+      try {
+        window.localStorage.setItem("lexa-chat-sidebar", next ? "1" : "0");
+      } catch {
+        // non-fatal
+      }
+      return next;
+    });
+  }, []);
   useEffect(() => {
     if (!projectId) return;
     if (thread) {
@@ -272,30 +347,51 @@ export function HeraldChatPage({ slug, thread }: { slug: string; thread?: string
 
   const { data: agents = [] } = useAgents();
   const { data: skills = [] } = useSkills();
-  const [selection, setSelection] = useState({ agentId: "", skillId: "" });
-  const effectiveAgentId = selection.agentId !== "" ? selection.agentId : (agents.find((a) => a.id === "lexa")?.id ?? agents[0]?.id ?? "");
-  const agentSkillIds = new Set(agents.find((a) => a.id === effectiveAgentId)?.skillIds ?? []);
-  const effectiveSkillId = agentSkillIds.has(selection.skillId) ? selection.skillId : "";
+  // Skill stays OPTIONAL per message — chat starts with none selected and
+  // messages go out without one unless picked here (herald-chat.html
+  // composer annotation). Changing skill mid-thread mints a fresh thread
+  // server-side.
+  const [skillId, setSkillId] = useState("");
+  // Per-turn thinking effort override (herald-chat.html composer): ""
+  // follows the project default; an explicit level rides the next stream
+  // payload only, then falls back. Resets on thread switch / New chat.
+  const [effort, setEffort] = useState<HeraldReasoningEffort | "">("");
+  // Chips filter to the Herald Agent junction list — chat ALWAYS runs the
+  // herald lane, regardless of the project engine.
+  const heraldSkillIds = new Set(agents.find((a) => a.id === ENGINE_AGENT_IDS.herald)?.skillIds ?? []);
+  const heraldSkills = skills.filter((s) => heraldSkillIds.has(s.id));
+  const effectiveSkillId = heraldSkillIds.has(skillId) ? skillId : "";
 
   const streamKey = projectId ? `herald-chat:${chatId}` : null;
   const stream = useHeraldStream(streamKey);
   const streaming = stream.status === "connecting" || stream.status === "streaming";
 
+  useEffect(() => {
+    setEffort("");
+  }, [chatId]);
+
   const [input, setInput] = useState("");
   const [images, setImages] = useState<HeraldImage[]>([]);
-  const [lastMessage, setLastMessage] = useState<string | null>(null);
-  const [resetOpen, setResetOpen] = useState(false);
-  const [resetError, setResetError] = useState<string | null>(null);
 
   // "@" mentions over the plain composer textarea (mentions-autocomplete.html).
   const composerRef = useRef<HTMLTextAreaElement>(null);
   const mention = useMentionTokens({ slug, value: input, onChange: setInput });
 
   const busy409 = stream.status === "error" && stream.error?.code === "HERALD_TASK_ACTIVE";
-  const failed = stream.status === "error" && stream.error?.code !== "HERALD_TASK_ACTIVE";
   const providerMissing = !settingsLoading && settings === null;
 
-  const agentName = agents.find((a) => a.id === effectiveAgentId)?.name;
+  // Engine gate (herald-chat.html): chat ALWAYS runs the herald lane — under
+  // a blacksmith project default every stream fails up front, so the banner
+  // renders before any attempt.
+  const engineGate = settings?.engine === "blacksmith";
+
+  // Vision resolution mirrors task create: primary inline parts or a
+  // configured vision model; without either, attach is disabled with a
+  // tooltip pointing at Project Settings → Herald vision.
+  const visionReady = hasVisionCapability(settings);
+  const attachDisabled = !settingsLoading && settings !== null && !visionReady;
+  const ATTACH_DISABLED_TITLE = "Images are disabled — configure vision in Project Settings → Herald.";
+
   const skillName = skills.find((s) => s.id === effectiveSkillId)?.name;
 
   // Terminal stream states refetch the transcript so persisted partials,
@@ -311,25 +407,36 @@ export function HeraldChatPage({ slug, thread }: { slug: string; thread?: string
 
   const startStream = useCallback(
     (message: string, fromIndex?: number) => {
+      // Fresh chat: mint the thread id here — an empty chatId would collapse
+      // every new conversation onto a single server-side row.
+      let threadId = chatId;
+      if (!threadId) {
+        threadId = crypto.randomUUID();
+        applyChatId(threadId);
+        void navigate({ search: { thread: threadId }, replace: true });
+      }
       stream.send("/api/herald/chat/stream", {
         projectId,
-        chatId,
+        chatId: threadId,
         message,
-        agentId: effectiveAgentId || undefined,
+        // Persona is NOT sent: it resolves server-side from the project's
+        // configured Herald Agent (Project Settings → Herald).
         skillId: effectiveSkillId || undefined,
         // Backend contract gap (reported): chat attachments need a storageKey
         // minted by an upload endpoint that doesn't exist yet — images stay
         // local previews until that lands.
         attachments: [],
+        // Explicit per-turn override only — omitted = project default.
+        ...(effort ? { reasoningEffort: effort } : {}),
         ...(fromIndex !== undefined ? { fromIndex } : {}),
       });
+      setEffort("");
     },
-    [stream, projectId, chatId, effectiveAgentId, effectiveSkillId]
+    [stream, projectId, chatId, effectiveSkillId, effort, applyChatId, navigate]
   );
 
   const send = (message: string) => {
     if (!projectId || !message || streaming) return;
-    setLastMessage(message);
     setTurns((prev) => [...(prev ?? []), { role: "user", text: message, imageCount: images.length, rawIndex: -1 }]);
     setInput("");
     mention.close();
@@ -355,7 +462,6 @@ export function HeraldChatPage({ slug, thread }: { slug: string; thread?: string
     const message = draft.trim();
     if (!message || streaming) return;
     const idx = resendIndex(rawMessages, "edit", target.rawIndex) ?? target.rawIndex;
-    setLastMessage(message);
     truncateFrom(target, message);
     startStream(message, idx);
   };
@@ -365,7 +471,6 @@ export function HeraldChatPage({ slug, thread }: { slug: string; thread?: string
   const handleRegenerate = (target: ChatTurn) => {
     if (streaming) return;
     const idx = resendIndex(rawMessages, "regenerate") ?? target.rawIndex;
-    setLastMessage(target.text);
     truncateFrom(target);
     startStream(target.text, idx);
   };
@@ -385,12 +490,12 @@ export function HeraldChatPage({ slug, thread }: { slug: string; thread?: string
     }
     if (!trigger) return;
     const idx = resendIndex(rawMessages, "edit", trigger.rawIndex) ?? trigger.rawIndex;
-    setLastMessage(trigger.text);
     truncateFrom(trigger);
     startStream(trigger.text, idx);
   };
 
   const pasteIntoComposer = (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+    if (attachDisabled) return;
     const files = Array.from(e.clipboardData.files).filter((f) => f.type.startsWith("image/"));
     if (files.length === 0) return;
     e.preventDefault();
@@ -415,31 +520,11 @@ export function HeraldChatPage({ slug, thread }: { slug: string; thread?: string
     selectThread(crypto.randomUUID());
   }, [selectThread]);
 
-  const handleExport = useCallback(
-    (id: string) => {
-      void api.exportHeraldChat(id).catch((err: Error & { code?: string }) => {
-        toast.push("error", "Export failed", err.code ?? err.message);
-      });
-    },
-    [toast]
-  );
-
-  const handleResetConfirm = async () => {
-    if (!projectId || !chatId) return;
-    try {
-      await deleteChat.mutateAsync({ chatId });
-      setTurns([]);
-      const fresh = crypto.randomUUID();
-      applyChatId(fresh);
-      void navigate({ search: { thread: fresh }, replace: true });
-      setResetOpen(false);
-      setResetError(null);
-    } catch (err) {
-      setResetError((err as { code?: string }).code ?? (err as Error).message);
-    }
-  };
-
   const headerSub = `${resolved?.name ?? ""} · thread with Herald — not tied to any document`;
+
+  // Stable markdown text-leaf hook (mention chips) — identity must hold
+  // across stream deltas or the memoized renderer re-lexes every frame.
+  const renderText = useCallback((text: string) => renderTokenized(text, slug), [slug]);
 
   // Last user turn index in display space — regenerate renders only there.
   const lastUserPos = useMemo(() => {
@@ -448,21 +533,44 @@ export function HeraldChatPage({ slug, thread }: { slug: string; thread?: string
     return -1;
   }, [turns]);
 
+  // Post-stream activity summary (done only) — attached to the trailing
+  // assistant turn while this tab's session still holds it.
+  const streamActivity = useMemo<ActivityView | undefined>(() => {
+    if (stream.status !== "done") return undefined;
+    if (!stream.reasoningText && stream.tools.length === 0) return undefined;
+    return { items: stream.items, tools: stream.tools, reasoningMs: stream.reasoningMs };
+  }, [stream.status, stream.items, stream.tools, stream.reasoningText, stream.reasoningMs]);
+
   const [editingPos, setEditingPos] = useState<number | null>(null);
   const [editDraft, setEditDraft] = useState("");
 
-  // Banner-retry optimistic truncation: the failed attempt's trigger is the
-  // last user turn in display space — drop everything after it so the resent
-  // turn doesn't duplicate.
-  const truncateAfterLastUser = () => {
-    setTurns((prev) => {
-      const arr = prev ?? [];
-      for (let i = arr.length - 1; i >= 0; i--) {
-        if (arr[i].role === "user") return arr.slice(0, i + 1);
-      }
-      return arr;
-    });
-  };
+  // Scroll-to-bottom affordance (herald-chat.html): auto-follow keeps the
+  // view pinned to new deltas while at bottom; scrolling up releases the pin
+  // until a jump back (button click or manual scroll to bottom).
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const atBottomRef = useRef(true);
+  const [atBottom, setAtBottom] = useState(true);
+  const handleTranscriptScroll = useCallback(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const near = el.scrollHeight - el.scrollTop - el.clientHeight < 24;
+    atBottomRef.current = near;
+    setAtBottom(near);
+  }, []);
+  const scrollToBottom = useCallback((smooth: boolean) => {
+    const el = scrollRef.current;
+    if (!el) return;
+    if (typeof el.scrollTo === "function") {
+      el.scrollTo({ top: el.scrollHeight, behavior: smooth ? "smooth" : "auto" });
+    } else {
+      el.scrollTop = el.scrollHeight;
+    }
+  }, []);
+  useEffect(() => {
+    if (atBottomRef.current) scrollToBottom(false);
+    // stream.items covers tool/reasoning/text item growth — bubble height
+    // changes whenever ANY timeline element mounts, not just text deltas.
+  }, [turns, stream.text, stream.reasoningText, stream.items, scrollToBottom]);
 
   const beginEdit = (pos: number) => {
     const arr = turns ?? [];
@@ -483,29 +591,27 @@ export function HeraldChatPage({ slug, thread }: { slug: string; thread?: string
   };
 
   return (
-    <main className="chat-shell">
+    <div className="chat-layout">
+      <ThreadsSidebar
+        threads={listQuery.data ?? []}
+        activeChatId={chatId}
+        search={chatSearch}
+        onSearchChange={setChatSearch}
+        onSelect={selectThread}
+        onNewChat={startNewChat}
+        onPinToggle={(id, pinned) => void metaChat.mutateAsync({ chatId: id, pinned })}
+        onRename={(id, title) => renameChat.mutateAsync({ chatId: id, title })}
+        onDelete={(id) => deleteChat.mutateAsync({ chatId: id })}
+        open={sidebarOpen}
+        onToggle={toggleSidebar}
+        onClose={() => setSidebarOpen(false)}
+      />
+      <main className="chat-shell">
       {/* Thread header */}
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "16px 24px 0" }}>
         <div className="flex items-center gap-3">
           <h1 className="font-display text-xl font-semibold text-lx-text-primary">Herald Chat</h1>
           <span className="font-micro text-2xs text-lx-text-muted uppercase tracking-[0.04em]">{headerSub}</span>
-        </div>
-        <div className="flex items-center gap-2">
-          <ChatHistoryDropdown
-            threads={listQuery.data ?? []}
-            activeChatId={chatId}
-            search={chatSearch}
-            onSearchChange={setChatSearch}
-            onSelect={selectThread}
-            onNewChat={startNewChat}
-            onPinToggle={(id, pinned) => void metaChat.mutateAsync({ chatId: id, pinned })}
-            onExport={handleExport}
-            onRename={(id, title) => renameChat.mutateAsync({ chatId: id, title })}
-            onDelete={(id) => deleteChat.mutateAsync({ chatId: id })}
-          />
-          <button type="button" className="btn btn-danger btn-sm" onClick={() => { setResetOpen(true); setResetError(null); }}>
-            Delete chat
-          </button>
         </div>
       </div>
 
@@ -514,7 +620,7 @@ export function HeraldChatPage({ slug, thread }: { slug: string; thread?: string
           <div className="card-panel" style={{ maxWidth: 760, margin: "0 auto" }}>
             <div className="empty-state" style={{ padding: "32px 20px" }}>
               <div className="empty-state-icon">
-                <Zap size={24} strokeWidth={1.5} />
+                <HearthFlameIcon size={24} />
               </div>
               <div className="text-sm font-medium text-lx-text-primary">No AI provider configured</div>
               <p className="text-xs text-lx-text-secondary mt-1" style={{ maxWidth: 260 }}>
@@ -531,7 +637,8 @@ export function HeraldChatPage({ slug, thread }: { slug: string; thread?: string
       ) : (
         <>
           {/* Transcript */}
-          <div className="chat-scroll">
+          <div className="chat-transcript">
+            <div ref={scrollRef} className="chat-scroll" onScroll={handleTranscriptScroll}>
             <div className="chat-column">
               {(turns ?? []).map((turn, pos) =>
                 turn.role === "user" ? (
@@ -561,7 +668,7 @@ export function HeraldChatPage({ slug, thread }: { slug: string; thread?: string
                           <button type="button" className="btn btn-primary btn-icon-sm" title="Save edit (Enter)" aria-label="Save edit" onClick={() => commitEdit(pos)}>
                             <CheckIcon />
                           </button>
-                          <button type="button" className="btn btn-ghost btn-icon-sm" title="Cancel edit (Esc)" aria-label="Cancel edit" onClick={cancelEdit}>
+                          <button type="button" className="icon-btn" title="Cancel edit (Esc)" aria-label="Cancel edit" onClick={cancelEdit}>
                             <XIcon />
                           </button>
                         </div>
@@ -590,82 +697,78 @@ export function HeraldChatPage({ slug, thread }: { slug: string; thread?: string
                       </>
                     )}
                   </div>
-                ) : (
-                  <AssistantBubble
-                    key={pos}
-                    turn={turn}
-                    slug={slug}
-                    agentName={agentName}
-                    skillName={skillName}
-                    projectId={projectId}
-                    streaming={streaming}
-                    onRetry={() => handleRetryTurn(turn)}
-                  />
-                )
+                 ) : (
+                   <AssistantBubble
+                     key={pos}
+                     turn={turn}
+                     slug={slug}
+                     skillName={skillName}
+                     projectId={projectId}
+                     streaming={streaming}
+                     renderText={renderText}
+                     activity={streamActivity && pos === (turns?.length ?? 0) - 1 ? streamActivity : undefined}
+                     onRetry={() => handleRetryTurn(turn)}
+                   />
+                 )
               )}
 
-              {streaming && (
-                <div className="bubble-ai">
-                  <div className="bubble-meta">Herald{agentName ? ` · ${agentName}` : ""}{skillName ? ` · ${skillName}` : ""}</div>
-                  {stream.tools.length > 0 && (
-                    <div className="flex items-center gap-2 mb-2" style={{ flexWrap: "wrap" }}>
-                      <HeraldToolChips tools={stream.tools} />
-                    </div>
-                  )}
-                  <div className="text-sm text-lx-text-secondary font-mono" style={{ lineHeight: "20px", fontSize: 12, whiteSpace: "pre-wrap" }}>
-                    {stream.text}
-                    <span style={{ color: "var(--lx-border-focus)" }}>▍</span>
+                {streaming && (
+                  <div className="bubble-ai">
+                    <div className="bubble-meta">Herald · Herald Agent persona{skillName ? ` · ${skillName}` : ""}</div>
+                    <HeraldActivity
+                      items={stream.items}
+                      tools={stream.tools}
+                      reasoningActive={stream.reasoningActive}
+                      reasoningMs={stream.reasoningMs}
+                      renderText={renderText}
+                    />
                   </div>
-                </div>
-              )}
+                )}
+             </div>
             </div>
+            {!atBottom && (
+              <button
+                type="button"
+                className="btn btn-ghost btn-icon-sm chat-jump-bottom"
+                title="Jump to latest"
+                aria-label="Jump to latest"
+                onClick={() => scrollToBottom(true)}
+              >
+                <ArrowDown size={14} strokeWidth={1.5} />
+              </button>
+            )}
           </div>
 
           {/* Composer */}
           <div className="chat-composer">
             <div className="chat-composer-inner">
-              <AgentSkillPicker
-                agents={agents}
-                skills={skills}
-                selection={{ agentId: effectiveAgentId, skillId: effectiveSkillId }}
-                onChange={(next) => setSelection({ agentId: next.agentId, skillId: next.skillId })}
+              {/* Shared picker component (skill only — persona comes from
+                  project settings; no agent picker exists). */}
+              <SkillPicker
+                skills={heraldSkills}
+                skillId={effectiveSkillId}
+                onSkillChange={setSkillId}
                 layout="inline"
                 allowNoSkill
+                trailing={
+                  <EffortPicker effort={effort} projectEffort={settings?.reasoningEffort ?? null} disabled={streaming} onChange={setEffort} />
+                }
               />
 
+              {engineGate && (
+                <div className="banner-warning mb-2">
+                  <svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} style={{ flexShrink: 0 }}>
+                    <path d="M13 2 3 14h7l-1 8 10-12h-7l1-8z" />
+                  </svg>
+                  <span><span className="font-mono font-medium">ENGINE_NOT_SUPPORTED_FOR_CHAT</span> — this project's default engine is Blacksmith. Freeform chat needs the Herald engine; ask an admin to switch it in Project Settings → Herald.</span>
+                </div>
+              )}
               {busy409 && (
                 <div className="banner-warning mb-2">
                   <svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} style={{ flexShrink: 0 }}>
                     <path d="M13 2 3 14h7l-1 8 10-12h-7l1-8z" />
                   </svg>
                   <span><span className="font-mono font-medium">HERALD_TASK_ACTIVE</span> — Herald is already responding in this thread. Stop the current reply to send something new.</span>
-                </div>
-              )}
-              {failed && (
-                <div className="notice notice-danger mb-2" style={{ alignItems: "center" }}>
-                  <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} style={{ flexShrink: 0 }}>
-                    <circle cx="12" cy="12" r="10" />
-                    <path d="M12 8v4" />
-                    <path d="M12 16h.01" />
-                  </svg>
-                  <div className="flex-1">
-                    <span className="font-mono text-xs font-medium">{stream.error?.code}</span>
-                    <span className="text-xs" style={{ marginLeft: 8 }}>{stream.error?.message}</span>
-                  </div>
-                  <button type="button" className="btn btn-ghost btn-sm" style={{ flexShrink: 0, color: "var(--lx-text-primary)" }} onClick={() => stream.reset()}>Dismiss</button>
-                  <button
-                    type="button"
-                    className="btn btn-primary btn-sm"
-                    style={{ flexShrink: 0 }}
-                    onClick={() => {
-                      if (!lastMessage) return;
-                      const idx = resendIndex(rawMessages, "retry");
-                      truncateAfterLastUser();
-                      startStream(lastMessage, idx ?? undefined);
-                    }}
-                  >
-                    Retry
-                  </button>
                 </div>
               )}
 
@@ -746,7 +849,15 @@ export function HeraldChatPage({ slug, thread }: { slug: string; thread?: string
                   ) : (
                     <>
                       <div className="flex items-center gap-2">
-                        <HeraldImageAttach images={images} onChange={setImages} caps={CHAT_CAPS} hint="" compact />
+                        <HeraldImageAttach
+                          images={images}
+                          onChange={setImages}
+                          caps={CHAT_CAPS}
+                          hint=""
+                          compact
+                          disabled={attachDisabled}
+                          disabledTitle={ATTACH_DISABLED_TITLE}
+                        />
                         <span className="font-micro text-2xs text-lx-text-muted uppercase tracking-[0.04em]">≤3 images · ≤1.5MB total</span>
                       </div>
                       <button type="button" className="btn btn-primary btn-sm" disabled={!input.trim() || busy409} onClick={() => send(input.trim())}>
@@ -761,34 +872,8 @@ export function HeraldChatPage({ slug, thread }: { slug: string; thread?: string
           </div>
         </>
       )}
-
-      {/* Delete confirm (current thread) */}
-      {resetOpen && (
-        <>
-          <button type="button" className="slideover-overlay" onClick={() => setResetOpen(false)} aria-label="Close" />
-          <div className="fixed inset-0 flex items-center justify-center z-50 pointer-events-none">
-            <dialog open className="dialog dialog-enter pointer-events-auto" aria-modal="true" aria-label="Delete this chat?">
-              <div className="flex items-center justify-between mb-2">
-                <span className="font-display text-base font-semibold text-lx-text-primary">Delete this chat?</span>
-                <button type="button" className="btn btn-ghost btn-icon-sm" onClick={() => setResetOpen(false)} aria-label="Cancel delete">✕</button>
-              </div>
-              <p className="text-xs text-lx-text-secondary" style={{ lineHeight: "18px" }}>
-                This deletes the current transcript for you in {resolved?.name ?? "this project"} — both turns and attachments. The view lands on a fresh empty chat. This cannot be undone.
-              </p>
-              {resetError && (
-                <div className="notice notice-danger mt-3">
-                  <span className="font-mono text-xs font-medium">{resetError}</span>
-                </div>
-              )}
-              <div className="flex items-center justify-end gap-2 mt-4">
-                <button type="button" className="btn btn-ghost btn-sm" onClick={() => setResetOpen(false)}>Cancel</button>
-                <button type="button" className="btn btn-danger-solid btn-sm" onClick={handleResetConfirm}>Delete chat</button>
-              </div>
-            </dialog>
-          </div>
-        </>
-      )}
     </main>
+    </div>
   );
 }
 
@@ -810,22 +895,26 @@ function CopyButton({ text, label }: { text: string; label: string }) {
 function AssistantBubble({
   turn,
   slug,
-  agentName,
   skillName,
   projectId,
   streaming,
+  renderText,
+  activity,
   onRetry,
 }: {
   turn: ChatTurn;
   slug: string;
-  agentName?: string;
   skillName?: string;
   projectId?: string;
   streaming: boolean;
+  renderText: (text: string) => ReactNode;
+  activity?: ActivityView;
   onRetry: () => void;
 }) {
   const time = hhmm(turn.ts);
-  const meta = `Herald${agentName ? ` · ${agentName}` : ""}${skillName ? ` · ${skillName}` : ""}${turn.stopped ? " · stopped" : ""}`;
+  // Persona label mirrors the project's configured agent (read-only — chat
+  // always runs the Herald lane, so it is always the Herald Agent).
+  const meta = `Herald · Herald Agent persona${skillName ? ` · ${skillName}` : ""}${turn.stopped ? " · stopped" : ""}`;
   const segments = useMemo(() => splitFences(turn.text), [turn.text]);
   const citations = turn.citations;
   const guidance = turn.error ? guidanceFor(turn.error.code) : null;
@@ -871,7 +960,7 @@ function AssistantBubble({
           )}
           {guidance === "retry" && (
             <div className="mt-2">
-              <button type="button" className="btn btn-ghost-accent btn-sm" disabled={streaming} onClick={onRetry}>
+              <button type="button" className="btn btn-primary btn-sm" disabled={streaming} onClick={onRetry}>
                 <RegenerateIcon />
                 Retry
               </button>
@@ -880,30 +969,30 @@ function AssistantBubble({
         </div>
       ) : (
         <>
+          {activity && (
+            <HeraldActivity
+              items={activity.items}
+              tools={activity.tools}
+              reasoningActive={false}
+              reasoningMs={activity.reasoningMs}
+              done
+            />
+          )}
           {segments.map((seg, i) =>
             seg.fenced ? (
-              <div
-                key={i}
-                style={{
-                  position: "relative",
-                  background: "var(--lx-surface-input)",
-                  border: "1px solid var(--lx-border-default)",
-                  borderRadius: 6,
-                  padding: "8px 28px 8px 10px",
-                  marginTop: i === 0 ? 0 : 8,
-                  fontFamily: "var(--lx-font-mono)",
-                  fontSize: 12,
-                  lineHeight: "20px",
-                  whiteSpace: "pre-wrap",
-                  color: "var(--lx-text-secondary)",
-                }}
-              >
-                <span style={{ position: "absolute", top: 4, right: 4 }}><CopyButton text={seg.body} label="Copy code" /></span>
-                {seg.body}
+              <div key={i} className="herald-codeblock">
+                <span className="herald-codeblock-chrome">
+                  {seg.lang && <span className="herald-codeblock-lang">{seg.lang}</span>}
+                  <CopyButton text={seg.body} label="Copy code" />
+                </span>
+                <code
+                  className="hljs-theme"
+                  dangerouslySetInnerHTML={{ __html: highlightCode(seg.body, seg.lang) }}
+                />
               </div>
             ) : (
-              <div key={i} className="text-sm text-lx-text-primary" style={{ lineHeight: "22px", whiteSpace: "pre-wrap" }}>
-                {renderTokenized(seg.body, slug)}
+              <div key={i} className="bubble-md">
+                <MarkdownContent md={seg.body} renderText={renderText} />
               </div>
             )
           )}
@@ -931,7 +1020,7 @@ function AssistantBubble({
             <div className="flex items-center gap-2 mt-2">
               <span className="font-micro text-2xs text-lx-text-muted" style={{ textTransform: "uppercase", letterSpacing: "0.04em" }}>● Stopped</span>
               <span style={{ flex: 1, height: 1, background: "var(--lx-border-subtle)" }} />
-              <button type="button" className="btn btn-ghost-accent btn-sm" disabled={streaming} onClick={onRetry}>
+              <button type="button" className="btn btn-primary btn-sm" disabled={streaming} onClick={onRetry}>
                 <RegenerateIcon />
                 Retry
               </button>

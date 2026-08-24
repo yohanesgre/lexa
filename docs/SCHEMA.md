@@ -699,6 +699,11 @@ CREATE TABLE forge_sessions (
 -- are seeded builtins; builtins are editable + resettable but not deletable.
 -- Renamed from forge_* by migration 0010 (Herald) — column definitions
 -- unchanged; both tiers share these catalogs.
+-- Hearth refactor (0013): exactly TWO builtin agents — 'hearth-herald'
+-- ("Herald Agent", PM-assistant persona) and 'hearth-blacksmith'
+-- ("Blacksmith Agent"). The generic 'lexa' entry is retired. Skill
+-- availability per agent = lexa_agent_skills junction rows ONLY (no JSON
+-- columns); builtins are editable + resettable but not deletable.
 CREATE TABLE lexa_agents (
   id           TEXT PRIMARY KEY,
   name         TEXT NOT NULL UNIQUE,
@@ -743,6 +748,40 @@ CREATE TABLE herald_settings (
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
+
+-- ============================================================
+-- Hearth engine switching + vision (migration 0013)
+-- ============================================================
+-- Per-project execution engine for document threads + Generate:
+-- 'herald' (server-side chat() lane) or 'blacksmith' (daemon lane).
+-- Freeform chat ALWAYS runs the herald lane regardless of engine.
+-- The member-facing engine toggle is a personal overlay (client-side
+-- session preference) — `engine` here is the project default, written by
+-- admins only; the toggle UI renders only when engine_switcher_enabled=1.
+ALTER TABLE herald_settings ADD COLUMN engine TEXT NOT NULL DEFAULT 'herald'
+  CHECK (engine IN ('herald','blacksmith'));
+ALTER TABLE herald_settings ADD COLUMN engine_switcher_enabled INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE herald_settings ADD COLUMN primary_supports_images INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE herald_settings ADD COLUMN vision_model TEXT;
+
+-- Agent catalog rebinding (0013, single transaction — atomic):
+-- Herald Agent gets a NEW internal id; forge_tasks.agent_id FKs and any
+-- lexa_agent_skills junction rows are rebound in the same tx. One-time
+-- consequence: existing threads keyed on agentId reset once (continue-vs-
+-- fresh sees an unknown agentId → fresh overwrite).
+UPDATE lexa_agents SET id = 'hearth-herald', name = 'Herald Agent',
+  instructions = <companion-persona instructions>
+WHERE id = 'lexa';
+UPDATE forge_tasks SET agent_id = 'hearth-herald' WHERE agent_id = 'lexa';
+UPDATE lexa_agent_skills SET agent_id = 'hearth-herald' WHERE agent_id = 'lexa';
+INSERT INTO lexa_agents (id, name, description, instructions, is_builtin)
+VALUES ('hearth-blacksmith', 'Blacksmith Agent', '', <coding-agent instructions>, 1);
+-- Junction seeding: bind existing builtin skills to Herald Agent;
+-- Blacksmith Agent starts with the coding-appropriate subset.
+INSERT INTO lexa_agent_skills (agent_id, skill_id)
+SELECT 'hearth-herald', id FROM lexa_skills WHERE is_builtin = 1;
+INSERT INTO lexa_agent_skills (agent_id, skill_id)
+SELECT 'hearth-blacksmith', id FROM lexa_skills WHERE id IN (<coding subset>);
 
 -- Herald thread transcripts: one persisted conversation per document
 -- (ModelMessage[] JSON in `messages`). Long threads roll into `summary`
@@ -967,6 +1006,15 @@ hermes/command-code), and reports the result.
 - **Auth:** browser calls use the normal Bearer API key; daemon endpoints
   (`/api/forge/daemon/*`, `/api/forge/runtimes/*`, `/api/forge/sessions`)
   accept `x-forge-token` (`LXK_FORGE_DAEMON_TOKEN`) or a Bearer key.
+
+### Hearth — two agents, per-project engine, vision chain
+Umbrella renamed **Hearth** (UI/docs/wireframes this cycle; internal identifiers `forge_tasks`/`forge_sessions`/`/api/forge/*`/`FORGE_*`/CLI are deferred — they keep their names).
+
+- **Exactly two builtin agents** (`lexa_agents`, migration 0013): `hearth-herald` ("Herald Agent") and `hearth-blacksmith` ("Blacksmith Agent") — same PM-assistant role, different execution architecture. The generic `lexa` entry is retired; its id is NOT reused.
+- **Skill availability = junction rows only.** Which skills an agent offers is whatever `lexa_agent_skills` says — admin-editable, no JSON columns on the agent rows.
+- **Engine switching:** `herald_settings.engine` ∈ `'herald'|'blacksmith'` applies to document threads + Generate. Freeform chat ALWAYS runs the herald lane; under `engine='blacksmith'` chat requests fail with `ENGINE_NOT_SUPPORTED_FOR_CHAT` (409). `engine_switcher_enabled=1` merely shows the member toggle, which is a personal overlay (client-side session preference) — it never writes `herald_settings.engine`; that column is the project default, admin-written.
+- **Vision resolution order** (per request): `primary_supports_images=1` → inline image parts; else `vision_model` configured → internal `analyze_image` tool delegation on the PRIMARY provider (same kind/api_key/base_url — only the model differs); the tool frame is suppressed from member UI; else attachments are rejected up front with `VISION_NOT_CONFIGURED` (409).
+- **Id rebind consequence (one-time):** threads keyed on the old agent id reset once after 0013 — continue-vs-fresh sees an unknown agentId and starts fresh.
 
 ### Task field options (custom priority/type)
 Priority and type are per-project option lists (`priority_options` / `type_options`), not global enums. `tasks.priority` / `tasks.type` are plain TEXT columns (DEFAULT `'medium'` / `'task'`) with **no FK** — SQLite enforces nothing; the service validates the value against the project's option rows (`InvalidOption` 422) and resolves an empty value to the first option.

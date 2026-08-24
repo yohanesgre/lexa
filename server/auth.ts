@@ -11,9 +11,17 @@ export const PUBLIC_URL = process.env.LXK_PUBLIC_URL || "http://localhost:3000";
 // Dev-only trusted origin: vite dev (http://localhost:5173) proxies /api and
 // sends the Origin header on cookie-bearing auth POSTs (sign-out,
 // change-password, reset-password) — without this they 403 INVALID_ORIGIN.
-const TRUSTED_ORIGINS = process.env.LXK_ENV === "dev"
-  ? [PUBLIC_URL, "http://localhost:5173"]
-  : [PUBLIC_URL];
+// LXK_TRUSTED_ORIGINS (comma-separated) adds LAN/Tailscale origins so plain-HTTP
+// sign-ins from other devices pass the origin check,
+// e.g. http://192.168.0.131:3000,http://machine-name.tailnet-name.ts.net:3000
+const extraTrustedOrigins = (process.env.LXK_TRUSTED_ORIGINS || "")
+  .split(",")
+  .map((o) => o.trim())
+  .filter((o) => o.length > 0);
+const TRUSTED_ORIGINS =
+  process.env.LXK_ENV === "dev"
+    ? [PUBLIC_URL, "http://localhost:5173", ...extraTrustedOrigins]
+    : [PUBLIC_URL, ...extraTrustedOrigins];
 
 // Per-IP throttle for the keyless /api/auth/* surface (the per-email login
 // budget only guards one email; an attacker can otherwise spam scrypt-hash
@@ -193,6 +201,6 @@ export const auth = betterAuth({
     }),
     tanstackStartCookies(),
   ],
-  advanced: { useSecureCookies: true },
+  advanced: { useSecureCookies: PUBLIC_URL.startsWith("https") },
   trustedOrigins: TRUSTED_ORIGINS,
 });

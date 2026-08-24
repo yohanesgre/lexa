@@ -8,17 +8,49 @@ import type { StreamFrame } from "../../shared/herald";
 
 export interface HeraldToolChip {
   key: string;
+  // Raw tool name from the frame (e.g. `wiki_search`) — rendered as the
+  // bracketed `[name]` prefix of the verbose transcript line.
+  name: string;
+  // Humanized fallback copy when the frame carries no detail.
   label: string;
   phase: "call" | "result";
+  // Verbose process sentence from the call frame's `detail` (e.g.
+  // `Searching wiki for "setup"`) — kept intact through the call→result flip.
+  detail?: string;
+  // Detail from the RESULT frame, if any — rendered as the compact
+  // `↳ …` line beneath the completed call line.
+  resultDetail?: string;
 }
 
 export type HeraldStreamStatus = "idle" | "connecting" | "streaming" | "done" | "error" | "aborted";
+
+// Chronological reply timeline (herald-chat.html): one entry per content
+// element in FRAME ARRIVAL ORDER — reasoning bursts, tool calls and text
+// deltas interleave exactly as the model emitted them. Consecutive delta
+// frames merge into the current text item; a tool result replaces its
+// chip in place.
+export type HeraldTimelineItem =
+  | { kind: "text"; text: string }
+  | { kind: "tool"; chip: HeraldToolChip }
+  | { kind: "reasoning"; text: string; ms: number | null };
 
 export interface HeraldStreamSnapshot {
   status: HeraldStreamStatus;
   frames: StreamFrame[];
   text: string;
   tools: HeraldToolChip[];
+  // Ordered timeline for the streaming bubble renderer. Session-memory
+  // only, like the rest of the ephemeral state.
+  items: HeraldTimelineItem[];
+  // Ephemeral reasoning buffer from `reasoning` SSE frames — lives only in
+  // this session's memory, never persisted; fetched transcripts have none.
+  reasoningText: string;
+  // True while the latest frame was a reasoning delta (drives the
+  // auto-expanded Thinking row); any other frame closes the burst.
+  reasoningActive: boolean;
+  // Accumulated wall time of completed reasoning bursts (null while none
+  // has closed yet) — feeds the "Thought for Ns" label.
+  reasoningMs: number | null;
   error: { code: string; message: string } | null;
   usage: { in: number; out: number } | null;
 }
@@ -28,11 +60,15 @@ const IDLE: HeraldStreamSnapshot = Object.freeze({
   frames: [],
   text: "",
   tools: [],
+  items: [],
+  reasoningText: "",
+  reasoningActive: false,
+  reasoningMs: null,
   error: null,
   usage: null,
 });
 
-// Tool frame names → wireframe chip copy (herald-popover.html annotations).
+// Tool frame names → wireframe chip copy (herald-chat.html annotations).
 function toolLabel(name: string): string {
   switch (name) {
     case "web_search":
@@ -43,6 +79,13 @@ function toolLabel(name: string): string {
     default:
       return name;
   }
+}
+
+// `detail` rides on tool frames per the backend contract but isn't on the
+// shared StreamFrame union yet — read it defensively at the SSE boundary.
+function frameDetail(frame: StreamFrame): string | undefined {
+  const detail = (frame as { detail?: unknown }).detail;
+  return typeof detail === "string" && detail.trim().length > 0 ? detail : undefined;
 }
 
 class HeraldStreamSession {
@@ -120,36 +163,94 @@ class HeraldStreamSession {
     let buffer = "";
     const frames: StreamFrame[] = [];
     let tools = [...this.snapshot.tools];
+    let items: HeraldTimelineItem[] = [...this.snapshot.items];
     let text = "";
     let toolSeq = tools.length;
+    let reasoningText = this.snapshot.reasoningText;
+    let reasoningActive = false;
+    let reasoningMs = this.snapshot.reasoningMs;
+    let burstStart = 0;
+
+    // Bank the open burst: aggregate ms for the summary label + per-item ms
+    // for the row's own "Thought for Ns" label.
+    const closeBurst = (): Partial<HeraldStreamSnapshot> => {
+      reasoningActive = false;
+      const elapsed = Math.max(1, Math.round(performance.now() - burstStart));
+      reasoningMs = (reasoningMs ?? 0) + elapsed;
+      const last = items[items.length - 1];
+      if (last?.kind === "reasoning" && last.ms === null) {
+        items = [...items.slice(0, -1), { ...last, ms: elapsed }];
+      }
+      return { reasoningActive: false, reasoningMs, items: [...items] };
+    };
 
     const handleFrame = (frame: StreamFrame) => {
       frames.push(frame);
-      switch (frame.type) {
-        case "delta":
-          text += frame.text;
-          this.emit({ frames: [...frames], text });
-          break;
-        case "tool": {
-          if (frame.phase === "call") {
-            tools = [...tools, { key: `${frame.name}-${toolSeq++}`, label: toolLabel(frame.name), phase: "call" }];
+      // Ephemeral reasoning buffer — appended live, never persisted.
+      if (frame.type === "reasoning") {
+        if (frame.delta.length > 0) {
+          const last = items[items.length - 1];
+          if (!reasoningActive) {
+            reasoningActive = true;
+            burstStart = performance.now();
+            items = [...items, { kind: "reasoning", text: frame.delta, ms: null }];
+          } else if (last?.kind === "reasoning") {
+            items = [...items.slice(0, -1), { ...last, text: last.text + frame.delta }];
           } else {
-            // Flip the most recent unresolved chip of the same tool to result.
-            const index = tools.findLastIndex((t) => t.label === toolLabel(frame.name) && t.phase === "call");
-            if (index >= 0) tools = tools.map((t, i) => (i === index ? { ...t, phase: "result" } : t));
+            items = [...items, { kind: "reasoning", text: frame.delta, ms: null }];
           }
-          this.emit({ frames: [...frames], tools: [...tools] });
+          reasoningText += frame.delta;
+          this.emit({ frames: [...frames], items: [...items], reasoningText, reasoningActive: true });
+        }
+        return;
+      }
+      // Any non-reasoning frame closes the current burst and banks its time.
+      let burstPatch: Partial<HeraldStreamSnapshot> = {};
+      if (reasoningActive) {
+        burstPatch = closeBurst();
+      }
+      switch (frame.type) {
+        case "delta": {
+          text += frame.text;
+          const last = items[items.length - 1];
+          if (last?.kind === "text") {
+            items = [...items.slice(0, -1), { kind: "text", text: last.text + frame.text }];
+          } else {
+            items = [...items, { kind: "text", text: frame.text }];
+          }
+          this.emit({ frames: [...frames], ...burstPatch, text, items: [...items] });
+          break;
+        }
+        case "tool": {
+          const detail = frameDetail(frame);
+          if (frame.phase === "call") {
+            const chip: HeraldToolChip = { key: `${frame.name}-${toolSeq++}`, name: frame.name, label: toolLabel(frame.name), phase: "call", detail };
+            tools = [...tools, chip];
+            items = [...items, { kind: "tool", chip }];
+          } else {
+            // Flip the most recent unresolved chip of the same tool to result;
+            // the result frame's detail rides separately so the call line
+            // keeps its process sentence.
+            const index = tools.findLastIndex((t) => t.name === frame.name && t.phase === "call");
+            if (index >= 0) {
+              const chip = { ...tools[index], phase: "result" as const, resultDetail: detail };
+              tools = tools.map((t, i) => (i === index ? chip : t));
+              const itemIndex = items.findLastIndex((it) => it.kind === "tool" && it.chip.key === chip.key);
+              if (itemIndex >= 0) items = items.map((it, i) => (i === itemIndex ? { kind: "tool" as const, chip } : it));
+            }
+          }
+          this.emit({ frames: [...frames], ...burstPatch, tools: [...tools], items: [...items] });
           break;
         }
         case "error":
-          this.emit({ frames: [...frames], status: "error", error: { code: frame.code, message: frame.message } });
+          this.emit({ frames: [...frames], status: "error", error: { code: frame.code, message: frame.message }, ...burstPatch });
           break;
         case "done":
           text = frame.text;
-          this.emit({ frames: [...frames], text, status: "done", usage: frame.usage });
+          this.emit({ frames: [...frames], text, status: "done", usage: frame.usage, ...burstPatch });
           break;
         case "start":
-          this.emit({ frames: [...frames] });
+          this.emit({ frames: [...frames], ...burstPatch });
           break;
       }
     };
@@ -202,6 +303,10 @@ export interface HeraldStream extends HeraldStreamSnapshot {
   abort: () => void;
   // Clear the terminal state back to idle (Dismiss affordances).
   reset: () => void;
+  // Raw store surface — external observers (tests, devtools) can record
+  // every emitted snapshot without relying on React render batching.
+  subscribe: (listener: () => void) => () => void;
+  getSnapshot: () => HeraldStreamSnapshot;
 }
 
 // Subscribe to the session for `key`. A fresh key renders idle; send() boots
@@ -215,6 +320,8 @@ export function useHeraldStream(key: string | null): HeraldStream {
   );
   return {
     ...snapshot,
+    subscribe: (listener: () => void) => (session ? session.subscribe(listener) : noopSubscribe(listener)),
+    getSnapshot: () => session?.getSnapshot() ?? IDLE,
     send: (url: string, body: unknown) => {
       if (!key) return;
       const existing = sessions.get(key);

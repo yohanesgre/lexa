@@ -145,6 +145,11 @@ describe("HeraldSettingsRepo getByProject/maskedView", () => {
           searchProvider: "exa",
           hasSearchKey: true,
           urlAllowlist: "docs.example.com,api.example.com",
+          engine: "herald",
+          engineSwitcherEnabled: false,
+          primarySupportsImages: false,
+          visionModel: null,
+          reasoningEffort: null,
         });
         const raw = JSON.stringify(masked);
         expect(raw).not.toContain("sk-live-1234abcd");
@@ -181,6 +186,111 @@ describe("HeraldSettingsRepo getByProject/maskedView", () => {
       Effect.gen(function* () {
         const err = yield* repo.maskedView("p1").pipe(Effect.flip);
         expect(err._tag).toBe("RowNotFound");
+      })
+    );
+  });
+});
+
+describe("HeraldSettingsRepo hearth columns (0013)", () => {
+  const base = { kind: "openai_compatible" as const, baseUrl: "https://api.example.com/v1", model: "gpt-x", apiKey: "sk-secret-abcd" };
+
+  it("round-trips engine/vision columns", () => {
+    const db = tmpDb();
+    seed(db);
+    const repo = makeRepo(db);
+    Effect.runSync(
+      Effect.gen(function* () {
+        const row = yield* repo.upsert("p1", {
+          ...base,
+          engine: "blacksmith",
+          engineSwitcherEnabled: true,
+          primarySupportsImages: true,
+          visionModel: "claude-vision",
+        });
+        expect(row.engine).toBe("blacksmith");
+        expect(row.engine_switcher_enabled).toBe(1);
+        expect(row.primary_supports_images).toBe(1);
+        expect(row.vision_model).toBe("claude-vision");
+        const masked = yield* repo.maskedView("p1");
+        expect(masked.engine).toBe("blacksmith");
+        expect(masked.engineSwitcherEnabled).toBe(true);
+        expect(masked.primarySupportsImages).toBe(true);
+        expect(masked.visionModel).toBe("claude-vision");
+      })
+    );
+  });
+
+  it("omitted visionModel clears on update; stored keys kept when omitted", () => {
+    const db = tmpDb();
+    seed(db);
+    const repo = makeRepo(db);
+    Effect.runSync(
+      Effect.gen(function* () {
+        yield* repo.upsert("p1", {
+          ...base,
+          visionModel: "vl-model",
+          engine: "blacksmith",
+        });
+        const row = yield* repo.upsert("p1", { ...base, kind: "openai_compatible" });
+        expect(row.api_key).toBe("sk-secret-abcd");
+        expect(row.vision_model).toBeNull();
+        expect(row.engine).toBe("herald");
+      })
+    );
+  });
+
+  it("visionModel stores independently of the primary kind (shared credentials)", () => {
+    const db = tmpDb();
+    seed(db);
+    const repo = makeRepo(db);
+    const row = Effect.runSync(repo.upsert("p1", { ...base, visionModel: "inherits-primary" }));
+    expect(row.kind).toBe("openai_compatible");
+    expect(row.vision_model).toBe("inherits-primary");
+  });
+});
+
+describe("HeraldSettingsRepo reasoning_effort (0014)", () => {
+  const base = { kind: "openai_compatible" as const, baseUrl: "https://api.example.com/v1", model: "gpt-x", apiKey: "sk-secret-abcd" };
+
+  it("round-trips reasoningEffort; NULL default on fresh insert", () => {
+    const db = tmpDb();
+    seed(db);
+    const repo = makeRepo(db);
+    Effect.runSync(
+      Effect.gen(function* () {
+        const row = yield* repo.upsert("p1", { ...base });
+        expect(row.reasoning_effort).toBeNull();
+        expect((yield* repo.maskedView("p1")).reasoningEffort).toBeNull();
+
+        const set = yield* repo.upsert("p1", { ...base, reasoningEffort: "high" });
+        expect(set.reasoning_effort).toBe("high");
+        expect((yield* repo.maskedView("p1")).reasoningEffort).toBe("high");
+      })
+    );
+  });
+
+  it("explicit null clears; omitted keeps stored value semantics consistent with other nullable fields (clears)", () => {
+    const db = tmpDb();
+    seed(db);
+    const repo = makeRepo(db);
+    Effect.runSync(
+      Effect.gen(function* () {
+        yield* repo.upsert("p1", { ...base, reasoningEffort: "low" });
+        const cleared = yield* repo.upsert("p1", { ...base, reasoningEffort: null });
+        expect(cleared.reasoning_effort).toBeNull();
+      })
+    );
+  });
+
+  it("masked view never leaks anything beyond the effort enum value", () => {
+    const db = tmpDb();
+    seed(db);
+    const repo = makeRepo(db);
+    Effect.runSync(
+      Effect.gen(function* () {
+        yield* repo.upsert("p1", { ...base, reasoningEffort: "minimal" });
+        const masked = yield* repo.maskedView("p1");
+        expect(masked.reasoningEffort).toBe("minimal");
       })
     );
   });

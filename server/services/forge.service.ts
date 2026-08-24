@@ -14,15 +14,22 @@ import * as msg from "../activity-messages";
 import { rowToForgeSession, RuntimeWithTeam } from "../../shared/db";
 import type { ForgeTask, ForgeTaskLog, DocumentSource, TipTapDoc, LexaAgent, LexaSkill, ForgeSession, ActivityType, ForgeProvider } from "../../shared/types";
 
-// Builtin seed defaults — mirrors migrations/0001_init.sql (fresh installs) and
-// migrations/0004_forge_pm_skills.sql (existing DBs).
-// Reset to default restores these exact values (and, for Lexa, the full
-// builtin skill set). Keep the two in sync when editing either.
-const DEFAULT_AGENT: { id: string; instructions: string; skillIds: string[] } = {
-  id: "lexa",
+// Builtin seed defaults — mirrors migrations/0001_init.sql (fresh installs,
+// pre-0013 shape) and migrations/0013_hearth_engine.sql (the two-agent Hearth
+// catalog). Reset to default restores these exact values (and skill sets).
+// Keep the two in sync when editing either.
+export const HERALD_AGENT: { id: string; instructions: string; skillIds: string[] } = {
+  id: "hearth-herald",
   instructions:
-    "You are Forge, Lexa's project management assistant. You help teams run their projects: you write task descriptions, requirements, and wiki pages, and you sharpen the team's documents — spotting missing details, unclear scope, and weak acceptance criteria. You may read files in your working directory (the project workspace) to ground your writing in the actual repo and docs. You do not write files, run commands, or act on any system — your whole output is the text you write. Match the document's existing voice and structure. If the linked sources contradict the document, prefer the sources.",
+    "You are the Herald Agent, Lexa's companion project-management assistant. You help teams run their projects: you draft and sharpen task descriptions, requirements, and wiki pages, spot missing details, unclear scope, and weak acceptance criteria, and answer questions about the project. You may read files in your working directory (the project workspace) to ground your writing in the actual repo and docs. You do not write files, run commands, or act on any system — your whole output is the text you write. Match the document's existing voice and structure. If the linked sources contradict the document, prefer the sources.",
   skillIds: ["requirements", "deliverables", "review", "definition-of-done", "status", "polish"],
+};
+
+export const BLACKSMITH_AGENT: { id: string; instructions: string; skillIds: string[] } = {
+  id: "hearth-blacksmith",
+  instructions:
+    "You are the Blacksmith Agent, a coding agent working inside a persistent project workspace. You implement, refactor, and debug code: read the repository, plan the change, apply it, and verify with builds or tests where possible. Follow the project's existing conventions and keep changes minimal and focused. When a task is ambiguous, choose the smallest reasonable interpretation and state your assumption in the final summary.",
+  skillIds: ["requirements", "definition-of-done", "review"],
 };
 
 const DEFAULT_SKILLS: Record<string, string> = {
@@ -222,20 +229,22 @@ export class ForgeService extends Effect.Service<ForgeService>()("Lexa/ForgeServ
           return yield* repo.findAgentById(agentId).pipe(Effect.catchTag("RowNotFound", () => new AgentNotFound({ id: agentId })));
         }),
 
-      // Builtin-only: restore the seeded instructions + the full builtin skill set.
+      // Builtin-only: restore the seeded instructions + the agent's default
+      // skill set (Herald Agent and Blacksmith Agent since 0013).
       resetAgentToDefault: (id: string): Effect.Effect<LexaAgent, AgentNotFound | ForgeBuiltinDelete | ConstraintViolation | DbError> =>
         Effect.gen(function* () {
           const agent = yield* repo.findAgentById(id).pipe(Effect.catchTag("RowNotFound", () => new AgentNotFound({ id })));
-          if (!agent.isBuiltin || agent.id !== DEFAULT_AGENT.id) {
+          const seed = agent.id === HERALD_AGENT.id ? HERALD_AGENT : agent.id === BLACKSMITH_AGENT.id ? BLACKSMITH_AGENT : null;
+          if (!agent.isBuiltin || seed === null) {
             return yield* new ForgeBuiltinDelete({ kind: "agent", name: agent.name });
           }
           return yield* withTx(
             db,
             Effect.gen(function* () {
-              yield* repo.updateAgent(id, { instructions: DEFAULT_AGENT.instructions }).pipe(
+              yield* repo.updateAgent(id, { instructions: seed.instructions }).pipe(
                 Effect.catchTag("RowNotFound", () => new AgentNotFound({ id }))
               );
-              yield* repo.replaceAgentSkills(id, DEFAULT_AGENT.skillIds);
+              yield* repo.replaceAgentSkills(id, seed.skillIds);
               return yield* repo.findAgentById(id).pipe(Effect.catchTag("RowNotFound", () => new AgentNotFound({ id })));
             })
           );
