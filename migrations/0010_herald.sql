@@ -1,4 +1,4 @@
--- Herald assistant tier (docs/HERALD_PLAN.md S3/S4/S6/S8/S14).
+-- Herald assistant tier (see docs/ADR-0001-two-tier-ai-architecture.md).
 
 CREATE TABLE herald_settings (
   project_id TEXT PRIMARY KEY REFERENCES projects(id) ON DELETE CASCADE,

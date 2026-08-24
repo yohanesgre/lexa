@@ -246,8 +246,7 @@ Hearth is the umbrella for both AI execution tiers (renamed from Hearth —
 UI/docs/wireframes this cycle; internal identifiers `hearth_tasks`/
 `hearth_sessions`/`/api/hearth/*`/`HEARTH_*`/CLI keep their names until a
 deferred identifier migration). Both tiers are ACTIVE and
-co-exist; the run popover picks per-run. Design rationale: `docs/ADR-0001-two-tier-ai-architecture.md`; implementation plan + decisions log:
-`docs/HERALD_PLAN.md`.
+co-exist; the run popover picks per-run. Design rationale: `docs/ADR-0001-two-tier-ai-architecture.md` (decisions + amendments log).
 
 | | Herald | Blacksmith |
 |---|---|---|
