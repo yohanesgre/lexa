@@ -180,15 +180,15 @@ describe("syncRateLimitFromDb", () => {
 });
 
 describe("isRateLimitExemptPath", () => {
-  it("exempts token-gated forge machine surfaces", () => {
-    expect(isRateLimitExemptPath("/api/forge/daemon/tasks/abc/log")).toBe(true);
-    expect(isRateLimitExemptPath("/api/forge/runtimes/register")).toBe(true);
-    expect(isRateLimitExemptPath("/api/forge/machines/heartbeat")).toBe(true);
+  it("exempts token-gated hearth machine surfaces", () => {
+    expect(isRateLimitExemptPath("/api/hearth/daemon/tasks/abc/log")).toBe(true);
+    expect(isRateLimitExemptPath("/api/hearth/runtimes/register")).toBe(true);
+    expect(isRateLimitExemptPath("/api/hearth/machines/heartbeat")).toBe(true);
   });
 
   it("keeps everything else limited", () => {
-    expect(isRateLimitExemptPath("/api/forge/machines")).toBe(false);
-    expect(isRateLimitExemptPath("/api/forge/tasks/history")).toBe(false);
+    expect(isRateLimitExemptPath("/api/hearth/machines")).toBe(false);
+    expect(isRateLimitExemptPath("/api/hearth/tasks/history")).toBe(false);
     expect(isRateLimitExemptPath("/api/projects")).toBe(false);
     expect(isRateLimitExemptPath("/api/setup")).toBe(false);
   });

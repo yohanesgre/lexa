@@ -150,6 +150,7 @@ describe("HeraldSettingsRepo getByProject/maskedView", () => {
           primarySupportsImages: false,
           visionModel: null,
           reasoningEffort: null,
+          writeTools: [],
         });
         const raw = JSON.stringify(masked);
         expect(raw).not.toContain("sk-live-1234abcd");

@@ -198,7 +198,7 @@ function finalBanner(flavorName: string, fullDomain: string, apiKey: string, ima
 // authoritative. LXK_IMAGE_TAG stays explicit per-run via opts.
 const COMPOSE_MANAGED_KEYS = [
   "LXK_API_KEY", "VITE_LXK_API_KEY", "LXK_ADMIN_EMAILS", "LXK_ENV",
-  "LXK_FORGE_DAEMON_TOKEN", "CF_TUNNEL_TOKEN", "GITHUB_APP_ID",
+  "LXK_HEARTH_DAEMON_TOKEN", "CF_TUNNEL_TOKEN", "GITHUB_APP_ID",
   "GITHUB_PRIVATE_KEY", "GITHUB_PRIVATE_KEY_FILE", "GITHUB_WEBHOOK_SECRET",
   "LXK_PUBLIC_URL", "LXK_MAX_BODY_MB", "LOG_LEVEL",
   "LXK_IMAGE_TAG",

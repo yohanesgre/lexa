@@ -23,7 +23,7 @@ export const textEditorExtensions = [
   }),
   // StarterKit's code mark excludes all other marks (bold+code is invalid
   // in the schema), but valid CommonMark like **`code`** produces exactly
-  // that combination — and Forge results routinely contain it. Without this,
+  // that combination — and Hearth results routinely contain it. Without this,
   // accepting such a result throws and the review panel is stuck open.
   Code.extend({ excludes: "" }),
   Underline,

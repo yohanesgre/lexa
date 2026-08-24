@@ -21,7 +21,7 @@ import { auth, PUBLIC_URL } from "../auth";
 import { createApiMiddleware } from "./middleware";
 import { resolveRateLimitFromDbValues, syncRateLimitFromDb } from "./rate-limit";
 import { syncGitHubConfigFromDb, resetGithubCaches } from "../github/client";
-import { loadTaskRepoContent } from "../services/forge-repo-content";
+import { loadTaskRepoContent } from "../services/hearth-repo-content";
 import { clampLimit, nextCursor } from "../../shared/pagination";
 import { ProjectService } from "../services/project.service";
 import { ProjectRepo } from "../repos/project.repo";
@@ -58,7 +58,7 @@ import { WorkspaceInvitesService } from "../services/workspace-invites.service";
 import { PasswordLinksService } from "../services/password-links.service";
 import { FieldConfigService } from "../services/field-config.service";
 import { FieldConfigRepo } from "../repos/field-config.repo";
-import { ForgeService } from "../services/forge.service";
+import { HearthService } from "../services/hearth.service";
 import { HeraldService } from "../services/herald.service";
 import { HeraldSettingsRepo } from "../repos/herald-settings.repo";
 import { HeraldThreadRepo } from "../repos/herald-thread.repo";
@@ -66,7 +66,7 @@ import { buildChatExport } from "../services/herald.service";
 import { ProjectMemoryRepo } from "../repos/project-memory.repo";
 import { listModels, type ProviderConfig } from "../herald/provider";
 import { RuntimeEventService } from "../services/runtime-event.service";
-import { ForgeRepo } from "../repos/forge.repo";
+import { HearthRepo } from "../repos/hearth.repo";
 import { RuntimeEventRepo } from "../repos/runtime-event.repo";
 import { RuntimeMachineRepo } from "../repos/runtime-machine.repo";
 import { RuntimeMachineService } from "../services/runtime-machine.service";
@@ -84,7 +84,7 @@ import * as msg from "../activity-messages";
 import { WebhookEventRepo } from "../repos/webhook-event.repo";
 import { GitHubClient } from "../github/client";
 import { extractText } from "../../shared/tiptap-text";
-import type { ActivityEvent, ForgeTask, Project, DomainProject } from "../../shared/types";
+import type { ActivityEvent, HearthTask, Project, DomainProject } from "../../shared/types";
 import type { StreamFrame } from "../../shared/herald";
 
 const ApiKeySchema = Schema.Struct({
@@ -393,7 +393,7 @@ const fieldConfigGroup = HttpApiGroup.make("field-config")
   .add(HttpApiEndpoint.put("putFieldConfig", "/projects/:slug/field-config")
     .setPath(SlugPath).setPayload(FieldConfigPayload).addSuccess(FieldConfigSchema));
 
-// ── Forge (runtime agent writing assistant) ──
+// ── Hearth (runtime agent writing assistant) ──
 
 const RuntimeModelSchema = Schema.Struct({
   id: Schema.String,
@@ -427,7 +427,7 @@ const RuntimeSchema = Schema.Struct({
   createdAt: Schema.String,
 });
 
-const ForgeTaskSchema = Schema.Struct({
+const HearthTaskSchema = Schema.Struct({
   id: Schema.String,
   key: Schema.String,
   runtimeId: Schema.NullOr(Schema.String),
@@ -473,7 +473,7 @@ const RepoContentEntrySchema = Schema.Struct({
 // array — [] when nothing shipped (the daemon writes files only when
 // non-empty).
 const ClaimResponseSchema = Schema.Struct({
-  task: Schema.NullOr(ForgeTaskSchema),
+  task: Schema.NullOr(HearthTaskSchema),
   provider: Schema.Literal("opencode", "hermes", "command-code"),
   agent: Schema.String,
   model: Schema.String,
@@ -494,7 +494,7 @@ const ClaimResponseSchema = Schema.Struct({
   skillId: Schema.String,
 });
 
-const ForgeAgentSchema = Schema.Struct({
+const HearthAgentSchema = Schema.Struct({
   id: Schema.String,
   name: Schema.String,
   description: Schema.String,
@@ -505,7 +505,7 @@ const ForgeAgentSchema = Schema.Struct({
   updatedAt: Schema.String,
 });
 
-const ForgeSkillSchema = Schema.Struct({
+const HearthSkillSchema = Schema.Struct({
   id: Schema.String,
   name: Schema.String,
   description: Schema.String,
@@ -515,9 +515,9 @@ const ForgeSkillSchema = Schema.Struct({
   updatedAt: Schema.String,
 });
 
-// ── Forge warm sessions (document ↔ runtime agent conversation mapping) ──
+// ── Hearth warm sessions (document ↔ runtime agent conversation mapping) ──
 // Sessions are document-agnostic metadata: any document_id is valid, no 404s.
-const ForgeSessionSchema = Schema.Struct({
+const HearthSessionSchema = Schema.Struct({
   documentType: Schema.Literal("task", "wiki"),
   documentId: Schema.String,
   runtimeId: Schema.String,
@@ -529,9 +529,9 @@ const ForgeSessionSchema = Schema.Struct({
   updatedAt: Schema.String,
 });
 
-const ForgeSessionListResponse = Schema.Struct({ data: Schema.Array(ForgeSessionSchema) });
+const HearthSessionListResponse = Schema.Struct({ data: Schema.Array(HearthSessionSchema) });
 
-const ForgeSessionUpsertInput = Schema.Struct({
+const HearthSessionUpsertInput = Schema.Struct({
   documentType: Schema.Literal("task", "wiki"),
   documentId: Schema.String,
   runtimeId: Schema.String,
@@ -542,19 +542,19 @@ const ForgeSessionUpsertInput = Schema.Struct({
 });
 
 // DELETE (daemon-side drop) and POST reset share the document+runtime ref.
-const ForgeSessionRefInput = Schema.Struct({
+const HearthSessionRefInput = Schema.Struct({
   documentType: Schema.Literal("task", "wiki"),
   documentId: Schema.String,
   runtimeId: Schema.String,
 });
 
-const CreateForgeAgentInput = Schema.Struct({
+const CreateHearthAgentInput = Schema.Struct({
   name: Schema.String,
   description: Schema.optionalWith(Schema.String, { default: () => "" }),
   instructions: Schema.String,
 });
 
-const UpdateForgeAgentInput = Schema.Struct({
+const UpdateHearthAgentInput = Schema.Struct({
   name: Schema.optional(Schema.String),
   description: Schema.optional(Schema.String),
   instructions: Schema.optional(Schema.String),
@@ -562,20 +562,20 @@ const UpdateForgeAgentInput = Schema.Struct({
 
 const ReplaceAgentSkillsInput = Schema.Struct({ skillIds: Schema.Array(Schema.String) });
 
-const CreateForgeSkillInput = Schema.Struct({
+const CreateHearthSkillInput = Schema.Struct({
   name: Schema.String,
   description: Schema.optionalWith(Schema.String, { default: () => "" }),
   instructions: Schema.String,
 });
 
-const UpdateForgeSkillInput = Schema.Struct({
+const UpdateHearthSkillInput = Schema.Struct({
   name: Schema.optional(Schema.String),
   description: Schema.optional(Schema.String),
   instructions: Schema.optional(Schema.String),
 });
 
-const ForgeAgentPath = Schema.Struct({ id: Schema.String });
-const ForgeSkillPath = Schema.Struct({ id: Schema.String });
+const HearthAgentPath = Schema.Struct({ id: Schema.String });
+const HearthSkillPath = Schema.Struct({ id: Schema.String });
 
 const SourceSchema = Schema.Struct({
   id: Schema.String,
@@ -700,7 +700,7 @@ const ClaimRuntimeEventInput = Schema.Struct({ machineId: Schema.String });
 const CompleteTaskInput = Schema.Struct({ result: Schema.String });
 const FailTaskInput = Schema.Struct({ error: Schema.String });
 
-const CreateForgeTaskInput = Schema.Struct({
+const CreateHearthTaskInput = Schema.Struct({
   slug: Schema.String,
   documentType: Schema.Literal("task", "wiki"),
   documentId: Schema.String,
@@ -711,21 +711,21 @@ const CreateForgeTaskInput = Schema.Struct({
   runtimeId: Schema.optional(Schema.String),   // pick a specific runtime; omitted = any
 });
 
-const ForgeTaskPath = Schema.Struct({ id: Schema.String });
+const HearthTaskPath = Schema.Struct({ id: Schema.String });
 const RuntimeIdPath = Schema.Struct({ id: Schema.String });
 
-const ForgeTaskListResponse = Schema.Struct({ data: Schema.Array(ForgeTaskSchema) });
+const HearthTaskListResponse = Schema.Struct({ data: Schema.Array(HearthTaskSchema) });
 
-const RecentForgeTaskSchema = Schema.extend(
-  ForgeTaskSchema,
+const RecentHearthTaskSchema = Schema.extend(
+  HearthTaskSchema,
   Schema.Struct({ projectName: Schema.String })
 );
-const RecentForgeTaskListResponse = Schema.Struct({ data: Schema.Array(RecentForgeTaskSchema) });
+const RecentHearthTaskListResponse = Schema.Struct({ data: Schema.Array(RecentHearthTaskSchema) });
 
 // History rows carry the project name (control panel lists across projects).
 // summary = per-status totals, global (not filter-scoped).
-const ForgeTaskHistoryResponse = Schema.Struct({
-  data: Schema.Array(RecentForgeTaskSchema),
+const HearthTaskHistoryResponse = Schema.Struct({
+  data: Schema.Array(RecentHearthTaskSchema),
   nextCursor: Schema.NullOr(Schema.String),
   summary: Schema.Struct({
     queued: Schema.Number,
@@ -736,7 +736,7 @@ const ForgeTaskHistoryResponse = Schema.Struct({
   }),
 });
 
-const ForgeTaskLogSchema = Schema.Struct({
+const HearthTaskLogSchema = Schema.Struct({
   id: Schema.String,
   taskId: Schema.String,
   message: Schema.String,
@@ -744,7 +744,7 @@ const ForgeTaskLogSchema = Schema.Struct({
   level: Schema.Literal("info", "warn", "error"),
   createdAt: Schema.String,
 });
-const ForgeTaskLogListResponse = Schema.Struct({ data: Schema.Array(ForgeTaskLogSchema) });
+const HearthTaskLogListResponse = Schema.Struct({ data: Schema.Array(HearthTaskLogSchema) });
 // stream/level are classified ONCE by the daemon at write time; defaults keep
 // older daemons (and any non-daemon writer) working.
 const AppendLogInput = Schema.Struct({
@@ -806,10 +806,11 @@ const ActivityEventSchema = Schema.Struct({
   type: Schema.Literal("created", "moved", "field_changed", "archived", "restored", "deleted",
     "link_added", "link_removed", "source_added", "source_removed",
     "github_linked", "github_unlinked", "github_synced",
-    "forge_completed", "forge_failed", "forge_cancelled",
+    "hearth_completed", "hearth_failed", "hearth_cancelled",
     "commented", "comment_deleted",
     "attachment_added", "attachment_removed"),
   message: Schema.String,
+  viaHerald: Schema.Boolean,
   createdAt: Schema.String,
 });
 
@@ -820,6 +821,7 @@ const TaskCommentSchema = Schema.Struct({
   authorKind: Schema.Literal("user", "agent", "system"),
   authorLabel: Schema.String,
   body: Schema.Any,
+  viaHerald: Schema.Boolean,
   editedAt: Schema.NullOr(Schema.String),
   createdAt: Schema.String,
 });
@@ -853,74 +855,74 @@ const taskLinksGroup = HttpApiGroup.make("task-links")  .add(HttpApiEndpoint.get
   .add(HttpApiEndpoint.get("searchMentions", "/projects/:slug/mentions")
     .setPath(SlugPath).addSuccess(MentionsResponse));
 
-const forgeGroup = HttpApiGroup.make("forge")
-  .add(HttpApiEndpoint.post("registerRuntime", "/forge/runtimes/register")
+const hearthGroup = HttpApiGroup.make("hearth")
+  .add(HttpApiEndpoint.post("registerRuntime", "/hearth/runtimes/register")
     .setPayload(RegisterRuntimeInput).addSuccess(RuntimeSchema, { status: 201 }))
-  .add(HttpApiEndpoint.patch("updateRuntime", "/forge/runtimes/:id")
+  .add(HttpApiEndpoint.patch("updateRuntime", "/hearth/runtimes/:id")
     .setPath(RuntimeIdPath).setPayload(UpdateRuntimeInput).addSuccess(RuntimeSchema))
-  .add(HttpApiEndpoint.del("removeRuntime", "/forge/runtimes/:id")
+  .add(HttpApiEndpoint.del("removeRuntime", "/hearth/runtimes/:id")
     .setPath(RuntimeIdPath).addSuccess(Schema.Void, { status: 204 }))
-  .add(HttpApiEndpoint.post("heartbeat", "/forge/daemon/heartbeat")
+  .add(HttpApiEndpoint.post("heartbeat", "/hearth/daemon/heartbeat")
     .setPayload(HeartbeatInput).addSuccess(Schema.Struct({ ok: Schema.Boolean })))
-  .add(HttpApiEndpoint.post("claimTask", "/forge/daemon/claim")
+  .add(HttpApiEndpoint.post("claimTask", "/hearth/daemon/claim")
     .setPayload(ClaimInput).addSuccess(ClaimResponseSchema))
   // Runtime setup events — web wizard creates, CLI listener claims/completes.
-  .add(HttpApiEndpoint.post("createRuntimeEvent", "/forge/runtime-events")
+  .add(HttpApiEndpoint.post("createRuntimeEvent", "/hearth/runtime-events")
     .setPayload(CreateRuntimeEventInput).addSuccess(RuntimeEventSchema, { status: 201 }))
-  .add(HttpApiEndpoint.post("claimRuntimeEvent", "/forge/runtime-events/claim")
+  .add(HttpApiEndpoint.post("claimRuntimeEvent", "/hearth/runtime-events/claim")
     .setPayload(ClaimRuntimeEventInput)
     .addSuccess(Schema.NullOr(Schema.Struct({ event: RuntimeEventSchema, rawKey: Schema.NullOr(Schema.String) }))))
-  .add(HttpApiEndpoint.post("completeRuntimeEvent", "/forge/runtime-events/:id/complete")
+  .add(HttpApiEndpoint.post("completeRuntimeEvent", "/hearth/runtime-events/:id/complete")
     .setPath(RuntimeEventPath).addSuccess(RuntimeEventSchema))
-  .add(HttpApiEndpoint.post("failRuntimeEvent", "/forge/runtime-events/:id/fail")
+  .add(HttpApiEndpoint.post("failRuntimeEvent", "/hearth/runtime-events/:id/fail")
     .setPath(RuntimeEventPath).setPayload(FailRuntimeEventInput).addSuccess(RuntimeEventSchema))
-  .add(HttpApiEndpoint.get("getRuntimeEvent", "/forge/runtime-events/:id")
+  .add(HttpApiEndpoint.get("getRuntimeEvent", "/hearth/runtime-events/:id")
     .setPath(RuntimeEventPath).addSuccess(RuntimeEventSchema))
-  .add(HttpApiEndpoint.get("listRuntimeEvents", "/forge/runtime-events")
+  .add(HttpApiEndpoint.get("listRuntimeEvents", "/hearth/runtime-events")
     .addSuccess(RuntimeEventListResponse))
-  .add(HttpApiEndpoint.post("machineHeartbeat", "/forge/machines/heartbeat")
+  .add(HttpApiEndpoint.post("machineHeartbeat", "/hearth/machines/heartbeat")
     .setPayload(MachineHeartbeatInput).addSuccess(MachineHeartbeatResponse))
-  .add(HttpApiEndpoint.post("registerMachine", "/forge/machines/register")
+  .add(HttpApiEndpoint.post("registerMachine", "/hearth/machines/register")
     .setPayload(MachineRegisterInput).addSuccess(MachineRegisterResponse))
-  .add(HttpApiEndpoint.get("listMachines", "/forge/machines")
+  .add(HttpApiEndpoint.get("listMachines", "/hearth/machines")
     .addSuccess(MachineListResponse))
-  .add(HttpApiEndpoint.del("removeMachine", "/forge/machines/:id")
+  .add(HttpApiEndpoint.del("removeMachine", "/hearth/machines/:id")
     .setPath(MachineIdPath).addSuccess(Schema.Void, { status: 204 }))
-  .add(HttpApiEndpoint.get("listRuntimes", "/forge/runtimes")
+  .add(HttpApiEndpoint.get("listRuntimes", "/hearth/runtimes")
     .addSuccess(Schema.Struct({ data: Schema.Array(RuntimeSchema) })))
-  .add(HttpApiEndpoint.post("createForgeTask", "/forge/tasks")
-    .setPayload(CreateForgeTaskInput).addSuccess(ForgeTaskSchema, { status: 201 }))
-  .add(HttpApiEndpoint.get("getForgeTask", "/forge/tasks/:id")
-    .setPath(ForgeTaskPath).addSuccess(ForgeTaskSchema))
-  .add(HttpApiEndpoint.get("listForgeTasks", "/forge/tasks")
-    .addSuccess(ForgeTaskListResponse))
-  .add(HttpApiEndpoint.get("listRecentForgeTasks", "/forge/tasks/recent")
-    .addSuccess(RecentForgeTaskListResponse))
-  .add(HttpApiEndpoint.get("listForgeTaskHistory", "/forge/tasks/history")
-    .addSuccess(ForgeTaskHistoryResponse))
-  .add(HttpApiEndpoint.post("completeForgeTask", "/forge/daemon/tasks/:id/complete")
-    .setPath(ForgeTaskPath).setPayload(CompleteTaskInput).addSuccess(ForgeTaskSchema))
-  .add(HttpApiEndpoint.post("failForgeTask", "/forge/daemon/tasks/:id/fail")
-    .setPath(ForgeTaskPath).setPayload(FailTaskInput).addSuccess(ForgeTaskSchema))
-  .add(HttpApiEndpoint.get("getDaemonTaskStatus", "/forge/daemon/tasks/:id/status")
-    .setPath(ForgeTaskPath).addSuccess(Schema.Struct({ status: Schema.String })))
-  .add(HttpApiEndpoint.post("cancelForgeTask", "/forge/tasks/:id/cancel")
-    .setPath(ForgeTaskPath).addSuccess(ForgeTaskSchema))
-  .add(HttpApiEndpoint.get("listForgeTaskLogs", "/forge/tasks/:id/logs")
-    .setPath(ForgeTaskPath).addSuccess(ForgeTaskLogListResponse))
-  .add(HttpApiEndpoint.post("appendForgeTaskLog", "/forge/daemon/tasks/:id/log")
-    .setPath(ForgeTaskPath).setPayload(AppendLogInput).addSuccess(ForgeTaskLogSchema))
+  .add(HttpApiEndpoint.post("createHearthTask", "/hearth/tasks")
+    .setPayload(CreateHearthTaskInput).addSuccess(HearthTaskSchema, { status: 201 }))
+  .add(HttpApiEndpoint.get("getHearthTask", "/hearth/tasks/:id")
+    .setPath(HearthTaskPath).addSuccess(HearthTaskSchema))
+  .add(HttpApiEndpoint.get("listHearthTasks", "/hearth/tasks")
+    .addSuccess(HearthTaskListResponse))
+  .add(HttpApiEndpoint.get("listRecentHearthTasks", "/hearth/tasks/recent")
+    .addSuccess(RecentHearthTaskListResponse))
+  .add(HttpApiEndpoint.get("listHearthTaskHistory", "/hearth/tasks/history")
+    .addSuccess(HearthTaskHistoryResponse))
+  .add(HttpApiEndpoint.post("completeHearthTask", "/hearth/daemon/tasks/:id/complete")
+    .setPath(HearthTaskPath).setPayload(CompleteTaskInput).addSuccess(HearthTaskSchema))
+  .add(HttpApiEndpoint.post("failHearthTask", "/hearth/daemon/tasks/:id/fail")
+    .setPath(HearthTaskPath).setPayload(FailTaskInput).addSuccess(HearthTaskSchema))
+  .add(HttpApiEndpoint.get("getDaemonTaskStatus", "/hearth/daemon/tasks/:id/status")
+    .setPath(HearthTaskPath).addSuccess(Schema.Struct({ status: Schema.String })))
+  .add(HttpApiEndpoint.post("cancelHearthTask", "/hearth/tasks/:id/cancel")
+    .setPath(HearthTaskPath).addSuccess(HearthTaskSchema))
+  .add(HttpApiEndpoint.get("listHearthTaskLogs", "/hearth/tasks/:id/logs")
+    .setPath(HearthTaskPath).addSuccess(HearthTaskLogListResponse))
+  .add(HttpApiEndpoint.post("appendHearthTaskLog", "/hearth/daemon/tasks/:id/log")
+    .setPath(HearthTaskPath).setPayload(AppendLogInput).addSuccess(HearthTaskLogSchema))
   // Warm sessions: the daemon PUTs the pre-spawn mapping and DELETEs it on
   // cancel/timeout; the browser GETs (popover line) and POSTs reset.
-  .add(HttpApiEndpoint.get("listForgeSessions", "/forge/sessions")
-    .addSuccess(ForgeSessionListResponse))
-  .add(HttpApiEndpoint.put("upsertForgeSession", "/forge/sessions")
-    .setPayload(ForgeSessionUpsertInput).addSuccess(Schema.Void, { status: 204 }))
-  .add(HttpApiEndpoint.del("removeForgeSession", "/forge/sessions")
-    .setPayload(ForgeSessionRefInput).addSuccess(Schema.Void, { status: 204 }))
-  .add(HttpApiEndpoint.post("resetForgeSession", "/forge/sessions/reset")
-    .setPayload(ForgeSessionRefInput).addSuccess(Schema.Void, { status: 204 })
-    .addError(Schema.Struct({ _tag: Schema.Literal("ForgeSessionActive") })))
+  .add(HttpApiEndpoint.get("listHearthSessions", "/hearth/sessions")
+    .addSuccess(HearthSessionListResponse))
+  .add(HttpApiEndpoint.put("upsertHearthSession", "/hearth/sessions")
+    .setPayload(HearthSessionUpsertInput).addSuccess(Schema.Void, { status: 204 }))
+  .add(HttpApiEndpoint.del("removeHearthSession", "/hearth/sessions")
+    .setPayload(HearthSessionRefInput).addSuccess(Schema.Void, { status: 204 }))
+  .add(HttpApiEndpoint.post("resetHearthSession", "/hearth/sessions/reset")
+    .setPayload(HearthSessionRefInput).addSuccess(Schema.Void, { status: 204 })
+    .addError(Schema.Struct({ _tag: Schema.Literal("HearthSessionActive") })))
   .add(HttpApiEndpoint.get("listSources", "/projects/:slug/documents/:type/:id/sources")
     .setPath(DocumentPath).addSuccess(SourceListResponse))
   .add(HttpApiEndpoint.post("addSource", "/projects/:slug/documents/:type/:id/sources")
@@ -930,32 +932,32 @@ const forgeGroup = HttpApiGroup.make("forge")
     .addSuccess(Schema.Void, { status: 204 }));
 
 // Lexa Agents/Skills catalog (S14) — top-level groups, hard cutover from the
-// old forge-prefixed paths (no aliases).
+// old hearth-prefixed paths (no aliases).
 const agentsGroup = HttpApiGroup.make("agents")
   .add(HttpApiEndpoint.get("listAgents", "/agents")
-    .addSuccess(Schema.Struct({ data: Schema.Array(ForgeAgentSchema) })))
+    .addSuccess(Schema.Struct({ data: Schema.Array(HearthAgentSchema) })))
   .add(HttpApiEndpoint.post("createAgent", "/agents")
-    .setPayload(CreateForgeAgentInput).addSuccess(ForgeAgentSchema, { status: 201 }))
+    .setPayload(CreateHearthAgentInput).addSuccess(HearthAgentSchema, { status: 201 }))
   .add(HttpApiEndpoint.patch("updateAgent", "/agents/:id")
-    .setPath(ForgeAgentPath).setPayload(UpdateForgeAgentInput).addSuccess(ForgeAgentSchema))
+    .setPath(HearthAgentPath).setPayload(UpdateHearthAgentInput).addSuccess(HearthAgentSchema))
   .add(HttpApiEndpoint.del("deleteAgent", "/agents/:id")
-    .setPath(ForgeAgentPath).addSuccess(Schema.Void, { status: 204 }))
+    .setPath(HearthAgentPath).addSuccess(Schema.Void, { status: 204 }))
   .add(HttpApiEndpoint.put("replaceAgentSkills", "/agents/:id/skills")
-    .setPath(ForgeAgentPath).setPayload(ReplaceAgentSkillsInput).addSuccess(ForgeAgentSchema))
+    .setPath(HearthAgentPath).setPayload(ReplaceAgentSkillsInput).addSuccess(HearthAgentSchema))
   .add(HttpApiEndpoint.post("resetAgent", "/agents/:id/reset")
-    .setPath(ForgeAgentPath).addSuccess(ForgeAgentSchema));
+    .setPath(HearthAgentPath).addSuccess(HearthAgentSchema));
 
 const skillsGroup = HttpApiGroup.make("skills")
   .add(HttpApiEndpoint.get("listSkills", "/skills")
-    .addSuccess(Schema.Struct({ data: Schema.Array(ForgeSkillSchema) })))
+    .addSuccess(Schema.Struct({ data: Schema.Array(HearthSkillSchema) })))
   .add(HttpApiEndpoint.post("createSkill", "/skills")
-    .setPayload(CreateForgeSkillInput).addSuccess(ForgeSkillSchema, { status: 201 }))
+    .setPayload(CreateHearthSkillInput).addSuccess(HearthSkillSchema, { status: 201 }))
   .add(HttpApiEndpoint.patch("updateSkill", "/skills/:id")
-    .setPath(ForgeSkillPath).setPayload(UpdateForgeSkillInput).addSuccess(ForgeSkillSchema))
+    .setPath(HearthSkillPath).setPayload(UpdateHearthSkillInput).addSuccess(HearthSkillSchema))
   .add(HttpApiEndpoint.del("deleteSkill", "/skills/:id")
-    .setPath(ForgeSkillPath).addSuccess(Schema.Void, { status: 204 }))
+    .setPath(HearthSkillPath).addSuccess(Schema.Void, { status: 204 }))
   .add(HttpApiEndpoint.post("resetSkill", "/skills/:id/reset")
-    .setPath(ForgeSkillPath).addSuccess(ForgeSkillSchema));
+    .setPath(HearthSkillPath).addSuccess(HearthSkillSchema));
 
 // ── Herald assistant tier (S3/S5/S9/S15) ──
 const ProviderKindSchema = Schema.Literal("openai_compatible", "anthropic_compatible");
@@ -978,6 +980,7 @@ const HeraldSettingsInputPayload = Schema.Struct({
   primarySupportsImages: Schema.optional(Schema.Boolean),
   visionModel: Schema.optional(Schema.NullOr(Schema.String)),
   reasoningEffort: Schema.optional(Schema.NullOr(HeraldReasoningEffortSchema)),
+  writeTools: Schema.optional(Schema.Array(Schema.String)),
 });
 
 const HeraldSettingsMaskedSchema = Schema.Struct({
@@ -995,6 +998,7 @@ const HeraldSettingsMaskedSchema = Schema.Struct({
   primarySupportsImages: Schema.Boolean,
   visionModel: Schema.NullOr(Schema.String),
   reasoningEffort: Schema.NullOr(HeraldReasoningEffortSchema),
+  writeTools: Schema.Array(Schema.String),
 });
 
 // test/models take UNSAVED submitted values (never persist); an omitted
@@ -1090,11 +1094,11 @@ const heraldGroup = HttpApiGroup.make("herald")
   .add(HttpApiEndpoint.post("listHeraldModels", "/herald/settings/:projectId/models")
     .setPath(HeraldSettingsPath).setPayload(HeraldSettingsTestPayload).addSuccess(ModelListResponse))
   .add(HttpApiEndpoint.post("createHeraldTask", "/herald/tasks")
-    .setPayload(CreateHeraldTaskInput).addSuccess(ForgeTaskSchema, { status: 201 }))
+    .setPayload(CreateHeraldTaskInput).addSuccess(HearthTaskSchema, { status: 201 }))
   .add(HttpApiEndpoint.post("streamHeraldTask", "/herald/tasks/:id/stream")
-    .setPath(ForgeTaskPath).addSuccess(Schema.Void))
+    .setPath(HearthTaskPath).addSuccess(Schema.Void))
   .add(HttpApiEndpoint.post("cancelHeraldTask", "/herald/tasks/:id/cancel")
-    .setPath(ForgeTaskPath).addSuccess(Schema.Struct({ ok: Schema.Boolean })))
+    .setPath(HearthTaskPath).addSuccess(Schema.Struct({ ok: Schema.Boolean })))
   .add(HttpApiEndpoint.del("resetHeraldThread", "/herald/threads/:documentType/:documentId")
     .setPath(HeraldThreadPath).addSuccess(Schema.Void, { status: 204 }))
   .add(HttpApiEndpoint.post("streamHeraldChat", "/herald/chat/stream")
@@ -1114,7 +1118,15 @@ const heraldGroup = HttpApiGroup.make("herald")
   .add(HttpApiEndpoint.post("addHeraldMemory", "/herald/memory/:projectId")
     .setPath(MemoryProjectPath).setPayload(MemoryCreatePayload).addSuccess(MemoryEntrySchema, { status: 201 }))
   .add(HttpApiEndpoint.del("removeHeraldMemory", "/herald/memory/:projectId/:memoryId")
-    .setPath(MemoryDeletePath).addSuccess(Schema.Void, { status: 204 }));
+    .setPath(MemoryDeletePath).addSuccess(Schema.Void, { status: 204 }))
+  .add(HttpApiEndpoint.post("decideHeraldApproval", "/herald/approvals/:id/decide")
+    .setPath(Schema.Struct({ id: Schema.String }))
+    .setPayload(Schema.Struct({ verdict: Schema.Literal("approve", "reject") }))
+    .addSuccess(Schema.Struct({ approvalId: Schema.String, batchId: Schema.String, status: Schema.String, remaining: Schema.Number })))
+  .add(HttpApiEndpoint.post("resumeHeraldChat", "/herald/chat/:chatId/resume")
+    .setPath(HeraldChatPath).addSuccess(Schema.Void))
+  .add(HttpApiEndpoint.post("resumeHeraldThread", "/herald/threads/:documentType/:documentId/resume")
+    .setPath(HeraldThreadPath).addSuccess(Schema.Void));
 
 const WikiPageSchema = Schema.Struct({
   id: Schema.String,
@@ -1637,7 +1649,7 @@ export const LexaApi = HttpApi.make("lexa")
   .add(swimlanesGroup)
   .add(milestonesGroup)
   .add(fieldConfigGroup)
-  .add(forgeGroup)
+  .add(hearthGroup)
   .add(agentsGroup)
   .add(skillsGroup)
   .add(heraldGroup)
@@ -2196,11 +2208,11 @@ const fieldConfigLive = HttpApiBuilder.group(LexaApi, "field-config", (handlers)
     )
 );
 
-const forgeLive = HttpApiBuilder.group(LexaApi, "forge", (handlers) =>
+const hearthLive = HttpApiBuilder.group(LexaApi, "hearth", (handlers) =>
   handlers
     .handle("registerRuntime", (req) =>
       respond(Effect.gen(function* () {
-        const service = yield* ForgeService;
+        const service = yield* HearthService;
         const runtime = yield* service.registerRuntime({
           id: req.payload.id,
           name: req.payload.name,
@@ -2219,7 +2231,7 @@ const forgeLive = HttpApiBuilder.group(LexaApi, "forge", (handlers) =>
     )
     .handle("updateRuntime", (req) =>
       respond(Effect.gen(function* () {
-        const service = yield* ForgeService;
+        const service = yield* HearthService;
         return yield* service.updateRuntime(req.path.id, {
           ...(req.payload.name !== undefined ? { name: req.payload.name } : {}),
           ...(req.payload.provider !== undefined ? { provider: req.payload.provider } : {}),
@@ -2233,7 +2245,7 @@ const forgeLive = HttpApiBuilder.group(LexaApi, "forge", (handlers) =>
     )
     .handle("removeRuntime", (req) =>
       respond(Effect.gen(function* () {
-        const service = yield* ForgeService;
+        const service = yield* HearthService;
         const eventService = yield* RuntimeEventService;
         const runtime = yield* service.getRuntimeConfig(req.path.id);
         // Never blocks on machine state: the remove event is delivered
@@ -2252,7 +2264,7 @@ const forgeLive = HttpApiBuilder.group(LexaApi, "forge", (handlers) =>
     )
     .handle("heartbeat", (req) =>
       respond(Effect.gen(function* () {
-        const service = yield* ForgeService;
+        const service = yield* HearthService;
         yield* service.heartbeat(req.payload.runtimeId);
         // A live heartbeat proves the credential works — clear any
         // previously reported auth failure.
@@ -2262,7 +2274,7 @@ const forgeLive = HttpApiBuilder.group(LexaApi, "forge", (handlers) =>
     )
     .handle("claimTask", (req) =>
       respond(Effect.gen(function* () {
-        const service = yield* ForgeService;
+        const service = yield* HearthService;
         const task = yield* service.claimNext(req.payload.runtimeId);
         if (!task) return { task: null, provider: "opencode" as const, agent: "", model: "", printLogs: false, logLevel: "", extraArgs: [], prompt: "", agentMarkdown: "", skillMarkdown: "", skillIds: [], repoContent: [], runtimeSessionId: null, agentId: "", skillId: "" };
         const runtime = yield* service.getRuntimeConfig(req.payload.runtimeId);
@@ -2342,7 +2354,7 @@ const forgeLive = HttpApiBuilder.group(LexaApi, "forge", (handlers) =>
     .handle("machineHeartbeat", (req) =>
       respond(Effect.gen(function* () {
         const machineService = yield* RuntimeMachineService;
-        const forgeService = yield* ForgeService;
+        const hearthService = yield* HearthService;
         const projectService = yield* ProjectService;
         const machine = yield* machineService.heartbeat({
           id: req.payload.id,
@@ -2350,7 +2362,7 @@ const forgeLive = HttpApiBuilder.group(LexaApi, "forge", (handlers) =>
           clis: req.payload.clis ? req.payload.clis.map((c) => ({ provider: c.provider, version: c.version })) : undefined,
         });
         if (req.payload.runtimes) {
-          yield* forgeService.syncCatalogs(req.payload.id, req.payload.runtimes.map((catalog) => ({
+          yield* hearthService.syncCatalogs(req.payload.id, req.payload.runtimes.map((catalog) => ({
             runtimeId: catalog.runtimeId,
             agentCli: catalog.agentCli,
             models: [...catalog.models],
@@ -2361,16 +2373,16 @@ const forgeLive = HttpApiBuilder.group(LexaApi, "forge", (handlers) =>
           // The daemon died with a reportable failure (e.g. revoked API key,
           // exit code 3). The listener has valid auth, so it relays on the
           // machine's behalf — the runtime row surfaces it as lastError.
-          yield* forgeService.reportDaemonErrors([...req.payload.daemonErrors]);
+          yield* hearthService.reportDaemonErrors([...req.payload.daemonErrors]);
         }
         // Stuck-task sweep: runs while any machine listens (3s cadence) —
         // the only case where a re-claim is possible. Re-queues 'running'
         // tasks whose runtime has been offline > 10 min, and hard-deletes
-        // stale 'running' runs (started > FORGE_STALE_RUN_MIN, runtime
+        // stale 'running' runs (started > HEARTH_STALE_RUN_MIN, runtime
         // offline/gone — the runner is dead and will never complete).
-        const swept = yield* forgeService.sweepStalledTasks();
+        const swept = yield* hearthService.sweepStalledTasks();
         if (swept > 0) {
-          console.log(`[forge-sweep] ${swept} stale task(s) re-queued or removed`);
+          console.log(`[hearth-sweep] ${swept} stale task(s) re-queued or removed`);
         }
         const projects = yield* projectService.list();
         return { ...machine, projects: projects.map((p) => ({ id: p.id, name: p.name, slug: p.slug, description: p.description })) };
@@ -2403,7 +2415,7 @@ const forgeLive = HttpApiBuilder.group(LexaApi, "forge", (handlers) =>
     .handle("listRuntimes", (req) =>
       respond(Effect.gen(function* () {
         const identity = yield* AuthIdentity;
-        const service = yield* ForgeService;
+        const service = yield* HearthService;
         let runtimes = yield* service.listRuntimes();
         // Team gating: team admin sees own-team + global runtimes; keys and
         // superadmin sessions see all. ?teamId= narrows the result.
@@ -2423,9 +2435,9 @@ const forgeLive = HttpApiBuilder.group(LexaApi, "forge", (handlers) =>
         return { data: runtimes };
       }))
     )
-    .handle("createForgeTask", (req) =>
+    .handle("createHearthTask", (req) =>
       respond(Effect.gen(function* () {
-        const service = yield* ForgeService;
+        const service = yield* HearthService;
         const project = yield* requireProjectRead(req.payload.slug);
         const task = yield* service.create({
           projectId: project.id,
@@ -2440,16 +2452,16 @@ const forgeLive = HttpApiBuilder.group(LexaApi, "forge", (handlers) =>
         return task;
       }))
     )
-    .handle("getForgeTask", (req) =>
+    .handle("getHearthTask", (req) =>
       respond(Effect.gen(function* () {
-        const service = yield* ForgeService;
+        const service = yield* HearthService;
         return yield* service.getById(req.path.id);
       }))
     )
-    .handle("listForgeTasks", (req) =>
+    .handle("listHearthTasks", (req) =>
       respond(Effect.gen(function* () {
         const projectService = yield* ProjectService;
-        const service = yield* ForgeService;
+        const service = yield* HearthService;
         const q = searchParams(req);
         const slug = q.get("slug");
         if (!slug) return yield* Effect.fail(ProjectNotFound);
@@ -2460,17 +2472,17 @@ const forgeLive = HttpApiBuilder.group(LexaApi, "forge", (handlers) =>
         return { data: tasks };
       }))
     )
-    .handle("listRecentForgeTasks", () =>
+    .handle("listRecentHearthTasks", () =>
       respond(Effect.gen(function* () {
-        const service = yield* ForgeService;
+        const service = yield* HearthService;
         const tasks = yield* service.listRecent(10);
         return { data: tasks };
       }))
     )
-    .handle("listForgeTaskHistory", (req) =>
+    .handle("listHearthTaskHistory", (req) =>
       respond(Effect.gen(function* () {
         const projectService = yield* ProjectService;
-        const service = yield* ForgeService;
+        const service = yield* HearthService;
         const q = searchParams(req);
         const slug = q.get("slug") ?? undefined;
         const project = slug ? yield* projectService.findBySlug(slug) : null;
@@ -2493,41 +2505,41 @@ const forgeLive = HttpApiBuilder.group(LexaApi, "forge", (handlers) =>
         return { data: result.tasks, nextCursor: result.nextCursor, summary: result.summary };
       }))
     )
-    .handle("completeForgeTask", (req) =>
+    .handle("completeHearthTask", (req) =>
       respond(Effect.gen(function* () {
-        const service = yield* ForgeService;
+        const service = yield* HearthService;
         return yield* service.complete(req.path.id, req.payload.result);
       }))
     )
     .handle("getDaemonTaskStatus", (req) =>
       respond(Effect.gen(function* () {
-        const service = yield* ForgeService;
+        const service = yield* HearthService;
         const task = yield* service.getById(req.path.id);
         return { status: task.status };
       }))
     )
-    .handle("failForgeTask", (req) =>
+    .handle("failHearthTask", (req) =>
       respond(Effect.gen(function* () {
-        const service = yield* ForgeService;
+        const service = yield* HearthService;
         return yield* service.fail(req.path.id, req.payload.error);
       }))
     )
-    .handle("cancelForgeTask", (req) =>
+    .handle("cancelHearthTask", (req) =>
       respond(Effect.gen(function* () {
-        const service = yield* ForgeService;
+        const service = yield* HearthService;
         return yield* service.cancel(req.path.id);
       }))
     )
-    .handle("listForgeTaskLogs", (req) =>
+    .handle("listHearthTaskLogs", (req) =>
       respond(Effect.gen(function* () {
-        const service = yield* ForgeService;
+        const service = yield* HearthService;
         const logs = yield* service.listLogs(req.path.id);
         return { data: logs };
       }))
     )
-    .handle("appendForgeTaskLog", (req) =>
+    .handle("appendHearthTaskLog", (req) =>
       respond(Effect.gen(function* () {
-        const service = yield* ForgeService;
+        const service = yield* HearthService;
         return yield* service.appendLog(req.path.id, req.payload.message, req.payload.stream ?? "out", req.payload.level ?? "info");
       }))
     )
@@ -2562,9 +2574,9 @@ const forgeLive = HttpApiBuilder.group(LexaApi, "forge", (handlers) =>
         return undefined;
       }))
     )
-    .handle("listForgeSessions", (req) =>
+    .handle("listHearthSessions", (req) =>
       respond(Effect.gen(function* () {
-        const service = yield* ForgeService;
+        const service = yield* HearthService;
         const q = searchParams(req);
         const documentType = q.get("documentType");
         const documentId = q.get("documentId");
@@ -2572,27 +2584,27 @@ const forgeLive = HttpApiBuilder.group(LexaApi, "forge", (handlers) =>
         // empty list (never 404).
         if (documentType !== "task" && documentType !== "wiki") return { data: [] };
         if (!documentId) return { data: [] };
-        return { data: yield* service.forgeSessionList(documentType, documentId) };
+        return { data: yield* service.hearthSessionList(documentType, documentId) };
       }))
     )
-    .handle("upsertForgeSession", (req) =>
+    .handle("upsertHearthSession", (req) =>
       respond(Effect.gen(function* () {
-        const service = yield* ForgeService;
-        yield* service.forgeSessionUpsert(req.payload);
+        const service = yield* HearthService;
+        yield* service.hearthSessionUpsert(req.payload);
         return undefined;
       }))
     )
-    .handle("removeForgeSession", (req) =>
+    .handle("removeHearthSession", (req) =>
       respond(Effect.gen(function* () {
-        const service = yield* ForgeService;
-        yield* service.forgeSessionRemove(req.payload.documentType, req.payload.documentId, req.payload.runtimeId);
+        const service = yield* HearthService;
+        yield* service.hearthSessionRemove(req.payload.documentType, req.payload.documentId, req.payload.runtimeId);
         return undefined;
       }))
     )
-    .handle("resetForgeSession", (req) =>
+    .handle("resetHearthSession", (req) =>
       respond(Effect.gen(function* () {
-        const service = yield* ForgeService;
-        yield* service.forgeSessionReset(req.payload.documentType, req.payload.documentId, req.payload.runtimeId);
+        const service = yield* HearthService;
+        yield* service.hearthSessionReset(req.payload.documentType, req.payload.documentId, req.payload.runtimeId);
         return undefined;
       }))
     )
@@ -2602,7 +2614,7 @@ const agentsLive = HttpApiBuilder.group(LexaApi, "agents", (handlers) =>
   handlers
     .handle("listAgents", () =>
       respond(Effect.gen(function* () {
-        const service = yield* ForgeService;
+        const service = yield* HearthService;
         const agents = yield* service.listAgents();
         return { data: agents };
       }))
@@ -2610,21 +2622,21 @@ const agentsLive = HttpApiBuilder.group(LexaApi, "agents", (handlers) =>
     .handle("createAgent", (req) =>
       respond(Effect.gen(function* () {
         yield* requireAdmin;
-        const service = yield* ForgeService;
+        const service = yield* HearthService;
         return yield* service.createAgent(req.payload);
       }))
     )
     .handle("updateAgent", (req) =>
       respond(Effect.gen(function* () {
         yield* requireAdmin;
-        const service = yield* ForgeService;
+        const service = yield* HearthService;
         return yield* service.updateAgent(req.path.id, req.payload);
       }))
     )
     .handle("deleteAgent", (req) =>
       respond(Effect.gen(function* () {
         yield* requireAdmin;
-        const service = yield* ForgeService;
+        const service = yield* HearthService;
         yield* service.deleteAgent(req.path.id);
         return undefined;
       }))
@@ -2632,14 +2644,14 @@ const agentsLive = HttpApiBuilder.group(LexaApi, "agents", (handlers) =>
     .handle("replaceAgentSkills", (req) =>
       respond(Effect.gen(function* () {
         yield* requireAdmin;
-        const service = yield* ForgeService;
+        const service = yield* HearthService;
         return yield* service.replaceAgentSkills(req.path.id, [...req.payload.skillIds]);
       }))
     )
     .handle("resetAgent", (req) =>
       respond(Effect.gen(function* () {
         yield* requireAdmin;
-        const service = yield* ForgeService;
+        const service = yield* HearthService;
         return yield* service.resetAgentToDefault(req.path.id);
       }))
     )
@@ -2649,7 +2661,7 @@ const skillsLive = HttpApiBuilder.group(LexaApi, "skills", (handlers) =>
   handlers
     .handle("listSkills", () =>
       respond(Effect.gen(function* () {
-        const service = yield* ForgeService;
+        const service = yield* HearthService;
         const skills = yield* service.listSkills();
         return { data: skills };
       }))
@@ -2657,21 +2669,21 @@ const skillsLive = HttpApiBuilder.group(LexaApi, "skills", (handlers) =>
     .handle("createSkill", (req) =>
       respond(Effect.gen(function* () {
         yield* requireAdmin;
-        const service = yield* ForgeService;
+        const service = yield* HearthService;
         return yield* service.createSkill(req.payload);
       }))
     )
     .handle("updateSkill", (req) =>
       respond(Effect.gen(function* () {
         yield* requireAdmin;
-        const service = yield* ForgeService;
+        const service = yield* HearthService;
         return yield* service.updateSkill(req.path.id, req.payload);
       }))
     )
     .handle("deleteSkill", (req) =>
       respond(Effect.gen(function* () {
         yield* requireAdmin;
-        const service = yield* ForgeService;
+        const service = yield* HearthService;
         yield* service.deleteSkill(req.path.id);
         return undefined;
       }))
@@ -2679,7 +2691,7 @@ const skillsLive = HttpApiBuilder.group(LexaApi, "skills", (handlers) =>
     .handle("resetSkill", (req) =>
       respond(Effect.gen(function* () {
         yield* requireAdmin;
-        const service = yield* ForgeService;
+        const service = yield* HearthService;
         return yield* service.resetSkillToDefault(req.path.id);
       }))
     )
@@ -2700,7 +2712,11 @@ const heraldLive = HttpApiBuilder.group(LexaApi, "herald", (handlers) =>
       respond(Effect.gen(function* () {
         yield* requireAdmin;
         const repo = yield* HeraldSettingsRepo;
-        yield* repo.upsert(req.path.projectId, req.payload);
+        const payload = {
+          ...req.payload,
+          ...(req.payload.writeTools !== undefined ? { writeTools: [...req.payload.writeTools] } : {}),
+        };
+        yield* repo.upsert(req.path.projectId, payload);
         return yield* repo.maskedView(req.path.projectId);
       }))
     )
@@ -2741,15 +2757,15 @@ const heraldLive = HttpApiBuilder.group(LexaApi, "herald", (handlers) =>
     .handle("streamHeraldTask", (req) =>
       respond(Effect.gen(function* () {
         const identity = yield* AuthIdentity;
-        const forgeService = yield* ForgeService;
-        const task = yield* forgeService.getById(req.path.id);
+        const hearthService = yield* HearthService;
+        const task = yield* hearthService.getById(req.path.id);
         if (identity.role !== "admin" && identity.userId) {
           const authz = yield* AuthorizationService;
           const access = yield* authz.projectAccess(identity.userId, task.projectId);
           if (!access) return yield* new ProjectAccessDenied({ project: task.projectId, role: "member" });
         }
         const service = yield* HeraldService;
-        const frames = yield* service.runStream(req.path.id);
+        const frames = yield* service.runStream(req.path.id, { userId: identity.userId ?? undefined });
         wireDisconnectAbort(yield* HttpServerRequest, () => service.abortStream(req.path.id));
         return sseHttpResponse(frames);
       }))
@@ -2757,9 +2773,9 @@ const heraldLive = HttpApiBuilder.group(LexaApi, "herald", (handlers) =>
     .handle("cancelHeraldTask", (req) =>
       respond(Effect.gen(function* () {
         const service = yield* HeraldService;
-        const forgeService = yield* ForgeService;
+        const hearthService = yield* HearthService;
         if (!service.abortStream(req.path.id)) {
-          yield* forgeService.cancel(req.path.id);
+          yield* hearthService.cancel(req.path.id);
         }
         return { ok: true as const };
       }))
@@ -2793,6 +2809,42 @@ const heraldLive = HttpApiBuilder.group(LexaApi, "herald", (handlers) =>
           ...(req.payload.reasoningEffort !== undefined ? { reasoningEffort: req.payload.reasoningEffort } : {}),
         });
         wireDisconnectAbort(yield* HttpServerRequest, () => service.abortChat(req.payload.chatId));
+        return sseHttpResponse(frames);
+      }))
+    )
+    .handle("decideHeraldApproval", (req) =>
+      respond(Effect.gen(function* () {
+        const identity = yield* AuthIdentity;
+        if (!identity.userId) return yield* new NoUserContext();
+        const service = yield* HeraldService;
+        return yield* service.decideApproval(req.path.id, identity.userId, req.payload.verdict);
+      }))
+    )
+    .handle("resumeHeraldChat", (req) =>
+      respond(Effect.gen(function* () {
+        const identity = yield* AuthIdentity;
+        if (!identity.userId) return yield* new NoUserContext();
+        const threadRepo = yield* HeraldThreadRepo;
+        const t = yield* threadRepo.loadChat(req.path.chatId, identity.userId).pipe(
+          Effect.catchTag("RowNotFound", () => new HeraldThreadNotFound({ documentType: "chat", documentId: req.path.chatId }))
+        );
+        yield* requireProjectReadById(t.projectId);
+        const service = yield* HeraldService;
+        const frames = yield* service.resumeChatStream(req.path.chatId, identity.userId);
+        wireDisconnectAbort(yield* HttpServerRequest, () => service.abortChat(req.path.chatId));
+        return sseHttpResponse(frames);
+      }))
+    )
+    .handle("resumeHeraldThread", (req) =>
+      respond(Effect.gen(function* () {
+        const threadRepo = yield* HeraldThreadRepo;
+        const thread = yield* threadRepo.loadThread(req.path.documentType, req.path.documentId).pipe(
+          Effect.catchTag("RowNotFound", () => new HeraldThreadNotFound({ documentType: req.path.documentType, documentId: req.path.documentId }))
+        );
+        yield* requireProjectReadById(thread.projectId);
+        const service = yield* HeraldService;
+        const frames = yield* service.resumeThreadStream(req.path.documentType, req.path.documentId);
+        wireDisconnectAbort(yield* HttpServerRequest, () => service.abortStream(req.path.documentId));
         return sseHttpResponse(frames);
       }))
     )
@@ -3931,7 +3983,7 @@ export function createApiHandler(dbPath: string) {
 
   const serviceLayer = buildServiceLayer(dbPath);
   const handlerLayer = Layer.mergeAll(
-    healthLive, setupLive, projectsLive, columnsLive, swimlanesLive, milestonesLive, fieldConfigLive, forgeLive, agentsLive, skillsLive, heraldLive, taskLinksLive, tasksLive, boardLive, wikiLive, publicShareLive, attachmentsLive, apiKeysLive, adminLive, meLive, dashboardLive,
+    healthLive, setupLive, projectsLive, columnsLive, swimlanesLive, milestonesLive, fieldConfigLive, hearthLive, agentsLive, skillsLive, heraldLive, taskLinksLive, tasksLive, boardLive, wikiLive, publicShareLive, attachmentsLive, apiKeysLive, adminLive, meLive, dashboardLive,
     createTeamsLive(LexaApi), createWorkspaceLive(LexaApi), createSessionsLive(LexaApi),
   ).pipe(Layer.provide(Layer.provide(serviceLayer, Layer.mergeAll(dbLayer, LoggerLayer))), Layer.provide(dbLayer));
   const merged = Layer.mergeAll(apiLayer, handlerLayer);
@@ -3962,7 +4014,7 @@ function buildServiceLayer(dbPath: string) {
     MilestoneRepo.Default, MilestoneService.Default,
     TaskRepo.Default, TaskService.Default,
     FieldConfigRepo.Default, FieldConfigService.Default,
-    ForgeRepo.Default, ForgeService.Default,
+    HearthRepo.Default, HearthService.Default,
     HeraldSettingsRepo.Default, HeraldThreadRepo.Default, ProjectMemoryRepo.Default,
     HeraldService.Default.pipe(
       Layer.provide(Layer.mergeAll(storageLayerFor(storageCfg), Layer.succeed(StorageConfig, storageCfg)))

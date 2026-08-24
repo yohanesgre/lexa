@@ -1,7 +1,7 @@
 import { useMemo } from "react";
 import { Link, Outlet, useRouterState } from "@tanstack/react-router";
 import { useProjectSelection } from "../../lib/project-selection";
-import { ForgeStatus } from "../forge/ForgeStatus";
+import { HearthStatus } from "../hearth/HearthStatus";
 import { NavLink } from "./NavLink";
 import { ProjectSwitcher } from "./ProjectSwitcher";
 import { ThemeToggle } from "./ThemeToggle";
@@ -17,9 +17,9 @@ export function AppShell() {
   const pathname = useRouterState({ select: (s) => s.location.pathname });
   const { selectedSlug } = useProjectSelection();
 
-  const routeType: "home" | "dashboard" | "board" | "tasks" | "wiki" | "chat" | "milestones" | "swimlanes" | "settings" | "forge" = useMemo(() => {
+  const routeType: "home" | "dashboard" | "board" | "tasks" | "wiki" | "chat" | "milestones" | "swimlanes" | "settings" | "hearth" = useMemo(() => {
     if (pathname === "/") return "home";
-    if (pathname === "/forge") return "forge";
+    if (pathname === "/hearth") return "hearth";
     if (pathname === "/settings" || pathname.startsWith("/settings/")) return "settings";
     if (pathname.match(/^\/[^/]+\/board$/)) return "board";
     if (pathname.match(/^\/[^/]+\/tasks$/)) return "tasks";
@@ -77,12 +77,12 @@ export function AppShell() {
             <NavLink to={chatTo} params={chatParams} active={routeType === "chat"}>
               Chat
             </NavLink>
-            <NavLink to="/forge" active={routeType === "forge"}>Hearth</NavLink>
+            <NavLink to="/hearth" active={routeType === "hearth"}>Hearth</NavLink>
           </div>
           <div className="nav-spacer" />
           <div className="nav-right">
             <ThemeToggle />
-            <ForgeStatus />
+            <HearthStatus />
             <ProjectSwitcher routeType={routeType} />
             <UserMenu />
           </div>

@@ -23,12 +23,13 @@ import { useMentionTokens } from "../../lib/useMentionTokens";
 import { renderTokenized } from "../../lib/tokenizeTranscript";
 import { MarkdownContent, highlightCode } from "../../lib/markdownToReact";
 import { ThreadsSidebar } from "./ThreadsSidebar";
-import { SkillPicker } from "../forge/herald/SkillPicker";
-import { HearthFlameIcon } from "../forge/herald/HeraldPanel";
-import { HeraldImageAttach, acceptImageFiles } from "../forge/herald/HeraldImageAttach";
-import type { HeraldImage } from "../forge/herald/HeraldImageAttach";
+import { SkillPicker } from "../hearth/herald/SkillPicker";
+import { HearthFlameIcon } from "../hearth/herald/HeraldPanel";
+import { HeraldImageAttach, acceptImageFiles } from "../hearth/herald/HeraldImageAttach";
+import type { HeraldImage } from "../hearth/herald/HeraldImageAttach";
 import { HeraldActivity } from "./HeraldActivity";
 import { EffortPicker } from "./EffortPicker";
+import { ApprovalChipRow, HeraldApprovalBatch, SuspendedIndicator, type ApprovalChip } from "./HeraldApprovals";
 import type { HeraldTimelineItem, HeraldToolChip } from "../../lib/use-herald-stream";
 import type { HeraldReasoningEffort } from "../../../shared/herald";
 
@@ -69,6 +70,15 @@ interface ChatTurn {
   citations?: CitationView[];
   error?: { code: string; message: string };
   stopped?: boolean;
+  // Post-stream activity snapshot frozen at suspend time (session memory).
+  activity?: ActivityView;
+  // Frozen write-approval batch (herald-write-approvals.html): chips live in
+  // session memory from the tool_pending frames; decisions mutate them here.
+  batch?: { batchId: string; chips: ApprovalChip[] };
+  // Reload mid-suspension: the transcript entry carries the pendingBatch
+  // marker but NOT the chip payloads (no batch-read endpoint) — render the
+  // waiting indicator only.
+  suspendedBatchId?: string;
 }
 
 // Post-stream activity summary shown on the trailing done turn — sourced from
@@ -337,12 +347,21 @@ export function HeraldChatPage({ slug, thread }: { slug: string; thread?: string
 
   const [turns, setTurns] = useState<ChatTurn[] | null>(null);
   useEffect(() => {
-    if (transcript.data) {
-      setTurns(renderTranscript(transcript.data.messages));
-    }
     if (transcript.error) {
       setTurns([]);
+      return;
     }
+    if (!transcript.data) return;
+    // Server truth replaces the optimistic view — EXCEPT while an approval
+    // batch is live in this tab: the frozen chips are session memory the
+    // transcript payload cannot reconstruct (it carries no chip payloads),
+    // so a late/resumed fetch must not wipe them mid-flow.
+    setTurns((prev) => {
+      const liveApproval = (prev ?? []).some(
+        (t) => t.batch?.chips.some((c) => c.state === "pending") || t.suspendedBatchId
+      );
+      return liveApproval ? prev : renderTranscript(transcript.data!.messages);
+    });
   }, [transcript.data, transcript.error]);
 
   const { data: agents = [] } = useAgents();
@@ -380,6 +399,19 @@ export function HeraldChatPage({ slug, thread }: { slug: string; thread?: string
   const busy409 = stream.status === "error" && stream.error?.code === "HERALD_TASK_ACTIVE";
   const providerMissing = !settingsLoading && settings === null;
 
+  // Composer lock while any approval chip is pending (same rule as
+  // streaming) — includes the marker-only reload case (no chip payloads).
+  const batchChips = (turns ?? []).flatMap((t) => t.batch?.chips ?? []);
+  const pendingCount = batchChips.filter((c) => c.state === "pending").length;
+  const hasSuspendedMarker = (turns ?? []).some((t) => !!t.suspendedBatchId);
+  const suspendedLock = pendingCount > 0 || hasSuspendedMarker || stream.status === "suspended";
+  const suspendTally =
+    batchChips.length === 0
+      ? ""
+      : pendingCount === batchChips.length
+        ? `${pendingCount} pending`
+        : `${pendingCount} of ${batchChips.length} pending`;
+
   // Engine gate (herald-chat.html): chat ALWAYS runs the herald lane — under
   // a blacksmith project default every stream fails up front, so the banner
   // renders before any attempt.
@@ -398,10 +430,16 @@ export function HeraldChatPage({ slug, thread }: { slug: string; thread?: string
   // errors and citations appear without a reload.
   useEffect(() => {
     if (!chatId) return;
-    if (stream.status === "done" || stream.status === "error" || stream.status === "aborted") {
+    // Terminal stream states refetch the transcript so persisted partials,
+    // errors and citations appear without a reload. The sidebar list
+    // refreshes here too — the thread row + derived title are persisted
+    // server-side exactly at these boundaries, so this is the earliest
+    // moment a fresh thread can appear.
+    if (stream.status === "done" || stream.status === "error" || stream.status === "aborted" || stream.status === "suspended") {
       void qc.invalidateQueries({ queryKey: ["herald-chat", chatId] });
+      if (projectId) void qc.invalidateQueries({ queryKey: ["herald-chats", projectId] });
     }
-  }, [stream.status, chatId, qc]);
+  }, [stream.status, chatId, projectId, qc]);
 
   const rawMessages = useMemo(() => transcript.data?.messages ?? [], [transcript.data]);
 
@@ -436,7 +474,7 @@ export function HeraldChatPage({ slug, thread }: { slug: string; thread?: string
   );
 
   const send = (message: string) => {
-    if (!projectId || !message || streaming) return;
+    if (!projectId || !message || streaming || suspendedLock) return;
     setTurns((prev) => [...(prev ?? []), { role: "user", text: message, imageCount: images.length, rawIndex: -1 }]);
     setInput("");
     mention.close();
@@ -541,6 +579,105 @@ export function HeraldChatPage({ slug, thread }: { slug: string; thread?: string
     return { items: stream.items, tools: stream.tools, reasoningMs: stream.reasoningMs };
   }, [stream.status, stream.items, stream.tools, stream.reasoningText, stream.reasoningMs]);
 
+  // ── Write approvals (herald-write-approvals.html) ──
+  // The suspended frame is terminal for the segment: freeze the in-memory
+  // bubble (activity + text + chips) into the transcript view as an editable
+  // audit trail, then reset the stream session so the resumed turn starts a
+  // FRESH assistant entry.
+  const frozeBatchRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (stream.status !== "suspended") return;
+    const batchId = stream.suspendedBatchId ?? "";
+    if (!batchId || frozeBatchRef.current === batchId) return;
+    frozeBatchRef.current = batchId;
+    const chips: ApprovalChip[] = stream.pending
+      .filter((p) => p.batchId === batchId)
+      .map((p) => ({ ...p, state: "pending" as const }));
+    const activity: ActivityView | undefined =
+      stream.reasoningText || stream.tools.length > 0 || stream.reasoningMs !== null
+        ? { items: stream.items, tools: stream.tools, reasoningMs: stream.reasoningMs }
+        : undefined;
+    setTurns((prev) => [
+      ...(prev ?? []),
+      {
+        role: "assistant",
+        text: stream.text,
+        imageCount: 0,
+        rawIndex: -1,
+        ...(activity ? { activity } : {}),
+        ...(chips.length > 0 ? { batch: { batchId, chips } } : { suspendedBatchId: batchId }),
+      },
+    ]);
+    stream.reset();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- freeze once per suspended batch; snapshot fields are read at flip time
+  }, [stream.status]);
+
+  const updateChip = useCallback((approvalId: string, patch: Partial<ApprovalChip> & { state: ApprovalChip["state"] }) => {
+    setTurns((prev) =>
+      (prev ?? []).map((t) => {
+        if (!t.batch || !t.batch.chips.some((c) => c.approvalId === approvalId)) return t;
+        return { ...t, batch: { ...t.batch, chips: t.batch.chips.map((c) => (c.approvalId === approvalId ? { ...c, ...patch } : c)) } };
+      })
+    );
+  }, []);
+
+  // One decision = one POST keyed by approvalId; the response's status is
+  // authoritative for that chip only — siblings untouched. Server-side 409s
+  // flip the chip to their terminal state instead of surfacing as toasts.
+  const handleDecide = useCallback(
+    async (chip: ApprovalChip, verdict: "approve" | "reject") => {
+      try {
+        const res = await api.decideHeraldApproval(chip.approvalId, verdict);
+        updateChip(chip.approvalId, { state: res.status === "approved" ? "approved" : "rejected" });
+      } catch (e) {
+        const err = e as Error & { code?: string; details?: unknown };
+        if (err.code === "APPROVAL_EXPIRED") {
+          updateChip(chip.approvalId, { state: "expired" });
+        } else if (err.code === "APPROVAL_ALREADY_DECIDED") {
+          const prev = (err.details as { status?: string } | undefined)?.status;
+          updateChip(chip.approvalId, { state: prev === "approved" ? "approved" : prev === "rejected" ? "rejected" : "expired" });
+        } else {
+          toast.push("error", "Decision failed", err.message);
+        }
+      }
+    },
+    [updateChip, toast]
+  );
+
+  // "Approve all" loops over still-pending chips only, one decide POST each.
+  const [batchBusy, setBatchBusy] = useState(false);
+  const handleApproveAll = useCallback(
+    (chips: ApprovalChip[]) => {
+      const targets = chips.filter((c) => c.state === "pending");
+      if (targets.length === 0) return;
+      setBatchBusy(true);
+      void (async () => {
+        try {
+          for (const chip of targets) await handleDecide(chip, "approve");
+        } finally {
+          setBatchBusy(false);
+        }
+      })();
+    },
+    [handleDecide]
+  );
+
+  // When EVERY chip of a frozen batch reaches a terminal state the client
+  // re-opens the stream for that batch — Herald continues with a fresh entry.
+  const resumedBatchesRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    if (!chatId || streaming) return;
+    for (let i = (turns ?? []).length - 1; i >= 0; i--) {
+      const b = turns?.[i].batch;
+      if (!b || resumedBatchesRef.current.has(b.batchId)) continue;
+      if (b.chips.some((c) => c.state === "pending")) return;
+      resumedBatchesRef.current.add(b.batchId);
+      stream.send(`/api/herald/chat/${chatId}/resume`, {});
+      return;
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- send() is stable; guard fires on decision state changes
+  }, [turns, chatId, streaming, stream.status]);
+
   const [editingPos, setEditingPos] = useState<number | null>(null);
   const [editDraft, setEditDraft] = useState("");
 
@@ -601,7 +738,13 @@ export function HeraldChatPage({ slug, thread }: { slug: string; thread?: string
         onNewChat={startNewChat}
         onPinToggle={(id, pinned) => void metaChat.mutateAsync({ chatId: id, pinned })}
         onRename={(id, title) => renameChat.mutateAsync({ chatId: id, title })}
-        onDelete={(id) => deleteChat.mutateAsync({ chatId: id })}
+        onDelete={(id) =>
+          deleteChat.mutateAsync({ chatId: id }).then(() => {
+            // Deleting the active thread lands on a fresh chat — the dead
+            // uuid would 404 its transcript and linger in localStorage.
+            if (id === chatId) startNewChat();
+          })
+        }
         open={sidebarOpen}
         onToggle={toggleSidebar}
         onClose={() => setSidebarOpen(false)}
@@ -706,10 +849,13 @@ export function HeraldChatPage({ slug, thread }: { slug: string; thread?: string
                      projectId={projectId}
                      streaming={streaming}
                      renderText={renderText}
-                     activity={streamActivity && pos === (turns?.length ?? 0) - 1 ? streamActivity : undefined}
+                     activity={turn.activity ?? (streamActivity && pos === (turns?.length ?? 0) - 1 ? streamActivity : undefined)}
+                     batchBusy={batchBusy}
+                     onDecide={handleDecide}
+                     onApproveAll={handleApproveAll}
                      onRetry={() => handleRetryTurn(turn)}
                    />
-                 )
+                  )
               )}
 
                 {streaming && (
@@ -722,6 +868,14 @@ export function HeraldChatPage({ slug, thread }: { slug: string; thread?: string
                       reasoningMs={stream.reasoningMs}
                       renderText={renderText}
                     />
+                    {stream.pending.length > 0 && (
+                      <HeraldApprovalBatch
+                        chips={stream.pending.map((p) => ({ ...p, state: "pending" as const }))}
+                        locked
+                        onDecide={() => {}}
+                        onApproveAll={() => {}}
+                      />
+                    )}
                   </div>
                 )}
              </div>
@@ -750,9 +904,6 @@ export function HeraldChatPage({ slug, thread }: { slug: string; thread?: string
                 onSkillChange={setSkillId}
                 layout="inline"
                 allowNoSkill
-                trailing={
-                  <EffortPicker effort={effort} projectEffort={settings?.reasoningEffort ?? null} disabled={streaming} onChange={setEffort} />
-                }
               />
 
               {engineGate && (
@@ -772,7 +923,7 @@ export function HeraldChatPage({ slug, thread }: { slug: string; thread?: string
                 </div>
               )}
 
-              <div className="composer" style={{ ...(busy409 ? { opacity: 0.55 } : {}), position: "relative" }}>
+              <div className="composer" style={{ ...(busy409 || suspendedLock ? { opacity: 0.55 } : {}), position: "relative" }}>
                 {mention.open && (
                   <div className="dropdown-menu mention-popup" role="listbox" style={mention.popupStyle ?? undefined}>
                     {mention.items.length === 0 ? (
@@ -817,7 +968,7 @@ export function HeraldChatPage({ slug, thread }: { slug: string; thread?: string
                   ref={composerRef}
                   className="composer-editor w-full"
                   rows={2}
-                  placeholder={streaming ? "Herald is responding…" : "Ask Herald anything about this project…"}
+                  placeholder={streaming ? "Herald is responding…" : suspendedLock ? "Decide the pending changes above…" : "Ask Herald anything about this project…"}
                   value={input}
                   onChange={mention.handleChange}
                   onPaste={pasteIntoComposer}
@@ -829,7 +980,7 @@ export function HeraldChatPage({ slug, thread }: { slug: string; thread?: string
                       send(input.trim());
                     }
                   }}
-                  disabled={streaming || busy409}
+                  disabled={streaming || busy409 || suspendedLock}
                   style={{ border: "none", background: "transparent" }}
                 />
                 <div className="composer-footer">
@@ -846,6 +997,15 @@ export function HeraldChatPage({ slug, thread }: { slug: string; thread?: string
                         Stop
                       </button>
                     </>
+                  ) : suspendedLock ? (
+                    <>
+                      <span className="font-micro text-2xs text-lx-text-warning" style={{ transform: "uppercase", textTransform: "uppercase", letterSpacing: "0.04em" }}>
+                        ● Turn suspended{suspendTally ? ` — ${suspendTally}` : ""}
+                      </span>
+                      <button type="button" className="btn btn-primary btn-sm" disabled>
+                        Send
+                      </button>
+                    </>
                   ) : (
                     <>
                       <div className="flex items-center gap-2">
@@ -860,10 +1020,13 @@ export function HeraldChatPage({ slug, thread }: { slug: string; thread?: string
                         />
                         <span className="font-micro text-2xs text-lx-text-muted uppercase tracking-[0.04em]">≤3 images · ≤1.5MB total</span>
                       </div>
-                      <button type="button" className="btn btn-primary btn-sm" disabled={!input.trim() || busy409} onClick={() => send(input.trim())}>
-                        Send
-                        <Send size={12} strokeWidth={1.5} />
-                      </button>
+                      <div className="flex items-center gap-2">
+                        <EffortPicker effort={effort} projectEffort={settings?.reasoningEffort ?? null} disabled={streaming} onChange={setEffort} />
+                        <button type="button" className="btn btn-primary btn-sm" disabled={!input.trim() || busy409} onClick={() => send(input.trim())}>
+                          Send
+                          <Send size={12} strokeWidth={1.5} />
+                        </button>
+                      </div>
                     </>
                   )}
                 </div>
@@ -900,6 +1063,9 @@ function AssistantBubble({
   streaming,
   renderText,
   activity,
+  batchBusy,
+  onDecide,
+  onApproveAll,
   onRetry,
 }: {
   turn: ChatTurn;
@@ -909,6 +1075,9 @@ function AssistantBubble({
   streaming: boolean;
   renderText: (text: string) => ReactNode;
   activity?: ActivityView;
+  batchBusy: boolean;
+  onDecide: (chip: ApprovalChip, verdict: "approve" | "reject") => void;
+  onApproveAll: (chips: ApprovalChip[]) => void;
   onRetry: () => void;
 }) {
   const time = hhmm(turn.ts);
@@ -996,6 +1165,15 @@ function AssistantBubble({
               </div>
             )
           )}
+          {turn.batch && turn.batch.chips.length > 0 && (
+            <HeraldApprovalBatch
+              chips={turn.batch.chips}
+              locked={batchBusy}
+              onDecide={onDecide}
+              onApproveAll={() => onApproveAll(turn.batch!.chips)}
+            />
+          )}
+          {(turn.batch ? turn.batch.chips.some((c) => c.state === "pending") : !!turn.suspendedBatchId) && <SuspendedIndicator />}
           {citations && citations.length > 0 && (
             <div className="flex items-center mt-2" style={{ gap: 6, flexWrap: "wrap" }}>
               {citations.map((c) => (
@@ -1047,6 +1225,7 @@ export function renderTranscript(messages: unknown[]): ChatTurn[] {
       citations?: unknown;
       error?: unknown;
       stopped?: unknown;
+      pendingBatch?: unknown;
     };
     if (msg.role !== "user" && msg.role !== "assistant") continue;
     let text = "";
@@ -1059,7 +1238,17 @@ export function renderTranscript(messages: unknown[]): ChatTurn[] {
         else text += String(part.content ?? part.text ?? "");
       }
     }
-    if (!text && !imageCount && !msg.error && !msg.stopped) continue;
+    // Suspended-turn marker (legacy string batchId or PendingBatchMarker
+    // object) — chip payloads are NOT in the transcript; the waiting
+    // indicator renders without them.
+    const pendingBatchId =
+      typeof msg.pendingBatch === "string"
+        ? msg.pendingBatch
+        : msg.pendingBatch && typeof msg.pendingBatch === "object" &&
+            typeof (msg.pendingBatch as { batchId?: unknown }).batchId === "string"
+          ? (msg.pendingBatch as { batchId: string }).batchId
+          : null;
+    if (!text && !imageCount && !msg.error && !msg.stopped && pendingBatchId === null) continue;
     const citations = msg.role === "assistant" ? safeCitations(msg.citations) : [];
     const err = isErrorMeta(msg.error);
     out.push({
@@ -1071,6 +1260,7 @@ export function renderTranscript(messages: unknown[]): ChatTurn[] {
       ...(citations.length > 0 ? { citations } : {}),
       ...(err ? { error: err } : {}),
       ...(msg.stopped === true ? { stopped: true } : {}),
+      ...(pendingBatchId !== null ? { suspendedBatchId: pendingBatchId } : {}),
     });
   }
   return out;

@@ -1,8 +1,8 @@
 import type { TipTapDoc } from "../../shared/types";
 import { renderDoc } from "./tiptap-render";
 import { DescriptionEditor } from "./DescriptionEditor";
-import { LinksSection } from "./forge/LinksSection";
-import { SourcesSection } from "./forge/SourcesSection";
+import { LinksSection } from "./hearth/LinksSection";
+import { SourcesSection } from "./hearth/SourcesSection";
 
 interface TaskDescriptionSectionProps {
   isCreate: boolean;
@@ -26,7 +26,7 @@ export function TaskDescriptionSection({ isCreate, slug, task, emptyDoc, taskTit
       initialContent={emptyDoc}
       onChange={setCreateDescription}
       placeholder="Add a description..."
-      forge={slug ? { slug, documentType: "task", documentId: task?.id ?? "" } : undefined}
+      hearth={slug ? { slug, documentType: "task", documentId: task?.id ?? "" } : undefined}
     />
     <div className="mt-4 border border-dashed border-lx-border-default rounded-md p-3 text-xs text-lx-text-muted font-body">
       No GitHub section in create mode — linking is available after the task exists.
@@ -38,7 +38,7 @@ export function TaskDescriptionSection({ isCreate, slug, task, emptyDoc, taskTit
       <DescriptionEditor
         initialContent={task!.description}
         editable={true}
-        forge={slug ? { slug, documentType: "task", documentId: task!.id } : undefined}
+        hearth={slug ? { slug, documentType: "task", documentId: task!.id } : undefined}
         attachments={slug ? { slug, documentId: task!.id } : undefined}
         onBlur={(doc) => {
           onUpdate?.(task!.id, { description: doc });

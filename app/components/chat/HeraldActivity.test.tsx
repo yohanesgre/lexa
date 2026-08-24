@@ -17,8 +17,13 @@ const reasoning = (t: string, ms: number | null = null): HeraldTimelineItem => (
 const toolItem = (key: string, phase: "call" | "result"): HeraldTimelineItem => ({ kind: "tool", chip: toolChip(key, phase) });
 
 describe("HeraldActivity timeline", () => {
-  it("renders nothing without items", () => {
+  it("streaming with no frames yet: lone caret keeps the bubble alive", () => {
     const { container } = render(<HeraldActivity items={[]} tools={[]} reasoningActive={false} reasoningMs={null} />);
+    expect(container.querySelector(".bubble-md .herald-stream-caret")).not.toBeNull();
+  });
+
+  it("done with no summary parts renders nothing (no stray caret)", () => {
+    const { container } = render(<HeraldActivity items={[]} tools={[]} reasoningActive={false} reasoningMs={null} done />);
     expect(container).toBeEmptyDOMElement();
   });
 

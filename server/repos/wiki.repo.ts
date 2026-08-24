@@ -57,6 +57,13 @@ export class WikiRepo extends Effect.Service<WikiRepo>()("Lexa/WikiRepo", {
           projectId
         ).pipe(Effect.map((rows) => rows.map(rowToWikiPageMeta))),
 
+      findFullByProject: (projectId: string): Effect.Effect<WikiPage[], DbError> =>
+        queryAll<WikiPageRow>(
+          db,
+          `SELECT * FROM wiki_pages WHERE project_id = ? ORDER BY COALESCE(parent_id, '') ASC, position ASC`,
+          projectId
+        ).pipe(Effect.map((rows) => rows.map(rowToWikiPage))),
+
       findChildren: (projectId: string, parentId: string): Effect.Effect<WikiPageMeta[], DbError> =>
         queryAll<WikiPageRow>(
           db,

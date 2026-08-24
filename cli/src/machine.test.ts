@@ -58,7 +58,7 @@ describe("scrubDaemonEnv", () => {
     const mod = await import("./machine");
     const env = {
       LXK_API_KEY: "lxk_x",
-      LXK_FORGE_DAEMON_TOKEN: "deadbeef",
+      LXK_HEARTH_DAEMON_TOKEN: "deadbeef",
       GITHUB_APP_ID: "123",
       GITHUB_PRIVATE_KEY: "-----BEGIN",
       CF_API_TOKEN: "cf-t",
@@ -73,7 +73,7 @@ describe("scrubDaemonEnv", () => {
 
   it("drops vars with SECRET/TOKEN/PRIVATE_KEY/API_KEY/PASSWORD markers (case-insensitive)", async () => {
     const mod = await import("./machine");
-    const env = { LEXA_API_KEY: "lxk_x", FORGE_DAEMON_TOKEN: "tok", MY_PRIVATE_KEY: "k", DB_PASSWORD: "pw", api_token: "t", PATH: "/usr/bin" };
+    const env = { LEXA_API_KEY: "lxk_x", HEARTH_DAEMON_TOKEN: "tok", MY_PRIVATE_KEY: "k", DB_PASSWORD: "pw", api_token: "t", PATH: "/usr/bin" };
     expect(mod.scrubDaemonEnv(env)).toEqual({ PATH: "/usr/bin" });
   });
 

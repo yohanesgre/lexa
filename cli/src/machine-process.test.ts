@@ -227,16 +227,16 @@ describe("machineListen daemon spawning", () => {
   }
 
   function writeRuntimeEnv(agentCli: string, extra: Record<string, string> = {}): string {
-    const runtimeId = extra.FORGE_RUNTIME_ID ?? "r1";
+    const runtimeId = extra.HEARTH_RUNTIME_ID ?? "r1";
     mkdirSync(join(GROUP_DIR(), "runtimes", runtimeId), { recursive: true });
     writeFileSync(
       join(GROUP_DIR(), "runtimes", runtimeId, "env"),
       [
         `LEXA_URL=http://fake-server`,
-        `FORGE_AGENT=${agentCli}`,
-        `FORGE_RUNTIME_ID=${runtimeId}`,
-        `FORGE_RUNTIME_NAME=host-${agentCli}`,
-        `FORGE_MACHINE_ID=m1`,
+        `HEARTH_AGENT=${agentCli}`,
+        `HEARTH_RUNTIME_ID=${runtimeId}`,
+        `HEARTH_RUNTIME_NAME=host-${agentCli}`,
+        `HEARTH_MACHINE_ID=m1`,
         ...Object.entries(extra).map(([k, v]) => `${k}=${v}`),
       ].join("\n") + "\n",
     );
@@ -253,7 +253,7 @@ describe("machineListen daemon spawning", () => {
 
     const daemonSpawn = childMocks.spawnCalls.find((c) => c.cmd === "bun");
     expect(daemonSpawn).toBeDefined();
-    expect(daemonSpawn?.args).toEqual(["run", join(homeDir, ".local", "share", "lexa-forge", "daemon.js")]);
+    expect(daemonSpawn?.args).toEqual(["run", join(homeDir, ".local", "share", "lexa-hearth", "daemon.js")]);
     const env = daemonSpawn?.opts.env as Record<string, string>;
     // Security contract: shell secrets never reach the child...
     expect(env.LXK_API_KEY).toBeUndefined();
@@ -266,10 +266,10 @@ describe("machineListen daemon spawning", () => {
     expect(env.LEXA_FLAVOR).toBe("prod");
     // ...and the runtime env file is the ONLY credential source.
     expect(env.LEXA_URL).toBe("http://fake-server");
-    expect(env.FORGE_AGENT).toBe("opencode");
-    expect(env.FORGE_RUNTIME_ID).toBe("r1");
+    expect(env.HEARTH_AGENT).toBe("opencode");
+    expect(env.HEARTH_RUNTIME_ID).toBe("r1");
     // normalizeRuntimeEnv overrides the machine id with the listener's own.
-    expect(env.FORGE_MACHINE_ID).toMatch(/^[^-]+-[0-9a-f]{8}$/);
+    expect(env.HEARTH_MACHINE_ID).toMatch(/^[^-]+-[0-9a-f]{8}$/);
     // Daemon pid persisted for the stale-daemon sweep on next boot.
     expect(readFileSync(join(GROUP_DIR(), "runtimes", "r1", "daemon.pid"), "utf-8").trim()).toBe("4242");
   });
@@ -300,7 +300,7 @@ describe("machineListen daemon spawning", () => {
     const eventSpawn = daemonSpawns[daemonSpawns.length - 1];
     const env = eventSpawn?.opts.env as Record<string, string>;
     expect(env.LEXA_API_KEY).toBe("lxk_onetime");
-    expect(env.FORGE_AGENT).toBe("command-code");
+    expect(env.HEARTH_AGENT).toBe("command-code");
     expect(childMocks.completedEvents).toContain("evt-1");
     // Env file persisted under <group>/runtimes/<id>/.
     const envDirs = readdirSync(join(GROUP_DIR(), "runtimes")).filter((d) => d !== "r1");

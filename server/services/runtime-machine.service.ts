@@ -1,7 +1,7 @@
 import { Effect } from "effect";
 import { randomBytes } from "node:crypto";
 import { RuntimeMachineRepo, type MachineCli } from "../repos/runtime-machine.repo";
-import { ForgeRepo } from "../repos/forge.repo";
+import { HearthRepo } from "../repos/hearth.repo";
 import { RuntimeEventService } from "./runtime-event.service";
 import { DbError, ConstraintViolation, Sqlite, withTx } from "../db/database";
 import { MachineIdTaken, MachineNotFound } from "../api/errors";
@@ -23,10 +23,10 @@ function generateMachineSecret(): string {
 }
 
 export class RuntimeMachineService extends Effect.Service<RuntimeMachineService>()("Lexa/RuntimeMachineService", {
-  dependencies: [RuntimeMachineRepo.Default, ForgeRepo.Default, RuntimeEventService.Default],
+  dependencies: [RuntimeMachineRepo.Default, HearthRepo.Default, RuntimeEventService.Default],
   effect: Effect.gen(function* () {
     const repo = yield* RuntimeMachineRepo;
-    const forgeRepo = yield* ForgeRepo;
+    const hearthRepo = yield* HearthRepo;
     const eventService = yield* RuntimeEventService;
     const db = yield* Sqlite;
 
@@ -73,11 +73,11 @@ export class RuntimeMachineService extends Effect.Service<RuntimeMachineService>
           yield* withTx(
             db,
             Effect.gen(function* () {
-              const runtimes = yield* forgeRepo.listRuntimesByMachine(id);
+              const runtimes = yield* hearthRepo.listRuntimesByMachine(id);
               for (const runtime of runtimes) {
                 yield* eventService.createRemove({ machineId: id, agentCli: runtime.provider });
               }
-              yield* forgeRepo.deleteRuntimesByMachine(id);
+              yield* hearthRepo.deleteRuntimesByMachine(id);
               yield* repo.delete(id).pipe(
                 Effect.catchTag("RowNotFound", () => new MachineNotFound({ id }))
               );

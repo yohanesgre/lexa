@@ -26,7 +26,7 @@ const BOARD: Board = {
   tasks: [{ id: "t1", key: "EG-1", projectId: "p1", columnId: "c1", swimlaneId: "s1", title: "T1", description: { type: "doc", content: [] }, priority: "p", type: "t", assignees: [], position: "a0", githubs: [], dueAt: null, archivedAt: null, createdAt: "t", updatedAt: "t" }],
 };
 const ARCHIVED_LANE: Swimlane = { ...LANE, archivedAt: "2026-03-01T00:00:00.000Z" };
-const ARCHIVE_EVENT: ActivityEvent = { id: 1, taskId: "t1", actorKind: "agent", actorLabel: "mcp", actorUserId: null, type: "archived", message: "mcp archived this task", createdAt: "t" };
+const ARCHIVE_EVENT: ActivityEvent = { id: 1, taskId: "t1", actorKind: "agent", actorLabel: "mcp", actorUserId: null, type: "archived", message: "mcp archived this task", viaHerald: false, createdAt: "t" };
 
 const routes = new Map<string, unknown>();
 function mockFetch(): void {

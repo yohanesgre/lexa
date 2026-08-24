@@ -17,21 +17,25 @@ import {
   type CacheablePrompt,
 } from "../herald/prompt";
 import { buildHeraldTools, MAX_CHAT_TOOL_ROUNDS, MAX_TOOL_ROUNDS, toolCallDetail, type TaskRef } from "../herald/tools";
-import { ForgeRepo } from "../repos/forge.repo";
+import { HearthRepo } from "../repos/hearth.repo";
 import { HeraldSettingsRepo, type HeraldSettingsRow } from "../repos/herald-settings.repo";
 import { HeraldThreadRepo, type HeraldThread } from "../repos/herald-thread.repo";
 import { ProjectMemoryRepo } from "../repos/project-memory.repo";
 import { TaskRepo } from "../repos/task.repo";
 import { WikiRepo } from "../repos/wiki.repo";
-import { ForgeService, BLACKSMITH_AGENT, HERALD_AGENT } from "./forge.service";
-import { loadTaskRepoContent } from "./forge-repo-content";
+import { HearthService, BLACKSMITH_AGENT, HERALD_AGENT } from "./hearth.service";
+import { loadTaskRepoContent } from "./hearth-repo-content";
 import { Storage } from "../storage/storage";
 import { Sqlite, DbError, RowNotFound } from "../db/database";
 import {
   AgentNotFound,
+  ApprovalAlreadyDecided,
+  ApprovalExpired,
+  ApprovalNotFound,
+  ApprovalsPending,
   EngineNotSupportedForChat,
   errorCodeMap,
-  ForgeTaskNotFound,
+  HearthTaskNotFound,
   HeraldGenerationFailed,
   HeraldTaskActive,
   HeraldThreadNotFound,
@@ -46,12 +50,28 @@ import {
   VisionNotConfigured,
   WikiPageNotFound,
 } from "../api/errors";
+import { HeraldPendingWritesRepo, type HeraldPendingWriteRow } from "../repos/herald-pending-writes.repo";
+import {
+  buildHeraldWriteTools,
+  createWriteRecorder,
+  isHeraldWriteTool,
+  parseWriteTools,
+  type HeraldWriteToolDeps,
+  type HeraldWriteToolName,
+  type QueuedProposal,
+} from "../herald/write-tools";
+import { CommentService } from "./comment.service";
+import { MilestoneService } from "./milestone.service";
+import { SwimlaneService } from "./swimlane.service";
+import { TaskService } from "./task.service";
+import { WikiService } from "./wiki.service";
+import { AuthorizationService } from "./authorization.service";
 import { GitHubClient } from "../github/client";
 import { ProjectReposRepo } from "../repos/project-repos.repo";
 import { docToMarkdown } from "../../shared/markdown";
 import { extractText } from "../../shared/tiptap-text";
 import { parseTaskKey } from "../task-key";
-import type { TipTapDoc, Task } from "../../shared/types";
+import type { TipTapDoc, Task, WikiPage, Actor } from "../../shared/types";
 import type { Citation, HeraldChatStreamRequest, HeraldReasoningEffort, StreamFrame } from "../../shared/herald";
 import { deriveChatTitle } from "../../shared/herald";
 import { buildAnalyzeImageTool, resolveVisionMode, type VisionMode } from "../herald/vision";
@@ -377,6 +397,43 @@ export function modelOptionsForEffort(effort: HeraldReasoningEffort | null): Rec
   return effort === null ? undefined : { reasoning_effort: effort };
 }
 
+// ── Write-approval resume helpers (pure) ──
+
+// batchId of a pendingBatch marker value — legacy string shape or the
+// PendingBatchMarker object ({ batchId, approvals }). Null otherwise.
+function pendingBatchIdOf(pb: unknown): string | null {
+  if (typeof pb === "string") return pb;
+  if (pb && typeof pb === "object" && typeof (pb as { batchId?: unknown }).batchId === "string") {
+    return (pb as { batchId: string }).batchId;
+  }
+  return null;
+}
+
+// Newest-first scan for the transcript entry carrying a pendingBatch marker
+// (the suspended assistant turn). Null when no turn is suspended.
+export function findPendingBatch(messages: unknown[]): string | null {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const m = messages[i] as { pendingBatch?: unknown } | null;
+    const id = m && typeof m === "object" ? pendingBatchIdOf(m.pendingBatch) : null;
+    if (id !== null) return id;
+  }
+  return null;
+}
+
+// Drop the pendingBatch marker from entries whose batch fully resolved
+// (all rows decided + executed). Entries keep their content/ts/toolCalls.
+export function applyResumeResults(messages: unknown[], resolvedBatchIds: string[]): unknown[] {
+  const done = new Set(resolvedBatchIds);
+  return messages.map((m) => {
+    const id = pendingBatchIdOf((m as { pendingBatch?: unknown } | null)?.pendingBatch);
+    if (id !== null && done.has(id)) {
+      const { pendingBatch: _resolved, ...rest } = m as Record<string, unknown>;
+      return rest;
+    }
+    return m;
+  });
+}
+
 export interface StreamRunContext {
   keyId: string;
   idField: "taskId" | "chatId";
@@ -398,6 +455,15 @@ export interface StreamRunContext {
   onDone: (text: string) => Promise<void>;
   onFail: (message: string) => Promise<void>;
   onCancel: () => Promise<void>;
+  // Resume streams: the transcript already ends with the suspended assistant
+  // entry — no fresh user message is appended.
+  skipUserEntry?: boolean;
+  // Resume outcome per decided row of the resumed batch — one approval_result
+  // frame each, pushed right after the start frame.
+  approvalResults?: Array<{ approvalId: string; status: "applied" | "failed" | "denied"; error?: string }>;
+  // Per-turn write-proposal queue (createWriteRecorder.drain). Drained once,
+  // at the suspend checkpoint.
+  writeDrain?: () => QueuedProposal[];
   modelOptions?: Record<string, unknown>;
 }
 
@@ -418,24 +484,81 @@ export function buildStream(ctx: StreamRunContext): ReadableStream<StreamFrame> 
         // misclassified as a client abort in the catch below.
         let stalled = false;
         const userEntry = { role: "user", content: ctx.userContent, ts: ctx.userTs };
+        const userEntries = ctx.skipUserEntry ? [] : [userEntry];
+        // Completed tool calls for the persisted transcript entry.
+        const toolCallsLog: Array<{ name: string; detail?: string }> = [];
+        // Provider toolCallIds of write-tool calls, in TOOL_CALL_RESULT order —
+        // pairs each drained proposal with the call that proposed it.
+        const writeToolCallIds: string[] = [];
+        let writeQueueDrained = false;
+        const drainWrites = (): QueuedProposal[] => {
+          if (writeQueueDrained || !ctx.writeDrain) return [];
+          writeQueueDrained = true;
+          return ctx.writeDrain();
+        };
         // Failure/abort terminal persist — runs BEFORE onFail/onCancel so a
         // retry can drop the failed entry by re-sending from its index.
         const persistTerminalTurn = async (extra: Record<string, unknown>) => {
           await ctx.persist(
             [
               ...ctx.history,
-              userEntry,
+              ...userEntries,
               { role: "assistant", content: text, ts: new Date().toISOString(), ...extra },
             ],
             ctx.historySummary(),
             ctx.historySummarizedCount()
           );
         };
+        // Suspend checkpoint: proposals exist and the stream wasn't killed by
+        // the stall watchdog — surface tool_pending frames, persist the
+        // suspended assistant entry, emit the terminal suspended frame.
+        const suspendTurn = async (drained: QueuedProposal[]) => {
+          for (const p of drained) {
+            push({
+              type: "tool_pending",
+              approvalId: p.approvalId,
+              batchId: p.batchId,
+              seq: p.seq,
+              name: p.name,
+              ...(p.detail !== undefined ? { detail: p.detail } : {}),
+              diff: p.diff,
+            });
+          }
+          const citations = ctx.getCitations();
+          await ctx.persist(
+            [
+              ...ctx.history,
+              ...userEntries,
+              {
+                role: "assistant",
+                content: text,
+                ts: new Date().toISOString(),
+                ...(citations.length > 0 ? { citations } : {}),
+                ...(toolCallsLog.length > 0 ? { toolCalls: toolCallsLog } : {}),
+                pendingBatch: {
+                  batchId: drained[0].batchId,
+                  approvals: drained.map((p, i) => ({ approvalId: p.approvalId, toolCallId: writeToolCallIds[i] ?? "" })),
+                },
+              },
+            ],
+            ctx.historySummary(),
+            ctx.historySummarizedCount()
+          );
+          push({ type: "suspended", batchId: drained[0].batchId });
+        };
         try {
           push({ type: "start", [ctx.idField]: ctx.keyId, threadId: ctx.threadId } as StreamFrame);
+          for (const r of ctx.approvalResults ?? []) {
+            push({
+              type: "approval_result",
+              approvalId: r.approvalId,
+              status: r.status,
+              ...(r.error !== undefined ? { error: r.error } : {}),
+            });
+          }
           const prepared = ctx.imageMode === "delegate"
-            ? await replaceImageRefsWithPlaceholders([...ctx.history, userEntry])
-            : await hydrateImageParts([...ctx.history, userEntry], ctx.loadImageBase64);
+            ? await replaceImageRefsWithPlaceholders([...ctx.history, ...userEntries])
+            : await hydrateImageParts([...ctx.history, ...userEntries], ctx.loadImageBase64);
           let toolRounds = 0;
           // Accumulated tool-call args per toolCallId: TOOL_CALL_START carries
           // only the name; the args stream in via TOOL_CALL_ARGS chunks.
@@ -514,10 +637,20 @@ export function buildStream(ctx: StreamRunContext): ReadableStream<StreamFrame> 
                 if (shouldEmitToolFrame(name)) {
                   push(detail === undefined ? { type: "tool", phase: "call", name } : { type: "tool", phase: "call", name, detail });
                   push(detail === undefined ? { type: "tool", phase: "result", name } : { type: "tool", phase: "result", name, detail });
+                  toolCallsLog.push(detail === undefined ? { name } : { name, detail });
                 }
                 if (toolRounds > ctx.toolRoundCap) {
                   abort.abort();
                   throw new HeraldToolBudgetExceeded({ rounds: ctx.toolRoundCap });
+                }
+              } else if (chunk.type === "TOOL_CALL_RESULT") {
+                const id = chunk.toolCallId !== undefined ? String(chunk.toolCallId) : "";
+                const name = pendingCalls.get(id)?.name ?? "";
+                if (isHeraldWriteTool(name)) {
+                  writeToolCallIds.push(id);
+                  // A write tool produced its proposal result — the turn must
+                  // end so the batch can surface for approval. Abort once.
+                  if (!abort.signal.aborted) abort.abort();
                 }
               } else if (chunk.type === "RUN_FINISHED") {
                 const u = chunk.usage as
@@ -531,16 +664,23 @@ export function buildStream(ctx: StreamRunContext): ReadableStream<StreamFrame> 
             }
           };
           await consume(ctx.tools);
+          let drained = drainWrites();
           // Some OpenAI-compatible providers/models reject function calling
           // with a normal finish and empty content (no RUN_ERROR). One
-          // degraded retry without tools beats a silent empty reply.
-          if (text === "" && ctx.tools && ctx.tools.length > 0) {
+          // degraded retry without tools beats a silent empty reply — never
+          // when the turn is suspending on write proposals.
+          if (drained.length === 0 && text === "" && ctx.tools && ctx.tools.length > 0) {
             await consume(undefined);
+            drained = drainWrites();
+          }
+          if (drained.length > 0 && !stalled) {
+            await suspendTurn(drained);
+            return;
           }
           const citations = ctx.getCitations();
           const finalMessages = [
             ...ctx.history,
-            userEntry,
+            ...userEntries,
             { role: "assistant", content: text, ts: new Date().toISOString(), ...(citations.length > 0 ? { citations } : {}) },
           ];
           let summary = ctx.historySummary();
@@ -559,7 +699,15 @@ export function buildStream(ctx: StreamRunContext): ReadableStream<StreamFrame> 
           await ctx.onDone(text);
           push({ type: "done", [ctx.idField]: ctx.keyId, text, usage: { in: usageIn, out: usageOut } } as StreamFrame);
         } catch (e) {
-          if (e instanceof HeraldToolBudgetExceeded) {
+          const drained = drainWrites();
+          if (drained.length > 0 && !stalled) {
+            // Proposals already persisted this turn — suspend instead of
+            // failing, even when the provider stream died mid-flight.
+            await suspendTurn(drained).catch(async () => {
+              await persistTerminalTurn({ stopped: true }).catch(() => {});
+              await ctx.onCancel().catch(() => {});
+            });
+          } else if (e instanceof HeraldToolBudgetExceeded) {
             await persistTerminalTurn({
               error: { code: "HERALD_TOOL_BUDGET_EXCEEDED", message: `Herald exceeded its tool budget (${e.rounds} rounds)` },
             }).catch(() => {});
@@ -615,26 +763,40 @@ async function summarizeOlder(config: ProviderConfig, older: unknown[]): Promise
 
 export class HeraldService extends Effect.Service<HeraldService>()("Lexa/Herald", {
   dependencies: [
-    ForgeRepo.Default,
+    HearthRepo.Default,
     HeraldSettingsRepo.Default,
     HeraldThreadRepo.Default,
+    HeraldPendingWritesRepo.Default,
     ProjectMemoryRepo.Default,
-    ForgeService.Default,
+    HearthService.Default,
     Storage.Default,
     TaskRepo.Default,
     WikiRepo.Default,
     ProjectReposRepo.Default,
+    TaskService.Default,
+    CommentService.Default,
+    WikiService.Default,
+    MilestoneService.Default,
+    SwimlaneService.Default,
+    AuthorizationService.Default,
   ],
   effect: Effect.gen(function* () {
-    const forgeRepo = yield* ForgeRepo;
+    const hearthRepo = yield* HearthRepo;
     const settingsRepo = yield* HeraldSettingsRepo;
     const threadRepo = yield* HeraldThreadRepo;
+    const pendingWritesRepo = yield* HeraldPendingWritesRepo;
     const memoryRepo = yield* ProjectMemoryRepo;
-    const forgeService = yield* ForgeService;
+    const hearthService = yield* HearthService;
     const storage = yield* Storage;
     const taskRepo = yield* TaskRepo;
     const wikiRepo = yield* WikiRepo;
     const db = yield* Sqlite;
+    const taskService = yield* TaskService;
+    const commentService = yield* CommentService;
+    const wikiService = yield* WikiService;
+    const milestoneService = yield* MilestoneService;
+    const swimlaneService = yield* SwimlaneService;
+    const authz = yield* AuthorizationService;
 
     const configFromRow = (row: HeraldSettingsRow): ProviderConfig => ({
       kind: row.kind,
@@ -797,7 +959,25 @@ export class HeraldService extends Effect.Service<HeraldService>()("Lexa/Herald"
           taskRepo.findById(ref).pipe(Effect.orElse(() => taskRepo.findByKey(ref)))
         ).catch(() => null);
         if (!t || t.projectId !== projectId) return null;
-        return taskRefOf(t);
+        const col = db.prepare(`SELECT name FROM columns WHERE id = ?`).get(t.columnId) as { name: string } | undefined;
+        const lane = db.prepare(`SELECT name, milestone_id FROM swimlanes WHERE id = ?`).get(t.swimlaneId) as
+          | { name: string; milestone_id: string | null }
+          | undefined;
+        let milestoneName: string | null = null;
+        if (lane?.milestone_id) {
+          const m = db.prepare(`SELECT name FROM milestones WHERE id = ?`).get(lane.milestone_id) as { name: string } | undefined;
+          milestoneName = m?.name ?? null;
+        }
+        const gi = t.githubs[0];
+        return {
+          ...taskRefOf(t),
+          columnName: col?.name ?? "",
+          swimlaneName: lane?.name ?? "",
+          milestoneName,
+          type: t.type,
+          assignees: t.assignees,
+          githubIssue: gi ? { repo: gi.repo, number: gi.issueNumber } : null,
+        };
       },
       searchTasksByTitle: async (query: string, limit = 10) => {
         const rows = await Effect.runPromise(taskRepo.searchByTitle(projectId, query, limit)).catch(() => [] as Task[]);
@@ -812,7 +992,317 @@ export class HeraldService extends Effect.Service<HeraldService>()("Lexa/Herald"
         if (!page) return null;
         return { title: page.title, slug: page.slug, content: page.content as TipTapDoc };
       },
+      listAllTasks: async () => {
+        const rows = await Effect.runPromise(taskRepo.listByProject(projectId)).catch(() => [] as Task[]);
+        return rows.map(taskRefOf);
+      },
+      listWikiPagesFull: async () => {
+        const rows = await Effect.runPromise(wikiRepo.findFullByProject(projectId)).catch(() => [] as WikiPage[]);
+        return rows.map((p) => ({ title: p.title, slug: p.slug, content: p.content as TipTapDoc }));
+      },
+      getBoardStructure: async () => {
+        const columns = (
+          db
+            .prepare(`SELECT id, name, position, wip_limit, github_state, is_done FROM columns WHERE project_id = ? ORDER BY position`)
+            .all(projectId) as Array<{
+            id: string;
+            name: string;
+            position: number;
+            wip_limit: number | null;
+            github_state: "open" | "closed" | null;
+            is_done: number;
+          }>
+        ).map((c) => ({
+          id: c.id,
+          name: c.name,
+          position: c.position,
+          wipLimit: c.wip_limit,
+          githubState: c.github_state,
+          isDone: c.is_done !== 0,
+        }));
+        const swimlanes = (
+          db
+            .prepare(`SELECT id, name, kind, start_at, due_at, archived_at, milestone_id FROM swimlanes WHERE project_id = ? ORDER BY position`)
+            .all(projectId) as Array<{
+            id: string;
+            name: string;
+            kind: "backlog" | "sprint";
+            start_at: string | null;
+            due_at: string | null;
+            archived_at: string | null;
+            milestone_id: string | null;
+          }>
+        ).map((l) => ({
+          id: l.id,
+          name: l.name,
+          kind: l.kind,
+          startAt: l.start_at,
+          dueAt: l.due_at,
+          archived: l.archived_at !== null,
+          milestoneId: l.milestone_id,
+        }));
+        const milestones = (
+          db.prepare(`SELECT id, name, due_at, archived_at FROM milestones WHERE project_id = ? ORDER BY position`).all(projectId) as Array<{
+            id: string;
+            name: string;
+            due_at: string | null;
+            archived_at: string | null;
+          }>
+        ).map((m) => ({
+          id: m.id,
+          name: m.name,
+          dueAt: m.due_at,
+          archived: m.archived_at !== null,
+        }));
+        return { columns, swimlanes, milestones };
+      },
     });
+
+    // ── Write tools (per-write approval queue) ──
+
+    const heraldActor = (ownerUserId: string): Actor => ({ kind: "agent", label: "herald", userId: ownerUserId });
+
+    const makeWriteDeps = (projectId: string, recorder: ReturnType<typeof createWriteRecorder>): HeraldWriteToolDeps => ({
+      projectId,
+      findTaskByRef: async (ref: string) => {
+        const t = await Effect.runPromise(
+          taskRepo.findById(ref).pipe(Effect.orElse(() => taskRepo.findByKey(ref)))
+        ).catch(() => null);
+        if (!t || t.projectId !== projectId) return null;
+        const col = db.prepare(`SELECT name FROM columns WHERE id = ?`).get(t.columnId) as { name: string } | undefined;
+        return {
+          id: t.id,
+          key: t.key,
+          title: t.title,
+          columnName: col?.name ?? "",
+          priority: t.priority,
+          type: t.type,
+          dueAt: t.dueAt,
+          assignees: t.assignees,
+          descriptionText: extractText(t.description as TipTapDoc),
+          archivedAt: t.archivedAt,
+        };
+      },
+      findColumn: async (id: string) =>
+        (db.prepare(`SELECT id, name FROM columns WHERE id = ?`).get(id) as { id: string; name: string } | undefined) ?? null,
+      findWikiPageBySlug: async (slug: string) => {
+        const page = await Effect.runPromise(wikiRepo.findBySlug(projectId, slug)).catch(() => null);
+        if (!page) return null;
+        return { slug: page.slug, title: page.title, text: extractText(page.content as TipTapDoc) };
+      },
+      findMilestone: async (id: string) => {
+        const m = db.prepare(`SELECT id, name, due_at, archived_at FROM milestones WHERE id = ?`).get(id) as
+          | { id: string; name: string; due_at: string | null; archived_at: string | null }
+          | undefined;
+        return m ? { id: m.id, name: m.name, dueAt: m.due_at, archivedAt: m.archived_at } : null;
+      },
+      findSwimlane: async (id: string) => {
+        const l = db.prepare(`SELECT id, name, kind FROM swimlanes WHERE id = ?`).get(id) as
+          | { id: string; name: string; kind: "backlog" | "milestone" | "sprint" }
+          | undefined;
+        return l ? { id: l.id, name: l.name, kind: l.kind } : null;
+      },
+      countSprints: async (milestoneId) => {
+        const r = db
+          .prepare(`SELECT COUNT(*) AS c FROM swimlanes WHERE milestone_id = ? AND kind = 'sprint' AND archived_at IS NULL`)
+          .get(milestoneId) as { c: number } | undefined;
+        return r?.c ?? 0;
+      },
+      record: recorder.record,
+    });
+
+    // Build the write-toolset for a turn. Empty allowlist → read-only.
+    // Document-thread proposals require an authenticated owner (the pending
+    // row's owner_user_id is NOT NULL).
+    const buildWriteToolset = (
+      settingsRow: HeraldSettingsRow,
+      turn: { projectId: string; documentType: "task" | "wiki" | "chat"; documentId: string; ownerUserId: string }
+    ): { tools: unknown[]; drain: (() => QueuedProposal[]) | undefined } => {
+      const enabled = parseWriteTools(settingsRow.write_tools);
+      if (enabled.length === 0) return { tools: [], drain: undefined };
+      const recorder = createWriteRecorder(turn, (row) =>
+        Effect.runPromise(
+          pendingWritesRepo.insert({
+            id: row.id,
+            project_id: row.projectId,
+            document_type: row.documentType,
+            document_id: row.documentId,
+            owner_user_id: row.ownerUserId,
+            batch_id: row.batchId,
+            seq: row.seq,
+            tool_name: row.toolName,
+            args: row.args,
+            diff: row.diff,
+            expires_at: row.expiresAt,
+          })
+        ).then(() => {})
+      );
+      const all = buildHeraldWriteTools(makeWriteDeps(turn.projectId, recorder)) as Array<{ name: string }>;
+      const tools = all.filter((t) => enabled.includes(t.name));
+      return tools.length === 0 ? { tools: [], drain: undefined } : { tools, drain: () => recorder.drain() };
+    };
+
+    const resolveTaskRefRow = (ref: string) =>
+      taskRepo.findById(ref).pipe(
+        Effect.orElse(() => taskRepo.findByKey(ref)),
+        Effect.catchTag("RowNotFound", () => new TaskNotFound({ id: ref }))
+      );
+
+    const str = (v: unknown): string => String(v);
+
+    // Execute one approved pending-write row as the herald actor. Never
+    // fails — domain errors are recorded on the row as `CODE: message` and
+    // reported via ok:false so the batch sweep continues.
+    const executeApprovedRow = (row: HeraldPendingWriteRow) =>
+      Effect.gen(function* () {
+        const access = yield* authz.projectAccess(row.owner_user_id, row.project_id);
+        if (access === null) {
+          const message = "FORBIDDEN: Write denied: insufficient permissions.";
+          yield* pendingWritesRepo.markExecutionError(row.id, message);
+          return { approvalId: row.id, ok: false as const, error: message };
+        }
+        const actor = heraldActor(row.owner_user_id);
+        let args: Record<string, unknown> = {};
+        try {
+          args = JSON.parse(row.args) as Record<string, unknown>;
+        } catch {
+          args = {};
+        }
+        const applied = yield* Effect.gen(function* () {
+          switch (row.tool_name as HeraldWriteToolName) {
+            case "create_task": {
+              const first = db.prepare(`SELECT id FROM columns WHERE project_id = ? ORDER BY position ASC LIMIT 1`).get(row.project_id) as
+                | { id: string }
+                | undefined;
+              if (!first) return yield* new InvalidArgs({ reason: "project has no columns" });
+              return yield* taskService.create(actor, {
+                projectId: row.project_id,
+                columnId: first.id,
+                title: str(args.title ?? ""),
+                ...(args.description !== undefined ? { description: args.description as TipTapDoc } : {}),
+                ...(args.priorityId !== undefined ? { priority: str(args.priorityId) } : {}),
+                ...(args.typeId !== undefined ? { type: str(args.typeId) } : {}),
+                ...(args.dueAt !== undefined ? { dueAt: args.dueAt as string | null } : {}),
+                ...(args.assigneeIds !== undefined ? { assignees: args.assigneeIds as string[] } : {}),
+                ...(args.parentId !== undefined ? { parentId: str(args.parentId) } : {}),
+                ...(args.sprintId !== undefined ? { swimlaneId: str(args.sprintId) } : {}),
+              }, { viaHerald: true });
+            }
+            case "update_task": {
+              const t = yield* resolveTaskRefRow(str(args.ref ?? ""));
+              return yield* taskService.update(actor, t.id, {
+                ...(args.title !== undefined ? { title: str(args.title) } : {}),
+                ...(args.description !== undefined ? { description: args.description as TipTapDoc } : {}),
+                ...(args.priorityId !== undefined ? { priority: str(args.priorityId) } : {}),
+                ...(args.typeId !== undefined ? { type: str(args.typeId) } : {}),
+                ...(args.dueAt !== undefined ? { dueAt: args.dueAt as string | null } : {}),
+                ...(args.assigneeIds !== undefined ? { assignees: args.assigneeIds as string[] } : {}),
+              }, { viaHerald: true });
+            }
+            case "move_task": {
+              const t = yield* resolveTaskRefRow(str(args.ref ?? ""));
+              return yield* taskService.move(actor, t.id, {
+                columnId: str(args.toColumnId ?? ""),
+                swimlaneId: args.toSwimlaneId !== undefined ? str(args.toSwimlaneId) : t.swimlaneId,
+                ...(args.beforeTaskId !== undefined ? { beforeTaskId: str(args.beforeTaskId) } : {}),
+                ...(args.afterTaskId !== undefined ? { afterTaskId: str(args.afterTaskId) } : {}),
+              }, { viaHerald: true });
+            }
+            case "archive_task": {
+              const t = yield* resolveTaskRefRow(str(args.ref ?? ""));
+              return yield* taskService.archive(actor, t.id, { viaHerald: true });
+            }
+            case "restore_task": {
+              const t = yield* resolveTaskRefRow(str(args.ref ?? ""));
+              return yield* taskService.restore(actor, t.id, { viaHerald: true });
+            }
+            case "add_comment": {
+              const t = yield* resolveTaskRefRow(str(args.ref ?? ""));
+              return yield* commentService.create(t.id, actor, args.body as TipTapDoc, { viaHerald: true });
+            }
+            case "create_wiki_page":
+              return yield* wikiService.create(row.project_id, {
+                title: str(args.title ?? ""),
+                ...(args.slug !== undefined ? { slug: str(args.slug) } : {}),
+                ...(args.content !== undefined ? { content: args.content as TipTapDoc } : {}),
+                ...(args.parentId !== undefined ? { parentId: str(args.parentId) } : {}),
+              });
+            case "edit_wiki_page": {
+              const page = yield* wikiRepo.findBySlug(row.project_id, str(args.slug ?? "")).pipe(
+                Effect.catchTag("RowNotFound", () => new WikiPageNotFound({ id: str(args.slug ?? "") }))
+              );
+              return yield* wikiService.update(page.id, {
+                ...(args.title !== undefined ? { title: str(args.title) } : {}),
+                ...(args.content !== undefined ? { content: JSON.stringify(args.content) } : {}),
+              });
+            }
+            case "create_milestone":
+              return yield* milestoneService.create({
+                projectId: row.project_id,
+                name: str(args.name ?? ""),
+                ...(args.dueAt !== undefined ? { dueAt: args.dueAt as string | null } : {}),
+              });
+            case "update_milestone":
+              return yield* milestoneService.update(str(args.milestoneId ?? ""), {
+                ...(args.name !== undefined ? { name: str(args.name) } : {}),
+                ...(args.dueAt !== undefined ? { dueAt: args.dueAt as string | null } : {}),
+              });
+            case "archive_milestone":
+              return yield* milestoneService.archive(actor, str(args.milestoneId ?? ""), { viaHerald: true });
+            case "create_sprint":
+              return yield* swimlaneService.create({
+                projectId: row.project_id,
+                name: str(args.name ?? ""),
+                ...(args.startAt !== undefined ? { startAt: args.startAt as string | null } : {}),
+                ...(args.dueAt !== undefined ? { dueAt: args.dueAt as string | null } : {}),
+                ...(args.milestoneId !== undefined ? { milestoneId: str(args.milestoneId) } : {}),
+              });
+            case "update_sprint":
+              return yield* swimlaneService.update(str(args.swimlaneId ?? ""), {
+                ...(args.name !== undefined ? { name: str(args.name) } : {}),
+                ...(args.startAt !== undefined ? { startAt: args.startAt as string | null } : {}),
+                ...(args.dueAt !== undefined ? { dueAt: args.dueAt as string | null } : {}),
+              });
+          }
+        }).pipe(Effect.either);
+        if (applied._tag === "Left") {
+          const err = applied.left as { _tag?: string; message?: string };
+          const code = errorCodeMap[err._tag ?? ""] ?? "HERALD_WRITE_FAILED";
+          const message = `${code}: ${str(err.message ?? "write failed")}`.slice(0, 2000);
+          yield* pendingWritesRepo.markExecutionError(row.id, message);
+          return { approvalId: row.id, ok: false as const, error: message };
+        }
+        return { approvalId: row.id, ok: true as const };
+      });
+
+    // Shared resume prologue: sweep TTLs, locate the suspended batch,
+    // refuse while approvals are outstanding, execute approved rows in seq
+    // order, return the transcript with the batch marker cleared plus one
+    // outcome per decided row (applied|failed|denied) for approval_result
+    // frames.
+    const prepareResume = (thread: HeraldThread) =>
+      Effect.gen(function* () {
+        yield* pendingWritesRepo.sweepExpired();
+        const batchId = findPendingBatch(thread.messages);
+        if (batchId === null) return yield* new ApprovalsPending({ batchId: "", remaining: 0 });
+        const rows = yield* pendingWritesRepo.listByBatch(batchId);
+        const remaining = rows.filter((r) => r.status === "pending").length;
+        if (remaining > 0) return yield* new ApprovalsPending({ batchId, remaining });
+        const results: Array<{ approvalId: string; status: "applied" | "failed" | "denied"; error?: string }> = [];
+        for (const row of rows) {
+          if (row.status === "approved") {
+            const outcome = yield* executeApprovedRow(row);
+            results.push(
+              outcome.ok
+                ? { approvalId: row.id, status: "applied" as const }
+                : { approvalId: row.id, status: "failed" as const, ...(outcome.error !== undefined ? { error: outcome.error } : {}) }
+            );
+          } else if (row.status === "rejected") {
+            results.push({ approvalId: row.id, status: "denied" as const });
+          }
+        }
+        return { messages: applyResumeResults(thread.messages, [batchId]), results };
+      });
 
     return {
       // Queue row only — runtime-online guard deliberately skipped (S2).
@@ -828,10 +1318,10 @@ export class HeraldService extends Effect.Service<HeraldService>()("Lexa/Herald"
       }) =>
         Effect.gen(function* () {
           const settingsRow = yield* getSettingsOrFail(input.projectId);
-          yield* forgeRepo.findAgentById(input.agentId).pipe(
+          yield* hearthRepo.findAgentById(input.agentId).pipe(
             Effect.catchTag("RowNotFound", () => new AgentNotFound({ id: input.agentId }))
           );
-          yield* forgeRepo.findSkillById(input.skillId).pipe(
+          yield* hearthRepo.findSkillById(input.skillId).pipe(
             Effect.catchTag("RowNotFound", () => new SkillNotFound({ id: input.skillId }))
           );
           const engine = settingsRow.engine;
@@ -849,7 +1339,7 @@ export class HeraldService extends Effect.Service<HeraldService>()("Lexa/Herald"
             );
           }
           if (engine === "blacksmith") {
-            const runtimes = yield* forgeRepo.listRuntimes();
+            const runtimes = yield* hearthRepo.listRuntimes();
             if (!runtimes.some((r) => r.status === "online")) {
               return yield* new NoRuntimeOnline();
             }
@@ -879,12 +1369,12 @@ export class HeraldService extends Effect.Service<HeraldService>()("Lexa/Herald"
               summarizedCount: verdict.summarizedCount,
             });
           }
-          // Blacksmith rows carry document context like ForgeService.create —
+          // Blacksmith rows carry document context like HearthService.create —
           // the daemon builds its prompt from the claim payload alone.
           const docContext = engine === "blacksmith"
             ? (yield* loadDocContext(input.projectId, input.documentType, input.documentId)).context
             : "";
-          return yield* forgeRepo.createTask({
+          return yield* hearthRepo.createTask({
             id: crypto.randomUUID(),
             projectId: input.projectId,
             documentType: input.documentType,
@@ -900,7 +1390,7 @@ export class HeraldService extends Effect.Service<HeraldService>()("Lexa/Herald"
 
       resetThread: (projectId: string, documentType: "task" | "wiki", documentId: string) =>
         Effect.gen(function* () {
-          const tasks = yield* forgeRepo.listTasksForDocument(projectId, documentType, documentId);
+          const tasks = yield* hearthRepo.listTasksForDocument(projectId, documentType, documentId);
           if (tasks.some((t) => t.kind === "herald" && t.status === "running")) {
             return yield* new HeraldTaskActive();
           }
@@ -927,11 +1417,11 @@ export class HeraldService extends Effect.Service<HeraldService>()("Lexa/Herald"
 
       chatActive: (chatId: string): boolean => activeChats.has(chatId),
 
-      runStream: (taskId: string) =>
+      runStream: (taskId: string, opts?: { userId?: string }) =>
         Effect.gen(function* () {
-          const task = yield* forgeRepo.claimHeraldTask(taskId).pipe(
+          const task = yield* hearthRepo.claimHeraldTask(taskId).pipe(
             Effect.catchTag("ConstraintViolation", () => new HeraldTaskActive()),
-            Effect.catchTag("RowNotFound", () => new ForgeTaskNotFound({ id: taskId }))
+            Effect.catchTag("RowNotFound", () => new HearthTaskNotFound({ id: taskId }))
           );
           const settingsRow = yield* getSettingsOrFail(task.projectId);
           const config = configFromRow(settingsRow);
@@ -941,10 +1431,10 @@ export class HeraldService extends Effect.Service<HeraldService>()("Lexa/Herald"
           );
           const verdict = resolveHeraldThread(existing, task.agentId, task.skillId);
 
-          const agent = yield* forgeRepo.findAgentById(task.agentId).pipe(
+          const agent = yield* hearthRepo.findAgentById(task.agentId).pipe(
             Effect.catchTag("RowNotFound", () => new AgentNotFound({ id: task.agentId }))
           );
-          const skill = yield* forgeRepo.findSkillById(task.skillId).pipe(
+          const skill = yield* hearthRepo.findSkillById(task.skillId).pipe(
             Effect.catchTag("RowNotFound", () => new SkillNotFound({ id: task.skillId }))
           );
 
@@ -963,6 +1453,16 @@ export class HeraldService extends Effect.Service<HeraldService>()("Lexa/Herald"
 
           const imageMode = resolveVisionMode(settingsRow);
           const baseTools = buildHeraldTools(buildToolDeps(task.projectId, settingsRow.url_allowlist, settingsRow.search_api_key));
+          // Write tools ride only with an authenticated user — undefined
+          // userId (daemon claim path) keeps the lane read-only.
+          const writeSet = opts?.userId !== undefined
+            ? buildWriteToolset(settingsRow, {
+                projectId: task.projectId,
+                documentType: task.documentType,
+                documentId: task.documentId,
+                ownerUserId: opts.userId,
+              })
+            : { tools: [] as unknown[], drain: undefined as (() => QueuedProposal[]) | undefined };
           const tools =
             imageMode === "delegate"
               ? [
@@ -973,8 +1473,9 @@ export class HeraldService extends Effect.Service<HeraldService>()("Lexa/Herald"
                     resolveMimeType: (key) => resolveMimeType(task.projectId, key),
                     fetchImpl: fetch,
                   }),
+                  ...writeSet.tools,
                 ]
-              : baseTools;
+              : [...baseTools, ...writeSet.tools];
 
           const instruction = [
             task.selection ? `Selected text:\n"""\n${task.selection}\n"""` : null,
@@ -1006,6 +1507,7 @@ export class HeraldService extends Effect.Service<HeraldService>()("Lexa/Herald"
             toolRoundCap: MAX_TOOL_ROUNDS,
             loadImageBase64,
             imageMode,
+            ...(writeSet.drain ? { writeDrain: writeSet.drain } : {}),
             persist: (messages, summary, summarizedCount) =>
               Effect.runPromise(
                 threadRepo.saveThread(task.documentType, task.documentId, {
@@ -1018,17 +1520,17 @@ export class HeraldService extends Effect.Service<HeraldService>()("Lexa/Herald"
                 })
               ).then(() => {}),
             onDone: (text) =>
-              Effect.runPromise(forgeService.complete(taskId, text))
+              Effect.runPromise(hearthService.complete(taskId, text))
                 .then(() => {})
                 .catch(() => {}),
             onFail: (message) =>
-              Effect.runPromise(forgeService.fail(taskId, message))
+              Effect.runPromise(hearthService.fail(taskId, message))
                 .then(() => {})
                 .catch(() => {}),
             onCancel: async () => {
-              await Effect.runPromise(forgeService.cancel(taskId)).catch(() => {});
+              await Effect.runPromise(hearthService.cancel(taskId)).catch(() => {});
               await Effect.runPromise(
-                forgeRepo.appendLog(crypto.randomUUID(), taskId, "aborted")
+                hearthRepo.appendLog(crypto.randomUUID(), taskId, "aborted")
               ).catch(() => {});
             },
           });
@@ -1080,6 +1582,9 @@ export class HeraldService extends Effect.Service<HeraldService>()("Lexa/Herald"
             if (fromIndex < verdict.messages.length) {
               const truncated = yield* threadRepo.truncateChatFrom(chatId, userId, fromIndex);
               verdict = resolveHeraldThread(truncated, req.agentId ?? null, req.skillId ?? null);
+              // Editing away a suspended turn would orphan its approvals.
+              const orphanBatch = findPendingBatch(verdict.messages);
+              if (orphanBatch !== null) return yield* new ApprovalsPending({ batchId: orphanBatch, remaining: 0 });
             }
           }
 
@@ -1102,6 +1607,7 @@ export class HeraldService extends Effect.Service<HeraldService>()("Lexa/Herald"
 
           // Per-turn citation collector fed by the web_search/fetch_url tools.
           let citations: Citation[] = [];
+          let chatWriteDrain: (() => QueuedProposal[]) | undefined;
           return buildStream({
             keyId: chatId,
             idField: "chatId",
@@ -1123,6 +1629,13 @@ export class HeraldService extends Effect.Service<HeraldService>()("Lexa/Herald"
                   citations = collectCitation(citations, c);
                 },
               });
+              const writeSet = buildWriteToolset(settingsRow, {
+                projectId: req.projectId,
+                documentType: "chat",
+                documentId: chatId,
+                ownerUserId: userId,
+              });
+              chatWriteDrain = writeSet.drain;
               return imageMode === "delegate" && attachments.length > 0
                 ? [
                     ...base,
@@ -1132,12 +1645,14 @@ export class HeraldService extends Effect.Service<HeraldService>()("Lexa/Herald"
                       resolveMimeType: (key) => resolveMimeType(req.projectId, key),
                       fetchImpl: fetch,
                     }),
+                    ...writeSet.tools,
                   ]
-                : base;
+                : [...base, ...writeSet.tools];
             })(),
             toolRoundCap: MAX_CHAT_TOOL_ROUNDS,
             loadImageBase64,
             imageMode: attachments.length > 0 ? imageMode : "inline",
+            ...(chatWriteDrain ? { writeDrain: chatWriteDrain } : {}),
             historySummary: () => verdict.summary,
             historySummarizedCount: () => verdict.summarizedCount,
             persist: (messages, summary, summarizedCount) =>
@@ -1148,6 +1663,196 @@ export class HeraldService extends Effect.Service<HeraldService>()("Lexa/Herald"
                   title,
                   agentId: req.agentId ?? null,
                   skillId: req.skillId ?? null,
+                  messages,
+                  summary,
+                  summarizedCount,
+                })
+              ).then(() => {}),
+            onDone: () => Promise.resolve(),
+            onFail: () => Promise.resolve(),
+            onCancel: () => Promise.resolve(),
+          });
+        }),
+
+      // Decide one pending write. Order is pinned: sweep → fetch → owner
+      // check (hidden as NotFound) → lazy TTL flip → already-decided guard →
+      // conditional decide.
+      decideApproval: (approvalId: string, userId: string, verdict: "approve" | "reject") =>
+        Effect.gen(function* () {
+          yield* pendingWritesRepo.sweepExpired();
+          const row = yield* pendingWritesRepo.getById(approvalId);
+          if (row === null || row.owner_user_id !== userId) {
+            return yield* new ApprovalNotFound({ id: approvalId });
+          }
+          const expired = yield* pendingWritesRepo.expireIfDue(approvalId);
+          if (expired !== null) return yield* new ApprovalExpired({ id: approvalId });
+          if (row.status !== "pending") {
+            return yield* new ApprovalAlreadyDecided({ id: approvalId, status: row.status });
+          }
+          const decided = yield* pendingWritesRepo.decide(approvalId, verdict === "approve" ? "approved" : "rejected");
+          const remaining = yield* pendingWritesRepo.countByBatchRemaining(row.batch_id);
+          return { approvalId, batchId: row.batch_id, status: decided?.status ?? row.status, remaining };
+        }),
+
+      resumeChatStream: (chatId: string, userId: string) =>
+        Effect.gen(function* () {
+          if (activeChats.has(chatId)) return yield* new HeraldTaskActive();
+          const thread = yield* threadRepo.loadChat(chatId, userId).pipe(
+            Effect.catchTag("RowNotFound", () => new HeraldThreadNotFound({ documentType: "chat", documentId: chatId }))
+          );
+          const settingsRow = yield* getSettingsOrFail(thread.projectId);
+          if (settingsRow.engine === "blacksmith") {
+            return yield* new EngineNotSupportedForChat({ engine: settingsRow.engine });
+          }
+          const { messages: history, results: approvalResults } = yield* prepareResume(thread);
+          const imageMode = resolveVisionMode(settingsRow);
+          const memoryHits = yield* memoryRepo.searchByProject(thread.projectId, extractMemoryTerms("", ""));
+          const systemPrompts = buildSystemPrompts({
+            identity: CHAT_IDENTITY,
+            memoryBlock: memoryBlockFromHits(memoryHits),
+            agentMarkdown: null,
+            skillMarkdown: null,
+          });
+          const writeSet = buildWriteToolset(settingsRow, {
+            projectId: thread.projectId,
+            documentType: "chat",
+            documentId: chatId,
+            ownerUserId: userId,
+          });
+          let citations: Citation[] = [];
+          return buildStream({
+            keyId: chatId,
+            idField: "chatId",
+            threadId: chatId,
+            registry: activeChats,
+            config: configFromRow(settingsRow),
+            systemPrompts,
+            history,
+            userTs: new Date().toISOString(),
+            getCitations: () => citations,
+            modelOptions: modelOptionsForEffort(resolveReasoningEffort(settingsRow.reasoning_effort)),
+            userContent: "",
+            skipUserEntry: true,
+            approvalResults,
+            ...(writeSet.drain ? { writeDrain: writeSet.drain } : {}),
+            tools: [
+              ...buildHeraldTools({
+                ...buildToolDeps(thread.projectId, settingsRow.url_allowlist, settingsRow.search_api_key),
+                onCitation: (c) => {
+                  citations = collectCitation(citations, c);
+                },
+              }),
+              ...writeSet.tools,
+            ],
+            toolRoundCap: MAX_CHAT_TOOL_ROUNDS,
+            loadImageBase64,
+            imageMode,
+            historySummary: () => thread.summary,
+            historySummarizedCount: () => thread.summarizedCount,
+            persist: (messages, summary, summarizedCount) =>
+              Effect.runPromise(
+                threadRepo.saveThread("chat", chatId, {
+                  projectId: thread.projectId,
+                  ownerUserId: userId,
+                  title: thread.title,
+                  agentId: thread.agentId,
+                  skillId: thread.skillId,
+                  messages,
+                  summary,
+                  summarizedCount,
+                })
+              ).then(() => {}),
+            onDone: () => Promise.resolve(),
+            onFail: () => Promise.resolve(),
+            onCancel: () => Promise.resolve(),
+          });
+        }),
+
+      resumeThreadStream: (documentType: "task" | "wiki", documentId: string) =>
+        Effect.gen(function* () {
+          const thread = yield* threadRepo.loadThread(documentType, documentId).pipe(
+            Effect.catchTag("RowNotFound", () => new HeraldThreadNotFound({ documentType, documentId }))
+          );
+          const tasks = yield* hearthRepo.listTasksForDocument(thread.projectId, documentType, documentId);
+          if (tasks.some((t) => t.kind === "herald" && t.status === "running")) {
+            return yield* new HeraldTaskActive();
+          }
+          const settingsRow = yield* getSettingsOrFail(thread.projectId);
+          const { messages: history, results: approvalResults } = yield* prepareResume(thread);
+          if (!thread.agentId || !thread.skillId) return yield* new AgentNotFound({ id: "" });
+          const agent = yield* hearthRepo.findAgentById(thread.agentId).pipe(
+            Effect.catchTag("RowNotFound", () => new AgentNotFound({ id: thread.agentId ?? "" }))
+          );
+          const skill = yield* hearthRepo.findSkillById(thread.skillId).pipe(
+            Effect.catchTag("RowNotFound", () => new SkillNotFound({ id: thread.skillId ?? "" }))
+          );
+          const doc = yield* loadDocContext(thread.projectId, documentType, documentId);
+          const repoContent = yield* loadTaskRepoContent({
+            projectId: thread.projectId,
+            documentType,
+            documentId,
+          } as Parameters<typeof loadTaskRepoContent>[0]).pipe(Effect.catchAll(() => Effect.succeed([])));
+          const memoryHits = yield* memoryRepo.searchByProject(thread.projectId, extractMemoryTerms(doc.title, doc.context));
+          const systemPrompts = buildSystemPrompts({
+            identity: IDENTITY,
+            memoryBlock: memoryBlockFromHits(memoryHits),
+            agentMarkdown: agent.instructions,
+            skillMarkdown: skill.instructions,
+            repoContent,
+            docContext: doc.context,
+          });
+          const imageMode = resolveVisionMode(settingsRow);
+          const baseTools = buildHeraldTools(buildToolDeps(thread.projectId, settingsRow.url_allowlist, settingsRow.search_api_key));
+          // Document-thread proposals need an authenticated owner; a null
+          // owner_user_id keeps the resumed lane read-only.
+          const writeSet = thread.ownerUserId !== null
+            ? buildWriteToolset(settingsRow, {
+                projectId: thread.projectId,
+                documentType,
+                documentId,
+                ownerUserId: thread.ownerUserId,
+              })
+            : { tools: [] as unknown[], drain: undefined as (() => QueuedProposal[]) | undefined };
+          const tools =
+            imageMode === "delegate"
+              ? [
+                  ...baseTools,
+                  buildAnalyzeImageTool({
+                    config: visionConfigOf(settingsRow),
+                    loadImageBase64,
+                    resolveMimeType: (key) => resolveMimeType(thread.projectId, key),
+                    fetchImpl: fetch,
+                  }),
+                  ...writeSet.tools,
+                ]
+              : [...baseTools, ...writeSet.tools];
+          return buildStream({
+            keyId: documentId,
+            idField: "taskId",
+            threadId: documentId,
+            registry: activeTasks,
+            config: configFromRow(settingsRow),
+            systemPrompts,
+            history,
+            userTs: new Date().toISOString(),
+            getCitations: () => [],
+            modelOptions: modelOptionsForEffort(resolveReasoningEffort(settingsRow.reasoning_effort)),
+            userContent: "",
+            skipUserEntry: true,
+            approvalResults,
+            ...(writeSet.drain ? { writeDrain: writeSet.drain } : {}),
+            tools,
+            toolRoundCap: MAX_TOOL_ROUNDS,
+            loadImageBase64,
+            imageMode,
+            historySummary: () => thread.summary,
+            historySummarizedCount: () => thread.summarizedCount,
+            persist: (messages, summary, summarizedCount) =>
+              Effect.runPromise(
+                threadRepo.saveThread(documentType, documentId, {
+                  projectId: thread.projectId,
+                  agentId: thread.agentId,
+                  skillId: thread.skillId,
                   messages,
                   summary,
                   summarizedCount,

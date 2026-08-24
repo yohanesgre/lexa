@@ -5,7 +5,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useProjects, useProjectMembers, useAddProjectMember, useRemoveProjectMember, useDeleteProject, useUpdateProject, useProjectRepos, useReplaceProjectRepos, useGithubRepoSearch, useUsers, useTeams, useUpdateProjectTeam, useSession } from "../../lib/queries";
 import * as api from "../../lib/api";
 import { InlineDropdown } from "./SettingsSections";
-import { HeraldProviderSection, HeraldEngineSection, AgentSkillAvailabilitySection, ProjectMemorySection } from "./HeraldSettingsSection";
+import { HeraldProviderSection, HeraldWriteToolsSection, HeraldEngineSection, AgentSkillAvailabilitySection, ProjectMemorySection } from "./HeraldSettingsSection";
 import { Field } from "../ui/Field";
 import { TextInput } from "../ui/TextInput";
 import { TextArea } from "../ui/TextArea";
@@ -56,6 +56,7 @@ export function ProjectSettingsHub({ projectId }: { projectId: string }) {
       <TeamAssignmentSection project={project} />
       <ProjectBasicSection project={project} />
       <HeraldProviderSection project={project} />
+      <HeraldWriteToolsSection project={project} />
       <HeraldEngineSection project={project} />
       <AgentSkillAvailabilitySection projectId={project.id} />
       <ProjectMemorySection projectId={project.id} />

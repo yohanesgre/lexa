@@ -418,7 +418,7 @@ export function rowToRuntime(row: RuntimeRow): RuntimeWithTeam {
   };
 }
 
-export interface ForgeTaskRow {
+export interface HearthTaskRow {
   id: string;
   key: string;
   runtime_id: string | null;
@@ -442,7 +442,7 @@ export interface ForgeTaskRow {
   finished_at: string | null;
 }
 
-export function rowToForgeTask(row: ForgeTaskRow): {
+export function rowToHearthTask(row: HearthTaskRow): {
   id: string; key: string; runtimeId: string | null; projectId: string; documentType: "task" | "wiki"; documentId: string; documentTitle: string; agentId: string; skillId: string; agentName: string; skillName: string; extraPrompt: string; selection: string; docContext: string; status: "queued" | "running" | "completed" | "failed" | "cancelled"; result: string | null; error: string | null; kind: "blacksmith" | "herald"; createdAt: string; startedAt: string | null; finishedAt: string | null;
 } {
   return {
@@ -470,7 +470,7 @@ export function rowToForgeTask(row: ForgeTaskRow): {
   };
 }
 
-export interface ForgeAgentRow {
+export interface LexaAgentRow {
   id: string;
   name: string;
   description: string;
@@ -480,7 +480,7 @@ export interface ForgeAgentRow {
   updated_at: string;
 }
 
-export function rowToForgeAgent(row: ForgeAgentRow, skillIds: string[]): {
+export function rowToLexaAgent(row: LexaAgentRow, skillIds: string[]): {
   id: string; name: string; description: string; instructions: string; isBuiltin: boolean; skillIds: string[]; createdAt: string; updatedAt: string;
 } {
   return {
@@ -495,7 +495,7 @@ export function rowToForgeAgent(row: ForgeAgentRow, skillIds: string[]): {
   };
 }
 
-export interface ForgeSkillRow {
+export interface LexaSkillRow {
   id: string;
   name: string;
   description: string;
@@ -505,7 +505,7 @@ export interface ForgeSkillRow {
   updated_at: string;
 }
 
-export function rowToForgeSkill(row: ForgeSkillRow): {
+export function rowToLexaSkill(row: LexaSkillRow): {
   id: string; name: string; description: string; instructions: string; isBuiltin: boolean; createdAt: string; updatedAt: string;
 } {
   return {
@@ -519,7 +519,7 @@ export function rowToForgeSkill(row: ForgeSkillRow): {
   };
 }
 
-export interface ForgeSessionRow {
+export interface HearthSessionRow {
   document_type: "task" | "wiki";
   document_id: string;
   runtime_id: string;
@@ -531,7 +531,7 @@ export interface ForgeSessionRow {
   updated_at: string;
 }
 
-export function rowToForgeSession(row: ForgeSessionRow): {
+export function rowToHearthSession(row: HearthSessionRow): {
   documentType: "task" | "wiki";
   documentId: string;
   runtimeId: string;
@@ -555,7 +555,7 @@ export function rowToForgeSession(row: ForgeSessionRow): {
   };
 }
 
-export interface ForgeTaskLogRow {
+export interface HearthTaskLogRow {
   id: string;
   task_id: string;
   message: string;
@@ -564,7 +564,7 @@ export interface ForgeTaskLogRow {
   created_at: string;
 }
 
-export function rowToForgeTaskLog(row: ForgeTaskLogRow): {
+export function rowToHearthTaskLog(row: HearthTaskLogRow): {
   id: string;
   taskId: string;
   message: string;
@@ -638,6 +638,7 @@ export interface ActivityRow {
   actor_user_id: string | null;
   type: ActivityType;
   message: string;
+  via_herald: number;
   created_at: string;
 }
 
@@ -650,6 +651,7 @@ export function rowToActivityEvent(r: ActivityRow): ActivityEvent {
     actorUserId: r.actor_user_id,
     type: r.type,
     message: r.message,
+    viaHerald: r.via_herald === 1,
     createdAt: r.created_at,
   };
 }
@@ -661,6 +663,7 @@ export interface CommentRow {
   author_kind: ActorKind;
   author_label: string;
   body: string;
+  via_herald: number;
   edited_at: string | null;
   deleted_at: string | null;
   created_at: string;
@@ -674,6 +677,7 @@ export function rowToComment(r: CommentRow): TaskComment {
     authorKind: r.author_kind,
     authorLabel: r.author_label,
     body: JSON.parse(r.body) as TipTapDoc,
+    viaHerald: r.via_herald === 1,
     editedAt: r.edited_at,
     deletedAt: r.deleted_at,
     createdAt: r.created_at,

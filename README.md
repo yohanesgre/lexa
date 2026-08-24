@@ -1,6 +1,6 @@
 # Lexa
 
-Self-hosted project management for small teams. Kanban with swimlanes and WIP limits, rich task descriptions, a nested wiki, a Forge AI writing assistant, and two-way GitHub issue sync.
+Self-hosted project management for small teams. Kanban with swimlanes and WIP limits, rich task descriptions, a nested wiki, a Hearth AI writing assistant, and two-way GitHub issue sync.
 
 Stack: **Bun + SQLite + TanStack Start (React) + Effect-TS + Tailwind**, served behind a cloudflared tunnel.
 
@@ -10,9 +10,9 @@ Stack: **Bun + SQLite + TanStack Start (React) + Effect-TS + Tailwind**, served 
 - **Tasks** — rich TipTap descriptions, assignees, activity timeline + comments, required-field gates per column, subtasks / blocked-by / related links
 - **Nested wiki** — hierarchical pages, FTS5 full-text search, revisions
 - **Two-way GitHub sync** — link tasks to issues, echo-suppressed webhooks, column ↔ issue-state mapping, out-of-sync surfacing
-- **Forge** — AI writing assistant with agents + skills rule bundles, pluggable runtimes (OpenCode / Hermes / Command Code)
+- **Hearth** — AI writing assistant with agents + skills rule bundles, pluggable runtimes (OpenCode / Hermes / Command Code)
 - **Auth** — Cloudflare Access (Google OAuth) for humans, `lxk_` API keys for machines
-- **`lexa-cli`** — operator CLI for tasks, wiki, deploy, and Forge runtimes
+- **`lexa-cli`** — operator CLI for tasks, wiki, deploy, and Hearth runtimes
 
 ## Quickstart (local dev)
 
@@ -76,7 +76,7 @@ and never committed (`.env*` is gitignored):
 |---|---|
 | Local dev (`.env`) | `bun run setup` generates `LXK_API_KEY` + `VITE_LXK_API_KEY` and `LXK_ADMIN_EMAILS`; `GITHUB_*` only if you want two-way GitHub sync |
 | Staging/prod (`.env.staging` / `.env.prod`) | `lexa-cli deploy` prompts for admin email, API key and Cloudflare token, writes the file, and preserves `GITHUB_*` + `LXK_API_KEY` across re-runs |
-| Optional | `LXK_FORGE_DAEMON_TOKEN`, `LXK_MAX_BODY_MB` (body cap, default 16), `LXK_ACCESS_AUD` (Access JWT verification), `LOG_LEVEL` |
+| Optional | `LXK_HEARTH_DAEMON_TOKEN`, `LXK_MAX_BODY_MB` (body cap, default 16), `LXK_ACCESS_AUD` (Access JWT verification), `LOG_LEVEL` |
 
 ## Documentation
 

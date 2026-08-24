@@ -1,4 +1,4 @@
-// Pure selection of repo files worth shipping to a Forge run as context.
+// Pure selection of repo files worth shipping to a Hearth run as context.
 // No I/O — the caller fetches the tree, this picks the files, the caller
 // fetches contents. Unit-testable in isolation.
 

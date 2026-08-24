@@ -40,14 +40,14 @@ All non-2xx responses share one shape:
 | 403 | `CANNOT_DELETE_SELF` | Removing the last superadmin / self-removal via the workspace member routes (details: `{ message }`) |
 | 404 | `USER_NOT_FOUND` | Unknown user id on admin/workspace/team-member endpoints |
 | 404 | `TEAM_NOT_FOUND` `INVITE_NOT_FOUND` `SESSION_NOT_FOUND` | Unknown team / invite / own-session id |
-| 404 | `PROJECT_NOT_FOUND` `COLUMN_NOT_FOUND` `SWIMLANE_NOT_FOUND` `MILESTONE_NOT_FOUND` `TASK_NOT_FOUND` `PAGE_NOT_FOUND` `SOURCE_NOT_FOUND` `FORGE_TASK_NOT_FOUND` `TASK_LINK_NOT_FOUND` `MACHINE_NOT_FOUND` `RUNTIME_NOT_FOUND` `RUNTIME_EVENT_NOT_FOUND` `API_KEY_NOT_FOUND` `AGENT_NOT_FOUND` `SKILL_NOT_FOUND` | |
+| 404 | `PROJECT_NOT_FOUND` `COLUMN_NOT_FOUND` `SWIMLANE_NOT_FOUND` `MILESTONE_NOT_FOUND` `TASK_NOT_FOUND` `PAGE_NOT_FOUND` `SOURCE_NOT_FOUND` `HEARTH_TASK_NOT_FOUND` `TASK_LINK_NOT_FOUND` `MACHINE_NOT_FOUND` `RUNTIME_NOT_FOUND` `RUNTIME_EVENT_NOT_FOUND` `API_KEY_NOT_FOUND` `AGENT_NOT_FOUND` `SKILL_NOT_FOUND` | |
 | 404 | `SHARE_LINK_NOT_FOUND` | Wiki share link unknown, expired, or revoked — all three return this identical envelope (no existence oracle) |
 | 404 | `ATTACHMENT_NOT_FOUND` | Unknown attachment id, blob missing, or attachment outside the shared subtree on the share route |
 | 409 | `SLUG_TAKEN` | Duplicate project slug, wiki slug, or team slug (details: `{ slug }`); also the constraint fallback on project update/delete |
 | 409 | `INVITE_PENDING` | An invite is already pending for that email (details: `{ email }`) |
 | 409 | `MACHINE_ID_TAKEN` | Machine id already registered to another host, legacy (no secret), or secret mismatch (details: `{ id, reason: "hostname" \| "legacy" \| "secret_mismatch" }`) |
 | 409 | `TASK_HAS_CHILDREN` | Task delete hits a constraint (defensive — subtask links cascade on delete) |
-| 409 | `NO_RUNTIME_ONLINE` | Create Forge task with no daemon online |
+| 409 | `NO_RUNTIME_ONLINE` | Create Hearth task with no daemon online |
 | 409 | `TASK_LINK_CYCLE` | subtask_of link would create a cycle (details: `{ message }`) |
 | 409 | `HAS_CHILDREN` | Delete column with tasks / wiki page with children / milestone with sprints (details: `{ count }`) |
 | 409 | `WIP_LIMIT` | Move would exceed column WIP limit |
@@ -55,7 +55,7 @@ All non-2xx responses share one shape:
 | 409 | `DEADLINE_AFTER_LANE` | Task deadline later than its lane's due date (details: `{ date }`) |
 | 409 | `ALREADY_LINKED` | Task already has a GitHub issue in that repo |
 | 409 | `OPTION_IN_USE` | Delete priority/type option still referenced by tasks (details: `{ optionId, label }`) |
-| 409 | `FORGE_ENTITY_IN_USE` | Delete agent/skill still used by forge tasks (details: `{ kind, name, count }`) |
+| 409 | `HEARTH_ENTITY_IN_USE` | Delete agent/skill still used by hearth tasks (details: `{ kind, name, count }`) |
 | 409 | `TEAM_HAS_PROJECTS` | Delete team while it owns projects (details: `{ count }` — reassign projects first) |
 | 409 | `CONSTRAINT` | Generic constraint-violation fallback (typed codes like `SLUG_TAKEN` / `HAS_CHILDREN` / `OPTION_IN_USE` are raised whenever possible) |
 | 413 | `BODY_TOO_LARGE` | Request body exceeds `LXK_MAX_BODY_MB` (default 16) — early gates, before auth: stream cap in `server/entry.ts` (chunked/CL-less bodies included) + declared-length pre-check in the API middleware. Attachment-upload paths get a raised cap (`LXK_MAX_UPLOAD_MB` + multipart slack) so legit uploads reach the route. |
@@ -65,13 +65,13 @@ All non-2xx responses share one shape:
 | 422 | `NEIGHBOR_NOT_IN_COLUMN` | `beforeTaskId`/`afterTaskId` not in target column (details: `{ taskId }`) |
 | 422 | `INVALID_OPTION` | Unknown priority/type option id, duplicate label, or empty option list (details: `{ optionId? }`) |
 | 422 | `INVALID_TASK_LINK` | Self-link or cross-project task link (details: `{ message }`) |
-| 422 | `FORGE_BUILTIN_DELETE` | Delete/reset of a builtin agent or skill (details: `{ kind, name }`) |
+| 422 | `HEARTH_BUILTIN_DELETE` | Delete/reset of a builtin agent or skill (details: `{ kind, name }`) |
 | 422 | `SEARCH_ERROR` | Wiki FTS5 query rejected |
 | 422 | `SOURCE_UNREACHABLE` | External source DNS/fetch failed after the SSRF guard (details: `{ url }`) |
 | 422 | `API_KEY_NAME_EMPTY` | API key name missing or blank |
 | 422 | `NOT_WORKSPACE_MEMBER` | Team-member add targets an email that is not a workspace member (details: `{ email, available }` — invite via the superadmin first) |
 | 422 | `INVALID_ARGS` | Sprint start date later than its due date (details: `{ reason }`); Herald provider settings first save without an apiKey (`apiKey required on first save`); Herald attachment scope/cap violations |
-| 429 | `RATE_LIMITED` | Per-IP rate limit exceeded on `/api/*` (webhook, `/api/forge/daemon/*`, `/api/forge/runtimes/register` exempt; `/api/setup*` + `/api/health` ARE limited; `/api/share/*` uses a dedicated stricter bucket) — enforced in the API middleware, otherwise one shared bucket |
+| 429 | `RATE_LIMITED` | Per-IP rate limit exceeded on `/api/*` (webhook, `/api/hearth/daemon/*`, `/api/hearth/runtimes/register` exempt; `/api/setup*` + `/api/health` ARE limited; `/api/share/*` uses a dedicated stricter bucket) — enforced in the API middleware, otherwise one shared bucket |
 | 500 | `DATABASE_ERROR` / `INTERNAL` | |
 | 500 | `PASSWORD_LINK_FAILED` | Admin-issued set-password link could not be issued (details: `{ message }`) |
 | 502 | `GITHUB_API_ERROR` | Only on explicit GitHub-linking endpoints; never on moves |
@@ -119,7 +119,7 @@ via the session cookie.
   never edited at runtime (no role-editing endpoint; legacy `admin` → `superadmin`).
   A `requireSuperadmin` gate (403 `FORBIDDEN`) protects project
   create/update/delete, column and swimlane mutations, `PUT field-config`, all
-  `/api/settings/*`, all `/api/admin/*`, Forge agent/skill CRUD + reset + skill
+  `/api/settings/*`, all `/api/admin/*`, Hearth agent/skill CRUD + reset + skill
   binding, and the teams/workspace lifecycle endpoints (see Teams & Workspace).
   Team-admin authority comes from the org `member.role` (owner/admin) on the
   team, never from `users.role`.
@@ -140,10 +140,10 @@ via the session cookie.
     /api/share/:token/attachments/:id` joins this exemption — same bucket,
     token validated per request.
   - `POST /api/webhooks/github` — HMAC-SHA-256 signature over the raw body is the auth
-  - `/api/forge/daemon/*`, `/api/forge/runtimes/register`, and
-    `/api/forge/sessions` — also accept the
-    daemon token (`x-forge-token: <LXK_FORGE_DAEMON_TOKEN>` header) in place of a key
-    (`/api/forge/sessions` joins the daemon's PUT/DELETE and the browser's
+  - `/api/hearth/daemon/*`, `/api/hearth/runtimes/register`, and
+    `/api/hearth/sessions` — also accept the
+    daemon token (`x-hearth-token: <LXK_HEARTH_DAEMON_TOKEN>` header) in place of a key
+    (`/api/hearth/sessions` joins the daemon's PUT/DELETE and the browser's
     GET/reset)
 - **Login rate limit (R17):** failed logins on `/api/auth/sign-in/email` are
   throttled by an in-process limiter (5 attempts/60s per email, 15 min
@@ -163,7 +163,7 @@ type TipTapDoc = { type: "doc"; content: unknown[] };
 
 interface ProjectRepo {
   repo: string;                   // "owner/name"
-  sourceRole: boolean;            // Forge context + project label
+  sourceRole: boolean;            // Hearth context + project label
   workspaceRole: boolean;         // issue link/create/sync
 }
 
@@ -380,7 +380,7 @@ interface RuntimeEvent {
   finishedAt: ISODate | null;
 }
 
-interface ForgeTask {
+interface HearthTask {
   id: ID;
   runtimeId: ID | null;
   projectId: ID;
@@ -840,7 +840,7 @@ DELETE /api/projects/:slug/tasks/:id/comments/:commentId
   (title/description/priority/type/assignees — no diffs) · `archived` ·
   `restored` · `deleted` · `link_added` · `link_removed` · `source_added` ·
   `source_removed` · `github_linked` · `github_unlinked` · `github_synced`
-  (webhook-driven) · `forge_completed` · `forge_failed` · `forge_cancelled` ·
+  (webhook-driven) · `hearth_completed` · `hearth_failed` · `hearth_cancelled` ·
   `commented` · `comment_deleted`.
 - Messages frozen at write time (e.g. `"Maria moved from In Progress to Done"`).
   Column renamed later → old messages keep the old name (by design).
@@ -1272,17 +1272,17 @@ Handled: event "issues" with payload.action closed | reopened | edited
   (GitHub sends the transition in the payload, not in the header)
 ```
 
-### Forge (AI writing assistant)
+### Hearth (AI writing assistant)
 
 ```
-POST   /api/forge/runtimes/register        (daemon child; x-forge-token or Bearer)
+POST   /api/hearth/runtimes/register        (daemon child; x-hearth-token or Bearer)
 body { id?, name*, provider*: "opencode"|"hermes"|"command-code", machineId*, model?, hostname?, teamId? }
 → 201 Runtime
   teamId omitted/NULL = global runtime (superadmin-owned; claims any team's
   project tasks). A non-null teamId scopes the runtime to that team's tasks.
   (R13: team admin registers for own team; superadmin any team + global.)
 
-PATCH  /api/forge/runtimes/:id              (browser)
+PATCH  /api/hearth/runtimes/:id              (browser)
 body { name?, provider?, agent?, model?, printLogs?, logLevel?, extraArgs?: string[] }   (server-authoritative config)
 → 200 Runtime
   | 404 RUNTIME_NOT_FOUND
@@ -1296,13 +1296,13 @@ agents (rule bundles). extraArgs are appended verbatim to the agent CLI spawn
 passed verbatim
 to --model. hostname/status are daemon-reported and not editable.
 
-GET    /api/forge/runtimes?teamId=
+GET    /api/hearth/runtimes?teamId=
 → 200 { data: Runtime[] }                  (offline if last_seen > 2 min ago)
   ?teamId= filter: team admin — own team only; superadmin — any team, plus
-  global (team_id NULL) runtimes. Claim rule: a runtime claims a forge task
+  global (team_id NULL) runtimes. Claim rule: a runtime claims a hearth task
   only when team_id IS NULL (global) OR team_id = the task's project.team_id.
 
-DELETE /api/forge/runtimes/:id              (browser)
+DELETE /api/hearth/runtimes/:id              (browser)
 → 204 | 404 RUNTIME_NOT_FOUND
   (team admin: own team's runtimes only; superadmin: all + global)
 Removal never blocks: it queues a machine-scoped `remove` event (delivered
@@ -1312,7 +1312,7 @@ at most one runtime per agent CLI, so the whole (machine, provider) pair is
 removed — keeping host state consistent with the provider-scoped event.
 Runtimes without a machine are deleted directly.
 
-POST   /api/forge/daemon/heartbeat         (daemon child)
+POST   /api/hearth/daemon/heartbeat         (daemon child)
 body { runtimeId* }
 → 200 { ok: true }
 The daemon reports liveness. `lexa-cli machine listen` discovers
@@ -1323,9 +1323,9 @@ NOT respawn it; the listener relays the failure on its next machine heartbeat
 (daemonErrors) so the runtime row shows last_error = "API key revoked".
 Recovery: re-run Setup runtime (install event delivers a fresh key).
 
-POST   /api/forge/daemon/claim             (daemon)
+POST   /api/hearth/daemon/claim             (daemon)
 body { runtimeId* }
-→ 200 { task: ForgeTask | null, provider, agent, model: string, printLogs: boolean,
+→ 200 { task: HearthTask | null, provider, agent, model: string, printLogs: boolean,
         logLevel: ""|"DEBUG"|"INFO"|"WARN"|"ERROR", extraArgs: string[], prompt: string,
         agentMarkdown: string, skillMarkdown: string, skillIds: string[],
         repoContent: [{ owner, repo, path, content }],
@@ -1349,22 +1349,22 @@ body { runtimeId* }
   path, content = UTF-8 text (≤ 256 KB per file, ≤ 512 KB total, ≤ 50 files,
   ≤ 3 repos).
   runtimeSessionId: the warm-session continue-vs-mint verdict — the mapped
-  runtime session id when a forge_sessions row exists for (documentType,
+  runtime session id when a hearth_sessions row exists for (documentType,
   documentId, runtimeId) AND its agent/skill match the task's, else null
   (the daemon then mints a fresh session on its serve server). agentId/skillId
   are the task's own — what a future mapping must match. Only meaningful for
   provider "opencode"; hermes/command-code ignore it.)
 
-# ── Forge warm sessions (document ↔ runtime agent conversation mapping) ──
-GET    /api/forge/sessions?documentType=&documentId=   (browser)
-→ 200 { data: Array<ForgeSession> }
-ForgeSession = { documentType, documentId, runtimeId, runtimeSessionId,
+# ── Hearth warm sessions (document ↔ runtime agent conversation mapping) ──
+GET    /api/hearth/sessions?documentType=&documentId=   (browser)
+→ 200 { data: Array<HearthSession> }
+HearthSession = { documentType, documentId, runtimeId, runtimeSessionId,
   provider, agentId, skillId, createdAt, updatedAt } (camelCase)
 The mapping tells which agent-side conversation (opencode serve session id)
-the next Forge task on this document should continue. Missing/invalid query
+the next Hearth task on this document should continue. Missing/invalid query
 params → { data: [] } (sessions are document-agnostic metadata — never 404).
 
-PUT    /api/forge/sessions                   (daemon)
+PUT    /api/hearth/sessions                   (daemon)
 body { documentType*, documentId*, runtimeId*, runtimeSessionId*, provider*,
        agentId*, skillId* }
 → 204
@@ -1372,22 +1372,22 @@ Upsert called by the daemon BEFORE the run starts (pre-spawn mapping write,
 spec §8 step 3) and to rewrite the row on stale-session retry. provider is
 "opencode"|"hermes"|"command-code"; only opencode writes rows in v1.
 
-DELETE /api/forge/sessions                   (daemon)
+DELETE /api/hearth/sessions                   (daemon)
 body { documentType*, documentId*, runtimeId* }
 → 204
 Daemon-side drop on cancel/timeout. Always allowed — NEVER 409: the in-flight
 run is gone, nothing will re-write the row.
 
-POST   /api/forge/sessions/reset             (browser)
+POST   /api/hearth/sessions/reset             (browser)
 body { documentType*, documentId*, runtimeId* }
-→ 204 | 409 FORGE_SESSION_ACTIVE
+→ 204 | 409 HEARTH_SESSION_ACTIVE
 User-facing reset: deletes the mapping row so the next run mints a new
 session. 409 while a task on this document+runtime is queued or running —
 otherwise the run's completion would re-write the row the user just deleted
 and silently undo the reset. Deleting a missing mapping is 204, never 404.
 
 # ── Runtime setup events (web wizard → machine CLI listener) ──
-POST   /api/forge/runtime-events           (browser)
+POST   /api/hearth/runtime-events           (browser)
 body { machineId*, action*: "install"|"update", agentCli*, apiKeyId?, rawKey? }
 → 201 RuntimeEvent
   | 404 MACHINE_NOT_FOUND / API_KEY_NOT_FOUND
@@ -1395,7 +1395,7 @@ The wizard sends only machine + agent CLI. Provider/model, agent persona,
 logging, and extra args are configured after setup. Install creates a FRESH API
 key; rawKey is verified against the stored SHA-256 hash and held ONLY in memory.
 
-POST   /api/forge/runtime-events/claim     (listener; Bearer + x-machine-secret)
+POST   /api/hearth/runtime-events/claim     (listener; Bearer + x-machine-secret)
 body { machineId* }   header: x-machine-secret
 → 200 { event: RuntimeEvent | null, rawKey: string | null }   (null = none pending)
   | 403 FORBIDDEN ("machine secret mismatch" — identical for missing machine,
@@ -1407,16 +1407,16 @@ The secret binds machine identity: it is minted once at register, returned a
 single time, and required on every claim — a key holder without the machine's
 secret cannot hijack another machine's pending install event.
 
-POST   /api/forge/runtime-events/:id/complete   (listener)  → 200 RuntimeEvent
-POST   /api/forge/runtime-events/:id/fail       (listener)  body { error* } → 200 RuntimeEvent
+POST   /api/hearth/runtime-events/:id/complete   (listener)  → 200 RuntimeEvent
+POST   /api/hearth/runtime-events/:id/fail       (listener)  body { error* } → 200 RuntimeEvent
   (complete/fail only transition from 'claimed')
 
-GET    /api/forge/runtime-events/:id       (browser)  → 200 RuntimeEvent
-GET    /api/forge/runtime-events           (browser)  → 200 { data: RuntimeEvent[] }
+GET    /api/hearth/runtime-events/:id       (browser)  → 200 RuntimeEvent
+GET    /api/hearth/runtime-events           (browser)  → 200 { data: RuntimeEvent[] }
   ?machineId=<id> filters by machine
 
 # ── Machine registry and CLI catalogs ──
-POST   /api/forge/machines/register             (cli login)
+POST   /api/hearth/machines/register             (cli login)
 body { id*, hostname*, secret? }
 → 200 { machine, secret: string | null }
   | 409 MACHINE_ID_TAKEN { id, reason: "hostname" | "legacy" | "secret_mismatch" }
@@ -1429,7 +1429,7 @@ and re-register). Machine ids are `hostname-<unique>` (new machines; legacy
 UUID ids keep working). The listener persists the secret at
 `~/.lexa/<host>/machine-secret` (chmod 600).
 
-POST   /api/forge/machines/heartbeat          (listener)
+POST   /api/hearth/machines/heartbeat          (listener)
 body { id*, hostname?, clis?: [{ provider, version }],
        runtimes?: [{ runtimeId, agentCli, models, agents }],
        daemonErrors?: [{ runtimeId, error }] }
@@ -1441,18 +1441,18 @@ Upserts a machine row (marks it listening). The CLI persists id in
 (opencode/cmd --version; hermes skipped). daemonErrors relay daemon failures
 the daemon itself can't report (revoked key → exit code 3) — stored on the
 matching runtime row as last_error. Also runs the stuck-task sweep: 'running'
-forge tasks whose runtime has been offline > 10 min are re-queued, and stale
-'running' runs (started > FORGE_STALE_RUN_MIN, default 30m, runtime offline
+hearth tasks whose runtime has been offline > 10 min are re-queued, and stale
+'running' runs (started > HEARTH_STALE_RUN_MIN, default 30m, runtime offline
 or gone) are hard-deleted — task + log — since the runner is dead and will
 never post a result.
 Catalogs are stored on matching runtime rows and power Settings pickers.
 
-GET    /api/forge/machines                     (browser)
+GET    /api/hearth/machines                     (browser)
 → 200 { data: Machine[] }
 Machines with last_seen > 2 min ago are marked offline. Offline machines stay
 visible but cannot be targeted for runtime setup.
 
-DELETE /api/forge/machines/:id                  (browser)
+DELETE /api/hearth/machines/:id                  (browser)
 → 204 | 404 MACHINE_NOT_FOUND
 Removes the host: queues machine-scoped `remove` events for each of its
 runtimes (deduped per provider, delivered on the listener's next heartbeat),
@@ -1460,50 +1460,50 @@ deletes the runtime rows, its pending setup events (FK cascade), and the
 machine row. Never blocks — a still-listening machine reappears on its next
 heartbeat (upsert) until `lexa-cli machine stop` is run on it.
 
-POST   /api/forge/tasks                    (browser)
+POST   /api/hearth/tasks                    (browser)
 body { slug*, documentType*: "task"|"wiki", documentId*, agentId*, skillId*,
        extraPrompt?, selection?, runtimeId? }
   agentId/skillId reference the global rule bundles (Settings → Agents/Skills);
   extraPrompt is a per-run free-text addition to the prompt.
-→ 201 ForgeTask
+→ 201 HearthTask
   | 404 PROJECT_NOT_FOUND / TASK_NOT_FOUND / PAGE_NOT_FOUND / AGENT_NOT_FOUND / SKILL_NOT_FOUND
   | 409 NO_RUNTIME_ONLINE                 (no daemon is up)
 
-GET    /api/forge/tasks/:id
-→ 200 ForgeTask
+GET    /api/hearth/tasks/:id
+→ 200 HearthTask
 
-GET    /api/forge/tasks?slug*&documentType&documentId
-→ 200 { data: ForgeTask[] }   (for one document, per doc — the Forge panel's
+GET    /api/hearth/tasks?slug*&documentType&documentId
+→ 200 { data: HearthTask[] }   (for one document, per doc — the Hearth panel's
   per-document run list; status newest-first)
   | 404 PROJECT_NOT_FOUND  (slug missing or unknown)
 
-GET    /api/forge/tasks/recent
-→ 200 { data: Array<ForgeTask & { projectName }> }   (10 newest, cross-project)
+GET    /api/hearth/tasks/recent
+→ 200 { data: Array<HearthTask & { projectName }> }   (10 newest, cross-project)
 
-GET    /api/forge/daemon/tasks/:id/status    (daemon)
+GET    /api/hearth/daemon/tasks/:id/status    (daemon)
 → 200 { status: "queued"|"running"|"completed"|"failed"|"cancelled" }
   Polling fallback for daemons that cannot stream logs.
 
-POST   /api/forge/tasks/:id/cancel             (browser)
-→ 200 ForgeTask  (status → "cancelled"; daemon discards the run)
+POST   /api/hearth/tasks/:id/cancel             (browser)
+→ 200 HearthTask  (status → "cancelled"; daemon discards the run)
 
-GET    /api/forge/tasks/:id/logs               (browser)
-→ 200 { data: ForgeTaskLog[] }   (ascending; live activity feed while running)
+GET    /api/hearth/tasks/:id/logs               (browser)
+→ 200 { data: HearthTaskLog[] }   (ascending; live activity feed while running)
 Each log row carries stream ("out"|"err") + level ("info"|"warn"|"error") —
-classified ONCE by the daemon at write time (shared/forge-log.ts) and stored;
+classified ONCE by the daemon at write time (shared/hearth-log.ts) and stored;
 the UI renders the stored level. Legacy rows default to out/info.
 
-GET    /api/forge/tasks/history                (browser)
+GET    /api/hearth/tasks/history                (browser)
 query { slug?, status?, skillId?, documentType?, limit?, cursor? }
   status: queued | running | completed | failed | cancelled
   skillId: a skill's id (filter by operation bundle)
   limit: 1–200 (default 50) · cursor: opaque keyset cursor
 → 200 {
-  data: Array<ForgeTask & { projectName }>,
+  data: Array<HearthTask & { projectName }>,
   nextCursor: string | null,
   summary: { queued, running, completed, failed, cancelled }   (global, not filter-scoped)
 }
-Cross-project task history for the Forge control panel, newest first.
+Cross-project task history for the Hearth control panel, newest first.
 Keyset-paginated on (created_at, id) DESC; nextCursor is null on the last
 page. summary carries per-status totals and is NOT scoped by the filters —
 the strip describes the system, the table is the view. The frontend polls
@@ -1511,9 +1511,9 @@ this endpoint every 1.5s while any row on the page is queued/running, else
 on a 15s idle heartbeat.
 
 # ── Lexa Agents & Skills catalog (global rule bundles; browser, Bearer) ──
-# Moved from /api/forge/agents|skills… in migration 0010 — hard cutover, no
+# Moved from /api/hearth/agents|skills… in migration 0010 — hard cutover, no
 # aliases (sole consumer is the bundled web app). The catalog is the behavioral
-# spec for BOTH Forge tiers: prompt injection renders it for Herald, .agents/
+# spec for BOTH Hearth tiers: prompt injection renders it for Herald, .agents/
 # file writing renders it for Blacksmith. All mutations are admin-only
 # (403 FORBIDDEN for members).
 GET    /api/agents
@@ -1527,16 +1527,16 @@ PATCH  /api/agents/:id    (admin)  body { name?, description?, instructions? }
 → 200 LexaAgent  | 403 FORBIDDEN | 404 AGENT_NOT_FOUND | 409 CONSTRAINT
 
 DELETE /api/agents/:id    (admin)
-→ 204 | 403 FORBIDDEN | 404 AGENT_NOT_FOUND | 422 FORGE_BUILTIN_DELETE | 409 FORGE_ENTITY_IN_USE
-  (builtins can't be deleted; an agent still used by forge tasks can't either)
+→ 204 | 403 FORBIDDEN | 404 AGENT_NOT_FOUND | 422 HEARTH_BUILTIN_DELETE | 409 HEARTH_ENTITY_IN_USE
+  (builtins can't be deleted; an agent still used by hearth tasks can't either)
 
 PUT    /api/agents/:id/skills  (admin)  body { skillIds*: string[] }  (full replace)
 → 200 LexaAgent  | 403 FORBIDDEN | 404 AGENT_NOT_FOUND / SKILL_NOT_FOUND
-  (M2M bindings; the Forge popover only offers the attached skills)
+  (M2M bindings; the Hearth popover only offers the attached skills)
 
 POST   /api/agents/:id/reset  (admin; builtin only)
 → 200 LexaAgent  (restores the seeded instructions + full builtin skill set)
-  | 403 FORBIDDEN | 404 AGENT_NOT_FOUND | 422 FORGE_BUILTIN_DELETE
+  | 403 FORBIDDEN | 404 AGENT_NOT_FOUND | 422 HEARTH_BUILTIN_DELETE
 
 GET    /api/skills
 → 200 { data: LexaSkill[] }   (skill = { id, name, description, instructions, isBuiltin, createdAt, updatedAt })
@@ -1548,18 +1548,18 @@ PATCH  /api/skills/:id    (admin)  body { name?, description?, instructions? }
 → 200 LexaSkill  | 403 FORBIDDEN | 404 SKILL_NOT_FOUND | 409 CONSTRAINT
 
 DELETE /api/skills/:id    (admin)
-→ 204 | 403 FORBIDDEN | 404 SKILL_NOT_FOUND | 422 FORGE_BUILTIN_DELETE | 409 FORGE_ENTITY_IN_USE
+→ 204 | 403 FORBIDDEN | 404 SKILL_NOT_FOUND | 422 HEARTH_BUILTIN_DELETE | 409 HEARTH_ENTITY_IN_USE
 
 POST   /api/skills/:id/reset  (admin; builtin only)
-→ 200 LexaSkill  | 403 FORBIDDEN | 404 SKILL_NOT_FOUND | 422 FORGE_BUILTIN_DELETE
+→ 200 LexaSkill  | 403 FORBIDDEN | 404 SKILL_NOT_FOUND | 422 HEARTH_BUILTIN_DELETE
 
-POST   /api/forge/daemon/tasks/:id/log         (daemon)  body { message*, stream? ("out"|"err"), level? ("info"|"warn"|"error") } → 200 ForgeTaskLog
+POST   /api/hearth/daemon/tasks/:id/log         (daemon)  body { message*, stream? ("out"|"err"), level? ("info"|"warn"|"error") } → 200 HearthTaskLog
 (appends one activity line — claim, model, agent start, generating, done/failed;
 stream/level are classified once by the daemon and stored; defaults out/info
 keep older daemons working)
 
-POST   /api/forge/daemon/tasks/:id/complete   (daemon)  body { result* } → 200 ForgeTask
-POST   /api/forge/daemon/tasks/:id/fail       (daemon)  body { error* }  → 200 ForgeTask
+POST   /api/hearth/daemon/tasks/:id/complete   (daemon)  body { result* } → 200 HearthTask
+POST   /api/hearth/daemon/tasks/:id/fail       (daemon)  body { error* }  → 200 HearthTask
 
 GET    /api/projects/:slug/documents/:type/:id/sources
 → 200 { data: DocumentSource[] }
@@ -1576,15 +1576,15 @@ DELETE /api/projects/:slug/documents/:type/:id/sources/:sourceId
 ```
 
 Notes:
-- **Daemon auth:** `/api/forge/daemon/*` and `/api/forge/runtimes/register` accept
-  the shared secret `LXK_FORGE_DAEMON_TOKEN` via `x-forge-token`, or a normal
+- **Daemon auth:** `/api/hearth/daemon/*` and `/api/hearth/runtimes/register` accept
+  the shared secret `LXK_HEARTH_DAEMON_TOKEN` via `x-hearth-token`, or a normal
   Bearer API key; the other runtime routes require the Bearer key. Browser
   endpoints use the Bearer key. The CLI listener (`machine listen`) uses the
-  Bearer key from its saved login for `/api/forge/runtime-events/*` and
-  `/api/forge/machines/*`.
+  Bearer key from its saved login for `/api/hearth/runtime-events/*` and
+  `/api/hearth/machines/*`.
 - **SSRF guard:** external sources resolve DNS and reject private/loopback/
   link-local/CGNAT addresses before fetching.
-- **Forge loop:** the spawned agent CLI receives a server-built prompt; the
+- **Hearth loop:** the spawned agent CLI receives a server-built prompt; the
   one-shot result is returned to the editor for accept/reject.
 
 ### Herald (AI assistant tier)
@@ -1596,8 +1596,8 @@ mutations + test/models are superadmin (`403 FORBIDDEN` otherwise); reads,
 tasks, chat, and memory follow normal project access; chat additionally
 requires a session user (bare API key → `400 NO_USER_CONTEXT`).
 
-Visibility: Forge task brief info (status, timestamps) is member-visible;
-detail/log internals (result text, `forge_task_logs` streams) are
+Visibility: Hearth task brief info (status, timestamps) is member-visible;
+detail/log internals (result text, `hearth_task_logs` streams) are
 admin-gated.
 
 ```
@@ -1608,8 +1608,10 @@ GET    /api/herald/settings/:projectId
         urlAllowlist: string|null,
         engine: "herald"|"blacksmith", engineSwitcherEnabled: boolean,
         primarySupportsImages: boolean,
-        visionModel: string|null }
-  Masked view — api_key/search_api_key never serialized.
+        visionModel: string|null,
+        writeTools: string[] }
+  Masked view — api_key/search_api_key never serialized. writeTools is the
+  parsed allowlist of enabled write-tool names (empty → read-only turns).
   | 404 PROJECT_NOT_FOUND | 409 PROVIDER_NOT_CONFIGURED (no row yet)
 
 PUT    /api/herald/settings/:projectId   (admin)
@@ -1617,11 +1619,14 @@ body { kind*, baseUrl*, model*, apiKey?, searchProvider?, searchApiKey?,
        urlAllowlist?,
        engine?: "herald"|"blacksmith", engineSwitcherEnabled?: boolean,
        primarySupportsImages?: boolean,
-       visionModel?: string }
+       visionModel?: string,
+       writeTools?: string[] }
   Omitted apiKey/searchApiKey keep the stored values; first save
   without an apiKey → 422 INVALID_ARGS ("apiKey required on first save").
   Vision shares the primary provider (kind/api_key/base_url) — only
   `visionModel` differs; no separate vision credentials exist.
+  writeTools: unknown names are dropped, duplicates collapse, stored
+  comma-separated in herald_settings.write_tools.
 → 200 masked view (same shape as GET)
 
 POST   /api/herald/settings/:projectId/test   (admin)
@@ -1643,8 +1648,8 @@ body { slug*, documentType*: "task"|"wiki", documentId*, prompt*, agentId*,
        skillId*, selection?,
        attachments?: [{ storageKey*, mimeType*, name* }] }
   Engine routing: the project's `herald_settings.engine` is resolved once per
-  request. engine='herald' → forge_tasks row kind='herald' (queued), no
-  runtime-online guard (unchanged). engine='blacksmith' → forge_tasks row
+  request. engine='herald' → hearth_tasks row kind='herald' (queued), no
+  runtime-online guard (unchanged). engine='blacksmith' → hearth_tasks row
   kind='blacksmith' + runtime-online guard (`NO_RUNTIME_ONLINE` 409); the
   claim payload carries `.agents/` bundles (agentMarkdown/skillMarkdown) as
   for any Blacksmith task. skillId must be bound to the resolved engine's
@@ -1654,7 +1659,7 @@ body { slug*, documentType*: "task"|"wiki", documentId*, prompt*, agentId*,
   png/jpeg/gif/webp only. Attachments require vision capability:
   primary_supports_images=1 → inline parts; else vision_model configured →
   internal analyze_image delegation; else 409 VISION_NOT_CONFIGURED.
-→ 201 ForgeTask
+→ 201 HearthTask
   | 404 PROJECT_NOT_FOUND / TASK_NOT_FOUND / PAGE_NOT_FOUND / AGENT_NOT_FOUND / SKILL_NOT_FOUND
   | 409 PROVIDER_NOT_CONFIGURED          (no saved settings for the project)
   | 409 NO_RUNTIME_ONLINE                (engine=blacksmith, no daemon online)
@@ -1663,16 +1668,29 @@ body { slug*, documentType*: "task"|"wiki", documentId*, prompt*, agentId*,
 
 POST   /api/herald/tasks/:id/stream      (SSE — POST + fetch-stream, not EventSource)
 → 200 text/event-stream
-  Frames (exactly one terminal frame — error|done):
+  Frames (exactly one terminal frame — error|done|suspended):
     event: start  data: {"taskId":"…","threadId":"…"}
     event: delta  data: {"text":"…"}
     event: tool   data: {"phase":"call"|"result","name":"…"}
+    event: tool_pending data: {"approvalId":"…","batchId":"…","seq":n,
+                               "name":"create_task","detail":"…",
+                               "diff":{…HeraldWriteDiff…}}
     event: error  data: {"code":"HERALD_GENERATION_FAILED","message":"…"}
     event: done   data: {"taskId":"…","text":"…","usage":{"in":n,"out":n}}
+    event: suspended data: {"batchId":"…"}
+    event: approval_result data: {"approvalId":"…","status":"applied"|"failed"|"denied",
+                                 "error":"CODE: message"}          (resume streams only)
+  tool_pending frames (one per pending write, seq order) appear only right
+  before a terminal `suspended` frame — the turn proposed writes and awaits
+  approval decisions; resume continues it (see resume endpoints below).
+  approval_result frames (one per decided row of the resumed batch, seq
+  order) appear right after the `start` frame on resume streams only:
+  applied|failed for approved+executed rows (`error` carries "CODE: message"
+  for failed rows), denied for rejected rows.
   Heartbeat comment ": ping" every 15s (proxy buffering). Client disconnect
   aborts the run (task → cancelled, "aborted" log). Stop button = client
   abort + cancel below.
-  | 404 FORGE_TASK_NOT_FOUND | 409 HERALD_TASK_ACTIVE (already claimed/running)
+  | 404 HEARTH_TASK_NOT_FOUND | 409 HERALD_TASK_ACTIVE (already claimed/running)
 
 POST   /api/herald/tasks/:id/cancel
 → 200 { ok: true }
@@ -1745,6 +1763,25 @@ DELETE /api/herald/chat/:chatId
   current). 409 while a stream is in flight on that chatId; next "New chat"
   starts fresh.
 
+POST   /api/herald/approvals/:id/decide
+body { verdict*: "approve" | "reject" }
+→ 200 { approvalId, batchId, status, remaining }
+  | 404 APPROVAL_NOT_FOUND | 409 APPROVAL_EXPIRED / APPROVAL_ALREADY_DECIDED
+  Owner-only (session user). Flips the pending-write row; does NOT execute.
+  Execution happens inside the resume stream (first act, before the provider
+  call), so results stream as frames. `remaining` = unresolved rows left in
+  the batch; the client opens the resume stream only when it reaches 0.
+
+POST   /api/herald/chat/:chatId/resume            (SSE — POST + fetch-stream)
+POST   /api/herald/threads/:documentType/:documentId/resume   (SSE)
+  Same frames as the respective stream endpoints. Server-side sequence:
+  sweep expired → execute approved rows in seq order (each emitting an
+  approval_result frame right after start: applied|failed, error carries
+  "CODE: message"; rejected rows emit denied) → continue the provider turn
+  with no new user message → done.
+  | 404 HERALD_THREAD_NOT_FOUND / APPROVAL_NOT_FOUND (nothing to resume)
+  | 409 HERALD_TASK_ACTIVE | 409 APPROVALS_PENDING
+
 GET    /api/herald/chats/:projectId?q=
 → 200 { data: [{ chatId, title, pinned, snippet, createdAt, updatedAt }] }
   | 404 PROJECT_NOT_FOUND
@@ -1781,6 +1818,32 @@ POST   /api/herald/memory/:projectId     body { content* }
 
 DELETE /api/herald/memory/:projectId/:memoryId
 → 204
+
+  Herald read tools (server-side toolset available to every herald turn;
+  project-scoped, read-only):
+    web_search(query)                    Exa, ≤5 results (only when configured)
+    fetch_url(url)                       SSRF-guarded plain text / PDF extract
+    read_s3_file(key)                    project attachment text (5 MB cap)
+    get_task(ref)                        ref = task id or PREFIX-n alias →
+      { id, key, title, priority, dueAt, archived, markdown,
+        columnName?, swimlaneName?, milestoneName?, type?,
+        assignees?: string[], githubIssue?: { repo, number } | null }
+    search_tasks(query, limit?)          ≤10 title-substring matches
+    search_wiki(query, limit?)           FTS, ≤10 {title, slug, snippet}
+    read_wiki_page(slug)                 { title, slug, markdown } (~8k cap)
+    get_all_tasks()                      { tasks: [<get_task summary fields>
+                                         + markdown], truncated? } — archived
+                                         included; 60000-char total markdown
+                                         cap, truncated:true = tasks dropped
+    get_all_wiki_pages()                 { pages: [{title, slug, markdown}],
+                                         truncated? } — each page ~8k cap,
+                                         60000-char total cap
+    get_board_structure()                { columns: [{id, name, position,
+                                         wipLimit, githubState, isDone}],
+                                         swimlanes: [{id, name, kind, startAt,
+                                         dueAt, archived, milestoneId}],
+                                         milestones: [{id, name, dueAt,
+                                         archived}] }
 ```
 
 ## Notes

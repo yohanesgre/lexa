@@ -6,6 +6,18 @@ All notable changes to Lexa are documented here. Format based on
 
 ## [Unreleased]
 
+### Changed
+
+- **BREAKING: Forge→Hearth rename** — full identifier rename executed
+  (migration `0015_hearth_rename.sql`): DB tables `hearth_tasks` /
+  `hearth_task_logs` / `hearth_sessions`, REST routes `/api/hearth/*`, daemon
+  auth header `x-hearth-token`, env vars `HEARTH_*` / `LXK_HEARTH_DAEMON_TOKEN`,
+  activity types `hearth_completed/_failed/_cancelled`, error codes `HEARTH_*`,
+  service/file names (`HearthService`, `hearth/daemon.ts`,
+  `app/components/hearth/`). Deployed machines must be reinstalled:
+  `lexa-cli machine uninstall && lexa-cli machine install`.
+
+
 ### Added
 
 - **In-app human auth (Better Auth)** — email/password login at `/login`,
@@ -48,6 +60,21 @@ All notable changes to Lexa are documented here. Format based on
   independent of the GitHub state mapping; multiple done columns are
   allowed (e.g. Done + Released). Sprint progress counts a task as done
   when it sits in a done column or is archived.
+- **Herald write tools (proposed-actions flow)** — Herald can now propose task
+  and wiki mutations (`propose_*`) instead of writing directly; proposals land
+  in `herald_pending_writes` (migration `0016_herald_write_tools.sql`) and
+  surface in the chat as a `<HeraldApprovals>` card with per-proposal
+  accept/reject. Approved writes are replayed through the existing service
+  path so activity emission, guards, and GitHub sync are unchanged.
+- **Herald chat streaming perf** — `MarkdownContent` now content-addresses
+  completed top-level blocks (cached ReactNode references), and
+  `useHeraldStream` coalesces delta/reasoning notifications to one React
+  render per animation frame. Tables and lists paint smoothly without
+  per-delta reflow; status-bearing frames (done, error, tool) still notify
+  synchronously.
+- **Composer: effort picker left of Send** — the per-turn thinking-effort
+  picker moved from the SkillPicker row into the composer footer, sitting
+  to the left of the Send button.
 
 ### Changed
 

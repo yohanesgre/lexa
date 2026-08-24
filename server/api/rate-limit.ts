@@ -2,7 +2,7 @@ import { Database } from "bun:sqlite";
 import { getSetting } from "../db/settings";
 
 export interface RateLimiterOptions {
-  max?: number; // default 6000 requests per window (self-hosted; Forge agents are chatty)
+  max?: number; // default 6000 requests per window (self-hosted; Hearth agents are chatty)
   windowMs?: number; // default 600_000 (10 min)
   sweepThreshold?: number; // default 10_000 — sweep expired buckets when size crosses this
 }
@@ -43,14 +43,14 @@ export function syncRateLimitFromDb(db: Database): void {
   apiRateLimiter.setLimits({ max, windowMs });
 }
 
-// Forge machine surfaces are key/token-gated and chatty by design — the
+// Hearth machine surfaces are key/token-gated and chatty by design — the
 // daemon's log POSTs, runtime registration, and the listener's 3s heartbeat
 // must never 429. Same policy as before, now covering machines/heartbeat.
 export function isRateLimitExemptPath(path: string): boolean {
   return (
-    path.startsWith("/api/forge/daemon/") ||
-    path === "/api/forge/runtimes/register" ||
-    path === "/api/forge/machines/heartbeat"
+    path.startsWith("/api/hearth/daemon/") ||
+    path === "/api/hearth/runtimes/register" ||
+    path === "/api/hearth/machines/heartbeat"
   );
 }
 

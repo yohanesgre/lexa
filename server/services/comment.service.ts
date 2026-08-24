@@ -32,7 +32,7 @@ export class CommentService extends Effect.Service<CommentService>()("Lexa/Comme
         }
       });
 
-    const create = (taskId: string, actor: Actor, body: TipTapDoc): Effect.Effect<{ comment: TaskComment; activity: ActivityEvent }, TaskNotFound | CommentInvalid | DbError | ConstraintViolation | RowNotFound> =>
+    const create = (taskId: string, actor: Actor, body: TipTapDoc, opts?: { viaHerald?: boolean }): Effect.Effect<{ comment: TaskComment; activity: ActivityEvent }, TaskNotFound | CommentInvalid | DbError | ConstraintViolation | RowNotFound> =>
       Effect.gen(function* () {
         yield* validateBody(body);
         // Existence pre-check — a bare insert would surface a raw FK
@@ -44,10 +44,12 @@ export class CommentService extends Effect.Service<CommentService>()("Lexa/Comme
           const comment = yield* commentRepo.insert({
             taskId, authorId: actor.userId ?? null, authorKind: actor.kind,
             authorLabel: actor.label, body: JSON.stringify(body),
+            viaHerald: opts?.viaHerald === true,
           });
           const activity = yield* activityRepo.insert({
             taskId, actorKind: actor.kind, actorLabel: actor.label,
             actorUserId: actor.userId ?? null, type: "commented", message: msg.commented(actor.label),
+            viaHerald: opts?.viaHerald === true,
           });
           return { comment, activity };
         }));

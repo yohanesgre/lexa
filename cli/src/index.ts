@@ -6,7 +6,7 @@
  *   lexa-cli-dev <command> [options]    (dev: bun run cli/index.ts)
  *
  * Wraps the Lexa REST API with the same lxk_ Bearer auth as the web app.
- * The Forge daemon stays a polling process; this CLI installs/starts/stops it
+ * The Hearth daemon stays a polling process; this CLI installs/starts/stops it
  * and gives humans/scripts a non-browser way to drive Lexa.
  *
  * Env fallbacks (overridden by --url/--key or saved login):
@@ -520,7 +520,7 @@ Wiki:
 Projects:
   project list [--json]
 
-Runtimes (Forge daemon):
+Runtimes (Hearth daemon):
   runtime list                                   server-side daemon view
   runtime delete <id>                            remove a runtime (daemon + env
                                                   cleaned up by its machine's
@@ -539,7 +539,7 @@ Machine listener:
                                                   (reappears if still listening — stop
                                                   the listener first for permanent removal)
 
-Forge workspaces (local machine view):
+Hearth workspaces (local machine view):
   machine workspace list                         per-project dirs under ~/.lexa/<host>/projects/ (per server)
   machine workspace sync                         re-index projects from the server + provision
 
@@ -592,7 +592,7 @@ const GROUP_HELP: Record<string, string> = {
   wiki: `Wiki:
   wiki list --project <slug> [--json]
   wiki get  <pageSlug> --project <slug> [--json]`,
-  runtime: `Runtimes (Forge daemon):
+  runtime: `Runtimes (Hearth daemon):
   runtime list                                   server-side daemon view
   runtime delete <id>                            remove a runtime (daemon + env
                                                   cleaned up by its machine's
@@ -610,7 +610,7 @@ const GROUP_HELP: Record<string, string> = {
                                                   (reappears if still listening — stop
                                                   the listener first for permanent removal)
 
-Forge workspaces (local machine view):
+Hearth workspaces (local machine view):
   machine workspace list                         per-project dirs under ~/.lexa/<host>/projects/ (per server)
   machine workspace sync                         re-index projects from the server + provision`,
 

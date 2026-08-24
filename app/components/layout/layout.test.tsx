@@ -127,7 +127,7 @@ describe("AppShell", () => {
       expect(screen.getByText(label)).toBeInTheDocument();
     }
     expect(screen.queryByRole("link", { name: "Settings" })).not.toBeInTheDocument();
-    // "Hearth" appears in the nav link and in ForgeStatus
+    // "Hearth" appears in the nav link and in HearthStatus
     expect(screen.getAllByText("Hearth").length).toBeGreaterThanOrEqual(1);
     expect(screen.getByTestId("outlet")).toBeInTheDocument();
     // board route → the Board NavLink is active
@@ -166,8 +166,8 @@ describe("AppShell", () => {
     expect(screen.queryByText("Workspace settings")).not.toBeInTheDocument();
   });
 
-  it("on /forge the brand is NOT active and the Hearth link IS active", () => {
-    pathnameMock.value = "/forge";
+  it("on /hearth the brand is NOT active and the Hearth link IS active", () => {
+    pathnameMock.value = "/hearth";
     render(<ProjectSelectionProvider><AppShell /></ProjectSelectionProvider>, { wrapper });
     expect(screen.getByText("Lexa").className).not.toContain("active");
     expect(screen.getByRole("link", { name: "Hearth" }).className).toContain("active");

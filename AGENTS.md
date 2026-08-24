@@ -1,3 +1,14 @@
+<!-- intent-skills:start -->
+## Skill Loading
+
+Before editing files for a substantial task:
+- Run `bunx @tanstack/intent@latest list` from the workspace root to see available local skills.
+- If a listed skill matches the task, run `bunx @tanstack/intent@latest load <package>#<skill>` before changing files.
+- Use the loaded `SKILL.md` guidance while making the change.
+- Monorepos: when working across packages, run the skill check from the workspace root and prefer the local skill for the package being changed.
+- Multiple matches: prefer the most specific local skill for the package or concern you are changing; load additional skills only when the task spans multiple packages or concerns.
+<!-- intent-skills:end -->
+
 ## You are the fe lane (frontend)
 Scope: app/ ONLY (routes, components, styles, app/lib). Never: server/, shared/types.ts, docs/, package.json, tsconfig.json, app.config.ts.
 - Gates before you may start: wireframe lane DONE (orchestrator confirms) AND BE contract commit exists. Wait otherwise.
@@ -89,7 +100,7 @@ These were each hard-won design fixes (rationale lives in `docs/ARCHITECTURE.md`
 4. **Positions are fractional-index keys.** Generation is deterministic — retries must re-read anchors before regenerating. Neighborless moves append to end; never `generateKeyBetween(null, null)` into a non-empty column. Retry only on `isPositionConflict`, at most once.
 5. **WIP limit is enforced inside the conditional UPDATE** (atomic), with the within-column-reorder short-circuit (`column_id = ?2 OR count < limit`).
 6. **Mutation responses are authoritative.** Frontend updates TanStack Query cache via `setQueryData` from the mutation response. Never `invalidateQueries` on the mutation path.
-7. **REST boundary speaks TipTap JSON.** Markdown conversion lives only in `shared/markdown.ts` (used by GitHub sync, Forge, CLI); the frontend never sees Markdown.
+7. **REST boundary speaks TipTap JSON.** Markdown conversion lives only in `shared/markdown.ts` (used by GitHub sync, Hearth, CLI); the frontend never sees Markdown.
 8. **Webhook route has no API-key middleware** — HMAC-SHA-256 signature verification over the raw body is the auth, and it runs before JSON parsing.
 9. **Column→GitHub state mapping uses `columns.github_state`**, never column names.
 10. **`required_fields` is enforced on create, move, AND update**, with TipTap-aware emptiness (a doc with no text nodes is empty).
@@ -179,11 +190,11 @@ Key facts:
   PEM) or `GITHUB_PRIVATE_KEY_FILE` (path — recommended), prod volume mount.
   Webhook auth is HMAC-SHA-256 over the raw body — no Access bypass needed.
 
-### Forge (AI writing assistant)
+### Hearth (AI writing assistant)
 
-- The Forge button in the task/wiki editors needs at least one online daemon
+- The Hearth button in the task/wiki editors needs at least one online daemon
   child, managed by `lexa-cli machine listen` (env: `LEXA_URL`,
-  `LEXA_API_KEY` or `LXK_FORGE_DAEMON_TOKEN`, `FORGE_AGENT=opencode|hermes|command-code`).
+  `LEXA_API_KEY` or `LXK_HEARTH_DAEMON_TOKEN`, `HEARTH_AGENT=opencode|hermes|command-code`).
   The listener owns per-runtime daemon children; there are no per-runtime systemd units.
   Without a daemon, Generate returns `NO_RUNTIME_ONLINE`.
 - **Daemons NEVER inherit the listener's shell env:** secret vars are scrubbed
@@ -208,22 +219,22 @@ Key facts:
   claim payload carries the continue-vs-mint verdict: `runtimeSessionId`
   (continue the mapped conversation) or `null` (mint
   `POST /session?directory=<workspace>` on serve, assert the bound directory,
-  then persist the mapping in `forge_sessions` BEFORE the run). Runs are
+  then persist the mapping in `hearth_sessions` BEFORE the run). Runs are
   blocking `POST /session/:id/message` (model as `{providerID, modelID}` —
   a `"provider/model"` string is rejected), live logs tee via 3s polling of
   `GET /session/:id/message`, the result is the joined text parts, and
   `session.error` fails the task. Cancel/timeout = `POST /session/:id/abort`
   (best effort — unblocks the message POST) + **drop the mapping row
-  unconditionally** (`DELETE /api/forge/sessions`; an aborted session is
+  unconditionally** (`DELETE /api/hearth/sessions`; an aborted session is
   poisoned and must never be continued). The popover's "New session" uses the
-  user-facing `POST /api/forge/sessions/reset` (409 while the document has an
+  user-facing `POST /api/hearth/sessions/reset` (409 while the document has an
   active task on that runtime). Agent/skill change → the server returns `null`
   → the daemon mints a fresh session and rewrites the row (reset semantics,
   no history rows). Auto-compaction is server-side (`compaction.auto` in the
   serve session loop) — long-lived sessions compact themselves, no Lexa work.
 - **Serve lifecycle:** serve binds `127.0.0.1` on a flavor-separated port —
   prod 4096–4127, staging 4196–4227, dev 4296–4327 (`flavorBaseFor(LEXA_FLAVOR)`
-  + `fnv1a(runtimeId) % 32`, +1..+4 fallback candidates, `FORGE_SERVE_PORT`
+  + `fnv1a(runtimeId) % 32`, +1..+4 fallback candidates, `HEARTH_SERVE_PORT`
   override in the runtime env file first), readiness probed via `GET /session`
   (200 = fully up). Flavor is a derived label only (loopback → `dev`, else
   `prod`; `LEXA_FLAVOR`/`--flavor` override) used for exactly this serve-port
@@ -231,7 +242,7 @@ Key facts:
   (SIGKILL/power-loss orphans), respawns crashed serve with a 5s→30s backoff
   (never gives up, sessions survive — the session DB lives in the persistent
   sandbox), kills serve on its SIGTERM (listener stop) and on the exit-3
-  auth-failure path. If serve cannot boot, claimed tasks fail with "Forge
+  auth-failure path. If serve cannot boot, claimed tasks fail with "Hearth
   runtime unavailable — opencode serve did not start" — no legacy cold-`run`
   fallback.
 - **Persistent sandbox + workspace (opencode only):** every project gets a
@@ -239,8 +250,8 @@ Key facts:
   write-once with README.md + a static orchestrator AGENTS.md); per run the
   daemon (over)writes `.agents/agents/<agentId>/AGENTS.md` (the selected
   lexa-agent's rules) and `.agents/skills/<skillId>/SKILL.md`. The sealed
-  per-run `.forge/` HOME is replaced by a persistent per-runtime sandbox at
-  the group's `<LEXA_DIR>/runtimes/<runtimeId>/forge-home/` (seeded once, never
+  per-run `.hearth/` HOME is replaced by a persistent per-runtime sandbox at
+  the group's `<LEXA_DIR>/runtimes/<runtimeId>/hearth-home/` (seeded once, never
   wiped — removed only with the runtime; contains the deny-rule
   `opencode.json`:
   bash fully denied, `external_directory: deny`, `*auth.json*` denied,
@@ -252,7 +263,7 @@ Key facts:
   workspace at mint and keep it on continuation; a re-provisioned workspace
   (listener sync / manual wipe) leaves a stale file context — reset the
   session after wiping a workspace. Global opencode config — permissions,
-  plugins — never loads into Forge runs.
+  plugins — never loads into Hearth runs.
   `lexa-cli machine workspace list|sync` inspects/re-syncs local workspaces.
   hermes/command-code keep the legacy ephemeral `~/.lexa/<host>/runs/` layout.
 
@@ -287,9 +298,9 @@ The CLI version is **independent** of the web app version:
   `upgrade`, `github status|setup|check`. Agent skill:
   `~/.agents/skills/lexa-cli/SKILL.md`. The CLI is for humans/operators.
 - **Runtime setup wizard → CLI listener:** the web Settings wizard (Settings →
-  Forge Runtimes → Setup runtime) lists registered machines from
-  `GET /api/forge/machines`, then sends only machine + agent CLI + a fresh key
-  through `POST /api/forge/runtime-events`. The listener derives its group
+  Hearth Runtimes → Setup runtime) lists registered machines from
+  `GET /api/hearth/machines`, then sends only machine + agent CLI + a fresh key
+  through `POST /api/hearth/runtime-events`. The listener derives its group
   from the server URL at boot (`machine listen --url <base>`; `machine install`
   bakes the URL into the systemd unit ExecStart). It persists its machine id
   at `~/.lexa/<host>/machine-id` and the per-machine secret at

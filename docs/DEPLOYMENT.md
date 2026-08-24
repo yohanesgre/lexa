@@ -32,7 +32,7 @@ logic, not seed).
 | `CF_TUNNEL_TOKEN` | `lexa-cli deploy` | staging/prod |
 | `GITHUB_APP_ID` / `GITHUB_WEBHOOK_SECRET` | preserved across deploys; set once by hand for issue sync | only for GitHub sync |
 | `GITHUB_PRIVATE_KEY` / `GITHUB_PRIVATE_KEY_FILE` | hand-set; PEM volume-mounted read-only in prod compose | only for GitHub sync |
-| `LXK_FORGE_DAEMON_TOKEN` | hand-set (Settings alternative) | only for Forge daemons |
+| `LXK_HEARTH_DAEMON_TOKEN` | hand-set (Settings alternative) | only for Hearth daemons |
 | `LXK_MAX_BODY_MB` / `LOG_LEVEL` / `DATABASE_PATH` / `PORT` | defaults; tune by hand | no |
 
 ## Full variable reference
@@ -48,7 +48,7 @@ logic, not seed).
 | `LOG_LEVEL` | logging level (default `info`) |
 | `LXK_ADMIN_EMAILS` | comma-separated **superadmin** emails — env-only allow-list, applied at provisioning (setup wizard only); never edited at runtime |
 | `LXK_API_KEY` | server auth Bearer key (`lxk_` + 43 chars) — machines use it directly; also injected into the served HTML as `<meta name="lxk-api-key">` for browsers |
-| `LXK_FORGE_DAEMON_TOKEN` | shared secret for Forge daemons (alternative to a Settings API key) |
+| `LXK_HEARTH_DAEMON_TOKEN` | shared secret for Hearth daemons (alternative to a Settings API key) |
 | `LXK_MAX_BODY_MB` | max request body for `/api` in MB (default 16); webhook payloads hard-capped at 1 MB before HMAC, regardless |
 | `LXK_PUBLIC_URL` | public base URL of this flavor (e.g. `https://lexa.example.com`) — Better Auth `baseURL` + `trustedOrigins`; written by `lexa-cli deploy` from the deploy domain; hand-set in dev |
 | `LXK_SEED_DEV` | dev-only boot-time sample data (`1` enables; set by `scripts/dev.sh`) |
@@ -189,3 +189,18 @@ exists.
   referenced via `GITHUB_PRIVATE_KEY_FILE` or mounted read-only into the
   container (`./github-app.private-key.pem:/app/github-app.private-key.pem:ro`
   in prod compose; the PEM itself is gitignored).
+
+## Upgrading across the Forge→Hearth rename (2026-08-24)
+
+Migration `0015_hearth_rename.sql` renames the DB tables and activity types;
+the server image applies it at boot. Machines running the old listener/daemon
+must be reinstalled — the systemd unit (`lexa-hearth-listen`), state dir
+(`~/.local/share/lexa-hearth`), env vars (`HEARTH_*`,
+`LXK_HEARTH_DAEMON_TOKEN`) and auth header (`x-hearth-token`) all changed:
+
+```bash
+lexa-cli machine uninstall && lexa-cli machine install
+```
+
+Old daemons sending `x-forge-token` or polling `/api/forge/*` get 401/404
+after the server upgrade — redeploy the server first, then reinstall machines.

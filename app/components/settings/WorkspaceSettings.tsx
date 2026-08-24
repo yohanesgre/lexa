@@ -3,7 +3,7 @@ import { Check, Copy, Plus, Trash2, Users } from "lucide-react";
 import { useSession, useWorkspaceMembers, useUpdateWorkspaceMember, useDeleteWorkspaceMember, useWorkspaceInvites, useCreateWorkspaceInvite, useRevokeWorkspaceInvite, useCreateSetPasswordLink, useTeams, useCreateTeam, useDeleteTeam } from "../../lib/queries";
 import { ApiKeysSection, GithubSyncSection, MachinesRuntimesSection, RateLimitSection } from "./SettingsSections";
 import { formatRelative } from "../../lib/relative-time";
-import { AgentsSettingsSection, SkillsSettingsSection } from "../forge/AgentSkillSettings";
+import { AgentsSettingsSection, SkillsSettingsSection } from "../hearth/AgentSkillSettings";
 import { copyToClipboard } from "../../lib/clipboard";
 import { Field } from "../ui/Field";
 import { TextInput } from "../ui/TextInput";
@@ -11,7 +11,7 @@ import type { WorkspaceInvite } from "../../../shared/types";
 import type { WorkspaceMember } from "../../lib/api";
 
 // Superadmin-only workspace settings: Members + invites, Teams, Machines &
-// runtimes, API keys, rate limiting, GitHub sync, Forge agents & skills.
+// runtimes, API keys, rate limiting, GitHub sync, Hearth agents & skills.
 // NO Superadmins section — superadmin is env-only (LXK_ADMIN_EMAILS).
 
 function LinkCopyModal({ title, link, onDone }: { title: string; link: string; onDone: () => void }) {
@@ -341,7 +341,7 @@ function TeamDeleteModal({ name, onCancel, onConfirm }: { name: string; onCancel
   );
 }
 
-// Forge Agents & Skills (workspace-global rule bundles; full editor inline).
+// Hearth Agents & Skills (workspace-global rule bundles; full editor inline).
 function AgentsSkillsSections() {
   return (
     <>

@@ -37,11 +37,11 @@ export class SearchError extends Data.TaggedError("SearchError")<{}> {}
 export class SourceNotFound extends Data.TaggedError("SourceNotFound")<{ id: string }> {}
 export class SourceFetchError extends Data.TaggedError("SourceFetchError")<{ message: string }> {}
 export class SourceUnreachable extends Data.TaggedError("SourceUnreachable")<{ url: string }> {}
-export class ForgeTaskNotFound extends Data.TaggedError("ForgeTaskNotFound")<{ id: string }> {}
+export class HearthTaskNotFound extends Data.TaggedError("HearthTaskNotFound")<{ id: string }> {}
 export class AgentNotFound extends Data.TaggedError("AgentNotFound")<{ id: string }> {}
 export class SkillNotFound extends Data.TaggedError("SkillNotFound")<{ id: string }> {}
-export class ForgeBuiltinDelete extends Data.TaggedError("ForgeBuiltinDelete")<{ kind: "agent" | "skill"; name: string }> {}
-export class ForgeEntityInUse extends Data.TaggedError("ForgeEntityInUse")<{ kind: "agent" | "skill"; name: string; count: number }> {}
+export class HearthBuiltinDelete extends Data.TaggedError("HearthBuiltinDelete")<{ kind: "agent" | "skill"; name: string }> {}
+export class HearthEntityInUse extends Data.TaggedError("HearthEntityInUse")<{ kind: "agent" | "skill"; name: string; count: number }> {}
 export class RuntimeNotFound extends Data.TaggedError("RuntimeNotFound")<{ id: string }> {}
 export class RuntimeEventNotFound extends Data.TaggedError("RuntimeEventNotFound")<{ id: string }> {}
 export class MachineNotFound extends Data.TaggedError("MachineNotFound")<{ id: string }> {}
@@ -63,7 +63,7 @@ export class InvalidName extends Data.TaggedError("InvalidName")<{ reason: strin
 export class InvalidRateLimit extends Data.TaggedError("InvalidRateLimit")<{ reason: string }> {}
 export class InvalidGithubSettings extends Data.TaggedError("InvalidGithubSettings")<{ reason: string }> {}
 export class NoUserContext extends Data.TaggedError("NoUserContext")<{}> {}
-export class ForgeSessionActive extends Data.TaggedError("ForgeSessionActive")<{}> {}
+export class HearthSessionActive extends Data.TaggedError("HearthSessionActive")<{}> {}
 export class ProviderNotConfigured extends Data.TaggedError("ProviderNotConfigured")<{ projectId: string }> {}
 export class ProviderAuthFailed extends Data.TaggedError("ProviderAuthFailed")<{ message?: string }> {}
 export class ProviderUnreachable extends Data.TaggedError("ProviderUnreachable")<{ message?: string }> {}
@@ -73,6 +73,11 @@ export class HeraldTaskActive extends Data.TaggedError("HeraldTaskActive")<{}> {
 export class HeraldThreadNotFound extends Data.TaggedError("HeraldThreadNotFound")<{ documentType: string; documentId: string }> {}
 export class VisionNotConfigured extends Data.TaggedError("VisionNotConfigured")<{}> {}
 export class EngineNotSupportedForChat extends Data.TaggedError("EngineNotSupportedForChat")<{ engine: string }> {}
+export class ApprovalNotFound extends Data.TaggedError("ApprovalNotFound")<{ id: string }> {}
+export class ApprovalExpired extends Data.TaggedError("ApprovalExpired")<{ id: string }> {}
+export class ApprovalAlreadyDecided extends Data.TaggedError("ApprovalAlreadyDecided")<{ id: string; status: string }> {}
+export class ApprovalsPending extends Data.TaggedError("ApprovalsPending")<{ batchId: string; remaining: number }> {}
+export class ToolDenied extends Data.TaggedError("ToolDenied")<{ message: string }> {}
 export { ProjectAccessDenied } from "../services/user-project-role.service";
 
 export const errorCodeMap: Record<string, string> = {
@@ -102,11 +107,11 @@ export const errorCodeMap: Record<string, string> = {
   SourceNotFound: "SOURCE_NOT_FOUND",
   SourceFetchError: "SOURCE_FETCH_ERROR",
   SourceUnreachable: "SOURCE_UNREACHABLE",
-  ForgeTaskNotFound: "FORGE_TASK_NOT_FOUND",
+  HearthTaskNotFound: "HEARTH_TASK_NOT_FOUND",
   AgentNotFound: "AGENT_NOT_FOUND",
   SkillNotFound: "SKILL_NOT_FOUND",
-  ForgeBuiltinDelete: "FORGE_BUILTIN_DELETE",
-  ForgeEntityInUse: "FORGE_ENTITY_IN_USE",
+  HearthBuiltinDelete: "HEARTH_BUILTIN_DELETE",
+  HearthEntityInUse: "HEARTH_ENTITY_IN_USE",
   RuntimeNotFound: "RUNTIME_NOT_FOUND",
   RuntimeEventNotFound: "RUNTIME_EVENT_NOT_FOUND",
   MachineNotFound: "MACHINE_NOT_FOUND",
@@ -135,7 +140,7 @@ export const errorCodeMap: Record<string, string> = {
   Forbidden: "FORBIDDEN",
   SetupLocked: "SETUP_LOCKED",
   SearchError: "SEARCH_ERROR",
-  ForgeSessionActive: "FORGE_SESSION_ACTIVE",
+  HearthSessionActive: "HEARTH_SESSION_ACTIVE",
   ProviderNotConfigured: "PROVIDER_NOT_CONFIGURED",
   ProviderAuthFailed: "PROVIDER_AUTH_FAILED",
   ProviderUnreachable: "PROVIDER_UNREACHABLE",
@@ -145,6 +150,11 @@ export const errorCodeMap: Record<string, string> = {
   HeraldThreadNotFound: "HERALD_THREAD_NOT_FOUND",
   VisionNotConfigured: "VISION_NOT_CONFIGURED",
   EngineNotSupportedForChat: "ENGINE_NOT_SUPPORTED_FOR_CHAT",
+  ApprovalNotFound: "APPROVAL_NOT_FOUND",
+  ApprovalExpired: "APPROVAL_EXPIRED",
+  ApprovalAlreadyDecided: "APPROVAL_ALREADY_DECIDED",
+  ApprovalsPending: "APPROVALS_PENDING",
+  ToolDenied: "TOOL_DENIED",
   RowNotFound: "NOT_FOUND",
   ConstraintViolation: "CONSTRAINT",
   DbError: "DATABASE_ERROR",
@@ -185,7 +195,7 @@ export function errorToStatus(error: { _tag: string }): number {
     case "WikiPageNotFound":
     case "ShareLinkNotFound":
     case "SourceNotFound":
-    case "ForgeTaskNotFound":
+    case "HearthTaskNotFound":
     case "AgentNotFound":
     case "SkillNotFound":
     case "RuntimeNotFound":
@@ -201,6 +211,7 @@ export function errorToStatus(error: { _tag: string }): number {
     case "WorkspaceUserNotFound":
     case "SessionNotFound":
     case "HeraldThreadNotFound":
+    case "ApprovalNotFound":
     case "RowNotFound":
       return 404;
     case "WipLimitExceeded":
@@ -214,12 +225,15 @@ export function errorToStatus(error: { _tag: string }): number {
     case "OptionInUse":
     case "NoRuntimeOnline":
     case "TaskLinkCycle":
-    case "ForgeEntityInUse":
-    case "ForgeSessionActive":
+    case "HearthEntityInUse":
+    case "HearthSessionActive":
     case "ProviderNotConfigured":
     case "HeraldTaskActive":
     case "VisionNotConfigured":
     case "EngineNotSupportedForChat":
+    case "ApprovalExpired":
+    case "ApprovalAlreadyDecided":
+    case "ApprovalsPending":
     case "ConstraintViolation":
     case "MachineIdTaken":
     case "TeamHasProjects":
@@ -229,7 +243,7 @@ export function errorToStatus(error: { _tag: string }): number {
     case "NeighborNotInColumn":
     case "InvalidOption":
     case "InvalidTaskLink":
-    case "ForgeBuiltinDelete":
+    case "HearthBuiltinDelete":
     case "SearchError":
     case "ApiKeyNameEmpty":
     case "SourceUnreachable":
@@ -240,6 +254,8 @@ export function errorToStatus(error: { _tag: string }): number {
     case "InvalidGithubSettings":
     case "MemberNotInWorkspace":
       return 422;
+    case "ToolDenied":
+      return 403;
     case "InvalidKey":
     case "MissingAuth":
       return 401;
@@ -310,16 +326,16 @@ export function errorMessage(error: { _tag: string } & Record<string, unknown>):
       return typeof error.message === "string" && error.message ? error.message : "Failed to fetch source";
     case "SourceUnreachable":
       return `Cannot reach '${error.url}'`;
-    case "ForgeTaskNotFound":
-      return `Forge task not found`;
+    case "HearthTaskNotFound":
+      return `Hearth task not found`;
     case "AgentNotFound":
-      return `Forge agent not found`;
+      return `Hearth agent not found`;
     case "SkillNotFound":
-      return `Forge skill not found`;
-    case "ForgeBuiltinDelete":
+      return `Hearth skill not found`;
+    case "HearthBuiltinDelete":
       return `Builtin ${error.kind} '${error.name}' cannot be deleted — edit it or reset it to default instead`;
-    case "ForgeEntityInUse":
-      return `${error.kind === "agent" ? "Agent" : "Skill"} '${error.name}' is still used by ${error.count} forge task${error.count === 1 ? "" : "s"} — reassign those tasks first`;
+    case "HearthEntityInUse":
+      return `${error.kind === "agent" ? "Agent" : "Skill"} '${error.name}' is still used by ${error.count} hearth task${error.count === 1 ? "" : "s"} — reassign those tasks first`;
     case "RuntimeNotFound":
       return `Runtime not found`;
     case "RuntimeEventNotFound":
@@ -335,9 +351,9 @@ export function errorMessage(error: { _tag: string } & Record<string, unknown>):
     case "ApiKeyNotFound":
       return `API key not found`;
     case "NoRuntimeOnline":
-      return `No Forge runtime is online. Start the daemon (bun run forge:daemon) and try again.`;
-    case "ForgeSessionActive":
-      return `A Forge task is still running for this document — start a new session once it finishes`;
+      return `No Hearth runtime is online. Start the daemon (bun run hearth:daemon) and try again.`;
+    case "HearthSessionActive":
+      return `A Hearth task is still running for this document — start a new session once it finishes`;
     case "TaskLinkNotFound":
       return `Task link not found`;
     case "TaskLinkCycle":
@@ -389,6 +405,16 @@ export function errorMessage(error: { _tag: string } & Record<string, unknown>):
       return `Image attachments need vision — enable primary image support or configure a vision model in Settings`;
     case "EngineNotSupportedForChat":
       return `Freeform chat runs on the Herald engine — this project's engine is '${error.engine}'`;
+    case "ApprovalNotFound":
+      return "Approval not found";
+    case "ApprovalExpired":
+      return "Approval expired — write not executed.";
+    case "ApprovalAlreadyDecided":
+      return `Approval already decided (${error.status})`;
+    case "ApprovalsPending":
+      return `${error.remaining} approval(s) still pending in batch '${error.batchId}' — decide them before resuming`;
+    case "ToolDenied":
+      return String(error.message ?? "Write denied: insufficient permissions.");
     case "RowNotFound":
       return "Resource not found";
     case "CannotDeleteSelf":

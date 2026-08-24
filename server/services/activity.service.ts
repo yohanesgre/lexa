@@ -11,12 +11,13 @@ export class ActivityService extends Effect.Service<ActivityService>()("Lexa/Act
     const commentRepo = yield* CommentRepo;
     const db = yield* Sqlite;
 
-    const append = (taskId: string, actor: Actor, type: ActivityType, message: string): Effect.Effect<ActivityEvent, DbError | ConstraintViolation> =>
+    const append = (taskId: string, actor: Actor, type: ActivityType, message: string, opts?: { viaHerald?: boolean }): Effect.Effect<ActivityEvent, DbError | ConstraintViolation> =>
       // Single-statement insert (no BEGIN) — inherently joins an outer
       // withTx/batch transaction on the shared connection.
       activityRepo.insert({
         taskId, actorKind: actor.kind, actorLabel: actor.label,
         actorUserId: actor.userId ?? null, type, message,
+        viaHerald: opts?.viaHerald === true,
       });
 
     const listMerged = (taskId: string, cursor: string | null, limit: number): Effect.Effect<{ items: ActivityItem[]; nextCursor: string | null }, DbError> =>

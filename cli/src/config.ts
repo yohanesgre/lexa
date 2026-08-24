@@ -81,7 +81,7 @@ export function groupDir(host: string): string {
 // Derived flavor label — loopback servers are dev, everything else prod.
 // LEXA_FLAVOR env overrides (e.g. a non-loopback staging server). Used for
 // exactly one thing: the daemon serve-port base (flavorBaseFor in
-// forge/daemon.ts). Never a state location, never a login default.
+// hearth/daemon.ts). Never a state location, never a login default.
 export function flavorFor(host: string): LexaFlavor {
   const override = process.env.LEXA_FLAVOR;
   if (override === "dev" || override === "staging" || override === "prod") return override;

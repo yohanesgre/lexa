@@ -13,8 +13,8 @@ import {
   useUpdateWikiPage, useDeleteWikiPage, useUpdateFieldConfig, useCreateColumn,
   useUpdateColumn, useDeleteColumn, useCreateSwimlane, useUpdateSwimlane, useArchiveSwimlane,
   useDeleteSwimlane, useCreateApiKey, useDeleteApiKey, useAddComment, useDeleteComment,
-  useUpdateComment, useCancelForgeTask, useAddTaskLink, useRemoveTaskLink,
-  useAddSource, useRemoveSource, useCreateForgeTask, useCreateForgeAgent,
+  useUpdateComment, useCancelHearthTask, useAddTaskLink, useRemoveTaskLink,
+  useAddSource, useRemoveSource, useCreateHearthTask, useCreateHearthAgent,
   useUpdateRateLimit, useUpdateGithubSettings, useClearGithubSettings,
 } from "./queries";
 
@@ -42,7 +42,7 @@ const BOARD2: Board = { ...BOARD, columns: [...BOARD.columns, { ...COLUMN, id: "
 const PAGE: WikiPage = { id: "w1", projectId: "p1", title: "Home", slug: "home", parentId: null, position: 0, updatedAt: "t", content: { type: "doc", content: [] }, createdAt: "t" };
 const PAGE2: WikiPage = { ...PAGE, id: "w2", slug: "other", title: "Other" };
 const EV = { id: 1, taskId: "t1", actorKind: "user" as const, actorLabel: "Maria", actorUserId: null, type: "created" as const, message: "m", createdAt: "t" };
-const COMMENT = { id: 9, taskId: "t1", authorId: "u1", authorKind: "user" as const, authorLabel: "Maria", body: { type: "doc", content: [] }, editedAt: null, deletedAt: null, createdAt: "t" };
+const COMMENT = { id: 9, taskId: "t1", authorId: "u1", authorKind: "user" as const, authorLabel: "Maria", body: { type: "doc", content: [] }, viaHerald: false, editedAt: null, deletedAt: null, createdAt: "t" };
 const KEY = { id: "k1", name: "ops", createdAt: "t", lastUsedAt: null };
 const LINK = { id: "l1", projectId: "p1", fromTaskId: "t1", toTaskId: "t2", relation: "blocked_by" as const, createdAt: "t" };
 
@@ -418,25 +418,25 @@ describe("activity + link mutations", () => {
   });
 });
 
-describe("forge mutations", () => {
-  it("useCancelForgeTask updates recent + every cached history page in place", async () => {
-    routes.set("POST /api/forge/tasks/ft1/cancel", { id: "ft1", status: "cancelled" });
+describe("hearth mutations", () => {
+  it("useCancelHearthTask updates recent + every cached history page in place", async () => {
+    routes.set("POST /api/hearth/tasks/ft1/cancel", { id: "ft1", status: "cancelled" });
     const recent = [{ id: "ft1", status: "queued", projectName: "Demo" }];
-    queryClient.setQueryData(["forge-recent-tasks"], recent);
-    queryClient.setQueryData(["forge-task-history", {}, null], { data: [{ id: "ft1", status: "queued" }], nextCursor: null, summary: { queued: 1, running: 0, completed: 0, failed: 0, cancelled: 0 } });
-    const { result } = renderHook(() => useCancelForgeTask(), { wrapper });
+    queryClient.setQueryData(["hearth-recent-tasks"], recent);
+    queryClient.setQueryData(["hearth-task-history", {}, null], { data: [{ id: "ft1", status: "queued" }], nextCursor: null, summary: { queued: 1, running: 0, completed: 0, failed: 0, cancelled: 0 } });
+    const { result } = renderHook(() => useCancelHearthTask(), { wrapper });
     await act(async () => { await result.current.mutateAsync("ft1"); });
-    expect((queryClient.getQueryData<{ status: string }[]>(["forge-recent-tasks"])![0] as { status: string }).status).toBe("cancelled");
-    const page = queryClient.getQueryData<{ data: { status: string }[] }>(["forge-task-history", {}, null])!;
+    expect((queryClient.getQueryData<{ status: string }[]>(["hearth-recent-tasks"])![0] as { status: string }).status).toBe("cancelled");
+    const page = queryClient.getQueryData<{ data: { status: string }[] }>(["hearth-task-history", {}, null])!;
     expect(page.data[0]!.status).toBe("cancelled");
   });
 
-  it("useCreateForgeTask seeds the recent list with the project name", async () => {
-    routes.set("POST /api/forge/tasks", { id: "ft2", projectId: "p1", status: "queued" });
+  it("useCreateHearthTask seeds the recent list with the project name", async () => {
+    routes.set("POST /api/hearth/tasks", { id: "ft2", projectId: "p1", status: "queued" });
     queryClient.setQueryData(["projects"], [PROJECT]);
-    queryClient.setQueryData(["forge-recent-tasks"], []);
-    const { result } = renderHook(() => useCreateForgeTask(), { wrapper });
+    queryClient.setQueryData(["hearth-recent-tasks"], []);
+    const { result } = renderHook(() => useCreateHearthTask(), { wrapper });
     await act(async () => { await result.current.mutateAsync({ slug: "demo", documentType: "task", documentId: "t1", agentId: "a1", skillId: "s1" }); });
-    expect(queryClient.getQueryData<{ projectName: string }[]>(["forge-recent-tasks"])![0]).toMatchObject({ id: "ft2", projectName: "Demo" });
+    expect(queryClient.getQueryData<{ projectName: string }[]>(["hearth-recent-tasks"])![0]).toMatchObject({ id: "ft2", projectName: "Demo" });
   });
 });

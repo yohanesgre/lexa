@@ -9,6 +9,17 @@ The CLI version is INDEPENDENT of the web app version (see AGENTS.md):
 The version lives in `cli/package.json` — `publish-cli.yml` verifies the tag
 matches it before compiling.
 
+## [Unreleased]
+
+### Changed
+
+- **BREAKING: Forge→Hearth rename** — CLI state dir moved to
+  `~/.local/share/lexa-hearth`, systemd unit renamed `lexa-hearth-listen`,
+  daemon env vars now `HEARTH_*` (`LXK_HEARTH_DAEMON_TOKEN`), API paths
+  `/api/hearth/*`. Existing machines must be reinstalled:
+  `lexa-cli machine uninstall && lexa-cli machine install`. The legacy
+  `~/.config/lexa-forge` migration path is unchanged.
+
 ## [0.3.0] - 2026-08-13
 
 ### Added

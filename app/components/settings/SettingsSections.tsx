@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 import { AlertTriangle, Check, Copy, Key, Plus, RotateCcw, Settings, Trash2, Upload } from "lucide-react";
 import { useApiKeys, useCreateApiKey, useDeleteApiKey, useRuntimes, useMachines, useRemoveRuntime, useRemoveMachine, useRateLimit, useUpdateRateLimit, useGithubSettings, useUpdateGithubSettings, useClearGithubSettings } from "../../lib/queries";
-import { RuntimeSetupModal } from "../forge/RuntimeSetupModal";
-import { RuntimeEditModal } from "../forge/RuntimeEditModal";
-import { RuntimeRestartModal } from "../forge/RuntimeRestartModal";
+import { RuntimeSetupModal } from "../hearth/RuntimeSetupModal";
+import { RuntimeEditModal } from "../hearth/RuntimeEditModal";
+import { RuntimeRestartModal } from "../hearth/RuntimeRestartModal";
 import { copyToClipboard } from "../../lib/clipboard";
 import { formatRelative } from "../../lib/relative-time";
 import { parseApiDate } from "../../lib/date";

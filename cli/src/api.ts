@@ -218,30 +218,30 @@ export class LexaClient {
     return this.request<{ id: string; title: string; slug: string; content: unknown }>(`/api/projects/${slug}/wiki/${pageSlug}`);
   }
 
-  // ── Forge runtimes ──
+  // ── Hearth runtimes ──
   listRuntimes(): Effect.Effect<RuntimeInfo[], ApiError, never> {
-    return Effect.map(this.request<{ data: RuntimeInfo[] }>("/api/forge/runtimes"), (r) => r.data);
+    return Effect.map(this.request<{ data: RuntimeInfo[] }>("/api/hearth/runtimes"), (r) => r.data);
   }
 
   deleteRuntime(id: string): Effect.Effect<void, ApiError, never> {
-    return this.request<void>(`/api/forge/runtimes/${encodeURIComponent(id)}`, { method: "DELETE" });
+    return this.request<void>(`/api/hearth/runtimes/${encodeURIComponent(id)}`, { method: "DELETE" });
   }
 
   listMachines(): Effect.Effect<MachineInfo[], ApiError, never> {
-    return Effect.map(this.request<{ data: MachineInfo[] }>("/api/forge/machines"), (r) => r.data);
+    return Effect.map(this.request<{ data: MachineInfo[] }>("/api/hearth/machines"), (r) => r.data);
   }
 
   registerMachine(input: { id: string; hostname: string; secret: string }): Effect.Effect<{ machine: MachineInfo; secret: string | null }, ApiError, never> {
-    return this.request<{ machine: MachineInfo; secret: string | null }>("/api/forge/machines/register", { method: "POST", body: JSON.stringify(input) });
+    return this.request<{ machine: MachineInfo; secret: string | null }>("/api/hearth/machines/register", { method: "POST", body: JSON.stringify(input) });
   }
 
   deleteMachine(id: string): Effect.Effect<void, ApiError, never> {
-    return this.request<void>(`/api/forge/machines/${encodeURIComponent(id)}`, { method: "DELETE" });
+    return this.request<void>(`/api/hearth/machines/${encodeURIComponent(id)}`, { method: "DELETE" });
   }
 
   // ── Runtime setup events (web wizard → listener) ──
   claimRuntimeEvent(machineId: string, secret: string): Effect.Effect<{ event: RuntimeEventInfo; rawKey: string | null } | null, ApiError, never> {
-    return this.request<{ event: RuntimeEventInfo; rawKey: string | null } | null>("/api/forge/runtime-events/claim", {
+    return this.request<{ event: RuntimeEventInfo; rawKey: string | null } | null>("/api/hearth/runtime-events/claim", {
       method: "POST",
       headers: { "x-machine-secret": secret },
       body: JSON.stringify({ machineId }),
@@ -249,11 +249,11 @@ export class LexaClient {
   }
 
   completeRuntimeEvent(id: string): Effect.Effect<RuntimeEventInfo, ApiError, never> {
-    return this.request<RuntimeEventInfo>(`/api/forge/runtime-events/${id}/complete`, { method: "POST" });
+    return this.request<RuntimeEventInfo>(`/api/hearth/runtime-events/${id}/complete`, { method: "POST" });
   }
 
   failRuntimeEvent(id: string, error: string): Effect.Effect<RuntimeEventInfo, ApiError, never> {
-    return this.request<RuntimeEventInfo>(`/api/forge/runtime-events/${id}/fail`, { method: "POST", body: JSON.stringify({ error }) });
+    return this.request<RuntimeEventInfo>(`/api/hearth/runtime-events/${id}/fail`, { method: "POST", body: JSON.stringify({ error }) });
   }
 
   // Presence heartbeat and runtime catalogs — machine identity is stable across
@@ -265,7 +265,7 @@ export class LexaClient {
     clis?: Array<{ provider: "opencode" | "hermes" | "command-code"; version: string }>;
     daemonErrors?: Array<{ runtimeId: string; error: string }>;
   }): Effect.Effect<MachineHeartbeatInfo, ApiError, never> {
-    return this.request<MachineHeartbeatInfo>("/api/forge/machines/heartbeat", { method: "POST", body: JSON.stringify(input) });
+    return this.request<MachineHeartbeatInfo>("/api/hearth/machines/heartbeat", { method: "POST", body: JSON.stringify(input) });
   }
 }
 

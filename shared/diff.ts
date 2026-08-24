@@ -1,6 +1,6 @@
 import type { TipTapDoc } from "./types";
 
-// Git-style unified diff for the Forge review-in-editor flow.
+// Git-style unified diff for the Hearth review-in-editor flow.
 // The document is never mutated while the diff is shown: the original side is
 // the selection's structure (plain text, list markers kept, no markdown
 // syntax), the new side is the AI result parsed back to the same form.
@@ -41,7 +41,7 @@ type DiffNode = {
 
 // Canonical plain-text form used for diffing: headings bare (no # markers),
 // list items prefixed with "- ", code blocks bare (no fences), blocks joined
-// with "\n". Matches the forge-review wireframe's rendering.
+// with "\n". Matches the hearth-review wireframe's rendering.
 export function docToDiffText(doc: TipTapDoc): string {
   try {
     if (!doc || !Array.isArray(doc.content)) return "";

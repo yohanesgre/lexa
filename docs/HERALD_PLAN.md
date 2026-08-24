@@ -2,8 +2,11 @@
 
 > **Status:** approved-direction spec + phased plan. Implementation not started.
 > **Superseded in part** by the Hearth refactor plan (docs change set, 2026-08-23):
-> umbrella renamed Forge → Hearth; exactly two builtin agents (`hearth-herald`,
+> umbrella renamed to Hearth; exactly two builtin agents (`hearth-herald`,
 > `hearth-blacksmith` — migration 0013 id rebind, generic 'lexa' retired);
+> full identifier rename (tables/routes/env/CLI) executed 2026-08-24 via
+> migration 0015 — remaining `forge_*` mentions below are historical records
+> of earlier migrations, kept verbatim.
 > per-project engine switching (`herald_settings.engine`) with personal-overlay
 > member toggle; vision chain (`primary_supports_images` / `vision_model` /
 > `VISION_NOT_CONFIGURED`); chat guard `ENGINE_NOT_SUPPORTED_FOR_CHAT`.
@@ -23,7 +26,7 @@ Both tiers co-exist; popover picks per-run.
 
 ## Global constraints
 
-- Names exact: `/api/herald/*`, `herald_threads`, `project_memory`. Existing `/api/forge/*` + `forge_*` untouched except one `kind` predicate.
+- Names exact: `/api/herald/*`, `herald_threads`, `project_memory`. Existing `/api/hearth/*` + `forge_*` untouched except one `kind` predicate.
 - Wireframe-first non-negotiable; PHOSPHOR primitives verbatim from `docs/design-system.html`; ported classes land in `app/styles/phosphor.css`.
 - TanStack Query: `setQueryData` from mutation responses only; never `invalidateQueries` on mutation path.
 - TipTap JSON boundary; markdown only via `shared/markdown.ts`.
@@ -40,16 +43,16 @@ Both tiers co-exist; popover picks per-run.
 | Role | Writing + PM assistant | Coding agent |
 | Engine | Server-side `chat()` (@tanstack/ai) | daemon/opencode warm serve |
 | Queue consumer | HTTP stream handler, in-process | daemons via `claimNextTask` |
-| Auth | Browser cookie/Bearer | x-forge-token surfaces |
-| Thread state | `herald_threads` (ModelMessage[] JSON) | `forge_sessions` |
+| Auth | Browser cookie/Bearer | x-hearth-token surfaces |
+| Thread state | `herald_threads` (ModelMessage[] JSON) | `hearth_sessions` |
 | Agents/skills render | prompt injection via systemPrompts | `.agents/` file writes |
 
-Shared: `forge_tasks` queue, **Lexa Agents/Skills** catalog (tables `lexa_agents`/`lexa_skills`/`lexa_agent_skills` — renamed from `forge_*` in 0010; routes `/api/agents`, `/api/skills`), popover entry, logs/activity machinery. Umbrella = Hearth (internal `forge_*` identifiers deferred). Both tiers ACTIVE — no dormant wording anywhere.
+Shared: `hearth_tasks` queue, **Lexa Agents/Skills** catalog (tables `lexa_agents`/`lexa_skills`/`lexa_agent_skills` — renamed from `forge_*` in 0010; routes `/api/agents`, `/api/skills`), popover entry, logs/activity machinery. Umbrella = Hearth (internal `forge_*` identifiers deferred). Both tiers ACTIVE — no dormant wording anywhere.
 
 ## S2. Herald execution path
 
 1. `POST /api/herald/tasks` `{documentType, documentId, prompt, agentId, skillId}`.
-2. `HeraldService.enqueue`: guard provider configured (`PROVIDER_NOT_CONFIGURED`); create `forge_tasks` row `kind='herald'`, status `queued`; activity via existing create path. Runtime-online guard skipped.
+2. `HeraldService.enqueue`: guard provider configured (`PROVIDER_NOT_CONFIGURED`); create `hearth_tasks` row `kind='herald'`, status `queued`; activity via existing create path. Runtime-online guard skipped.
 3. Client opens `POST /api/herald/tasks/:id/stream`. Handler claims task (conditional UPDATE `queued→running`, kind-scoped), assembles prompt, calls `chat()`, pipes frames.
 4. Prompt assembly (cache-friendly order):
    - `systemPrompts[0]`: identity + MARKDOWN_STYLE contract + `project_memory` block — Anthropic `cache_control` breakpoint here.
@@ -58,7 +61,7 @@ Shared: `forge_tasks` queue, **Lexa Agents/Skills** catalog (tables `lexa_agents
    - user message: instruction (+ rolling-summary segment when present).
    - Object form `{content, metadata}` carries `cache_control` (verified).
 5. Adapter by `herald_settings.kind`: `openai_compatible` | `anthropic_compatible`, both custom `baseURL`-capable (verified). OpenRouter = example only.
-6. Terminal: `done` frame then `ForgeService.complete(taskId, finalText)` (same-tx activity); `RUN_ERROR` event translated per S5/S9 + `ForgeService.fail`.
+6. Terminal: `done` frame then `HearthService.complete(taskId, finalText)` (same-tx activity); `RUN_ERROR` event translated per S5/S9 + `HearthService.fail`.
 
 Keys server-side only.
 
@@ -89,11 +92,11 @@ CREATE TABLE herald_settings (
 
 ## S4. Queue integration
 
-Reuse `forge_tasks` + discriminator column:
+Reuse `hearth_tasks` + discriminator column:
 
 ```sql
-ALTER TABLE forge_tasks ADD COLUMN kind TEXT NOT NULL DEFAULT 'blacksmith';
-CREATE INDEX idx_forge_tasks_kind_status ON forge_tasks(kind, status);
+ALTER TABLE hearth_tasks ADD COLUMN kind TEXT NOT NULL DEFAULT 'blacksmith';
+CREATE INDEX idx_hearth_tasks_kind_status ON hearth_tasks(kind, status);
 ```
 
 - `claimNextTask` gains `AND kind='blacksmith'` — daemons can never claim Herald tasks.
@@ -115,8 +118,8 @@ event: done    data: {"taskId":"…","text":"…","usage":{"in":n,"out":n}}
 ```
 
 - Exactly one terminal frame (`error`|`done`). Heartbeat `: ping` every 15s.
-- `RUN_ERROR` translation: recognizable failures → catalog codes, else `HERALD_GENERATION_FAILED`; emit frame; close cleanly; `ForgeService.fail`.
-- Disconnect→abort: request signal wired into `chat()` AbortController; abort discards partial message, `ForgeService.cancel`, `appendLog("aborted")`.
+- `RUN_ERROR` translation: recognizable failures → catalog codes, else `HERALD_GENERATION_FAILED`; emit frame; close cleanly; `HearthService.fail`.
+- Disconnect→abort: request signal wired into `chat()` AbortController; abort discards partial message, `HearthService.cancel`, `appendLog("aborted")`.
 - Stop button: client aborts fetch + `POST /api/herald/tasks/:id/cancel`; server keeps `Map<taskId, AbortController>`.
 - Subrequest budget: `MAX_TOOL_ROUNDS=4`; worst case ≈9 upstream calls/task (provider turn + one upstream per tool call); counter logged per run.
 
@@ -196,7 +199,7 @@ FTS sync app-managed in repo (no triggers). Injection: FTS-match top terms from 
 | `HERALD_TASK_ACTIVE` | 409 | reset while stream running |
 | `HERALD_THREAD_NOT_FOUND` | 404 | missing thread row |
 
-All `Data.TaggedError`, declarative `.addError` mapping. Upstream bodies never echoed raw. Activity: reuse existing forge task catalog entries; zero new `activity-messages.ts` entries v1.
+All `Data.TaggedError`, declarative `.addError` mapping. Upstream bodies never echoed raw. Activity: reuse existing hearth task catalog entries; zero new `activity-messages.ts` entries v1.
 
 ## S10. UI states (wireframe-first)
 
@@ -223,7 +226,7 @@ Parity via existing `appendLog` (2000-char bound, FIFO 400): provider kind/model
 - Pin `"@tanstack/ai"` exact 0.47.x, no caret. Adapters isolated in `server/herald/provider.ts`; `chat()` imported in exactly one file. Upgrade touches two files.
 - `Lexa/Herald` Effect service surface: `enqueue`, `runStream(taskId): ReadableStream`, `resetThread`, `testConnection`. Routes never import @tanstack/ai.
 - Types in NEW `shared/herald.ts` (declared deviation from `shared/types.ts` home — dirty-tree avoidance; consolidation later only with user approval).
-- `loadTaskRepoContent` pure-move extract into `server/services/forge-repo-content.ts`; both tiers share it.
+- `loadTaskRepoContent` pure-move extract into `server/services/hearth-repo-content.ts`; both tiers share it.
 - Worker-portability goals (not migration target): exported caps, Web ReadableStream SSE, no Node APIs in `Lexa/Herald` path, bun:sqlite confined to repos, persistence-floor-shaped store, FTS behind interface. PDF extraction should prefer a workerd-compatible lib (unpdf-style) over Node-native.
 
 ## S13. Multimodal input (images)
@@ -245,8 +248,8 @@ ALTER TABLE forge_skills RENAME TO lexa_skills;
 ALTER TABLE forge_agent_skills RENAME TO lexa_agent_skills;
 ```
 
-- Other `forge_*` tables keep names (`forge_tasks`, logs, sessions, runtimes/events/machines) — queue stays under the Hearth umbrella (identifier rename deferred). Indexes follow tables; legacy index names left as-is.
-- Route moves — hard cutover, no aliases (sole consumer is bundled web app): `/api/forge/agents…` → **`/api/agents…`**, `/api/forge/skills…` → **`/api/skills…`** incl. junction subpaths.
+- Other `forge_*` tables keep names (`hearth_tasks`, logs, sessions, runtimes/events/machines) — queue stays under the Hearth umbrella (identifier rename deferred). Indexes follow tables; legacy index names left as-is.
+- Route moves — hard cutover, no aliases (sole consumer is bundled web app): `/api/hearth/agents…` → **`/api/agents…`**, `/api/hearth/skills…` → **`/api/skills…`** incl. junction subpaths.
 - **Kept:** claim payload field names `agentMarkdown`/`skillMarkdown` (wire compat with compiled prod daemons during rolling upgrades); `AgentSkillSettings.tsx` filename.
 - **Renamed:** `shared/types.ts` `ForgeAgent`/`ForgeSkill` → `LexaAgent`/`LexaSkill`; hooks `useForgeAgents/useForgeSkills` → `useAgents/useSkills`, query keys `['agents']`/`['skills']`; UI labels "Lexa Agents"/"Lexa Skills" everywhere.
 - ⚠️ Table names live in SQL strings — NOT compile-time caught. Atomic single-migration rename; repo+service vitest suites mandatory; P4 grep gate: zero hits for old names outside migrations.
@@ -273,9 +276,9 @@ Standalone chat beside the Herald popover; same engine, not tied to a document.
 |---|---|
 | P1 | + chat surface states; "Lexa Agents/Skills" labels in picker + settings wireframes |
 | P2 | + three RENAME statements; CHECK +'chat'; project_id NOT NULL + owner_user_id; gate adds `PRAGMA foreign_key_list` paste |
-| P3 | + renamed statements in forge.repo.ts; chat access fns on herald-thread.repo.ts (owner-scoped); tests cover renamed tables + owner guard |
-| P4 | + runChatStream path (no prefetch, CHAT_IDENTITY, message-term memory); rename refs across forge.service.ts; grep gate zero-hits |
-| P5 | + top-level /api/agents,/api/skills groups replacing forge-group CRUD; + chat stream/GET/DELETE + 409 concurrency; smoke gains chat cases |
+| P3 | + renamed statements in hearth.repo.ts; chat access fns on herald-thread.repo.ts (owner-scoped); tests cover renamed tables + owner guard |
+| P4 | + runChatStream path (no prefetch, CHAT_IDENTITY, message-term memory); rename refs across hearth.service.ts; grep gate zero-hits |
+| P5 | + top-level /api/agents,/api/skills groups replacing hearth-group CRUD; + chat stream/GET/DELETE + 409 concurrency; smoke gains chat cases |
 | P6 | + AgentSkillSettings retarget + labels; hook/key renames; + chat UI components |
 | P7 | + API.md moved routes + chat endpoints; LAYERS.md rename + chat pattern; branding sweep |
 | P8 | + chat round-trip smoke (send/stream/reload/reset/409); Blacksmith regression: bundles still render from payload |
@@ -298,12 +301,12 @@ Gate: fresh DB migrate passes; `.schema herald_threads` paste; `tsc --noEmit`.
 
 ### P3 — Repos — M
 Create: `server/repos/herald-settings.repo.ts`, `herald-thread.repo.ts` (loadThread/saveThread/resetThread/summary), `project-memory.repo.ts` (CRUD + FTS sync + searchByProject).
-Modify: `server/repos/forge.repo.ts` — createTask kind param, claim predicate, claimHeraldTask.
+Modify: `server/repos/hearth.repo.ts` — createTask kind param, claim predicate, claimHeraldTask.
 Tests: vitest per repo, in-memory sqlite.
 Gate: scoped `vitest run` green; `tsc --noEmit`.
 
 ### P4 — Services (@tanstack/ai lands here) — L
-Create: `server/services/herald.service.ts` (`Lexa/Herald`), `server/herald/provider.ts` (adapters + testConnection + listModels), `server/herald/prompt.ts`, `server/herald/tools.ts` (**active**: web_search/fetch_url/read_s3_file + SSRF guard module + allowlist enforcement + PDF extraction), `server/services/forge-repo-content.ts` (pure move from http.ts).
+Create: `server/services/herald.service.ts` (`Lexa/Herald`), `server/herald/provider.ts` (adapters + testConnection + listModels), `server/herald/prompt.ts`, `server/herald/tools.ts` (**active**: web_search/fetch_url/read_s3_file + SSRF guard module + allowlist enforcement + PDF extraction), `server/services/hearth-repo-content.ts` (pure move from http.ts).
 Modify: `package.json` exact pins (@tanstack/ai, exa client or plain fetch, unpdf-style).
 Tests: fake-fetch adapter units; prompt assembly snapshot; continue-vs-fresh matrix; RUN_ERROR translation; SSRF unit tests (private-IP rejection, redirect re-validation, allowlist); multimodal hydration (storage-ref → data part) + cap enforcement.
 Dependency note: `read_s3_file` phase-gates behind attachments/storage work landing (P0).
@@ -315,7 +318,7 @@ Smoke script `scripts/herald-smoke.sh`: unauth 401; missing config 409; bad key 
 Gate: pasted curl outputs; `tsc --noEmit`.
 
 ### P6 — React transcription (@designer lane; blocked by P1 gate) — L
-Create: `app/lib/use-herald-stream.ts` (fetch reader + AbortController), forge components (mode picker, streaming panel, tool chips, stop button, empty state), settings provider + memory components.
+Create: `app/lib/use-herald-stream.ts` (fetch reader + AbortController), hearth components (mode picker, streaming panel, tool chips, stop button, empty state), settings provider + memory components.
 Modify: `app/lib/api.ts`, `app/lib/queries.ts` (`setQueryData` discipline), `app/styles/phosphor.css` (port wireframe classes).
 Rules: transcribe completed wireframe exactly; insert converts via `shared/markdown.ts`.
 Gate: `tsc --noEmit`; `bun run dev:full` manual QA checklist paste (each S10 state); `vitest run`.
@@ -325,7 +328,7 @@ Update: `docs/ADR-0001-two-tier-ai-architecture.md` (written 2026-08-22 — keep
 Gate: grep confirms no stale tier wording; cross-refs valid.
 
 ### P8 — Final verification — S
-`tsc --noEmit` · `vitest run` · `bash wireframes/build.sh` · `bun run dev:full` smoke: create task, stream, tool chip appears, stop mid-stream, reset thread, settings round-trip; existing Forge/GitHub acceptance checks unaffected.
+`tsc --noEmit` · `vitest run` · `bash wireframes/build.sh` · `bun run dev:full` smoke: create task, stream, tool chip appears, stop mid-stream, reset thread, settings round-trip; existing Hearth/GitHub acceptance checks unaffected.
 
 # RISKS
 
@@ -355,7 +358,7 @@ Gate: grep confirms no stale tier wording; cross-refs valid.
 - Multimodal: images in v1 (≤5/msg, ≤5MB, png/jpeg/gif/webp); storage-ref persisted, hydrated to base64 at call time; no settings flag — upstream 400 maps to explicit error
 - Catalog renamed **Lexa Agents/Skills** (`lexa_*` tables, `/api/agents`+`/api/skills` routes); claim payload field names kept for daemon wire compat
 - **Herald Chat** added: freeform assistant surface on same engine; no queue row, one thread per (project,user), direct SSE
-- Review outcomes (2026-08-22): keys plaintext at rest · provider config **per-project** · Herald tasks visible+badged in Forge surfaces · threads kept forever (no prune)
+- Review outcomes (2026-08-22): keys plaintext at rest · provider config **per-project** · Herald tasks visible+badged in Hearth surfaces · threads kept forever (no prune)
 - Model picker: fetch models from provider endpoint (per-kind wire format, base-URL normalized); free-text fallback always available
 - Defaults taken (no user input needed): no sampling params in settings v1 (provider defaults) · PM read tools tasks-only v1 (wiki later) · settings surface mount point = designer's call during P1
-- Tiers: Herald + Blacksmith both ACTIVE, co-exist; Hearth umbrella (renamed from Forge, 2026-08-23)
+- Tiers: Herald + Blacksmith both ACTIVE, co-exist; Hearth umbrella (renamed from Hearth, 2026-08-23)

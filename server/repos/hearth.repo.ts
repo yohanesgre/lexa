@@ -1,0 +1,628 @@
+import { Effect } from "effect";
+import { Sqlite, queryAll, queryFirst, run, withTx, DbError, RowNotFound, ConstraintViolation } from "../db/database";
+import { RuntimeRow, RuntimeWithTeam, HearthTaskRow, HearthTaskLogRow, LexaAgentRow, LexaSkillRow, rowToRuntime, rowToHearthTask, rowToHearthTaskLog, rowToLexaAgent, rowToLexaSkill } from "../../shared/db";
+import type { Runtime, HearthTask, HearthTaskLog, HearthProvider, HearthTaskStatus, LexaAgent, LexaSkill } from "../../shared/types";
+
+// Hard cap for a task's activity log: a verbose agent run can emit hundreds
+// of lines, so trim each task's log to the newest LOG_CAP rows (FIFO).
+const LOG_CAP = 400;
+
+// Hearth tasks are always read joined with their document's title and the
+// agent/skill names so the UI can show names instead of raw ids.
+const TASK_SELECT = `
+  SELECT ft.*,
+         CASE WHEN ft.document_type = 'task' THEN (SELECT title FROM tasks WHERE id = ft.document_id)
+              ELSE (SELECT title FROM wiki_pages WHERE slug = ft.document_id) END AS document_title,
+         CASE WHEN ft.document_type = 'task' THEN COALESCE((SELECT key FROM tasks WHERE id = ft.document_id), '')
+              ELSE '' END AS key,
+         fa.name AS agent_name,
+         fs.name AS skill_name
+  FROM hearth_tasks ft
+  LEFT JOIN lexa_agents fa ON fa.id = ft.agent_id
+  LEFT JOIN lexa_skills fs ON fs.id = ft.skill_id
+`;
+
+// Comma-joined attached skill ids for an agent row (agents list endpoint).
+const AGENT_SELECT = `
+  SELECT fa.*,
+         (SELECT GROUP_CONCAT(skill_id) FROM lexa_agent_skills WHERE agent_id = fa.id) AS skill_ids
+  FROM lexa_agents fa
+`;
+
+export class HearthRepo extends Effect.Service<HearthRepo>()("Lexa/HearthRepo", {
+  effect: Effect.gen(function* () {
+    const db = yield* Sqlite;
+
+    return {
+      // ── Runtimes ──
+      registerRuntime: (input: { id: string; name: string; provider: HearthProvider; machineId: string; agent: string; model: string; hostname: string; teamId: string | null }): Effect.Effect<RuntimeWithTeam, ConstraintViolation | DbError> =>
+        Effect.gen(function* () {
+          yield* run(
+            db,
+            `INSERT INTO runtimes (id, name, provider, machine_id, team_id, agent, model, status, hostname, last_seen)
+             VALUES (?, ?, ?, ?, ?, ?, ?, 'online', ?, datetime('now'))
+             ON CONFLICT(id) DO UPDATE SET
+               name = excluded.name,
+               provider = excluded.provider,
+               machine_id = excluded.machine_id,
+               team_id = excluded.team_id,
+               status = 'online',
+               hostname = excluded.hostname,
+               last_seen = datetime('now')`,
+            input.id,
+            input.name,
+            input.provider,
+            input.machineId,
+            input.teamId,
+            input.agent,
+            input.model,
+            input.hostname
+          );
+          const rows = yield* queryAll<RuntimeRow>(db, `SELECT * FROM runtimes WHERE id = ?`, input.id);
+          const row = rows[0];
+          if (!row) return yield* Effect.fail(new DbError({ message: "runtime row missing after registration" }));
+          return rowToRuntime(row);
+        }),
+
+      updateRuntimeHeartbeat: (id: string): Effect.Effect<void, ConstraintViolation | DbError> =>
+        run(db, `UPDATE runtimes SET status = 'online', last_seen = datetime('now') WHERE id = ?`, id).pipe(
+          Effect.map(() => undefined)
+        ),
+
+      markRuntimesOffline: (): Effect.Effect<void, ConstraintViolation | DbError> =>
+        run(db, `UPDATE runtimes SET status = 'offline' WHERE last_seen < datetime('now', '-2 minutes')`).pipe(
+          Effect.map(() => undefined)
+        ),
+
+      findRuntimeById: (id: string): Effect.Effect<RuntimeWithTeam, RowNotFound | DbError> =>
+        queryFirst<RuntimeRow>(db, `SELECT * FROM runtimes WHERE id = ?`, id).pipe(Effect.map(rowToRuntime)),
+
+      deleteRuntime: (id: string): Effect.Effect<void, RowNotFound | ConstraintViolation | DbError> =>
+        run(db, `DELETE FROM runtimes WHERE id = ?`, id).pipe(
+          Effect.flatMap((changes) =>
+            changes === 0 ? Effect.fail(new RowNotFound({ table: "runtimes" })) : Effect.void
+          )
+        ),
+
+      // Remove events are provider-scoped (the listener deletes every env
+      // matching the agent CLI), and a machine hosts at most one runtime per
+      // agent CLI — so deleting one row removes the whole (machine, provider)
+      // pair, keeping host state consistent with the queued event.
+      deleteRuntimePair: (machineId: string, provider: HearthProvider): Effect.Effect<void, ConstraintViolation | DbError> =>
+        run(db, `DELETE FROM runtimes WHERE machine_id = ? AND provider = ?`, machineId, provider).pipe(
+          Effect.map(() => undefined)
+        ),
+
+      listRuntimesByMachine: (machineId: string): Effect.Effect<Runtime[], DbError> =>
+        queryAll<RuntimeRow>(db, `SELECT * FROM runtimes WHERE machine_id = ?`, machineId).pipe(
+          Effect.map((rows) => rows.map(rowToRuntime))
+        ),
+
+      deleteRuntimesByMachine: (machineId: string): Effect.Effect<void, ConstraintViolation | DbError> =>
+        run(db, `DELETE FROM runtimes WHERE machine_id = ?`, machineId).pipe(
+          Effect.map(() => undefined)
+        ),
+
+      setRuntimeLastError: (id: string, error: string): Effect.Effect<void, ConstraintViolation | DbError> =>
+        run(db, `UPDATE runtimes SET last_error = ? WHERE id = ?`, error, id).pipe(
+          Effect.map(() => undefined)
+        ),
+
+      clearRuntimeLastError: (id: string): Effect.Effect<void, ConstraintViolation | DbError> =>
+        run(db, `UPDATE runtimes SET last_error = NULL WHERE id = ?`, id).pipe(
+          Effect.map(() => undefined)
+        ),
+
+      updateRuntime: (id: string, patch: { name?: string; provider?: HearthProvider; agent?: string; model?: string; printLogs?: boolean; logLevel?: string; extraArgs?: string[] }): Effect.Effect<RuntimeWithTeam, RowNotFound | ConstraintViolation | DbError> =>
+        Effect.gen(function* () {
+          const sets: string[] = [];
+          const params: unknown[] = [];
+          if (patch.name !== undefined) {
+            sets.push("name = ?");
+            params.push(patch.name);
+          }
+          if (patch.provider !== undefined) {
+            sets.push("provider = ?");
+            params.push(patch.provider);
+          }
+          if (patch.agent !== undefined) {
+            sets.push("agent = ?");
+            params.push(patch.agent);
+          }
+          if (patch.model !== undefined) {
+            sets.push("model = ?");
+            params.push(patch.model);
+          }
+          if (patch.printLogs !== undefined) {
+            sets.push("print_logs = ?");
+            params.push(patch.printLogs ? 1 : 0);
+          }
+          if (patch.logLevel !== undefined) {
+            sets.push("log_level = ?");
+            params.push(patch.logLevel);
+          }
+          if (patch.extraArgs !== undefined) {
+            sets.push("extra_args = ?");
+            params.push(JSON.stringify(patch.extraArgs));
+          }
+          if (sets.length === 0) {
+            return yield* queryFirst<RuntimeRow>(db, `SELECT * FROM runtimes WHERE id = ?`, id).pipe(
+              Effect.map(rowToRuntime)
+            );
+          }
+          params.push(id);
+          yield* run(db, `UPDATE runtimes SET ${sets.join(", ")} WHERE id = ?`, ...params);
+          return yield* queryFirst<RuntimeRow>(db, `SELECT * FROM runtimes WHERE id = ?`, id).pipe(
+            Effect.map(rowToRuntime)
+          );
+        }),
+
+      updateRuntimeModels: (id: string, models: { id: string; provider: string; name: string }[]): Effect.Effect<void, ConstraintViolation | DbError> =>
+        run(db, `UPDATE runtimes SET models_catalog = ? WHERE id = ?`, JSON.stringify(models), id).pipe(
+          Effect.map(() => undefined)
+        ),
+
+      updateRuntimeAgents: (id: string, agents: { id: string; name: string }[]): Effect.Effect<void, ConstraintViolation | DbError> =>
+        run(db, `UPDATE runtimes SET agents_catalog = ? WHERE id = ?`, JSON.stringify(agents), id).pipe(
+          Effect.map(() => undefined)
+        ),
+
+      updateRuntimeCatalogs: (input: { id: string; machineId: string; agentCli: HearthProvider; models: { id: string; provider: string; name: string }[]; agents: { id: string; name: string }[] }): Effect.Effect<void, ConstraintViolation | DbError> =>
+        run(
+          db,
+          `UPDATE runtimes SET models_catalog = ?, agents_catalog = ? WHERE id = ? AND machine_id = ? AND provider = ?`,
+          JSON.stringify(input.models),
+          JSON.stringify(input.agents),
+          input.id,
+          input.machineId,
+          input.agentCli
+        ).pipe(Effect.map(() => undefined)),
+
+      listRuntimes: (): Effect.Effect<RuntimeWithTeam[], DbError> =>
+        queryAll<RuntimeRow>(db, `SELECT * FROM runtimes ORDER BY created_at`).pipe(
+          Effect.map((rows) => rows.map(rowToRuntime))
+        ),
+
+      // ── Agents & skills (global rule bundles) ──
+      listAgents: (): Effect.Effect<LexaAgent[], DbError> =>
+        queryAll<LexaAgentRow & { skill_ids: string | null }>(db, `${AGENT_SELECT} ORDER BY fa.is_builtin DESC, fa.created_at`).pipe(
+          Effect.map((rows) => rows.map((r) => rowToLexaAgent(r, (r.skill_ids ?? "").split(",").filter(Boolean))))
+        ),
+
+      findAgentById: (id: string): Effect.Effect<LexaAgent, RowNotFound | DbError> =>
+        queryFirst<LexaAgentRow & { skill_ids: string | null }>(db, `${AGENT_SELECT} WHERE fa.id = ?`, id).pipe(
+          Effect.map((r) => rowToLexaAgent(r, (r.skill_ids ?? "").split(",").filter(Boolean)))
+        ),
+
+      createAgent: (input: { id: string; name: string; description: string; instructions: string }): Effect.Effect<LexaAgent, ConstraintViolation | DbError> =>
+        Effect.gen(function* () {
+          yield* run(
+            db,
+            `INSERT INTO lexa_agents (id, name, description, instructions, is_builtin) VALUES (?, ?, ?, ?, 0)`,
+            input.id,
+            input.name,
+            input.description,
+            input.instructions
+          );
+          const row = yield* queryFirst<LexaAgentRow & { skill_ids: string | null }>(db, `${AGENT_SELECT} WHERE fa.id = ?`, input.id).pipe(
+            Effect.catchTag("RowNotFound", () => new DbError({ message: "agent row missing after create" }))
+          );
+          return rowToLexaAgent(row, []);
+        }),
+
+      updateAgent: (id: string, patch: { name?: string; description?: string; instructions?: string }): Effect.Effect<LexaAgent, RowNotFound | ConstraintViolation | DbError> =>
+        Effect.gen(function* () {
+          const sets: string[] = [];
+          const params: unknown[] = [];
+          if (patch.name !== undefined) { sets.push("name = ?"); params.push(patch.name); }
+          if (patch.description !== undefined) { sets.push("description = ?"); params.push(patch.description); }
+          if (patch.instructions !== undefined) { sets.push("instructions = ?"); params.push(patch.instructions); }
+          if (sets.length === 0) {
+            return yield* queryFirst<LexaAgentRow & { skill_ids: string | null }>(db, `${AGENT_SELECT} WHERE fa.id = ?`, id).pipe(
+              Effect.map((r) => rowToLexaAgent(r, (r.skill_ids ?? "").split(",").filter(Boolean)))
+            );
+          }
+          sets.push("updated_at = datetime('now')");
+          params.push(id);
+          yield* run(db, `UPDATE lexa_agents SET ${sets.join(", ")} WHERE id = ?`, ...params);
+          return yield* queryFirst<LexaAgentRow & { skill_ids: string | null }>(db, `${AGENT_SELECT} WHERE fa.id = ?`, id).pipe(
+            Effect.map((r) => rowToLexaAgent(r, (r.skill_ids ?? "").split(",").filter(Boolean)))
+          );
+        }),
+
+      deleteAgent: (id: string): Effect.Effect<void, RowNotFound | ConstraintViolation | DbError> =>
+        run(db, `DELETE FROM lexa_agents WHERE id = ?`, id).pipe(
+          Effect.flatMap((changes) => (changes === 0 ? Effect.fail(new RowNotFound({ table: "lexa_agents" })) : Effect.void))
+        ),
+
+      replaceAgentSkills: (agentId: string, skillIds: string[]): Effect.Effect<void, ConstraintViolation | DbError> =>
+        withTx(
+          db,
+          Effect.gen(function* () {
+            yield* run(db, `DELETE FROM lexa_agent_skills WHERE agent_id = ?`, agentId);
+            for (const skillId of skillIds) {
+              yield* run(db, `INSERT INTO lexa_agent_skills (agent_id, skill_id) VALUES (?, ?)`, agentId, skillId);
+            }
+          })
+        ),
+
+      listSkills: (): Effect.Effect<LexaSkill[], DbError> =>
+        queryAll<LexaSkillRow>(db, `SELECT * FROM lexa_skills ORDER BY is_builtin DESC, created_at`).pipe(
+          Effect.map((rows) => rows.map(rowToLexaSkill))
+        ),
+
+      findSkillById: (id: string): Effect.Effect<LexaSkill, RowNotFound | DbError> =>
+        queryFirst<LexaSkillRow>(db, `SELECT * FROM lexa_skills WHERE id = ?`, id).pipe(Effect.map(rowToLexaSkill)),
+
+      createSkill: (input: { id: string; name: string; description: string; instructions: string }): Effect.Effect<LexaSkill, ConstraintViolation | DbError> =>
+        Effect.gen(function* () {
+          yield* run(
+            db,
+            `INSERT INTO lexa_skills (id, name, description, instructions, is_builtin) VALUES (?, ?, ?, ?, 0)`,
+            input.id,
+            input.name,
+            input.description,
+            input.instructions
+          );
+          const row = yield* queryFirst<LexaSkillRow>(db, `SELECT * FROM lexa_skills WHERE id = ?`, input.id).pipe(
+            Effect.catchTag("RowNotFound", () => new DbError({ message: "skill row missing after create" }))
+          );
+          return rowToLexaSkill(row);
+        }),
+
+      updateSkill: (id: string, patch: { name?: string; description?: string; instructions?: string }): Effect.Effect<LexaSkill, RowNotFound | ConstraintViolation | DbError> =>
+        Effect.gen(function* () {
+          const sets: string[] = [];
+          const params: unknown[] = [];
+          if (patch.name !== undefined) { sets.push("name = ?"); params.push(patch.name); }
+          if (patch.description !== undefined) { sets.push("description = ?"); params.push(patch.description); }
+          if (patch.instructions !== undefined) { sets.push("instructions = ?"); params.push(patch.instructions); }
+          if (sets.length === 0) {
+            return yield* queryFirst<LexaSkillRow>(db, `SELECT * FROM lexa_skills WHERE id = ?`, id).pipe(Effect.map(rowToLexaSkill));
+          }
+          sets.push("updated_at = datetime('now')");
+          params.push(id);
+          yield* run(db, `UPDATE lexa_skills SET ${sets.join(", ")} WHERE id = ?`, ...params);
+          return yield* queryFirst<LexaSkillRow>(db, `SELECT * FROM lexa_skills WHERE id = ?`, id).pipe(Effect.map(rowToLexaSkill));
+        }),
+
+      deleteSkill: (id: string): Effect.Effect<void, RowNotFound | ConstraintViolation | DbError> =>
+        run(db, `DELETE FROM lexa_skills WHERE id = ?`, id).pipe(
+          Effect.flatMap((changes) => (changes === 0 ? Effect.fail(new RowNotFound({ table: "lexa_skills" })) : Effect.void))
+        ),
+
+      // ── Tasks ──
+      createTask: (input: {
+        id: string;
+        projectId: string;
+        documentType: "task" | "wiki";
+        documentId: string;
+        agentId: string;
+        skillId: string;
+        extraPrompt: string;
+        selection: string;
+        docContext: string;
+        runtimeId?: string;          // preferred runtime (set at claim time if omitted)
+        kind?: "blacksmith" | "herald";
+      }): Effect.Effect<HearthTask, ConstraintViolation | DbError | RowNotFound> =>
+        Effect.gen(function* () {
+          yield* run(
+            db,
+            `INSERT INTO hearth_tasks (id, project_id, document_type, document_id, agent_id, skill_id, extra_prompt, selection, doc_context, status, runtime_id, kind)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'queued', ?, ?)`,
+            input.id,
+            input.projectId,
+            input.documentType,
+            input.documentId,
+            input.agentId,
+            input.skillId,
+            input.extraPrompt,
+            input.selection,
+            input.docContext,
+            input.runtimeId ?? null,
+            input.kind ?? "blacksmith"
+          );
+          return yield* queryFirst<HearthTaskRow>(db, `${TASK_SELECT} WHERE ft.id = ?`, input.id).pipe(
+            Effect.map(rowToHearthTask)
+          );
+        }),
+
+      findTaskById: (id: string): Effect.Effect<HearthTask, RowNotFound | DbError> =>
+        queryFirst<HearthTaskRow>(db, `${TASK_SELECT} WHERE ft.id = ?`, id).pipe(Effect.map(rowToHearthTask)),
+
+      // Claim a queued task for a runtime. A task pinned to a specific runtime
+      // (runtime_id set at create) may ONLY be claimed by that runtime.
+      // Unpinned tasks (runtime_id null) are claimable by anyone, FIFO.
+      // Team scoping: a runtime scoped to a team (team_id set) may only claim
+      // tasks whose project belongs to that team; global runtimes (team_id
+      // null) claim any team's tasks (claim rule: team_id IS NULL OR = project.team_id).
+      claimNextTask: (runtimeId: string, teamId: string | null): Effect.Effect<HearthTask | null, ConstraintViolation | DbError | RowNotFound> =>
+        Effect.gen(function* () {
+          const rows = yield* queryAll<HearthTaskRow>(
+            db,
+            `${TASK_SELECT}
+             WHERE ft.status = 'queued'
+               AND ft.kind = 'blacksmith'
+               AND (ft.runtime_id IS NULL OR ft.runtime_id = ?)
+               AND (? IS NULL OR (SELECT p.team_id FROM projects p WHERE p.id = ft.project_id) = ?)
+             ORDER BY (ft.runtime_id = ?) DESC, ft.created_at
+             LIMIT 1`,
+            runtimeId,
+            teamId,
+            teamId,
+            runtimeId
+          );
+          const task = rows[0];
+          if (!task) return null;
+          yield* run(
+            db,
+            `UPDATE hearth_tasks SET status = 'running', runtime_id = ?, started_at = datetime('now') WHERE id = ? AND status = 'queued'`,
+            runtimeId,
+            task.id
+          );
+          const updated = yield* queryFirst<HearthTaskRow>(db, `${TASK_SELECT} WHERE ft.id = ?`, task.id).pipe(
+            Effect.map(rowToHearthTask)
+          );
+          // If the conditional update lost the race, return null (someone else claimed it).
+          return updated.status === "running" && updated.runtimeId === runtimeId ? updated : null;
+        }),
+
+      // Herald stream handler claims its task with a conditional UPDATE —
+      // kind-scoped so a blacksmith row can never be claimed here, and
+      // status-scoped so a double claim (retry, concurrent stream) loses the
+      // race and surfaces as ConstraintViolation.
+      claimHeraldTask: (taskId: string): Effect.Effect<HearthTask, ConstraintViolation | DbError | RowNotFound> =>
+        Effect.gen(function* () {
+          const changes = yield* run(
+            db,
+            `UPDATE hearth_tasks SET status = 'running', started_at = datetime('now')
+             WHERE id = ? AND kind = 'herald' AND status = 'queued'`,
+            taskId
+          );
+          if (changes === 0) {
+            return yield* Effect.fail(new ConstraintViolation({ message: `task ${taskId} is not a queued herald task`, isPositionConflict: false }));
+          }
+          return yield* queryFirst<HearthTaskRow>(db, `${TASK_SELECT} WHERE ft.id = ?`, taskId).pipe(
+            Effect.map(rowToHearthTask)
+          );
+        }),
+
+      // Re-queue `running` tasks whose runner is gone: started > 10 min ago
+      // AND the bound runtime has no heartbeat in the last 2 min (offline).
+      // Clearing runtime_id/started_at lets any runtime claim it again.
+      // A slow-but-alive daemon is never touched (its heartbeat is fresh).
+      sweepStuckTasks: (): Effect.Effect<number, ConstraintViolation | DbError> =>
+        run(
+          db,
+          `UPDATE hearth_tasks SET status = 'queued', runtime_id = NULL, started_at = NULL
+           WHERE status = 'running'
+             AND started_at < datetime('now', '-10 minutes')
+             AND (
+               runtime_id IS NULL
+               OR NOT EXISTS (
+                 SELECT 1 FROM runtimes r
+                 WHERE r.id = hearth_tasks.runtime_id
+                   AND r.last_seen >= datetime('now', '-2 minutes')
+               )
+             )`
+        ),
+
+      // Auto-remove stale `running` runs: started longer than staleMinutes
+      // ago AND the bound runtime is offline or gone — the runner is dead
+      // and will never post a result, so the record is purged (task + logs)
+      // instead of being re-queued forever. A live runtime is never touched
+      // (the run may legitimately be long).
+      deleteStaleRuns: (staleMinutes: number): Effect.Effect<number, ConstraintViolation | DbError> =>
+        Effect.gen(function* () {
+          const stale = yield* queryAll<{ id: string }>(
+            db,
+            `SELECT id FROM hearth_tasks
+             WHERE status = 'running'
+               AND started_at < datetime('now', ?)
+               AND (
+                 runtime_id IS NULL
+                 OR NOT EXISTS (
+                   SELECT 1 FROM runtimes r
+                   WHERE r.id = hearth_tasks.runtime_id
+                     AND r.last_seen >= datetime('now', '-2 minutes')
+                 )
+               )`,
+            `-${staleMinutes} minutes`
+          );
+          let removed = 0;
+          for (const row of stale) {
+            yield* run(db, `DELETE FROM hearth_task_logs WHERE task_id = ?`, row.id);
+            yield* run(db, `DELETE FROM hearth_tasks WHERE id = ?`, row.id);
+            removed += 1;
+          }
+          return removed;
+        }),
+
+      // Terminal status writes. Cancel wins over a late daemon complete/fail:
+      // the daemon may still be finishing a run after the user cancelled it,
+      // so complete/fail only transition from 'running'. Cancel transitions
+      // from 'queued' or 'running'. A no-op (0 rows changed) returns the row
+      // unchanged.
+      updateTaskStatus: (id: string, status: HearthTask["status"], result?: string | null, error?: string | null): Effect.Effect<HearthTask, RowNotFound | ConstraintViolation | DbError> =>
+        Effect.gen(function* () {
+          const sets = ["status = ?", "finished_at = datetime('now')"];
+          const params: unknown[] = [status];
+          if (result !== undefined) {
+            sets.push("result = ?");
+            params.push(result === null ? null : result.slice(0, 1024 * 1024));
+          }
+          if (error !== undefined) {
+            sets.push("error = ?");
+            params.push(error === null ? null : error.slice(0, 2000));
+          }
+          const from =
+            status === "cancelled" ? "status IN ('queued', 'running')" : "status = 'running'";
+          params.push(id);
+          yield* run(
+            db,
+            `UPDATE hearth_tasks SET ${sets.join(", ")} WHERE id = ? AND ${from}`,
+            ...params
+          );
+          return yield* queryFirst<HearthTaskRow>(db, `${TASK_SELECT} WHERE ft.id = ?`, id).pipe(
+            Effect.map(rowToHearthTask)
+          );
+        }),
+
+      listTasksForDocument: (projectId: string, documentType: "task" | "wiki", documentId: string): Effect.Effect<HearthTask[], DbError> =>
+        queryAll<HearthTaskRow>(
+          db,
+          `${TASK_SELECT}
+           WHERE ft.project_id = ? AND ft.document_type = ? AND ft.document_id = ?
+           ORDER BY ft.created_at DESC
+           LIMIT 20`,
+          projectId,
+          documentType,
+          documentId
+        ).pipe(Effect.map((rows) => rows.map(rowToHearthTask))),
+
+      // Recent tasks across all projects (for the navbar status bar).
+      listRecent: (limit = 10): Effect.Effect<Array<HearthTask & { project_name: string }>, DbError> =>
+        queryAll<HearthTaskRow & { project_name: string }>(
+          db,
+          `SELECT ft.*, p.name AS project_name,
+                  CASE WHEN ft.document_type = 'task' THEN (SELECT title FROM tasks WHERE id = ft.document_id)
+                       ELSE (SELECT title FROM wiki_pages WHERE slug = ft.document_id) END AS document_title,
+                  CASE WHEN ft.document_type = 'task' THEN COALESCE((SELECT key FROM tasks WHERE id = ft.document_id), '')
+                       ELSE '' END AS key,
+                  fa.name AS agent_name,
+                  fs.name AS skill_name
+           FROM hearth_tasks ft
+           INNER JOIN projects p ON p.id = ft.project_id
+           LEFT JOIN lexa_agents fa ON fa.id = ft.agent_id
+           LEFT JOIN lexa_skills fs ON fs.id = ft.skill_id
+           ORDER BY ft.created_at DESC
+           LIMIT ?`,
+          limit
+        ).pipe(
+          Effect.map((rows) => rows.map((r) => ({ ...rowToHearthTask(r), project_name: r.project_name })))
+        ),
+
+      // Full task history (Hearth control panel). Keyset-paginated on
+      // (created_at, id) descending; the id tiebreak keeps the cursor stable
+      // across rows created in the same second. Filters are optional.
+      listHistory: (
+        filters: { projectId?: string; status?: HearthTaskStatus; skillId?: string; documentType?: "task" | "wiki" },
+        limit: number,
+        cursor?: string
+      ): Effect.Effect<{ tasks: Array<HearthTask & { project_name: string }>; hasMore: boolean }, DbError> => {
+        const conditions: string[] = [];
+        const params: unknown[] = [];
+        if (filters.projectId) {
+          conditions.push("ft.project_id = ?");
+          params.push(filters.projectId);
+        }
+        if (filters.status) {
+          conditions.push("ft.status = ?");
+          params.push(filters.status);
+        }
+        if (filters.skillId) {
+          conditions.push("ft.skill_id = ?");
+          params.push(filters.skillId);
+        }
+        if (filters.documentType) {
+          conditions.push("ft.document_type = ?");
+          params.push(filters.documentType);
+        }
+        if (cursor) {
+          const [createdAt, id] = cursor.split(":");
+          if (createdAt && id) {
+            conditions.push("(ft.created_at < ? OR (ft.created_at = ? AND ft.id < ?))");
+            params.push(createdAt, createdAt, id);
+          }
+        }
+        const where = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
+        const sql = `SELECT ft.*, p.name AS project_name,
+                            CASE WHEN ft.document_type = 'task' THEN (SELECT title FROM tasks WHERE id = ft.document_id)
+                                 ELSE (SELECT title FROM wiki_pages WHERE slug = ft.document_id) END AS document_title,
+                            CASE WHEN ft.document_type = 'task' THEN COALESCE((SELECT key FROM tasks WHERE id = ft.document_id), '')
+                                 ELSE '' END AS key,
+                            fa.name AS agent_name,
+                            fs.name AS skill_name
+                     FROM hearth_tasks ft
+                     INNER JOIN projects p ON p.id = ft.project_id
+                     LEFT JOIN lexa_agents fa ON fa.id = ft.agent_id
+                     LEFT JOIN lexa_skills fs ON fs.id = ft.skill_id
+                     ${where}
+                     ORDER BY ft.created_at DESC, ft.id DESC
+                     LIMIT ?`;
+        return queryAll<HearthTaskRow & { project_name: string }>(db, sql, ...params, limit + 1).pipe(
+          Effect.map((rows) => {
+            const hasMore = rows.length > limit;
+            const tasks = rows.slice(0, limit).map((r) => ({ ...rowToHearthTask(r), project_name: r.project_name }));
+            return { tasks, hasMore };
+          })
+        );
+      },
+
+      // Per-status totals for the control panel's summary strip (global, not
+      // filter-scoped — the strip describes the system, the table is the view).
+      countByStatus: (): Effect.Effect<Record<HearthTaskStatus, number>, DbError> =>
+        queryAll<{ status: HearthTaskStatus; n: number }>(
+          db,
+          `SELECT status, COUNT(*) AS n FROM hearth_tasks GROUP BY status`
+        ).pipe(
+          Effect.map((rows) => {
+            const counts: Record<HearthTaskStatus, number> = { queued: 0, running: 0, completed: 0, failed: 0, cancelled: 0 };
+            for (const r of rows) counts[r.status] = r.n;
+            return counts;
+          })
+        ),
+
+      // Tasks referencing an agent/skill (delete guards — an entity still in
+      // use by queued/running/history rows cannot be removed).
+      countTasksByAgent: (agentId: string): Effect.Effect<number, DbError> =>
+        queryAll<{ n: number }>(db, `SELECT COUNT(*) AS n FROM hearth_tasks WHERE agent_id = ?`, agentId).pipe(
+          Effect.map((rows) => rows[0]?.n ?? 0)
+        ),
+
+      countTasksBySkill: (skillId: string): Effect.Effect<number, DbError> =>
+        queryAll<{ n: number }>(db, `SELECT COUNT(*) AS n FROM hearth_tasks WHERE skill_id = ?`, skillId).pipe(
+          Effect.map((rows) => rows[0]?.n ?? 0)
+        ),
+
+      // ── Task activity log ──
+      appendLog: (
+        id: string,
+        taskId: string,
+        message: string,
+        stream: "out" | "err" = "out",
+        level: "info" | "warn" | "error" = "info"
+      ): Effect.Effect<HearthTaskLog, ConstraintViolation | DbError | RowNotFound> =>
+        withTx(
+          db,
+          Effect.gen(function* () {
+            yield* run(
+              db,
+              `DELETE FROM hearth_task_logs WHERE task_id = ? AND id NOT IN (
+                 SELECT id FROM hearth_task_logs WHERE task_id = ? ORDER BY created_at DESC, rowid DESC LIMIT ${LOG_CAP - 1}
+               )`,
+              taskId,
+              taskId
+            );
+            yield* run(
+              db,
+              `INSERT INTO hearth_task_logs (id, task_id, message, stream, level) VALUES (?, ?, ?, ?, ?)`,
+              id,
+              taskId,
+              message,
+              stream,
+              level
+            );
+            return yield* queryFirst<HearthTaskLogRow>(db, `SELECT * FROM hearth_task_logs WHERE id = ?`, id).pipe(
+              Effect.map(rowToHearthTaskLog)
+            );
+          })
+        ),
+
+      listLogs: (taskId: string): Effect.Effect<HearthTaskLog[], DbError> =>
+        queryAll<HearthTaskLogRow>(db, `SELECT * FROM hearth_task_logs WHERE task_id = ? ORDER BY created_at ASC, rowid ASC`, taskId).pipe(
+          Effect.map((rows) => rows.map(rowToHearthTaskLog))
+        ),
+    };
+  }),
+}) {}

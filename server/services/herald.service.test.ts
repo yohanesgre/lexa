@@ -64,6 +64,9 @@ describe("Herald toolset", () => {
     searchTasksByTitle: async () => [],
     searchWikiPages: async () => [],
     findWikiPageBySlug: async () => null,
+    listAllTasks: async () => [],
+    listWikiPagesFull: async () => [],
+    getBoardStructure: async () => ({ columns: [], swimlanes: [], milestones: [] }),
   };
 
   it("includes the wiki tools alongside the PM reads", () => {

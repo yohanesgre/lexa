@@ -56,15 +56,15 @@ export function createApiMiddleware(db: Database, dbPath: string) {
       // AUTH below but still rate-limited — with the dedicated stricter
       // shareRateLimiter bucket instead of the general API bucket.
       const isPublicShare = path.startsWith("/api/share/");
-      // Forge daemon endpoints accept the daemon token (LXK_FORGE_DAEMON_TOKEN)
+      // Hearth daemon endpoints accept the daemon token (LXK_HEARTH_DAEMON_TOKEN)
       // in place of the API key — the daemon may hold its own credential.
-      // /api/forge/sessions joins them: the daemon PUTs the pre-spawn mapping
-      // and DELETEs it on cancel/timeout with x-forge-token; the browser
+      // /api/hearth/sessions joins them: the daemon PUTs the pre-spawn mapping
+      // and DELETEs it on cancel/timeout with x-hearth-token; the browser
       // GET/reset keep using the Bearer key.
-      const isForgeDaemon = path.startsWith("/api/forge/daemon/") || path === "/api/forge/runtimes/register" || path === "/api/forge/sessions";
+      const isHearthDaemon = path.startsWith("/api/hearth/daemon/") || path === "/api/hearth/runtimes/register" || path === "/api/hearth/sessions";
 
       // Rate limit before auth: a blocked IP stays blocked regardless of key.
-      // The key/token-gated forge machine surfaces are exempt (isRateLimitExemptPath:
+      // The key/token-gated hearth machine surfaces are exempt (isRateLimitExemptPath:
       // daemon log POSTs, runtime registration, the listener's 3s heartbeat — a
       // chatty agent's traffic must not share the IP bucket); setup and health are
       // rate-limited again. IP is resolved in entry (socket only visible there) and
@@ -97,8 +97,8 @@ export function createApiMiddleware(db: Database, dbPath: string) {
         );
       }
 
-      const daemonTokenOk = isForgeDaemon && process.env.LXK_FORGE_DAEMON_TOKEN
-        ? constantTimeTokenEqual(request.headers["x-forge-token"] ?? "", process.env.LXK_FORGE_DAEMON_TOKEN)
+      const daemonTokenOk = isHearthDaemon && process.env.LXK_HEARTH_DAEMON_TOKEN
+        ? constantTimeTokenEqual(request.headers["x-hearth-token"] ?? "", process.env.LXK_HEARTH_DAEMON_TOKEN)
         : false;
       let identity: AuthIdentityShape;
       if (!isHealth && !isSetup && !daemonTokenOk && !isPublicShare) {

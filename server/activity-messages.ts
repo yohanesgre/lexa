@@ -32,9 +32,9 @@ export function githubUnlinked(repo: string, number: number) { return `Unlinked 
 export function githubSynced(number: number, state: "open" | "closed", toCol: string) {
   return `Issue #${number} ${state} on GitHub — task moved to ${toCol}`;
 }
-export function forgeCompleted(agent: string) { return `Forge: ${agent} completed — result ready`; }
-export function forgeFailed() { return "Forge run failed"; }
-export function forgeCancelled() { return "Forge run cancelled"; }
+export function hearthCompleted(agent: string) { return `Hearth: ${agent} completed — result ready`; }
+export function hearthFailed() { return "Hearth run failed"; }
+export function hearthCancelled() { return "Hearth run cancelled"; }
 export function commented(actor: string) { return `${actor} commented`; }
 export function commentDeleted(actor: string) { return `${actor} deleted a comment`; }
 export function attachmentAdded(actor: string, filename: string) { return `${actor} attached ${filename}`; }
@@ -98,9 +98,9 @@ export function formatActivityMessage(type: ActivityType, payload: ActivityMessa
       const p = payload as { number: number; state: "open" | "closed"; toCol: string };
       return githubSynced(p.number, p.state, p.toCol);
     }
-    case "forge_completed": return forgeCompleted((payload as { agent: string }).agent);
-    case "forge_failed": return forgeFailed();
-    case "forge_cancelled": return forgeCancelled();
+    case "hearth_completed": return hearthCompleted((payload as { agent: string }).agent);
+    case "hearth_failed": return hearthFailed();
+    case "hearth_cancelled": return hearthCancelled();
     case "commented": return commented((payload as { actor: string }).actor);
     case "comment_deleted": return commentDeleted((payload as { actor: string }).actor);
     case "attachment_added": {

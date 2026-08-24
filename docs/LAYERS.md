@@ -31,7 +31,7 @@
 └─────────────────────────────────────────────────────────┘
 ```
 
-**The v1 cycle is gone — no bidirectional service cycles:** `TaskService` never depends on `GitHubService`. The service-to-service edges that exist are all one-way: `GitHubService → TaskService` (+ `ProjectService`, used by webhook handling); `WorkspaceService → WorkspaceInvitesService, PasswordLinksService`; `RuntimeMachineService → RuntimeEventService`; `ForgeService → SourceService`; and `TaskService`, `TaskLinkService`, `SourceService` (+ `GitHubService`) → `ActivityService`. Lexa→GitHub sync is orchestrated by the route layer after a successful move. GitHubService also depends on `ProjectService` (workspace-repo validation, issue listing); content push is service-internal but stays GitHub-side — the route layer still owns move-time state sync.
+**The v1 cycle is gone — no bidirectional service cycles:** `TaskService` never depends on `GitHubService`. The service-to-service edges that exist are all one-way: `GitHubService → TaskService` (+ `ProjectService`, used by webhook handling); `WorkspaceService → WorkspaceInvitesService, PasswordLinksService`; `RuntimeMachineService → RuntimeEventService`; `HearthService → SourceService`; and `TaskService`, `TaskLinkService`, `SourceService` (+ `GitHubService`) → `ActivityService`. Lexa→GitHub sync is orchestrated by the route layer after a successful move. GitHubService also depends on `ProjectService` (workspace-repo validation, issue listing); content push is service-internal but stays GitHub-side — the route layer still owns move-time state sync.
 
 ## Infrastructure
 
@@ -576,7 +576,7 @@ deny) and the team/settings gates live in `server/services/authorization.service
 // isTeamAdmin(userId, teamId): member.role ∈ {owner, admin} on that org, or superadmin
 // isSuperadmin(userId): users.role === 'superadmin'
 // Settings gate: superadmin only (R14) — API keys, rate limits, GitHub
-// config, Forge agents/skills, security are no longer 'admin'-gated;
+// config, Hearth agents/skills, security are no longer 'admin'-gated;
 // team admins get 403 on every server-settings route.
 ```
 
@@ -682,7 +682,7 @@ export class AttachmentService extends Effect.Service<AttachmentService>()("Lexa
 Better Auth session user (`actorFromIdentity` maps it to kind 'user'); API
 keys → kind 'agent' with the key's NAME as label and the key owner's
 user id (unbound keys → NULL); webhook moves → kind 'system', label
-'github'; Forge terminal events → kind 'agent', label = forge agent name
+'github'; Hearth terminal events → kind 'agent', label = hearth agent name
 (agent_id fallback). The legacy `x-lxk-user` header is gone — attribution
 comes from the authenticated channel, never from a spoofable header; role
 never comes from the browser either (authz stays server-side).
@@ -779,11 +779,11 @@ const moveHandler = (req) =>
 
 The webhook route is exempt from API-key middleware and verifies `X-Hub-Signature-256` (HMAC-SHA-256, raw body, constant-time) before parsing; acks 200 immediately and processes in the background (Bun has no `waitUntil` — the handler returns the ack, then runs the Effect fire-and-forget on a shared `ManagedRuntime`; `webhook_events` pruned at boot, >7 days).
 
-### Forge claim — repoContent delivery
+### Hearth claim — repoContent delivery
 
-On `POST /api/forge/daemon/claim` the handler assembles the claim: task, runtime config, server-built prompt, agent/skill rule files, and — best-effort — the task's linked GitHub repo content (`repoContent: [{ owner, repo, path, content }]`, `[]` when none). The daemon writes those files into `repo-content/` (+ `MANIFEST.md`) and the prompt points the agent there ("Linked GitHub repo content is in the repo-content/ directory…").
+On `POST /api/hearth/daemon/claim` the handler assembles the claim: task, runtime config, server-built prompt, agent/skill rule files, and — best-effort — the task's linked GitHub repo content (`repoContent: [{ owner, repo, path, content }]`, `[]` when none). The daemon writes those files into `repo-content/` (+ `MANIFEST.md`) and the prompt points the agent there ("Linked GitHub repo content is in the repo-content/ directory…").
 
-- **Sources:** the project's `project_repos` rows with `source_role = 1` → repo values ("owner/repo"), capped at the `forge_repo_cap` setting (env bootstrap `LXK_FORGE_REPO_CAP`, default 3), only when `documentType === "task"`. Task-linked issue repos no longer feed context.
+- **Sources:** the project's `project_repos` rows with `source_role = 1` → repo values ("owner/repo"), capped at the `hearth_repo_cap` setting (env bootstrap `LXK_HEARTH_REPO_CAP`, default 3), only when `documentType === "task"`. Task-linked issue repos no longer feed context.
 - **Pipeline (per repo):** `GitHubClient.getDefaultBranch` → `getRepoFileTree(recursive=1)` → pure `selectRepoFiles` (`server/github/repo-content.ts`: skips node_modules/.git/dist/build/vendor/.next/coverage/target/.venv dirs, lockfiles, `*.min.js`/`*.min.css`/`*.map`, true binaries — svg stays; caps 50 files / 256 KB per file / 512 KB total, respecting tree sizes without fetching) → `getRepoFileContent` (per-segment URL-encoded path, base64 → UTF-8). Content truncated to 256 KB per file at assembly; total byte cap enforced across repos.
 - **Never fails the claim:** every failure (unconfigured app, missing repo, network, per-file) is caught per repo/file, logged `WARN`, and skipped — `repoContent` ends up `[]` and the claim still returns 200. The prompt's repo-content line is added only when `repoContent` is non-empty (`buildPromptForTask(task, hasRepoContent)`).
 
@@ -791,13 +791,15 @@ On `POST /api/forge/daemon/claim` the handler assembles the claim: task, runtime
 
 ```typescript
 export class HeraldService extends Effect.Service<HeraldService>()("Lexa/Herald", {
-  dependencies: [ForgeRepo.Default, HeraldSettingsRepo.Default, HeraldThreadRepo.Default,
-                 ProjectMemoryRepo.Default, ForgeService.Default, Storage.Default,
-                 TaskRepo.Default, WikiRepo.Default, ProjectReposRepo.Default],
+  dependencies: [HearthRepo.Default, HeraldSettingsRepo.Default, HeraldThreadRepo.Default,
+                 HeraldPendingWritesRepo.Default, ProjectMemoryRepo.Default, HearthService.Default,
+                 Storage.Default, TaskRepo.Default, WikiRepo.Default, ProjectReposRepo.Default,
+                 TaskService.Default, CommentService.Default, WikiService.Default,
+                 MilestoneService.Default, SwimlaneService.Default, AuthorizationService.Default],
   effect: Effect.gen(function* () {
     return {
       // enqueue: guard provider configured (ProviderNotConfigured), validate
-      //   agent/skill/document/attachments, then forgeRepo.createTask (queued).
+      //   agent/skill/document/attachments, then hearthRepo.createTask (queued).
       //   Engine routing: resolve the project's herald_settings.engine ONCE
       //   per request (single settings read — the engine resolution seam).
       //   engine='herald' → kind='herald' row, runtime-online guard skipped
@@ -831,22 +833,60 @@ export class HeraldService extends Effect.Service<HeraldService>()("Lexa/Herald"
   message carries the instruction (+ rolling-summary segment when present).
   Object form `{content, metadata}` carries `cache_control`.
 - **Tools** (`server/herald/tools.ts`) are declared with
-  `toolDefinition().server(fn)` — v1 reads only: `web_search` (Exa),
+  `toolDefinition().server(fn)` — the read toolset: `web_search` (Exa),
   SSRF-guarded `fetch_url` (allowlist-enforced, PDF-capable),
   `read_s3_file` via `Lexa/Storage`, PM reads (`get_task` accepts the
   `PREFIX-n` alias, `search_tasks`), wiki reads (`search_wiki` FTS-scoped
   to the project, `read_wiki_page` by slug — TipTap→markdown via
-  `shared/markdown.ts`, ~8k-char output cap). Write tools deferred until
-  approval UX exists. Round caps → `HeraldToolBudgetExceeded`: document-task
-  streams `MAX_TOOL_ROUNDS=4`; freeform chat `MAX_CHAT_TOOL_ROUNDS=8` (the
+  `shared/markdown.ts`, ~8k-char output cap), plus bulk reads
+  (`get_all_tasks` — full markdown per task, 60k-char total cap;
+  `get_all_wiki_pages` — ~8k per page, 60k total; `get_board_structure` —
+  columns/swimlanes/milestones projection); bulk outputs carry
+  `truncated: true` when the cap dropped content. Round caps → `HeraldToolBudgetExceeded`: document-task
+  streams `MAX_TOOL_ROUNDS=12`; freeform chat `MAX_CHAT_TOOL_ROUNDS=24` (the
   chat toolset chains reads — search_wiki → read_wiki_page → search_tasks —
   so it gets a wider budget; threaded through `StreamRunContext.toolRoundCap`).
+- **Write tools** (`server/herald/write-tools.ts`) are a second toolset,
+  gated by `herald_settings.write_tools` (comma-separated names, parsed by
+  `parseWriteTools` — unknown names dropped, duplicates collapse; empty →
+  read-only turn). 13 proposal-only tools (`create_task`, `update_task`,
+  `move_task`, `archive_task`, `restore_task`, `add_comment`,
+  `create_wiki_page`, `edit_wiki_page`, `create_milestone`,
+  `update_milestone`, `archive_milestone`, `create_sprint`,
+  `update_sprint`) — none apply a write directly; each validates refs and
+  persists a pending row via `createWriteRecorder` (per-turn budget:
+  `MAX_WRITES_PER_TURN=8`; over-budget proposals return a tool error).
+  Diffs are server-computed plain-text projections (`HeraldWriteDiff` in
+  `shared/herald.ts`, TipTap-aware text extraction, capped) — what the
+  approver sees; raw args ride the row for execution.
+- **Approval protocol:** when a turn queued write proposals, the stream ends
+  at the suspend checkpoint instead of `done`: every pending row is emitted
+  as a `tool_pending` frame (seq order), the assistant transcript entry is
+  persisted with a `pendingBatch` marker — `{ batchId, approvals }` where
+  `approvals` pairs each row's `approvalId` with the provider `toolCallId`
+  of the write call that proposed it (legacy string shape still read) — and
+  the terminal frame is `suspended { batchId }`. The owner decides each row
+  via `POST /api/herald/approvals/:id/decide` (order pinned: sweep → fetch →
+  owner check hidden as NotFound → lazy TTL flip → already-decided guard →
+  conditional decide). Resume (`POST /api/herald/chat/:chatId/resume` /
+  `POST /api/herald/threads/:documentType/:documentId/resume`) sweeps TTLs,
+  locates the suspended batch via `findPendingBatch` (newest-first scan of
+  the transcript, both marker shapes), refuses while approvals are
+  outstanding (`APPROVALS_PENDING`), executes approved rows in seq order as
+  the herald actor (per-row domain failures recorded on the row via
+  `markExecutionError` — never abort the batch), emits one `approval_result`
+  frame per decided row right after the start frame (applied|failed with
+  "CODE: message" error for executed rows, denied for rejected rows), clears
+  the marker with `applyResumeResults`, and continues the stream from the
+  existing transcript (no fresh user entry). Approval TTL is 24h
+  (`APPROVAL_TTL_HOURS`, SQL-format `expires_at`) enforced lazily on
+  decide/resume/transcript reads — no timer.
 - **SSE bridge** (`sseHttpResponse` in `server/api/http.ts`): encodes
   StreamFrames as `event:`/`data:` pairs over a raw `HttpServerResponse.stream`
   (bypasses the JSON encoder) with a 15s `: ping` heartbeat comment. Exactly
-  one terminal frame (`error`|`done`). Disconnect→abort: the request signal
+  one terminal frame (`error`|`done`|`suspended`). Disconnect→abort: the request signal
   is wired into the service's `Map<taskId|chatId, AbortController>`; abort
-  discards the partial message and cancels/fails via `ForgeService`.
+  discards the partial message and cancels/fails via `HearthService`.
 - **Reasoning frames:** `REASONING_MESSAGE_CONTENT` chunks from reasoning
   models stream as `{ type: "reasoning", delta }` frames, live and in order,
   interleaved with `delta`/`tool` frames. Ephemeral — never persisted into
@@ -857,7 +897,7 @@ export class HeraldService extends Effect.Service<HeraldService>()("Lexa/Herald"
   through `translateRunError` — recognizable upstream failures map to catalog
   codes (`PROVIDER_AUTH_FAILED`, `PROVIDER_UNREACHABLE`), everything else to
   `HERALD_GENERATION_FAILED`; the frame carries the mapped code, the task is
-  failed via `ForgeService.fail`. Upstream bodies never echoed raw.
+  failed via `HearthService.fail`. Upstream bodies never echoed raw.
 - **Stall watchdog:** every chunk race in `buildStream`'s consume loop runs
   against a fresh timer (`STREAM_STALL_TIMEOUT_MS = 90_000`, reset on ANY
   chunk). If no chunk arrives for 90s, the provider request is aborted and
@@ -934,7 +974,7 @@ One `HttpApiBuilder.middleware` wraps the whole router (pre-routing, before deco
 - **Literal short-circuits only.** Return `HttpServerResponse.unsafeJson(...)` for 429/413/401/403 — never `Effect.fail` with an undeclared error. In @effect/platform 0.97 the error encoder cannot encode undeclared failures → raw cause → 500 trap.
 - **`AuthIdentity` is provided, not re-fetched.** Middleware resolves the caller ONCE — session cookie first (`SessionService.userFrom`, try/catch), Bearer key fallback (`resolveApiKeyIdentity(authHeader, db)`) — on the *shared* Sqlite connection and `Effect.provideService`s the tag; handlers/`requireSuperadmin` read it. Per-request DB opens are banned (they cost 3 PRAGMAs each). `/api/auth/*` is mounted BEFORE this middleware (Better Auth handler owns that path).
 - **Socket IP lives only in entry.** `remoteAddress` is unpopulated on the web-handler path, so entry stamps `x-lexa-remote-ip` (deleting any inbound value first — spoof guard) on the reconstructed request; middleware applies the `isPrivateIp`-gated `cf-connecting-ip` trust.
-- **Exemptions are path predicates inside the middleware**: `/api/setup*` + `/api/health` skip AUTH only (they stay rate-limited); `/api/share/*` skips AUTH only too (public wiki-share capability URLs — still rate-limited with a dedicated stricter bucket, security headers kept; handlers must not consume `AuthIdentity`, since exempt paths receive a synthetic identity); `/api/forge/daemon/*` + `/api/forge/runtimes/register` + `/api/forge/machines/heartbeat` accept the daemon token where applicable and are rate-limit-exempt (key/token-gated machine surfaces — log streams and the 3s heartbeat must not 429).
+- **Exemptions are path predicates inside the middleware**: `/api/setup*` + `/api/health` skip AUTH only (they stay rate-limited); `/api/share/*` skips AUTH only too (public wiki-share capability URLs — still rate-limited with a dedicated stricter bucket, security headers kept; handlers must not consume `AuthIdentity`, since exempt paths receive a synthetic identity); `/api/hearth/daemon/*` + `/api/hearth/runtimes/register` + `/api/hearth/machines/heartbeat` accept the daemon token where applicable and are rate-limit-exempt (key/token-gated machine surfaces — log streams and the 3s heartbeat must not 429).
 - **Rate limiting shares one bucket** (`apiRateLimiter` singleton; `/api/share/*` excepted — it applies a dedicated stricter per-IP bucket so the public unauthenticated surface cannot exhaust the shared one) and runs before auth — a blocked IP stays blocked regardless of key. Limits are DB-configured (`GET`/`PUT /api/settings/rate-limit`, admin-only): **DB settings (`settings.rate_limit_max` / `settings.rate_limit_window_ms`) with the code defaults (6000 / 600_000 ms) as fallback** — `resolveRateLimitFromDbValues` in `server/api/rate-limit.ts`. The DB is the single source of truth: env (`LXK_RATE_LIMIT_MAX` / `LXK_RATE_LIMIT_WINDOW_MS`) is a first-boot bootstrap, mirrored into the DB once at boot by `mirrorSettingsFromEnv` (server/db/settings.ts) when keys are empty, and never consulted at runtime. `syncRateLimitFromDb` applies the DB values at boot (after the mirror) and on save, so changes take effect live without a restart (existing buckets keep their windowStart and expire against the new window).
 - **Router 404s** fail with `RouteNotFound` after the middleware; caught inside so 404s carry the security headers (empty body, platform-identical shape).
 - **`MaxBodySize` is unenforced in 0.97** — the authoritative body cap is entry's stream cap (`readBodyWithLimit`); the middleware pre-check is a declared-length fast-path only.
@@ -966,12 +1006,12 @@ All list endpoints: `?limit` (default 50, max 200) + cursor (opaque: `"<columnId
 | `SourceNotFound` | 404 | delete a source that doesn't exist |
 | `SourceFetchError` | 422 | bad URL / SSRF-guard block / unreadable page |
 | `SourceUnreachable` | 422 | fetch failed (timeout, DNS, network) |
-| `ForgeTaskNotFound` | 404 | |
-| `AgentNotFound` | 404 | unknown forge agent (task create / claim resolve) |
-| `SkillNotFound` | 404 | unknown forge skill (task create / bindings) |
-| `ForgeBuiltinDelete` | 422 | delete/reset-guard on a builtin agent/skill |
-| `ForgeEntityInUse` | 409 | delete agent/skill still referenced by forge tasks |
-| `NoRuntimeOnline` | 409 | create Forge task with no daemon up |
+| `HearthTaskNotFound` | 404 | |
+| `AgentNotFound` | 404 | unknown hearth agent (task create / claim resolve) |
+| `SkillNotFound` | 404 | unknown hearth skill (task create / bindings) |
+| `HearthBuiltinDelete` | 422 | delete/reset-guard on a builtin agent/skill |
+| `HearthEntityInUse` | 409 | delete agent/skill still referenced by hearth tasks |
+| `NoRuntimeOnline` | 409 | create Hearth task with no daemon up |
 | `MachineNotFound` | 404 | unknown machine target |
 | `MachineIdTaken` | 409 | register: id bound to another host, legacy (no secret), or secret mismatch (details: `{ id, reason }`) |
 | `MachineSecretMismatch` | 403 | runtime-event claim without a matching machine secret — identical response for missing machine/legacy/wrong secret (no existence oracle) |
@@ -990,14 +1030,14 @@ All list endpoints: `?limit` (default 50, max 200) + cursor (opaque: `"<columnId
 | `NoUserContext` | 400 | `PATCH /api/me` called with a bare API key (no session) — agents have no profile |
 | `MilestoneNotFound` | 404 | incl. cross-project refs (swimlane sprint fields) |
 | `InvalidArgs` | 422 | swimlane sprint validation: `startAt > dueAt` |
-| `RuntimeNotFound` | 404 | unknown forge runtime target |
+| `RuntimeNotFound` | 404 | unknown hearth runtime target |
 | `RuntimeEventNotFound` | 404 | unknown runtime setup event |
 | `ApiKeyNotFound` | 404 | settings — key id that doesn't exist |
 | `ApiKeyNameEmpty` | 422 | create key with no name (`server/services/api-key.service.ts`) |
 | `Forbidden` | 403 | admin/settings gates — also the code for `ProjectAccessDenied` / `MachineSecretMismatch` |
 | `SetupLocked` | 403 | wizard on an already-configured install |
 | `SearchError` | 422 | invalid search query |
-| `ForgeSessionActive` | 409 | document already has an active forge task |
+| `HearthSessionActive` | 409 | document already has an active hearth task |
 | `TeamNotFound` | 404 | |
 | `TeamMemberNotFound` | 404 | unknown user on team membership routes |
 | `MemberNotInWorkspace` | 422 | add a non-member to a team |
@@ -1023,11 +1063,16 @@ All list endpoints: `?limit` (default 50, max 200) + cursor (opaque: `"<columnId
 | `ProviderAuthFailed` | 502 | upstream 401/403 (provider or Exa) |
 | `ProviderUnreachable` | 502 | provider network/timeout/DNS failure |
 | `HeraldGenerationFailed` | 502 | RUN_ERROR catch-all, malformed stream |
-| `HeraldToolBudgetExceeded` | 502 | tool round cap hit (document tasks `MAX_TOOL_ROUNDS=4`, freeform chat `MAX_CHAT_TOOL_ROUNDS=8`) |
+| `HeraldToolBudgetExceeded` | 502 | tool round cap hit (document tasks `MAX_TOOL_ROUNDS=12`, freeform chat `MAX_CHAT_TOOL_ROUNDS=24`) |
 | `HeraldTaskActive` | 409 | thread reset or second chat stream while a Herald stream is running |
 | `HeraldThreadNotFound` | 404 | missing thread row (`herald_threads`) |
 | `VisionNotConfigured` | 409 | attachments submitted while `primary_supports_images=0` AND `vision_model IS NULL` |
 | `EngineNotSupportedForChat` | 409 | freeform chat while the project engine is `blacksmith` |
+| `ApprovalNotFound` | 404 | unknown approval id, or not the pending row's owner (owner mismatch hidden as NotFound) |
+| `ApprovalExpired` | 409 | decide on a row past its 24h TTL — lazily flipped to `expired` first |
+| `ApprovalAlreadyDecided` | 409 | second decision on a decided/expired row — payload `{ id, status }` |
+| `ApprovalsPending` | 409 | resume while rows in the batch are still undecided — payload `{ batchId, remaining }` |
+| `ToolDenied` | 403 | write-tool execution refused by authorization at resume time |
 
 Note: `RowNotFound` (server/db/database.ts) is a repo-level error with no
 `errorCodeMap` entry — if it ever reaches the HTTP error encoder it falls to
@@ -1040,8 +1085,8 @@ Defined in the error map but never raised by any REST handler — do not match o
 ```
 TaskService        → TaskRepo, ColumnRepo, SwimlaneRepo, ProjectRepo, FieldConfigRepo, ActivityService
 FieldConfigService → FieldConfigRepo, ProjectRepo
-ForgeService       → ForgeRepo, ForgeSessionRepo, SourceRepo, SourceService, TaskRepo, WikiRepo, ProjectRepo, ActivityService
-HeraldService      → ForgeRepo, HeraldSettingsRepo, HeraldThreadRepo, ProjectMemoryRepo, ForgeService, Storage, TaskRepo, WikiRepo, ProjectReposRepo
+HearthService       → HearthRepo, HearthSessionRepo, SourceRepo, SourceService, TaskRepo, WikiRepo, ProjectRepo, ActivityService
+HeraldService      → HearthRepo, HeraldSettingsRepo, HeraldThreadRepo, HeraldPendingWritesRepo, ProjectMemoryRepo, HearthService, Storage, TaskRepo, WikiRepo, ProjectReposRepo, TaskService, CommentService, WikiService, MilestoneService, SwimlaneService, AuthorizationService (never GitHubService — approved writes run through the domain services)
 SourceService      → SourceRepo, ProjectRepo, WikiRepo, ActivityService
 TaskLinkService    → TaskLinkRepo, TaskRepo, ProjectRepo, ActivityService
 WikiService        → WikiRepo, ProjectRepo

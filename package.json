@@ -1,7 +1,7 @@
 {
   "name": "lexa",
   "version": "0.3.0",
-  "description": "Self-hosted project management — Kanban with swimlanes/WIP limits, nested wiki, Forge AI writing assistant.",
+  "description": "Self-hosted project management — Kanban with swimlanes/WIP limits, nested wiki, Hearth AI writing assistant.",
   "scripts": {
     "test": "vitest run",
     "prepare": "./scripts/prepare-effect.sh",

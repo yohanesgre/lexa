@@ -112,7 +112,7 @@ export class TaskService extends Effect.Service<TaskService>()("Lexa/TaskService
         assignees?: string[];
         parentId?: string;            // create as subtask of this task
         dueAt?: string | null;
-      }): Effect.Effect<{ task: Task; activity: ActivityEvent[] }, ProjectNotFound | ColumnNotFound | SwimlaneNotFound | TaskNotFound | RequiredFieldMissing | InvalidOption | DeadlineAfterLane | ConstraintViolation | DbError | RowNotFound> =>
+      }, opts?: { viaHerald?: boolean }): Effect.Effect<{ task: Task; activity: ActivityEvent[] }, ProjectNotFound | ColumnNotFound | SwimlaneNotFound | TaskNotFound | RequiredFieldMissing | InvalidOption | DeadlineAfterLane | ConstraintViolation | DbError | RowNotFound> =>
         Effect.gen(function* () {
           const project = yield* projectRepo.findById(input.projectId).pipe(
             Effect.catchTag("RowNotFound", () => new ProjectNotFound({ identifier: input.projectId }))
@@ -216,7 +216,7 @@ export class TaskService extends Effect.Service<TaskService>()("Lexa/TaskService
                   () => doInsert
                 )
               );
-              const ev = yield* activityService.append(t.id, actor, "created", msg.created(actor.label));
+              const ev = yield* activityService.append(t.id, actor, "created", msg.created(actor.label), { viaHerald: opts?.viaHerald === true });
               return { task: t, activity: [ev] };
             })
           );
@@ -261,7 +261,8 @@ export class TaskService extends Effect.Service<TaskService>()("Lexa/TaskService
           type?: string;
           assignees?: string[];
           dueAt?: string | null;
-        }
+        },
+        opts?: { viaHerald?: boolean }
       ): Effect.Effect<{ task: Task; activity: ActivityEvent[] }, TaskNotFound | ColumnNotFound | SwimlaneNotFound | RequiredFieldMissing | InvalidOption | DeadlineAfterLane | ConstraintViolation | DbError | RowNotFound> =>
         Effect.gen(function* () {
           const task = yield* taskRepo.findById(id).pipe(
@@ -329,7 +330,7 @@ export class TaskService extends Effect.Service<TaskService>()("Lexa/TaskService
             );
             const activity: ActivityEvent[] = [];
             for (const r of rows) {
-              activity.push(yield* activityService.append(id, actor, r.type, r.message));
+              activity.push(yield* activityService.append(id, actor, r.type, r.message, { viaHerald: opts?.viaHerald === true }));
             }
             return { task: u, activity };
           }));
@@ -337,7 +338,7 @@ export class TaskService extends Effect.Service<TaskService>()("Lexa/TaskService
           return updated;
         }),
 
-      move: (actor: Actor, taskId: string, target: MoveTarget, opts?: { bypassGuards?: boolean }): Effect.Effect<{ task: Task; activity: ActivityEvent[] }, TaskNotFound | ColumnNotFound | SwimlaneNotFound | RequiredFieldMissing | WipLimitExceeded | NeighborNotInColumn | DeadlineAfterLane | DbError | ConstraintViolation | RowNotFound> =>
+      move: (actor: Actor, taskId: string, target: MoveTarget, opts?: { bypassGuards?: boolean; viaHerald?: boolean }): Effect.Effect<{ task: Task; activity: ActivityEvent[] }, TaskNotFound | ColumnNotFound | SwimlaneNotFound | RequiredFieldMissing | WipLimitExceeded | NeighborNotInColumn | DeadlineAfterLane | DbError | ConstraintViolation | RowNotFound> =>
         Effect.gen(function* () {
           const task = yield* taskRepo.findById(taskId).pipe(
             Effect.catchTag("RowNotFound", () => new TaskNotFound({ id: taskId }))
@@ -465,7 +466,7 @@ export class TaskService extends Effect.Service<TaskService>()("Lexa/TaskService
               if (m.columnId !== task.columnId || m.swimlaneId !== task.swimlaneId) {
                 const ev = yield* activityService.append(taskId, actor, "moved", msg.moved(
                   actor.label, oldCol.name, column.name, oldLane?.name ?? null, newLane?.name ?? null
-                ));
+                ), { viaHerald: opts?.viaHerald === true });
                 return { task: m, activity: [ev] };
               }
               return { task: m, activity: [] as ActivityEvent[] };
@@ -524,7 +525,7 @@ export class TaskService extends Effect.Service<TaskService>()("Lexa/TaskService
           return undefined;
         }),
 
-      archive: (actor: Actor, id: string): Effect.Effect<{ task: Task; activity: ActivityEvent[] }, TaskNotFound | RowNotFound | DbError | ConstraintViolation> =>
+      archive: (actor: Actor, id: string, opts?: { viaHerald?: boolean }): Effect.Effect<{ task: Task; activity: ActivityEvent[] }, TaskNotFound | RowNotFound | DbError | ConstraintViolation> =>
         Effect.gen(function* () {
           const task = yield* taskRepo.findById(id).pipe(
             Effect.catchTag("RowNotFound", () => new TaskNotFound({ id }))
@@ -532,14 +533,14 @@ export class TaskService extends Effect.Service<TaskService>()("Lexa/TaskService
           if (task.archivedAt) return { task, activity: [] };
           const archived = yield* withTx(db, Effect.gen(function* () {
             const a = yield* taskRepo.setArchived(id, new Date().toISOString());
-            const ev = yield* activityService.append(id, actor, "archived", msg.archived(actor.label));
+            const ev = yield* activityService.append(id, actor, "archived", msg.archived(actor.label), { viaHerald: opts?.viaHerald === true });
             return { task: a, activity: [ev] };
           }));
           yield* Effect.logInfo(`[Task] Archived ${archived.task.id}`);
           return archived;
         }),
 
-      restore: (actor: Actor, id: string): Effect.Effect<{ task: Task; activity: ActivityEvent[] }, TaskNotFound | RowNotFound | DbError | ConstraintViolation> =>
+      restore: (actor: Actor, id: string, opts?: { viaHerald?: boolean }): Effect.Effect<{ task: Task; activity: ActivityEvent[] }, TaskNotFound | RowNotFound | DbError | ConstraintViolation> =>
         Effect.gen(function* () {
           const task = yield* taskRepo.findById(id).pipe(
             Effect.catchTag("RowNotFound", () => new TaskNotFound({ id }))
@@ -547,7 +548,7 @@ export class TaskService extends Effect.Service<TaskService>()("Lexa/TaskService
           if (!task.archivedAt) return { task, activity: [] };
           const restored = yield* withTx(db, Effect.gen(function* () {
             const r = yield* taskRepo.setArchived(id, null);
-            const ev = yield* activityService.append(id, actor, "restored", msg.restored(actor.label));
+            const ev = yield* activityService.append(id, actor, "restored", msg.restored(actor.label), { viaHerald: opts?.viaHerald === true });
             return { task: r, activity: [ev] };
           }));
           yield* Effect.logInfo(`[Task] Restored ${restored.task.id}`);

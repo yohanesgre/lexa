@@ -1463,8 +1463,8 @@
     box-shadow: var(--lx-focus-glow);
   }
 
-  /* Forge review-in-editor: focused panel in the editor body — between the
-     toolbar and the document (forge-review wireframe). Not toolbar chrome:
+  /* Hearth review-in-editor: focused panel in the editor body — between the
+     toolbar and the document (hearth-review wireframe). Not toolbar chrome:
      the wrapper carries the focus ring and the document dims until Accept. */
   .editor-wrapper.is-reviewing {
     border-color: var(--lx-border-focus);
@@ -1474,14 +1474,14 @@
     opacity: 0.55;
     pointer-events: none;
   }
-  .forge-review-panel {
+  .hearth-review-panel {
     background: var(--lx-surface-card);
     border-top: 1px solid var(--lx-border-default);
     border-bottom: 1px solid var(--lx-border-default);
     overflow: hidden;
   }
 
-  .forge-review-banner {
+  .hearth-review-banner {
     display: flex;
     align-items: center;
     justify-content: space-between;
@@ -1490,13 +1490,13 @@
     background: var(--lx-bg-warning-subtle);
     border-bottom: 1px solid var(--lx-border-default);
   }
-  .forge-review-identity {
+  .hearth-review-identity {
     display: flex;
     flex-direction: column;
     gap: 2px;
     min-width: 0;
   }
-  .forge-review-title {
+  .hearth-review-title {
     font-family: var(--lx-font-micro);
     font-size: 11px;
     text-transform: uppercase;
@@ -1506,7 +1506,7 @@
     overflow: hidden;
     text-overflow: ellipsis;
   }
-  .forge-review-note {
+  .hearth-review-note {
     font-size: 11px;
     color: var(--lx-text-secondary);
     opacity: 0.8;
@@ -1515,14 +1515,14 @@
     text-overflow: ellipsis;
   }
 
-  .forge-diff {
+  .hearth-diff {
     margin: 0;
     border: 0;
     border-radius: 0;
     overflow: hidden;
     background: var(--lx-surface-card);
   }
-  .forge-diff-empty {
+  .hearth-diff-empty {
     margin: 0;
     padding: 16px;
     border: 0;
@@ -1532,10 +1532,10 @@
     font-size: 12px;
     color: var(--lx-text-muted);
   }
-  .forge-diff-hunk + .forge-diff-hunk {
+  .hearth-diff-hunk + .hearth-diff-hunk {
     border-top: 1px solid var(--lx-border-default);
   }
-  .forge-diff-hunk-header {
+  .hearth-diff-hunk-header {
     display: flex;
     align-items: center;
     gap: 8px;
@@ -1546,7 +1546,7 @@
     font-size: 11px;
     color: var(--lx-text-muted);
   }
-  .forge-diff-line {
+  .hearth-diff-line {
     display: flex;
     gap: 10px;
     padding: 2px 12px;
@@ -1554,39 +1554,39 @@
     font-size: 12px;
     line-height: 20px;
   }
-  .forge-diff-line.del {
+  .hearth-diff-line.del {
     background: var(--lx-bg-danger-subtle);
   }
-  .forge-diff-line.add {
+  .hearth-diff-line.add {
     background: var(--lx-bg-success-subtle);
   }
-  .forge-diff-sign {
+  .hearth-diff-sign {
     color: var(--lx-text-danger);
     flex-shrink: 0;
     user-select: none;
   }
-  .forge-diff-line.add .forge-diff-sign {
+  .hearth-diff-line.add .hearth-diff-sign {
     color: var(--lx-text-success);
   }
-  .forge-diff-text {
+  .hearth-diff-text {
     color: var(--lx-text-secondary);
     overflow-wrap: anywhere;
   }
-  .forge-diff-line.del > .forge-diff-text {
+  .hearth-diff-line.del > .hearth-diff-text {
     color: var(--lx-text-danger);
   }
-  .forge-diff-line.add > .forge-diff-text {
+  .hearth-diff-line.add > .hearth-diff-text {
     color: var(--lx-text-success);
   }
-  .forge-diff-span.same {
+  .hearth-diff-span.same {
     color: var(--lx-text-secondary);
   }
-  .forge-diff-span.del {
+  .hearth-diff-span.del {
     background: color-mix(in srgb, var(--lx-text-danger) 22%, transparent);
     color: var(--lx-text-danger);
     border-radius: 3px;
   }
-  .forge-diff-span.add {
+  .hearth-diff-span.add {
     background: color-mix(in srgb, var(--lx-text-success) 22%, transparent);
     color: var(--lx-text-success);
     border-radius: 3px;
@@ -2140,8 +2140,8 @@
     gap: 8px;
   }
 
-  /* Forge status pill in the navbar (running / done / failed states) */
-  .forge-status {
+  /* Hearth status pill in the navbar (running / done / failed states) */
+  .hearth-status {
     display: inline-flex;
     align-items: center;
     gap: 6px;
@@ -2155,12 +2155,12 @@
     cursor: pointer;
     transition: background 100ms, border-color 100ms;
   }
-  .forge-status--idle    { background: var(--lx-surface-card); border-color: var(--lx-border-default); color: var(--lx-text-secondary); }
-  .forge-status--warning { background: var(--lx-surface-card); border-color: rgba(240, 192, 64, 0.35); color: var(--lx-text-primary); }
-  .forge-status--danger  { background: var(--lx-bg-danger-subtle); border-color: rgba(255, 68, 68, 0.25); color: var(--lx-text-danger); }
-  .forge-status--ok      { background: var(--lx-bg-success-subtle); border-color: rgba(74, 222, 128, 0.25); color: var(--lx-text-success); }
-  /* Dismiss (X) on finished tasks in the Forge status panel */
-  .forge-dismiss {
+  .hearth-status--idle    { background: var(--lx-surface-card); border-color: var(--lx-border-default); color: var(--lx-text-secondary); }
+  .hearth-status--warning { background: var(--lx-surface-card); border-color: rgba(240, 192, 64, 0.35); color: var(--lx-text-primary); }
+  .hearth-status--danger  { background: var(--lx-bg-danger-subtle); border-color: rgba(255, 68, 68, 0.25); color: var(--lx-text-danger); }
+  .hearth-status--ok      { background: var(--lx-bg-success-subtle); border-color: rgba(74, 222, 128, 0.25); color: var(--lx-text-success); }
+  /* Dismiss (X) on finished tasks in the Hearth status panel */
+  .hearth-dismiss {
     display: inline-flex;
     align-items: center;
     justify-content: center;
@@ -2175,14 +2175,14 @@
     transition: background 100ms, color 100ms;
   }
 
-  /* Live activity feed for a running Forge task (popover) */
-  .forge-task-log {
+  /* Live activity feed for a running Hearth task (popover) */
+  .hearth-task-log {
     background: var(--lx-surface-input);
     border: 1px solid var(--lx-border-default);
     border-radius: 6px;
     overflow: hidden;
   }
-  .forge-task-log-head {
+  .hearth-task-log-head {
     display: flex;
     align-items: center;
     justify-content: space-between;
@@ -2194,13 +2194,13 @@
     text-transform: uppercase;
     color: var(--lx-text-muted);
   }
-  .forge-task-log-live {
+  .hearth-task-log-live {
     color: var(--lx-text-warning);
     display: inline-flex;
     align-items: center;
     gap: 4px;
   }
-  .forge-task-log-live::before {
+  .hearth-task-log-live::before {
     content: "";
     width: 6px;
     height: 6px;
@@ -2210,13 +2210,13 @@
   }
   /* Static feed (finished/cancelled): the dot desaturates and stops pulsing —
      a dead "live" indicator on a closed log is noise. */
-  .forge-task-log-live.is-static {
+  .hearth-task-log-live.is-static {
     color: var(--lx-text-muted);
   }
-  .forge-task-log-live.is-static::before {
+  .hearth-task-log-live.is-static::before {
     animation: none;
   }
-  .forge-task-log-body {
+  .hearth-task-log-body {
     max-height: 180px;
     overflow-y: auto;
     padding: 8px 10px;
@@ -2224,69 +2224,69 @@
     font-size: 11px;
     line-height: 20px;
   }
-  .forge-task-log-empty {
+  .hearth-task-log-empty {
     font-family: var(--lx-font-mono);
     font-size: 11px;
     line-height: 20px;
     color: var(--lx-text-muted);
     padding: 8px 10px;
   }
-  .forge-task-log-line {
+  .hearth-task-log-line {
     display: flex;
     gap: 8px;
     color: var(--lx-text-secondary);
     white-space: nowrap;
   }
-  .forge-task-log-dot {
+  .hearth-task-log-dot {
     flex-shrink: 0;
     color: var(--lx-text-success);
     font-size: 8px;
     line-height: 20px;
   }
-  .forge-task-log-time {
+  .hearth-task-log-time {
     flex-shrink: 0;
     color: var(--lx-text-muted);
   }
-  .forge-task-log-msg {
+  .hearth-task-log-msg {
     overflow: hidden;
     text-overflow: ellipsis;
   }
   /* stderr lines (daemon prefixes [stderr]) — tinted danger + a subtle red
      wash so agent errors stand out from the stdout stream. The [stderr]
      prefix itself is stripped visually (the tint carries it); Copy keeps it. */
-  .forge-task-log-line.stderr {
+  .hearth-task-log-line.stderr {
     color: var(--lx-text-danger);
     background: rgba(255, 68, 68, 0.05);
   }
-  .forge-task-log-line.stderr .forge-task-log-dot {
+  .hearth-task-log-line.stderr .hearth-task-log-dot {
     color: var(--lx-text-danger);
   }
   /* warn tier (retries, rate limits, backoffs — level classified once by the
      daemon) — amber, softer than errors but visible. */
-  .forge-task-log-line.warn {
+  .hearth-task-log-line.warn {
     color: var(--lx-text-warning);
   }
-  .forge-task-log-line.warn .forge-task-log-dot {
+  .hearth-task-log-line.warn .hearth-task-log-dot {
     color: var(--lx-text-warning);
   }
-  .forge-task-log-line.current {
+  .hearth-task-log-line.current {
     background: rgba(240, 192, 64, 0.08);
     border-radius: 4px;
     padding: 0 2px;
   }
-  .forge-task-log-line.current .forge-task-log-dot {
+  .hearth-task-log-line.current .hearth-task-log-dot {
     color: var(--lx-text-warning);
   }
-  .forge-task-log-line.current .forge-task-log-msg {
+  .hearth-task-log-line.current .hearth-task-log-msg {
     color: var(--lx-text-primary);
   }
   /* Follow toggle in the log header — active (pulsing ●) means auto-scroll on */
-  .forge-task-log-head .btn.is-active {
+  .hearth-task-log-head .btn.is-active {
     border-color: var(--lx-border-focus);
     color: var(--lx-text-primary);
     animation: lx-wip-pulse 1.2s ease-in-out infinite;
   }
-  .forge-dismiss:hover {
+  .hearth-dismiss:hover {
     background: var(--lx-bg-danger-subtle);
     color: var(--lx-text-danger);
   }
@@ -2713,7 +2713,7 @@
     display: inline-flex;
   }
 
-  /* Unified navbar pill — same geometry as the Forge status pill.
+  /* Unified navbar pill — same geometry as the Hearth status pill.
      Used by: project switcher trigger, user profile trigger. */
   .nav-pill {
     display: inline-flex;
@@ -3270,7 +3270,7 @@
     left: 0;
   }
 
-  [data-forge-popover] {
+  [data-hearth-popover] {
     max-height: calc(100vh - 16px);
     overflow-y: auto;
   }
@@ -3778,10 +3778,10 @@
     flex-shrink: 0;
   }
 
-  /* Expanded Forge log viewer (forge-log-modal) — shared by the editor
+  /* Expanded Hearth log viewer (hearth-log-modal) — shared by the editor
      popover and the control panel slideover. Same append-only feed as the
-     compact .forge-task-log, but full-height with wrapped lines. */
-  .forge-log-modal {
+     compact .hearth-task-log, but full-height with wrapped lines. */
+  .hearth-log-modal {
     width: 760px;
     max-width: calc(100vw - 32px);
     padding: 0;
@@ -3789,15 +3789,15 @@
     display: flex;
     flex-direction: column;
   }
-  .forge-log-modal .modal-header {
+  .hearth-log-modal .modal-header {
     height: auto;
     padding: 12px 16px;
     gap: 12px;
   }
-  .forge-log-modal .modal-title {
+  .hearth-log-modal .modal-title {
     font-size: 15px;
   }
-  .forge-log-modal-body {
+  .hearth-log-modal-body {
     padding: 12px 16px 16px;
     display: flex;
     flex-direction: column;
@@ -3805,14 +3805,14 @@
     flex: 1;
     min-height: 0;
   }
-  .forge-log-modal .modal-footer {
+  .hearth-log-modal .modal-footer {
     height: auto;
     padding: 10px 16px;
     justify-content: space-between;
   }
   /* Expanded feed: wraps long lines instead of truncating (the compact boxes
      ellipsize; the viewer wraps so the full stream is readable). */
-  .forge-task-log-expanded {
+  .hearth-task-log-expanded {
     flex: 1;
     min-height: 0;
     max-height: none;
@@ -3823,15 +3823,15 @@
     border-radius: 6px;
     overflow-y: auto;
   }
-  .forge-task-log-expanded .forge-task-log-line {
+  .hearth-task-log-expanded .hearth-task-log-line {
     white-space: pre-wrap;
     word-break: break-word;
   }
-  .forge-task-log-expanded .forge-task-log-dot {
+  .hearth-task-log-expanded .hearth-task-log-dot {
     font-size: 9px;
     line-height: 21px;
   }
-  .forge-task-log-expanded .forge-task-log-msg {
+  .hearth-task-log-expanded .hearth-task-log-msg {
     overflow: visible;
     text-overflow: clip;
     white-space: pre-wrap;
@@ -6057,6 +6057,130 @@
 }
 .bubble-md a { color: var(--lx-text-link); }
 
+/* ---- Hearth slideover — task Result card (completed tasks) ----
+   Card shell transcribed verbatim from wireframes/src/hearth-control-panel.html
+   (success-subtle surface + rgba green border, 6px radius, 12px 16px padding,
+   14px/22px base). Prose rules mirror .bubble-md (same heading scale, code/pre
+   surfaces, blockquote/hr) at the card's 14px base; p/list rhythm follows the
+   wireframe. Tokens only — the rgba border is the wireframe's own value. */
+.hearth-result-card {
+  background: var(--lx-bg-success-subtle);
+  border: 1px solid rgba(74, 222, 128, 0.25);
+  border-radius: 6px;
+  padding: 12px 16px;
+  font-family: var(--lx-font-body);
+  font-size: 14px;
+  line-height: 22px;
+  color: var(--lx-text-primary);
+}
+.hearth-result-md > *:first-child { margin-top: 0; }
+.hearth-result-md > *:last-child { margin-bottom: 0; }
+.hearth-result-md p { margin: 0 0 8px; }
+.hearth-result-md h1 {
+  font-size: 24px;
+  font-weight: 600;
+  font-family: var(--lx-font-display);
+  line-height: 30px;
+  letter-spacing: -0.03em;
+  color: var(--lx-text-primary);
+  margin: 20px 0 12px;
+}
+.hearth-result-md h2 {
+  font-size: 18px;
+  font-weight: 600;
+  font-family: var(--lx-font-display);
+  line-height: 26px;
+  letter-spacing: -0.02em;
+  color: var(--lx-text-primary);
+  margin: 20px 0 8px;
+}
+.hearth-result-md h3,
+.hearth-result-md h4 {
+  font-size: 16px;
+  font-weight: 500;
+  font-family: var(--lx-font-display);
+  line-height: 24px;
+  letter-spacing: -0.02em;
+  color: var(--lx-text-primary);
+  margin: 20px 0 8px;
+}
+.hearth-result-md ul,
+.hearth-result-md ol {
+  margin: 0 0 8px;
+  padding-left: 18px;
+}
+/* Tailwind preflight strips list-style globally (@layer base) — restore
+   marker semantics per level; markers live in the 18px list gutter. */
+.hearth-result-md ul { list-style: disc; }
+.hearth-result-md ul ul { list-style: circle; }
+.hearth-result-md ol { list-style: decimal; }
+.hearth-result-md li { margin-bottom: 4px; }
+.hearth-result-md li::marker { color: var(--lx-text-secondary); }
+.hearth-result-md li > input[type="checkbox"] {
+  margin-right: 5px;
+  vertical-align: -1px;
+  accent-color: var(--lx-border-focus);
+}
+.hearth-result-md code {
+  font-family: var(--lx-font-mono);
+  font-size: 12px;
+  background: var(--lx-surface-elevated);
+  padding: 2px 4px;
+  border-radius: 4px;
+  color: var(--lx-text-secondary);
+}
+.hearth-result-md pre {
+  background: var(--lx-surface-elevated);
+  border: 1px solid var(--lx-border-default);
+  border-radius: 6px;
+  padding: 12px 16px;
+  margin: 0 0 8px;
+  overflow-x: auto;
+}
+.hearth-result-md pre code {
+  background: transparent;
+  padding: 0;
+  font-size: 12px;
+  line-height: 20px;
+  white-space: pre;
+  color: var(--lx-text-secondary);
+}
+.hearth-result-md blockquote {
+  margin: 8px 0;
+  padding-left: 12px;
+  border-left: 2px solid var(--lx-border-strong);
+  color: var(--lx-text-secondary);
+}
+.hearth-result-md hr {
+  border: none;
+  border-top: 1px solid var(--lx-border-default);
+  margin: 16px 0;
+}
+.hearth-result-md table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 8px 0;
+  font-size: 13px;
+  line-height: 20px;
+}
+.hearth-result-md th,
+.hearth-result-md td {
+  text-align: left;
+  vertical-align: top;
+  padding: 6px 10px;
+  border: 1px solid var(--lx-border-default);
+}
+.hearth-result-md th {
+  font-weight: 500;
+  color: var(--lx-text-secondary);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-family: var(--lx-font-body);
+  background: var(--lx-surface-elevated);
+}
+.hearth-result-md a { color: var(--lx-text-link); }
+
 /* ---- Herald chat — highlighted code block (done-turn fenced segments) ----
    Same elevated surface as .bubble-md pre, plus a chrome row: micro-caps
    language label + copy button, top-right. Body is highlight.js output
@@ -6299,4 +6423,189 @@
 .mention-popup {
   max-height: 264px;
   overflow-y: auto;
+}
+
+/* ---- Herald write approvals (herald-write-approvals.html) ----
+   Approval batch groups one turn's pending write proposals; each chip is
+   one proposed write. Pending carries a warning LED edge (status-accent
+   language: full-height 3px left border, same as toasts / card-row--warning);
+   terminal states drop the accent and mute — expired keeps a strong-muted
+   edge, failed keeps the danger edge (the two that still need eyes). */
+.approval-batch {
+  background: var(--lx-surface-elevated);
+  border: 1px solid var(--lx-border-default);
+  border-radius: 8px;
+  padding: 10px 12px;
+  margin-top: 10px;
+}
+.approval-chip {
+  background: var(--lx-surface-card);
+  border: 1px solid var(--lx-border-default);
+  border-left: 3px solid #f0c040;
+  border-radius: 6px;
+  padding: 10px 12px;
+}
+.approval-chip + .approval-chip {
+  margin-top: 8px;
+}
+.approval-chip.state-approved,
+.approval-chip.state-rejected {
+  border-left-color: transparent;
+  opacity: 0.72;
+}
+.approval-chip.state-expired {
+  border-left-color: var(--lx-border-strong);
+  opacity: 0.85;
+}
+.approval-chip.state-failed {
+  border-left-color: #ff4444;
+}
+
+.approval-tool {
+  font-family: var(--lx-font-mono);
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--lx-text-secondary);
+}
+.approval-target {
+  font-family: var(--lx-font-mono);
+  font-size: 12px;
+  color: var(--lx-text-primary);
+}
+.approval-seq {
+  font-family: var(--lx-font-micro);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  color: var(--lx-text-muted);
+}
+
+/* Diff bodies */
+.approval-diff {
+  margin-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.approval-field-list {
+  background: var(--lx-surface-input);
+  border: 1px solid var(--lx-border-subtle);
+  border-radius: 6px;
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.approval-field-label {
+  font-family: var(--lx-font-micro);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--lx-text-muted);
+  flex-shrink: 0;
+  width: 92px;
+  padding-top: 2px;
+}
+.approval-diff-table th {
+  padding: 5px 8px;
+}
+.approval-diff-table td {
+  padding: 5px 8px;
+  font-size: 12px;
+  line-height: 17px;
+}
+.diff-before {
+  color: var(--lx-text-secondary);
+}
+.diff-after {
+  color: var(--lx-text-primary);
+  font-weight: 500;
+}
+.column-pill {
+  display: inline-flex;
+  align-items: center;
+  height: 22px;
+  padding: 0 8px;
+  border: 1px solid var(--lx-border-default);
+  border-radius: 4px;
+  font-size: 12px;
+  background: var(--lx-surface-input);
+}
+.approval-textblock {
+  background: var(--lx-surface-input);
+  border: 1px solid var(--lx-border-subtle);
+  border-radius: 6px;
+  padding: 8px 10px;
+}
+.approval-textblock p {
+  font-size: 13px;
+  line-height: 19px;
+  margin: 4px 0 0;
+}
+.approval-blocklabel {
+  font-family: var(--lx-font-micro);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--lx-text-muted);
+}
+
+/* Chip terminal status line — replaces the buttons once decided */
+.approval-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-family: var(--lx-font-micro);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+/* Suspended-turn indicator — distinct from streaming: static warm dot +
+   amber micro caps (streaming uses the blinking block caret instead). */
+.suspended-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 9999px;
+  background: var(--lx-text-warning);
+  flex-shrink: 0;
+  animation: lx-suspended-pulse 1.6s var(--lx-ease-in-out) infinite;
+}
+@keyframes lx-suspended-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.45;
+  }
+}
+
+/* "via Herald" provenance pill — accent-subtle like the builtin chips in
+   Project Settings, so it reads as metadata, not alarm. */
+.via-pill {
+  font-family: var(--lx-font-micro);
+  font-size: 10px;
+  line-height: 14px;
+  text-transform: lowercase;
+  letter-spacing: 0.03em;
+  background: var(--lx-bg-accent-subtle);
+  color: var(--lx-text-link);
+  padding: 1px 7px;
+  border-radius: 9999px;
+}
+
+/* Settings callout note (settings-project-herald.html pattern) */
+.responsive-note {
+  background: var(--lx-surface-elevated);
+  border: 1px solid var(--lx-border-default);
+  border-radius: 6px;
+  padding: 12px 16px;
+  margin-top: 16px;
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--lx-text-secondary);
+}
+.responsive-note strong {
+  color: var(--lx-text-primary);
+  font-weight: 500;
 }

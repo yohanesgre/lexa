@@ -130,7 +130,7 @@ writes is ms-scale. Post-ack atomic work must fit `batch()` (see above).
   `wrangler d1 execute --file`. Replaces `scripts/dev.sh` boot + `seed-dev.sql`.
 - cloudflared tunnel dropped entirely — Worker custom domain replaces it;
   `lexa-cli deploy` compose flow obsolete for the web tier.
-- Forge daemons unaffected — already external machines reached over HTTP; outbound
+- Hearth daemons unaffected — already external machines reached over HTTP; outbound
   subrequest budget 50/request free, 1000 paid.
 
 ## Object storage (R2)
@@ -162,14 +162,14 @@ Gateway routing; published from `cloudflare/ai`, not the TanStack monorepo).
 
 Decision (2026-08-22): the chat() path IS the assistant tier — **Herald** (writing
 assistant and PM assistant). The daemon/opencode runtime remains for coding tasks —
-**Blacksmith**; both tiers are active and co-exist under the Forge umbrella (the
-shared queue/catalog: `forge_*` tables feed both tiers). See
+**Blacksmith**; both tiers are active and co-exist under the Hearth umbrella (the
+shared queue/catalog: `hearth_*` tables feed both tiers). See
 `docs/ADR-0001-two-tier-ai-architecture.md`.
 
 Shape:
 
 ```
-POST /api/forge/tasks → queue → server-side chat():
+POST /api/hearth/tasks → queue → server-side chat():
   adapter       = openaiCompatible | anthropic — custom baseUrl + apiKey from
                   settings (both verified custom-endpoint-capable; OpenRouter is
                   only an example endpoint)
@@ -204,8 +204,8 @@ POST /api/forge/tasks → queue → server-side chat():
   sandbox filesystem work — coding territory, which is what the Blacksmith
   runtime lane is for.
 - **Verdict: replace for assistants, keep daemon for coding.** Both behind the same
-  `Lexa/Forge` service interface; UI labels modes distinctly.
-- Churn risk: pin exact versions and wrap `chat()` behind the `Lexa/Forge` service
+  `Lexa/Hearth` service interface; UI labels modes distinctly.
+- Churn risk: pin exact versions and wrap `chat()` behind the `Lexa/Hearth` service
   so SDK swaps stay contained.
 
 ## Top risks

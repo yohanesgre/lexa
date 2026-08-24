@@ -11,7 +11,7 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as ChatRouteImport } from './routes/chat'
-import { Route as ForgeRouteImport } from './routes/forge'
+import { Route as HearthRouteImport } from './routes/hearth'
 import { Route as InviteRouteImport } from './routes/invite'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as SetPasswordRouteImport } from './routes/set-password'
@@ -43,9 +43,9 @@ const ChatRoute = ChatRouteImport.update({
   path: '/chat',
   getParentRoute: () => rootRouteImport,
 } as any)
-const ForgeRoute = ForgeRouteImport.update({
-  id: '/forge',
-  path: '/forge',
+const HearthRoute = HearthRouteImport.update({
+  id: '/hearth',
+  path: '/hearth',
   getParentRoute: () => rootRouteImport,
 } as any)
 const InviteRoute = InviteRouteImport.update({
@@ -153,7 +153,7 @@ const SettingsProjectProjectIdRoute =
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/chat': typeof ChatRoute
-  '/forge': typeof ForgeRoute
+  '/hearth': typeof HearthRoute
   '/invite': typeof InviteRoute
   '/login': typeof LoginRoute
   '/set-password': typeof SetPasswordRoute
@@ -178,7 +178,7 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/chat': typeof ChatRoute
-  '/forge': typeof ForgeRoute
+  '/hearth': typeof HearthRoute
   '/invite': typeof InviteRoute
   '/login': typeof LoginRoute
   '/set-password': typeof SetPasswordRoute
@@ -204,7 +204,7 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/chat': typeof ChatRoute
-  '/forge': typeof ForgeRoute
+  '/hearth': typeof HearthRoute
   '/invite': typeof InviteRoute
   '/login': typeof LoginRoute
   '/set-password': typeof SetPasswordRoute
@@ -231,7 +231,7 @@ export interface FileRouteTypes {
   fullPaths:
     | '/'
     | '/chat'
-    | '/forge'
+    | '/hearth'
     | '/invite'
     | '/login'
     | '/set-password'
@@ -256,7 +256,7 @@ export interface FileRouteTypes {
   to:
     | '/'
     | '/chat'
-    | '/forge'
+    | '/hearth'
     | '/invite'
     | '/login'
     | '/set-password'
@@ -281,7 +281,7 @@ export interface FileRouteTypes {
     | '__root__'
     | '/'
     | '/chat'
-    | '/forge'
+    | '/hearth'
     | '/invite'
     | '/login'
     | '/set-password'
@@ -307,7 +307,7 @@ export interface FileRouteTypes {
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   ChatRoute: typeof ChatRoute
-  ForgeRoute: typeof ForgeRoute
+  HearthRoute: typeof HearthRoute
   InviteRoute: typeof InviteRoute
   LoginRoute: typeof LoginRoute
   SetPasswordRoute: typeof SetPasswordRoute
@@ -342,11 +342,11 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ChatRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/forge': {
-      id: '/forge'
-      path: '/forge'
-      fullPath: '/forge'
-      preLoaderRoute: typeof ForgeRouteImport
+    '/hearth': {
+      id: '/hearth'
+      path: '/hearth'
+      fullPath: '/hearth'
+      preLoaderRoute: typeof HearthRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/invite': {
@@ -513,7 +513,7 @@ const SettingsRouteWithChildren = SettingsRoute._addFileChildren(
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   ChatRoute: ChatRoute,
-  ForgeRoute: ForgeRoute,
+  HearthRoute: HearthRoute,
   InviteRoute: InviteRoute,
   LoginRoute: LoginRoute,
   SetPasswordRoute: SetPasswordRoute,

@@ -1,6 +1,6 @@
 # lexa-cli
 
-Operator CLI for a Lexa server — tasks, wiki, projects, Forge machine/daemon
+Operator CLI for a Lexa server — tasks, wiki, projects, Hearth machine/daemon
 management, deploy, and upgrade. Wraps the Lexa REST API with `lxk_` Bearer
 keys. The CLI is versioned and released INDEPENDENTLY of the web app:
 `cli-vX.Y.Z` tags publish the binary; `vX.Y.Z` tags publish the app image.
@@ -24,7 +24,7 @@ lexa-cli upgrade
 lexa-cli login --url https://lexa.example.com --key lxk_...   # stores creds in ~/.lexa/config.json
 lexa-cli status                                               # server + machine health
 
-# Forge machine management (the listener supervises per-runtime daemons)
+# Hearth machine management (the listener supervises per-runtime daemons)
 lexa-cli machine install          # install the listener (systemd unit)
 lexa-cli machine listen           # run the listener under your own supervisor
 lexa-cli machine list             # list machines + runtimes
@@ -50,7 +50,7 @@ guide (GitHub App, Google OAuth, Access policies).
 ## Development
 
 ```bash
-bun run compile:cli        # prod binary → bin/lexa-cli (bundles the Forge daemon)
+bun run compile:cli        # prod binary → bin/lexa-cli (bundles the Hearth daemon)
 bun run install:cli-dev    # dev shim → ~/.local/bin/lexa-cli-dev (runs live source, never overwrites prod)
 bun run uninstall:cli-dev  # removes the dev shim
 ```

@@ -2,6 +2,7 @@ import { Effect } from "effect";
 import { Sqlite, queryFirst, run, DbError, RowNotFound, ConstraintViolation } from "../db/database";
 import { InvalidArgs } from "../api/errors";
 import type { HeraldReasoningEffort, HeraldSettingsInput, HeraldSettingsMasked } from "../../shared/herald";
+import { parseWriteTools } from "../herald/write-tools";
 
 export interface HeraldSettingsRow {
   project_id: string;
@@ -17,6 +18,7 @@ export interface HeraldSettingsRow {
   primary_supports_images: number;
   vision_model: string | null;
   reasoning_effort: HeraldReasoningEffort | null;
+  write_tools: string;
   created_at: string;
   updated_at: string;
 }
@@ -49,6 +51,7 @@ export class HeraldSettingsRepo extends Effect.Service<HeraldSettingsRepo>()("Le
       primarySupportsImages: row.primary_supports_images === 1,
       visionModel: row.vision_model,
       reasoningEffort: row.reasoning_effort,
+      writeTools: parseWriteTools(row.write_tools),
     });
 
     return {
@@ -68,8 +71,8 @@ export class HeraldSettingsRepo extends Effect.Service<HeraldSettingsRepo>()("Le
           yield* run(
             db,
             `INSERT INTO herald_settings (project_id, kind, base_url, api_key, model, search_provider, search_api_key, url_allowlist,
-               engine, engine_switcher_enabled, primary_supports_images, vision_model, reasoning_effort)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+               engine, engine_switcher_enabled, primary_supports_images, vision_model, reasoning_effort, write_tools)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
              ON CONFLICT(project_id) DO UPDATE SET
                kind = excluded.kind,
                base_url = excluded.base_url,
@@ -83,6 +86,7 @@ export class HeraldSettingsRepo extends Effect.Service<HeraldSettingsRepo>()("Le
                primary_supports_images = excluded.primary_supports_images,
                vision_model = excluded.vision_model,
                reasoning_effort = excluded.reasoning_effort,
+               write_tools = excluded.write_tools,
                updated_at = datetime('now')`,
             projectId,
             input.kind,
@@ -96,7 +100,9 @@ export class HeraldSettingsRepo extends Effect.Service<HeraldSettingsRepo>()("Le
             input.engineSwitcherEnabled === true ? 1 : 0,
             input.primarySupportsImages === true ? 1 : 0,
             input.visionModel ?? null,
-            input.reasoningEffort ?? null
+            input.reasoningEffort ?? null,
+            // Comma-joined known names; unknown entries dropped at parse time.
+            (input.writeTools ?? []).join(",")
           );
           return yield* getRow(projectId);
         }),
