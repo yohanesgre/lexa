@@ -3,7 +3,6 @@
 - **Status:** Accepted (amended 2026-08-23 — Hearth refactor: umbrella rename,
   two-agent catalog, engine switching, vision chain)
 - **Date:** 2026-08-22
-- **Implementation plan:** `docs/HERALD_PLAN.md`
 - **Related research:** `docs/CLOUDFLARE_WORKERS.md`
 
 ## Context
