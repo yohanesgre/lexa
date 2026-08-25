@@ -1,7 +1,7 @@
 {
   "name": "lexa",
   "version": "0.3.0",
-  "description": "Self-hosted project management — Kanban with swimlanes/WIP limits, nested wiki, Hearth AI writing assistant.",
+  "description": "Self-hosted project management \u2014 Kanban with swimlanes/WIP limits, nested wiki, Hearth AI writing assistant.",
   "scripts": {
     "test": "vitest run",
     "prepare": "./scripts/prepare-effect.sh",
@@ -15,7 +15,8 @@
     "setup": "bun run scripts/setup-cli.ts",
     "build": "vite build",
     "typecheck": "tsc --noEmit",
-    "doctor": "npx react-doctor@latest"
+    "doctor": "npx react-doctor@latest",
+    "check:mobile": "bun --env-file=.env scripts/check-mobile.mjs"
   },
   "repository": {
     "type": "git",
@@ -87,6 +88,7 @@
     "tailwindcss": "^4.3.3",
     "typescript": "^7.0.2",
     "vite": "^8.1.5",
-    "vitest": "^4.1.10"
+    "vitest": "^4.1.10",
+    "playwright": "^1.62.1"
   }
 }

@@ -184,7 +184,7 @@ export function OutlineSidebar({ headings, collapsed, onToggle }: OutlineSidebar
   if (isCollapsed) {
     return (
       <aside
-        className="flex-shrink-0 flex flex-col bg-lx-surface-elevated"
+        className="outline-sidebar outline-sidebar-rail flex-shrink-0 flex flex-col bg-lx-surface-elevated"
         style={{
           width: 36,
           minWidth: 36,
@@ -210,7 +210,7 @@ export function OutlineSidebar({ headings, collapsed, onToggle }: OutlineSidebar
 
   return (
     <aside
-      className="flex-shrink-0 flex flex-col bg-lx-surface-elevated"
+      className="outline-sidebar outline-sidebar-open flex-shrink-0 flex flex-col bg-lx-surface-elevated"
       style={{ width: 220, overflow: "hidden", borderLeft: "1px solid var(--lx-border-default)" }}
     >
       <div className="sidebar-header">

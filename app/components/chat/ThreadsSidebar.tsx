@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { useScrollLock } from "../../lib/scroll-lock";
 import { PanelLeft } from "lucide-react";
 import type { HeraldChatThreadSummary } from "../../lib/api";
 import { formatRelative } from "../../lib/relative-time";
@@ -229,6 +230,11 @@ export function ThreadsSidebar({
       </div>
     );
   };
+
+  // Lock body scroll while the threads sidebar is open.
+  useEffect(() => {
+    return useScrollLock(open);
+  }, [open]);
 
   // Collapsed: 36px icon rail with the restore control — wiki sidebar's
   // exact affordance (WikiLayout.tsx), kept at every viewport width so

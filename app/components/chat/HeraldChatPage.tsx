@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate } from "@tanstack/react-router";
-import { Send, Square, ArrowDown } from "lucide-react";
+import { Send, Square, ArrowDown, ChevronDown, ChevronUp } from "lucide-react";
 import * as api from "../../lib/api";
 import {
   useProjects,
@@ -298,6 +298,11 @@ export function HeraldChatPage({ slug, thread }: { slug: string; thread?: string
   useEffect(() => {
     try {
       if (window.localStorage.getItem("lexa-chat-sidebar") === "0") setSidebarOpen(false);
+      // On mobile the overlay would obscure the chat — default to closed
+      // unless the user explicitly opened it on this device.
+      else if (window.matchMedia("(max-width: 899.98px)").matches && window.localStorage.getItem("lexa-chat-sidebar") !== "1") {
+        setSidebarOpen(false);
+      }
     } catch {
       // non-fatal
     }
@@ -313,6 +318,23 @@ export function HeraldChatPage({ slug, thread }: { slug: string; thread?: string
       return next;
     });
   }, []);
+  // The top nav's "PanelLeft" button dispatches this event on mobile.
+  // We toggle the threads sidebar. Desktop behavior is unchanged (the
+  // collapsed rail remains the entry point there).
+  useEffect(() => {
+    function handleToggle() {
+      if (typeof window.matchMedia === "function" && window.matchMedia("(max-width: 899.98px)").matches) {
+        setSidebarOpen((v) => {
+          const next = !v;
+          try { window.localStorage.setItem("lexa-chat-sidebar", next ? "1" : "0"); } catch {}
+          return next;
+        });
+      }
+    }
+    window.addEventListener("lexa:toggle-threads-sidebar", handleToggle);
+    return () => window.removeEventListener("lexa:toggle-threads-sidebar", handleToggle);
+  }, []);
+
   useEffect(() => {
     if (!projectId) return;
     if (thread) {
@@ -371,6 +393,18 @@ export function HeraldChatPage({ slug, thread }: { slug: string; thread?: string
   // composer annotation). Changing skill mid-thread mints a fresh thread
   // server-side.
   const [skillId, setSkillId] = useState("");
+  // Skills panel collapsed by default on mobile (saves vertical space) and
+  // expanded by default on desktop (chip row is the primary selection UI).
+  // The viewport is read on mount; subsequent resizes keep the current
+  // state — the user can collapse/expand manually and the choice sticks.
+  const [skillsPanelOpen, setSkillsPanelOpen] = useState<boolean>(() => {
+    if (typeof window === "undefined" || typeof window.matchMedia !== "function") return true;
+    return !window.matchMedia("(max-width: 767px)").matches;
+  });
+  // Mobile composer treatment: collapse skills by default, flip dropdowns
+  // upward so they don't run off the bottom of the screen. Desktop keeps
+  // the original behavior (chips visible, dropdowns below).
+  const isMobileComposer = typeof window !== "undefined" && typeof window.matchMedia === "function" && window.matchMedia("(max-width: 767px)").matches;
   // Per-turn thinking effort override (herald-chat.html composer): ""
   // follows the project default; an explicit level rides the next stream
   // payload only, then falls back. Resets on thread switch / New chat.
@@ -896,15 +930,33 @@ export function HeraldChatPage({ slug, thread }: { slug: string; thread?: string
           {/* Composer */}
           <div className="chat-composer">
             <div className="chat-composer-inner">
-              {/* Shared picker component (skill only — persona comes from
-                  project settings; no agent picker exists). */}
-              <SkillPicker
-                skills={heraldSkills}
-                skillId={effectiveSkillId}
-                onSkillChange={setSkillId}
-                layout="inline"
-                allowNoSkill
-              />
+              {/* Skill picker — collapsed by default to a one-line summary
+                  (skill name + chevron). Tapping expands the chip row. */}
+              <div className="skills-panel">
+                <button
+                  type="button"
+                  className="skills-panel-toggle"
+                  aria-expanded={skillsPanelOpen}
+                  onClick={() => setSkillsPanelOpen((v) => !v)}
+                >
+                  <span className="prop-label">Skill</span>
+                  <span className="skills-panel-current">
+                    {skillName ?? "None"}
+                  </span>
+                  {skillsPanelOpen ? <ChevronUp size={14} strokeWidth={1.5} /> : <ChevronDown size={14} strokeWidth={1.5} />}
+                </button>
+                {skillsPanelOpen && (
+                  <div className="skills-panel-body">
+                    <SkillPicker
+                      skills={heraldSkills}
+                      skillId={effectiveSkillId}
+                      onSkillChange={setSkillId}
+                      layout="inline"
+                      allowNoSkill
+                    />
+                  </div>
+                )}
+              </div>
 
               {engineGate && (
                 <div className="banner-warning mb-2">
@@ -1021,7 +1073,7 @@ export function HeraldChatPage({ slug, thread }: { slug: string; thread?: string
                         <span className="font-micro text-2xs text-lx-text-muted uppercase tracking-[0.04em]">≤3 images · ≤1.5MB total</span>
                       </div>
                       <div className="flex items-center gap-2">
-                        <EffortPicker effort={effort} projectEffort={settings?.reasoningEffort ?? null} disabled={streaming} onChange={setEffort} />
+                        <EffortPicker effort={effort} projectEffort={settings?.reasoningEffort ?? null} disabled={streaming} align={isMobileComposer ? "up" : "down"} onChange={setEffort} />
                         <button type="button" className="btn btn-primary btn-sm" disabled={!input.trim() || busy409} onClick={() => send(input.trim())}>
                           Send
                           <Send size={12} strokeWidth={1.5} />
