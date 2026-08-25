@@ -56,7 +56,7 @@ export function UserMenu() {
   };
 
   return (
-    <div ref={ref} style={{ position: "relative" }}>
+    <div ref={ref} className="user-menu" style={{ position: "relative" }}>
       <button
         type="button"
         aria-expanded={open}

@@ -6609,3 +6609,1326 @@
   color: var(--lx-text-primary);
   font-weight: 500;
 }
+
+/* =========================================================
+   Lexa — Mobile / responsive
+   Three breakpoints (mobile-first defaults stay desktop):
+     • < 768px  : mobile  — single column, hamburger nav, full-screen slideover
+     • < 1024px : tablet  — narrower gutters, hide tertiary chrome
+     • ≥ 1024px : desktop (default above)
+   Touch targets ≥ 44px on mobile. No raw hex — PHOSPHOR tokens only.
+   ========================================================= */
+
+/* ---- 1. Mobile nav (hamburger + slide-down panel) ----
+   On mobile we hide the inline nav-links (no room for 7 items) and reveal a
+   hamburger button. Tapping it toggles .app-nav-menu-open on <nav> and
+   slides the panel in from the top. The panel covers the page but the nav
+   bar stays visible so the user can dismiss it. */
+.nav-hamburger {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border: 0;
+  background: transparent;
+  color: var(--lx-text-secondary);
+  border-radius: 6px;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.nav-hamburger:hover,
+.nav-hamburger[aria-expanded="true"] {
+  color: var(--lx-text-primary);
+  background: var(--lx-surface-card-hover);
+}
+.nav-hamburger svg {
+  width: 20px;
+  height: 20px;
+}
+
+/* Context-sensitive sidebar toggle (mobile only). Sits left of the Lexa
+   brand on wiki/chat routes — opens the page tree or threads sidebar. */
+.nav-sidebar-toggle {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border: 0;
+  background: transparent;
+  color: var(--lx-text-secondary);
+  border-radius: 6px;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  flex-shrink: 0;
+}
+.nav-sidebar-toggle:hover,
+.nav-sidebar-toggle:active {
+  color: var(--lx-text-primary);
+  background: var(--lx-surface-card-hover);
+}
+.nav-sidebar-toggle svg {
+  width: 20px;
+  height: 20px;
+}
+
+/* Slide-down panel rendered inside the nav. Hidden by default; opened by
+   .app-nav.app-nav-menu-open. Position: fixed so it doesn't push the page
+   down — sits over content. */
+.app-nav-menu {
+  display: none;
+}
+
+@media (max-width: 767.98px) {
+  .app-nav {
+    gap: 8px;
+    padding: 0 8px;
+    height: 48px;
+  }
+  .nav-brand {
+    font-size: 15px;
+  }
+  .nav-links {
+    display: none;
+  }
+  .nav-hamburger {
+    display: inline-flex;
+  }
+  .nav-sidebar-toggle {
+    display: inline-flex;
+  }
+  .nav-right {
+    margin-left: auto;
+    gap: 4px;
+  }
+  /* Hide the brand text "Lexa" on very narrow screens — keep just the brand
+     area clickable. The icon-only mark is implicit via the .nav-brand box. */
+  .nav-brand {
+    flex: 0 0 auto;
+  }
+
+  /* Slide-down menu (always present in DOM, only visible when opened) */
+  .app-nav-menu {
+    display: none;
+    position: fixed;
+    top: 48px;
+    left: 0;
+    right: 0;
+    background: var(--lx-surface-elevated);
+    border-bottom: 1px solid var(--lx-border-default);
+    box-shadow: var(--lx-shadow-md);
+    transform: translateY(-12px);
+    opacity: 0;
+    transition: transform 200ms var(--lx-ease-out), opacity 200ms var(--lx-ease-out);
+    z-index: 45;
+    max-height: calc(100vh - 48px);
+    overflow-y: auto;
+    padding: 8px 0 12px;
+  }
+  .app-nav.app-nav-menu-open .app-nav-menu {
+    display: block;
+    transform: translateY(0);
+    opacity: 1;
+  }
+  .app-nav-menu-link {
+    display: flex;
+    align-items: center;
+    min-height: 44px;
+    padding: 0 16px;
+    font-size: 15px;
+    font-weight: 500;
+    color: var(--lx-text-secondary);
+    text-decoration: none;
+    border-left: 2px solid transparent;
+  }
+  .app-nav-menu-link:hover,
+  .app-nav-menu-link.active {
+    color: var(--lx-text-primary);
+    background: var(--lx-surface-card-hover);
+    border-left-color: var(--lx-border-focus);
+  }
+  .app-nav-menu-divider {
+    height: 1px;
+    background: var(--lx-border-subtle);
+    margin: 8px 0;
+  }
+  /* Backdrop dismisses the menu. */
+  .app-nav-backdrop {
+    display: none;
+    position: fixed;
+    inset: 48px 0 0 0;
+    background: var(--lx-surface-overlay);
+    z-index: 44;
+  }
+  .app-nav.app-nav-menu-open + .app-nav-backdrop {
+    display: block;
+  }
+
+  /* The user menu (avatar + dropdown) in the nav-right — give it room.
+     On mobile the project switcher + hearth status are dropped: not enough
+     room in 375px. User menu + hamburger stay. */
+  .nav-right > :not(.user-menu) {
+    display: none;
+  }
+  .nav-right {
+    gap: 4px;
+    margin-left: auto;
+  }
+}
+
+/* ---- 2. Page frame ----
+   Tighter horizontal padding on mobile. Top padding stays so the nav has
+   visual separation. */
+@media (max-width: 767.98px) {
+  .page-frame {
+    padding: 16px 12px;
+  }
+  .page-frame-narrow {
+    max-width: none;
+  }
+}
+@media (min-width: 768px) and (max-width: 1023.98px) {
+  .page-frame {
+    padding: 24px 16px;
+  }
+}
+
+/* ---- 3. Wiki layout ----
+   Per wireframes/src/wiki-mobile.html: below 768px the 260px sidebar
+   becomes a full-screen overlay with a scrim instead of a 36px rail. We
+   keep the existing collapsed-rail behavior for tablet+ (1024px+), and
+   replace it with a true overlay on mobile. */
+@media (max-width: 767.98px) {
+  .wiki-layout {
+    height: calc(100vh - 48px);
+  }
+  .wiki-content {
+    padding: 16px 16px 32px;
+  }
+  .wiki-prose {
+    max-width: none;
+    font-size: 15px;
+    line-height: 24px;
+  }
+  .wiki-prose h1 {
+    font-size: 22px;
+    line-height: 28px;
+  }
+  .wiki-prose h2 {
+    font-size: 17px;
+    line-height: 24px;
+    margin-top: 24px;
+  }
+  .wiki-prose h3 {
+    font-size: 15px;
+    line-height: 22px;
+  }
+  .wiki-prose pre {
+    font-size: 12px;
+    padding: 10px 12px;
+  }
+  .wiki-prose table {
+    display: block;
+    overflow-x: auto;
+  }
+
+  /* Sidebar: position fixed, full width, slide in/out, with scrim.
+     The existing component sets a 36px rail when collapsed; on mobile we
+     override that to a true overlay. The component also keeps the rail
+     visible at < 768px via matchMedia — we force the rail off-screen when
+     the menu is closed and full-width when opened. */
+  .wiki-sidebar {
+    position: fixed !important;
+    top: 48px !important;
+    bottom: 0 !important;
+    left: 0 !important;
+    width: min(320px, 86vw) !important;
+    min-width: 0 !important;
+    padding: 0 !important;
+    align-items: stretch !important;
+    z-index: 60;
+    transition: transform 200ms var(--lx-ease-out);
+    box-shadow: var(--lx-shadow-lg);
+  }
+  /* Rail (collapsed): hidden on mobile. The top nav exposes a context-
+     sensitive toggle button (left of the Lexa brand) instead. */
+  .wiki-sidebar.wiki-sidebar-rail {
+    display: none !important;
+  }
+  /* Open sidebar: slide in. */
+  .wiki-sidebar.wiki-sidebar-open {
+    transform: translateX(0);
+  }
+  .wiki-sidebar-backdrop {
+    display: block;
+    position: fixed;
+    top: 48px;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    background: var(--lx-surface-overlay);
+    z-index: 55;
+  }
+}
+
+/* ---- 4. Task slideover ----
+   Full-screen on mobile so the editor + activity tabs have real estate. */
+@media (max-width: 767.98px) {
+  .slideover {
+    width: 100vw;
+    max-width: 100vw;
+    box-shadow: none;
+  }
+  .slideover.slideover-expanded {
+    width: 100vw;
+  }
+  .slideover-header {
+    padding: 0 12px;
+    min-height: 48px;
+  }
+  .slideover-body {
+    padding: 0 12px 12px;
+  }
+  .slideover-footer {
+    padding: 8px 12px;
+  }
+  .slideover-title {
+    font-size: 16px;
+  }
+  .slideover-body.editor-flush > :not(.task-editor-host) {
+    padding-left: 12px;
+    padding-right: 12px;
+  }
+  .slideover-body.editor-flush .task-editor-host .editor-wrapper {
+    margin: 8px 12px 0;
+  }
+}
+
+/* ---- 5. Kanban board ----
+   On mobile, columns are full-width stacked (one column visible at a time
+   with horizontal page swipe, or stacked vertically if we keep it simple).
+   The wireframe chose horizontal swipe with snap — we keep it simple:
+   columns become 85vw wide and the row scrolls horizontally with snap. */
+@media (max-width: 767.98px) {
+  .board-header {
+    flex-wrap: wrap;
+    height: auto;
+    min-height: 56px;
+    padding: 8px 12px;
+    gap: 8px;
+  }
+  .board-header > .flex.items-center.gap-2 {
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+  .board-header h1 {
+    font-size: 17px;
+  }
+  .board-scroll {
+    padding: 8px 8px 16px;
+    gap: 10px;
+  }
+  .columns-row {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    scroll-snap-type: x mandatory;
+    -webkit-overflow-scrolling: touch;
+    padding-bottom: 4px;
+    margin: 0 -8px;
+    padding-left: 8px;
+    padding-right: 8px;
+    /* Hide scrollbar on touch devices but keep it functional. */
+    scrollbar-width: none;
+  }
+  .columns-row::-webkit-scrollbar {
+    display: none;
+  }
+  .column {
+    width: 85vw;
+    max-width: 320px;
+    scroll-snap-align: start;
+  }
+  .board-lanes {
+    /* Keep swimlane labels readable on mobile. */
+    font-size: 12px;
+  }
+  /* Milestone selector + filter chips: stack and wrap. */
+  .board-header .flex.items-center.gap-3 {
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+  /* Make the "Settings" + "Show archived" + filter buttons full-width-ish. */
+  .board-header .btn {
+    min-height: 36px;
+  }
+}
+
+/* ---- 6. Tasks list view ----
+   Per-row meta collapses; "where" column hides the swimlane text on mobile
+   to keep the row one line; type/priority chips stay. */
+@media (max-width: 767.98px) {
+  .tasks-page {
+    gap: 12px;
+  }
+  .tasks-title {
+    font-size: 20px;
+    line-height: 26px;
+  }
+  .tasks-header {
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .tasks-search {
+    min-width: 0;
+    width: 100%;
+    flex-basis: 100%;
+  }
+  .tasks-filter {
+    width: 100%;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 6px;
+  }
+  .tasks-select {
+    min-width: 0;
+    width: 100%;
+    max-width: none;
+  }
+  .tasks-archive-toggle {
+    grid-column: 1 / -1;
+    width: 100%;
+    justify-content: center;
+  }
+  .task-row-title {
+    font-size: 14px;
+  }
+  .tasks-list .card-row {
+    flex-wrap: wrap;
+    padding: 10px 12px;
+    gap: 8px;
+  }
+  .tasks-list .card-row .task-key,
+  .tasks-list .card-row .task-row-key {
+    flex-shrink: 0;
+    white-space: nowrap;
+  }
+  .task-row-meta {
+    flex-wrap: wrap;
+    gap: 4px;
+  }
+  .task-row-where {
+    flex-basis: auto;
+    order: 0;
+    margin-top: 0;
+  }
+  .task-row-title {
+    font-size: 14px;
+    flex-basis: 100%;
+    order: 3;
+    margin-top: 2px;
+  }
+  .milestones-content {
+    gap: 12px;
+  }
+  .milestone-card {
+    padding: 12px;
+  }
+  .milestone-card-header {
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+  .milestone-card-title {
+    font-size: 16px;
+  }
+  .gantt-chart {
+    overflow-x: auto;
+  }
+}
+
+/* ---- 8. Swimlanes settings ----
+   Form rows stack. */
+@media (max-width: 767.98px) {
+  .swimlanes-page {
+    gap: 12px;
+  }
+  .swimlane-form-row {
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .swimlane-form-row .swimlane-handle {
+    min-height: 44px;
+    min-width: 44px;
+  }
+  .swimlane-color-picker {
+    flex-wrap: wrap;
+  }
+}
+
+/* ---- 9. Chat (Herald threads + chat page) ----
+   Threads sidebar already becomes an overlay below 900px. Tighten the
+   chat surface so the composer and message bubbles use full width. */
+@media (max-width: 767.98px) {
+  .chat-page,
+  .herald-chat-page {
+    /* nothing specific; the threads sidebar already handles its mobile
+       breakpoint. We just ensure the message column takes full width. */
+  }
+  .chat-message {
+    max-width: 100%;
+  }
+  .composer-editor {
+    font-size: 16px; /* prevent iOS zoom on focus */
+  }
+  .chat-input,
+  .input,
+  textarea,
+  select,
+  input[type="text"],
+  input[type="email"],
+  input[type="password"],
+  input[type="search"] {
+    font-size: 16px; /* prevent iOS zoom on focus */
+  }
+}
+
+/* ---- 10. Settings (workspace, team, project, me) ----
+   Settings nav (side rail) collapses to a top tab strip on mobile. The
+   settings-table becomes a horizontally-scrollable card so columns are
+   never squeezed. */
+@media (max-width: 767.98px) {
+  .settings-layout {
+    flex-direction: column;
+    gap: 12px;
+  }
+  .settings-side {
+    width: 100% !important;
+    flex-shrink: 0;
+    border-right: none;
+    border-bottom: 1px solid var(--lx-border-default);
+    padding-bottom: 8px;
+  }
+  .settings-side-list {
+    display: flex;
+    flex-direction: row;
+    overflow-x: auto;
+    gap: 4px;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+  }
+  .settings-side-list::-webkit-scrollbar {
+    display: none;
+  }
+  .settings-side-item {
+    flex-shrink: 0;
+    min-height: 36px;
+    padding: 0 12px;
+    border-radius: 4px;
+  }
+  .settings-content {
+    min-width: 0;
+  }
+  .settings-table {
+    display: block;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+  .settings-section {
+    padding: 12px;
+  }
+  .settings-card {
+    padding: 12px;
+  }
+}
+
+/* ---- 11. Hearth control panel ----
+   The control panel has 2 columns on desktop; stack on mobile. Form rows
+   wrap. */
+@media (max-width: 767.98px) {
+  .hearth-page,
+  .hearth-content {
+    gap: 12px;
+  }
+  .hearth-grid {
+    grid-template-columns: 1fr !important;
+    gap: 12px;
+  }
+  .hearth-form-row {
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+}
+
+/* ---- 12. Modals / dialogs ----
+   Modals become full-width with smaller padding on mobile. */
+@media (max-width: 767.98px) {
+  .modal,
+  dialog.modal {
+    width: 100vw;
+    max-width: 100vw;
+    height: 100vh;
+    max-height: 100vh;
+    border-radius: 0;
+    margin: 0;
+    padding: 16px 12px;
+  }
+  .modal-header,
+  .modal-footer {
+    padding-left: 0;
+    padding-right: 0;
+  }
+  .modal-body {
+    padding: 12px 0;
+  }
+  .modal-close {
+    min-width: 44px;
+    min-height: 44px;
+  }
+}
+
+/* ---- 13. Home / dashboard ----
+   The home page uses a card grid; on mobile it becomes a single column. */
+@media (max-width: 767.98px) {
+  .home-header {
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .home-grid {
+    grid-template-columns: 1fr !important;
+    gap: 12px;
+  }
+  .home-card {
+    padding: 12px;
+  }
+  .home-title {
+    font-size: 20px;
+    line-height: 26px;
+  }
+  .project-card {
+    padding: 12px;
+  }
+}
+
+/* ---- 14. Project dashboard + home: actual class names ----
+   .project-cards is a 3-col grid → 1-col on mobile.
+   .stats-bar is a 4-col grid → 2-col on mobile (small enough to keep two
+   cards per row, big enough to read 36px display values). */
+@media (max-width: 767.98px) {
+  .project-cards {
+    grid-template-columns: 1fr;
+    gap: 12px;
+  }
+  .stats-bar {
+    grid-template-columns: repeat(2, 1fr);
+    gap: 10px;
+  }
+  .stats-bar .stat-value {
+    font-size: 28px;
+    line-height: 32px;
+  }
+  .stat-card {
+    padding: 14px;
+  }
+  /* Project dashboard grid (status sections) — used in $slug/index.tsx */
+  .project-dashboard-grid {
+    grid-template-columns: 1fr !important;
+    gap: 16px;
+  }
+  /* Milestone cards: stack children */
+  .milestone-card-header h3 {
+    font-size: 15px;
+  }
+  .milestone-card-meta {
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+}
+
+/* ---- 15. Tasks page filter + form rows ----
+   Already handled in section 6, but ensure inline form rows in the board
+   toolbar (filter, settings modal) also wrap. */
+@media (max-width: 767.98px) {
+  .filter-popover {
+    width: calc(100vw - 32px);
+    max-width: 320px;
+  }
+  .kanban-settings-modal {
+    width: 100vw;
+    max-width: 100vw;
+    height: 100vh;
+    max-height: 100vh;
+    border-radius: 0;
+    margin: 0;
+  }
+  /* Swimlane / column form rows */
+  .option-form-row {
+    flex-wrap: wrap;
+  }
+}
+
+/* ---- 16. Herald chat composer + message bubbles ----
+   The Herald panel uses a 2-column layout (sidebar + thread). On mobile
+   the sidebar already becomes overlay (existing rule). Tighten message
+   composer and prevent iOS zoom. */
+@media (max-width: 767.98px) {
+  .herald-panel,
+  .herald-chat-page {
+    gap: 0;
+  }
+  .herald-thread {
+    padding: 0;
+  }
+  .message-bubble {
+    max-width: 88%;
+  }
+  .composer-toolbar button,
+  .tab-btn {
+    min-height: 36px;
+    padding: 0 10px;
+  }
+  .herald-input,
+  .composer-editor {
+    font-size: 16px;
+  }
+}
+
+/* ---- 17. Form rows: general ----
+   Multi-field rows (label + input + button) stack on mobile. */
+@media (max-width: 767.98px) {
+  .form-row,
+  .field-row {
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .form-row > .field,
+  .field-row > .field {
+    flex-basis: 100%;
+  }
+  /* Inputs min-height 44px for touch targets */
+  .input,
+  input.input,
+  textarea.input,
+  select.input,
+  .tasks-search,
+  .tasks-select,
+  .wiki-search-input,
+  .select-trigger,
+  .menu-button,
+  .btn {
+    min-height: 36px;
+  }
+  .btn-primary,
+  .btn-danger-solid,
+  .btn-ghost {
+    min-height: 36px;
+  }
+  .icon-btn {
+    min-width: 36px;
+    min-height: 36px;
+  }
+}
+
+/* ---- 18. Toast & dropdown positioning ----
+   Toasts: don't fight the bottom edge on notched phones. */
+@media (max-width: 767.98px) {
+  .toast-container {
+    left: 12px;
+    right: 12px;
+    bottom: 12px;
+    max-width: none;
+  }
+  .toast {
+    width: 100%;
+  }
+}
+
+/* ---- 19. Wiki outline sidebar (CONTENTS) ----
+   The outline is a secondary sidebar. On mobile we hide it entirely — the
+   hamburger already exposes the page tree (the primary sidebar), and
+   stacking two overlays would crowd the screen. Re-enable via the
+   toggle in the rail (kept available for tablet+ widths). */
+@media (max-width: 767.98px) {
+  .outline-sidebar {
+    display: none !important;
+  }
+}
+
+/* ---- 20. Threads sidebar collapsed on mobile ----
+   The collapsed rail is hidden on mobile — the top nav exposes a context-
+   sensitive toggle (left of the Lexa brand) instead. The chat shell
+   uses the full viewport width. */
+@media (max-width: 899.98px) {
+  .threads-sidebar.collapsed {
+    display: none !important;
+  }
+  .chat-layout > .chat-shell,
+  .chat-layout > main.chat-shell {
+    padding-left: 0;
+  }
+}
+
+/* Settings table — ensure horizontal scroll on mobile. The table has
+   min-width so columns don't squeeze; the .card-panel wrapper is the
+   scroll container. */
+@media (max-width: 767.98px) {
+  .settings-table {
+    min-width: 540px;
+  }
+  /* The settings table usually lives inside a .card-panel; ensure the
+     wrapper scrolls instead of overflowing the page. */
+  .card-panel:has(> .settings-table) {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+}
+
+/* ---- 21. Tablet (768–1023px) nav: also use hamburger ----
+   At 768–1023px there's not enough room for 7 inline nav links + project
+   switcher + 4 right-side icons. The hamburger pattern is universal below
+   1024px. */
+@media (min-width: 768px) and (max-width: 1023.98px) {
+  .app-nav .nav-links {
+    display: none;
+  }
+  .app-nav .nav-hamburger {
+    display: inline-flex;
+  }
+  .app-nav .nav-sidebar-toggle {
+    display: inline-flex;
+  }
+  .app-nav .app-nav-menu {
+    display: block;
+    position: fixed;
+    top: 48px;
+    left: 0;
+    right: 0;
+    background: var(--lx-surface-elevated);
+    border-bottom: 1px solid var(--lx-border-default);
+    box-shadow: var(--lx-shadow-md);
+    transform: translateY(-12px);
+    opacity: 0;
+    transition: transform 200ms var(--lx-ease-out), opacity 200ms var(--lx-ease-out);
+    z-index: 45;
+    max-height: calc(100vh - 48px);
+    overflow-y: auto;
+    padding: 8px 0 12px;
+  }
+  .app-nav.app-nav-menu-open .app-nav-menu {
+    display: block;
+    transform: translateY(0);
+    opacity: 1;
+  }
+  .app-nav.app-nav-menu-open + .app-nav-backdrop {
+    display: block;
+  }
+  /* Right cluster: drop project switcher and hearth on tablet too, keep
+     theme + user. */
+  .nav-right > :not(.user-menu):not(.nav-pill) {
+    display: none;
+  }
+}
+
+/* ---- 22. Wiki edit page on mobile ----
+   The edit view is a 2-column split (preview | editor) plus a page-settings
+   sidebar on the right. On mobile:
+   - The 2-column split (WikiEditSplit) becomes a vertical stack.
+   - The page-settings sidebar (EditSidebar) is hidden — its Autosave
+     toggle and Version History are desktop-only. The EditHeader's
+     Cancel/Save buttons remain in the main flow. */
+@media (max-width: 767.98px) {
+  .wiki-edit-workspace {
+    flex-direction: column;
+  }
+  .wiki-edit-main {
+    padding: 0;
+    min-height: 0;
+  }
+  /* Stack the preview/editor split on mobile. */
+  .wiki-edit-workspace .flex.flex-1.overflow-hidden {
+    flex-direction: column !important;
+  }
+  .wiki-edit-workspace .flex.flex-1.overflow-hidden > .flex.flex-1.flex-col {
+    min-height: 200px;
+  }
+  /* Hide the page-settings sidebar (Autosave + Version History) on mobile. */
+  .wiki-edit-workspace .wiki-edit-sidebar,
+  .wiki-edit-workspace aside.flex-shrink-0.flex.flex-col.bg-lx-surface-elevated {
+    display: none !important;
+  }
+}
+
+/* ---- 23. Mobile refinements ----
+   The top-nav sidebar toggle duplicates the in-header collapse button on
+   the wiki page tree and Herald threads sidebars. On mobile we hide the
+   in-header button (the nav has the toggle) — desktop keeps it.
+   Also: shrink the nav sidebar toggle to match the brand. */
+@media (max-width: 1023.98px) {
+  /* The Collapse sidebar button inside wiki + threads sidebars. */
+  .wiki-sidebar .sidebar-header button[aria-label="Collapse sidebar"],
+  .threads-sidebar .threads-sidebar-header button[aria-label="Collapse sidebar"] {
+    display: none !important;
+  }
+  /* The X "Close threads" backdrop button — keep (it's the dimmer, not
+     a duplicate control). */
+
+  /* Smaller nav sidebar toggle. */
+  .nav-sidebar-toggle {
+    width: 32px;
+    height: 32px;
+  }
+  .nav-sidebar-toggle svg {
+    width: 16px;
+    height: 16px;
+  }
+}
+
+/* ---- 24. Chat composer on mobile: compact + elevated ----
+   The desktop composer has 12px/24px/20px padding and shares the page
+   background. On mobile we:
+   - Trim padding
+   - Lift the composer with a card surface + shadow so it reads as the
+     primary action area
+   - Tighten message bubble padding
+   - Add the collapsible skills panel styles */
+@media (max-width: 767.98px) {
+  /* Composer container — elevated card with safe-area-aware padding. */
+  .chat-composer {
+    padding: 8px 12px 12px;
+    background: var(--lx-surface-elevated);
+    border-top: 1px solid var(--lx-border-default);
+    box-shadow: 0 -2px 12px rgba(0, 0, 0, 0.25);
+    /* Sit above the iOS home indicator. */
+    padding-bottom: max(12px, env(safe-area-inset-bottom));
+  }
+  .chat-composer-inner {
+    max-width: none;
+  }
+
+  /* Skills panel — collapsed by default. The toggle row is one line tall
+     (28px) showing the current skill; tap to expand. */
+  .skills-panel {
+    margin-bottom: 8px;
+  }
+  .skills-panel-toggle {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    width: 100%;
+    height: 28px;
+    padding: 0 8px;
+    background: transparent;
+    border: 1px solid var(--lx-border-subtle);
+    border-radius: 6px;
+    color: var(--lx-text-secondary);
+    font: inherit;
+    font-size: 12px;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .skills-panel-toggle:hover,
+  .skills-panel-toggle:active {
+    background: var(--lx-surface-card-hover);
+  }
+  .skills-panel-toggle .prop-label {
+    color: var(--lx-text-muted);
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+  .skills-panel-current {
+    flex: 1;
+    min-width: 0;
+    text-align: left;
+    color: var(--lx-text-primary);
+    font-size: 12px;
+    font-weight: 500;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .skills-panel-body {
+    margin-top: 6px;
+  }
+
+  /* Tighter message bubble padding so more content fits on screen. */
+  .bubble,
+  .bubble-user,
+  .bubble-ai {
+    padding: 10px 12px !important;
+  }
+  .bubble-meta {
+    margin-bottom: 4px;
+  }
+}
+
+/* ---- 25. Tables inside chat bubbles on mobile ----
+   .bubble-md table is `width: 100%` on desktop, which is fine. On mobile
+   the bubble is narrow (~320px content area) and the table contents
+   (e.g. "App crashes on dashboard; 100% reproducible...") exceed it. The
+   table currently overflows the bubble horizontally — keys are clipped
+   on the left and the right side scrolls off-screen.
+
+   Fix: turn the table into a horizontally-scrollable block on mobile
+   with a sensible min-width. The user scrolls the table, not the
+   bubble. */
+@media (max-width: 767.98px) {
+  .bubble-md table {
+    display: block;
+    width: 100%;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    font-size: 12px;
+    /* Subtle visual hint that the table scrolls. */
+    border: 1px solid var(--lx-border-default);
+    border-radius: 4px;
+  }
+  .bubble-md table thead,
+  .bubble-md table tbody {
+    display: table;
+    width: 100%;
+    min-width: 360px;
+  }
+  .bubble-md th,
+  .bubble-md td {
+    padding: 6px 8px;
+    word-break: break-word;
+  }
+  .bubble-md pre {
+    /* Pre blocks are also wide on mobile; allow horizontal scroll. */
+    max-width: 100%;
+    overflow-x: auto;
+  }
+}
+
+/* ---- 26. Chat bubble max-width on mobile ----
+   Bubbles currently span ~80-88% of the chat shell which on a 375px
+   viewport leaves a thin right margin. The user feedback is that bubbles
+   feel "too flat" / too wide. Tighten the max-widths so:
+   - User bubbles stay short and right-aligned (typical chat UX)
+   - AI bubbles have a visible right margin so the chat reads as a
+     conversation, not a flat document
+*/
+@media (max-width: 767.98px) {
+  .bubble-user {
+    max-width: 78%;
+  }
+  .bubble-ai {
+    max-width: 92%;
+  }
+}
+
+/* ---- 27. Chat composer footer buttons on mobile ----
+   The chat composer footer (image attach + effort picker + Send) renders
+   its buttons at 36px tall which feels too chunky on a 375px viewport —
+   the row visually dominates the textarea above. Tighten heights + padding
+   so the composer reads as a single tight action bar. */
+@media (max-width: 767.98px) {
+  .chat-composer .composer-footer {
+    padding: 6px 8px;
+    gap: 6px;
+  }
+  .chat-composer .composer-footer .btn,
+  .chat-composer .composer-footer .btn-sm,
+  .chat-composer .composer-footer .btn-icon-sm {
+    min-height: 30px;
+    height: 30px;
+    padding: 0 10px;
+    font-size: 12px;
+  }
+  .chat-composer .composer-footer .btn-icon-sm {
+    width: 30px;
+    padding: 0;
+  }
+  .chat-composer .composer-footer .btn svg,
+  .chat-composer .composer-footer .btn-sm svg {
+    width: 12px;
+    height: 12px;
+  }
+  /* "≤3 images · ≤1.5MB total" — shrink + tighter line height. */
+  .chat-composer .composer-footer .font-micro {
+    font-size: 9px;
+    line-height: 1.3;
+  }
+}
+
+/* ---- 28. Skills panel on desktop ----
+   On desktop the chip row is the primary skill-selection UI. The mobile
+   collapsible toggle (one-line summary + chevron) is redundant here and
+   adds visual noise — hide it. On mobile it stays as the entry point. */
+@media (min-width: 768px) {
+  .skills-panel-toggle {
+    display: none !important;
+  }
+  .skills-panel-body {
+    margin-top: 0 !important;
+  }
+}
+
+/* ---- 29. Chat thread header on mobile ----
+   The thread header renders the title ("Herald Chat") and a long subtitle
+   ("NIMBUS · THREAD WITH HERALD — NOT TIED TO ANY DOCUMENT") side by side.
+   On mobile the subtitle overflows past the right edge. Stack the
+   subtitle below the title and let it wrap. */
+@media (max-width: 767.98px) {
+  .chat-shell > div:first-child {
+    padding: 12px 12px 0 !important;
+  }
+  .chat-shell > div:first-child .flex.items-center.gap-3 {
+    flex-wrap: wrap;
+    gap: 4px;
+  }
+  .chat-shell > div:first-child .font-micro {
+    flex-basis: 100%;
+    line-height: 1.5;
+  }
+}
+
+/* ---- 30. Effort picker button on mobile ----
+   The "default (medium)" trigger wraps to two lines at 11px in a 100px
+   button, which doubles the footer row height. Force white-space: nowrap
+   so it stays on one line; if the text overflows the button it's
+   truncated by the button's own padding-right — readable in practice
+   since the chevron is the affordance. */
+@media (max-width: 767.98px) {
+  .chat-composer .composer-footer button[aria-haspopup="listbox"] {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    flex-shrink: 0;
+  }
+}
+
+/* ---- 31. Project switcher in the mobile nav menu ----
+   At the top of the slide-down menu, show a "Project: <name> ▾" toggle
+   that expands to a list of projects. Mirrors the desktop ProjectSwitcher
+   but as an inline panel inside the menu. */
+.app-nav-menu-project {
+  border-bottom: 1px solid var(--lx-border-subtle);
+  margin: 0 0 4px;
+  padding: 0;
+}
+.app-nav-menu-project-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  min-height: 44px;
+  padding: 0 16px;
+  background: transparent;
+  border: 0;
+  border-left: 2px solid transparent;
+  font: inherit;
+  font-size: 13px;
+  color: var(--lx-text-primary);
+  cursor: pointer;
+  text-align: left;
+  -webkit-tap-highlight-color: transparent;
+}
+.app-nav-menu-project-toggle:hover,
+.app-nav-menu-project-toggle:active {
+  background: var(--lx-surface-card-hover);
+}
+.app-nav-menu-project-label {
+  font-family: var(--lx-font-micro);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--lx-text-muted);
+  min-width: 50px;
+}
+.app-nav-menu-project-name {
+  flex: 1;
+  min-width: 0;
+  font-weight: 600;
+  color: var(--lx-text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.app-nav-menu-project-list {
+  background: var(--lx-surface-elevated);
+  max-height: 200px;
+  overflow-y: auto;
+  border-bottom: 1px solid var(--lx-border-subtle);
+}
+.app-nav-menu-project-list .app-nav-menu-link {
+  padding-left: 32px;
+  font-size: 13px;
+  font-weight: 400;
+}
+.app-nav-menu-project-list .app-nav-menu-link.active {
+  color: var(--lx-text-link);
+  background: rgba(240, 192, 64, 0.2);
+  border-left-color: var(--lx-border-focus);
+}
+.rotate-180 {
+  transform: rotate(180deg);
+}
+
+/* Fix: project list items need full-width bg. The .app-nav-menu-project
+   container is a block element but the inner list is also block by
+   default; the actual issue is that .app-nav-menu-project-list was
+   inheriting the parent's content width when it should be 100% of the
+   menu (which is already full viewport width via the .app-nav-menu
+   fixed positioning). */
+.app-nav-menu-project,
+.app-nav-menu-project-list {
+  display: block;
+  width: 100%;
+}
+
+/* Project list items must fill the row width — without this they
+   collapse to content + padding. */
+.app-nav-menu-project-list .app-nav-menu-link {
+  width: 100%;
+  box-sizing: border-box;
+}
+
+
+
+/* ---- 32. Tablet menu: link display + flex column layout ----
+   On tablet (768-1023px) the menu is shown via hamburger but the
+   `.app-nav-menu-link { display: flex }` rule lives in the mobile media
+   query (max-width: 767.98px) and doesn't apply. Without it, links fall
+   back to inline-block and shrink to content width — producing the
+   right-aligned cluster seen in the screenshot. The project list and
+   separators also need the same column treatment. */
+@media (min-width: 768px) and (max-width: 1023.98px) {
+  .app-nav .app-nav-menu {
+    display: flex;
+    flex-direction: column;
+  }
+  .app-nav .app-nav-menu-link,
+  .app-nav .app-nav-menu-project-toggle,
+  .app-nav .app-nav-menu-project-list .app-nav-menu-link {
+    display: flex;
+    align-items: center;
+    width: 100%;
+    box-sizing: border-box;
+  }
+  .app-nav .app-nav-menu-divider {
+    width: 100%;
+  }
+  .app-nav .app-nav-menu-project,
+  .app-nav .app-nav-menu-project-list {
+    display: block;
+    width: 100%;
+  }
+}
+
+/* ---- 33. Action items in the nav menu (Project settings, Create new project) ----
+   The action items inside the project selector need the same visual
+   treatment as a regular menu link (row height, padding, hover state) but
+   must NEVER be styled as "active" — they're not navigation destinations
+   that the user is currently on in the nav sense. Project settings and
+   Create new project both use this class. */
+.app-nav-menu-action {
+  display: flex;
+  align-items: center;
+  min-height: 44px;
+  padding: 0 16px;
+  font-size: 15px;
+  font-weight: 500;
+  color: var(--lx-text-secondary);
+  text-decoration: none;
+  border-left: 2px solid transparent;
+  width: 100%;
+  box-sizing: border-box;
+  -webkit-tap-highlight-color: transparent;
+}
+.app-nav-menu-action:hover,
+.app-nav-menu-action:active {
+  color: var(--lx-text-primary);
+  background: var(--lx-surface-card-hover);
+  border-left-color: var(--lx-border-focus);
+}
+/* Belt + suspenders: TanStack Router may still try to mark the link
+   active via data-status="active" or an .active class. Strip any active
+   treatment this class might inherit. */
+.app-nav-menu-action.active,
+.app-nav-menu-action[data-status="active"] {
+  color: var(--lx-text-secondary) !important;
+  background: transparent !important;
+  border-left-color: transparent !important;
+}
+.app-nav-menu-action.active:hover,
+.app-nav-menu-action[data-status="active"]:hover {
+  color: var(--lx-text-primary) !important;
+  background: var(--lx-surface-card-hover) !important;
+  border-left-color: var(--lx-border-focus) !important;
+}
+
+/* ---- 34. Hover-scroll-lock for open nav menus ----
+   When the user's pointer is over an open nav surface (hamburger menu,
+   wiki sidebar overlay, chat threads overlay, project selector list,
+   any other dropdown), prevent the page underneath from scrolling. The
+   standard pattern is a `data-scroll-lock` attribute on <body> toggled
+   on pointerenter/pointerleave. Mobile touch users are unaffected (touch
+   events don't fire pointerenter, the menu scrolls itself). */
+[data-scroll-lock="true"] {
+  overflow: hidden !important;
+  /* Preserve scroll position visually — works in conjunction with the
+     <body>'s existing overflow. */
+  touch-action: none;
+}
+
+/* ---- 35. Nav menu link padding on tablet ----
+   The base .app-nav-menu-link padding (0 16px) lives in the mobile media
+   query (max-width: 767.98px). On tablet the menu items inherit no
+   padding from the base rule and end up flush against the left edge of
+   the menu — matches the visual when the menu opens at 800-1023px. The
+   project toggle + project list rows also need the same horizontal
+   padding for visual consistency. */
+@media (min-width: 768px) and (max-width: 1023.98px) {
+  .app-nav .app-nav-menu-link,
+  .app-nav .app-nav-menu-action,
+  .app-nav .app-nav-menu-project-toggle {
+    padding-left: 16px;
+    padding-right: 16px;
+  }
+  .app-nav .app-nav-menu-project-list .app-nav-menu-link,
+  .app-nav .app-nav-menu-project-list .app-nav-menu-action {
+    padding-left: 32px;
+  }
+}
+
+/* ---- 36. Nav menu link base styles (applies at all viewports) ----
+   The base .app-nav-menu-link styles (color, border-left, padding,
+   font-size) live inside the mobile media query. On tablet the menu
+   items fall back to a default text color and lose the left-border
+   active indicator. Move the base styles to top-level so they apply
+   whenever the menu is rendered (mobile, tablet, or in the future). */
+.app-nav-menu-link {
+  display: flex;
+  align-items: center;
+  min-height: 44px;
+  padding: 0 16px;
+  font-size: 15px;
+  font-weight: 500;
+  color: var(--lx-text-secondary);
+  text-decoration: none;
+  border-left: 2px solid transparent;
+}
+.app-nav-menu-link:hover,
+.app-nav-menu-link.active {
+  color: var(--lx-text-primary);
+  background: var(--lx-surface-card-hover);
+  border-left-color: var(--lx-border-focus);
+}
+
+/* ---- 37. Nav backdrop on tablet ----
+   The .app-nav-backdrop display rules live in the mobile media query.
+   On tablet (768-1023px) the menu is shown via hamburger but the
+   backdrop is hidden — the page content under the menu isn't dimmed.
+   Promote the backdrop rules to top-level (and the menu-open variant)
+   so they apply at every viewport where the menu is shown. */
+.app-nav-backdrop {
+  display: none;
+  position: fixed;
+  inset: 48px 0 0 0;
+  background: var(--lx-surface-overlay);
+  z-index: 44;
+}
+.app-nav.app-nav-menu-open + .app-nav-backdrop {
+  display: block;
+}

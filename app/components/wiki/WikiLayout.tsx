@@ -1,5 +1,6 @@
 import { Link, useNavigate } from "@tanstack/react-router";
 import { useEffect, useMemo, useState, useCallback, useRef } from "react";
+import { useScrollLock } from "../../lib/scroll-lock";
 import { Search, ChevronRight, Plus, X, Pencil, FolderInput, Trash2, PanelLeft } from "lucide-react";
 import { useWikiPages, useSearchWikiPages, useDeleteWikiPage } from "../../lib/queries";
 import type { WikiPageMeta } from "../../../shared/types";
@@ -317,12 +318,29 @@ export function WikiLayout({ slug, activePageSlug, children }: WikiLayoutProps) 
       : false
   );
 
+  // The top nav's "PanelLeft" button dispatches this event on mobile. We
+  // open the sidebar so the user can pick a different page. Desktop
+  // behavior is unchanged (the rail remains the entry point there).
+  useEffect(() => {
+    function handleToggle() {
+      if (typeof window.matchMedia === "function" && window.matchMedia("(max-width: 767px)").matches) {
+        setSidebarCollapsed(false);
+      }
+    }
+    window.addEventListener("lexa:toggle-wiki-sidebar", handleToggle);
+    return () => window.removeEventListener("lexa:toggle-wiki-sidebar", handleToggle);
+  }, []);
+
+  // Lock body scroll while the wiki sidebar is open.
+  useEffect(() => {
+    return useScrollLock(!sidebarCollapsed);
+  }, [sidebarCollapsed]);
+
   return (
     <div className="wiki-layout">
       {sidebarCollapsed ? (
         <aside
-          className="wiki-sidebar"
-          style={{ width: 36, minWidth: 36, padding: "8px 0", alignItems: "center" }}
+          className="wiki-sidebar wiki-sidebar-rail"
         >
           <button
             type="button"
@@ -335,7 +353,7 @@ export function WikiLayout({ slug, activePageSlug, children }: WikiLayoutProps) 
           </button>
         </aside>
       ) : (
-      <aside className="wiki-sidebar">
+      <aside className="wiki-sidebar wiki-sidebar-open">
         <div className="sidebar-header">
           <div style={{ flex: 1, minWidth: 0 }}>
             <WikiSearchBox

@@ -123,15 +123,19 @@ describe("AppShell", () => {
     expect(screen.getByText("Lexa")).toBeInTheDocument();
     // Settings is no longer a nav tab — settings entry points live in the
     // user menu and the project switcher.
+    // Mobile menu duplicates the desktop nav links in the DOM for the
+    // hamburger drawer — getAllByText returns both. We just need to
+    // confirm each label is present at least once.
     for (const label of ["Dashboard", "Board", "Tasks", "Wiki", "Milestones", "Swimlanes"]) {
-      expect(screen.getByText(label)).toBeInTheDocument();
+      expect(screen.getAllByText(label).length).toBeGreaterThanOrEqual(1);
     }
     expect(screen.queryByRole("link", { name: "Settings" })).not.toBeInTheDocument();
     // "Hearth" appears in the nav link and in HearthStatus
     expect(screen.getAllByText("Hearth").length).toBeGreaterThanOrEqual(1);
     expect(screen.getByTestId("outlet")).toBeInTheDocument();
-    // board route → the Board NavLink is active
-    expect(screen.getByText("Board").className).toContain("active");
+    // board route → the Board NavLink is active. Multiple matches exist
+    // (desktop + mobile drawer); any with the active class suffices.
+    expect(screen.getAllByText("Board").some((el) => el.className.includes("active"))).toBe(true);
   });
 
   it("shows the signed-out Log in CTA in the user menu slot when there is no session", async () => {
@@ -170,8 +174,12 @@ describe("AppShell", () => {
     pathnameMock.value = "/hearth";
     render(<ProjectSelectionProvider><AppShell /></ProjectSelectionProvider>, { wrapper });
     expect(screen.getByText("Lexa").className).not.toContain("active");
-    expect(screen.getByRole("link", { name: "Hearth" }).className).toContain("active");
-    expect(screen.getByText("Dashboard").className).not.toContain("active");
+    // NavLinks render the same label twice (desktop + mobile drawer);
+    // assert at least one has the active class.
+    const hearthLinks = screen.getAllByRole("link", { name: "Hearth" });
+    expect(hearthLinks.some((el) => el.className.includes("active"))).toBe(true);
+    const dashLinks = screen.getAllByText("Dashboard");
+    expect(dashLinks.every((el) => !el.className.includes("active"))).toBe(true);
   });
 
   it("on / the brand IS active and no nav link is", () => {
@@ -179,9 +187,13 @@ describe("AppShell", () => {
     render(<ProjectSelectionProvider><AppShell /></ProjectSelectionProvider>, { wrapper });
     expect(screen.getByText("Lexa").className).toContain("active");
     for (const label of ["Dashboard", "Board", "Tasks", "Wiki", "Milestones", "Swimlanes"]) {
-      expect(screen.getByText(label).className).not.toContain("active");
+      // Multiple matches exist (desktop + mobile drawer). Neither should
+      // have the active class on the home route.
+      expect(screen.getAllByText(label).every((el) => !el.className.includes("active"))).toBe(true);
     }
-    expect(screen.getAllByRole("link", { name: "Hearth" })[0]!.className).not.toContain("active");
+    // The desktop nav link is rendered as the first match in document order.
+    const hearthLinks = screen.getAllByRole("link", { name: "Hearth" });
+    expect(hearthLinks[0]!.className).not.toContain("active");
   });
 
   it("switches the selected project from the switcher", async () => {

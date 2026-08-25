@@ -1,7 +1,11 @@
-import { useMemo } from "react";
-import { Link, Outlet, useRouterState } from "@tanstack/react-router";
+import { useEffect, useMemo, useState } from "react";
+import { useScrollLock } from "../../lib/scroll-lock";
+import { Link, Outlet, useRouterState, useNavigate } from "@tanstack/react-router";
+import { Menu, X, PanelLeft, ChevronDown } from "lucide-react";
+import { cn } from "../ui/cn";
 import { useProjectSelection } from "../../lib/project-selection";
 import { HearthStatus } from "../hearth/HearthStatus";
+import { useProjects } from "../../lib/queries";
 import { NavLink } from "./NavLink";
 import { ProjectSwitcher } from "./ProjectSwitcher";
 import { ThemeToggle } from "./ThemeToggle";
@@ -15,7 +19,35 @@ const BARE_PREFIXES = ["/share/"];
 
 export function AppShell() {
   const pathname = useRouterState({ select: (s) => s.location.pathname });
-  const { selectedSlug } = useProjectSelection();
+  const { selectedSlug, setSelectedSlug } = useProjectSelection();
+  const navigate = useNavigate();
+  const { data: projects = [] } = useProjects();
+  const selectedProjectId = projects.find((p) => p.slug === selectedSlug)?.id;
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [projectListOpen, setProjectListOpen] = useState(false);
+
+  // Lock body scroll while the menu is open. Standard modal pattern —
+  // the menu's own overflow handles content scrolling on touch.
+  useEffect(() => {
+    if (!menuOpen) return;
+    return useScrollLock(menuOpen);
+  }, [menuOpen]);
+
+  // Close the mobile menu on route change so it doesn't linger over the
+  // next page.
+  useEffect(() => {
+    setMenuOpen(false);
+  }, [pathname]);
+
+  // Esc closes the mobile menu.
+  useEffect(() => {
+    if (!menuOpen) return;
+    function handleKey(e: KeyboardEvent) {
+      if (e.key === "Escape") setMenuOpen(false);
+    }
+    document.addEventListener("keydown", handleKey);
+    return () => document.removeEventListener("keydown", handleKey);
+  }, [menuOpen]);
 
   const routeType: "home" | "dashboard" | "board" | "tasks" | "wiki" | "chat" | "milestones" | "swimlanes" | "settings" | "hearth" = useMemo(() => {
     if (pathname === "/") return "home";
@@ -48,10 +80,28 @@ export function AppShell() {
   const milestonesParams = selectedSlug ? { slug: selectedSlug } : undefined;
   const swimlanesParams = selectedSlug ? { slug: selectedSlug } : undefined;
 
+  const navClass = menuOpen ? "app-nav app-nav-menu-open" : "app-nav";
+
   return (
     <>
       {!isBare && (
-        <nav className="app-nav">
+        <nav className={navClass}>
+          {/* Context-sensitive sidebar toggle (mobile only). Shown on routes
+             that own a left sidebar — wiki page tree, chat threads. Tapping
+             dispatches a custom event that the layout component picks up. */}
+          {(routeType === "wiki" || routeType === "chat") && (
+            <button
+              type="button"
+              className="nav-sidebar-toggle"
+              aria-label={routeType === "wiki" ? "Open page tree" : "Open threads"}
+              onClick={() => {
+                const event = routeType === "wiki" ? "lexa:toggle-wiki-sidebar" : "lexa:toggle-threads-sidebar";
+                window.dispatchEvent(new CustomEvent(event));
+              }}
+            >
+              <PanelLeft />
+            </button>
+          )}
           <Link to="/" className={routeType === "home" ? "nav-brand active" : "nav-brand"}>
             Lexa
           </Link>
@@ -86,7 +136,104 @@ export function AppShell() {
             <ProjectSwitcher routeType={routeType} />
             <UserMenu />
           </div>
+          <button
+            type="button"
+            className="nav-hamburger"
+            aria-label={menuOpen ? "Close menu" : "Open menu"}
+            aria-expanded={menuOpen}
+            onClick={() => setMenuOpen((v) => !v)}
+          >
+            {menuOpen ? <X /> : <Menu />}
+          </button>
+          <div className="app-nav-menu" role="menu" aria-hidden={!menuOpen}>
+            {selectedSlug && (
+              <div className="app-nav-menu-project">
+                <button
+                  type="button"
+                  className="app-nav-menu-project-toggle"
+                  aria-expanded={projectListOpen}
+                  onClick={() => setProjectListOpen((v) => !v)}
+                >
+                  <span className="app-nav-menu-project-label">Project</span>
+                  <span className="app-nav-menu-project-name">
+                    {projects.find((p) => p.slug === selectedSlug)?.name ?? selectedSlug}
+                  </span>
+                  <ChevronDown size={14} strokeWidth={1.5} className={projectListOpen ? "rotate-180" : ""} style={{ transition: "transform 200ms", flexShrink: 0 }} />
+                </button>
+                {projectListOpen && projects.length > 1 && (
+                  <div className="app-nav-menu-project-list">
+                    {projects.map((p) => (
+                      <button
+                        key={p.id}
+                        type="button"
+                        className={cn("app-nav-menu-link", p.slug === selectedSlug && "active")}
+                        onClick={() => {
+                          setSelectedSlug(p.slug);
+                          setProjectListOpen(false);
+                          setMenuOpen(false);
+                          navigate({ to: "/$slug", params: { slug: p.slug } });
+                        }}
+                      >
+                        {p.name}
+                      </button>
+                    ))}
+                    <div className="app-nav-menu-divider" />
+                    {selectedProjectId && (
+                      <Link
+                        to="/settings/project/$projectId"
+                        params={{ projectId: selectedProjectId }}
+                        className="app-nav-menu-action"
+                        onClick={() => setMenuOpen(false)}
+                      >
+                        Project settings
+                      </Link>
+                    )}
+                    <Link
+                      to="/"
+                      search={{ new: 1 } as never}
+                      className="app-nav-menu-action"
+                      onClick={() => setMenuOpen(false)}
+                    >
+                      Create new project
+                    </Link>
+                  </div>
+                )}
+              </div>
+            )}
+            <Link to={dashboardTo} params={dashboardParams} className="app-nav-menu-link" activeOptions={{ exact: true }}>
+              Dashboard
+            </Link>
+            <Link to={boardTo} params={boardParams} className="app-nav-menu-link">
+              Board
+            </Link>
+            <Link to={tasksTo} params={tasksParams} className="app-nav-menu-link">
+              Tasks
+            </Link>
+            <Link to={milestonesTo} params={milestonesParams} className="app-nav-menu-link">
+              Milestones
+            </Link>
+            <Link to={swimlanesTo} params={swimlanesParams} className="app-nav-menu-link">
+              Swimlanes
+            </Link>
+            <Link to={wikiTo} params={wikiParams} className="app-nav-menu-link">
+              Wiki
+            </Link>
+            <Link to={chatTo} params={chatParams} className="app-nav-menu-link">
+              Chat
+            </Link>
+            <Link to="/hearth" className="app-nav-menu-link">
+              Hearth
+            </Link>
+          </div>
         </nav>
+      )}
+      {!isBare && menuOpen && (
+        <button
+          type="button"
+          className="app-nav-backdrop"
+          aria-label="Close menu"
+          onClick={() => setMenuOpen(false)}
+        />
       )}
       <Outlet />
     </>

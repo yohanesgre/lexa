@@ -13,10 +13,14 @@ const LEVELS: { value: HeraldReasoningEffort; label: string }[] = [
   { value: "high", label: "High" },
 ];
 
-export function EffortPicker({ effort, projectEffort, disabled = false, onChange }: {
+export function EffortPicker({ effort, projectEffort, disabled = false, align = "down", onChange }: {
   effort: HeraldReasoningEffort | "";
   projectEffort: HeraldReasoningEffort | null;
   disabled?: boolean;
+  /** "down" (default) opens below the trigger; "up" opens above — use "up"
+   *  on mobile where the button sits near the bottom of the viewport and a
+   *  downward menu would run off-screen. */
+  align?: "up" | "down";
   onChange: (effort: HeraldReasoningEffort | "") => void;
 }) {
   const [open, setOpen] = useState(false);
@@ -71,7 +75,7 @@ export function EffortPicker({ effort, projectEffort, disabled = false, onChange
         </svg>
       </button>
       {open && (
-        <div className="menu" role="listbox" aria-label="Thinking effort" style={{ position: "absolute", top: "calc(100% + 4px)", left: 0, zIndex: 30, padding: 8, display: "flex", flexDirection: "column", gap: 2, minWidth: 200 }}>
+        <div className="menu" role="listbox" aria-label="Thinking effort" style={{ position: "absolute", ...(align === "up" ? { top: "auto", bottom: "calc(100% + 4px)" } : { top: "calc(100% + 4px)", bottom: "auto" }), left: 0, zIndex: 30, padding: 8, display: "flex", flexDirection: "column", gap: 2, minWidth: 200 }}>
           <div className="font-micro text-2xs text-lx-text-muted uppercase tracking-[0.04em]" style={{ padding: "4px 8px" }}>Thinking effort</div>
           <button type="button" role="option" aria-selected={!effort} className="menu-item" style={itemStyle(!effort)} onClick={() => { onChange(""); setOpen(false); }}>
             <span>Default{projectEffort ? ` · project (${projectEffort})` : " · none set"}</span>
