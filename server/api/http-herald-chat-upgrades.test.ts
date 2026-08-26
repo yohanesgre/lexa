@@ -246,13 +246,12 @@ describe("POST /api/herald/chat/stream (fromIndex)", () => {
   it("edit flow: truncates to fromIndex, appends the new turn, persists ts meta", async () => {
     const put = await handler(
       authed("PUT", "/api/herald/settings/p2", {
-        kind: "openai_compatible",
-        baseUrl: `http://127.0.0.1:${donePort}`,
-        model: "test-model",
-        apiKey: "sk-test",
+        fallbackModelIds: ["test-model"],
       })
     );
     expect(put.status).toBe(200);
+    db.exec(`INSERT OR IGNORE INTO herald_providers (id, label, base_url, api_key) VALUES ('prov-p2', 'MockDone', 'http://127.0.0.1:${donePort}', 'sk-test')`);
+    db.exec(`INSERT OR IGNORE INTO herald_models (id, provider_id, model_id, kind, priority, enabled) VALUES ('m-p2', 'prov-p2', 'test-model', 'openai_compatible', 1, 1)`);
 
     const res = await handler(
       authed("POST", "/api/herald/chat/stream", {
@@ -318,13 +317,12 @@ describe("POST /api/herald/chat/stream (fromIndex)", () => {
   it("second concurrent stream on an active chat → 409 HERALD_TASK_ACTIVE", async () => {
     const put = await handler(
       authed("PUT", "/api/herald/settings/p1", {
-        kind: "openai_compatible",
-        baseUrl: `http://127.0.0.1:${holdPort}`,
-        model: "test-model",
-        apiKey: "sk-test",
+        fallbackModelIds: ["test-model"],
       })
     );
     expect(put.status).toBe(200);
+    db.exec(`INSERT OR IGNORE INTO herald_providers (id, label, base_url, api_key) VALUES ('prov-p1', 'MockHold', 'http://127.0.0.1:${holdPort}', 'sk-test')`);
+    db.exec(`INSERT OR IGNORE INTO herald_models (id, provider_id, model_id, kind, priority, enabled) VALUES ('m-p1', 'prov-p1', 'test-model', 'openai_compatible', 1, 1)`);
 
     const ac = new AbortController();
     const first = await handler(

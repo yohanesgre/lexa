@@ -60,6 +60,21 @@ export interface ProviderConfig {
   baseUrl: string;
   apiKey: string;
   model: string;
+  providerId?: string;
+}
+
+export function configForModel(
+  provider: { base_url: string; api_key: string },
+  model: { kind: ProviderKind; model_id: string }
+): ProviderConfig {
+  return { kind: model.kind, baseUrl: provider.base_url, apiKey: provider.api_key, model: model.model_id };
+}
+
+export function buildAdapterForModel(
+  provider: { base_url: string; api_key: string },
+  model: { kind: ProviderKind; model_id: string }
+): AnyTextAdapter {
+  return buildAdapter(configForModel(provider, model));
 }
 
 type OpenAiChatModel = Parameters<typeof createOpenaiChatCompletions>[0];
@@ -293,6 +308,15 @@ export function translateRunError(e: unknown): ProviderAuthFailed | ProviderUnre
     msg.includes("forbidden")
   ) {
     return new ProviderAuthFailed({});
+  }
+  if (
+    statusCode === 429 ||
+    /\b429\b/.test(msg) ||
+    msg.includes("rate limit") ||
+    msg.includes("rate_limit") ||
+    msg.includes("too many requests")
+  ) {
+    return new ProviderUnreachable({ message: raw.slice(0, 300) || "rate limited" });
   }
   if (
     msg.includes("fetch failed") ||

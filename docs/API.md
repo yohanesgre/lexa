@@ -1602,46 +1602,100 @@ admin-gated.
 
 ```
 GET    /api/herald/settings/:projectId
-→ 200 { projectId, kind: "openai_compatible"|"anthropic_compatible", baseUrl,
-        model, hasKey: boolean, keyMask: string|null ("sk-…abcd"),
-        searchProvider: "exa"|null, hasSearchKey: boolean,
+→ 200 { projectId, searchProvider: "exa"|null, hasSearchKey: boolean,
         urlAllowlist: string|null,
         engine: "herald"|"blacksmith", engineSwitcherEnabled: boolean,
+        reasoningEffort: "minimal"|"low"|"medium"|"high"|null,
         primarySupportsImages: boolean,
-        visionModel: string|null,
-        writeTools: string[] }
-  Masked view — api_key/search_api_key never serialized. writeTools is the
-  parsed allowlist of enabled write-tool names (empty → read-only turns).
-  | 404 PROJECT_NOT_FOUND | 409 PROVIDER_NOT_CONFIGURED (no row yet)
+        writeTools: string[],
+        providerId: string|null, modelId: string|null,
+        fallbackModelIds: string[] }
+  Masked view — no provider api_key/search_api_key ever serialized. Provider
+  binding (providerId/modelId/fallbackModelIds) comes from the global gateway
+  registry (GET /api/admin/herald/providers). Legacy per-project provider
+  columns (kind/base_url/api_key/model/vision_model) were dropped in 0017.
+  | 404 PROJECT_NOT_FOUND | 404 HERALD_THREAD_NOT_FOUND | 409 PROVIDER_NOT_CONFIGURED (no row yet)
 
-PUT    /api/herald/settings/:projectId   (admin)
-body { kind*, baseUrl*, model*, apiKey?, searchProvider?, searchApiKey?,
-       urlAllowlist?,
+PUT    /api/herald/settings/:projectId   (superadmin — requireSuperadmin, 403 FORBIDDEN otherwise)
+body { providerId?: string|null, modelId?: string|null, fallbackModelIds?: string[],
+       searchProvider?: "exa"|null, searchApiKey?: string|null,
+       urlAllowlist?: string|null,
        engine?: "herald"|"blacksmith", engineSwitcherEnabled?: boolean,
-       primarySupportsImages?: boolean,
-       visionModel?: string,
+       reasoningEffort?: "minimal"|"low"|"medium"|"high"|null,
        writeTools?: string[] }
-  Omitted apiKey/searchApiKey keep the stored values; first save
-  without an apiKey → 422 INVALID_ARGS ("apiKey required on first save").
-  Vision shares the primary provider (kind/api_key/base_url) — only
-  `visionModel` differs; no separate vision credentials exist.
-  writeTools: unknown names are dropped, duplicates collapse, stored
-  comma-separated in herald_settings.write_tools.
-→ 200 masked view (same shape as GET)
+  Payload is the project-level Herald binding + retained engine/search/writeTools.
+  providerId/modelId = primary model (must be an enabled herald_models row);
+  fallbackModelIds = ordered cross-kind fallback list (≤3, deduped, provider
+  registry supplies kind per model). Omitted searchApiKey keeps the stored value.
+  After 0017 kind/base_url/api_key/model/vision_model are gone from
+  herald_settings — provider credentials live in herald_providers only.
+  writeTools: unknown names dropped, duplicates collapse, stored comma-separated.
+→ 200 masked view (same shape as GET) | 403 FORBIDDEN | 404 PROJECT_NOT_FOUND
 
-POST   /api/herald/settings/:projectId/test   (admin)
-body same as PUT — UNSAVED submitted values (never persists); an omitted
-  apiKey falls back to the stored one so testing a saved config doesn't
-  require re-entering the key.
+POST   /api/herald/settings/:projectId/test   (admin — requireAdmin)
+body { kind?, baseUrl?, model?, apiKey?, searchProvider?, searchApiKey?,
+       urlAllowlist?, engine?, engineSwitcherEnabled?, primarySupportsImages?,
+       visionModel?, reasoningEffort?, writeTools? }
+  UNSAVED submitted values (never persists); an omitted apiKey falls back to the
+  stored one so testing a saved config doesn't require re-entering the key.
+  After 0017 the payload is legacy-compatible (kind/baseUrl/model optional) and
+  the gateway fallback is used when they are omitted.
 → 200 { ok: true, latencyMs } | 502 PROVIDER_AUTH_FAILED | 502 PROVIDER_UNREACHABLE
   Minimal completion ping (+ Exa ping when configured).
 
-POST   /api/herald/settings/:projectId/models   (admin)
+POST   /api/herald/settings/:projectId/models   (admin — requireAdmin)
 body same as test
 → 200 { models: [{ id }] } | 502 PROVIDER_AUTH_FAILED / PROVIDER_UNREACHABLE
   Lists models from the provider using submitted unsaved values (per-kind wire
   format, base URL normalized per kind). Some compat endpoints lack the route
   — manual model entry is always available as fallback.
+
+### Herald Gateway — Admin Registry (superadmin-only, requireSuperadmin → 403 FORBIDDEN otherwise)
+
+Global provider registry. `herald_providers` holds the credentials/base URLs;
+`herald_models` holds per-model kind/priority/enabled; `herald_call_logs` is
+append-only; `herald_model_prices` is the OpenRouter price cache. Gateway
+streams with cross-kind fallback (≤3, priority-ordered), fresh adapter per
+attempt, cost via `herald_model_prices` (OpenRouter fetch).
+
+```
+GET    /api/admin/herald/providers   (superadmin)
+→ 200 { data: HeraldProviderMasked[] }   HeraldProviderMasked = { id, label, baseUrl, hasKey, keyMask, createdAt, updatedAt }
+  | 403 FORBIDDEN
+
+POST   /api/admin/herald/providers   (superadmin)
+body { label*, baseUrl*, apiKey* }   // baseUrl = provider base URL, apiKey = provider secret
+→ 200 HeraldProviderMasked (masked view of the created row) | 403 FORBIDDEN
+
+PATCH  /api/admin/herald/providers/:id   (superadmin)
+body { label?, baseUrl?, apiKey? }   // patch — omitted fields unchanged; updated_at = datetime('now')
+→ 200 HeraldProviderMasked | 403 FORBIDDEN | 404 (RowNotFound → NOT_FOUND)
+
+DELETE /api/admin/herald/providers/:id   (superadmin)
+→ 204 | 403 FORBIDDEN | 404
+
+POST   /api/admin/herald/providers/:id/test   (superadmin)
+→ 200 { ok: true, latencyMs: number } | 403 FORBIDDEN | 404 | 502 PROVIDER_AUTH_FAILED | 502 PROVIDER_UNREACHABLE
+  Live probe: listModels against the stored provider row (kind openai_compatible, model "test").
+
+POST   /api/admin/herald/providers/:id/models   (superadmin)
+→ 200 { data: HeraldModelRow[] }   HeraldModelRow = { id, providerId, modelId, kind, priority, enabled, createdAt }
+  | 403 FORBIDDEN | 404
+
+GET    /api/admin/herald/usage?groupBy=day|model   (superadmin)
+→ 200 { totalCostCents: number, byDay: Array<{ day: string, costCents: number }>, byModel: Array<{ model: string, costCents: number }> }
+  | 403 FORBIDDEN
+  groupBy is parsed from the query string (default "day"); cost aggregates from herald_call_logs.cost_cents.
+
+GET    /api/admin/herald/calls   (superadmin)
+→ 200 { data: HeraldCallLogRow[] }   // last 100, created_at DESC
+  | 403 FORBIDDEN
+
+POST   /api/admin/herald/prices/sync   (superadmin)
+→ 200 { synced: number }   // rows upserted from OpenRouter fetch into herald_model_prices
+  | 403 FORBIDDEN
+  Errors inside the price fetch are caught — sync returns 0 rather than 5xx.
+```
 
 POST   /api/herald/tasks
 body { slug*, documentType*: "task"|"wiki", documentId*, prompt*, agentId*,

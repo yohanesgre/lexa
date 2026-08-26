@@ -7,20 +7,15 @@ import type { HeraldSettingsMasked } from "../../../shared/herald";
 
 const masked: HeraldSettingsMasked = {
   projectId: "p1",
-  kind: "openai_compatible",
-  baseUrl: "https://api.example.com/v1",
-  model: "gpt-x",
-  hasKey: true,
-  keyMask: "sk-…abc",
   searchProvider: null,
   hasSearchKey: false,
   urlAllowlist: null,
   engine: "herald",
   engineSwitcherEnabled: true,
   primarySupportsImages: false,
-  visionModel: null,
   reasoningEffort: null,
   writeTools: ["create_task", "add_comment"],
+  fallbackModelIds: ["gpt-x"],
 };
 
 const saveMock = vi.fn();
@@ -79,9 +74,7 @@ describe("HeraldWriteToolsSection (herald-write-approvals.html State 4)", () => 
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
     await waitFor(() =>
       expect(saveMock).toHaveBeenCalledWith({
-        kind: "openai_compatible",
-        baseUrl: "https://api.example.com/v1",
-        model: "gpt-x",
+        fallbackModelIds: ["gpt-x"],
         writeTools: ["create_task", "add_comment", "move_task"],
       })
     );

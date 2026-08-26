@@ -731,38 +731,75 @@ CREATE TABLE lexa_agent_skills (
 );
 
 -- ============================================================
--- Herald assistant tier (migration 0010)
+-- Herald assistant tier (migration 0010) + Gateway (0017)
 -- ============================================================
--- Per-project model endpoint settings for the Herald assistant tier
--- (server-side chat() path — see docs/CLOUDFLARE_WORKERS.md). One row per
--- project; search credentials optional.
+-- Per-project Herald settings. Gateway migration 0017 hard-recreated this table
+-- dropping legacy provider columns (kind, base_url, api_key, model, vision_model).
+-- Remaining columns: search + engine + reasoning + write_tools.
+-- Migration 0018 adds fallback_model_ids (JSON array of herald_models ids, ordered, ≤3).
 CREATE TABLE herald_settings (
   project_id TEXT PRIMARY KEY REFERENCES projects(id) ON DELETE CASCADE,
-  kind TEXT NOT NULL CHECK (kind IN ('openai_compatible','anthropic_compatible')),
-  base_url TEXT NOT NULL,
-  api_key TEXT NOT NULL,
-  model TEXT NOT NULL,
   search_provider TEXT,
   search_api_key TEXT,
   url_allowlist TEXT,
+  engine TEXT NOT NULL DEFAULT 'herald' CHECK (engine IN ('herald','blacksmith')),
+  engine_switcher_enabled INTEGER NOT NULL DEFAULT 0,
+  primary_supports_images INTEGER NOT NULL DEFAULT 0,
+  reasoning_effort TEXT CHECK (reasoning_effort IN ('minimal','low','medium','high')),
+  write_tools TEXT NOT NULL DEFAULT '',
+  fallback_model_ids TEXT NOT NULL DEFAULT '[]',
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
--- ============================================================
--- Hearth engine switching + vision (migration 0013)
--- ============================================================
--- Per-project execution engine for document threads + Generate:
--- 'herald' (server-side chat() lane) or 'blacksmith' (daemon lane).
--- Freeform chat ALWAYS runs the herald lane regardless of engine.
--- The member-facing engine toggle is a personal overlay (client-side
--- session preference) — `engine` here is the project default, written by
--- admins only; the toggle UI renders only when engine_switcher_enabled=1.
-ALTER TABLE herald_settings ADD COLUMN engine TEXT NOT NULL DEFAULT 'herald'
-  CHECK (engine IN ('herald','blacksmith'));
-ALTER TABLE herald_settings ADD COLUMN engine_switcher_enabled INTEGER NOT NULL DEFAULT 0;
-ALTER TABLE herald_settings ADD COLUMN primary_supports_images INTEGER NOT NULL DEFAULT 0;
-ALTER TABLE herald_settings ADD COLUMN vision_model TEXT;
+-- Herald Gateway: global providers (no project_id) — superadmin-only.
+CREATE TABLE herald_providers (
+  id TEXT PRIMARY KEY,
+  label TEXT NOT NULL,
+  base_url TEXT NOT NULL,
+  api_key TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE herald_models (
+  id TEXT PRIMARY KEY,
+  provider_id TEXT NOT NULL REFERENCES herald_providers(id) ON DELETE CASCADE,
+  model_id TEXT NOT NULL,
+  kind TEXT NOT NULL CHECK (kind IN ('openai_compatible','anthropic_compatible')),
+  priority INTEGER NOT NULL DEFAULT 0,
+  enabled INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX idx_herald_models_provider ON herald_models(provider_id);
+CREATE UNIQUE INDEX idx_herald_models_provider_priority ON herald_models(provider_id, priority);
+
+CREATE TABLE herald_call_logs (
+  id TEXT PRIMARY KEY,
+  project_id TEXT REFERENCES projects(id) ON DELETE CASCADE,
+  provider_id TEXT REFERENCES herald_providers(id) ON DELETE SET NULL,
+  model TEXT NOT NULL,
+  kind TEXT NOT NULL CHECK (kind IN ('openai_compatible','anthropic_compatible')),
+  status TEXT NOT NULL CHECK (status IN ('done','error','suspended','aborted')),
+  error_code TEXT,
+  usage_in INTEGER NOT NULL DEFAULT 0,
+  usage_out INTEGER NOT NULL DEFAULT 0,
+  cached_in INTEGER NOT NULL DEFAULT 0,
+  latency_ms INTEGER,
+  cost_cents INTEGER NOT NULL DEFAULT 0,
+  estimated INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX idx_call_logs_project_time ON herald_call_logs(project_id, created_at);
+CREATE INDEX idx_call_logs_provider ON herald_call_logs(provider_id);
+CREATE INDEX idx_call_logs_model ON herald_call_logs(model);
+
+CREATE TABLE herald_model_prices (
+  model TEXT PRIMARY KEY,
+  prompt_price REAL NOT NULL DEFAULT 0,
+  completion_price REAL NOT NULL DEFAULT 0,
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
 
 -- Agent catalog rebinding (0013, single transaction — atomic):
 -- Herald Agent gets a NEW internal id; hearth_tasks.agent_id FKs and any
@@ -858,7 +895,7 @@ CREATE INDEX idx_herald_pending_thread ON herald_pending_writes(document_type, d
 
 ALTER TABLE task_activity ADD COLUMN via_herald INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE task_comments ADD COLUMN via_herald INTEGER NOT NULL DEFAULT 0;
-ALTER TABLE herald_settings ADD COLUMN write_tools TEXT NOT NULL DEFAULT '';
+-- write_tools column added in 0016 and carried into the 0017 herald_settings rebuild (now baked in).
 
 -- Curated project memory: judgment-type facts only (live truth always comes
 -- from DB reads, never memorized). `source` ∈ manual/herald (no CHECK in DDL).

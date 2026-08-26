@@ -30,7 +30,7 @@ import type { Project } from "../../../shared/types";
 // PUT requires kind/baseUrl/model — partial saves (engine, vision) ride on
 // the stored masked values so only the touched fields actually change.
 function storedBaseInput(settings: HeraldSettingsMasked): HeraldSettingsInput {
-  return { kind: settings.kind, baseUrl: settings.baseUrl, model: settings.model };
+  return { kind: settings.kind, baseUrl: settings.baseUrl, model: settings.model } as HeraldSettingsInput;
 }
 
 export function HeraldProviderSection({ project }: { project: Project }) {
@@ -59,9 +59,9 @@ export function HeraldProviderSection({ project }: { project: Project }) {
   // Hydrate the form once per project from the masked view.
   useEffect(() => {
     if (settings && hydratedProjectId !== project.id) {
-      setKind(settings.kind);
-      setBaseUrl(settings.baseUrl);
-      setModel(settings.model);
+      if (settings.kind) setKind(settings.kind);
+      if (settings.baseUrl) setBaseUrl(settings.baseUrl);
+      if (settings.model) setModel(settings.model);
       setReasoningEffort(settings.reasoningEffort ?? "");
       setSupportsImages(settings.primarySupportsImages);
       setVisionModel(settings.visionModel ?? "");
@@ -521,11 +521,12 @@ export function HeraldWriteToolsSection({ project }: { project: Project }) {
   const handleSave = () => {
     if (!settings) return;
     save.mutate({
-      kind: settings.kind,
-      baseUrl: settings.baseUrl,
-      model: settings.model,
+      ...(settings.kind !== undefined ? { kind: settings.kind } : {}),
+      ...(settings.baseUrl !== undefined ? { baseUrl: settings.baseUrl } : {}),
+      ...(settings.model !== undefined ? { model: settings.model } : {}),
+      ...(settings.fallbackModelIds !== undefined ? { fallbackModelIds: [...settings.fallbackModelIds] } : {}),
       writeTools: selected,
-    });
+    } as HeraldSettingsInput);
   };
 
   // No provider row yet — PUT needs kind/baseUrl/model, so this section stays
