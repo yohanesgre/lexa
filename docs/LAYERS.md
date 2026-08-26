@@ -787,13 +787,57 @@ On `POST /api/hearth/daemon/claim` the handler assembles the claim: task, runtim
 - **Pipeline (per repo):** `GitHubClient.getDefaultBranch` → `getRepoFileTree(recursive=1)` → pure `selectRepoFiles` (`server/github/repo-content.ts`: skips node_modules/.git/dist/build/vendor/.next/coverage/target/.venv dirs, lockfiles, `*.min.js`/`*.min.css`/`*.map`, true binaries — svg stays; caps 50 files / 256 KB per file / 512 KB total, respecting tree sizes without fetching) → `getRepoFileContent` (per-segment URL-encoded path, base64 → UTF-8). Content truncated to 256 KB per file at assembly; total byte cap enforced across repos.
 - **Never fails the claim:** every failure (unconfigured app, missing repo, network, per-file) is caught per repo/file, logged `WARN`, and skipped — `repoContent` ends up `[]` and the claim still returns 200. The prompt's repo-content line is added only when `repoContent` is non-empty (`buildPromptForTask(task, hasRepoContent)`).
 
+### Lexa/Herald Gateway — provider registry + cross-kind fallback
+
+```typescript
+export class HeraldGateway extends Effect.Service<HeraldGateway>()("Lexa/HeraldGateway", {
+  dependencies: [HeraldProvidersRepo.Default, HeraldModelsRepo.Default,
+                 HeraldCallLogsRepo.Default, HeraldModelPricesRepo.Default,
+                 HeraldSettingsRepo.Default],
+  effect: Effect.gen(function* () {
+    // resolveFallback(projectId) → ProviderConfig[] (≤3, priority-ordered,
+    // enabled models cross-kind, fresh adapter per attempt via buildAdapter).
+    // streamChat(input) → AsyncIterable<StreamChunk>: iterates fallback configs,
+    // fresh normalizeBaseUrl + buildAdapter per attempt, isRetriable = ProviderAuthFailed
+    // | ProviderUnreachable | HeraldGenerationFailed, call_logs insert per attempt
+    // (done/error/aborted/suspended), cost via herald_model_prices (OpenRouter fetch).
+    // No cycles: gateway depends on repos + Sqlite only — never on HeraldService.
+  }),
+}) {}
+```
+
+Thin gateway repos (Effect.Service, Sqlite only, no business logic):
+
+```typescript
+export class HeraldProvidersRepo extends Effect.Service<HeraldProvidersRepo>()("Lexa/HeraldProvidersRepo", {
+  // herald_providers(id,label,base_url,api_key,created_at,updated_at) — global, no project_id
+  // thin: create/getById/list/maskedList/maskedView/update/delete; update sets updated_at = datetime('now')
+}) {}
+export class HeraldModelsRepo extends Effect.Service<HeraldModelsRepo>()("Lexa/HeraldModelsRepo", {
+  // herald_models(id,provider_id→herald_providers ON DELETE CASCADE,model_id,kind CHECK openai_compatible|anthropic_compatible,priority,enabled)
+  // thin: create/getById/listByProvider/listAll/update/delete
+}) {}
+export class HeraldCallLogsRepo extends Effect.Service<HeraldCallLogsRepo>()("Lexa/HeraldCallLogsRepo", {
+  // herald_call_logs(id,project_id→projects ON DELETE CASCADE,provider_id→herald_providers ON DELETE SET NULL,model,kind,status CHECK done|error|suspended|aborted,error_code,usage_in/out,cached_in,latency_ms,cost_cents,estimated,created_at)
+  // thin: insert/getById/listByProject/listByProvider/listByModel/listRecent
+}) {}
+export class HeraldModelPricesRepo extends Effect.Service<HeraldModelPricesRepo>()("Lexa/HeraldModelPricesRepo", {
+  // herald_model_prices(model PK,prompt_price,completion_price,updated_at) — OpenRouter cache, price-sync upserts
+  // thin: upsert/getByModel/list; upsert ON CONFLICT(model) DO UPDATE SET prompt_price,completion_price,updated_at=datetime('now')
+}) {}
+// HeraldSettingsRepo after 0017: herald_settings dropped kind/base_url/api_key/model/vision_model —
+// now only search_provider, search_api_key, url_allowlist, engine, engine_switcher_enabled,
+// primary_supports_images, reasoning_effort, write_tools + project_id PK. Thin upsert/maskedView.
+// price-sync: server/herald/price-sync.ts fetch OpenRouter → herald_model_prices upserts (superadmin POST /admin/herald/prices/sync).
+```
+
 ### Lexa/Herald — assistant tier (server-side TanStack AI)
 
 ```typescript
 export class HeraldService extends Effect.Service<HeraldService>()("Lexa/Herald", {
   dependencies: [HearthRepo.Default, HeraldSettingsRepo.Default, HeraldThreadRepo.Default,
                  HeraldPendingWritesRepo.Default, ProjectMemoryRepo.Default, HearthService.Default,
-                 Storage.Default, TaskRepo.Default, WikiRepo.Default, ProjectReposRepo.Default,
+                 HeraldGateway.Default, Storage.Default, TaskRepo.Default, WikiRepo.Default, ProjectReposRepo.Default,
                  TaskService.Default, CommentService.Default, WikiService.Default,
                  MilestoneService.Default, SwimlaneService.Default, AuthorizationService.Default],
   effect: Effect.gen(function* () {

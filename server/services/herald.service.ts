@@ -75,6 +75,7 @@ import type { TipTapDoc, Task, WikiPage, Actor } from "../../shared/types";
 import type { Citation, HeraldChatStreamRequest, HeraldReasoningEffort, StreamFrame } from "../../shared/herald";
 import { deriveChatTitle } from "../../shared/herald";
 import { buildAnalyzeImageTool, resolveVisionMode, type VisionMode } from "../herald/vision";
+import { HeraldGateway } from "../herald/gateway.service";
 
 export const SUMMARY_THRESHOLD_MESSAGES = 40;
 export const SUMMARY_THRESHOLD_BYTES = 64 * 1024;
@@ -461,10 +462,9 @@ export interface StreamRunContext {
   // Resume outcome per decided row of the resumed batch — one approval_result
   // frame each, pushed right after the start frame.
   approvalResults?: Array<{ approvalId: string; status: "applied" | "failed" | "denied"; error?: string }>;
-  // Per-turn write-proposal queue (createWriteRecorder.drain). Drained once,
-  // at the suspend checkpoint.
   writeDrain?: () => QueuedProposal[];
   modelOptions?: Record<string, unknown>;
+  gatewayStream?: (input: unknown) => AsyncIterable<StreamChunk>;
 }
 
 export function buildStream(ctx: StreamRunContext): ReadableStream<StreamFrame> {
@@ -563,15 +563,25 @@ export function buildStream(ctx: StreamRunContext): ReadableStream<StreamFrame> 
           // Accumulated tool-call args per toolCallId: TOOL_CALL_START carries
           // only the name; the args stream in via TOOL_CALL_ARGS chunks.
           const pendingCalls = new Map<string, { name: string; args: string }>();
+          const getStream = (tools: ReadonlyArray<unknown> | undefined): AsyncIterable<StreamChunk> =>
+            ctx.gatewayStream
+              ? ctx.gatewayStream({
+                  systemPrompts: ctx.systemPrompts,
+                  messages: prepared,
+                  tools,
+                  abortController: abort,
+                  ...(ctx.modelOptions !== undefined ? { modelOptions: ctx.modelOptions } : {}),
+                })
+              : streamChat({
+                  config: ctx.config,
+                  systemPrompts: ctx.systemPrompts,
+                  messages: prepared,
+                  tools,
+                  abortController: abort,
+                  ...(ctx.modelOptions !== undefined ? { modelOptions: ctx.modelOptions } : {}),
+                });
           const consume = async (tools: ReadonlyArray<unknown> | undefined) => {
-            const chunks = streamChat({
-              config: ctx.config,
-              systemPrompts: ctx.systemPrompts,
-              messages: prepared,
-              tools,
-              abortController: abort,
-              ...(ctx.modelOptions !== undefined ? { modelOptions: ctx.modelOptions } : {}),
-            });
+            const chunks = getStream(tools);
             const iterator = chunks[Symbol.asyncIterator]();
             for (;;) {
               // Stall watchdog: race each chunk against a fresh timer, reset
@@ -795,6 +805,7 @@ export class HeraldService extends Effect.Service<HeraldService>()("Lexa/Herald"
     MilestoneService.Default,
     SwimlaneService.Default,
     AuthorizationService.Default,
+    HeraldGateway.Default,
   ],
   effect: Effect.gen(function* () {
     const hearthRepo = yield* HearthRepo;
@@ -813,21 +824,22 @@ export class HeraldService extends Effect.Service<HeraldService>()("Lexa/Herald"
     const milestoneService = yield* MilestoneService;
     const swimlaneService = yield* SwimlaneService;
     const authz = yield* AuthorizationService;
+    const gateway = yield* HeraldGateway;
 
     const configFromRow = (row: HeraldSettingsRow): ProviderConfig => ({
-      kind: row.kind,
-      baseUrl: row.base_url,
-      apiKey: row.api_key,
-      model: row.model,
+      kind: (row as unknown as { kind: ProviderConfig["kind"] }).kind ?? "openai_compatible",
+      baseUrl: (row as unknown as { base_url: string }).base_url ?? "",
+      apiKey: (row as unknown as { api_key: string }).api_key ?? "",
+      model: (row as unknown as { model: string }).model ?? "",
     });
 
     // Vision delegation runs on the PRIMARY provider (same kind/base_url/
     // api_key) — only the model differs.
     const visionConfigOf = (row: HeraldSettingsRow): ProviderConfig => ({
-      kind: row.kind,
-      baseUrl: row.base_url,
-      apiKey: row.api_key,
-      model: row.vision_model ?? "",
+      kind: (row as unknown as { kind: ProviderConfig["kind"] }).kind ?? "openai_compatible",
+      baseUrl: (row as unknown as { base_url: string }).base_url ?? "",
+      apiKey: (row as unknown as { api_key: string }).api_key ?? "",
+      model: (row as unknown as { vision_model: string | null }).vision_model ?? "",
     });
 
     const resolveMimeType = (projectId: string, key: string): Promise<string> =>
@@ -1363,7 +1375,7 @@ export class HeraldService extends Effect.Service<HeraldService>()("Lexa/Herald"
           const attachments = input.attachments ?? [];
           if (attachments.length > 0) {
             yield* validateAttachments(input.projectId, attachments, DOC_IMAGE_CAPS);
-            if (resolveVisionMode(settingsRow) === "none") {
+            if (resolveVisionMode({ primary_supports_images: settingsRow.primary_supports_images, vision_model: (settingsRow as unknown as { vision_model?: string | null }).vision_model ?? null }) === "none") {
               return yield* new VisionNotConfigured();
             }
             const existing = yield* threadRepo.loadThread(input.documentType, input.documentId).pipe(
@@ -1467,7 +1479,7 @@ export class HeraldService extends Effect.Service<HeraldService>()("Lexa/Herald"
             docContext: doc.context,
           });
 
-          const imageMode = resolveVisionMode(settingsRow);
+          const imageMode = resolveVisionMode({ primary_supports_images: settingsRow.primary_supports_images, vision_model: (settingsRow as unknown as { vision_model?: string | null }).vision_model ?? null });
           const baseTools = buildHeraldTools(buildToolDeps(task.projectId, settingsRow.url_allowlist, settingsRow.search_api_key));
           // Write tools ride only with an authenticated user — undefined
           // userId (daemon claim path) keeps the lane read-only.
@@ -1511,6 +1523,7 @@ export class HeraldService extends Effect.Service<HeraldService>()("Lexa/Herald"
             threadId: task.documentId,
             registry: activeTasks,
             config,
+            gatewayStream: (input: unknown) => gateway.streamChat({ projectId: task.projectId, ...(input as unknown as object) } as never),
             systemPrompts,
             history: verdict.messages,
             userTs: new Date().toISOString(),
@@ -1568,7 +1581,7 @@ export class HeraldService extends Effect.Service<HeraldService>()("Lexa/Herald"
           }
 
           const attachments = req.attachments ?? [];
-          const imageMode = resolveVisionMode(settingsRow);
+          const imageMode = resolveVisionMode({ primary_supports_images: settingsRow.primary_supports_images, vision_model: (settingsRow as unknown as { vision_model?: string | null }).vision_model ?? null });
           yield* validateAttachments(req.projectId, attachments, CHAT_IMAGE_CAPS);
           if (attachments.length > 0 && imageMode === "none") {
             return yield* new VisionNotConfigured();
@@ -1630,6 +1643,7 @@ export class HeraldService extends Effect.Service<HeraldService>()("Lexa/Herald"
             threadId: chatId,
             registry: activeChats,
             config,
+            gatewayStream: (input: unknown) => gateway.streamChat({ projectId: req.projectId, ...(input as unknown as object) } as never),
             systemPrompts,
             history: verdict.messages,
             userTs: new Date().toISOString(),
@@ -1721,7 +1735,7 @@ export class HeraldService extends Effect.Service<HeraldService>()("Lexa/Herald"
             return yield* new EngineNotSupportedForChat({ engine: settingsRow.engine });
           }
           const { messages: history, results: approvalResults } = yield* prepareResume(thread);
-          const imageMode = resolveVisionMode(settingsRow);
+          const imageMode = resolveVisionMode({ primary_supports_images: settingsRow.primary_supports_images, vision_model: (settingsRow as unknown as { vision_model?: string | null }).vision_model ?? null });
           const memoryHits = yield* memoryRepo.searchByProject(thread.projectId, extractMemoryTerms("", ""));
           const systemPrompts = buildSystemPrompts({
             identity: CHAT_IDENTITY,
@@ -1742,6 +1756,7 @@ export class HeraldService extends Effect.Service<HeraldService>()("Lexa/Herald"
             threadId: chatId,
             registry: activeChats,
             config: configFromRow(settingsRow),
+            gatewayStream: (input: unknown) => gateway.streamChat({ projectId: thread.projectId, ...(input as unknown as object) } as never),
             systemPrompts,
             history,
             userTs: new Date().toISOString(),
@@ -1817,7 +1832,7 @@ export class HeraldService extends Effect.Service<HeraldService>()("Lexa/Herald"
             repoContent,
             docContext: doc.context,
           });
-          const imageMode = resolveVisionMode(settingsRow);
+          const imageMode = resolveVisionMode({ primary_supports_images: settingsRow.primary_supports_images, vision_model: (settingsRow as unknown as { vision_model?: string | null }).vision_model ?? null });
           const baseTools = buildHeraldTools(buildToolDeps(thread.projectId, settingsRow.url_allowlist, settingsRow.search_api_key));
           // Document-thread proposals need an authenticated owner; a null
           // owner_user_id keeps the resumed lane read-only.
@@ -1848,6 +1863,7 @@ export class HeraldService extends Effect.Service<HeraldService>()("Lexa/Herald"
             threadId: documentId,
             registry: activeTasks,
             config: configFromRow(settingsRow),
+            gatewayStream: (input: unknown) => gateway.streamChat({ projectId: thread.projectId, ...(input as unknown as object) } as never),
             systemPrompts,
             history,
             userTs: new Date().toISOString(),

@@ -1,5 +1,5 @@
 import type { Project, ProjectRepo, Column, Swimlane, Task, Board, Milestone, WikiPageMeta, WikiPage, WikiPageRevision, WikiPageRevisionSummary, TipTapDoc, ApiKey, ApiKeyCreateResult, Dashboard, FieldConfig, HearthTask, HearthTaskLog, HearthTaskStatus, LexaAgent, LexaSkill, HearthProvider, HearthSession, DocumentSource, Runtime, RuntimeEvent, Machine, TaskLink, TaskLinkSuggestion, ActivityEvent, ActivityItem, TaskComment, GithubIssueSummary, Team, TeamMember, TeamMemberRole, WorkspaceInvite, SessionInfo, LexaUser, Attachment } from "../../shared/types";
-import type { HeraldSettingsMasked, HeraldSettingsInput, HeraldChatTranscript, ModelListResult } from "../../shared/herald";
+import type { HeraldSettingsMasked, HeraldSettingsInput, HeraldChatTranscript, ModelListResult, HeraldProvider, HeraldProviderModel, HeraldUsage, HeraldCall, HeraldProjectSettings } from "../../shared/herald";
 
 const BASE = "/api";
 
@@ -740,6 +740,58 @@ export async function testHeraldSettings(
 
 export function listHeraldModels(projectId: string, input: HeraldSettingsInput): Promise<ModelListResult> {
   return request(`${BASE}/herald/settings/${projectId}/models`, { method: "POST", body: JSON.stringify(input) });
+}
+
+export function listHeraldProviders(): Promise<{ data: HeraldProvider[] }> {
+  return request(`${BASE}/herald/providers`);
+}
+
+export function createHeraldProvider(input: { label: string; baseUrl: string; apiKey: string }): Promise<HeraldProvider> {
+  return request(`${BASE}/herald/providers`, { method: "POST", body: JSON.stringify({ label: input.label, base_url: input.baseUrl, api_key: input.apiKey }) });
+}
+
+export function updateHeraldProvider(id: string, input: { label?: string; baseUrl?: string; apiKey?: string }): Promise<HeraldProvider> {
+  const body: Record<string, string> = {};
+  if (input.label !== undefined) body.label = input.label;
+  if (input.baseUrl !== undefined) body.base_url = input.baseUrl;
+  if (input.apiKey !== undefined) body.api_key = input.apiKey;
+  return request(`${BASE}/herald/providers/${id}`, { method: "PATCH", body: JSON.stringify(body) });
+}
+
+export function deleteHeraldProvider(id: string): Promise<void> {
+  return request(`${BASE}/herald/providers/${id}`, { method: "DELETE" });
+}
+
+export function testHeraldProvider(id: string): Promise<{ ok: boolean; latencyMs: number }> {
+  return request(`${BASE}/herald/providers/${id}/test`, { method: "POST" });
+}
+
+export function fetchHeraldProviderModels(id: string): Promise<{ data: HeraldProviderModel[] }> {
+  return request(`${BASE}/herald/providers/${id}/models`, { method: "POST" });
+}
+
+export function updateHeraldProviderModel(id: string, modelId: string, patch: { enabled?: boolean; priority?: number }): Promise<HeraldProviderModel> {
+  return request(`${BASE}/herald/providers/${id}/models/${encodeURIComponent(modelId)}`, { method: "PATCH", body: JSON.stringify(patch) });
+}
+
+export function getHeraldUsage(): Promise<HeraldUsage> {
+  return request(`${BASE}/herald/usage`);
+}
+
+export function listHeraldCalls(params?: { projectId?: string; limit?: number }): Promise<{ data: HeraldCall[] }> {
+  const qs = new URLSearchParams();
+  if (params?.projectId) qs.set("projectId", params.projectId);
+  if (params?.limit) qs.set("limit", String(params.limit));
+  const q = qs.toString();
+  return request(`${BASE}/herald/calls${q ? `?${q}` : ""}`);
+}
+
+export function getHeraldProjectSettings(projectId: string): Promise<HeraldProjectSettings> {
+  return request(`${BASE}/herald/settings/${projectId}`);
+}
+
+export function putHeraldProjectSettings(projectId: string, input: { providerId: string | null; modelId: string | null; fallbackModelIds: string[] }): Promise<HeraldProjectSettings> {
+  return request(`${BASE}/herald/settings/${projectId}`, { method: "PUT", body: JSON.stringify({ providerId: input.providerId, modelId: input.modelId, fallbackModelIds: input.fallbackModelIds }) });
 }
 
 export function createHeraldTask(input: {

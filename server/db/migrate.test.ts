@@ -36,7 +36,7 @@ describe("runMigrations", () => {
   it("applies the real migrations dir and records _migrations", () => {
     const dbPath = join(tmpDir(), "app.db");
     runMigrations(dbPath, MIGRATIONS);
-    expect(appliedMigrations(dbPath)).toEqual(["0001_init.sql", "0002_project_repos.sql", "0003_forge_sessions.sql", "0004_auth_roles_teams.sql", "0005_milestones_sprints.sql", "0006_drop_mcp_connected.sql", "0007_task_keys.sql", "0008_wiki_share_links.sql", "0009_attachments.sql", "0010_herald.sql", "0011_chat_threads.sql", "0012_chat_pins.sql", "0013_hearth_engine.sql", "0014_herald_reasoning_effort.sql", "0015_hearth_rename.sql", "0016_herald_write_tools.sql"]);
+    expect(appliedMigrations(dbPath)).toEqual(["0001_init.sql", "0002_project_repos.sql", "0003_forge_sessions.sql", "0004_auth_roles_teams.sql", "0005_milestones_sprints.sql", "0006_drop_mcp_connected.sql", "0007_task_keys.sql", "0008_wiki_share_links.sql", "0009_attachments.sql", "0010_herald.sql", "0011_chat_threads.sql", "0012_chat_pins.sql", "0013_hearth_engine.sql", "0014_herald_reasoning_effort.sql", "0015_hearth_rename.sql", "0016_herald_write_tools.sql", "0017_herald_gateway.sql", "0018_herald_gateway_fallback_and_priority.sql"]);
     const db = new Database(dbPath);
     expect(tableExists(db, "tasks")).toBe(true);
     expect(tableExists(db, "_migrations")).toBe(true);
@@ -47,7 +47,7 @@ describe("runMigrations", () => {
     const dbPath = join(tmpDir(), "app.db");
     runMigrations(dbPath, MIGRATIONS);
     runMigrations(dbPath, MIGRATIONS);
-    expect(appliedMigrations(dbPath)).toEqual(["0001_init.sql", "0002_project_repos.sql", "0003_forge_sessions.sql", "0004_auth_roles_teams.sql", "0005_milestones_sprints.sql", "0006_drop_mcp_connected.sql", "0007_task_keys.sql", "0008_wiki_share_links.sql", "0009_attachments.sql", "0010_herald.sql", "0011_chat_threads.sql", "0012_chat_pins.sql", "0013_hearth_engine.sql", "0014_herald_reasoning_effort.sql", "0015_hearth_rename.sql", "0016_herald_write_tools.sql"]);
+    expect(appliedMigrations(dbPath)).toEqual(["0001_init.sql", "0002_project_repos.sql", "0003_forge_sessions.sql", "0004_auth_roles_teams.sql", "0005_milestones_sprints.sql", "0006_drop_mcp_connected.sql", "0007_task_keys.sql", "0008_wiki_share_links.sql", "0009_attachments.sql", "0010_herald.sql", "0011_chat_threads.sql", "0012_chat_pins.sql", "0013_hearth_engine.sql", "0014_herald_reasoning_effort.sql", "0015_hearth_rename.sql", "0016_herald_write_tools.sql", "0017_herald_gateway.sql", "0018_herald_gateway_fallback_and_priority.sql"]);
   });
 
   it("rolls back a failed migration atomically (no partial schema, no _migrations row)", () => {
@@ -74,7 +74,7 @@ describe("runMigrations", () => {
   it("keeps the default migrations dir (prod behavior)", () => {
     const dbPath = join(tmpDir(), "app.db");
     runMigrations(dbPath);
-    expect(appliedMigrations(dbPath)).toEqual(["0001_init.sql", "0002_project_repos.sql", "0003_forge_sessions.sql", "0004_auth_roles_teams.sql", "0005_milestones_sprints.sql", "0006_drop_mcp_connected.sql", "0007_task_keys.sql", "0008_wiki_share_links.sql", "0009_attachments.sql", "0010_herald.sql", "0011_chat_threads.sql", "0012_chat_pins.sql", "0013_hearth_engine.sql", "0014_herald_reasoning_effort.sql", "0015_hearth_rename.sql", "0016_herald_write_tools.sql"]);
+    expect(appliedMigrations(dbPath)).toEqual(["0001_init.sql", "0002_project_repos.sql", "0003_forge_sessions.sql", "0004_auth_roles_teams.sql", "0005_milestones_sprints.sql", "0006_drop_mcp_connected.sql", "0007_task_keys.sql", "0008_wiki_share_links.sql", "0009_attachments.sql", "0010_herald.sql", "0011_chat_threads.sql", "0012_chat_pins.sql", "0013_hearth_engine.sql", "0014_herald_reasoning_effort.sql", "0015_hearth_rename.sql", "0016_herald_write_tools.sql", "0017_herald_gateway.sql", "0018_herald_gateway_fallback_and_priority.sql"]);
   });
 
   it("0011 backfills chat titles from the first text message; image-array first messages stay NULL", () => {
@@ -162,8 +162,13 @@ VALUES ('chat', 'c1', 'p1', 'u1', '[]');
     const db = new Database(dbPath);
     const cols = (db.prepare("PRAGMA table_info(herald_settings)").all() as { name: string }[]).map((c) => c.name);
     expect(cols).toEqual(
-      expect.arrayContaining(["engine", "engine_switcher_enabled", "primary_supports_images", "vision_model"])
+      expect.arrayContaining(["engine", "engine_switcher_enabled", "primary_supports_images", "reasoning_effort", "write_tools", "fallback_model_ids"])
     );
+    expect(cols).not.toContain("vision_model");
+    expect(cols).not.toContain("kind");
+    expect(cols).not.toContain("base_url");
+    expect(cols).not.toContain("api_key");
+    expect(cols).not.toContain("model");
     const agents = db.prepare("SELECT id, name FROM lexa_agents WHERE is_builtin = 1 ORDER BY id").all() as Array<{ id: string; name: string }>;
     expect(agents).toEqual([
       { id: "hearth-blacksmith", name: "Blacksmith Agent" },

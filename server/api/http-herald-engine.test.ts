@@ -66,8 +66,7 @@ INSERT INTO projects (id, name, slug, key, next_task_number) VALUES ('p1', 'P', 
 INSERT INTO columns (id, project_id, name, position) VALUES ('c1', 'p1', 'Todo', 0);
 INSERT INTO swimlanes (id, project_id, name, position, kind, due_at) VALUES ('s-backlog', 'p1', 'Backlog', 0, 'backlog', NULL);
 INSERT INTO tasks (id, project_id, column_id, swimlane_id, title, position, key, number) VALUES ('t1', 'p1', 'c1', 's-backlog', 'T1', 'a0', 'HE-1', 1);
-INSERT INTO herald_settings (project_id, kind, base_url, api_key, model)
-VALUES ('p1', 'openai_compatible', 'http://localhost:9/v1', 'sk-engine-test', 'mock-mini');
+INSERT INTO herald_settings (project_id) VALUES ('p1');
 INSERT INTO runtimes (id, name, provider, status) VALUES ('rt1', 'RT', 'opencode', 'offline');
 INSERT INTO attachments (id, project_id, task_id, filename, mime_type, size_bytes, sha256, storage_key)
 VALUES ('a1', 'p1', 't1', 'shot.png', 'image/png', 10, 'deadbeef', 'blobs/fake');
@@ -172,7 +171,7 @@ describe("POST /api/herald/chat/stream engine guard", () => {
 describe("vision chain gating on POST /api/herald/tasks", () => {
   it("attachments without any vision capability → 409 VISION_NOT_CONFIGURED, no queue row / thread write", async () => {
     setEngine("herald");
-    db.exec(`UPDATE herald_settings SET primary_supports_images = 0, vision_model = NULL WHERE project_id = 'p1'`);
+    db.exec(`UPDATE herald_settings SET primary_supports_images = 0 WHERE project_id = 'p1'`);
     const beforeTasks = (db.prepare("SELECT COUNT(*) AS n FROM hearth_tasks WHERE project_id = 'p1'").get() as { n: number }).n;
     const beforeThreads = (db.prepare("SELECT COUNT(*) AS n FROM herald_threads WHERE document_type = 'task' AND document_id = 't1'").get() as { n: number }).n;
     const res = await handler(
@@ -200,14 +199,15 @@ describe("vision chain gating on POST /api/herald/tasks", () => {
     await res.json();
   });
 
-  it("vision_model configured → delegation path accepted (201)", async () => {
-    db.exec(`UPDATE herald_settings SET primary_supports_images = 0, vision_model = 'vl-1' WHERE project_id = 'p1'`);
+  it("vision_model removed → delegation unavailable, 409 VISION_NOT_CONFIGURED", async () => {
+    db.exec(`UPDATE herald_settings SET primary_supports_images = 0 WHERE project_id = 'p1'`);
     const res = await handler(
       authed("POST", "/api/herald/tasks", taskBody({
         attachments: [{ storageKey: "blobs/fake", mimeType: "image/png", name: "shot.png" }],
       }))
     );
-    expect(res.status).toBe(201);
-    await res.json();
+    expect(res.status).toBe(409);
+    const body = await res.json();
+    expect(body.error.code).toBe("VISION_NOT_CONFIGURED");
   });
 });

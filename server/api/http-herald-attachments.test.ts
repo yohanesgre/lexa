@@ -83,34 +83,27 @@ afterAll(() => {
 });
 
 describe("PUT /api/herald/settings/:projectId", () => {
-  it("fresh project without apiKey → 422 INVALID_ARGS 'apiKey required on first save'", async () => {
+  it("fresh project PUT without legacy provider fields → 200 (gateway registry supplies provider)", async () => {
     const res = await handler(
       authed("PUT", "/api/herald/settings/p1", {
-        kind: "openai_compatible",
-        baseUrl: "http://localhost:9/v1",
-        model: "mock-mini",
+        fallbackModelIds: [],
       })
     );
-    expect(res.status).toBe(422);
+    expect(res.status).toBe(200);
     const body = await res.json();
-    expect(body.error.code).toBe("INVALID_ARGS");
-    expect(body.error.message).toBe("apiKey required on first save");
+    expect(body.projectId).toBe("p1");
+    expect(Array.isArray(body.fallbackModelIds ?? [])).toBe(true);
   });
 
-  it("with apiKey → masked view with hasKey true", async () => {
+  it("PUT with primarySupportsImages → masked view reflects it", async () => {
     const res = await handler(
       authed("PUT", "/api/herald/settings/p1", {
-        kind: "openai_compatible",
-        baseUrl: "http://localhost:9/v1",
-        model: "mock-mini",
-        apiKey: "sk-test-1234",
         primarySupportsImages: true,
       })
     );
     expect(res.status).toBe(200);
     const body = await res.json();
-    expect(body.hasKey).toBe(true);
-    expect(JSON.stringify(body)).not.toContain("sk-test-1234");
+    expect(body.primarySupportsImages).toBe(true);
   });
 });
 

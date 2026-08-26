@@ -9,7 +9,7 @@ import { LoggerLayer } from "../logging/logger";
 import { Sqlite, withTx, DbError, queryFirst, RowNotFound } from "../db/database";
 import { Database } from "bun:sqlite";
 import { getSetting, setSetting, deleteSetting } from "../db/settings";
-import { ProjectNotFound, WikiPageNotFound, MachineNotFound, Forbidden, SetupLocked, TaskNotFound, InvalidName, InvalidRateLimit, InvalidGithubSettings, NoUserContext, InvalidArgs, GithubApiError, errorResponse, errorToStatus, ProjectAccessDenied, HeraldTaskActive, HeraldThreadNotFound, ProviderNotConfigured, ProviderAuthFailed, ProviderUnreachable, HeraldGenerationFailed } from "./errors";
+import { ProjectNotFound, WikiPageNotFound, MachineNotFound, Forbidden, SetupLocked, TaskNotFound, InvalidName, InvalidRateLimit, InvalidGithubSettings, NoUserContext, InvalidArgs, GithubApiError, errorResponse, errorToStatus, ProjectAccessDenied, HeraldTaskActive, HeraldThreadNotFound, ProviderNotConfigured, ProviderAuthFailed, ProviderUnreachable, HeraldGenerationFailed, HasChildren } from "./errors";
 import { respond } from "./http-helpers";
 import { resolveTaskId } from "./task-id";
 import { parseTaskKey } from "../task-key";
@@ -65,6 +65,11 @@ import { HeraldThreadRepo } from "../repos/herald-thread.repo";
 import { buildChatExport } from "../services/herald.service";
 import { ProjectMemoryRepo } from "../repos/project-memory.repo";
 import { listModels, type ProviderConfig } from "../herald/provider";
+import { HeraldProvidersRepo } from "../repos/herald-providers.repo";
+import { HeraldModelsRepo } from "../repos/herald-models.repo";
+import { HeraldCallLogsRepo } from "../repos/herald-call-logs.repo";
+import { HeraldModelPricesRepo } from "../repos/herald-model-prices.repo";
+import { syncModelPrices } from "../herald/price-sync";
 import { RuntimeEventService } from "../services/runtime-event.service";
 import { HearthRepo } from "../repos/hearth.repo";
 import { RuntimeEventRepo } from "../repos/runtime-event.repo";
@@ -968,9 +973,9 @@ const HeraldSettingsPath = Schema.Struct({ projectId: Schema.String });
 
 // Keys are write-only: omitted apiKey/searchApiKey keep the stored values.
 const HeraldSettingsInputPayload = Schema.Struct({
-  kind: ProviderKindSchema,
-  baseUrl: Schema.String,
-  model: Schema.String,
+  kind: Schema.optional(ProviderKindSchema),
+  baseUrl: Schema.optional(Schema.String),
+  model: Schema.optional(Schema.String),
   apiKey: Schema.optional(Schema.String),
   searchProvider: Schema.optional(Schema.NullOr(Schema.Literal("exa"))),
   searchApiKey: Schema.optional(Schema.NullOr(Schema.String)),
@@ -981,24 +986,26 @@ const HeraldSettingsInputPayload = Schema.Struct({
   visionModel: Schema.optional(Schema.NullOr(Schema.String)),
   reasoningEffort: Schema.optional(Schema.NullOr(HeraldReasoningEffortSchema)),
   writeTools: Schema.optional(Schema.Array(Schema.String)),
+  fallbackModelIds: Schema.optional(Schema.Array(Schema.String)),
 });
 
 const HeraldSettingsMaskedSchema = Schema.Struct({
   projectId: Schema.String,
-  kind: ProviderKindSchema,
-  baseUrl: Schema.String,
-  model: Schema.String,
-  hasKey: Schema.Boolean,
-  keyMask: Schema.NullOr(Schema.String),
+  kind: Schema.optional(ProviderKindSchema),
+  baseUrl: Schema.optional(Schema.String),
+  model: Schema.optional(Schema.String),
+  hasKey: Schema.optional(Schema.Boolean),
+  keyMask: Schema.optional(Schema.NullOr(Schema.String)),
   searchProvider: Schema.NullOr(Schema.Literal("exa")),
   hasSearchKey: Schema.Boolean,
   urlAllowlist: Schema.NullOr(Schema.String),
   engine: Schema.Literal("herald", "blacksmith"),
   engineSwitcherEnabled: Schema.Boolean,
   primarySupportsImages: Schema.Boolean,
-  visionModel: Schema.NullOr(Schema.String),
+  visionModel: Schema.optional(Schema.NullOr(Schema.String)),
   reasoningEffort: Schema.NullOr(HeraldReasoningEffortSchema),
   writeTools: Schema.Array(Schema.String),
+  fallbackModelIds: Schema.optional(Schema.Array(Schema.String)),
 });
 
 // test/models take UNSAVED submitted values (never persist); an omitted
@@ -1641,6 +1648,18 @@ const meGroup = HttpApiGroup.make("me")
     .setPayload(UpdateMyNameInput)
     .addSuccess(UserSchema));
 
+const adminHeraldGroup = HttpApiGroup.make("adminHerald")
+  .add(HttpApiEndpoint.get("adminHeraldUsage", "/admin/herald/usage").addSuccess(Schema.Struct({ totalCostCents: Schema.Number, byDay: Schema.Array(Schema.Struct({ day: Schema.String, costCents: Schema.Number })), byModel: Schema.Array(Schema.Struct({ model: Schema.String, costCents: Schema.Number })) })))
+  .add(HttpApiEndpoint.get("adminHeraldCalls", "/admin/herald/calls").addSuccess(Schema.Struct({ data: Schema.Array(Schema.Any) })))
+  .add(HttpApiEndpoint.post("adminHeraldPriceSync", "/admin/herald/prices/sync").addSuccess(Schema.Struct({ synced: Schema.Number })))
+  .add(HttpApiEndpoint.get("adminHeraldProviders", "/admin/herald/providers").addSuccess(Schema.Struct({ data: Schema.Array(Schema.Any) })))
+  .add(HttpApiEndpoint.post("adminHeraldCreateProvider", "/admin/herald/providers").setPayload(Schema.Struct({ label: Schema.String, baseUrl: Schema.String, apiKey: Schema.String })).addSuccess(Schema.Any))
+  .add(HttpApiEndpoint.patch("adminHeraldUpdateProvider", "/admin/herald/providers/:id").setPath(Schema.Struct({ id: Schema.String })).setPayload(Schema.Struct({ label: Schema.optional(Schema.String), baseUrl: Schema.optional(Schema.String), apiKey: Schema.optional(Schema.String) })).addSuccess(Schema.Any))
+  .add(HttpApiEndpoint.del("adminHeraldDeleteProvider", "/admin/herald/providers/:id").setPath(Schema.Struct({ id: Schema.String })).addSuccess(Schema.Void, { status: 204 }))
+  .add(HttpApiEndpoint.post("adminHeraldTestProvider", "/admin/herald/providers/:id/test").setPath(Schema.Struct({ id: Schema.String })).addSuccess(Schema.Struct({ ok: Schema.Boolean, latencyMs: Schema.Number })))
+  .add(HttpApiEndpoint.post("adminHeraldProviderModels", "/admin/herald/providers/:id/models").setPath(Schema.Struct({ id: Schema.String })).addSuccess(Schema.Struct({ data: Schema.Array(Schema.Any) })))
+  .add(HttpApiEndpoint.post("adminHeraldReorderModels", "/admin/herald/providers/:id/models/reorder").setPath(Schema.Struct({ id: Schema.String })).setPayload(Schema.Struct({ orderedIds: Schema.Array(Schema.String) })).addSuccess(Schema.Struct({ data: Schema.Array(Schema.Any) })));
+
 export const LexaApi = HttpApi.make("lexa")
   .add(healthGroup)
   .add(setupGroup)
@@ -1660,6 +1679,7 @@ export const LexaApi = HttpApi.make("lexa")
   .add(dashboardGroup)
   .add(apiKeysGroup)
   .add(adminGroup)
+  .add(adminHeraldGroup)
   .add(meGroup)
   .add(teamsGroup)
   .add(workspaceGroup)
@@ -1680,6 +1700,18 @@ const searchParams = (req: { request: { originalUrl: string } }): URLSearchParam
 // middleware (member keys are 403'd there already — this is belt-and-braces
 // for any handler reached through a path that skips the middleware check).
 const requireAdmin = Effect.gen(function* () {
+  const identity = yield* AuthIdentity;
+  if (identity.role !== "admin") {
+    return yield* Effect.fail(new Forbidden({ message: "Admin role required" }));
+  }
+  return identity;
+});
+
+// Superadmin-only gate (Herald Gateway): same identity check as
+// Workspace/Teams requireSuperadmin — superadmin sessions (role "admin"
+// after middleware mapping) and bare API keys (role "admin") pass; member
+// sessions (role "member") get 403 FORBIDDEN.
+const requireSuperadmin = Effect.gen(function* () {
   const identity = yield* AuthIdentity;
   if (identity.role !== "admin") {
     return yield* Effect.fail(new Forbidden({ message: "Admin role required" }));
@@ -2710,7 +2742,7 @@ const heraldLive = HttpApiBuilder.group(LexaApi, "herald", (handlers) =>
     )
     .handle("putHeraldSettings", (req) =>
       respond(Effect.gen(function* () {
-        yield* requireAdmin;
+        yield* requireSuperadmin;
         const repo = yield* HeraldSettingsRepo;
         const payload = {
           ...req.payload,
@@ -3630,19 +3662,21 @@ function wireDisconnectAbort(request: HttpServerRequest, abort: () => boolean): 
 
 // test/models take UNSAVED submitted values; an omitted apiKey falls back to
 // the stored one so testing a saved config doesn't require re-entering the key.
+// After 0017 legacy kind/baseUrl/model/apiKey columns are gone — payload is optional and fallback is gateway.
 const resolveProviderConfig = (
-  projectId: string,
-  payload: { kind: "openai_compatible" | "anthropic_compatible"; baseUrl: string; model: string; apiKey?: string }
+  _projectId: string,
+  payload: { kind?: "openai_compatible" | "anthropic_compatible"; baseUrl?: string; model?: string; apiKey?: string }
 ): Effect.Effect<ProviderConfig, ProviderNotConfigured | DbError | RowNotFound, HeraldSettingsRepo> =>
   Effect.gen(function* () {
-    const repo = yield* HeraldSettingsRepo;
-    const stored = yield* repo.getByProject(projectId).pipe(Effect.catchTag("RowNotFound", () => Effect.succeed(null)));
-    return {
-      kind: payload.kind,
-      baseUrl: payload.baseUrl,
-      model: payload.model,
-      apiKey: payload.apiKey ?? stored?.api_key ?? "",
-    };
+    if (payload.kind && payload.baseUrl && payload.model) {
+      return {
+        kind: payload.kind,
+        baseUrl: payload.baseUrl,
+        model: payload.model,
+        apiKey: payload.apiKey ?? "",
+      };
+    }
+    return yield* Effect.fail(new ProviderNotConfigured({ projectId: _projectId }));
   });
 
 const attachmentsLive = HttpApiBuilder.group(LexaApi, "attachments", (handlers) =>
@@ -3905,6 +3939,125 @@ const adminLive = HttpApiBuilder.group(LexaApi, "admin", (handlers) =>
 // Self-service profile: the acting user comes from the session cookie (or a
 // key-bound user), resolved by the middleware into AuthIdentity.userId. Bare
 // API keys have no user context — agents have no profile to edit.
+const adminHeraldLive = HttpApiBuilder.group(LexaApi, "adminHerald", (handlers) =>
+  handlers
+    .handle("adminHeraldUsage", () =>
+      respond(Effect.gen(function* () {
+        yield* requireSuperadmin;
+        const repo = yield* HeraldCallLogsRepo;
+        const db = yield* Sqlite;
+        const groupBy = (searchParams({ request: { originalUrl: "/admin/herald/usage?groupBy=day" } } as never).get("groupBy") ?? "day");
+        void groupBy;
+        // aggregate cost — simple total + by day/model
+        const logs = yield* repo.listRecent(10000);
+        const totalCostCents = logs.reduce((s: number, r: { costCents: number }) => s + r.costCents, 0);
+        const byModelMap = new Map<string, number>();
+        const byDayMap = new Map<string, number>();
+        for (const r of logs as unknown as Array<{ model: string; costCents: number; createdAt: string }>) {
+          byModelMap.set(r.model, (byModelMap.get(r.model) ?? 0) + r.costCents);
+          const day = r.createdAt.slice(0, 10);
+          byDayMap.set(day, (byDayMap.get(day) ?? 0) + r.costCents);
+        }
+        return { totalCostCents, byDay: [...byDayMap.entries()].map(([day, costCents]) => ({ day, costCents })), byModel: [...byModelMap.entries()].map(([model, costCents]) => ({ model, costCents })) };
+      }))
+    )
+    .handle("adminHeraldCalls", () =>
+      respond(Effect.gen(function* () {
+        yield* requireSuperadmin;
+        const repo = yield* HeraldCallLogsRepo;
+        const logs = yield* repo.listRecent(100);
+        return { data: logs };
+      }))
+    )
+    .handle("adminHeraldPriceSync", () =>
+      respond(Effect.gen(function* () {
+        yield* requireSuperadmin;
+        const n = yield* syncModelPrices().pipe(Effect.catchAll(() => Effect.succeed(0)));
+        return { synced: n };
+      }))
+    )
+    .handle("adminHeraldProviders", () =>
+      respond(Effect.gen(function* () {
+        yield* requireSuperadmin;
+        const repo = yield* HeraldProvidersRepo;
+        const rows = yield* repo.maskedList();
+        return { data: rows };
+      }))
+    )
+    .handle("adminHeraldCreateProvider", (req) =>
+      respond(Effect.gen(function* () {
+        yield* requireSuperadmin;
+        const repo = yield* HeraldProvidersRepo;
+        const id = crypto.randomUUID();
+        const row = yield* repo.create({ id, label: req.payload.label, baseUrl: req.payload.baseUrl, apiKey: req.payload.apiKey });
+        const masked = yield* repo.maskedView(row.id);
+        return masked as unknown as never;
+      }))
+    )
+    .handle("adminHeraldUpdateProvider", (req) =>
+      respond(Effect.gen(function* () {
+        yield* requireSuperadmin;
+        const repo = yield* HeraldProvidersRepo;
+        yield* repo.update(req.path.id, { label: req.payload.label, baseUrl: req.payload.baseUrl, apiKey: req.payload.apiKey });
+        return yield* repo.maskedView(req.path.id);
+      }))
+    )
+    .handle("adminHeraldDeleteProvider", (req) =>
+      respond(Effect.gen(function* () {
+        yield* requireSuperadmin;
+        const db = yield* Sqlite;
+        const mRepo = yield* HeraldModelsRepo;
+        const models = yield* mRepo.listByProvider(req.path.id).pipe(Effect.catchAll(() => Effect.succeed([] as unknown as Array<{ id: string }>)));
+        if (models.length > 0) {
+          const modelIds = new Set((models as Array<{ id: string }>).map((m) => m.id));
+          const rows = db.prepare(`SELECT fallback_model_ids FROM herald_settings`).all() as Array<{ fallback_model_ids: string }>;
+          let refs = 0;
+          for (const r of rows) {
+            try {
+              const ids = JSON.parse(r.fallback_model_ids ?? "[]") as string[];
+              for (const fid of ids) if (modelIds.has(fid)) refs++;
+            } catch {}
+          }
+          if (refs > 0) return yield* new HasChildren({ count: refs });
+        }
+        const repo = yield* HeraldProvidersRepo;
+        yield* repo.delete(req.path.id);
+        return undefined;
+      }))
+    )
+    .handle("adminHeraldTestProvider", (req) =>
+      respond(Effect.gen(function* () {
+        yield* requireSuperadmin;
+        const pRepo = yield* HeraldProvidersRepo;
+        const mRepo = yield* HeraldModelsRepo;
+        const prov = yield* pRepo.getById(req.path.id);
+        const models = yield* mRepo.listByProvider(req.path.id).pipe(Effect.catchAll(() => Effect.succeed([] as Array<{ kind: ProviderConfig["kind"]; enabled: boolean }>)));
+        const enabledKind = (models as Array<{ kind: ProviderConfig["kind"]; enabled: boolean }>).find((m) => m.enabled)?.kind;
+        const kind: ProviderConfig["kind"] = enabledKind ?? "openai_compatible";
+        const cfg: ProviderConfig = { kind, baseUrl: prov.base_url, apiKey: prov.api_key, model: "test" };
+        const start = Date.now();
+        yield* Effect.tryPromise({ try: () => listModels(cfg), catch: (e) => e as ProviderAuthFailed | ProviderUnreachable });
+        return { ok: true, latencyMs: Date.now() - start };
+      }))
+    )
+    .handle("adminHeraldProviderModels", (req) =>
+      respond(Effect.gen(function* () {
+        yield* requireSuperadmin;
+        const repo = yield* HeraldModelsRepo;
+        const rows = yield* repo.listByProvider(req.path.id);
+        return { data: rows };
+      }))
+    )
+    .handle("adminHeraldReorderModels", (req) =>
+      respond(Effect.gen(function* () {
+        yield* requireSuperadmin;
+        const repo = yield* HeraldModelsRepo;
+        const rows = yield* repo.reorder(req.path.id, [...req.payload.orderedIds]);
+        return { data: rows };
+      }))
+    )
+);
+
 const meLive = HttpApiBuilder.group(LexaApi, "me", (handlers) =>
   handlers
     .handle("updateMe", (req) =>
@@ -3983,7 +4136,7 @@ export function createApiHandler(dbPath: string) {
 
   const serviceLayer = buildServiceLayer(dbPath);
   const handlerLayer = Layer.mergeAll(
-    healthLive, setupLive, projectsLive, columnsLive, swimlanesLive, milestonesLive, fieldConfigLive, hearthLive, agentsLive, skillsLive, heraldLive, taskLinksLive, tasksLive, boardLive, wikiLive, publicShareLive, attachmentsLive, apiKeysLive, adminLive, meLive, dashboardLive,
+    healthLive, setupLive, projectsLive, columnsLive, swimlanesLive, milestonesLive, fieldConfigLive, hearthLive, agentsLive, skillsLive, heraldLive, taskLinksLive, tasksLive, boardLive, wikiLive, publicShareLive, attachmentsLive, apiKeysLive, adminLive, adminHeraldLive, meLive, dashboardLive,
     createTeamsLive(LexaApi), createWorkspaceLive(LexaApi), createSessionsLive(LexaApi),
   ).pipe(Layer.provide(Layer.provide(serviceLayer, Layer.mergeAll(dbLayer, LoggerLayer))), Layer.provide(dbLayer));
   const merged = Layer.mergeAll(apiLayer, handlerLayer);

@@ -197,16 +197,15 @@ describe("translateRunError", () => {
     expect((err as { message: string }).message).toContain("Internal server error");
   });
 
-  it("429 preserves status and message as HeraldGenerationFailed (not auth)", () => {
+  it("429 with rate limit maps to ProviderUnreachable (retriable with backoff)", () => {
     const apiErr = Object.assign(new Error("429 Rate limit exceeded"), {
       status: 429,
       code: "429",
       error: { message: "Rate limit exceeded" },
     });
     const err = translateRunError(apiErr);
-    expect(err._tag).toBe("HeraldGenerationFailed");
-    expect((err as { message: string }).message).toContain("429");
-    expect((err as { message: string }).message).toContain("Rate limit exceeded");
+    expect(err._tag).toBe("ProviderUnreachable");
+    expect((err as { message: string }).message?.toLowerCase() ?? "").toContain("429");
   });
 
   it("401 via numeric status field maps to ProviderAuthFailed", () => {
