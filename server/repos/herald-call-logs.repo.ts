@@ -92,6 +92,151 @@ export class HeraldCallLogsRepo extends Effect.Service<HeraldCallLogsRepo>()("Le
           queryAll<HeraldCallLogDbRow>(db, `SELECT * FROM herald_call_logs ORDER BY created_at DESC LIMIT ?`, limit),
           (rows) => rows.map(toDomain)
         ),
+
+      usageStats: (filters: { from?: string | null; to?: string | null; projectId?: string | null } = {}): Effect.Effect<{ totalTokens: number; promptTokens: number; completionTokens: number; totalCostCents: number; totalCostUsd: number; avgLatencyMs: number | null; errorRate: number; totalCalls: number; errorCalls: number }, DbError> =>
+        Effect.gen(function* () {
+          const params: unknown[] = [];
+          const conds: string[] = [];
+          if (filters.projectId) { conds.push("project_id = ?"); params.push(filters.projectId); }
+          if (filters.from) { conds.push("date(created_at) >= date(?)"); params.push(filters.from); }
+          if (filters.to) { conds.push("date(created_at) <= date(?)"); params.push(filters.to); }
+          const where = conds.length ? `WHERE ${conds.join(" AND ")}` : "";
+          const row = yield* Effect.try({
+            try: () => {
+              const sql = `SELECT
+                COUNT(*) as totalCalls,
+                COALESCE(SUM(usage_in),0) as promptTokens,
+                COALESCE(SUM(usage_out),0) as completionTokens,
+                COALESCE(SUM(usage_in + usage_out + cached_in),0) as totalTokens,
+                COALESCE(SUM(cost_cents),0) as totalCostCents,
+                AVG(latency_ms) as avgLatencyMs,
+                COALESCE(SUM(CASE WHEN status = 'error' THEN 1 ELSE 0 END),0) as errorCalls
+                FROM herald_call_logs ${where}`;
+              return db.prepare(sql).get(...params) as {
+                totalCalls: number; promptTokens: number; completionTokens: number; totalTokens: number; totalCostCents: number; avgLatencyMs: number | null; errorCalls: number;
+              } | null;
+            },
+            catch: (e) => new DbError({ message: String(e), cause: e }),
+          });
+          const totalCalls = Number(row?.totalCalls ?? 0);
+          const errorCalls = Number(row?.errorCalls ?? 0);
+          return {
+            totalTokens: Number(row?.totalTokens ?? 0),
+            promptTokens: Number(row?.promptTokens ?? 0),
+            completionTokens: Number(row?.completionTokens ?? 0),
+            totalCostCents: Number(row?.totalCostCents ?? 0),
+            totalCostUsd: Number(row?.totalCostCents ?? 0) / 100,
+            avgLatencyMs: row?.avgLatencyMs !== null && row?.avgLatencyMs !== undefined ? Math.round(Number(row.avgLatencyMs)) : null,
+            errorRate: totalCalls > 0 ? errorCalls / totalCalls : 0,
+            totalCalls,
+            errorCalls,
+          };
+        }),
+
+      byDay: (filters: { from?: string | null; to?: string | null; projectId?: string | null } = {}): Effect.Effect<Array<{ day: string; tokens: number; costCents: number; costUsd: number; avgLatencyMs: number | null; calls: number; errorRate: number }>, DbError> =>
+        Effect.gen(function* () {
+          const params: unknown[] = [];
+          const conds: string[] = [];
+          if (filters.projectId) { conds.push("project_id = ?"); params.push(filters.projectId); }
+          if (filters.from) { conds.push("date(created_at) >= date(?)"); params.push(filters.from); }
+          if (filters.to) { conds.push("date(created_at) <= date(?)"); params.push(filters.to); }
+          const where = conds.length ? `WHERE ${conds.join(" AND ")}` : "";
+          const rows = yield* Effect.try({
+            try: () => {
+              const sql = `SELECT
+                date(created_at) as day,
+                COALESCE(SUM(usage_in + usage_out + cached_in),0) as tokens,
+                COALESCE(SUM(cost_cents),0) as costCents,
+                AVG(latency_ms) as avgLatencyMs,
+                COUNT(*) as calls,
+                COALESCE(SUM(CASE WHEN status = 'error' THEN 1 ELSE 0 END),0) as errorCalls
+                FROM herald_call_logs ${where}
+                GROUP BY date(created_at)
+                ORDER BY day ASC`;
+              return db.prepare(sql).all(...params) as Array<{ day: string; tokens: number; costCents: number; avgLatencyMs: number | null; calls: number; errorCalls: number }>;
+            },
+            catch: (e) => new DbError({ message: String(e), cause: e }),
+          });
+          return rows.map((r) => ({
+            day: r.day,
+            tokens: Number(r.tokens),
+            costCents: Number(r.costCents),
+            costUsd: Number(r.costCents) / 100,
+            avgLatencyMs: r.avgLatencyMs !== null ? Math.round(Number(r.avgLatencyMs)) : null,
+            calls: Number(r.calls),
+            errorRate: Number(r.calls) > 0 ? Number(r.errorCalls) / Number(r.calls) : 0,
+          }));
+        }),
+
+      byModel: (filters: { from?: string | null; to?: string | null; projectId?: string | null } = {}): Effect.Effect<Array<{ model: string; tokens: number; costCents: number; costUsd: number; avgLatencyMs: number | null; calls: number; errorRate: number }>, DbError> =>
+        Effect.gen(function* () {
+          const params: unknown[] = [];
+          const conds: string[] = [];
+          if (filters.projectId) { conds.push("project_id = ?"); params.push(filters.projectId); }
+          if (filters.from) { conds.push("date(created_at) >= date(?)"); params.push(filters.from); }
+          if (filters.to) { conds.push("date(created_at) <= date(?)"); params.push(filters.to); }
+          const where = conds.length ? `WHERE ${conds.join(" AND ")}` : "";
+          const rows = yield* Effect.try({
+            try: () => {
+              const sql = `SELECT
+                model,
+                COALESCE(SUM(usage_in + usage_out + cached_in),0) as tokens,
+                COALESCE(SUM(cost_cents),0) as costCents,
+                AVG(latency_ms) as avgLatencyMs,
+                COUNT(*) as calls,
+                COALESCE(SUM(CASE WHEN status = 'error' THEN 1 ELSE 0 END),0) as errorCalls
+                FROM herald_call_logs ${where}
+                GROUP BY model
+                ORDER BY tokens DESC`;
+              return db.prepare(sql).all(...params) as Array<{ model: string; tokens: number; costCents: number; avgLatencyMs: number | null; calls: number; errorCalls: number }>;
+            },
+            catch: (e) => new DbError({ message: String(e), cause: e }),
+          });
+          return rows.map((r) => ({
+            model: r.model,
+            tokens: Number(r.tokens),
+            costCents: Number(r.costCents),
+            costUsd: Number(r.costCents) / 100,
+            avgLatencyMs: r.avgLatencyMs !== null ? Math.round(Number(r.avgLatencyMs)) : null,
+            calls: Number(r.calls),
+            errorRate: Number(r.calls) > 0 ? Number(r.errorCalls) / Number(r.calls) : 0,
+          }));
+        }),
+
+      csv: (filters: { from?: string | null; to?: string | null; projectId?: string | null } = {}): Effect.Effect<string, DbError> =>
+        Effect.gen(function* () {
+          const params: unknown[] = [];
+          const conds: string[] = [];
+          if (filters.projectId) { conds.push("project_id = ?"); params.push(filters.projectId); }
+          if (filters.from) { conds.push("date(created_at) >= date(?)"); params.push(filters.from); }
+          if (filters.to) { conds.push("date(created_at) <= date(?)"); params.push(filters.to); }
+          const where = conds.length ? `WHERE ${conds.join(" AND ")}` : "";
+          const rows = yield* Effect.try({
+            try: () => {
+              const sql = `SELECT
+                date(created_at) as day,
+                model,
+                COALESCE(SUM(usage_in + usage_out + cached_in),0) as tokens,
+                COALESCE(SUM(cost_cents),0) as costCents,
+                AVG(latency_ms) as avgLatencyMs,
+                COUNT(*) as calls,
+                COALESCE(SUM(CASE WHEN status = 'error' THEN 1 ELSE 0 END),0) as errorCalls
+                FROM herald_call_logs ${where}
+                GROUP BY date(created_at), model
+                ORDER BY day ASC, tokens DESC`;
+              return db.prepare(sql).all(...params) as Array<{ day: string; model: string; tokens: number; costCents: number; avgLatencyMs: number | null; calls: number; errorCalls: number }>;
+            },
+            catch: (e) => new DbError({ message: String(e), cause: e }),
+          });
+          const header = "day,model,tokens,cost_cents,cost_usd,avg_latency_ms,calls,error_rate";
+          const lines = rows.map((r) => {
+            const errorRate = Number(r.calls) > 0 ? Number(r.errorCalls) / Number(r.calls) : 0;
+            const avg = r.avgLatencyMs !== null ? Math.round(Number(r.avgLatencyMs)) : "";
+            const costUsd = (Number(r.costCents) / 100).toFixed(2);
+            return `${r.day},${r.model},${r.tokens},${r.costCents},${costUsd},${avg},${r.calls},${errorRate.toFixed(4)}`;
+          });
+          return [header, ...lines].join("\n");
+        }),
     };
   }),
 }) {}

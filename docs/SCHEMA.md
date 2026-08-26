@@ -801,6 +801,15 @@ CREATE TABLE herald_model_prices (
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+CREATE TABLE herald_provider_health (
+  provider_id TEXT PRIMARY KEY REFERENCES herald_providers(id) ON DELETE CASCADE,
+  failure_count INTEGER NOT NULL DEFAULT 0,
+  circuit_state TEXT NOT NULL CHECK (circuit_state IN ('open','closed','half-open')) DEFAULT 'closed',
+  opened_at TEXT,
+  last_probe_at TEXT,
+  consecutive_failures INTEGER NOT NULL DEFAULT 0
+);
+
 -- Agent catalog rebinding (0013, single transaction — atomic):
 -- Herald Agent gets a NEW internal id; hearth_tasks.agent_id FKs and any
 -- lexa_agent_skills junction rows are rebound in the same tx. One-time

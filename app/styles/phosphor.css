@@ -7932,3 +7932,19 @@
 .app-nav.app-nav-menu-open + .app-nav-backdrop {
   display: block;
 }
+
+  /* Admin — Herald Usage & Health (wireframes/src/admin-herald-usage.html) */
+  .kpi-grid { display:grid; grid-template-columns:repeat(4,1fr); gap:16px; }
+  @media (max-width:900px){ .kpi-grid{ grid-template-columns:repeat(2,1fr);} }
+  @media (max-width:520px){ .kpi-grid{ grid-template-columns:1fr;} }
+  .kpi-card { background:var(--lx-surface-card); border:1px solid var(--lx-border-default); border-radius:12px; padding:20px; }
+  .kpi-label { font-family:var(--lx-font-micro); font-size:11px; color:var(--lx-text-muted); text-transform:uppercase; letter-spacing:0.04em; margin-bottom:6px; }
+  .kpi-value { font-family:var(--lx-font-mono); font-size:24px; line-height:30px; font-weight:600; color:var(--lx-text-primary); letter-spacing:-0.03em; }
+  .kpi-value-danger{ color:var(--lx-text-danger); }
+  .kpi-value-warning{ color:var(--lx-text-warning); }
+  .chart-shell{ position:relative; height:220px; border:1px dashed var(--lx-border-strong); border-radius:8px; background:var(--lx-surface-elevated); display:flex; align-items:center; justify-content:center; overflow:hidden; }
+  .chart-shell canvas{ width:100%; height:100%; display:block; }
+  .health-badge{display:inline-flex; align-items:center; height:20px; padding:0 8px; border-radius:9999px; font-family:var(--lx-font-micro); font-size:11px; font-weight:600; line-height:14px; text-transform:uppercase; letter-spacing:0.04em; border:1px solid transparent;}
+  .health-open{ background:var(--lx-bg-danger-subtle); color:var(--lx-text-danger); border-color:rgba(255,68,68,0.18);}
+  .health-closed{ background:var(--lx-bg-success-subtle); color:var(--lx-text-success); border-color:rgba(74,222,128,0.18);}
+  .health-half{ background:var(--lx-bg-warning-subtle); color:var(--lx-text-warning); border-color:rgba(240,192,64,0.18);}
