@@ -53,12 +53,12 @@ describe("normalizeHost", () => {
   it("strips schemes and lowercases", async () => {
     const { normalizeHost } = await import("./config");
     expect(normalizeHost("https://Lexa.Example.Com")).toBe("lexa.example.com");
-    expect(normalizeHost("http://lexa.yohanesgre.com")).toBe("lexa.yohanesgre.com");
+    expect(normalizeHost("http://lexa.example.com")).toBe("lexa.example.com");
   });
 
   it("accepts bare hosts", async () => {
     const { normalizeHost } = await import("./config");
-    expect(normalizeHost("lexa.yohanesgre.com")).toBe("lexa.yohanesgre.com");
+    expect(normalizeHost("lexa.example.com")).toBe("lexa.example.com");
     expect(normalizeHost("10.0.0.5")).toBe("10.0.0.5");
     expect(normalizeHost("192.168.1.50")).toBe("192.168.1.50");
   });
@@ -95,7 +95,7 @@ describe("normalizeHost", () => {
 describe("groupDir + flavorFor", () => {
   it("groupDir nests the normalized host under the state root", async () => {
     const { groupDir } = await import("./config");
-    expect(groupDir("https://lexa.yohanesgre.com")).toBe(join(dir, "lexa.yohanesgre.com"));
+    expect(groupDir("https://lexa.example.com")).toBe(join(dir, "lexa.example.com"));
     expect(groupDir("http://localhost:3000")).toBe(join(dir, "localhost:3000"));
     expect(groupDir("https://192.168.1.50:8443")).toBe(join(dir, "192.168.1.50:8443"));
     expect(groupDir("127.0.0.1")).toBe(join(dir, "localhost"));
@@ -106,19 +106,19 @@ describe("groupDir + flavorFor", () => {
     expect(flavorFor("http://localhost:3000")).toBe("dev");
     expect(flavorFor("http://127.0.0.1")).toBe("dev");
     expect(flavorFor("http://[::1]")).toBe("dev");
-    expect(flavorFor("https://lexa.yohanesgre.com")).toBe("prod");
+    expect(flavorFor("https://lexa.example.com")).toBe("prod");
   });
 
   it("flavorFor: LEXA_FLAVOR env overrides (staging server on a non-loopback host)", async () => {
     const { flavorFor } = await import("./config");
     process.env.LEXA_FLAVOR = "staging";
     try {
-      expect(flavorFor("https://lexa-preview.yohanesgre.com")).toBe("staging");
+      expect(flavorFor("https://lexa-preview.example.com")).toBe("staging");
       expect(flavorFor("http://localhost:3000")).toBe("staging");
     } finally {
       delete process.env.LEXA_FLAVOR;
     }
-    expect(flavorFor("https://lexa-preview.yohanesgre.com")).toBe("prod");
+    expect(flavorFor("https://lexa-preview.example.com")).toBe("prod");
   });
 
   it("flavorFor: invalid LEXA_FLAVOR is ignored", async () => {
