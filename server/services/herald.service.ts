@@ -659,7 +659,23 @@ export function buildStream(ctx: StreamRunContext): ReadableStream<StreamFrame> 
                 usageIn = Number(u?.input ?? u?.promptTokens ?? usageIn);
                 usageOut = Number(u?.output ?? u?.completionTokens ?? usageOut);
               } else if (chunk.type === "RUN_ERROR") {
-                throw translateRunError(new Error(chunk.message));
+                const err: Record<string, unknown> = { message: chunk.message };
+                const c = chunk as unknown as Record<string, unknown>;
+                if (c.code !== undefined) {
+                  err.code = c.code;
+                  err.status = c.code;
+                }
+                if (c.rawEvent !== undefined) {
+                  err.rawEvent = c.rawEvent;
+                  err.error = c.rawEvent;
+                }
+                const nested = (c.error as Record<string, unknown> | undefined);
+                if (nested !== undefined && err.rawEvent === undefined) {
+                  err.error = nested;
+                }
+                const e = Object.assign(new Error(chunk.message), err);
+                if (c.rawEvent !== undefined) (e as unknown as Record<string, unknown>).cause = c.rawEvent;
+                throw translateRunError(e);
               }
             }
           };
@@ -1399,9 +1415,9 @@ export class HeraldService extends Effect.Service<HeraldService>()("Lexa/Herald"
           );
         }),
 
-      testConnection: (config: ProviderConfig) =>
+      testConnection: (config: ProviderConfig, opts?: { signal?: AbortSignal }) =>
         Effect.tryPromise({
-          try: () => providerTestConnection(config),
+          try: () => providerTestConnection(config, opts),
           catch: (e) => e as ProviderAuthFailed | ProviderUnreachable | HeraldGenerationFailed,
         }),
 

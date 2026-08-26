@@ -713,8 +713,29 @@ export function putHeraldSettings(projectId: string, input: HeraldSettingsInput)
   return request(`${BASE}/herald/settings/${projectId}`, { method: "PUT", body: JSON.stringify(input) });
 }
 
-export function testHeraldSettings(projectId: string, input: HeraldSettingsInput): Promise<{ ok: boolean; latencyMs: number }> {
-  return request(`${BASE}/herald/settings/${projectId}/test`, { method: "POST", body: JSON.stringify(input) });
+export async function testHeraldSettings(
+  projectId: string,
+  input: HeraldSettingsInput,
+  opts?: { signal?: AbortSignal }
+): Promise<{ ok: boolean; latencyMs: number }> {
+  try {
+    return await request<{ ok: boolean; latencyMs: number }>(`${BASE}/herald/settings/${projectId}/test`, {
+      method: "POST",
+      body: JSON.stringify(input),
+      signal: opts?.signal ?? AbortSignal.timeout(35_000),
+    });
+  } catch (e) {
+    const err = e as { code?: string; name?: string; message?: string };
+    if (!err.code) {
+      const msg = `${err.name ?? ""} ${err.message ?? ""}`.toLowerCase();
+      if (msg.includes("timeout") || msg.includes("abort")) {
+        const mapped = new Error("Provider unreachable (timeout)") as Error & { code?: string };
+        mapped.code = "PROVIDER_UNREACHABLE";
+        throw mapped;
+      }
+    }
+    throw e;
+  }
 }
 
 export function listHeraldModels(projectId: string, input: HeraldSettingsInput): Promise<ModelListResult> {

@@ -3994,6 +3994,14 @@ export function createApiHandler(dbPath: string) {
     const url = new URL(req.url);
     try {
       const res = await handler(req);
+      if (url.pathname === "/api/hearth/tasks/recent" && req.method === "GET" && res.status < 400) {
+        try {
+          const row = (db as unknown as { prepare: (s: string) => { get: () => unknown } }).prepare("SELECT 1 AS v FROM runtimes WHERE status = 'online' LIMIT 1").get() as { v: number } | undefined;
+          if (!row) return res;
+        } catch {
+          // if runtimes table missing (pre-migration) fall through to log
+        }
+      }
       const level = res.status >= 500 ? "ERROR" : res.status >= 400 ? "WARN" : "INFO";
       console.log(JSON.stringify({ level, service: "http", method: req.method, path: url.pathname, status: res.status, duration: Date.now() - start, timestamp: new Date().toISOString() }));
       return res;
@@ -4094,3 +4102,18 @@ export function createWebhookHandler(dbPath: string): (rawBody: ArrayBuffer, del
     return new Response(JSON.stringify({ ok: true }), { status: 200, headers: { "Content-Type": "application/json" } });
   };
 }
+
+// ─── Workers-side factory (Phase 6 follow-up) ───────────────────────────
+//
+// The Bun host's `createApiHandler(dbPath)` opens a `bun:sqlite` Database
+// and builds the Effect runtime. The Workers-side equivalent builds
+// the same runtime from the workerd `env` binding:
+//
+//   createApiHandler({ driver: createD1Driver(env.DB), env, auth,
+//                      webhookVerifier: ..., webhookHandler: ... })
+//
+// For now the Workers host returns a 200 stub from server/workers-entry.ts
+// and the real HTTP wiring is a Phase 6+ follow-up. This alias is the
+// canonical Bun-side name for the worker-routing layer to import once
+// the full D1 driver is wired through.
+export const createApiHandlerForBun: typeof createApiHandler = createApiHandler;

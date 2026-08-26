@@ -13,7 +13,7 @@ import { parseBackupStamp, pruneBackups, runBackup } from "./backup";
 const MIGRATIONS = fileURLToPath(new URL("../../migrations", import.meta.url));
 
 function makeCfg(fsRoot: string): StorageConfigShape {
-  return { driver: "fs", fsRoot, s3: null, maxUploadBytes: 25 * 1024 * 1024 };
+  return { driver: "fs", fsRoot, s3: null, r2: null, maxUploadBytes: 25 * 1024 * 1024 };
 }
 
 function makeDb(dir: string): string {

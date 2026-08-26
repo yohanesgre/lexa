@@ -4,29 +4,29 @@ import { organization, admin, createAccessControl } from "better-auth/plugins";
 import { createAuthEndpoint } from "better-auth/api";
 import { z } from "zod";
 import { Database } from "bun:sqlite";
+import { getEnv, type RuntimeEnv } from "./env";
 
 export const DATABASE_PATH = process.env.DATABASE_PATH || "/app/data/lexa.db";
 export const PUBLIC_URL = process.env.LXK_PUBLIC_URL || "http://localhost:3000";
 
-// Dev-only trusted origin: vite dev (http://localhost:5173) proxies /api and
-// sends the Origin header on cookie-bearing auth POSTs (sign-out,
-// change-password, reset-password) — without this they 403 INVALID_ORIGIN.
-// LXK_TRUSTED_ORIGINS (comma-separated) adds LAN/Tailscale origins so plain-HTTP
-// sign-ins from other devices pass the origin check,
-// e.g. http://192.168.0.131:3000,http://machine-name.tailnet-name.ts.net:3000
-const extraTrustedOrigins = (process.env.LXK_TRUSTED_ORIGINS || "")
-  .split(",")
-  .map((o) => o.trim())
-  .filter((o) => o.length > 0);
-const TRUSTED_ORIGINS =
-  process.env.LXK_ENV === "dev"
-    ? [PUBLIC_URL, "http://localhost:5173", ...extraTrustedOrigins]
-    : [PUBLIC_URL, ...extraTrustedOrigins];
+function resolvePublicUrl(env: RuntimeEnv): string {
+  return env.LXK_PUBLIC_URL ?? PUBLIC_URL;
+}
 
-// Per-IP throttle for the keyless /api/auth/* surface (the per-email login
-// budget only guards one email; an attacker can otherwise spam scrypt-hash
-// sign-in attempts from one IP against many emails). 120 req/min burst,
-// in-memory — single server process, like loginLimiter.
+function resolveDatabasePath(env: RuntimeEnv): string {
+  return env.DATABASE_PATH ?? DATABASE_PATH;
+}
+
+function resolveTrustedOrigins(env: RuntimeEnv, publicUrl: string): string[] {
+  const extra = (env.LXK_TRUSTED_ORIGINS ?? "")
+    .split(",")
+    .map((o) => o.trim())
+    .filter((o) => o.length > 0);
+  return env.LXK_ENV === "dev"
+    ? [publicUrl, "http://localhost:5173", ...extra]
+    : [publicUrl, ...extra];
+}
+
 const authIpBuckets = new Map<string, { count: number; windowStart: number }>();
 const AUTH_IP_LIMIT = 120;
 const AUTH_IP_WINDOW_MS = 60_000;
@@ -44,13 +44,6 @@ export function authIpLimiter(ip: string): { ok: boolean; retryAfterSec: number 
   return { ok: true, retryAfterSec: 0 };
 }
 
-// ── Login rate limit (R17) ──
-// Better Auth 1.6.27 has no bundled rateLimit plugin (DECLARED DEVIATION) —
-// this is a small in-process limiter (memory storage; fine for the single
-// server process). Budget: 5 failed attempts per email per 60s, then a
-// 15-minute lockout. A successful login resets the email's budget. Wired in
-// server/entry.ts around POST /api/auth/sign-in/email only — the existing
-// per-IP /api limiter is untouched.
 const LOGIN_WINDOW_MS = 60_000;
 const LOGIN_MAX_FAILURES = 5;
 const LOGIN_LOCKOUT_MS = 15 * 60_000;
@@ -95,112 +88,168 @@ export const loginLimiter = {
   },
 };
 
-// Admin-plugin role surface (server-side auth.api.admin.*; HTTP
-// /api/auth/admin/* is gated on the superadmin role). access-control
-// statements mirror the built-in defaults (user CRUD + session ops).
 const adminAc = createAccessControl({
   user: ["create", "list", "set-role", "ban", "delete", "set-password", "set-email", "get", "update", "impersonate"],
   session: ["list", "revoke", "delete"],
 });
 
-const authDb = new Database(DATABASE_PATH);
-
-// Workspace-invite acceptance (R3/R6): superadmin mints a link-based invite
-// (workspace_invitations row, 7d expiry, revocable while pending); the invited
-// person opens /invite?token=… and sets name+password. This endpoint validates
-// the token, creates the member account (credential password), and stamps
-// accepted_at. Keyless + session-less by nature — the token is the auth.
-const lexaInvitesPlugin = () => ({
-  id: "lexa-invites",
-  endpoints: {
-    acceptInvite: createAuthEndpoint(
-      "/invite/accept",
-      {
-        method: "POST",
-        body: z.object({
-          token: z.string(),
-          name: z.string().min(1),
-          password: z.string().min(8),
-        }),
-      },
-      async (ctx) => {
-        const row = authDb
-          .prepare("SELECT id, email, expires_at, accepted_at FROM workspace_invitations WHERE token = ?")
-          .get(ctx.body.token) as { id: string; email: string; expires_at: string; accepted_at: string | null } | null;
-        if (!row) throw ctx.error("BAD_REQUEST", { code: "INVALID_TOKEN" });
-        if (row.accepted_at) throw ctx.error("BAD_REQUEST", { code: "INVALID_TOKEN" });
-        if (new Date(row.expires_at).getTime() < Date.now()) throw ctx.error("BAD_REQUEST", { code: "INVALID_TOKEN" });
-        const existing = authDb.prepare("SELECT id FROM users WHERE email = ?").get(row.email) as { id: string } | null;
-        if (existing) {
-          // Two-step (R11): the account exists but may have no password (legacy
-          // users) — the invite cannot set it. Do NOT stamp accepted_at: the
-          // pending invite then blocks re-issue and forces the right path — a
-          // superadmin-issued set-password link. The FE invite page shows the
-          // "account exists — contact an admin" state.
-          throw ctx.error("BAD_REQUEST", { code: "USER_EXISTS" });
-        }
-        await auth.api.createUser({
-          body: { email: row.email, password: ctx.body.password, name: ctx.body.name, data: { role: "member" } },
-        });
-        authDb.prepare("UPDATE workspace_invitations SET accepted_at = datetime('now') WHERE id = ?").run(row.id);
-        return ctx.json({ status: true as const, email: row.email });
-      },
-    ),
-  },
-});
-
-// In-process Better Auth instance, mounted at /api/auth/* BEFORE the API-key
-// middleware (see server/entry.ts). Email/password only — no social providers.
-// Teams = Better Auth organizations (org plugin); tanstackStartCookies MUST be
-// the last plugin (better-auth#8059). Superadmin is env-only (LXK_ADMIN_EMAILS),
-// never derived from a provider — sign-up is disabled (R3: provisioning only).
-// Team creation/deletion are closed on the org HTTP surface (R6: superadmin
-// only via /api/teams) — creation is allow-listed, deletion is disabled.
-export const auth = betterAuth({
-  baseURL: PUBLIC_URL,
-  database: authDb,
-  emailAndPassword: {
-    enabled: true,
-    disableSignUp: true,
-    // R11: setting a password through a reset/set-password link revokes all
-    // the user's sessions (forgotten/lost-password paths invalidate the past).
-    revokeSessionsOnPasswordReset: true,
-  },
-  user: {
-    modelName: "users",
-    fields: {
-      name: "name",
-      email: "email",
-      image: "image",
-      emailVerified: "email_verified",
-      createdAt: "created_at",
-      updatedAt: "updated_at",
+function makeLexaInvitesPlugin(db: Database, getAuth: () => any) {
+  return () => ({
+    id: "lexa-invites",
+    endpoints: {
+      acceptInvite: createAuthEndpoint(
+        "/invite/accept",
+        {
+          method: "POST",
+          body: z.object({
+            token: z.string(),
+            name: z.string().min(1),
+            password: z.string().min(8),
+          }),
+        },
+        async (ctx) => {
+          const row = db
+            .prepare("SELECT id, email, expires_at, accepted_at FROM workspace_invitations WHERE token = ?")
+            .get(ctx.body.token) as { id: string; email: string; expires_at: string; accepted_at: string | null } | null;
+          if (!row) throw ctx.error("BAD_REQUEST", { code: "INVALID_TOKEN" });
+          if (row.accepted_at) throw ctx.error("BAD_REQUEST", { code: "INVALID_TOKEN" });
+          if (new Date(row.expires_at).getTime() < Date.now()) throw ctx.error("BAD_REQUEST", { code: "INVALID_TOKEN" });
+          const existing = db.prepare("SELECT id FROM users WHERE email = ?").get(row.email) as { id: string } | null;
+          if (existing) {
+            throw ctx.error("BAD_REQUEST", { code: "USER_EXISTS" });
+          }
+          await getAuth().api.createUser({
+            body: { email: row.email, password: ctx.body.password, name: ctx.body.name, data: { role: "member" } },
+          });
+          db.prepare("UPDATE workspace_invitations SET accepted_at = datetime('now') WHERE id = ?").run(row.id);
+          return ctx.json({ status: true as const, email: row.email });
+        },
+      ),
     },
-    additionalFields: { role: { type: "string", required: false } },
-  },
-  plugins: [
-    lexaInvitesPlugin(),
-    organization({
-      creatorRole: "owner",
-      allowUserToCreateOrganization: (user) => user.role === "superadmin",
-      disableOrganizationDeletion: true,
-    }),
-    admin({
-      defaultRole: "member",
-      adminRoles: ["superadmin"],
-      roles: {
-        superadmin: adminAc.newRole({
-          user: ["create", "list", "set-role", "ban", "delete", "set-password", "set-email", "get", "update"],
-          session: ["list", "revoke", "delete"],
-        }),
-        member: adminAc.newRole({
-          user: [],
-          session: ["list", "revoke"],
-        }),
+  });
+}
+
+const authRefMap = new WeakMap<object, { current: any }>();
+
+export function buildAuthOptions(env: RuntimeEnv) {
+  const publicUrl = resolvePublicUrl(env);
+  const databasePath = resolveDatabasePath(env);
+  const trustedOrigins = resolveTrustedOrigins(env, publicUrl);
+
+  // TODO Phase 6: Workers D1 init — env.DB is D1Database; better-auth needs a D1
+  // adapter (e.g. kysely/d1). The cast below documents intent and keeps Bun path
+  // identical; replace with the real D1 adapter when wiring Phase 6.
+  const database = env.DB ? (env.DB as unknown as Database) : new Database(databasePath);
+
+  const authRef: { current: any } = { current: null };
+
+  const invitesPlugin = env.DB
+    ? () => ({
+        id: "lexa-invites",
+        endpoints: {
+          acceptInvite: createAuthEndpoint(
+            "/invite/accept",
+            {
+              method: "POST",
+              body: z.object({
+                token: z.string(),
+                name: z.string().min(1),
+                password: z.string().min(8),
+              }),
+            },
+            async (ctx) => {
+              throw ctx.error("NOT_IMPLEMENTED" as any, { message: "D1 invites not yet wired — Phase 6" });
+            },
+          ),
+        },
+      })
+    : makeLexaInvitesPlugin(database as Database, () => authRef.current);
+
+  const options = {
+    baseURL: publicUrl,
+    trustedOrigins,
+    database,
+    emailAndPassword: {
+      enabled: true,
+      disableSignUp: true,
+      revokeSessionsOnPasswordReset: true,
+    },
+    user: {
+      modelName: "users",
+      fields: {
+        name: "name",
+        email: "email",
+        image: "image",
+        emailVerified: "email_verified",
+        createdAt: "created_at",
+        updatedAt: "updated_at",
       },
-    }),
-    tanstackStartCookies(),
-  ],
-  advanced: { useSecureCookies: PUBLIC_URL.startsWith("https") },
-  trustedOrigins: TRUSTED_ORIGINS,
-});
+      additionalFields: { role: { type: "string" as const, required: false } },
+    },
+    plugins: [
+      invitesPlugin(),
+      organization({
+        creatorRole: "owner",
+        allowUserToCreateOrganization: (user) => (user as { role?: string }).role === "superadmin",
+        disableOrganizationDeletion: true,
+      }),
+      admin({
+        defaultRole: "member",
+        adminRoles: ["superadmin"],
+        roles: {
+          superadmin: adminAc.newRole({
+            user: ["create", "list", "set-role", "ban", "delete", "set-password", "set-email", "get", "update"],
+            session: ["list", "revoke", "delete"],
+          }),
+          member: adminAc.newRole({
+            user: [],
+            session: ["list", "revoke"],
+          }),
+        },
+      }),
+      tanstackStartCookies(),
+    ],
+    advanced: { useSecureCookies: publicUrl.startsWith("https"), cookieCache: { enabled: false } },
+  };
+
+  authRefMap.set(options, authRef);
+  return options;
+}
+
+function createAuthInstance(env: RuntimeEnv) {
+  const opts = buildAuthOptions(env);
+  const instance = betterAuth(opts);
+  const ref = authRefMap.get(opts);
+  if (ref) ref.current = instance;
+  return instance;
+}
+
+export const auth = createAuthInstance(getEnv());
+
+export interface LexaAuth {
+  env: RuntimeEnv;
+  databasePath: string;
+  publicUrl: string;
+  trustedOrigins: string[];
+  authIpLimiter: typeof authIpLimiter;
+  loginLimiter: typeof loginLimiter;
+  handler: (req: Request) => Promise<Response>;
+  auth: unknown;
+}
+
+export function createAuth(env: RuntimeEnv): LexaAuth {
+  const publicUrl = resolvePublicUrl(env);
+  const databasePath = resolveDatabasePath(env);
+  const trustedOrigins = resolveTrustedOrigins(env, publicUrl);
+  const instance = createAuthInstance(env);
+  return {
+    env,
+    databasePath,
+    publicUrl,
+    trustedOrigins,
+    authIpLimiter,
+    loginLimiter,
+    handler: instance.handler as unknown as LexaAuth["handler"],
+    auth: instance,
+  };
+}

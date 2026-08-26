@@ -1,7 +1,7 @@
 {
   "name": "lexa",
   "version": "0.3.0",
-  "description": "Self-hosted project management \u2014 Kanban with swimlanes/WIP limits, nested wiki, Hearth AI writing assistant.",
+  "description": "Self-hosted project management — Kanban with swimlanes/WIP limits, nested wiki, Hearth AI writing assistant.",
   "scripts": {
     "test": "vitest run",
     "prepare": "./scripts/prepare-effect.sh",
@@ -16,7 +16,8 @@
     "build": "vite build",
     "typecheck": "tsc --noEmit",
     "doctor": "npx react-doctor@latest",
-    "check:mobile": "bun --env-file=.env scripts/check-mobile.mjs"
+    "check:mobile": "bun --env-file=.env scripts/check-mobile.mjs",
+    "check:invariants": "bun run scripts/check-invariants.ts"
   },
   "repository": {
     "type": "git",
@@ -73,6 +74,8 @@
     "zod": "^4.4.3"
   },
   "devDependencies": {
+    "@cloudflare/vite-plugin": "^1.53.1",
+    "@cloudflare/workers-types": "^5.20260825.1",
     "@tailwindcss/vite": "^4.3.3",
     "@testing-library/jest-dom": "^7.0.1",
     "@testing-library/react": "^16.3.2",
@@ -84,11 +87,13 @@
     "@vitejs/plugin-react": "^6.0.4",
     "better-sqlite3": "^13.0.3",
     "jsdom": "^30.0.1",
+    "miniflare": "^5.20260820.0-alpha",
+    "playwright": "^1.62.1",
     "react-doctor": "^0.9.2",
     "tailwindcss": "^4.3.3",
     "typescript": "^7.0.2",
     "vite": "^8.1.5",
     "vitest": "^4.1.10",
-    "playwright": "^1.62.1"
+    "wrangler": "^4.125.0"
   }
 }

@@ -447,15 +447,19 @@ export function HeraldProviderSection({ project }: { project: Project }) {
                 <div className="text-xs text-lx-text-secondary mt-1">Provider reachable · key valid</div>
               </div>
             )}
-            {testState === "fail" && (
-              <div className="card-row card-row--danger" style={{ width: 220 }}>
-                <div className="flex items-center gap-2">
-                  <X size={14} strokeWidth={2} color="var(--lx-text-danger)" />
-                  <span className="text-xs font-medium text-lx-text-danger font-mono">{(test.error as { code?: string })?.code ?? "PROVIDER_UNREACHABLE"}</span>
+            {testState === "fail" && (() => {
+              const failCode = (test.error as { code?: string })?.code ?? "PROVIDER_UNREACHABLE";
+              const failMsg = (test.error as Error)?.message ?? "Check base URL / key.";
+              return (
+              <div className="card-row card-row--danger" style={{ width: 220, maxWidth: "100%" }}>
+                <div className="flex items-center gap-2" style={{ minWidth: 0 }}>
+                  <X size={14} strokeWidth={2} color="var(--lx-text-danger)" style={{ flexShrink: 0 }} />
+                  <span className="text-xs font-medium text-lx-text-danger font-mono" style={{ wordBreak: "break-word", overflowWrap: "anywhere" }}>{failCode}</span>
                 </div>
-                <div className="text-xs text-lx-text-secondary mt-1">{(test.error as Error)?.message ?? "Check base URL / key."}</div>
+                <div className="text-xs text-lx-text-secondary mt-1" title={failMsg} style={{ wordBreak: "break-word", overflowWrap: "anywhere", whiteSpace: "pre-wrap" }}>{failMsg}</div>
               </div>
-            )}
+              );
+            })()}
           </div>
         </div>
 

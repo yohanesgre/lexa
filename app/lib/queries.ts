@@ -1475,15 +1475,21 @@ export function useRemoveMachine() {
 
 // Recent Hearth tasks across all projects — powers the navbar status pill.
 // Polls fast while a task runs, slow while idle, and not at all when no
-// tasks exist (nothing can start without a registered machine/runtime).
+// tasks exist or no Hearth runtime is online (prevents 15s spam + http log
+// noise on installs without a blacksmith daemon).
 export function useRecentHearthTasks() {
+  const { data: runtimes } = useRuntimes();
+  const hasRuntime = runtimes?.some((r) => r.status === "online");
   return useQuery({
     queryKey: ["hearth-recent-tasks"],
     queryFn: () => api.listRecentHearthTasks().then((r) => r.data),
     refetchInterval: (query) => {
       const rows = query.state.data ?? [];
       const hasActive = rows.some((t) => t.status === "queued" || t.status === "running");
-      return hasActive ? 1500 : rows.length ? 15_000 : false;
+      if (hasActive) return 1500;
+      if (!rows.length) return false;
+      if (runtimes !== undefined && !hasRuntime) return false;
+      return 15_000;
     },
   });
 }
