@@ -151,7 +151,7 @@ function WorkspaceMembersSection() {
         <div className="flex items-center gap-3 flex-wrap">
           <input
             className="prop-input"
-            placeholder="Invite by email (e.g. nova@emberfall.dev)"
+            placeholder="Invite by email (e.g. nova@example.com)"
             value={inviteEmail}
             onChange={(e) => setInviteEmail(e.target.value)}
             style={{ minWidth: 280 }}
