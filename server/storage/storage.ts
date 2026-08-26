@@ -1,6 +1,6 @@
 import { Context, Effect } from "effect";
 import { StorageConfigShape } from "./config";
-import { createFsDriver, createS3Driver, KeyNotFound, StorageError } from "./drivers";
+import { createFsDriver, createR2Driver, createS3Driver, KeyNotFound, StorageError } from "./drivers";
 
 export { KeyNotFound, StorageError };
 export type { StorageDriver } from "./drivers";
@@ -15,7 +15,7 @@ export class StorageConfig extends Context.Tag("Lexa/StorageConfig")<StorageConf
 export class Storage extends Effect.Service<Storage>()("Lexa/Storage", {
   effect: Effect.gen(function* () {
     const cfg = yield* StorageConfig;
-    const driver = cfg.driver === "s3" && cfg.s3 ? createS3Driver(cfg.s3) : createFsDriver(cfg.fsRoot);
+    const driver = cfg.driver === "r2" && cfg.r2 ? createR2Driver(cfg.r2) : cfg.driver === "s3" && cfg.s3 ? createS3Driver(cfg.s3) : createFsDriver(cfg.fsRoot);
     return {
       put: (key: string, data: Uint8Array): Effect.Effect<void, StorageError> =>
         Effect.tryPromise({

@@ -121,6 +121,20 @@ describe("translateRunError", () => {
     }
   });
 
+  it("maps timeout/abort-shaped messages and DOMException names to ProviderUnreachable", () => {
+    for (const msg of ["timeout", "The operation was aborted", "ETIMEDOUT", "aborted"]) {
+      expect(translateRunError(new Error(msg))._tag).toBe("ProviderUnreachable");
+    }
+    const abortErr = Object.assign(new Error("The operation was aborted due to timeout"), { name: "AbortError" });
+    expect(translateRunError(abortErr)._tag).toBe("ProviderUnreachable");
+    const timeoutErr = Object.assign(new Error("signal timed out"), { name: "TimeoutError" });
+    expect(translateRunError(timeoutErr)._tag).toBe("ProviderUnreachable");
+    const domTimeout = new DOMException("signal timed out", "TimeoutError");
+    expect(translateRunError(domTimeout)._tag).toBe("ProviderUnreachable");
+    const domAbort = new DOMException("The operation was aborted", "AbortError");
+    expect(translateRunError(domAbort)._tag).toBe("ProviderUnreachable");
+  });
+
   it("maps Bun fetch TypeError (dead endpoint) to ProviderUnreachable", () => {
     expect(translateRunError(new TypeError("Unable to connect"))._tag).toBe("ProviderUnreachable");
     expect(translateRunError(new TypeError("Connection error."))._tag).toBe("ProviderUnreachable");
@@ -132,6 +146,12 @@ describe("translateRunError", () => {
     expect(translateRunError(wrapped)._tag).toBe("ProviderUnreachable");
   });
 
+  it("walks the cause chain — AbortError name in cause → ProviderUnreachable", () => {
+    const cause = Object.assign(new Error("aborted"), { name: "AbortError" });
+    const wrapped = new Error("chat failed", { cause } as ErrorOptions);
+    expect(translateRunError(wrapped)._tag).toBe("ProviderUnreachable");
+  });
+
   it("falls through to HeraldGenerationFailed with bounded message", () => {
     const err = translateRunError(new Error(`x`.repeat(1000)));
     expect(err._tag).toBe("HeraldGenerationFailed");
@@ -140,5 +160,65 @@ describe("translateRunError", () => {
 
   it("stringifies non-Error throwables", () => {
     expect(translateRunError("boom")._tag).toBe("HeraldGenerationFailed");
+  });
+
+  it("500 with provider rawEvent preserves verbatim upstream message", () => {
+    const apiErr = Object.assign(new Error("500 Internal server error"), {
+      status: 500,
+      code: "500",
+      error: { message: "Internal server error" },
+      rawEvent: { message: "Internal server error" },
+    });
+    const err = translateRunError(apiErr);
+    expect(err._tag).toBe("HeraldGenerationFailed");
+    expect((err as { message: string }).message).toContain("500");
+    expect((err as { message: string }).message).toContain("Internal server error");
+    expect((err as { message: string }).message.length).toBeLessThanOrEqual(300);
+  });
+
+  it("Zen double-nested error body surfaces inner message verbatim", () => {
+    const zenBody = { type: "error", error: { message: "Internal server error" } };
+    const apiErr = Object.assign(new Error("500 Internal server error"), {
+      status: 500,
+      error: zenBody.error,
+      rawEvent: zenBody.error,
+    });
+    const err = translateRunError(apiErr);
+    expect(err._tag).toBe("HeraldGenerationFailed");
+    expect((err as { message: string }).message).toBe("500 Internal server error");
+  });
+
+  it("RUN_ERROR chunk with code+rawEvent preserves upstream 500 message", () => {
+    const chunk: unknown = { message: "500 Internal server error", code: "500", rawEvent: { message: "Internal server error" } };
+    const c = chunk as Record<string, unknown>;
+    const e = Object.assign(new Error(String(c.message)), { code: c.code, status: c.code, rawEvent: c.rawEvent, error: c.rawEvent, cause: c.rawEvent });
+    const err = translateRunError(e);
+    expect(err._tag).toBe("HeraldGenerationFailed");
+    expect((err as { message: string }).message).toContain("Internal server error");
+  });
+
+  it("429 preserves status and message as HeraldGenerationFailed (not auth)", () => {
+    const apiErr = Object.assign(new Error("429 Rate limit exceeded"), {
+      status: 429,
+      code: "429",
+      error: { message: "Rate limit exceeded" },
+    });
+    const err = translateRunError(apiErr);
+    expect(err._tag).toBe("HeraldGenerationFailed");
+    expect((err as { message: string }).message).toContain("429");
+    expect((err as { message: string }).message).toContain("Rate limit exceeded");
+  });
+
+  it("401 via numeric status field maps to ProviderAuthFailed", () => {
+    const apiErr = Object.assign(new Error("Unauthorized"), { status: 401, error: { message: "Unauthorized" } });
+    expect(translateRunError(apiErr)._tag).toBe("ProviderAuthFailed");
+  });
+});
+
+describe("testConnection timeout", () => {
+  it("AbortSignal.timeout maps to ProviderUnreachable via translateRunError", () => {
+    const sig = AbortSignal.timeout(1);
+    const err = Object.assign(new Error("signal timed out"), { name: (sig.reason as DOMException)?.name ?? "TimeoutError" });
+    expect(translateRunError(err)._tag).toBe("ProviderUnreachable");
   });
 });

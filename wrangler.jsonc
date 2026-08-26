@@ -1,0 +1,42 @@
+// Cloudflare Workers flavor configuration — parallel to the Bun+Docker
+// flavor (see docs/DEPLOYMENT.md). The `main` field points at the Workers
+// entry the Vite build emits; bindings (D1, R2, KV) are declared here with
+// placeholder IDs that `lexa-cli deploy workers` overwrites at deploy time.
+// See ADR-0002 and docs/CLOUDFLARE_WORKERS.md (now design authority for
+// the Workers flavor).
+{
+  "name": "lexa",
+  "main": "server/workers-entry.ts",
+  "compatibility_date": "2026-08-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "vars": {
+    "LXK_ENV": "production"
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "lexa",
+      // Placeholder; `lexa-cli deploy workers` overwrites with the real id.
+      "database_id": "00000000-0000-0000-0000-000000000000"
+    }
+  ],
+  "r2_buckets": [
+    {
+      "binding": "BLOB",
+      "bucket_name": "lexa-blobs"
+    }
+  ],
+  "kv_namespaces": [
+    {
+      "binding": "KV",
+      // Placeholder; `lexa-cli deploy workers` overwrites with the real id.
+      "id": "00000000000000000000000000000000"
+    }
+  ],
+  "triggers": {
+    "crons": ["*/15 * * * *"]
+  },
+  "observability": {
+    "enabled": true
+  }
+}

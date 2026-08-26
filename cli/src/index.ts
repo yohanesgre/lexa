@@ -677,9 +677,24 @@ async function main(): Promise<void> {
     case "login": program = cmdLogin(flags); prefix = "Login failed"; break;
     case "logout": program = cmdLogout(flags); break;
     case "status": program = cmdStatus(flags); prefix = "Status check failed"; break;
-    case "deploy": program = cmdDeploy(flags, positionals.slice(1)); raw = true; break;
-    case "undeploy": program = cmdUndeploy(flags, positionals.slice(1)); raw = true; break;
-
+    case "deploy": {
+      const runtime = flags.runtime === "workers" ? "workers" : "bun";
+      const { cmdDeployWorkers } = await import("./deploy-workers");
+      program = runtime === "workers"
+        ? cmdDeployWorkers(flags, positionals.slice(1))
+        : cmdDeploy(flags, positionals.slice(1));
+      raw = true;
+      break;
+    }
+    case "undeploy": {
+      const runtime = flags.runtime === "workers" ? "workers" : "bun";
+      const { cmdUndeployWorkers } = await import("./deploy-workers");
+      program = runtime === "workers"
+        ? cmdUndeployWorkers(flags, positionals.slice(1))
+        : cmdUndeploy(flags, positionals.slice(1));
+      raw = true;
+      break;
+    }
     case "upgrade":
       if (sub !== "") usage("upgrade", sub);
       program = cmdUpgradeCli(); break;

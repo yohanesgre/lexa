@@ -1,7 +1,7 @@
 import { mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { Data } from "effect";
-import type { S3StorageOptions } from "./config";
+import type { R2ListPage, R2StorageOptions, S3StorageOptions } from "./config";
 
 export class StorageError extends Data.TaggedError("StorageError")<{ message: string; cause?: unknown }> {}
 export class KeyNotFound extends Data.TaggedError("KeyNotFound")<{ key: string }> {}
@@ -138,6 +138,62 @@ export function createS3Driver(opts: S3StorageOptions): StorageDriver {
         return out.sort();
       } catch (e) {
         throw new StorageError({ message: `s3 list failed under ${prefix}`, cause: e });
+      }
+    },
+  };
+}
+// R2 binding driver — Workers-only. The binding is provided by workerd via
+// the `env.BLOB` binding declared in `wrangler.jsonc`. Mirrors the
+// `StorageDriver` interface so callers are driver-agnostic.
+export function createR2Driver(opts: R2StorageOptions): StorageDriver {
+  const binding = opts.binding;
+  return {
+    async put(key, data) {
+      try {
+        const bytes = data instanceof Uint8Array ? data : new Uint8Array(data);
+        await binding.put(key, bytes);
+      } catch (e) {
+        throw new StorageError({ message: `r2 put failed for ${key}`, cause: e });
+      }
+    },
+    async get(key) {
+      try {
+        const obj = await binding.get(key);
+        if (!obj) throw new KeyNotFound({ key });
+        return new Uint8Array(await obj.arrayBuffer());
+      } catch (e) {
+        if (e instanceof KeyNotFound) throw e;
+        throw new StorageError({ message: `r2 get failed for ${key}`, cause: e });
+      }
+    },
+    async delete(key) {
+      try {
+        // R2 delete is idempotent — missing key is a no-op, no exception.
+        await binding.delete(key);
+      } catch (e) {
+        throw new StorageError({ message: `r2 delete failed for ${key}`, cause: e });
+      }
+    },
+    async stat(key) {
+      try {
+        const head = await binding.head(key);
+        return head ? head.size : null;
+      } catch (e) {
+        throw new StorageError({ message: `r2 stat failed for ${key}`, cause: e });
+      }
+    },
+    async list(prefix) {
+      try {
+        const out: string[] = [];
+        let cursor: string | undefined;
+        do {
+          const page: R2ListPage = await binding.list({ prefix, cursor });
+          for (const obj of page.objects) out.push(obj.key);
+          cursor = page.truncated ? page.cursor : undefined;
+        } while (cursor);
+        return out.sort();
+      } catch (e) {
+        throw new StorageError({ message: `r2 list failed under ${prefix}`, cause: e });
       }
     },
   };

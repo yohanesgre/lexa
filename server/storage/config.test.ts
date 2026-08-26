@@ -35,10 +35,20 @@ describe("resolveStorageConfig", () => {
     expect(cfg.driver).toBe("s3");
     expect(cfg.s3).toEqual({ endpoint: "http://127.0.0.1:9000", bucket: "lexa", accessKeyId: "k", secretAccessKey: "s", region: "auto" });
   });
+
+  it("r2 driver is Workers-only; rejects on the Bun host with a clear error", () => {
+    // The native R2 binding is not available outside workerd. Operators who
+    // want to talk to R2 from the Bun host must use LXK_STORAGE_DRIVER=s3
+    // with LXK_S3_ENDPOINT=https://<accountid>.r2.cloudflarestorage.com.
+    expect(() => resolveStorageConfig({ LXK_STORAGE_DRIVER: "r2" }, "/d"))
+      .toThrow(/Workers-only/);
+    expect(() => resolveStorageConfig({ LXK_STORAGE_DRIVER: "r2" }, "/d"))
+      .toThrow(/LXK_STORAGE_DRIVER=s3/);
+  });
 });
 
 describe("bodyCapFor", () => {
-  const cfg = { driver: "fs" as const, fsRoot: "/x", s3: null, maxUploadBytes: DEFAULT_MAX_UPLOAD_MB * MB };
+  const cfg = { driver: "fs" as const, fsRoot: "/x", s3: null, r2: null, maxUploadBytes: DEFAULT_MAX_UPLOAD_MB * MB };
   const smallCfg = { ...cfg, maxUploadBytes: 1 * MB };
 
   it("non-upload paths keep the global cap", () => {

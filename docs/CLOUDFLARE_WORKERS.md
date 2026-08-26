@@ -1,10 +1,11 @@
 # Cloudflare Workers hosting — research note
 
-> **Status:** research only, not design authority. Current production design remains
-> Bun standalone + SQLite WAL + cloudflared tunnel (`docs/DEPLOYMENT.md`).
-> Researched 2026-08-22 against current Cloudflare/TanStack/Effect docs.
+> **Status:** design authority — Workers flavor. ADR-0002 supersedes for the
+> parallel-flavor decision (see `docs/ADR-0002-cloudflare-workers-hosting.md`).
+> Researched 2026-08-22 against current Cloudflare/TanStack/Effect docs. The
+> ADR is the WHY; this note is the HOW (library/quirk reference for the
+> Workers flavor).
 
-## Verdict
 
 Migrating Lexa to Cloudflare Workers is **feasible — no hard blockers** — but it is a
 real migration, not a redeploy. The price is an async rewrite of the entire persistence

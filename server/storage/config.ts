@@ -1,4 +1,22 @@
-export type StorageDriverKind = "fs" | "s3";
+export type StorageDriverKind = "fs" | "s3" | "r2";
+
+// Narrow R2 binding surface — the methods we actually call. The real
+// `R2Bucket` type from `cloudflare:workers` extends this; declaring the
+// shape here keeps `server/storage/*` Workers-free at the type level and
+// the entry on Workers narrows the `env.BLOB` binding to this interface.
+export interface R2Bucket {
+  put(key: string, value: ArrayBuffer | Uint8Array | string | null, options?: { onlyIf?: { etagMatches?: string; uploadedBefore?: Date } }): Promise<{ etag: string; uploaded: Date }>;
+  get(key: string): Promise<{ arrayBuffer(): Promise<ArrayBuffer>; body: ReadableStream; etag: string } | null>;
+  delete(key: string): Promise<void>;
+  head(key: string): Promise<{ size: number; etag: string } | null>;
+  list(options?: { prefix?: string; cursor?: string; limit?: number }): Promise<R2ListPage>;
+}
+
+export interface R2ListPage {
+  objects: { key: string; size: number; etag: string }[];
+  truncated: boolean;
+  cursor?: string;
+}
 
 export interface S3StorageOptions {
   endpoint: string | null;
@@ -8,10 +26,16 @@ export interface S3StorageOptions {
   region: string;
 }
 
+export interface R2StorageOptions {
+  binding: R2Bucket;
+  bucketName: string;
+}
+
 export interface StorageConfigShape {
   driver: StorageDriverKind;
   fsRoot: string;
   s3: S3StorageOptions | null;
+  r2: R2StorageOptions | null;
   maxUploadBytes: number;
 }
 
@@ -26,15 +50,26 @@ function parsePositiveMb(raw: string | undefined): number {
   const n = Number(raw);
   return Number.isFinite(n) && n > 0 ? n : DEFAULT_MAX_UPLOAD_MB;
 }
-
 export function resolveStorageConfig(
   env: Record<string, string | undefined>,
   dbDir: string
 ): StorageConfigShape {
-  const driver: StorageDriverKind = env.LXK_STORAGE_DRIVER === "s3" ? "s3" : "fs";
+  const rawDriver = env.LXK_STORAGE_DRIVER;
+  const driver: StorageDriverKind = rawDriver === "s3" ? "s3" : rawDriver === "r2" ? "r2" : "fs";
   const maxUploadBytes = Math.round(parsePositiveMb(env.LXK_MAX_UPLOAD_MB) * 1024 * 1024);
   if (driver === "fs") {
-    return { driver, fsRoot: env.LXK_STORAGE_FS_ROOT || joinPath(dbDir, "blobs"), s3: null, maxUploadBytes };
+    return { driver, fsRoot: env.LXK_STORAGE_FS_ROOT || joinPath(dbDir, "blobs"), s3: null, r2: null, maxUploadBytes };
+  }
+  if (driver === "r2") {
+    // The native R2 binding is only available on Cloudflare Workers. The Bun
+    // host that drives `bun run dev:full` / `lexa-cli deploy bun` must use
+    // the S3 driver with `LXK_S3_ENDPOINT=https://<accountid>.r2.cloudflarestorage.com`
+    // to talk to R2. Reject r2 here with a clear error so misconfiguration
+    // is loud, not silent.
+    throw new Error(
+      "LXK_STORAGE_DRIVER=r2 is Workers-only. On the Bun host use LXK_STORAGE_DRIVER=s3 with " +
+        "LXK_S3_ENDPOINT set to https://<accountid>.r2.cloudflarestorage.com.",
+    );
   }
   const bucket = env.LXK_S3_BUCKET ?? "";
   const accessKeyId = env.LXK_S3_ACCESS_KEY_ID ?? "";
@@ -52,6 +87,7 @@ export function resolveStorageConfig(
       secretAccessKey,
       region: env.LXK_S3_REGION || "auto",
     },
+    r2: null,
     maxUploadBytes,
   };
 }
