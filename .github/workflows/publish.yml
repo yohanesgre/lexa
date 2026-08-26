@@ -1,9 +1,11 @@
 name: publish-image
 
 on:
-  push:
-    branches: [main]
-    tags: ["v*"]
+  workflow_dispatch:
+# Disabled — publish-image not used during C2 (restore push/tags to re-enable)
+#  push:
+#    branches: [main]
+#    tags: ["v*"]
 
 permissions:
   contents: read
@@ -11,6 +13,7 @@ permissions:
 
 jobs:
   build:
+    if: false # disabled — publish-image not used (C2)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
