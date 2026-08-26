@@ -69,6 +69,9 @@ import { HeraldProvidersRepo } from "../repos/herald-providers.repo";
 import { HeraldModelsRepo } from "../repos/herald-models.repo";
 import { HeraldCallLogsRepo } from "../repos/herald-call-logs.repo";
 import { HeraldModelPricesRepo } from "../repos/herald-model-prices.repo";
+import { HeraldHealthRepo } from "../repos/herald-health.repo";
+import { HeraldHealthService } from "../services/herald-health.service";
+import { HeraldGateway } from "../herald/gateway.service";
 import { syncModelPrices } from "../herald/price-sync";
 import { RuntimeEventService } from "../services/runtime-event.service";
 import { HearthRepo } from "../repos/hearth.repo";
@@ -1648,8 +1651,59 @@ const meGroup = HttpApiGroup.make("me")
     .setPayload(UpdateMyNameInput)
     .addSuccess(UserSchema));
 
+const HeraldUsageSummarySchema = Schema.Struct({
+  totalTokens: Schema.Number,
+  promptTokens: Schema.Number,
+  completionTokens: Schema.Number,
+  totalCostCents: Schema.Number,
+  totalCostUsd: Schema.Number,
+  avgLatencyMs: Schema.NullOr(Schema.Number),
+  errorRate: Schema.Number,
+  totalCalls: Schema.Number,
+  errorCalls: Schema.Number,
+});
+const HeraldByDayRowSchema = Schema.Struct({
+  day: Schema.String,
+  tokens: Schema.Number,
+  costCents: Schema.Number,
+  costUsd: Schema.Number,
+  avgLatencyMs: Schema.NullOr(Schema.Number),
+  calls: Schema.Number,
+  errorRate: Schema.Number,
+});
+const HeraldByModelRowSchema = Schema.Struct({
+  model: Schema.String,
+  tokens: Schema.Number,
+  costCents: Schema.Number,
+  costUsd: Schema.Number,
+  avgLatencyMs: Schema.NullOr(Schema.Number),
+  calls: Schema.Number,
+  errorRate: Schema.Number,
+});
+const HeraldUsageResponseSchema = Schema.Struct({
+  summary: HeraldUsageSummarySchema,
+  totalCostCents: Schema.Number,
+  byDay: Schema.Array(HeraldByDayRowSchema),
+  byModel: Schema.Array(HeraldByModelRowSchema),
+});
+
+const HeraldPriceInputSchema = Schema.Struct({
+  model: Schema.String,
+  prompt_price: Schema.Number,
+  completion_price: Schema.Number,
+});
+const HeraldPriceResponseSchema = Schema.Struct({
+  model: Schema.String,
+  prompt_price: Schema.Number,
+  completion_price: Schema.Number,
+  updated_at: Schema.String,
+});
+
 const adminHeraldGroup = HttpApiGroup.make("adminHerald")
-  .add(HttpApiEndpoint.get("adminHeraldUsage", "/admin/herald/usage").addSuccess(Schema.Struct({ totalCostCents: Schema.Number, byDay: Schema.Array(Schema.Struct({ day: Schema.String, costCents: Schema.Number })), byModel: Schema.Array(Schema.Struct({ model: Schema.String, costCents: Schema.Number })) })))
+  .add(HttpApiEndpoint.get("adminHeraldUsage", "/admin/herald/usage").addSuccess(HeraldUsageResponseSchema))
+  .add(HttpApiEndpoint.get("adminHeraldUsageCsv", "/admin/herald/usage.csv").addSuccess(Schema.Void, { status: 200 }))
+  .add(HttpApiEndpoint.get("adminHeraldPrices", "/admin/herald/prices").addSuccess(Schema.Struct({ data: Schema.Array(HeraldPriceResponseSchema) })))
+  .add(HttpApiEndpoint.put("adminHeraldPutPrices", "/admin/herald/prices").setPayload(HeraldPriceInputSchema).addSuccess(HeraldPriceResponseSchema))
   .add(HttpApiEndpoint.get("adminHeraldCalls", "/admin/herald/calls").addSuccess(Schema.Struct({ data: Schema.Array(Schema.Any) })))
   .add(HttpApiEndpoint.post("adminHeraldPriceSync", "/admin/herald/prices/sync").addSuccess(Schema.Struct({ synced: Schema.Number })))
   .add(HttpApiEndpoint.get("adminHeraldProviders", "/admin/herald/providers").addSuccess(Schema.Struct({ data: Schema.Array(Schema.Any) })))
@@ -1658,7 +1712,11 @@ const adminHeraldGroup = HttpApiGroup.make("adminHerald")
   .add(HttpApiEndpoint.del("adminHeraldDeleteProvider", "/admin/herald/providers/:id").setPath(Schema.Struct({ id: Schema.String })).addSuccess(Schema.Void, { status: 204 }))
   .add(HttpApiEndpoint.post("adminHeraldTestProvider", "/admin/herald/providers/:id/test").setPath(Schema.Struct({ id: Schema.String })).addSuccess(Schema.Struct({ ok: Schema.Boolean, latencyMs: Schema.Number })))
   .add(HttpApiEndpoint.post("adminHeraldProviderModels", "/admin/herald/providers/:id/models").setPath(Schema.Struct({ id: Schema.String })).addSuccess(Schema.Struct({ data: Schema.Array(Schema.Any) })))
-  .add(HttpApiEndpoint.post("adminHeraldReorderModels", "/admin/herald/providers/:id/models/reorder").setPath(Schema.Struct({ id: Schema.String })).setPayload(Schema.Struct({ orderedIds: Schema.Array(Schema.String) })).addSuccess(Schema.Struct({ data: Schema.Array(Schema.Any) })));
+  .add(HttpApiEndpoint.post("adminHeraldReorderModels", "/admin/herald/providers/:id/models/reorder").setPath(Schema.Struct({ id: Schema.String })).setPayload(Schema.Struct({ orderedIds: Schema.Array(Schema.String) })).addSuccess(Schema.Struct({ data: Schema.Array(Schema.Any) })))
+  .add(HttpApiEndpoint.get("adminHeraldHealth", "/admin/herald/providers/:id/health").setPath(Schema.Struct({ id: Schema.String })).addSuccess(Schema.Struct({ providerId: Schema.String, circuitState: Schema.Literal("open", "closed", "half-open"), failureCount: Schema.Number, openedAt: Schema.NullOr(Schema.String), lastProbeAt: Schema.NullOr(Schema.String), consecutiveFailures: Schema.Number })));
+
+const projectHeraldUsageGroup = HttpApiGroup.make("projectHeraldUsage")
+  .add(HttpApiEndpoint.get("projectHeraldUsage", "/projects/:slug/herald/usage").setPath(SlugPath).addSuccess(HeraldUsageResponseSchema));
 
 export const LexaApi = HttpApi.make("lexa")
   .add(healthGroup)
@@ -1680,6 +1738,7 @@ export const LexaApi = HttpApi.make("lexa")
   .add(apiKeysGroup)
   .add(adminGroup)
   .add(adminHeraldGroup)
+  .add(projectHeraldUsageGroup)
   .add(meGroup)
   .add(teamsGroup)
   .add(workspaceGroup)
@@ -3941,24 +4000,65 @@ const adminLive = HttpApiBuilder.group(LexaApi, "admin", (handlers) =>
 // API keys have no user context — agents have no profile to edit.
 const adminHeraldLive = HttpApiBuilder.group(LexaApi, "adminHerald", (handlers) =>
   handlers
-    .handle("adminHeraldUsage", () =>
+    .handle("adminHeraldUsage", (req) =>
       respond(Effect.gen(function* () {
         yield* requireSuperadmin;
         const repo = yield* HeraldCallLogsRepo;
-        const db = yield* Sqlite;
-        const groupBy = (searchParams({ request: { originalUrl: "/admin/herald/usage?groupBy=day" } } as never).get("groupBy") ?? "day");
-        void groupBy;
-        // aggregate cost — simple total + by day/model
-        const logs = yield* repo.listRecent(10000);
-        const totalCostCents = logs.reduce((s: number, r: { costCents: number }) => s + r.costCents, 0);
-        const byModelMap = new Map<string, number>();
-        const byDayMap = new Map<string, number>();
-        for (const r of logs as unknown as Array<{ model: string; costCents: number; createdAt: string }>) {
-          byModelMap.set(r.model, (byModelMap.get(r.model) ?? 0) + r.costCents);
-          const day = r.createdAt.slice(0, 10);
-          byDayMap.set(day, (byDayMap.get(day) ?? 0) + r.costCents);
+        const sp = searchParams(req as unknown as { request: { originalUrl: string } });
+        const from = sp.get("from");
+        const to = sp.get("to");
+        const projectId = sp.get("projectId");
+        const filters = { from: from || null, to: to || null, projectId: projectId || null };
+        const [stats, byDay, byModel] = yield* Effect.all([repo.usageStats(filters), repo.byDay(filters), repo.byModel(filters)], { concurrency: 3 });
+        return { summary: stats, totalCostCents: stats.totalCostCents, byDay, byModel };
+      }))
+    )
+    .handle("adminHeraldUsageCsv", (req) =>
+      respond(Effect.gen(function* () {
+        yield* requireSuperadmin;
+        const repo = yield* HeraldCallLogsRepo;
+        const sp = searchParams(req as unknown as { request: { originalUrl: string } });
+        const from = sp.get("from");
+        const to = sp.get("to");
+        const projectId = sp.get("projectId");
+        const filters = { from: from || null, to: to || null, projectId: projectId || null };
+        const csv = yield* repo.csv(filters);
+        return HttpServerResponse.raw(csv, {
+          status: 200,
+          headers: { "Content-Type": "text/csv; charset=utf-8", "Content-Disposition": `attachment; filename="herald-usage.csv"` },
+        });
+      }))
+    )
+    .handle("adminHeraldPrices", () =>
+      respond(Effect.gen(function* () {
+        yield* requireSuperadmin;
+        const repo = yield* HeraldModelPricesRepo;
+        const rows = yield* repo.list();
+        return { data: rows.map((r) => ({ model: r.model, prompt_price: r.promptPrice, completion_price: r.completionPrice, updated_at: r.updatedAt })) };
+      }))
+    )
+    .handle("adminHeraldPutPrices", (req) =>
+      respond(Effect.gen(function* () {
+        yield* requireSuperadmin;
+        const model = req.payload.model?.trim();
+        if (!model) return yield* new InvalidArgs({ reason: "model is required" });
+        const promptPrice = req.payload.prompt_price;
+        const completionPrice = req.payload.completion_price;
+        const decimalsOk = (n: number): boolean => {
+          const s = String(n);
+          const dot = s.indexOf(".");
+          if (dot === -1) return true;
+          return s.slice(dot + 1).length <= 6;
+        };
+        if (typeof promptPrice !== "number" || !Number.isFinite(promptPrice) || promptPrice < 0 || !decimalsOk(promptPrice)) {
+          return yield* new InvalidArgs({ reason: "prompt_price must be a number >= 0 with max 6 decimals" });
         }
-        return { totalCostCents, byDay: [...byDayMap.entries()].map(([day, costCents]) => ({ day, costCents })), byModel: [...byModelMap.entries()].map(([model, costCents]) => ({ model, costCents })) };
+        if (typeof completionPrice !== "number" || !Number.isFinite(completionPrice) || completionPrice < 0 || !decimalsOk(completionPrice)) {
+          return yield* new InvalidArgs({ reason: "completion_price must be a number >= 0 with max 6 decimals" });
+        }
+        const repo = yield* HeraldModelPricesRepo;
+        const row = yield* repo.upsert({ model, promptPrice, completionPrice });
+        return { model: row.model, prompt_price: row.promptPrice, completion_price: row.completionPrice, updated_at: row.updatedAt };
       }))
     )
     .handle("adminHeraldCalls", () =>
@@ -4056,6 +4156,30 @@ const adminHeraldLive = HttpApiBuilder.group(LexaApi, "adminHerald", (handlers) 
         return { data: rows };
       }))
     )
+    .handle("adminHeraldHealth", (req) =>
+      respond(Effect.gen(function* () {
+        yield* requireSuperadmin;
+        const svc = yield* HeraldHealthService;
+        return yield* svc.getHealth(req.path.id);
+      }))
+    )
+);
+
+const projectHeraldUsageLive = HttpApiBuilder.group(LexaApi, "projectHeraldUsage", (handlers) =>
+  handlers.handle("projectHeraldUsage", (req) =>
+    respond(Effect.gen(function* () {
+      yield* requireSuperadmin;
+      const projectService = yield* ProjectService;
+      const repo = yield* HeraldCallLogsRepo;
+      const project = yield* projectService.findBySlug(req.path.slug);
+      const sp = searchParams(req as unknown as { request: { originalUrl: string } });
+      const from = sp.get("from");
+      const to = sp.get("to");
+      const filters = { from: from || null, to: to || null, projectId: project.id };
+      const [stats, byDay, byModel] = yield* Effect.all([repo.usageStats(filters), repo.byDay(filters), repo.byModel(filters)], { concurrency: 3 });
+      return { summary: stats, totalCostCents: stats.totalCostCents, byDay, byModel };
+    }))
+  )
 );
 
 const meLive = HttpApiBuilder.group(LexaApi, "me", (handlers) =>
@@ -4136,7 +4260,7 @@ export function createApiHandler(dbPath: string) {
 
   const serviceLayer = buildServiceLayer(dbPath);
   const handlerLayer = Layer.mergeAll(
-    healthLive, setupLive, projectsLive, columnsLive, swimlanesLive, milestonesLive, fieldConfigLive, hearthLive, agentsLive, skillsLive, heraldLive, taskLinksLive, tasksLive, boardLive, wikiLive, publicShareLive, attachmentsLive, apiKeysLive, adminLive, adminHeraldLive, meLive, dashboardLive,
+    healthLive, setupLive, projectsLive, columnsLive, swimlanesLive, milestonesLive, fieldConfigLive, hearthLive, agentsLive, skillsLive, heraldLive, taskLinksLive, tasksLive, boardLive, wikiLive, publicShareLive, attachmentsLive, apiKeysLive, adminLive, adminHeraldLive, projectHeraldUsageLive, meLive, dashboardLive,
     createTeamsLive(LexaApi), createWorkspaceLive(LexaApi), createSessionsLive(LexaApi),
   ).pipe(Layer.provide(Layer.provide(serviceLayer, Layer.mergeAll(dbLayer, LoggerLayer))), Layer.provide(dbLayer));
   const merged = Layer.mergeAll(apiLayer, handlerLayer);
@@ -4197,6 +4321,8 @@ function buildServiceLayer(dbPath: string) {
     DashboardService.Default,
     TeamsService.Default, WorkspaceService.Default, AuthorizationService.Default,
     WorkspaceInvitesService.Default, PasswordLinksService.Default,
+    HeraldProvidersRepo.Default, HeraldModelsRepo.Default, HeraldCallLogsRepo.Default, HeraldModelPricesRepo.Default,
+    HeraldHealthRepo.Default, HeraldHealthService.Default, HeraldGateway.Default,
   );
 }
 

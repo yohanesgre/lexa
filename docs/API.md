@@ -1682,10 +1682,24 @@ POST   /api/admin/herald/providers/:id/models   (superadmin)
 → 200 { data: HeraldModelRow[] }   HeraldModelRow = { id, providerId, modelId, kind, priority, enabled, createdAt }
   | 403 FORBIDDEN | 404
 
-GET    /api/admin/herald/usage?groupBy=day|model   (superadmin)
-→ 200 { totalCostCents: number, byDay: Array<{ day: string, costCents: number }>, byModel: Array<{ model: string, costCents: number }> }
+GET    /api/admin/herald/usage?from=YYYY-MM-DD&to=YYYY-MM-DD&projectId=ID   (superadmin)
+→ 200 { summary: { totalTokens, promptTokens, completionTokens, totalCostCents, totalCostUsd, avgLatencyMs: number|null, errorRate: 0-1, totalCalls, errorCalls }, byDay: Array<{ day: YYYY-MM-DD, tokens, costCents, costUsd, avgLatencyMs, calls, errorRate }>, byModel: Array<{ model, tokens, costCents, costUsd, avgLatencyMs, calls, errorRate }>, totalCostCents }
   | 403 FORBIDDEN
-  groupBy is parsed from the query string (default "day"); cost aggregates from herald_call_logs.cost_cents.
+  Filters: from/to are date( created_at ) inclusive bounds; projectId scopes to one project (also available as GET /api/projects/:slug/herald/usage?from=&to= — same shape, superadmin, slug resolved to projectId). Unbounded when omitted. Aggregation via herald_call_logs indexes idx_call_logs_project_time / idx_call_logs_model.
+
+GET    /api/admin/herald/usage.csv?from=&to=&projectId=   (superadmin)
+→ 200 text/csv; header day,model,tokens,cost_cents,cost_usd,avg_latency_ms,calls,error_rate; rows grouped by (day, model) ordered day ASC; same auth + filters as the JSON endpoint. Content-Disposition: attachment; filename="herald-usage.csv"
+
+GET    /api/admin/herald/prices   (superadmin)
+→ 200 { data: [{ model, prompt_price, completion_price, updated_at }] } | 403 FORBIDDEN
+
+PUT    /api/admin/herald/prices   (superadmin)
+body { model*, prompt_price*, completion_price* }   // numbers >=0, max 6 decimals
+→ 200 { model, prompt_price, completion_price, updated_at } | 403 FORBIDDEN | 422 INVALID_ARGS
+  Writes to herald_model_prices (ON CONFLICT upsert, updated_at = datetime('now')).
+
+GET    /api/projects/:slug/herald/usage?from=&to=   (superadmin)
+→ 200 same shape as GET /api/admin/herald/usage scoped to that project | 403 FORBIDDEN | 404 PROJECT_NOT_FOUND
 
 GET    /api/admin/herald/calls   (superadmin)
 → 200 { data: HeraldCallLogRow[] }   // last 100, created_at DESC
@@ -1695,6 +1709,11 @@ POST   /api/admin/herald/prices/sync   (superadmin)
 → 200 { synced: number }   // rows upserted from OpenRouter fetch into herald_model_prices
   | 403 FORBIDDEN
   Errors inside the price fetch are caught — sync returns 0 rather than 5xx.
+
+GET    /api/admin/herald/providers/:id/health   (superadmin)
+→ 200 { providerId: string, circuitState: "open"|"closed"|"half-open", failureCount: number, openedAt: string|null, lastProbeAt: string|null, consecutiveFailures: number }
+  | 403 FORBIDDEN | 404 (provider unknown → 404, missing health row → 200 default closed)
+  Circuit breaker (pla-1): 3 consecutive fails in 5m → open 5m → half-open allow 1 probe (lazy, isAllowed handles transition).
 ```
 
 POST   /api/herald/tasks

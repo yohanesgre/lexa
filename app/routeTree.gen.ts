@@ -30,6 +30,7 @@ import { Route as SettingsWorkspaceRouteImport } from './routes/settings/workspa
 import { Route as ShareTokenRouteImport } from './routes/share.$token'
 import { Route as SlugWikiIndexRouteImport } from './routes/$slug/wiki/index'
 import { Route as SlugWikiPageSlugRouteImport } from './routes/$slug/wiki/$pageSlug'
+import { Route as AdminHeraldUsageRouteImport } from './routes/admin.herald.usage'
 import { Route as ApiAuthSplatRouteImport } from './routes/api.auth.$'
 import { Route as SettingsProjectProjectIdRouteImport } from './routes/settings/project.$projectId'
 
@@ -138,6 +139,11 @@ const SlugWikiPageSlugRoute = SlugWikiPageSlugRouteImport.update({
   path: '/$slug/wiki/$pageSlug',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AdminHeraldUsageRoute = AdminHeraldUsageRouteImport.update({
+  id: '/admin/herald/usage',
+  path: '/admin/herald/usage',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiAuthSplatRoute = ApiAuthSplatRouteImport.update({
   id: '/api/auth/$',
   path: '/api/auth/$',
@@ -171,6 +177,7 @@ export interface FileRoutesByFullPath {
   '/share/$token': typeof ShareTokenRoute
   '/$slug/': typeof SlugIndexRoute
   '/$slug/wiki/$pageSlug': typeof SlugWikiPageSlugRoute
+  '/admin/herald/usage': typeof AdminHeraldUsageRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
   '/settings/project/$projectId': typeof SettingsProjectProjectIdRoute
   '/$slug/wiki/': typeof SlugWikiIndexRoute
@@ -196,6 +203,7 @@ export interface FileRoutesByTo {
   '/share/$token': typeof ShareTokenRoute
   '/$slug': typeof SlugIndexRoute
   '/$slug/wiki/$pageSlug': typeof SlugWikiPageSlugRoute
+  '/admin/herald/usage': typeof AdminHeraldUsageRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
   '/settings/project/$projectId': typeof SettingsProjectProjectIdRoute
   '/$slug/wiki': typeof SlugWikiIndexRoute
@@ -222,6 +230,7 @@ export interface FileRoutesById {
   '/share/$token': typeof ShareTokenRoute
   '/$slug/': typeof SlugIndexRoute
   '/$slug/wiki/$pageSlug': typeof SlugWikiPageSlugRoute
+  '/admin/herald/usage': typeof AdminHeraldUsageRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
   '/settings/project/$projectId': typeof SettingsProjectProjectIdRoute
   '/$slug/wiki/': typeof SlugWikiIndexRoute
@@ -249,6 +258,7 @@ export interface FileRouteTypes {
     | '/share/$token'
     | '/$slug/'
     | '/$slug/wiki/$pageSlug'
+    | '/admin/herald/usage'
     | '/api/auth/$'
     | '/settings/project/$projectId'
     | '/$slug/wiki/'
@@ -274,6 +284,7 @@ export interface FileRouteTypes {
     | '/share/$token'
     | '/$slug'
     | '/$slug/wiki/$pageSlug'
+    | '/admin/herald/usage'
     | '/api/auth/$'
     | '/settings/project/$projectId'
     | '/$slug/wiki'
@@ -299,6 +310,7 @@ export interface FileRouteTypes {
     | '/share/$token'
     | '/$slug/'
     | '/$slug/wiki/$pageSlug'
+    | '/admin/herald/usage'
     | '/api/auth/$'
     | '/settings/project/$projectId'
     | '/$slug/wiki/'
@@ -322,6 +334,7 @@ export interface RootRouteChildren {
   ShareTokenRoute: typeof ShareTokenRoute
   SlugIndexRoute: typeof SlugIndexRoute
   SlugWikiPageSlugRoute: typeof SlugWikiPageSlugRoute
+  AdminHeraldUsageRoute: typeof AdminHeraldUsageRoute
   ApiAuthSplatRoute: typeof ApiAuthSplatRoute
   SlugWikiIndexRoute: typeof SlugWikiIndexRoute
 }
@@ -475,6 +488,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof SlugWikiPageSlugRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/admin/herald/usage': {
+      id: '/admin/herald/usage'
+      path: '/admin/herald/usage'
+      fullPath: '/admin/herald/usage'
+      preLoaderRoute: typeof AdminHeraldUsageRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/auth/$': {
       id: '/api/auth/$'
       path: '/api/auth/$'
@@ -528,6 +548,7 @@ const rootRouteChildren: RootRouteChildren = {
   ShareTokenRoute: ShareTokenRoute,
   SlugIndexRoute: SlugIndexRoute,
   SlugWikiPageSlugRoute: SlugWikiPageSlugRoute,
+  AdminHeraldUsageRoute: AdminHeraldUsageRoute,
   ApiAuthSplatRoute: ApiAuthSplatRoute,
   SlugWikiIndexRoute: SlugWikiIndexRoute,
 }

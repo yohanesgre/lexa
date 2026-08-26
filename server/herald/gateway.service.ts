@@ -1,4 +1,4 @@
-import { Effect } from "effect";
+import { Effect, Option } from "effect";
 import type { ModelMessage, StreamChunk } from "@tanstack/ai";
 import { buildAdapter, normalizeBaseUrl, streamChat as providerStreamChat, translateRunError, type ProviderConfig } from "./provider";
 import type { CacheablePrompt } from "./prompt";
@@ -7,6 +7,8 @@ import { HeraldModelsRepo } from "../repos/herald-models.repo";
 import { HeraldCallLogsRepo } from "../repos/herald-call-logs.repo";
 import { HeraldModelPricesRepo } from "../repos/herald-model-prices.repo";
 import { HeraldSettingsRepo } from "../repos/herald-settings.repo";
+import { HeraldHealthService } from "../services/herald-health.service";
+import { estimateTokens } from "./tiktoken";
 import { ProviderNotConfigured, HeraldGenerationFailed } from "../api/errors";
 
 export interface GatewayStreamInput {
@@ -37,6 +39,13 @@ export class HeraldGateway extends Effect.Service<HeraldGateway>()("Lexa/HeraldG
     const modelRepo = yield* HeraldModelsRepo;
     const callLogRepo = yield* HeraldCallLogsRepo;
     const priceRepo = yield* HeraldModelPricesRepo;
+    const healthOption = yield* Effect.serviceOption(HeraldHealthService);
+    const health = Option.isSome(healthOption) ? healthOption.value : ({
+      isAllowed: () => Effect.succeed(true),
+      recordFailure: () => Effect.void,
+      recordSuccess: () => Effect.void,
+      getHealth: (id: string) => Effect.succeed({ providerId: id, circuitState: "closed" as const, failureCount: 0, openedAt: null, lastProbeAt: null, consecutiveFailures: 0 }),
+    } as unknown as InstanceType<typeof HeraldHealthService>);
     yield* HeraldSettingsRepo;
 
     const resolveFallback = (projectId: string): Effect.Effect<ProviderConfig[], ProviderNotConfigured> =>
@@ -77,12 +86,23 @@ export class HeraldGateway extends Effect.Service<HeraldGateway>()("Lexa/HeraldG
           let lastError: unknown = null;
           for (let i = 0; i < limited.length; i++) {
             const cfg = limited[i];
+            if (cfg.providerId) {
+              try {
+                const allowed = await Effect.runPromise(health.isAllowed(cfg.providerId).pipe(Effect.catchAll(() => Effect.succeed(true))));
+                if (!allowed) {
+                  continue;
+                }
+              } catch {}
+            }
             const start = Date.now();
             try {
               normalizeBaseUrl(cfg.baseUrl, cfg.kind);
             } catch (e) {
               const err = translateRunError(e);
               lastError = err;
+              if (cfg.providerId) {
+                try { await Effect.runPromise(health.recordFailure(cfg.providerId).pipe(Effect.catchAll(() => Effect.void))); } catch {}
+              }
               try { const l3 = (callLogRepo as unknown as Record<string, unknown>); const fn3 = (l3.log ?? l3.insert) as ((i: unknown) => Effect.Effect<void, unknown>) | undefined; if (fn3) await Effect.runPromise(fn3.call(callLogRepo, { id: crypto.randomUUID(), projectId: input.projectId, providerId: cfg.providerId ?? null, model: cfg.model, kind: cfg.kind, status: "error", errorCode: (err as { _tag: string })._tag, latencyMs: Date.now() - start } as unknown as never).pipe(Effect.catchAll(() => Effect.void)));
               } catch {}
               if (!isRetriable(err) || i === limited.length - 1) throw err;
@@ -99,6 +119,7 @@ export class HeraldGateway extends Effect.Service<HeraldGateway>()("Lexa/HeraldG
                 modelOptions: input.modelOptions,
               });
               let usageIn = 0; let usageOut = 0;
+              let generatedText = "";
               for await (const chunk of iterable) {
                 if ((chunk as { type?: string }).type === "RUN_ERROR") {
                   const c = chunk as unknown as Record<string, unknown>;
@@ -111,6 +132,10 @@ export class HeraldGateway extends Effect.Service<HeraldGateway>()("Lexa/HeraldG
                   });
                   throw translateRunError(e);
                 }
+                if ((chunk as { type?: string }).type === "TEXT_MESSAGE_CONTENT") {
+                  const d = (chunk as unknown as { delta?: string }).delta ?? "";
+                  generatedText += d;
+                }
                 if ((chunk as { type?: string }).type === "RUN_FINISHED") {
                   const u = (chunk as unknown as { usage?: { input?: number; output?: number; promptTokens?: number; completionTokens?: number } }).usage;
                   usageIn = Number(u?.input ?? u?.promptTokens ?? 0);
@@ -121,15 +146,30 @@ export class HeraldGateway extends Effect.Service<HeraldGateway>()("Lexa/HeraldG
               {
                 let costCents = 0;
                 let estimated = false;
+                if (usageIn === 0 && usageOut === 0) {
+                  const inputText = [
+                    ...(input.systemPrompts?.map((p) => typeof (p as unknown as { content?: unknown }).content === "string" ? String((p as unknown as { content: string }).content) : JSON.stringify((p as unknown as { content: unknown }).content ?? "")) ?? []),
+                    ...input.messages.map((m) => typeof (m as unknown as { content?: unknown }).content === "string" ? String((m as unknown as { content: string }).content) : Array.isArray((m as unknown as { content?: unknown }).content) ? JSON.stringify((m as unknown as { content: unknown }).content) : JSON.stringify((m as unknown as { content?: unknown }).content ?? "")),
+                    generatedText,
+                  ].join("\n");
+                  const est = estimateTokens(inputText);
+                  if (est > 0) {
+                    usageIn = est;
+                    estimated = true;
+                  } else if (inputText.length > 0) {
+                    usageIn = Math.ceil(inputText.length / 4);
+                    estimated = true;
+                  }
+                }
                 try {
                   const price = await Effect.runPromise(priceRepo.getByModel(cfg.model).pipe(Effect.catchAll(() => Effect.succeed(null as unknown as { promptPrice: number; completionPrice: number }))));
                   if (price) {
                     costCents = Math.round((usageIn * price.promptPrice + usageOut * price.completionPrice) * 100);
-                    estimated = false;
                   } else {
-                    // TODO: price-sync lane: if schema allows costCents null, use null + estimated true for missing prices
                     costCents = 0;
-                    estimated = true;
+                    if (!estimated) estimated = usageIn === 0 && usageOut === 0;
+                    if (usageIn !== 0 || usageOut !== 0) estimated = estimated;
+                    else estimated = true;
                   }
                 } catch {
                   costCents = 0;
@@ -138,11 +178,17 @@ export class HeraldGateway extends Effect.Service<HeraldGateway>()("Lexa/HeraldG
                 try { const l2 = (callLogRepo as unknown as Record<string, unknown>); const fn2 = (l2.log ?? l2.insert) as ((i: unknown) => Effect.Effect<void, unknown>) | undefined; if (fn2) await Effect.runPromise(fn2.call(callLogRepo, { id: crypto.randomUUID(), projectId: input.projectId, providerId: cfg.providerId ?? null, model: cfg.model, kind: cfg.kind, status: "done", latencyMs: Date.now() - start, usageIn, usageOut, costCents, estimated } as unknown as never).pipe(Effect.catchAll(() => Effect.void)));
                 } catch {}
               }
+              if (cfg.providerId) {
+                try { await Effect.runPromise(health.recordSuccess(cfg.providerId).pipe(Effect.catchAll(() => Effect.void))); } catch {}
+              }
               return;
             } catch (e) {
               const tagged = (e as { _tag?: string })?._tag;
               const err = tagged === "ProviderAuthFailed" || tagged === "ProviderUnreachable" || tagged === "HeraldGenerationFailed" ? (e as ReturnType<typeof translateRunError>) : translateRunError(e);
               lastError = err;
+              if (cfg.providerId) {
+                try { await Effect.runPromise(health.recordFailure(cfg.providerId).pipe(Effect.catchAll(() => Effect.void))); } catch {}
+              }
               try { const l3 = (callLogRepo as unknown as Record<string, unknown>); const fn3 = (l3.log ?? l3.insert) as ((i: unknown) => Effect.Effect<void, unknown>) | undefined; if (fn3) await Effect.runPromise(fn3.call(callLogRepo, { id: crypto.randomUUID(), projectId: input.projectId, providerId: cfg.providerId ?? null, model: cfg.model, kind: cfg.kind, status: "error", errorCode: (err as { _tag: string })._tag, latencyMs: Date.now() - start } as unknown as never).pipe(Effect.catchAll(() => Effect.void)));
               } catch {}
               if (!isRetriable(err) || i === limited.length - 1) throw err;
