@@ -368,8 +368,11 @@ VALUES
    '{"type":"doc","content":[{"type":"heading","attrs":{"level":1},"content":[{"type":"text","text":"Nimbus Product Overview"}]},{"type":"paragraph","content":[{"type":"text","text":"A web app for small teams to plan and ship."}]}]}',
    'Nimbus Product Overview\nA web app for small teams to plan and ship.',
    'manual', datetime('now', '-3 days')),
-  ('seed-rev-02', 'seed-wiki-02',
-   'Auth & Permissions', 'auth-permissions',
-   '{"type":"doc","content":[{"type":"paragraph","content":[{"type":"text","text":"Draft access notes — work in progress."}]}]}',
-   'Draft access notes — work in progress.',
-   'autosave', datetime('now', '-1 day'));
+   ('seed-rev-02', 'seed-wiki-02',
+    'Auth & Permissions', 'auth-permissions',
+    '{"type":"doc","content":[{"type":"paragraph","content":[{"type":"text","text":"Draft access notes — work in progress."}]}]}',
+    'Draft access notes — work in progress.',
+    'autosave', datetime('now', '-1 day'));
+
+-- Herald Gateway: no seed provider — registry is superadmin-managed (see /hearth/providers).
+-- Projects start with no herald_settings row; user creates provider via POST /api/admin/herald/providers.

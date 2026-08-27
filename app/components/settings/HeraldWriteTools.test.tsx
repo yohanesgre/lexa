@@ -15,6 +15,8 @@ const masked: HeraldSettingsMasked = {
   primarySupportsImages: false,
   reasoningEffort: null,
   writeTools: ["create_task", "add_comment"],
+  providerId: null,
+  modelId: null,
   fallbackModelIds: ["gpt-x"],
 };
 

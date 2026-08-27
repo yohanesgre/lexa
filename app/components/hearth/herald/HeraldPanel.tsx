@@ -14,6 +14,7 @@ import {
   useCancelHeraldTask,
   useTaskAttachments,
   useWikiAttachments,
+  useHearthTask,
 } from "../../../lib/queries";
 import { ENGINE_AGENT_IDS } from "../../../lib/use-hearth-engine";
 import { useHeraldStream } from "../../../lib/use-herald-stream";
@@ -63,7 +64,7 @@ export function HearthFlameIcon({ size = 14 }: { size?: number }) {
   );
 }
 
-export function HeraldPanel({ editor, slug, documentType, documentId, engineSwitcherEnabled, onModeChange, onClose }: {
+export function HeraldPanel({ editor, slug, documentType, documentId, engineSwitcherEnabled, onModeChange, onClose, onReview, reviewActive, appliedTaskId, rejectedTaskId }: {
   editor: Editor;
   slug: string;
   documentType: "task" | "wiki";
@@ -73,6 +74,10 @@ export function HeraldPanel({ editor, slug, documentType, documentId, engineSwit
   engineSwitcherEnabled: boolean;
   onModeChange: (mode: HearthMode) => void;
   onClose: () => void;
+  onReview?: (text: string, identity: { action: string; runtimeName: string | null; provider: string | null; taskId: string }) => void;
+  reviewActive?: boolean | undefined;
+  appliedTaskId?: string | null | undefined;
+  rejectedTaskId?: string | null | undefined;
 }) {
   const { data: projects = [] } = useProjects();
   const projectId = projects.find((p) => p.slug === slug)?.id;
@@ -119,12 +124,25 @@ export function HeraldPanel({ editor, slug, documentType, documentId, engineSwit
   const running = stream.status === "connecting" || stream.status === "streaming";
   const done = stream.status === "done";
   const failed = stream.status === "error";
+  const { data: heraldTaskData } = useHearthTask(taskId, !!taskId && done);
 
   const selectionText = editor.state.doc.textBetween(editor.state.selection.from, editor.state.selection.to, "\n");
   const selectionMarkdown = selectionText ? selectionToMarkdown(editor) : "";
 
   const handleGenerate = () => {
     if (!effectiveSkillId) return;
+    let effectiveSelection = selectionMarkdown;
+    if (effectiveSkillId === "polish" && !effectiveSelection.trim()) {
+      try {
+        const full = docToMarkdown(editor.state.doc.toJSON() as unknown as TipTapDoc);
+        if (full.trim()) effectiveSelection = full;
+        else if (editor.state.doc.textContent.trim()) effectiveSelection = editor.state.doc.textContent;
+        else if (selectionText.trim()) effectiveSelection = selectionText;
+      } catch {
+        if (editor.state.doc.textContent.trim()) effectiveSelection = editor.state.doc.textContent;
+        else if (selectionText.trim()) effectiveSelection = selectionText;
+      }
+    }
     createTask.mutate(
       {
         slug,
@@ -133,7 +151,7 @@ export function HeraldPanel({ editor, slug, documentType, documentId, engineSwit
         prompt: prompt.trim(),
         agentId: ENGINE_AGENT_IDS.herald,
         skillId: effectiveSkillId,
-        ...(selectionMarkdown ? { selection: selectionMarkdown } : {}),
+        ...(effectiveSelection.trim() ? { selection: effectiveSelection } : {}),
         // Attachment rows expose sha256 but not storage_key; Lexa/Storage
         // keys are deterministic (storageKeyFor → blobs/<sha256>) so the ref
         // is rebuilt here until the API exposes storage_key directly.
@@ -165,6 +183,24 @@ export function HeraldPanel({ editor, slug, documentType, documentId, engineSwit
     editor.chain().focus().insertContent(doc.content ?? []).run();
     onClose();
   };
+
+  const handleReviewInEditor = () => {
+    if (!stream.text || !taskId) return;
+    if (onReview) {
+      const skillName = agentSkills.find((s) => s.id === effectiveSkillId)?.name ?? effectiveSkillId ?? "Herald";
+      onReview(stream.text, {
+        action: skillName,
+        runtimeName: null,
+        provider: settings?.model ?? settings?.baseUrl ?? null,
+        taskId,
+      });
+      onClose();
+    } else {
+      handleInsert();
+    }
+  };
+
+  const alreadyHandled = taskId != null && (appliedTaskId === taskId || rejectedTaskId === taskId);
 
   const providerMissing = !settingsLoading && settings === null;
 
@@ -241,26 +277,32 @@ export function HeraldPanel({ editor, slug, documentType, documentId, engineSwit
       )}
 
       {!providerMissing && done && (
-        <>
-          <div style={{ padding: "10px 12px" }}>
-            <span className="prop-label" style={{ display: "block", marginBottom: 6 }}>
-              Result <span className="font-micro text-2xs text-lx-text-muted uppercase tracking-[0.04em]" style={{ marginLeft: 4 }}>raw markdown</span>
-            </span>
-            <div style={monoBox(200)}>{stream.text}</div>
-          </div>
-          <div className="flex items-center justify-between" style={{ padding: "10px 12px", borderTop: "1px solid var(--lx-border-default)" }}>
-            <span className="font-micro text-2xs text-lx-text-muted uppercase tracking-[0.04em]">
-              ↑ {(stream.usage?.in ?? 0).toLocaleString()} · ↓ {(stream.usage?.out ?? 0).toLocaleString()} tokens
-            </span>
-            <div className="flex items-center gap-2">
-              <button type="button" className="btn btn-ghost" style={{ height: 26, padding: "0 10px", fontSize: 12 }} onClick={handleDismiss}>Discard</button>
-              <button type="button" className="btn btn-primary" style={{ height: 26, padding: "0 10px", fontSize: 12 }} onClick={handleInsert}>
-                <Check size={12} strokeWidth={2.5} />
-                Insert
-              </button>
+        <div style={{ padding: 12 }}>
+          <div
+            style={{ background: "var(--lx-surface-input)", border: "1px solid var(--lx-border-default)", borderRadius: 6, padding: "10px 12px" }}
+          >
+            <div className="flex items-center gap-2 mb-1 min-w-0">
+              <Check size={14} strokeWidth={2.5} className="text-lx-text-success shrink-0" />
+              <span className="text-xs font-medium text-lx-text-primary truncate flex-1 min-w-0" style={{ fontFamily: "var(--lx-font-body)" }}>{heraldTaskData?.documentTitle || "Document"}</span>
             </div>
+            <span className="font-micro text-2xs text-lx-text-muted uppercase tracking-[0.04em]" style={{ letterSpacing: "0.04em" }}>
+              {agentSkills.find((s) => s.id === effectiveSkillId)?.name ?? "Herald"} — ready to review
+            </span>
           </div>
-        </>
+          <div className="flex items-center justify-end gap-2 mt-3">
+            {reviewActive || alreadyHandled ? (
+              <span className="font-micro text-2xs text-lx-text-warning uppercase tracking-[0.04em]">In review in editor</span>
+            ) : (
+              <>
+                <button type="button" className="btn btn-ghost" style={{ height: 26, padding: "0 10px", fontSize: 12 }} onClick={handleDismiss}>Reject</button>
+                <button type="button" className="btn btn-primary" style={{ height: 26, padding: "0 10px", fontSize: 12 }} onClick={handleReviewInEditor}>
+                  <Check size={12} strokeWidth={2.5} />
+                  Review in editor
+                </button>
+              </>
+            )}
+          </div>
+        </div>
       )}
 
       {!providerMissing && failed && (

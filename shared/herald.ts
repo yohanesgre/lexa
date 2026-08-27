@@ -1,10 +1,17 @@
 import type { ID, ISODate } from "./types";
 
-export type ProviderKind = "openai_compatible" | "anthropic_compatible";
+export type ProviderKind = "openai_compatible" | "anthropic_compatible" | "openai_responses";
 
 export type HearthEngine = "herald" | "blacksmith";
 
 export type HeraldReasoningEffort = "minimal" | "low" | "medium" | "high";
+
+export const HERALD_PRE_INGRESS_TIMEOUT_MS = 30_000;
+export const HERALD_STALL_TIMEOUT_MS = 90_000;
+export const HERALD_STALL_MESSAGE = "stream stalled — no response from provider";
+export const STREAM_STALL_TIMEOUT_MS = HERALD_STALL_TIMEOUT_MS;
+export const STREAM_STALL_MESSAGE = HERALD_STALL_MESSAGE;
+export const PRE_INGRESS_TIMEOUT_MS = HERALD_PRE_INGRESS_TIMEOUT_MS;
 
 export interface HeraldSettingsMasked {
   projectId: ID;
@@ -16,6 +23,8 @@ export interface HeraldSettingsMasked {
   primarySupportsImages: boolean;
   reasoningEffort: HeraldReasoningEffort | null;
   writeTools: string[];
+  providerId: string | null;
+  modelId: string | null;
   fallbackModelIds?: string[];
   kind?: ProviderKind;
   baseUrl?: string;
@@ -26,6 +35,8 @@ export interface HeraldSettingsMasked {
 }
 
 export interface HeraldSettingsInput {
+  providerId?: string | null | undefined;
+  modelId?: string | null | undefined;
   searchProvider?: "exa" | null | undefined;
   searchApiKey?: string | null | undefined;
   urlAllowlist?: string | null | undefined;
@@ -53,6 +64,7 @@ export interface HeraldProviderMasked {
   keyMask: string | null;
   createdAt: ISODate;
   updatedAt: ISODate;
+  models?: HeraldProviderModel[];
 }
 
 export interface HeraldModelRow {

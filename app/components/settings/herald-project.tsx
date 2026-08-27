@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useHeraldProviders, useHeraldProjectSettings, useSaveHeraldProjectSettings } from "../../lib/queries/herald-admin";
 import { useHeraldSettings } from "../../lib/queries";
+import { useToast } from "../ui/Toast";
 import type { HeraldProviderModel } from "../../../shared/herald";
 import type { Project } from "../../../shared/types";
 
@@ -14,6 +15,7 @@ export function HeraldProjectProviderSection({ project }: { project: Project }) 
   const { data: legacySettings } = useHeraldSettings(project.id);
   const { data: projectSettings, isLoading: settingsLoading } = useHeraldProjectSettings(project.id);
   const save = useSaveHeraldProjectSettings(project.id);
+  const toast = useToast();
 
   const settings = (projectSettings as unknown as { providerId?: string | null | undefined; modelId?: string | null | undefined; fallbackModelIds?: string[]; searchProvider?: string | null | undefined; urlAllowlist?: string | null | undefined; hasSearchKey?: boolean | undefined; reasoningEffort?: string | null | undefined; engine?: string } | null) ?? null;
 
@@ -48,6 +50,32 @@ export function HeraldProjectProviderSection({ project }: { project: Project }) 
     }
   }, [settings?.providerId]);
 
+  // Default fallback suggestions: after fetch, if primary selected but no fallbacks,
+  // populate up to 2 enabled models from the primary provider (priority order).
+  useEffect(() => {
+    if (!hydrated || providersLoading || settingsLoading) return;
+    if (!providerId || !modelId) {
+      if (!providerId && providers.length > 0) {
+        const firstWithModels = providers.find((p) => (p.models ?? []).some((m) => m.enabled));
+        if (!firstWithModels) return;
+        const enabled = enabledModelsOf(firstWithModels);
+        if (enabled.length === 0) return;
+        const primary = enabled[0]!.modelId;
+        setProviderId(firstWithModels.id);
+        setModelId(primary);
+        const defaults = enabled.filter((m) => m.modelId !== primary).slice(0, 2).map((m) => `${firstWithModels.id}:${m.modelId}`);
+        if (defaults.length > 0) setFallbacks(defaults);
+      }
+      return;
+    }
+    if (fallbacks.length > 0) return;
+    const prov = providers.find((p) => p.id === providerId);
+    const enabled = enabledModelsOf(prov);
+    if (enabled.length < 2) return;
+    const defaults = enabled.filter((m) => m.modelId !== modelId).slice(0, 2).map((m) => `${providerId}:${m.modelId}`);
+    if (defaults.length > 0) setFallbacks(defaults);
+  }, [hydrated, providersLoading, settingsLoading, providers, providerId, modelId, fallbacks.length]);
+
   const selectedProvider = providers.find((p) => p.id === providerId);
   const enabledModels = enabledModelsOf(selectedProvider);
   const allEnabledAcrossProviders = providers.flatMap((p) => (p.models ?? []).filter((m) => m.enabled).map((m) => ({ ...m, providerLabel: p.label, providerId: p.id, baseUrl: (p.baseUrl ?? (p as unknown as { base_url?: string }).base_url) ?? "" })));
@@ -78,11 +106,9 @@ export function HeraldProjectProviderSection({ project }: { project: Project }) 
     const next = [...fallbacks];
     const target = idx + dir;
     if (target < 0 || target >= next.length) return;
-    const tmp = next[idx];
-    // @ts-expect-error — strict: exactOptional indexedAccess
-    next[idx]! = next[target];
-    // @ts-expect-error — strict: exactOptional indexedAccess
-    next[target]! = tmp;
+    const tmp = next[idx]!;
+    next[idx] = next[target]!;
+    next[target] = tmp;
     setFallbacks(next);
   };
 
@@ -104,26 +130,34 @@ export function HeraldProjectProviderSection({ project }: { project: Project }) 
     save.mutate({ providerId: providerId || null, modelId: modelId || null, fallbackModelIds: fallbacks });
   };
 
+  const [testDetail, setTestDetail] = useState<string>("");
   const handleTest = async () => {
     setTestState("pending");
     try {
       const res = await fetch(`/api/herald/settings/${project.id}/test`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ providerId: providerId || null, modelId: modelId || null }),
+        body: JSON.stringify({ providerId: providerId || null, modelId: modelId || null, fallbackModelIds: fallbacks }),
       });
       const body = await res.json().catch(() => ({}));
       if (!res.ok) {
-        const code = (body as { error?: { code?: string } }).error?.code ?? "PROVIDER_UNREACHABLE";
+        const code = (body as { error?: { code?: string; message?: string } }).error?.code ?? "PROVIDER_UNREACHABLE";
+        const msg = (body as { error?: { message?: string } }).error?.message ?? "";
         setTestCode(code);
-        setTestState("fail");
+        setTestDetail(msg.slice(0, 500));
+        setTestState("idle");
+        toast.push("error", code, msg.slice(0, 500) || "Upstream rejected the key (401). Other outcome: PROVIDER_UNREACHABLE.");
         return;
       }
-      setTestLatency((body as { latencyMs?: number }).latencyMs ?? 0);
-      setTestState("ok");
+      const latency = (body as { latencyMs?: number }).latencyMs ?? 0;
+      setTestLatency(latency);
+      setTestState("idle");
+      toast.push("success", `Connection OK · ${latency} ms`, "Provider reachable · key valid");
     } catch {
       setTestCode("PROVIDER_UNREACHABLE");
-      setTestState("fail");
+      setTestDetail("");
+      setTestState("idle");
+      toast.push("error", "PROVIDER_UNREACHABLE", "Upstream unreachable");
     }
   };
 
@@ -229,7 +263,7 @@ export function HeraldProjectProviderSection({ project }: { project: Project }) 
 
         <div className="field">
           <label className="field-label">Fallback models <span className="font-micro text-2xs text-lx-text-muted uppercase tracking-[0.04em]" style={{ marginLeft: 6 }}>ordered · cross-kind allowed · drag or ↑/↓</span></label>
-          <div className="card-panel" style={{ padding: 8, display: "flex", flexDirection: "column", gap: 4, maxWidth: 480, background: "var(--lx-surface-input)" }}>
+          <div className="card-panel w-fit" style={{ padding: 8, display: "flex", flexDirection: "column", gap: 4, background: "var(--lx-surface-input)", width: "fit-content", maxWidth: "100%" }}>
             {fallbackRows.map((row, idx) => (
               <div key={`${row.providerId}:${row.modelId}`} className="card-row" style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 8px" }}>
                 <svg width={10} height={14} viewBox="0 0 10 14" fill="none" style={{ color: "var(--lx-text-muted)", cursor: "grab", flexShrink: 0 }}><circle cx={3} cy={3} r={1.2} fill="currentColor" /><circle cx={7} cy={3} r={1.2} fill="currentColor" /><circle cx={3} cy={7} r={1.2} fill="currentColor" /><circle cx={7} cy={7} r={1.2} fill="currentColor" /><circle cx={3} cy={11} r={1.2} fill="currentColor" /><circle cx={7} cy={11} r={1.2} fill="currentColor" /></svg>
@@ -246,14 +280,14 @@ export function HeraldProjectProviderSection({ project }: { project: Project }) 
             ))}
             {fallbacks.length === 0 && <div className="text-xs text-lx-text-muted" style={{ padding: "4px 8px" }}>No fallbacks — primary only.</div>}
             <div className="flex items-center gap-2" style={{ marginTop: 4 }}>
-              <select className="prop-input flex-1 font-mono" style={{ height: 28, fontSize: 12 }} value={addFallbackId} onChange={(e) => setAddFallbackId(e.target.value)}>
+              <select className="prop-input flex-1 font-mono" style={{ height: 28, fontSize: 12, maxWidth: 400 }} value={addFallbackId} onChange={(e) => setAddFallbackId(e.target.value)}>
                 <option value="">Add fallback…</option>
                 {fallbackOptions.map((m) => (
                   <option key={`${m.providerId}:${m.modelId}`} value={`${m.providerId}:${m.modelId}`}>{m.modelId} — {m.kind} ({m.providerLabel})</option>
                 ))}
                 {modelId && <option disabled>{modelId} (primary — already selected)</option>}
               </select>
-              <button type="button" className="btn btn-ghost" style={{ height: 28, padding: "0 10px", fontSize: 12 }} onClick={handleAddFallback}>Add</button>
+              <button type="button" className="btn btn-ghost btn-sm" style={{ height: 28 }} onClick={handleAddFallback} disabled={!addFallbackId}>Add</button>
             </div>
           </div>
           <div className="field-hint">Ordered fallback chain — tried in priority order after the primary model fails (auth/rate-limit/unreachable). Cross-kind allowed: OpenAI and Anthropic models can interleave.</div>
@@ -261,39 +295,43 @@ export function HeraldProjectProviderSection({ project }: { project: Project }) 
 
         <div className="field">
           <label className="field-label">Test connection</label>
-          <div className="flex items-start gap-3" style={{ flexWrap: "wrap" }}>
-            <button type="button" className="btn btn-ghost" style={{ alignSelf: "center", height: 28, padding: "0 10px", fontSize: 12 }} onClick={handleTest} disabled={!providerId || !modelId || testState === "pending"}>
-              <svg width={12} height={12} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5}><path d="M13 2 3 14h7l-1 8 10-12h-7l1-8z" /></svg>
-              Test connection
-            </button>
-            {testState === "pending" && (
-              <div className="card-row card-row--neutral" style={{ width: 220 }}>
+          <button type="button" className="btn btn-ghost" style={{ height: 28, padding: "0 10px", fontSize: 12 }} onClick={handleTest} disabled={!providerId || !modelId || testState === "pending"}>
+            <svg width={12} height={12} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5}><path d="M13 2 3 14h7l-1 8 10-12h-7l1-8z" /></svg>
+            Test connection
+          </button>
+          {testState === "pending" && (() => {
+            const total = 1 + fallbacks.length;
+            const pct = total > 1 ? Math.round(100 / total) : 100;
+            const primaryLabel = modelId || "—";
+            const providerLabel = selectedProvider?.label ?? providerId ?? "—";
+            return (
+              <div className="card-panel card-panel--neutral" style={{ marginTop: 10, padding: "10px 12px" }}>
                 <div className="flex items-center gap-2">
                   <span className="spinner" style={{ width: 14, height: 14, borderWidth: 2 }} />
-                  <span className="text-xs font-medium text-lx-text-primary">Testing…</span>
+                  <span className="text-xs font-medium text-lx-text-primary">Testing… attempt 1/{total}</span>
+                  <span className="font-micro text-2xs text-lx-text-muted" style={{ marginLeft: "auto", textTransform: "uppercase", letterSpacing: "0.04em" }}>{primaryLabel} · {providerLabel}</span>
                 </div>
-                <div className="text-xs text-lx-text-secondary mt-1">Minimal completion ping (+ Exa ping when set)</div>
-              </div>
-            )}
-            {testState === "ok" && (
-              <div className="card-row card-row--success" style={{ width: 220 }}>
-                <div className="flex items-center gap-2">
-                  <svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke="var(--lx-text-success)" strokeWidth={2.5}><path d="M20 6L9 17l-5-5" /></svg>
-                  <span className="text-xs font-medium text-lx-text-primary">OK · {testLatency} ms</span>
+                <div style={{ marginTop: 8, height: 4, background: "var(--lx-surface-card)", borderRadius: 9999, overflow: "hidden" }}>
+                  <div style={{ width: `${pct}%`, height: "100%", background: "var(--lx-border-focus)", transition: "width 300ms" }} />
                 </div>
-                <div className="text-xs text-lx-text-secondary mt-1">Provider reachable · key valid</div>
-              </div>
-            )}
-            {testState === "fail" && (
-              <div className="card-row card-row--danger" style={{ width: 220 }}>
-                <div className="flex items-center gap-2">
-                  <svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke="var(--lx-text-danger)" strokeWidth={2}><circle cx={12} cy={12} r={10} /><path d="m15 9-6 6" /><path d="m9 9 6 6" /></svg>
-                  <span className="text-xs font-medium text-lx-text-danger font-mono">{testCode}</span>
+                <div className="text-xs text-lx-text-secondary mt-1 font-mono" style={{ fontSize: 11 }}>Minimal completion ping (+ Exa ping when set)</div>
+                <div style={{ marginTop: 8, display: "flex", flexDirection: "column", gap: 4 }}>
+                  <div className="flex items-center gap-2">
+                    <span className="spinner" style={{ width: 10, height: 10, borderWidth: 1.5 }} />
+                    <span className="font-mono text-xs text-lx-text-primary">{primaryLabel}</span>
+                    <span className="font-mono text-2xs text-lx-text-muted">trying…</span>
+                  </div>
+                  {fallbackRows.map((row) => (
+                    <div key={`${row.providerId}:${row.modelId}`} className="flex items-center gap-2" style={{ opacity: 0.6 }}>
+                      <svg width={10} height={10} viewBox="0 0 24 24" fill="none" stroke="var(--lx-text-muted)" strokeWidth={2}><circle cx={12} cy={12} r={10} /><path d="M12 8v4" /><path d="M12 16h.01" /></svg>
+                      <span className="font-mono text-xs text-lx-text-muted">{row.modelId}</span>
+                      <span className="font-mono text-2xs text-lx-text-muted">queued (fallback)</span>
+                    </div>
+                  ))}
                 </div>
-                <div className="text-xs text-lx-text-secondary mt-1">Upstream rejected the key (401). Other outcome: PROVIDER_UNREACHABLE.</div>
               </div>
-            )}
-          </div>
+            );
+          })()}
         </div>
 
         <div className="flex items-center justify-between mt-5" style={{ borderTop: "1px solid var(--lx-border-subtle)", paddingTop: 16 }}>

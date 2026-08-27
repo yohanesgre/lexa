@@ -5,6 +5,7 @@ import { render, screen, fireEvent, waitFor, within } from "@testing-library/rea
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 import { HeraldChatPage, renderTranscript, safeCitations, guidanceFor, splitFences } from "./HeraldChatPage";
+import { deriveChatTitle } from "../../../shared/herald";
 
 const navigateMock = vi.hoisted(() => vi.fn());
 
@@ -147,8 +148,7 @@ describe("HeraldChatPage affordances", () => {
     // Exactly one regenerate affordance — on the last user turn only.
     const regenButtons = screen.getAllByRole("button", { name: "Regenerate from here" });
     expect(regenButtons).toHaveLength(1);
-    // @ts-expect-error — strict: exactOptional indexedAccess
-    fireEvent.click(regenButtons[0]);
+    fireEvent.click(regenButtons[0]!);
 
     await waitFor(() => expect(streamBodies).toHaveLength(1));
     expect(streamBodies[0]).toMatchObject({ message: "latest ask", fromIndex: 2 });
@@ -601,9 +601,8 @@ describe("Herald activity strip", () => {
       const url = String(input);
       const key = `${init?.method ?? "GET"} ${url.split("?")[0]}`;
       if (key.startsWith("POST /api/herald/approvals/") && key.endsWith("/decide")) {
-        const id = url.split("/")[4];
+        const id = url.split("/")[4]!;
         const verdict = (JSON.parse(String(init?.body)) as { verdict: string }).verdict;
-        // @ts-expect-error — strict: exactOptional indexedAccess
         decideCalls.push({ id, verdict });
         return Promise.resolve(new Response(JSON.stringify({ approvalId: id, batchId: "b1", status: verdict === "approve" ? "approved" : "rejected", remaining: 0 }), { status: 200 }));
       }
@@ -648,8 +647,7 @@ describe("Herald activity strip", () => {
     expect(screen.getByText(/turn suspended — 2 pending/i)).toBeInTheDocument();
 
     // Per-chip decisions — one POST each keyed by approvalId.
-    // @ts-expect-error — strict: exactOptional indexedAccess
-    fireEvent.click(screen.getAllByRole("button", { name: "Approve" })[0]);
+    fireEvent.click(screen.getAllByRole("button", { name: "Approve" })[0]!);
     await waitFor(() => expect(decideCalls).toEqual([{ id: "a1", verdict: "approve" }]));
     // Decided chip collapses to its status line; the batch survives (session
     // memory is not clobbered by transcript fetches mid-flow).
@@ -743,18 +741,13 @@ describe("transcript meta helpers", () => {
       { role: "system", content: "ignored" },
     ]);
     expect(turns).toHaveLength(6);
-    expect(turns[0]).toMatchObject({ role: "user", text: "plain", rawIndex: 0 });
-    // @ts-expect-error — strict: exactOptional indexedAccess
-    expect(turns[0].ts).toBeUndefined();
-    expect(turns[1]).toMatchObject({ imageCount: 1, text: "caption", rawIndex: 1 });
-    // @ts-expect-error — strict: exactOptional indexedAccess
-    expect(turns[2].ts).toBe("2026-08-22T09:41:00Z");
-    // @ts-expect-error — strict: exactOptional indexedAccess
-    expect(turns[3].citations).toHaveLength(1);
-    // @ts-expect-error — strict: exactOptional indexedAccess
-    expect(turns[4].error).toEqual({ code: "PROVIDER_AUTH_FAILED", message: "nope" });
-    // @ts-expect-error — strict: exactOptional indexedAccess
-    expect(turns[5].stopped).toBe(true);
+    expect(turns[0]!).toMatchObject({ role: "user", text: "plain", rawIndex: 0 });
+    expect(turns[0]!.ts).toBeUndefined();
+    expect(turns[1]!).toMatchObject({ imageCount: 1, text: "caption", rawIndex: 1 });
+    expect(turns[2]!.ts).toBe("2026-08-22T09:41:00Z");
+    expect(turns[3]!.citations).toHaveLength(1);
+    expect(turns[4]!.error).toEqual({ code: "PROVIDER_AUTH_FAILED", message: "nope" });
+    expect(turns[5]!.stopped).toBe(true);
   });
 
   it("safeCitations rejects non-https and malformed entries", () => {
@@ -773,7 +766,7 @@ describe("transcript meta helpers", () => {
     expect(guidanceFor("HERALD_TOOL_BUDGET_EXCEEDED")).toBe("info");
     expect(guidanceFor("PROVIDER_UNREACHABLE")).toBe("retry");
     expect(guidanceFor("PROVIDER_RATE_LIMITED")).toBe("retry");
-    expect(guidanceFor("HERALD_GENERATION_FAILED")).toBe("info");
+    expect(guidanceFor("HERALD_GENERATION_FAILED")).toBe("retry");
   });
 
   it("splitFences extracts fenced bodies, capturing the language tag", () => {
@@ -797,5 +790,387 @@ describe("transcript meta helpers", () => {
     expect(block.querySelector("code.hljs-theme")?.innerHTML).toContain("hljs-");
     // Copy affordance survives.
     expect(screen.getByRole("button", { name: "Copy code" })).toBeInTheDocument();
+  });
+});
+
+describe("optimistic sidebar", () => {
+  function sseStream(frames: unknown[], delayMs = 30): Response {
+    const encoder = new TextEncoder();
+    const chunks = frames.map((f) => `event: ${(f as { type: string }).type}\ndata: ${JSON.stringify(f)}\n\n`);
+    const body = new ReadableStream<Uint8Array>({
+      async start(controller) {
+        for (const chunk of chunks) {
+          controller.enqueue(encoder.encode(chunk));
+          await new Promise((r) => setTimeout(r, delayMs));
+        }
+        controller.close();
+      },
+    });
+    return new Response(body, { status: 200, headers: { "Content-Type": "text/event-stream" } });
+  }
+
+  it("new chat: sidebar shows optimistic thread after first delta before done", async () => {
+    const newId = "c-new-opt";
+    const message = "My new thread title that is long enough to be derived and truncated at 60 chars maybe";
+    const expectedTitle = deriveChatTitle(message);
+    fetchMock.mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const key = `${init?.method ?? "GET"} ${url.split("?")[0]}`;
+      if (key.startsWith("POST /api/herald/chat/stream")) {
+        const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+        streamBodies.push(body);
+        return Promise.resolve(
+          sseStream(
+            [
+              { type: "start", threadId: String(body.chatId) },
+              { type: "delta", text: "hello" },
+              { type: "done", text: "hello", usage: { in: 1, out: 1 } },
+            ],
+            30
+          )
+        );
+      }
+      if (key.startsWith("GET /api/herald/chats/p1")) {
+        if (streamBodies.length > 0) {
+          const sid = String((streamBodies[0] as Record<string, unknown>).chatId);
+          const smsg = String((streamBodies[0] as Record<string, unknown>).message);
+          const title = deriveChatTitle(smsg);
+          const now = new Date().toISOString();
+          return Promise.resolve(
+            new Response(JSON.stringify({ data: [{ chatId: sid, title, pinned: false, snippet: null, createdAt: now, updatedAt: now }] }), {
+              status: 200,
+            })
+          );
+        }
+        return Promise.resolve(new Response(JSON.stringify({ data: [] }), { status: 200 }));
+      }
+      if (key.startsWith("GET /api/herald/chat/")) {
+        const chatId = url.split("/").pop()!.split("?")[0]!;
+        const msgs = transcripts.get(chatId) ?? [];
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              chatId,
+              projectId: "p1",
+              ownerUserId: null,
+              agentId: null,
+              skillId: null,
+              messages: msgs,
+              summary: null,
+              summarizedCount: 0,
+              createdAt: "t",
+              updatedAt: "t",
+            }),
+            { status: 200 }
+          )
+        );
+      }
+      if (key.startsWith("PATCH /api/herald/chat/") || key.startsWith("DELETE /api/herald/chat/")) {
+        return Promise.resolve(new Response(JSON.stringify({}), { status: 200 }));
+      }
+      const routes: Record<string, unknown> = {
+        "GET /api/projects": { data: [PROJECT], nextCursor: null },
+        "GET /api/herald/settings/p1": currentSettings,
+        "GET /api/agents": { data: [{ id: "hearth-herald", name: "Herald Agent", description: "", instructions: "", skillIds: [] }] },
+        "GET /api/skills": { data: [] },
+      };
+      if (!(key in routes)) return Promise.reject(new Error(`unmocked: ${key}`));
+      return Promise.resolve(new Response(JSON.stringify(routes[key]), { status: 200 }));
+    });
+
+    render(<HeraldChatPage slug="demo" thread={newId} />, { wrapper });
+    await screen.findByPlaceholderText(/ask herald anything/i);
+    expect(screen.getByText(/no threads yet/i)).toBeInTheDocument();
+
+    fireEvent.change(screen.getByPlaceholderText(/ask herald anything/i), { target: { value: message } });
+    fireEvent.click(screen.getByRole("button", { name: /^send$/i }));
+
+    await waitFor(() => expect(screen.getByText(expectedTitle)).toBeInTheDocument(), { timeout: 2000 });
+    const list = document.querySelector(".threads-sidebar-list") as HTMLElement;
+    const row = within(list).getByText(expectedTitle).closest(".thread-row") as HTMLElement;
+    expect(row.className).toContain("active");
+
+    await waitFor(() => expect(screen.getByText(expectedTitle)).toBeInTheDocument(), { timeout: 2000 });
+  });
+
+  it("existing thread: second turn bumps updatedAt eagerly", async () => {
+    const oldTs = "2026-08-20T00:00:00.000Z";
+    chatThreads = [{ chatId: "c1", title: "Existing thread", pinned: false, snippet: null, createdAt: oldTs, updatedAt: oldTs }];
+    transcripts.set("c1", [u("first q"), a("first a")]);
+    fetchMock.mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const key = `${init?.method ?? "GET"} ${url.split("?")[0]}`;
+      if (key.startsWith("POST /api/herald/chat/stream")) {
+        const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+        streamBodies.push(body);
+        return Promise.resolve(
+          sseStream(
+            [
+              { type: "start", threadId: String(body.chatId) },
+              { type: "delta", text: "follow up answer" },
+              { type: "done", text: "follow up answer", usage: { in: 1, out: 1 } },
+            ],
+            30
+          )
+        );
+      }
+      if (key.startsWith("GET /api/herald/chats/p1")) {
+        return Promise.resolve(new Response(JSON.stringify({ data: chatThreads }), { status: 200 }));
+      }
+      if (key.startsWith("GET /api/herald/chat/")) {
+        const chatId = url.split("/").pop()!.split("?")[0]!;
+        const msgs = transcripts.get(chatId) ?? [];
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              chatId,
+              projectId: "p1",
+              ownerUserId: null,
+              agentId: null,
+              skillId: null,
+              messages: msgs,
+              summary: null,
+              summarizedCount: 0,
+              createdAt: "t",
+              updatedAt: "t",
+            }),
+            { status: 200 }
+          )
+        );
+      }
+      const routes: Record<string, unknown> = {
+        "GET /api/projects": { data: [PROJECT], nextCursor: null },
+        "GET /api/herald/settings/p1": currentSettings,
+        "GET /api/herald/chats/p1": { data: chatThreads },
+        "GET /api/agents": { data: [{ id: "hearth-herald", name: "Herald Agent", description: "", instructions: "", skillIds: [] }] },
+        "GET /api/skills": { data: [] },
+      };
+      if (!(key in routes)) return Promise.reject(new Error(`unmocked: ${key}`));
+      return Promise.resolve(new Response(JSON.stringify(routes[key]), { status: 200 }));
+    });
+
+    render(<HeraldChatPage slug="demo" thread="c1" />, { wrapper });
+    await screen.findByText("Existing thread");
+    const before = (queryClient.getQueryData(["herald-chats", "p1", null]) as unknown[]) ?? chatThreads;
+    expect(before).toHaveLength(1);
+
+    fireEvent.change(screen.getByPlaceholderText(/ask herald anything/i), { target: { value: "follow up" } });
+    fireEvent.click(screen.getByRole("button", { name: /^send$/i }));
+
+    await waitFor(
+      () => {
+        const cached = queryClient.getQueryData(["herald-chats", "p1", null]) as { chatId: string; updatedAt: string }[] | undefined;
+        expect(cached).toBeDefined();
+        expect(cached![0]!.updatedAt).not.toBe(oldTs);
+      },
+      { timeout: 2000 }
+    );
+    expect(screen.getByText("Existing thread")).toBeInTheDocument();
+  });
+
+  it("no optimistic row on error before ingress (HERALD_TASK_ACTIVE)", async () => {
+    const newId = "c-err-opt";
+    fetchMock.mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const key = `${init?.method ?? "GET"} ${url.split("?")[0]}`;
+      if (key.startsWith("POST /api/herald/chat/stream")) {
+        const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+        streamBodies.push(body);
+        return Promise.resolve(
+          new Response(JSON.stringify({ error: { code: "HERALD_TASK_ACTIVE", message: "busy" } }), { status: 409, headers: { "Content-Type": "application/json" } })
+        );
+      }
+      if (key.startsWith("GET /api/herald/chats/p1")) {
+        return Promise.resolve(new Response(JSON.stringify({ data: [] }), { status: 200 }));
+      }
+      if (key.startsWith("GET /api/herald/chat/")) {
+        const chatId = url.split("/").pop()!.split("?")[0]!;
+        const msgs = transcripts.get(chatId) ?? [];
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              chatId,
+              projectId: "p1",
+              ownerUserId: null,
+              agentId: null,
+              skillId: null,
+              messages: msgs,
+              summary: null,
+              summarizedCount: 0,
+              createdAt: "t",
+              updatedAt: "t",
+            }),
+            { status: 200 }
+          )
+        );
+      }
+      const routes: Record<string, unknown> = {
+        "GET /api/projects": { data: [PROJECT], nextCursor: null },
+        "GET /api/herald/settings/p1": currentSettings,
+        "GET /api/agents": { data: [{ id: "hearth-herald", name: "Herald Agent", description: "", instructions: "", skillIds: [] }] },
+        "GET /api/skills": { data: [] },
+      };
+      if (!(key in routes)) return Promise.reject(new Error(`unmocked: ${key}`));
+      return Promise.resolve(new Response(JSON.stringify(routes[key]), { status: 200 }));
+    });
+
+    render(<HeraldChatPage slug="demo" thread={newId} />, { wrapper });
+    await screen.findByPlaceholderText(/ask herald anything/i);
+    fireEvent.change(screen.getByPlaceholderText(/ask herald anything/i), { target: { value: "should not appear" } });
+    fireEvent.click(screen.getByRole("button", { name: /^send$/i }));
+    await waitFor(() => expect(streamBodies).toHaveLength(1));
+    await new Promise((r) => setTimeout(r, 200));
+    expect(screen.queryByText(deriveChatTitle("should not appear"))).toBeNull();
+    expect(screen.getByText(/no threads yet/i)).toBeInTheDocument();
+  });
+
+  it("abort before ingress leaves no phantom row", async () => {
+    const newId = "c-abort-opt";
+    fetchMock.mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const key = `${init?.method ?? "GET"} ${url.split("?")[0]}`;
+      if (key.startsWith("POST /api/herald/chat/stream")) {
+        const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+        streamBodies.push(body);
+        return Promise.resolve(
+          sseStream(
+            [
+              { type: "start", threadId: String(body.chatId) },
+              { type: "delta", text: "late hello" },
+              { type: "done", text: "late hello", usage: { in: 1, out: 1 } },
+            ],
+            80
+          )
+        );
+      }
+      if (key.startsWith("GET /api/herald/chats/p1")) {
+        return Promise.resolve(new Response(JSON.stringify({ data: [] }), { status: 200 }));
+      }
+      if (key.startsWith("GET /api/herald/chat/")) {
+        const chatId = url.split("/").pop()!.split("?")[0]!;
+        const msgs = transcripts.get(chatId) ?? [];
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              chatId,
+              projectId: "p1",
+              ownerUserId: null,
+              agentId: null,
+              skillId: null,
+              messages: msgs,
+              summary: null,
+              summarizedCount: 0,
+              createdAt: "t",
+              updatedAt: "t",
+            }),
+            { status: 200 }
+          )
+        );
+      }
+      const routes: Record<string, unknown> = {
+        "GET /api/projects": { data: [PROJECT], nextCursor: null },
+        "GET /api/herald/settings/p1": currentSettings,
+        "GET /api/agents": { data: [{ id: "hearth-herald", name: "Herald Agent", description: "", instructions: "", skillIds: [] }] },
+        "GET /api/skills": { data: [] },
+      };
+      if (!(key in routes)) return Promise.reject(new Error(`unmocked: ${key}`));
+      return Promise.resolve(new Response(JSON.stringify(routes[key]), { status: 200 }));
+    });
+
+    render(<HeraldChatPage slug="demo" thread={newId} />, { wrapper });
+    await screen.findByPlaceholderText(/ask herald anything/i);
+    fireEvent.change(screen.getByPlaceholderText(/ask herald anything/i), { target: { value: "abort me before ingress" } });
+    fireEvent.click(screen.getByRole("button", { name: /^send$/i }));
+    await screen.findByRole("button", { name: /^stop$/i });
+    fireEvent.click(screen.getByRole("button", { name: /^stop$/i }));
+    await new Promise((r) => setTimeout(r, 300));
+    expect(screen.queryByText(deriveChatTitle("abort me before ingress"))).toBeNull();
+    expect(screen.getByText(/no threads yet/i)).toBeInTheDocument();
+  });
+
+  it("filtered search list not polluted at ingress", async () => {
+    const newId = "c-filter-opt";
+    const message = "filter pollution check message long enough";
+    const expectedTitle = deriveChatTitle(message);
+    queryClient.setQueryData(["herald-chats", "p1", "foo"], [
+      { chatId: "c-filtered", title: "Filtered only", pinned: false, snippet: null, createdAt: "t", updatedAt: "2026-08-20T00:00:00Z" },
+    ]);
+    fetchMock.mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const key = `${init?.method ?? "GET"} ${url.split("?")[0]}`;
+      if (key.startsWith("POST /api/herald/chat/stream")) {
+        const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+        streamBodies.push(body);
+        return Promise.resolve(
+          sseStream(
+            [
+              { type: "start", threadId: String(body.chatId) },
+              { type: "delta", text: "hello" },
+              { type: "done", text: "hello", usage: { in: 1, out: 1 } },
+            ],
+            30
+          )
+        );
+      }
+      if (key.startsWith("GET /api/herald/chats/p1")) {
+        if (streamBodies.length > 0) {
+          const sid = String((streamBodies[0] as Record<string, unknown>).chatId);
+          const smsg = String((streamBodies[0] as Record<string, unknown>).message);
+          const title = deriveChatTitle(smsg);
+          const now = new Date().toISOString();
+          return Promise.resolve(
+            new Response(JSON.stringify({ data: [{ chatId: sid, title, pinned: false, snippet: null, createdAt: now, updatedAt: now }] }), {
+              status: 200,
+            })
+          );
+        }
+        return Promise.resolve(new Response(JSON.stringify({ data: [] }), { status: 200 }));
+      }
+      if (key.startsWith("GET /api/herald/chat/")) {
+        const chatId = url.split("/").pop()!.split("?")[0]!;
+        const msgs = transcripts.get(chatId) ?? [];
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              chatId,
+              projectId: "p1",
+              ownerUserId: null,
+              agentId: null,
+              skillId: null,
+              messages: msgs,
+              summary: null,
+              summarizedCount: 0,
+              createdAt: "t",
+              updatedAt: "t",
+            }),
+            { status: 200 }
+          )
+        );
+      }
+      const routes: Record<string, unknown> = {
+        "GET /api/projects": { data: [PROJECT], nextCursor: null },
+        "GET /api/herald/settings/p1": currentSettings,
+        "GET /api/agents": { data: [{ id: "hearth-herald", name: "Herald Agent", description: "", instructions: "", skillIds: [] }] },
+        "GET /api/skills": { data: [] },
+      };
+      if (!(key in routes)) return Promise.reject(new Error(`unmocked: ${key}`));
+      return Promise.resolve(new Response(JSON.stringify(routes[key]), { status: 200 }));
+    });
+
+    render(<HeraldChatPage slug="demo" thread={newId} />, { wrapper });
+    await screen.findByPlaceholderText(/ask herald anything/i);
+    fireEvent.change(screen.getByPlaceholderText(/ask herald anything/i), { target: { value: message } });
+    fireEvent.click(screen.getByRole("button", { name: /^send$/i }));
+    await waitFor(() => expect(screen.getByText(expectedTitle)).toBeInTheDocument(), { timeout: 2000 });
+    const filtered = queryClient.getQueryData(["herald-chats", "p1", "foo"]) as unknown[] | undefined;
+    expect(filtered).toHaveLength(1);
+    expect((filtered as { chatId: string }[])[0]!.chatId).toBe("c-filtered");
+    await waitFor(
+      () => {
+        const unfiltered = queryClient.getQueryData(["herald-chats", "p1", null]) as unknown[] | undefined;
+        expect(unfiltered?.some((t: unknown) => (t as { chatId: string }).chatId === newId)).toBe(true);
+      },
+      { timeout: 2000 }
+    );
   });
 });

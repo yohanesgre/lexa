@@ -127,6 +127,8 @@ describe("HeraldSettingsRepo getByProject/maskedView", () => {
           primarySupportsImages: false,
           reasoningEffort: null,
           writeTools: [],
+          providerId: null,
+          modelId: null,
           fallbackModelIds: [],
         });
         const raw = JSON.stringify(masked);

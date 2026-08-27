@@ -266,8 +266,7 @@ function TeamsSection() {
             type="button"
             className="btn btn-primary"
             disabled={!name.trim() || createTeam.isPending}
-            // @ts-expect-error — strict: exactOptional indexedAccess
-            onClick={() => createTeam.mutate({ name: name.trim(), slug: slug.trim() || undefined }, { onSuccess: () => { setName(""); setSlug(""); } })}
+            onClick={() => createTeam.mutate({ name: name.trim(), ...(slug.trim() ? { slug: slug.trim() } : {}) }, { onSuccess: () => { setName(""); setSlug(""); } })}
           >
             Create team
           </button>
@@ -366,7 +365,7 @@ export function WorkspaceSettings() {
       {isSuperadmin && (
         <div className="card-panel mt-0 mb-6" style={{ padding: "10px 12px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
           <span className="text-sm text-lx-text-secondary">Gateway usage, cost, latency &amp; health — all projects aggregated.</span>
-          <Link to="/admin/herald/usage" className="btn btn-ghost" style={{ height: 28, padding: "0 10px", fontSize: 12, textDecoration: "none", display: "inline-flex", alignItems: "center", whiteSpace: "nowrap" }}>
+          <Link to="/hearth/usage" className="btn btn-ghost" style={{ height: 28, padding: "0 10px", fontSize: 12, textDecoration: "none", display: "inline-flex", alignItems: "center", whiteSpace: "nowrap" }}>
             Herald Usage · Gateway
           </Link>
         </div>
@@ -374,6 +373,10 @@ export function WorkspaceSettings() {
 
       <WorkspaceMembersSection />
       <TeamsSection />
+      <div className="card-panel mb-6" style={{ padding: "10px 12px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, borderStyle: "dashed" }}>
+        <span className="text-sm text-lx-text-secondary">Hearth operations (runs, usage, providers, runtimes, bindings, agents) have moved to <span className="font-mono text-xs">/hearth</span> — canonical ops shell. This page retains machines/runtimes/providers/agents for reference until removal (Phase 3 duplication noted).</span>
+        <Link to="/hearth/runs" className="btn btn-ghost" style={{ height: 28, padding: "0 10px", fontSize: 12, textDecoration: "none", display: "inline-flex", alignItems: "center", whiteSpace: "nowrap" }}>Open /hearth</Link>
+      </div>
       <MachinesRuntimesSection showTeamColumn />
       <ApiKeysSection />
       <RateLimitSection />

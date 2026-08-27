@@ -14,6 +14,8 @@ export interface HeraldSettingsRow {
   reasoning_effort: HeraldReasoningEffort | null;
   write_tools: string;
   fallback_model_ids: string;
+  provider_id: string | null;
+  primary_model_id: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -50,6 +52,8 @@ export class HeraldSettingsRepo extends Effect.Service<HeraldSettingsRepo>()("Le
       primarySupportsImages: row.primary_supports_images === 1,
       reasoningEffort: row.reasoning_effort,
       writeTools: parseWriteTools(row.write_tools),
+      providerId: (row as unknown as { provider_id?: string | null }).provider_id ?? null,
+      modelId: (row as unknown as { primary_model_id?: string | null }).primary_model_id ?? null,
       fallbackModelIds: parseFallbackIds(row.fallback_model_ids),
     });
 
@@ -60,11 +64,13 @@ export class HeraldSettingsRepo extends Effect.Service<HeraldSettingsRepo>()("Le
         Effect.gen(function* () {
           const existing = yield* getRowOrNull(projectId);
           const fallbackIds = input.fallbackModelIds !== undefined ? JSON.stringify(input.fallbackModelIds.slice(0, 3)) : existing?.fallback_model_ids ?? "[]";
+          const providerId = input.providerId !== undefined ? (input.providerId ?? null) : (existing as unknown as { provider_id?: string | null } | null)?.provider_id ?? null;
+          const primaryModelId = input.modelId !== undefined ? (input.modelId ?? null) : (existing as unknown as { primary_model_id?: string | null } | null)?.primary_model_id ?? null;
           yield* run(
             db,
             `INSERT INTO herald_settings (project_id, search_provider, search_api_key, url_allowlist,
-               engine, engine_switcher_enabled, primary_supports_images, reasoning_effort, write_tools, fallback_model_ids)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+               engine, engine_switcher_enabled, primary_supports_images, reasoning_effort, write_tools, fallback_model_ids, provider_id, primary_model_id)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
              ON CONFLICT(project_id) DO UPDATE SET
                search_provider = excluded.search_provider,
                url_allowlist = excluded.url_allowlist,
@@ -75,6 +81,8 @@ export class HeraldSettingsRepo extends Effect.Service<HeraldSettingsRepo>()("Le
                reasoning_effort = excluded.reasoning_effort,
                write_tools = excluded.write_tools,
                fallback_model_ids = excluded.fallback_model_ids,
+               provider_id = excluded.provider_id,
+               primary_model_id = excluded.primary_model_id,
                updated_at = datetime('now')`,
             projectId,
             input.searchProvider ?? null,
@@ -85,7 +93,9 @@ export class HeraldSettingsRepo extends Effect.Service<HeraldSettingsRepo>()("Le
             input.primarySupportsImages === true ? 1 : 0,
             input.reasoningEffort ?? null,
             (input.writeTools ?? []).join(","),
-            fallbackIds
+            fallbackIds,
+            providerId,
+            primaryModelId
           );
           return yield* getRow(projectId);
         }),

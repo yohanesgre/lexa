@@ -62,6 +62,9 @@
   --lx-badge-asset: #F9A8D4;
   --lx-pb-medium: #67E8F9;
   --lx-pb-low: #B8B2AB;
+  --lx-status-danger: #FF4444;
+  --lx-status-warning: #F0C040;
+  --lx-status-success: #4ADE80;
 
   --lx-font-display: "Space Grotesk", -apple-system, BlinkMacSystemFont, sans-serif;
   --lx-font-body: "IBM Plex Sans", -apple-system, BlinkMacSystemFont, sans-serif;
@@ -90,6 +93,9 @@
   --lx-border-subtle: #EBE5DE;
   --lx-border-strong: #C4BAB0;
   --lx-border-focus: #D4A017;
+  --lx-status-danger: #DC2626;
+  --lx-status-warning: #D4A017;
+  --lx-status-success: #16A34A;
 
   --lx-text-primary: #1A1714;
   --lx-text-secondary: #5C554F;
@@ -734,7 +740,7 @@
     height: 20px;
     padding: 0 8px;
     border-radius: 9999px;
-    border: 1px solid rgba(252, 211, 77, 0.35);
+    border: 1px solid var(--lx-bg-warning-subtle);
     font-family: var(--lx-font-body);
     font-size: 11px;
     line-height: 14px;
@@ -744,7 +750,7 @@
   }
 
   .card-due-overdue {
-    border-color: rgba(255, 68, 68, 0.45);
+    border-color: var(--lx-bg-danger-subtle);
     background: var(--lx-bg-danger-subtle);
     color: var(--lx-text-danger);
   }
@@ -980,7 +986,7 @@
     height: 20px;
     padding: 0 8px;
     border-radius: 9999px;
-    border: 1px solid rgba(252, 211, 77, 0.35);
+    border: 1px solid var(--lx-bg-warning-subtle);
     font-family: var(--lx-font-body);
     font-size: 11px;
     line-height: 14px;
@@ -991,7 +997,7 @@
   }
 
   .lane-due-overdue {
-    border-color: rgba(255, 68, 68, 0.45);
+    border-color: var(--lx-bg-danger-subtle);
     background: var(--lx-bg-danger-subtle);
     color: var(--lx-text-danger);
   }
@@ -2157,7 +2163,7 @@
   }
   .hearth-status--idle    { background: var(--lx-surface-card); border-color: var(--lx-border-default); color: var(--lx-text-secondary); }
   .hearth-status--warning { background: var(--lx-surface-card); border-color: rgba(240, 192, 64, 0.35); color: var(--lx-text-primary); }
-  .hearth-status--danger  { background: var(--lx-bg-danger-subtle); border-color: rgba(255, 68, 68, 0.25); color: var(--lx-text-danger); }
+  .hearth-status--danger  { background: var(--lx-bg-danger-subtle); border-color: var(--lx-bg-danger-subtle); color: var(--lx-text-danger); }
   .hearth-status--ok      { background: var(--lx-bg-success-subtle); border-color: rgba(74, 222, 128, 0.25); color: var(--lx-text-success); }
   /* Dismiss (X) on finished tasks in the Hearth status panel */
   .hearth-dismiss {
@@ -2327,6 +2333,7 @@
 
   .settings-table {
     width: 100%;
+    table-layout: auto;
     border-collapse: collapse;
     font-size: 13px;
   }
@@ -2334,8 +2341,9 @@
   .settings-table th,
   .settings-table td {
     text-align: left;
-    padding: 10px 12px;
-    border-bottom: 1px solid var(--lx-border-default);
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--lx-border-subtle);
+    vertical-align: middle;
   }
 
   .settings-table th {
@@ -2345,15 +2353,107 @@
     text-transform: uppercase;
     letter-spacing: 0.05em;
     font-family: var(--lx-font-body);
+    background: var(--lx-surface-elevated);
+    border-bottom: 1px solid var(--lx-border-default);
+    height: 36px;
+    white-space: nowrap;
   }
 
   .settings-table td {
     color: var(--lx-text-primary);
     font-family: var(--lx-font-body);
+    height: 48px;
   }
 
   .settings-table tbody tr:last-child td {
     border-bottom: none;
+  }
+
+  .settings-table .table-actions {
+    display: inline-flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 8px;
+    white-space: nowrap;
+  }
+
+  .settings-table .pill,
+  .settings-table .badge-pill {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    height: 22px;
+    padding: 0 8px;
+    border-radius: 9999px;
+    font-size: 11px;
+    font-weight: 500;
+    line-height: 1;
+    white-space: nowrap;
+    vertical-align: middle;
+  }
+
+  .card-panel:has(> .settings-table) {
+    overflow: hidden;
+    padding: 0;
+  }
+
+  .card-panel:has(> .settings-table) .settings-table th:first-child,
+  .card-panel:has(> .settings-table) .settings-table td:first-child {
+    padding-left: 16px;
+  }
+
+  .card-panel:has(> .settings-table) .settings-table th:last-child,
+  .card-panel:has(> .settings-table) .settings-table td:last-child {
+    padding-right: 16px;
+  }
+
+  .settings-table td .btn + .btn {
+    margin-left: 8px;
+  }
+
+  .settings-table .table-actions .btn + .btn {
+    margin-left: 0;
+  }
+
+  .settings-table td span[style*="9999"] {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    height: 22px !important;
+    padding: 0 8px !important;
+    border-radius: 9999px !important;
+    font-size: 11px !important;
+    font-weight: 500;
+    line-height: 1 !important;
+    vertical-align: middle;
+  }
+
+  .settings-table--herald-usage,
+  .settings-table--herald-prices,
+  .settings-table--herald-health {
+    width: 100%;
+    table-layout: fixed;
+  }
+  .settings-table--herald-usage th,
+  .settings-table--herald-prices th,
+  .settings-table--herald-health th {
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .settings-table--herald-usage td:first-child,
+  .settings-table--herald-prices td:first-child {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .settings-table--herald-prices .prop-input {
+    width: 100% !important;
+    max-width: 120px;
+    box-sizing: border-box;
+  }
+
+  .settings-table tbody tr.is-expandable:hover {
+    background: var(--lx-surface-elevated);
   }
 
   /* Checklist (TipTap taskList read-mode) */
@@ -2380,11 +2480,12 @@
     height: 14px;
     border: 1px solid var(--lx-border-strong);
     border-radius: 3px;
-    margin-top: 3px;
-    flex-shrink: 0;
-    display: flex;
+    background: var(--lx-surface-input);
+    display: inline-flex;
     align-items: center;
     justify-content: center;
+    flex-shrink: 0;
+    margin-top: 3px;
   }
   .checkbox.checked {
     background: var(--lx-border-focus);
@@ -2645,6 +2746,12 @@
     -webkit-box-orient: vertical;
     overflow: hidden;
     line-height: 16px;
+  }
+  mark {
+    background: rgba(240, 192, 64, 0.16);
+    color: var(--lx-text-warning);
+    border-radius: 2px;
+    padding: 0 2px;
   }
   .search-result mark {
     background: rgba(240, 192, 64, 0.16);
@@ -3060,7 +3167,7 @@
   }
   .status-badge-approaching {
     color: var(--lx-text-warning);
-    border-color: rgba(252, 211, 77, 0.35);
+    border-color: var(--lx-bg-warning-subtle);
   }
   .status-badge-exceeded {
     color: var(--lx-text-danger);
@@ -3519,28 +3626,32 @@
     color: var(--lx-text-link-hover);
   }
 
-  /* ---- Move-confirm dialog: clear-deadline checkbox — ported from wireframes.css.
-         Defined BEFORE the filter-popover .check-row so the cascade matches the
-         wireframe file (dialog variant earlier, filter variant later wins on
-         padding/font/cursor) — same relative order as wireframes.css. ---- */
   .check-row {
     display: flex;
     align-items: center;
     gap: 8px;
     font-size: 13px;
     color: var(--lx-text-secondary);
-    margin-top: 10px;
     padding: 8px 12px;
     border: 1px solid var(--lx-border-default);
     border-radius: 6px;
     background: var(--lx-surface-card);
+    cursor: pointer;
+  }
+  .check-row .checkbox {
+    margin-top: 0;
+  }
+  .dialog .check-row,
+  .modal-body .check-row {
+    margin-top: 10px;
   }
 
-  /* ---- Filter Popover Checkbox Rows ---- */
+  /* ---- Filter Popover Checkbox Rows — scoped so settings/dialog keep bordered cards ---- */
   .filter-popover .menu-separator {
     margin: 6px 4px;
   }
-  .check-row {
+  .filter-popover .check-row,
+  .menu-popover .check-row {
     display: flex;
     align-items: center;
     gap: 8px;
@@ -3551,14 +3662,20 @@
     color: var(--lx-text-primary);
     cursor: pointer;
     transition: background 100ms;
+    border: none;
+    border-radius: 4px;
+    background: transparent;
   }
-  .check-row:hover {
+  .filter-popover .check-row:hover,
+  .menu-popover .check-row:hover {
     background: var(--lx-surface-card-hover);
   }
-  .check-row .checkbox {
+  .filter-popover .check-row .checkbox,
+  .menu-popover .check-row .checkbox {
     margin-top: 0;
   }
-  .check-row .avatar {
+  .filter-popover .check-row .avatar,
+  .menu-popover .check-row .avatar {
     margin-right: 0;
   }
 
@@ -5142,7 +5259,7 @@
   height: 20px;
   padding: 0 8px;
   border-radius: 9999px;
-  border: 1px solid rgba(252, 211, 77, 0.35);
+  border: 1px solid var(--lx-bg-warning-subtle);
   font-family: var(--lx-font-body);
   font-size: 11px;
   line-height: 14px;
@@ -5150,7 +5267,7 @@
   white-space: nowrap;
 }
 .milestone-due-overdue {
-  border-color: rgba(255, 68, 68, 0.45);
+  border-color: var(--lx-bg-danger-subtle);
   background: var(--lx-bg-danger-subtle);
   color: var(--lx-text-danger);
 }
@@ -5802,6 +5919,14 @@
   flex-direction: column;
   gap: 16px;
 }
+.chat-column--approvals {
+  max-width: 720px;
+}
+.chat-column .approval-batch {
+  max-width: 720px;
+  width: 100%;
+  align-self: center;
+}
 .bubble-user {
   align-self: flex-end;
   max-width: 80%;
@@ -5817,6 +5942,7 @@
   border: 1px solid var(--lx-border-default);
   border-radius: 12px 12px 12px 4px;
   padding: 10px 14px;
+  overflow: hidden;
 }
 .bubble-meta {
   font-family: var(--lx-font-micro);
@@ -6372,6 +6498,16 @@
 .thread-row:focus-within .thread-row-actions {
   opacity: 1;
 }
+.thread-row:focus-visible {
+  outline: none;
+  box-shadow: var(--lx-focus-ring);
+}
+.thread-snippet mark, .threads-sidebar-list mark {
+  background: rgba(240, 192, 64, 0.16);
+  color: var(--lx-text-warning);
+  border-radius: 2px;
+  padding: 0 2px;
+}
 .threads-sidebar-backdrop {
   display: none;
 }
@@ -6408,7 +6544,7 @@
     right: 0;
     bottom: 0;
     left: 0;
-    background: rgba(0, 0, 0, 0.4);
+    background: var(--lx-surface-overlay);
     z-index: 65;
   }
 }
@@ -6441,7 +6577,7 @@
 .approval-chip {
   background: var(--lx-surface-card);
   border: 1px solid var(--lx-border-default);
-  border-left: 3px solid #f0c040;
+  border-left: 3px solid var(--lx-border-focus);
   border-radius: 6px;
   padding: 10px 12px;
 }
@@ -6458,7 +6594,7 @@
   opacity: 0.85;
 }
 .approval-chip.state-failed {
-  border-left-color: #ff4444;
+  border-left-color: var(--lx-status-danger);
 }
 
 .approval-tool {
@@ -7354,12 +7490,13 @@
 }
 
 /* ---- 20. Threads sidebar collapsed on mobile ----
-   The collapsed rail is hidden on mobile — the top nav exposes a context-
-   sensitive toggle (left of the Lexa brand) instead. The chat shell
-   uses the full viewport width. */
+   Collapsed rail stays visible at every viewport as the drawer trigger
+   (mirrors the wiki rail). The earlier rule at 6492 keeps it as a 36px
+   overlay rail; this block only adjusts the chat shell padding. */
 @media (max-width: 899.98px) {
   .threads-sidebar.collapsed {
-    display: none !important;
+    display: flex !important;
+    transform: none;
   }
   .chat-layout > .chat-shell,
   .chat-layout > main.chat-shell {

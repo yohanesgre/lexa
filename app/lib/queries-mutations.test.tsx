@@ -370,8 +370,7 @@ describe("activity + link mutations", () => {
     });
     const { result } = renderHook(() => useUpdateComment("demo", "t1"), { wrapper });
     await act(async () => { await result.current.mutateAsync({ commentId: 9, body: { type: "doc", content: [] } }); });
-    // @ts-expect-error — strict: exactOptional indexedAccess
-    const data = (queryClient.getQueryData(["task-activity"!, "demo", "t1"]) as { pages: { data: ActivityItem[] }[] }).pages[0].data;
+    const data = (queryClient.getQueryData(["task-activity", "demo", "t1"]) as { pages: { data: ActivityItem[] }[] }).pages[0]!.data;
     expect(data.find((i) => i.kind === "comment")).toMatchObject({ kind: "comment", editedAt: "t2" });
   });
 
@@ -380,8 +379,7 @@ describe("activity + link mutations", () => {
     seedActivity();
     const { result } = renderHook(() => useDeleteComment("demo", "t1"), { wrapper });
     await act(async () => { await result.current.mutateAsync(9); });
-    // @ts-expect-error — strict: exactOptional indexedAccess
-    const data = (queryClient.getQueryData(["task-activity"!, "demo", "t1"]) as { pages: { data: ActivityItem[] }[] }).pages[0].data;
+    const data = (queryClient.getQueryData(["task-activity", "demo", "t1"]) as { pages: { data: ActivityItem[] }[] }).pages[0]!.data;
     expect(data.filter((i) => i.kind === "comment")).toHaveLength(0);
     const last = data[data.length - 1];
     expect(last).toMatchObject({ kind: "event", type: "comment_deleted" });

@@ -287,3 +287,180 @@ describe("use-herald-stream write approvals", () => {
     expect(latest!.error).toBeNull();
   });
 });
+
+describe("hasIngress", () => {
+  const fetchMock = vi.fn();
+  const seen: HeraldStreamSnapshot[] = [];
+  let unsubscribe: (() => void) | null = null;
+
+  beforeEach(() => {
+    vi.stubGlobal("fetch", fetchMock);
+    seen.length = 0;
+    unsubscribe = null;
+  });
+
+  afterEach(() => {
+    unsubscribe?.();
+    unsubscribe = null;
+    act(() => latest?.reset());
+    latest = null;
+    vi.unstubAllGlobals();
+  });
+
+  function recordSnapshots() {
+    unsubscribe?.();
+    unsubscribe = latest!.subscribe(() => {
+      const snap = latest!.getSnapshot();
+      seen.push(snap);
+    });
+  }
+
+  function sendAndRecord(key: string, res: Response) {
+    fetchMock.mockReturnValue(Promise.resolve(res));
+    render(<Harness k={key} />);
+    act(() => latest!.send("/api/herald/chat/stream", {}));
+    recordSnapshots();
+  }
+
+  it("false after start/connecting, true after first delta", async () => {
+    sendAndRecord(
+      "hasIngress-delta",
+      sseStream([
+        { type: "start", threadId: "t" },
+        { type: "delta", text: "hello" },
+        { type: "done", text: "hello", usage: { in: 1, out: 1 } },
+      ])
+    );
+    expect(latest!.hasIngress).toBe(false);
+    await waitFor(() => expect(latest!.hasIngress).toBe(true));
+    await waitFor(() => expect(latest!.status).toBe("done"));
+    expect(latest!.hasIngress).toBe(true);
+  });
+
+  it("true after non-empty reasoning delta, stays false for empty reasoning delta", async () => {
+    sendAndRecord(
+      "hasIngress-reasoning-nonempty",
+      sseStream([
+        { type: "start", threadId: "t" },
+        { type: "reasoning", delta: "thinking" },
+        { type: "done", text: "ok", usage: { in: 1, out: 1 } },
+      ])
+    );
+    await waitFor(() => expect(latest!.hasIngress).toBe(true));
+    await waitFor(() => expect(latest!.status).toBe("done"));
+
+    act(() => latest!.reset());
+    seen.length = 0;
+    unsubscribe?.();
+    unsubscribe = null;
+
+    sendAndRecord(
+      "hasIngress-reasoning-empty",
+      sseStream([
+        { type: "start", threadId: "t" },
+        { type: "reasoning", delta: "" },
+        { type: "done", text: "", usage: { in: 0, out: 0 } },
+      ])
+    );
+    await waitFor(() => expect(latest!.status).toBe("done"));
+    expect(latest!.hasIngress).toBe(false);
+    expect(latest!.reasoningText).toBe("");
+  });
+
+  it("true after tool call", async () => {
+    sendAndRecord(
+      "hasIngress-tool-call",
+      sseStream([
+        { type: "start", threadId: "t" },
+        { type: "tool", phase: "call", name: "web_search" },
+        { type: "done", text: "", usage: { in: 0, out: 0 } },
+      ])
+    );
+    await waitFor(() => expect(latest!.hasIngress).toBe(true));
+    await waitFor(() => expect(latest!.status).toBe("done"));
+  });
+
+  it("true after tool_pending", async () => {
+    sendAndRecord(
+      "hasIngress-pending",
+      sseStream([
+        { type: "start", threadId: "t" },
+        { type: "tool_pending", approvalId: "a1", batchId: "b1", seq: 0, name: "create_task", diff: { type: "task_create", title: "Fix", fields: {} } },
+        { type: "suspended", batchId: "b1" },
+      ])
+    );
+    await waitFor(() => expect(latest!.hasIngress).toBe(true));
+    expect(latest!.status).toBe("suspended");
+  });
+
+  it("true after suspended, error, and done with text; false for done with empty text and start only", async () => {
+    sendAndRecord(
+      "hasIngress-suspended",
+      sseStream([
+        { type: "start", threadId: "t" },
+        { type: "suspended", batchId: "b1" },
+      ])
+    );
+    await waitFor(() => expect(latest!.hasIngress).toBe(true));
+    act(() => latest!.reset());
+
+    sendAndRecord(
+      "hasIngress-error",
+      sseStream([{ type: "start", threadId: "t" }, { type: "error", code: "FOO", message: "bar" }])
+    );
+    await waitFor(() => expect(latest!.hasIngress).toBe(true));
+    act(() => latest!.reset());
+
+    sendAndRecord(
+      "hasIngress-done-text",
+      sseStream([{ type: "start", threadId: "t" }, { type: "done", text: "hello", usage: { in: 1, out: 1 } }])
+    );
+    await waitFor(() => expect(latest!.hasIngress).toBe(true));
+    act(() => latest!.reset());
+
+    sendAndRecord(
+      "hasIngress-done-empty",
+      sseStream([{ type: "start", threadId: "t" }, { type: "done", text: "", usage: { in: 0, out: 0 } }])
+    );
+    await waitFor(() => expect(latest!.status).toBe("done"));
+    expect(latest!.hasIngress).toBe(false);
+    act(() => latest!.reset());
+
+    sendAndRecord(
+      "hasIngress-done-whitespace",
+      sseStream([{ type: "start", threadId: "t" }, { type: "done", text: "   ", usage: { in: 0, out: 0 } }])
+    );
+    await waitFor(() => expect(latest!.status).toBe("done"));
+    expect(latest!.hasIngress).toBe(false);
+    act(() => latest!.reset());
+
+    sendAndRecord("hasIngress-start-only", sseStream([{ type: "start", threadId: "t" }, { type: "done", text: "", usage: { in: 0, out: 0 } }]));
+    await waitFor(() => expect(latest!.status).toBe("done"));
+    expect(latest!.hasIngress).toBe(false);
+  });
+
+  it("false for start only without done (stream closes without terminal is error, no ingress)", async () => {
+    const encoder = new TextEncoder();
+    const body = new ReadableStream<Uint8Array>({
+      async start(controller) {
+        controller.enqueue(encoder.encode(`event: start\ndata: ${JSON.stringify({ type: "start", threadId: "t" })}\n\n`));
+        await new Promise((r) => setTimeout(r, 20));
+        controller.close();
+      },
+    });
+    sendAndRecord("hasIngress-start-no-terminal", new Response(body, { status: 200, headers: { "Content-Type": "text/event-stream" } }));
+    await waitFor(() => expect(latest!.status).toBe("error"));
+    expect(latest!.hasIngress).toBe(false);
+  });
+
+  it("reset clears hasIngress", async () => {
+    sendAndRecord(
+      "hasIngress-reset",
+      sseStream([{ type: "start", threadId: "t" }, { type: "delta", text: "hi" }, { type: "done", text: "hi", usage: { in: 1, out: 1 } }])
+    );
+    await waitFor(() => expect(latest!.hasIngress).toBe(true));
+    act(() => latest!.reset());
+    expect(latest!.hasIngress).toBe(false);
+    expect(latest!.status).toBe("idle");
+  });
+});

@@ -161,7 +161,13 @@ export class HearthService extends Effect.Service<HearthService>()("Lexa/HearthS
       if (hasRepoContent) {
         sections.push("", "Linked GitHub repo content is in the repo-content/ directory of your working directory (see repo-content/MANIFEST.md) — read it to ground your work in the actual code.");
       }
-      if (task.selection) sections.push("", `Selected text:\n"""\n${task.selection}\n"""`);
+      const rawSelection = task.selection ?? "";
+      let effectiveSelection = rawSelection;
+      if (skill.id === "polish" && rawSelection.trim() === "") {
+        const fallback = docContext?.trim() ? docContext : "";
+        if (fallback) effectiveSelection = fallback;
+      }
+      if (effectiveSelection.trim()) sections.push("", `Selected text:\n"""\n${effectiveSelection}\n"""`);
       sections.push(
         "",
         "Your working directory contains AGENTS.md (project rules) and .agents/ (your rules and skills) — follow them.",
@@ -432,7 +438,14 @@ export class HearthService extends Effect.Service<HearthService>()("Lexa/HearthS
         Effect.gen(function* () {
           const { agent, skill } = yield* resolveRulesImpl(task);
           const sourcesContent = yield* loadSourcesContent(task.projectId, task.documentType, task.documentId);
-          return buildPrompt(task, agent, skill, task.docContext, sourcesContent, hasRepoContent);
+          let effectiveDocContext = task.docContext;
+          if (skill.id === "polish" && !task.selection.trim() && !effectiveDocContext.trim()) {
+            const loaded = yield* loadDocumentContext(task.projectId, task.documentType, task.documentId).pipe(
+              Effect.catchAll(() => Effect.succeed(""))
+            );
+            if (loaded.trim()) effectiveDocContext = loaded;
+          }
+          return buildPrompt(task, agent, skill, effectiveDocContext, sourcesContent, hasRepoContent);
         }),
 
       listForDocument: (projectId: string, documentType: "task" | "wiki", documentId: string): Effect.Effect<HearthTask[], DbError> =>

@@ -163,8 +163,7 @@ describe("markdownToReact", () => {
 
   it("trailing node lands inside the last block element (streaming caret)", () => {
     const el = mount("first para\n\nlast para", { trailing: <span data-caret /> });
-    const lastP = el.querySelectorAll("p")[1];
-    // @ts-expect-error — strict: exactOptional indexedAccess
+    const lastP = el.querySelectorAll("p")[1]!;
     expect(lastP.querySelector("[data-caret]")).not.toBeNull();
   });
 });

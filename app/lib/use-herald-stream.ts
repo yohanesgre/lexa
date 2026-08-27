@@ -1,5 +1,6 @@
 import { useCallback, useState, useSyncExternalStore } from "react";
 import type { HeraldWriteDiff, StreamFrame } from "../../shared/herald";
+import { HERALD_PRE_INGRESS_TIMEOUT_MS, HERALD_STALL_TIMEOUT_MS, HERALD_STALL_MESSAGE } from "../../shared/herald";
 
 // Fetch-based SSE reader for Herald's POST stream endpoints (S5). Sessions
 // live in a module-level store keyed by taskId/chatId so a closed popover or
@@ -70,6 +71,7 @@ export interface HeraldStreamSnapshot {
   suspendedBatchId: string | null;
   error: { code: string; message: string } | null;
   usage: { in: number; out: number } | null;
+  hasIngress: boolean;
 }
 
 const IDLE: HeraldStreamSnapshot = Object.freeze({
@@ -85,7 +87,12 @@ const IDLE: HeraldStreamSnapshot = Object.freeze({
   suspendedBatchId: null,
   error: null,
   usage: null,
+  hasIngress: false,
 });
+
+export const STREAM_STALL_TIMEOUT_MS = HERALD_STALL_TIMEOUT_MS;
+export const PRE_INGRESS_TIMEOUT_MS = HERALD_PRE_INGRESS_TIMEOUT_MS;
+export const STREAM_STALL_MESSAGE = HERALD_STALL_MESSAGE;
 
 // Tool frame names → wireframe chip copy (herald-chat.html annotations).
 function toolLabel(name: string): string {
@@ -194,6 +201,7 @@ class HeraldStreamSession {
     let reasoningMs = this.snapshot.reasoningMs;
     let burstStart = 0;
     let pending: HeraldPendingChip[] = this.snapshot.status === "idle" ? [] : [...this.snapshot.pending];
+    let hasIngress = this.snapshot.hasIngress ?? false;
 
     // Bank the open burst: aggregate ms for the summary label + per-item ms
     // for the row's own "Thought for Ns" label.
@@ -213,6 +221,7 @@ class HeraldStreamSession {
       // Ephemeral reasoning buffer — appended live, never persisted.
       if (frame.type === "reasoning") {
         if (frame.delta.length > 0) {
+          hasIngress = true;
           const last = items[items.length - 1];
           if (!reasoningActive) {
             reasoningActive = true;
@@ -224,7 +233,7 @@ class HeraldStreamSession {
             items = [...items, { kind: "reasoning", text: frame.delta, ms: null }];
           }
           reasoningText += frame.delta;
-          this.emit({ frames: [...frames], items: [...items], reasoningText, reasoningActive: true }, true);
+          this.emit({ frames: [...frames], items: [...items], reasoningText, reasoningActive: true, hasIngress }, true);
         }
         return;
       }
@@ -235,6 +244,7 @@ class HeraldStreamSession {
       }
       switch (frame.type) {
         case "delta": {
+          hasIngress = true;
           text += frame.text;
           const last = items[items.length - 1];
           if (last?.kind === "text") {
@@ -242,10 +252,11 @@ class HeraldStreamSession {
           } else {
             items = [...items, { kind: "text", text: frame.text }];
           }
-          this.emit({ frames: [...frames], ...burstPatch, text, items: [...items] }, true);
+          this.emit({ frames: [...frames], ...burstPatch, text, items: [...items], hasIngress }, true);
           break;
         }
         case "tool": {
+          hasIngress = true;
           const detail = frameDetail(frame);
           if (frame.phase === "call") {
             const chip: HeraldToolChip = { key: `${frame.name}-${toolSeq++}`, name: frame.name, label: toolLabel(frame.name), phase: "call", detail };
@@ -263,10 +274,11 @@ class HeraldStreamSession {
               if (itemIndex >= 0) items = items.map((it, i) => (i === itemIndex ? { kind: "tool" as const, chip } : it));
             }
           }
-          this.emit({ frames: [...frames], ...burstPatch, tools: [...tools], items: [...items] });
+          this.emit({ frames: [...frames], ...burstPatch, tools: [...tools], items: [...items], hasIngress });
           break;
         }
         case "tool_pending": {
+          hasIngress = true;
           // One proposal per frame, seq order guaranteed server-side — keep
           // the array sorted anyway so rendering never depends on arrival.
           const chip: HeraldPendingChip = {
@@ -278,28 +290,45 @@ class HeraldStreamSession {
             diff: frame.diff,
           };
           pending = [...pending.filter((p) => p.approvalId !== chip.approvalId), chip].sort((a, b) => a.seq - b.seq);
-          this.emit({ frames: [...frames], ...burstPatch, pending: [...pending] });
+          this.emit({ frames: [...frames], ...burstPatch, pending: [...pending], hasIngress });
           break;
         }
         case "suspended":
-          this.emit({ frames: [...frames], status: "suspended", suspendedBatchId: frame.batchId, ...burstPatch });
+          hasIngress = true;
+          this.emit({ frames: [...frames], status: "suspended", suspendedBatchId: frame.batchId, ...burstPatch, hasIngress });
           break;
         case "error":
-          this.emit({ frames: [...frames], status: "error", error: { code: frame.code, message: frame.message }, ...burstPatch });
+          hasIngress = true;
+          this.emit({ frames: [...frames], status: "error", error: { code: frame.code, message: frame.message }, ...burstPatch, hasIngress });
           break;
-        case "done":
+        case "done": {
+          if (frame.text && frame.text.trim().length > 0) hasIngress = true;
           text = frame.text;
-          this.emit({ frames: [...frames], text, status: "done", usage: frame.usage, ...burstPatch });
+          this.emit({ frames: [...frames], text, status: "done", usage: frame.usage, ...burstPatch, hasIngress });
           break;
+        }
         case "start":
-          this.emit({ frames: [...frames], ...burstPatch });
+          this.emit({ frames: [...frames], ...burstPatch, hasIngress });
           break;
       }
     };
 
+    let stallTimer: ReturnType<typeof setTimeout> | undefined;
     try {
       for (;;) {
-        const { done, value } = await reader.read();
+        let readResult: Awaited<ReturnType<typeof reader.read>>;
+        const timeoutMs = hasIngress ? STREAM_STALL_TIMEOUT_MS : PRE_INGRESS_TIMEOUT_MS;
+        const readPromise = reader.read();
+        readPromise.catch(() => {});
+        const stallPromise = new Promise<never>((_, reject) => {
+          stallTimer = setTimeout(() => reject(Object.assign(new Error("stall"), { name: "StallTimeout" })), timeoutMs);
+        });
+        try {
+          readResult = await Promise.race([readPromise, stallPromise]);
+        } finally {
+          clearTimeout(stallTimer);
+        }
+        const { done, value } = readResult;
         if (done) break;
         buffer += decoder.decode(value, { stream: true });
         let sep: number;
@@ -323,13 +352,21 @@ class HeraldStreamSession {
           if (this.snapshot.status === "error" || this.snapshot.status === "done" || this.snapshot.status === "suspended") return;
         }
       }
-      // Stream closed without a terminal frame.
       if (this.snapshot.status === "streaming") {
-        this.emit({ status: "error", error: { code: "HERALD_GENERATION_FAILED", message: "The provider closed the stream unexpectedly. No partial text was kept." } });
+        this.emit({ status: "error", error: { code: "HERALD_GENERATION_FAILED", message: STREAM_STALL_MESSAGE } });
       }
     } catch (e) {
       if ((e as Error).name === "AbortError") return;
+      if ((e as Error).name === "StallTimeout") {
+        this.emit({ status: "error", error: { code: "HERALD_GENERATION_FAILED", message: STREAM_STALL_MESSAGE } });
+        try {
+          await reader.cancel();
+        } catch {}
+        return;
+      }
       this.emit({ status: "error", error: { code: "HERALD_GENERATION_FAILED", message: "The stream failed unexpectedly." } });
+    } finally {
+      clearTimeout(stallTimer);
     }
   }
 }

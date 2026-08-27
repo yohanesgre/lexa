@@ -151,7 +151,7 @@ async function extractPdf(bytes: Uint8Array): Promise<string> {
 // Manual redirect loop — every Location hop re-runs full validation
 // (scheme/IP/allowlist). A redirect never bypasses the guards.
 export async function fetchUrlText(rawUrl: string, allowlist: string | null, fetchImpl: FetchLike): Promise<string> {
-  let current = validateUrl(rawUrl, allowlist);
+  let current = await validateUrl(rawUrl, allowlist);
   for (let hop = 0; hop <= FETCH_URL_MAX_REDIRECTS; hop++) {
     const res = await fetchImpl(current, {
       redirect: "manual",
@@ -162,7 +162,7 @@ export async function fetchUrlText(rawUrl: string, allowlist: string | null, fet
       const location = res.headers.get("location");
       if (!location) throw new UrlBlocked({ reason: "redirect without a location" });
       if (hop === FETCH_URL_MAX_REDIRECTS) throw new UrlBlocked({ reason: "too many redirects" });
-      current = validateUrl(new URL(location, current).toString(), allowlist);
+      current = await validateUrl(new URL(location, current).toString(), allowlist);
       continue;
     }
     if (!res.ok) throw new Error(`HTTP_${res.status}`);
@@ -283,11 +283,13 @@ export function buildHeraldTools(deps: HeraldToolDeps) {
   tools.push(
     toolDefinition({
       name: "search_tasks",
-      description: "Search this project's tasks by title substring. Returns at most 10 matches.",
-      inputSchema: z.object({ query: z.string().min(1), limit: z.number().int().min(1).max(10).optional() }),
+        description: "Search this project's tasks by title substring. Returns at most 10 matches.",
+      inputSchema: z.object({ query: z.string().min(1), limit: z.coerce.number().int().min(1).max(10).optional().catch(10) }),
       outputSchema: z.object({ tasks: z.array(z.object(summarizeTaskShape())) }),
     }).server(async ({ query, limit }) => {
-      const tasks = await deps.searchTasksByTitle(query, limit ?? 10);
+      const safeLimit = typeof limit === "number" && Number.isFinite(limit) ? Math.min(10, Math.max(1, Math.floor(limit))) : 5;
+      const effective = limit === undefined ? 10 : safeLimit;
+      const tasks = await deps.searchTasksByTitle(query, effective);
       return { tasks: tasks.map(summarizeTask) };
     })
   );
@@ -297,12 +299,14 @@ export function buildHeraldTools(deps: HeraldToolDeps) {
       name: "search_wiki",
       description:
         "Full-text search this project's wiki pages. Returns at most 10 matches with title, slug and a highlighted snippet.",
-      inputSchema: z.object({ query: z.string().min(1), limit: z.number().int().min(1).max(10).optional() }),
+      inputSchema: z.object({ query: z.string().min(1), limit: z.coerce.number().int().min(1).max(10).optional().catch(5) }),
       outputSchema: z.object({
         pages: z.array(z.object({ title: z.string(), slug: z.string(), snippet: z.string() })),
       }),
     }).server(async ({ query, limit }) => {
-      const pages = await deps.searchWikiPages(query, limit ?? 10);
+      const safeLimit = typeof limit === "number" && Number.isFinite(limit) ? Math.min(10, Math.max(1, Math.floor(limit))) : 5;
+      const effective = limit === undefined ? 10 : safeLimit;
+      const pages = await deps.searchWikiPages(query, effective);
       return { pages };
     })
   );

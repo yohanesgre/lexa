@@ -1,6 +1,10 @@
-import { useState } from "react";
-import { Trash2, Settings, RefreshCw } from "lucide-react";
-import { useHeraldProviders, useCreateProvider, useUpdateProvider, useDeleteProvider, useTestProvider, useFetchModels, useUpdateProviderModel } from "../../lib/queries/herald-admin";
+import { useState, Fragment } from "react";
+import { createPortal } from "react-dom";
+import { Trash2, Settings, RefreshCw, ChevronDown } from "lucide-react";
+import { DndContext, PointerSensor, useSensor, useSensors, type DragEndEvent } from "@dnd-kit/core";
+import { SortableContext, useSortable, verticalListSortingStrategy, arrayMove } from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
+import { useHeraldProviders, useCreateProvider, useUpdateProvider, useDeleteProvider, useTestProvider, useFetchModels, useUpdateProviderModel, useReorderProviderModels } from "../../lib/queries/herald-admin";
 import type { HeraldProvider, HeraldProviderModel } from "../../../shared/herald";
 
 function normalizeBaseUrl(u: string): string {
@@ -97,41 +101,44 @@ export function HeraldProvidersSection() {
                 const isExpanded = expanded === p.id;
                 const testState = testResults[p.id];
                 return (
-                  <>
-                    <tr key={p.id}>
-                      <td>
-                        <div className="flex items-center gap-2">
-                          <button type="button" className="text-sm font-medium text-lx-text-primary" style={{ background: "transparent", border: "none", cursor: "pointer", padding: 0 }} onClick={() => setExpanded(isExpanded ? null : p.id)}>
-                            {p.label}
+                  <Fragment key={p.id}>
+                    <tr style={{ cursor: "pointer" }} className="is-expandable" onClick={() => setExpanded(isExpanded ? null : p.id)}>
+                      <td style={{ maxWidth: 0 }}>
+                        <div className="flex items-center gap-2 min-w-0">
+                          <button type="button" title={p.label} className="flex items-center gap-1.5 text-sm font-medium text-lx-text-primary hover:bg-[var(--lx-surface-card-hover)] rounded min-w-0 flex-1 truncate text-left" style={{ background: "transparent", border: "none", cursor: "pointer", padding: "2px 6px 2px 0", margin: "-2px 0 -2px -4px", borderRadius: 4, display: "inline-flex", alignItems: "center", gap: 6, minWidth: 0, overflow: "hidden" }} onClick={(e) => { e.stopPropagation(); setExpanded(isExpanded ? null : p.id); }}>
+                            <ChevronDown size={12} strokeWidth={2} style={{ color: "var(--lx-text-secondary)", flexShrink: 0, transform: isExpanded ? "rotate(0deg)" : "rotate(-90deg)", transition: "transform 150ms var(--lx-ease-out)" }} />
+                            <span className="truncate" title={p.label} style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", minWidth: 0 }}>{p.label}</span>
                           </button>
-                          <span className="font-micro text-2xs" style={{ background: enabled > 0 ? "var(--lx-bg-success-subtle)" : "var(--lx-surface-elevated)", color: enabled > 0 ? "var(--lx-text-success)" : "var(--lx-text-muted)", padding: "2px 6px", borderRadius: 9999, border: enabled > 0 ? "none" : "1px solid var(--lx-border-default)" }}>
-                            {enabled > 0 ? "active" : `${enabled} enabled · ${total} total`}
-                          </span>
-                          {enabled > 0 && <span className="font-micro text-2xs" style={{ display: "none" }} />}
                         </div>
                       </td>
                       <td className="font-mono text-xs text-lx-text-secondary">{bu}</td>
                       <td className="text-xs text-lx-text-secondary">{total === 0 ? "—" : `${enabled} enabled · ${total} total`}</td>
-                      <td style={{ textAlign: "right", whiteSpace: "nowrap" }}>
-                        {testState?.state === "pending" ? (
-                          <span className="flex items-center justify-end gap-2" style={{ display: "inline-flex" }}>
-                            <span className="spinner" style={{ width: 12, height: 12, borderWidth: 2 }} />
-                            <span className="text-xs text-lx-text-secondary">Testing…</span>
-                          </span>
-                        ) : testState?.state === "ok" ? (
-                          <span className="font-micro text-2xs" style={{ background: "var(--lx-bg-success-subtle)", color: "var(--lx-text-success)", padding: "2px 6px", borderRadius: 9999 }}>OK · {testState.latencyMs} ms</span>
-                        ) : testState?.state === "fail" ? (
-                          <span className="font-mono text-xs" style={{ color: "var(--lx-text-danger)" }}>{testState.code}</span>
-                        ) : null}
-                        <button type="button" className="btn btn-ghost" style={{ height: 28, padding: "0 10px", fontSize: 12, marginLeft: 6 }} onClick={() => handleTest(p.id)} disabled={test.isPending}>
-                          Test
-                        </button>
-                        <button type="button" className="btn btn-ghost" style={{ width: 28, height: 28, padding: 0 }} aria-label="Edit provider" onClick={() => startEdit(p)}>
-                          <Settings size={14} strokeWidth={1.5} />
-                        </button>
-                        <button type="button" className="btn btn-danger" style={{ width: 28, height: 28, padding: 0 }} aria-label="Delete provider" onClick={() => setDeleteConfirm(p.id)}>
-                          <Trash2 size={14} strokeWidth={1.5} />
-                        </button>
+                      <td style={{ textAlign: "right" }}>
+                        <div className="table-actions">
+                          {testState?.state === "pending" ? (
+                            <span className="flex items-center justify-end gap-2" style={{ display: "inline-flex" }}>
+                              <span className="spinner" style={{ width: 12, height: 12, borderWidth: 2 }} />
+                              <span className="text-xs text-lx-text-secondary">Testing…</span>
+                            </span>
+                          ) : testState?.state === "ok" ? (
+                            <span className="font-micro text-2xs" style={{ background: "var(--lx-bg-success-subtle)", color: "var(--lx-text-success)", padding: "2px 6px", borderRadius: 9999 }}>OK · {testState.latencyMs} ms</span>
+                          ) : testState?.state === "fail" ? (
+                            <span className="font-mono text-xs" style={{ color: "var(--lx-text-danger)" }}>{testState.code}</span>
+                          ) : null}
+                          <button type="button" className="btn btn-ghost btn-sm" onClick={(e) => { e.stopPropagation(); handleFetch(p.id); }} disabled={fetchModels.isPending} title="Sync models from provider without expanding">
+                            <RefreshCw size={12} strokeWidth={1.5} className={fetchModels.isPending ? "animate-spin" : undefined} />
+                            Fetch
+                          </button>
+                          <button type="button" className="btn btn-ghost btn-sm" onClick={(e) => { e.stopPropagation(); handleTest(p.id); }} disabled={test.isPending}>
+                            Test
+                          </button>
+                          <button type="button" className="btn btn-ghost btn-icon-sm" aria-label="Edit provider" onClick={(e) => { e.stopPropagation(); startEdit(p); }}>
+                            <Settings size={14} strokeWidth={1.5} />
+                          </button>
+                          <button type="button" className="btn btn-danger btn-icon-sm" aria-label="Delete provider" onClick={(e) => { e.stopPropagation(); setDeleteConfirm(p.id); }}>
+                            <Trash2 size={14} strokeWidth={1.5} />
+                          </button>
+                        </div>
                       </td>
                     </tr>
                     {isExpanded && (
@@ -143,30 +150,17 @@ export function HeraldProvidersSection() {
                                 <span className="text-sm font-medium text-lx-text-primary">Models — {p.label}</span>
                                 <span className="font-micro text-2xs text-lx-text-muted uppercase tracking-[0.04em]">{enabled} enabled of {total} · drag to reprioritize</span>
                               </div>
-                              <button type="button" className="btn btn-ghost" style={{ height: 28, padding: "0 10px", fontSize: 12 }} onClick={() => handleFetch(p.id)} disabled={fetchModels.isPending}>
+                              <button type="button" className="btn btn-ghost btn-sm" onClick={() => handleFetch(p.id)} disabled={fetchModels.isPending}>
                                 <RefreshCw size={12} strokeWidth={1.5} className={fetchModels.isPending ? "animate-spin" : undefined} />
                                 Fetch models
                               </button>
                             </div>
-                            <div className="card-panel" style={{ overflow: "hidden", padding: 0 }}>
-                              <table className="settings-table">
-                                <thead>
-                                  <tr><th style={{ width: 36 }}></th><th>Model ID</th><th style={{ width: 150 }}>Kind</th><th style={{ width: 70 }}>Priority</th><th style={{ width: 80 }}>Enabled</th></tr>
-                                </thead>
-                                <tbody>
-                                  {models.length === 0 ? (
-                                    <tr><td colSpan={5} className="text-xs text-lx-text-muted" style={{ textAlign: "center", padding: 16 }}>No models — fetch from provider.</td></tr>
-                                  ) : models.map((m) => (
-                                    <ModelRow key={m.modelId ?? m.id} providerId={p.id} model={m} />
-                                  ))}
-                                </tbody>
-                              </table>
-                            </div>
+                            <ProviderModelsTable providerId={p.id} models={models} />
                           </div>
                         </td>
                       </tr>
                     )}
-                  </>
+                  </Fragment>
                 );
               })}
               {providers.length === 0 && (
@@ -219,36 +213,94 @@ export function HeraldProvidersSection() {
         </div>
       )}
 
-      {deleteConfirm && (
-        <div style={{ position: "fixed", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", zIndex: 50 }}>
-          <button type="button" className="slideover-overlay" onClick={() => setDeleteConfirm(null)} aria-label="Close" />
-          <div className="card-panel" style={{ position: "relative", zIndex: 1, maxWidth: 420 }}>
-            <h3 className="font-display text-base font-medium text-lx-text-primary">Delete provider?</h3>
-            <p className="text-sm text-lx-text-secondary mt-2">This will permanently delete the provider. Projects referencing it will fail with 409 until reassigned.</p>
-            <div className="flex items-center gap-2 mt-4 justify-end">
-              <button type="button" className="btn btn-ghost" onClick={() => setDeleteConfirm(null)}>Cancel</button>
-              <button type="button" className="btn btn-danger-solid" onClick={() => del.mutate(deleteConfirm, { onSuccess: () => setDeleteConfirm(null) })}><Trash2 size={14} strokeWidth={1.5} /> Delete</button>
+      {deleteConfirm && typeof document !== "undefined" && createPortal(
+        <>
+          <button type="button" className="dialog-overlay" onClick={() => setDeleteConfirm(null)} aria-label="Close" />
+          <div className="fixed inset-0 flex items-center justify-center z-[70] pointer-events-none">
+            <div className="dialog dialog-enter pointer-events-auto" style={{ maxWidth: 420 }}>
+              <h3 className="font-display text-base font-medium text-lx-text-primary">Delete provider?</h3>
+              <p className="text-sm text-lx-text-secondary mt-2">This will permanently delete the provider. Projects referencing it will fail with 409 until reassigned.</p>
+              <div className="flex items-center gap-2 mt-4 justify-end">
+                <button type="button" className="btn btn-ghost" onClick={() => setDeleteConfirm(null)}>Cancel</button>
+                <button type="button" className="btn btn-danger-solid" disabled={del.isPending} onClick={() => del.mutate(deleteConfirm, { onSuccess: () => setDeleteConfirm(null) })}><Trash2 size={14} strokeWidth={1.5} /> {del.isPending ? "Deleting…" : "Delete"}</button>
+              </div>
             </div>
           </div>
-        </div>
+        </>,
+        document.body,
       )}
     </section>
   );
 }
 
-function ModelRow({ providerId, model }: { providerId: string; model: HeraldProviderModel }) {
+function ProviderModelsTable({ providerId, models }: { providerId: string; models: HeraldProviderModel[] }) {
+  const reorder = useReorderProviderModels();
+  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 4 } }));
+
+  const handleDragEnd = (event: DragEndEvent) => {
+    const { active, over } = event;
+    if (!over || active.id === over.id) return;
+    const oldIndex = models.findIndex((m) => m.id === String(active.id));
+    const newIndex = models.findIndex((m) => m.id === String(over.id));
+    if (oldIndex === -1 || newIndex === -1) return;
+    const ordered = arrayMove(models, oldIndex, newIndex);
+    const orderedIds = ordered.map((m) => m.id);
+    reorder.mutate({ providerId, orderedIds });
+  };
+
+  return (
+    <div className="card-panel" style={{ overflow: "hidden", padding: 0 }}>
+      <DndContext sensors={sensors} onDragEnd={handleDragEnd}>
+        <SortableContext items={models.map((m) => m.id)} strategy={verticalListSortingStrategy}>
+          <table className="settings-table">
+            <thead>
+              <tr><th style={{ width: 36 }}></th><th>Model ID</th><th style={{ width: 150 }}>Kind</th><th style={{ width: 70 }}>Priority</th><th style={{ width: 80 }}>Enabled</th></tr>
+            </thead>
+            <tbody>
+              {models.length === 0 ? (
+                <tr><td colSpan={5} className="text-xs text-lx-text-muted" style={{ textAlign: "center", padding: 16 }}>No models — fetch from provider.</td></tr>
+              ) : models.map((m) => (
+                <SortableModelRow key={m.id} providerId={providerId} model={m} />
+              ))}
+            </tbody>
+          </table>
+        </SortableContext>
+      </DndContext>
+    </div>
+  );
+}
+
+function SortableModelRow({ providerId, model }: { providerId: string; model: HeraldProviderModel }) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: model.id });
   const update = useUpdateProviderModel(providerId);
   const mid = model.modelId ?? (model as unknown as { model_id?: string }).model_id ?? model.id;
   return (
-    <tr>
+    <tr
+      ref={setNodeRef}
+      style={{ transform: CSS.Transform.toString(transform), transition, opacity: isDragging ? 0.5 : undefined }}
+    >
       <td style={{ textAlign: "center" }}>
-        <svg width={10} height={14} viewBox="0 0 10 14" fill="none" style={{ color: "var(--lx-text-muted)", cursor: "grab" }}><circle cx={3} cy={3} r={1.2} fill="currentColor" /><circle cx={7} cy={3} r={1.2} fill="currentColor" /><circle cx={3} cy={7} r={1.2} fill="currentColor" /><circle cx={7} cy={7} r={1.2} fill="currentColor" /><circle cx={3} cy={11} r={1.2} fill="currentColor" /><circle cx={7} cy={11} r={1.2} fill="currentColor" /></svg>
+        <span
+          {...attributes}
+          {...listeners}
+          style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", cursor: "grab", touchAction: "none", color: "var(--lx-text-muted)", padding: 4 }}
+          aria-label="Drag to reprioritize"
+          title="Drag to reprioritize"
+        >
+          <svg width={10} height={14} viewBox="0 0 10 14" fill="none" style={{ color: "var(--lx-text-muted)", pointerEvents: "none" }}><circle cx={3} cy={3} r={1.2} fill="currentColor" /><circle cx={7} cy={3} r={1.2} fill="currentColor" /><circle cx={3} cy={7} r={1.2} fill="currentColor" /><circle cx={7} cy={7} r={1.2} fill="currentColor" /><circle cx={3} cy={11} r={1.2} fill="currentColor" /><circle cx={7} cy={11} r={1.2} fill="currentColor" /></svg>
+        </span>
       </td>
       <td className="font-mono text-xs" style={{ color: model.enabled ? "var(--lx-text-primary)" : "var(--lx-text-secondary)" }}>{mid}</td>
-      <td><span style={{ background: model.kind === "anthropic_compatible" ? "var(--lx-bg-success-subtle)" : "var(--lx-bg-accent-subtle)", color: model.kind === "anthropic_compatible" ? "var(--lx-text-success)" : "var(--lx-text-link)", padding: "2px 6px", borderRadius: 9999, fontSize: 11 }}>{model.kind}</span></td>
+      <td><span style={{ background: model.kind === "anthropic_compatible" ? "var(--lx-bg-success-subtle)" : model.kind === "openai_responses" ? "rgba(139, 92, 246, 0.12)" : "var(--lx-bg-accent-subtle)", color: model.kind === "anthropic_compatible" ? "var(--lx-text-success)" : model.kind === "openai_responses" ? "#a78bfa" : "var(--lx-text-link)", padding: "2px 6px", borderRadius: 9999, fontSize: 11 }}>{model.kind}</span></td>
       <td className="font-mono text-xs text-lx-text-secondary">{model.priority}</td>
       <td>
-        <button type="button" className={`toggle-switch${model.enabled ? " is-on" : ""}`} aria-label={model.enabled ? "Enabled" : "Disabled"} onClick={() => update.mutate({ modelId: mid, enabled: !model.enabled })} />
+        <button
+          type="button"
+          className={`toggle-switch${model.enabled ? " is-on" : ""}`}
+          aria-label={model.enabled ? "Enabled" : "Disabled"}
+          onClick={() => update.mutate({ modelId: mid, enabled: !model.enabled })}
+          onPointerDown={(e) => e.stopPropagation()}
+        />
       </td>
     </tr>
   );

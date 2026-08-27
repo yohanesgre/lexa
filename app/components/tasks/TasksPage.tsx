@@ -15,7 +15,7 @@ const KEY_PATTERN = /^[A-Z0-9]{2,6}-\d+$/i;
 
 export interface TasksPageProps {
   slug: string;
-  search: { task?: string | undefined; swimlane?: string };
+  search: { task?: string | undefined; swimlane?: string | undefined };
 }
 
 export function TasksPage({ slug, search }: TasksPageProps) {
@@ -287,7 +287,6 @@ export function TasksPage({ slug, search }: TasksPageProps) {
       )}
 
       {selectedTaskId !== null && (
-        // @ts-expect-error — strict: exactOptional indexedAccess
         <TaskDetail
           mode="view"
           task={selectedTask ?? undefined}

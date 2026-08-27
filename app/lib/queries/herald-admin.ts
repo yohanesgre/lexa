@@ -93,14 +93,7 @@ export function useFetchModels() {
   });
 }
 
-export function useHeraldUsage() {
-  return useQuery({
-    queryKey: ["herald-usage"],
-    queryFn: () => api.getHeraldUsage(),
-    retry: false,
-    staleTime: 60_000,
-  });
-}
+export { useHeraldUsage } from "../herald-usage.query";
 
 export function useHeraldCalls(params?: { projectId?: string | undefined; limit?: number }) {
   return useQuery({
@@ -129,6 +122,26 @@ export function useUpdateProviderModel(providerId: string) {
     },
     onError: (err) => {
       toast.push("error", "Failed to update model", toastMessage(err));
+    },
+  });
+}
+
+export function useReorderProviderModels() {
+  const qc = useQueryClient();
+  const toast = useToast();
+  return useMutation({
+    mutationFn: ({ providerId, orderedIds }: { providerId: string; orderedIds: string[] }) =>
+      api.reorderHeraldProviderModels(providerId, orderedIds),
+    onSuccess: (res, vars) => {
+      const nextModels = (res.data ?? []) as unknown as HeraldProviderModel[];
+      qc.setQueryData<HeraldProvider[]>(["herald-providers"], (old) => {
+        if (!old) return old;
+        return old.map((p) => (p.id === vars.providerId ? { ...p, models: nextModels } : p));
+      });
+    },
+    onError: (err) => {
+      qc.invalidateQueries({ queryKey: ["herald-providers"] });
+      toast.push("error", "Failed to reorder models", toastMessage(err));
     },
   });
 }

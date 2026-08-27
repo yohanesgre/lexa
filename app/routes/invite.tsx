@@ -6,8 +6,7 @@ import { useSession } from "../lib/queries";
 // Accepting sets the password → member account created (server-side token
 // resolution) → session cookie established.
 export const Route = createFileRoute("/invite")({
-  // @ts-expect-error — strict: exactOptional indexedAccess
-  validateSearch: (search: Record<string, unknown>): { token?: string } => ({
+  validateSearch: (search: Record<string, unknown>): { token?: string | undefined } => ({
     token: typeof search.token === "string" && search.token ? search.token : undefined,
   }),
   component: InvitePage,

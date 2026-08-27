@@ -60,11 +60,13 @@ import { FieldConfigService } from "../services/field-config.service";
 import { FieldConfigRepo } from "../repos/field-config.repo";
 import { HearthService } from "../services/hearth.service";
 import { HeraldService } from "../services/herald.service";
+import { HeraldChatService } from "../services/herald-chat.service";
+import { HeraldTaskService } from "../services/herald-task.service";
 import { HeraldSettingsRepo } from "../repos/herald-settings.repo";
 import { HeraldThreadRepo } from "../repos/herald-thread.repo";
 import { buildChatExport } from "../services/herald.service";
 import { ProjectMemoryRepo } from "../repos/project-memory.repo";
-import { listModels, type ProviderConfig } from "../herald/provider";
+import { listModels, normalizeProviderKind, inferModelKind, heraldLog, type ProviderConfig } from "../herald/provider";
 import { HeraldProvidersRepo } from "../repos/herald-providers.repo";
 import { HeraldModelsRepo } from "../repos/herald-models.repo";
 import { HeraldCallLogsRepo } from "../repos/herald-call-logs.repo";
@@ -968,7 +970,7 @@ const skillsGroup = HttpApiGroup.make("skills")
     .setPath(HearthSkillPath).addSuccess(HearthSkillSchema));
 
 // ── Herald assistant tier (S3/S5/S9/S15) ──
-const ProviderKindSchema = Schema.Literal("openai_compatible", "anthropic_compatible");
+const ProviderKindSchema = Schema.Literal("openai_compatible", "anthropic_compatible", "openai_responses");
 
 const HeraldReasoningEffortSchema = Schema.Literal("minimal", "low", "medium", "high");
 
@@ -976,6 +978,8 @@ const HeraldSettingsPath = Schema.Struct({ projectId: Schema.String });
 
 // Keys are write-only: omitted apiKey/searchApiKey keep the stored values.
 const HeraldSettingsInputPayload = Schema.Struct({
+  providerId: Schema.optional(Schema.NullOr(Schema.String)),
+  modelId: Schema.optional(Schema.NullOr(Schema.String)),
   kind: Schema.optional(ProviderKindSchema),
   baseUrl: Schema.optional(Schema.String),
   model: Schema.optional(Schema.String),
@@ -994,6 +998,8 @@ const HeraldSettingsInputPayload = Schema.Struct({
 
 const HeraldSettingsMaskedSchema = Schema.Struct({
   projectId: Schema.String,
+  providerId: Schema.NullOr(Schema.String),
+  modelId: Schema.NullOr(Schema.String),
   kind: Schema.optional(ProviderKindSchema),
   baseUrl: Schema.optional(Schema.String),
   model: Schema.optional(Schema.String),
@@ -1712,6 +1718,7 @@ const adminHeraldGroup = HttpApiGroup.make("adminHerald")
   .add(HttpApiEndpoint.del("adminHeraldDeleteProvider", "/admin/herald/providers/:id").setPath(Schema.Struct({ id: Schema.String })).addSuccess(Schema.Void, { status: 204 }))
   .add(HttpApiEndpoint.post("adminHeraldTestProvider", "/admin/herald/providers/:id/test").setPath(Schema.Struct({ id: Schema.String })).addSuccess(Schema.Struct({ ok: Schema.Boolean, latencyMs: Schema.Number })))
   .add(HttpApiEndpoint.post("adminHeraldProviderModels", "/admin/herald/providers/:id/models").setPath(Schema.Struct({ id: Schema.String })).addSuccess(Schema.Struct({ data: Schema.Array(Schema.Any) })))
+  .add(HttpApiEndpoint.patch("adminHeraldUpdateModel", "/admin/herald/providers/:id/models/:modelId").setPath(Schema.Struct({ id: Schema.String, modelId: Schema.String })).setPayload(Schema.Struct({ enabled: Schema.optional(Schema.Boolean), priority: Schema.optional(Schema.Number) })).addSuccess(Schema.Any))
   .add(HttpApiEndpoint.post("adminHeraldReorderModels", "/admin/herald/providers/:id/models/reorder").setPath(Schema.Struct({ id: Schema.String })).setPayload(Schema.Struct({ orderedIds: Schema.Array(Schema.String) })).addSuccess(Schema.Struct({ data: Schema.Array(Schema.Any) })))
   .add(HttpApiEndpoint.get("adminHeraldHealth", "/admin/herald/providers/:id/health").setPath(Schema.Struct({ id: Schema.String })).addSuccess(Schema.Struct({ providerId: Schema.String, circuitState: Schema.Literal("open", "closed", "half-open"), failureCount: Schema.Number, openedAt: Schema.NullOr(Schema.String), lastProbeAt: Schema.NullOr(Schema.String), consecutiveFailures: Schema.Number })));
 
@@ -2838,9 +2845,61 @@ const heraldLive = HttpApiBuilder.group(LexaApi, "herald", (handlers) =>
     .handle("testHeraldSettings", (req) =>
       respond(Effect.gen(function* () {
         yield* requireAdmin;
-        const service = yield* HeraldService;
-        const config = yield* resolveProviderConfig(req.path.projectId, req.payload);
-        return yield* service.testConnection(config);
+        const gateway = yield* HeraldGateway;
+        return yield* gateway.testConnection(req.path.projectId, {
+          ...( (req.payload as { providerId?: string | null }).providerId !== undefined ? { providerId: (req.payload as { providerId?: string | null }).providerId } : {}),
+          ...( (req.payload as { modelId?: string | null }).modelId !== undefined ? { modelId: (req.payload as { modelId?: string | null }).modelId } : {}),
+          ...( (req.payload as { fallbackModelIds?: string[] }).fallbackModelIds !== undefined ? { fallbackModelIds: (req.payload as { fallbackModelIds?: string[] }).fallbackModelIds as string[] } : {}),
+          ...( (req.payload as { kind?: string }).kind !== undefined ? { kind: (req.payload as { kind?: string }).kind as string } : {}),
+          ...( (req.payload as { baseUrl?: string }).baseUrl !== undefined ? { baseUrl: (req.payload as { baseUrl?: string }).baseUrl as string } : {}),
+          ...( (req.payload as { model?: string }).model !== undefined ? { model: (req.payload as { model?: string }).model as string } : {}),
+          ...( (req.payload as { apiKey?: string }).apiKey !== undefined ? { apiKey: (req.payload as { apiKey?: string }).apiKey as string } : {}),
+        }).pipe(
+          Effect.tapError((e) =>
+            Effect.sync(() => {
+              const err = e as unknown as { _tag?: string; message?: string; stack?: string; cause?: unknown } & Record<string, unknown>;
+              const stack = typeof err.stack === "string" ? err.stack.slice(0, 2000) : null;
+              const causeRaw = err.cause as unknown;
+              const cause = causeRaw === undefined || causeRaw === null ? null : causeRaw instanceof Error ? `${causeRaw.name}: ${causeRaw.message}`.slice(0, 800) : (() => { try { return (typeof causeRaw === "string" ? causeRaw : JSON.stringify(causeRaw)).slice(0, 800); } catch { return String(causeRaw).slice(0, 800); } })();
+              let causeChain: string | null = null;
+              try {
+                const chain: string[] = [];
+                let cur: unknown = e;
+                for (let i = 0; i < 5; i++) {
+                  const curCause = (cur as unknown as Record<string, unknown>)?.cause;
+                  if (curCause === undefined || curCause === null) break;
+                  chain.push(curCause instanceof Error ? `${(curCause as Error).name}: ${(curCause as Error).message}` : typeof curCause === "string" ? curCause.slice(0, 400) : JSON.stringify(curCause).slice(0, 400));
+                  cur = curCause;
+                  if (typeof cur !== "object" || cur === null) break;
+                }
+                if (chain.length > 0) causeChain = chain.join(" -> ").slice(0, 800);
+              } catch {}
+              const rawEvent = (() => { try { const v = (e as unknown as Record<string, unknown>).cause ?? (e as unknown as Record<string, unknown>).rawEvent ?? null; if (v === null || v === undefined) return null; return (typeof v === "string" ? v : JSON.stringify(v)).slice(0, 800); } catch { return null; } })();
+              try {
+                const line = JSON.stringify({
+                  level: "ERROR",
+                  service: "herald-http",
+                  message: `testHeraldSettings failed: ${String(err.message ?? err._tag ?? e).slice(0, 500)}`,
+                  meta: {
+                    projectId: req.path.projectId,
+                    errorTag: err._tag ?? null,
+                    status: 502,
+                    stack,
+                    cause,
+                    causeChain,
+                    rawEvent,
+                    raw: String(err.message ?? e).slice(0, 800),
+                  },
+                  timestamp: new Date().toISOString(),
+                });
+                process.stderr.write(line + "\n");
+              } catch {}
+            })
+          ),
+          Effect.catchAllCause((cause) =>
+            Effect.flatMap(Effect.logError(`[herald-http] testHeraldSettings fiber failure: ${String(Cause.pretty(cause)).slice(0, 800)}`), () => Effect.failCause(cause))
+          )
+        );
       }))
     )
     .handle("listHeraldModels", (req) =>
@@ -3750,20 +3809,38 @@ function wireDisconnectAbort(request: HttpServerRequest, abort: () => boolean): 
 // test/models take UNSAVED submitted values; an omitted apiKey falls back to
 // the stored one so testing a saved config doesn't require re-entering the key.
 // After 0017 legacy kind/baseUrl/model/apiKey columns are gone — payload is optional and fallback is gateway.
+// Unsaved providerId/modelId (herald-project.tsx Test) resolves to the same ProviderConfig as the persisted binding.
 const resolveProviderConfig = (
-  _projectId: string,
-  payload: { kind?: "openai_compatible" | "anthropic_compatible" | undefined; baseUrl?: string | undefined; model?: string | undefined; apiKey?: string | undefined }
-): Effect.Effect<ProviderConfig, ProviderNotConfigured | DbError | RowNotFound, HeraldSettingsRepo> =>
+  projectId: string,
+  payload: { providerId?: string | null | undefined; modelId?: string | null | undefined; kind?: string | undefined; baseUrl?: string | undefined; model?: string | undefined; apiKey?: string | undefined }
+): Effect.Effect<ProviderConfig, ProviderNotConfigured | DbError, HeraldGateway | HeraldProvidersRepo | HeraldModelsRepo> =>
   Effect.gen(function* () {
+    if (payload.providerId && payload.modelId) {
+      const providerRepo = yield* HeraldProvidersRepo;
+      const modelRepo = yield* HeraldModelsRepo;
+      const provider = (yield* providerRepo.getById(payload.providerId).pipe(Effect.catchTag("RowNotFound", () => Effect.fail(new ProviderNotConfigured({ projectId }))))) as unknown as { base_url: string; api_key: string };
+      const model = yield* modelRepo.findByProviderAndModelId(payload.providerId, payload.modelId).pipe(Effect.catchTag("RowNotFound", () => Effect.fail(new ProviderNotConfigured({ projectId }))));
+      if (!model.enabled) return yield* Effect.fail(new ProviderNotConfigured({ projectId }));
+      return {
+        kind: normalizeProviderKind(model.kind),
+        baseUrl: (provider as unknown as { base_url: string }).base_url ?? "",
+        model: model.modelId,
+        apiKey: (provider as unknown as { api_key: string }).api_key ?? "",
+        providerId: payload.providerId,
+      };
+    }
     if (payload.kind && payload.baseUrl && payload.model) {
       return {
-        kind: payload.kind,
+        kind: normalizeProviderKind(payload.kind),
         baseUrl: payload.baseUrl,
         model: payload.model,
         apiKey: payload.apiKey ?? "",
       };
     }
-    return yield* Effect.fail(new ProviderNotConfigured({ projectId: _projectId }));
+    const gateway = yield* HeraldGateway;
+    const configs = yield* gateway.resolveFallback(projectId);
+    if (configs.length === 0) return yield* new ProviderNotConfigured({ projectId });
+    return configs[0]!;
   });
 
 const attachmentsLive = HttpApiBuilder.group(LexaApi, "attachments", (handlers) =>
@@ -4159,10 +4236,11 @@ const adminHeraldLive = HttpApiBuilder.group(LexaApi, "adminHerald", (handlers) 
         const pRepo = yield* HeraldProvidersRepo;
         const mRepo = yield* HeraldModelsRepo;
         const prov = yield* pRepo.getById(req.path.id);
-        const models = yield* mRepo.listByProvider(req.path.id).pipe(Effect.catchAll(() => Effect.succeed([] as Array<{ kind: ProviderConfig["kind"]; enabled: boolean }>)));
-        const enabledKind = models.find((m) => m.enabled)?.kind;
-        const kind: ProviderConfig["kind"] = enabledKind ?? "openai_compatible";
-        const cfg: ProviderConfig = { kind, baseUrl: prov.base_url, apiKey: prov.api_key, model: "test" };
+        const models = yield* mRepo.listByProvider(req.path.id).pipe(Effect.catchAll(() => Effect.succeed([] as Array<{ kind: string; enabled: boolean; modelId: string }>)));
+        const firstEnabled = (models as Array<{ kind: string; enabled: boolean; modelId: string }>).find((m) => m.enabled);
+        const kind: ProviderConfig["kind"] = normalizeProviderKind(firstEnabled?.kind ?? (models[0] as { kind?: string } | undefined)?.kind ?? "openai_compatible");
+        const model = firstEnabled?.modelId ?? (models[0] as { modelId?: string } | undefined)?.modelId ?? "test";
+        const cfg: ProviderConfig = { kind, baseUrl: prov.base_url, apiKey: prov.api_key, model };
         const start = Date.now();
         yield* Effect.tryPromise({ try: () => listModels(cfg), catch: (e) => e as ProviderAuthFailed | ProviderUnreachable });
         return { ok: true, latencyMs: Date.now() - start };
@@ -4171,9 +4249,58 @@ const adminHeraldLive = HttpApiBuilder.group(LexaApi, "adminHerald", (handlers) 
     .handle("adminHeraldProviderModels", (req) =>
       respond(Effect.gen(function* () {
         yield* requireSuperadmin;
-        const repo = yield* HeraldModelsRepo;
-        const rows = yield* repo.listByProvider(req.path.id);
+        const pRepo = yield* HeraldProvidersRepo;
+        const mRepo = yield* HeraldModelsRepo;
+        const prov = yield* pRepo.getById(req.path.id);
+        const existing = yield* mRepo.listByProvider(req.path.id).pipe(Effect.catchAll(() => Effect.succeed([] as Array<{ kind: string; enabled: boolean }>)));
+        const enabledKind = (existing as Array<{ kind: string; enabled: boolean }>).find((m) => m.enabled)?.kind;
+        const kind: ProviderConfig["kind"] = normalizeProviderKind(enabledKind ?? "openai_compatible");
+        const existingModels = existing as Array<{ modelId: string; enabled: boolean }>;
+        const firstEnabledModel = existingModels.find((m) => m.enabled)?.modelId;
+        const model = firstEnabledModel ?? existingModels[0]?.modelId ?? "test";
+        const cfg: ProviderConfig = { kind, baseUrl: prov.base_url, apiKey: prov.api_key, model };
+        const catalog = yield* Effect.tryPromise({
+          try: () => listModels(cfg),
+          catch: (e) => e as ProviderAuthFailed | ProviderUnreachable,
+        });
+        const db = yield* Sqlite;
+        yield* withTx(
+          db,
+          Effect.gen(function* () {
+            const rows = yield* mRepo.listByProvider(req.path.id).pipe(Effect.catchAll(() => Effect.succeed([] as Array<{ modelId: string; priority: number; kind: string; id: string }>)));
+            const existingById = new Map((rows as Array<{ modelId: string; kind: string; id: string }>).map((r) => [r.modelId, r]));
+            const maxPriority = (rows as Array<{ priority: number }>).reduce((m, r) => Math.max(m, r.priority), -1);
+            let nextPriority = maxPriority + 1;
+            for (const m of catalog.models) {
+              const inferred = inferModelKind(m.id);
+              const found = existingById.get(m.id);
+              if (found) {
+                if (normalizeProviderKind(found.kind) !== inferred) {
+                  yield* mRepo.update(found.id, { kind: inferred });
+                  heraldLog("WARN", "herald model kind auto-corrected", { providerId: req.path.id, modelId: m.id, from: found.kind, to: inferred });
+                }
+                continue;
+              }
+              const id = crypto.randomUUID();
+              yield* mRepo.create({ id, providerId: req.path.id, modelId: m.id, kind: inferred, priority: nextPriority++, enabled: false });
+            }
+          })
+        );
+        const rows = yield* mRepo.listByProvider(req.path.id);
         return { data: rows };
+      }))
+    )
+    .handle("adminHeraldUpdateModel", (req) =>
+      respond(Effect.gen(function* () {
+        yield* requireSuperadmin;
+        const pRepo = yield* HeraldProvidersRepo;
+        const mRepo = yield* HeraldModelsRepo;
+        yield* pRepo.getById(req.path.id);
+        const found = yield* mRepo.findByProviderAndModelId(req.path.id, req.path.modelId);
+        const patch: { enabled?: boolean; priority?: number } = {};
+        if (req.payload.enabled !== undefined) patch.enabled = req.payload.enabled;
+        if (req.payload.priority !== undefined) patch.priority = req.payload.priority;
+        return yield* mRepo.update(found.id, patch);
       }))
     )
     .handle("adminHeraldReorderModels", (req) =>
@@ -4329,6 +4456,12 @@ function buildServiceLayer(dbPath: string) {
     FieldConfigRepo.Default, FieldConfigService.Default,
     HearthRepo.Default, HearthService.Default,
     HeraldSettingsRepo.Default, HeraldThreadRepo.Default, ProjectMemoryRepo.Default,
+    HeraldChatService.Default.pipe(
+      Layer.provide(Layer.mergeAll(storageLayerFor(storageCfg), Layer.succeed(StorageConfig, storageCfg)))
+    ),
+    HeraldTaskService.Default.pipe(
+      Layer.provide(Layer.mergeAll(storageLayerFor(storageCfg), Layer.succeed(StorageConfig, storageCfg)))
+    ),
     HeraldService.Default.pipe(
       Layer.provide(Layer.mergeAll(storageLayerFor(storageCfg), Layer.succeed(StorageConfig, storageCfg)))
     ),

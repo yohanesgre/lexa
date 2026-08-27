@@ -91,11 +91,14 @@ export function HeraldActivity({ items, tools, reasoningActive, reasoningMs, don
   // visibly alive instead of rendering empty space while STREAMING runs.
   if (items.length === 0) {
     return (
-      <div className="bubble-md">
-        <span className="herald-stream-caret" aria-hidden="true">
-          ▍
-        </span>
-      </div>
+      <>
+        <div className="bubble-meta">Herald · Herald Agent persona</div>
+        <div className="bubble-md">
+          <span className="herald-stream-caret" aria-hidden="true">
+            ▍
+          </span>
+        </div>
+      </>
     );
   }
   const lastReasoningItem = items.findLast((it) => it.kind === "reasoning");
@@ -106,7 +109,6 @@ export function HeraldActivity({ items, tools, reasoningActive, reasoningMs, don
           const isLatest = idx === items.length - 1;
           return (
             <div key={idx} className="bubble-md">
-              // @ts-expect-error — strict: exactOptional indexedAccess
               <MarkdownContent
                 md={item.text}
                 renderText={renderText}

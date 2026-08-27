@@ -273,7 +273,7 @@ export function ApprovalChipRow({
         </div>
       ) : chip.state === "failed" && chip.error ? (
         <div className="approval-diff">
-          <div style={{ background: "var(--lx-bg-danger-subtle)", border: "1px solid rgba(220,38,38,0.25)", borderRadius: 6, padding: "8px 10px" }}>
+          <div style={{ background: "var(--lx-bg-danger-subtle)", border: "1px solid var(--lx-bg-danger-subtle)", borderRadius: 6, padding: "8px 10px", overflow: "hidden" }}>
             <div className="font-mono text-xs font-medium" style={{ color: "var(--lx-text-danger)" }}>
               {chip.error.code}
             </div>

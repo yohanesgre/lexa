@@ -246,8 +246,7 @@ function SharePage() {
 }
 
 export const Route = createFileRoute("/share/$token")({
-  // @ts-expect-error — strict: exactOptional indexedAccess
-  validateSearch: (search: Record<string, unknown>): { page?: string } => ({
+  validateSearch: (search: Record<string, unknown>): { page?: string | undefined } => ({
     page: typeof search.page === "string" && search.page ? search.page : undefined,
   }),
   component: SharePage,

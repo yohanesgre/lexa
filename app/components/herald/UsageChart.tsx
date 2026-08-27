@@ -1,7 +1,21 @@
 import type { HeraldByDayRow } from "../../lib/herald-usage.query";
 
-export function UsageChart({ byDay }: { byDay: HeraldByDayRow[] }) {
+export function UsageChart({
+  byDay,
+  isLoading,
+  isError,
+  onRetry,
+}: {
+  byDay: HeraldByDayRow[];
+  isLoading?: boolean;
+  isError?: boolean;
+  onRetry?: () => void;
+}) {
   const hasData = byDay && byDay.length > 0;
+  let overlay: string | null = null;
+  if (isLoading) overlay = "Loading chart…";
+  else if (isError) overlay = "Failed to load chart";
+  else if (!hasData) overlay = "No data for this window";
   return (
     <section className="card-panel mt-4">
       <div className="flex items-center justify-between mb-3">
@@ -9,7 +23,7 @@ export function UsageChart({ byDay }: { byDay: HeraldByDayRow[] }) {
       </div>
       <div className="chart-shell">
         <canvas id="herald-by-day" width={960} height={220} aria-label="Tokens per day line chart placeholder" />
-        <div style={{ position: "absolute", inset: 0, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", pointerEvents: "none" }}>
+        <div style={{ position: "absolute", inset: 0, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", pointerEvents: isError ? "auto" : "none" }}>
           <svg width={40} height={20} viewBox="0 0 100 24" fill="none" style={{ opacity: 0.35, marginBottom: 8 }}>
             <path d="M2 18 L20 14 L38 16 L56 8 L74 10 L92 4" stroke="var(--lx-text-muted)" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" fill="none" />
             <circle cx={20} cy={14} r={2} fill="var(--lx-text-muted)" />
@@ -19,9 +33,20 @@ export function UsageChart({ byDay }: { byDay: HeraldByDayRow[] }) {
           <div className="font-micro text-2xs color-muted" style={{ textTransform: "uppercase", letterSpacing: "0.04em" }}>
             Line chart — tokens / cost / latency per day
           </div>
-          <div className="font-micro text-2xs color-muted" style={{ opacity: 0.7 }}>
-            {hasData ? `${byDay.length} day(s)` : "No data for this window"}
-          </div>
+          {overlay ? (
+            <div className="font-micro text-2xs color-muted" style={{ opacity: isLoading ? 0.9 : 0.85, marginTop: 4, fontStyle: isLoading ? "italic" : undefined }}>
+              {overlay}
+              {isError && onRetry ? (
+                <button className="btn btn-ghost btn-sm" style={{ marginLeft: 10, pointerEvents: "auto", verticalAlign: "middle" }} onClick={onRetry}>
+                  Retry
+                </button>
+              ) : null}
+            </div>
+          ) : (
+            <div className="font-micro text-2xs color-muted" style={{ opacity: 0.7 }}>
+              {byDay.length} day(s)
+            </div>
+          )}
         </div>
       </div>
       <div className="flex items-center gap-2 mt-3" style={{ flexWrap: "wrap" }}>

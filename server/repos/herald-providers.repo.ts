@@ -1,6 +1,6 @@
 import { Effect } from "effect";
 import { Sqlite, queryAll, queryFirst, run, DbError, RowNotFound, ConstraintViolation } from "../db/database";
-import type { HeraldProviderMasked } from "../../shared/herald";
+import type { HeraldProviderMasked, HeraldModelRow, ProviderKind } from "../../shared/herald";
 
 export interface HeraldProviderRow {
   id: string;
@@ -9,6 +9,16 @@ export interface HeraldProviderRow {
   api_key: string;
   created_at: string;
   updated_at: string;
+}
+
+interface HeraldModelDbRow {
+  id: string;
+  provider_id: string;
+  model_id: string;
+  kind: ProviderKind;
+  priority: number;
+  enabled: number;
+  created_at: string;
 }
 
 function toMasked(row: HeraldProviderRow): HeraldProviderMasked {
@@ -20,6 +30,18 @@ function toMasked(row: HeraldProviderRow): HeraldProviderMasked {
     keyMask: row.api_key ? `sk-…${row.api_key.slice(-4)}` : null,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
+  };
+}
+
+function toModelDomain(row: HeraldModelDbRow): HeraldModelRow {
+  return {
+    id: row.id,
+    providerId: row.provider_id,
+    modelId: row.model_id,
+    kind: row.kind,
+    priority: row.priority,
+    enabled: row.enabled === 1,
+    createdAt: row.created_at,
   };
 }
 
@@ -57,10 +79,34 @@ export class HeraldProvidersRepo extends Effect.Service<HeraldProvidersRepo>()("
         run(db, `DELETE FROM herald_providers WHERE id = ?`, id).pipe(Effect.map(() => undefined)),
 
       maskedView: (id: string): Effect.Effect<HeraldProviderMasked, RowNotFound | DbError> =>
-        Effect.map(queryFirst<HeraldProviderRow>(db, `SELECT * FROM herald_providers WHERE id = ?`, id), toMasked),
+        Effect.gen(function* () {
+          const row = yield* queryFirst<HeraldProviderRow>(db, `SELECT * FROM herald_providers WHERE id = ?`, id);
+          const masked = toMasked(row);
+          const modelRows = yield* queryAll<HeraldModelDbRow>(db, `SELECT * FROM herald_models WHERE provider_id = ? ORDER BY priority ASC, id ASC`, id).pipe(
+            Effect.catchAll(() => Effect.succeed([] as HeraldModelDbRow[]))
+          );
+          const models = modelRows.map(toModelDomain).map((m) => ({ id: m.id, providerId: m.providerId, modelId: m.modelId, kind: m.kind, priority: m.priority, enabled: m.enabled, createdAt: m.createdAt }));
+          return { ...masked, models } as HeraldProviderMasked;
+        }),
 
       maskedList: (): Effect.Effect<HeraldProviderMasked[], DbError> =>
-        Effect.map(queryAll<HeraldProviderRow>(db, `SELECT * FROM herald_providers ORDER BY created_at ASC`), (rows) => rows.map(toMasked)),
+        Effect.gen(function* () {
+          const rows = yield* queryAll<HeraldProviderRow>(db, `SELECT * FROM herald_providers ORDER BY created_at ASC`);
+          const modelRows = yield* queryAll<HeraldModelDbRow>(db, `SELECT * FROM herald_models ORDER BY priority ASC, id ASC`).pipe(
+            Effect.catchAll(() => Effect.succeed([] as HeraldModelDbRow[]))
+          );
+          const byProvider = new Map<string, HeraldModelDbRow[]>();
+          for (const mr of modelRows) {
+            const arr = byProvider.get(mr.provider_id) ?? [];
+            arr.push(mr);
+            byProvider.set(mr.provider_id, arr);
+          }
+          return rows.map((r) => {
+            const masked = toMasked(r);
+            const models = (byProvider.get(r.id) ?? []).map(toModelDomain).map((m) => ({ id: m.id, providerId: m.providerId, modelId: m.modelId, kind: m.kind, priority: m.priority, enabled: m.enabled, createdAt: m.createdAt }));
+            return { ...masked, models } as HeraldProviderMasked;
+          });
+        }),
     };
   }),
 }) {}

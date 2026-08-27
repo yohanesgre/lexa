@@ -33,11 +33,14 @@ export class HeraldModelsRepo extends Effect.Service<HeraldModelsRepo>()("Lexa/H
         run(
           db,
           `INSERT INTO herald_models (id, provider_id, model_id, kind, priority, enabled) VALUES (?, ?, ?, ?, ?, ?)`,
-          input.id, input.providerId, input.modelId, input.kind, input.priority ?? 0, input.enabled === false ? 0 : 1
+          input.id, input.providerId, input.modelId, input.kind, input.priority ?? 0, input.enabled === true ? 1 : 0
         ).pipe(
           Effect.flatMap(() => queryFirst<HeraldModelDbRow>(db, `SELECT * FROM herald_models WHERE id = ?`, input.id)),
           Effect.map(toDomain)
         ),
+
+      findByProviderAndModelId: (providerId: string, modelId: string): Effect.Effect<HeraldModelRow, RowNotFound | DbError> =>
+        Effect.map(queryFirst<HeraldModelDbRow>(db, `SELECT * FROM herald_models WHERE provider_id = ? AND model_id = ?`, providerId, modelId), toDomain),
 
       getById: (id: string): Effect.Effect<HeraldModelRow, RowNotFound | DbError> =>
         Effect.map(queryFirst<HeraldModelDbRow>(db, `SELECT * FROM herald_models WHERE id = ?`, id), toDomain),

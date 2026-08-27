@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
 import { useScrollLock } from "../../lib/scroll-lock";
-import { PanelLeft } from "lucide-react";
 import type { HeraldChatThreadSummary } from "../../lib/api";
 import { formatRelative } from "../../lib/relative-time";
 
@@ -62,21 +61,21 @@ function DeleteIcon() {
 }
 
 // Client-side match highlighting over the server-returned snippet:
-// case-insensitive occurrences of q get <strong>. No query → plain text.
-export function highlightSnippet(snippet: string, q: string): { text: string; bold: boolean }[] {
+// case-insensitive occurrences of q get <mark>. No query → plain text.
+export function highlightSnippet(snippet: string, q: string): { text: string; mark: boolean; bold: boolean }[] {
   const needle = q.trim().toLowerCase();
-  if (!needle) return [{ text: snippet, bold: false }];
-  const out: { text: string; bold: boolean }[] = [];
+  if (!needle) return [{ text: snippet, mark: false, bold: false }];
+  const out: { text: string; mark: boolean; bold: boolean }[] = [];
   let rest = snippet;
   for (;;) {
     const idx = rest.toLowerCase().indexOf(needle);
     if (idx < 0) break;
-    if (idx > 0) out.push({ text: rest.slice(0, idx), bold: false });
-    out.push({ text: rest.slice(idx, idx + needle.length), bold: true });
+    if (idx > 0) out.push({ text: rest.slice(0, idx), mark: false, bold: false });
+    out.push({ text: rest.slice(idx, idx + needle.length), mark: true, bold: true });
     rest = rest.slice(idx + needle.length);
   }
-  if (rest) out.push({ text: rest, bold: false });
-  return out.length > 0 ? out : [{ text: snippet, bold: false }];
+  if (rest) out.push({ text: rest, mark: false, bold: false });
+  return out.length > 0 ? out : [{ text: snippet, mark: false, bold: false }];
 }
 
 export function ThreadsSidebar({
@@ -183,7 +182,8 @@ export function ThreadsSidebar({
           if (isMobileViewport()) onClose?.();
         }}
         onKeyDown={(e) => {
-          if (e.key === "Enter") {
+          if (e.key === "Enter" || e.key === " " || e.key === "Spacebar") {
+            if (e.key === " ") e.preventDefault();
             onSelect(thread.chatId);
             if (isMobileViewport()) onClose?.();
           }
@@ -201,7 +201,7 @@ export function ThreadsSidebar({
           {searching && thread.snippet && (
             <div className="thread-snippet truncate">
               {highlightSnippet(thread.snippet, search).map((seg, i) =>
-                seg.bold ? <strong key={i}>{seg.text}</strong> : <span key={i}>{seg.text}</span>
+                seg.mark ? <mark key={i}>{seg.text}</mark> : <span key={i}>{seg.text}</span>
               )}
             </div>
           )}
@@ -231,9 +231,9 @@ export function ThreadsSidebar({
     );
   };
 
-  // Lock body scroll while the threads sidebar is open.
   useEffect(() => {
-    return useScrollLock(open);
+    if (!open || !isMobileViewport()) return;
+    return useScrollLock(true);
   }, [open]);
 
   // Collapsed: 36px icon rail with the restore control — wiki sidebar's
@@ -247,9 +247,9 @@ export function ThreadsSidebar({
           className="w-7 h-7 p-0 flex items-center justify-center text-lx-text-secondary hover:text-lx-text-primary rounded"
           onClick={onToggle}
           aria-label="Expand sidebar"
-          title="Threads"
+          title="Expand sidebar"
         >
-          <PanelLeft size={14} strokeWidth={1.5} />
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="9" y1="3" x2="9" y2="21"/></svg>
         </button>
       </aside>
     );
@@ -273,7 +273,7 @@ export function ThreadsSidebar({
             aria-label="Collapse sidebar"
             title="Collapse sidebar"
           >
-            <PanelLeft size={14} strokeWidth={1.5} />
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="9" y1="3" x2="9" y2="21"/></svg>
           </button>
         </div>
         <input

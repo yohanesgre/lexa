@@ -26,6 +26,31 @@ export function EffortPicker({ effort, projectEffort, disabled = false, align = 
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
 
+  const handleOptionKeyDown = (e: React.KeyboardEvent<HTMLButtonElement>, idx: number) => {
+    const total = LEVELS.length + 1;
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      const next = (idx + 1) % total;
+      const items = rootRef.current?.querySelectorAll<HTMLButtonElement>('[role="option"]');
+      items?.[next]?.focus();
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      const prev = (idx - 1 + total) % total;
+      const items = rootRef.current?.querySelectorAll<HTMLButtonElement>('[role="option"]');
+      items?.[prev]?.focus();
+    } else if (e.key === "Home") {
+      e.preventDefault();
+      rootRef.current?.querySelectorAll<HTMLButtonElement>('[role="option"]')[0]?.focus();
+    } else if (e.key === "End") {
+      e.preventDefault();
+      const items = rootRef.current?.querySelectorAll<HTMLButtonElement>('[role="option"]');
+      items?.[items.length - 1]?.focus();
+    } else if (e.key === "Escape") {
+      e.preventDefault();
+      setOpen(false);
+    }
+  };
+
   useEffect(() => {
     if (!open) return;
     const onDown = (e: MouseEvent) => {
@@ -77,12 +102,12 @@ export function EffortPicker({ effort, projectEffort, disabled = false, align = 
       {open && (
         <div className="menu" role="listbox" aria-label="Thinking effort" style={{ position: "absolute", ...(align === "up" ? { top: "auto", bottom: "calc(100% + 4px)" } : { top: "calc(100% + 4px)", bottom: "auto" }), left: 0, zIndex: 30, padding: 8, display: "flex", flexDirection: "column", gap: 2, minWidth: 200 }}>
           <div className="font-micro text-2xs text-lx-text-muted uppercase tracking-[0.04em]" style={{ padding: "4px 8px" }}>Thinking effort</div>
-          <button type="button" role="option" aria-selected={!effort} className="menu-item" style={itemStyle(!effort)} onClick={() => { onChange(""); setOpen(false); }}>
+          <button type="button" role="option" aria-selected={!effort} tabIndex={0} className="menu-item" style={itemStyle(!effort)} onClick={() => { onChange(""); setOpen(false); }} onKeyDown={(e) => handleOptionKeyDown(e, 0)}>
             <span>Default{projectEffort ? ` · project (${projectEffort})` : " · none set"}</span>
             {!effort && <Check size={12} strokeWidth={2.5} />}
           </button>
-          {LEVELS.map(({ value, label }) => (
-            <button key={value} type="button" role="option" aria-selected={effort === value} className="menu-item" style={itemStyle(effort === value)} onClick={() => { onChange(value); setOpen(false); }}>
+          {LEVELS.map(({ value, label }, idx) => (
+            <button key={value} type="button" role="option" aria-selected={effort === value} tabIndex={0} className="menu-item" style={itemStyle(effort === value)} onClick={() => { onChange(value); setOpen(false); }} onKeyDown={(e) => handleOptionKeyDown(e, idx + 1)}>
               <span>{label}</span>
               {effort === value && <Check size={12} strokeWidth={2.5} />}
             </button>

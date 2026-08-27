@@ -34,7 +34,7 @@ async function request<T>(url: string, init?: RequestInit): Promise<T> {
     target = `${origin}${url}`;
     if (cookie) headers.cookie = cookie;
   }
-  const res = await fetch(target, { ...init, headers });
+  const res = await fetch(target, { credentials: "include", ...init, headers });
   if (!res.ok) {
     const body = await res.json().catch(() => ({})) as { error?: { code?: string | undefined; message?: string | undefined; details?: unknown } };
     const err = new Error(body.error?.message ?? `HTTP ${res.status}`) as Error & { code?: string | undefined; details?: unknown };
@@ -774,6 +774,10 @@ export function updateHeraldProviderModel(id: string, modelId: string, patch: { 
   return request(`${BASE}/admin/herald/providers/${id}/models/${encodeURIComponent(modelId)}`, { method: "PATCH", body: JSON.stringify(patch) });
 }
 
+export function reorderHeraldProviderModels(id: string, orderedIds: string[]): Promise<{ data: HeraldProviderModel[] }> {
+  return request(`${BASE}/admin/herald/providers/${id}/models/reorder`, { method: "POST", body: JSON.stringify({ orderedIds }) });
+}
+
 export function getHeraldUsage(): Promise<HeraldUsage> {
   return request(`${BASE}/admin/herald/usage`);
 }
@@ -867,7 +871,7 @@ export function renameHeraldChat(chatId: string, title: string): Promise<{ chatI
 // text/markdown). Frontend-only: blob → programmatic <a download> click.
 // Filename prefers the Content-Disposition header, falls back to chatId.
 export async function exportHeraldChat(chatId: string): Promise<void> {
-  const res = await fetch(`${BASE}/herald/chat/${chatId}/export`);
+  const res = await fetch(`${BASE}/herald/chat/${chatId}/export`, { credentials: "include" });
   if (!res.ok) {
     const body = (await res.json().catch(() => ({}))) as { error?: { code?: string | undefined; message?: string } };
     const err = new Error(body.error?.message ?? `HTTP ${res.status}`) as Error & { code?: string | undefined };
@@ -961,6 +965,7 @@ export function uploadAttachmentWithProgress(
   const xhr = new XMLHttpRequest();
   const promise = new Promise<{ data: Attachment; activity?: ActivityEvent[] }>((resolve, reject) => {
     xhr.open("POST", path);
+    xhr.withCredentials = true;
     xhr.responseType = "json";
     xhr.onload = () => {
       if (xhr.status >= 200 && xhr.status < 300) {

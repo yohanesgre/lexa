@@ -4,17 +4,19 @@ export type Theme = "dark" | "light";
 
 const STORAGE_KEY = "lexa:theme";
 
-function readStoredTheme(): Theme {
-  try {
-    const stored = localStorage.getItem(STORAGE_KEY);
-    return stored === "light" ? "light" : "dark";
-  } catch {
-    return "dark";
-  }
-}
+export function useTheme(): { theme: Theme; toggleTheme: () => void; mounted: boolean } {
+  const [theme, setTheme] = useState<Theme>("dark");
+  const [mounted, setMounted] = useState(false);
 
-export function useTheme(): { theme: Theme; toggleTheme: () => void } {
-  const [theme, setTheme] = useState<Theme>(readStoredTheme);
+  useEffect(() => {
+    try {
+      const stored = localStorage.getItem(STORAGE_KEY);
+      if (stored === "light" || stored === "dark") setTheme(stored);
+    } catch {
+      // ignore storage errors
+    }
+    setMounted(true);
+  }, []);
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
@@ -32,5 +34,5 @@ export function useTheme(): { theme: Theme; toggleTheme: () => void } {
     });
   }, []);
 
-  return { theme, toggleTheme };
+  return { theme, toggleTheme, mounted };
 }

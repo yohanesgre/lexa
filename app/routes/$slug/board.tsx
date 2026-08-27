@@ -3,8 +3,7 @@ import { BoardPage } from "../../components/kanban/BoardPage";
 import { getBoard } from "../../lib/api";
 
 export const Route = createFileRoute("/$slug/board")({
-  // @ts-expect-error — strict: exactOptional indexedAccess
-  validateSearch: (search: Record<string, unknown>): { task?: string | undefined; milestone?: string } => ({
+  validateSearch: (search: Record<string, unknown>): { task?: string | undefined; milestone?: string | undefined } => ({
     task: typeof search.task === "string" ? search.task : undefined,
     milestone: typeof search.milestone === "string" ? search.milestone : undefined,
   }),

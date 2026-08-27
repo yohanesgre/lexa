@@ -5,8 +5,6 @@ import { useQuery } from "@tanstack/react-query";
 import { useProjects, useProjectMembers, useAddProjectMember, useRemoveProjectMember, useDeleteProject, useUpdateProject, useProjectRepos, useReplaceProjectRepos, useGithubRepoSearch, useUsers, useTeams, useUpdateProjectTeam, useSession } from "../../lib/queries";
 import * as api from "../../lib/api";
 import { InlineDropdown } from "./SettingsSections";
-import { HeraldWriteToolsSection, HeraldEngineSection, AgentSkillAvailabilitySection, ProjectMemorySection } from "./HeraldSettingsSection";
-import { HeraldProjectProviderSection } from "./herald-project";
 import { Field } from "../ui/Field";
 import { TextInput } from "../ui/TextInput";
 import { TextArea } from "../ui/TextArea";
@@ -54,13 +52,12 @@ export function ProjectSettingsHub({ projectId }: { projectId: string }) {
         </Link>
       </div>
 
+      <div className="card-panel mb-6" style={{ padding: "10px 12px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, borderStyle: "dashed" }}>
+        <span className="text-sm text-lx-text-secondary">Herald provider, engine, write tools, memory, and skill bindings are now managed in <span className="font-mono text-xs">/hearth/bindings</span>.</span>
+        <Link to="/hearth/bindings" className="btn btn-ghost" style={{ height: 28, padding: "0 10px", fontSize: 12, textDecoration: "none", display: "inline-flex", alignItems: "center", whiteSpace: "nowrap" }}>Open in Hearth · Bindings</Link>
+      </div>
       <TeamAssignmentSection project={project} />
       <ProjectBasicSection project={project} />
-      <HeraldProjectProviderSection project={project} />
-      <HeraldWriteToolsSection project={project} />
-      <HeraldEngineSection project={project} />
-      <AgentSkillAvailabilitySection projectId={project.id} />
-      <ProjectMemorySection projectId={project.id} />
       <LinkedReposSection slug={project.slug} />
       <ProjectMembersSection slug={project.slug} />
       <ProjectDangerSection project={project} />

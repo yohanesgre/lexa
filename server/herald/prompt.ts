@@ -53,6 +53,9 @@ function docContextBlock(docContext: string): string | null {
   return `Current document content:\n\n${docContext}`;
 }
 
+export const WRITE_POLICY =
+  "You have write tools gated by approval. Never claim created/updated/archived before tool returns proposed:true and user approves. If user asks to create/update, call tool immediately with required args; do not ask for confirmation unless missing required field. Never hallucinate success.";
+
 export interface SystemPromptInput {
   identity: string;
   memoryBlock: string | null;
@@ -63,6 +66,7 @@ export interface SystemPromptInput {
   // Ephemeral @-mention context (chat only) — resolved at send, NEVER
   // persisted into the user message.
   mentionContext?: string;
+  writeTools?: string[];
 }
 
 // Order is cache-friendly: [0] identity+style+memory changes rarely,
@@ -71,6 +75,7 @@ export interface SystemPromptInput {
 export function buildSystemPrompts(input: SystemPromptInput): CacheablePrompt[] {
   const segments: string[] = [input.identity, MARKDOWN_STYLE];
   if (input.memoryBlock) segments.push(input.memoryBlock);
+  if (input.writeTools && input.writeTools.length > 0) segments.push(WRITE_POLICY);
 
   const prompts: CacheablePrompt[] = [
     { content: segments.join("\n\n"), cache_control: { type: "ephemeral" } },
@@ -101,10 +106,13 @@ export interface UserMessageInput {
   summarizedCount?: number;
 }
 
+export const DEFAULT_HERALD_PROMPT = "Generate based on document context.";
+
 export function buildUserMessage(input: UserMessageInput): string {
+  const instruction = input.instruction.trim() !== "" ? input.instruction : DEFAULT_HERALD_PROMPT;
   if (input.summary && input.summary.trim() !== "") {
     const segment = `[Conversation summary — the ${input.summarizedCount ?? 0} earlier turns below were condensed]\n${input.summary.trim()}\n[end of summary]`;
-    return `${segment}\n\n${input.instruction}`;
+    return `${segment}\n\n${instruction}`;
   }
-  return input.instruction;
+  return instruction;
 }

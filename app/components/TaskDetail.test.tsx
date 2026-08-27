@@ -165,7 +165,6 @@ describe("TaskDetail (view mode)", () => {
 
 describe("TaskDetail (create mode — TipTap smoke)", () => {
   it("mounts the TipTap description editor without crashing", async () => {
-    // @ts-expect-error — strict: exactOptional indexedAccess
     renderDetail({ mode: "create", task: undefined });
     expect(screen.getByLabelText("Task title")).toBeInTheDocument();
     expect(screen.getByText("Create task")).toBeInTheDocument();

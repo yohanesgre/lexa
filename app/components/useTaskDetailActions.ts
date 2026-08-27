@@ -4,12 +4,12 @@ import type { TipTapDoc } from "../../shared/types";
 interface UseTaskDetailActionsArgs {
   task: { id: string; columnId: string | null; swimlaneId: string | null; title: string } | null | undefined;
   defaultColumnId?: string | null | undefined;
-  columns?: { id: string }[];
-  fieldConfig?: { priorities: { id: string }[]; types: { id: string }[] };
+  columns?: { id: string }[] | undefined;
+  fieldConfig?: { priorities: { id: string }[]; types: { id: string }[] } | undefined;
   emptyDoc: TipTapDoc;
-  onLinkGithub?: (id: string, repo: string) => Promise<{ repo: string; issueNumber: number } | null | undefined>;
-  onUnlinkGithub?: (id: string, issueId: string) => Promise<void>;
-  onCreate?: (input: { title: string; columnId: string; priority: string; type: string; assignees: string[]; description: TipTapDoc; dueAt?: string | null }) => Promise<void>;
+  onLinkGithub?: ((id: string, repo: string) => Promise<{ repo: string; issueNumber: number } | null | undefined>) | undefined;
+  onUnlinkGithub?: ((id: string, issueId: string) => Promise<void>) | undefined;
+  onCreate?: ((input: { title: string; columnId: string; priority: string; type: string; assignees: string[]; description: TipTapDoc; dueAt?: string | null | undefined }) => Promise<void>) | undefined;
   onClose: () => void;
 }
 
@@ -61,7 +61,7 @@ export function useTaskDetailActions(args: UseTaskDetailActionsArgs) {
     setLinkState("loading");
     try {
       const linked = await onLinkGithub?.(task.id, linkRepo.trim());
-      if (linked) setLinkedIssue({ repo: linked.repo, number: linked.issueNumber });
+      if (linked) setLinkedIssue({ repo: linked.repo!, number: linked.issueNumber });
       setLinkState("success");
     } catch {
       setLinkState("idle");

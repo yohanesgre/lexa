@@ -5,8 +5,7 @@ import { Field } from "../components/ui/Field";
 import { TextInput } from "../components/ui/TextInput";
 
 export const Route = createFileRoute("/login")({
-  // @ts-expect-error — strict: exactOptional indexedAccess
-  validateSearch: (search: Record<string, unknown>): { redirect?: string } => ({
+  validateSearch: (search: Record<string, unknown>): { redirect?: string | undefined } => ({
     redirect: typeof search.redirect === "string" ? search.redirect : undefined,
   }),
   component: LoginPage,

@@ -124,7 +124,6 @@ describe("ActivityTab", () => {
     // invariant 6: comment removed from the cache via setQueryData, no refetch
     expect(activityCalls()).toBe(0);
     const pages = (queryClient.getQueryData(["task-activity", "demo", "t1"]) as { pages: { data: unknown[] }[] }).pages;
-    // @ts-expect-error — strict: exactOptional indexedAccess
-    expect(pages[0].data.filter((i) => (i as { kind?: string }).kind === "comment")).toHaveLength(0);
+    expect(pages[0]!.data.filter((i) => (i as { kind?: string }).kind === "comment")).toHaveLength(0);
   });
 });

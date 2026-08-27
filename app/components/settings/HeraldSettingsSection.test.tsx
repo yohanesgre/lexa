@@ -78,8 +78,7 @@ describe("Herald provider — API key field (rework)", () => {
     fireEvent.change(input, { target: { value: "sk-live-new-key" } });
     fireEvent.click(screen.getByRole("button", { name: /save/i }));
     expect(saveMutate).toHaveBeenCalledTimes(1);
-    // @ts-expect-error — strict: exactOptional indexedAccess
-    const [payload, options] = saveMutate.mock.calls[0];
+    const [payload, options] = saveMutate.mock.calls[0]!;
     expect((payload as Record<string, unknown>).apiKey).toBe("sk-live-new-key");
     // Success callback clears the field (empty = keep stored afterwards).
     act(() => {

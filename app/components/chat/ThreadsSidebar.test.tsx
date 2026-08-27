@@ -55,15 +55,15 @@ afterEach(() => {
 describe("highlightSnippet", () => {
   it("bolds case-insensitive matches and keeps surrounding text plain", () => {
     expect(highlightSnippet("…cross-check the rollback Runbook before Friday…", "runbook")).toEqual([
-      { text: "…cross-check the rollback ", bold: false },
-      { text: "Runbook", bold: true },
-      { text: " before Friday…", bold: false },
+      { text: "…cross-check the rollback ", bold: false, mark: false },
+      { text: "Runbook", bold: true, mark: true },
+      { text: " before Friday…", bold: false, mark: false },
     ]);
   });
 
   it("handles multiple + adjacent matches and empty queries", () => {
     expect(highlightSnippet("aa aa", "aa")).toHaveLength(3);
-    expect(highlightSnippet("plain text", "")).toEqual([{ text: "plain text", bold: false }]);
+    expect(highlightSnippet("plain text", "")).toEqual([{ text: "plain text", bold: false, mark: false }]);
   });
 });
 
@@ -121,12 +121,11 @@ describe("ThreadsSidebar", () => {
 
   it("snippet rows render under titles with the query bolded while searching; hidden when empty", () => {
     const threads: HeraldChatThreadSummary[] = [
-      // @ts-expect-error — strict: exactOptional indexedAccess
-      { ...THREADS[0], snippet: "…cross-check the rollback runbook before Friday…" },
+      { ...THREADS[0]!, snippet: "…cross-check the rollback runbook before Friday…" },
     ];
     setup({ threads, search: "runbook" });
     const bolded = screen.getByText("runbook");
-    expect(bolded.tagName).toBe("STRONG");
+    expect(bolded.tagName).toBe("MARK");
     expect(bolded.parentElement?.textContent).toBe("…cross-check the rollback runbook before Friday…");
     cleanup();
 

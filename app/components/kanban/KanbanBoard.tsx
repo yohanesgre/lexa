@@ -339,7 +339,6 @@ export function KanbanBoard({ board, showArchived = false, onToggleArchived, onM
           <BoardEmptyState onAddColumn={() => setIsColumnCreateOpen(true)} />
         ) : (
           rows.map(({ lane }) => (
-            // @ts-expect-error — strict: exactOptional indexedAccess
             <BoardLane
               key={lane.id}
               slug={board.project.slug}
