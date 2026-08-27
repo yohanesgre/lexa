@@ -49,7 +49,7 @@ INSERT INTO api_keys (id, name, key_hash, user_id) VALUES ('k1', 'agent-key', '$
     returnHeaders: true,
   })) as unknown as { headers?: Headers };
   const setCookie = signIn.headers?.get?.("set-cookie") ?? "";
-  sessionCookie = setCookie.split(";")[0];
+  sessionCookie = setCookie.split(";")[0]!!;
   expect(sessionCookie).toMatch(/^__Secure-better-auth\.session_token=/);
 });
 

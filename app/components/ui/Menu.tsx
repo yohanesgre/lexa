@@ -6,7 +6,7 @@ interface MenuProps {
   trigger: (props: { open: boolean; toggle: () => void }) => React.ReactNode;
   children: React.ReactNode;
   align?: "left" | "right";
-  gap?: number;
+  gap?: number | undefined;
 }
 
 export function Menu({ trigger, children, align = "right", gap = 8 }: MenuProps) {

@@ -13,7 +13,7 @@ export const Route = createFileRoute("/admin/herald/usage")({
 function HeraldUsagePage() {
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
-  const [filters, setFilters] = useState<{ from?: string | null; to?: string | null }>({});
+  const [filters, setFilters] = useState<{ from?: string | null | undefined; to?: string | null }>({});
   const { data, isLoading, error } = useHeraldUsage(filters);
 
   const handleApply = () => setFilters({ from: from || null, to: to || null });
@@ -69,7 +69,7 @@ function HeraldUsagePage() {
 
       <UsageByModelTable byModel={data?.byModel ?? []} />
 
-      <PriceEditor byModel={data?.byModel} />
+      <PriceEditor byModel={data?.byModel!} />
 
       <section className="card-panel mt-4" id="health">
         <div className="flex items-center justify-between mb-3" style={{ flexWrap: "wrap", gap: 8 }}>

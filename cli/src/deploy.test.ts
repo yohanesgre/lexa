@@ -148,7 +148,7 @@ describe("runCompose", () => {
     const mod = await import("./deploy");
     const empty = mkdtempSync(join(tmpdir(), "lexa-deploy-nocompose-"));
     process.chdir(empty);
-    const err = (await Effect.runPromise(mod.runCompose(mod.FLAVORS.prod)).catch((e) => e)) as Error;
+    const err = (await Effect.runPromise(mod.runCompose(mod.FLAVORS.prod!)).catch((e) => e)) as Error;
     expect(err.message).toBe("  ERROR: run from the repo root (docker-compose.yml not found)");
     process.chdir(cwd);
     rmSync(empty, { recursive: true, force: true });
@@ -159,7 +159,7 @@ describe("runCompose", () => {
     const repo = mkdtempSync(join(tmpdir(), "lexa-deploy-run-"));
     writeFileSync(join(repo, "docker-compose.yml"), "services: {}\n");
     process.chdir(repo);
-    await Effect.runPromise(mod.runCompose(mod.FLAVORS.prod, { imageTag: "v1.2.3" }));
+    await Effect.runPromise(mod.runCompose(mod.FLAVORS.prod!, { imageTag: "v1.2.3" }));
     const up = childMocks.spawnSyncCalls.find((c) => c.args.includes("up"));
     expect(up?.cmd).toBe("docker");
     expect(up?.args).toEqual(["compose", "-f", "docker-compose.yml", "-f", "docker-compose.prod.yml", "--env-file", ".env.prod", "up", "-d", "--pull", "always", "--wait"]);
@@ -175,7 +175,7 @@ describe("runCompose", () => {
     const repo = mkdtempSync(join(tmpdir(), "lexa-deploy-run-"));
     writeFileSync(join(repo, "docker-compose.yml"), "services: {}\n");
     process.chdir(repo);
-    await Effect.runPromise(mod.runCompose(mod.FLAVORS.staging));
+    await Effect.runPromise(mod.runCompose(mod.FLAVORS.staging!));
     const up = childMocks.spawnSyncCalls.find((c) => c.args.includes("up"));
     expect(up?.args).toContain("docker-compose.staging.yml");
     expect((up?.opts.env as Record<string, string>).COMPOSE_PROJECT_NAME).toBe("lexa-staging");
@@ -189,7 +189,7 @@ describe("runCompose", () => {
     const repo = mkdtempSync(join(tmpdir(), "lexa-deploy-run-"));
     writeFileSync(join(repo, "docker-compose.yml"), "services: {}\n");
     process.chdir(repo);
-    await Effect.runPromise(mod.runCompose(mod.FLAVORS.prod, { clean: true }));
+    await Effect.runPromise(mod.runCompose(mod.FLAVORS.prod!, { clean: true }));
     const cmds = childMocks.spawnSyncCalls.map((c) => c.args.join(" "));
     const downIdx = cmds.findIndex((a) => a.includes("down -v"));
     const upIdx = cmds.findIndex((a) => a.includes("up -d"));
@@ -205,7 +205,7 @@ describe("runCompose", () => {
     const repo = mkdtempSync(join(tmpdir(), "lexa-deploy-run-"));
     writeFileSync(join(repo, "docker-compose.yml"), "services: {}\n");
     process.chdir(repo);
-    const err = (await Effect.runPromise(mod.runCompose(mod.FLAVORS.prod)).catch((e) => e)) as Error;
+    const err = (await Effect.runPromise(mod.runCompose(mod.FLAVORS.prod!)).catch((e) => e)) as Error;
     expect(err.message).toBe("  ERROR: docker compose failed (status 7)");
     process.chdir(cwd);
     rmSync(repo, { recursive: true, force: true });
@@ -225,7 +225,7 @@ describe("cmdDeploy end-to-end", () => {
         Effect.provideService(cfg, Context.get(svc, cfg)),
       ),
     );
-    const captured = log.mock.calls.map((c) => String(c[0])).join("\n");
+    const captured = log.mock.calls.map((c) => String(c[0]!)).join("\n");
     log.mockRestore();
     return { deployDir, log: captured };
   }
@@ -292,7 +292,7 @@ describe("cmdDeploy end-to-end", () => {
         Effect.provideService(cfg, Context.get(svc, cfg)),
       )),
     ).rejects.toThrow(/exit\(1\)/);
-    expect(log.mock.calls.map((c) => String(c[0])).join("\n")).toContain("Aborted (confirmation did not match).");
+    expect(log.mock.calls.map((c) => String(c[0]!)).join("\n")).toContain("Aborted (confirmation did not match).");
     // No compose up after an aborted clean.
     expect(childMocks.spawnSyncCalls.some((c) => c.args.includes("up"))).toBe(false);
     exitSpy.mockRestore();
@@ -331,7 +331,7 @@ describe("cmdUndeploy", () => {
         ),
       );
     } finally {
-      captured = [...log.mock.calls, ...warn.mock.calls].map((c) => String(c[0])).join("\n");
+      captured = [...log.mock.calls, ...warn.mock.calls].map((c) => String(c[0]!)).join("\n");
       log.mockRestore();
       warn.mockRestore();
     }
@@ -414,7 +414,7 @@ describe("cmdUndeploy", () => {
         Effect.provideService(cfg, Context.get(svc, cfg)),
       )),
     ).rejects.toThrow(/exit\(1\)/);
-    expect(log.mock.calls.map((c) => String(c[0])).join("\n")).toContain("Aborted (confirmation did not match).");
+    expect(log.mock.calls.map((c) => String(c[0]!)).join("\n")).toContain("Aborted (confirmation did not match).");
     expect(childMocks.spawnSyncCalls.length).toBe(0);
     expect(cfMocks.requests.length).toBe(0);
     exitSpy.mockRestore();

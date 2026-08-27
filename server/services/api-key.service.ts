@@ -22,7 +22,7 @@ function generateRawKey(): string {
   let result = "";
   const base = 62n;
   while (value > 0n) { result = chars[Number(value % base)] + result; value /= base; }
-  while (result.length < 43) result = chars[0] + result;
+  while (result.length < 43) result = chars[0]! + result;
   return `lxk_${result}`;
 }
 

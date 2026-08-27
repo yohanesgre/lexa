@@ -35,7 +35,7 @@ describe("diffText", () => {
   it("pure addition becomes one hunk with empty old side", () => {
     const r = diffText("", "hello\nworld");
     expect(r.hunks).toHaveLength(1);
-    expect(r.hunks[0]).toMatchObject({ oldStart: 1, oldLines: 0, newStart: 1, newLines: 2 });
+    expect(r.hunks[0]!).toMatchObject({ oldStart: 1, oldLines: 0, newStart: 1, newLines: 2 });
     expect(r.additions).toBe(2);
     expect(r.deletions).toBe(0);
   });
@@ -47,9 +47,10 @@ describe("diffText", () => {
       "Root cause: an off-by-one in the chunk coordinate math in TilemapChunkLoader._loadChunk() — chunk indices are assigned from the world origin, but the loader assumes they start at 0.";
     const r = diffText(oldText, newText);
     expect(r.hunks).toHaveLength(1);
-    const hunk = r.hunks[0];
+    const hunk = r.hunks[0]!; // test guarantees presence
     expect(hunk.lines).toHaveLength(2);
-    const [del, add] = hunk.lines;
+    const del = hunk.lines[0]!; // test guarantees presence
+    const add = hunk.lines[1]!; // test guarantees presence
     expect(del.kind).toBe("del");
     expect(add.kind).toBe("add");
     const delSame = del.spans.filter((s) => s.kind === "same").map((s) => s.text).join("");
@@ -68,7 +69,9 @@ describe("diffText", () => {
     const oldText = "The furnace zone crash stems from an off-by-one in the chunk coordinate math when transitioning between zones. #107 points to TilemapChunkLoader._loadChunk().";
     const newText = "Root cause: an off-by-one in the chunk coordinate math in TilemapChunkLoader._loadChunk() — chunk indices are assigned from the world origin, but the loader assumes they start at 0.";
     const r = diffText(oldText, newText);
-    const [del, add] = r.hunks[0].lines;
+    const lines = r.hunks[0]!.lines;
+    const del = lines[0]!; // test guarantees presence
+    const add = lines[1]!; // test guarantees presence
     expect(del.spans.map((s) => s.text).join("")).toBe(oldText);
     expect(add.spans.map((s) => s.text).join("")).toBe(newText);
   });
@@ -79,7 +82,7 @@ describe("diffText", () => {
     const r = diffText(oldText, newText);
     expect(r.additions).toBe(1);
     expect(r.deletions).toBe(4);
-    const hunk = r.hunks[0];
+    const hunk = r.hunks[0]!; // test guarantees presence
     expect(hunk.lines).toHaveLength(5);
     for (const line of hunk.lines) {
       expect(line.spans).toEqual([]);
@@ -89,14 +92,14 @@ describe("diffText", () => {
   it("adjacent changes merge into a single hunk (git behavior)", () => {
     const r = diffText("line1\nline2\nline3", "line1\nCHANGED\nline3");
     expect(r.hunks).toHaveLength(1);
-    expect(r.hunks[0]).toMatchObject({ oldStart: 2, oldLines: 1, newStart: 2, newLines: 1 });
+    expect(r.hunks[0]!).toMatchObject({ oldStart: 2, oldLines: 1, newStart: 2, newLines: 1 });
   });
 
   it("separate changes produce separate hunks", () => {
     const r = diffText("a\nb\nc\nd", "A\nb\nc\nD");
     expect(r.hunks).toHaveLength(2);
-    expect(r.hunks[0].oldStart).toBe(1);
-    expect(r.hunks[1].oldStart).toBe(4);
+    expect(r.hunks[0]!.oldStart).toBe(1);
+    expect(r.hunks[1]!.oldStart).toBe(4);
   });
 
   it("counts additions and deletions", () => {
@@ -109,7 +112,9 @@ describe("diffText", () => {
     const oldLine = "when transitioning between zones. #107 points to";
     const newLine = "— chunk indices are assigned from the world origin";
     const r = diffText(oldLine, newLine);
-    const [del, add] = r.hunks[0].lines;
+    const lines2 = r.hunks[0]!.lines;
+    const del = lines2[0]!; // test guarantees presence
+    const add = lines2[1]!; // test guarantees presence
     const delMerged = del.spans.filter((s) => s.kind === "del").map((s) => s.text).join("");
     const addMerged = add.spans.filter((s) => s.kind === "add").map((s) => s.text).join("");
     expect(delMerged).toBe(oldLine);

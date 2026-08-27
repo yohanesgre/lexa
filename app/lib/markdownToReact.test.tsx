@@ -47,8 +47,8 @@ describe("markdownToReact", () => {
     const outerUl = nested.querySelector("ul")!;
     const outerItems = Array.from(outerUl.children).filter((el) => el.tagName === "LI");
     expect(outerItems).toHaveLength(2);
-    expect(outerItems[0].querySelector("ul > li")).not.toBeNull();
-    expect(outerItems[0].querySelectorAll("ul > li")).toHaveLength(2);
+    expect(outerItems[0]!.querySelector("ul > li")).not.toBeNull();
+    expect(outerItems[0]!.querySelectorAll("ul > li")).toHaveLength(2);
 
     // Tight list: bare text in li; loose list: paragraph blocks inside li.
     const tight = mount("- tight");
@@ -156,7 +156,7 @@ describe("markdownToReact", () => {
     });
     const chips = root.querySelectorAll(".chip-wrap[data-chip='true']");
     expect(chips).toHaveLength(1);
-    expect(chips[0].textContent).toContain("@LEX-1");
+    expect(chips[0]!.textContent).toContain("@LEX-1");
     expect(root.querySelector("code")?.textContent).toBe("code @LEX-2");
     expect(root.querySelector("code .chip-wrap")).toBeNull();
   });
@@ -164,6 +164,7 @@ describe("markdownToReact", () => {
   it("trailing node lands inside the last block element (streaming caret)", () => {
     const el = mount("first para\n\nlast para", { trailing: <span data-caret /> });
     const lastP = el.querySelectorAll("p")[1];
+    // @ts-expect-error — strict: exactOptional indexedAccess
     expect(lastP.querySelector("[data-caret]")).not.toBeNull();
   });
 });

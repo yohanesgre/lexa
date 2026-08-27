@@ -64,15 +64,15 @@ describe("WikiShareRepo", () => {
       insertLink(repo, { id: "l2", token: "tok-2" });
       const rows = Effect.runSync(repo.listByPage("w1"));
       expect(rows.map((r) => r.id)).toEqual(["l1", "l2"]);
-      expect(rows[0]).toMatchObject({
+      expect(rows[0]!).toMatchObject({
         id: "l1",
         page_id: "w1",
         token: "tok-1",
         expires_at: null,
         created_by: "u1",
       });
-      expect(rows[0].created_at).toBeTruthy();
-      expect(rows[0].updated_at).toBeTruthy();
+      expect(rows[0]!.created_at).toBeTruthy();
+      expect(rows[0]!.updated_at).toBeTruthy();
     } finally { close(); }
   });
 
@@ -117,7 +117,7 @@ describe("WikiShareRepo", () => {
     try {
       const rows = Effect.runSync(repo.findSubtreeRows("w1"));
       expect(rows.map((r) => r.id).sort()).toEqual(["w1", "w2", "w3"]);
-      expect(rows[0].id).toBe("w1");
+      expect(rows[0]!.id).toBe("w1");
       const byId = new Map(rows.map((r) => [r.id, r]));
       expect(byId.get("w2")?.parent_id).toBe("w1");
       expect(byId.get("w3")?.parent_id).toBe("w2");
@@ -140,8 +140,8 @@ describe("WikiShareRepo", () => {
     ];
     const tree = buildSubtreeTree(rows);
     expect(tree?.page.id).toBe("w1");
-    expect(tree?.children[0]?.page.id).toBe("w2");
-    expect(tree?.children[0]?.children[0]?.page.id).toBe("w3");
+    expect(tree?.children[0]!?.page.id).toBe("w2");
+    expect(tree?.children[0]!?.children[0]!?.page.id).toBe("w3");
     expect(buildSubtreeTree([])).toBeNull();
   });
 

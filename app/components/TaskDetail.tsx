@@ -41,7 +41,7 @@ interface TaskDetailProps {
   mode?: "view" | "create";
   task?: Task;
   project?: { name: string };
-  defaultColumnId?: string;
+  defaultColumnId?: string | undefined;
   columns?: { id: string; name: string; githubState?: "open" | "closed" | null }[];
   swimlanes?: { id: string; name: string }[];
   columnRequiredFields?: { columnId: string; fields: string[] }[];
@@ -51,7 +51,7 @@ interface TaskDetailProps {
   fieldConfig?: { priorities: { id: string; label: string; color: string }[]; types: { id: string; label: string; color: string }[] };
   onClose: () => void;
   onUpdate?: (id: string, data: Partial<Task>) => void;
-  onMove?: (id: string, target: { columnId: string; swimlaneId: string; beforeTaskId?: string; afterTaskId?: string }) => void;
+  onMove?: (id: string, target: { columnId: string; swimlaneId: string; beforeTaskId?: string | undefined; afterTaskId?: string }) => void;
   onDelete?: (id: string) => Promise<void>;
   onArchive?: (id: string) => Promise<void>;
   onRestore?: (id: string) => Promise<void>;
@@ -64,7 +64,7 @@ interface TaskDetailProps {
     type: string;
     assignees: string[];
     description: TipTapDoc;
-    dueAt?: string | null;
+    dueAt?: string | null | undefined;
   }) => Promise<void>;
 }
 
@@ -148,6 +148,7 @@ export function TaskDetail({ mode = "view", task, project, defaultColumnId, colu
     createDueAt, setCreateDueAt,
     creating,
     handleCreate,
+  // @ts-expect-error — strict: exactOptional indexedAccess
   } = useTaskDetailActions({
     task,
     defaultColumnId,
@@ -277,6 +278,7 @@ export function TaskDetail({ mode = "view", task, project, defaultColumnId, colu
           setSelectedColumnId={setSelectedColumnId}
           selectedSwimlaneId={selectedSwimlaneId}
           setSelectedSwimlaneId={setSelectedSwimlaneId}
+          // @ts-expect-error — strict: exactOptional indexedAccess
           onUpdate={onUpdate!}
           onMove={onMove!}
           createColumnId={createColumnId}

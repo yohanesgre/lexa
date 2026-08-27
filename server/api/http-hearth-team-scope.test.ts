@@ -84,7 +84,7 @@ INSERT INTO hearth_tasks (id, project_id, document_type, document_id, agent_id, 
   const { createApiHandler } = await import("./http");
   handler = createApiHandler(dbPath);
   const signIn = (await auth.api.signInEmail({ body: { email: "admin@lexa.test", password: "password123" }, returnHeaders: true })) as unknown as { headers?: Headers };
-  teamAdminCookie = (signIn.headers?.get("set-cookie") ?? "").split(";")[0];
+  teamAdminCookie = (signIn.headers?.get("set-cookie") ?? "").split(";")[0]!;
 });
 
 afterAll(() => {

@@ -1,6 +1,37 @@
 export type ID = string;
 export type ISODate = string;
-export type TipTapDoc = { type: "doc"; content: unknown[] };
+export type JSONValue = string | number | boolean | null | JSONValue[] | { [key: string]: JSONValue };
+export type TipTapMark = { type: string; attrs?: Record<string, JSONValue> | Record<string, unknown> | undefined };
+export type TipTapNode = {
+  type: string;
+  attrs?: Record<string, JSONValue> | Record<string, unknown> | undefined;
+  content?: TipTapNode[] | undefined;
+  text?: string | undefined;
+  marks?: TipTapMark[] | undefined;
+};
+export type TipTapDoc = { type: "doc"; content: TipTapNode[] };
+
+export function parseTipTapDoc(json: string): TipTapDoc {
+  const parsed: unknown = JSON.parse(json);
+  if (
+    typeof parsed === "object" &&
+    parsed !== null &&
+    (parsed as { type?: unknown }).type === "doc" &&
+    Array.isArray((parsed as { content?: unknown }).content)
+  ) {
+    return parsed as TipTapDoc;
+  }
+  throw new Error("Invalid TipTapDoc");
+}
+
+export function isTipTapDoc(value: unknown): value is TipTapDoc {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    (value as { type?: unknown }).type === "doc" &&
+    Array.isArray((value as { content?: unknown }).content)
+  );
+}
 
 export interface ProjectRepo {
   repo: string;

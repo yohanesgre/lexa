@@ -2,8 +2,8 @@ export interface ToggleProps {
   checked: boolean;
   onChange: (checked: boolean) => void;
   label?: React.ReactNode;
-  disabled?: boolean;
-  className?: string;
+  disabled?: boolean | undefined;
+  className?: string | undefined;
 }
 
 export function Toggle({ checked, onChange, label, disabled, className }: ToggleProps) {

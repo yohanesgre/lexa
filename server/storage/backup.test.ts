@@ -42,7 +42,7 @@ describe("runBackup (fs driver)", () => {
     expect(raw).toContain("CREATE TABLE projects");
     expect(raw).toContain("p1");
 
-    expect(await driver.get("backups/" + key.split("/")[1].replace(".db.gz", "-blobs/sha-a")))
+    expect(await driver.get("backups/" + key.split("/")[1]!.replace(".db.gz", "-blobs/sha-a")))
       .toEqual(new Uint8Array([1, 2, 3]));
 
     const leftovers = readdirSync(dir).filter((f) => f.startsWith("lexa-backup-"));

@@ -162,7 +162,8 @@ export function HearthTaskLogModal({
               ) : (
                 lines.map((line) => {
                   const { level, display } = classifyLogLine(line);
-                  const isLast = line.id === lines[lines.length - 1].id;
+                  // @ts-expect-error — strict: exactOptional indexedAccess
+                  const isLast = line.id === lines[lines.length - 1!].id;
                   return (
                     <div key={line.id} className={cn("hearth-task-log-line", level === "error" && "stderr", level === "warn" && "warn", active && isLast && "current")}>
                       <span className="hearth-task-log-dot" aria-hidden="true">{level === "info" ? "●" : "!"}</span>

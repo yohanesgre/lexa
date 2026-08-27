@@ -53,10 +53,10 @@ describe("WorkspaceInvitesService", () => {
     expect(expiryMs - Date.now()).toBeGreaterThan(7 * 24 * 3600 * 1000 - 60_000);
     expect(expiryMs - Date.now()).toBeLessThan(7 * 24 * 3600 * 1000 + 60_000);
     expect(link).toMatch(/^http:\/\/localhost:3000\/invite\?token=/);
-    const token = link.split("token=")[1];
+    const token = link.split("token=")[1]!;
     const row = db.prepare("SELECT token FROM workspace_invitations WHERE email = ?").get("new.user@lexa.dev") as { token: string } | null;
     expect(row?.token).toBe(token);
-    expect(invite.tokenHint).toBe(token.slice(0, 8));
+    expect(invite.tokenHint).toBe(token!.slice(0, 8));
   });
 
   it("rejects a duplicate pending invite for the same email", () => {
@@ -72,7 +72,7 @@ describe("WorkspaceInvitesService", () => {
     const db = tmpDb();
     const svc = makeService(db);
     const first = Effect.runSync(svc.create("a@lexa.dev", null));
-    db.prepare("UPDATE workspace_invitations SET expires_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-1 day') WHERE id = ?").run(first.invite.id);
+    db.prepare("UPDATE workspace_invitations SET expires_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-1 day') WHERE id = ?").run(first!.invite.id);
     const second = Effect.runSync(Effect.either(svc.create("a@lexa.dev", null)));
     expect(Either.isRight(second)).toBe(true);
     if (Either.isRight(second)) expect(second.right.invite.email).toBe("a@lexa.dev");

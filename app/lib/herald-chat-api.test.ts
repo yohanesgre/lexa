@@ -25,16 +25,17 @@ describe("herald chat api", () => {
   it("listHeraldChats appends ?q= only for non-empty queries", async () => {
     fetchMock.mockImplementation(() => Promise.resolve(new Response(JSON.stringify({ data: [] }), { status: 200 })));
     await api.listHeraldChats("p1");
-    expect(fetchMock.mock.calls[0][0]).toBe("/api/herald/chats/p1");
+    expect(fetchMock.mock.calls[0]![0]).toBe("/api/herald/chats/p1");
     await api.listHeraldChats("p1", "  runbook ");
-    expect(fetchMock.mock.calls[1][0]).toBe("/api/herald/chats/p1?q=runbook");
+    expect(fetchMock.mock.calls[1]![0]).toBe("/api/herald/chats/p1?q=runbook");
     await api.listHeraldChats("p1", "   ");
-    expect(fetchMock.mock.calls[2][0]).toBe("/api/herald/chats/p1");
+    expect(fetchMock.mock.calls[2]![0]).toBe("/api/herald/chats/p1");
   });
 
   it("updateHeraldChatMeta PATCHes {title?, pinned?}", async () => {
     fetchMock.mockResolvedValue(new Response(JSON.stringify({ chatId: "c1", pinned: true }), { status: 200 }));
     await api.updateHeraldChatMeta("c1", { pinned: true });
+    // @ts-expect-error — strict: exactOptional indexedAccess
     const [url, init] = fetchMock.mock.calls[0];
     expect(url).toBe("/api/herald/chat/c1");
     expect(init.method).toBe("PATCH");
@@ -55,7 +56,7 @@ describe("herald chat api", () => {
       })
     );
     await api.exportHeraldChat("c1");
-    expect(fetchMock.mock.calls[0][0]).toBe("/api/herald/chat/c1/export");
+    expect(fetchMock.mock.calls[0]![0]).toBe("/api/herald/chat/c1/export");
     expect(clicked).toBe(true);
     clickSpy.mockRestore();
   });

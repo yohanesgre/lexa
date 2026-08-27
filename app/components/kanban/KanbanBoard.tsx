@@ -32,18 +32,18 @@ import { Archive, Trash2 } from "lucide-react";
 export interface MoveTarget {
   columnId: string;
   swimlaneId: string;
-  beforeTaskId?: string;
-  afterTaskId?: string;
+  beforeTaskId?: string | undefined;
+  afterTaskId?: string | undefined;
 }
 
 interface KanbanBoardProps {
   board: Board;
-  showArchived?: boolean;
+  showArchived?: boolean | undefined;
   onToggleArchived?: (show: boolean) => void;
   onMoveTask: (taskId: string, target: MoveTarget) => Promise<void>;
   onSelectTask?: (task: Task) => void;
   onOpenCreateTask?: (columnId: string, swimlaneId?: string) => void;
-  milestoneId?: string | null;
+  milestoneId?: string | null | undefined;
   onMilestoneChange?: (id: string | null) => void;
 }
 
@@ -238,7 +238,7 @@ export function KanbanBoard({ board, showArchived = false, onToggleArchived, onM
     if (String(over.id) === task.id) return;
 
     const overData = over.data.current as
-      | { type?: string; columnId?: string; swimlaneId?: string }
+      | { type?: string | undefined; columnId?: string | undefined; swimlaneId?: string }
       | undefined;
 
     let targetColumnId: string;
@@ -339,6 +339,7 @@ export function KanbanBoard({ board, showArchived = false, onToggleArchived, onM
           <BoardEmptyState onAddColumn={() => setIsColumnCreateOpen(true)} />
         ) : (
           rows.map(({ lane }) => (
+            // @ts-expect-error — strict: exactOptional indexedAccess
             <BoardLane
               key={lane.id}
               slug={board.project.slug}

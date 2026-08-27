@@ -34,12 +34,13 @@ function tmpDb(): Database {
 function seed(db: Database) {
   db.prepare("INSERT INTO users (id, email, name) VALUES ('u1', 'u1@test.dev', 'User One')").run();
   db.prepare("INSERT INTO projects (id, name, slug) VALUES ('p1','P','p1'), ('p2','P2','p2')").run();
+  const emptyDoc = JSON.stringify({ type: "doc", content: [] });
   db.prepare(
     `INSERT INTO wiki_pages (id, project_id, title, slug, content, content_text, parent_id, position) VALUES
        ('w-root', 'p1', 'Root', 'root', ?, 'root text', NULL, 0),
-       ('w-child', 'p1', 'Child', 'child', '{}', '', 'w-root', 0),
-       ('w-other', 'p2', 'Other', 'other', '{}', '', NULL, 0)`
-  ).run(JSON.stringify(ROOT_DOC));
+       ('w-child', 'p1', 'Child', 'child', ?, '', 'w-root', 0),
+       ('w-other', 'p2', 'Other', 'other', ?, '', NULL, 0)`
+  ).run(JSON.stringify(ROOT_DOC), emptyDoc, emptyDoc);
 }
 
 function makeService(db: Database) {
@@ -182,7 +183,7 @@ describe("WikiShareService.resolvePublic", () => {
       expect(root.content).toEqual(ROOT_DOC);
       expect(root.children).toHaveLength(1);
       expect(root.children[0]!.id).toBe("w-child");
-      expect(root.children[0]!.content).toEqual({});
+      expect(root.children[0]!.content).toEqual({ type: "doc", content: [] });
       expect(root.children[0]!.children).toEqual([]);
     }
   });

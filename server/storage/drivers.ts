@@ -81,7 +81,7 @@ export function createFsDriver(root: string): StorageDriver {
 // S3Error with "StatusCode" 404 / NoSuchKey — treated as KeyNotFound.
 export function createS3Driver(opts: S3StorageOptions): StorageDriver {
   const client = new Bun.S3Client({
-    endpoint: opts.endpoint ?? undefined,
+    ...(opts.endpoint ? { endpoint: opts.endpoint } : {}),
     bucket: opts.bucket,
     region: opts.region,
     accessKeyId: opts.accessKeyId,
@@ -131,7 +131,7 @@ export function createS3Driver(opts: S3StorageOptions): StorageDriver {
         const out: string[] = [];
         let token: string | undefined;
         do {
-          const page = await client.list({ prefix, maxKeys: 1000, continuationToken: token });
+          const page = await client.list({ prefix, maxKeys: 1000, ...(token !== undefined ? { continuationToken: token } : {}) });
           for (const item of page.contents ?? []) out.push(item.key);
           token = page.isTruncated ? page.nextContinuationToken : undefined;
         } while (token);
@@ -187,7 +187,7 @@ export function createR2Driver(opts: R2StorageOptions): StorageDriver {
         const out: string[] = [];
         let cursor: string | undefined;
         do {
-          const page: R2ListPage = await binding.list({ prefix, cursor });
+          const page: R2ListPage = await binding.list({ prefix, ...(cursor !== undefined ? { cursor } : {}) });
           for (const obj of page.objects) out.push(obj.key);
           cursor = page.truncated ? page.cursor : undefined;
         } while (cursor);

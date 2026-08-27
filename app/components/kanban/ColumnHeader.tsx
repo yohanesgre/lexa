@@ -11,8 +11,8 @@ interface ColumnHeaderProps {
   column: Column;
   taskCount: number;
   wipLimit: number | null;
-  wipFlash?: boolean;
-  dimmed?: boolean;
+  wipFlash?: boolean | undefined;
+  dimmed?: boolean | undefined;
   onOpenCreate?: () => void;
 }
 

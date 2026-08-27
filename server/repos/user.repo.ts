@@ -12,7 +12,7 @@ export class UserRepo extends Effect.Service<UserRepo>()("Lexa/UserRepo", {
 
       findByEmail: (email: string): Effect.Effect<UserRow | null, DbError> =>
         queryAll<UserRow>(db, `SELECT * FROM users WHERE email = ? LIMIT 1`, email).pipe(
-          Effect.map((rows) => rows[0] ?? null)
+          Effect.map((rows) => rows[0]! ?? null)
         ),
 
       listAll: (): Effect.Effect<UserRow[], DbError> =>

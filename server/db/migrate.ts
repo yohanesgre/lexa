@@ -4,51 +4,51 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 // import.meta.dir is bun-only; fall back for non-bun runtimes (vitest workers).
-const DEFAULT_MIGRATIONS_DIR = import.meta.dir
-  ? join(import.meta.dir, "../../migrations")
+const DEFAULT_MIGRATIONS_DIR = (import.meta as unknown as { dir?: string }).dir
+  ? join((import.meta as unknown as { dir: string }).dir, "../../migrations")
   : fileURLToPath(new URL("../../migrations", import.meta.url));
 
 export function runMigrations(dbPath: string, migrationsDir = DEFAULT_MIGRATIONS_DIR) {
-  const db = new Database(dbPath) as any;
+  const db = new Database(dbPath);
   try { chmodSync(dbPath, 0o600); } catch {}
-  (db as any).exec("PRAGMA busy_timeout = 5000");
+  db.exec("PRAGMA busy_timeout = 5000");
   // FK enforcement OFF during migrations, matching bun:sqlite's production
   // default (the vitest shim defaults it ON). Rebuilds like 0004/0005 drop
   // parent tables that children still reference — defer_foreign_keys cannot
   // help (the implicit DELETE is re-checked at COMMIT), so enforcement is
   // disabled for the whole run. Apps re-enable it via initSqlite.
-  (db as any).exec("PRAGMA foreign_keys = OFF");
+  db.exec("PRAGMA foreign_keys = OFF");
 
-  (db as any).run("CREATE TABLE IF NOT EXISTS _migrations (name TEXT PRIMARY KEY, applied_at TEXT DEFAULT (datetime('now')))");
+  db.exec("CREATE TABLE IF NOT EXISTS _migrations (name TEXT PRIMARY KEY, applied_at TEXT DEFAULT (datetime('now')))");
 
   const files = readdirSync(migrationsDir).filter((f: string) => f.endsWith(".sql")).sort();
 
   for (const file of files) {
-    const row = (db as any).query("SELECT name FROM _migrations WHERE name = ?").get(file) as { name: string } | null;
+    const row = db.query("SELECT name FROM _migrations WHERE name = ?").get(file) as unknown as { name: string } | null;
     if (row) continue;
 
     const sql = readFileSync(join(migrationsDir, file), "utf-8");
     // Atomic per-file apply: migration + its record in one transaction. A
     // failed migration leaves no partial schema and no _migrations row.
-    (db as any).exec("BEGIN");
+    db.exec("BEGIN");
     try {
-      (db as any).run(sql);
-      (db as any).run("INSERT INTO _migrations (name) VALUES (?)", [file]);
-      (db as any).exec("COMMIT");
+      db.exec(sql);
+      db.prepare("INSERT INTO _migrations (name) VALUES (?)").run(file);
+      db.exec("COMMIT");
     } catch (e) {
-      (db as any).exec("ROLLBACK");
+      db.exec("ROLLBACK");
       throw e;
     }
     console.log(`Applied migration: ${file}`);
   }
 
   // Populate sqlite_stat1 so the planner picks indexes instead of coin-flipping.
-  (db as any).exec("ANALYZE");
+  db.exec("ANALYZE");
 
   db.close();
 }
 
-const dbPath = (import.meta as any).main ? process.argv[2] : null;
+const dbPath = (import.meta as unknown as { main?: boolean }).main ? process.argv[2]! : null;
 if (dbPath) {
   runMigrations(dbPath);
   console.log("Migrations complete");

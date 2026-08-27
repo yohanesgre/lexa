@@ -13,9 +13,9 @@ const RELATION_LABELS: Record<TaskLinkRelation, string> = {
 interface LinksSectionProps {
   slug: string;
   taskId: string;
-  taskTitleById?: Map<string, string>;  // from the board — for link display
-  taskKeyById?: Map<string, string>;    // from the board — for link display
-  className?: string;
+  taskTitleById?: Map<string, string> | undefined;  // from the board — for link display
+  taskKeyById?: Map<string, string> | undefined;    // from the board — for link display
+  className?: string | undefined;
 }
 
 export function LinksSection({ slug, taskId, taskTitleById, taskKeyById, className }: LinksSectionProps) {
@@ -108,7 +108,7 @@ export function LinksSection({ slug, taskId, taskTitleById, taskKeyById, classNa
             onKeyDown={(e) => {
               if (e.key === "Enter" && suggestions.length > 0) {
                 e.preventDefault();
-                addLink.mutate({ toTaskId: suggestions[0].id, relation });
+                addLink.mutate({ toTaskId: suggestions[0]!.id, relation });
                 setQuery("");
               }
             }}

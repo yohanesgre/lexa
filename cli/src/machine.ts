@@ -57,7 +57,7 @@ const CMD_BIN = process.env.HEARTH_CMD_BIN ?? "cmd";
 export class MachineError extends Data.TaggedError("MachineError")<{
   reason: string;
 }> {
-  get message(): string {
+  override get message(): string {
     return this.reason;
   }
 }
@@ -65,7 +65,7 @@ export class MachineError extends Data.TaggedError("MachineError")<{
 export class ListenerError extends Data.TaggedError("ListenerError")<{
   reason: string;
 }> {
-  get message(): string {
+  override get message(): string {
     return this.reason;
   }
 }
@@ -491,7 +491,7 @@ function parseAgents(raw: string): Array<{ id: string; name: string }> {
     const trimmed = line.trim();
     const match = /^([A-Za-z][A-Za-z0-9_-]*)(?:\s+\(([^)]+)\))?$/.exec(trimmed);
     if (!match || trimmed.includes("permission") || trimmed === "Options" || trimmed === "Commands") continue;
-    const id = match[1];
+    const id = match[1]!; // regex guarantees capture
     if (seen.has(id)) continue;
     seen.add(id);
     result.push({ id, name: match[2] ?? id });
@@ -507,8 +507,8 @@ function discoverCatalog(agentCli: RuntimeEnv["agentCli"]): Effect.Effect<Pick<R
   return Effect.gen(function* () {
     const [modelsRaw, agentsRaw] = yield* Effect.all(captures, { concurrency: "unbounded" });
     return {
-      models: parseModels(modelsRaw, agentCli),
-      agents: parseAgents(agentsRaw),
+      models: parseModels(modelsRaw ?? "", agentCli),
+      agents: parseAgents(agentsRaw ?? ""),
     };
   });
 }
@@ -1005,10 +1005,10 @@ export const listRuntimes = (config: CliConfig): Effect.Effect<void, never> =>
 
 function printTable(rows: Record<string, string>[]): void {
   if (rows.length === 0) return;
-  const keys = Object.keys(rows[0]);
+  const keys = Object.keys(rows[0]!);
   const widths = keys.map((key) => Math.max(key.length, ...rows.map((row) => (row[key] ?? "").length)));
   const pad = (value: string, width: number) => value + " ".repeat(Math.max(0, width - value.length));
-  console.log("  " + keys.map((key, index) => pad(key, widths[index])).join("  "));
+  console.log("  " + keys.map((key, index) => pad(key, widths[index]!)).join("  "));
   console.log("  " + widths.map((width) => "-".repeat(width)).join("  "));
-  for (const row of rows) console.log("  " + keys.map((key, index) => pad(row[key] ?? "", widths[index])).join("  "));
+  for (const row of rows) console.log("  " + keys.map((key, index) => pad(row[key] ?? "", widths[index]!)).join("  "));
 }

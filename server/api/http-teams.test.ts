@@ -44,7 +44,7 @@ async function signIn(email: string): Promise<string> {
     body: { email, password: "password123" },
     returnHeaders: true,
   })) as unknown as { headers?: Headers };
-  return (res.headers?.get("set-cookie") ?? "").split(";")[0];
+  return (res.headers?.get("set-cookie") ?? "").split(";")[0]!;
 }
 
 beforeAll(async () => {
@@ -60,7 +60,7 @@ beforeAll(async () => {
   const emails = ["sa@lexa.test", "member2@lexa.test", "member3@lexa.test", "member4@lexa.test"];
   for (const email of emails) {
     const u = await auth.api.createUser({
-      body: { email, password: "password123", name: email.split("@")[0], data: { role: email.startsWith("sa") ? "superadmin" : "member" } },
+      body: { email, password: "password123", name: email.split("@")[0]!, data: { role: email.startsWith("sa") ? "superadmin" : "member" } },
     });
     userIds[email] = u.user.id;
   }
@@ -109,7 +109,7 @@ describe("teams + workspace + sessions endpoints", () => {
 
   it("duplicate explicit slug → 409 SLUG_TAKEN", async () => {
     const first = await withKey("POST", "/api/teams", { name: "Alpha", slug: "alpha" });
-    expect(first.status).toBe(201);
+    expect(first!.status).toBe(201);
     const dup = await withKey("POST", "/api/teams", { name: "Beta", slug: "alpha" });
     expect(dup.status).toBe(409);
     expect(((await dup.json()) as { error: { code: string } }).error.code).toBe("SLUG_TAKEN");
@@ -224,7 +224,7 @@ describe("teams + workspace + sessions endpoints", () => {
       body: { email: "member3@lexa.test", password: "password123" },
       returnHeaders: true,
     })) as unknown as { headers?: Headers };
-    const preCookie = (preSignIn.headers?.get?.("set-cookie") ?? "").split(";")[0];
+    const preCookie = (preSignIn.headers?.get?.("set-cookie") ?? "").split(";")[0]!;
     expect(preCookie).toMatch(/^__Secure-better-auth\.session_token=/);
     const deactivate = await withKey("PATCH", `/api/workspace/members/${userIds["member3@lexa.test"]}`, { action: "deactivate" });
     expect(deactivate.status).toBe(200);
@@ -324,13 +324,13 @@ describe("teams + workspace + sessions endpoints", () => {
     const body = (await list.json()) as { data: { id: string; ipAddress: string | null; userAgent: string | null; expiresAt: string }[] };
     expect(body.data.length).toBeGreaterThan(0);
     const [first] = body.data;
-    expect(first.id).toBeTruthy();
-    expect(first.expiresAt).toBeTruthy();
+    expect(first!.id).toBeTruthy();
+    expect(first!.expiresAt).toBeTruthy();
     // foreign session id → 404
     const foreign = await withCookie(cookie, "POST", "/api/sessions/not-mine/revoke");
     expect(foreign.status).toBe(404);
     // revoke own → 204, then the cookie dies
-    const revoked = await withCookie(cookie, "POST", `/api/sessions/${first.id}/revoke`);
+    const revoked = await withCookie(cookie, "POST", `/api/sessions/${first!.id}/revoke`);
     expect(revoked.status).toBe(204);
     const after = await withCookie(cookie, "GET", "/api/sessions");
     expect(after.status).toBe(401);

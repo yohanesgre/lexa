@@ -5,7 +5,7 @@ export function isPrivateIp(ip: string): boolean {
   // IPv4
   const v4 = ip.match(/^(\d+)\.(\d+)\.(\d+)\.(\d+)$/);
   if (v4) {
-    const [a, b] = [Number(v4[1]), Number(v4[2])];
+    const [a, b] = [Number(v4[1]!), Number(v4[2]!)];
     if (a === 10) return true;              // RFC1918 10/8
     if (a === 127) return true;             // loopback
     if (a === 169 && b === 254) return true; // link-local

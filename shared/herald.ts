@@ -26,20 +26,20 @@ export interface HeraldSettingsMasked {
 }
 
 export interface HeraldSettingsInput {
-  searchProvider?: "exa" | null;
-  searchApiKey?: string | null;
-  urlAllowlist?: string | null;
-  engine?: HearthEngine;
-  engineSwitcherEnabled?: boolean;
-  primarySupportsImages?: boolean;
-  reasoningEffort?: HeraldReasoningEffort | null;
-  writeTools?: readonly string[] | string[];
-  fallbackModelIds?: readonly string[] | string[];
-  kind?: ProviderKind;
-  baseUrl?: string;
-  model?: string;
-  apiKey?: string;
-  visionModel?: string | null;
+  searchProvider?: "exa" | null | undefined;
+  searchApiKey?: string | null | undefined;
+  urlAllowlist?: string | null | undefined;
+  engine?: HearthEngine | undefined;
+  engineSwitcherEnabled?: boolean | undefined;
+  primarySupportsImages?: boolean | undefined;
+  reasoningEffort?: HeraldReasoningEffort | null | undefined;
+  writeTools?: readonly string[] | string[] | undefined;
+  fallbackModelIds?: readonly string[] | string[] | undefined;
+  kind?: ProviderKind | undefined;
+  baseUrl?: string | undefined;
+  model?: string | undefined;
+  apiKey?: string | undefined;
+  visionModel?: string | null | undefined;
 }
 
 export type HeraldCallLogStatus = "done" | "error" | "suspended" | "aborted";
@@ -69,8 +69,8 @@ export interface HeraldModelInput {
   providerId: ID;
   modelId: string;
   kind: ProviderKind;
-  priority?: number;
-  enabled?: boolean;
+  priority?: number | undefined;
+  enabled?: boolean | undefined;
 }
 
 export interface HeraldCallLogRow {
@@ -91,18 +91,18 @@ export interface HeraldCallLogRow {
 }
 
 export interface HeraldCallLogInput {
-  projectId?: ID | null;
-  providerId?: ID | null;
+  projectId?: ID | null | undefined;
+  providerId?: ID | null | undefined;
   model: string;
   kind: ProviderKind;
   status: HeraldCallLogStatus;
-  errorCode?: string | null;
-  usageIn?: number;
-  usageOut?: number;
-  cachedIn?: number;
-  latencyMs?: number | null;
-  costCents?: number;
-  estimated?: boolean;
+  errorCode?: string | null | undefined;
+  usageIn?: number | undefined;
+  usageOut?: number | undefined;
+  cachedIn?: number | undefined;
+  latencyMs?: number | null | undefined;
+  costCents?: number | undefined;
+  estimated?: boolean | undefined;
 }
 
 export interface HeraldModelPrice {
@@ -173,11 +173,11 @@ export interface HeraldChatStreamRequest {
   projectId: ID;
   chatId: string;
   message: string;
-  agentId?: string;
-  skillId?: string;
-  attachments?: HeraldChatAttachment[];
-  fromIndex?: number;
-  reasoningEffort?: HeraldReasoningEffort | null;
+  agentId?: string | undefined;
+  skillId?: string | undefined;
+  attachments?: HeraldChatAttachment[] | undefined;
+  fromIndex?: number | undefined;
+  reasoningEffort?: HeraldReasoningEffort | null | undefined;
 }
 
 export interface HeraldChatAttachment {
@@ -192,6 +192,7 @@ export interface HeraldChatTranscript {
   ownerUserId: ID | null;
   agentId: string | null;
   skillId: string | null;
+  // Wire payload decoded via Schema at service boundary — intentionally unknown until validated.
   messages: unknown[];
   summary: string | null;
   summarizedCount: number;
@@ -246,7 +247,7 @@ export interface HeraldProvider {
 export interface HeraldProviderInput {
   label: string;
   baseUrl: string;
-  apiKey?: string;
+  apiKey?: string | undefined;
 }
 
 export interface HeraldProviderTestResult {

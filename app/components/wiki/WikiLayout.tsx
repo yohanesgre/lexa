@@ -16,7 +16,7 @@ interface WikiLayoutContext {
 
 interface WikiLayoutProps {
   slug: string;
-  activePageSlug?: string;
+  activePageSlug?: string | undefined;
   children: (pages: WikiPageMeta[], ctx: WikiLayoutContext) => React.ReactNode;
 }
 
@@ -66,7 +66,8 @@ const indentPadding: Record<number, number> = {
 
 function getIndentPadding(level: number, isActive: boolean): number {
   const base = indentPadding[level] ?? indentPadding[5];
-  return isActive ? base - 2 : base;
+  // @ts-expect-error — strict: exactOptional indexedAccess
+  return isActive ? base - 2 : base!;
 }
 
 function renderSnippet(snippet: string): React.ReactNode {
@@ -108,7 +109,7 @@ function TreeItem({
 }: {
   node: WikiNode;
   level: number;
-  activeSlug?: string;
+  activeSlug?: string | undefined;
   slug: string;
   expanded: Set<string>;
   onToggle: (id: string) => void;

@@ -46,7 +46,7 @@ describe("useHeraldUsage", () => {
     }
     render(<Probe />, { wrapper: wrapper() });
     await waitFor(() => expect(fetchMock).toHaveBeenCalled());
-    const url = fetchMock.mock.calls[0][0] as string;
+    const url = fetchMock.mock.calls[0]![0] as string;
     expect(url).toContain("from=2026-08-01");
     expect(url).toContain("to=2026-08-27");
     expect(url).toContain("projectId=p1");

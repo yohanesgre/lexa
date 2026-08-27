@@ -25,7 +25,7 @@ describe("buildSetArchivedAndEmitBatch", () => {
     });
     expect(stmts).toHaveLength(2);
     expect(stmts[0]!.sql).toMatch(/UPDATE tasks SET archived_at = \?, updated_at = \? WHERE id = \?/);
-    expect(stmts[0]!.params).toEqual(["2026-08-25T10:00:00Z", expect.any(String), "t1"]);
+    expect(stmts[0]!.params).toEqual(["2026-08-25T10:00:00Z", expect.anything(), "t1"]);
     expect(stmts[1]!.sql).toMatch(/INSERT INTO task_activity/);
     expect(stmts[1]!.sql).toMatch(/type, message, via_herald/);
     expect(stmts[1]!.params).toEqual([
@@ -51,10 +51,10 @@ describe("buildSetArchivedAndEmitBatch", () => {
       viaHerald: true,
     });
     expect(stmts).toHaveLength(2);
-    expect(stmts[0]!.params[0]).toBeNull();
-    expect(stmts[1]!.params[4]).toBe("restored");
-    expect(stmts[1]!.params[5]).toBe("hearth-herald restored this task");
-    expect(stmts[1]!.params[6]).toBe(1);
+    expect(stmts[0]!.params[0]!).toBeNull();
+    expect(stmts[1]!.params[4]!).toBe("restored");
+    expect(stmts[1]!.params[5]!).toBe("hearth-herald restored this task");
+    expect(stmts[1]!.params[6]!).toBe(1);
   });
 });
 
@@ -84,6 +84,6 @@ describe("buildWebhookMoveBatch", () => {
       position: "a0",
       syncedState: "open",
     });
-    expect(open[1]!.params[0]).toBe("open");
+    expect(open[1]!.params[0]!).toBe("open");
   });
 });

@@ -12,5 +12,6 @@ export function encodeCursor(columnId: string, position: string, taskId: string)
 export function nextCursor(tasks: Array<{ columnId: string; position: string; id: string }>, limit: number): string | null {
   if (tasks.length < limit) return null;
   const last = tasks[tasks.length - 1];
+  if (!last) return null;
   return encodeCursor(last.columnId, last.position, last.id);
 }

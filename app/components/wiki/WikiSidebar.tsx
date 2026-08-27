@@ -5,7 +5,7 @@ interface WikiSidebarProps {
   title: string;
   collapsed: boolean;
   onToggle: () => void;
-  width?: number;
+  width?: number | undefined;
   children: ReactNode;
 }
 

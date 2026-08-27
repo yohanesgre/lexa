@@ -23,8 +23,12 @@ export class ActivityService extends Effect.Service<ActivityService>()("Lexa/Act
     const listMerged = (taskId: string, cursor: string | null, limit: number): Effect.Effect<{ items: ActivityItem[]; nextCursor: string | null }, DbError> =>
       Effect.gen(function* () {
         const parsed = cursor ? (() => {
-          const [createdAt, idStr, kind] = cursor.split("|");
-          return { createdAt, id: Number(idStr), kind: kind as "event" | "comment" };
+          const parts = cursor.split("|");
+          const createdAt = parts[0] ?? "";
+          const idStr = parts[1] ?? "0";
+          const kind = parts[2] as "event" | "comment" | undefined;
+          if (!createdAt || !idStr || !kind) return null;
+          return { createdAt, id: Number(idStr), kind };
         })() : null;
         const c = parsed ? { createdAt: parsed.createdAt, id: parsed.id } : null;
         const page = limit + 1;
@@ -39,8 +43,9 @@ export class ActivityService extends Effect.Service<ActivityService>()("Lexa/Act
         const hasMore = merged.length > limit;
         const slice = merged.slice(0, limit);
         const items = slice.map((s) => s.item).reverse(); // ascending oldest→newest
-        const nextCursor = hasMore && slice.length > 0
-          ? `${slice[slice.length - 1].at}|${slice[slice.length - 1].id}|${slice[slice.length - 1].kind}`
+        const last = slice[slice.length - 1];
+        const nextCursor = hasMore && last
+          ? `${last.at}|${last.id}|${last.kind}`
           : null;
         return { items, nextCursor };
       });

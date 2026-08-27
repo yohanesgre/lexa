@@ -8,7 +8,7 @@ interface NewPageModalProps {
   slug: string;
   isOpen: boolean;
   onClose: () => void;
-  defaultParentId?: string | null;
+  defaultParentId?: string | null | undefined;
   pages: WikiPageMeta[];
 }
 

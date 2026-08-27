@@ -54,7 +54,7 @@ describe("applyResumeResults", () => {
     };
     const out = applyResumeResults([entry], ["b1"]);
     expect(out).toHaveLength(1);
-    expect(out[0]).toEqual({
+    expect(out[0]!).toEqual({
       role: "assistant",
       content: "proposed writes",
       ts: "2026-08-24T00:00:00Z",
@@ -69,15 +69,15 @@ describe("applyResumeResults", () => {
       { role: "assistant", content: "b", pendingBatch: "b2" },
     ];
     const out = applyResumeResults(messages, ["b1"]);
-    expect(out[0]).toEqual(messages[0]);
-    expect(out[1]).toEqual({ role: "assistant", content: "a" });
-    expect(out[2]).toEqual(messages[2]);
+    expect(out[0]!).toEqual(messages[0]!);
+    expect(out[1]!).toEqual({ role: "assistant", content: "a" });
+    expect(out[2]!).toEqual(messages[2]!);
   });
 
   it("does not mutate the input transcript", () => {
     const messages = [{ role: "assistant", content: "a", pendingBatch: "b1" }];
     applyResumeResults(messages, ["b1"]);
-    expect(messages[0]).toHaveProperty("pendingBatch", "b1");
+    expect(messages[0]!).toHaveProperty("pendingBatch", "b1");
   });
 
   it("handles null entries without throwing", () => {
@@ -92,14 +92,14 @@ describe("applyResumeResults", () => {
       pendingBatch: { batchId: "b1", approvals: [{ approvalId: "a1", toolCallId: "call_1" }] },
     };
     const out = applyResumeResults([{ role: "user", content: "go" }, entry], ["b1"]);
-    expect(out[0]).toEqual({ role: "user", content: "go" });
-    expect(out[1]).toEqual({ role: "assistant", content: "proposed writes", ts: "2026-08-24T00:00:00Z" });
+    expect(out[0]!).toEqual({ role: "user", content: "go" });
+    expect(out[1]!).toEqual({ role: "assistant", content: "proposed writes", ts: "2026-08-24T00:00:00Z" });
   });
 
   it("leaves object markers of unresolved batches alone", () => {
     const entry = { role: "assistant", content: "a", pendingBatch: { batchId: "b2", approvals: [] } };
     const out = applyResumeResults([entry], ["b1"]);
-    expect(out[0]).toEqual(entry);
+    expect(out[0]!).toEqual(entry);
   });
 
   it("mixed shapes resolve independently", () => {

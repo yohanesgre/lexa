@@ -59,7 +59,7 @@ export class HearthRepo extends Effect.Service<HearthRepo>()("Lexa/HearthRepo", 
             input.hostname
           );
           const rows = yield* queryAll<RuntimeRow>(db, `SELECT * FROM runtimes WHERE id = ?`, input.id);
-          const row = rows[0];
+          const row = rows[0]!;
           if (!row) return yield* Effect.fail(new DbError({ message: "runtime row missing after registration" }));
           return rowToRuntime(row);
         }),
@@ -352,7 +352,7 @@ export class HearthRepo extends Effect.Service<HearthRepo>()("Lexa/HearthRepo", 
             teamId,
             runtimeId
           );
-          const task = rows[0];
+          const task = rows[0]!;
           if (!task) return null;
           yield* run(
             db,
@@ -577,12 +577,12 @@ export class HearthRepo extends Effect.Service<HearthRepo>()("Lexa/HearthRepo", 
       // use by queued/running/history rows cannot be removed).
       countTasksByAgent: (agentId: string): Effect.Effect<number, DbError> =>
         queryAll<{ n: number }>(db, `SELECT COUNT(*) AS n FROM hearth_tasks WHERE agent_id = ?`, agentId).pipe(
-          Effect.map((rows) => rows[0]?.n ?? 0)
+          Effect.map((rows) => rows[0]!?.n ?? 0)
         ),
 
       countTasksBySkill: (skillId: string): Effect.Effect<number, DbError> =>
         queryAll<{ n: number }>(db, `SELECT COUNT(*) AS n FROM hearth_tasks WHERE skill_id = ?`, skillId).pipe(
-          Effect.map((rows) => rows[0]?.n ?? 0)
+          Effect.map((rows) => rows[0]!?.n ?? 0)
         ),
 
       // ── Task activity log ──

@@ -43,12 +43,12 @@ describe("analyzeImage wire formats (fake fetch)", () => {
     const out = await analyzeImage(deps(fetchImpl), "k1", "what is shown?");
     expect(out).toBe("a red button");
     expect(calls).toHaveLength(1);
-    expect(calls[0].url).toBe("https://vision.example.com/v1/chat/completions");
-    const headers = new Headers(calls[0].init.headers as Record<string, string>);
+    expect(calls[0]!.url).toBe("https://vision.example.com/v1/chat/completions");
+    const headers = new Headers(calls[0]!.init.headers as Record<string, string>);
     expect(headers.get("authorization")).toBe("Bearer vk-test");
-    const body = JSON.parse(String(calls[0].init.body)) as { model: string; messages: Array<{ content: Array<Record<string, unknown>> }> };
+    const body = JSON.parse(String(calls[0]!.init.body)) as { model: string; messages: Array<{ content: Array<Record<string, unknown>> }> };
     expect(body.model).toBe("vl-1");
-    const img = body.messages[0].content.find((p) => p.type === "image_url") as { image_url: { url: string } };
+    const img = body.messages[0]!.content.find((p) => p.type === "image_url") as { image_url: { url: string } };
     expect(img.image_url.url.startsWith("data:image/png;base64,QkY=")).toBe(true);
   });
 
@@ -61,12 +61,12 @@ describe("analyzeImage wire formats (fake fetch)", () => {
     const d = { ...deps(fetchImpl), config: config("anthropic_compatible") };
     const out = await analyzeImage(d, "k1", "describe");
     expect(out).toBe("part1\npart2");
-    expect(calls[0].url).toBe("https://vision.example.com/v1/messages");
-    const headers = new Headers(calls[0].init.headers as Record<string, string>);
+    expect(calls[0]!.url).toBe("https://vision.example.com/v1/messages");
+    const headers = new Headers(calls[0]!.init.headers as Record<string, string>);
     expect(headers.get("x-api-key")).toBe("vk-test");
     expect(headers.get("anthropic-version")).toBe("2023-06-01");
-    const body = JSON.parse(String(calls[0].init.body)) as { messages: Array<{ content: Array<Record<string, unknown>> }> };
-    const img = body.messages[0].content.find((p) => p.type === "image") as { source: Record<string, unknown> };
+    const body = JSON.parse(String(calls[0]!.init.body)) as { messages: Array<{ content: Array<Record<string, unknown>> }> };
+    const img = body.messages[0]!.content.find((p) => p.type === "image") as { source: Record<string, unknown> };
     expect(img.source).toEqual({ type: "base64", media_type: "image/png", data: "QkY=" });
   });
 
@@ -93,7 +93,7 @@ describe("frame suppression + placeholder transform", () => {
       { role: "user", content: ["look at", { type: "image-ref", storageKey: "k1", mimeType: "image/png" }, "and this"] },
       { role: "assistant", content: "plain" },
     ]);
-    expect(out[0].content).toEqual(["look at", { type: "text", content: "[attached image: k1]" }, "and this"]);
-    expect(out[1].content).toBe("plain");
+    expect(out[0]!.content).toEqual(["look at", { type: "text", content: "[attached image: k1]" }, "and this"]);
+    expect(out[1]!.content).toBe("plain");
   });
 });

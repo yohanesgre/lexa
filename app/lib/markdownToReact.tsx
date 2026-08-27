@@ -14,7 +14,7 @@ import hljs from "highlight.js/lib/common";
 export interface MarkdownRenderOptions {
   // Hook for plain-text leaves (e.g. mention-chip tokenization). Never
   // applied inside code spans/blocks — those keep literal semantics.
-  renderText?: (text: string) => ReactNode;
+  renderText?: ((text: string) => ReactNode) | undefined;
 }
 
 // Highlighted-code boundary: the ONLY dangerouslySetInnerHTML in chat. Input

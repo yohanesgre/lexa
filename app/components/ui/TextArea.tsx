@@ -4,7 +4,7 @@ export interface TextAreaProps
   extends Omit<React.TextareaHTMLAttributes<HTMLTextAreaElement>, "onChange"> {
   value: string;
   onChange: (value: string) => void;
-  invalid?: boolean;
+  invalid?: boolean | undefined;
 }
 
 export function TextArea({ value, onChange, invalid, className, ...rest }: TextAreaProps) {

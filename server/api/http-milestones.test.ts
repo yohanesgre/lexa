@@ -66,7 +66,7 @@ describe("milestones routes", () => {
     expect(list.status).toBe(200);
     const data = (await list.json()).data;
     expect(data).toHaveLength(2); // seeded + created
-    expect(data[1]).toMatchObject({ name: "v1", dueAt: "2026-08-30", sprintCount: 0, archivedSprintCount: 0 });
+    expect(data[1]!).toMatchObject({ name: "v1", dueAt: "2026-08-30", sprintCount: 0, archivedSprintCount: 0 });
     const board = await handler(json("GET", "/api/projects/p1/board"));
     const body = await board.json();
     expect(Array.isArray(body.milestones)).toBe(true);
@@ -117,7 +117,7 @@ describe("milestones routes", () => {
     expect(aBody.data.archivedAt).not.toBeNull();
     expect(aBody.data.sprintCount).toBe(1); // mutation responses carry real counts
     expect(aBody.activity.map((a: { type: string }) => a.type)).toEqual(["archived"]);
-    expect(aBody.activity[0]).toMatchObject({ actorLabel: "Maria", message: "Maria archived this task" });
+    expect(aBody.activity[0]!).toMatchObject({ actorLabel: "Maria", message: "Maria archived this task" });
     const lane = db.prepare("SELECT archived_at FROM swimlanes WHERE id = 'sp2'").get() as { archived_at: string | null };
     expect(lane.archived_at).not.toBeNull();
     const task = db.prepare("SELECT archived_at FROM tasks WHERE id = 't-ar'").get() as { archived_at: string | null };

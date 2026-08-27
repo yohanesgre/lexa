@@ -273,8 +273,8 @@ describe("prependActivity", () => {
     });
     prependActivity(queryClient, "demo", "t1", [{ kind: "event" as const, id: 2, taskId: "t1", actorKind: "user" as const, actorLabel: "A", actorUserId: null, type: "moved" as const, message: "m2", viaHerald: false, createdAt: "t2" }]);
     const cached = queryClient.getQueryData(["task-activity", "demo", "t1"]) as { pages: { data: unknown[] }[] };
-    expect(cached.pages[0].data).toHaveLength(2);
-    expect(cached.pages[1].data).toHaveLength(0);
-    expect((cached.pages[0].data[1] as { message: string }).message).toBe("m2");
+    expect(cached.pages[0]!.data).toHaveLength(2);
+    expect(cached.pages[1]!.data).toHaveLength(0);
+    expect((cached.pages[0]!.data[1] as { message: string }).message).toBe("m2");
   });
 });

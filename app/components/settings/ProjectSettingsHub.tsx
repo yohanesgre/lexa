@@ -357,7 +357,7 @@ function LinkedReposSection({ slug }: { slug: string }) {
   );
 }
 
-function RemoveRepoModal({ repo, onCancel, onConfirm }: { repo?: string; onCancel: () => void; onConfirm: () => void }) {
+function RemoveRepoModal({ repo, onCancel, onConfirm }: { repo?: string | undefined; onCancel: () => void; onConfirm: () => void }) {
   return (
     <>
       <button type="button" className="slideover-overlay" onClick={onCancel} aria-label="Close" />

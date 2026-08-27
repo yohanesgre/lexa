@@ -118,7 +118,7 @@ describe("ProjectMemoryRepo FTS searchByProject", () => {
         yield* repo.create({ id: "m3", projectId: "p1", content: "tunnel credentials live in cloudflare dashboard" });
         const hits = yield* repo.searchByProject("p1", ["tunnel", "cloudflared"]);
         expect(hits.length).toBeGreaterThanOrEqual(1);
-        expect(hits[0]).toContain("cloudflared tunnel");
+        expect(hits[0]!).toContain("cloudflared tunnel");
         expect(hits.some((h) => h.includes("sqlite"))).toBe(false);
       })
     );

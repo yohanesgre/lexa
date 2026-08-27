@@ -108,8 +108,8 @@ describe("HearthSessionRepo upsert/get", () => {
         yield* repo.upsert({ documentType: "task", documentId: "t1", runtimeId: "rt1", runtimeSessionId: "sess-2", provider: "opencode", agentId: "a1", skillId: "sk2" });
         const rows = yield* repo.listForDocument("task", "t1");
         expect(rows).toHaveLength(1);
-        expect(rows[0].runtime_session_id).toBe("sess-2");
-        expect(rows[0].skill_id).toBe("sk2");
+        expect(rows[0]!.runtime_session_id).toBe("sess-2");
+        expect(rows[0]!.skill_id).toBe("sk2");
       })
     );
   });
@@ -143,7 +143,7 @@ describe("HearthSessionRepo per-runtime isolation", () => {
         yield* repo.upsert({ documentType: "task", documentId: "t2", runtimeId: "rt1", runtimeSessionId: "s2", provider: "opencode", agentId: "a1", skillId: "sk1" });
         const rows = yield* repo.listForDocument("task", "t1");
         expect(rows).toHaveLength(1);
-        expect(rows[0].document_id).toBe("t1");
+        expect(rows[0]!.document_id).toBe("t1");
       })
     );
   });
@@ -176,7 +176,7 @@ describe("HearthSessionRepo remove", () => {
         yield* repo.remove("wiki", "w1", "rt1");
         const rows = yield* repo.listForDocument("wiki", "w1");
         expect(rows).toHaveLength(1);
-        expect(rows[0].runtime_id).toBe("rt2");
+        expect(rows[0]!.runtime_id).toBe("rt2");
       })
     );
   });

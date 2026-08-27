@@ -41,7 +41,7 @@ async function signIn(email: string): Promise<string> {
     body: { email, password: "password123" },
     returnHeaders: true,
   })) as unknown as { headers?: Headers };
-  return (res.headers?.get("set-cookie") ?? "").split(";")[0];
+  return (res.headers?.get("set-cookie") ?? "").split(";")[0]!;
 }
 
 beforeAll(async () => {
@@ -59,7 +59,7 @@ beforeAll(async () => {
       body: {
         email,
         password: "password123",
-        name: email.split("@")[0],
+        name: email.split("@")[0]!!,
         data: { role: email.startsWith("sa") ? "superadmin" : "member" },
       },
     });

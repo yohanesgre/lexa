@@ -88,8 +88,8 @@ describe("PUT /api/hearth/sessions", () => {
     const list = await handler(adminReq("/api/hearth/sessions?documentType=task&documentId=t1"));
     const body = await list.json();
     expect(body.data).toHaveLength(1);
-    expect(body.data[0].runtimeSessionId).toBe("sess-2");
-    expect(body.data[0].skillId).toBe("sk2");
+    expect(body.data[0]!.runtimeSessionId).toBe("sess-2");
+    expect(body.data[0]!.skillId).toBe("sk2");
   });
 });
 
@@ -100,7 +100,7 @@ describe("GET /api/hearth/sessions", () => {
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.data).toHaveLength(1);
-    const row = body.data[0];
+    const row = body.data[0]!;
     expect(row.documentType).toBe("task");
     expect(row.documentId).toBe("t1");
     expect(row.runtimeId).toBe("rt1");

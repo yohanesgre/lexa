@@ -64,7 +64,7 @@ describe("GET /api/admin/herald/usage", () => {
     expect(body.summary.totalCostCents).toBe(360);
     expect(body.summary.errorRate).toBeCloseTo(0.25);
     expect(body.byDay.length).toBe(3);
-    expect(body.byDay[0].day).toBe("2026-08-01");
+    expect(body.byDay[0]!.day).toBe("2026-08-01");
     expect(body.byModel.length).toBeGreaterThanOrEqual(2);
     expect(body.totalCostCents).toBe(360);
   });
@@ -75,7 +75,7 @@ describe("GET /api/admin/herald/usage", () => {
     const body = await res.json() as any;
     expect(body.summary.totalCalls).toBe(2);
     expect(body.byDay.length).toBe(1);
-    expect(body.byDay[0].day).toBe("2026-08-02");
+    expect(body.byDay[0]!.day).toBe("2026-08-02");
   });
 
   it("filters by projectId", async () => {

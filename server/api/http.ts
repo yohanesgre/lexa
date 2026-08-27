@@ -92,7 +92,7 @@ import * as msg from "../activity-messages";
 import { WebhookEventRepo } from "../repos/webhook-event.repo";
 import { GitHubClient } from "../github/client";
 import { extractText } from "../../shared/tiptap-text";
-import type { ActivityEvent, HearthTask, Project, DomainProject } from "../../shared/types";
+import type { ActivityEvent, HearthTask, Project, DomainProject, Column, Swimlane, Milestone, Task, WikiPage, WikiPageMeta, WikiPageRevision, WikiPageRevisionSummary } from "../../shared/types";
 import type { StreamFrame } from "../../shared/herald";
 
 const ApiKeySchema = Schema.Struct({
@@ -1749,11 +1749,10 @@ export const LexaApi = HttpApi.make("lexa")
 
 const apiLayer = HttpApiBuilder.api(LexaApi);
 
-// The HttpApi platform rewrites req.request.url to a host-less relative path
-// (fromWeb → removeHost). originalUrl keeps the full URL, so parse query params
-// from that instead of calling `new URL(req.request.url)` (which throws).
-const searchParams = (req: { request: { originalUrl: string } }): URLSearchParams =>
-  URL.parse(req.request.originalUrl)?.searchParams ?? new URLSearchParams();
+const searchParams = (req: unknown): URLSearchParams => {
+  const url = (req as { request?: { originalUrl?: string } })?.request?.originalUrl;
+  return url ? (URL.parse(url)?.searchParams ?? new URLSearchParams()) : new URLSearchParams();
+};
 
 // Admin-only gate: consumes the caller identity resolved by the API
 // middleware (member keys are 403'd there already — this is belt-and-braces
@@ -1848,7 +1847,7 @@ function generateRawApiKey(): string {
   let result = "";
   const base = 62n;
   while (value > 0n) { result = chars[Number(value % base)] + result; value /= base; }
-  while (result.length < 43) result = chars[0] + result;
+  while (result.length < 43) result = chars[0]! + result;
   return `lxk_${result}`;
 }
 
@@ -1990,8 +1989,10 @@ const projectsLive = HttpApiBuilder.group(LexaApi, "projects", (handlers) =>
           if (!team) return yield* Effect.fail(new TeamNotFound({ teamId }));
         }
         const project = yield* service.create({
-          name: req.payload.name, slug: req.payload.slug,
-          description: req.payload.description, teamId,
+          name: req.payload.name,
+          ...(req.payload.slug !== undefined ? { slug: req.payload.slug } : {}),
+          ...(req.payload.description !== undefined ? { description: req.payload.description } : {}),
+          teamId,
         });
         return yield* withRepos(project);
       }))
@@ -2048,8 +2049,8 @@ const projectsLive = HttpApiBuilder.group(LexaApi, "projects", (handlers) =>
         yield* requireAdmin;
         const service = yield* ProjectService;
         const project = yield* service.update(req.path.slug, {
-          name: req.payload.name,
-          description: req.payload.description,
+          ...(req.payload.name !== undefined ? { name: req.payload.name } : {}),
+          ...(req.payload.description !== undefined ? { description: req.payload.description } : {}),
         });
         return yield* withRepos(project);
       }))
@@ -2114,9 +2115,10 @@ const columnsLive = HttpApiBuilder.group(LexaApi, "columns", (handlers) =>
         const project = yield* projectService.findBySlug(req.path.slug);
         const column = yield* columnService.create({
           projectId: project.id, name: req.payload.name,
-          color: req.payload.color,
-          wipLimit: req.payload.wipLimit, requiredFields: req.payload.requiredFields as string[] | undefined,
-          githubState: req.payload.githubState,
+          ...(req.payload.color !== undefined ? { color: req.payload.color } : {}),
+          ...(req.payload.wipLimit !== undefined ? { wipLimit: req.payload.wipLimit } : {}),
+          ...(req.payload.requiredFields !== undefined ? { requiredFields: req.payload.requiredFields as string[] } : {}),
+          ...(req.payload.githubState !== undefined ? { githubState: req.payload.githubState } : {}),
         });
         return formatColumn(column);
       }))
@@ -2126,10 +2128,12 @@ const columnsLive = HttpApiBuilder.group(LexaApi, "columns", (handlers) =>
         yield* requireAdmin;
         const columnService = yield* ColumnService;
         const column = yield* columnService.update(req.path.id, {
-          name: req.payload.name, position: req.payload.position,
-          color: req.payload.color, wipLimit: req.payload.wipLimit,
-          requiredFields: req.payload.requiredFields as string[] | undefined,
-          githubState: req.payload.githubState,
+          ...(req.payload.name !== undefined ? { name: req.payload.name } : {}),
+          ...(req.payload.position !== undefined ? { position: req.payload.position } : {}),
+          ...(req.payload.color !== undefined ? { color: req.payload.color } : {}),
+          ...(req.payload.wipLimit !== undefined ? { wipLimit: req.payload.wipLimit } : {}),
+          ...(req.payload.requiredFields !== undefined ? { requiredFields: req.payload.requiredFields as string[] } : {}),
+          ...(req.payload.githubState !== undefined ? { githubState: req.payload.githubState } : {}),
         });
         return formatColumn(column);
       }))
@@ -2161,8 +2165,11 @@ const swimlanesLive = HttpApiBuilder.group(LexaApi, "swimlanes", (handlers) =>
         const swimlaneService = yield* SwimlaneService;
         const project = yield* projectService.findBySlug(req.path.slug);
         const swimlane = yield* swimlaneService.create({
-          projectId: project.id, name: req.payload.name, description: req.payload.description,
-          dueAt: req.payload.dueAt, startAt: req.payload.startAt, milestoneId: req.payload.milestoneId,
+          projectId: project.id, name: req.payload.name,
+          ...(req.payload.description !== undefined ? { description: req.payload.description } : {}),
+          ...(req.payload.dueAt !== undefined ? { dueAt: req.payload.dueAt } : {}),
+          ...(req.payload.startAt !== undefined ? { startAt: req.payload.startAt } : {}),
+          ...(req.payload.milestoneId !== undefined ? { milestoneId: req.payload.milestoneId } : {}),
         });
         return formatSwimlane(swimlane);
       }))
@@ -2172,8 +2179,12 @@ const swimlanesLive = HttpApiBuilder.group(LexaApi, "swimlanes", (handlers) =>
         yield* requireAdmin;
         const swimlaneService = yield* SwimlaneService;
         const swimlane = yield* swimlaneService.update(req.path.id, {
-          name: req.payload.name, description: req.payload.description, position: req.payload.position,
-          dueAt: req.payload.dueAt, startAt: req.payload.startAt, milestoneId: req.payload.milestoneId,
+          ...(req.payload.name !== undefined ? { name: req.payload.name } : {}),
+          ...(req.payload.description !== undefined ? { description: req.payload.description } : {}),
+          ...(req.payload.position !== undefined ? { position: req.payload.position } : {}),
+          ...(req.payload.dueAt !== undefined ? { dueAt: req.payload.dueAt } : {}),
+          ...(req.payload.startAt !== undefined ? { startAt: req.payload.startAt } : {}),
+          ...(req.payload.milestoneId !== undefined ? { milestoneId: req.payload.milestoneId } : {}),
         });
         return formatSwimlane(swimlane);
       }))
@@ -2223,7 +2234,9 @@ const milestonesLive = HttpApiBuilder.group(LexaApi, "milestones", (handlers) =>
         const milestoneService = yield* MilestoneService;
         const project = yield* projectService.findBySlug(req.path.slug);
         const milestone = yield* milestoneService.create({
-          projectId: project.id, name: req.payload.name, description: req.payload.description, dueAt: req.payload.dueAt,
+          projectId: project.id, name: req.payload.name,
+          ...(req.payload.description !== undefined ? { description: req.payload.description } : {}),
+          ...(req.payload.dueAt !== undefined ? { dueAt: req.payload.dueAt } : {}),
         });
         return formatMilestone(milestone);
       }))
@@ -2233,7 +2246,10 @@ const milestonesLive = HttpApiBuilder.group(LexaApi, "milestones", (handlers) =>
         yield* requireAdmin;
         const milestoneService = yield* MilestoneService;
         const milestone = yield* milestoneService.update(req.path.id, {
-          name: req.payload.name, description: req.payload.description, position: req.payload.position, dueAt: req.payload.dueAt,
+          ...(req.payload.name !== undefined ? { name: req.payload.name } : {}),
+          ...(req.payload.description !== undefined ? { description: req.payload.description } : {}),
+          ...(req.payload.position !== undefined ? { position: req.payload.position } : {}),
+          ...(req.payload.dueAt !== undefined ? { dueAt: req.payload.dueAt } : {}),
         });
         return formatMilestone(milestone);
       }))
@@ -2305,7 +2321,7 @@ const hearthLive = HttpApiBuilder.group(LexaApi, "hearth", (handlers) =>
       respond(Effect.gen(function* () {
         const service = yield* HearthService;
         const runtime = yield* service.registerRuntime({
-          id: req.payload.id,
+          ...(req.payload.id !== undefined ? { id: req.payload.id } : {}),
           name: req.payload.name,
           provider: req.payload.provider,
           machineId: req.payload.machineId,
@@ -2405,8 +2421,8 @@ const hearthLive = HttpApiBuilder.group(LexaApi, "hearth", (handlers) =>
           machineId: req.payload.machineId,
           action: req.payload.action,
           agentCli: req.payload.agentCli,
-          apiKeyId: req.payload.apiKeyId,
-          rawKey: req.payload.rawKey,
+          ...(req.payload.apiKeyId !== undefined ? { apiKeyId: req.payload.apiKeyId } : {}),
+          ...(req.payload.rawKey !== undefined ? { rawKey: req.payload.rawKey } : {}),
         });
       }))
     )
@@ -2450,7 +2466,7 @@ const hearthLive = HttpApiBuilder.group(LexaApi, "hearth", (handlers) =>
         const machine = yield* machineService.heartbeat({
           id: req.payload.id,
           hostname: req.payload.hostname ?? "",
-          clis: req.payload.clis ? req.payload.clis.map((c) => ({ provider: c.provider, version: c.version })) : undefined,
+          ...(req.payload.clis !== undefined ? { clis: req.payload.clis.map((c) => ({ provider: c.provider, version: c.version })) } : {}),
         });
         if (req.payload.runtimes) {
           yield* hearthService.syncCatalogs(req.payload.id, req.payload.runtimes.map((catalog) => ({
@@ -2538,7 +2554,7 @@ const hearthLive = HttpApiBuilder.group(LexaApi, "hearth", (handlers) =>
           skillId: req.payload.skillId,
           extraPrompt: req.payload.extraPrompt ?? "",
           selection: req.payload.selection ?? "",
-          runtimeId: req.payload.runtimeId,
+          ...(req.payload.runtimeId !== undefined ? { runtimeId: req.payload.runtimeId } : {}),
         });
         return task;
       }))
@@ -2585,10 +2601,10 @@ const hearthLive = HttpApiBuilder.group(LexaApi, "hearth", (handlers) =>
         const limit = Number.isFinite(limitRaw) ? Math.min(Math.max(Math.trunc(limitRaw), 1), 200) : 50;
         const result = yield* service.listHistory(
           {
-            projectId: project?.id,
-            status: status && statuses.has(status) ? (status as "queued" | "running" | "completed" | "failed" | "cancelled") : undefined,
-            skillId,
-            documentType: documentType === "task" || documentType === "wiki" ? documentType : undefined,
+            ...(project?.id !== undefined ? { projectId: project.id } : {}),
+            ...(status && statuses.has(status) ? { status: status as "queued" | "running" | "completed" | "failed" | "cancelled" } : {}),
+            ...(skillId !== undefined ? { skillId } : {}),
+            ...(documentType === "task" || documentType === "wiki" ? { documentType } : {}),
           },
           limit,
           q.get("cursor") ?? undefined
@@ -2721,7 +2737,11 @@ const agentsLive = HttpApiBuilder.group(LexaApi, "agents", (handlers) =>
       respond(Effect.gen(function* () {
         yield* requireAdmin;
         const service = yield* HearthService;
-        return yield* service.updateAgent(req.path.id, req.payload);
+        return yield* service.updateAgent(req.path.id, {
+          ...(req.payload.name !== undefined ? { name: req.payload.name } : {}),
+          ...(req.payload.description !== undefined ? { description: req.payload.description } : {}),
+          ...(req.payload.instructions !== undefined ? { instructions: req.payload.instructions } : {}),
+        });
       }))
     )
     .handle("deleteAgent", (req) =>
@@ -2768,7 +2788,11 @@ const skillsLive = HttpApiBuilder.group(LexaApi, "skills", (handlers) =>
       respond(Effect.gen(function* () {
         yield* requireAdmin;
         const service = yield* HearthService;
-        return yield* service.updateSkill(req.path.id, req.payload);
+        return yield* service.updateSkill(req.path.id, {
+          ...(req.payload.name !== undefined ? { name: req.payload.name } : {}),
+          ...(req.payload.description !== undefined ? { description: req.payload.description } : {}),
+          ...(req.payload.instructions !== undefined ? { instructions: req.payload.instructions } : {}),
+        });
       }))
     )
     .handle("deleteSkill", (req) =>
@@ -2840,8 +2864,8 @@ const heraldLive = HttpApiBuilder.group(LexaApi, "herald", (handlers) =>
           prompt: req.payload.prompt,
           agentId: req.payload.agentId,
           skillId: req.payload.skillId,
-          selection: req.payload.selection,
-          attachments: req.payload.attachments ? [...req.payload.attachments] : undefined,
+          ...(req.payload.selection !== undefined ? { selection: req.payload.selection } : {}),
+          ...(req.payload.attachments !== undefined ? { attachments: [...req.payload.attachments] } : {}),
         });
       }))
     )
@@ -2856,7 +2880,7 @@ const heraldLive = HttpApiBuilder.group(LexaApi, "herald", (handlers) =>
           if (!access) return yield* new ProjectAccessDenied({ project: task.projectId, role: "member" });
         }
         const service = yield* HeraldService;
-        const frames = yield* service.runStream(req.path.id, { userId: identity.userId ?? undefined });
+        const frames = yield* service.runStream(req.path.id, { ...(identity.userId !== undefined && identity.userId !== null ? { userId: identity.userId } : {}) });
         wireDisconnectAbort(yield* HttpServerRequest, () => service.abortStream(req.path.id));
         return sseHttpResponse(frames);
       }))
@@ -2982,7 +3006,7 @@ const heraldLive = HttpApiBuilder.group(LexaApi, "herald", (handlers) =>
         const project = yield* requireProjectReadById(req.path.projectId);
         const service = yield* HeraldService;
         const q = searchParams(req).get("q") ?? undefined;
-        return { data: yield* service.listChats(project.id, identity.userId, { q }) };
+        return { data: yield* service.listChats(project.id, identity.userId, { ...(q !== undefined ? { q } : {}) }) };
       }))
     )
     .handle("renameHeraldChat", (req) =>
@@ -2991,7 +3015,7 @@ const heraldLive = HttpApiBuilder.group(LexaApi, "herald", (handlers) =>
         if (!identity.userId) return yield* new NoUserContext();
         const service = yield* HeraldService;
         const t = yield* service
-          .updateChatMeta(req.path.chatId, identity.userId, { title: req.payload.title, pinned: req.payload.pinned })
+          .updateChatMeta(req.path.chatId, identity.userId, { ...(req.payload.title !== undefined ? { title: req.payload.title } : {}), ...(req.payload.pinned !== undefined ? { pinned: req.payload.pinned } : {}) })
           .pipe(
             Effect.catchTag("RowNotFound", () => new HeraldThreadNotFound({ documentType: "chat", documentId: req.path.chatId }))
           );
@@ -3122,10 +3146,10 @@ const tasksLive = HttpApiBuilder.group(LexaApi, "tasks", (handlers) =>
         const limit = clampLimit(q.get("limit"));
         const cursor = q.get("cursor") ?? undefined;
         const filters = {
-          columnId: q.get("columnId") ?? undefined,
-          swimlaneId: q.get("swimlaneId") ?? undefined,
-          assignee: q.get("assignee") ?? undefined,
-          type: q.get("type") ?? undefined,
+          ...(q.get("columnId") ? { columnId: q.get("columnId")! } : {}),
+          ...(q.get("swimlaneId") ? { swimlaneId: q.get("swimlaneId")! } : {}),
+          ...(q.get("assignee") ? { assignee: q.get("assignee")! } : {}),
+          ...(q.get("type") ? { type: q.get("type")! } : {}),
         };
         const result = yield* taskService.findByProject(project.id, filters, limit, cursor);
         return {
@@ -3141,11 +3165,14 @@ const tasksLive = HttpApiBuilder.group(LexaApi, "tasks", (handlers) =>
         const project = yield* requireProjectRead(req.path.slug);
         const { task, activity } = yield* taskService.create(actorFromIdentity(identity), {
           projectId: project.id, columnId: req.payload.columnId,
-          swimlaneId: req.payload.swimlaneId, title: req.payload.title,
-          description: req.payload.description, priority: req.payload.priority,
-          type: req.payload.type, parentId: req.payload.parentId,
-          assignees: req.payload.assignees ? [...req.payload.assignees] : undefined,
-          dueAt: req.payload.dueAt,
+          ...(req.payload.swimlaneId !== undefined ? { swimlaneId: req.payload.swimlaneId } : {}),
+          title: req.payload.title,
+          ...(req.payload.description !== undefined ? { description: req.payload.description } : {}),
+          ...(req.payload.priority !== undefined ? { priority: req.payload.priority } : {}),
+          ...(req.payload.type !== undefined ? { type: req.payload.type } : {}),
+          ...(req.payload.parentId !== undefined ? { parentId: req.payload.parentId } : {}),
+          ...(req.payload.assignees !== undefined ? { assignees: [...req.payload.assignees] } : {}),
+          ...(req.payload.dueAt !== undefined ? { dueAt: req.payload.dueAt } : {}),
         });
         return { data: formatTask(task), activity: activityPayload(activity) };
       }))
@@ -3166,10 +3193,12 @@ const tasksLive = HttpApiBuilder.group(LexaApi, "tasks", (handlers) =>
         const identity = yield* AuthIdentity;
         const id = yield* resolveTaskId(req.path.id, req.path.slug);
         const { task, activity } = yield* taskService.update(actorFromIdentity(identity), id, {
-          title: req.payload.title, description: req.payload.description,
-          priority: req.payload.priority, type: req.payload.type,
-          assignees: req.payload.assignees ? [...req.payload.assignees] : undefined,
-          dueAt: req.payload.dueAt,
+          ...(req.payload.title !== undefined ? { title: req.payload.title } : {}),
+          ...(req.payload.description !== undefined ? { description: req.payload.description } : {}),
+          ...(req.payload.priority !== undefined ? { priority: req.payload.priority } : {}),
+          ...(req.payload.type !== undefined ? { type: req.payload.type } : {}),
+          ...(req.payload.assignees !== undefined ? { assignees: [...req.payload.assignees] } : {}),
+          ...(req.payload.dueAt !== undefined ? { dueAt: req.payload.dueAt } : {}),
         });
         if (task.githubs.length > 0) {
           // Best-effort content push (title+body → all linked issues). The
@@ -3197,8 +3226,9 @@ const tasksLive = HttpApiBuilder.group(LexaApi, "tasks", (handlers) =>
         const id = yield* resolveTaskId(req.path.id, req.path.slug);
         const { task, activity } = yield* taskService.move(actorFromIdentity(identity), id, {
           columnId: req.payload.columnId, swimlaneId: req.payload.swimlaneId,
-          beforeTaskId: req.payload.beforeTaskId, afterTaskId: req.payload.afterTaskId,
-          clearDueAt: req.payload.clearDueAt,
+          ...(req.payload.beforeTaskId !== undefined ? { beforeTaskId: req.payload.beforeTaskId } : {}),
+          ...(req.payload.afterTaskId !== undefined ? { afterTaskId: req.payload.afterTaskId } : {}),
+          ...(req.payload.clearDueAt !== undefined ? { clearDueAt: req.payload.clearDueAt } : {}),
         });
         const column = yield* columnService.getById(req.payload.columnId);
         if (column.githubState && task.githubs.length > 0) {
@@ -3409,7 +3439,7 @@ const dashboardLive = HttpApiBuilder.group(LexaApi, "dashboard", (handlers) =>
         return {
           projects: visible.map((ph) => ({
             ...ph,
-            project: { ...ph.project, teamId: (ph.project as unknown as { teamId?: string | null }).teamId ?? null },
+            project: { ...ph.project, teamId: (ph.project as { teamId?: string | null }).teamId ?? null },
           })),
           stats: {
             totalTasks: visible.reduce((s, ph) => s + ph.taskCount, 0),
@@ -3421,13 +3451,11 @@ const dashboardLive = HttpApiBuilder.group(LexaApi, "dashboard", (handlers) =>
           outOfSyncTasks,
         };
       }
-      // The shared ProjectHealth type is team-free; the wire Project carries
-      // teamId (the domain project already has it from the row mapping).
       return {
         ...dash,
         projects: dash.projects.map((ph) => ({
           ...ph,
-          project: { ...ph.project, teamId: (ph.project as unknown as { teamId?: string | null }).teamId ?? null },
+          project: { ...ph.project, teamId: (ph.project as { teamId?: string | null }).teamId ?? null },
         })),
       };
     }))
@@ -3461,10 +3489,10 @@ const wikiLive = HttpApiBuilder.group(LexaApi, "wiki", (handlers) =>
         const contentText = req.payload.content ? extractText(req.payload.content) : undefined;
         const page = yield* wikiService.create(project.id, {
           title: req.payload.title,
-          slug: req.payload.slug,
-          content: req.payload.content,
-          contentText,
-          parentId: req.payload.parentId ?? undefined,
+          ...(req.payload.slug !== undefined ? { slug: req.payload.slug } : {}),
+          ...(req.payload.content !== undefined ? { content: req.payload.content } : {}),
+          ...(contentText !== undefined ? { contentText } : {}),
+          ...(req.payload.parentId !== undefined ? { parentId: req.payload.parentId } : {}),
         });
         return formatWikiPage(page);
       }))
@@ -3474,7 +3502,7 @@ const wikiLive = HttpApiBuilder.group(LexaApi, "wiki", (handlers) =>
         const wikiService = yield* WikiService;
         const project = yield* requireProjectRead(req.path.slug);
         const q = searchParams(req).get("q");
-        if (!q) return { data: [] as any[] };
+        if (!q) return { data: [] as never[] };
         const results = yield* wikiService.search(project.id, q);
         return { data: results.map(formatWikiPage) };
       }))
@@ -3503,7 +3531,7 @@ const wikiLive = HttpApiBuilder.group(LexaApi, "wiki", (handlers) =>
         const wikiService = yield* WikiService;
         const project = yield* requireProjectRead(req.path.slug);
         const page = yield* wikiService.findBySlug(project.id, req.path.pageSlug);
-        const updateInput: Record<string, unknown> = {};
+        const updateInput: { title?: string; slug?: string; parentId?: string | null; position?: number; content?: string; contentText?: string } = {};
         if (req.payload.title !== undefined) updateInput.title = req.payload.title;
         if (req.payload.slug !== undefined) updateInput.slug = req.payload.slug;
         if (req.payload.parentId !== undefined) updateInput.parentId = req.payload.parentId;
@@ -3513,7 +3541,7 @@ const wikiLive = HttpApiBuilder.group(LexaApi, "wiki", (handlers) =>
           updateInput.contentText = extractText(req.payload.content);
         }
         const saveType = req.payload.saveType ?? "autosave";
-        const updated = yield* wikiService.update(page.id, updateInput as any, saveType);
+        const updated = yield* wikiService.update(page.id, updateInput, saveType);
         return formatWikiPage(updated);
       }))
     )
@@ -3724,7 +3752,7 @@ function wireDisconnectAbort(request: HttpServerRequest, abort: () => boolean): 
 // After 0017 legacy kind/baseUrl/model/apiKey columns are gone — payload is optional and fallback is gateway.
 const resolveProviderConfig = (
   _projectId: string,
-  payload: { kind?: "openai_compatible" | "anthropic_compatible"; baseUrl?: string; model?: string; apiKey?: string }
+  payload: { kind?: "openai_compatible" | "anthropic_compatible" | undefined; baseUrl?: string | undefined; model?: string | undefined; apiKey?: string | undefined }
 ): Effect.Effect<ProviderConfig, ProviderNotConfigured | DbError | RowNotFound, HeraldSettingsRepo> =>
   Effect.gen(function* () {
     if (payload.kind && payload.baseUrl && payload.model) {
@@ -3967,7 +3995,7 @@ const adminLive = HttpApiBuilder.group(LexaApi, "admin", (handlers) =>
             const p = yield* projectRepo.findById(r.project_id).pipe(
               Effect.catchTag("RowNotFound", () => Effect.succeed(null))
             );
-            return { projectId: r.project_id, projectSlug: p ? (p as any).slug : "unknown", role: r.role };
+            return { projectId: r.project_id, projectSlug: p ? p.slug : "unknown", role: r.role };
           })
         );
         return { data: entries };
@@ -3982,7 +4010,7 @@ const adminLive = HttpApiBuilder.group(LexaApi, "admin", (handlers) =>
         const project = yield* projectRepo.findById(req.payload.projectId).pipe(
           Effect.catchTag("RowNotFound", () => Effect.succeed(null))
         );
-        return { projectId: req.payload.projectId, projectSlug: project ? (project as any).slug : "unknown", role: req.payload.role };
+        return { projectId: req.payload.projectId, projectSlug: project ? project.slug : "unknown", role: req.payload.role };
       }))
     )
     .handle("removeUserProjectRole", (req) =>
@@ -4004,7 +4032,7 @@ const adminHeraldLive = HttpApiBuilder.group(LexaApi, "adminHerald", (handlers) 
       respond(Effect.gen(function* () {
         yield* requireSuperadmin;
         const repo = yield* HeraldCallLogsRepo;
-        const sp = searchParams(req as unknown as { request: { originalUrl: string } });
+        const sp = searchParams(req);
         const from = sp.get("from");
         const to = sp.get("to");
         const projectId = sp.get("projectId");
@@ -4017,7 +4045,7 @@ const adminHeraldLive = HttpApiBuilder.group(LexaApi, "adminHerald", (handlers) 
       respond(Effect.gen(function* () {
         yield* requireSuperadmin;
         const repo = yield* HeraldCallLogsRepo;
-        const sp = searchParams(req as unknown as { request: { originalUrl: string } });
+        const sp = searchParams(req);
         const from = sp.get("from");
         const to = sp.get("to");
         const projectId = sp.get("projectId");
@@ -4089,16 +4117,16 @@ const adminHeraldLive = HttpApiBuilder.group(LexaApi, "adminHerald", (handlers) 
         yield* requireSuperadmin;
         const repo = yield* HeraldProvidersRepo;
         const id = crypto.randomUUID();
-        const row = yield* repo.create({ id, label: req.payload.label, baseUrl: req.payload.baseUrl, apiKey: req.payload.apiKey });
+        const row = yield* repo.create({ id, label: req.payload.label!, baseUrl: req.payload.baseUrl!, apiKey: req.payload.apiKey ?? "" });
         const masked = yield* repo.maskedView(row.id);
-        return masked as unknown as never;
+        return masked;
       }))
     )
     .handle("adminHeraldUpdateProvider", (req) =>
       respond(Effect.gen(function* () {
         yield* requireSuperadmin;
         const repo = yield* HeraldProvidersRepo;
-        yield* repo.update(req.path.id, { label: req.payload.label, baseUrl: req.payload.baseUrl, apiKey: req.payload.apiKey });
+        yield* repo.update(req.path.id, { ...(req.payload.label !== undefined ? { label: req.payload.label } : {}), ...(req.payload.baseUrl !== undefined ? { baseUrl: req.payload.baseUrl } : {}), ...(req.payload.apiKey !== undefined ? { apiKey: req.payload.apiKey } : {}) });
         return yield* repo.maskedView(req.path.id);
       }))
     )
@@ -4107,9 +4135,9 @@ const adminHeraldLive = HttpApiBuilder.group(LexaApi, "adminHerald", (handlers) 
         yield* requireSuperadmin;
         const db = yield* Sqlite;
         const mRepo = yield* HeraldModelsRepo;
-        const models = yield* mRepo.listByProvider(req.path.id).pipe(Effect.catchAll(() => Effect.succeed([] as unknown as Array<{ id: string }>)));
+        const models = yield* mRepo.listByProvider(req.path.id).pipe(Effect.catchAll(() => Effect.succeed([] as Array<{ id: string }>)));
         if (models.length > 0) {
-          const modelIds = new Set((models as Array<{ id: string }>).map((m) => m.id));
+          const modelIds = new Set(models.map((m) => m.id));
           const rows = db.prepare(`SELECT fallback_model_ids FROM herald_settings`).all() as Array<{ fallback_model_ids: string }>;
           let refs = 0;
           for (const r of rows) {
@@ -4132,7 +4160,7 @@ const adminHeraldLive = HttpApiBuilder.group(LexaApi, "adminHerald", (handlers) 
         const mRepo = yield* HeraldModelsRepo;
         const prov = yield* pRepo.getById(req.path.id);
         const models = yield* mRepo.listByProvider(req.path.id).pipe(Effect.catchAll(() => Effect.succeed([] as Array<{ kind: ProviderConfig["kind"]; enabled: boolean }>)));
-        const enabledKind = (models as Array<{ kind: ProviderConfig["kind"]; enabled: boolean }>).find((m) => m.enabled)?.kind;
+        const enabledKind = models.find((m) => m.enabled)?.kind;
         const kind: ProviderConfig["kind"] = enabledKind ?? "openai_compatible";
         const cfg: ProviderConfig = { kind, baseUrl: prov.base_url, apiKey: prov.api_key, model: "test" };
         const start = Date.now();
@@ -4172,7 +4200,7 @@ const projectHeraldUsageLive = HttpApiBuilder.group(LexaApi, "projectHeraldUsage
       const projectService = yield* ProjectService;
       const repo = yield* HeraldCallLogsRepo;
       const project = yield* projectService.findBySlug(req.path.slug);
-      const sp = searchParams(req as unknown as { request: { originalUrl: string } });
+      const sp = searchParams(req);
       const from = sp.get("from");
       const to = sp.get("to");
       const filters = { from: from || null, to: to || null, projectId: project.id };
@@ -4201,28 +4229,28 @@ const meLive = HttpApiBuilder.group(LexaApi, "me", (handlers) =>
     )
 );
 
-function withRepos(p: DomainProject): Effect.Effect<Project & { teamId: string | null }, DbError, ProjectReposRepo> {
+function withRepos(p: DomainProject & { teamId?: string | null }): Effect.Effect<Project & { teamId: string | null }, DbError, ProjectReposRepo> {
   return Effect.gen(function* () {
     const reposRepo = yield* ProjectReposRepo;
     const repos = yield* reposRepo.listByProject(p.id);
-    return { ...p, repos, teamId: (p as unknown as { teamId?: string | null }).teamId ?? null };
+    return { ...p, repos, teamId: p.teamId ?? null };
   });
 }
 
-function formatColumn(c: { id: string; projectId: string; name: string; position: number; color: string; wipLimit: number | null; requiredFields: string[]; githubState: "open" | "closed" | null }) {
-  return c as any;
+function formatColumn<T>(c: T): T {
+  return c;
 }
 
-function formatSwimlane(s: { id: string; projectId: string; name: string; description: string; position: number }) {
-  return s as any;
+function formatSwimlane<T>(s: T): T {
+  return s;
 }
 
-function formatMilestone(m: { id: string; projectId: string; name: string; description: string; position: number; dueAt: string | null; archivedAt: string | null; sprintCount: number; archivedSprintCount: number }) {
-  return m as any;
+function formatMilestone<T>(m: T): T {
+  return m;
 }
 
-function formatTask(t: { id: string; projectId: string; columnId: string; swimlaneId: string; title: string; description: any; priority: string; type: string; assignees: string[]; position: string; githubs: any[]; createdAt: string; updatedAt: string }) {
-  return t as any;
+function formatTask<T>(t: T): T {
+  return t;
 }
 
 // The response schema requires the kind discriminator; service results are
@@ -4231,24 +4259,24 @@ function activityPayload(events: ActivityEvent[]) {
   return events.map((a) => ({ kind: "event" as const, ...a }));
 }
 
-function formatWikiPage(page: { id: string; projectId: string; title: string; slug: string; content: any; parentId: string | null; position: number; createdAt: string; updatedAt: string }) {
-  return page as any;
+function formatWikiPage<T>(page: T): T {
+  return page;
 }
 
-function formatWikiPageMeta(
-  meta: { id: string; projectId: string; title: string; slug: string; parentId: string | null; position: number; updatedAt: string },
+function formatWikiPageMeta<T extends WikiPageMeta>(
+  meta: T,
   parentIds: Set<string>
-) {
+): T & { hasChildren: boolean; createdAt: string } {
   const hasChildren = parentIds.has(meta.id);
-  return { ...meta, hasChildren, createdAt: "" } as any;
+  return { ...meta, hasChildren, createdAt: "" };
 }
 
-function formatWikiPageRevisionSummary(r: { id: string; title: string; saveType: string; createdAt: string }) {
-  return r as any;
+function formatWikiPageRevisionSummary<T>(r: T): T {
+  return r;
 }
 
-function formatWikiPageRevision(r: { id: string; pageId: string; title: string; slug: string; content: any; contentText: string; saveType: string; createdAt: string }) {
-  return r as any;
+function formatWikiPageRevision<T>(r: T): T {
+  return r;
 }
 
 export function createApiHandler(dbPath: string) {
@@ -4265,7 +4293,7 @@ export function createApiHandler(dbPath: string) {
   ).pipe(Layer.provide(Layer.provide(serviceLayer, Layer.mergeAll(dbLayer, LoggerLayer))), Layer.provide(dbLayer));
   const merged = Layer.mergeAll(apiLayer, handlerLayer);
   const finalLayer = Layer.provide(merged, createApiMiddleware(db, dbPath));
-  const { handler } = HttpApiBuilder.toWebHandler(finalLayer as unknown as Parameters<typeof HttpApiBuilder.toWebHandler>[0]);
+  const { handler } = HttpApiBuilder.toWebHandler(finalLayer as never);
   return async (req: Request) => {
     const start = Date.now();
     const url = new URL(req.url);
@@ -4273,7 +4301,7 @@ export function createApiHandler(dbPath: string) {
       const res = await handler(req);
       if (url.pathname === "/api/hearth/tasks/recent" && req.method === "GET" && res.status < 400) {
         try {
-          const row = (db as unknown as { prepare: (s: string) => { get: () => unknown } }).prepare("SELECT 1 AS v FROM runtimes WHERE status = 'online' LIMIT 1").get() as { v: number } | undefined;
+          const row = db.prepare("SELECT 1 AS v FROM runtimes WHERE status = 'online' LIMIT 1").get() as { v: number } | undefined;
           if (!row) return res;
         } catch {
           // if runtimes table missing (pre-migration) fall through to log
@@ -4372,8 +4400,8 @@ export function createWebhookHandler(dbPath: string): (rawBody: ArrayBuffer, del
   return (rawBody, deliveryId, event) => {
     const processing = Effect.gen(function* () {
       const service = yield* GitHubService;
-      const payload = JSON.parse(new TextDecoder().decode(rawBody)) as Record<string, unknown>;
-      yield* service.handleWebhook(deliveryId, event, payload as any);
+      const payload = JSON.parse(new TextDecoder().decode(rawBody)) as Parameters<typeof service.handleWebhook>[2];
+      yield* service.handleWebhook(deliveryId, event, payload);
     });
     runtime.runPromise(processing).catch((e) => {
       console.error(`[Webhook] processing failed delivery=${deliveryId} event=${event}:`, e);

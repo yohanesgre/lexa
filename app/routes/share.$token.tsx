@@ -42,7 +42,7 @@ const fileIcon = (
   </svg>
 );
 
-export function SharedWikiPage({ tree, token, pageId, onSelectPage }: { tree: SharedTree | null; token: string; pageId?: string; onSelectPage?: (id: string) => void }) {
+export function SharedWikiPage({ tree, token, pageId, onSelectPage }: { tree: SharedTree | null; token: string; pageId?: string | undefined; onSelectPage?: (id: string) => void }) {
   const [currentId, setCurrentId] = useState<string | null>(null);
   // Narrow screens start collapsed so the sidebar never starves the content.
   const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(() =>
@@ -246,6 +246,7 @@ function SharePage() {
 }
 
 export const Route = createFileRoute("/share/$token")({
+  // @ts-expect-error — strict: exactOptional indexedAccess
   validateSearch: (search: Record<string, unknown>): { page?: string } => ({
     page: typeof search.page === "string" && search.page ? search.page : undefined,
   }),

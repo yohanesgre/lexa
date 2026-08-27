@@ -61,11 +61,11 @@ export class MilestoneRepo extends Effect.Service<MilestoneRepo>()("Lexa/Milesto
 
       maxPosition: (projectId: string): Effect.Effect<number, DbError> =>
         queryAll<{ mp: number }>(db, `SELECT COALESCE(MAX(position), -1) as mp FROM milestones WHERE project_id = ?`, projectId)
-          .pipe(Effect.map((rows) => rows[0]?.mp ?? -1)),
+          .pipe(Effect.map((rows) => rows[0]!?.mp ?? -1)),
 
       countSprints: (milestoneId: string): Effect.Effect<number, DbError> =>
         queryAll<{ c: number }>(db, `SELECT COUNT(*) as c FROM swimlanes WHERE milestone_id = ?`, milestoneId)
-          .pipe(Effect.map((rows) => rows[0]?.c ?? 0)),
+          .pipe(Effect.map((rows) => rows[0]!?.c ?? 0)),
 
       findByMilestone: (milestoneId: string): Effect.Effect<Swimlane[], DbError> =>
         queryAll<SwimlaneRow>(db, `SELECT * FROM swimlanes WHERE milestone_id = ? ORDER BY position`, milestoneId)

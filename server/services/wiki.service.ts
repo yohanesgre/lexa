@@ -27,10 +27,10 @@ export class WikiService extends Effect.Service<WikiService>()("Lexa/WikiService
         projectId: string,
         input: {
           title: string;
-          slug?: string;
-          content?: TipTapDoc;
-          contentText?: string;
-          parentId?: string;
+          slug?: string | undefined;
+          content?: TipTapDoc | undefined;
+          contentText?: string | undefined;
+          parentId?: string | null | undefined;
         }
       ): Effect.Effect<WikiPage, ProjectNotFound | SlugTaken | DbError | RowNotFound> =>
         Effect.gen(function* () {

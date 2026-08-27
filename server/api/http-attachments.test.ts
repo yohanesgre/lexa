@@ -64,7 +64,7 @@ async function createShareLink(pageSlug: string, expiresAt?: string): Promise<{ 
   const res = await handler(authed("POST", `/api/projects/p1/wiki/pages/${pageSlug}/share`, expiresAt ? { expiresAt } : {}));
   expect(res.status).toBe(201);
   const body = await res.json();
-  const token = (body.link.url as string).split("/share/")[1];
+  const token = (body.link.url as string).split("/share/")[1]!;
   return { id: body.link.id, token };
 }
 
@@ -136,18 +136,18 @@ describe("POST /api/projects/:slug/tasks/:taskId/attachments", () => {
     });
     expect(body.data.sha256).toMatch(/^[0-9a-f]{64}$/);
     expect(body.activity).toHaveLength(1);
-    expect(body.activity[0].type).toBe("attachment_added");
-    expect(body.activity[0].message).toContain("photo.png");
+    expect(body.activity[0]!.type).toBe("attachment_added");
+    expect(body.activity[0]!.message).toContain("photo.png");
     const rows = db.prepare("SELECT type FROM task_activity WHERE task_id = 't1'").all() as { type: string }[];
     expect(rows.map((r) => r.type)).toContain("attachment_added");
   });
 
   it("dedupe: identical bytes → same row id, empty activity, no second blob", async () => {
     const first = await uploadToTask(PNG_BYTES, "again.png");
-    expect(first.res.status).toBe(201);
+    expect(first!.res.status).toBe(201);
     const second = await uploadToTask(PNG_BYTES, "third-name.png");
     expect(second.res.status).toBe(201);
-    expect(second.body.data.id).toBe(first.body.data.id);
+    expect(second.body.data.id).toBe(first!.body.data.id);
     expect(second.body.activity).toEqual([]);
     expect(blobCount()).toBe(1);
   });
@@ -253,7 +253,7 @@ describe("DELETE /api/attachments/:id", () => {
 async function runServiceRemove(
   attachmentId: string,
   identity: { keyId: string; keyName: string; userId: string | null; userName: string | null; role: "admin" | "member" }
-): Promise<{ outcome: "Left" | "Right"; errorTag?: string }> {
+): Promise<{ outcome: "Left" | "Right"; errorTag?: string | undefined }> {
   const result = await Effect.runPromise(
     Effect.gen(function* () {
       const svc = yield* AttachmentService;
@@ -313,7 +313,7 @@ describe("GET /api/projects/:slug/wiki/pages/:pageSlug/attachments", () => {
     expect(child.status).toBe(200);
     const { data } = await child.json();
     expect(data).toHaveLength(1);
-    expect(data[0]).toMatchObject({ filename: "child-pic.png", taskId: null });
+    expect(data[0]!).toMatchObject({ filename: "child-pic.png", taskId: null });
   });
 
   it("unknown page → 404 PAGE_NOT_FOUND", async () => {

@@ -16,10 +16,10 @@ export interface HeraldToolChip {
   phase: "call" | "result";
   // Verbose process sentence from the call frame's `detail` (e.g.
   // `Searching wiki for "setup"`) — kept intact through the call→result flip.
-  detail?: string;
+  detail?: string | undefined;
   // Detail from the RESULT frame, if any — rendered as the compact
   // `↳ …` line beneath the completed call line.
-  resultDetail?: string;
+  resultDetail?: string | undefined;
 }
 
 export type HeraldStreamStatus = "idle" | "connecting" | "streaming" | "suspended" | "done" | "error" | "aborted";
@@ -32,7 +32,7 @@ export interface HeraldPendingChip {
   batchId: string;
   seq: number;
   name: string;
-  detail?: string;
+  detail?: string | undefined;
   diff: HeraldWriteDiff;
 }
 
@@ -168,7 +168,7 @@ class HeraldStreamSession {
       return;
     }
     if (!res.ok) {
-      const payload = (await res.json().catch(() => ({}))) as { error?: { code?: string; message?: string } };
+      const payload = (await res.json().catch(() => ({}))) as { error?: { code?: string | undefined; message?: string } };
       this.emit({
         status: "error",
         error: { code: payload.error?.code ?? `HTTP ${res.status}`, message: payload.error?.message ?? `Request failed (${res.status}).` },
@@ -257,7 +257,7 @@ class HeraldStreamSession {
             // keeps its process sentence.
             const index = tools.findLastIndex((t) => t.name === frame.name && t.phase === "call");
             if (index >= 0) {
-              const chip = { ...tools[index], phase: "result" as const, resultDetail: detail };
+              const chip = { ...tools[index]!, phase: "result" as const, resultDetail: detail } as HeraldToolChip;
               tools = tools.map((t, i) => (i === index ? chip : t));
               const itemIndex = items.findLastIndex((it) => it.kind === "tool" && it.chip.key === chip.key);
               if (itemIndex >= 0) items = items.map((it, i) => (i === itemIndex ? { kind: "tool" as const, chip } : it));

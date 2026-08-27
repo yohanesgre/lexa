@@ -9,8 +9,8 @@ export interface MilestoneFormProps {
   milestone?: Milestone | null;
   isOpen: boolean;
   onClose: () => void;
-  onSubmit: (input: { name: string; description?: string | null; dueAt?: string | null }) => void;
-  zIndex?: number;
+  onSubmit: (input: { name: string; description?: string | null | undefined; dueAt?: string | null }) => void;
+  zIndex?: number | undefined;
 }
 
 export function MilestoneForm({ milestone, isOpen, onClose, onSubmit, zIndex = 70 }: MilestoneFormProps) {

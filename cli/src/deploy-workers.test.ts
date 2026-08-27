@@ -9,7 +9,7 @@ describe("cmdDeployWorkers", () => {
       await Effect.runPromise(
         cmdDeployWorkers({}, ["example.com", "staging"])
       );
-      const out = log.mock.calls.map((c) => String(c[0])).join("\n");
+      const out = log.mock.calls.map((c) => String(c[0]!)).join("\n");
       expect(out).toMatch(/Workers flavor: <lexa-preview\.example\.com>/);
       expect(out).toMatch(/D1 database name: lexa-staging/);
       expect(out).toMatch(/R2 bucket name:    lexa-blobs-staging/);
@@ -26,7 +26,7 @@ describe("cmdDeployWorkers", () => {
       await Effect.runPromise(
         cmdDeployWorkers({}, ["example.com", "prod"])
       );
-      const out = log.mock.calls.map((c) => String(c[0])).join("\n");
+      const out = log.mock.calls.map((c) => String(c[0]!)).join("\n");
       expect(out).toMatch(/Workers flavor: <lexa\.example\.com>/);
       expect(out).toMatch(/D1 database name: lexa-prod/);
     } finally {
@@ -53,7 +53,7 @@ describe("cmdUndeployWorkers", () => {
     const log = vi.spyOn(console, "log").mockImplementation(() => undefined);
     try {
       await Effect.runPromise(cmdUndeployWorkers({}, ["example.com"]));
-      const out = log.mock.calls.map((c) => String(c[0])).join("\n");
+      const out = log.mock.calls.map((c) => String(c[0]!)).join("\n");
       expect(out).toMatch(/Workers undeploy: <example\.com>/);
       expect(out).toMatch(/wrangler delete/);
       expect(out).toMatch(/data preserved/);
@@ -66,7 +66,7 @@ describe("cmdUndeployWorkers", () => {
     const log = vi.spyOn(console, "log").mockImplementation(() => undefined);
     try {
       await Effect.runPromise(cmdUndeployWorkers({ "purge-data": true }, ["example.com"]));
-      const out = log.mock.calls.map((c) => String(c[0])).join("\n");
+      const out = log.mock.calls.map((c) => String(c[0]!)).join("\n");
       expect(out).toMatch(/--purge-data/);
       expect(out).toMatch(/irreversible/);
     } finally {

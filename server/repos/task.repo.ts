@@ -472,7 +472,7 @@ export class TaskRepo extends Effect.Service<TaskRepo>()("Lexa/TaskRepo", {
       },
       countByProject: (projectId: string): Effect.Effect<number, DbError> =>
         queryAll<{ cnt: number }>(db, `SELECT COUNT(*) as cnt FROM tasks WHERE project_id = ? AND archived_at IS NULL`, projectId).pipe(
-          Effect.map((rows) => rows[0]?.cnt ?? 0)
+          Effect.map((rows) => rows[0]!?.cnt ?? 0)
         ),
 
       countUrgent: (projectId: string): Effect.Effect<number, DbError> =>
@@ -484,7 +484,7 @@ export class TaskRepo extends Effect.Service<TaskRepo>()("Lexa/TaskRepo", {
              AND t.priority = (SELECT id FROM priority_options WHERE project_id = ? ORDER BY position LIMIT 1)`,
           projectId,
           projectId
-        ).pipe(Effect.map((rows) => rows[0]?.cnt ?? 0)),
+        ).pipe(Effect.map((rows) => rows[0]!?.cnt ?? 0)),
 
       countOutOfSync: (projectId: string): Effect.Effect<number, DbError> =>
         queryAll<{ cnt: number }>(
@@ -496,11 +496,11 @@ export class TaskRepo extends Effect.Service<TaskRepo>()("Lexa/TaskRepo", {
              AND t.archived_at IS NULL
              AND gi.synced_state IS NOT c.github_state`,
           projectId
-        ).pipe(Effect.map((rows) => rows[0]?.cnt ?? 0)),
+        ).pipe(Effect.map((rows) => rows[0]!?.cnt ?? 0)),
 
       countByColumn: (projectId: string, columnId: string): Effect.Effect<number, DbError> =>
         queryAll<{ cnt: number }>(db, `SELECT COUNT(*) as cnt FROM tasks WHERE project_id = ? AND column_id = ? AND archived_at IS NULL`, projectId, columnId).pipe(
-          Effect.map((rows) => rows[0]?.cnt ?? 0)
+          Effect.map((rows) => rows[0]!?.cnt ?? 0)
         ),
 
       findUrgentAcrossAllProjects: (limit: number): Effect.Effect<Array<{ id: string; title: string; project_name: string; project_slug: string; column_name: string; priority: string }>, DbError> =>

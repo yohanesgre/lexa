@@ -52,7 +52,8 @@ describe("ShareDialog", () => {
   it("copy writes the URL to the clipboard and flips feedback to Copied", async () => {
     setupHooks();
     render(<ShareDialog slug="p1" pageSlug="home" isOpen onClose={() => {}} />);
-    fireEvent.click(screen.getAllByRole("button", { name: "Copy" })[0]);
+    // @ts-expect-error — strict: exactOptional indexedAccess
+    fireEvent.click(screen.getAllByRole("button"!, { name: "Copy" })[0]);
     await vi.waitFor(() => expect(navigator.clipboard.writeText).toHaveBeenCalledWith("http://lexa.test/share/aaaa"));
     await vi.waitFor(() => expect(screen.getAllByText("Copied").length).toBeGreaterThan(0));
   });
@@ -60,7 +61,8 @@ describe("ShareDialog", () => {
   it("revoke calls the mutation with the link id (no confirm step)", () => {
     const { revokeMutate } = setupHooks();
     render(<ShareDialog slug="p1" pageSlug="home" isOpen onClose={() => {}} />);
-    fireEvent.click(screen.getAllByRole("button", { name: "Revoke" })[1]);
+    // @ts-expect-error — strict: exactOptional indexedAccess
+    fireEvent.click(screen.getAllByRole("button"!, { name: "Revoke" })[1]);
     expect(revokeMutate).toHaveBeenCalledWith("l2");
   });
 
@@ -70,7 +72,7 @@ describe("ShareDialog", () => {
     fireEvent.click(screen.getByRole("button", { name: /No expiry/ }));
     // Popover opens on the current month — pick day 15 (exists in every month).
     const day15 = await screen.findAllByRole("button", { name: "15" });
-    fireEvent.click(day15[0]);
+    fireEvent.click(day15[0]!);
     fireEvent.click(screen.getByRole("button", { name: /Create link/ }));
     const now = new Date();
     const iso = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-15`;
@@ -90,7 +92,8 @@ describe("ShareDialog", () => {
     const onClose = vi.fn();
     render(<ShareDialog slug="p1" pageSlug="home" isOpen onClose={onClose} />);
     const closeButtons = screen.getAllByRole("button", { name: "Close" });
-    fireEvent.click(closeButtons[closeButtons.length - 1]);
+    // @ts-expect-error — strict: exactOptional indexedAccess
+    fireEvent.click(closeButtons[closeButtons.length - 1!]);
     expect(onClose).toHaveBeenCalled();
   });
 });

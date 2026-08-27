@@ -203,7 +203,7 @@ function escapeHtml(text: string): string {
 
 export interface MentionExtensionOptions {
   slug: string;
-  debounceMs?: number;
+  debounceMs?: number | undefined;
   fetchMentions?: (slug: string, query: string) => Promise<MentionItem[]>;
 }
 
@@ -243,10 +243,10 @@ export function createMentionExtension(opts: MentionExtensionOptions) {
         },
       };
     },
-    renderText({ node }: { node: { attrs: { label?: string | null; refId?: string | null } } }) {
+    renderText({ node }: { node: { attrs: { label?: string | null | undefined; refId?: string | null } } }) {
       return `@${node.attrs.label ?? node.attrs.refId ?? ""}`;
     },
-    renderHTML({ node }: { node: { attrs: { refType?: string; refId?: string | null; label?: string | null } } }) {
+    renderHTML({ node }: { node: { attrs: { refType?: string | undefined; refId?: string | null | undefined; label?: string | null } } }) {
       return [
         "span",
         {

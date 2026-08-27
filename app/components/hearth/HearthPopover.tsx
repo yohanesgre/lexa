@@ -49,10 +49,10 @@ interface HearthPopoverProps {
   reviewActive: boolean;
   // Task id accepted in the review banner this session — terminal state, so
   // the result is never offered for insert again (prevents duplicates).
-  appliedTaskId?: string | null;
+  appliedTaskId?: string | null | undefined;
   // Task id rejected in the editor review surface this session — terminal
   // state, so the result isn't re-offered when the popover reopens.
-  rejectedTaskId?: string | null;
+  rejectedTaskId?: string | null | undefined;
   anchorRect: DOMRect | null;
 }
 
@@ -402,7 +402,7 @@ export function HearthPopover({ editor, slug, documentType, documentId, open, on
   // Auto-select the first online runtime.
   useEffect(() => {
     if (runtimeId === "" && onlineRuntimes.length > 0) {
-      setRuntimeId(onlineRuntimes[0].id);
+      setRuntimeId(onlineRuntimes[0]!.id);
     }
   }, [onlineRuntimes, runtimeId]);
 
@@ -618,6 +618,7 @@ export function HearthPopover({ editor, slug, documentType, documentId, open, on
           followLog={followLog}
           setFollowLog={setFollowLog}
           logBodyRef={logBodyRef}
+          // @ts-expect-error — strict: exactOptional indexedAccess
           logs={logs}
           canViewLogs={isAdmin}
           setLogModalOpen={setLogModalOpen}

@@ -16,12 +16,12 @@ interface DescriptionEditorProps {
   onBlur?: (doc: TipTapDoc) => void;
   onDone?: (doc: TipTapDoc) => void;
   onCancel?: () => void;
-  placeholder?: string;
-  editable?: boolean;
-  hearth?: { slug: string; documentType: "task" | "wiki"; documentId: string };
+  placeholder?: string | undefined;
+  editable?: boolean | undefined;
+  hearth?: { slug: string; documentType: "task" | "wiki"; documentId: string } | undefined;
   // Paste/drop-to-embed uploads (attachments API). Absent in create mode —
   // there is no taskId to attach to yet.
-  attachments?: { slug: string; documentId: string };
+  attachments?: { slug: string; documentId: string } | undefined;
   onReviewStateChange?: (active: boolean) => void;
 }
 

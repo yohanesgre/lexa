@@ -45,7 +45,7 @@ afterAll(() => {
   rmSync(dir, { recursive: true, force: true });
 });
 
-const acceptCode = async (body: unknown): Promise<{ status: number; code?: string }> => {
+const acceptCode = async (body: unknown): Promise<{ status: number; code?: string | undefined }> => {
   const res = await accept(body);
   return { status: res.status, code: ((await res.json()) as { code?: string }).code };
 };

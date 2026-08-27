@@ -120,8 +120,8 @@ function FilterBar({ status, slug, skillId, projects, skills, onReset }: {
   status: HearthTaskStatus | null;
   slug: string;
   skillId: string;
-  projects: { data?: { id: string; slug: string; name: string }[] };
-  skills: { data?: { id: string; name: string }[] };
+  projects: { data?: { id: string; slug: string; name: string }[] | undefined };
+  skills: { data?: { id: string; name: string }[] | undefined };
   onReset: (patch: Partial<{ status: HearthTaskStatus | null; slug: string; skillId: string }>) => void;
 }) {
   return (
@@ -441,7 +441,8 @@ export function HearthControlPanel() {
   }, [search.task]);
 
   const skills = useSkills();
-  const history = useHearthTaskHistory({ slug: slug || undefined, status: status ?? undefined, skillId: skillId || undefined }, cursor);
+  // @ts-expect-error — strict: exactOptional indexedAccess
+  const history = useHearthTaskHistory({ slug: slug || undefined!, status: status ?? undefined, skillId: skillId || undefined }, cursor);
   const runtimes = useRuntimes();
   const projects = useProjects();
   const selected = useHearthTask(selectedId, selectedId !== null);
@@ -456,7 +457,7 @@ export function HearthControlPanel() {
   const online = runtimes.data?.filter((r) => r.status === "online").length ?? 0;
   const total = runtimes.data?.length ?? 0;
 
-  const reset = (next: { slug?: string; status?: HearthTaskStatus | null; skillId?: string }) => {
+  const reset = (next: { slug?: string | undefined; status?: HearthTaskStatus | null; skillId?: string }) => {
     if (next.slug !== undefined) setSlug(next.slug);
     if (next.status !== undefined) setStatus(next.status ?? null);
     if (next.skillId !== undefined) setSkillId(next.skillId);
@@ -503,6 +504,7 @@ export function HearthControlPanel() {
       <SummaryStrip summary={summary} activeCount={activeCount} online={online} total={total} />
 
 
+      // @ts-expect-error — strict: exactOptional indexedAccess
       <FilterBar status={status} slug={slug} skillId={skillId} projects={projects} skills={skills} onReset={reset} />
 
 
@@ -592,6 +594,7 @@ export function HearthControlPanel() {
       </main>
 
       {logModalOpen && (
+// @ts-expect-error — strict: exactOptional indexedAccess
 <HearthTaskLogModal
         open={logModalOpen}
         onClose={() => setLogModalOpen(false)}

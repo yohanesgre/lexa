@@ -212,13 +212,13 @@ describe("flavorBaseFor", () => {
 describe("deriveServePort", () => {
   it("override wins and is first candidate", () => {
     const ports = deriveServePort("rt-abc", 4096, "4250");
-    expect(ports[0]).toBe(4250);
+    expect(ports[0]!).toBe(4250);
   });
   it("defaults to flavor base + fnv1a(runtimeId)%32, then +1..+4", () => {
     const ports = deriveServePort("rt-abc", 4096);
-    expect(ports[0]).toBeGreaterThanOrEqual(4096);
-    expect(ports[0]).toBeLessThan(4128);
-    expect(ports).toEqual([ports[0], ports[0] + 1, ports[0] + 2, ports[0] + 3, ports[0] + 4]);
+    expect(ports[0]!).toBeGreaterThanOrEqual(4096);
+    expect(ports[0]!).toBeLessThan(4128);
+    expect(ports).toEqual([ports[0]!, ports[0]! + 1, ports[0]! + 2, ports[0]! + 3, ports[0]! + 4]);
   });
   it("stable per runtime id", () => {
     expect(deriveServePort("rt-abc", 4096)[0]).toBe(deriveServePort("rt-abc", 4096)[0]);

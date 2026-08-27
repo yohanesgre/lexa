@@ -9,11 +9,11 @@ import type { CliConfig } from "./config";
 
 export class ApiError extends Data.TaggedError("ApiError")<{
   status: number;
-  code?: string;
-  details?: unknown;
-  serverMessage?: string;
+  code?: string | undefined;
+  details?: unknown | undefined;
+  serverMessage?: string | undefined;
 }> {
-  get message(): string {
+  override get message(): string {
     return this.serverMessage ?? `HTTP ${this.status}`;
   }
 }

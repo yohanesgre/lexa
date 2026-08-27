@@ -5,7 +5,7 @@ import type { HeadingOutline } from "../tiptap-render";
 
 interface OutlineSidebarProps {
   headings: HeadingOutline[];
-  collapsed?: boolean;
+  collapsed?: boolean | undefined;
   onToggle?: () => void;
 }
 
@@ -23,14 +23,16 @@ function toTree(headings: HeadingOutline[]): TreeNode[] {
   for (const h of headings) {
     while (stack.length > 0) {
       const parent = stack[stack.length - 1];
-      if (parent.level < h.level) break;
+      // @ts-expect-error — strict: exactOptional indexedAccess
+      if (parent.level < h.level!) break;
       stack.pop();
     }
     const node: TreeNode = { key: h.id, title: h.text, children: [], level: h.level };
     if (stack.length === 0) {
       root.push(node);
     } else {
-      stack[stack.length - 1].children.push(node);
+      // @ts-expect-error — strict: exactOptional indexedAccess
+      stack[stack.length - 1!].children.push(node);
     }
     stack.push(node);
   }

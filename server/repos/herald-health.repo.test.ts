@@ -36,7 +36,7 @@ describe("herald-health.repo", () => {
       runMigrations(dbPath);
       const db = new Database(dbPath);
       db.prepare("INSERT INTO herald_providers (id, label, base_url, api_key) VALUES ('pr1','P','https://x','sk')").run();
-      const layer = HeraldHealthRepo.Default.pipe(Layer.provide(Layer.succeed(Sqlite, db as any)));
+      const layer = HeraldHealthRepo.Default.pipe(Layer.provide(Layer.succeed(Sqlite, db)));
       const prog = Effect.gen(function* () {
         const repo = yield* HeraldHealthRepo;
         const inserted = yield* repo.upsert({ providerId: "pr1", failureCount: 1, circuitState: "closed", consecutiveFailures: 1 });
@@ -62,7 +62,7 @@ describe("herald-health.repo", () => {
       runMigrations(dbPath);
       const db = new Database(dbPath);
       db.prepare("INSERT INTO herald_providers (id, label, base_url, api_key) VALUES ('pr1','P','https://x','sk')").run();
-      const layer = HeraldHealthRepo.Default.pipe(Layer.provide(Layer.succeed(Sqlite, db as any)));
+      const layer = HeraldHealthRepo.Default.pipe(Layer.provide(Layer.succeed(Sqlite, db)));
       const prog = Effect.gen(function* () {
         const repo = yield* HeraldHealthRepo;
         yield* repo.upsert({ providerId: "pr1", failureCount: 2 });

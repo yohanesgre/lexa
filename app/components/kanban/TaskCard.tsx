@@ -12,17 +12,17 @@ interface TaskCardProps {
   types: FieldOption[];
   assignees: string[];
   githubs: GithubIssue[];
-  dueAt?: string | null;
-  isDragging?: boolean;
-  dimmed?: boolean;
-  archived?: boolean;
-  isSubtask?: boolean;            // render indented + dimmed
-  blockedBy?: string[];           // blocker task titles (informational)
-  subtaskCount?: number;          // children count for the parent chevron
-  onToggleSubtasks?: () => void;
-  subtasksCollapsed?: boolean;
-  action?: React.ReactNode;
-  className?: string;
+  dueAt?: string | null | undefined;
+  isDragging?: boolean | undefined;
+  dimmed?: boolean | undefined;
+  archived?: boolean | undefined;
+  isSubtask?: boolean | undefined;            // render indented + dimmed
+  blockedBy?: string[] | undefined;           // blocker task titles (informational)
+  subtaskCount?: number | undefined;          // children count for the parent chevron
+  onToggleSubtasks?: (() => void) | undefined;
+  subtasksCollapsed?: boolean | undefined;
+  action?: React.ReactNode | undefined;
+  className?: string | undefined;
 }
 
 function GithubMark({ size = 12 }: { size?: number }) {

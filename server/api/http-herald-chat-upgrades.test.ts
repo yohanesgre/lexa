@@ -162,8 +162,8 @@ describe("GET /api/herald/chats/:projectId (q + pinned ordering)", () => {
       "chat-rec",
       "chat-z",
     ]);
-    expect(body.data[0].pinned).toBe(true);
-    expect(body.data[1].pinned).toBe(false);
+    expect(body.data[0]!.pinned).toBe(true);
+    expect(body.data[1]!.pinned).toBe(false);
 
     const annas = await handler(authed("GET", "/api/herald/chats/p1", undefined, SECOND_ADMIN_KEY));
     expect((await annas.json()).data.map((t: { chatId: string }) => t.chatId)).toEqual(["chat-u2"]);
@@ -173,14 +173,14 @@ describe("GET /api/herald/chats/:projectId (q + pinned ordering)", () => {
     const res = await handler(authed("GET", "/api/herald/chats/p1?q=needle"));
     const body = await res.json();
     expect(body.data.map((t: { chatId: string }) => t.chatId)).toEqual(["chat-z"]);
-    expect(body.data[0].snippet).toBe("the needle in transcript");
+    expect(body.data[0]!.snippet).toBe("the needle in transcript");
   });
 
   it("?q= title-only match → snippet null", async () => {
     const res = await handler(authed("GET", "/api/herald/chats/p1?q=Recency"));
     const body = await res.json();
     expect(body.data.map((t: { chatId: string }) => t.chatId)).toEqual(["chat-rec"]);
-    expect(body.data[0].snippet).toBeNull();
+    expect(body.data[0]!.snippet).toBeNull();
   });
 });
 
@@ -263,21 +263,21 @@ describe("POST /api/herald/chat/stream (fromIndex)", () => {
     );
     expect(res.status).toBe(200);
     const frames = await readSseFrames(res, "done");
-    expect(frames[0].type).toBe("start");
+    expect(frames[0]!.type).toBe("start");
     expect(frames.some((f) => f.type === "delta")).toBe(true);
-    expect(frames.at(-1)?.type).toBe("done");
+    expect(frames.at(-1)!?.type).toBe("done");
 
     const transcript = await handler(authed("GET", "/api/herald/chat/chat-edit"));
     const { messages } = (await transcript.json()) as { messages: Array<Record<string, unknown>> };
     expect(messages).toHaveLength(4);
-    expect(messages[0]).toEqual({ role: "user", content: "q0" });
-    expect(messages[1]).toEqual({ role: "assistant", content: "a0" });
-    expect(messages[2].role).toBe("user");
-    expect(messages[2].content).toBe("edited q1");
-    expect(typeof messages[2].ts).toBe("string");
-    expect(messages[3].role).toBe("assistant");
-    expect(messages[3].content).toBe("Hi");
-    expect(typeof messages[3].ts).toBe("string");
+    expect(messages[0]!).toEqual({ role: "user", content: "q0" });
+    expect(messages[1]!).toEqual({ role: "assistant", content: "a0" });
+    expect(messages[2]!.role).toBe("user");
+    expect(messages[2]!.content).toBe("edited q1");
+    expect(typeof messages[2]!.ts).toBe("string");
+    expect(messages[3]!.role).toBe("assistant");
+    expect(messages[3]!.content).toBe("Hi");
+    expect(typeof messages[3]!.ts).toBe("string");
   }, 20000);
 
   it("bad fromIndex → 422 INVALID_ARGS, transcript untouched", async () => {
@@ -307,11 +307,11 @@ describe("POST /api/herald/chat/stream (fromIndex)", () => {
     const transcript = await handler(authed("GET", "/api/herald/chat/chat-err"));
     const { messages } = (await transcript.json()) as { messages: Array<Record<string, unknown>> };
     expect(messages).toHaveLength(2);
-    expect(messages[0].role).toBe("user");
-    expect(messages[0].content).toBe("hi again");
-    expect(messages[1].role).toBe("assistant");
-    expect(messages[1].content).toBe("Hi");
-    expect(messages[1].error).toBeUndefined();
+    expect(messages[0]!.role).toBe("user");
+    expect(messages[0]!.content).toBe("hi again");
+    expect(messages[1]!.role).toBe("assistant");
+    expect(messages[1]!.content).toBe("Hi");
+    expect(messages[1]!.error).toBeUndefined();
   }, 20000);
 
   it("second concurrent stream on an active chat → 409 HERALD_TASK_ACTIVE", async () => {
@@ -333,8 +333,8 @@ describe("POST /api/herald/chat/stream (fromIndex)", () => {
         signal: ac.signal,
       })
     );
-    expect(first.status).toBe(200);
-    const reader = first.body!.getReader();
+    expect(first!.status).toBe(200);
+    const reader = first!.body!.getReader();
     await reader.read(); // start frame — chat registered active
 
     const second = await handler(

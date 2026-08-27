@@ -16,7 +16,7 @@ const GH_API = "https://api.github.com/repos/yohanesgre/lexa/releases?per_page=1
 
 export function cliTagToVersion(tag: string): string | null {
   const m = /^cli-v([0-9.]+)$/.exec(tag);
-  return m ? m[1] : null;
+  return m ? m[1]! : null;
 }
 
 export function compareVersions(a: string, b: string): number {
@@ -38,7 +38,7 @@ async function latestCliTag(): Promise<string | null> {
     const tags = releases.map((r) => r.tag_name).filter((t) => cliTagToVersion(t) !== null);
     if (tags.length === 0) return null;
     tags.sort((a, b) => compareVersions(cliTagToVersion(b)!, cliTagToVersion(a)!));
-    return tags[0];
+    return tags[0]!;
   } catch {
     return null;
   }

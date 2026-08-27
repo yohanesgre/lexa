@@ -3,7 +3,8 @@ export const DAY_WIDTH_PX = 28;
 
 export function parseDay(s: string): Date {
   const [y, m, d] = s.split("-").map(Number);
-  return new Date(Date.UTC(y, m - 1, d));
+  // @ts-expect-error — strict: exactOptional indexedAccess
+  return new Date(Date.UTC(y, m - 1!, d));
 }
 
 export function formatDay(d: Date): string {

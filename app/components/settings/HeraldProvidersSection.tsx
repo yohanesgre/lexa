@@ -20,7 +20,7 @@ export function HeraldProvidersSection() {
   const [baseUrl, setBaseUrl] = useState("");
   const [apiKey, setApiKey] = useState("");
   const [editingId, setEditingId] = useState<string | null>(null);
-  const [testResults, setTestResults] = useState<Record<string, { state: "pending" | "ok" | "fail"; latencyMs?: number; code?: string; message?: string }>>({});
+  const [testResults, setTestResults] = useState<Record<string, { state: "pending" | "ok" | "fail"; latencyMs?: number | undefined; code?: string | undefined; message?: string | undefined }>>({});
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
 
   const editing = editingId ? providers.find((p) => p.id === editingId) : null;
@@ -43,7 +43,7 @@ export function HeraldProvidersSection() {
     const payload = { label: label.trim(), baseUrl: normalizeBaseUrl(baseUrl), apiKey: apiKey.trim() };
     if (!payload.label || !payload.baseUrl) return;
     if (editingId) {
-      const patch: { label?: string; baseUrl?: string; apiKey?: string } = { label: payload.label, baseUrl: payload.baseUrl };
+      const patch: { label?: string | undefined; baseUrl?: string | undefined; apiKey?: string } = { label: payload.label, baseUrl: payload.baseUrl };
       if (payload.apiKey) patch.apiKey = payload.apiKey;
       update.mutate({ id: editingId, ...patch } as never, { onSuccess: resetForm });
     } else {
@@ -57,7 +57,7 @@ export function HeraldProvidersSection() {
     test.mutate(id, {
       onSuccess: (res) => setTestResults((m) => ({ ...m, [id]: { state: "ok", latencyMs: res.latencyMs } })),
       onError: (err) => {
-        const e = err as { code?: string; message?: string };
+        const e = err as { code?: string | undefined; message?: string | undefined };
         setTestResults((m) => ({ ...m, [id]: { state: "fail", code: e.code ?? "PROVIDER_UNREACHABLE", message: e.message } }));
       },
     });

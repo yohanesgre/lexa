@@ -173,7 +173,7 @@ const HTTP_TIMEOUT_MS = 15_000;
 class DaemonError extends Data.TaggedError("DaemonError")<{
   reason: string;
 }> {
-  get message(): string {
+  override get message(): string {
     return this.reason;
   }
 }
@@ -181,7 +181,7 @@ class DaemonError extends Data.TaggedError("DaemonError")<{
 class AgentError extends Data.TaggedError("AgentError")<{
   reason: string;
 }> {
-  get message(): string {
+  override get message(): string {
     return this.reason;
   }
 }

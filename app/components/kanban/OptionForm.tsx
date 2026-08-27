@@ -11,7 +11,7 @@ export interface OptionFormProps {
   isOpen: boolean;
   onClose: () => void;
   onSubmit: (input: { label: string; color: string }) => void;
-  zIndex?: number;
+  zIndex?: number | undefined;
 }
 
 const swatches: { value: string; label: string }[] = OPTION_COLORS;

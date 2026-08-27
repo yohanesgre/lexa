@@ -48,7 +48,7 @@ export function createApiMiddleware(db: Database, dbPath: string) {
   return HttpApiBuilder.middleware((httpApp) =>
     Effect.gen(function* () {
       const request = yield* HttpServerRequest;
-      const path = request.url.split(/[?#]/)[0];
+      const path = request.url.split(/[?#]/)[0] ?? "";
 
       const isSetup = path.startsWith("/api/setup");
       const isHealth = path === "/api/health";

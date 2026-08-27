@@ -99,8 +99,8 @@ describe("get_all_wiki_pages", () => {
     const exec = tool({ listWikiPagesFull: async () => pages }, "get_all_wiki_pages");
     const out = await exec({});
     expect(out.truncated).toBeUndefined();
-    expect((out.pages as Array<{ markdown: string }>)[0].markdown.length).toBe(WIKI_READ_CAP);
-    expect((out.pages as Array<{ markdown: string }>)[1].markdown).toBe("hi");
+    expect((out.pages! as Array<{ markdown: string }>)[0]!.markdown.length).toBe(WIKI_READ_CAP);
+    expect((out.pages! as Array<{ markdown: string }>)[1]!.markdown).toBe("hi");
   });
 
   it("sets truncated when the total exceeds ALL_WIKI_CAP", async () => {

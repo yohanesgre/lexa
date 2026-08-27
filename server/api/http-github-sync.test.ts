@@ -109,7 +109,7 @@ describe("GitHub content push on task save", () => {
     const res = await api("PATCH", "/api/projects/p1/tasks/t1", { title: "T1 edited" });
     expect(res.status).toBe(200);
     expect(patchCalls).toHaveLength(1);
-    expect(JSON.parse(String(patchCalls[0].body))).toMatchObject({ title: "T1 edited", body: "" });
+    expect(JSON.parse(String(patchCalls[0]!.body))).toMatchObject({ title: "T1 edited", body: "" });
 
     const row = db.prepare("SELECT pushed_title, pushed_body, push_failed FROM task_github_issues WHERE task_id = 't1'").get() as { pushed_title: string | null; pushed_body: string | null; push_failed: number };
     expect(row.pushed_title).toBe("T1 edited");
@@ -144,7 +144,7 @@ describe("GitHub content push on task save", () => {
 
     const row2 = db.prepare("SELECT pushed_title, push_failed FROM task_github_issues WHERE task_id = 't1'").get();
     console.log("ROW2:", JSON.stringify(row2));
-    expect(body.data.githubs[0].pushFailed).toBe(true);
+    expect(body.data.githubs[0]!.pushFailed).toBe(true);
 
     // Next save retries (pushed_* still NULL → diff says changed).
     failPatches = false;

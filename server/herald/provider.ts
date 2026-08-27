@@ -126,11 +126,11 @@ export interface StreamChatInput {
   config: ProviderConfig;
   systemPrompts: CacheablePrompt[];
   messages: ModelMessage[];
-  tools?: ReadonlyArray<unknown>;
-  abortController?: AbortController;
+  tools?: ReadonlyArray<unknown> | undefined;
+  abortController?: AbortController | undefined;
   // Merged verbatim into the provider request body by the adapter's
   // mapOptionsToRequest (e.g. { reasoning_effort: "high" }).
-  modelOptions?: Record<string, unknown>;
+  modelOptions?: Record<string, unknown> | undefined;
 }
 
 // The ONLY file that imports chat() (S12). Everything provider-shaped goes
@@ -250,7 +250,7 @@ function extractStatusCode(e: unknown, depth = 0, seen = new Set<unknown>()): nu
     if (typeof obj.status === "string") {
       const m = obj.status.match(/\b(\d{3})\b/);
       if (m) {
-        const n = Number(m[1]);
+        const n = Number(m[1]!);
         if (n >= 100 && n < 600) return n;
       }
     }

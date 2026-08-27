@@ -15,7 +15,7 @@ export interface R2Bucket {
 export interface R2ListPage {
   objects: { key: string; size: number; etag: string }[];
   truncated: boolean;
-  cursor?: string;
+  cursor?: string | undefined;
 }
 
 export interface S3StorageOptions {

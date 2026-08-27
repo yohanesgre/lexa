@@ -54,7 +54,7 @@ export function renderMention(
 export type TTNode = {
   type: string;
   content?: TTNode[];
-  text?: string;
+  text?: string | undefined;
   marks?: { type: string; attrs?: Record<string, unknown> }[];
   attrs?: Record<string, unknown>;
 };

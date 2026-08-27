@@ -115,7 +115,7 @@ describe("use-herald-stream reasoning frames", () => {
     await waitFor(() => expect(latest!.status).toBe("done"));
 
     expect(seen.some((s) => s.reasoningActive && s.reasoningText === "plan a")).toBe(true);
-    expect(seen.some((s) => !s.reasoningActive && s.tools.length === 1 && s.tools[0].phase === "call")).toBe(true);
+    expect(seen.some((s) => !s.reasoningActive && s.tools.length === 1 && s.tools[0]!.phase === "call")).toBe(true);
     // Second burst reopened the buffer WITHOUT discarding the first.
     expect(seen.some((s) => s.reasoningActive && s.reasoningText === "plan aplan b")).toBe(true);
     expect(latest!.reasoningText).toBe("plan aplan b");
@@ -148,7 +148,7 @@ describe("use-herald-stream reasoning frames", () => {
     });
     // Whitespace-only detail is dropped → bare humanized chip.
     expect(latest!.tools[1]).toMatchObject({ label: "Searching web…", phase: "call" });
-    expect(latest!.tools[1].detail).toBeUndefined();
+    expect(latest!.tools[1]!.detail).toBeUndefined();
   });
 
   it("timeline: text→tool→text yields three items in arrival order; consecutive deltas merge; tool result flips in place", async () => {
@@ -198,8 +198,8 @@ describe("use-herald-stream reasoning frames", () => {
     const items = latest!.items;
     expect(items.map((it) => it.kind)).toEqual(["reasoning", "text", "reasoning", "text"]);
     expect(items[0]).toMatchObject({ kind: "reasoning", text: "plan a continues" });
-    if (items[0].kind === "reasoning") {
-      expect(items[0].ms).not.toBeNull();
+    if (items[0]!.kind === "reasoning") {
+      expect(items[0]!.ms).not.toBeNull();
     }
     expect(items[1]).toMatchObject({ kind: "text", text: "mid answer" });
     expect(items[2]).toMatchObject({ kind: "reasoning", text: "plan b" });
@@ -280,8 +280,8 @@ describe("use-herald-stream write approvals", () => {
     expect(latest!.suspendedBatchId).toBe("b1");
     // Seq order wins over arrival order; diff payloads ride through intact.
     expect(latest!.pending.map((p) => p.approvalId)).toEqual(["a1", "a2"]);
-    expect(latest!.pending[0].diff).toMatchObject({ type: "task_create", title: "Fix" });
-    expect(latest!.pending[1].diff).toMatchObject({ type: "task_move", toColumn: "In Progress" });
+    expect(latest!.pending[0]!.diff).toMatchObject({ type: "task_create", title: "Fix" });
+    expect(latest!.pending[1]!.diff).toMatchObject({ type: "task_move", toColumn: "In Progress" });
     expect(latest!.text).toBe("Working…");
     // Stream end after `suspended` is NOT an error (terminal contract).
     expect(latest!.error).toBeNull();

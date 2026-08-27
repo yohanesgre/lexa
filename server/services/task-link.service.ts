@@ -26,7 +26,7 @@ export class TaskLinkService extends Effect.Service<TaskLinkService>()("Lexa/Tas
         for (let i = 0; i < 50; i++) {
           const parents = yield* repo.findParents(current);
           if (parents.length === 0) break;
-          const parent = parents[0];
+          const parent = parents[0]!;
           if (seen.has(parent.toTaskId)) break; // safety
           seen.add(parent.toTaskId);
           current = parent.toTaskId;

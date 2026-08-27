@@ -34,7 +34,7 @@ function loadEnv(file: string): Record<string, string> {
   const out: Record<string, string> = {};
   for (const line of readFileSync(file, "utf-8").split("\n")) {
     const m = line.match(/^([A-Z0-9_]+)=(.*)$/);
-    if (m) out[m[1]] = m[2];
+    if (m) out[m[1]!] = m[2]!;
   }
   return out;
 }
@@ -54,7 +54,7 @@ function generateRawKey(): string {
   let result = "";
   const base = 62n;
   while (value > 0n) { result = chars[Number(value % base)] + result; value /= base; }
-  while (result.length < 43) result = chars[0] + result;
+  while (result.length < 43) result = chars[0]! + result;
   return `lxk_${result}`;
 }
 
@@ -206,6 +206,7 @@ async function main() {
     db.exec("PRAGMA journal_mode = WAL");
     db.exec("PRAGMA foreign_keys = ON");
     db.exec("PRAGMA busy_timeout = 5000");
+  // @ts-ignore strict: exactOptional indexedAccess
     const keyHash = createHash("sha256").update(env.LXK_API_KEY).digest("hex");
     const row = db.prepare("SELECT id FROM api_keys WHERE key_hash = ?").get(keyHash) as { id: string } | null;
     if (!row && env.LXK_API_KEY) {

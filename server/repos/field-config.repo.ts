@@ -39,7 +39,7 @@ export class FieldConfigRepo extends Effect.Service<FieldConfigRepo>()("Lexa/Fie
       // First option (position 0) = create default + dashboard "urgent" equivalent.
       findFirstPriority: (projectId: string): Effect.Effect<FieldOption | null, DbError> =>
         queryAll<PriorityOptionRow>(db, `SELECT * FROM priority_options WHERE project_id = ? ORDER BY position LIMIT 1`, projectId).pipe(
-          Effect.map((rows) => (rows[0] ? rowToFieldOption(rows[0]) : null))
+          Effect.map((rows) => (rows[0]! ? rowToFieldOption(rows[0]!) : null))
         ),
 
       createOption: (input: { id: string; projectId: string; label: string; color: string; position: number }, kind: FieldKind): Effect.Effect<void, ConstraintViolation | DbError> =>
@@ -84,7 +84,7 @@ export class FieldConfigRepo extends Effect.Service<FieldConfigRepo>()("Lexa/Fie
             ? `SELECT COUNT(*) as c FROM tasks WHERE priority = ?`
             : `SELECT COUNT(*) as c FROM tasks WHERE type = ?`,
           optionId
-        ).pipe(Effect.map((rows) => rows[0]?.c ?? 0)),
+        ).pipe(Effect.map((rows) => rows[0]!?.c ?? 0)),
 
       // Replace the whole list for a project atomically (used by PUT field-config).
       replaceList: (projectId: string, kind: FieldKind, options: { id: string; label: string; color: string; position: number }[]): Effect.Effect<void, ConstraintViolation | DbError> => {

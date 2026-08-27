@@ -44,6 +44,6 @@ export function useResetHearthSession() {
 }
 
 function toastMessage(err: unknown): string {
-  const e = err as { code?: string; message?: string };
+  const e = err as { code?: string | undefined; message?: string };
   return e.message || "Something went wrong";
 }

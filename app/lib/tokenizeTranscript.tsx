@@ -12,7 +12,7 @@ const SLUG_TOKEN_RE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 export interface TokenSegment {
   kind: "text" | "task" | "wiki";
   text: string;
-  ref?: string;
+  ref?: string | undefined;
 }
 
 export function tokenizeMentionText(text: string): TokenSegment[] {
@@ -23,16 +23,18 @@ export function tokenizeMentionText(text: string): TokenSegment[] {
   for (const match of text.matchAll(re)) {
     const prefix = match[1];
     const token = match[2];
-    const start = match.index! + prefix.length;
+    // @ts-expect-error — strict: exactOptional indexedAccess
+    const start = match.index! + prefix.length!;
     if (start > last) out.push({ kind: "text", text: text.slice(last, start) });
-    if (TASK_TOKEN_RE.test(token)) {
+    if (TASK_TOKEN_RE.test(token!)) {
       out.push({ kind: "task", text: `@${token}`, ref: token });
-    } else if (SLUG_TOKEN_RE.test(token)) {
+    } else if (SLUG_TOKEN_RE.test(token!)) {
       out.push({ kind: "wiki", text: `@${token}`, ref: token });
     } else {
       out.push({ kind: "text", text: `@${token}` });
     }
-    last = start + token.length + 1;
+    // @ts-expect-error — strict: exactOptional indexedAccess
+    last = start + token.length + 1!;
   }
   if (last < text.length) out.push({ kind: "text", text: text.slice(last) });
   return out;

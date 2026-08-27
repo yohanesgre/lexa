@@ -78,6 +78,7 @@ describe("Herald provider — API key field (rework)", () => {
     fireEvent.change(input, { target: { value: "sk-live-new-key" } });
     fireEvent.click(screen.getByRole("button", { name: /save/i }));
     expect(saveMutate).toHaveBeenCalledTimes(1);
+    // @ts-expect-error — strict: exactOptional indexedAccess
     const [payload, options] = saveMutate.mock.calls[0];
     expect((payload as Record<string, unknown>).apiKey).toBe("sk-live-new-key");
     // Success callback clears the field (empty = keep stored afterwards).
@@ -98,7 +99,7 @@ describe("Herald provider — API key field (rework)", () => {
     fireEvent.change(screen.getByLabelText("Base URL"), { target: { value: "https://x.test/v1" } });
     fireEvent.change(screen.getByLabelText("Model"), { target: { value: "m1" } });
     fireEvent.click(screen.getByRole("button", { name: /save/i }));
-    const payload = saveMutate.mock.calls[0][0] as Record<string, unknown>;
+    const payload = saveMutate.mock.calls[0]![0] as Record<string, unknown>;
     expect(payload.apiKey).toBeUndefined();
   });
 });
@@ -109,7 +110,7 @@ describe("Herald engine section", () => {
     render(<HeraldEngineSection project={PROJECT} />);
     fireEvent.click(screen.getByRole("radio", { name: /blacksmith/i }));
     expect(saveMutate).toHaveBeenCalledTimes(1);
-    const payload = saveMutate.mock.calls[0][0] as Record<string, unknown>;
+    const payload = saveMutate.mock.calls[0]![0] as Record<string, unknown>;
     // PUT contract: kind/baseUrl/model are required — partial saves carry
     // the stored values so only engine actually changes.
     expect(payload).toMatchObject({
@@ -125,7 +126,7 @@ describe("Herald engine section", () => {
     render(<HeraldEngineSection project={PROJECT} />);
     const toggle = screen.getByRole("switch", { name: "Engine switcher off" });
     fireEvent.click(toggle);
-    const payload = saveMutate.mock.calls[0][0] as Record<string, unknown>;
+    const payload = saveMutate.mock.calls[0]![0] as Record<string, unknown>;
     expect(payload.engineSwitcherEnabled).toBe(true);
   });
 });
@@ -137,7 +138,7 @@ describe("Herald vision fields (folded into provider section)", () => {
     fireEvent.click(screen.getByLabelText("Primary model accepts images directly"));
     fireEvent.change(screen.getByLabelText("Vision model"), { target: { value: "gpt-5-vision" } });
     fireEvent.click(screen.getByRole("button", { name: /^save$/i }));
-    const payload = saveMutate.mock.calls[0][0] as Record<string, unknown>;
+    const payload = saveMutate.mock.calls[0]![0] as Record<string, unknown>;
     expect(payload).toMatchObject({
       kind: "openai_compatible",
       baseUrl: "https://openrouter.ai/api/v1",
@@ -157,7 +158,7 @@ describe("Herald vision fields (folded into provider section)", () => {
     expect(screen.queryByLabelText("Vision API key")).toBeNull();
     expect(screen.queryByRole("heading", { name: "Vision" })).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: /^save$/i }));
-    const payload = saveMutate.mock.calls[0][0] as Record<string, unknown>;
+    const payload = saveMutate.mock.calls[0]![0] as Record<string, unknown>;
     expect(payload.visionModel).toBeNull();
   });
 });
@@ -182,12 +183,12 @@ describe("Herald thinking effort (settings-project-herald.html)", () => {
     render(<HeraldProviderSection project={PROJECT} />);
     fireEvent.change(screen.getByLabelText("Thinking effort"), { target: { value: "high" } });
     fireEvent.click(screen.getByRole("button", { name: /^save$/i }));
-    let payload = saveMutate.mock.calls[0][0] as Record<string, unknown>;
+    let payload = saveMutate.mock.calls[0]![0] as Record<string, unknown>;
     expect(payload.reasoningEffort).toBe("high");
 
     fireEvent.change(screen.getByLabelText("Thinking effort"), { target: { value: "" } });
     fireEvent.click(screen.getByRole("button", { name: /^save$/i }));
-    payload = saveMutate.mock.calls[1][0] as Record<string, unknown>;
+    payload = saveMutate.mock.calls[1]![0] as Record<string, unknown>;
     expect(payload.reasoningEffort).toBeNull();
   });
 

@@ -100,7 +100,7 @@ describe("buildMentionSuggestion", () => {
       sublabel: "ignored-on-insert",
     });
     const json = editor.getJSON() as { content: { type: string; content?: { type: string; attrs?: Record<string, unknown> }[] }[] };
-    const para = json.content[0].content!;
+    const para = json.content[0]!.content!;
     const mention = para.find((n) => n.type === "mention");
     expect(mention?.attrs).toMatchObject({ refType: "task", refId: "t1", label: "NIM-231" });
     expect(para.at(-1)).toMatchObject({ type: "text", text: " " });
@@ -127,7 +127,7 @@ describe("createMentionExtension", () => {
       },
     });
     const json = editor.getJSON() as { content: { content: { type: string; attrs?: Record<string, unknown> }[] }[] };
-    const mention = json.content[0].content!.find((n) => n.type === "mention");
+    const mention = json.content[0]!.content!.find((n) => n.type === "mention");
     expect(mention?.attrs).toMatchObject({ refType: "wiki", refId: "api-reference", label: "API Reference" });
     // Editor-side chip markup carries the ref data + @label text.
     const html = editor.getHTML();

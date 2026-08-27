@@ -24,22 +24,22 @@ describe("markdownToDoc", () => {
     const doc = markdownToDoc("# One\n\n## Two\n\n### Three");
     expect(doc.type).toBe("doc");
     const content = doc.content as Record<string, unknown>[];
-    expect(content[0]).toMatchObject({ type: "heading", attrs: { level: 1 } });
-    expect(content[1]).toMatchObject({ type: "heading", attrs: { level: 2 } });
-    expect(content[2]).toMatchObject({ type: "heading", attrs: { level: 3 } });
+    expect(content[0]!).toMatchObject({ type: "heading", attrs: { level: 1 } });
+    expect(content[1]!).toMatchObject({ type: "heading", attrs: { level: 2 } });
+    expect(content[2]!).toMatchObject({ type: "heading", attrs: { level: 3 } });
   });
 
   it("maps paragraph", () => {
     const doc = markdownToDoc("Hello world");
     expect(doc.type).toBe("doc");
     const content = doc.content as Record<string, unknown>[];
-    expect(content[0]).toMatchObject({ type: "paragraph" });
+    expect(content[0]!).toMatchObject({ type: "paragraph" });
   });
 
   it("maps bold text", () => {
     const doc = markdownToDoc("This is **bold** text");
-    const para = (doc.content as Record<string, unknown>[])[0];
-    const children = para.content as Record<string, unknown>[];
+    const para = (doc.content as Record<string, unknown>[])[0]!;
+    const children = para!.content as Record<string, unknown>[];
     expect(children).toBeDefined();
     const bold = children.find(c => c.type === "text" && Array.isArray(c.marks));
     expect(bold).toBeDefined();
@@ -47,8 +47,8 @@ describe("markdownToDoc", () => {
 
   it("maps italic text", () => {
     const doc = markdownToDoc("This is *italic* text");
-    const para = (doc.content as Record<string, unknown>[])[0];
-    const children = para.content as Record<string, unknown>[];
+    const para = (doc.content as Record<string, unknown>[])[0]!;
+    const children = para!.content as Record<string, unknown>[];
     const italic = children.find(
       c =>
         c.type === "text" &&
@@ -60,8 +60,8 @@ describe("markdownToDoc", () => {
 
   it("maps inline code", () => {
     const doc = markdownToDoc("Use `const x = 1` here");
-    const para = (doc.content as Record<string, unknown>[])[0];
-    const children = para.content as Record<string, unknown>[];
+    const para = (doc.content as Record<string, unknown>[])[0]!;
+    const children = para!.content as Record<string, unknown>[];
     const code = children.find(
       c =>
         c.type === "text" &&
@@ -73,8 +73,8 @@ describe("markdownToDoc", () => {
 
   it("maps links", () => {
     const doc = markdownToDoc("Visit [example](https://example.com) now");
-    const para = (doc.content as Record<string, unknown>[])[0];
-    const children = para.content as Record<string, unknown>[];
+    const para = (doc.content as Record<string, unknown>[])[0]!;
+    const children = para!.content as Record<string, unknown>[];
     const link = children.find(
       c =>
         c.type === "text" &&
@@ -86,14 +86,14 @@ describe("markdownToDoc", () => {
 
   it("drops javascript: link hrefs at the authoring boundary", () => {
     const doc = markdownToDoc("Click [x](javascript:alert(1)) or [safe](https://ok.dev)");
-    const para = (doc.content as Record<string, unknown>[])[0];
-    const children = para.content as Record<string, unknown>[];
+    const para = (doc.content as Record<string, unknown>[])[0]!;
+    const children = para!.content as Record<string, unknown>[];
     const marks = (c: Record<string, unknown>) =>
       (c.marks as { type: string; attrs?: Record<string, unknown> }[] | undefined)?.filter(m => m.type === "link") ?? [];
-    const xMarks = marks(children[1] as Record<string, unknown>); // "Click ", [x](js:...), " or ", [safe](...)
+    const xMarks = marks(children[1]! as Record<string, unknown>); // "Click ", [x](js:...), " or ", [safe](...)
     expect(xMarks).toHaveLength(1);
     expect(xMarks[0]!.attrs?.href).toBeUndefined(); // dropped, link mark has no href
-    const safeMarks = marks(children[3] as Record<string, unknown>);
+    const safeMarks = marks(children[3]! as Record<string, unknown>);
     expect(safeMarks[0]!.attrs?.href).toBe("https://ok.dev"); // safe schemes round-trip unchanged
   });
 
@@ -115,16 +115,16 @@ describe("markdownToDoc", () => {
   it("maps task list with checked items", () => {
     const doc = markdownToDoc("- [x] buy milk\n- [x] walk dog");
     const content = doc.content as Record<string, unknown>[];
-    const taskList = content[0];
+    const taskList = content[0]!;
     const items = taskList.content as Record<string, unknown>[];
-    expect(items[0]).toMatchObject({ type: "taskItem", attrs: { checked: true } });
-    expect(items[1]).toMatchObject({ type: "taskItem", attrs: { checked: true } });
+    expect(items[0]!).toMatchObject({ type: "taskItem", attrs: { checked: true } });
+    expect(items[1]!).toMatchObject({ type: "taskItem", attrs: { checked: true } });
   });
 
   it("maps fenced code block with language", () => {
     const doc = markdownToDoc("```ts\nconst x = 1;\n```");
     const content = doc.content as Record<string, unknown>[];
-    expect(content[0]).toMatchObject({ type: "codeBlock" });
+    expect(content[0]!).toMatchObject({ type: "codeBlock" });
   });
 
   it("maps blockquote", () => {
@@ -135,32 +135,32 @@ describe("markdownToDoc", () => {
   it("maps horizontal rule", () => {
     const doc = markdownToDoc("---");
     const content = doc.content as Record<string, unknown>[];
-    expect(content[0]).toMatchObject({ type: "horizontalRule" });
+    expect(content[0]!).toMatchObject({ type: "horizontalRule" });
   });
 
   it("maps tables to table nodes", () => {
     const doc = markdownToDoc("| a | b |\n|---|---|\n| 1 | 2 |");
     const content = doc.content as Record<string, unknown>[];
-    expect(content[0]).toMatchObject({ type: "table" });
-    const rows = content[0].content as Record<string, unknown>[];
-    expect(rows[0]).toMatchObject({ type: "tableRow" });
-    const header = rows[0].content as Record<string, unknown>[];
-    expect(header[0]).toMatchObject({ type: "tableHeader" });
-    expect(header[1]).toMatchObject({ type: "tableHeader" });
-    const body = rows[1].content as Record<string, unknown>[];
-    expect(body[0]).toMatchObject({ type: "tableCell" });
+    expect(content[0]!).toMatchObject({ type: "table" });
+    const rows = content[0]!.content as Record<string, unknown>[];
+    expect(rows[0]!).toMatchObject({ type: "tableRow" });
+    const header = rows[0]!.content as Record<string, unknown>[];
+    expect(header[0]!).toMatchObject({ type: "tableHeader" });
+    expect(header[1]!).toMatchObject({ type: "tableHeader" });
+    const body = rows[1]!.content as Record<string, unknown>[];
+    expect(body[0]!).toMatchObject({ type: "tableCell" });
   });
 
   it("wraps table cell content in paragraphs (schema requires block+)", () => {
     const doc = markdownToDoc("| a | b |\n|---|---|\n| 1 | 2 |");
-    const rows = (doc.content as Record<string, unknown>[])[0].content as Record<string, unknown>[];
-    const header = rows[0].content as Record<string, unknown>[];
-    expect(header[0]).toMatchObject({
+    const rows = (doc.content as Record<string, unknown>[])[0]!.content as Record<string, unknown>[];
+    const header = rows[0]!.content as Record<string, unknown>[];
+    expect(header[0]!).toMatchObject({
       type: "tableHeader",
       content: [{ type: "paragraph", content: [{ type: "text", text: "a" }] }],
     });
-    const body = rows[1].content as Record<string, unknown>[];
-    expect(body[0]).toMatchObject({
+    const body = rows[1]!.content as Record<string, unknown>[];
+    expect(body[0]!).toMatchObject({
       type: "tableCell",
       content: [{ type: "paragraph", content: [{ type: "text", text: "1" }] }],
     });
@@ -168,33 +168,33 @@ describe("markdownToDoc", () => {
 
   it("maps table alignment", () => {
     const doc = markdownToDoc("| a | b | c |\n|:--|:-:|--:|\n| 1 | 2 | 3 |");
-    const rows = (doc.content as Record<string, unknown>[])[0].content as Record<string, unknown>[];
-    const header = rows[0].content as Record<string, unknown>[];
-    expect(header[0]).toMatchObject({ type: "tableHeader", attrs: { align: "left" } });
-    expect(header[1]).toMatchObject({ type: "tableHeader", attrs: { align: "center" } });
-    expect(header[2]).toMatchObject({ type: "tableHeader", attrs: { align: "right" } });
+    const rows = (doc.content as Record<string, unknown>[])[0]!.content as Record<string, unknown>[];
+    const header = rows[0]!.content as Record<string, unknown>[];
+    expect(header[0]!).toMatchObject({ type: "tableHeader", attrs: { align: "left" } });
+    expect(header[1]!).toMatchObject({ type: "tableHeader", attrs: { align: "center" } });
+    expect(header[2]!).toMatchObject({ type: "tableHeader", attrs: { align: "right" } });
   });
 
   it("degrades raw HTML to codeBlock", () => {
     const doc = markdownToDoc("<div>hello</div>");
     const content = doc.content as Record<string, unknown>[];
-    expect(content[0]).toMatchObject({ type: "codeBlock" });
+    expect(content[0]!).toMatchObject({ type: "codeBlock" });
   });
 
   it("maps images to image nodes", () => {
     const doc = markdownToDoc("Look: ![alt](https://example.com/img.png)");
-    const para = (doc.content as Record<string, unknown>[])[0];
-    const image = (para.content as Record<string, unknown>[]).find(c => c.type === "image");
+    const para = (doc.content as Record<string, unknown>[])[0]!;
+    const image = (para!.content as Record<string, unknown>[]).find(c => c.type === "image");
     expect(image).toBeDefined();
     expect(image).toMatchObject({ attrs: { src: "https://example.com/img.png" } });
   });
 
   it("drops non-http image srcs at the authoring boundary", () => {
     const doc = markdownToDoc("![bad](javascript:alert(1)) ![ok](https://ok.dev/img.png)");
-    const para = (doc.content as Record<string, unknown>[])[0];
-    const images = (para.content as Record<string, unknown>[]).filter(c => c.type === "image");
+    const para = (doc.content as Record<string, unknown>[])[0]!;
+    const images = (para!.content as Record<string, unknown>[]).filter(c => c.type === "image");
     expect(images).toHaveLength(1);
-    expect(images[0]).toMatchObject({ attrs: { src: "https://ok.dev/img.png" } });
+    expect(images[0]!).toMatchObject({ attrs: { src: "https://ok.dev/img.png" } });
   });
 
   it("never throws on garbage input", () => {

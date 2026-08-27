@@ -24,7 +24,7 @@ const envelope = (code: string, message: string, details?: unknown) =>
     headers: { "Content-Type": "application/json" },
   });
 
-type ApiErrorLike = Error & { code?: string; details?: unknown };
+type ApiErrorLike = Error & { code?: string | undefined; details?: unknown };
 
 async function failureOf(p: Promise<unknown>): Promise<ApiErrorLike> {
   try {

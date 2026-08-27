@@ -27,7 +27,7 @@ export class MilestoneService extends Effect.Service<MilestoneService>()("Lexa/M
           );
           const maxPos = yield* repo.maxPosition(input.projectId);
           const id = crypto.randomUUID();
-          const milestone = yield* repo.create({ id, projectId: input.projectId, name: input.name, description: input.description, position: maxPos + 1, dueAt: input.dueAt ?? null }).pipe(
+          const milestone = yield* repo.create({ id, projectId: input.projectId, name: input.name, ...(input.description !== undefined ? { description: input.description } : {}), position: maxPos + 1, dueAt: input.dueAt ?? null }).pipe(
             Effect.catchTags({
               ConstraintViolation: (e) => new DbError({ message: "Database error", cause: e }),
               RowNotFound: (e) => new DbError({ message: "Database error", cause: e }),

@@ -77,7 +77,7 @@ export class ProjectMemoryRepo extends Effect.Service<ProjectMemoryRepo>()("Lexa
           db,
           Effect.gen(function* () {
             const rows = yield* queryAll<{ rowid: number }>(db, `SELECT rowid FROM project_memory WHERE id = ?`, id);
-            const rowid = rows[0]?.rowid;
+            const rowid = rows[0]!?.rowid;
             if (rowid === undefined) return yield* Effect.fail(new RowNotFound({ table: "project_memory" }));
             yield* run(db, `DELETE FROM project_memory WHERE id = ?`, id);
             yield* run(db, `DELETE FROM project_memory_fts WHERE rowid = ?`, rowid);

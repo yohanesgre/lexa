@@ -8,9 +8,9 @@ export function NavLink({
   children,
 }: {
   to: string;
-  params?: Record<string, string>;
-  active?: boolean;
-  exact?: boolean;
+  params?: Record<string, string> | undefined;
+  active?: boolean | undefined;
+  exact?: boolean | undefined;
   children: React.ReactNode;
 }) {
   const pathname = useRouterState({ select: (s) => s.location.pathname });
@@ -18,9 +18,9 @@ export function NavLink({
   return (
     <Link
       to={to}
-      params={params}
+      {...(params !== undefined ? { params } : {})}
       className={isActive ? "nav-link active" : "nav-link"}
-      activeOptions={exact ? { exact: true } : undefined}
+      {...(exact ? { activeOptions: { exact: true } } : {})}
     >
       {children}
     </Link>

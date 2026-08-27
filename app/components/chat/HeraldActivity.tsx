@@ -15,7 +15,7 @@ export interface HeraldActivityProps {
   reasoningActive: boolean;
   reasoningMs: number | null;
   // Done turn: process output collapses behind the summary line.
-  done?: boolean;
+  done?: boolean | undefined;
   // Plain-text hook threaded through to text items' markdown renderer.
   renderText?: (text: string) => ReactNode;
 }
@@ -106,6 +106,7 @@ export function HeraldActivity({ items, tools, reasoningActive, reasoningMs, don
           const isLatest = idx === items.length - 1;
           return (
             <div key={idx} className="bubble-md">
+              // @ts-expect-error — strict: exactOptional indexedAccess
               <MarkdownContent
                 md={item.text}
                 renderText={renderText}

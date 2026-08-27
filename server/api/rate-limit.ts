@@ -62,14 +62,15 @@ export interface RateLimiter {
 
 export function isPrivateIp(ip: string): boolean {
   const v6mapped = ip.match(/^::ffff:(\d{1,3}(?:\.\d{1,3}){3})$/i);
-  const candidate = v6mapped ? v6mapped[1] : ip;
+  const candidate = v6mapped ? (v6mapped[1] ?? ip) : ip;
   if (candidate.includes(":")) {
     if (candidate === "::1") return true;
     return candidate.startsWith("fc") || candidate.startsWith("fd");
   }
   const parts = candidate.split(".").map(Number);
   if (parts.length !== 4 || parts.some((p) => Number.isNaN(p) || p < 0 || p > 255)) return false;
-  const [a, b] = parts;
+  const a = parts[0]!; // length checked to 4
+  const b = parts[1]!; // length checked to 4
   if (a === 127) return true;
   if (a === 10) return true;
   if (a === 172 && b >= 16 && b <= 31) return true;

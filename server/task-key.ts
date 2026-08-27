@@ -7,9 +7,9 @@ export function generateTaskKey(slug: string, taken: (candidate: string) => bool
   const letters = lastWord.split("");
   let base: string;
   if (words.length > 1) {
-    base = words.filter((w) => !/^\d/.test(w)).slice(0, 3).map((w) => w[0]).join("").toUpperCase();
+    base = words.filter((w) => !/^\d/.test(w)).slice(0, 3).map((w) => w[0]!).join("").toUpperCase();
   } else {
-    const first = letters[0] ?? "p";
+    const first = letters[0]! ?? "p";
     const consonants = letters.slice(1).filter((c) => !VOWELS.has(c));
     base = (first + consonants.join("")).toUpperCase().slice(0, 3);
   }
@@ -30,5 +30,5 @@ export function generateTaskKey(slug: string, taken: (candidate: string) => bool
 export function parseTaskKey(raw: string): { prefix: string; number: number } | null {
   const m = raw.toUpperCase().match(/^([A-Z0-9]{2,6})-(\d+)$/);
   if (!m) return null;
-  return { prefix: m[1], number: Number(m[2]) };
+  return { prefix: m[1]!, number: Number(m[2]!) };
 }

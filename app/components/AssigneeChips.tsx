@@ -5,13 +5,13 @@ import { cn } from "./ui/cn";
 interface AssigneeChipsProps {
   assignees: string[];
   availableAssignees: string[];
-  placeholder?: string;
-  inputClassName?: string;
+  placeholder?: string | undefined;
+  inputClassName?: string | undefined;
   inputStyle?: React.CSSProperties;
   onChange?: (assignees: string[]) => void;
-  readonly?: boolean;
-  compact?: boolean;
-  expanded?: boolean;
+  readonly?: boolean | undefined;
+  compact?: boolean | undefined;
+  expanded?: boolean | undefined;
 }
 
 export function AssigneeChips({

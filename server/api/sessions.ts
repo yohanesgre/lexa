@@ -42,7 +42,7 @@ export const createSessionsLive = (api: typeof LexaApi) =>
           const sessions = yield* Effect.tryPromise(() => auth.api.listSessions({ headers })).pipe(
             Effect.mapError(() => new Error("listSessions failed"))
           );
-          const own = (sessions ?? [])
+          const own = ((sessions ?? []) as Parameters<typeof toSessionInfo>[0][])
             .map(toSessionInfo)
             .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
           return { data: own };

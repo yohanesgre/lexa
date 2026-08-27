@@ -63,7 +63,7 @@ describe("wiki routes", () => {
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.data.map((p: { slug: string }) => p.slug)).toEqual(["home", "child"]);
-    expect(body.data[0].hasChildren).toBe(true);
+    expect(body.data[0]!.hasChildren).toBe(true);
   });
 
   it("POST /api/projects/:slug/wiki creates a page (201); unknown project → 404", async () => {
@@ -122,8 +122,8 @@ describe("wiki routes", () => {
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.data.length).toBeGreaterThan(0);
-    expect(body.data[0].slug).toBe("home");
-    expect(body.data[0].snippet).toContain("hello");
+    expect(body.data[0]!.slug).toBe("home");
+    expect(body.data[0]!.snippet).toContain("hello");
   });
 
   it("GET wiki/search with a missing q → 200 empty data", async () => {
@@ -145,8 +145,8 @@ describe("settings api-keys routes", () => {
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.data.some((k: { id: string }) => k.id === "k1")).toBe(true);
-    expect("keyHash" in body.data[0]).toBe(false);
-    expect("key_hash" in body.data[0]).toBe(false);
+    expect("keyHash" in body.data[0]!).toBe(false);
+    expect("key_hash" in body.data[0]!).toBe(false);
   });
 
   it("POST /api/settings/api-keys returns the raw key once (201); the key works", async () => {

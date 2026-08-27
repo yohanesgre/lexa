@@ -181,7 +181,7 @@ export function AppShell() {
                     {selectedProjectId && (
                       <Link
                         to="/settings/project/$projectId"
-                        params={{ projectId: selectedProjectId }}
+                        params={{ projectId: selectedProjectId! }}
                         className="app-nav-menu-action"
                         onClick={() => setMenuOpen(false)}
                       >
@@ -200,25 +200,25 @@ export function AppShell() {
                 )}
               </div>
             )}
-            <Link to={dashboardTo} params={dashboardParams} className="app-nav-menu-link" activeOptions={{ exact: true }}>
+            <Link to={dashboardTo} {...(dashboardParams ? { params: dashboardParams } : {})} className="app-nav-menu-link" activeOptions={{ exact: true }}>
               Dashboard
             </Link>
-            <Link to={boardTo} params={boardParams} className="app-nav-menu-link">
+            <Link to={boardTo} {...(boardParams ? { params: boardParams } : {})} className="app-nav-menu-link">
               Board
             </Link>
-            <Link to={tasksTo} params={tasksParams} className="app-nav-menu-link">
+            <Link to={tasksTo} {...(tasksParams ? { params: tasksParams } : {})} className="app-nav-menu-link">
               Tasks
             </Link>
-            <Link to={milestonesTo} params={milestonesParams} className="app-nav-menu-link">
+            <Link to={milestonesTo} {...(milestonesParams ? { params: milestonesParams } : {})} className="app-nav-menu-link">
               Milestones
             </Link>
-            <Link to={swimlanesTo} params={swimlanesParams} className="app-nav-menu-link">
+            <Link to={swimlanesTo} {...(swimlanesParams ? { params: swimlanesParams } : {})} className="app-nav-menu-link">
               Swimlanes
             </Link>
-            <Link to={wikiTo} params={wikiParams} className="app-nav-menu-link">
+            <Link to={wikiTo} {...(wikiParams ? { params: wikiParams } : {})} className="app-nav-menu-link">
               Wiki
             </Link>
-            <Link to={chatTo} params={chatParams} className="app-nav-menu-link">
+            <Link to={chatTo} {...(chatParams ? { params: chatParams } : {})} className="app-nav-menu-link">
               Chat
             </Link>
             <Link to="/hearth" className="app-nav-menu-link">

@@ -75,7 +75,7 @@ describe("LexaClient request building", () => {
   it("200 response parses and sends Bearer auth", async () => {
     const out = await Effect.runPromise(client().health());
     expect(out).toEqual({ ok: true });
-    const req = seen[0];
+    const req = seen[0]!;
     expect(req.method).toBe("GET");
     expect(req.url).toBe("/api/health");
     expect(req.headers.authorization).toBe("Bearer test-key");

@@ -13,7 +13,7 @@ export interface ApprovalChip {
   batchId: string;
   seq: number;
   name: string;
-  detail?: string;
+  detail?: string | undefined;
   diff: HeraldWriteDiff;
   state: ApprovalChipState;
   error?: { code: string; message: string };

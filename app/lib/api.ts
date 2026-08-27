@@ -8,7 +8,7 @@ const BASE = "/api";
 // vite.config.ts excludes @tanstack/react-start-server from the client dep
 // optimizer. Client-side this is never called — fetch stays same-origin and
 // the session cookie flows implicitly.
-async function serverRequestContext(): Promise<{ origin: string; cookie?: string }> {
+async function serverRequestContext(): Promise<{ origin: string; cookie?: string | undefined }> {
   const origin =
     typeof process !== "undefined"
       ? (process.env.LXK_PUBLIC_URL ?? "http://localhost:3000")
@@ -36,8 +36,8 @@ async function request<T>(url: string, init?: RequestInit): Promise<T> {
   }
   const res = await fetch(target, { ...init, headers });
   if (!res.ok) {
-    const body = await res.json().catch(() => ({})) as { error?: { code?: string; message?: string; details?: unknown } };
-    const err = new Error(body.error?.message ?? `HTTP ${res.status}`) as Error & { code?: string; details?: unknown };
+    const body = await res.json().catch(() => ({})) as { error?: { code?: string | undefined; message?: string | undefined; details?: unknown } };
+    const err = new Error(body.error?.message ?? `HTTP ${res.status}`) as Error & { code?: string | undefined; details?: unknown };
     err.code = body.error?.code;
     err.details = body.error?.details;
     throw err;
@@ -83,7 +83,7 @@ export function getDashboard(): Promise<Dashboard> {
   return request(`${BASE}/dashboard`);
 }
 
-export function createProject(input: { name: string; slug?: string; description?: string; teamId?: string | null }): Promise<Project> {
+export function createProject(input: { name: string; slug?: string | undefined; description?: string | undefined; teamId?: string | null }): Promise<Project> {
   return request(`${BASE}/projects`, { method: "POST", body: JSON.stringify(input) });
 }
 
@@ -95,7 +95,7 @@ export function deleteProject(slug: string): Promise<void> {
   return request(`${BASE}/projects/${slug}`, { method: "DELETE" });
 }
 
-export function updateProject(slug: string, input: { name?: string; description?: string }): Promise<Project> {
+export function updateProject(slug: string, input: { name?: string | undefined; description?: string }): Promise<Project> {
   return request(`${BASE}/projects/${slug}`, { method: "PATCH", body: JSON.stringify(input) });
 }
 
@@ -135,11 +135,11 @@ export function listColumns(slug: string): Promise<{ data: Column[] }> {
   return request(`${BASE}/projects/${slug}/columns`);
 }
 
-export function createColumn(slug: string, input: { name: string; wipLimit?: number | null; requiredFields?: string[]; color?: string; githubState?: "open" | "closed" | null; isDone?: boolean }): Promise<Column> {
+export function createColumn(slug: string, input: { name: string; wipLimit?: number | null | undefined; requiredFields?: string[] | undefined; color?: string | undefined; githubState?: "open" | "closed" | null | undefined; isDone?: boolean }): Promise<Column> {
   return request(`${BASE}/projects/${slug}/columns`, { method: "POST", body: JSON.stringify(input) });
 }
 
-export function updateColumn(slug: string, id: string, input: { name?: string; wipLimit?: number | null; requiredFields?: string[]; color?: string; position?: number; githubState?: "open" | "closed" | null; isDone?: boolean }): Promise<Column> {
+export function updateColumn(slug: string, id: string, input: { name?: string | undefined; wipLimit?: number | null | undefined; requiredFields?: string[] | undefined; color?: string | undefined; position?: number | undefined; githubState?: "open" | "closed" | null | undefined; isDone?: boolean }): Promise<Column> {
   return request(`${BASE}/projects/${slug}/columns/${id}`, { method: "PATCH", body: JSON.stringify(input) });
 }
 
@@ -151,11 +151,11 @@ export function listSwimlanes(slug: string): Promise<{ data: Swimlane[] }> {
   return request(`${BASE}/projects/${slug}/swimlanes`);
 }
 
-export function createSwimlane(slug: string, input: { name: string; description?: string; dueAt?: string | null; startAt?: string | null; milestoneId?: string | null }): Promise<Swimlane> {
+export function createSwimlane(slug: string, input: { name: string; description?: string | undefined; dueAt?: string | null | undefined; startAt?: string | null | undefined; milestoneId?: string | null }): Promise<Swimlane> {
   return request(`${BASE}/projects/${slug}/swimlanes`, { method: "POST", body: JSON.stringify(input) });
 }
 
-export function updateSwimlane(slug: string, id: string, input: { name?: string; position?: number; description?: string; dueAt?: string | null; startAt?: string | null; milestoneId?: string | null }): Promise<Swimlane> {
+export function updateSwimlane(slug: string, id: string, input: { name?: string | undefined; position?: number | undefined; description?: string | undefined; dueAt?: string | null | undefined; startAt?: string | null | undefined; milestoneId?: string | null }): Promise<Swimlane> {
   return request(`${BASE}/projects/${slug}/swimlanes/${id}`, { method: "PATCH", body: JSON.stringify(input) });
 }
 
@@ -180,11 +180,11 @@ export function listMilestones(slug: string): Promise<{ data: Milestone[] }> {
   return request(`${BASE}/projects/${slug}/milestones`);
 }
 
-export function createMilestone(slug: string, input: { name: string; description?: string; position?: number; dueAt?: string | null }): Promise<Milestone> {
+export function createMilestone(slug: string, input: { name: string; description?: string | undefined; position?: number | undefined; dueAt?: string | null }): Promise<Milestone> {
   return request(`${BASE}/projects/${slug}/milestones`, { method: "POST", body: JSON.stringify(input) });
 }
 
-export function updateMilestone(slug: string, id: string, input: { name?: string; description?: string; position?: number; dueAt?: string | null }): Promise<Milestone> {
+export function updateMilestone(slug: string, id: string, input: { name?: string | undefined; description?: string | undefined; position?: number | undefined; dueAt?: string | null }): Promise<Milestone> {
   return request(`${BASE}/projects/${slug}/milestones/${id}`, { method: "PATCH", body: JSON.stringify(input) });
 }
 
@@ -211,16 +211,16 @@ export interface TaskMutationResult {
   activity: ActivityEvent[];
 }
 
-export function createTask(slug: string, input: { columnId: string; swimlaneId?: string; title: string; description?: TipTapDoc; priority?: string; type?: string; parentId?: string; assignees?: string[]; dueAt?: string | null }): Promise<TaskMutationResult> {
+export function createTask(slug: string, input: { columnId: string; swimlaneId?: string | undefined; title: string; description?: TipTapDoc | undefined; priority?: string | undefined; type?: string | undefined; parentId?: string | undefined; assignees?: string[] | undefined; dueAt?: string | null }): Promise<TaskMutationResult> {
   return request(`${BASE}/projects/${slug}/tasks`, { method: "POST", body: JSON.stringify(input) });
 }
 
 
-export function updateTask(slug: string, id: string, input: { title?: string; description?: TipTapDoc; priority?: string; type?: string; assignees?: string[]; dueAt?: string | null }): Promise<TaskMutationResult> {
+export function updateTask(slug: string, id: string, input: { title?: string | undefined; description?: TipTapDoc | undefined; priority?: string | undefined; type?: string | undefined; assignees?: string[] | undefined; dueAt?: string | null }): Promise<TaskMutationResult> {
   return request(`${BASE}/projects/${slug}/tasks/${id}`, { method: "PATCH", body: JSON.stringify(input) });
 }
 
-export function moveTask(slug: string, id: string, target: { columnId: string; swimlaneId: string; beforeTaskId?: string; afterTaskId?: string; clearDueAt?: boolean }): Promise<TaskMutationResult> {
+export function moveTask(slug: string, id: string, target: { columnId: string; swimlaneId: string; beforeTaskId?: string | undefined; afterTaskId?: string | undefined; clearDueAt?: boolean }): Promise<TaskMutationResult> {
   return request(`${BASE}/projects/${slug}/tasks/${id}/move`, { method: "POST", body: JSON.stringify(target) });
 }
 
@@ -279,7 +279,7 @@ export function getFieldConfig(slug: string): Promise<FieldConfig> {
   return request(`${BASE}/projects/${slug}/field-config`);
 }
 
-export function updateFieldConfig(slug: string, input: { priorities: { id?: string; label: string; color?: string; position?: number }[]; types: { id?: string; label: string; color?: string; position?: number }[] }): Promise<FieldConfig> {
+export function updateFieldConfig(slug: string, input: { priorities: { id?: string | undefined; label: string; color?: string | undefined; position?: number }[]; types: { id?: string | undefined; label: string; color?: string | undefined; position?: number }[] }): Promise<FieldConfig> {
   return request(`${BASE}/projects/${slug}/field-config`, { method: "PUT", body: JSON.stringify(input) });
 }
 
@@ -287,7 +287,7 @@ export function listWikiPages(slug: string): Promise<{ data: WikiPageMeta[] }> {
   return request(`${BASE}/projects/${slug}/wiki`);
 }
 
-export function createWikiPage(slug: string, input: { parentId?: string | null; title: string; slug?: string; content?: TipTapDoc }): Promise<WikiPage> {
+export function createWikiPage(slug: string, input: { parentId?: string | null | undefined; title: string; slug?: string | undefined; content?: TipTapDoc }): Promise<WikiPage> {
   return request(`${BASE}/projects/${slug}/wiki`, { method: "POST", body: JSON.stringify(input) });
 }
 
@@ -300,7 +300,7 @@ export function getWikiPage(slug: string, pageSlug: string): Promise<WikiPage> {
 }
 
 
-export function updateWikiPage(slug: string, pageSlug: string, input: { title?: string; slug?: string; content?: TipTapDoc; parentId?: string | null; position?: number; saveType?: "autosave" | "manual" }): Promise<WikiPage> {
+export function updateWikiPage(slug: string, pageSlug: string, input: { title?: string | undefined; slug?: string | undefined; content?: TipTapDoc; parentId?: string | null | undefined; position?: number | undefined; saveType?: "autosave" | "manual" }): Promise<WikiPage> {
   return request(`${BASE}/projects/${slug}/wiki/${pageSlug}`, { method: "PATCH", body: JSON.stringify(input) });
 }
 
@@ -383,7 +383,7 @@ export function getGithubSettings(): Promise<GithubSettings> {
   return request(`${BASE}/settings/github`);
 }
 
-export function updateGithubSettings(input: { appId: string; privateKey?: string; webhookSecret?: string }): Promise<GithubSettings> {
+export function updateGithubSettings(input: { appId: string; privateKey?: string | undefined; webhookSecret?: string }): Promise<GithubSettings> {
   return request(`${BASE}/settings/github`, { method: "PUT", body: JSON.stringify(input) });
 }
 
@@ -500,9 +500,9 @@ export function createHearthTask(input: {
   documentId: string;
   agentId: string;
   skillId: string;
-  extraPrompt?: string;
-  selection?: string;
-  runtimeId?: string;
+  extraPrompt?: string | undefined;
+  selection?: string | undefined;
+  runtimeId?: string | undefined;
 }): Promise<HearthTask> {
   return request(`${BASE}/hearth/tasks`, { method: "POST", body: JSON.stringify(input) });
 }
@@ -539,12 +539,12 @@ export interface HearthHistoryPage {
 
 // Full Hearth task history (control panel): optional filters + keyset cursor.
 export function listHearthTaskHistory(filters: {
-  slug?: string;
+  slug?: string | undefined;
   status?: HearthTaskStatus;
-  skillId?: string;
+  skillId?: string | undefined;
   documentType?: "task" | "wiki";
-  limit?: number;
-  cursor?: string;
+  limit?: number | undefined;
+  cursor?: string | undefined;
 }): Promise<HearthHistoryPage> {
   const q = new URLSearchParams();
   if (filters.slug) q.set("slug", filters.slug);
@@ -577,11 +577,11 @@ export function listHearthAgents(): Promise<{ data: LexaAgent[] }> {
   return request(`${BASE}/agents`);
 }
 
-export function createHearthAgent(input: { name: string; description?: string; instructions: string }): Promise<LexaAgent> {
+export function createHearthAgent(input: { name: string; description?: string | undefined; instructions: string }): Promise<LexaAgent> {
   return request(`${BASE}/agents`, { method: "POST", body: JSON.stringify(input) });
 }
 
-export function updateHearthAgent(id: string, patch: { name?: string; description?: string; instructions?: string }): Promise<LexaAgent> {
+export function updateHearthAgent(id: string, patch: { name?: string | undefined; description?: string | undefined; instructions?: string }): Promise<LexaAgent> {
   return request(`${BASE}/agents/${id}`, { method: "PATCH", body: JSON.stringify(patch) });
 }
 
@@ -601,11 +601,11 @@ export function listHearthSkills(): Promise<{ data: LexaSkill[] }> {
   return request(`${BASE}/skills`);
 }
 
-export function createHearthSkill(input: { name: string; description?: string; instructions: string }): Promise<LexaSkill> {
+export function createHearthSkill(input: { name: string; description?: string | undefined; instructions: string }): Promise<LexaSkill> {
   return request(`${BASE}/skills`, { method: "POST", body: JSON.stringify(input) });
 }
 
-export function updateHearthSkill(id: string, patch: { name?: string; description?: string; instructions?: string }): Promise<LexaSkill> {
+export function updateHearthSkill(id: string, patch: { name?: string | undefined; description?: string | undefined; instructions?: string }): Promise<LexaSkill> {
   return request(`${BASE}/skills/${id}`, { method: "PATCH", body: JSON.stringify(patch) });
 }
 
@@ -622,7 +622,7 @@ export function listRuntimes(teamId?: string): Promise<{ data: Runtime[] }> {
   return request(`${BASE}/hearth/runtimes${qs}`);
 }
 
-export function updateRuntime(id: string, patch: { name?: string; provider?: "opencode" | "hermes" | "command-code"; agent?: string; model?: string; printLogs?: boolean; logLevel?: "" | "DEBUG" | "INFO" | "WARN" | "ERROR"; extraArgs?: string[] }): Promise<Runtime> {
+export function updateRuntime(id: string, patch: { name?: string | undefined; provider?: "opencode" | "hermes" | "command-code"; agent?: string | undefined; model?: string | undefined; printLogs?: boolean | undefined; logLevel?: "" | "DEBUG" | "INFO" | "WARN" | "ERROR"; extraArgs?: string[] }): Promise<Runtime> {
   return request(`${BASE}/hearth/runtimes/${id}`, { method: "PATCH", body: JSON.stringify(patch) });
 }
 
@@ -640,8 +640,8 @@ export function createRuntimeEvent(input: {
   machineId: string;
   action: "install" | "update";
   agentCli: "opencode" | "hermes" | "command-code";
-  apiKeyId?: string;
-  rawKey?: string;
+  apiKeyId?: string | undefined;
+  rawKey?: string | undefined;
 }): Promise<RuntimeEvent> {
   return request(`${BASE}/hearth/runtime-events`, { method: "POST", body: JSON.stringify(input) });
 }
@@ -725,7 +725,7 @@ export async function testHeraldSettings(
       signal: opts?.signal ?? AbortSignal.timeout(35_000),
     });
   } catch (e) {
-    const err = e as { code?: string; name?: string; message?: string };
+    const err = e as { code?: string | undefined; name?: string | undefined; message?: string };
     if (!err.code) {
       const msg = `${err.name ?? ""} ${err.message ?? ""}`.toLowerCase();
       if (msg.includes("timeout") || msg.includes("abort")) {
@@ -750,7 +750,7 @@ export function createHeraldProvider(input: { label: string; baseUrl: string; ap
   return request(`${BASE}/herald/providers`, { method: "POST", body: JSON.stringify({ label: input.label, base_url: input.baseUrl, api_key: input.apiKey }) });
 }
 
-export function updateHeraldProvider(id: string, input: { label?: string; baseUrl?: string; apiKey?: string }): Promise<HeraldProvider> {
+export function updateHeraldProvider(id: string, input: { label?: string | undefined; baseUrl?: string | undefined; apiKey?: string }): Promise<HeraldProvider> {
   const body: Record<string, string> = {};
   if (input.label !== undefined) body.label = input.label;
   if (input.baseUrl !== undefined) body.base_url = input.baseUrl;
@@ -770,7 +770,7 @@ export function fetchHeraldProviderModels(id: string): Promise<{ data: HeraldPro
   return request(`${BASE}/herald/providers/${id}/models`, { method: "POST" });
 }
 
-export function updateHeraldProviderModel(id: string, modelId: string, patch: { enabled?: boolean; priority?: number }): Promise<HeraldProviderModel> {
+export function updateHeraldProviderModel(id: string, modelId: string, patch: { enabled?: boolean | undefined; priority?: number }): Promise<HeraldProviderModel> {
   return request(`${BASE}/herald/providers/${id}/models/${encodeURIComponent(modelId)}`, { method: "PATCH", body: JSON.stringify(patch) });
 }
 
@@ -778,7 +778,7 @@ export function getHeraldUsage(): Promise<HeraldUsage> {
   return request(`${BASE}/herald/usage`);
 }
 
-export function listHeraldCalls(params?: { projectId?: string; limit?: number }): Promise<{ data: HeraldCall[] }> {
+export function listHeraldCalls(params?: { projectId?: string | undefined; limit?: number }): Promise<{ data: HeraldCall[] }> {
   const qs = new URLSearchParams();
   if (params?.projectId) qs.set("projectId", params.projectId);
   if (params?.limit) qs.set("limit", String(params.limit));
@@ -801,7 +801,7 @@ export function createHeraldTask(input: {
   prompt: string;
   agentId: string;
   skillId: string;
-  selection?: string;
+  selection?: string | undefined;
   attachments?: { storageKey: string; mimeType: string; name: string }[];
 }): Promise<HearthTask> {
   return request(`${BASE}/herald/tasks`, { method: "POST", body: JSON.stringify(input) });
@@ -842,7 +842,7 @@ export interface HeraldChatThreadSummary {
   chatId: string;
   title: string | null;
   pinned: boolean;
-  snippet?: string | null;
+  snippet?: string | null | undefined;
   createdAt: string;
   updatedAt: string;
 }
@@ -854,12 +854,12 @@ export function listHeraldChats(projectId: string, q?: string): Promise<{ data: 
 
 export function updateHeraldChatMeta(
   chatId: string,
-  patch: { title?: string; pinned?: boolean }
-): Promise<{ chatId: string; title?: string; pinned?: boolean }> {
+  patch: { title?: string | undefined; pinned?: boolean }
+): Promise<{ chatId: string; title?: string | undefined; pinned?: boolean }> {
   return request(`${BASE}/herald/chat/${chatId}`, { method: "PATCH", body: JSON.stringify(patch) });
 }
 
-export function renameHeraldChat(chatId: string, title: string): Promise<{ chatId: string; title?: string }> {
+export function renameHeraldChat(chatId: string, title: string): Promise<{ chatId: string; title?: string | undefined }> {
   return updateHeraldChatMeta(chatId, { title });
 }
 
@@ -869,15 +869,15 @@ export function renameHeraldChat(chatId: string, title: string): Promise<{ chatI
 export async function exportHeraldChat(chatId: string): Promise<void> {
   const res = await fetch(`${BASE}/herald/chat/${chatId}/export`);
   if (!res.ok) {
-    const body = (await res.json().catch(() => ({}))) as { error?: { code?: string; message?: string } };
-    const err = new Error(body.error?.message ?? `HTTP ${res.status}`) as Error & { code?: string };
-    err.code = body.error?.code;
+    const body = (await res.json().catch(() => ({}))) as { error?: { code?: string | undefined; message?: string } };
+    const err = new Error(body.error?.message ?? `HTTP ${res.status}`) as Error & { code?: string | undefined };
+    if (body.error?.code !== undefined) err.code = body.error.code;
     throw err;
   }
   const blob = await res.blob();
   const dispo = res.headers.get("Content-Disposition") ?? "";
   const match = /filename\*?=(?:UTF-8'')?"?([^";]+)"?/i.exec(dispo);
-  const name = match ? decodeURIComponent(match[1].trim()) : `herald-chat-${chatId}.md`;
+  const name = match?.[1] ? decodeURIComponent(match[1]!.trim()) : `herald-chat-${chatId}.md`;
   const url = URL.createObjectURL(blob);
   const anchor = document.createElement("a");
   anchor.href = url;
@@ -967,8 +967,8 @@ export function uploadAttachmentWithProgress(
         resolve((xhr.response ?? {}) as { data: Attachment; activity?: ActivityEvent[] });
         return;
       }
-      const body = (xhr.response ?? {}) as { error?: { code?: string; message?: string; details?: unknown } };
-      const err = new Error(body.error?.message ?? `HTTP ${xhr.status}`) as Error & { code?: string; details?: unknown };
+      const body = (xhr.response ?? {}) as { error?: { code?: string | undefined; message?: string | undefined; details?: unknown } };
+      const err = new Error(body.error?.message ?? `HTTP ${xhr.status}`) as Error & { code?: string | undefined; details?: unknown };
       err.code = body.error?.code;
       err.details = body.error?.details;
       reject(err);
