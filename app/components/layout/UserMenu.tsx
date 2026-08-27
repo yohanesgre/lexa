@@ -102,6 +102,12 @@ export function UserMenu() {
               
             </Link>
           )}
+          {isSuperadmin && (
+            <Link to="/admin/herald/usage" className="dropdown-item" style={{ height: 32, textDecoration: "none" }} onClick={() => setOpen(false)}>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5}><path d="M3 3v18h18" /><path d="M7 16l4-4 4 4 4-8" /></svg>
+              <span className="text-sm color-secondary">Herald Usage · Gateway</span>
+            </Link>
+          )}
           <div className="dropdown-separator" />
           <button type="button" className="dropdown-item danger" style={{ gap: 8, width: "100%", textAlign: "left", border: "none", background: "none", font: "inherit", padding: "0 10px", cursor: "pointer", height: 32 }} onClick={handleSignOut} disabled={signOut.isPending}>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5}><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9" /></svg>
