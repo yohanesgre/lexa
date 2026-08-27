@@ -52,15 +52,15 @@ class D1Stmt implements DbStmt {
   constructor(private readonly stmt: D1PreparedLike) {}
   all<T extends LexaRow = LexaRow>(...params: SqlParam[]): Promise<T[]> {
     return Promise.resolve(
-      this.stmt.bind(...(params as unknown[])).all<T>().then((r) => r.results),
+      this.stmt.bind(...params).all<T>().then((r) => r.results),
     );
   }
   first<T extends LexaRow = LexaRow>(...params: SqlParam[]): Promise<T | null> {
-    return Promise.resolve(this.stmt.bind(...(params as unknown[])).first<T>());
+    return Promise.resolve(this.stmt.bind(...params).first<T>());
   }
   run(...params: SqlParam[]): Promise<StmtResult> {
     return Promise.resolve(
-      this.stmt.bind(...(params as unknown[])).run().then((r) => ({ changes: r.meta.changes })),
+      this.stmt.bind(...params).run().then((r) => ({ changes: r.meta.changes })),
     );
   }
 }
@@ -72,7 +72,7 @@ export function createD1Driver(d1: D1Like): DbDriver {
     },
     async batch(stmts: { sql: string; params: SqlParam[] }[]): Promise<void> {
       const result = await d1.batch(
-        stmts.map((s) => ({ sql: s.sql, params: s.params as unknown[] })),
+        stmts.map((s) => ({ sql: s.sql, params: s.params })),
       );
       // D1's batch enforces a 30s wall-clock ceiling per call. Surface
       // a typed `BatchTimeout` if the meta duration approaches the cap.

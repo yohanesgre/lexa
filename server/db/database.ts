@@ -1,6 +1,7 @@
 import { Context, Effect, Layer, Data } from "effect";
 import { Database } from "bun:sqlite";
 import { chmodSync, existsSync } from "node:fs";
+import type { SqlParam } from "./driver";
 
 export class DbError extends Data.TaggedError("DbError")<{ message: string; cause?: unknown }> {}
 export class RowNotFound extends Data.TaggedError("RowNotFound")<{ table: string }> {}
@@ -27,6 +28,8 @@ export function initSqlite(dbPath: string): Layer.Layer<Sqlite> {
   return Layer.succeed(Sqlite, db);
 }
 
+export function queryAll<T>(db: Database, sql: string, ...params: SqlParam[]): Effect.Effect<T[], DbError>;
+export function queryAll<T>(db: Database, sql: string, ...params: unknown[]): Effect.Effect<T[], DbError>;
 export function queryAll<T>(db: Database, sql: string, ...params: unknown[]): Effect.Effect<T[], DbError> {
   return Effect.try({
     try: () => db.prepare(sql).all(...params) as T[],
@@ -34,6 +37,8 @@ export function queryAll<T>(db: Database, sql: string, ...params: unknown[]): Ef
   });
 }
 
+export function queryFirst<T>(db: Database, sql: string, ...params: SqlParam[]): Effect.Effect<T, RowNotFound | DbError>;
+export function queryFirst<T>(db: Database, sql: string, ...params: unknown[]): Effect.Effect<T, RowNotFound | DbError>;
 export function queryFirst<T>(db: Database, sql: string, ...params: unknown[]): Effect.Effect<T, RowNotFound | DbError> {
   return Effect.try({
     try: () => db.prepare(sql).get(...params) as T | null,
@@ -43,6 +48,8 @@ export function queryFirst<T>(db: Database, sql: string, ...params: unknown[]): 
   );
 }
 
+export function run(db: Database, sql: string, ...params: SqlParam[]): Effect.Effect<number, ConstraintViolation | DbError>;
+export function run(db: Database, sql: string, ...params: unknown[]): Effect.Effect<number, ConstraintViolation | DbError>;
 export function run(db: Database, sql: string, ...params: unknown[]): Effect.Effect<number, ConstraintViolation | DbError> {
   return Effect.try({
     try: () => db.prepare(sql).run(...params).changes as number,
@@ -59,6 +66,8 @@ export function run(db: Database, sql: string, ...params: unknown[]): Effect.Eff
   });
 }
 
+export function batch(db: Database, stmts: { sql: string; params: SqlParam[] }[]): Effect.Effect<void, ConstraintViolation | DbError>;
+export function batch(db: Database, stmts: { sql: string; params: unknown[] }[]): Effect.Effect<void, ConstraintViolation | DbError>;
 export function batch(db: Database, stmts: { sql: string; params: unknown[] }[]): Effect.Effect<void, ConstraintViolation | DbError> {
   return Effect.try({
     try: () => {

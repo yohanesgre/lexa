@@ -203,7 +203,7 @@ const server: Server<unknown> = Bun.serve({
           // Never attach an empty body to bodyless requests — better-call
           // treats a present-but-empty body as a body and 415s GETs (e.g.
           // get-session) for missing Content-Type.
-          body: req.body ? read.bytes : undefined,
+          ...(req.body ? { body: read.bytes as BodyInit } : {}),
         });
         // Login rate limiting (R17): 5 failed attempts / 60s per email, then
         // a 15-minute lockout — small in-process limiter (1.6.27 has no

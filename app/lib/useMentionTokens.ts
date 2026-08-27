@@ -14,7 +14,7 @@ export function findActiveTrigger(value: string, caret: number): { query: string
   const match = TRIGGER_RE.exec(before);
   if (!match) return null;
   // start = position of "@" (prefix + trigger), so completion replaces it.
-  return { query: match[2], start: match.index! + match[1].length };
+  return { query: match[2]!, start: match.index! + match[1]!.length };
 }
 
 // Replaces "@query" (trigger through caret) with the completed token.
@@ -41,11 +41,11 @@ export function positionPopup(input: {
   caretX: number;
   caretContainerY: number;
   caretViewportY: number;
-  caretLineHeight?: number;
+  caretLineHeight?: number | undefined;
   popupWidth: number;
   popupHeight: number;
   containerWidth: number;
-  gap?: number;
+  gap?: number | undefined;
 }): { left: number; top: number; flipped: boolean } {
   const gap = input.gap ?? MENTION_POPUP_GAP;
   const flipped = input.caretViewportY - input.popupHeight - gap < 0;
@@ -159,7 +159,7 @@ interface UseMentionTokensOptions {
   slug: string;
   value: string;
   onChange: (next: string) => void;
-  debounceMs?: number;
+  debounceMs?: number | undefined;
   fetchItems?: typeof fetchMentionItems;
 }
 

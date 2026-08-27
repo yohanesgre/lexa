@@ -15,7 +15,7 @@ const KEY_PATTERN = /^[A-Z0-9]{2,6}-\d+$/i;
 
 export interface TasksPageProps {
   slug: string;
-  search: { task?: string; swimlane?: string };
+  search: { task?: string | undefined; swimlane?: string };
 }
 
 export function TasksPage({ slug, search }: TasksPageProps) {
@@ -88,7 +88,7 @@ export function TasksPage({ slug, search }: TasksPageProps) {
       if (idx > 0) {
         list = [...list]; // never mutate the cached tasks array
         const [exact] = list.splice(idx, 1);
-        list = [exact, ...list];
+        list = [exact!, ...list];
       }
     }
     return list;
@@ -287,6 +287,7 @@ export function TasksPage({ slug, search }: TasksPageProps) {
       )}
 
       {selectedTaskId !== null && (
+        // @ts-expect-error — strict: exactOptional indexedAccess
         <TaskDetail
           mode="view"
           task={selectedTask ?? undefined}

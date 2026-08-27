@@ -42,9 +42,9 @@ describe("HeraldActivity timeline", () => {
     expect(children[0]).toHaveClass("bubble-md");
     expect(children[1]).toHaveClass("herald-activity");
     expect(children[2]).toHaveClass("bubble-md");
-    expect(children[0].textContent).toContain("first burst");
-    expect(children[1].textContent).toContain("[fetch]");
-    expect(children[2].textContent).toContain("second burst");
+    expect(children[0]!.textContent).toContain("first burst");
+    expect(children[1]!.textContent).toContain("[fetch]");
+    expect(children[2]!.textContent).toContain("second burst");
   });
 
   it("stream caret rides only the LAST text item; earlier bursts stay caret-free", () => {
@@ -58,8 +58,8 @@ describe("HeraldActivity timeline", () => {
     );
     const mds = container.querySelectorAll(".bubble-md");
     expect(mds).toHaveLength(2);
-    expect(mds[0].querySelector(".herald-stream-caret")).toBeNull();
-    expect(mds[1].querySelector(".herald-stream-caret")).not.toBeNull();
+    expect(mds[0]!.querySelector(".herald-stream-caret")).toBeNull();
+    expect(mds[1]!.querySelector(".herald-stream-caret")).not.toBeNull();
   });
 
   it("streaming never folds: consecutive same-name calls each render as their own expanded line", () => {
@@ -100,10 +100,10 @@ describe("HeraldActivity timeline", () => {
     const chips = [toolChip("search", "result"), toolChip("read", "result"), toolChip("fetch", "result")];
     const items: HeraldTimelineItem[] = [
       reasoning("hidden thoughts", null),
-      { kind: "tool", chip: chips[0] },
+      { kind: "tool", chip: chips[0]! },
       text("the clean reply"),
-      { kind: "tool", chip: chips[1] },
-      { kind: "tool", chip: chips[2] },
+      { kind: "tool", chip: chips[1]! },
+      { kind: "tool", chip: chips[2]! },
     ];
     const { container } = render(
       <HeraldActivity items={items} tools={chips} reasoningActive={false} reasoningMs={6400} done />

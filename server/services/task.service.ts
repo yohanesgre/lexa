@@ -319,12 +319,12 @@ export class TaskService extends Effect.Service<TaskService>()("Lexa/TaskService
 
           const updated = yield* withTx(db, Effect.gen(function* () {
             const u = yield* taskRepo.update(id, {
-              title: input.title,
-              description: input.description !== undefined ? JSON.stringify(input.description) : undefined,
-              priority: input.priority,
-              type: input.type,
-              assignees: input.assignees,
-              dueAt: input.dueAt,
+              ...(input.title !== undefined ? { title: input.title } : {}),
+              ...(input.description !== undefined ? { description: JSON.stringify(input.description) } : {}),
+              ...(input.priority !== undefined ? { priority: input.priority } : {}),
+              ...(input.type !== undefined ? { type: input.type } : {}),
+              ...(input.assignees !== undefined ? { assignees: input.assignees } : {}),
+              ...(input.dueAt !== undefined ? { dueAt: input.dueAt } : {}),
             }).pipe(
               Effect.catchTag("RowNotFound", () => new TaskNotFound({ id }))
             );
@@ -406,7 +406,7 @@ export class TaskService extends Effect.Service<TaskService>()("Lexa/TaskService
               position,
               projectId: task.projectId,
               clearDueAt: target.clearDueAt ?? false,
-            }, { bypassWip: opts?.bypassGuards });
+            }, { bypassWip: opts?.bypassGuards ?? false });
             if (result.changes === 0) {
               const count = yield* taskRepo.countByColumn(task.projectId, target.columnId);
               return yield* new WipLimitExceeded({ columnName: column.name, limit: column.wipLimit ?? 0, current: count });

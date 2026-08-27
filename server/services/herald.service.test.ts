@@ -33,12 +33,12 @@ import type { StreamFrame } from "../../shared/herald";
 
 const providerMock = vi.hoisted(() => ({
   script: [] as Array<Record<string, unknown>>,
-  calls: [] as Array<{ input?: { modelOptions?: Record<string, unknown> } }>,
+  calls: [] as Array<{ input?: { modelOptions?: Record<string, unknown> | undefined } | undefined }>,
 }));
 
 vi.mock("../herald/provider", () => ({
-  streamChat: async function* (input?: { modelOptions?: Record<string, unknown> }) {
-    providerMock.calls.push({ input });
+  streamChat: async function* (input?: { modelOptions?: Record<string, unknown> | undefined }) {
+    providerMock.calls.push({ ...(input !== undefined ? { input } : {}) });
     for (const chunk of providerMock.script) {
       if (typeof chunk.delayMs === "number") await new Promise((r) => setTimeout(r, chunk.delayMs as number));
       if (chunk.hang === true) await new Promise<void>(() => {});
@@ -247,7 +247,7 @@ describe("hydrateImageParts", () => {
       [{ role: "user", content: ["look", ref("k1")] }],
       loader
     );
-    expect(out[0].content).toEqual([
+    expect(out[0]!.content).toEqual([
       "look",
       { type: "image", source: { type: "data", value: "b64:k1", mimeType: "image/png" } },
     ]);
@@ -255,26 +255,26 @@ describe("hydrateImageParts", () => {
 
   it("drops refs whose blob fails to load — silently", async () => {
     const out = await hydrateImageParts([{ role: "user", content: [ref("dead"), "text stays"] }], loader);
-    expect(out[0].content).toEqual(["text stays"]);
+    expect(out[0]!.content).toEqual(["text stays"]);
   });
 
   it("loader rejection also drops the ref", async () => {
     const out = await hydrateImageParts([{ role: "user", content: [ref("boom")] }], async () => {
       throw new Error("storage gone");
     });
-    expect(out[0].content).toEqual([]);
+    expect(out[0]!.content).toEqual([]);
   });
 
   it("string content passes through untouched", async () => {
     const msg = { role: "assistant", content: "plain" };
     const out = await hydrateImageParts([msg], loader);
-    expect(out[0]).toBe(msg);
+    expect(out[0]!).toBe(msg);
   });
 
   it("preserves message identity fields on hydrated messages", async () => {
     const out = await hydrateImageParts([{ role: "user", name: "u1", content: [ref("k")] }], loader);
-    expect(out[0].role).toBe("user");
-    expect((out[0] as { name?: string }).name).toBe("u1");
+    expect(out[0]!.role).toBe("user");
+    expect((out[0]! as { name?: string }).name).toBe("u1");
   });
 });
 
@@ -349,8 +349,8 @@ describe("@-mention chat resolution", () => {
     // userContent would be exactly `message` (no injected block anywhere).
     expect(message).not.toContain("ctx");
     // The ephemeral block IS present in the last system prompt.
-    expect(systemPrompts[systemPrompts.length - 1].content).toContain("[task] LEX-42 — T");
-    expect(systemPrompts[systemPrompts.length - 1].content).toContain("Referenced by the user just now:");
+    expect(systemPrompts[systemPrompts.length - 1]!.content).toContain("[task] LEX-42 — T");
+    expect(systemPrompts[systemPrompts.length - 1]!.content).toContain("Referenced by the user just now:");
     // No mentionContext → no extra segment (existing behavior unchanged).
     const without = buildSystemPrompts({ identity: "i", memoryBlock: null, agentMarkdown: null, skillMarkdown: null });
     expect(without.length).toBe(2);
@@ -372,7 +372,7 @@ describe("collectCitation", () => {
     let out = collectCitation([], { title: "First", url: "https://x.example/a" });
     out = collectCitation(out, { title: "Second", url: "https://x.example/a" });
     expect(out).toHaveLength(1);
-    expect(out[0].title).toBe("First");
+    expect(out[0]!.title).toBe("First");
   });
 
   it("caps at CHAT_CITATION_CAP entries", () => {
@@ -530,7 +530,7 @@ describe("Herald tool budget", () => {
   it("freeform chat cap allows MAX_CHAT_TOOL_ROUNDS rounds before tripping", async () => {
     providerMock.script = Array.from({ length: MAX_CHAT_TOOL_ROUNDS }, () => toolEnd()).concat([{ type: "RUN_FINISHED" }]);
     const frames = await drain(buildStream(baseCtx(MAX_CHAT_TOOL_ROUNDS)));
-    expect(frames.at(-1)?.type).toBe("done");
+    expect(frames.at(-1)!?.type).toBe("done");
     expect(frames.some((f) => f.type === "error")).toBe(false);
   });
 
@@ -545,7 +545,7 @@ describe("Herald tool budget", () => {
   it("document-task cap still trips at MAX_TOOL_ROUNDS + 1 and allows exactly MAX_TOOL_ROUNDS", async () => {
     providerMock.script = Array.from({ length: MAX_TOOL_ROUNDS }, () => toolEnd()).concat([{ type: "RUN_FINISHED" }]);
     const okFrames = await drain(buildStream(baseCtx(MAX_TOOL_ROUNDS)));
-    expect(okFrames.at(-1)?.type).toBe("done");
+    expect(okFrames.at(-1)!?.type).toBe("done");
 
     providerMock.script = Array.from({ length: MAX_TOOL_ROUNDS + 1 }, () => toolEnd());
     const frames = await drain(buildStream(baseCtx(MAX_TOOL_ROUNDS)));
@@ -601,7 +601,7 @@ describe("buildStream reasoning frames", () => {
       { type: "reasoning", delta: "hard" },
       { type: "delta", text: "answer" },
     ]);
-    expect(frames.at(-1)?.type).toBe("done");
+    expect(frames.at(-1)!?.type).toBe("done");
   });
 
   it("reasoning content is never persisted into the transcript", async () => {
@@ -612,10 +612,10 @@ describe("buildStream reasoning frames", () => {
     ];
     const ctx = baseCtx();
     const frames = await drain(buildStream(ctx));
-    expect(frames.at(-1)?.type).toBe("done");
+    expect(frames.at(-1)!?.type).toBe("done");
     expect(ctx.persistCalls.length).toBe(1);
     for (const messages of ctx.persistCalls) {
-      const assistant = (messages as Array<{ role: string; content: unknown }>).at(-1);
+      const assistant = (messages as Array<{ role: string; content: unknown }>).at(-1)!;
       expect(assistant?.role).toBe("assistant");
       expect(assistant?.content).toBe("public answer");
       expect(JSON.stringify(messages)).not.toContain("secret thoughts");
@@ -740,7 +740,7 @@ describe("stream stall watchdog", () => {
       const err = frames.find((f) => f.type === "error") as { code?: string; message?: string } | undefined;
       expect(err?.code).toBe("HERALD_GENERATION_FAILED");
       expect(err?.message).toBe("stream stalled — no response from provider");
-      const last = (ctx.persistCalls.at(-1) as Array<{ role?: string; content?: unknown; error?: unknown }>).at(-1);
+      const last = (ctx.persistCalls.at(-1)! as Array<{ role?: string; content?: unknown; error?: unknown }>).at(-1)!;
       expect(last).toMatchObject({
         role: "assistant",
         content: "par",
@@ -781,7 +781,7 @@ describe("stream stall watchdog", () => {
       const pending = drain(buildStream(baseCtx()));
       await vi.advanceTimersByTimeAsync(STREAM_STALL_TIMEOUT_MS * 2);
       const frames = await pending;
-      expect(frames.at(-1)?.type).toBe("done");
+      expect(frames.at(-1)!?.type).toBe("done");
     } finally {
       vi.useRealTimers();
     }
@@ -814,7 +814,7 @@ describe("reasoning effort resolution", () => {
       { type: "TEXT_MESSAGE_CONTENT", delta: "ok" },
       { type: "RUN_FINISHED" },
     ];
-    const baseCtx = (modelOptions?: Record<string, unknown>): StreamRunContext => ({
+    const baseCtx = (modelOptions?: Record<string, import("../../shared/types").JSONValue>): StreamRunContext => ({
       keyId: "c1",
       idField: "chatId",
       threadId: "c1",
@@ -840,10 +840,10 @@ describe("reasoning effort resolution", () => {
 
     providerMock.calls = [];
     await drain(buildStream(baseCtx({ reasoning_effort: "high" })));
-    expect(providerMock.calls.at(-1)?.input?.modelOptions).toEqual({ reasoning_effort: "high" });
+    expect(providerMock.calls.at(-1)!?.input?.modelOptions).toEqual({ reasoning_effort: "high" });
 
     providerMock.calls = [];
     await drain(buildStream(baseCtx()));
-    expect(providerMock.calls.at(-1)?.input?.modelOptions).toBeUndefined();
+    expect(providerMock.calls.at(-1)!?.input?.modelOptions).toBeUndefined();
   });
 });

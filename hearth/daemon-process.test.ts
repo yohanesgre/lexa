@@ -185,7 +185,7 @@ describe("hearth daemon (bun subprocess, fake server + fake agent)", () => {
     let daemonStderr = "";
     daemon.stderr?.on("data", (d: Buffer) => (daemonStderr += d.toString()));
     try {
-      const complete = await waitFor(() => completes[0]);
+      const complete = await waitFor(() => completes[0]!);
       expect(complete.url).toContain("/api/hearth/daemon/tasks/t1/complete");
       const result = String(complete.body.result ?? "");
       // Allowlisted vars reach the child...
@@ -507,7 +507,7 @@ describe("hearth daemon (bun subprocess) with a fake opencode serve runtime", ()
       });
       expect(minted.directory).toBe(join(dir, "projects", "p1"));
 
-      const put = await waitFor(() => sessionsPuts[0]);
+      const put = await waitFor(() => sessionsPuts[0]!);
       expect(put.body).toEqual({
         documentType: "task",
         documentId: "d1",
@@ -524,7 +524,7 @@ describe("hearth daemon (bun subprocess) with a fake opencode serve runtime", ()
       expect(msg.body?.parts).toEqual([{ type: "text", text: "write the docs" }]);
 
       await waitFor(() => readServeEvents().find((e) => e.event === "abort") ? true : undefined);
-      const del = await waitFor(() => sessionsDeletes[0]);
+      const del = await waitFor(() => sessionsDeletes[0]!);
       expect(del.body).toEqual({ documentType: "task", documentId: "d1", runtimeId: "r-test" });
 
       expect(completes.length).toBe(0);

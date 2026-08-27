@@ -11,7 +11,7 @@ function toggleSet<T>(set: Set<T>, value: T): Set<T> {
   return next;
 }
 
-function FilterSection({ label, first, children }: { label: string; first?: boolean; children: React.ReactNode }) {
+function FilterSection({ label, first, children }: { label: string; first?: boolean | undefined; children: React.ReactNode }) {
   return (
     <>
       <div className="prop-label" style={{ padding: first ? "6px 10px 2px" : "0 10px 2px" }}>
@@ -118,7 +118,7 @@ function FilterPopover({
             key={a}
             checked={filters.assignees.has(a)}
             onChange={() => toggleAssignee(a)}
-            icon={<div className="avatar">{a[0].toUpperCase()}</div>}
+            icon={<div className="avatar">{a[0]!.toUpperCase()}</div>}
             label={a}
           />
         ))}

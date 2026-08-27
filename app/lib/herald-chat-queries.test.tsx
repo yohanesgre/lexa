@@ -98,8 +98,8 @@ describe("useUpdateHeraldChatMeta", () => {
     });
     const cache = qc.getQueryData<HeraldChatThreadSummary[]>(["herald-chats", "p1"])!;
     expect(cache.map((t) => t.chatId)).toEqual(["c1", "c2"]);
-    expect(cache[0].pinned).toBe(true);
-    expect((qc.getQueryData<HeraldChatThreadSummary[]>(["herald-chats", "p1", "runbook"]) ?? [])[0].pinned).toBe(true);
+    expect(cache[0]!.pinned).toBe(true);
+    expect((qc.getQueryData<HeraldChatThreadSummary[]>(["herald-chats", "p1", "runbook"]) ?? [])[0]!.pinned).toBe(true);
     expect(spy).not.toHaveBeenCalled();
   });
 

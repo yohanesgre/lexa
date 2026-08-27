@@ -84,7 +84,7 @@ export function SkillPicker({ skills, skillId, onSkillChange, layout = "stacked"
   // (label beside chips).
   layout?: "stacked" | "inline";
   // chat: skill optional — starts with none; picking is per message.
-  allowNoSkill?: boolean;
+  allowNoSkill?: boolean | undefined;
   // Extra inline control rendered at the end of the row (chat composer:
   // the Effort picker shares the row per herald-chat.html).
   trailing?: ReactNode;

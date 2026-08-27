@@ -45,13 +45,13 @@ describe("gantt date math", () => {
   it("axisDays returns every day in the range inclusive", () => {
     const days = axisDays(parseDay("2026-08-10"), parseDay("2026-08-13"));
     expect(days).toHaveLength(4);
-    expect(formatDay(days[0])).toBe("2026-08-10");
-    expect(formatDay(days[3])).toBe("2026-08-13");
+    expect(formatDay(days[0]!)).toBe("2026-08-10");
+    expect(formatDay(days[3]!)).toBe("2026-08-13");
   });
   it("axisDays does not week-align a mid-week start", () => {
     const days = axisDays(parseDay("2026-08-13"), parseDay("2026-08-13"));
     expect(days).toHaveLength(1);
-    expect(formatDay(days[0])).toBe("2026-08-13");
+    expect(formatDay(days[0]!)).toBe("2026-08-13");
   });
   it("xForDay/dayForX round-trip snaps to day", () => {
     const start = parseDay("2026-07-27");

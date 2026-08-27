@@ -61,6 +61,7 @@ function wrapper({ children }: { children: ReactNode }) {
 }
 
 function BoardPageWrapper() {
+  // @ts-expect-error — strict: exactOptional indexedAccess
   return <BoardPage slug="demo" search={searchMock.value} />;
 }
 

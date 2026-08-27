@@ -56,12 +56,12 @@ const docText = (doc: TipTapDoc | undefined | null): string => cap(extractText(d
 
 export function buildTaskCreateDiff(input: {
   title: string;
-  description?: TipTapDoc;
-  priority?: string;
-  type?: string;
-  dueAt?: string;
-  assigneeIds?: string[];
-  parentTitle?: string | null;
+  description?: TipTapDoc | undefined;
+  priority?: string | undefined;
+  type?: string | undefined;
+  dueAt?: string | undefined;
+  assigneeIds?: string[] | undefined;
+  parentTitle?: string | null | undefined;
 }): Extract<HeraldWriteDiff, { type: "task_create" }> {
   const fields: Record<string, string | null> = {};
   if (input.description !== undefined) fields.description = docText(input.description);
@@ -114,7 +114,7 @@ export function buildTaskUpdateDiff(
   };
 }
 
-export function buildWikiEditDiff(page: { slug: string; title: string; text: string }, next: { title?: string; content: TipTapDoc }): Extract<HeraldWriteDiff, { type: "wiki_edit" }> {
+export function buildWikiEditDiff(page: { slug: string; title: string; text: string }, next: { title?: string | undefined; content: TipTapDoc }): Extract<HeraldWriteDiff, { type: "wiki_edit" }> {
   return {
     type: "wiki_edit",
     slug: page.slug,
@@ -131,7 +131,7 @@ export function buildTaskRestoreDiff(task: WriteTaskSnapshot): Extract<HeraldWri
   return { type: "task_restore", taskRef: task.key, taskTitle: task.title, toColumn: task.columnName };
 }
 
-export function buildMilestoneCreateDiff(input: { name: string; dueAt?: string }): Extract<HeraldWriteDiff, { type: "milestone_create" }> {
+export function buildMilestoneCreateDiff(input: { name: string; dueAt?: string | undefined }): Extract<HeraldWriteDiff, { type: "milestone_create" }> {
   return { type: "milestone_create", name: input.name, ...(input.dueAt !== undefined ? { dueAt: input.dueAt } : {}) };
 }
 
@@ -145,7 +145,7 @@ export function buildMilestoneArchiveDiff(input: { name: string; sprintsAffected
   };
 }
 
-export function buildSprintCreateDiff(input: { name: string; startAt?: string; dueAt?: string }): Extract<HeraldWriteDiff, { type: "sprint_create" }> {
+export function buildSprintCreateDiff(input: { name: string; startAt?: string | undefined; dueAt?: string | undefined }): Extract<HeraldWriteDiff, { type: "sprint_create" }> {
   return {
     type: "sprint_create",
     name: input.name,
@@ -323,7 +323,7 @@ export function buildHeraldWriteTools(deps: HeraldWriteToolDeps) {
         const m = await resolveOrError(deps.findMilestone(args.milestoneId), `milestone '${args.milestoneId}' not found`);
         if (!m.ok) return { proposed: false, error: m.error };
       }
-      const diff = buildTaskCreateDiff({ ...args, parentTitle });
+      const diff = buildTaskCreateDiff({ title: args.title, ...(args.description !== undefined ? { description: args.description } : {}), ...(args.priorityId !== undefined ? { priority: args.priorityId } : {}), ...(args.typeId !== undefined ? { type: args.typeId } : {}), ...(args.dueAt !== undefined ? { dueAt: args.dueAt } : {}), ...(args.assigneeIds !== undefined ? { assigneeIds: args.assigneeIds } : {}), parentTitle });
       const r = await record(deps, {
         name: "create_task",
         args,
@@ -588,7 +588,7 @@ export function buildHeraldWriteTools(deps: HeraldWriteToolDeps) {
         const m = await resolveOrError(deps.findMilestone(args.milestoneId), `milestone '${args.milestoneId}' not found`);
         if (!m.ok) return { proposed: false, error: m.error };
       }
-      const diff = buildSprintCreateDiff(args);
+      const diff = buildSprintCreateDiff({ name: args.name, ...(args.startAt !== undefined ? { startAt: args.startAt } : {}), ...(args.dueAt !== undefined ? { dueAt: args.dueAt } : {}) });
       const r = await record(deps, { name: "create_sprint", args, diff, detail: `Create sprint "${cap(args.name, 60)}"` });
       if (!r.ok) return { proposed: false, error: r.error };
       return { proposed: true, approvalId: r.value.approvalId };

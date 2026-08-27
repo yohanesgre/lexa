@@ -13,47 +13,47 @@ import type { D1Database, KVNamespace, R2Bucket } from "@cloudflare/workers-type
 
 export interface RuntimeEnv {
   // Storage / runtime
-  DATABASE_PATH?: string;
-  PORT?: string;
-  LXK_ENV?: string;
-  LXK_PUBLIC_URL?: string;
-  LXK_TRUSTED_ORIGINS?: string;
-  LXK_ADMIN_EMAILS?: string;
+  DATABASE_PATH?: string | undefined;
+  PORT?: string | undefined;
+  LXK_ENV?: string | undefined;
+  LXK_PUBLIC_URL?: string | undefined;
+  LXK_TRUSTED_ORIGINS?: string | undefined;
+  LXK_ADMIN_EMAILS?: string | undefined;
   // Auth
-  LXK_API_KEY?: string;
+  LXK_API_KEY?: string | undefined;
   // GitHub
-  GITHUB_APP_ID?: string;
-  GITHUB_PRIVATE_KEY?: string;
-  GITHUB_PRIVATE_KEY_FILE?: string;
-  GITHUB_WEBHOOK_SECRET?: string;
+  GITHUB_APP_ID?: string | undefined;
+  GITHUB_PRIVATE_KEY?: string | undefined;
+  GITHUB_PRIVATE_KEY_FILE?: string | undefined;
+  GITHUB_WEBHOOK_SECRET?: string | undefined;
   // Storage drivers
-  LXK_STORAGE_DRIVER?: string;
-  LXK_STORAGE_FS_ROOT?: string;
-  LXK_S3_BUCKET?: string;
-  LXK_S3_ACCESS_KEY_ID?: string;
-  LXK_S3_SECRET_ACCESS_KEY?: string;
-  LXK_S3_ENDPOINT?: string;
-  LXK_S3_REGION?: string;
+  LXK_STORAGE_DRIVER?: string | undefined;
+  LXK_STORAGE_FS_ROOT?: string | undefined;
+  LXK_S3_BUCKET?: string | undefined;
+  LXK_S3_ACCESS_KEY_ID?: string | undefined;
+  LXK_S3_SECRET_ACCESS_KEY?: string | undefined;
+  LXK_S3_ENDPOINT?: string | undefined;
+  LXK_S3_REGION?: string | undefined;
   // Body / limits
-  LXK_MAX_BODY_MB?: string;
-  LXK_MAX_UPLOAD_MB?: string;
+  LXK_MAX_BODY_MB?: string | undefined;
+  LXK_MAX_UPLOAD_MB?: string | undefined;
   // Hearth / daemon
-  LXK_HEARTH_DAEMON_TOKEN?: string;
-  LXK_HEARTH_REPO_CAP?: string;
-  HEARTH_STALE_RUN_MIN?: string;
+  LXK_HEARTH_DAEMON_TOKEN?: string | undefined;
+  LXK_HEARTH_REPO_CAP?: string | undefined;
+  HEARTH_STALE_RUN_MIN?: string | undefined;
   // Logging
-  LOG_LEVEL?: string;
-  TANSTACK_AI_DEBUG?: string;
-  TANSTACK_AI_JSON?: string;
+  LOG_LEVEL?: string | undefined;
+  TANSTACK_AI_DEBUG?: string | undefined;
+  TANSTACK_AI_JSON?: string | undefined;
   // Backups / seed
-  LXK_BACKUP_ENABLED?: string;
-  LXK_BACKUP_RETENTION?: string;
-  LXK_SEED_DEV?: string;
+  LXK_BACKUP_ENABLED?: string | undefined;
+  LXK_BACKUP_RETENTION?: string | undefined;
+  LXK_SEED_DEV?: string | undefined;
   // Workers bindings (only present on the Workers path)
-  DB?: D1Database;
-  BLOB?: R2Bucket;
-  KV?: KVNamespace;
-  CRON_SECRET?: string;
+  DB?: D1Database | undefined;
+  BLOB?: R2Bucket | undefined;
+  KV?: KVNamespace | undefined;
+  CRON_SECRET?: string | undefined;
 }
 
 export type ProcessEnvSource = Record<string, string | undefined>;

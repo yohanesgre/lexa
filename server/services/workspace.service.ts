@@ -62,7 +62,7 @@ export class WorkspaceService extends Effect.Service<WorkspaceService>()("Lexa/W
           const byUser = new Map<string, WorkspaceMember["teams"]>();
           for (const t of teamRows) {
             const entry = byUser.get(t.userId) ?? [];
-            entry.push({ teamId: t.teamId, teamName: t.teamName, role: (t.role.split(",")[0].trim() || "member") as TeamMemberRole });
+            entry.push({ teamId: t.teamId, teamName: t.teamName, role: ((t.role.split("!,")[0] ?? "").trim() || "member") as TeamMemberRole });
             byUser.set(t.userId, entry);
           }
           return users.map((u) => ({ ...toUser(u), banned: u.banned === 1, teams: byUser.get(u.id) ?? [] }));

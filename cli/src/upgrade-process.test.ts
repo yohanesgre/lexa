@@ -23,7 +23,7 @@ vi.mock("node:child_process", async () => {
       childMocks.curlCalls.push({ cmd, args });
       // Simulate a real download: curl -o <path> writes the file.
       const o = args.indexOf("-o");
-      if (o > 0 && args[o + 1]) fs.writeFileSync(args[o + 1], "downloaded-binary");
+      if (o > 0 && args[o + 1] !== undefined) fs.writeFileSync(args[o + 1]!, "downloaded-binary");
       return { status: childMocks.curlStatus, stdout: "", stderr: "", signal: null, pid: 1 };
     },
   };
@@ -68,7 +68,7 @@ describe("cmdUpgradeCli (COMPILED=true)", () => {
     const log = vi.spyOn(console, "log").mockImplementation(() => {});
     const mod = await import("./upgrade");
     await Effect.runPromise(mod.cmdUpgradeCli());
-    const out = log.mock.calls.map((c) => String(c[0])).join("\n");
+    const out = log.mock.calls.map((c) => String(c[0]!)).join("\n");
     expect(out).toContain("Already up to date (latest: cli-v1.2.3).");
     expect(childMocks.curlCalls).toEqual([]);
     log.mockRestore();
@@ -84,13 +84,13 @@ describe("cmdUpgradeCli (COMPILED=true)", () => {
     await Effect.runPromise(mod.cmdUpgradeCli());
 
     expect(childMocks.curlCalls.length).toBe(1);
-    expect(childMocks.curlCalls[0].cmd).toBe("curl");
-    expect(childMocks.curlCalls[0].args).toEqual(["-fsSL", "-o", join(dir, "lexa-cli.new"), "https://github.com/yohanesgre/lexa/releases/download/cli-v2.0.0/lexa-cli"]);
+    expect(childMocks.curlCalls[0]!.cmd).toBe("curl");
+    expect(childMocks.curlCalls[0]!.args).toEqual(["-fsSL", "-o", join(dir, "lexa-cli.new"), "https://github.com/yohanesgre/lexa/releases/download/cli-v2.0.0/lexa-cli"]);
     // chmod 755 + rename: the .new file is gone, the binary is in place.
     expect(existsSync(join(dir, "lexa-cli.new"))).toBe(false);
     expect(existsSync(join(dir, "lexa-cli"))).toBe(true);
     expect(statSync(join(dir, "lexa-cli")).mode & 0o777).toBe(0o755);
-    const out = log.mock.calls.map((c) => String(c[0])).join("\n");
+    const out = log.mock.calls.map((c) => String(c[0]!)).join("\n");
     expect(out).toContain("1.2.3 → cli-v2.0.0");
     log.mockRestore();
     restoreExecPath();

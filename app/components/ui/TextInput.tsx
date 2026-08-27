@@ -4,7 +4,7 @@ export interface TextInputProps
   extends Omit<React.InputHTMLAttributes<HTMLInputElement>, "onChange"> {
   value: string;
   onChange: (value: string) => void;
-  invalid?: boolean;
+  invalid?: boolean | undefined;
 }
 
 export function TextInput({ value, onChange, invalid, className, ...rest }: TextInputProps) {

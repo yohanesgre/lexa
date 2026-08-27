@@ -1,18 +1,13 @@
 import { type Token, type Tokens, marked } from "marked";
-import type { TipTapDoc } from "./types";
+import type { TipTapDoc, TipTapNode, TipTapMark, JSONValue } from "./types";
 import { safeHref } from "./safe-href";
 
-type TipTapMark = { type: string; attrs?: Record<string, unknown> };
-type TipTapNode = {
-  type: string;
-  attrs?: Record<string, unknown>;
-  content?: TipTapNode[];
-  text?: string;
-  marks?: TipTapMark[];
-};
-
 function rawToken(t: Token): string {
-  return "raw" in t ? String((t as { raw: unknown }).raw) : JSON.stringify(t);
+  if ("raw" in t) {
+    const raw = (t as { raw: string }).raw;
+    return typeof raw === "string" ? raw : String(raw);
+  }
+  return JSON.stringify(t);
 }
 
 // Attachment image srcs are root-relative Lexa URLs. Relative srcs are only
@@ -88,7 +83,7 @@ function flattenInline(tokens: Token[], parentMarks: TipTapMark[] = []): TipTapN
         // mention re-mapping risks permanent outOfSync churn. A plain link is
         // lossless for echo and still navigates.
         const href = safeHref(t.href);
-        const attrs: Record<string, unknown> = {};
+        const attrs: Record<string, JSONValue> = {};
         if (href) attrs.href = href;
         if (t.title) attrs.title = t.title;
         out.push(...flattenInline(t.tokens ?? [], [...parentMarks, { type: "link", attrs }]));
@@ -109,7 +104,7 @@ function flattenInline(tokens: Token[], parentMarks: TipTapMark[] = []): TipTapN
         // issue bodies keep their Lexa attachment references (host-agnostic).
         const src = safeImageSrc(t.href);
         if (!src) break;
-        const attrs: Record<string, unknown> = { src };
+        const attrs: Record<string, JSONValue> = { src };
         // marked puts the alt text in t.text, not an attrs field.
         if (t.text) attrs.alt = t.text;
         if (t.title) attrs.title = t.title;
@@ -256,7 +251,9 @@ function renderInlineNode(node: TipTapNode, opts?: DocToMarkdownOptions): string
     let result = node.text ?? "";
     const marks = node.marks ?? [];
     for (let i = marks.length - 1; i >= 0; i--) {
-      result = applyMark(marks[i], result);
+      const m = marks[i];
+      if (!m) continue;
+      result = applyMark(m, result);
     }
     return result;
   }
@@ -356,7 +353,7 @@ function renderNode(node: TipTapNode, opts?: DocToMarkdownOptions): string {
       return "---";
     case "table": {
       const rows = (node.content ?? []).filter((n) => n.type === "tableRow");
-      const header = rows[0];
+      const header = rows[0]!;
       const body = rows.slice(1);
       const colspan = (c: TipTapNode) => {
         const n = Number(c.attrs?.colspan ?? 1);
@@ -464,7 +461,7 @@ export interface DocToMarkdownOptions {
 
 export function docToMarkdown(doc: TipTapDoc, opts?: DocToMarkdownOptions): string {
   try {
-    return renderBlock(doc.content as TipTapNode[], opts);
+    return renderBlock(doc.content, opts);
   } catch {
     return "";
   }

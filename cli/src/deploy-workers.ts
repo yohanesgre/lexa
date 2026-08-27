@@ -32,13 +32,13 @@ export function cmdDeployWorkers(
   positionals: string[]
 ): Effect.Effect<void, never, never> {
   return Effect.gen(function* () {
-    const domain = positionals[0];
+    const domain = positionals[0]!;
     if (!domain) {
       console.error("  ERROR: missing <domain> positional");
       console.error("  Usage: lexa-cli deploy <domain> workers [staging|prod] [flags]");
       process.exit(1);
     }
-    const flavor = positionals[1] === "staging" ? "staging" : "prod";
+    const flavor = positionals[1]! === "staging" ? "staging" : "prod";
     const subdomain = flavor === "staging" ? "lexa-preview" : "lexa";
 
     console.log(`==> Workers flavor: <${subdomain}.${domain}>`);
@@ -65,7 +65,7 @@ export function cmdUndeployWorkers(
   positionals: string[]
 ): Effect.Effect<void, never, never> {
   return Effect.gen(function* () {
-    const domain = positionals[0];
+    const domain = positionals[0]!;
     if (!domain) {
       console.error("  ERROR: missing <domain> positional");
       console.error("  Usage: lexa-cli undeploy <domain> workers [staging|prod]");

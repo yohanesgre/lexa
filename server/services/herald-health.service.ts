@@ -1,7 +1,7 @@
 /**
  * Herald provider health / circuit breaker (pla-1).
  *
- * States: closed → (3 consecutive fails in any 5m) → open 5m → half-open allow 1 probe →
+ * States: closed → (3 consecutive fails in every 5m window) → open 5m → half-open allow 1 probe →
  * success→closed reset, fail→re-open.
  *
  * Lazy probe (no cron): isAllowed handles the closed→open and open→half-open
@@ -59,7 +59,7 @@ export class HeraldHealthService extends Effect.Service<HeraldHealthService>()("
         if (row.circuit_state === "open") {
           if (isExpired(row.opened_at, OPEN_MS)) {
             const iso = nowIso();
-            yield* repo.upsert({ providerId, circuitState: "half-open", lastProbeAt: iso }).pipe(Effect.catchAll(() => Effect.succeed(row as unknown as never)));
+            yield* repo.upsert({ providerId, circuitState: "half-open", lastProbeAt: iso }).pipe(Effect.catchAll(() => Effect.succeed(row)));
             return true;
           }
           return false;

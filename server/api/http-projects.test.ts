@@ -68,7 +68,7 @@ describe("projects routes", () => {
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.data).toHaveLength(1);
-    expect(body.data[0]).toMatchObject({ id: "p1", slug: "p1", name: "P" });
+    expect(body.data[0]!).toMatchObject({ id: "p1", slug: "p1", name: "P" });
     expect(body.nextCursor).toBeNull();
   });
 
@@ -194,8 +194,8 @@ describe("swimlane routes", () => {
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.data.map((l: { id: string }) => l.id)).toEqual(["s-backlog", "m1"]);
-    expect(body.data[0].kind).toBe("backlog");
-    expect(body.data[1].dueAt).toBe("2026-06-01");
+    expect(body.data[0]!.kind).toBe("backlog");
+    expect(body.data[1]!.dueAt).toBe("2026-06-01");
   });
 
   it("POST /api/projects/:slug/swimlanes creates a sprint lane (201); unknown project → 404", async () => {
@@ -262,7 +262,7 @@ describe("swimlane routes", () => {
     const body = await res.json();
     expect(body.data.archivedAt).toBeTruthy();
     expect(body.activity).toHaveLength(1); // t1 archived
-    expect(body.activity[0].type).toBe("archived");
+    expect(body.activity[0]!.type).toBe("archived");
     const backlog = await handler(json("POST", "/api/projects/p1/swimlanes/s-backlog/archive"));
     expect(backlog.status).toBe(409);
     expect((await backlog.json()).error.code).toBe("BACKLOG_PROTECTED");

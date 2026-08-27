@@ -113,19 +113,19 @@ describe("rowToTask", () => {
     const linked: TaskRow = { ...row, github_issues_raw: "ghi1,1,r1,open,0||ghi2,2,r2,closed,0" };
     const t = rowToTask(linked);
     expect(t.githubs).toHaveLength(2);
-    expect(t.githubs[1]).toMatchObject({ issueId: "ghi2", issueNumber: 2, repo: "r2", syncedState: "closed" });
+    expect(t.githubs[1]!).toMatchObject({ issueId: "ghi2", issueNumber: 2, repo: "r2", syncedState: "closed" });
   });
 
   it("detects outOfSync when column githubState differs", () => {
     const linked: TaskRow = { ...row, github_issues_raw: "ghi1,1,r,open,0" };
     const t = rowToTask(linked, "closed");
-    expect(t.githubs[0].outOfSync).toBe(true);
+    expect(t.githubs[0]!.outOfSync).toBe(true);
   });
 
   it("uses column_github_state from row when arg not provided", () => {
     const linked: TaskRow = { ...row, github_issues_raw: "ghi1,1,r,closed,0", column_github_state: "open" };
     const t = rowToTask(linked);
-    expect(t.githubs[0].outOfSync).toBe(true);
+    expect(t.githubs[0]!.outOfSync).toBe(true);
   });
 
   it("maps archivedAt", () => {

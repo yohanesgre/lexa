@@ -39,7 +39,7 @@ interface Case {
   url: string;
   body?: unknown;
   response: unknown;
-  status?: number;
+  status?: number | undefined;
   expectResult?: (r: unknown) => void;
 }
 

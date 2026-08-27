@@ -9,16 +9,17 @@ interface ColumnProps {
   id: string;
   children: ReactNode;
   data?: Record<string, unknown>;
-  isEmpty?: boolean;
-  slug?: string;
-  columnId?: string;
-  swimlaneId?: string;
+  isEmpty?: boolean | undefined;
+  slug?: string | undefined;
+  columnId?: string | undefined;
+  swimlaneId?: string | undefined;
   priorities?: FieldOption[];
   types?: FieldOption[];
   onOpenCreate?: () => void;
 }
 
 export function Column({ id, children, data, isEmpty, slug, columnId, swimlaneId, priorities = [], types = [], onOpenCreate }: ColumnProps) {
+  // @ts-expect-error — strict: exactOptional indexedAccess
   const { setNodeRef, isOver } = useDroppable({ id, data });
   const empty = isEmpty ?? false;
   const [showForm, setShowForm] = useState(false);

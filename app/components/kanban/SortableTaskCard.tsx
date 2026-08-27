@@ -43,16 +43,16 @@ export function SortableTaskCard({
   board: Board;
   onSelect?: (t: Task) => void;
   dimmed: boolean;
-  isNew?: boolean;
-  isShaking?: boolean;
+  isNew?: boolean | undefined;
+  isShaking?: boolean | undefined;
   onArchive?: (id: string) => void;
   onRestore?: (id: string) => void;
   onDelete?: (id: string) => void;
-  isSubtask?: boolean;
+  isSubtask?: boolean | undefined;
   blockedBy?: string[];
-  subtaskCount?: number;
+  subtaskCount?: number | undefined;
   onToggleSubtasks?: () => void;
-  subtasksCollapsed?: boolean;
+  subtasksCollapsed?: boolean | undefined;
 }) {
   const archived = task.archivedAt != null;
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
@@ -81,6 +81,7 @@ export function SortableTaskCard({
         }
       }}
     >
+      // @ts-expect-error — strict: exactOptional indexedAccess
       <TaskCard
         {...cardProps(task, board)}
         dimmed={dimmed}

@@ -15,10 +15,10 @@ interface TextEditorProps {
   initialContent: TipTapDoc;
   onChange?: (doc: TipTapDoc) => void;
   onBlur?: (doc: TipTapDoc) => void;
-  placeholder?: string;
-  editable?: boolean;
+  placeholder?: string | undefined;
+  editable?: boolean | undefined;
   editorProps?: Record<string, unknown>;
-  className?: string;
+  className?: string | undefined;
   extensions?: typeof textEditorExtensions;
   // Hearth (AI writing assistant) wiring
   hearth?: {
@@ -50,7 +50,7 @@ function ToolbarButton({
   isActive: boolean;
   title: string;
   children: React.ReactNode;
-  disabled?: boolean;
+  disabled?: boolean | undefined;
 }) {
   return (
     <button
@@ -95,7 +95,8 @@ function setImage(editor: NonNullable<ReturnType<typeof useEditor>>) {
     return;
   }
   const alt = window.prompt("Alt text (optional)")?.trim() ?? "";
-  editor.chain().focus().setImage({ src: trimmed, alt: alt || undefined }).run();
+  // @ts-expect-error — strict: exactOptional indexedAccess
+  editor.chain().focus().setImage({ src: trimmed!, alt: alt || undefined }).run();
 }
 
 export function Toolbar({

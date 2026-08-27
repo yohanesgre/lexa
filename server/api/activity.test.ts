@@ -54,7 +54,7 @@ describe("GET /api/projects/:slug/tasks/:id/activity", () => {
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.data).toHaveLength(1);
-    expect(["event", "comment"]).toContain(body.data[0].kind);
+    expect(["event", "comment"]).toContain(body.data[0]!.kind);
     expect(body.nextCursor).toBeTruthy();
   });
 
@@ -72,7 +72,7 @@ describe("GET /api/projects/:slug/tasks/:id/activity", () => {
     expect(body2.data).toHaveLength(1);
     expect(body2.nextCursor).toBeNull();
     // ascending order across pages: page1 newest, page2 oldest
-    expect(body1.data[0].createdAt > body2.data[0].createdAt).toBe(true);
+    expect(body1.data[0]!.createdAt > body2.data[0]!.createdAt).toBe(true);
   });
 
   it("rejects without a key", async () => {
@@ -97,9 +97,9 @@ describe("GET /api/projects/:slug/tasks/:id/activity", () => {
     const { data, activity } = await res.json();
     expect(data.title).toBe("New title");
     expect(activity).toHaveLength(1);
-    expect(activity[0].type).toBe("field_changed");
-    expect(activity[0].message).toBe("Maria changed the title");
-    expect(activity[0].kind).toBe("event");
+    expect(activity[0]!.type).toBe("field_changed");
+    expect(activity[0]!.message).toBe("Maria changed the title");
+    expect(activity[0]!.kind).toBe("event");
   });
 
   it("moveTask response carries the appended activity", async () => {

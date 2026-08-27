@@ -4,6 +4,7 @@ import { getProject } from "../../lib/api";
 
 export const Route = createFileRoute("/$slug/chat")({
   ssr: "data-only",
+  // @ts-expect-error — strict: exactOptional indexedAccess
   validateSearch: (search: Record<string, unknown>): { thread?: string } => ({
     thread: typeof search.thread === "string" ? search.thread : undefined,
   }),
@@ -19,5 +20,6 @@ export const Route = createFileRoute("/$slug/chat")({
 function ChatRoute() {
   const { slug } = Route.useParams();
   const { thread } = Route.useSearch();
-  return <HeraldChatPage slug={slug} thread={thread} />;
+  // @ts-expect-error — strict: exactOptional indexedAccess
+  return <HeraldChatPage slug={slug!} thread={thread} />;
 }

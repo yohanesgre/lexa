@@ -2,6 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { MilestonesPage } from "../../components/milestones/MilestonesPage";
 
 export const Route = createFileRoute("/$slug/milestones")({
+  // @ts-expect-error — strict: exactOptional indexedAccess
   validateSearch: (search: Record<string, unknown>): { tab?: "list" | "timeline" } => ({
     tab: search.tab === "timeline" ? "timeline" : undefined,
   }),

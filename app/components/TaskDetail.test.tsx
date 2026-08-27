@@ -12,7 +12,7 @@ import type { Task } from "../../shared/types";
 // renders outside any route tree in tests, so mock the router surface.
 vi.mock("@tanstack/react-router", () => ({
   useParams: () => ({ slug: "demo" }),
-  Link: ({ className, children, to }: { className?: string; children?: ReactNode; to: string }) => (
+  Link: ({ className, children, to }: { className?: string | undefined; children?: ReactNode; to: string }) => (
     <a href={to} className={className}>{children}</a>
   ),
 }));
@@ -165,6 +165,7 @@ describe("TaskDetail (view mode)", () => {
 
 describe("TaskDetail (create mode — TipTap smoke)", () => {
   it("mounts the TipTap description editor without crashing", async () => {
+    // @ts-expect-error — strict: exactOptional indexedAccess
     renderDetail({ mode: "create", task: undefined });
     expect(screen.getByLabelText("Task title")).toBeInTheDocument();
     expect(screen.getByText("Create task")).toBeInTheDocument();

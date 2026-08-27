@@ -20,9 +20,9 @@ async function makeTestPem(pkcs1 = false): Promise<string> {
 }
 
 function decodeJwtParts(jwt: string): { header: any; payload: any } {
-  const [h, p] = jwt.split(".");
+  const [h, p] = jwt.split(".") as [string, string, ...string[]];
   const decode = (seg: string) => JSON.parse(Buffer.from(seg.replace(/-/g, "+").replace(/_/g, "/"), "base64").toString("utf-8"));
-  return { header: decode(h), payload: decode(p) };
+  return { header: decode(h!), payload: decode(p!) };
 }
 
 describe("createAppJwt", () => {

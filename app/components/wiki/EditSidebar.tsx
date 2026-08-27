@@ -18,7 +18,7 @@ interface EditSidebarProps {
   onSelectRevision: (id: string) => void;
   onRestore: (id: string) => void;
   onClosePreview: () => void;
-  restoring?: boolean;
+  restoring?: boolean | undefined;
 }
 
 function formatRelative(iso: string): string {

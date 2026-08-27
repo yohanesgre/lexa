@@ -41,7 +41,7 @@ async function createLink(expiresAt?: string): Promise<{ id: string; token: stri
   expect(res.status).toBe(201);
   const body = await res.json();
   // url = `${PUBLIC_URL}/share/${token}` — recover the token from the URL.
-  const token = (body.link.url as string).split("/share/")[1];
+  const token = (body.link.url as string).split("/share/")[1]!;
   return { id: body.link.id, token };
 }
 

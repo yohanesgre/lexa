@@ -12,7 +12,7 @@ export class UserProjectRoleRepo extends Effect.Service<UserProjectRoleRepo>()("
 
       findByUserAndProject: (userId: string, projectId: string): Effect.Effect<UserProjectRoleRow | null, DbError> =>
         queryAll<UserProjectRoleRow>(db, `SELECT * FROM user_project_roles WHERE user_id = ? AND project_id = ? LIMIT 1`, userId, projectId).pipe(
-          Effect.map((rows) => rows[0] ?? null)
+          Effect.map((rows) => rows[0]! ?? null)
         ),
 
       setRole: (userId: string, projectId: string, role: "admin" | "member"): Effect.Effect<void, DbError | ConstraintViolation> =>

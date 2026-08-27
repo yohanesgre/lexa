@@ -1,9 +1,9 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 
 export interface HeraldUsageFilters {
-  from?: string | null;
-  to?: string | null;
-  projectId?: string | null;
+  from?: string | null | undefined;
+  to?: string | null | undefined;
+  projectId?: string | null | undefined;
 }
 
 export interface HeraldUsageSummary {
@@ -64,9 +64,9 @@ function buildQuery(filters: HeraldUsageFilters): string {
 async function requestJson<T>(url: string, init?: RequestInit): Promise<T> {
   const res = await fetch(url, { ...init, headers: { "Content-Type": "application/json", ...(init?.headers as Record<string, string> | undefined) } });
   if (!res.ok) {
-    const body = await res.json().catch(() => ({})) as { error?: { code?: string; message?: string } };
+    const body = await res.json().catch(() => ({})) as { error?: { code?: string | undefined; message?: string } };
     const err = new Error(body.error?.message ?? `HTTP ${res.status}`) as Error & { code?: string };
-    err.code = body.error?.code;
+    err.code = body.error?.code!;
     throw err;
   }
   return res.json() as Promise<T>;

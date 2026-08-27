@@ -120,7 +120,7 @@ describe("tasks routes", () => {
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.data.title).toBe("Renamed");
-    expect(body.activity[0]).toMatchObject({ type: "field_changed", message: "Maria changed the title" });
+    expect(body.activity[0]!).toMatchObject({ type: "field_changed", message: "Maria changed the title" });
   });
 
   it("DELETE /api/projects/:slug/tasks/:id → 204 with an empty body, then the task is gone", async () => {
@@ -229,7 +229,7 @@ describe("task ticket key routes", () => {
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.data).toHaveLength(1);
-    expect(body.data[0].id).toBe("tk1");
+    expect(body.data[0]!.id).toBe("tk1");
   });
 });
 

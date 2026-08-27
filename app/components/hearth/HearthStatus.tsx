@@ -212,7 +212,7 @@ export function HearthStatus() {
                           style={{ fontSize: 10, color: "var(--lx-text-muted)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: "100%", display: "inline-flex", alignItems: "center", gap: 6 }}
                         >
                           <span className="hearth-task-log-live" />
-                          {activeLogs.data[activeLogs.data.length - 1].message}
+                          {activeLogs.data![activeLogs.data!.length - 1]!.message}
                         </span>
                       )}
                     </Link>

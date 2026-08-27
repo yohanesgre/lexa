@@ -42,10 +42,11 @@ function makeService(db: Database) {
   return Context.get(ctx, MilestoneService);
 }
 
-function makeRepo<T>(db: Database, Repo: any): T {
+function makeRepo<T>(db: Database, Repo: { Default: Layer.Layer<T, never, Sqlite> }): T {
   const layer = Repo.Default.pipe(Layer.provide(Layer.succeed(Sqlite, db)));
   const ctx = Effect.runSync(Effect.scoped(Layer.build(layer)));
-  return Context.get(ctx, Repo) as T;
+  // test helper: Repo is an Effect.Service class; Default layer is typed with Sqlite dep
+  return Context.get(ctx, Repo as unknown as Context.Tag<T, T>) as T;
 }
 
 const maria: Actor = { kind: "user", label: "Maria", userId: "u1" };
@@ -115,7 +116,7 @@ describe("MilestoneService archive/restore", () => {
     const task = await Effect.runPromise(taskRepo.findById("t1"));
     expect(task.archivedAt).not.toBeNull();
     expect(res.activity).toHaveLength(1); // per-task only (task_activity FK → tasks.id)
-    expect(res.activity[0]).toMatchObject({ type: "archived", taskId: "t1", actorLabel: "Maria" });
+    expect(res.activity[0]!).toMatchObject({ type: "archived", taskId: "t1", actorLabel: "Maria" });
     // activity rows exist in the DB (emitted inside the same transaction)
     const rows = db.prepare("SELECT task_id, type FROM task_activity WHERE task_id = 't1'").all() as { task_id: string; type: string }[];
     expect(rows).toEqual([{ task_id: "t1", type: "archived" }]);

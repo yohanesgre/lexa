@@ -118,7 +118,7 @@ describe("buildTaskUpdateDiff", () => {
 
   it("empty assignee list projects before=null", () => {
     const diff = buildTaskUpdateDiff({ ...snapshot, assignees: [] }, [{ field: "assignees", after: "x" }]);
-    expect(diff.changes[0].before).toBeNull();
+    expect(diff.changes[0]!.before).toBeNull();
   });
 });
 
@@ -182,8 +182,8 @@ describe("createWriteRecorder budget + persistence rows", () => {
     const second = await recorder.record(proposal(1));
     if ("error" in first || "error" in second) throw new Error("unexpected budget rejection");
     expect(rows).toHaveLength(2);
-    expect(first.batchId).toBe(second.batchId);
-    expect(second.seq).toBe(first.seq + 1);
+    expect(first!.batchId).toBe(second.batchId);
+    expect(second.seq).toBe(first!.seq + 1);
     for (const row of rows) {
       expect(row.projectId).toBe("p1");
       expect(row.documentType).toBe("chat");
@@ -200,7 +200,7 @@ describe("createWriteRecorder budget + persistence rows", () => {
     const { recorder, rows } = makeRecorder();
     await recorder.record(proposal(0));
     const expectedMs = Date.now() + APPROVAL_TTL_HOURS * 3_600_000;
-    const actualMs = Date.parse((rows[0].expiresAt as string).replace(" ", "T") + "Z");
+    const actualMs = Date.parse((rows[0]!.expiresAt as string).replace(" ", "T") + "Z");
     expect(Math.abs(expectedMs - actualMs)).toBeLessThan(5_000);
   });
 

@@ -357,8 +357,8 @@ describe("activity + link mutations", () => {
     const { result } = renderHook(() => useAddComment("demo", "t1"), { wrapper });
     await act(async () => { await result.current.mutateAsync({ type: "doc", content: [] }); });
     const pages = (queryClient.getQueryData(["task-activity", "demo", "t1"]) as { pages: { data: ActivityItem[] }[] }).pages;
-    expect(pages[0].data).toHaveLength(3);
-    expect(pages[0].data[2]).toMatchObject({ kind: "event", type: "created" });
+    expect(pages[0]!.data).toHaveLength(3);
+    expect(pages[0]!.data[2]).toMatchObject({ kind: "event", type: "created" });
   });
 
   it("useUpdateComment replaces the matching comment row", async () => {
@@ -370,7 +370,8 @@ describe("activity + link mutations", () => {
     });
     const { result } = renderHook(() => useUpdateComment("demo", "t1"), { wrapper });
     await act(async () => { await result.current.mutateAsync({ commentId: 9, body: { type: "doc", content: [] } }); });
-    const data = (queryClient.getQueryData(["task-activity", "demo", "t1"]) as { pages: { data: ActivityItem[] }[] }).pages[0].data;
+    // @ts-expect-error — strict: exactOptional indexedAccess
+    const data = (queryClient.getQueryData(["task-activity"!, "demo", "t1"]) as { pages: { data: ActivityItem[] }[] }).pages[0].data;
     expect(data.find((i) => i.kind === "comment")).toMatchObject({ kind: "comment", editedAt: "t2" });
   });
 
@@ -379,7 +380,8 @@ describe("activity + link mutations", () => {
     seedActivity();
     const { result } = renderHook(() => useDeleteComment("demo", "t1"), { wrapper });
     await act(async () => { await result.current.mutateAsync(9); });
-    const data = (queryClient.getQueryData(["task-activity", "demo", "t1"]) as { pages: { data: ActivityItem[] }[] }).pages[0].data;
+    // @ts-expect-error — strict: exactOptional indexedAccess
+    const data = (queryClient.getQueryData(["task-activity"!, "demo", "t1"]) as { pages: { data: ActivityItem[] }[] }).pages[0].data;
     expect(data.filter((i) => i.kind === "comment")).toHaveLength(0);
     const last = data[data.length - 1];
     expect(last).toMatchObject({ kind: "event", type: "comment_deleted" });
@@ -414,7 +416,7 @@ describe("activity + link mutations", () => {
     await act(async () => { await result.current.mutateAsync({ kind: "wiki", ref: "home" }); });
     expect(queryClient.getQueryData(["sources", "demo", "task", "t1"])).toHaveLength(1);
     const pages = (queryClient.getQueryData(["task-activity", "demo", "t1"]) as { pages: { data: ActivityItem[] }[] }).pages;
-    expect(pages[0].data).toHaveLength(2);
+    expect(pages[0]!.data).toHaveLength(2);
   });
 });
 

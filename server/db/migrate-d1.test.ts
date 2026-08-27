@@ -32,7 +32,7 @@ function makeStubRunner(): D1MigrationRunner & { _table(name: string): Table } {
         },
         async first<T>(): Promise<T | null> {
           if (/SELECT name FROM _migrations WHERE name = \?/.test(sql)) {
-            const name = stmt._bound[0] as string;
+            const name = stmt._bound[0]! as string;
             const rows = tables["_migrations"] ?? [];
             const hit = rows.find((r) => r.name === name);
             return (hit ? { name: hit.name } : null) as T | null;
@@ -41,7 +41,7 @@ function makeStubRunner(): D1MigrationRunner & { _table(name: string): Table } {
         },
         async run() {
           if (/INSERT INTO _migrations \(name\) VALUES \(\?\)/.test(sql)) {
-            const name = stmt._bound[0] as string;
+            const name = stmt._bound[0]! as string;
             const rows = tables["_migrations"] ?? [];
             rows.push({ name, applied_at: new Date().toISOString() });
             tables["_migrations"] = rows;

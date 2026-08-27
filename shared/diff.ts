@@ -1,4 +1,4 @@
-import type { TipTapDoc } from "./types";
+import type { TipTapDoc, TipTapNode } from "./types";
 
 // Git-style unified diff for the Hearth review-in-editor flow.
 // The document is never mutated while the diff is shown: the original side is
@@ -32,12 +32,7 @@ export interface DiffResult {
   hunks: DiffHunk[];
 }
 
-type DiffNode = {
-  type: string;
-  attrs?: Record<string, unknown>;
-  content?: DiffNode[];
-  text?: string;
-};
+type DiffNode = TipTapNode;
 
 // Canonical plain-text form used for diffing: headings bare (no # markers),
 // list items prefixed with "- ", code blocks bare (no fences), blocks joined
@@ -45,7 +40,7 @@ type DiffNode = {
 export function docToDiffText(doc: TipTapDoc): string {
   try {
     if (!doc || !Array.isArray(doc.content)) return "";
-    return collectDiffLines(doc.content as DiffNode[], "").join("\n");
+    return collectDiffLines(doc.content, "").join("\n");
   } catch {
     return "";
   }
@@ -122,18 +117,23 @@ function lcsOps(a: string[], b: string[]): Op[] {
   const dp: number[][] = Array.from({ length: n + 1 }, () => new Array<number>(m + 1).fill(0));
   for (let i = n - 1; i >= 0; i--) {
     for (let j = m - 1; j >= 0; j--) {
-      dp[i][j] = a[i] === b[j] ? dp[i + 1][j + 1] + 1 : Math.max(dp[i + 1][j], dp[i][j + 1]);
+      const ai = a[i]!;
+      const bj = b[j]!;
+      const diag = dp[i + 1]![j + 1]!;
+      const down = dp[i + 1]![j]!;
+      const right = dp[i]![j + 1]!;
+      dp[i]![j] = ai === bj ? diag + 1 : Math.max(down, right);
     }
   }
   const ops: Op[] = [];
   let i = 0;
   let j = 0;
   while (i < n && j < m) {
-    if (a[i] === b[j]) {
+    if (a[i]! === b[j]!) {
       ops.push({ kind: "equal", a: i, b: j });
       i++;
       j++;
-    } else if (dp[i + 1][j] >= dp[i][j + 1]) {
+    } else if (dp[i + 1]![j]! >= dp[i]![j + 1]!) {
       ops.push({ kind: "del", a: i, b: -1 });
       i++;
     } else {
@@ -164,14 +164,14 @@ export function diffText(oldText: string, newText: string): DiffResult {
   let newBefore = 0;
 
   for (let i = 0; i < ops.length; i++) {
-    const op = ops[i];
+    const op = ops[i]!;
     if (op.kind === "equal") {
       oldBefore++;
       newBefore++;
       continue;
     }
     const start = i;
-    while (i < ops.length && ops[i].kind !== "equal") i++;
+    while (i < ops.length && ops[i]!.kind !== "equal") i++;
     const run = ops.slice(start, i);
     i--;
 
@@ -180,8 +180,8 @@ export function diffText(oldText: string, newText: string): DiffResult {
     additions += addB.length;
     deletions += delA.length;
 
-    const oldStart = delA.length > 0 ? delA[0].a + 1 : oldBefore + 1;
-    const newStart = addB.length > 0 ? addB[0].b + 1 : newBefore + 1;
+    const oldStart = delA.length > 0 ? delA[0]!.a + 1 : oldBefore + 1;
+    const newStart = addB.length > 0 ? addB[0]!.b + 1 : newBefore + 1;
 
     // Word-level spans: pair the i-th deleted line with the i-th added line
     // only when the counts match (unbalanced hunks render plain, like the
@@ -193,14 +193,16 @@ export function diffText(oldText: string, newText: string): DiffResult {
     const lines: DiffLine[] = [];
     for (const o of run) {
       if (o.kind === "del") {
-        const text = a[o.a];
+        const text = a[o.a] ?? "";
         const pairIdx = delLines.indexOf(o);
-        const spans = pairWordDiff ? wordSpans(text, b[addLines[pairIdx].b]).del : [];
+        const paired = pairWordDiff ? addLines[pairIdx] : undefined;
+        const spans = pairWordDiff && paired ? wordSpans(text, b[paired.b] ?? "").del : [];
         lines.push({ kind: "del", text, spans });
       } else {
-        const text = b[o.b];
+        const text = b[o.b] ?? "";
         const pairIdx = addLines.indexOf(o);
-        const spans = pairWordDiff ? wordSpans(a[delLines[pairIdx].a], text).add : [];
+        const paired = pairWordDiff ? delLines[pairIdx] : undefined;
+        const spans = pairWordDiff && paired ? wordSpans(a[paired.a] ?? "", text).add : [];
         lines.push({ kind: "add", text, spans });
       }
     }
@@ -226,7 +228,7 @@ const TOKEN_RE = /([A-Za-z0-9_]+)|([^\sA-Za-z0-9_]+)/g;
 function tokenize(text: string): Token[] {
   const tokens: Token[] = [];
   for (const match of text.matchAll(TOKEN_RE)) {
-    tokens.push({ text: match[0], start: match.index ?? 0, end: (match.index ?? 0) + match[0].length });
+    tokens.push({ text: match[0]!, start: match.index ?? 0, end: (match.index ?? 0) + match[0]!.length });
   }
   return tokens;
 }
@@ -239,17 +241,24 @@ function wordSpans(aText: string, bText: string): { del: DiffSpan[]; add: DiffSp
   const add: DiffSpan[] = [];
   let i = 0;
   while (i < ops.length) {
-    const kind = ops[i].kind;
+    const op0 = ops[i]!;
+    const kind = op0.kind;
     let j = i;
-    while (j < ops.length && ops[j].kind === kind) j++;
-    const first = ops[i];
-    const last = ops[j - 1];
+    while (j < ops.length && ops[j]!.kind === kind) j++;
+    const first = ops[i]!;
+    const last = ops[j - 1]!;
     if (kind === "del") {
-      del.push({ kind: "del", text: aText.slice(wsStart(aText, a[first.a].start), a[last.a].end) });
+      const sTok = a[first.a]!;
+      const eTok = a[last.a]!;
+      del.push({ kind: "del", text: aText.slice(wsStart(aText, sTok.start), eTok.end) });
     } else if (kind === "add") {
-      add.push({ kind: "add", text: bText.slice(wsStart(bText, b[first.b].start), b[last.b].end) });
+      const sTok = b[first.b]!;
+      const eTok = b[last.b]!;
+      add.push({ kind: "add", text: bText.slice(wsStart(bText, sTok.start), eTok.end) });
     } else {
-      const text = aText.slice(wsStart(aText, a[first.a].start), a[last.a].end);
+      const sTok = a[first.a]!;
+      const eTok = a[last.a]!;
+      const text = aText.slice(wsStart(aText, sTok.start), eTok.end);
       del.push({ kind: "same", text });
       add.push({ kind: "same", text });
     }
@@ -260,6 +269,6 @@ function wordSpans(aText: string, bText: string): { del: DiffSpan[]; add: DiffSp
 
 function wsStart(text: string, index: number): number {
   let s = index;
-  while (s > 0 && /\s/.test(text[s - 1])) s--;
+  while (s > 0 && /\s/.test(text[s - 1] ?? "")) s--;
   return s;
 }

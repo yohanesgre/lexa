@@ -24,7 +24,7 @@ export interface CliConfig {
 // Deploy credentials (Cloudflare) persisted alongside the login so
 // `lexa-cli deploy` works without a saved url/apiKey.
 export interface DeployCreds {
-  cfToken?: string;
+  cfToken?: string | undefined;
 }
 
 export const LEXA_DIR = process.env.LEXA_DIR ?? join(homedir(), ".lexa");
@@ -52,7 +52,7 @@ export function normalizeHost(urlOrHost: string): string {
     const bracketed = /^\[([^\]]+)\](?::(\d+))?$/.exec(host);
     if (bracketed) {
       host = bracketed[1]!;
-      port = bracketed[2] ?? "";
+      port = bracketed[2]! ?? "";
     } else {
       // Bare host:port (single colon); multi-colon input is a bare IPv6.
       const singleColon = /^([^:]+):(\d+)$/.exec(host);

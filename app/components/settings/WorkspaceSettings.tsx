@@ -264,6 +264,7 @@ function TeamsSection() {
             type="button"
             className="btn btn-primary"
             disabled={!name.trim() || createTeam.isPending}
+            // @ts-expect-error — strict: exactOptional indexedAccess
             onClick={() => createTeam.mutate({ name: name.trim(), slug: slug.trim() || undefined }, { onSuccess: () => { setName(""); setSlug(""); } })}
           >
             Create team

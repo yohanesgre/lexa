@@ -21,7 +21,7 @@ describe("buildMilestoneArchiveCascadeBatch", () => {
     expect(stmts[1]!.params).toEqual(["2026-08-25T10:00:00Z", "2026-08-25T10:00:00Z", "s1"]);
     expect(stmts[2]!.sql).toMatch(/UPDATE tasks SET archived_at/);
     expect(stmts[3]!.sql).toMatch(/INSERT INTO task_activity/);
-    expect(stmts[3]!.params[4]).toBe("archived");
+    expect(stmts[3]!.params[4]!).toBe("archived");
   });
 
   it("scales linearly: N swimlanes + M tasks = 1 + N + 2*M statements", () => {
@@ -39,7 +39,7 @@ describe("buildMilestoneArchiveCascadeBatch", () => {
     expect(stmts).toHaveLength(1 + 3 + 2 * 5);
     const inserts = stmts.filter((s) => s.sql.startsWith("INSERT INTO task_activity"));
     for (const i of inserts) {
-      expect(i.params[6]).toBe(1);
+      expect(i.params[6]!).toBe(1);
     }
   });
 

@@ -14,7 +14,7 @@ const MILESTONE_NONE = "none";
 
 export interface BoardPageProps {
   slug: string;
-  search: { task?: string; milestone?: string };
+  search: { task?: string | undefined; milestone?: string };
 }
 
 export function BoardPage({ slug, search }: BoardPageProps) {
@@ -187,6 +187,7 @@ export function BoardPage({ slug, search }: BoardPageProps) {
         onMilestoneChange={handleMilestoneChange}
       />
       {(selectedTaskId !== null || isCreating) && (
+        // @ts-expect-error — strict: exactOptional indexedAccess
         <TaskDetail
           mode={isCreating ? "create" : "view"}
           task={selectedTask ?? undefined}

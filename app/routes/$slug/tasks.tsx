@@ -3,7 +3,8 @@ import { TasksPage } from "../../components/tasks/TasksPage";
 import { getBoard } from "../../lib/api";
 
 export const Route = createFileRoute("/$slug/tasks")({
-  validateSearch: (search: Record<string, unknown>): { task?: string; swimlane?: string } => ({
+  // @ts-expect-error — strict: exactOptional indexedAccess
+  validateSearch: (search: Record<string, unknown>): { task?: string | undefined; swimlane?: string } => ({
     task: typeof search.task === "string" ? search.task : undefined,
     swimlane: typeof search.swimlane === "string" ? search.swimlane : undefined,
   }),

@@ -1,4 +1,4 @@
-export function GithubMark({ size = 14, className }: { size?: number; className?: string }) {
+export function GithubMark({ size = 14, className }: { size?: number | undefined; className?: string }) {
   return (
     <svg
       width={size}
@@ -14,7 +14,7 @@ export function GithubMark({ size = 14, className }: { size?: number; className?
   );
 }
 
-export function TrashIcon({ size = 14, className }: { size?: number; className?: string }) {
+export function TrashIcon({ size = 14, className }: { size?: number | undefined; className?: string }) {
   return (
     <svg
       width={size}
@@ -30,7 +30,7 @@ export function TrashIcon({ size = 14, className }: { size?: number; className?:
   );
 }
 
-export function ArchiveIcon({ size = 14, className }: { size?: number; className?: string }) {
+export function ArchiveIcon({ size = 14, className }: { size?: number | undefined; className?: string }) {
   return (
     <svg
       width={size}
@@ -47,7 +47,7 @@ export function ArchiveIcon({ size = 14, className }: { size?: number; className
   );
 }
 
-export function LinkIcon({ size = 14, className }: { size?: number; className?: string }) {
+export function LinkIcon({ size = 14, className }: { size?: number | undefined; className?: string }) {
   return (
     <svg
       width={size}

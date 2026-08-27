@@ -68,7 +68,7 @@ export class RuntimeEventRepo extends Effect.Service<RuntimeEventRepo>()("Lexa/R
             input.apiKeyId
           );
           const rows = yield* queryAll<RuntimeEventRow>(db, `SELECT * FROM runtime_events WHERE id = ?`, input.id);
-          const row = rows[0];
+          const row = rows[0]!;
           if (!row) return yield* Effect.fail(new DbError({ message: "runtime event row missing after create" }));
           return rowToRuntimeEvent(row);
         }),
@@ -88,7 +88,7 @@ export class RuntimeEventRepo extends Effect.Service<RuntimeEventRepo>()("Lexa/R
              ORDER BY created_at LIMIT 1`,
             machineId
           );
-          const event = rows[0];
+          const event = rows[0]!;
           if (!event) return null;
           const claimed = yield* run(
             db,
@@ -99,7 +99,7 @@ export class RuntimeEventRepo extends Effect.Service<RuntimeEventRepo>()("Lexa/R
           );
           if (claimed === 0) return null;
           const updatedRows = yield* queryAll<RuntimeEventRow>(db, `SELECT * FROM runtime_events WHERE id = ?`, event.id);
-          const updated = updatedRows[0];
+          const updated = updatedRows[0]!;
           if (!updated) return yield* Effect.fail(new DbError({ message: "runtime event row missing after claim" }));
           return rowToRuntimeEvent(updated);
         }),

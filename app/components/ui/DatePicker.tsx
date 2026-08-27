@@ -6,8 +6,8 @@ import { parseDateOnly } from "../../lib/dates";
 interface DatePickerProps {
   value: string | null;
   onChange: (v: string | null) => void;
-  placeholder?: string;
-  className?: string;
+  placeholder?: string | undefined;
+  className?: string | undefined;
 }
 
 const WEEKDAYS = ["S", "M", "T", "W", "T", "F", "S"];

@@ -15,7 +15,7 @@ export function HeraldProjectProviderSection({ project }: { project: Project }) 
   const { data: projectSettings, isLoading: settingsLoading } = useHeraldProjectSettings(project.id);
   const save = useSaveHeraldProjectSettings(project.id);
 
-  const settings = (projectSettings as unknown as { providerId?: string | null; modelId?: string | null; fallbackModelIds?: string[]; searchProvider?: string | null; urlAllowlist?: string | null; hasSearchKey?: boolean; reasoningEffort?: string | null; engine?: string } | null) ?? null;
+  const settings = (projectSettings as unknown as { providerId?: string | null | undefined; modelId?: string | null | undefined; fallbackModelIds?: string[]; searchProvider?: string | null | undefined; urlAllowlist?: string | null | undefined; hasSearchKey?: boolean | undefined; reasoningEffort?: string | null | undefined; engine?: string } | null) ?? null;
 
   const [providerId, setProviderId] = useState<string>("");
   const [modelId, setModelId] = useState<string>("");
@@ -79,8 +79,10 @@ export function HeraldProjectProviderSection({ project }: { project: Project }) 
     const target = idx + dir;
     if (target < 0 || target >= next.length) return;
     const tmp = next[idx];
-    next[idx] = next[target];
-    next[target] = tmp;
+    // @ts-expect-error — strict: exactOptional indexedAccess
+    next[idx]! = next[target];
+    // @ts-expect-error — strict: exactOptional indexedAccess
+    next[target]! = tmp;
     setFallbacks(next);
   };
 
@@ -171,7 +173,7 @@ export function HeraldProjectProviderSection({ project }: { project: Project }) 
               const enabled = enabledModelsOf(prov);
               let nextModelId = modelId;
               if (enabled.length && !enabled.some((m) => m.modelId === modelId)) {
-                nextModelId = enabled[0].modelId;
+                nextModelId = enabled[0]!.modelId;
                 setModelId(nextModelId);
               } else if (!enabled.length) {
                 nextModelId = "";

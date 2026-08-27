@@ -99,7 +99,7 @@ export const MENTION_CAPS = {
 export function scanMentionTokens(text: string): string[] {
   const out: string[] = [];
   for (const m of text.matchAll(/(?<![A-Za-z0-9])@([A-Za-z0-9][A-Za-z0-9_-]*)/g)) {
-    out.push(m[1]);
+    out.push(m[1]!); // regex guarantees capture
   }
   return out;
 }
@@ -458,13 +458,13 @@ export interface StreamRunContext {
   onCancel: () => Promise<void>;
   // Resume streams: the transcript already ends with the suspended assistant
   // entry — no fresh user message is appended.
-  skipUserEntry?: boolean;
+  skipUserEntry?: boolean | undefined;
   // Resume outcome per decided row of the resumed batch — one approval_result
   // frame each, pushed right after the start frame.
-  approvalResults?: Array<{ approvalId: string; status: "applied" | "failed" | "denied"; error?: string }>;
-  writeDrain?: () => QueuedProposal[];
-  modelOptions?: Record<string, unknown>;
-  gatewayStream?: (input: unknown) => AsyncIterable<StreamChunk>;
+  approvalResults?: Array<{ approvalId: string; status: "applied" | "failed" | "denied"; error?: string }> | undefined;
+  writeDrain?: (() => QueuedProposal[]) | undefined;
+  modelOptions?: Record<string, unknown> | undefined;
+  gatewayStream?: ((input: unknown) => AsyncIterable<StreamChunk>) | undefined;
 }
 
 export function buildStream(ctx: StreamRunContext): ReadableStream<StreamFrame> {
@@ -536,7 +536,7 @@ export function buildStream(ctx: StreamRunContext): ReadableStream<StreamFrame> 
                 ...(citations.length > 0 ? { citations } : {}),
                 ...(toolCallsLog.length > 0 ? { toolCalls: toolCallsLog } : {}),
                 pendingBatch: {
-                  batchId: drained[0].batchId,
+                  batchId: drained[0]!.batchId,
                   approvals: drained.map((p, i) => ({ approvalId: p.approvalId, toolCallId: writeToolCallIds[i] ?? "" })),
                 },
               },
@@ -544,7 +544,7 @@ export function buildStream(ctx: StreamRunContext): ReadableStream<StreamFrame> 
             ctx.historySummary(),
             ctx.historySummarizedCount()
           );
-          push({ type: "suspended", batchId: drained[0].batchId });
+          push({ type: "suspended", batchId: drained[0]!.batchId });
         };
         try {
           push({ type: "start", [ctx.idField]: ctx.keyId, threadId: ctx.threadId } as StreamFrame);
@@ -1898,9 +1898,9 @@ export class HeraldService extends Effect.Service<HeraldService>()("Lexa/Herald"
 
       // Owner-scoped chat history list (sidebar): pinned first, then newest.
       // Optional q prefilter + transcript snippet for search UIs.
-      listChats: (projectId: string, userId: string, opts: { q?: string } = {}) =>
+      listChats: (projectId: string, userId: string, opts: { q?: string | undefined } = {}) =>
         Effect.map(
-          threadRepo.listChats(projectId, userId, { q: opts.q }),
+          threadRepo.listChats(projectId, userId, { ...(opts.q !== undefined ? { q: opts.q } : {}) }),
           (rows) =>
             rows.map((t) => ({
               chatId: t.documentId,

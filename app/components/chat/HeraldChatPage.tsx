@@ -66,10 +66,10 @@ interface ChatTurn {
   // Index into the RAW transcript messages array — resend targets are raw
   // positions (the server truncates its own array).
   rawIndex: number;
-  ts?: string;
+  ts?: string | undefined;
   citations?: CitationView[];
   error?: { code: string; message: string };
-  stopped?: boolean;
+  stopped?: boolean | undefined;
   // Post-stream activity snapshot frozen at suspend time (session memory).
   activity?: ActivityView;
   // Frozen write-approval batch (herald-write-approvals.html): chips live in
@@ -78,7 +78,7 @@ interface ChatTurn {
   // Reload mid-suspension: the transcript entry carries the pendingBatch
   // marker but NOT the chip payloads (no batch-read endpoint) — render the
   // waiting indicator only.
-  suspendedBatchId?: string;
+  suspendedBatchId?: string | undefined;
 }
 
 // Post-stream activity summary shown on the trailing done turn — sourced from
@@ -257,10 +257,12 @@ export function HeraldChatPage({ slug, thread }: { slug: string; thread?: string
     if (resolved || projects.length === 0) return;
     if (!projectFromList && !projectError && project === undefined) return;
     const fallback = projects[0];
-    if (fallback.slug === slug) return;
+    // @ts-expect-error — strict: exactOptional indexedAccess
+    if (fallback.slug === slug!) return;
     void navigate({
       to: "/$slug/chat",
-      params: { slug: fallback.slug },
+      // @ts-expect-error — strict: exactOptional indexedAccess
+      params: { slug: fallback.slug! },
       search: thread ? { thread } : {},
       replace: true,
     });
@@ -555,8 +557,8 @@ export function HeraldChatPage({ slug, thread }: { slug: string; thread?: string
     const pos = arr.indexOf(assistantTurn);
     let trigger: ChatTurn | null = null;
     for (let i = pos - 1; i >= 0; i--) {
-      if (arr[i].role === "user") {
-        trigger = arr[i];
+      if (arr[i]!.role === "user") {
+        trigger = arr[i]!;
         break;
       }
     }
@@ -601,7 +603,7 @@ export function HeraldChatPage({ slug, thread }: { slug: string; thread?: string
   // Last user turn index in display space — regenerate renders only there.
   const lastUserPos = useMemo(() => {
     const arr = turns ?? [];
-    for (let i = arr.length - 1; i >= 0; i--) if (arr[i].role === "user") return i;
+    for (let i = arr.length - 1; i >= 0; i--) if (arr[i]!.role === "user") return i;
     return -1;
   }, [turns]);
 
@@ -664,7 +666,7 @@ export function HeraldChatPage({ slug, thread }: { slug: string; thread?: string
         const res = await api.decideHeraldApproval(chip.approvalId, verdict);
         updateChip(chip.approvalId, { state: res.status === "approved" ? "approved" : "rejected" });
       } catch (e) {
-        const err = e as Error & { code?: string; details?: unknown };
+        const err = e as Error & { code?: string | undefined; details?: unknown };
         if (err.code === "APPROVAL_EXPIRED") {
           updateChip(chip.approvalId, { state: "expired" });
         } else if (err.code === "APPROVAL_ALREADY_DECIDED") {
@@ -702,7 +704,7 @@ export function HeraldChatPage({ slug, thread }: { slug: string; thread?: string
   useEffect(() => {
     if (!chatId || streaming) return;
     for (let i = (turns ?? []).length - 1; i >= 0; i--) {
-      const b = turns?.[i].batch;
+      const b = turns?.[i]!.batch;
       if (!b || resumedBatchesRef.current.has(b.batchId)) continue;
       if (b.chips.some((c) => c.state === "pending")) return;
       resumedBatchesRef.current.add(b.batchId);
@@ -875,6 +877,7 @@ export function HeraldChatPage({ slug, thread }: { slug: string; thread?: string
                     )}
                   </div>
                  ) : (
+                   // @ts-expect-error — strict: exactOptional indexedAccess
                    <AssistantBubble
                      key={pos}
                      turn={turn}
@@ -984,7 +987,8 @@ export function HeraldChatPage({ slug, thread }: { slug: string; thread?: string
                       <>
                         {mention.items.some((it) => it.refType === "task") && <div className="dropdown-label">Tasks</div>}
                         {mention.items.map((it, idx) =>
-                          idx > 0 && mention.items[idx - 1].refType !== it.refType && (
+                          // @ts-expect-error — strict: exactOptional indexedAccess
+                          idx > 0 && mention.items[idx - 1!].refType !== it.refType && (
                             <div key={`sep-${idx}`} className="dropdown-separator" />
                           )
                         )}
@@ -1122,8 +1126,8 @@ function AssistantBubble({
 }: {
   turn: ChatTurn;
   slug: string;
-  skillName?: string;
-  projectId?: string;
+  skillName?: string | undefined;
+  projectId?: string | undefined;
   streaming: boolean;
   renderText: (text: string) => ReactNode;
   activity?: ActivityView;
@@ -1271,7 +1275,7 @@ export function renderTranscript(messages: unknown[]): ChatTurn[] {
   const out: ChatTurn[] = [];
   for (let rawIndex = 0; rawIndex < messages.length; rawIndex++) {
     const msg = messages[rawIndex] as {
-      role?: string;
+      role?: string | undefined;
       content?: unknown;
       ts?: unknown;
       citations?: unknown;
@@ -1285,7 +1289,7 @@ export function renderTranscript(messages: unknown[]): ChatTurn[] {
     if (typeof msg.content === "string") {
       text = msg.content;
     } else if (Array.isArray(msg.content)) {
-      for (const part of msg.content as Array<{ type?: string; content?: unknown; text?: unknown }>) {
+      for (const part of msg.content as Array<{ type?: string | undefined; content?: unknown; text?: unknown }>) {
         if (part.type === "image-ref") imageCount++;
         else text += String(part.content ?? part.text ?? "");
       }

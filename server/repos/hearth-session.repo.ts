@@ -24,7 +24,7 @@ export class HearthSessionRepo extends Effect.Service<HearthSessionRepo>()("Lexa
         documentType,
         documentId,
         runtimeId
-      ).pipe(Effect.map((rows) => rows[0] ?? null));
+      ).pipe(Effect.map((rows) => rows[0]! ?? null));
 
     return {
       upsert: (input: HearthSessionInput): Effect.Effect<void, ConstraintViolation | DbError> =>
@@ -80,7 +80,7 @@ export class HearthSessionRepo extends Effect.Service<HearthSessionRepo>()("Lexa
           documentType,
           documentId,
           runtimeId
-        ).pipe(Effect.map((rows) => (rows[0]?.c ?? 0) > 0)),
+        ).pipe(Effect.map((rows) => (rows[0]!?.c ?? 0) > 0)),
     };
   }),
 }) {}

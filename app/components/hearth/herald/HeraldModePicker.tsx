@@ -12,7 +12,7 @@ export type HearthMode = HearthEngine;
 export function HeraldModePicker({ mode, onChange, disabled }: {
   mode: HearthMode;
   onChange: (mode: HearthMode) => void;
-  disabled?: boolean;
+  disabled?: boolean | undefined;
 }) {
   const optionStyle = (selected: boolean): React.CSSProperties => ({
     height: 22,
@@ -63,7 +63,7 @@ export function EngineToggle({ enabled, mode, onChange, disabled }: {
   enabled: boolean;
   mode: HearthMode;
   onChange: (mode: HearthMode) => void;
-  disabled?: boolean;
+  disabled?: boolean | undefined;
 }) {
   if (!enabled) return null;
   return <HeraldModePicker mode={mode} onChange={onChange} disabled={disabled} />;

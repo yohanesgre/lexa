@@ -74,7 +74,8 @@ describe("HeraldApprovalBatch (herald-write-approvals.html)", () => {
 
     const mixed = render(
       <HeraldApprovalBatch
-        chips={[chips[0], { ...chips[1], state: "approved" }, { ...chips[2], state: "rejected" }]}
+        // @ts-expect-error — strict: exactOptional indexedAccess
+        chips={[chips[0]!, { ...chips[1]!, state: "approved" }!, { ...chips[2], state: "rejected" }]}
         locked={false}
         onDecide={onDecide}
         onApproveAll={onApproveAll}

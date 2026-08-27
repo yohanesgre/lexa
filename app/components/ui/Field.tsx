@@ -16,11 +16,11 @@ export function useFieldContext(): FieldContextValue {
 
 export interface FieldProps {
   label?: React.ReactNode;
-  htmlFor?: string;
+  htmlFor?: string | undefined;
   hint?: React.ReactNode;
   error?: React.ReactNode;
   children: React.ReactNode;
-  className?: string;
+  className?: string | undefined;
 }
 
 export function Field({ label, htmlFor, hint, error, children, className }: FieldProps) {

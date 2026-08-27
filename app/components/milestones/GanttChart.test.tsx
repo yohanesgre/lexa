@@ -94,7 +94,7 @@ describe("GanttChart", () => {
     const bottoms = [...guides].map((g) => parseFloat((g as HTMLElement).style.bottom));
     expect(bottoms[0]).toBe(bottoms[1]); // s1's start/end pair
     expect(bottoms[2]).toBe(bottoms[3]); // s2's pair
-    expect(bottoms[0]).toBeGreaterThan(bottoms[2]);
+    expect(bottoms[0]).toBeGreaterThan(bottoms[2]!);
     // no guidelines inside lanes — they live at the canvas level
     for (const lane of canvas.querySelectorAll(".tl-lane")) {
       expect(lane.querySelectorAll(".tl-guideline")).toHaveLength(0);

@@ -4,7 +4,7 @@ export interface SelectInputProps
   extends Omit<React.SelectHTMLAttributes<HTMLSelectElement>, "onChange" | "children"> {
   value: string;
   onChange: (value: string) => void;
-  invalid?: boolean;
+  invalid?: boolean | undefined;
   children: React.ReactNode;
 }
 

@@ -302,10 +302,10 @@ describe("HeraldThreadRepo chat titles + history", () => {
 
         // Mid truncation: keep [q0, a0], drop the rest.
         const mid = yield* repo.truncateChatFrom("c1", "u1", 2);
-        expect(mid.messages).toEqual([msgs[0], msgs[1]]);
+        expect(mid.messages).toEqual([msgs[0]!, msgs[1]!]);
         // fromIndex === length → no-op (nothing to drop).
         const atEnd = yield* repo.truncateChatFrom("c1", "u1", 2);
-        expect(atEnd.messages).toEqual([msgs[0], msgs[1]]);
+        expect(atEnd.messages).toEqual([msgs[0]!, msgs[1]!]);
         // fromIndex 0 → empty transcript.
         const zero = yield* repo.truncateChatFrom("c1", "u1", 0);
         expect(zero.messages).toEqual([]);

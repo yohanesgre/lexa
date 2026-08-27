@@ -59,11 +59,11 @@ export class SwimlaneRepo extends Effect.Service<SwimlaneRepo>()("Lexa/SwimlaneR
 
       maxPosition: (projectId: string): Effect.Effect<number, DbError> =>
         queryAll<{ mp: number }>(db, `SELECT COALESCE(MAX(position), -1) as mp FROM swimlanes WHERE project_id = ?`, projectId)
-          .pipe(Effect.map((rows) => rows[0]?.mp ?? -1)),
+          .pipe(Effect.map((rows) => rows[0]!?.mp ?? -1)),
 
       countTasks: (swimlaneId: string): Effect.Effect<number, DbError> =>
         queryAll<{ c: number }>(db, `SELECT COUNT(*) as c FROM tasks WHERE swimlane_id = ?`, swimlaneId).pipe(
-          Effect.map((rows) => rows[0]?.c ?? 0)
+          Effect.map((rows) => rows[0]!?.c ?? 0)
         ),
 
       countDueAfter: (swimlaneId: string, dueAt: string): Effect.Effect<number, DbError> =>
@@ -72,7 +72,7 @@ export class SwimlaneRepo extends Effect.Service<SwimlaneRepo>()("Lexa/SwimlaneR
           `SELECT COUNT(*) as c FROM tasks WHERE swimlane_id = ? AND due_at IS NOT NULL AND due_at > ? AND archived_at IS NULL`,
           swimlaneId,
           dueAt
-        ).pipe(Effect.map((rows) => rows[0]?.c ?? 0)),
+        ).pipe(Effect.map((rows) => rows[0]!?.c ?? 0)),
 
       findFirstDueAfter: (swimlaneId: string, dueAt: string): Effect.Effect<{ id: string; title: string } | null, DbError> =>
         queryAll<{ id: string; title: string }>(
@@ -80,7 +80,7 @@ export class SwimlaneRepo extends Effect.Service<SwimlaneRepo>()("Lexa/SwimlaneR
           `SELECT id, title FROM tasks WHERE swimlane_id = ? AND due_at IS NOT NULL AND due_at > ? AND archived_at IS NULL ORDER BY due_at ASC LIMIT 1`,
           swimlaneId,
           dueAt
-        ).pipe(Effect.map((rows) => rows[0] ?? null)),
+        ).pipe(Effect.map((rows) => rows[0]! ?? null)),
     };
   }),
 }) {}

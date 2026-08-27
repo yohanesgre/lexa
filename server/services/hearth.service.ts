@@ -330,7 +330,7 @@ export class HearthService extends Effect.Service<HearthService>()("Lexa/HearthS
             extraPrompt: input.extraPrompt ?? "",
             selection: input.selection,
             docContext,
-            runtimeId: input.runtimeId,
+            ...(input.runtimeId !== undefined ? { runtimeId: input.runtimeId } : {}),
           });
         }),
 

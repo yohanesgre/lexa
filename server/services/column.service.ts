@@ -31,10 +31,10 @@ export class ColumnService extends Effect.Service<ColumnService>()("Lexa/ColumnS
             projectId: input.projectId,
             name: input.name,
             position: maxPos + 1,
-            wipLimit: input.wipLimit,
-            requiredFields: input.requiredFields,
-            color: input.color,
-            githubState: input.githubState,
+            ...(input.wipLimit !== undefined ? { wipLimit: input.wipLimit } : {}),
+            ...(input.requiredFields !== undefined ? { requiredFields: input.requiredFields } : {}),
+            ...(input.color !== undefined ? { color: input.color } : {}),
+            ...(input.githubState !== undefined ? { githubState: input.githubState } : {}),
           });
           yield* Effect.logInfo(`[Column] Created ${col.id} in project ${col.projectId}`);
           return col;

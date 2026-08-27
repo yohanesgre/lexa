@@ -4,7 +4,7 @@ import * as api from "../api";
 import { useToast } from "../../components/ui/Toast";
 
 function toastMessage(err: unknown): string {
-  const e = err as { code?: string; message?: string };
+  const e = err as { code?: string | undefined; message?: string };
   return e.message || "Something went wrong";
 }
 
@@ -36,7 +36,7 @@ export function useUpdateProvider() {
   const qc = useQueryClient();
   const toast = useToast();
   return useMutation({
-    mutationFn: ({ id, ...input }: { id: string; label?: string; baseUrl?: string; apiKey?: string }) => api.updateHeraldProvider(id, input),
+    mutationFn: ({ id, ...input }: { id: string; label?: string | undefined; baseUrl?: string | undefined; apiKey?: string }) => api.updateHeraldProvider(id, input),
     onSuccess: (provider) => {
       qc.setQueryData<HeraldProvider[]>(["herald-providers"], (old) => (old ?? []).map((p) => (p.id === provider.id ? provider : p)));
       toast.push("success", "Provider updated");
@@ -102,7 +102,7 @@ export function useHeraldUsage() {
   });
 }
 
-export function useHeraldCalls(params?: { projectId?: string; limit?: number }) {
+export function useHeraldCalls(params?: { projectId?: string | undefined; limit?: number }) {
   return useQuery({
     queryKey: ["herald-calls", params?.projectId ?? null, params?.limit ?? null],
     queryFn: () => api.listHeraldCalls(params).then((r) => r.data),
@@ -115,7 +115,7 @@ export function useUpdateProviderModel(providerId: string) {
   const qc = useQueryClient();
   const toast = useToast();
   return useMutation({
-    mutationFn: ({ modelId, ...patch }: { modelId: string; enabled?: boolean; priority?: number }) =>
+    mutationFn: ({ modelId, ...patch }: { modelId: string; enabled?: boolean | undefined; priority?: number }) =>
       api.updateHeraldProviderModel(providerId, modelId, patch),
     onSuccess: (model) => {
       qc.setQueryData<HeraldProvider[]>(["herald-providers"], (old) => {

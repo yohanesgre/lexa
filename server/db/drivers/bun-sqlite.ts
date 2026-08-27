@@ -16,13 +16,13 @@ import type { DbDriver, DbStmt, LexaRow, SqlParam, StmtResult } from "../driver"
 class BunSqliteStmt implements DbStmt {
   constructor(private readonly stmt: Statement) {}
   all<T extends LexaRow = LexaRow>(...params: SqlParam[]): Promise<T[]> {
-    return Promise.resolve(this.stmt.all(...(params as unknown[])) as T[]);
+    return Promise.resolve(this.stmt.all(...params) as T[]);
   }
   first<T extends LexaRow = LexaRow>(...params: SqlParam[]): Promise<T | null> {
-    return Promise.resolve((this.stmt.get(...(params as unknown[])) ?? null) as T | null);
+    return Promise.resolve((this.stmt.get(...params) ?? null) as T | null);
   }
   run(...params: SqlParam[]): Promise<StmtResult> {
-    const r = this.stmt.run(...(params as unknown[]));
+    const r = this.stmt.run(...params);
     return Promise.resolve({ changes: r.changes, lastInsertRowid: r.lastInsertRowid });
   }
 }
@@ -36,11 +36,11 @@ export function createBunSqliteDriver(db: Database): DbDriver {
     },
     async batch(stmts: { sql: string; params: SqlParam[] }[]): Promise<void> {
       if (txDepth > 0) {
-        for (const s of stmts) db.prepare(s.sql).run(...(s.params as unknown[]));
+        for (const s of stmts) db.prepare(s.sql).run(...s.params);
         return;
       }
       db.transaction(() => {
-        for (const s of stmts) db.prepare(s.sql).run(...(s.params as unknown[]));
+        for (const s of stmts) db.prepare(s.sql).run(...s.params);
       })();
     },
     async transaction<T>(fn: (tx: DbDriver) => Promise<T>): Promise<T> {

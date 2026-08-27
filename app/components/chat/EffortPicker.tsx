@@ -16,7 +16,7 @@ const LEVELS: { value: HeraldReasoningEffort; label: string }[] = [
 export function EffortPicker({ effort, projectEffort, disabled = false, align = "down", onChange }: {
   effort: HeraldReasoningEffort | "";
   projectEffort: HeraldReasoningEffort | null;
-  disabled?: boolean;
+  disabled?: boolean | undefined;
   /** "down" (default) opens below the trigger; "up" opens above — use "up"
    *  on mobile where the button sits near the bottom of the viewport and a
    *  downward menu would run off-screen. */

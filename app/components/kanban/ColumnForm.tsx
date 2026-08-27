@@ -12,13 +12,13 @@ export interface ColumnFormProps {
   onClose: () => void;
   onSubmit: (input: {
     name: string;
-    color?: string | null;
+    color?: string | null | undefined;
     wipLimit?: number | null;
     requiredFields?: string[];
-    githubState?: string | null;
-    isDone?: boolean;
+    githubState?: string | null | undefined;
+    isDone?: boolean | undefined;
   }) => void;
-  zIndex?: number;
+  zIndex?: number | undefined;
 }
 
 const colors: { value: string | null; label: string; hex: string }[] = [

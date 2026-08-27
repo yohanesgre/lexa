@@ -5,7 +5,7 @@ import type { HeraldByModelRow } from "../../lib/herald-usage.query";
 export function PriceEditor({ byModel }: { byModel?: HeraldByModelRow[] }) {
   const { data: priceData, isLoading } = useHeraldPrices();
   const putPrice = usePutHeraldPrice();
-  const [edits, setEdits] = useState<Record<string, { prompt_price: string; completion_price: string; error?: string }>>({});
+  const [edits, setEdits] = useState<Record<string, { prompt_price: string; completion_price: string; error?: string | undefined }>>({});
 
   const prices: HeraldPriceRow[] = (priceData as unknown as { data: HeraldPriceRow[] })?.data ?? (priceData as unknown as HeraldPriceRow[]) ?? [];
   const priceMap = new Map(prices.map((p) => [p.model, p]));
@@ -42,10 +42,10 @@ export function PriceEditor({ byModel }: { byModel?: HeraldByModelRow[] }) {
       return s.slice(dot + 1).length <= 6;
     };
     if (!Number.isFinite(pp) || pp < 0 || !decimalsOk(pp) || !Number.isFinite(cp) || cp < 0 || !decimalsOk(cp)) {
-      setEdits((prev) => ({ ...prev, [model]: { ...prev[model], error: "Invalid number (≥0, max 6 decimals)" } }));
+      setEdits((prev) => ({ ...prev, [model]: { ...prev[model]!, error: "Invalid number (≥0, max 6 decimals)" } }));
       return;
     }
-    setEdits((prev) => ({ ...prev, [model]: { ...prev[model], error: undefined } }));
+    setEdits((prev) => ({ ...prev, [model]: { ...prev[model]!, error: undefined } }));
     putPrice.mutate({ model, prompt_price: pp, completion_price: cp });
   };
 

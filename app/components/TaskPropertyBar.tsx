@@ -18,7 +18,7 @@ interface TaskPropertyBarProps {
   setSelectedColumnId: (v: string) => void;
   selectedSwimlaneId: string;
   setSelectedSwimlaneId: (v: string) => void;
-  onUpdate: (id: string, data: { columnId?: string; priority?: string; type?: string; assignees?: string[]; dueAt?: string | null }) => void;
+  onUpdate: (id: string, data: { columnId?: string | undefined; priority?: string | undefined; type?: string | undefined; assignees?: string[]; dueAt?: string | null }) => void;
   onMove: (id: string, data: { columnId: string; swimlaneId: string }) => void;
   createColumnId: string;
   setCreateColumnId: (v: string) => void;

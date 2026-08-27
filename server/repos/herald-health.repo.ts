@@ -44,16 +44,18 @@ export class HeraldHealthRepo extends Effect.Service<HeraldHealthRepo>()("Lexa/H
       getOrNull: (providerId: string): Effect.Effect<HeraldHealthRow | null, DbError> =>
         Effect.gen(function* () {
           const row = yield* queryFirst<HeraldHealthRow>(db, `SELECT * FROM herald_provider_health WHERE provider_id = ?`, providerId).pipe(
-            Effect.catchTag("RowNotFound", () => Effect.succeed(null as unknown as HeraldHealthRow)),
-            Effect.catchTag("DbError", (e) => Effect.fail(e))
+            Effect.catchTags({
+              RowNotFound: () => Effect.succeed<HeraldHealthRow | null>(null),
+              DbError: (e) => Effect.fail(e),
+            })
           );
-          return row as HeraldHealthRow | null;
+          return row;
         }),
 
       upsert: (row: { providerId: string; failureCount?: number; circuitState?: HeraldHealthRow["circuit_state"]; openedAt?: string | null; lastProbeAt?: string | null; consecutiveFailures?: number }): Effect.Effect<HeraldHealthRow, ConstraintViolation | DbError | RowNotFound> =>
         Effect.gen(function* () {
           const existing = yield* queryFirst<HeraldHealthRow>(db, `SELECT * FROM herald_provider_health WHERE provider_id = ?`, row.providerId).pipe(
-            Effect.catchTag("RowNotFound", () => Effect.succeed(null as unknown as HeraldHealthRow))
+            Effect.catchTag("RowNotFound", () => Effect.succeed<HeraldHealthRow | null>(null))
           );
           if (existing) {
             const failureCount = row.failureCount ?? existing.failure_count;

@@ -81,7 +81,7 @@ export class HeraldModelsRepo extends Effect.Service<HeraldModelsRepo>()("Lexa/H
             const rows = yield* queryAll<HeraldModelDbRow>(db, `SELECT * FROM herald_models WHERE provider_id = ? ORDER BY priority ASC, id ASC`, providerId);
             const existingIds = new Set(rows.map((r) => r.id));
             if (orderedIds.length !== rows.length || orderedIds.some((id) => !existingIds.has(id))) {
-              return yield* Effect.fail(new RowNotFound({ table: "herald_models" }) as unknown as never);
+              return yield* new RowNotFound({ table: "herald_models" });
             }
             const tempOffset = 100000;
             for (let i = 0; i < orderedIds.length; i++) {

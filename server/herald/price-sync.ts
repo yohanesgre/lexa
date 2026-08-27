@@ -18,7 +18,7 @@ export const syncModelPrices = (): Effect.Effect<number, ProviderUnreachable, Sq
     const repo = yield* HeraldModelPricesRepo;
     const controller = new AbortController();
     const t = setTimeout(() => controller.abort(), 15_000);
-    if (typeof (t as unknown as { unref?: () => void }).unref === "function") (t as unknown as { unref: () => void }).unref();
+    if (typeof (t as { unref?: () => void }).unref === "function") (t as { unref: () => void }).unref();
     try {
       const res = yield* Effect.tryPromise({
         try: () => fetch("https://openrouter.ai/api/v1/models", { signal: controller.signal }),

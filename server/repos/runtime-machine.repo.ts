@@ -76,7 +76,7 @@ export class RuntimeMachineRepo extends Effect.Service<RuntimeMachineRepo>()("Le
             input.mintedSecret
           );
           const rows = yield* queryAll<MachineRow>(db, `SELECT * FROM machines WHERE id = ?`, input.id);
-          const row = rows[0];
+          const row = rows[0]!;
           if (!row) return yield* Effect.fail(new DbError({ message: "machine row missing after register" }));
           return { _tag: "created", machine: rowToMachine(row) };
         }),
@@ -100,7 +100,7 @@ export class RuntimeMachineRepo extends Effect.Service<RuntimeMachineRepo>()("Le
             JSON.stringify(input.clis ?? [])
           );
           const rows = yield* queryAll<MachineRow>(db, `SELECT * FROM machines WHERE id = ?`, input.id);
-          const row = rows[0];
+          const row = rows[0]!;
           if (!row) return yield* Effect.fail(new DbError({ message: "machine row missing after heartbeat" }));
           return rowToMachine(row);
         }),

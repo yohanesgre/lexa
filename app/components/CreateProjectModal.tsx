@@ -10,7 +10,7 @@ interface CreateProjectModalProps {
   open: boolean;
   pending: boolean;
   onClose: () => void;
-  onSubmit: (input: { name: string; description?: string; teamId: string | null }) => void;
+  onSubmit: (input: { name: string; description?: string | undefined; teamId: string | null }) => void;
 }
 
 export function CreateProjectModal({ open, pending, onClose, onSubmit }: CreateProjectModalProps) {

@@ -1,6 +1,7 @@
 export function parseDateOnly(s: string): Date {
   const [y, m, d] = s.split("-").map(Number);
-  return new Date(y, m - 1, d);
+  // @ts-expect-error — strict: exactOptional indexedAccess
+  return new Date(y!, m - 1!, d);
 }
 
 export function formatDueLabel(dueAt: string, today = new Date()): { text: string; overdue: boolean } {

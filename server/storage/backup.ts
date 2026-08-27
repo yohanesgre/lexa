@@ -13,7 +13,7 @@ export const DEFAULT_BACKUP_RETENTION = 14;
 // chronological sort for retention.
 export function parseBackupStamp(key: string): string | null {
   const m = /^backups\/lexa-(.+)\.db\.gz$/.exec(key);
-  return m ? m[1] : null;
+  return m ? m[1]! : null;
 }
 
 function stampNow(): string {

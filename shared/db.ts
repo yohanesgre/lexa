@@ -2,6 +2,7 @@
 // Used by server repos/services only. Frontend never imports this file.
 
 import type { TipTapDoc, ISODate, RuntimeAgent, RuntimeModel, ActorKind, ActivityType, ActivityEvent, TaskComment, Swimlane, Milestone, DomainProject, Runtime } from "./types";
+import { parseTipTapDoc } from "./types";
 
 // Runtime with the owning team exposed (wire-only — the shared Runtime type
 // stays team-free per the contract; the FE reads teamId off the wire).
@@ -191,7 +192,7 @@ export function rowToWikiPage(row: WikiPageRow): {
 } {
   return {
     ...rowToWikiPageMeta(row),
-    content: JSON.parse(row.content) as TipTapDoc,
+    content: parseTipTapDoc(row.content),
     createdAt: row.created_at,
   };
 }
@@ -215,7 +216,7 @@ export function rowToWikiPageRevision(row: WikiPageRevisionRow): {
     pageId: row.page_id,
     title: row.title,
     slug: row.slug,
-    content: JSON.parse(row.content) as TipTapDoc,
+    content: parseTipTapDoc(row.content),
     contentText: row.content_text,
     saveType: row.save_type,
     createdAt: row.created_at,
@@ -284,7 +285,7 @@ export interface TaskRow {
 export function rowToTask(row: TaskRow, columnGithubState?: "open" | "closed" | null): {
   id: string; key: string; projectId: string; columnId: string; swimlaneId: string; title: string; description: TipTapDoc; priority: string; type: string; assignees: string[]; position: string; dueAt: string | null; githubs: { issueId: string; issueNumber: number; repo: string; syncedState: "open" | "closed" | null; url: string; outOfSync: boolean; pushFailed: boolean }[]; archivedAt: ISODate | null; createdAt: ISODate; updatedAt: ISODate;
 } {
-  return taskFromRow(row, columnGithubState, JSON.parse(row.description) as TipTapDoc);
+  return taskFromRow(row, columnGithubState, parseTipTapDoc(row.description));
 }
 
 // Slim rows (board/list paths select no description) map to an empty doc —
@@ -676,7 +677,7 @@ export function rowToComment(r: CommentRow): TaskComment {
     authorId: r.author_id,
     authorKind: r.author_kind,
     authorLabel: r.author_label,
-    body: JSON.parse(r.body) as TipTapDoc,
+    body: parseTipTapDoc(r.body),
     viaHerald: r.via_herald === 1,
     editedAt: r.edited_at,
     deletedAt: r.deleted_at,

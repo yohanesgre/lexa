@@ -35,7 +35,7 @@ describe("MilestoneRepo", () => {
     expect(created.name).toBe("v1");
     const found = await Effect.runPromise(repo.findByProject("p1"));
     expect(found).toHaveLength(1);
-    expect(found[0].sprintCount).toBe(0);
+    expect(found[0]!.sprintCount).toBe(0);
     const updated = await Effect.runPromise(repo.update("ms1", { name: "v1.0", dueAt: "2026-08-30" }));
     expect(updated.name).toBe("v1.0");
     expect(updated.dueAt).toBe("2026-08-30");
@@ -50,8 +50,8 @@ describe("MilestoneRepo", () => {
              VALUES ('sp1','p1','Sprint 1',0,'sprint','ms1',NULL),
                     ('sp2','p1','Sprint 2',1,'sprint','ms1','2026-09-01 00:00:00')`);
     const found = await Effect.runPromise(repo.findByProject("p1"));
-    expect(found[0].sprintCount).toBe(2);
-    expect(found[0].archivedSprintCount).toBe(1);
+    expect(found[0]!.sprintCount).toBe(2);
+    expect(found[0]!.archivedSprintCount).toBe(1);
   });
 
   it("countSprints and findByMilestone see loose + scoped lanes", async () => {
@@ -64,7 +64,7 @@ describe("MilestoneRepo", () => {
     expect(await Effect.runPromise(repo.countSprints("ms1"))).toBe(1);
     const lanes = await Effect.runPromise(repo.findByMilestone("ms1"));
     expect(lanes.map((l) => l.id)).toEqual(["sp1"]);
-    expect(lanes[0].milestoneId).toBe("ms1");
+    expect(lanes[0]!.milestoneId).toBe("ms1");
   });
 
   it("update with no fields is a no-op read; unknown id → RowNotFound", async () => {

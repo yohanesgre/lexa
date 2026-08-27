@@ -81,14 +81,14 @@ describe("ActivityService", () => {
         // page 1 limit 2, ascending: [comment 01-02, event 01-03] — newest two
         const page1 = yield* svc.listMerged("t1", null, 2);
         expect(page1.items.map((i) => i.kind)).toEqual(["comment", "event"]);
-        expect(page1.items[0].kind === "comment" && page1.items[0].authorLabel === "Maria").toBe(true);
-        expect(page1.items[1].kind === "event" && page1.items[1].type === "moved").toBe(true);
+        expect(page1.items[0]!.kind === "comment" && page1.items[0]!.authorLabel === "Maria").toBe(true);
+        expect(page1.items[1]!.kind === "event" && page1.items[1]!.type === "moved").toBe(true);
         expect(page1.nextCursor).not.toBeNull();
         expect(page1.nextCursor!.endsWith("|comment")).toBe(true);
         // page 2: the remaining oldest event
         const page2 = yield* svc.listMerged("t1", page1.nextCursor, 2);
         expect(page2.items.map((i) => i.kind)).toEqual(["event"]);
-        expect(page2.items[0].kind === "event" && page2.items[0].type === "created").toBe(true);
+        expect(page2.items[0]!.kind === "event" && page2.items[0]!.type === "created").toBe(true);
         expect(page2.nextCursor).toBeNull();
       })
     );

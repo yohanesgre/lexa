@@ -11,7 +11,7 @@ import type { RecentHearthTask, HearthHistoryPage } from "./api";
 import { useToast } from "../components/ui/Toast";
 
 function toastMessage(err: unknown): string {
-  const e = err as { code?: string; message?: string };
+  const e = err as { code?: string | undefined; message?: string };
   return e.message || "Something went wrong";
 }
 
@@ -76,7 +76,7 @@ export function useUpdateProject() {
   const qc = useQueryClient();
   const toast = useToast();
   return useMutation({
-    mutationFn: ({ slug, ...input }: { slug: string; name?: string; description?: string }) => api.updateProject(slug, input),
+    mutationFn: ({ slug, ...input }: { slug: string; name?: string | undefined; description?: string }) => api.updateProject(slug, input),
     onSuccess: (project) => {
       qc.setQueryData<Project[]>(["projects"], (old) => {
         if (!old) return [project];
@@ -270,7 +270,7 @@ export function useUpdateTask(slug: string) {
   const qc = useQueryClient();
   const toast = useToast();
   return useMutation({
-    mutationFn: ({ id, ...input }: { id: string; title?: string; description?: TipTapDoc; priority?: string; type?: string; assignees?: string[]; dueAt?: string | null }) =>
+    mutationFn: ({ id, ...input }: { id: string; title?: string | undefined; description?: TipTapDoc; priority?: string | undefined; type?: string | undefined; assignees?: string[]; dueAt?: string | null }) =>
       api.updateTask(slug, id, input),
     onSuccess: ({ data: task, activity }) => {
       qc.setQueryData(["tasks", slug, task.id], task);
@@ -317,7 +317,7 @@ export function useMoveTask(slug: string) {
   const qc = useQueryClient();
   const toast = useToast();
   return useMutation({
-    mutationFn: ({ id, ...target }: { id: string; columnId: string; swimlaneId: string; beforeTaskId?: string; afterTaskId?: string; clearDueAt?: boolean }) =>
+    mutationFn: ({ id, ...target }: { id: string; columnId: string; swimlaneId: string; beforeTaskId?: string | undefined; afterTaskId?: string | undefined; clearDueAt?: boolean }) =>
       api.moveTask(slug, id, target),
     onSuccess: ({ data: task, activity }) => {
       // Keep both board caches in sync with the authoritative move response.
@@ -998,7 +998,7 @@ export function useUpdateGithubSettings() {
   const qc = useQueryClient();
   const toast = useToast();
   return useMutation({
-    mutationFn: (input: { appId: string; privateKey?: string; webhookSecret?: string }) => api.updateGithubSettings(input),
+    mutationFn: (input: { appId: string; privateKey?: string | undefined; webhookSecret?: string }) => api.updateGithubSettings(input),
     onSuccess: (settings) => {
       // Mutation response is authoritative — update the cache from it, never refetch.
       qc.setQueryData(["github-settings"], settings);
@@ -1429,7 +1429,7 @@ export function useUpdateRuntime() {
   const qc = useQueryClient();
   const toast = useToast();
   return useMutation({
-    mutationFn: ({ id, patch }: { id: string; patch: { name?: string; provider?: "opencode" | "hermes" | "command-code"; agent?: string; model?: string; printLogs?: boolean; logLevel?: "" | "DEBUG" | "INFO" | "WARN" | "ERROR"; extraArgs?: string[] } }) => api.updateRuntime(id, patch),
+    mutationFn: ({ id, patch }: { id: string; patch: { name?: string | undefined; provider?: "opencode" | "hermes" | "command-code"; agent?: string | undefined; model?: string | undefined; printLogs?: boolean | undefined; logLevel?: "" | "DEBUG" | "INFO" | "WARN" | "ERROR"; extraArgs?: string[] } }) => api.updateRuntime(id, patch),
     onSuccess: (runtime) => {
       qc.setQueryData<Runtime[]>(["hearth-runtimes"], (rows) => rows?.map((r) => (r.id === runtime.id ? runtime : r)));
       toast.push("success", "Runtime updated — applies on the next Hearth task");
@@ -1542,7 +1542,7 @@ export function useCancelHearthTask() {
 // Polls while any row on the current page is queued/running so active runs
 // update in place; idle pages refresh on a slow heartbeat.
 export function useHearthTaskHistory(
-  filters: { slug?: string; status?: HearthTask["status"]; skillId?: string; documentType?: "task" | "wiki"; limit?: number },
+  filters: { slug?: string | undefined; status?: HearthTask["status"]; skillId?: string | undefined; documentType?: "task" | "wiki"; limit?: number },
   cursor: string | null
 ) {
   return useQuery({
@@ -1593,7 +1593,7 @@ export function useUpdateHearthAgent() {
   const qc = useQueryClient();
   const toast = useToast();
   return useMutation({
-    mutationFn: ({ id, patch }: { id: string; patch: { name?: string; description?: string; instructions?: string } }) => api.updateHearthAgent(id, patch),
+    mutationFn: ({ id, patch }: { id: string; patch: { name?: string | undefined; description?: string | undefined; instructions?: string } }) => api.updateHearthAgent(id, patch),
     onSuccess: (agent) => {
       qc.setQueryData<LexaAgent[]>(["agents"], (rows) => rows?.map((r) => (r.id === agent.id ? agent : r)));
       toast.push("success", `Agent '${agent.name}' saved`);
@@ -1668,7 +1668,7 @@ export function useUpdateHearthSkill() {
   const qc = useQueryClient();
   const toast = useToast();
   return useMutation({
-    mutationFn: ({ id, patch }: { id: string; patch: { name?: string; description?: string; instructions?: string } }) => api.updateHearthSkill(id, patch),
+    mutationFn: ({ id, patch }: { id: string; patch: { name?: string | undefined; description?: string | undefined; instructions?: string } }) => api.updateHearthSkill(id, patch),
     onSuccess: (skill) => {
       qc.setQueryData<LexaSkill[]>(["skills"], (rows) => rows?.map((r) => (r.id === skill.id ? skill : r)));
       toast.push("success", `Skill '${skill.name}' saved`);
@@ -2059,7 +2059,7 @@ export function useUpdateHeraldChatMeta(projectId: string | undefined) {
   const qc = useQueryClient();
   const toast = useToast();
   return useMutation({
-    mutationFn: ({ chatId, ...patch }: { chatId: string; title?: string; pinned?: boolean }) =>
+    mutationFn: ({ chatId, ...patch }: { chatId: string; title?: string | undefined; pinned?: boolean }) =>
       api.updateHeraldChatMeta(chatId, patch),
     onSuccess: (_result, { chatId, title, pinned }) => {
       qc.setQueriesData<api.HeraldChatThreadSummary[]>({ queryKey: ["herald-chats", projectId] }, (old) => {

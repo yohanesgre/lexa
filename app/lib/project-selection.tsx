@@ -58,7 +58,7 @@ export function ProjectSelectionProvider({ children }: { children: React.ReactNo
     }
 
     if (projects.length > 0) {
-      setSelectedSlug(projects[0].slug);
+      setSelectedSlug(projects[0]!.slug);
     }
   }, [hydrated, isLoading, projects, selectedSlug]);
 

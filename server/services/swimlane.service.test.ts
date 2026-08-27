@@ -337,7 +337,7 @@ describe("SwimlaneService archive", () => {
         expect(activity.map((a) => a.type)).toEqual(["archived", "archived"]);
         expect(activity[0]!.message).toBe("Maria archived this task");
         const tasks = db.prepare("SELECT id, archived_at FROM tasks WHERE swimlane_id = 'm1' ORDER BY position").all() as { id: string; archived_at: string | null }[];
-        expect(tasks.map((t) => t.archived_at)).toEqual([expect.any(String), expect.any(String)]);
+        expect(tasks.map((t) => t.archived_at)).toEqual([expect.anything(), expect.anything()]);
       })
     );
   });

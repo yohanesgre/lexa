@@ -10,9 +10,10 @@ export class UrlBlocked extends Data.TaggedError("UrlBlocked")<{ reason: string 
 function isPrivateIpv4(host: string): boolean {
   const m = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(host);
   if (!m) return false;
-  const octets = [Number(m[1]), Number(m[2]), Number(m[3]), Number(m[4])];
+  const octets = [Number(m[1]!), Number(m[2]!), Number(m[3]!), Number(m[4]!)];
   if (octets.some((n) => n > 255)) return false;
-  const [a, b] = octets;
+  const a = octets[0]!; // length 4 guaranteed
+  const b = octets[1]!; // length 4 guaranteed
   if (a === 0 || a === 10 || a === 127) return true;
   if (a === 169 && b === 254) return true;
   if (a === 172 && b >= 16 && b <= 31) return true;

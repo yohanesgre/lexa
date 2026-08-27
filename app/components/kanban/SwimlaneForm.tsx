@@ -10,8 +10,8 @@ export interface SwimlaneFormProps {
   swimlane?: Swimlane | null;
   isOpen: boolean;
   onClose: () => void;
-  onSubmit: (input: { name: string; description?: string | null; dueAt?: string | null; startAt?: string | null; milestoneId?: string | null }) => void;
-  zIndex?: number;
+  onSubmit: (input: { name: string; description?: string | null | undefined; dueAt?: string | null | undefined; startAt?: string | null | undefined; milestoneId?: string | null }) => void;
+  zIndex?: number | undefined;
 }
 
 export function SwimlaneForm({ slug, swimlane, isOpen, onClose, onSubmit, zIndex = 70 }: SwimlaneFormProps) {

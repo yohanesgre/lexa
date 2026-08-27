@@ -9,8 +9,8 @@ export interface HeraldImage {
 
 export interface HeraldImageCaps {
   maxCount: number;
-  maxBytesEach?: number;
-  maxTotalBytes?: number;
+  maxBytesEach?: number | undefined;
+  maxTotalBytes?: number | undefined;
 }
 
 const ALLOWED_TYPES = ["image/png", "image/jpeg", "image/gif", "image/webp"];
@@ -66,9 +66,9 @@ export function HeraldImageAttach({ images, onChange, caps, hint, compact, disab
   hint: string;
   // Chat composer variant: bare icon button while empty (herald-chat.html
   // composer-footer).
-  compact?: boolean;
-  disabled?: boolean;
-  disabledTitle?: string;
+  compact?: boolean | undefined;
+  disabled?: boolean | undefined;
+  disabledTitle?: string | undefined;
 }) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [rejection, setRejection] = useState<string | null>(null);

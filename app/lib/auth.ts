@@ -12,8 +12,8 @@ export interface AuthSession {
   userId: string;
   expiresAt: string;
   createdAt: string;
-  ipAddress?: string | null;
-  userAgent?: string | null;
+  ipAddress?: string | null | undefined;
+  userAgent?: string | null | undefined;
 }
 
 export interface SessionResponse {
@@ -53,9 +53,9 @@ async function authRequest(path: string, body: unknown): Promise<unknown> {
     body: JSON.stringify(body),
   });
   if (!res.ok) {
-    const data = await res.json().catch(() => ({})) as { message?: string; error?: string; code?: string };
+    const data = await res.json().catch(() => ({})) as { message?: string | undefined; error?: string | undefined; code?: string };
     const err = new Error(data.message ?? data.error ?? `HTTP ${res.status}`) as Error & { code?: string };
-    err.code = data.code ?? (data.error ?? undefined);
+    err.code = data.code ?? (data.error ?? undefined!);
     throw err;
   }
   if (res.status === 204) return undefined;

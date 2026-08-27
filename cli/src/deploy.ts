@@ -58,17 +58,17 @@ function usage(): never {
 export class DeployError extends Data.TaggedError("DeployError")<{
   reason: string;
 }> {
-  get message(): string {
+  override get message(): string {
     return this.reason;
   }
 }
 
 export class CfApiError extends Data.TaggedError("CfApiError")<{
   status: number;
-  cfMessage?: string;
-  code?: number;
+  cfMessage?: string | undefined;
+  code?: number | undefined;
 }> {
-  get message(): string {
+  override get message(): string {
     return `Cloudflare API error: ${this.cfMessage ?? this.status}${this.code !== undefined ? ` (${this.code})` : ""}`;
   }
 }
@@ -204,7 +204,7 @@ const COMPOSE_MANAGED_KEYS = [
   "LXK_IMAGE_TAG",
 ];
 
-function composeEnvFor(flavor: Flavor, opts: { imageTag?: string } = {}): Record<string, string> {
+function composeEnvFor(flavor: Flavor, opts: { imageTag?: string | undefined } = {}): Record<string, string> {
   const env: Record<string, string> = { ...(process.env as Record<string, string>) };
   for (const key of COMPOSE_MANAGED_KEYS) delete env[key];
   env.COMPOSE_PROJECT_NAME = flavor.composeName;
@@ -212,7 +212,7 @@ function composeEnvFor(flavor: Flavor, opts: { imageTag?: string } = {}): Record
   return env;
 }
 
-export function runCompose(flavor: Flavor, opts: { imageTag?: string; clean?: boolean } = {}): Effect.Effect<void, DeployError, never> {
+export function runCompose(flavor: Flavor, opts: { imageTag?: string | undefined; clean?: boolean | undefined } = {}): Effect.Effect<void, DeployError, never> {
   return Effect.gen(function* () {
     if (!existsSync("docker-compose.yml")) {
       return yield* new DeployError({ reason: "  ERROR: run from the repo root (docker-compose.yml not found)" });
@@ -346,12 +346,12 @@ export const cmdDeploy = Effect.fn("LexaCli/cmdDeploy")(function* (
   if (accounts.length === 0) {
     return yield* new DeployError({ reason: "  ERROR: no Cloudflare accounts on this token — check the token permissions" });
   }
-  const account = accounts[0].id;
+  const account = accounts[0]!.id;
   const zones = (yield* cfFetch(cfToken, `/zones?name=${domain}`)) as Array<{ id: string }>;
   if (zones.length === 0) {
     return yield* new DeployError({ reason: `  ERROR: no Cloudflare zone for "${domain}" — does the domain point at this CF account?` });
   }
-  const zone = zones[0].id;
+  const zone = zones[0]!.id;
   console.log(`  Account: ${account}  Zone: ${zone}`);
 
   // Tunnel
@@ -359,7 +359,7 @@ export const cmdDeploy = Effect.fn("LexaCli/cmdDeploy")(function* (
   const existingTunnels = (yield* cfFetch(cfToken, `/accounts/${account}/cfd_tunnel?name=${flavor.tunnelName}&is_deleted=false`)) as Array<{ id: string }>;
   let tunnel: string;
   if (existingTunnels.length > 0) {
-    tunnel = existingTunnels[0].id;
+    tunnel = existingTunnels[0]!.id;
     console.log(`  Using existing tunnel: ${tunnel}`);
   } else {
     const created = (yield* cfFetch(cfToken, `/accounts/${account}/cfd_tunnel`, {
@@ -376,7 +376,7 @@ export const cmdDeploy = Effect.fn("LexaCli/cmdDeploy")(function* (
   console.log("==> DNS...");
   const existingDns = (yield* cfFetch(cfToken, `/zones/${zone}/dns_records?type=CNAME&name=${fullDomain}`)) as Array<{ id: string }>;
   if (existingDns.length > 0) {
-    yield* cfFetch(cfToken, `/zones/${zone}/dns_records/${existingDns[0].id}`, { method: "DELETE" });
+    yield* cfFetch(cfToken, `/zones/${zone}/dns_records/${existingDns[0]!.id}`, { method: "DELETE" });
   }
   yield* cfFetch(cfToken, `/zones/${zone}/dns_records`, {
     method: "POST",
@@ -453,7 +453,7 @@ export const cmdDeploy = Effect.fn("LexaCli/cmdDeploy")(function* (
         .map((l) => l.trim())
         .filter((l) => {
           const m = /^([A-Za-z_][A-Za-z0-9_]*)=/.exec(l);
-          return m && !rewrittenKeys.has(m[1]) && !l.startsWith("#");
+          return m && !rewrittenKeys.has(m[1]!) && !l.startsWith("#");
         })
     : [];
 

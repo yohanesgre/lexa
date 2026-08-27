@@ -27,7 +27,7 @@ function readEnv(file: string): Map<string, string> {
     if (!existsSync(file)) return out;
     for (const line of readFileSync(file, "utf-8").split("\n")) {
       const m = /^([A-Za-z_][A-Za-z0-9_]*)=(.*)$/.exec(line.trim());
-      if (m) out.set(m[1], m[2]);
+      if (m) out.set(m[1]!, m[2]!);
     }
   } catch { /* unreadable file = empty map */ }
   return out;
@@ -35,7 +35,7 @@ function readEnv(file: string): Map<string, string> {
 
 function pemHeaderOk(pemPath: string): boolean {
   try {
-    const first = readFileSync(pemPath, "utf-8").split("\n")[0].trim();
+    const first = readFileSync(pemPath!, "utf-8").split("\n")[0]!.trim();
     return first === "-----BEGIN RSA PRIVATE KEY-----" || first === "-----BEGIN PRIVATE KEY-----";
   } catch {
     return false;
@@ -212,7 +212,7 @@ export const cmdGithubSetup = Effect.fn("LexaCli/cmdGithubSetup")(function* (fla
     if (existsSync(file)) {
       for (const line of readFileSync(file, "utf-8").split("\n")) {
         const m = /^([A-Za-z_][A-Za-z0-9_]*)=/.exec(line.trim());
-        if (m && OWNED_KEYS.has(m[1])) continue;
+        if (m && OWNED_KEYS.has(m[1]!)) continue;
         if (line.trim() !== "") carried.push(line);
       }
     }
@@ -234,8 +234,8 @@ export const cmdGithubSetup = Effect.fn("LexaCli/cmdGithubSetup")(function* (fla
 });
 
 export const cmdGithubCheck = Effect.fn("LexaCli/cmdGithubCheck")(function* (client: LexaClient, flags: Record<string, string | boolean>, args: string[]) {
-  const slug = args[0] ?? "";
-  const repo = args[1] ?? "";
+  const slug = args[0]! ?? "";
+  const repo = args[1]! ?? "";
   if (!slug || !repo) {
     console.error("  Usage: lexa-cli github check <slug> <owner/repo>");
     process.exit(1);
@@ -254,7 +254,7 @@ export const cmdGithubCheck = Effect.fn("LexaCli/cmdGithubCheck")(function* (cli
   console.log(`==> Round-trip: ${slug} → ${repo}`);
   const task = yield* client.createTask(slug, {
     columnId: open.id,
-    swimlaneId: swimlanes[0].id,
+    swimlaneId: swimlanes[0]!.id,
     title: `GitHub sync check ${ts}`,
   });
   console.log(`  Task created: ${task.id}`);
@@ -264,7 +264,7 @@ export const cmdGithubCheck = Effect.fn("LexaCli/cmdGithubCheck")(function* (cli
   if (!issue) throw new Error("link succeeded but response has no githubs — issue not created?");
   console.log(`  Issue created+linked: ${issue.url}`);
 
-  const moved = yield* client.moveTask(slug, task.id, { columnId: closed.id, swimlaneId: swimlanes[0].id });
+  const moved = yield* client.moveTask(slug, task.id, { columnId: closed.id, swimlaneId: swimlanes[0]!.id });
   const synced = moved.githubs?.find((g) => g.issueId === issue.issueId);
   console.log(`  Moved to "${closed.name}" (github_state=closed): ${synced?.syncedState ?? "?"}`);
 

@@ -29,7 +29,7 @@ const toMember = (r: MemberRow): TeamMember => ({
   userId: r.userId,
   name: r.name,
   email: r.email,
-  role: (r.role.split(",")[0].trim() || "member") as TeamMemberRole,
+  role: ((r.role.split("!,")[0] ?? "").trim() || "member") as TeamMemberRole,
   createdAt: r.createdAt,
 });
 

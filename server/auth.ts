@@ -93,7 +93,8 @@ const adminAc = createAccessControl({
   session: ["list", "revoke", "delete"],
 });
 
-function makeLexaInvitesPlugin(db: Database, getAuth: () => any) {
+type LexaAuthApi = { api: { createUser: (opts: { body: { email: string; password: string; name: string; data: { role: string } } }) => Promise<unknown> } };
+function makeLexaInvitesPlugin(db: Database, getAuth: () => LexaAuthApi) {
   return () => ({
     id: "lexa-invites",
     endpoints: {
@@ -129,7 +130,7 @@ function makeLexaInvitesPlugin(db: Database, getAuth: () => any) {
   });
 }
 
-const authRefMap = new WeakMap<object, { current: any }>();
+const authRefMap = new WeakMap<object, { current: unknown }>();
 
 export function buildAuthOptions(env: RuntimeEnv) {
   const publicUrl = resolvePublicUrl(env);
@@ -139,9 +140,9 @@ export function buildAuthOptions(env: RuntimeEnv) {
   // TODO Phase 6: Workers D1 init — env.DB is D1Database; better-auth needs a D1
   // adapter (e.g. kysely/d1). The cast below documents intent and keeps Bun path
   // identical; replace with the real D1 adapter when wiring Phase 6.
-  const database = env.DB ? (env.DB as unknown as Database) : new Database(databasePath);
+  const database = env.DB ? (env.DB as never as Database) : new Database(databasePath);
 
-  const authRef: { current: any } = { current: null };
+  const authRef: { current: unknown } = { current: null };
 
   const invitesPlugin = env.DB
     ? () => ({
@@ -158,12 +159,12 @@ export function buildAuthOptions(env: RuntimeEnv) {
               }),
             },
             async (ctx) => {
-              throw ctx.error("NOT_IMPLEMENTED" as any, { message: "D1 invites not yet wired — Phase 6" });
+              throw (ctx.error as (code: string, opts: unknown) => never)("NOT_IMPLEMENTED", { message: "D1 invites not yet wired — Phase 6" });
             },
           ),
         },
       })
-    : makeLexaInvitesPlugin(database as Database, () => authRef.current);
+    : makeLexaInvitesPlugin(database as Database, () => authRef.current as LexaAuthApi);
 
   const options = {
     baseURL: publicUrl,
@@ -249,7 +250,7 @@ export function createAuth(env: RuntimeEnv): LexaAuth {
     trustedOrigins,
     authIpLimiter,
     loginLimiter,
-    handler: instance.handler as unknown as LexaAuth["handler"],
+    handler: instance.handler as LexaAuth["handler"],
     auth: instance,
   };
 }

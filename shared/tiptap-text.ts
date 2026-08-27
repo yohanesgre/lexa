@@ -26,11 +26,15 @@ export function extractText(doc: TipTapDoc): string {
   }
 }
 
+function isNode(value: unknown): value is Node {
+  return typeof value === "object" && value !== null && "type" in value && typeof (value as { type: unknown }).type === "string";
+}
+
 function processNodes(nodes: unknown[]): string {
   const blocks: string[] = [];
   for (const raw of nodes) {
-    if (!raw || typeof raw !== "object") continue;
-    const node = raw as Node;
+    if (!isNode(raw)) continue;
+    const node = raw;
     if (BLOCK_TYPES.has(node.type)) {
       blocks.push(extractBlock(node));
     } else {
@@ -38,7 +42,10 @@ function processNodes(nodes: unknown[]): string {
       if (blocks.length === 0) {
         blocks.push(text);
       } else {
-        blocks[blocks.length - 1] += text;
+        const lastIdx = blocks.length - 1;
+        const last = blocks[lastIdx];
+        if (last !== undefined) blocks[lastIdx] = last + text;
+        else blocks.push(text);
       }
     }
   }

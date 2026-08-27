@@ -121,6 +121,7 @@ describe("ThreadsSidebar", () => {
 
   it("snippet rows render under titles with the query bolded while searching; hidden when empty", () => {
     const threads: HeraldChatThreadSummary[] = [
+      // @ts-expect-error — strict: exactOptional indexedAccess
       { ...THREADS[0], snippet: "…cross-check the rollback runbook before Friday…" },
     ];
     setup({ threads, search: "runbook" });

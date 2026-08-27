@@ -45,7 +45,7 @@ export class SwimlaneService extends Effect.Service<SwimlaneService>()("Lexa/Swi
           yield* ensureMilestone(input.milestoneId, input.projectId);
           const maxPos = yield* repo.maxPosition(input.projectId);
           const id = crypto.randomUUID();
-          const lane = yield* repo.create({ id, projectId: input.projectId, name: input.name, description: input.description, position: maxPos + 1, kind: "sprint", dueAt: input.dueAt ?? null, startAt: input.startAt ?? null, milestoneId: input.milestoneId ?? null }).pipe(
+          const lane = yield* repo.create({ id, projectId: input.projectId, name: input.name, ...(input.description !== undefined ? { description: input.description } : {}), position: maxPos + 1, kind: "sprint", dueAt: input.dueAt ?? null, startAt: input.startAt ?? null, milestoneId: input.milestoneId ?? null }).pipe(
             Effect.catchTags({
               ConstraintViolation: (e) => new DbError({ message: "Database error", cause: e }),
               RowNotFound: (e) => new DbError({ message: "Database error", cause: e }),
@@ -85,8 +85,8 @@ export class SwimlaneService extends Effect.Service<SwimlaneService>()("Lexa/Swi
               const first = yield* repo.findFirstDueAfter(id, input.dueAt);
               return yield* new DeadlineAfterLane({
                 date: input.dueAt,
-                taskId: first?.id,
-                taskTitle: first?.title,
+                ...(first?.id !== undefined ? { taskId: first.id } : {}),
+                ...(first?.title !== undefined ? { taskTitle: first.title } : {}),
               });
             }
           }

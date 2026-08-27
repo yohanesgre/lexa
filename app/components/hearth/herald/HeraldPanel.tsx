@@ -42,9 +42,9 @@ function docAttachmentIds(editor: Editor): string[] {
     const n = node as { type?: unknown; attrs?: Record<string, unknown> | null; content?: unknown };
     if (n.type === "image" && typeof n.attrs?.src === "string") {
       const m = ATTACHMENT_SRC_RE.exec(n.attrs.src.trim());
-      if (m && !seen.has(m[1])) {
-        seen.add(m[1]);
-        ids.push(m[1]);
+      if (m && !seen.has(m[1]!)) {
+        seen.add(m[1]!);
+        ids.push(m[1]!);
       }
     }
     if (Array.isArray(n.content)) n.content.forEach(walk);

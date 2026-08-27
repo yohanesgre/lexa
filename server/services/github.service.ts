@@ -71,7 +71,7 @@ export class GitHubService extends Effect.Service<GitHubService>()("Lexa/GitHubS
           );
           const body = docToMarkdown(task.description, {
             baseUrl: PUBLIC_URL,
-            projectSlug: project && "slug" in project ? String((project as { slug: string }).slug) : undefined,
+            ...(project && "slug" in project && (project as { slug: string }).slug !== undefined ? { projectSlug: String((project as { slug: string }).slug) } : {}),
           });
           const links = yield* taskRepo.findGithubLinks(taskId);
           for (const link of links) {
@@ -215,6 +215,7 @@ export class GitHubService extends Effect.Service<GitHubService>()("Lexa/GitHubS
           let items = cached && now - cached.at < ISSUE_LIST_TTL_MS ? cached.items : null;
           if (!items) {
             const [owner, name] = repo.split("/");
+            if (!owner || !name) return yield* new GithubApiError({ message: `Invalid repo '${repo}'` });
             items = yield* client.listIssues(owner, name);
             issueListCache.set(repo, { at: now, items });
           }
@@ -332,6 +333,7 @@ export class GitHubService extends Effect.Service<GitHubService>()("Lexa/GitHubS
             return yield* new ColumnNotFound({ id: "first" });
           }
           const first = columns.toSorted((a, b) => a.position - b.position)[0];
+          if (!first) return yield* new ColumnNotFound({ id: "first" });
           const { task } = yield* taskService.create(actor, {
             projectId: project.id,
             columnId: first.id,

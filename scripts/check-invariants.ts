@@ -238,12 +238,12 @@ const results: Invariant[] = [];
     for (let i = 0; i < lines.length; i++) {
       const m = /from\s+["']\.\.?\/services\/([a-z0-9._-]+)["']/i.exec(lines[i]!);
       if (m) {
-        const target = `${sep}services${sep}${m[1]}.ts`;
-        if (services.has(join(ROOT, "server", "services", `${m[1]}.ts`)) ||
-            services.has(join(ROOT, "cli", "src", "services", `${m[1]}.ts`))) {
+        const target = `${sep}services${sep}${m[1]!}.ts`;
+        if (services.has(join(ROOT, "server", "services", `${m[1]!}.ts`)) ||
+            services.has(join(ROOT, "cli", "src", "services", `${m[1]!}.ts`))) {
           // Allow self-import only.
-          if (!f.endsWith(`${sep}${m[1]}.ts`)) {
-            cycles.push(`${relative(ROOT, f)}:${i + 1} → services/${m[1]}`);
+          if (!f.endsWith(`${sep}${m[1]!}.ts`)) {
+            cycles.push(`${relative(ROOT, f)}:${i + 1} → services/${m[1]!}`);
           }
         }
       }
@@ -292,7 +292,7 @@ const results: Invariant[] = [];
     title: "Echo suppression (webhook move + github_synced_state in same atomic unit)",
     status: ok ? "ok" : "fail",
     evidence: ok
-      ? `${atomicHits[0]}: webhook-move + github_synced_state + withTx/batch co-located (${hits.length} refs)`
+      ? `${atomicHits[0]!}: webhook-move + github_synced_state + withTx/batch co-located (${hits.length} refs)`
       : `no file in services/api/repos/drivers has github_synced_state + webhook-move + withTx/batch together (${hits.length} refs)`,
   });
 }

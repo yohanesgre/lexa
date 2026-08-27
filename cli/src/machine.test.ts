@@ -150,7 +150,7 @@ describe("workspaceList", () => {
     const log = vi.spyOn(console, "log").mockImplementation(() => {});
     const mod = await import("./machine");
     await Effect.runPromise(mod.workspaceList(cfg));
-    const lines = log.mock.calls.map((c) => String(c[0])).join("\n");
+    const lines = log.mock.calls.map((c) => String(c[0]!)).join("\n");
     expect(lines).toContain("No workspaces yet");
     log.mockRestore();
   });
@@ -165,7 +165,7 @@ describe("workspaceList", () => {
     const log = vi.spyOn(console, "log").mockImplementation(() => {});
     const mod = await import("./machine");
     await Effect.runPromise(mod.workspaceList(cfg));
-    const lines = log.mock.calls.map((c) => String(c[0])).join("\n");
+    const lines = log.mock.calls.map((c) => String(c[0]!)).join("\n");
     expect(lines).toContain("One");
     expect(lines).toContain("provisioned");
     expect(lines).toContain("Two");
@@ -181,7 +181,7 @@ describe("workspaceList", () => {
     const log = vi.spyOn(console, "log").mockImplementation(() => {});
     const mod = await import("./machine");
     await Effect.runPromise(mod.workspaceList(cfg));
-    const lines = log.mock.calls.map((c) => String(c[0])).join("\n");
+    const lines = log.mock.calls.map((c) => String(c[0]!)).join("\n");
     expect(lines).toContain("orphan");
     log.mockRestore();
   });

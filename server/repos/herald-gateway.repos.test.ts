@@ -31,7 +31,7 @@ describe("herald gateway phase 1", () => {
       expect(cols).not.toContain("vision_model");
       expect(cols).toEqual(expect.arrayContaining(["search_provider","search_api_key","url_allowlist","engine","engine_switcher_enabled","primary_supports_images","write_tools","reasoning_effort","created_at","updated_at","project_id"]));
       for (const tbl of ["herald_providers","herald_models","herald_call_logs","herald_model_prices"]) {
-        const row = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name=?").get(tbl) as any;
+        const row = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name=?").get(tbl) as { name: string } | undefined;
         expect(row?.name).toBe(tbl);
       }
       const idx = (db.prepare("SELECT name FROM sqlite_master WHERE type='index'").all() as { name: string }[]).map((r) => r.name);
@@ -55,7 +55,7 @@ describe("herald gateway phase 1", () => {
       seed.prepare("INSERT INTO projects (id, name, slug) VALUES ('p1','P','p1')").run();
       seed.close();
       const db = new Database(dbPath);
-      const layer = Layer.mergeAll(HeraldSettingsRepo.Default).pipe(Layer.provide(Layer.succeed(Sqlite, db as any)));
+      const layer = Layer.mergeAll(HeraldSettingsRepo.Default).pipe(Layer.provide(Layer.succeed(Sqlite, db)));
       const prog = Effect.gen(function* () {
         const repo = yield* HeraldSettingsRepo;
         const r = yield* repo.upsert("p1", { searchProvider: "exa", searchApiKey: "skey", urlAllowlist: "https://a.com", writeTools: ["task_create"] });
@@ -64,8 +64,8 @@ describe("herald gateway phase 1", () => {
         const masked = yield* repo.maskedView("p1");
         expect(masked.searchProvider).toBe("exa");
         expect(masked.hasSearchKey).toBe(true);
-        expect((masked as any).kind).toBeUndefined();
-        expect((masked as any).model).toBeUndefined();
+        expect((masked as { kind?: unknown }).kind).toBeUndefined();
+        expect((masked as { model?: unknown }).model).toBeUndefined();
       });
       await Effect.runPromise(prog.pipe(Effect.provide(layer)));
       db.close();
@@ -77,7 +77,7 @@ describe("herald gateway phase 1", () => {
     try {
       runMigrations(dbPath);
       const db = new Database(dbPath);
-      const layer = Layer.mergeAll(HeraldProvidersRepo.Default).pipe(Layer.provide(Layer.succeed(Sqlite, db as any)));
+      const layer = Layer.mergeAll(HeraldProvidersRepo.Default).pipe(Layer.provide(Layer.succeed(Sqlite, db)));
       const prog = Effect.gen(function* () {
         const repo = yield* HeraldProvidersRepo;
         const row = yield* repo.create({ id: "pr1", label: "OpenAI", baseUrl: "https://api.openai.com/v1", apiKey: "sk-abc123XYZ" });
@@ -85,10 +85,10 @@ describe("herald gateway phase 1", () => {
         const masked = yield* repo.maskedView("pr1");
         expect(masked.hasKey).toBe(true);
         expect(masked.keyMask).toBe("sk-…3XYZ");
-        expect((masked as any).api_key).toBeUndefined();
+        expect((masked as { api_key?: unknown }).api_key).toBeUndefined();
         const list = yield* repo.maskedList();
-        expect(list[0].hasKey).toBe(true);
-        expect((list[0] as any).api_key).toBeUndefined();
+        expect(list[0]!.hasKey).toBe(true);
+        expect((list[0]! as { api_key?: unknown }).api_key).toBeUndefined();
       });
       await Effect.runPromise(prog.pipe(Effect.provide(layer)));
       db.close();
@@ -103,7 +103,7 @@ describe("herald gateway phase 1", () => {
       seed.prepare("INSERT INTO projects (id, name, slug) VALUES ('p1','P','p1')").run();
       seed.close();
       const db = new Database(dbPath);
-      const layer = Layer.mergeAll(HeraldProvidersRepo.Default, HeraldModelsRepo.Default, HeraldCallLogsRepo.Default, HeraldModelPricesRepo.Default).pipe(Layer.provide(Layer.succeed(Sqlite, db as any)));
+      const layer = Layer.mergeAll(HeraldProvidersRepo.Default, HeraldModelsRepo.Default, HeraldCallLogsRepo.Default, HeraldModelPricesRepo.Default).pipe(Layer.provide(Layer.succeed(Sqlite, db)));
       const prog = Effect.gen(function* () {
         const provRepo = yield* HeraldProvidersRepo;
         const modelRepo = yield* HeraldModelsRepo;

@@ -25,7 +25,7 @@ interface ThreadsSidebarProps {
   onPinToggle: (chatId: string, pinned: boolean) => Promise<unknown> | unknown;
   onRename: (chatId: string, title: string) => Promise<unknown> | unknown;
   onDelete: (chatId: string) => Promise<unknown> | unknown;
-  open?: boolean;
+  open?: boolean | undefined;
   onToggle?: () => void;
   onClose?: () => void;
 }

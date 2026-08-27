@@ -5,7 +5,7 @@ import { CSS } from "@dnd-kit/utilities";
 import { cn } from "../ui/cn";
 import type { FieldOption } from "../../../shared/types";
 
-function SortableRow({ id, className, children }: { id: string; className?: string; children: React.ReactNode }) {
+function SortableRow({ id, className, children }: { id: string; className?: string | undefined; children: React.ReactNode }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id });
   return (
     <tr

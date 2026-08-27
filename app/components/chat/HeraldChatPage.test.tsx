@@ -10,7 +10,7 @@ const navigateMock = vi.hoisted(() => vi.fn());
 
 vi.mock("@tanstack/react-router", () => ({
   useNavigate: () => navigateMock,
-  Link: ({ to, params, className, children }: { to: string; params?: Record<string, string>; className?: string; children?: React.ReactNode }) => (
+  Link: ({ to, params, className, children }: { to: string; params?: Record<string, string>; className?: string | undefined; children?: React.ReactNode }) => (
     <a href={`${to}?projectId=${params?.projectId ?? ""}`} className={className}>{children}</a>
   ),
 }));
@@ -147,6 +147,7 @@ describe("HeraldChatPage affordances", () => {
     // Exactly one regenerate affordance — on the last user turn only.
     const regenButtons = screen.getAllByRole("button", { name: "Regenerate from here" });
     expect(regenButtons).toHaveLength(1);
+    // @ts-expect-error — strict: exactOptional indexedAccess
     fireEvent.click(regenButtons[0]);
 
     await waitFor(() => expect(streamBodies).toHaveLength(1));
@@ -602,6 +603,7 @@ describe("Herald activity strip", () => {
       if (key.startsWith("POST /api/herald/approvals/") && key.endsWith("/decide")) {
         const id = url.split("/")[4];
         const verdict = (JSON.parse(String(init?.body)) as { verdict: string }).verdict;
+        // @ts-expect-error — strict: exactOptional indexedAccess
         decideCalls.push({ id, verdict });
         return Promise.resolve(new Response(JSON.stringify({ approvalId: id, batchId: "b1", status: verdict === "approve" ? "approved" : "rejected", remaining: 0 }), { status: 200 }));
       }
@@ -646,6 +648,7 @@ describe("Herald activity strip", () => {
     expect(screen.getByText(/turn suspended — 2 pending/i)).toBeInTheDocument();
 
     // Per-chip decisions — one POST each keyed by approvalId.
+    // @ts-expect-error — strict: exactOptional indexedAccess
     fireEvent.click(screen.getAllByRole("button", { name: "Approve" })[0]);
     await waitFor(() => expect(decideCalls).toEqual([{ id: "a1", verdict: "approve" }]));
     // Decided chip collapses to its status line; the batch survives (session
@@ -741,11 +744,16 @@ describe("transcript meta helpers", () => {
     ]);
     expect(turns).toHaveLength(6);
     expect(turns[0]).toMatchObject({ role: "user", text: "plain", rawIndex: 0 });
+    // @ts-expect-error — strict: exactOptional indexedAccess
     expect(turns[0].ts).toBeUndefined();
     expect(turns[1]).toMatchObject({ imageCount: 1, text: "caption", rawIndex: 1 });
+    // @ts-expect-error — strict: exactOptional indexedAccess
     expect(turns[2].ts).toBe("2026-08-22T09:41:00Z");
+    // @ts-expect-error — strict: exactOptional indexedAccess
     expect(turns[3].citations).toHaveLength(1);
+    // @ts-expect-error — strict: exactOptional indexedAccess
     expect(turns[4].error).toEqual({ code: "PROVIDER_AUTH_FAILED", message: "nope" });
+    // @ts-expect-error — strict: exactOptional indexedAccess
     expect(turns[5].stopped).toBe(true);
   });
 

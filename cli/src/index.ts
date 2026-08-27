@@ -42,7 +42,7 @@ function parseArgs(argv: string[]): ParsedArgs {
   const positionals: string[] = [];
   const flags: Record<string, string | boolean> = {};
   for (let i = 0; i < argv.length; i++) {
-    const a = argv[i];
+    const a = argv[i]!; // argv length guarantees presence
     if (a.startsWith("--")) {
       const eq = a.indexOf("=");
       if (eq > 0) {
@@ -66,7 +66,7 @@ function parseArgs(argv: string[]): ParsedArgs {
 
 // ── errors ──
 export class NotLoggedIn extends Data.TaggedError("NotLoggedIn")<{}> {
-  get message(): string {
+  override get message(): string {
     return "Not logged in. Run: lexa-cli login [--url <base>] [--key <lxk_...>]";
   }
 }
@@ -115,13 +115,13 @@ function runCommand<A>(prefix: string, program: Effect.Effect<A, unknown, CliCon
 // ── table printing (shared) ──
 function printTable(rows: Record<string, string>[]): void {
   if (rows.length === 0) return;
-  const keys = Object.keys(rows[0]);
+  const keys = Object.keys(rows[0]!);
   const widths = keys.map((k) => Math.max(k.length, ...rows.map((r) => (r[k] ?? "").length)));
   const pad = (s: string, w: number) => s + " ".repeat(Math.max(0, w - s.length));
-  console.log(keys.map((k, i) => pad(k, widths[i])).join("  "));
+  console.log(keys.map((k, i) => pad(k, widths[i]!)).join("  "));
   console.log(widths.map((w) => "-".repeat(w)).join("  "));
   for (const r of rows) {
-    console.log(keys.map((k, i) => pad(r[k] ?? "", widths[i])).join("  "));
+    console.log(keys.map((k, i) => pad(r[k] ?? "", widths[i]!)).join("  "));
   }
 }
 
@@ -319,7 +319,7 @@ function resolveTaskId(client: LexaClient, slug: string, id: string): Effect.Eff
 function cmdTaskList(flags: Record<string, string | boolean>, args: string[]): Effect.Effect<void, unknown, CliConfigService> {
   return Effect.gen(function* () {
     const { client } = yield* requireClient(flags);
-    const slug = (typeof flags.project === "string" && flags.project) || args[0] || "";
+    const slug = (typeof flags.project === "string" && flags.project) || args[0]! || "";
     if (!slug) { console.error("  Usage: lexa-cli task list --project <slug>"); process.exit(1); }
     const limit = typeof flags.limit === "string" ? parseInt(flags.limit, 10) : 20;
     const json = flags.json === true;
@@ -368,7 +368,7 @@ function cmdTaskMove(flags: Record<string, string | boolean>, args: string[]): E
   return Effect.gen(function* () {
     const { client } = yield* requireClient(flags);
     const slug = (typeof flags.project === "string" && flags.project) || "";
-    const id = args[0] || "";
+    const id = args[0]! || "";
     const column = (typeof flags.column === "string" && flags.column) || "";
     const swimlane = (typeof flags.swimlane === "string" && flags.swimlane) || "";
     if (!slug || !id || !column) {
@@ -387,7 +387,7 @@ function cmdTaskGet(flags: Record<string, string | boolean>, args: string[]): Ef
   return Effect.gen(function* () {
     const { client } = yield* requireClient(flags);
     const slug = (typeof flags.project === "string" && flags.project) || "";
-    const id = args[0] || "";
+    const id = args[0]! || "";
     if (!slug || !id) { console.error("  Usage: lexa-cli task get <id> --project <slug>"); process.exit(1); }
     const taskId = yield* resolveTaskId(client, slug, id);
     const t = yield* client.getTask(slug, taskId);
@@ -407,7 +407,7 @@ function cmdTaskUpdate(flags: Record<string, string | boolean>, args: string[]):
   return Effect.gen(function* () {
     const { client } = yield* requireClient(flags);
     const slug = (typeof flags.project === "string" && flags.project) || "";
-    const id = args[0] || "";
+    const id = args[0]! || "";
     const title = typeof flags.title === "string" ? flags.title : undefined;
     const priority = typeof flags.priority === "string" ? flags.priority : undefined;
     const type = typeof flags.type === "string" ? flags.type : undefined;
@@ -416,7 +416,7 @@ function cmdTaskUpdate(flags: Record<string, string | boolean>, args: string[]):
       process.exit(1);
     }
     const taskId = yield* resolveTaskId(client, slug, id);
-    const t = yield* client.updateTask(slug, taskId, { title, priority, type });
+    const t = yield* client.updateTask(slug, taskId, { ...(title !== undefined ? { title } : {}), ...(priority !== undefined ? { priority } : {}), ...(type !== undefined ? { type } : {}) });
     console.log(`  Updated ${taskId} — ${t.title}`);
   });
 }
@@ -437,7 +437,7 @@ function cmdWikiGet(flags: Record<string, string | boolean>, args: string[]): Ef
   return Effect.gen(function* () {
     const { client } = yield* requireClient(flags);
     const slug = (typeof flags.project === "string" && flags.project) || "";
-    const pageSlug = args[0] || "";
+    const pageSlug = args[0]! || "";
     if (!slug || !pageSlug) { console.error("  Usage: lexa-cli wiki get <pageSlug> --project <slug>"); process.exit(1); }
     const page = yield* client.getWikiPage(slug, pageSlug);
     if (flags.json === true) { console.log(JSON.stringify(page, null, 2)); return; }
@@ -456,7 +456,7 @@ function cmdWikiGet(flags: Record<string, string | boolean>, args: string[]): Ef
 function cmdRuntimeDelete(flags: Record<string, string | boolean>, args: string[]): Effect.Effect<void, unknown, CliConfigService> {
   return Effect.gen(function* () {
     const { client } = yield* requireClient(flags);
-    const id = args[0] || "";
+    const id = args[0]! || "";
     if (!id) {
       console.error("  Usage: lexa-cli runtime delete <id>");
       console.error("  (ids from `lexa-cli runtime list`)");
@@ -471,7 +471,7 @@ function cmdRuntimeDelete(flags: Record<string, string | boolean>, args: string[
 function cmdMachineDelete(flags: Record<string, string | boolean>, args: string[]): Effect.Effect<void, unknown, CliConfigService> {
   return Effect.gen(function* () {
     const { client } = yield* requireClient(flags);
-    const id = args[0] || "";
+    const id = args[0]! || "";
     if (!id) {
       console.error("  Usage: lexa-cli machine delete <id>");
       console.error("  (ids from `lexa-cli machine list`)");
@@ -653,11 +653,11 @@ function usage(cmd: string, sub: string): never {
 
 async function main(): Promise<void> {
   const argv = process.argv.slice(2);
-  if (argv.length === 0 || argv[0] === "--help" || argv[0] === "-h" || argv[0] === "help") {
+  if (argv.length === 0 || argv[0]! === "--help" || argv[0]! === "-h" || argv[0]! === "help") {
     console.log(HELP);
     return;
   }
-  if (argv[0] === "--version" || argv[0] === "-v" || argv[0] === "version") {
+  if (argv[0]! === "--version" || argv[0]! === "-v" || argv[0]! === "version") {
     console.log(`lexa-cli ${CLI_VERSION}`);
     return;
   }
@@ -665,8 +665,8 @@ async function main(): Promise<void> {
   // command dispatches. No-op when LEXA_DIR is set or no legacy roots exist.
   migrateFlavorRootsSync();
   const { positionals, flags } = parseArgs(argv);
-  const cmd = positionals[0];
-  const sub = positionals[1] ?? "";
+  const cmd = positionals[0]!;
+  const sub = positionals[1]! ?? "";
   const rest = positionals.slice(2);
 
   let program: Effect.Effect<unknown, unknown, CliConfigService> | null = null;
@@ -767,10 +767,10 @@ async function main(): Promise<void> {
         case "logs": program = Effect.gen(function* () { yield* requireClient(flags); yield* machineLogs(); }); break;
         case "delete": program = cmdMachineDelete(flags, rest); break;
         case "workspace":
-          switch (rest[0]) {
+          switch (rest[0]!) {
             case "list": program = Effect.gen(function* () { const { config } = yield* requireClient(flags); yield* workspaceList(config); }); break;
             case "sync": program = Effect.gen(function* () { const { config } = yield* requireClient(flags); yield* workspaceSync(config); }); break;
-            default: usage("machine", rest[0] === undefined ? "" : `workspace ${rest[0]}`);
+            default: usage("machine", rest[0]! === undefined ? "" : `workspace ${rest[0]!}`);
           }
           break;
         default: usage("machine", sub);

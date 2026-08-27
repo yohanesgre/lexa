@@ -3,7 +3,7 @@ import type { TipTapDoc } from "../../shared/types";
 
 interface UseTaskDetailActionsArgs {
   task: { id: string; columnId: string | null; swimlaneId: string | null; title: string } | null | undefined;
-  defaultColumnId?: string | null;
+  defaultColumnId?: string | null | undefined;
   columns?: { id: string }[];
   fieldConfig?: { priorities: { id: string }[]; types: { id: string }[] };
   emptyDoc: TipTapDoc;
