@@ -747,14 +747,14 @@ export function listHeraldProviders(): Promise<{ data: HeraldProvider[] }> {
 }
 
 export function createHeraldProvider(input: { label: string; baseUrl: string; apiKey: string }): Promise<HeraldProvider> {
-  return request(`${BASE}/admin/herald/providers`, { method: "POST", body: JSON.stringify({ label: input.label, base_url: input.baseUrl, api_key: input.apiKey }) });
+  return request(`${BASE}/admin/herald/providers`, { method: "POST", body: JSON.stringify({ label: input.label, baseUrl: input.baseUrl, apiKey: input.apiKey }) });
 }
 
 export function updateHeraldProvider(id: string, input: { label?: string | undefined; baseUrl?: string | undefined; apiKey?: string }): Promise<HeraldProvider> {
   const body: Record<string, string> = {};
   if (input.label !== undefined) body.label = input.label;
-  if (input.baseUrl !== undefined) body.base_url = input.baseUrl;
-  if (input.apiKey !== undefined) body.api_key = input.apiKey;
+  if (input.baseUrl !== undefined) body.baseUrl = input.baseUrl;
+  if (input.apiKey !== undefined) body.apiKey = input.apiKey;
   return request(`${BASE}/admin/herald/providers/${id}`, { method: "PATCH", body: JSON.stringify(body) });
 }
 
