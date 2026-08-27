@@ -743,11 +743,11 @@ export function listHeraldModels(projectId: string, input: HeraldSettingsInput):
 }
 
 export function listHeraldProviders(): Promise<{ data: HeraldProvider[] }> {
-  return request(`${BASE}/herald/providers`);
+  return request(`${BASE}/admin/herald/providers`);
 }
 
 export function createHeraldProvider(input: { label: string; baseUrl: string; apiKey: string }): Promise<HeraldProvider> {
-  return request(`${BASE}/herald/providers`, { method: "POST", body: JSON.stringify({ label: input.label, base_url: input.baseUrl, api_key: input.apiKey }) });
+  return request(`${BASE}/admin/herald/providers`, { method: "POST", body: JSON.stringify({ label: input.label, base_url: input.baseUrl, api_key: input.apiKey }) });
 }
 
 export function updateHeraldProvider(id: string, input: { label?: string | undefined; baseUrl?: string | undefined; apiKey?: string }): Promise<HeraldProvider> {
@@ -755,27 +755,27 @@ export function updateHeraldProvider(id: string, input: { label?: string | undef
   if (input.label !== undefined) body.label = input.label;
   if (input.baseUrl !== undefined) body.base_url = input.baseUrl;
   if (input.apiKey !== undefined) body.api_key = input.apiKey;
-  return request(`${BASE}/herald/providers/${id}`, { method: "PATCH", body: JSON.stringify(body) });
+  return request(`${BASE}/admin/herald/providers/${id}`, { method: "PATCH", body: JSON.stringify(body) });
 }
 
 export function deleteHeraldProvider(id: string): Promise<void> {
-  return request(`${BASE}/herald/providers/${id}`, { method: "DELETE" });
+  return request(`${BASE}/admin/herald/providers/${id}`, { method: "DELETE" });
 }
 
 export function testHeraldProvider(id: string): Promise<{ ok: boolean; latencyMs: number }> {
-  return request(`${BASE}/herald/providers/${id}/test`, { method: "POST" });
+  return request(`${BASE}/admin/herald/providers/${id}/test`, { method: "POST" });
 }
 
 export function fetchHeraldProviderModels(id: string): Promise<{ data: HeraldProviderModel[] }> {
-  return request(`${BASE}/herald/providers/${id}/models`, { method: "POST" });
+  return request(`${BASE}/admin/herald/providers/${id}/models`, { method: "POST" });
 }
 
 export function updateHeraldProviderModel(id: string, modelId: string, patch: { enabled?: boolean | undefined; priority?: number }): Promise<HeraldProviderModel> {
-  return request(`${BASE}/herald/providers/${id}/models/${encodeURIComponent(modelId)}`, { method: "PATCH", body: JSON.stringify(patch) });
+  return request(`${BASE}/admin/herald/providers/${id}/models/${encodeURIComponent(modelId)}`, { method: "PATCH", body: JSON.stringify(patch) });
 }
 
 export function getHeraldUsage(): Promise<HeraldUsage> {
-  return request(`${BASE}/herald/usage`);
+  return request(`${BASE}/admin/herald/usage`);
 }
 
 export function listHeraldCalls(params?: { projectId?: string | undefined; limit?: number }): Promise<{ data: HeraldCall[] }> {
@@ -783,7 +783,7 @@ export function listHeraldCalls(params?: { projectId?: string | undefined; limit
   if (params?.projectId) qs.set("projectId", params.projectId);
   if (params?.limit) qs.set("limit", String(params.limit));
   const q = qs.toString();
-  return request(`${BASE}/herald/calls${q ? `?${q}` : ""}`);
+  return request(`${BASE}/admin/herald/calls${q ? `?${q}` : ""}`);
 }
 
 export function getHeraldProjectSettings(projectId: string): Promise<HeraldProjectSettings> {

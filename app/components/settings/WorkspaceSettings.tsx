@@ -1,7 +1,9 @@
 import { useState } from "react";
+import { Link } from "@tanstack/react-router";
 import { Check, Copy, Plus, Trash2, Users } from "lucide-react";
 import { useSession, useWorkspaceMembers, useUpdateWorkspaceMember, useDeleteWorkspaceMember, useWorkspaceInvites, useCreateWorkspaceInvite, useRevokeWorkspaceInvite, useCreateSetPasswordLink, useTeams, useCreateTeam, useDeleteTeam } from "../../lib/queries";
 import { ApiKeysSection, GithubSyncSection, MachinesRuntimesSection, RateLimitSection } from "./SettingsSections";
+import { HeraldProvidersSection } from "./HeraldProvidersSection";
 import { formatRelative } from "../../lib/relative-time";
 import { AgentsSettingsSection, SkillsSettingsSection } from "../hearth/AgentSkillSettings";
 import { copyToClipboard } from "../../lib/clipboard";
@@ -353,12 +355,22 @@ function AgentsSkillsSections() {
 }
 
 export function WorkspaceSettings() {
+  const { data: session } = useSession();
+  const isSuperadmin = session?.user?.role === "superadmin";
   return (
     <main className="page-frame page-frame-narrow">
       <h1 className="font-display text-2xl font-semibold text-lx-text-primary mb-4">Workspace settings</h1>
       <p className="text-sm text-lx-text-secondary mb-6" style={{ maxWidth: 560 }}>
         Superadmin-only surface. Members, invites, teams, machines &amp; runtimes, API keys, rate limiting, GitHub sync, Hearth agents &amp; skills. Superadmin is env-provisioned (LXK_ADMIN_EMAILS) — there is no in-app promotion UI.
       </p>
+      {isSuperadmin && (
+        <div className="card-panel mt-0 mb-6" style={{ padding: "10px 12px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
+          <span className="text-sm text-lx-text-secondary">Gateway usage, cost, latency &amp; health — all projects aggregated.</span>
+          <Link to="/admin/herald/usage" className="btn btn-ghost" style={{ height: 28, padding: "0 10px", fontSize: 12, textDecoration: "none", display: "inline-flex", alignItems: "center", whiteSpace: "nowrap" }}>
+            Herald Usage · Gateway
+          </Link>
+        </div>
+      )}
 
       <WorkspaceMembersSection />
       <TeamsSection />
@@ -366,6 +378,7 @@ export function WorkspaceSettings() {
       <ApiKeysSection />
       <RateLimitSection />
       <GithubSyncSection />
+      {isSuperadmin && <HeraldProvidersSection />}
       <AgentsSkillsSections />
     </main>
   );
