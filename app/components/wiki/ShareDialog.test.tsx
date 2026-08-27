@@ -52,8 +52,7 @@ describe("ShareDialog", () => {
   it("copy writes the URL to the clipboard and flips feedback to Copied", async () => {
     setupHooks();
     render(<ShareDialog slug="p1" pageSlug="home" isOpen onClose={() => {}} />);
-    // @ts-expect-error — strict: exactOptional indexedAccess
-    fireEvent.click(screen.getAllByRole("button"!, { name: "Copy" })[0]);
+    fireEvent.click(screen.getAllByRole("button"!, { name: "Copy" })[0]!);
     await vi.waitFor(() => expect(navigator.clipboard.writeText).toHaveBeenCalledWith("http://lexa.test/share/aaaa"));
     await vi.waitFor(() => expect(screen.getAllByText("Copied").length).toBeGreaterThan(0));
   });
@@ -61,8 +60,7 @@ describe("ShareDialog", () => {
   it("revoke calls the mutation with the link id (no confirm step)", () => {
     const { revokeMutate } = setupHooks();
     render(<ShareDialog slug="p1" pageSlug="home" isOpen onClose={() => {}} />);
-    // @ts-expect-error — strict: exactOptional indexedAccess
-    fireEvent.click(screen.getAllByRole("button"!, { name: "Revoke" })[1]);
+    fireEvent.click(screen.getAllByRole("button"!, { name: "Revoke" })[1]!);
     expect(revokeMutate).toHaveBeenCalledWith("l2");
   });
 
@@ -92,8 +90,7 @@ describe("ShareDialog", () => {
     const onClose = vi.fn();
     render(<ShareDialog slug="p1" pageSlug="home" isOpen onClose={onClose} />);
     const closeButtons = screen.getAllByRole("button", { name: "Close" });
-    // @ts-expect-error — strict: exactOptional indexedAccess
-    fireEvent.click(closeButtons[closeButtons.length - 1!]);
+    fireEvent.click(closeButtons[closeButtons.length - 1]!);
     expect(onClose).toHaveBeenCalled();
   });
 });

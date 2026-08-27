@@ -171,8 +171,7 @@ function TaskStatusPanel(props: {
   followLog: boolean;
   setFollowLog: (updater: (prev: boolean) => boolean) => void;
   logBodyRef: React.RefObject<HTMLDivElement | null>;
-  logs: { data?: HearthTaskLog[] };
-  // Log/detail internals are ADMIN-GATED — members get brief status rows only.
+  logs: { data?: HearthTaskLog[] | undefined };
   canViewLogs: boolean;
   setLogModalOpen: (v: boolean) => void;
   dismissedIdsRef: Set<string>;
@@ -183,6 +182,84 @@ function TaskStatusPanel(props: {
 }) {
   const { taskId, taskData, running, failed, done, reviewActive, followLog, setFollowLog, logBodyRef, logs, canViewLogs, setLogModalOpen, dismissedIdsRef, cancelTask, setTaskId, runtimes, onReview } = props;
   const logLines = (logs.data ?? []).slice(-50);
+  if (done || failed) {
+    return (
+      <div style={{ padding: 12 }}>
+        {failed ? (
+          <div className="border rounded-md p-3 text-[13px] leading-5 font-body whitespace-pre-wrap max-h-56 overflow-y-auto text-lx-text-danger bg-lx-bg-danger-subtle border-lx-border-default">
+            {taskData?.error}
+          </div>
+        ) : (
+          <div
+            style={{ background: "var(--lx-surface-input)", border: "1px solid var(--lx-border-default)", borderRadius: 6, padding: "10px 12px" }}
+          >
+            <div className="flex items-center gap-2 mb-1 min-w-0">
+              <Check size={14} strokeWidth={2.5} className="text-lx-text-success shrink-0" />
+              <span className="text-xs font-medium text-lx-text-primary truncate flex-1 min-w-0" style={{ fontFamily: "var(--lx-font-body)" }}>{taskData?.documentTitle || "Document"}</span>
+            </div>
+            <span className="font-micro text-2xs text-lx-text-muted uppercase tracking-[0.04em]" style={{ letterSpacing: "0.04em" }}>
+              {taskData?.skillName ? `${taskData.skillName} — ready to review` : "Review — ready to review"}
+            </span>
+          </div>
+        )}
+        {!failed && (
+          <div className="flex items-center justify-end gap-2 mt-3">
+            {reviewActive ? (
+              <span className="font-micro text-2xs text-lx-text-warning uppercase tracking-[0.04em]">In review in editor</span>
+            ) : (
+              <>
+                <button
+                  type="button"
+                  className="btn btn-ghost"
+                  style={{ height: 26, padding: "0 10px", fontSize: 12 }}
+                  onClick={() => {
+                    if (taskData) dismissedIdsRef.add(taskData.id);
+                    setTaskId(null);
+                  }}
+                >
+                  Reject
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  style={{ height: 26, padding: "0 10px", fontSize: 12 }}
+                  onClick={() => {
+                    if (taskData?.result) {
+                      const runtime = runtimes.find((r) => r.id === taskData.runtimeId);
+                      onReview(taskData.result, {
+                        action: taskData.skillName || taskData.skillId,
+                        runtimeName: runtime?.name ?? null,
+                        provider: runtime?.provider ?? null,
+                        taskId: taskData.id,
+                      });
+                    }
+                  }}
+                >
+                  <Check size={12} strokeWidth={2.5} />
+                  Review in editor
+                </button>
+              </>
+            )}
+          </div>
+        )}
+        {failed && (
+          <div className="flex items-center justify-end mt-3">
+            <button
+              type="button"
+              className="btn btn-ghost"
+              style={{ height: 26, padding: "0 10px", fontSize: 12 }}
+              onClick={() => {
+                if (taskData) dismissedIdsRef.add(taskData.id);
+                setTaskId(null);
+              }}
+            >
+              Reject
+            </button>
+          </div>
+        )}
+      </div>
+    );
+  }
   return (
   <div style={{ padding: "0 12px 12px" }}>
     {running && (
@@ -252,83 +329,6 @@ function TaskStatusPanel(props: {
           </div>
         </div>
       </div>
-    )}
-    {(done || failed) && (
-      <>
-        {failed ? (
-          <div className="border rounded-md p-3 text-[13px] leading-5 font-body whitespace-pre-wrap max-h-56 overflow-y-auto text-lx-text-danger bg-lx-bg-danger-subtle border-lx-border-default">
-            {taskData?.error}
-          </div>
-        ) : (
-          <div
-            className="border rounded-md p-3 text-[13px] leading-5 font-body"
-            style={{ background: "var(--lx-surface-input)", borderColor: "var(--lx-border-default)", color: "var(--lx-text-secondary)" }}
-          >
-            <div className="flex items-center gap-2 mb-1">
-              <Check size={14} strokeWidth={2.5} className="text-lx-text-success" />
-              <span className="font-medium text-lx-text-primary">{taskData?.documentTitle || "Document"}</span>
-            </div>
-            <span className="font-micro text-2xs text-lx-text-muted uppercase tracking-[0.04em]">
-              {taskData?.skillName ? taskData.skillName : ""} — ready to review
-            </span>
-          </div>
-        )}
-        {!failed && (
-          <div className="flex items-center justify-end gap-2 mt-3">
-            {reviewActive ? (
-              <span className="font-micro text-2xs text-lx-text-warning uppercase tracking-[0.04em]">In review in editor</span>
-            ) : (
-              <>
-                <button
-                  type="button"
-                  className="btn btn-ghost"
-                  style={{ height: 26, padding: "0 10px", fontSize: 12 }}
-                  onClick={() => {
-                    if (taskData) dismissedIdsRef.add(taskData.id);
-                    setTaskId(null);
-                  }}
-                >
-                  Reject
-                </button>
-                <button
-                  type="button"
-                  className="btn btn-primary"
-                  style={{ height: 26, padding: "0 10px", fontSize: 12 }}
-                  onClick={() => {
-                    if (taskData?.result) {
-                      const runtime = runtimes.find((r) => r.id === taskData.runtimeId);
-                      onReview(taskData.result, {
-                        action: taskData.skillName || taskData.skillId,
-                        runtimeName: runtime?.name ?? null,
-                        provider: runtime?.provider ?? null,
-                        taskId: taskData.id,
-                      });
-                    }
-                  }}
-                >
-                  <Check size={12} strokeWidth={2.5} />
-                  Review in editor
-                </button>
-              </>
-            )}
-          </div>
-        )}
-        {failed && (
-          <div className="flex items-center justify-end mt-3">
-            <button
-              type="button"
-              className="btn btn-ghost"
-              style={{ height: 26, padding: "0 10px", fontSize: 12 }}
-              onClick={() => {
-                if (taskData) dismissedIdsRef.add(taskData.id);
-                setTaskId(null);
-              }}
-            >
-              Reject
-            </button>
-          </div>
-        )}
-      </>
     )}
   </div>
   );
@@ -483,6 +483,16 @@ export function HearthPopover({ editor, slug, documentType, documentId, open, on
 
   const handleGenerate = () => {
     if (!selectedSkill) return;
+    let effectiveSelection = selectionMarkdown || selectionText;
+    if (selectedSkill.id === "polish" && !effectiveSelection.trim()) {
+      try {
+        const full = docToMarkdown(editor.state.doc.toJSON() as import("../../../shared/types").TipTapDoc);
+        if (full.trim()) effectiveSelection = full;
+        else if (editor.state.doc.textContent.trim()) effectiveSelection = editor.state.doc.textContent;
+      } catch {
+        if (editor.state.doc.textContent.trim()) effectiveSelection = editor.state.doc.textContent;
+      }
+    }
     createTask.mutate(
       {
         slug,
@@ -491,7 +501,7 @@ export function HearthPopover({ editor, slug, documentType, documentId, open, on
         agentId: ENGINE_AGENT_IDS[mode],
         skillId: selectedSkill.id,
         extraPrompt: extraPrompt || undefined,
-        selection: selectionMarkdown || selectionText,
+        selection: effectiveSelection,
         runtimeId: runtimeId || undefined,
       },
       { onSuccess: (t) => setTaskId(t.id) }
@@ -525,6 +535,8 @@ export function HearthPopover({ editor, slug, documentType, documentId, open, on
   if (!portalTarget) return null;
 
   // Herald tier — full panel per herald-popover.html (own header states).
+  // Done state delegates to the editor review surface (diff only editor,
+  // never raw in popover — hearth-review.html:153).
   if (mode === "herald") {
     return createPortal(
       <div ref={containerRef} className="menu-popover" data-hearth-popover style={popoverStyle}>
@@ -536,11 +548,27 @@ export function HearthPopover({ editor, slug, documentType, documentId, open, on
           engineSwitcherEnabled={switcherEnabled}
           onModeChange={changeMode}
           onClose={onClose}
+          onReview={onReview}
+          reviewActive={reviewActive}
+          appliedTaskId={appliedTaskId}
+          rejectedTaskId={rejectedTaskId}
         />
       </div>,
       portalTarget
     );
   }
+
+  const headerRight = done ? (
+    <span className="font-micro text-2xs text-lx-text-success uppercase tracking-[0.04em]">Ready</span>
+  ) : failed ? (
+    <span className="font-micro text-2xs text-lx-text-danger uppercase tracking-[0.04em]">Failed</span>
+  ) : running ? (
+    <span className="font-micro text-2xs text-lx-text-warning uppercase tracking-[0.04em]">Running…</span>
+  ) : switcherEnabled ? (
+    <EngineToggle enabled mode={mode} onChange={changeMode} disabled={taskRunning} />
+  ) : (
+    <span className="font-micro text-2xs text-lx-text-muted uppercase tracking-[0.04em]">AI project assistant</span>
+  );
 
   return createPortal(
     <div ref={containerRef} className="menu-popover" data-hearth-popover style={popoverStyle}>
@@ -549,65 +577,10 @@ export function HearthPopover({ editor, slug, documentType, documentId, open, on
           <HearthFlameIcon />
           Hearth
         </span>
-        {/* Engine toggle renders ONLY when the project enables the switcher;
-            switching mid-run is blocked until the terminal frame. */}
-        {switcherEnabled ? (
-          <EngineToggle enabled mode={mode} onChange={changeMode} disabled={taskRunning} />
-        ) : (
-          <span className="font-micro text-2xs text-lx-text-muted uppercase tracking-[0.04em]">AI project assistant</span>
-        )}
+        {headerRight}
       </div>
 
-      {/* Skill picker — only the active engine agent's attached skills */}
-      <div style={{ padding: "10px 12px", borderBottom: "1px solid var(--lx-border-default)" }}>
-        <span className="prop-label" style={{ display: "block", marginBottom: 6 }}>Skill</span>
-        {agentSkills.length > 0 ? (
-          renderChips(agentSkills, effectiveSkillId, setSkillId, (s) => s.name, (s) => s.id, skillMenuOpen, setSkillMenuOpen)
-        ) : (
-          <div style={{ background: "var(--lx-surface-input)", border: "1px solid var(--lx-border-default)", borderRadius: 6, padding: "8px 10px" }}>
-            <span className="text-xs text-lx-text-muted">No skills attached — add them in Settings.</span>
-          </div>
-        )}
-      </div>
-
-      <PromptFields
-        extraPrompt={extraPrompt}
-        setExtraPrompt={setExtraPrompt}
-        runtimeId={runtimeId}
-        setRuntimeId={setRuntimeId}
-        onlineRuntimes={onlineRuntimes}
-      />
-
-      {/* Session line — continuing conversation mapped to this document on the selected runtime */}
-      <div style={{ padding: "8px 12px", borderBottom: "1px solid var(--lx-border-default)", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-        <span className="text-xs text-lx-text-muted" style={{ fontSize: 11 }}>
-          {sessionRow ? `Continuing session from ${formatSessionAge(sessionRow.updatedAt)}` : "New session"}
-        </span>
-        <button
-          type="button"
-          className="btn btn-ghost"
-          style={{ height: 22, padding: "0 8px", fontSize: 11 }}
-          onClick={() => resetSession.mutate({ documentType, documentId, runtimeId })}
-          disabled={resetSession.isPending || taskRunning || !runtimeId}
-          title={taskRunning ? "running task" : undefined}
-        >
-          New session
-        </button>
-      </div>
-
-      <div style={{ padding: "10px 12px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-        <span className="font-micro text-2xs text-lx-text-muted uppercase tracking-[0.04em]">
-          {selectionText ? `Selection: ${selectionText.length} chars` : "No selection"}
-        </span>
-        {!taskId && (
-          <button type="button" className="btn btn-primary" style={{ height: 28, padding: "0 12px", fontSize: 12 }} onClick={handleGenerate} disabled={createTask.isPending || onlineRuntimes.length === 0 || !selectedSkill}>
-            <Flame size={12} strokeWidth={1.5} />
-            {createTask.isPending ? "Starting…" : "Generate"}
-          </button>
-        )}
-      </div>
-
-      {taskId && (
+      {taskId ? (
         <TaskStatusPanel
           taskId={taskId}
           taskData={taskData}
@@ -618,7 +591,6 @@ export function HearthPopover({ editor, slug, documentType, documentId, open, on
           followLog={followLog}
           setFollowLog={setFollowLog}
           logBodyRef={logBodyRef}
-          // @ts-expect-error — strict: exactOptional indexedAccess
           logs={logs}
           canViewLogs={isAdmin}
           setLogModalOpen={setLogModalOpen}
@@ -628,6 +600,53 @@ export function HearthPopover({ editor, slug, documentType, documentId, open, on
           runtimes={runtimes}
           onReview={onReview}
         />
+      ) : (
+        <>
+          <div style={{ padding: "10px 12px", borderBottom: "1px solid var(--lx-border-default)" }}>
+            <span className="prop-label" style={{ display: "block", marginBottom: 6 }}>Skill</span>
+            {agentSkills.length > 0 ? (
+              renderChips(agentSkills, effectiveSkillId, setSkillId, (s) => s.name, (s) => s.id, skillMenuOpen, setSkillMenuOpen)
+            ) : (
+              <div style={{ background: "var(--lx-surface-input)", border: "1px solid var(--lx-border-default)", borderRadius: 6, padding: "8px 10px" }}>
+                <span className="text-xs text-lx-text-muted">No skills attached — add them in Settings.</span>
+              </div>
+            )}
+          </div>
+
+          <PromptFields
+            extraPrompt={extraPrompt}
+            setExtraPrompt={setExtraPrompt}
+            runtimeId={runtimeId}
+            setRuntimeId={setRuntimeId}
+            onlineRuntimes={onlineRuntimes}
+          />
+
+          <div style={{ padding: "8px 12px", borderBottom: "1px solid var(--lx-border-default)", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+            <span className="text-xs text-lx-text-muted" style={{ fontSize: 11 }}>
+              {sessionRow ? `Continuing session from ${formatSessionAge(sessionRow.updatedAt)}` : "New session"}
+            </span>
+            <button
+              type="button"
+              className="btn btn-ghost"
+              style={{ height: 22, padding: "0 8px", fontSize: 11 }}
+              onClick={() => resetSession.mutate({ documentType, documentId, runtimeId })}
+              disabled={resetSession.isPending || taskRunning || !runtimeId}
+              title={taskRunning ? "running task" : undefined}
+            >
+              New session
+            </button>
+          </div>
+
+          <div style={{ padding: "10px 12px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+            <span className="font-micro text-2xs text-lx-text-muted uppercase tracking-[0.04em]">
+              {selectionText ? `Selection: ${selectionText.length} chars` : "No selection"}
+            </span>
+            <button type="button" className="btn btn-primary" style={{ height: 28, padding: "0 12px", fontSize: 12 }} onClick={handleGenerate} disabled={createTask.isPending || onlineRuntimes.length === 0 || !selectedSkill}>
+              <Flame size={12} strokeWidth={1.5} />
+              {createTask.isPending ? "Starting…" : "Generate"}
+            </button>
+          </div>
+        </>
       )}
 
 

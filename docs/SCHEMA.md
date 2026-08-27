@@ -737,6 +737,7 @@ CREATE TABLE lexa_agent_skills (
 -- dropping legacy provider columns (kind, base_url, api_key, model, vision_model).
 -- Remaining columns: search + engine + reasoning + write_tools.
 -- Migration 0018 adds fallback_model_ids (JSON array of herald_models ids, ordered, ≤3).
+-- Migration 0021 adds provider_id + primary_model_id (primary binding to herald_providers/models).
 CREATE TABLE herald_settings (
   project_id TEXT PRIMARY KEY REFERENCES projects(id) ON DELETE CASCADE,
   search_provider TEXT,
@@ -748,6 +749,8 @@ CREATE TABLE herald_settings (
   reasoning_effort TEXT CHECK (reasoning_effort IN ('minimal','low','medium','high')),
   write_tools TEXT NOT NULL DEFAULT '',
   fallback_model_ids TEXT NOT NULL DEFAULT '[]',
+  provider_id TEXT REFERENCES herald_providers(id) ON DELETE SET NULL,
+  primary_model_id TEXT,
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
@@ -766,9 +769,9 @@ CREATE TABLE herald_models (
   id TEXT PRIMARY KEY,
   provider_id TEXT NOT NULL REFERENCES herald_providers(id) ON DELETE CASCADE,
   model_id TEXT NOT NULL,
-  kind TEXT NOT NULL CHECK (kind IN ('openai_compatible','anthropic_compatible')),
+  kind TEXT NOT NULL CHECK (kind IN ('openai_compatible','anthropic_compatible','openai_responses')),
   priority INTEGER NOT NULL DEFAULT 0,
-  enabled INTEGER NOT NULL DEFAULT 1,
+  enabled INTEGER NOT NULL DEFAULT 0,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE INDEX idx_herald_models_provider ON herald_models(provider_id);
@@ -779,7 +782,7 @@ CREATE TABLE herald_call_logs (
   project_id TEXT REFERENCES projects(id) ON DELETE CASCADE,
   provider_id TEXT REFERENCES herald_providers(id) ON DELETE SET NULL,
   model TEXT NOT NULL,
-  kind TEXT NOT NULL CHECK (kind IN ('openai_compatible','anthropic_compatible')),
+  kind TEXT NOT NULL CHECK (kind IN ('openai_compatible','anthropic_compatible','openai_responses')),
   status TEXT NOT NULL CHECK (status IN ('done','error','suspended','aborted')),
   error_code TEXT,
   usage_in INTEGER NOT NULL DEFAULT 0,
@@ -1101,7 +1104,7 @@ Umbrella renamed **Hearth**; full identifier rename (tables `hearth_tasks`/`hear
 - **Exactly two builtin agents** (`lexa_agents`, migration 0013): `hearth-herald` ("Herald Agent") and `hearth-blacksmith` ("Blacksmith Agent") — same PM-assistant role, different execution architecture. The generic `lexa` entry is retired; its id is NOT reused.
 - **Skill availability = junction rows only.** Which skills an agent offers is whatever `lexa_agent_skills` says — admin-editable, no JSON columns on the agent rows.
 - **Engine switching:** `herald_settings.engine` ∈ `'herald'|'blacksmith'` applies to document threads + Generate. Freeform chat ALWAYS runs the herald lane; under `engine='blacksmith'` chat requests fail with `ENGINE_NOT_SUPPORTED_FOR_CHAT` (409). `engine_switcher_enabled=1` merely shows the member toggle, which is a personal overlay (client-side session preference) — it never writes `herald_settings.engine`; that column is the project default, admin-written.
-- **Vision resolution order** (per request): `primary_supports_images=1` → inline image parts; else `vision_model` configured → internal `analyze_image` tool delegation on the PRIMARY provider (same kind/api_key/base_url — only the model differs); the tool frame is suppressed from member UI; else attachments are rejected up front with `VISION_NOT_CONFIGURED` (409).
+- **Vision resolution order** (per request): `primary_supports_images=1` → inline image parts; else `VISION_NOT_CONFIGURED` (409) — `vision_model` delegation was removed in 0017 (columns `kind`/`base_url`/`api_key`/`model`/`vision_model` dropped; legacy code retains a compat check that never fires).
 - **Id rebind consequence (one-time):** threads keyed on the old agent id reset once after 0013 — continue-vs-fresh sees an unknown agentId and starts fresh.
 
 ### Task field options (custom priority/type)

@@ -24,6 +24,12 @@ import { Route as SlugMilestonesRouteImport } from './routes/$slug/milestones'
 import { Route as SlugSettingsRouteImport } from './routes/$slug/settings'
 import { Route as SlugSwimlanesRouteImport } from './routes/$slug/swimlanes'
 import { Route as SlugTasksRouteImport } from './routes/$slug/tasks'
+import { Route as HearthAgentsRouteImport } from './routes/hearth.agents'
+import { Route as HearthBindingsRouteImport } from './routes/hearth.bindings'
+import { Route as HearthProvidersRouteImport } from './routes/hearth.providers'
+import { Route as HearthRunsRouteImport } from './routes/hearth.runs'
+import { Route as HearthRuntimesRouteImport } from './routes/hearth.runtimes'
+import { Route as HearthUsageRouteImport } from './routes/hearth.usage'
 import { Route as SettingsMeRouteImport } from './routes/settings/me'
 import { Route as SettingsTeamRouteImport } from './routes/settings/team'
 import { Route as SettingsWorkspaceRouteImport } from './routes/settings/workspace'
@@ -32,6 +38,7 @@ import { Route as SlugWikiIndexRouteImport } from './routes/$slug/wiki/index'
 import { Route as SlugWikiPageSlugRouteImport } from './routes/$slug/wiki/$pageSlug'
 import { Route as AdminHeraldUsageRouteImport } from './routes/admin.herald.usage'
 import { Route as ApiAuthSplatRouteImport } from './routes/api.auth.$'
+import { Route as HearthBindingsProjectIdRouteImport } from './routes/hearth.bindings.$projectId'
 import { Route as SettingsProjectProjectIdRouteImport } from './routes/settings/project.$projectId'
 
 const IndexRoute = IndexRouteImport.update({
@@ -109,6 +116,36 @@ const SlugTasksRoute = SlugTasksRouteImport.update({
   path: '/$slug/tasks',
   getParentRoute: () => rootRouteImport,
 } as any)
+const HearthAgentsRoute = HearthAgentsRouteImport.update({
+  id: '/agents',
+  path: '/agents',
+  getParentRoute: () => HearthRoute,
+} as any)
+const HearthBindingsRoute = HearthBindingsRouteImport.update({
+  id: '/bindings',
+  path: '/bindings',
+  getParentRoute: () => HearthRoute,
+} as any)
+const HearthProvidersRoute = HearthProvidersRouteImport.update({
+  id: '/providers',
+  path: '/providers',
+  getParentRoute: () => HearthRoute,
+} as any)
+const HearthRunsRoute = HearthRunsRouteImport.update({
+  id: '/runs',
+  path: '/runs',
+  getParentRoute: () => HearthRoute,
+} as any)
+const HearthRuntimesRoute = HearthRuntimesRouteImport.update({
+  id: '/runtimes',
+  path: '/runtimes',
+  getParentRoute: () => HearthRoute,
+} as any)
+const HearthUsageRoute = HearthUsageRouteImport.update({
+  id: '/usage',
+  path: '/usage',
+  getParentRoute: () => HearthRoute,
+} as any)
 const SettingsMeRoute = SettingsMeRouteImport.update({
   id: '/me',
   path: '/me',
@@ -149,6 +186,11 @@ const ApiAuthSplatRoute = ApiAuthSplatRouteImport.update({
   path: '/api/auth/$',
   getParentRoute: () => rootRouteImport,
 } as any)
+const HearthBindingsProjectIdRoute = HearthBindingsProjectIdRouteImport.update({
+  id: '/$projectId',
+  path: '/$projectId',
+  getParentRoute: () => HearthBindingsRoute,
+} as any)
 const SettingsProjectProjectIdRoute =
   SettingsProjectProjectIdRouteImport.update({
     id: '/project/$projectId',
@@ -159,7 +201,7 @@ const SettingsProjectProjectIdRoute =
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/chat': typeof ChatRoute
-  '/hearth': typeof HearthRoute
+  '/hearth': typeof HearthRouteWithChildren
   '/invite': typeof InviteRoute
   '/login': typeof LoginRoute
   '/set-password': typeof SetPasswordRoute
@@ -171,6 +213,12 @@ export interface FileRoutesByFullPath {
   '/$slug/settings': typeof SlugSettingsRoute
   '/$slug/swimlanes': typeof SlugSwimlanesRoute
   '/$slug/tasks': typeof SlugTasksRoute
+  '/hearth/agents': typeof HearthAgentsRoute
+  '/hearth/bindings': typeof HearthBindingsRouteWithChildren
+  '/hearth/providers': typeof HearthProvidersRoute
+  '/hearth/runs': typeof HearthRunsRoute
+  '/hearth/runtimes': typeof HearthRuntimesRoute
+  '/hearth/usage': typeof HearthUsageRoute
   '/settings/me': typeof SettingsMeRoute
   '/settings/team': typeof SettingsTeamRoute
   '/settings/workspace': typeof SettingsWorkspaceRoute
@@ -179,13 +227,14 @@ export interface FileRoutesByFullPath {
   '/$slug/wiki/$pageSlug': typeof SlugWikiPageSlugRoute
   '/admin/herald/usage': typeof AdminHeraldUsageRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
+  '/hearth/bindings/$projectId': typeof HearthBindingsProjectIdRoute
   '/settings/project/$projectId': typeof SettingsProjectProjectIdRoute
   '/$slug/wiki/': typeof SlugWikiIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/chat': typeof ChatRoute
-  '/hearth': typeof HearthRoute
+  '/hearth': typeof HearthRouteWithChildren
   '/invite': typeof InviteRoute
   '/login': typeof LoginRoute
   '/set-password': typeof SetPasswordRoute
@@ -197,6 +246,12 @@ export interface FileRoutesByTo {
   '/$slug/settings': typeof SlugSettingsRoute
   '/$slug/swimlanes': typeof SlugSwimlanesRoute
   '/$slug/tasks': typeof SlugTasksRoute
+  '/hearth/agents': typeof HearthAgentsRoute
+  '/hearth/bindings': typeof HearthBindingsRouteWithChildren
+  '/hearth/providers': typeof HearthProvidersRoute
+  '/hearth/runs': typeof HearthRunsRoute
+  '/hearth/runtimes': typeof HearthRuntimesRoute
+  '/hearth/usage': typeof HearthUsageRoute
   '/settings/me': typeof SettingsMeRoute
   '/settings/team': typeof SettingsTeamRoute
   '/settings/workspace': typeof SettingsWorkspaceRoute
@@ -205,6 +260,7 @@ export interface FileRoutesByTo {
   '/$slug/wiki/$pageSlug': typeof SlugWikiPageSlugRoute
   '/admin/herald/usage': typeof AdminHeraldUsageRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
+  '/hearth/bindings/$projectId': typeof HearthBindingsProjectIdRoute
   '/settings/project/$projectId': typeof SettingsProjectProjectIdRoute
   '/$slug/wiki': typeof SlugWikiIndexRoute
 }
@@ -212,7 +268,7 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/chat': typeof ChatRoute
-  '/hearth': typeof HearthRoute
+  '/hearth': typeof HearthRouteWithChildren
   '/invite': typeof InviteRoute
   '/login': typeof LoginRoute
   '/set-password': typeof SetPasswordRoute
@@ -224,6 +280,12 @@ export interface FileRoutesById {
   '/$slug/settings': typeof SlugSettingsRoute
   '/$slug/swimlanes': typeof SlugSwimlanesRoute
   '/$slug/tasks': typeof SlugTasksRoute
+  '/hearth/agents': typeof HearthAgentsRoute
+  '/hearth/bindings': typeof HearthBindingsRouteWithChildren
+  '/hearth/providers': typeof HearthProvidersRoute
+  '/hearth/runs': typeof HearthRunsRoute
+  '/hearth/runtimes': typeof HearthRuntimesRoute
+  '/hearth/usage': typeof HearthUsageRoute
   '/settings/me': typeof SettingsMeRoute
   '/settings/team': typeof SettingsTeamRoute
   '/settings/workspace': typeof SettingsWorkspaceRoute
@@ -232,6 +294,7 @@ export interface FileRoutesById {
   '/$slug/wiki/$pageSlug': typeof SlugWikiPageSlugRoute
   '/admin/herald/usage': typeof AdminHeraldUsageRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
+  '/hearth/bindings/$projectId': typeof HearthBindingsProjectIdRoute
   '/settings/project/$projectId': typeof SettingsProjectProjectIdRoute
   '/$slug/wiki/': typeof SlugWikiIndexRoute
 }
@@ -252,6 +315,12 @@ export interface FileRouteTypes {
     | '/$slug/settings'
     | '/$slug/swimlanes'
     | '/$slug/tasks'
+    | '/hearth/agents'
+    | '/hearth/bindings'
+    | '/hearth/providers'
+    | '/hearth/runs'
+    | '/hearth/runtimes'
+    | '/hearth/usage'
     | '/settings/me'
     | '/settings/team'
     | '/settings/workspace'
@@ -260,6 +329,7 @@ export interface FileRouteTypes {
     | '/$slug/wiki/$pageSlug'
     | '/admin/herald/usage'
     | '/api/auth/$'
+    | '/hearth/bindings/$projectId'
     | '/settings/project/$projectId'
     | '/$slug/wiki/'
   fileRoutesByTo: FileRoutesByTo
@@ -278,6 +348,12 @@ export interface FileRouteTypes {
     | '/$slug/settings'
     | '/$slug/swimlanes'
     | '/$slug/tasks'
+    | '/hearth/agents'
+    | '/hearth/bindings'
+    | '/hearth/providers'
+    | '/hearth/runs'
+    | '/hearth/runtimes'
+    | '/hearth/usage'
     | '/settings/me'
     | '/settings/team'
     | '/settings/workspace'
@@ -286,6 +362,7 @@ export interface FileRouteTypes {
     | '/$slug/wiki/$pageSlug'
     | '/admin/herald/usage'
     | '/api/auth/$'
+    | '/hearth/bindings/$projectId'
     | '/settings/project/$projectId'
     | '/$slug/wiki'
   id:
@@ -304,6 +381,12 @@ export interface FileRouteTypes {
     | '/$slug/settings'
     | '/$slug/swimlanes'
     | '/$slug/tasks'
+    | '/hearth/agents'
+    | '/hearth/bindings'
+    | '/hearth/providers'
+    | '/hearth/runs'
+    | '/hearth/runtimes'
+    | '/hearth/usage'
     | '/settings/me'
     | '/settings/team'
     | '/settings/workspace'
@@ -312,6 +395,7 @@ export interface FileRouteTypes {
     | '/$slug/wiki/$pageSlug'
     | '/admin/herald/usage'
     | '/api/auth/$'
+    | '/hearth/bindings/$projectId'
     | '/settings/project/$projectId'
     | '/$slug/wiki/'
   fileRoutesById: FileRoutesById
@@ -319,7 +403,7 @@ export interface FileRouteTypes {
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   ChatRoute: typeof ChatRoute
-  HearthRoute: typeof HearthRoute
+  HearthRoute: typeof HearthRouteWithChildren
   InviteRoute: typeof InviteRoute
   LoginRoute: typeof LoginRoute
   SetPasswordRoute: typeof SetPasswordRoute
@@ -446,6 +530,48 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof SlugTasksRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/hearth/agents': {
+      id: '/hearth/agents'
+      path: '/agents'
+      fullPath: '/hearth/agents'
+      preLoaderRoute: typeof HearthAgentsRouteImport
+      parentRoute: typeof HearthRoute
+    }
+    '/hearth/bindings': {
+      id: '/hearth/bindings'
+      path: '/bindings'
+      fullPath: '/hearth/bindings'
+      preLoaderRoute: typeof HearthBindingsRouteImport
+      parentRoute: typeof HearthRoute
+    }
+    '/hearth/providers': {
+      id: '/hearth/providers'
+      path: '/providers'
+      fullPath: '/hearth/providers'
+      preLoaderRoute: typeof HearthProvidersRouteImport
+      parentRoute: typeof HearthRoute
+    }
+    '/hearth/runs': {
+      id: '/hearth/runs'
+      path: '/runs'
+      fullPath: '/hearth/runs'
+      preLoaderRoute: typeof HearthRunsRouteImport
+      parentRoute: typeof HearthRoute
+    }
+    '/hearth/runtimes': {
+      id: '/hearth/runtimes'
+      path: '/runtimes'
+      fullPath: '/hearth/runtimes'
+      preLoaderRoute: typeof HearthRuntimesRouteImport
+      parentRoute: typeof HearthRoute
+    }
+    '/hearth/usage': {
+      id: '/hearth/usage'
+      path: '/usage'
+      fullPath: '/hearth/usage'
+      preLoaderRoute: typeof HearthUsageRouteImport
+      parentRoute: typeof HearthRoute
+    }
     '/settings/me': {
       id: '/settings/me'
       path: '/me'
@@ -502,6 +628,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiAuthSplatRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/hearth/bindings/$projectId': {
+      id: '/hearth/bindings/$projectId'
+      path: '/$projectId'
+      fullPath: '/hearth/bindings/$projectId'
+      preLoaderRoute: typeof HearthBindingsProjectIdRouteImport
+      parentRoute: typeof HearthBindingsRoute
+    }
     '/settings/project/$projectId': {
       id: '/settings/project/$projectId'
       path: '/project/$projectId'
@@ -511,6 +644,39 @@ declare module '@tanstack/react-router' {
     }
   }
 }
+
+interface HearthBindingsRouteChildren {
+  HearthBindingsProjectIdRoute: typeof HearthBindingsProjectIdRoute
+}
+
+const HearthBindingsRouteChildren: HearthBindingsRouteChildren = {
+  HearthBindingsProjectIdRoute: HearthBindingsProjectIdRoute,
+}
+
+const HearthBindingsRouteWithChildren = HearthBindingsRoute._addFileChildren(
+  HearthBindingsRouteChildren,
+)
+
+interface HearthRouteChildren {
+  HearthAgentsRoute: typeof HearthAgentsRoute
+  HearthBindingsRoute: typeof HearthBindingsRouteWithChildren
+  HearthProvidersRoute: typeof HearthProvidersRoute
+  HearthRunsRoute: typeof HearthRunsRoute
+  HearthRuntimesRoute: typeof HearthRuntimesRoute
+  HearthUsageRoute: typeof HearthUsageRoute
+}
+
+const HearthRouteChildren: HearthRouteChildren = {
+  HearthAgentsRoute: HearthAgentsRoute,
+  HearthBindingsRoute: HearthBindingsRouteWithChildren,
+  HearthProvidersRoute: HearthProvidersRoute,
+  HearthRunsRoute: HearthRunsRoute,
+  HearthRuntimesRoute: HearthRuntimesRoute,
+  HearthUsageRoute: HearthUsageRoute,
+}
+
+const HearthRouteWithChildren =
+  HearthRoute._addFileChildren(HearthRouteChildren)
 
 interface SettingsRouteChildren {
   SettingsMeRoute: typeof SettingsMeRoute
@@ -533,7 +699,7 @@ const SettingsRouteWithChildren = SettingsRoute._addFileChildren(
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   ChatRoute: ChatRoute,
-  HearthRoute: HearthRoute,
+  HearthRoute: HearthRouteWithChildren,
   InviteRoute: InviteRoute,
   LoginRoute: LoginRoute,
   SetPasswordRoute: SetPasswordRoute,

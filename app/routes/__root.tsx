@@ -50,9 +50,14 @@ export const Route = createRootRouteWithContext<RouterContext>()({
 function RootComponent() {
   const { queryClient } = Route.useRouteContext();
   return (
-    <html lang="en">
+    <html lang="en" suppressHydrationWarning>
       <head>
         <HeadContent />
+        <script
+          dangerouslySetInnerHTML={{
+            __html: "try{var t=localStorage.getItem('lexa:theme');document.documentElement.dataset.theme=t==='light'?'light':'dark'}catch{}",
+          }}
+        />
       </head>
       <body>
         <QueryClientProvider client={queryClient}>

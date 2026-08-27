@@ -65,9 +65,8 @@ const indentPadding: Record<number, number> = {
 };
 
 function getIndentPadding(level: number, isActive: boolean): number {
-  const base = indentPadding[level] ?? indentPadding[5];
-  // @ts-expect-error — strict: exactOptional indexedAccess
-  return isActive ? base - 2 : base!;
+  const base = (indentPadding[level] ?? indentPadding[5]!)!;
+  return isActive ? base - 2 : base;
 }
 
 function renderSnippet(snippet: string): React.ReactNode {

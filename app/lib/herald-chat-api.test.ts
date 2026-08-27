@@ -35,8 +35,7 @@ describe("herald chat api", () => {
   it("updateHeraldChatMeta PATCHes {title?, pinned?}", async () => {
     fetchMock.mockResolvedValue(new Response(JSON.stringify({ chatId: "c1", pinned: true }), { status: 200 }));
     await api.updateHeraldChatMeta("c1", { pinned: true });
-    // @ts-expect-error — strict: exactOptional indexedAccess
-    const [url, init] = fetchMock.mock.calls[0];
+    const [url, init] = fetchMock.mock.calls[0]!;
     expect(url).toBe("/api/herald/chat/c1");
     expect(init.method).toBe("PATCH");
     expect(JSON.parse(init.body)).toEqual({ pinned: true });

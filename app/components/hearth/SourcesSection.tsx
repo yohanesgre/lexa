@@ -52,8 +52,7 @@ export function SourcesSection({ slug, documentType, documentId, className }: So
     if (!v) return;
     if (mention) {
       if (wikiMatches.length === 0) return;
-      // @ts-expect-error — strict: exactOptional indexedAccess
-      selectWiki(wikiMatches[highlight >= 0 ? highlight : 0!]);
+      selectWiki(wikiMatches[highlight >= 0 ? highlight : 0]!);
       return;
     }
     const looksLikeUrl = /^https?:\/\//i.test(v);
@@ -132,8 +131,7 @@ export function SourcesSection({ slug, documentType, documentId, className }: So
                 setHighlight((h) => (h - 1 + wikiMatches.length) % wikiMatches.length);
               } else if (e.key === "Enter" && dropdownOpen && wikiMatches.length > 0) {
                 e.preventDefault();
-                // @ts-expect-error — strict: exactOptional indexedAccess
-                selectWiki(wikiMatches[highlight >= 0 ? highlight : 0!]);
+                selectWiki(wikiMatches[highlight >= 0 ? highlight : 0]!);
               } else if (e.key === "Escape") {
                 setFocused(false);
               } else if (e.key === "Enter") {

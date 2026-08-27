@@ -337,6 +337,5 @@ function LaneRow({ lane, board, isAdmin, onEdit, onArchive, onRestore, onDelete 
 
 function shortDate(iso: string): string {
   const [y, m, d] = iso.split("-").map(Number);
-  // @ts-expect-error — strict: exactOptional indexedAccess
-  return new Date(Date.UTC(y, m - 1!, d)).toLocaleDateString("en-US", { month: "short", day: "numeric" });
+  return new Date(Date.UTC(y!, m! - 1, d!)).toLocaleDateString("en-US", { month: "short", day: "numeric" });
 }

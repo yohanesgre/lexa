@@ -95,8 +95,7 @@ function setImage(editor: NonNullable<ReturnType<typeof useEditor>>) {
     return;
   }
   const alt = window.prompt("Alt text (optional)")?.trim() ?? "";
-  // @ts-expect-error — strict: exactOptional indexedAccess
-  editor.chain().focus().setImage({ src: trimmed!, alt: alt || undefined }).run();
+  editor.chain().focus().setImage({ src: trimmed, ...(alt ? { alt } : {}) }).run();
 }
 
 export function Toolbar({

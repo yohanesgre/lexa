@@ -2028,6 +2028,7 @@ export function useDeleteAttachment(slug: string, documentType: "task" | "wiki",
 }
 
 // ── Herald (server-side assistant tier) ──
+// Cache keys: chat list ["herald-chats",projectId] vs doc thread ["herald-thread",projectId,docType,docId] vs single chat ["herald-chat",chatId] — distinct prefixes, no collision. Verified 2026-08-27 concern split.
 
 // Masked provider settings for a project. A missing row is the "not
 // configured" state, not an error — surfaced as null so surfaces can swap
@@ -2125,9 +2126,16 @@ export function useSaveHeraldSettings(projectId: string) {
   const toast = useToast();
   return useMutation({
     mutationFn: (input: HeraldSettingsInput) => api.putHeraldSettings(projectId, input),
-    onSuccess: (masked) => {
+    onSuccess: (masked, input) => {
       qc.setQueryData<HeraldSettingsMasked | null>(["herald-settings", projectId], masked);
-      toast.push("success", "Herald provider saved");
+      if (input.engine !== undefined) {
+        const label = input.engine === "blacksmith" ? "Blacksmith" : input.engine === "herald" ? "Herald" : String(input.engine);
+        toast.push("success", `Default engine updated to ${label}`);
+      } else if (input.engineSwitcherEnabled !== undefined) {
+        toast.push("success", input.engineSwitcherEnabled ? "Engine switcher enabled" : "Engine switcher disabled");
+      } else {
+        toast.push("success", "Herald provider saved");
+      }
     },
     onError: (err) => {
       toast.push("error", "Failed to save Herald provider", toastMessage(err));

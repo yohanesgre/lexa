@@ -424,10 +424,10 @@ function TaskDetailSlideover({ detail, detailProjectSlug, runtimes, logs, canVie
   );
 }
 
-export function HearthControlPanel() {
+export function HearthControlPanel({ embedded = false }: { embedded?: boolean }) {
   const portalTarget = typeof document !== "undefined" ? document.body : null;
   // ?task=<id> deep-link (navbar Hearth dropdown rows) — opens the record.
-  const search = useSearch({ from: "/hearth" });
+  const search = useSearch({ from: "/hearth/runs" });
   const [status, setStatus] = useState<HearthTaskStatus | null>(null);
   const [slug, setSlug] = useState("");
   const [skillId, setSkillId] = useState("");
@@ -441,8 +441,7 @@ export function HearthControlPanel() {
   }, [search.task]);
 
   const skills = useSkills();
-  // @ts-expect-error — strict: exactOptional indexedAccess
-  const history = useHearthTaskHistory({ slug: slug || undefined!, status: status ?? undefined, skillId: skillId || undefined }, cursor);
+  const history = useHearthTaskHistory({ ...(slug ? { slug } : {}), ...(status ? { status } : {}), ...(skillId ? { skillId } : {}) }, cursor);
   const runtimes = useRuntimes();
   const projects = useProjects();
   const selected = useHearthTask(selectedId, selectedId !== null);
@@ -484,13 +483,12 @@ export function HearthControlPanel() {
 
   const activeCount = (summary?.queued ?? 0) + (summary?.running ?? 0);
 
-  return (
+  const header = !embedded ? (
     <>
-      <main className="page-frame">
       <div className="flex items-center justify-between mb-3">
         <h1 className="font-display text-2xl weight-600 text-lx-text-primary mb-0">Hearth</h1>
         <div className="flex items-center gap-3">
-          <Link to="/settings" className="btn btn-ghost" style={{ height: 28, padding: "0 12px", fontSize: 12, textDecoration: "none", display: "inline-flex", alignItems: "center", gap: 6 }}>
+          <Link to="/hearth/runtimes" className="btn btn-ghost" style={{ height: 28, padding: "0 12px", fontSize: 12, textDecoration: "none", display: "inline-flex", alignItems: "center", gap: 6 }}>
             <LayoutGrid size={14} strokeWidth={1.5} />
             Hearth runtimes
           </Link>
@@ -499,12 +497,16 @@ export function HearthControlPanel() {
       <p className="text-sm text-lx-text-secondary mb-4" style={{ maxWidth: 560 }}>
         Every AI writing-assist run across all projects, newest first. Rows open the task record: activity feed, result, and failure details.
       </p>
+    </>
+  ) : null;
+
+  const body = (
+    <>
+      {header}
 
       {/* Summary strip — counts ride the history response (no separate aggregate endpoint) */}
       <SummaryStrip summary={summary} activeCount={activeCount} online={online} total={total} />
 
-
-      // @ts-expect-error — strict: exactOptional indexedAccess
       <FilterBar status={status} slug={slug} skillId={skillId} projects={projects} skills={skills} onReset={reset} />
 
 
@@ -591,18 +593,28 @@ export function HearthControlPanel() {
           />,
           portalTarget
         )}
-      </main>
+    </>
+  );
 
+  const inner = (
+    <>
+      {body}
       {logModalOpen && (
-// @ts-expect-error — strict: exactOptional indexedAccess
 <HearthTaskLogModal
         open={logModalOpen}
         onClose={() => setLogModalOpen(false)}
         task={detail}
         logs={logs.data ?? []}
-        runtimes={runtimes.data}
+        runtimes={runtimes.data ?? []}
       />
       )}
     </>
   );
+
+  if (embedded) return inner;
+  return <main className="page-frame page-frame-narrow">{inner}</main>;
+}
+
+export function HearthRunsContent() {
+  return <HearthControlPanel embedded />;
 }

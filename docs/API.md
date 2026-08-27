@@ -80,10 +80,10 @@ All non-2xx responses share one shape:
 | 502 | `PROVIDER_AUTH_FAILED` | Upstream 401/403 from the provider or Exa |
 | 502 | `PROVIDER_UNREACHABLE` | Provider network/timeout/DNS failure |
 | 502 | `HERALD_GENERATION_FAILED` | RUN_ERROR catch-all, malformed stream |
-| 502 | `HERALD_TOOL_BUDGET_EXCEEDED` | Tool round cap hit (document tasks `MAX_TOOL_ROUNDS=4`, freeform chat `MAX_CHAT_TOOL_ROUNDS=8`) |
+| 502 | `HERALD_TOOL_BUDGET_EXCEEDED` | Tool round cap hit (document tasks `MAX_TOOL_ROUNDS=12`, freeform chat `MAX_CHAT_TOOL_ROUNDS=24`) |
 | 409 | `HERALD_TASK_ACTIVE` | Thread reset or second chat stream while a Herald stream is running |
 | 404 | `HERALD_THREAD_NOT_FOUND` | Missing Herald thread row |
-| 409 | `VISION_NOT_CONFIGURED` | Attachments submitted while `primary_supports_images=0` AND `vision_model IS NULL` |
+| 409 | `VISION_NOT_CONFIGURED` | Attachments submitted while `primary_supports_images=0` (vision_model delegation removed in 0017) |
 | 409 | `ENGINE_NOT_SUPPORTED_FOR_CHAT` | Freeform chat while the project engine is `blacksmith` (chat always runs the herald lane) |
 
 Defined in the error map but never raised by any REST handler — do not match on them:
@@ -1730,13 +1730,13 @@ body { slug*, documentType*: "task"|"wiki", documentId*, prompt*, agentId*,
   attachments are image refs into the project's attachment storage
   (cross-project keys → 422); caps ≤5 images/message, ≤5MB each,
   png/jpeg/gif/webp only. Attachments require vision capability:
-  primary_supports_images=1 → inline parts; else vision_model configured →
-  internal analyze_image delegation; else 409 VISION_NOT_CONFIGURED.
+  primary_supports_images=1 → inline parts; else 409
+  VISION_NOT_CONFIGURED (`vision_model` delegation removed in 0017).
 → 201 HearthTask
   | 404 PROJECT_NOT_FOUND / TASK_NOT_FOUND / PAGE_NOT_FOUND / AGENT_NOT_FOUND / SKILL_NOT_FOUND
   | 409 PROVIDER_NOT_CONFIGURED          (no saved settings for the project)
   | 409 NO_RUNTIME_ONLINE                (engine=blacksmith, no daemon online)
-  | 409 VISION_NOT_CONFIGURED            (attachments, no vision chain)
+  | 409 VISION_NOT_CONFIGURED            (attachments, no vision chain — vision_model removed in 0017)
   | 422 INVALID_ARGS                     (attachment scope/caps)
 
 POST   /api/herald/tasks/:id/stream      (SSE — POST + fetch-stream, not EventSource)
@@ -1784,8 +1784,8 @@ body { projectId*, chatId*, message*, agentId?, skillId?,
   stream minus taskId (frames carry chatId). Second concurrent stream on the
   same chatId → 409 HERALD_TASK_ACTIVE. Image caps tighter than
   document-Herald: ≤3/message, ≤1.5MB total request; vision resolution as on
-  task create (inline parts / analyze_image delegation / 409
-  VISION_NOT_CONFIGURED).
+  task create (inline parts / 409 VISION_NOT_CONFIGURED — vision_model
+  delegation removed in 0017).
   | 400 NO_USER_CONTEXT | 409 PROVIDER_NOT_CONFIGURED / HERALD_TASK_ACTIVE
   | 409 ENGINE_NOT_SUPPORTED_FOR_CHAT / VISION_NOT_CONFIGURED
   | 422 INVALID_ARGS

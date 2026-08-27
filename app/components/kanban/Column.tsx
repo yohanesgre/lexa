@@ -19,8 +19,7 @@ interface ColumnProps {
 }
 
 export function Column({ id, children, data, isEmpty, slug, columnId, swimlaneId, priorities = [], types = [], onOpenCreate }: ColumnProps) {
-  // @ts-expect-error — strict: exactOptional indexedAccess
-  const { setNodeRef, isOver } = useDroppable({ id, data });
+  const { setNodeRef, isOver } = useDroppable({ id, ...(data ? { data } : {}) });
   const empty = isEmpty ?? false;
   const [showForm, setShowForm] = useState(false);
   const [title, setTitle] = useState("");

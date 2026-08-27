@@ -22,17 +22,15 @@ function toTree(headings: HeadingOutline[]): TreeNode[] {
   const stack: TreeNode[] = [];
   for (const h of headings) {
     while (stack.length > 0) {
-      const parent = stack[stack.length - 1];
-      // @ts-expect-error — strict: exactOptional indexedAccess
-      if (parent.level < h.level!) break;
+      const parent = stack[stack.length - 1]!;
+      if (parent.level < h.level) break;
       stack.pop();
     }
     const node: TreeNode = { key: h.id, title: h.text, children: [], level: h.level };
     if (stack.length === 0) {
       root.push(node);
     } else {
-      // @ts-expect-error — strict: exactOptional indexedAccess
-      stack[stack.length - 1!].children.push(node);
+      stack[stack.length - 1]!.children.push(node);
     }
     stack.push(node);
   }

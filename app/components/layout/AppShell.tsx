@@ -51,7 +51,7 @@ export function AppShell() {
 
   const routeType: "home" | "dashboard" | "board" | "tasks" | "wiki" | "chat" | "milestones" | "swimlanes" | "settings" | "hearth" = useMemo(() => {
     if (pathname === "/") return "home";
-    if (pathname === "/hearth") return "hearth";
+    if (pathname === "/hearth" || pathname.startsWith("/hearth/")) return "hearth";
     if (pathname === "/settings" || pathname.startsWith("/settings/")) return "settings";
     if (pathname.match(/^\/[^/]+\/board$/)) return "board";
     if (pathname.match(/^\/[^/]+\/tasks$/)) return "tasks";

@@ -29,8 +29,8 @@ only), popover, logs/activity machinery. Per-project engine switching
 gate; personal-overlay member toggle is client-side session preference, admin
 writes the default; freeform chat always herald → 409
 `ENGINE_NOT_SUPPORTED_FOR_CHAT` under blacksmith). Vision chain:
-`primarySupportsImages` checkbox → inline vs `vision_model` delegation merged
-into primary provider vs 409 `VISION_NOT_CONFIGURED`. Full Forge→Hearth
+`primarySupportsImages` checkbox → inline vs 409 `VISION_NOT_CONFIGURED`
+(`vision_model` delegation removed in 0017). Full Forge→Hearth
 identifier rename (tables `hearth_tasks`/`hearth_task_logs`/`hearth_sessions`,
 routes `/api/hearth/*`, header `x-hearth-token`, env `HEARTH_*/LXK_HEARTH_DAEMON_TOKEN`,
 activity `hearth_*`, CLI state) via migration 0015 — breaking reinstall. The

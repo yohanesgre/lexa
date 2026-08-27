@@ -23,7 +23,7 @@ export interface BoardLaneProps {
   flashColumnId: string | null;
   collapsed: ReadonlySet<string>;
   toggleLane: (laneId: string) => void;
-  onOpenCreateTask?: (columnId: string, laneId: string) => void;
+  onOpenCreateTask?: ((columnId: string, laneId?: string | undefined) => void) | undefined;
   onSelectTask: (t: Task) => void;
   newTaskIds: Set<string>;
   shakeTaskId: string | null;

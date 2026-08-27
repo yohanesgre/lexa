@@ -278,12 +278,11 @@ ACTIVE and co-exist; the run popover picks per-run. Design rationale:
   only. Toggle renders only when `engine_switcher_enabled=1`.
 - **Skills via junction:** per-agent skill availability =
   `lexa_agent_skills` junction rows, admin-editable — no JSON columns.
-- **Vision chain:** `primarySupportsImages` checkbox drives three outcomes:
-  primary supports images → inline image parts; else configured `vision_model`
-  → internal `analyze_image` tool delegation merged into the primary provider
-  (same kind/api_key/base_url, only model differs; tool frame suppressed from
-  member UI); else attachments rejected up front with 409
-  `VISION_NOT_CONFIGURED`.
+- **Vision chain:** `primarySupportsImages` checkbox drives two outcomes:
+  primary supports images → inline image parts; else attachments rejected
+  up front with 409 `VISION_NOT_CONFIGURED` (`vision_model` delegation
+  removed in 0017 — columns kind/base_url/api_key/model/vision_model
+  dropped; legacy compat check remains but never fires).
 - **Full identifier rename (2026-08-24, migration 0015):** Forge→Hearth tables,
   routes, headers, env, activity types, service/file names, CLI state — see
   intro paragraph. Breaking change gated by atomic migration + mandatory
@@ -294,9 +293,8 @@ assistant lane while another routes generation through daemon runtimes —
 `herald_settings.engine` is the admin-written project default; the member
 toggle is a personal overlay (client-side session preference) shown only when
 `engine_switcher_enabled=1`. Skill availability per agent = junction rows only.
-Vision: `primary_supports_images=1` → inline image parts; else configured
-`vision_model` → internal `analyze_image` delegation (frame suppressed from
-member UI); else attachments rejected up front (`VISION_NOT_CONFIGURED`).
+Vision: `primary_supports_images=1` → inline image parts; else
+`VISION_NOT_CONFIGURED` (`vision_model` delegation removed in 0017).
 
 - **Shared queue with a discriminator:** both tiers ride `hearth_tasks`;
   `kind` ∈ `'herald' | 'blacksmith'`. `claimNextTask` carries

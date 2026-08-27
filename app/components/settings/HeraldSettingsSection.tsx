@@ -290,14 +290,16 @@ export function HeraldProviderSection({ project }: { project: Project }) {
         {/* Vision — folded into provider config (no standalone section) */}
         <div className="field">
           <label className="field-label">Primary model vision</label>
-          <label className="check-row" style={{ cursor: "pointer", display: "inline-flex", alignItems: "flex-start", gap: 4 }}>
+          <label className="check-row" style={{ cursor: "pointer" }}>
             <input
               type="checkbox"
               checked={supportsImages}
               onChange={(e) => setSupportsImages(e.target.checked)}
               aria-label="Primary model accepts images directly"
+              style={{ position: "absolute", opacity: 0, width: 14, height: 14 }}
             />
-            <span className="text-sm text-lx-text-secondary">&nbsp;Primary model accepts images directly (inline image parts)</span>
+            <div className={`checkbox${supportsImages ? " checked" : ""}`} aria-hidden="true" />
+            <span className="text-sm text-lx-text-secondary">Primary model accepts images directly (inline image parts)</span>
           </label>
           <div className="field-hint">Tick when the configured model is multimodal — images ride inline in the same request, no second provider needed.</div>
         </div>
@@ -565,11 +567,10 @@ export function HeraldWriteToolsSection({ project }: { project: Project }) {
           </label>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "4px 24px", background: "var(--lx-surface-input)", border: "1px solid var(--lx-border-default)", borderRadius: 6, padding: "10px 12px" }}>
             {HERALD_WRITE_TOOLS.map((tool) => (
-              <label key={tool} className="check-row" style={{ cursor: "pointer", padding: "2px 0" }}>
+              <label key={tool} className="check-row" style={{ cursor: "pointer" }}>
                 <input type="checkbox" checked={selected.includes(tool)} onChange={() => toggleTool(tool)} aria-label={tool} style={{ position: "absolute", opacity: 0, width: 14, height: 14 }} />
                 <div className={`checkbox${selected.includes(tool) ? " checked" : ""}`} aria-hidden="true" />
-                &nbsp;
-                <span className={`font-mono text-xs ${selected.includes(tool) ? "text-lx-text-primary" : "text-lx-text-secondary"}`}>{tool}</span>
+                <span className="text-sm text-lx-text-secondary">{tool.split("_").map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join(" ")}</span>
               </label>
             ))}
           </div>
@@ -792,7 +793,7 @@ function AgentSkillColumn({ agentId, agents, skills, onToggle }: {
       </div>
       <div style={{ background: "var(--lx-surface-input)", border: "1px solid var(--lx-border-default)", borderRadius: 6, padding: "10px 12px", display: "flex", flexDirection: "column", gap: 6 }}>
         {skills.map((skill) => (
-          <label key={skill.id} className="check-row" style={{ cursor: "pointer", display: "flex", alignItems: "center", gap: 4 }}>
+          <label key={skill.id} className="check-row" style={{ cursor: "pointer" }}>
             <input
               type="checkbox"
               checked={attached.has(skill.id)}
@@ -801,8 +802,10 @@ function AgentSkillColumn({ agentId, agents, skills, onToggle }: {
                 onToggle(agent.id, next);
               }}
               aria-label={`${skill.name} — ${agent.name}`}
+              style={{ position: "absolute", opacity: 0, width: 14, height: 14 }}
             />
-            <span className="text-sm text-lx-text-secondary">&nbsp;{skill.name}</span>
+            <div className={`checkbox${attached.has(skill.id) ? " checked" : ""}`} aria-hidden="true" />
+            <span className="text-sm text-lx-text-secondary">{skill.name}</span>
           </label>
         ))}
       </div>

@@ -56,7 +56,7 @@ describe("HeraldGateway", () => {
     spy.mockImplementation(((input: { config: { model: string } }) => {
       if (input.config.model === "model-a") {
         return (async function* () {
-          throw new ProviderAuthFailed({});
+          throw new ProviderUnreachable({ message: "rate limited", status: 429 } as never);
         })();
       }
       return (async function* () {
@@ -109,7 +109,7 @@ describe("HeraldGateway", () => {
     spy.mockImplementation(((input: { config: { kind: string; baseUrl: string } }) => {
       seen.push(provider.normalizeBaseUrl(input.config.baseUrl, input.config.kind as never));
       return (async function* () {
-        throw new ProviderAuthFailed({});
+        throw new ProviderUnreachable({});
       })();
     }) as never);
 
@@ -176,11 +176,11 @@ describe("HeraldGateway", () => {
     expect(calls).toBe(3);
   });
 
-  it("continues on ProviderAuthFailed/ProviderUnreachable/HeraldGenerationFailed, surfaces last error", async () => {
+  it("continues on ProviderUnreachable/HeraldGenerationFailed, surfaces aggregated error", async () => {
     const spy = vi.spyOn(provider, "streamChat");
     spy.mockImplementation((() =>
       (async function* () {
-        throw new ProviderUnreachable({});
+        throw new ProviderUnreachable({ message: "unreachable", status: 503 } as never);
       })()) as never);
 
     const gatewayLayer = HeraldGateway.Default.pipe(
@@ -213,7 +213,7 @@ describe("HeraldGateway", () => {
     });
 
     const tag = await Effect.runPromise(program.pipe(Effect.provide(gatewayLayer))) as unknown as string;
-    expect(tag).toBe("ProviderUnreachable");
+    expect(tag).toBe("HeraldGenerationFailed");
   });
 
   it("configForModel builds per-model ProviderConfig with fresh adapter per attempt", () => {

@@ -24,12 +24,8 @@ import { Toolbar } from "./TextEditor";
 import { textEditorExtensions } from "../lib/tiptap";
 import { SourcesSection } from "./hearth/SourcesSection";
 import { LinksSection } from "./hearth/LinksSection";
-import { HearthReviewSurface } from "./hearth/HearthReviewSurface";
-import { useHearthReview } from "./hearth/useHearthReview";
 import { ActivityTab } from "./activity/ActivityTab";
 import { cn } from "./ui/cn";
-import { useEditor, EditorContent } from "@tiptap/react";
-import type { JSONContent } from "@tiptap/core";
 
 
 
@@ -39,7 +35,7 @@ type RequiredFieldName = "assignee" | "description";
 
 interface TaskDetailProps {
   mode?: "view" | "create";
-  task?: Task;
+  task?: Task | undefined;
   project?: { name: string };
   defaultColumnId?: string | undefined;
   columns?: { id: string; name: string; githubState?: "open" | "closed" | null }[];
@@ -148,7 +144,6 @@ export function TaskDetail({ mode = "view", task, project, defaultColumnId, colu
     createDueAt, setCreateDueAt,
     creating,
     handleCreate,
-  // @ts-expect-error — strict: exactOptional indexedAccess
   } = useTaskDetailActions({
     task,
     defaultColumnId,
@@ -278,7 +273,6 @@ export function TaskDetail({ mode = "view", task, project, defaultColumnId, colu
           setSelectedColumnId={setSelectedColumnId}
           selectedSwimlaneId={selectedSwimlaneId}
           setSelectedSwimlaneId={setSelectedSwimlaneId}
-          // @ts-expect-error — strict: exactOptional indexedAccess
           onUpdate={onUpdate!}
           onMove={onMove!}
           createColumnId={createColumnId}

@@ -996,13 +996,11 @@ export class HeraldService extends Effect.Service<HeraldService>()("Lexa/Herald"
   preference) — it never writes `herald_settings.engine`; that column is the
   admin-written project default. The toggle renders only when
   `engine_switcher_enabled=1`.
-- **Vision resolution chain** (three outcomes, evaluated in order):
+- **Vision resolution chain** (two outcomes; `vision_model` delegation
+  removed in 0017 — columns kind/base_url/api_key/model/vision_model
+  dropped, legacy compat check remains but never fires):
   1. `primary_supports_images=1` → inline image parts on the primary model.
-  2. else `vision_model` configured → internal `analyze_image` tool
-     delegation on the PRIMARY provider — same kind/api_key/base_url, only
-     the model differs; the tool frame is SUPPRESSED
-     from member UI (internal plumbing, not a user-visible chip).
-  3. else attachments are rejected up front with `VisionNotConfigured`
+  2. else attachments are rejected up front with `VisionNotConfigured`
      (409) — never a mid-stream failure.
 - **Two-agent seed constants:** the single `DEFAULT_AGENT` ('lexa') is
   replaced by two builtin seed constants — `hearth-herald` ("Herald Agent",
@@ -1110,7 +1108,7 @@ All list endpoints: `?limit` (default 50, max 200) + cursor (opaque: `"<columnId
 | `HeraldToolBudgetExceeded` | 502 | tool round cap hit (document tasks `MAX_TOOL_ROUNDS=12`, freeform chat `MAX_CHAT_TOOL_ROUNDS=24`) |
 | `HeraldTaskActive` | 409 | thread reset or second chat stream while a Herald stream is running |
 | `HeraldThreadNotFound` | 404 | missing thread row (`herald_threads`) |
-| `VisionNotConfigured` | 409 | attachments submitted while `primary_supports_images=0` AND `vision_model IS NULL` |
+| `VisionNotConfigured` | 409 | attachments submitted while `primary_supports_images=0` (vision_model delegation removed in 0017) |
 | `EngineNotSupportedForChat` | 409 | freeform chat while the project engine is `blacksmith` |
 | `ApprovalNotFound` | 404 | unknown approval id, or not the pending row's owner (owner mismatch hidden as NotFound) |
 | `ApprovalExpired` | 409 | decide on a row past its 24h TTL — lazily flipped to `expired` first |

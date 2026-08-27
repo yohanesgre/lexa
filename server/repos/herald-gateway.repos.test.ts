@@ -37,10 +37,10 @@ describe("herald gateway phase 1", () => {
       const idx = (db.prepare("SELECT name FROM sqlite_master WHERE type='index'").all() as { name: string }[]).map((r) => r.name);
       expect(idx).toEqual(expect.arrayContaining(["idx_call_logs_project_time","idx_call_logs_provider","idx_call_logs_model","idx_herald_models_provider"]));
       const provSql = (db.prepare("SELECT sql FROM sqlite_master WHERE name='herald_models'").get() as { sql: string }).sql;
-      expect(provSql).toContain("CHECK (kind IN ('openai_compatible','anthropic_compatible'))");
+      expect(provSql).toContain("CHECK (kind IN ('openai_compatible','anthropic_compatible','openai_responses'))");
       const logsSql = (db.prepare("SELECT sql FROM sqlite_master WHERE name='herald_call_logs'").get() as { sql: string }).sql;
       expect(logsSql).toContain("CHECK (status IN ('done','error','suspended','aborted'))");
-      expect(logsSql).toContain("CHECK (kind IN ('openai_compatible','anthropic_compatible'))");
+      expect(logsSql).toContain("CHECK (kind IN ('openai_compatible','anthropic_compatible','openai_responses'))");
       const provCols = (db.prepare("PRAGMA table_info(herald_providers)").all() as { name: string }[]).map((c) => c.name);
       expect(provCols).not.toContain("project_id");
       db.close();

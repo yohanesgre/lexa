@@ -78,6 +78,7 @@ export function useHeraldUsage(filters: HeraldUsageFilters) {
     queryFn: () => requestJson<HeraldUsageResponse>(`/api/admin/herald/usage${buildQuery(filters)}`),
     retry: false,
     staleTime: 30_000,
+    refetchOnWindowFocus: false,
   });
 }
 
@@ -87,6 +88,7 @@ export function useProjectHeraldUsage(slug: string, filters: Omit<HeraldUsageFil
     queryFn: () => requestJson<HeraldUsageResponse>(`/api/projects/${encodeURIComponent(slug)}/herald/usage${buildQuery(filters as HeraldUsageFilters)}`),
     retry: false,
     staleTime: 30_000,
+    refetchOnWindowFocus: false,
     enabled: !!slug,
   });
 }
@@ -114,6 +116,7 @@ export function useHeraldPrices() {
     queryFn: () => requestJson<{ data: HeraldPriceRow[] }>(`/api/admin/herald/prices`),
     retry: false,
     staleTime: 30_000,
+    refetchOnWindowFocus: false,
   });
 }
 

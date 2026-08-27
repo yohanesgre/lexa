@@ -65,9 +65,39 @@ export class InvalidGithubSettings extends Data.TaggedError("InvalidGithubSettin
 export class NoUserContext extends Data.TaggedError("NoUserContext")<{}> {}
 export class HearthSessionActive extends Data.TaggedError("HearthSessionActive")<{}> {}
 export class ProviderNotConfigured extends Data.TaggedError("ProviderNotConfigured")<{ projectId: string }> {}
-export class ProviderAuthFailed extends Data.TaggedError("ProviderAuthFailed")<{ message?: string }> {}
-export class ProviderUnreachable extends Data.TaggedError("ProviderUnreachable")<{ message?: string }> {}
-export class HeraldGenerationFailed extends Data.TaggedError("HeraldGenerationFailed")<{ message: string }> {}
+export class ProviderAuthFailed extends Data.TaggedError("ProviderAuthFailed")<{
+  message?: string;
+  status?: number | null;
+  providerMessage?: string | null;
+  raw?: string | null;
+  rawEvent?: string | null;
+  upstreamBody?: string | null;
+  retryAfter?: number | null;
+  attempts?: unknown;
+  errorTag?: string | null;
+}> {}
+export class ProviderUnreachable extends Data.TaggedError("ProviderUnreachable")<{
+  message?: string;
+  status?: number | null;
+  providerMessage?: string | null;
+  raw?: string | null;
+  rawEvent?: string | null;
+  upstreamBody?: string | null;
+  retryAfter?: number | null;
+  attempts?: unknown;
+  errorTag?: string | null;
+}> {}
+export class HeraldGenerationFailed extends Data.TaggedError("HeraldGenerationFailed")<{
+  message: string;
+  status?: number | null;
+  providerMessage?: string | null;
+  raw?: string | null;
+  rawEvent?: string | null;
+  upstreamBody?: string | null;
+  retryAfter?: number | null;
+  attempts?: unknown;
+  errorTag?: string | null;
+}> {}
 export class HeraldToolBudgetExceeded extends Data.TaggedError("HeraldToolBudgetExceeded")<{ rounds: number }> {}
 export class HeraldTaskActive extends Data.TaggedError("HeraldTaskActive")<{}> {}
 export class HeraldThreadNotFound extends Data.TaggedError("HeraldThreadNotFound")<{ documentType: string; documentId: string }> {}
@@ -388,7 +418,7 @@ export function errorMessage(error: { _tag: string } & Record<string, unknown>):
     case "NoUserContext":
       return "No user context — this endpoint needs a session or a key bound to a user";
     case "ProviderNotConfigured":
-      return `Herald provider is not configured for this project — set it up in Settings`;
+      return `Herald provider is not configured for this project — enable at least one model in Workspace → Herald Providers`;
     case "ProviderAuthFailed":
       return typeof error.message === "string" && error.message ? error.message : "The AI provider rejected the API key";
     case "ProviderUnreachable":

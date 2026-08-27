@@ -196,7 +196,7 @@ export function HearthStatus() {
                     style={{ height: "auto", padding: "8px 10px", alignItems: "flex-start", flexDirection: "column", gap: 2, cursor: "pointer", position: "relative" }}
                   >
                     <Link
-                      to="/hearth"
+                      to="/hearth/runs"
                       search={{ task: t.id }}
                       onClick={() => setOpen(false)}
                       className="flex flex-col w-full"
@@ -265,7 +265,7 @@ export function HearthStatus() {
               })
             )}
             <Link
-              to="/hearth"
+              to="/hearth/runs"
               role="menuitem"
               onClick={() => setOpen(false)}
               className="dropdown-item"
@@ -276,7 +276,7 @@ export function HearthStatus() {
             </Link>
             <div className="dropdown-separator" />
             <Link
-              to="/settings"
+              to="/hearth/runtimes"
               role="menuitem"
               onClick={() => setOpen(false)}
               className="dropdown-item"

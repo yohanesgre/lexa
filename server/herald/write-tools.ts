@@ -131,8 +131,8 @@ export function buildTaskRestoreDiff(task: WriteTaskSnapshot): Extract<HeraldWri
   return { type: "task_restore", taskRef: task.key, taskTitle: task.title, toColumn: task.columnName };
 }
 
-export function buildMilestoneCreateDiff(input: { name: string; dueAt?: string | undefined }): Extract<HeraldWriteDiff, { type: "milestone_create" }> {
-  return { type: "milestone_create", name: input.name, ...(input.dueAt !== undefined ? { dueAt: input.dueAt } : {}) };
+export function buildMilestoneCreateDiff(input: { name: string; dueAt?: string | null | undefined }): Extract<HeraldWriteDiff, { type: "milestone_create" }> {
+  return { type: "milestone_create", name: input.name, ...(input.dueAt !== undefined && input.dueAt !== null ? { dueAt: input.dueAt } : {}) };
 }
 
 // sprintsAffected omitted when the milestone has no live sprints — the chip
@@ -228,19 +228,23 @@ export function createWriteRecorder(
         .toISOString()
         .slice(0, 19)
         .replace("T", " ");
-      await insert({
-        id: approvalId,
-        projectId: turn.projectId,
-        documentType: turn.documentType,
-        documentId: turn.documentId,
-        ownerUserId: turn.ownerUserId,
-        batchId,
-        seq: rowSeq,
-        toolName: proposal.name,
-        args: JSON.stringify(proposal.args),
-        diff: JSON.stringify(proposal.diff),
-        expiresAt,
-      });
+      try {
+        await insert({
+          id: approvalId,
+          projectId: turn.projectId,
+          documentType: turn.documentType,
+          documentId: turn.documentId,
+          ownerUserId: turn.ownerUserId,
+          batchId,
+          seq: rowSeq,
+          toolName: proposal.name,
+          args: JSON.stringify(proposal.args),
+          diff: JSON.stringify(proposal.diff),
+          expiresAt,
+        });
+      } catch (e) {
+        return { error: String((e as { message?: string }).message ?? "failed to queue write") };
+      }
       queue.push({
         approvalId,
         batchId,
@@ -286,7 +290,12 @@ async function record(deps: HeraldWriteToolDeps, proposal: { name: HeraldWriteTo
   return { ok: true, value: r };
 }
 
-const tipTapDoc = z.custom<TipTapDoc>((v) => typeof v === "object" && v !== null && (v as { type?: unknown }).type === "doc");
+const tipTapDoc = z
+  .object({
+    type: z.literal("doc"),
+    content: z.array(z.object({ type: z.string() }).passthrough()).optional(),
+  })
+  .passthrough() as unknown as z.ZodType<TipTapDoc, TipTapDoc>;
 
 export function buildHeraldWriteTools(deps: HeraldWriteToolDeps) {
   const tools = [];
@@ -520,8 +529,8 @@ export function buildHeraldWriteTools(deps: HeraldWriteToolDeps) {
   tools.push(
     toolDefinition({
       name: "create_milestone",
-      description: "Propose creating a milestone. Requires user approval.",
-      inputSchema: z.object({ name: z.string().min(1).max(200), dueAt: z.string().optional() }),
+      description: "Propose creating a milestone. Omit optional dueAt if not provided; never send \"None\" string. Requires user approval.",
+      inputSchema: z.object({ name: z.string().min(1).max(200), dueAt: z.string().optional().nullable() }),
       outputSchema: z.object({ proposed: z.boolean(), approvalId: z.string().optional(), error: z.string().optional() }),
     }).server(async (args) => {
       const diff = buildMilestoneCreateDiff(args);

@@ -42,9 +42,13 @@ export class HeraldPendingWritesRepo extends Effect.Service<HeraldPendingWritesR
         )
       );
 
+    const sweepExpiredInternal = (): Effect.Effect<number, DbError | ConstraintViolation> =>
+      run(db, `UPDATE herald_pending_writes SET status = 'expired' WHERE status = 'pending' AND expires_at <= datetime('now')`).pipe(Effect.catchAll(() => Effect.succeed(0 as number)));
+
     const getById = (id: string): Effect.Effect<HeraldPendingWriteRow | null, DbError> =>
-      queryFirst<HeraldPendingWriteRow>(db, `SELECT * FROM herald_pending_writes WHERE id = ?`, id).pipe(
-        Effect.catchTag("RowNotFound", () => Effect.succeed(null))
+      sweepExpiredInternal().pipe(
+        Effect.flatMap(() => queryFirst<HeraldPendingWriteRow>(db, `SELECT * FROM herald_pending_writes WHERE id = ?`, id).pipe(Effect.catchTag("RowNotFound", () => Effect.succeed(null)))),
+        Effect.catchAll(() => queryFirst<HeraldPendingWriteRow>(db, `SELECT * FROM herald_pending_writes WHERE id = ?`, id).pipe(Effect.catchTag("RowNotFound", () => Effect.succeed(null))))
       );
 
     // Conditional decide — only a 'pending' row moves. Returns the updated
@@ -76,20 +80,27 @@ export class HeraldPendingWritesRepo extends Effect.Service<HeraldPendingWritesR
                WHERE status = 'pending' AND expires_at <= datetime('now')`);
 
     const listByBatch = (batchId: string): Effect.Effect<HeraldPendingWriteRow[], DbError> =>
-      queryAll<HeraldPendingWriteRow>(
-        db,
-        `SELECT * FROM herald_pending_writes WHERE batch_id = ? ORDER BY seq ASC`,
-        batchId
+      sweepExpiredInternal().pipe(
+        Effect.flatMap(() =>
+          queryAll<HeraldPendingWriteRow>(db, `SELECT * FROM herald_pending_writes WHERE batch_id = ? ORDER BY seq ASC`, batchId)
+        ),
+        Effect.catchAll(() => queryAll<HeraldPendingWriteRow>(db, `SELECT * FROM herald_pending_writes WHERE batch_id = ? ORDER BY seq ASC`, batchId))
       );
 
     const countByBatchRemaining = (batchId: string): Effect.Effect<number, DbError> =>
-      queryFirst<{ n: number }>(
-        db,
-        `SELECT COUNT(*) AS n FROM herald_pending_writes WHERE batch_id = ? AND status = 'pending'`,
-        batchId
-      ).pipe(
-        Effect.map((r) => r.n),
-        Effect.catchTag("RowNotFound", () => Effect.succeed(0))
+      sweepExpiredInternal().pipe(
+        Effect.flatMap(() =>
+          queryFirst<{ n: number }>(db, `SELECT COUNT(*) AS n FROM herald_pending_writes WHERE batch_id = ? AND status = 'pending'`, batchId).pipe(
+            Effect.map((r) => r.n),
+            Effect.catchTag("RowNotFound", () => Effect.succeed(0))
+          )
+        ),
+        Effect.catchAll(() =>
+          queryFirst<{ n: number }>(db, `SELECT COUNT(*) AS n FROM herald_pending_writes WHERE batch_id = ? AND status = 'pending'`, batchId).pipe(
+            Effect.map((r) => r.n),
+            Effect.catchTag("RowNotFound", () => Effect.succeed(0))
+          )
+        )
       );
 
     const markExecutionError = (id: string, error: string): Effect.Effect<void, DbError | ConstraintViolation> =>

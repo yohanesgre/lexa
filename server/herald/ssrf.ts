@@ -1,4 +1,5 @@
 import { Data } from "effect";
+import { lookup } from "node:dns/promises";
 
 export const FETCH_URL_TEXT_CAP = 512 * 1024;
 export const FETCH_URL_PDF_CAP = 5 * 1024 * 1024;
@@ -12,8 +13,8 @@ function isPrivateIpv4(host: string): boolean {
   if (!m) return false;
   const octets = [Number(m[1]!), Number(m[2]!), Number(m[3]!), Number(m[4]!)];
   if (octets.some((n) => n > 255)) return false;
-  const a = octets[0]!; // length 4 guaranteed
-  const b = octets[1]!; // length 4 guaranteed
+  const a = octets[0]!;
+  const b = octets[1]!;
   if (a === 0 || a === 10 || a === 127) return true;
   if (a === 169 && b === 254) return true;
   if (a === 172 && b >= 16 && b <= 31) return true;
@@ -38,8 +39,6 @@ function isBlockedHost(hostname: string): boolean {
   return false;
 }
 
-// Hostname suffix match: "example.com" allows "example.com" and
-// "api.example.com" but not "notexample.com".
 export function hostAllowed(hostname: string, allowlist: string | null): boolean {
   if (allowlist === null || allowlist.trim() === "") return true;
   const hosts = allowlist
@@ -51,9 +50,22 @@ export function hostAllowed(hostname: string, allowlist: string | null): boolean
   return hosts.some((h) => target === h || target.endsWith(`.${h}`));
 }
 
-// Validate one hop. Re-run for every redirect location — a redirect never
-// bypasses scheme/IP/allowlist checks.
-export function validateUrl(raw: string, allowlist: string | null): URL {
+async function validateIpBlocks(hostname: string): Promise<void> {
+  let addrs: Array<{ address: string }>;
+  try {
+    addrs = await lookup(hostname, { all: true });
+  } catch {
+    return;
+  }
+  for (const a of addrs) {
+    const ip = a.address;
+    if (isPrivateIpv4(ip) || isPrivateIpv6(ip)) {
+      throw new UrlBlocked({ reason: "private or reserved addresses are blocked" });
+    }
+  }
+}
+
+export async function validateUrl(raw: string, allowlist: string | null): Promise<URL> {
   let url: URL;
   try {
     url = new URL(raw);
@@ -69,5 +81,6 @@ export function validateUrl(raw: string, allowlist: string | null): URL {
   if (!hostAllowed(url.hostname, allowlist)) {
     throw new UrlBlocked({ reason: "host is not on the project's URL allowlist" });
   }
+  await validateIpBlocks(url.hostname);
   return url;
 }

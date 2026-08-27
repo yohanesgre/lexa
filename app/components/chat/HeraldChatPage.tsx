@@ -31,7 +31,8 @@ import { HeraldActivity } from "./HeraldActivity";
 import { EffortPicker } from "./EffortPicker";
 import { ApprovalChipRow, HeraldApprovalBatch, SuspendedIndicator, type ApprovalChip } from "./HeraldApprovals";
 import type { HeraldTimelineItem, HeraldToolChip } from "../../lib/use-herald-stream";
-import type { HeraldReasoningEffort } from "../../../shared/herald";
+import { deriveChatTitle, type HeraldReasoningEffort } from "../../../shared/herald";
+import type { HeraldChatThreadSummary } from "../../lib/api";
 
 // Herald Chat — dedicated /$slug/chat route (herald-chat.html +
 // herald-chat-upgrades.html). Multi-thread per (project, user): the History
@@ -71,7 +72,7 @@ interface ChatTurn {
   error?: { code: string; message: string };
   stopped?: boolean | undefined;
   // Post-stream activity snapshot frozen at suspend time (session memory).
-  activity?: ActivityView;
+  activity?: ActivityView | undefined;
   // Frozen write-approval batch (herald-write-approvals.html): chips live in
   // session memory from the tool_pending frames; decisions mutate them here.
   batch?: { batchId: string; chips: ApprovalChip[] };
@@ -118,7 +119,7 @@ export type ErrorGuidance = "settings" | "info" | "retry";
 
 export function guidanceFor(code: string): ErrorGuidance {
   if (code === "PROVIDER_AUTH_FAILED") return "settings";
-  if (/RATE|UNREACHABLE/.test(code)) return "retry";
+  if (/RATE|UNREACHABLE|GENERATION_FAILED/.test(code)) return "retry";
   return "info";
 }
 
@@ -233,7 +234,7 @@ function useCopied(): [boolean, () => void] {
   return [copied, mark];
 }
 
-export function HeraldChatPage({ slug, thread }: { slug: string; thread?: string }) {
+export function HeraldChatPage({ slug, thread }: { slug: string; thread?: string | undefined }) {
   const qc = useQueryClient();
   const navigate = useNavigate({ from: "/$slug/chat" });
   const { data: projects = [] } = useProjects();
@@ -257,12 +258,10 @@ export function HeraldChatPage({ slug, thread }: { slug: string; thread?: string
     if (resolved || projects.length === 0) return;
     if (!projectFromList && !projectError && project === undefined) return;
     const fallback = projects[0];
-    // @ts-expect-error — strict: exactOptional indexedAccess
-    if (fallback.slug === slug!) return;
+    if (!fallback || fallback.slug === slug) return;
     void navigate({
       to: "/$slug/chat",
-      // @ts-expect-error — strict: exactOptional indexedAccess
-      params: { slug: fallback.slug! },
+      params: { slug: fallback!.slug },
       search: thread ? { thread } : {},
       replace: true,
     });
@@ -360,33 +359,42 @@ export function HeraldChatPage({ slug, thread }: { slug: string; thread?: string
   const { data: settings, isLoading: settingsLoading } = useHeraldSettings(projectId);
 
   // Transcript render on load (GET /api/herald/chat/:chatId). A fresh uuid
-  // 404s — that IS the empty-thread state, not an error.
+  // 404s — that IS the empty-thread state, not an error. HERALD_THREAD_NOT_FOUND
+  // is handled silently (no retry, no throw, no console spam) and falls back.
   const transcript = useQuery({
     queryKey: ["herald-chat", chatId],
     queryFn: () => api.getHeraldChat(chatId),
     enabled: !!chatId && !!projectId,
     retry: false,
+    throwOnError: false,
     staleTime: Infinity,
   });
+
+  const streamKey = projectId ? `herald-chat:${chatId}` : null;
+  const stream = useHeraldStream(streamKey);
+  const streaming = stream.status === "connecting" || stream.status === "streaming";
 
   const [turns, setTurns] = useState<ChatTurn[] | null>(null);
   useEffect(() => {
     if (transcript.error) {
+      if (stream.status === "error" && stream.hasIngress) return;
       setTurns([]);
       return;
     }
     if (!transcript.data) return;
-    // Server truth replaces the optimistic view — EXCEPT while an approval
-    // batch is live in this tab: the frozen chips are session memory the
-    // transcript payload cannot reconstruct (it carries no chip payloads),
-    // so a late/resumed fetch must not wipe them mid-flow.
     setTurns((prev) => {
       const liveApproval = (prev ?? []).some(
         (t) => t.batch?.chips.some((c) => c.state === "pending") || t.suspendedBatchId
       );
-      return liveApproval ? prev : renderTranscript(transcript.data!.messages);
+      if (liveApproval) return prev;
+      if (stream.status === "error" && stream.hasIngress) {
+        const serverTurns = renderTranscript(transcript.data!.messages);
+        const hasFailed = serverTurns.some((t) => !!t.error);
+        if (!hasFailed && (prev ?? []).length > serverTurns.length) return prev;
+      }
+      return renderTranscript(transcript.data!.messages);
     });
-  }, [transcript.data, transcript.error]);
+  }, [transcript.data, transcript.error, stream.status, stream.hasIngress]);
 
   const { data: agents = [] } = useAgents();
   const { data: skills = [] } = useSkills();
@@ -417,13 +425,62 @@ export function HeraldChatPage({ slug, thread }: { slug: string; thread?: string
   const heraldSkills = skills.filter((s) => heraldSkillIds.has(s.id));
   const effectiveSkillId = heraldSkillIds.has(skillId) ? skillId : "";
 
-  const streamKey = projectId ? `herald-chat:${chatId}` : null;
-  const stream = useHeraldStream(streamKey);
-  const streaming = stream.status === "connecting" || stream.status === "streaming";
+  const pendingTitleRef = useRef<string | null>(null);
+  const ingressInsertedRef = useRef<Set<string>>(new Set());
+  const knownChatIdsRef = useRef<Set<string>>(new Set());
+  const initialLastRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!projectId) return;
+    try {
+      initialLastRef.current = window.localStorage.getItem(`lexa-chat-last:${projectId}`);
+    } catch {}
+  }, [projectId]);
+  useEffect(() => {
+    if (listQuery.data) {
+      for (const t of listQuery.data) knownChatIdsRef.current.add(t.chatId);
+    }
+  }, [listQuery.data]);
 
   useEffect(() => {
     setEffort("");
   }, [chatId]);
+
+  useEffect(() => {
+    if (!projectId || !chatId) return;
+    if (transcript.isLoading) return;
+    if (!transcript.error) return;
+    const code = (transcript.error as { code?: string }).code;
+    const notFound = code === "HERALD_THREAD_NOT_FOUND" || code === "NOT_FOUND" || (transcript.error as Error).message?.includes("404");
+    if (!notFound) return;
+    if (stream.hasIngress) return;
+    if (!listQuery.data) return;
+    if (listQuery.data.length === 0 && !knownChatIdsRef.current.has(chatId) && thread === chatId && initialLastRef.current !== chatId) return;
+    if (thread === chatId && !knownChatIdsRef.current.has(chatId) && initialLastRef.current !== chatId) return;
+    const staleId = chatId;
+    qc.cancelQueries({ queryKey: ["herald-chat", staleId] });
+    qc.removeQueries({ queryKey: ["herald-chat", staleId] });
+    try { window.localStorage.removeItem(`lexa-chat-last:${projectId}`); } catch {}
+    if (thread) void navigate({ search: {}, replace: true });
+    const head = listQuery.data?.[0]?.chatId;
+    if (head && head !== staleId) applyChatId(head);
+    else setChatId("");
+  }, [projectId, chatId, transcript.error, transcript.isLoading, thread, navigate, qc, listQuery.data, applyChatId, stream.hasIngress]);
+
+  useEffect(() => {
+    if (!projectId || !chatId || !listQuery.data || listQuery.isLoading) return;
+    if (thread === chatId && !knownChatIdsRef.current.has(chatId) && initialLastRef.current !== chatId) return;
+    if (listQuery.data.length === 0 && !knownChatIdsRef.current.has(chatId) && initialLastRef.current !== chatId) return;
+    if (thread && listQuery.data.length > 0 && !listQuery.data.some((t) => t.chatId === chatId) && !stream.hasIngress && transcript.error) {
+      const staleId = chatId;
+      qc.cancelQueries({ queryKey: ["herald-chat", staleId] });
+      qc.removeQueries({ queryKey: ["herald-chat", staleId] });
+      try { window.localStorage.removeItem(`lexa-chat-last:${projectId}`); } catch {}
+      void navigate({ search: {}, replace: true });
+      const head = listQuery.data[0]?.chatId;
+      if (head && head !== staleId) applyChatId(head);
+      else setChatId("");
+    }
+  }, [projectId, chatId, listQuery.data, listQuery.isLoading, thread, stream.hasIngress, transcript.error, navigate, qc, applyChatId]);
 
   const [input, setInput] = useState("");
   const [images, setImages] = useState<HeraldImage[]>([]);
@@ -441,12 +498,12 @@ export function HeraldChatPage({ slug, thread }: { slug: string; thread?: string
   const pendingCount = batchChips.filter((c) => c.state === "pending").length;
   const hasSuspendedMarker = (turns ?? []).some((t) => !!t.suspendedBatchId);
   const suspendedLock = pendingCount > 0 || hasSuspendedMarker || stream.status === "suspended";
-  const suspendTally =
-    batchChips.length === 0
-      ? ""
-      : pendingCount === batchChips.length
-        ? `${pendingCount} pending`
-        : `${pendingCount} of ${batchChips.length} pending`;
+  const suspendTally = (() => {
+    const effectiveTotal = batchChips.length > 0 ? batchChips.length : stream.pending.length;
+    const effectivePending = batchChips.length > 0 ? pendingCount : stream.pending.length;
+    if (effectiveTotal === 0) return "";
+    return effectivePending === effectiveTotal ? `${effectivePending} pending` : `${effectivePending} of ${effectiveTotal} pending`;
+  })();
 
   // Engine gate (herald-chat.html): chat ALWAYS runs the herald lane — under
   // a blacksmith project default every stream fails up front, so the banner
@@ -462,20 +519,59 @@ export function HeraldChatPage({ slug, thread }: { slug: string; thread?: string
 
   const skillName = skills.find((s) => s.id === effectiveSkillId)?.name;
 
-  // Terminal stream states refetch the transcript so persisted partials,
-  // errors and citations appear without a reload.
   useEffect(() => {
     if (!chatId) return;
-    // Terminal stream states refetch the transcript so persisted partials,
-    // errors and citations appear without a reload. The sidebar list
-    // refreshes here too — the thread row + derived title are persisted
-    // server-side exactly at these boundaries, so this is the earliest
-    // moment a fresh thread can appear.
     if (stream.status === "done" || stream.status === "error" || stream.status === "aborted" || stream.status === "suspended") {
-      void qc.invalidateQueries({ queryKey: ["herald-chat", chatId] });
+      const code = (transcript.error as { code?: string } | null)?.code;
+      const isNotFound = code === "HERALD_THREAD_NOT_FOUND" || code === "NOT_FOUND";
+      if (isNotFound) {
+        qc.cancelQueries({ queryKey: ["herald-chat", chatId] });
+        qc.removeQueries({ queryKey: ["herald-chat", chatId] });
+      } else {
+        void qc.invalidateQueries({ queryKey: ["herald-chat", chatId] });
+      }
       if (projectId) void qc.invalidateQueries({ queryKey: ["herald-chats", projectId] });
     }
-  }, [stream.status, chatId, projectId, qc]);
+  }, [stream.status, chatId, projectId, qc, transcript.error]);
+
+  useEffect(() => {
+    if (!projectId || !chatId) return;
+    if (!stream.hasIngress) return;
+    if (ingressInsertedRef.current.has(chatId)) return;
+    ingressInsertedRef.current.add(chatId);
+    const now = new Date().toISOString();
+    const raw = pendingTitleRef.current ?? "";
+    const derived = raw ? deriveChatTitle(raw) : "";
+    const title: string | null = derived ? derived : null;
+    const sortThreads = (threads: HeraldChatThreadSummary[]) =>
+      [...threads].sort((a, b) => {
+        if (a.pinned !== b.pinned) return a.pinned ? -1 : 1;
+        return b.updatedAt.localeCompare(a.updatedAt);
+      });
+    const entry: HeraldChatThreadSummary = {
+      chatId,
+      title,
+      pinned: false,
+      snippet: null,
+      createdAt: now,
+      updatedAt: now,
+    };
+    const queries = qc.getQueriesData<HeraldChatThreadSummary[]>({ queryKey: ["herald-chats", projectId] });
+    if (queries.length === 0) {
+      qc.setQueryData<HeraldChatThreadSummary[]>(["herald-chats", projectId, null], sortThreads([entry]));
+    } else {
+      for (const [key] of queries) {
+        qc.setQueryData<HeraldChatThreadSummary[]>(key, (old) => {
+          if (!old) return old;
+          const exists = old.some((t) => t.chatId === chatId);
+          if (exists) return sortThreads(old.map((t) => (t.chatId === chatId ? { ...t, updatedAt: now } : t)));
+          const q = (key[2] as string | null) ?? null;
+          if (q !== null) return old;
+          return sortThreads([...old, entry]);
+        });
+      }
+    }
+  }, [stream.hasIngress, chatId, projectId, qc]);
 
   const rawMessages = useMemo(() => transcript.data?.messages ?? [], [transcript.data]);
 
@@ -489,6 +585,8 @@ export function HeraldChatPage({ slug, thread }: { slug: string; thread?: string
         applyChatId(threadId);
         void navigate({ search: { thread: threadId }, replace: true });
       }
+      pendingTitleRef.current = message.trim();
+      ingressInsertedRef.current.delete(threadId);
       stream.send("/api/herald/chat/stream", {
         projectId,
         chatId: threadId,
@@ -648,6 +746,44 @@ export function HeraldChatPage({ slug, thread }: { slug: string; thread?: string
     // eslint-disable-next-line react-hooks/exhaustive-deps -- freeze once per suspended batch; snapshot fields are read at flip time
   }, [stream.status]);
 
+  const frozeErrorRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (stream.status !== "error" || !stream.hasIngress) return;
+    const key = `${stream.error?.code ?? "HERALD_GENERATION_FAILED"}:${stream.text}:${stream.error?.message ?? ""}`;
+    if (frozeErrorRef.current === key) return;
+    frozeErrorRef.current = key;
+    const activity: ActivityView | undefined =
+      stream.items.length > 0 || stream.tools.length > 0 || stream.reasoningMs !== null || stream.reasoningText
+        ? { items: stream.items, tools: stream.tools, reasoningMs: stream.reasoningMs }
+        : undefined;
+    setTurns((prev) => {
+      const arr = prev ?? [];
+      const last = arr[arr.length - 1];
+      if (last?.role === "assistant" && last.error?.code === (stream.error?.code ?? "HERALD_GENERATION_FAILED")) return arr;
+      if (last?.role === "assistant" && last.error) {
+        const errorVal = stream.error ?? last.error;
+        return arr.map((t, i) => (i === arr.length - 1 ? { ...t, text: stream.text || t.text, error: errorVal, ...(activity ? { activity } : {}) } : t));
+      }
+      const ephemeral: ChatTurn = {
+        role: "assistant",
+        text: stream.text,
+        imageCount: 0,
+        rawIndex: -1,
+        error: stream.error ?? { code: "HERALD_GENERATION_FAILED", message: "stream stalled — no response from provider" },
+        ...(activity ? { activity } : {}),
+      };
+      return [...arr, ephemeral];
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- freeze once per error snapshot; fields read at flip time
+  }, [stream.status, stream.hasIngress, stream.text, stream.error, stream.items, stream.tools, stream.reasoningMs, stream.reasoningText]);
+
+  useEffect(() => {
+    frozeErrorRef.current = null;
+  }, [chatId]);
+  useEffect(() => {
+    if (stream.status === "connecting" || stream.status === "streaming") frozeErrorRef.current = null;
+  }, [stream.status]);
+
   const updateChip = useCallback((approvalId: string, patch: Partial<ApprovalChip> & { state: ApprovalChip["state"] }) => {
     setTurns((prev) =>
       (prev ?? []).map((t) => {
@@ -708,6 +844,7 @@ export function HeraldChatPage({ slug, thread }: { slug: string; thread?: string
       if (!b || resumedBatchesRef.current.has(b.batchId)) continue;
       if (b.chips.some((c) => c.state === "pending")) return;
       resumedBatchesRef.current.add(b.batchId);
+      ingressInsertedRef.current.delete(chatId);
       stream.send(`/api/herald/chat/${chatId}/resume`, {});
       return;
     }
@@ -776,9 +913,11 @@ export function HeraldChatPage({ slug, thread }: { slug: string; thread?: string
         onRename={(id, title) => renameChat.mutateAsync({ chatId: id, title })}
         onDelete={(id) =>
           deleteChat.mutateAsync({ chatId: id }).then(() => {
-            // Deleting the active thread lands on a fresh chat — the dead
-            // uuid would 404 its transcript and linger in localStorage.
-            if (id === chatId) startNewChat();
+            if (id === chatId) {
+              try { window.localStorage.removeItem(`lexa-chat-last:${projectId}`); } catch {}
+              setChatId("");
+              void navigate({ search: {}, replace: true });
+            }
           })
         }
         open={sidebarOpen}
@@ -830,10 +969,14 @@ export function HeraldChatPage({ slug, thread }: { slug: string; thread?: string
                           rows={2}
                           value={editDraft}
                           onChange={(e) => setEditDraft(e.target.value)}
+                          placeholder="Enter save, Shift+Enter newline"
+                          title="Enter save, Shift+Enter newline"
                           onKeyDown={(e) => {
                             if (e.key === "Enter" && !e.shiftKey) {
                               e.preventDefault();
                               commitEdit(pos);
+                            } else if (e.key === "Enter" && e.shiftKey) {
+                              // allow newline
                             }
                             if (e.key === "Escape") {
                               e.preventDefault();
@@ -877,7 +1020,6 @@ export function HeraldChatPage({ slug, thread }: { slug: string; thread?: string
                     )}
                   </div>
                  ) : (
-                   // @ts-expect-error — strict: exactOptional indexedAccess
                    <AssistantBubble
                      key={pos}
                      turn={turn}
@@ -917,17 +1059,17 @@ export function HeraldChatPage({ slug, thread }: { slug: string; thread?: string
                 )}
              </div>
             </div>
-            {!atBottom && (
-              <button
-                type="button"
-                className="btn btn-ghost btn-icon-sm chat-jump-bottom"
-                title="Jump to latest"
-                aria-label="Jump to latest"
-                onClick={() => scrollToBottom(true)}
-              >
-                <ArrowDown size={14} strokeWidth={1.5} />
-              </button>
-            )}
+            <button
+              type="button"
+              className="btn btn-ghost btn-icon-sm chat-jump-bottom"
+              title="Jump to latest"
+              aria-label="Jump to latest"
+              aria-hidden={atBottom ? "true" : "false"}
+              style={atBottom ? { opacity: 0, pointerEvents: "none" } : undefined}
+              onClick={() => scrollToBottom(true)}
+            >
+              <ArrowDown size={14} strokeWidth={1.5} />
+            </button>
           </div>
 
           {/* Composer */}
@@ -987,8 +1129,7 @@ export function HeraldChatPage({ slug, thread }: { slug: string; thread?: string
                       <>
                         {mention.items.some((it) => it.refType === "task") && <div className="dropdown-label">Tasks</div>}
                         {mention.items.map((it, idx) =>
-                          // @ts-expect-error — strict: exactOptional indexedAccess
-                          idx > 0 && mention.items[idx - 1!].refType !== it.refType && (
+                          idx > 0 && mention.items[idx - 1]!.refType !== it.refType && (
                             <div key={`sep-${idx}`} className="dropdown-separator" />
                           )
                         )}
@@ -1023,7 +1164,7 @@ export function HeraldChatPage({ slug, thread }: { slug: string; thread?: string
                 <textarea
                   ref={composerRef}
                   className="composer-editor w-full"
-                  rows={2}
+                  rows={streaming || suspendedLock ? 1 : 2}
                   placeholder={streaming ? "Herald is responding…" : suspendedLock ? "Decide the pending changes above…" : "Ask Herald anything about this project…"}
                   value={input}
                   onChange={mention.handleChange}
@@ -1046,7 +1187,7 @@ export function HeraldChatPage({ slug, thread }: { slug: string; thread?: string
                       <button
                         type="button"
                         className="btn btn-ghost btn-sm"
-                        style={{ borderColor: "rgba(255,68,68,0.45)", color: "var(--lx-text-danger)" }}
+                        style={{ borderColor: "var(--lx-bg-danger-subtle)", color: "var(--lx-text-danger)" }}
                         onClick={() => stream.abort()}
                       >
                         <Square size={12} strokeWidth={1.5} fill="currentColor" />
@@ -1130,7 +1271,7 @@ function AssistantBubble({
   projectId?: string | undefined;
   streaming: boolean;
   renderText: (text: string) => ReactNode;
-  activity?: ActivityView;
+  activity?: ActivityView | undefined;
   batchBusy: boolean;
   onDecide: (chip: ApprovalChip, verdict: "approve" | "reject") => void;
   onApproveAll: (chips: ApprovalChip[]) => void;
@@ -1161,9 +1302,10 @@ function AssistantBubble({
         <div
           style={{
             background: "var(--lx-bg-danger-subtle)",
-            border: "1px solid rgba(220,38,38,0.25)",
-            borderRadius: "12px 12px 12px 4px",
+            border: "1px solid var(--lx-bg-danger-subtle)",
+            borderRadius: "6px",
             padding: "10px 14px",
+            overflow: "hidden",
           }}
         >
           <div className="font-mono text-xs font-medium" style={{ color: "var(--lx-text-danger)" }}>{turn.error.code}</div>

@@ -81,7 +81,6 @@ export function SortableTaskCard({
         }
       }}
     >
-      // @ts-expect-error — strict: exactOptional indexedAccess
       <TaskCard
         {...cardProps(task, board)}
         dimmed={dimmed}

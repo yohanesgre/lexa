@@ -7,8 +7,7 @@ import { CreateProjectModal } from "../components/CreateProjectModal";
 import { useProjectSelection } from "../lib/project-selection";
 
 export const Route = createFileRoute("/")({
-  // @ts-expect-error — strict: exactOptional indexedAccess
-  validateSearch: (search: Record<string, unknown>): { new?: boolean } => ({
+  validateSearch: (search: Record<string, unknown>): { new?: boolean | undefined } => ({
     new: search.new === "1" || search.new === true ? true : undefined,
   }),
   loader: async ({ context }) => {
