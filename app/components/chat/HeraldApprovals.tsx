@@ -37,13 +37,24 @@ function targetFor(diff: HeraldWriteDiff): string {
     case "task_move":
     case "task_archive":
     case "task_restore":
+    case "task_delete":
     case "comment":
       return diff.taskRef;
     case "wiki_create":
     case "wiki_edit":
+    case "wiki_delete":
       return diff.slug;
-    default:
+    case "milestone_create":
+    case "milestone_update":
+    case "milestone_archive":
+    case "milestone_delete":
+    case "sprint_create":
+    case "sprint_update":
+    case "sprint_archive":
+    case "sprint_delete":
       return diff.name;
+    case "swimlane_move":
+      return diff.swimlaneName;
   }
 }
 
@@ -175,6 +186,38 @@ function DiffBody({ chip }: { chip: ApprovalChip }) {
       return <FieldList rows={[{ label: "Name", value: d.name, primary: true }]} />;
     case "sprint_update":
       return <DiffTable changes={d.changes ?? []} />;
+    case "task_delete":
+      return (
+        <ConfirmLine>
+          Deletes <span className="font-mono text-lx-text-primary">{d.taskRef}</span> — &ldquo;{d.taskTitle}&rdquo;. This cannot be undone.
+        </ConfirmLine>
+      );
+    case "wiki_delete":
+      return (
+        <ConfirmLine>
+          Deletes page <span className="font-mono text-lx-text-primary">{d.slug}</span> — &ldquo;{d.title}&rdquo;.
+        </ConfirmLine>
+      );
+    case "milestone_delete":
+      return (
+        <ConfirmLine>
+          Deletes milestone <span className="text-lx-text-primary">{d.name}</span>.
+        </ConfirmLine>
+      );
+    case "sprint_archive":
+      return (
+        <ConfirmLine>
+          Archives sprint <span className="text-lx-text-primary">{d.name}</span>. Its live tasks archive with it.
+        </ConfirmLine>
+      );
+    case "sprint_delete":
+      return (
+        <ConfirmLine>
+          Deletes sprint <span className="text-lx-text-primary">{d.name}</span>.
+        </ConfirmLine>
+      );
+    case "swimlane_move":
+      return <MovePills from={d.fromMilestone ?? "Backlog"} to={d.toMilestone ?? "Backlog"} />;
   }
 }
 

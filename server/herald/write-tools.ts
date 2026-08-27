@@ -21,14 +21,20 @@ export const HERALD_WRITE_TOOL_NAMES = [
   "move_task",
   "archive_task",
   "restore_task",
+  "delete_task",
   "add_comment",
   "create_wiki_page",
   "edit_wiki_page",
+  "delete_wiki_page",
   "create_milestone",
   "update_milestone",
   "archive_milestone",
+  "delete_milestone",
   "create_sprint",
   "update_sprint",
+  "archive_sprint",
+  "delete_sprint",
+  "move_swimlane",
 ] as const;
 
 export type HeraldWriteToolName = (typeof HERALD_WRITE_TOOL_NAMES)[number];
@@ -154,6 +160,41 @@ export function buildSprintCreateDiff(input: { name: string; startAt?: string | 
   };
 }
 
+export function buildTaskDeleteDiff(task: WriteTaskSnapshot): Extract<HeraldWriteDiff, { type: "task_delete" }> {
+  return { type: "task_delete", taskRef: task.key, taskTitle: cap(task.title, 60) };
+}
+
+export function buildWikiDeleteDiff(page: { slug: string; title: string }): Extract<HeraldWriteDiff, { type: "wiki_delete" }> {
+  return { type: "wiki_delete", slug: page.slug, title: cap(page.title, 60) };
+}
+
+export function buildMilestoneDeleteDiff(input: { name: string }): Extract<HeraldWriteDiff, { type: "milestone_delete" }> {
+  return { type: "milestone_delete", name: cap(input.name, 60) };
+}
+
+export function buildSprintArchiveDiff(input: { name: string }): Extract<HeraldWriteDiff, { type: "sprint_archive" }> {
+  return { type: "sprint_archive", name: cap(input.name, 60) };
+}
+
+export function buildSprintDeleteDiff(input: { name: string }): Extract<HeraldWriteDiff, { type: "sprint_delete" }> {
+  return { type: "sprint_delete", name: cap(input.name, 60) };
+}
+
+export function buildSwimlaneMoveDiff(input: {
+  swimlaneId: string;
+  swimlaneName: string;
+  fromMilestone: string | null;
+  toMilestone: string | null;
+}): Extract<HeraldWriteDiff, { type: "swimlane_move" }> {
+  return {
+    type: "swimlane_move",
+    swimlaneId: input.swimlaneId,
+    swimlaneName: cap(input.swimlaneName, 60),
+    fromMilestone: input.fromMilestone ? cap(input.fromMilestone, 60) : null,
+    toMilestone: input.toMilestone ? cap(input.toMilestone, 60) : null,
+  };
+}
+
 function change(field: string, before: string | null, after: string | null) {
   return { field, before: before === "" ? null : before, after: after === "" ? null : after };
 }
@@ -171,6 +212,8 @@ export interface WriteSwimlaneSnapshot {
   id: string;
   name: string;
   kind: "backlog" | "milestone" | "sprint";
+  archivedAt: string | null;
+  milestoneId: string | null;
 }
 
 export interface RecordedProposal {
@@ -386,7 +429,7 @@ export function buildHeraldWriteTools(deps: HeraldWriteToolDeps) {
     toolDefinition({
       name: "move_task",
       description:
-        "Propose moving a task to another column (optionally another swimlane, optionally before/after a neighbor in the target column). Requires user approval.",
+        "Move task to another column and/or swimlane (fellow column / sprint). Provide toColumnId for column move, toSwimlaneId for swimlane move, both together allowed. Optionally before/after a neighbor in the target column. Requires user approval.",
       inputSchema: z.object({
         ref: z.string().min(1).describe("Task id or PREFIX-n key"),
         toColumnId: z.string().min(1),
@@ -626,6 +669,118 @@ export function buildHeraldWriteTools(deps: HeraldWriteToolDeps) {
       if (changes.length === 0) return { proposed: false, error: "no fields to update" };
       const diff: HeraldWriteDiff = { type: "sprint_update", name: args.name ?? lane.value.name, changes };
       const r = await record(deps, { name: "update_sprint", args, diff, detail: `Update sprint "${cap(lane.value.name, 60)}"` });
+      if (!r.ok) return { proposed: false, error: r.error };
+      return { proposed: true, approvalId: r.value.approvalId };
+    })
+  );
+
+  tools.push(
+    toolDefinition({
+      name: "delete_task",
+      description: "Propose deleting a task (hard delete — fails if it has subtasks). Requires user approval.",
+      inputSchema: z.object({ ref: z.string().min(1).describe("Task id or PREFIX-n key") }),
+      outputSchema: z.object({ proposed: z.boolean(), approvalId: z.string().optional(), error: z.string().optional() }),
+    }).server(async (args) => {
+      const task = await resolveOrError(deps.findTaskByRef(args.ref), `task '${args.ref}' not found`);
+      if (!task.ok) return { proposed: false, error: task.error };
+      const diff = buildTaskDeleteDiff(task.value);
+      const r = await record(deps, { name: "delete_task", args, diff, detail: `Delete ${task.value.key} "${cap(task.value.title, 40)}"` });
+      if (!r.ok) return { proposed: false, error: r.error };
+      return { proposed: true, approvalId: r.value.approvalId };
+    })
+  );
+
+  tools.push(
+    toolDefinition({
+      name: "delete_wiki_page",
+      description: "Propose deleting a wiki page (fails if it has children). Requires user approval.",
+      inputSchema: z.object({ slug: z.string().min(1) }),
+      outputSchema: z.object({ proposed: z.boolean(), approvalId: z.string().optional(), error: z.string().optional() }),
+    }).server(async (args) => {
+      const page = await resolveOrError(deps.findWikiPageBySlug(args.slug), `wiki page '${args.slug}' not found`);
+      if (!page.ok) return { proposed: false, error: page.error };
+      const diff = buildWikiDeleteDiff(page.value);
+      const r = await record(deps, { name: "delete_wiki_page", args, diff, detail: `Delete page "${cap(page.value.title, 60)}"` });
+      if (!r.ok) return { proposed: false, error: r.error };
+      return { proposed: true, approvalId: r.value.approvalId };
+    })
+  );
+
+  tools.push(
+    toolDefinition({
+      name: "delete_milestone",
+      description: "Propose deleting a milestone (fails if it has sprints). Requires user approval.",
+      inputSchema: z.object({ milestoneId: z.string().min(1) }),
+      outputSchema: z.object({ proposed: z.boolean(), approvalId: z.string().optional(), error: z.string().optional() }),
+    }).server(async (args) => {
+      const m = await resolveOrError(deps.findMilestone(args.milestoneId), `milestone '${args.milestoneId}' not found`);
+      if (!m.ok) return { proposed: false, error: m.error };
+      const diff = buildMilestoneDeleteDiff({ name: m.value.name });
+      const r = await record(deps, { name: "delete_milestone", args, diff, detail: `Delete milestone "${cap(m.value.name, 60)}"` });
+      if (!r.ok) return { proposed: false, error: r.error };
+      return { proposed: true, approvalId: r.value.approvalId };
+    })
+  );
+
+  tools.push(
+    toolDefinition({
+      name: "archive_sprint",
+      description: "Propose archiving a sprint lane (its live tasks archive with it; Backlog cannot be archived). Requires user approval.",
+      inputSchema: z.object({ swimlaneId: z.string().min(1) }),
+      outputSchema: z.object({ proposed: z.boolean(), approvalId: z.string().optional(), error: z.string().optional() }),
+    }).server(async (args) => {
+      const lane = await resolveOrError(deps.findSwimlane(args.swimlaneId), `sprint '${args.swimlaneId}' not found`);
+      if (!lane.ok) return { proposed: false, error: lane.error };
+      if (lane.value.kind !== "sprint") return { proposed: false, error: `'${lane.value.name}' is not a sprint` };
+      const diff = buildSprintArchiveDiff({ name: lane.value.name });
+      const r = await record(deps, { name: "archive_sprint", args, diff, detail: `Archive sprint "${cap(lane.value.name, 60)}"` });
+      if (!r.ok) return { proposed: false, error: r.error };
+      return { proposed: true, approvalId: r.value.approvalId };
+    })
+  );
+
+  tools.push(
+    toolDefinition({
+      name: "delete_sprint",
+      description: "Propose deleting a sprint lane (fails if it has tasks; Backlog cannot be deleted). Requires user approval.",
+      inputSchema: z.object({ swimlaneId: z.string().min(1) }),
+      outputSchema: z.object({ proposed: z.boolean(), approvalId: z.string().optional(), error: z.string().optional() }),
+    }).server(async (args) => {
+      const lane = await resolveOrError(deps.findSwimlane(args.swimlaneId), `sprint '${args.swimlaneId}' not found`);
+      if (!lane.ok) return { proposed: false, error: lane.error };
+      if (lane.value.kind !== "sprint") return { proposed: false, error: `'${lane.value.name}' is not a sprint` };
+      const diff = buildSprintDeleteDiff({ name: lane.value.name });
+      const r = await record(deps, { name: "delete_sprint", args, diff, detail: `Delete sprint "${cap(lane.value.name, 60)}"` });
+      if (!r.ok) return { proposed: false, error: r.error };
+      return { proposed: true, approvalId: r.value.approvalId };
+    })
+  );
+
+  tools.push(
+    toolDefinition({
+      name: "move_swimlane",
+      description: "Propose moving a swimlane (sprint) to another milestone, or to Backlog/unassigned when milestoneId is null. Requires user approval.",
+      inputSchema: z.object({ swimlaneId: z.string().min(1), milestoneId: z.string().nullable() }),
+      outputSchema: z.object({ proposed: z.boolean(), approvalId: z.string().optional(), error: z.string().optional() }),
+    }).server(async (args) => {
+      const lane = await resolveOrError(deps.findSwimlane(args.swimlaneId), `swimlane '${args.swimlaneId}' not found`);
+      if (!lane.ok) return { proposed: false, error: lane.error };
+      if (lane.value.kind !== "sprint") return { proposed: false, error: `'${lane.value.name}' is not a sprint` };
+      if (lane.value.archivedAt) return { proposed: false, error: `sprint '${lane.value.name}' is archived` };
+      let fromMilestone: string | null = null;
+      if (lane.value.milestoneId) {
+        const from = await deps.findMilestone(lane.value.milestoneId).catch(() => null);
+        fromMilestone = from?.name ?? null;
+      }
+      let toMilestone: string | null = null;
+      if (args.milestoneId !== null) {
+        const m = await resolveOrError(deps.findMilestone(args.milestoneId), `milestone '${args.milestoneId}' not found`);
+        if (!m.ok) return { proposed: false, error: m.error };
+        toMilestone = m.value.name;
+      }
+      const diff = buildSwimlaneMoveDiff({ swimlaneId: lane.value.id, swimlaneName: lane.value.name, fromMilestone, toMilestone });
+      const detail = `Move swimlane "${cap(lane.value.name, 60)}" → ${toMilestone ? `"${cap(toMilestone, 60)}"` : "Backlog"}`;
+      const r = await record(deps, { name: "move_swimlane", args, diff, detail });
       if (!r.ok) return { proposed: false, error: r.error };
       return { proposed: true, approvalId: r.value.approvalId };
     })

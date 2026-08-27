@@ -36,7 +36,7 @@ describe("runMigrations", () => {
   it("applies the real migrations dir and records _migrations", () => {
     const dbPath = join(tmpDir(), "app.db");
     runMigrations(dbPath, MIGRATIONS);
-    expect(appliedMigrations(dbPath)).toEqual(["0001_init.sql", "0002_project_repos.sql", "0003_forge_sessions.sql", "0004_auth_roles_teams.sql", "0005_milestones_sprints.sql", "0006_drop_mcp_connected.sql", "0007_task_keys.sql", "0008_wiki_share_links.sql", "0009_attachments.sql", "0010_herald.sql", "0011_chat_threads.sql", "0012_chat_pins.sql", "0013_hearth_engine.sql", "0014_herald_reasoning_effort.sql", "0015_hearth_rename.sql", "0016_herald_write_tools.sql", "0017_herald_gateway.sql", "0018_herald_gateway_fallback_and_priority.sql", "0019_herald_provider_health.sql", "0020_herald_kind_alias.sql", "0021_herald_project_provider_binding.sql"]);
+    expect(appliedMigrations(dbPath)).toEqual(["0001_init.sql", "0002_project_repos.sql", "0003_forge_sessions.sql", "0004_auth_roles_teams.sql", "0005_milestones_sprints.sql", "0006_drop_mcp_connected.sql", "0007_task_keys.sql", "0008_wiki_share_links.sql", "0009_attachments.sql", "0010_herald.sql", "0011_chat_threads.sql", "0012_chat_pins.sql", "0013_hearth_engine.sql", "0014_herald_reasoning_effort.sql", "0015_hearth_rename.sql", "0016_herald_write_tools.sql", "0017_herald_gateway.sql", "0018_herald_gateway_fallback_and_priority.sql", "0019_herald_provider_health.sql", "0020_herald_kind_alias.sql", "0021_herald_project_provider_binding.sql", "0022_herald_responses_kind.sql", "0023_fix_go_model_kind.sql"]);
     const db = new Database(dbPath);
     expect(tableExists(db, "tasks")).toBe(true);
     expect(tableExists(db, "_migrations")).toBe(true);
@@ -47,7 +47,7 @@ describe("runMigrations", () => {
     const dbPath = join(tmpDir(), "app.db");
     runMigrations(dbPath, MIGRATIONS);
     runMigrations(dbPath, MIGRATIONS);
-    expect(appliedMigrations(dbPath)).toEqual(["0001_init.sql", "0002_project_repos.sql", "0003_forge_sessions.sql", "0004_auth_roles_teams.sql", "0005_milestones_sprints.sql", "0006_drop_mcp_connected.sql", "0007_task_keys.sql", "0008_wiki_share_links.sql", "0009_attachments.sql", "0010_herald.sql", "0011_chat_threads.sql", "0012_chat_pins.sql", "0013_hearth_engine.sql", "0014_herald_reasoning_effort.sql", "0015_hearth_rename.sql", "0016_herald_write_tools.sql", "0017_herald_gateway.sql", "0018_herald_gateway_fallback_and_priority.sql", "0019_herald_provider_health.sql", "0020_herald_kind_alias.sql", "0021_herald_project_provider_binding.sql"]);
+    expect(appliedMigrations(dbPath)).toEqual(["0001_init.sql", "0002_project_repos.sql", "0003_forge_sessions.sql", "0004_auth_roles_teams.sql", "0005_milestones_sprints.sql", "0006_drop_mcp_connected.sql", "0007_task_keys.sql", "0008_wiki_share_links.sql", "0009_attachments.sql", "0010_herald.sql", "0011_chat_threads.sql", "0012_chat_pins.sql", "0013_hearth_engine.sql", "0014_herald_reasoning_effort.sql", "0015_hearth_rename.sql", "0016_herald_write_tools.sql", "0017_herald_gateway.sql", "0018_herald_gateway_fallback_and_priority.sql", "0019_herald_provider_health.sql", "0020_herald_kind_alias.sql", "0021_herald_project_provider_binding.sql", "0022_herald_responses_kind.sql", "0023_fix_go_model_kind.sql"]);
   });
 
   it("rolls back a failed migration atomically (no partial schema, no _migrations row)", () => {
@@ -74,7 +74,7 @@ describe("runMigrations", () => {
   it("keeps the default migrations dir (prod behavior)", () => {
     const dbPath = join(tmpDir(), "app.db");
     runMigrations(dbPath);
-    expect(appliedMigrations(dbPath)).toEqual(["0001_init.sql", "0002_project_repos.sql", "0003_forge_sessions.sql", "0004_auth_roles_teams.sql", "0005_milestones_sprints.sql", "0006_drop_mcp_connected.sql", "0007_task_keys.sql", "0008_wiki_share_links.sql", "0009_attachments.sql", "0010_herald.sql", "0011_chat_threads.sql", "0012_chat_pins.sql", "0013_hearth_engine.sql", "0014_herald_reasoning_effort.sql", "0015_hearth_rename.sql", "0016_herald_write_tools.sql", "0017_herald_gateway.sql", "0018_herald_gateway_fallback_and_priority.sql", "0019_herald_provider_health.sql", "0020_herald_kind_alias.sql", "0021_herald_project_provider_binding.sql"]);
+    expect(appliedMigrations(dbPath)).toEqual(["0001_init.sql", "0002_project_repos.sql", "0003_forge_sessions.sql", "0004_auth_roles_teams.sql", "0005_milestones_sprints.sql", "0006_drop_mcp_connected.sql", "0007_task_keys.sql", "0008_wiki_share_links.sql", "0009_attachments.sql", "0010_herald.sql", "0011_chat_threads.sql", "0012_chat_pins.sql", "0013_hearth_engine.sql", "0014_herald_reasoning_effort.sql", "0015_hearth_rename.sql", "0016_herald_write_tools.sql", "0017_herald_gateway.sql", "0018_herald_gateway_fallback_and_priority.sql", "0019_herald_provider_health.sql", "0020_herald_kind_alias.sql", "0021_herald_project_provider_binding.sql", "0022_herald_responses_kind.sql", "0023_fix_go_model_kind.sql"]);
   });
 
   it("0011 backfills chat titles from the first text message; image-array first messages stay NULL", () => {
