@@ -1,10 +1,56 @@
-# Cloudflare Workers hosting — research note
+# Cloudflare Workers hosting — Workers flavor HOW
 
-> **Status:** design authority — Workers flavor. ADR-0002 supersedes for the
-> parallel-flavor decision (see `docs/ADR-0002-cloudflare-workers-hosting.md`).
-> Researched 2026-08-22 against current Cloudflare/TanStack/Effect docs. The
-> ADR is the WHY; this note is the HOW (library/quirk reference for the
-> Workers flavor).
+> **Status:** design authority — Workers flavor (decision formerly ADR-0002,
+> now merged into this file). Researched 2026-08-22 against current Cloudflare/TanStack/Effect
+> docs; decision accepted 2026-08-25. This doc is the canonical HOW (library/quirk
+> reference) and now also carries the WHY/decision summary — see §Decision summary below.
+
+## Decision summary (merged from ADR-0002)
+
+Add a second, fully independent hosting flavor — **Workers + D1 + R2** — that
+coexists with the existing Bun+Docker flavor. Two flavors are peer-level; neither
+replaces the other; either or both can be live at any time.
+
+1. **Runtime split:** two flavors, separate users. Each flavor has its own domain,
+   DB, attachment bucket, settings, and lifecycle. Same source tree builds both via
+   a Vite plugin chain that emits two server bundles (Bun entry + Workers entry).
+2. **Data layer:** one repo, two drivers. `server/db/drivers/bun-sqlite.ts` and
+   `server/db/drivers/d1.ts` both implement `DbDriver`. Repos are async; the
+   `bun-sqlite` driver wraps the sync API in `Promise.resolve`, so existing code-shape
+   is preserved.
+3. **Atomicity invariants re-expressed:** the emission invariant (mutation +
+   `task_activity` in one atomic unit) and the webhook atomic move +
+   `github_synced_state` write become pre-computed `{ sql, params }[]` arrays passed
+   to `db.batch()`. The WIP-limit conditional UPDATE stays a single statement.
+   Read-modify-write sites that aren't strict emissions stay as-is.
+4. **Env access:** `server/env.ts` returns a `RuntimeEnv` — `process.env` on Bun,
+   `env` from `cloudflare:workers` on Workers. Every module-scope `process.env.X`
+   read goes through this helper. `server/auth.ts` becomes `createAuth(env)`, a
+   per-request factory.
+5. **Storage:** Workers uses the R2 native binding (driver kind `"r2"`); Bun keeps
+   `fs` and `s3` (S3 covers R2's S3 endpoint for Bun-side users). The `StorageDriver`
+   interface is unchanged.
+6. **No data sync between flavors.** A user who wants to move from Bun to Workers
+   dumps the Bun DB to SQL and replays it on D1 manually. `lexa-cli deploy workers
+   --seed` re-applies the dev seed file.
+7. **Deploy surface:** `lexa-cli deploy <domain> [bun|workers] [staging|prod]` is the
+   operator's pick point. The Bun flavor uses the existing Docker+cloudflared flow.
+   The Workers flavor provisions D1+R2+KV+Worker route via the Cloudflare API and
+   ships a prebuilt bundle. See `docs/DEPLOYMENT.md` for the dispatch.
+8. **Cron + observability:** Workers' `scheduled` handler runs prune + backup (cron
+   `*/15 * * * *`); `wrangler.jsonc` enables observability. The Bun path keeps its
+   `setInterval`.
+9. **Compliance gate:** `scripts/check-invariants.ts` scans the source tree for the
+   14 architectural invariants listed in `AGENTS.md` and fails any PR that introduces
+   a violation. This is the durable record of the invariants for future contributors.
+
+Alternatives rejected: status quo (Bun only), Workers-only cutover, single-domain
+warm backup, D1 canonical + sqlite mirror, one-way export — see §Decision summary above for full
+rationale. Consequences and compliance notes #1–14 preserved there (positive:
+$5/mo flat infra, async driver shape, invariant guard rails, R2 binding contained to
+`server/storage/`; risks: D1 no interactive tx / 30s batch ceiling / sequential
+execution, `lastInsertRowid` unreliable on D1, wide `createAuth(env)` refactor,
+pre-1.0 version pins, two deploy surfaces, regex compliance script).
 
 
 Migrating Lexa to Cloudflare Workers is **feasible — no hard blockers** — but it is a
@@ -164,8 +210,7 @@ Gateway routing; published from `cloudflare/ai`, not the TanStack monorepo).
 Decision (2026-08-22): the chat() path IS the assistant tier — **Herald** (writing
 assistant and PM assistant). The daemon/opencode runtime remains for coding tasks —
 **Blacksmith**; both tiers are active and co-exist under the Hearth umbrella (the
-shared queue/catalog: `hearth_*` tables feed both tiers). See
-`docs/ADR-0001-two-tier-ai-architecture.md`.
+shared queue/catalog: `hearth_*` tables feed both tiers). See `docs/ARCHITECTURE.md` §Hearth — two active AI tiers.
 
 Shape:
 

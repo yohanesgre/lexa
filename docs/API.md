@@ -1590,7 +1590,7 @@ Notes:
 ### Herald (AI assistant tier)
 
 Server-side TanStack AI `chat()` assistant beside Blacksmith under the Hearth
-umbrella (ADR-0001). Per-project provider settings;
+umbrella (see docs/ARCHITECTURE.md §Hearth — two active AI tiers). Per-project provider settings;
 keys are server-side only and never serialized (masked view). Settings
 mutations + test/models are superadmin (`403 FORBIDDEN` otherwise); reads,
 tasks, chat, and memory follow normal project access; chat additionally

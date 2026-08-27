@@ -1,8 +1,11 @@
 # Hearth — AI execution runtime
 
 Hearth is Lexa's AI execution umbrella. Two co-existing active tiers (see
-`docs/ADR-0001-two-tier-ai-architecture.md` for the decision record and
-`docs/ARCHITECTURE.md` §"Hearth — two active AI tiers" for context):
+`docs/ARCHITECTURE.md` §Hearth — two active AI tiers for the decision record,
+formerly ADR-0001, now merged; `docs/HEARTH.md` for runtime details;
+amendments 2026-08-23/24 merged into ARCHITECTURE.md — two-agent catalog,
+engine switching, personal-overlay toggle, skills junction, vision chain, and
+full Forge→Hearth identifier rename):
 
 | | Herald | Blacksmith |
 |---|---|---|
@@ -13,12 +16,25 @@ Hearth is Lexa's AI execution umbrella. Two co-existing active tiers (see
 | Thread state | `herald_threads` (ModelMessage[] JSON, rolling summary) | `hearth_sessions` |
 | Agents/skills render | prompt injection via systemPrompts | `.agents/` file writes |
 
-Shared: `hearth_tasks` queue (`kind` discriminates), **Lexa Agents/Skills**
-catalog (`lexa_agents` / `lexa_skills` / `lexa_agent_skills` — renamed from
-`forge_*` in migration 0010; routes `/api/agents`, `/api/skills`), popover,
-logs/activity machinery. Per-project engine switching
-(`herald_settings.engine`) with personal-overlay member toggle. The popover
-picks per-run.
+Shared: `hearth_tasks` queue with `kind` discriminator (`herald`|`blacksmith`
+— `claimNextTask` carries `AND kind='blacksmith'`; Herald streams claim via a
+kind-scoped conditional UPDATE; field names `agentMarkdown`/`skillMarkdown`
+frozen for daemon wire compat), **Lexa Agents/Skills** catalog
+(`lexa_agents`/`lexa_skills`/`lexa_agent_skills` — renamed from `forge_*` in
+migration 0010; routes `/api/agents`, `/api/skills`; exactly two builtins
+`hearth-herald`/`hearth-blacksmith` after migration 0013 id rebind, generic
+`lexa` retired; per-agent skill availability = `lexa_agent_skills` junction
+only), popover, logs/activity machinery. Per-project engine switching
+(`herald_settings.engine` ∈ `herald|blacksmith` with `engine_switcher_enabled`
+gate; personal-overlay member toggle is client-side session preference, admin
+writes the default; freeform chat always herald → 409
+`ENGINE_NOT_SUPPORTED_FOR_CHAT` under blacksmith). Vision chain:
+`primarySupportsImages` checkbox → inline vs `vision_model` delegation merged
+into primary provider vs 409 `VISION_NOT_CONFIGURED`. Full Forge→Hearth
+identifier rename (tables `hearth_tasks`/`hearth_task_logs`/`hearth_sessions`,
+routes `/api/hearth/*`, header `x-hearth-token`, env `HEARTH_*/LXK_HEARTH_DAEMON_TOKEN`,
+activity `hearth_*`, CLI state) via migration 0015 — breaking reinstall. The
+popover picks per-run.
 
 ## Daemon + listener
 

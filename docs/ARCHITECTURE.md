@@ -9,7 +9,7 @@ A lightweight, self-hosted project management tool. Kanban board, issue/task tic
 | Frontend     | React + Vite + TanStack Start | SSR for initial load, SPA-like after, file-based routing |
 | Backend      | Effect-TS + @effect/platform HttpApi | Typed errors, DI, declarative error→HTTP mapping, OpenAPI for free |
 | Database     | SQLite via bun:sqlite (WAL)   | Local file, zero-ops, transactional batch helper for atomic mutations |
-| Runtime      | Bun standalone HTTP server (Docker) | One process for SSR + REST + webhooks; simple deploys |
+| Runtime      | Bun standalone HTTP server (Docker) primary + Cloudflare Workers + D1 + R2 parallel flavor (optional, $5/mo — see `docs/CLOUDFLARE_WORKERS.md`) | One process for SSR + REST + webhooks; simple deploys (Bun) or edge isolates (Workers, Workers flavor) |
 | Human auth   | In-process Better Auth 1.6.27 (pinned) | Email/password login + cookie sessions at `/api/auth/*`; no edge auth, no external IdP, no SMTP |
 | Machine auth | API keys (`lxk_` + base62(43B)) | Hermes/CLI/webhooks: Bearer key → SHA-256 lookup |
 | GitHub Sync  | GitHub App + Webhooks         | Issues r/w + Metadata read only; echo-suppressed two-way state sync |
@@ -242,11 +242,14 @@ Anyone with issue-triage permission on a linked repo can trigger webhook-driven 
 
 ## Hearth — two active AI tiers
 
-Hearth is the umbrella for both AI execution tiers (renamed from Hearth —
-UI/docs/wireframes this cycle; internal identifiers `hearth_tasks`/
-`hearth_sessions`/`/api/hearth/*`/`HEARTH_*`/CLI keep their names until a
-deferred identifier migration). Both tiers are ACTIVE and
-co-exist; the run popover picks per-run. Design rationale: `docs/ADR-0001-two-tier-ai-architecture.md` (decisions + amendments log).
+Hearth is the umbrella for both AI execution tiers (renamed Forge→Hearth
+end-to-end in 2026-08-24 via migration 0015: tables
+`hearth_tasks`/`hearth_task_logs`/`hearth_sessions`, routes `/api/hearth/*`,
+header `x-hearth-token`, env `HEARTH_*`/`LXK_HEARTH_DAEMON_TOKEN`, activity
+`hearth_*`, CLI state `~/.local/share/lexa-hearth` — breaking reinstall
+`lexa-cli machine uninstall && lexa-cli machine install`). Both tiers are
+ACTIVE and co-exist; the run popover picks per-run. Design rationale:
+`docs/ARCHITECTURE.md` §Hearth — two active AI tiers (formerly ADR-0001, now merged here); runtime details: `docs/HEARTH.md`.
 
 | | Herald | Blacksmith |
 |---|---|---|
@@ -257,14 +260,41 @@ co-exist; the run popover picks per-run. Design rationale: `docs/ADR-0001-two-ti
 | Agents/skills render | prompt injection via systemPrompts | `.agents/` file writes |
 | Engine switching | default lane; freeform chat always herald | per-project `engine='blacksmith'`: document threads + Generate route here (runtime-online guard, `.agents/` claim bundles); chat → 409 `ENGINE_NOT_SUPPORTED_FOR_CHAT` |
 
+**Amendments (accepted 2026-08-23/24, merged from ADR-0001):**
+
+- **Two-agent catalog with id rebind (migration 0013):** exactly two builtin
+  agents `hearth-herald` ("Herald Agent") and `hearth-blacksmith`
+  ("Blacksmith Agent") — generic `lexa` retired. Migration atomically rebinds
+  `hearth_tasks.agent_id` FKs + `lexa_agent_skills` junction rows to the new
+  Herald id. One-time thread reset: existing threads keyed on the old agent id
+  see unknown agent → fresh overwrite.
+- **Per-project engine switching:** `herald_settings.engine` ∈
+  `herald|blacksmith` applies to document threads + Generate; enqueue branches
+  on it (kind row + runtime-online guard for blacksmith). Freeform Herald Chat
+  always runs the herald lane — under `engine='blacksmith'` chat returns 409
+  `ENGINE_NOT_SUPPORTED_FOR_CHAT`.
+- **Personal-overlay toggle:** member engine toggle is a client-side session
+  preference — never writes the project default; `engine` is admin-written
+  only. Toggle renders only when `engine_switcher_enabled=1`.
+- **Skills via junction:** per-agent skill availability =
+  `lexa_agent_skills` junction rows, admin-editable — no JSON columns.
+- **Vision chain:** `primarySupportsImages` checkbox drives three outcomes:
+  primary supports images → inline image parts; else configured `vision_model`
+  → internal `analyze_image` tool delegation merged into the primary provider
+  (same kind/api_key/base_url, only model differs; tool frame suppressed from
+  member UI); else attachments rejected up front with 409
+  `VISION_NOT_CONFIGURED`.
+- **Full identifier rename (2026-08-24, migration 0015):** Forge→Hearth tables,
+  routes, headers, env, activity types, service/file names, CLI state — see
+  intro paragraph. Breaking change gated by atomic migration + mandatory
+  repo/service test suites.
+
 Engine switching rationale: one project may want the zero-infrastructure
 assistant lane while another routes generation through daemon runtimes —
 `herald_settings.engine` is the admin-written project default; the member
 toggle is a personal overlay (client-side session preference) shown only when
-`engine_switcher_enabled=1`. Exactly two builtin agents exist after migration
-0013 (`hearth-herald`, `hearth-blacksmith` — id rebind, generic 'lexa'
-retired); skill availability per agent = junction rows only. Vision:
-`primary_supports_images=1` → inline image parts; else configured
+`engine_switcher_enabled=1`. Skill availability per agent = junction rows only.
+Vision: `primary_supports_images=1` → inline image parts; else configured
 `vision_model` → internal `analyze_image` delegation (frame suppressed from
 member UI); else attachments rejected up front (`VISION_NOT_CONFIGURED`).
 
@@ -284,6 +314,21 @@ member UI); else attachments rejected up front (`VISION_NOT_CONFIGURED`).
   `project_memory` FTS5 facts, and a freeform chat surface on the same engine.
 - **Blacksmith** is unchanged: machine/listener/daemon infrastructure remains
   deliberately for coding work (shell, file edits, sandboxes).
+
+**Consequences:** assistant features ship with the web app (deploy = image +
+one settings row); token streaming, tools, memory, multimodal become direct API
+surface; provider/vendor swap is a settings edit; Worker-portable by
+construction (no child processes in the Herald path); feature velocity — most
+changes touch prompt/tool rows, not plumbing.
+
+**Accepted risks:** TanStack AI is 0.x — pinned exact versions, `chat()`
+imported in exactly one service (`server/herald/provider.ts`); upgrades are
+deliberate acts. Catalog becomes load-bearing — prompt quality depends on
+curated Lexa Agents/Skills rows (size discipline required). Two tiers must be
+labeled distinctly in UI — users will expect Blacksmith-grade results from
+Herald runs otherwise. API keys held server-side plaintext (accepted for
+self-hosted threat model). Table renames fail at runtime, not compile time —
+gated by atomic migration plus mandatory repo/service test suites.
 
 ## Frontend
 
@@ -312,6 +357,28 @@ Key components: `KanbanBoard` (swimlanes → columns → task cards, inline add,
 
 ### Mutation responses are authoritative
 SQLite is local (WAL) so reads are immediate, but the mutation response is still the single source of truth. Rule: **mutations return the updated entity and TanStack Query updates its cache from the mutation response (`setQueryData`) — no refetch on the mutation path.**
+
+## Hosting flavors
+
+Two peer-level flavors share the same source tree (no data sync between them;
+migrate Bun→Workers by dumping the Bun DB to SQL and replaying on D1):
+
+- **Bun standalone (primary):** `Bun.serve` + `bun:sqlite` (WAL) + cloudflared
+  tunnel. Current live system. Deployed via `lexa-cli deploy <domain> prod`
+  (Docker + tunnel + DNS).
+- **Cloudflare Workers (parallel, optional, $5/mo):** Workers + D1 + R2 + KV.
+  Same routes and services, different drivers: `server/db/drivers/bun-sqlite.ts`
+  vs `server/db/drivers/d1.ts` (repos async; bun-sqlite wraps sync API in
+  `Promise.resolve`), R2 native binding driver vs `fs`/`s3`, `RuntimeEnv`
+  (`process.env` on Bun vs `env` from `cloudflare:workers` on Workers),
+  `createAuth(env)` factory, `wrangler d1 migrations`, `scheduled` prune+backup.
+  Atomicity invariants (emission + webhook) re-expressed as `db.batch()` arrays.
+
+Vite plugin chain emits two server bundles (Bun entry + Workers entry).
+Dispatch point: `lexa-cli deploy <domain> [bun|workers] [staging|prod]`.
+Compliance gate: `scripts/check-invariants.ts` scans for the 14 invariants.
+Full Workers HOW: `docs/CLOUDFLARE_WORKERS.md` (decision formerly ADR-0002,
+now merged there); deploy flows: `docs/DEPLOYMENT.md`.
 
 ## File Structure
 
