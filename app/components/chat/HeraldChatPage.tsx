@@ -15,7 +15,7 @@ import {
 } from "../../lib/queries";
 import { ENGINE_AGENT_IDS, hasVisionCapability } from "../../lib/use-hearth-engine";
 import { useToast } from "../ui/Toast";
-import { useHeraldStream } from "../../lib/use-herald-stream";
+import { heraldSendForKey, useHeraldStream } from "../../lib/use-herald-stream";
 import { useDebouncedValue } from "../../lib/useDebouncedValue";
 import { resendIndex } from "../../lib/resendIndex";
 import { copyToClipboard } from "../../lib/clipboard";
@@ -387,14 +387,22 @@ export function HeraldChatPage({ slug, thread }: { slug: string; thread?: string
         (t) => t.batch?.chips.some((c) => c.state === "pending") || t.suspendedBatchId
       );
       if (liveApproval) return prev;
-      if (stream.status === "error" && stream.hasIngress) {
-        const serverTurns = renderTranscript(transcript.data!.messages);
+      const serverTurns = renderTranscript(transcript.data!.messages);
+      const ephemeralUsers = (prev ?? []).filter((t) => t.role === "user" && t.rawIndex === -1);
+      if (ephemeralUsers.length > 0 && (streaming || stream.hasIngress || stream.status === "suspended")) {
+        const toAdd = ephemeralUsers.filter((e) => !serverTurns.some((s) => s.role === "user" && s.text === e.text));
+        if (toAdd.length > 0) return [...serverTurns, ...toAdd];
+      }
+      if ((streaming || stream.status === "connecting") && prev && prev.length < serverTurns.length) {
+        return prev;
+      }
+      if ((stream.status === "error" || streaming) && stream.hasIngress) {
         const hasFailed = serverTurns.some((t) => !!t.error);
         if (!hasFailed && (prev ?? []).length > serverTurns.length) return prev;
       }
-      return renderTranscript(transcript.data!.messages);
+      return serverTurns;
     });
-  }, [transcript.data, transcript.error, stream.status, stream.hasIngress]);
+  }, [transcript.data, transcript.error, stream.status, stream.hasIngress, streaming]);
 
   const { data: agents = [] } = useAgents();
   const { data: skills = [] } = useSkills();
@@ -452,7 +460,7 @@ export function HeraldChatPage({ slug, thread }: { slug: string; thread?: string
     const code = (transcript.error as { code?: string }).code;
     const notFound = code === "HERALD_THREAD_NOT_FOUND" || code === "NOT_FOUND" || (transcript.error as Error).message?.includes("404");
     if (!notFound) return;
-    if (stream.hasIngress) return;
+    if (stream.hasIngress || streaming) return;
     if (!listQuery.data) return;
     if (listQuery.data.length === 0 && !knownChatIdsRef.current.has(chatId) && thread === chatId && initialLastRef.current !== chatId) return;
     if (thread === chatId && !knownChatIdsRef.current.has(chatId) && initialLastRef.current !== chatId) return;
@@ -464,13 +472,13 @@ export function HeraldChatPage({ slug, thread }: { slug: string; thread?: string
     const head = listQuery.data?.[0]?.chatId;
     if (head && head !== staleId) applyChatId(head);
     else setChatId("");
-  }, [projectId, chatId, transcript.error, transcript.isLoading, thread, navigate, qc, listQuery.data, applyChatId, stream.hasIngress]);
+  }, [projectId, chatId, transcript.error, transcript.isLoading, thread, navigate, qc, listQuery.data, applyChatId, stream.hasIngress, streaming]);
 
   useEffect(() => {
     if (!projectId || !chatId || !listQuery.data || listQuery.isLoading) return;
     if (thread === chatId && !knownChatIdsRef.current.has(chatId) && initialLastRef.current !== chatId) return;
     if (listQuery.data.length === 0 && !knownChatIdsRef.current.has(chatId) && initialLastRef.current !== chatId) return;
-    if (thread && listQuery.data.length > 0 && !listQuery.data.some((t) => t.chatId === chatId) && !stream.hasIngress && transcript.error) {
+    if (thread && listQuery.data.length > 0 && !listQuery.data.some((t) => t.chatId === chatId) && !stream.hasIngress && !streaming && transcript.error) {
       const staleId = chatId;
       qc.cancelQueries({ queryKey: ["herald-chat", staleId] });
       qc.removeQueries({ queryKey: ["herald-chat", staleId] });
@@ -480,7 +488,7 @@ export function HeraldChatPage({ slug, thread }: { slug: string; thread?: string
       if (head && head !== staleId) applyChatId(head);
       else setChatId("");
     }
-  }, [projectId, chatId, listQuery.data, listQuery.isLoading, thread, stream.hasIngress, transcript.error, navigate, qc, applyChatId]);
+  }, [projectId, chatId, listQuery.data, listQuery.isLoading, thread, stream.hasIngress, streaming, transcript.error, navigate, qc, applyChatId]);
 
   const [input, setInput] = useState("");
   const [images, setImages] = useState<HeraldImage[]>([]);
@@ -577,34 +585,57 @@ export function HeraldChatPage({ slug, thread }: { slug: string; thread?: string
 
   const startStream = useCallback(
     (message: string, fromIndex?: number) => {
-      // Fresh chat: mint the thread id here — an empty chatId would collapse
-      // every new conversation onto a single server-side row.
       let threadId = chatId;
+      const isNewThread = !threadId;
       if (!threadId) {
         threadId = crypto.randomUUID();
         applyChatId(threadId);
         void navigate({ search: { thread: threadId }, replace: true });
       }
       pendingTitleRef.current = message.trim();
-      ingressInsertedRef.current.delete(threadId);
-      stream.send("/api/herald/chat/stream", {
+      if (isNewThread && projectId) {
+        const now = new Date().toISOString();
+        const derived = deriveChatTitle(message.trim());
+        const title: string | null = derived ? derived : null;
+        const entry: HeraldChatThreadSummary = {
+          chatId: threadId,
+          title,
+          pinned: false,
+          snippet: null,
+          createdAt: now,
+          updatedAt: now,
+        };
+        const sortThreads = (threads: HeraldChatThreadSummary[]) =>
+          [...threads].sort((a, b) => {
+            if (a.pinned !== b.pinned) return a.pinned ? -1 : 1;
+            return b.updatedAt.localeCompare(a.updatedAt);
+          });
+        qc.setQueryData<HeraldChatThreadSummary[]>(["herald-chats", projectId, null], (old) => {
+          if (!old) return sortThreads([entry]);
+          if (old.some((t) => t.chatId === threadId)) return old;
+          return sortThreads([...old, entry]);
+        });
+        ingressInsertedRef.current.add(threadId);
+      } else {
+        ingressInsertedRef.current.delete(threadId);
+      }
+      const body = {
         projectId,
         chatId: threadId,
         message,
-        // Persona is NOT sent: it resolves server-side from the project's
-        // configured Herald Agent (Project Settings → Herald).
         skillId: effectiveSkillId || undefined,
-        // Backend contract gap (reported): chat attachments need a storageKey
-        // minted by an upload endpoint that doesn't exist yet — images stay
-        // local previews until that lands.
         attachments: [],
-        // Explicit per-turn override only — omitted = project default.
         ...(effort ? { reasoningEffort: effort } : {}),
         ...(fromIndex !== undefined ? { fromIndex } : {}),
-      });
+      };
+      if (isNewThread) {
+        heraldSendForKey(`herald-chat:${threadId}`, "/api/herald/chat/stream", body);
+      } else {
+        stream.send("/api/herald/chat/stream", body);
+      }
       setEffort("");
     },
-    [stream, projectId, chatId, effectiveSkillId, effort, applyChatId, navigate]
+    [stream, projectId, chatId, effectiveSkillId, effort, applyChatId, navigate, qc]
   );
 
   const send = (message: string) => {
@@ -1039,7 +1070,7 @@ export function HeraldChatPage({ slug, thread }: { slug: string; thread?: string
 
                 {streaming && (
                   <div className="bubble-ai">
-                    <div className="bubble-meta">Herald · Herald Agent persona{skillName ? ` · ${skillName}` : ""}</div>
+                    <div className="bubble-meta">Herald Agent{skillName ? ` · ${skillName}` : ""}</div>
                     <HeraldActivity
                       items={stream.items}
                       tools={stream.tools}
@@ -1280,7 +1311,7 @@ function AssistantBubble({
   const time = hhmm(turn.ts);
   // Persona label mirrors the project's configured agent (read-only — chat
   // always runs the Herald lane, so it is always the Herald Agent).
-  const meta = `Herald · Herald Agent persona${skillName ? ` · ${skillName}` : ""}${turn.stopped ? " · stopped" : ""}`;
+  const meta = `Herald Agent${skillName ? ` · ${skillName}` : ""}${turn.stopped ? " · stopped" : ""}`;
   const segments = useMemo(() => splitFences(turn.text), [turn.text]);
   const citations = turn.citations;
   const guidance = turn.error ? guidanceFor(turn.error.code) : null;
