@@ -21,6 +21,37 @@ wizard's sample-data step. Prod/staging stay empty; the Backlog swimlane and
 default columns appear when the first project is created (project-creation
 logic, not seed).
 
+### Workers flavor — parallel, optional ($5/mo)
+
+The Bun flavors above are Docker + SQLite + cloudflared. A parallel
+**Workers flavor** — Cloudflare Workers + D1 + R2 + KV — coexists peer-level
+(same source tree, separate domain/DB/bucket). See `docs/CLOUDFLARE_WORKERS.md`
+for the $5/mo rationale, feasibility tables, and full HOW.
+
+- **Dispatch:** `lexa-cli deploy <domain> [bun|workers] [staging|prod]` — the
+  operator's pick point. `bun` uses the Docker+cloudflared flow above; `workers`
+  provisions Cloudflare resources via the Cloudflare API and ships a prebuilt
+  Worker bundle (Vite plugin chain emits two server bundles).
+- **Cloudflare provisioning (per flavor):** D1 database + R2 bucket (attachments,
+  native binding driver) + KV (if needed) + Worker route + custom domain. No
+  tunnel, no VPS.
+- **Migrations & seed:** `wrangler d1 migrations create/apply` replaces boot-time
+  `migrate.ts`; `wrangler d1 execute --file` for seed; `lexa-cli deploy workers
+  --seed` re-applies `scripts/seed-dev.sql`.
+- **Cron:** Workers' `scheduled` handler runs prune + backup on `*/15 * * * *`
+  (`wrangler.jsonc`); Bun keeps its `setInterval`.
+- **Secrets:** `wrangler secret put` for all secrets; `GITHUB_PRIVATE_KEY_FILE`
+  is **impossible** on Workers (no filesystem) — use inline `GITHUB_PRIVATE_KEY`
+  (already supported per `docs/GITHUB_SETUP.md`). The settings DB remains the
+  runtime source of truth for GitHub App credentials.
+- **No data sync** between flavors — dump the Bun DB to SQL and replay on D1 to
+  migrate.
+- **Compliance gate:** `scripts/check-invariants.ts` scans the source tree for
+  the 14 invariants and fails any PR that violates them.
+
+The Workers flavor is opt-in — either or both flavors can be live on different
+domains; one failing does not affect the other.
+
 ## Who writes what
 
 | Variable | Written by | Required |
