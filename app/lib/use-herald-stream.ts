@@ -377,6 +377,18 @@ function getSession(key: string): HeraldStreamSession | null {
   return sessions.get(key) ?? null;
 }
 
+export function heraldSendForKey(key: string, url: string, body: unknown): void {
+  const existing = sessions.get(key);
+  if (existing && (existing.getSnapshot().status === "connecting" || existing.getSnapshot().status === "streaming")) return;
+  const next = new HeraldStreamSession(key, url, body);
+  sessions.set(key, next);
+  next.start();
+}
+
+export function heraldGetSnapshot(key: string): HeraldStreamSnapshot {
+  return sessions.get(key)?.getSnapshot() ?? IDLE;
+}
+
 export interface HeraldStream extends HeraldStreamSnapshot {
   send: (url: string, body: unknown) => void;
   abort: () => void;
