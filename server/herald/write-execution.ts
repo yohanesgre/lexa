@@ -133,10 +133,35 @@ export const executeHeraldWrite = (row: HeraldPendingWriteRow, ctx: HeraldWriteE
           return yield* (ctx.milestoneService as unknown as { update(a: string, b: unknown): Effect.Effect<unknown, unknown> }).update(str(args.milestoneId ?? ""), { ...(args.name !== undefined ? { name: str(args.name) } : {}), ...(args.dueAt !== undefined ? { dueAt: args.dueAt as string | null } : {}) });
         case "archive_milestone":
           return yield* (ctx.milestoneService as unknown as { archive(a: Actor, b: string, c: unknown): Effect.Effect<unknown, unknown> }).archive(actor, str(args.milestoneId ?? ""), { viaHerald: true });
+        case "delete_milestone":
+          return yield* (ctx.milestoneService as unknown as { delete(a: string): Effect.Effect<unknown, unknown> }).delete(str(args.milestoneId ?? ""));
         case "create_sprint":
           return yield* (ctx.swimlaneService as unknown as { create(a: unknown): Effect.Effect<unknown, unknown> }).create({ projectId: row.project_id, name: str(args.name ?? ""), ...(args.startAt !== undefined ? { startAt: args.startAt as string | null } : {}), ...(args.dueAt !== undefined ? { dueAt: args.dueAt as string | null } : {}), ...(args.milestoneId !== undefined ? { milestoneId: str(args.milestoneId) } : {}) });
         case "update_sprint":
           return yield* (ctx.swimlaneService as unknown as { update(a: string, b: unknown): Effect.Effect<unknown, unknown> }).update(str(args.swimlaneId ?? ""), { ...(args.name !== undefined ? { name: str(args.name) } : {}), ...(args.startAt !== undefined ? { startAt: args.startAt as string | null } : {}), ...(args.dueAt !== undefined ? { dueAt: args.dueAt as string | null } : {}) });
+        case "archive_sprint":
+          return yield* (ctx.swimlaneService as unknown as { archive(a: Actor, b: string): Effect.Effect<unknown, unknown> }).archive(actor, str(args.swimlaneId ?? ""));
+        case "delete_sprint":
+          return yield* (ctx.swimlaneService as unknown as { delete(a: string): Effect.Effect<unknown, unknown> }).delete(str(args.swimlaneId ?? ""));
+        case "delete_wiki_page": {
+          const page = yield* ctx.wikiRepo.findBySlug(row.project_id, str(args.slug ?? "")).pipe(Effect.catchTag("RowNotFound", () => new WikiPageNotFound({ id: str(args.slug ?? "") })));
+          return yield* (ctx.wikiService as unknown as { delete(a: string): Effect.Effect<unknown, unknown> }).delete((page as unknown as { id: string }).id);
+        }
+        case "move_swimlane": {
+          const swimlaneId = str(args.swimlaneId ?? "");
+          const rawMilestone = args.milestoneId as string | null | undefined;
+          const milestoneId = rawMilestone === null || rawMilestone === undefined ? null : str(rawMilestone);
+          const svc = ctx.swimlaneService as unknown as { update(a: string, b: unknown): Effect.Effect<unknown, unknown>; move?: (a: string, b: string | null) => Effect.Effect<unknown, unknown> };
+          if (svc.move) return yield* svc.move(swimlaneId, milestoneId);
+          if (svc.update) return yield* svc.update(swimlaneId, { milestoneId });
+          const dbAny = ctx.db as unknown as { prepare(sql: string): { run(...a: unknown[]): unknown } };
+          dbAny.prepare(`UPDATE swimlanes SET milestone_id = ?, updated_at = datetime('now') WHERE id = ?`).run(milestoneId, swimlaneId);
+          return undefined as unknown as never;
+        }
+        case "delete_task": {
+          const t = yield* resolveTaskRefRow(str(args.ref ?? ""));
+          return yield* (ctx.taskService as unknown as { delete(a: Actor, b: string): Effect.Effect<unknown, unknown> }).delete(actor, (t as unknown as { id: string }).id);
+        }
       }
     }).pipe(Effect.either);
     if (applied._tag === "Left") {

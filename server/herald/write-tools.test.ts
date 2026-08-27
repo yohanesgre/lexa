@@ -13,6 +13,11 @@ import {
   buildMilestoneCreateDiff,
   buildMilestoneArchiveDiff,
   buildSprintCreateDiff,
+  buildTaskDeleteDiff,
+  buildWikiDeleteDiff,
+  buildMilestoneDeleteDiff,
+  buildSprintArchiveDiff,
+  buildSprintDeleteDiff,
   createWriteRecorder,
   type WriteRecorderInsertRow,
   type WriteTaskSnapshot,
@@ -272,9 +277,31 @@ describe("buildSprintCreateDiff", () => {
 });
 
 describe("HERALD_WRITE_TOOL_NAMES", () => {
-  it("covers exactly the 13 write tools", () => {
-    expect(HERALD_WRITE_TOOL_NAMES).toHaveLength(13);
+  it("covers exactly the 18 write tools", () => {
+    expect(HERALD_WRITE_TOOL_NAMES).toHaveLength(19);
     expect(HERALD_WRITE_TOOL_NAMES).toContain("create_task");
     expect(HERALD_WRITE_TOOL_NAMES).toContain("update_sprint");
+    expect(HERALD_WRITE_TOOL_NAMES).toContain("delete_task");
+    expect(HERALD_WRITE_TOOL_NAMES).toContain("delete_wiki_page");
+    expect(HERALD_WRITE_TOOL_NAMES).toContain("delete_milestone");
+    expect(HERALD_WRITE_TOOL_NAMES).toContain("archive_sprint");
+    expect(HERALD_WRITE_TOOL_NAMES).toContain("delete_sprint");
+    expect(HERALD_WRITE_TOOL_NAMES).toContain("move_swimlane");
+  });
+});
+
+describe("new diff builders", () => {
+  it("buildTaskDeleteDiff caps title", () => {
+    expect(buildTaskDeleteDiff(snapshot)).toEqual({ type: "task_delete", taskRef: "NIM-3", taskTitle: "Old title" });
+  });
+  it("buildWikiDeleteDiff", () => {
+    expect(buildWikiDeleteDiff({ slug: "intro", title: "Intro" })).toEqual({ type: "wiki_delete", slug: "intro", title: "Intro" });
+  });
+  it("buildMilestoneDeleteDiff", () => {
+    expect(buildMilestoneDeleteDiff({ name: "M1" })).toEqual({ type: "milestone_delete", name: "M1" });
+  });
+  it("buildSprintArchiveDiff / buildSprintDeleteDiff", () => {
+    expect(buildSprintArchiveDiff({ name: "S1" })).toEqual({ type: "sprint_archive", name: "S1" });
+    expect(buildSprintDeleteDiff({ name: "S1" })).toEqual({ type: "sprint_delete", name: "S1" });
   });
 });

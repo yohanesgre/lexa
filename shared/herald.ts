@@ -170,14 +170,20 @@ export type HeraldWriteDiff =
   | { type: "task_move"; taskRef: string; taskTitle: string; fromColumn: string; toColumn: string }
   | { type: "task_archive"; taskRef: string; taskTitle: string }
   | { type: "task_restore"; taskRef: string; taskTitle: string; toColumn: string }
+  | { type: "task_delete"; taskRef: string; taskTitle: string }
   | { type: "comment"; taskRef: string; taskTitle: string; bodyText: string }
   | { type: "wiki_create"; slug: string; title: string; bodyText: string }
   | { type: "wiki_edit"; slug: string; title: string; beforeText: string; afterText: string }
+  | { type: "wiki_delete"; slug: string; title: string }
   | { type: "milestone_create"; name: string; dueAt?: string }
   | { type: "milestone_update"; name: string; changes?: Array<{ field: string; before: string | null; after: string | null }> }
   | { type: "milestone_archive"; name: string; sprintsAffected?: number }
+  | { type: "milestone_delete"; name: string }
   | { type: "sprint_create"; name: string; startAt?: string; dueAt?: string }
-  | { type: "sprint_update"; name: string; changes?: Array<{ field: string; before: string | null; after: string | null }> };
+  | { type: "sprint_update"; name: string; changes?: Array<{ field: string; before: string | null; after: string | null }> }
+  | { type: "sprint_archive"; name: string }
+  | { type: "sprint_delete"; name: string }
+  | { type: "swimlane_move"; swimlaneId: string; swimlaneName: string; fromMilestone: string | null; toMilestone: string | null };
 
 export type HeraldThreadType = "task" | "wiki" | "chat";
 
