@@ -9,6 +9,10 @@ Before editing files for a substantial task:
 - Multiple matches: prefer the most specific local skill for the package or concern you are changing; load additional skills only when the task spans multiple packages or concerns.
 <!-- intent-skills:end -->
 
+## Git Workflow — single trunk (local auto-enforce)
+
+Trunk `main` — never commit directly. Every task: `main` → new branch → work → PR → merge to `main`. Before any git mutation (branch/worktree, checkout -b, add, commit, push, merge/rebase/cherry-pick, tag `v*`/`cli-v*`, or `wireframes/` submodule) load `.agents/skills/git-workflow/SKILL.md` and follow guardrails verbatim. No commit/push/merge without explicit user ask; gate (`tsc --noEmit` + `vitest run` + `check:invariants` + secrets check) must be green. Quick gate: `bash .agents/skills/git-workflow/scripts/verify-gate.sh`.
+
 You are working on **Lexa**: a self-hosted project management tool. Kanban with swimlanes/WIP limits, tasks with rich descriptions, nested wiki, and two-way GitHub issue sync. Bun server + SQLite database behind cloudflared tunnel. Stack: TanStack Start + React + Effect-TS + Tailwind.
 
 ## Status protocol + report contract
