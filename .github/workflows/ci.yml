@@ -21,10 +21,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          submodules: recursive
+          submodules: false
 
       - name: Restore wireframes submodule gracefully
-        if: always()
         continue-on-error: true
         run: git submodule update --init --recursive || echo "wireframes submodule unavailable (private) - skipping wireframes checks"
 
