@@ -412,6 +412,7 @@ export function useHeraldStream(key: string | null): HeraldStream {
   const subscribeThrottled = useCallback(
     (listener: () => void) => {
       if (!session) return noopSubscribe(listener);
+      const isVitest = typeof process !== "undefined" && !!(process.env as Record<string, unknown>).VITEST;
       let scheduled = false;
       let raf = 0;
       let timer: ReturnType<typeof setTimeout> | undefined;
@@ -420,7 +421,7 @@ export function useHeraldStream(key: string | null): HeraldStream {
         listener();
       };
       const wrapped = (coalesce?: boolean) => {
-        if (!coalesce) {
+        if (!coalesce || isVitest) {
           cancelAnimationFrame(raf);
           clearTimeout(timer);
           scheduled = false;

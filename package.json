@@ -17,7 +17,8 @@
     "typecheck": "tsc --noEmit",
     "doctor": "npx react-doctor@latest",
     "check:mobile": "bun --env-file=.env scripts/check-mobile.mjs",
-    "check:invariants": "bun run scripts/check-invariants.ts"
+    "check:invariants": "bun run scripts/check-invariants.ts",
+    "ci:local": "bash scripts/ci-local.sh"
   },
   "repository": {
     "type": "git",
@@ -77,6 +78,7 @@
     "@cloudflare/vite-plugin": "^1.53.1",
     "@cloudflare/workers-types": "^5.20260825.1",
     "@tailwindcss/vite": "^4.3.3",
+    "@tanstack/react-devtools": "^0.10.12",
     "@testing-library/jest-dom": "^7.0.1",
     "@testing-library/react": "^16.3.2",
     "@testing-library/user-event": "^14.6.3",
@@ -85,6 +87,7 @@
     "@types/react": "^19.2.17",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^6.0.4",
+    "@vitest/coverage-v8": "^4.1.11",
     "better-sqlite3": "^13.0.3",
     "jsdom": "^30.0.1",
     "miniflare": "^5.20260820.0-alpha",
@@ -93,7 +96,6 @@
     "tailwindcss": "^4.3.3",
     "typescript": "^7.0.2",
     "vite": "^8.1.5",
-    "@tanstack/react-devtools": "^0.10.12",
     "vite-plugin-inspect": "^12.0.2",
     "vitest": "^4.1.10",
     "wrangler": "^4.125.0"
