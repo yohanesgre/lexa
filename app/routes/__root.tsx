@@ -1,6 +1,6 @@
 import { HeadContent, Outlet, Scripts, createRootRouteWithContext, redirect } from "@tanstack/react-router";
 import { QueryClientProvider } from "@tanstack/react-query";
-import { TanStackDevtools } from "@tanstack/react-devtools";
+import { lazy, Suspense } from "react";
 import phosphorCss from "../styles/phosphor.css?url";
 import { ModalStackProvider } from "../components/ui/ModalStack";
 import { ToastProvider } from "../components/ui/Toast";
@@ -9,6 +9,15 @@ import { TeamSelectionProvider } from "../lib/team-selection";
 import { AppShell } from "../components/layout/AppShell";
 import { getSession } from "../lib/auth";
 import type { RouterContext } from "../router";
+
+const TanStackDevtools = import.meta.env.DEV
+  ? lazy(() =>
+      // @ts-ignore optional dev dep - CI may not have it installed
+      import("@tanstack/react-devtools")
+        .then((m) => ({ default: m.TanStackDevtools }) as { default: React.ComponentType })
+        .catch(() => ({ default: () => null })),
+    )
+  : (() => null) as unknown as React.ComponentType;
 
 // Public/auth surfaces — everything else requires a session. The guard runs
 // on the server too (SSR cookie forwarding in getSession, try/catch inside);
@@ -72,7 +81,9 @@ function RootComponent() {
               </TeamSelectionProvider>
             </ToastProvider>
           </ModalStackProvider>
-          <TanStackDevtools />
+          <Suspense fallback={null}>
+            <TanStackDevtools />
+          </Suspense>
         </QueryClientProvider>
         <Scripts />
       </body>
