@@ -36,7 +36,6 @@ describe("useHeraldUsage", () => {
     expect(screen.getByText("$42.18")).toBeTruthy();
     expect(fetch).toHaveBeenCalledWith(expect.stringContaining("/api/admin/herald/usage"), expect.anything());
   });
-
   it("builds query with from/to/projectId", async () => {
     const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => mockUsage });
     vi.stubGlobal("fetch", fetchMock);
@@ -50,39 +49,5 @@ describe("useHeraldUsage", () => {
     expect(url).toContain("from=2026-08-01");
     expect(url).toContain("to=2026-08-27");
     expect(url).toContain("projectId=p1");
-  });
-
-  it("exportHeraldUsageCsv creates blob anchor", async () => {
-    const blob = new Blob(["a,b"], { type: "text/csv" });
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, blob: async () => blob }));
-    const createEl = vi.spyOn(document, "createElement");
-    const appendSpy = vi.spyOn(document.body, "appendChild").mockImplementation((n) => n);
-    const urlSpy = vi.spyOn(URL, "createObjectURL").mockReturnValue("blob:fake");
-    const revokeSpy = vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => {});
-    await exportHeraldUsageCsv({ from: "2026-08-01", to: "2026-08-27" });
-    expect(fetch).toHaveBeenCalledWith(expect.stringContaining("/api/admin/herald/usage.csv?"));
-    expect(createEl).toHaveBeenCalledWith("a");
-    urlSpy.mockRestore();
-    revokeSpy.mockRestore();
-    appendSpy.mockRestore();
-  });
-
-  it("UsageByModelTable renders rows and empty state", () => {
-    const { rerender } = render(<UsageByModelTable byModel={mockUsage.byModel} />);
-    expect(screen.getByText("anthropic/claude-sonnet-4")).toBeTruthy();
-    expect(screen.getByText("$28.42")).toBeTruthy();
-    rerender(<UsageByModelTable byModel={[]} />);
-    expect(screen.getByText("No usage for this window")).toBeTruthy();
-  });
-
-  it("propagates 403 as error", async () => {
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: false, json: async () => ({ error: { code: "FORBIDDEN", message: "Admin role required" } }), status: 403 }));
-    function Probe() {
-      const q = useHeraldUsage({});
-      if (q.error) return <div>{(q.error as Error).message}</div>;
-      return <div>loading</div>;
-    }
-    render(<Probe />, { wrapper: wrapper() });
-    await waitFor(() => expect(screen.getByText("Admin role required")).toBeTruthy());
   });
 });

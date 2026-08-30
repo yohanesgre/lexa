@@ -1,4 +1,4 @@
-import { describe, expect, it, afterEach } from "vitest";
+import { describe, expect, it, afterEach, beforeAll, beforeEach, afterAll } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -11,19 +11,36 @@ import { ProjectMemoryRepo, MEMORY_SEARCH_K, MEMORY_CHAR_CAP } from "./project-m
 
 const MIGRATIONS = fileURLToPath(new URL("../../migrations", import.meta.url));
 
-let dirs: string[] = [];
-let dbs: Database[] = [];
+let dir: string;
+let db: Database;
 
-function tmpDb(): Database {
-  const dir = mkdtempSync(join(tmpdir(), "lexa-project-memory-repo-"));
-  dirs.push(dir);
+beforeAll(() => {
+  dir = mkdtempSync(join(tmpdir(), "lexa-project-memory-repo-"));
   const path = join(dir, "test.db");
   runMigrations(path, MIGRATIONS);
   const ctx = Effect.runSync(Effect.scoped(Layer.build(initSqlite(path))));
-  const db = Context.get(ctx, Sqlite);
-  dbs.push(db);
-  return db;
+  db = Context.get(ctx, Sqlite);
+});
+
+afterAll(() => {
+  try { db.close(); } catch {}
+  rmSync(dir, { recursive: true, force: true });
+});
+
+function cleanDb(db: Database) {
+  db.exec("PRAGMA foreign_keys = OFF");
+  const tables = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name != '_migrations' AND name NOT LIKE '%fts%'").all() as { name: string }[];
+  for (const { name } of tables) {
+    try { db.exec(`DELETE FROM "${name}"`); } catch {}
+  }
+  try { db.exec("DELETE FROM sqlite_sequence"); } catch {}
+  db.exec("PRAGMA foreign_keys = ON");
 }
+
+beforeEach(() => {
+  cleanDb(db);
+});
+
 
 function seed(db: Database) {
   db.exec(`
@@ -37,18 +54,8 @@ function makeRepo(db: Database) {
   return Context.get(ctx, ProjectMemoryRepo);
 }
 
-afterEach(() => {
-  for (const db of dbs) {
-    try { db.close(); } catch {}
-  }
-  dbs = [];
-  for (const d of dirs) rmSync(d, { recursive: true, force: true });
-  dirs = [];
-});
-
 describe("ProjectMemoryRepo CRUD", () => {
   it("create + get + list round-trips", () => {
-    const db = tmpDb();
     seed(db);
     const repo = makeRepo(db);
     Effect.runSync(
@@ -66,7 +73,6 @@ describe("ProjectMemoryRepo CRUD", () => {
   });
 
   it("list is project-scoped", () => {
-    const db = tmpDb();
     seed(db);
     const repo = makeRepo(db);
     Effect.runSync(
@@ -80,7 +86,6 @@ describe("ProjectMemoryRepo CRUD", () => {
   });
 
   it("remove deletes; second remove fails RowNotFound", () => {
-    const db = tmpDb();
     seed(db);
     const repo = makeRepo(db);
     Effect.runSync(
@@ -94,7 +99,6 @@ describe("ProjectMemoryRepo CRUD", () => {
   });
 
   it("get fails RowNotFound when absent", () => {
-    const db = tmpDb();
     seed(db);
     const repo = makeRepo(db);
     Effect.runSync(
@@ -108,7 +112,6 @@ describe("ProjectMemoryRepo CRUD", () => {
 
 describe("ProjectMemoryRepo FTS searchByProject", () => {
   it("matches terms and ranks better matches first", () => {
-    const db = tmpDb();
     seed(db);
     const repo = makeRepo(db);
     Effect.runSync(
@@ -125,7 +128,6 @@ describe("ProjectMemoryRepo FTS searchByProject", () => {
   });
 
   it("scoped to project", () => {
-    const db = tmpDb();
     seed(db);
     const repo = makeRepo(db);
     Effect.runSync(
@@ -139,7 +141,6 @@ describe("ProjectMemoryRepo FTS searchByProject", () => {
   });
 
   it("caps hits at k=5 default", () => {
-    const db = tmpDb();
     seed(db);
     const repo = makeRepo(db);
     Effect.runSync(
@@ -154,7 +155,6 @@ describe("ProjectMemoryRepo FTS searchByProject", () => {
   });
 
   it("enforces cumulative char cap by truncating the crossing hit", () => {
-    const db = tmpDb();
     seed(db);
     const repo = makeRepo(db);
     Effect.runSync(
@@ -171,7 +171,6 @@ describe("ProjectMemoryRepo FTS searchByProject", () => {
   });
 
   it("empty terms → no hits, no query", () => {
-    const db = tmpDb();
     seed(db);
     const repo = makeRepo(db);
     Effect.runSync(
@@ -183,7 +182,6 @@ describe("ProjectMemoryRepo FTS searchByProject", () => {
   });
 
   it("FTS index stays in sync after delete", () => {
-    const db = tmpDb();
     seed(db);
     const repo = makeRepo(db);
     Effect.runSync(

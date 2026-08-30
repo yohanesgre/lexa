@@ -1,4 +1,4 @@
-import { describe, it, expect, afterEach } from "vitest";
+import { describe, it, expect, afterEach, beforeAll, beforeEach, afterAll } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -11,34 +11,42 @@ import { AuthorizationService } from "./authorization.service";
 
 const MIGRATIONS = fileURLToPath(new URL("../../migrations", import.meta.url));
 
-let dirs: string[] = [];
-let dbs: Database[] = [];
+let dir: string;
+let db: Database;
 
-function tmpDb(): Database {
-  const dir = mkdtempSync(join(tmpdir(), "lexa-authz-"));
-  dirs.push(dir);
+beforeAll(() => {
+  dir = mkdtempSync(join(tmpdir(), "lexa-authz-"));
   const path = join(dir, "test.db");
   runMigrations(path, MIGRATIONS);
   const ctx = Effect.runSync(Effect.scoped(Layer.build(initSqlite(path))));
-  const db = Context.get(ctx, Sqlite);
-  dbs.push(db);
-  return db;
+  db = Context.get(ctx, Sqlite);
+});
+
+afterAll(() => {
+  try { db.close(); } catch {}
+  rmSync(dir, { recursive: true, force: true });
+});
+
+function cleanDb(db: Database) {
+  db.exec("PRAGMA foreign_keys = OFF");
+  const tables = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name != '_migrations' AND name NOT LIKE '%fts%'").all() as { name: string }[];
+  for (const { name } of tables) {
+    try { db.exec(`DELETE FROM "${name}"`); } catch {}
+  }
+  try { db.exec("DELETE FROM sqlite_sequence"); } catch {}
+  db.exec("PRAGMA foreign_keys = ON");
 }
+
+beforeEach(() => {
+  cleanDb(db);
+});
+
 
 function makeAuthz(db: Database) {
   const layer = AuthorizationService.Default.pipe(Layer.provide(Layer.succeed(Sqlite, db)));
   const ctx = Effect.runSync(Effect.scoped(Layer.build(layer)));
   return Context.get(ctx, AuthorizationService);
 }
-
-afterEach(() => {
-  for (const db of dbs) {
-    try { db.close(); } catch {}
-  }
-  dbs = [];
-  for (const d of dirs) rmSync(d, { recursive: true, force: true });
-  dirs = [];
-});
 
 // World:
 //  sa      — superadmin
@@ -76,7 +84,6 @@ INSERT INTO user_project_roles (user_id, role, project_id) VALUES ('grantee', 'a
 
 describe("AuthorizationService", () => {
   it("project access: superadmin > grant > team membership > deny", () => {
-    const db = tmpDb();
     seed(db);
     const authz = makeAuthz(db);
     const access = (userId: string, projectId: string) => Effect.runSync(authz.projectAccess(userId, projectId));
@@ -100,7 +107,6 @@ describe("AuthorizationService", () => {
   });
 
   it("team gate: superadmin or org owner/admin; plain members and outsiders denied", () => {
-    const db = tmpDb();
     seed(db);
     const authz = makeAuthz(db);
     const manage = (userId: string, teamId: string) => Effect.runSync(authz.canManageTeam(userId, teamId));
@@ -118,7 +124,6 @@ describe("AuthorizationService", () => {
   });
 
   it("isTeamAdmin reads comma-joined org roles (multi-role members)", () => {
-    const db = tmpDb();
     seed(db);
     db.prepare("UPDATE member SET role = 'owner,admin' WHERE id = 'm4'").run();
     const authz = makeAuthz(db);
@@ -127,7 +132,6 @@ describe("AuthorizationService", () => {
   });
 
   it("settings gate: superadmin only", () => {
-    const db = tmpDb();
     seed(db);
     const authz = makeAuthz(db);
     expect(Effect.runSync(authz.canManageSettings("sa"))).toBe(true);
@@ -136,7 +140,6 @@ describe("AuthorizationService", () => {
   });
 
   it("unknown users get no access anywhere", () => {
-    const db = tmpDb();
     seed(db);
     const authz = makeAuthz(db);
     expect(Effect.runSync(authz.projectAccess("ghost", "p1"))).toBeNull();

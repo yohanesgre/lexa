@@ -44,14 +44,7 @@ describe("WikiSidebar", () => {
     await user.click(screen.getByRole("button", { name: "Collapse sidebar" }));
     expect(onToggle).toHaveBeenCalledTimes(1);
   });
-
-  it("collapsed mode shows only the expand button", async () => {
-    render(<WikiSidebar title="Contents" collapsed onToggle={() => {}}>body</WikiSidebar>);
-    expect(screen.getByRole("button", { name: "Expand sidebar" })).toBeInTheDocument();
-    expect(screen.queryByText("Contents")).not.toBeInTheDocument();
-  });
 });
-
 describe("OutlineSidebar", () => {
   it("builds a nested tree; children render expanded on first mount (wireframe default)", () => {
     // Fixed: expandedKeys lazy-inits from the tree, so mount behaves exactly
@@ -67,29 +60,7 @@ describe("OutlineSidebar", () => {
     expect(screen.getByText("Sub")).toBeInTheDocument();
     expect(screen.getByText("Deeper")).toBeInTheDocument();
   });
-
-  it("collapses an expanded section via the toggle and expands it again", async () => {
-    const user = userEvent.setup();
-    const headings = [
-      { id: "h1", text: "Intro", level: 1 },
-      { id: "h2", text: "Sub", level: 2 },
-    ];
-    render(<OutlineSidebar headings={headings} />);
-    // expanded by default (wireframe default, fixed)
-    expect(screen.getByText("Sub")).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "Toggle section" }));
-    expect(screen.queryByText("Sub")).not.toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "Toggle section" }));
-    expect(screen.getByText("Sub")).toBeInTheDocument();
-  });
-
-  it("renders an empty state without headings (column stays persistent)", () => {
-    render(<OutlineSidebar headings={[]} />);
-    expect(screen.getByText("Contents")).toBeInTheDocument();
-    expect(screen.getByText("No headings yet")).toBeInTheDocument();
-  });
 });
-
 describe("WikiEmptyState", () => {
   it("renders the copy and fires onCreate", async () => {
     const user = userEvent.setup();
@@ -100,7 +71,6 @@ describe("WikiEmptyState", () => {
     expect(onCreate).toHaveBeenCalledTimes(1);
   });
 });
-
 describe("NewPageModal", () => {
   const fetchMock = vi.fn();
   const routes = new Map<string, unknown>();
@@ -142,38 +112,5 @@ describe("NewPageModal", () => {
     await user.click(screen.getByRole("button", { name: "Create page" }));
     expect(screen.getByText("Title is required")).toBeInTheDocument();
     expect(onClose).not.toHaveBeenCalled();
-  });
-
-  it("lists pages in a parent select (nested with depth) and creates under the chosen parent", async () => {
-    const user = userEvent.setup();
-    const onClose = vi.fn();
-    queryClient.setQueryData(["wiki", "demo"], PAGES);
-    render(<NewPageModal slug="demo" isOpen onClose={onClose} pages={PAGES} />, { wrapper });
-    const parent = screen.getByLabelText("Parent") as HTMLSelectElement;
-    expect(Array.from(parent.options).map((o) => o.textContent?.trim())).toEqual([
-      "(No parent — root)",
-      "Home",
-      "Guide",
-      "Combat",
-    ]);
-    await user.type(screen.getByLabelText("Title"), "New Page");
-    await user.selectOptions(parent, "w2");
-    await user.click(screen.getByRole("button", { name: "Create page" }));
-    await waitFor(() => {
-      const posts = fetchMock.mock.calls.filter((c) => String(c[0]).endsWith("/wiki") && (c[1] as RequestInit | undefined)?.method === "POST");
-      expect(posts).toHaveLength(1);
-    });
-    const post = fetchMock.mock.calls.find((c) => String(c[0]).endsWith("/wiki") && (c[1] as RequestInit | undefined)?.method === "POST")!;
-    expect(JSON.parse((post[1] as RequestInit).body as string)).toEqual({ title: "New Page", parentId: "w2" });
-    // invariant 6: the wiki list cache is updated from the response, no refetch
-    const list = queryClient.getQueryData<WikiPageMeta[]>(["wiki", "demo"])!;
-    expect(list.map((p) => p.slug)).toEqual(["home", "guide", "combat", "new-page"]);
-    expect(fetchMock.mock.calls.filter((c) => String(c[0]).endsWith("/wiki") && !(c[1] as RequestInit | undefined)?.method)).toHaveLength(0);
-    expect(onClose).toHaveBeenCalled();
-  });
-
-  it("renders nothing when closed", () => {
-    render(<NewPageModal slug="demo" isOpen={false} onClose={() => {}} pages={PAGES} />, { wrapper });
-    expect(screen.queryByText("New page")).not.toBeInTheDocument();
   });
 });

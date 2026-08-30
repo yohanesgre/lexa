@@ -1,4 +1,4 @@
-import { describe, expect, it, afterEach } from "vitest";
+import { describe, expect, it, afterEach, beforeAll, beforeEach, afterAll } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -13,22 +13,39 @@ import type { TipTapDoc } from "../../shared/types";
 
 const MIGRATIONS = fileURLToPath(new URL("../../migrations", import.meta.url));
 
-let dirs: string[] = [];
-let dbs: Database[] = [];
+let dir: string;
+let db: Database;
 
-const DOC: TipTapDoc = { type: "doc", content: [{ type: "paragraph", content: [{ type: "text", text: "hello" }] }] };
-const DOC2: TipTapDoc = { type: "doc", content: [{ type: "paragraph", content: [{ type: "text", text: "goodbye" }] }] };
-
-function tmpDb(): Database {
-  const dir = mkdtempSync(join(tmpdir(), "lexa-wiki-svc-"));
-  dirs.push(dir);
+beforeAll(() => {
+  dir = mkdtempSync(join(tmpdir(), "lexa-wiki-svc-"));
   const path = join(dir, "test.db");
   runMigrations(path, MIGRATIONS);
   const ctx = Effect.runSync(Effect.scoped(Layer.build(initSqlite(path))));
-  const db = Context.get(ctx, Sqlite);
-  dbs.push(db);
-  return db;
+  db = Context.get(ctx, Sqlite);
+});
+
+afterAll(() => {
+  try { db.close(); } catch {}
+  rmSync(dir, { recursive: true, force: true });
+});
+
+function cleanDb(db: Database) {
+  db.exec("PRAGMA foreign_keys = OFF");
+  const tables = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name != '_migrations' AND name NOT LIKE '%fts%'").all() as { name: string }[];
+  for (const { name } of tables) {
+    try { db.exec(`DELETE FROM "${name}"`); } catch {}
+  }
+  try { db.exec("DELETE FROM sqlite_sequence"); } catch {}
+  db.exec("PRAGMA foreign_keys = ON");
 }
+
+beforeEach(() => {
+  cleanDb(db);
+});
+
+
+const DOC: TipTapDoc = { type: "doc", content: [{ type: "paragraph", content: [{ type: "text", text: "hello" }] }] };
+const DOC2: TipTapDoc = { type: "doc", content: [{ type: "paragraph", content: [{ type: "text", text: "goodbye" }] }] };
 
 function seed(db: Database) {
   db.prepare("INSERT INTO projects (id, name, slug) VALUES ('p1','P','p1'), ('p2','P2','p2')").run();
@@ -40,18 +57,8 @@ function makeService(db: Database) {
   return Context.get(ctx, WikiService);
 }
 
-afterEach(() => {
-  for (const db of dbs) {
-    try { db.close(); } catch {}
-  }
-  dbs = [];
-  for (const d of dirs) rmSync(d, { recursive: true, force: true });
-  dirs = [];
-});
-
 describe("WikiService.create", () => {
   it("creates a page with slugified title, content, and contentText", () => {
-    const db = tmpDb();
     seed(db);
     const svc = makeService(db);
     const res = Effect.runSync(Effect.either(svc.create("p1", { title: "Getting Started", content: DOC, contentText: "hello" })));
@@ -68,7 +75,6 @@ describe("WikiService.create", () => {
   });
 
   it("slug uniqueness is per project — same slug in another project is fine", () => {
-    const db = tmpDb();
     seed(db);
     const svc = makeService(db);
     Effect.runSync(Effect.either(svc.create("p1", { title: "Home" })));
@@ -81,7 +87,6 @@ describe("WikiService.create", () => {
   });
 
   it("unknown project → ProjectNotFound", () => {
-    const db = tmpDb();
     seed(db);
     const svc = makeService(db);
     const res = Effect.runSync(Effect.either(svc.create("nope", { title: "X" })));
@@ -90,7 +95,6 @@ describe("WikiService.create", () => {
   });
 
   it("nested children get positions scoped to their parent", () => {
-    const db = tmpDb();
     seed(db);
     const svc = makeService(db);
     const root1 = Effect.runSync(svc.create("p1", { title: "Root 1" }));
@@ -110,7 +114,6 @@ describe("WikiService.create", () => {
 
 describe("WikiService.read", () => {
   it("findByProject returns metas ordered by parent then position", () => {
-    const db = tmpDb();
     seed(db);
     const svc = makeService(db);
     const root = Effect.runSync(svc.create("p1", { title: "Root" }));
@@ -121,7 +124,6 @@ describe("WikiService.read", () => {
   });
 
   it("findChildren returns only direct children ordered by position", () => {
-    const db = tmpDb();
     seed(db);
     const svc = makeService(db);
     const root = Effect.runSync(svc.create("p1", { title: "Root" }));
@@ -133,7 +135,6 @@ describe("WikiService.read", () => {
   });
 
   it("findBySlug missing → WikiPageNotFound; unknown project → ProjectNotFound", () => {
-    const db = tmpDb();
     seed(db);
     const svc = makeService(db);
     const missing = Effect.runSync(Effect.either(svc.findBySlug("p1", "nope")));
@@ -147,7 +148,6 @@ describe("WikiService.read", () => {
 
 describe("WikiService.update", () => {
   it("updates title/content/contentText and records an autosave revision of the prior state", () => {
-    const db = tmpDb();
     seed(db);
     const svc = makeService(db);
     const page = Effect.runSync(svc.create("p1", { title: "Old", content: DOC, contentText: "hello" }));
@@ -164,7 +164,6 @@ describe("WikiService.update", () => {
   });
 
   it("slug conflict on update → ConstraintViolation (no SlugTaken at service layer)", () => {
-    const db = tmpDb();
     seed(db);
     const svc = makeService(db);
     const a = Effect.runSync(svc.create("p1", { title: "A" }));
@@ -175,7 +174,6 @@ describe("WikiService.update", () => {
   });
 
   it("moves a page under a new parent and repositions it", () => {
-    const db = tmpDb();
     seed(db);
     const svc = makeService(db);
     const a = Effect.runSync(svc.create("p1", { title: "A" }));
@@ -193,7 +191,6 @@ describe("WikiService.update", () => {
   });
 
   it("missing id → WikiPageNotFound", () => {
-    const db = tmpDb();
     seed(db);
     const svc = makeService(db);
     const res = Effect.runSync(Effect.either(svc.update("nope", { title: "X" })));
@@ -202,7 +199,6 @@ describe("WikiService.update", () => {
   });
 
   it("prunes revisions to the newest 100", () => {
-    const db = tmpDb();
     seed(db);
     const svc = makeService(db);
     const page = Effect.runSync(svc.create("p1", { title: "P" }));
@@ -216,7 +212,6 @@ describe("WikiService.update", () => {
 
 describe("WikiService revisions", () => {
   it("listRevisions returns newest-first summaries with saveType; getRevision returns full revision", () => {
-    const db = tmpDb();
     seed(db);
     const svc = makeService(db);
     const page = Effect.runSync(svc.create("p1", { title: "P", content: DOC, contentText: "hello" }));
@@ -236,7 +231,6 @@ describe("WikiService revisions", () => {
   });
 
   it("restoreRevision rolls back title/slug/content and records a manual revision", () => {
-    const db = tmpDb();
     seed(db);
     const svc = makeService(db);
     const page = Effect.runSync(svc.create("p1", { title: "Guide", content: DOC, contentText: "old text" }));
@@ -255,7 +249,6 @@ describe("WikiService revisions", () => {
   });
 
   it("restoring a revision of a different page → WikiPageNotFound", () => {
-    const db = tmpDb();
     seed(db);
     const svc = makeService(db);
     const a = Effect.runSync(svc.create("p1", { title: "A" }));
@@ -272,7 +265,6 @@ describe("WikiService revisions", () => {
 
 describe("WikiService.delete", () => {
   it("deletes a leaf page and its revisions", () => {
-    const db = tmpDb();
     seed(db);
     const svc = makeService(db);
     const page = Effect.runSync(svc.create("p1", { title: "Leaf" }));
@@ -286,7 +278,6 @@ describe("WikiService.delete", () => {
   });
 
   it("page with children → HasChildren with the child count", () => {
-    const db = tmpDb();
     seed(db);
     const svc = makeService(db);
     const parent = Effect.runSync(svc.create("p1", { title: "Parent" }));
@@ -302,7 +293,6 @@ describe("WikiService.delete", () => {
   });
 
   it("missing id → WikiPageNotFound", () => {
-    const db = tmpDb();
     seed(db);
     const svc = makeService(db);
     const res = Effect.runSync(Effect.either(svc.delete("nope")));
@@ -313,7 +303,6 @@ describe("WikiService.delete", () => {
 
 describe("WikiService.search", () => {
   it("FTS5 finds pages by contentText with a snippet", () => {
-    const db = tmpDb();
     seed(db);
     const svc = makeService(db);
     const page = Effect.runSync(svc.create("p1", { title: "Indexing", content: DOC, contentText: "fractional indexing keeps keys short" }));
@@ -327,7 +316,6 @@ describe("WikiService.search", () => {
   });
 
   it("scopes results per project and respects the limit", () => {
-    const db = tmpDb();
     seed(db);
     const svc = makeService(db);
     Effect.runSync(svc.create("p1", { title: "One", contentText: "fractional" }));
@@ -344,7 +332,6 @@ describe("WikiService.search", () => {
   });
 
   it("update re-indexes contentText via the FTS trigger", () => {
-    const db = tmpDb();
     seed(db);
     const svc = makeService(db);
     const page = Effect.runSync(svc.create("p1", { title: "P", contentText: "alpha" }));
@@ -358,7 +345,6 @@ describe("WikiService.search", () => {
   });
 
   it("invalid FTS5 query → SearchError", () => {
-    const db = tmpDb();
     seed(db);
     const svc = makeService(db);
     Effect.runSync(svc.create("p1", { title: "P", contentText: "alpha" }));
@@ -368,7 +354,6 @@ describe("WikiService.search", () => {
   });
 
   it("hyphenated query → SearchError (FTS5 parses '-' as column syntax)", () => {
-    const db = tmpDb();
     seed(db);
     const svc = makeService(db);
     Effect.runSync(svc.create("p1", { title: "P", contentText: "alpha" }));

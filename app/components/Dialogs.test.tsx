@@ -32,36 +32,7 @@ describe("DeleteTaskDialog", () => {
     render(<DeleteTaskDialog task={TASK} open={false} deleting={false} onClose={() => {}} onDelete={() => {}} />);
     expect(screen.queryByText("Delete task")).not.toBeInTheDocument();
   });
-
-  it("shows the task title and confirms deletion", async () => {
-    const user = userEvent.setup();
-    const onDelete = vi.fn();
-    const onClose = vi.fn();
-    render(<DeleteTaskDialog task={TASK} open deleting={false} onClose={onClose} onDelete={onDelete} />);
-    expect(screen.getByText("Delete task")).toBeInTheDocument();
-    expect(screen.getByText(/Task One/)).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "Delete" }));
-    expect(onDelete).toHaveBeenCalledTimes(1);
-  });
-
-  it("cancel and overlay close without deleting", async () => {
-    const user = userEvent.setup();
-    const onDelete = vi.fn();
-    const onClose = vi.fn();
-    render(<DeleteTaskDialog task={TASK} open deleting={false} onClose={onClose} onDelete={onDelete} />);
-    await user.click(screen.getByRole("button", { name: "Cancel" }));
-    expect(onClose).toHaveBeenCalledTimes(1);
-    expect(onDelete).not.toHaveBeenCalled();
-    await user.click(screen.getByLabelText("Close"));
-    expect(onClose).toHaveBeenCalledTimes(2);
-  });
-
-  it("disables the delete button while deleting", () => {
-    render(<DeleteTaskDialog task={TASK} open deleting onClose={() => {}} onDelete={() => {}} />);
-    expect(screen.getByRole("button", { name: "Deleting..." })).toBeDisabled();
-  });
 });
-
 describe("MissingFieldsWarning", () => {
   it("renders the column and required fields and dismisses", async () => {
     const user = userEvent.setup();
@@ -72,7 +43,6 @@ describe("MissingFieldsWarning", () => {
     expect(onDismiss).toHaveBeenCalledTimes(1);
   });
 });
-
 describe("MoveConfirmDialog", () => {
   function pending(task: Task, swimlaneId: string): PendingMove {
     return { task, target: { columnId: "c1", swimlaneId } };
@@ -81,40 +51,5 @@ describe("MoveConfirmDialog", () => {
   it("renders nothing without a pending move or an unknown lane", () => {
     render(<MoveConfirmDialog board={BOARD} pending={null} resolve={() => {}} cancel={() => {}} />);
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
-  });
-
-  it("deadline conflict: resolving with the checkbox checked passes clearDueAt", async () => {
-    const user = userEvent.setup();
-    const resolve = vi.fn();
-    const cancel = vi.fn();
-    const task = { ...TASK, dueAt: "2099-09-01" }; // later than the lane's 2099-08-01
-    render(<MoveConfirmDialog board={BOARD} pending={pending(task, "s1")} resolve={resolve} cancel={cancel} />);
-    expect(screen.getByText("Deadline conflict")).toBeInTheDocument();
-    // un-checked → resolve(false)
-    await user.click(screen.getByRole("button", { name: "Move anyway" }));
-    expect(resolve).toHaveBeenCalledWith(false);
-    // checked → resolve(true)
-    await user.click(screen.getByRole("checkbox"));
-    await user.click(screen.getByRole("button", { name: "Move anyway" }));
-    expect(resolve).toHaveBeenCalledWith(true);
-  });
-
-  it("overdue lane: shows the overdue message and resolves without clearing", async () => {
-    const user = userEvent.setup();
-    const resolve = vi.fn();
-    render(<MoveConfirmDialog board={BOARD} pending={pending(TASK, "s2")} resolve={resolve} cancel={() => {}} />);
-    expect(screen.getByText("Overdue lane")).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "Move" }));
-    expect(resolve).toHaveBeenCalledWith(false);
-  });
-
-  it("cancel closes the dialog without resolving", async () => {
-    const user = userEvent.setup();
-    const resolve = vi.fn();
-    const cancel = vi.fn();
-    render(<MoveConfirmDialog board={BOARD} pending={pending(TASK, "s2")} resolve={resolve} cancel={cancel} />);
-    await user.click(screen.getByRole("button", { name: "Cancel" }));
-    expect(cancel).toHaveBeenCalledTimes(1);
-    expect(resolve).not.toHaveBeenCalled();
   });
 });

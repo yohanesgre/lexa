@@ -1,4 +1,4 @@
-import { describe, expect, it, afterEach } from "vitest";
+import { describe, expect, it, afterEach, beforeAll, beforeEach, afterAll } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -11,19 +11,36 @@ import { HearthSessionRepo } from "./hearth-session.repo";
 
 const MIGRATIONS = fileURLToPath(new URL("../../migrations", import.meta.url));
 
-let dirs: string[] = [];
-let dbs: Database[] = [];
+let dir: string;
+let db: Database;
 
-function tmpDb(): Database {
-  const dir = mkdtempSync(join(tmpdir(), "lexa-hearth-session-repo-"));
-  dirs.push(dir);
+beforeAll(() => {
+  dir = mkdtempSync(join(tmpdir(), "lexa-hearth-session-repo-"));
   const path = join(dir, "test.db");
   runMigrations(path, MIGRATIONS);
   const ctx = Effect.runSync(Effect.scoped(Layer.build(initSqlite(path))));
-  const db = Context.get(ctx, Sqlite);
-  dbs.push(db);
-  return db;
+  db = Context.get(ctx, Sqlite);
+});
+
+afterAll(() => {
+  try { db.close(); } catch {}
+  rmSync(dir, { recursive: true, force: true });
+});
+
+function cleanDb(db: Database) {
+  db.exec("PRAGMA foreign_keys = OFF");
+  const tables = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name != '_migrations' AND name NOT LIKE '%fts%'").all() as { name: string }[];
+  for (const { name } of tables) {
+    try { db.exec(`DELETE FROM "${name}"`); } catch {}
+  }
+  try { db.exec("DELETE FROM sqlite_sequence"); } catch {}
+  db.exec("PRAGMA foreign_keys = ON");
 }
+
+beforeEach(() => {
+  cleanDb(db);
+});
+
 
 // hearth_tasks rows (for hasActiveTask) need their FK targets; hearth_sessions
 // itself is FK-free.
@@ -51,18 +68,8 @@ function seedTask(db: Database, id: string, documentId: string, status: string, 
   ).run(id, documentId, status, runtimeId);
 }
 
-afterEach(() => {
-  for (const db of dbs) {
-    try { db.close(); } catch {}
-  }
-  dbs = [];
-  for (const d of dirs) rmSync(d, { recursive: true, force: true });
-  dirs = [];
-});
-
 describe("HearthSessionRepo upsert/get", () => {
   it("upsert then get round-trips all fields", () => {
-    const db = tmpDb();
     seed(db);
     const repo = makeRepo(db);
     Effect.runSync(
@@ -88,7 +95,6 @@ describe("HearthSessionRepo upsert/get", () => {
   });
 
   it("get returns null for a missing mapping", () => {
-    const db = tmpDb();
     seed(db);
     const repo = makeRepo(db);
     Effect.runSync(
@@ -99,7 +105,6 @@ describe("HearthSessionRepo upsert/get", () => {
   });
 
   it("upsert twice updates agent/skill/session in place (no duplicate rows)", () => {
-    const db = tmpDb();
     seed(db);
     const repo = makeRepo(db);
     Effect.runSync(
@@ -117,7 +122,6 @@ describe("HearthSessionRepo upsert/get", () => {
 
 describe("HearthSessionRepo per-runtime isolation", () => {
   it("same document on two runtimes → two rows; listForDocument returns both", () => {
-    const db = tmpDb();
     seed(db);
     const repo = makeRepo(db);
     Effect.runSync(
@@ -134,7 +138,6 @@ describe("HearthSessionRepo per-runtime isolation", () => {
   });
 
   it("listForDocument is scoped to the document (other documents excluded)", () => {
-    const db = tmpDb();
     seed(db);
     const repo = makeRepo(db);
     Effect.runSync(
@@ -151,7 +154,6 @@ describe("HearthSessionRepo per-runtime isolation", () => {
 
 describe("HearthSessionRepo remove", () => {
   it("remove deletes the mapping row", () => {
-    const db = tmpDb();
     seed(db);
     const repo = makeRepo(db);
     Effect.runSync(
@@ -166,7 +168,6 @@ describe("HearthSessionRepo remove", () => {
   });
 
   it("remove on one runtime leaves the other runtime's mapping intact", () => {
-    const db = tmpDb();
     seed(db);
     const repo = makeRepo(db);
     Effect.runSync(
@@ -184,7 +185,6 @@ describe("HearthSessionRepo remove", () => {
 
 describe("HearthSessionRepo hasActiveTask", () => {
   it("true when a queued or running task exists for the document+runtime", () => {
-    const db = tmpDb();
     seed(db);
     const repo = makeRepo(db);
     Effect.runSync(
@@ -197,7 +197,6 @@ describe("HearthSessionRepo hasActiveTask", () => {
   });
 
   it("false for completed/failed/cancelled tasks", () => {
-    const db = tmpDb();
     seed(db);
     const repo = makeRepo(db);
     Effect.runSync(
@@ -211,7 +210,6 @@ describe("HearthSessionRepo hasActiveTask", () => {
   });
 
   it("false when no task row exists for the document", () => {
-    const db = tmpDb();
     seed(db);
     const repo = makeRepo(db);
     Effect.runSync(
@@ -222,7 +220,6 @@ describe("HearthSessionRepo hasActiveTask", () => {
   });
 
   it("false when the active task belongs to a different runtime", () => {
-    const db = tmpDb();
     seed(db);
     const repo = makeRepo(db);
     Effect.runSync(

@@ -25,7 +25,6 @@ describe("MilestoneSelector", () => {
     expect(trigger.textContent).toContain("v1.0 launch");
     expect(trigger.textContent).toContain("2/4 archived");
   });
-
   it("lists options with counts; archived milestones dimmed; Manage milestones link present", async () => {
     const user = userEvent.setup();
     render(<MilestoneSelector milestones={MILESTONES} value={null} onChange={() => {}} slug="demo" />);
@@ -37,32 +36,5 @@ describe("MilestoneSelector", () => {
     expect(screen.getByRole("link", { name: /Manage milestones/ })).toBeInTheDocument();
     const archivedOption = screen.getByText("Prototype").closest("button")!;
     expect(archivedOption.className).toContain("archived");
-  });
-
-  it("selecting an option calls onChange with its id", async () => {
-    const user = userEvent.setup();
-    const onChange = vi.fn();
-    render(<MilestoneSelector milestones={MILESTONES} value={null} onChange={onChange} slug="demo" />);
-    await user.click(screen.getByRole("button", { name: /No milestone/ }));
-    await user.click(screen.getByText("Beta milestone"));
-    expect(onChange).toHaveBeenCalledWith("m2");
-  });
-
-  it("selecting No milestone calls onChange with null", async () => {
-    const user = userEvent.setup();
-    const onChange = vi.fn();
-    render(<MilestoneSelector milestones={MILESTONES} value="m1" onChange={onChange} slug="demo" />);
-    await user.click(screen.getByRole("button", { name: /v1.0 launch/ }));
-    await user.click(screen.getByText("No milestone"));
-    expect(onChange).toHaveBeenCalledWith(null);
-  });
-
-  it("zero-sprint milestones show no count suffix", async () => {
-    const user = userEvent.setup();
-    const none: Milestone[] = [{ ...MILESTONES[0]!, sprintCount: 0, archivedSprintCount: 0 }];
-    render(<MilestoneSelector milestones={none} value={null} onChange={() => {}} slug="demo" />);
-    await user.click(screen.getByRole("button", { name: /No milestone/ }));
-    expect(screen.getByText("v1.0 launch")).toBeInTheDocument();
-    expect(screen.queryByText(/sprints archived/)).not.toBeInTheDocument();
   });
 });

@@ -1,4 +1,4 @@
-import { describe, expect, it, afterEach } from "vitest";
+import { describe, expect, it, afterEach, beforeAll, beforeEach, afterAll } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -13,19 +13,36 @@ import type { Actor } from "../../shared/types";
 
 const MIGRATIONS = fileURLToPath(new URL("../../migrations", import.meta.url));
 
-let dirs: string[] = [];
-let dbs: Database[] = [];
+let dir: string;
+let db: Database;
 
-function tmpDb(): Database {
-  const dir = mkdtempSync(join(tmpdir(), "lexa-task-repo-"));
-  dirs.push(dir);
+beforeAll(() => {
+  dir = mkdtempSync(join(tmpdir(), "lexa-task-repo-"));
   const path = join(dir, "test.db");
   runMigrations(path, MIGRATIONS);
   const ctx = Effect.runSync(Effect.scoped(Layer.build(initSqlite(path))));
-  const db = Context.get(ctx, Sqlite);
-  dbs.push(db);
-  return db;
+  db = Context.get(ctx, Sqlite);
+});
+
+afterAll(() => {
+  try { db.close(); } catch {}
+  rmSync(dir, { recursive: true, force: true });
+});
+
+function cleanDb(db: Database) {
+  db.exec("PRAGMA foreign_keys = OFF");
+  const tables = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name != '_migrations' AND name NOT LIKE '%fts%'").all() as { name: string }[];
+  for (const { name } of tables) {
+    try { db.exec(`DELETE FROM "${name}"`); } catch {}
+  }
+  try { db.exec("DELETE FROM sqlite_sequence"); } catch {}
+  db.exec("PRAGMA foreign_keys = ON");
 }
+
+beforeEach(() => {
+  cleanDb(db);
+});
+
 
 function seed(db: Database) {
   db.prepare("INSERT INTO projects (id, name, slug) VALUES ('p1','P','p1')").run();
@@ -57,18 +74,8 @@ function makeService(db: Database) {
 
 const maria: Actor = { kind: "user", label: "Maria", userId: "u1" };
 
-afterEach(() => {
-  for (const db of dbs) {
-    try { db.close(); } catch {}
-  }
-  dbs = [];
-  for (const d of dirs) rmSync(d, { recursive: true, force: true });
-  dirs = [];
-});
-
 describe("TaskRepo.findLastInColumn", () => {
   it("anchors on the max position including archived tasks", () => {
-    const db = tmpDb();
     seed(db);
     const repo = makeRepo(db);
     const last = Effect.runSync(repo.findLastInColumn("p1", "c1"));
@@ -80,7 +87,6 @@ describe("TaskRepo.findLastInColumn", () => {
 
 describe("create after archived last position", () => {
   it("creates a task in a column whose last position is an archived task", () => {
-    const db = tmpDb();
     seed(db);
     const svc = makeService(db);
     const { task } = Effect.runSync(
@@ -94,7 +100,6 @@ describe("create after archived last position", () => {
 
 describe("TaskRepo.findUrgentAcrossAllProjects", () => {
   it("excludes tasks in a closed (done) column but keeps unmapped and open ones", () => {
-    const db = tmpDb();
     seed(db);
     db.prepare("INSERT INTO columns (id, project_id, name, position, github_state) VALUES ('c2','p1','Done',1,'closed')").run();
     db.prepare("INSERT INTO columns (id, project_id, name, position, github_state) VALUES ('c3','p1','Later',2,NULL)").run();

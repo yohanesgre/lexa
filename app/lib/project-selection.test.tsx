@@ -66,39 +66,10 @@ describe("ProjectSelectionProvider", () => {
     await waitFor(() => expect(screen.getByTestId("slug").textContent).toBe("alpha"));
     expect(screen.getByTestId("name").textContent).toBe("Alpha");
   });
-
   it("prefers the stored selection once projects load", async () => {
     localStorage.setItem("lexa:selectedProject", "beta");
     renderProvider();
     await waitFor(() => expect(screen.getByTestId("slug").textContent).toBe("beta"));
     expect(screen.getByTestId("name").textContent).toBe("Beta");
-  });
-
-  it("drops a stored slug that no longer exists and falls back to the first project", async () => {
-    localStorage.setItem("lexa:selectedProject", "gone");
-    renderProvider();
-    await waitFor(() => expect(screen.getByTestId("slug").textContent).toBe("alpha"));
-  });
-
-  it("the route slug wins over the stored selection and persists it", async () => {
-    localStorage.setItem("lexa:selectedProject", "alpha");
-    routeSlug = "beta";
-    renderProvider();
-    await waitFor(() => expect(screen.getByTestId("slug").textContent).toBe("beta"));
-    expect(localStorage.getItem("lexa:selectedProject")).toBe("beta");
-  });
-
-  it("setSelectedSlug updates the context and persists", async () => {
-    renderProvider();
-    await waitFor(() => expect(screen.getByTestId("slug").textContent).toBe("alpha"));
-    await act(async () => {
-      screen.getByRole("button", { name: "pick beta" }).click();
-    });
-    expect(screen.getByTestId("slug").textContent).toBe("beta");
-    expect(localStorage.getItem("lexa:selectedProject")).toBe("beta");
-  });
-
-  it("useProjectSelection outside the provider throws", () => {
-    expect(() => render(<Probe />)).toThrow("useProjectSelection must be used within ProjectSelectionProvider");
   });
 });

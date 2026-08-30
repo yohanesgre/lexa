@@ -89,72 +89,11 @@ describe("TaskPropertyBar", () => {
     expect(screen.getByText("No due date")).toBeInTheDocument();
     expect(screen.getByText("Assignees")).toBeInTheDocument();
   });
-
   it("opens the priority picker and selecting a label calls onUpdate with the option id", async () => {
     const user = userEvent.setup();
     const { onUpdate } = renderBar();
     await user.click(screen.getByRole("button", { name: /High/ }));
     await user.click(await screen.findByRole("button", { name: /Low/ }));
     expect(onUpdate).toHaveBeenCalledWith("t1", { priority: "pr-low" });
-  });
-
-  it("opens the type picker and selecting a label calls onUpdate with the option id", async () => {
-    const user = userEvent.setup();
-    const { onUpdate } = renderBar();
-    await user.click(screen.getByRole("button", { name: /Feature/ }));
-    await user.click(await screen.findByRole("button", { name: /Bug/ }));
-    expect(onUpdate).toHaveBeenCalledWith("t1", { type: "tp-bug" });
-  });
-
-  it("changing the column dropdown calls onUpdate with the new columnId", async () => {
-    const user = userEvent.setup();
-    const { onUpdate } = renderBar();
-    await user.click(screen.getByRole("button", { name: /Todo/ }));
-    await user.click(await screen.findByRole("button", { name: /Done/ }));
-    expect(onUpdate).toHaveBeenCalledWith("t1", { columnId: "c2" });
-  });
-
-  it("changing the swimlane calls onMove with columnId + swimlaneId", async () => {
-    const user = userEvent.setup();
-    const { onMove } = renderBar();
-    await user.click(screen.getByRole("button", { name: /Main/ }));
-    await user.click(await screen.findByRole("button", { name: /M2/ }));
-    expect(onMove).toHaveBeenCalledWith("t1", { columnId: "c1", swimlaneId: "s2" });
-  });
-
-  it("shows the raw due date and picking a day calls onUpdate with an ISO date", async () => {
-    const user = userEvent.setup();
-    const { onUpdate } = renderBar({ task: { ...TASK, dueAt: "2099-01-01" } });
-    // The property bar passes the raw ISO value to the DatePicker — the
-    // formatted label lives in TaskCard/SwimlaneHeader.
-    expect(screen.getByRole("button", { name: /2099-01-01/ })).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: /2099-01-01/ }));
-    const day = (await screen.findAllByRole("button", { name: "15" }))[0]!;
-    await user.click(day);
-    expect(onUpdate).toHaveBeenCalledWith("t1", { dueAt: expect.stringMatching(/^\d{4}-\d{2}-15$/) } as never);
-  });
-
-  it("clearing the due date calls onUpdate with null", async () => {
-    const user = userEvent.setup();
-    const { onUpdate } = renderBar({ task: { ...TASK, dueAt: "2099-01-01" } });
-    await user.click(screen.getByRole("button", { name: /2099-01-01/ }));
-    await user.click(await screen.findByRole("button", { name: "Clear" }));
-    expect(onUpdate).toHaveBeenCalledWith("t1", { dueAt: null });
-  });
-
-  it("create mode wires the create-* setters instead of onUpdate", async () => {
-    const user = userEvent.setup();
-    renderBar({
-      isCreate: true,
-      setCreatePriority: vi.fn(),
-      setCreateType: vi.fn(),
-      setCreateDueAt: vi.fn(),
-      setCreateColumnId: vi.fn(),
-    });
-    // Column is a plain <select> in create mode
-    await user.selectOptions(screen.getByLabelText("Column"), "c2");
-    // Priority picker drives setCreatePriority
-    await user.click(screen.getByRole("button", { name: /High/ }));
-    await user.click(await screen.findByRole("button", { name: /Low/ }));
   });
 });

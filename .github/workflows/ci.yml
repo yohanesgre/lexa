@@ -48,8 +48,13 @@ jobs:
       - name: Typecheck
         run: bun run typecheck
 
-      - name: Tests
-        run: bun run test
+      - name: Tests (critical — PR fast gate)
+        if: github.event_name == 'pull_request'
+        run: bun run test:critical
+
+      - name: Tests (full — main/tag)
+        if: github.event_name != 'pull_request'
+        run: bun run test:full
 
       - name: Invariant compliance
         run: bun run check:invariants

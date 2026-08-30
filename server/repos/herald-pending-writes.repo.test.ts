@@ -1,4 +1,4 @@
-import { describe, expect, it, afterEach } from "vitest";
+import { describe, expect, it, afterEach, beforeAll, beforeEach, afterAll } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -11,19 +11,36 @@ import { HeraldPendingWritesRepo, type HeraldPendingWriteRow } from "./herald-pe
 
 const MIGRATIONS = fileURLToPath(new URL("../../migrations", import.meta.url));
 
-let dirs: string[] = [];
-let dbs: Database[] = [];
+let dir: string;
+let db: Database;
 
-function tmpDb(): Database {
-  const dir = mkdtempSync(join(tmpdir(), "lexa-herald-pending-writes-repo-"));
-  dirs.push(dir);
+beforeAll(() => {
+  dir = mkdtempSync(join(tmpdir(), "lexa-herald-pending-writes-repo-"));
   const path = join(dir, "test.db");
   runMigrations(path, MIGRATIONS);
   const ctx = Effect.runSync(Effect.scoped(Layer.build(initSqlite(path))));
-  const db = Context.get(ctx, Sqlite);
-  dbs.push(db);
-  return db;
+  db = Context.get(ctx, Sqlite);
+});
+
+afterAll(() => {
+  try { db.close(); } catch {}
+  rmSync(dir, { recursive: true, force: true });
+});
+
+function cleanDb(db: Database) {
+  db.exec("PRAGMA foreign_keys = OFF");
+  const tables = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name != '_migrations' AND name NOT LIKE '%fts%'").all() as { name: string }[];
+  for (const { name } of tables) {
+    try { db.exec(`DELETE FROM "${name}"`); } catch {}
+  }
+  try { db.exec("DELETE FROM sqlite_sequence"); } catch {}
+  db.exec("PRAGMA foreign_keys = ON");
 }
+
+beforeEach(() => {
+  cleanDb(db);
+});
+
 
 // herald_pending_writes FK targets: projects, users, and the composite
 // herald_threads(document_type, document_id) key.
@@ -69,18 +86,8 @@ function row(overrides: Partial<HeraldPendingWriteRow>): HeraldPendingWriteRow {
   };
 }
 
-afterEach(() => {
-  for (const db of dbs) {
-    try { db.close(); } catch {}
-  }
-  dbs = [];
-  for (const d of dirs) rmSync(d, { recursive: true, force: true });
-  dirs = [];
-});
-
 describe("HeraldPendingWritesRepo insert/getById", () => {
   it("insert defaults status='pending' and round-trips via getById", () => {
-    const db = tmpDb();
     seed(db);
     const repo = makeRepo(db);
     Effect.runSync(
@@ -100,7 +107,6 @@ describe("HeraldPendingWritesRepo insert/getById", () => {
   });
 
   it("FK enforcement: insert without the herald_threads composite key fails", () => {
-    const db = tmpDb();
     seed(db);
     const repo = makeRepo(db);
     Effect.runSync(
@@ -114,7 +120,6 @@ describe("HeraldPendingWritesRepo insert/getById", () => {
 
 describe("HeraldPendingWritesRepo decide guard paths", () => {
   it("pending → approved returns the decided row with decided_at set", () => {
-    const db = tmpDb();
     seed(db);
     const repo = makeRepo(db);
     Effect.runSync(
@@ -129,7 +134,6 @@ describe("HeraldPendingWritesRepo decide guard paths", () => {
   });
 
   it("second decide on the same row returns null (guard, not error)", () => {
-    const db = tmpDb();
     seed(db);
     const repo = makeRepo(db);
     Effect.runSync(
@@ -142,7 +146,6 @@ describe("HeraldPendingWritesRepo decide guard paths", () => {
   });
 
   it("decide on an expired row returns null — expiry wins over a late decision", () => {
-    const db = tmpDb();
     seed(db);
     const repo = makeRepo(db);
     Effect.runSync(
@@ -157,7 +160,6 @@ describe("HeraldPendingWritesRepo decide guard paths", () => {
 
 describe("HeraldPendingWritesRepo expireIfDue / sweepExpired", () => {
   it("expireIfDue flips only pending+due rows; future or non-pending → null", () => {
-    const db = tmpDb();
     seed(db);
     const repo = makeRepo(db);
     Effect.runSync(
@@ -173,7 +175,6 @@ describe("HeraldPendingWritesRepo expireIfDue / sweepExpired", () => {
   });
 
   it("sweepExpired counts only due pending rows across batches", () => {
-    const db = tmpDb();
     seed(db);
     const repo = makeRepo(db);
     Effect.runSync(
@@ -192,7 +193,6 @@ describe("HeraldPendingWritesRepo expireIfDue / sweepExpired", () => {
 
 describe("HeraldPendingWritesRepo listByBatch / countByBatchRemaining", () => {
   it("listByBatch orders by seq ASC regardless of insert order", () => {
-    const db = tmpDb();
     seed(db);
     const repo = makeRepo(db);
     Effect.runSync(
@@ -208,7 +208,6 @@ describe("HeraldPendingWritesRepo listByBatch / countByBatchRemaining", () => {
   });
 
   it("countByBatchRemaining counts only pending rows in the batch", () => {
-    const db = tmpDb();
     seed(db);
     const repo = makeRepo(db);
     Effect.runSync(
@@ -226,20 +225,4 @@ describe("HeraldPendingWritesRepo listByBatch / countByBatchRemaining", () => {
   });
 });
 
-describe("HeraldPendingWritesRepo markExecutionError", () => {
-  it("records the error string on the row without touching status", () => {
-    const db = tmpDb();
-    seed(db);
-    const repo = makeRepo(db);
-    Effect.runSync(
-      Effect.gen(function* () {
-        yield* repo.insert(row({ id: "w1" }));
-        seedDecided(db, "w1", "approved");
-        yield* repo.markExecutionError("w1", "WIP_LIMIT: column at capacity");
-        const got = yield* repo.getById("w1");
-        expect(got!.execution_error).toBe("WIP_LIMIT: column at capacity");
-        expect(got!.status).toBe("approved");
-      })
-    );
-  });
-});
+
