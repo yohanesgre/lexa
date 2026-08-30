@@ -1,0 +1,25 @@
+# gitleaks config - extends default rules, allowlists known false positives
+# Docs and test fixtures contain synthetic PEM headers / lxk_ keys with fake values.
+# Real secrets outside those paths still block CI (continue-on-error: false).
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Lexa false positives: docs and test fixtures"
+paths = [
+  '''\.gitleaks\.toml''',
+  '''docs/.*''',
+  '''\.env\.example$''',
+  '''.*\.test\.ts$''',
+  '''.*\.test\.tsx$''',
+  '''cli/src/github\.ts$''',
+  '''server/github/crypto\.ts$''',
+]
+stopwords = [
+  "test-ci-key",
+  "MIIE",
+  "MIIEow",
+  "LXK-TEST-KEY-FRAGMENT",
+  "fake",
+]
