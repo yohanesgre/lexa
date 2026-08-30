@@ -13,5 +13,6 @@ function ProjectSettingsRedirect() {
 }
 
 export const Route = createFileRoute("/$slug/settings")({
+  ssr:false,
   component: ProjectSettingsRedirect,
 });

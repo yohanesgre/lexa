@@ -24,5 +24,6 @@ function SettingsLayout() {
 }
 
 export const Route = createFileRoute("/settings")({
+  ssr:false,
   component: SettingsLayout,
 });

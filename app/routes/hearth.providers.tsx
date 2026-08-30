@@ -5,6 +5,7 @@ import { useToast } from "../components/ui/Toast";
 import { HeraldProvidersSection } from "../components/settings/HeraldProvidersSection";
 
 export const Route = createFileRoute("/hearth/providers")({
+  ssr:false,
   component: HearthProvidersRoute,
 });
 

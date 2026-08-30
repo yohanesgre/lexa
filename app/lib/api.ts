@@ -1,40 +1,15 @@
+import { Schema } from "effect";
 import type { Project, ProjectRepo, Column, Swimlane, Task, Board, Milestone, WikiPageMeta, WikiPage, WikiPageRevision, WikiPageRevisionSummary, TipTapDoc, ApiKey, ApiKeyCreateResult, Dashboard, FieldConfig, HearthTask, HearthTaskLog, HearthTaskStatus, LexaAgent, LexaSkill, HearthProvider, HearthSession, DocumentSource, Runtime, RuntimeEvent, Machine, TaskLink, TaskLinkSuggestion, ActivityEvent, ActivityItem, TaskComment, GithubIssueSummary, Team, TeamMember, TeamMemberRole, WorkspaceInvite, SessionInfo, LexaUser, Attachment } from "../../shared/types";
 import type { HeraldSettingsMasked, HeraldSettingsInput, HeraldChatTranscript, ModelListResult, HeraldProvider, HeraldProviderModel, HeraldUsage, HeraldCall, HeraldProjectSettings } from "../../shared/herald";
 
 const BASE = "/api";
-
-// SSR: resolve the request's origin + cookie so a server-side prefetch (route
-// loader during SSR) hits the same REST API the browser uses. Safe because
-// vite.config.ts excludes @tanstack/react-start-server from the client dep
-// optimizer. Client-side this is never called — fetch stays same-origin and
-// the session cookie flows implicitly.
-async function serverRequestContext(): Promise<{ origin: string; cookie?: string | undefined }> {
-  const origin =
-    typeof process !== "undefined"
-      ? (process.env.LXK_PUBLIC_URL ?? "http://localhost:3000")
-      : "http://localhost:3000";
-  try {
-    const { getRequest } = await import("@tanstack/react-start-server");
-    const req = getRequest();
-    return { origin, cookie: req?.headers.get("cookie") ?? undefined };
-  } catch {
-    // No request context (unit tests) — fetch absolute, no cookie.
-    return { origin, cookie: undefined };
-  }
-}
 
 async function request<T>(url: string, init?: RequestInit): Promise<T> {
   // FormData bodies must reach the browser untouched — it supplies the
   // multipart boundary via Content-Type; a JSON override breaks the upload.
   const isForm = typeof FormData !== "undefined" && init?.body instanceof FormData;
   const headers: Record<string, string> = { ...(isForm ? {} : { "Content-Type": "application/json" }), ...init?.headers as Record<string, string> };
-  let target = url;
-  if (typeof window === "undefined") {
-    const { origin, cookie } = await serverRequestContext();
-    target = `${origin}${url}`;
-    if (cookie) headers.cookie = cookie;
-  }
-  const res = await fetch(target, { credentials: "include", ...init, headers });
+  const res = await fetch(url, { credentials: "include", ...init, headers });
   if (!res.ok) {
     const body = await res.json().catch(() => ({})) as { error?: { code?: string | undefined; message?: string | undefined; details?: unknown } };
     const err = new Error(body.error?.message ?? `HTTP ${res.status}`) as Error & { code?: string | undefined; details?: unknown };
@@ -43,7 +18,9 @@ async function request<T>(url: string, init?: RequestInit): Promise<T> {
     throw err;
   }
   if (res.status === 204) return undefined as T;
-  return res.json();
+  const raw = (await res.json()) as unknown;
+  const decoded = Schema.decodeUnknownSync(Schema.Unknown)(raw);
+  return decoded as T;
 }
 
 export function listProjects(): Promise<{ data: Project[]; nextCursor: string | null }> {

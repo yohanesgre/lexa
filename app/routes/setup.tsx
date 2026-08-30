@@ -6,6 +6,7 @@ import { copyToClipboard } from "../lib/clipboard";
 import { cn } from "../components/ui/cn";
 
 export const Route = createFileRoute("/setup")({
+  ssr:false,
   component: SetupWizard,
 });
 

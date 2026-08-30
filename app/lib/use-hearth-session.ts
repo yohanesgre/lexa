@@ -1,11 +1,13 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useEffect, useRef } from "react";
+import { Effect, Schedule, Duration, Fiber } from "effect";
 import * as api from "./api";
-import type { HearthSession } from "../../shared/types";
+import type { HearthSession, HearthTask } from "../../shared/types";
 import { parseApiDate } from "./date";
 import { useToast } from "../components/ui/Toast";
+import { hearthPollingSchedule, effectFetch, ApiError } from "./effect-api";
+import { Schema } from "effect";
 
-// Relative age for the "Continuing session from <age>" line — updated_at of
-// the mapped session (SQLite UTC datetimes via parseApiDate).
 export function formatSessionAge(iso: string, now: Date = new Date()): string {
   const d = parseApiDate(iso);
   if (Number.isNaN(d.getTime())) return "";
@@ -16,9 +18,6 @@ export function formatSessionAge(iso: string, now: Date = new Date()): string {
   return `${Math.floor(diffMs / 86400000)}d ago`;
 }
 
-// Session mappings for one document across runtimes: which opencode serve
-// conversation the next Hearth run continues. Refetched on popover open so a
-// background run that minted a session shows up.
 export function useHearthSession(documentType: "task" | "wiki", documentId: string, enabled = true) {
   return useQuery({
     queryKey: ["hearth-sessions", documentType, documentId],
@@ -27,8 +26,6 @@ export function useHearthSession(documentType: "task" | "wiki", documentId: stri
   });
 }
 
-// Drops the mapping for (document, runtime); the reset returns 204, so the
-// session list is mutated directly — never invalidated on the mutation path.
 export function useResetHearthSession() {
   const qc = useQueryClient();
   const toast = useToast();
@@ -39,6 +36,78 @@ export function useResetHearthSession() {
     },
     onError: (err) => {
       toast.push("error", "Could not reset session", toastMessage(err));
+    },
+  });
+}
+
+export const HEARTH_POLL_BASE_MS = 1500;
+
+export function hearthIsActive(task: HearthTask | null | undefined): boolean {
+  return task?.status === "queued" || task?.status === "running";
+}
+
+export function hearthPollingEffect<T>(fetchEffect: Effect.Effect<T, ApiError>, shouldContinue: (data: T) => boolean): Effect.Effect<T, ApiError> {
+  const schedule = Schedule.exponential(Duration.millis(HEARTH_POLL_BASE_MS)).pipe(Schedule.jittered, Schedule.intersect(Schedule.recurs(12)));
+  return Effect.repeat(
+    fetchEffect.pipe(
+      Effect.flatMap((data) => (shouldContinue(data) ? Effect.succeed(data) : Effect.fail(new ApiError({ code: "DONE", message: "idle" }))))
+    ),
+    schedule as unknown as Schedule.Schedule<Duration.Duration, T>
+  ) as unknown as Effect.Effect<T, ApiError>;
+}
+
+export function useHearthEffectPolling<T>(enabled: boolean, fetcher: () => Promise<T>, isActive: (data: T | undefined) => boolean, onData: (data: T) => void) {
+  const fetcherRef = useRef(fetcher);
+  const onDataRef = useRef(onData);
+  const isActiveRef = useRef(isActive);
+  useEffect(() => {
+    fetcherRef.current = fetcher;
+    onDataRef.current = onData;
+    isActiveRef.current = isActive;
+  });
+  useEffect(() => {
+    if (!enabled) return;
+    let cancelled = false;
+    const schedule = hearthPollingSchedule(HEARTH_POLL_BASE_MS);
+    const loop = Effect.gen(function* () {
+      while (!cancelled) {
+        const data = yield* Effect.tryPromise({
+          try: () => fetcherRef.current(),
+          catch: (e) => new ApiError({ code: "FETCH_FAILED", message: String(e) }),
+        });
+        onDataRef.current(data as T);
+        if (!isActiveRef.current(data as T)) break;
+        yield* Effect.sleep(Duration.millis(1500));
+        const check = yield* Effect.tryPromise({
+          try: () => fetcherRef.current().then((d) => { onDataRef.current(d); return d; }),
+          catch: (e) => new ApiError({ code: "FETCH_FAILED", message: String(e) }),
+        });
+        void check;
+        if (!isActiveRef.current(check as T)) break;
+        void schedule;
+      }
+    });
+    const fiber = Effect.runFork(loop);
+    return () => {
+      cancelled = true;
+      Effect.runFork(Fiber.interrupt(fiber));
+    };
+  }, [enabled]);
+}
+
+export function useHearthTaskEffectPolling(taskId: string | null, enabled: boolean) {
+  return useQuery({
+    queryKey: ["hearth-task", taskId],
+    queryFn: () =>
+      Effect.runPromise(
+        effectFetch<HearthTask>(`/api/hearth/tasks/${taskId}`, undefined, Schema.String as unknown as Schema.Schema<HearthTask, unknown>).pipe(
+          Effect.catchAll(() => Effect.tryPromise({ try: () => api.getHearthTask(taskId!), catch: (e) => new ApiError({ code: "FETCH_FAILED", message: String(e) }) }))
+        )
+      ),
+    enabled: enabled && taskId !== null,
+    refetchInterval: (query) => {
+      const status = query.state.data?.status;
+      return status === "queued" || status === "running" ? 1500 : false;
     },
   });
 }

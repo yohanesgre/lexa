@@ -3,6 +3,7 @@ import { InvalidTokenState, SetPasswordForm } from "../components/auth/SetPasswo
 import { useSession } from "../lib/queries";
 
 export const Route = createFileRoute("/set-password")({
+  ssr:false,
   validateSearch: (search: Record<string, unknown>): { token?: string | undefined } => ({
     token: typeof search.token === "string" && search.token ? search.token : undefined,
   }),

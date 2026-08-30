@@ -10,7 +10,7 @@ export const Route = createFileRoute("/")({
   validateSearch: (search: Record<string, unknown>): { new?: boolean | undefined } => ({
     new: search.new === "1" || search.new === true ? true : undefined,
   }),
-  ssr: false,
+  ssr:false,
   loader: async ({ context }) => {
     // Prefetch the dashboard so the first paint renders content instead of
     // skeletons — the same key/queryFn the component's useDashboard reads.

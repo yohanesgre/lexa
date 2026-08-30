@@ -1,6 +1,7 @@
 import { useCallback, useState, useSyncExternalStore } from "react";
 import type { HeraldWriteDiff, StreamFrame } from "../../shared/herald";
-import { HERALD_PRE_INGRESS_TIMEOUT_MS, HERALD_STALL_TIMEOUT_MS, HERALD_STALL_MESSAGE } from "../../shared/herald";
+import { HERALD_PRE_INGRESS_TIMEOUT_MS, HERALD_STALL_MESSAGE, HERALD_STALL_TIMEOUT_MS } from "../../shared/herald";
+import { Duration, Effect, Schedule, Stream } from "effect";
 
 // Fetch-based SSE reader for Herald's POST stream endpoints (S5). Sessions
 // live in a module-level store keyed by taskId/chatId so a closed popover or
@@ -156,19 +157,24 @@ class HeraldStreamSession {
   }
 
   start(): void {
-    void this.run();
+    void this.runEffect();
   }
 
-  private async run(): Promise<void> {
+  private async runEffect(): Promise<void> {
     this.emit({ status: "connecting", error: null });
     let res: Response;
     try {
-      res = await fetch(this.url, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(this.body),
-        signal: this.controller.signal,
+      const fetchEffect = Effect.tryPromise({
+        try: () =>
+          fetch(this.url, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(this.body),
+            signal: this.controller.signal,
+          }),
+        catch: (e) => e as Error,
       });
+      res = await Effect.runPromise(fetchEffect);
     } catch (e) {
       if ((e as Error).name === "AbortError") return;
       this.emit({ status: "error", error: { code: "HERALD_GENERATION_FAILED", message: "Could not reach the server." } });
@@ -203,8 +209,6 @@ class HeraldStreamSession {
     let pending: HeraldPendingChip[] = this.snapshot.status === "idle" ? [] : [...this.snapshot.pending];
     let hasIngress = this.snapshot.hasIngress ?? false;
 
-    // Bank the open burst: aggregate ms for the summary label + per-item ms
-    // for the row's own "Thought for Ns" label.
     const closeBurst = (): Partial<HeraldStreamSnapshot> => {
       reasoningActive = false;
       const elapsed = Math.max(1, Math.round(performance.now() - burstStart));
@@ -218,7 +222,6 @@ class HeraldStreamSession {
 
     const handleFrame = (frame: StreamFrame) => {
       frames.push(frame);
-      // Ephemeral reasoning buffer — appended live, never persisted.
       if (frame.type === "reasoning") {
         if (frame.delta.length > 0) {
           hasIngress = true;
@@ -237,7 +240,6 @@ class HeraldStreamSession {
         }
         return;
       }
-      // Any non-reasoning frame closes the current burst and banks its time.
       let burstPatch: Partial<HeraldStreamSnapshot> = {};
       if (reasoningActive) {
         burstPatch = closeBurst();
@@ -263,9 +265,6 @@ class HeraldStreamSession {
             tools = [...tools, chip];
             items = [...items, { kind: "tool", chip }];
           } else {
-            // Flip the most recent unresolved chip of the same tool to result;
-            // the result frame's detail rides separately so the call line
-            // keeps its process sentence.
             const index = tools.findLastIndex((t) => t.name === frame.name && t.phase === "call");
             if (index >= 0) {
               const chip = { ...tools[index]!, phase: "result" as const, resultDetail: detail } as HeraldToolChip;
@@ -279,8 +278,6 @@ class HeraldStreamSession {
         }
         case "tool_pending": {
           hasIngress = true;
-          // One proposal per frame, seq order guaranteed server-side — keep
-          // the array sorted anyway so rendering never depends on arrival.
           const chip: HeraldPendingChip = {
             approvalId: frame.approvalId,
             batchId: frame.batchId,
@@ -313,45 +310,65 @@ class HeraldStreamSession {
       }
     };
 
-    let stallTimer: ReturnType<typeof setTimeout> | undefined;
     try {
-      for (;;) {
-        let readResult: Awaited<ReturnType<typeof reader.read>>;
-        const timeoutMs = hasIngress ? STREAM_STALL_TIMEOUT_MS : PRE_INGRESS_TIMEOUT_MS;
-        const readPromise = reader.read();
-        readPromise.catch(() => {});
-        const stallPromise = new Promise<never>((_, reject) => {
-          stallTimer = setTimeout(() => reject(Object.assign(new Error("stall"), { name: "StallTimeout" })), timeoutMs);
-        });
-        try {
-          readResult = await Promise.race([readPromise, stallPromise]);
-        } finally {
-          clearTimeout(stallTimer);
-        }
-        const { done, value } = readResult;
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-        let sep: number;
-        while ((sep = buffer.indexOf("\n\n")) !== -1) {
-          const rawEvent = buffer.slice(0, sep);
-          buffer = buffer.slice(sep + 2);
-          let eventName = "message";
-          const dataLines: string[] = [];
-          for (const line of rawEvent.split("\n")) {
-            if (line.startsWith(":")) continue; // heartbeat comment
-            if (line.startsWith("event:")) eventName = line.slice(6).trim();
-            else if (line.startsWith("data:")) dataLines.push(line.slice(5).trim());
+      const chunkIterable = {
+        [Symbol.asyncIterator]: async function* (): AsyncGenerator<Uint8Array> {
+          while (true) {
+            const timeoutMs = hasIngress ? STREAM_STALL_TIMEOUT_MS : PRE_INGRESS_TIMEOUT_MS;
+            const readEffect = Effect.tryPromise({
+              try: () => reader.read(),
+              catch: (e) => e as Error,
+            });
+            const timed = Effect.timeout(readEffect, Duration.millis(timeoutMs));
+            const retried = Effect.retry(timed as unknown as Effect.Effect<Awaited<ReturnType<typeof reader.read>>, Error>, Schedule.recurs(0) as unknown as Schedule.Schedule<never, Error>);
+            let result: Awaited<ReturnType<typeof reader.read>>;
+            try {
+              result = (await Effect.runPromise(retried as unknown as Effect.Effect<Awaited<ReturnType<typeof reader.read>>, Error>)) as unknown as Awaited<ReturnType<typeof reader.read>>;
+            } catch (e) {
+              const tag = (e as { _tag?: string })?._tag;
+              const name = (e as Error)?.name;
+              const msg = String(e);
+              if (tag === "TimeoutException" || name === "TimeoutException" || msg.includes("TimeoutException") || msg.includes("Timeout")) {
+                throw Object.assign(new Error("stall"), { name: "StallTimeout" });
+              }
+              throw e;
+            }
+            if (result.done) break;
+            yield result.value as Uint8Array;
           }
-          if (dataLines.length === 0) continue;
-          try {
-            const payload = JSON.parse(dataLines.join("\n")) as StreamFrame;
-            handleFrame({ ...(payload as { type?: string }), type: payload.type ?? eventName } as StreamFrame);
-          } catch {
-            // Malformed chunk — skip, never kill the stream.
-          }
-          if (this.snapshot.status === "error" || this.snapshot.status === "done" || this.snapshot.status === "suspended") return;
-        }
-      }
+        },
+      };
+
+      const chunkStream = Stream.fromAsyncIterable(chunkIterable, (e) => e as Error);
+
+      await Effect.runPromise(
+        Stream.runForEach(chunkStream, (chunk) =>
+          Effect.sync(() => {
+            buffer += decoder.decode(chunk as Uint8Array, { stream: true });
+            let sep: number;
+            while ((sep = buffer.indexOf("\n\n")) !== -1) {
+              const rawEvent = buffer.slice(0, sep);
+              buffer = buffer.slice(sep + 2);
+              let eventName = "message";
+              const dataLines: string[] = [];
+              for (const line of rawEvent.split("\n")) {
+                if (line.startsWith(":")) continue;
+                if (line.startsWith("event:")) eventName = line.slice(6).trim();
+                else if (line.startsWith("data:")) dataLines.push(line.slice(5).trim());
+              }
+              if (dataLines.length === 0) continue;
+              try {
+                const payload = JSON.parse(dataLines.join("\n")) as StreamFrame;
+                handleFrame({ ...(payload as { type?: string }), type: payload.type ?? eventName } as StreamFrame);
+              } catch {
+                // Malformed chunk — skip
+              }
+              if (this.snapshot.status === "error" || this.snapshot.status === "done" || this.snapshot.status === "suspended") return;
+            }
+          })
+        )
+      );
+
       if (this.snapshot.status === "streaming") {
         this.emit({ status: "error", error: { code: "HERALD_GENERATION_FAILED", message: STREAM_STALL_MESSAGE } });
       }
@@ -365,8 +382,6 @@ class HeraldStreamSession {
         return;
       }
       this.emit({ status: "error", error: { code: "HERALD_GENERATION_FAILED", message: "The stream failed unexpectedly." } });
-    } finally {
-      clearTimeout(stallTimer);
     }
   }
 }

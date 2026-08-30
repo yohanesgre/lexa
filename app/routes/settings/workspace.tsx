@@ -18,5 +18,6 @@ function WorkspaceRoute() {
 }
 
 export const Route = createFileRoute("/settings/workspace")({
+  ssr:false,
   component: WorkspaceRoute,
 });
