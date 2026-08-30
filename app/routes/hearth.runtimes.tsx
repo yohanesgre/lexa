@@ -5,6 +5,7 @@ import { useToast } from "../components/ui/Toast";
 import { MachinesRuntimesSection } from "../components/settings/SettingsSections";
 
 export const Route = createFileRoute("/hearth/runtimes")({
+  ssr:false,
   component: HearthRuntimesRoute,
 });
 

@@ -5,6 +5,7 @@ import { useToast } from "../components/ui/Toast";
 import { AgentsSettingsSection, SkillsSettingsSection } from "../components/hearth/AgentSkillSettings";
 
 export const Route = createFileRoute("/hearth/agents")({
+  ssr:false,
   component: HearthAgentsRoute,
 });
 

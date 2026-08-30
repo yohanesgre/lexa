@@ -1,6 +1,11 @@
 import { useCallback, useState, useSyncExternalStore } from "react";
 import type { HeraldWriteDiff, StreamFrame } from "../../shared/herald";
 import { HERALD_PRE_INGRESS_TIMEOUT_MS, HERALD_STALL_TIMEOUT_MS, HERALD_STALL_MESSAGE } from "../../shared/herald";
+import { Effect, Stream, Schedule, Duration } from "effect";
+import * as Option from "effect/Option";
+
+// @ts-ignore vite client types
+const USE_EFFECT = import.meta.env.VITE_EFFECT_HERALD !== "0";
 
 // Fetch-based SSE reader for Herald's POST stream endpoints (S5). Sessions
 // live in a module-level store keyed by taskId/chatId so a closed popover or
@@ -156,7 +161,236 @@ class HeraldStreamSession {
   }
 
   start(): void {
-    void this.run();
+    if (USE_EFFECT) void this.runEffect();
+    else void this.run();
+  }
+
+  private async runEffect(): Promise<void> {
+    this.emit({ status: "connecting", error: null });
+    let res: Response;
+    try {
+      const fetchEffect = Effect.tryPromise({
+        try: () =>
+          fetch(this.url, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(this.body),
+            signal: this.controller.signal,
+          }),
+        catch: (e) => e as Error,
+      });
+      res = await Effect.runPromise(fetchEffect);
+    } catch (e) {
+      if ((e as Error).name === "AbortError") return;
+      this.emit({ status: "error", error: { code: "HERALD_GENERATION_FAILED", message: "Could not reach the server." } });
+      return;
+    }
+    if (!res.ok) {
+      const payload = (await res.json().catch(() => ({}))) as { error?: { code?: string | undefined; message?: string } };
+      this.emit({
+        status: "error",
+        error: { code: payload.error?.code ?? `HTTP ${res.status}`, message: payload.error?.message ?? `Request failed (${res.status}).` },
+      });
+      return;
+    }
+    if (!res.body) {
+      this.emit({ status: "error", error: { code: "HERALD_GENERATION_FAILED", message: "Empty stream." } });
+      return;
+    }
+
+    this.emit({ status: "streaming" });
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    const frames: StreamFrame[] = [];
+    let tools = [...this.snapshot.tools];
+    let items: HeraldTimelineItem[] = [...this.snapshot.items];
+    let text = "";
+    let toolSeq = tools.length;
+    let reasoningText = this.snapshot.reasoningText;
+    let reasoningActive = false;
+    let reasoningMs = this.snapshot.reasoningMs;
+    let burstStart = 0;
+    let pending: HeraldPendingChip[] = this.snapshot.status === "idle" ? [] : [...this.snapshot.pending];
+    let hasIngress = this.snapshot.hasIngress ?? false;
+
+    const closeBurst = (): Partial<HeraldStreamSnapshot> => {
+      reasoningActive = false;
+      const elapsed = Math.max(1, Math.round(performance.now() - burstStart));
+      reasoningMs = (reasoningMs ?? 0) + elapsed;
+      const last = items[items.length - 1];
+      if (last?.kind === "reasoning" && last.ms === null) {
+        items = [...items.slice(0, -1), { ...last, ms: elapsed }];
+      }
+      return { reasoningActive: false, reasoningMs, items: [...items] };
+    };
+
+    const handleFrame = (frame: StreamFrame) => {
+      frames.push(frame);
+      if (frame.type === "reasoning") {
+        if (frame.delta.length > 0) {
+          hasIngress = true;
+          const last = items[items.length - 1];
+          if (!reasoningActive) {
+            reasoningActive = true;
+            burstStart = performance.now();
+            items = [...items, { kind: "reasoning", text: frame.delta, ms: null }];
+          } else if (last?.kind === "reasoning") {
+            items = [...items.slice(0, -1), { ...last, text: last.text + frame.delta }];
+          } else {
+            items = [...items, { kind: "reasoning", text: frame.delta, ms: null }];
+          }
+          reasoningText += frame.delta;
+          this.emit({ frames: [...frames], items: [...items], reasoningText, reasoningActive: true, hasIngress }, true);
+        }
+        return;
+      }
+      let burstPatch: Partial<HeraldStreamSnapshot> = {};
+      if (reasoningActive) {
+        burstPatch = closeBurst();
+      }
+      switch (frame.type) {
+        case "delta": {
+          hasIngress = true;
+          text += frame.text;
+          const last = items[items.length - 1];
+          if (last?.kind === "text") {
+            items = [...items.slice(0, -1), { kind: "text", text: last.text + frame.text }];
+          } else {
+            items = [...items, { kind: "text", text: frame.text }];
+          }
+          this.emit({ frames: [...frames], ...burstPatch, text, items: [...items], hasIngress }, true);
+          break;
+        }
+        case "tool": {
+          hasIngress = true;
+          const detail = frameDetail(frame);
+          if (frame.phase === "call") {
+            const chip: HeraldToolChip = { key: `${frame.name}-${toolSeq++}`, name: frame.name, label: toolLabel(frame.name), phase: "call", detail };
+            tools = [...tools, chip];
+            items = [...items, { kind: "tool", chip }];
+          } else {
+            const index = tools.findLastIndex((t) => t.name === frame.name && t.phase === "call");
+            if (index >= 0) {
+              const chip = { ...tools[index]!, phase: "result" as const, resultDetail: detail } as HeraldToolChip;
+              tools = tools.map((t, i) => (i === index ? chip : t));
+              const itemIndex = items.findLastIndex((it) => it.kind === "tool" && it.chip.key === chip.key);
+              if (itemIndex >= 0) items = items.map((it, i) => (i === itemIndex ? { kind: "tool" as const, chip } : it));
+            }
+          }
+          this.emit({ frames: [...frames], ...burstPatch, tools: [...tools], items: [...items], hasIngress });
+          break;
+        }
+        case "tool_pending": {
+          hasIngress = true;
+          const chip: HeraldPendingChip = {
+            approvalId: frame.approvalId,
+            batchId: frame.batchId,
+            seq: frame.seq,
+            name: frame.name,
+            ...(frameDetail(frame) ? { detail: frameDetail(frame) } : {}),
+            diff: frame.diff,
+          };
+          pending = [...pending.filter((p) => p.approvalId !== chip.approvalId), chip].sort((a, b) => a.seq - b.seq);
+          this.emit({ frames: [...frames], ...burstPatch, pending: [...pending], hasIngress });
+          break;
+        }
+        case "suspended":
+          hasIngress = true;
+          this.emit({ frames: [...frames], status: "suspended", suspendedBatchId: frame.batchId, ...burstPatch, hasIngress });
+          break;
+        case "error":
+          hasIngress = true;
+          this.emit({ frames: [...frames], status: "error", error: { code: frame.code, message: frame.message }, ...burstPatch, hasIngress });
+          break;
+        case "done": {
+          if (frame.text && frame.text.trim().length > 0) hasIngress = true;
+          text = frame.text;
+          this.emit({ frames: [...frames], text, status: "done", usage: frame.usage, ...burstPatch, hasIngress });
+          break;
+        }
+        case "start":
+          this.emit({ frames: [...frames], ...burstPatch, hasIngress });
+          break;
+      }
+    };
+
+    let stallTimer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      const chunkIterable = {
+        [Symbol.asyncIterator]: async function* (): AsyncGenerator<Uint8Array> {
+          while (true) {
+            const timeoutMs = hasIngress ? STREAM_STALL_TIMEOUT_MS : PRE_INGRESS_TIMEOUT_MS;
+            const readEffect = Effect.tryPromise({
+              try: () => reader.read(),
+              catch: (e) => e as Error,
+            });
+            const timed = Effect.timeout(readEffect, Duration.millis(timeoutMs));
+            const retried = Effect.retry(timed as unknown as Effect.Effect<Awaited<ReturnType<typeof reader.read>>, Error>, Schedule.recurs(0) as unknown as Schedule.Schedule<never, Error>);
+            let result: Awaited<ReturnType<typeof reader.read>>;
+            try {
+              result = (await Effect.runPromise(retried as unknown as Effect.Effect<Awaited<ReturnType<typeof reader.read>>, Error>)) as unknown as Awaited<ReturnType<typeof reader.read>>;
+            } catch (e) {
+              const tag = (e as { _tag?: string })?._tag;
+              const name = (e as Error)?.name;
+              const msg = String(e);
+              if (tag === "TimeoutException" || name === "TimeoutException" || msg.includes("TimeoutException") || msg.includes("Timeout")) {
+                throw Object.assign(new Error("stall"), { name: "StallTimeout" });
+              }
+              throw e;
+            }
+            if (result.done) break;
+            yield result.value as Uint8Array;
+          }
+        },
+      };
+
+      const chunkStream = Stream.fromAsyncIterable(chunkIterable, (e) => e as Error);
+
+      await Effect.runPromise(
+        Stream.runForEach(chunkStream, (chunk) =>
+          Effect.sync(() => {
+            buffer += decoder.decode(chunk as Uint8Array, { stream: true });
+            let sep: number;
+            while ((sep = buffer.indexOf("\n\n")) !== -1) {
+              const rawEvent = buffer.slice(0, sep);
+              buffer = buffer.slice(sep + 2);
+              let eventName = "message";
+              const dataLines: string[] = [];
+              for (const line of rawEvent.split("\n")) {
+                if (line.startsWith(":")) continue;
+                if (line.startsWith("event:")) eventName = line.slice(6).trim();
+                else if (line.startsWith("data:")) dataLines.push(line.slice(5).trim());
+              }
+              if (dataLines.length === 0) continue;
+              try {
+                const payload = JSON.parse(dataLines.join("\n")) as StreamFrame;
+                handleFrame({ ...(payload as { type?: string }), type: payload.type ?? eventName } as StreamFrame);
+              } catch {
+                // Malformed chunk — skip
+              }
+              if (this.snapshot.status === "error" || this.snapshot.status === "done" || this.snapshot.status === "suspended") return;
+            }
+          })
+        )
+      );
+
+      if (this.snapshot.status === "streaming") {
+        this.emit({ status: "error", error: { code: "HERALD_GENERATION_FAILED", message: STREAM_STALL_MESSAGE } });
+      }
+    } catch (e) {
+      if ((e as Error).name === "AbortError") return;
+      if ((e as Error).name === "StallTimeout") {
+        this.emit({ status: "error", error: { code: "HERALD_GENERATION_FAILED", message: STREAM_STALL_MESSAGE } });
+        try {
+          await reader.cancel();
+        } catch {}
+        return;
+      }
+      this.emit({ status: "error", error: { code: "HERALD_GENERATION_FAILED", message: "The stream failed unexpectedly." } });
+    } finally {
+      clearTimeout(stallTimer);
+    }
   }
 
   private async run(): Promise<void> {

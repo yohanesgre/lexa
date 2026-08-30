@@ -6,7 +6,7 @@ export const Route = createFileRoute("/$slug/chat")({
   validateSearch: (search: Record<string, unknown>): { thread?: string | undefined } => ({
     thread: typeof search.thread === "string" ? search.thread : undefined,
   }),
-  ssr: false,
+  ssr:false,
   loader: async ({ context, params }) => {
     await context.queryClient.prefetchQuery({
       queryKey: ["project", params.slug],

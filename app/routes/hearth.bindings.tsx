@@ -8,7 +8,7 @@ export const Route = createFileRoute("/hearth/bindings")({
   validateSearch: (search: Record<string, unknown>): { projectId?: string | undefined } => ({
     projectId: typeof search.projectId === "string" && search.projectId ? search.projectId : undefined,
   }),
-  ssr: false,
+  ssr:false,
   component: HearthBindingsRoute,
 });
 
