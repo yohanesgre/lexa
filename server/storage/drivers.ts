@@ -77,7 +77,7 @@ export function createFsDriver(root: string): StorageDriver {
   };
 }
 
-// Bun.S3Client (bun-types 1.3.14 s3.d.ts). A missing object surfaces as an
+// Bun.S3Client (bun-types 1.4 s3.d.ts). A missing object surfaces as an
 // S3Error with "StatusCode" 404 / NoSuchKey — treated as KeyNotFound.
 export function createS3Driver(opts: S3StorageOptions): StorageDriver {
   const client = new Bun.S3Client({
