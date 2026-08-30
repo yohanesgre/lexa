@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
-import { SharedWikiPage, fetchSharedTree } from "./share.$token";
+import { SharedWikiPage } from "./share.$token";
+import { fetchSharedTree } from "../lib/share";
 
 const child = {
   id: "w2", title: "Child", slug: "child",

@@ -13,6 +13,7 @@ export const Route = createFileRoute("/hearth/usage")({
     from: typeof search.from === "string" && search.from ? search.from : undefined,
     to: typeof search.to === "string" && search.to ? search.to : undefined,
   }),
+  ssr: false,
   component: HearthUsageRoute,
 });
 
@@ -65,12 +66,12 @@ function HearthUsageRoute() {
         </div>
         <div className="flex items-center gap-3" style={{ flexWrap: "wrap" }}>
           <div className="field" style={{ marginBottom: 0 }}>
-            <label className="field-label" style={{ marginBottom: 4 }}>From</label>
-            <input className="prop-input" type="date" value={from} onChange={(e) => setFrom(e.target.value)} style={{ width: 160 }} />
+            <label htmlFor="hearth-usage-from" className="field-label" style={{ marginBottom: 4 }}>From</label>
+            <input id="hearth-usage-from" aria-label="From date" className="prop-input" type="date" value={from} onChange={(e) => setFrom(e.target.value)} style={{ width: 160 }} />
           </div>
           <div className="field" style={{ marginBottom: 0 }}>
-            <label className="field-label" style={{ marginBottom: 4 }}>To</label>
-            <input className="prop-input" type="date" value={to} onChange={(e) => setTo(e.target.value)} style={{ width: 160 }} />
+            <label htmlFor="hearth-usage-to" className="field-label" style={{ marginBottom: 4 }}>To</label>
+            <input id="hearth-usage-to" aria-label="To date" className="prop-input" type="date" value={to} onChange={(e) => setTo(e.target.value)} style={{ width: 160 }} />
           </div>
           <button className="btn btn-primary btn-sm" style={{ alignSelf: "flex-end" }} onClick={handleApply}>Apply</button>
           <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 8, alignSelf: "flex-end" }}>

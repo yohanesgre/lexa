@@ -5,6 +5,7 @@ export const Route = createFileRoute("/hearth/runs")({
   validateSearch: (search: Record<string, unknown>): { task?: string | undefined } => ({
     task: typeof search.task === "string" && search.task ? search.task : undefined,
   }),
+  ssr: false,
   component: HearthRunsRoute,
 });
 

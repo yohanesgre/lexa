@@ -3,10 +3,10 @@ import { HeraldChatPage } from "../../components/chat/HeraldChatPage";
 import { getProject } from "../../lib/api";
 
 export const Route = createFileRoute("/$slug/chat")({
-  ssr: "data-only",
   validateSearch: (search: Record<string, unknown>): { thread?: string | undefined } => ({
     thread: typeof search.thread === "string" ? search.thread : undefined,
   }),
+  ssr: false,
   loader: async ({ context, params }) => {
     await context.queryClient.prefetchQuery({
       queryKey: ["project", params.slug],

@@ -1,3 +1,4 @@
+import { memo, useMemo } from "react";
 import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import type { Board, Task } from "../../../shared/types";
@@ -22,6 +23,57 @@ function cardProps(task: Task, board: Board) {
 }
 
 const EMPTY_BLOCKED_BY: string[] = [];
+
+const CardMenu = memo(function CardMenu({
+  archived,
+  taskId,
+  onArchive,
+  onRestore,
+  onDelete,
+}: {
+  archived: boolean;
+  taskId: string;
+  onArchive?: ((id: string) => void) | undefined;
+  onRestore?: ((id: string) => void) | undefined;
+  onDelete?: ((id: string) => void) | undefined;
+}) {
+  return (
+    <Menu
+      align="right"
+      trigger={({ open, toggle }) => (
+        <button
+          type="button"
+          className={cn("icon-btn", open && "active")}
+          onClick={(e) => {
+            e.stopPropagation();
+            toggle();
+          }}
+          title="Card menu"
+          aria-label="Card menu"
+        >
+          <MoreHorizontal size={14} />
+        </button>
+      )}
+    >
+      {archived ? (
+        <button type="button" className="menu-item" onClick={(e) => { e.stopPropagation(); onRestore?.(taskId); }}>
+          <Archive size={14} />
+          Restore
+        </button>
+      ) : (
+        <button type="button" className="menu-item" onClick={(e) => { e.stopPropagation(); onArchive?.(taskId); }}>
+          <Archive size={14} />
+          Archive
+        </button>
+      )}
+      <div className="menu-separator" />
+      <button type="button" className="menu-item danger" onClick={(e) => { e.stopPropagation(); onDelete?.(taskId); }}>
+        <Trash2 size={14} />
+        Delete
+      </button>
+    </Menu>
+  );
+});
 
 export function SortableTaskCard({
   task,
@@ -55,6 +107,7 @@ export function SortableTaskCard({
   subtasksCollapsed?: boolean | undefined;
 }) {
   const archived = task.archivedAt != null;
+  const cardPropsMemo = useMemo(() => cardProps(task, board), [task, board]);
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: task.id,
     data: { type: "card", columnId: task.columnId, swimlaneId: task.swimlaneId },
@@ -82,7 +135,7 @@ export function SortableTaskCard({
       }}
     >
       <TaskCard
-        {...cardProps(task, board)}
+        {...cardPropsMemo}
         dimmed={dimmed}
         archived={archived}
         isSubtask={isSubtask}
@@ -91,39 +144,7 @@ export function SortableTaskCard({
         onToggleSubtasks={onToggleSubtasks}
         subtasksCollapsed={subtasksCollapsed}
         className={cn(isNew && "card-enter")}
-        action={
-          <Menu
-            align="right"
-            trigger={({ open, toggle }) => (
-              <button
-                type="button"
-                className={cn("icon-btn", open && "active")}
-                onClick={(e) => { e.stopPropagation(); toggle(); }}
-                title="Card menu"
-                aria-label="Card menu"
-              >
-                <MoreHorizontal size={14} />
-              </button>
-            )}
-          >
-            {archived ? (
-              <button type="button" className="menu-item" onClick={(e) => { e.stopPropagation(); onRestore?.(task.id); }}>
-                <Archive size={14} />
-                Restore
-              </button>
-            ) : (
-              <button type="button" className="menu-item" onClick={(e) => { e.stopPropagation(); onArchive?.(task.id); }}>
-                <Archive size={14} />
-                Archive
-              </button>
-            )}
-            <div className="menu-separator" />
-            <button type="button" className="menu-item danger" onClick={(e) => { e.stopPropagation(); onDelete?.(task.id); }}>
-              <Trash2 size={14} />
-              Delete
-            </button>
-          </Menu>
-        }
+        action={<CardMenu archived={archived} taskId={task.id} onArchive={onArchive} onRestore={onRestore} onDelete={onDelete} />}
       />
     </div>
   );

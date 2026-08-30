@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import {
   DndContext,
   DragOverlay,
@@ -87,7 +87,7 @@ function useLinkMaps(board: Board) {
       }
     }
     return { childrenByParent, parentOf, blockedBy };
-  }, [board]);
+  }, [board.links, board.tasks]);
 }
 
 const EMPTY_BLOCKED_BY: string[] = [];
@@ -119,8 +119,13 @@ function BoardEmptyState({ onAddColumn }: { onAddColumn: () => void }) {
   );
 }
 
+function tasksReducer(state: Task[], action: { type: "set"; tasks: Task[] } | { type: "move"; taskId: string; columnId: string; swimlaneId: string; position: string }): Task[] {
+  if (action.type === "set") return action.tasks;
+  return state.map((t) => (t.id === action.taskId ? { ...t, columnId: action.columnId, swimlaneId: action.swimlaneId, position: action.position } : t));
+}
+
 export function KanbanBoard({ board, showArchived = false, onToggleArchived, onMoveTask, onSelectTask, onOpenCreateTask, milestoneId = null, onMilestoneChange }: KanbanBoardProps) {
-  const [localTasks, setLocalTasks] = useState<Task[]>(board.tasks);
+  const [localTasks, dispatch] = useReducer(tasksReducer, board.tasks);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [flashColumnId, setFlashColumnId] = useState<string | null>(null);
   const [shakeTaskId, setShakeTaskId] = useState<string | null>(null);
@@ -153,7 +158,7 @@ export function KanbanBoard({ board, showArchived = false, onToggleArchived, onM
   }, [localTasks]);
 
   useEffect(() => {
-    setLocalTasks(board.tasks);
+    dispatch({ type: "set", tasks: board.tasks });
   }, [board.tasks]);
 
   useEffect(
@@ -213,7 +218,7 @@ export function KanbanBoard({ board, showArchived = false, onToggleArchived, onM
       if (filters.swimlanes.size > 0 && !filters.swimlanes.has(task.swimlaneId)) return true;
       return false;
     },
-    [filters]
+    [filters.priorities, filters.types, filters.assignees, filters.swimlanes]
   );
 
 
@@ -307,9 +312,7 @@ export function KanbanBoard({ board, showArchived = false, onToggleArchived, onM
     // returns false the confirm dialog is pending and commits later (resolve)
     // without any optimistic local state.
     if (!confirmMove(task, target)) return;
-    setLocalTasks((prev) =>
-      prev.map((t) => (t.id === task.id ? { ...t, columnId: targetColumnId, swimlaneId: targetLaneId, position } : t))
-    );
+    dispatch({ type: "move", taskId: task.id, columnId: targetColumnId, swimlaneId: targetLaneId, position });
   };
 
   return (

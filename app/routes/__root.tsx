@@ -1,5 +1,6 @@
 import { HeadContent, Outlet, Scripts, createRootRouteWithContext, redirect } from "@tanstack/react-router";
 import { QueryClientProvider } from "@tanstack/react-query";
+import { TanStackDevtools } from "@tanstack/react-devtools";
 import phosphorCss from "../styles/phosphor.css?url";
 import { ModalStackProvider } from "../components/ui/ModalStack";
 import { ToastProvider } from "../components/ui/Toast";
@@ -21,6 +22,7 @@ const PUBLIC_PREFIXES = ["/share/"];
 
 export const Route = createRootRouteWithContext<RouterContext>()({
   beforeLoad: async ({ location }) => {
+    if (location.pathname.startsWith("/__inspect") || location.pathname.startsWith("/.vite-inspect")) return;
     if (PUBLIC_PATHS.has(location.pathname)) return;
     if (PUBLIC_PREFIXES.some((prefix) => location.pathname.startsWith(prefix))) return;
     // Direct fetch, not the query cache: the guard must reflect the real
@@ -70,6 +72,7 @@ function RootComponent() {
               </TeamSelectionProvider>
             </ToastProvider>
           </ModalStackProvider>
+          <TanStackDevtools />
         </QueryClientProvider>
         <Scripts />
       </body>

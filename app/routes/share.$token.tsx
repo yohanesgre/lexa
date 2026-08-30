@@ -1,38 +1,38 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
 import { PanelLeft } from "lucide-react";
 import { createFileRoute } from "@tanstack/react-router";
 import { renderDoc } from "../components/tiptap-render";
 import { ThemeToggle } from "../components/layout/ThemeToggle";
 import type { TipTapDoc } from "../../shared/types";
+import { fetchSharedTree, type SharedPageNode, type SharedTree } from "../lib/share";
 
-interface SharedPageNode {
-  id: string;
-  title: string;
-  slug: string;
-  content: TipTapDoc | Record<string, never>;
-  updatedAt: string;
-  children: SharedPageNode[];
-}
-
-interface SharedTree {
-  root: SharedPageNode;
-}
-
-// Plain fetch — the token IS the credential; the keyed API client must not
-// attach an Authorization header to this surface. Total: any failure
-// (network error, malformed body) resolves to null → dead-link state.
-export async function fetchSharedTree(token: string): Promise<SharedTree | null> {
-  try {
-    const res = await fetch(`/api/share/${encodeURIComponent(token)}`);
-    if (!res.ok) return null;
-    return (await res.json()) as SharedTree;
-  } catch {
-    return null;
-  }
+function extractSnippet(tree: SharedTree | null): string | null {
+  if (!tree?.root.content || typeof tree.root.content !== "object") return null;
+  const doc = tree.root.content as TipTapDoc;
+  if (!Array.isArray(doc.content)) return null;
+  const texts: string[] = [];
+  let totalLen = 0;
+  const walk = (nodes: unknown[]) => {
+    for (const n of nodes) {
+      if (totalLen > 160) break;
+      if (!n || typeof n !== "object") continue;
+      const node = n as { text?: string; content?: unknown[] };
+      if (typeof node.text === "string" && node.text.trim()) {
+        const t = node.text.trim();
+        texts.push(t);
+        totalLen += t.length + 1;
+      }
+      if (Array.isArray(node.content)) walk(node.content);
+    }
+  };
+  walk(doc.content);
+  const joined = texts.join(" ").replace(/\s+/g, " ").trim();
+  if (!joined) return null;
+  return joined.length > 160 ? `${joined.slice(0, 157)}...` : joined;
 }
 
 function formatDate(iso: string): string {
-  return new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+  return new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" });
 }
 
 const fileIcon = (
@@ -44,12 +44,22 @@ const fileIcon = (
 
 export function SharedWikiPage({ tree, token, pageId, onSelectPage }: { tree: SharedTree | null; token: string; pageId?: string | undefined; onSelectPage?: (id: string) => void }) {
   const [currentId, setCurrentId] = useState<string | null>(null);
-  // Narrow screens start collapsed so the sidebar never starves the content.
-  const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(() =>
-    typeof window !== "undefined" && typeof window.matchMedia === "function"
-      ? window.matchMedia("(max-width: 767px)").matches
-      : false
+  const isMobile = useSyncExternalStore(
+    (cb) => {
+      if (typeof window === "undefined" || typeof window.matchMedia !== "function") return () => {};
+      const mql = window.matchMedia("(max-width: 767px)");
+      const handler = () => cb();
+      if (typeof mql.addEventListener === "function") mql.addEventListener("change", handler);
+      else (mql as unknown as { addListener: (cb: () => void) => void }).addListener?.(handler);
+      return () => {
+        if (typeof mql.removeEventListener === "function") mql.removeEventListener("change", handler);
+        else (mql as unknown as { removeListener: (cb: () => void) => void }).removeListener?.(handler);
+      };
+    },
+    () => typeof window !== "undefined" && typeof window.matchMedia === "function" ? window.matchMedia("(max-width: 767px)").matches : false,
+    () => false,
   );
+  const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(isMobile);
 
   if (!tree) {
     return (
@@ -86,18 +96,12 @@ export function SharedWikiPage({ tree, token, pageId, onSelectPage }: { tree: Sh
     node.children.forEach(walk);
   };
   walk(tree.root);
-  // URL param wins over local state so browser Back/Forward and deep links
-  // select the right node.
   const current = (pageId && byId.get(pageId)) || (currentId !== null && byId.get(currentId)) || tree.root;
-  // Empty pages arrive as content:{} — normalize so renderDoc never sees a
-  // doc without a content array.
   const doc: TipTapDoc =
     current.content && typeof current.content === "object" && Array.isArray((current.content as TipTapDoc).content)
       ? (current.content as TipTapDoc)
       : { type: "doc", content: [] };
 
-  // Sidebar nav lists the WHOLE shared subtree (root row first) so visitors
-  // can navigate back up without browser Back.
   const navNodes: { id: string; title: string; depth: number }[] = [];
   const walkNav = (node: SharedPageNode, depth: number) => {
     navNodes.push({ id: node.id, title: node.title, depth });
@@ -214,13 +218,20 @@ function SharePage() {
   const { token } = Route.useParams();
   const { page } = Route.useSearch();
   const navigate = Route.useNavigate();
-  const [tree, setTree] = useState<SharedTree | null>(null);
-  const [loaded, setLoaded] = useState(false);
+  const loaderData = Route.useLoaderData() as { tree: SharedTree | null };
+  const [tree, setTree] = useState<SharedTree | null>(() => loaderData?.tree ?? null);
+  const [loaded, setLoaded] = useState(() => loaderData !== undefined);
 
   useEffect(() => {
+    if (loaderData !== undefined) {
+      setTree(loaderData.tree);
+      setLoaded(true);
+    }
+  }, [loaderData]);
+
+  useEffect(() => {
+    if (loaderData !== undefined) return;
     let cancelled = false;
-    // Any failure (network error, malformed body) resolves to the dead-link
-    // state — a visitor must never see a permanent blank page.
     fetchSharedTree(token)
       .catch(() => null)
       .then((result) => {
@@ -232,7 +243,7 @@ function SharePage() {
     return () => {
       cancelled = true;
     };
-  }, [token]);
+  }, [token, loaderData]);
 
   if (!loaded) return <main style={{ minHeight: "100vh" }} />;
   return (
@@ -249,5 +260,30 @@ export const Route = createFileRoute("/share/$token")({
   validateSearch: (search: Record<string, unknown>): { page?: string | undefined } => ({
     page: typeof search.page === "string" && search.page ? search.page : undefined,
   }),
+  ssr: "data-only",
+  loader: async ({ params, context }) => {
+    let tree: SharedTree | null = null;
+    try {
+      tree = await fetchSharedTree(params.token);
+    } catch {
+      tree = null;
+    }
+    return { tree };
+  },
+  head: ({ loaderData }: any) => {
+    const ld = loaderData as { tree?: SharedTree | null } | undefined;
+    const title = ld?.tree?.root.title ?? "Lexa shared page";
+    const snippet = extractSnippet(ld?.tree ?? null);
+    const description = snippet ?? "Shared via Lexa";
+    return {
+      meta: [
+        { title },
+        { name: "description", content: description },
+        { property: "og:title", content: title },
+        { property: "og:description", content: description },
+        { name: "robots", content: "noindex" },
+      ],
+    };
+  },
   component: SharePage,
 });

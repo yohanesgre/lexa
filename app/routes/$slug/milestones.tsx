@@ -5,6 +5,7 @@ export const Route = createFileRoute("/$slug/milestones")({
   validateSearch: (search: Record<string, unknown>): { tab?: "list" | "timeline" | undefined } => ({
     tab: search.tab === "timeline" ? "timeline" : undefined,
   }),
+  ssr: false,
   component: MilestonesRoute,
 });
 

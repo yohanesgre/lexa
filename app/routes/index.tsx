@@ -10,6 +10,7 @@ export const Route = createFileRoute("/")({
   validateSearch: (search: Record<string, unknown>): { new?: boolean | undefined } => ({
     new: search.new === "1" || search.new === true ? true : undefined,
   }),
+  ssr: false,
   loader: async ({ context }) => {
     // Prefetch the dashboard so the first paint renders content instead of
     // skeletons — the same key/queryFn the component's useDashboard reads.
@@ -52,7 +53,7 @@ function Home() {
 
   if (isLoading) {
     return (
-      <main className="page-frame">
+      <main className="page-frame page-frame-narrow">
         <div className="flex items-center justify-between mb-4">
           <div>
             <div className="skeleton" style={{ width: 160, height: 24 }} />
@@ -83,7 +84,7 @@ function Home() {
   const isEmpty = !dashboard?.projects.length;
 
   return (
-    <main className="page-frame">
+    <main className="page-frame page-frame-narrow">
       <div className="flex items-center justify-between mb-4">
         <h1 className="font-display text-2xl font-semibold text-lx-text-primary">Projects</h1>
         <div className="flex items-center gap-3">

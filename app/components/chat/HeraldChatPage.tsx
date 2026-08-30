@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate } from "@tanstack/react-router";
 import { Send, Square, ArrowDown, ChevronDown, ChevronUp } from "lucide-react";
@@ -53,6 +53,174 @@ import type { HeraldChatThreadSummary } from "../../lib/api";
 // failed/interrupted treatments) transcribe herald-chat-upgrades.html.
 
 const CHAT_CAPS = { maxCount: 3, maxTotalBytes: Math.floor(1.5 * 1024 * 1024) };
+const ATTACH_DISABLED_TITLE_GLOBAL = "Images are disabled — configure vision in Project Settings → Herald.";
+
+const ChatComposer = memo(function ChatComposer({
+  slug,
+  streaming,
+  busy409,
+  suspendedLock,
+  suspendTally,
+  attachDisabled,
+  isMobileComposer,
+  effort,
+  projectEffort,
+  onEffortChange,
+  onSend,
+  onAbort,
+}: {
+  slug: string;
+  streaming: boolean;
+  busy409: boolean;
+  suspendedLock: boolean;
+  suspendTally: string;
+  attachDisabled: boolean;
+  isMobileComposer: boolean;
+  effort: HeraldReasoningEffort | "";
+  projectEffort: HeraldReasoningEffort | null | undefined;
+  onEffortChange: (e: HeraldReasoningEffort | "") => void;
+  onSend: (message: string, imageCount: number) => void;
+  onAbort: () => void;
+}) {
+  const [draft, setDraft] = useState("");
+  const [images, setImages] = useState<HeraldImage[]>([]);
+  const composerRef = useRef<HTMLTextAreaElement>(null);
+  const mention = useMentionTokens({ slug, value: draft, onChange: setDraft });
+
+  const composerStyle = useMemo<React.CSSProperties>(
+    () => ({ ...(busy409 || suspendedLock ? { opacity: 0.55 } : {}), position: "relative" }),
+    [busy409, suspendedLock]
+  );
+  const textareaStyle = useMemo<React.CSSProperties>(() => ({ border: "none", background: "transparent" }), []);
+
+  const pasteIntoComposer = useCallback(
+    (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+      if (attachDisabled) return;
+      const files = Array.from(e.clipboardData.files).filter((f) => f.type.startsWith("image/"));
+      if (files.length === 0) return;
+      e.preventDefault();
+      const result = acceptImageFiles(files, images, CHAT_CAPS);
+      setImages(result.images);
+    },
+    [attachDisabled, images]
+  );
+
+  const handleSend = useCallback(() => {
+    const msg = draft.trim();
+    if (!msg || streaming || suspendedLock || busy409) return;
+    onSend(msg, images.length);
+    setDraft("");
+    mention.close();
+    setImages([]);
+  }, [draft, streaming, suspendedLock, busy409, onSend, images.length, mention]);
+
+  const canSend = draft.trim().length > 0 && !busy409 && !streaming && !suspendedLock;
+
+  return (
+    <div className="composer" style={composerStyle}>
+      {mention.open && (
+        <div className="dropdown-menu mention-popup" role="listbox" style={mention.popupStyle ?? undefined}>
+          {mention.items.length === 0 ? (
+            <div className="dropdown-item" style={{ cursor: "default", color: "var(--lx-text-muted)" }}>
+              No matches
+            </div>
+          ) : (
+            <>
+              {mention.items.some((it) => it.refType === "task") && <div className="dropdown-label">Tasks</div>}
+              {mention.items.map((it, idx) =>
+                idx > 0 && mention.items[idx - 1]!.refType !== it.refType ? <div key={`sep-${idx}`} className="dropdown-separator" /> : null
+              )}
+              {mention.items.map((it, idx) => (
+                <div
+                  key={`${it.refType}-${it.refId}`}
+                  role="option"
+                  aria-selected={idx === mention.focusedIndex}
+                  className={idx === mention.focusedIndex ? "dropdown-item focused" : "dropdown-item"}
+                  onMouseDown={(e) => {
+                    e.preventDefault();
+                    mention.handleSelect(composerRef.current);
+                  }}
+                >
+                  {it.refType === "task" ? (
+                    <>
+                      <span className="task-key" style={{ fontSize: 13 }}>
+                        {it.label}
+                      </span>
+                      <span className="truncate flex-1 min-w-0">{it.sublabel}</span>
+                    </>
+                  ) : (
+                    <>
+                      <span className="truncate flex-1 min-w-0">{it.label}</span>
+                      <span className="font-mono text-xs text-lx-text-muted">{it.sublabel}</span>
+                    </>
+                  )}
+                </div>
+              ))}
+            </>
+          )}
+        </div>
+      )}
+      <textarea
+        ref={composerRef}
+        className="composer-editor w-full"
+        rows={streaming || suspendedLock ? 1 : 2}
+        placeholder={streaming ? "Herald is responding…" : suspendedLock ? "Decide the pending changes above…" : "Ask Herald anything about this project…"}
+        value={draft}
+        onChange={mention.handleChange}
+        onPaste={pasteIntoComposer}
+        onSelect={mention.handleSelectCaret}
+        onKeyDown={(e) => {
+          if (mention.handleKeyDown(e)) return;
+          if (e.key === "Enter" && !e.shiftKey) {
+            e.preventDefault();
+            handleSend();
+          }
+        }}
+        disabled={streaming || busy409 || suspendedLock}
+        style={textareaStyle}
+      />
+      <div className="composer-footer">
+        {streaming ? (
+          <>
+            <span className="font-micro text-2xs text-lx-text-warning uppercase tracking-[0.04em]">● Streaming…</span>
+            <button
+              type="button"
+              className="btn btn-ghost btn-sm"
+              style={{ borderColor: "var(--lx-bg-danger-subtle)", color: "var(--lx-text-danger)" }}
+              onClick={onAbort}
+            >
+              <Square size={12} strokeWidth={1.5} fill="currentColor" />
+              Stop
+            </button>
+          </>
+        ) : suspendedLock ? (
+          <>
+            <span className="font-micro text-2xs text-lx-text-warning" style={{ transform: "uppercase", textTransform: "uppercase", letterSpacing: "0.04em" }}>
+              ● Turn suspended{suspendTally ? ` — ${suspendTally}` : ""}
+            </span>
+            <button type="button" className="btn btn-primary btn-sm" disabled>
+              Send
+            </button>
+          </>
+        ) : (
+          <>
+            <div className="flex items-center gap-2">
+              <HeraldImageAttach images={images} onChange={setImages} caps={CHAT_CAPS} hint="" compact disabled={attachDisabled} disabledTitle={ATTACH_DISABLED_TITLE_GLOBAL} />
+              <span className="font-micro text-2xs text-lx-text-muted uppercase tracking-[0.04em]">≤3 images · ≤1.5MB total</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <EffortPicker effort={effort} projectEffort={projectEffort ?? null} disabled={streaming} align={isMobileComposer ? "up" : "down"} onChange={onEffortChange} />
+              <button type="button" className="btn btn-primary btn-sm" disabled={!canSend} onClick={handleSend}>
+                Send
+                <Send size={12} strokeWidth={1.5} />
+              </button>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+});
 
 export interface CitationView {
   url: string;
@@ -289,6 +457,7 @@ export function HeraldChatPage({ slug, thread }: { slug: string; thread?: string
   const [chatSearch, setChatSearch] = useState("");
   const debouncedSearch = useDebouncedValue(chatSearch, 250);
   const listQuery = useHeraldChatList(projectId, debouncedSearch);
+  const threads = useMemo(() => listQuery.data ?? [], [listQuery.data]);
   // Sidebar visibility — the collapse control lives INSIDE the sidebar
   // (herald-chat.html, mirroring the wiki sidebar): ≥900px it swaps the
   // docked column for a 36px restore rail, <900px the rail button opens the
@@ -490,28 +659,38 @@ export function HeraldChatPage({ slug, thread }: { slug: string; thread?: string
     }
   }, [projectId, chatId, listQuery.data, listQuery.isLoading, thread, stream.hasIngress, streaming, transcript.error, navigate, qc, applyChatId]);
 
-  const [input, setInput] = useState("");
-  const [images, setImages] = useState<HeraldImage[]>([]);
-
-  // "@" mentions over the plain composer textarea (mentions-autocomplete.html).
-  const composerRef = useRef<HTMLTextAreaElement>(null);
-  const mention = useMentionTokens({ slug, value: input, onChange: setInput });
-
   const busy409 = stream.status === "error" && stream.error?.code === "HERALD_TASK_ACTIVE";
   const providerMissing = !settingsLoading && settings === null;
 
   // Composer lock while any approval chip is pending (same rule as
   // streaming) — includes the marker-only reload case (no chip payloads).
-  const batchChips = (turns ?? []).flatMap((t) => t.batch?.chips ?? []);
-  const pendingCount = batchChips.filter((c) => c.state === "pending").length;
-  const hasSuspendedMarker = (turns ?? []).some((t) => !!t.suspendedBatchId);
+  const batchChips = useMemo(() => (turns ?? []).flatMap((t) => t.batch?.chips ?? []), [turns]);
+  const pendingCount = useMemo(() => batchChips.filter((c) => c.state === "pending").length, [batchChips]);
+  const hasSuspendedMarker = useMemo(() => (turns ?? []).some((t) => !!t.suspendedBatchId), [turns]);
   const suspendedLock = pendingCount > 0 || hasSuspendedMarker || stream.status === "suspended";
-  const suspendTally = (() => {
+  const suspendTally = useMemo(() => {
     const effectiveTotal = batchChips.length > 0 ? batchChips.length : stream.pending.length;
     const effectivePending = batchChips.length > 0 ? pendingCount : stream.pending.length;
     if (effectiveTotal === 0) return "";
     return effectivePending === effectiveTotal ? `${effectivePending} pending` : `${effectivePending} of ${effectiveTotal} pending`;
-  })();
+  }, [batchChips, pendingCount, stream.pending]);
+
+  const headerStyle = useMemo<React.CSSProperties>(() => ({ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "16px 24px 0" }), []);
+  const editTextareaStyle = useMemo<React.CSSProperties>(
+    () => ({
+      width: "100%",
+      resize: "vertical",
+      background: "var(--lx-surface-input)",
+      border: "1px solid var(--lx-border-focus)",
+      borderRadius: 6,
+      padding: "8px 10px",
+      fontSize: 13,
+      lineHeight: "18px",
+      fontFamily: "var(--lx-font-body)",
+      color: "var(--lx-text-primary)",
+    }),
+    []
+  );
 
   // Engine gate (herald-chat.html): chat ALWAYS runs the herald lane — under
   // a blacksmith project default every stream fails up front, so the banner
@@ -638,14 +817,14 @@ export function HeraldChatPage({ slug, thread }: { slug: string; thread?: string
     [stream, projectId, chatId, effectiveSkillId, effort, applyChatId, navigate, qc]
   );
 
-  const send = (message: string) => {
-    if (!projectId || !message || streaming || suspendedLock) return;
-    setTurns((prev) => [...(prev ?? []), { role: "user", text: message, imageCount: images.length, rawIndex: -1 }]);
-    setInput("");
-    mention.close();
-    startStream(message);
-    setImages([]);
-  };
+  const send = useCallback(
+    (message: string, imageCount = 0) => {
+      if (!projectId || !message || streaming || suspendedLock) return;
+      setTurns((prev) => [...(prev ?? []), { role: "user", text: message, imageCount, rawIndex: -1 }]);
+      startStream(message);
+    },
+    [projectId, streaming, suspendedLock, startStream]
+  );
 
   // Keep turns up to & including `target` (optionally rewriting its text) —
   // the optimistic view of edit/regenerate/retry until the terminal-state
@@ -697,21 +876,27 @@ export function HeraldChatPage({ slug, thread }: { slug: string; thread?: string
     startStream(trigger.text, idx);
   };
 
-  const pasteIntoComposer = (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
-    if (attachDisabled) return;
-    const files = Array.from(e.clipboardData.files).filter((f) => f.type.startsWith("image/"));
-    if (files.length === 0) return;
-    e.preventDefault();
-    const result = acceptImageFiles(files, images, CHAT_CAPS);
-    setImages(result.images);
-  };
-
   // Thread switching (History rows / New chat): deep-link via ?thread=.
   // Mid-stream switch aborts the running stream — v1 accepted trade-off.
   const renameChat = useRenameHeraldChat(projectId);
   const deleteChat = useDeleteHeraldChat(projectId);
   const metaChat = useUpdateHeraldChatMeta(projectId);
   const toast = useToast();
+  const handlePinToggle = useCallback((id: string, pinned: boolean) => void metaChat.mutateAsync({ chatId: id, pinned }), [metaChat]);
+  const handleRename = useCallback((id: string, title: string) => renameChat.mutateAsync({ chatId: id, title }), [renameChat]);
+  const handleDelete = useCallback(
+    (id: string) =>
+      deleteChat.mutateAsync({ chatId: id }).then(() => {
+        if (id === chatId) {
+          try {
+            window.localStorage.removeItem(`lexa-chat-last:${projectId}`);
+          } catch {}
+          setChatId("");
+          void navigate({ search: {}, replace: true });
+        }
+      }),
+    [deleteChat, chatId, projectId, navigate]
+  );
   const selectThread = useCallback(
     (id: string) => {
       if (streaming) stream.abort();
@@ -722,6 +907,7 @@ export function HeraldChatPage({ slug, thread }: { slug: string; thread?: string
   const startNewChat = useCallback(() => {
     selectThread(crypto.randomUUID());
   }, [selectThread]);
+  const handleAbort = useCallback(() => stream.abort(), [stream]);
 
   const headerSub = `${resolved?.name ?? ""} · thread with Herald — not tied to any document`;
 
@@ -934,30 +1120,22 @@ export function HeraldChatPage({ slug, thread }: { slug: string; thread?: string
   return (
     <div className="chat-layout">
       <ThreadsSidebar
-        threads={listQuery.data ?? []}
+        threads={threads}
         activeChatId={chatId}
         search={chatSearch}
         onSearchChange={setChatSearch}
         onSelect={selectThread}
         onNewChat={startNewChat}
-        onPinToggle={(id, pinned) => void metaChat.mutateAsync({ chatId: id, pinned })}
-        onRename={(id, title) => renameChat.mutateAsync({ chatId: id, title })}
-        onDelete={(id) =>
-          deleteChat.mutateAsync({ chatId: id }).then(() => {
-            if (id === chatId) {
-              try { window.localStorage.removeItem(`lexa-chat-last:${projectId}`); } catch {}
-              setChatId("");
-              void navigate({ search: {}, replace: true });
-            }
-          })
-        }
+        onPinToggle={handlePinToggle}
+        onRename={handleRename}
+        onDelete={handleDelete}
         open={sidebarOpen}
         onToggle={toggleSidebar}
         onClose={() => setSidebarOpen(false)}
       />
       <main className="chat-shell">
       {/* Thread header */}
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "16px 24px 0" }}>
+      <div style={headerStyle}>
         <div className="flex items-center gap-3">
           <h1 className="font-display text-xl font-semibold text-lx-text-primary">Herald Chat</h1>
           <span className="font-micro text-2xs text-lx-text-muted uppercase tracking-[0.04em]">{headerSub}</span>
@@ -1015,7 +1193,7 @@ export function HeraldChatPage({ slug, thread }: { slug: string; thread?: string
                             }
                           }}
                           aria-label="Edit message"
-                          style={{ width: "100%", resize: "vertical", background: "var(--lx-surface-input)", border: "1px solid var(--lx-border-focus)", borderRadius: 6, padding: "8px 10px", fontSize: 13, lineHeight: "18px", fontFamily: "var(--lx-font-body)", color: "var(--lx-text-primary)" }}
+                          style={editTextareaStyle}
                         />
                         <div className="flex items-center justify-end gap-2 mt-2">
                           <button type="button" className="btn btn-primary btn-icon-sm" title="Save edit (Enter)" aria-label="Save edit" onClick={() => commitEdit(pos)}>
@@ -1151,114 +1329,20 @@ export function HeraldChatPage({ slug, thread }: { slug: string; thread?: string
                 </div>
               )}
 
-              <div className="composer" style={{ ...(busy409 || suspendedLock ? { opacity: 0.55 } : {}), position: "relative" }}>
-                {mention.open && (
-                  <div className="dropdown-menu mention-popup" role="listbox" style={mention.popupStyle ?? undefined}>
-                    {mention.items.length === 0 ? (
-                      <div className="dropdown-item" style={{ cursor: "default", color: "var(--lx-text-muted)" }}>No matches</div>
-                    ) : (
-                      <>
-                        {mention.items.some((it) => it.refType === "task") && <div className="dropdown-label">Tasks</div>}
-                        {mention.items.map((it, idx) =>
-                          idx > 0 && mention.items[idx - 1]!.refType !== it.refType && (
-                            <div key={`sep-${idx}`} className="dropdown-separator" />
-                          )
-                        )}
-                        {mention.items.map((it, idx) => (
-                          <div
-                            key={`${it.refType}-${it.refId}`}
-                            role="option"
-                            aria-selected={idx === mention.focusedIndex}
-                            className={idx === mention.focusedIndex ? "dropdown-item focused" : "dropdown-item"}
-                            onMouseDown={(e) => {
-                              e.preventDefault();
-                              mention.handleSelect(composerRef.current);
-                            }}
-                          >
-                            {it.refType === "task" ? (
-                              <>
-                                <span className="task-key" style={{ fontSize: 13 }}>{it.label}</span>
-                                <span className="truncate flex-1 min-w-0">{it.sublabel}</span>
-                              </>
-                            ) : (
-                              <>
-                                <span className="truncate flex-1 min-w-0">{it.label}</span>
-                                <span className="font-mono text-xs text-lx-text-muted">{it.sublabel}</span>
-                              </>
-                            )}
-                          </div>
-                        ))}
-                      </>
-                    )}
-                  </div>
-                )}
-                <textarea
-                  ref={composerRef}
-                  className="composer-editor w-full"
-                  rows={streaming || suspendedLock ? 1 : 2}
-                  placeholder={streaming ? "Herald is responding…" : suspendedLock ? "Decide the pending changes above…" : "Ask Herald anything about this project…"}
-                  value={input}
-                  onChange={mention.handleChange}
-                  onPaste={pasteIntoComposer}
-                  onSelect={mention.handleSelectCaret}
-                  onKeyDown={(e) => {
-                    if (mention.handleKeyDown(e)) return;
-                    if (e.key === "Enter" && !e.shiftKey) {
-                      e.preventDefault();
-                      send(input.trim());
-                    }
-                  }}
-                  disabled={streaming || busy409 || suspendedLock}
-                  style={{ border: "none", background: "transparent" }}
-                />
-                <div className="composer-footer">
-                  {streaming ? (
-                    <>
-                      <span className="font-micro text-2xs text-lx-text-warning uppercase tracking-[0.04em]">● Streaming…</span>
-                      <button
-                        type="button"
-                        className="btn btn-ghost btn-sm"
-                        style={{ borderColor: "var(--lx-bg-danger-subtle)", color: "var(--lx-text-danger)" }}
-                        onClick={() => stream.abort()}
-                      >
-                        <Square size={12} strokeWidth={1.5} fill="currentColor" />
-                        Stop
-                      </button>
-                    </>
-                  ) : suspendedLock ? (
-                    <>
-                      <span className="font-micro text-2xs text-lx-text-warning" style={{ transform: "uppercase", textTransform: "uppercase", letterSpacing: "0.04em" }}>
-                        ● Turn suspended{suspendTally ? ` — ${suspendTally}` : ""}
-                      </span>
-                      <button type="button" className="btn btn-primary btn-sm" disabled>
-                        Send
-                      </button>
-                    </>
-                  ) : (
-                    <>
-                      <div className="flex items-center gap-2">
-                        <HeraldImageAttach
-                          images={images}
-                          onChange={setImages}
-                          caps={CHAT_CAPS}
-                          hint=""
-                          compact
-                          disabled={attachDisabled}
-                          disabledTitle={ATTACH_DISABLED_TITLE}
-                        />
-                        <span className="font-micro text-2xs text-lx-text-muted uppercase tracking-[0.04em]">≤3 images · ≤1.5MB total</span>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <EffortPicker effort={effort} projectEffort={settings?.reasoningEffort ?? null} disabled={streaming} align={isMobileComposer ? "up" : "down"} onChange={setEffort} />
-                        <button type="button" className="btn btn-primary btn-sm" disabled={!input.trim() || busy409} onClick={() => send(input.trim())}>
-                          Send
-                          <Send size={12} strokeWidth={1.5} />
-                        </button>
-                      </div>
-                    </>
-                  )}
-                </div>
-              </div>
+              <ChatComposer
+                slug={slug}
+                streaming={streaming}
+                busy409={busy409}
+                suspendedLock={suspendedLock}
+                suspendTally={suspendTally}
+                attachDisabled={attachDisabled}
+                isMobileComposer={isMobileComposer}
+                effort={effort}
+                projectEffort={settings?.reasoningEffort}
+                onEffortChange={setEffort}
+                onSend={send}
+                onAbort={handleAbort}
+              />
             </div>
           </div>
         </>
