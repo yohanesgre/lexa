@@ -8,6 +8,7 @@ export const Route = createFileRoute("/hearth/bindings")({
   validateSearch: (search: Record<string, unknown>): { projectId?: string | undefined } => ({
     projectId: typeof search.projectId === "string" && search.projectId ? search.projectId : undefined,
   }),
+  ssr: false,
   component: HearthBindingsRoute,
 });
 
@@ -49,7 +50,7 @@ function HearthBindingsRoute() {
     <>
       <section className="mt-4">
         <div className="card-panel card-panel--elevated">
-          <label className="field-label">Project</label>
+          <label htmlFor="hearth-project-select" className="field-label">Project</label>
           <div className="flex items-center gap-3" style={{ flexWrap: "wrap" }}>
             {projectsLoading ? (
               <span className="text-sm color-muted">Loading projects…</span>
@@ -57,6 +58,8 @@ function HearthBindingsRoute() {
               <span className="text-sm color-muted">No projects in your team yet</span>
             ) : (
               <select
+                id="hearth-project-select"
+                aria-label="Select project"
                 className="prop-input"
                 style={{ minWidth: 280, maxWidth: 400 }}
                 defaultValue=""

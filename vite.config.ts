@@ -23,6 +23,11 @@ export default defineConfig(async ({ command }) => {
     plugins.unshift(cloudflare({ viteEnvironment: { name: "ssr" } }));
   }
 
+  if (command === "serve") {
+    const { default: Inspect } = await import("vite-plugin-inspect");
+    plugins.unshift(Inspect({ build: false }));
+  }
+
   return {
     plugins,
     server: {

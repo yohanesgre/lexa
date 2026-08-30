@@ -1,3 +1,4 @@
+import { memo } from "react";
 import { cn } from "../ui/cn";
 import { formatDueLabel } from "../../lib/dates";
 import type { GithubIssue, FieldOption } from "../../../shared/types";
@@ -33,7 +34,7 @@ function GithubMark({ size = 12 }: { size?: number }) {
   );
 }
 
-export function TaskCard({ taskKey, title, priority, type, priorities, types, assignees, githubs, dueAt, isDragging = false, dimmed = false, archived = false, isSubtask = false, blockedBy = [], subtaskCount = 0, onToggleSubtasks, subtasksCollapsed = false, action, className }: TaskCardProps) {
+export const TaskCard = memo(function TaskCard({ taskKey, title, priority, type, priorities, types, assignees, githubs, dueAt, isDragging = false, dimmed = false, archived = false, isSubtask = false, blockedBy = [], subtaskCount = 0, onToggleSubtasks, subtasksCollapsed = false, action, className }: TaskCardProps) {
   const typeOpt = types.find((t) => t.id === type);
   const prioOpt = priorities.find((p) => p.id === priority);
   const typeLabel = typeOpt?.label ?? type;
@@ -121,4 +122,4 @@ export function TaskCard({ taskKey, title, priority, type, priorities, types, as
       </div>
     </div>
   );
-}
+});

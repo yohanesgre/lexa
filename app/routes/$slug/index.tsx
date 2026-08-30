@@ -8,20 +8,23 @@ import { MilestoneCard } from "../../components/milestones/MilestoneCard";
 import type { Dashboard, ProjectHealth } from "../../../shared/types";
 
 export const Route = createFileRoute("/$slug/")({
+  ssr: false,
   loader: async ({ context, params }) => {
     const { slug } = params;
-    await context.queryClient.prefetchQuery({
-      queryKey: ["dashboard"],
-      queryFn: () => getDashboard(),
-    });
-    await context.queryClient.prefetchQuery({
-      queryKey: ["board", slug, false],
-      queryFn: () => getBoard(slug, false),
-    });
-    await context.queryClient.prefetchQuery({
-      queryKey: ["milestones", slug],
-      queryFn: () => listMilestones(slug).then((r) => r.data),
-    });
+    await Promise.all([
+      context.queryClient.prefetchQuery({
+        queryKey: ["dashboard"],
+        queryFn: () => getDashboard(),
+      }),
+      context.queryClient.prefetchQuery({
+        queryKey: ["board", slug, false],
+        queryFn: () => getBoard(slug, false),
+      }),
+      context.queryClient.prefetchQuery({
+        queryKey: ["milestones", slug],
+        queryFn: () => listMilestones(slug).then((r) => r.data),
+      }),
+    ]);
   },
   component: ProjectDashboard,
 });
@@ -50,7 +53,7 @@ function ProjectDashboard() {
 
   if (isLoading) {
     return (
-      <main className="page-frame">
+      <main className="page-frame page-frame-narrow">
         <div className="flex items-center justify-between mb-4">
           <div>
             <div className="skeleton" style={{ width: 160, height: 24 }} />
@@ -95,7 +98,7 @@ function ProjectDashboard() {
   };
 
   return (
-    <main className="page-frame">
+    <main className="page-frame page-frame-narrow">
       <div className="flex items-center justify-between mb-4">
         <div className="flex items-center gap-3">
           <span

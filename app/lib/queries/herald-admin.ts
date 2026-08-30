@@ -140,7 +140,6 @@ export function useReorderProviderModels() {
       });
     },
     onError: (err) => {
-      qc.invalidateQueries({ queryKey: ["herald-providers"] });
       toast.push("error", "Failed to reorder models", toastMessage(err));
     },
   });

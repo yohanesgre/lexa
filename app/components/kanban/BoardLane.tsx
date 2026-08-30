@@ -1,3 +1,4 @@
+import { useMemo } from "react";
 import type { Swimlane, Task } from "../../../shared/types";
 import { Column } from "./Column";
 import { SortableContext, verticalListSortingStrategy } from "@dnd-kit/sortable";
@@ -42,8 +43,18 @@ export function BoardLane({
   const laneId = lane.id;
   const laneTaskCount = localTasks.filter((t) => t.swimlaneId === laneId).length;
   const isCollapsed = collapsed.has(laneId);
-  const tasksInCell = (columnId: string, lId: string) =>
-    localTasks.filter((t) => t.columnId === columnId && t.swimlaneId === lId);
+  const cellMap = useMemo(() => {
+    const m = new Map<string, Task[]>();
+    for (const t of localTasks) {
+      const key = `${t.columnId}:${t.swimlaneId}`;
+      const arr = m.get(key);
+      if (arr) arr.push(t);
+      else m.set(key, [t]);
+    }
+    for (const arr of m.values()) arr.sort(byPosition);
+    return m;
+  }, [localTasks]);
+  const tasksInCell = (columnId: string, lId: string) => cellMap.get(`${columnId}:${lId}`) ?? [];
   return (
     <div key={laneId}>
       <SwimlaneHeader
