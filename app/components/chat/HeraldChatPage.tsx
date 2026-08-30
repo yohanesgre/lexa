@@ -506,11 +506,11 @@ export function HeraldChatPage({ slug, thread }: { slug: string; thread?: string
   }, []);
 
   useEffect(() => {
-    if (!projectId) return;
     if (thread) {
       applyChatId(thread);
       return;
     }
+    if (!projectId) return;
     let last: string | null = null;
     try {
       last = window.localStorage.getItem(`lexa-chat-last:${projectId}`);
@@ -533,13 +533,13 @@ export function HeraldChatPage({ slug, thread }: { slug: string; thread?: string
   const transcript = useQuery({
     queryKey: ["herald-chat", chatId],
     queryFn: () => api.getHeraldChat(chatId),
-    enabled: !!chatId && !!projectId,
+    enabled: !!chatId,
     retry: false,
     throwOnError: false,
     staleTime: Infinity,
   });
 
-  const streamKey = projectId ? `herald-chat:${chatId}` : null;
+  const streamKey = chatId ? `herald-chat:${chatId}` : null;
   const stream = useHeraldStream(streamKey);
   const streaming = stream.status === "connecting" || stream.status === "streaming";
 
@@ -819,11 +819,11 @@ export function HeraldChatPage({ slug, thread }: { slug: string; thread?: string
 
   const send = useCallback(
     (message: string, imageCount = 0) => {
-      if (!projectId || !message || streaming || suspendedLock) return;
+      if (!message || streaming || suspendedLock) return;
       setTurns((prev) => [...(prev ?? []), { role: "user", text: message, imageCount, rawIndex: -1 }]);
       startStream(message);
     },
-    [projectId, streaming, suspendedLock, startStream]
+    [streaming, suspendedLock, startStream]
   );
 
   // Keep turns up to & including `target` (optionally rewriting its text) —

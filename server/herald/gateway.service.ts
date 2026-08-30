@@ -97,6 +97,7 @@ function isRetriable(e: unknown): boolean {
     const m = String((e as { message?: string }).message ?? "").toLowerCase();
     if (m.includes("upstream response mapping failed")) return false;
     if (status !== undefined && [400, 401, 403, 404, 422].includes(status)) return false;
+    if (status === undefined) return true;
     return isTransientUpstream(e);
   }
   return false;
@@ -114,6 +115,7 @@ function isSingleRetryCandidate(e: unknown): boolean {
   if (tag === "HeraldGenerationFailed") {
     const m = String((e as { message?: string }).message ?? "").toLowerCase();
     if (m.includes("upstream response mapping failed")) return false;
+    if (status === undefined) return true;
     return isTransientUpstream(e);
   }
   return false;
@@ -394,7 +396,8 @@ export class HeraldGateway extends Effect.Service<HeraldGateway>()("Lexa/HeraldG
                 }
                 throw err;
               }
-              if (isRetriable(err)) await sleepBackoff(err, i, { projectId: input.projectId, model: cfg.model, providerId: cfg.providerId ?? null });
+              if (!isRetriable(err)) throw err;
+              await sleepBackoff(err, i, { projectId: input.projectId, model: cfg.model, providerId: cfg.providerId ?? null });
               gatewayLog("WARN", `herald stream retrying next model after baseUrl failure`, { projectId: input.projectId, attempt: i + 1, nextModel: attemptConfigs[i + 1]?.model ?? null, singleRetry: isSingleRetry && i === 0, status: diag.status, errorTag: (err as { _tag?: string })._tag ?? null, retryAfter: diag.retryAfter, backoffMs: backoffMsFor(err, i) });
               continue;
             }
@@ -530,7 +533,8 @@ export class HeraldGateway extends Effect.Service<HeraldGateway>()("Lexa/HeraldG
                 }
                 throw err;
               }
-              if (isRetriable(err)) await sleepBackoff(err, i, { projectId: input.projectId, model: cfg.model, providerId: cfg.providerId ?? null });
+              if (!isRetriable(err)) throw err;
+              await sleepBackoff(err, i, { projectId: input.projectId, model: cfg.model, providerId: cfg.providerId ?? null });
               gatewayLog("WARN", `herald stream retrying next model${isSingleRetry && i === 0 ? " (single-config retry same provider)" : ""}`, { projectId: input.projectId, attempt: i + 1, nextModel: attemptConfigs[i + 1]?.model ?? null, nextProviderId: attemptConfigs[i + 1]?.providerId ?? null, singleRetry: isSingleRetry && i === 0, status: diag.status, errorTag: (err as { _tag?: string })._tag ?? null, retryAfter: diag.retryAfter, backoffMs: backoffMsFor(err, i) });
             }
           }
