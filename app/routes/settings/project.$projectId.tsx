@@ -5,6 +5,7 @@ import { ProjectSettingsHub } from "../../components/settings/ProjectSettingsHub
 // assignment control lives here; project-bound sections (name/desc, repos,
 // members, delete) are page-level equivalents of the dashboard modals.
 export const Route = createFileRoute("/settings/project/$projectId")({
+  ssr:false,
   component: ProjectSettingsRoute,
 });
 

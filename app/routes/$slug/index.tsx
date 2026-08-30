@@ -8,7 +8,7 @@ import { MilestoneCard } from "../../components/milestones/MilestoneCard";
 import type { Dashboard, ProjectHealth } from "../../../shared/types";
 
 export const Route = createFileRoute("/$slug/")({
-  ssr: false,
+  ssr:false,
   loader: async ({ context, params }) => {
     const { slug } = params;
     await Promise.all([

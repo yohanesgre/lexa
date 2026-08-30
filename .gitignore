@@ -26,11 +26,6 @@ github-app*.pem
 # Agent skills are installed globally (~/.agents/skills/), not vendored
 skills/
 skills-lock.json
-.agents/*
-!.agents/skills/
-.agents/skills/*
-!.agents/skills/git-workflow/
-!.agents/skills/git-workflow/**
 # Vendored Effect source for the effect-ts skill (version-pinned by scripts/prepare-effect.sh)
 .repos/
 

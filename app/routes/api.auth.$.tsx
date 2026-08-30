@@ -8,6 +8,7 @@ import { createFileRoute } from "@tanstack/react-router";
 // vite SSR loader cannot execute — dynamic import keeps it out of the SSR
 // static graph (only evaluated at request time under the Bun server).
 export const Route = createFileRoute("/api/auth/$")({
+  ssr:false,
   server: {
     handlers: {
       GET: async ({ request }: { request: Request }) =>

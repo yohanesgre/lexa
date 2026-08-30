@@ -13,7 +13,7 @@ export const Route = createFileRoute("/hearth/usage")({
     from: typeof search.from === "string" && search.from ? search.from : undefined,
     to: typeof search.to === "string" && search.to ? search.to : undefined,
   }),
-  ssr: false,
+  ssr:false,
   component: HearthUsageRoute,
 });
 

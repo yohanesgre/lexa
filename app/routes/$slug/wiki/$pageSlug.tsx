@@ -5,7 +5,7 @@ import { WikiLayout } from "../../../components/wiki/WikiLayout";
 import { WikiPageViewer } from "../../../components/wiki/WikiPageViewer";
 
 export const Route = createFileRoute("/$slug/wiki/$pageSlug")({
-  ssr: false,
+  ssr:false,
   loader: async ({ context, params }) => {
     const { slug, pageSlug } = params;
     await Promise.all([

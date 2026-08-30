@@ -7,6 +7,7 @@ import { HeraldProjectProviderSection } from "../components/settings/herald-proj
 import { HeraldEngineSection, HeraldWriteToolsSection, ProjectMemorySection, AgentSkillAvailabilitySection } from "../components/settings/HeraldSettingsSection";
 
 export const Route = createFileRoute("/hearth/bindings/$projectId")({
+  ssr:false,
   component: HearthBindingDetailRoute,
 });
 

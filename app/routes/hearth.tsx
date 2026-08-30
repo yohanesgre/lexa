@@ -70,6 +70,7 @@ function HearthLayout() {
 }
 
 export const Route = createFileRoute("/hearth")({
+  ssr:false,
   beforeLoad: ({ location }) => {
     if (location.pathname === "/hearth" || location.pathname === "/hearth/") {
       // Intentional: forward full search so ?task deep-links survive the canonical redirect.

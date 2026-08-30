@@ -6,7 +6,7 @@ A lightweight, self-hosted project management tool. Kanban board, issue/task tic
 
 | Layer        | Choice                        | Rationale |
 | ------------ | ----------------------------- | --------- |
-| Frontend     | React + Vite + TanStack Start | SSR for initial load, SPA-like after, file-based routing |
+| Frontend     | React + Vite + TanStack Start | TanStack Start SPA mode (ssr:false all routes, keep plugin, no dehydrate), TanStack Router + Query client-only, file-based routing, server/entry SPA fallback; Workers: SPA static |
 | Backend      | Effect-TS + @effect/platform HttpApi | Typed errors, DI, declarative error→HTTP mapping, OpenAPI for free |
 | Database     | SQLite via bun:sqlite (WAL)   | Local file, zero-ops, transactional batch helper for atomic mutations |
 | Runtime      | Bun standalone HTTP server (Docker) primary + Cloudflare Workers + D1 + R2 parallel flavor (optional, $5/mo — see `docs/CLOUDFLARE_WORKERS.md`) | One process for SSR + REST + webhooks; simple deploys (Bun) or edge isolates (Workers, Workers flavor) |
@@ -354,7 +354,10 @@ gated by atomic migration plus mandatory repo/service test suites.
 Key components: `KanbanBoard` (swimlanes → columns → task cards, inline add, settings modal), `TaskDetail` slideover (title/description editors, property bar, GitHub section), `WikiLayout` (nested collapsible sidebar + TipTap page), `Dashboard` (project cards with health dots, WIP bars, stats, attention sections).
 
 ### Mutation responses are authoritative
-SQLite is local (WAL) so reads are immediate, but the mutation response is still the single source of truth. Rule: **mutations return the updated entity and TanStack Query updates its cache from the mutation response (`setQueryData`) — no refetch on the mutation path.**
+SQLite is local (WAL) so reads are immediate, but the mutation response is still the single source of truth. Rule: **mutations return the updated entity and TanStack Query updates its cache from the mutation response (`setQueryData`) — no refetch on the mutation path.** Invariant #6 preserved.
+
+### Effect Mid (frontend, 3.22 — SPA only)
+Effect-TS 3.22 in frontend is limited to **Mid**: Effect lives under `queryFn` only, no global `Runtime`, no SSR Effect. Client-only `app/lib/effect-api.ts` (`effectFetch` → `Schema.decodeUnknownSync` via `shared/schema.ts` decode) consumed inside TanStack Query `queryFn`/`mutationFn`; `VITE_EFFECT_HERALD` gates the Herald path (default on, `VITE_EFFECT_HERALD=0` rolls back to legacy `run()` kept intact). Workers SPA static inherits the same client-only boundary.
 
 ## Hosting flavors
 
@@ -362,10 +365,10 @@ Two peer-level flavors share the same source tree (no data sync between them;
 migrate Bun→Workers by dumping the Bun DB to SQL and replaying on D1):
 
 - **Bun standalone (primary):** `Bun.serve` + `bun:sqlite` (WAL) + cloudflared
-  tunnel. Current live system. Deployed via `lexa-cli deploy <domain> prod`
+  tunnel. SPA fallback in `server/entry.ts` (serves `index.html` for non-`/api` routes, no SSR). Current live system. Deployed via `lexa-cli deploy <domain> prod`
   (Docker + tunnel + DNS).
 - **Cloudflare Workers (parallel, optional, $5/mo):** Workers + D1 + R2 + KV.
-  Same routes and services, different drivers: `server/db/drivers/bun-sqlite.ts`
+  SPA static (no SSR) — same routes and services, different drivers: `server/db/drivers/bun-sqlite.ts`
   vs `server/db/drivers/d1.ts` (repos async; bun-sqlite wraps sync API in
   `Promise.resolve`), R2 native binding driver vs `fs`/`s3`, `RuntimeEnv`
   (`process.env` on Bun vs `env` from `cloudflare:workers` on Workers),
@@ -387,7 +390,7 @@ lexa/
 │   ├── components/           # activity/, auth/, hearth/, kanban/, layout/, milestones/, settings/, swimlanes/, ui/, wiki/ + flat task components (TaskDetail.tsx, TaskPropertyBar.tsx, TaskTitleInput.tsx)
 │   └── lib/                  # api.ts, queries.ts
 ├── server/                   # Effect-TS services
-│   ├── entry.ts              # Bun.serve — boot, webhook, static/SSR, /api stream cap + IP stamp
+│   ├── entry.ts              # Bun.serve — boot, webhook, static/SPA fallback, /api stream cap + IP stamp
 │   ├── auth.ts               # Better Auth instance (credentials + organization + tanstackStartCookies)
 │   ├── api/                  # HttpApi app (http.ts), middleware.ts (rate/auth/headers), auth-key.ts, auth.ts, errors.ts, limits.ts
 │   ├── services/             # task, project, wiki, column, swimlane, session, authorization, workspace-invites, password-links, ...

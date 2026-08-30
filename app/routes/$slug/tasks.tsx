@@ -9,7 +9,7 @@ export const Route = createFileRoute("/$slug/tasks")({
   }),
   // Interactive list view — same treatment as the board: server-prefetched
   // board data, client-rendered DOM.
-  ssr: "data-only",
+  ssr:false,
   loader: async ({ context, params }) => {
     const { slug } = params;
     await context.queryClient.prefetchQuery({

@@ -20,6 +20,8 @@ import { useUpdateWikiPage, useRestoreWikiRevision } from "../../lib/queries";
 import { useAttachmentEmbeds } from "../../lib/useAttachmentEmbeds";
 import { createMentionExtension } from "../../lib/mention-suggestion";
 import * as api from "../../lib/api";
+import { Effect } from "effect";
+import { createWikiAutosaveEffect } from "../../lib/effect-api";
 
 const emptyDoc: TipTapDoc = { type: "doc", content: [] };
 
@@ -104,16 +106,12 @@ export function useWikiEditor({ slug, page }: { slug: string; page: WikiPage }) 
 
   const editorRef = useRef<Editor | null>(null);
   const titleRef = useRef(title);
-  // Paste/drop-to-embed: images upload via the attachments API and insert
-  // with src=/api/attachments/<id>; other types upload as plain attachments.
   const embeds = useAttachmentEmbeds({ slug, documentType: "wiki", documentId: page.slug });
-  const autosaveTimer = useRef<number | null>(null);
   const markDirtyRef = useRef<() => void>(() => {});
-  // While a Hearth result is being reviewed, autosave is suspended — the
-  // unaccepted insert must not reach the database before Accept.
   const reviewActiveRef = useRef(false);
   const historyPreviewRef = useRef<string | null>(null);
   const previewSnapshotRef = useRef<TipTapDoc | null>(null);
+  const autosaveHandleRef = useRef<ReturnType<typeof createWikiAutosaveEffect> | null>(null);
 
   useEffect(() => {
     titleRef.current = title;
@@ -185,10 +183,7 @@ export function useWikiEditor({ slug, page }: { slug: string; page: WikiPage }) 
   const save = async (saveType: "autosave" | "manual" = "manual") => {
     const editor = editorRef.current;
     if (!editor) return;
-    if (autosaveTimer.current !== null) {
-      window.clearTimeout(autosaveTimer.current);
-      autosaveTimer.current = null;
-    }
+    autosaveHandleRef.current?.cancel();
     dispatch({ type: "saving" });
     try {
       const savedPage = await updateWikiPage.mutateAsync({
@@ -215,15 +210,56 @@ export function useWikiEditor({ slug, page }: { slug: string; page: WikiPage }) 
     saveRef.current = save;
   });
 
+  useEffect(() => {
+    autosaveHandleRef.current?.destroy();
+    const handle = createWikiAutosaveEffect(
+      (decodedDoc) =>
+        Effect.tryPromise({
+          try: () => {
+            const ed = editorRef.current;
+            if (!ed) return Promise.resolve(undefined as unknown as WikiPage);
+            dispatch({ type: "saving" });
+            return updateWikiPage.mutateAsync({
+              pageSlug: page.slug,
+              title: titleRef.current,
+              content: decodedDoc,
+              saveType: "autosave",
+            });
+          },
+          catch: (e) => e as unknown as Error,
+        }).pipe(
+          Effect.flatMap((savedPage) =>
+            Effect.sync(() => {
+              if (savedPage) {
+                dispatch({ type: "saved", page: savedPage as WikiPage, at: new Date() });
+                if ((savedPage as WikiPage).slug !== page.slug) {
+                  navigate({
+                    to: "/$slug/wiki/$pageSlug",
+                    params: { slug, pageSlug: (savedPage as WikiPage).slug },
+                    replace: true,
+                  });
+                }
+              }
+            })
+          ),
+          Effect.ensuring(Effect.sync(() => dispatch({ type: "done" }))),
+          Effect.catchAll(() => Effect.succeed(undefined))
+        ),
+      autosaveDelay
+    );
+    autosaveHandleRef.current = handle;
+    return () => handle.destroy();
+  }, [autosaveDelay, page.slug, slug, navigate, updateWikiPage]);
+
   const markDirty = useCallback(() => {
     dispatch({ type: "dirty" });
     if (reviewActiveRef.current) return;
     if (!autosaveEnabled) return;
-    if (autosaveTimer.current !== null) window.clearTimeout(autosaveTimer.current);
-    autosaveTimer.current = window.setTimeout(() => {
-      void saveRef.current("autosave");
-    }, autosaveDelay);
-  }, [autosaveEnabled, autosaveDelay]);
+    const ed = editorRef.current;
+    if (!ed) return;
+    const doc = ed.getJSON() as unknown as TipTapDoc;
+    autosaveHandleRef.current?.trigger(doc);
+  }, [autosaveEnabled]);
 
   useEffect(() => {
     markDirtyRef.current = markDirty;
@@ -268,19 +304,13 @@ export function useWikiEditor({ slug, page }: { slug: string; page: WikiPage }) 
   };
 
   const handleRestore = async (revisionId: string) => {
-    if (autosaveTimer.current !== null) {
-      window.clearTimeout(autosaveTimer.current);
-      autosaveTimer.current = null;
-    }
+    autosaveHandleRef.current?.cancel();
     try {
       const restored = await restoreWikiPage.mutateAsync({ pageSlug: page.slug, revisionId });
       dispatch({ type: "title", title: restored.title });
       dispatch({ type: "saved", page: restored, at: new Date() });
       editorRef.current?.commands.setContent((restored.content ?? emptyDoc) as unknown as JSONContent);
-      if (autosaveTimer.current !== null) {
-        window.clearTimeout(autosaveTimer.current);
-        autosaveTimer.current = null;
-      }
+      autosaveHandleRef.current?.cancel();
       previewSnapshotRef.current = null;
       editorRef.current?.setEditable(true);
       setHistoryPreviewId(null);
@@ -314,10 +344,7 @@ export function useWikiEditor({ slug, page }: { slug: string; page: WikiPage }) 
   };
 
   const handleCancel = () => {
-    if (autosaveTimer.current !== null) {
-      window.clearTimeout(autosaveTimer.current);
-      autosaveTimer.current = null;
-    }
+    autosaveHandleRef.current?.cancel();
     previewSnapshotRef.current = null;
     setHistoryPreviewId(null);
     dispatch({ type: "cancel", page: lastSavedPage });
@@ -334,7 +361,7 @@ export function useWikiEditor({ slug, page }: { slug: string; page: WikiPage }) 
 
   useEffect(() => {
     return () => {
-      if (autosaveTimer.current !== null) window.clearTimeout(autosaveTimer.current);
+      autosaveHandleRef.current?.destroy();
     };
   }, []);
 

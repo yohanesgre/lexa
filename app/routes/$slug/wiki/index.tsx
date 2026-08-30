@@ -6,6 +6,7 @@ import { firstRootPage } from "../../../lib/wiki";
 import type { WikiPageMeta } from "../../../../shared/types";
 
 export const Route = createFileRoute("/$slug/wiki/")({
+  ssr:false,
   loader: async ({ context, params }) => {
     const { slug } = params;
     await context.queryClient.prefetchQuery({

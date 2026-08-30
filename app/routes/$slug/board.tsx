@@ -10,7 +10,7 @@ export const Route = createFileRoute("/$slug/board")({
   // The board is the most interactive surface (DnD, TipTap) — keep the DOM
   // client-rendered, but still prefetch + hydrate the board data server-side
   // so the first paint isn't a loading skeleton + client fetch.
-  ssr: "data-only",
+  ssr:false,
   loader: async ({ context, params }) => {
     const { slug } = params;
     await context.queryClient.prefetchQuery({

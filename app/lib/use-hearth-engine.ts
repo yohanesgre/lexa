@@ -1,5 +1,7 @@
-import { useCallback, useState } from "react";
+import { useCallback, useState, useEffect, useRef } from "react";
+import { Effect, Schedule, Duration, Fiber } from "effect";
 import type { HearthEngine, HeraldSettingsMasked } from "../../shared/herald";
+import { hearthPollingSchedule, ApiError } from "./effect-api";
 
 // Member-facing personal engine overlay (settings-project-herald.html Engine
 // section + hearth-popover.html annotations): merely SHOWS the toggle in the
@@ -67,4 +69,31 @@ export const ENGINE_AGENT_NAMES: Record<HearthEngine, string> = {
 export function hasVisionCapability(settings: HeraldSettingsMasked | null | undefined): boolean {
   if (!settings) return false;
   return Boolean(settings.primarySupportsImages || settings.visionModel);
+}
+
+export const HEARTH_ENGINE_POLL_BASE_MS = 1500;
+
+export function useHearthEnginePolling(enabled: boolean, fetcher: () => Promise<HeraldSettingsMasked | null>, onData: (data: HeraldSettingsMasked | null) => void) {
+  const fetcherRef = useRef(fetcher);
+  const onDataRef = useRef(onData);
+  useEffect(() => {
+    fetcherRef.current = fetcher;
+    onDataRef.current = onData;
+  });
+  useEffect(() => {
+    if (!enabled) return;
+    const schedule = Schedule.exponential(Duration.millis(HEARTH_ENGINE_POLL_BASE_MS)).pipe(Schedule.jittered, Schedule.intersect(Schedule.recurs(8)));
+    void schedule;
+    const effect = Effect.repeat(
+      Effect.tryPromise({
+        try: () => fetcherRef.current().then((d) => { onDataRef.current(d); return d; }),
+        catch: (e) => new ApiError({ code: "FETCH_FAILED", message: String(e) }),
+      }),
+      hearthPollingSchedule(HEARTH_ENGINE_POLL_BASE_MS) as unknown as Schedule.Schedule<Duration.Duration, unknown>
+    );
+    const fiber = Effect.runFork(effect.pipe(Effect.catchAll(() => Effect.succeed(null))));
+    return () => {
+      Effect.runFork(Fiber.interrupt(fiber));
+    };
+  }, [enabled]);
 }

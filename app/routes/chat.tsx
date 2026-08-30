@@ -7,6 +7,7 @@ import { useProjectSelection } from "../lib/project-selection";
 // renders the dashboard for slug "chat" ("Failed to load board: Project
 // not found"). Redirect to the selected (or first) project's chat.
 export const Route = createFileRoute("/chat")({
+  ssr:false,
   component: ChatRedirect,
 });
 
