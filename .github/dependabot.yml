@@ -3,12 +3,21 @@ updates:
   - package-ecosystem: bun
     directory: "/"
     schedule:
-      interval: weekly
+      interval: monthly
+    open-pull-requests-limit: 5
+    groups:
+      bun-dependencies:
+        patterns: ["*"]
   - package-ecosystem: docker
     directory: "/"
     schedule:
-      interval: weekly
+      interval: monthly
+    open-pull-requests-limit: 5
   - package-ecosystem: github-actions
     directory: "/"
     schedule:
-      interval: weekly
+      interval: monthly
+    open-pull-requests-limit: 5
+    groups:
+      github-actions:
+        patterns: ["*"]

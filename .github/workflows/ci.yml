@@ -96,6 +96,8 @@ jobs:
       - name: Gitleaks scan
         uses: gitleaks/gitleaks-action@v2
         continue-on-error: false
+        with:
+          args: detect --source . --no-git --config .gitleaks.toml -v --exit-code=2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
