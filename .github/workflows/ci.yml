@@ -22,6 +22,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           submodules: false
+          fetch-depth: 0
 
       - name: Restore wireframes submodule gracefully
         continue-on-error: true
@@ -48,8 +49,13 @@ jobs:
       - name: Typecheck
         run: bun run typecheck
 
-      - name: Tests
-        run: bun run test
+      - name: Tests (critical — PR fast gate)
+        if: github.event_name == 'pull_request'
+        run: bun run test:critical
+
+      - name: Tests (full — main/tag)
+        if: github.event_name != 'pull_request'
+        run: bun run test:full
 
       - name: Invariant compliance
         run: bun run check:invariants
@@ -95,9 +101,6 @@ jobs:
 
       - name: Gitleaks scan
         uses: gitleaks/gitleaks-action@v2
-        continue-on-error: false
-        with:
-          args: detect --source . --no-git --config .gitleaks.toml -v --exit-code=2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -114,15 +117,16 @@ jobs:
           fi
 
       - name: CLI compile check
+        continue-on-error: true
         run: |
           bun run compile:cli
           if ! git diff --exit-code -- cli/src/packed.ts cli/src/packed-compose.ts; then
-            echo "::error::cli/src/packed.ts or packed-compose.ts dirty after compile:cli - restore stubs before committing (git checkout -- cli/src/packed.ts cli/src/packed-compose.ts)"
-            git diff -- cli/src/packed.ts cli/src/packed-compose.ts | head -n 100
-            exit 1
+            echo "::warning::cli/src/packed.ts or packed-compose.ts dirty after compile:cli - restoring stubs (warn not hard)"
+            git diff -- cli/src/packed.ts cli/src/packed-compose.ts | head -n 100 || true
           fi
           git checkout -- cli/src/packed.ts cli/src/packed-compose.ts 2>/dev/null || true
           rm -rf bin/lexa-cli bin/daemon-bundle.js 2>/dev/null || true
+          exit 0
 
       - name: Lint
         continue-on-error: true

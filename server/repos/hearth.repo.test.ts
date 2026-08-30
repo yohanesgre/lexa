@@ -1,4 +1,4 @@
-import { describe, expect, it, afterEach } from "vitest";
+import { describe, expect, it, afterEach, beforeAll, beforeEach, afterAll } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -11,19 +11,36 @@ import { HearthRepo } from "./hearth.repo";
 
 const MIGRATIONS = fileURLToPath(new URL("../../migrations", import.meta.url));
 
-let dirs: string[] = [];
-let dbs: Database[] = [];
+let dir: string;
+let db: Database;
 
-function tmpDb(): Database {
-  const dir = mkdtempSync(join(tmpdir(), "lexa-hearth-repo-"));
-  dirs.push(dir);
+beforeAll(() => {
+  dir = mkdtempSync(join(tmpdir(), "lexa-hearth-repo-"));
   const path = join(dir, "test.db");
   runMigrations(path, MIGRATIONS);
   const ctx = Effect.runSync(Effect.scoped(Layer.build(initSqlite(path))));
-  const db = Context.get(ctx, Sqlite);
-  dbs.push(db);
-  return db;
+  db = Context.get(ctx, Sqlite);
+});
+
+afterAll(() => {
+  try { db.close(); } catch {}
+  rmSync(dir, { recursive: true, force: true });
+});
+
+function cleanDb(db: Database) {
+  db.exec("PRAGMA foreign_keys = OFF");
+  const tables = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name != '_migrations' AND name NOT LIKE '%fts%'").all() as { name: string }[];
+  for (const { name } of tables) {
+    try { db.exec(`DELETE FROM "${name}"`); } catch {}
+  }
+  try { db.exec("DELETE FROM sqlite_sequence"); } catch {}
+  db.exec("PRAGMA foreign_keys = ON");
 }
+
+beforeEach(() => {
+  cleanDb(db);
+});
+
 
 function seed(db: Database) {
   db.exec(`
@@ -55,18 +72,8 @@ function taskInput(id: string, kind?: "blacksmith" | "herald") {
   };
 }
 
-afterEach(() => {
-  for (const db of dbs) {
-    try { db.close(); } catch {}
-  }
-  dbs = [];
-  for (const d of dirs) rmSync(d, { recursive: true, force: true });
-  dirs = [];
-});
-
 describe("HearthRepo createTask kind", () => {
   it("defaults to blacksmith", () => {
-    const db = tmpDb();
     seed(db);
     const repo = makeRepo(db);
     Effect.runSync(
@@ -78,7 +85,6 @@ describe("HearthRepo createTask kind", () => {
   });
 
   it("kind='herald' is persisted", () => {
-    const db = tmpDb();
     seed(db);
     const repo = makeRepo(db);
     Effect.runSync(
@@ -93,7 +99,6 @@ describe("HearthRepo createTask kind", () => {
 
 describe("HearthRepo claimNextTask kind scoping", () => {
   it("never returns a herald task", () => {
-    const db = tmpDb();
     seed(db);
     const repo = makeRepo(db);
     Effect.runSync(
@@ -109,7 +114,6 @@ describe("HearthRepo claimNextTask kind scoping", () => {
   });
 
   it("returns null when only herald tasks are queued", () => {
-    const db = tmpDb();
     seed(db);
     const repo = makeRepo(db);
     Effect.runSync(
@@ -124,7 +128,6 @@ describe("HearthRepo claimNextTask kind scoping", () => {
 
 describe("HearthRepo claimHeraldTask", () => {
   it("claims a queued herald task → running", () => {
-    const db = tmpDb();
     seed(db);
     const repo = makeRepo(db);
     Effect.runSync(
@@ -138,7 +141,6 @@ describe("HearthRepo claimHeraldTask", () => {
   });
 
   it("refuses a blacksmith task", () => {
-    const db = tmpDb();
     seed(db);
     const repo = makeRepo(db);
     Effect.runSync(
@@ -151,7 +153,6 @@ describe("HearthRepo claimHeraldTask", () => {
   });
 
   it("double claim fails on the second call", () => {
-    const db = tmpDb();
     seed(db);
     const repo = makeRepo(db);
     Effect.runSync(
@@ -165,7 +166,6 @@ describe("HearthRepo claimHeraldTask", () => {
   });
 
   it("missing task fails", () => {
-    const db = tmpDb();
     seed(db);
     const repo = makeRepo(db);
     Effect.runSync(

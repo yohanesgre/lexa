@@ -1,4 +1,4 @@
-import { describe, it, expect, afterEach } from "vitest";
+import { describe, it, expect, afterEach, beforeAll, beforeEach, afterAll } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -11,19 +11,36 @@ import { WorkspaceInvitesService, InviteAlreadyPending, InviteNotFound } from ".
 
 const MIGRATIONS = fileURLToPath(new URL("../../migrations", import.meta.url));
 
-let dirs: string[] = [];
-let dbs: Database[] = [];
+let dir: string;
+let db: Database;
 
-function tmpDb(): Database {
-  const dir = mkdtempSync(join(tmpdir(), "lexa-invites-"));
-  dirs.push(dir);
+beforeAll(() => {
+  dir = mkdtempSync(join(tmpdir(), "lexa-invites-"));
   const path = join(dir, "test.db");
   runMigrations(path, MIGRATIONS);
   const ctx = Effect.runSync(Effect.scoped(Layer.build(initSqlite(path))));
-  const db = Context.get(ctx, Sqlite);
-  dbs.push(db);
-  return db;
+  db = Context.get(ctx, Sqlite);
+});
+
+afterAll(() => {
+  try { db.close(); } catch {}
+  rmSync(dir, { recursive: true, force: true });
+});
+
+function cleanDb(db: Database) {
+  db.exec("PRAGMA foreign_keys = OFF");
+  const tables = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name != '_migrations' AND name NOT LIKE '%fts%'").all() as { name: string }[];
+  for (const { name } of tables) {
+    try { db.exec(`DELETE FROM "${name}"`); } catch {}
+  }
+  try { db.exec("DELETE FROM sqlite_sequence"); } catch {}
+  db.exec("PRAGMA foreign_keys = ON");
 }
+
+beforeEach(() => {
+  cleanDb(db);
+});
+
 
 function makeService(db: Database) {
   const layer = WorkspaceInvitesService.Default.pipe(Layer.provide(Layer.succeed(Sqlite, db)));
@@ -31,18 +48,8 @@ function makeService(db: Database) {
   return Context.get(ctx, WorkspaceInvitesService);
 }
 
-afterEach(() => {
-  for (const db of dbs) {
-    try { db.close(); } catch {}
-  }
-  dbs = [];
-  for (const d of dirs) rmSync(d, { recursive: true, force: true });
-  dirs = [];
-});
-
 describe("WorkspaceInvitesService", () => {
   it("creates an invite with a 7d expiry and a link carrying the token", () => {
-    const db = tmpDb();
     const svc = makeService(db);
     const { invite, link } = Effect.runSync(svc.create("New.User@Lexa.Dev", null));
     expect(invite.email).toBe("new.user@lexa.dev");
@@ -60,7 +67,6 @@ describe("WorkspaceInvitesService", () => {
   });
 
   it("rejects a duplicate pending invite for the same email", () => {
-    const db = tmpDb();
     const svc = makeService(db);
     Effect.runSync(svc.create("a@lexa.dev", null));
     const result = Effect.runSync(Effect.either(svc.create("A@Lexa.Dev", null)));
@@ -69,7 +75,6 @@ describe("WorkspaceInvitesService", () => {
   });
 
   it("re-issues when the previous invite expired (dead rows do not block)", () => {
-    const db = tmpDb();
     const svc = makeService(db);
     const first = Effect.runSync(svc.create("a@lexa.dev", null));
     db.prepare("UPDATE workspace_invitations SET expires_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-1 day') WHERE id = ?").run(first!.invite.id);
@@ -79,7 +84,6 @@ describe("WorkspaceInvitesService", () => {
   });
 
   it("revokes a pending invite and refuses unknown ids", () => {
-    const db = tmpDb();
     const svc = makeService(db);
     const { invite } = Effect.runSync(svc.create("a@lexa.dev", null));
     expect(Effect.runSync(Effect.either(svc.revoke(invite.id)))).toEqual(Either.right(undefined));
@@ -91,7 +95,6 @@ describe("WorkspaceInvitesService", () => {
   });
 
   it("refuses to revoke an accepted invite (spent)", () => {
-    const db = tmpDb();
     const svc = makeService(db);
     const { invite } = Effect.runSync(svc.create("a@lexa.dev", null));
     db.prepare("UPDATE workspace_invitations SET accepted_at = datetime('now') WHERE id = ?").run(invite.id);
@@ -103,7 +106,6 @@ describe("WorkspaceInvitesService", () => {
   });
 
   it("lists invites newest first", () => {
-    const db = tmpDb();
     const svc = makeService(db);
     Effect.runSync(svc.create("a@lexa.dev", null));
     Effect.runSync(svc.create("b@lexa.dev", null));

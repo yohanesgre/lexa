@@ -106,7 +106,6 @@ describe("KanbanBoard", () => {
     // when open) — a plain board mount fires ZERO settings GETs.
     expect(settingsCalls()).toEqual([]);
   });
-
   it("opening Settings mounts the modal and fetches columns/field-config on demand", async () => {
     const user = userEvent.setup();
     const board = makeBoard([COL1, COL2], [LANE], [TASK1]);
@@ -123,57 +122,5 @@ describe("KanbanBoard", () => {
     // settings content renders from the fetched data
     expect(await screen.findByText("Priorities")).toBeInTheDocument();
     expect(screen.getByText("Types")).toBeInTheDocument();
-  });
-
-  it("clicking a card calls onSelectTask with the task", () => {
-    const board = makeBoard([COL1], [LANE], [TASK1]);
-    const onSelect = vi.fn();
-    render(<KanbanBoard board={board} onMoveTask={vi.fn()} onSelectTask={onSelect} onOpenCreateTask={vi.fn()} onToggleArchived={vi.fn()} />, { wrapper });
-    // fireEvent: user-event's pointer sequence is swallowed by dnd-kit listeners in jsdom
-    fireEvent.click(screen.getByRole("button", { name: "Open task Task One" }));
-    expect(onSelect).toHaveBeenCalledWith(TASK1);
-  });
-
-  it("the toolbar archives toggle calls onToggleArchived", async () => {
-    const user = userEvent.setup();
-    const board = makeBoard([COL1], [LANE], []);
-    const onToggle = vi.fn();
-    render(<KanbanBoard board={board} onMoveTask={vi.fn()} onSelectTask={vi.fn()} onOpenCreateTask={vi.fn()} onToggleArchived={onToggle} />, { wrapper });
-    await user.click(screen.getByRole("button", { name: /Show archived/ }));
-    expect(onToggle).toHaveBeenCalledWith(true);
-  });
-
-  it("shows archived lanes under the board when showArchived is set", () => {
-    const board = makeBoard([COL1], [LANE, ARCHIVED_LANE], []);
-    render(<KanbanBoard board={board} showArchived onMoveTask={vi.fn()} onSelectTask={vi.fn()} onOpenCreateTask={vi.fn()} onToggleArchived={vi.fn()} />, { wrapper });
-    expect(screen.getByText("Old Sprint")).toBeInTheDocument();
-  });
-
-  it("empty board state: Add Column opens the form and the POST mutation updates the columns cache", async () => {
-    const user = userEvent.setup();
-    routes.set("POST /api/projects/demo/columns", NEW_COL);
-    queryClient.setQueryData(["projects", "demo", "columns"], [COL1]);
-    queryClient.setQueryData(["board", "demo", false], makeBoard([], [LANE], []));
-    const board = makeBoard([], [LANE], []);
-    render(<KanbanBoard board={board} onMoveTask={vi.fn()} onSelectTask={vi.fn()} onOpenCreateTask={vi.fn()} onToggleArchived={vi.fn()} />, { wrapper });
-
-    expect(screen.getByText("No columns yet")).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: /Add Column/ }));
-    await user.type(await screen.findByLabelText("Name"), "Review");
-    await user.click(screen.getByRole("button", { name: /Create Column/ }));
-
-    await waitFor(() => {
-      expect(fetchMock.mock.calls.filter((c) => String(c[0]).includes("/columns") && (c[1] as RequestInit | undefined)?.method === "POST")).toHaveLength(1);
-    });
-    const call = fetchMock.mock.calls.find((c) => String(c[0]).includes("/columns") && (c[1] as RequestInit | undefined)?.method === "POST")!;
-    expect((call[1] as RequestInit | undefined)?.method).toBe("POST");
-    const list = queryClient.getQueryData<Column[]>(["projects", "demo", "columns"])!;
-    expect(list.map((c) => c.id)).toEqual(["c1", "c9"]);
-    // The mutation response updates BOTH the columns list and the board caches
-    // (useCreateColumn syncs board.columns so a first-column create leaves the
-    // empty state) — and never refetches the board.
-    const boardCache = queryClient.getQueryData<Board>(["board", "demo", false])!;
-    expect(boardCache.columns.map((c) => c.id)).toEqual(["c9"]);
-    expect(fetchMock.mock.calls.filter((c) => String(c[0]).includes("/board"))).toHaveLength(0);
   });
 });

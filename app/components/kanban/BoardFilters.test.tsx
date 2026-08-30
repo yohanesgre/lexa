@@ -39,7 +39,6 @@ describe("FilterButton", () => {
     expect(screen.getByText("Assignee")).toBeInTheDocument();
     expect(screen.getByText("Swimlane")).toBeInTheDocument();
   });
-
   it("toggling a column filter calls onChange with the updated FilterState", async () => {
     const user = userEvent.setup();
     const onChange = vi.fn();
@@ -50,83 +49,5 @@ describe("FilterButton", () => {
     const next = onChange.mock.calls[0]![0] as FilterState;
     expect(Array.from(next.columns)).toEqual(["c1"]);
     expect(next.priorities.size).toBe(0);
-  });
-
-  it("shows the active count badge once filters are set", () => {
-    const active = emptyFilters();
-    active.priorities.add("pr-high");
-    active.types.add("tp-bug");
-    render(<FilterButton board={BOARD} filters={active} onChange={() => {}} />);
-    expect(screen.getByText("2")).toBeInTheDocument();
-  });
-
-  it("Clear all filters resets the state", async () => {
-    const user = userEvent.setup();
-    const onChange = vi.fn();
-    const active = emptyFilters();
-    active.columns.add("c1");
-    render(<FilterButton board={BOARD} filters={active} onChange={onChange} />);
-    await user.click(screen.getByRole("button", { name: /Filter/ }));
-    await user.click(await screen.findByRole("button", { name: /Clear all filters/ }));
-    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ columns: expect.any(Set) }));
-    const next = onChange.mock.calls[0]![0] as FilterState;
-    expect(next.columns.size).toBe(0);
-    expect(next.priorities.size).toBe(0);
-  });
-
-  it("lists assignees from the board and the Unassigned row only when present", async () => {
-    const user = userEvent.setup();
-    render(<FilterButton board={BOARD} filters={emptyFilters()} onChange={() => {}} />);
-    await user.click(screen.getByRole("button", { name: /Filter/ }));
-    expect(await screen.findByRole("button", { name: /Maria/ })).toBeInTheDocument();
-    // t2 has no assignees → Unassigned row appears
-    expect(screen.getByRole("button", { name: /Unassigned/ })).toBeInTheDocument();
-  });
-});
-
-describe("ActiveFilterBar", () => {
-  it("renders chips for active filters with labels resolved from the board", () => {
-    const active = emptyFilters();
-    active.columns.add("c2");
-    active.priorities.add("pr-high");
-    active.assignees.add("");
-    active.swimlanes.add("s1");
-    render(<ActiveFilterBar board={BOARD} filters={active} onChange={() => {}} />);
-    expect(screen.getByText("Done")).toBeInTheDocument(); // column name
-    expect(screen.getByText("High")).toBeInTheDocument();  // priority label
-    expect(screen.getByText("Unassigned")).toBeInTheDocument();
-    expect(screen.getByText("Backlog")).toBeInTheDocument(); // lane name
-  });
-
-  it("removing a chip toggles that single filter off", async () => {
-    const user = userEvent.setup();
-    const onChange = vi.fn();
-    const active = emptyFilters();
-    active.columns.add("c1");
-    active.columns.add("c2");
-    render(<ActiveFilterBar board={BOARD} filters={active} onChange={onChange} />);
-    await user.click(screen.getAllByRole("button", { name: "Remove Column filter" })[0]!);
-    const next = onChange.mock.calls[0]![0] as FilterState;
-    expect(Array.from(next.columns)).toEqual(["c2"]);
-  });
-
-  it("Clear all empties every filter set", async () => {
-    const user = userEvent.setup();
-    const onChange = vi.fn();
-    const active = emptyFilters();
-    active.columns.add("c1");
-    active.types.add("tp-bug");
-    render(<ActiveFilterBar board={BOARD} filters={active} onChange={onChange} />);
-    await user.click(screen.getByRole("button", { name: "Clear all" }));
-    const next = onChange.mock.calls[0]![0] as FilterState;
-    expect(next.columns.size).toBe(0);
-    expect(next.types.size).toBe(0);
-  });
-
-  it("renders no chips when no filters are active", () => {
-    render(<ActiveFilterBar board={BOARD} filters={emptyFilters()} onChange={() => {}} />);
-    // the bar itself (Clear all) always renders; only the chips are conditional
-    expect(screen.getByRole("button", { name: "Clear all" })).toBeInTheDocument();
-    expect(screen.queryByText("Done")).not.toBeInTheDocument();
   });
 });

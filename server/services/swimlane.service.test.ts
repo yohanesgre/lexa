@@ -1,4 +1,4 @@
-import { describe, expect, it, afterEach } from "vitest";
+import { describe, expect, it, afterEach, beforeAll, beforeEach, afterAll } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -21,19 +21,36 @@ import type { Actor } from "../../shared/types";
 
 const MIGRATIONS = fileURLToPath(new URL("../../migrations", import.meta.url));
 
-let dirs: string[] = [];
-let dbs: Database[] = [];
+let dir: string;
+let db: Database;
 
-function tmpDb(): Database {
-  const dir = mkdtempSync(join(tmpdir(), "lexa-swimlane-svc-"));
-  dirs.push(dir);
+beforeAll(() => {
+  dir = mkdtempSync(join(tmpdir(), "lexa-swimlane-svc-"));
   const path = join(dir, "test.db");
   runMigrations(path, MIGRATIONS);
   const ctx = Effect.runSync(Effect.scoped(Layer.build(initSqlite(path))));
-  const db = Context.get(ctx, Sqlite);
-  dbs.push(db);
-  return db;
+  db = Context.get(ctx, Sqlite);
+});
+
+afterAll(() => {
+  try { db.close(); } catch {}
+  rmSync(dir, { recursive: true, force: true });
+});
+
+function cleanDb(db: Database) {
+  db.exec("PRAGMA foreign_keys = OFF");
+  const tables = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name != '_migrations' AND name NOT LIKE '%fts%'").all() as { name: string }[];
+  for (const { name } of tables) {
+    try { db.exec(`DELETE FROM "${name}"`); } catch {}
+  }
+  try { db.exec("DELETE FROM sqlite_sequence"); } catch {}
+  db.exec("PRAGMA foreign_keys = ON");
 }
+
+beforeEach(() => {
+  cleanDb(db);
+});
+
 
 function seed(db: Database) {
   db.prepare("INSERT INTO projects (id, name, slug) VALUES ('p1','P','p1')").run();
@@ -54,18 +71,8 @@ function makeService(db: Database) {
 
 const maria: Actor = { kind: "user", label: "Maria", userId: "u1" };
 
-afterEach(() => {
-  for (const db of dbs) {
-    try { db.close(); } catch {}
-  }
-  dbs = [];
-  for (const d of dirs) rmSync(d, { recursive: true, force: true });
-  dirs = [];
-});
-
 describe("SwimlaneService create", () => {
   it("creates a sprint lane with dueAt appended after the last position", () => {
-    const db = tmpDb();
     seed(db);
     const svc = makeService(db);
     Effect.runSync(
@@ -80,7 +87,6 @@ describe("SwimlaneService create", () => {
   });
 
   it("creates a loose sprint by default; milestoneId + startAt persist when given", () => {
-    const db = tmpDb();
     seed(db);
     const svc = makeService(db);
     db.prepare("INSERT INTO milestones (id, project_id, name, position) VALUES ('ms1','p1','v1',0)").run();
@@ -98,7 +104,6 @@ describe("SwimlaneService create", () => {
   });
 
   it("rejects startAt later than dueAt (INVALID_ARGS)", () => {
-    const db = tmpDb();
     seed(db);
     const svc = makeService(db);
     const result = Effect.runSync(Effect.either(svc.create({ projectId: "p1", name: "Bad", startAt: "2026-09-01", dueAt: "2026-08-01" })));
@@ -107,7 +112,6 @@ describe("SwimlaneService create", () => {
   });
 
   it("rejects an unknown or cross-project milestoneId (MILESTONE_NOT_FOUND)", () => {
-    const db = tmpDb();
     seed(db);
     const svc = makeService(db);
     db.prepare("INSERT INTO projects (id, name, slug) VALUES ('p2','P2','p2')").run();
@@ -121,7 +125,6 @@ describe("SwimlaneService create", () => {
   });
 
   it("rejects a missing project", () => {
-    const db = tmpDb();
     seed(db);
     const svc = makeService(db);
     const result = Effect.runSync(Effect.either(svc.create({ projectId: "nope", name: "X" })));
@@ -132,7 +135,6 @@ describe("SwimlaneService create", () => {
 
 describe("SwimlaneService update", () => {
   it("rejects shrinking the deadline past a task's due date", () => {
-    const db = tmpDb();
     seed(db);
     const svc = makeService(db);
     const result = Effect.runSync(Effect.either(svc.update("m1", { dueAt: "2026-06-15" })));
@@ -150,7 +152,6 @@ describe("SwimlaneService update", () => {
   });
 
   it("allows moving the deadline after all task due dates", () => {
-    const db = tmpDb();
     seed(db);
     const svc = makeService(db);
     Effect.runSync(
@@ -162,7 +163,6 @@ describe("SwimlaneService update", () => {
   });
 
   it("rejects setting a deadline on the backlog lane", () => {
-    const db = tmpDb();
     seed(db);
     const svc = makeService(db);
     const result = Effect.runSync(Effect.either(svc.update("s-backlog", { dueAt: "2026-01-01" })));
@@ -174,7 +174,6 @@ describe("SwimlaneService update", () => {
   });
 
   it("rejects updating a missing lane", () => {
-    const db = tmpDb();
     seed(db);
     const svc = makeService(db);
     const result = Effect.runSync(Effect.either(svc.update("nope", { name: "X" })));
@@ -183,7 +182,6 @@ describe("SwimlaneService update", () => {
   });
 
   it("updates name and position", () => {
-    const db = tmpDb();
     seed(db);
     const svc = makeService(db);
     Effect.runSync(
@@ -196,7 +194,6 @@ describe("SwimlaneService update", () => {
   });
 
   it("update rejects startAt > dueAt on an existing lane (INVALID_ARGS)", () => {
-    const db = tmpDb();
     seed(db);
     const svc = makeService(db);
     const result = Effect.runSync(Effect.either(svc.update("m1", { startAt: "2026-09-01", dueAt: "2026-08-01" })));
@@ -205,7 +202,6 @@ describe("SwimlaneService update", () => {
   });
 
   it("partial PATCH validates against the lane's other bound (startAt vs dueAt)", () => {
-    const db = tmpDb();
     seed(db);
     const svc = makeService(db);
     // m2: no dates, no tasks → set a consistent range first.
@@ -228,7 +224,6 @@ describe("SwimlaneService update", () => {
   });
 
   it("update persists startAt/milestoneId and clears them with null", () => {
-    const db = tmpDb();
     seed(db);
     const svc = makeService(db);
     db.prepare("INSERT INTO milestones (id, project_id, name, position) VALUES ('ms1','p1','v1',0)").run();
@@ -245,7 +240,6 @@ describe("SwimlaneService update", () => {
   });
 
   it("update rejects unknown milestoneId on an existing lane", () => {
-    const db = tmpDb();
     seed(db);
     const svc = makeService(db);
     const result = Effect.runSync(Effect.either(svc.update("m1", { milestoneId: "nope" })));
@@ -254,7 +248,6 @@ describe("SwimlaneService update", () => {
   });
 
   it("backlog lane rejects startAt/milestoneId too (BACKLOG_PROTECTED)", () => {
-    const db = tmpDb();
     seed(db);
     const svc = makeService(db);
     const result = Effect.runSync(Effect.either(svc.update("s-backlog", { startAt: "2026-01-01" })));
@@ -268,7 +261,6 @@ describe("SwimlaneService update", () => {
 
 describe("SwimlaneService delete", () => {
   it("rejects deleting a lane with tasks", () => {
-    const db = tmpDb();
     seed(db);
     const svc = makeService(db);
     const result = Effect.runSync(Effect.either(svc.delete("m1")));
@@ -280,7 +272,6 @@ describe("SwimlaneService delete", () => {
   });
 
   it("deletes an empty milestone lane", () => {
-    const db = tmpDb();
     seed(db);
     const svc = makeService(db);
     Effect.runSync(svc.delete("m2"));
@@ -289,7 +280,6 @@ describe("SwimlaneService delete", () => {
   });
 
   it("deleting the backlog lane is rejected (BACKLOG_PROTECTED)", () => {
-    const db = tmpDb();
     seed(db);
     const svc = makeService(db);
     const result = Effect.runSync(Effect.either(svc.delete("s-backlog")));
@@ -303,7 +293,6 @@ describe("SwimlaneService delete", () => {
   });
 
   it("rejects deleting a missing lane", () => {
-    const db = tmpDb();
     seed(db);
     const svc = makeService(db);
     const result = Effect.runSync(Effect.either(svc.delete("nope")));
@@ -314,7 +303,6 @@ describe("SwimlaneService delete", () => {
 
 describe("SwimlaneService archive", () => {
   it("rejects archiving the backlog lane", () => {
-    const db = tmpDb();
     seed(db);
     const svc = makeService(db);
     const result = Effect.runSync(Effect.either(svc.archive(maria, "s-backlog")));
@@ -326,7 +314,6 @@ describe("SwimlaneService archive", () => {
   });
 
   it("archives the lane and its live tasks, emitting one activity row per task", () => {
-    const db = tmpDb();
     seed(db);
     const svc = makeService(db);
     Effect.runSync(
@@ -343,7 +330,6 @@ describe("SwimlaneService archive", () => {
   });
 
   it("archiving an already-archived lane is idempotent", () => {
-    const db = tmpDb();
     seed(db);
     const svc = makeService(db);
     Effect.runSync(
@@ -356,7 +342,6 @@ describe("SwimlaneService archive", () => {
   });
 
   it("rejects archiving a missing lane", () => {
-    const db = tmpDb();
     seed(db);
     const svc = makeService(db);
     const result = Effect.runSync(Effect.either(svc.archive(maria, "nope")));
@@ -367,7 +352,6 @@ describe("SwimlaneService archive", () => {
 
 describe("SwimlaneService restore", () => {
   it("restores the lane and is idempotent; tasks stay archived", () => {
-    const db = tmpDb();
     seed(db);
     const svc = makeService(db);
     Effect.runSync(
@@ -387,7 +371,6 @@ describe("SwimlaneService restore", () => {
   });
 
   it("rejects restoring a missing lane", () => {
-    const db = tmpDb();
     seed(db);
     const svc = makeService(db);
     const result = Effect.runSync(Effect.either(svc.restore(maria, "nope")));
@@ -398,7 +381,6 @@ describe("SwimlaneService restore", () => {
 
 describe("SwimlaneService queries", () => {
   it("getById returns the lane; missing → SwimlaneNotFound", () => {
-    const db = tmpDb();
     seed(db);
     const svc = makeService(db);
     Effect.runSync(
@@ -413,7 +395,6 @@ describe("SwimlaneService queries", () => {
   });
 
   it("findByProject hides archived lanes unless includeArchived", () => {
-    const db = tmpDb();
     seed(db);
     const svc = makeService(db);
     Effect.runSync(

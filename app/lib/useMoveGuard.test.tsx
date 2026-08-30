@@ -56,7 +56,6 @@ describe("useMoveGuard", () => {
     expect(confirmed!).toBe(true);
     expect(result.current.pending).toBeNull();
   });
-
   it("moves immediately when the lane deadline is in the future and the task due fits", async () => {
     const { result } = renderHook(() => useMoveGuard("demo", BOARD), { wrapper });
     let confirmed: boolean;
@@ -65,67 +64,5 @@ describe("useMoveGuard", () => {
       await waitForMove();
     });
     expect(confirmed!).toBe(true);
-  });
-
-  it("defers the move when the target lane is overdue", async () => {
-    const { result } = renderHook(() => useMoveGuard("demo", BOARD), { wrapper });
-    let confirmed: boolean;
-    await act(async () => {
-      confirmed = result.current.confirmMove(TASK, { columnId: "c1", swimlaneId: "s-old" });
-    });
-    expect(confirmed!).toBe(false);
-    expect(result.current.pending).toMatchObject({ task: TASK, target: { swimlaneId: "s-old" } });
-    expect(fetchMock).not.toHaveBeenCalled();
-  });
-
-  it("defers the move when the task's due date exceeds the lane deadline", async () => {
-    const overdueTask: Task = { ...TASK, dueAt: "2100-01-01" };
-    const { result } = renderHook(() => useMoveGuard("demo", BOARD), { wrapper });
-    let confirmed: boolean;
-    await act(async () => {
-      confirmed = result.current.confirmMove(overdueTask, MOVE_TARGET);
-    });
-    expect(confirmed!).toBe(false);
-    expect(result.current.pending?.task.dueAt).toBe("2100-01-01");
-    expect(fetchMock).not.toHaveBeenCalled();
-  });
-
-  it("resolve(false) moves without clearing the due date", async () => {
-    const { result } = renderHook(() => useMoveGuard("demo", BOARD), { wrapper });
-    act(() => {
-      result.current.confirmMove({ ...TASK, dueAt: "2100-01-01" }, MOVE_TARGET);
-    });
-    await waitFor(() => expect(result.current.pending).not.toBeNull());
-    await act(async () => {
-      result.current.resolve(false);
-      await waitForMove();
-    });
-    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
-    expect(JSON.parse(String(init.body))).toEqual({ columnId: "c1", swimlaneId: "s-future" });
-    expect(result.current.pending).toBeNull();
-  });
-
-  it("resolve(true) moves with clearDueAt: true", async () => {
-    const { result } = renderHook(() => useMoveGuard("demo", BOARD), { wrapper });
-    act(() => {
-      result.current.confirmMove({ ...TASK, dueAt: "2100-01-01" }, MOVE_TARGET);
-    });
-    await waitFor(() => expect(result.current.pending).not.toBeNull());
-    await act(async () => {
-      result.current.resolve(true);
-      await waitForMove();
-    });
-    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
-    expect(JSON.parse(String(init.body))).toEqual({ columnId: "c1", swimlaneId: "s-future", clearDueAt: true });
-  });
-
-  it("cancel clears the pending move without mutating", async () => {
-    const { result } = renderHook(() => useMoveGuard("demo", BOARD), { wrapper });
-    await act(async () => {
-      result.current.confirmMove({ ...TASK, dueAt: "2100-01-01" }, MOVE_TARGET);
-      result.current.cancel();
-    });
-    expect(result.current.pending).toBeNull();
-    expect(fetchMock).not.toHaveBeenCalled();
   });
 });

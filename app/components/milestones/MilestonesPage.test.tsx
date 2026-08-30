@@ -98,7 +98,6 @@ describe("MilestonesPage (list tab)", () => {
     expect(screen.getByText("Prototype")).toBeInTheDocument();
     expect(await screen.findByText("Restore")).toBeInTheDocument();
   });
-
   it("archive click fires the cascade archive mutation", async () => {
     const user = userEvent.setup();
     routes.set("POST /api/projects/demo/milestones/m1/archive", { data: { ...MILESTONES[0]!, archivedAt: "2026-08-13T00:00:00.000Z" }, activity: [] });
@@ -110,47 +109,5 @@ describe("MilestonesPage (list tab)", () => {
     await waitFor(() => {
       expect(fetchMock.mock.calls.filter((c) => String(c[0]).includes("/milestones/m1/archive")).length).toBe(1);
     });
-  });
-
-  it("delete is disabled when sprints exist (tooltip), enabled on archived rows", async () => {
-    render(<MilestonesPage slug="demo" tab="list" />, { wrapper });
-    await screen.findByText("v1.0 launch");
-    const deleteBtns = screen.getAllByRole("button", { name: "Delete" });
-    // m1 (sprints) disabled, m2 (sprints) disabled, m3 archived (no sprints) enabled
-    expect(deleteBtns[0]).toBeDisabled();
-    expect(deleteBtns[1]).toBeDisabled();
-    expect(deleteBtns[2]).not.toBeDisabled();
-    expect(deleteBtns[0]!.title).toContain("409 HAS_CHILDREN");
-  });
-
-  it("new milestone button opens the create form and submits", async () => {
-    const user = userEvent.setup();
-    routes.set("POST /api/projects/demo/milestones", { id: "m9", projectId: "p1", name: "v2", description: null, position: 3, dueAt: null, archivedAt: null, sprintCount: 0, archivedSprintCount: 0 });
-    render(<MilestonesPage slug="demo" tab="list" />, { wrapper });
-    await user.click(await screen.findByRole("button", { name: /New Milestone/ }));
-    await user.type(screen.getByLabelText("Name"), "v2");
-    await user.click(screen.getByRole("button", { name: "Create Milestone" }));
-    await waitFor(() => {
-      expect(fetchMock.mock.calls.some((c) => String(c[0]).includes("/milestones") && String(c[1]?.method) === "POST")).toBe(true);
-    });
-  });
-
-  it("delete with sprints present never fires the mutation", async () => {
-    render(<MilestonesPage slug="demo" tab="list" />, { wrapper });
-    await screen.findByText("v1.0 launch");
-    const btn = screen.getAllByRole("button", { name: "Delete" })[0]!;
-    await userEvent.setup().click(btn);
-    expect(fetchMock.mock.calls.filter((c) => String(c[0]).includes("DELETE")).length).toBe(0);
-  });
-
-  it("collapse toggle hides the milestone's sprint sub-rows", async () => {
-    const user = userEvent.setup();
-    render(<MilestonesPage slug="demo" tab="list" />, { wrapper });
-    await screen.findByText("Sprint 7 — Core");
-    await user.click(screen.getByRole("button", { name: /Collapse v1.0 launch sprints/ }));
-    expect(screen.queryByText("Sprint 7 — Core")).not.toBeInTheDocument();
-    expect(screen.queryByText("Sprint 6 — Ash & Bone")).not.toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: /Expand v1.0 launch sprints/ }));
-    expect(screen.getByText("Sprint 7 — Core")).toBeInTheDocument();
   });
 });

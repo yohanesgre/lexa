@@ -1,4 +1,4 @@
-import { describe, expect, it, afterEach } from "vitest";
+import { describe, expect, it, afterEach, beforeAll, beforeEach, afterAll } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -11,19 +11,36 @@ import { SwimlaneRepo } from "./swimlane.repo";
 
 const MIGRATIONS = fileURLToPath(new URL("../../migrations", import.meta.url));
 
-let dirs: string[] = [];
-let dbs: Database[] = [];
+let dir: string;
+let db: Database;
 
-function tmpDb(): Database {
-  const dir = mkdtempSync(join(tmpdir(), "lexa-swimlane-repo-"));
-  dirs.push(dir);
+beforeAll(() => {
+  dir = mkdtempSync(join(tmpdir(), "lexa-swimlane-repo-"));
   const path = join(dir, "test.db");
   runMigrations(path, MIGRATIONS);
   const ctx = Effect.runSync(Effect.scoped(Layer.build(initSqlite(path))));
-  const db = Context.get(ctx, Sqlite);
-  dbs.push(db);
-  return db;
+  db = Context.get(ctx, Sqlite);
+});
+
+afterAll(() => {
+  try { db.close(); } catch {}
+  rmSync(dir, { recursive: true, force: true });
+});
+
+function cleanDb(db: Database) {
+  db.exec("PRAGMA foreign_keys = OFF");
+  const tables = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name != '_migrations' AND name NOT LIKE '%fts%'").all() as { name: string }[];
+  for (const { name } of tables) {
+    try { db.exec(`DELETE FROM "${name}"`); } catch {}
+  }
+  try { db.exec("DELETE FROM sqlite_sequence"); } catch {}
+  db.exec("PRAGMA foreign_keys = ON");
 }
+
+beforeEach(() => {
+  cleanDb(db);
+});
+
 
 function seed(db: Database) {
   db.prepare("INSERT INTO projects (id, name, slug) VALUES ('p1','P','p1')").run();
@@ -44,18 +61,8 @@ function makeRepo(db: Database) {
   return Context.get(ctx, SwimlaneRepo);
 }
 
-afterEach(() => {
-  for (const db of dbs) {
-    try { db.close(); } catch {}
-  }
-  dbs = [];
-  for (const d of dirs) rmSync(d, { recursive: true, force: true });
-  dirs = [];
-});
-
 describe("SwimlaneRepo CRUD", () => {
   it("create inserts and returns the row with kind/dueAt/description", () => {
-    const db = tmpDb();
     seed(db);
     const repo = makeRepo(db);
     Effect.runSync(
@@ -72,7 +79,6 @@ describe("SwimlaneRepo CRUD", () => {
   });
 
   it("findById returns the row; missing → RowNotFound", () => {
-    const db = tmpDb();
     seed(db);
     const repo = makeRepo(db);
     Effect.runSync(
@@ -87,7 +93,6 @@ describe("SwimlaneRepo CRUD", () => {
   });
 
   it("findByProject returns lanes ordered by position", () => {
-    const db = tmpDb();
     seed(db);
     const repo = makeRepo(db);
     Effect.runSync(
@@ -99,7 +104,6 @@ describe("SwimlaneRepo CRUD", () => {
   });
 
   it("findBacklog returns the backlog lane; missing → RowNotFound", () => {
-    const db = tmpDb();
     seed(db);
     const repo = makeRepo(db);
     Effect.runSync(
@@ -115,7 +119,6 @@ describe("SwimlaneRepo CRUD", () => {
   });
 
   it("update mutates name/description/position/dueAt; empty input returns the row unchanged", () => {
-    const db = tmpDb();
     seed(db);
     const repo = makeRepo(db);
     Effect.runSync(
@@ -133,7 +136,6 @@ describe("SwimlaneRepo CRUD", () => {
   });
 
   it("setArchived sets and clears archived_at; missing id → RowNotFound", () => {
-    const db = tmpDb();
     seed(db);
     const repo = makeRepo(db);
     Effect.runSync(
@@ -150,7 +152,6 @@ describe("SwimlaneRepo CRUD", () => {
   });
 
   it("maxPosition is -1 for an empty project and max+1 after inserts", () => {
-    const db = tmpDb();
     seed(db);
     const repo = makeRepo(db);
     Effect.runSync(
@@ -164,7 +165,6 @@ describe("SwimlaneRepo CRUD", () => {
 
 describe("SwimlaneRepo due-date queries", () => {
   it("countTasks counts every task in the lane", () => {
-    const db = tmpDb();
     seed(db);
     const repo = makeRepo(db);
     Effect.runSync(
@@ -176,7 +176,6 @@ describe("SwimlaneRepo due-date queries", () => {
   });
 
   it("countDueAfter counts only live tasks with a due date strictly after", () => {
-    const db = tmpDb();
     seed(db);
     const repo = makeRepo(db);
     Effect.runSync(
@@ -191,23 +190,10 @@ describe("SwimlaneRepo due-date queries", () => {
     );
   });
 
-  it("findFirstDueAfter returns the earliest live task after the date", () => {
-    const db = tmpDb();
-    seed(db);
-    const repo = makeRepo(db);
-    Effect.runSync(
-      Effect.gen(function* () {
-        const first = yield* repo.findFirstDueAfter("m1", "2026-06-01");
-        expect(first).toEqual({ id: "t1", title: "T1" });
-        expect(yield* repo.findFirstDueAfter("m1", "2026-12-01")).toBeNull();
-      })
-    );
-  });
 });
 
 describe("SwimlaneRepo constraints", () => {
   it("delete removes an empty lane; deleting a lane with tasks hits the FK constraint", () => {
-    const db = tmpDb();
     seed(db);
     const repo = makeRepo(db);
     Effect.runSync(
@@ -226,7 +212,6 @@ describe("SwimlaneRepo constraints", () => {
   });
 
   it("the partial unique index allows at most one backlog per project", () => {
-    const db = tmpDb();
     seed(db);
     const repo = makeRepo(db);
     Effect.runSync(

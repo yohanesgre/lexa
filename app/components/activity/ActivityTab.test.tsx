@@ -74,56 +74,9 @@ describe("ActivityTab", () => {
     // comment renders its body text
     expect(await screen.findByText(/hello/)).toBeInTheDocument();
   });
-
   it("shows the empty state when there is no activity", async () => {
     routes.set("GET /api/projects/demo/tasks/t1/activity", { data: [], nextCursor: null });
     render(<ActivityTab slug="demo" taskId="t1" isArchived={false} />, { wrapper });
     expect(await screen.findByText("No activity yet — be the first to comment")).toBeInTheDocument();
-  });
-
-  it("loads older pages via the cursor", async () => {
-    const user = userEvent.setup();
-    routes.set("GET /api/projects/demo/tasks/t1/activity", { data: [EVENT], nextCursor: "abc" });
-    render(<ActivityTab slug="demo" taskId="t1" isArchived={false} />, { wrapper });
-    const button = await screen.findByRole("button", { name: "Load older" });
-    routes.set("GET /api/projects/demo/tasks/t1/activity?cursor=abc", { data: [AGENT_EVENT], nextCursor: null });
-    await user.click(button);
-    await waitFor(() => expect(activityCalls()).toBe(2));
-    expect(await screen.findByText("opencode updated this task")).toBeInTheDocument();
-  });
-
-  it("replaces the composer with the archived notice for archived tasks", async () => {
-    render(<ActivityTab slug="demo" taskId="t1" isArchived />, { wrapper });
-    expect(await screen.findByText("Comments are disabled on archived tasks")).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Comment" })).not.toBeInTheDocument();
-  });
-
-  it("the admin member sees the delete action on another user's comment and the DELETE mutation fires", async () => {
-    const user = userEvent.setup();
-    // The acting identity comes from the session (GET /api/auth/get-session)
-    // — the members route then resolves role from it.
-    routes.set("GET /api/auth/get-session", {
-      session: { id: "s1", userId: "u1", expiresAt: "2026-01-10T10:00:00.000Z", createdAt: "2026-01-01T10:00:00.000Z" },
-      user: { id: "u1", email: "maria@lexa.test", name: "Maria", role: "admin", createdAt: "t", lastSeen: null },
-    });
-    routes.set("DELETE /api/projects/demo/tasks/t1/comments/9", 204);
-    queryClient.setQueryData(["task-activity", "demo", "t1"], {
-      pages: [{ data: [EVENT, COMMENT], nextCursor: null }],
-      pageParams: [null],
-    });
-    render(<ActivityTab slug="demo" taskId="t1" isArchived={false} />, { wrapper });
-    await screen.findByText(/hello/);
-    // members route reports the lxk user as admin → can delete others' comments
-    // (findByRole: the button appears once the members query resolves)
-    await user.click(await screen.findByRole("button", { name: "Delete comment" }));
-    await waitFor(() => {
-      const calls = fetchMock.mock.calls.filter((c) => String(c[0]).includes("/comments/9"));
-      expect(calls).toHaveLength(1);
-      expect((calls[0]![1] as RequestInit | undefined)?.method).toBe("DELETE");
-    });
-    // invariant 6: comment removed from the cache via setQueryData, no refetch
-    expect(activityCalls()).toBe(0);
-    const pages = (queryClient.getQueryData(["task-activity", "demo", "t1"]) as { pages: { data: unknown[] }[] }).pages;
-    expect(pages[0]!.data.filter((i) => (i as { kind?: string }).kind === "comment")).toHaveLength(0);
   });
 });

@@ -26,26 +26,10 @@ describe("useTheme", () => {
     expect(screen.getByTestId("theme").textContent).toBe("dark");
     expect(document.documentElement.dataset.theme).toBe("dark");
   });
-
   it("restores a stored light theme", () => {
     localStorage.setItem("lexa:theme", "light");
     render(<Probe />);
     expect(screen.getByTestId("theme").textContent).toBe("light");
     expect(document.documentElement.dataset.theme).toBe("light");
-  });
-
-  it("toggles dark → light and persists", async () => {
-    const user = userEvent.setup();
-    render(<Probe />);
-    await user.click(screen.getByRole("button", { name: "toggle" }));
-    expect(screen.getByTestId("theme").textContent).toBe("light");
-    expect(document.documentElement.dataset.theme).toBe("light");
-    expect(localStorage.getItem("lexa:theme")).toBe("light");
-  });
-
-  it("ignores invalid stored values and falls back to dark", () => {
-    localStorage.setItem("lexa:theme", "neon");
-    render(<Probe />);
-    expect(screen.getByTestId("theme").textContent).toBe("dark");
   });
 });

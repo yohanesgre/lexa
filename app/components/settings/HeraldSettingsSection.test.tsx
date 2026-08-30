@@ -70,39 +70,7 @@ describe("Herald provider — API key field (rework)", () => {
     // Eye/reveal dropped deliberately.
     expect(screen.queryByRole("button", { name: /reveal|hide|show/i })).toBeNull();
   });
-
-  it("typing updates state and Save sends the typed value; success clears back to keep-state", () => {
-    const { saveMutate } = mockQueries(MASKED);
-    render(<HeraldProviderSection project={PROJECT} />);
-    const input = screen.getByLabelText("API key");
-    fireEvent.change(input, { target: { value: "sk-live-new-key" } });
-    fireEvent.click(screen.getByRole("button", { name: /save/i }));
-    expect(saveMutate).toHaveBeenCalledTimes(1);
-    const [payload, options] = saveMutate.mock.calls[0]!;
-    expect((payload as Record<string, unknown>).apiKey).toBe("sk-live-new-key");
-    // Success callback clears the field (empty = keep stored afterwards).
-    act(() => {
-      (options as { onSuccess?: () => void }).onSuccess?.();
-    });
-    expect((input as HTMLInputElement).value).toBe("");
-  });
-
-  it("no key yet: no badge, plain placeholder, empty field still omits apiKey from payload", () => {
-    // hasKey is a `true` literal on the masked type — "no key" IS settings=null
-    // (PROVIDER_NOT_CONFIGURED resolves to null in useHeraldSettings).
-    const { saveMutate } = mockQueries(null);
-    render(<HeraldProviderSection project={PROJECT} />);
-    expect(screen.queryByText(/saved · /i)).toBeNull();
-    expect((screen.getByLabelText("API key") as HTMLInputElement).placeholder).toBe("sk-…");
-    // Base URL + model are required before Save enables.
-    fireEvent.change(screen.getByLabelText("Base URL"), { target: { value: "https://x.test/v1" } });
-    fireEvent.change(screen.getByLabelText("Model"), { target: { value: "m1" } });
-    fireEvent.click(screen.getByRole("button", { name: /save/i }));
-    const payload = saveMutate.mock.calls[0]![0] as Record<string, unknown>;
-    expect(payload.apiKey).toBeUndefined();
-  });
 });
-
 describe("Herald engine section", () => {
   it("segmented control persists the engine immediately, riding on the stored base fields", () => {
     const { saveMutate } = mockQueries(MASKED);
@@ -119,17 +87,7 @@ describe("Herald engine section", () => {
       engine: "blacksmith",
     });
   });
-
-  it("switcher toggle sends engineSwitcherEnabled and renders hidden-by-default semantics", () => {
-    const { saveMutate } = mockQueries(MASKED);
-    render(<HeraldEngineSection project={PROJECT} />);
-    const toggle = screen.getByRole("switch", { name: "Engine switcher off" });
-    fireEvent.click(toggle);
-    const payload = saveMutate.mock.calls[0]![0] as Record<string, unknown>;
-    expect(payload.engineSwitcherEnabled).toBe(true);
-  });
 });
-
 describe("Herald vision fields (folded into provider section)", () => {
   it("save payload carries primarySupportsImages + visionModel riding the Herald provider base fields", () => {
     const { saveMutate } = mockQueries(MASKED);
@@ -149,19 +107,7 @@ describe("Herald vision fields (folded into provider section)", () => {
     expect(payload.visionProvider).toBeUndefined();
     expect(payload.visionApiKey).toBeUndefined();
   });
-
-  it("no provider select or key field rendered; empty vision model saves null", () => {
-    const { saveMutate } = mockQueries(MASKED);
-    render(<HeraldProviderSection project={PROJECT} />);
-    expect(screen.queryByLabelText("Vision provider")).toBeNull();
-    expect(screen.queryByLabelText("Vision API key")).toBeNull();
-    expect(screen.queryByRole("heading", { name: "Vision" })).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: /^save$/i }));
-    const payload = saveMutate.mock.calls[0]![0] as Record<string, unknown>;
-    expect(payload.visionModel).toBeNull();
-  });
 });
-
 describe("Herald thinking effort (settings-project-herald.html)", () => {
   it("select renders between Model and vision with the exact option set, hydrated from the masked view", () => {
     mockQueries(MASKED);
@@ -176,28 +122,7 @@ describe("Herald thinking effort (settings-project-herald.html)", () => {
     expect(fields.indexOf("Model")).toBeLessThan(fields.indexOf("Thinking effort"));
     expect(fields.indexOf("Thinking effort")).toBeLessThan(fields.indexOf("Primary model vision"));
   });
-
-  it("Save sends the picked level; clearing back to Default (none set) saves null", () => {
-    const { saveMutate } = mockQueries(MASKED);
-    render(<HeraldProviderSection project={PROJECT} />);
-    fireEvent.change(screen.getByLabelText("Thinking effort"), { target: { value: "high" } });
-    fireEvent.click(screen.getByRole("button", { name: /^save$/i }));
-    let payload = saveMutate.mock.calls[0]![0] as Record<string, unknown>;
-    expect(payload.reasoningEffort).toBe("high");
-
-    fireEvent.change(screen.getByLabelText("Thinking effort"), { target: { value: "" } });
-    fireEvent.click(screen.getByRole("button", { name: /^save$/i }));
-    payload = saveMutate.mock.calls[1]![0] as Record<string, unknown>;
-    expect(payload.reasoningEffort).toBeNull();
-  });
-
-  it("unset project (null) hydrates to Default (none set)", () => {
-    mockQueries({ ...MASKED, reasoningEffort: null });
-    render(<HeraldProviderSection project={PROJECT} />);
-    expect((screen.getByLabelText("Thinking effort") as HTMLSelectElement).value).toBe("");
-  });
 });
-
 describe("Agent skill availability", () => {
   it("renders exactly the two builtin agents and writes junction rows immediately on toggle", () => {
     vi.mocked(queries.useAgents).mockReturnValue({

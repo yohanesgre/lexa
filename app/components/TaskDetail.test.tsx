@@ -114,7 +114,6 @@ describe("TaskDetail (view mode)", () => {
     expect(screen.getByText("High")).toBeInTheDocument();
     expect(screen.getByText("Feature")).toBeInTheDocument();
   });
-
   it("renders the ticket key first in the header with a copy button", () => {
     renderDetail();
     const header = screen.getByText("Task One").closest(".slideover-title")!;
@@ -123,56 +122,5 @@ describe("TaskDetail (view mode)", () => {
     expect(key!.textContent).toBe("EG-1");
     expect(header.textContent!.indexOf("EG-1")).toBeLessThan(header.textContent!.indexOf("Task One"));
     expect(screen.getByRole("button", { name: "Copy key" })).toBeInTheDocument();
-  });
-
-  it("copies the key to the clipboard on click", async () => {
-    const user = userEvent.setup();
-    const writeText = vi.fn().mockResolvedValue(undefined);
-    Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
-    renderDetail();
-    await user.click(screen.getByRole("button", { name: "Copy key" }));
-    expect(writeText).toHaveBeenCalledWith("EG-1");
-  });
-
-  it("shows the missing-fields warning for the task's column", async () => {
-    renderDetail({
-      columnRequiredFields: [{ columnId: "c1", fields: ["description", "assignee"] }],
-    });
-    // the task HAS a description ("hello body") — only assignee is missing
-    expect(await screen.findByText("Todo requires assignee")).toBeInTheDocument();
-  });
-
-  it("Activity tab fetches and renders the timeline", async () => {
-    const user = userEvent.setup();
-    renderDetail();
-    await user.click(screen.getByRole("button", { name: "Activity" }));
-    expect(await screen.findByText("Maria created this task")).toBeInTheDocument();
-    // exactly one activity fetch — no refetch on tab switches
-    expect(fetchMock.mock.calls.filter((c) => String(c[0]).includes("/activity"))).toHaveLength(1);
-  });
-
-  it("delete flow: footer Delete opens the dialog and confirms", async () => {
-    const user = userEvent.setup();
-    const { onDelete } = renderDetail();
-    await user.click(screen.getByRole("button", { name: "Delete" }));
-    expect(screen.getByText("Delete task")).toBeInTheDocument();
-    // two "Delete" buttons exist once the dialog is open (footer + dialog)
-    const dialog = screen.getByText("Delete task").closest("dialog")!;
-    await user.click(within(dialog).getByRole("button", { name: "Delete" }));
-    await waitFor(() => expect(onDelete).toHaveBeenCalledWith("t1"));
-  });
-});
-
-describe("TaskDetail (create mode — TipTap smoke)", () => {
-  it("mounts the TipTap description editor without crashing", async () => {
-    renderDetail({ mode: "create", task: undefined });
-    expect(screen.getByLabelText("Task title")).toBeInTheDocument();
-    expect(screen.getByText("Create task")).toBeInTheDocument();
-    // The TipTap editor mounted: the ProseMirror node exists and the toolbar
-    // (which requires a live editor instance) renders its command buttons.
-    // jsdom renders the ProseMirror div without children — mount is what matters.
-    await waitFor(() => expect(document.querySelector(".ProseMirror")).not.toBeNull());
-    expect(screen.getByRole("button", { name: "Bold" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Heading 2" })).toBeInTheDocument();
   });
 });

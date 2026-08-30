@@ -1,4 +1,4 @@
-import { describe, expect, it, afterEach } from "vitest";
+import { describe, expect, it, afterEach, beforeAll, beforeEach, afterAll } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -12,19 +12,36 @@ import { ProjectNotFound, SlugTaken } from "../api/errors";
 
 const MIGRATIONS = fileURLToPath(new URL("../../migrations", import.meta.url));
 
-let dirs: string[] = [];
-let dbs: Database[] = [];
+let dir: string;
+let db: Database;
 
-function tmpDb(): Database {
-  const dir = mkdtempSync(join(tmpdir(), "lexa-project-svc-"));
-  dirs.push(dir);
+beforeAll(() => {
+  dir = mkdtempSync(join(tmpdir(), "lexa-project-svc-"));
   const path = join(dir, "test.db");
   runMigrations(path, MIGRATIONS);
   const ctx = Effect.runSync(Effect.scoped(Layer.build(initSqlite(path))));
-  const db = Context.get(ctx, Sqlite);
-  dbs.push(db);
-  return db;
+  db = Context.get(ctx, Sqlite);
+});
+
+afterAll(() => {
+  try { db.close(); } catch {}
+  rmSync(dir, { recursive: true, force: true });
+});
+
+function cleanDb(db: Database) {
+  db.exec("PRAGMA foreign_keys = OFF");
+  const tables = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name != '_migrations' AND name NOT LIKE '%fts%'").all() as { name: string }[];
+  for (const { name } of tables) {
+    try { db.exec(`DELETE FROM "${name}"`); } catch {}
+  }
+  try { db.exec("DELETE FROM sqlite_sequence"); } catch {}
+  db.exec("PRAGMA foreign_keys = ON");
 }
+
+beforeEach(() => {
+  cleanDb(db);
+});
+
 
 function makeService(db: Database) {
   const layer = ProjectService.Default.pipe(Layer.provide(Layer.succeed(Sqlite, db)));
@@ -32,18 +49,8 @@ function makeService(db: Database) {
   return Context.get(ctx, ProjectService);
 }
 
-afterEach(() => {
-  for (const db of dbs) {
-    try { db.close(); } catch {}
-  }
-  dbs = [];
-  for (const d of dirs) rmSync(d, { recursive: true, force: true });
-  dirs = [];
-});
-
 describe("ProjectService.create", () => {
   it("creates a project with an auto-slugified slug", () => {
-    const db = tmpDb();
     const svc = makeService(db);
     const created = Effect.runSync(Effect.either(svc.create({ name: "Acme Widgets" })));
     expect(Either.isRight(created)).toBe(true);
@@ -55,7 +62,6 @@ describe("ProjectService.create", () => {
   });
 
   it("accepts an explicit slug and description", () => {
-    const db = tmpDb();
     const svc = makeService(db);
     const created = Effect.runSync(
       Effect.either(svc.create({ name: "Whatever", slug: "my-project", description: "d" }))
@@ -68,7 +74,6 @@ describe("ProjectService.create", () => {
   });
 
   it("duplicate slug → SlugTaken (derived and explicit)", () => {
-    const db = tmpDb();
     const svc = makeService(db);
     Effect.runSync(svc.create({ name: "Acme" }));
     const dupName = Effect.runSync(Effect.either(svc.create({ name: "Acme" })));
@@ -80,7 +85,6 @@ describe("ProjectService.create", () => {
   });
 
   it("seeds 5 default columns, one Backlog swimlane, and 4+4 field options", () => {
-    const db = tmpDb();
     const svc = makeService(db);
     const created = Effect.runSync(svc.create({ name: "Acme" }));
     const columns = db.prepare("SELECT name, position FROM columns WHERE project_id = ? ORDER BY position").all(created.id) as { name: string; position: number }[];
@@ -95,7 +99,6 @@ describe("ProjectService.create", () => {
   });
 
   it("assigns a collision-resolved ticket key at creation", async () => {
-    const db = tmpDb();
     const svc = makeService(db);
     const a = await Effect.runPromise(svc.create({ name: "Web Client", slug: "web-client" }));
     expect(a.key).toBe("WC");
@@ -106,7 +109,6 @@ describe("ProjectService.create", () => {
 
 describe("ProjectService.find", () => {
   it("findBySlug / findById / list return projects", () => {
-    const db = tmpDb();
     const svc = makeService(db);
     const created = Effect.runSync(svc.create({ name: "Acme" }));
     const bySlug = Effect.runSync(Effect.either(svc.findBySlug("acme")));
@@ -120,7 +122,6 @@ describe("ProjectService.find", () => {
   });
 
   it("missing slug/id → ProjectNotFound", () => {
-    const db = tmpDb();
     const svc = makeService(db);
     const bySlug = Effect.runSync(Effect.either(svc.findBySlug("nope")));
     expect(Either.isLeft(bySlug)).toBe(true);
@@ -133,7 +134,6 @@ describe("ProjectService.find", () => {
 
 describe("ProjectService.update", () => {
   it("updates name/description without touching the slug", () => {
-    const db = tmpDb();
     const svc = makeService(db);
     const created = Effect.runSync(svc.create({ name: "Acme" }));
     const updated = Effect.runSync(
@@ -148,7 +148,6 @@ describe("ProjectService.update", () => {
   });
 
   it("missing slug → ProjectNotFound", () => {
-    const db = tmpDb();
     const svc = makeService(db);
     const res = Effect.runSync(Effect.either(svc.update("nope", { name: "X" })));
     expect(Either.isLeft(res)).toBe(true);
@@ -158,7 +157,6 @@ describe("ProjectService.update", () => {
 
 describe("ProjectService.delete", () => {
   it("cascades to columns, swimlanes, tasks, wiki, and field options", () => {
-    const db = tmpDb();
     const svc = makeService(db);
     const created = Effect.runSync(svc.create({ name: "Acme" }));
     const col = db.prepare("SELECT id FROM columns WHERE project_id = ? LIMIT 1").get(created.id) as { id: string };
@@ -178,7 +176,6 @@ describe("ProjectService.delete", () => {
   });
 
   it("missing slug → ProjectNotFound", () => {
-    const db = tmpDb();
     const svc = makeService(db);
     const res = Effect.runSync(Effect.either(svc.delete("nope")));
     expect(Either.isLeft(res)).toBe(true);

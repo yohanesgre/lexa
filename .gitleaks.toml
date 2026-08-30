@@ -15,6 +15,7 @@ paths = [
   '''.*\.test\.tsx$''',
   '''cli/src/github\.ts$''',
   '''server/github/crypto\.ts$''',
+  '''\.repos/.*''',
 ]
 stopwords = [
   "test-ci-key",

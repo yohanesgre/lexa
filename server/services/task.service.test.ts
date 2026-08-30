@@ -1,4 +1,4 @@
-import { describe, expect, it, afterEach } from "vitest";
+import { describe, expect, it, afterEach, beforeAll, beforeEach, afterAll } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -13,19 +13,36 @@ import type { Actor, TipTapDoc } from "../../shared/types";
 
 const MIGRATIONS = fileURLToPath(new URL("../../migrations", import.meta.url));
 
-let dirs: string[] = [];
-let dbs: Database[] = [];
+let dir: string;
+let db: Database;
 
-function tmpDb(): Database {
-  const dir = mkdtempSync(join(tmpdir(), "lexa-task-svc-"));
-  dirs.push(dir);
+beforeAll(() => {
+  dir = mkdtempSync(join(tmpdir(), "lexa-task-svc-"));
   const path = join(dir, "test.db");
   runMigrations(path, MIGRATIONS);
   const ctx = Effect.runSync(Effect.scoped(Layer.build(initSqlite(path))));
-  const db = Context.get(ctx, Sqlite);
-  dbs.push(db);
-  return db;
+  db = Context.get(ctx, Sqlite);
+});
+
+afterAll(() => {
+  try { db.close(); } catch {}
+  rmSync(dir, { recursive: true, force: true });
+});
+
+function cleanDb(db: Database) {
+  db.exec("PRAGMA foreign_keys = OFF");
+  const tables = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name != '_migrations' AND name NOT LIKE '%fts%'").all() as { name: string }[];
+  for (const { name } of tables) {
+    try { db.exec(`DELETE FROM "${name}"`); } catch {}
+  }
+  try { db.exec("DELETE FROM sqlite_sequence"); } catch {}
+  db.exec("PRAGMA foreign_keys = ON");
 }
+
+beforeEach(() => {
+  cleanDb(db);
+});
+
 
 function seed(db: Database) {
   db.prepare("INSERT INTO projects (id, name, slug, key) VALUES ('p1','P','p1','EG')").run();
@@ -47,18 +64,8 @@ function makeService(db: Database) {
 
 const maria: Actor = { kind: "user", label: "Maria", userId: "u1" };
 
-afterEach(() => {
-  for (const db of dbs) {
-    try { db.close(); } catch {}
-  }
-  dbs = [];
-  for (const d of dirs) rmSync(d, { recursive: true, force: true });
-  dirs = [];
-});
-
 describe("TaskService emission", () => {
   it("update emits field_changed rows for each changed field", () => {
-    const db = tmpDb();
     seed(db);
     const svc = makeService(db);
     Effect.runSync(
@@ -72,7 +79,6 @@ describe("TaskService emission", () => {
   });
 
   it("move emits moved with old/new column names; a same-cell move emits nothing", () => {
-    const db = tmpDb();
     seed(db);
     const svc = makeService(db);
     Effect.runSync(
@@ -89,7 +95,6 @@ describe("TaskService emission", () => {
   });
 
   it("moveFromWebhook emits github_synced, not moved", () => {
-    const db = tmpDb();
     seed(db);
     db.prepare("INSERT INTO task_github_issues (task_id, issue_id, issue_number, repo) VALUES ('t1','ghi1',7,'owner/repo')").run();
     const svc = makeService(db);
@@ -108,7 +113,6 @@ describe("TaskService emission", () => {
   });
 
   it("create and archive emit created/archived rows", () => {
-    const db = tmpDb();
     seed(db);
     const svc = makeService(db);
     Effect.runSync(
@@ -172,7 +176,6 @@ function seedDeadline(db: Database) {
 
 describe("TaskService WIP + positions", () => {
   it("move into a column at its WIP limit is rejected atomically", () => {
-    const db = tmpDb();
     seedWip(db);
     const svc = makeService(db);
     Effect.runSync(
@@ -197,7 +200,6 @@ describe("TaskService WIP + positions", () => {
   });
 
   it("within-column reorder is allowed even at the WIP limit", () => {
-    const db = tmpDb();
     seedWip(db);
     const svc = makeService(db);
     Effect.runSync(
@@ -214,7 +216,6 @@ describe("TaskService WIP + positions", () => {
   });
 
   it("neighborless move appends to the end of the target column", () => {
-    const db = tmpDb();
     seedWip(db);
     // c-done already holds t2 (a0) + d1 (a1) — the new task must land after d1.
     db.prepare("INSERT INTO tasks (id, project_id, column_id, swimlane_id, title, position, created_at) VALUES ('d1','p1','c-done','s1','D1','a1','2026-01-01 10:00:00')").run();
@@ -229,7 +230,6 @@ describe("TaskService WIP + positions", () => {
   });
 
   it("a position conflict surfaces as ConstraintViolation after the one-shot retry", () => {
-    const db = tmpDb();
     seedWip(db);
     // d2 occupies exactly the key keyBetween('a1','a2') would generate.
     db.prepare("INSERT INTO tasks (id, project_id, column_id, swimlane_id, title, position, created_at) VALUES ('d1','p1','c-done','s1','D1','a1','2026-01-01 10:00:00')").run();
@@ -253,7 +253,6 @@ describe("TaskService WIP + positions", () => {
   });
 
   it("move succeeds when it exactly fills the last free slot (count = limit - 1)", () => {
-    const db = tmpDb();
     seedWip(db);
     // c-todo holds 2 tasks (t1, t3); a limit of 3 leaves exactly one free slot.
     db.prepare("UPDATE columns SET wip_limit = 3 WHERE id = 'c-todo'").run();
@@ -271,7 +270,6 @@ describe("TaskService WIP + positions", () => {
   });
 
   it("a reorder between two existing neighbors emits no activity", () => {
-    const db = tmpDb();
     seedWip(db);
     // c-todo: t1 (a0), t3 (a1), t4 (a2). Reorder t1 between t3 and t4.
     db.prepare("INSERT INTO tasks (id, project_id, column_id, swimlane_id, title, position, created_at) VALUES ('t4','p1','c-todo','s1','T4','a2','2026-01-01 10:00:00')").run();
@@ -301,7 +299,6 @@ describe("TaskService required fields", () => {
   });
 
   it("create rejects an empty or whitespace-only description (TipTap-aware)", () => {
-    const db = tmpDb();
     seedRequired(db);
     const svc = makeService(db);
     Effect.runSync(
@@ -324,7 +321,6 @@ describe("TaskService required fields", () => {
   });
 
   it("move validates required fields against the target column", () => {
-    const db = tmpDb();
     seedRequired(db);
     const svc = makeService(db);
     Effect.runSync(
@@ -344,7 +340,6 @@ describe("TaskService required fields", () => {
   });
 
   it("update rejects clearing a required description", () => {
-    const db = tmpDb();
     seedRequired(db);
     const svc = makeService(db);
     Effect.runSync(
@@ -364,7 +359,6 @@ describe("TaskService required fields", () => {
 
 describe("TaskService swimlane + deadline", () => {
   it("create without swimlaneId lands in the project's backlog lane", () => {
-    const db = tmpDb();
     seedDeadline(db);
     const svc = makeService(db);
     Effect.runSync(
@@ -376,7 +370,6 @@ describe("TaskService swimlane + deadline", () => {
   });
 
   it("create rejects a due date later than the lane's deadline", () => {
-    const db = tmpDb();
     seedDeadline(db);
     const svc = makeService(db);
     Effect.runSync(
@@ -395,7 +388,6 @@ describe("TaskService swimlane + deadline", () => {
   });
 
   it("update rejects a due date later than the lane's deadline", () => {
-    const db = tmpDb();
     seedDeadline(db);
     const svc = makeService(db);
     Effect.runSync(
@@ -415,7 +407,6 @@ describe("TaskService swimlane + deadline", () => {
   });
 
   it("move rejects when the task's due date exceeds the target lane's deadline; clearDueAt bypasses", () => {
-    const db = tmpDb();
     seedDeadline(db);
     const svc = makeService(db);
     Effect.runSync(
@@ -435,7 +426,6 @@ describe("TaskService swimlane + deadline", () => {
   });
 
   it("a dueAt exactly equal to the lane's deadline is allowed on create, update, and move", () => {
-    const db = tmpDb();
     seedDeadline(db);
     const svc = makeService(db);
     Effect.runSync(
@@ -457,7 +447,6 @@ describe("TaskService swimlane + deadline", () => {
   });
 
   it("update with dueAt: null clears the deadline even when the lane has one", () => {
-    const db = tmpDb();
     seedDeadline(db);
     db.prepare("UPDATE tasks SET due_at = '2026-06-01' WHERE id = 't1'").run();
     const svc = makeService(db);
@@ -471,7 +460,6 @@ describe("TaskService swimlane + deadline", () => {
   });
 
   it("move into an archived lane is rejected", () => {
-    const db = tmpDb();
     seedDeadline(db);
     db.prepare("UPDATE swimlanes SET archived_at = '2026-03-01T00:00:00.000Z' WHERE id = 'm1'").run();
     const svc = makeService(db);
@@ -490,7 +478,6 @@ describe("TaskService swimlane + deadline", () => {
 
 describe("TaskService ticket keys", () => {
   it("assigns sequential per-project numbers with composed keys", () => {
-    const db = tmpDb();
     seed(db);
     const svc = makeService(db);
     Effect.runSync(
@@ -504,7 +491,6 @@ describe("TaskService ticket keys", () => {
   });
 
   it("numbers are per-project", () => {
-    const db = tmpDb();
     seed(db);
     const svc = makeService(db);
     Effect.runSync(

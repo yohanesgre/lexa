@@ -1,4 +1,4 @@
-import { describe, expect, it, afterEach } from "vitest";
+import { describe, expect, it, afterEach, beforeAll, beforeEach, afterAll } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -11,19 +11,36 @@ import { CommentRepo } from "./comment.repo";
 
 const MIGRATIONS = fileURLToPath(new URL("../../migrations", import.meta.url));
 
-let dirs: string[] = [];
-let dbs: Database[] = [];
+let dir: string;
+let db: Database;
 
-function tmpDb(): Database {
-  const dir = mkdtempSync(join(tmpdir(), "lexa-comment-repo-"));
-  dirs.push(dir);
+beforeAll(() => {
+  dir = mkdtempSync(join(tmpdir(), "lexa-comment-repo-"));
   const path = join(dir, "test.db");
   runMigrations(path, MIGRATIONS);
   const ctx = Effect.runSync(Effect.scoped(Layer.build(initSqlite(path))));
-  const db = Context.get(ctx, Sqlite);
-  dbs.push(db);
-  return db;
+  db = Context.get(ctx, Sqlite);
+});
+
+afterAll(() => {
+  try { db.close(); } catch {}
+  rmSync(dir, { recursive: true, force: true });
+});
+
+function cleanDb(db: Database) {
+  db.exec("PRAGMA foreign_keys = OFF");
+  const tables = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name != '_migrations' AND name NOT LIKE '%fts%'").all() as { name: string }[];
+  for (const { name } of tables) {
+    try { db.exec(`DELETE FROM "${name}"`); } catch {}
+  }
+  try { db.exec("DELETE FROM sqlite_sequence"); } catch {}
+  db.exec("PRAGMA foreign_keys = ON");
 }
+
+beforeEach(() => {
+  cleanDb(db);
+});
+
 
 function seed(db: Database) {
   db.prepare("INSERT INTO projects (id, name, slug) VALUES ('p1','P','p1')").run();
@@ -39,18 +56,8 @@ function makeRepo(db: Database) {
   return Context.get(ctx, CommentRepo);
 }
 
-afterEach(() => {
-  for (const db of dbs) {
-    try { db.close(); } catch {}
-  }
-  dbs = [];
-  for (const d of dirs) rmSync(d, { recursive: true, force: true });
-  dirs = [];
-});
-
 describe("CommentRepo", () => {
   it("inserts, finds, updates, soft-deletes, and lists with keyset", () => {
-    const db = tmpDb();
     seed(db);
     const repo = makeRepo(db);
     Effect.runSync(
@@ -71,7 +78,6 @@ describe("CommentRepo", () => {
   });
 
   it("insert with nonexistent task_id fails with tagged ConstraintViolation (not a defect)", () => {
-    const db = tmpDb();
     seed(db);
     const repo = makeRepo(db);
     const result = Effect.runSync(Effect.either(
@@ -82,7 +88,6 @@ describe("CommentRepo", () => {
   });
 
   it("updateBody on missing id fails with RowNotFound", () => {
-    const db = tmpDb();
     seed(db);
     const repo = makeRepo(db);
     const result = Effect.runSync(Effect.either(
@@ -93,7 +98,6 @@ describe("CommentRepo", () => {
   });
 
   it("softDelete on missing id fails with RowNotFound", () => {
-    const db = tmpDb();
     seed(db);
     const repo = makeRepo(db);
     const result = Effect.runSync(Effect.either(repo.softDelete(999)));
@@ -102,7 +106,6 @@ describe("CommentRepo", () => {
   });
 
   it("updateBody on an already-deleted comment fails with RowNotFound", () => {
-    const db = tmpDb();
     seed(db);
     const repo = makeRepo(db);
     Effect.runSync(
@@ -117,7 +120,6 @@ describe("CommentRepo", () => {
   });
 
   it("softDelete on an already-deleted comment fails with RowNotFound", () => {
-    const db = tmpDb();
     seed(db);
     const repo = makeRepo(db);
     Effect.runSync(

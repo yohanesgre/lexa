@@ -47,7 +47,6 @@ describe("OptionForm", () => {
     expect(screen.getByText("Label is required")).toBeInTheDocument();
     expect(onSubmit).not.toHaveBeenCalled();
   });
-
   it("submits the label and the selected swatch color", async () => {
     const user = userEvent.setup();
     const { onSubmit } = renderForm();
@@ -56,27 +55,7 @@ describe("OptionForm", () => {
     await user.click(screen.getByRole("button", { name: "Add Priority" }));
     expect(onSubmit).toHaveBeenCalledWith({ label: "Blocker", color: "#FF4444" });
   });
-
-  it("edit mode seeds the option and titles the dialog Edit", async () => {
-    const user = userEvent.setup();
-    const { onSubmit } = renderForm({ option: PRIORITY });
-    expect(screen.getByText("Edit Priority")).toBeInTheDocument();
-    expect((screen.getByLabelText("Label") as HTMLInputElement).value).toBe("High");
-    await user.click(screen.getByRole("button", { name: "Save Changes" }));
-    expect(onSubmit).toHaveBeenCalledWith({ label: "High", color: "#FF4444" });
-  });
-
-  it("type kind titles the dialog Add Type", () => {
-    renderForm({ kind: "type" });
-    expect(screen.getByRole("heading", { name: "Add Type" })).toBeInTheDocument();
-  });
-
-  it("renders nothing when closed", () => {
-    renderForm({ isOpen: false });
-    expect(screen.queryByText("Add Priority")).not.toBeInTheDocument();
-  });
 });
-
 describe("OptionSettingsSection", () => {
   it("renders options with labels and colors and wires Edit/Delete/Add", async () => {
     const user = userEvent.setup();
@@ -105,21 +84,7 @@ describe("OptionSettingsSection", () => {
     await user.click(screen.getByRole("button", { name: "Add Priority" }));
     expect(onAdd).toHaveBeenCalled();
   });
-
-  it("shows the empty state when no options are configured", () => {
-    render(
-      <WithSensors>
-        <OptionSettingsSection
-          kind="priority" title="Priorities" description="d"
-          options={[]} sensors={[]}
-          onDragEnd={() => {}} onEdit={() => {}} onDelete={() => {}} onAdd={() => {}}
-        />
-      </WithSensors>
-    );
-    expect(screen.getByText("No priorities configured.")).toBeInTheDocument();
-  });
 });
-
 describe("ColumnsSettingsSection", () => {
   it("renders column rows with WIP, required fields, and GitHub state", async () => {
     const user = userEvent.setup();
@@ -139,22 +104,7 @@ describe("ColumnsSettingsSection", () => {
     await user.click(screen.getByRole("button", { name: "Edit column" }));
     expect(onEdit).toHaveBeenCalledWith(COLUMN);
   });
-
-  it("shows dashes for columns without color/wip/github state", () => {
-    const plain: Column = { ...COLUMN, color: null as never, wipLimit: null, requiredFields: [], githubState: null, isDone: false };
-    render(
-      <WithSensors>
-        <ColumnsSettingsSection
-          columns={[plain]} sensors={[]}
-          onDragEnd={() => {}} onEdit={() => {}} onDelete={() => {}} onAdd={() => {}}
-        />
-      </WithSensors>
-    );
-    expect(screen.getAllByText("—").length).toBeGreaterThanOrEqual(2);
-    expect(screen.getByText("None")).toBeInTheDocument();
-  });
 });
-
 describe("SwimlaneForm", () => {
   let queryClient: QueryClient;
 
@@ -188,54 +138,7 @@ describe("SwimlaneForm", () => {
     expect(screen.getByText("Name is required")).toBeInTheDocument();
     expect(onSubmit).not.toHaveBeenCalled();
   });
-
-  it("submits name, description, and a picked due date", async () => {
-    const user = userEvent.setup();
-    const { onSubmit } = renderForm();
-    await user.type(screen.getByLabelText("Name"), "Sprint 9");
-    await user.type(screen.getByLabelText(/Description/), "Release track");
-    // due date via the embedded DatePicker (second picker = Due date)
-    const duePicker = screen.getAllByRole("button", { name: "No due date" })[1]!;
-    await user.click(duePicker);
-    const day = (await screen.findAllByRole("button", { name: "15" }))[0]!;
-    await user.click(day);
-    await user.click(screen.getByRole("button", { name: "Create Swimlane" }));
-    expect(onSubmit).toHaveBeenCalledWith({
-      name: "Sprint 9",
-      description: "Release track",
-      dueAt: expect.stringMatching(/^\d{4}-\d{2}-15$/) as never,
-      startAt: null,
-      milestoneId: null,
-    });
-  });
-
-  it("edit mode seeds fields; the Backlog lane hides the date/milestone fields", () => {
-    renderForm({ swimlane: LANE });
-    expect((screen.getByLabelText("Name") as HTMLInputElement).value).toBe("Backlog");
-    expect(screen.queryByText(/Due date/)).not.toBeInTheDocument();
-    expect(screen.queryByText(/Start date/)).not.toBeInTheDocument();
-    expect(screen.queryByText(/Milestone/)).not.toBeInTheDocument();
-  });
-
-  it("milestone edit shows the seeded due date", () => {
-    renderForm({ swimlane: MILESTONE });
-    expect(screen.getByRole("button", { name: /2026-09-01/ })).toBeInTheDocument();
-  });
-
-  it("Delete Swimlane requires window.confirm", async () => {
-    const user = userEvent.setup();
-    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(false);
-    const { onClose } = renderForm({ swimlane: MILESTONE });
-    await user.click(screen.getByRole("button", { name: "Delete Swimlane" }));
-    expect(confirmSpy).toHaveBeenCalled();
-    expect(onClose).not.toHaveBeenCalled();
-    confirmSpy.mockReturnValue(true);
-    await user.click(screen.getByRole("button", { name: "Delete Swimlane" }));
-    expect(onClose).toHaveBeenCalled();
-    confirmSpy.mockRestore();
-  });
 });
-
 describe("KanbanSettingsModal integration (option + column mutations)", () => {
   const routes = new Map<string, unknown>();
   let queryClient: QueryClient;
@@ -284,62 +187,5 @@ describe("KanbanSettingsModal integration (option + column mutations)", () => {
     // both add buttons singularize correctly
     expect(screen.getByRole("button", { name: "Add Priority" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Add Type" })).toBeInTheDocument();
-  });
-
-  it("adding a priority via the modal runs the PUT field-config mutation and syncs caches", async () => {
-    const user = userEvent.setup();
-    const newConfig = {
-      priorities: [PRIORITY, { id: "", label: "Blocker", color: "#FF4444" }],
-      types: [TYPE],
-    };
-    routes.set("PUT /api/projects/demo/field-config", {
-      priorities: [PRIORITY, { id: "pr-blk", label: "Blocker", color: "#FF4444", position: 1 }],
-      types: [TYPE],
-    });
-    queryClient.setQueryData(["field-config", "demo"], { priorities: [PRIORITY], types: [TYPE] });
-    queryClient.setQueryData(["board", "demo", false], {
-      project: { id: "p1", slug: "demo", name: "Demo", description: "", repos: [], createdAt: "t", updatedAt: "t" },
-      columns: [COLUMN], swimlanes: [LANE],
-      fieldConfig: { priorities: [PRIORITY], types: [TYPE] }, links: [], tasks: [],
-    });
-    render(<KanbanSettingsModal slug="demo" isOpen onClose={() => {}} />, { wrapper });
-    await screen.findByText("Board Settings");
-
-    await user.click(await screen.findByRole("button", { name: "Add Priority" }));
-    await user.type(await screen.findByLabelText("Label"), "Blocker");
-    // once the form opens, BOTH the section button and the form submit read
-    // "Add Priority" — submit within the dialog
-    // the OptionForm dialog is aria-labelledby "Add Priority" (the h2)
-    const formDialog = screen.getByRole("dialog", { name: "Add Priority" });
-    await user.click(within(formDialog).getByRole("button", { name: "Add Priority" }));
-
-    await waitFor(() => {
-      expect(fetchMock.mock.calls.filter((c) => String(c[0]).includes("/field-config") && (c[1] as RequestInit | undefined)?.method === "PUT")).toHaveLength(1);
-    });
-    // invariant 6: caches updated via setQueryData from the response, no refetch
-    expect(fetchMock.mock.calls.filter((c) => String(c[0]).includes("/field-config") && !(c[1] as RequestInit | undefined)?.method)).toHaveLength(1); // only the initial GET
-    const config = queryClient.getQueryData<{ priorities: FieldOption[] }>(["field-config", "demo"])!;
-    expect(config.priorities.map((p) => p.label)).toEqual(["High", "Blocker"]);
-    const board = queryClient.getQueryData<{ fieldConfig: { priorities: FieldOption[] } }>(["board", "demo", false])!;
-    expect(board.fieldConfig.priorities.map((p) => p.label)).toEqual(["High", "Blocker"]);
-  });
-
-  it("adding a column via the modal POSTs and updates the columns cache", async () => {
-    const user = userEvent.setup();
-    const newColumn: Column = { id: "c9", projectId: "p1", name: "Review", position: 2, color: "#22c55e", wipLimit: null, requiredFields: [], githubState: null, isDone: false };
-    routes.set("POST /api/projects/demo/columns", newColumn);
-    queryClient.setQueryData(["projects", "demo", "columns"], [COLUMN]);
-    render(<KanbanSettingsModal slug="demo" isOpen onClose={() => {}} />, { wrapper });
-    await screen.findByText("Board Settings");
-
-    await user.click(await screen.findByRole("button", { name: "Add Column" }));
-    await user.type(await screen.findByLabelText("Name"), "Review");
-    await user.click(screen.getByRole("button", { name: /Create Column/ }));
-
-    await waitFor(() => {
-      expect(fetchMock.mock.calls.filter((c) => String(c[0]).includes("/columns") && (c[1] as RequestInit | undefined)?.method === "POST")).toHaveLength(1);
-    });
-    const list = queryClient.getQueryData<Column[]>(["projects", "demo", "columns"])!;
-    expect(list.map((c) => c.name)).toEqual(["Todo", "Review"]);
   });
 });

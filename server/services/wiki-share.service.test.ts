@@ -1,4 +1,4 @@
-import { describe, expect, it, afterEach } from "vitest";
+import { describe, expect, it, afterEach, beforeAll, beforeEach, afterAll } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -12,24 +12,41 @@ import { ShareLinkNotFound, WikiPageNotFound } from "../api/errors";
 
 const MIGRATIONS = fileURLToPath(new URL("../../migrations", import.meta.url));
 
-let dirs: string[] = [];
-let dbs: Database[] = [];
+let dir: string;
+let db: Database;
+
+beforeAll(() => {
+  dir = mkdtempSync(join(tmpdir(), "lexa-wiki-share-svc-"));
+  const path = join(dir, "test.db");
+  runMigrations(path, MIGRATIONS);
+  const ctx = Effect.runSync(Effect.scoped(Layer.build(initSqlite(path))));
+  db = Context.get(ctx, Sqlite);
+});
+
+afterAll(() => {
+  try { db.close(); } catch {}
+  rmSync(dir, { recursive: true, force: true });
+});
+
+function cleanDb(db: Database) {
+  db.exec("PRAGMA foreign_keys = OFF");
+  const tables = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name != '_migrations' AND name NOT LIKE '%fts%'").all() as { name: string }[];
+  for (const { name } of tables) {
+    try { db.exec(`DELETE FROM "${name}"`); } catch {}
+  }
+  try { db.exec("DELETE FROM sqlite_sequence"); } catch {}
+  db.exec("PRAGMA foreign_keys = ON");
+}
+
+beforeEach(() => {
+  cleanDb(db);
+});
+
 
 const ROOT_DOC = {
   type: "doc",
   content: [{ type: "paragraph", content: [{ type: "text", text: "root text" }] }],
 };
-
-function tmpDb(): Database {
-  const dir = mkdtempSync(join(tmpdir(), "lexa-wiki-share-svc-"));
-  dirs.push(dir);
-  const path = join(dir, "test.db");
-  runMigrations(path, MIGRATIONS);
-  const ctx = Effect.runSync(Effect.scoped(Layer.build(initSqlite(path))));
-  const db = Context.get(ctx, Sqlite);
-  dbs.push(db);
-  return db;
-}
 
 function seed(db: Database) {
   db.prepare("INSERT INTO users (id, email, name) VALUES ('u1', 'u1@test.dev', 'User One')").run();
@@ -66,18 +83,8 @@ function createLink(
   );
 }
 
-afterEach(() => {
-  for (const db of dbs) {
-    try { db.close(); } catch {}
-  }
-  dbs = [];
-  for (const d of dirs) rmSync(d, { recursive: true, force: true });
-  dirs = [];
-});
-
 describe("WikiShareService.create", () => {
   it("creates a link with a base64url token, uuid id, and NULL expiry preserved", () => {
-    const db = tmpDb();
     seed(db);
     const svc = makeService(db);
     const res = createLink(svc);
@@ -92,7 +99,6 @@ describe("WikiShareService.create", () => {
   });
 
   it("normalizes expiresAt to UTC ISO-8601", () => {
-    const db = tmpDb();
     seed(db);
     const svc = makeService(db);
     const res = createLink(svc, { expiresAt: "2026-09-01T15:00:00+03:00" });
@@ -101,7 +107,6 @@ describe("WikiShareService.create", () => {
   });
 
   it("page of another project → WikiPageNotFound", () => {
-    const db = tmpDb();
     seed(db);
     const svc = makeService(db);
     const res = createLink(svc, { projectId: "p1", pageId: "w-other" });
@@ -110,7 +115,6 @@ describe("WikiShareService.create", () => {
   });
 
   it("unknown page → WikiPageNotFound", () => {
-    const db = tmpDb();
     seed(db);
     const svc = makeService(db);
     const res = createLink(svc, { pageId: "nope" });
@@ -121,7 +125,6 @@ describe("WikiShareService.create", () => {
 
 describe("WikiShareService.list", () => {
   it("lists links for a page, oldest first; other pages unaffected", () => {
-    const db = tmpDb();
     seed(db);
     const svc = makeService(db);
     const a = createLink(svc);
@@ -141,7 +144,6 @@ describe("WikiShareService.list", () => {
 
 describe("WikiShareService.revoke", () => {
   it("deletes the link; resolving it afterwards fails ShareLinkNotFound", () => {
-    const db = tmpDb();
     seed(db);
     const svc = makeService(db);
     const created = createLink(svc);
@@ -156,7 +158,6 @@ describe("WikiShareService.revoke", () => {
   });
 
   it("missing id → ShareLinkNotFound", () => {
-    const db = tmpDb();
     seed(db);
     const svc = makeService(db);
     const res = Effect.runSync(Effect.either(svc.revoke("nope", "p1")));
@@ -167,7 +168,6 @@ describe("WikiShareService.revoke", () => {
 
 describe("WikiShareService.resolvePublic", () => {
   it("valid token returns root + descendants with parsed JSON content", () => {
-    const db = tmpDb();
     seed(db);
     const svc = makeService(db);
     const created = createLink(svc);
@@ -189,7 +189,6 @@ describe("WikiShareService.resolvePublic", () => {
   });
 
   it("expired link → ShareLinkNotFound", () => {
-    const db = tmpDb();
     seed(db);
     const svc = makeService(db);
     const created = createLink(svc, { expiresAt: new Date(Date.now() - 60_000).toISOString() });
@@ -200,7 +199,6 @@ describe("WikiShareService.resolvePublic", () => {
   });
 
   it("future expiry still resolves", () => {
-    const db = tmpDb();
     seed(db);
     const svc = makeService(db);
     const created = createLink(svc, { expiresAt: new Date(Date.now() + 3_600_000).toISOString() });
@@ -210,7 +208,6 @@ describe("WikiShareService.resolvePublic", () => {
   });
 
   it("NULL expiry never expires", () => {
-    const db = tmpDb();
     seed(db);
     const svc = makeService(db);
     const created = createLink(svc);
@@ -220,7 +217,6 @@ describe("WikiShareService.resolvePublic", () => {
   });
 
   it("unknown token → ShareLinkNotFound (same failure path)", () => {
-    const db = tmpDb();
     seed(db);
     const svc = makeService(db);
     const res = Effect.runSync(Effect.either(svc.resolvePublic("nope")));
