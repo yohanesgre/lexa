@@ -1,7 +1,7 @@
 # Builder: full install (dev deps incl. vite/tailwind) + frontend build.
 # Build tools (python3/make/g++) are needed only here: bun compiles
 # better-sqlite3 (test-only devDep) via node-gyp during install.
-FROM oven/bun:1.3.14-slim AS builder
+FROM oven/bun:1.4.0-slim AS builder
 WORKDIR /app
 
 RUN apt-get update && apt-get install -y --no-install-recommends python3 make g++ \
@@ -24,7 +24,7 @@ ENV VITE_LXK_API_KEY=$VITE_LXK_API_KEY
 RUN bunx vite build
 
 # Runtime: production deps only, no build tools, no dev deps.
-FROM oven/bun:1.3.14-slim AS runtime
+FROM oven/bun:1.4.0-slim AS runtime
 WORKDIR /app
 
 ENV LXK_SKIP_PREPARE=1
