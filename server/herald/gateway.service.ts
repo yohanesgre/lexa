@@ -385,7 +385,7 @@ export class HeraldGateway extends Effect.Service<HeraldGateway>()("Lexa/HeraldG
                 if (!isRetriable(err)) { /* push still honors single retry candidate */ } else { await sleepBackoff(err, 0, { projectId: input.projectId, model: cfg.model, providerId: cfg.providerId ?? null }); }
                 continue;
               }
-              if (!isRetriable(err) || i === attemptConfigs.length - 1) {
+              if (i === attemptConfigs.length - 1) {
                 if (attempts.length > 1 || attemptConfigs.length > 1) {
                   gatewayLog("FATAL", `herald stream all ${attemptConfigs.length} models failed (baseUrl)`, { projectId: input.projectId, total: attemptConfigs.length, lastError: (err as { message?: string }).message ?? String(err), attempts, errorTag: (err as { _tag?: string })._tag ?? null, status: diag.status, providerMessage: diag.providerMessage, retryAfter: diag.retryAfter });
                   const detail = attempts.map((a) => `${a.model}: ${a.providerMessage ?? a.raw.slice(0, 80)} (${a.status ?? "?"}/${a.errorTag ?? "?"})`).join("; ");
@@ -394,7 +394,7 @@ export class HeraldGateway extends Effect.Service<HeraldGateway>()("Lexa/HeraldG
                 }
                 throw err;
               }
-              await sleepBackoff(err, i, { projectId: input.projectId, model: cfg.model, providerId: cfg.providerId ?? null });
+              if (isRetriable(err)) await sleepBackoff(err, i, { projectId: input.projectId, model: cfg.model, providerId: cfg.providerId ?? null });
               gatewayLog("WARN", `herald stream retrying next model after baseUrl failure`, { projectId: input.projectId, attempt: i + 1, nextModel: attemptConfigs[i + 1]?.model ?? null, singleRetry: isSingleRetry && i === 0, status: diag.status, errorTag: (err as { _tag?: string })._tag ?? null, retryAfter: diag.retryAfter, backoffMs: backoffMsFor(err, i) });
               continue;
             }
@@ -521,7 +521,7 @@ export class HeraldGateway extends Effect.Service<HeraldGateway>()("Lexa/HeraldG
                 await sleepBackoff(err, 0, { projectId: input.projectId, model: cfg.model, providerId: cfg.providerId ?? null });
                 continue;
               }
-              if (!isRetriable(err) || i === attemptConfigs.length - 1) {
+              if (i === attemptConfigs.length - 1) {
                 if (attempts.length > 1 || attemptConfigs.length > 1) {
                   gatewayLog("FATAL", `herald stream all ${attemptConfigs.length} models failed`, { projectId: input.projectId, total: attemptConfigs.length, lastError: (err as { message?: string }).message ?? String(err), lastStack: diag.stack, attempts, singleRetry: isSingleRetry, errorTag: (err as { _tag?: string })._tag ?? null, status: diag.status, providerMessage: diag.providerMessage, retryAfter: diag.retryAfter });
                   const detail = attempts.map((a) => `${a.model}: ${a.providerMessage ?? a.raw.slice(0, 80)} (${a.status ?? "?"}/${a.errorTag ?? "?"})`).join("; ");
@@ -530,7 +530,7 @@ export class HeraldGateway extends Effect.Service<HeraldGateway>()("Lexa/HeraldG
                 }
                 throw err;
               }
-              await sleepBackoff(err, i, { projectId: input.projectId, model: cfg.model, providerId: cfg.providerId ?? null });
+              if (isRetriable(err)) await sleepBackoff(err, i, { projectId: input.projectId, model: cfg.model, providerId: cfg.providerId ?? null });
               gatewayLog("WARN", `herald stream retrying next model${isSingleRetry && i === 0 ? " (single-config retry same provider)" : ""}`, { projectId: input.projectId, attempt: i + 1, nextModel: attemptConfigs[i + 1]?.model ?? null, nextProviderId: attemptConfigs[i + 1]?.providerId ?? null, singleRetry: isSingleRetry && i === 0, status: diag.status, errorTag: (err as { _tag?: string })._tag ?? null, retryAfter: diag.retryAfter, backoffMs: backoffMsFor(err, i) });
             }
           }
@@ -726,8 +726,7 @@ export class HeraldGateway extends Effect.Service<HeraldGateway>()("Lexa/HeraldG
               yield* Effect.promise(() => sleepBackoff(err, 0, { projectId, model: cfg.model, providerId: cfg.providerId ?? null }));
               continue;
             }
-            const retriable = isRetriable(err);
-            if (!retriable || i === attemptConfigs.length - 1) {
+            if (i === attemptConfigs.length - 1) {
               if (attempts.length > 1 || attemptConfigs.length > 1) {
                 const detail = attempts.map((a) => `${a.model}: ${a.error} (${a.status ?? "?"}/${a.errorTag ?? "?"})`).join("; ");
                 const combined = `all models failed — ${detail}`.slice(0, 500);
@@ -736,7 +735,7 @@ export class HeraldGateway extends Effect.Service<HeraldGateway>()("Lexa/HeraldG
               }
               throw err as never;
             }
-            yield* Effect.promise(() => sleepBackoff(err, i, { projectId, model: cfg.model, providerId: cfg.providerId ?? null }));
+            if (isRetriable(err)) yield* Effect.promise(() => sleepBackoff(err, i, { projectId, model: cfg.model, providerId: cfg.providerId ?? null }));
             yield* Effect.sync(() => gatewayLog("WARN", `herald test retrying next model${isSingleRetry && i === 0 ? " (single-config retry same provider)" : ""}`, { projectId, attempt: i + 1, nextModel: attemptConfigs[i + 1]?.model ?? null, nextProviderId: attemptConfigs[i + 1]?.providerId ?? null, failuresSoFar: attempts.length, singleRetry: isSingleRetry && i === 0, status: diag.status, errorTag: tag ?? null, retryAfter: diag.retryAfter, backoffMs: backoffMsFor(err, i) }));
           }
         }
