@@ -4,6 +4,8 @@
   "description": "Self-hosted project management — Kanban with swimlanes/WIP limits, nested wiki, Hearth AI writing assistant.",
   "scripts": {
     "test": "vitest run",
+    "test:critical": "vitest run shared server/services server/db server/repos",
+    "test:full": "vitest run",
     "prepare": "./scripts/prepare-effect.sh",
     "dev": "vite dev",
     "dev:server": "bun --env-file=.env run server/entry.ts",

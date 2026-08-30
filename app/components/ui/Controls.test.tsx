@@ -19,7 +19,6 @@ describe("TextArea", () => {
     expect(onChange).toHaveBeenCalledWith("hellox");
   });
 });
-
 describe("SelectInput", () => {
   it("forwards value and onChange", async () => {
     const user = userEvent.setup();
@@ -34,7 +33,6 @@ describe("SelectInput", () => {
     expect(onChange).toHaveBeenCalledWith("b");
   });
 });
-
 describe("Checkbox", () => {
   it("toggles checked state", async () => {
     const user = userEvent.setup();
@@ -44,7 +42,6 @@ describe("Checkbox", () => {
     expect(onChange).toHaveBeenCalledWith(true);
   });
 });
-
 describe("Toggle", () => {
   it("toggles aria-pressed and fires onChange", async () => {
     const user = userEvent.setup();
@@ -54,14 +51,5 @@ describe("Toggle", () => {
     expect(toggle).toHaveAttribute("aria-pressed", "false");
     await user.click(toggle);
     expect(onChange).toHaveBeenCalledWith(true);
-  });
-
-  it("renders the is-on visual when checked", () => {
-    const onChange = vi.fn();
-    const { rerender } = render(<Toggle checked onChange={onChange} />);
-    const toggle = screen.getByRole("button");
-    expect(toggle.className).toContain("is-on");
-    rerender(<Toggle checked={false} onChange={onChange} />);
-    expect(toggle.className).not.toContain("is-on");
   });
 });

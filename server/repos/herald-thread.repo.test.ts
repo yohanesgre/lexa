@@ -1,4 +1,4 @@
-import { describe, expect, it, afterEach } from "vitest";
+import { describe, expect, it, afterEach, beforeAll, beforeEach, afterAll } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -11,19 +11,36 @@ import { HeraldThreadRepo } from "./herald-thread.repo";
 
 const MIGRATIONS = fileURLToPath(new URL("../../migrations", import.meta.url));
 
-let dirs: string[] = [];
-let dbs: Database[] = [];
+let dir: string;
+let db: Database;
 
-function tmpDb(): Database {
-  const dir = mkdtempSync(join(tmpdir(), "lexa-herald-thread-repo-"));
-  dirs.push(dir);
+beforeAll(() => {
+  dir = mkdtempSync(join(tmpdir(), "lexa-herald-thread-repo-"));
   const path = join(dir, "test.db");
   runMigrations(path, MIGRATIONS);
   const ctx = Effect.runSync(Effect.scoped(Layer.build(initSqlite(path))));
-  const db = Context.get(ctx, Sqlite);
-  dbs.push(db);
-  return db;
+  db = Context.get(ctx, Sqlite);
+});
+
+afterAll(() => {
+  try { db.close(); } catch {}
+  rmSync(dir, { recursive: true, force: true });
+});
+
+function cleanDb(db: Database) {
+  db.exec("PRAGMA foreign_keys = OFF");
+  const tables = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name != '_migrations' AND name NOT LIKE '%fts%'").all() as { name: string }[];
+  for (const { name } of tables) {
+    try { db.exec(`DELETE FROM "${name}"`); } catch {}
+  }
+  try { db.exec("DELETE FROM sqlite_sequence"); } catch {}
+  db.exec("PRAGMA foreign_keys = ON");
 }
+
+beforeEach(() => {
+  cleanDb(db);
+});
+
 
 function seed(db: Database) {
   db.exec(`
@@ -38,18 +55,8 @@ function makeRepo(db: Database) {
   return Context.get(ctx, HeraldThreadRepo);
 }
 
-afterEach(() => {
-  for (const db of dbs) {
-    try { db.close(); } catch {}
-  }
-  dbs = [];
-  for (const d of dirs) rmSync(d, { recursive: true, force: true });
-  dirs = [];
-});
-
 describe("HeraldThreadRepo save/load", () => {
   it("upsert + load round-trips messages and metadata", () => {
-    const db = tmpDb();
     seed(db);
     const repo = makeRepo(db);
     Effect.runSync(
@@ -69,7 +76,6 @@ describe("HeraldThreadRepo save/load", () => {
   });
 
   it("second save overwrites in place (single row) and bumps updated_at", () => {
-    const db = tmpDb();
     seed(db);
     const repo = makeRepo(db);
     Effect.runSync(
@@ -88,7 +94,6 @@ describe("HeraldThreadRepo save/load", () => {
   });
 
   it("summary + summarized_count update via saveThread", () => {
-    const db = tmpDb();
     seed(db);
     const repo = makeRepo(db);
     Effect.runSync(
@@ -110,7 +115,6 @@ describe("HeraldThreadRepo save/load", () => {
   });
 
   it("loadThread fails RowNotFound when absent", () => {
-    const db = tmpDb();
     seed(db);
     const repo = makeRepo(db);
     Effect.runSync(
@@ -122,7 +126,6 @@ describe("HeraldThreadRepo save/load", () => {
   });
 
   it("resetThread deletes the row; second reset fails RowNotFound", () => {
-    const db = tmpDb();
     seed(db);
     const repo = makeRepo(db);
     Effect.runSync(
@@ -138,7 +141,6 @@ describe("HeraldThreadRepo save/load", () => {
 
 describe("HeraldThreadRepo chat ownership", () => {
   it("loadChat returns thread for owner", () => {
-    const db = tmpDb();
     seed(db);
     const repo = makeRepo(db);
     Effect.runSync(
@@ -152,7 +154,6 @@ describe("HeraldThreadRepo chat ownership", () => {
   });
 
   it("owner mismatch → RowNotFound (404-equivalent)", () => {
-    const db = tmpDb();
     seed(db);
     const repo = makeRepo(db);
     Effect.runSync(
@@ -165,7 +166,6 @@ describe("HeraldThreadRepo chat ownership", () => {
   });
 
   it("missing chat → RowNotFound", () => {
-    const db = tmpDb();
     seed(db);
     const repo = makeRepo(db);
     Effect.runSync(
@@ -177,7 +177,6 @@ describe("HeraldThreadRepo chat ownership", () => {
   });
 
   it("appendChatMessage preserves prior messages; append by non-owner fails RowNotFound", () => {
-    const db = tmpDb();
     seed(db);
     const repo = makeRepo(db);
     Effect.runSync(
@@ -200,7 +199,6 @@ describe("HeraldThreadRepo chat ownership", () => {
 
 describe("HeraldThreadRepo chat titles + history", () => {
   it("saveThread COALESCE: rename survives later saves; NULL title backfills exactly once", () => {
-    const db = tmpDb();
     seed(db);
     const repo = makeRepo(db);
     Effect.runSync(
@@ -233,7 +231,6 @@ describe("HeraldThreadRepo chat titles + history", () => {
   });
 
   it("listChats orders updated_at DESC and is owner+project scoped", () => {
-    const db = tmpDb();
     seed(db);
     db.exec(`INSERT INTO projects (id, name, slug) VALUES ('p2', 'Q', 'p2');`);
     const repo = makeRepo(db);
@@ -261,7 +258,6 @@ describe("HeraldThreadRepo chat titles + history", () => {
   });
 
   it("updateChatMeta updates title and pinned; non-owner or missing chat → RowNotFound", () => {
-    const db = tmpDb();
     seed(db);
     const repo = makeRepo(db);
     Effect.runSync(
@@ -287,7 +283,6 @@ describe("HeraldThreadRepo chat titles + history", () => {
   });
 
   it("truncateChatFrom keeps messages[0..fromIndex); non-owner → RowNotFound", () => {
-    const db = tmpDb();
     seed(db);
     const repo = makeRepo(db);
     Effect.runSync(
@@ -317,7 +312,6 @@ describe("HeraldThreadRepo chat titles + history", () => {
   });
 
   it("listChats orders pinned threads before recency; q prefilter matches title or transcript", () => {
-    const db = tmpDb();
     seed(db);
     const repo = makeRepo(db);
     Effect.runSync(

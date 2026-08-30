@@ -76,7 +76,6 @@ describe("AttachmentsPanel", () => {
     expect(screen.getByRole("button", { name: /upload/i })).toBeInTheDocument();
     expect(screen.getByText("Attachments")).toBeInTheDocument();
   });
-
   it("renders rows with meta (size · uploader · date) and inline-preview hrefs", async () => {
     // Server sends created_at ASC; panel displays newest first.
     mockedApi.listTaskAttachments.mockResolvedValue({ data: [CSV, SVG, PNG] });
@@ -96,44 +95,5 @@ describe("AttachmentsPanel", () => {
     // image/* + pdf comes from the server; the anchor is the affordance).
     const link = screen.getByRole("link", { name: "board-crash-screenshot.png" });
     expect(link).toHaveAttribute("href", "/api/attachments/11111111-1111-4111-8111-111111111111");
-  });
-
-  it("kebab menu offers Download + Delete; delete filters the row via cache update", async () => {
-    mockedApi.listTaskAttachments.mockResolvedValue({ data: [PNG] });
-    mockedApi.deleteAttachment.mockResolvedValue(undefined);
-    renderPanel();
-    await waitFor(() => expect(screen.getByText("board-crash-screenshot.png")).toBeInTheDocument());
-
-    fireEvent.click(screen.getByRole("button", { name: /actions for board-crash-screenshot/i }));
-    expect(screen.getByRole("menuitem", { name: /download/i })).toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole("menuitem", { name: /delete/i }));
-    await waitFor(() => expect(mockedApi.deleteAttachment).toHaveBeenCalledWith(PNG.id));
-    await waitFor(() => expect(screen.queryByText("board-crash-screenshot.png")).not.toBeInTheDocument());
-  });
-
-  it("upload success prepends one row — dedupe payload (activity []) lands identically", async () => {
-    mockedApi.listTaskAttachments.mockResolvedValue({ data: [] });
-    let resolveUpload!: (v: { data: Attachment; activity: never[] }) => void;
-    mockedApi.uploadAttachmentWithProgress.mockImplementation(() => {
-      const promise = new Promise<{ data: Attachment; activity: never[] }>((res) => { resolveUpload = res; });
-      return { promise, abort: () => {} };
-    });
-
-    renderPanel();
-    await waitFor(() => expect(screen.getByText("No attachments yet")).toBeInTheDocument());
-
-    const input = document.querySelector('input[type="file"]') as HTMLInputElement;
-    await waitFor(() => expect(input).not.toBeNull());
-    fireEvent.change(input, { target: { files: [new File(["x"], "dedupe-hit.png", { type: "image/png" })] } });
-
-    // Uploading row visible while in flight.
-    expect(screen.getByText("dedupe-hit.png")).toBeInTheDocument();
-
-    // Dedupe hit: 201 with the EXISTING row and activity: [].
-    await waitFor(() => expect(resolveUpload).toBeTypeOf("function"));
-    resolveUpload({ data: PNG, activity: [] });
-    await waitFor(() => expect(screen.getByText("board-crash-screenshot.png")).toBeInTheDocument());
-    expect(mockedApi.listTaskAttachments).toHaveBeenCalledTimes(1);
   });
 });

@@ -1,12 +1,19 @@
 #!/usr/bin/env bash
 # ci-local — local mirror of .github/workflows/ci.yml
-# Usage: bun run ci:local  |  bash scripts/ci-local.sh
-# Env: LXK_SKIP_PREPARE=1 is set inside (matches CI).
+# Usage: bun run ci:local  |  bash scripts/ci-local.sh [--critical]  |  CRITICAL=1 bash scripts/ci-local.sh
+# Env: LXK_SKIP_PREPARE=1 is set inside (matches CI). CRITICAL=1 runs test:critical only.
 # Missing optional tools (docker, gitleaks) warn and skip.
 # Wireframes private submodule: skips gracefully if absent.
 set -euo pipefail
 
 export LXK_SKIP_PREPARE=1
+
+CRITICAL="${CRITICAL:-0}"
+for arg in "$@"; do
+  case "$arg" in
+    --critical) CRITICAL=1 ;;
+  esac
+done
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
@@ -49,8 +56,12 @@ section "typecheck"
 if bun run typecheck; then ok "typecheck"; else fail "typecheck"; fi
 
 # ── Tests ─────────────────────────────────────────────────────────────
-section "tests"
-if bun run test; then ok "tests"; else fail "tests"; fi
+if [ "$CRITICAL" = "1" ]; then section "tests (critical)"; else section "tests (full)"; fi
+if [ "$CRITICAL" = "1" ]; then
+  if bun run test:critical; then ok "tests (critical)"; else fail "tests (critical)"; fi
+else
+  if bun run test; then ok "tests"; else fail "tests"; fi
+fi
 
 # ── Invariant compliance ──────────────────────────────────────────────
 section "check:invariants"

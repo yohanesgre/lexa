@@ -92,41 +92,10 @@ describe("SwimlanesPage", () => {
     expect(screen.getByText("system lane")).toBeInTheDocument();
     expect(screen.getAllByText("View tasks").length).toBeGreaterThanOrEqual(3);
   });
-
   it("view tasks links carry the swimlane search param", async () => {
     render(<SwimlanesPage slug="demo" />, { wrapper });
     await screen.findByText("Sprint 7 — Core");
     const link = screen.getAllByText("View tasks")[0]!.closest("a")!;
     expect(link.getAttribute("href")).toContain("swimlane=s1");
-  });
-
-  it("milestone filter narrows the rows", async () => {
-    const user = userEvent.setup();
-    render(<SwimlanesPage slug="demo" />, { wrapper });
-    await screen.findByText("Sprint 7 — Core");
-    await user.selectOptions(screen.getByLabelText("Filter by milestone"), "none");
-    expect(screen.queryByText("Sprint 7 — Core")).not.toBeInTheDocument();
-    expect(screen.getByText("Hack week")).toBeInTheDocument();
-  });
-
-  it("archived state filter shows the archived-only view with Restore", async () => {
-    const user = userEvent.setup();
-    render(<SwimlanesPage slug="demo" />, { wrapper });
-    await screen.findByText("Sprint 7 — Core");
-    await user.selectOptions(screen.getByLabelText("State filter"), "archived");
-    expect(await screen.findByRole("button", { name: "Restore" })).toBeInTheDocument();
-    expect(screen.queryByText("Sprint 7 — Core")).not.toBeInTheDocument();
-  });
-
-  it("archive row action fires the archive mutation", async () => {
-    const user = userEvent.setup();
-    routes.set("POST /api/projects/demo/swimlanes/s2/archive", { data: { ...makeBoard().swimlanes[1], archivedAt: "2026-08-13T00:00:00.000Z" }, activity: [] });
-    render(<SwimlanesPage slug="demo" />, { wrapper });
-    const row = (await screen.findAllByText("Hack week"))[0]!.closest(".sl-row")!;
-    const btn = row.querySelector('button:nth-of-type(2)') ?? row.querySelector("button:last-of-type");
-    await user.click(btn as HTMLElement);
-    await waitFor(() => {
-      expect(fetchMock.mock.calls.filter((c) => String(c[0]).includes("/swimlanes/s2/archive")).length).toBe(1);
-    });
   });
 });

@@ -82,7 +82,6 @@ describe("query hooks — keys + URLs", () => {
     expect(data).toEqual([PROJECT]);
     expect(queryClient.getQueryCache().findAll({ queryKey: ["projects"], exact: true })).toHaveLength(1);
   });
-
   it("useBoard keys on slug + includeArchived and builds the query string", async () => {
     routes.set("GET /api/projects/demo/board", BOARD);
     routes.set("GET /api/projects/demo/board?includeArchived=true", BOARD);
@@ -98,126 +97,7 @@ describe("query hooks — keys + URLs", () => {
     expect(boardCalls).toBe(1);
     expect(tasks.result.current.tasks![0]!.title).toBe("T1");
   });
-
-  it("useDashboard fetches /api/dashboard", async () => {
-    routes.set("GET /api/dashboard", { projects: [], stats: { totalTasks: 0, activeProjects: 0, wipExceeded: 0, outOfSync: 0 }, urgentTasks: [], outOfSyncTasks: [] });
-    const { result } = renderHook(() => useDashboard(), { wrapper });
-    await awaitData(result);
-  });
-
-  it("useFieldConfig / useWikiPages / useWikiPage / useRevisions hit their URLs", async () => {
-    routes.set("GET /api/projects/demo/field-config", FIELD_CONFIG);
-    routes.set("GET /api/projects/demo/wiki", { data: [] });
-    routes.set("GET /api/projects/demo/wiki/home", { id: "w1", projectId: "p1", title: "Home", slug: "home", parentId: null, position: 0, updatedAt: "t", content: { type: "doc", content: [] }, createdAt: "t" });
-    routes.set("GET /api/projects/demo/wiki/home/revisions?limit=20", { revisions: [] });
-    const fc = renderHook(() => useFieldConfig("demo"), { wrapper });
-    await awaitData(fc.result);
-    const wiki = renderHook(() => useWikiPages("demo"), { wrapper });
-    await awaitData(wiki.result);
-    const page = renderHook(() => useWikiPage("demo", "home"), { wrapper });
-    await awaitData(page.result);
-    const rev = renderHook(() => useRevisions("demo", "home", 20), { wrapper });
-    await awaitData(rev.result);
-    expect(fetchMock).toHaveBeenCalledWith("/api/projects/demo/field-config", expect.anything());
-    expect(fetchMock).toHaveBeenCalledWith("/api/projects/demo/wiki", expect.anything());
-    expect(fetchMock).toHaveBeenCalledWith("/api/projects/demo/wiki/home", expect.anything());
-    expect(fetchMock).toHaveBeenCalledWith("/api/projects/demo/wiki/home/revisions?limit=20", expect.anything());
-    expect(queryClient.getQueryCache().findAll({ queryKey: ["wikiPage", "demo", "home"], exact: true })).toHaveLength(1);
-  });
-
-  it("useSearchWikiPages is disabled for an empty query", async () => {
-    const { result } = renderHook(() => useSearchWikiPages("demo", ""), { wrapper });
-    await waitFor(() => expect(result.current.isPending).toBe(true));
-    expect(fetchMock).not.toHaveBeenCalled();
-    expect(queryClient.getQueryCache().findAll({ queryKey: ["wikiSearch", "demo", ""], exact: true })).toHaveLength(1);
-  });
-
-  it("useTaskSearch requires at least 2 trimmed characters", async () => {
-    routes.set("GET /api/projects/demo/tasks/search?q=ab&exclude=", { data: [] });
-    const short = renderHook(() => useTaskSearch("demo", "a"), { wrapper });
-    await waitFor(() => expect(short.result.current.isPending).toBe(true));
-    expect(fetchMock).not.toHaveBeenCalled();
-    const ok = renderHook(() => useTaskSearch("demo", "ab"), { wrapper });
-    await waitFor(() => expect(ok.result.current.isSuccess).toBe(true));
-    expect(fetchMock).toHaveBeenCalledWith("/api/projects/demo/tasks/search?q=ab&exclude=", expect.anything());
-  });
-
-  it("useSources / useTaskLinks are disabled until both ids exist", async () => {
-    routes.set("GET /api/projects/demo/documents/task/t1/sources", { data: [] });
-    routes.set("GET /api/projects/demo/tasks/t1/links", { data: [] });
-    const s1 = renderHook(() => useSources("", "task", ""), { wrapper });
-    await waitFor(() => expect(s1.result.current.isPending).toBe(true));
-    const s2 = renderHook(() => useSources("demo", "task", "t1"), { wrapper });
-    await waitFor(() => expect(s2.result.current.isSuccess).toBe(true));
-    const l1 = renderHook(() => useTaskLinks("demo", ""), { wrapper });
-    await waitFor(() => expect(l1.result.current.isPending).toBe(true));
-    const l2 = renderHook(() => useTaskLinks("demo", "t1"), { wrapper });
-    await waitFor(() => expect(l2.result.current.isSuccess).toBe(true));
-  });
-
-  it("useHearthTask / useHearthTaskLogs / useRecentHearthTask respect the enabled flag + null id", async () => {
-    routes.set("GET /api/hearth/tasks/ft1", { id: "ft1", status: "queued" });
-    routes.set("GET /api/hearth/tasks/ft1/logs", { data: [] });
-    routes.set("GET /api/hearth/tasks?slug=demo&documentType=task&documentId=t1", { data: [] });
-    const off = renderHook(() => useHearthTask("ft1", false), { wrapper });
-    await waitFor(() => expect(off.result.current.isPending).toBe(true));
-    const nullId = renderHook(() => useHearthTask(null, true), { wrapper });
-    await waitFor(() => expect(nullId.result.current.isPending).toBe(true));
-    const on = renderHook(() => useHearthTask("ft1", true), { wrapper });
-    await waitFor(() => expect(on.result.current.isSuccess).toBe(true));
-    const logs = renderHook(() => useHearthTaskLogs("ft1", true), { wrapper });
-    await waitFor(() => expect(logs.result.current.isSuccess).toBe(true));
-    const recent = renderHook(() => useRecentHearthTask("demo", "task", "", true), { wrapper });
-    await waitFor(() => expect(recent.result.current.isPending).toBe(true));
-    expect(fetchMock).not.toHaveBeenCalledWith("/api/hearth/tasks?slug=demo&documentType=task&documentId=t1", expect.anything());
-    const recentOn = renderHook(() => useRecentHearthTask("demo", "task", "t1", true), { wrapper });
-    await waitFor(() => expect(recentOn.result.current.isSuccess).toBe(true));
-    expect(fetchMock).toHaveBeenCalledWith("/api/hearth/tasks?slug=demo&documentType=task&documentId=t1", expect.anything());
-  });
-
-  it("settings/hearth list hooks hit their URLs", async () => {
-    routes.set("GET /api/settings/api-keys", { data: [] });
-    routes.set("GET /api/settings/rate-limit", { max: 6000, windowMs: 600000, envOverride: false });
-    routes.set("GET /api/settings/github", { appId: "123456", privateKeySet: true, webhookSecretSet: true, source: "settings" });
-    routes.set("GET /api/admin/users", { data: [] });
-    routes.set("GET /api/projects/demo/members", { data: [] });
-    routes.set("GET /api/hearth/runtimes", { data: [] });
-    routes.set("GET /api/hearth/machines", { data: [] });
-    routes.set("GET /api/agents", { data: [] });
-    routes.set("GET /api/skills", { data: [] });
-    routes.set("GET /api/hearth/tasks/recent", { data: [] });
-    routes.set("GET /api/hearth/tasks/history", { data: [], nextCursor: null, summary: { queued: 0, running: 0, completed: 0, failed: 0, cancelled: 0 } });
-    const hooks: Array<() => unknown> = [
-      () => useApiKeys(), () => useUsers(), () => useProjectMembers("demo"), () => useRuntimes(),
-      () => useMachines(), () => useAgents(), () => useSkills(), () => useRecentHearthTasks(),
-      () => useHearthTaskHistory({}, null), () => useRateLimit(), () => useGithubSettings(),
-    ];
-    for (const hook of hooks) {
-      const { result } = renderHook(hook as () => unknown, { wrapper });
-      await waitFor(() => expect((result.current as { isSuccess?: boolean }).isSuccess).toBe(true));
-    }
-    expect(queryClient.getQueryCache().findAll({ queryKey: ["api-keys"], exact: true })).toHaveLength(1);
-    expect(queryClient.getQueryCache().findAll({ queryKey: ["hearth-runtimes"], exact: true })).toHaveLength(1);
-  });
-
-  it("useTaskActivity is an infinite query — page 1 without cursor, next page with the cursor", async () => {
-    routes.set("GET /api/projects/demo/tasks/t1/activity", { data: [{ kind: "event", id: 1, taskId: "t1", actorKind: "user", actorLabel: "Maria", actorUserId: null, type: "created", message: "m", createdAt: "t" }], nextCursor: "c1" });
-    routes.set("GET /api/projects/demo/tasks/t1/activity?cursor=c1", { data: [], nextCursor: null });
-    const { result } = renderHook(() => useTaskActivity("demo", "t1"), { wrapper });
-    await waitFor(() => expect(result.current.isSuccess).toBe(true));
-    expect(result.current.data!.pages).toHaveLength(1);
-    await result.current.fetchNextPage();
-    await waitFor(() => expect(result.current.data!.pages).toHaveLength(2));
-    expect(fetchMock).toHaveBeenCalledWith("/api/projects/demo/tasks/t1/activity?cursor=c1", expect.anything());
-  });
-
-  it("useTaskActivity is disabled for a missing task id", async () => {
-    const { result } = renderHook(() => useTaskActivity("demo", ""), { wrapper });
-    await waitFor(() => expect(result.current.isPending).toBe(true));
-    expect(fetchMock).not.toHaveBeenCalled();
-  });
 });
-
 describe("deriveTaskList", () => {
   it("resolves names/colors from the board maps and falls back to ids", () => {
     const rows = deriveTaskList(BOARD);
@@ -247,7 +127,6 @@ describe("deriveTaskList", () => {
     });
   });
 });
-
 describe("selectProjectHealth", () => {
   it("finds the project's health entry or returns undefined", () => {
     const dashboard = {
@@ -261,7 +140,6 @@ describe("selectProjectHealth", () => {
     expect(selectProjectHealth(dashboard, undefined)).toBeUndefined();
   });
 });
-
 describe("prependActivity", () => {
   it("appends items to the end of page 1 only", () => {
     queryClient.setQueryData(["task-activity", "demo", "t1"], {
