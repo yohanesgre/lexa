@@ -7,6 +7,7 @@ import { Effect, Layer, Context } from "effect";
 import { Database } from "bun:sqlite";
 import { runMigrations } from "../db/migrate";
 import { Sqlite, initSqlite } from "../db/database";
+import { DbBunLive } from "../db/db";
 import { ProjectMemoryRepo, MEMORY_SEARCH_K, MEMORY_CHAR_CAP } from "./project-memory.repo";
 
 const MIGRATIONS = fileURLToPath(new URL("../../migrations", import.meta.url));
@@ -49,16 +50,16 @@ function seed(db: Database) {
 }
 
 function makeRepo(db: Database) {
-  const layer = ProjectMemoryRepo.Default.pipe(Layer.provide(Layer.succeed(Sqlite, db)));
+  const layer = ProjectMemoryRepo.Default.pipe(Layer.provide(Layer.mergeAll(Layer.succeed(Sqlite, db), DbBunLive(db))));
   const ctx = Effect.runSync(Effect.scoped(Layer.build(layer)));
   return Context.get(ctx, ProjectMemoryRepo);
 }
 
 describe("ProjectMemoryRepo CRUD", () => {
-  it("create + get + list round-trips", () => {
+  it("create + get + list round-trips", async () => {
     seed(db);
     const repo = makeRepo(db);
-    Effect.runSync(
+    await Effect.runPromise(
       Effect.gen(function* () {
         yield* repo.create({ id: "m1", projectId: "p1", content: "Prefer bun over node" });
         yield* repo.create({ id: "m2", projectId: "p1", content: "API keys rotate quarterly", source: "herald" });
@@ -72,10 +73,10 @@ describe("ProjectMemoryRepo CRUD", () => {
     );
   });
 
-  it("list is project-scoped", () => {
+  it("list is project-scoped", async () => {
     seed(db);
     const repo = makeRepo(db);
-    Effect.runSync(
+    await Effect.runPromise(
       Effect.gen(function* () {
         yield* repo.create({ id: "m1", projectId: "p1", content: "one" });
         yield* repo.create({ id: "m2", projectId: "p2", content: "two" });
@@ -85,10 +86,10 @@ describe("ProjectMemoryRepo CRUD", () => {
     );
   });
 
-  it("remove deletes; second remove fails RowNotFound", () => {
+  it("remove deletes; second remove fails RowNotFound", async () => {
     seed(db);
     const repo = makeRepo(db);
-    Effect.runSync(
+    await Effect.runPromise(
       Effect.gen(function* () {
         yield* repo.create({ id: "m1", projectId: "p1", content: "bye soon" });
         yield* repo.remove("m1");
@@ -98,10 +99,10 @@ describe("ProjectMemoryRepo CRUD", () => {
     );
   });
 
-  it("get fails RowNotFound when absent", () => {
+  it("get fails RowNotFound when absent", async () => {
     seed(db);
     const repo = makeRepo(db);
-    Effect.runSync(
+    await Effect.runPromise(
       Effect.gen(function* () {
         const err = yield* repo.get("ghost").pipe(Effect.flip);
         expect(err._tag).toBe("RowNotFound");
@@ -111,10 +112,10 @@ describe("ProjectMemoryRepo CRUD", () => {
 });
 
 describe("ProjectMemoryRepo FTS searchByProject", () => {
-  it("matches terms and ranks better matches first", () => {
+  it("matches terms and ranks better matches first", async () => {
     seed(db);
     const repo = makeRepo(db);
-    Effect.runSync(
+    await Effect.runPromise(
       Effect.gen(function* () {
         yield* repo.create({ id: "m1", projectId: "p1", content: "deploy uses cloudflared tunnel" });
         yield* repo.create({ id: "m2", projectId: "p1", content: "database is sqlite with WAL mode" });
@@ -127,10 +128,10 @@ describe("ProjectMemoryRepo FTS searchByProject", () => {
     );
   });
 
-  it("scoped to project", () => {
+  it("scoped to project", async () => {
     seed(db);
     const repo = makeRepo(db);
-    Effect.runSync(
+    await Effect.runPromise(
       Effect.gen(function* () {
         yield* repo.create({ id: "m1", projectId: "p1", content: "kubernetes cluster notes" });
         yield* repo.create({ id: "m2", projectId: "p2", content: "kubernetes cluster secrets" });
@@ -140,10 +141,10 @@ describe("ProjectMemoryRepo FTS searchByProject", () => {
     );
   });
 
-  it("caps hits at k=5 default", () => {
+  it("caps hits at k=5 default", async () => {
     seed(db);
     const repo = makeRepo(db);
-    Effect.runSync(
+    await Effect.runPromise(
       Effect.gen(function* () {
         for (let i = 0; i < 8; i++) {
           yield* repo.create({ id: `m${i}`, projectId: "p1", content: `widget fact number ${i}` });
@@ -154,10 +155,10 @@ describe("ProjectMemoryRepo FTS searchByProject", () => {
     );
   });
 
-  it("enforces cumulative char cap by truncating the crossing hit", () => {
+  it("enforces cumulative char cap by truncating the crossing hit", async () => {
     seed(db);
     const repo = makeRepo(db);
-    Effect.runSync(
+    await Effect.runPromise(
       Effect.gen(function* () {
         yield* repo.create({ id: "big", projectId: "p1", content: "alpha ".repeat(500) }); // 3000 chars
         yield* repo.create({ id: "small", projectId: "p1", content: "beta detail" });
@@ -170,10 +171,10 @@ describe("ProjectMemoryRepo FTS searchByProject", () => {
     );
   });
 
-  it("empty terms → no hits, no query", () => {
+  it("empty terms → no hits, no query", async () => {
     seed(db);
     const repo = makeRepo(db);
-    Effect.runSync(
+    await Effect.runPromise(
       Effect.gen(function* () {
         yield* repo.create({ id: "m1", projectId: "p1", content: "anything" });
         expect(yield* repo.searchByProject("p1", [])).toEqual([]);
@@ -181,10 +182,10 @@ describe("ProjectMemoryRepo FTS searchByProject", () => {
     );
   });
 
-  it("FTS index stays in sync after delete", () => {
+  it("FTS index stays in sync after delete", async () => {
     seed(db);
     const repo = makeRepo(db);
-    Effect.runSync(
+    await Effect.runPromise(
       Effect.gen(function* () {
         yield* repo.create({ id: "m1", projectId: "p1", content: "ephemeral note about zig" });
         yield* repo.remove("m1");

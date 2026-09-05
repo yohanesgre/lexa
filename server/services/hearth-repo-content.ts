@@ -1,10 +1,10 @@
 import { Effect } from "effect";
-import { Sqlite } from "../db/database";
-import { getSetting } from "../db/settings";
+import { Db, queryFirst } from "../db/db";
 import { GitHubClient } from "../github/client";
 import { selectRepoFiles, REPO_CONTENT_DEFAULTS } from "../github/repo-content";
 import { ProjectReposRepo } from "../repos/project-repos.repo";
 import { TaskRepo } from "../repos/task.repo";
+import { currentEnv, repoCapFrom } from "../runtime-env";
 import type { HearthTask } from "../../shared/types";
 
 // At most N source repos per claim — app-level setting hearth_repo_cap
@@ -25,7 +25,7 @@ export interface RepoContentEntry {
 // each file truncated to maxBytesPerFile at write.
 export const loadTaskRepoContent = (
   task: HearthTask
-): Effect.Effect<RepoContentEntry[], never, GitHubClient | TaskRepo | ProjectReposRepo | Sqlite> =>
+): Effect.Effect<RepoContentEntry[], never, GitHubClient | TaskRepo | ProjectReposRepo | Db> =>
   Effect.gen(function* () {
     if (task.documentType !== "task") return [];
     const taskRepo = yield* TaskRepo;
@@ -39,10 +39,15 @@ export const loadTaskRepoContent = (
     const projectRepos = yield* reposRepo.listByProject(taskRow.projectId).pipe(
       Effect.catchAll(() => Effect.succeed([]))
     );
-    const db = yield* Sqlite;
-    const capRaw = getSetting(db, "hearth_repo_cap") || process.env.LXK_HEARTH_REPO_CAP || "";
-    const capParsed = Number.parseInt(capRaw, 10);
-    const cap = Number.isFinite(capParsed) && capParsed > 0 ? capParsed : DEFAULT_REPO_CONTENT_REPOS;
+    const db = yield* Db;
+    const env = yield* currentEnv;
+    const stored = yield* queryFirst<{ value: string }>(db, "SELECT value FROM settings WHERE key = ?", "hearth_repo_cap").pipe(
+      Effect.map((row) => row.value),
+      Effect.catchTag("RowNotFound", () => Effect.succeed("")),
+      Effect.catchAll(() => Effect.succeed(""))
+    );
+    const capRaw = stored || env.LXK_HEARTH_REPO_CAP || "";
+    const cap = repoCapFrom({ ...env, LXK_HEARTH_REPO_CAP: capRaw }, DEFAULT_REPO_CONTENT_REPOS);
     const repos: string[] = [];
     for (const r of projectRepos) {
       if (r.sourceRole) repos.push(r.repo);

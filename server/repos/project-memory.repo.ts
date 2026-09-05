@@ -1,5 +1,5 @@
 import { Effect } from "effect";
-import { Sqlite, queryFirst, queryAll, run, withTx, DbError, RowNotFound, ConstraintViolation } from "../db/database";
+import { Db, queryFirst, queryAll, run, withTx, DbError, RowNotFound, ConstraintViolation } from "../db/db";
 import type { ID, ISODate } from "../../shared/types";
 
 export interface ProjectMemoryEntry {
@@ -36,7 +36,7 @@ export const MEMORY_CHAR_CAP = 2000;
 
 export class ProjectMemoryRepo extends Effect.Service<ProjectMemoryRepo>()("Lexa/ProjectMemoryRepo", {
   effect: Effect.gen(function* () {
-    const db = yield* Sqlite;
+    const db = yield* Db;
 
     // FTS5 external-content table — the index is maintained here, in the same
     // transaction as the content write (no triggers).

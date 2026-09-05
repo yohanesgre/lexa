@@ -7,6 +7,7 @@ import { Effect, Layer, Context } from "effect";
 import { Database } from "bun:sqlite";
 import { runMigrations } from "../db/migrate";
 import { Sqlite, initSqlite } from "../db/database";
+import { DbBunLive } from "../db/db";
 import { HearthSessionRepo } from "./hearth-session.repo";
 
 const MIGRATIONS = fileURLToPath(new URL("../../migrations", import.meta.url));
@@ -56,7 +57,7 @@ function seed(db: Database) {
 }
 
 function makeRepo(db: Database) {
-  const layer = HearthSessionRepo.Default.pipe(Layer.provide(Layer.succeed(Sqlite, db)));
+  const layer = HearthSessionRepo.Default.pipe(Layer.provide(Layer.mergeAll(Layer.succeed(Sqlite, db), DbBunLive(db))));
   const ctx = Effect.runSync(Effect.scoped(Layer.build(layer)));
   return Context.get(ctx, HearthSessionRepo);
 }
@@ -69,10 +70,10 @@ function seedTask(db: Database, id: string, documentId: string, status: string, 
 }
 
 describe("HearthSessionRepo upsert/get", () => {
-  it("upsert then get round-trips all fields", () => {
+  it("upsert then get round-trips all fields", async () => {
     seed(db);
     const repo = makeRepo(db);
-    Effect.runSync(
+    await Effect.runPromise(
       Effect.gen(function* () {
         yield* repo.upsert({
           documentType: "task",
@@ -94,20 +95,20 @@ describe("HearthSessionRepo upsert/get", () => {
     );
   });
 
-  it("get returns null for a missing mapping", () => {
+  it("get returns null for a missing mapping", async () => {
     seed(db);
     const repo = makeRepo(db);
-    Effect.runSync(
+    await Effect.runPromise(
       Effect.gen(function* () {
         expect(yield* repo.get("wiki", "w1", "rt1")).toBeNull();
       })
     );
   });
 
-  it("upsert twice updates agent/skill/session in place (no duplicate rows)", () => {
+  it("upsert twice updates agent/skill/session in place (no duplicate rows)", async () => {
     seed(db);
     const repo = makeRepo(db);
-    Effect.runSync(
+    await Effect.runPromise(
       Effect.gen(function* () {
         yield* repo.upsert({ documentType: "task", documentId: "t1", runtimeId: "rt1", runtimeSessionId: "sess-1", provider: "opencode", agentId: "a1", skillId: "sk1" });
         yield* repo.upsert({ documentType: "task", documentId: "t1", runtimeId: "rt1", runtimeSessionId: "sess-2", provider: "opencode", agentId: "a1", skillId: "sk2" });
@@ -121,10 +122,10 @@ describe("HearthSessionRepo upsert/get", () => {
 });
 
 describe("HearthSessionRepo per-runtime isolation", () => {
-  it("same document on two runtimes → two rows; listForDocument returns both", () => {
+  it("same document on two runtimes → two rows; listForDocument returns both", async () => {
     seed(db);
     const repo = makeRepo(db);
-    Effect.runSync(
+    await Effect.runPromise(
       Effect.gen(function* () {
         yield* repo.upsert({ documentType: "wiki", documentId: "w1", runtimeId: "rt1", runtimeSessionId: "s1", provider: "opencode", agentId: "a1", skillId: "sk1" });
         yield* repo.upsert({ documentType: "wiki", documentId: "w1", runtimeId: "rt2", runtimeSessionId: "s2", provider: "opencode", agentId: "a1", skillId: "sk1" });
@@ -137,10 +138,10 @@ describe("HearthSessionRepo per-runtime isolation", () => {
     );
   });
 
-  it("listForDocument is scoped to the document (other documents excluded)", () => {
+  it("listForDocument is scoped to the document (other documents excluded)", async () => {
     seed(db);
     const repo = makeRepo(db);
-    Effect.runSync(
+    await Effect.runPromise(
       Effect.gen(function* () {
         yield* repo.upsert({ documentType: "task", documentId: "t1", runtimeId: "rt1", runtimeSessionId: "s1", provider: "opencode", agentId: "a1", skillId: "sk1" });
         yield* repo.upsert({ documentType: "task", documentId: "t2", runtimeId: "rt1", runtimeSessionId: "s2", provider: "opencode", agentId: "a1", skillId: "sk1" });
@@ -153,10 +154,10 @@ describe("HearthSessionRepo per-runtime isolation", () => {
 });
 
 describe("HearthSessionRepo remove", () => {
-  it("remove deletes the mapping row", () => {
+  it("remove deletes the mapping row", async () => {
     seed(db);
     const repo = makeRepo(db);
-    Effect.runSync(
+    await Effect.runPromise(
       Effect.gen(function* () {
         yield* repo.upsert({ documentType: "task", documentId: "t1", runtimeId: "rt1", runtimeSessionId: "s1", provider: "opencode", agentId: "a1", skillId: "sk1" });
         yield* repo.remove("task", "t1", "rt1");
@@ -167,10 +168,10 @@ describe("HearthSessionRepo remove", () => {
     );
   });
 
-  it("remove on one runtime leaves the other runtime's mapping intact", () => {
+  it("remove on one runtime leaves the other runtime's mapping intact", async () => {
     seed(db);
     const repo = makeRepo(db);
-    Effect.runSync(
+    await Effect.runPromise(
       Effect.gen(function* () {
         yield* repo.upsert({ documentType: "wiki", documentId: "w1", runtimeId: "rt1", runtimeSessionId: "s1", provider: "opencode", agentId: "a1", skillId: "sk1" });
         yield* repo.upsert({ documentType: "wiki", documentId: "w1", runtimeId: "rt2", runtimeSessionId: "s2", provider: "opencode", agentId: "a1", skillId: "sk1" });
@@ -184,10 +185,10 @@ describe("HearthSessionRepo remove", () => {
 });
 
 describe("HearthSessionRepo hasActiveTask", () => {
-  it("true when a queued or running task exists for the document+runtime", () => {
+  it("true when a queued or running task exists for the document+runtime", async () => {
     seed(db);
     const repo = makeRepo(db);
-    Effect.runSync(
+    await Effect.runPromise(
       Effect.gen(function* () {
         seedTask(db, "ft1", "t1", "queued", null);
         seedTask(db, "ft2", "t1", "running", "rt1");
@@ -196,10 +197,10 @@ describe("HearthSessionRepo hasActiveTask", () => {
     );
   });
 
-  it("false for completed/failed/cancelled tasks", () => {
+  it("false for completed/failed/cancelled tasks", async () => {
     seed(db);
     const repo = makeRepo(db);
-    Effect.runSync(
+    await Effect.runPromise(
       Effect.gen(function* () {
         seedTask(db, "ft1", "t1", "completed", "rt1");
         seedTask(db, "ft2", "t1", "failed", "rt1");
@@ -209,20 +210,20 @@ describe("HearthSessionRepo hasActiveTask", () => {
     );
   });
 
-  it("false when no task row exists for the document", () => {
+  it("false when no task row exists for the document", async () => {
     seed(db);
     const repo = makeRepo(db);
-    Effect.runSync(
+    await Effect.runPromise(
       Effect.gen(function* () {
         expect(yield* repo.hasActiveTask("task", "ghost", "rt1")).toBe(false);
       })
     );
   });
 
-  it("false when the active task belongs to a different runtime", () => {
+  it("false when the active task belongs to a different runtime", async () => {
     seed(db);
     const repo = makeRepo(db);
-    Effect.runSync(
+    await Effect.runPromise(
       Effect.gen(function* () {
         seedTask(db, "ft1", "t1", "running", "rt2");
         expect(yield* repo.hasActiveTask("task", "t1", "rt1")).toBe(false);

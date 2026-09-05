@@ -3,7 +3,7 @@ import { randomBytes } from "node:crypto";
 import { RuntimeMachineRepo, type MachineCli } from "../repos/runtime-machine.repo";
 import { HearthRepo } from "../repos/hearth.repo";
 import { RuntimeEventService } from "./runtime-event.service";
-import { DbError, ConstraintViolation, Sqlite, withTx } from "../db/database";
+import { DbError, ConstraintViolation, Db, withTx } from "../db/db";
 import { MachineIdTaken, MachineNotFound } from "../api/errors";
 import type { Machine } from "../../shared/types";
 
@@ -28,7 +28,7 @@ export class RuntimeMachineService extends Effect.Service<RuntimeMachineService>
     const repo = yield* RuntimeMachineRepo;
     const hearthRepo = yield* HearthRepo;
     const eventService = yield* RuntimeEventService;
-    const db = yield* Sqlite;
+    const db = yield* Db;
 
     const get = (id: string): Effect.Effect<Machine, MachineNotFound | DbError> =>
       repo.findById(id).pipe(

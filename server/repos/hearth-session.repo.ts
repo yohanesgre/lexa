@@ -1,5 +1,5 @@
 import { Effect } from "effect";
-import { Sqlite, queryAll, run, DbError, ConstraintViolation } from "../db/database";
+import { Db, queryAll, run, DbError, ConstraintViolation } from "../db/db";
 import { HearthSessionRow } from "../../shared/db";
 import type { HearthProvider } from "../../shared/types";
 
@@ -15,7 +15,7 @@ export interface HearthSessionInput {
 
 export class HearthSessionRepo extends Effect.Service<HearthSessionRepo>()("Lexa/HearthSessionRepo", {
   effect: Effect.gen(function* () {
-    const db = yield* Sqlite;
+    const db = yield* Db;
 
     const selectRow = (documentType: string, documentId: string, runtimeId: string): Effect.Effect<HearthSessionRow | null, DbError> =>
       queryAll<HearthSessionRow>(

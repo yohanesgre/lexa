@@ -1,5 +1,5 @@
 import { Effect } from "effect";
-import { Sqlite, queryAll, queryFirst, run, DbError, RowNotFound, ConstraintViolation } from "../db/database";
+import { Db, queryAll, queryFirst, run, DbError, RowNotFound, ConstraintViolation } from "../db/db";
 import { MilestoneRow, SwimlaneRow, rowToMilestone, rowToSwimlane } from "../../shared/db";
 import type { Milestone, Swimlane } from "../../shared/types";
 
@@ -13,7 +13,7 @@ const MILESTONE_SELECT_WITH_COUNTS = `
 
 export class MilestoneRepo extends Effect.Service<MilestoneRepo>()("Lexa/MilestoneRepo", {
   effect: Effect.gen(function* () {
-    const db = yield* Sqlite;
+    const db = yield* Db;
 
     return {
       create: (input: { id: string; projectId: string; name: string; description?: string; position: number; dueAt?: string | null }): Effect.Effect<Milestone, ConstraintViolation | DbError | RowNotFound> =>

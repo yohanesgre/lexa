@@ -7,6 +7,7 @@ import { Effect, Layer, Context, Either } from "effect";
 import { Database } from "bun:sqlite";
 import { runMigrations } from "../db/migrate";
 import { Sqlite, initSqlite, RowNotFound, ConstraintViolation } from "../db/database";
+import { DbBunLive } from "../db/db";
 import { CommentRepo } from "./comment.repo";
 
 const MIGRATIONS = fileURLToPath(new URL("../../migrations", import.meta.url));
@@ -51,16 +52,16 @@ function seed(db: Database) {
 }
 
 function makeRepo(db: Database) {
-  const layer = CommentRepo.Default.pipe(Layer.provide(Layer.succeed(Sqlite, db)));
+  const layer = CommentRepo.Default.pipe(Layer.provide(Layer.mergeAll(Layer.succeed(Sqlite, db), DbBunLive(db))));
   const ctx = Effect.runSync(Effect.scoped(Layer.build(layer)));
   return Context.get(ctx, CommentRepo);
 }
 
 describe("CommentRepo", () => {
-  it("inserts, finds, updates, soft-deletes, and lists with keyset", () => {
+  it("inserts, finds, updates, soft-deletes, and lists with keyset", async () => {
     seed(db);
     const repo = makeRepo(db);
-    Effect.runSync(
+    await Effect.runPromise(
       Effect.gen(function* () {
         const c = yield* repo.insert({ taskId: "t1", authorId: "u1", authorKind: "user", authorLabel: "Maria", body: JSON.stringify({ type: "doc", content: [{ type: "paragraph", content: [{ type: "text", text: "hi" }] }] }) });
         expect(c.id).toBeGreaterThan(0);
@@ -77,38 +78,38 @@ describe("CommentRepo", () => {
     );
   });
 
-  it("insert with nonexistent task_id fails with tagged ConstraintViolation (not a defect)", () => {
+  it("insert with nonexistent task_id fails with tagged ConstraintViolation (not a defect)", async () => {
     seed(db);
     const repo = makeRepo(db);
-    const result = Effect.runSync(Effect.either(
+    const result = await Effect.runPromise(Effect.either(
       repo.insert({ taskId: "nope", authorId: null, authorKind: "system", authorLabel: "system", body: JSON.stringify({ type: "doc", content: [] }) })
     ));
     expect(Either.isLeft(result)).toBe(true);
     if (Either.isLeft(result)) expect(result.left).toBeInstanceOf(ConstraintViolation);
   });
 
-  it("updateBody on missing id fails with RowNotFound", () => {
+  it("updateBody on missing id fails with RowNotFound", async () => {
     seed(db);
     const repo = makeRepo(db);
-    const result = Effect.runSync(Effect.either(
+    const result = await Effect.runPromise(Effect.either(
       repo.updateBody(999, JSON.stringify({ type: "doc", content: [] }))
     ));
     expect(Either.isLeft(result)).toBe(true);
     if (Either.isLeft(result)) expect(result.left).toBeInstanceOf(RowNotFound);
   });
 
-  it("softDelete on missing id fails with RowNotFound", () => {
+  it("softDelete on missing id fails with RowNotFound", async () => {
     seed(db);
     const repo = makeRepo(db);
-    const result = Effect.runSync(Effect.either(repo.softDelete(999)));
+    const result = await Effect.runPromise(Effect.either(repo.softDelete(999)));
     expect(Either.isLeft(result)).toBe(true);
     if (Either.isLeft(result)) expect(result.left).toBeInstanceOf(RowNotFound);
   });
 
-  it("updateBody on an already-deleted comment fails with RowNotFound", () => {
+  it("updateBody on an already-deleted comment fails with RowNotFound", async () => {
     seed(db);
     const repo = makeRepo(db);
-    Effect.runSync(
+    await Effect.runPromise(
       Effect.gen(function* () {
         const c = yield* repo.insert({ taskId: "t1", authorId: "u1", authorKind: "user", authorLabel: "Maria", body: JSON.stringify({ type: "doc", content: [] }) });
         yield* repo.softDelete(c.id);
@@ -119,10 +120,10 @@ describe("CommentRepo", () => {
     );
   });
 
-  it("softDelete on an already-deleted comment fails with RowNotFound", () => {
+  it("softDelete on an already-deleted comment fails with RowNotFound", async () => {
     seed(db);
     const repo = makeRepo(db);
-    Effect.runSync(
+    await Effect.runPromise(
       Effect.gen(function* () {
         const c = yield* repo.insert({ taskId: "t1", authorId: "u1", authorKind: "user", authorLabel: "Maria", body: JSON.stringify({ type: "doc", content: [] }) });
         yield* repo.softDelete(c.id);

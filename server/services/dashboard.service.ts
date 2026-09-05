@@ -4,7 +4,7 @@ import { ProjectReposRepo } from "../repos/project-repos.repo";
 import { ColumnRepo } from "../repos/column.repo";
 import { TaskRepo } from "../repos/task.repo";
 import type { Dashboard } from "../../shared/types";
-import { DbError } from "../db/database";
+import { DbError } from "../db/db";
 
 export class DashboardService extends Effect.Service<DashboardService>()("Lexa/DashboardService", {
   dependencies: [ProjectRepo.Default, ProjectReposRepo.Default, ColumnRepo.Default, TaskRepo.Default],

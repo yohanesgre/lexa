@@ -7,6 +7,7 @@ import { Effect, Layer, Context } from "effect";
 import { Database } from "bun:sqlite";
 import { runMigrations } from "../db/migrate";
 import { Sqlite, initSqlite } from "../db/database";
+import { DbBunLive } from "../db/db";
 import { HeraldPendingWritesRepo, type HeraldPendingWriteRow } from "./herald-pending-writes.repo";
 
 const MIGRATIONS = fileURLToPath(new URL("../../migrations", import.meta.url));
@@ -60,7 +61,7 @@ function seedDecided(db: Database, id: string, status: string) {
 }
 
 function makeRepo(db: Database) {
-  const layer = HeraldPendingWritesRepo.Default.pipe(Layer.provide(Layer.succeed(Sqlite, db)));
+  const layer = HeraldPendingWritesRepo.Default.pipe(Layer.provide(Layer.mergeAll(Layer.succeed(Sqlite, db), DbBunLive(db))));
   const ctx = Effect.runSync(Effect.scoped(Layer.build(layer)));
   return Context.get(ctx, HeraldPendingWritesRepo);
 }
@@ -87,10 +88,10 @@ function row(overrides: Partial<HeraldPendingWriteRow>): HeraldPendingWriteRow {
 }
 
 describe("HeraldPendingWritesRepo insert/getById", () => {
-  it("insert defaults status='pending' and round-trips via getById", () => {
+  it("insert defaults status='pending' and round-trips via getById", async () => {
     seed(db);
     const repo = makeRepo(db);
-    Effect.runSync(
+    await Effect.runPromise(
       Effect.gen(function* () {
         const r = row({ id: "w1" });
         yield* repo.insert(r);
@@ -106,10 +107,10 @@ describe("HeraldPendingWritesRepo insert/getById", () => {
     );
   });
 
-  it("FK enforcement: insert without the herald_threads composite key fails", () => {
+  it("FK enforcement: insert without the herald_threads composite key fails", async () => {
     seed(db);
     const repo = makeRepo(db);
-    Effect.runSync(
+    await Effect.runPromise(
       Effect.gen(function* () {
         const exit = yield* Effect.exit(repo.insert(row({ document_id: "ghost" })));
         expect(exit._tag).toBe("Failure");
@@ -119,10 +120,10 @@ describe("HeraldPendingWritesRepo insert/getById", () => {
 });
 
 describe("HeraldPendingWritesRepo decide guard paths", () => {
-  it("pending → approved returns the decided row with decided_at set", () => {
+  it("pending → approved returns the decided row with decided_at set", async () => {
     seed(db);
     const repo = makeRepo(db);
-    Effect.runSync(
+    await Effect.runPromise(
       Effect.gen(function* () {
         yield* repo.insert(row({ id: "w1" }));
         const decided = yield* repo.decide("w1", "approved");
@@ -133,10 +134,10 @@ describe("HeraldPendingWritesRepo decide guard paths", () => {
     );
   });
 
-  it("second decide on the same row returns null (guard, not error)", () => {
+  it("second decide on the same row returns null (guard, not error)", async () => {
     seed(db);
     const repo = makeRepo(db);
-    Effect.runSync(
+    await Effect.runPromise(
       Effect.gen(function* () {
         yield* repo.insert(row({ id: "w1" }));
         expect(yield* repo.decide("w1", "approved")).not.toBeNull();
@@ -145,10 +146,10 @@ describe("HeraldPendingWritesRepo decide guard paths", () => {
     );
   });
 
-  it("decide on an expired row returns null — expiry wins over a late decision", () => {
+  it("decide on an expired row returns null — expiry wins over a late decision", async () => {
     seed(db);
     const repo = makeRepo(db);
-    Effect.runSync(
+    await Effect.runPromise(
       Effect.gen(function* () {
         yield* repo.insert(row({ id: "w1", expires_at: "2000-01-01 00:00:00" }));
         expect(yield* repo.expireIfDue("w1")).not.toBeNull();
@@ -159,10 +160,10 @@ describe("HeraldPendingWritesRepo decide guard paths", () => {
 });
 
 describe("HeraldPendingWritesRepo expireIfDue / sweepExpired", () => {
-  it("expireIfDue flips only pending+due rows; future or non-pending → null", () => {
+  it("expireIfDue flips only pending+due rows; future or non-pending → null", async () => {
     seed(db);
     const repo = makeRepo(db);
-    Effect.runSync(
+    await Effect.runPromise(
       Effect.gen(function* () {
         yield* repo.insert(row({ id: "due", expires_at: "2000-01-01 00:00:00" }));
         yield* repo.insert(row({ id: "future", expires_at: "9999-01-01 00:00:00" }));
@@ -174,10 +175,10 @@ describe("HeraldPendingWritesRepo expireIfDue / sweepExpired", () => {
     );
   });
 
-  it("sweepExpired counts only due pending rows across batches", () => {
+  it("sweepExpired counts only due pending rows across batches", async () => {
     seed(db);
     const repo = makeRepo(db);
-    Effect.runSync(
+    await Effect.runPromise(
       Effect.gen(function* () {
         yield* repo.insert(row({ id: "a", batch_id: "b1", expires_at: "2000-01-01 00:00:00" }));
         yield* repo.insert(row({ id: "b", batch_id: "b1", expires_at: "2000-01-02 00:00:00" }));
@@ -192,10 +193,10 @@ describe("HeraldPendingWritesRepo expireIfDue / sweepExpired", () => {
 });
 
 describe("HeraldPendingWritesRepo listByBatch / countByBatchRemaining", () => {
-  it("listByBatch orders by seq ASC regardless of insert order", () => {
+  it("listByBatch orders by seq ASC regardless of insert order", async () => {
     seed(db);
     const repo = makeRepo(db);
-    Effect.runSync(
+    await Effect.runPromise(
       Effect.gen(function* () {
         yield* repo.insert(row({ id: "s2", batch_id: "b1", seq: 2 }));
         yield* repo.insert(row({ id: "s0", batch_id: "b1", seq: 0 }));
@@ -207,10 +208,10 @@ describe("HeraldPendingWritesRepo listByBatch / countByBatchRemaining", () => {
     );
   });
 
-  it("countByBatchRemaining counts only pending rows in the batch", () => {
+  it("countByBatchRemaining counts only pending rows in the batch", async () => {
     seed(db);
     const repo = makeRepo(db);
-    Effect.runSync(
+    await Effect.runPromise(
       Effect.gen(function* () {
         yield* repo.insert(row({ id: "p1r", batch_id: "b1" }));
         yield* repo.insert(row({ id: "p2r", batch_id: "b1" }));

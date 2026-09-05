@@ -7,6 +7,7 @@ import { Effect, Layer, Context, Either } from "effect";
 import { Database } from "bun:sqlite";
 import { runMigrations } from "../db/migrate";
 import { Sqlite, initSqlite } from "../db/database";
+import { DbBunLive } from "../db/db";
 import { FieldConfigService } from "./field-config.service";
 import { FieldConfigRepo } from "../repos/field-config.repo";
 import { ProjectNotFound, OptionInUse, InvalidOption } from "../api/errors";
@@ -50,13 +51,13 @@ function seed(db: Database) {
 }
 
 function makeService(db: Database) {
-  const layer = FieldConfigService.Default.pipe(Layer.provide(Layer.succeed(Sqlite, db)));
+  const layer = FieldConfigService.Default.pipe(Layer.provide(Layer.mergeAll(Layer.succeed(Sqlite, db), DbBunLive(db))));
   const ctx = Effect.runSync(Effect.scoped(Layer.build(layer)));
   return Context.get(ctx, FieldConfigService);
 }
 
 function makeRepo(db: Database) {
-  const layer = FieldConfigRepo.Default.pipe(Layer.provide(Layer.succeed(Sqlite, db)));
+  const layer = FieldConfigRepo.Default.pipe(Layer.provide(Layer.mergeAll(Layer.succeed(Sqlite, db), DbBunLive(db))));
   const ctx = Effect.runSync(Effect.scoped(Layer.build(layer)));
   return Context.get(ctx, FieldConfigRepo);
 }
@@ -64,35 +65,35 @@ function makeRepo(db: Database) {
 const opt = (id: string, label: string, position = 0): FieldOption => ({ id, label, color: "#888", position });
 
 describe("FieldConfigService.seedDefaults", () => {
-  it("creates 4 priorities + 4 types; the first priority is the create default", () => {
+  it("creates 4 priorities + 4 types; the first priority is the create default", async () => {
     seed(db);
     const repo = makeRepo(db);
-    Effect.runSync(repo.seedDefaults("p1"));
-    const cfg = Effect.runSync(repo.findByProject("p1"));
+    await Effect.runPromise(repo.seedDefaults("p1"));
+    const cfg = await Effect.runPromise(repo.findByProject("p1"));
     expect(cfg.priorities.map((o) => o.label)).toEqual(["Urgent", "High", "Medium", "Low"]);
     expect(cfg.types.map((o) => o.label)).toEqual(["Feature", "Bug", "Task", "Asset"]);
-    const first = Effect.runSync(repo.findFirstPriority("p1"));
+    const first = await Effect.runPromise(repo.findFirstPriority("p1"));
     expect(first?.label).toBe("Urgent");
     expect(first?.position).toBe(0);
   });
 });
 
 describe("FieldConfigService.findByProject", () => {
-  it("unknown project → ProjectNotFound", () => {
+  it("unknown project → ProjectNotFound", async () => {
     seed(db);
     const svc = makeService(db);
-    const res = Effect.runSync(Effect.either(svc.findByProject("nope")));
+    const res = await Effect.runPromise(Effect.either(svc.findByProject("nope")));
     expect(Either.isLeft(res)).toBe(true);
     if (Either.isLeft(res)) expect(res.left).toBeInstanceOf(ProjectNotFound);
   });
 });
 
 describe("FieldConfigService.replace", () => {
-  it("fully replaces both lists; id-less options are created with generated ids", () => {
+  it("fully replaces both lists; id-less options are created with generated ids", async () => {
     seed(db);
     const svc = makeService(db);
-    Effect.runSync(makeRepo(db).seedDefaults("p1"));
-    const res = Effect.runSync(
+    await Effect.runPromise(makeRepo(db).seedDefaults("p1"));
+    const res = await Effect.runPromise(
       Effect.either(svc.replace("p1", {
         priorities: [opt("", "Now"), opt("", "Later")],
         types: [opt("", "Chore")],
@@ -110,14 +111,14 @@ describe("FieldConfigService.replace", () => {
     expect(rows).toBe(2);
   });
 
-  it("keeps existing ids, applies label/color edits and reorder; first option becomes the create default", () => {
+  it("keeps existing ids, applies label/color edits and reorder; first option becomes the create default", async () => {
     seed(db);
     const svc = makeService(db);
     const repo = makeRepo(db);
-    Effect.runSync(repo.seedDefaults("p1"));
-    const before = Effect.runSync(repo.findByProject("p1"));
+    await Effect.runPromise(repo.seedDefaults("p1"));
+    const before = await Effect.runPromise(repo.findByProject("p1"));
     const [urgent, high] = before.priorities;
-    const res = Effect.runSync(
+    const res = await Effect.runPromise(
       Effect.either(svc.replace("p1", {
         priorities: [
           { ...opt(high!.id, "High!!"), color: "#123456" },
@@ -133,26 +134,26 @@ describe("FieldConfigService.replace", () => {
       expect(res.right.priorities[0]!.id).toBe(high!.id);
       expect(res.right.priorities.map((o) => o.position)).toEqual([0, 1]);
     }
-    const first = Effect.runSync(repo.findFirstPriority("p1"));
+    const first = await Effect.runPromise(repo.findFirstPriority("p1"));
     expect(first?.id).toBe(high!.id);
     expect(first?.label).toBe("High!!");
   });
 
-  it("empty list → InvalidOption", () => {
+  it("empty list → InvalidOption", async () => {
     seed(db);
     const svc = makeService(db);
-    const emptyPrios = Effect.runSync(Effect.either(svc.replace("p1", { priorities: [], types: [opt("", "T")] })));
+    const emptyPrios = await Effect.runPromise(Effect.either(svc.replace("p1", { priorities: [], types: [opt("", "T")] })));
     expect(Either.isLeft(emptyPrios)).toBe(true);
     if (Either.isLeft(emptyPrios)) expect(emptyPrios.left).toBeInstanceOf(InvalidOption);
-    const emptyTypes = Effect.runSync(Effect.either(svc.replace("p1", { priorities: [opt("", "P")], types: [] })));
+    const emptyTypes = await Effect.runPromise(Effect.either(svc.replace("p1", { priorities: [opt("", "P")], types: [] })));
     expect(Either.isLeft(emptyTypes)).toBe(true);
     if (Either.isLeft(emptyTypes)) expect(emptyTypes.left).toBeInstanceOf(InvalidOption);
   });
 
-  it("duplicate labels (case-insensitive) → InvalidOption", () => {
+  it("duplicate labels (case-insensitive) → InvalidOption", async () => {
     seed(db);
     const svc = makeService(db);
-    const res = Effect.runSync(
+    const res = await Effect.runPromise(
       Effect.either(svc.replace("p1", {
         priorities: [opt("", "High"), opt("", "high")],
         types: [opt("", "T")],
@@ -162,10 +163,10 @@ describe("FieldConfigService.replace", () => {
     if (Either.isLeft(res)) expect(res.left).toBeInstanceOf(InvalidOption);
   });
 
-  it("unknown option id → InvalidOption", () => {
+  it("unknown option id → InvalidOption", async () => {
     seed(db);
     const svc = makeService(db);
-    const res = Effect.runSync(
+    const res = await Effect.runPromise(
       Effect.either(svc.replace("p1", {
         priorities: [opt("does-not-exist", "P")],
         types: [opt("", "T")],
@@ -178,18 +179,18 @@ describe("FieldConfigService.replace", () => {
     }
   });
 
-  it("deleting an option used by tasks → OptionInUse", () => {
+  it("deleting an option used by tasks → OptionInUse", async () => {
     seed(db);
     const svc = makeService(db);
     const repo = makeRepo(db);
-    Effect.runSync(repo.seedDefaults("p1"));
-    const cfg = Effect.runSync(repo.findByProject("p1"));
+    await Effect.runPromise(repo.seedDefaults("p1"));
+    const cfg = await Effect.runPromise(repo.findByProject("p1"));
     const used = cfg.priorities[1]!;
     db.prepare("INSERT INTO columns (id, project_id, name, position) VALUES ('c1','p1','Todo',0)").run();
     db.prepare("INSERT INTO swimlanes (id, project_id, name, position) VALUES ('s1','p1','Default',0)").run();
     db.prepare("INSERT INTO tasks (id, project_id, column_id, swimlane_id, title, priority, type, position, created_at) VALUES ('t1','p1','c1','s1','T', ?, ?, 'a0','2026-01-01 10:00:00')").run(used.id, cfg.types[0]!.id);
     const keptPrios = cfg.priorities.filter((o) => o.id !== used.id);
-    const res = Effect.runSync(
+    const res = await Effect.runPromise(
       Effect.either(svc.replace("p1", { priorities: keptPrios, types: cfg.types }))
     );
     expect(Either.isLeft(res)).toBe(true);
@@ -201,18 +202,18 @@ describe("FieldConfigService.replace", () => {
       }
     }
     // the used option is still there
-    const after = Effect.runSync(repo.findByProject("p1"));
+    const after = await Effect.runPromise(repo.findByProject("p1"));
     expect(after.priorities.map((o) => o.id)).toContain(used.id);
   });
 
-  it("deleting an unused option succeeds", () => {
+  it("deleting an unused option succeeds", async () => {
     seed(db);
     const svc = makeService(db);
     const repo = makeRepo(db);
-    Effect.runSync(repo.seedDefaults("p1"));
-    const cfg = Effect.runSync(repo.findByProject("p1"));
+    await Effect.runPromise(repo.seedDefaults("p1"));
+    const cfg = await Effect.runPromise(repo.findByProject("p1"));
     const dropped = cfg.types[3]!;
-    const res = Effect.runSync(
+    const res = await Effect.runPromise(
       Effect.either(svc.replace("p1", {
         priorities: cfg.priorities,
         types: cfg.types.filter((o) => o.id !== dropped.id),
@@ -222,13 +223,13 @@ describe("FieldConfigService.replace", () => {
     if (Either.isRight(res)) expect(res.right.types.map((o) => o.id)).not.toContain(dropped.id);
   });
 
-  it("invalid payload leaves both lists untouched (atomicity)", () => {
+  it("invalid payload leaves both lists untouched (atomicity)", async () => {
     seed(db);
     const svc = makeService(db);
     const repo = makeRepo(db);
-    Effect.runSync(repo.seedDefaults("p1"));
-    const before = Effect.runSync(repo.findByProject("p1"));
-    const res = Effect.runSync(
+    await Effect.runPromise(repo.seedDefaults("p1"));
+    const before = await Effect.runPromise(repo.findByProject("p1"));
+    const res = await Effect.runPromise(
       Effect.either(svc.replace("p1", {
         priorities: [opt("", "Brand New")],
         types: [opt("nope", "T")], // invalid — the whole replace must fail
@@ -236,15 +237,15 @@ describe("FieldConfigService.replace", () => {
     );
     expect(Either.isLeft(res)).toBe(true);
     if (Either.isLeft(res)) expect(res.left).toBeInstanceOf(InvalidOption);
-    const after = Effect.runSync(repo.findByProject("p1"));
+    const after = await Effect.runPromise(repo.findByProject("p1"));
     expect(after.priorities.map((o) => o.label)).toEqual(before.priorities.map((o) => o.label));
     expect(after.types.map((o) => o.label)).toEqual(before.types.map((o) => o.label));
   });
 
-  it("unknown project → ProjectNotFound", () => {
+  it("unknown project → ProjectNotFound", async () => {
     seed(db);
     const svc = makeService(db);
-    const res = Effect.runSync(Effect.either(svc.replace("nope", { priorities: [opt("", "P")], types: [opt("", "T")] })));
+    const res = await Effect.runPromise(Effect.either(svc.replace("nope", { priorities: [opt("", "P")], types: [opt("", "T")] })));
     expect(Either.isLeft(res)).toBe(true);
     if (Either.isLeft(res)) expect(res.left).toBeInstanceOf(ProjectNotFound);
   });

@@ -14,7 +14,7 @@
  * path; the lazy check is the intended simplification.
  */
 import { Effect } from "effect";
-import { Sqlite, DbError, RowNotFound } from "../db/database";
+import { Db, DbError, RowNotFound } from "../db/db";
 import { HeraldHealthRepo, type HeraldHealthRow } from "../repos/herald-health.repo";
 
 const THRESHOLD = 3;
@@ -36,7 +36,7 @@ export class HeraldHealthService extends Effect.Service<HeraldHealthService>()("
   dependencies: [HeraldHealthRepo.Default],
   effect: Effect.gen(function* () {
     const repo = yield* HeraldHealthRepo;
-    const db = yield* Sqlite;
+    const db = yield* Db;
 
     const getOrDefault = (providerId: string): Effect.Effect<HeraldHealthRow, DbError> =>
       repo.get(providerId).pipe(

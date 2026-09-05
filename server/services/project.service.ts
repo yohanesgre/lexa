@@ -4,7 +4,7 @@ import { ProjectReposRepo } from "../repos/project-repos.repo";
 import { ColumnRepo } from "../repos/column.repo";
 import { SwimlaneRepo } from "../repos/swimlane.repo";
 import { FieldConfigRepo } from "../repos/field-config.repo";
-import { ConstraintViolation, DbError, RowNotFound, Sqlite, withTx } from "../db/database";
+import { ConstraintViolation, DbError, RowNotFound, Db, withTx } from "../db/db";
 import { ProjectNotFound, SlugTaken } from "../api/errors";
 import { generateTaskKey } from "../task-key";
 import type { DomainProject, ProjectRepo as ProjectRepoType } from "../../shared/types";
@@ -25,7 +25,7 @@ export class ProjectService extends Effect.Service<ProjectService>()("Lexa/Proje
     const columnRepo = yield* ColumnRepo;
     const swimlaneRepo = yield* SwimlaneRepo;
     const fieldConfigRepo = yield* FieldConfigRepo;
-    const db = yield* Sqlite;
+    const db = yield* Db;
 
     const slugify = (name: string): string =>
       name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 60) || "project";

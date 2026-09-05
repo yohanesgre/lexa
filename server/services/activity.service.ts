@@ -1,5 +1,5 @@
 import { Effect } from "effect";
-import { Sqlite, DbError, ConstraintViolation } from "../db/database";
+import { Db, DbError, ConstraintViolation } from "../db/db";
 import { ActivityRepo } from "../repos/activity.repo";
 import { CommentRepo } from "../repos/comment.repo";
 import { ActivityItem, Actor, ActivityType, ActivityEvent } from "../../shared/types";
@@ -9,7 +9,7 @@ export class ActivityService extends Effect.Service<ActivityService>()("Lexa/Act
   effect: Effect.gen(function* () {
     const activityRepo = yield* ActivityRepo;
     const commentRepo = yield* CommentRepo;
-    const db = yield* Sqlite;
+    const db = yield* Db;
 
     const append = (taskId: string, actor: Actor, type: ActivityType, message: string, opts?: { viaHerald?: boolean }): Effect.Effect<ActivityEvent, DbError | ConstraintViolation> =>
       // Single-statement insert (no BEGIN) — inherently joins an outer
@@ -19,6 +19,15 @@ export class ActivityService extends Effect.Service<ActivityService>()("Lexa/Act
         actorUserId: actor.userId ?? null, type, message,
         viaHerald: opts?.viaHerald === true,
       });
+
+    // Newest-first read-back for mutation responses: after a batch() write
+    // set, the just-inserted rows are the latest for the task (the caller
+    // holds the write lock on Bun; on D1 the batch committed immediately
+    // before). Returned oldest-first to match append order.
+    const listLatest = (taskId: string, limit: number): Effect.Effect<ActivityEvent[], DbError> =>
+      activityRepo.listByTaskKeyset(taskId, null, limit).pipe(
+        Effect.map((rows) => [...rows].reverse())
+      );
 
     const listMerged = (taskId: string, cursor: string | null, limit: number): Effect.Effect<{ items: ActivityItem[]; nextCursor: string | null }, DbError> =>
       Effect.gen(function* () {
@@ -50,6 +59,6 @@ export class ActivityService extends Effect.Service<ActivityService>()("Lexa/Act
         return { items, nextCursor };
       });
 
-    return { append, listMerged };
+    return { append, listMerged, listLatest };
   }),
 }) {}

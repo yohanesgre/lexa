@@ -1,5 +1,5 @@
 import { Effect } from "effect";
-import { Sqlite, queryAll, queryFirst, run, DbError, RowNotFound, ConstraintViolation } from "../db/database";
+import { Db, queryAll, queryFirst, run, DbError, RowNotFound, ConstraintViolation } from "../db/db";
 import type { RuntimeEvent, RuntimeEventAction, HearthProvider } from "../../shared/types";
 
 export interface RuntimeEventRow {
@@ -46,7 +46,7 @@ export function takeRawKey(eventId: string): string | null {
 
 export class RuntimeEventRepo extends Effect.Service<RuntimeEventRepo>()("Lexa/RuntimeEventRepo", {
   effect: Effect.gen(function* () {
-    const db = yield* Sqlite;
+    const db = yield* Db;
 
     return {
       create: (input: {

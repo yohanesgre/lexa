@@ -2,7 +2,7 @@ import { Effect, Data } from "effect";
 import { UserProjectRoleRepo } from "../repos/user-project-role.repo";
 import { UserRepo } from "../repos/user.repo";
 import { ProjectRepo } from "../repos/project.repo";
-import { DbError, RowNotFound, ConstraintViolation } from "../db/database";
+import { DbError, RowNotFound, ConstraintViolation } from "../db/db";
 import { UserNotFound } from "./user.service";
 import type { UserProjectRoleRow } from "../../shared/db";
 

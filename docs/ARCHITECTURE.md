@@ -6,7 +6,7 @@ A lightweight, self-hosted project management tool. Kanban board, issue/task tic
 
 | Layer        | Choice                        | Rationale |
 | ------------ | ----------------------------- | --------- |
-| Frontend     | React + Vite + TanStack Start | TanStack Start SPA mode (ssr:false all routes, keep plugin, no dehydrate), TanStack Router + Query client-only, file-based routing, server/entry SPA fallback; Workers: SPA static |
+| Frontend     | React + Vite + TanStack Start | Selective hybrid: SPA everywhere except `/share/*` (root `ssr` function gated on path; app/auth routes `ssr:false`, client-only loaders), TanStack Router + Query, file-based routing, server/entry SSR shell + SPA fallback; Workers: built worker SSRs `/share`, fallback elsewhere |
 | Backend      | Effect-TS + @effect/platform HttpApi | Typed errors, DI, declarative error→HTTP mapping, OpenAPI for free |
 | Database     | SQLite via bun:sqlite (WAL)   | Local file, zero-ops, transactional batch helper for atomic mutations |
 | Runtime      | Bun standalone HTTP server (Docker) primary + Cloudflare Workers + D1 + R2 parallel flavor (optional, $5/mo — see `docs/CLOUDFLARE_WORKERS.md`) | One process for SSR + REST + webhooks; simple deploys (Bun) or edge isolates (Workers, Workers flavor) |
@@ -365,10 +365,14 @@ Two peer-level flavors share the same source tree (no data sync between them;
 migrate Bun→Workers by dumping the Bun DB to SQL and replaying on D1):
 
 - **Bun standalone (primary):** `Bun.serve` + `bun:sqlite` (WAL) + cloudflared
-  tunnel. SPA fallback in `server/entry.ts` (serves `index.html` for non-`/api` routes, no SSR). Current live system. Deployed via `lexa-cli deploy <domain> prod`
-  (Docker + tunnel + DNS).
+  tunnel. `server/entry.ts` runs the Start handler (SSR shell) + serves
+  `index.html` fallback for non-`/api` SPA routes; `/share/*` renders
+  server-side (loader + unfurl meta). Current live system. Deployed via
+  `lexa-cli deploy <domain> prod` (Docker + tunnel + DNS).
 - **Cloudflare Workers (parallel, optional, $5/mo):** Workers + D1 + R2 + KV.
-  SPA static (no SSR) — same routes and services, different drivers: `server/db/drivers/bun-sqlite.ts`
+  Same selective hybrid: built worker SSRs `/share/*`, static fallback for SPA
+  routes (source `wrangler dev` = API + fallback by platform limitation) — same
+  routes and services, different drivers: `server/db/drivers/bun-sqlite.ts`
   vs `server/db/drivers/d1.ts` (repos async; bun-sqlite wraps sync API in
   `Promise.resolve`), R2 native binding driver vs `fs`/`s3`, `RuntimeEnv`
   (`process.env` on Bun vs `env` from `cloudflare:workers` on Workers),
@@ -376,7 +380,7 @@ migrate Bun→Workers by dumping the Bun DB to SQL and replaying on D1):
   Atomicity invariants (emission + webhook) re-expressed as `db.batch()` arrays.
 
 Vite plugin chain emits two server bundles (Bun entry + Workers entry).
-Dispatch point: `lexa-cli deploy <domain> [bun|workers] [staging|prod]`.
+Dispatch point: `lexa-cli deploy <domain> [--direct] [--runtime workers] [staging|prod]`.
 Compliance gate: `scripts/check-invariants.ts` scans for the 14 invariants.
 Full Workers HOW: `docs/CLOUDFLARE_WORKERS.md` (decision formerly ADR-0002,
 now merged there); deploy flows: `docs/DEPLOYMENT.md`.

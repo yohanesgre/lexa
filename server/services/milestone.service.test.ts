@@ -7,6 +7,7 @@ import { Effect, Layer, Context, Either } from "effect";
 import { Database } from "bun:sqlite";
 import { runMigrations } from "../db/migrate";
 import { Sqlite, initSqlite } from "../db/database";
+import { DbBunLive, Db } from "../db/db";
 import { MilestoneService } from "./milestone.service";
 import { SwimlaneRepo } from "../repos/swimlane.repo";
 import { TaskRepo } from "../repos/task.repo";
@@ -54,15 +55,15 @@ function seed(db: Database) {
 }
 
 function makeService(db: Database) {
-  const layer = MilestoneService.Default.pipe(Layer.provide(Layer.succeed(Sqlite, db)));
+  const layer = MilestoneService.Default.pipe(Layer.provide(Layer.mergeAll(Layer.succeed(Sqlite, db), DbBunLive(db))));
   const ctx = Effect.runSync(Effect.scoped(Layer.build(layer)));
   return Context.get(ctx, MilestoneService);
 }
 
-function makeRepo<T>(db: Database, Repo: { Default: Layer.Layer<T, never, Sqlite> }): T {
-  const layer = Repo.Default.pipe(Layer.provide(Layer.succeed(Sqlite, db)));
+function makeRepo<T>(db: Database, Repo: { Default: Layer.Layer<T, never, Sqlite | Db> }): T {
+  const layer = Repo.Default.pipe(Layer.provide(Layer.mergeAll(Layer.succeed(Sqlite, db), DbBunLive(db))));
   const ctx = Effect.runSync(Effect.scoped(Layer.build(layer)));
-  // test helper: Repo is an Effect.Service class; Default layer is typed with Sqlite dep
+  // test helper: Repo is an Effect.Service class; Default layer is typed with Db dep
   return Context.get(ctx, Repo as unknown as Context.Tag<T, T>) as T;
 }
 

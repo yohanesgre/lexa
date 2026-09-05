@@ -1,5 +1,5 @@
 import { Effect } from "effect";
-import { Sqlite, queryAll, queryFirst, run, DbError, ConstraintViolation } from "../db/database";
+import { Db, queryAll, queryFirst, run, DbError, ConstraintViolation } from "../db/db";
 
 export interface AttachmentRow {
   id: string;
@@ -17,7 +17,7 @@ export interface AttachmentRow {
 
 export class AttachmentRepo extends Effect.Service<AttachmentRepo>()("Lexa/AttachmentRepo", {
   effect: Effect.gen(function* () {
-    const db = yield* Sqlite;
+    const db = yield* Db;
 
     return {
       insert: (input: {

@@ -6,6 +6,7 @@ import { Database } from "bun:sqlite";
 import { runMigrations } from "../db/migrate";
 import { Effect, Layer } from "effect";
 import { Sqlite } from "../db/database";
+import { DbBunLive } from "../db/db";
 import { HeraldSettingsRepo } from "./herald-settings.repo";
 import { HeraldProvidersRepo } from "./herald-providers.repo";
 import { HeraldModelsRepo } from "./herald-models.repo";
@@ -18,7 +19,7 @@ function tempDbPath() {
 }
 
 describe("herald gateway phase 1", () => {
-  it("migration 0017 drops legacy cols, keeps gateway cols, creates 4 new tables + indexes", () => {
+  it("migration 0017 drops legacy cols, keeps gateway cols, creates 4 new tables + indexes", async () => {
     const { dbPath, dir } = tempDbPath();
     try {
       runMigrations(dbPath);
@@ -55,7 +56,7 @@ describe("herald gateway phase 1", () => {
       seed.prepare("INSERT INTO projects (id, name, slug) VALUES ('p1','P','p1')").run();
       seed.close();
       const db = new Database(dbPath);
-      const layer = Layer.mergeAll(HeraldSettingsRepo.Default).pipe(Layer.provide(Layer.succeed(Sqlite, db)));
+      const layer = Layer.mergeAll(HeraldSettingsRepo.Default).pipe(Layer.provide(Layer.mergeAll(Layer.succeed(Sqlite, db), DbBunLive(db))));
       const prog = Effect.gen(function* () {
         const repo = yield* HeraldSettingsRepo;
         const r = yield* repo.upsert("p1", { searchProvider: "exa", searchApiKey: "skey", urlAllowlist: "https://a.com", writeTools: ["task_create"] });
@@ -77,7 +78,7 @@ describe("herald gateway phase 1", () => {
     try {
       runMigrations(dbPath);
       const db = new Database(dbPath);
-      const layer = Layer.mergeAll(HeraldProvidersRepo.Default).pipe(Layer.provide(Layer.succeed(Sqlite, db)));
+      const layer = Layer.mergeAll(HeraldProvidersRepo.Default).pipe(Layer.provide(Layer.mergeAll(Layer.succeed(Sqlite, db), DbBunLive(db))));
       const prog = Effect.gen(function* () {
         const repo = yield* HeraldProvidersRepo;
         const row = yield* repo.create({ id: "pr1", label: "OpenAI", baseUrl: "https://api.openai.com/v1", apiKey: "sk-abc123XYZ" });
@@ -103,7 +104,7 @@ describe("herald gateway phase 1", () => {
       seed.prepare("INSERT INTO projects (id, name, slug) VALUES ('p1','P','p1')").run();
       seed.close();
       const db = new Database(dbPath);
-      const layer = Layer.mergeAll(HeraldProvidersRepo.Default, HeraldModelsRepo.Default, HeraldCallLogsRepo.Default, HeraldModelPricesRepo.Default).pipe(Layer.provide(Layer.succeed(Sqlite, db)));
+      const layer = Layer.mergeAll(HeraldProvidersRepo.Default, HeraldModelsRepo.Default, HeraldCallLogsRepo.Default, HeraldModelPricesRepo.Default).pipe(Layer.provide(Layer.mergeAll(Layer.succeed(Sqlite, db), DbBunLive(db))));
       const prog = Effect.gen(function* () {
         const provRepo = yield* HeraldProvidersRepo;
         const modelRepo = yield* HeraldModelsRepo;

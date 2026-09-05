@@ -1,11 +1,11 @@
 import { Effect } from "effect";
-import { Sqlite, queryAll, queryFirst, run, DbError, RowNotFound, ConstraintViolation } from "../db/database";
+import { Db, queryAll, queryFirst, run, DbError, RowNotFound, ConstraintViolation } from "../db/db";
 import { SwimlaneRow, rowToSwimlane } from "../../shared/db";
 import type { Swimlane } from "../../shared/types";
 
 export class SwimlaneRepo extends Effect.Service<SwimlaneRepo>()("Lexa/SwimlaneRepo", {
   effect: Effect.gen(function* () {
-    const db = yield* Sqlite;
+    const db = yield* Db;
 
     return {
       create: (input: { id: string; projectId: string; name: string; description?: string; position: number; kind?: "backlog" | "sprint"; dueAt?: string | null; startAt?: string | null; milestoneId?: string | null }): Effect.Effect<Swimlane, ConstraintViolation | DbError | RowNotFound> =>

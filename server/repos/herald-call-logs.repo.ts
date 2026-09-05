@@ -1,5 +1,5 @@
 import { Effect } from "effect";
-import { Sqlite, queryAll, queryFirst, run, DbError, RowNotFound, ConstraintViolation } from "../db/database";
+import { Db, queryAll, queryFirst, run, DbError, RowNotFound, ConstraintViolation } from "../db/db";
 import type { HeraldCallLogRow, HeraldCallLogInput } from "../../shared/herald";
 
 export interface HeraldCallLogDbRow {
@@ -40,7 +40,7 @@ function toDomain(row: HeraldCallLogDbRow): HeraldCallLogRow {
 
 export class HeraldCallLogsRepo extends Effect.Service<HeraldCallLogsRepo>()("Lexa/HeraldCallLogsRepo", {
   effect: Effect.gen(function* () {
-    const db = yield* Sqlite;
+    const db = yield* Db;
 
     return {
       insert: (input: { id: string } & HeraldCallLogInput): Effect.Effect<HeraldCallLogRow, ConstraintViolation | DbError | RowNotFound> =>
@@ -101,9 +101,11 @@ export class HeraldCallLogsRepo extends Effect.Service<HeraldCallLogsRepo>()("Le
           if (filters.from) { conds.push("date(created_at) >= date(?)"); params.push(filters.from); }
           if (filters.to) { conds.push("date(created_at) <= date(?)"); params.push(filters.to); }
           const where = conds.length ? `WHERE ${conds.join(" AND ")}` : "";
-          const row = yield* Effect.try({
-            try: () => {
-              const sql = `SELECT
+          const row = yield* queryFirst<{
+            totalCalls: number; promptTokens: number; completionTokens: number; totalTokens: number; totalCostCents: number; avgLatencyMs: number | null; errorCalls: number;
+          }>(
+            db,
+            `SELECT
                 COUNT(*) as totalCalls,
                 COALESCE(SUM(usage_in),0) as promptTokens,
                 COALESCE(SUM(usage_out),0) as completionTokens,
@@ -111,13 +113,9 @@ export class HeraldCallLogsRepo extends Effect.Service<HeraldCallLogsRepo>()("Le
                 COALESCE(SUM(cost_cents),0) as totalCostCents,
                 AVG(latency_ms) as avgLatencyMs,
                 COALESCE(SUM(CASE WHEN status = 'error' THEN 1 ELSE 0 END),0) as errorCalls
-                FROM herald_call_logs ${where}`;
-              return db.prepare(sql).get(...params) as {
-                totalCalls: number; promptTokens: number; completionTokens: number; totalTokens: number; totalCostCents: number; avgLatencyMs: number | null; errorCalls: number;
-              } | null;
-            },
-            catch: (e) => new DbError({ message: String(e), cause: e }),
-          });
+                FROM herald_call_logs ${where}`,
+            ...params
+          ).pipe(Effect.catchTag("RowNotFound", () => Effect.succeed(null)));
           const totalCalls = Number(row?.totalCalls ?? 0);
           const errorCalls = Number(row?.errorCalls ?? 0);
           return {
@@ -141,9 +139,9 @@ export class HeraldCallLogsRepo extends Effect.Service<HeraldCallLogsRepo>()("Le
           if (filters.from) { conds.push("date(created_at) >= date(?)"); params.push(filters.from); }
           if (filters.to) { conds.push("date(created_at) <= date(?)"); params.push(filters.to); }
           const where = conds.length ? `WHERE ${conds.join(" AND ")}` : "";
-          const rows = yield* Effect.try({
-            try: () => {
-              const sql = `SELECT
+          const rows = yield* queryAll<{ day: string; tokens: number; costCents: number; avgLatencyMs: number | null; calls: number; errorCalls: number }>(
+            db,
+            `SELECT
                 date(created_at) as day,
                 COALESCE(SUM(usage_in + usage_out + cached_in),0) as tokens,
                 COALESCE(SUM(cost_cents),0) as costCents,
@@ -152,11 +150,9 @@ export class HeraldCallLogsRepo extends Effect.Service<HeraldCallLogsRepo>()("Le
                 COALESCE(SUM(CASE WHEN status = 'error' THEN 1 ELSE 0 END),0) as errorCalls
                 FROM herald_call_logs ${where}
                 GROUP BY date(created_at)
-                ORDER BY day ASC`;
-              return db.prepare(sql).all(...params) as Array<{ day: string; tokens: number; costCents: number; avgLatencyMs: number | null; calls: number; errorCalls: number }>;
-            },
-            catch: (e) => new DbError({ message: String(e), cause: e }),
-          });
+                ORDER BY day ASC`,
+            ...params
+          );
           return rows.map((r) => ({
             day: r.day,
             tokens: Number(r.tokens),
@@ -176,9 +172,9 @@ export class HeraldCallLogsRepo extends Effect.Service<HeraldCallLogsRepo>()("Le
           if (filters.from) { conds.push("date(created_at) >= date(?)"); params.push(filters.from); }
           if (filters.to) { conds.push("date(created_at) <= date(?)"); params.push(filters.to); }
           const where = conds.length ? `WHERE ${conds.join(" AND ")}` : "";
-          const rows = yield* Effect.try({
-            try: () => {
-              const sql = `SELECT
+          const rows = yield* queryAll<{ model: string; tokens: number; costCents: number; avgLatencyMs: number | null; calls: number; errorCalls: number }>(
+            db,
+            `SELECT
                 model,
                 COALESCE(SUM(usage_in + usage_out + cached_in),0) as tokens,
                 COALESCE(SUM(cost_cents),0) as costCents,
@@ -187,11 +183,9 @@ export class HeraldCallLogsRepo extends Effect.Service<HeraldCallLogsRepo>()("Le
                 COALESCE(SUM(CASE WHEN status = 'error' THEN 1 ELSE 0 END),0) as errorCalls
                 FROM herald_call_logs ${where}
                 GROUP BY model
-                ORDER BY tokens DESC`;
-              return db.prepare(sql).all(...params) as Array<{ model: string; tokens: number; costCents: number; avgLatencyMs: number | null; calls: number; errorCalls: number }>;
-            },
-            catch: (e) => new DbError({ message: String(e), cause: e }),
-          });
+                ORDER BY tokens DESC`,
+            ...params
+          );
           return rows.map((r) => ({
             model: r.model,
             tokens: Number(r.tokens),
@@ -211,9 +205,9 @@ export class HeraldCallLogsRepo extends Effect.Service<HeraldCallLogsRepo>()("Le
           if (filters.from) { conds.push("date(created_at) >= date(?)"); params.push(filters.from); }
           if (filters.to) { conds.push("date(created_at) <= date(?)"); params.push(filters.to); }
           const where = conds.length ? `WHERE ${conds.join(" AND ")}` : "";
-          const rows = yield* Effect.try({
-            try: () => {
-              const sql = `SELECT
+          const rows = yield* queryAll<{ day: string; model: string; tokens: number; costCents: number; avgLatencyMs: number | null; calls: number; errorCalls: number }>(
+            db,
+            `SELECT
                 date(created_at) as day,
                 model,
                 COALESCE(SUM(usage_in + usage_out + cached_in),0) as tokens,
@@ -223,11 +217,9 @@ export class HeraldCallLogsRepo extends Effect.Service<HeraldCallLogsRepo>()("Le
                 COALESCE(SUM(CASE WHEN status = 'error' THEN 1 ELSE 0 END),0) as errorCalls
                 FROM herald_call_logs ${where}
                 GROUP BY date(created_at), model
-                ORDER BY day ASC, tokens DESC`;
-              return db.prepare(sql).all(...params) as Array<{ day: string; model: string; tokens: number; costCents: number; avgLatencyMs: number | null; calls: number; errorCalls: number }>;
-            },
-            catch: (e) => new DbError({ message: String(e), cause: e }),
-          });
+                ORDER BY day ASC, tokens DESC`,
+            ...params
+          );
           const header = "day,model,tokens,cost_cents,cost_usd,avg_latency_ms,calls,error_rate";
           const lines = rows.map((r) => {
             const errorRate = Number(r.calls) > 0 ? Number(r.errorCalls) / Number(r.calls) : 0;

@@ -1,5 +1,5 @@
 import { Effect } from "effect";
-import { withTx, Sqlite, DbError, ConstraintViolation, RowNotFound } from "../db/database";
+import { withTx, Db, DbError, ConstraintViolation, RowNotFound } from "../db/db";
 import { CommentRepo } from "../repos/comment.repo";
 import { ActivityRepo } from "../repos/activity.repo";
 import { TaskRepo } from "../repos/task.repo";
@@ -19,7 +19,7 @@ export class CommentService extends Effect.Service<CommentService>()("Lexa/Comme
     const activityRepo = yield* ActivityRepo;
     const taskRepo = yield* TaskRepo;
     const roleRepo = yield* UserProjectRoleRepo;
-    const db = yield* Sqlite;
+    const db = yield* Db;
 
     const validateBody = (body: TipTapDoc): Effect.Effect<void, CommentInvalid> =>
       Effect.gen(function* () {

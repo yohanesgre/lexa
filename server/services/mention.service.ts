@@ -1,5 +1,5 @@
 import { Effect } from "effect";
-import { DbError } from "../db/database";
+import { DbError } from "../db/db";
 import { TaskRepo } from "../repos/task.repo";
 import { WikiRepo } from "../repos/wiki.repo";
 

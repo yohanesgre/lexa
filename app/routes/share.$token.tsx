@@ -260,7 +260,6 @@ export const Route = createFileRoute("/share/$token")({
   validateSearch: (search: Record<string, unknown>): { page?: string | undefined } => ({
     page: typeof search.page === "string" && search.page ? search.page : undefined,
   }),
-  ssr:false,
   loader: async ({ params, context }) => {
     let tree: SharedTree | null = null;
     try {

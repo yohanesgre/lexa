@@ -30,7 +30,9 @@ const PUBLIC_PATHS = new Set(["/login", "/set-password", "/invite", "/setup"]);
 const PUBLIC_PREFIXES = ["/share/"];
 
 export const Route = createRootRouteWithContext<RouterContext>()({
-  ssr:false,
+  // Function form (not `false`): per-match opt-in so ONLY /share/* renders
+  // server-side — every other route inherits `false` exactly as before.
+  ssr: ({ location }) => PUBLIC_PREFIXES.some((prefix) => location.pathname.startsWith(prefix)),
   beforeLoad: async ({ location }) => {
     if (location.pathname.startsWith("/__inspect") || location.pathname.startsWith("/.vite-inspect")) return;
     if (PUBLIC_PATHS.has(location.pathname)) return;

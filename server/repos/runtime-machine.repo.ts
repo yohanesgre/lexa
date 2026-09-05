@@ -1,5 +1,5 @@
 import { Effect } from "effect";
-import { Sqlite, queryAll, queryFirst, run, DbError, RowNotFound, ConstraintViolation } from "../db/database";
+import { Db, queryAll, queryFirst, run, DbError, RowNotFound, ConstraintViolation } from "../db/db";
 import type { Machine } from "../../shared/types";
 
 interface MachineRow {
@@ -37,7 +37,7 @@ function rowToMachine(row: MachineRow): Machine {
 
 export class RuntimeMachineRepo extends Effect.Service<RuntimeMachineRepo>()("Lexa/RuntimeMachineRepo", {
   effect: Effect.gen(function* () {
-    const db = yield* Sqlite;
+    const db = yield* Db;
 
     return {
       // Called by `lexa-cli login` — binds the machine without marking it

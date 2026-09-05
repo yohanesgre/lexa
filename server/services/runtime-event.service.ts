@@ -2,7 +2,7 @@ import { Effect } from "effect";
 import { RuntimeEventRepo, storeRawKey, takeRawKey } from "../repos/runtime-event.repo";
 import { RuntimeMachineRepo } from "../repos/runtime-machine.repo";
 import { ApiKeyRepo } from "../repos/api-key.repo";
-import { DbError, RowNotFound, ConstraintViolation } from "../db/database";
+import { DbError, RowNotFound, ConstraintViolation } from "../db/db";
 import { ApiKeyNotFound, MachineNotFound, MachineSecretMismatch, RuntimeEventNotFound } from "../api/errors";
 import { constantTimeTokenEqual } from "../api/auth-key";
 import type { HearthProvider, RuntimeEvent, RuntimeEventAction } from "../../shared/types";

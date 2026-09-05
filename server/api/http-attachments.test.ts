@@ -7,6 +7,7 @@ import { Database } from "bun:sqlite";
 import { Effect, Layer } from "effect";
 import { runMigrations } from "../db/migrate";
 import { Sqlite } from "../db/database";
+import { DbBunLive } from "../db/db";
 import { AttachmentService } from "../services/attachment.service";
 import { Storage, StorageConfig } from "../storage/storage";
 import { resolveStorageConfig } from "../storage/config";
@@ -115,7 +116,7 @@ let serviceTestLayer: Layer.Layer<AttachmentService>;
 function buildServiceTestLayer() {
   const cfg = resolveStorageConfig(process.env, dir);
   const deps = Layer.mergeAll(
-    Layer.succeed(Sqlite, db),
+    Layer.mergeAll(Layer.succeed(Sqlite, db), DbBunLive(db)),
     Layer.succeed(StorageConfig, cfg),
     Storage.Default.pipe(Layer.provide(Layer.succeed(StorageConfig, cfg)))
   );

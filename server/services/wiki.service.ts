@@ -1,7 +1,7 @@
 import { Effect } from "effect";
 import { WikiRepo } from "../repos/wiki.repo";
 import { ProjectRepo } from "../repos/project.repo";
-import { ConstraintViolation, DbError, RowNotFound, Sqlite, withTx } from "../db/database";
+import { ConstraintViolation, DbError, RowNotFound, Db, withTx } from "../db/db";
 import { ProjectNotFound, WikiPageNotFound, SlugTaken, HasChildren, SearchError } from "../api/errors";
 import type { WikiPage, WikiPageMeta, WikiPageRevision, WikiPageRevisionSummary } from "../../shared/types";
 import type { TipTapDoc } from "../../shared/types";
@@ -12,7 +12,7 @@ export class WikiService extends Effect.Service<WikiService>()("Lexa/WikiService
   effect: Effect.gen(function* () {
     const repo = yield* WikiRepo;
     const projectRepo = yield* ProjectRepo;
-    const db = yield* Sqlite;
+    const db = yield* Db;
 
     const slugify = (title: string): string =>
       title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 60) || "page";

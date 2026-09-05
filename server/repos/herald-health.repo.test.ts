@@ -7,6 +7,7 @@ import { Database } from "bun:sqlite";
 import { runMigrations } from "../db/migrate";
 import { Effect, Layer } from "effect";
 import { Sqlite } from "../db/database";
+import { DbBunLive } from "../db/db";
 import { HeraldHealthRepo } from "./herald-health.repo";
 
 function tempDbPath() {
@@ -15,7 +16,7 @@ function tempDbPath() {
 }
 
 describe("herald-health.repo", () => {
-  it("migration creates herald_provider_health with correct schema and FK cascade", () => {
+  it("migration creates herald_provider_health with correct schema and FK cascade", async () => {
     const { dbPath, dir } = tempDbPath();
     try {
       runMigrations(dbPath);
@@ -36,7 +37,7 @@ describe("herald-health.repo", () => {
       runMigrations(dbPath);
       const db = new Database(dbPath);
       db.prepare("INSERT INTO herald_providers (id, label, base_url, api_key) VALUES ('pr1','P','https://x','sk')").run();
-      const layer = HeraldHealthRepo.Default.pipe(Layer.provide(Layer.succeed(Sqlite, db)));
+      const layer = HeraldHealthRepo.Default.pipe(Layer.provide(Layer.mergeAll(Layer.succeed(Sqlite, db), DbBunLive(db))));
       const prog = Effect.gen(function* () {
         const repo = yield* HeraldHealthRepo;
         const inserted = yield* repo.upsert({ providerId: "pr1", failureCount: 1, circuitState: "closed", consecutiveFailures: 1 });
@@ -62,7 +63,7 @@ describe("herald-health.repo", () => {
       runMigrations(dbPath);
       const db = new Database(dbPath);
       db.prepare("INSERT INTO herald_providers (id, label, base_url, api_key) VALUES ('pr1','P','https://x','sk')").run();
-      const layer = HeraldHealthRepo.Default.pipe(Layer.provide(Layer.succeed(Sqlite, db)));
+      const layer = HeraldHealthRepo.Default.pipe(Layer.provide(Layer.mergeAll(Layer.succeed(Sqlite, db), DbBunLive(db))));
       const prog = Effect.gen(function* () {
         const repo = yield* HeraldHealthRepo;
         yield* repo.upsert({ providerId: "pr1", failureCount: 2 });

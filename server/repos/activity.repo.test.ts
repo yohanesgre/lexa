@@ -7,6 +7,7 @@ import { Effect, Layer, Context, Either } from "effect";
 import { Database } from "bun:sqlite";
 import { runMigrations } from "../db/migrate";
 import { Sqlite, initSqlite, ConstraintViolation } from "../db/database";
+import { DbBunLive } from "../db/db";
 import { ActivityRepo } from "./activity.repo";
 
 const MIGRATIONS = fileURLToPath(new URL("../../migrations", import.meta.url));
@@ -50,16 +51,16 @@ function seed(db: Database) {
 }
 
 function makeRepo(db: Database) {
-  const layer = ActivityRepo.Default.pipe(Layer.provide(Layer.succeed(Sqlite, db)));
+  const layer = ActivityRepo.Default.pipe(Layer.provide(Layer.mergeAll(Layer.succeed(Sqlite, db), DbBunLive(db))));
   const ctx = Effect.runSync(Effect.scoped(Layer.build(layer)));
   return Context.get(ctx, ActivityRepo);
 }
 
 describe("ActivityRepo", () => {
-  it("inserts and lists rows with keyset cursor", () => {
+  it("inserts and lists rows with keyset cursor", async () => {
     seed(db);
     const repo = makeRepo(db);
-    Effect.runSync(
+    await Effect.runPromise(
       Effect.gen(function* () {
         const a = yield* repo.insert({ taskId: "t1", actorKind: "user", actorLabel: "Maria", actorUserId: null, type: "created", message: "Maria created this task" });
         const b = yield* repo.insert({ taskId: "t1", actorKind: "user", actorLabel: "Maria", actorUserId: null, type: "moved", message: "Maria moved from Todo to Done" });
@@ -77,10 +78,10 @@ describe("ActivityRepo", () => {
     );
   });
 
-  it("insert with nonexistent task_id fails with tagged ConstraintViolation (not a defect)", () => {
+  it("insert with nonexistent task_id fails with tagged ConstraintViolation (not a defect)", async () => {
     seed(db);
     const repo = makeRepo(db);
-    const result = Effect.runSync(Effect.either(
+    const result = await Effect.runPromise(Effect.either(
       repo.insert({ taskId: "nope", actorKind: "user", actorLabel: "Maria", actorUserId: null, type: "created", message: "x" })
     ));
     expect(Either.isLeft(result)).toBe(true);

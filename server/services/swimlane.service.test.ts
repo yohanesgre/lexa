@@ -7,6 +7,7 @@ import { Effect, Layer, Context, Either } from "effect";
 import { Database } from "bun:sqlite";
 import { runMigrations } from "../db/migrate";
 import { Sqlite, initSqlite } from "../db/database";
+import { DbBunLive } from "../db/db";
 import { SwimlaneService } from "./swimlane.service";
 import {
   SwimlaneNotFound,
@@ -64,7 +65,7 @@ function seed(db: Database) {
 }
 
 function makeService(db: Database) {
-  const layer = SwimlaneService.Default.pipe(Layer.provide(Layer.succeed(Sqlite, db)));
+  const layer = SwimlaneService.Default.pipe(Layer.provide(Layer.mergeAll(Layer.succeed(Sqlite, db), DbBunLive(db))));
   const ctx = Effect.runSync(Effect.scoped(Layer.build(layer)));
   return Context.get(ctx, SwimlaneService);
 }
@@ -72,10 +73,10 @@ function makeService(db: Database) {
 const maria: Actor = { kind: "user", label: "Maria", userId: "u1" };
 
 describe("SwimlaneService create", () => {
-  it("creates a sprint lane with dueAt appended after the last position", () => {
+  it("creates a sprint lane with dueAt appended after the last position", async () => {
     seed(db);
     const svc = makeService(db);
-    Effect.runSync(
+    await Effect.runPromise(
       Effect.gen(function* () {
         const lane = yield* svc.create({ projectId: "p1", name: "Sprint 3", dueAt: "2026-08-01" });
         expect(lane.kind).toBe("sprint");
@@ -86,11 +87,11 @@ describe("SwimlaneService create", () => {
     );
   });
 
-  it("creates a loose sprint by default; milestoneId + startAt persist when given", () => {
+  it("creates a loose sprint by default; milestoneId + startAt persist when given", async () => {
     seed(db);
     const svc = makeService(db);
     db.prepare("INSERT INTO milestones (id, project_id, name, position) VALUES ('ms1','p1','v1',0)").run();
-    Effect.runSync(
+    await Effect.runPromise(
       Effect.gen(function* () {
         const lane = yield* svc.create({ projectId: "p1", name: "Sprint A", startAt: "2026-08-10", dueAt: "2026-08-30", milestoneId: "ms1" });
         expect(lane.kind).toBe("sprint");
@@ -103,41 +104,41 @@ describe("SwimlaneService create", () => {
     );
   });
 
-  it("rejects startAt later than dueAt (INVALID_ARGS)", () => {
+  it("rejects startAt later than dueAt (INVALID_ARGS)", async () => {
     seed(db);
     const svc = makeService(db);
-    const result = Effect.runSync(Effect.either(svc.create({ projectId: "p1", name: "Bad", startAt: "2026-09-01", dueAt: "2026-08-01" })));
+    const result = await Effect.runPromise(Effect.either(svc.create({ projectId: "p1", name: "Bad", startAt: "2026-09-01", dueAt: "2026-08-01" })));
     expect(Either.isLeft(result)).toBe(true);
     if (Either.isLeft(result)) expect(result.left).toBeInstanceOf(InvalidArgs);
   });
 
-  it("rejects an unknown or cross-project milestoneId (MILESTONE_NOT_FOUND)", () => {
+  it("rejects an unknown or cross-project milestoneId (MILESTONE_NOT_FOUND)", async () => {
     seed(db);
     const svc = makeService(db);
     db.prepare("INSERT INTO projects (id, name, slug) VALUES ('p2','P2','p2')").run();
     db.prepare("INSERT INTO milestones (id, project_id, name, position) VALUES ('ms-p2','p2','other',0)").run();
-    const unknown = Effect.runSync(Effect.either(svc.create({ projectId: "p1", name: "S", milestoneId: "nope" })));
+    const unknown = await Effect.runPromise(Effect.either(svc.create({ projectId: "p1", name: "S", milestoneId: "nope" })));
     expect(Either.isLeft(unknown)).toBe(true);
     if (Either.isLeft(unknown)) expect(unknown.left).toBeInstanceOf(MilestoneNotFound);
-    const cross = Effect.runSync(Effect.either(svc.create({ projectId: "p1", name: "S", milestoneId: "ms-p2" })));
+    const cross = await Effect.runPromise(Effect.either(svc.create({ projectId: "p1", name: "S", milestoneId: "ms-p2" })));
     expect(Either.isLeft(cross)).toBe(true);
     if (Either.isLeft(cross)) expect(cross.left).toBeInstanceOf(MilestoneNotFound);
   });
 
-  it("rejects a missing project", () => {
+  it("rejects a missing project", async () => {
     seed(db);
     const svc = makeService(db);
-    const result = Effect.runSync(Effect.either(svc.create({ projectId: "nope", name: "X" })));
+    const result = await Effect.runPromise(Effect.either(svc.create({ projectId: "nope", name: "X" })));
     expect(Either.isLeft(result)).toBe(true);
     if (Either.isLeft(result)) expect(result.left).toBeInstanceOf(ProjectNotFound);
   });
 });
 
 describe("SwimlaneService update", () => {
-  it("rejects shrinking the deadline past a task's due date", () => {
+  it("rejects shrinking the deadline past a task's due date", async () => {
     seed(db);
     const svc = makeService(db);
-    const result = Effect.runSync(Effect.either(svc.update("m1", { dueAt: "2026-06-15" })));
+    const result = await Effect.runPromise(Effect.either(svc.update("m1", { dueAt: "2026-06-15" })));
     expect(Either.isLeft(result)).toBe(true);
     if (Either.isLeft(result)) {
       expect(result.left).toBeInstanceOf(DeadlineAfterLane);
@@ -151,10 +152,10 @@ describe("SwimlaneService update", () => {
     expect(lane.due_at).toBe("2026-06-01");
   });
 
-  it("allows moving the deadline after all task due dates", () => {
+  it("allows moving the deadline after all task due dates", async () => {
     seed(db);
     const svc = makeService(db);
-    Effect.runSync(
+    await Effect.runPromise(
       Effect.gen(function* () {
         const lane = yield* svc.update("m1", { dueAt: "2026-08-01" });
         expect(lane.dueAt).toBe("2026-08-01");
@@ -162,10 +163,10 @@ describe("SwimlaneService update", () => {
     );
   });
 
-  it("rejects setting a deadline on the backlog lane", () => {
+  it("rejects setting a deadline on the backlog lane", async () => {
     seed(db);
     const svc = makeService(db);
-    const result = Effect.runSync(Effect.either(svc.update("s-backlog", { dueAt: "2026-01-01" })));
+    const result = await Effect.runPromise(Effect.either(svc.update("s-backlog", { dueAt: "2026-01-01" })));
     expect(Either.isLeft(result)).toBe(true);
     if (Either.isLeft(result)) {
       expect(result.left).toBeInstanceOf(BacklogProtected);
@@ -173,18 +174,18 @@ describe("SwimlaneService update", () => {
     }
   });
 
-  it("rejects updating a missing lane", () => {
+  it("rejects updating a missing lane", async () => {
     seed(db);
     const svc = makeService(db);
-    const result = Effect.runSync(Effect.either(svc.update("nope", { name: "X" })));
+    const result = await Effect.runPromise(Effect.either(svc.update("nope", { name: "X" })));
     expect(Either.isLeft(result)).toBe(true);
     if (Either.isLeft(result)) expect(result.left).toBeInstanceOf(SwimlaneNotFound);
   });
 
-  it("updates name and position", () => {
+  it("updates name and position", async () => {
     seed(db);
     const svc = makeService(db);
-    Effect.runSync(
+    await Effect.runPromise(
       Effect.gen(function* () {
         const lane = yield* svc.update("m2", { name: "Renamed", position: 5 });
         expect(lane.name).toBe("Renamed");
@@ -193,29 +194,29 @@ describe("SwimlaneService update", () => {
     );
   });
 
-  it("update rejects startAt > dueAt on an existing lane (INVALID_ARGS)", () => {
+  it("update rejects startAt > dueAt on an existing lane (INVALID_ARGS)", async () => {
     seed(db);
     const svc = makeService(db);
-    const result = Effect.runSync(Effect.either(svc.update("m1", { startAt: "2026-09-01", dueAt: "2026-08-01" })));
+    const result = await Effect.runPromise(Effect.either(svc.update("m1", { startAt: "2026-09-01", dueAt: "2026-08-01" })));
     expect(Either.isLeft(result)).toBe(true);
     if (Either.isLeft(result)) expect(result.left).toBeInstanceOf(InvalidArgs);
   });
 
-  it("partial PATCH validates against the lane's other bound (startAt vs dueAt)", () => {
+  it("partial PATCH validates against the lane's other bound (startAt vs dueAt)", async () => {
     seed(db);
     const svc = makeService(db);
     // m2: no dates, no tasks → set a consistent range first.
-    Effect.runSync(svc.update("m2", { startAt: "2026-08-10", dueAt: "2026-08-30" }));
+    await Effect.runPromise(svc.update("m2", { startAt: "2026-08-10", dueAt: "2026-08-30" }));
     // Lone startAt later than the lane's dueAt → InvalidArgs.
-    const startLate = Effect.runSync(Effect.either(svc.update("m2", { startAt: "2026-09-01" })));
+    const startLate = await Effect.runPromise(Effect.either(svc.update("m2", { startAt: "2026-09-01" })));
     expect(Either.isLeft(startLate)).toBe(true);
     if (Either.isLeft(startLate)) expect(startLate.left).toBeInstanceOf(InvalidArgs);
     // Lone dueAt earlier than the lane's startAt → InvalidArgs.
-    const dueEarly = Effect.runSync(Effect.either(svc.update("m2", { dueAt: "2026-07-01" })));
+    const dueEarly = await Effect.runPromise(Effect.either(svc.update("m2", { dueAt: "2026-07-01" })));
     expect(Either.isLeft(dueEarly)).toBe(true);
     if (Either.isLeft(dueEarly)) expect(dueEarly.left).toBeInstanceOf(InvalidArgs);
     // A valid lone startAt passes and persists.
-    const ok = Effect.runSync(Effect.either(svc.update("m2", { startAt: "2026-07-15" })));
+    const ok = await Effect.runPromise(Effect.either(svc.update("m2", { startAt: "2026-07-15" })));
     expect(Either.isRight(ok)).toBe(true);
     if (Either.isRight(ok)) {
       expect(ok.right.startAt).toBe("2026-07-15");
@@ -223,11 +224,11 @@ describe("SwimlaneService update", () => {
     }
   });
 
-  it("update persists startAt/milestoneId and clears them with null", () => {
+  it("update persists startAt/milestoneId and clears them with null", async () => {
     seed(db);
     const svc = makeService(db);
     db.prepare("INSERT INTO milestones (id, project_id, name, position) VALUES ('ms1','p1','v1',0)").run();
-    Effect.runSync(
+    await Effect.runPromise(
       Effect.gen(function* () {
         const lane = yield* svc.update("m1", { startAt: "2026-05-10", milestoneId: "ms1" });
         expect(lane.startAt).toBe("2026-05-10");
@@ -239,18 +240,18 @@ describe("SwimlaneService update", () => {
     );
   });
 
-  it("update rejects unknown milestoneId on an existing lane", () => {
+  it("update rejects unknown milestoneId on an existing lane", async () => {
     seed(db);
     const svc = makeService(db);
-    const result = Effect.runSync(Effect.either(svc.update("m1", { milestoneId: "nope" })));
+    const result = await Effect.runPromise(Effect.either(svc.update("m1", { milestoneId: "nope" })));
     expect(Either.isLeft(result)).toBe(true);
     if (Either.isLeft(result)) expect(result.left).toBeInstanceOf(MilestoneNotFound);
   });
 
-  it("backlog lane rejects startAt/milestoneId too (BACKLOG_PROTECTED)", () => {
+  it("backlog lane rejects startAt/milestoneId too (BACKLOG_PROTECTED)", async () => {
     seed(db);
     const svc = makeService(db);
-    const result = Effect.runSync(Effect.either(svc.update("s-backlog", { startAt: "2026-01-01" })));
+    const result = await Effect.runPromise(Effect.either(svc.update("s-backlog", { startAt: "2026-01-01" })));
     expect(Either.isLeft(result)).toBe(true);
     if (Either.isLeft(result)) {
       expect(result.left).toBeInstanceOf(BacklogProtected);
@@ -260,10 +261,10 @@ describe("SwimlaneService update", () => {
 });
 
 describe("SwimlaneService delete", () => {
-  it("rejects deleting a lane with tasks", () => {
+  it("rejects deleting a lane with tasks", async () => {
     seed(db);
     const svc = makeService(db);
-    const result = Effect.runSync(Effect.either(svc.delete("m1")));
+    const result = await Effect.runPromise(Effect.either(svc.delete("m1")));
     expect(Either.isLeft(result)).toBe(true);
     if (Either.isLeft(result)) {
       expect(result.left).toBeInstanceOf(HasChildren);
@@ -271,18 +272,18 @@ describe("SwimlaneService delete", () => {
     }
   });
 
-  it("deletes an empty milestone lane", () => {
+  it("deletes an empty milestone lane", async () => {
     seed(db);
     const svc = makeService(db);
-    Effect.runSync(svc.delete("m2"));
+    await Effect.runPromise(svc.delete("m2"));
     const row = db.prepare("SELECT COUNT(*) AS n FROM swimlanes WHERE id = 'm2'").get() as { n: number };
     expect(row.n).toBe(0);
   });
 
-  it("deleting the backlog lane is rejected (BACKLOG_PROTECTED)", () => {
+  it("deleting the backlog lane is rejected (BACKLOG_PROTECTED)", async () => {
     seed(db);
     const svc = makeService(db);
-    const result = Effect.runSync(Effect.either(svc.delete("s-backlog")));
+    const result = await Effect.runPromise(Effect.either(svc.delete("s-backlog")));
     expect(Either.isLeft(result)).toBe(true);
     if (Either.isLeft(result)) {
       expect(result.left).toBeInstanceOf(BacklogProtected);
@@ -292,20 +293,20 @@ describe("SwimlaneService delete", () => {
     expect(row.n).toBe(1);
   });
 
-  it("rejects deleting a missing lane", () => {
+  it("rejects deleting a missing lane", async () => {
     seed(db);
     const svc = makeService(db);
-    const result = Effect.runSync(Effect.either(svc.delete("nope")));
+    const result = await Effect.runPromise(Effect.either(svc.delete("nope")));
     expect(Either.isLeft(result)).toBe(true);
     if (Either.isLeft(result)) expect(result.left).toBeInstanceOf(SwimlaneNotFound);
   });
 });
 
 describe("SwimlaneService archive", () => {
-  it("rejects archiving the backlog lane", () => {
+  it("rejects archiving the backlog lane", async () => {
     seed(db);
     const svc = makeService(db);
-    const result = Effect.runSync(Effect.either(svc.archive(maria, "s-backlog")));
+    const result = await Effect.runPromise(Effect.either(svc.archive(maria, "s-backlog")));
     expect(Either.isLeft(result)).toBe(true);
     if (Either.isLeft(result)) {
       expect(result.left).toBeInstanceOf(BacklogProtected);
@@ -313,10 +314,10 @@ describe("SwimlaneService archive", () => {
     }
   });
 
-  it("archives the lane and its live tasks, emitting one activity row per task", () => {
+  it("archives the lane and its live tasks, emitting one activity row per task", async () => {
     seed(db);
     const svc = makeService(db);
-    Effect.runSync(
+    await Effect.runPromise(
       Effect.gen(function* () {
         const { lane, activity } = yield* svc.archive(maria, "m1");
         expect(lane.archivedAt).not.toBeNull();
@@ -329,10 +330,10 @@ describe("SwimlaneService archive", () => {
     );
   });
 
-  it("archiving an already-archived lane is idempotent", () => {
+  it("archiving an already-archived lane is idempotent", async () => {
     seed(db);
     const svc = makeService(db);
-    Effect.runSync(
+    await Effect.runPromise(
       Effect.gen(function* () {
         yield* svc.archive(maria, "m1");
         const second = yield* svc.archive(maria, "m1");
@@ -341,20 +342,20 @@ describe("SwimlaneService archive", () => {
     );
   });
 
-  it("rejects archiving a missing lane", () => {
+  it("rejects archiving a missing lane", async () => {
     seed(db);
     const svc = makeService(db);
-    const result = Effect.runSync(Effect.either(svc.archive(maria, "nope")));
+    const result = await Effect.runPromise(Effect.either(svc.archive(maria, "nope")));
     expect(Either.isLeft(result)).toBe(true);
     if (Either.isLeft(result)) expect(result.left).toBeInstanceOf(SwimlaneNotFound);
   });
 });
 
 describe("SwimlaneService restore", () => {
-  it("restores the lane and is idempotent; tasks stay archived", () => {
+  it("restores the lane and is idempotent; tasks stay archived", async () => {
     seed(db);
     const svc = makeService(db);
-    Effect.runSync(
+    await Effect.runPromise(
       Effect.gen(function* () {
         yield* svc.archive(maria, "m1");
         const { lane, activity } = yield* svc.restore(maria, "m1");
@@ -370,20 +371,20 @@ describe("SwimlaneService restore", () => {
     );
   });
 
-  it("rejects restoring a missing lane", () => {
+  it("rejects restoring a missing lane", async () => {
     seed(db);
     const svc = makeService(db);
-    const result = Effect.runSync(Effect.either(svc.restore(maria, "nope")));
+    const result = await Effect.runPromise(Effect.either(svc.restore(maria, "nope")));
     expect(Either.isLeft(result)).toBe(true);
     if (Either.isLeft(result)) expect(result.left).toBeInstanceOf(SwimlaneNotFound);
   });
 });
 
 describe("SwimlaneService queries", () => {
-  it("getById returns the lane; missing → SwimlaneNotFound", () => {
+  it("getById returns the lane; missing → SwimlaneNotFound", async () => {
     seed(db);
     const svc = makeService(db);
-    Effect.runSync(
+    await Effect.runPromise(
       Effect.gen(function* () {
         const lane = yield* svc.getById("m1");
         expect(lane.kind).toBe("sprint");
@@ -394,10 +395,10 @@ describe("SwimlaneService queries", () => {
     );
   });
 
-  it("findByProject hides archived lanes unless includeArchived", () => {
+  it("findByProject hides archived lanes unless includeArchived", async () => {
     seed(db);
     const svc = makeService(db);
-    Effect.runSync(
+    await Effect.runPromise(
       Effect.gen(function* () {
         yield* svc.archive(maria, "m1");
         const live = yield* svc.findByProject("p1");

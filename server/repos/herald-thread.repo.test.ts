@@ -7,6 +7,7 @@ import { Effect, Layer, Context } from "effect";
 import { Database } from "bun:sqlite";
 import { runMigrations } from "../db/migrate";
 import { Sqlite, initSqlite } from "../db/database";
+import { DbBunLive } from "../db/db";
 import { HeraldThreadRepo } from "./herald-thread.repo";
 
 const MIGRATIONS = fileURLToPath(new URL("../../migrations", import.meta.url));
@@ -50,16 +51,16 @@ function seed(db: Database) {
 }
 
 function makeRepo(db: Database) {
-  const layer = HeraldThreadRepo.Default.pipe(Layer.provide(Layer.succeed(Sqlite, db)));
+  const layer = HeraldThreadRepo.Default.pipe(Layer.provide(Layer.mergeAll(Layer.succeed(Sqlite, db), DbBunLive(db))));
   const ctx = Effect.runSync(Effect.scoped(Layer.build(layer)));
   return Context.get(ctx, HeraldThreadRepo);
 }
 
 describe("HeraldThreadRepo save/load", () => {
-  it("upsert + load round-trips messages and metadata", () => {
+  it("upsert + load round-trips messages and metadata", async () => {
     seed(db);
     const repo = makeRepo(db);
-    Effect.runSync(
+    await Effect.runPromise(
       Effect.gen(function* () {
         const msgs = [{ role: "user", content: "hello" }, { role: "assistant", content: "hi" }];
         yield* repo.saveThread("task", "t1", { projectId: "p1", agentId: "a1", skillId: "s1", messages: msgs });
@@ -75,10 +76,10 @@ describe("HeraldThreadRepo save/load", () => {
     );
   });
 
-  it("second save overwrites in place (single row) and bumps updated_at", () => {
+  it("second save overwrites in place (single row) and bumps updated_at", async () => {
     seed(db);
     const repo = makeRepo(db);
-    Effect.runSync(
+    await Effect.runPromise(
       Effect.gen(function* () {
         yield* repo.saveThread("wiki", "w1", { projectId: "p1", messages: [{ role: "user", content: "a" }] });
         db.exec(`UPDATE herald_threads SET updated_at = datetime('now', '-1 hour') WHERE document_id = 'w1'`);
@@ -93,10 +94,10 @@ describe("HeraldThreadRepo save/load", () => {
     );
   });
 
-  it("summary + summarized_count update via saveThread", () => {
+  it("summary + summarized_count update via saveThread", async () => {
     seed(db);
     const repo = makeRepo(db);
-    Effect.runSync(
+    await Effect.runPromise(
       Effect.gen(function* () {
         yield* repo.saveThread("task", "t1", { projectId: "p1", messages: Array.from({ length: 10 }, (_, i) => ({ role: "user", content: `m${i}` })) });
         const kept = [{ role: "user", content: "m8" }, { role: "user", content: "m9" }];
@@ -114,10 +115,10 @@ describe("HeraldThreadRepo save/load", () => {
     );
   });
 
-  it("loadThread fails RowNotFound when absent", () => {
+  it("loadThread fails RowNotFound when absent", async () => {
     seed(db);
     const repo = makeRepo(db);
-    Effect.runSync(
+    await Effect.runPromise(
       Effect.gen(function* () {
         const err = yield* repo.loadThread("task", "ghost").pipe(Effect.flip);
         expect(err._tag).toBe("RowNotFound");
@@ -125,10 +126,10 @@ describe("HeraldThreadRepo save/load", () => {
     );
   });
 
-  it("resetThread deletes the row; second reset fails RowNotFound", () => {
+  it("resetThread deletes the row; second reset fails RowNotFound", async () => {
     seed(db);
     const repo = makeRepo(db);
-    Effect.runSync(
+    await Effect.runPromise(
       Effect.gen(function* () {
         yield* repo.saveThread("chat", "c1", { projectId: "p1", ownerUserId: "u1", messages: [] });
         yield* repo.resetThread("chat", "c1");
@@ -140,10 +141,10 @@ describe("HeraldThreadRepo save/load", () => {
 });
 
 describe("HeraldThreadRepo chat ownership", () => {
-  it("loadChat returns thread for owner", () => {
+  it("loadChat returns thread for owner", async () => {
     seed(db);
     const repo = makeRepo(db);
-    Effect.runSync(
+    await Effect.runPromise(
       Effect.gen(function* () {
         yield* repo.saveThread("chat", "c1", { projectId: "p1", ownerUserId: "u1", messages: [{ role: "user", content: "yo" }] });
         const thread = yield* repo.loadChat("c1", "u1");
@@ -153,10 +154,10 @@ describe("HeraldThreadRepo chat ownership", () => {
     );
   });
 
-  it("owner mismatch → RowNotFound (404-equivalent)", () => {
+  it("owner mismatch → RowNotFound (404-equivalent)", async () => {
     seed(db);
     const repo = makeRepo(db);
-    Effect.runSync(
+    await Effect.runPromise(
       Effect.gen(function* () {
         yield* repo.saveThread("chat", "c1", { projectId: "p1", ownerUserId: "u1", messages: [] });
         const err = yield* repo.loadChat("c1", "u2").pipe(Effect.flip);
@@ -165,10 +166,10 @@ describe("HeraldThreadRepo chat ownership", () => {
     );
   });
 
-  it("missing chat → RowNotFound", () => {
+  it("missing chat → RowNotFound", async () => {
     seed(db);
     const repo = makeRepo(db);
-    Effect.runSync(
+    await Effect.runPromise(
       Effect.gen(function* () {
         const err = yield* repo.loadChat("ghost", "u1").pipe(Effect.flip);
         expect(err._tag).toBe("RowNotFound");
@@ -176,10 +177,10 @@ describe("HeraldThreadRepo chat ownership", () => {
     );
   });
 
-  it("appendChatMessage preserves prior messages; append by non-owner fails RowNotFound", () => {
+  it("appendChatMessage preserves prior messages; append by non-owner fails RowNotFound", async () => {
     seed(db);
     const repo = makeRepo(db);
-    Effect.runSync(
+    await Effect.runPromise(
       Effect.gen(function* () {
         yield* repo.saveThread("chat", "c1", { projectId: "p1", ownerUserId: "u1", messages: [{ role: "user", content: "q" }] });
         yield* repo.appendChatMessage("c1", "u1", { role: "assistant", content: "a" });
@@ -198,10 +199,10 @@ describe("HeraldThreadRepo chat ownership", () => {
 });
 
 describe("HeraldThreadRepo chat titles + history", () => {
-  it("saveThread COALESCE: rename survives later saves; NULL title backfills exactly once", () => {
+  it("saveThread COALESCE: rename survives later saves; NULL title backfills exactly once", async () => {
     seed(db);
     const repo = makeRepo(db);
-    Effect.runSync(
+    await Effect.runPromise(
       Effect.gen(function* () {
         // Renamed thread keeps its title across saves — even when the patch
         // carries a different title (stored value wins).
@@ -230,11 +231,11 @@ describe("HeraldThreadRepo chat titles + history", () => {
     );
   });
 
-  it("listChats orders updated_at DESC and is owner+project scoped", () => {
+  it("listChats orders updated_at DESC and is owner+project scoped", async () => {
     seed(db);
     db.exec(`INSERT INTO projects (id, name, slug) VALUES ('p2', 'Q', 'p2');`);
     const repo = makeRepo(db);
-    Effect.runSync(
+    await Effect.runPromise(
       Effect.gen(function* () {
         yield* repo.saveThread("chat", "c-old", { projectId: "p1", ownerUserId: "u1", title: "Old", messages: [] });
         yield* repo.saveThread("chat", "c-new", { projectId: "p1", ownerUserId: "u1", title: "New", messages: [] });
@@ -257,10 +258,10 @@ describe("HeraldThreadRepo chat titles + history", () => {
     );
   });
 
-  it("updateChatMeta updates title and pinned; non-owner or missing chat → RowNotFound", () => {
+  it("updateChatMeta updates title and pinned; non-owner or missing chat → RowNotFound", async () => {
     seed(db);
     const repo = makeRepo(db);
-    Effect.runSync(
+    await Effect.runPromise(
       Effect.gen(function* () {
         yield* repo.saveThread("chat", "c1", { projectId: "p1", ownerUserId: "u1", title: "Before", messages: [] });
         const renamed = yield* repo.updateChatMeta("c1", "u1", { title: "After" });
@@ -282,10 +283,10 @@ describe("HeraldThreadRepo chat titles + history", () => {
     );
   });
 
-  it("truncateChatFrom keeps messages[0..fromIndex); non-owner → RowNotFound", () => {
+  it("truncateChatFrom keeps messages[0..fromIndex); non-owner → RowNotFound", async () => {
     seed(db);
     const repo = makeRepo(db);
-    Effect.runSync(
+    await Effect.runPromise(
       Effect.gen(function* () {
         const msgs = [
           { role: "user", content: "q0" },
@@ -311,10 +312,10 @@ describe("HeraldThreadRepo chat titles + history", () => {
     );
   });
 
-  it("listChats orders pinned threads before recency; q prefilter matches title or transcript", () => {
+  it("listChats orders pinned threads before recency; q prefilter matches title or transcript", async () => {
     seed(db);
     const repo = makeRepo(db);
-    Effect.runSync(
+    await Effect.runPromise(
       Effect.gen(function* () {
         yield* repo.saveThread("chat", "c-fresh", { projectId: "p1", ownerUserId: "u1", title: "Fresh", messages: [{ role: "user", content: "latest chatter" }] });
         yield* repo.saveThread("chat", "c-old-pin", { projectId: "p1", ownerUserId: "u1", title: "Old but pinned", messages: [] });

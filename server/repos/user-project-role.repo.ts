@@ -1,10 +1,10 @@
 import { Effect } from "effect";
-import { Sqlite, queryAll, run, withTx, DbError, ConstraintViolation } from "../db/database";
+import { Db, queryAll, run, withTx, DbError, ConstraintViolation } from "../db/db";
 import type { UserProjectRoleRow } from "../../shared/db";
 
 export class UserProjectRoleRepo extends Effect.Service<UserProjectRoleRepo>()("Lexa/UserProjectRoleRepo", {
   effect: Effect.gen(function* () {
-    const db = yield* Sqlite;
+    const db = yield* Db;
 
     return {
       findByUserId: (userId: string): Effect.Effect<UserProjectRoleRow[], DbError> =>

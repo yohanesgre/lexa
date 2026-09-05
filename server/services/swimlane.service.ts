@@ -3,7 +3,7 @@ import { SwimlaneRepo } from "../repos/swimlane.repo";
 import { ProjectRepo } from "../repos/project.repo";
 import { TaskRepo } from "../repos/task.repo";
 import { ActivityService } from "./activity.service";
-import { queryAll, DbError, ConstraintViolation, withTx, Sqlite } from "../db/database";
+import { queryAll, DbError, ConstraintViolation, withTx, Db } from "../db/db";
 import { ProjectNotFound, SwimlaneNotFound, HasChildren, BacklogProtected, DeadlineAfterLane, TaskNotFound, MilestoneNotFound, InvalidArgs } from "../api/errors";
 import * as msg from "../activity-messages";
 import type { Swimlane, Actor, ActivityEvent } from "../../shared/types";
@@ -15,7 +15,7 @@ export class SwimlaneService extends Effect.Service<SwimlaneService>()("Lexa/Swi
     const projectRepo = yield* ProjectRepo;
     const taskRepo = yield* TaskRepo;
     const activityService = yield* ActivityService;
-    const db = yield* Sqlite;
+    const db = yield* Db;
 
     // start_at must not be later than due_at (both YYYY-MM-DD — string compare is fine).
     const validateDates = (startAt?: string | null, dueAt?: string | null): Effect.Effect<void, InvalidArgs> =>

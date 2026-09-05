@@ -1,5 +1,6 @@
-import { Database } from "bun:sqlite";
-import { getSetting } from "../db/settings";
+import type { Database } from "bun:sqlite";
+import { Effect } from "effect";
+import { queryFirst, type DbDriver } from "../db/db";
 
 export interface RateLimiterOptions {
   max?: number; // default 6000 requests per window (self-hosted; Hearth agents are chatty)
@@ -9,6 +10,14 @@ export interface RateLimiterOptions {
 
 export const DEFAULT_RATE_LIMIT_MAX = 6000;
 export const DEFAULT_RATE_LIMIT_WINDOW_MS = 600_000;
+
+// Sync settings read over a sync Database (Bun path). Mirrors
+// server/db/settings.ts getSetting verbatim — kept local so this module
+// stays importable on Workers (settings.ts pulls node:fs).
+function getSettingSync(db: Database, key: string): string | null {
+  const row = db.prepare("SELECT value FROM settings WHERE key = ?").get(key) as { value: string } | null;
+  return row?.value ?? null;
+}
 
 // Same positive-integer rule the env mirror used to apply, now applied to the
 // settings rows only — missing/invalid fall back to the code-level defaults.
@@ -37,10 +46,26 @@ export function resolveRateLimitFromDbValues(opts: {
 // are optional).
 export function syncRateLimitFromDb(db: Database): void {
   const { max, windowMs } = resolveRateLimitFromDbValues({
-    settingsMax: getSetting(db, "rate_limit_max"),
-    settingsWindowMs: getSetting(db, "rate_limit_window_ms"),
+    settingsMax: getSettingSync(db, "rate_limit_max"),
+    settingsWindowMs: getSettingSync(db, "rate_limit_window_ms"),
   });
   apiRateLimiter.setLimits({ max, windowMs });
+}
+
+// Async port of syncRateLimitFromDb over a DbDriver (Workers/D1 path).
+// Same resolution, same singleton — never throws on missing rows.
+export function syncRateLimitFromDbAsync(driver: DbDriver): Effect.Effect<void, never> {
+  const read = (key: string): Effect.Effect<string | null, never> =>
+    queryFirst<{ value: string }>(driver, "SELECT value FROM settings WHERE key = ?", key).pipe(
+      Effect.map((row) => row.value),
+      Effect.catchAll(() => Effect.succeed(null))
+    );
+  return Effect.gen(function* () {
+    const settingsMax = yield* read("rate_limit_max");
+    const settingsWindowMs = yield* read("rate_limit_window_ms");
+    const { max, windowMs } = resolveRateLimitFromDbValues({ settingsMax, settingsWindowMs });
+    apiRateLimiter.setLimits({ max, windowMs });
+  });
 }
 
 // Hearth machine surfaces are key/token-gated and chatty by design — the

@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Effect, Layer, Context, Either } from "effect";
 import { Database } from "bun:sqlite";
+import { DbBunLive } from "../db/db";
 
 const MIGRATIONS = fileURLToPath(new URL("../../migrations", import.meta.url));
 
@@ -39,11 +40,11 @@ describe("PasswordLinksService", () => {
 
     const db = Effect.runSync(Effect.scoped(Layer.build(initSqlite(dbPath))));
     const sqlite = Context.get(db, Sqlite);
-    const layer = PasswordLinksService.Default.pipe(Layer.provide(Layer.succeed(Sqlite, sqlite)));
+    const layer = PasswordLinksService.Default.pipe(Layer.provide(Layer.mergeAll(Layer.succeed(Sqlite, sqlite), DbBunLive(sqlite))));
     const ctx = Effect.runSync(Effect.scoped(Layer.build(layer)));
     const svc = Context.get(ctx, PasswordLinksService);
 
-    const { token, link } = Effect.runSync(svc.issue(userId));
+    const { token, link } = await Effect.runPromise(svc.issue(userId));
     expect(link).toBe(`http://localhost:3000/set-password?token=${token}`);
     const row = sqlite.prepare("SELECT identifier, value, expiresAt FROM verification WHERE identifier = ?").get(`reset-password:${token}`) as { identifier: string; value: string; expiresAt: string } | null;
     expect(row?.value).toBe(userId);
@@ -79,10 +80,10 @@ describe("PasswordLinksService", () => {
     const { initSqlite, Sqlite, RowNotFound } = await import("../db/database");
     const db = Effect.runSync(Effect.scoped(Layer.build(initSqlite(dbPath))));
     const sqlite = Context.get(db, Sqlite);
-    const layer = PasswordLinksService.Default.pipe(Layer.provide(Layer.succeed(Sqlite, sqlite)));
+    const layer = PasswordLinksService.Default.pipe(Layer.provide(Layer.mergeAll(Layer.succeed(Sqlite, sqlite), DbBunLive(sqlite))));
     const ctx = Effect.runSync(Effect.scoped(Layer.build(layer)));
     const svc = Context.get(ctx, PasswordLinksService);
-    const result = Effect.runSync(Effect.either(svc.issue("no-such-user")));
+    const result = await Effect.runPromise(Effect.either(svc.issue("no-such-user")));
     expect(Either.isLeft(result)).toBe(true);
     if (Either.isLeft(result)) expect(result.left).toBeInstanceOf(RowNotFound);
     sqlite.close();

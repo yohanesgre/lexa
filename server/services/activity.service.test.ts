@@ -7,6 +7,7 @@ import { Effect, Layer, Context, Either } from "effect";
 import { Database } from "bun:sqlite";
 import { runMigrations } from "../db/migrate";
 import { Sqlite, initSqlite, withTx, DbError } from "../db/database";
+import { DbBunLive } from "../db/db";
 import { ActivityService } from "./activity.service";
 
 const MIGRATIONS = fileURLToPath(new URL("../../migrations", import.meta.url));
@@ -51,16 +52,16 @@ function seed(db: Database) {
 }
 
 function makeService(db: Database) {
-  const layer = ActivityService.Default.pipe(Layer.provide(Layer.succeed(Sqlite, db)));
+  const layer = ActivityService.Default.pipe(Layer.provide(Layer.mergeAll(Layer.succeed(Sqlite, db), DbBunLive(db))));
   const ctx = Effect.runSync(Effect.scoped(Layer.build(layer)));
   return Context.get(ctx, ActivityService);
 }
 
 describe("ActivityService", () => {
-  it("append inserts an activity row with the actor fields", () => {
+  it("append inserts an activity row with the actor fields", async () => {
     seed(db);
     const svc = makeService(db);
-    Effect.runSync(
+    await Effect.runPromise(
       Effect.gen(function* () {
         const ev = yield* svc.append("t1", { kind: "user", label: "Maria", userId: "u1" }, "created", "Maria created this task");
         expect(ev.id).toBeGreaterThan(0);
@@ -74,7 +75,7 @@ describe("ActivityService", () => {
     );
   });
 
-  it("merges events and comments chronologically with keyset pagination", () => {
+  it("merges events and comments chronologically with keyset pagination", async () => {
     seed(db);
     // Explicit created_at so ordering is deterministic: event 01-01 (oldest),
     // comment 01-02, event 01-03 (newest).
@@ -82,7 +83,7 @@ describe("ActivityService", () => {
     db.prepare("INSERT INTO task_comments (task_id, author_id, author_kind, author_label, body, created_at) VALUES ('t1','u1','user','Maria','{\"type\":\"doc\",\"content\":[]}','2026-01-02 10:00:00')").run();
     db.prepare("INSERT INTO task_activity (task_id, actor_kind, actor_label, actor_user_id, type, message, created_at) VALUES ('t1','user','Maria','u1','moved','new event','2026-01-03 10:00:00')").run();
     const svc = makeService(db);
-    Effect.runSync(
+    await Effect.runPromise(
       Effect.gen(function* () {
         // page 1 limit 2, ascending: [comment 01-02, event 01-03] — newest two
         const page1 = yield* svc.listMerged("t1", null, 2);
@@ -100,10 +101,10 @@ describe("ActivityService", () => {
     );
   });
 
-  it("append is nested-transaction-safe", () => {
+  it("append is nested-transaction-safe", async () => {
     seed(db);
     const svc = makeService(db);
-    const result = Effect.runSync(
+    const result = await Effect.runPromise(
       Effect.either(
         withTx(db, Effect.gen(function* () {
           yield* svc.append("t1", { kind: "system", label: "system", userId: null }, "archived", "Task archived");

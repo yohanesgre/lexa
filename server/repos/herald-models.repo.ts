@@ -1,5 +1,5 @@
 import { Effect } from "effect";
-import { Sqlite, queryAll, queryFirst, run, batch, withTx, DbError, RowNotFound, ConstraintViolation } from "../db/database";
+import { Db, queryAll, queryFirst, run, batch, withTx, DbError, RowNotFound, ConstraintViolation } from "../db/db";
 import type { ProviderKind, HeraldModelRow } from "../../shared/herald";
 
 export interface HeraldModelDbRow {
@@ -26,7 +26,7 @@ function toDomain(row: HeraldModelDbRow): HeraldModelRow {
 
 export class HeraldModelsRepo extends Effect.Service<HeraldModelsRepo>()("Lexa/HeraldModelsRepo", {
   effect: Effect.gen(function* () {
-    const db = yield* Sqlite;
+    const db = yield* Db;
 
     return {
       create: (input: { id: string; providerId: string; modelId: string; kind: ProviderKind; priority?: number; enabled?: boolean }): Effect.Effect<HeraldModelRow, ConstraintViolation | DbError | RowNotFound> =>
@@ -68,7 +68,7 @@ export class HeraldModelsRepo extends Effect.Service<HeraldModelsRepo>()("Lexa/H
       delete: (id: string): Effect.Effect<void, ConstraintViolation | DbError> =>
         Effect.gen(function* () {
           yield* run(db, `DELETE FROM herald_models WHERE id = ?`, id);
-          const rows = db.prepare(`SELECT project_id, fallback_model_ids FROM herald_settings`).all() as Array<{ project_id: string; fallback_model_ids: string }>;
+          const rows = yield* queryAll<{ project_id: string; fallback_model_ids: string }>(db, `SELECT project_id, fallback_model_ids FROM herald_settings`);
           for (const r of rows) {
             let ids: string[] = [];
             try { const v = JSON.parse(r.fallback_model_ids ?? "[]"); if (Array.isArray(v)) ids = v.filter((x: unknown) => typeof x === "string"); } catch {}

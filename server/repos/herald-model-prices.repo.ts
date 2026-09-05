@@ -1,5 +1,5 @@
 import { Effect } from "effect";
-import { Sqlite, queryAll, queryFirst, run, DbError, RowNotFound, ConstraintViolation } from "../db/database";
+import { Db, queryAll, queryFirst, run, DbError, RowNotFound, ConstraintViolation } from "../db/db";
 import type { HeraldModelPrice } from "../../shared/herald";
 
 export interface HeraldModelPriceRow {
@@ -15,7 +15,7 @@ function toDomain(row: HeraldModelPriceRow): HeraldModelPrice {
 
 export class HeraldModelPricesRepo extends Effect.Service<HeraldModelPricesRepo>()("Lexa/HeraldModelPricesRepo", {
   effect: Effect.gen(function* () {
-    const db = yield* Sqlite;
+    const db = yield* Db;
 
     return {
       upsert: (input: { model: string; promptPrice: number; completionPrice: number }): Effect.Effect<HeraldModelPrice, ConstraintViolation | DbError | RowNotFound> =>

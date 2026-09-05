@@ -7,6 +7,7 @@ import { Effect, Layer, Context } from "effect";
 import { Database } from "bun:sqlite";
 import { runMigrations } from "../db/migrate";
 import { Sqlite } from "../db/database";
+import { DbBunLive } from "../db/db";
 import { TaskLinkRepo } from "./task-link.repo";
 
 const MIGRATIONS = fileURLToPath(new URL("../../migrations", import.meta.url));
@@ -32,10 +33,10 @@ function makeRepo() {
   const db = new Database(path);
   db.exec("PRAGMA foreign_keys = ON");
   db.exec(SEED);
-  const layer = TaskLinkRepo.Default.pipe(Layer.provide(Layer.succeed(Sqlite, db)));
+  const layer = TaskLinkRepo.Default.pipe(Layer.provide(Layer.mergeAll(Layer.succeed(Sqlite, db), DbBunLive(db))));
   const ctx = Effect.runSync(Effect.scoped(Layer.build(layer)));
   const repo = Context.get(ctx, TaskLinkRepo);
-  const search = (...args: Parameters<typeof repo.search>) => Effect.runSync(repo.search(...args));
+  const search = async (...args: Parameters<typeof repo.search>) => await Effect.runPromise(repo.search(...args));
   return { search, close: () => db.close() };
 }
 
@@ -45,42 +46,42 @@ afterEach(() => {
 });
 
 describe("TaskLinkRepo.search LIKE escaping", () => {
-  it("treats % as a literal character — does not match all rows", () => {
+  it("treats % as a literal character — does not match all rows", async () => {
     const repo = makeRepo();
     try {
-      const rows = repo.search("p1", "%", "none");
+      const rows = await repo.search("p1", "%", "none");
       expect(rows.map((r) => r.title)).toEqual(["Progress 50% done"]);
     } finally { repo.close(); }
   });
 
-  it("treats _ as a literal character — does not match all rows", () => {
+  it("treats _ as a literal character — does not match all rows", async () => {
     const repo = makeRepo();
     try {
-      const rows = repo.search("p1", "_", "none");
+      const rows = await repo.search("p1", "_", "none");
       expect(rows.map((r) => r.title)).toEqual(["under_score name"]);
     } finally { repo.close(); }
   });
 
-  it("treats backslash as a literal character", () => {
+  it("treats backslash as a literal character", async () => {
     const repo = makeRepo();
     try {
-      const rows = repo.search("p1", "\\", "none");
+      const rows = await repo.search("p1", "\\", "none");
       expect(rows.map((r) => r.title)).toEqual(["back\\slash name"]);
     } finally { repo.close(); }
   });
 
-  it("plain substring search still works", () => {
+  it("plain substring search still works", async () => {
     const repo = makeRepo();
     try {
-      const rows = repo.search("p1", "plain", "none");
+      const rows = await repo.search("p1", "plain", "none");
       expect(rows.map((r) => r.title)).toEqual(["plain title"]);
     } finally { repo.close(); }
   });
 
-  it("excludes the given task id", () => {
+  it("excludes the given task id", async () => {
     const repo = makeRepo();
     try {
-      const rows = repo.search("p1", "plain", "t3");
+      const rows = await repo.search("p1", "plain", "t3");
       expect(rows).toEqual([]);
     } finally { repo.close(); }
   });

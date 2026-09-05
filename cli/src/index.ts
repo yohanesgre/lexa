@@ -543,11 +543,17 @@ Hearth workspaces (local machine view):
   machine workspace list                         per-project dirs under ~/.lexa/<host>/projects/ (per server)
   machine workspace sync                         re-index projects from the server + provision
 
-Deploy (Docker + cloudflared tunnel):
-  deploy <domain> [staging|prod]          Cloudflare tunnel provisioning,
+Deploy (Docker + cloudflared tunnel, outbound-only — CGNAT-safe):
+  deploy <domain> [staging|prod] [--direct]
+                                          tunnel provisioning (skipped with
+                                           --direct: no Cloudflare, publishes
+                                           :3000 for your own reverse proxy;
+                                           requires --public-url),
                                            .env.<flavor> + docker compose up
                                            (redeploy = upgrade: pulls the latest image;
                                            --image <tag> pins a version; --clean wipes the DB)
+                                           --runtime workers: Workers flavor
+                                            (D1+R2+KV provisioning)
   undeploy <domain> [staging|prod]        teardown: containers, volume, CF resources,
                                            local state (deploy dir + creds)
 

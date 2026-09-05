@@ -1,6 +1,6 @@
 import { Context, Effect, Layer } from "effect";
-import { Database } from "bun:sqlite";
-import { getSetting } from "../db/settings";
+import type { Database } from "bun:sqlite";
+import { queryFirst, type DbDriver } from "../db/db";
 import { GithubApiError } from "../api/errors";
 import { createAppJwt, verifyWebhookSignature } from "./crypto";
 
@@ -38,10 +38,34 @@ export const GitHubConfigLive = Layer.effect(GitHubConfig, Effect.sync(() => con
 // the holder — called at boot (after the env mirror) and after every
 // PUT /api/settings/github.
 export function syncGitHubConfigFromDb(db: Database): void {
-  const nonEmpty = (v: string | null): string => (v !== null && v.trim() !== "" ? v : "");
-  configHolder.appId = nonEmpty(getSetting(db, "github_app_id"));
-  configHolder.privateKey = nonEmpty(getSetting(db, "github_private_key"));
-  configHolder.webhookSecret = nonEmpty(getSetting(db, "github_webhook_secret"));
+  configHolder.appId = nonEmptySetting(
+    (db.prepare("SELECT value FROM settings WHERE key = ?").get("github_app_id") as { value: string } | null)?.value ?? null
+  );
+  configHolder.privateKey = nonEmptySetting(
+    (db.prepare("SELECT value FROM settings WHERE key = ?").get("github_private_key") as { value: string } | null)?.value ?? null
+  );
+  configHolder.webhookSecret = nonEmptySetting(
+    (db.prepare("SELECT value FROM settings WHERE key = ?").get("github_webhook_secret") as { value: string } | null)?.value ?? null
+  );
+}
+
+function nonEmptySetting(v: string | null): string {
+  return v !== null && v.trim() !== "" ? v : "";
+}
+
+// Async port of syncGitHubConfigFromDb over a DbDriver (Workers/D1 path).
+// Same holder, same DB-only semantics — missing rows read as "".
+export function syncGitHubConfigFromDbAsync(driver: DbDriver): Effect.Effect<void, never> {
+  const read = (key: string): Effect.Effect<string, never> =>
+    queryFirst<{ value: string }>(driver, "SELECT value FROM settings WHERE key = ?", key).pipe(
+      Effect.map((row) => nonEmptySetting(row.value)),
+      Effect.catchAll(() => Effect.succeed(""))
+    );
+  return Effect.gen(function* () {
+    configHolder.appId = yield* read("github_app_id");
+    configHolder.privateKey = yield* read("github_private_key");
+    configHolder.webhookSecret = yield* read("github_webhook_secret");
+  });
 }
 
 // Drops cached installation ids and tokens — a credential/app change must not

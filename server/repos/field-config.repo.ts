@@ -1,5 +1,5 @@
 import { Effect } from "effect";
-import { Sqlite, queryAll, run, batch, DbError, ConstraintViolation } from "../db/database";
+import { Db, queryAll, run, batch, BatchStmt, DbError, ConstraintViolation } from "../db/db";
 import { PriorityOptionRow, TypeOptionRow, rowToFieldOption } from "../../shared/db";
 import type { FieldConfig, FieldOption } from "../../shared/types";
 
@@ -11,7 +11,7 @@ function table(kind: FieldKind): string {
 
 export class FieldConfigRepo extends Effect.Service<FieldConfigRepo>()("Lexa/FieldConfigRepo", {
   effect: Effect.gen(function* () {
-    const db = yield* Sqlite;
+    const db = yield* Db;
 
     return {
       findByProject: (projectId: string): Effect.Effect<FieldConfig, DbError> =>
@@ -89,7 +89,7 @@ export class FieldConfigRepo extends Effect.Service<FieldConfigRepo>()("Lexa/Fie
       // Replace the whole list for a project atomically (used by PUT field-config).
       replaceList: (projectId: string, kind: FieldKind, options: { id: string; label: string; color: string; position: number }[]): Effect.Effect<void, ConstraintViolation | DbError> => {
         const t = table(kind);
-        const stmts: { sql: string; params: unknown[] }[] = [
+        const stmts: BatchStmt[] = [
           { sql: `DELETE FROM ${t} WHERE project_id = ?`, params: [projectId] },
           ...options.map((o) => ({
             sql: `INSERT INTO ${t} (id, project_id, label, color, position) VALUES (?, ?, ?, ?, ?)`,

@@ -1,25 +1,21 @@
 import { Effect } from "effect";
-import { Sqlite, queryAll, queryFirst, run, DbError, RowNotFound, ConstraintViolation } from "../db/database";
+import { Db, queryAll, queryFirst, runReturning, DbError, RowNotFound, ConstraintViolation } from "../db/db";
 import { CommentRow, rowToComment } from "../../shared/db";
 import type { TaskComment, ActorKind } from "../../shared/types";
 
 export class CommentRepo extends Effect.Service<CommentRepo>()("Lexa/CommentRepo", {
   effect: Effect.gen(function* () {
-    const db = yield* Sqlite;
+    const db = yield* Db;
 
     const insert = (input: { taskId: string; authorId: string | null; authorKind: ActorKind; authorLabel: string; body: string; viaHerald?: boolean }): Effect.Effect<TaskComment, DbError | ConstraintViolation> =>
       Effect.gen(function* () {
-        yield* run(
+        const row = yield* runReturning<CommentRow>(
           db,
           `INSERT INTO task_comments (task_id, author_id, author_kind, author_label, body, via_herald)
-           VALUES (?, ?, ?, ?, ?, ?)`,
+           VALUES (?, ?, ?, ?, ?, ?)
+           RETURNING id, task_id, author_id, author_kind, author_label, body, via_herald, edited_at, deleted_at, created_at`,
           input.taskId, input.authorId, input.authorKind, input.authorLabel, input.body,
           input.viaHerald === true ? 1 : 0
-        );
-        const row = yield* queryFirst<CommentRow>(
-          db,
-          `SELECT id, task_id, author_id, author_kind, author_label, body, via_herald, edited_at, deleted_at, created_at
-           FROM task_comments WHERE id = last_insert_rowid()`
         ).pipe(
           Effect.catchTag("RowNotFound", () => Effect.fail(new DbError({ message: "comment row vanished after insert" })))
         );

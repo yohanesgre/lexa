@@ -119,6 +119,19 @@ describe("materializeCompose", () => {
     expect(existsSync(join(out, "docker-compose.yml"))).toBe(true);
   });
 
+  it("writes the direct overlay instead of the flavor overlay with --direct", async () => {
+    const mod = await import("./deploy");
+    const deployDir = mkdtempSync(join(tmpdir(), "lexa-deploy-dir-"));
+    const out = mod.materializeCompose("prod", { "deploy-dir": deployDir, direct: true }, "example.com");
+    expect(out).toBe(deployDir);
+    const files = readdirSync(deployDir).sort();
+    expect(files).toEqual(["docker-compose.direct.yml", "docker-compose.yml"].sort());
+    const overlay = readFileSync(join(deployDir, "docker-compose.direct.yml"), "utf-8");
+    expect(overlay).toMatch(/ports:/);
+    expect(overlay).not.toMatch(/tunnel/);
+    rmSync(deployDir, { recursive: true, force: true });
+  });
+
   it("falls back to the repo cwd when no compose files are embedded", async () => {
     composeMocks.empty = true;
     vi.resetModules();
@@ -307,6 +320,72 @@ describe("cmdDeploy end-to-end", () => {
     const cmds = childMocks.spawnSyncCalls.map((c) => c.args.join(" "));
     expect(cmds.some((a) => a.includes("down -v"))).toBe(true);
     expect(cmds.some((a) => a.includes("up -d"))).toBe(true);
+    rmSync(deployDir, { recursive: true, force: true });
+  });
+
+  it("--direct without a CF token succeeds: no CF calls, env has public URL and no tunnel token", async () => {
+    Object.defineProperty(process.stdin, "isTTY", { value: false, configurable: true });
+    delete process.env.CF_API_TOKEN;
+    delete process.env.CLOUDFLARE_API_TOKEN;
+    delete process.env.LXK_PUBLIC_URL;
+    const { "cf-token": _cfToken, "deploy-dir": _deployDirFlag, ...noToken } = DEPLOY_FLAGS;
+    const { deployDir } = await runDeploy({ ...noToken, direct: true, "public-url": "https://lexa.example.com" });
+    expect(cfMocks.requests.length).toBe(0);
+    const env = readFileSync(join(deployDir, ".env.prod"), "utf-8");
+    expect(env).toContain("LXK_PUBLIC_URL=https://lexa.example.com");
+    expect(env).not.toMatch(/CF_TUNNEL_TOKEN=/);
+    const up = childMocks.spawnSyncCalls.find((c) => c.args.includes("up"));
+    expect(up?.args).toContain("docker-compose.direct.yml");
+    const files = readdirSync(deployDir).sort();
+    expect(files).toContain("docker-compose.direct.yml");
+    expect(files).not.toContain("docker-compose.prod.yml");
+    rmSync(deployDir, { recursive: true, force: true });
+  });
+
+  it("--direct without LXK_PUBLIC_URL fails explicitly", async () => {
+    Object.defineProperty(process.stdin, "isTTY", { value: false, configurable: true });
+    delete process.env.CF_API_TOKEN;
+    delete process.env.CLOUDFLARE_API_TOKEN;
+    delete process.env.LXK_PUBLIC_URL;
+    stubCfApi();
+    const deployDir = mkdtempSync(join(tmpdir(), "lexa-deploy-e2e-"));
+    const log = vi.spyOn(console, "log").mockImplementation(() => {});
+    const mod = await import("./deploy");
+    const cfg = (await import("./config")).CliConfigService;
+    const svc = Effect.runSync(Effect.scoped(Layer.build(cfg.Default)));
+    const { "cf-token": _cfTokenDirect, ...noTokenDirect } = DEPLOY_FLAGS;
+    const err = (await Effect.runPromise(
+      mod.cmdDeploy({ ...noTokenDirect, "deploy-dir": deployDir, direct: true }, ["example.com", "prod"]).pipe(
+        Effect.provideService(cfg, Context.get(svc, cfg)),
+      ),
+    ).catch((e) => e)) as Error;
+    log.mockRestore();
+    expect(err.message).toMatch(/LXK_PUBLIC_URL required with --direct/);
+    expect(cfMocks.requests.length).toBe(0);
+    expect(childMocks.spawnSyncCalls.some((c) => c.args.includes("up"))).toBe(false);
+    rmSync(deployDir, { recursive: true, force: true });
+  });
+
+  it("without --direct and without a CF token fails on a non-TTY", async () => {
+    Object.defineProperty(process.stdin, "isTTY", { value: false, configurable: true });
+    delete process.env.CF_API_TOKEN;
+    delete process.env.CLOUDFLARE_API_TOKEN;
+    stubCfApi();
+    const deployDir = mkdtempSync(join(tmpdir(), "lexa-deploy-e2e-"));
+    const log = vi.spyOn(console, "log").mockImplementation(() => {});
+    const mod = await import("./deploy");
+    const cfg = (await import("./config")).CliConfigService;
+    const svc = Effect.runSync(Effect.scoped(Layer.build(cfg.Default)));
+    const { "cf-token": _cfTokenMissing, ...noTokenMissing } = DEPLOY_FLAGS;
+    const err = (await Effect.runPromise(
+      mod.cmdDeploy({ ...noTokenMissing, "deploy-dir": deployDir }, ["example.com", "prod"]).pipe(
+        Effect.provideService(cfg, Context.get(svc, cfg)),
+      ),
+    ).catch((e) => e)) as Error;
+    log.mockRestore();
+    expect(err.message).toMatch(/CF API token required/);
+    expect(cfMocks.requests.length).toBe(0);
+    expect(childMocks.spawnSyncCalls.some((c) => c.args.includes("up"))).toBe(false);
     rmSync(deployDir, { recursive: true, force: true });
   });
 });

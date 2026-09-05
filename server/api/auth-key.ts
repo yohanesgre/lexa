@@ -1,5 +1,8 @@
 import { createHash, timingSafeEqual } from "node:crypto";
-import { Database } from "bun:sqlite";
+import type { Database } from "bun:sqlite";
+import { Effect } from "effect";
+import { queryFirst, run, type DbDriver } from "../db/db";
+import type { DbError } from "../db/db";
 
 export interface ApiKeyIdentity {
   keyId: string;
@@ -39,6 +42,48 @@ export function resolveApiKeyIdentity(authHeader: string, headers: Headers, db: 
   } catch {
     return null;
   }
+}
+
+// Async port of resolveApiKeyIdentity over a DbDriver (Workers/D1 path).
+// Same SQL, same key-shape validation, same hourly last_used_at touch —
+// the sync version above stays the Bun hot path. Returns null on any miss
+// or failure, mirroring the sync try/catch.
+export function resolveApiKeyIdentityAsync(
+  driver: DbDriver,
+  authHeader: string
+): Effect.Effect<ApiKeyIdentity | null, DbError> {
+  if (!authHeader.startsWith("Bearer ")) return Effect.succeed(null);
+  const key = authHeader.slice(7);
+  if (!key.startsWith("lxk_") || !/^lxk_[0-9A-Za-z]{43}$/.test(key)) return Effect.succeed(null);
+  const keyHash = createHash("sha256").update(key).digest("hex");
+  return Effect.gen(function* () {
+    const row = yield* queryFirst<{ id: string; name: string; user_id: string | null }>(
+      driver,
+      "SELECT id, name, user_id FROM api_keys WHERE key_hash = ?",
+      keyHash
+    );
+    yield* run(
+      driver,
+      "UPDATE api_keys SET last_used_at = datetime('now') WHERE id = ? AND (last_used_at IS NULL OR last_used_at < datetime('now', '-1 hour'))",
+      row.id
+    );
+    let userId: string | null = null;
+    let userName: string | null = null;
+    let role: "admin" | "member" = "admin";
+    if (row.user_id) {
+      const user = yield* queryFirst<{ role: "superadmin" | "member"; name: string }>(
+        driver,
+        "SELECT role, name FROM users WHERE id = ?",
+        row.user_id
+      );
+      role = user.role === "superadmin" ? "admin" : "member";
+      userId = row.user_id;
+      userName = user.name;
+    }
+    return { keyId: row.id, keyName: row.name, userId, userName, role };
+  }).pipe(
+    Effect.catchAll(() => Effect.succeed(null))
+  );
 }
 
 // Constant-time comparison (sha256 digest length is fixed, so timingSafeEqual

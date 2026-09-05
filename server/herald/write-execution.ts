@@ -3,7 +3,7 @@ import { InvalidArgs, TaskNotFound, WikiPageNotFound, errorCodeMap } from "../ap
 import type { HeraldPendingWriteRow } from "../repos/herald-pending-writes.repo";
 import type { HeraldWriteToolName } from "./write-tools";
 import type { TipTapDoc, Actor } from "../../shared/types";
-import type { Sqlite } from "../db/database";
+import type { DbDriver } from "../db/db";
 import type { TaskRepo } from "../repos/task.repo";
 import type { WikiRepo } from "../repos/wiki.repo";
 import type { HeraldPendingWritesRepo } from "../repos/herald-pending-writes.repo";
@@ -15,7 +15,7 @@ import type { SwimlaneService } from "../services/swimlane.service";
 import type { AuthorizationService } from "../services/authorization.service";
 
 export type HeraldWriteExecutionCtx = {
-  db: Sqlite;
+  db: DbDriver;
   taskService: TaskService;
   commentService: CommentService;
   wikiService: WikiService;
@@ -154,8 +154,7 @@ export const executeHeraldWrite = (row: HeraldPendingWriteRow, ctx: HeraldWriteE
           const svc = ctx.swimlaneService as unknown as { update(a: string, b: unknown): Effect.Effect<unknown, unknown>; move?: (a: string, b: string | null) => Effect.Effect<unknown, unknown> };
           if (svc.move) return yield* svc.move(swimlaneId, milestoneId);
           if (svc.update) return yield* svc.update(swimlaneId, { milestoneId });
-          const dbAny = ctx.db as unknown as { prepare(sql: string): { run(...a: unknown[]): unknown } };
-          dbAny.prepare(`UPDATE swimlanes SET milestone_id = ?, updated_at = datetime('now') WHERE id = ?`).run(milestoneId, swimlaneId);
+          yield* Effect.promise(() => ctx.db.prepare(`UPDATE swimlanes SET milestone_id = ?, updated_at = datetime('now') WHERE id = ?`).run(milestoneId, swimlaneId));
           return undefined as unknown as never;
         }
         case "delete_task": {

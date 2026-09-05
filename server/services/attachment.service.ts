@@ -1,6 +1,6 @@
 import { Effect } from "effect";
 import { createHash, randomUUID } from "node:crypto";
-import { Sqlite, withTx, DbError, ConstraintViolation } from "../db/database";
+import { Db, withTx, DbError, ConstraintViolation } from "../db/db";
 import { AttachmentRepo, AttachmentRow } from "../repos/attachment.repo";
 import { ActivityService } from "./activity.service";
 import { UserProjectRoleRepo } from "../repos/user-project-role.repo";
@@ -43,7 +43,7 @@ export class AttachmentService extends Effect.Service<AttachmentService>()("Lexa
     const shareRepo = yield* WikiShareRepo;
     const storage = yield* Storage;
     const storageCfg = yield* StorageConfig;
-    const db = yield* Sqlite;
+    const db = yield* Db;
 
     // Row → shared API shape; uploadedByLabel resolved server-side so the UI
     // shows a name without extra fetches.

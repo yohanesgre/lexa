@@ -7,6 +7,7 @@ import { Effect, Layer, Context } from "effect";
 import { Database } from "bun:sqlite";
 import { runMigrations } from "../db/migrate";
 import { Sqlite, initSqlite } from "../db/database";
+import { DbBunLive } from "../db/db";
 import { TaskRepo } from "./task.repo";
 import { TaskService } from "../services/task.service";
 import type { Actor } from "../../shared/types";
@@ -61,13 +62,13 @@ function seed(db: Database) {
 }
 
 function makeRepo(db: Database) {
-  const layer = TaskRepo.Default.pipe(Layer.provide(Layer.succeed(Sqlite, db)));
+  const layer = TaskRepo.Default.pipe(Layer.provide(Layer.mergeAll(Layer.succeed(Sqlite, db), DbBunLive(db))));
   const ctx = Effect.runSync(Effect.scoped(Layer.build(layer)));
   return Context.get(ctx, TaskRepo);
 }
 
 function makeService(db: Database) {
-  const layer = TaskService.Default.pipe(Layer.provide(Layer.succeed(Sqlite, db)));
+  const layer = TaskService.Default.pipe(Layer.provide(Layer.mergeAll(Layer.succeed(Sqlite, db), DbBunLive(db))));
   const ctx = Effect.runSync(Effect.scoped(Layer.build(layer)));
   return Context.get(ctx, TaskService);
 }
@@ -75,10 +76,10 @@ function makeService(db: Database) {
 const maria: Actor = { kind: "user", label: "Maria", userId: "u1" };
 
 describe("TaskRepo.findLastInColumn", () => {
-  it("anchors on the max position including archived tasks", () => {
+  it("anchors on the max position including archived tasks", async () => {
     seed(db);
     const repo = makeRepo(db);
-    const last = Effect.runSync(repo.findLastInColumn("p1", "c1"));
+    const last = await Effect.runPromise(repo.findLastInColumn("p1", "c1"));
     expect(last.id).toBe("t-arch");
     expect(last.archivedAt).not.toBeNull();
     expect(last.position).toBe("a1");
@@ -86,10 +87,10 @@ describe("TaskRepo.findLastInColumn", () => {
 });
 
 describe("create after archived last position", () => {
-  it("creates a task in a column whose last position is an archived task", () => {
+  it("creates a task in a column whose last position is an archived task", async () => {
     seed(db);
     const svc = makeService(db);
-    const { task } = Effect.runSync(
+    const { task } = await Effect.runPromise(
       svc.create(maria, { projectId: "p1", columnId: "c1", title: "New", priority: "prio-1", type: "type-1" })
     );
     expect(task.position > "a1").toBe(true);
@@ -99,7 +100,7 @@ describe("create after archived last position", () => {
 });
 
 describe("TaskRepo.findUrgentAcrossAllProjects", () => {
-  it("excludes tasks in a closed (done) column but keeps unmapped and open ones", () => {
+  it("excludes tasks in a closed (done) column but keeps unmapped and open ones", async () => {
     seed(db);
     db.prepare("INSERT INTO columns (id, project_id, name, position, github_state) VALUES ('c2','p1','Done',1,'closed')").run();
     db.prepare("INSERT INTO columns (id, project_id, name, position, github_state) VALUES ('c3','p1','Later',2,NULL)").run();
@@ -107,7 +108,7 @@ describe("TaskRepo.findUrgentAcrossAllProjects", () => {
                 VALUES ('t-done','p1','c2','s1','Done urgent','{"type":"doc","content":[]}','prio-1','type-1','b0','2026-01-04 10:00:00'),
                        ('t-later','p1','c3','s1','Later urgent','{"type":"doc","content":[]}','prio-1','type-1','c0','2026-01-05 10:00:00')`).run();
     const repo = makeRepo(db);
-    const urgent = Effect.runSync(repo.findUrgentAcrossAllProjects(50));
+    const urgent = await Effect.runPromise(repo.findUrgentAcrossAllProjects(50));
     expect(urgent.map((t) => t.id).sort()).toEqual(["t-later", "t-live"]);
   });
 });

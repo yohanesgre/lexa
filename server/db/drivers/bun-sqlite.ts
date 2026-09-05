@@ -31,6 +31,7 @@ export function createBunSqliteDriver(db: Database): DbDriver {
   let txDepth = 0;
 
   const driver: DbDriver = {
+    supportsInteractiveTx: true,
     prepare(sql: string): DbStmt {
       return new BunSqliteStmt(db.prepare(sql));
     },

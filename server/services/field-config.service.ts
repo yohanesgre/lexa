@@ -1,7 +1,7 @@
 import { Effect } from "effect";
 import { FieldConfigRepo } from "../repos/field-config.repo";
 import { ProjectRepo } from "../repos/project.repo";
-import { DbError, RowNotFound, ConstraintViolation, Sqlite, withTx } from "../db/database";
+import { DbError, RowNotFound, ConstraintViolation, Db, withTx } from "../db/db";
 import { ProjectNotFound, OptionInUse, InvalidOption } from "../api/errors";
 import type { FieldConfig, FieldOption } from "../../shared/types";
 
@@ -10,7 +10,7 @@ export class FieldConfigService extends Effect.Service<FieldConfigService>()("Le
   effect: Effect.gen(function* () {
     const repo = yield* FieldConfigRepo;
     const projectRepo = yield* ProjectRepo;
-    const db = yield* Sqlite;
+    const db = yield* Db;
 
     const getByProject = (projectId: string): Effect.Effect<FieldConfig, ProjectNotFound | DbError> =>
       Effect.gen(function* () {

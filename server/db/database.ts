@@ -1,11 +1,11 @@
-import { Context, Effect, Layer, Data } from "effect";
+import { Context, Effect, Layer } from "effect";
 import { Database } from "bun:sqlite";
 import { chmodSync, existsSync } from "node:fs";
 import type { SqlParam } from "./driver";
 
-export class DbError extends Data.TaggedError("DbError")<{ message: string; cause?: unknown }> {}
-export class RowNotFound extends Data.TaggedError("RowNotFound")<{ table: string }> {}
-export class ConstraintViolation extends Data.TaggedError("ConstraintViolation")<{ message: string; isPositionConflict: boolean }> {}
+import { DbError, RowNotFound, ConstraintViolation } from "./driver";
+
+export { DbError, RowNotFound, ConstraintViolation };
 
 export class Sqlite extends Context.Tag("Lexa/Sqlite")<Sqlite, Database>() {}
 

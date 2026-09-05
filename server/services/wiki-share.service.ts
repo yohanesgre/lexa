@@ -3,7 +3,7 @@ import { randomBytes, randomUUID } from "node:crypto";
 import { WikiShareRepo } from "../repos/wiki-share.repo";
 import type { WikiShareLinkRow, SubtreeRow } from "../repos/wiki-share.repo";
 import { WikiRepo } from "../repos/wiki.repo";
-import { DbError } from "../db/database";
+import { DbError } from "../db/db";
 import { ShareLinkNotFound, WikiPageNotFound } from "../api/errors";
 
 export interface SharedPageNode {

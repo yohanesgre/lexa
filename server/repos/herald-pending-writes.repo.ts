@@ -1,5 +1,5 @@
 import { Effect } from "effect";
-import { Sqlite, queryAll, queryFirst, run, DbError, ConstraintViolation } from "../db/database";
+import { Db, queryAll, queryFirst, run, DbError, ConstraintViolation } from "../db/db";
 
 export type PendingWriteStatus = "pending" | "approved" | "rejected" | "expired";
 
@@ -23,7 +23,7 @@ export interface HeraldPendingWriteRow {
 
 export class HeraldPendingWritesRepo extends Effect.Service<HeraldPendingWritesRepo>()("Lexa/HeraldPendingWritesRepo", {
   effect: Effect.gen(function* () {
-    const db = yield* Sqlite;
+    const db = yield* Db;
 
     // Insert input omits the DB-managed columns (status defaults to 'pending',
     // created_at/decided_at are set by SQL, execution_error starts NULL).

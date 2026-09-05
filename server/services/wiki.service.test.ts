@@ -7,6 +7,7 @@ import { Effect, Layer, Context, Either } from "effect";
 import { Database } from "bun:sqlite";
 import { runMigrations } from "../db/migrate";
 import { Sqlite, initSqlite } from "../db/database";
+import { DbBunLive } from "../db/db";
 import { WikiService } from "./wiki.service";
 import { ProjectNotFound, WikiPageNotFound, SlugTaken, HasChildren, SearchError } from "../api/errors";
 import type { TipTapDoc } from "../../shared/types";
@@ -52,16 +53,16 @@ function seed(db: Database) {
 }
 
 function makeService(db: Database) {
-  const layer = WikiService.Default.pipe(Layer.provide(Layer.succeed(Sqlite, db)));
+  const layer = WikiService.Default.pipe(Layer.provide(Layer.mergeAll(Layer.succeed(Sqlite, db), DbBunLive(db))));
   const ctx = Effect.runSync(Effect.scoped(Layer.build(layer)));
   return Context.get(ctx, WikiService);
 }
 
 describe("WikiService.create", () => {
-  it("creates a page with slugified title, content, and contentText", () => {
+  it("creates a page with slugified title, content, and contentText", async () => {
     seed(db);
     const svc = makeService(db);
-    const res = Effect.runSync(Effect.either(svc.create("p1", { title: "Getting Started", content: DOC, contentText: "hello" })));
+    const res = await Effect.runPromise(Effect.either(svc.create("p1", { title: "Getting Started", content: DOC, contentText: "hello" })));
     expect(Either.isRight(res)).toBe(true);
     if (Either.isRight(res)) {
       expect(res.right.slug).toBe("getting-started");
@@ -74,84 +75,84 @@ describe("WikiService.create", () => {
     }
   });
 
-  it("slug uniqueness is per project — same slug in another project is fine", () => {
+  it("slug uniqueness is per project — same slug in another project is fine", async () => {
     seed(db);
     const svc = makeService(db);
-    Effect.runSync(Effect.either(svc.create("p1", { title: "Home" })));
-    const dup = Effect.runSync(Effect.either(svc.create("p1", { title: "Home" })));
+    await Effect.runPromise(Effect.either(svc.create("p1", { title: "Home" })));
+    const dup = await Effect.runPromise(Effect.either(svc.create("p1", { title: "Home" })));
     expect(Either.isLeft(dup)).toBe(true);
     if (Either.isLeft(dup)) expect(dup.left).toBeInstanceOf(SlugTaken);
-    const other = Effect.runSync(Effect.either(svc.create("p2", { title: "Home" })));
+    const other = await Effect.runPromise(Effect.either(svc.create("p2", { title: "Home" })));
     expect(Either.isRight(other)).toBe(true);
     if (Either.isRight(other)) expect(other.right.slug).toBe("home");
   });
 
-  it("unknown project → ProjectNotFound", () => {
+  it("unknown project → ProjectNotFound", async () => {
     seed(db);
     const svc = makeService(db);
-    const res = Effect.runSync(Effect.either(svc.create("nope", { title: "X" })));
+    const res = await Effect.runPromise(Effect.either(svc.create("nope", { title: "X" })));
     expect(Either.isLeft(res)).toBe(true);
     if (Either.isLeft(res)) expect(res.left).toBeInstanceOf(ProjectNotFound);
   });
 
-  it("nested children get positions scoped to their parent", () => {
+  it("nested children get positions scoped to their parent", async () => {
     seed(db);
     const svc = makeService(db);
-    const root1 = Effect.runSync(svc.create("p1", { title: "Root 1" }));
-    const root2 = Effect.runSync(svc.create("p1", { title: "Root 2" }));
+    const root1 = await Effect.runPromise(svc.create("p1", { title: "Root 1" }));
+    const root2 = await Effect.runPromise(svc.create("p1", { title: "Root 2" }));
     expect(root1.position).toBe(0);
     expect(root2.position).toBe(1);
-    const child1 = Effect.runSync(svc.create("p1", { title: "Child 1", parentId: root1.id }));
-    const child2 = Effect.runSync(svc.create("p1", { title: "Child 2", parentId: root1.id }));
+    const child1 = await Effect.runPromise(svc.create("p1", { title: "Child 1", parentId: root1.id }));
+    const child2 = await Effect.runPromise(svc.create("p1", { title: "Child 2", parentId: root1.id }));
     expect(child1.parentId).toBe(root1.id);
     expect(child1.position).toBe(0);
     expect(child2.position).toBe(1);
     // a root sibling created after the children still counts root siblings only
-    const root3 = Effect.runSync(svc.create("p1", { title: "Root 3" }));
+    const root3 = await Effect.runPromise(svc.create("p1", { title: "Root 3" }));
     expect(root3.position).toBe(2);
   });
 });
 
 describe("WikiService.read", () => {
-  it("findByProject returns metas ordered by parent then position", () => {
+  it("findByProject returns metas ordered by parent then position", async () => {
     seed(db);
     const svc = makeService(db);
-    const root = Effect.runSync(svc.create("p1", { title: "Root" }));
-    Effect.runSync(svc.create("p1", { title: "Child", parentId: root.id }));
-    const pages = Effect.runSync(svc.findByProject("p1"));
+    const root = await Effect.runPromise(svc.create("p1", { title: "Root" }));
+    await Effect.runPromise(svc.create("p1", { title: "Child", parentId: root.id }));
+    const pages = await Effect.runPromise(svc.findByProject("p1"));
     // ORDER BY COALESCE(parent_id, '') ASC → roots (''), then children by parent
     expect(pages.map((p) => p.title)).toEqual(["Root", "Child"]);
   });
 
-  it("findChildren returns only direct children ordered by position", () => {
+  it("findChildren returns only direct children ordered by position", async () => {
     seed(db);
     const svc = makeService(db);
-    const root = Effect.runSync(svc.create("p1", { title: "Root" }));
-    const c1 = Effect.runSync(svc.create("p1", { title: "B", parentId: root.id }));
-    const c2 = Effect.runSync(svc.create("p1", { title: "A", parentId: root.id }));
-    const children = Effect.runSync(svc.findChildren("p1", root.id));
+    const root = await Effect.runPromise(svc.create("p1", { title: "Root" }));
+    const c1 = await Effect.runPromise(svc.create("p1", { title: "B", parentId: root.id }));
+    const c2 = await Effect.runPromise(svc.create("p1", { title: "A", parentId: root.id }));
+    const children = await Effect.runPromise(svc.findChildren("p1", root.id));
     expect(children.map((c) => c.id)).toEqual([c1.id, c2.id]);
     expect(children.map((c) => c.title)).toEqual(["B", "A"]);
   });
 
-  it("findBySlug missing → WikiPageNotFound; unknown project → ProjectNotFound", () => {
+  it("findBySlug missing → WikiPageNotFound; unknown project → ProjectNotFound", async () => {
     seed(db);
     const svc = makeService(db);
-    const missing = Effect.runSync(Effect.either(svc.findBySlug("p1", "nope")));
+    const missing = await Effect.runPromise(Effect.either(svc.findBySlug("p1", "nope")));
     expect(Either.isLeft(missing)).toBe(true);
     if (Either.isLeft(missing)) expect(missing.left).toBeInstanceOf(WikiPageNotFound);
-    const noProject = Effect.runSync(Effect.either(svc.findBySlug("nope", "home")));
+    const noProject = await Effect.runPromise(Effect.either(svc.findBySlug("nope", "home")));
     expect(Either.isLeft(noProject)).toBe(true);
     if (Either.isLeft(noProject)) expect(noProject.left).toBeInstanceOf(ProjectNotFound);
   });
 });
 
 describe("WikiService.update", () => {
-  it("updates title/content/contentText and records an autosave revision of the prior state", () => {
+  it("updates title/content/contentText and records an autosave revision of the prior state", async () => {
     seed(db);
     const svc = makeService(db);
-    const page = Effect.runSync(svc.create("p1", { title: "Old", content: DOC, contentText: "hello" }));
-    const updated = Effect.runSync(
+    const page = await Effect.runPromise(svc.create("p1", { title: "Old", content: DOC, contentText: "hello" }));
+    const updated = await Effect.runPromise(
       Effect.either(svc.update(page.id, { title: "New", content: JSON.stringify(DOC2), contentText: "goodbye" }))
     );
     expect(Either.isRight(updated)).toBe(true);
@@ -163,47 +164,47 @@ describe("WikiService.update", () => {
     expect(revisions).toEqual([{ title: "Old", content_text: "hello", save_type: "autosave" }]);
   });
 
-  it("slug conflict on update → ConstraintViolation (no SlugTaken at service layer)", () => {
+  it("slug conflict on update → ConstraintViolation (no SlugTaken at service layer)", async () => {
     seed(db);
     const svc = makeService(db);
-    const a = Effect.runSync(svc.create("p1", { title: "A" }));
-    Effect.runSync(svc.create("p1", { title: "B" }));
-    const res = Effect.runSync(Effect.either(svc.update(a.id, { slug: "b" })));
+    const a = await Effect.runPromise(svc.create("p1", { title: "A" }));
+    await Effect.runPromise(svc.create("p1", { title: "B" }));
+    const res = await Effect.runPromise(Effect.either(svc.update(a.id, { slug: "b" })));
     expect(Either.isLeft(res)).toBe(true);
     if (Either.isLeft(res)) expect(res.left._tag).toBe("ConstraintViolation");
   });
 
-  it("moves a page under a new parent and repositions it", () => {
+  it("moves a page under a new parent and repositions it", async () => {
     seed(db);
     const svc = makeService(db);
-    const a = Effect.runSync(svc.create("p1", { title: "A" }));
-    const b = Effect.runSync(svc.create("p1", { title: "B" }));
-    const moved = Effect.runSync(Effect.either(svc.update(b.id, { parentId: a.id, position: 5 })));
+    const a = await Effect.runPromise(svc.create("p1", { title: "A" }));
+    const b = await Effect.runPromise(svc.create("p1", { title: "B" }));
+    const moved = await Effect.runPromise(Effect.either(svc.update(b.id, { parentId: a.id, position: 5 })));
     expect(Either.isRight(moved)).toBe(true);
     if (Either.isRight(moved)) {
       expect(moved.right.parentId).toBe(a.id);
       expect(moved.right.position).toBe(5);
     }
     // back to root
-    const reRooted = Effect.runSync(Effect.either(svc.update(b.id, { parentId: null })));
+    const reRooted = await Effect.runPromise(Effect.either(svc.update(b.id, { parentId: null })));
     expect(Either.isRight(reRooted)).toBe(true);
     if (Either.isRight(reRooted)) expect(reRooted.right.parentId).toBeNull();
   });
 
-  it("missing id → WikiPageNotFound", () => {
+  it("missing id → WikiPageNotFound", async () => {
     seed(db);
     const svc = makeService(db);
-    const res = Effect.runSync(Effect.either(svc.update("nope", { title: "X" })));
+    const res = await Effect.runPromise(Effect.either(svc.update("nope", { title: "X" })));
     expect(Either.isLeft(res)).toBe(true);
     if (Either.isLeft(res)) expect(res.left).toBeInstanceOf(WikiPageNotFound);
   });
 
-  it("prunes revisions to the newest 100", () => {
+  it("prunes revisions to the newest 100", async () => {
     seed(db);
     const svc = makeService(db);
-    const page = Effect.runSync(svc.create("p1", { title: "P" }));
+    const page = await Effect.runPromise(svc.create("p1", { title: "P" }));
     for (let i = 0; i < 105; i++) {
-      Effect.runSync(svc.update(page.id, { contentText: `v${i}` }));
+      await Effect.runPromise(svc.update(page.id, { contentText: `v${i}` }));
     }
     const n = (db.prepare("SELECT COUNT(*) AS n FROM wiki_page_revisions WHERE page_id = ?").get(page.id) as { n: number }).n;
     expect(n).toBe(100);
@@ -211,16 +212,16 @@ describe("WikiService.update", () => {
 });
 
 describe("WikiService revisions", () => {
-  it("listRevisions returns newest-first summaries with saveType; getRevision returns full revision", () => {
+  it("listRevisions returns newest-first summaries with saveType; getRevision returns full revision", async () => {
     seed(db);
     const svc = makeService(db);
-    const page = Effect.runSync(svc.create("p1", { title: "P", content: DOC, contentText: "hello" }));
-    Effect.runSync(svc.update(page.id, { title: "P2" }, "manual"));
-    const summaries = Effect.runSync(svc.listRevisions("p", "p1"));
+    const page = await Effect.runPromise(svc.create("p1", { title: "P", content: DOC, contentText: "hello" }));
+    await Effect.runPromise(svc.update(page.id, { title: "P2" }, "manual"));
+    const summaries = await Effect.runPromise(svc.listRevisions("p", "p1"));
     expect(summaries).toHaveLength(1);
     expect(summaries[0]!.saveType).toBe("manual");
     expect(summaries[0]!.title).toBe("P");
-    const full = Effect.runSync(Effect.either(svc.getRevision(summaries[0]!.id)));
+    const full = await Effect.runPromise(Effect.either(svc.getRevision(summaries[0]!.id)));
     expect(Either.isRight(full)).toBe(true);
     if (Either.isRight(full)) {
       expect(full.right.pageId).toBe(page.id);
@@ -230,14 +231,14 @@ describe("WikiService revisions", () => {
     }
   });
 
-  it("restoreRevision rolls back title/slug/content and records a manual revision", () => {
+  it("restoreRevision rolls back title/slug/content and records a manual revision", async () => {
     seed(db);
     const svc = makeService(db);
-    const page = Effect.runSync(svc.create("p1", { title: "Guide", content: DOC, contentText: "old text" }));
-    Effect.runSync(svc.update(page.id, { title: "Guide 2", content: JSON.stringify(DOC2), contentText: "new text" }));
-    const revisions = Effect.runSync(svc.listRevisions("guide", "p1"));
+    const page = await Effect.runPromise(svc.create("p1", { title: "Guide", content: DOC, contentText: "old text" }));
+    await Effect.runPromise(svc.update(page.id, { title: "Guide 2", content: JSON.stringify(DOC2), contentText: "new text" }));
+    const revisions = await Effect.runPromise(svc.listRevisions("guide", "p1"));
     expect(revisions).toHaveLength(1);
-    const restored = Effect.runSync(Effect.either(svc.restoreRevision(revisions[0]!.id, "guide", "p1")));
+    const restored = await Effect.runPromise(Effect.either(svc.restoreRevision(revisions[0]!.id, "guide", "p1")));
     expect(Either.isRight(restored)).toBe(true);
     if (Either.isRight(restored)) {
       expect(restored.right.title).toBe("Guide");
@@ -248,28 +249,28 @@ describe("WikiService revisions", () => {
     expect(after.map((r) => r.save_type).sort()).toEqual(["autosave", "manual"]);
   });
 
-  it("restoring a revision of a different page → WikiPageNotFound", () => {
+  it("restoring a revision of a different page → WikiPageNotFound", async () => {
     seed(db);
     const svc = makeService(db);
-    const a = Effect.runSync(svc.create("p1", { title: "A" }));
-    const b = Effect.runSync(svc.create("p1", { title: "B" }));
-    Effect.runSync(svc.update(a.id, { title: "A2" }));
-    const revs = Effect.runSync(svc.listRevisions("a", "p1"));
-    const res = Effect.runSync(Effect.either(svc.restoreRevision(revs[0]!.id, "b", "p1")));
+    const a = await Effect.runPromise(svc.create("p1", { title: "A" }));
+    const b = await Effect.runPromise(svc.create("p1", { title: "B" }));
+    await Effect.runPromise(svc.update(a.id, { title: "A2" }));
+    const revs = await Effect.runPromise(svc.listRevisions("a", "p1"));
+    const res = await Effect.runPromise(Effect.either(svc.restoreRevision(revs[0]!.id, "b", "p1")));
     expect(Either.isLeft(res)).toBe(true);
     if (Either.isLeft(res)) expect(res.left).toBeInstanceOf(WikiPageNotFound);
-    const unchanged = Effect.runSync(svc.findBySlug("p1", "b"));
+    const unchanged = await Effect.runPromise(svc.findBySlug("p1", "b"));
     expect(unchanged.title).toBe("B");
   });
 });
 
 describe("WikiService.delete", () => {
-  it("deletes a leaf page and its revisions", () => {
+  it("deletes a leaf page and its revisions", async () => {
     seed(db);
     const svc = makeService(db);
-    const page = Effect.runSync(svc.create("p1", { title: "Leaf" }));
-    Effect.runSync(svc.update(page.id, { title: "Leaf 2" }));
-    const res = Effect.runSync(Effect.either(svc.delete(page.id)));
+    const page = await Effect.runPromise(svc.create("p1", { title: "Leaf" }));
+    await Effect.runPromise(svc.update(page.id, { title: "Leaf 2" }));
+    const res = await Effect.runPromise(Effect.either(svc.delete(page.id)));
     expect(Either.isRight(res)).toBe(true);
     const n = (db.prepare("SELECT COUNT(*) AS n FROM wiki_pages WHERE id = ?").get(page.id) as { n: number }).n;
     expect(n).toBe(0);
@@ -277,12 +278,12 @@ describe("WikiService.delete", () => {
     expect(revs).toBe(0);
   });
 
-  it("page with children → HasChildren with the child count", () => {
+  it("page with children → HasChildren with the child count", async () => {
     seed(db);
     const svc = makeService(db);
-    const parent = Effect.runSync(svc.create("p1", { title: "Parent" }));
-    Effect.runSync(svc.create("p1", { title: "Child", parentId: parent.id }));
-    const res = Effect.runSync(Effect.either(svc.delete(parent.id)));
+    const parent = await Effect.runPromise(svc.create("p1", { title: "Parent" }));
+    await Effect.runPromise(svc.create("p1", { title: "Child", parentId: parent.id }));
+    const res = await Effect.runPromise(Effect.either(svc.delete(parent.id)));
     expect(Either.isLeft(res)).toBe(true);
     if (Either.isLeft(res)) {
       expect(res.left).toBeInstanceOf(HasChildren);
@@ -292,21 +293,21 @@ describe("WikiService.delete", () => {
     expect(n).toBe(1);
   });
 
-  it("missing id → WikiPageNotFound", () => {
+  it("missing id → WikiPageNotFound", async () => {
     seed(db);
     const svc = makeService(db);
-    const res = Effect.runSync(Effect.either(svc.delete("nope")));
+    const res = await Effect.runPromise(Effect.either(svc.delete("nope")));
     expect(Either.isLeft(res)).toBe(true);
     if (Either.isLeft(res)) expect(res.left).toBeInstanceOf(WikiPageNotFound);
   });
 });
 
 describe("WikiService.search", () => {
-  it("FTS5 finds pages by contentText with a snippet", () => {
+  it("FTS5 finds pages by contentText with a snippet", async () => {
     seed(db);
     const svc = makeService(db);
-    const page = Effect.runSync(svc.create("p1", { title: "Indexing", content: DOC, contentText: "fractional indexing keeps keys short" }));
-    const results = Effect.runSync(Effect.either(svc.search("p1", "fractional")));
+    const page = await Effect.runPromise(svc.create("p1", { title: "Indexing", content: DOC, contentText: "fractional indexing keeps keys short" }));
+    const results = await Effect.runPromise(Effect.either(svc.search("p1", "fractional")));
     expect(Either.isRight(results)).toBe(true);
     if (Either.isRight(results)) {
       expect(results.right).toHaveLength(1);
@@ -315,49 +316,49 @@ describe("WikiService.search", () => {
     }
   });
 
-  it("scopes results per project and respects the limit", () => {
+  it("scopes results per project and respects the limit", async () => {
     seed(db);
     const svc = makeService(db);
-    Effect.runSync(svc.create("p1", { title: "One", contentText: "fractional" }));
-    Effect.runSync(svc.create("p1", { title: "Two", contentText: "fractional" }));
-    Effect.runSync(svc.create("p2", { title: "Other", contentText: "fractional" }));
-    const all = Effect.runSync(svc.search("p1", "fractional"));
+    await Effect.runPromise(svc.create("p1", { title: "One", contentText: "fractional" }));
+    await Effect.runPromise(svc.create("p1", { title: "Two", contentText: "fractional" }));
+    await Effect.runPromise(svc.create("p2", { title: "Other", contentText: "fractional" }));
+    const all = await Effect.runPromise(svc.search("p1", "fractional"));
     expect(all).toHaveLength(2);
-    const limited = Effect.runSync(svc.search("p1", "fractional", 1));
+    const limited = await Effect.runPromise(svc.search("p1", "fractional", 1));
     expect(limited).toHaveLength(1);
-    const other = Effect.runSync(svc.search("p2", "fractional"));
+    const other = await Effect.runPromise(svc.search("p2", "fractional"));
     expect(other).toHaveLength(1);
-    const none = Effect.runSync(svc.search("p1", "zzz"));
+    const none = await Effect.runPromise(svc.search("p1", "zzz"));
     expect(none).toEqual([]);
   });
 
-  it("update re-indexes contentText via the FTS trigger", () => {
+  it("update re-indexes contentText via the FTS trigger", async () => {
     seed(db);
     const svc = makeService(db);
-    const page = Effect.runSync(svc.create("p1", { title: "P", contentText: "alpha" }));
-    let results = Effect.runSync(svc.search("p1", "alpha"));
+    const page = await Effect.runPromise(svc.create("p1", { title: "P", contentText: "alpha" }));
+    let results = await Effect.runPromise(svc.search("p1", "alpha"));
     expect(results).toHaveLength(1);
-    results = Effect.runSync(svc.search("p1", "beta"));
+    results = await Effect.runPromise(svc.search("p1", "beta"));
     expect(results).toHaveLength(0);
-    Effect.runSync(svc.update(page.id, { contentText: "beta" }));
-    results = Effect.runSync(svc.search("p1", "beta"));
+    await Effect.runPromise(svc.update(page.id, { contentText: "beta" }));
+    results = await Effect.runPromise(svc.search("p1", "beta"));
     expect(results).toHaveLength(1);
   });
 
-  it("invalid FTS5 query → SearchError", () => {
+  it("invalid FTS5 query → SearchError", async () => {
     seed(db);
     const svc = makeService(db);
-    Effect.runSync(svc.create("p1", { title: "P", contentText: "alpha" }));
-    const res = Effect.runSync(Effect.either(svc.search("p1", "\"unterminated")));
+    await Effect.runPromise(svc.create("p1", { title: "P", contentText: "alpha" }));
+    const res = await Effect.runPromise(Effect.either(svc.search("p1", "\"unterminated")));
     expect(Either.isLeft(res)).toBe(true);
     if (Either.isLeft(res)) expect(res.left).toBeInstanceOf(SearchError);
   });
 
-  it("hyphenated query → SearchError (FTS5 parses '-' as column syntax)", () => {
+  it("hyphenated query → SearchError (FTS5 parses '-' as column syntax)", async () => {
     seed(db);
     const svc = makeService(db);
-    Effect.runSync(svc.create("p1", { title: "P", contentText: "alpha" }));
-    const res = Effect.runSync(Effect.either(svc.search("p1", "foo-bar")));
+    await Effect.runPromise(svc.create("p1", { title: "P", contentText: "alpha" }));
+    const res = await Effect.runPromise(Effect.either(svc.search("p1", "foo-bar")));
     expect(Either.isLeft(res)).toBe(true);
     if (Either.isLeft(res)) expect(res.left).toBeInstanceOf(SearchError);
   });

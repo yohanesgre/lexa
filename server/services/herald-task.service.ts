@@ -9,7 +9,7 @@ import { HearthRepo } from "../repos/hearth.repo";
 import { TaskRepo } from "../repos/task.repo";
 import { WikiRepo } from "../repos/wiki.repo";
 import { Storage } from "../storage/storage";
-import { Sqlite, DbError, RowNotFound } from "../db/database";
+import { Db, DbError, RowNotFound, queryFirst, run, type SqlParam } from "../db/db";
 import { HearthService, BLACKSMITH_AGENT, HERALD_AGENT } from "./hearth.service";
 import { loadTaskRepoContent } from "./hearth-repo-content";
 import { HeraldGateway } from "../herald/gateway.service";
@@ -45,7 +45,11 @@ export class HeraldTaskService extends Effect.Service<HeraldTaskService>()("Lexa
     const storage = yield* Storage;
     const taskRepo = yield* TaskRepo;
     const wikiRepo = yield* WikiRepo;
-    const db = yield* Sqlite;
+    const db = yield* Db;
+    const dbFirst = <T>(sql: string, ...params: SqlParam[]): Promise<T | null> =>
+      db.prepare(sql).first(...params).then((row) => row as unknown as T | null);
+    const dbAll = <T>(sql: string, ...params: SqlParam[]): Promise<T[]> =>
+      db.prepare(sql).all(...params).then((rows) => rows as unknown as T[]);
     const taskService = yield* TaskService;
     const commentService = yield* CommentService;
     const wikiService = yield* WikiService;
@@ -56,8 +60,8 @@ export class HeraldTaskService extends Effect.Service<HeraldTaskService>()("Lexa
 
     const configFromRow = (row: HeraldSettingsRow): ProviderConfig => ({ kind: (row as unknown as { kind: ProviderConfig["kind"] }).kind ?? "openai_compatible", baseUrl: (row as unknown as { base_url: string }).base_url ?? "", apiKey: (row as unknown as { api_key: string }).api_key ?? "", model: (row as unknown as { model: string }).model ?? "" });
     const visionConfigOf = (row: HeraldSettingsRow): ProviderConfig => ({ kind: (row as unknown as { kind: ProviderConfig["kind"] }).kind ?? "openai_compatible", baseUrl: (row as unknown as { base_url: string }).base_url ?? "", apiKey: (row as unknown as { api_key: string }).api_key ?? "", model: (row as unknown as { vision_model: string | null }).vision_model ?? "" });
-    const resolveMimeType = (projectId: string, key: string): Promise<string> => Promise.resolve((db.prepare(`SELECT mime_type FROM attachments WHERE project_id = ? AND storage_key = ? LIMIT 1`).get(projectId, key) as { mime_type?: string } | undefined)?.mime_type ?? "image/png");
-    const skillJunctionBound = (agentId: string, skillId: string): boolean => db.prepare(`SELECT 1 FROM lexa_agent_skills WHERE agent_id = ? AND skill_id = ? LIMIT 1`).get(agentId, skillId) !== null;
+    const resolveMimeType = async (projectId: string, key: string): Promise<string> => (await dbFirst<{ mime_type?: string }>(`SELECT mime_type FROM attachments WHERE project_id = ? AND storage_key = ? LIMIT 1`, projectId, key))?.mime_type ?? "image/png";
+    const skillJunctionBound = async (agentId: string, skillId: string): Promise<boolean> => (await dbFirst(`SELECT 1 FROM lexa_agent_skills WHERE agent_id = ? AND skill_id = ? LIMIT 1`, agentId, skillId)) !== null;
     const getSettingsOrFail = (projectId: string) => settingsRepo.getByProject(projectId).pipe(Effect.catchTag("RowNotFound", () => new ProviderNotConfigured({ projectId })));
     const taskRefOf = (t: Task): TaskRef => ({ id: t.id, key: t.key, title: t.title, priority: t.priority, dueAt: t.dueAt, archivedAt: t.archivedAt, markdown: docToMarkdown(t.description as TipTapDoc) });
     const loadDocContext = (projectId: string, documentType: "task" | "wiki", documentId: string): Effect.Effect<{ title: string; context: string }, TaskNotFound | WikiPageNotFound | DbError | RowNotFound> => Effect.gen(function* () {
@@ -66,20 +70,20 @@ export class HeraldTaskService extends Effect.Service<HeraldTaskService>()("Lexa
     });
     const loadImageBase64 = (key: string): Promise<string | null> => Effect.runPromise(Effect.map(storage.get(key), bytesToBase64)).catch(() => null);
     const validateAttachments = (projectId: string, attachments: ReadonlyArray<{ storageKey: string; mimeType: string }>, caps: { maxCount: number; maxBytesEach?: number; maxTotalBytes?: number }): Effect.Effect<void, InvalidArgs | DbError> => Effect.gen(function* () {
-      for (const a of attachments) { const scoped = db.prepare(`SELECT 1 FROM attachments WHERE project_id = ? AND storage_key = ? LIMIT 1`).get(projectId, a.storageKey) !== null; if (!scoped) return yield* new InvalidArgs({ reason: `attachment '${a.storageKey}' does not belong to this project` }); }
+      for (const a of attachments) { const scoped = (yield* Effect.promise(() => dbFirst(`SELECT 1 FROM attachments WHERE project_id = ? AND storage_key = ? LIMIT 1`, projectId, a.storageKey))) !== null; if (!scoped) return yield* new InvalidArgs({ reason: `attachment '${a.storageKey}' does not belong to this project` }); }
       const sized = yield* Effect.forEach(attachments, (a) => storage.stat(a.storageKey).pipe(Effect.catchTag("StorageError", () => Effect.succeed(null)), Effect.map((size) => ({ mimeType: a.mimeType, size: size ?? 0 }))));
       yield* Effect.try({ try: () => assertAttachmentCaps(sized, caps), catch: (e) => e as InvalidArgs });
     });
     const buildToolDeps = (projectId: string, allowlist: string | null, searchApiKey: string | null) => ({
       projectId, allowlist, searchApiKey, fetchImpl: fetch,
       storageGet: (key: string) => Effect.runPromise(storage.get(key)),
-      projectOwnsStorageKey: (pid: string, key: string) => Promise.resolve(db.prepare(`SELECT 1 FROM attachments WHERE project_id = ? AND storage_key = ? LIMIT 1`).get(pid, key) !== null),
+      projectOwnsStorageKey: (pid: string, key: string) => dbFirst(`SELECT 1 FROM attachments WHERE project_id = ? AND storage_key = ? LIMIT 1`, pid, key).then((r) => r !== null),
       findTaskByRef: async (ref: string) => {
         const t = await Effect.runPromise(taskRepo.findById(ref).pipe(Effect.orElse(() => taskRepo.findByKey(ref)))).catch(() => null);
         if (!t || (t as unknown as { projectId: string }).projectId !== projectId) return null;
-        const col = db.prepare(`SELECT name FROM columns WHERE id = ?`).get((t as unknown as { columnId: string }).columnId) as { name: string } | undefined;
-        const lane = db.prepare(`SELECT name, milestone_id FROM swimlanes WHERE id = ?`).get((t as unknown as { swimlaneId: string }).swimlaneId) as { name: string; milestone_id: string | null } | undefined;
-        let milestoneName: string | null = null; if (lane?.milestone_id) { const m = db.prepare(`SELECT name FROM milestones WHERE id = ?`).get(lane.milestone_id) as { name: string } | undefined; milestoneName = m?.name ?? null; }
+        const col = await dbFirst<{ name: string }>(`SELECT name FROM columns WHERE id = ?`, (t as unknown as { columnId: string }).columnId);
+        const lane = await dbFirst<{ name: string; milestone_id: string | null }>(`SELECT name, milestone_id FROM swimlanes WHERE id = ?`, (t as unknown as { swimlaneId: string }).swimlaneId);
+        let milestoneName: string | null = null; if (lane?.milestone_id) { const m = await dbFirst<{ name: string }>(`SELECT name FROM milestones WHERE id = ?`, lane.milestone_id); milestoneName = m?.name ?? null; }
         const gi = (t as unknown as { githubs: Array<{ repo: string; issueNumber: number }> }).githubs[0];
         return { ...taskRefOf(t as unknown as Task), columnName: col?.name ?? "", swimlaneName: lane?.name ?? "", milestoneName, type: (t as unknown as { type: string }).type, assignees: (t as unknown as { assignees: string[] }).assignees, githubIssue: gi ? { repo: gi.repo, number: gi.issueNumber } : null };
       },
@@ -89,9 +93,9 @@ export class HeraldTaskService extends Effect.Service<HeraldTaskService>()("Lexa
       listAllTasks: async () => { const rows = await Effect.runPromise(taskRepo.listByProject(projectId)).catch(() => [] as Task[]); return rows.map(taskRefOf); },
       listWikiPagesFull: async () => { const rows = await Effect.runPromise(wikiRepo.findFullByProject(projectId)).catch(() => [] as WikiPage[]); return rows.map((p) => ({ title: p.title, slug: p.slug, content: p.content as TipTapDoc })); },
       getBoardStructure: async () => {
-        const columns = (db.prepare(`SELECT id, name, position, wip_limit, github_state, is_done FROM columns WHERE project_id = ? ORDER BY position`).all(projectId) as Array<{ id: string; name: string; position: number; wip_limit: number | null; github_state: "open" | "closed" | null; is_done: number }>).map((c) => ({ id: c.id, name: c.name, position: c.position, wipLimit: c.wip_limit, githubState: c.github_state, isDone: c.is_done !== 0 }));
-        const swimlanes = (db.prepare(`SELECT id, name, kind, start_at, due_at, archived_at, milestone_id FROM swimlanes WHERE project_id = ? ORDER BY position`).all(projectId) as Array<{ id: string; name: string; kind: "backlog" | "sprint"; start_at: string | null; due_at: string | null; archived_at: string | null; milestone_id: string | null }>).map((l) => ({ id: l.id, name: l.name, kind: l.kind, startAt: l.start_at, dueAt: l.due_at, archived: l.archived_at !== null, milestoneId: l.milestone_id }));
-        const milestones = (db.prepare(`SELECT id, name, due_at, archived_at FROM milestones WHERE project_id = ? ORDER BY position`).all(projectId) as Array<{ id: string; name: string; due_at: string | null; archived_at: string | null }>).map((m) => ({ id: m.id, name: m.name, dueAt: m.due_at, archived: m.archived_at !== null }));
+        const columns = (await dbAll<{ id: string; name: string; position: number; wip_limit: number | null; github_state: "open" | "closed" | null; is_done: number }>(`SELECT id, name, position, wip_limit, github_state, is_done FROM columns WHERE project_id = ? ORDER BY position`, projectId)).map((c) => ({ id: c.id, name: c.name, position: c.position, wipLimit: c.wip_limit, githubState: c.github_state, isDone: c.is_done !== 0 }));
+        const swimlanes = (await dbAll<{ id: string; name: string; kind: "backlog" | "sprint"; start_at: string | null; due_at: string | null; archived_at: string | null; milestone_id: string | null }>(`SELECT id, name, kind, start_at, due_at, archived_at, milestone_id FROM swimlanes WHERE project_id = ? ORDER BY position`, projectId)).map((l) => ({ id: l.id, name: l.name, kind: l.kind, startAt: l.start_at, dueAt: l.due_at, archived: l.archived_at !== null, milestoneId: l.milestone_id }));
+        const milestones = (await dbAll<{ id: string; name: string; due_at: string | null; archived_at: string | null }>(`SELECT id, name, due_at, archived_at FROM milestones WHERE project_id = ? ORDER BY position`, projectId)).map((m) => ({ id: m.id, name: m.name, dueAt: m.due_at, archived: m.archived_at !== null }));
         return { columns, swimlanes, milestones };
       },
     });
@@ -101,14 +105,14 @@ export class HeraldTaskService extends Effect.Service<HeraldTaskService>()("Lexa
       findTaskByRef: async (ref: string) => {
         const t = await Effect.runPromise(taskRepo.findById(ref).pipe(Effect.orElse(() => taskRepo.findByKey(ref)))).catch(() => null);
         if (!t || (t as unknown as { projectId: string }).projectId !== projectId) return null;
-        const col = db.prepare(`SELECT name FROM columns WHERE id = ?`).get((t as unknown as { columnId: string }).columnId) as { name: string } | undefined;
+        const col = await dbFirst<{ name: string }>(`SELECT name FROM columns WHERE id = ?`, (t as unknown as { columnId: string }).columnId);
         return { id: (t as unknown as { id: string }).id, key: (t as unknown as { key: string }).key, title: (t as unknown as { title: string }).title, columnName: col?.name ?? "", priority: (t as unknown as { priority: string }).priority, type: (t as unknown as { type: string }).type, dueAt: (t as unknown as { dueAt: string | null }).dueAt, assignees: (t as unknown as { assignees: string[] }).assignees, descriptionText: extractText((t as unknown as { description: TipTapDoc }).description as TipTapDoc), archivedAt: (t as unknown as { archivedAt: string | null }).archivedAt };
       },
-      findColumn: async (id: string) => (db.prepare(`SELECT id, name FROM columns WHERE id = ?`).get(id) as { id: string; name: string } | undefined) ?? null,
+      findColumn: async (id: string) => (await dbFirst<{ id: string; name: string }>(`SELECT id, name FROM columns WHERE id = ?`, id)) ?? null,
       findWikiPageBySlug: async (slug: string) => { const page = await Effect.runPromise(wikiRepo.findBySlug(projectId, slug)).catch(() => null); if (!page) return null; return { slug: (page as unknown as { slug: string }).slug, title: (page as unknown as { title: string }).title, text: extractText((page as unknown as { content: TipTapDoc }).content as TipTapDoc) }; },
-      findMilestone: async (id: string) => { const m = db.prepare(`SELECT id, name, due_at, archived_at FROM milestones WHERE id = ?`).get(id) as { id: string; name: string; due_at: string | null; archived_at: string | null } | undefined; return m ? { id: m.id, name: m.name, dueAt: m.due_at, archivedAt: m.archived_at } : null; },
-      findSwimlane: async (id: string) => { const l = db.prepare(`SELECT id, name, kind, archived_at, milestone_id FROM swimlanes WHERE id = ?`).get(id) as { id: string; name: string; kind: "backlog" | "milestone" | "sprint"; archived_at: string | null; milestone_id: string | null } | undefined; return l ? { id: l.id, name: l.name, kind: l.kind, archivedAt: l.archived_at, milestoneId: l.milestone_id } : null; },
-      countSprints: async (milestoneId) => { const r = db.prepare(`SELECT COUNT(*) AS c FROM swimlanes WHERE milestone_id = ? AND kind = 'sprint' AND archived_at IS NULL`).get(milestoneId) as { c: number } | undefined; return r?.c ?? 0; },
+      findMilestone: async (id: string) => { const m = await dbFirst<{ id: string; name: string; due_at: string | null; archived_at: string | null }>(`SELECT id, name, due_at, archived_at FROM milestones WHERE id = ?`, id); return m ? { id: m.id, name: m.name, dueAt: m.due_at, archivedAt: m.archived_at } : null; },
+      findSwimlane: async (id: string) => { const l = await dbFirst<{ id: string; name: string; kind: "backlog" | "milestone" | "sprint"; archived_at: string | null; milestone_id: string | null }>(`SELECT id, name, kind, archived_at, milestone_id FROM swimlanes WHERE id = ?`, id); return l ? { id: l.id, name: l.name, kind: l.kind, archivedAt: l.archived_at, milestoneId: l.milestone_id } : null; },
+      countSprints: async (milestoneId) => { const r = await dbFirst<{ c: number }>(`SELECT COUNT(*) AS c FROM swimlanes WHERE milestone_id = ? AND kind = 'sprint' AND archived_at IS NULL`, milestoneId); return r?.c ?? 0; },
       record: recorder.record,
     });
     const buildWriteToolset = (settingsRow: HeraldSettingsRow, turn: { projectId: string; documentType: "task" | "wiki" | "chat"; documentId: string; ownerUserId: string }): { tools: unknown[]; drain: (() => QueuedProposal[]) | undefined } => {
@@ -146,7 +150,7 @@ export class HeraldTaskService extends Effect.Service<HeraldTaskService>()("Lexa
         yield* hearthRepo.findSkillById(input.skillId).pipe(Effect.catchTag("RowNotFound", () => new SkillNotFound({ id: input.skillId })));
         const engine = (settingsRow as unknown as { engine: string }).engine;
         const engineAgentId = engine === "blacksmith" ? BLACKSMITH_AGENT.id : HERALD_AGENT.id;
-        if (!skillJunctionBound(engineAgentId, input.skillId)) return yield* new SkillNotFound({ id: input.skillId });
+        if (!(yield* Effect.promise(() => skillJunctionBound(engineAgentId, input.skillId)))) return yield* new SkillNotFound({ id: input.skillId });
         if (input.documentType === "task") yield* taskRepo.findById(input.documentId).pipe(Effect.catchTag("RowNotFound", () => new TaskNotFound({ id: input.documentId })));
         else yield* wikiRepo.findBySlug(input.projectId, input.documentId).pipe(Effect.catchTag("RowNotFound", () => new WikiPageNotFound({ id: input.documentId })));
         if (engine === "blacksmith") { const runtimes = yield* hearthRepo.listRuntimes(); if (!runtimes.some((r) => r.status === "online")) return yield* new NoRuntimeOnline(); }

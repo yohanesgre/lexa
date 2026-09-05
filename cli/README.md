@@ -40,12 +40,14 @@ Environment fallbacks when not logged in: `LEXA_URL` and `LEXA_API_KEY`.
 ## Deploy
 
 ```bash
-lexa-cli deploy lexa.example.com [staging|prod]
+lexa-cli deploy lexa.example.com [staging|prod] [--direct]
 ```
 
-Pulls the prebuilt image from ghcr.io and wires up Docker + cloudflared
-tunnel + Cloudflare Access. See `docs/DEPLOYMENT.md` for the full setup
-guide (GitHub App, Google OAuth, Access policies).
+Pulls the prebuilt image from ghcr.io and wires up Docker + an
+outbound-only cloudflared tunnel — no public IP, no open ports (works
+behind NAT/CGNAT). `--direct` skips Cloudflare entirely for machines with
+a public IP + own reverse proxy. See `docs/DEPLOYMENT.md` for the full
+setup guide (GitHub App).
 
 ## Development
 

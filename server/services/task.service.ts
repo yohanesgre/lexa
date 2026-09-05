@@ -4,7 +4,7 @@ import { ProjectRepo } from "../repos/project.repo";
 import { ColumnRepo } from "../repos/column.repo";
 import { SwimlaneRepo } from "../repos/swimlane.repo";
 import { FieldConfigRepo } from "../repos/field-config.repo";
-import { ConstraintViolation, DbError, RowNotFound, Sqlite, withTx, queryFirst } from "../db/database";
+import { ConstraintViolation, DbError, RowNotFound, Db, withTx, queryFirst, run, batch } from "../db/db";
 import { keyAfter } from "../../shared/positions";
 import { keyBetween } from "../../shared/positions";
 import {
@@ -21,6 +21,18 @@ import {
 } from "../api/errors";
 import { ActivityService } from "./activity.service";
 import * as msg from "../activity-messages";
+import {
+  buildActivityStmts,
+  buildPlainMoveStmts,
+  buildTaskArchiveBatch,
+  buildTaskCreateBatch,
+  buildTaskDeleteBatch,
+  buildTaskUpdateBatch,
+  buildUnlinkBatch,
+  buildWebhookMoveAndEmitBatch,
+  buildWipMoveStmt,
+  type ActivityInput,
+} from "../repos/task-batch";
 import type { Task, Column, Swimlane, TipTapDoc, Actor, ActivityEvent, ActivityType } from "../../shared/types";
 
 export function isEmptyDoc(doc: TipTapDoc): boolean {
@@ -59,6 +71,17 @@ function validateRequiredFields(
   return Effect.void;
 }
 
+function asInput(actor: Actor, type: string, message: string, viaHerald: boolean): ActivityInput {
+  return {
+    actorKind: actor.kind,
+    actorLabel: actor.label,
+    actorUserId: actor.userId ?? null,
+    type,
+    message,
+    viaHerald,
+  };
+}
+
 export class TaskService extends Effect.Service<TaskService>()("Lexa/TaskService", {
   dependencies: [TaskRepo.Default, ProjectRepo.Default, ColumnRepo.Default, SwimlaneRepo.Default, FieldConfigRepo.Default, ActivityService.Default],
   effect: Effect.gen(function* () {
@@ -68,7 +91,7 @@ export class TaskService extends Effect.Service<TaskService>()("Lexa/TaskService
     const swimlaneRepo = yield* SwimlaneRepo;
     const fieldConfigRepo = yield* FieldConfigRepo;
     const activityService = yield* ActivityService;
-    const db = yield* Sqlite;
+    const db = yield* Db;
 
     const resolveOption = (
       projectId: string,
@@ -184,7 +207,7 @@ export class TaskService extends Effect.Service<TaskService>()("Lexa/TaskService
             );
             const number = counter.next_task_number;
             const key = `${project.key}-${number}`;
-            yield* taskRepo.create({
+            yield* batch(db, buildTaskCreateBatch({
               id: taskId,
               projectId: input.projectId,
               columnId,
@@ -193,15 +216,14 @@ export class TaskService extends Effect.Service<TaskService>()("Lexa/TaskService
               description: JSON.stringify(desc),
               priority,
               type,
-              assignees: input.assignees ?? [],
               position,
               dueAt: input.dueAt ?? null,
               number,
               key,
-            });
-            if (parent) {
-              yield* taskRepo.createSubtaskLink(input.projectId, taskId, parent.id);
-            }
+              assignees: input.assignees ?? [],
+              ...(parent ? { subtaskOfParentId: parent.id } : {}),
+              activity: [asInput(actor, "created", msg.created(actor.label), opts?.viaHerald === true)],
+            }));
             return yield* taskRepo.findById(taskId).pipe(
               Effect.catchTag("RowNotFound", () => new ProjectNotFound({ identifier: input.projectId }))
             );
@@ -216,8 +238,8 @@ export class TaskService extends Effect.Service<TaskService>()("Lexa/TaskService
                   () => doInsert
                 )
               );
-              const ev = yield* activityService.append(t.id, actor, "created", msg.created(actor.label), { viaHerald: opts?.viaHerald === true });
-              return { task: t, activity: [ev] };
+              const activity = yield* activityService.listLatest(t.id, 1);
+              return { task: t, activity };
             })
           );
           yield* Effect.logInfo(`[Task] Created ${task.task.id} in column ${task.task.columnId} project ${task.task.projectId}`);
@@ -293,45 +315,47 @@ export class TaskService extends Effect.Service<TaskService>()("Lexa/TaskService
 
           // Diff against the pre-update row — only real changes emit rows
           // (messages are frozen at write time with option LABELS, not ids).
-          const rows: { type: ActivityType; message: string }[] = [];
+          const viaHerald = opts?.viaHerald === true;
+          const rows: ActivityInput[] = [];
           if (input.title !== undefined && input.title !== task.title) {
-            rows.push({ type: "field_changed", message: msg.titleChanged(actor.label) });
+            rows.push(asInput(actor, "field_changed", msg.titleChanged(actor.label), viaHerald));
           }
           if (input.description !== undefined && JSON.stringify(input.description) !== JSON.stringify(task.description)) {
-            rows.push({ type: "field_changed", message: msg.descriptionUpdated(actor.label) });
+            rows.push(asInput(actor, "field_changed", msg.descriptionUpdated(actor.label), viaHerald));
           }
           if (input.priority !== undefined && input.priority !== task.priority) {
             const opts = yield* fieldConfigRepo.findPrioritiesByProject(task.projectId);
             const label = (optionId: string) => opts.find((o) => o.id === optionId)?.label ?? optionId;
-            rows.push({ type: "field_changed", message: msg.priorityChanged(label(task.priority), label(input.priority)) });
+            rows.push(asInput(actor, "field_changed", msg.priorityChanged(label(task.priority), label(input.priority)), viaHerald));
           }
           if (input.type !== undefined && input.type !== task.type) {
             const opts = yield* fieldConfigRepo.findTypesByProject(task.projectId);
             const label = (optionId: string) => opts.find((o) => o.id === optionId)?.label ?? optionId;
-            rows.push({ type: "field_changed", message: msg.typeChanged(label(task.type), label(input.type)) });
+            rows.push(asInput(actor, "field_changed", msg.typeChanged(label(task.type), label(input.type)), viaHerald));
           }
           if (input.assignees !== undefined && input.assignees.toSorted().join("\u0000") !== task.assignees.toSorted().join("\u0000")) {
-            rows.push({ type: "field_changed", message: msg.assigneesUpdated(actor.label) });
+            rows.push(asInput(actor, "field_changed", msg.assigneesUpdated(actor.label), viaHerald));
           }
           if (input.dueAt !== undefined && input.dueAt !== task.dueAt) {
-            rows.push({ type: "field_changed", message: msg.dueDateChanged(task.dueAt ?? null, input.dueAt ?? null) });
+            rows.push(asInput(actor, "field_changed", msg.dueDateChanged(task.dueAt ?? null, input.dueAt ?? null), viaHerald));
           }
 
           const updated = yield* withTx(db, Effect.gen(function* () {
-            const u = yield* taskRepo.update(id, {
+            const stmts = buildTaskUpdateBatch({
+              id,
               ...(input.title !== undefined ? { title: input.title } : {}),
               ...(input.description !== undefined ? { description: JSON.stringify(input.description) } : {}),
               ...(input.priority !== undefined ? { priority: input.priority } : {}),
               ...(input.type !== undefined ? { type: input.type } : {}),
-              ...(input.assignees !== undefined ? { assignees: input.assignees } : {}),
+              ...(input.assignees !== undefined ? { replaceAssignees: input.assignees } : {}),
               ...(input.dueAt !== undefined ? { dueAt: input.dueAt } : {}),
-            }).pipe(
+              activity: rows,
+            });
+            if (stmts.length > 0) yield* batch(db, stmts);
+            const u = yield* taskRepo.findById(id).pipe(
               Effect.catchTag("RowNotFound", () => new TaskNotFound({ id }))
             );
-            const activity: ActivityEvent[] = [];
-            for (const r of rows) {
-              activity.push(yield* activityService.append(id, actor, r.type, r.message, { viaHerald: opts?.viaHerald === true }));
-            }
+            const activity = rows.length === 0 ? [] : yield* activityService.listLatest(id, rows.length);
             return { task: u, activity };
           }));
           yield* Effect.logInfo(`[Task] Updated ${updated.task.id}`);
@@ -397,43 +421,64 @@ export class TaskService extends Effect.Service<TaskService>()("Lexa/TaskService
             return keyAfter(last?.position ?? null);
           });
 
-          const doMove = Effect.gen(function* () {
+          // WIP enforcement stays a SINGLE conditional UPDATE (invariant
+          // #5): its rowsChanged gates the pre-computed batch below. The
+          // bypassWip path (webhook/internal) skips the count clause.
+          const bypassWip = opts?.bypassGuards ?? false;
+          const doMoveWithCascade = Effect.gen(function* () {
             const position = yield* computePosition;
             const resolvedSwimlane = target.swimlaneId !== undefined ? target.swimlaneId : task.swimlaneId;
-            const result = yield* taskRepo.move(taskId, {
-              columnId: target.columnId,
-              swimlaneId: resolvedSwimlane,
-              position,
-              projectId: task.projectId,
-              clearDueAt: target.clearDueAt ?? false,
-            }, { bypassWip: opts?.bypassGuards ?? false });
-            if (result.changes === 0) {
+            const moveStmt = bypassWip
+              ? buildPlainMoveStmts([{
+                  taskId,
+                  columnId: target.columnId,
+                  swimlaneId: resolvedSwimlane,
+                  position,
+                  clearDueAt: target.clearDueAt ?? false,
+                }])[0]!
+              : buildWipMoveStmt({
+                  taskId,
+                  projectId: task.projectId,
+                  columnId: target.columnId,
+                  swimlaneId: resolvedSwimlane,
+                  position,
+                  clearDueAt: target.clearDueAt ?? false,
+                });
+            const changes = yield* run(db, moveStmt.sql, ...moveStmt.params);
+            if (changes === 0) {
               const count = yield* taskRepo.countByColumn(task.projectId, target.columnId);
               return yield* new WipLimitExceeded({ columnName: column.name, limit: column.wipLimit ?? 0, current: count });
             }
-            return result.task;
-          });
-
-          // Cascade: when a parent moves, its subtasks follow (same column,
-          // appended after the parent's new position). One retry closure for
-          // the WHOLE move — anchors and child list are re-read inside it,
-          // so a position conflict retries the parent AND its children.
-          const doMoveWithCascade = Effect.gen(function* () {
-            const m = yield* doMove;
-            if (m.columnId !== task.columnId || m.swimlaneId !== task.swimlaneId) {
+            // Cascade: when a parent moves, its subtasks follow (same column,
+            // appended after the parent's new position). Child positions are
+            // chained in JS — no reads — so they join the same batch.
+            const columnChanged = target.columnId !== task.columnId;
+            const laneChanged = resolvedSwimlane !== task.swimlaneId;
+            const childMoves: { taskId: string; columnId: string; swimlaneId: string; position: string }[] = [];
+            if (columnChanged || laneChanged) {
               const children = yield* taskRepo.findSubtasks(taskId);
-              let childPos = m.position;
+              let childPos = position;
               for (const child of children) {
                 childPos = keyAfter(childPos);
-                yield* taskRepo.move(child.id, {
-                  columnId: m.columnId,
-                  swimlaneId: m.swimlaneId,
+                childMoves.push({
+                  taskId: child.id,
+                  columnId: target.columnId,
+                  swimlaneId: resolvedSwimlane,
                   position: childPos,
-                  projectId: task.projectId,
-                }, { bypassWip: true });
+                });
               }
             }
-            return m;
+            // Column OR lane change emits; position-only reorders don't.
+            const emitMoved = columnChanged || laneChanged;
+            const rest = [
+              ...buildPlainMoveStmts(childMoves),
+              ...buildActivityStmts(taskId, emitMoved ? [movedActivity()] : []),
+            ];
+            if (rest.length > 0) yield* batch(db, rest);
+            const m = yield* taskRepo.findById(taskId).pipe(
+              Effect.catchTag("RowNotFound", () => new TaskNotFound({ id: taskId }))
+            );
+            return { task: m, emitMoved };
           });
 
           // Old/new names for the moved message — captured before the move
@@ -453,23 +498,24 @@ export class TaskService extends Effect.Service<TaskService>()("Lexa/TaskService
                 Effect.catchTag("RowNotFound", () => Effect.succeed(null))
               );
 
+          const movedActivity = () => asInput(actor, "moved", msg.moved(
+            actor.label, oldCol.name, column.name, oldLane?.name ?? null, newLane?.name ?? null
+          ), opts?.viaHerald === true);
+
           const moved = yield* withTx(
             db,
             Effect.gen(function* () {
-              const m = yield* doMoveWithCascade.pipe(
+              // One retry closure for the WHOLE move — anchors and child
+              // list are re-read inside it, so a position conflict retries
+              // the parent AND its children.
+              const r = yield* doMoveWithCascade.pipe(
                 Effect.catchIf(
                   (e) => e instanceof ConstraintViolation && e.isPositionConflict,
                   () => doMoveWithCascade
                 )
               );
-              // Column OR lane change emits; position-only reorders don't.
-              if (m.columnId !== task.columnId || m.swimlaneId !== task.swimlaneId) {
-                const ev = yield* activityService.append(taskId, actor, "moved", msg.moved(
-                  actor.label, oldCol.name, column.name, oldLane?.name ?? null, newLane?.name ?? null
-                ), { viaHerald: opts?.viaHerald === true });
-                return { task: m, activity: [ev] };
-              }
-              return { task: m, activity: [] as ActivityEvent[] };
+              const activity = r.emitMoved ? yield* activityService.listLatest(taskId, 1) : [] as ActivityEvent[];
+              return { task: r.task, activity };
             })
           );
 
@@ -486,26 +532,37 @@ export class TaskService extends Effect.Service<TaskService>()("Lexa/TaskService
           const column = yield* columnRepo.findById(columnId).pipe(
             Effect.catchTag("RowNotFound", () => new ColumnNotFound({ id: columnId }))
           );
-          const last = yield* taskRepo.findLastInColumn(task.projectId, columnId).pipe(
-            Effect.catchTag("RowNotFound", () => Effect.succeed(null))
-          );
-          const position = keyAfter(last?.position ?? null);
-          // Webhook moves bypass guards; the move + synced-state write run as
-          // one transaction (repo batch joins this withTx), then the
-          // github_synced activity row lands in the SAME transaction.
-          const webhookMoved = yield* withTx(db, Effect.gen(function* () {
-            const moved = yield* taskRepo.moveFromWebhook(task.id, issueId, {
+          // Webhook moves bypass guards; the move + synced-state write +
+          // github_synced activity row run as ONE pre-computed batch —
+          // atomic on both drivers (invariant #2/#3). Neighborless moves
+          // append to end (invariant #4); retry-once re-reads the anchor.
+          const doWebhookMove = Effect.gen(function* () {
+            const last = yield* taskRepo.findLastInColumn(task.projectId, columnId).pipe(
+              Effect.catchTag("RowNotFound", () => Effect.succeed(null))
+            );
+            const position = keyAfter(last?.position ?? null);
+            const issue = task.githubs.find((g) => g.issueId === issueId);
+            yield* batch(db, buildWebhookMoveAndEmitBatch({
+              taskId: task.id,
+              issueId,
               columnId,
               swimlaneId: task.swimlaneId,
               position,
-            }, syncedState);
-            const issue = task.githubs.find((g) => g.issueId === issueId);
-            if (issue) {
-              yield* activityService.append(task.id, WEBHOOK_ACTOR, "github_synced",
-                msg.githubSynced(issue.issueNumber, syncedState, column.name));
-            }
-            return moved;
-          }));
+              syncedState,
+              activity: issue
+                ? asInput(WEBHOOK_ACTOR, "github_synced", msg.githubSynced(issue.issueNumber, syncedState, column.name), false)
+                : null,
+            }));
+            return yield* taskRepo.findById(task.id).pipe(
+              Effect.catchTag("RowNotFound", () => new TaskNotFound({ id: issueId }))
+            );
+          });
+          const webhookMoved = yield* withTx(db, doWebhookMove.pipe(
+            Effect.catchIf(
+              (e) => e instanceof ConstraintViolation && e.isPositionConflict,
+              () => doWebhookMove
+            )
+          ));
           yield* Effect.logInfo(`[Task] Webhook-moved ${webhookMoved.id} column=${webhookMoved.columnId}`);
           return webhookMoved;
         }),
@@ -513,14 +570,15 @@ export class TaskService extends Effect.Service<TaskService>()("Lexa/TaskService
       delete: (actor: Actor, id: string): Effect.Effect<void, TaskNotFound | TaskHasChildren | DbError | ConstraintViolation> =>
         Effect.gen(function* () {
           yield* taskRepo.findById(id).pipe(Effect.catchTag("RowNotFound", () => new TaskNotFound({ id })));
-          // deleted row lands in the same tx as the delete — if the delete
-          // fails (children), the rollback removes the activity row too.
-          yield* withTx(db, Effect.gen(function* () {
-            yield* activityService.append(id, actor, "deleted", msg.deletedTask(actor.label));
-            yield* taskRepo.delete(id).pipe(
-              Effect.catchTag("ConstraintViolation", () => new TaskHasChildren({ taskId: id }))
-            );
-          }));
+          // deleted row lands in the same batch as the delete — if the
+          // delete fails (children), the rollback removes the activity row
+          // too.
+          yield* withTx(db, batch(db, buildTaskDeleteBatch({
+            taskId: id,
+            activity: asInput(actor, "deleted", msg.deletedTask(actor.label), false),
+          })).pipe(
+            Effect.catchTag("ConstraintViolation", () => new TaskHasChildren({ taskId: id }))
+          ));
           yield* Effect.logInfo(`[Task] Deleted ${id}`);
           return undefined;
         }),
@@ -531,10 +589,17 @@ export class TaskService extends Effect.Service<TaskService>()("Lexa/TaskService
             Effect.catchTag("RowNotFound", () => new TaskNotFound({ id }))
           );
           if (task.archivedAt) return { task, activity: [] };
+          const archivedAt = new Date().toISOString();
           const archived = yield* withTx(db, Effect.gen(function* () {
-            const a = yield* taskRepo.setArchived(id, new Date().toISOString());
-            const ev = yield* activityService.append(id, actor, "archived", msg.archived(actor.label), { viaHerald: opts?.viaHerald === true });
-            return { task: a, activity: [ev] };
+            yield* batch(db, buildTaskArchiveBatch({
+              taskId: id,
+              archivedAt,
+              activity: asInput(actor, "archived", msg.archived(actor.label), opts?.viaHerald === true),
+            }));
+            const a = yield* taskRepo.findById(id).pipe(
+              Effect.catchTag("RowNotFound", () => new TaskNotFound({ id }))
+            );
+            return { task: a, activity: yield* activityService.listLatest(id, 1) };
           }));
           yield* Effect.logInfo(`[Task] Archived ${archived.task.id}`);
           return archived;
@@ -547,9 +612,15 @@ export class TaskService extends Effect.Service<TaskService>()("Lexa/TaskService
           );
           if (!task.archivedAt) return { task, activity: [] };
           const restored = yield* withTx(db, Effect.gen(function* () {
-            const r = yield* taskRepo.setArchived(id, null);
-            const ev = yield* activityService.append(id, actor, "restored", msg.restored(actor.label), { viaHerald: opts?.viaHerald === true });
-            return { task: r, activity: [ev] };
+            yield* batch(db, buildTaskArchiveBatch({
+              taskId: id,
+              archivedAt: null,
+              activity: asInput(actor, "restored", msg.restored(actor.label), opts?.viaHerald === true),
+            }));
+            const r = yield* taskRepo.findById(id).pipe(
+              Effect.catchTag("RowNotFound", () => new TaskNotFound({ id }))
+            );
+            return { task: r, activity: yield* activityService.listLatest(id, 1) };
           }));
           yield* Effect.logInfo(`[Task] Restored ${restored.task.id}`);
           return restored;
@@ -564,12 +635,11 @@ export class TaskService extends Effect.Service<TaskService>()("Lexa/TaskService
             Effect.catchTag("RowNotFound", () => new TaskNotFound({ id: taskId }))
           );
           const issue = task.githubs.find((g) => g.issueId === issueId);
-          yield* withTx(db, Effect.gen(function* () {
-            yield* taskRepo.unlinkGithubIssue(taskId, issueId);
-            if (issue) {
-              yield* activityService.append(taskId, actor, "github_unlinked", msg.githubUnlinked(issue.repo, issue.issueNumber));
-            }
-          }));
+          yield* withTx(db, batch(db, buildUnlinkBatch({
+            taskId,
+            issueId,
+            activity: issue ? asInput(actor, "github_unlinked", msg.githubUnlinked(issue.repo, issue.issueNumber), false) : null,
+          })));
           yield* Effect.logInfo(`[Task] Unlinked GitHub issue ${issueId} from ${taskId}`);
           return { unlinked: true };
         }),

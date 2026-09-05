@@ -37,6 +37,8 @@ export interface RuntimeEnv {
   // Body / limits
   LXK_MAX_BODY_MB?: string | undefined;
   LXK_MAX_UPLOAD_MB?: string | undefined;
+  LXK_RATE_LIMIT_MAX?: string | undefined;
+  LXK_RATE_LIMIT_WINDOW_MS?: string | undefined;
   // Hearth / daemon
   LXK_HEARTH_DAEMON_TOKEN?: string | undefined;
   LXK_HEARTH_REPO_CAP?: string | undefined;
@@ -86,6 +88,8 @@ export function getEnv(source: ProcessEnvSource = processEnvSafe()): RuntimeEnv 
     LXK_S3_REGION: source.LXK_S3_REGION,
     LXK_MAX_BODY_MB: source.LXK_MAX_BODY_MB,
     LXK_MAX_UPLOAD_MB: source.LXK_MAX_UPLOAD_MB,
+    LXK_RATE_LIMIT_MAX: source.LXK_RATE_LIMIT_MAX,
+    LXK_RATE_LIMIT_WINDOW_MS: source.LXK_RATE_LIMIT_WINDOW_MS,
     LXK_HEARTH_DAEMON_TOKEN: source.LXK_HEARTH_DAEMON_TOKEN,
     LXK_HEARTH_REPO_CAP: source.LXK_HEARTH_REPO_CAP,
     HEARTH_STALE_RUN_MIN: source.HEARTH_STALE_RUN_MIN,
@@ -129,6 +133,8 @@ export function getEnvFromWorkers(env: Record<string, unknown>): RuntimeEnv {
     LXK_S3_REGION: undefined,
     LXK_MAX_BODY_MB: s("LXK_MAX_BODY_MB"),
     LXK_MAX_UPLOAD_MB: s("LXK_MAX_UPLOAD_MB"),
+    LXK_RATE_LIMIT_MAX: s("LXK_RATE_LIMIT_MAX"),
+    LXK_RATE_LIMIT_WINDOW_MS: s("LXK_RATE_LIMIT_WINDOW_MS"),
     LXK_HEARTH_DAEMON_TOKEN: s("LXK_HEARTH_DAEMON_TOKEN"),
     LXK_HEARTH_REPO_CAP: s("LXK_HEARTH_REPO_CAP"),
     HEARTH_STALE_RUN_MIN: s("HEARTH_STALE_RUN_MIN"),
@@ -148,6 +154,32 @@ export function getEnvFromWorkers(env: Record<string, unknown>): RuntimeEnv {
 function processEnvSafe(): ProcessEnvSource {
   if (typeof process !== "undefined" && process.env) return process.env;
   return {};
+}
+
+// ─── Shared resolvers ───────────────────────────────────────────────────
+// Single source of truth for env-derived defaults. server/auth.ts and any
+// future per-request factory resolve through these from an explicit
+// RuntimeEnv argument — never from `process.env` directly.
+
+export const DEFAULT_DATABASE_PATH = "/app/data/lexa.db";
+export const DEFAULT_PUBLIC_URL = "http://localhost:3000";
+
+export function resolvePublicUrl(env: RuntimeEnv): string {
+  return env.LXK_PUBLIC_URL ?? DEFAULT_PUBLIC_URL;
+}
+
+export function resolveDatabasePath(env: RuntimeEnv): string {
+  return env.DATABASE_PATH ?? DEFAULT_DATABASE_PATH;
+}
+
+export function resolveTrustedOrigins(env: RuntimeEnv, publicUrl: string = resolvePublicUrl(env)): string[] {
+  const extra = (env.LXK_TRUSTED_ORIGINS ?? "")
+    .split(",")
+    .map((o) => o.trim())
+    .filter((o) => o.length > 0);
+  return env.LXK_ENV === "dev"
+    ? [publicUrl, "http://localhost:5173", ...extra]
+    : [publicUrl, ...extra];
 }
 
 // ─── Workers / Bun dispatch ──────────────────────────────────────────────

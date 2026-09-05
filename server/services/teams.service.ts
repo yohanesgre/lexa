@@ -1,6 +1,6 @@
 import { Effect, Data, Either } from "effect";
 import { randomBytes } from "node:crypto";
-import { Sqlite, DbError, ConstraintViolation } from "../db/database";
+import { Db, DbError, ConstraintViolation, RowNotFound, queryAll, queryFirst, run } from "../db/db";
 import type { Team, TeamMember, TeamMemberRole } from "../../shared/types";
 
 export class TeamNotFound extends Data.TaggedError("TeamNotFound")<{ teamId: string }> {}
@@ -49,22 +49,24 @@ const slugify = (name: string): string => {
 // UNIQUE; the server appends a random suffix unless the caller supplied one.
 export class TeamsService extends Effect.Service<TeamsService>()("Lexa/TeamsService", {
   effect: Effect.gen(function* () {
-    const db = yield* Sqlite;
+    const db = yield* Db;
+
+    const firstOrNull = <T>(eff: Effect.Effect<T, RowNotFound | DbError>): Effect.Effect<T | null, DbError> =>
+      eff.pipe(Effect.catchTag("RowNotFound", () => Effect.succeed(null)));
 
     const insert = (name: string, slug: string, createdBy: string): Effect.Effect<Team, TeamSlugTaken | DbError> =>
-      Effect.try({
-        try: () => {
-          const now = new Date().toISOString();
-          db.prepare("INSERT INTO organization (id, name, slug, createdAt) VALUES (?, ?, ?, ?)").run(crypto.randomUUID(), name, slug, now);
-          const org = db.prepare("SELECT id, name, slug, createdAt FROM organization WHERE slug = ?").get(slug) as OrgRow;
-          db.prepare("INSERT INTO member (id, organizationId, userId, role, createdAt) VALUES (?, ?, ?, 'owner', ?)").run(crypto.randomUUID(), org.id, createdBy, now);
-          return toTeam(org);
-        },
-        catch: (e) => {
-          const msg = String(e);
-          if (msg.includes("UNIQUE") || /constraint failed/i.test(msg)) return new TeamSlugTaken({ slug });
-          return new DbError({ message: msg, cause: e });
-        },
+      Effect.gen(function* () {
+        const now = new Date().toISOString();
+        yield* run(db, "INSERT INTO organization (id, name, slug, createdAt) VALUES (?, ?, ?, ?)", crypto.randomUUID(), name, slug, now).pipe(
+          Effect.catchTag("ConstraintViolation", () => Effect.fail(new TeamSlugTaken({ slug })))
+        );
+        const org = yield* queryFirst<OrgRow>(db, "SELECT id, name, slug, createdAt FROM organization WHERE slug = ?", slug).pipe(
+          Effect.catchTag("RowNotFound", () => Effect.fail(new DbError({ message: `team row vanished after insert slug=${slug}` })))
+        );
+        yield* run(db, "INSERT INTO member (id, organizationId, userId, role, createdAt) VALUES (?, ?, ?, 'owner', ?)", crypto.randomUUID(), org.id, createdBy, now).pipe(
+          Effect.mapError((e) => (e instanceof ConstraintViolation ? new DbError({ message: e.message, cause: e }) : e))
+        );
+        return toTeam(org);
       });
 
     const create = (name: string, slug: string | undefined, createdBy: string): Effect.Effect<Team, TeamSlugTaken | DbError> =>
@@ -84,70 +86,50 @@ export class TeamsService extends Effect.Service<TeamsService>()("Lexa/TeamsServ
       });
 
     const listAll = (): Effect.Effect<Team[], DbError> =>
-      Effect.try({
-        try: () => (db.prepare("SELECT id, name, slug, createdAt FROM organization ORDER BY createdAt DESC, rowid DESC").all() as OrgRow[]).map(toTeam),
-        catch: (e) => new DbError({ message: String(e), cause: e }),
-      });
+      queryAll<OrgRow>(db, "SELECT id, name, slug, createdAt FROM organization ORDER BY createdAt DESC, rowid DESC").pipe(
+        Effect.map((rows) => rows.map(toTeam))
+      );
 
     const listForUser = (userId: string): Effect.Effect<Team[], DbError> =>
-      Effect.try({
-        try: () =>
-          (db
-            .prepare(
-              "SELECT o.id, o.name, o.slug, o.createdAt FROM organization o JOIN member m ON m.organizationId = o.id WHERE m.userId = ? AND (m.role LIKE '%owner%' OR m.role LIKE '%admin%') ORDER BY o.createdAt DESC, o.rowid DESC"
-            )
-            .all(userId) as OrgRow[])
-            .map(toTeam),
-        catch: (e) => new DbError({ message: String(e), cause: e }),
-      });
+      queryAll<OrgRow>(
+        db,
+        "SELECT o.id, o.name, o.slug, o.createdAt FROM organization o JOIN member m ON m.organizationId = o.id WHERE m.userId = ? AND (m.role LIKE '%owner%' OR m.role LIKE '%admin%') ORDER BY o.createdAt DESC, o.rowid DESC",
+        userId
+      ).pipe(Effect.map((rows) => rows.map(toTeam)));
 
     const findById = (teamId: string): Effect.Effect<Team | null, DbError> =>
-      Effect.try({
-        try: () => {
-          const row = db.prepare("SELECT id, name, slug, createdAt FROM organization WHERE id = ?").get(teamId) as OrgRow | null;
-          return row ? toTeam(row) : null;
-        },
-        catch: (e) => new DbError({ message: String(e), cause: e }),
-      });
+      firstOrNull(queryFirst<OrgRow>(db, "SELECT id, name, slug, createdAt FROM organization WHERE id = ?", teamId)).pipe(
+        Effect.map((row) => (row ? toTeam(row) : null))
+      );
 
     const remove = (teamId: string): Effect.Effect<void, TeamNotFound | TeamHasProjects | DbError> =>
       Effect.gen(function* () {
-        const org = yield* Effect.try({
-          try: () => db.prepare("SELECT id FROM organization WHERE id = ?").get(teamId) as OrgRow | null,
-          catch: (e) => new DbError({ message: String(e), cause: e }),
-        });
+        const org = yield* firstOrNull(queryFirst<OrgRow>(db, "SELECT id FROM organization WHERE id = ?", teamId));
         if (!org) return yield* Effect.fail(new TeamNotFound({ teamId }));
-        const owned = yield* Effect.try({
-          try: () => (db.prepare("SELECT COUNT(*) c FROM projects WHERE team_id = ?").get(teamId) as { c: number }).c,
-          catch: (e) => new DbError({ message: String(e), cause: e }),
-        });
-        if (owned > 0) return yield* Effect.fail(new TeamHasProjects({ teamId, count: owned }));
-        yield* Effect.try({
-          try: () => {
-            // runtimes are ephemeral infra — unassign them (fresh DBs get
-            // ON DELETE SET NULL from the FK; this explicit clear also covers
-            // DBs migrated before that FK action existed).
-            db.prepare("UPDATE runtimes SET team_id = NULL WHERE team_id = ?").run(teamId);
-            db.prepare("DELETE FROM organization WHERE id = ?").run(teamId);
-          },
-          catch: (e) => new DbError({ message: String(e), cause: e }),
-        });
+        const owned = yield* queryFirst<{ c: number }>(db, "SELECT COUNT(*) c FROM projects WHERE team_id = ?", teamId).pipe(
+          Effect.catchTag("RowNotFound", () => Effect.succeed({ c: 0 }))
+        );
+        if (owned.c > 0) return yield* Effect.fail(new TeamHasProjects({ teamId, count: owned.c }));
+        // runtimes are ephemeral infra — unassign them (fresh DBs get
+        // ON DELETE SET NULL from the FK; this explicit clear also covers
+        // DBs migrated before that FK action existed).
+        yield* run(db, "UPDATE runtimes SET team_id = NULL WHERE team_id = ?", teamId).pipe(
+          Effect.mapError((e) => (e instanceof ConstraintViolation ? new DbError({ message: e.message, cause: e }) : e))
+        );
+        yield* run(db, "DELETE FROM organization WHERE id = ?", teamId).pipe(
+          Effect.mapError((e) => (e instanceof ConstraintViolation ? new DbError({ message: e.message, cause: e }) : e))
+        );
       });
 
     const members = (teamId: string): Effect.Effect<TeamMember[], TeamNotFound | DbError> =>
       Effect.gen(function* () {
         const org = yield* findById(teamId);
         if (!org) return yield* Effect.fail(new TeamNotFound({ teamId }));
-        return yield* Effect.try({
-          try: () =>
-            (db
-              .prepare(
-                "SELECT m.userId, u.name, u.email, m.role, m.createdAt FROM member m JOIN users u ON u.id = m.userId WHERE m.organizationId = ? ORDER BY m.rowid"
-              )
-              .all(teamId) as MemberRow[])
-              .map(toMember),
-          catch: (e) => new DbError({ message: String(e), cause: e }),
-        });
+        return yield* queryAll<MemberRow>(
+          db,
+          "SELECT m.userId, u.name, u.email, m.role, m.createdAt FROM member m JOIN users u ON u.id = m.userId WHERE m.organizationId = ? ORDER BY m.rowid",
+          teamId
+        ).pipe(Effect.map((rows) => rows.map(toMember)));
       });
 
     const addMember = (teamId: string, email: string, role: TeamMemberRole): Effect.Effect<TeamMember, TeamNotFound | MemberNotInWorkspace | ConstraintViolation | DbError> =>
@@ -155,26 +137,17 @@ export class TeamsService extends Effect.Service<TeamsService>()("Lexa/TeamsServ
         const org = yield* findById(teamId);
         if (!org) return yield* Effect.fail(new TeamNotFound({ teamId }));
         const normalized = email.trim().toLowerCase();
-        const user = yield* Effect.try({
-          try: () => db.prepare("SELECT id, name, email FROM users WHERE email = ?").get(normalized) as { id: string; name: string; email: string } | null,
-          catch: (e) => new DbError({ message: String(e), cause: e }),
-        });
+        const user = yield* firstOrNull(
+          queryFirst<{ id: string; name: string; email: string }>(db, "SELECT id, name, email FROM users WHERE email = ?", normalized)
+        );
         if (!user) {
-          const available = (db.prepare("SELECT email FROM users WHERE email LIKE ? ORDER BY email LIMIT 5").all(`%${normalized.split("@")[0]}%`) as { email: string }[]).map((r) => r.email);
+          const available = yield* queryAll<{ email: string }>(db, "SELECT email FROM users WHERE email LIKE ? ORDER BY email LIMIT 5", `%${normalized.split("@")[0]}%`).pipe(
+            Effect.map((rows) => rows.map((r) => r.email))
+          );
           return yield* Effect.fail(new MemberNotInWorkspace({ email: normalized, available }));
         }
         const now = new Date().toISOString();
-        yield* Effect.try({
-          try: () =>
-            db
-              .prepare("INSERT INTO member (id, organizationId, userId, role, createdAt) VALUES (?, ?, ?, ?, ?)")
-              .run(crypto.randomUUID(), teamId, user.id, role, now),
-          catch: (e) => {
-            const msg = String(e);
-            if (msg.includes("UNIQUE") || /constraint failed/i.test(msg)) return new ConstraintViolation({ message: msg, isPositionConflict: false });
-            return new DbError({ message: msg, cause: e });
-          },
-        });
+        yield* run(db, "INSERT INTO member (id, organizationId, userId, role, createdAt) VALUES (?, ?, ?, ?, ?)", crypto.randomUUID(), teamId, user.id, role, now);
         return { userId: user.id, name: user.name, email: user.email, role, createdAt: now };
       });
 
@@ -182,25 +155,26 @@ export class TeamsService extends Effect.Service<TeamsService>()("Lexa/TeamsServ
       Effect.gen(function* () {
         const org = yield* findById(teamId);
         if (!org) return yield* Effect.fail(new TeamNotFound({ teamId }));
-        const member = yield* Effect.try({
-          try: () => db.prepare("SELECT userId, role FROM member WHERE organizationId = ? AND userId = ?").get(teamId, userId) as { userId: string; role: string } | null,
-          catch: (e) => new DbError({ message: String(e), cause: e }),
-        });
+        const member = yield* firstOrNull(
+          queryFirst<{ userId: string; role: string }>(db, "SELECT userId, role FROM member WHERE organizationId = ? AND userId = ?", teamId, userId)
+        );
         if (!member) return yield* Effect.fail(new TeamMemberNotFound({ userId }));
         if (role !== "owner" && member.role.includes("owner")) {
-          const ownerCount = yield* Effect.try({
-            try: () => (db.prepare("SELECT COUNT(*) c FROM member WHERE organizationId = ? AND role LIKE '%owner%'").get(teamId) as { c: number }).c,
-            catch: (e) => new DbError({ message: String(e), cause: e }),
-          });
-          if (ownerCount <= 1) {
+          const ownerCount = yield* queryFirst<{ c: number }>(db, "SELECT COUNT(*) c FROM member WHERE organizationId = ? AND role LIKE '%owner%'", teamId).pipe(
+            Effect.catchTag("RowNotFound", () => Effect.succeed({ c: 0 }))
+          );
+          if (ownerCount.c <= 1) {
             return yield* Effect.fail(new SoleOwner({ message: "Cannot demote the last owner — transfer ownership first" }));
           }
         }
-        yield* Effect.try({
-          try: () => db.prepare("UPDATE member SET role = ? WHERE organizationId = ? AND userId = ?").run(role, teamId, userId),
-          catch: (e) => new DbError({ message: String(e), cause: e }),
-        });
-        const row = db.prepare("SELECT m.userId, u.name, u.email, m.role, m.createdAt FROM member m JOIN users u ON u.id = m.userId WHERE m.organizationId = ? AND m.userId = ?").get(teamId, userId) as MemberRow;
+        yield* run(db, "UPDATE member SET role = ? WHERE organizationId = ? AND userId = ?", role, teamId, userId).pipe(
+          Effect.mapError((e) => (e instanceof ConstraintViolation ? new DbError({ message: e.message, cause: e }) : e))
+        );
+        const row = yield* queryFirst<MemberRow>(
+          db,
+          "SELECT m.userId, u.name, u.email, m.role, m.createdAt FROM member m JOIN users u ON u.id = m.userId WHERE m.organizationId = ? AND m.userId = ?",
+          teamId, userId
+        ).pipe(Effect.catchTag("RowNotFound", () => Effect.fail(new TeamMemberNotFound({ userId }))));
         return toMember(row);
       });
 
@@ -208,24 +182,21 @@ export class TeamsService extends Effect.Service<TeamsService>()("Lexa/TeamsServ
       Effect.gen(function* () {
         const org = yield* findById(teamId);
         if (!org) return yield* Effect.fail(new TeamNotFound({ teamId }));
-        const member = yield* Effect.try({
-          try: () => db.prepare("SELECT userId, role FROM member WHERE organizationId = ? AND userId = ?").get(teamId, userId) as { userId: string; role: string } | null,
-          catch: (e) => new DbError({ message: String(e), cause: e }),
-        });
+        const member = yield* firstOrNull(
+          queryFirst<{ userId: string; role: string }>(db, "SELECT userId, role FROM member WHERE organizationId = ? AND userId = ?", teamId, userId)
+        );
         if (!member) return yield* Effect.fail(new TeamMemberNotFound({ userId }));
         if (member.role.includes("owner")) {
-          const ownerCount = yield* Effect.try({
-            try: () => (db.prepare("SELECT COUNT(*) c FROM member WHERE organizationId = ? AND role LIKE '%owner%'").get(teamId) as { c: number }).c,
-            catch: (e) => new DbError({ message: String(e), cause: e }),
-          });
-          if (ownerCount <= 1) {
+          const ownerCount = yield* queryFirst<{ c: number }>(db, "SELECT COUNT(*) c FROM member WHERE organizationId = ? AND role LIKE '%owner%'", teamId).pipe(
+            Effect.catchTag("RowNotFound", () => Effect.succeed({ c: 0 }))
+          );
+          if (ownerCount.c <= 1) {
             return yield* Effect.fail(new SoleOwner({ message: "Cannot remove the last owner — transfer ownership first" }));
           }
         }
-        yield* Effect.try({
-          try: () => db.prepare("DELETE FROM member WHERE organizationId = ? AND userId = ?").run(teamId, userId),
-          catch: (e) => new DbError({ message: String(e), cause: e }),
-        });
+        yield* run(db, "DELETE FROM member WHERE organizationId = ? AND userId = ?", teamId, userId).pipe(
+          Effect.mapError((e) => (e instanceof ConstraintViolation ? new DbError({ message: e.message, cause: e }) : e))
+        );
       });
 
     return { create, listAll, listForUser, findById, remove, members, addMember, setMemberRole, removeMember };

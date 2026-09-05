@@ -7,6 +7,7 @@ import { Effect, Layer, Context } from "effect";
 import { Database } from "bun:sqlite";
 import { runMigrations } from "../db/migrate";
 import { Sqlite, initSqlite } from "../db/database";
+import { DbBunLive } from "../db/db";
 import { HeraldSettingsRepo } from "./herald-settings.repo";
 
 const MIGRATIONS = fileURLToPath(new URL("../../migrations", import.meta.url));
@@ -47,16 +48,16 @@ function seed(db: Database) {
 }
 
 function makeRepo(db: Database) {
-  const layer = HeraldSettingsRepo.Default.pipe(Layer.provide(Layer.succeed(Sqlite, db)));
+  const layer = HeraldSettingsRepo.Default.pipe(Layer.provide(Layer.mergeAll(Layer.succeed(Sqlite, db), DbBunLive(db))));
   const ctx = Effect.runSync(Effect.scoped(Layer.build(layer)));
   return Context.get(ctx, HeraldSettingsRepo);
 }
 
 describe("HeraldSettingsRepo upsert", () => {
-  it("inserts a new row and returns it", () => {
+  it("inserts a new row and returns it", async () => {
     seed(db);
     const repo = makeRepo(db);
-    Effect.runSync(
+    await Effect.runPromise(
       Effect.gen(function* () {
         const row = yield* repo.upsert("p1", {
           searchProvider: "exa",
@@ -69,10 +70,10 @@ describe("HeraldSettingsRepo upsert", () => {
     );
   });
 
-  it("update keeps stored keys when omitted", () => {
+  it("update keeps stored keys when omitted", async () => {
     seed(db);
     const repo = makeRepo(db);
-    Effect.runSync(
+    await Effect.runPromise(
       Effect.gen(function* () {
         yield* repo.upsert("p1", {
           searchProvider: "exa",
@@ -87,10 +88,10 @@ describe("HeraldSettingsRepo upsert", () => {
     );
   });
 
-  it("upsert on missing project violates FK", () => {
+  it("upsert on missing project violates FK", async () => {
     seed(db);
     const repo = makeRepo(db);
-    const exit = Effect.runSyncExit(
+    const exit = await Effect.runPromiseExit(
       repo.upsert("nope", { searchProvider: "exa", searchApiKey: "k" })
     );
     expect(exit._tag).toBe("Failure");
@@ -98,10 +99,10 @@ describe("HeraldSettingsRepo upsert", () => {
 });
 
 describe("HeraldSettingsRepo getByProject/maskedView", () => {
-  it("getByProject fails RowNotFound when absent", () => {
+  it("getByProject fails RowNotFound when absent", async () => {
     seed(db);
     const repo = makeRepo(db);
-    Effect.runSync(
+    await Effect.runPromise(
       Effect.gen(function* () {
         const err = yield* repo.getByProject("p1").pipe(Effect.flip);
         expect(err._tag).toBe("RowNotFound");
@@ -109,10 +110,10 @@ describe("HeraldSettingsRepo getByProject/maskedView", () => {
     );
   });
 
-  it("masked view never exposes keys; keyMask uses stored key tail", () => {
+  it("masked view never exposes keys; keyMask uses stored key tail", async () => {
     seed(db);
     const repo = makeRepo(db);
-    Effect.runSync(
+    await Effect.runPromise(
       Effect.gen(function* () {
         yield* repo.upsert("p1", {
           searchProvider: "exa",
@@ -140,10 +141,10 @@ describe("HeraldSettingsRepo getByProject/maskedView", () => {
     );
   });
 
-  it("masked view hasSearchKey false without search key", () => {
+  it("masked view hasSearchKey false without search key", async () => {
     seed(db);
     const repo = makeRepo(db);
-    Effect.runSync(
+    await Effect.runPromise(
       Effect.gen(function* () {
         yield* repo.upsert("p1", {});
         const masked = yield* repo.maskedView("p1");
@@ -153,10 +154,10 @@ describe("HeraldSettingsRepo getByProject/maskedView", () => {
     );
   });
 
-  it("maskedView fails RowNotFound when absent", () => {
+  it("maskedView fails RowNotFound when absent", async () => {
     seed(db);
     const repo = makeRepo(db);
-    Effect.runSync(
+    await Effect.runPromise(
       Effect.gen(function* () {
         const err = yield* repo.maskedView("p1").pipe(Effect.flip);
         expect(err._tag).toBe("RowNotFound");
@@ -168,10 +169,10 @@ describe("HeraldSettingsRepo getByProject/maskedView", () => {
 describe("HeraldSettingsRepo hearth columns (0013)", () => {
   const base = {} as const;
 
-  it("round-trips engine columns", () => {
+  it("round-trips engine columns", async () => {
     seed(db);
     const repo = makeRepo(db);
-    Effect.runSync(
+    await Effect.runPromise(
       Effect.gen(function* () {
         const row = yield* repo.upsert("p1", {
           engine: "blacksmith",
@@ -189,10 +190,10 @@ describe("HeraldSettingsRepo hearth columns (0013)", () => {
     );
   });
 
-  it("engine resets to default on update without explicit value", () => {
+  it("engine resets to default on update without explicit value", async () => {
     seed(db);
     const repo = makeRepo(db);
-    Effect.runSync(
+    await Effect.runPromise(
       Effect.gen(function* () {
         yield* repo.upsert("p1", {
           engine: "blacksmith",
@@ -203,10 +204,10 @@ describe("HeraldSettingsRepo hearth columns (0013)", () => {
     );
   });
 
-  it("upsert without legacy provider fields still succeeds", () => {
+  it("upsert without legacy provider fields still succeeds", async () => {
     seed(db);
     const repo = makeRepo(db);
-    const row = Effect.runSync(repo.upsert("p1", {}));
+    const row = await Effect.runPromise(repo.upsert("p1", {}));
     expect(row.project_id).toBe("p1");
   });
 });
@@ -214,10 +215,10 @@ describe("HeraldSettingsRepo hearth columns (0013)", () => {
 describe("HeraldSettingsRepo reasoning_effort (0014)", () => {
   const base = {} as const;
 
-  it("round-trips reasoningEffort; NULL default on fresh insert", () => {
+  it("round-trips reasoningEffort; NULL default on fresh insert", async () => {
     seed(db);
     const repo = makeRepo(db);
-    Effect.runSync(
+    await Effect.runPromise(
       Effect.gen(function* () {
         const row = yield* repo.upsert("p1", { ...base });
         expect(row.reasoning_effort).toBeNull();
@@ -230,10 +231,10 @@ describe("HeraldSettingsRepo reasoning_effort (0014)", () => {
     );
   });
 
-  it("explicit null clears; omitted keeps stored value semantics consistent with other nullable fields (clears)", () => {
+  it("explicit null clears; omitted keeps stored value semantics consistent with other nullable fields (clears)", async () => {
     seed(db);
     const repo = makeRepo(db);
-    Effect.runSync(
+    await Effect.runPromise(
       Effect.gen(function* () {
         yield* repo.upsert("p1", { reasoningEffort: "low" });
         const cleared = yield* repo.upsert("p1", { reasoningEffort: null });
@@ -242,10 +243,10 @@ describe("HeraldSettingsRepo reasoning_effort (0014)", () => {
     );
   });
 
-  it("masked view never leaks anything beyond the effort enum value", () => {
+  it("masked view never leaks anything beyond the effort enum value", async () => {
     seed(db);
     const repo = makeRepo(db);
-    Effect.runSync(
+    await Effect.runPromise(
       Effect.gen(function* () {
         yield* repo.upsert("p1", { reasoningEffort: "minimal" });
         const masked = yield* repo.maskedView("p1");

@@ -9,7 +9,7 @@ import { TaskService } from "./task.service";
 import { ProjectService } from "./project.service";
 import { ActivityService } from "./activity.service";
 import { GithubIssueAlreadyLinked, TaskNotFound, GithubApiError, ProjectNotFound, ColumnNotFound, SwimlaneNotFound, RequiredFieldMissing, InvalidOption, DeadlineAfterLane } from "../api/errors";
-import { Sqlite, withTx, DbError, ConstraintViolation, RowNotFound } from "../db/database";
+import { Db, withTx, DbError, ConstraintViolation, RowNotFound } from "../db/db";
 import { PUBLIC_URL } from "../auth";
 import { extractText } from "../../shared/tiptap-text";
 import { docToMarkdown, markdownToDoc, normalizeMarkdownForEcho } from "../../shared/markdown";
@@ -34,7 +34,7 @@ export class GitHubService extends Effect.Service<GitHubService>()("Lexa/GitHubS
     const projectService = yield* ProjectService;
     const columnRepo = yield* ColumnRepo;
     const activityService = yield* ActivityService;
-    const db = yield* Sqlite;
+    const db = yield* Db;
 
     return {
       // ---- Lexa → GitHub (called by ROUTES after a successful move) ----

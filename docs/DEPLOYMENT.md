@@ -21,36 +21,80 @@ wizard's sample-data step. Prod/staging stay empty; the Backlog swimlane and
 default columns appear when the first project is created (project-creation
 logic, not seed).
 
-### Workers flavor — parallel, optional ($5/mo)
+## Deployment options
+
+Three ways to reach the public internet — same image and data layout.
+Pick one per flavor.
+
+### Option 1 — Direct: public IP + own reverse proxy (`--direct`)
+
+For machines with a public IP where you already terminate TLS (nginx,
+Caddy, …). Lexa listens on plain HTTP `:3000`; the direct overlay
+publishes it (`docker-compose.direct.yml`, no `tunnel` service) and your
+proxy forwards to it. No Cloudflare account, token, tunnel, or DNS
+provisioning happens at all:
+
+```bash
+lexa-cli deploy <domain> prod --direct --public-url https://lexa.example.com
+```
+
+`--public-url` (or `LXK_PUBLIC_URL`) is required — it becomes
+`LXK_PUBLIC_URL` in `.env.<flavor>` (Better Auth base URL + trusted
+origin). The env file is written without `CF_TUNNEL_TOKEN`. All other
+flags (`--image`, `--clean`, `--admin-email`, `--api-key`,
+`--deploy-dir`) behave as in tunnel mode.
+
+### Option 2 — Tunnel: CGNAT / no public IP (default)
+
+The Bun flavors reach the public internet through an outbound-only cloudflared
+tunnel — no public IP, no open ports, no port-forwarding on the host. This is
+the path for machines behind NAT/CGNAT or with no public IP at all: the tunnel
+dials out to Cloudflare, so inbound connectivity is never required.
+
+### Option 3 — Workers flavor — parallel, optional ($5/mo)
+
+> **Status: SHIPPED — first remote deploy unwatched.** The flavor is complete
+> and proven on local workerd + local D1 (full API, session auth, SSR, webhook
+> round-trip, dump-replay). The first REMOTE deploy still needs a human eye on
+> the migration log (failure is loud + atomic, never partial). Known gaps on
+> Workers: Lexa→GitHub push half untested without real App creds; Herald
+> provider execution untested; session list/revoke endpoints 500. Bun flavor
+> is unaffected.
 
 The Bun flavors above are Docker + SQLite + cloudflared. A parallel
 **Workers flavor** — Cloudflare Workers + D1 + R2 + KV — coexists peer-level
 (same source tree, separate domain/DB/bucket). See `docs/CLOUDFLARE_WORKERS.md`
 for the $5/mo rationale, feasibility tables, and full HOW.
 
-- **Dispatch:** `lexa-cli deploy <domain> [bun|workers] [staging|prod]` — the
-  operator's pick point. `bun` uses the Docker+cloudflared flow above; `workers`
-  provisions Cloudflare resources via the Cloudflare API and ships a prebuilt
-  Worker bundle (Vite plugin chain emits two server bundles).
+- **Dispatch:** `lexa-cli deploy <domain> --runtime workers [staging|prod]` — the
+  operator's pick point. `bun` (default) uses the Docker+cloudflared flow above;
+  `workers` provisions Cloudflare resources via the Cloudflare API and ships a
+  prebuilt Worker bundle (Vite plugin chain emits two server bundles).
 - **Cloudflare provisioning (per flavor):** D1 database + R2 bucket (attachments,
   native binding driver) + KV (if needed) + Worker route + custom domain. No
   tunnel, no VPS.
 - **Migrations & seed:** `wrangler d1 migrations create/apply` replaces boot-time
-  `migrate.ts`; `wrangler d1 execute --file` for seed; `lexa-cli deploy workers
-  --seed` re-applies `scripts/seed-dev.sql`.
+  `migrate.ts`; `wrangler d1 execute --file` for seed; `lexa-cli deploy --runtime
+  workers --seed` re-applies `scripts/seed-dev.sql` (once the flavor ships).
 - **Cron:** Workers' `scheduled` handler runs prune + backup on `*/15 * * * *`
   (`wrangler.jsonc`); Bun keeps its `setInterval`.
 - **Secrets:** `wrangler secret put` for all secrets; `GITHUB_PRIVATE_KEY_FILE`
   is **impossible** on Workers (no filesystem) — use inline `GITHUB_PRIVATE_KEY`
   (already supported per `docs/GITHUB_SETUP.md`). The settings DB remains the
   runtime source of truth for GitHub App credentials.
-- **No data sync** between flavors — dump the Bun DB to SQL and replay on D1 to
-  migrate.
+- **No data sync** between flavors — dump the Bun DB and replay on D1 to
+  migrate: dump with raw UTF-8 literals (D1 has no `unistr()`), exclude FTS5
+  shadow tables (`wiki_fts*` rebuilds via triggers on replay;
+  `project_memory_fts` needs one appended
+  `INSERT INTO project_memory_fts(rowid, content) SELECT rowid, content FROM
+  project_memory`), prefix the file with `PRAGMA defer_foreign_keys = ON`.
+- **Snapshots:** no in-worker backup builds (retention prune only) — snapshot
+  via `wrangler d1 export <db> --remote --output snap.sql`.
 - **Compliance gate:** `scripts/check-invariants.ts` scans the source tree for
   the 14 invariants and fails any PR that violates them.
 
-The Workers flavor is opt-in — either or both flavors can be live on different
-domains; one failing does not affect the other.
+The Workers flavor is opt-in — once shipped, either or both flavors can be live
+on different domains; one failing does not affect the other.
 
 ## Who writes what
 
@@ -58,9 +102,9 @@ domains; one failing does not affect the other.
 |---|---|---|
 | `LXK_API_KEY` | setup wizard / `lexa-cli deploy` (or `--api-key`) | yes |
 | `LXK_ADMIN_EMAILS` | setup wizard / `lexa-cli deploy` (or `--admin-email`) | yes (superadmin bootstrap, env-only) |
-| `LXK_PUBLIC_URL` | `lexa-cli deploy` (from the deploy domain) | staging/prod (Better Auth baseURL) |
+| `LXK_PUBLIC_URL` | `lexa-cli deploy` (from the deploy domain; `--public-url` with `--direct`) | staging/prod (Better Auth baseURL) |
 | `LXK_ENV` | setup wizard (`--prod`/`--staging`) / `lexa-cli deploy` | yes (prod/staging) |
-| `CF_TUNNEL_TOKEN` | `lexa-cli deploy` | staging/prod |
+| `CF_TUNNEL_TOKEN` | `lexa-cli deploy` (tunnel mode only) | tunnel only |
 | `GITHUB_APP_ID` / `GITHUB_WEBHOOK_SECRET` | preserved across deploys; set once by hand for issue sync | only for GitHub sync |
 | `GITHUB_PRIVATE_KEY` / `GITHUB_PRIVATE_KEY_FILE` | hand-set; PEM volume-mounted read-only in prod compose | only for GitHub sync |
 | `LXK_HEARTH_DAEMON_TOKEN` | hand-set (Settings alternative) | only for Hearth daemons |
@@ -111,7 +155,7 @@ The image is built and pushed by CI (`.github/workflows/publish.yml`): main →
 `ghcr.io/yohanesgre/lexa:staging`, `v*` tags → `:latest` (prod). The binary
 embeds the compose files (image refs, volumes, tunnel — few KB) and pulls the
 image — **no checkout, no build, no git**. It checks docker/compose,
-provisions Cloudflare (tunnel, DNS), writes `.env.prod`
+provisions Cloudflare (tunnel, DNS; skipped with `--direct`), writes `.env.prod`
 into `~/.lexa/<domain>/deploy/` (the `~/.lexa-staging` root is the legacy
 flavor layout, migrated into host-keyed groups), and runs
 `docker compose up`. **Redeploy = upgrade**:
@@ -119,7 +163,8 @@ deploy always pulls the latest image; `--image <tag>` pins a specific version;
 `--clean` recreates from scratch (removes the `lexa-data` volume — DB wiped,
 confirmed on a TTY). The data volume survives normal redeploys untouched.
 Non-interactive flags: `--cf-token`, `--admin-email`,
-`--api-key`, `--deploy-dir`, `--image`, `--clean`. No Google/Access flags —
+`--api-key`, `--deploy-dir`, `--image`, `--clean`, `--direct`,
+`--public-url`. No Google/Access flags —
 human auth is in-app (Better Auth).
 
 Provisioning from a checkout instead: `bun run setup --prod --admin-email x --yes`
@@ -152,7 +197,7 @@ Google OAuth, no external IdP, no SMTP. Provisioning is the only hand step:
 the `/setup` wizard (first run) creates the superadmin with a password;
 `LXK_ADMIN_EMAILS` is the env-only superadmin allow-list.
 
-### 1. Cloudflare API token
+### 1. Cloudflare API token (tunnel mode — skipped with `--direct`)
 
 Create a token with exactly these permissions (see `lexa-cli deploy` prompt):
 
@@ -163,12 +208,14 @@ Create a token with exactly these permissions (see `lexa-cli deploy` prompt):
 
 Pass it with `--cf-token <token>` or `CF_API_TOKEN` / `CLOUDFLARE_API_TOKEN`.
 
-### 2. What `lexa-cli deploy` provisions (per flavor)
+### 2. What `lexa-cli deploy` provisions (per flavor, tunnel mode)
 
 Account = the first account on the token; zone = the one matching `<domain>`.
 All Cloudflare state is per-flavor (distinct names for staging vs prod):
 
-1. **Tunnel** `lexa-staging` / `lexa-prod` — token written to `.env.<flavor>` as `CF_TUNNEL_TOKEN`
+1. **Tunnel** `lexa-staging` / `lexa-prod` — token written to `.env.<flavor>` as `CF_TUNNEL_TOKEN`.
+   The tunnel container dials out to Cloudflare (outbound-only), so the host
+   needs no public IP and no inbound ports — works behind NAT/CGNAT.
 2. **DNS** — CNAME `<subdomain>.<domain>` → `<tunnel>.cfargotunnel.com` (proxied)
 3. **Ingress** — `<subdomain>.<domain>` → `http://app:3000` (warns on failure; add manually via Zero Trust → Tunnels → Public Hostnames if the API call fails)
 

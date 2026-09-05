@@ -7,6 +7,7 @@ import { Effect, Layer, Context } from "effect";
 import { Database } from "bun:sqlite";
 import { runMigrations } from "../db/migrate";
 import { Sqlite, initSqlite } from "../db/database";
+import { DbBunLive } from "../db/db";
 import { AuthorizationService } from "./authorization.service";
 
 const MIGRATIONS = fileURLToPath(new URL("../../migrations", import.meta.url));
@@ -43,7 +44,7 @@ beforeEach(() => {
 
 
 function makeAuthz(db: Database) {
-  const layer = AuthorizationService.Default.pipe(Layer.provide(Layer.succeed(Sqlite, db)));
+  const layer = AuthorizationService.Default.pipe(Layer.provide(Layer.mergeAll(Layer.succeed(Sqlite, db), DbBunLive(db))));
   const ctx = Effect.runSync(Effect.scoped(Layer.build(layer)));
   return Context.get(ctx, AuthorizationService);
 }
@@ -83,67 +84,67 @@ INSERT INTO user_project_roles (user_id, role, project_id) VALUES ('grantee', 'a
 }
 
 describe("AuthorizationService", () => {
-  it("project access: superadmin > grant > team membership > deny", () => {
+  it("project access: superadmin > grant > team membership > deny", async () => {
     seed(db);
     const authz = makeAuthz(db);
-    const access = (userId: string, projectId: string) => Effect.runSync(authz.projectAccess(userId, projectId));
+    const access = async (userId: string, projectId: string) => await Effect.runPromise(authz.projectAccess(userId, projectId));
 
     // superadmin: everything, including unassigned
-    expect(access("sa", "p1")).toBe("admin");
-    expect(access("sa", "p2")).toBe("admin");
-    expect(access("sa", "p3")).toBe("admin");
+    expect(await access("sa", "p1")).toBe("admin");
+    expect(await access("sa", "p2")).toBe("admin");
+    expect(await access("sa", "p3")).toBe("admin");
     // team-a members: admin/member roles from org
-    expect(access("owner", "p1")).toBe("admin");
-    expect(access("admin", "p1")).toBe("admin");
-    expect(access("member", "p1")).toBe("member");
+    expect(await access("owner", "p1")).toBe("admin");
+    expect(await access("admin", "p1")).toBe("admin");
+    expect(await access("member", "p1")).toBe("member");
     // cross-team: no access (grantee exception below)
-    expect(access("outsider", "p1")).toBeNull();
-    expect(access("member", "p2")).toBeNull();
+    expect(await access("outsider", "p1")).toBeNull();
+    expect(await access("member", "p2")).toBeNull();
     // explicit grant beats team: grantee is team-b outsider but has admin grant on p2
-    expect(access("grantee", "p2")).toBe("admin");
+    expect(await access("grantee", "p2")).toBe("admin");
     // unassigned project: superadmin only
-    expect(access("owner", "p3")).toBeNull();
-    expect(access("grantee", "p3")).toBeNull();
+    expect(await access("owner", "p3")).toBeNull();
+    expect(await access("grantee", "p3")).toBeNull();
   });
 
-  it("team gate: superadmin or org owner/admin; plain members and outsiders denied", () => {
+  it("team gate: superadmin or org owner/admin; plain members and outsiders denied", async () => {
     seed(db);
     const authz = makeAuthz(db);
-    const manage = (userId: string, teamId: string) => Effect.runSync(authz.canManageTeam(userId, teamId));
+    const manage = async (userId: string, teamId: string) => await Effect.runPromise(authz.canManageTeam(userId, teamId));
 
-    expect(manage("sa", "team-a")).toBe(true);
-    expect(manage("owner", "team-a")).toBe(true);
-    expect(manage("admin", "team-a")).toBe(true);
-    expect(manage("member", "team-a")).toBe(false);
-    expect(manage("outsider", "team-a")).toBe(false);
+    expect(await manage("sa", "team-a")).toBe(true);
+    expect(await manage("owner", "team-a")).toBe(true);
+    expect(await manage("admin", "team-a")).toBe(true);
+    expect(await manage("member", "team-a")).toBe(false);
+    expect(await manage("outsider", "team-a")).toBe(false);
     // team-b is outsider's team
-    expect(manage("outsider", "team-b")).toBe(true);
-    expect(manage("owner", "team-b")).toBe(false);
+    expect(await manage("outsider", "team-b")).toBe(true);
+    expect(await manage("owner", "team-b")).toBe(false);
     // grant on a project does not grant team-admin authority
-    expect(manage("grantee", "team-b")).toBe(false);
+    expect(await manage("grantee", "team-b")).toBe(false);
   });
 
-  it("isTeamAdmin reads comma-joined org roles (multi-role members)", () => {
+  it("isTeamAdmin reads comma-joined org roles (multi-role members)", async () => {
     seed(db);
     db.prepare("UPDATE member SET role = 'owner,admin' WHERE id = 'm4'").run();
     const authz = makeAuthz(db);
-    expect(Effect.runSync(authz.isTeamAdmin("outsider", "team-b"))).toBe(true);
-    expect(Effect.runSync(authz.isTeamAdmin("member", "team-a"))).toBe(false);
+    expect(await Effect.runPromise(authz.isTeamAdmin("outsider", "team-b"))).toBe(true);
+    expect(await Effect.runPromise(authz.isTeamAdmin("member", "team-a"))).toBe(false);
   });
 
-  it("settings gate: superadmin only", () => {
+  it("settings gate: superadmin only", async () => {
     seed(db);
     const authz = makeAuthz(db);
-    expect(Effect.runSync(authz.canManageSettings("sa"))).toBe(true);
-    expect(Effect.runSync(authz.canManageSettings("owner"))).toBe(false);
-    expect(Effect.runSync(authz.canManageSettings("member"))).toBe(false);
+    expect(await Effect.runPromise(authz.canManageSettings("sa"))).toBe(true);
+    expect(await Effect.runPromise(authz.canManageSettings("owner"))).toBe(false);
+    expect(await Effect.runPromise(authz.canManageSettings("member"))).toBe(false);
   });
 
-  it("unknown users get no access anywhere", () => {
+  it("unknown users get no access anywhere", async () => {
     seed(db);
     const authz = makeAuthz(db);
-    expect(Effect.runSync(authz.projectAccess("ghost", "p1"))).toBeNull();
-    expect(Effect.runSync(authz.canManageTeam("ghost", "team-a"))).toBe(false);
-    expect(Effect.runSync(authz.isSuperadmin("ghost"))).toBe(false);
+    expect(await Effect.runPromise(authz.projectAccess("ghost", "p1"))).toBeNull();
+    expect(await Effect.runPromise(authz.canManageTeam("ghost", "team-a"))).toBe(false);
+    expect(await Effect.runPromise(authz.isSuperadmin("ghost"))).toBe(false);
   });
 });

@@ -37,6 +37,9 @@ function usage(): never {
   console.error("  --image <tag>             image tag to deploy (default: latest; staging flavor: staging)");
   console.error("  --clean                   recreate from scratch — removes the data volume (DB wiped)");
   console.error("  --cf-token <token>        Cloudflare API token (env: CF_API_TOKEN)");
+  console.error("  --direct                  no Cloudflare at all — publish :3000 for your own");
+  console.error("                              reverse proxy + TLS (requires --public-url)");
+  console.error("  --public-url <url>        public base URL (env: LXK_PUBLIC_URL; required with --direct)");
   console.error("  --admin-email <email>     admin email (reuses LXK_ADMIN_EMAILS from the env file)");
   console.error("  --api-key <key>           lxk_ API key (reuses LXK_API_KEY from the env file)");
   console.error("");
@@ -272,7 +275,8 @@ export function materializeCompose(flavorName: string, flags: Record<string, str
     throw new Error("no embedded compose files and no docker-compose.yml in cwd (run `bun run compile:cli` or use --deploy-dir)");
   }
   mkdirSync(deployDir, { recursive: true });
-  const flavorFiles = new Set(["docker-compose.yml", `docker-compose.${flavorName}.yml`]);
+  const overlay = flags["direct"] === true ? "docker-compose.direct.yml" : `docker-compose.${flavorName}.yml`;
+  const flavorFiles = new Set(["docker-compose.yml", overlay]);
   for (const [rel, packed] of entries) {
     if (flavorFiles.has(rel)) {
       writeFileSync(join(deployDir, rel), gunzipSync(Buffer.from(packed, "base64")));
@@ -314,8 +318,7 @@ export const cmdDeploy = Effect.fn("LexaCli/cmdDeploy")(function* (
   if (!flavor) usage();
   const isTTY = process.stdin.isTTY === true;
 
-  const fullDomain = flavor.subdomain ? `${flavor.subdomain}.${domain}` : "";
-  banner(flavorName, fullDomain);
+  let fullDomain = flavor.subdomain ? `${flavor.subdomain}.${domain}` : "";
 
   // Clean-machine flow: the binary embeds the compose files (image refs), so
   // no repo checkout is needed. Materialize them, then verify docker.
@@ -323,9 +326,21 @@ export const cmdDeploy = Effect.fn("LexaCli/cmdDeploy")(function* (
   process.chdir(deployDir);
   yield* requirePrereqs();
 
+  const direct = flags["direct"] === true;
+  let publicUrl = `https://${fullDomain}`;
+  let cfToken = "";
+  let tunnelToken = "";
+  if (direct) {
+    publicUrl = flagStr(flags, "public-url") || process.env.LXK_PUBLIC_URL || "";
+    if (!publicUrl) {
+      return yield* new DeployError({ reason: "  ERROR: LXK_PUBLIC_URL required with --direct — pass --public-url https://... or set LXK_PUBLIC_URL" });
+    }
+    fullDomain = publicUrl.replace(/^https?:\/\//, "").replace(/\/+$/, "");
+    console.log("  Direct mode — no Cloudflare provisioning (own reverse proxy + TLS)");
+  } else {
   // ── Cloudflare (staging/prod) ──
   const saved = yield* config.loadDeployCreds(groupDir(domain));
-  let cfToken = flagStr(flags, "cf-token") || process.env.CF_API_TOKEN || process.env.CLOUDFLARE_API_TOKEN || "";
+  cfToken = flagStr(flags, "cf-token") || process.env.CF_API_TOKEN || process.env.CLOUDFLARE_API_TOKEN || "";
   if (!cfToken && saved?.cfToken) cfToken = saved.cfToken;
   if (!cfToken) {
     if (!isTTY) {
@@ -369,7 +384,7 @@ export const cmdDeploy = Effect.fn("LexaCli/cmdDeploy")(function* (
     tunnel = created.id;
     console.log(`  Created: ${tunnel}`);
   }
-  const tunnelToken = yield* extractTunnelToken(yield* cfFetch(cfToken, `/accounts/${account}/cfd_tunnel/${tunnel}/token`));
+  tunnelToken = yield* extractTunnelToken(yield* cfFetch(cfToken, `/accounts/${account}/cfd_tunnel/${tunnel}/token`));
   console.log(`  Tunnel: ${tunnel}  Token: ready`);
 
   // DNS
@@ -402,6 +417,8 @@ export const cmdDeploy = Effect.fn("LexaCli/cmdDeploy")(function* (
         }),
     }),
   );
+  }
+  banner(flavorName, fullDomain);
 
   // ── Admin user + API key ──
   console.log("");
@@ -463,8 +480,8 @@ export const cmdDeploy = Effect.fn("LexaCli/cmdDeploy")(function* (
     `VITE_LXK_API_KEY=${apiKey}`,
     `LXK_ADMIN_EMAILS=${adminEmail}`,
     `LXK_ENV=${flavorName}`,
-    `LXK_PUBLIC_URL=https://${fullDomain}`,
-    `CF_TUNNEL_TOKEN=${tunnelToken}`,
+    `LXK_PUBLIC_URL=${publicUrl}`,
+    ...(direct ? [] : [`CF_TUNNEL_TOKEN=${tunnelToken}`]),
     `GITHUB_APP_ID=${githubAppId}`,
     "GITHUB_PRIVATE_KEY_FILE=/app/github-app.private-key.pem",
     `GITHUB_WEBHOOK_SECRET=${githubWebhookSecret}`,
@@ -487,6 +504,7 @@ export const cmdDeploy = Effect.fn("LexaCli/cmdDeploy")(function* (
   }, groupDir(domain));
 
   const imageTag = flagStr(flags, "image") || undefined;
+  const activeFlavor = direct ? { ...flavor, composeFiles: "-f docker-compose.yml -f docker-compose.direct.yml" } : flavor;
   const clean = flags.clean === true;
   if (clean && isTTY) {
     console.log("");
@@ -498,7 +516,7 @@ export const cmdDeploy = Effect.fn("LexaCli/cmdDeploy")(function* (
     }
   }
 
-  yield* runCompose(flavor, { imageTag, clean });
+  yield* runCompose(activeFlavor, { imageTag, clean });
   finalBanner(flavorName, fullDomain, apiKey, imageTag);
 });
 

@@ -1,11 +1,11 @@
 import { Effect } from "effect";
-import { Sqlite, queryAll, queryFirst, run, DbError, RowNotFound, ConstraintViolation } from "../db/database";
+import { Db, queryAll, queryFirst, run, DbError, RowNotFound, ConstraintViolation } from "../db/db";
 import { WikiPageRow, rowToWikiPage, rowToWikiPageMeta, WikiPageRevisionRow, rowToWikiPageRevision, rowToWikiPageRevisionSummary } from "../../shared/db";
 import type { WikiPage, WikiPageMeta, WikiPageRevision, WikiPageRevisionSummary } from "../../shared/types";
 
 export class WikiRepo extends Effect.Service<WikiRepo>()("Lexa/WikiRepo", {
   effect: Effect.gen(function* () {
-    const db = yield* Sqlite;
+    const db = yield* Db;
 
     return {
       create: (input: {

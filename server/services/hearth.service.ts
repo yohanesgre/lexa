@@ -7,7 +7,8 @@ import { WikiRepo } from "../repos/wiki.repo";
 import { ProjectRepo } from "../repos/project.repo";
 import { SourceService } from "./source.service";
 import { ActivityService } from "./activity.service";
-import { DbError, RowNotFound, ConstraintViolation, Sqlite, withTx } from "../db/database";
+import { DbError, RowNotFound, ConstraintViolation, Db, withTx } from "../db/db";
+import { currentEnv, staleMinFrom } from "../runtime-env";
 import { ProjectNotFound, TaskNotFound, WikiPageNotFound, HearthTaskNotFound, NoRuntimeOnline, RuntimeNotFound, AgentNotFound, SkillNotFound, HearthBuiltinDelete, HearthEntityInUse, HearthSessionActive } from "../api/errors";
 import { docToMarkdown } from "../../shared/markdown";
 import * as msg from "../activity-messages";
@@ -58,7 +59,7 @@ export class HearthService extends Effect.Service<HearthService>()("Lexa/HearthS
     const wikiRepo = yield* WikiRepo;
     const projectRepo = yield* ProjectRepo;
     const activityService = yield* ActivityService;
-    const db = yield* Sqlite;
+    const db = yield* Db;
 
     // Hearth runs are unattended — the actor is the agent itself. Agent name
     // resolved at write time; falls back to the agent id.
@@ -543,10 +544,7 @@ export class HearthService extends Effect.Service<HearthService>()("Lexa/HearthS
       // runtime is never touched. Override with HEARTH_STALE_RUN_MIN.
       sweepStalledTasks: (): Effect.Effect<number, ConstraintViolation | DbError> =>
         Effect.gen(function* () {
-          const staleMin = (() => {
-            const v = Number(process.env.HEARTH_STALE_RUN_MIN);
-            return Number.isFinite(v) && v > 0 ? v : 30;
-          })();
+          const staleMin = staleMinFrom(yield* currentEnv);
           // Delete BEFORE re-queue: re-queuing first would move the stale
           // run out of 'running' and shield it from the removal check.
           const removed = yield* repo.deleteStaleRuns(staleMin);

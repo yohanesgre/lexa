@@ -1,10 +1,10 @@
 import { Effect } from "effect";
-import { Sqlite, queryAll, queryFirst, run, DbError, RowNotFound, ConstraintViolation } from "../db/database";
+import { Db, queryAll, queryFirst, run, DbError, RowNotFound, ConstraintViolation } from "../db/db";
 import type { UserRow } from "../../shared/db";
 
 export class UserRepo extends Effect.Service<UserRepo>()("Lexa/UserRepo", {
   effect: Effect.gen(function* () {
-    const db = yield* Sqlite;
+    const db = yield* Db;
 
     return {
       findById: (id: string): Effect.Effect<UserRow, DbError | RowNotFound> =>

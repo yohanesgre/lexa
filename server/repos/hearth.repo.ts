@@ -1,5 +1,5 @@
 import { Effect } from "effect";
-import { Sqlite, queryAll, queryFirst, run, withTx, DbError, RowNotFound, ConstraintViolation } from "../db/database";
+import { Db, queryAll, queryFirst, run, withTx, DbError, RowNotFound, ConstraintViolation } from "../db/db";
 import { RuntimeRow, RuntimeWithTeam, HearthTaskRow, HearthTaskLogRow, LexaAgentRow, LexaSkillRow, rowToRuntime, rowToHearthTask, rowToHearthTaskLog, rowToLexaAgent, rowToLexaSkill } from "../../shared/db";
 import type { Runtime, HearthTask, HearthTaskLog, HearthProvider, HearthTaskStatus, LexaAgent, LexaSkill } from "../../shared/types";
 
@@ -31,7 +31,7 @@ const AGENT_SELECT = `
 
 export class HearthRepo extends Effect.Service<HearthRepo>()("Lexa/HearthRepo", {
   effect: Effect.gen(function* () {
-    const db = yield* Sqlite;
+    const db = yield* Db;
 
     return {
       // ── Runtimes ──

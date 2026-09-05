@@ -41,6 +41,10 @@ export interface DbDriver {
   batch(stmts: { sql: string; params: SqlParam[] }[]): Promise<void>;
   /** Interactive transaction — bun-sqlite only. D1 throws (use `batch` instead). */
   transaction<T>(fn: (tx: DbDriver) => Promise<T>): Promise<T>;
+  /** Capability flag for the async `withTx` helper (`server/db/db.ts`).
+   *  `false` on D1 (no BEGIN/COMMIT — callers run sequentially, each
+   *  `batch()` still atomic); `true`/undefined everywhere else. */
+  supportsInteractiveTx?: boolean;
   close(): void;
 }
 

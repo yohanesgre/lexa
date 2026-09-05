@@ -7,6 +7,7 @@ import { Effect, Layer, Context, Either } from "effect";
 import { Database } from "bun:sqlite";
 import { runMigrations } from "../db/migrate";
 import { Sqlite, initSqlite, ConstraintViolation } from "../db/database";
+import { DbBunLive } from "../db/db";
 import { TaskService, isEmptyDoc } from "./task.service";
 import { WipLimitExceeded, RequiredFieldMissing, DeadlineAfterLane, SwimlaneNotFound } from "../api/errors";
 import type { Actor, TipTapDoc } from "../../shared/types";
@@ -57,7 +58,7 @@ function seed(db: Database) {
 }
 
 function makeService(db: Database) {
-  const layer = TaskService.Default.pipe(Layer.provide(Layer.succeed(Sqlite, db)));
+  const layer = TaskService.Default.pipe(Layer.provide(Layer.mergeAll(Layer.succeed(Sqlite, db), DbBunLive(db))));
   const ctx = Effect.runSync(Effect.scoped(Layer.build(layer)));
   return Context.get(ctx, TaskService);
 }
@@ -65,10 +66,10 @@ function makeService(db: Database) {
 const maria: Actor = { kind: "user", label: "Maria", userId: "u1" };
 
 describe("TaskService emission", () => {
-  it("update emits field_changed rows for each changed field", () => {
+  it("update emits field_changed rows for each changed field", async () => {
     seed(db);
     const svc = makeService(db);
-    Effect.runSync(
+    await Effect.runPromise(
       Effect.gen(function* () {
         const { task, activity } = yield* svc.update(maria, "t1", { title: "New title", priority: "prio-2" });
         expect(task.title).toBe("New title");
@@ -78,10 +79,10 @@ describe("TaskService emission", () => {
     );
   });
 
-  it("move emits moved with old/new column names; a same-cell move emits nothing", () => {
+  it("move emits moved with old/new column names; a same-cell move emits nothing", async () => {
     seed(db);
     const svc = makeService(db);
-    Effect.runSync(
+    await Effect.runPromise(
       Effect.gen(function* () {
         const { task, activity } = yield* svc.move(maria, "t1", { columnId: "c-done", swimlaneId: "s1" });
         expect(task.columnId).toBe("c-done");
@@ -94,11 +95,11 @@ describe("TaskService emission", () => {
     );
   });
 
-  it("moveFromWebhook emits github_synced, not moved", () => {
+  it("moveFromWebhook emits github_synced, not moved", async () => {
     seed(db);
     db.prepare("INSERT INTO task_github_issues (task_id, issue_id, issue_number, repo) VALUES ('t1','ghi1',7,'owner/repo')").run();
     const svc = makeService(db);
-    Effect.runSync(
+    await Effect.runPromise(
       Effect.gen(function* () {
         const task = yield* svc.moveFromWebhook("ghi1", "c-done", "closed");
         expect(task.columnId).toBe("c-done");
@@ -112,10 +113,10 @@ describe("TaskService emission", () => {
     expect(rows[0]!.actor_label).toBe("github");
   });
 
-  it("create and archive emit created/archived rows", () => {
+  it("create and archive emit created/archived rows", async () => {
     seed(db);
     const svc = makeService(db);
-    Effect.runSync(
+    await Effect.runPromise(
       Effect.gen(function* () {
         const { task, activity } = yield* svc.create(maria, {
           projectId: "p1", columnId: "c-todo", swimlaneId: "s1",
@@ -175,10 +176,10 @@ function seedDeadline(db: Database) {
 }
 
 describe("TaskService WIP + positions", () => {
-  it("move into a column at its WIP limit is rejected atomically", () => {
+  it("move into a column at its WIP limit is rejected atomically", async () => {
     seedWip(db);
     const svc = makeService(db);
-    Effect.runSync(
+    await Effect.runPromise(
       Effect.gen(function* () {
         const result = yield* Effect.either(svc.move(maria, "t2", { columnId: "c-todo", swimlaneId: "s1" }));
         expect(Either.isLeft(result)).toBe(true);
@@ -199,10 +200,10 @@ describe("TaskService WIP + positions", () => {
     );
   });
 
-  it("within-column reorder is allowed even at the WIP limit", () => {
+  it("within-column reorder is allowed even at the WIP limit", async () => {
     seedWip(db);
     const svc = makeService(db);
-    Effect.runSync(
+    await Effect.runPromise(
       Effect.gen(function* () {
         // c-todo holds t1 (a0) + t3 (a1) with limit 1 — reordering inside the
         // same column must short-circuit the count check.
@@ -215,12 +216,12 @@ describe("TaskService WIP + positions", () => {
     );
   });
 
-  it("neighborless move appends to the end of the target column", () => {
+  it("neighborless move appends to the end of the target column", async () => {
     seedWip(db);
     // c-done already holds t2 (a0) + d1 (a1) — the new task must land after d1.
     db.prepare("INSERT INTO tasks (id, project_id, column_id, swimlane_id, title, position, created_at) VALUES ('d1','p1','c-done','s1','D1','a1','2026-01-01 10:00:00')").run();
     const svc = makeService(db);
-    Effect.runSync(
+    await Effect.runPromise(
       Effect.gen(function* () {
         const { task } = yield* svc.move(maria, "t1", { columnId: "c-done", swimlaneId: "s1" });
         expect(task.position).toBe("a2"); // keyAfter('a1')
@@ -229,14 +230,14 @@ describe("TaskService WIP + positions", () => {
     );
   });
 
-  it("a position conflict surfaces as ConstraintViolation after the one-shot retry", () => {
+  it("a position conflict surfaces as ConstraintViolation after the one-shot retry", async () => {
     seedWip(db);
     // d2 occupies exactly the key keyBetween('a1','a2') would generate.
     db.prepare("INSERT INTO tasks (id, project_id, column_id, swimlane_id, title, position, created_at) VALUES ('d1','p1','c-done','s1','D1','a1','2026-01-01 10:00:00')").run();
     db.prepare("INSERT INTO tasks (id, project_id, column_id, swimlane_id, title, position, created_at) VALUES ('d2','p1','c-done','s1','D2','a1V','2026-01-01 10:00:00')").run();
     db.prepare("INSERT INTO tasks (id, project_id, column_id, swimlane_id, title, position, created_at) VALUES ('d3','p1','c-done','s1','D3','a2','2026-01-01 10:00:00')").run();
     const svc = makeService(db);
-    Effect.runSync(
+    await Effect.runPromise(
       Effect.gen(function* () {
         const result = yield* Effect.either(svc.move(maria, "t1", { columnId: "c-done", swimlaneId: "s1", afterTaskId: "d1", beforeTaskId: "d3" }));
         expect(Either.isLeft(result)).toBe(true);
@@ -252,12 +253,12 @@ describe("TaskService WIP + positions", () => {
     );
   });
 
-  it("move succeeds when it exactly fills the last free slot (count = limit - 1)", () => {
+  it("move succeeds when it exactly fills the last free slot (count = limit - 1)", async () => {
     seedWip(db);
     // c-todo holds 2 tasks (t1, t3); a limit of 3 leaves exactly one free slot.
     db.prepare("UPDATE columns SET wip_limit = 3 WHERE id = 'c-todo'").run();
     const svc = makeService(db);
-    Effect.runSync(
+    await Effect.runPromise(
       Effect.gen(function* () {
         const result = yield* Effect.either(svc.move(maria, "t2", { columnId: "c-todo", swimlaneId: "s1" }));
         expect(Either.isRight(result)).toBe(true);
@@ -269,12 +270,12 @@ describe("TaskService WIP + positions", () => {
     );
   });
 
-  it("a reorder between two existing neighbors emits no activity", () => {
+  it("a reorder between two existing neighbors emits no activity", async () => {
     seedWip(db);
     // c-todo: t1 (a0), t3 (a1), t4 (a2). Reorder t1 between t3 and t4.
     db.prepare("INSERT INTO tasks (id, project_id, column_id, swimlane_id, title, position, created_at) VALUES ('t4','p1','c-todo','s1','T4','a2','2026-01-01 10:00:00')").run();
     const svc = makeService(db);
-    Effect.runSync(
+    await Effect.runPromise(
       Effect.gen(function* () {
         const { task, activity } = yield* svc.move(maria, "t1", { columnId: "c-todo", swimlaneId: "s1", afterTaskId: "t3", beforeTaskId: "t4" });
         expect(task.position).toBe("a1V"); // keyBetween('a1','a2')
@@ -289,7 +290,7 @@ describe("TaskService WIP + positions", () => {
 });
 
 describe("TaskService required fields", () => {
-  it("isEmptyDoc treats an image-only description as non-empty", () => {
+  it("isEmptyDoc treats an image-only description as non-empty", async () => {
     const IMG_DOC: TipTapDoc = {
       type: "doc",
       content: [{ type: "paragraph", content: [{ type: "image", attrs: { src: "https://x.com/i.png" } }] }],
@@ -298,10 +299,10 @@ describe("TaskService required fields", () => {
     expect(isEmptyDoc(EMPTY_DOC)).toBe(true);
   });
 
-  it("create rejects an empty or whitespace-only description (TipTap-aware)", () => {
+  it("create rejects an empty or whitespace-only description (TipTap-aware)", async () => {
     seedRequired(db);
     const svc = makeService(db);
-    Effect.runSync(
+    await Effect.runPromise(
       Effect.gen(function* () {
         const empty = yield* Effect.either(svc.create(maria, { projectId: "p1", columnId: "c-todo", swimlaneId: "s1", title: "X", description: EMPTY_DOC }));
         expect(Either.isLeft(empty)).toBe(true);
@@ -320,10 +321,10 @@ describe("TaskService required fields", () => {
     );
   });
 
-  it("move validates required fields against the target column", () => {
+  it("move validates required fields against the target column", async () => {
     seedRequired(db);
     const svc = makeService(db);
-    Effect.runSync(
+    await Effect.runPromise(
       Effect.gen(function* () {
         // t1 has no assignees — moving into c-done (requires assignee) fails.
         const blocked = yield* Effect.either(svc.move(maria, "t1", { columnId: "c-done", swimlaneId: "s1" }));
@@ -339,10 +340,10 @@ describe("TaskService required fields", () => {
     );
   });
 
-  it("update rejects clearing a required description", () => {
+  it("update rejects clearing a required description", async () => {
     seedRequired(db);
     const svc = makeService(db);
-    Effect.runSync(
+    await Effect.runPromise(
       Effect.gen(function* () {
         const result = yield* Effect.either(svc.update(maria, "t1", { description: EMPTY_DOC }));
         expect(Either.isLeft(result)).toBe(true);
@@ -358,10 +359,10 @@ describe("TaskService required fields", () => {
 });
 
 describe("TaskService swimlane + deadline", () => {
-  it("create without swimlaneId lands in the project's backlog lane", () => {
+  it("create without swimlaneId lands in the project's backlog lane", async () => {
     seedDeadline(db);
     const svc = makeService(db);
-    Effect.runSync(
+    await Effect.runPromise(
       Effect.gen(function* () {
         const { task } = yield* svc.create(maria, { projectId: "p1", columnId: "c-todo", title: "New task" });
         expect(task.swimlaneId).toBe("s-backlog");
@@ -369,10 +370,10 @@ describe("TaskService swimlane + deadline", () => {
     );
   });
 
-  it("create rejects a due date later than the lane's deadline", () => {
+  it("create rejects a due date later than the lane's deadline", async () => {
     seedDeadline(db);
     const svc = makeService(db);
-    Effect.runSync(
+    await Effect.runPromise(
       Effect.gen(function* () {
         const late = yield* Effect.either(svc.create(maria, { projectId: "p1", columnId: "c-todo", swimlaneId: "m1", title: "Late", dueAt: "2026-07-01" }));
         expect(Either.isLeft(late)).toBe(true);
@@ -387,10 +388,10 @@ describe("TaskService swimlane + deadline", () => {
     );
   });
 
-  it("update rejects a due date later than the lane's deadline", () => {
+  it("update rejects a due date later than the lane's deadline", async () => {
     seedDeadline(db);
     const svc = makeService(db);
-    Effect.runSync(
+    await Effect.runPromise(
       Effect.gen(function* () {
         // t1 lives in m1 (due 2026-06-01).
         const late = yield* Effect.either(svc.update(maria, "t1", { dueAt: "2026-07-01" }));
@@ -406,10 +407,10 @@ describe("TaskService swimlane + deadline", () => {
     );
   });
 
-  it("move rejects when the task's due date exceeds the target lane's deadline; clearDueAt bypasses", () => {
+  it("move rejects when the task's due date exceeds the target lane's deadline; clearDueAt bypasses", async () => {
     seedDeadline(db);
     const svc = makeService(db);
-    Effect.runSync(
+    await Effect.runPromise(
       Effect.gen(function* () {
         // t2 (due 2026-07-01) in the backlog; m1's deadline is 2026-06-01.
         const blocked = yield* Effect.either(svc.move(maria, "t2", { columnId: "c-todo", swimlaneId: "m1" }));
@@ -425,10 +426,10 @@ describe("TaskService swimlane + deadline", () => {
     );
   });
 
-  it("a dueAt exactly equal to the lane's deadline is allowed on create, update, and move", () => {
+  it("a dueAt exactly equal to the lane's deadline is allowed on create, update, and move", async () => {
     seedDeadline(db);
     const svc = makeService(db);
-    Effect.runSync(
+    await Effect.runPromise(
       Effect.gen(function* () {
         // create: dueAt === lane dueAt (2026-06-01) → allowed (guard is strictly-after)
         const created = yield* Effect.either(svc.create(maria, { projectId: "p1", columnId: "c-todo", swimlaneId: "m1", title: "Equal", dueAt: "2026-06-01" }));
@@ -446,11 +447,11 @@ describe("TaskService swimlane + deadline", () => {
     );
   });
 
-  it("update with dueAt: null clears the deadline even when the lane has one", () => {
+  it("update with dueAt: null clears the deadline even when the lane has one", async () => {
     seedDeadline(db);
     db.prepare("UPDATE tasks SET due_at = '2026-06-01' WHERE id = 't1'").run();
     const svc = makeService(db);
-    Effect.runSync(
+    await Effect.runPromise(
       Effect.gen(function* () {
         const result = yield* Effect.either(svc.update(maria, "t1", { dueAt: null }));
         expect(Either.isRight(result)).toBe(true);
@@ -459,11 +460,11 @@ describe("TaskService swimlane + deadline", () => {
     );
   });
 
-  it("move into an archived lane is rejected", () => {
+  it("move into an archived lane is rejected", async () => {
     seedDeadline(db);
     db.prepare("UPDATE swimlanes SET archived_at = '2026-03-01T00:00:00.000Z' WHERE id = 'm1'").run();
     const svc = makeService(db);
-    Effect.runSync(
+    await Effect.runPromise(
       Effect.gen(function* () {
         const result = yield* Effect.either(svc.move(maria, "t2", { columnId: "c-todo", swimlaneId: "m1" }));
         expect(Either.isLeft(result)).toBe(true);
@@ -477,10 +478,10 @@ describe("TaskService swimlane + deadline", () => {
 });
 
 describe("TaskService ticket keys", () => {
-  it("assigns sequential per-project numbers with composed keys", () => {
+  it("assigns sequential per-project numbers with composed keys", async () => {
     seed(db);
     const svc = makeService(db);
-    Effect.runSync(
+    await Effect.runPromise(
       Effect.gen(function* () {
         const { task: t1 } = yield* svc.create(maria, { projectId: "p1", columnId: "c-todo", title: "One" });
         const { task: t2 } = yield* svc.create(maria, { projectId: "p1", columnId: "c-todo", title: "Two" });
@@ -490,10 +491,10 @@ describe("TaskService ticket keys", () => {
     );
   });
 
-  it("numbers are per-project", () => {
+  it("numbers are per-project", async () => {
     seed(db);
     const svc = makeService(db);
-    Effect.runSync(
+    await Effect.runPromise(
       Effect.gen(function* () {
         const { task: t } = yield* svc.create(maria, { projectId: "p2", columnId: "c-p2", title: "Other" });
         expect(t.key).toBe("WC-1");

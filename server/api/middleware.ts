@@ -1,14 +1,23 @@
 import { HttpApiBuilder, HttpServerResponse } from "@effect/platform";
 import { HttpServerRequest } from "@effect/platform/HttpServerRequest";
 import { Cause, Effect } from "effect";
-import { Database } from "bun:sqlite";
+import type { Database } from "bun:sqlite";
 import { dirname } from "node:path";
 import { AuthIdentity, AuthIdentityShape } from "./auth";
 import { constantTimeTokenEqual, resolveApiKeyIdentity } from "./auth-key";
 import { MAX_API_BODY, X_LEXA_REMOTE_IP } from "./limits";
 import { bodyCapFor, resolveStorageConfig } from "../storage/config";
 import { apiRateLimiter, isPrivateIp, isRateLimitExemptPath, shareRateLimiter } from "./rate-limit";
-import { auth } from "../auth";
+import { getEnv, type RuntimeEnv } from "../env";
+import { storageEnvFrom } from "../runtime-env";
+
+export interface MiddlewareSession {
+  user?: { id: string; name: string; role?: string } | null;
+}
+
+export interface ApiMiddlewareDeps {
+  getSession?: ((headers: Headers) => Promise<MiddlewareSession | null>) | undefined;
+}
 
 // API-level middleware wrapped around the whole HttpApi router. Applied at
 // build time; runs before route matching (incl. 404s) and before
@@ -23,9 +32,16 @@ const withSecurityHeaders = (resp: HttpServerResponse.HttpServerResponse) =>
 // Session caller → identity. The session user's role maps superadmin→admin
 // so the legacy requireAdmin gates stay correct until the authorization
 // service replaces them (R14). Every getSession is try/catch'd (R1 — an
-// uncaught throw would crash the request).
-const sessionIdentity = (headers: Headers): Effect.Effect<AuthIdentityShape | null, never> =>
-  Effect.tryPromise(() => auth.api.getSession({ headers })).pipe(
+// uncaught throw would crash the request). The getter is injected: the Bun
+// host passes the better-auth singleton (server/auth.ts), which can never be
+// imported on Workers — the Workers entry passes its own per-request
+// createAuth(env) getter or omits sessions (Bearer-only).
+const sessionIdentity = (
+  headers: Headers,
+  getSession?: (headers: Headers) => Promise<MiddlewareSession | null>
+): Effect.Effect<AuthIdentityShape | null, never> => {
+  if (!getSession) return Effect.succeed(null);
+  return Effect.tryPromise(() => getSession(headers)).pipe(
     Effect.map((session) => {
       const user = session?.user;
       if (!user) return null;
@@ -39,12 +55,13 @@ const sessionIdentity = (headers: Headers): Effect.Effect<AuthIdentityShape | nu
     }),
     Effect.catchAll(() => Effect.succeed(null))
   );
+};
 
-export function createApiMiddleware(db: Database, dbPath: string) {
+export function createApiMiddleware(db: Database, dbPath: string, env: RuntimeEnv = getEnv(), deps: ApiMiddlewareDeps = {}) {
   // Boot-time env (like DATABASE_PATH): the upload cap raises the declared
   // body pre-check on attachment-upload paths so a legit large upload reaches
   // the route, which enforces the exact per-file cap.
-  const storageCfg = resolveStorageConfig(process.env, dirname(dbPath));
+  const storageCfg = resolveStorageConfig(storageEnvFrom(env), dirname(dbPath));
   return HttpApiBuilder.middleware((httpApp) =>
     Effect.gen(function* () {
       const request = yield* HttpServerRequest;
@@ -97,14 +114,14 @@ export function createApiMiddleware(db: Database, dbPath: string) {
         );
       }
 
-      const daemonTokenOk = isHearthDaemon && process.env.LXK_HEARTH_DAEMON_TOKEN
-        ? constantTimeTokenEqual(request.headers["x-hearth-token"] ?? "", process.env.LXK_HEARTH_DAEMON_TOKEN)
+      const daemonTokenOk = isHearthDaemon && env.LXK_HEARTH_DAEMON_TOKEN
+        ? constantTimeTokenEqual(request.headers["x-hearth-token"] ?? "", env.LXK_HEARTH_DAEMON_TOKEN)
         : false;
       let identity: AuthIdentityShape;
       if (!isHealth && !isSetup && !daemonTokenOk && !isPublicShare) {
         // Dual-channel (R4): session cookie first (browsers), Bearer key
         // second (machines). The x-lxk-user header is removed — never read.
-        const session = yield* sessionIdentity(new Headers(request.headers));
+        const session = yield* sessionIdentity(new Headers(request.headers), deps.getSession);
         if (session) {
           identity = session;
         } else {

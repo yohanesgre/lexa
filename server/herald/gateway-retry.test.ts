@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { Effect, Layer } from "effect";
 import { Database } from "bun:sqlite";
 import { Sqlite } from "../db/database";
+import { DbBunLive } from "../db/db";
 import { HeraldGateway } from "./gateway.service";
 import { HeraldProvidersRepo } from "../repos/herald-providers.repo";
 import { HeraldModelsRepo } from "../repos/herald-models.repo";
@@ -13,7 +14,7 @@ import { HeraldGenerationFailed } from "../api/errors";
 function memDbLayer() {
   const db = new Database(":memory:");
   db.exec("PRAGMA foreign_keys = ON");
-  return Layer.succeed(Sqlite, db);
+  return Layer.mergeAll(Layer.succeed(Sqlite, db), DbBunLive(db));
 }
 function stubCallLog() {
   return Layer.succeed(HeraldCallLogsRepo, { insert: () => Effect.void, log: () => Effect.void } as unknown as never);

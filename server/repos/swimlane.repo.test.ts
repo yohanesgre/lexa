@@ -7,6 +7,7 @@ import { Effect, Layer, Context, Either } from "effect";
 import { Database } from "bun:sqlite";
 import { runMigrations } from "../db/migrate";
 import { Sqlite, initSqlite, ConstraintViolation, RowNotFound } from "../db/database";
+import { DbBunLive } from "../db/db";
 import { SwimlaneRepo } from "./swimlane.repo";
 
 const MIGRATIONS = fileURLToPath(new URL("../../migrations", import.meta.url));
@@ -56,16 +57,16 @@ function seed(db: Database) {
 }
 
 function makeRepo(db: Database) {
-  const layer = SwimlaneRepo.Default.pipe(Layer.provide(Layer.succeed(Sqlite, db)));
+  const layer = SwimlaneRepo.Default.pipe(Layer.provide(Layer.mergeAll(Layer.succeed(Sqlite, db), DbBunLive(db))));
   const ctx = Effect.runSync(Effect.scoped(Layer.build(layer)));
   return Context.get(ctx, SwimlaneRepo);
 }
 
 describe("SwimlaneRepo CRUD", () => {
-  it("create inserts and returns the row with kind/dueAt/description", () => {
+  it("create inserts and returns the row with kind/dueAt/description", async () => {
     seed(db);
     const repo = makeRepo(db);
-    Effect.runSync(
+    await Effect.runPromise(
       Effect.gen(function* () {
         const lane = yield* repo.create({ id: "m3", projectId: "p1", name: "M3", description: "d", position: 3, kind: "sprint", dueAt: "2026-09-01" });
         expect(lane.id).toBe("m3");
@@ -78,10 +79,10 @@ describe("SwimlaneRepo CRUD", () => {
     );
   });
 
-  it("findById returns the row; missing → RowNotFound", () => {
+  it("findById returns the row; missing → RowNotFound", async () => {
     seed(db);
     const repo = makeRepo(db);
-    Effect.runSync(
+    await Effect.runPromise(
       Effect.gen(function* () {
         const lane = yield* repo.findById("m1");
         expect(lane.name).toBe("Milestone 1");
@@ -92,10 +93,10 @@ describe("SwimlaneRepo CRUD", () => {
     );
   });
 
-  it("findByProject returns lanes ordered by position", () => {
+  it("findByProject returns lanes ordered by position", async () => {
     seed(db);
     const repo = makeRepo(db);
-    Effect.runSync(
+    await Effect.runPromise(
       Effect.gen(function* () {
         const lanes = yield* repo.findByProject("p1");
         expect(lanes.map((l) => l.id)).toEqual(["s-backlog", "m1", "m2"]);
@@ -103,10 +104,10 @@ describe("SwimlaneRepo CRUD", () => {
     );
   });
 
-  it("findBacklog returns the backlog lane; missing → RowNotFound", () => {
+  it("findBacklog returns the backlog lane; missing → RowNotFound", async () => {
     seed(db);
     const repo = makeRepo(db);
-    Effect.runSync(
+    await Effect.runPromise(
       Effect.gen(function* () {
         const lane = yield* repo.findBacklog("p1");
         expect(lane.id).toBe("s-backlog");
@@ -118,10 +119,10 @@ describe("SwimlaneRepo CRUD", () => {
     );
   });
 
-  it("update mutates name/description/position/dueAt; empty input returns the row unchanged", () => {
+  it("update mutates name/description/position/dueAt; empty input returns the row unchanged", async () => {
     seed(db);
     const repo = makeRepo(db);
-    Effect.runSync(
+    await Effect.runPromise(
       Effect.gen(function* () {
         const lane = yield* repo.update("m2", { name: "Renamed", description: "new", position: 9, dueAt: "2026-10-01" });
         expect(lane.name).toBe("Renamed");
@@ -135,10 +136,10 @@ describe("SwimlaneRepo CRUD", () => {
     );
   });
 
-  it("setArchived sets and clears archived_at; missing id → RowNotFound", () => {
+  it("setArchived sets and clears archived_at; missing id → RowNotFound", async () => {
     seed(db);
     const repo = makeRepo(db);
-    Effect.runSync(
+    await Effect.runPromise(
       Effect.gen(function* () {
         const archived = yield* repo.setArchived("m2", "2026-03-01T00:00:00.000Z");
         expect(archived.archivedAt).toBe("2026-03-01T00:00:00.000Z");
@@ -151,10 +152,10 @@ describe("SwimlaneRepo CRUD", () => {
     );
   });
 
-  it("maxPosition is -1 for an empty project and max+1 after inserts", () => {
+  it("maxPosition is -1 for an empty project and max+1 after inserts", async () => {
     seed(db);
     const repo = makeRepo(db);
-    Effect.runSync(
+    await Effect.runPromise(
       Effect.gen(function* () {
         expect(yield* repo.maxPosition("p2")).toBe(-1);
         expect(yield* repo.maxPosition("p1")).toBe(2);
@@ -164,10 +165,10 @@ describe("SwimlaneRepo CRUD", () => {
 });
 
 describe("SwimlaneRepo due-date queries", () => {
-  it("countTasks counts every task in the lane", () => {
+  it("countTasks counts every task in the lane", async () => {
     seed(db);
     const repo = makeRepo(db);
-    Effect.runSync(
+    await Effect.runPromise(
       Effect.gen(function* () {
         expect(yield* repo.countTasks("m1")).toBe(4);
         expect(yield* repo.countTasks("m2")).toBe(0);
@@ -175,10 +176,10 @@ describe("SwimlaneRepo due-date queries", () => {
     );
   });
 
-  it("countDueAfter counts only live tasks with a due date strictly after", () => {
+  it("countDueAfter counts only live tasks with a due date strictly after", async () => {
     seed(db);
     const repo = makeRepo(db);
-    Effect.runSync(
+    await Effect.runPromise(
       Effect.gen(function* () {
         // t1 (07-01) only — t2 (05-01) earlier, t3 archived, t4 no due date.
         expect(yield* repo.countDueAfter("m1", "2026-06-01")).toBe(1);
@@ -193,10 +194,10 @@ describe("SwimlaneRepo due-date queries", () => {
 });
 
 describe("SwimlaneRepo constraints", () => {
-  it("delete removes an empty lane; deleting a lane with tasks hits the FK constraint", () => {
+  it("delete removes an empty lane; deleting a lane with tasks hits the FK constraint", async () => {
     seed(db);
     const repo = makeRepo(db);
-    Effect.runSync(
+    await Effect.runPromise(
       Effect.gen(function* () {
         const blocked = yield* Effect.either(repo.delete("m1"));
         expect(Either.isLeft(blocked)).toBe(true);
@@ -211,10 +212,10 @@ describe("SwimlaneRepo constraints", () => {
     );
   });
 
-  it("the partial unique index allows at most one backlog per project", () => {
+  it("the partial unique index allows at most one backlog per project", async () => {
     seed(db);
     const repo = makeRepo(db);
-    Effect.runSync(
+    await Effect.runPromise(
       Effect.gen(function* () {
         // Second backlog in p1 → constraint violation, classified by the repo.
         const dup = yield* Effect.either(repo.create({ id: "b2", projectId: "p1", name: "B2", position: 9, kind: "backlog" }));

@@ -4,7 +4,7 @@ import { SwimlaneRepo } from "../repos/swimlane.repo";
 import { TaskRepo } from "../repos/task.repo";
 import { ProjectRepo } from "../repos/project.repo";
 import { ActivityService } from "./activity.service";
-import { DbError, ConstraintViolation, withTx, Sqlite } from "../db/database";
+import { DbError, ConstraintViolation, withTx, Db } from "../db/db";
 import { ProjectNotFound, MilestoneNotFound, HasChildren, TaskNotFound } from "../api/errors";
 import * as msg from "../activity-messages";
 import type { Milestone, Actor, ActivityEvent } from "../../shared/types";
@@ -17,7 +17,7 @@ export class MilestoneService extends Effect.Service<MilestoneService>()("Lexa/M
     const taskRepo = yield* TaskRepo;
     const projectRepo = yield* ProjectRepo;
     const activityService = yield* ActivityService;
-    const db = yield* Sqlite;
+    const db = yield* Db;
 
     return {
       create: (input: { projectId: string; name: string; description?: string; dueAt?: string | null }): Effect.Effect<Milestone, ProjectNotFound | DbError> =>

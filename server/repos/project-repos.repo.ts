@@ -1,11 +1,11 @@
 import { Effect } from "effect";
-import { Sqlite, queryAll, run, DbError, ConstraintViolation, withTx } from "../db/database";
+import { Db, queryAll, run, DbError, ConstraintViolation, withTx } from "../db/db";
 import { ProjectRepoRow, rowToProjectRepo } from "../../shared/db";
 import type { ProjectRepo } from "../../shared/types";
 
 export class ProjectReposRepo extends Effect.Service<ProjectReposRepo>()("Lexa/ProjectReposRepo", {
   effect: Effect.gen(function* () {
-    const db = yield* Sqlite;
+    const db = yield* Db;
 
     return {
       listByProject: (projectId: string): Effect.Effect<ProjectRepo[], DbError> =>

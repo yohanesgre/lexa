@@ -1,5 +1,5 @@
 import { Effect } from "effect";
-import { Sqlite } from "../db/database";
+import { Db } from "../db/db";
 import { HeraldModelPricesRepo } from "../repos/herald-model-prices.repo";
 import { ProviderUnreachable } from "../api/errors";
 
@@ -13,7 +13,7 @@ function isValidPriceString(s: string): boolean {
   return Number.isFinite(n);
 }
 
-export const syncModelPrices = (): Effect.Effect<number, ProviderUnreachable, Sqlite | HeraldModelPricesRepo> =>
+export const syncModelPrices = (): Effect.Effect<number, ProviderUnreachable, Db | HeraldModelPricesRepo> =>
   Effect.gen(function* () {
     const repo = yield* HeraldModelPricesRepo;
     const controller = new AbortController();

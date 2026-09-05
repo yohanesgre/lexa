@@ -1,10 +1,10 @@
 import { Effect } from "effect";
-import { Sqlite, queryAll, queryFirst, run, DbError, RowNotFound, ConstraintViolation } from "../db/database";
+import { Db, queryAll, queryFirst, run, DbError, RowNotFound, ConstraintViolation } from "../db/db";
 import type { ApiKeyRow } from "../../shared/db";
 
 export class ApiKeyRepo extends Effect.Service<ApiKeyRepo>()("Lexa/ApiKeyRepo", {
   effect: Effect.gen(function* () {
-    const db = yield* Sqlite;
+    const db = yield* Db;
 
     return {
       create: (input: { id: string; name: string; keyHash: string }): Effect.Effect<ApiKeyRow, DbError | ConstraintViolation | RowNotFound> =>

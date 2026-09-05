@@ -1,8 +1,8 @@
 import { Logger, LogLevel, Layer, FiberId } from "effect";
+import { getEnv } from "../env";
 
-const levelFromEnv = (): LogLevel.LogLevel => {
-  const raw = (typeof process !== "undefined" ? process.env.LOG_LEVEL : undefined) ?? "info";
-  switch (raw.toLowerCase()) {
+const levelFromEnv = (raw: string | undefined): LogLevel.LogLevel => {
+  switch ((raw ?? "info").toLowerCase()) {
     case "trace": return LogLevel.Trace;
     case "debug": return LogLevel.Debug;
     case "info":  return LogLevel.Info;
@@ -15,7 +15,7 @@ const levelFromEnv = (): LogLevel.LogLevel => {
   }
 };
 
-const logLevel = levelFromEnv();
+const logLevel = levelFromEnv(getEnv().LOG_LEVEL);
 
 const structuredLogger = Logger.make(({ logLevel, message, annotations, date, fiberId }) => {
   const extra: Record<string, unknown> = {};

@@ -1,5 +1,5 @@
 import { Effect } from "effect";
-import { Sqlite, queryAll, queryFirst, run, DbError, RowNotFound, ConstraintViolation } from "../db/database";
+import { Db, queryAll, queryFirst, run, DbError, RowNotFound, ConstraintViolation } from "../db/db";
 
 export interface WikiShareLinkRow {
   id: string;
@@ -40,7 +40,7 @@ export function buildSubtreeTree(rows: SubtreeRow[]): SubtreeNode | null {
 
 export class WikiShareRepo extends Effect.Service<WikiShareRepo>()("Lexa/WikiShareRepo", {
   effect: Effect.gen(function* () {
-    const db = yield* Sqlite;
+    const db = yield* Db;
 
     return {
       insert: (link: {

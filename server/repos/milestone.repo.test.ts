@@ -7,6 +7,7 @@ import { Effect, Layer, Context } from "effect";
 import { Database } from "bun:sqlite";
 import { runMigrations } from "../db/migrate";
 import { Sqlite } from "../db/database";
+import { DbBunLive } from "../db/db";
 import { MilestoneRepo } from "./milestone.repo";
 
 const MIGRATIONS = fileURLToPath(new URL("../../migrations", import.meta.url));
@@ -22,7 +23,7 @@ function setup() {
   const path = join(dir, "test.db");
   runMigrations(path, MIGRATIONS);
   db = new Database(path);
-  const layer = MilestoneRepo.Default.pipe(Layer.provide(Layer.succeed(Sqlite, db)));
+  const layer = MilestoneRepo.Default.pipe(Layer.provide(Layer.mergeAll(Layer.succeed(Sqlite, db), DbBunLive(db))));
   const ctx = Effect.runSync(Effect.scoped(Layer.build(layer)));
   repo = Context.get(ctx, MilestoneRepo);
   db.exec(`INSERT INTO projects (id, name, slug) VALUES ('p1','P','p1')`);

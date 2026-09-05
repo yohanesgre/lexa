@@ -1,5 +1,5 @@
 import { Effect } from "effect";
-import { Sqlite, queryAll, queryFirst, run, batch, DbError, RowNotFound, ConstraintViolation } from "../db/database";
+import { Db, queryAll, queryFirst, run, batch, DbError, RowNotFound, ConstraintViolation } from "../db/db";
 import { TaskRow, rowToTask, rowToTaskSlim } from "../../shared/db";
 import type { Task } from "../../shared/types";
 
@@ -46,7 +46,7 @@ export interface GithubLinkRow {
 
 export class TaskRepo extends Effect.Service<TaskRepo>()("Lexa/TaskRepo", {
   effect: Effect.gen(function* () {
-    const db = yield* Sqlite;
+    const db = yield* Db;
 
     return {
       create: (input: {

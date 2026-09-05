@@ -1,5 +1,5 @@
 import { Effect } from "effect";
-import { Sqlite, queryFirst, run, DbError, RowNotFound, ConstraintViolation } from "../db/database";
+import { Db, queryFirst, run, DbError, RowNotFound, ConstraintViolation } from "../db/db";
 import type { HeraldReasoningEffort, HeraldSettingsInput, HeraldSettingsMasked } from "../../shared/herald";
 import { parseWriteTools } from "../herald/write-tools";
 
@@ -31,7 +31,7 @@ function parseFallbackIds(raw: string | null | undefined): string[] {
 
 export class HeraldSettingsRepo extends Effect.Service<HeraldSettingsRepo>()("Lexa/HeraldSettingsRepo", {
   effect: Effect.gen(function* () {
-    const db = yield* Sqlite;
+    const db = yield* Db;
 
     const getRow = (projectId: string): Effect.Effect<HeraldSettingsRow, RowNotFound | DbError> =>
       queryFirst<HeraldSettingsRow>(db, `SELECT * FROM herald_settings WHERE project_id = ?`, projectId);

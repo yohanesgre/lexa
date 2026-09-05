@@ -1,7 +1,10 @@
 import { Effect } from "effect";
-import { Sqlite, DbError } from "../db/database";
+import { Db, DbError, RowNotFound, queryFirst } from "../db/db";
 
 export type ProjectAccessRole = "admin" | "member";
+
+const firstOrNull = <T>(eff: Effect.Effect<T, RowNotFound | DbError>): Effect.Effect<T | null, DbError> =>
+  eff.pipe(Effect.catchTag("RowNotFound", () => Effect.succeed(null)));
 
 // Project-access + team/settings gates (R8/R14). The decision order is
 // pinned by the spec: superadmin > explicit user_project_roles grant > team
@@ -10,30 +13,24 @@ export type ProjectAccessRole = "admin" | "member";
 // roles everywhere.
 export class AuthorizationService extends Effect.Service<AuthorizationService>()("Lexa/AuthorizationService", {
   effect: Effect.gen(function* () {
-    const db = yield* Sqlite;
+    const db = yield* Db;
 
     const isSuperadmin = (userId: string): Effect.Effect<boolean, DbError> =>
-      Effect.try({
-        try: () => {
-          const row = db.prepare("SELECT role FROM users WHERE id = ?").get(userId) as { role: string } | null;
-          return row?.role === "superadmin";
-        },
-        catch: (e) => new DbError({ message: String(e), cause: e }),
-      });
+      firstOrNull(queryFirst<{ role: string }>(db, "SELECT role FROM users WHERE id = ?", userId)).pipe(
+        Effect.map((row) => row?.role === "superadmin")
+      );
 
     // Org role owner/admin on that team = team admin.
     const isTeamAdmin = (userId: string, teamId: string): Effect.Effect<boolean, DbError> =>
-      Effect.try({
-        try: () => {
-          const row = db
-            .prepare("SELECT role FROM member WHERE organizationId = ? AND userId = ?")
-            .get(teamId, userId) as { role: string } | null;
+      firstOrNull(
+        queryFirst<{ role: string }>(db, "SELECT role FROM member WHERE organizationId = ? AND userId = ?", teamId, userId)
+      ).pipe(
+        Effect.map((row) => {
           if (!row) return false;
           const roles = row.role.split(",").map((r) => r.trim());
           return roles.includes("owner") || roles.includes("admin");
-        },
-        catch: (e) => new DbError({ message: String(e), cause: e }),
-      });
+        })
+      );
 
     // Project access decision:
     //   1. superadmin                    → "admin"
@@ -43,26 +40,17 @@ export class AuthorizationService extends Effect.Service<AuthorizationService>()
     const projectAccess = (userId: string, projectId: string): Effect.Effect<ProjectAccessRole | null, DbError> =>
       Effect.gen(function* () {
         if (yield* isSuperadmin(userId)) return "admin" as const;
-        const grant = yield* Effect.try({
-          try: () =>
-            db.prepare("SELECT role FROM user_project_roles WHERE user_id = ? AND project_id = ?").get(userId, projectId) as
-              | { role: "admin" | "member" }
-              | null,
-          catch: (e) => new DbError({ message: String(e), cause: e }),
-        });
+        const grant = yield* firstOrNull(
+          queryFirst<{ role: "admin" | "member" }>(db, "SELECT role FROM user_project_roles WHERE user_id = ? AND project_id = ?", userId, projectId)
+        );
         if (grant) return grant.role;
-        const team = yield* Effect.try({
-          try: () => db.prepare("SELECT team_id FROM projects WHERE id = ?").get(projectId) as { team_id: string | null } | null,
-          catch: (e) => new DbError({ message: String(e), cause: e }),
-        });
+        const team = yield* firstOrNull(
+          queryFirst<{ team_id: string | null }>(db, "SELECT team_id FROM projects WHERE id = ?", projectId)
+        );
         if (!team?.team_id) return null; // unassigned → superadmin-only (already ruled out)
-        const member = yield* Effect.try({
-          try: () =>
-            db.prepare("SELECT role FROM member WHERE organizationId = ? AND userId = ?").get(team.team_id, userId) as
-              | { role: string }
-              | null,
-          catch: (e) => new DbError({ message: String(e), cause: e }),
-        });
+        const member = yield* firstOrNull(
+          queryFirst<{ role: string }>(db, "SELECT role FROM member WHERE organizationId = ? AND userId = ?", team.team_id, userId)
+        );
         if (!member) return null;
         const roles = member.role.split(",").map((r) => r.trim());
         return roles.includes("owner") || roles.includes("admin") ? "admin" : "member";

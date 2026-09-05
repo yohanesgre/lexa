@@ -3,6 +3,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { Effect, Layer } from "effect";
 import { Database } from "bun:sqlite";
 import { Sqlite } from "../db/database";
+import { DbBunLive } from "../db/db";
 import { HeraldGateway } from "./gateway.service";
 import { HeraldProvidersRepo } from "../repos/herald-providers.repo";
 import { HeraldModelsRepo } from "../repos/herald-models.repo";
@@ -105,8 +106,8 @@ describe("gateway health wiring", () => {
       Layer.succeed(HeraldCallLogsRepo, { insert: () => Effect.void } as unknown as never),
       Layer.succeed(HeraldSettingsRepo, { getByProject: () => Effect.fail(new (class E { _tag = "RowNotFound" as const; table = "herald_settings" })()) } as unknown as never),
       Layer.succeed(HeraldHealthService, mockHealth(db) as unknown as never),
-      HeraldModelPricesRepo.Default.pipe(Layer.provide(Layer.succeed(Sqlite, db as any))),
-      Layer.succeed(Sqlite, db as any)
+      HeraldModelPricesRepo.Default.pipe(Layer.provide(Layer.mergeAll(Layer.succeed(Sqlite, db as any), DbBunLive(db as any)))),
+      Layer.mergeAll(Layer.succeed(Sqlite, db as any), DbBunLive(db as any))
     );
     const gatewayLayer = Layer.provide(HeraldGateway.Default, combined);
 
@@ -144,8 +145,8 @@ describe("gateway health wiring", () => {
       Layer.succeed(HeraldCallLogsRepo, { insert: (inp: unknown) => Effect.sync(() => { const r = inp as { providerId: string | null; status: string; estimated?: boolean }; db.prepare("INSERT INTO herald_call_logs (id, project_id, provider_id, model, kind, status, estimated) VALUES (?,?,?,?,?,?,?)").run(crypto.randomUUID(), "p1", r.providerId, "m", "openai_compatible", r.status, r.estimated ? 1 : 0); }) } as unknown as never),
       Layer.succeed(HeraldSettingsRepo, { getByProject: () => Effect.fail(new (class E { _tag = "RowNotFound" as const; table = "herald_settings" })()) } as unknown as never),
       Layer.succeed(HeraldHealthService, mockHealth(db) as unknown as never),
-      HeraldModelPricesRepo.Default.pipe(Layer.provide(Layer.succeed(Sqlite, db as any))),
-      Layer.succeed(Sqlite, db as any)
+      HeraldModelPricesRepo.Default.pipe(Layer.provide(Layer.mergeAll(Layer.succeed(Sqlite, db as any), DbBunLive(db as any)))),
+      Layer.mergeAll(Layer.succeed(Sqlite, db as any), DbBunLive(db as any))
     );
     const gatewayLayer = Layer.provide(HeraldGateway.Default, combined);
 
@@ -178,11 +179,11 @@ describe("gateway health wiring", () => {
     const combined = Layer.mergeAll(
       Layer.succeed(HeraldProvidersRepo, { list: () => Effect.succeed([]) } as unknown as never),
       Layer.succeed(HeraldModelsRepo, { listAll: () => Effect.succeed([]) } as unknown as never),
-      HeraldCallLogsRepo.Default.pipe(Layer.provide(Layer.succeed(Sqlite, db as any))),
+      HeraldCallLogsRepo.Default.pipe(Layer.provide(Layer.mergeAll(Layer.succeed(Sqlite, db as any), DbBunLive(db as any)))),
       Layer.succeed(HeraldSettingsRepo, { getByProject: () => Effect.fail(new (class E { _tag = "RowNotFound" as const; table = "herald_settings" })()) } as unknown as never),
       Layer.succeed(HeraldHealthService, mockHealth(db) as unknown as never),
-      HeraldModelPricesRepo.Default.pipe(Layer.provide(Layer.succeed(Sqlite, db as any))),
-      Layer.succeed(Sqlite, db as any)
+      HeraldModelPricesRepo.Default.pipe(Layer.provide(Layer.mergeAll(Layer.succeed(Sqlite, db as any), DbBunLive(db as any)))),
+      Layer.mergeAll(Layer.succeed(Sqlite, db as any), DbBunLive(db as any))
     );
     const gatewayLayer = Layer.provide(HeraldGateway.Default, combined);
 

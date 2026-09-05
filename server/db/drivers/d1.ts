@@ -67,6 +67,7 @@ class D1Stmt implements DbStmt {
 
 export function createD1Driver(d1: D1Like): DbDriver {
   return {
+    supportsInteractiveTx: false,
     prepare(sql: string): DbStmt {
       return new D1Stmt(d1.prepare(sql));
     },

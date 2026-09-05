@@ -7,6 +7,7 @@ import { Effect, Layer, Context, Either } from "effect";
 import { Database } from "bun:sqlite";
 import { runMigrations } from "../db/migrate";
 import { Sqlite, initSqlite } from "../db/database";
+import { DbBunLive } from "../db/db";
 import { ColumnService } from "./column.service";
 import { ProjectNotFound, ColumnNotFound, HasChildren } from "../api/errors";
 
@@ -48,28 +49,28 @@ function seed(db: Database) {
 }
 
 function makeService(db: Database) {
-  const layer = ColumnService.Default.pipe(Layer.provide(Layer.succeed(Sqlite, db)));
+  const layer = ColumnService.Default.pipe(Layer.provide(Layer.mergeAll(Layer.succeed(Sqlite, db), DbBunLive(db))));
   const ctx = Effect.runSync(Effect.scoped(Layer.build(layer)));
   return Context.get(ctx, ColumnService);
 }
 
 describe("ColumnService.create", () => {
-  it("appends at the end of an empty project (position 0) and after existing columns", () => {
+  it("appends at the end of an empty project (position 0) and after existing columns", async () => {
     seed(db);
     db.prepare("INSERT INTO columns (id, project_id, name, position) VALUES ('c0','p2','Existing',0)").run();
     const svc = makeService(db);
-    const first = Effect.runSync(Effect.either(svc.create({ projectId: "p1", name: "Todo" })));
+    const first = await Effect.runPromise(Effect.either(svc.create({ projectId: "p1", name: "Todo" })));
     expect(Either.isRight(first)).toBe(true);
     if (Either.isRight(first)) expect(first.right.position).toBe(0);
-    const second = Effect.runSync(Effect.either(svc.create({ projectId: "p2", name: "Done" })));
+    const second = await Effect.runPromise(Effect.either(svc.create({ projectId: "p2", name: "Done" })));
     expect(Either.isRight(second)).toBe(true);
     if (Either.isRight(second)) expect(second.right.position).toBe(1);
   });
 
-  it("stores wipLimit, requiredFields, color, and githubState", () => {
+  it("stores wipLimit, requiredFields, color, and githubState", async () => {
     seed(db);
     const svc = makeService(db);
-    const res = Effect.runSync(
+    const res = await Effect.runPromise(
       Effect.either(svc.create({
         projectId: "p1",
         name: "In Progress",
@@ -90,42 +91,42 @@ describe("ColumnService.create", () => {
     }
   });
 
-  it("unknown project → ProjectNotFound", () => {
+  it("unknown project → ProjectNotFound", async () => {
     seed(db);
     const svc = makeService(db);
-    const res = Effect.runSync(Effect.either(svc.create({ projectId: "nope", name: "X" })));
+    const res = await Effect.runPromise(Effect.either(svc.create({ projectId: "nope", name: "X" })));
     expect(Either.isLeft(res)).toBe(true);
     if (Either.isLeft(res)) expect(res.left).toBeInstanceOf(ProjectNotFound);
   });
 });
 
 describe("ColumnService.read", () => {
-  it("findByProject returns columns ordered by position", () => {
+  it("findByProject returns columns ordered by position", async () => {
     seed(db);
     db.prepare("INSERT INTO columns (id, project_id, name, position) VALUES ('c1','p1','Done',2), ('c2','p1','Todo',1)").run();
     const svc = makeService(db);
-    const cols = Effect.runSync(svc.findByProject("p1"));
+    const cols = await Effect.runPromise(svc.findByProject("p1"));
     expect(cols.map((c) => c.name)).toEqual(["Todo", "Done"]);
   });
 
-  it("getById missing → ColumnNotFound; findByProject missing project → ProjectNotFound", () => {
+  it("getById missing → ColumnNotFound; findByProject missing project → ProjectNotFound", async () => {
     seed(db);
     const svc = makeService(db);
-    const missing = Effect.runSync(Effect.either(svc.getById("nope")));
+    const missing = await Effect.runPromise(Effect.either(svc.getById("nope")));
     expect(Either.isLeft(missing)).toBe(true);
     if (Either.isLeft(missing)) expect(missing.left).toBeInstanceOf(ColumnNotFound);
-    const noProject = Effect.runSync(Effect.either(svc.findByProject("nope")));
+    const noProject = await Effect.runPromise(Effect.either(svc.findByProject("nope")));
     expect(Either.isLeft(noProject)).toBe(true);
     if (Either.isLeft(noProject)) expect(noProject.left).toBeInstanceOf(ProjectNotFound);
   });
 });
 
 describe("ColumnService.update", () => {
-  it("updates name, position, color, wipLimit, requiredFields, githubState", () => {
+  it("updates name, position, color, wipLimit, requiredFields, githubState", async () => {
     seed(db);
     db.prepare("INSERT INTO columns (id, project_id, name, position) VALUES ('c1','p1','Todo',0)").run();
     const svc = makeService(db);
-    const res = Effect.runSync(
+    const res = await Effect.runPromise(
       Effect.either(svc.update("c1", {
         name: "Blocked",
         position: 9,
@@ -145,7 +146,7 @@ describe("ColumnService.update", () => {
       expect(res.right.githubState).toBe("closed");
     }
     // null clears wipLimit and githubState
-    const cleared = Effect.runSync(Effect.either(svc.update("c1", { wipLimit: null, githubState: null })));
+    const cleared = await Effect.runPromise(Effect.either(svc.update("c1", { wipLimit: null, githubState: null })));
     expect(Either.isRight(cleared)).toBe(true);
     if (Either.isRight(cleared)) {
       expect(cleared.right.wipLimit).toBeNull();
@@ -153,45 +154,45 @@ describe("ColumnService.update", () => {
     }
   });
 
-  it("missing id → ColumnNotFound", () => {
+  it("missing id → ColumnNotFound", async () => {
     seed(db);
     const svc = makeService(db);
-    const res = Effect.runSync(Effect.either(svc.update("nope", { name: "X" })));
+    const res = await Effect.runPromise(Effect.either(svc.update("nope", { name: "X" })));
     expect(Either.isLeft(res)).toBe(true);
     if (Either.isLeft(res)) expect(res.left).toBeInstanceOf(ColumnNotFound);
   });
 
-  it("update sets and clears isDone", () => {
+  it("update sets and clears isDone", async () => {
     seed(db);
     db.prepare("INSERT INTO columns (id, project_id, name, position) VALUES ('c1','p1','Done',0)").run();
     const svc = makeService(db);
-    const set = Effect.runSync(Effect.either(svc.update("c1", { isDone: true })));
+    const set = await Effect.runPromise(Effect.either(svc.update("c1", { isDone: true })));
     expect(Either.isRight(set)).toBe(true);
     if (Either.isRight(set)) expect(set.right.isDone).toBe(true);
-    const cleared = Effect.runSync(Effect.either(svc.update("c1", { isDone: false })));
+    const cleared = await Effect.runPromise(Effect.either(svc.update("c1", { isDone: false })));
     expect(Either.isRight(cleared)).toBe(true);
     if (Either.isRight(cleared)) expect(cleared.right.isDone).toBe(false);
   });
 });
 
 describe("ColumnService.delete", () => {
-  it("deletes an empty column", () => {
+  it("deletes an empty column", async () => {
     seed(db);
     db.prepare("INSERT INTO columns (id, project_id, name, position) VALUES ('c1','p1','Todo',0)").run();
     const svc = makeService(db);
-    const res = Effect.runSync(Effect.either(svc.delete("c1")));
+    const res = await Effect.runPromise(Effect.either(svc.delete("c1")));
     expect(Either.isRight(res)).toBe(true);
     const n = (db.prepare("SELECT COUNT(*) AS n FROM columns WHERE id = 'c1'").get() as { n: number }).n;
     expect(n).toBe(0);
   });
 
-  it("non-empty column → HasChildren with the task count", () => {
+  it("non-empty column → HasChildren with the task count", async () => {
     seed(db);
     db.prepare("INSERT INTO columns (id, project_id, name, position) VALUES ('c1','p1','Todo',0), ('c2','p1','Done',1)").run();
     db.prepare("INSERT INTO swimlanes (id, project_id, name, position) VALUES ('s1','p1','Default',0)").run();
     db.prepare("INSERT INTO tasks (id, project_id, column_id, swimlane_id, title, position, created_at) VALUES ('t1','p1','c1','s1','T','a0','2026-01-01 10:00:00'), ('t2','p1','c1','s1','T2','a1','2026-01-01 10:00:00')").run();
     const svc = makeService(db);
-    const blocked = Effect.runSync(Effect.either(svc.delete("c1")));
+    const blocked = await Effect.runPromise(Effect.either(svc.delete("c1")));
     expect(Either.isLeft(blocked)).toBe(true);
     if (Either.isLeft(blocked)) {
       expect(blocked.left).toBeInstanceOf(HasChildren);
@@ -202,10 +203,10 @@ describe("ColumnService.delete", () => {
     expect(n).toBe(1);
   });
 
-  it("missing id → ColumnNotFound", () => {
+  it("missing id → ColumnNotFound", async () => {
     seed(db);
     const svc = makeService(db);
-    const res = Effect.runSync(Effect.either(svc.delete("nope")));
+    const res = await Effect.runPromise(Effect.either(svc.delete("nope")));
     expect(Either.isLeft(res)).toBe(true);
     if (Either.isLeft(res)) expect(res.left).toBeInstanceOf(ColumnNotFound);
   });

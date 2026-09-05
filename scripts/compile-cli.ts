@@ -63,7 +63,7 @@ writeFileSync(
 // never builds from source. The compose files ARE the deploy contract, so
 // they're embedded here (few KB) and materialized to the deploy dir at
 // deploy time. No repo checkout is ever needed.
-const COMPOSE_FILES_LIST = ["docker-compose.yml", "docker-compose.staging.yml", "docker-compose.prod.yml"];
+const COMPOSE_FILES_LIST = ["docker-compose.yml", "docker-compose.staging.yml", "docker-compose.prod.yml", "docker-compose.direct.yml"];
 const composePacked = COMPOSE_FILES_LIST.filter((f) => existsSync(join(root, f)))
   .map((f) => `${JSON.stringify(f)}:${JSON.stringify(gzipSync(readFileSync(join(root, f))).toString("base64"))}`)
   .join(",\n");

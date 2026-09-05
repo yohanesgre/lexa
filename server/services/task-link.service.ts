@@ -2,7 +2,7 @@ import { Effect } from "effect";
 import { TaskLinkRepo } from "../repos/task-link.repo";
 import { TaskRepo } from "../repos/task.repo";
 import { ProjectRepo } from "../repos/project.repo";
-import { DbError, RowNotFound, ConstraintViolation, Sqlite, withTx } from "../db/database";
+import { DbError, RowNotFound, ConstraintViolation, Db, withTx } from "../db/db";
 import { ProjectNotFound, TaskNotFound, TaskLinkNotFound, TaskLinkCycle, InvalidTaskLink } from "../api/errors";
 import { ActivityService } from "./activity.service";
 import * as msg from "../activity-messages";
@@ -16,7 +16,7 @@ export class TaskLinkService extends Effect.Service<TaskLinkService>()("Lexa/Tas
     const taskRepo = yield* TaskRepo;
     const projectRepo = yield* ProjectRepo;
     const activityService = yield* ActivityService;
-    const db = yield* Sqlite;
+    const db = yield* Db;
 
     // Walk the subtask_of parent chain from a task; return the ancestor ids.
     const ancestorIds = (taskId: string): Effect.Effect<Set<string>, DbError> =>

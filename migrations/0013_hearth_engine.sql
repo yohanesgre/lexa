@@ -2,6 +2,16 @@
 -- Per-project execution engine for document threads + Generate; freeform chat
 -- always runs the herald lane regardless of engine.
 
+-- D1 applies each migration file with foreign keys ENFORCED (unlike Bun,
+-- which migrates with PRAGMA foreign_keys = OFF). The agent-catalog rewrite
+-- below updates a parent primary key (lexa_agents.id) while its junction
+-- rows still point at the old id, so immediate enforcement rejects it.
+-- Deferring enforcement to the file's commit keeps the statements identical
+-- on both engines with the same outcome: the batch commits only when every
+-- reference is rebound. No-op on Bun (keys already off) and transaction-
+-- scoped (resets at commit — enforcement stays on afterwards).
+PRAGMA defer_foreign_keys = ON;
+
 ALTER TABLE herald_settings ADD COLUMN engine TEXT NOT NULL DEFAULT 'herald'
   CHECK (engine IN ('herald','blacksmith'));
 ALTER TABLE herald_settings ADD COLUMN engine_switcher_enabled INTEGER NOT NULL DEFAULT 0;

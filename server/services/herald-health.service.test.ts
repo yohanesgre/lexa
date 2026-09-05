@@ -7,6 +7,7 @@ import { Database } from "bun:sqlite";
 import { runMigrations } from "../db/migrate";
 import { Effect, Layer } from "effect";
 import { Sqlite } from "../db/database";
+import { DbBunLive } from "../db/db";
 import { HeraldHealthRepo } from "../repos/herald-health.repo";
 import { HeraldHealthService } from "./herald-health.service";
 
@@ -24,7 +25,7 @@ describe("herald-health.service", () => {
       runMigrations(dbPath);
       const db = new Database(dbPath);
       db.prepare("INSERT INTO herald_providers (id, label, base_url, api_key) VALUES ('pr1','P','https://x','sk')").run();
-      const layer = Layer.mergeAll(HeraldHealthRepo.Default, HeraldHealthService.Default).pipe(Layer.provide(Layer.succeed(Sqlite, db)));
+      const layer = Layer.mergeAll(HeraldHealthRepo.Default, HeraldHealthService.Default).pipe(Layer.provide(Layer.mergeAll(Layer.succeed(Sqlite, db), DbBunLive(db))));
       const prog = Effect.gen(function* () {
         const svc = yield* HeraldHealthService;
         const allowed = yield* svc.isAllowed("pr1");
@@ -44,7 +45,7 @@ describe("herald-health.service", () => {
       runMigrations(dbPath);
       const db = new Database(dbPath);
       db.prepare("INSERT INTO herald_providers (id, label, base_url, api_key) VALUES ('pr1','P','https://x','sk')").run();
-      const layer = Layer.mergeAll(HeraldHealthRepo.Default, HeraldHealthService.Default).pipe(Layer.provide(Layer.succeed(Sqlite, db)));
+      const layer = Layer.mergeAll(HeraldHealthRepo.Default, HeraldHealthService.Default).pipe(Layer.provide(Layer.mergeAll(Layer.succeed(Sqlite, db), DbBunLive(db))));
       const prog = Effect.gen(function* () {
         const svc = yield* HeraldHealthService;
         yield* svc.recordFailure("pr1");
@@ -67,7 +68,7 @@ describe("herald-health.service", () => {
       runMigrations(dbPath);
       const db = new Database(dbPath);
       db.prepare("INSERT INTO herald_providers (id, label, base_url, api_key) VALUES ('pr1','P','https://x','sk')").run();
-      const layer = Layer.mergeAll(HeraldHealthRepo.Default, HeraldHealthService.Default).pipe(Layer.provide(Layer.succeed(Sqlite, db)));
+      const layer = Layer.mergeAll(HeraldHealthRepo.Default, HeraldHealthService.Default).pipe(Layer.provide(Layer.mergeAll(Layer.succeed(Sqlite, db), DbBunLive(db))));
       const prog = Effect.gen(function* () {
         const svc = yield* HeraldHealthService;
         const past = new Date(Date.now() - 6 * 60 * 1000).toISOString();
@@ -95,7 +96,7 @@ describe("herald-health.service", () => {
       runMigrations(dbPath);
       const db = new Database(dbPath);
       db.prepare("INSERT INTO herald_providers (id, label, base_url, api_key) VALUES ('pr1','P','https://x','sk')").run();
-      const layer = Layer.mergeAll(HeraldHealthRepo.Default, HeraldHealthService.Default).pipe(Layer.provide(Layer.succeed(Sqlite, db)));
+      const layer = Layer.mergeAll(HeraldHealthRepo.Default, HeraldHealthService.Default).pipe(Layer.provide(Layer.mergeAll(Layer.succeed(Sqlite, db), DbBunLive(db))));
       const prog = Effect.gen(function* () {
         const svc = yield* HeraldHealthService;
         const repo = yield* HeraldHealthRepo;

@@ -1,5 +1,5 @@
 import { Effect } from "effect";
-import { Sqlite, queryAll, queryFirst, run, DbError, RowNotFound, ConstraintViolation } from "../db/database";
+import { Db, queryAll, queryFirst, run, DbError, RowNotFound, ConstraintViolation } from "../db/db";
 import type { HeraldProviderMasked, HeraldModelRow, ProviderKind } from "../../shared/herald";
 
 export interface HeraldProviderRow {
@@ -47,7 +47,7 @@ function toModelDomain(row: HeraldModelDbRow): HeraldModelRow {
 
 export class HeraldProvidersRepo extends Effect.Service<HeraldProvidersRepo>()("Lexa/HeraldProvidersRepo", {
   effect: Effect.gen(function* () {
-    const db = yield* Sqlite;
+    const db = yield* Db;
 
     return {
       create: (input: { id: string; label: string; baseUrl: string; apiKey: string }): Effect.Effect<HeraldProviderRow, ConstraintViolation | DbError | RowNotFound> =>

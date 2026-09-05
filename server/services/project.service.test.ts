@@ -7,6 +7,7 @@ import { Effect, Layer, Context, Either } from "effect";
 import { Database } from "bun:sqlite";
 import { runMigrations } from "../db/migrate";
 import { Sqlite, initSqlite } from "../db/database";
+import { DbBunLive } from "../db/db";
 import { ProjectService } from "./project.service";
 import { ProjectNotFound, SlugTaken } from "../api/errors";
 
@@ -44,15 +45,15 @@ beforeEach(() => {
 
 
 function makeService(db: Database) {
-  const layer = ProjectService.Default.pipe(Layer.provide(Layer.succeed(Sqlite, db)));
+  const layer = ProjectService.Default.pipe(Layer.provide(Layer.mergeAll(Layer.succeed(Sqlite, db), DbBunLive(db))));
   const ctx = Effect.runSync(Effect.scoped(Layer.build(layer)));
   return Context.get(ctx, ProjectService);
 }
 
 describe("ProjectService.create", () => {
-  it("creates a project with an auto-slugified slug", () => {
+  it("creates a project with an auto-slugified slug", async () => {
     const svc = makeService(db);
-    const created = Effect.runSync(Effect.either(svc.create({ name: "Acme Widgets" })));
+    const created = await Effect.runPromise(Effect.either(svc.create({ name: "Acme Widgets" })));
     expect(Either.isRight(created)).toBe(true);
     if (Either.isRight(created)) {
       expect(created.right.slug).toBe("acme-widgets");
@@ -61,9 +62,9 @@ describe("ProjectService.create", () => {
     }
   });
 
-  it("accepts an explicit slug and description", () => {
+  it("accepts an explicit slug and description", async () => {
     const svc = makeService(db);
-    const created = Effect.runSync(
+    const created = await Effect.runPromise(
       Effect.either(svc.create({ name: "Whatever", slug: "my-project", description: "d" }))
     );
     expect(Either.isRight(created)).toBe(true);
@@ -73,20 +74,20 @@ describe("ProjectService.create", () => {
     }
   });
 
-  it("duplicate slug → SlugTaken (derived and explicit)", () => {
+  it("duplicate slug → SlugTaken (derived and explicit)", async () => {
     const svc = makeService(db);
-    Effect.runSync(svc.create({ name: "Acme" }));
-    const dupName = Effect.runSync(Effect.either(svc.create({ name: "Acme" })));
+    await Effect.runPromise(svc.create({ name: "Acme" }));
+    const dupName = await Effect.runPromise(Effect.either(svc.create({ name: "Acme" })));
     expect(Either.isLeft(dupName)).toBe(true);
     if (Either.isLeft(dupName)) expect(dupName.left).toBeInstanceOf(SlugTaken);
-    const dupSlug = Effect.runSync(Effect.either(svc.create({ name: "Other", slug: "acme" })));
+    const dupSlug = await Effect.runPromise(Effect.either(svc.create({ name: "Other", slug: "acme" })));
     expect(Either.isLeft(dupSlug)).toBe(true);
     if (Either.isLeft(dupSlug)) expect(dupSlug.left).toBeInstanceOf(SlugTaken);
   });
 
-  it("seeds 5 default columns, one Backlog swimlane, and 4+4 field options", () => {
+  it("seeds 5 default columns, one Backlog swimlane, and 4+4 field options", async () => {
     const svc = makeService(db);
-    const created = Effect.runSync(svc.create({ name: "Acme" }));
+    const created = await Effect.runPromise(svc.create({ name: "Acme" }));
     const columns = db.prepare("SELECT name, position FROM columns WHERE project_id = ? ORDER BY position").all(created.id) as { name: string; position: number }[];
     expect(columns.map((c) => c.name)).toEqual(["Todo", "In Progress", "Review", "Done", "Blocked"]);
     expect(columns.map((c) => c.position)).toEqual([1, 2, 3, 4, 5]);
@@ -108,35 +109,35 @@ describe("ProjectService.create", () => {
 });
 
 describe("ProjectService.find", () => {
-  it("findBySlug / findById / list return projects", () => {
+  it("findBySlug / findById / list return projects", async () => {
     const svc = makeService(db);
-    const created = Effect.runSync(svc.create({ name: "Acme" }));
-    const bySlug = Effect.runSync(Effect.either(svc.findBySlug("acme")));
+    const created = await Effect.runPromise(svc.create({ name: "Acme" }));
+    const bySlug = await Effect.runPromise(Effect.either(svc.findBySlug("acme")));
     expect(Either.isRight(bySlug)).toBe(true);
     if (Either.isRight(bySlug)) expect(bySlug.right.id).toBe(created.id);
-    const byId = Effect.runSync(Effect.either(svc.findById(created.id)));
+    const byId = await Effect.runPromise(Effect.either(svc.findById(created.id)));
     expect(Either.isRight(byId)).toBe(true);
     if (Either.isRight(byId)) expect(byId.right.slug).toBe("acme");
-    const list = Effect.runSync(svc.list());
+    const list = await Effect.runPromise(svc.list());
     expect(list.map((p) => p.id)).toEqual([created.id]);
   });
 
-  it("missing slug/id → ProjectNotFound", () => {
+  it("missing slug/id → ProjectNotFound", async () => {
     const svc = makeService(db);
-    const bySlug = Effect.runSync(Effect.either(svc.findBySlug("nope")));
+    const bySlug = await Effect.runPromise(Effect.either(svc.findBySlug("nope")));
     expect(Either.isLeft(bySlug)).toBe(true);
     if (Either.isLeft(bySlug)) expect(bySlug.left).toBeInstanceOf(ProjectNotFound);
-    const byId = Effect.runSync(Effect.either(svc.findById("nope")));
+    const byId = await Effect.runPromise(Effect.either(svc.findById("nope")));
     expect(Either.isLeft(byId)).toBe(true);
     if (Either.isLeft(byId)) expect(byId.left).toBeInstanceOf(ProjectNotFound);
   });
 });
 
 describe("ProjectService.update", () => {
-  it("updates name/description without touching the slug", () => {
+  it("updates name/description without touching the slug", async () => {
     const svc = makeService(db);
-    const created = Effect.runSync(svc.create({ name: "Acme" }));
-    const updated = Effect.runSync(
+    const created = await Effect.runPromise(svc.create({ name: "Acme" }));
+    const updated = await Effect.runPromise(
       Effect.either(svc.update("acme", { name: "Acme 2", description: "new" }))
     );
     expect(Either.isRight(updated)).toBe(true);
@@ -147,23 +148,23 @@ describe("ProjectService.update", () => {
     }
   });
 
-  it("missing slug → ProjectNotFound", () => {
+  it("missing slug → ProjectNotFound", async () => {
     const svc = makeService(db);
-    const res = Effect.runSync(Effect.either(svc.update("nope", { name: "X" })));
+    const res = await Effect.runPromise(Effect.either(svc.update("nope", { name: "X" })));
     expect(Either.isLeft(res)).toBe(true);
     if (Either.isLeft(res)) expect(res.left).toBeInstanceOf(ProjectNotFound);
   });
 });
 
 describe("ProjectService.delete", () => {
-  it("cascades to columns, swimlanes, tasks, wiki, and field options", () => {
+  it("cascades to columns, swimlanes, tasks, wiki, and field options", async () => {
     const svc = makeService(db);
-    const created = Effect.runSync(svc.create({ name: "Acme" }));
+    const created = await Effect.runPromise(svc.create({ name: "Acme" }));
     const col = db.prepare("SELECT id FROM columns WHERE project_id = ? LIMIT 1").get(created.id) as { id: string };
     const lane = db.prepare("SELECT id FROM swimlanes WHERE project_id = ? LIMIT 1").get(created.id) as { id: string };
     db.prepare("INSERT INTO tasks (id, project_id, column_id, swimlane_id, title, position, created_at) VALUES ('t1', ?, ?, ?, 'T', 'a0', '2026-01-01 10:00:00')").run(created.id, col.id, lane.id);
     db.prepare("INSERT INTO wiki_pages (id, project_id, title, slug, content, content_text, position) VALUES ('w1', ?, 'Home', 'home', '{\"type\":\"doc\",\"content\":[]}', '', 0)").run(created.id);
-    const res = Effect.runSync(Effect.either(svc.delete("acme")));
+    const res = await Effect.runPromise(Effect.either(svc.delete("acme")));
     expect(Either.isRight(res)).toBe(true);
     const count = (sql: string) => (db.prepare(sql).get(created.id) as { n: number }).n;
     expect(count("SELECT COUNT(*) AS n FROM projects WHERE id = ?")).toBe(0);
@@ -175,9 +176,9 @@ describe("ProjectService.delete", () => {
     expect(count("SELECT COUNT(*) AS n FROM type_options WHERE project_id = ?")).toBe(0);
   });
 
-  it("missing slug → ProjectNotFound", () => {
+  it("missing slug → ProjectNotFound", async () => {
     const svc = makeService(db);
-    const res = Effect.runSync(Effect.either(svc.delete("nope")));
+    const res = await Effect.runPromise(Effect.either(svc.delete("nope")));
     expect(Either.isLeft(res)).toBe(true);
     if (Either.isLeft(res)) expect(res.left).toBeInstanceOf(ProjectNotFound);
   });

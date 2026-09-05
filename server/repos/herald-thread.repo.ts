@@ -1,5 +1,5 @@
 import { Effect } from "effect";
-import { Sqlite, queryFirst, queryAll, run, withTx, DbError, RowNotFound, ConstraintViolation } from "../db/database";
+import { Db, queryFirst, queryAll, run, withTx, DbError, RowNotFound, ConstraintViolation } from "../db/db";
 import type { ID, ISODate } from "../../shared/types";
 import type { HeraldThreadType } from "../../shared/herald";
 
@@ -73,7 +73,7 @@ export interface SaveThreadPatch {
 
 export class HeraldThreadRepo extends Effect.Service<HeraldThreadRepo>()("Lexa/HeraldThreadRepo", {
   effect: Effect.gen(function* () {
-    const db = yield* Sqlite;
+    const db = yield* Db;
 
     return {
       loadThread: (documentType: HeraldThreadType, documentId: string): Effect.Effect<HeraldThread, RowNotFound | DbError> =>

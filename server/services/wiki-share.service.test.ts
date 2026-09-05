@@ -7,6 +7,7 @@ import { Effect, Layer, Context, Either } from "effect";
 import { Database } from "bun:sqlite";
 import { runMigrations } from "../db/migrate";
 import { Sqlite, initSqlite } from "../db/database";
+import { DbBunLive } from "../db/db";
 import { WikiShareService } from "./wiki-share.service";
 import { ShareLinkNotFound, WikiPageNotFound } from "../api/errors";
 
@@ -61,16 +62,16 @@ function seed(db: Database) {
 }
 
 function makeService(db: Database) {
-  const layer = WikiShareService.Default.pipe(Layer.provide(Layer.succeed(Sqlite, db)));
+  const layer = WikiShareService.Default.pipe(Layer.provide(Layer.mergeAll(Layer.succeed(Sqlite, db), DbBunLive(db))));
   const ctx = Effect.runSync(Effect.scoped(Layer.build(layer)));
   return Context.get(ctx, WikiShareService);
 }
 
-function createLink(
+async function createLink(
   svc: WikiShareService,
   overrides: Partial<{ projectId: string; pageId: string; expiresAt: string | null; createdBy: string }> = {}
 ) {
-  return Effect.runSync(
+  return await Effect.runPromise(
     Effect.either(
       svc.create({
         projectId: "p1",
@@ -84,10 +85,10 @@ function createLink(
 }
 
 describe("WikiShareService.create", () => {
-  it("creates a link with a base64url token, uuid id, and NULL expiry preserved", () => {
+  it("creates a link with a base64url token, uuid id, and NULL expiry preserved", async () => {
     seed(db);
     const svc = makeService(db);
-    const res = createLink(svc);
+    const res = await createLink(svc);
     expect(Either.isRight(res)).toBe(true);
     if (Either.isRight(res)) {
       expect(res.right.token).toMatch(/^[A-Za-z0-9_-]{24}$/);
@@ -98,81 +99,81 @@ describe("WikiShareService.create", () => {
     }
   });
 
-  it("normalizes expiresAt to UTC ISO-8601", () => {
+  it("normalizes expiresAt to UTC ISO-8601", async () => {
     seed(db);
     const svc = makeService(db);
-    const res = createLink(svc, { expiresAt: "2026-09-01T15:00:00+03:00" });
+    const res = await createLink(svc, { expiresAt: "2026-09-01T15:00:00+03:00" });
     expect(Either.isRight(res)).toBe(true);
     if (Either.isRight(res)) expect(res.right.expires_at).toBe("2026-09-01T12:00:00.000Z");
   });
 
-  it("page of another project → WikiPageNotFound", () => {
+  it("page of another project → WikiPageNotFound", async () => {
     seed(db);
     const svc = makeService(db);
-    const res = createLink(svc, { projectId: "p1", pageId: "w-other" });
+    const res = await createLink(svc, { projectId: "p1", pageId: "w-other" });
     expect(Either.isLeft(res)).toBe(true);
     if (Either.isLeft(res)) expect(res.left).toBeInstanceOf(WikiPageNotFound);
   });
 
-  it("unknown page → WikiPageNotFound", () => {
+  it("unknown page → WikiPageNotFound", async () => {
     seed(db);
     const svc = makeService(db);
-    const res = createLink(svc, { pageId: "nope" });
+    const res = await createLink(svc, { pageId: "nope" });
     expect(Either.isLeft(res)).toBe(true);
     if (Either.isLeft(res)) expect(res.left).toBeInstanceOf(WikiPageNotFound);
   });
 });
 
 describe("WikiShareService.list", () => {
-  it("lists links for a page, oldest first; other pages unaffected", () => {
+  it("lists links for a page, oldest first; other pages unaffected", async () => {
     seed(db);
     const svc = makeService(db);
-    const a = createLink(svc);
-    const b = createLink(svc);
+    const a = await createLink(svc);
+    const b = await createLink(svc);
     expect(Either.isRight(a) && Either.isRight(b)).toBe(true);
     if (!Either.isRight(a) || !Either.isRight(b)) throw new Error("create failed");
-    const links = Effect.runSync(svc.list("w-root"));
+    const links = await Effect.runPromise(svc.list("w-root"));
     // ORDER BY created_at ASC, id ASC — same-second inserts tie-break on id
     const expected = [a.right, b.right]
       .map((r) => ({ token: r.token, created_at: r.created_at, id: r.id }))
       .sort((x, y) => x.created_at.localeCompare(y.created_at) || x.id.localeCompare(y.id))
       .map((r) => r.token);
     expect(links.map((l) => l.token)).toEqual(expected);
-    expect(Effect.runSync(svc.list("w-child"))).toEqual([]);
+    expect(await Effect.runPromise(svc.list("w-child"))).toEqual([]);
   });
 });
 
 describe("WikiShareService.revoke", () => {
-  it("deletes the link; resolving it afterwards fails ShareLinkNotFound", () => {
+  it("deletes the link; resolving it afterwards fails ShareLinkNotFound", async () => {
     seed(db);
     const svc = makeService(db);
-    const created = createLink(svc);
+    const created = await createLink(svc);
     if (!Either.isRight(created)) throw new Error("create failed");
-    const revoked = Effect.runSync(Effect.either(svc.revoke(created.right.id, "p1")));
+    const revoked = await Effect.runPromise(Effect.either(svc.revoke(created.right.id, "p1")));
     expect(Either.isRight(revoked)).toBe(true);
     const n = (db.prepare("SELECT COUNT(*) AS n FROM wiki_share_links WHERE id = ?").get(created.right.id) as { n: number }).n;
     expect(n).toBe(0);
-    const resolved = Effect.runSync(Effect.either(svc.resolvePublic(created.right.token)));
+    const resolved = await Effect.runPromise(Effect.either(svc.resolvePublic(created.right.token)));
     expect(Either.isLeft(resolved)).toBe(true);
     if (Either.isLeft(resolved)) expect(resolved.left).toBeInstanceOf(ShareLinkNotFound);
   });
 
-  it("missing id → ShareLinkNotFound", () => {
+  it("missing id → ShareLinkNotFound", async () => {
     seed(db);
     const svc = makeService(db);
-    const res = Effect.runSync(Effect.either(svc.revoke("nope", "p1")));
+    const res = await Effect.runPromise(Effect.either(svc.revoke("nope", "p1")));
     expect(Either.isLeft(res)).toBe(true);
     if (Either.isLeft(res)) expect(res.left).toBeInstanceOf(ShareLinkNotFound);
   });
 });
 
 describe("WikiShareService.resolvePublic", () => {
-  it("valid token returns root + descendants with parsed JSON content", () => {
+  it("valid token returns root + descendants with parsed JSON content", async () => {
     seed(db);
     const svc = makeService(db);
-    const created = createLink(svc);
+    const created = await createLink(svc);
     if (!Either.isRight(created)) throw new Error("create failed");
-    const res = Effect.runSync(Effect.either(svc.resolvePublic(created.right.token)));
+    const res = await Effect.runPromise(Effect.either(svc.resolvePublic(created.right.token)));
     expect(Either.isRight(res)).toBe(true);
     if (Either.isRight(res)) {
       const root = res.right.root;
@@ -188,38 +189,38 @@ describe("WikiShareService.resolvePublic", () => {
     }
   });
 
-  it("expired link → ShareLinkNotFound", () => {
+  it("expired link → ShareLinkNotFound", async () => {
     seed(db);
     const svc = makeService(db);
-    const created = createLink(svc, { expiresAt: new Date(Date.now() - 60_000).toISOString() });
+    const created = await createLink(svc, { expiresAt: new Date(Date.now() - 60_000).toISOString() });
     if (!Either.isRight(created)) throw new Error("create failed");
-    const res = Effect.runSync(Effect.either(svc.resolvePublic(created.right.token)));
+    const res = await Effect.runPromise(Effect.either(svc.resolvePublic(created.right.token)));
     expect(Either.isLeft(res)).toBe(true);
     if (Either.isLeft(res)) expect(res.left).toBeInstanceOf(ShareLinkNotFound);
   });
 
-  it("future expiry still resolves", () => {
+  it("future expiry still resolves", async () => {
     seed(db);
     const svc = makeService(db);
-    const created = createLink(svc, { expiresAt: new Date(Date.now() + 3_600_000).toISOString() });
+    const created = await createLink(svc, { expiresAt: new Date(Date.now() + 3_600_000).toISOString() });
     if (!Either.isRight(created)) throw new Error("create failed");
-    const res = Effect.runSync(Effect.either(svc.resolvePublic(created.right.token)));
+    const res = await Effect.runPromise(Effect.either(svc.resolvePublic(created.right.token)));
     expect(Either.isRight(res)).toBe(true);
   });
 
-  it("NULL expiry never expires", () => {
+  it("NULL expiry never expires", async () => {
     seed(db);
     const svc = makeService(db);
-    const created = createLink(svc);
+    const created = await createLink(svc);
     if (!Either.isRight(created)) throw new Error("create failed");
-    const res = Effect.runSync(Effect.either(svc.resolvePublic(created.right.token)));
+    const res = await Effect.runPromise(Effect.either(svc.resolvePublic(created.right.token)));
     expect(Either.isRight(res)).toBe(true);
   });
 
-  it("unknown token → ShareLinkNotFound (same failure path)", () => {
+  it("unknown token → ShareLinkNotFound (same failure path)", async () => {
     seed(db);
     const svc = makeService(db);
-    const res = Effect.runSync(Effect.either(svc.resolvePublic("nope")));
+    const res = await Effect.runPromise(Effect.either(svc.resolvePublic("nope")));
     expect(Either.isLeft(res)).toBe(true);
     if (Either.isLeft(res)) expect(res.left).toBeInstanceOf(ShareLinkNotFound);
   });

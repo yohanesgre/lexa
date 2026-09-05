@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { Effect, Layer } from "effect";
 import { Database } from "bun:sqlite";
 import { Sqlite } from "../db/database";
+import { DbBunLive } from "../db/db";
 import { HeraldGateway } from "./gateway.service";
 import { HeraldProvidersRepo } from "../repos/herald-providers.repo";
 import { HeraldModelsRepo } from "../repos/herald-models.repo";
@@ -13,7 +14,7 @@ import { ProviderAuthFailed, ProviderUnreachable } from "../api/errors";
 function memDbLayer() {
   const db = new Database(":memory:");
   db.exec("PRAGMA foreign_keys = ON");
-  return Layer.succeed(Sqlite, db);
+  return Layer.mergeAll(Layer.succeed(Sqlite, db), DbBunLive(db));
 }
 
 function stubCallLog() {
@@ -94,7 +95,7 @@ describe("HeraldGateway", () => {
     expect(spy).toHaveBeenCalledTimes(2);
   });
 
-  it("normalize per kind: same baseUrl gives different normalized url per model kind", () => {
+  it("normalize per kind: same baseUrl gives different normalized url per model kind", async () => {
     const { normalizeBaseUrl } = provider;
     const openai = normalizeBaseUrl("https://api.example.com", "openai_compatible");
     const anthropic = normalizeBaseUrl("https://api.example.com", "anthropic_compatible");
@@ -216,7 +217,7 @@ describe("HeraldGateway", () => {
     expect(tag).toBe("HeraldGenerationFailed");
   });
 
-  it("configForModel builds per-model ProviderConfig with fresh adapter per attempt", () => {
+  it("configForModel builds per-model ProviderConfig with fresh adapter per attempt", async () => {
     const cfg = provider.configForModel({ base_url: "https://api.example.com", api_key: "sk-123" }, { kind: "anthropic_compatible", model_id: "claude-x" });
     expect(cfg).toEqual({ kind: "anthropic_compatible", baseUrl: "https://api.example.com", apiKey: "sk-123", model: "claude-x" });
     const adapter = provider.buildAdapterForModel({ base_url: "https://api.example.com", api_key: "sk-123" }, { kind: "openai_compatible", model_id: "gpt-4o" });

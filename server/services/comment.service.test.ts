@@ -7,6 +7,7 @@ import { Effect, Layer, Context, Either } from "effect";
 import { Database } from "bun:sqlite";
 import { runMigrations } from "../db/migrate";
 import { Sqlite, initSqlite } from "../db/database";
+import { DbBunLive } from "../db/db";
 import { CommentService } from "./comment.service";
 import { CommentInvalid, CommentNotFound, CommentEditForbidden, CommentDeleteForbidden, TaskNotFound } from "../api/errors";
 import type { AuthIdentityShape } from "../api/auth";
@@ -56,7 +57,7 @@ function seed(db: Database) {
 }
 
 function makeService(db: Database) {
-  const layer = CommentService.Default.pipe(Layer.provide(Layer.succeed(Sqlite, db)));
+  const layer = CommentService.Default.pipe(Layer.provide(Layer.mergeAll(Layer.succeed(Sqlite, db), DbBunLive(db))));
   const ctx = Effect.runSync(Effect.scoped(Layer.build(layer)));
   return Context.get(ctx, CommentService);
 }
@@ -67,19 +68,19 @@ const BODY: TipTapDoc = { type: "doc", content: [{ type: "paragraph", content: [
 const EMPTY: TipTapDoc = { type: "doc", content: [] };
 
 describe("CommentService", () => {
-  it("create validates and appends activity in one tx", () => {
+  it("create validates and appends activity in one tx", async () => {
     seed(db);
     const svc = makeService(db);
     // empty doc → CommentInvalid
-    const invalid = Effect.runSync(Effect.either(svc.create("t1", maria, EMPTY)));
+    const invalid = await Effect.runPromise(Effect.either(svc.create("t1", maria, EMPTY)));
     expect(Either.isLeft(invalid)).toBe(true);
     if (Either.isLeft(invalid)) expect(invalid.left).toBeInstanceOf(CommentInvalid);
     // missing task → TaskNotFound
-    const missing = Effect.runSync(Effect.either(svc.create("nope", maria, BODY)));
+    const missing = await Effect.runPromise(Effect.either(svc.create("nope", maria, BODY)));
     expect(Either.isLeft(missing)).toBe(true);
     if (Either.isLeft(missing)) expect(missing.left).toBeInstanceOf(TaskNotFound);
     // valid → comment + 'commented' activity
-    const ok = Effect.runSync(Effect.either(svc.create("t1", maria, BODY)));
+    const ok = await Effect.runPromise(Effect.either(svc.create("t1", maria, BODY)));
     expect(Either.isRight(ok)).toBe(true);
     if (Either.isRight(ok)) {
       expect(ok.right.comment.authorLabel).toBe("Maria");
@@ -91,10 +92,10 @@ describe("CommentService", () => {
     expect(rows.n).toBe(1);
   });
 
-  it("edit allows only the author", () => {
+  it("edit allows only the author", async () => {
     seed(db);
     const svc = makeService(db);
-    Effect.runSync(
+    await Effect.runPromise(
       Effect.gen(function* () {
         const { comment } = yield* svc.create("t1", maria, BODY);
         // non-author → CommentEditForbidden
@@ -117,10 +118,10 @@ describe("CommentService", () => {
     );
   });
 
-  it("delete allows author or admin, soft-deletes, appends comment_deleted", () => {
+  it("delete allows author or admin, soft-deletes, appends comment_deleted", async () => {
     seed(db);
     const svc = makeService(db);
-    Effect.runSync(
+    await Effect.runPromise(
       Effect.gen(function* () {
         const { comment: c1 } = yield* svc.create("t1", maria, BODY);
         // plain member (u3) → CommentDeleteForbidden

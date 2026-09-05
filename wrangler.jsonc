@@ -9,6 +9,23 @@
   "main": "server/workers-entry.ts",
   "compatibility_date": "2026-08-01",
   "compatibility_flags": ["nodejs_compat"],
+  // `bun:sqlite` is a Bun builtin no other runtime can resolve (vitest maps
+  // it to a node:sqlite shim the same way). The worker never constructs it —
+  // see server/workers-shims/bun-sqlite.ts. `lexa-cli deploy --runtime
+  // workers` copies this alias into the generated per-flavor config.
+  // `@tanstack/react-start/server` pulls Vite-virtual modules unresolvable
+  // outside the vite build (see server/workers-shims/start-server.ts): the
+  // vite workers build ignores this alias and links the real Start SSR
+  // handler, while source `wrangler dev` gets stubs and falls back to the
+  // no-SSR page for non-API routes. `node:fs` has no filesystem on Workers
+  // (see server/workers-shims/node-fs.ts) — the R2/D1 drivers serve those
+  // roles, so the stubs never execute on this flavor.
+  "alias": {
+    "bun:sqlite": "./server/workers-shims/bun-sqlite.ts",
+    "better-auth/tanstack-start": "./server/workers-shims/better-auth-tanstack-start.ts",
+    "@tanstack/react-start/server": "./server/workers-shims/start-server.ts",
+    "node:fs": "./server/workers-shims/node-fs.ts"
+  },
   "vars": {
     "LXK_ENV": "production"
   },

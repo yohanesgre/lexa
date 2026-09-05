@@ -1,5 +1,5 @@
 import { Effect, Data } from "effect";
-import { Sqlite, DbError, withTx } from "../db/database";
+import { Db, DbError, ConstraintViolation, RowNotFound, queryAll, queryFirst, run, withTx } from "../db/db";
 import { WorkspaceInvitesService } from "./workspace-invites.service";
 import { PasswordLinksService } from "./password-links.service";
 import type { LexaUser, TeamMemberRole } from "../../shared/types";
@@ -40,34 +40,29 @@ const toUser = (r: UserRow): LexaUser => ({
 export class WorkspaceService extends Effect.Service<WorkspaceService>()("Lexa/WorkspaceService", {
   dependencies: [WorkspaceInvitesService.Default, PasswordLinksService.Default],
   effect: Effect.gen(function* () {
-    const db = yield* Sqlite;
+    const db = yield* Db;
     const invites = yield* WorkspaceInvitesService;
     const passwordLinks = yield* PasswordLinksService;
 
     const findUser = (userId: string): Effect.Effect<UserRow | null, DbError> =>
-      Effect.try({
-        try: () => db.prepare("SELECT id, email, name, role, created_at, last_seen, banned FROM users WHERE id = ?").get(userId) as UserRow | null,
-        catch: (e) => new DbError({ message: String(e), cause: e }),
-      });
+      queryFirst<UserRow>(db, "SELECT id, email, name, role, created_at, last_seen, banned FROM users WHERE id = ?", userId).pipe(
+        Effect.catchTag("RowNotFound", () => Effect.succeed(null))
+      );
 
     const listMembers = (): Effect.Effect<WorkspaceMember[], DbError> =>
-      Effect.try({
-        try: () => {
-          const users = db.prepare("SELECT id, email, name, role, created_at, last_seen, banned FROM users ORDER BY created_at DESC, rowid DESC").all() as UserRow[];
-          const teamRows = db
-            .prepare(
-              "SELECT m.userId, o.id AS teamId, o.name AS teamName, m.role FROM member m JOIN organization o ON o.id = m.organizationId ORDER BY o.name"
-            )
-            .all() as { userId: string; teamId: string; teamName: string; role: string }[];
-          const byUser = new Map<string, WorkspaceMember["teams"]>();
-          for (const t of teamRows) {
-            const entry = byUser.get(t.userId) ?? [];
-            entry.push({ teamId: t.teamId, teamName: t.teamName, role: ((t.role.split("!,")[0] ?? "").trim() || "member") as TeamMemberRole });
-            byUser.set(t.userId, entry);
-          }
-          return users.map((u) => ({ ...toUser(u), banned: u.banned === 1, teams: byUser.get(u.id) ?? [] }));
-        },
-        catch: (e) => new DbError({ message: String(e), cause: e }),
+      Effect.gen(function* () {
+        const users = yield* queryAll<UserRow>(db, "SELECT id, email, name, role, created_at, last_seen, banned FROM users ORDER BY created_at DESC, rowid DESC");
+        const teamRows = yield* queryAll<{ userId: string; teamId: string; teamName: string; role: string }>(
+          db,
+          "SELECT m.userId, o.id AS teamId, o.name AS teamName, m.role FROM member m JOIN organization o ON o.id = m.organizationId ORDER BY o.name"
+        );
+        const byUser = new Map<string, WorkspaceMember["teams"]>();
+        for (const t of teamRows) {
+          const entry = byUser.get(t.userId) ?? [];
+          entry.push({ teamId: t.teamId, teamName: t.teamName, role: ((t.role.split("!,")[0] ?? "").trim() || "member") as TeamMemberRole });
+          byUser.set(t.userId, entry);
+        }
+        return users.map((u) => ({ ...toUser(u), banned: u.banned === 1, teams: byUser.get(u.id) ?? [] }));
       });
 
     // Deactivate/reactivate (R16): the banned column is better-auth's own
@@ -78,13 +73,14 @@ export class WorkspaceService extends Effect.Service<WorkspaceService>()("Lexa/W
       Effect.gen(function* () {
         const user = yield* findUser(userId);
         if (!user) return yield* Effect.fail(new WorkspaceUserNotFound({ userId }));
-        yield* Effect.try({
-          try: () => {
-            db.prepare("UPDATE users SET banned = ?, banReason = ?, banExpires = NULL WHERE id = ?").run(active ? 0 : 1, active ? null : "deactivated by superadmin", userId);
-            if (!active) db.prepare("DELETE FROM session WHERE userId = ?").run(userId);
-          },
-          catch: (e) => new DbError({ message: String(e), cause: e }),
-        });
+        yield* run(db, "UPDATE users SET banned = ?, banReason = ?, banExpires = NULL WHERE id = ?", active ? 0 : 1, active ? null : "deactivated by superadmin", userId).pipe(
+          Effect.mapError((e) => (e instanceof ConstraintViolation ? new DbError({ message: e.message, cause: e }) : e))
+        );
+        if (!active) {
+          yield* run(db, "DELETE FROM session WHERE userId = ?", userId).pipe(
+            Effect.mapError((e) => (e instanceof ConstraintViolation ? new DbError({ message: e.message, cause: e }) : e))
+          );
+        }
         const updated = yield* findUser(userId);
         return toUser(updated!);
       });
@@ -94,22 +90,22 @@ export class WorkspaceService extends Effect.Service<WorkspaceService>()("Lexa/W
         const user = yield* findUser(userId);
         if (!user) return yield* Effect.fail(new WorkspaceUserNotFound({ userId }));
         if (user.role === "superadmin") {
-          const total = yield* Effect.try({
-            try: () => (db.prepare("SELECT COUNT(*) c FROM users WHERE role = 'superadmin'").get() as { c: number }).c,
-            catch: (e) => new DbError({ message: String(e), cause: e }),
-          });
-          if (total <= 1) {
+          const total = yield* queryFirst<{ c: number }>(db, "SELECT COUNT(*) c FROM users WHERE role = 'superadmin'").pipe(
+            Effect.catchTag("RowNotFound", () => Effect.succeed({ c: 0 }))
+          );
+          if (total.c <= 1) {
             return yield* Effect.fail(new CannotDeleteSelf({ message: "Cannot delete the last superadmin" }));
           }
         }
         // Atomic: keys + user row in one transaction (a mid-way failure must
         // not leave the keys revoked with the user still active).
-        yield* withTx(db, Effect.try({
-          try: () => {
-            db.prepare("DELETE FROM api_keys WHERE user_id = ?").run(userId);
-            db.prepare("DELETE FROM users WHERE id = ?").run(userId);
-          },
-          catch: (e) => new DbError({ message: String(e), cause: e }),
+        yield* withTx(db, Effect.gen(function* () {
+          yield* run(db, "DELETE FROM api_keys WHERE user_id = ?", userId).pipe(
+            Effect.mapError((e) => (e instanceof ConstraintViolation ? new DbError({ message: e.message, cause: e }) : e))
+          );
+          yield* run(db, "DELETE FROM users WHERE id = ?", userId).pipe(
+            Effect.mapError((e) => (e instanceof ConstraintViolation ? new DbError({ message: e.message, cause: e }) : e))
+          );
         }));
       });
 

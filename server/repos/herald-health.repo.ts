@@ -1,5 +1,5 @@
 import { Effect } from "effect";
-import { Sqlite, queryFirst, run, DbError, RowNotFound, ConstraintViolation } from "../db/database";
+import { Db, queryFirst, run, DbError, RowNotFound, ConstraintViolation } from "../db/db";
 
 export interface HeraldHealthRow {
   provider_id: string;
@@ -32,7 +32,7 @@ function toDomain(row: HeraldHealthRow): HeraldHealthDomain {
 
 export class HeraldHealthRepo extends Effect.Service<HeraldHealthRepo>()("Lexa/HeraldHealthRepo", {
   effect: Effect.gen(function* () {
-    const db = yield* Sqlite;
+    const db = yield* Db;
 
     return {
       get: (providerId: string): Effect.Effect<HeraldHealthRow, RowNotFound | DbError> =>

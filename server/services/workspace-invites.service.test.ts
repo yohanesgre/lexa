@@ -7,6 +7,7 @@ import { Effect, Layer, Context, Either } from "effect";
 import { Database } from "bun:sqlite";
 import { runMigrations } from "../db/migrate";
 import { Sqlite, initSqlite, RowNotFound, ConstraintViolation } from "../db/database";
+import { DbBunLive } from "../db/db";
 import { WorkspaceInvitesService, InviteAlreadyPending, InviteNotFound } from "./workspace-invites.service";
 
 const MIGRATIONS = fileURLToPath(new URL("../../migrations", import.meta.url));
@@ -43,15 +44,15 @@ beforeEach(() => {
 
 
 function makeService(db: Database) {
-  const layer = WorkspaceInvitesService.Default.pipe(Layer.provide(Layer.succeed(Sqlite, db)));
+  const layer = WorkspaceInvitesService.Default.pipe(Layer.provide(Layer.mergeAll(Layer.succeed(Sqlite, db), DbBunLive(db))));
   const ctx = Effect.runSync(Effect.scoped(Layer.build(layer)));
   return Context.get(ctx, WorkspaceInvitesService);
 }
 
 describe("WorkspaceInvitesService", () => {
-  it("creates an invite with a 7d expiry and a link carrying the token", () => {
+  it("creates an invite with a 7d expiry and a link carrying the token", async () => {
     const svc = makeService(db);
-    const { invite, link } = Effect.runSync(svc.create("New.User@Lexa.Dev", null));
+    const { invite, link } = await Effect.runPromise(svc.create("New.User@Lexa.Dev", null));
     expect(invite.email).toBe("new.user@lexa.dev");
     expect(invite.acceptedAt).toBeNull();
     expect(invite.tokenHint).toHaveLength(8);
@@ -66,50 +67,50 @@ describe("WorkspaceInvitesService", () => {
     expect(invite.tokenHint).toBe(token!.slice(0, 8));
   });
 
-  it("rejects a duplicate pending invite for the same email", () => {
+  it("rejects a duplicate pending invite for the same email", async () => {
     const svc = makeService(db);
-    Effect.runSync(svc.create("a@lexa.dev", null));
-    const result = Effect.runSync(Effect.either(svc.create("A@Lexa.Dev", null)));
+    await Effect.runPromise(svc.create("a@lexa.dev", null));
+    const result = await Effect.runPromise(Effect.either(svc.create("A@Lexa.Dev", null)));
     expect(Either.isLeft(result)).toBe(true);
     if (Either.isLeft(result)) expect(result.left).toBeInstanceOf(InviteAlreadyPending);
   });
 
-  it("re-issues when the previous invite expired (dead rows do not block)", () => {
+  it("re-issues when the previous invite expired (dead rows do not block)", async () => {
     const svc = makeService(db);
-    const first = Effect.runSync(svc.create("a@lexa.dev", null));
+    const first = await Effect.runPromise(svc.create("a@lexa.dev", null));
     db.prepare("UPDATE workspace_invitations SET expires_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-1 day') WHERE id = ?").run(first!.invite.id);
-    const second = Effect.runSync(Effect.either(svc.create("a@lexa.dev", null)));
+    const second = await Effect.runPromise(Effect.either(svc.create("a@lexa.dev", null)));
     expect(Either.isRight(second)).toBe(true);
     if (Either.isRight(second)) expect(second.right.invite.email).toBe("a@lexa.dev");
   });
 
-  it("revokes a pending invite and refuses unknown ids", () => {
+  it("revokes a pending invite and refuses unknown ids", async () => {
     const svc = makeService(db);
-    const { invite } = Effect.runSync(svc.create("a@lexa.dev", null));
-    expect(Effect.runSync(Effect.either(svc.revoke(invite.id)))).toEqual(Either.right(undefined));
+    const { invite } = await Effect.runPromise(svc.create("a@lexa.dev", null));
+    expect(await Effect.runPromise(Effect.either(svc.revoke(invite.id)))).toEqual(Either.right(undefined));
     const gone = db.prepare("SELECT id FROM workspace_invitations WHERE id = ?").get(invite.id);
     expect(gone).toBeNull();
-    const second = Effect.runSync(Effect.either(svc.revoke(invite.id)));
+    const second = await Effect.runPromise(Effect.either(svc.revoke(invite.id)));
     expect(Either.isLeft(second)).toBe(true);
     if (Either.isLeft(second)) expect(second.left).toBeInstanceOf(InviteNotFound);
   });
 
-  it("refuses to revoke an accepted invite (spent)", () => {
+  it("refuses to revoke an accepted invite (spent)", async () => {
     const svc = makeService(db);
-    const { invite } = Effect.runSync(svc.create("a@lexa.dev", null));
+    const { invite } = await Effect.runPromise(svc.create("a@lexa.dev", null));
     db.prepare("UPDATE workspace_invitations SET accepted_at = datetime('now') WHERE id = ?").run(invite.id);
-    const result = Effect.runSync(Effect.either(svc.revoke(invite.id)));
+    const result = await Effect.runPromise(Effect.either(svc.revoke(invite.id)));
     expect(Either.isLeft(result)).toBe(true);
     if (Either.isLeft(result)) expect(result.left).toBeInstanceOf(ConstraintViolation);
     const stillThere = db.prepare("SELECT id FROM workspace_invitations WHERE id = ?").get(invite.id);
     expect(stillThere).toBeTruthy();
   });
 
-  it("lists invites newest first", () => {
+  it("lists invites newest first", async () => {
     const svc = makeService(db);
-    Effect.runSync(svc.create("a@lexa.dev", null));
-    Effect.runSync(svc.create("b@lexa.dev", null));
-    const invites = Effect.runSync(svc.list());
+    await Effect.runPromise(svc.create("a@lexa.dev", null));
+    await Effect.runPromise(svc.create("b@lexa.dev", null));
+    const invites = await Effect.runPromise(svc.list());
     expect(invites.map((i) => i.email)).toEqual(["b@lexa.dev", "a@lexa.dev"]);
   });
 });

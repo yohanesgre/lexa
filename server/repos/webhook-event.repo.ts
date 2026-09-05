@@ -1,9 +1,9 @@
 import { Effect } from "effect";
-import { Sqlite, queryFirst, run, DbError, ConstraintViolation } from "../db/database";
+import { Db, queryFirst, run, DbError, ConstraintViolation } from "../db/db";
 
 export class WebhookEventRepo extends Effect.Service<WebhookEventRepo>()("Lexa/WebhookEventRepo", {
   effect: Effect.gen(function* () {
-    const db = yield* Sqlite;
+    const db = yield* Db;
 
     return {
       // Cheap pre-check: has this delivery id been processed before?

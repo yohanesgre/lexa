@@ -1,6 +1,6 @@
 import { Effect, Data } from "effect";
 import { UserRepo } from "../repos/user.repo";
-import { DbError, RowNotFound, ConstraintViolation } from "../db/database";
+import { DbError, RowNotFound, ConstraintViolation } from "../db/db";
 import type { UserRow } from "../../shared/db";
 
 export class UserNotFound extends Data.TaggedError("UserNotFound")<{ id: string }> {}

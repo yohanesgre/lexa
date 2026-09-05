@@ -2,7 +2,7 @@ import { Effect } from "effect";
 import { SourceRepo } from "../repos/source.repo";
 import { ProjectRepo } from "../repos/project.repo";
 import { WikiRepo } from "../repos/wiki.repo";
-import { DbError, RowNotFound, ConstraintViolation, Sqlite, withTx } from "../db/database";
+import { DbError, RowNotFound, ConstraintViolation, Db, withTx } from "../db/db";
 import { ProjectNotFound, WikiPageNotFound, SourceNotFound, SourceFetchError, SourceUnreachable } from "../api/errors";
 import { ActivityService } from "./activity.service";
 import * as msg from "../activity-messages";
@@ -17,7 +17,7 @@ export class SourceService extends Effect.Service<SourceService>()("Lexa/SourceS
     const projectRepo = yield* ProjectRepo;
     const wikiRepo = yield* WikiRepo;
     const activityService = yield* ActivityService;
-    const db = yield* Sqlite;
+    const db = yield* Db;
 
     const resolveAddresses = (hostname: string): Effect.Effect<string[], never> =>
       Effect.gen(function* () {

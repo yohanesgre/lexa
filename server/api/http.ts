@@ -1,26 +1,26 @@
 import { HttpApi, HttpApiBuilder, HttpApiEndpoint, HttpApiGroup, HttpMiddleware, HttpServerResponse } from "@effect/platform";
 import { HttpServerRequest } from "@effect/platform/HttpServerRequest";
 import * as Multipart from "@effect/platform/Multipart";
-import { Cause, Effect, Layer, ManagedRuntime, Schema, Stream } from "effect";
+import { Cause, Context, Effect, Layer, ManagedRuntime, Schema, Stream } from "effect";
 import { createHash, randomBytes } from "node:crypto";
-import { readFileSync, existsSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { LoggerLayer } from "../logging/logger";
-import { Sqlite, withTx, DbError, queryFirst, RowNotFound } from "../db/database";
-import { Database } from "bun:sqlite";
-import { getSetting, setSetting, deleteSetting } from "../db/settings";
+import { Db, run, queryAll, withTx, DbError, queryFirst, RowNotFound, type DbDriver } from "../db/db";
+import { createBunSqliteDriver } from "../db/drivers/bun-sqlite";
+import type { Database } from "bun:sqlite";
+import { getSettingAsync, setSettingAsync, deleteSettingAsync } from "./workers-ports";
 import { ProjectNotFound, WikiPageNotFound, MachineNotFound, Forbidden, SetupLocked, TaskNotFound, InvalidName, InvalidRateLimit, InvalidGithubSettings, NoUserContext, InvalidArgs, GithubApiError, errorResponse, errorToStatus, ProjectAccessDenied, HeraldTaskActive, HeraldThreadNotFound, ProviderNotConfigured, ProviderAuthFailed, ProviderUnreachable, HeraldGenerationFailed, HasChildren } from "./errors";
 import { respond } from "./http-helpers";
 import { resolveTaskId } from "./task-id";
 import { parseTaskKey } from "../task-key";
-import { AuthIdentity, actorFromIdentity } from "./auth";
+import { AuthIdentity, AuthIdentityShape, actorFromIdentity } from "./auth";
 import { teamsGroup, createTeamsLive } from "./teams";
 import { workspaceGroup, createWorkspaceLive } from "./workspace";
 import { sessionsGroup, createSessionsLive } from "./sessions";
-import { auth, PUBLIC_URL } from "../auth";
-import { createApiMiddleware } from "./middleware";
-import { resolveRateLimitFromDbValues, syncRateLimitFromDb } from "./rate-limit";
-import { syncGitHubConfigFromDb, resetGithubCaches } from "../github/client";
+import { auth } from "../auth";
+import { createApiMiddleware, type MiddlewareSession } from "./middleware";
+import { resolveRateLimitFromDbValues, syncRateLimitFromDbAsync } from "./rate-limit";
+import { syncGitHubConfigFromDbAsync, resetGithubCaches } from "../github/client";
 import { loadTaskRepoContent } from "../services/hearth-repo-content";
 import { clampLimit, nextCursor } from "../../shared/pagination";
 import { ProjectService } from "../services/project.service";
@@ -43,7 +43,12 @@ import { AttachmentService } from "../services/attachment.service";
 import type { ServeAttachment } from "../services/attachment.service";
 import { AttachmentRepo } from "../repos/attachment.repo";
 import { Storage, StorageConfig } from "../storage/storage";
-import { resolveStorageConfig, bodyCapFor } from "../storage/config";
+import { resolveStorageConfig, bodyCapFor, type StorageConfigShape } from "../storage/config";
+import { adminEmailsFrom, currentEnv, storageEnvFrom, RuntimeEnvLive, type RuntimeEnv } from "../runtime-env";
+import { getEnv, resolvePublicUrl } from "../env";
+import { resolveApiKeyIdentityAsync, constantTimeTokenEqual } from "./auth-key";
+import { resolveMaxApiBody, X_LEXA_REMOTE_IP } from "./limits";
+import { apiRateLimiter, shareRateLimiter, isPrivateIp, isRateLimitExemptPath } from "./rate-limit";
 import { ApiKeyService } from "../services/api-key.service";
 import { ApiKeyRepo } from "../repos/api-key.repo";
 import { UserService } from "../services/user.service";
@@ -1761,6 +1766,61 @@ const searchParams = (req: unknown): URLSearchParams => {
   return url ? (URL.parse(url)?.searchParams ?? new URLSearchParams()) : new URLSearchParams();
 };
 
+// Bun-only Database loading. Reached synchronously from entry.ts but the
+// constructor must not be a static value import (that would pin bun:sqlite
+// into the workerd module graph). Resolve it with a dynamic import —
+// invisible to the static graph, served by the host runtime on Bun and by
+// the vitest alias under node. Never executed on Workers.
+// Per-factory auth hooks (B6a/B6b). The setup setAdmin handler provisions
+// through better-auth's createUser — the Bun factory wires the process-wide
+// singleton, the Workers factory wires its per-request createAuth(env)
+// instance (D1 adapter). Handlers yield this tag instead of importing the
+// singleton, so the module graph stays workerd-safe.
+export interface ApiAuthHooksShape {
+  createUser(input: { email: string; password: string; name: string }): Promise<unknown>;
+}
+
+export class ApiAuthHooks extends Context.Tag("Lexa/ApiAuthHooks")<ApiAuthHooks, ApiAuthHooksShape>() {}
+
+async function buildBunApp(dbPath: string, env?: RuntimeEnv) {
+  const { Database } = await import("bun:sqlite");
+  const db = new Database(dbPath);
+  db.exec("PRAGMA journal_mode = WAL");
+  db.exec("PRAGMA foreign_keys = ON");
+  db.exec("PRAGMA busy_timeout = 5000");
+  const driver = createBunSqliteDriver(db);
+  const dbLayer = Layer.mergeAll(
+    Layer.succeed(Db, driver),
+    Layer.succeed(ApiAuthHooks, {
+      createUser: (input) =>
+        auth.api.createUser({ body: { ...input, data: { role: "superadmin" } } }),
+    } satisfies ApiAuthHooksShape),
+  );
+  const serviceLayer = buildServiceLayer(dbPath, env);
+  const handlerLayer = routeGroups().pipe(
+    Layer.provide(Layer.provide(serviceLayer, Layer.mergeAll(dbLayer, LoggerLayer))),
+    Layer.provide(dbLayer)
+  );
+  const merged = Layer.mergeAll(apiLayer, handlerLayer);
+  const finalLayer = Layer.provide(
+    merged,
+    createApiMiddleware(db, dbPath, env, { getSession: (headers) => auth.api.getSession({ headers }) })
+  );
+  const { handler } = HttpApiBuilder.toWebHandler(finalLayer as never);
+  return { handler, driver };
+}
+
+// Eager boot with crash-on-failure: entry.ts calls the factories
+// synchronously and a bad DATABASE_PATH must still take the process down
+// at boot (as the previous synchronous construction did) instead of
+// surfacing as per-request 500s.
+function bootOrCrash<T>(promise: Promise<T>): Promise<T> {
+  promise.catch((e) => {
+    setTimeout(() => { throw e; }, 0);
+  });
+  return promise;
+}
+
 // Admin-only gate: consumes the caller identity resolved by the API
 // middleware (member keys are 403'd there already — this is belt-and-braces
 // for any handler reached through a path that skips the middleware check).
@@ -1821,25 +1881,26 @@ const requireProjectReadById = (projectId: string): Effect.Effect<DomainProject,
 // first-boot bootstrap, mirrored into the settings table at boot). source is
 // "settings" if any github_* row exists, else "none". Only appId is returned
 // as a value — the PEM and webhook secret are write-only (booleans only).
-function githubSettingsResponse(db: Database): {
+function githubSettingsResponse(driver: DbDriver): Effect.Effect<{
   appId: string;
   privateKeySet: boolean;
   webhookSecretSet: boolean;
   source: "settings" | "none";
-} {
-  const settings = {
-    appId: getSetting(db, "github_app_id"),
-    privateKey: getSetting(db, "github_private_key"),
-    webhookSecret: getSetting(db, "github_webhook_secret"),
-  };
-  const nonEmpty = (v: string | null): string => (v !== null && v.trim() !== "" ? v : "");
-  const anySettings = settings.appId !== null || settings.privateKey !== null || settings.webhookSecret !== null;
-  return {
-    appId: nonEmpty(settings.appId),
-    privateKeySet: nonEmpty(settings.privateKey) !== "",
-    webhookSecretSet: nonEmpty(settings.webhookSecret) !== "",
-    source: anySettings ? "settings" : "none",
-  };
+}, DbError> {
+  return Effect.gen(function* () {
+    const appId = yield* getSettingAsync(driver, "github_app_id");
+    const privateKey = yield* getSettingAsync(driver, "github_private_key");
+    const webhookSecret = yield* getSettingAsync(driver, "github_webhook_secret");
+    const settings = { appId, privateKey, webhookSecret };
+    const nonEmpty = (v: string | null): string => (v !== null && v.trim() !== "" ? v : "");
+    const anySettings = settings.appId !== null || settings.privateKey !== null || settings.webhookSecret !== null;
+    return {
+      appId: nonEmpty(settings.appId),
+      privateKeySet: nonEmpty(settings.privateKey) !== "",
+      webhookSecretSet: nonEmpty(settings.webhookSecret) !== "",
+      source: anySettings ? "settings" : "none",
+    };
+  });
 }
 
 const healthLive = HttpApiBuilder.group(LexaApi, "health", (handlers) =>
@@ -1858,20 +1919,27 @@ function generateRawApiKey(): string {
   return `lxk_${result}`;
 }
 
-function setupStatus(db: Database) {
-  const apiKeyCount = (db.prepare("SELECT COUNT(*) c FROM api_keys").get() as { c: number }).c;
-  const projectCount = (db.prepare("SELECT COUNT(*) c FROM projects").get() as { c: number }).c;
-  const userCount = (db.prepare("SELECT COUNT(*) c FROM users").get() as { c: number }).c;
-  const superadminCount = (db.prepare("SELECT COUNT(*) c FROM users WHERE role = 'superadmin'").get() as { c: number }).c;
-  const adminEmails = (process.env.LXK_ADMIN_EMAILS || "").split(",").map((s) => s.trim()).filter(Boolean);
-  const setupComplete = getSetting(db, "setup_complete") === "1";
-  return {
-    configured: setupComplete || (apiKeyCount > 0 && superadminCount > 0),
-    needsAdmin: superadminCount === 0,
-    hasApiKey: apiKeyCount > 0,
-    hasProjects: projectCount > 0,
-    hasUsers: userCount > 0,
-  };
+const countRows = (driver: DbDriver, sql: string): Effect.Effect<number, DbError> =>
+  queryFirst<{ c: number }>(driver, sql).pipe(
+    Effect.map((row) => row.c),
+    Effect.catchTag("RowNotFound", () => Effect.succeed(0))
+  );
+
+function setupStatus(driver: DbDriver) {
+  return Effect.gen(function* () {
+    const apiKeyCount = yield* countRows(driver, "SELECT COUNT(*) c FROM api_keys");
+    const projectCount = yield* countRows(driver, "SELECT COUNT(*) c FROM projects");
+    const userCount = yield* countRows(driver, "SELECT COUNT(*) c FROM users");
+    const superadminCount = yield* countRows(driver, "SELECT COUNT(*) c FROM users WHERE role = 'superadmin'");
+    const setupComplete = (yield* getSettingAsync(driver, "setup_complete")) === "1";
+    return {
+      configured: setupComplete || (apiKeyCount > 0 && superadminCount > 0),
+      needsAdmin: superadminCount === 0,
+      hasApiKey: apiKeyCount > 0,
+      hasProjects: projectCount > 0,
+      hasUsers: userCount > 0,
+    };
+  });
 }
 
 // The wizard is only for first install: once setup is complete (flag set by
@@ -1879,49 +1947,91 @@ function setupStatus(db: Database) {
 // setAdmin (superadmin account creation) stays open while the env-provided
 // key exists but no superadmin ACCOUNT does — the web wizard is the only way
 // to set the superadmin password (no --admin-password flag, R3).
-function setupAdminLocked(db: Database): boolean {
-  const apiKeyCount = (db.prepare("SELECT COUNT(*) c FROM api_keys").get() as { c: number }).c;
-  const superadminCount = (db.prepare("SELECT COUNT(*) c FROM users WHERE role = 'superadmin'").get() as { c: number }).c;
-  return getSetting(db, "setup_complete") === "1" ||
-    ((db.prepare("SELECT COUNT(*) c FROM projects").get() as { c: number }).c > 0) ||
-    (apiKeyCount > 0 && superadminCount > 0);
+function setupAdminLocked(driver: DbDriver): Effect.Effect<boolean, DbError> {
+  return Effect.gen(function* () {
+    const apiKeyCount = yield* countRows(driver, "SELECT COUNT(*) c FROM api_keys");
+    const superadminCount = yield* countRows(driver, "SELECT COUNT(*) c FROM users WHERE role = 'superadmin'");
+    if ((yield* getSettingAsync(driver, "setup_complete")) === "1") return true;
+    if ((yield* countRows(driver, "SELECT COUNT(*) c FROM projects")) > 0) return true;
+    return apiKeyCount > 0 && superadminCount > 0;
+  });
 }
 
 // api-key minting / seed / complete lock like before: an instance configured
 // entirely via env (LXK_ADMIN_EMAILS + a key) must not leave key minting open.
-function setupLocked(db: Database): boolean {
-  const adminEmails = (process.env.LXK_ADMIN_EMAILS || "").split(",").map((s) => s.trim()).filter(Boolean);
-  const apiKeyCount = (db.prepare("SELECT COUNT(*) c FROM api_keys").get() as { c: number }).c;
-  return getSetting(db, "setup_complete") === "1" ||
-    ((db.prepare("SELECT COUNT(*) c FROM projects").get() as { c: number }).c > 0) ||
-    (apiKeyCount > 0 && adminEmails.length > 0);
+function setupLocked(driver: DbDriver, env: RuntimeEnv): Effect.Effect<boolean, DbError> {
+  return Effect.gen(function* () {
+    const adminEmails = adminEmailsFrom(env);
+    const apiKeyCount = yield* countRows(driver, "SELECT COUNT(*) c FROM api_keys");
+    if ((yield* getSettingAsync(driver, "setup_complete")) === "1") return true;
+    if ((yield* countRows(driver, "SELECT COUNT(*) c FROM projects")) > 0) return true;
+    return apiKeyCount > 0 && adminEmails.length > 0;
+  });
 }
+
+// Quote-aware script splitter for the dev seed file: `--` comments are
+// stripped and statements split on `;` outside single-quoted strings.
+const splitSqlScript = (sql: string): string[] => {
+  const stmts: string[] = [];
+  let cur = "";
+  let inStr = false;
+  for (let i = 0; i < sql.length; i++) {
+    const ch = sql[i]!;
+    if (inStr) {
+      cur += ch;
+      if (ch === "'") {
+        if (sql[i + 1] === "'") { cur += sql[i + 1]!; i++; }
+        else inStr = false;
+      }
+      continue;
+    }
+    if (ch === "'") { inStr = true; cur += ch; continue; }
+    if (ch === "-" && sql[i + 1] === "-") {
+      while (i < sql.length && sql[i] !== "\n") i++;
+      continue;
+    }
+    if (ch === ";") {
+      if (cur.trim() !== "") stmts.push(cur.trim());
+      cur = "";
+      continue;
+    }
+    cur += ch;
+  }
+  if (cur.trim() !== "") stmts.push(cur.trim());
+  return stmts;
+};
 
 const setupLive = HttpApiBuilder.group(LexaApi, "setup", (handlers) =>
   handlers
     .handle("status", () =>
       respond(Effect.gen(function* () {
-        const db = yield* Sqlite;
-        return setupStatus(db);
+        const db = yield* Db;
+        return yield* setupStatus(db);
       }))
     )
     .handle("setAdmin", (req) =>
       respond(Effect.gen(function* () {
-        const db = yield* Sqlite;
-        if (setupAdminLocked(db)) return yield* Effect.fail(new SetupLocked());
+        const db = yield* Db;
+        const hooks = yield* ApiAuthHooks;
+        const env = yield* currentEnv;
+        if (yield* setupAdminLocked(db)) return yield* Effect.fail(new SetupLocked());
         // Allow-list at provisioning only (Q12): when LXK_ADMIN_EMAILS is set,
         // only those emails may become superadmin; empty env = bootstrap (first
         // operator picks freely). Never written back to the setting — env-only.
-        const allowlist = (process.env.LXK_ADMIN_EMAILS || "").split(",").map((s) => s.trim().toLowerCase()).filter(Boolean);
+        const allowlist = adminEmailsFrom(env).map((s) => s.toLowerCase());
         const email = req.payload.email.trim().toLowerCase();
         if (allowlist.length > 0 && !allowlist.includes(email)) {
           return yield* Effect.fail(new Forbidden({ message: "Email is not in the LXK_ADMIN_EMAILS allow-list" }));
         }
-        const existing = db.prepare("SELECT id FROM users WHERE email = ?").get(email) as { id: string } | null;
+        const existing = yield* queryFirst<{ id: string }>(db, "SELECT id FROM users WHERE email = ?", email).pipe(
+          Effect.catchTag("RowNotFound", () => Effect.succeed(null))
+        );
         if (!existing) {
           yield* Effect.tryPromise(() =>
-            auth.api.createUser({
-              body: { email, password: req.payload.password, name: email.split("@")[0] || email, data: { role: "superadmin" } },
+            hooks.createUser({
+              email,
+              password: req.payload.password,
+              name: email.split("@")[0] || email,
             })
           ).pipe(
             Effect.mapError(() => new Forbidden({ message: "Superadmin account creation failed" }))
@@ -1932,33 +2042,45 @@ const setupLive = HttpApiBuilder.group(LexaApi, "setup", (handlers) =>
     )
     .handle("createApiKey", () =>
       respond(Effect.gen(function* () {
-        const db = yield* Sqlite;
-        if (setupLocked(db)) return yield* Effect.fail(new SetupLocked());
+        const db = yield* Db;
+        const env = yield* currentEnv;
+        if (yield* setupLocked(db, env)) return yield* Effect.fail(new SetupLocked());
         const key = generateRawApiKey();
         const keyHash = createHash("sha256").update(key).digest("hex");
-        db.prepare("INSERT INTO api_keys (id, name, key_hash) VALUES (?, ?, ?)").run(crypto.randomUUID(), "setup-wizard", keyHash);
+        yield* run(db, "INSERT INTO api_keys (id, name, key_hash) VALUES (?, ?, ?)", crypto.randomUUID(), "setup-wizard", keyHash);
         return { key };
       }))
     )
     .handle("seed", () =>
       respond(Effect.gen(function* () {
-        const db = yield* Sqlite;
-        if (setupLocked(db)) return yield* Effect.fail(new SetupLocked());
-        const lxkEnv = process.env.LXK_ENV;
+        const db = yield* Db;
+        const env = yield* currentEnv;
+        if (yield* setupLocked(db, env)) return yield* Effect.fail(new SetupLocked());
+        if (env.DB) return { seeded: false as const };
+        const lxkEnv = env.LXK_ENV;
         if (lxkEnv && lxkEnv !== "dev") return { seeded: false as const };
+        const fs = yield* Effect.tryPromise(() => import("node:fs")).pipe(
+          Effect.catchAll(() => Effect.succeed(null))
+        );
+        if (!fs) return { seeded: false as const };
         const seedFile = join(import.meta.dir, "../../scripts/seed-dev.sql");
-        if (!existsSync(seedFile)) return { seeded: false as const };
-        const projectCount = (db.prepare("SELECT COUNT(*) c FROM projects").get() as { c: number }).c;
+        if (!fs.existsSync(seedFile)) return { seeded: false as const };
+        const projectCount = yield* countRows(db, "SELECT COUNT(*) c FROM projects");
         if (projectCount > 0) return { seeded: false as const };
-        db.exec(readFileSync(seedFile, "utf-8"));
+        const sql = yield* Effect.tryPromise(() => Promise.resolve(fs.readFileSync(seedFile, "utf-8"))).pipe(
+          Effect.catchAll(() => Effect.succeed(null))
+        );
+        if (sql === null) return { seeded: false as const };
+        for (const stmt of splitSqlScript(sql)) yield* run(db, stmt);
         return { seeded: true as const };
       }))
     )
     .handle("complete", () =>
       respond(Effect.gen(function* () {
-        const db = yield* Sqlite;
-        if (setupLocked(db)) return yield* Effect.fail(new SetupLocked());
-        setSetting(db, "setup_complete", "1");
+        const db = yield* Db;
+        const env = yield* currentEnv;
+        if (yield* setupLocked(db, env)) return yield* Effect.fail(new SetupLocked());
+        yield* setSettingAsync(db, "setup_complete", "1");
         return { ok: true as const };
       }))
     )
@@ -3166,7 +3288,7 @@ const taskLinksLive = HttpApiBuilder.group(LexaApi, "task-links", (handlers) =>
         // lookup, so a query that IS a key returns the exact task first.
         const parsed = parseTaskKey(q);
         if (parsed) {
-          const db = yield* Sqlite;
+          const db = yield* Db;
           const exact = yield* queryFirst<{ id: string; title: string; column_name: string; type: string; priority: string }>(
             db,
             `SELECT t.id, t.title, c.name AS column_name, t.type, t.priority
@@ -3412,7 +3534,7 @@ const tasksLive = HttpApiBuilder.group(LexaApi, "tasks", (handlers) =>
         const id = yield* resolveTaskId(req.path.id, req.path.slug);
         const task = yield* taskService.getById(id);
         const issue = task.githubs.find((g) => g.issueId === req.path.issueId);
-        const db = yield* Sqlite;
+        const db = yield* Db;
         // Does NOT close or delete the GitHub issue.
         const ev = yield* withTx(db, Effect.gen(function* () {
           yield* taskRepo.unlinkGithubIssue(id, req.path.issueId);
@@ -3521,10 +3643,10 @@ const dashboardLive = HttpApiBuilder.group(LexaApi, "dashboard", (handlers) =>
   )
 );
 
-function formatWikiShareLink(row: WikiShareLinkRow): Schema.Schema.Type<typeof WikiShareLinkSchema> {
+function formatWikiShareLink(row: WikiShareLinkRow, baseUrl: string): Schema.Schema.Type<typeof WikiShareLinkSchema> {
   return {
     id: row.id,
-    url: `${PUBLIC_URL}/share/${row.token}`,
+    url: `${baseUrl}/share/${row.token}`,
     expiresAt: row.expires_at,
     createdAt: row.created_at,
   };
@@ -3656,7 +3778,8 @@ const wikiLive = HttpApiBuilder.group(LexaApi, "wiki", (handlers) =>
           expiresAt: req.payload.expiresAt ?? null,
           createdBy: identity.userId,
         });
-        return { link: formatWikiShareLink(row) };
+        const env = yield* currentEnv;
+        return { link: formatWikiShareLink(row, resolvePublicUrl(env)) };
       }))
     )
     .handle("listShareLinks", (req) =>
@@ -3666,7 +3789,9 @@ const wikiLive = HttpApiBuilder.group(LexaApi, "wiki", (handlers) =>
         const project = yield* requireProjectRead(req.path.slug);
         const page = yield* wikiService.findBySlug(project.id, req.path.pageSlug);
         const rows = yield* shareService.list(page.id);
-        return { data: rows.map(formatWikiShareLink) };
+        const env = yield* currentEnv;
+        const baseUrl = resolvePublicUrl(env);
+        return { data: rows.map((r) => formatWikiShareLink(r, baseUrl)) };
       }))
     )
     .handle("revokeShareLink", (req) =>
@@ -3966,11 +4091,11 @@ const apiKeysLive = HttpApiBuilder.group(LexaApi, "api-keys", (handlers) =>  han
     .handle("getRateLimit", () =>
       respond(Effect.gen(function* () {
         yield* requireAdmin;
-        const db = yield* Sqlite;
+        const db = yield* Db;
         return {
           ...resolveRateLimitFromDbValues({
-            settingsMax: getSetting(db, "rate_limit_max"),
-            settingsWindowMs: getSetting(db, "rate_limit_window_ms"),
+            settingsMax: yield* getSettingAsync(db, "rate_limit_max"),
+            settingsWindowMs: yield* getSettingAsync(db, "rate_limit_window_ms"),
           }),
           envOverride: false,
         };
@@ -3989,10 +4114,10 @@ const apiKeysLive = HttpApiBuilder.group(LexaApi, "api-keys", (handlers) =>  han
         if (!Number.isInteger(windowMs) || windowMs < 1000) {
           return yield* Effect.fail(new InvalidRateLimit({ reason: "windowMs must be an integer >= 1000" }));
         }
-        const db = yield* Sqlite;
-        setSetting(db, "rate_limit_max", String(max));
-        setSetting(db, "rate_limit_window_ms", String(windowMs));
-        syncRateLimitFromDb(db);
+        const db = yield* Db;
+        yield* setSettingAsync(db, "rate_limit_max", String(max));
+        yield* setSettingAsync(db, "rate_limit_window_ms", String(windowMs));
+        yield* syncRateLimitFromDbAsync(db);
         return {
           ...resolveRateLimitFromDbValues({ settingsMax: String(max), settingsWindowMs: String(windowMs) }),
           envOverride: false,
@@ -4002,8 +4127,8 @@ const apiKeysLive = HttpApiBuilder.group(LexaApi, "api-keys", (handlers) =>  han
     .handle("getGithubSettings", () =>
       respond(Effect.gen(function* () {
         yield* requireAdmin;
-        const db = yield* Sqlite;
-        return githubSettingsResponse(db);
+        const db = yield* Db;
+        return yield* githubSettingsResponse(db);
       }))
     )
     .handle("setGithubSettings", (req) =>      respond(Effect.gen(function* () {
@@ -4022,20 +4147,20 @@ const apiKeysLive = HttpApiBuilder.group(LexaApi, "api-keys", (handlers) =>  han
         if (privateKey !== undefined && privateKey.trim() !== "" && !privateKey.includes("-----BEGIN")) {
           return yield* Effect.fail(new InvalidGithubSettings({ reason: "privateKey must be a PEM starting with -----BEGIN" }));
         }
-        const db = yield* Sqlite;
-        if (appId.trim() === "") deleteSetting(db, "github_app_id");
-        else setSetting(db, "github_app_id", appId.trim());
+        const db = yield* Db;
+        if (appId.trim() === "") yield* deleteSettingAsync(db, "github_app_id");
+        else yield* setSettingAsync(db, "github_app_id", appId.trim());
         if (privateKey !== undefined) {
-          if (privateKey.trim() === "") deleteSetting(db, "github_private_key");
-          else setSetting(db, "github_private_key", privateKey);
+          if (privateKey.trim() === "") yield* deleteSettingAsync(db, "github_private_key");
+          else yield* setSettingAsync(db, "github_private_key", privateKey);
         }
         if (webhookSecret !== undefined) {
-          if (webhookSecret.trim() === "") deleteSetting(db, "github_webhook_secret");
-          else setSetting(db, "github_webhook_secret", webhookSecret.trim());
+          if (webhookSecret.trim() === "") yield* deleteSettingAsync(db, "github_webhook_secret");
+          else yield* setSettingAsync(db, "github_webhook_secret", webhookSecret.trim());
         }
-        syncGitHubConfigFromDb(db);
+        yield* syncGitHubConfigFromDbAsync(db);
         resetGithubCaches();
-        return githubSettingsResponse(db);
+        return yield* githubSettingsResponse(db);
       }))
     )
     .handle("searchGithubRepos", (req) =>
@@ -4210,12 +4335,12 @@ const adminHeraldLive = HttpApiBuilder.group(LexaApi, "adminHerald", (handlers) 
     .handle("adminHeraldDeleteProvider", (req) =>
       respond(Effect.gen(function* () {
         yield* requireSuperadmin;
-        const db = yield* Sqlite;
+        const db = yield* Db;
         const mRepo = yield* HeraldModelsRepo;
         const models = yield* mRepo.listByProvider(req.path.id).pipe(Effect.catchAll(() => Effect.succeed([] as Array<{ id: string }>)));
         if (models.length > 0) {
           const modelIds = new Set(models.map((m) => m.id));
-          const rows = db.prepare(`SELECT fallback_model_ids FROM herald_settings`).all() as Array<{ fallback_model_ids: string }>;
+          const rows = yield* queryAll<{ fallback_model_ids: string }>(db, `SELECT fallback_model_ids FROM herald_settings`);
           let refs = 0;
           for (const r of rows) {
             try {
@@ -4263,7 +4388,7 @@ const adminHeraldLive = HttpApiBuilder.group(LexaApi, "adminHerald", (handlers) 
           try: () => listModels(cfg),
           catch: (e) => e as ProviderAuthFailed | ProviderUnreachable,
         });
-        const db = yield* Sqlite;
+        const db = yield* Db;
         yield* withTx(
           db,
           Effect.gen(function* () {
@@ -4406,33 +4531,28 @@ function formatWikiPageRevision<T>(r: T): T {
   return r;
 }
 
-export function createApiHandler(dbPath: string) {
-  const db = new Database(dbPath);
-  db.exec("PRAGMA journal_mode = WAL");
-  db.exec("PRAGMA foreign_keys = ON");
-  db.exec("PRAGMA busy_timeout = 5000");
-  const dbLayer = Layer.succeed(Sqlite, db);
-
-  const serviceLayer = buildServiceLayer(dbPath);
-  const handlerLayer = Layer.mergeAll(
+function routeGroups() {
+  return Layer.mergeAll(
     healthLive, setupLive, projectsLive, columnsLive, swimlanesLive, milestonesLive, fieldConfigLive, hearthLive, agentsLive, skillsLive, heraldLive, taskLinksLive, tasksLive, boardLive, wikiLive, publicShareLive, attachmentsLive, apiKeysLive, adminLive, adminHeraldLive, projectHeraldUsageLive, meLive, dashboardLive,
     createTeamsLive(LexaApi), createWorkspaceLive(LexaApi), createSessionsLive(LexaApi),
-  ).pipe(Layer.provide(Layer.provide(serviceLayer, Layer.mergeAll(dbLayer, LoggerLayer))), Layer.provide(dbLayer));
-  const merged = Layer.mergeAll(apiLayer, handlerLayer);
-  const finalLayer = Layer.provide(merged, createApiMiddleware(db, dbPath));
-  const { handler } = HttpApiBuilder.toWebHandler(finalLayer as never);
+  );
+}
+
+export function createApiHandler(dbPath: string, env?: RuntimeEnv) {
+  const ready = bootOrCrash(buildBunApp(dbPath, env));
   return async (req: Request) => {
     const start = Date.now();
     const url = new URL(req.url);
     try {
+      const { handler, driver } = await ready;
       const res = await handler(req);
       if (url.pathname === "/api/hearth/tasks/recent" && req.method === "GET" && res.status < 400) {
-        try {
-          const row = db.prepare("SELECT 1 AS v FROM runtimes WHERE status = 'online' LIMIT 1").get() as { v: number } | undefined;
-          if (!row) return res;
-        } catch {
-          // if runtimes table missing (pre-migration) fall through to log
-        }
+        const row = await Effect.runPromise(
+          queryFirst<{ v: number }>(driver, "SELECT 1 AS v FROM runtimes WHERE status = 'online' LIMIT 1").pipe(
+            Effect.catchAll(() => Effect.succeed(null))
+          )
+        );
+        if (!row) return res;
       }
       const level = res.status >= 500 ? "ERROR" : res.status >= 400 ? "WARN" : "INFO";
       console.log(JSON.stringify({ level, service: "http", method: req.method, path: url.pathname, status: res.status, duration: Date.now() - start, timestamp: new Date().toISOString() }));
@@ -4445,8 +4565,12 @@ export function createApiHandler(dbPath: string) {
   };
 }
 
-function buildServiceLayer(dbPath: string) {
-  const storageCfg = resolveStorageConfig(process.env, dirname(dbPath));
+function buildServiceLayer(dbPath: string, env?: RuntimeEnv) {
+  const storageCfg = resolveStorageConfig(storageEnvFrom(env ?? getEnv()), dirname(dbPath));
+  return buildServiceLayerWithStorage(storageCfg);
+}
+
+function buildServiceLayerWithStorage(storageCfg: StorageConfigShape) {
   return Layer.mergeAll(
     ProjectRepo.Default, ProjectService.Default, ProjectReposRepo.Default,
     ColumnRepo.Default, ColumnService.Default,
@@ -4498,17 +4622,19 @@ function storageLayerFor(cfg: ReturnType<typeof resolveStorageConfig>) {
 // signature before parsing (createWebhookVerifier), then acks 200 immediately;
 // processing runs in the background (Bun has no waitUntil — ack first, then
 // fire-and-forget). Each factory builds its own runtime on the shared layers.
-function buildWebhookRuntime(dbPath: string) {
-  const db = new Database(dbPath);
-  db.exec("PRAGMA journal_mode = WAL");
-  db.exec("PRAGMA foreign_keys = ON");
-  db.exec("PRAGMA busy_timeout = 5000");
-  return ManagedRuntime.make(
-    Layer.provideMerge(
-      buildServiceLayer(dbPath),
-      Layer.mergeAll(Layer.succeed(Sqlite, db), LoggerLayer),
+function buildBunWebhookRuntime(dbPath: string) {
+  return buildBunApp(dbPath).then(({ driver }) =>
+    ManagedRuntime.make(
+      Layer.provideMerge(
+        buildServiceLayer(dbPath),
+        Layer.mergeAll(Layer.succeed(Db, driver), LoggerLayer),
+      )
     )
   );
+}
+
+function buildWebhookRuntime(dbPath: string) {
+  return bootOrCrash(buildBunWebhookRuntime(dbPath));
 }
 
 // HMAC-SHA-256 verification over the RAW body, constant-time compare — the
@@ -4519,11 +4645,13 @@ function buildWebhookRuntime(dbPath: string) {
 export function createWebhookVerifier(dbPath: string): (rawBody: ArrayBuffer, signature: string | null) => Promise<boolean> {
   const runtime = buildWebhookRuntime(dbPath);
   return (rawBody, signature) =>
-    runtime.runPromise(
-      Effect.gen(function* () {
-        const client = yield* GitHubClient;
-        return yield* client.verifyWebhookSignature(rawBody, signature);
-      })
+    runtime.then((rt) =>
+      rt.runPromise(
+        Effect.gen(function* () {
+          const client = yield* GitHubClient;
+          return yield* client.verifyWebhookSignature(rawBody, signature);
+        })
+      )
     );
 }
 
@@ -4536,24 +4664,175 @@ export function createWebhookHandler(dbPath: string): (rawBody: ArrayBuffer, del
       const payload = JSON.parse(new TextDecoder().decode(rawBody)) as Parameters<typeof service.handleWebhook>[2];
       yield* service.handleWebhook(deliveryId, event, payload);
     });
-    runtime.runPromise(processing).catch((e) => {
-      console.error(`[Webhook] processing failed delivery=${deliveryId} event=${event}:`, e);
+    runtime.then((rt) =>
+      rt.runPromise(processing).catch((e) => {
+        console.error(`[Webhook] processing failed delivery=${deliveryId} event=${event}:`, e);
+      })
+    ).catch((e) => {
+      console.error(`[Webhook] runtime failed delivery=${deliveryId} event=${event}:`, e);
     });
     return new Response(JSON.stringify({ ok: true }), { status: 200, headers: { "Content-Type": "application/json" } });
   };
 }
 
-// ─── Workers-side factory (Phase 6 follow-up) ───────────────────────────
-//
-// The Bun host's `createApiHandler(dbPath)` opens a `bun:sqlite` Database
-// and builds the Effect runtime. The Workers-side equivalent builds
-// the same runtime from the workerd `env` binding:
-//
-//   createApiHandler({ driver: createD1Driver(env.DB), env, auth,
-//                      webhookVerifier: ..., webhookHandler: ... })
-//
-// For now the Workers host returns a 200 stub from server/workers-entry.ts
-// and the real HTTP wiring is a Phase 6+ follow-up. This alias is the
-// canonical Bun-side name for the worker-routing layer to import once
-// the full D1 driver is wired through.
-export const createApiHandlerForBun: typeof createApiHandler = createApiHandler;
+// ─── Workers-side factory ───────────────────────────────────────────────
+// Same route groups as the Bun host, composed over a caller-supplied
+// DbDriver (D1 on Workers) with per-request env, R2 storage, and a
+// per-request better-auth instance (session verification + setAdmin +
+// invites via the D1 adapter — B6b). Webhook stays outside this app
+// (raw-body HMAC before parse — workers-entry.ts owns it, B4 pattern).
+
+export interface WorkersApiHandlerOptions {
+  driver: DbDriver;
+  runtimeEnv: RuntimeEnv;
+  storage: StorageConfigShape;
+  authHooks: ApiAuthHooksShape;
+  getSession?: ((headers: Headers) => Promise<MiddlewareSession | null>) | undefined;
+}
+
+const withSecurityHeaders = (resp: HttpServerResponse.HttpServerResponse) =>
+  HttpServerResponse.setHeaders(resp, { "X-Content-Type-Options": "nosniff", "Cache-Control": "no-store" });
+
+const workersSessionIdentity = (
+  headers: Headers,
+  getSession?: (headers: Headers) => Promise<MiddlewareSession | null>
+): Effect.Effect<AuthIdentityShape | null, never> => {
+  if (!getSession) return Effect.succeed(null);
+  return Effect.tryPromise(() => getSession(headers)).pipe(
+    Effect.map((session) => {
+      const user = session?.user;
+      if (!user) return null;
+      return {
+        keyId: "",
+        keyName: user.name,
+        userId: user.id,
+        userName: user.name,
+        role: user.role === "superadmin" ? ("admin" as const) : ("member" as const),
+      };
+    }),
+    Effect.catchAll(() => Effect.succeed(null))
+  );
+};
+
+function createWorkersApiMiddleware(
+  driver: DbDriver,
+  runtimeEnv: RuntimeEnv,
+  storageCfg: StorageConfigShape,
+  deps: { getSession?: ((headers: Headers) => Promise<MiddlewareSession | null>) | undefined } = {}
+) {
+  const maxApiBody = resolveMaxApiBody(runtimeEnv);
+  return HttpApiBuilder.middleware((httpApp) =>
+    Effect.gen(function* () {
+      const request = yield* HttpServerRequest;
+      const path = request.url.split(/[?#]/)[0] ?? "";
+
+      const isSetup = path.startsWith("/api/setup");
+      const isHealth = path === "/api/health";
+      const isPublicShare = path.startsWith("/api/share/");
+      const isHearthDaemon =
+        path.startsWith("/api/hearth/daemon/") ||
+        path === "/api/hearth/runtimes/register" ||
+        path === "/api/hearth/sessions";
+
+      const stampedIp = request.headers[X_LEXA_REMOTE_IP] ?? "";
+      const cfIp = request.headers["cf-connecting-ip"];
+      const ip = stampedIp && isPrivateIp(stampedIp) && cfIp ? cfIp : (stampedIp || cfIp || "unknown");
+      const limiter = isPublicShare ? shareRateLimiter : apiRateLimiter;
+      if (!isRateLimitExemptPath(path) && !limiter.check(ip)) {
+        const retryAfter = Math.ceil(limiter.retryAfterMs(ip) / 1000);
+        console.warn(`[API] rate limited ip=${ip} retryAfter=${retryAfter}s`);
+        return withSecurityHeaders(
+          HttpServerResponse.unsafeJson(
+            { error: { code: "RATE_LIMITED", message: "Rate limit exceeded" } },
+            { status: 429 }
+          ).pipe(HttpServerResponse.setHeader("Retry-After", String(retryAfter)))
+        );
+      }
+
+      const declared = Number(request.headers["content-length"] ?? 0);
+      const bodyCap = bodyCapFor(path, storageCfg, maxApiBody);
+      if (declared > bodyCap) {
+        console.warn(`[API] body too large path=${path} declared=${request.headers["content-length"] ?? "unknown"} bytes`);
+        return withSecurityHeaders(
+          HttpServerResponse.unsafeJson(
+            { error: { code: "BODY_TOO_LARGE", message: "Request body too large" } },
+            { status: 413 }
+          )
+        );
+      }
+
+      const daemonTokenOk = isHearthDaemon && runtimeEnv.LXK_HEARTH_DAEMON_TOKEN
+        ? constantTimeTokenEqual(request.headers["x-hearth-token"] ?? "", runtimeEnv.LXK_HEARTH_DAEMON_TOKEN)
+        : false;
+      let identity: AuthIdentityShape;
+      if (!isHealth && !isSetup && !daemonTokenOk && !isPublicShare) {
+        const session = yield* workersSessionIdentity(new Headers(request.headers), deps.getSession);
+        if (session) {
+          identity = session;
+        } else {
+          const authHeader = request.headers["authorization"] ?? "";
+          const resolved = yield* resolveApiKeyIdentityAsync(driver, authHeader).pipe(
+            Effect.catchAll(() => Effect.succeed(null))
+          );
+          if (!resolved) {
+            const reason = authHeader.startsWith("Bearer ") ? "unknown key" : "missing or malformed key";
+            console.warn(`[Auth] denied path=${path} reason=${reason}`);
+            return withSecurityHeaders(
+              HttpServerResponse.unsafeJson(
+                { error: { code: "UNAUTHORIZED", message: "Invalid or missing API key" } },
+                { status: 401 }
+              )
+            );
+          }
+          if (resolved.userId !== null && resolved.role === "member") {
+            console.warn(`[Auth] denied path=${path} reason=member key`);
+            return withSecurityHeaders(
+              HttpServerResponse.unsafeJson(
+                { error: { code: "FORBIDDEN", message: "Member API keys are not supported on the REST API yet" } },
+                { status: 403 }
+              )
+            );
+          }
+          identity = resolved;
+        }
+      } else {
+        identity = { keyId: "", keyName: "", userId: null, userName: null, role: "admin" };
+      }
+
+      const response = yield* httpApp.pipe(
+        Effect.provideService(AuthIdentity, identity),
+        Effect.catchAllCause((cause) => {
+          const failure = Cause.failureOption(cause);
+          if (failure._tag === "Some" && (failure.value as { _tag?: string })._tag === "RouteNotFound") {
+            return Effect.succeed(
+              withSecurityHeaders(HttpServerResponse.empty().pipe(HttpServerResponse.setStatus(404)))
+            );
+          }
+          return Effect.failCause(cause);
+        })
+      );
+      return withSecurityHeaders(response);
+    })
+  );
+}
+
+export function createWorkersApiHandler(opts: WorkersApiHandlerOptions) {
+  const { driver, runtimeEnv, storage, authHooks } = opts;
+  const dbLayer = Layer.mergeAll(
+    Layer.succeed(Db, driver),
+    RuntimeEnvLive(runtimeEnv),
+    Layer.succeed(ApiAuthHooks, authHooks),
+  );
+  const serviceLayer = buildServiceLayerWithStorage(storage);
+  const handlerLayer = routeGroups().pipe(
+    Layer.provide(Layer.provide(serviceLayer, Layer.mergeAll(dbLayer, LoggerLayer))),
+    Layer.provide(dbLayer)
+  );
+  const merged = Layer.mergeAll(apiLayer, handlerLayer);
+  const finalLayer = Layer.provide(
+    merged,
+    createWorkersApiMiddleware(driver, runtimeEnv, storage, { getSession: opts.getSession })
+  );
+  const { handler } = HttpApiBuilder.toWebHandler(finalLayer as never);
+  return async (req: Request) => handler(req);
+}

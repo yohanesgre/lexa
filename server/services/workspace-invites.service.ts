@@ -1,6 +1,6 @@
 import { Effect, Data } from "effect";
 import { randomUUID } from "node:crypto";
-import { Sqlite, DbError, ConstraintViolation, RowNotFound } from "../db/database";
+import { Db, DbError, ConstraintViolation, RowNotFound, queryAll, queryFirst, run } from "../db/db";
 import { PUBLIC_URL } from "../auth";
 import type { WorkspaceInvite } from "../../shared/types";
 
@@ -28,7 +28,7 @@ const toInvite = (row: InviteRow): WorkspaceInvite => ({
 // (POST /api/auth/invite/accept, server/auth.ts) — the token is the auth.
 export class WorkspaceInvitesService extends Effect.Service<WorkspaceInvitesService>()("Lexa/WorkspaceInvitesService", {
   effect: Effect.gen(function* () {
-    const db = yield* Sqlite;
+    const db = yield* Db;
 
     const create = (email: string, createdBy: string | null): Effect.Effect<{ invite: WorkspaceInvite; link: string }, InviteAlreadyPending | ConstraintViolation | DbError> =>
       Effect.gen(function* () {
@@ -41,23 +41,16 @@ export class WorkspaceInvitesService extends Effect.Service<WorkspaceInvitesServ
         // are kept (audit) and still block (the user exists already).
         // expires_at is stored ISO-8601 — compare against an ISO now, not
         // datetime('now') (mixed formats mis-compare: 'T' > ' ').
-        yield* Effect.try({
-          try: () => db.prepare("DELETE FROM workspace_invitations WHERE email = ? AND expires_at < strftime('%Y-%m-%dT%H:%M:%fZ', 'now')").run(normalized),
-          catch: (e) => new DbError({ message: String(e), cause: e }),
-        });
-        yield* Effect.try({
-          try: () =>
-            db
-              .prepare("INSERT INTO workspace_invitations (id, email, role, token, expires_at, created_by) VALUES (?, ?, 'member', ?, ?, ?)")
-              .run(id, normalized, token, expiresAt, createdBy),
-          catch: (e) => {
-            const msg = String(e);
-            if (msg.includes("UNIQUE") || /constraint failed/i.test(msg)) {
-              return new InviteAlreadyPending({ email: normalized });
-            }
-            return new DbError({ message: msg, cause: e });
-          },
-        });
+        yield* run(db, "DELETE FROM workspace_invitations WHERE email = ? AND expires_at < strftime('%Y-%m-%dT%H:%M:%fZ', 'now')", normalized).pipe(
+          Effect.mapError((e) => (e instanceof ConstraintViolation ? new DbError({ message: e.message, cause: e }) : e))
+        );
+        yield* run(
+          db,
+          "INSERT INTO workspace_invitations (id, email, role, token, expires_at, created_by) VALUES (?, ?, 'member', ?, ?, ?)",
+          id, normalized, token, expiresAt, createdBy
+        ).pipe(
+          Effect.catchTag("ConstraintViolation", () => Effect.fail(new InviteAlreadyPending({ email: normalized })))
+        );
         return {
           invite: toInvite({ id, email: normalized, token, expires_at: expiresAt, accepted_at: null }),
           link: `${PUBLIC_URL}/invite?token=${token}`,
@@ -66,28 +59,24 @@ export class WorkspaceInvitesService extends Effect.Service<WorkspaceInvitesServ
 
     const revoke = (id: string): Effect.Effect<void, InviteNotFound | ConstraintViolation | DbError> =>
       Effect.gen(function* () {
-        const row = yield* Effect.try({
-          try: () => db.prepare("SELECT accepted_at FROM workspace_invitations WHERE id = ?").get(id) as { accepted_at: string | null } | null,
-          catch: (e) => new DbError({ message: String(e), cause: e }),
-        });
+        const row = yield* queryFirst<{ accepted_at: string | null }>(db, "SELECT accepted_at FROM workspace_invitations WHERE id = ?", id).pipe(
+          Effect.catchTag("RowNotFound", () => Effect.succeed(null))
+        );
         if (!row) return yield* Effect.fail(new InviteNotFound({ inviteId: id }));
         if (row.accepted_at) {
           // Accepted invites are spent — the member account exists. Revoking
           // the link is meaningless; surface 409 (contract: pending only).
           return yield* Effect.fail(new ConstraintViolation({ message: "invite already accepted", isPositionConflict: false }));
         }
-        yield* Effect.try({
-          try: () => db.prepare("DELETE FROM workspace_invitations WHERE id = ?").run(id),
-          catch: (e) => new DbError({ message: String(e), cause: e }),
-        });
+        yield* run(db, "DELETE FROM workspace_invitations WHERE id = ?", id).pipe(
+          Effect.mapError((e) => (e instanceof ConstraintViolation ? new DbError({ message: e.message, cause: e }) : e))
+        );
       });
 
     const list = (): Effect.Effect<WorkspaceInvite[], DbError> =>
-      Effect.try({
-        try: () =>
-          (db.prepare("SELECT id, email, token, expires_at, accepted_at FROM workspace_invitations ORDER BY created_at DESC, rowid DESC").all() as InviteRow[]).map(toInvite),
-        catch: (e) => new DbError({ message: String(e), cause: e }),
-      });
+      queryAll<InviteRow>(db, "SELECT id, email, token, expires_at, accepted_at FROM workspace_invitations ORDER BY created_at DESC, rowid DESC").pipe(
+        Effect.map((rows) => rows.map(toInvite))
+      );
 
     return { create, revoke, list };
   }),

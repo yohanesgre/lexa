@@ -1,11 +1,11 @@
 import { Effect } from "effect";
-import { Sqlite, queryAll, queryFirst, run, DbError, RowNotFound, ConstraintViolation } from "../db/database";
+import { Db, queryAll, queryFirst, run, DbError, RowNotFound, ConstraintViolation } from "../db/db";
 import { TaskLinkRow, rowToTaskLink } from "../../shared/db";
 import type { TaskLink, TaskLinkRelation } from "../../shared/types";
 
 export class TaskLinkRepo extends Effect.Service<TaskLinkRepo>()("Lexa/TaskLinkRepo", {
   effect: Effect.gen(function* () {
-    const db = yield* Sqlite;
+    const db = yield* Db;
 
     return {
       create: (input: {

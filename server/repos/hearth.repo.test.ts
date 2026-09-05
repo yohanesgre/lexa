@@ -7,6 +7,7 @@ import { Effect, Layer, Context } from "effect";
 import { Database } from "bun:sqlite";
 import { runMigrations } from "../db/migrate";
 import { Sqlite, initSqlite } from "../db/database";
+import { DbBunLive } from "../db/db";
 import { HearthRepo } from "./hearth.repo";
 
 const MIGRATIONS = fileURLToPath(new URL("../../migrations", import.meta.url));
@@ -52,7 +53,7 @@ function seed(db: Database) {
 }
 
 function makeRepo(db: Database) {
-  const layer = HearthRepo.Default.pipe(Layer.provide(Layer.succeed(Sqlite, db)));
+  const layer = HearthRepo.Default.pipe(Layer.provide(Layer.mergeAll(Layer.succeed(Sqlite, db), DbBunLive(db))));
   const ctx = Effect.runSync(Effect.scoped(Layer.build(layer)));
   return Context.get(ctx, HearthRepo);
 }
@@ -73,10 +74,10 @@ function taskInput(id: string, kind?: "blacksmith" | "herald") {
 }
 
 describe("HearthRepo createTask kind", () => {
-  it("defaults to blacksmith", () => {
+  it("defaults to blacksmith", async () => {
     seed(db);
     const repo = makeRepo(db);
-    Effect.runSync(
+    await Effect.runPromise(
       Effect.gen(function* () {
         const task = yield* repo.createTask(taskInput("ft1"));
         expect(task.kind).toBe("blacksmith");
@@ -84,10 +85,10 @@ describe("HearthRepo createTask kind", () => {
     );
   });
 
-  it("kind='herald' is persisted", () => {
+  it("kind='herald' is persisted", async () => {
     seed(db);
     const repo = makeRepo(db);
-    Effect.runSync(
+    await Effect.runPromise(
       Effect.gen(function* () {
         const task = yield* repo.createTask(taskInput("ft2", "herald"));
         expect(task.kind).toBe("herald");
@@ -98,10 +99,10 @@ describe("HearthRepo createTask kind", () => {
 });
 
 describe("HearthRepo claimNextTask kind scoping", () => {
-  it("never returns a herald task", () => {
+  it("never returns a herald task", async () => {
     seed(db);
     const repo = makeRepo(db);
-    Effect.runSync(
+    await Effect.runPromise(
       Effect.gen(function* () {
         yield* repo.createTask(taskInput("ft-h", "herald"));
         yield* repo.createTask(taskInput("ft-b", "blacksmith"));
@@ -113,10 +114,10 @@ describe("HearthRepo claimNextTask kind scoping", () => {
     );
   });
 
-  it("returns null when only herald tasks are queued", () => {
+  it("returns null when only herald tasks are queued", async () => {
     seed(db);
     const repo = makeRepo(db);
-    Effect.runSync(
+    await Effect.runPromise(
       Effect.gen(function* () {
         yield* repo.createTask(taskInput("ft-h", "herald"));
         const claimed = yield* repo.claimNextTask("rt1", null);
@@ -127,10 +128,10 @@ describe("HearthRepo claimNextTask kind scoping", () => {
 });
 
 describe("HearthRepo claimHeraldTask", () => {
-  it("claims a queued herald task → running", () => {
+  it("claims a queued herald task → running", async () => {
     seed(db);
     const repo = makeRepo(db);
-    Effect.runSync(
+    await Effect.runPromise(
       Effect.gen(function* () {
         yield* repo.createTask(taskInput("ft-h", "herald"));
         const claimed = yield* repo.claimHeraldTask("ft-h");
@@ -140,10 +141,10 @@ describe("HearthRepo claimHeraldTask", () => {
     );
   });
 
-  it("refuses a blacksmith task", () => {
+  it("refuses a blacksmith task", async () => {
     seed(db);
     const repo = makeRepo(db);
-    Effect.runSync(
+    await Effect.runPromise(
       Effect.gen(function* () {
         yield* repo.createTask(taskInput("ft-b", "blacksmith"));
         const err = yield* repo.claimHeraldTask("ft-b").pipe(Effect.flip);
@@ -152,10 +153,10 @@ describe("HearthRepo claimHeraldTask", () => {
     );
   });
 
-  it("double claim fails on the second call", () => {
+  it("double claim fails on the second call", async () => {
     seed(db);
     const repo = makeRepo(db);
-    Effect.runSync(
+    await Effect.runPromise(
       Effect.gen(function* () {
         yield* repo.createTask(taskInput("ft-h", "herald"));
         yield* repo.claimHeraldTask("ft-h");
@@ -165,10 +166,10 @@ describe("HearthRepo claimHeraldTask", () => {
     );
   });
 
-  it("missing task fails", () => {
+  it("missing task fails", async () => {
     seed(db);
     const repo = makeRepo(db);
-    Effect.runSync(
+    await Effect.runPromise(
       Effect.gen(function* () {
         const err = yield* repo.claimHeraldTask("ghost").pipe(Effect.flip);
         expect(err._tag).toBe("ConstraintViolation");

@@ -1,7 +1,7 @@
 import { Effect } from "effect";
 import { ColumnRepo } from "../repos/column.repo";
 import { ProjectRepo } from "../repos/project.repo";
-import { DbError, RowNotFound, ConstraintViolation } from "../db/database";
+import { DbError, RowNotFound, ConstraintViolation } from "../db/db";
 import { ProjectNotFound, ColumnNotFound, HasChildren } from "../api/errors";
 import type { Column } from "../../shared/types";
 
