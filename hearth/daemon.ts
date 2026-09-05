@@ -741,12 +741,18 @@ function scheduleServeRespawn(runtimeId: string) {
 // The probe doubles as bind verification; a child that exits before ready
 // (port taken, broken binary) fails that candidate and the loop moves on.
 async function trySpawnServe(runtimeId: string, port: number, sandboxHome: string): Promise<ReturnType<typeof spawn> | null> {
-  const child = spawn("opencode", ["serve", "--port", String(port), "--hostname", "127.0.0.1"], {
-    cwd: process.cwd(),
-    env: buildChildEnv(process.env, process.cwd(), sandboxHome) as NodeJS.ProcessEnv,
-    detached: true,
-    stdio: "inherit",
-  });
+  let child: ReturnType<typeof spawn>;
+  try {
+    child = spawn("opencode", ["serve", "--port", String(port), "--hostname", "127.0.0.1"], {
+      cwd: process.cwd(),
+      env: buildChildEnv(process.env, process.cwd(), sandboxHome) as NodeJS.ProcessEnv,
+      detached: true,
+      stdio: "inherit",
+    });
+  } catch (e) {
+    serveState.lastError = `spawn opencode serve: ${(e as Error).message}`;
+    return null;
+  }
   let gone = false;
   child.once("close", () => { gone = true; });
   child.once("error", (e) => {
