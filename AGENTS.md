@@ -139,9 +139,20 @@ These rules are non-negotiable and apply to every agent working on Lexa:
 
 ```bash
 tsc --noEmit                    # must pass at every phase gate
-vitest run                      # shared/ pure modules (markdown, positions)
 bun run dev                     # local smoke testing (vite + server)
 ```
+
+Lane-scoped tests for iteration (pick your lane — `test`/`test:full` stay for pre-merge):
+
+| Lane | Command | Scope |
+|---|---|---|
+| shared/pure | `bun run test:shared` | `shared/` (~150 tests, fastest) |
+| backend | `bun run test:be` | `shared/` + `server/` incl. `server/api` |
+| frontend | `bun run test:fe` | `shared/` + `app/` |
+| cli | `bun run test:cli` | `cli/src/` |
+| hearth | `bun run test:hearth` | `hearth/` + `shared/hearth-log` + `server/*hearth*` |
+
+Full suite (`bun run test` / `test:full`) + `check:invariants` run only at the final gate / CI (PR runs `test:critical`, main runs `test:full` — see `.github/workflows/ci.yml`).
 
 Acceptance checks live in `docs/GITHUB_SETUP.md` (sync round-trip) — run them and paste the output.
 

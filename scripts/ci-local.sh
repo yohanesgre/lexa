@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ci-local — local mirror of .github/workflows/ci.yml
-# Usage: bun run ci:local  |  bash scripts/ci-local.sh [--critical]  |  CRITICAL=1 bash scripts/ci-local.sh
+# Usage: bun run ci:local  |  bash scripts/ci-local.sh [--critical] [--lane=shared|be|fe|cli|hearth]  |  CRITICAL=1 bash scripts/ci-local.sh
 # Env: LXK_SKIP_PREPARE=1 is set inside (matches CI). CRITICAL=1 runs test:critical only.
 # Missing optional tools (docker, gitleaks) warn and skip.
 # Wireframes private submodule: skips gracefully if absent.
@@ -9,11 +9,17 @@ set -euo pipefail
 export LXK_SKIP_PREPARE=1
 
 CRITICAL="${CRITICAL:-0}"
+LANE=""
 for arg in "$@"; do
   case "$arg" in
     --critical) CRITICAL=1 ;;
+    --lane=*) LANE="${arg#--lane=}" ;;
   esac
 done
+case "$LANE" in
+  ""|shared|be|fe|cli|hearth) ;;
+  *) echo "unknown --lane=$LANE (want shared|be|fe|cli|hearth)"; exit 1 ;;
+esac
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
@@ -56,8 +62,10 @@ section "typecheck"
 if bun run typecheck; then ok "typecheck"; else fail "typecheck"; fi
 
 # ── Tests ─────────────────────────────────────────────────────────────
-if [ "$CRITICAL" = "1" ]; then section "tests (critical)"; else section "tests (full)"; fi
-if [ "$CRITICAL" = "1" ]; then
+if [ -n "$LANE" ]; then section "tests (lane: $LANE)"; elif [ "$CRITICAL" = "1" ]; then section "tests (critical)"; else section "tests (full)"; fi
+if [ -n "$LANE" ]; then
+  if bun run "test:$LANE"; then ok "tests (lane: $LANE)"; else fail "tests (lane: $LANE)"; fi
+elif [ "$CRITICAL" = "1" ]; then
   if bun run test:critical; then ok "tests (critical)"; else fail "tests (critical)"; fi
 else
   if bun run test; then ok "tests"; else fail "tests"; fi
