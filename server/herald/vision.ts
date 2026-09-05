@@ -1,7 +1,7 @@
 import { toolDefinition } from "@tanstack/ai";
 import { z } from "zod";
 import type { ProviderConfig } from "./provider";
-import { normalizeBaseUrl } from "./provider";
+import { normalizeBaseUrl, OPENCODE_SESSION_HEADER, resolveOpencodeSessionId } from "./provider";
 
 export type VisionMode = "inline" | "delegate" | "none";
 
@@ -33,7 +33,11 @@ async function analyzeOpenAiCompatible(deps: AnalyzeDeps, prompt: string, mimeTy
   const base = normalizeBaseUrl(deps.config.baseUrl, "openai_compatible").replace(/\/+$/, "");
   const res = await deps.fetchImpl(`${base}/chat/completions`, {
     method: "POST",
-    headers: { "content-type": "application/json", authorization: `Bearer ${deps.config.apiKey}` },
+    headers: {
+      "content-type": "application/json",
+      authorization: `Bearer ${deps.config.apiKey}`,
+      [OPENCODE_SESSION_HEADER]: resolveOpencodeSessionId(deps.config.sessionId, deps.config),
+    },
     body: JSON.stringify({
       model: deps.config.model,
       max_tokens: VISION_MAX_TOKENS,
@@ -64,6 +68,7 @@ async function analyzeAnthropicCompatible(deps: AnalyzeDeps, prompt: string, mim
       "content-type": "application/json",
       "x-api-key": deps.config.apiKey,
       "anthropic-version": "2023-06-01",
+      [OPENCODE_SESSION_HEADER]: resolveOpencodeSessionId(deps.config.sessionId, deps.config),
     },
     body: JSON.stringify({
       model: deps.config.model,

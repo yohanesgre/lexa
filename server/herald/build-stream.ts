@@ -83,12 +83,12 @@ export interface StreamRunContext {
   gatewayStream?: ((input: unknown) => AsyncIterable<StreamChunk>) | undefined;
 }
 
-async function summarizeOlder(config: import("./provider").ProviderConfig, older: unknown[]): Promise<string> {
+async function summarizeOlder(config: import("./provider").ProviderConfig, older: unknown[], sessionId: string): Promise<string> {
   const { completeText } = await import("./provider");
   return completeText(config, {
     systemPrompts: [{ content: "You condense working conversations. Reply with a terse bullet summary of decisions, constraints and open threads only." }],
     messages: [{ role: "user", content: `Summarize these earlier conversation turns for continuity:\n\n${JSON.stringify(older).slice(0, 60000)}` }],
-  });
+  }, { sessionId });
 }
 
 export function buildStream(ctx: StreamRunContext): ReadableStream<StreamFrame> {
@@ -154,7 +154,7 @@ export function buildStream(ctx: StreamRunContext): ReadableStream<StreamFrame> 
           const pendingCalls = new Map<string, { name: string; args: string }>();
           const toolNamesById = new Map<string, string>();
           const getStream = (tools: ReadonlyArray<unknown> | undefined): AsyncIterable<StreamChunk> =>
-            ctx.gatewayStream ? ctx.gatewayStream({ systemPrompts: ctx.systemPrompts, messages: prepared, tools, abortController: abort, ...(ctx.modelOptions !== undefined ? { modelOptions: ctx.modelOptions } : {}) }) : streamChat({ config: ctx.config, systemPrompts: ctx.systemPrompts, messages: prepared, tools, abortController: abort, ...(ctx.modelOptions !== undefined ? { modelOptions: ctx.modelOptions } : {}) });
+            ctx.gatewayStream ? ctx.gatewayStream({ systemPrompts: ctx.systemPrompts, messages: prepared, tools, abortController: abort, sessionId: ctx.threadId, ...(ctx.modelOptions !== undefined ? { modelOptions: ctx.modelOptions } : {}) }) : streamChat({ config: ctx.config, systemPrompts: ctx.systemPrompts, messages: prepared, tools, abortController: abort, sessionId: ctx.threadId, ...(ctx.modelOptions !== undefined ? { modelOptions: ctx.modelOptions } : {}) });
           const consume = async (tools: ReadonlyArray<unknown> | undefined) => {
             const chunks = getStream(tools);
             const iterator = chunks[Symbol.asyncIterator]();
@@ -412,7 +412,7 @@ export function buildStream(ctx: StreamRunContext): ReadableStream<StreamFrame> 
             const olderCandidates = finalMessages.slice(0, finalMessages.length - 8);
             const older = olderCandidates.filter((m) => pendingBatchIdOf((m as { pendingBatch?: unknown } | null)?.pendingBatch) === null);
             if (older.length > 0 && older.length === olderCandidates.length) {
-              const condensed = await summarizeOlder(ctx.config, older).catch(() => null);
+              const condensed = await summarizeOlder(ctx.config, older, ctx.threadId).catch(() => null);
               if (condensed !== null) { summarizedCount += older.length; summary = condensed; kept = finalMessages.slice(-8); }
             }
           }

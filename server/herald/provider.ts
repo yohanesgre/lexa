@@ -138,12 +138,40 @@ export function inferModelKind(modelId: string): ProviderKind {
   return "openai_compatible";
 }
 
+export const OPENCODE_SESSION_HEADER = "x-opencode-session" as const;
+
+export function opencodeSessionIdFor(conversationId: string): string {
+  const trimmed = conversationId.trim();
+  return trimmed.startsWith("lexa-herald-") ? trimmed : `lexa-herald-${trimmed}`;
+}
+
+function fallbackSessionId(config: Pick<ProviderConfig, "providerId" | "model">): string {
+  return `lexa-herald-${config.providerId ?? config.model}`;
+}
+
+export function resolveOpencodeSessionId(
+  sessionId: string | undefined,
+  fallback: Pick<ProviderConfig, "providerId" | "model">,
+): string {
+  const trimmed = sessionId?.trim();
+  if (trimmed) return trimmed.startsWith("lexa-herald-") ? trimmed : `lexa-herald-${trimmed}`;
+  return fallbackSessionId(fallback);
+}
+
+function opencodeSessionHeaders(
+  sessionId: string | undefined,
+  fallback: Pick<ProviderConfig, "providerId" | "model">,
+): Record<string, string> {
+  return { [OPENCODE_SESSION_HEADER]: resolveOpencodeSessionId(sessionId, fallback) };
+}
+
 export interface ProviderConfig {
   kind: ProviderKind;
   baseUrl: string;
   apiKey: string;
   model: string;
   providerId?: string;
+  sessionId?: string;
 }
 
 export function configForModel(
@@ -203,15 +231,18 @@ export function buildAdapter(config: ProviderConfig): AnyTextAdapter {
   if (kind === "openai_compatible") {
     return createOpenaiChatCompletions(config.model as OpenAiChatCompletionsModel, config.apiKey, {
       baseURL: normalizeBaseUrl(config.baseUrl, kind),
+      defaultHeaders: opencodeSessionHeaders(config.sessionId, config),
     });
   }
   if (kind === "openai_responses") {
     return createOpenaiChat(config.model as OpenAiResponsesModel, config.apiKey, {
       baseURL: normalizeBaseUrl(config.baseUrl, kind),
+      defaultHeaders: opencodeSessionHeaders(config.sessionId, config),
     });
   }
   return createAnthropicChat(config.model as AnthropicChatModel, config.apiKey, {
     baseURL: normalizeBaseUrl(config.baseUrl, kind),
+    defaultHeaders: opencodeSessionHeaders(config.sessionId, config),
   });
 }
 
@@ -231,6 +262,7 @@ export interface StreamChatInput {
   messages: ModelMessage[];
   tools?: ReadonlyArray<unknown> | undefined;
   abortController?: AbortController | undefined;
+  sessionId?: string | undefined;
   // Merged verbatim into the provider request body by the adapter's
   // mapOptionsToRequest (e.g. { reasoning_effort: "high" }).
   modelOptions?: Record<string, unknown> | undefined;
@@ -247,7 +279,9 @@ export function streamChat(input: StreamChatInput): AsyncIterable<StreamChunk> {
     filteredMessages = [{ role: "user", content: "Generate based on document context." } as ModelMessage];
   }
   return chat({
-    adapter: buildAdapter(input.config),
+    adapter: buildAdapter(
+      input.sessionId !== undefined ? { ...input.config, sessionId: input.sessionId } : input.config,
+    ),
     systemPrompts: toSystemPrompts(input.config.kind, input.systemPrompts) as never,
     messages: filteredMessages,
     tools: input.tools as never,
@@ -261,7 +295,7 @@ export function streamChat(input: StreamChatInput): AsyncIterable<StreamChunk> {
 export async function completeText(
   config: ProviderConfig,
   input: { systemPrompts?: CacheablePrompt[]; messages: ModelMessage[] },
-  opts?: { signal?: AbortSignal; abortController?: AbortController }
+  opts?: { signal?: AbortSignal; abortController?: AbortController; sessionId?: string },
 ): Promise<string> {
   const debug = debugOption();
   let abortController = opts?.abortController;
@@ -272,7 +306,9 @@ export async function completeText(
     else sig.addEventListener("abort", () => abortController!.abort((sig as AbortSignal & { reason?: unknown }).reason), { once: true });
   }
   return (await chat({
-    adapter: buildAdapter(config),
+    adapter: buildAdapter(
+      opts?.sessionId !== undefined ? { ...config, sessionId: opts.sessionId } : config,
+    ),
     systemPrompts: toSystemPrompts(config.kind, input.systemPrompts ?? []) as never,
     messages: input.messages,
     stream: false,
@@ -294,15 +330,17 @@ const ANTHROPIC_VERSION = "2023-06-01";
 // normalized per kind.
 export async function listModels(
   config: ProviderConfig,
-  fetchImpl: FetchLike = fetch
+  fetchImpl: FetchLike = fetch,
+  opts?: { sessionId?: string },
 ): Promise<{ models: { id: string }[] }> {
   const kind = normalizeProviderKind(config.kind);
   const base = normalizeBaseUrl(config.baseUrl, kind).replace(/\/+$/, "");
   const isOpenAiWire = kind === "openai_compatible" || kind === "openai_responses";
   const path = isOpenAiWire ? "/models" : "/v1/models";
+  const sessionHeaders = opencodeSessionHeaders(opts?.sessionId ?? config.sessionId, config);
   const headers: Record<string, string> = isOpenAiWire
-    ? { authorization: `Bearer ${config.apiKey}` }
-    : { "x-api-key": config.apiKey, "anthropic-version": ANTHROPIC_VERSION };
+    ? { authorization: `Bearer ${config.apiKey}`, ...sessionHeaders }
+    : { "x-api-key": config.apiKey, "anthropic-version": ANTHROPIC_VERSION, ...sessionHeaders };
   heraldLog("DEBUG", "herald-provider listModels request", { kind, base, path, model: config.model, providerId: config.providerId ?? null, apiKeyMask: maskApiKey(config.apiKey) });
   let res: Response;
   try {
@@ -814,12 +852,16 @@ export function translateRunError(e: unknown, config?: ProviderConfig): Provider
 // Minimal completion ping against submitted (unsaved) values. Never persists.
 export async function testConnection(
   config: ProviderConfig,
-  opts?: { signal?: AbortSignal }
+  opts?: { signal?: AbortSignal; sessionId?: string },
 ): Promise<{ ok: true; latencyMs: number }> {
   const startedAt = Date.now();
   const signal = opts?.signal ?? AbortSignal.timeout(30_000);
   try {
-    await completeText(config, { messages: [{ role: "user", content: "Reply with the single word: ok" }] }, { signal });
+    await completeText(
+      config,
+      { messages: [{ role: "user", content: "Reply with the single word: ok" }] },
+      { signal, ...(opts?.sessionId !== undefined ? { sessionId: opts.sessionId } : {}) },
+    );
     return { ok: true, latencyMs: Date.now() - startedAt };
   } catch (e) {
     throw translateRunError(e, config);

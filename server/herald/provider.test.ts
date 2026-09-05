@@ -5,6 +5,9 @@ import {
   normalizeBaseUrl,
   normalizeProviderKind,
   inferModelKind,
+  opencodeSessionIdFor,
+  resolveOpencodeSessionId,
+  OPENCODE_SESSION_HEADER,
   translateRunError,
   extractRetryAfter,
   extractUpstreamBody,
@@ -200,6 +203,38 @@ describe("buildAdapter", () => {
     expect(buildAdapter(openaiConfig())).toBeDefined();
     expect(buildAdapter(anthropicConfig())).toBeDefined();
   });
+
+  it("attaches x-opencode-session defaultHeaders on every adapter", () => {
+    for (const cfg of [openaiConfig(), anthropicConfig(), responsesConfig()]) {
+      const adapter = buildAdapter({ ...cfg, sessionId: "thread-abc" });
+      const client = (adapter as unknown as { client: Record<string, unknown> }).client;
+      const options = (client as { _options?: Record<string, unknown> })._options ?? client;
+      const headers = (options as { defaultHeaders?: Record<string, string> }).defaultHeaders;
+      expect(headers?.[OPENCODE_SESSION_HEADER]).toBe("lexa-herald-thread-abc");
+    }
+  });
+
+  it("falls back to a stable per-model session id when none is given", () => {
+    const adapter = buildAdapter(openaiConfig());
+    const client = (adapter as unknown as { client: Record<string, unknown> }).client;
+    const options = (client as { _options?: Record<string, unknown> })._options ?? client;
+    const headers = (options as { defaultHeaders?: Record<string, string> }).defaultHeaders;
+    expect(headers?.[OPENCODE_SESSION_HEADER]).toBe("lexa-herald-gpt-4o");
+  });
+});
+
+describe("opencode session id", () => {
+  it("prefixes bare conversation ids with lexa-herald-", () => {
+    expect(opencodeSessionIdFor("thread-abc")).toBe("lexa-herald-thread-abc");
+    expect(opencodeSessionIdFor("lexa-herald-thread-abc")).toBe("lexa-herald-thread-abc");
+  });
+
+  it("resolveOpencodeSessionId prefers the conversation id, falls back per model", () => {
+    expect(resolveOpencodeSessionId("chat-1", { model: "m" })).toBe("lexa-herald-chat-1");
+    expect(resolveOpencodeSessionId(undefined, { model: "m" })).toBe("lexa-herald-m");
+    expect(resolveOpencodeSessionId(undefined, { providerId: "p1", model: "m" })).toBe("lexa-herald-p1");
+    expect(resolveOpencodeSessionId("  ", { model: "m" })).toBe("lexa-herald-m");
+  });
 });
 
 function fakeFetch(status: number, body: unknown, log: { url?: string; headers?: Record<string, string> } = {}): FetchLike {
@@ -268,6 +303,18 @@ describe("listModels", () => {
     const log: { url?: string } = {};
     await listModels(responsesConfig("https://api.example.com/v1"), fakeFetch(200, { data: [] }, log));
     expect(log.url).toBe("https://api.example.com/v1/models");
+  });
+
+  it("sends x-opencode-session on the openai wire (fallback per model)", async () => {
+    const log: { url?: string; headers?: Record<string, string> } = {};
+    await listModels(openaiConfig(), fakeFetch(200, { data: [] }, log));
+    expect(log.headers?.[OPENCODE_SESSION_HEADER]).toBe("lexa-herald-gpt-4o");
+  });
+
+  it("sends x-opencode-session on the anthropic wire (explicit session id)", async () => {
+    const log: { url?: string; headers?: Record<string, string> } = {};
+    await listModels(anthropicConfig(), fakeFetch(200, { models: [] }, log), { sessionId: "chat-1" });
+    expect(log.headers?.[OPENCODE_SESSION_HEADER]).toBe("lexa-herald-chat-1");
   });
 });
 
