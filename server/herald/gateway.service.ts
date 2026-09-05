@@ -82,6 +82,7 @@ export interface GatewayStreamInput {
   abortController?: AbortController | undefined;
   modelOptions?: Record<string, unknown> | undefined;
   fallbackConfigs?: ProviderConfig[] | undefined;
+  sessionId?: string | undefined;
 }
 
 function isRetriable(e: unknown): boolean {
@@ -402,7 +403,7 @@ export class HeraldGateway extends Effect.Service<HeraldGateway>()("Lexa/HeraldG
               continue;
             }
             try {
-              void buildAdapter(cfg);
+              void buildAdapter(input.sessionId !== undefined ? { ...cfg, sessionId: input.sessionId } : cfg);
               gatewayLog("DEBUG", "herald stream dispatch config snapshot", { projectId: input.projectId, attempt: i + 1, total: attemptConfigs.length, providerId: cfg.providerId ?? null, model: cfg.model, kind: normalizeProviderKind(cfg.kind), baseUrl: safeBaseUrl(cfg.baseUrl, cfg.kind), apiKeyMask: maskApiKeyShort(cfg.apiKey) });
               gatewayLog("INFO", `herald stream dispatch attempt ${i + 1}/${attemptConfigs.length}${singleRetryLabel}`, { attempt: i + 1, total: attemptConfigs.length, providerId: cfg.providerId ?? null, model: cfg.model, kind: normalizeProviderKind(cfg.kind), baseUrl: safeBaseUrl(cfg.baseUrl, cfg.kind), singleRetry: isSingleRetry && i === 1 });
               const iterable = providerStreamChat({
@@ -412,6 +413,7 @@ export class HeraldGateway extends Effect.Service<HeraldGateway>()("Lexa/HeraldG
                 tools: input.tools,
                 abortController: input.abortController,
                 modelOptions: input.modelOptions,
+                ...(input.sessionId !== undefined ? { sessionId: input.sessionId } : {}),
               });
               let usageIn = 0; let usageOut = 0;
               let generatedText = "";
@@ -554,7 +556,7 @@ export class HeraldGateway extends Effect.Service<HeraldGateway>()("Lexa/HeraldG
     const testConnection = (
       projectId: string,
       override?: { providerId?: string | null; modelId?: string | null; fallbackModelIds?: string[]; kind?: string; baseUrl?: string; model?: string; apiKey?: string },
-      opts?: { signal?: AbortSignal }
+      opts?: { signal?: AbortSignal; sessionId?: string }
     ): Effect.Effect<{ ok: true; latencyMs: number }, ProviderNotConfigured | HeraldGenerationFailed | import("../api/errors").ProviderAuthFailed | import("../api/errors").ProviderUnreachable> =>
       Effect.gen(function* () {
         if (override?.kind && override?.baseUrl && override?.model) {
@@ -563,6 +565,7 @@ export class HeraldGateway extends Effect.Service<HeraldGateway>()("Lexa/HeraldG
             baseUrl: override.baseUrl,
             model: override.model,
             apiKey: override.apiKey ?? "",
+            ...(opts?.sessionId !== undefined ? { sessionId: opts.sessionId } : {}),
           };
           yield* Effect.sync(() => gatewayLog("DEBUG", "herald test direct config", { projectId, providerId: cfg.providerId ?? null, model: cfg.model, kind: normalizeProviderKind(cfg.kind), baseUrl: safeBaseUrl(cfg.baseUrl, cfg.kind), apiKeyMask: maskApiKeyShort(cfg.apiKey) }));
           yield* Effect.sync(() => gatewayLog("INFO", `herald test direct start`, { projectId, providerId: cfg.providerId ?? null, model: cfg.model, kind: normalizeProviderKind(cfg.kind), baseUrl: safeBaseUrl(cfg.baseUrl, cfg.kind), apiKeyMask: maskApiKeyShort(cfg.apiKey) }));

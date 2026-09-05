@@ -2907,7 +2907,7 @@ const heraldLive = HttpApiBuilder.group(LexaApi, "herald", (handlers) =>
         yield* requireAdmin;
         const config = yield* resolveProviderConfig(req.path.projectId, req.payload);
         return yield* Effect.tryPromise({
-          try: () => listModels(config),
+          try: () => listModels(config, fetch, { sessionId: `models-${req.path.projectId}` }),
           catch: (e) => e as ProviderAuthFailed | ProviderUnreachable,
         });
       }))
@@ -4240,7 +4240,7 @@ const adminHeraldLive = HttpApiBuilder.group(LexaApi, "adminHerald", (handlers) 
         const firstEnabled = (models as Array<{ kind: string; enabled: boolean; modelId: string }>).find((m) => m.enabled);
         const kind: ProviderConfig["kind"] = normalizeProviderKind(firstEnabled?.kind ?? (models[0] as { kind?: string } | undefined)?.kind ?? "openai_compatible");
         const model = firstEnabled?.modelId ?? (models[0] as { modelId?: string } | undefined)?.modelId ?? "test";
-        const cfg: ProviderConfig = { kind, baseUrl: prov.base_url, apiKey: prov.api_key, model };
+        const cfg: ProviderConfig = { kind, baseUrl: prov.base_url, apiKey: prov.api_key, model, sessionId: `provider-test-${req.path.id}` };
         const start = Date.now();
         yield* Effect.tryPromise({ try: () => listModels(cfg), catch: (e) => e as ProviderAuthFailed | ProviderUnreachable });
         return { ok: true, latencyMs: Date.now() - start };
@@ -4258,7 +4258,7 @@ const adminHeraldLive = HttpApiBuilder.group(LexaApi, "adminHerald", (handlers) 
         const existingModels = existing as Array<{ modelId: string; enabled: boolean }>;
         const firstEnabledModel = existingModels.find((m) => m.enabled)?.modelId;
         const model = firstEnabledModel ?? existingModels[0]?.modelId ?? "test";
-        const cfg: ProviderConfig = { kind, baseUrl: prov.base_url, apiKey: prov.api_key, model };
+        const cfg: ProviderConfig = { kind, baseUrl: prov.base_url, apiKey: prov.api_key, model, sessionId: `provider-models-${req.path.id}` };
         const catalog = yield* Effect.tryPromise({
           try: () => listModels(cfg),
           catch: (e) => e as ProviderAuthFailed | ProviderUnreachable,
