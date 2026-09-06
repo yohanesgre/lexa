@@ -7,7 +7,7 @@
  *   bun run setup --prod --admin-email ops@x.com --api-key lxk_... --yes
  *
  * Prompts for the admin email (LXK_ADMIN_EMAILS) + the superadmin password,
- * ensures an API key (LXK_API_KEY / VITE_LXK_API_KEY) exists in the flavor
+ * ensures an API key (LXK_API_KEY) exists in the flavor
  * env file, runs migrations, creates the superadmin account (Better Auth
  * credential), and (dev only) offers sample data.
  *
@@ -92,10 +92,9 @@ async function main() {
 
   // 1. Admin email
   console.log("\n── Admin email ──");
-  console.log("  The first person to log in with this email (via Cloudflare");
-  console.log("  Access / Google OAuth) becomes an admin. For staging/prod,");
-  console.log("  it must be a tester in your Google OAuth consent screen and");
-  console.log("  within the Access allowed-domain policy.");
+  console.log("  The superadmin account is created for this email (in-app");
+  console.log("  email/password login, no external identity provider). Members join");
+  console.log("  later via workspace invite links issued by a superadmin.");
   const currentAdmins = (env.LXK_ADMIN_EMAILS || "").split(",").map((s) => s.trim()).filter(Boolean);
   const adminArg = flagValue("--admin-email");
   let adminInput = adminArg || "";
@@ -150,7 +149,6 @@ async function main() {
   }
   if (apiKey) {
     env.LXK_API_KEY = apiKey;
-    env.VITE_LXK_API_KEY = apiKey;
   }
 
   // 3. Persist env file — LXK_ENV is always explicit so the seed gate works.
@@ -269,8 +267,8 @@ async function main() {
     console.log("  Deploy:             lexa-cli deploy <domain> " + flavor);
     console.log("  (or docker compose --env-file " + envFile + " up -d --build)");
     console.log("  Health:             curl https://<host>/api/health");
-    console.log("  First login:        add the admin email as a tester in Google Cloud →");
-    console.log("                      OAuth consent screen, and to the CF Access allow policy.");
+    console.log("  First login:        open https://<host>/setup once to create the");
+    console.log("                      superadmin account, then onboard members via invite links.");
   }
   console.log("");
 }
