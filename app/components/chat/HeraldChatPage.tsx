@@ -22,6 +22,7 @@ import { copyToClipboard } from "../../lib/clipboard";
 import { isNarrowViewport, hasMatchMedia, matchMedia } from "../../lib/viewport";
 import { useMentionTokens } from "../../lib/useMentionTokens";
 import { renderTokenized } from "../../lib/tokenizeTranscript";
+import { withKeys } from "../../lib/withKeys";
 import { MarkdownContent, highlightCode } from "../../lib/markdownToReact";
 import { ThreadsSidebar } from "./ThreadsSidebar";
 import { SkillPicker } from "../hearth/herald/SkillPicker";
@@ -303,14 +304,19 @@ const GUIDANCE_BODY: Record<string, string> = {
 // render as a highlighted mono block with a language label + copy button.
 export function splitFences(text: string): { fenced: boolean; body: string; lang?: string }[] {
   const parts = text.split("```");
-  return parts
-    .map((body, i) => {
-      if (i % 2 === 0) return { fenced: false, body };
-      const m = body.match(/^([a-zA-Z0-9_-]*)\n/);
-      const lang = m && m[1] ? m[1] : undefined;
-      return { fenced: true, body: m ? body.slice(m[0].length) : body, ...(lang ? { lang } : {}) };
-    })
-    .filter((seg) => seg.body.length > 0);
+  const out: { fenced: boolean; body: string; lang?: string }[] = [];
+  for (let i = 0; i < parts.length; i++) {
+    const body = parts[i]!;
+    if (i % 2 === 0) {
+      if (body.length > 0) out.push({ fenced: false, body });
+      continue;
+    }
+    const m = body.match(/^([a-zA-Z0-9_-]*)\n/);
+    const lang = m && m[1] ? m[1] : undefined;
+    const fencedBody = m ? body.slice(m[0].length) : body;
+    if (fencedBody.length > 0) out.push({ fenced: true, body: fencedBody, ...(lang ? { lang } : {}) });
+  }
+  return out;
 }
 
 function hhmm(ts?: string): string | null {
@@ -934,63 +940,82 @@ export function HeraldChatPage({ slug, thread }: { slug: string; thread?: string
   // audit trail, then reset the stream session so the resumed turn starts a
   // FRESH assistant entry.
   const frozeBatchRef = useRef<string | null>(null);
-  useEffect(() => {
-    if (stream.status !== "suspended") return;
-    const batchId = stream.suspendedBatchId ?? "";
-    if (!batchId || frozeBatchRef.current === batchId) return;
-    frozeBatchRef.current = batchId;
-    const chips: ApprovalChip[] = stream.pending
-      .filter((p) => p.batchId === batchId)
-      .map((p) => ({ ...p, state: "pending" as const }));
-    const activity: ActivityView | undefined =
-      stream.reasoningText || stream.tools.length > 0 || stream.reasoningMs !== null
-        ? { items: stream.items, tools: stream.tools, reasoningMs: stream.reasoningMs }
-        : undefined;
-    setTurns((prev) => [
-      ...(prev ?? []),
-      {
-        role: "assistant",
-        text: stream.text,
-        imageCount: 0,
-        rawIndex: -1,
-        ...(activity ? { activity } : {}),
-        ...(chips.length > 0 ? { batch: { batchId, chips } } : { suspendedBatchId: batchId }),
-      },
-    ]);
-    stream.reset();
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- freeze once per suspended batch; snapshot fields are read at flip time
-  }, [stream.status]);
-
   const frozeErrorRef = useRef<string | null>(null);
+  const resumedBatchesRef = useRef<Set<string>>(new Set());
+  // One settling effect (not a chain): freezes the terminal stream frame
+  // (suspension or error) into the transcript view, then re-opens any frozen
+  // batch whose chips have all reached a terminal state. The freeze setState
+  // and the resume pass live in the SAME effect so freezing a frame never
+  // spawns a downstream effect — the refs make each branch idempotent.
   useEffect(() => {
-    if (stream.status !== "error" || !stream.hasIngress) return;
-    const key = `${stream.error?.code ?? "HERALD_GENERATION_FAILED"}:${stream.text}:${stream.error?.message ?? ""}`;
-    if (frozeErrorRef.current === key) return;
-    frozeErrorRef.current = key;
-    const activity: ActivityView | undefined =
-      stream.items.length > 0 || stream.tools.length > 0 || stream.reasoningMs !== null || stream.reasoningText
-        ? { items: stream.items, tools: stream.tools, reasoningMs: stream.reasoningMs }
-        : undefined;
-    setTurns((prev) => {
-      const arr = prev ?? [];
-      const last = arr[arr.length - 1];
-      if (last?.role === "assistant" && last.error?.code === (stream.error?.code ?? "HERALD_GENERATION_FAILED")) return arr;
-      if (last?.role === "assistant" && last.error) {
-        const errorVal = stream.error ?? last.error;
-        return arr.map((t, i) => (i === arr.length - 1 ? { ...t, text: stream.text || t.text, error: errorVal, ...(activity ? { activity } : {}) } : t));
+    if (stream.status === "suspended") {
+      const batchId = stream.suspendedBatchId ?? "";
+      if (batchId && frozeBatchRef.current !== batchId) {
+        frozeBatchRef.current = batchId;
+        const chips: ApprovalChip[] = [];
+        for (const p of stream.pending) {
+          if (p.batchId === batchId) chips.push({ ...p, state: "pending" as const });
+        }
+        const activity: ActivityView | undefined =
+          stream.reasoningText || stream.tools.length > 0 || stream.reasoningMs !== null
+            ? { items: stream.items, tools: stream.tools, reasoningMs: stream.reasoningMs }
+            : undefined;
+        setTurns((prev) => [
+          ...(prev ?? []),
+          {
+            role: "assistant",
+            text: stream.text,
+            imageCount: 0,
+            rawIndex: -1,
+            ...(activity ? { activity } : {}),
+            ...(chips.length > 0 ? { batch: { batchId, chips } } : { suspendedBatchId: batchId }),
+          },
+        ]);
+        stream.reset();
       }
-      const ephemeral: ChatTurn = {
-        role: "assistant",
-        text: stream.text,
-        imageCount: 0,
-        rawIndex: -1,
-        error: stream.error ?? { code: "HERALD_GENERATION_FAILED", message: "stream stalled — no response from provider" },
-        ...(activity ? { activity } : {}),
-      };
-      return [...arr, ephemeral];
-    });
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- freeze once per error snapshot; fields read at flip time
-  }, [stream.status, stream.hasIngress, stream.text, stream.error, stream.items, stream.tools, stream.reasoningMs, stream.reasoningText]);
+    }
+    if (stream.status === "error" && stream.hasIngress) {
+      const key = `${stream.error?.code ?? "HERALD_GENERATION_FAILED"}:${stream.text}:${stream.error?.message ?? ""}`;
+      if (frozeErrorRef.current !== key) {
+        frozeErrorRef.current = key;
+        const activity: ActivityView | undefined =
+          stream.items.length > 0 || stream.tools.length > 0 || stream.reasoningMs !== null || stream.reasoningText
+            ? { items: stream.items, tools: stream.tools, reasoningMs: stream.reasoningMs }
+            : undefined;
+        setTurns((prev) => {
+          const arr = prev ?? [];
+          const last = arr[arr.length - 1];
+          if (last?.role === "assistant" && last.error?.code === (stream.error?.code ?? "HERALD_GENERATION_FAILED")) return arr;
+          if (last?.role === "assistant" && last.error) {
+            const errorVal = stream.error ?? last.error;
+            return arr.map((t, i) => (i === arr.length - 1 ? { ...t, text: stream.text || t.text, error: errorVal, ...(activity ? { activity } : {}) } : t));
+          }
+          const ephemeral: ChatTurn = {
+            role: "assistant",
+            text: stream.text,
+            imageCount: 0,
+            rawIndex: -1,
+            error: stream.error ?? { code: "HERALD_GENERATION_FAILED", message: "stream stalled — no response from provider" },
+            ...(activity ? { activity } : {}),
+          };
+          return [...arr, ephemeral];
+        });
+      }
+    }
+    // When EVERY chip of a frozen batch reaches a terminal state the client
+    // re-opens the stream for that batch — Herald continues with a fresh entry.
+    if (!chatId || streaming) return;
+    for (let i = (turns ?? []).length - 1; i >= 0; i--) {
+      const b = turns?.[i]!.batch;
+      if (!b || resumedBatchesRef.current.has(b.batchId)) continue;
+      if (b.chips.some((c) => c.state === "pending")) return;
+      resumedBatchesRef.current.add(b.batchId);
+      ingressInsertedRef.current.delete(chatId);
+      stream.send(`/api/herald/chat/${chatId}/resume`, {});
+      return;
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- freeze once per terminal frame; snapshot fields are read at flip time
+  }, [stream.status, stream.suspendedBatchId, stream.pending, stream.text, stream.error, stream.items, stream.tools, stream.reasoningMs, stream.reasoningText, stream.hasIngress, turns, chatId, streaming]);
 
   useEffect(() => {
     frozeErrorRef.current = null;
@@ -1040,7 +1065,10 @@ export function HeraldChatPage({ slug, thread }: { slug: string; thread?: string
       setBatchBusy(true);
       void (async () => {
         try {
-          for (const chip of targets) await handleDecide(chip, "approve");
+          await targets.reduce(
+            (chain, chip) => chain.then(() => handleDecide(chip, "approve")),
+            Promise.resolve() as Promise<void>
+          );
         } finally {
           setBatchBusy(false);
         }
@@ -1048,23 +1076,6 @@ export function HeraldChatPage({ slug, thread }: { slug: string; thread?: string
     },
     [handleDecide]
   );
-
-  // When EVERY chip of a frozen batch reaches a terminal state the client
-  // re-opens the stream for that batch — Herald continues with a fresh entry.
-  const resumedBatchesRef = useRef<Set<string>>(new Set());
-  useEffect(() => {
-    if (!chatId || streaming) return;
-    for (let i = (turns ?? []).length - 1; i >= 0; i--) {
-      const b = turns?.[i]!.batch;
-      if (!b || resumedBatchesRef.current.has(b.batchId)) continue;
-      if (b.chips.some((c) => c.state === "pending")) return;
-      resumedBatchesRef.current.add(b.batchId);
-      ingressInsertedRef.current.delete(chatId);
-      stream.send(`/api/herald/chat/${chatId}/resume`, {});
-      return;
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- send() is stable; guard fires on decision state changes
-  }, [turns, chatId, streaming, stream.status]);
 
   const [editingPos, setEditingPos] = useState<number | null>(null);
   const [editDraft, setEditDraft] = useState("");
@@ -1458,9 +1469,9 @@ function AssistantBubble({
               done
             />
           )}
-          {segments.map((seg, i) =>
+          {withKeys(segments, (seg) => `${seg.fenced ? "f" : "t"}:${seg.lang ?? ""}:${seg.body.length}`).map(({ item: seg, key }) =>
             seg.fenced ? (
-              <div key={`${i}:fence`} className="herald-codeblock">
+              <div key={key} className="herald-codeblock">
                 <span className="herald-codeblock-chrome">
                   {seg.lang && <span className="herald-codeblock-lang">{seg.lang}</span>}
                   <CopyButton text={seg.body} label="Copy code" />
@@ -1471,7 +1482,7 @@ function AssistantBubble({
                 />
               </div>
             ) : (
-              <div key={`${i}:text`} className="bubble-md">
+              <div key={key} className="bubble-md">
                 <MarkdownContent md={seg.body} renderText={renderText} />
               </div>
             )

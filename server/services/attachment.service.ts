@@ -212,13 +212,23 @@ export class AttachmentService extends Effect.Service<AttachmentService>()("Lexa
     const listForTask = (taskId: string, projectId: string): Effect.Effect<Attachment[], DbError> =>
       Effect.gen(function* () {
         const rows = yield* attachmentRepo.findByTaskId(taskId);
-        return yield* Effect.all(rows.filter((r) => r.project_id === projectId).map(toAttachment));
+        const list: Attachment[] = [];
+        for (const row of rows) {
+          if (row.project_id !== projectId) continue;
+          list.push(yield* toAttachment(row));
+        }
+        return list;
       });
 
     const listForWikiPage = (wikiPageId: string, projectId: string): Effect.Effect<Attachment[], DbError> =>
       Effect.gen(function* () {
         const rows = yield* attachmentRepo.findByWikiPageId(wikiPageId);
-        return yield* Effect.all(rows.filter((r) => r.project_id === projectId).map(toAttachment));
+        const list: Attachment[] = [];
+        for (const row of rows) {
+          if (row.project_id !== projectId) continue;
+          list.push(yield* toAttachment(row));
+        }
+        return list;
       });
 
     return { upload, remove, serve, resolveShare, listForTask, listForWikiPage };

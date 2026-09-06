@@ -1,6 +1,7 @@
 import { Children, cloneElement, isValidElement, memo, useMemo, useRef, type ReactNode } from "react";
 import { marked, type Token, type Tokens } from "marked";
 import hljs from "highlight.js/lib/common";
+import { withKeys } from "./withKeys";
 
 // Assistant-transcript markdown → React elements. LLM output is UNTRUSTED,
 // so this never touches dangerouslySetInnerHTML EXCEPT for highlighted code:
@@ -37,8 +38,7 @@ function safeHref(href: unknown): string | null {
 const BLOCK_TAGS = new Set(["p", "h1", "h2", "h3", "h4"]);
 
 function renderInline(tokens: Token[] | undefined, opts: MarkdownRenderOptions): ReactNode[] {
-  return (tokens ?? []).map((t, i) => {
-    const k = `${i}:${t.type}`;
+  return withKeys(tokens ?? [], (t) => t.type).map(({ item: t, key: k }) => {
     switch (t.type) {
       case "text":
         return (
@@ -77,24 +77,24 @@ function renderInline(tokens: Token[] | undefined, opts: MarkdownRenderOptions):
   });
 }
 
-function listItem(item: Tokens.ListItem, opts: MarkdownRenderOptions, key: number): ReactNode {
+function listItem(item: Tokens.ListItem, opts: MarkdownRenderOptions, key: string): ReactNode {
   return (
     <li key={key}>
       {item.task && <input type="checkbox" disabled checked={item.checked === true} readOnly />}
-      {(item.tokens ?? []).map((t, i) =>
+      {withKeys(item.tokens ?? [], (t) => t.type).map(({ item: t, key: tk }) =>
         t.type === "text" ? (
-          <span key={`t${i}`}>
+          <span key={tk}>
             {"tokens" in t && t.tokens ? renderInline(t.tokens, opts) : (opts.renderText ? opts.renderText((t as Tokens.Text).text) : (t as Tokens.Text).text)}
           </span>
         ) : (
-          renderBlock(t, opts, i)
+          renderBlock(t, opts, tk)
         )
       )}
     </li>
   );
 }
 
-function renderBlock(t: Token, opts: MarkdownRenderOptions, key: number): ReactNode {
+function renderBlock(t: Token, opts: MarkdownRenderOptions, key: string): ReactNode {
   switch (t.type) {
     case "space":
     case "def":
@@ -121,10 +121,10 @@ function renderBlock(t: Token, opts: MarkdownRenderOptions, key: number): ReactN
     case "hr":
       return <hr key={key} />;
     case "blockquote":
-      return <blockquote key={key}>{(t as Tokens.Blockquote).tokens.map((child, i) => renderBlock(child, opts, i))}</blockquote>;
+      return <blockquote key={key}>{withKeys((t as Tokens.Blockquote).tokens, (child) => child.type).map(({ item: child, key: ck }) => renderBlock(child, opts, ck))}</blockquote>;
     case "list": {
       const list = t as Tokens.List;
-      const items = list.items.map((item, i) => listItem(item, opts, i));
+      const items = withKeys(list.items, () => "li").map(({ item, key: ik }) => listItem(item, opts, ik));
       if (!list.ordered) return <ul key={key}>{items}</ul>;
       return (
         <ol key={key} {...(list.start && list.start !== 1 ? { start: list.start } : {})}>
@@ -138,16 +138,16 @@ function renderBlock(t: Token, opts: MarkdownRenderOptions, key: number): ReactN
         <table key={key}>
           <thead>
             <tr>
-              {table.header.map((cell, i) => (
-                <th key={`h${i}`}>{renderInline(cell.tokens, opts)}</th>
+              {withKeys(table.header, () => "th").map(({ item: cell, key: hk }) => (
+                <th key={hk}>{renderInline(cell.tokens, opts)}</th>
               ))}
             </tr>
           </thead>
           <tbody>
-            {table.rows.map((row, r) => (
-              <tr key={`r${r}`}>
-                {row.map((cell, c) => (
-                  <td key={`c${c}`}>{renderInline(cell.tokens, opts)}</td>
+            {withKeys(table.rows, () => "tr").map(({ item: row, key: rk }) => (
+              <tr key={rk}>
+                {withKeys(row, () => "td").map(({ item: cell, key: ck }) => (
+                  <td key={ck}>{renderInline(cell.tokens, opts)}</td>
                 ))}
               </tr>
             ))}
@@ -169,7 +169,7 @@ function renderBlock(t: Token, opts: MarkdownRenderOptions, key: number): ReactN
   }
 }
 
-function createElementFor(tag: "h1" | "h2" | "h3" | "h4", key: number, children: ReactNode): ReactNode {
+function createElementFor(tag: "h1" | "h2" | "h3" | "h4", key: string, children: ReactNode): ReactNode {
   if (tag === "h1") return <h1 key={key}>{children}</h1>;
   if (tag === "h2") return <h2 key={key}>{children}</h2>;
   if (tag === "h3") return <h3 key={key}>{children}</h3>;
@@ -177,9 +177,8 @@ function createElementFor(tag: "h1" | "h2" | "h3" | "h4", key: number, children:
 }
 
 export function markdownToReact(md: string, opts: MarkdownRenderOptions = {}): ReactNode[] {
-  return marked
-    .lexer(md)
-    .map((t, i) => renderBlock(t, opts, i))
+  return withKeys(marked.lexer(md), (t) => t.type)
+    .map(({ item: t, key }) => renderBlock(t, opts, key))
     .filter((n) => n !== null);
 }
 
@@ -223,20 +222,20 @@ export const MarkdownContent = memo(function MarkdownContent({ md, renderText, t
     const out: ReactNode[] = [];
     const liveKeys = new Set<string>();
     const lastIdx = tokens.length - 1;
-    tokens.forEach((t, i) => {
+    withKeys(tokens, (t) => t.type).forEach(({ item: t, key: rk }, i) => {
       if (t.type === "space" || t.type === "def") return;
       if (i < lastIdx) {
         const key = blockCacheKey(i, t.type, t.raw);
         liveKeys.add(key);
         let node = cache.get(key);
         if (node === undefined) {
-          node = renderBlock(t, opts, i);
+          node = renderBlock(t, opts, rk);
           cache.set(key, node);
         }
         out.push(node);
         return;
       }
-      out.push(renderBlock(t, opts, i));
+      out.push(renderBlock(t, opts, rk));
     });
     for (const k of cache.keys()) if (!liveKeys.has(k)) cache.delete(k);
     if (!trailing) return out;

@@ -85,7 +85,10 @@ export class HeraldProvidersRepo extends Effect.Service<HeraldProvidersRepo>()("
           const modelRows = yield* queryAll<HeraldModelDbRow>(db, `SELECT * FROM herald_models WHERE provider_id = ? ORDER BY priority ASC, id ASC`, id).pipe(
             Effect.catchAll(() => Effect.succeed([] as HeraldModelDbRow[]))
           );
-          const models = modelRows.map(toModelDomain).map((m) => ({ id: m.id, providerId: m.providerId, modelId: m.modelId, kind: m.kind, priority: m.priority, enabled: m.enabled, createdAt: m.createdAt }));
+          const models = modelRows.map((row) => {
+            const m = toModelDomain(row);
+            return { id: m.id, providerId: m.providerId, modelId: m.modelId, kind: m.kind, priority: m.priority, enabled: m.enabled, createdAt: m.createdAt };
+          });
           return { ...masked, models } as HeraldProviderMasked;
         }),
 
@@ -103,7 +106,10 @@ export class HeraldProvidersRepo extends Effect.Service<HeraldProvidersRepo>()("
           }
           return rows.map((r) => {
             const masked = toMasked(r);
-            const models = (byProvider.get(r.id) ?? []).map(toModelDomain).map((m) => ({ id: m.id, providerId: m.providerId, modelId: m.modelId, kind: m.kind, priority: m.priority, enabled: m.enabled, createdAt: m.createdAt }));
+            const models = (byProvider.get(r.id) ?? []).map((row) => {
+              const m = toModelDomain(row);
+              return { id: m.id, providerId: m.providerId, modelId: m.modelId, kind: m.kind, priority: m.priority, enabled: m.enabled, createdAt: m.createdAt };
+            });
             return { ...masked, models } as HeraldProviderMasked;
           });
         }),

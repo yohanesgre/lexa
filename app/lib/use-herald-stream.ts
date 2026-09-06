@@ -43,10 +43,14 @@ export interface HeraldPendingChip {
 // deltas interleave exactly as the model emitted them. Consecutive delta
 // frames merge into the current text item; a tool result replaces its
 // chip in place.
+// `id` is a stable arrival-order identity (module-scope counter) so the
+// timeline renderer never has to key rows by array index.
 export type HeraldTimelineItem =
-  | { kind: "text"; text: string }
-  | { kind: "tool"; chip: HeraldToolChip }
-  | { kind: "reasoning"; text: string; ms: number | null };
+  | { id: number; kind: "text"; text: string }
+  | { id: number; kind: "tool"; chip: HeraldToolChip }
+  | { id: number; kind: "reasoning"; text: string; ms: number | null };
+
+let nextTimelineItemId = 1;
 
 export interface HeraldStreamSnapshot {
   status: HeraldStreamStatus;
@@ -229,11 +233,11 @@ class HeraldStreamSession {
           if (!reasoningActive) {
             reasoningActive = true;
             burstStart = performance.now();
-            items = [...items, { kind: "reasoning", text: frame.delta, ms: null }];
+            items = [...items, { id: nextTimelineItemId++, kind: "reasoning", text: frame.delta, ms: null }];
           } else if (last?.kind === "reasoning") {
             items = [...items.slice(0, -1), { ...last, text: last.text + frame.delta }];
           } else {
-            items = [...items, { kind: "reasoning", text: frame.delta, ms: null }];
+            items = [...items, { id: nextTimelineItemId++, kind: "reasoning", text: frame.delta, ms: null }];
           }
           reasoningText += frame.delta;
           this.emit({ frames: [...frames], items: [...items], reasoningText, reasoningActive: true, hasIngress }, true);
@@ -250,9 +254,9 @@ class HeraldStreamSession {
           text += frame.text;
           const last = items[items.length - 1];
           if (last?.kind === "text") {
-            items = [...items.slice(0, -1), { kind: "text", text: last.text + frame.text }];
+            items = [...items.slice(0, -1), { ...last, text: last.text + frame.text }];
           } else {
-            items = [...items, { kind: "text", text: frame.text }];
+            items = [...items, { id: nextTimelineItemId++, kind: "text", text: frame.text }];
           }
           this.emit({ frames: [...frames], ...burstPatch, text, items: [...items], hasIngress }, true);
           break;
@@ -263,14 +267,15 @@ class HeraldStreamSession {
           if (frame.phase === "call") {
             const chip: HeraldToolChip = { key: `${frame.name}-${toolSeq++}`, name: frame.name, label: toolLabel(frame.name), phase: "call", detail };
             tools = [...tools, chip];
-            items = [...items, { kind: "tool", chip }];
+            items = [...items, { id: nextTimelineItemId++, kind: "tool", chip }];
           } else {
             const index = tools.findLastIndex((t) => t.name === frame.name && t.phase === "call");
             if (index >= 0) {
               const chip = { ...tools[index]!, phase: "result" as const, resultDetail: detail } as HeraldToolChip;
               tools = tools.map((t, i) => (i === index ? chip : t));
               const itemIndex = items.findLastIndex((it) => it.kind === "tool" && it.chip.key === chip.key);
-              if (itemIndex >= 0) items = items.map((it, i) => (i === itemIndex ? { kind: "tool" as const, chip } : it));
+              if (itemIndex >= 0)
+                items = items.map((it, i) => (i === itemIndex && it.kind === "tool" ? { ...it, chip } : it));
             }
           }
           this.emit({ frames: [...frames], ...burstPatch, tools: [...tools], items: [...items], hasIngress });
@@ -363,7 +368,8 @@ class HeraldStreamSession {
               } catch {
                 // Malformed chunk — skip
               }
-              if (this.snapshot.status === "error" || this.snapshot.status === "done" || this.snapshot.status === "suspended") return;
+              const status = this.snapshot.status;
+              if (status === "error" || status === "done" || status === "suspended") return;
             }
           })
         )

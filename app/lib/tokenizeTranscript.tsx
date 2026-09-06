@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { withKeys } from "./withKeys";
 
 // Transcript token chips (mentions-autocomplete.html, transcript state):
 // stored message text is PLAIN; the client renders resolvable tokens as
@@ -39,8 +40,7 @@ export function tokenizeMentionText(text: string): TokenSegment[] {
 }
 
 export function renderTokenized(text: string, slug: string): ReactNode {
-  return tokenizeMentionText(text).map((seg, i) => {
-    const k = `${i}:${seg.kind}:${seg.text}`;
+  return withKeys(tokenizeMentionText(text), (seg) => `${seg.kind}:${seg.text}`).map(({ item: seg, key: k }) => {
     if (seg.kind === "text") return <span key={k}>{seg.text}</span>;
     const href =
       seg.kind === "task"

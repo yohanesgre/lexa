@@ -97,7 +97,7 @@ export function ShareDialog({ slug, pageSlug, isOpen, onClose }: ShareDialogProp
               <div className="text-sm text-lx-text-danger mb-3 bg-lx-bg-danger-subtle rounded-md px-3 py-2">{error}</div>
             )}
 
-            <label className="field-label block mb-1.5">Links</label>
+          <span className="field-label block mb-1.5">Links</span>
 
             {(displayLinks).map((link) => (
               <div key={link.id} className="github-issue-row" title={link.url}>

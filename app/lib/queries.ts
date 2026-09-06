@@ -1072,6 +1072,7 @@ export function useSetPassword() {
     mutationFn: ({ newPassword, token }: { newPassword: string; token: string }) => auth.setPassword({ newPassword, token }),
     onSuccess: (res) => {
       qc.setQueryData(["session"], res);
+      void qc.invalidateQueries({ queryKey: ["session"] });
       toast.push("success", "Password set — you're signed in");
     },
     onError: (err) => {
@@ -1263,6 +1264,7 @@ export function useRevokeWorkspaceInvite() {
     mutationFn: (inviteId: string) => api.revokeWorkspaceInvite(inviteId),
     onSuccess: (_v, inviteId) => {
       qc.setQueryData<WorkspaceInvite[]>(["workspace-invites"], (old) => (old ?? []).filter((i) => i.id !== inviteId));
+      void qc.invalidateQueries({ queryKey: ["workspace-invites"] });
       toast.push("success", "Invite revoked");
     },
     onError: (err) => {
@@ -2073,6 +2075,7 @@ export function useUpdateHeraldChatMeta(projectId: string | undefined) {
           )
         );
       });
+      void qc.invalidateQueries({ queryKey: ["herald-chats"] });
     },
     onError: (err) => toast.push("error", "Update failed", toastMessage(err)),
   });
@@ -2193,6 +2196,7 @@ export function useCreateHeraldTask() {
         { ...task, projectName: project?.name ?? "" },
         ...(rows ?? []),
       ]);
+      void qc.invalidateQueries({ queryKey: ["hearth-recent-tasks"] });
     },
     onError: (err) => {
       toast.push("error", "Herald unavailable", toastMessage(err));
@@ -2201,10 +2205,12 @@ export function useCreateHeraldTask() {
 }
 
 export function useCancelHeraldTask() {
+  const qc = useQueryClient();
   const toast = useToast();
   return useMutation({
     mutationFn: (id: string) => api.cancelHeraldTask(id),
     onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["hearth-recent-tasks"] });
       toast.push("success", "Herald run stopped");
     },
     onError: (err) => {

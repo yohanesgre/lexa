@@ -33,65 +33,85 @@ function storedBaseInput(settings: HeraldSettingsMasked): HeraldSettingsInput {
   return { kind: settings.kind, baseUrl: settings.baseUrl, model: settings.model } as HeraldSettingsInput;
 }
 
+// One form object + a single patch helper instead of a dozen useState calls.
+interface ProviderFormState {
+  kind: ProviderKind;
+  baseUrl: string;
+  model: string;
+  apiKey: string;
+  reasoningEffort: HeraldReasoningEffort | "";
+  supportsImages: boolean;
+  visionModel: string;
+  searchProvider: "exa" | "none";
+  searchApiKey: string;
+  urlAllowlist: string;
+}
+
+const EMPTY_PROVIDER_FORM: ProviderFormState = {
+  kind: "openai_compatible",
+  baseUrl: "",
+  model: "",
+  apiKey: "",
+  reasoningEffort: "",
+  supportsImages: false,
+  visionModel: "",
+  searchProvider: "exa",
+  searchApiKey: "",
+  urlAllowlist: "",
+};
+
 export function HeraldProviderSection({ project }: { project: Project }) {
   const { data: settings, isLoading } = useHeraldSettings(project.id);
   const save = useSaveHeraldSettings(project.id);
   const test = useTestHeraldSettings(project.id);
   const fetchModels = useFetchHeraldModels(project.id);
 
-  const [kind, setKind] = useState<ProviderKind>("openai_compatible");
-  const [baseUrl, setBaseUrl] = useState("");
-  const [model, setModel] = useState("");
-  const [apiKey, setApiKey] = useState("");
-  const [reasoningEffort, setReasoningEffort] = useState<HeraldReasoningEffort | "">("");
-  const [supportsImages, setSupportsImages] = useState(false);
-  const [visionModel, setVisionModel] = useState("");
-  const [searchProvider, setSearchProvider] = useState<"exa" | "none">("exa");
-  const [replacingSearchKey, setReplacingSearchKey] = useState(false);
-  const [searchApiKey, setSearchApiKey] = useState("");
-  const [urlAllowlist, setUrlAllowlist] = useState("");
+  const [form, setForm] = useState<ProviderFormState>(EMPTY_PROVIDER_FORM);
+  const patchForm = (patch: Partial<ProviderFormState>) => setForm((prev) => ({ ...prev, ...patch }));
   const [modelsOpen, setModelsOpen] = useState(false);
   const [modelFilter, setModelFilter] = useState("");
   const [visionModelsOpen, setVisionModelsOpen] = useState(false);
   const [visionModelFilter, setVisionModelFilter] = useState("");
-  const [hydratedProjectId, setHydratedProjectId] = useState<string | null>(null);
+  const hydratedRef = useRef<string | null>(null);
 
-  // Hydrate the form once per project from the masked view.
+  // Hydrate the form once per project from the masked view. The section is
+  // keyed by project id at the call site, so no secret/input resets are
+  // needed here — a project switch remounts with EMPTY_PROVIDER_FORM.
   useEffect(() => {
-    if (settings && hydratedProjectId !== project.id) {
-      if (settings.kind) setKind(settings.kind);
-      if (settings.baseUrl) setBaseUrl(settings.baseUrl);
-      if (settings.model) setModel(settings.model);
-      setReasoningEffort(settings.reasoningEffort ?? "");
-      setSupportsImages(settings.primarySupportsImages);
-      setVisionModel(settings.visionModel ?? "");
-      setSearchProvider(settings.searchProvider === "exa" ? "exa" : "none");
-      setUrlAllowlist(settings.urlAllowlist ?? "");
-      setHydratedProjectId(project.id);
-      setReplacingSearchKey(false);
-      setApiKey("");
-      setSearchApiKey("");
+    if (settings && hydratedRef.current !== project.id) {
+      hydratedRef.current = project.id;
+      setForm((prev) => ({
+        ...prev,
+        ...(settings.kind ? { kind: settings.kind } : {}),
+        ...(settings.baseUrl ? { baseUrl: settings.baseUrl } : {}),
+        ...(settings.model ? { model: settings.model } : {}),
+        reasoningEffort: settings.reasoningEffort ?? "",
+        supportsImages: settings.primarySupportsImages,
+        ...(settings.visionModel ? { visionModel: settings.visionModel } : {}),
+        searchProvider: settings.searchProvider === "exa" ? "exa" : "none",
+        ...(settings.urlAllowlist ? { urlAllowlist: settings.urlAllowlist } : {}),
+      }));
     }
-  }, [settings, project.id, hydratedProjectId]);
+  }, [settings, project.id]);
 
-  const formInput = () => ({
-    kind,
-    baseUrl: baseUrl.trim(),
-    model: model.trim(),
-    ...(apiKey.trim() ? { apiKey: apiKey.trim() } : {}),
-    reasoningEffort: (reasoningEffort || null) as HeraldReasoningEffort | null,
-    primarySupportsImages: supportsImages,
-    visionModel: visionModel.trim() || null,
-    searchProvider: searchProvider === "exa" ? ("exa" as const) : null,
-    ...(searchApiKey.trim() ? { searchApiKey: searchApiKey.trim() } : replacingSearchKey && searchProvider === "exa" ? { searchApiKey: null } : {}),
-    urlAllowlist: urlAllowlist.trim() || null,
+  const formInput = (): HeraldSettingsInput => ({
+    kind: form.kind,
+    baseUrl: form.baseUrl.trim(),
+    model: form.model.trim(),
+    ...(form.apiKey.trim() ? { apiKey: form.apiKey.trim() } : {}),
+    reasoningEffort: (form.reasoningEffort || null) as HeraldReasoningEffort | null,
+    primarySupportsImages: form.supportsImages,
+    visionModel: form.visionModel.trim() || null,
+    searchProvider: form.searchProvider === "exa" ? ("exa" as const) : null,
+    ...(form.searchApiKey.trim() ? { searchApiKey: form.searchApiKey.trim() } : {}),
+    urlAllowlist: form.urlAllowlist.trim() || null,
   });
 
   const handleSave = () =>
     save.mutate(formInput(), {
       // Saved-key badge refreshes from the mutation response (setQueryData in
       // useSaveHeraldSettings); the field returns to its "keep stored" state.
-      onSuccess: () => setApiKey(""),
+      onSuccess: () => patchForm({ apiKey: "" }),
     });
 
   const handleTest = () =>
@@ -134,12 +154,13 @@ export function HeraldProviderSection({ project }: { project: Project }) {
       <div className="card-panel card-panel--elevated">
         {/* Kind */}
         <div className="field">
-          <label className="field-label">Kind</label>
+          <label className="field-label" htmlFor="herald-kind">Kind</label>
           <select
+            id="herald-kind"
             className="prop-input w-full"
             aria-label="Provider kind"
-            value={kind}
-            onChange={(e) => setKind(e.target.value as ProviderKind)}
+            value={form.kind}
+            onChange={(e) => patchForm({ kind: e.target.value as ProviderKind })}
             style={{ maxWidth: 320 }}
           >
             <option value="openai_compatible">OpenAI-compatible</option>
@@ -151,7 +172,7 @@ export function HeraldProviderSection({ project }: { project: Project }) {
         {/* Base URL */}
         <div className="field">
           <label className="field-label" htmlFor="herald-base-url">Base URL</label>
-          <input id="herald-base-url" className="prop-input w-full font-mono" type="text" value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} placeholder="https://openrouter.ai/api/v1" style={{ maxWidth: 480 }} />
+          <input id="herald-base-url" className="prop-input w-full font-mono" type="text" value={form.baseUrl} onChange={(e) => patchForm({ baseUrl: e.target.value })} placeholder="https://openrouter.ai/api/v1" style={{ maxWidth: 480 }} />
           <div className="field-hint">OpenRouter shown as an example — any compatible endpoint works.</div>
         </div>
 
@@ -181,8 +202,8 @@ export function HeraldProviderSection({ project }: { project: Project }) {
             id="herald-api-key"
             className="prop-input w-full font-mono"
             type="password"
-            value={apiKey}
-            onChange={(e) => setApiKey(e.target.value)}
+            value={form.apiKey}
+            onChange={(e) => patchForm({ apiKey: e.target.value })}
             placeholder={settings?.hasKey ? `Type to replace ${settings.keyMask ?? "sk-…"}` : "sk-…"}
             aria-label="API key"
             autoComplete="off"
@@ -200,8 +221,8 @@ export function HeraldProviderSection({ project }: { project: Project }) {
           <label className="field-label" htmlFor="herald-model">Model</label>
           <div style={{ position: "relative", maxWidth: 480 }}>
             <div className="flex items-center gap-2">
-              <input id="herald-model" className="prop-input flex-1 font-mono" type="text" value={model} onChange={(e) => setModel(e.target.value)} placeholder="model id…" />
-              <button type="button" className="btn btn-ghost btn-sm" style={{ flexShrink: 0 }} onClick={handleFetchModels} disabled={fetchModels.isPending || !baseUrl.trim()}>
+              <input id="herald-model" className="prop-input flex-1 font-mono" type="text" value={form.model} onChange={(e) => patchForm({ model: e.target.value })} placeholder="model id…" />
+              <button type="button" className="btn btn-ghost btn-sm" style={{ flexShrink: 0 }} onClick={handleFetchModels} disabled={fetchModels.isPending || !form.baseUrl.trim()}>
                 <RefreshCw size={12} strokeWidth={1.5} className={fetchModels.isPending ? "animate-spin" : undefined} />
                 Fetch models
               </button>
@@ -233,12 +254,12 @@ export function HeraldProviderSection({ project }: { project: Project }) {
                       height: 28,
                       fontSize: 12,
                       justifyContent: "space-between",
-                      ...(model === m.id ? { background: "var(--lx-surface-selected)", color: "var(--lx-text-primary)" } : {}),
+                      ...(form.model === m.id ? { background: "var(--lx-surface-selected)", color: "var(--lx-text-primary)" } : {}),
                     }}
-                    onClick={() => { setModel(m.id); setModelsOpen(false); }}
+                    onClick={() => { patchForm({ model: m.id }); setModelsOpen(false); }}
                   >
                     <span>{m.id}</span>
-                    {model === m.id && <Check size={12} strokeWidth={2.5} />}
+                    {form.model === m.id && <Check size={12} strokeWidth={2.5} />}
                   </button>
                 ))}
                 </div>
@@ -250,7 +271,7 @@ export function HeraldProviderSection({ project }: { project: Project }) {
                   style={{ height: 28, color: "var(--lx-text-link)" }}
                   onClick={() => setModelsOpen(false)}
                 >
-                  Use &quot;{model || "my-custom-model-id"}&quot; anyway (free text)
+                  Use &quot;{form.model || "my-custom-model-id"}&quot; anyway (free text)
                 </button>
                 <div className="flex justify-end" style={{ padding: "2px 4px" }}>
                   <button type="button" className="btn btn-ghost btn-icon-sm" aria-label="Close model list" onClick={() => { setModelsOpen(false); setModelFilter(""); }}>
@@ -274,8 +295,8 @@ export function HeraldProviderSection({ project }: { project: Project }) {
             id="herald-reasoning-effort"
             className="prop-input"
             aria-label="Thinking effort"
-            value={reasoningEffort}
-            onChange={(e) => setReasoningEffort(e.target.value as HeraldReasoningEffort | "")}
+            value={form.reasoningEffort}
+            onChange={(e) => patchForm({ reasoningEffort: e.target.value as HeraldReasoningEffort | "" })}
             style={{ width: 200, height: 32, fontSize: 12 }}
           >
             <option value="">Default (none set)</option>
@@ -289,16 +310,16 @@ export function HeraldProviderSection({ project }: { project: Project }) {
 
         {/* Vision — folded into provider config (no standalone section) */}
         <div className="field">
-          <label className="field-label">Primary model vision</label>
+          <span className="field-label">Primary model vision</span>
           <label className="check-row" style={{ cursor: "pointer" }}>
             <input
               type="checkbox"
-              checked={supportsImages}
-              onChange={(e) => setSupportsImages(e.target.checked)}
+              checked={form.supportsImages}
+              onChange={(e) => patchForm({ supportsImages: e.target.checked })}
               aria-label="Primary model accepts images directly"
               style={{ position: "absolute", opacity: 0, width: 14, height: 14 }}
             />
-            <div className={`checkbox${supportsImages ? " checked" : ""}`} aria-hidden="true" />
+            <div className={`checkbox${form.supportsImages ? " checked" : ""}`} aria-hidden="true" />
             <span className="text-sm text-lx-text-secondary">Primary model accepts images directly (inline image parts)</span>
           </label>
           <div className="field-hint">Tick when the configured model is multimodal — images ride inline in the same request, no second provider needed.</div>
@@ -313,11 +334,11 @@ export function HeraldProviderSection({ project }: { project: Project }) {
                 id="herald-vision-model"
                 className="prop-input flex-1 font-mono"
                 type="text"
-                value={visionModel}
-                onChange={(e) => setVisionModel(e.target.value)}
+                value={form.visionModel}
+                onChange={(e) => patchForm({ visionModel: e.target.value })}
                 placeholder="vision model id…"
               />
-              <button type="button" className="btn btn-ghost btn-sm" style={{ flexShrink: 0 }} onClick={handleFetchModels} disabled={fetchModels.isPending || !baseUrl.trim()}>
+              <button type="button" className="btn btn-ghost btn-sm" style={{ flexShrink: 0 }} onClick={handleFetchModels} disabled={fetchModels.isPending || !form.baseUrl.trim()}>
                 <RefreshCw size={12} strokeWidth={1.5} className={fetchModels.isPending ? "animate-spin" : undefined} />
                 Fetch models
               </button>
@@ -349,12 +370,12 @@ export function HeraldProviderSection({ project }: { project: Project }) {
                       height: 28,
                       fontSize: 12,
                       justifyContent: "space-between",
-                      ...(visionModel === m.id ? { background: "var(--lx-surface-selected)", color: "var(--lx-text-primary)" } : {}),
+                      ...(form.visionModel === m.id ? { background: "var(--lx-surface-selected)", color: "var(--lx-text-primary)" } : {}),
                     }}
-                    onClick={() => { setVisionModel(m.id); setVisionModelsOpen(false); setVisionModelFilter(""); }}
+                    onClick={() => { patchForm({ visionModel: m.id }); setVisionModelsOpen(false); setVisionModelFilter(""); }}
                   >
                     <span>{m.id}</span>
-                    {visionModel === m.id && <Check size={12} strokeWidth={2.5} />}
+                    {form.visionModel === m.id && <Check size={12} strokeWidth={2.5} />}
                   </button>
                 ))}
                 </div>
@@ -366,7 +387,7 @@ export function HeraldProviderSection({ project }: { project: Project }) {
                   style={{ height: 28, color: "var(--lx-text-link)" }}
                   onClick={() => setVisionModelsOpen(false)}
                 >
-                  Use &quot;{visionModel || "my-custom-model-id"}&quot; anyway (free text)
+                  Use &quot;{form.visionModel || "my-custom-model-id"}&quot; anyway (free text)
                 </button>
                 <div className="flex justify-end" style={{ padding: "2px 4px" }}>
                   <button type="button" className="btn btn-ghost btn-icon-sm" aria-label="Close vision model list" onClick={() => { setVisionModelsOpen(false); setVisionModelFilter(""); }}>
@@ -385,27 +406,27 @@ export function HeraldProviderSection({ project }: { project: Project }) {
 
         {/* Web search */}
         <div className="field">
-          <label className="field-label">Web search</label>
+          <span className="field-label">Web search</span>
           <div className="flex items-center gap-2" style={{ flexWrap: "wrap" }}>
             <select
               className="prop-input"
               aria-label="Search provider"
-              value={searchProvider}
-              onChange={(e) => setSearchProvider(e.target.value === "exa" ? "exa" : "none")}
+              value={form.searchProvider}
+              onChange={(e) => patchForm({ searchProvider: e.target.value === "exa" ? "exa" : "none" })}
               style={{ width: 200, height: 32, fontSize: 12 }}
             >
               <option value="exa">Exa</option>
               <option value="none">None (web_search disabled)</option>
             </select>
-            {settings?.hasSearchKey && !replacingSearchKey ? (
+            {settings?.hasSearchKey ? (
               <input className="prop-input font-mono" type="password" value={settings.searchProvider === "exa" ? "saved" : ""} readOnly aria-label="Saved Exa API key (masked)" style={{ width: 240, height: 32, fontSize: 12 }} />
             ) : (
               <input
                 className="prop-input font-mono"
                 type="password"
                 placeholder={settings?.hasSearchKey ? "Replace Exa API key…" : "Exa API key…"}
-                value={searchApiKey}
-                onChange={(e) => setSearchApiKey(e.target.value)}
+                value={form.searchApiKey}
+                onChange={(e) => patchForm({ searchApiKey: e.target.value })}
                 aria-label="Exa API key"
                 style={{ width: 240, height: 32, fontSize: 12 }}
               />
@@ -419,15 +440,15 @@ export function HeraldProviderSection({ project }: { project: Project }) {
           <label className="field-label" htmlFor="herald-allowlist">
             URL allowlist <span className="font-micro text-2xs text-lx-text-muted uppercase tracking-[0.04em]" style={{ marginLeft: 6 }}>fetch_url guard</span>
           </label>
-          <input id="herald-allowlist" className="prop-input w-full font-mono" type="text" value={urlAllowlist} onChange={(e) => setUrlAllowlist(e.target.value)} placeholder="docs.github.com, developer.mozilla.org" style={{ maxWidth: 480 }} />
+          <input id="herald-allowlist" className="prop-input w-full font-mono" type="text" value={form.urlAllowlist} onChange={(e) => patchForm({ urlAllowlist: e.target.value })} placeholder="docs.github.com, developer.mozilla.org" style={{ maxWidth: 480 }} />
           <div className="field-hint">Comma-separated hostnames (suffix match). Empty = all hosts allowed. Enforced on every redirect hop of fetch_url.</div>
         </div>
 
         {/* Test connection: pending / ok / fail variants */}
         <div className="field">
-          <label className="field-label">Test connection</label>
+          <span className="field-label">Test connection</span>
           <div className="flex items-start gap-3" style={{ flexWrap: "wrap" }}>
-            <button type="button" className="btn btn-ghost btn-sm" style={{ alignSelf: "center" }} onClick={handleTest} disabled={test.isPending || !baseUrl.trim() || !model.trim()}>
+            <button type="button" className="btn btn-ghost btn-sm" style={{ alignSelf: "center" }} onClick={handleTest} disabled={test.isPending || !form.baseUrl.trim() || !form.model.trim()}>
               <Zap size={12} strokeWidth={1.5} />
               Test connection
             </button>
@@ -467,7 +488,7 @@ export function HeraldProviderSection({ project }: { project: Project }) {
 
         <div className="flex items-center justify-between mt-5" style={{ borderTop: "1px solid var(--lx-border-subtle)", paddingTop: 16 }}>
           <span className="field-hint">Omitted key fields keep stored values. Saving with no provider row yet creates it; enqueue without a row fails PROVIDER_NOT_CONFIGURED.</span>
-          <button type="button" className="btn btn-primary" onClick={handleSave} disabled={save.isPending || !baseUrl.trim() || !model.trim()}>
+          <button type="button" className="btn btn-primary" onClick={handleSave} disabled={save.isPending || !form.baseUrl.trim() || !form.model.trim()}>
             {save.isPending ? "Saving…" : "Save"}
           </button>
         </div>
@@ -501,14 +522,14 @@ export function HeraldWriteToolsSection({ project }: { project: Project }) {
   const { data: settings, isLoading } = useHeraldSettings(project.id);
   const save = useSaveHeraldWriteTools(project.id);
   const [selected, setSelected] = useState<string[]>([]);
-  const [hydratedProjectId, setHydratedProjectId] = useState<string | null>(null);
+  const hydratedRef = useRef<string | null>(null);
 
   useEffect(() => {
-    if (settings && hydratedProjectId !== project.id) {
+    if (settings && hydratedRef.current !== project.id) {
+      hydratedRef.current = project.id;
       setSelected(settings.writeTools.filter((t) => (HERALD_WRITE_TOOLS as readonly string[]).includes(t)));
-      setHydratedProjectId(project.id);
     }
-  }, [settings, project.id, hydratedProjectId]);
+  }, [settings, project.id]);
 
   const enabled = selected.length > 0;
 
@@ -559,12 +580,12 @@ export function HeraldWriteToolsSection({ project }: { project: Project }) {
 
         {/* Per-tool checkboxes */}
         <div className="field">
-          <label className="field-label">
+          <span className="field-label">
             Allowed tools{" "}
             <span className="font-micro text-2xs text-lx-text-muted" style={{ textTransform: "uppercase", letterSpacing: "0.04em", marginLeft: 6 }}>
               13 write tools
             </span>
-          </label>
+          </span>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "4px 24px", background: "var(--lx-surface-input)", border: "1px solid var(--lx-border-default)", borderRadius: 6, padding: "10px 12px" }}>
             {HERALD_WRITE_TOOLS.map((tool) => (
               <label key={tool} className="check-row" style={{ cursor: "pointer" }}>
@@ -687,28 +708,6 @@ function MemoryRow({ memory, onDelete, deleting }: { memory: HeraldMemoryEntry; 
 
 // ── Engine section (settings-project-herald.html) ──
 
-export function HeraldEngineSection({ project }: { project: Project }) {
-  const { data: settings } = useHeraldSettings(project.id);
-  const save = useSaveHeraldSettings(project.id);
-  const [engine, setEngine] = useState<HearthEngine>("herald");
-  const [switcher, setSwitcher] = useState(false);
-  const [hydratedProjectId, setHydratedProjectId] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (settings && hydratedProjectId !== project.id) {
-      setEngine(settings.engine);
-      setSwitcher(settings.engineSwitcherEnabled);
-      setHydratedProjectId(project.id);
-    }
-  }, [settings, project.id, hydratedProjectId]);
-
-  // Controls persist immediately (PUT with the stored base fields); the
-  // mutation response refreshes the settings cache via setQueryData.
-  const persist = (patch: Partial<HeraldSettingsInput>) => {
-    if (!settings) return;
-    save.mutate({ ...storedBaseInput(settings), ...patch });
-  };
-
 const OPTION_BASE_STYLE: React.CSSProperties = { height: 24, padding: "0 12px", fontSize: 12 };
 const OPTION_SELECTED_STYLE: React.CSSProperties = {
   background: "var(--lx-surface-selected)",
@@ -719,6 +718,28 @@ const OPTION_UNSELECTED_STYLE: React.CSSProperties = { color: "var(--lx-text-sec
 const optionStyle = (selected: boolean): React.CSSProperties =>
   selected ? { ...OPTION_BASE_STYLE, ...OPTION_SELECTED_STYLE } : { ...OPTION_BASE_STYLE, ...OPTION_UNSELECTED_STYLE };
 
+export function HeraldEngineSection({ project }: { project: Project }) {
+  const { data: settings } = useHeraldSettings(project.id);
+  const save = useSaveHeraldSettings(project.id);
+  const [engine, setEngine] = useState<HearthEngine>("herald");
+  const [switcher, setSwitcher] = useState(false);
+  const hydratedRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (settings && hydratedRef.current !== project.id) {
+      hydratedRef.current = project.id;
+      setEngine(settings.engine);
+      setSwitcher(settings.engineSwitcherEnabled);
+    }
+  }, [settings, project.id]);
+
+  // Controls persist immediately (PUT with the stored base fields); the
+  // mutation response refreshes the settings cache via setQueryData.
+  const persist = (patch: Partial<HeraldSettingsInput>) => {
+    if (!settings) return;
+    save.mutate({ ...storedBaseInput(settings), ...patch });
+  };
+
   return (
     <section className="mb-8">
       <h2 className="font-display text-lg font-medium text-lx-text-primary mb-3">Engine</h2>
@@ -728,7 +749,7 @@ const optionStyle = (selected: boolean): React.CSSProperties =>
 
       <div className="card-panel card-panel--elevated">
         <div className="field">
-          <label className="field-label">Default engine</label>
+          <span className="field-label">Default engine</span>
           <div
             className="flex items-center"
             role="radiogroup"
@@ -752,7 +773,7 @@ const optionStyle = (selected: boolean): React.CSSProperties =>
         </div>
 
         <div className="field">
-          <label className="field-label">Show engine switcher to members</label>
+          <span className="field-label">Show engine switcher to members</span>
           <div className="flex items-center gap-3">
             <button
               type="button"

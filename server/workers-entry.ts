@@ -294,7 +294,7 @@ export async function pruneR2Backups(blob: R2Bucket, retention: number): Promise
       if (key.startsWith(`backups/lexa-${stamp}-blobs/`)) doomed.add(key);
     }
   }
-  for (const key of doomed) await blob.delete(key);
+  await Promise.all(Array.from(doomed, (key) => blob.delete(key)));
   return Array.from(doomed).sort();
 }
 

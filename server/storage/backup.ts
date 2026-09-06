@@ -51,9 +51,7 @@ export async function pruneBackups(driver: StorageDriver, retention: number): Pr
       if (key.startsWith(`backups/lexa-${stamp}-blobs/`)) doomed.add(key);
     }
   }
-  for (const key of doomed) {
-    await driver.delete(key);
-  }
+  await Promise.all(Array.from(doomed, (key) => driver.delete(key)));
   return Array.from(doomed).sort();
 }
 
@@ -79,10 +77,11 @@ export async function runBackup(
     // fs driver: the blobs live beside the DB — copy them into the backup set
     // so a restore is self-contained. s3 buckets hold their own copies.
     if (cfg.driver === "fs") {
-      for (const rel of listBlobFiles(cfg.fsRoot)) {
+      const puts = listBlobFiles(cfg.fsRoot).map((rel) => {
         const data = new Uint8Array(readFileSync(join(cfg.fsRoot, rel)));
-        await driver.put(`backups/${name}-blobs/${rel.slice("blobs/".length)}`, data);
-      }
+        return driver.put(`backups/${name}-blobs/${rel.slice("blobs/".length)}`, data);
+      });
+      await Promise.all(puts);
     }
     await pruneBackups(driver, retention);
     return { key: `backups/${name}.db.gz` };

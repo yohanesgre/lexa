@@ -160,23 +160,24 @@ export function PromptEditorModal({ kind, entity, allSkills = [], allAgents = []
           </div>
         )}
 
-        {!isAgent && allAgents.length > 0 && (
-          <div className="field">
-            <span className="field-label">Used by</span>
-            <div style={{ background: "var(--lx-surface-input)", border: "1px solid var(--lx-border-default)", borderRadius: 6, padding: "10px 12px", display: "flex", flexDirection: "column", gap: 6 }}>
-              {allAgents.filter((a) => a.skillIds.includes(skill?.id ?? "")).length === 0 ? (
-                <span className="text-xs text-lx-text-muted">No agents use this skill yet.</span>
-              ) : (
-                allAgents
-                  .filter((a) => a.skillIds.includes(skill?.id ?? ""))
-                  .map((a) => (
+        {!isAgent && allAgents.length > 0 && (() => {
+          const usingAgents = allAgents.filter((a) => a.skillIds.includes(skill?.id ?? ""));
+          return (
+            <div className="field">
+              <span className="field-label">Used by</span>
+              <div style={{ background: "var(--lx-surface-input)", border: "1px solid var(--lx-border-default)", borderRadius: 6, padding: "10px 12px", display: "flex", flexDirection: "column", gap: 6 }}>
+                {usingAgents.length === 0 ? (
+                  <span className="text-xs text-lx-text-muted">No agents use this skill yet.</span>
+                ) : (
+                  usingAgents.map((a) => (
                     <span key={a.id} className="text-xs" style={{ color: "var(--lx-text-secondary)" }}>{a.name}</span>
                   ))
-              )}
+                )}
+              </div>
+              <div className="field-hint">Read-only — bindings are managed from the agent editor.</div>
             </div>
-            <div className="field-hint">Read-only — bindings are managed from the agent editor.</div>
-          </div>
-        )}
+          );
+        })()}
 
         {/* Delivery preview — what the daemon writes into the run dir */}
         <div className="field">

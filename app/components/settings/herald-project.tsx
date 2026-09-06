@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useHeraldProviders, useHeraldProjectSettings, useSaveHeraldProjectSettings } from "../../lib/queries/herald-admin";
 import { useHeraldSettings } from "../../lib/queries";
 import { useToast } from "../ui/Toast";
@@ -22,38 +22,29 @@ export function HeraldProjectProviderSection({ project }: { project: Project }) 
   const [providerId, setProviderId] = useState<string>("");
   const [modelId, setModelId] = useState<string>("");
   const [fallbacks, setFallbacks] = useState<string[]>([]);
-  const [hydrated, setHydrated] = useState(false);
+  const hydratedRef = useRef(false);
   const [testState, setTestState] = useState<"idle" | "pending" | "ok" | "fail">("idle");
-  const [testLatency, setTestLatency] = useState<number>(0);
-  const [testCode, setTestCode] = useState<string>("");
 
+  // Hydrate once from the fetched settings, then settle defaults — one
+  // effect, no chained state→effect rounds (defaults need the hydrated
+  // values, so they settle on the pass after hydration lands).
   useEffect(() => {
-    if (!hydrated && settings !== undefined) {
+    if (!hydratedRef.current && settings !== undefined) {
       if (settings && (settings.providerId !== undefined || settings.modelId !== undefined)) {
         setProviderId(settings.providerId ?? "");
         setModelId(settings.modelId ?? "");
         setFallbacks(settings.fallbackModelIds ?? []);
-        setHydrated(true);
+        hydratedRef.current = true;
       } else if (!settingsLoading && !providersLoading && legacySettings === null && settings === null) {
-        setHydrated(true);
+        hydratedRef.current = true;
       } else if (settings === null && legacySettings === null && !settingsLoading) {
-        setHydrated(true);
+        hydratedRef.current = true;
       }
+      return;
     }
-  }, [settings, legacySettings, hydrated, settingsLoading, providersLoading]);
-
-  useEffect(() => {
-    if (hydrated && settings && settings.providerId) {
-      if (providerId !== settings.providerId) {
-        // keep local state in sync after save
-      }
-    }
-  }, [settings?.providerId]);
-
-  // Default fallback suggestions: after fetch, if primary selected but no fallbacks,
-  // populate up to 2 enabled models from the primary provider (priority order).
-  useEffect(() => {
-    if (!hydrated || providersLoading || settingsLoading) return;
+    if (!hydratedRef.current || providersLoading || settingsLoading) return;
+    // Default fallback suggestions: after fetch, if primary selected but no fallbacks,
+    // populate up to 2 enabled models from the primary provider (priority order).
     if (!providerId || !modelId) {
       if (!providerId && providers.length > 0) {
         const firstWithModels = providers.find((p) => (p.models ?? []).some((m) => m.enabled));
@@ -74,11 +65,17 @@ export function HeraldProjectProviderSection({ project }: { project: Project }) 
     if (enabled.length < 2) return;
     const defaults = enabled.filter((m) => m.modelId !== modelId).slice(0, 2).map((m) => `${providerId}:${m.modelId}`);
     if (defaults.length > 0) setFallbacks(defaults);
-  }, [hydrated, providersLoading, settingsLoading, providers, providerId, modelId, fallbacks.length]);
+  }, [settings, legacySettings, settingsLoading, providersLoading, providers, providerId, modelId, fallbacks.length]);
 
   const selectedProvider = providers.find((p) => p.id === providerId);
   const enabledModels = enabledModelsOf(selectedProvider);
-  const allEnabledAcrossProviders = providers.flatMap((p) => (p.models ?? []).filter((m) => m.enabled).map((m) => ({ ...m, providerLabel: p.label, providerId: p.id, baseUrl: (p.baseUrl ?? (p as unknown as { base_url?: string }).base_url) ?? "" })));
+  const allEnabledAcrossProviders = providers.reduce<Array<HeraldProviderModel & { providerLabel: string; providerId: string; baseUrl: string }>>((acc, p) => {
+    for (const m of p.models ?? []) {
+      if (!m.enabled) continue;
+      acc.push({ ...m, providerLabel: p.label, providerId: p.id, baseUrl: (p.baseUrl ?? (p as unknown as { base_url?: string }).base_url) ?? "" });
+    }
+    return acc;
+  }, []);
 
   const primaryKey = providerId && modelId ? `${providerId}:${modelId}` : null;
   const fallbackKeySet = new Set(fallbacks);
@@ -130,8 +127,8 @@ export function HeraldProjectProviderSection({ project }: { project: Project }) 
     save.mutate({ providerId: providerId || null, modelId: modelId || null, fallbackModelIds: fallbacks });
   };
 
-  const [testDetail, setTestDetail] = useState<string>("");
   const handleTest = async () => {
+    if (testState === "pending") return;
     setTestState("pending");
     try {
       const res = await fetch(`/api/herald/settings/${project.id}/test`, {
@@ -139,23 +136,19 @@ export function HeraldProjectProviderSection({ project }: { project: Project }) 
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ providerId: providerId || null, modelId: modelId || null, fallbackModelIds: fallbacks }),
       });
-      const body = await res.json().catch(() => ({}));
       if (!res.ok) {
-        const code = (body as { error?: { code?: string; message?: string } }).error?.code ?? "PROVIDER_UNREACHABLE";
-        const msg = (body as { error?: { message?: string } }).error?.message ?? "";
-        setTestCode(code);
-        setTestDetail(msg.slice(0, 500));
+        const body = (await res.json().catch(() => ({}))) as { error?: { code?: string; message?: string } };
+        const code = body.error?.code ?? "PROVIDER_UNREACHABLE";
+        const msg = body.error?.message ?? "";
         setTestState("idle");
         toast.push("error", code, msg.slice(0, 500) || "Upstream rejected the key (401). Other outcome: PROVIDER_UNREACHABLE.");
         return;
       }
-      const latency = (body as { latencyMs?: number }).latencyMs ?? 0;
-      setTestLatency(latency);
+      const body = (await res.json().catch(() => ({}))) as { latencyMs?: number };
+      const latency = body.latencyMs ?? 0;
       setTestState("idle");
       toast.push("success", `Connection OK · ${latency} ms`, "Provider reachable · key valid");
     } catch {
-      setTestCode("PROVIDER_UNREACHABLE");
-      setTestDetail("");
       setTestState("idle");
       toast.push("error", "PROVIDER_UNREACHABLE", "Upstream unreachable");
     }
@@ -195,8 +188,9 @@ export function HeraldProjectProviderSection({ project }: { project: Project }) 
         )}
 
         <div className="field">
-          <label className="field-label">Primary provider <span className="font-micro text-2xs text-lx-text-muted uppercase tracking-[0.04em]" style={{ marginLeft: 6 }}>from registry</span></label>
+          <label className="field-label" htmlFor="herald-primary-provider">Primary provider <span className="font-micro text-2xs text-lx-text-muted uppercase tracking-[0.04em]" style={{ marginLeft: 6 }}>from registry</span></label>
           <select
+            id="herald-primary-provider"
             className="prop-input w-full"
             style={{ maxWidth: 480 }}
             value={providerId}
@@ -234,9 +228,10 @@ export function HeraldProjectProviderSection({ project }: { project: Project }) 
         </div>
 
         <div className="field">
-          <label className="field-label">Model</label>
+          <label className="field-label" htmlFor="herald-project-model">Model</label>
           <div style={{ position: "relative", maxWidth: 480 }}>
             <select
+              id="herald-project-model"
               className="prop-input w-full font-mono"
               value={modelId}
               onChange={(e) => {
@@ -262,7 +257,7 @@ export function HeraldProjectProviderSection({ project }: { project: Project }) 
         </div>
 
         <div className="field">
-          <label className="field-label">Fallback models <span className="font-micro text-2xs text-lx-text-muted uppercase tracking-[0.04em]" style={{ marginLeft: 6 }}>ordered · cross-kind allowed · drag or ↑/↓</span></label>
+          <label className="field-label" htmlFor="herald-add-fallback">Fallback models <span className="font-micro text-2xs text-lx-text-muted uppercase tracking-[0.04em]" style={{ marginLeft: 6 }}>ordered · cross-kind allowed · drag or ↑/↓</span></label>
           <div className="card-panel w-fit" style={{ padding: 8, display: "flex", flexDirection: "column", gap: 4, background: "var(--lx-surface-input)", width: "fit-content", maxWidth: "100%" }}>
             {fallbackRows.map((row, idx) => (
               <div key={`${row.providerId}:${row.modelId}`} className="card-row" style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 8px" }}>
@@ -280,7 +275,7 @@ export function HeraldProjectProviderSection({ project }: { project: Project }) 
             ))}
             {fallbacks.length === 0 && <div className="text-xs text-lx-text-muted" style={{ padding: "4px 8px" }}>No fallbacks — primary only.</div>}
             <div className="flex items-center gap-2" style={{ marginTop: 4 }}>
-              <select className="prop-input flex-1 font-mono" style={{ height: 28, fontSize: 12, maxWidth: 400 }} value={addFallbackId} onChange={(e) => setAddFallbackId(e.target.value)}>
+              <select id="herald-add-fallback" aria-label="Add fallback model" className="prop-input flex-1 font-mono" style={{ height: 28, fontSize: 12, maxWidth: 400 }} value={addFallbackId} onChange={(e) => setAddFallbackId(e.target.value)}>
                 <option value="">Add fallback…</option>
                 {fallbackOptions.map((m) => (
                   <option key={`${m.providerId}:${m.modelId}`} value={`${m.providerId}:${m.modelId}`}>{m.modelId} — {m.kind} ({m.providerLabel})</option>
@@ -294,7 +289,7 @@ export function HeraldProjectProviderSection({ project }: { project: Project }) 
         </div>
 
         <div className="field">
-          <label className="field-label">Test connection</label>
+          <span className="field-label">Test connection</span>
           <button type="button" className="btn btn-ghost" style={{ height: 28, padding: "0 10px", fontSize: 12 }} onClick={handleTest} disabled={!providerId || !modelId || testState === "pending"}>
             <svg width={12} height={12} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5}><path d="M13 2 3 14h7l-1 8 10-12h-7l1-8z" /></svg>
             Test connection

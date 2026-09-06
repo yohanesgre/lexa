@@ -47,10 +47,14 @@ export function isHeraldWriteTool(name: string): name is HeraldWriteToolName {
 // are dropped silently; duplicates collapse.
 export function parseWriteTools(raw: string | null | undefined): string[] {
   if (!raw) return [];
+  const seen = new Set<string>();
   const out: string[] = [];
   for (const part of raw.split(",")) {
     const name = part.trim();
-    if (name !== "" && isHeraldWriteTool(name) && !out.includes(name)) out.push(name);
+    if (name !== "" && isHeraldWriteTool(name) && !seen.has(name)) {
+      seen.add(name);
+      out.push(name);
+    }
   }
   return out;
 }
@@ -334,11 +338,10 @@ async function record(deps: HeraldWriteToolDeps, proposal: { name: HeraldWriteTo
 }
 
 const tipTapDoc = z
-  .object({
+  .looseObject({
     type: z.literal("doc"),
-    content: z.array(z.object({ type: z.string() }).passthrough()).optional(),
-  })
-  .passthrough() as unknown as z.ZodType<TipTapDoc, TipTapDoc>;
+    content: z.array(z.looseObject({ type: z.string() })).optional(),
+  }) as unknown as z.ZodType<TipTapDoc, TipTapDoc>;
 
 export function buildHeraldWriteTools(deps: HeraldWriteToolDeps) {
   const tools = [];

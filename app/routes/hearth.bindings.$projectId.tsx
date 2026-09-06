@@ -70,9 +70,9 @@ function HearthBindingDetailRoute() {
         <Link to="/hearth/bindings" className="btn btn-ghost" style={{ height: 28, padding: "0 10px", fontSize: 12 }}>← Back to bindings</Link>
         <span className="font-mono text-xs color-muted">{project.slug} · {project.name}</span>
       </div>
-      <HeraldProjectProviderSection project={project} />
-      <HeraldEngineSection project={project} />
-      <HeraldWriteToolsSection project={project} />
+      <HeraldProjectProviderSection key={project.id} project={project} />
+      <HeraldEngineSection key={project.id} project={project} />
+      <HeraldWriteToolsSection key={project.id} project={project} />
       <AgentSkillAvailabilitySection projectId={project.id} />
       <ProjectMemorySection projectId={project.id} />
     </section>
