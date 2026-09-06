@@ -98,7 +98,8 @@ CREATE TABLE session (
   ipAddress             TEXT,
   userAgent             TEXT,
   userId                TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  activeOrganizationId  TEXT                                  -- organization plugin; NULL = no active team
+  activeOrganizationId  TEXT,                                 -- organization plugin; NULL = no active team
+  impersonatedBy        TEXT                                  -- admin plugin (better-auth 1.7+); NULL = no impersonation
 );
 CREATE INDEX session_userId_idx ON session(userId);
 
@@ -154,6 +155,23 @@ CREATE TABLE member (
 );
 CREATE INDEX member_organizationId_idx ON member(organizationId);
 CREATE INDEX member_userId_idx ON member(userId);
+
+-- Organization invitations (better-auth 1.7+ startup check mandates the
+-- table; Lexa never uses it — team membership is direct member-row
+-- insertion, no email invites at team level).
+CREATE TABLE invitation (
+  id             TEXT PRIMARY KEY,
+  organizationId TEXT NOT NULL REFERENCES organization(id) ON DELETE CASCADE,
+  email          TEXT NOT NULL,
+  role           TEXT NOT NULL,
+  status         TEXT NOT NULL DEFAULT 'pending',             -- pending|accepted|rejected|canceled
+  teamId         TEXT,                                         -- org-teams feature (unused)
+  inviterId      TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  expiresAt      TEXT NOT NULL,
+  createdAt      TEXT NOT NULL
+);
+CREATE INDEX invitation_organizationId_idx ON invitation(organizationId);
+CREATE INDEX invitation_email_idx ON invitation(email);
 
 -- ============================================================
 -- Workspace invitations (superadmin-issued app-member invites)
