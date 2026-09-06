@@ -5,10 +5,10 @@
 // Flavor picks only the .env.<flavor> file + image tag.
 import { Effect, Data } from "effect";
 import { spawnSync } from "node:child_process";
-import { existsSync, readFileSync, writeFileSync, mkdirSync, rmSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync, mkdirSync, rmSync, copyFileSync } from "node:fs";
 import { randomBytes } from "node:crypto";
 import { gunzipSync } from "node:zlib";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { CliConfigService, groupDir } from "./config";
 import { COMPOSE_FILES } from "./packed-compose";
 
@@ -270,9 +270,18 @@ export function materializeCompose(flavorName: string, flags: Record<string, str
   const deployDir = flagStr(flags, "deploy-dir") || join(groupDir(domain), "deploy");
   const entries = Object.entries(COMPOSE_FILES);
   if (entries.length === 0) {
-    // Running from source: the repo's compose files are the contract.
-    if (existsSync("docker-compose.yml")) return process.cwd();
-    throw new Error("no embedded compose files and no docker-compose.yml in cwd (run `bun run compile:cli` or use --deploy-dir)");
+    // Running from source: copy the repo's compose files into the deploy dir.
+    // Never operate in cwd — undeploy removes the deploy dir on teardown, so
+    // returning cwd here would wipe whatever directory the user ran from.
+    if (!existsSync("docker-compose.yml")) {
+      throw new Error("no embedded compose files and no docker-compose.yml in cwd (run `bun run compile:cli` or use --deploy-dir)");
+    }
+    mkdirSync(deployDir, { recursive: true });
+    const overlay = flags["direct"] === true ? "docker-compose.direct.yml" : `docker-compose.${flavorName}.yml`;
+    for (const rel of ["docker-compose.yml", overlay]) {
+      copyFileSync(rel, join(deployDir, rel));
+    }
+    return deployDir;
   }
   mkdirSync(deployDir, { recursive: true });
   const overlay = flags["direct"] === true ? "docker-compose.direct.yml" : `docker-compose.${flavorName}.yml`;
@@ -602,6 +611,9 @@ export const cmdUndeploy = Effect.fn("LexaCli/cmdUndeploy")(function* (
   }
 
   const deployDir = yield* Effect.try({ try: () => materializeCompose(flavorName, flags, domain), catch: (e) => new DeployError({ reason: `  ERROR: ${(e as Error).message}` }) });
+  if (resolve(deployDir) === process.cwd()) {
+    return yield* new DeployError({ reason: "  ERROR: refusing to tear down the current working directory — pass an explicit --deploy-dir" });
+  }
   process.chdir(deployDir);
   yield* downCompose(flavor);
 

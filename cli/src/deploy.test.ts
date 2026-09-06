@@ -132,14 +132,19 @@ describe("materializeCompose", () => {
     rmSync(deployDir, { recursive: true, force: true });
   });
 
-  it("falls back to the repo cwd when no compose files are embedded", async () => {
+  it("copies the repo compose files into the deploy dir when nothing is embedded", async () => {
     composeMocks.empty = true;
     vi.resetModules();
     const mod = await import("./deploy");
     const repo = mkdtempSync(join(tmpdir(), "lexa-deploy-repo-"));
     writeFileSync(join(repo, "docker-compose.yml"), "services: {}\n");
+    writeFileSync(join(repo, "docker-compose.prod.yml"), "services: {}\n");
     process.chdir(repo);
-    expect(mod.materializeCompose("prod", {}, "example.com")).toBe(repo);
+    const out = mod.materializeCompose("prod", {}, "example.com");
+    // Never the cwd itself — undeploy removes the deploy dir on teardown.
+    expect(out).not.toBe(repo);
+    expect(readFileSync(join(out, "docker-compose.yml"), "utf-8")).toContain("services:");
+    expect(existsSync(join(out, "docker-compose.prod.yml"))).toBe(true);
     process.chdir(cwd);
     rmSync(repo, { recursive: true, force: true });
   });
@@ -498,5 +503,27 @@ describe("cmdUndeploy", () => {
     expect(cfMocks.requests.length).toBe(0);
     exitSpy.mockRestore();
     log.mockRestore();
+  });
+
+  it("refuses when the deploy dir resolves to cwd (never wipe where you stand)", async () => {
+    Object.defineProperty(process.stdin, "isTTY", { value: false, configurable: true });
+    const repo = mkdtempSync(join(tmpdir(), "lexa-deploy-repodir-"));
+    writeFileSync(join(repo, "docker-compose.yml"), "services: {}\n");
+    writeFileSync(join(repo, "docker-compose.prod.yml"), "services: {}\n");
+    process.chdir(repo);
+    const mod = await import("./deploy");
+    const cfg = (await import("./config")).CliConfigService;
+    const svc = Effect.runSync(Effect.scoped(Layer.build(cfg.Default)));
+    const err = (await Effect.runPromise(
+      mod.cmdUndeploy({ ...DEPLOY_FLAGS, "deploy-dir": ".", yes: true }, ["example.com", "prod"]).pipe(
+        Effect.provideService(cfg, Context.get(svc, cfg)),
+      ),
+    ).catch((e) => e)) as Error;
+    expect(err.message).toMatch(/refusing to tear down the current working directory/);
+    expect(childMocks.spawnSyncCalls.length).toBe(0);
+    process.chdir(cwd);
+    // The directory (and its compose file) survive the refused teardown.
+    expect(existsSync(join(repo, "docker-compose.yml"))).toBe(true);
+    rmSync(repo, { recursive: true, force: true });
   });
 });
