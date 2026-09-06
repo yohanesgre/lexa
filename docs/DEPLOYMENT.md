@@ -270,7 +270,12 @@ exists.
 
 ## Upgrading across the Forge→Hearth rename (2026-08-24)
 
-Migration `0015_hearth_rename.sql` renames the DB tables and activity types;
+> Pre-release history: migrations `0001`–`0024` were squashed into a single
+> `0001_init.sql` baseline for 2026.1.0 (no tagged release predates it, so no
+> live database carries the old files). The rename below describes what the
+> baseline already contains; fresh installs get it directly.
+
+The baseline carries the renamed DB tables and activity types (`hearth_*`);
 the server image applies it at boot. Machines running the old listener/daemon
 must be reinstalled — the systemd unit (`lexa-hearth-listen`), state dir
 (`~/.local/share/lexa-hearth`), env vars (`HEARTH_*`,
