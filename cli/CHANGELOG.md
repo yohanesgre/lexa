@@ -2,10 +2,11 @@
 
 All notable changes to `lexa-cli` are documented here. Format based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). This project follows
-[Semantic Versioning](https://semver.org/).
+[Calendar Versioning](https://calver.org/) (`YYYY.MINOR.MICRO` — see
+`docs/RELEASING.md`; `0.1.x`–`0.3.0` predate the switch and were never tagged).
 
 The CLI version is INDEPENDENT of the web app version (see AGENTS.md):
-`cli-vX.Y.Z` tags release the binary; `vX.Y.Z` tags release the app image.
+`cli-vYYYY.MINOR.MICRO` tags release the binary; `vYYYY.MINOR.MICRO` tags release the app image.
 The version lives in `cli/package.json` — `publish-cli.yml` verifies the tag
 matches it before compiling.
 

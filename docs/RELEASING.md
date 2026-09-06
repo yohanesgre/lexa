@@ -4,12 +4,47 @@ The web app and CLI have **independent versions** and **independent release
 pipelines**. A version bump without its changelog entry is an incomplete
 release.
 
-## Versioning
+## Versioning — CalVer `YYYY.MINOR.MICRO`
+
+Lexa uses Calendar Versioning ([CalVer](https://calver.org/)), scheme
+`YYYY.MINOR.MICRO` — the same scheme as Unity and JetBrains IDEs
+(`2025.1`, `2025.2`, …). The year is a timestamp, not a compatibility
+promise: read "which release train am I on", not "will this break me"
+(the changelog answers the latter).
+
+- `YYYY` — calendar year (Gregorian, UTC) of the release, e.g. `2026`.
+- `MINOR` — Nth feature release within that year, starting at `1`.
+  Resets to `1` every January. May contain breaking changes; each ships
+  with migration notes in the changelog entry.
+- `MICRO` — patch/hotfix counter within `YYYY.MINOR`, starting at `0`.
+  Backwards-compatible fixes only. Resets to `0` on every MINOR bump.
+- No pre-release suffixes (`-rc1`, `-beta`, …) in tags or manifests;
+  stabilization happens on the release branch before tagging.
+
+Examples: `2026.1.0` (first feature release of 2026), `2026.1.1`
+(hotfix on top), `2026.2.0` (second feature release), `2027.1.0`
+(first release of the new year — MINOR resets even if 2026 ended at
+`2026.5.x`).
+
+History: `0.1.0`–`0.3.0` predate CalVer and were never tagged; their
+changelog sections stay as-is for archaeology. `2026.1.0` is the first
+tagged release of both artifacts.
+
+Web app and CLI keep independent versions and pipelines (table above)
+but follow the same scheme. They ship together at `2026.1.0` (the
+Forge→Hearth rename breaks both sides at once) and may diverge after
+that — e.g. web at `2026.2.0` while CLI stays `2026.1.3`. Each side
+bumps only when it ships; the release commit names only the side(s)
+being released.
+
+No code changes were needed for the switch: the CI globs (`v*` /
+`cli-v*`), the tag guard, and the `upgrade` numeric segment compare
+all handle `YYYY.MINOR.MICRO` as-is (verified at adoption).
 
 | | Web app | CLI |
 |---|---|---|
 | Manifest (single source) | `package.json` | `cli/package.json` (read statically by `cli/src/version.ts` — never regenerated) |
-| Tag format | `vX.Y.Z` | `cli-vX.Y.Z` |
+| Tag format | `vYYYY.MINOR.MICRO` (e.g. `v2026.1.0`) | `cli-vYYYY.MINOR.MICRO` (e.g. `cli-v2026.1.0`) |
 | CI | `.github/workflows/publish.yml` → `ghcr.io/yohanesgre/lexa` | `.github/workflows/publish-cli.yml` → GitHub release `bin/lexa-cli` |
 | Changelog | `CHANGELOG.md` (root) | `cli/CHANGELOG.md` |
 | Failure guard | — | `publish-cli.yml` fails if the tag doesn't match `cli/package.json` |
@@ -21,7 +56,7 @@ CLI asset.
 ## Pre-tag checklist
 
 1. **Both changelogs.** Before tagging, verify the new version has a dated
-   section (`## [X.Y.Z] - YYYY-MM-DD`, Keep a Changelog) in BOTH
+   section (`## [2026.1.0] - YYYY-MM-DD`, Keep a Changelog) in BOTH
    `CHANGELOG.md` and `cli/CHANGELOG.md` that cover their respective changes.
 2. **Wireframes submodule.** Commit `wireframes/` changes INSIDE the
    submodule first; the parent release commit then records the new pointer.
@@ -33,16 +68,17 @@ CLI asset.
 4. **Gate.** `tsc --noEmit`, full `vitest run`, and `bash wireframes/build.sh`
    green before tagging.
 5. **Tag the release commit.** Annotated only:
-   `git tag -a vX.Y.Z -m "<one-line summary>"` and
-   `git tag -a cli-vX.Y.Z -m "<one-line summary>"`.
+   `git tag -a v2026.1.0 -m "<one-line summary>"` and
+   `git tag -a cli-v2026.1.0 -m "<one-line summary>"` (substitute the
+   version being released).
 6. **Release commit shape.** One
-   `chore(release): vX.Y.Z, cli-vX.Y.Z` commit containing the version bumps
+   `chore(release): v2026.1.0, cli-v2026.1.0` commit containing the version bumps
    + both changelog entries, then the tags.
 
 ## Web app image flow
 
 - Only `v*` tags publish — no staging image.
-- `v*` tags → `ghcr.io/yohanesgre/lexa:latest` + `ghcr.io/yohanesgre/lexa:<version>` (where `<version>` is the tag name, e.g. `v0.3.0`).
+- `v*` tags → `ghcr.io/yohanesgre/lexa:latest` + `ghcr.io/yohanesgre/lexa:<version>` (where `<version>` is the tag name, e.g. `v2026.1.0`).
 - The web wizard at `/setup` gates `LXK_ENV` non-dev deployments to skip
   sample data; `LXK_ENV=dev` enables `LXK_SEED_DEV=1` seeding.
 - Remote deploy uses `lexa-cli deploy <domain> [staging|prod]`. Deploy
