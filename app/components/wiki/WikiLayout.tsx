@@ -1,6 +1,7 @@
 import { Link, useNavigate } from "@tanstack/react-router";
 import { useEffect, useMemo, useState, useCallback, useRef } from "react";
-import { useScrollLock } from "../../lib/scroll-lock";
+import { lockScroll } from "../../lib/scroll-lock";
+import { hasMatchMedia, isNarrowViewport } from "../../lib/viewport";
 import { Search, ChevronRight, Plus, X, Pencil, FolderInput, Trash2, PanelLeft } from "lucide-react";
 import { useWikiPages, useSearchWikiPages, useDeleteWikiPage } from "../../lib/queries";
 import type { WikiPageMeta } from "../../../shared/types";
@@ -312,18 +313,19 @@ export function WikiLayout({ slug, activePageSlug, children }: WikiLayoutProps) 
 
   const showResults = query.length > 0;
   // Narrow screens start collapsed so the tree never starves the content.
-  const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(() =>
-    typeof window !== "undefined" && typeof window.matchMedia === "function"
-      ? window.matchMedia("(max-width: 767px)").matches
-      : false
-  );
+  // Static default (same on server + client); the viewport is read once on
+  // mount and the user's manual choice sticks afterwards.
+  const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(false);
+  useEffect(() => {
+    if (isNarrowViewport()) setSidebarCollapsed(true);
+  }, []);
 
   // The top nav's "PanelLeft" button dispatches this event on mobile. We
   // open the sidebar so the user can pick a different page. Desktop
   // behavior is unchanged (the rail remains the entry point there).
   useEffect(() => {
     function handleToggle() {
-      if (typeof window.matchMedia === "function" && window.matchMedia("(max-width: 767px)").matches) {
+      if (hasMatchMedia() && isNarrowViewport()) {
         setSidebarCollapsed(false);
       }
     }
@@ -333,7 +335,7 @@ export function WikiLayout({ slug, activePageSlug, children }: WikiLayoutProps) 
 
   // Lock body scroll while the wiki sidebar is open.
   useEffect(() => {
-    return useScrollLock(!sidebarCollapsed);
+    return lockScroll(!sidebarCollapsed);
   }, [sidebarCollapsed]);
 
   return (

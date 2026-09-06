@@ -38,38 +38,39 @@ const BLOCK_TAGS = new Set(["p", "h1", "h2", "h3", "h4"]);
 
 function renderInline(tokens: Token[] | undefined, opts: MarkdownRenderOptions): ReactNode[] {
   return (tokens ?? []).map((t, i) => {
+    const k = `${i}:${t.type}`;
     switch (t.type) {
       case "text":
         return (
-          <span key={i}>
+          <span key={k}>
             {"tokens" in t && t.tokens ? renderInline(t.tokens, opts) : (opts.renderText ? opts.renderText((t as Tokens.Text).text) : (t as Tokens.Text).text)}
           </span>
         );
       case "escape":
-        return <span key={i}>{(t as Tokens.Escape).text}</span>;
+        return <span key={k}>{(t as Tokens.Escape).text}</span>;
       case "strong":
-        return <strong key={i}>{renderInline((t as Tokens.Strong).tokens, opts)}</strong>;
+        return <strong key={k}>{renderInline((t as Tokens.Strong).tokens, opts)}</strong>;
       case "em":
-        return <em key={i}>{renderInline((t as Tokens.Em).tokens, opts)}</em>;
+        return <em key={k}>{renderInline((t as Tokens.Em).tokens, opts)}</em>;
       case "del":
-        return <del key={i}>{renderInline((t as Tokens.Del).tokens, opts)}</del>;
+        return <del key={k}>{(t as Tokens.Del).text}</del>;
       case "codespan":
-        return <code key={i}>{(t as Tokens.Codespan).text}</code>;
+        return <code key={k}>{(t as Tokens.Codespan).text}</code>;
       case "link": {
         const link = t as Tokens.Link;
         const href = safeHref(link.href);
         const inner = renderInline(link.tokens, opts);
-        if (!href) return <span key={i}>{inner}</span>;
+        if (!href) return <span key={k}>{inner}</span>;
         return (
-          <a key={i} href={href} target="_blank" rel="noopener noreferrer">
+          <a key={k} href={href} target="_blank" rel="noopener noreferrer">
             {inner}
           </a>
         );
       }
       case "image":
-        return <span key={i}>{opts.renderText ? opts.renderText((t as Tokens.Image).text) : (t as Tokens.Image).text}</span>;
+        return <span key={k}>{opts.renderText ? opts.renderText((t as Tokens.Image).text) : (t as Tokens.Image).text}</span>;
       case "br":
-        return <br key={i} />;
+        return <br key={k} />;
       default:
         return null;
     }
@@ -82,7 +83,7 @@ function listItem(item: Tokens.ListItem, opts: MarkdownRenderOptions, key: numbe
       {item.task && <input type="checkbox" disabled checked={item.checked === true} readOnly />}
       {(item.tokens ?? []).map((t, i) =>
         t.type === "text" ? (
-          <span key={i}>
+          <span key={`t${i}`}>
             {"tokens" in t && t.tokens ? renderInline(t.tokens, opts) : (opts.renderText ? opts.renderText((t as Tokens.Text).text) : (t as Tokens.Text).text)}
           </span>
         ) : (
@@ -138,15 +139,15 @@ function renderBlock(t: Token, opts: MarkdownRenderOptions, key: number): ReactN
           <thead>
             <tr>
               {table.header.map((cell, i) => (
-                <th key={i}>{renderInline(cell.tokens, opts)}</th>
+                <th key={`h${i}`}>{renderInline(cell.tokens, opts)}</th>
               ))}
             </tr>
           </thead>
           <tbody>
             {table.rows.map((row, r) => (
-              <tr key={r}>
+              <tr key={`r${r}`}>
                 {row.map((cell, c) => (
-                  <td key={c}>{renderInline(cell.tokens, opts)}</td>
+                  <td key={`c${c}`}>{renderInline(cell.tokens, opts)}</td>
                 ))}
               </tr>
             ))}
@@ -205,14 +206,17 @@ function blockCacheKey(index: number, type: string, raw: string): string {
 // partial block instead of the whole reply. This is what keeps tables/lists
 // from lagging behind the token stream.
 export const MarkdownContent = memo(function MarkdownContent({ md, renderText, trailing }: MarkdownContentProps) {
-  const cacheRef = useRef<Map<string, ReactNode>>(new Map());
-  const renderTextRef = useRef(renderText);
+  // One cache per renderText identity (the hook closes over project/slug —
+  // cached nodes embed its output, so they must not survive an identity
+  // change). The outer map only ever gains entries: no ref is written during
+  // render; superseded inner maps become unreachable (GC) and each is pruned
+  // to its own live keys every pass.
+  const cachesRef = useRef<Map<typeof renderText, Map<string, ReactNode>>>(new Map());
   const nodes = useMemo(() => {
-    const cache = cacheRef.current;
-    if (renderTextRef.current !== renderText) {
-      // Cached nodes embed the previous hook's output — drop them all.
-      renderTextRef.current = renderText;
-      cache.clear();
+    let cache = cachesRef.current.get(renderText);
+    if (cache === undefined) {
+      cache = new Map<string, ReactNode>();
+      cachesRef.current.set(renderText, cache);
     }
     const opts = { renderText };
     const tokens = marked.lexer(md);

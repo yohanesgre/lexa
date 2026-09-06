@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
-import { useScrollLock } from "../../lib/scroll-lock";
+import { lockScroll } from "../../lib/scroll-lock";
+import { matchMedia } from "../../lib/viewport";
 import type { HeraldChatThreadSummary } from "../../lib/api";
 import { formatRelative } from "../../lib/relative-time";
 
@@ -32,7 +33,7 @@ interface ThreadsSidebarProps {
 // Drawer dismissal is a <900px affordance — desktop collapse is owned by the
 // header toggle alone. Safe under jsdom (no matchMedia → desktop).
 function isMobileViewport(): boolean {
-  return typeof window.matchMedia === "function" && window.matchMedia("(max-width: 899.98px)").matches;
+  return matchMedia("(max-width: 899.98px)");
 }
 
 function PinIcon() {
@@ -231,10 +232,9 @@ export function ThreadsSidebar({
     );
   };
 
-  useEffect(() => {
-    if (!open || !isMobileViewport()) return;
-    return useScrollLock(true);
-  }, [open]);
+  // Scroll lock: plain function called from an effect (not a hook — rules
+  // of hooks). The lock itself is gated on open + mobile viewport.
+  useEffect(() => lockScroll(open && isMobileViewport()), [open]);
 
   // Collapsed: 36px icon rail with the restore control — wiki sidebar's
   // exact affordance (WikiLayout.tsx), kept at every viewport width so

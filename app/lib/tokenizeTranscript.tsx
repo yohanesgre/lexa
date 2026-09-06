@@ -40,13 +40,14 @@ export function tokenizeMentionText(text: string): TokenSegment[] {
 
 export function renderTokenized(text: string, slug: string): ReactNode {
   return tokenizeMentionText(text).map((seg, i) => {
-    if (seg.kind === "text") return <span key={i}>{seg.text}</span>;
+    const k = `${i}:${seg.kind}:${seg.text}`;
+    if (seg.kind === "text") return <span key={k}>{seg.text}</span>;
     const href =
       seg.kind === "task"
         ? `/${encodeURIComponent(slug)}/board?task=${encodeURIComponent(seg.ref ?? "")}`
         : `/${encodeURIComponent(slug)}/wiki/${encodeURIComponent(seg.ref ?? "")}`;
     return (
-      <a key={i} href={href} className="mention-chip">
+      <a key={k} href={href} className="mention-chip">
         {seg.kind === "task" ? <span className="task-key">{seg.text}</span> : seg.text}
       </a>
     );

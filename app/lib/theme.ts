@@ -23,16 +23,14 @@ export function useTheme(): { theme: Theme; toggleTheme: () => void; mounted: bo
   }, [theme]);
 
   const toggleTheme = useCallback(() => {
-    setTheme((t) => {
-      const next = t === "dark" ? "light" : "dark";
-      try {
-        localStorage.setItem(STORAGE_KEY, next);
-      } catch {
-        // ignore storage errors
-      }
-      return next;
-    });
-  }, []);
+    const next = theme === "dark" ? "light" : "dark";
+    setTheme(next);
+    try {
+      localStorage.setItem(STORAGE_KEY, next);
+    } catch {
+      // ignore storage errors
+    }
+  }, [theme]);
 
   return { theme, toggleTheme, mounted };
 }

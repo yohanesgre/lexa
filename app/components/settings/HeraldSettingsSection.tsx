@@ -709,14 +709,15 @@ export function HeraldEngineSection({ project }: { project: Project }) {
     save.mutate({ ...storedBaseInput(settings), ...patch });
   };
 
-  const optionStyle = (selected: boolean): React.CSSProperties => ({
-    height: 24,
-    padding: "0 12px",
-    fontSize: 12,
-    ...(selected
-      ? { background: "var(--lx-surface-selected)", borderColor: "var(--lx-border-focus)", color: "var(--lx-text-primary)" }
-      : { color: "var(--lx-text-secondary)" }),
-  });
+const OPTION_BASE_STYLE: React.CSSProperties = { height: 24, padding: "0 12px", fontSize: 12 };
+const OPTION_SELECTED_STYLE: React.CSSProperties = {
+  background: "var(--lx-surface-selected)",
+  borderColor: "var(--lx-border-focus)",
+  color: "var(--lx-text-primary)",
+};
+const OPTION_UNSELECTED_STYLE: React.CSSProperties = { color: "var(--lx-text-secondary)" };
+const optionStyle = (selected: boolean): React.CSSProperties =>
+  selected ? { ...OPTION_BASE_STYLE, ...OPTION_SELECTED_STYLE } : { ...OPTION_BASE_STYLE, ...OPTION_UNSELECTED_STYLE };
 
   return (
     <section className="mb-8">

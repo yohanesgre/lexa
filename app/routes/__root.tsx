@@ -68,10 +68,9 @@ function RootComponent() {
       <head>
         <HeadContent />
         <script
-          dangerouslySetInnerHTML={{
-            __html: "try{var t=localStorage.getItem('lexa:theme');document.documentElement.dataset.theme=t==='light'?'light':'dark'}catch{}",
-          }}
-        />
+          suppressHydrationWarning
+          // eslint-disable-next-line react/no-danger -- static inline bootstrap, no user data interpolates
+        >{`try{var t=localStorage.getItem('lexa:theme');document.documentElement.dataset.theme=t==='light'?'light':'dark'}catch{}`}</script>
       </head>
       <body>
         <QueryClientProvider client={queryClient}>

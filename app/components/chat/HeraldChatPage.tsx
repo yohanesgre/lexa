@@ -19,6 +19,7 @@ import { heraldSendForKey, useHeraldStream } from "../../lib/use-herald-stream";
 import { useDebouncedValue } from "../../lib/useDebouncedValue";
 import { resendIndex } from "../../lib/resendIndex";
 import { copyToClipboard } from "../../lib/clipboard";
+import { isNarrowViewport, hasMatchMedia, matchMedia } from "../../lib/viewport";
 import { useMentionTokens } from "../../lib/useMentionTokens";
 import { renderTokenized } from "../../lib/tokenizeTranscript";
 import { MarkdownContent, highlightCode } from "../../lib/markdownToReact";
@@ -470,7 +471,7 @@ export function HeraldChatPage({ slug, thread }: { slug: string; thread?: string
       if (window.localStorage.getItem("lexa-chat-sidebar") === "0") setSidebarOpen(false);
       // On mobile the overlay would obscure the chat — default to closed
       // unless the user explicitly opened it on this device.
-      else if (window.matchMedia("(max-width: 899.98px)").matches && window.localStorage.getItem("lexa-chat-sidebar") !== "1") {
+      else if (matchMedia("(max-width: 899.98px)") && window.localStorage.getItem("lexa-chat-sidebar") !== "1") {
         setSidebarOpen(false);
       }
     } catch {
@@ -478,27 +479,21 @@ export function HeraldChatPage({ slug, thread }: { slug: string; thread?: string
     }
   }, []);
   const toggleSidebar = useCallback(() => {
-    setSidebarOpen((v) => {
-      const next = !v;
-      try {
-        window.localStorage.setItem("lexa-chat-sidebar", next ? "1" : "0");
-      } catch {
-        // non-fatal
-      }
-      return next;
-    });
-  }, []);
+    const next = !sidebarOpen;
+    setSidebarOpen(next);
+    try {
+      window.localStorage.setItem("lexa-chat-sidebar", next ? "1" : "0");
+    } catch {
+      // non-fatal
+    }
+  }, [sidebarOpen]);
   // The top nav's "PanelLeft" button dispatches this event on mobile.
   // We toggle the threads sidebar. Desktop behavior is unchanged (the
   // collapsed rail remains the entry point there).
   useEffect(() => {
     function handleToggle() {
-      if (typeof window.matchMedia === "function" && window.matchMedia("(max-width: 899.98px)").matches) {
-        setSidebarOpen((v) => {
-          const next = !v;
-          try { window.localStorage.setItem("lexa-chat-sidebar", next ? "1" : "0"); } catch {}
-          return next;
-        });
+      if (hasMatchMedia() && matchMedia("(max-width: 899.98px)")) {
+        setSidebarOpen((v) => !v);
       }
     }
     window.addEventListener("lexa:toggle-threads-sidebar", handleToggle);
@@ -584,14 +579,17 @@ export function HeraldChatPage({ slug, thread }: { slug: string; thread?: string
   // expanded by default on desktop (chip row is the primary selection UI).
   // The viewport is read on mount; subsequent resizes keep the current
   // state — the user can collapse/expand manually and the choice sticks.
-  const [skillsPanelOpen, setSkillsPanelOpen] = useState<boolean>(() => {
-    if (typeof window === "undefined" || typeof window.matchMedia !== "function") return true;
-    return !window.matchMedia("(max-width: 767px)").matches;
-  });
+  // Narrow screens start collapsed so the tree never starves the content.
+  // Static default (same on server + client); the viewport is read once on
+  // mount below and the user's manual choice sticks afterwards.
+  const [skillsPanelOpen, setSkillsPanelOpen] = useState<boolean>(true);
+  useEffect(() => {
+    if (isNarrowViewport()) setSkillsPanelOpen(false);
+  }, []);
   // Mobile composer treatment: collapse skills by default, flip dropdowns
   // upward so they don't run off the bottom of the screen. Desktop keeps
   // the original behavior (chips visible, dropdowns below).
-  const isMobileComposer = typeof window !== "undefined" && typeof window.matchMedia === "function" && window.matchMedia("(max-width: 767px)").matches;
+  const isMobileComposer = isNarrowViewport();
   // Per-turn thinking effort override (herald-chat.html composer): ""
   // follows the project default; an explicit level rides the next stream
   // payload only, then falls back. Resets on thread switch / New chat.
@@ -731,7 +729,7 @@ export function HeraldChatPage({ slug, thread }: { slug: string; thread?: string
     const derived = raw ? deriveChatTitle(raw) : "";
     const title: string | null = derived ? derived : null;
     const sortThreads = (threads: HeraldChatThreadSummary[]) =>
-      [...threads].sort((a, b) => {
+      threads.toSorted((a, b) => {
         if (a.pinned !== b.pinned) return a.pinned ? -1 : 1;
         return b.updatedAt.localeCompare(a.updatedAt);
       });
@@ -785,7 +783,7 @@ export function HeraldChatPage({ slug, thread }: { slug: string; thread?: string
           updatedAt: now,
         };
         const sortThreads = (threads: HeraldChatThreadSummary[]) =>
-          [...threads].sort((a, b) => {
+          threads.toSorted((a, b) => {
             if (a.pinned !== b.pinned) return a.pinned ? -1 : 1;
             return b.updatedAt.localeCompare(a.updatedAt);
           });
@@ -1462,7 +1460,7 @@ function AssistantBubble({
           )}
           {segments.map((seg, i) =>
             seg.fenced ? (
-              <div key={i} className="herald-codeblock">
+              <div key={`${i}:fence`} className="herald-codeblock">
                 <span className="herald-codeblock-chrome">
                   {seg.lang && <span className="herald-codeblock-lang">{seg.lang}</span>}
                   <CopyButton text={seg.body} label="Copy code" />
@@ -1473,7 +1471,7 @@ function AssistantBubble({
                 />
               </div>
             ) : (
-              <div key={i} className="bubble-md">
+              <div key={`${i}:text`} className="bubble-md">
                 <MarkdownContent md={seg.body} renderText={renderText} />
               </div>
             )

@@ -74,7 +74,7 @@ export function renderInline(
 ): ReactNode {
   if (!nodes) return null;
   return nodes.map((node, i) => {
-    const nodeKey = `${keyPrefix}-${i}`;
+    const nodeKey = `${keyPrefix}-${i}:${node.type}`;
     if (node.type === "text") {
       let el: ReactNode = node.text ?? "";
       for (const mark of node.marks ?? []) {
@@ -97,7 +97,7 @@ export function renderInline(
             );
         }
       }
-      return <span key={`${keyPrefix}-t-${node.text ?? ""}`}>{el}</span>;
+      return <span key={`${nodeKey}-t-${node.text ?? ""}`}>{el}</span>;
     }
     if (node.type === "hardBreak") return <br key={nodeKey} />;
     if (node.type === "mention") return renderMention(node.attrs, nodeKey, slug, variant);
@@ -122,7 +122,7 @@ function renderBlocks(
   variant: "task" | "wiki",
   slug?: string
 ): ReactNode {
-  return (nodes ?? []).map((node, i) => renderNode(node, `${keyPrefix}-b${i}`, variant, slug));
+  return (nodes ?? []).map((node, i) => renderNode(node, `${keyPrefix}-b${i}-${node.type}`, variant, slug));
 }
 
 export function renderNode(
@@ -301,5 +301,5 @@ export function renderDoc(doc: TipTapDoc, variant: "task" | "wiki" = "task", slu
     if (node.type === "heading") return hasText(node.content ?? []);
     return true;
   });
-  return visibleNodes.map((node, i) => renderNode(node, `n${i}`, variant, slug));
+  return visibleNodes.map((node, i) => renderNode(node, `n${i}-${node.type}`, variant, slug));
 }

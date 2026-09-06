@@ -391,8 +391,8 @@ export function HeraldApprovalBatch({
           </button>
         )}
       </div>
-      {[...chips]
-        .sort((a, b) => a.seq - b.seq)
+      {chips
+        .toSorted((a, b) => a.seq - b.seq)
         .map((chip) => (
           <ApprovalChipRow key={chip.approvalId} chip={chip} total={total} mixedBatch={mixed} disabled={locked} onDecide={onDecide} />
         ))}

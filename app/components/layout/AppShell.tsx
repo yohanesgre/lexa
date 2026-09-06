@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { useScrollLock } from "../../lib/scroll-lock";
+import { lockScroll } from "../../lib/scroll-lock";
 import { Link, Outlet, useRouterState, useNavigate } from "@tanstack/react-router";
 import { Menu, X, PanelLeft, ChevronDown } from "lucide-react";
 import { cn } from "../ui/cn";
@@ -30,7 +30,7 @@ export function AppShell() {
   // the menu's own overflow handles content scrolling on touch.
   useEffect(() => {
     if (!menuOpen) return;
-    return useScrollLock(menuOpen);
+    return lockScroll(menuOpen);
   }, [menuOpen]);
 
   // Close the mobile menu on route change so it doesn't linger over the

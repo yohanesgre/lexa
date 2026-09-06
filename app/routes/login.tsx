@@ -5,10 +5,10 @@ import { Field } from "../components/ui/Field";
 import { TextInput } from "../components/ui/TextInput";
 
 export const Route = createFileRoute("/login")({
-  ssr:false,
   validateSearch: (search: Record<string, unknown>): { redirect?: string | undefined } => ({
     redirect: typeof search.redirect === "string" ? search.redirect : undefined,
   }),
+  ssr: false,
   component: LoginPage,
 });
 

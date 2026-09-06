@@ -105,10 +105,11 @@ export function HeraldActivity({ items, tools, reasoningActive, reasoningMs, don
   return (
     <>
       {items.map((item, idx) => {
+        const k = `${idx}:${item.kind}`;
         if (item.kind === "text") {
           const isLatest = idx === items.length - 1;
           return (
-            <div key={idx} className="bubble-md">
+            <div key={k} className="bubble-md">
               <MarkdownContent
                 md={item.text}
                 renderText={renderText}
@@ -119,12 +120,12 @@ export function HeraldActivity({ items, tools, reasoningActive, reasoningMs, don
         }
         if (item.kind === "tool") {
           return (
-            <div key={idx} className="herald-activity">
+            <div key={k} className="herald-activity">
               <ToolLine chip={item.chip} />
             </div>
           );
         }
-        return <ReasoningRow key={idx} item={item} active={reasoningActive && item === lastReasoningItem} />;
+        return <ReasoningRow key={k} item={item} active={reasoningActive && item === lastReasoningItem} />;
       })}
     </>
   );
@@ -159,7 +160,7 @@ function DoneFold({ items, tools, reasoningMs }: {
           item.kind === "reasoning" ? (
             item.text ? <div key={`r${i}`} className="herald-activity-reasoning">{item.text}</div> : null
           ) : (
-            <ToolLine key={`t${i}`} chip={item.chip} />
+            <ToolLine key={`t${i}-${item.chip}`} chip={item.chip} />
           )
         )}
     </div>

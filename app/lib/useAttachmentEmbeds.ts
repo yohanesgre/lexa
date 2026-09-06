@@ -1,3 +1,4 @@
+import { useCallback } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import type { EditorView } from "@tiptap/pm/view";
 import type { ActivityEvent, Attachment } from "../../shared/types";
@@ -48,12 +49,12 @@ export function useAttachmentEmbeds({ slug, documentType, documentId }: Attachme
     }
   };
 
-  const insertImageAt = (view: EditorView, pos: number | null, src: string, alt: string) => {
+  const insertImageAt = useCallback((view: EditorView, pos: number | null, src: string, alt: string) => {
     const schema = view.state.schema;
     if (!schema.nodes.image) return;
     const node = schema.nodes.image.create({ src, alt });
     view.dispatch(view.state.tr.insert(pos ?? view.state.selection.from, node));
-  };
+  }, []);
 
   const processFiles = async (view: EditorView, files: File[], dropPos: number | null) => {
     let pos = dropPos;

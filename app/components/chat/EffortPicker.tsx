@@ -67,12 +67,17 @@ export function EffortPicker({ effort, projectEffort, disabled = false, align = 
     };
   }, [open]);
 
-  const itemStyle = (selected: boolean): React.CSSProperties => ({
-    height: 28,
-    fontSize: 12,
-    justifyContent: "space-between",
-    ...(selected ? { background: "var(--lx-surface-selected)", color: "var(--lx-text-primary)" } : {}),
-  });
+const ITEM_BASE_STYLE: React.CSSProperties = {
+  height: 28,
+  fontSize: 12,
+  justifyContent: "space-between",
+};
+const ITEM_SELECTED_STYLE: React.CSSProperties = {
+  background: "var(--lx-surface-selected)",
+  color: "var(--lx-text-primary)",
+};
+const itemStyle = (selected: boolean): React.CSSProperties =>
+  selected ? { ...ITEM_BASE_STYLE, ...ITEM_SELECTED_STYLE } : ITEM_BASE_STYLE;
 
   return (
     <div ref={rootRef} style={{ position: "relative", display: "inline-flex" }}>

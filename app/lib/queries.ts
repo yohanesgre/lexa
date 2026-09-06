@@ -2045,7 +2045,7 @@ export function useHeraldChatList(projectId: string | undefined, q?: string) {
 }
 
 function sortThreads(threads: api.HeraldChatThreadSummary[]): api.HeraldChatThreadSummary[] {
-  return [...threads].sort((a, b) => {
+  return threads.toSorted((a, b) => {
     if (a.pinned !== b.pinned) return a.pinned ? -1 : 1;
     return b.updatedAt.localeCompare(a.updatedAt);
   });
