@@ -73,9 +73,10 @@ for the $5/mo rationale, feasibility tables, and full HOW.
 - **Cloudflare provisioning (per flavor):** D1 database + R2 bucket (attachments,
   native binding driver) + KV (if needed) + Worker route + custom domain. No
   tunnel, no VPS.
-- **Migrations & seed:** `wrangler d1 migrations create/apply` replaces boot-time
-  `migrate.ts`; `wrangler d1 execute --file` for seed; `lexa-cli deploy --runtime
-  workers --seed` re-applies `scripts/seed-dev.sql` (once the flavor ships).
+- **Migrations & seed:** `lexa-cli deploy --runtime workers` applies each
+  `migrations/*.sql` file to D1 via `wrangler d1 execute --file` — one batch
+  per file plus its `_migrations` registry row, the same semantics as the Bun
+  boot-time runner (no `wrangler d1 migrations` journal involved).
 - **Cron:** Workers' `scheduled` handler runs prune + backup on `*/15 * * * *`
   (`wrangler.jsonc`); Bun keeps its `setInterval`.
 - **Secrets:** `wrangler secret put` for all secrets; `GITHUB_PRIVATE_KEY_FILE`
@@ -122,7 +123,7 @@ on different domains; one failing does not affect the other.
 | `GITHUB_WEBHOOK_SECRET` | HMAC secret for the `/api/webhooks/github` route |
 | `LOG_LEVEL` | logging level (default `info`) |
 | `LXK_ADMIN_EMAILS` | comma-separated **superadmin** emails — env-only allow-list, applied at provisioning (setup wizard only); never edited at runtime |
-| `LXK_API_KEY` | server auth Bearer key (`lxk_` + 43 chars) — machines use it directly; also injected into the served HTML as `<meta name="lxk-api-key">` for browsers |
+| `LXK_API_KEY` | server auth Bearer key (`lxk_` + 43 chars) — machines use it directly; browsers authenticate via the session cookie |
 | `LXK_HEARTH_DAEMON_TOKEN` | shared secret for Hearth daemons (alternative to a Settings API key) |
 | `LXK_MAX_BODY_MB` | max request body for `/api` in MB (default 16); webhook payloads hard-capped at 1 MB before HMAC, regardless |
 | `LXK_PUBLIC_URL` | public base URL of this flavor (e.g. `https://lexa.example.com`) — Better Auth `baseURL` + `trustedOrigins`; written by `lexa-cli deploy` from the deploy domain; hand-set in dev |
@@ -131,8 +132,9 @@ on different domains; one failing does not affect the other.
 
 **Unused by the server:** `LXK_ACCESS_AUD` / `LXK_ACCESS_TEAM` (Cloudflare
 Access) — the server reads them nowhere, but docker-compose still passes both
-into the container and `lexa-cli deploy` still rewrites them. **Still live:**
-`VITE_LXK_API_KEY` (browser key injection — served as `<meta name="lxk-api-key">`). **Never exist:** Google OAuth
+into the container and `lexa-cli deploy` still rewrites them. `VITE_LXK_API_KEY`
+is still written by setup but read by nothing — browsers authenticate via the
+session cookie. **Never exist:** Google OAuth
 envs, SMTP envs — human auth is in-app email/password (Better Auth).
 
 ## Bootstrap

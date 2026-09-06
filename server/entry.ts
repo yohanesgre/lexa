@@ -305,25 +305,19 @@ const server: Server<unknown> = Bun.serve({
         console.error("[SSR] Uncaught:", err);
         return withSecurityHeaders(new Response("Internal error", { status: 500, headers: { "Content-Type": "text/plain" } }));
       }
-      // Inject the server's current API key into the HTML so the browser can
-      // authenticate without a build-time baked key. This keeps :3000 working
-      // even after `bun run setup` rotates the key in .env (the built bundle
-      // would otherwise carry a stale key). (The x-lxk-user / lxk-logout meta
-      // tags are removed with the Cloudflare Access flow — browser identity
-      // comes from the session cookie.)
-      if (process.env.LXK_API_KEY && res.headers.get("content-type")?.includes("text/html")) {
-        const html = await res.text();
-        const injected = html.replace(
-          "<head>",
-          `<head><meta name="lxk-api-key" content="${process.env.LXK_API_KEY}">`
-        );
-        // The key-bearing page must never be cached (browser or CDN).
-        const injectedHeaders = new Headers(res.headers);
-        injectedHeaders.set("Cache-Control", "no-store");
-        injectedHeaders.set("X-Content-Type-Options", "nosniff");
-        return new Response(injected, {
+      // SSR HTML must never be cached (browser or CDN). (A previous revision
+      // injected the server API key as <meta name="lxk-api-key"> here for
+      // browser auth; nothing has read it since the session-cookie switch,
+      // and the streamed SSR output carries no <head> for the replace to
+      // match, so the injection was dead — removed. Browser identity comes
+      // from the session cookie.)
+      if (res.headers.get("content-type")?.includes("text/html")) {
+        const headers = new Headers(res.headers);
+        headers.set("Cache-Control", "no-store");
+        headers.set("X-Content-Type-Options", "nosniff");
+        return new Response(res.body, {
           status: res.status,
-          headers: injectedHeaders,
+          headers,
         });
       }
       return res;
