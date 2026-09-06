@@ -1,5 +1,5 @@
 import { createRouter as createTanStackRouter, type Serializable } from "@tanstack/react-router";
-import { QueryClient, dehydrate, hydrate } from "@tanstack/react-query";
+import { QueryClient, dehydrate, hydrate, type DehydratedState } from "@tanstack/react-query";
 import { routeTree } from "./routeTree.gen";
 
 export interface RouterContext {
@@ -31,7 +31,7 @@ export function getRouter() {
       return { queryClientState: { queries: state.queries } as unknown as Serializable };
     },
     hydrate: (payload) => {
-      hydrate(queryClient, payload.queryClientState);
+      hydrate(queryClient, payload.queryClientState as unknown as DehydratedState);
     },
   });
   return router;

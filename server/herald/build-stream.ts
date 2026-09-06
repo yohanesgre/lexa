@@ -190,7 +190,7 @@ export function buildStream(ctx: StreamRunContext): ReadableStream<StreamFrame> 
               } else if (chunk.type === "TOOL_CALL_END") {
                 const id = chunk.toolCallId !== undefined ? String(chunk.toolCallId) : "";
                 const pending = pendingCalls.get(id);
-                const rawName = chunk.toolCallName ?? chunk.toolName ?? pending?.name ?? "";
+                const rawName = pending?.name ?? "";
                 if (rawName) toolNamesById.set(id, rawName);
                 pendingCalls.delete(id);
                 const name = rawName;
