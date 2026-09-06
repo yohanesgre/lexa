@@ -1031,6 +1031,8 @@ CREATE INDEX idx_task_activity_task ON task_activity(task_id, created_at, id);
 
 -- Migration bookkeeping (server/db/migrate.ts):
 -- _migrations (name TEXT PRIMARY KEY, applied_at TEXT) — applied migration files.
+-- Pre-release history (0001-0024) was squashed into this single 0001_init.sql
+-- baseline for 2026.1.0; future migrations continue at 0025_*.sql.
 ```
 
 ## Design Notes

@@ -15,10 +15,9 @@ import * as msg from "../activity-messages";
 import { rowToHearthSession, RuntimeWithTeam } from "../../shared/db";
 import type { HearthTask, HearthTaskLog, DocumentSource, TipTapDoc, LexaAgent, LexaSkill, HearthSession, ActivityType, HearthProvider } from "../../shared/types";
 
-// Builtin seed defaults — mirrors migrations/0001_init.sql (fresh installs,
-// pre-0013 shape) and migrations/0013_hearth_engine.sql (the two-agent Hearth
-// catalog). Reset to default restores these exact values (and skill sets).
-// Keep the two in sync when editing either.
+// Builtin seed defaults — mirrors migrations/0001_init.sql (the squashed
+// 2026.1.0 baseline). Reset to default restores these exact values (and
+// skill sets). Keep the two in sync when editing either.
 export const HERALD_AGENT: { id: string; instructions: string; skillIds: string[] } = {
   id: "hearth-herald",
   instructions:
