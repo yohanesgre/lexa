@@ -40,17 +40,24 @@ vitest run
 
 ## Deploying (self-host)
 
-`lexa-cli deploy <domain> [staging|prod]` provisions everything: Docker + cloudflared tunnel, DNS, env file, then pulls the prebuilt image and brings up compose (`staging` → `lexa-preview.<domain>`, `prod` → `lexa.<domain>`). The image is built and pushed by CI (`ghcr.io/yohanesgre/lexa`). `--direct` skips Cloudflare for your own reverse proxy; a Workers + D1 flavor is also available.
+`lexa-cli deploy <domain> [staging|prod]` provisions Docker + cloudflared
+tunnel, DNS, and the env file, then pulls the prebuilt image CI publishes
+to `ghcr.io/yohanesgre/lexa`:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/yohanesgre/lexa/main/scripts/install-cli.sh | bash
 lexa-cli deploy lexa.example.com prod
 ```
 
+- `staging` → `lexa-preview.<domain>`, `prod` → `lexa.<domain>`
 - **Redeploy = upgrade** — deploy always pulls the latest image
 - `--image <tag>` pins a specific version
 - `--clean` recreates from scratch (removes the `lexa-data` volume — DB wiped)
-- Full contract (flavors, env reference, GitHub App setup, secrets hygiene): [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) + [`docs/GITHUB_SETUP.md`](docs/GITHUB_SETUP.md)
+- `--direct` skips Cloudflare for your own reverse proxy; a Workers + D1
+  flavor is also available
+- Full contract (flavors, env reference, GitHub App setup, secrets hygiene):
+  [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) +
+  [`docs/GITHUB_SETUP.md`](docs/GITHUB_SETUP.md)
 
 ## CLI
 
@@ -66,6 +73,29 @@ lexa-cli upgrade                          # self-update the CLI binary
 ```
 
 Columns and swimlanes are referenced by name, projects by slug. Every `list`/`get` accepts `--json`. `LEXA_URL` + `LEXA_API_KEY` env vars replace the saved login.
+
+## For agents
+
+Lexa is scriptable end to end — agents drive it without touching a browser:
+
+```bash
+export LEXA_URL=https://lexa.example.com LEXA_API_KEY=lxk_...
+lexa-cli status                                   # connectivity + auth check
+lexa-cli task list --project my-project --json    # machine-readable
+lexa-cli task get <short-id> --project my-project # description as Markdown
+lexa-cli task move <id> --project my-project --column Done
+lexa-cli wiki get getting-started --project my-project
+```
+
+- One `lxk_` key (Settings → API Keys) is the only credential. Commands
+  never prompt when piped and exit non-zero with errors on stderr.
+- Columns/swimlanes by name, projects by slug, tasks by UUID or short-ID
+  prefix; every `list`/`get` takes `--json`.
+- For anything the CLI doesn't cover, speak the REST contract directly:
+  [`docs/API.md`](docs/API.md).
+- To run Lexa tasks *as* an agent runtime (persistent workspace, repo
+  context, heartbeat), install the machine listener:
+  `lexa-cli machine install`.
 
 ## Environment variables
 
