@@ -2,7 +2,8 @@
 
 All notable changes to Lexa are documented here. Format based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). This project follows
-[Semantic Versioning](https://semver.org/).
+[Calendar Versioning](https://calver.org/) (`YYYY.MINOR.MICRO` — see
+`docs/RELEASING.md`; `0.1.0`–`0.3.0` predate the switch and were never tagged).
 
 ## [Unreleased]
 
