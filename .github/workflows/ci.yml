@@ -28,8 +28,40 @@ jobs:
         continue-on-error: true
         run: git submodule update --init --recursive || echo "wireframes submodule unavailable (private) - skipping wireframes checks"
 
+      - name: Detect changed paths (PR gate)
+        id: changes
+        run: |
+          if [ "${{ github.event_name }}" != "pull_request" ]; then
+            echo "docker=true" >> "$GITHUB_OUTPUT"
+            echo "mobile=true" >> "$GITHUB_OUTPUT"
+            echo "coverage=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          git fetch origin main:refs/remotes/origin/main --quiet
+          CHANGED=$(git diff --name-only origin/main...HEAD)
+          echo "$CHANGED"
+          if echo "$CHANGED" | grep -qE '^(Dockerfile|docker-compose[^/]*\.yml|package\.json|bun\.lock|server/|migrations/|scripts/(setup|seed))'; then
+            echo "docker=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "docker=false" >> "$GITHUB_OUTPUT"
+          fi
+          if echo "$CHANGED" | grep -qE '^(app/|vite\.config\.ts|package\.json|bun\.lock|scripts/check-mobile\.mjs)'; then
+            echo "mobile=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "mobile=false" >> "$GITHUB_OUTPUT"
+          fi
+          if echo "$CHANGED" | grep -qE '^(server/|shared/|vitest\.config\.ts|vitest\.setup\.ts)'; then
+            echo "coverage=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "coverage=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Install native build deps (better-sqlite3)
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends python3 make g++
+        run: |
+          missing=""
+          for t in python3 make g++; do command -v $t >/dev/null || missing="$missing $t"; done
+          if [ -z "$missing" ]; then echo "toolchain present - skipping apt"; exit 0; fi
+          sudo apt-get update && sudo apt-get install -y --no-install-recommends python3 make g++
 
       - uses: oven-sh/setup-bun@v2
         with:
@@ -64,6 +96,7 @@ jobs:
         run: bun run build
 
       - name: Docker build smoke
+        if: steps.changes.outputs.docker == 'true'
         timeout-minutes: 5
         run: |
           docker build -t lexa:ci .
@@ -85,7 +118,7 @@ jobs:
           exit 1
 
       - name: Cleanup Docker (always)
-        if: always()
+        if: always() && steps.changes.outputs.docker == 'true'
         run: docker rm -f lexa-ci >/dev/null 2>&1 || true
 
       - name: Audit dependencies
@@ -178,6 +211,7 @@ jobs:
           fi
 
       - name: Coverage (v8)
+        if: steps.changes.outputs.coverage == 'true'
         continue-on-error: true
         run: |
           echo "running coverage with v8 provider (thresholds 60% server/shared)"
@@ -196,7 +230,7 @@ jobs:
           exit 0
 
       - name: Upload coverage artifact
-        if: always()
+        if: steps.changes.outputs.coverage == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: coverage-lcov
@@ -239,6 +273,7 @@ jobs:
           fi
 
       - name: Check mobile
+        if: steps.changes.outputs.mobile == 'true'
         continue-on-error: true
         run: |
           if ! grep -q '"check:mobile"' package.json; then
