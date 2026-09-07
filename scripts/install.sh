@@ -189,6 +189,10 @@ deploy_workers() {
   else
     fetch_release "workers" "${WORK_DIR:-lexa-workers-release}"
     WORK_DIR="${WORK_DIR:-lexa-workers-release}"
+    # Retry safety: a previous failed run may have left stale extractions
+    # (old-tag dist/migrations/scripts mixed with the new tarball's). The
+    # dir is installer-owned — keep only the downloads.
+    find "${WORK_DIR}" -mindepth 1 -maxdepth 1 ! -name '*.tar.gz' ! -name 'checksums.txt' -exec rm -rf {} +
     unpack_release "${WORK_DIR}" "${WORK_DIR}" workers
   fi
 

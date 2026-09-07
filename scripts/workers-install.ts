@@ -75,13 +75,26 @@ async function cfJson<T>(label: string, path: string, init?: RequestInit): Promi
   return r.json?.result as T;
 }
 
-function wrangler(args: string[], opts: { input?: string; capture?: boolean } = {}): { status: number; stdout: string } {
+function wrangler(args: string[], opts: { input?: string; capture?: boolean } = {}): { status: number; stdout: string; stderr: string } {
   const res = spawnSync("bunx", ["wrangler", ...args], {
     input: opts.input,
-    stdio: opts.capture ? ["pipe", "pipe", "inherit"] : opts.input !== undefined ? ["pipe", "inherit", "inherit"] : "inherit",
+    stdio: opts.capture ? ["pipe", "pipe", "pipe"] : opts.input !== undefined ? ["pipe", "inherit", "inherit"] : "inherit",
+    // The REST calls authenticate with the token directly; wrangler only
+    // sees it through the environment. Without this it prompts for login
+    // (instantly failing under capture) and every d1/deploy step dies.
+    env: { ...process.env, CLOUDFLARE_API_TOKEN: CF_TOKEN },
     encoding: "utf-8",
-  } as never) as unknown as { status: number | null; stdout?: unknown };
-  return { status: res.status ?? 1, stdout: typeof res.stdout === "string" ? res.stdout : "" };
+  } as never) as unknown as { status: number | null; stdout?: unknown; stderr?: unknown };
+  return {
+    status: res.status ?? 1,
+    stdout: typeof res.stdout === "string" ? res.stdout : "",
+    stderr: typeof res.stderr === "string" ? res.stderr : "",
+  };
+}
+
+function dieWrangler(label: string, r: { stdout: string; stderr: string }): never {
+  const tail = (r.stderr || r.stdout).split("\n").filter(Boolean).slice(-3).join(" | ");
+  die(`${label} failed (status 1)${tail ? `: ${tail.slice(-400)}` : ""}`);
 }
 
 // ── CF: account, zone (custom domain only) ──
@@ -187,6 +200,7 @@ copyContents(assetsAbs, join(deployDir, "assets"));
 const publicUrl = CUSTOM_DOMAIN ? `https://${CUSTOM_DOMAIN}` : "";
 const config = {
   name: FLAVOR.workerName,
+  account_id: account,
   main: `./${(manifest.main ?? "index.js").split("/").pop()}`,
   compatibility_date: (JSON.parse(readFileSync(join(DIR, "wrangler.jsonc"), "utf-8").replace(/\/\/[^\n]*/g, "")) as { compatibility_date?: string }).compatibility_date ?? "2026-08-01",
   compatibility_flags: ["nodejs_compat"],
@@ -206,10 +220,10 @@ console.log(`  ✓ wrangler config → ${configPath}`);
 // ── D1 migrations (journal semantics mirrored from the CLI deploy) ──
 const journalInit = wrangler(["d1", "execute", FLAVOR.d1Name, "--remote", "--config", configPath, "--json", "--command",
   "CREATE TABLE IF NOT EXISTS _migrations (name TEXT PRIMARY KEY, applied_at TEXT DEFAULT (datetime('now')))"], { capture: true });
-if (journalInit.status !== 0) die(`D1 journal init failed (status ${journalInit.status})`);
+if (journalInit.status !== 0) dieWrangler("D1 journal init", journalInit);
 const journalList = wrangler(["d1", "execute", FLAVOR.d1Name, "--remote", "--config", configPath, "--json", "--command",
   "SELECT name FROM _migrations"], { capture: true });
-if (journalList.status !== 0) die(`D1 journal read failed (status ${journalList.status})`);
+if (journalList.status !== 0) dieWrangler("D1 journal read", journalList);
 const applied = new Set<string>();
 try {
   const parsed = JSON.parse(journalList.stdout || "[]") as Array<{ results?: Array<{ name?: string }> }>;
@@ -227,7 +241,7 @@ for (const file of files) {
   writeFileSync(tmp, `${sql}\nINSERT INTO _migrations (name) VALUES ('${file.replace(/'/g, "''")}');\n`);
   try {
     const res = wrangler(["d1", "execute", FLAVOR.d1Name, "--remote", "--config", configPath, "--file", tmp]);
-    if (res.status !== 0) die(`D1 migration ${file} failed (status ${res.status})`);
+    if (res.status !== 0) dieWrangler(`D1 migration ${file}`, res);
   } finally {
     rmSync(tmp, { force: true });
   }
@@ -238,7 +252,7 @@ if (count === 0) console.log("  ✓ D1 schema up to date");
 
 // ── Deploy ──
 const deployed = wrangler(["deploy", "--config", configPath]);
-if (deployed.status !== 0) die(`wrangler deploy failed (status ${deployed.status})`);
+if (deployed.status !== 0) dieWrangler("wrangler deploy", deployed);
 
 // ── Custom domain: bind the route (workers.dev needs no route) ──
 if (CUSTOM_DOMAIN && zone) {
