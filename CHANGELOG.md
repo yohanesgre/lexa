@@ -7,6 +7,17 @@ All notable changes to Lexa are documented here. Format based on
 
 ## [Unreleased]
 
+## [2026.2.7] - 2026-09-08
+
+### Fixed
+
+- **Workers migrations failed on a fresh D1 with `FOREIGN KEY constraint
+  failed`** — wrangler's `d1 execute --file` routes through D1's import
+  endpoint, which rejected the baseline migration even though the same file
+  passes on the D1 engine locally (workerd, FKs enforced) and plain SQLite;
+  migrations now execute through the D1 query REST API as one batch (the
+  path `runMigrationsD1` uses for CLI deploys), with structured errors
+
 ## [2026.2.6] - 2026-09-08
 
 ### Fixed
