@@ -2,7 +2,9 @@ name: publish-image
 
 on:
   push:
+    branches: ["main"]
     tags: ["v*"]
+    paths-ignore: ["**.md", "docs/**", "wireframes/**", "status/**", ".agents/**"]
   workflow_dispatch:
 
 permissions:
@@ -11,7 +13,7 @@ permissions:
 
 concurrency:
   group: publish-image-${{ github.ref }}
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   build:
@@ -33,6 +35,23 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Resolve image tags
+        run: |
+          if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
+            VER="${{ github.ref_name }}"
+            VER="${VER#v}"
+            {
+              echo "tags<<EOF"
+              echo "ghcr.io/yohanesgre/lexa:latest"
+              echo "ghcr.io/yohanesgre/lexa:v${VER}"
+              echo "ghcr.io/yohanesgre/lexa:${VER%.*}"
+              echo "EOF"
+            } >> "$GITHUB_OUTPUT"
+          else
+            echo "tags=ghcr.io/yohanesgre/lexa:staging" >> "$GITHUB_OUTPUT"
+          fi
+        id: tags
+
       - name: Build and push
         uses: docker/build-push-action@v7
         with:
@@ -41,6 +60,12 @@ jobs:
           platforms: linux/amd64
           cache-from: type=gha
           cache-to: type=gha,mode=max
-          tags: |
-            ghcr.io/yohanesgre/lexa:latest
-            ghcr.io/yohanesgre/lexa:${{ github.ref_name }}
+          tags: ${{ steps.tags.outputs.tags }}
+          sbom: true
+          labels: |
+            org.opencontainers.image.title=Lexa
+            org.opencontainers.image.description=Self-hosted project management for small teams
+            org.opencontainers.image.source=https://github.com/yohanesgre/lexa
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.version=${{ github.ref_name }}
+            org.opencontainers.image.licenses=MIT

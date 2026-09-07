@@ -77,8 +77,9 @@ CLI asset.
 
 ## Web app image flow
 
-- Only `v*` tags publish — no staging image.
-- `v*` tags → `ghcr.io/yohanesgre/lexa:latest` + `ghcr.io/yohanesgre/lexa:<version>` (where `<version>` is the tag name, e.g. `v2026.1.0`).
+- `main` pushes publish `ghcr.io/yohanesgre/lexa:staging` (what
+  `deploy <domain> staging` pulls by default).
+- `v*` tags → `ghcr.io/yohanesgre/lexa:latest` + `ghcr.io/yohanesgre/lexa:<version>` + `ghcr.io/yohanesgre/lexa:<YYYY.MINOR>` (where `<version>` is the tag name, e.g. `v2026.1.0` + floating `2026.1` for patch-auto pins).
 - The web wizard at `/setup` gates `LXK_ENV` non-dev deployments to skip
   sample data; `LXK_ENV=dev` enables `LXK_SEED_DEV=1` seeding.
 - Remote deploy uses `lexa-cli deploy <domain> [staging|prod]`. Deploy

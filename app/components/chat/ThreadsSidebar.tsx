@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
-import { useScrollLock } from "../../lib/scroll-lock";
+import { lockScroll } from "../../lib/scroll-lock";
+import { matchMedia } from "../../lib/viewport";
 import type { HeraldChatThreadSummary } from "../../lib/api";
 import { formatRelative } from "../../lib/relative-time";
 
@@ -32,7 +33,7 @@ interface ThreadsSidebarProps {
 // Drawer dismissal is a <900px affordance — desktop collapse is owned by the
 // header toggle alone. Safe under jsdom (no matchMedia → desktop).
 function isMobileViewport(): boolean {
-  return typeof window.matchMedia === "function" && window.matchMedia("(max-width: 899.98px)").matches;
+  return matchMedia("(max-width: 899.98px)");
 }
 
 function PinIcon() {
@@ -62,7 +63,7 @@ function DeleteIcon() {
 
 // Client-side match highlighting over the server-returned snippet:
 // case-insensitive occurrences of q get <mark>. No query → plain text.
-export function highlightSnippet(snippet: string, q: string): { text: string; mark: boolean; bold: boolean }[] {
+function highlightSnippet(snippet: string, q: string): { text: string; mark: boolean; bold: boolean }[] {
   const needle = q.trim().toLowerCase();
   if (!needle) return [{ text: snippet, mark: false, bold: false }];
   const out: { text: string; mark: boolean; bold: boolean }[] = [];
@@ -172,23 +173,23 @@ export function ThreadsSidebar({
       );
     }
     return (
-      <div
-        key={thread.chatId}
-        role="button"
-        tabIndex={0}
-        className={`thread-row ${isActive ? "active" : ""}`}
-        onClick={() => {
-          onSelect(thread.chatId);
-          if (isMobileViewport()) onClose?.();
-        }}
-        onKeyDown={(e) => {
-          if (e.key === "Enter" || e.key === " " || e.key === "Spacebar") {
-            if (e.key === " ") e.preventDefault();
+      <div key={thread.chatId} className={`thread-row ${isActive ? "active" : ""}`}>
+        <div
+          className="thread-row-main"
+          role="button"
+          tabIndex={0}
+          onClick={() => {
             onSelect(thread.chatId);
             if (isMobileViewport()) onClose?.();
-          }
-        }}
-      >
+          }}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" || e.key === " " || e.key === "Spacebar") {
+              if (e.key === " ") e.preventDefault();
+              onSelect(thread.chatId);
+              if (isMobileViewport()) onClose?.();
+            }
+          }}
+        >
         {thread.pinned && (
           <span className="thread-pin" title="Pinned">
             <PinIcon />
@@ -206,6 +207,7 @@ export function ThreadsSidebar({
             </div>
           )}
           <div className="thread-meta">{isActive ? "Active now" : formatRelative(thread.updatedAt)}</div>
+        </div>
         </div>
         <div className="thread-row-actions" onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
           <button type="button" className="icon-btn" title={thread.pinned ? "Unpin" : "Pin"} aria-label={thread.pinned ? `Unpin ${title}` : `Pin ${title}`} onClick={() => void onPinToggle(thread.chatId, !thread.pinned)}>
@@ -231,10 +233,9 @@ export function ThreadsSidebar({
     );
   };
 
-  useEffect(() => {
-    if (!open || !isMobileViewport()) return;
-    return useScrollLock(true);
-  }, [open]);
+  // Scroll lock: plain function called from an effect (not a hook — rules
+  // of hooks). The lock itself is gated on open + mobile viewport.
+  useEffect(() => lockScroll(open && isMobileViewport()), [open]);
 
   // Collapsed: 36px icon rail with the restore control — wiki sidebar's
   // exact affordance (WikiLayout.tsx), kept at every viewport width so

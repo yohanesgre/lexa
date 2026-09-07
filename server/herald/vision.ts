@@ -87,10 +87,11 @@ async function analyzeAnthropicCompatible(deps: AnalyzeDeps, prompt: string, mim
   });
   if (!res.ok) throw new Error(`vision HTTP ${res.status}`);
   const body = (await res.json()) as { content?: Array<{ type?: unknown; text?: unknown }> };
-  const text = (body.content ?? [])
-    .filter((b) => b.type === "text" && typeof b.text === "string")
-    .map((b) => b.text as string)
-    .join("\n");
+  const textParts: string[] = [];
+  for (const b of body.content ?? []) {
+    if (b.type === "text" && typeof b.text === "string") textParts.push(b.text);
+  }
+  const text = textParts.join("\n");
   if (text.trim() === "") throw new Error("empty vision response");
   return text;
 }

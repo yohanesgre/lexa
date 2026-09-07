@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import type { Attachment } from "../../shared/types";
 import { useTaskAttachments, useUploadAttachment, useDeleteAttachment } from "../lib/queries";
 import { Menu } from "./ui/Menu";
@@ -79,18 +79,20 @@ function KebabIcon() {
   );
 }
 
-export function isInlinePreviewable(mimeType: string): boolean {
+function isInlinePreviewable(mimeType: string): boolean {
   return mimeType.startsWith("image/") || mimeType === "application/pdf";
 }
 
-export function formatAttachmentSize(bytes: number): string {
+function formatAttachmentSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${Math.max(1, Math.round(bytes / 1024))} KB`;
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
+const DATE_FMT = new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric" });
+
 function formatAttachmentDate(iso: string): string {
-  return new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric" });
+  return DATE_FMT.format(new Date(iso));
 }
 
 interface UploadRow {
@@ -128,10 +130,14 @@ export function AttachmentsPanel({ slug, taskId }: AttachmentsPanelProps) {
     }
   };
 
-  const attachmentUrl = (a: Attachment) => `/api/attachments/${a.id}`;
-  const uploaderLabel = (a: Attachment) => a.uploadedByLabel ?? a.uploadedBy ?? "Unknown";
+  const attachmentUrl = useCallback((a: Attachment) => `/api/attachments/${a.id}`, []);
+  const uploaderLabel = useCallback((a: Attachment) => a.uploadedByLabel ?? a.uploadedBy ?? "Unknown", []);
   const rows = attachments ?? [];
   const totalBytes = rows.reduce((sum, a) => sum + a.sizeBytes, 0);
+  const displayRows = useMemo<Array<Attachment & { date: string }>>(
+    () => (attachments ?? []).map((a) => ({ ...a, date: formatAttachmentDate(a.createdAt) })),
+    [attachments],
+  );
 
   return (
     <div
@@ -192,7 +198,7 @@ export function AttachmentsPanel({ slug, taskId }: AttachmentsPanelProps) {
         </div>
       )}
 
-      {rows.map((a) => {
+      {displayRows.map((a) => {
         const previewable = isInlinePreviewable(a.mimeType);
         return (
           <div key={a.id} className="github-issue-row">
@@ -215,7 +221,7 @@ export function AttachmentsPanel({ slug, taskId }: AttachmentsPanelProps) {
                   {a.filename}
                 </a>
                 <span className="font-micro text-2xs text-lx-text-muted">
-                  {formatAttachmentSize(a.sizeBytes)} · {uploaderLabel(a)} · {formatAttachmentDate(a.createdAt)}
+                  {formatAttachmentSize(a.sizeBytes)} · {uploaderLabel(a)} · {a.date}
                 </span>
               </div>
             </div>

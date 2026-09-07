@@ -44,6 +44,56 @@ function timelineLabel(task: HearthTask): string {
   return `Created ${t(task.createdAt)} · Started ${t(task.startedAt)} · Finished ${t(task.finishedAt)}`;
 }
 
+function LogLineRow({ line, active, isLast }: { line: HearthTaskLog; active: boolean; isLast: boolean }) {
+  const { level, display } = classifyLogLine(line);
+  return (
+    <div className={cn("hearth-task-log-line", level === "error" && "stderr", level === "warn" && "warn", active && isLast && "current")}>
+      <span className="hearth-task-log-dot" aria-hidden="true">{level === "info" ? "●" : "!"}</span>
+      <span className="hearth-task-log-time">{formatLogTime(line.createdAt)}</span>
+      <span className="hearth-task-log-msg">{display}</span>
+    </div>
+  );
+}
+
+function FollowToggle({ followLog, onToggle }: { followLog: boolean; onToggle: () => void }) {
+  return (
+    <>
+      <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+        <span className="font-micro text-2xs uppercase tracking-[0.04em]" style={{ color: "var(--lx-text-muted)" }}>Follow</span>
+        <button
+          type="button"
+          className={cn("btn btn-ghost", followLog && "is-active")}
+          aria-pressed={followLog}
+          aria-label={followLog ? "Pause auto-scroll" : "Resume auto-scroll"}
+          title={followLog ? "Pause auto-scroll" : "Resume auto-scroll"}
+          style={{ height: 20, padding: "0 7px", fontSize: 10, lineHeight: "18px" }}
+          onClick={onToggle}
+        >
+          ●
+        </button>
+      </span>
+      <span className="hearth-task-log-live" style={{ marginLeft: 8 }}>live</span>
+    </>
+  );
+}
+
+function LogBody({ lines, status }: { lines: HearthTaskLog[]; status: HearthTaskStatus }) {
+  if (lines.length === 0) {
+    return (
+      <div className="text-lx-text-muted" style={{ fontFamily: "var(--lx-font-mono)", fontSize: 12.5, lineHeight: "21px" }}>
+        {status === "queued" ? "Queued — waiting for a runtime to claim it." : "No activity recorded for this task."}
+      </div>
+    );
+  }
+  return (
+    <>
+      {lines.map((line, i) => (
+        <LogLineRow key={line.id} line={line} active={status === "queued" || status === "running"} isLast={i === lines.length - 1} />
+      ))}
+    </>
+  );
+}
+
 // Expanded log viewer for a Hearth task — same append-only feed as the compact
 // .hearth-task-log, but full-height with wrapped lines, follow + copy. Shared
 // by the editor popover and the control panel slideover (hearth-log-modal).
@@ -116,25 +166,7 @@ export function HearthTaskLogModal({
               </div>
             </div>
             <div className="flex items-center gap-2" style={{ marginLeft: "auto", flexShrink: 0 }}>
-              {active && (
-                <>
-                  <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
-                    <span className="font-micro text-2xs uppercase tracking-[0.04em]" style={{ color: "var(--lx-text-muted)" }}>Follow</span>
-                    <button
-                      type="button"
-                      className={cn("btn btn-ghost", followLog && "is-active")}
-                      aria-pressed={followLog}
-                      aria-label={followLog ? "Pause auto-scroll" : "Resume auto-scroll"}
-                      title={followLog ? "Pause auto-scroll" : "Resume auto-scroll"}
-                      style={{ height: 20, padding: "0 7px", fontSize: 10, lineHeight: "18px" }}
-                      onClick={() => setFollowLog((v) => !v)}
-                    >
-                      ●
-                    </button>
-                  </span>
-                  <span className="hearth-task-log-live" style={{ marginLeft: 8 }}>live</span>
-                </>
-              )}
+              {active && <FollowToggle followLog={followLog} onToggle={() => setFollowLog((v) => !v)} />}
               <button type="button" className="btn btn-ghost" style={{ height: 26, padding: "0 10px", fontSize: 11 }} onClick={handleCopy}>
                 {copied ? <Check size={11} strokeWidth={2.5} /> : <Copy size={11} strokeWidth={1.5} />}
                 <span style={{ marginLeft: 5 }}>{copied ? "Copied" : "Copy"}</span>
@@ -155,23 +187,7 @@ export function HearthTaskLogModal({
               </span>
             </div>
             <div className="hearth-task-log hearth-task-log-expanded" ref={bodyRef}>
-              {lines.length === 0 ? (
-                <div className="text-lx-text-muted" style={{ fontFamily: "var(--lx-font-mono)", fontSize: 12.5, lineHeight: "21px" }}>
-                  {task.status === "queued" ? "Queued — waiting for a runtime to claim it." : "No activity recorded for this task."}
-                </div>
-              ) : (
-                lines.map((line) => {
-                  const { level, display } = classifyLogLine(line);
-                  const isLast = line.id === lines[lines.length - 1]!.id;
-                  return (
-                    <div key={line.id} className={cn("hearth-task-log-line", level === "error" && "stderr", level === "warn" && "warn", active && isLast && "current")}>
-                      <span className="hearth-task-log-dot" aria-hidden="true">{level === "info" ? "●" : "!"}</span>
-                      <span className="hearth-task-log-time">{formatLogTime(line.createdAt)}</span>
-                      <span className="hearth-task-log-msg">{display}</span>
-                    </div>
-                  );
-                })
-              )}
+              <LogBody lines={lines} status={task.status} />
             </div>
           </div>
 

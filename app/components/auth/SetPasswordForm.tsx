@@ -3,6 +3,7 @@ import { useNavigate } from "@tanstack/react-router";
 import { useSetPassword } from "../../lib/queries";
 import { Field } from "../ui/Field";
 import { TextInput } from "../ui/TextInput";
+import { NoticeDanger } from "../ui/NoticeDanger";
 
 // Shared accept form for both token links: admin-issued set-password links
 // (/set-password?token=…) and workspace invitation links (/invite?token=…).
@@ -73,10 +74,7 @@ export function SetPasswordForm({ token }: { token: string }) {
 export function InvalidTokenState() {
   return (
     <div className="card-panel" style={{ boxShadow: "var(--lx-shadow-sm)" }}>
-      <div className="notice notice-danger mb-4">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5}><circle cx="12" cy="12" r="10" /><line x1="12" y1="8" x2="12" y2="12" /><line x1="12" y1="16" x2="12.01" y2="16" /></svg>
-        <span>This link is invalid or has expired. Ask your admin for a new one.</span>
-      </div>
+      <NoticeDanger>This link is invalid or has expired. Ask your admin for a new one.</NoticeDanger>
       <p className="text-sm text-lx-text-secondary mb-4" style={{ marginTop: 0 }}>
         Tokens are single-use and expire after 7 days. Your admin can send a fresh link from Workspace settings → Members → "Send set-password link".
       </p>

@@ -1072,6 +1072,7 @@ export function useSetPassword() {
     mutationFn: ({ newPassword, token }: { newPassword: string; token: string }) => auth.setPassword({ newPassword, token }),
     onSuccess: (res) => {
       qc.setQueryData(["session"], res);
+      void qc.invalidateQueries({ queryKey: ["session"] });
       toast.push("success", "Password set — you're signed in");
     },
     onError: (err) => {
@@ -1081,10 +1082,12 @@ export function useSetPassword() {
 }
 
 export function useChangePassword() {
+  const qc = useQueryClient();
   const toast = useToast();
   return useMutation({
     mutationFn: ({ currentPassword, newPassword }: { currentPassword: string; newPassword: string }) => auth.changePassword({ currentPassword, newPassword }),
     onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["session"] });
       toast.push("success", "Password updated");
     },
     onError: (err) => {
@@ -1263,6 +1266,7 @@ export function useRevokeWorkspaceInvite() {
     mutationFn: (inviteId: string) => api.revokeWorkspaceInvite(inviteId),
     onSuccess: (_v, inviteId) => {
       qc.setQueryData<WorkspaceInvite[]>(["workspace-invites"], (old) => (old ?? []).filter((i) => i.id !== inviteId));
+      void qc.invalidateQueries({ queryKey: ["workspace-invites"] });
       toast.push("success", "Invite revoked");
     },
     onError: (err) => {
@@ -1272,10 +1276,12 @@ export function useRevokeWorkspaceInvite() {
 }
 
 export function useCreateSetPasswordLink() {
+  const qc = useQueryClient();
   const toast = useToast();
   return useMutation({
     mutationFn: (userId: string) => api.createSetPasswordLink(userId),
     onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["users"] });
       toast.push("success", "Set-password link created");
     },
     onError: (err) => {
@@ -2045,7 +2051,7 @@ export function useHeraldChatList(projectId: string | undefined, q?: string) {
 }
 
 function sortThreads(threads: api.HeraldChatThreadSummary[]): api.HeraldChatThreadSummary[] {
-  return [...threads].sort((a, b) => {
+  return threads.toSorted((a, b) => {
     if (a.pinned !== b.pinned) return a.pinned ? -1 : 1;
     return b.updatedAt.localeCompare(a.updatedAt);
   });
@@ -2073,17 +2079,22 @@ export function useUpdateHeraldChatMeta(projectId: string | undefined) {
           )
         );
       });
+      void qc.invalidateQueries({ queryKey: ["herald-chats"] });
     },
     onError: (err) => toast.push("error", "Update failed", toastMessage(err)),
   });
 }
 
 export function useRenameHeraldChat(projectId: string | undefined) {
+  const qc = useQueryClient();
   const meta = useUpdateHeraldChatMeta(projectId);
   const toast = useToast();
   return useMutation({
     mutationFn: ({ chatId, title }: { chatId: string; title: string }) =>
       meta.mutateAsync({ chatId, title }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["herald-chats"] });
+    },
     onError: (err) => toast.push("error", "Rename failed", toastMessage(err)),
   });
 }
@@ -2176,8 +2187,12 @@ export function useTestHeraldSettings(projectId: string) {
 }
 
 export function useFetchHeraldModels(projectId: string) {
+  const qc = useQueryClient();
   return useMutation({
     mutationFn: (input: HeraldSettingsInput) => api.listHeraldModels(projectId, input),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["herald-providers"] });
+    },
   });
 }
 
@@ -2193,6 +2208,7 @@ export function useCreateHeraldTask() {
         { ...task, projectName: project?.name ?? "" },
         ...(rows ?? []),
       ]);
+      void qc.invalidateQueries({ queryKey: ["hearth-recent-tasks"] });
     },
     onError: (err) => {
       toast.push("error", "Herald unavailable", toastMessage(err));
@@ -2201,10 +2217,12 @@ export function useCreateHeraldTask() {
 }
 
 export function useCancelHeraldTask() {
+  const qc = useQueryClient();
   const toast = useToast();
   return useMutation({
     mutationFn: (id: string) => api.cancelHeraldTask(id),
     onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["hearth-recent-tasks"] });
       toast.push("success", "Herald run stopped");
     },
     onError: (err) => {

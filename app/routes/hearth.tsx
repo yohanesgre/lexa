@@ -1,23 +1,33 @@
 import { createFileRoute, Outlet, Link, redirect, useRouterState } from "@tanstack/react-router";
 import { useHearthRole } from "../lib/useHearthRole";
 
+// Hearth shell tabs (wireframes/src/hearth-*.html tab bars): Runs always
+// visible; the rest hide per role. Data-driven so the layout stays flat.
+const HEARTH_TABS: Array<{ to: string; label: string; also?: string[]; superadmin?: boolean; can?: "canViewRuntimes" | "canViewBindings" }> = [
+  { to: "/hearth/runs", label: "Runs", also: ["/hearth"] },
+  { to: "/hearth/usage", label: "Usage", superadmin: true },
+  { to: "/hearth/providers", label: "Providers", superadmin: true },
+  { to: "/hearth/runtimes", label: "Runtimes", can: "canViewRuntimes" },
+  { to: "/hearth/bindings", label: "Bindings", can: "canViewBindings" },
+  { to: "/hearth/agents", label: "Agents", superadmin: true },
+];
+
+type HearthRole = { isSuperadmin: boolean; teamsLoading: boolean; sessionLoading: boolean; canViewRuntimes: boolean; canViewBindings: boolean };
+
+function isTabActive(pathname: string, tab: (typeof HEARTH_TABS)[number]): boolean {
+  return (tab.also?.includes(pathname) ?? false) || pathname === tab.to || pathname === `${tab.to}/` || pathname.startsWith(`${tab.to}/`);
+}
+
+function tabVisible(tab: (typeof HEARTH_TABS)[number], role: HearthRole): boolean {
+  if (tab.superadmin) return !role.sessionLoading && !role.teamsLoading && role.isSuperadmin;
+  if (tab.can === "canViewRuntimes") return !role.teamsLoading && role.canViewRuntimes;
+  if (tab.can === "canViewBindings") return !role.teamsLoading && role.canViewBindings;
+  return true;
+}
+
 function HearthLayout() {
   const pathname = useRouterState({ select: (s) => s.location.pathname }) as string;
-  const { isSuperadmin, teamsLoading, sessionLoading, canViewRuntimes, canViewBindings } = useHearthRole();
-
-  const isLoading = sessionLoading || teamsLoading;
-  const showUsage = !isLoading && isSuperadmin;
-  const showProviders = !isLoading && isSuperadmin;
-  const showRuntimes = !teamsLoading && canViewRuntimes;
-  const showBindings = !teamsLoading && canViewBindings;
-  const showAgents = !isLoading && isSuperadmin;
-
-  const isRuns = pathname === "/hearth/runs" || pathname === "/hearth" || pathname === "/hearth/runs/";
-  const isUsage = pathname === "/hearth/usage" || pathname.startsWith("/hearth/usage/");
-  const isProviders = pathname === "/hearth/providers" || pathname.startsWith("/hearth/providers/");
-  const isRuntimes = pathname === "/hearth/runtimes" || pathname.startsWith("/hearth/runtimes/");
-  const isBindings = pathname === "/hearth/bindings" || pathname.startsWith("/hearth/bindings/");
-  const isAgents = pathname === "/hearth/agents" || pathname.startsWith("/hearth/agents/");
+  const role = useHearthRole();
 
   return (
     <main className="page-frame page-frame-narrow">
@@ -34,34 +44,14 @@ function HearthLayout() {
       </p>
 
       <div className="tab-bar" style={{ marginTop: 16 }}>
-        <Link to="/hearth/runs" className={isRuns ? "tab-btn active" : "tab-btn"}>
-          Runs
-        </Link>
-        {showUsage && (
-          <Link to="/hearth/usage" className={isUsage ? "tab-btn active" : "tab-btn"}>
-            Usage
-          </Link>
-        )}
-        {showProviders && (
-          <Link to="/hearth/providers" className={isProviders ? "tab-btn active" : "tab-btn"}>
-            Providers
-          </Link>
-        )}
-        {showRuntimes && (
-          <Link to="/hearth/runtimes" className={isRuntimes ? "tab-btn active" : "tab-btn"}>
-            Runtimes
-          </Link>
-        )}
-        {showBindings && (
-          <Link to="/hearth/bindings" className={isBindings ? "tab-btn active" : "tab-btn"}>
-            Bindings
-          </Link>
-        )}
-        {showAgents && (
-          <Link to="/hearth/agents" className={isAgents ? "tab-btn active" : "tab-btn"}>
-            Agents
-          </Link>
-        )}
+        {HEARTH_TABS.map((tab) => {
+          if (!tabVisible(tab, role)) return null;
+          return (
+            <Link key={tab.to} to={tab.to} className={isTabActive(pathname, tab) ? "tab-btn active" : "tab-btn"}>
+              {tab.label}
+            </Link>
+          );
+        })}
       </div>
 
       <Outlet />

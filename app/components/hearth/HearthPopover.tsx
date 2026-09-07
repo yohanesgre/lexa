@@ -1,18 +1,16 @@
-import { useEffect, useLayoutEffect, useRef, useState, useEffectEvent } from "react";
+import { useEffect, useEffectEvent, useLayoutEffect, useRef, useState, useSyncExternalStore } from "react";
 import { createPortal } from "react-dom";
-import { Check, Flame, Maximize } from "lucide-react";
 import type { Editor } from "@tiptap/core";
-import { cn } from "../ui/cn";
 import { docToMarkdown } from "../../../shared/markdown";
 import { useCreateHearthTask, useHearthTask, useRuntimes, useRecentHearthTask, useCancelHearthTask, useHearthTaskLogs, useAgents, useSkills, useProjects, useHeraldSettings, useSession } from "../../lib/queries";
-import { useHearthSession, useResetHearthSession, formatSessionAge } from "../../lib/use-hearth-session";
-import { parseApiDate } from "../../lib/date";
-import { saveEngineOverlay, resolveActiveEngine, ENGINE_AGENT_IDS } from "../../lib/use-hearth-engine";
+import { useHearthSession, useResetHearthSession } from "../../lib/use-hearth-session";import { saveEngineOverlay, resolveActiveEngine, ENGINE_AGENT_IDS } from "../../lib/use-hearth-engine";
 import { HearthTaskLogModal } from "./HearthTaskLogModal";
-import { classifyLogLine } from "../../lib/hearth-log-line";
+import { TaskStatusPanel } from "./HearthTaskStatusPanel";
+import { BlacksmithForm } from "./HearthBlacksmithForm";
 import { EngineToggle } from "./herald/HeraldModePicker";
 import type { HearthMode } from "./herald/HeraldModePicker";
-import { HeraldPanel, HearthFlameIcon } from "./herald/HeraldPanel";
+import { HeraldPanel } from "./herald/HeraldPanel";
+import { HeraldFlameIcon } from "./herald/HeraldFlameIcon";
 import type { LexaSkill, HearthTask, HearthTaskLog, Runtime } from "../../../shared/types";
 
 // The active engine is the admin-written project default; a member's
@@ -26,17 +24,6 @@ function changeModeFor(projectId: string | undefined, next: HearthMode): HearthM
 // Task ids the user rejected this session — never re-attach to them on
 // reopen, so a rejected result isn't offered again in this session.
 const dismissedIdsRef = new Set<string>();
-
-// More than this many agents/skills collapses the chip row into a dropdown.
-const CHIP_MAX = 6;
-
-// SQLite datetime('now') is "YYYY-MM-DD HH:MM:SS" in UTC — render the local
-// wall-clock time for the log's timestamp column.
-function formatLogTime(iso: string): string {
-  const d = parseApiDate(iso);
-  if (Number.isNaN(d.getTime())) return iso.slice(11, 19);
-  return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false });
-}
 
 interface HearthPopoverProps {
   editor: Editor;
@@ -56,113 +43,201 @@ interface HearthPopoverProps {
   anchorRect: DOMRect | null;
 }
 
-function PromptFields({ extraPrompt, setExtraPrompt, runtimeId, setRuntimeId, onlineRuntimes }: {
-  extraPrompt: string;
-  setExtraPrompt: (v: string) => void;
-  runtimeId: string;
-  setRuntimeId: (v: string) => void;
-  onlineRuntimes: Runtime[];
+type RecentTask = { kind: string; status: string; id: string } | null | undefined;
+
+// Background resume: attach to a recent queued/running/completed task unless
+// the user applied, rejected, or explicitly dismissed it this session.
+function resolveAttachId(open: boolean, taskId: string | null, recent: RecentTask, appliedTaskId: string | null | undefined, rejectedTaskId: string | null | undefined): string | null {
+  if (!open || taskId !== null || !recent || recent.kind !== "blacksmith") return null;
+  if (recent.status !== "queued" && recent.status !== "running" && recent.status !== "completed") return null;
+  if (dismissedIdsRef.has(recent.id) || recent.id === appliedTaskId || recent.id === rejectedTaskId) return null;
+  return recent.id;
+}
+
+// Skill state for the active engine agent: junction rows only, with the
+// empty selection falling back to the first attached skill.
+function resolveSkillState(agents: { id: string; skillIds: string[] }[], skills: LexaSkill[], mode: HearthMode, skillId: string) {
+  const activeSkillIds = new Set(agents.find((a) => a.id === ENGINE_AGENT_IDS[mode])?.skillIds ?? []);
+  const agentSkills = skills.filter((s) => activeSkillIds.has(s.id));
+  const effectiveSkillId = activeSkillIds.has(skillId) ? skillId : (agentSkills[0]?.id ?? "");
+  const selectedSkill = agentSkills.find((s) => s.id === effectiveSkillId) ?? null;
+  return { agentSkills, effectiveSkillId, selectedSkill };
+}
+
+// The selection is sent to the agent as Markdown (not plain text) so the
+// model can preserve the document's formatting — headings, lists, bold,
+// code fences, task lists — and mirror it in its output.
+function selectionPayload(editor: Editor): { text: string; markdown: string } {
+  const text = editor.state.doc.textBetween(editor.state.selection.from, editor.state.selection.to, "\n");
+  const markdown = docToMarkdown({
+    type: "doc",
+    content: editor.state.doc.slice(editor.state.selection.from, editor.state.selection.to).content.toJSON(),
+  } as import("../../../shared/types").TipTapDoc);
+  return { text, markdown };
+}
+
+// Polish can run without a selection: fall back to the whole document as
+// Markdown, then plain text.
+function effectiveSelectionFor(editor: Editor, skillId: string, markdown: string, text: string): string {
+  let effectiveSelection = markdown || text;
+  if (skillId === "polish" && !effectiveSelection.trim()) {
+    try {
+      const full = docToMarkdown(editor.state.doc.toJSON() as import("../../../shared/types").TipTapDoc);
+      if (full.trim()) effectiveSelection = full;
+      else if (editor.state.doc.textContent.trim()) effectiveSelection = editor.state.doc.textContent;
+    } catch {
+      if (editor.state.doc.textContent.trim()) effectiveSelection = editor.state.doc.textContent;
+    }
+  }
+  return effectiveSelection;
+}
+
+// Prefer anchoring below the button; flip above when it doesn't fit there;
+// as a last resort pin it inside the viewport so the controls stay reachable
+// either way.
+function computePopoverTop(anchorRect: DOMRect | null, height: number): number {
+  const belowTop = (anchorRect?.bottom ?? 8) + 6;
+  const aboveTop = (anchorRect?.top ?? 8) - height - 6;
+  const fitsBelow = belowTop >= 8 && belowTop + height <= window.innerHeight - 8;
+  const fitsAbove = aboveTop >= 8 && aboveTop + height <= window.innerHeight - 8;
+  if (fitsBelow) return belowTop;
+  if (fitsAbove) return aboveTop;
+  return Math.max(8, Math.min(belowTop, window.innerHeight - 8 - height));
+}
+
+function computePopoverStyle(anchorRect: DOMRect | null, popoverTop: number): React.CSSProperties {
+  if (!anchorRect) return {};
+  return {
+    position: "fixed",
+    top: popoverTop,
+    left: Math.min(Math.max(8, anchorRect.left), (typeof window !== "undefined" ? window.innerWidth : 0) - 348),
+    zIndex: 80,
+    width: 340,
+  };
+}
+
+function HeaderRight({ done, failed, running, switcherEnabled, mode, changeMode, taskRunning }: {
+  done: boolean; failed: boolean; running: boolean; switcherEnabled: boolean; mode: HearthMode; changeMode: (next: HearthMode) => void; taskRunning: boolean;
 }) {
-  return (
-    <>
-      {/* Additional prompt — per-run free text, appended to the task prompt */}
-      <div style={{ padding: "10px 12px", borderBottom: "1px solid var(--lx-border-default)" }}>
-        <span className="prop-label" style={{ display: "block", marginBottom: 6 }}>
-          Additional prompt <span className="font-micro text-2xs text-lx-text-muted uppercase tracking-[0.04em]" style={{ marginLeft: 4 }}>Optional</span>
-        </span>
-        <textarea
-          className="prop-input w-full"
-          rows={3}
-          aria-label="Additional prompt"
-          value={extraPrompt}
-          onChange={(e) => setExtraPrompt(e.target.value)}
-          placeholder="Extra instructions for this run…"
-          style={{ fontSize: 12, lineHeight: 1.5, resize: "vertical" }}
-        />
-      </div>
+  if (done) return <span className="font-micro text-2xs text-lx-text-success uppercase tracking-[0.04em]">Ready</span>;
+  if (failed) return <span className="font-micro text-2xs text-lx-text-danger uppercase tracking-[0.04em]">Failed</span>;
+  if (running) return <span className="font-micro text-2xs text-lx-text-warning uppercase tracking-[0.04em]">Running…</span>;
+  if (switcherEnabled) return <EngineToggle enabled mode={mode} onChange={changeMode} disabled={taskRunning} />;
+  return <span className="font-micro text-2xs text-lx-text-muted uppercase tracking-[0.04em]">AI project assistant</span>;
+}
 
-      <div style={{ padding: "10px 12px", borderBottom: "1px solid var(--lx-border-default)" }}>
-        <span className="prop-label" style={{ display: "block", marginBottom: 6 }}>Runtime</span>
-        <select
-          className="prop-input w-full"
-          aria-label="Runtime"
-          value={runtimeId}
-          onChange={(e) => setRuntimeId(e.target.value)}
-          style={{ height: 28, fontSize: 12 }}
-          disabled={onlineRuntimes.length === 0}
-        >
-          {onlineRuntimes.length === 0 ? (
-            <option value="">No runtime online</option>
-          ) : (
-            onlineRuntimes.map((r) => (
-              <option key={r.id} value={r.id}>{r.name} · {r.provider}</option>
-            ))
-          )}
-        </select>
-      </div>
-    </>
+// Document-level outside click + Escape dismiss for the open popover.
+function useOutsideDismiss(open: boolean, onClose: () => void, containerRef: React.RefObject<HTMLDivElement | null>, escapeBlocked: boolean) {
+  const onOutsideClick = useEffectEvent((e: MouseEvent) => {
+    if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+      onClose();
+    }
+  });
+  const onDocumentKeyDown = useEffectEvent((e: KeyboardEvent) => {
+    // The expanded log viewer owns Escape while it is open.
+    if (e.key === "Escape" && !escapeBlocked) onClose();
+  });
+  useEffect(() => {
+    if (!open) return;
+    document.addEventListener("mousedown", onOutsideClick);
+    document.addEventListener("keydown", onDocumentKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", onOutsideClick);
+      document.removeEventListener("keydown", onDocumentKeyDown);
+    };
+  }, [open]);
+}
+
+// When the popover reopens and there's a recent task (from a background run),
+// attach to it so the user can accept/reject the finished result. Tasks the
+// user already applied (accepted in the review banner), rejected in the
+// editor review, or explicitly dismissed are skipped — the popover starts
+// fresh for the next Hearth run.
+function useAttachRecentTask(open: boolean, taskId: string | null, recent: RecentTask, appliedTaskId: string | null | undefined, rejectedTaskId: string | null | undefined, setTaskId: (v: string | null) => void) {
+  const [prevAttachId, setPrevAttachId] = useState<string | null>(null);
+  const attachId = resolveAttachId(open, taskId, recent, appliedTaskId, rejectedTaskId);
+  if (attachId !== null && prevAttachId !== attachId) {
+    setPrevAttachId(attachId);
+    setTaskId(attachId);
+  }
+}
+
+// The popover grows with task state (running log, buttons) and the anchor
+// can sit low — or off-screen — when the editor is deep in a scrollable
+// slideover. Without clamping the picker rows can end up below the fold,
+// unreachable. Clamp the left edge too.
+function usePopoverPosition(open: boolean, anchorRect: DOMRect | null, containerRef: React.RefObject<HTMLDivElement | null>) {
+  const [popoverTop, setPopoverTop] = useState(0);
+  useLayoutEffect(() => {
+    if (!open || !containerRef.current) return;
+    const top = computePopoverTop(anchorRect, containerRef.current.offsetHeight);
+    setPopoverTop((prev) => (prev === top ? prev : top));
+  });
+  return popoverTop;
+}
+
+function isTaskActive(status: string | null | undefined): boolean {
+  return status === "queued" || status === "running";
+}
+
+function taskPhase(status: string | null | undefined) {
+  return { running: isTaskActive(status), done: status === "completed", failed: status === "failed" };
+}
+
+function buildCreateTaskInput(slug: string, documentType: "task" | "wiki", documentId: string, mode: HearthMode, skillId: string, extraPrompt: string, selection: string, runtimeId: string) {
+  return {
+    slug,
+    documentType,
+    documentId,
+    agentId: ENGINE_AGENT_IDS[mode],
+    skillId,
+    extraPrompt: extraPrompt || undefined,
+    selection,
+    runtimeId: runtimeId || undefined,
+  };
+}
+
+// Herald tier — full panel per herald-popover.html (own header states).
+// Done state delegates to the editor review surface (diff only editor,
+// never raw in popover — hearth-review.html:153).
+function HeraldPortalView({ containerRef, popoverStyle, editor, slug, documentType, documentId, switcherEnabled, changeMode, onClose, onReview, reviewActive, appliedTaskId, rejectedTaskId, portalTarget }: {
+  containerRef: React.RefObject<HTMLDivElement | null>;
+  popoverStyle: React.CSSProperties;
+  editor: Editor;
+  slug: string;
+  documentType: "task" | "wiki";
+  documentId: string;
+  switcherEnabled: boolean;
+  changeMode: (next: HearthMode) => void;
+  onClose: () => void;
+  onReview: (text: string, identity: { action: string; runtimeName: string | null; provider: string | null; taskId: string }) => void;
+  reviewActive: boolean;
+  appliedTaskId: string | null | undefined;
+  rejectedTaskId: string | null | undefined;
+  portalTarget: HTMLElement;
+}) {
+  return createPortal(
+    <div ref={containerRef} className="menu-popover" data-hearth-popover style={popoverStyle}>
+      <HeraldPanel
+        editor={editor}
+        slug={slug}
+        documentType={documentType}
+        documentId={documentId}
+        engineSwitcherEnabled={switcherEnabled}
+        onModeChange={changeMode}
+        onClose={onClose}
+        onReview={onReview}
+        reviewActive={reviewActive}
+        appliedTaskId={appliedTaskId}
+        rejectedTaskId={rejectedTaskId}
+      />
+    </div>,
+    portalTarget
   );
 }
 
-
-
-const renderChips = <T,>(items: T[], selected: string | null, onSelect: (id: string) => void, label: (item: T) => string, idOf: (item: T) => string, restOpen: boolean, setRestOpen: (v: boolean) => void) => {
-  const visible = items.length > CHIP_MAX ? items.slice(0, CHIP_MAX) : items;
-  const rest = items.length > CHIP_MAX ? items.slice(CHIP_MAX) : [];
-  return (
-    <div className="flex items-center gap-2" style={{ flexWrap: "wrap" }}>
-      {visible.map((item) => (
-        <button
-          key={idOf(item)}
-          type="button"
-          className="btn btn-ghost"
-          style={{
-            height: 26, padding: "0 10px", fontSize: 12,
-            borderColor: selected === idOf(item) ? "var(--lx-border-focus)" : undefined,
-            color: selected === idOf(item) ? "var(--lx-text-primary)" : undefined,
-          }}
-          onClick={() => onSelect(idOf(item))}
-        >
-          {label(item)}
-        </button>
-      ))}
-      {rest.length > 0 && (
-        <div style={{ position: "relative" }}>
-          <button
-            type="button"
-            className="btn btn-ghost"
-            style={{ height: 26, padding: "0 10px", fontSize: 12 }}
-            aria-label="More options"
-            onClick={() => setRestOpen(!restOpen)}
-            aria-expanded={restOpen}
-          >
-            ⋯
-          </button>
-          {restOpen && (
-            <div className="menu" style={{ position: "absolute", top: "calc(100% + 4px)", left: 0, zIndex: 10, padding: 8, display: "flex", flexDirection: "column", gap: 2 }}>
-              {rest.map((item) => (
-                <button
-                  key={idOf(item)}
-                  type="button"
-                  className="menu-item"
-                  style={{ fontSize: 12, color: selected === idOf(item) ? "var(--lx-text-primary)" : undefined }}
-                  onClick={() => {
-                    onSelect(idOf(item));
-                    setRestOpen(false);
-                  }}
-                >
-                  {label(item)}
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
-function TaskStatusPanel(props: {
-  taskId: string;
+function PopoverBody({ taskId, taskData, running, failed, done, reviewActive, followLog, setFollowLog, logBodyRef, logs, isAdmin, setLogModalOpen, cancelTask, setTaskId, runtimes, onReview, agentSkills, effectiveSkillId, setSkillId, extraPrompt, setExtraPrompt, runtimeId, setRuntimeId, onlineRuntimes, sessionRow, resetSession, documentType, documentId, taskRunning, selectionText, onGenerate, creating, logModalOpen }: {
+  taskId: string | null;
   taskData: HearthTask | null;
   running: boolean;
   failed: boolean;
@@ -172,165 +247,85 @@ function TaskStatusPanel(props: {
   setFollowLog: (updater: (prev: boolean) => boolean) => void;
   logBodyRef: React.RefObject<HTMLDivElement | null>;
   logs: { data?: HearthTaskLog[] | undefined };
-  canViewLogs: boolean;
+  isAdmin: boolean;
   setLogModalOpen: (v: boolean) => void;
-  dismissedIdsRef: Set<string>;
   cancelTask: { mutate: (id: string) => void; isPending: boolean };
   setTaskId: (v: string | null) => void;
   runtimes: Runtime[];
   onReview: (text: string, identity: { action: string; runtimeName: string | null; provider: string | null; taskId: string }) => void;
+  agentSkills: LexaSkill[];
+  effectiveSkillId: string;
+  setSkillId: (v: string) => void;
+  extraPrompt: string;
+  setExtraPrompt: (v: string) => void;
+  runtimeId: string;
+  setRuntimeId: (v: string) => void;
+  onlineRuntimes: Runtime[];
+  sessionRow: { updatedAt: string } | null;
+  resetSession: { mutate: (input: { documentType: "task" | "wiki"; documentId: string; runtimeId: string }) => void; isPending: boolean };
+  documentType: "task" | "wiki";
+  documentId: string;
+  taskRunning: boolean;
+  selectionText: string;
+  onGenerate: () => void;
+  creating: boolean;
+  logModalOpen: boolean;
 }) {
-  const { taskId, taskData, running, failed, done, reviewActive, followLog, setFollowLog, logBodyRef, logs, canViewLogs, setLogModalOpen, dismissedIdsRef, cancelTask, setTaskId, runtimes, onReview } = props;
-  const logLines = (logs.data ?? []).slice(-50);
-  if (done || failed) {
-    return (
-      <div style={{ padding: 12 }}>
-        {failed ? (
-          <div className="border rounded-md p-3 text-[13px] leading-5 font-body whitespace-pre-wrap max-h-56 overflow-y-auto text-lx-text-danger bg-lx-bg-danger-subtle border-lx-border-default">
-            {taskData?.error}
-          </div>
-        ) : (
-          <div
-            style={{ background: "var(--lx-surface-input)", border: "1px solid var(--lx-border-default)", borderRadius: 6, padding: "10px 12px" }}
-          >
-            <div className="flex items-center gap-2 mb-1 min-w-0">
-              <Check size={14} strokeWidth={2.5} className="text-lx-text-success shrink-0" />
-              <span className="text-xs font-medium text-lx-text-primary truncate flex-1 min-w-0" style={{ fontFamily: "var(--lx-font-body)" }}>{taskData?.documentTitle || "Document"}</span>
-            </div>
-            <span className="font-micro text-2xs text-lx-text-muted uppercase tracking-[0.04em]" style={{ letterSpacing: "0.04em" }}>
-              {taskData?.skillName ? `${taskData.skillName} — ready to review` : "Review — ready to review"}
-            </span>
-          </div>
-        )}
-        {!failed && (
-          <div className="flex items-center justify-end gap-2 mt-3">
-            {reviewActive ? (
-              <span className="font-micro text-2xs text-lx-text-warning uppercase tracking-[0.04em]">In review in editor</span>
-            ) : (
-              <>
-                <button
-                  type="button"
-                  className="btn btn-ghost"
-                  style={{ height: 26, padding: "0 10px", fontSize: 12 }}
-                  onClick={() => {
-                    if (taskData) dismissedIdsRef.add(taskData.id);
-                    setTaskId(null);
-                  }}
-                >
-                  Reject
-                </button>
-                <button
-                  type="button"
-                  className="btn btn-primary"
-                  style={{ height: 26, padding: "0 10px", fontSize: 12 }}
-                  onClick={() => {
-                    if (taskData?.result) {
-                      const runtime = runtimes.find((r) => r.id === taskData.runtimeId);
-                      onReview(taskData.result, {
-                        action: taskData.skillName || taskData.skillId,
-                        runtimeName: runtime?.name ?? null,
-                        provider: runtime?.provider ?? null,
-                        taskId: taskData.id,
-                      });
-                    }
-                  }}
-                >
-                  <Check size={12} strokeWidth={2.5} />
-                  Review in editor
-                </button>
-              </>
-            )}
-          </div>
-        )}
-        {failed && (
-          <div className="flex items-center justify-end mt-3">
-            <button
-              type="button"
-              className="btn btn-ghost"
-              style={{ height: 26, padding: "0 10px", fontSize: 12 }}
-              onClick={() => {
-                if (taskData) dismissedIdsRef.add(taskData.id);
-                setTaskId(null);
-              }}
-            >
-              Reject
-            </button>
-          </div>
-        )}
-      </div>
-    );
-  }
   return (
-  <div style={{ padding: "0 12px 12px" }}>
-    {running && (
-      <div className="flex items-center justify-between gap-2 mb-2">
-        <div className="flex items-center gap-2">
-          <span className="spinner" style={{ width: 12, height: 12, borderWidth: 2 }} />
-          <span className="text-xs text-lx-text-secondary font-body">
-            {taskData?.runtimeId ? "Agent working…" : "Queued…"}
-          </span>
-        </div>
-        <button
-          type="button"
-          className="btn btn-ghost"
-          style={{ height: 24, padding: "0 8px", fontSize: 11 }}
-          onClick={() => {
-            if (taskData) {
-              dismissedIdsRef.add(taskData.id);
-              cancelTask.mutate(taskData.id);
-              setTaskId(null);
-            }
-          }}
-          disabled={cancelTask.isPending}
-          title="Cancel this Hearth task — it stops working server-side"
-        >
-          Cancel
-        </button>
-      </div>
-    )}
-    {running && canViewLogs && (
-      <div className="hearth-task-log" style={{ marginBottom: 8 }}>
-        <div className="slideover-body" style={{ padding: 0 }}>
-          <div className="flex items-center justify-between" style={{ marginBottom: 8 }}>
-            <span className="font-micro text-2xs text-lx-text-muted" style={{ textTransform: "uppercase", letterSpacing: "0.04em" }}>Activity</span>
-            <button type="button" className="btn btn-ghost" style={{ height: 22, padding: "0 8px", fontSize: 11 }} onClick={() => setLogModalOpen(true)} aria-label="Expand log" title="Open the full log viewer">
-              <Maximize size={11} strokeWidth={1.5} />
-              <span style={{ marginLeft: 5 }}>Expand</span>
-            </button>
-          </div>
-          <div className="hearth-task-log">
-            <div className="hearth-task-log-head">
-              <span className="hearth-task-log-live">Live · {logLines.length} {logLines.length === 1 ? "line" : "lines"}</span>
-              <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
-                <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
-                  <span className="font-micro text-2xs uppercase tracking-[0.04em] text-lx-text-muted">Follow</span>
-                  <button type="button" className={cn("btn btn-ghost", followLog && "is-active")} aria-pressed={followLog} aria-label={followLog ? "Pause auto-scroll" : "Resume auto-scroll"} title={followLog ? "Pause auto-scroll" : "Resume auto-scroll"} style={{ height: 18, padding: "0 6px", fontSize: 10, lineHeight: "16px" }} onClick={() => setFollowLog((v) => !v)}>●</button>
-                </span>
-                <span className="hearth-task-log-live" style={{ marginLeft: 8 }}>live</span>
-              </span>
-            </div>
-            {logLines.length === 0 ? (
-              <div className="hearth-task-log-empty">{taskData?.runtimeId ? "Waiting for daemon activity." : "Queued — waiting for a runtime to claim it."}</div>
-            ) : (
-              <div className="hearth-task-log-body" ref={logBodyRef}>
-                {logLines.map((line, index) => {
-                  const { level, display } = classifyLogLine(line);
-                  const isLast = index === logLines.length - 1;
-                  return (
-                    <div key={line.id} className={cn("hearth-task-log-line", level === "error" && "stderr", level === "warn" && "warn", isLast && "current")}>
-                      <span className="hearth-task-log-dot" aria-hidden="true">{level === "info" ? "●" : "!"}</span>
-                      <span className="hearth-task-log-time">{formatLogTime(line.createdAt)}</span>
-                      <span className="hearth-task-log-msg">{display}</span>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-        </div>
-      </div>
-    )}
-  </div>
+    <>
+      {taskId ? (
+        <TaskStatusPanel
+          taskId={taskId}
+          taskData={taskData}
+          running={running}
+          failed={failed}
+          done={done}
+          reviewActive={reviewActive}
+          followLog={followLog}
+          setFollowLog={setFollowLog}
+          logBodyRef={logBodyRef}
+          logs={logs}
+          canViewLogs={isAdmin}
+          setLogModalOpen={setLogModalOpen}
+          dismissedIdsRef={dismissedIdsRef}
+          cancelTask={cancelTask}
+          setTaskId={setTaskId}
+          runtimes={runtimes}
+          onReview={onReview}
+        />
+      ) : (
+        <BlacksmithForm
+          agentSkills={agentSkills}
+          effectiveSkillId={effectiveSkillId}
+          setSkillId={setSkillId}
+          extraPrompt={extraPrompt}
+          setExtraPrompt={setExtraPrompt}
+          runtimeId={runtimeId}
+          setRuntimeId={setRuntimeId}
+          onlineRuntimes={onlineRuntimes}
+          sessionRow={sessionRow}
+          resetSession={resetSession}
+          documentType={documentType}
+          documentId={documentId}
+          taskRunning={taskRunning}
+          selectionText={selectionText}
+          onGenerate={onGenerate}
+          creating={creating}
+        />
+      )}
+
+      {/* Rendered inside the popover so the fixed modal layers above it (the
+          popover's stacking context is z-80). */}
+      {logModalOpen && (
+<HearthTaskLogModal
+        open={logModalOpen}
+        onClose={() => setLogModalOpen(false)}
+        task={taskData}
+        logs={logs.data ?? []}
+        runtimes={runtimes}
+      />
+      )}
+    </>
   );
 }
 
@@ -361,11 +356,17 @@ export function HearthPopover({ editor, slug, documentType, documentId, open, on
   const { data: skills = [] } = useSkills();
   const [skillId, setSkillId] = useState("");
   const [extraPrompt, setExtraPrompt] = useState("");
-  const [skillMenuOpen, setSkillMenuOpen] = useState(false);
   const [runtimeId, setRuntimeId] = useState<string>("");
   const [taskId, setTaskId] = useState<string | null>(null);
   const [logModalOpen, setLogModalOpen] = useState(false);
   const [followLog, setFollowLog] = useState(true);
+  // Hydration-safe portal target: SSR and the first client render both see
+  // null, the browser switches to document.body after hydration.
+  const portalTarget = useSyncExternalStore(
+    () => () => {},
+    () => document.body,
+    () => null,
+  );
   const logBodyRef = useRef<HTMLDivElement>(null);
   const { data: runtimes = [] } = useRuntimes();
   // Any online runtime can run tasks — Hearth uses the daemon's agent CLI
@@ -379,288 +380,121 @@ export function HearthPopover({ editor, slug, documentType, documentId, open, on
   // background run that minted a session is reflected.
   const sessions = useHearthSession(documentType, documentId, open && mode === "blacksmith");
   const resetSession = useResetHearthSession();
-  const task = useHearthTask(taskId, open && taskId !== null);
+  const attached = open && taskId !== null;
+  const task = useHearthTask(taskId, attached);
   // Live "what is it doing" feed — polls while the task is queued/running.
   // ADMIN-GATED: members don't fetch log internals (403 server-side).
   const { data: session } = useSession();
   const isAdmin = session?.user?.role === "superadmin";
-  const logs = useHearthTaskLogs(taskId, open && taskId !== null && isAdmin);
+  const logs = useHearthTaskLogs(taskId, attached && isAdmin);
   // Background resume: if a task for this doc is running/completed from a
   // previous popover session, surface it instead of losing it. Tasks the
   // user explicitly dismissed (Reject) are not re-attached.
   const recent = useRecentHearthTask(slug, documentType, documentId, open && taskId === null);
   const containerRef = useRef<HTMLDivElement>(null);
 
-  // Effective skill: the active engine agent's junction rows only; an empty
-  // selection falls back to the first attached skill of that agent.
-  const activeAgentId = ENGINE_AGENT_IDS[mode];
-  const activeSkillIds = new Set(agents.find((a) => a.id === activeAgentId)?.skillIds ?? []);
-  const agentSkills: LexaSkill[] = skills.filter((s) => activeSkillIds.has(s.id));
-  const effectiveSkillId = activeSkillIds.has(skillId) ? skillId : (agentSkills[0]?.id ?? "");
-  const selectedSkill: LexaSkill | null = agentSkills.find((s) => s.id === effectiveSkillId) ?? null;
+  const { agentSkills, effectiveSkillId, selectedSkill } = resolveSkillState(agents, skills, mode, skillId);
 
-  // Auto-select the first online runtime.
-  useEffect(() => {
-    if (runtimeId === "" && onlineRuntimes.length > 0) {
-      setRuntimeId(onlineRuntimes[0]!.id);
-    }
-  }, [onlineRuntimes, runtimeId]);
+  useOutsideDismiss(open, onClose, containerRef, logModalOpen);
 
-  const onOutsideClick = useEffectEvent((e: MouseEvent) => {
-    if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
-      onClose();
-    }
-  });
-  const onDocumentKeyDown = useEffectEvent((e: KeyboardEvent) => {
-    // The expanded log viewer owns Escape while it is open.
-    if (e.key === "Escape" && !logModalOpen) onClose();
-  });
-  useEffect(() => {
-    if (!open) return;
-    document.addEventListener("mousedown", onOutsideClick);
-    document.addEventListener("keydown", onDocumentKeyDown);
-    return () => {
-      document.removeEventListener("mousedown", onOutsideClick);
-      document.removeEventListener("keydown", onDocumentKeyDown);
-    };
-  }, [open]);
+  useAttachRecentTask(open, taskId, recent.data as RecentTask, appliedTaskId, rejectedTaskId, setTaskId);
 
-  // When the popover reopens and there's a recent task (from a background run),
-  // attach to it so the user can accept/reject the finished result. Tasks the
-  // user already applied (accepted in the review banner), rejected in the
-  // editor review, or explicitly dismissed are skipped — the popover starts
-  // fresh for the next Hearth run.
-  const [prevAttachId, setPrevAttachId] = useState<string | null>(null);
-  const attachId =
-    open && taskId === null && recent?.data && recent.data.kind === "blacksmith" && (recent.data.status === "queued" || recent.data.status === "running" || recent.data.status === "completed") && !dismissedIdsRef.has(recent.data.id) && recent.data.id !== appliedTaskId && recent.data.id !== rejectedTaskId
-      ? recent.data.id
-      : null;
-  if (attachId !== null && prevAttachId !== attachId) {
-    setPrevAttachId(attachId);
-    setTaskId(attachId);
-  }
-
-  // Follow mode: keep the activity log pinned to the newest line while the
-  // task runs. The user can pause it (manual scroll) via the Follow toggle.
-  useEffect(() => {
-    if (followLog && logBodyRef.current) {
-      logBodyRef.current.scrollTop = logBodyRef.current.scrollHeight;
-    }
-  }, [logs.data, followLog]);
-
-  // The popover grows with task state (running log, buttons) and the anchor
-  // can sit low — or off-screen — when the editor is deep in a scrollable
-  // slideover. Without clamping the picker rows can end up below the fold,
-  // unreachable. Prefer anchoring below the button; flip above when it
-  // doesn't fit there; as a last resort pin it inside the viewport so the
-  // controls stay reachable either way. Clamp the left edge too.
-  const [popoverTop, setPopoverTop] = useState(0);
-  useLayoutEffect(() => {
-    if (!open || !containerRef.current) return;
-    const h = containerRef.current.offsetHeight;
-    const belowTop = (anchorRect?.bottom ?? 8) + 6;
-    const aboveTop = (anchorRect?.top ?? 8) - h - 6;
-    const fitsBelow = belowTop >= 8 && belowTop + h <= window.innerHeight - 8;
-    const fitsAbove = aboveTop >= 8 && aboveTop + h <= window.innerHeight - 8;
-    const top = fitsBelow
-      ? belowTop
-      : fitsAbove
-        ? aboveTop
-        : Math.max(8, Math.min(belowTop, window.innerHeight - 8 - h));
-    setPopoverTop((prev) => (prev === top ? prev : top));
-  });
+  const popoverTop = usePopoverPosition(open, anchorRect, containerRef);
 
   if (!open) return null;
 
-  // The selection is sent to the agent as Markdown (not plain text) so the
-  // model can preserve the document's formatting — headings, lists, bold,
-  // code fences, task lists — and mirror it in its output.
-  const selectionText = editor.state.doc.textBetween(editor.state.selection.from, editor.state.selection.to, "\n");
-  const selectionMarkdown = docToMarkdown({
-    type: "doc",
-    content: editor.state.doc.slice(editor.state.selection.from, editor.state.selection.to).content.toJSON(),
-  } as import("../../../shared/types").TipTapDoc);
+  const selection = selectionPayload(editor);
 
   const handleGenerate = () => {
     if (!selectedSkill) return;
-    let effectiveSelection = selectionMarkdown || selectionText;
-    if (selectedSkill.id === "polish" && !effectiveSelection.trim()) {
-      try {
-        const full = docToMarkdown(editor.state.doc.toJSON() as import("../../../shared/types").TipTapDoc);
-        if (full.trim()) effectiveSelection = full;
-        else if (editor.state.doc.textContent.trim()) effectiveSelection = editor.state.doc.textContent;
-      } catch {
-        if (editor.state.doc.textContent.trim()) effectiveSelection = editor.state.doc.textContent;
-      }
-    }
+    const effectiveSelection = effectiveSelectionFor(editor, selectedSkill.id, selection.markdown, selection.text);
     createTask.mutate(
-      {
-        slug,
-        documentType,
-        documentId,
-        agentId: ENGINE_AGENT_IDS[mode],
-        skillId: selectedSkill.id,
-        extraPrompt: extraPrompt || undefined,
-        selection: effectiveSelection,
-        runtimeId: runtimeId || undefined,
-      },
+      buildCreateTaskInput(slug, documentType, documentId, mode, selectedSkill.id, extraPrompt, effectiveSelection, runtimeId),
       { onSuccess: (t) => setTaskId(t.id) }
     );
   };
 
+  const { running, done, failed } = taskPhase(task.data?.status);
   const taskData = task.data ?? null;
-  const running = taskData?.status === "queued" || taskData?.status === "running";
-  const done = taskData?.status === "completed";
-  const failed = taskData?.status === "failed";
 
   // Session mapping for the selected runtime — the next Generate continues it
   // ("New session" when none). Reset is disabled while any task for this
   // document is running (the endpoint 409s in that case).
-  const sessionRow = sessions.data?.find((s) => s.runtimeId === runtimeId) ?? null;
-  const taskRunning = running || recent.data?.status === "queued" || recent.data?.status === "running";
+  const sessionRow = sessions.data?.find((s) => s.runtimeId === runtimeId);
+  const taskRunning = running || isTaskActive(recent.data?.status);
+  const popoverStyle = computePopoverStyle(anchorRect, popoverTop);
 
-  const popoverStyle: React.CSSProperties = anchorRect
-    ? {
-        position: "fixed",
-        top: popoverTop,
-        left: Math.min(Math.max(8, anchorRect.left), (typeof window !== "undefined" ? window.innerWidth : 0) - 348),
-        zIndex: 80,
-        width: 340,
-      }
-    : {};
-
-;
-
-  const portalTarget = typeof document !== "undefined" ? document.body : null;
   if (!portalTarget) return null;
 
   // Herald tier — full panel per herald-popover.html (own header states).
   // Done state delegates to the editor review surface (diff only editor,
   // never raw in popover — hearth-review.html:153).
   if (mode === "herald") {
-    return createPortal(
-      <div ref={containerRef} className="menu-popover" data-hearth-popover style={popoverStyle}>
-        <HeraldPanel
-          editor={editor}
-          slug={slug}
-          documentType={documentType}
-          documentId={documentId}
-          engineSwitcherEnabled={switcherEnabled}
-          onModeChange={changeMode}
-          onClose={onClose}
-          onReview={onReview}
-          reviewActive={reviewActive}
-          appliedTaskId={appliedTaskId}
-          rejectedTaskId={rejectedTaskId}
-        />
-      </div>,
-      portalTarget
+    return (
+      <HeraldPortalView
+        containerRef={containerRef}
+        popoverStyle={popoverStyle}
+        editor={editor}
+        slug={slug}
+        documentType={documentType}
+        documentId={documentId}
+        switcherEnabled={switcherEnabled}
+        changeMode={changeMode}
+        onClose={onClose}
+        onReview={onReview}
+        reviewActive={reviewActive}
+        appliedTaskId={appliedTaskId}
+        rejectedTaskId={rejectedTaskId}
+        portalTarget={portalTarget}
+      />
     );
   }
-
-  const headerRight = done ? (
-    <span className="font-micro text-2xs text-lx-text-success uppercase tracking-[0.04em]">Ready</span>
-  ) : failed ? (
-    <span className="font-micro text-2xs text-lx-text-danger uppercase tracking-[0.04em]">Failed</span>
-  ) : running ? (
-    <span className="font-micro text-2xs text-lx-text-warning uppercase tracking-[0.04em]">Running…</span>
-  ) : switcherEnabled ? (
-    <EngineToggle enabled mode={mode} onChange={changeMode} disabled={taskRunning} />
-  ) : (
-    <span className="font-micro text-2xs text-lx-text-muted uppercase tracking-[0.04em]">AI project assistant</span>
-  );
 
   return createPortal(
     <div ref={containerRef} className="menu-popover" data-hearth-popover style={popoverStyle}>
       <div className="flex items-center justify-between" style={{ padding: "10px 12px", borderBottom: "1px solid var(--lx-border-default)" }}>
         <span className="text-sm font-medium text-lx-text-primary font-body" style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
-          <HearthFlameIcon />
+          <HeraldFlameIcon />
           Hearth
         </span>
-        {headerRight}
+        <HeaderRight done={done} failed={failed} running={running} switcherEnabled={switcherEnabled} mode={mode} changeMode={changeMode} taskRunning={taskRunning} />
       </div>
 
-      {taskId ? (
-        <TaskStatusPanel
-          taskId={taskId}
-          taskData={taskData}
-          running={running}
-          failed={failed}
-          done={done}
-          reviewActive={reviewActive}
-          followLog={followLog}
-          setFollowLog={setFollowLog}
-          logBodyRef={logBodyRef}
-          logs={logs}
-          canViewLogs={isAdmin}
-          setLogModalOpen={setLogModalOpen}
-          dismissedIdsRef={dismissedIdsRef}
-          cancelTask={cancelTask}
-          setTaskId={setTaskId}
-          runtimes={runtimes}
-          onReview={onReview}
-        />
-      ) : (
-        <>
-          <div style={{ padding: "10px 12px", borderBottom: "1px solid var(--lx-border-default)" }}>
-            <span className="prop-label" style={{ display: "block", marginBottom: 6 }}>Skill</span>
-            {agentSkills.length > 0 ? (
-              renderChips(agentSkills, effectiveSkillId, setSkillId, (s) => s.name, (s) => s.id, skillMenuOpen, setSkillMenuOpen)
-            ) : (
-              <div style={{ background: "var(--lx-surface-input)", border: "1px solid var(--lx-border-default)", borderRadius: 6, padding: "8px 10px" }}>
-                <span className="text-xs text-lx-text-muted">No skills attached — add them in Settings.</span>
-              </div>
-            )}
-          </div>
-
-          <PromptFields
-            extraPrompt={extraPrompt}
-            setExtraPrompt={setExtraPrompt}
-            runtimeId={runtimeId}
-            setRuntimeId={setRuntimeId}
-            onlineRuntimes={onlineRuntimes}
-          />
-
-          <div style={{ padding: "8px 12px", borderBottom: "1px solid var(--lx-border-default)", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-            <span className="text-xs text-lx-text-muted" style={{ fontSize: 11 }}>
-              {sessionRow ? `Continuing session from ${formatSessionAge(sessionRow.updatedAt)}` : "New session"}
-            </span>
-            <button
-              type="button"
-              className="btn btn-ghost"
-              style={{ height: 22, padding: "0 8px", fontSize: 11 }}
-              onClick={() => resetSession.mutate({ documentType, documentId, runtimeId })}
-              disabled={resetSession.isPending || taskRunning || !runtimeId}
-              title={taskRunning ? "running task" : undefined}
-            >
-              New session
-            </button>
-          </div>
-
-          <div style={{ padding: "10px 12px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-            <span className="font-micro text-2xs text-lx-text-muted uppercase tracking-[0.04em]">
-              {selectionText ? `Selection: ${selectionText.length} chars` : "No selection"}
-            </span>
-            <button type="button" className="btn btn-primary" style={{ height: 28, padding: "0 12px", fontSize: 12 }} onClick={handleGenerate} disabled={createTask.isPending || onlineRuntimes.length === 0 || !selectedSkill}>
-              <Flame size={12} strokeWidth={1.5} />
-              {createTask.isPending ? "Starting…" : "Generate"}
-            </button>
-          </div>
-        </>
-      )}
-
-
-      {/* Rendered inside the popover so the fixed modal layers above it (the
-          popover's stacking context is z-80). */}
-      {logModalOpen && (
-<HearthTaskLogModal
-        open={logModalOpen}
-        onClose={() => setLogModalOpen(false)}
-        task={taskData}
-        logs={logs.data ?? []}
+      <PopoverBody
+        taskId={taskId}
+        taskData={taskData}
+        running={running}
+        failed={failed}
+        done={done}
+        reviewActive={reviewActive}
+        followLog={followLog}
+        setFollowLog={setFollowLog}
+        logBodyRef={logBodyRef}
+        logs={logs}
+        isAdmin={isAdmin}
+        setLogModalOpen={setLogModalOpen}
+        cancelTask={cancelTask}
+        setTaskId={setTaskId}
         runtimes={runtimes}
+        onReview={onReview}
+        agentSkills={agentSkills}
+        effectiveSkillId={effectiveSkillId}
+        setSkillId={setSkillId}
+        extraPrompt={extraPrompt}
+        setExtraPrompt={setExtraPrompt}
+        runtimeId={runtimeId}
+        setRuntimeId={setRuntimeId}
+        onlineRuntimes={onlineRuntimes}
+        sessionRow={sessionRow ?? null}
+        resetSession={resetSession}
+        documentType={documentType}
+        documentId={documentId}
+        taskRunning={taskRunning}
+        selectionText={selection.text}
+        onGenerate={handleGenerate}
+        creating={createTask.isPending}
+        logModalOpen={logModalOpen}
       />
-      )}
     </div>,
     portalTarget
   );

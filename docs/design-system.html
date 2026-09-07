@@ -48,9 +48,6 @@
   --lx-bg-warning-subtle: rgba(240, 192, 64, 0.10);
   --lx-bg-success-subtle: rgba(74, 222, 128, 0.10);
   --lx-bg-accent-subtle: rgba(240, 192, 64, 0.10);
-  --lx-status-danger: #FF4444;
-  --lx-status-warning: #F0C040;
-  --lx-status-success: #4ADE80;
 
   --lx-shadow-sm: 0 1px 2px rgba(12, 11, 9, 0.5);
   --lx-shadow-md: 0 4px 12px rgba(12, 11, 9, 0.6);
@@ -378,7 +375,7 @@ a:hover { color: var(--lx-text-link-hover); }
    accent survives .card-row:hover's border-color reset (equal specificity,
    later source order wins). */
 .card-row.card-row--success, .card-panel--success { border-left: 3px solid #4ADE80; }
-.card-row.card-row--warning, .card-panel--warning { border-left: 3px solid var(--lx-border-focus); }
+.card-row.card-row--warning, .card-panel--warning { border-left: 3px solid #F0C040; }
 .card-row.card-row--danger,  .card-panel--danger  { border-left: 3px solid #FF4444; }
 .card-row.card-row--neutral, .card-panel--neutral { border-left: 3px solid #4A443D; }
 .card-tile {
@@ -711,7 +708,7 @@ a:hover { color: var(--lx-text-link-hover); }
   height: 20px;
   padding: 0 8px;
   border-radius: 9999px;
-  border: 1px solid var(--lx-bg-warning-subtle);
+  border: 1px solid rgba(252, 211, 77, 0.35);
   font-family: var(--lx-font-body);
   font-size: 11px;
   line-height: 14px;
@@ -722,7 +719,7 @@ a:hover { color: var(--lx-text-link-hover); }
 }
 
 .lane-due-overdue {
-  border-color: var(--lx-bg-danger-subtle);
+  border-color: rgba(255, 68, 68, 0.45);
   background: var(--lx-bg-danger-subtle);
   color: var(--lx-text-danger);
 }
@@ -734,7 +731,7 @@ a:hover { color: var(--lx-text-link-hover); }
   height: 20px;
   padding: 0 8px;
   border-radius: 9999px;
-  border: 1px solid var(--lx-bg-warning-subtle);
+  border: 1px solid rgba(252, 211, 77, 0.35);
   font-family: var(--lx-font-body);
   font-size: 11px;
   line-height: 14px;
@@ -744,7 +741,7 @@ a:hover { color: var(--lx-text-link-hover); }
 }
 
 .card-due-overdue {
-  border-color: var(--lx-bg-danger-subtle);
+  border-color: rgba(255, 68, 68, 0.45);
   background: var(--lx-bg-danger-subtle);
   color: var(--lx-text-danger);
 }
@@ -1814,9 +1811,6 @@ mark {
   --lx-bg-warning-subtle: rgba(212, 160, 23, 0.08);
   --lx-bg-success-subtle: rgba(22, 163, 74, 0.08);
   --lx-bg-accent-subtle: rgba(212, 160, 23, 0.08);
-  --lx-status-danger: #DC2626;
-  --lx-status-warning: #D4A017;
-  --lx-status-success: #16A34A;
 
   --lx-shadow-sm: 0 1px 2px rgba(26, 23, 20, 0.08);
   --lx-shadow-md: 0 4px 12px rgba(26, 23, 20, 0.10);
@@ -1909,7 +1903,7 @@ mark {
 }
 
 .toast-success { border-left: 3px solid #4ADE80; }
-.toast-warning { border-left: 3px solid var(--lx-border-focus); }
+.toast-warning { border-left: 3px solid #F0C040; }
 .toast-error   { border-left: 3px solid #FF4444; }
 .toast-neutral { border-left: 3px solid #4A443D; }
 
@@ -3194,7 +3188,7 @@ textarea.prop-input {
   border: 1px solid;
 }
 .status-badge-ok { color: var(--lx-text-success); border-color: rgba(134, 238, 172, 0.35); }
-.status-badge-approaching { color: var(--lx-text-warning); border-color: var(--lx-bg-warning-subtle); }
+.status-badge-approaching { color: var(--lx-text-warning); border-color: rgba(252, 211, 77, 0.35); }
 .status-badge-exceeded { color: var(--lx-text-danger); border-color: rgba(255, 153, 153, 0.4); }
 .status-badge-empty { color: var(--lx-text-muted); border-color: var(--lx-border-default); }
 
@@ -4513,7 +4507,7 @@ textarea.prop-input {
   height: 20px;
   padding: 0 8px;
   border-radius: 9999px;
-  border: 1px solid var(--lx-bg-warning-subtle);
+  border: 1px solid rgba(252, 211, 77, 0.35);
   font-family: var(--lx-font-body);
   font-size: 11px;
   line-height: 14px;
@@ -4521,7 +4515,7 @@ textarea.prop-input {
   white-space: nowrap;
 }
 .milestone-due-overdue {
-  border-color: var(--lx-bg-danger-subtle);
+  border-color: rgba(255, 68, 68, 0.45);
   background: var(--lx-bg-danger-subtle);
   color: var(--lx-text-danger);
 }
@@ -5182,15 +5176,6 @@ textarea.prop-input {
 .thread-row:hover { background: var(--lx-surface-card-hover); }
 
 .thread-row.active { background: var(--lx-bg-accent-subtle); }
-
-.thread-row:focus-visible { outline: none; box-shadow: var(--lx-focus-ring); }
-
-.thread-snippet mark, .threads-sidebar-list mark {
-  background: rgba(240, 192, 64, 0.16);
-  color: var(--lx-text-warning);
-  border-radius: 2px;
-  padding: 0 2px;
-}
 
 .thread-pin {
   flex-shrink: 0;
@@ -6660,7 +6645,10 @@ th { font-weight:500; color: var(--lx-text-secondary); font-size:11px; text-tran
     });
     // Sections rail — highlight the section nearest the top of the viewport
     const navLinks = [...document.querySelectorAll('.ds-nav a')];
-    const sections = navLinks.map((a) => document.querySelector(a.getAttribute('href')));
+    const sections = navLinks.map((a) => {
+      const id = (a.getAttribute('href') || '').slice(1);
+      return id ? document.getElementById(id) : null;
+    });
     const spy = new IntersectionObserver((entries) => {
       entries.forEach((entry) => {
         if (!entry.isIntersecting) return;

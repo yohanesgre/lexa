@@ -1,12 +1,18 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
 
 export type Theme = "dark" | "light";
 
 const STORAGE_KEY = "lexa:theme";
 
+// Hydration flag without state: false on the server snapshot, true on the
+// client after the first paint — no effect-driven setState initialization.
+const subscribeNoop = () => () => {};
+const getMounted = () => true;
+const getMountedServer = () => false;
+
 export function useTheme(): { theme: Theme; toggleTheme: () => void; mounted: boolean } {
   const [theme, setTheme] = useState<Theme>("dark");
-  const [mounted, setMounted] = useState(false);
+  const mounted = useSyncExternalStore(subscribeNoop, getMounted, getMountedServer);
 
   useEffect(() => {
     try {
@@ -15,7 +21,6 @@ export function useTheme(): { theme: Theme; toggleTheme: () => void; mounted: bo
     } catch {
       // ignore storage errors
     }
-    setMounted(true);
   }, []);
 
   useEffect(() => {
@@ -23,16 +28,14 @@ export function useTheme(): { theme: Theme; toggleTheme: () => void; mounted: bo
   }, [theme]);
 
   const toggleTheme = useCallback(() => {
-    setTheme((t) => {
-      const next = t === "dark" ? "light" : "dark";
-      try {
-        localStorage.setItem(STORAGE_KEY, next);
-      } catch {
-        // ignore storage errors
-      }
-      return next;
-    });
-  }, []);
+    const next = theme === "dark" ? "light" : "dark";
+    setTheme(next);
+    try {
+      localStorage.setItem(STORAGE_KEY, next);
+    } catch {
+      // ignore storage errors
+    }
+  }, [theme]);
 
   return { theme, toggleTheme, mounted };
 }

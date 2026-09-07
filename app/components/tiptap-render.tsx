@@ -1,6 +1,7 @@
 import { type ReactNode } from "react";
 import type { TipTapDoc } from "../../shared/types";
 import { safeHref } from "../../shared/safe-href";
+import { withKeys } from "../lib/withKeys";
 import { cn } from "./ui/cn";
 
 // Root-relative attachment srcs render because cookie auth covers the GET —
@@ -73,8 +74,7 @@ export function renderInline(
   slug?: string
 ): ReactNode {
   if (!nodes) return null;
-  return nodes.map((node, i) => {
-    const nodeKey = `${keyPrefix}-${i}`;
+  return withKeys(nodes, (node) => `${keyPrefix}/${node.type === "text" ? `t:${node.text ?? ""}` : node.type}`).map(({ item: node, key: nodeKey }) => {
     if (node.type === "text") {
       let el: ReactNode = node.text ?? "";
       for (const mark of node.marks ?? []) {
@@ -97,7 +97,7 @@ export function renderInline(
             );
         }
       }
-      return <span key={`${keyPrefix}-t-${node.text ?? ""}`}>{el}</span>;
+      return <span key={nodeKey}>{el}</span>;
     }
     if (node.type === "hardBreak") return <br key={nodeKey} />;
     if (node.type === "mention") return renderMention(node.attrs, nodeKey, slug, variant);
@@ -108,7 +108,7 @@ export function renderInline(
       const src = safeImageSrc(node.attrs?.src);
       if (!src) return null;
       const alt = typeof node.attrs?.alt === "string" ? node.attrs.alt : "";
-      return <img key={`${nodeKey}-${src}`} src={src} alt={alt} loading="lazy" />;
+      return <img key={nodeKey} src={src} alt={alt} loading="lazy" />;
     }
     return renderNode(node, nodeKey, variant, slug);
   });
@@ -122,7 +122,9 @@ function renderBlocks(
   variant: "task" | "wiki",
   slug?: string
 ): ReactNode {
-  return (nodes ?? []).map((node, i) => renderNode(node, `${keyPrefix}-b${i}`, variant, slug));
+  return withKeys(nodes ?? [], (node) => node.type).map(({ item: node, key }) =>
+    renderNode(node, `${keyPrefix}/b/${key}`, variant, slug)
+  );
 }
 
 export function renderNode(
@@ -301,5 +303,7 @@ export function renderDoc(doc: TipTapDoc, variant: "task" | "wiki" = "task", slu
     if (node.type === "heading") return hasText(node.content ?? []);
     return true;
   });
-  return visibleNodes.map((node, i) => renderNode(node, `n${i}`, variant, slug));
+  return withKeys(visibleNodes, (node) => node.type).map(({ item: node, key }) =>
+    renderNode(node, `n/${key}`, variant, slug)
+  );
 }

@@ -14,18 +14,200 @@ export interface SwimlaneFormProps {
   zIndex?: number | undefined;
 }
 
+interface SwimlaneFormState {
+  name: string;
+  description: string;
+  dueAt: string | null;
+  startAt: string | null;
+  milestoneId: string | null;
+}
+
+function validateSwimlaneForm(state: SwimlaneFormState): string | null {
+  if (state.name.trim() === "") return "Name is required";
+  if (state.startAt && state.dueAt && state.startAt > state.dueAt) {
+    return "Start date must be before the due date";
+  }
+  return null;
+}
+
+function buildSwimlanePayload(state: SwimlaneFormState) {
+  const trimmedDescription = state.description.trim();
+  return {
+    name: state.name.trim(),
+    description: trimmedDescription === "" ? null : trimmedDescription,
+    dueAt: state.dueAt,
+    startAt: state.startAt,
+    milestoneId: state.milestoneId,
+  };
+}
+
+function FieldShell({ id, label, hint, children }: { id: string; label: string; hint: React.ReactNode; children: React.ReactNode }) {
+  return (
+    <div className="mb-4">
+      <label className="block text-xs font-medium text-lx-text-secondary mb-1.5 font-body" htmlFor={id}>
+        {label}
+        <span className="font-mono text-[10px] uppercase tracking-[0.04em] text-lx-text-muted ml-1.5">
+          Optional
+        </span>
+      </label>
+      {children}
+      <p className="text-[11px] leading-4 text-lx-text-muted mt-1 font-body">
+        {hint}
+      </p>
+    </div>
+  );
+}
+
+function SwimlaneFormFields({ error, state, set, milestones, isBacklog }: {
+  error: string | null;
+  state: SwimlaneFormState;
+  set: (patch: Partial<SwimlaneFormState>) => void;
+  milestones: { id: string; name: string; archivedAt: string | null | undefined }[];
+  isBacklog: boolean;
+}) {
+  return (
+    <div className="p-4 overflow-y-auto" style={{ maxHeight: "calc(100vh - 140px)" }}>
+      {error && (
+        <div className="text-sm text-lx-text-danger mb-4 bg-lx-bg-danger-subtle rounded-md px-3 py-2">
+          {error}
+        </div>
+      )}
+
+      <div className="mb-4">
+        <label className="block text-xs font-medium text-lx-text-secondary mb-1.5 font-body" htmlFor="swimlane-name">
+          Name
+        </label>
+        <input
+          id="swimlane-name"
+          className="prop-input w-full"
+          value={state.name}
+          onChange={(e) => set({ name: e.target.value })}
+          placeholder="e.g. Sprint 8 — The Hollow Crown"
+        />
+      </div>
+
+      <div className="mb-4">
+        <label className="block text-xs font-medium text-lx-text-secondary mb-1.5 font-body" htmlFor="swimlane-description">
+          Description
+          <span className="font-mono text-[10px] uppercase tracking-[0.04em] text-lx-text-muted ml-1.5">
+            Optional
+          </span>
+        </label>
+        <textarea
+          id="swimlane-description"
+          className="prop-input w-full"
+          value={state.description}
+          onChange={(e) => set({ description: e.target.value })}
+          placeholder="e.g. Release track, team, or sprint goal"
+          rows={4}
+        />
+        <p className="text-[11px] leading-4 text-lx-text-muted mt-1 font-body">
+          Shown as a subtitle under the swimlane header on the board.
+        </p>
+      </div>
+
+      {!isBacklog && (
+        <FieldShell
+          id="swimlane-milestone"
+          label="Milestone"
+          hint={<>Stored as swimlanes.milestone_id. &ldquo;None&rdquo; = loose sprint (no milestone).</>}
+        >
+          <select
+            id="swimlane-milestone"
+            className="prop-input w-full"
+            value={state.milestoneId ?? ""}
+            onChange={(e) => set({ milestoneId: e.target.value === "" ? null : e.target.value })}
+          >
+            <option value="">None — loose sprint</option>
+            {milestones.map((m) => (
+              <option key={m.id} value={m.id}>
+                {m.name}{m.archivedAt ? " (archived)" : ""}
+              </option>
+            ))}
+          </select>
+        </FieldShell>
+      )}
+
+      {!isBacklog && (
+        <FieldShell
+          id="swimlane-start"
+          label="Start date"
+          hint="Stored as swimlanes.start_at YYYY-MM-DD. Validated start &le; due on save."
+        >
+          <DatePicker value={state.startAt} onChange={(v) => set({ startAt: v })} className="w-full" />
+        </FieldShell>
+      )}
+
+      {!isBacklog && (
+        <FieldShell
+          id="swimlane-due"
+          label="Due date"
+          hint="Stored as swimlanes.due_at YYYY-MM-DD — date-only, no time-of-day. Empty = lane has no deadline."
+        >
+          <DatePicker value={state.dueAt} onChange={(v) => set({ dueAt: v })} className="w-full" />
+        </FieldShell>
+      )}
+    </div>
+  );
+}
+
+function SwimlaneFormHeader({ title, onClose }: { title: string; onClose: () => void }) {
+  return (
+    <div className="flex items-center justify-between h-14 px-4 border-b border-lx-border-subtle flex-shrink-0">
+      <h2 id="swimlane-form-title" className="font-display text-base font-medium text-lx-text-primary">
+        {title}
+      </h2>
+      <button
+        type="button"
+        className="btn btn-ghost w-8 h-8 p-0"
+        onClick={onClose}
+        aria-label="Close"
+      >
+        <X size={18} strokeWidth={1.5} />
+      </button>
+    </div>
+  );
+}
+
+function SwimlaneFormFooter({ isEdit, swimlaneName, onClose, submitLabel }: {
+  isEdit: boolean;
+  swimlaneName: string;
+  onClose: () => void;
+  submitLabel: string;
+}) {
+  return (
+    <div className="flex items-center gap-2 px-4 py-3 border-t border-lx-border-subtle">
+      {isEdit && (
+        <button
+          type="button"
+          className="btn btn-danger-solid"
+          style={{ marginRight: "auto" }}
+          onClick={() => {
+            if (window.confirm(`Delete "${swimlaneName}"? This will unassign all tasks in this swimlane.`)) {
+              onClose();
+            }
+          }}
+        >
+          <Trash2 size={14} strokeWidth={1.5} />
+          Delete Swimlane
+        </button>
+      )}
+      <button type="button" className="btn btn-ghost" onClick={onClose}>
+        Cancel
+      </button>
+      <button type="submit" className="btn btn-primary">
+        <Plus size={14} strokeWidth={1.5} />
+        {submitLabel}
+      </button>
+    </div>
+  );
+}
+
 export function SwimlaneForm({ slug, swimlane, isOpen, onClose, onSubmit, zIndex = 70 }: SwimlaneFormProps) {
   const isEdit = !!swimlane;
   const { data: milestones = [] } = useMilestones(slug);
 
-  interface FormState {
-    name: string;
-    description: string;
-    dueAt: string | null;
-    startAt: string | null;
-    milestoneId: string | null;
-  }
-  const [state, setState] = useState<FormState>({
+  const [state, setState] = useState<SwimlaneFormState>({
     name: "",
     description: "",
     dueAt: null,
@@ -33,7 +215,7 @@ export function SwimlaneForm({ slug, swimlane, isOpen, onClose, onSubmit, zIndex
     milestoneId: null,
   });
   const [error, setError] = useState<string | null>(null);
-  const set = (patch: Partial<FormState> | ((s: FormState) => FormState)) =>
+  const set = (patch: Partial<SwimlaneFormState> | ((s: SwimlaneFormState) => SwimlaneFormState)) =>
     setState((s) => (typeof patch === "function" ? patch(s) : { ...s, ...patch }));
 
   const onEscape = useEffectEvent((event: KeyboardEvent) => {
@@ -75,24 +257,13 @@ export function SwimlaneForm({ slug, swimlane, isOpen, onClose, onSubmit, zIndex
 
   const handleSubmit = (event: React.FormEvent) => {
     event.preventDefault();
-    const trimmedName = state.name.trim();
-    if (trimmedName === "") {
-      setError("Name is required");
-      return;
-    }
-    if (state.startAt && state.dueAt && state.startAt > state.dueAt) {
-      setError("Start date must be before the due date");
+    const error = validateSwimlaneForm(state);
+    if (error) {
+      setError(error);
       return;
     }
     setError(null);
-    const trimmedDescription = state.description.trim();
-    onSubmit({
-      name: trimmedName,
-      description: trimmedDescription === "" ? null : trimmedDescription,
-      dueAt: state.dueAt,
-      startAt: state.startAt,
-      milestoneId: state.milestoneId,
-    });
+    onSubmit(buildSwimlanePayload(state));
     onClose();
   };
 
@@ -109,143 +280,20 @@ export function SwimlaneForm({ slug, swimlane, isOpen, onClose, onSubmit, zIndex
           aria-labelledby="swimlane-form-title"
         >
           <form onSubmit={handleSubmit}>
-            <div className="flex items-center justify-between h-14 px-4 border-b border-lx-border-subtle flex-shrink-0">
-              <h2 id="swimlane-form-title" className="font-display text-base font-medium text-lx-text-primary">
-                {isEdit ? "Edit Swimlane" : "Create Swimlane"}
-              </h2>
-              <button
-                type="button"
-                className="btn btn-ghost w-8 h-8 p-0"
-                onClick={onClose}
-                aria-label="Close"
-              >
-                <X size={18} strokeWidth={1.5} />
-              </button>
-            </div>
-
-            <div className="p-4 overflow-y-auto" style={{ maxHeight: "calc(100vh - 140px)" }}>
-              {error && (
-                <div className="text-sm text-lx-text-danger mb-4 bg-lx-bg-danger-subtle rounded-md px-3 py-2">
-                  {error}
-                </div>
-              )}
-
-              <div className="mb-4">
-                <label className="block text-xs font-medium text-lx-text-secondary mb-1.5 font-body" htmlFor="swimlane-name">
-                  Name
-                </label>
-                <input
-                  id="swimlane-name"
-                  className="prop-input w-full"
-                  value={state.name}
-                  onChange={(e) => set({ name: e.target.value })}
-                  placeholder="e.g. Sprint 8 — The Hollow Crown"
-                  autoFocus
-                />
-              </div>
-
-              <div className="mb-4">
-                <label className="block text-xs font-medium text-lx-text-secondary mb-1.5 font-body" htmlFor="swimlane-description">
-                  Description
-                  <span className="font-mono text-[10px] uppercase tracking-[0.04em] text-lx-text-muted ml-1.5">
-                    Optional
-                  </span>
-                </label>
-                <textarea
-                  id="swimlane-description"
-                  className="prop-input w-full"
-                  value={state.description}
-                  onChange={(e) => set({ description: e.target.value })}
-                  placeholder="e.g. Release track, team, or sprint goal"
-                  rows={4}
-                />
-                <p className="text-[11px] leading-4 text-lx-text-muted mt-1 font-body">
-                  Shown as a subtitle under the swimlane header on the board.
-                </p>
-              </div>
-
-              {!isBacklog && (
-                <div className="mb-4">
-                  <label className="block text-xs font-medium text-lx-text-secondary mb-1.5 font-body" htmlFor="swimlane-milestone">
-                    Milestone
-                    <span className="font-mono text-[10px] uppercase tracking-[0.04em] text-lx-text-muted ml-1.5">
-                      Optional
-                    </span>
-                  </label>
-                  <select
-                    id="swimlane-milestone"
-                    className="prop-input w-full"
-                    value={state.milestoneId ?? ""}
-                    onChange={(e) => set({ milestoneId: e.target.value === "" ? null : e.target.value })}
-                  >
-                    <option value="">None — loose sprint</option>
-                    {milestones.map((m) => (
-                      <option key={m.id} value={m.id}>
-                        {m.name}{m.archivedAt ? " (archived)" : ""}
-                      </option>
-                    ))}
-                  </select>
-                  <p className="text-[11px] leading-4 text-lx-text-muted mt-1 font-body">
-                    Stored as swimlanes.milestone_id. &ldquo;None&rdquo; = loose sprint (no milestone).
-                  </p>
-                </div>
-              )}
-
-              {!isBacklog && (
-                <div className="mb-4">
-                  <label className="block text-xs font-medium text-lx-text-secondary mb-1.5 font-body" htmlFor="swimlane-start">
-                    Start date
-                    <span className="font-mono text-[10px] uppercase tracking-[0.04em] text-lx-text-muted ml-1.5">
-                      Optional
-                    </span>
-                  </label>
-                  <DatePicker value={state.startAt} onChange={(v) => set({ startAt: v })} className="w-full" />
-                  <p className="text-[11px] leading-4 text-lx-text-muted mt-1 font-body">
-                    Stored as swimlanes.start_at YYYY-MM-DD. Validated start &le; due on save.
-                  </p>
-                </div>
-              )}
-
-              {!isBacklog && (
-                <div className="mb-4">
-                  <label className="block text-xs font-medium text-lx-text-secondary mb-1.5 font-body" htmlFor="swimlane-due">
-                    Due date
-                    <span className="font-mono text-[10px] uppercase tracking-[0.04em] text-lx-text-muted ml-1.5">
-                      Optional
-                    </span>
-                  </label>
-                  <DatePicker value={state.dueAt} onChange={(v) => set({ dueAt: v })} className="w-full" />
-                  <p className="text-[11px] leading-4 text-lx-text-muted mt-1 font-body">
-                    Stored as swimlanes.due_at YYYY-MM-DD — date-only, no time-of-day. Empty = lane has no deadline.
-                  </p>
-                </div>
-              )}
-            </div>
-
-            <div className="flex items-center gap-2 px-4 py-3 border-t border-lx-border-subtle">
-              {isEdit && (
-                <button
-                  type="button"
-                  className="btn btn-danger-solid"
-                  style={{ marginRight: "auto" }}
-                  onClick={() => {
-                    if (window.confirm(`Delete "${swimlane!.name}"? This will unassign all tasks in this swimlane.`)) {
-                      onClose();
-                    }
-                  }}
-                >
-                  <Trash2 size={14} strokeWidth={1.5} />
-                  Delete Swimlane
-                </button>
-              )}
-              <button type="button" className="btn btn-ghost" onClick={onClose}>
-                Cancel
-              </button>
-              <button type="submit" className="btn btn-primary">
-                <Plus size={14} strokeWidth={1.5} />
-                {isEdit ? "Save Changes" : "Create Swimlane"}
-              </button>
-            </div>
+            <SwimlaneFormHeader title={isEdit ? "Edit Swimlane" : "Create Swimlane"} onClose={onClose} />
+            <SwimlaneFormFields
+              error={error}
+              state={state}
+              set={set}
+              milestones={milestones}
+              isBacklog={isBacklog}
+            />
+            <SwimlaneFormFooter
+              isEdit={isEdit}
+              swimlaneName={swimlane?.name ?? ""}
+              onClose={onClose}
+              submitLabel={isEdit ? "Save Changes" : "Create Swimlane"}
+            />
           </form>
         </dialog>
       </div>

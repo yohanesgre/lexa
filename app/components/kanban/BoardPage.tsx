@@ -12,9 +12,57 @@ import type { Task, TipTapDoc } from "../../../shared/types";
 // milestone would make the loose-sprint view unreachable from the UI.
 const MILESTONE_NONE = "none";
 
+function resolveEffectiveMilestone(milestoneParam: string | null, defaultMilestone: string | null) {
+  if (milestoneParam === MILESTONE_NONE) return null;
+  return milestoneParam ?? defaultMilestone;
+}
+
 export interface BoardPageProps {
   slug: string;
   search: { task?: string | undefined; milestone?: string | undefined };
+}
+
+function BoardSkeleton() {
+  return (
+    <div className="board-area">
+      <div className="board-header">
+        <div className="skeleton" style={{ width: 140, height: 22 }} />
+        <div className="flex items-center gap-2">
+          <div className="skeleton" style={{ width: 72, height: 32 }} />
+          <div className="skeleton" style={{ width: 88, height: 32 }} />
+        </div>
+      </div>
+      <div className="board-scroll" style={{ overflow: "hidden" }}>
+        {[0, 1, 2].map((lane) => (
+          <div key={lane}>
+            <div className="skeleton" style={{ width: 320, height: 36, marginBottom: 12 }} />
+            <div className="columns-row">
+              {[0, 1, 2, 3].map((col) => (
+                <div key={col} className="column" style={{ minHeight: 320 }}>
+                  <div className="column-header">
+                    <div className="skeleton" style={{ width: col * 23 + 52, height: 12 }} />
+                  </div>
+                  <div className="column-body">
+                    {[0, 1].map((card) => (
+                      <div key={card} className="card-row">
+                        <div className="skeleton" style={{ width: card === 0 ? 56 : 40, height: 18 }} />
+                        <div className="skeleton mt-2" style={{ width: card === 0 ? "85%" : "92%", height: 14 }} />
+                        <div className="skeleton mt-1" style={{ width: card === 0 ? "60%" : "45%", height: 14 }} />
+                        <div className="flex items-center gap-2 mt-2">
+                          <div className="skeleton skeleton-circle" style={{ width: 20, height: 20 }} />
+                          <div className="skeleton" style={{ width: card === 0 ? 72 : 56, height: 12 }} />
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
 }
 
 export function BoardPage({ slug, search }: BoardPageProps) {
@@ -38,7 +86,7 @@ export function BoardPage({ slug, search }: BoardPageProps) {
   // user choice that sticks (loose sprints + Backlog), never falling back.
   const milestoneParam = search.milestone ?? null;
   const defaultMilestone = (board?.milestones ?? []).find((m) => !m.archivedAt)?.id ?? null;
-  const effectiveMilestone = milestoneParam === MILESTONE_NONE ? null : (milestoneParam ?? defaultMilestone);
+  const effectiveMilestone = resolveEffectiveMilestone(milestoneParam, defaultMilestone);
 
   const handleMilestoneChange = (id: string | null) => {
     navigate({ search: { milestone: id === null ? MILESTONE_NONE : id }, replace: true } as never);
@@ -130,46 +178,7 @@ export function BoardPage({ slug, search }: BoardPageProps) {
   };
 
   if (isLoading) {
-    return (
-      <div className="board-area">
-        <div className="board-header">
-          <div className="skeleton" style={{ width: 140, height: 22 }} />
-          <div className="flex items-center gap-2">
-            <div className="skeleton" style={{ width: 72, height: 32 }} />
-            <div className="skeleton" style={{ width: 88, height: 32 }} />
-          </div>
-        </div>
-        <div className="board-scroll" style={{ overflow: "hidden" }}>
-          {[0, 1, 2].map((lane) => (
-            <div key={lane}>
-              <div className="skeleton" style={{ width: 320, height: 36, marginBottom: 12 }} />
-              <div className="columns-row">
-                {[0, 1, 2, 3].map((col) => (
-                  <div key={col} className="column" style={{ minHeight: 320 }}>
-                    <div className="column-header">
-                      <div className="skeleton" style={{ width: col * 23 + 52, height: 12 }} />
-                    </div>
-                    <div className="column-body">
-                      {[0, 1].map((card) => (
-                        <div key={card} className="card-row">
-                          <div className="skeleton" style={{ width: card === 0 ? 56 : 40, height: 18 }} />
-                          <div className="skeleton mt-2" style={{ width: card === 0 ? "85%" : "92%", height: 14 }} />
-                          <div className="skeleton mt-1" style={{ width: card === 0 ? "60%" : "45%", height: 14 }} />
-                          <div className="flex items-center gap-2 mt-2">
-                            <div className="skeleton skeleton-circle" style={{ width: 20, height: 20 }} />
-                            <div className="skeleton" style={{ width: card === 0 ? 72 : 56, height: 12 }} />
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          ))}
-        </div>
-      </div>
-    );
+    return <BoardSkeleton />;
   }
   if (error) return <div className="board-error">Failed to load board: {(error as Error).message}</div>;
   if (!board) return <div className="board-error">Project not found</div>;

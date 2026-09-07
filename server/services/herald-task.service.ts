@@ -81,8 +81,10 @@ export class HeraldTaskService extends Effect.Service<HeraldTaskService>()("Lexa
       findTaskByRef: async (ref: string) => {
         const t = await Effect.runPromise(taskRepo.findById(ref).pipe(Effect.orElse(() => taskRepo.findByKey(ref)))).catch(() => null);
         if (!t || (t as unknown as { projectId: string }).projectId !== projectId) return null;
-        const col = await dbFirst<{ name: string }>(`SELECT name FROM columns WHERE id = ?`, (t as unknown as { columnId: string }).columnId);
-        const lane = await dbFirst<{ name: string; milestone_id: string | null }>(`SELECT name, milestone_id FROM swimlanes WHERE id = ?`, (t as unknown as { swimlaneId: string }).swimlaneId);
+        const [col, lane] = await Promise.all([
+          dbFirst<{ name: string }>(`SELECT name FROM columns WHERE id = ?`, (t as unknown as { columnId: string }).columnId),
+          dbFirst<{ name: string; milestone_id: string | null }>(`SELECT name, milestone_id FROM swimlanes WHERE id = ?`, (t as unknown as { swimlaneId: string }).swimlaneId),
+        ]);
         let milestoneName: string | null = null; if (lane?.milestone_id) { const m = await dbFirst<{ name: string }>(`SELECT name FROM milestones WHERE id = ?`, lane.milestone_id); milestoneName = m?.name ?? null; }
         const gi = (t as unknown as { githubs: Array<{ repo: string; issueNumber: number }> }).githubs[0];
         return { ...taskRefOf(t as unknown as Task), columnName: col?.name ?? "", swimlaneName: lane?.name ?? "", milestoneName, type: (t as unknown as { type: string }).type, assignees: (t as unknown as { assignees: string[] }).assignees, githubIssue: gi ? { repo: gi.repo, number: gi.issueNumber } : null };
@@ -120,7 +122,8 @@ export class HeraldTaskService extends Effect.Service<HeraldTaskService>()("Lexa
       if (enabled.length === 0) return { tools: [], drain: undefined };
       const recorder = createWriteRecorder(turn, (row) => Effect.runPromise(pendingWritesRepo.insert({ id: row.id, project_id: row.projectId, document_type: row.documentType, document_id: row.documentId, owner_user_id: row.ownerUserId, batch_id: row.batchId, seq: row.seq, tool_name: row.toolName, args: row.args, diff: row.diff, expires_at: row.expiresAt })).then(() => {}));
       const all = buildHeraldWriteTools(makeWriteDeps(turn.projectId, recorder)) as Array<{ name: string }>;
-      const tools = all.filter((t) => enabled.includes(t.name));
+      const enabledSet = new Set(enabled);
+      const tools = all.filter((t) => enabledSet.has(t.name));
       return tools.length === 0 ? { tools: [], drain: undefined } : { tools, drain: () => recorder.drain() };
     };
     const ctx = { db, taskService, commentService, wikiService, milestoneService, swimlaneService, authz, pendingWritesRepo, taskRepo, wikiRepo };

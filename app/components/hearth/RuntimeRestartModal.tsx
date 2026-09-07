@@ -6,7 +6,7 @@ import { copyToClipboard } from "../../lib/clipboard";
 import { useRuntimes } from "../../lib/queries";
 import { parseApiDate } from "../../lib/date";
 import { cn } from "../ui/cn";
-import type { Runtime } from "../../../shared/types";
+import type { Machine, Runtime, RuntimeEvent } from "../../../shared/types";
 
 const USER_TIME_ZONE = typeof window !== "undefined" ? Intl.DateTimeFormat().resolvedOptions().timeZone : "UTC";
 const LAST_SEEN_FMT = new Intl.DateTimeFormat("en-GB", { timeZone: USER_TIME_ZONE });
@@ -15,10 +15,80 @@ function isOnline(lastSeen: string | null): boolean {
   return !!lastSeen && Date.now() - parseApiDate(lastSeen).getTime() < 2 * 60 * 1000;
 }
 
+function RestartNotice({ machineOnline, hostname }: { machineOnline: boolean; hostname: string | null }) {
+  return (
+    <div className={cn("card-row flex items-start gap-3 mb-4", machineOnline ? "card-row--warning" : "card-row--danger")}>
+      <RefreshCw size={16} strokeWidth={1.5} className="text-lx-text-link flex-shrink-0" style={{ marginTop: 1 }} />
+      <div>
+        <div className="text-sm font-medium text-lx-text-primary">{machineOnline ? "Machine listener is online" : "Machine listener is offline"}</div>
+        <div className="text-xs text-lx-text-secondary" style={{ marginTop: 2, lineHeight: 1.5 }}>
+          {machineOnline ? "Send an update event. The listener restarts this runtime child and keeps its saved Settings configuration." : `Start the listener on ${hostname || "the runtime machine"}. The runtime remains in the list until it reconnects.`}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function OfflineCommand({ machine }: { machine: Machine | undefined }) {
+  const [copied, setCopied] = useState(false);
+  const copy = () => {
+    void copyToClipboard("lexa-cli machine listen").then(() => {
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1500);
+    });
+  };
+  return (
+    <div className="field">
+      <div className="field-label">Run on the machine</div>
+      <div style={{ background: "var(--lx-surface-input)", border: "1px solid var(--lx-border-default)", borderRadius: 6, padding: 12, position: "relative" }}>
+        <pre className="font-mono text-xs text-lx-text-secondary whitespace-pre-wrap leading-6 m-0">lexa-cli machine listen</pre>
+        <button type="button" className="btn btn-ghost" aria-label="Copy machine listen command" style={{ position: "absolute", top: 8, right: 8, height: 24, padding: "0 8px", fontSize: 11 }} onClick={copy}>{copied ? <Check size={12} strokeWidth={1.5} /> : <Copy size={12} strokeWidth={1.5} />} {copied ? "Copied" : "Copy"}</button>
+      </div>
+      <div className="field-hint mt-1.5">Last seen: {machine?.lastSeen ? LAST_SEEN_FMT.format(parseApiDate(machine.lastSeen)) : "never"}. This modal keeps polling.</div>
+    </div>
+  );
+}
+
+function ProgressLine({ runtimeName, sendError, event, eventComplete, backOnline }: {
+  runtimeName: string;
+  sendError: string | null;
+  event: RuntimeEvent | undefined;
+  eventComplete: boolean;
+  backOnline: boolean;
+}) {
+  if (sendError) return <div className="notice notice-warning mt-3">{sendError}</div>;
+  if (event?.status === "failed") return <div className="notice notice-warning mt-3">{event.error || "The listener could not restart the runtime."}</div>;
+  if (eventComplete && backOnline) {
+    return <div className="card-row flex items-center gap-3 mt-4" style={{ background: "var(--lx-bg-success-subtle)" }}><span className="sync-dot sync-synced" /><span className="text-xs font-medium text-lx-text-primary">{runtimeName} is back online</span></div>;
+  }
+  if (event) {
+    return <div className="flex items-center gap-3 mt-4" style={{ background: "var(--lx-surface-input)", border: "1px solid var(--lx-border-default)", borderRadius: 6, padding: "10px 12px" }}><span className="spinner" style={{ width: 14, height: 14, borderWidth: 2 }} /><span className="text-xs text-lx-text-secondary">Waiting for the listener to restart the child…</span></div>;
+  }
+  return null;
+}
+
+interface RestartFooterProps {
+  machineOnline: boolean;
+  eventId: string | null;
+  event: RuntimeEvent | undefined;
+  onClose: () => void;
+  onRestart: () => void;
+  onCheckAgain: () => void;
+}
+
+function RestartFooter({ machineOnline, eventId, event, onClose, onRestart, onCheckAgain }: RestartFooterProps) {
+  return (
+    <div className="flex justify-end mt-5" style={{ gap: 8 }}>
+      <button type="button" className="btn btn-ghost" onClick={onClose}>Close</button>
+      {machineOnline && <button type="button" className="btn btn-primary" onClick={onRestart} disabled={!!eventId && event?.status !== "failed"}><RefreshCw size={12} strokeWidth={1.5} /> {eventId ? "Restart sent" : "Restart runtime"}</button>}
+      {!machineOnline && <button type="button" className="btn btn-ghost" onClick={onCheckAgain}>Check again</button>}
+    </div>
+  );
+}
+
 export function RuntimeRestartModal({ runtime, onClose }: { runtime: Runtime; onClose: () => void }) {
   const [eventId, setEventId] = useState<string | null>(null);
   const [sendError, setSendError] = useState<string | null>(null);
-  const [copied, setCopied] = useState(false);
   const qc = useQueryClient();
   const { data: runtimes = [] } = useRuntimes();
   const { data: machines = [] } = useQuery({
@@ -54,13 +124,6 @@ export function RuntimeRestartModal({ runtime, onClose }: { runtime: Runtime; on
       .catch((error: unknown) => setSendError(error instanceof Error ? error.message : "Could not send restart event"));
   };
 
-  const copy = () => {
-    void copyToClipboard("lexa-cli machine listen").then(() => {
-      setCopied(true);
-      window.setTimeout(() => setCopied(false), 1500);
-    });
-  };
-
   return (
     <>
       <button type="button" className="slideover-overlay" onClick={onClose} aria-label="Close" />
@@ -71,40 +134,17 @@ export function RuntimeRestartModal({ runtime, onClose }: { runtime: Runtime; on
             <button type="button" className="btn btn-ghost" style={{ width: 32, height: 32, padding: 0 }} onClick={onClose} aria-label="Close"><X size={16} strokeWidth={1.5} /></button>
           </div>
           <div className="modal-body">
-            <div className={cn("card-row flex items-start gap-3 mb-4", machineOnline ? "card-row--warning" : "card-row--danger")}>
-              <RefreshCw size={16} strokeWidth={1.5} className="text-lx-text-link flex-shrink-0" style={{ marginTop: 1 }} />
-              <div>
-                <div className="text-sm font-medium text-lx-text-primary">{machineOnline ? "Machine listener is online" : "Machine listener is offline"}</div>
-                <div className="text-xs text-lx-text-secondary" style={{ marginTop: 2, lineHeight: 1.5 }}>
-                  {machineOnline ? "Send an update event. The listener restarts this runtime child and keeps its saved Settings configuration." : `Start the listener on ${runtime.hostname || "the runtime machine"}. The runtime remains in the list until it reconnects.`}
-                </div>
-              </div>
-            </div>
-
-            {!machineOnline && (
-              <div className="field">
-                <div className="field-label">Run on the machine</div>
-                <div style={{ background: "var(--lx-surface-input)", border: "1px solid var(--lx-border-default)", borderRadius: 6, padding: 12, position: "relative" }}>
-                  <pre className="font-mono text-xs text-lx-text-secondary whitespace-pre-wrap leading-6 m-0">lexa-cli machine listen</pre>
-                  <button type="button" className="btn btn-ghost" aria-label="Copy machine listen command" style={{ position: "absolute", top: 8, right: 8, height: 24, padding: "0 8px", fontSize: 11 }} onClick={copy}>{copied ? <Check size={12} strokeWidth={1.5} /> : <Copy size={12} strokeWidth={1.5} />} {copied ? "Copied" : "Copy"}</button>
-                </div>
-                <div className="field-hint mt-1.5">Last seen: {machine?.lastSeen ? LAST_SEEN_FMT.format(parseApiDate(machine.lastSeen)) : "never"}. This modal keeps polling.</div>
-              </div>
-            )}
-
-            {sendError && <div className="notice notice-warning mt-3">{sendError}</div>}
-            {event?.status === "failed" && <div className="notice notice-warning mt-3">{event.error || "The listener could not restart the runtime."}</div>}
-            {eventComplete && backOnline ? (
-              <div className="card-row flex items-center gap-3 mt-4" style={{ background: "var(--lx-bg-success-subtle)" }}><span className="sync-dot sync-synced" /><span className="text-xs font-medium text-lx-text-primary">{runtime.name} is back online</span></div>
-            ) : eventId ? (
-              <div className="flex items-center gap-3 mt-4" style={{ background: "var(--lx-surface-input)", border: "1px solid var(--lx-border-default)", borderRadius: 6, padding: "10px 12px" }}><span className="spinner" style={{ width: 14, height: 14, borderWidth: 2 }} /><span className="text-xs text-lx-text-secondary">Waiting for the listener to restart the child…</span></div>
-            ) : null}
-
-            <div className="flex justify-end mt-5" style={{ gap: 8 }}>
-              <button type="button" className="btn btn-ghost" onClick={onClose}>Close</button>
-              {machineOnline && <button type="button" className="btn btn-primary" onClick={restart} disabled={!!eventId && event?.status !== "failed"}><RefreshCw size={12} strokeWidth={1.5} /> {eventId ? "Restart sent" : "Restart runtime"}</button>}
-              {!machineOnline && <button type="button" className="btn btn-ghost" onClick={() => void qc.refetchQueries({ queryKey: ["hearth-machines"] })}>Check again</button>}
-            </div>
+            <RestartNotice machineOnline={machineOnline} hostname={runtime.hostname} />
+            {!machineOnline && <OfflineCommand machine={machine} />}
+            <ProgressLine runtimeName={runtime.name} sendError={sendError} event={event} eventComplete={eventComplete} backOnline={backOnline} />
+            <RestartFooter
+              machineOnline={machineOnline}
+              eventId={eventId}
+              event={event}
+              onClose={onClose}
+              onRestart={restart}
+              onCheckAgain={() => void qc.refetchQueries({ queryKey: ["hearth-machines"] })}
+            />
           </div>
         </dialog>
       </div>

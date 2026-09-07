@@ -52,9 +52,7 @@ export function AgentsSettingsSection() {
       ) : (
         <div className="card-panel" style={{ overflow: "hidden" }}>
           <table className="settings-table">
-            <thead>
-              <tr><th>Name</th><th>Description</th><th>Skills</th><th>Builtin</th><th>Updated</th><th></th></tr>
-            </thead>
+            <SettingsTableHead labels={["Name", "Description", "Skills", "Builtin", "Updated", ""]} />
             <tbody>
               {agents.map((a) => (
                 <tr key={a.id}>
@@ -77,6 +75,7 @@ export function AgentsSettingsSection() {
 
       {editing !== null && (
         <PromptEditorModal
+          key={typeof editing === "string" ? editing : editing.id}
           kind="agent"
           entity={editing}
           allSkills={skills}
@@ -90,6 +89,15 @@ export function AgentsSettingsSection() {
 // Skills are global operation bundles; instructions become
 // .agents/<skill>/SKILL.md at claim time. Builtins are never deleted;
 // bindings live on the agent editor.
+
+function SettingsTableHead({ labels }: { labels: string[] }) {
+  return (
+    <thead>
+      <tr>{labels.map((label, i) => <th key={`${i}-${label}`}>{label}</th>)}</tr>
+    </thead>
+  );
+}
+
 export function SkillsSettingsSection() {
   const { data: skills = [], isLoading, isError } = useSkills();
   const { data: agents = [] } = useAgents();
@@ -120,9 +128,7 @@ export function SkillsSettingsSection() {
       ) : (
         <div className="card-panel" style={{ overflow: "hidden" }}>
           <table className="settings-table">
-            <thead>
-              <tr><th>Name</th><th>Description</th><th>Used by</th><th>Builtin</th><th>Updated</th><th></th></tr>
-            </thead>
+            <SettingsTableHead labels={["Name", "Description", "Used by", "Builtin", "Updated", ""]} />
             <tbody>
               {skills.map((s) => (
                 <tr key={s.id}>
@@ -164,6 +170,7 @@ export function SkillsSettingsSection() {
 
       {editing !== null && (
         <PromptEditorModal
+          key={editing === "new" ? "new" : editing.id}
           kind="skill"
           entity={editing === "new" ? null : editing}
           allAgents={agents}

@@ -63,7 +63,12 @@ export function buildChatExport(t: { title: string | null; messages: unknown[] }
   return `${lines.join("\n")}\n`;
 }
 export function buildChatSnippet(messages: unknown[], q: string): string | null {
-  const flat = messages.map((m) => (typeof (m as { content?: unknown }).content === "string" ? (m as { content: string }).content : "")).filter((s) => s !== "").join("\n");
+  const parts: string[] = [];
+  for (const m of messages) {
+    const content = (m as { content?: unknown }).content;
+    if (typeof content === "string" && content !== "") parts.push(content);
+  }
+  const flat = parts.join("\n");
   if (flat === "") return null;
   const idx = flat.toLowerCase().indexOf(q.toLowerCase());
   if (idx === -1) return null;
@@ -84,15 +89,18 @@ export function assertAttachmentCaps(refs: Array<{ mimeType: string; size: numbe
 }
 export function bytesToBase64(bytes: Uint8Array): string { let bin = ""; const CHUNK = 0x8000; for (let i = 0; i < bytes.length; i += CHUNK) bin += String.fromCharCode(...bytes.subarray(i, i + CHUNK)); return btoa(bin); }
 export async function hydrateImageParts(messages: unknown[], load: (key: string) => Promise<string | null>): Promise<import("@tanstack/ai").ModelMessage[]> {
-  const out: import("@tanstack/ai").ModelMessage[] = [];
-  for (const message of messages) {
+  return Promise.all(messages.map(async (message) => {
     const msg = message as import("@tanstack/ai").ModelMessage;
-    if (!Array.isArray(msg.content)) { out.push(msg); continue; }
-    const parts: unknown[] = [];
-    for (const raw of msg.content) { const candidate: unknown = raw; if (!isStoredImageRef(candidate)) { parts.push(raw); continue; } const base64 = await load(candidate.storageKey).catch(() => null); if (base64 === null) continue; parts.push({ type: "image", source: { type: "data", value: base64, mimeType: candidate.mimeType } }); }
-    out.push({ ...msg, content: parts } as import("@tanstack/ai").ModelMessage);
-  }
-  return out;
+    if (!Array.isArray(msg.content)) return msg;
+    const parts = (await Promise.all(msg.content.map(async (raw) => {
+      const candidate: unknown = raw;
+      if (!isStoredImageRef(candidate)) return raw;
+      const base64 = await load(candidate.storageKey).catch(() => null);
+      if (base64 === null) return null;
+      return { type: "image", source: { type: "data", value: base64, mimeType: candidate.mimeType } };
+    }))).filter((p) => p !== null);
+    return { ...msg, content: parts } as import("@tanstack/ai").ModelMessage;
+  }));
 }
 export async function replaceImageRefsWithPlaceholders(messages: unknown[]): Promise<import("@tanstack/ai").ModelMessage[]> {
   const out: import("@tanstack/ai").ModelMessage[] = [];

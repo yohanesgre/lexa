@@ -11,6 +11,105 @@ interface SourcesSectionProps {
   className?: string | undefined;
 }
 
+// "@" is the explicit wiki mention trigger: it opens the page list even with
+// an empty query and always adds by validated slug.
+function resolveWikiMatches(wikiPages: WikiPageMeta[], mention: boolean, query: string): WikiPageMeta[] {
+  if (query) {
+    return wikiPages.filter((p) => p.title.toLowerCase().includes(query.toLowerCase())).slice(0, mention ? 8 : 5);
+  }
+  return mention ? wikiPages.slice(0, 8) : [];
+}
+
+function moveHighlight(h: number, delta: number, len: number): number {
+  return (h + delta + len) % len;
+}
+
+interface SourceKeyContext {
+  openWithMatches: boolean;
+  matchCount: number;
+  highlight: number;
+  onMoveHighlight: (next: number) => void;
+  onSelectMatch: () => void;
+  onEscape: () => void;
+  onAdd: () => void;
+}
+
+function handleSourceKeyDown(e: React.KeyboardEvent<HTMLInputElement>, ctx: SourceKeyContext): void {
+  if (e.key === "ArrowDown" && ctx.openWithMatches) {
+    e.preventDefault();
+    ctx.onMoveHighlight(moveHighlight(ctx.highlight, 1, ctx.matchCount));
+  } else if (e.key === "ArrowUp" && ctx.openWithMatches) {
+    e.preventDefault();
+    ctx.onMoveHighlight(moveHighlight(ctx.highlight, -1, ctx.matchCount));
+  } else if (e.key === "Enter" && ctx.openWithMatches) {
+    e.preventDefault();
+    ctx.onSelectMatch();
+  } else if (e.key === "Escape") {
+    ctx.onEscape();
+  } else if (e.key === "Enter") {
+    ctx.onAdd();
+  }
+}
+
+function SourceRow({ title, kind, onRemove }: { title: string; kind: string; onRemove: () => void }) {
+  return (
+    <div className="github-issue-row">
+      <div className="flex items-center gap-2" style={{ minWidth: 0 }}>
+        {kind === "wiki" ? (
+          <BookOpen size={12} strokeWidth={1.5} className="text-lx-text-muted flex-shrink-0" />
+        ) : (
+          <Globe size={12} strokeWidth={1.5} className="text-lx-text-muted flex-shrink-0" />
+        )}
+        <span className="text-sm text-lx-text-secondary truncate">{title}</span>
+        <span className="font-micro text-2xs text-lx-text-muted">{kind}</span>
+      </div>
+      <button
+        type="button"
+        className="icon-btn"
+        title="Remove source"
+        aria-label="Remove source"
+        style={{ width: 20, height: 20 }}
+        onClick={onRemove}
+      >
+        <X size={10} strokeWidth={2} />
+      </button>
+    </div>
+  );
+}
+
+function WikiDropdown({ matches, pages, query, highlight, onSelect, onHover }: {
+  matches: WikiPageMeta[];
+  pages: WikiPageMeta[];
+  query: string;
+  highlight: number;
+  onSelect: (page: WikiPageMeta) => void;
+  onHover: (index: number) => void;
+}) {
+  return (
+    <div className="menu-popover" style={{ position: "absolute", top: "calc(100% + 4px)", left: 0, right: 0, zIndex: 30, maxHeight: 224, overflowY: "auto" }}>
+      {matches.length === 0 ? (
+        <div className="menu-item" style={{ cursor: "default" }}>
+          {pages.length === 0 ? "No wiki pages in this project yet" : `No wiki pages match "${query}"`}
+        </div>
+      ) : (
+        matches.map((p, i) => (
+          <button
+            key={p.id}
+            type="button"
+            className={cn("menu-item", i === highlight && "active")}
+            onMouseEnter={() => onHover(i)}
+            onClick={() => onSelect(p)}
+          >
+            <BookOpen size={12} strokeWidth={1.5} />
+            <span className="truncate" style={{ flex: 1, textAlign: "left" }}>{p.title}</span>
+            <span className="font-micro text-2xs text-lx-text-muted flex-shrink-0">{p.slug}</span>
+          </button>
+        ))
+      )}
+    </div>
+  );
+}
+
 export function SourcesSection({ slug, documentType, documentId, className }: SourcesSectionProps) {
   const { data: sources = [] } = useSources(slug, documentType, documentId);
   const addSource = useAddSource(slug, documentType, documentId);
@@ -22,17 +121,9 @@ export function SourcesSection({ slug, documentType, documentId, className }: So
   const [highlight, setHighlight] = useState(-1);
   const [adding, setAdding] = useState(false);
 
-  // "@" is the explicit wiki mention trigger: it opens the page list even with
-  // an empty query and always adds by validated slug.
   const mention = value.trim().startsWith("@");
   const query = mention ? value.trim().slice(1).trim() : value.trim();
-
-  const wikiMatches = query
-    ? wikiPages.filter((p) => p.title.toLowerCase().includes(query.toLowerCase())).slice(0, mention ? 8 : 5)
-    : mention
-      ? wikiPages.slice(0, 8)
-      : [];
-
+  const wikiMatches = resolveWikiMatches(wikiPages, mention, query);
   const dropdownOpen = focused && value.trim().length > 0 && (mention || wikiMatches.length > 0);
 
   const selectWiki = (page: WikiPageMeta) => {
@@ -68,6 +159,18 @@ export function SourcesSection({ slug, documentType, documentId, className }: So
     );
   };
 
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    handleSourceKeyDown(e, {
+      openWithMatches: dropdownOpen && wikiMatches.length > 0,
+      matchCount: wikiMatches.length,
+      highlight,
+      onMoveHighlight: setHighlight,
+      onSelectMatch: () => selectWiki(wikiMatches[highlight >= 0 ? highlight : 0]!),
+      onEscape: () => setFocused(false),
+      onAdd: handleAdd,
+    });
+  };
+
   return (
     <div className={cn(className)}>
       <div className="flex items-center gap-2 mb-2">
@@ -77,30 +180,7 @@ export function SourcesSection({ slug, documentType, documentId, className }: So
       </div>
 
       {sources.map((s) => (
-        <div
-          key={s.id}
-          className="github-issue-row"
-        >
-          <div className="flex items-center gap-2" style={{ minWidth: 0 }}>
-            {s.kind === "wiki" ? (
-              <BookOpen size={12} strokeWidth={1.5} className="text-lx-text-muted flex-shrink-0" />
-            ) : (
-              <Globe size={12} strokeWidth={1.5} className="text-lx-text-muted flex-shrink-0" />
-            )}
-            <span className="text-sm text-lx-text-secondary truncate">{s.title}</span>
-            <span className="font-micro text-2xs text-lx-text-muted">{s.kind}</span>
-          </div>
-          <button
-            type="button"
-            className="icon-btn"
-            title="Remove source"
-            aria-label="Remove source"
-            style={{ width: 20, height: 20 }}
-            onClick={() => removeSource.mutate(s.id)}
-          >
-            <X size={10} strokeWidth={2} />
-          </button>
-        </div>
+        <SourceRow key={s.id} title={s.title} kind={s.kind} onRemove={() => removeSource.mutate(s.id)} />
       ))}
 
       {sources.length === 0 && (
@@ -122,22 +202,7 @@ export function SourcesSection({ slug, documentType, documentId, className }: So
             }}
             onFocus={() => setFocused(true)}
             onBlur={() => window.setTimeout(() => setFocused(false), 150)}
-            onKeyDown={(e) => {
-              if (e.key === "ArrowDown" && dropdownOpen && wikiMatches.length > 0) {
-                e.preventDefault();
-                setHighlight((h) => (h + 1) % wikiMatches.length);
-              } else if (e.key === "ArrowUp" && dropdownOpen && wikiMatches.length > 0) {
-                e.preventDefault();
-                setHighlight((h) => (h - 1 + wikiMatches.length) % wikiMatches.length);
-              } else if (e.key === "Enter" && dropdownOpen && wikiMatches.length > 0) {
-                e.preventDefault();
-                selectWiki(wikiMatches[highlight >= 0 ? highlight : 0]!);
-              } else if (e.key === "Escape") {
-                setFocused(false);
-              } else if (e.key === "Enter") {
-                handleAdd();
-              }
-            }}
+            onKeyDown={handleKeyDown}
             style={{ flex: 1, height: 28, fontSize: 12, minWidth: 0 }}
           />
           <button
@@ -153,27 +218,14 @@ export function SourcesSection({ slug, documentType, documentId, className }: So
         </div>
 
         {dropdownOpen && (
-          <div className="menu-popover" style={{ position: "absolute", top: "calc(100% + 4px)", left: 0, right: 0, zIndex: 30, maxHeight: 224, overflowY: "auto" }}>
-            {wikiMatches.length === 0 ? (
-              <div className="menu-item" style={{ cursor: "default" }}>
-                {wikiPages.length === 0 ? "No wiki pages in this project yet" : `No wiki pages match "${query}"`}
-              </div>
-            ) : (
-              wikiMatches.map((p, i) => (
-                <button
-                  key={p.id}
-                  type="button"
-                  className={cn("menu-item", i === highlight && "active")}
-                  onMouseEnter={() => setHighlight(i)}
-                  onClick={() => selectWiki(p)}
-                >
-                  <BookOpen size={12} strokeWidth={1.5} />
-                  <span className="truncate" style={{ flex: 1, textAlign: "left" }}>{p.title}</span>
-                  <span className="font-micro text-2xs text-lx-text-muted flex-shrink-0">{p.slug}</span>
-                </button>
-              ))
-            )}
-          </div>
+          <WikiDropdown
+            matches={wikiMatches}
+            pages={wikiPages}
+            query={query}
+            highlight={highlight}
+            onSelect={selectWiki}
+            onHover={setHighlight}
+          />
         )}
       </div>
     </div>

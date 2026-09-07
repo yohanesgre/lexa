@@ -15,6 +15,23 @@ import { auth, loginLimiter, authIpLimiter } from "./auth";
 import type { Server } from "bun";
 
 let ssrFetch: ((req: Request) => Promise<Response>) | null = null;
+
+// SPA shell (dist/client/_shell.html) — prerendered at build by the
+// tanstack-start SPA mode. ssr:false routes must be served this shell: the
+// SSR handler emits a headless React fragment for them (no <html>/<head>),
+// which renders as a blank page. /share/* responses carry real SSR markup
+// (<html> present) and pass through untouched.
+let spaShellHtml: string | null = null;
+function spaShell(): string {
+  if (spaShellHtml === null) {
+    try {
+      spaShellHtml = readFileSync(join(import.meta.dir, "../dist/client/_shell.html"), "utf8");
+    } catch {
+      spaShellHtml = "";
+    }
+  }
+  return spaShellHtml;
+}
 try {
   // @ts-expect-error built artifact (vite build emits dist/server/server.js); typed at the cast below
   const mod = (await import("../dist/server/server.js")) as unknown as {
@@ -305,25 +322,27 @@ const server: Server<unknown> = Bun.serve({
         console.error("[SSR] Uncaught:", err);
         return withSecurityHeaders(new Response("Internal error", { status: 500, headers: { "Content-Type": "text/plain" } }));
       }
-      // Inject the server's current API key into the HTML so the browser can
-      // authenticate without a build-time baked key. This keeps :3000 working
-      // even after `bun run setup` rotates the key in .env (the built bundle
-      // would otherwise carry a stale key). (The x-lxk-user / lxk-logout meta
-      // tags are removed with the Cloudflare Access flow — browser identity
-      // comes from the session cookie.)
-      if (process.env.LXK_API_KEY && res.headers.get("content-type")?.includes("text/html")) {
-        const html = await res.text();
-        const injected = html.replace(
-          "<head>",
-          `<head><meta name="lxk-api-key" content="${process.env.LXK_API_KEY}">`
-        );
-        // The key-bearing page must never be cached (browser or CDN).
-        const injectedHeaders = new Headers(res.headers);
-        injectedHeaders.set("Cache-Control", "no-store");
-        injectedHeaders.set("X-Content-Type-Options", "nosniff");
-        return new Response(injected, {
+      // SSR HTML must never be cached (browser or CDN). (A previous revision
+      // injected the server API key as <meta name="lxk-api-key"> here for
+      // browser auth; nothing has read it since the session-cookie switch,
+      // and the streamed SSR output carries no <head> for the replace to
+      // match, so the injection was dead — removed. Browser identity comes
+      // from the session cookie.)
+      if (res.headers.get("content-type")?.includes("text/html")) {
+        const headers = new Headers(res.headers);
+        headers.set("Cache-Control", "no-store");
+        headers.set("X-Content-Type-Options", "nosniff");
+        // Headless fragment → serve the prerendered SPA shell instead.
+        const text = await res.text();
+        if (!text.includes("<html")) {
+          const shell = spaShell();
+          if (shell) {
+            return withSecurityHeaders(new Response(shell, { status: 200, headers }));
+          }
+        }
+        return new Response(text, {
           status: res.status,
-          headers: injectedHeaders,
+          headers,
         });
       }
       return res;

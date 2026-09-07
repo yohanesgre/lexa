@@ -9,19 +9,21 @@ import type { HearthEngine } from "../../../../shared/herald";
 // mid-run is blocked until the terminal frame.
 export type HearthMode = HearthEngine;
 
+const OPTION_BASE_STYLE: React.CSSProperties = { height: 22, padding: "0 10px", fontSize: 11 };
+const OPTION_SELECTED_STYLE: React.CSSProperties = {
+  background: "var(--lx-surface-selected)",
+  borderColor: "var(--lx-border-focus)",
+  color: "var(--lx-text-primary)",
+};
+const OPTION_UNSELECTED_STYLE: React.CSSProperties = { color: "var(--lx-text-secondary)" };
+const optionStyle = (selected: boolean): React.CSSProperties =>
+  selected ? { ...OPTION_BASE_STYLE, ...OPTION_SELECTED_STYLE } : { ...OPTION_BASE_STYLE, ...OPTION_UNSELECTED_STYLE };
+
 export function HeraldModePicker({ mode, onChange, disabled }: {
   mode: HearthMode;
   onChange: (mode: HearthMode) => void;
   disabled?: boolean | undefined;
 }) {
-  const optionStyle = (selected: boolean): React.CSSProperties => ({
-    height: 22,
-    padding: "0 10px",
-    fontSize: 11,
-    ...(selected
-      ? { background: "var(--lx-surface-selected)", borderColor: "var(--lx-border-focus)", color: "var(--lx-text-primary)" }
-      : { color: "var(--lx-text-secondary)" }),
-  });
   return (
     <div
       className="flex items-center"

@@ -354,7 +354,10 @@ export async function listModels(
   if (!res.ok) throw new ProviderUnreachable({ message: `models endpoint returned ${res.status}` });
   const body = (await res.json()) as { data?: Array<{ id?: string }>; models?: Array<{ id?: string }> };
   const items = body.data ?? body.models ?? [];
-  const models = items.filter((m) => typeof m.id === "string").map((m) => ({ id: m.id as string }));
+  const models: Array<{ id: string }> = [];
+  for (const m of items) {
+    if (typeof m.id === "string") models.push({ id: m.id });
+  }
   heraldLog("DEBUG", "herald-provider listModels parsed", { kind, count: models.length });
   return { models };
 }

@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useRef, useState, type ReactNode } from "react";
-import { MarkdownContent } from "../../lib/markdownToReact";
+import { MarkdownContent } from "../MarkdownContent";
 import type { HeraldTimelineItem, HeraldToolChip } from "../../lib/use-herald-stream";
 
 // Chronological reply timeline inside the assistant bubble
@@ -26,13 +26,10 @@ function thoughtLabel(ms: number | null): string | null {
 }
 
 function ReasoningRow({ item, active }: { item: Extract<HeraldTimelineItem, { kind: "reasoning" }>; active: boolean }) {
-  const [expanded, setExpanded] = useState(active);
-  const wasActive = useRef(active);
-  useEffect(() => {
-    if (active) setExpanded(true);
-    else if (wasActive.current) setExpanded(false);
-    wasActive.current = active;
-  }, [active]);
+  // Expansion derives from the active prop; a user click sets a null-able
+  // override that lasts until the parent drops the row's active state.
+  const [override, setOverride] = useState<boolean | null>(null);
+  const expanded = override ?? active;
 
   const bodyRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -43,7 +40,7 @@ function ReasoningRow({ item, active }: { item: Extract<HeraldTimelineItem, { ki
   const label = active ? "Thinking…" : thoughtLabel(item.ms) ?? "Thought";
   return (
     <div className="herald-activity">
-      <button type="button" className="herald-activity-toggle" aria-expanded={expanded} onClick={() => setExpanded((v) => !v)}>
+      <button type="button" className="herald-activity-toggle" aria-expanded={expanded} onClick={() => setOverride(!expanded)}>
         <svg className={expanded ? "herald-activity-chevron" : "herald-activity-chevron collapsed"} viewBox="0 0 24 24" fill="none" aria-hidden="true">
           <path d="m6 9 6 6 6-6" />
         </svg>
@@ -104,11 +101,11 @@ export function HeraldActivity({ items, tools, reasoningActive, reasoningMs, don
   const lastReasoningItem = items.findLast((it) => it.kind === "reasoning");
   return (
     <>
-      {items.map((item, idx) => {
+      {items.map((item) => {
         if (item.kind === "text") {
-          const isLatest = idx === items.length - 1;
+          const isLatest = item === items[items.length - 1];
           return (
-            <div key={idx} className="bubble-md">
+            <div key={item.id} className="bubble-md">
               <MarkdownContent
                 md={item.text}
                 renderText={renderText}
@@ -119,12 +116,13 @@ export function HeraldActivity({ items, tools, reasoningActive, reasoningMs, don
         }
         if (item.kind === "tool") {
           return (
-            <div key={idx} className="herald-activity">
+            <div key={item.id} className="herald-activity">
               <ToolLine chip={item.chip} />
             </div>
           );
         }
-        return <ReasoningRow key={idx} item={item} active={reasoningActive && item === lastReasoningItem} />;
+        const rowActive = reasoningActive && item === lastReasoningItem;
+        return <ReasoningRow key={item.id} item={item} active={rowActive} />;
       })}
     </>
   );
@@ -155,11 +153,11 @@ function DoneFold({ items, tools, reasoningMs }: {
         <span>{summary}</span>
       </button>
       {bodyVisible &&
-        items.map((item, i) =>
+        items.map((item) =>
           item.kind === "reasoning" ? (
-            item.text ? <div key={`r${i}`} className="herald-activity-reasoning">{item.text}</div> : null
+            item.text ? <div key={item.id} className="herald-activity-reasoning">{item.text}</div> : null
           ) : (
-            <ToolLine key={`t${i}`} chip={item.chip} />
+            <ToolLine key={item.id} chip={item.chip} />
           )
         )}
     </div>

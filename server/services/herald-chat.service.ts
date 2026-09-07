@@ -103,8 +103,10 @@ export class HeraldChatService extends Effect.Service<HeraldChatService>()("Lexa
       findTaskByRef: async (ref: string) => {
         const t = await Effect.runPromise(taskRepo.findById(ref).pipe(Effect.orElse(() => taskRepo.findByKey(ref)))).catch(() => null);
         if (!t || (t as unknown as { projectId: string }).projectId !== projectId) return null;
-        const col = await dbFirst<{ name: string }>(`SELECT name FROM columns WHERE id = ?`, (t as unknown as { columnId: string }).columnId);
-        const lane = await dbFirst<{ name: string; milestone_id: string | null }>(`SELECT name, milestone_id FROM swimlanes WHERE id = ?`, (t as unknown as { swimlaneId: string }).swimlaneId);
+        const [col, lane] = await Promise.all([
+          dbFirst<{ name: string }>(`SELECT name FROM columns WHERE id = ?`, (t as unknown as { columnId: string }).columnId),
+          dbFirst<{ name: string; milestone_id: string | null }>(`SELECT name, milestone_id FROM swimlanes WHERE id = ?`, (t as unknown as { swimlaneId: string }).swimlaneId),
+        ]);
         let milestoneName: string | null = null;
         if (lane?.milestone_id) { const m = await dbFirst<{ name: string }>(`SELECT name FROM milestones WHERE id = ?`, lane.milestone_id); milestoneName = m?.name ?? null; }
         return { id: (t as unknown as { id: string }).id, key: (t as unknown as { key: string }).key, title: (t as unknown as { title: string }).title, priority: (t as unknown as { priority: string }).priority, dueAt: (t as unknown as { dueAt: string | null }).dueAt, archivedAt: (t as unknown as { archivedAt: string | null }).archivedAt, markdown: docToMarkdown((t as unknown as { description: TipTapDoc }).description as TipTapDoc), columnName: col?.name ?? "", swimlaneName: lane?.name ?? "", milestoneName, type: (t as unknown as { type: string }).type, assignees: (t as unknown as { assignees: string[] }).assignees, githubIssue: null };
@@ -141,7 +143,8 @@ export class HeraldChatService extends Effect.Service<HeraldChatService>()("Lexa
       if (enabled.length === 0) return { tools: [], drain: undefined };
       const recorder = createWriteRecorder(turn, (row) => Effect.runPromise(pendingWritesRepo.insert({ id: row.id, project_id: row.projectId, document_type: row.documentType, document_id: row.documentId, owner_user_id: row.ownerUserId, batch_id: row.batchId, seq: row.seq, tool_name: row.toolName, args: row.args, diff: row.diff, expires_at: row.expiresAt })).then(() => {}));
       const all = buildHeraldWriteTools(makeWriteDeps(turn.projectId, recorder)) as Array<{ name: string }>;
-      const tools = all.filter((t) => enabled.includes(t.name));
+      const enabledSet = new Set(enabled);
+      const tools = all.filter((t) => enabledSet.has(t.name));
       return tools.length === 0 ? { tools: [], drain: undefined } : { tools, drain: () => recorder.drain() };
     };
 

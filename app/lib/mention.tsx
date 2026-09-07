@@ -1,6 +1,7 @@
 import { type ReactNode } from "react";
 import type { TipTapDoc } from "../../shared/types";
 import { safeHref } from "../../shared/safe-href";
+import { withKeys } from "./withKeys";
 import { TTNode, hasText } from "../components/tiptap-render";
 
 // Render-time mention highlight over project member names (wireframe:
@@ -64,13 +65,14 @@ function applyMarks(segment: { text: string; mention: boolean }, marks: TTNode["
 
 function renderInlineNodes(nodes: TTNode[] | undefined, members: string[], keyPrefix: string): ReactNode {
   if (!nodes) return null;
-  return nodes.map((node, i) => {
-    const nodeKey = `${keyPrefix}-${i}`;
+  return withKeys(nodes, (node) => `${keyPrefix}/${node.type === "text" ? `t:${node.text ?? ""}` : node.type}`).map(({ item: node, key: nodeKey }) => {
     if (node.type === "text") {
       const segments = splitMentions(node.text ?? "", members);
       return (
-        <span key={`${nodeKey}-t`}>
-          {segments.map((s, j) => applyMarks(s, node.marks, `${nodeKey}-s${j}-${s.text}`))}
+        <span key={nodeKey}>
+          {withKeys(segments, (s) => `${s.mention ? "m" : "p"}:${s.text}`).map(({ item: s, key: sk }) =>
+            applyMarks(s, node.marks, sk)
+          )}
         </span>
       );
     }
@@ -119,5 +121,7 @@ function collectText(node: TTNode): string {
 export function renderCommentBody(doc: TipTapDoc, memberNames: string[]): ReactNode {
   const nodes = doc.content as TTNode[];
   if (!hasText(nodes ?? [])) return null;
-  return nodes.map((node, i) => renderBlockNode(node, memberNames, `n${i}`));
+  return withKeys(nodes, (node) => node.type).map(({ item: node, key }) =>
+    renderBlockNode(node, memberNames, `n/${key}`)
+  );
 }

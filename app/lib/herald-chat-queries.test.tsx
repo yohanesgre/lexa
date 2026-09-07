@@ -56,7 +56,9 @@ describe("useRenameHeraldChat", () => {
     const cache = qc.getQueryData<HeraldChatThreadSummary[]>(["herald-chats", "p1"])!;
     expect(cache.find((t) => t.chatId === "c2")?.title).toBe("Rollback runbook draft");
     expect(cache.find((t) => t.chatId === "c1")?.title).toBe("Payments migration questions");
-    expect(spy).not.toHaveBeenCalled();
+    // Cache is patched in place for instant UI; a background refetch also
+    // fires so the server view re-syncs (React Doctor: mutations invalidate).
+    expect(spy).toHaveBeenCalledWith({ queryKey: ["herald-chats"] });
   });
 });
 describe("useUpdateHeraldChatMeta", () => {
@@ -74,7 +76,7 @@ describe("useUpdateHeraldChatMeta", () => {
     expect(cache.map((t) => t.chatId)).toEqual(["c1", "c2"]);
     expect(cache[0]!.pinned).toBe(true);
     expect((qc.getQueryData<HeraldChatThreadSummary[]>(["herald-chats", "p1", "runbook"]) ?? [])[0]!.pinned).toBe(true);
-    expect(spy).not.toHaveBeenCalled();
+    expect(spy).toHaveBeenCalledWith({ queryKey: ["herald-chats"] });
   });
 });
 describe("useDeleteHeraldChat", () => {

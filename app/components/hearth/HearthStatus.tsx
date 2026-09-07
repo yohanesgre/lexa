@@ -60,6 +60,163 @@ function TaskRowMain({ t, navigable }: { t: RecentHearthTask; navigable: boolean
   );
 }
 
+function rowMeta(t: RecentHearthTask, runtime: { name: string; provider: string } | undefined): string {
+  const isActive = t.status === "queued" || t.status === "running";
+  return isActive && runtime ? `${t.projectName} · ${runtime.name} · ${runtime.provider}` : t.projectName;
+}
+
+function StatusPill({ active, doneCount, failedCount, idle }: {
+  active: RecentHearthTask | undefined;
+  doneCount: number;
+  failedCount: number;
+  idle: boolean;
+}) {
+  if (active) {
+    return (
+      <>
+        <span className="spinner" style={{ width: 10, height: 10, borderWidth: 2 }} />
+        Hearth · {active.skillName || active.skillId}
+      </>
+    );
+  }
+  if (failedCount > 0) {
+    return (
+      <>
+        <Flame size={12} strokeWidth={1.5} />
+        {doneCount > 0 ? `${doneCount} done · ${failedCount} failed` : `${failedCount} failed`}
+      </>
+    );
+  }
+  if (idle) {
+    return (
+      <>
+        <Flame size={12} strokeWidth={1.5} />
+        Hearth
+      </>
+    );
+  }
+  return (
+    <>
+      <Check size={12} strokeWidth={2.5} />
+      {doneCount} done
+    </>
+  );
+}
+
+function pillClass(active: RecentHearthTask | undefined, failedCount: number, idle: boolean): string {
+  if (active) return "hearth-status hearth-status--warning";
+  if (failedCount > 0) return "hearth-status hearth-status--danger";
+  return cn("hearth-status", idle ? "hearth-status--idle" : "hearth-status--ok");
+}
+
+function TaskRowActions({ t, isActive, copiedId, onCopy, onCancel, onDismiss, cancelPending }: {
+  t: RecentHearthTask;
+  isActive: boolean;
+  copiedId: string | null;
+  onCopy: (id: string) => void;
+  onCancel: (id: string) => void;
+  onDismiss: (id: string) => void;
+  cancelPending: boolean;
+}) {
+  return (
+    <div style={{ position: "absolute", top: 8, right: 8, display: "flex", gap: 4 }}>
+      <button
+        type="button"
+        className="hearth-dismiss"
+        aria-label="Copy task id"
+        title={copiedId === t.id ? "Copied" : "Copy task id"}
+        onClick={() => onCopy(t.id)}
+        style={{ width: 16, height: 16 }}
+      >
+        {copiedId === t.id ? <Check size={10} strokeWidth={2.5} /> : <Copy size={10} strokeWidth={1.5} />}
+      </button>
+      {isActive && (
+        <button
+          type="button"
+          className="hearth-dismiss"
+          aria-label="Cancel Hearth task"
+          title="Cancel this Hearth task"
+          onClick={() => onCancel(t.id)}
+          disabled={cancelPending}
+        >
+          <X size={12} strokeWidth={2} />
+        </button>
+      )}
+      {TERMINAL_STATUSES.has(t.status) && (
+        <button
+          type="button"
+          className="hearth-dismiss"
+          aria-label="Dismiss from panel"
+          title="Dismiss from panel"
+          onClick={() => onDismiss(t.id)}
+        >
+          <X size={12} strokeWidth={2} />
+        </button>
+      )}
+    </div>
+  );
+}
+
+function TaskRow({ t, runtimes, isAdmin, lastLogMessage, copiedId, cancelPending, onClose, onCopy, onCancel, onDismiss }: {
+  t: RecentHearthTask;
+  runtimes: { id: string; name: string; provider: string }[];
+  isAdmin: boolean;
+  lastLogMessage: string | null;
+  copiedId: string | null;
+  cancelPending: boolean;
+  onClose: () => void;
+  onCopy: (id: string) => void;
+  onCancel: (id: string) => void;
+  onDismiss: (id: string) => void;
+}) {
+  const runtime = runtimes.find((r) => r.id === t.runtimeId);
+  const isActive = t.status === "queued" || t.status === "running";
+  return (
+    <div
+      role="menuitem"
+      className="dropdown-item"
+      style={{ height: "auto", padding: "8px 10px", alignItems: "flex-start", flexDirection: "column", gap: 2, cursor: "pointer", position: "relative" }}
+    >
+      <Link
+        to="/hearth/runs"
+        search={{ task: t.id }}
+        onClick={onClose}
+        className="flex flex-col w-full"
+        style={{ gap: 2, textDecoration: "none", color: "inherit", minWidth: 0 }}
+      >
+        <div className="flex items-center gap-2 w-full" style={{ paddingRight: 64 }}>
+          <TaskRowMain t={t} navigable />
+        </div>
+        <span className="font-micro text-2xs text-lx-text-muted">{rowMeta(t, runtime)}</span>
+        {isAdmin && isActive && lastLogMessage && (
+          <span
+            className="font-mono"
+            style={{ fontSize: 10, color: "var(--lx-text-muted)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: "100%", display: "inline-flex", alignItems: "center", gap: 6 }}
+          >
+            <span className="hearth-task-log-live" />
+            {lastLogMessage}
+          </span>
+        )}
+      </Link>
+      <span
+        className="font-mono"
+        style={{ fontSize: 10, color: "var(--lx-text-muted)", display: "inline-flex", alignItems: "center", gap: 6, minWidth: 0, paddingRight: 64 }}
+      >
+        <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 180 }}>{t.id}</span>
+      </span>
+      <TaskRowActions
+        t={t}
+        isActive={isActive}
+        copiedId={copiedId}
+        onCopy={onCopy}
+        onCancel={onCancel}
+        onDismiss={onDismiss}
+        cancelPending={cancelPending}
+      />
+    </div>
+  );
+}
+
 export function HearthStatus() {
   const { data: tasks = [] } = useRecentHearthTasks();
   const { data: runtimes = [] } = useRuntimes();
@@ -145,35 +302,12 @@ export function HearthStatus() {
     <div ref={containerRef} style={{ position: "relative" }}>
       <button
         type="button"
-        className={cn(
-          "hearth-status",
-          active ? "hearth-status--warning" : failedCount > 0 ? "hearth-status--danger" : idle ? "hearth-status--idle" : "hearth-status--ok"
-        )}
+        className={pillClass(active, failedCount, idle)}
         onClick={toggle}
         aria-expanded={open}
         aria-haspopup="menu"
       >
-        {active ? (
-          <>
-            <span className="spinner" style={{ width: 10, height: 10, borderWidth: 2 }} />
-            Hearth · {active.skillName || active.skillId}
-          </>
-        ) : failedCount > 0 ? (
-          <>
-            <Flame size={12} strokeWidth={1.5} />
-            {doneCount > 0 ? `${doneCount} done · ${failedCount} failed` : `${failedCount} failed`}
-          </>
-        ) : idle ? (
-          <>
-            <Flame size={12} strokeWidth={1.5} />
-            Hearth
-          </>
-        ) : (
-          <>
-            <Check size={12} strokeWidth={2.5} />
-            {doneCount} done
-          </>
-        )}
+        <StatusPill active={active} doneCount={doneCount} failedCount={failedCount} idle={idle} />
       </button>
 
       {open &&
@@ -184,83 +318,27 @@ export function HearthStatus() {
               <div className="text-xs text-lx-text-muted px-3 py-3">No Hearth tasks yet.</div>
             ) : (
               visible.slice(0, 6).map((t) => {
-                const runtime = runtimes.find((r) => r.id === t.runtimeId);
                 const isActive = t.status === "queued" || t.status === "running";
-                const meta =
-                  isActive && runtime ? `${t.projectName} · ${runtime.name} · ${runtime.provider}` : t.projectName;
+                const lastLog = isAdmin && isActive && activeLogs.data && activeLogs.data.length > 0
+                  ? activeLogs.data[activeLogs.data.length - 1]!.message
+                  : null;
                 return (
-                  <div
+                  <TaskRow
                     key={t.id}
-                    role="menuitem"
-                    className="dropdown-item"
-                    style={{ height: "auto", padding: "8px 10px", alignItems: "flex-start", flexDirection: "column", gap: 2, cursor: "pointer", position: "relative" }}
-                  >
-                    <Link
-                      to="/hearth/runs"
-                      search={{ task: t.id }}
-                      onClick={() => setOpen(false)}
-                      className="flex flex-col w-full"
-                      style={{ gap: 2, textDecoration: "none", color: "inherit", minWidth: 0 }}
-                    >
-                      <div className="flex items-center gap-2 w-full" style={{ paddingRight: 64 }}>
-                        <TaskRowMain t={t} navigable />
-                      </div>
-                      <span className="font-micro text-2xs text-lx-text-muted">{meta}</span>
-                      {isAdmin && isActive && activeLogs.data && activeLogs.data.length > 0 && (
-                        <span
-                          className="font-mono"
-                          style={{ fontSize: 10, color: "var(--lx-text-muted)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: "100%", display: "inline-flex", alignItems: "center", gap: 6 }}
-                        >
-                          <span className="hearth-task-log-live" />
-                          {activeLogs.data![activeLogs.data!.length - 1]!.message}
-                        </span>
-                      )}
-                    </Link>
-                    <span
-                      className="font-mono"
-                      style={{ fontSize: 10, color: "var(--lx-text-muted)", display: "inline-flex", alignItems: "center", gap: 6, minWidth: 0, paddingRight: 64 }}
-                    >
-                      <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 180 }}>{t.id}</span>
-                    </span>
-                    <div style={{ position: "absolute", top: 8, right: 8, display: "flex", gap: 4 }}>
-                      <button
-                        type="button"
-                        className="hearth-dismiss"
-                        aria-label="Copy task id"
-                        title={copiedId === t.id ? "Copied" : "Copy task id"}
-                        onClick={() => copyTaskId(t.id)}
-                        style={{ width: 16, height: 16 }}
-                      >
-                        {copiedId === t.id ? <Check size={10} strokeWidth={2.5} /> : <Copy size={10} strokeWidth={1.5} />}
-                      </button>
-                      {isActive && (
-                        <button
-                          type="button"
-                          className="hearth-dismiss"
-                          aria-label="Cancel Hearth task"
-                          title="Cancel this Hearth task"
-                          onClick={() => {
-                            cancelTask.mutate(t.id);
-                            dismiss(t.id);
-                          }}
-                          disabled={cancelTask.isPending}
-                        >
-                          <X size={12} strokeWidth={2} />
-                        </button>
-                      )}
-                      {TERMINAL_STATUSES.has(t.status) && (
-                        <button
-                          type="button"
-                          className="hearth-dismiss"
-                          aria-label="Dismiss from panel"
-                          title="Dismiss from panel"
-                          onClick={() => dismiss(t.id)}
-                        >
-                          <X size={12} strokeWidth={2} />
-                        </button>
-                      )}
-                    </div>
-                  </div>
+                    t={t}
+                    runtimes={runtimes}
+                    isAdmin={isAdmin}
+                    lastLogMessage={lastLog}
+                    copiedId={copiedId}
+                    cancelPending={cancelTask.isPending}
+                    onClose={() => setOpen(false)}
+                    onCopy={copyTaskId}
+                    onCancel={(id) => {
+                      cancelTask.mutate(id);
+                      dismiss(id);
+                    }}
+                    onDismiss={dismiss}
+                  />
                 );
               })
             )}

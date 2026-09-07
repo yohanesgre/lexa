@@ -18,6 +18,51 @@ interface ColumnHeaderProps {
 
 const pad = (n: number) => String(n).padStart(2, "0");
 
+function resolveWipState(wipLimit: number | null, taskCount: number, wipFlash: boolean) {
+  if (wipLimit === null) return null;
+  if (wipFlash || taskCount > wipLimit) return "exceeded";
+  if (taskCount >= wipLimit * 0.8) return "approaching";
+  return "ok";
+}
+
+interface ConfirmDialogProps {
+  title: React.ReactNode;
+  children: React.ReactNode;
+  onCancel: () => void;
+  confirmIcon: React.ReactNode;
+  confirmLabel: string;
+  onConfirm: () => void;
+  titleId: string;
+}
+
+function ConfirmDialog({ title, children, onCancel, confirmIcon, confirmLabel, onConfirm, titleId }: ConfirmDialogProps) {
+  return (
+    <>
+      <button
+        type="button"
+        className="dialog-overlay"
+        aria-label="Close dialog"
+        onClick={onCancel}
+        />
+      <div className="fixed inset-0 flex items-center justify-center z-[80] pointer-events-none">
+        <dialog open className="dialog dialog-enter pointer-events-auto" aria-modal="true" aria-labelledby={titleId}>
+          <h2 id={titleId} className="font-display text-lg font-medium text-lx-text-primary">{title}</h2>
+          <p className="text-sm text-lx-text-secondary mt-3 leading-5">
+            {children}
+          </p>
+          <div className="flex items-center gap-2 mt-4 justify-end">
+            <button type="button" className="btn btn-ghost" onClick={onCancel}>Cancel</button>
+            <button type="button" className="btn btn-danger-solid" onClick={onConfirm}>
+              {confirmIcon}
+              {confirmLabel}
+            </button>
+          </div>
+        </dialog>
+      </div>
+    </>
+  );
+}
+
 export function ColumnHeader({ slug, column, taskCount, wipLimit, wipFlash = false, dimmed = false, onOpenCreate }: ColumnHeaderProps) {
   const { data: board } = useBoard(slug);
   const deleteColumn = useDeleteColumn(slug);
@@ -28,14 +73,7 @@ export function ColumnHeader({ slug, column, taskCount, wipLimit, wipFlash = fal
   const [deleteConfirm, setDeleteConfirm] = useState(false);
   const [clearConfirm, setClearConfirm] = useState(false);
 
-  const wipState =
-    wipLimit === null
-      ? null
-      : wipFlash || taskCount > wipLimit
-        ? "exceeded"
-        : taskCount >= wipLimit * 0.8
-          ? "approaching"
-          : "ok";
+  const wipState = resolveWipState(wipLimit, taskCount, wipFlash);
 
   const handleDelete = () => {
     deleteColumn.mutate({ id: column.id });
@@ -120,55 +158,29 @@ export function ColumnHeader({ slug, column, taskCount, wipLimit, wipFlash = fal
       )}
 
       {deleteConfirm && (
-        <>
-          <button
-            type="button"
-            className="dialog-overlay"
-            aria-label="Close dialog"
-            onClick={() => setDeleteConfirm(false)}
-            />
-          <div className="fixed inset-0 flex items-center justify-center z-[80] pointer-events-none">
-            <dialog open className="dialog dialog-enter pointer-events-auto" aria-modal="true" aria-labelledby="delete-column-title">
-              <h2 id="delete-column-title" className="font-display text-lg font-medium text-lx-text-primary">Delete &lsquo;{column.name}&rsquo;?</h2>
-              <p className="text-sm text-lx-text-secondary mt-3 leading-5">
-                This will remove all tasks in this column. This action cannot be undone.
-              </p>
-              <div className="flex items-center gap-2 mt-4 justify-end">
-                <button type="button" className="btn btn-ghost" onClick={() => setDeleteConfirm(false)}>Cancel</button>
-                <button type="button" className="btn btn-danger-solid" onClick={handleDelete}>
-                  <Trash2 size={14} strokeWidth={1.5} />
-                  Delete
-                </button>
-              </div>
-            </dialog>
-          </div>
-        </>
+        <ConfirmDialog
+          titleId="delete-column-title"
+          title={<>Delete &lsquo;{column.name}&rsquo;?</>}
+          onCancel={() => setDeleteConfirm(false)}
+          confirmIcon={<Trash2 size={14} strokeWidth={1.5} />}
+          confirmLabel="Delete"
+          onConfirm={handleDelete}
+        >
+          This will remove all tasks in this column. This action cannot be undone.
+        </ConfirmDialog>
       )}
 
       {clearConfirm && (
-        <>
-          <button
-            type="button"
-            className="dialog-overlay"
-            aria-label="Close dialog"
-            onClick={() => setClearConfirm(false)}
-            />
-          <div className="fixed inset-0 flex items-center justify-center z-[80] pointer-events-none">
-            <dialog open className="dialog dialog-enter pointer-events-auto" aria-modal="true" aria-labelledby="clear-column-title">
-              <h2 id="clear-column-title" className="font-display text-lg font-medium text-lx-text-primary">Clear all tasks?</h2>
-              <p className="text-sm text-lx-text-secondary mt-3 leading-5">
-                This will permanently delete all {taskCount} task{taskCount !== 1 ? "s" : ""} in <span className="font-medium text-lx-text-primary">&lsquo;{column.name}&rsquo;</span>. This action cannot be undone.
-              </p>
-              <div className="flex items-center gap-2 mt-4 justify-end">
-                <button type="button" className="btn btn-ghost" onClick={() => setClearConfirm(false)}>Cancel</button>
-                <button type="button" className="btn btn-danger-solid" onClick={handleClearTasks}>
-                  <Eraser size={14} strokeWidth={1.5} />
-                  Clear
-                </button>
-              </div>
-            </dialog>
-          </div>
-        </>
+        <ConfirmDialog
+          titleId="clear-column-title"
+          title="Clear all tasks?"
+          onCancel={() => setClearConfirm(false)}
+          confirmIcon={<Eraser size={14} strokeWidth={1.5} />}
+          confirmLabel="Clear"
+          onConfirm={handleClearTasks}
+        >
+          This will permanently delete all {taskCount} task{taskCount !== 1 ? "s" : ""} in <span className="font-medium text-lx-text-primary">&lsquo;{column.name}&rsquo;</span>. This action cannot be undone.
+        </ConfirmDialog>
       )}
     </>
   );

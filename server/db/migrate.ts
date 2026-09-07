@@ -110,14 +110,16 @@ export async function runMigrationsD1(
 
   const files = readdirSync(migrationsDir).filter((f) => f.endsWith(".sql")).sort();
 
-  for (const file of files) {
+  // Applied strictly in filename order; the chain keeps the same
+  // sequential semantics as the previous awaited loop.
+  const applyOne = async (file: string): Promise<void> => {
     const row = await d1
       .prepare("SELECT name FROM _migrations WHERE name = ?")
       .bind(file)
       .first<{ name: string }>();
     if (row) {
       alreadyApplied.push(file);
-      continue;
+      return;
     }
 
     const sql = readFileSync(join(migrationsDir, file), "utf-8");
@@ -133,7 +135,8 @@ export async function runMigrationsD1(
       throw new Error(`D1 migration ${file} failed (duration ${result.duration}ms)`);
     }
     applied.push(file);
-  }
+  };
+  await files.reduce<Promise<void>>((prev, file) => prev.then(() => applyOne(file)), Promise.resolve());
 
   return { applied, alreadyApplied, totalDurationMs: Date.now() - start };
 }

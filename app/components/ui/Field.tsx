@@ -1,4 +1,4 @@
-import { createContext, useContext, useId } from "react";
+import { createContext, useContext, useId, useMemo } from "react";
 
 export interface FieldContextValue {
   error: React.ReactNode;
@@ -28,6 +28,7 @@ export function Field({ label, htmlFor, hint, error, children, className }: Fiel
   const id = useId();
   const invalid = error != null && error !== "" && error !== false;
   const descId = invalid || (hint != null && hint !== "") ? id : undefined;
+  const ctx = useMemo(() => ({ error, invalid, descId }), [error, invalid, descId]);
   return (
     <div className={className}>
       {label && (
@@ -35,7 +36,7 @@ export function Field({ label, htmlFor, hint, error, children, className }: Fiel
           {label}
         </label>
       )}
-      <FieldContext.Provider value={{ error, invalid, descId }}>
+      <FieldContext.Provider value={ctx}>
         {children}
       </FieldContext.Provider>
       {invalid ? (

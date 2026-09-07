@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { useHeraldPrices, usePutHeraldPrice, type HeraldPriceRow } from "../../lib/herald-usage.query";
 import type { HeraldByModelRow } from "../../lib/herald-usage.query";
 
@@ -24,23 +24,13 @@ export function PriceEditor({
     return Array.from(set).sort();
   })();
 
-  useEffect(() => {
-    const next: Record<string, { prompt_price: string; completion_price: string }> = {};
-    for (const model of models) {
-      const p = priceMap.get(model);
-      if (!edits[model]) {
-        next[model] = {
-          prompt_price: p ? String(p.prompt_price) : "0",
-          completion_price: p ? String(p.completion_price) : "0",
-        };
-      }
-    }
-    if (Object.keys(next).length) setEdits((prev) => ({ ...next, ...prev }));
-  }, [models.join(","), prices.length]);
+  const defaultsFor = (model: string): { prompt_price: string; completion_price: string; error?: string | undefined } => {
+    const p = priceMap.get(model);
+    return { prompt_price: p ? String(p.prompt_price) : "0", completion_price: p ? String(p.completion_price) : "0" };
+  };
 
   const handleSave = (model: string) => {
-    const e = edits[model];
-    if (!e) return;
+    const e = edits[model] ?? defaultsFor(model);
     const pp = Number(e.prompt_price);
     const cp = Number(e.completion_price);
     const decimalsOk = (n: number) => {
@@ -106,15 +96,15 @@ export function PriceEditor({
                 </td>
               </tr>
             ) : models.map((model) => {
-              const e = edits[model] ?? { prompt_price: "0", completion_price: "0" };
+              const e = edits[model] ?? defaultsFor(model);
               return (
                 <tr key={model}>
                   <td className="font-mono text-xs weight-500 color-primary">{model}</td>
                   <td>
-                    <input className="prop-input font-mono" value={e.prompt_price} onChange={(ev) => setEdits((prev) => ({ ...prev, [model]: { ...prev[model], prompt_price: ev.target.value, completion_price: prev[model]?.completion_price ?? "0" } }))} style={{ width: "100%", maxWidth: 120, height: 28, fontSize: 12, textAlign: "right", boxSizing: "border-box" as const }} />
+                    <input className="prop-input font-mono" aria-label={`prompt_price for ${model}`} value={e.prompt_price} onChange={(ev) => setEdits((prev) => ({ ...prev, [model]: { ...prev[model], prompt_price: ev.target.value, completion_price: prev[model]?.completion_price ?? "0" } }))} style={{ width: "100%", maxWidth: 120, height: 28, fontSize: 12, textAlign: "right", boxSizing: "border-box" as const }} />
                   </td>
                   <td>
-                    <input className="prop-input font-mono" value={e.completion_price} onChange={(ev) => setEdits((prev) => ({ ...prev, [model]: { ...prev[model], prompt_price: prev[model]?.prompt_price ?? "0", completion_price: ev.target.value } }))} style={{ width: "100%", maxWidth: 120, height: 28, fontSize: 12, textAlign: "right", boxSizing: "border-box" as const }} />
+                    <input className="prop-input font-mono" aria-label={`completion_price for ${model}`} value={e.completion_price} onChange={(ev) => setEdits((prev) => ({ ...prev, [model]: { ...prev[model], prompt_price: prev[model]?.prompt_price ?? "0", completion_price: ev.target.value } }))} style={{ width: "100%", maxWidth: 120, height: 28, fontSize: 12, textAlign: "right", boxSizing: "border-box" as const }} />
                   </td>
                   <td style={{ textAlign: "right", whiteSpace: "nowrap" }}>
                     <button className="btn btn-primary btn-sm" onClick={() => handleSave(model)} disabled={putPrice.isPending}>Save</button>

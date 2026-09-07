@@ -344,12 +344,13 @@ export class HeraldGateway extends Effect.Service<HeraldGateway>()("Lexa/HeraldG
           const isSingleConfig = limited.length === 1;
           const attemptConfigs = limited.slice();
           const isSingleRetry = isSingleConfig;
+          const abortSignal = input.abortController?.signal;
           let lastError: unknown = null;
           let retriedSingleNetwork = false;
           const attempts: Array<{ model: string; providerId: string | null; status: number | null; providerMessage: string | null; raw: string; errorTag: string | null; retryAfter: number | null }> = [];
           for (let i = 0; i < attemptConfigs.length; i++) {
-            gatewayLog("DEBUG", "herald stream attempt abort check", { projectId: input.projectId, attempt: i + 1, total: attemptConfigs.length, aborted: !!input.abortController?.signal.aborted, abortReason: (() => { try { return (input.abortController?.signal as unknown as { reason?: unknown })?.reason ? String((input.abortController?.signal as unknown as { reason: unknown }).reason).slice(0, 200) : null; } catch { return null; } })() });
-            if (input.abortController?.signal.aborted) {
+            gatewayLog("DEBUG", "herald stream attempt abort check", { projectId: input.projectId, attempt: i + 1, total: attemptConfigs.length, aborted: !!abortSignal?.aborted, abortReason: (() => { try { return abortSignal?.reason ? String((abortSignal as unknown as { reason: unknown }).reason).slice(0, 200) : null; } catch { return null; } })() });
+            if (abortSignal?.aborted) {
               gatewayLog("INFO", `herald stream aborted before attempt ${i + 1}`, { projectId: input.projectId, attempt: i + 1, total: attemptConfigs.length });
               break;
             }
@@ -380,7 +381,7 @@ export class HeraldGateway extends Effect.Service<HeraldGateway>()("Lexa/HeraldG
               }
               try { const l3 = (callLogRepo as never as Record<string, unknown>); const fn3 = (l3.log ?? l3.insert) as ((i: unknown) => Effect.Effect<void, unknown>) | undefined; if (fn3) await Effect.runPromise(fn3.call(callLogRepo, { id: crypto.randomUUID(), projectId: input.projectId, providerId: cfg.providerId ?? null, model: cfg.model, kind: cfg.kind, status: "error", errorCode: (err as { _tag: string })._tag, latencyMs: Date.now() - start } as never).pipe(Effect.catchAll(() => Effect.void)));
               } catch {}
-              if (input.abortController?.signal.aborted) throw err;
+              if (abortSignal?.aborted) throw err;
               if (isSingleConfig && !retriedSingleNetwork && isSingleRetryCandidate(err) && i === 0) {
                 retriedSingleNetwork = true;
                 attemptConfigs.push(cfg);
@@ -518,7 +519,7 @@ export class HeraldGateway extends Effect.Service<HeraldGateway>()("Lexa/HeraldG
               }
               try { const l3 = (callLogRepo as never as Record<string, unknown>); const fn3 = (l3.log ?? l3.insert) as ((i: unknown) => Effect.Effect<void, unknown>) | undefined; if (fn3) await Effect.runPromise(fn3.call(callLogRepo, { id: crypto.randomUUID(), projectId: input.projectId, providerId: cfg.providerId ?? null, model: cfg.model, kind: cfg.kind, status: "error", errorCode: (err as { _tag: string })._tag, latencyMs: Date.now() - start } as never).pipe(Effect.catchAll(() => Effect.void)));
               } catch {}
-              if (input.abortController?.signal.aborted) throw err;
+              if (abortSignal?.aborted) throw err;
               if (isSingleConfig && !retriedSingleNetwork && isSingleRetryCandidate(err) && i === 0) {
                 retriedSingleNetwork = true;
                 attemptConfigs.push(cfg);

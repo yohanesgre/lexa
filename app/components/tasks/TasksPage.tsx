@@ -13,9 +13,178 @@ type SortKey = "board" | "priority" | "created";
 // Ticket-key pattern: project prefix (2–6 chars) + dash + number — e.g. "EG-12".
 const KEY_PATTERN = /^[A-Z0-9]{2,6}-\d+$/i;
 
+interface TasksFilters {
+  query: string;
+  columnId: string;
+  typeId: string;
+  priorityId: string;
+  assignee: string;
+  swimlaneId: string;
+  sortKey: SortKey;
+}
+
+function hasActiveTaskFilters(f: TasksFilters) {
+  return f.query !== "" || f.columnId !== "" || f.typeId !== "" || f.priorityId !== "" || f.assignee !== "" || f.swimlaneId !== "";
+}
+
+function findExactKeyMatchId(query: string, tasks: TaskListItem[] | null | undefined) {
+  const q = query.trim();
+  if (!KEY_PATTERN.test(q)) return null;
+  return tasks?.find((t) => t.key.toLowerCase() === q.toLowerCase())?.id ?? null;
+}
+
+function filterAndSortTasks(
+  tasks: TaskListItem[],
+  filters: TasksFilters,
+  showArchived: boolean,
+  fieldConfig: FieldConfig | undefined,
+  exactMatchId: string | null,
+): TaskListItem[] {
+  const { query, columnId, typeId, priorityId, assignee, swimlaneId, sortKey } = filters;
+  let list = tasks;
+  const q = query.trim().toLowerCase();
+  if (q) list = list.filter((t) => t.title.toLowerCase().includes(q) || t.key.toLowerCase().includes(q));
+  if (columnId) list = list.filter((t) => t.columnId === columnId);
+  if (typeId) list = list.filter((t) => t.typeId === typeId);
+  if (priorityId) list = list.filter((t) => t.priorityId === priorityId);
+  if (assignee) list = list.filter((t) => t.assignees.includes(assignee));
+  if (swimlaneId) list = list.filter((t) => t.swimlaneId === swimlaneId);
+  if (showArchived) list = list.filter((t) => t.archivedAt !== null);
+  const priorityPos = new Map((fieldConfig?.priorities ?? []).map((o) => [o.id, o.position]));
+  if (sortKey === "priority") {
+    list = list.toSorted((a, b) => (priorityPos.get(a.priorityId) ?? 999) - (priorityPos.get(b.priorityId) ?? 999));
+  } else if (sortKey === "created") {
+    list = list.toSorted((a, b) => b.createdAt.localeCompare(a.createdAt));
+  }
+  // Key-pattern search: surface the exact key match first (server pre-checks the same way).
+  if (exactMatchId) {
+    const idx = list.findIndex((t) => t.id === exactMatchId);
+    if (idx > 0) {
+      list = [...list]; // never mutate the cached tasks array
+      const [exact] = list.splice(idx, 1);
+      list = [exact!, ...list];
+    }
+  }
+  return list;
+}
+
+async function runTaskMutation(fn: () => Promise<unknown>, after?: () => void) {
+  try {
+    await fn();
+    after?.();
+  } catch {
+    // error toast comes from the mutation
+  }
+}
+
+function findLinkedIssue(task: { githubs: { repo: string; issueNumber: number }[] }, repo: string) {
+  const linked = task.githubs.find((g) => g.repo === repo);
+  return linked ? { repo: linked.repo, issueNumber: linked.issueNumber } : null;
+}
+
+function resolveSelectedTask(
+  full: Task | undefined,
+  boardTasks: Task[] | undefined,
+  selectedTaskId: string | null,
+) {
+  if (!selectedTaskId) return null;
+  return full ?? boardTasks?.find((t) => t.id === selectedTaskId) ?? null;
+}
+
+function TasksErrorState({ message, onRetry }: { message: string; onRetry: () => void }) {
+  return (
+    <main className="page-frame page-frame-narrow">
+      <div className="tasks-error">
+        <div className="tasks-error-title">Failed to load tasks</div>
+        <div className="tasks-error-sub">{message}</div>
+        <button type="button" className="btn btn-ghost btn-sm" onClick={onRetry}>
+          Retry
+        </button>
+      </div>
+    </main>
+  );
+}
+
+function TasksSkeleton() {
+  return (
+    <main className="page-frame page-frame-narrow">
+      <div className="tasks-page">
+        <div className="tasks-header">
+          <div className="skeleton" style={{ width: 140, height: 22 }} />
+        </div>
+        <div className="tasks-list">
+          {[0, 1, 2, 3, 4].map((i) => (
+            <div key={i} className="card-row">
+              <div className="skeleton" style={{ width: i === 0 ? "55%" : `${40 + i * 9}%`, height: 14 }} />
+            </div>
+          ))}
+        </div>
+      </div>
+    </main>
+  );
+}
+
 export interface TasksPageProps {
   slug: string;
   search: { task?: string | undefined; swimlane?: string | undefined };
+}
+
+function TaskRow({ task, swimlaneId, swimlanes, exactMatchId, onSelect }: {
+  task: TaskListItem;
+  swimlaneId: string;
+  swimlanes: Swimlane[];
+  exactMatchId: string | null;
+  onSelect: (t: TaskListItem) => void;
+}) {
+  return (
+    <button
+      type="button"
+      className={task.archivedAt ? "card-row archived" : "card-row"}
+      style={task.priorityColor !== "" ? { borderLeft: `3px solid ${task.priorityColor}` } : undefined}
+      onClick={() => onSelect(task)}
+    >
+      <span className="task-key">{task.key}</span>
+      <span className="task-row-title">{task.title}</span>
+      <span className="task-row-meta">
+        {swimlaneId && (
+          <span className="task-row-where">
+            <span className="task-chip gh">
+              Sprint: {swimlanes.find((l) => l.id === swimlaneId)?.name ?? swimlaneId}
+            </span>
+          </span>
+        )}
+        <span className="task-row-where">
+          {task.columnColor ? (
+            <span
+              className="task-row-where-chip"
+              style={{ color: task.columnColor, background: `${task.columnColor}1a` }}
+            >
+              <span className="dot" style={{ background: task.columnColor }} />
+              {task.columnName}
+            </span>
+          ) : (
+            <span className="task-row-where-chip">{task.columnName}</span>
+          )}
+          <span>{task.swimlaneName}</span>
+        </span>
+        <span className="task-row-status">
+          {task.id === exactMatchId && (
+            <span className="task-chip gh">
+              exact match
+            </span>
+          )}
+          <span className="task-chip type" style={task.typeColor ? { color: task.typeColor, borderColor: task.typeColor } : undefined}>
+            {task.typeLabel}
+          </span>
+          <span className="task-chip priority" style={task.priorityColor ? { color: task.priorityColor, borderColor: task.priorityColor } : undefined}>
+            {task.priorityLabel}
+          </span>
+          {task.githubNumber !== null && <span className="task-gh">#{task.githubNumber}</span>}
+          <span className="task-row-date">{task.createdAt.slice(0, 10)}</span>
+        </span>
+      </span>
+    </button>
+  );
 }
 
 export function TasksPage({ slug, search }: TasksPageProps) {
@@ -57,42 +226,15 @@ export function TasksPage({ slug, search }: TasksPageProps) {
   const linkGithubIssue = useLinkGithubIssue(slug);
   const unlinkGithubIssue = useUnlinkGithubIssue(slug);
 
-  const hasActiveFilters = query !== "" || columnId !== "" || typeId !== "" || priorityId !== "" || assignee !== "" || swimlaneId !== "";
+  const hasActiveFilters = hasActiveTaskFilters(filters);
 
   // Key-pattern search: the task whose key matches the query exactly.
-  const exactMatchId = useMemo(() => {
-    const q = query.trim();
-    if (!KEY_PATTERN.test(q)) return null;
-    return tasks?.find((t) => t.key.toLowerCase() === q.toLowerCase())?.id ?? null;
-  }, [query, tasks]);
+  const exactMatchId = useMemo(() => findExactKeyMatchId(query, tasks), [query, tasks]);
 
-  const filtered = useMemo(() => {
-    let list = tasks ?? [];
-    const q = query.trim().toLowerCase();
-    if (q) list = list.filter((t) => t.title.toLowerCase().includes(q) || t.key.toLowerCase().includes(q));
-    if (columnId) list = list.filter((t) => t.columnId === columnId);
-    if (typeId) list = list.filter((t) => t.typeId === typeId);
-    if (priorityId) list = list.filter((t) => t.priorityId === priorityId);
-    if (assignee) list = list.filter((t) => t.assignees.includes(assignee));
-    if (swimlaneId) list = list.filter((t) => t.swimlaneId === swimlaneId);
-    if (showArchived) list = list.filter((t) => t.archivedAt !== null);
-    const priorityPos = new Map((fieldConfig?.priorities ?? []).map((o) => [o.id, o.position]));
-    if (sortKey === "priority") {
-      list = list.toSorted((a, b) => (priorityPos.get(a.priorityId) ?? 999) - (priorityPos.get(b.priorityId) ?? 999));
-    } else if (sortKey === "created") {
-      list = list.toSorted((a, b) => b.createdAt.localeCompare(a.createdAt));
-    }
-    // Key-pattern search: surface the exact key match first (server pre-checks the same way).
-    if (exactMatchId) {
-      const idx = list.findIndex((t) => t.id === exactMatchId);
-      if (idx > 0) {
-        list = [...list]; // never mutate the cached tasks array
-        const [exact] = list.splice(idx, 1);
-        list = [exact!, ...list];
-      }
-    }
-    return list;
-  }, [tasks, fieldConfig, query, columnId, typeId, priorityId, assignee, swimlaneId, showArchived, sortKey, exactMatchId]);
+  const filtered = useMemo(
+    () => filterAndSortTasks(tasks ?? [], filters, showArchived, fieldConfig, exactMatchId),
+    [tasks, filters, showArchived, fieldConfig, exactMatchId],
+  );
 
   const clearFilters = () => {
     setFilters({ query: "", columnId: "", typeId: "", priorityId: "", assignee: "", swimlaneId: "", sortKey: "board" });
@@ -101,7 +243,7 @@ export function TasksPage({ slug, search }: TasksPageProps) {
 
   const selectedTaskId = search.task ?? null;
   const { data: selectedTaskFull } = useTask(slug, selectedTaskId);
-  const selectedTask = selectedTaskFull ?? (selectedTaskId ? boardQuery.data?.tasks.find((t) => t.id === selectedTaskId) ?? null : null);
+  const selectedTask = resolveSelectedTask(selectedTaskFull, boardQuery.data?.tasks, selectedTaskId);
 
   const handleMove = async (taskId: string, target: MoveTarget) => {
     await moveTask.mutateAsync({ id: taskId, ...target });
@@ -109,33 +251,18 @@ export function TasksPage({ slug, search }: TasksPageProps) {
   const handleUpdate = (id: string, data: Partial<Task>) => {
     updateTask.mutate({ id, ...data });
   };
-  const handleDelete = async (id: string) => {
-    try {
-      await deleteTask.mutateAsync({ id });
-      navigate({ search: { task: undefined }, replace: true } as never);
-    } catch {
-      // error toast comes from the mutation
-    }
-  };
-  const handleArchive = async (id: string) => {
-    try {
-      await archiveTask.mutateAsync({ id });
-      navigate({ search: { task: undefined }, replace: true } as never);
-    } catch {
-      // error toast comes from the mutation
-    }
-  };
-  const handleRestore = async (id: string) => {
-    try {
-      await restoreTask.mutateAsync({ id });
-    } catch {
-      // error toast comes from the mutation
-    }
-  };
+  const handleDelete = (id: string) => runTaskMutation(
+    () => deleteTask.mutateAsync({ id }),
+    () => navigate({ search: { task: undefined }, replace: true } as never),
+  );
+  const handleArchive = (id: string) => runTaskMutation(
+    () => archiveTask.mutateAsync({ id }),
+    () => navigate({ search: { task: undefined }, replace: true } as never),
+  );
+  const handleRestore = (id: string) => runTaskMutation(() => restoreTask.mutateAsync({ id }));
   const handleLinkGithub = async (id: string, repo: string) => {
     const { data: task } = await linkGithubIssue.mutateAsync({ id, repo });
-    const linked = task.githubs.find((g) => g.repo === repo);
-    return linked ? { repo: linked.repo, issueNumber: linked.issueNumber } : null;
+    return findLinkedIssue(task, repo);
   };
   const handleUnlinkGithub = async (id: string, issueId: string) => {
     await unlinkGithubIssue.mutateAsync({ id, issueId });
@@ -152,35 +279,10 @@ export function TasksPage({ slug, search }: TasksPageProps) {
   };
 
   if (isLoading) {
-    return (
-      <main className="page-frame page-frame-narrow">
-        <div className="tasks-page">
-          <div className="tasks-header">
-            <div className="skeleton" style={{ width: 140, height: 22 }} />
-          </div>
-          <div className="tasks-list">
-            {[0, 1, 2, 3, 4].map((i) => (
-              <div key={i} className="card-row">
-                <div className="skeleton" style={{ width: i === 0 ? "55%" : `${40 + i * 9}%`, height: 14 }} />
-              </div>
-            ))}
-          </div>
-        </div>
-      </main>
-    );
+    return <TasksSkeleton />;
   }
   if (error) {
-    return (
-      <main className="page-frame page-frame-narrow">
-        <div className="tasks-error">
-          <div className="tasks-error-title">Failed to load tasks</div>
-          <div className="tasks-error-sub">{(error as Error).message}</div>
-          <button type="button" className="btn btn-ghost btn-sm" onClick={() => refetch()}>
-            Retry
-          </button>
-        </div>
-      </main>
-    );
+    return <TasksErrorState message={(error as Error).message} onRetry={() => refetch()} />;
   }
   if (!board || !tasks) return <main className="page-frame page-frame-narrow"><div className="tasks-error">Project not found</div></main>;
 
@@ -234,54 +336,7 @@ export function TasksPage({ slug, search }: TasksPageProps) {
       ) : (
         <div className="tasks-list">
           {filtered.map((t) => (
-            <button
-              key={t.id}
-              type="button"
-              className={t.archivedAt ? "card-row archived" : "card-row"}
-              style={t.priorityColor !== "" ? { borderLeft: `3px solid ${t.priorityColor}` } : undefined}
-              onClick={() => handleSelectTask(t)}
-            >
-              <span className="task-key">{t.key}</span>
-              <span className="task-row-title">{t.title}</span>
-                <span className="task-row-meta">
-                  {swimlaneId && (
-                    <span className="task-row-where">
-                      <span className="task-chip gh">
-                        Sprint: {swimlanes.find((l) => l.id === swimlaneId)?.name ?? swimlaneId}
-                      </span>
-                    </span>
-                  )}
-                <span className="task-row-where">
-                  {t.columnColor ? (
-                    <span
-                      className="task-row-where-chip"
-                      style={{ color: t.columnColor, background: `${t.columnColor}1a` }}
-                    >
-                      <span className="dot" style={{ background: t.columnColor }} />
-                      {t.columnName}
-                    </span>
-                  ) : (
-                    <span className="task-row-where-chip">{t.columnName}</span>
-                  )}
-                  <span>{t.swimlaneName}</span>
-                </span>
-                <span className="task-row-status">
-                  {t.id === exactMatchId && (
-                    <span className="task-chip gh">
-                      exact match
-                    </span>
-                  )}
-                  <span className="task-chip type" style={t.typeColor ? { color: t.typeColor, borderColor: t.typeColor } : undefined}>
-                    {t.typeLabel}
-                  </span>
-                  <span className="task-chip priority" style={t.priorityColor ? { color: t.priorityColor, borderColor: t.priorityColor } : undefined}>
-                    {t.priorityLabel}
-                  </span>
-                  {t.githubNumber !== null && <span className="task-gh">#{t.githubNumber}</span>}
-                  <span className="task-row-date">{t.createdAt.slice(0, 10)}</span>
-                </span>
-              </span>
-            </button>
+            <TaskRow key={t.id} task={t} swimlaneId={swimlaneId} swimlanes={swimlanes} exactMatchId={exactMatchId} onSelect={handleSelectTask} />
           ))}
         </div>
       )}

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { Check, Copy, Link as LinkIcon, Plus, Share2, X } from "lucide-react";
 import { DatePicker } from "../ui/DatePicker";
 import { useCreateWikiShareLink, useRevokeWikiShareLink, useWikiShareLinks } from "../../lib/queries";
@@ -12,12 +12,23 @@ interface ShareDialogProps {
   onClose: () => void;
 }
 
+const EXPIRY_FMT = new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", year: "numeric" });
+
 function formatDate(iso: string): string {
-  return parseApiDate(iso).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+  return EXPIRY_FMT.format(parseApiDate(iso));
 }
 
 export function ShareDialog({ slug, pageSlug, isOpen, onClose }: ShareDialogProps) {
   const links = useWikiShareLinks(slug, pageSlug);
+  const displayLinks = useMemo(
+    () =>
+      (links.data ?? []).map((l) => ({
+        ...l,
+        created: formatDate(l.createdAt),
+        expires: l.expiresAt !== null ? formatDate(l.expiresAt) : null,
+      })),
+    [links.data],
+  );
   const createLink = useCreateWikiShareLink(slug, pageSlug);
   const revokeLink = useRevokeWikiShareLink(slug, pageSlug);
 
@@ -86,9 +97,9 @@ export function ShareDialog({ slug, pageSlug, isOpen, onClose }: ShareDialogProp
               <div className="text-sm text-lx-text-danger mb-3 bg-lx-bg-danger-subtle rounded-md px-3 py-2">{error}</div>
             )}
 
-            <label className="field-label block mb-1.5">Links</label>
+          <span className="field-label block mb-1.5">Links</span>
 
-            {(links.data ?? []).map((link) => (
+            {(displayLinks).map((link) => (
               <div key={link.id} className="github-issue-row" title={link.url}>
                 <div style={{ minWidth: 0 }}>
                   <div className="flex items-center gap-2">
@@ -96,10 +107,10 @@ export function ShareDialog({ slug, pageSlug, isOpen, onClose }: ShareDialogProp
                     <span className="font-mono text-xs text-lx-text-primary truncate">{link.url}</span>
                   </div>
                   <div className="flex items-center gap-2 mt-1">
-                    <span className="text-xs text-lx-text-secondary">Created {formatDate(link.createdAt)}</span>
-                    {link.expiresAt !== null ? (
+                    <span className="text-xs text-lx-text-secondary">Created {link.created}</span>
+                    {link.expires ? (
                       <span className="card-due" style={{ height: 18, padding: "0 6px", fontSize: 10 }}>
-                        Expires {formatDate(link.expiresAt)}
+                        Expires {link.expires}
                       </span>
                     ) : (
                       <span className="font-micro text-2xs text-lx-text-muted uppercase tracking-[0.04em]">Never expires</span>
