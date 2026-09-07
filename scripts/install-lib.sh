@@ -480,10 +480,15 @@ fetch_release() {
 }
 
 # unpack_release <fetch_dir> <install_dir> server|workers
+# Multiple fetches of different tags can pile up in the fetch dir; extract
+# the newest tarball, never treat a second match as a member name.
 unpack_release() {
   local fetch_dir="$1" install_dir="$2" kind="$3"
   mkdir -p "${install_dir}"
-  step "unpack" tar xzf "${fetch_dir}/lexa-${kind}-"*.tar.gz -C "${install_dir}"
+  local tarball
+  tarball=$(ls -t "${fetch_dir}"/lexa-"${kind}"-*.tar.gz 2>/dev/null | head -1)
+  [ -n "${tarball}" ] || die "no lexa-${kind}-*.tar.gz found in ${fetch_dir}"
+  step "unpack" tar xzf "${tarball}" -C "${install_dir}"
 }
 
 # ---------------------------------------------------------------------------
