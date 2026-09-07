@@ -4,7 +4,10 @@ import { useHearthRole } from "../lib/useHearthRole";
 import { useProjects } from "../lib/queries";
 import { useToast } from "../components/ui/Toast";
 import { HeraldProjectProviderSection } from "../components/settings/herald-project";
-import { HeraldEngineSection, HeraldWriteToolsSection, ProjectMemorySection, AgentSkillAvailabilitySection } from "../components/settings/HeraldSettingsSection";
+import { HeraldEngineSection } from "../components/settings/herald/HeraldEngineSection";
+import { HeraldWriteToolsSection } from "../components/settings/herald/HeraldWriteToolsSection";
+import { ProjectMemorySection } from "../components/settings/herald/HeraldProjectMemory";
+import { AgentSkillAvailabilitySection } from "../components/settings/herald/HeraldAgentSkills";
 
 export const Route = createFileRoute("/hearth/bindings/$projectId")({
   ssr:false,
