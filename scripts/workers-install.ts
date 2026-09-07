@@ -76,7 +76,10 @@ async function cfJson<T>(label: string, path: string, init?: RequestInit): Promi
 }
 
 function wrangler(args: string[], opts: { input?: string; capture?: boolean } = {}): { status: number; stdout: string; stderr: string } {
-  const res = spawnSync("bunx", ["wrangler", ...args], {
+  // `bun x wrangler`, not `bunx`: recent bun no longer ships a bunx shim,
+  // and a missing binary shows up as ENOENT — status null → 1 with empty
+  // pipes, which read as a silent failure.
+  const res = spawnSync("bun", ["x", "wrangler", ...args], {
     input: opts.input,
     stdio: opts.capture ? ["pipe", "pipe", "pipe"] : opts.input !== undefined ? ["pipe", "inherit", "inherit"] : "inherit",
     // The REST calls authenticate with the token directly; wrangler only
@@ -84,11 +87,11 @@ function wrangler(args: string[], opts: { input?: string; capture?: boolean } = 
     // (instantly failing under capture) and every d1/deploy step dies.
     env: { ...process.env, CLOUDFLARE_API_TOKEN: CF_TOKEN },
     encoding: "utf-8",
-  } as never) as unknown as { status: number | null; stdout?: unknown; stderr?: unknown };
+  } as never) as unknown as { status: number | null; stdout?: unknown; stderr?: unknown; error?: Error };
   return {
     status: res.status ?? 1,
     stdout: typeof res.stdout === "string" ? res.stdout : "",
-    stderr: typeof res.stderr === "string" ? res.stderr : "",
+    stderr: typeof res.stderr === "string" ? res.stderr : res.error ? String(res.error) : "",
   };
 }
 
