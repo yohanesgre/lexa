@@ -144,6 +144,7 @@ Design and API docs live in [`docs/`](docs/):
 | [`docs/API.md`](docs/API.md) | REST contract |
 | [`docs/LAYERS.md`](docs/LAYERS.md) | Effect service patterns, error catalog, webhook/auth flows |
 | [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) | Self-hosting via install.sh: targets, env reference, bootstrap |
+| [`docs/CLOUDFLARE_WORKERS.md`](docs/CLOUDFLARE_WORKERS.md) | Workers flavor: D1/R2/KV bindings, runtime quirks, cron |
 | [`docs/GITHUB_SETUP.md`](docs/GITHUB_SETUP.md) | GitHub App setup: webhook URL/secret, private key |
 
 ## Contributing

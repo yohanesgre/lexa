@@ -7,6 +7,37 @@ All notable changes to Lexa are documented here. Format based on
 
 ## [Unreleased]
 
+## [2026.1.2] - 2026-09-07
+
+### Added
+
+- **Install script** — self-hosting entry point: `curl -fsSL …/scripts/install.sh |
+  bash -s -- <target>` with targets docker (direct port mapping), bare metal
+  (release tarball + start script, `--systemd` opt-in), Cloudflare Workers
+  (release tarball + provisioning helper: D1/R2/KV find-or-create, D1 journal
+  migrations, deploy — zero clone) and dev (clone + dev:full); `uninstall.sh`
+  per target with data-kept-unless-`--purge` teardown
+- **Release artifacts** — CI publishes `lexa-server-v<TAG>.tar.gz` +
+  `lexa-workers-v<TAG>.tar.gz` (+ checksums) on every web release
+
+### Fixed
+
+- **Setup wizard was unusable** — the wizard posted `{email}` while the API
+  contract requires `{email*, password*}`; step 1 now collects a password
+  (min 8, show toggle), step 2 adapts to env-provided keys, Done marks setup
+  complete. First-install provisioning is free-choice: `LXK_ADMIN_EMAILS`
+  no longer allow-lists the wizard
+- **SPA-shell auth gap** — the prerendered shell dehydrated a settled root
+  match, so the auth guard (root beforeLoad) never ran on first hydration;
+  anonymous visitors saw the app shell with 401-firing queries. The guard is
+  now mirrored client-side after hydration
+
+### Removed
+
+- **`lexa-cli deploy` / `undeploy`** (ships as cli-v2026.2.0) — deployment
+  moved to the install script; `lexa-cli` is purely the headless operator
+  frontend with web-feature parity
+
 ## [2026.1.1] - 2026-09-07
 
 ### Fixed
