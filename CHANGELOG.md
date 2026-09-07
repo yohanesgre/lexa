@@ -7,6 +7,55 @@ All notable changes to Lexa are documented here. Format based on
 
 ## [Unreleased]
 
+## [2026.2.0] - 2026-09-08
+
+### Added
+
+- **Setup wizard seed flavors** — the sample-data step is now a three-way
+  choice: **Minimal** (default — 1 starter project, 5 tasks, 1 wiki page,
+  shows the core workflow), **Full** (the dev seed: 4 projects, 15 tasks,
+  swimlanes, wiki tree, GitHub link examples) or **Empty**;
+  `POST /api/setup/seed` takes `{ flavor: "minimal" | "full" }` and backfills
+  task keys after loading (wireframe-first: setup-wizard.html)
+- **Staging gets sample data** — the wizard seed previously ran in dev only
+  and silently no-op'd elsewhere; staging now seeds like dev. Prod stays
+  empty (`docs/API.md`, `AGENTS.md` updated)
+- **Unconfigured instances funnel to the wizard** — `/login` now checks
+  `/api/setup/status` and navigates fresh installs to `/setup` instead of
+  showing a login form with no superadmin to sign in as
+
+### Fixed
+
+- **Seeded first installs deadlocked the wizard** — the sample-data step
+  inserted projects, then `POST /api/setup/complete` hit the
+  `projects > 0` branch of the setup lock and 403'd; the frontend swallowed
+  the error, so `setup_complete` was never written and the dashboard nagged
+  "Finish setup" forever. `complete` no longer counts projects (admin,
+  api-key and seed keep the guard)
+- **Install script deployed a broken login** — the rendered compose never
+  passed `LXK_PUBLIC_URL` / `LXK_TRUSTED_ORIGINS` into the container, so the
+  server fell back to `http://localhost:3000` and Better Auth rejected every
+  login origin (`Invalid origin` 403s); both values are now forwarded, the
+  deploy `.env` carries `LXK_TRUSTED_ORIGINS`, and local deploys trust both
+  loopback hostnames (`localhost` and `127.0.0.1`)
+- **Docker image was missing the seed SQL** — `scripts/seed-*.sql` were not
+  copied into the runtime image, silently disabling all seeding in
+  containers
+- **Board kept rejected moves** — dragging a task into a column that refuses
+  it (required fields, WIP limit) left the card in the target column with
+  wrong counts forever; the board now awaits the mutation and on failure
+  reverts from the authoritative cache and shakes the card (invalid-drop
+  feedback per the design system)
+- **401 retry spam from shell-mounted queries** — `AppShell` fetched the
+  project list on every surface including login, and TanStack retried the
+  401 three times; bare paths skip the fetch and auth failures are never
+  retried
+- **React #418 on every page** — six same-line spaces between `<html>` and
+  `<head>` in the root route emitted a whitespace text node as a child of
+  `<html>`; hydration was discarded for every visitor and the app
+  re-rendered from scratch (root of the "hydration mismatch" console noise)
+- `lexa-deploy/` (local compose + real keys) is gitignored
+
 ## [2026.1.3] - 2026-09-07
 
 ### Fixed
