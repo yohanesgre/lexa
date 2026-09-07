@@ -187,10 +187,32 @@ async function handleApi(
 
 let ssrFetch: ((req: Request) => Promise<Response>) | null = null;
 
+// The cloudflare-plugin ssr environment renders the SPA shell without the
+// entry <script type="module"> tag (the client manifest never queues it in
+// that environment), so the served shell never boots and every page is
+// blank. The entry path IS in the shell's $_TSR manifest — re-attach it.
+// Cached: the shell is build-static; preloads stay from the first hit
+// (hints only — the client still fetches what the active route needs).
+let patchedShell: string | null = null;
+
+function injectEntryScript(html: string): string {
+  if (/<script[^>]+type="module"/.test(html)) return html;
+  const entry = html.match(/src:"(\/assets\/index-[^"]+\.js)"/)?.[1];
+  if (!entry) return html;
+  return `${html}<script type="module" async src="${entry}"></script>`;
+}
+
 async function handleSsr(req: WorkersRequest): Promise<Response> {
   try {
     ssrFetch ??= createStartHandler(defaultStreamHandler) as unknown as (req: Request) => Promise<Response>;
-    return await ssrFetch(req as unknown as Request);
+    const res = await ssrFetch(req as unknown as Request);
+    const ct = res.headers.get("content-type") ?? "";
+    if (!ct.includes("text/html")) return res;
+    patchedShell ??= injectEntryScript(await res.text());
+    if (patchedShell === null) return res;
+    const headers = new Headers(res.headers);
+    headers.delete("content-length");
+    return new Response(patchedShell, { status: res.status, headers });
   } catch (e) {
     console.warn("[Workers] SSR unavailable, serving fallback page:", e instanceof Error ? e.message : String(e));
     return fallbackPage();
