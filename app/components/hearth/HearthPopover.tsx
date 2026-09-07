@@ -1,4 +1,4 @@
-import { useEffect, useEffectEvent, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useEffectEvent, useLayoutEffect, useRef, useState, useSyncExternalStore } from "react";
 import { createPortal } from "react-dom";
 import type { Editor } from "@tiptap/core";
 import { docToMarkdown } from "../../../shared/markdown";
@@ -359,6 +359,13 @@ export function HearthPopover({ editor, slug, documentType, documentId, open, on
   const [taskId, setTaskId] = useState<string | null>(null);
   const [logModalOpen, setLogModalOpen] = useState(false);
   const [followLog, setFollowLog] = useState(true);
+  // Hydration-safe portal target: SSR and the first client render both see
+  // null, the browser switches to document.body after hydration.
+  const portalTarget = useSyncExternalStore(
+    () => () => {},
+    () => document.body,
+    () => null,
+  );
   const logBodyRef = useRef<HTMLDivElement>(null);
   const { data: runtimes = [] } = useRuntimes();
   // Any online runtime can run tasks — Hearth uses the daemon's agent CLI
@@ -416,7 +423,6 @@ export function HearthPopover({ editor, slug, documentType, documentId, open, on
   const taskRunning = running || isTaskActive(recent.data?.status);
   const popoverStyle = computePopoverStyle(anchorRect, popoverTop);
 
-  const portalTarget = typeof document !== "undefined" ? document.body : null;
   if (!portalTarget) return null;
 
   // Herald tier — full panel per herald-popover.html (own header states).

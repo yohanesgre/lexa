@@ -6,11 +6,15 @@ import { parseApiDate } from "../../lib/date";
 import type { HearthTask, HearthTaskLog, Runtime } from "../../../shared/types";
 
 // SQLite datetime('now') is "YYYY-MM-DD HH:MM:SS" in UTC — render the local
-// wall-clock time for the log's timestamp column.
+// wall-clock time for the log's timestamp column. Module-scope formatter with
+// an explicit locale keeps SSR and hydration output identical.
+const USER_TIME_ZONE = typeof window !== "undefined" ? Intl.DateTimeFormat().resolvedOptions().timeZone : "UTC";
+const LOG_TIME_FMT = new Intl.DateTimeFormat("en-GB", { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false, timeZone: USER_TIME_ZONE });
+
 function formatLogTime(iso: string): string {
   const d = parseApiDate(iso);
   if (Number.isNaN(d.getTime())) return iso.slice(11, 19);
-  return d.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false });
+  return LOG_TIME_FMT.format(d);
 }
 
 function TaskDonePanel({ taskData, failed, reviewActive, dismissedIdsRef, setTaskId, runtimes, onReview }: {

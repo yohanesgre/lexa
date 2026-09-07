@@ -140,13 +140,6 @@ function VersionHistorySection({ revisions, isLoading, error, activeRevisionId, 
   onClosePreview: () => void;
   restoring?: boolean | undefined;
 }) {
-  const section = (body: React.ReactNode) => (
-    <div className="sidebar-section flex-1 flex flex-col">
-      <span className="sidebar-section-title">Version History</span>
-      {body}
-    </div>
-  );
-
   if (isLoading) {
     return historySection(<div className="text-xs text-lx-text-muted py-2">Loading versions…</div>);
   }
