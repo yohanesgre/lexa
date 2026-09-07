@@ -7,6 +7,7 @@ import { formatDueLabel } from "../../lib/dates";
 import { sprintProgress } from "../../lib/progress";
 import { SwimlaneForm } from "./SwimlaneForm";
 import { ColumnForm } from "./ColumnForm";
+import { DeleteSwimlaneDialog } from "../swimlanes/DeleteSwimlaneDialog";
 import { SprintProgress } from "../milestones/SprintProgress";
 import type { Board, Swimlane } from "../../../shared/types";
 
@@ -124,35 +125,11 @@ function RenameSwimlaneForm({ lane, renameName, setRenameName, onSubmit, onCance
         value={renameName}
         onChange={(e) => setRenameName(e.target.value)}
         onBlur={onSubmit}
-        autoFocus
         onKeyDown={(e) => {
           if (e.key === "Escape") onCancel();
         }}
       />
     </form>
-  );
-}
-
-function DeleteSwimlaneDialog({ lane, onCancel, onConfirm }: { lane: Swimlane; onCancel: () => void; onConfirm: () => void }) {
-  return (
-    <>
-      <button type="button" className="dialog-overlay" onClick={onCancel} aria-label="Close" />
-      <div className="fixed inset-0 flex items-center justify-center z-[80] pointer-events-none">
-        <dialog open className="dialog dialog-enter pointer-events-auto" aria-modal="true" aria-label="Confirm">
-          <h2 className="font-display text-lg font-medium text-lx-text-primary">Delete &lsquo;{lane.name}&rsquo;?</h2>
-          <p className="text-sm text-lx-text-secondary mt-3 leading-5">
-            This will unassign all tasks in this swimlane. This action cannot be undone.
-          </p>
-          <div className="flex items-center gap-2 mt-4 justify-end">
-            <button type="button" className="btn btn-ghost" onClick={onCancel}>Cancel</button>
-            <button type="button" className="btn btn-danger-solid" onClick={onConfirm}>
-              <Trash2 size={14} strokeWidth={1.5} />
-              Delete
-            </button>
-          </div>
-        </dialog>
-      </div>
-    </>
   );
 }
 
@@ -301,7 +278,6 @@ export function SwimlaneHeader({ slug, lane, count, collapsed = false, onToggle,
           lane.kind === "backlog" && "swimlane-backlog",
           !!lane.archivedAt && "swimlane-archived"
         )}
-        onClick={onToggle}
       >
         <button
           type="button"
@@ -331,9 +307,16 @@ export function SwimlaneHeader({ slug, lane, count, collapsed = false, onToggle,
             onCancel={cancelRename}
           />
         ) : (
-          <span className="swimlane-name">{lane.name}</span>
+          <button
+            type="button"
+            className="flex flex-1 min-w-0 items-center cursor-pointer text-left bg-transparent border-0 p-0"
+            aria-label={collapsed ? "Expand swimlane" : "Collapse swimlane"}
+            onClick={onToggle}
+          >
+            <span className="swimlane-name">{lane.name}</span>
+            <SwimlaneMeta lane={lane} count={count} collapsed={collapsed} board={board} />
+          </button>
         )}
-        <SwimlaneMeta lane={lane} count={count} collapsed={collapsed} board={board} />
         <SwimlaneDescInline lane={lane} collapsed={collapsed} onOpenDesc={() => setIsDescOpen(true)} />
         <span className="flex-1" />
         {(onToggle || !!lane.archivedAt) && (
@@ -392,7 +375,7 @@ export function SwimlaneHeader({ slug, lane, count, collapsed = false, onToggle,
       )}
 
       {deleteConfirm && (
-        <DeleteSwimlaneDialog lane={lane} onCancel={() => setDeleteConfirm(false)} onConfirm={handleDelete} />
+        <DeleteSwimlaneDialog target={lane} onClose={() => setDeleteConfirm(false)} onDelete={handleDelete} />
       )}
 
       {isDescOpen && (

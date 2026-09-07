@@ -83,7 +83,6 @@ function SwimlaneFormFields({ error, state, set, milestones, isBacklog }: {
           value={state.name}
           onChange={(e) => set({ name: e.target.value })}
           placeholder="e.g. Sprint 8 — The Hollow Crown"
-          autoFocus
         />
       </div>
 

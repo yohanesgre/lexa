@@ -56,7 +56,6 @@ function InlineTaskForm(props: InlineTaskFormProps) {
         onChange={(e) => props.onTitleChange(e.target.value)}
         onKeyDown={props.onKeyDown}
         placeholder="Task title"
-        autoFocus
       />
       <div className="flex flex-col gap-2 mt-2">
         <div className="flex items-center justify-between">
