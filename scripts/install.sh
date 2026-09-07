@@ -94,11 +94,14 @@ deploy_docker() {
   cd "${DEPLOY_DIR}"
   [ -n "${API_KEY}" ] || API_KEY=$(gen_api_key)
   local public_url="${PUBLIC_URL:-http://127.0.0.1:${PORT}}"
+  # Local deploy — the operator may reach the app via either loopback
+  # hostname; trust both or Better Auth rejects one of them.
+  local trusted="${public_url},http://localhost:${PORT},http://127.0.0.1:${PORT}"
   write_env_file ".env" \
     "LXK_API_KEY=${API_KEY}" \
     "LXK_ENV=${FLAVOR}" \
     "LXK_PUBLIC_URL=${public_url}" \
-    "LXK_TRUSTED_ORIGINS=${public_url}"
+    "LXK_TRUSTED_ORIGINS=${trusted}"
   # Local docker deploy = direct semantics (host port mapping, no tunnel) —
   # the wizard URL must be reachable on the host. Flavor still sets LXK_ENV.
   [ -n "${IMAGE_TAG}" ] || { [ "${FLAVOR}" = "staging" ] && IMAGE_TAG="staging"; }
@@ -127,12 +130,13 @@ deploy_bare() {
   if [ -f "${INSTALL_DIR}/.env" ] && [ -n "${FROM_REPO}" ]; then
     echo "  ✓ ${FROM_REPO}/.env exists — kept (dev env untouched)"
   else
+    local bare_public="${PUBLIC_URL:-http://localhost:${BARE_PORT}}"
     step "write env" write_env_file "${INSTALL_DIR}/.env" \
       "LXK_API_KEY=${API_KEY}" \
       "LXK_ENV=${FLAVOR}" \
       "PORT=${BARE_PORT}" \
-      "LXK_PUBLIC_URL=${PUBLIC_URL:-http://localhost:${BARE_PORT}}" \
-      "LXK_TRUSTED_ORIGINS=${PUBLIC_URL:-http://localhost:${BARE_PORT}}"
+      "LXK_PUBLIC_URL=${bare_public}" \
+      "LXK_TRUSTED_ORIGINS=${bare_public},http://127.0.0.1:${BARE_PORT}"
   fi
   step "write start script" write_start_script "${INSTALL_DIR}"
   if [ "${SYSTEMD}" = "1" ]; then
