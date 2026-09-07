@@ -526,17 +526,23 @@ POST   /api/setup/api-key
 → 200 { key: "lxk_..." }
   Creates a fresh admin key (user_id NULL → admin). rawKey returned once.
 
-POST   /api/setup/seed
+POST   /api/setup/seed        body { flavor?: "minimal" | "full" }
 → 200 { seeded: boolean }
-  Loads scripts/seed-dev.sql into an empty DB. seeded=false if the file is
-  missing or the DB already has projects.
+  Loads scripts/seed-minimal.sql or scripts/seed-dev.sql (default full) into
+  an empty DB (dev and staging flavors only). seeded=false if the file is
+  missing, the flavor is neither dev nor staging, or the DB already has
+  projects. Task keys are backfilled after loading.
 
 POST   /api/setup/complete
 → 200 { ok: true } | 403 SETUP_LOCKED
   Sets setup_complete=1.
 
-The mutating setup endpoints fail 403 SETUP_LOCKED once setup_complete=1 or
-any project exists — the wizard only runs on first install.
+The mutating setup endpoints fail 403 SETUP_LOCKED once setup_complete=1,
+any project exists (in-use instance), or the instance is env-provisioned
+(api key + LXK_ADMIN_EMAILS) — the wizard only runs on first install.
+/setup/complete omits the projects branch: the wizard's own sample-data
+step creates projects immediately before complete, so counting them
+there would deadlock every seeded first install.
 ```
 
 ### Projects

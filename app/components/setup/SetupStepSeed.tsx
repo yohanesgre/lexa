@@ -1,17 +1,36 @@
 import { useState } from "react";
 import { ArrowLeft, ArrowRight, Database } from "lucide-react";
-import { completeSetup, seedSampleData } from "../../lib/api";
+import { completeSetup, seedSampleData, type SeedFlavor } from "../../lib/api";
 
-// Step 2 (dev only) — optional demo seed before completing setup.
+// Step 3 (dev + staging) — optional sample data before completing setup.
+// Wireframe: wireframes/src/setup-wizard.html step 3.
+const OPTIONS: { flavor: SeedFlavor | "none"; title: string; description: string }[] = [
+  {
+    flavor: "minimal",
+    title: "Minimal",
+    description: "1 starter project: Backlog / In Progress / Done, 5 tasks, 1 wiki page — shows the core workflow.",
+  },
+  {
+    flavor: "full",
+    title: "Full",
+    description: "4 projects, 15 tasks, swimlanes, wiki tree, and GitHub link examples.",
+  },
+  {
+    flavor: "none",
+    title: "Empty",
+    description: "No sample data. The Backlog swimlane and default columns appear when you create a project.",
+  },
+];
+
 export function SetupStepSeed({ onDone, onBack }: { onDone: () => void; onBack: () => void }) {
-  const [seed, setSeed] = useState(true);
+  const [choice, setChoice] = useState<SeedFlavor | "none">("minimal");
   const [busy, setBusy] = useState(false);
 
   const finish = async () => {
     setBusy(true);
     try {
-      if (seed) {
-        await seedSampleData().catch(() => {});
+      if (choice !== "none") {
+        await seedSampleData(choice).catch(() => {});
       }
       await completeSetup().catch(() => {});
       onDone();
@@ -22,20 +41,33 @@ export function SetupStepSeed({ onDone, onBack }: { onDone: () => void; onBack: 
 
   return (
     <div>
-      <div className="flex items-center gap-2 mb-3">
+      <div className="flex items-center gap-2 mb-2">
         <Database size={16} strokeWidth={1.5} className="text-lx-text-link" />
         <h2 className="font-display text-lg font-medium text-lx-text-primary">Sample data</h2>
       </div>
       <p className="text-sm text-lx-text-secondary leading-5 mb-4">
-        Seed the database with demo projects, tasks, and wiki pages so you can explore the board immediately.
+        Optional demo data so you can explore Lexa right away. Pick how much to load — you can delete it later.
       </p>
-      <label className="flex items-center justify-between bg-lx-surface-elevated border border-lx-border-default rounded-md px-4 py-3 cursor-pointer">
-        <div>
-          <div className="text-sm font-medium text-lx-text-primary">Include sample data</div>
-          <div className="text-xs text-lx-text-muted mt-0.5">4 projects, 15 tasks, wiki tree, GitHub link examples</div>
-        </div>
-        <input type="checkbox" className="w-4 h-4 accent-[var(--lx-text-link)]" checked={seed} onChange={(e) => setSeed(e.target.checked)} />
-      </label>
+
+      <div role="radiogroup" aria-label="Sample data" className="flex flex-col gap-2 mb-4">
+        {OPTIONS.map((option) => (
+          <div
+            key={option.flavor}
+            role="radio"
+            aria-checked={choice === option.flavor}
+            className="check-row"
+            style={{ alignItems: "flex-start" }}
+            onClick={() => setChoice(option.flavor)}
+          >
+            <span className={`radio ${choice === option.flavor ? "checked" : ""}`} style={{ marginTop: 3 }} />
+            <div>
+              <div className="text-sm text-lx-text-primary">{option.title}</div>
+              <div className="text-xs text-lx-text-muted" style={{ marginTop: 2 }}>{option.description}</div>
+            </div>
+          </div>
+        ))}
+      </div>
+
       <div className="flex justify-between mt-5">
         <button type="button" className="btn btn-ghost" onClick={onBack}>
           <ArrowLeft size={14} strokeWidth={2} /> Back

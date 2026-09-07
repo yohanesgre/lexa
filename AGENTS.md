@@ -188,9 +188,10 @@ Key facts:
 - **Setup wizard** (`scripts/setup-cli.ts` / web wizard `/setup`): prompts for
   admin email (`LXK_ADMIN_EMAILS`), keeps/generates `LXK_API_KEY`, runs
   migrations, seeds `scripts/seed-dev.sql` (only when the DB is empty). Sample
-  data is **dev-only**: when `LXK_ENV` is set and not `dev`, seeding is skipped
-  (prod stays empty — the Backlog swimlane and default columns appear when a
-  project is created). `/api/setup/*` endpoints are API-key exempt.
+  data is **dev + staging**: the wizard seeds in `dev` and `staging`; any
+  other `LXK_ENV` (prod) stays empty — the Backlog swimlane and default
+  columns appear when a project is created. `/api/setup/*` endpoints are
+  API-key exempt.
 - **Human auth** is in-process Better Auth (email/password, cookie sessions
   at `/api/auth/*`) — no Cloudflare Access, no Google OAuth, no SMTP.
   Provisioning is admin-curated: `/setup` wizard creates the first superadmin;

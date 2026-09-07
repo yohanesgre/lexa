@@ -93,3 +93,106 @@ describe("provisioning (setup wizard)", () => {
     expect(count.c).toBe(1);
   });
 });
+
+describe("sample data seed (wizard step)", () => {
+  let dir2: string;
+  let dbPath2: string;
+  let handler2: (req: Request) => Promise<Response>;
+
+  beforeAll(async () => {
+    dir2 = mkdtempSync(join(tmpdir(), "lexa-setup-seed-"));
+    dbPath2 = join(dir2, "test.db");
+    runMigrations(dbPath2, MIGRATIONS);
+    const { createApiHandler } = await import("./http");
+    handler2 = createApiHandler(dbPath2);
+    delete process.env.LXK_ADMIN_EMAILS;
+  });
+
+  afterAll(() => {
+    rmSync(dir2, { recursive: true, force: true });
+  });
+
+  const post = (h: (req: Request) => Promise<Response>, path: string, body?: unknown) =>
+    h(new Request(`http://localhost:3000${path}`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+    }));
+
+  it("completes setup after seeding sample data (projects no longer block complete)", async () => {
+    const seed = await json(await post(handler2, "/api/setup/seed", { flavor: "full" }));
+    expect(seed.seeded).toBe(true);
+    const db = new Database(dbPath2);
+    const projects = db.query("SELECT COUNT(*) c FROM projects").get() as { c: number };
+    db.close();
+    expect(projects.c).toBeGreaterThan(0);
+    const complete = await post(handler2, "/api/setup/complete");
+    expect(complete.status).toBe(200);
+    const db2 = new Database(dbPath2);
+    const flag = db2.query("SELECT value FROM settings WHERE key = 'setup_complete'").get() as { value: string } | null;
+    db2.close();
+    expect(flag?.value).toBe("1");
+  });
+
+  it("backfills task keys for seed SQL that omits them (full flavor)", async () => {
+    const db = new Database(dbPath2);
+    const nimbus = db.query("SELECT key, next_task_number FROM projects WHERE slug = 'nimbus'").get() as { key: string; next_task_number: number };
+    const firstTask = db.query("SELECT key, number FROM tasks WHERE project_id = (SELECT id FROM projects WHERE slug = 'nimbus') AND number = 1").get() as { key: string; number: number };
+    db.close();
+    expect(nimbus.key).toBe("NMB");
+    expect(nimbus.next_task_number).toBeGreaterThan(0);
+    expect(firstTask.key).toBe("NMB-1");
+  });
+
+  it("locks mutating setup endpoints after complete", async () => {
+    const seed = await post(handler2, "/api/setup/seed", { flavor: "full" });
+    expect(seed.status).toBe(403);
+    const admin = await handler2(new Request("http://localhost:3000/api/setup/admin", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ email: "late@lexa.dev", password: "password123" }),
+    }));
+    expect(admin.status).toBe(403);
+  });
+});
+
+describe("minimal seed flavor", () => {
+  let dir3: string;
+  let dbPath3: string;
+  let handler3: (req: Request) => Promise<Response>;
+
+  beforeAll(async () => {
+    dir3 = mkdtempSync(join(tmpdir(), "lexa-setup-seed-min-"));
+    dbPath3 = join(dir3, "test.db");
+    runMigrations(dbPath3, MIGRATIONS);
+    const { createApiHandler } = await import("./http");
+    handler3 = createApiHandler(dbPath3);
+    delete process.env.LXK_ADMIN_EMAILS;
+  });
+
+  afterAll(() => {
+    rmSync(dir3, { recursive: true, force: true });
+  });
+
+  it("seeds one starter project with explicit keys and completes setup", async () => {
+    const seed = await json(await handler3(new Request("http://localhost:3000/api/setup/seed", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ flavor: "minimal" }),
+    })));
+    expect(seed.seeded).toBe(true);
+    const db = new Database(dbPath3);
+    const project = db.query("SELECT key, next_task_number FROM projects WHERE slug = 'getting-started'").get() as { key: string; next_task_number: number };
+    const tasks = db.query("SELECT COUNT(*) c FROM tasks WHERE project_id = (SELECT id FROM projects WHERE slug = 'getting-started')").get() as { c: number };
+    const wiki = db.query("SELECT COUNT(*) c FROM wiki_pages WHERE project_id = (SELECT id FROM projects WHERE slug = 'getting-started')").get() as { c: number };
+    const first = db.query("SELECT key FROM tasks WHERE project_id = (SELECT id FROM projects WHERE slug = 'getting-started') AND number = 1").get() as { key: string };
+    db.close();
+    expect(project.key).toBe("GS");
+    expect(project.next_task_number).toBe(5);
+    expect(tasks.c).toBe(5);
+    expect(wiki.c).toBe(1);
+    expect(first.key).toBe("GS-1");
+    const complete = await handler3(new Request("http://localhost:3000/api/setup/complete", { method: "POST" }));
+    expect(complete.status).toBe(200);
+  });
+});
