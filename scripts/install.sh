@@ -74,6 +74,12 @@ case "${TARGET}" in
   *) die "unknown target '${TARGET}' (docker|bare|workers|dev)" ;;
 esac
 
+# Interactive: ask which flavor (default staging). Headless automation
+# (--yes, INSTALL_DRY_RUN=1, no tty) gets a deterministic staging default —
+# never a prompt, never a guess on the target.
+if [ -z "${FLAVOR}" ] && [ "${ASSUME_YES}" != "1" ] && [ "${INSTALL_DRY_RUN:-0}" != "1" ] && [ -r /dev/tty ]; then
+  FLAVOR=$(tty_read "Flavor — staging (sample data in the wizard) or prod (starts empty)" "staging")
+fi
 FLAVOR="${FLAVOR:-staging}"
 CF_TOKEN="${CF_TOKEN:-}"
 PUBLIC_URL="${PUBLIC_URL:-}"
