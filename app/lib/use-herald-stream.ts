@@ -95,10 +95,6 @@ const IDLE: HeraldStreamSnapshot = Object.freeze({
   hasIngress: false,
 });
 
-export const STREAM_STALL_TIMEOUT_MS = HERALD_STALL_TIMEOUT_MS;
-export const PRE_INGRESS_TIMEOUT_MS = HERALD_PRE_INGRESS_TIMEOUT_MS;
-export const STREAM_STALL_MESSAGE = HERALD_STALL_MESSAGE;
-
 // Tool frame names → wireframe chip copy (herald-chat.html annotations).
 function toolLabel(name: string): string {
   switch (name) {
@@ -319,7 +315,7 @@ class HeraldStreamSession {
       const chunkIterable = {
         [Symbol.asyncIterator]: async function* (): AsyncGenerator<Uint8Array> {
           while (true) {
-            const timeoutMs = hasIngress ? STREAM_STALL_TIMEOUT_MS : PRE_INGRESS_TIMEOUT_MS;
+            const timeoutMs = hasIngress ? HERALD_STALL_TIMEOUT_MS : HERALD_PRE_INGRESS_TIMEOUT_MS;
             const readEffect = Effect.tryPromise({
               try: () => reader.read(),
               catch: (e) => e as Error,
@@ -376,12 +372,12 @@ class HeraldStreamSession {
       );
 
       if (this.snapshot.status === "streaming") {
-        this.emit({ status: "error", error: { code: "HERALD_GENERATION_FAILED", message: STREAM_STALL_MESSAGE } });
+        this.emit({ status: "error", error: { code: "HERALD_GENERATION_FAILED", message: HERALD_STALL_MESSAGE } });
       }
     } catch (e) {
       if ((e as Error).name === "AbortError") return;
       if ((e as Error).name === "StallTimeout") {
-        this.emit({ status: "error", error: { code: "HERALD_GENERATION_FAILED", message: STREAM_STALL_MESSAGE } });
+        this.emit({ status: "error", error: { code: "HERALD_GENERATION_FAILED", message: HERALD_STALL_MESSAGE } });
         try {
           await reader.cancel();
         } catch {}

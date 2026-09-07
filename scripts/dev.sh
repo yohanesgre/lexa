@@ -3,7 +3,7 @@
 #   bun run dev:full
 #
 # - Loads .env (LXK_API_KEY etc.) into the shell so both processes see it.
-# - vite auto-loads VITE_LXK_API_KEY from .env for the browser auth header.
+# - vite auto-loads .env; browser auth rides the session cookie.
 # - The API server injects the current key into served HTML (meta tag), so
 #   `bun run setup` rotating the key never breaks the browser — no rebuild.
 # - Ctrl-C stops BOTH processes.

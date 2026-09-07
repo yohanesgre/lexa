@@ -80,7 +80,7 @@ export class HearthSessionRepo extends Effect.Service<HearthSessionRepo>()("Lexa
           documentType,
           documentId,
           runtimeId
-        ).pipe(Effect.map((rows) => (rows[0]!?.c ?? 0) > 0)),
+        ).pipe(Effect.map((rows) => (rows[0]?.c ?? 0) > 0)),
     };
   }),
 }) {}

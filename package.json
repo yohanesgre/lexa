@@ -1,7 +1,7 @@
 {
   "name": "lexa",
   "version": "2026.1.0",
-  "description": "Self-hosted project management \u2014 Kanban with swimlanes/WIP limits, nested wiki, Hearth AI writing assistant.",
+  "description": "Self-hosted project management — Kanban with swimlanes/WIP limits, nested wiki, Hearth AI writing assistant.",
   "scripts": {
     "test": "vitest run",
     "test:critical": "vitest run shared server/services server/db server/repos",
@@ -51,6 +51,8 @@
     "@tanstack/react-query": "^5.102.8",
     "@tanstack/react-router": "1.170.18",
     "@tanstack/react-start": "1.168.32",
+    "@tanstack/react-start-server": "1.167.22",
+    "@tiptap/extension-code": "3.31.3",
     "@tiptap/extension-highlight": "^3.31.3",
     "@tiptap/extension-image": "3.31.3",
     "@tiptap/extension-link": "^3.31.3",

@@ -84,7 +84,7 @@ export class FieldConfigRepo extends Effect.Service<FieldConfigRepo>()("Lexa/Fie
             ? `SELECT COUNT(*) as c FROM tasks WHERE priority = ?`
             : `SELECT COUNT(*) as c FROM tasks WHERE type = ?`,
           optionId
-        ).pipe(Effect.map((rows) => rows[0]!?.c ?? 0)),
+        ).pipe(Effect.map((rows) => rows[0]?.c ?? 0)),
 
       // Replace the whole list for a project atomically (used by PUT field-config).
       replaceList: (projectId: string, kind: FieldKind, options: { id: string; label: string; color: string; position: number }[]): Effect.Effect<void, ConstraintViolation | DbError> => {

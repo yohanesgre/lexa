@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { HERALD_STALL_MESSAGE, HERALD_STALL_TIMEOUT_MS } from "../../shared/herald";
 import {
   assertAttachmentCaps,
   buildChatExport,
@@ -19,8 +20,6 @@ import {
   resolveHeraldThread,
   resolveReasoningEffort,
   scanMentionTokens,
-  STREAM_STALL_MESSAGE,
-  STREAM_STALL_TIMEOUT_MS,
   StreamRunContext,
   SUMMARY_THRESHOLD_MESSAGES,
   type StoredImageRef,
@@ -735,7 +734,7 @@ describe("stream stall watchdog", () => {
       providerMock.script = [{ type: "TEXT_MESSAGE_CONTENT", delta: "par" }, { hang: true }];
       const ctx = baseCtx();
       const pending = drain(buildStream(ctx));
-      await vi.advanceTimersByTimeAsync(STREAM_STALL_TIMEOUT_MS);
+      await vi.advanceTimersByTimeAsync(HERALD_STALL_TIMEOUT_MS);
       const frames = await pending;
       const err = frames.find((f) => f.type === "error") as { code?: string; message?: string } | undefined;
       expect(err?.code).toBe("HERALD_GENERATION_FAILED");
@@ -779,7 +778,7 @@ describe("stream stall watchdog", () => {
         { type: "RUN_FINISHED" },
       ];
       const pending = drain(buildStream(baseCtx()));
-      await vi.advanceTimersByTimeAsync(STREAM_STALL_TIMEOUT_MS * 2);
+      await vi.advanceTimersByTimeAsync(HERALD_STALL_TIMEOUT_MS * 2);
       const frames = await pending;
       expect(frames.at(-1)!?.type).toBe("done");
     } finally {

@@ -9,9 +9,6 @@ export type HeraldReasoningEffort = "minimal" | "low" | "medium" | "high";
 export const HERALD_PRE_INGRESS_TIMEOUT_MS = 30_000;
 export const HERALD_STALL_TIMEOUT_MS = 90_000;
 export const HERALD_STALL_MESSAGE = "stream stalled — no response from provider";
-export const STREAM_STALL_TIMEOUT_MS = HERALD_STALL_TIMEOUT_MS;
-export const STREAM_STALL_MESSAGE = HERALD_STALL_MESSAGE;
-export const PRE_INGRESS_TIMEOUT_MS = HERALD_PRE_INGRESS_TIMEOUT_MS;
 
 export interface HeraldSettingsMasked {
   projectId: ID;
