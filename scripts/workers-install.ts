@@ -124,7 +124,7 @@ function ttyPrompt(question: string): string {
     const tty = openSync("/dev/tty", "r+");
     writeSync(tty, `\n${question} `);
     const buf = Buffer.alloc(256);
-    const n = readSync(tty, buf, 0, buf.length);
+    const n = readSync(tty, buf, 0, buf.length, null);
     closeSync(tty);
     return buf.subarray(0, n).toString().trim();
   } catch {
