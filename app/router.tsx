@@ -11,7 +11,19 @@ export interface RouterContext {
 // therefore lives per-request on the server (no cross-request cache bleed) and
 // is stable on the client.
 export function getRouter() {
-  const queryClient = new QueryClient();
+  // Auth failures are terminal: retrying 401s only spams the console while
+  // the auth bounce navigates an anonymous visitor off the app shell.
+  const queryClient = new QueryClient({
+    defaultOptions: {
+      queries: {
+        retry: (failureCount, error) => {
+          const code = (error as Error & { code?: string | undefined })?.code;
+          if (code === "UNAUTHORIZED") return false;
+          return failureCount < 3;
+        },
+      },
+    },
+  });
   const router = createTanStackRouter({
     routeTree,
     context: { queryClient },
