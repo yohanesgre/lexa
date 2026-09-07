@@ -14,6 +14,10 @@ export default defineConfig(async ({ command }) => {
       router: {
         routeFileIgnorePattern: "\\.test\\.",
       },
+      // SPA shell for ssr:false routes must be prerendered at build —
+      // without this the build skips /_shell and those routes serve a
+      // headless fragment (no <html>/<head>, blank page).
+      spa: { enabled: true },
     }),
     react(),
     tailwindcss(),

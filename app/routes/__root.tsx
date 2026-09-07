@@ -1,6 +1,5 @@
 import { HeadContent, Outlet, Scripts, createRootRouteWithContext, redirect } from "@tanstack/react-router";
 import { QueryClientProvider } from "@tanstack/react-query";
-import { lazy, Suspense } from "react";
 import phosphorCss from "../styles/phosphor.css?url";
 import { ModalStackProvider } from "../components/ui/ModalStack";
 import { ToastProvider } from "../components/ui/Toast";
@@ -9,15 +8,6 @@ import { TeamSelectionProvider } from "../lib/team-selection";
 import { AppShell } from "../components/layout/AppShell";
 import { getSession } from "../lib/auth";
 import type { RouterContext } from "../router";
-
-const TanStackDevtools = import.meta.env.DEV
-  ? lazy(() =>
-      // @ts-ignore optional dev dep - CI may not have it installed
-      import("@tanstack/react-devtools")
-        .then((m) => ({ default: m.TanStackDevtools }) as { default: React.ComponentType })
-        .catch(() => ({ default: () => null })),
-    )
-  : (() => null) as unknown as React.ComponentType;
 
 // Public/auth surfaces — everything else requires a session. The guard runs
 // on the server too (SSR cookie forwarding in getSession, try/catch inside);
@@ -30,9 +20,11 @@ const PUBLIC_PATHS = new Set(["/login", "/set-password", "/invite", "/setup"]);
 const PUBLIC_PREFIXES = ["/share/"];
 
 export const Route = createRootRouteWithContext<RouterContext>()({
-  // Function form (not `false`): per-match opt-in so ONLY /share/* renders
-  // server-side — every other route inherits `false` exactly as before.
-  ssr: ({ location }) => PUBLIC_PREFIXES.some((prefix) => location.pathname.startsWith(prefix)),
+  // SPA shell only. /share/* opts back INTO SSR at the route level
+  // (ssr: true on share.$token) — the fn-form `ssr: ({location}) => ...`
+  // on the ROOT breaks the SPA shell emission in tanstack-start 1.168.x
+  // (ssr:false routes get a headless fragment, no <html>/<head>).
+  ssr: false,
   beforeLoad: async ({ location }) => {
     if (location.pathname.startsWith("/__inspect") || location.pathname.startsWith("/.vite-inspect")) return;
     if (PUBLIC_PATHS.has(location.pathname)) return;
@@ -83,9 +75,6 @@ function RootComponent() {
               </TeamSelectionProvider>
             </ToastProvider>
           </ModalStackProvider>
-          <Suspense fallback={null}>
-            <TanStackDevtools />
-          </Suspense>
         </QueryClientProvider>
         <Scripts />
       </body>

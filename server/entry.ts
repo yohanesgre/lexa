@@ -15,6 +15,23 @@ import { auth, loginLimiter, authIpLimiter } from "./auth";
 import type { Server } from "bun";
 
 let ssrFetch: ((req: Request) => Promise<Response>) | null = null;
+
+// SPA shell (dist/client/_shell.html) — prerendered at build by the
+// tanstack-start SPA mode. ssr:false routes must be served this shell: the
+// SSR handler emits a headless React fragment for them (no <html>/<head>),
+// which renders as a blank page. /share/* responses carry real SSR markup
+// (<html> present) and pass through untouched.
+let spaShellHtml: string | null = null;
+function spaShell(): string {
+  if (spaShellHtml === null) {
+    try {
+      spaShellHtml = readFileSync(join(import.meta.dir, "../dist/client/_shell.html"), "utf8");
+    } catch {
+      spaShellHtml = "";
+    }
+  }
+  return spaShellHtml;
+}
 try {
   // @ts-expect-error built artifact (vite build emits dist/server/server.js); typed at the cast below
   const mod = (await import("../dist/server/server.js")) as unknown as {
@@ -315,7 +332,15 @@ const server: Server<unknown> = Bun.serve({
         const headers = new Headers(res.headers);
         headers.set("Cache-Control", "no-store");
         headers.set("X-Content-Type-Options", "nosniff");
-        return new Response(res.body, {
+        // Headless fragment → serve the prerendered SPA shell instead.
+        const text = await res.text();
+        if (!text.includes("<html")) {
+          const shell = spaShell();
+          if (shell) {
+            return withSecurityHeaders(new Response(shell, { status: 200, headers }));
+          }
+        }
+        return new Response(text, {
           status: res.status,
           headers,
         });

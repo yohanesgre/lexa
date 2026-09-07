@@ -260,6 +260,10 @@ export const Route = createFileRoute("/share/$token")({
   validateSearch: (search: Record<string, unknown>): { page?: string | undefined } => ({
     page: typeof search.page === "string" && search.page ? search.page : undefined,
   }),
+  // Full server render: the token IS the credential, the loader runs
+  // server-side, and the page must work without JS. Must sit after
+  // validateSearch (route property order feeds TanStack type inference).
+  ssr: true,
   loader: async ({ params, context }) => {
     let tree: SharedTree | null = null;
     try {
