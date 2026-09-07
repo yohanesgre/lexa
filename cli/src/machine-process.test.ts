@@ -320,6 +320,6 @@ describe("machineListen daemon spawning", () => {
     // The relay lands on a later heartbeat (the exit fires after the first).
     const relayed = childMocks.heartbeats.find((h) => (h.daemonErrors as Array<{ runtimeId: string; error: string }> | undefined)?.length);
     expect(relayed).toBeDefined();
-    expect((relayed?.daemonErrors as Array<{ runtimeId: string; error: string }>)[0]).toEqual({ runtimeId: "r1", error: "API key revoked" });
+    expect((relayed?.daemonErrors as Array<{ runtimeId: string; error: string }> | undefined)?.[0]).toEqual({ runtimeId: "r1", error: "API key revoked" });
   });
 });

@@ -1,0 +1,36 @@
+{
+  "$schema": "https://unpkg.com/knip@5/schema.json",
+  "entry": [
+    "app/router.tsx",
+    "app/routes/**/*.{ts,tsx}",
+    "scripts/*.ts",
+    "cli/src/*.ts",
+    "hearth/daemon.ts"
+  ],
+  "ignore": [
+    "app/routeTree.gen.ts",
+    "app/components/hearth/herald/HeraldPanelViews.tsx",
+    "app/components/ui/Checkbox.tsx",
+    "app/components/ui/Toggle.tsx",
+    "doctor.config.ts",
+    "server/workers-shims/**",
+    "tools.ts",
+    "wireframes/**",
+    "**/*.test.ts"
+  ],
+  "ignoreBinaries": [
+    "journalctl",
+    "opencode",
+    "oxlint",
+    "prettier",
+    "knip",
+    "depcheck"
+  ],
+  "exclude": [
+    "exports",
+    "types"
+  ],
+  "ignoreDependencies": [
+    "miniflare"
+  ]
+}

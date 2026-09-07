@@ -1,7 +1,7 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { QueryClient } from "@tanstack/react-query";
 import * as api from "../../lib/api";
-import { useProjects, useHeraldSettings, useHeraldChatList } from "../../lib/queries";
+import { useProjects, useHeraldSettings } from "../../lib/queries";
 import { useQuery } from "@tanstack/react-query";
 import type { HeraldChatThreadSummary } from "../../lib/api";
 import { useRenameHeraldChat, useDeleteHeraldChat, useUpdateHeraldChatMeta } from "../../lib/queries";
@@ -28,7 +28,6 @@ import {
   suspendTurnFrame,
   touchThreadEntry,
   truncateTurns,
-  appendEphemeralUserTurn,
   threadEntry,
 } from "./herald-chat-logic";
 

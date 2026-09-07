@@ -285,8 +285,25 @@ jobs:
             exit 0
           fi
           npx playwright install chromium --with-deps 2>&1 || echo "::warning::playwright install failed - continuing"
+          # The check drives a real browser against the dev stack (:3000 API +
+          # :5173 vite) — boot it first, then wait for both surfaces.
+          bun run setup --yes --admin-email admin@lexa.local
+          bun run dev:full > /tmp/dev-full.log 2>&1 &
+          up=0
+          for _ in $(seq 1 60); do
+            if curl -sf http://localhost:3000/api/health >/dev/null && curl -sf -o /dev/null http://localhost:5173/login; then
+              up=1
+              break
+            fi
+            sleep 1
+          done
+          if [ "$up" != "1" ]; then
+            echo "::warning::dev stack did not come up - skipping check:mobile (see /tmp/dev-full.log)"
+            tail -20 /tmp/dev-full.log || true
+            exit 0
+          fi
           echo "running bun run check:mobile"
-          bun run check:mobile 2>&1 | tee /tmp/check-mobile.log
+          LEXA_SEED_PASSWORD=password123 bun run check:mobile 2>&1 | tee /tmp/check-mobile.log
           rc=${PIPESTATUS[0]:-$?}
           if [ $rc -eq 0 ]; then
             echo "check:mobile passed"

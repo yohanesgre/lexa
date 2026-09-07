@@ -2,8 +2,9 @@ import { Effect } from "effect";
 import { testConnection as providerTestConnection, type ProviderConfig } from "../herald/provider";
 import { HeraldChatService } from "./herald-chat.service";
 import { HeraldTaskService } from "./herald-task.service";
-import { buildStream, STREAM_STALL_TIMEOUT_MS, STREAM_STALL_MESSAGE, shouldEmitToolFrame, stripToolCallXml, findPendingBatch, applyResumeResults, type StreamRunContext } from "../herald/build-stream";
-export { buildStream, STREAM_STALL_TIMEOUT_MS, STREAM_STALL_MESSAGE, shouldEmitToolFrame, stripToolCallXml, findPendingBatch, applyResumeResults, type StreamRunContext } from "../herald/build-stream";
+import { HERALD_STALL_TIMEOUT_MS, HERALD_STALL_MESSAGE } from "../../shared/herald";
+import { buildStream, shouldEmitToolFrame, stripToolCallXml, findPendingBatch, applyResumeResults, type StreamRunContext } from "../herald/build-stream";
+export { buildStream, shouldEmitToolFrame, stripToolCallXml, findPendingBatch, applyResumeResults, type StreamRunContext } from "../herald/build-stream";
 export * from "./herald-helpers";
 
 export class HeraldService extends Effect.Service<HeraldService>()("Lexa/Herald", {

@@ -18,9 +18,6 @@ RUN bun install --frozen-lockfile
 
 COPY . .
 
-ARG VITE_LXK_API_KEY
-ENV VITE_LXK_API_KEY=$VITE_LXK_API_KEY
-
 RUN bunx vite build
 
 # Runtime: production deps only, no build tools, no dev deps.

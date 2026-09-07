@@ -44,12 +44,6 @@ function outputOf(spy: { mock: { calls: unknown[][] } }): string {
   return spy.mock.calls.map((c: unknown[]) => String(c[0]!)).join("\n");
 }
 
-const COMPLETE_ENV = [
-  "GITHUB_APP_ID=123456",
-  "GITHUB_PRIVATE_KEY_FILE=/tmp/key.pem",
-  "GITHUB_WEBHOOK_SECRET=0123456789abcdef",
-].join("\n");
-
 describe("cmdGithubStatus", () => {
   it("reports a complete config with all ✅ rows", async () => {
     writeEnv(completeEnv());

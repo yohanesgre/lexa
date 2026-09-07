@@ -7,8 +7,6 @@ import { HERALD_STALL_TIMEOUT_MS, HERALD_STALL_MESSAGE } from "../../shared/hera
 import type { ModelMessage, StreamChunk } from "@tanstack/ai";
 import { hydrateImageParts, replaceImageRefsWithPlaceholders, needsSummary } from "../services/herald-helpers";
 
-export const STREAM_STALL_TIMEOUT_MS = HERALD_STALL_TIMEOUT_MS;
-export const STREAM_STALL_MESSAGE = HERALD_STALL_MESSAGE;
 export const ZERO_ARG_TOOLS = new Set(["get_all_tasks", "get_all_wiki_pages", "get_board_structure"]);
 const INTERNAL_TOOL = "analyze_image";
 
@@ -164,7 +162,7 @@ export function buildStream(ctx: StreamRunContext): ReadableStream<StreamFrame> 
               let result: IteratorResult<StreamChunk>;
               let stallTimer: ReturnType<typeof setTimeout> | undefined;
               try {
-                result = await Promise.race([next, new Promise<never>((_, reject) => { stallTimer = setTimeout(() => { stalled = true; abort.abort(); reject(new HeraldGenerationFailed({ message: STREAM_STALL_MESSAGE })); }, STREAM_STALL_TIMEOUT_MS); })]);
+                result = await Promise.race([next, new Promise<never>((_, reject) => { stallTimer = setTimeout(() => { stalled = true; abort.abort(); reject(new HeraldGenerationFailed({ message: HERALD_STALL_MESSAGE })); }, HERALD_STALL_TIMEOUT_MS); })]);
               } finally { clearTimeout(stallTimer); }
               if (result.done) break;
               const chunk = result.value;
@@ -392,7 +390,7 @@ export function buildStream(ctx: StreamRunContext): ReadableStream<StreamFrame> 
           if (drained.length > 0) { await suspendTurn(drained); return; }
           if (!didFinish && !stalled) {
             const code = "HERALD_GENERATION_FAILED";
-            const message = STREAM_STALL_MESSAGE;
+            const message = HERALD_STALL_MESSAGE;
             const citationsErr = ctx.getCitations();
             const extra: Record<string, unknown> = { error: { code, message } };
             if (citationsErr.length > 0) extra.citations = citationsErr;

@@ -19,7 +19,6 @@
 // can't run SELECTs and return results). The builder takes the
 // pre-resolved swimlane + task IDs as input.
 
-import type { SqlParam } from "../db/driver";
 import type { BatchStmt } from "./task-batch";
 
 export interface MilestoneArchiveCascadeInput {
