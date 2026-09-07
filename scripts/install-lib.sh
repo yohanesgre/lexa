@@ -167,8 +167,9 @@ tty_read() {
     die "headless: pass --flag instead (${prompt})"
   fi
   local reply=""
+  # Prompt on its own line: typed input must not glue onto the label.
   # shellcheck disable=SC2069  # redirect order matters: silence before /dev/tty open
-  printf '%s' "$prompt" 2>/dev/null > /dev/tty || die "headless: pass --flag instead (${prompt})"
+  printf '%s\n' "$prompt" 2>/dev/null > /dev/tty || die "headless: pass --flag instead (${prompt})"
   # shellcheck disable=SC2069
   IFS= read -r reply 2>/dev/null < /dev/tty || die "headless: pass --flag instead (${prompt})"
   if [ -z "$reply" ]; then
@@ -569,7 +570,31 @@ tty_read_soft() {
     return 0
   fi
   local reply=""
-  printf '%s' "$prompt" 2>/dev/null > /dev/tty || { printf '%s\n' "$default"; return 0; }
+  printf '%s\n' "$prompt" 2>/dev/null > /dev/tty || { printf '%s\n' "$default"; return 0; }
   IFS= read -r reply 2>/dev/null < /dev/tty || { printf '%s\n' "$default"; return 0; }
   if [ -z "$reply" ]; then printf '%s\n' "$default"; else printf '%s\n' "$reply"; fi
+}
+
+# tty_read_secret — tty_read for secrets: the reply is never echoed (read -s)
+# and a trailing newline keeps the next log line off the input line.
+# Headless: env override or --flag; a TTY is required otherwise.
+tty_read_secret() {
+  local prompt="$1" env_name="${2:-}"
+  if [ -n "$env_name" ]; then
+    local from_env=""
+    from_env=$(printenv "$env_name" || true)
+    if [ -n "$from_env" ]; then
+      printf '%s\n' "$from_env"
+      return 0
+    fi
+  fi
+  if [ ! -r /dev/tty ]; then
+    die "headless: pass --flag instead (${prompt})"
+  fi
+  printf '%s\n' "$prompt" 2>/dev/null > /dev/tty || die "headless: pass --flag instead (${prompt})"
+  local reply=""
+  # shellcheck disable=SC2069
+  IFS= read -rs reply 2>/dev/null < /dev/tty || die "headless: pass --flag instead (${prompt})"
+  printf '\n' > /dev/tty
+  printf '%s\n' "$reply"
 }

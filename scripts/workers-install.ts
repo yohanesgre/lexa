@@ -62,7 +62,11 @@ async function cfFetch(path: string, init?: RequestInit): Promise<{ ok: boolean;
 
 function dieCf(label: string, r: { errors: Array<{ message?: string }> }): never {
   const msg = r.errors.map((e) => e.message).join("; ") || "unknown CF error";
-  die(`${label}: ${msg}`);
+  const hint =
+    /authentication|forbidden|invalid request headers/i.test(msg)
+      ? " — check the API token's permissions (Account scope: Workers Scripts, D1, Workers KV Storage, Workers R2 Storage — all Edit)"
+      : "";
+  die(`${label}: ${msg}${hint}`);
 }
 
 async function cfJson<T>(label: string, path: string, init?: RequestInit): Promise<T> {

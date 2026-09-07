@@ -172,9 +172,8 @@ deploy_workers() {
   fi
   # headless without --domain → workers.dev default (no prompt, no failure)
   if [ -z "${CF_TOKEN}" ] && [ -r /dev/tty ]; then
-    CF_TOKEN=$(tty_read "Cloudflare API token (Workers scripts, D1, R2, KV)" "")
+    CF_TOKEN=$(tty_read_secret "Cloudflare API token (needs: Workers Scripts, D1, Workers KV Storage, Workers R2 Storage — all Edit, account scope)" "CF_API_TOKEN")
   fi
-  [ -n "${CF_TOKEN}" ] || die "Cloudflare API token required (env CF_API_TOKEN or --cf-token)"
   [ -n "${CF_TOKEN}" ] || die "Cloudflare API token required (env CF_API_TOKEN or --cf-token)"
   [ -n "${API_KEY}" ] || API_KEY=$(gen_api_key)
 
