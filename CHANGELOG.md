@@ -7,6 +7,19 @@ All notable changes to Lexa are documented here. Format based on
 
 ## [Unreleased]
 
+## [2026.1.1] - 2026-09-07
+
+### Fixed
+
+- **CI hygiene** — knip configured with real TanStack/router/server/CLI
+  entries (previous runs flagged used files as unused), the mobile
+  responsiveness check boots the dev stack instead of failing on a dead
+  port, unused imports and extra non-null assertions cleaned, and
+  `shared/herald` dropped its duplicate stream-alias exports
+- **Docker build** — dead `VITE_LXK_API_KEY` build argument removed
+  (browser auth has ridden the session cookie since 2026.1.0's auth
+  switch); buildx secret-in-arg warnings gone
+
 ## [2026.1.0] - 2026-09-07
 
 ### Added
