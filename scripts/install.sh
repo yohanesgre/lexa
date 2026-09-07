@@ -12,16 +12,18 @@ set -euo pipefail
 
 BASE_URL="${INSTALL_BASE_URL:-https://raw.githubusercontent.com/yohanesgre/lexa/main/scripts}"
 
-# The lib may not exist on disk for piped runs — bootstrap it next to the
-# script when possible, else into a temp dir (cleaned via trap).
-if [ -f "${BASH_SOURCE[0]}" ] && [ -d "$(dirname "${BASH_SOURCE[0]}")" ]; then
-  SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# Piped runs (curl | bash) have no BASH_SOURCE — the lib is then bootstrapped
+# into a temp dir. Direct runs (bash scripts/install.sh) use the checkout.
+SELF="${BASH_SOURCE[0]:-}"
+if [ -n "$SELF" ] && [ -f "$SELF" ]; then
+  SCRIPT_DIR="$(cd "$(dirname "$SELF")" && pwd)"
+  # shellcheck source=scripts/install-lib.sh
+  source "${SCRIPT_DIR}/install-lib.sh"
 else
   SCRIPT_DIR="$(mktemp -d /tmp/lexa-install.XXXXXX)"
   curl -fsSL "${BASE_URL}/install-lib.sh" -o "${SCRIPT_DIR}/install-lib.sh"
+  source "${SCRIPT_DIR}/install-lib.sh"
 fi
-# shellcheck source=scripts/install-lib.sh
-source "${SCRIPT_DIR}/install-lib.sh"
 
 # ---------------------------------------------------------------------------
 # Target detection (§15: interactive defaults with confirmation; headless
