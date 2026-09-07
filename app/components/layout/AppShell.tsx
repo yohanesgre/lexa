@@ -172,7 +172,10 @@ export function AppShell() {
   const pathname = useRouterState({ select: (s) => s.location.pathname });
   const { selectedSlug, setSelectedSlug } = useProjectSelection();
   const navigate = useNavigate();
-  const { data: projects = [] } = useProjects();
+  // Bare surfaces (login, setup, share) have no session — the project list
+  // would 401 and retry-spam the console. Skip the fetch there.
+  const isBare = isBarePath(pathname);
+  const { data: projects = [] } = useProjects({ enabled: !isBare });
   const selectedProjectId = projects.find((p) => p.slug === selectedSlug)?.id;
   const [menuOpen, setMenuOpen] = useState(false);
   const [projectListOpen, setProjectListOpen] = useState(false);
@@ -201,7 +204,6 @@ export function AppShell() {
   }, [menuOpen]);
 
   const routeType = useMemo(() => resolveRouteType(pathname), [pathname]);
-  const isBare = isBarePath(pathname);
 
   const targets = {
     dashboard: navTarget(selectedSlug, "/$slug"),
