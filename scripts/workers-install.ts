@@ -253,34 +253,36 @@ const configPath = join(deployDir, `wrangler.${FLAVOR_NAME}.json`);
 writeFileSync(configPath, JSON.stringify(config, null, 2) + "\n", { mode: 0o600 });
 console.log(`  ✓ wrangler config → ${configPath}`);
 
-// ── D1 migrations (journal semantics mirrored from the CLI deploy) ──
-const journalInit = wrangler(["d1", "execute", FLAVOR.d1Name, "--remote", "--config", configPath, "--json", "--command",
-  "CREATE TABLE IF NOT EXISTS _migrations (name TEXT PRIMARY KEY, applied_at TEXT DEFAULT (datetime('now')))"], { capture: true });
-if (journalInit.status !== 0) dieWrangler("D1 journal init", journalInit);
-const journalList = wrangler(["d1", "execute", FLAVOR.d1Name, "--remote", "--config", configPath, "--json", "--command",
-  "SELECT name FROM _migrations"], { capture: true });
-if (journalList.status !== 0) dieWrangler("D1 journal read", journalList);
-const applied = new Set<string>();
-try {
-  const parsed = JSON.parse(journalList.stdout || "[]") as Array<{ results?: Array<{ name?: string }> }>;
-  for (const block of parsed) for (const row of block.results ?? []) if (row.name) applied.add(row.name);
-} catch {
-  die("could not parse D1 journal output");
+// ── D1 migrations (via the D1 query API, not wrangler's import endpoint) ──
+// Same semantics as runMigrationsD1: the whole file executes as one batch
+// with FKs enforced. The wrangler import endpoint reports constraint
+// failures without context; the query API returns them structured, and the
+// registry row rides in the same batch.
+async function d1Query(label: string, databaseId: string, sql: string): Promise<void> {
+  await cfJson(label, `/accounts/${account}/d1/database/${databaseId}/query`, {
+    method: "POST",
+    body: JSON.stringify({ sql }),
+  });
 }
+
+await d1Query("D1 journal init", d1Id,
+  "CREATE TABLE IF NOT EXISTS _migrations (name TEXT PRIMARY KEY, applied_at TEXT DEFAULT (datetime('now')))");
+const journalRows = await cfJson<Array<{ results?: Array<{ name?: string }> }>>("D1 journal read",
+  `/accounts/${account}/d1/database/${d1Id}/query`, {
+    method: "POST",
+    body: JSON.stringify({ sql: "SELECT name FROM _migrations" }),
+  });
+const applied = new Set<string>();
+for (const block of journalRows) for (const row of block.results ?? []) if (row.name) applied.add(row.name);
+
 const migrationsDir = join(DIR, "migrations");
 const files = readdirSync(migrationsDir).filter((f) => f.endsWith(".sql")).sort();
 let count = 0;
 for (const file of files) {
   if (applied.has(file)) continue;
   const sql = readFileSync(join(migrationsDir, file), "utf-8");
-  const tmp = join(tmpdir(), `lexa-mig-${Date.now()}-${count}.sql`);
-  writeFileSync(tmp, `${sql}\nINSERT INTO _migrations (name) VALUES ('${file.replace(/'/g, "''")}');\n`);
-  try {
-    const res = wrangler(["d1", "execute", FLAVOR.d1Name, "--remote", "--config", configPath, "--file", tmp]);
-    if (res.status !== 0) dieWrangler(`D1 migration ${file}`, res);
-  } finally {
-    rmSync(tmp, { force: true });
-  }
+  await d1Query(`D1 migration ${file}`, d1Id,
+    `${sql}\nINSERT INTO _migrations (name) VALUES ('${file.replace(/'/g, "''")}');`);
   console.log(`  ✓ Applied migration: ${file}`);
   count++;
 }
