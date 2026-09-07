@@ -40,8 +40,8 @@ export function getSetupStatus(): Promise<SetupStatus> {
   return request(`${BASE}/setup/status`);
 }
 
-export function setSetupAdmin(email: string): Promise<{ ok: boolean }> {
-  return request(`${BASE}/setup/admin`, { method: "POST", body: JSON.stringify({ email }) });
+export function setSetupAdmin(email: string, password: string): Promise<{ ok: boolean }> {
+  return request(`${BASE}/setup/admin`, { method: "POST", body: JSON.stringify({ email, password }) });
 }
 
 export function createSetupApiKey(): Promise<{ key: string }> {

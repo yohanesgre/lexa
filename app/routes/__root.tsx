@@ -1,4 +1,5 @@
-import { HeadContent, Outlet, Scripts, createRootRouteWithContext, redirect } from "@tanstack/react-router";
+import { useEffect } from "react";
+import { HeadContent, Outlet, Scripts, createRootRouteWithContext, redirect, useNavigate, useRouterState } from "@tanstack/react-router";
 import { QueryClientProvider } from "@tanstack/react-query";
 import phosphorCss from "../styles/phosphor.css?url";
 import { ModalStackProvider } from "../components/ui/ModalStack";
@@ -53,11 +54,34 @@ export const Route = createRootRouteWithContext<RouterContext>()({
   component: RootComponent,
 });
 
+// Hydration gap-closer for the SPA shell: the prerendered shell dehydrates a
+// settled `__root__` match, so TanStack SKIPS root beforeLoad on the first
+// hydration — anonymous visitors could see the app shell with 401-firing
+// queries before navigating. This mirrors the beforeLoad guard client-side.
+// Deliberately a plain effect-side fetch (not useSession): a render-phase
+// query here runs the server branch during the SPA prerender and 500s the
+// build.
+function useAuthBounce() {
+  const navigate = useNavigate();
+  const pathname = useRouterState({ select: (s) => s.location.pathname });
+  useEffect(() => {
+    if (PUBLIC_PATHS.has(pathname) || PUBLIC_PREFIXES.some((p) => pathname.startsWith(p))) return;
+    let alive = true;
+    void getSession().then((res) => {
+      if (!alive || res.session) return;
+      void navigate({ to: "/login", search: { redirect: pathname }, replace: true });
+    });
+    return () => {
+      alive = false;
+    };
+  }, [pathname, navigate]);
+}
+
 function RootComponent() {
   const { queryClient } = Route.useRouteContext();
+  useAuthBounce();
   return (
-    <html lang="en" suppressHydrationWarning>
-      <head>
+    <html lang="en" suppressHydrationWarning>      <head>
         <HeadContent />
         <script
           suppressHydrationWarning

@@ -159,7 +159,8 @@ Acceptance checks live in `docs/GITHUB_SETUP.md` (sync round-trip) — run them 
 ### Running the dev stack (Bun standalone, no Cloudflare)
 
 The `.env` file is **required** — it supplies `LXK_API_KEY` (server auth) and
-`VITE_LXK_API_KEY` (browser auth header). `bun run setup` writes it.
+`VITE_LXK_API_KEY` (browser auth header). `bun run setup` writes it (dev-only;
+self-hosters use the install script + `/setup` wizard).
 
 ```bash
 bun run setup          # first-time: admin email, API key, migrations, sample data
@@ -206,7 +207,8 @@ Key facts:
 - **Releasing:** `docs/RELEASING.md` — version policy, pre-tag checklist, image flow, CLI build flow, deploy state.
 - **lexa-cli operator tool:** the `lexa-cli` skill (auto-discovered; the
   project ships one at `~/.agents/skills/lexa-cli/SKILL.md`). Load it before
-  any CLI work.
+  any CLI work. lexa-cli is operate-only — no deploy commands (removed in
+  cli-v2026.2.0; self-hosting goes through `scripts/install.sh`).
 - **Browser automation:** the `agent-browser` skill (auto-discovered; at
   `~/.agents/skills/agent-browser/SKILL.md`). Load it before any browser
   work. If the active model lacks vision, the skill defaults to snapshot-

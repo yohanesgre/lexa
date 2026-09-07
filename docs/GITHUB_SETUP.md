@@ -108,8 +108,8 @@ GITHUB_APP_ID=1234567
 GITHUB_PRIVATE_KEY_FILE=/app/github-app.private-key.pem
 GITHUB_WEBHOOK_SECRET=...
 ```
-`lexa-cli deploy <domain> prod` preserves the `GITHUB_*` block when it rewrites
-the env file. The key file is gitignored (`*.private-key.pem`) and excluded
+The install script (`scripts/install.sh`) preserves the `GITHUB_*` block when
+it rewrites the env file. The key file is gitignored (`*.private-key.pem`) and excluded
 from the Docker build context (`.dockerignore`) — never commit it.
 
 ## 5. Map columns

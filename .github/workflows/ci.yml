@@ -315,3 +315,49 @@ jobs:
           fi
           echo "::warning::check:mobile failed (rc=$rc) - warn not hard"
           exit 0
+
+  install-script:
+    # Install script = the deploy surface; tests must run the SAME graph as
+    # production (design-deploy-tooling.md §9 test-swap R). Cheap bash suite +
+    # a real docker e2e: install → health → teardown. NOTE: no TTY on CI and
+    # `uninstall.sh docker --purge` dies by design (purge confirm is TTY-only),
+    # so e2e cleanup uses `docker compose down -v` + rm -rf directly instead of
+    # uninstall --purge.
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Detect install-script changes (PR gate)
+        id: changes
+        run: |
+          if [ "${{ github.event_name }}" != "pull_request" ]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          git fetch origin main:refs/remotes/origin/main --quiet
+          CHANGED=$(git diff --name-only origin/main...HEAD)
+          echo "$CHANGED"
+          if echo "$CHANGED" | grep -qE '^scripts/(install|uninstall|test-install)'; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Install script tests (unit + dry-run)
+        if: steps.changes.outputs.run == 'true'
+        run: bash scripts/test-install.sh
+
+      - name: E2E install → health → cleanup
+        if: steps.changes.outputs.run == 'true'
+        run: |
+          WORKDIR="$(mktemp -d)"
+          cd "$WORKDIR"
+          bash "$GITHUB_WORKSPACE/scripts/install.sh" docker --port 9191
+          curl -sf http://127.0.0.1:9191/api/health | grep -q '"ok":true'
+          cd lexa-deploy
+          docker compose down -v
+          cd "$WORKDIR"
+          rm -rf lexa-deploy

@@ -368,7 +368,7 @@ migrate Bun→Workers by dumping the Bun DB to SQL and replaying on D1):
   tunnel. `server/entry.ts` runs the Start handler (SSR shell) + serves
   `index.html` fallback for non-`/api` SPA routes; `/share/*` renders
   server-side (loader + unfurl meta). Current live system. Deployed via
-  `lexa-cli deploy <domain> prod` (Docker + tunnel + DNS).
+  `scripts/install.sh` (Docker Compose / bare metal) — see docs/DEPLOYMENT.md.
 - **Cloudflare Workers (parallel, optional, $5/mo):** Workers + D1 + R2 + KV.
   Same selective hybrid: built worker SSRs `/share/*`, static fallback for SPA
   routes (source `wrangler dev` = API + fallback by platform limitation) — same
@@ -380,7 +380,7 @@ migrate Bun→Workers by dumping the Bun DB to SQL and replaying on D1):
   Atomicity invariants (emission + webhook) re-expressed as `db.batch()` arrays.
 
 Vite plugin chain emits two server bundles (Bun entry + Workers entry).
-Dispatch point: `lexa-cli deploy <domain> [--direct] [--runtime workers] [staging|prod]`.
+Dispatch point: `curl -fsSL …/scripts/install.sh | bash -s -- <target>` (docker | bare | workers | dev).
 Compliance gate: `scripts/check-invariants.ts` scans for the 14 invariants.
 Full Workers HOW: `docs/CLOUDFLARE_WORKERS.md` (decision formerly ADR-0002,
 now merged there); deploy flows: `docs/DEPLOYMENT.md`.

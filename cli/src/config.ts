@@ -21,12 +21,6 @@ export interface CliConfig {
   apiKey: string;
 }
 
-// Deploy credentials (Cloudflare) persisted alongside the login so
-// `lexa-cli deploy` works without a saved url/apiKey.
-export interface DeployCreds {
-  cfToken?: string | undefined;
-}
-
 export const LEXA_DIR = process.env.LEXA_DIR ?? join(homedir(), ".lexa");
 
 export type LexaFlavor = "dev" | "staging" | "prod";
@@ -137,48 +131,6 @@ function savedLoginSync(): CliConfig | null {
   return null;
 }
 
-function loadDeployCredsSync(dir: string): DeployCreds | null {
-  const path = join(dir, "config.json");
-  try {
-    if (!existsSync(path)) return null;
-    const raw = JSON.parse(readFileSync(path, "utf-8")) as { deploy?: DeployCreds };
-    return raw.deploy ?? null;
-  } catch {
-    return null;
-  }
-}
-
-function saveDeployCredsSync(creds: DeployCreds, dir: string): void {
-  migrateLegacyDirsSync();
-  mkdirSync(dir, { recursive: true, mode: 0o700 });
-  const path = join(dir, "config.json");
-  let existing: Record<string, unknown> = {};
-  try {
-    if (existsSync(path)) {
-      existing = JSON.parse(readFileSync(path, "utf-8")) as Record<string, unknown>;
-    }
-  } catch {
-    existing = {};
-  }
-  existing.deploy = creds;
-  writeFileSync(path, JSON.stringify(existing, null, 2) + "\n", { mode: 0o600 });
-  chmodSync(path, 0o600);
-}
-
-function clearDeployCredsSync(dir: string): void {
-  const path = join(dir, "config.json");
-  try {
-    if (!existsSync(path)) return;
-    const existing = JSON.parse(readFileSync(path, "utf-8")) as Record<string, unknown>;
-    if (!("deploy" in existing)) return;
-    delete existing.deploy;
-    writeFileSync(path, JSON.stringify(existing, null, 2) + "\n", { mode: 0o600 });
-    chmodSync(path, 0o600);
-  } catch {
-    // best-effort like the other config writes
-  }
-}
-
 // Legacy pre-group ~/.config/lexa-cli|lexa-forge locations. Migrate-and-
 // delete, no fallback: the group is derived from the legacy config.json url;
 // if the group file already exists it wins and the old one is removed; empty
@@ -287,9 +239,6 @@ export class CliConfigService extends Effect.Service<CliConfigService>()("LexaCl
       loadConfig: (dir: string): Effect.Effect<CliConfig | null, never> => Effect.sync(() => loadConfigSync(dir)),
       saveConfig: (config: CliConfig, dir: string): Effect.Effect<void, never> => Effect.sync(() => saveConfigSync(config, dir)),
       clearConfig: (dir: string): Effect.Effect<void, never> => Effect.sync(() => clearConfigSync(dir)),
-      loadDeployCreds: (dir: string): Effect.Effect<DeployCreds | null, never> => Effect.sync(() => loadDeployCredsSync(dir)),
-      saveDeployCreds: (creds: DeployCreds, dir: string): Effect.Effect<void, never> => Effect.sync(() => saveDeployCredsSync(creds, dir)),
-      clearDeployCreds: (dir: string): Effect.Effect<void, never> => Effect.sync(() => clearDeployCredsSync(dir)),
     };
   }),
 }) {}

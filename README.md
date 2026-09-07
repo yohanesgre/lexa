@@ -2,7 +2,7 @@
 
 Self-hosted project management for small teams. Kanban with swimlanes and WIP limits, rich task descriptions, a nested wiki, milestones, the Hearth AI writing assistant and Herald chat, team auth, and two-way GitHub issue sync.
 
-Stack: **Bun + SQLite + TanStack Start (React) + Effect-TS + Tailwind**, served behind a cloudflared tunnel.
+Stack: **Bun + SQLite + TanStack Start (React) + Effect-TS + Tailwind** — self-hosted via `scripts/install.sh` (docker, bare metal, Cloudflare Workers, or dev).
 
 ## Features
 
@@ -14,7 +14,7 @@ Stack: **Bun + SQLite + TanStack Start (React) + Effect-TS + Tailwind**, served 
 - **Herald chat** — streaming AI chat with threads, multi-provider gateway, and a proposed-actions approval flow for task/wiki writes
 - **Auth & teams** — email/password login with cookie sessions, teams and roles, workspace invites, `lxk_` API keys for machines
 - **Two-way GitHub sync** — link tasks to issues, echo-suppressed webhooks, column ↔ issue-state mapping, out-of-sync surfacing
-- **`lexa-cli`** — operator CLI for tasks, wiki, machines, deploy, and upgrades
+- **`lexa-cli`** — headless operator CLI for tasks, wiki, machines, keys, and upgrades
 
 ## Quickstart (local dev)
 
@@ -40,24 +40,48 @@ vitest run
 
 ## Deploying (self-host)
 
-`lexa-cli deploy <domain> [staging|prod]` provisions Docker + cloudflared
-tunnel, DNS, and the env file, then pulls the prebuilt image CI publishes
-to `ghcr.io/yohanesgre/lexa`:
+One install script — no clone, no repo checkout:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/yohanesgre/lexa/main/scripts/install-cli.sh | bash
-lexa-cli deploy lexa.example.com prod
+curl -fsSL https://raw.githubusercontent.com/yohanesgre/lexa/<tag>/scripts/install.sh | bash -s -- docker
 ```
 
-- `staging` → `lexa-preview.<domain>`, `prod` → `lexa.<domain>`
-- **Redeploy = upgrade** — deploy always pulls the latest image
-- `--image <tag>` pins a specific version
-- `--clean` recreates from scratch (removes the `lexa-data` volume — DB wiped)
-- `--direct` skips Cloudflare for your own reverse proxy; a Workers + D1
-  flavor is also available
-- Full contract (flavors, env reference, GitHub App setup, secrets hygiene):
-  [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) +
-  [`docs/GITHUB_SETUP.md`](docs/GITHUB_SETUP.md)
+Pipe a **release tag** (e.g. `v2026.1.2`), not `main` — the script content is
+pinned to the tag and never changes under your feet. Targets:
+
+| Target | What it does |
+|---|---|
+| `docker` | prebuilt image from `ghcr.io/yohanesgre/lexa`, compose up, health check (default 127.0.0.1:8080) |
+| `bare` | release tarball + env file + `lexa-start.sh` (systemd opt-in via `--systemd`) |
+| `workers` | Cloudflare Workers + D1 + R2 + KV via `bunx wrangler` |
+| `dev` | clone the repo, `bun install`, `bun run dev:full` |
+
+Flags: `--flavor staging|prod`, `--port`, `--bind`, `--key <lxk_...>`
+(auto-generated if absent), `--domain` (workers custom domain), `--systemd`
+(bare), `--image <tag>` (docker version pin).
+
+**First run:** open `http://<host>:<port>/setup` — create the first admin
+(email + password, min 8 chars). The wizard is the **only** provisioning path;
+passwords never pass through the shell.
+
+**lexa-cli** is the headless operator frontend for the running server (tasks,
+wiki, machines, keys, upgrades) — it installs separately and has **no deploy
+commands** (removed in cli-v2026.2.0):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/yohanesgre/lexa/cli-v<TAG>/scripts/install-cli.sh | bash
+```
+
+**Uninstall** (data kept unless `--purge`):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/yohanesgre/lexa/<tag>/scripts/uninstall.sh | bash -s -- docker
+```
+
+- **Upgrade = re-run `install.sh`** from the new tag (idempotent; data survives)
+- Full contract (per-target details, env reference, security notes):
+  [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md)
+- GitHub App setup: [`docs/GITHUB_SETUP.md`](docs/GITHUB_SETUP.md)
 
 ## CLI
 
@@ -68,7 +92,6 @@ lexa-cli login --url https://lexa.example.com --key lxk_...
 lexa-cli task list --project my-project
 lexa-cli task create --project my-project --column "In Progress" --swimlane Backlog --title "Ship it"
 lexa-cli wiki get --project my-project getting-started
-lexa-cli deploy lexa.example.com prod     # deploy / upgrade the server
 lexa-cli upgrade                          # self-update the CLI binary
 ```
 
@@ -99,15 +122,15 @@ lexa-cli wiki get getting-started --project my-project
 
 ## Environment variables
 
-`.env.example` is the tracked dev template (copy to `.env`). The prod/staging
-contract — flavors, who writes what, full variable reference — lives in
-[`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md). Values are generated on the machine
-and never committed (`.env*` is gitignored):
+`.env.example` is the tracked dev template (copy to `.env`). The
+self-hosting contract — per-target layout, env reference, security notes —
+lives in [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md). Values are generated on
+the machine and never committed (`.env*` is gitignored):
 
 | Situation | What's needed |
 |---|---|
 | Local dev (`.env`) | `bun run setup` generates `LXK_API_KEY` and `LXK_ADMIN_EMAILS`; `GITHUB_*` only if you want two-way GitHub sync |
-| Staging/prod (`.env.staging` / `.env.prod`) | `lexa-cli deploy` prompts for admin email, API key and Cloudflare token, writes the file, and preserves `GITHUB_*` + `LXK_API_KEY` across re-runs |
+| Self-hosted (install script) | the script writes the env file (`LXK_API_KEY`, `LXK_ENV`, `LXK_PUBLIC_URL`; `--key` to pin the API key); `GITHUB_*` preserved across re-runs |
 | Optional | `LXK_HEARTH_DAEMON_TOKEN`, `LXK_MAX_BODY_MB` (body cap, default 16), `LOG_LEVEL` |
 
 ## Documentation
@@ -120,7 +143,7 @@ Design and API docs live in [`docs/`](docs/):
 | [`docs/SCHEMA.md`](docs/SCHEMA.md) | SQL schema and data invariants |
 | [`docs/API.md`](docs/API.md) | REST contract |
 | [`docs/LAYERS.md`](docs/LAYERS.md) | Effect service patterns, error catalog, webhook/auth flows |
-| [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) | Deploy contract: flavors, env reference, bootstrap |
+| [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) | Self-hosting via install.sh: targets, env reference, bootstrap |
 | [`docs/GITHUB_SETUP.md`](docs/GITHUB_SETUP.md) | GitHub App setup: webhook URL/secret, private key |
 
 ## Contributing

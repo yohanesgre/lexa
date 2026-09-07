@@ -31,12 +31,16 @@ replaces the other; either or both can be live at any time.
    `fs` and `s3` (S3 covers R2's S3 endpoint for Bun-side users). The `StorageDriver`
    interface is unchanged.
 6. **No data sync between flavors.** A user who wants to move from Bun to Workers
-   dumps the Bun DB to SQL and replays it on D1 manually. `lexa-cli deploy workers
-   --seed` re-applies the dev seed file.
-7. **Deploy surface:** `lexa-cli deploy <domain> [bun|workers] [staging|prod]` is the
-   operator's pick point. The Bun flavor uses the existing Docker+cloudflared flow.
-   The Workers flavor provisions D1+R2+KV+Worker route via the Cloudflare API and
-   ships a prebuilt bundle. See `docs/DEPLOYMENT.md` for the dispatch.
+   dumps the Bun DB to SQL and replays it on D1 manually. The dev seed file is
+   re-applied only via the dev bootstrap (`bun run setup` / the wizard's
+   sample-data step) — never in staging/prod (`LXK_ENV` seed gate).
+7. **Deploy surface:** `install.sh workers` is the operator's pick point —
+   it fetches the release workers tarball, provisions D1+R2+KV via the
+   Cloudflare API, applies D1 migrations, and deploys the prebuilt bundle via
+   `bunx wrangler` (staging helper: `scripts/workers-install.ts`). Repo deploys
+   use `install.sh workers --from-repo <dir>` or `install.sh dev`. The Bun
+   flavor uses the `install.sh docker` flow. See `docs/DEPLOYMENT.md` for the
+   targets. (`lexa-cli deploy` was removed in cli-v2026.2.0.)
 8. **Cron + observability:** Workers' `scheduled` handler runs prune + backup (cron
    `*/15 * * * *`); `wrangler.jsonc` enables observability. The Bun path keeps its
    `setInterval`.
@@ -175,8 +179,8 @@ writes is ms-scale. Post-ack atomic work must fit `batch()` (see above).
   inline `GITHUB_PRIVATE_KEY` secret (already supported per `docs/GITHUB_SETUP.md`).
 - Migrations: `wrangler d1 migrations create/apply`; seed via
   `wrangler d1 execute --file`. Replaces `scripts/dev.sh` boot + `seed-dev.sql`.
-- cloudflared tunnel dropped entirely — Worker custom domain replaces it;
-  `lexa-cli deploy` compose flow obsolete for the web tier.
+- cloudflared tunnel dropped entirely — Worker custom domain replaces it; the
+  old `lexa-cli deploy` compose flow is gone (removed in cli-v2026.2.0).
 - Hearth daemons unaffected — already external machines reached over HTTP; outbound
   subrequest budget 50/request free, 1000 paid.
 
