@@ -7,6 +7,16 @@ All notable changes to Lexa are documented here. Format based on
 
 ## [Unreleased]
 
+## [2026.2.5] - 2026-09-08
+
+### Fixed
+
+- **Workers confirmations read stdin (EOF under `curl | bash`)** — Bun's
+  `prompt()` got the piped script as stdin, returned instantly, and the D1
+  drop question auto-answered before the operator could respond, continuing
+  against a stale half-provisioned database. Confirmations now read from
+  `/dev/tty`; an unreachable terminal counts as "keep" (#32)
+
 ## [2026.2.4] - 2026-09-08
 
 ### Added
