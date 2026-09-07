@@ -197,6 +197,7 @@ deploy_workers() {
   fi
 
   cf_args=(--cf-token "${CF_TOKEN}" --api-key "${API_KEY}" --flavor "${FLAVOR}")
+  [ "${RESET_DB}" = "1" ] && cf_args+=(--reset-db)
   [ -n "${DOMAIN}" ] && cf_args+=(--domain "${DOMAIN}")
   (cd "${WORK_DIR}" && step "workers install" bun scripts/workers-install.ts "${cf_args[@]}")
   if [ -n "${DOMAIN}" ]; then
