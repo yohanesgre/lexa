@@ -23,12 +23,13 @@ import { isNarrowViewport, hasMatchMedia, matchMedia } from "../../lib/viewport"
 import { useMentionTokens } from "../../lib/useMentionTokens";
 import { renderTokenized } from "../../lib/tokenizeTranscript";
 import { withKeys } from "../../lib/withKeys";
-import { MarkdownContent, highlightCode } from "../../lib/markdownToReact";
+import { highlightCode } from "../../lib/markdownToReact";
+import { MarkdownContent } from "../MarkdownContent";
 import { ThreadsSidebar } from "./ThreadsSidebar";
 import { SkillPicker } from "../hearth/herald/SkillPicker";
 import { HearthFlameIcon } from "../hearth/herald/HeraldPanel";
-import { HeraldImageAttach, acceptImageFiles } from "../hearth/herald/HeraldImageAttach";
-import type { HeraldImage } from "../hearth/herald/HeraldImageAttach";
+import { HeraldImageAttach } from "../hearth/herald/HeraldImageAttach";
+import { acceptImageFiles, type HeraldImage } from "../../lib/herald-image";
 import { HeraldActivity } from "./HeraldActivity";
 import { EffortPicker } from "./EffortPicker";
 import { ApprovalChipRow, HeraldApprovalBatch, SuspendedIndicator, type ApprovalChip } from "./HeraldApprovals";
@@ -136,6 +137,7 @@ const ChatComposer = memo(function ChatComposer({
                 <div
                   key={`${it.refType}-${it.refId}`}
                   role="option"
+                  tabIndex={-1}
                   aria-selected={idx === mention.focusedIndex}
                   className={idx === mention.focusedIndex ? "dropdown-item focused" : "dropdown-item"}
                   onMouseDown={(e) => {
@@ -263,7 +265,7 @@ interface ActivityView {
 
 // HTTPS-ONLY: http:// sources never render as chips (mixed-content +
 // spoofing discipline) — they stay out of the chip row entirely.
-export function safeCitations(raw: unknown): CitationView[] {
+function safeCitations(raw: unknown): CitationView[] {
   if (!Array.isArray(raw)) return [];
   const out: CitationView[] = [];
   for (const entry of raw) {
@@ -287,7 +289,7 @@ export function safeCitations(raw: unknown): CitationView[] {
 // - PROVIDER_UNREACHABLE / rate-limit family → prominent Retry
 export type ErrorGuidance = "settings" | "info" | "retry";
 
-export function guidanceFor(code: string): ErrorGuidance {
+function guidanceFor(code: string): ErrorGuidance {
   if (code === "PROVIDER_AUTH_FAILED") return "settings";
   if (/RATE|UNREACHABLE|GENERATION_FAILED/.test(code)) return "retry";
   return "info";
@@ -302,7 +304,7 @@ const GUIDANCE_BODY: Record<string, string> = {
 
 // Split stored text on ``` fences → plain / fenced segments. Fenced bodies
 // render as a highlighted mono block with a language label + copy button.
-export function splitFences(text: string): { fenced: boolean; body: string; lang?: string }[] {
+function splitFences(text: string): { fenced: boolean; body: string; lang?: string }[] {
   const parts = text.split("```");
   const out: { fenced: boolean; body: string; lang?: string }[] = [];
   for (let i = 0; i < parts.length; i++) {
@@ -446,6 +448,10 @@ export function HeraldChatPage({ slug, thread }: { slug: string; thread?: string
   // history list head > "" (fresh empty state). Every applied selection is
   // written back to localStorage.
   const [chatId, setChatId] = useState("");
+  const setChatIdRef = useRef(setChatId);
+  useEffect(() => {
+    setChatIdRef.current = setChatId;
+  });
   const applyChatId = useCallback(
     (id: string) => {
       setChatId(id);
@@ -644,7 +650,7 @@ export function HeraldChatPage({ slug, thread }: { slug: string; thread?: string
     if (thread) void navigate({ search: {}, replace: true });
     const head = listQuery.data?.[0]?.chatId;
     if (head && head !== staleId) applyChatId(head);
-    else setChatId("");
+    else setChatIdRef.current("");
   }, [projectId, chatId, transcript.error, transcript.isLoading, thread, navigate, qc, listQuery.data, applyChatId, stream.hasIngress, streaming]);
 
   useEffect(() => {
@@ -659,7 +665,7 @@ export function HeraldChatPage({ slug, thread }: { slug: string; thread?: string
       void navigate({ search: {}, replace: true });
       const head = listQuery.data[0]?.chatId;
       if (head && head !== staleId) applyChatId(head);
-      else setChatId("");
+      else setChatIdRef.current("");
     }
   }, [projectId, chatId, listQuery.data, listQuery.isLoading, thread, stream.hasIngress, streaming, transcript.error, navigate, qc, applyChatId]);
 
@@ -1163,9 +1169,11 @@ export function HeraldChatPage({ slug, thread }: { slug: string; thread?: string
                 Set up a provider for this project in Project Settings → Herald provider.
               </p>
               {projectId && (
-                <Link to="/settings/project/$projectId" params={{ projectId }} className="btn btn-primary btn-sm mt-3" style={{ textDecoration: "none" }}>
-                  Open Settings
-                </Link>
+                <div className="mt-3">
+                  <Link to="/settings/project/$projectId" params={{ projectId }} className="btn btn-primary btn-sm" style={{ textDecoration: "none" }}>
+                    Open Settings
+                  </Link>
+                </div>
               )}
             </div>
           </div>
@@ -1369,7 +1377,12 @@ function CopyButton({ text, label }: { text: string; label: string }) {
       className="icon-btn"
       title={copied ? "Copied" : label}
       aria-label={copied ? "Copied" : label}
-      onClick={() => void copyToClipboard(text).then(mark)}
+      onClick={async () => {
+        try {
+          await copyToClipboard(text);
+          mark();
+        } catch {}
+      }}
     >
       {copied ? <CheckIcon /> : <CopyIcon />}
     </button>
@@ -1537,7 +1550,7 @@ function AssistantBubble({
 // Optional inline meta (ts / citations / error / stopped) is read
 // defensively — legacy entries lack all of it. rawIndex preserves the
 // position in the RAW messages array for resend targeting.
-export function renderTranscript(messages: unknown[]): ChatTurn[] {
+function renderTranscript(messages: unknown[]): ChatTurn[] {
   const out: ChatTurn[] = [];
   for (let rawIndex = 0; rawIndex < messages.length; rawIndex++) {
     const msg = messages[rawIndex] as {

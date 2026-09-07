@@ -9,6 +9,7 @@ import { AgentsSettingsSection, SkillsSettingsSection } from "../hearth/AgentSki
 import { copyToClipboard } from "../../lib/clipboard";
 import { Field } from "../ui/Field";
 import { TextInput } from "../ui/TextInput";
+import { ConfirmDialog } from "../ui/ConfirmDialog";
 import type { WorkspaceInvite } from "../../../shared/types";
 import type { WorkspaceMember } from "../../lib/api";
 
@@ -207,28 +208,13 @@ function WorkspaceMembersSection() {
 
 function MemberDeleteModal({ name, onCancel, onConfirm }: { name: string; onCancel: () => void; onConfirm: () => void }) {
   return (
-    <>
-      <button type="button" className="slideover-overlay" onClick={onCancel} aria-label="Close" />
-      <div className="fixed inset-0 flex items-center justify-center z-50 pointer-events-none">
-        <dialog open className="dialog dialog-enter pointer-events-auto" aria-modal="true" aria-label="Dialog">
-          <h2 className="font-display text-lg font-medium text-lx-text-primary">Delete member?</h2>
-          <p className="text-sm text-lx-text-secondary mt-3 leading-5">
-            Delete{" "}
-            <span className="chip font-mono text-xs text-lx-text-primary">
-              {name}
-            </span>
-            {" "}from the workspace? Their API keys are revoked and team memberships and project grants are cleared. Activity and comments keep their rows. This cannot be undone.
-          </p>
-          <div className="flex items-center gap-2 mt-4 justify-end">
-            <button type="button" className="btn btn-ghost" onClick={onCancel}>Cancel</button>
-            <button type="button" className="btn btn-danger-solid" onClick={onConfirm}>
-              <Trash2 size={14} strokeWidth={1.5} />
-              Delete
-            </button>
-          </div>
-        </dialog>
-      </div>
-    </>
+    <ConfirmDialog
+      title="Delete member?"
+      body={<>Delete{" "}<span className="chip font-mono text-xs text-lx-text-primary">{name}</span>{" "}from the workspace? Their API keys are revoked and team memberships and project grants are cleared. Activity and comments keep their rows. This cannot be undone.</>}
+      confirmLabel="Delete"
+      onCancel={onCancel}
+      onConfirm={onConfirm}
+    />
   );
 }
 
@@ -318,28 +304,13 @@ function TeamsSection() {
 
 function TeamDeleteModal({ name, onCancel, onConfirm }: { name: string; onCancel: () => void; onConfirm: () => void }) {
   return (
-    <>
-      <button type="button" className="slideover-overlay" onClick={onCancel} aria-label="Close" />
-      <div className="fixed inset-0 flex items-center justify-center z-50 pointer-events-none">
-        <dialog open className="dialog dialog-enter pointer-events-auto" aria-modal="true" aria-label="Dialog">
-          <h2 className="font-display text-lg font-medium text-lx-text-primary">Delete team?</h2>
-          <p className="text-sm text-lx-text-secondary mt-3 leading-5">
-            Delete{" "}
-            <span className="chip font-mono text-xs text-lx-text-primary">
-              {name}
-            </span>
-            {" "}? Teams owning projects are refused with 409 TEAM_HAS_PROJECTS — re-assign or delete those projects first. Memberships are removed; projects become Global.
-          </p>
-          <div className="flex items-center gap-2 mt-4 justify-end">
-            <button type="button" className="btn btn-ghost" onClick={onCancel}>Cancel</button>
-            <button type="button" className="btn btn-danger-solid" onClick={onConfirm}>
-              <Trash2 size={14} strokeWidth={1.5} />
-              Delete
-            </button>
-          </div>
-        </dialog>
-      </div>
-    </>
+    <ConfirmDialog
+      title="Delete team?"
+      body={<>Delete{" "}<span className="chip font-mono text-xs text-lx-text-primary">{name}</span>{" "}? Teams owning projects are refused with 409 TEAM_HAS_PROJECTS — re-assign or delete those projects first. Memberships are removed; projects become Global.</>}
+      confirmLabel="Delete"
+      onCancel={onCancel}
+      onConfirm={onConfirm}
+    />
   );
 }
 

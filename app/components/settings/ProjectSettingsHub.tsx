@@ -8,6 +8,8 @@ import { InlineDropdown } from "./SettingsSections";
 import { Field } from "../ui/Field";
 import { TextInput } from "../ui/TextInput";
 import { TextArea } from "../ui/TextArea";
+import { ConfirmDialog } from "../ui/ConfirmDialog";
+import { MembersTableHead } from "./TeamSettings";
 import type { Project } from "../../../shared/types";
 
 // /settings/project/$projectId — the project settings surface reached from
@@ -452,9 +454,7 @@ function ProjectMembersSection({ slug }: { slug: string }) {
       ) : (
         <div className="card-panel" style={{ overflow: "hidden" }}>
           <table className="settings-table">
-            <thead>
-              <tr><th style={{ width: "auto" }}>User</th><th style={{ width: "auto" }}>Email</th><th style={{ width: 80 }}>Role</th><th style={{ width: 80 }} /></tr>
-            </thead>
+            <MembersTableHead />
             <tbody>
               {members.map((m) => (
                 <tr key={m.email}>
@@ -498,28 +498,13 @@ function ProjectMembersSection({ slug }: { slug: string }) {
 
 function RemoveMemberModal({ name, onCancel, onConfirm }: { name: string; onCancel: () => void; onConfirm: () => void }) {
   return (
-    <>
-      <button type="button" className="slideover-overlay" onClick={onCancel} aria-label="Close" />
-      <div className="fixed inset-0 flex items-center justify-center z-50 pointer-events-none">
-        <dialog open className="dialog dialog-enter pointer-events-auto" aria-modal="true" aria-label="Dialog">
-          <h2 className="font-display text-lg font-medium text-lx-text-primary">Remove member?</h2>
-          <p className="text-sm text-lx-text-secondary mt-3 leading-5">
-            Remove{" "}
-            <span className="chip font-mono text-xs text-lx-text-primary">
-              {name}
-            </span>
-            {" "}from this project? They will lose access immediately.
-          </p>
-          <div className="flex items-center gap-2 mt-4 justify-end">
-            <button type="button" className="btn btn-ghost" onClick={onCancel}>Cancel</button>
-            <button type="button" className="btn btn-danger-solid" onClick={onConfirm}>
-              <Trash2 size={14} strokeWidth={1.5} />
-              Remove
-            </button>
-          </div>
-        </dialog>
-      </div>
-    </>
+    <ConfirmDialog
+      title="Remove member?"
+      body={<>Remove{" "}<span className="chip font-mono text-xs text-lx-text-primary">{name}</span>{" "}from this project? They will lose access immediately.</>}
+      confirmLabel="Remove"
+      onCancel={onCancel}
+      onConfirm={onConfirm}
+    />
   );
 }
 

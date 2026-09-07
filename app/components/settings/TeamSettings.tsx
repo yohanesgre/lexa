@@ -12,6 +12,14 @@ import { TextInput } from "../ui/TextInput";
 
 const ROLES: TeamMemberRole[] = ["owner", "admin", "member"];
 
+export function MembersTableHead() {
+  return (
+    <thead>
+      <tr><th style={{ width: "auto" }}>User</th><th style={{ width: "auto" }}>Email</th><th style={{ width: "auto" }}>Role</th><th style={{ width: 80 }}><span className="table-actions" /></th></tr>
+    </thead>
+  );
+}
+
 // /settings/team — team admin: own team only (no switcher) · superadmin: any
 // team (header switcher). The server enforces both paths.
 export function TeamSettings() {
@@ -259,9 +267,7 @@ function TeamMembersSection({ teamId, isSuperadmin }: { teamId: string; isSupera
       ) : (
         <div className="card-panel" style={{ overflow: "hidden" }}>
           <table className="settings-table">
-            <thead>
-              <tr><th style={{ width: "auto" }}>User</th><th style={{ width: "auto" }}>Email</th><th style={{ width: 120 }}>Role</th><th style={{ width: 80 }} /></tr>
-            </thead>
+            <MembersTableHead />
             <tbody>
               {members.map((m: TeamMember) => {
                 const soleOwner = ownerCount === 1 && m.role === "owner";

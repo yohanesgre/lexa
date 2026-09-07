@@ -173,7 +173,7 @@ export function buildHeraldTools(deps: HeraldToolDeps) {
       name: "fetch_url",
       description:
         "Fetch a public http(s) URL and return its content as plain text (HTML is stripped; PDFs are extracted, max 50 pages / 5 MB). Private and reserved network addresses are blocked.",
-      inputSchema: z.object({ url: z.string().url() }),
+      inputSchema: z.object({ url: z.url() }),
       outputSchema: z.object({ content: z.string(), error: z.string().optional() }),
     }).server(async ({ url }) => {
       try {

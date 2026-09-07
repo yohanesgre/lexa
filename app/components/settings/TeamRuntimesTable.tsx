@@ -1,7 +1,8 @@
 import { useState } from "react";
-import { Plus, RotateCcw, Settings, Trash2 } from "lucide-react";
+import { Plus } from "lucide-react";
 import { useRemoveRuntime } from "../../lib/queries";
 import { RemoveRuntimeModal } from "./SettingsSections";
+import { RuntimeRowActions } from "./RuntimeRowActions";
 import { formatRelative } from "../../lib/relative-time";
 import { RuntimeSetupModal } from "../hearth/RuntimeSetupModal";
 import { RuntimeEditModal } from "../hearth/RuntimeEditModal";
@@ -48,7 +49,10 @@ export function TeamSettingsRuntimesTable({ teamId, runtimes, isLoading, isError
         <div className="card-panel" style={{ overflow: "hidden" }}>
           <table className="settings-table">
             <thead>
-              <tr><th>Name</th><th>CLI</th><th>Model</th><th>Hostname</th><th>Status</th><th /></tr>
+              <tr>
+                {["Name", "CLI", "Model", "Hostname", "Status"].map((label) => <th key={label}>{label}</th>)}
+                <th />
+              </tr>
             </thead>
             <tbody>
               {runtimes.map((r) => (
@@ -59,9 +63,7 @@ export function TeamSettingsRuntimesTable({ teamId, runtimes, isLoading, isError
                   <td className="font-mono text-xs text-lx-text-secondary">{r.hostname || "—"}</td>
                   <td><span className="flex items-center gap-2"><span className={r.status === "online" ? "sync-dot sync-synced" : "sync-dot sync-unlinked"} /><span className={`font-micro text-2xs uppercase tracking-[0.04em] ${r.status === "online" ? "text-lx-text-success" : "text-lx-text-muted"}`}>{r.status === "online" ? "Online" : "Offline"}</span></span>{r.lastError && <span className="block text-xs mt-1" style={{ color: "var(--lx-text-warning)" }}>{r.lastError.toLowerCase().includes("api key") ? "API key revoked — re-run Setup runtime" : r.lastError}</span>}</td>
                   <td style={{ textAlign: "right", whiteSpace: "nowrap" }}>
-                    {r.status === "offline" && <button type="button" className="btn btn-ghost" style={{ width: 28, height: 28, padding: 0 }} onClick={() => setRestarting(r)} aria-label={`Restart ${r.name}`} title="Restart guide"><RotateCcw size={14} strokeWidth={1.5} /></button>}
-                    <button type="button" className="btn btn-ghost" style={{ width: 28, height: 28, padding: 0 }} onClick={() => setEditing(r)} aria-label={`Edit ${r.name}`} title="Edit runtime"><Settings size={14} strokeWidth={1.5} /></button>
-                    <button type="button" className="btn btn-danger" style={{ width: 28, height: 28, padding: 0 }} onClick={() => setRemoving(r)} aria-label={`Remove ${r.name}`} title="Remove runtime"><Trash2 size={14} strokeWidth={1.5} /></button>
+                    <RuntimeRowActions name={r.name} offline={r.status === "offline"} onRestart={() => setRestarting(r)} onEdit={() => setEditing(r)} onRemove={() => setRemoving(r)} />
                   </td>
                 </tr>
               ))}

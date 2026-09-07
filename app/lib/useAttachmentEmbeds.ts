@@ -57,19 +57,18 @@ export function useAttachmentEmbeds({ slug, documentType, documentId }: Attachme
   }, []);
 
   const processFiles = async (view: EditorView, files: File[], dropPos: number | null) => {
+    // Uploads run concurrently; the caret-advancing image inserts stay
+    // sequential afterwards so multiple dropped images land in drop order.
+    const uploaded = await Promise.all(
+      files.map(async (file) => ({ file, attachment: await uploadAndCache(file) }))
+    );
     let pos = dropPos;
-    for (const file of files) {
-      if (!isEmbeddableImage(file)) {
-        await uploadAndCache(file);
-        continue;
-      }
-      const attachment = await uploadAndCache(file);
-      if (attachment) {
-        insertImageAt(view, pos, `/api/attachments/${attachment.id}`, file.name);
-        // Inline image occupies one position — advance so multiple dropped
-        // images land in drop order instead of stacking in reverse.
-        pos = (pos ?? view.state.selection.from) + 1;
-      }
+    for (const { file, attachment } of uploaded) {
+      if (!attachment || !isEmbeddableImage(file)) continue;
+      insertImageAt(view, pos, `/api/attachments/${attachment.id}`, file.name);
+      // Inline image occupies one position — advance so multiple dropped
+      // images land in drop order instead of stacking in reverse.
+      pos = (pos ?? view.state.selection.from) + 1;
     }
   };
 

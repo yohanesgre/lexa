@@ -1,6 +1,24 @@
 import { X } from "lucide-react";
 import { cn } from "./ui/cn";
 
+export function TaskNotFoundBody({ message, onClose }: { message: string; onClose: () => void }) {
+  return (
+    <div className="slideover-body flex items-center justify-center" style={{ flexDirection: "column", gap: 12 }}>
+      <div className="empty-state-icon">
+        <svg width={24} height={24} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round">
+          <circle cx="12" cy="12" r="10" />
+          <path d="M12 8v4M12 16h.01" />
+        </svg>
+      </div>
+      <div className="empty-state-title">Task not found</div>
+      <div className="empty-state-desc">{message}</div>
+      <button type="button" className="btn btn-primary" style={{ marginTop: 8 }} onClick={onClose}>
+        Close
+      </button>
+    </div>
+  );
+}
+
 export function TaskNotFoundDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
   return (
     <>
@@ -14,19 +32,7 @@ export function TaskNotFoundDialog({ open, onClose }: { open: boolean; onClose: 
       </button>
     </div>
   </div>
-  <div className="slideover-body flex items-center justify-center" style={{ flexDirection: "column", gap: 12 }}>
-    <div className="empty-state-icon">
-      <svg width={24} height={24} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round">
-        <circle cx="12" cy="12" r="10" />
-        <path d="M12 8v4M12 16h.01" />
-      </svg>
-    </div>
-    <div className="empty-state-title">Task not found</div>
-    <div className="empty-state-desc">This task was deleted or the link is stale.</div>
-    <button type="button" className="btn btn-primary" style={{ marginTop: 8 }} onClick={onClose}>
-      Close
-    </button>
-  </div>
+  <TaskNotFoundBody message="This task was deleted or the link is stale." onClose={onClose} />
 </dialog>
     </>
   );

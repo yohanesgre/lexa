@@ -1082,10 +1082,12 @@ export function useSetPassword() {
 }
 
 export function useChangePassword() {
+  const qc = useQueryClient();
   const toast = useToast();
   return useMutation({
     mutationFn: ({ currentPassword, newPassword }: { currentPassword: string; newPassword: string }) => auth.changePassword({ currentPassword, newPassword }),
     onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["session"] });
       toast.push("success", "Password updated");
     },
     onError: (err) => {
@@ -1274,10 +1276,12 @@ export function useRevokeWorkspaceInvite() {
 }
 
 export function useCreateSetPasswordLink() {
+  const qc = useQueryClient();
   const toast = useToast();
   return useMutation({
     mutationFn: (userId: string) => api.createSetPasswordLink(userId),
     onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["users"] });
       toast.push("success", "Set-password link created");
     },
     onError: (err) => {
@@ -2082,11 +2086,15 @@ export function useUpdateHeraldChatMeta(projectId: string | undefined) {
 }
 
 export function useRenameHeraldChat(projectId: string | undefined) {
+  const qc = useQueryClient();
   const meta = useUpdateHeraldChatMeta(projectId);
   const toast = useToast();
   return useMutation({
     mutationFn: ({ chatId, title }: { chatId: string; title: string }) =>
       meta.mutateAsync({ chatId, title }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["herald-chats"] });
+    },
     onError: (err) => toast.push("error", "Rename failed", toastMessage(err)),
   });
 }
@@ -2179,8 +2187,12 @@ export function useTestHeraldSettings(projectId: string) {
 }
 
 export function useFetchHeraldModels(projectId: string) {
+  const qc = useQueryClient();
   return useMutation({
     mutationFn: (input: HeraldSettingsInput) => api.listHeraldModels(projectId, input),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["herald-providers"] });
+    },
   });
 }
 

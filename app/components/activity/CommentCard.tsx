@@ -6,6 +6,7 @@ import type { CSSProperties } from "react";
 import type { TaskComment } from "../../../shared/types";
 import { extractText } from "../../../shared/tiptap-text";
 import { textEditorExtensions } from "../../lib/tiptap";
+import { CommentToolbar } from "./CommentToolbar";
 import { CommentBody } from "./CommentBody";
 import { RobotGlyph } from "./RobotGlyph";
 
@@ -139,24 +140,7 @@ export function CommentCard({ comment, members, currentUser, onDelete, onUpdate 
         </div>
         {editing && editor ? (
           <div className="composer" style={{ marginTop: 6 }}>
-            <div className="composer-toolbar">
-              <button type="button" className="toolbar-btn" title="Bold" aria-label="Bold" onClick={() => editor.chain().focus().toggleBold().run()}>
-                <i className="ph ph-text-b" />
-              </button>
-              <button type="button" className="toolbar-btn" title="Italic" aria-label="Italic" onClick={() => editor.chain().focus().toggleItalic().run()}>
-                <i className="ph ph-text-italic" />
-              </button>
-              <button type="button" className="toolbar-btn" title="Bullet list" aria-label="Bullet list" onClick={() => editor.chain().focus().toggleBulletList().run()}>
-                <i className="ph ph-list-bullets" />
-              </button>
-              <span className="toolbar-sep" role="separator" aria-hidden="true" />
-              <button type="button" className="toolbar-btn" title="Link" aria-label="Link" onClick={() => setEditLink(editor)}>
-                <i className="ph ph-link" />
-              </button>
-              <button type="button" className="toolbar-btn" title="Code block" aria-label="Code block" onClick={() => editor.chain().focus().toggleCodeBlock().run()}>
-                <i className="ph ph-code-block" />
-              </button>
-            </div>
+            <CommentToolbar editor={editor} />
             <EditorContent editor={editor} className="editor-content" />
             <div className="composer-footer">
               <span className="font-micro text-2xs text-lx-text-muted uppercase tracking-[0.04em]">Enter to save · Shift+Enter newline</span>
@@ -176,16 +160,4 @@ export function CommentCard({ comment, members, currentUser, onDelete, onUpdate 
       </div>
     </div>
   );
-}
-
-function setEditLink(editor: NonNullable<ReturnType<typeof useEditor>>) {
-  const previous = editor.getAttributes("link").href as string | undefined;
-  const url = window.prompt("Link URL", previous ?? "");
-  if (url === null) return;
-  if (url.trim() === "") {
-    editor.chain().focus().extendMarkRange("link").unsetLink().run();
-    return;
-  }
-  const href = /^https?:\/\//i.test(url) ? url : `https://${url}`;
-  editor.chain().focus().extendMarkRange("link").setLink({ href }).run();
 }

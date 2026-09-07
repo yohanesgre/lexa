@@ -6,9 +6,10 @@ import type { UseQueryResult } from "@tanstack/react-query";
 import { cn } from "../ui/cn";
 import { parseApiDate } from "../../lib/date";
 import { copyToClipboard } from "../../lib/clipboard";
-import { MarkdownContent } from "../../lib/markdownToReact";
+import { MarkdownContent } from "../MarkdownContent";
 import { useCancelHearthTask, useHearthTask, useHearthTaskHistory, useHearthTaskLogs, useSkills, useProjects, useRuntimes, useSession } from "../../lib/queries";
 import { HearthTaskLogModal } from "./HearthTaskLogModal";
+import { TaskNotFoundBody } from "../TaskNotFoundDialog";
 import { classifyLogLine } from "../../lib/hearth-log-line";
 import type { HearthTask, HearthTaskLog, HearthTaskStatus, Runtime } from "../../../shared/types";
 
@@ -405,19 +406,7 @@ function TaskDetailSlideover({ detail, detailProjectSlug, runtimes, logs, canVie
             </div>
           </>
         ) : (
-          <div className="slideover-body flex items-center justify-center" style={{ flexDirection: "column", gap: 12 }}>
-            <div className="empty-state-icon">
-              <svg width={24} height={24} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round">
-                <circle cx="12" cy="12" r="10" />
-                <path d="M12 8v4M12 16h.01" />
-              </svg>
-            </div>
-            <div className="empty-state-title">Task not found</div>
-            <div className="empty-state-desc">This Hearth task was deleted or is no longer visible.</div>
-            <button type="button" className="btn btn-primary" style={{ marginTop: 8 }} onClick={onClose}>
-              Close
-            </button>
-          </div>
+          <TaskNotFoundBody message="This Hearth task was deleted or is no longer visible." onClose={onClose} />
         )}
       </dialog>
     </>

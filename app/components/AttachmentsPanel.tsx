@@ -79,11 +79,11 @@ function KebabIcon() {
   );
 }
 
-export function isInlinePreviewable(mimeType: string): boolean {
+function isInlinePreviewable(mimeType: string): boolean {
   return mimeType.startsWith("image/") || mimeType === "application/pdf";
 }
 
-export function formatAttachmentSize(bytes: number): string {
+function formatAttachmentSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${Math.max(1, Math.round(bytes / 1024))} KB`;
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
@@ -135,8 +135,8 @@ export function AttachmentsPanel({ slug, taskId }: AttachmentsPanelProps) {
   const rows = attachments ?? [];
   const totalBytes = rows.reduce((sum, a) => sum + a.sizeBytes, 0);
   const displayRows = useMemo<Array<Attachment & { date: string }>>(
-    () => rows.map((a) => ({ ...a, date: formatAttachmentDate(a.createdAt) })),
-    [rows],
+    () => (attachments ?? []).map((a) => ({ ...a, date: formatAttachmentDate(a.createdAt) })),
+    [attachments],
   );
 
   return (

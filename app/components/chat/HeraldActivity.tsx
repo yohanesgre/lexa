@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useRef, useState, type ReactNode } from "react";
-import { MarkdownContent } from "../../lib/markdownToReact";
+import { MarkdownContent } from "../MarkdownContent";
 import type { HeraldTimelineItem, HeraldToolChip } from "../../lib/use-herald-stream";
 
 // Chronological reply timeline inside the assistant bubble

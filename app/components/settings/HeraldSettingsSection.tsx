@@ -67,6 +67,10 @@ export function HeraldProviderSection({ project }: { project: Project }) {
   const fetchModels = useFetchHeraldModels(project.id);
 
   const [form, setForm] = useState<ProviderFormState>(EMPTY_PROVIDER_FORM);
+  const setFormRef = useRef(setForm);
+  useEffect(() => {
+    setFormRef.current = setForm;
+  });
   const patchForm = (patch: Partial<ProviderFormState>) => setForm((prev) => ({ ...prev, ...patch }));
   const [modelsOpen, setModelsOpen] = useState(false);
   const [modelFilter, setModelFilter] = useState("");
@@ -80,7 +84,7 @@ export function HeraldProviderSection({ project }: { project: Project }) {
   useEffect(() => {
     if (settings && hydratedRef.current !== project.id) {
       hydratedRef.current = project.id;
-      setForm((prev) => ({
+      setFormRef.current((prev) => ({
         ...prev,
         ...(settings.kind ? { kind: settings.kind } : {}),
         ...(settings.baseUrl ? { baseUrl: settings.baseUrl } : {}),

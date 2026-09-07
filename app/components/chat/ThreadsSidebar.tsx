@@ -63,7 +63,7 @@ function DeleteIcon() {
 
 // Client-side match highlighting over the server-returned snippet:
 // case-insensitive occurrences of q get <mark>. No query → plain text.
-export function highlightSnippet(snippet: string, q: string): { text: string; mark: boolean; bold: boolean }[] {
+function highlightSnippet(snippet: string, q: string): { text: string; mark: boolean; bold: boolean }[] {
   const needle = q.trim().toLowerCase();
   if (!needle) return [{ text: snippet, mark: false, bold: false }];
   const out: { text: string; mark: boolean; bold: boolean }[] = [];
@@ -173,23 +173,23 @@ export function ThreadsSidebar({
       );
     }
     return (
-      <div
-        key={thread.chatId}
-        role="button"
-        tabIndex={0}
-        className={`thread-row ${isActive ? "active" : ""}`}
-        onClick={() => {
-          onSelect(thread.chatId);
-          if (isMobileViewport()) onClose?.();
-        }}
-        onKeyDown={(e) => {
-          if (e.key === "Enter" || e.key === " " || e.key === "Spacebar") {
-            if (e.key === " ") e.preventDefault();
+      <div key={thread.chatId} className={`thread-row ${isActive ? "active" : ""}`}>
+        <div
+          className="thread-row-main"
+          role="button"
+          tabIndex={0}
+          onClick={() => {
             onSelect(thread.chatId);
             if (isMobileViewport()) onClose?.();
-          }
-        }}
-      >
+          }}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" || e.key === " " || e.key === "Spacebar") {
+              if (e.key === " ") e.preventDefault();
+              onSelect(thread.chatId);
+              if (isMobileViewport()) onClose?.();
+            }
+          }}
+        >
         {thread.pinned && (
           <span className="thread-pin" title="Pinned">
             <PinIcon />
@@ -207,6 +207,7 @@ export function ThreadsSidebar({
             </div>
           )}
           <div className="thread-meta">{isActive ? "Active now" : formatRelative(thread.updatedAt)}</div>
+        </div>
         </div>
         <div className="thread-row-actions" onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
           <button type="button" className="icon-btn" title={thread.pinned ? "Unpin" : "Pin"} aria-label={thread.pinned ? `Unpin ${title}` : `Pin ${title}`} onClick={() => void onPinToggle(thread.chatId, !thread.pinned)}>

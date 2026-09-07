@@ -6458,6 +6458,14 @@
   gap: 8px;
   padding: 7px 8px;
   border-radius: 6px;
+}
+.thread-row-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border-radius: 6px;
   cursor: pointer;
 }
 .thread-row:hover {
@@ -6498,7 +6506,7 @@
 .thread-row:focus-within .thread-row-actions {
   opacity: 1;
 }
-.thread-row:focus-visible {
+.thread-row-main:focus-visible {
   outline: none;
   box-shadow: var(--lx-focus-ring);
 }

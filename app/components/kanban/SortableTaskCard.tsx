@@ -113,15 +113,28 @@ export function SortableTaskCard({
     data: { type: "card", columnId: task.columnId, swimlaneId: task.swimlaneId },
     disabled: archived,
   });
+  const { role: _dndRole, tabIndex: _dndTabIndex, ...sortableA11y } = attributes;
   return (
-    <div
+    <button
+      type="button"
       ref={setNodeRef}
-      style={{ transform: CSS.Transform.toString(transform), transition }}
+      style={{
+        transform: CSS.Transform.toString(transform),
+        transition,
+        appearance: "none",
+        background: "none",
+        border: "none",
+        padding: 0,
+        margin: 0,
+        width: "100%",
+        display: "block",
+        font: "inherit",
+        color: "inherit",
+        textAlign: "inherit",
+      }}
       className={cn(isDragging && "drag-source", isShaking && "lx-shake")}
-      {...attributes}
+      {...sortableA11y}
       {...listeners}
-      role="button"
-      tabIndex={0}
       aria-label={`Open task ${task.title}`}
       onClick={(e) => {
         if (!isDragging && !archived) { e.stopPropagation(); onSelect?.(task); }
@@ -146,6 +159,6 @@ export function SortableTaskCard({
         className={cn(isNew && "card-enter")}
         action={<CardMenu archived={archived} taskId={task.id} onArchive={onArchive} onRestore={onRestore} onDelete={onDelete} />}
       />
-    </div>
+    </button>
   );
 }

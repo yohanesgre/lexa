@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useHeraldProviders, useHeraldProjectSettings, useSaveHeraldProjectSettings } from "../../lib/queries/herald-admin";
 import { useHeraldSettings } from "../../lib/queries";
 import { useToast } from "../ui/Toast";
+import { WarningNotice } from "../ui/NoticeWarning";
 import type { HeraldProviderModel } from "../../../shared/herald";
 import type { Project } from "../../../shared/types";
 
@@ -23,6 +24,7 @@ export function HeraldProjectProviderSection({ project }: { project: Project }) 
   const [modelId, setModelId] = useState<string>("");
   const [fallbacks, setFallbacks] = useState<string[]>([]);
   const hydratedRef = useRef(false);
+  const testInFlightRef = useRef(false);
   const [testState, setTestState] = useState<"idle" | "pending" | "ok" | "fail">("idle");
 
   // Hydrate once from the fetched settings, then settle defaults — one
@@ -86,16 +88,20 @@ export function HeraldProjectProviderSection({ project }: { project: Project }) 
     if (fallbackKeySet.has(m.modelId)) return false;
     return true;
   });
-  const fallbackRows = fallbacks
-    .map((fid) => {
-      if (fid.includes(":")) {
-        const [fidProvider, ...rest] = fid.split(":");
-        const fidModel = rest.join(":");
-        return allEnabledAcrossProviders.find((m) => m.providerId === fidProvider && m.modelId === fidModel);
-      }
-      return allEnabledAcrossProviders.find((m) => m.modelId === fid);
-    })
-    .filter(Boolean) as Array<HeraldProviderModel & { providerLabel: string; providerId: string }>;
+  const fallbackByModel = new Map<string, HeraldProviderModel & { providerLabel: string; providerId: string }>();
+  const fallbackByKey = new Map<string, HeraldProviderModel & { providerLabel: string; providerId: string }>();
+  for (const m of allEnabledAcrossProviders) {
+    if (!fallbackByModel.has(m.modelId)) fallbackByModel.set(m.modelId, m);
+    if (!fallbackByKey.has(`${m.providerId}:${m.modelId}`)) fallbackByKey.set(`${m.providerId}:${m.modelId}`, m);
+  }
+  const fallbackRows: Array<HeraldProviderModel & { providerLabel: string; providerId: string }> = [];
+  for (const fid of fallbacks) {
+    const sep = fid.indexOf(":");
+    const match = sep >= 0
+      ? fallbackByKey.get(`${fid.slice(0, sep)}:${fid.slice(sep + 1)}`)
+      : fallbackByModel.get(fid);
+    if (match) fallbackRows.push(match);
+  }
 
   const [addFallbackId, setAddFallbackId] = useState<string>("");
 
@@ -128,7 +134,8 @@ export function HeraldProjectProviderSection({ project }: { project: Project }) 
   };
 
   const handleTest = async () => {
-    if (testState === "pending") return;
+    if (testInFlightRef.current || testState === "pending") return;
+    testInFlightRef.current = true;
     setTestState("pending");
     try {
       const res = await fetch(`/api/herald/settings/${project.id}/test`, {
@@ -140,15 +147,18 @@ export function HeraldProjectProviderSection({ project }: { project: Project }) 
         const body = (await res.json().catch(() => ({}))) as { error?: { code?: string; message?: string } };
         const code = body.error?.code ?? "PROVIDER_UNREACHABLE";
         const msg = body.error?.message ?? "";
+        testInFlightRef.current = false;
         setTestState("idle");
         toast.push("error", code, msg.slice(0, 500) || "Upstream rejected the key (401). Other outcome: PROVIDER_UNREACHABLE.");
         return;
       }
       const body = (await res.json().catch(() => ({}))) as { latencyMs?: number };
       const latency = body.latencyMs ?? 0;
+      testInFlightRef.current = false;
       setTestState("idle");
       toast.push("success", `Connection OK · ${latency} ms`, "Provider reachable · key valid");
     } catch {
+      testInFlightRef.current = false;
       setTestState("idle");
       toast.push("error", "PROVIDER_UNREACHABLE", "Upstream unreachable");
     }
@@ -178,13 +188,9 @@ export function HeraldProjectProviderSection({ project }: { project: Project }) 
 
       <div className="card-panel card-panel--elevated">
         {notConfigured && (
-          <div className="card-panel mt-0" style={{ background: "var(--lx-bg-warning-subtle)", borderColor: "rgba(240,192,64,0.25)", marginBottom: 16 }}>
-            <div className="flex items-center gap-2">
-              <svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke="var(--lx-text-warning)" strokeWidth={1.5}><circle cx={12} cy={12} r={10} /><path d="M12 8v5" /><path d="M12 16h.01" /></svg>
-              <span className="text-sm font-medium" style={{ color: "var(--lx-text-warning)" }}>PROVIDER_NOT_CONFIGURED</span>
-            </div>
-            <p className="text-xs text-lx-text-secondary mt-1">No provider configured for this project. Save a provider + model to enable Herald. Until then, Generate returns 409 PROVIDER_NOT_CONFIGURED.</p>
-          </div>
+            <WarningNotice className="mt-0" style={{ marginBottom: 16 }} title="PROVIDER_NOT_CONFIGURED">
+              No provider configured for this project. Save a provider + model to enable Herald. Until then, Generate returns 409 PROVIDER_NOT_CONFIGURED.
+            </WarningNotice>
         )}
 
         <div className="field">

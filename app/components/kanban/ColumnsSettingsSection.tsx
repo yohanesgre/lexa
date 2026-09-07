@@ -3,6 +3,7 @@ import { DndContext, type DragEndEvent, type SensorDescriptor, type SensorOption
 import { SortableContext, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { cn } from "../ui/cn";
+import { DragHandleTd } from "./DragHandle";
 import type { Column } from "../../../shared/types";
 
 function SortableRow({ id, className, children }: { id: string; className?: string | undefined; children: React.ReactNode }) {
@@ -70,9 +71,7 @@ export function ColumnsSettingsSection({ columns, sensors, onDragEnd, onEdit, on
                 <tbody>
                   {columns.map((column) => (
                     <SortableRow key={column.id} id={column.id} className="border-b border-lx-border last:border-b-0">
-                      <td className="py-2.5 px-3 whitespace-nowrap">
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="text-lx-text-muted cursor-grab"><circle cx="9" cy="12" r="1" /><circle cx="9" cy="5" r="1" /><circle cx="9" cy="19" r="1" /><circle cx="15" cy="12" r="1" /><circle cx="15" cy="5" r="1" /><circle cx="15" cy="19" r="1" /></svg>
-                      </td>
+                      <DragHandleTd />
                       <td className="py-2.5 px-3 text-sm font-medium text-lx-text-primary">{column.name}</td>
                       <td className="py-2.5 px-3"><ColorSwatch color={column.color} /></td>
                       <td className="py-2.5 px-3"><span className="font-mono text-2xs text-lx-text-secondary">{formatWipLimit(column.wipLimit)}</span></td>

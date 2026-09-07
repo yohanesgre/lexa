@@ -3,6 +3,7 @@ import { useState } from "react";
 import { useSession, useSignIn } from "../lib/queries";
 import { Field } from "../components/ui/Field";
 import { TextInput } from "../components/ui/TextInput";
+import { NoticeDanger } from "../components/ui/NoticeDanger";
 
 export const Route = createFileRoute("/login")({
   validateSearch: (search: Record<string, unknown>): { redirect?: string | undefined } => ({
@@ -53,10 +54,7 @@ function LoginPage() {
 
         <form onSubmit={handleSubmit} className="card-panel" style={{ boxShadow: "var(--lx-shadow-sm)" }}>
           {error && (
-            <div className="notice notice-danger mb-4">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5}><circle cx="12" cy="12" r="10" /><line x1="12" y1="8" x2="12" y2="12" /><line x1="12" y1="16" x2="12.01" y2="16" /></svg>
-              <span>Invalid email or password.</span>
-            </div>
+            <NoticeDanger>Invalid email or password.</NoticeDanger>
           )}
 
           <Field label="Email" htmlFor="login-email" className="field mb-3">

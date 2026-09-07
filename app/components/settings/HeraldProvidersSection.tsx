@@ -6,6 +6,7 @@ import { SortableContext, useSortable, verticalListSortingStrategy, arrayMove } 
 import { CSS } from "@dnd-kit/utilities";
 import { useHeraldProviders, useCreateProvider, useUpdateProvider, useDeleteProvider, useTestProvider, useFetchModels, useUpdateProviderModel, useReorderProviderModels } from "../../lib/queries/herald-admin";
 import type { HeraldProvider, HeraldProviderModel } from "../../../shared/herald";
+import { WarningNotice } from "../ui/NoticeWarning";
 
 function normalizeBaseUrl(u: string): string {
   return u.trim();
@@ -175,24 +176,24 @@ export function HeraldProvidersSection() {
         <h3 className="font-display text-base font-medium text-lx-text-primary mb-3">{editingId ? "Edit provider" : "Add provider"}</h3>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
           <div className="field" style={{ marginBottom: 0 }}>
-            <label className="field-label">Label</label>
-            <input className="prop-input w-full" placeholder="OpenRouter" value={label} onChange={(e) => setLabel(e.target.value)} />
+            <label className="field-label" htmlFor="provider-label">Label</label>
+            <input id="provider-label" className="prop-input w-full" placeholder="OpenRouter" value={label} onChange={(e) => setLabel(e.target.value)} />
           </div>
           <div className="field" style={{ marginBottom: 0 }}>
-            <label className="field-label">Base URL</label>
-            <input className="prop-input w-full font-mono" placeholder="https://openrouter.ai/api/v1" value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} />
+            <label className="field-label" htmlFor="provider-base-url">Base URL</label>
+            <input id="provider-base-url" className="prop-input w-full font-mono" placeholder="https://openrouter.ai/api/v1" value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} />
           </div>
         </div>
         <div className="field mt-3" style={{ marginBottom: 0 }}>
           <div className="flex items-center gap-2" style={{ marginBottom: 6 }}>
-            <label className="field-label" style={{ marginBottom: 0 }}>API key</label>
+            <label className="field-label" style={{ marginBottom: 0 }} htmlFor="provider-api-key">API key</label>
             {editing?.hasKey && (
               <span className="chip font-micro text-2xs" style={{ display: "inline-flex", alignItems: "center", gap: 5, height: 20, padding: "0 8px", background: "var(--lx-bg-accent-subtle)", color: "var(--lx-text-link)" }}>
                 Saved · <span className="font-mono">{editing.keyMask ?? "sk-…8f3a"}</span>
               </span>
             )}
           </div>
-          <input className="prop-input w-full font-mono" type="password" placeholder={editing?.hasKey ? `Type to replace ${editing.keyMask ?? "sk-…8f3a"}` : "sk-…"} value={apiKey} onChange={(e) => setApiKey(e.target.value)} style={{ maxWidth: 480 }} />
+          <input id="provider-api-key" className="prop-input w-full font-mono" type="password" placeholder={editing?.hasKey ? `Type to replace ${editing.keyMask ?? "sk-…8f3a"}` : "sk-…"} value={apiKey} onChange={(e) => setApiKey(e.target.value)} style={{ maxWidth: 480 }} />
           <div className="field-hint">Empty keeps the stored key. Typing replaces it on Save — write-only, never read back.</div>
         </div>
         <div className="flex items-center gap-2 mt-3">
@@ -204,13 +205,9 @@ export function HeraldProvidersSection() {
       </div>
 
       {providers.length === 0 && (
-        <div className="card-panel mt-4" style={{ background: "var(--lx-bg-warning-subtle)", borderColor: "rgba(240,192,64,0.25)" }}>
-          <div className="flex items-center gap-2">
-            <svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke="var(--lx-text-warning)" strokeWidth={1.5}><circle cx={12} cy={12} r={10} /><path d="M12 8v5" /><path d="M12 16h.01" /></svg>
-            <span className="text-sm font-medium" style={{ color: "var(--lx-text-warning)" }}>No providers yet</span>
-          </div>
-          <p className="text-xs text-lx-text-secondary mt-1">Add a provider above to enable Herald. Projects cannot select a model until at least one provider has enabled models.</p>
-        </div>
+        <WarningNotice className="mt-4" title="No providers yet">
+          Add a provider above to enable Herald. Projects cannot select a model until at least one provider has enabled models.
+        </WarningNotice>
       )}
 
       {deleteConfirm && typeof document !== "undefined" && createPortal(

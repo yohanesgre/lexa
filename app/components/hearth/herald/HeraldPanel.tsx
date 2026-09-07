@@ -112,14 +112,15 @@ export function HeraldPanel({ editor, slug, documentType, documentId, engineSwit
   const streamKey = taskId ? `herald-task:${taskId}` : null;
   const stream = useHeraldStream(streamKey);
 
-  // Enqueue → open the SSE stream exactly once per task id.
+  // Enqueue → open the SSE stream exactly once per task id. `stream` is
+  // recreated per render, so the ref guard (not dep equality) dedupes sends.
   const streamedTaskRef = useRef<string | null>(null);
   useEffect(() => {
     if (taskId && streamedTaskRef.current !== taskId) {
       streamedTaskRef.current = taskId;
       stream.send(`/api/herald/tasks/${taskId}/stream`, {});
     }
-  }, [taskId]);
+  }, [taskId, stream]);
 
   const running = stream.status === "connecting" || stream.status === "streaming";
   const done = stream.status === "done";

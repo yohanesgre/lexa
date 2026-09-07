@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
-import { AlertTriangle, Check, Copy, Key, Plus, RotateCcw, Settings, Trash2, Upload } from "lucide-react";
+import { AlertTriangle, Check, Copy, Key, Plus, Trash2, Upload } from "lucide-react";
+import { RuntimeRowActions } from "./RuntimeRowActions";
 import { useApiKeys, useCreateApiKey, useDeleteApiKey, useRuntimes, useMachines, useRemoveRuntime, useRemoveMachine, useRateLimit, useUpdateRateLimit, useGithubSettings, useUpdateGithubSettings, useClearGithubSettings } from "../../lib/queries";
 import { RuntimeSetupModal } from "../hearth/RuntimeSetupModal";
 import { RuntimeEditModal } from "../hearth/RuntimeEditModal";
@@ -8,6 +9,7 @@ import { copyToClipboard } from "../../lib/clipboard";
 import { formatRelative } from "../../lib/relative-time";
 import { parseApiDate } from "../../lib/date";
 import { Field } from "../ui/Field";
+import { ConfirmDialog } from "../ui/ConfirmDialog";
 import type { Runtime, Machine } from "../../../shared/types";
 
 // Workspace-scope settings sections, extracted from the old monolithic
@@ -108,30 +110,13 @@ function ApiKeyRevealModal({ name, fullKey, onDone }: { name: string; fullKey: s
 
 function DeleteKeyModal({ name, onCancel, onConfirm }: { name: string; onCancel: () => void; onConfirm: () => void }) {
   return (
-    <>
-      <button type="button" className="slideover-overlay" onClick={onCancel} aria-label="Close" />
-      <div className="fixed inset-0 flex items-center justify-center z-50 pointer-events-none">
-        <dialog open className="dialog dialog-enter pointer-events-auto" aria-modal="true" aria-label="Dialog">
-          <h2 className="font-display text-lg font-medium text-lx-text-primary">Delete API key?</h2>
-
-          <p className="text-sm text-lx-text-secondary mt-3 leading-5">
-            This will permanently delete{" "}
-            <span className="chip font-mono text-xs text-lx-text-primary">
-              {name}
-            </span>
-            {" "}— agents and integrations using this key will lose access immediately. This action cannot be undone.
-          </p>
-
-          <div className="flex items-center gap-2 mt-4 justify-end">
-            <button type="button" className="btn btn-ghost" onClick={onCancel}>Cancel</button>
-            <button type="button" className="btn btn-danger-solid" onClick={onConfirm}>
-              <Trash2 size={14} strokeWidth={1.5} />
-              Delete
-            </button>
-          </div>
-        </dialog>
-      </div>
-    </>
+    <ConfirmDialog
+      title="Delete API key?"
+      body={<>This will permanently delete{" "}<span className="chip font-mono text-xs text-lx-text-primary">{name}</span>{" "}— agents and integrations using this key will lose access immediately. This action cannot be undone.</>}
+      confirmLabel="Delete"
+      onCancel={onCancel}
+      onConfirm={onConfirm}
+    />
   );
 }
 
@@ -701,7 +686,7 @@ export function MachinesRuntimesSection({ showTeamColumn = false }: { showTeamCo
                       </td>
                     )}
                     <td><span className="flex items-center gap-2"><span className={r.status === "online" ? "sync-dot sync-synced" : "sync-dot sync-unlinked"} /><span className={`font-micro text-2xs uppercase tracking-[0.04em] ${r.status === "online" ? "text-lx-text-success" : "text-lx-text-muted"}`}>{r.status === "online" ? "Online" : "Offline"}</span></span>{r.lastError && <span className="block text-xs mt-1" style={{ color: "var(--lx-text-warning)" }}>{r.lastError.toLowerCase().includes("api key") ? "API key revoked — re-run Setup runtime" : r.lastError}</span>}</td>
-                    <td style={{ textAlign: "right", whiteSpace: "nowrap" }}>{r.status === "offline" && <button type="button" className="btn btn-ghost" style={{ width: 28, height: 28, padding: 0 }} onClick={() => setRestarting(r)} aria-label={`Restart ${r.name}`} title="Restart guide"><RotateCcw size={14} strokeWidth={1.5} /></button>}<button type="button" className="btn btn-ghost" style={{ width: 28, height: 28, padding: 0 }} onClick={() => setEditing(r)} aria-label={`Edit ${r.name}`} title="Edit runtime"><Settings size={14} strokeWidth={1.5} /></button><button type="button" className="btn btn-danger" style={{ width: 28, height: 28, padding: 0 }} onClick={() => setRemoving(r)} aria-label={`Remove ${r.name}`} title="Remove runtime"><Trash2 size={14} strokeWidth={1.5} /></button></td>
+                    <td style={{ textAlign: "right", whiteSpace: "nowrap" }}><RuntimeRowActions name={r.name} offline={r.status === "offline"} onRestart={() => setRestarting(r)} onEdit={() => setEditing(r)} onRemove={() => setRemoving(r)} /></td>
                   </tr>
                 );
               })}
