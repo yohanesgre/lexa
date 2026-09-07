@@ -1,6 +1,7 @@
 import { createFileRoute, Navigate, useNavigate } from "@tanstack/react-router";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useSession, useSignIn } from "../lib/queries";
+import { getSetupStatus } from "../lib/api";
 import { Field } from "../components/ui/Field";
 import { TextInput } from "../components/ui/TextInput";
 import { NoticeDanger } from "../components/ui/NoticeDanger";
@@ -21,6 +22,22 @@ function LoginPage() {
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Unconfigured instance — there is no superadmin to sign in as; the
+  // wizard is the only entry point. Direct fetch (same reasoning as the
+  // root guard: no query-cache interaction). Configured instances keep
+  // the login form.
+  useEffect(() => {
+    if (isLoading || session?.user) return;
+    let alive = true;
+    void getSetupStatus().then((status) => {
+      if (!alive || status.configured) return;
+      void navigate({ to: "/setup", replace: true });
+    });
+    return () => {
+      alive = false;
+    };
+  }, [isLoading, session?.user, navigate]);
 
   // Fresh sign-in completes → always land on home. Simpler and reliable:
   // avoids dynamic-path navigation entirely (the ?redirect= param stays in
