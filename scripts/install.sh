@@ -93,10 +93,12 @@ deploy_docker() {
   mkdir -p "${DEPLOY_DIR}"
   cd "${DEPLOY_DIR}"
   [ -n "${API_KEY}" ] || API_KEY=$(gen_api_key)
+  local public_url="${PUBLIC_URL:-http://127.0.0.1:${PORT}}"
   write_env_file ".env" \
     "LXK_API_KEY=${API_KEY}" \
     "LXK_ENV=${FLAVOR}" \
-    "LXK_PUBLIC_URL=${PUBLIC_URL:-http://127.0.0.1:${PORT}}"
+    "LXK_PUBLIC_URL=${public_url}" \
+    "LXK_TRUSTED_ORIGINS=${public_url}"
   # Local docker deploy = direct semantics (host port mapping, no tunnel) —
   # the wizard URL must be reachable on the host. Flavor still sets LXK_ENV.
   [ -n "${IMAGE_TAG}" ] || { [ "${FLAVOR}" = "staging" ] && IMAGE_TAG="staging"; }
@@ -129,7 +131,8 @@ deploy_bare() {
       "LXK_API_KEY=${API_KEY}" \
       "LXK_ENV=${FLAVOR}" \
       "PORT=${BARE_PORT}" \
-      "LXK_PUBLIC_URL=${PUBLIC_URL:-http://localhost:${BARE_PORT}}"
+      "LXK_PUBLIC_URL=${PUBLIC_URL:-http://localhost:${BARE_PORT}}" \
+      "LXK_TRUSTED_ORIGINS=${PUBLIC_URL:-http://localhost:${BARE_PORT}}"
   fi
   step "write start script" write_start_script "${INSTALL_DIR}"
   if [ "${SYSTEMD}" = "1" ]; then
