@@ -7,6 +7,16 @@ All notable changes to Lexa are documented here. Format based on
 
 ## [Unreleased]
 
+## [2026.2.2] - 2026-09-08
+
+### Fixed
+
+- **Workers install crashed provisioning R2** — CF's `list buckets` API
+  wraps the array in `result.buckets`; the installer treated it as a bare
+  array and died with `TypeError: .some is not a function` right after D1
+  creation. Also: KV namespaces are now matched by title instead of reusing
+  the account's first namespace
+
 ## [2026.2.1] - 2026-09-08
 
 ### Fixed
