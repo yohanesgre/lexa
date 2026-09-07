@@ -15,7 +15,7 @@
 // Superadmin provisioning is NOT done here — the web /setup wizard owns it
 // (owner decision: free-choice email + password at first install).
 
-import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { closeSync, existsSync, mkdirSync, openSync, readFileSync, readdirSync, readSync, rmSync, statSync, writeFileSync, writeSync } from "node:fs";
 import { join, dirname, basename } from "node:path";
 import { spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
@@ -115,13 +115,30 @@ if (CUSTOM_DOMAIN) {
 }
 
 // ── CF: D1 / R2 / KV (find-or-create) ──
+// Interactive confirmations read /dev/tty, never stdin: under curl|bash the
+// installer's stdin is the piped script (EOF), so prompt() would return
+// instantly and auto-pick the default. Returns "" when no terminal is
+// reachable — callers must treat that as the safe (non-destructive) answer.
+function ttyPrompt(question: string): string {
+  try {
+    const tty = openSync("/dev/tty", "r+");
+    writeSync(tty, `\n${question} `);
+    const buf = Buffer.alloc(256);
+    const n = readSync(tty, buf, 0, buf.length);
+    closeSync(tty);
+    return buf.subarray(0, n).toString().trim();
+  } catch {
+    return "";
+  }
+}
+
 async function ensureD1(): Promise<string> {
   const listed = await cfJson<Array<{ id: string; name: string }>>(`list D1 ${FLAVOR.d1Name}`, `/accounts/${account}/d1/database?name=${FLAVOR.d1Name}`);
   if (listed.length > 0) {
     let drop = RESET_DB;
     if (!drop && process.stdout.isTTY) {
-      const answer = prompt(`  D1 '${FLAVOR.d1Name}' already exists — drop it and start fresh? All data in it is lost [y/N]`) ?? "";
-      drop = /^y(es)?$/i.test(answer.trim());
+      const answer = ttyPrompt(`D1 '${FLAVOR.d1Name}' already exists — drop it and start fresh? All data in it is lost [y/N]`);
+      drop = /^y(es)?$/i.test(answer);
     }
     if (drop) {
       for (const db of listed) {
