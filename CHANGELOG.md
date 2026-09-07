@@ -7,6 +7,23 @@ All notable changes to Lexa are documented here. Format based on
 
 ## [Unreleased]
 
+## [2026.2.4] - 2026-09-08
+
+### Added
+
+- **Workers `--reset-db`** — drops the existing D1 database (matching the
+  flavor name) and applies migrations fresh; interactive runs are prompted
+  (y/N, default keep) when an existing database is detected, headless runs
+  require the explicit flag (#30)
+
+### Fixed
+
+- **Workers deploy: `wrangler` spawned via `bunx`, which no longer exists**
+  — recent bun removed the `bunx` shim; `spawnSync("bunx", …)` failed with
+  ENOENT, surfacing as `D1 journal init failed (status 1)` with empty
+  pipes and zero clue. Wrangler now runs via `bun x` and spawn errors land
+  in the stderr tail (#29)
+
 ## [2026.2.3] - 2026-09-08
 
 ### Fixed
