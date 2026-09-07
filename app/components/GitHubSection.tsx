@@ -4,6 +4,9 @@ import { cn } from "./ui/cn";
 import { X } from "lucide-react";
 import { GithubMark, LinkIcon } from "./icons";
 import { useProjectRepos, useGithubIssueSearch, useLinkExistingIssue } from "../lib/queries";
+import { GitHubCreateConfirmDialog } from "./github/GitHubCreateConfirmDialog";
+import { GitHubUnlinkDialog } from "./github/GitHubUnlinkDialog";
+import { GitHubEmptyState } from "./github/GitHubEmptyState";
 
 interface GitHubSectionProps {
   taskId: string;
@@ -368,27 +371,7 @@ export function GitHubSection({ taskId, slug, githubs, columnGithubState, onLink
       )}
 
       {githubs.length === 0 && !flowOpen && (
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <GithubMark size={14} className="text-lx-text-muted" />
-            <span className="text-sm text-lx-text-muted font-body">No issue linked</span>
-          </div>
-          <div className="flex items-center gap-2">
-            <span className="sync-dot sync-unlinked" />
-            <span className="font-micro text-2xs uppercase tracking-[0.04em] text-lx-text-muted">
-              Unlinked
-            </span>
-          </div>
-        </div>
-      )}
-
-      {githubs.length === 0 && !flowOpen && (
-        <div className="mt-3">
-          <button type="button" className="btn btn-ghost" onClick={() => openFlow("link")}>
-            <LinkIcon size={14} />
-            Link issue
-          </button>
-        </div>
+        <GitHubEmptyState onOpenFlow={() => openFlow("link")} />
       )}
 
       {flowOpen &&
@@ -428,58 +411,21 @@ export function GitHubSection({ taskId, slug, githubs, columnGithubState, onLink
         ))}
 
       {confirmCreate && (
-        <>
-          <button type="button" className="dialog-overlay" onClick={() => setConfirmCreate(false)} aria-label="Close" />
-          <div className="fixed inset-0 flex items-center justify-center z-[70] pointer-events-none">
-            <dialog open className="dialog dialog-enter" aria-modal="true" aria-labelledby="gh-create-title">
-              {columnGithubState === "closed" ? (
-                <>
-                  <h2 id="gh-create-title" className="font-display text-lg font-medium text-lx-text-primary">Create issue in a closed column?</h2>
-                  <p className="text-sm text-lx-text-secondary mt-3 leading-5" style={{ maxWidth: 360 }}>
-                    This task's column maps to <span className="font-mono text-xs">closed</span>. The new issue will start <span className="font-mono text-xs">open</span> and show out of sync until the task is moved to the mapped column.
-                  </p>
-                  <div className="flex items-center gap-2 mt-4 justify-end">
-                    <button type="button" className="btn btn-ghost" onClick={() => setConfirmCreate(false)}>Cancel</button>
-                    <button type="button" className="btn btn-primary" onClick={() => void handleCreateConfirm()} disabled={creating}>
-                      {creating ? "Creating..." : "Create issue anyway"}
-                    </button>
-                  </div>
-                </>
-              ) : (
-                <>
-                  <h2 id="gh-create-title" className="font-display text-lg font-medium text-lx-text-primary">Create GitHub issue in <span className="font-mono text-sm">{selectedRepo}</span> from this task?</h2>
-                  <p className="text-sm text-lx-text-secondary mt-3 leading-5" style={{ maxWidth: 360 }}>
-                    Creates a GitHub issue from this task and links it. Title + description are seeded from the task.
-                  </p>
-                  <div className="flex items-center gap-2 mt-4 justify-end">
-                    <button type="button" className="btn btn-ghost" onClick={() => setConfirmCreate(false)}>Cancel</button>
-                    <button type="button" className="btn btn-primary" onClick={() => void handleCreateConfirm()} disabled={creating}>
-                      {creating ? "Creating..." : "Create issue"}
-                    </button>
-                  </div>
-                </>
-              )}
-            </dialog>
-          </div>
-        </>
+        <GitHubCreateConfirmDialog
+          columnGithubState={columnGithubState}
+          selectedRepo={selectedRepo}
+          creating={creating}
+          onCreate={() => void handleCreateConfirm()}
+          onCancel={() => setConfirmCreate(false)}
+        />
       )}
 
       {confirmUnlink && (
-        <>
-          <button type="button" className="dialog-overlay" onClick={() => setConfirmUnlink(null)} aria-label="Close" />
-          <div className="fixed inset-0 flex items-center justify-center z-[70] pointer-events-none">
-            <dialog open className="dialog dialog-enter" aria-modal="true" aria-labelledby="gh-unlink-title">
-              <h2 id="gh-unlink-title" className="font-display text-lg font-medium text-lx-text-primary">Unlink issue?</h2>
-              <p className="text-sm text-lx-text-secondary mt-3 leading-5" style={{ maxWidth: 360 }}>
-                Unlink <span className="font-mono text-xs">{confirmUnlink.repo} #{confirmUnlink.issueNumber}</span> from this task? The GitHub issue stays open; only the link is removed.
-              </p>
-              <div className="flex items-center gap-2 mt-4 justify-end">
-                <button type="button" className="btn btn-ghost" onClick={() => setConfirmUnlink(null)}>Cancel</button>
-                <button type="button" className="btn btn-danger-solid" onClick={() => void handleUnlinkConfirm()}>Unlink</button>
-              </div>
-            </dialog>
-          </div>
-        </>
+        <GitHubUnlinkDialog
+          issue={confirmUnlink}
+          onConfirm={() => void handleUnlinkConfirm()}
+          onCancel={() => setConfirmUnlink(null)}
+        />
       )}
     </div>
   );

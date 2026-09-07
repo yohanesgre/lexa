@@ -1,6 +1,8 @@
 import type { Editor } from "@tiptap/core";
 import { markdownToDoc, docToMarkdown } from "../../../../shared/markdown";
-import type { Attachment, TipTapDoc } from "../../../../shared/types";
+import type { Attachment, LexaAgent, LexaSkill, TipTapDoc } from "../../../../shared/types";
+import { ENGINE_AGENT_IDS } from "../../../lib/use-hearth-engine";
+import type { HeraldSettingsMasked } from "../../../../shared/herald";
 
 // Embedded /api/attachments/<uuid> image nodes in the open document are the
 // only image source for a Herald run (herald-popover.html State 1/5) — same
@@ -32,6 +34,58 @@ export function pickAttachmentRows(
   wikiRows: Attachment[] | undefined
 ): Attachment[] | undefined {
   return documentType === "task" ? taskRows : wikiRows;
+}
+
+// Each attachment query only targets rows of its own document type — the
+// other call gets an empty id (hook treats "" as disabled).
+export function attachmentQueryId(documentType: "task" | "wiki", wanted: "task" | "wiki", documentId: string): string {
+  return documentType === wanted ? documentId : "";
+}
+
+// The persona is the project's configured Herald Agent — its junction rows
+// are the only skills the panel offers. An unpicked/out-of-junction id
+// falls back to the agent's first skill.
+export function pickHeraldSkill(
+  agents: LexaAgent[],
+  skills: LexaSkill[],
+  skillId: string
+): { agentSkills: LexaSkill[]; effectiveSkillId: string; skillName: string } {
+  const heraldSkillIds = new Set(agents.find((a) => a.id === ENGINE_AGENT_IDS.herald)?.skillIds ?? []);
+  const agentSkills = skills.filter((s) => heraldSkillIds.has(s.id));
+  const effectiveSkillId = heraldSkillIds.has(skillId) ? skillId : (agentSkills[0]?.id ?? "");
+  return { agentSkills, effectiveSkillId, skillName: agentSkills.find((s) => s.id === effectiveSkillId)?.name ?? "Herald" };
+}
+
+export function buildRunRequest(args: {
+  slug: string;
+  documentType: "task" | "wiki";
+  documentId: string;
+  prompt: string;
+  skillId: string;
+  selection: string;
+  docImages: Attachment[];
+}) {
+  return {
+    slug: args.slug,
+    documentType: args.documentType,
+    documentId: args.documentId,
+    prompt: args.prompt.trim(),
+    agentId: ENGINE_AGENT_IDS.herald,
+    skillId: args.skillId,
+    ...(args.selection.trim() ? { selection: args.selection } : {}),
+    // Attachment rows expose sha256 but not storage_key; Lexa/Storage keys
+    // are deterministic (storageKeyFor → blobs/<sha256>) so the ref is
+    // rebuilt here until the API exposes storage_key directly.
+    ...(args.docImages.length
+      ? {
+          attachments: args.docImages.map((a) => ({
+            storageKey: `blobs/${a.sha256}`,
+            mimeType: a.mimeType,
+            name: a.filename,
+          })),
+        }
+      : {}),
+  };
 }
 
 export function toDocImages(
@@ -85,4 +139,30 @@ export function resolveRunSelection(
 export function insertMarkdown(editor: Editor, text: string): void {
   const doc = markdownToDoc(text);
   editor.chain().focus().insertContent(doc.content ?? []).run();
+}
+
+export function monoBox(maxHeight: number): React.CSSProperties {
+  return {
+    background: "var(--lx-surface-input)",
+    border: "1px solid var(--lx-border-default)",
+    borderRadius: 6,
+    padding: "10px 12px",
+    fontFamily: "var(--lx-font-mono)",
+    fontSize: 11,
+    lineHeight: "18px",
+    color: "var(--lx-text-secondary)",
+    maxHeight,
+    overflowY: "auto",
+    whiteSpace: "pre-wrap",
+  };
+}
+
+export function providerLine(settings: HeraldSettingsMasked | null | undefined): string {
+  let host = "";
+  try {
+    if (settings?.baseUrl) host = `${new URL(settings.baseUrl).host} · `;
+  } catch {
+    host = "";
+  }
+  return `${host}herald · ${settings?.kind ?? ""}`;
 }

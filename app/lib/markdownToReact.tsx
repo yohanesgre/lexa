@@ -184,6 +184,10 @@ function createElementFor(tag: "h1" | "h2" | "h3" | "h4", key: string, children:
   return <h4 key={key}>{children}</h4>;
 }
 
+export function lexMarkdown(md: string) {
+  return marked.lexer(md);
+}
+
 export function markdownToReact(md: string, opts: MarkdownRenderOptions = {}): ReactNode[] {
   return withKeys(marked.lexer(md), (t) => t.type)
     .map(({ item: t, key }) => renderBlock(t, opts, key))

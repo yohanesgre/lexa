@@ -1,7 +1,6 @@
 import { Children, cloneElement, isValidElement, memo, useMemo, useRef, type ReactNode } from "react";
-import { marked } from "marked";
 import { withKeys } from "../lib/withKeys";
-import { BLOCK_TAGS, renderBlock, type MarkdownRenderOptions } from "../lib/markdownToReact";
+import { BLOCK_TAGS, lexMarkdown, renderBlock, type MarkdownRenderOptions } from "../lib/markdownToReact";
 
 interface MarkdownContentProps extends MarkdownRenderOptions {
   md: string;
@@ -39,7 +38,7 @@ export const MarkdownContent = memo(function MarkdownContent({ md, renderText, t
       cachesRef.current.set(renderText, cache);
     }
     const opts = { renderText };
-    const tokens = marked.lexer(md);
+    const tokens = lexMarkdown(md);
     const out: ReactNode[] = [];
     const liveKeys = new Set<string>();
     const lastIdx = tokens.length - 1;

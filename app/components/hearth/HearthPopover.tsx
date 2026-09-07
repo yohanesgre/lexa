@@ -9,7 +9,8 @@ import { TaskStatusPanel } from "./HearthTaskStatusPanel";
 import { BlacksmithForm } from "./HearthBlacksmithForm";
 import { EngineToggle } from "./herald/HeraldModePicker";
 import type { HearthMode } from "./herald/HeraldModePicker";
-import { HeraldPanel, HearthFlameIcon } from "./herald/HeraldPanel";
+import { HeraldPanel } from "./herald/HeraldPanel";
+import { HeraldFlameIcon } from "./herald/HeraldFlameIcon";
 import type { LexaSkill, HearthTask, HearthTaskLog, Runtime } from "../../../shared/types";
 
 // The active engine is the admin-written project default; a member's
@@ -453,7 +454,7 @@ export function HearthPopover({ editor, slug, documentType, documentId, open, on
     <div ref={containerRef} className="menu-popover" data-hearth-popover style={popoverStyle}>
       <div className="flex items-center justify-between" style={{ padding: "10px 12px", borderBottom: "1px solid var(--lx-border-default)" }}>
         <span className="text-sm font-medium text-lx-text-primary font-body" style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
-          <HearthFlameIcon />
+          <HeraldFlameIcon />
           Hearth
         </span>
         <HeaderRight done={done} failed={failed} running={running} switcherEnabled={switcherEnabled} mode={mode} changeMode={changeMode} taskRunning={taskRunning} />

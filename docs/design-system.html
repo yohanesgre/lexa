@@ -6645,7 +6645,10 @@ th { font-weight:500; color: var(--lx-text-secondary); font-size:11px; text-tran
     });
     // Sections rail — highlight the section nearest the top of the viewport
     const navLinks = [...document.querySelectorAll('.ds-nav a')];
-    const sections = navLinks.map((a) => document.querySelector(a.getAttribute('href')));
+    const sections = navLinks.map((a) => {
+      const id = (a.getAttribute('href') || '').slice(1);
+      return id ? document.getElementById(id) : null;
+    });
     const spy = new IntersectionObserver((entries) => {
       entries.forEach((entry) => {
         if (!entry.isIntersecting) return;
