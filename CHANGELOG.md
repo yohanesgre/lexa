@@ -7,6 +7,21 @@ All notable changes to Lexa are documented here. Format based on
 
 ## [Unreleased]
 
+## [2026.2.1] - 2026-09-08
+
+### Fixed
+
+- **Workers/bare deploys failed right after the release download** — the
+  tarball was fetched but never extracted (`unpack_release` existed but was
+  never called), so workers deploy died with `Module not found
+  "scripts/workers-install.ts"`; both targets now unpack into their work dir
+- **Server tarball had no `package.json`/`bun.lock`** — bare deploys could
+  not resolve dependencies even after unpacking; the release tarball now
+  ships both and bare deploy runs a production `bun install`
+- **Bare deploy wrote no `DATABASE_PATH`** — the entry's default is
+  `/app/data/lexa.db` (docker-biased) and failed with `EACCES` on a bare
+  host; the deploy `.env` now points it at `<install-dir>/data/lexa.db`
+
 ## [2026.2.0] - 2026-09-08
 
 ### Added
