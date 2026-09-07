@@ -75,7 +75,7 @@ function SetupWizard() {
 
           {/* Step 1 — API key */}
           {step === 1 && (
-            <SetupStepKey onDone={() => setStep(2)} onBack={() => setStep(0)} />
+            <SetupStepKey hasApiKey={status.hasApiKey} onDone={() => setStep(2)} onBack={() => setStep(0)} />
           )}
 
           {/* Step 2 — Sample data (dev only) */}

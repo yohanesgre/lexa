@@ -2013,16 +2013,11 @@ const setupLive = HttpApiBuilder.group(LexaApi, "setup", (handlers) =>
       respond(Effect.gen(function* () {
         const db = yield* Db;
         const hooks = yield* ApiAuthHooks;
-        const env = yield* currentEnv;
         if (yield* setupAdminLocked(db)) return yield* Effect.fail(new SetupLocked());
-        // Allow-list at provisioning only (Q12): when LXK_ADMIN_EMAILS is set,
-        // only those emails may become superadmin; empty env = bootstrap (first
-        // operator picks freely). Never written back to the setting — env-only.
-        const allowlist = adminEmailsFrom(env).map((s) => s.toLowerCase());
+        // First install is free-choice provisioning: the operator picks the
+        // superadmin email in the wizard (LXK_ADMIN_EMAILS is the CLI
+        // bootstrap default only — it never gates or pre-populates here).
         const email = req.payload.email.trim().toLowerCase();
-        if (allowlist.length > 0 && !allowlist.includes(email)) {
-          return yield* Effect.fail(new Forbidden({ message: "Email is not in the LXK_ADMIN_EMAILS allow-list" }));
-        }
         const existing = yield* queryFirst<{ id: string }>(db, "SELECT id FROM users WHERE email = ?", email).pipe(
           Effect.catchTag("RowNotFound", () => Effect.succeed(null))
         );

@@ -34,3 +34,4 @@ skills-lock.json
 
 # lexa-swarm lane status files (heartbeats, PLAN.md) — ephemeral orchestration state
 status/
+.staging-data/

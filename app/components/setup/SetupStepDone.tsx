@@ -1,8 +1,15 @@
+import { useEffect } from "react";
 import { ArrowRight, Sparkles } from "lucide-react";
+import { completeSetup } from "../../lib/api";
 
 // Final step — confirmation; signing in happens on /login with the session
-// cookie (the wizard only provisions the superadmin account).
+// cookie (the wizard only provisions the superadmin account). Marks the
+// instance complete (setup_complete=1 locks all mutating setup endpoints);
+// a locked instance (env-configured) ignores the failure — boot auto-locks.
 export function SetupStepDone({ onGoToApp }: { onGoToApp: () => void }) {
+  useEffect(() => {
+    void completeSetup().catch(() => {});
+  }, []);
   return (
     <div className="text-center py-4">
       <div className="w-12 h-12 rounded-full bg-lx-surface-selected flex items-center justify-center mx-auto mb-4">

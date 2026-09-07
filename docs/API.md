@@ -517,9 +517,10 @@ GET    /api/setup/status
 POST   /api/setup/admin        body { email*, password* }
 → 200 { ok: true } | 403 SETUP_LOCKED
   Creates the first superadmin account (users.role = 'superadmin') with the
-  given password (Better Auth credential hash). The legacy admin_emails
-  setting is DELETED — the env allow-list (LXK_ADMIN_EMAILS) is the only
-  superadmin source, applied at provisioning only, never edited at runtime.
+  given password (Better Auth credential hash). First install is free-choice
+  provisioning: the operator picks any email in the wizard.
+  LXK_ADMIN_EMAILS is the CLI bootstrap default only — it never gates or
+  pre-populates the wizard. The legacy admin_emails setting is DELETED.
 
 POST   /api/setup/api-key
 → 200 { key: "lxk_..." }

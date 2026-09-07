@@ -61,12 +61,14 @@ describe("provisioning (setup wizard)", () => {
     expect(signIn.user.email).toBe("ops@lexa.dev");
   }, 15000);
 
-  it("rejects an email outside the LXK_ADMIN_EMAILS allow-list", async () => {
+  it("accepts any email at first install — LXK_ADMIN_EMAILS never gates the wizard", async () => {
     process.env.LXK_ADMIN_EMAILS = "ops@lexa.dev";
-    const res = await setAdmin({ email: "intruder@lexa.dev", password: "password123" });
-    expect(res.status).toBe(403);
-    const body = await json(res);
-    expect(body.error.code).toBe("FORBIDDEN");
+    const res = await setAdmin({ email: "other@lexa.dev", password: "password123" });
+    expect(res.status).toBe(200);
+    const db = new Database(dbPath);
+    const user = db.query("SELECT email, role FROM users WHERE email = 'other@lexa.dev'").get() as { email: string; role: string } | null;
+    db.close();
+    expect(user?.role).toBe("superadmin");
   }, 15000);
 
   it("locks once a superadmin account and API key exist", async () => {
