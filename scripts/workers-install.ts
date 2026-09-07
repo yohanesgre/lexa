@@ -133,7 +133,8 @@ function ttyPrompt(question: string): string {
 }
 
 async function ensureD1(): Promise<string> {
-  const listed = await cfJson<Array<{ id: string; name: string }>>(`list D1 ${FLAVOR.d1Name}`, `/accounts/${account}/d1/database?name=${FLAVOR.d1Name}`);
+  // D1 list rows carry `uuid` (not `id`) — the same field create returns.
+  const listed = await cfJson<Array<{ uuid: string; name: string }>>(`list D1 ${FLAVOR.d1Name}`, `/accounts/${account}/d1/database?name=${FLAVOR.d1Name}`);
   if (listed.length > 0) {
     let drop = RESET_DB;
     if (!drop && process.stdout.isTTY) {
@@ -142,12 +143,12 @@ async function ensureD1(): Promise<string> {
     }
     if (drop) {
       for (const db of listed) {
-        await cfJson(`drop D1 ${db.name}`, `/accounts/${account}/d1/database/${db.id}`, { method: "DELETE" });
+        await cfJson(`drop D1 ${db.name}`, `/accounts/${account}/d1/database/${db.uuid}`, { method: "DELETE" });
         console.log(`  ✓ D1 '${db.name}' dropped`);
       }
     } else {
       console.log(`  ✓ D1 '${FLAVOR.d1Name}' exists — reused`);
-      return listed[0]!.id;
+      return listed[0]!.uuid;
     }
   }
   const created = await cfJson<{ uuid: string }>(`create D1 ${FLAVOR.d1Name}`, `/accounts/${account}/d1/database`, {
