@@ -34,6 +34,95 @@ function GithubMark({ size = 12 }: { size?: number }) {
   );
 }
 
+function SubtaskChevron({ collapsed, onToggle }: { collapsed: boolean; onToggle?: (() => void) | undefined }) {
+  return (
+    <button
+        type="button"
+        className="inline-flex items-center justify-center mr-1 text-lx-text-muted cursor-pointer"
+        style={{ width: 16, height: 16, border: "none", background: "none", padding: 0 }}
+        title={collapsed ? "Expand subtasks" : "Collapse subtasks"}
+        aria-label={collapsed ? "Expand subtasks" : "Collapse subtasks"}
+        onClick={(e) => { e.stopPropagation(); onToggle?.(); }}
+      >
+        <svg
+          width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
+          style={{ transform: collapsed ? "rotate(-90deg)" : "none", transition: "transform 100ms" }}
+        >
+          <path d="M9 18l6-6-6-6" />
+        </svg>
+      </button>
+  );
+}
+
+function CardBadgesRow({ typeLabel, typeColor, blockedBy, isLowPriority, prioColor, prioLabel, action }: {
+  typeLabel: string;
+  typeColor: string;
+  blockedBy: string[];
+  isLowPriority: boolean;
+  prioColor: string;
+  prioLabel: string;
+  action: React.ReactNode | undefined;
+}) {
+  return (
+    <div className="flex items-center justify-between">
+      <span
+        className="type-badge"
+        style={{ background: `${typeColor}1a`, color: typeColor }}
+      >
+        {typeLabel}
+      </span>
+      <span className="flex items-center gap-1">
+        {blockedBy.length > 0 && (
+          <span
+            className="sync-dot sync-diverged"
+            title={`Blocked by: ${blockedBy.join(", ")}`}
+            style={{ cursor: "help" }}
+          />
+        )}
+        <span
+          className="priority-dot"
+          style={isLowPriority ? { border: "2px solid #6B6560", background: "transparent" } : { background: prioColor }}
+          title={`${typeLabel} · ${prioLabel}`}
+        />
+        {action}
+      </span>
+    </div>
+  );
+}
+
+function CardAssignees({ assignees }: { assignees: string[] }) {
+  return (
+    <div className="card-assignees">
+      {assignees.slice(0, 3).map((a) => (
+        <div className="avatar" key={a}>{a.slice(0, 2).toUpperCase()}</div>
+      ))}
+      {assignees.length > 3 && <span className="card-assignees-overflow">+{assignees.length - 3}</span>}
+    </div>
+  );
+}
+
+function CardGithubIssues({ githubs, hasOutOfSync }: { githubs: GithubIssue[]; hasOutOfSync: boolean }) {
+  return (
+    <>
+      <div className="card-gh-issues">
+        {githubs.slice(0, 2).map(g => (
+          <span className="github-badge" key={g.issueId}>
+            <GithubMark />
+            #{g.issueNumber}
+          </span>
+        ))}
+        {githubs.length > 2 && <span className="card-gh-overflow">+{githubs.length - 2}</span>}
+      </div>
+      {githubs.length > 0 && (
+        <span
+          className={cn("sync-dot", hasOutOfSync ? "sync-diverged" : "sync-synced")}
+          title={hasOutOfSync ? "Out of sync with GitHub" : "Synced with GitHub"}
+        />
+      )}
+    </>
+  );
+}
+
 export const TaskCard = memo(function TaskCard({ taskKey, title, priority, type, priorities, types, assignees, githubs, dueAt, isDragging = false, dimmed = false, archived = false, isSubtask = false, blockedBy = [], subtaskCount = 0, onToggleSubtasks, subtasksCollapsed = false, action, className }: TaskCardProps) {
   const typeOpt = types.find((t) => t.id === type);
   const prioOpt = priorities.find((p) => p.id === priority);
@@ -47,46 +136,18 @@ export const TaskCard = memo(function TaskCard({ taskKey, title, priority, type,
   return (
     <div className={cn("kanban-card border-l-[3px]", isSubtask && "kanban-card-subtask", isDragging && "state-dragging", dimmed && "opacity-45", archived && "state-archived", className)}
       style={{ borderLeftColor: typeColor }}>
-      <div className="flex items-center justify-between">
-        <span
-          className="type-badge"
-          style={{ background: `${typeColor}1a`, color: typeColor }}
-        >
-          {typeLabel}
-        </span>
-        <span className="flex items-center gap-1">
-          {blockedBy.length > 0 && (
-            <span
-              className="sync-dot sync-diverged"
-              title={`Blocked by: ${blockedBy.join(", ")}`}
-              style={{ cursor: "help" }}
-            />
-          )}
-          <span
-            className="priority-dot"
-            style={isLowPriority ? { border: "2px solid #6B6560", background: "transparent" } : { background: prioColor }}
-            title={`${typeLabel} · ${prioOpt?.label ?? priority}`}
-          />
-          {action}
-        </span>
-      </div>
+      <CardBadgesRow
+        typeLabel={typeLabel}
+        typeColor={typeColor}
+        blockedBy={blockedBy}
+        isLowPriority={isLowPriority}
+        prioColor={prioColor}
+        prioLabel={prioOpt?.label ?? priority}
+        action={action}
+      />
       <div className="card-title mt-2">
         {subtaskCount > 0 && (
-          <button
-            type="button"
-            className="inline-flex items-center justify-center mr-1 text-lx-text-muted cursor-pointer"
-            style={{ width: 16, height: 16, border: "none", background: "none", padding: 0 }}
-            title={subtasksCollapsed ? "Expand subtasks" : "Collapse subtasks"}
-            aria-label={subtasksCollapsed ? "Expand subtasks" : "Collapse subtasks"}
-            onClick={(e) => { e.stopPropagation(); onToggleSubtasks?.(); }}
-          >
-            <svg
-              width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
-              style={{ transform: subtasksCollapsed ? "rotate(-90deg)" : "none", transition: "transform 100ms" }}
-            >
-              <path d="M9 18l6-6-6-6" />
-            </svg>
-          </button>
+          <SubtaskChevron collapsed={subtasksCollapsed} onToggle={onToggleSubtasks} />
         )}
         {taskKey && <span className="task-key">{taskKey}</span>}
         {" "}
@@ -94,31 +155,12 @@ export const TaskCard = memo(function TaskCard({ taskKey, title, priority, type,
         {subtaskCount > 0 && <span className="font-micro text-2xs text-lx-text-muted" style={{ marginLeft: 6 }}>{String(subtaskCount).padStart(2, "0")}</span>}
       </div>
       <div className="card-meta">
-        <div className="card-assignees">
-          {assignees.slice(0, 3).map((a) => (
-            <div className="avatar" key={a}>{a.slice(0, 2).toUpperCase()}</div>
-          ))}
-          {assignees.length > 3 && <span className="card-assignees-overflow">+{assignees.length - 3}</span>}
-        </div>
+        <CardAssignees assignees={assignees} />
         {due && (
           <span className={cn("card-due", due.overdue && "card-due-overdue")}>{due.text}</span>
         )}
         <div className="card-meta-spacer" />
-        <div className="card-gh-issues">
-          {githubs.slice(0, 2).map(g => (
-            <span className="github-badge" key={g.issueId}>
-              <GithubMark />
-              #{g.issueNumber}
-            </span>
-          ))}
-          {githubs.length > 2 && <span className="card-gh-overflow">+{githubs.length - 2}</span>}
-        </div>
-        {githubs.length > 0 && (
-          <span
-            className={cn("sync-dot", hasOutOfSync ? "sync-diverged" : "sync-synced")}
-            title={hasOutOfSync ? "Out of sync with GitHub" : "Synced with GitHub"}
-          />
-        )}
+        <CardGithubIssues githubs={githubs} hasOutOfSync={hasOutOfSync} />
       </div>
     </div>
   );

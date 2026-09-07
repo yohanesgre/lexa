@@ -19,6 +19,243 @@ interface SwimlaneHeaderProps {
   board?: Board;
 }
 
+interface SwimlaneActionsMenuProps {
+  lane: Swimlane;
+  collapsed: boolean;
+  onToggle: (() => void) | undefined;
+  onRename: () => void;
+  onOpenSettings: () => void;
+  onOpenAddColumn: () => void;
+  onRequestDelete: () => void;
+  archiveSwimlane: { mutate: (input: { id: string }) => void };
+  restoreSwimlane: { mutate: (input: { id: string }) => void };
+}
+
+function SwimlaneActionsMenu({ lane, collapsed, onToggle, onRename, onOpenSettings, onOpenAddColumn, onRequestDelete, archiveSwimlane, restoreSwimlane }: SwimlaneActionsMenuProps) {
+  return (
+    <Menu
+      align="right"
+      gap={16}
+      trigger={({ open, toggle }) => (
+        <button
+          type="button"
+          className={cn("icon-btn", open && "active")}
+          onClick={(e) => {
+            e.stopPropagation();
+            toggle();
+          }}
+          title="Swimlane menu"
+        >
+          <MoreHorizontal size={14} />
+        </button>
+      )}
+    >
+      {onToggle && (
+        <button type="button" className="menu-item" onClick={onToggle}>
+          {collapsed ? <ChevronDown size={14} /> : <ChevronUp size={14} />}
+          {collapsed ? "Expand" : "Collapse"}
+        </button>
+      )}
+      <button type="button" className="menu-item" onClick={onOpenSettings}>
+        <Settings size={14} />
+        Settings
+      </button>
+      <div className="menu-separator" />
+      <button type="button" className="menu-item" onClick={onRename}>
+        <Pencil size={14} />
+        Rename
+      </button>
+      <button type="button" className="menu-item" onClick={onOpenAddColumn}>
+        <Plus size={14} />
+        Add column
+      </button>
+      {!lane.archivedAt && lane.kind === "sprint" && (
+        <>
+          <div className="menu-separator" />
+          <button
+            type="button"
+            className="menu-item"
+            onClick={() => archiveSwimlane.mutate({ id: lane.id })}
+          >
+            <Archive size={14} />
+            Archive swimlane
+          </button>
+        </>
+      )}
+      {!!lane.archivedAt && (
+        <>
+          <div className="menu-separator" />
+          <button
+            type="button"
+            className="menu-item"
+            onClick={() => restoreSwimlane.mutate({ id: lane.id })}
+          >
+            <Archive size={14} />
+            Restore swimlane
+          </button>
+        </>
+      )}
+      <div className="menu-separator" />
+      <button type="button" className="menu-item danger" onClick={onRequestDelete}>
+        <Trash2 size={14} />
+        Delete swimlane
+      </button>
+    </Menu>
+  );
+}
+
+function RenameSwimlaneForm({ lane, renameName, setRenameName, onSubmit, onCancel }: {
+  lane: Swimlane;
+  renameName: string;
+  setRenameName: (value: string) => void;
+  onSubmit: () => void;
+  onCancel: () => void;
+}) {
+  return (
+    <form
+      onSubmit={(e) => { e.preventDefault(); onSubmit(); }}
+      className="flex items-center"
+      onClick={(e) => e.stopPropagation()}
+    >
+      <input
+        className="prop-input"
+        aria-label="Rename swimlane"
+        style={{ width: 160, height: 24, fontSize: 13 }}
+        value={renameName}
+        onChange={(e) => setRenameName(e.target.value)}
+        onBlur={onSubmit}
+        autoFocus
+        onKeyDown={(e) => {
+          if (e.key === "Escape") onCancel();
+        }}
+      />
+    </form>
+  );
+}
+
+function DeleteSwimlaneDialog({ lane, onCancel, onConfirm }: { lane: Swimlane; onCancel: () => void; onConfirm: () => void }) {
+  return (
+    <>
+      <button type="button" className="dialog-overlay" onClick={onCancel} aria-label="Close" />
+      <div className="fixed inset-0 flex items-center justify-center z-[80] pointer-events-none">
+        <dialog open className="dialog dialog-enter pointer-events-auto" aria-modal="true" aria-label="Confirm">
+          <h2 className="font-display text-lg font-medium text-lx-text-primary">Delete &lsquo;{lane.name}&rsquo;?</h2>
+          <p className="text-sm text-lx-text-secondary mt-3 leading-5">
+            This will unassign all tasks in this swimlane. This action cannot be undone.
+          </p>
+          <div className="flex items-center gap-2 mt-4 justify-end">
+            <button type="button" className="btn btn-ghost" onClick={onCancel}>Cancel</button>
+            <button type="button" className="btn btn-danger-solid" onClick={onConfirm}>
+              <Trash2 size={14} strokeWidth={1.5} />
+              Delete
+            </button>
+          </div>
+        </dialog>
+      </div>
+    </>
+  );
+}
+
+function SwimlaneDescDialog({ lane, onClose, onEdit }: { lane: Swimlane; onClose: () => void; onEdit: () => void }) {
+  return (
+    <>
+      <button type="button" className="dialog-overlay" onClick={onClose} aria-label="Close" />
+      <div className="fixed inset-0 flex items-center justify-center z-[80] pointer-events-none">
+        <dialog open className="dialog dialog-enter pointer-events-auto" aria-modal="true" aria-label="Confirm" style={{ maxWidth: 440 }}>
+          <h2 className="font-display text-lg font-medium text-lx-text-primary">{lane.name}</h2>
+          <div className="text-sm text-lx-text-secondary font-body leading-5 mt-3">
+            {renderSwimlaneDesc(lane.description)}
+          </div>
+          <div className="flex items-center justify-end gap-2 mt-4">
+            <button type="button" className="btn btn-ghost" onClick={onClose}>Close</button>
+            <button
+              type="button"
+              className="btn btn-ghost"
+              style={{ fontSize: 11, color: "var(--lx-text-link)" }}
+              onClick={onEdit}
+            >
+              Edit in Settings
+            </button>
+          </div>
+        </dialog>
+      </div>
+    </>
+  );
+}
+
+function LaneDates({ lane }: { lane: Swimlane }) {
+  if (lane.kind !== "sprint" || !lane.startAt || !lane.dueAt || lane.archivedAt) return null;
+  return (
+    <span className="lane-dates">
+      <span className="lane-dates-text">
+        {formatShortDate(lane.startAt)} → {formatShortDate(lane.dueAt)}
+      </span>
+      <span className="lane-dates-range" aria-hidden="true">
+        <span className="lane-dates-tick lane-dates-tick-start" />
+        <span className="lane-dates-line" />
+        <span className="lane-dates-tick lane-dates-tick-end" />
+      </span>
+    </span>
+  );
+}
+
+function SprintLaneProgress({ lane, board }: { lane: Swimlane; board: Board | undefined }) {
+  if (lane.kind !== "sprint" || lane.archivedAt || !board) return null;
+  const p = sprintProgress(board, lane.id);
+  return p.total > 0 ? <SprintProgress done={p.done} total={p.total} /> : null;
+}
+
+function SwimlaneMeta({ lane, count, collapsed, board }: { lane: Swimlane; count: number | undefined; collapsed: boolean; board: Board | undefined }) {
+  const due = lane.dueAt ? formatDueLabel(lane.dueAt) : null;
+  return (
+    <>
+      {count !== undefined && <span className="swimlane-count">{String(count).padStart(3, "0")}</span>}
+      <LaneDates lane={lane} />
+      {due && lane.kind !== "backlog" && !lane.archivedAt && (
+        <span className={cn("lane-due", due.overdue && "lane-due-overdue")}>{due.text}</span>
+      )}
+      <SprintLaneProgress lane={lane} board={board} />
+      {lane.kind === "backlog" && !collapsed && (
+        <span
+          style={{
+            fontSize: 11,
+            fontFamily: "var(--lx-font-micro)",
+            marginLeft: 8,
+            textTransform: "uppercase",
+            letterSpacing: "0.04em",
+            color: "var(--lx-text-muted)",
+          }}
+        >
+          system lane
+        </span>
+      )}
+    </>
+  );
+}
+
+function SwimlaneDescInline({ lane, collapsed, onOpenDesc }: { lane: Swimlane; collapsed: boolean; onOpenDesc: () => void }) {
+  const truncatedDesc = lane.description
+    ? lane.description.length > 80
+      ? lane.description.slice(0, 80) + "..."
+      : lane.description
+    : null;
+  if (!truncatedDesc || collapsed) return null;
+  return (
+    <>
+      <span className="swimlane-desc">{truncatedDesc}</span>
+      {lane.description.length > 80 && (
+        <button
+          type="button"
+          className="swimlane-desc-more"
+          onClick={(e) => { e.stopPropagation(); onOpenDesc(); }}
+        >
+          read more
+        </button>
+      )}
+    </>
+  );
+}
+
 export function SwimlaneHeader({ slug, lane, count, collapsed = false, onToggle, board }: SwimlaneHeaderProps) {
   const updateSwimlane = useUpdateSwimlane(slug);
   const deleteSwimlane = useDeleteSwimlane(slug);
@@ -33,17 +270,14 @@ export function SwimlaneHeader({ slug, lane, count, collapsed = false, onToggle,
   const [isAddColumnOpen, setIsAddColumnOpen] = useState(false);
   const [isDescOpen, setIsDescOpen] = useState(false);
 
-  const due = lane.dueAt ? formatDueLabel(lane.dueAt) : null;
-
-  const truncatedDesc = lane.description
-    ? lane.description.length > 80
-      ? lane.description.slice(0, 80) + "..."
-      : lane.description
-    : null;
-
   const handleRename = () => {
     setRenameName(lane.name);
     setIsRenaming(true);
+  };
+
+  const cancelRename = () => {
+    setRenameName(lane.name);
+    setIsRenaming(false);
   };
 
   const submitRename = () => {
@@ -89,145 +323,31 @@ export function SwimlaneHeader({ slug, lane, count, collapsed = false, onToggle,
           </svg>
         </button>
         {isRenaming ? (
-          <form
-            onSubmit={(e) => { e.preventDefault(); submitRename(); }}
-            className="flex items-center"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <input
-              className="prop-input"
-              aria-label="Rename swimlane"
-              style={{ width: 160, height: 24, fontSize: 13 }}
-              value={renameName}
-              onChange={(e) => setRenameName(e.target.value)}
-              onBlur={submitRename}
-              autoFocus
-              onKeyDown={(e) => {
-                if (e.key === "Escape") { setRenameName(lane.name); setIsRenaming(false); }
-              }}
-            />
-          </form>
+          <RenameSwimlaneForm
+            lane={lane}
+            renameName={renameName}
+            setRenameName={setRenameName}
+            onSubmit={submitRename}
+            onCancel={cancelRename}
+          />
         ) : (
           <span className="swimlane-name">{lane.name}</span>
         )}
-        {count !== undefined && <span className="swimlane-count">{String(count).padStart(3, "0")}</span>}
-        {lane.kind === "sprint" && lane.startAt && lane.dueAt && !lane.archivedAt && (
-          <span className="lane-dates">
-            <span className="lane-dates-text">
-              {formatShortDate(lane.startAt)} → {formatShortDate(lane.dueAt)}
-            </span>
-            <span className="lane-dates-range" aria-hidden="true">
-              <span className="lane-dates-tick lane-dates-tick-start" />
-              <span className="lane-dates-line" />
-              <span className="lane-dates-tick lane-dates-tick-end" />
-            </span>
-          </span>
-        )}
-        {due && lane.kind !== "backlog" && !lane.archivedAt && (
-          <span className={cn("lane-due", due.overdue && "lane-due-overdue")}>{due.text}</span>
-        )}
-        {lane.kind === "sprint" && !lane.archivedAt && board && (() => {
-          const p = sprintProgress(board, lane.id);
-          return p.total > 0 ? <SprintProgress done={p.done} total={p.total} /> : null;
-        })()}
-        {lane.kind === "backlog" && !collapsed && (
-          <span
-            style={{
-              fontSize: 11,
-              fontFamily: "var(--lx-font-micro)",
-              marginLeft: 8,
-              textTransform: "uppercase",
-              letterSpacing: "0.04em",
-              color: "var(--lx-text-muted)",
-            }}
-          >
-            system lane
-          </span>
-        )}
-        {truncatedDesc && !collapsed && (
-          <>
-            <span className="swimlane-desc">{truncatedDesc}</span>
-            {lane.description.length > 80 && (
-              <button
-                type="button"
-                className="swimlane-desc-more"
-                onClick={(e) => { e.stopPropagation(); setIsDescOpen(true); }}
-              >
-                read more
-              </button>
-            )}
-          </>
-        )}
+        <SwimlaneMeta lane={lane} count={count} collapsed={collapsed} board={board} />
+        <SwimlaneDescInline lane={lane} collapsed={collapsed} onOpenDesc={() => setIsDescOpen(true)} />
         <span className="flex-1" />
         {(onToggle || !!lane.archivedAt) && (
-          <Menu
-            align="right"
-            gap={16}
-            trigger={({ open, toggle }) => (
-              <button
-                type="button"
-                className={cn("icon-btn", open && "active")}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  toggle();
-                }}
-                title="Swimlane menu"
-              >
-                <MoreHorizontal size={14} />
-              </button>
-            )}
-          >
-            {onToggle && (
-              <button type="button" className="menu-item" onClick={onToggle}>
-                {collapsed ? <ChevronDown size={14} /> : <ChevronUp size={14} />}
-                {collapsed ? "Expand" : "Collapse"}
-              </button>
-            )}
-            <button type="button" className="menu-item" onClick={() => setIsSettingsOpen(true)}>
-              <Settings size={14} />
-              Settings
-            </button>
-            <div className="menu-separator" />
-            <button type="button" className="menu-item" onClick={handleRename}>
-              <Pencil size={14} />
-              Rename
-            </button>
-            <button type="button" className="menu-item" onClick={() => setIsAddColumnOpen(true)}>
-              <Plus size={14} />
-              Add column
-            </button>
-            {!lane.archivedAt && lane.kind === "sprint" && (
-              <>
-                <div className="menu-separator" />
-                <button
-                  type="button"
-                  className="menu-item"
-                  onClick={() => archiveSwimlane.mutate({ id: lane.id })}
-                >
-                  <Archive size={14} />
-                  Archive swimlane
-                </button>
-              </>
-            )}
-            {!!lane.archivedAt && (
-              <>
-                <div className="menu-separator" />
-                <button
-                  type="button"
-                  className="menu-item"
-                  onClick={() => restoreSwimlane.mutate({ id: lane.id })}
-                >
-                  <Archive size={14} />
-                  Restore swimlane
-                </button>
-              </>
-            )}
-            <div className="menu-separator" />
-            <button type="button" className="menu-item danger" onClick={() => setDeleteConfirm(true)}>
-              <Trash2 size={14} />
-              Delete swimlane
-            </button>
-          </Menu>
+          <SwimlaneActionsMenu
+            lane={lane}
+            collapsed={collapsed}
+            onToggle={onToggle}
+            onRename={handleRename}
+            onOpenSettings={() => setIsSettingsOpen(true)}
+            onOpenAddColumn={() => setIsAddColumnOpen(true)}
+            onRequestDelete={() => setDeleteConfirm(true)}
+            archiveSwimlane={archiveSwimlane}
+            restoreSwimlane={restoreSwimlane}
+          />
         )}
       </div>
 
@@ -272,49 +392,15 @@ export function SwimlaneHeader({ slug, lane, count, collapsed = false, onToggle,
       )}
 
       {deleteConfirm && (
-        <>
-          <button type="button" className="dialog-overlay" onClick={() => setDeleteConfirm(false)} aria-label="Close" />
-          <div className="fixed inset-0 flex items-center justify-center z-[80] pointer-events-none">
-            <dialog open className="dialog dialog-enter pointer-events-auto" aria-modal="true" aria-label="Confirm">
-              <h2 className="font-display text-lg font-medium text-lx-text-primary">Delete &lsquo;{lane.name}&rsquo;?</h2>
-              <p className="text-sm text-lx-text-secondary mt-3 leading-5">
-                This will unassign all tasks in this swimlane. This action cannot be undone.
-              </p>
-              <div className="flex items-center gap-2 mt-4 justify-end">
-                <button type="button" className="btn btn-ghost" onClick={() => setDeleteConfirm(false)}>Cancel</button>
-                <button type="button" className="btn btn-danger-solid" onClick={handleDelete}>
-                  <Trash2 size={14} strokeWidth={1.5} />
-                  Delete
-                </button>
-              </div>
-            </dialog>
-          </div>
-        </>
+        <DeleteSwimlaneDialog lane={lane} onCancel={() => setDeleteConfirm(false)} onConfirm={handleDelete} />
       )}
 
       {isDescOpen && (
-        <>
-          <button type="button" className="dialog-overlay" onClick={() => setIsDescOpen(false)} aria-label="Close" />
-          <div className="fixed inset-0 flex items-center justify-center z-[80] pointer-events-none">
-            <dialog open className="dialog dialog-enter pointer-events-auto" aria-modal="true" aria-label="Confirm" style={{ maxWidth: 440 }}>
-              <h2 className="font-display text-lg font-medium text-lx-text-primary">{lane.name}</h2>
-              <div className="text-sm text-lx-text-secondary font-body leading-5 mt-3">
-                {renderSwimlaneDesc(lane.description)}
-              </div>
-              <div className="flex items-center justify-end gap-2 mt-4">
-                <button type="button" className="btn btn-ghost" onClick={() => setIsDescOpen(false)}>Close</button>
-                <button
-                  type="button"
-                  className="btn btn-ghost"
-                  style={{ fontSize: 11, color: "var(--lx-text-link)" }}
-                  onClick={() => { setIsDescOpen(false); setIsSettingsOpen(true); }}
-                >
-                  Edit in Settings
-                </button>
-              </div>
-            </dialog>
-          </div>
-        </>
+        <SwimlaneDescDialog
+          lane={lane}
+          onClose={() => setIsDescOpen(false)}
+          onEdit={() => { setIsDescOpen(false); setIsSettingsOpen(true); }}
+        />
       )}
     </>
   );

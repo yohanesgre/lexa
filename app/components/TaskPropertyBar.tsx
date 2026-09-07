@@ -35,68 +35,67 @@ interface TaskPropertyBarProps {
   setEditingAssignees: (v: boolean) => void;
 }
 
-export function TaskPropertyBar(props: TaskPropertyBarProps) {
-  const { isCreate, task, columns, swimlanes, fieldConfig, missingFields, currentColumnName, currentSwimlaneName,
-    selectedColumnId, setSelectedColumnId, selectedSwimlaneId, setSelectedSwimlaneId, onUpdate, onMove,
-    createColumnId, setCreateColumnId, createPriority, setCreatePriority, createType, setCreateType,
-    createAssignees, setCreateAssignees, createDueAt, setCreateDueAt, availableAssignees, editingAssignees, setEditingAssignees } = props;
-  const priorities = fieldConfig?.priorities ?? [];
-  const types = fieldConfig?.types ?? [];
+type OptionItem = { id: string; label: string; color: string };
+
+function ColumnField(props: TaskPropertyBarProps) {
   return (
-<div className="property-bar mt-3">
-  <div className="prop-field">
-    <span className="prop-label">Column</span>
-    {isCreate ? (
-      <select
-        className="prop-input"
-        aria-label="Column"
-        style={{ minWidth: 120 }}
-        value={createColumnId}
-        onChange={(e) => setCreateColumnId(e.target.value)}
-      >
-        {(columns ?? []).map((column) => (
-          <option key={column.id} value={column.id}>
-            {column.name}
-          </option>
-        ))}
-      </select>
-    ) : (
-      <SelectDropdown
-        value={selectedColumnId}
-        options={(columns ?? []).map((col) => ({
-          value: col.id,
-          label: col.name,
-        }))}
-        onChange={(columnId: string) => {
-          setSelectedColumnId(columnId);
-          onUpdate?.(task!.id, { columnId });
-        }}
-        trigger={({ open, toggle }: { open: boolean; toggle: () => void }) => (
-          <button
-            type="button"
-            className={cn("prop-input", missingFields.length > 0 && "is-focused")}
-            style={{ minWidth: 120, height: 32, justifyContent: "space-between", display: "inline-flex", alignItems: "center" }}
-            onClick={toggle}
-          >
-            <span>{currentColumnName || "—"}</span>
-            <ChevronDown size={14} className={cn("transition-transform", open && "rotate-180")} />
-          </button>
-        )}
-      />
-    )}
-  </div>
-  {!isCreate && (swimlanes?.length ?? 0) > 0 && (
+    <div className="prop-field">
+      <span className="prop-label">Column</span>
+      {props.isCreate ? (
+        <select
+          className="prop-input"
+          aria-label="Column"
+          style={{ minWidth: 120 }}
+          value={props.createColumnId}
+          onChange={(e) => props.setCreateColumnId(e.target.value)}
+        >
+          {(props.columns ?? []).map((column) => (
+            <option key={column.id} value={column.id}>
+              {column.name}
+            </option>
+          ))}
+        </select>
+      ) : (
+        <SelectDropdown
+          value={props.selectedColumnId}
+          options={(props.columns ?? []).map((col) => ({
+            value: col.id,
+            label: col.name,
+          }))}
+          onChange={(columnId: string) => {
+            props.setSelectedColumnId(columnId);
+            props.onUpdate?.(props.task!.id, { columnId });
+          }}
+          trigger={({ open, toggle }: { open: boolean; toggle: () => void }) => (
+            <button
+              type="button"
+              className={cn("prop-input", props.missingFields.length > 0 && "is-focused")}
+              style={{ minWidth: 120, height: 32, justifyContent: "space-between", display: "inline-flex", alignItems: "center" }}
+              onClick={toggle}
+            >
+              <span>{props.currentColumnName || "—"}</span>
+              <ChevronDown size={14} className={cn("transition-transform", open && "rotate-180")} />
+            </button>
+          )}
+        />
+      )}
+    </div>
+  );
+}
+
+function SwimlaneField(props: TaskPropertyBarProps) {
+  return (
     <div className="prop-field">
       <span className="prop-label">Swimlane</span>
       <SelectDropdown
-        value={selectedSwimlaneId}
-        options={(swimlanes ?? []).map((lane) => ({
+        value={props.selectedSwimlaneId}
+        options={(props.swimlanes ?? []).map((lane) => ({
           value: lane.id,
           label: lane.name,
         }))}
         onChange={(swimlaneId: string) => {
-          setSelectedSwimlaneId(swimlaneId);
-          onMove?.(task!.id, { columnId: task!.columnId, swimlaneId });
+          props.setSelectedSwimlaneId(swimlaneId);
+          props.onMove?.(props.task!.id, { columnId: props.task!.columnId, swimlaneId });
         }}
         trigger={({ open, toggle }: { open: boolean; toggle: () => void }) => (
           <button
@@ -105,124 +104,113 @@ export function TaskPropertyBar(props: TaskPropertyBarProps) {
             style={{ minWidth: 120, height: 32, justifyContent: "space-between", display: "inline-flex", alignItems: "center" }}
             onClick={toggle}
           >
-            <span>{currentSwimlaneName || "—"}</span>
+            <span>{props.currentSwimlaneName || "—"}</span>
             <ChevronDown size={14} className={cn("transition-transform", open && "rotate-180")} />
           </button>
         )}
       />
     </div>
-  )}
-  <div className="prop-field">
-    <span className="prop-label">Priority</span>
-    {isCreate ? (
-      <SelectDropdown
-        value={createPriority}
-        options={(fieldConfig?.priorities ?? []).map((priority) => ({
-          value: priority.id,
-          label: (
-            <>
-              <span className="priority-dot" style={{ background: priority.color }} />
-              {priority.label}
-            </>
-          ),
-        }))}
-        onChange={(priority) => setCreatePriority(priority)}
-        trigger={({ toggle }) => {
-          const opt = (fieldConfig?.priorities ?? []).find((p) => p.id === createPriority);
-          return (
-            <button type="button" className="priority-badge" onClick={toggle} style={{ boxShadow: "var(--lx-focus-glow)", color: opt?.color, background: `${opt?.color ?? "#6b6560"}1a` }}>
-              <span className="priority-dot" style={{ background: opt?.color ?? "#6b6560" }} />
-              {opt?.label ?? "—"}
-            </button>
-          );
-        }}
-      />
-    ) : (
-      <SelectDropdown
-        value={task!.priority}
-        options={(fieldConfig?.priorities ?? []).map((priority) => ({
-          value: priority.id,
-          label: (
-            <>
-              <span className="priority-dot" style={{ background: priority.color }} />
-              {priority.label}
-            </>
-          ),
-        }))}
-        onChange={(priority) => onUpdate?.(task!.id, { priority })}
-        trigger={({ toggle }) => {
-          const opt = (fieldConfig?.priorities ?? []).find((p) => p.id === task!.priority);
-          return (
-            <button type="button" className="priority-badge" onClick={toggle} style={{ color: opt?.color, background: `${opt?.color ?? "#6b6560"}1a` }}>
-              <span className="priority-dot" style={{ background: opt?.color ?? "#6b6560" }} />
-              {opt?.label ?? "—"}
-            </button>
-          );
-        }}
-      />
-    )}
-  </div>
-  <div className="prop-field">
-    <span className="prop-label">Type</span>
-    {isCreate ? (
-      <SelectDropdown
-        value={createType}
-        options={(fieldConfig?.types ?? []).map((type) => ({
-          value: type.id,
-          label: (
-            <span className="type-badge" style={{ background: `${type.color}1a`, color: type.color }}>
-              {type.label}
-            </span>
-          ),
-        }))}
-        onChange={(type) => setCreateType(type)}
-        trigger={({ toggle }) => {
-          const opt = (fieldConfig?.types ?? []).find((t) => t.id === createType);
-          return (
-            <button type="button" className="type-badge" onClick={toggle} style={{ background: `${opt?.color ?? "#6B6560"}1a`, color: opt?.color ?? "#6B6560", boxShadow: "var(--lx-focus-glow)", borderRadius: 4 }}>
-              {opt?.label ?? "—"}
-            </button>
-          );
-        }}
-      />
-    ) : (
-      <SelectDropdown
-        value={task!.type}
-        options={(fieldConfig?.types ?? []).map((type) => ({
-          value: type.id,
-          label: (
-            <span className="type-badge" style={{ background: `${type.color}1a`, color: type.color }}>
-              {type.label}
-            </span>
-          ),
-        }))}
-        onChange={(type) => onUpdate?.(task!.id, { type })}
-        trigger={({ toggle }) => {
-          const opt = (fieldConfig?.types ?? []).find((t) => t.id === task!.type);
-          return (
-            <button type="button" className="type-badge" onClick={toggle} style={{ background: `${opt?.color ?? "#6B6560"}1a`, color: opt?.color ?? "#6B6560" }}>
-              {opt?.label ?? "—"}
-            </button>
-          );
-        }}
-      />
-    )}
-  </div>
-  <div className="prop-field">
-    <span className="prop-label">Due date</span>
-    {isCreate ? (
-      <DatePicker
-        value={createDueAt === "" ? null : createDueAt}
-        onChange={(v) => setCreateDueAt(v ?? "")}
-      />
-    ) : (
-      <DatePicker
-        value={task?.dueAt ?? null}
-        onChange={(v) => onUpdate?.(task!.id, { dueAt: v })}
-      />
-    )}
-  </div>
-  {isCreate || editingAssignees ? (
+  );
+}
+
+function PrioritySelect({ value, options, onChange, withGlow }: {
+  value: string;
+  options: OptionItem[];
+  onChange: (priority: string) => void;
+  withGlow: boolean;
+}) {
+  return (
+    <SelectDropdown
+      value={value}
+      options={options.map((priority) => ({
+        value: priority.id,
+        label: (
+          <>
+            <span className="priority-dot" style={{ background: priority.color }} />
+            {priority.label}
+          </>
+        ),
+      }))}
+      onChange={onChange}
+      trigger={({ toggle }) => {
+        const opt = options.find((p) => p.id === value);
+        return (
+          <button type="button" className="priority-badge" onClick={toggle} style={{ boxShadow: withGlow ? "var(--lx-focus-glow)" : undefined, color: opt?.color, background: `${opt?.color ?? "#6b6560"}1a` }}>
+            <span className="priority-dot" style={{ background: opt?.color ?? "#6b6560" }} />
+            {opt?.label ?? "—"}
+          </button>
+        );
+      }}
+    />
+  );
+}
+
+function TypeSelect({ value, options, onChange, withGlow }: {
+  value: string;
+  options: OptionItem[];
+  onChange: (type: string) => void;
+  withGlow: boolean;
+}) {
+  return (
+    <SelectDropdown
+      value={value}
+      options={options.map((type) => ({
+        value: type.id,
+        label: (
+          <span className="type-badge" style={{ background: `${type.color}1a`, color: type.color }}>
+            {type.label}
+          </span>
+        ),
+      }))}
+      onChange={onChange}
+      trigger={({ toggle }) => {
+        const opt = options.find((t) => t.id === value);
+        return (
+          <button type="button" className="type-badge" onClick={toggle} style={{ background: `${opt?.color ?? "#6B6560"}1a`, color: opt?.color ?? "#6B6560", boxShadow: withGlow ? "var(--lx-focus-glow)" : undefined, borderRadius: withGlow ? 4 : undefined }}>
+            {opt?.label ?? "—"}
+          </button>
+        );
+      }}
+    />
+  );
+}
+
+function DueDateField({ isCreate, task, createDueAt, setCreateDueAt, onUpdate }: {
+  isCreate: boolean;
+  task: Task | null;
+  createDueAt: string;
+  setCreateDueAt: (v: string) => void;
+  onUpdate: TaskPropertyBarProps["onUpdate"];
+}) {
+  return (
+    <div className="prop-field">
+      <span className="prop-label">Due date</span>
+      {isCreate ? (
+        <DatePicker
+          value={createDueAt === "" ? null : createDueAt}
+          onChange={(v) => setCreateDueAt(v ?? "")}
+        />
+      ) : (
+        <DatePicker
+          value={task?.dueAt ?? null}
+          onChange={(v) => onUpdate?.(task!.id, { dueAt: v })}
+        />
+      )}
+    </div>
+  );
+}
+
+function AssigneeEditorField({ isCreate, task, createAssignees, setCreateAssignees, availableAssignees, missingFields, setEditingAssignees, onUpdate }: {
+  isCreate: boolean;
+  task: Task | null;
+  createAssignees: string[];
+  setCreateAssignees: (v: string[]) => void;
+  availableAssignees: string[] | undefined;
+  missingFields: string[];
+  setEditingAssignees: (v: boolean) => void;
+  onUpdate: TaskPropertyBarProps["onUpdate"];
+}) {
+  return (
     <div className="prop-field" style={{ flexWrap: "wrap" }}>
       <span className="prop-label">Assignees</span>
       <button
@@ -248,7 +236,15 @@ export function TaskPropertyBar(props: TaskPropertyBarProps) {
           : (next: string[]) => onUpdate?.(task!.id, { assignees: next })}
       />
     </div>
-  ) : (
+  );
+}
+
+function ReadonlyAssigneesField({ task, availableAssignees, setEditingAssignees }: {
+  task: Task | null;
+  availableAssignees: string[] | undefined;
+  setEditingAssignees: (v: boolean) => void;
+}) {
+  return (
     <div className="prop-field">
       <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
         <span className="prop-label">Assignees</span>
@@ -272,6 +268,50 @@ export function TaskPropertyBar(props: TaskPropertyBarProps) {
         availableAssignees={availableAssignees ?? []}
       />
     </div>
+  );
+}
+
+export function TaskPropertyBar(props: TaskPropertyBarProps) {
+  const { isCreate, task, columns, swimlanes, fieldConfig, missingFields,
+    selectedSwimlaneId, onUpdate,
+    createPriority, setCreatePriority, createType, setCreateType,
+    createAssignees, setCreateAssignees, createDueAt, setCreateDueAt, availableAssignees, editingAssignees, setEditingAssignees } = props;
+  const priorities = fieldConfig?.priorities ?? [];
+  const types = fieldConfig?.types ?? [];
+  return (
+<div className="property-bar mt-3">
+  <ColumnField {...props} />
+  {!isCreate && (swimlanes?.length ?? 0) > 0 && <SwimlaneField {...props} />}
+  <div className="prop-field">
+    <span className="prop-label">Priority</span>
+    {isCreate ? (
+      <PrioritySelect value={createPriority} options={priorities} onChange={setCreatePriority} withGlow />
+    ) : (
+      <PrioritySelect value={task!.priority} options={priorities} onChange={(priority) => onUpdate?.(task!.id, { priority })} withGlow={false} />
+    )}
+  </div>
+  <div className="prop-field">
+    <span className="prop-label">Type</span>
+    {isCreate ? (
+      <TypeSelect value={createType} options={types} onChange={setCreateType} withGlow />
+    ) : (
+      <TypeSelect value={task!.type} options={types} onChange={(type) => onUpdate?.(task!.id, { type })} withGlow={false} />
+    )}
+  </div>
+  <DueDateField isCreate={isCreate} task={task} createDueAt={createDueAt} setCreateDueAt={setCreateDueAt} onUpdate={onUpdate} />
+  {isCreate || editingAssignees ? (
+    <AssigneeEditorField
+      isCreate={isCreate}
+      task={task}
+      createAssignees={createAssignees}
+      setCreateAssignees={setCreateAssignees}
+      availableAssignees={availableAssignees}
+      missingFields={missingFields}
+      setEditingAssignees={setEditingAssignees}
+      onUpdate={onUpdate}
+    />
+  ) : (
+    <ReadonlyAssigneesField task={task} availableAssignees={availableAssignees} setEditingAssignees={setEditingAssignees} />
   )}
 </div>
   );

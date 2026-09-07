@@ -35,6 +35,157 @@ function formatRelative(iso: string): string {
   return `${days} days ago`;
 }
 
+function AutosaveSection({ autosaveEnabled, autosaveDelay, onAutosaveChange, onDelayChange }: {
+  autosaveEnabled: boolean;
+  autosaveDelay: number;
+  onAutosaveChange: (enabled: boolean) => void;
+  onDelayChange: (delay: number) => void;
+}) {
+  return (
+    <div className="sidebar-section">
+      <div className="flex items-center justify-between mb-3">
+        <span className="text-sm font-medium font-body text-lx-text-primary">Autosave</span>
+        <button
+          type="button"
+          className={cn("toggle-switch", autosaveEnabled && "is-on")}
+          onClick={() => onAutosaveChange(!autosaveEnabled)}
+          aria-label={autosaveEnabled ? "Autosave on" : "Autosave off"}
+        />
+      </div>
+
+      {autosaveEnabled && (
+        <div className="mb-3">
+          <span className="prop-label block mb-1.5">Delay</span>
+          <div className="delay-selector">
+            {DELAY_OPTIONS.map((ms) => (
+              <button
+                key={ms}
+                type="button"
+                className={cn("delay-btn", autosaveDelay === ms && "is-active")}
+                onClick={() => onDelayChange(ms)}
+              >
+                {ms}ms
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <p className="text-xs text-lx-text-secondary font-body leading-[18px]">
+        {autosaveEnabled
+          ? "Automatically saves changes while you type."
+          : "Autosave is disabled."}
+      </p>
+    </div>
+  );
+}
+
+function RevisionItem({ rev, isActive, onSelectRevision }: {
+  rev: { id: string; createdAt: string; saveType: string };
+  isActive: boolean;
+  onSelectRevision: (id: string) => void;
+}) {
+  return (
+    <div
+      className={cn("history-item", isActive && "active")}
+      role="button"
+      tabIndex={0}
+      onClick={() => onSelectRevision(rev.id)}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          onSelectRevision(rev.id);
+        }
+      }}
+    >
+      <div className="flex flex-col gap-1">
+        <span className={cn("text-sm font-body text-lx-text-primary", isActive && "font-medium")}>
+          {formatRelative(rev.createdAt)}
+        </span>
+        {isActive && (
+          <span className="font-micro text-2xs text-lx-text-warning uppercase tracking-[0.04em]">
+            Previewing
+          </span>
+        )}
+      </div>
+      <span
+        className={cn(
+          "history-badge",
+          rev.saveType === "autosave" ? "history-badge-auto" : "history-badge-manual"
+        )}
+      >
+        {rev.saveType}
+      </span>
+    </div>
+  );
+}
+
+function historySection(body: React.ReactNode) {
+  return (
+    <div className="sidebar-section flex-1 flex flex-col">
+      <span className="sidebar-section-title">Version History</span>
+      {body}
+    </div>
+  );
+}
+
+function VersionHistorySection({ revisions, isLoading, error, activeRevisionId, selectedRevisionId, onSelectRevision, onRestore, onClosePreview, restoring }: {
+  revisions: { id: string; createdAt: string; saveType: string }[] | undefined;
+  isLoading: boolean;
+  error: unknown;
+  activeRevisionId: string | null;
+  selectedRevisionId: string | null;
+  onSelectRevision: (id: string) => void;
+  onRestore: (id: string) => void;
+  onClosePreview: () => void;
+  restoring?: boolean | undefined;
+}) {
+  const section = (body: React.ReactNode) => (
+    <div className="sidebar-section flex-1 flex flex-col">
+      <span className="sidebar-section-title">Version History</span>
+      {body}
+    </div>
+  );
+
+  if (isLoading) {
+    return historySection(<div className="text-xs text-lx-text-muted py-2">Loading versions…</div>);
+  }
+  if (error) {
+    return historySection(<div className="text-xs text-lx-text-danger py-2">Failed to load versions</div>);
+  }
+  if (!revisions || revisions.length === 0) {
+    return historySection(<div className="history-empty">No previous versions yet.</div>);
+  }
+
+  return historySection(
+    <>
+      <div className="history-list">
+        {revisions.map((rev) => (
+          <RevisionItem key={rev.id} rev={rev} isActive={rev.id === activeRevisionId} onSelectRevision={onSelectRevision} />
+        ))}
+      </div>
+      <div className="history-actions">
+        <button
+          type="button"
+          className="btn btn-primary flex-1"
+          disabled={restoring || selectedRevisionId === null}
+          onClick={() => selectedRevisionId && onRestore(selectedRevisionId)}
+        >
+          Restore
+        </button>
+        <button
+          type="button"
+          className="btn btn-ghost flex-1"
+          disabled={selectedRevisionId === null}
+          onClick={onClosePreview}
+        >
+          Close preview
+        </button>
+      </div>
+    </>,
+  );
+}
+
 export function EditSidebar({
   slug,
   pageSlug,
@@ -55,117 +206,23 @@ export function EditSidebar({
 
   return (
     <WikiSidebar title="Page settings" collapsed={collapsed} onToggle={onToggle}>
-      <div className="sidebar-section">
-        <div className="flex items-center justify-between mb-3">
-          <span className="text-sm font-medium font-body text-lx-text-primary">Autosave</span>
-          <button
-            type="button"
-            className={cn("toggle-switch", autosaveEnabled && "is-on")}
-            onClick={() => onAutosaveChange(!autosaveEnabled)}
-            aria-label={autosaveEnabled ? "Autosave on" : "Autosave off"}
-          />
-        </div>
-
-        {autosaveEnabled && (
-          <div className="mb-3">
-            <span className="prop-label block mb-1.5">Delay</span>
-            <div className="delay-selector">
-              {DELAY_OPTIONS.map((ms) => (
-                <button
-                  key={ms}
-                  type="button"
-                  className={cn("delay-btn", autosaveDelay === ms && "is-active")}
-                  onClick={() => onDelayChange(ms)}
-                >
-                  {ms}ms
-                </button>
-              ))}
-            </div>
-          </div>
-        )}
-
-        <p className="text-xs text-lx-text-secondary font-body leading-[18px]">
-          {autosaveEnabled
-            ? "Automatically saves changes while you type."
-            : "Autosave is disabled."}
-        </p>
-      </div>
-
-      <div className="sidebar-section flex-1 flex flex-col">
-        <span className="sidebar-section-title">Version History</span>
-
-        {isLoading && <div className="text-xs text-lx-text-muted py-2">Loading versions…</div>}
-
-        {error && (
-          <div className="text-xs text-lx-text-danger py-2">Failed to load versions</div>
-        )}
-
-        {!isLoading && !error && revisions && revisions.length === 0 && (
-          <div className="history-empty">No previous versions yet.</div>
-        )}
-
-        {!isLoading && !error && revisions && revisions.length > 0 && (
-          <>
-            <div className="history-list">
-              {revisions.map((rev) => {
-                const isActive = rev.id === activeRevisionId;
-                return (
-                  <div
-                    key={rev.id}
-                    className={cn("history-item", isActive && "active")}
-                    role="button"
-                    tabIndex={0}
-                    onClick={() => onSelectRevision(rev.id)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter" || e.key === " ") {
-                        e.preventDefault();
-                        onSelectRevision(rev.id);
-                      }
-                    }}
-                  >
-                    <div className="flex flex-col gap-1">
-                      <span className={cn("text-sm font-body text-lx-text-primary", isActive && "font-medium")}>
-                        {formatRelative(rev.createdAt)}
-                      </span>
-                      {isActive && (
-                        <span className="font-micro text-2xs text-lx-text-warning uppercase tracking-[0.04em]">
-                          Previewing
-                        </span>
-                      )}
-                    </div>
-                    <span
-                      className={cn(
-                        "history-badge",
-                        rev.saveType === "autosave" ? "history-badge-auto" : "history-badge-manual"
-                      )}
-                    >
-                      {rev.saveType}
-                    </span>
-                  </div>
-                );
-              })}
-            </div>
-            <div className="history-actions">
-              <button
-                type="button"
-                className="btn btn-primary flex-1"
-                disabled={restoring || selectedRevisionId === null}
-                onClick={() => selectedRevisionId && onRestore(selectedRevisionId)}
-              >
-                Restore
-              </button>
-              <button
-                type="button"
-                className="btn btn-ghost flex-1"
-                disabled={selectedRevisionId === null}
-                onClick={onClosePreview}
-              >
-                Close preview
-              </button>
-            </div>
-          </>
-        )}
-      </div>
+      <AutosaveSection
+        autosaveEnabled={autosaveEnabled}
+        autosaveDelay={autosaveDelay}
+        onAutosaveChange={onAutosaveChange}
+        onDelayChange={onDelayChange}
+      />
+      <VersionHistorySection
+        revisions={revisions}
+        isLoading={isLoading}
+        error={error}
+        activeRevisionId={activeRevisionId}
+        selectedRevisionId={selectedRevisionId}
+        onSelectRevision={onSelectRevision}
+        onRestore={onRestore}
+        onClosePreview={onClosePreview}
+        restoring={restoring}
+      />
     </WikiSidebar>
   );
 }

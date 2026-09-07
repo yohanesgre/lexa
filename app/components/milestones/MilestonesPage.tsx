@@ -11,6 +11,95 @@ import { MilestoneProgress } from "./MilestoneProgress";
 import { SprintProgress } from "./SprintProgress";
 import { TimelineTab } from "./TimelineTab";
 
+function splitByArchive(milestones: Milestone[]) {
+  return {
+    active: milestones.filter((m) => !m.archivedAt),
+    archived: milestones.filter((m) => !!m.archivedAt),
+  };
+}
+
+function milestoneLaneStats(board: NonNullable<ReturnType<typeof useBoard>["data"]> | undefined, milestoneId: string) {
+  if (!board) return { laneCount: 0, liveTaskCount: 0 };
+  const laneCount = board.swimlanes.filter((l) => l.milestoneId === milestoneId && !l.archivedAt).length;
+  const liveTaskCount = board.tasks.filter((t) => {
+    const lane = board.swimlanes.find((l) => l.id === t.swimlaneId);
+    return lane?.milestoneId === milestoneId && !t.archivedAt;
+  }).length;
+  return { laneCount, liveTaskCount };
+}
+
+function submitMilestoneForm<TInput extends { description?: string | null | undefined }>(
+  editing: Milestone | null,
+  input: TInput,
+  update: { mutate: (input: Omit<TInput, "description"> & { id: string; description?: string | undefined }) => void },
+  create: { mutate: (input: Omit<TInput, "description"> & { description?: string | undefined }) => void },
+) {
+  const payload = { ...input, description: input.description ?? undefined } as Omit<TInput, "description"> & { description?: string | undefined };
+  if (editing) {
+    update.mutate({ ...payload, id: editing.id });
+  } else {
+    create.mutate(payload);
+  }
+}
+
+function MilestonesSkeleton() {
+  return (
+    <main className="page-frame">
+      <div className="ms-tabs">
+        <button type="button" className="ms-tab active">Milestones</button>
+        <button type="button" className="ms-tab">Timeline</button>
+      </div>
+      <div className="milestone-card">
+        <div className="skeleton" style={{ width: 160, height: 20 }} />
+        <div className="skeleton mt-2" style={{ width: "80%", height: 12 }} />
+        <div className="skeleton mt-3" style={{ width: "100%", height: 4 }} />
+        <div className="skeleton mt-2" style={{ width: "100%", height: 4 }} />
+      </div>
+      <div className="milestone-card">
+        <div className="skeleton" style={{ width: 120, height: 20 }} />
+        <div className="skeleton mt-2" style={{ width: "60%", height: 12 }} />
+        <div className="skeleton mt-3" style={{ width: "100%", height: 4 }} />
+        <div className="skeleton mt-2" style={{ width: "100%", height: 4 }} />
+      </div>
+    </main>
+  );
+}
+
+function MilestonesErrorState({ message, onRetry }: { message: string; onRetry: () => void }) {
+  return (
+    <main className="page-frame">
+      <div className="tasks-error">
+        <div className="tasks-error-title">Failed to load milestones</div>
+        <div className="tasks-error-sub">{message}</div>
+        <button type="button" className="btn btn-ghost btn-sm" onClick={onRetry}>
+          Retry
+        </button>
+      </div>
+    </main>
+  );
+}
+
+function EmptyMilestones({ isAdmin, onNew }: { isAdmin: boolean; onNew: () => void }) {
+  return (
+    <div className="empty-state" style={{ padding: 24 }}>
+      <div className="empty-state-icon">
+        <svg viewBox="0 0 24 24" width={24} height={24} fill="none" stroke="currentColor" strokeWidth={1.5}>
+          <path d="M12 8v4l3 3" />
+          <circle cx="12" cy="12" r="9" />
+        </svg>
+      </div>
+      <div className="empty-state-title">No milestones yet</div>
+      <div className="empty-state-desc">Group sprints under a goal milestone — v1.0 launch, beta, or release tracks.</div>
+      {isAdmin && (
+        <button type="button" className="btn btn-primary" style={{ marginTop: 16 }} onClick={onNew}>
+          <Plus size={14} strokeWidth={1.5} />
+          New Milestone
+        </button>
+      )}
+    </div>
+  );
+}
+
 export function MilestonesPage({ slug, tab }: { slug: string; tab: "list" | "timeline" }) {
   const { data: milestones = [], isLoading, error, refetch } = useMilestones(slug);
   const { data: board } = useBoard(slug);
@@ -28,8 +117,7 @@ export function MilestonesPage({ slug, tab }: { slug: string; tab: "list" | "tim
   const [archiving, setArchiving] = useState<Milestone | null>(null);
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set());
 
-  const active = milestones.filter((m) => !m.archivedAt);
-  const archived = milestones.filter((m) => !!m.archivedAt);
+  const { active, archived } = splitByArchive(milestones);
 
   const toggleCollapsed = (id: string) =>
     setCollapsed((prev) => {
@@ -40,39 +128,10 @@ export function MilestonesPage({ slug, tab }: { slug: string; tab: "list" | "tim
     });
 
   if (isLoading) {
-    return (
-      <main className="page-frame">
-        <div className="ms-tabs">
-          <button type="button" className="ms-tab active">Milestones</button>
-          <button type="button" className="ms-tab">Timeline</button>
-        </div>
-        <div className="milestone-card">
-          <div className="skeleton" style={{ width: 160, height: 20 }} />
-          <div className="skeleton mt-2" style={{ width: "80%", height: 12 }} />
-          <div className="skeleton mt-3" style={{ width: "100%", height: 4 }} />
-          <div className="skeleton mt-2" style={{ width: "100%", height: 4 }} />
-        </div>
-        <div className="milestone-card">
-          <div className="skeleton" style={{ width: 120, height: 20 }} />
-          <div className="skeleton mt-2" style={{ width: "60%", height: 12 }} />
-          <div className="skeleton mt-3" style={{ width: "100%", height: 4 }} />
-          <div className="skeleton mt-2" style={{ width: "100%", height: 4 }} />
-        </div>
-      </main>
-    );
+    return <MilestonesSkeleton />;
   }
   if (error) {
-    return (
-      <main className="page-frame">
-        <div className="tasks-error">
-          <div className="tasks-error-title">Failed to load milestones</div>
-          <div className="tasks-error-sub">{(error as Error).message}</div>
-          <button type="button" className="btn btn-ghost btn-sm" onClick={() => refetch()}>
-            Retry
-          </button>
-        </div>
-      </main>
-    );
+    return <MilestonesErrorState message={(error as Error).message} onRetry={() => refetch()} />;
   }
 
   return (
@@ -112,27 +171,7 @@ export function MilestonesPage({ slug, tab }: { slug: string; tab: "list" | "tim
       ) : (
         <div>
           {milestones.length === 0 && (
-            <div className="empty-state" style={{ padding: 24 }}>
-              <div className="empty-state-icon">
-                <svg viewBox="0 0 24 24" width={24} height={24} fill="none" stroke="currentColor" strokeWidth={1.5}>
-                  <path d="M12 8v4l3 3" />
-                  <circle cx="12" cy="12" r="9" />
-                </svg>
-              </div>
-              <div className="empty-state-title">No milestones yet</div>
-              <div className="empty-state-desc">Group sprints under a goal milestone — v1.0 launch, beta, or release tracks.</div>
-              {isAdmin && (
-                <button
-                  type="button"
-                  className="btn btn-primary"
-                  style={{ marginTop: 16 }}
-                  onClick={() => { setEditing(null); setIsFormOpen(true); }}
-                >
-                  <Plus size={14} strokeWidth={1.5} />
-                  New Milestone
-                </button>
-              )}
-            </div>
+            <EmptyMilestones isAdmin={isAdmin} onNew={() => { setEditing(null); setIsFormOpen(true); }} />
           )}
 
           <div className="milestone-grid">
@@ -185,24 +224,15 @@ export function MilestonesPage({ slug, tab }: { slug: string; tab: "list" | "tim
           milestone={editing}
           isOpen={isFormOpen}
           onClose={() => setIsFormOpen(false)}
-          onSubmit={(input) => {
-            if (editing) {
-              updateMilestone.mutate({ id: editing.id, ...input, description: input.description ?? undefined });
-            } else {
-              createMilestone.mutate({ ...input, description: input.description ?? undefined });
-            }
-          }}
+          onSubmit={(input) => submitMilestoneForm(editing, input, updateMilestone, createMilestone)}
         />
       )}
 
       {archiving && (
         <CompleteMilestoneDialog
           milestone={archiving}
-          laneCount={board?.swimlanes.filter((l) => l.milestoneId === archiving.id && !l.archivedAt).length ?? 0}
-          liveTaskCount={board?.tasks.filter((t) => {
-            const lane = board.swimlanes.find((l) => l.id === t.swimlaneId);
-            return lane?.milestoneId === archiving.id && !t.archivedAt;
-          }).length ?? 0}
+          laneCount={milestoneLaneStats(board, archiving.id).laneCount}
+          liveTaskCount={milestoneLaneStats(board, archiving.id).liveTaskCount}
           onCancel={() => setArchiving(null)}
           onConfirm={() => {
             archiveMilestone.mutate({ id: archiving.id });
@@ -211,6 +241,112 @@ export function MilestonesPage({ slug, tab }: { slug: string; tab: "list" | "tim
         />
       )}
     </main>
+  );
+}
+
+function milestoneCardClass(isCurrent: boolean, archived: boolean) {
+  return cn("milestone-card", isCurrent && "active-callout", archived && "archived");
+}
+
+function milestoneCardData(board: ReturnType<typeof useBoard>["data"], milestone: Milestone) {
+  const lanes = (board?.swimlanes ?? []).filter((l) => l.milestoneId === milestone.id);
+  const tasks = board ? milestoneTaskProgress(board, milestone.id) : { done: 0, total: 0 };
+  return { lanes, tasks };
+}
+
+function sortMilestoneLanes(lanes: Swimlane[]) {
+  return lanes.toSorted((a, b) => a.position - b.position);
+}
+
+function milestoneSprintRowClass(lane: Swimlane) {
+  return cn("milestone-sprint-row", !!lane.archivedAt && "archived");
+}
+
+function sprintDatesCell(lane: Swimlane) {
+  if (lane.archivedAt) return laneDatesText(lane) ? `${laneDatesText(lane)} · archived` : "archived";
+  return laneDatesText(lane) ?? "";
+}
+
+function MilestoneSprints({ board, lanes, collapsed }: {
+  board: ReturnType<typeof useBoard>["data"];
+  lanes: Swimlane[];
+  collapsed: boolean;
+}) {
+  return (
+    <div className="milestone-sprints">
+      {sortMilestoneLanes(lanes).map((lane) => {
+        const p = board ? sprintProgress(board, lane.id) : { done: 0, total: 0 };
+        return (
+          <div key={lane.id} className={milestoneSprintRowClass(lane)}>
+            <span className="milestone-sprint-name">{lane.name}</span>
+            <span className="sl-dates">
+              {sprintDatesCell(lane)}
+            </span>
+            {!lane.archivedAt && p.total > 0 && <SprintProgress done={p.done} total={p.total} />}
+            <span className="flex-1" />
+            <Link to="/$slug/board" params={{ slug: board?.project.slug ?? "" }} search={{}} className="sl-link-btn">
+              View on board
+            </Link>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function ActiveMilestoneActions({ canDelete, onArchive, onEdit, onDelete }: {
+  canDelete: boolean;
+  onArchive: () => void;
+  onEdit: () => void;
+  onDelete: () => void;
+}) {
+  return (
+    <>
+      <div className="ms-actions-left">
+        <button type="button" className="btn btn-primary btn-sm" onClick={onArchive}>
+          Complete milestone
+        </button>
+        <button type="button" className="btn btn-ghost btn-sm" onClick={onEdit}>
+          Edit
+        </button>
+      </div>
+      <span className="ms-actions-spacer" />
+      <div className="ms-actions-right">
+        <button type="button" className="btn btn-ghost btn-sm" onClick={onArchive}>
+          Archive
+        </button>
+        <button
+          type="button"
+          className="btn btn-ghost btn-sm"
+          disabled={!canDelete}
+          title={canDelete ? undefined : "409 HAS_CHILDREN — loosen or archive sprints first"}
+          onClick={onDelete}
+        >
+          Delete
+        </button>
+      </div>
+    </>
+  );
+}
+
+function ArchivedMilestoneActions({ onRestore, onDelete }: {
+  onRestore: (() => void) | undefined;
+  onDelete: () => void;
+}) {
+  return (
+    <>
+      <div className="ms-actions-left">
+        <button type="button" className="btn btn-ghost btn-sm" onClick={onRestore}>
+          Restore
+        </button>
+      </div>
+      <span className="ms-actions-spacer" />
+      <div className="ms-actions-right">
+        <button type="button" className="btn btn-ghost btn-sm" style={{ color: "var(--lx-text-danger)" }} onClick={onDelete}>
+          Delete
+        </button>
+      </div>
+    </>
   );
 }
 
@@ -227,14 +363,13 @@ function MilestoneCard({ milestone, isActive, board, collapsed, onToggleCollapse
   onDelete: () => void;
 }) {
   const due = milestone.dueAt ? formatDueChip(milestone.dueAt) : null;
-  const lanes = (board?.swimlanes ?? []).filter((l) => l.milestoneId === milestone.id);
-  const tasks = board ? milestoneTaskProgress(board, milestone.id) : { done: 0, total: 0 };
+  const { lanes, tasks } = milestoneCardData(board, milestone);
   const archived = !!milestone.archivedAt;
   const isCurrent = isActive && !archived;
   const canDelete = milestone.sprintCount === 0;
 
   return (
-    <div className={cn("milestone-card", isCurrent && "active-callout", archived && "archived")}>
+    <div className={milestoneCardClass(isCurrent, archived)}>
       <div className="milestone-head">
         {lanes.length > 0 && (
           <button
@@ -264,72 +399,15 @@ function MilestoneCard({ milestone, isActive, board, collapsed, onToggleCollapse
       />
 
       {lanes.length > 0 && !collapsed && (
-        <div className="milestone-sprints">
-          {lanes
-            .toSorted((a, b) => a.position - b.position)
-            .map((lane) => {
-              const p = board ? sprintProgress(board, lane.id) : { done: 0, total: 0 };
-              return (
-                <div key={lane.id} className={cn("milestone-sprint-row", !!lane.archivedAt && "archived")}>
-                  <span className="milestone-sprint-name">{lane.name}</span>
-                  <span className="sl-dates">
-                    {lane.archivedAt
-                      ? (laneDatesText(lane) ? `${laneDatesText(lane)} · archived` : "archived")
-                      : (laneDatesText(lane) ?? "")}
-                  </span>
-                  {!lane.archivedAt && p.total > 0 && <SprintProgress done={p.done} total={p.total} />}
-                  <span className="flex-1" />
-                  <Link to="/$slug/board" params={{ slug: board?.project.slug ?? "" }} search={{}} className="sl-link-btn">
-                    View on board
-                  </Link>
-                </div>
-              );
-            })}
-        </div>
+        <MilestoneSprints board={board} lanes={lanes} collapsed={collapsed} />
       )}
 
       {isAdmin && (
         <div className="milestone-card-actions" style={{ marginTop: 14, borderTop: "1px dashed var(--lx-border-default)", paddingTop: 12 }}>
           {!archived ? (
-            <>
-              <div className="ms-actions-left">
-                <button type="button" className="btn btn-primary btn-sm" onClick={onArchive}>
-                  Complete milestone
-                </button>
-                <button type="button" className="btn btn-ghost btn-sm" onClick={onEdit}>
-                  Edit
-                </button>
-              </div>
-              <span className="ms-actions-spacer" />
-              <div className="ms-actions-right">
-                <button type="button" className="btn btn-ghost btn-sm" onClick={onArchive}>
-                  Archive
-                </button>
-                <button
-                  type="button"
-                  className="btn btn-ghost btn-sm"
-                  disabled={!canDelete}
-                  title={canDelete ? undefined : "409 HAS_CHILDREN — loosen or archive sprints first"}
-                  onClick={onDelete}
-                >
-                  Delete
-                </button>
-              </div>
-            </>
+            <ActiveMilestoneActions canDelete={canDelete} onArchive={onArchive} onEdit={onEdit} onDelete={onDelete} />
           ) : (
-            <>
-              <div className="ms-actions-left">
-                <button type="button" className="btn btn-ghost btn-sm" onClick={onRestore}>
-                  Restore
-                </button>
-              </div>
-              <span className="ms-actions-spacer" />
-              <div className="ms-actions-right">
-                <button type="button" className="btn btn-ghost btn-sm" style={{ color: "var(--lx-text-danger)" }} onClick={onDelete}>
-                  Delete
-                </button>
-              </div>
-            </>
+            <ArchivedMilestoneActions onRestore={onRestore} onDelete={onDelete} />
           )}
         </div>
       )}

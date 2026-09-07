@@ -18,6 +18,76 @@ interface ColumnProps {
   onOpenCreate?: () => void;
 }
 
+function optionColor(options: FieldOption[], id: string) {
+  return options.find((o) => o.id === id)?.color ?? "var(--lx-text-muted)";
+}
+
+function AddTaskButton({ onClick, empty }: { onClick?: (() => void) | undefined; empty: boolean }) {
+  return (
+    <button type="button" className="add-task-btn" style={empty ? { marginTop: 8 } : undefined} onClick={onClick}>
+      <Plus size={14} strokeWidth={1.5} />
+      Add task...
+    </button>
+  );
+}
+
+interface InlineTaskFormProps {
+  title: string;
+  onTitleChange: (value: string) => void;
+  onKeyDown: (e: React.KeyboardEvent) => void;
+  priorities: FieldOption[];
+  priority: string;
+  onPriorityChange: (value: string) => void;
+  types: FieldOption[];
+  type: string;
+  onTypeChange: (value: string) => void;
+  onCancel: () => void;
+  onSave: () => void;
+  saving: boolean;
+}
+
+function InlineTaskForm(props: InlineTaskFormProps) {
+  return (
+    <div className="inline-add-form">
+      <input
+        className="prop-input w-full is-focused"
+        aria-label="Task title"
+        value={props.title}
+        onChange={(e) => props.onTitleChange(e.target.value)}
+        onKeyDown={props.onKeyDown}
+        placeholder="Task title"
+        autoFocus
+      />
+      <div className="flex flex-col gap-2 mt-2">
+        <div className="flex items-center justify-between">
+          <span className="prop-label">Priority</span>
+          <select className="prop-input" aria-label="Priority" style={{ width: 140, color: optionColor(props.priorities, props.priority) }} value={props.priority} onChange={(e) => props.onPriorityChange(e.target.value)}>
+            {props.priorities.map((p) => (
+              <option key={p.id} value={p.id} style={{ color: p.color }}>● {p.label}</option>
+            ))}
+          </select>
+        </div>
+        <div className="flex items-center justify-between">
+          <span className="prop-label">Type</span>
+          <select className="prop-input" aria-label="Type" style={{ width: 140, color: optionColor(props.types, props.type) }} value={props.type} onChange={(e) => props.onTypeChange(e.target.value)}>
+            {props.types.map((t) => (
+              <option key={t.id} value={t.id} style={{ color: t.color }}>● {t.label}</option>
+            ))}
+          </select>
+        </div>
+      </div>
+      <div className="flex items-center justify-end gap-2 mt-3">
+        <button type="button" className="btn btn-ghost btn-sm" onClick={props.onCancel} disabled={props.saving}>
+          Cancel
+        </button>
+        <button type="button" className="btn btn-primary btn-sm" onClick={props.onSave} disabled={!props.title.trim() || props.saving}>
+          {props.saving ? "Saving..." : "Save"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export function Column({ id, children, data, isEmpty, slug, columnId, swimlaneId, priorities = [], types = [], onOpenCreate }: ColumnProps) {
   const { setNodeRef, isOver } = useDroppable({ id, ...(data ? { data } : {}) });
   const empty = isEmpty ?? false;
@@ -58,10 +128,7 @@ export function Column({ id, children, data, isEmpty, slug, columnId, swimlaneId
     return (
       <div ref={setNodeRef} className={cn("column-body", isOver && "drop-target")}>
         {!empty && children}
-        <button type="button" className="add-task-btn" style={empty ? { marginTop: 8 } : undefined} onClick={onOpenCreate}>
-          <Plus size={14} strokeWidth={1.5} />
-          Add task...
-        </button>
+        <AddTaskButton empty={empty} onClick={onOpenCreate} />
       </div>
     );
   }
@@ -70,53 +137,22 @@ export function Column({ id, children, data, isEmpty, slug, columnId, swimlaneId
     <div ref={setNodeRef} className={cn("column-body", isOver && "drop-target")}>
       {!empty && children}
       {showForm ? (
-        <div className="inline-add-form">
-          <input
-            className="prop-input w-full is-focused"
-            aria-label="Task title"
-            value={title}
-            onChange={(e) => setTitle(e.target.value)}
-            onKeyDown={handleKeyDown}
-            placeholder="Task title"
-            autoFocus
-          />
-          <div className="flex flex-col gap-2 mt-2">
-            <div className="flex items-center justify-between">
-              <span className="prop-label">Priority</span>
-              <select className="prop-input" aria-label="Priority" style={{ width: 140, color: priorities.find((p) => p.id === priority)?.color ?? "var(--lx-text-muted)" }} value={priority} onChange={(e) => setPriority(e.target.value)}>
-                {priorities.map((p) => (
-                  <option key={p.id} value={p.id} style={{ color: p.color }}>● {p.label}</option>
-                ))}
-              </select>
-            </div>
-            <div className="flex items-center justify-between">
-              <span className="prop-label">Type</span>
-              <select className="prop-input" aria-label="Type" style={{ width: 140, color: types.find((t) => t.id === type)?.color ?? "var(--lx-text-muted)" }} value={type} onChange={(e) => setType(e.target.value)}>
-                {types.map((t) => (
-                  <option key={t.id} value={t.id} style={{ color: t.color }}>● {t.label}</option>
-                ))}
-              </select>
-            </div>
-          </div>
-          <div className="flex items-center justify-end gap-2 mt-3">
-            <button type="button" className="btn btn-ghost btn-sm" onClick={resetForm} disabled={createTask?.isPending}>
-              Cancel
-            </button>
-            <button
-              type="button"
-              className="btn btn-primary btn-sm"
-              onClick={handleSave}
-              disabled={!title.trim() || createTask?.isPending}
-            >
-              {createTask?.isPending ? "Saving..." : "Save"}
-            </button>
-          </div>
-        </div>
+        <InlineTaskForm
+          title={title}
+          onTitleChange={setTitle}
+          onKeyDown={handleKeyDown}
+          priorities={priorities}
+          priority={priority}
+          onPriorityChange={setPriority}
+          types={types}
+          type={type}
+          onTypeChange={setType}
+          onCancel={resetForm}
+          onSave={handleSave}
+          saving={createTask?.isPending ?? false}
+        />
       ) : (
-        <button type="button" className="add-task-btn" style={empty ? { marginTop: 8 } : undefined} onClick={() => setShowForm(true)}>
-          <Plus size={14} strokeWidth={1.5} />
-          Add task...
-        </button>
+        <AddTaskButton empty={empty} onClick={() => setShowForm(true)} />
       )}
     </div>
   );
