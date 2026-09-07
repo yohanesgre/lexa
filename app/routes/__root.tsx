@@ -81,7 +81,8 @@ function RootComponent() {
   const { queryClient } = Route.useRouteContext();
   useAuthBounce();
   return (
-    <html lang="en" suppressHydrationWarning>      <head>
+    <html lang="en" suppressHydrationWarning>
+      <head>
         <HeadContent />
         <script
           suppressHydrationWarning
