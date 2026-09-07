@@ -4,8 +4,9 @@
 # status/design-deploy-tooling.md §13.
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-if [ -f "${SCRIPT_DIR}/install-lib.sh" ]; then
+SELF="${BASH_SOURCE[0]:-}"
+if [ -n "$SELF" ] && [ -f "$SELF" ]; then
+  SCRIPT_DIR="$(cd "$(dirname "$SELF")" && pwd)"
   # shellcheck source=scripts/install-lib.sh
   source "${SCRIPT_DIR}/install-lib.sh"
 else
@@ -35,9 +36,9 @@ fi
 case "${TARGET}" in
   docker)
     DEPLOY_DIR="${DEPLOY_DIR:-lexa-deploy}"
-    [ -d "${DEPLOY_DIR}" ] || die "deploy dir '${DEPLOY_DIR}' not found — pass --from-repo? no: pass DEPLOY_DIR env or cd next to it"
-    cd "${DEPLOY_DIR}"
-    step "compose down" mutate docker compose down
+    [ -d "${DEPLOY_DIR}" ] || die "deploy dir '${DEPLOY_DIR}' not found — pass DEPLOY_DIR env or cd next to it"
+    DEPLOY_DIR="$(cd "${DEPLOY_DIR}" && pwd)"
+    (cd "${DEPLOY_DIR}" && step "compose down" mutate docker compose down)
     if [ "${PURGE}" = "1" ]; then
       step "remove data volume" mutate docker volume rm lexa-data
     else
