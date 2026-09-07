@@ -51,20 +51,21 @@ export function SetupStepSeed({ onDone, onBack }: { onDone: () => void; onBack: 
 
       <div role="radiogroup" aria-label="Sample data" className="flex flex-col gap-2 mb-4">
         {OPTIONS.map((option) => (
-          <div
+          <button
             key={option.flavor}
+            type="button"
             role="radio"
             aria-checked={choice === option.flavor}
             className="check-row"
-            style={{ alignItems: "flex-start" }}
+            style={{ alignItems: "flex-start", textAlign: "left", width: "100%" }}
             onClick={() => setChoice(option.flavor)}
           >
             <span className={`radio ${choice === option.flavor ? "checked" : ""}`} style={{ marginTop: 3 }} />
-            <div>
-              <div className="text-sm text-lx-text-primary">{option.title}</div>
-              <div className="text-xs text-lx-text-muted" style={{ marginTop: 2 }}>{option.description}</div>
-            </div>
-          </div>
+            <span>
+              <span className="text-sm text-lx-text-primary" style={{ display: "block" }}>{option.title}</span>
+              <span className="text-xs text-lx-text-muted" style={{ display: "block", marginTop: 2 }}>{option.description}</span>
+            </span>
+          </button>
         ))}
       </div>
 
