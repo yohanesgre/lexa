@@ -7,6 +7,17 @@ All notable changes to Lexa are documented here. Format based on
 
 ## [Unreleased]
 
+## [2026.1.3] - 2026-09-07
+
+### Fixed
+
+- **Piped installs (`curl \| bash`) crashed at bootstrap** — piped runs have no
+  `BASH_SOURCE[0]` and `set -u` aborted before anything executed; the lib now
+  bootstraps into a temp dir when piped and uses the checkout when run
+  directly (`v2026.1.2` shipped this bug — found by the first real piped e2e)
+- **Uninstall left the deploy dir behind** — the removal ran from inside the
+  dir with a relative path (silent no-op); now resolves to an absolute path
+
 ## [2026.1.2] - 2026-09-07
 
 ### Added
