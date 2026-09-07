@@ -7,6 +7,18 @@ All notable changes to Lexa are documented here. Format based on
 
 ## [Unreleased]
 
+## [2026.2.8] - 2026-09-08
+
+### Fixed
+
+- **Workers deployment served blank pages** — the workers ssr environment
+  renders the SPA shell without the entry `<script type=module>` tag (the
+  client manifest never queues scripts in that environment), so the served
+  shell never boots the client: empty page, clean console. The SSR handler
+  now re-attaches the entry script from the shell's own `$_TSR` manifest
+  when absent. Not a Workers free-plan limitation — reproduced in local
+  workerd with a complete, script-less response (#38)
+
 ## [2026.2.7] - 2026-09-08
 
 ### Fixed
