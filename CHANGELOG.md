@@ -7,6 +7,24 @@ All notable changes to Lexa are documented here. Format based on
 
 ## [Unreleased]
 
+## [2026.2.3] - 2026-09-08
+
+### Fixed
+
+- **Workers deploy: wrangler never got the CF token** — the REST calls
+  authenticated fine but `d1`/`deploy` steps spawned `bunx wrangler` with a
+  bare environment, which prompted for login and failed instantly
+  (`D1 journal init failed (status 1)`, stderr swallowed). The token now
+  flows through the environment, captured stderr tails surface in error
+  messages, and the deploy config carries `account_id`
+- **Re-running a failed workers install crashed at unpack** — leftover
+  tarballs from older tags made the `lexa-workers-*.tar.gz` glob match
+  twice and tar treated the second as an archive member; the newest tarball
+  is now extracted explicitly and stale extractions are cleaned first
+- Interactive installs now **ask the flavor** (staging default); previously
+  `--flavor` was flag-only and every interactive run silently deployed
+  staging (#26)
+
 ## [2026.2.2] - 2026-09-08
 
 ### Fixed
