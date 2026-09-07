@@ -297,7 +297,7 @@ describe("cmdGithubSetup", () => {
       expect(out).toContain("first-boot BOOTSTRAP");
       expect(out).toContain("server imports");
       expect(out).toContain("never overwrite values already set");
-      expect(out).toContain("inert until a fresh deploy");
+      expect(out).toContain("env-file writes are inert");
       log.mockRestore();
     });
   });

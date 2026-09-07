@@ -1,112 +1,89 @@
 # Deployment & Environment Contract
 
-This doc is the single source of truth for the environment configuration of a
-Lexa deployment. The working `.env*` files are **never committed** — values
-are generated on the machine by the setup wizard (`bun run setup`) or by
-`lexa-cli deploy`, and all `.env*` are gitignored. The tracked
-`.env.example` (repo root) is the dev template only; prod/staging values are
-documented here.
+This doc is the single source of truth for deploying Lexa and configuring its
+environment. Deployment goes through **`scripts/install.sh`** — one script,
+four targets (`docker | bare | workers | dev`), zero clone for the hosted
+targets. The first superadmin is provisioned **only** by the web `/setup`
+wizard (email + password ≥8) — the script never handles passwords.
 
-## Flavors
+> Removed in cli-v2026.2.0: `lexa-cli deploy` / `lexa-cli undeploy` /
+> `--runtime workers` — hard-remove, no stubs. The install script replaced
+> them; `lexa-cli` is now an operate-only headless frontend (tasks, wiki,
+> machines, keys, upgrades).
 
-| Flavor | Env file | `LXK_ENV` | Compose files | Subdomain | Tunnel |
-|---|---|---|---|---|---|
-| dev (local) | `.env` | `dev` | `docker-compose.yml` | — | none |
-| staging | `.env.staging` | `staging` | `docker-compose.yml` + `docker-compose.staging.yml` | `lexa-preview.<domain>` | `lexa-staging` |
-| prod | `.env.prod` | `prod` | `docker-compose.yml` + `docker-compose.prod.yml` | `lexa.<domain>` | `lexa-prod` |
+The working `.env*` files are **never committed** — values are generated on
+the machine by the install script or the setup wizard, and all `.env*` are
+gitignored. The tracked `.env.example` (repo root) is the dev template only.
+
+## Targets
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/yohanesgre/lexa/<tag>/scripts/install.sh | bash -s -- <target> [flags]
+```
+
+| Target | Needs | Layout |
+|---|---|---|
+| `docker` | docker + compose plugin | deploy dir with compose file + `.env`; prebuilt image from `ghcr.io/yohanesgre/lexa` (CI: main → `:staging`, `v*` tags → `:latest`; `--image <tag>` pins) |
+| `bare` | curl, `sha256sum`; bun auto-installed if absent | `~/.lexa-server` (release tarball, checksum-verified) + `lexa-start.sh`; `--systemd` writes + enables the `lexa` unit |
+| `workers` | bun (runs `bunx wrangler`), Cloudflare API token | D1 database + R2 bucket + KV namespace provisioned, migrations applied, prebuilt Worker bundle deployed (`scripts/workers-install.ts`) |
+| `dev` | git + bun | clones the repo into `./lexa`, `bun install`, `bun run setup`, `bun run dev:full` |
+
+Flags: `--flavor staging|prod` (default staging), `--port` (docker, default
+8080), `--bind` (default 127.0.0.1), `--key <lxk_...>` (auto-generated +
+printed once if absent), `--domain` (workers custom domain; skips the prompt),
+`--systemd` (bare), `--image <tag>` (docker), `--from-repo <dir>` (install
+from a local checkout), `--yes`.
+
+The docker target uses direct semantics — host port mapping, no tunnel. Put
+your own reverse proxy in front of `<bind>:<port>` to reach it over TLS.
+
+### Cloudflare Workers target
+
+- **Custom domain:** interactive runs always offer the prompt (Enter =
+  free `lexa.<account>.workers.dev` subdomain); `--domain lexa.example.com`
+  skips it (zone-validated at provision time).
+- **Cloudflare token:** `CF_API_TOKEN` env or prompt (Workers scripts, D1,
+  R2, KV permissions). Provisioning is find-or-create — re-runs reuse the
+  existing D1/R2/KV resources and apply migrations incrementally.
+- No tunnel, no VPS: the Worker route (custom domain or workers.dev) is the
+  public entry. See `docs/CLOUDFLARE_WORKERS.md` for runtime details.
+
+### Uninstall
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/yohanesgre/lexa/<tag>/scripts/uninstall.sh | bash -s -- <target>
+```
+
+Data is **kept** unless `--purge` (requires typing `purge` on a TTY): docker
+removes the compose project but keeps the `lexa-data` volume; bare keeps the
+install dir; workers keeps D1/R2/KV; dev keeps `data/`. The CLI itself is
+uninstalled manually (`rm $(which lexa-cli)`).
+
+## Upgrade
+
+**Re-run `install.sh` from the new release tag — that is the whole upgrade.**
+The script is idempotent: docker pulls the new image and recreates the
+container (`lexa-data` volume survives); bare fetches the new tarball and
+restarts; workers reuses the Cloudflare resources and applies only new
+migrations. DB migrations run at server boot.
+
+## Seed gate
 
 `LXK_ENV` is the seed gate: when set and not `dev`, sample data is refused at
 three layers — the `/api/setup/seed` endpoint, the CLI wizard, and the web
-wizard's sample-data step. Prod/staging stay empty; the Backlog swimlane and
-default columns appear when the first project is created (project-creation
-logic, not seed).
-
-## Deployment options
-
-Three ways to reach the public internet — same image and data layout.
-Pick one per flavor.
-
-### Option 1 — Direct: public IP + own reverse proxy (`--direct`)
-
-For machines with a public IP where you already terminate TLS (nginx,
-Caddy, …). Lexa listens on plain HTTP `:3000`; the direct overlay
-publishes it (`docker-compose.direct.yml`, no `tunnel` service) and your
-proxy forwards to it. No Cloudflare account, token, tunnel, or DNS
-provisioning happens at all:
-
-```bash
-lexa-cli deploy <domain> prod --direct --public-url https://lexa.example.com
-```
-
-`--public-url` (or `LXK_PUBLIC_URL`) is required — it becomes
-`LXK_PUBLIC_URL` in `.env.<flavor>` (Better Auth base URL + trusted
-origin). The env file is written without `CF_TUNNEL_TOKEN`. All other
-flags (`--image`, `--clean`, `--admin-email`, `--api-key`,
-`--deploy-dir`) behave as in tunnel mode.
-
-### Option 2 — Tunnel: CGNAT / no public IP (default)
-
-The Bun flavors reach the public internet through an outbound-only cloudflared
-tunnel — no public IP, no open ports, no port-forwarding on the host. This is
-the path for machines behind NAT/CGNAT or with no public IP at all: the tunnel
-dials out to Cloudflare, so inbound connectivity is never required.
-
-### Option 3 — Workers flavor — parallel, optional ($5/mo)
-
-> **Status: SHIPPED — first remote deploy unwatched.** The flavor is complete
-> and proven on local workerd + local D1 (full API, session auth, SSR, webhook
-> round-trip, dump-replay). The first REMOTE deploy still needs a human eye on
-> the migration log (failure is loud + atomic, never partial). Known gaps on
-> Workers: Lexa→GitHub push half untested without real App creds; Herald
-> provider execution untested; session list/revoke endpoints 500. Bun flavor
-> is unaffected.
-
-The Bun flavors above are Docker + SQLite + cloudflared. A parallel
-**Workers flavor** — Cloudflare Workers + D1 + R2 + KV — coexists peer-level
-(same source tree, separate domain/DB/bucket). See `docs/CLOUDFLARE_WORKERS.md`
-for the $5/mo rationale, feasibility tables, and full HOW.
-
-- **Dispatch:** `lexa-cli deploy <domain> --runtime workers [staging|prod]` — the
-  operator's pick point. `bun` (default) uses the Docker+cloudflared flow above;
-  `workers` provisions Cloudflare resources via the Cloudflare API and ships a
-  prebuilt Worker bundle (Vite plugin chain emits two server bundles).
-- **Cloudflare provisioning (per flavor):** D1 database + R2 bucket (attachments,
-  native binding driver) + KV (if needed) + Worker route + custom domain. No
-  tunnel, no VPS.
-- **Migrations & seed:** `lexa-cli deploy --runtime workers` applies each
-  `migrations/*.sql` file to D1 via `wrangler d1 execute --file` — one batch
-  per file plus its `_migrations` registry row, the same semantics as the Bun
-  boot-time runner (no `wrangler d1 migrations` journal involved).
-- **Cron:** Workers' `scheduled` handler runs prune + backup on `*/15 * * * *`
-  (`wrangler.jsonc`); Bun keeps its `setInterval`.
-- **Secrets:** `wrangler secret put` for all secrets; `GITHUB_PRIVATE_KEY_FILE`
-  is **impossible** on Workers (no filesystem) — use inline `GITHUB_PRIVATE_KEY`
-  (already supported per `docs/GITHUB_SETUP.md`). The settings DB remains the
-  runtime source of truth for GitHub App credentials.
-- **No data sync** between flavors — dump the Bun DB and replay on D1 to
-  migrate: dump with raw UTF-8 literals (D1 has no `unistr()`), exclude FTS5
-  shadow tables (`wiki_fts*` rebuilds via triggers on replay;
-  `project_memory_fts` needs one appended
-  `INSERT INTO project_memory_fts(rowid, content) SELECT rowid, content FROM
-  project_memory`), prefix the file with `PRAGMA defer_foreign_keys = ON`.
-- **Snapshots:** no in-worker backup builds (retention prune only) — snapshot
-  via `wrangler d1 export <db> --remote --output snap.sql`.
-- **Compliance gate:** `scripts/check-invariants.ts` scans the source tree for
-  the 14 invariants and fails any PR that violates them.
-
-The Workers flavor is opt-in — once shipped, either or both flavors can be live
-on different domains; one failing does not affect the other.
+wizard's sample-data step. Staging/prod stay empty; the Backlog swimlane and
+default columns appear when the first project is created.
 
 ## Who writes what
 
 | Variable | Written by | Required |
 |---|---|---|
-| `LXK_API_KEY` | setup wizard / `lexa-cli deploy` (or `--api-key`) | yes |
-| `LXK_ADMIN_EMAILS` | setup wizard / `lexa-cli deploy` (or `--admin-email`) | yes (superadmin bootstrap, env-only) |
-| `LXK_PUBLIC_URL` | `lexa-cli deploy` (from the deploy domain; `--public-url` with `--direct`) | staging/prod (Better Auth baseURL) |
-| `LXK_ENV` | setup wizard (`--prod`/`--staging`) / `lexa-cli deploy` | yes (prod/staging) |
-| `CF_TUNNEL_TOKEN` | `lexa-cli deploy` (tunnel mode only) | tunnel only |
-| `GITHUB_APP_ID` / `GITHUB_WEBHOOK_SECRET` | preserved across deploys; set once by hand for issue sync | only for GitHub sync |
+| `LXK_API_KEY` | install script (or `--key`) / setup wizard | yes |
+| `LXK_ENV` | install script (`--flavor`) / setup wizard | yes (staging/prod) |
+| `LXK_PUBLIC_URL` | install script (from `--bind`/`--port`/`--domain`) | staging/prod (Better Auth baseURL) |
+| `CF_API_TOKEN` | operator env (workers target only) | workers only |
+| `LXK_ADMIN_EMAILS` | setup wizard (dev bootstrap) | dev only |
+| `GITHUB_APP_ID` / `GITHUB_WEBHOOK_SECRET` | hand-set once for issue sync; preserved across re-runs | only for GitHub sync |
 | `GITHUB_PRIVATE_KEY` / `GITHUB_PRIVATE_KEY_FILE` | hand-set; PEM volume-mounted read-only in prod compose | only for GitHub sync |
 | `LXK_HEARTH_DAEMON_TOKEN` | hand-set (Settings alternative) | only for Hearth daemons |
 | `LXK_MAX_BODY_MB` / `LOG_LEVEL` / `DATABASE_PATH` / `PORT` | defaults; tune by hand | no |
@@ -122,153 +99,65 @@ on different domains; one failing does not affect the other.
 | `GITHUB_PRIVATE_KEY_FILE` | App private key file path (read at boot, no escaping — recommended) |
 | `GITHUB_WEBHOOK_SECRET` | HMAC secret for the `/api/webhooks/github` route |
 | `LOG_LEVEL` | logging level (default `info`) |
-| `LXK_ADMIN_EMAILS` | comma-separated **superadmin** emails — env-only allow-list, applied at provisioning (setup wizard only); never edited at runtime |
+| `LXK_ADMIN_EMAILS` | comma-separated **superadmin** emails — env-only allow-list, applied at provisioning (dev setup wizard only); never edited at runtime |
 | `LXK_API_KEY` | server auth Bearer key (`lxk_` + 43 chars) — machines use it directly; browsers authenticate via the session cookie |
 | `LXK_HEARTH_DAEMON_TOKEN` | shared secret for Hearth daemons (alternative to a Settings API key) |
 | `LXK_MAX_BODY_MB` | max request body for `/api` in MB (default 16); webhook payloads hard-capped at 1 MB before HMAC, regardless |
-| `LXK_PUBLIC_URL` | public base URL of this flavor (e.g. `https://lexa.example.com`) — Better Auth `baseURL` + `trustedOrigins`; written by `lexa-cli deploy` from the deploy domain; hand-set in dev |
+| `LXK_PUBLIC_URL` | public base URL of this install (e.g. `https://lexa.example.com`) — Better Auth `baseURL` + `trustedOrigins`; written by the install script; hand-set in dev |
 | `LXK_SEED_DEV` | dev-only boot-time sample data (`1` enables; set by `scripts/dev.sh`) |
 | `PORT` | server port (default 3000) |
 
 **Unused by the server:** `LXK_ACCESS_AUD` / `LXK_ACCESS_TEAM` (Cloudflare
-Access) — the server reads them nowhere, but docker-compose still passes both
-into the container and `lexa-cli deploy` still rewrites them. `VITE_LXK_API_KEY`
-is still written by setup but read by nothing — browsers authenticate via the
-session cookie. **Never exist:** Google OAuth
-envs, SMTP envs — human auth is in-app email/password (Better Auth).
+Access) — the server reads them nowhere. `VITE_LXK_API_KEY` is written by the
+dev setup but read by nothing — browsers authenticate via the session cookie.
+**Never exist:** Google OAuth envs, SMTP envs — human auth is in-app
+email/password (Better Auth).
 
 ## Bootstrap
 
-**Local dev:** `bun run setup` (CLI wizard: admin email, API key, migrations,
-optional sample data) then `bun run dev:full` (API :3000 + vite :5173, vite
-proxies `/api`). `dev:full` sets `LXK_SEED_DEV=1` for boot-time
-sample data. Dev also sets `LXK_PUBLIC_URL=http://localhost:5173` (the
-Better Auth base URL + cookie domain for the local flow). See the repository
-README.
+**Local dev:** `bun run setup` (dev-only CLI wizard: admin email, API key,
+migrations, optional sample data — self-hosters use the install script +
+`/setup` wizard instead) then `bun run dev:full` (API :3000 + vite :5173,
+vite proxies `/api`). `dev:full` sets `LXK_SEED_DEV=1` for boot-time sample
+data. Dev also sets `LXK_PUBLIC_URL=http://localhost:5173` (the Better Auth
+base URL + cookie domain for the local flow). See the repository README.
 
-**Remote deploy** (no bun, no repo needed):
+**Superadmin account:** after install, open `<url>/setup` once — the wizard
+creates the first superadmin (free-choice email + password; the password is
+never passed as a shell flag or env var). Members are onboarded via
+superadmin-issued workspace invite links (7d expiry) and set-password links —
+no email transport anywhere.
 
-```bash
-curl -fsSL https://raw.githubusercontent.com/yohanesgre/lexa/main/scripts/install-cli.sh | bash
-lexa-cli deploy <domain> prod
-```
+**Verify:**
 
-The image is built and pushed by CI (`.github/workflows/publish.yml`): main →
-`ghcr.io/yohanesgre/lexa:staging`, `v*` tags → `:latest` (prod). The binary
-embeds the compose files (image refs, volumes, tunnel — few KB) and pulls the
-image — **no checkout, no build, no git**. It checks docker/compose,
-provisions Cloudflare (tunnel, DNS; skipped with `--direct`), writes `.env.prod`
-into `~/.lexa/<domain>/deploy/` (the `~/.lexa-staging` root is the legacy
-flavor layout, migrated into host-keyed groups), and runs
-`docker compose up`. **Redeploy = upgrade**:
-deploy always pulls the latest image; `--image <tag>` pins a specific version;
-`--clean` recreates from scratch (removes the `lexa-data` volume — DB wiped,
-confirmed on a TTY). The data volume survives normal redeploys untouched.
-Non-interactive flags: `--cf-token`, `--admin-email`,
-`--api-key`, `--deploy-dir`, `--image`, `--clean`, `--direct`,
-`--public-url`. No Google/Access flags —
-human auth is in-app (Better Auth).
-
-Provisioning from a checkout instead: `bun run setup --prod --admin-email x --yes`
-writes `.env.prod` with `LXK_ENV=prod`, runs migrations, mirrors the admin
-email, locks setup, and seeds nothing.
-
-**Superadmin account:** after deploy (or setup), open `/setup` once — the
-wizard creates the first superadmin (email + password, email-free; the
-password is never passed as a shell flag). The allow-list is applied at
-account creation only: later `LXK_ADMIN_EMAILS` edits affect only users
-created after the change (Q12). Members are onboarded via
-superadmin-issued workspace invite links (7d
-expiry) and set-password links — no email transport anywhere.
-
-**Teardown:** `lexa-cli undeploy <domain> [staging|prod]` reverses a deploy for
-that flavor: `docker compose down -v` (containers + data volume, DB wiped),
-deletes the Cloudflare resources (DNS record, tunnel), and removes the local
-state (flavor deploy dir + stored deploy creds; login stays). Prompts for
-confirmation on a TTY; non-TTY needs `--yes`. Cloudflare steps are
-best-effort — a missing token or failed API call warns and continues, so
-local teardown always completes.
+- Browse the deployed URL → redirected to the in-app login page
+- Sign in with the superadmin email + password → dashboard loads
+- `curl <url>/api/health` → **200** (key-exempt probe)
+- `curl -i <url>/api/projects` → **401** (no key, no session)
+- `lexa-cli login --url <url> --key <lxk_...>` → "Logged in" (needs a key
+  from Settings → API Keys)
 
 **GitHub sync** — see `docs/GITHUB_SETUP.md` (includes the acceptance round-trip).
 
-## Human auth (in-app, email/password)
+## Security notes
 
-Human auth runs **in-process**: Better Auth 1.6.27 on the Bun server
-(`server/auth.ts`), mounted at `/api/auth/*` — no Cloudflare Access, no
-Google OAuth, no external IdP, no SMTP. Provisioning is the only hand step:
-the `/setup` wizard (first run) creates the superadmin with a password;
-`LXK_ADMIN_EMAILS` is the env-only superadmin allow-list.
-
-### 1. Cloudflare API token (tunnel mode — skipped with `--direct`)
-
-Create a token with exactly these permissions (see `lexa-cli deploy` prompt):
-
-| Scope | Permission |
-|---|---|
-| Cloudflare One | Cloudflare One Connectors — **Write** |
-| Zone | DNS — **Write** |
-
-Pass it with `--cf-token <token>` or `CF_API_TOKEN` / `CLOUDFLARE_API_TOKEN`.
-
-### 2. What `lexa-cli deploy` provisions (per flavor, tunnel mode)
-
-Account = the first account on the token; zone = the one matching `<domain>`.
-All Cloudflare state is per-flavor (distinct names for staging vs prod):
-
-1. **Tunnel** `lexa-staging` / `lexa-prod` — token written to `.env.<flavor>` as `CF_TUNNEL_TOKEN`.
-   The tunnel container dials out to Cloudflare (outbound-only), so the host
-   needs no public IP and no inbound ports — works behind NAT/CGNAT.
-2. **DNS** — CNAME `<subdomain>.<domain>` → `<tunnel>.cfargotunnel.com` (proxied)
-3. **Ingress** — `<subdomain>.<domain>` → `http://app:3000` (warns on failure; add manually via Zero Trust → Tunnels → Public Hostnames if the API call fails)
-
-No Access apps, no IdPs, no policies — auth is in-app and needs no Cloudflare
-configuration. The deploy also writes `LXK_PUBLIC_URL=https://<subdomain>.<domain>`
-into the flavor env (Better Auth base URL + trusted origin).
-
-**Security model:** `/api/*` accepts a session cookie OR a Bearer key
-(dual-channel); `/api/webhooks/*` is HMAC-only — no edge
-gate exists, so there is nothing to bypass. Keys are `lxk_` + 43 base62
-chars (256-bit), rate-limited per IP, and revocable per-named-key (Settings →
-API Keys). Failed logins on `/api/auth/*` are throttled in-process (Better
-Auth rate-limit plugin; ~5 attempts/60s per email, 15 min lockout).
-
-Deploy creds (CF token) persist in
-`~/.lexa/<host>/config.json` under the
-`deploy` key.
-
-### 3. After deploy — create the superadmin
-
-Open `https://<subdomain>.<domain>/setup` in a browser once: the wizard
-creates the first superadmin (email + password; password is never a shell
-flag or env var). `LXK_ADMIN_EMAILS` must already list that email in
-`.env.<flavor>` (deploy's `--admin-email` or the wizard). The wizard also
-mints the machine API key and locks setup.
-
-Subsequent humans onboard via **workspace invite links** (Settings →
-Workspace → Members → Invite) and **set-password links** — both issued by a
-superadmin, link-based, 7d expiry, shared out-of-band. No email transport
-exists.
-
-### 4. Verify
-
-- Browse `https://<subdomain>.<domain>` → redirected to the in-app login page
-- Sign in with the superadmin email + password → dashboard loads
-- `curl https://<subdomain>.<domain>/api/health` → **200** (key-exempt probe)
-- `curl -i https://<subdomain>.<domain>/api/projects` → **401** (no key, no session)
-- `lexa-cli login --url https://<subdomain>.<domain> --key <lxk_...>` → "Logged in" (needs a key from Settings → API Keys)
-- Account menu (top right) shows the signed-in identity + **Log out**
-
-## Secrets hygiene
-
+- **Pipe per-tag URLs.** Always pipe the install/uninstall script from a
+  pinned release tag (`…/v2026.1.2/scripts/install.sh`), never `main` — the
+  script content cannot change between your read and your run. Bare-metal
+  tarballs are additionally sha256-verified by the script.
 - `.env`, `.env.staging`, `.env.prod` are gitignored — values are generated on
-  the machine, never committed.
-- `lexa-cli deploy` preserves `LXK_API_KEY` / `LXK_ADMIN_EMAILS` /
-  `LXK_PUBLIC_URL` / `GITHUB_*`
-  across re-runs so re-deploys don't rotate keys or clobber sync config.
+  the machine, never committed. The install script preserves `GITHUB_*` and
+  `LXK_API_KEY` across re-runs so upgrades don't rotate keys or clobber sync
+  config.
 - The GitHub App private key is never written to the env file: it is either
   referenced via `GITHUB_PRIVATE_KEY_FILE` or mounted read-only into the
   container (`./github-app.private-key.pem:/app/github-app.private-key.pem:ro`
   in prod compose; the PEM itself is gitignored).
+- `/api/*` accepts a session cookie OR a Bearer key (dual-channel);
+  `/api/webhooks/*` is HMAC-only. Keys are `lxk_` + 43 base62 chars
+  (256-bit), rate-limited per IP, revocable per-named-key (Settings → API
+  Keys). Failed logins on `/api/auth/*` are throttled in-process (Better Auth
+  rate-limit plugin; ~5 attempts/60s per email, 15 min lockout).
 
 ## Upgrading across the Forge→Hearth rename (2026-08-24)
 
@@ -288,4 +177,4 @@ lexa-cli machine uninstall && lexa-cli machine install
 ```
 
 Old daemons sending `x-forge-token` or polling `/api/forge/*` get 401/404
-after the server upgrade — redeploy the server first, then reinstall machines.
+after the server upgrade — upgrade the server first, then reinstall machines.

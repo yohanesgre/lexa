@@ -22,7 +22,6 @@
 import { Effect, Data } from "effect";
 import { LexaClient, ApiError } from "./api";
 import { CliConfigService, groupDir, migrateFlavorRootsSync, type CliConfig } from "./config";
-import { cmdDeploy, cmdUndeploy } from "./deploy";
 import { cmdGithubStatus, cmdGithubSetup, cmdGithubCheck } from "./github";
 import { cmdUpgradeCli } from "./upgrade";
 import { CLI_VERSION } from "./version";
@@ -543,27 +542,13 @@ Hearth workspaces (local machine view):
   machine workspace list                         per-project dirs under ~/.lexa/<host>/projects/ (per server)
   machine workspace sync                         re-index projects from the server + provision
 
-Deploy (Docker + cloudflared tunnel, outbound-only — CGNAT-safe):
-  deploy <domain> [staging|prod] [--direct]
-                                          tunnel provisioning (skipped with
-                                           --direct: no Cloudflare, publishes
-                                           :3000 for your own reverse proxy;
-                                           requires --public-url),
-                                           .env.<flavor> + docker compose up
-                                           (redeploy = upgrade: pulls the latest image;
-                                           --image <tag> pins a version; --clean wipes the DB)
-                                           --runtime workers: Workers flavor
-                                            (D1+R2+KV provisioning)
-  undeploy <domain> [staging|prod]        teardown: containers, volume, CF resources,
-                                           local state (deploy dir + creds)
-
 GitHub sync (optional integration):
   github status [--local] [--env-file <path>]
                                        read the LIVE server state (default;
                                        needs login — the server DB is the
                                        source of truth); --local: validate
                                        GITHUB_* in the LOCAL env file (offline
-                                       pre-deploy bootstrap check)
+                                       offline GITHUB_* bootstrap check)
   github setup [--local] [--env-file <path>]
                                        configure App ID + PEM + webhook secret
                                        (default: push to the server API —
@@ -580,8 +565,6 @@ GitHub sync (optional integration):
 
 Upgrade:
   upgrade                                self-update the CLI binary (GitHub release)
-                                           (web app upgrades = lexa-cli deploy — it pulls
-                                           the latest image; --image pins a tag)
 
 Env fallbacks: LEXA_URL, LEXA_API_KEY. Flags override saved login.
 `;
@@ -626,7 +609,7 @@ Hearth workspaces (local machine view):
                                        needs login; the server DB is the source
                                        of truth at runtime); --local: validate
                                        GITHUB_* in the LOCAL env file (offline
-                                       pre-deploy bootstrap check)
+                                       bootstrap check)
   github setup [--local] [--env-file <path>]
                                        configure GITHUB_APP_ID + PEM + secret
                                        (default: push to the server API —
@@ -645,10 +628,7 @@ Hearth workspaces (local machine view):
                                        irrelevant)`,
 
   upgrade: `Upgrade:
-  upgrade                                        self-update the CLI binary (GitHub release)
-                                                  (web app upgrades = deploy: it pulls the
-                                                  latest image; --image pins a tag; --clean
-                                                  wipes the DB volume)`,
+  upgrade                                        self-update the CLI binary (GitHub release)`,
 };
 
 function usage(cmd: string, sub: string): never {
@@ -683,24 +663,6 @@ async function main(): Promise<void> {
     case "login": program = cmdLogin(flags); prefix = "Login failed"; break;
     case "logout": program = cmdLogout(flags); break;
     case "status": program = cmdStatus(flags); prefix = "Status check failed"; break;
-    case "deploy": {
-      const runtime = flags.runtime === "workers" ? "workers" : "bun";
-      const { cmdDeployWorkers } = await import("./deploy-workers");
-      program = runtime === "workers"
-        ? cmdDeployWorkers(flags, positionals.slice(1))
-        : cmdDeploy(flags, positionals.slice(1));
-      raw = true;
-      break;
-    }
-    case "undeploy": {
-      const runtime = flags.runtime === "workers" ? "workers" : "bun";
-      const { cmdUndeployWorkers } = await import("./deploy-workers");
-      program = runtime === "workers"
-        ? cmdUndeployWorkers(flags, positionals.slice(1))
-        : cmdUndeploy(flags, positionals.slice(1));
-      raw = true;
-      break;
-    }
     case "upgrade":
       if (sub !== "") usage("upgrade", sub);
       program = cmdUpgradeCli(); break;

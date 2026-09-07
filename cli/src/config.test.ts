@@ -183,32 +183,6 @@ describe("CliConfigService", () => {
     expect(log).toHaveBeenCalledWith(expect.stringContaining("Logged out. Removed"));
     log.mockRestore();
   });
-  it("saveDeployCreds/loadDeployCreds round-trip and coexist with login keys", async () => {
-    const svc = await loadService();
-    const g = await groupFor("http://example.com");
-    await Effect.runPromise(svc.saveConfig({ url: "http://example.com", apiKey: "k" }, g));
-    const creds = { cfToken: "cf-t" };
-    await Effect.runPromise(svc.saveDeployCreds(creds, g));
-    expect(await Effect.runPromise(svc.loadDeployCreds(g))).toEqual(creds);
-    // The login must survive the deploy-creds write.
-    expect(await Effect.runPromise(svc.loadConfig(g))).toEqual({ url: "http://example.com", apiKey: "k" });
-    expect(mode(join(g, "config.json"))).toBe(0o600);
-  });
-  it("saveDeployCreds with partial creds stores only the provided keys", async () => {
-    const svc = await loadService();
-    const g = await groupFor("http://example.com");
-    await Effect.runPromise(svc.saveDeployCreds({ cfToken: "cf-t" }, g));
-    expect(await Effect.runPromise(svc.loadDeployCreds(g))).toEqual({ cfToken: "cf-t" });
-  });
-  it("saveDeployCreds replaces a corrupt config.json", async () => {
-    const g = await groupFor("http://example.com");
-    mkdirSync(g, { recursive: true });
-    writeFileSync(join(g, "config.json"), "{corrupt");
-    const svc = await loadService();
-    await Effect.runPromise(svc.saveDeployCreds({ cfToken: "cf-t" }, g));
-    const raw = JSON.parse(readFileSync(join(g, "config.json"), "utf-8")) as { deploy?: unknown };
-    expect(raw.deploy).toEqual({ cfToken: "cf-t" });
-  });
   it("savedLogin finds the login in a group dir", async () => {
     const svc = await loadService();
     await Effect.runPromise(svc.saveConfig({ url: "http://lexa.example.com", apiKey: "k" }, await groupFor("http://lexa.example.com")));

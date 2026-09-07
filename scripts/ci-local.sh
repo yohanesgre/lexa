@@ -164,17 +164,17 @@ fi
 # ── CLI compile check ─────────────────────────────────────────────────
 section "CLI compile check"
 if bun run compile:cli 2>&1; then
-  if git diff --exit-code -- cli/src/packed.ts cli/src/packed-compose.ts >/dev/null 2>&1; then
+  if git diff --exit-code -- cli/src/packed.ts >/dev/null 2>&1; then
     ok "CLI compile (no dirty packed files)"
   else
-    warn "cli/src/packed.ts or packed-compose.ts dirty after compile:cli - warn not hard (restoring stubs)"
-    git diff -- cli/src/packed.ts cli/src/packed-compose.ts | head -n 100 || true
+    warn "cli/src/packed.ts dirty after compile:cli - warn not hard (restoring stubs)"
+    git diff -- cli/src/packed.ts | head -n 100 || true
   fi
-  git checkout -- cli/src/packed.ts cli/src/packed-compose.ts 2>/dev/null || true
+  git checkout -- cli/src/packed.ts 2>/dev/null || true
   rm -rf bin/lexa-cli bin/daemon-bundle.js 2>/dev/null || true
 else
   warn "bun run compile:cli failed - warn not hard"
-  git checkout -- cli/src/packed.ts cli/src/packed-compose.ts 2>/dev/null || true
+  git checkout -- cli/src/packed.ts 2>/dev/null || true
   rm -rf bin/lexa-cli bin/daemon-bundle.js 2>/dev/null || true
 fi
 

@@ -12,6 +12,15 @@ release the app image. The version lives in `cli/package.json` —
 
 ## [Unreleased]
 
+## [2026.2.0] - 2026-09-07
+
+### Removed
+
+- **deploy/undeploy commands** — deployment moved to the install script
+  (`curl -fsSL https://raw.githubusercontent.com/yohanesgre/lexa/main/scripts/install.sh | bash -s -- docker|bare|workers|dev`).
+  `lexa-cli` is now purely the headless operator frontend
+  (login/status/task/wiki/project/members/keys/machine/runtime/github/upgrade).
+
 ## [2026.1.1] - 2026-09-07
 
 ### Fixed

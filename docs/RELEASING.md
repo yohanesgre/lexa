@@ -82,10 +82,10 @@ CLI asset.
 - `v*` tags → `ghcr.io/yohanesgre/lexa:latest` + `ghcr.io/yohanesgre/lexa:<version>` + `ghcr.io/yohanesgre/lexa:<YYYY.MINOR>` (where `<version>` is the tag name, e.g. `v2026.1.0` + floating `2026.1` for patch-auto pins).
 - The web wizard at `/setup` gates `LXK_ENV` non-dev deployments to skip
   sample data; `LXK_ENV=dev` enables `LXK_SEED_DEV=1` seeding.
-- Remote deploy uses `lexa-cli deploy <domain> [staging|prod]`. Deploy
-  embeds only the compose files (few KB) and pulls the image — **no
-  checkout, no build, no git**. Redeploy = upgrade (always pulls latest
-  image; `--image <tag>` pins a version; `--clean` recreates from scratch
+- Remote deploy uses `scripts/install.sh` (`curl -fsSL …/scripts/install.sh |
+  bash -s -- <target> [flags]`). It pulls the image — **no checkout, no
+  build, no git**. Upgrade = re-run with a newer tag (data volume survives;
+  `--purge`/`--clean` recreate from scratch)
   and removes the `lexa-data` volume — DB wiped, confirmed on a TTY).
 - The CLI `upgrade` command self-updates only the CLI binary (web app
   upgrades go through `deploy`).
@@ -117,7 +117,7 @@ non-interactive flags on `deploy` are `--cf-token`, `--admin-email`,
 On a machine without bun, install the CLI binary via:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/yohanesgre/lexa/main/scripts/install-cli.sh | bash
+curl -fsSL https://raw.githubusercontent.com/yohanesgre/lexa/<cli-tag>/scripts/install-cli.sh | bash
 ```
 
 Downloads the prebuilt binary from the newest `cli-v*` GitHub release →

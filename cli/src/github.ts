@@ -224,8 +224,8 @@ export const cmdGithubSetup = Effect.fn("LexaCli/cmdGithubSetup")(function* (fla
   console.log("  them into its settings DB on the next boot ONLY when the key");
   console.log("  is still unset — they never overwrite values already set in");
   console.log("  web Settings (or by a logged-in github setup). Once the server");
-  console.log("  has DB config, env-file writes are inert until a fresh deploy");
-  console.log("  (deploy --clean or a new server).");
+  console.log("  has DB config, env-file writes are inert — re-import needs a");
+  console.log("  server restart (docker restart / install.sh re-run).");
   console.log("");
   console.log("  Next steps:");
   console.log("    1. Restart the server (bun run dev:full / docker compose up -d) to import.");

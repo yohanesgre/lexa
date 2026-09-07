@@ -69,3 +69,79 @@ jobs:
             org.opencontainers.image.revision=${{ github.sha }}
             org.opencontainers.image.version=${{ github.ref_name }}
             org.opencontainers.image.licenses=MIT
+
+  release-tarballs:
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: false
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+        env:
+          LXK_SKIP_PREPARE: "1"
+
+      - name: Build bun flavor
+        run: LEXA_FLAVOR=bun bun run build
+        env:
+          LXK_SKIP_PREPARE: "1"
+
+      - name: Write lexa-start.sh
+        run: |
+          cat > lexa-start.sh <<'EOF'
+          #!/usr/bin/env bash
+          set -euo pipefail
+          cd "$(dirname "$0")"
+          exec bun --env-file="${ENV_FILE:-.env}" server/entry.ts "$@"
+          EOF
+          chmod +x lexa-start.sh
+
+      - name: Package server tarball
+        run: |
+          tar czf "lexa-server-${{ github.ref_name }}.tar.gz" \
+            --exclude='*/.dev.vars' \
+            dist server shared migrations scripts/seed-dev.sql lexa-start.sh
+
+      - name: Build workers flavor
+        run: LEXA_FLAVOR=workers bun run build
+        env:
+          LXK_SKIP_PREPARE: "1"
+
+      - name: Package workers tarball
+        run: |
+          # Strip the placeholder database_id — the install-script provisioner
+          # binds the real D1 id into a per-deploy wrangler config.
+          mkdir -p workers-stage/scripts
+          sed '/"database_id": "00000000-0000-0000-0000-000000000000"/d' \
+            wrangler.jsonc > workers-stage/wrangler.jsonc
+          cp -r dist migrations workers-stage/
+          # The workers installer helper (bun workers-install.ts) rides in the
+          # tarball — install.sh unpacks and runs it with bun.
+          cp scripts/workers-install.ts workers-stage/scripts/
+          tar czf "lexa-workers-${{ github.ref_name }}.tar.gz" \
+            --exclude='*/.dev.vars' \
+            -C workers-stage dist wrangler.jsonc migrations scripts
+
+      - name: Checksums
+        run: |
+          sha256sum "lexa-server-${{ github.ref_name }}.tar.gz" \
+                    "lexa-workers-${{ github.ref_name }}.tar.gz" > checksums.txt
+
+      - name: Attach artifacts to release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          gh release create "$TAG" \
+            --title "$TAG" --generate-notes \
+            "lexa-server-${TAG}.tar.gz" "lexa-workers-${TAG}.tar.gz" checksums.txt \
+          || gh release upload "$TAG" \
+            "lexa-server-${TAG}.tar.gz" "lexa-workers-${TAG}.tar.gz" checksums.txt --clobber

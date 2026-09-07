@@ -1,6 +1,6 @@
 // lexa-cli upgrade — self-update the CLI binary (GitHub release). Web app
-// upgrades go through `lexa-cli deploy` (it pulls the latest image by
-// default; --image pins a tag; --clean recreates the data volume).
+// upgrades go through the install script (re-run pulls the latest image
+// and recreates the container; the data volume survives).
 //
 // CLI releases are INDEPENDENT of web app releases: cli-vX.Y.Z tags publish
 // the binary as a GitHub release asset; vX.Y.Z tags publish the app image to
