@@ -212,7 +212,7 @@ verify_checksum() {
 # write_env_file <path> <key=value...>
 # Whitelisted keys only; file written chmod 600.
 # ---------------------------------------------------------------------------
-ENV_FILE_ALLOWED_KEYS=" LXK_API_KEY LXK_ENV LXK_PUBLIC_URL GITHUB_APP_ID GITHUB_PRIVATE_KEY_FILE GITHUB_WEBHOOK_SECRET CF_TUNNEL_TOKEN "
+ENV_FILE_ALLOWED_KEYS=" LXK_API_KEY LXK_ENV LXK_PUBLIC_URL LXK_TRUSTED_ORIGINS GITHUB_APP_ID GITHUB_PRIVATE_KEY_FILE GITHUB_WEBHOOK_SECRET CF_TUNNEL_TOKEN "
 
 write_env_file() {
   local path="$1"
@@ -362,6 +362,8 @@ services:
       - PORT=3000
       - LXK_ENV=\${LXK_ENV:-}
       - LXK_API_KEY=\${LXK_API_KEY}
+      - LXK_PUBLIC_URL=\${LXK_PUBLIC_URL:-}
+      - LXK_TRUSTED_ORIGINS=\${LXK_TRUSTED_ORIGINS:-}
       - LXK_ADMIN_EMAILS=\${LXK_ADMIN_EMAILS:-}
       - GITHUB_APP_ID=\${GITHUB_APP_ID:-}
       - GITHUB_PRIVATE_KEY_FILE=\${GITHUB_PRIVATE_KEY_FILE:-}
@@ -389,6 +391,8 @@ services:
       - PORT=3000
       - LXK_ENV=\${LXK_ENV:-}
       - LXK_API_KEY=\${LXK_API_KEY}
+      - LXK_PUBLIC_URL=\${LXK_PUBLIC_URL:-}
+      - LXK_TRUSTED_ORIGINS=\${LXK_TRUSTED_ORIGINS:-}
       - LXK_ADMIN_EMAILS=\${LXK_ADMIN_EMAILS:-}
       - GITHUB_APP_ID=\${GITHUB_APP_ID:-}
       - GITHUB_PRIVATE_KEY_FILE=\${GITHUB_PRIVATE_KEY_FILE:-}
