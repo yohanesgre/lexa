@@ -46,6 +46,8 @@ Flags:
   --key <k>                        LXK_API_KEY (default: auto-generated)
   --image <tag>                    container image tag
   --systemd                        bare: write + enable systemd unit
+  --reset-db                       workers: drop the existing D1 database and
+                                   start migrations fresh (data is lost)
   --yes                            assume yes for confirmations
   --purge                          uninstall: also delete data
   --clean                          docker: remove lexa-data volume
@@ -243,7 +245,7 @@ write_env_file() {
 parse_flags() {
   # shellcheck disable=SC2034  # parse_flags outputs are the caller's contract
   TARGET="" FLAVOR="" STAGING=0 PROD=0 PORT=8080 BIND=127.0.0.1 DOMAIN=""
-  API_KEY="" IMAGE_TAG="" SYSTEMD=0 ASSUME_YES=0 PURGE=0 CLEAN=0
+  API_KEY="" IMAGE_TAG="" SYSTEMD=0 ASSUME_YES=0 PURGE=0 CLEAN=0 RESET_DB=0
   FROM_REPO="" HELP=0 CF_TOKEN=""
   while [ $# -gt 0 ]; do
     case "$1" in
@@ -290,6 +292,7 @@ parse_flags() {
         shift 2
         ;;
       --systemd) SYSTEMD=1; shift ;;
+      --reset-db) RESET_DB=1; shift ;;
       --yes) ASSUME_YES=1; shift ;;
       --purge) PURGE=1; shift ;;
       --clean) CLEAN=1; shift ;;

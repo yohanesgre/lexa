@@ -44,6 +44,9 @@ function flag(name: string): string {
 
 const CF_TOKEN = flag("cf-token") || die("--cf-token required");
 const API_KEY = flag("api-key") || die("--api-key required");
+// Boolean flag: drops any existing D1 databases matching the flavor name
+// before creating a fresh one (all data in them is gone).
+const RESET_DB = process.argv.includes("--reset-db");
 const FLAVOR_NAME = flag("flavor") || "staging";
 const FLAVOR = WORKER_FLAVORS[FLAVOR_NAME] ?? die(`unknown flavor '${FLAVOR_NAME}' (staging|prod)`);
 const CUSTOM_DOMAIN = flag("domain"); // absent → workers.dev
@@ -114,9 +117,21 @@ if (CUSTOM_DOMAIN) {
 // ── CF: D1 / R2 / KV (find-or-create) ──
 async function ensureD1(): Promise<string> {
   const listed = await cfJson<Array<{ id: string; name: string }>>(`list D1 ${FLAVOR.d1Name}`, `/accounts/${account}/d1/database?name=${FLAVOR.d1Name}`);
-  if (listed[0]?.id) {
-    console.log(`  ✓ D1 '${FLAVOR.d1Name}' exists — reused`);
-    return listed[0]!.id;
+  if (listed.length > 0) {
+    let drop = RESET_DB;
+    if (!drop && process.stdout.isTTY) {
+      const answer = prompt(`  D1 '${FLAVOR.d1Name}' already exists — drop it and start fresh? All data in it is lost [y/N]`) ?? "";
+      drop = /^y(es)?$/i.test(answer.trim());
+    }
+    if (drop) {
+      for (const db of listed) {
+        await cfJson(`drop D1 ${db.name}`, `/accounts/${account}/d1/database/${db.id}`, { method: "DELETE" });
+        console.log(`  ✓ D1 '${db.name}' dropped`);
+      }
+    } else {
+      console.log(`  ✓ D1 '${FLAVOR.d1Name}' exists — reused`);
+      return listed[0]!.id;
+    }
   }
   const created = await cfJson<{ uuid: string }>(`create D1 ${FLAVOR.d1Name}`, `/accounts/${account}/d1/database`, {
     method: "POST",
