@@ -1,6 +1,6 @@
 {
   "name": "lexa",
-  "version": "2026.2.7",
+  "version": "2026.2.8",
   "description": "Self-hosted project management \u2014 Kanban with swimlanes/WIP limits, nested wiki, Hearth AI writing assistant.",
   "scripts": {
     "test": "vitest run",
