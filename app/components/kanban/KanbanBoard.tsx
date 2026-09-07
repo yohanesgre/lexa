@@ -127,12 +127,24 @@ function tasksReducer(state: Task[], action: { type: "set"; tasks: Task[] } | { 
 export function KanbanBoard({ board, showArchived = false, onToggleArchived, onMoveTask, onSelectTask, onOpenCreateTask, milestoneId = null, onMilestoneChange }: KanbanBoardProps) {
   const [localTasks, dispatch] = useReducer(tasksReducer, board.tasks);
   const [activeId, setActiveId] = useState<string | null>(null);
-  const [flashColumnId, setFlashColumnId] = useState<string | null>(null);
   const [shakeTaskId, setShakeTaskId] = useState<string | null>(null);
+  const [flashColumnId, setFlashColumnId] = useState<string | null>(null);
   const [newTaskIds, setNewTaskIds] = useState<Set<string>>(new Set());
   const flashTimer = useRef<number | null>(null);
   const shakeTimer = useRef<number | null>(null);
   const prevTaskIds = useRef<Set<string>>(new Set());
+  // Invalid drop feedback (DESIGN_SYSTEM: 200ms horizontal shake) + revert:
+  // the optimistic move lives in localTasks, so when the server rejects the
+  // mutation the board resets from the untouched (authoritative) cache.
+  const revertMove = useCallback(
+    (taskId: string) => {
+      dispatch({ type: "set", tasks: board.tasks });
+      setShakeTaskId(taskId);
+      if (shakeTimer.current !== null) window.clearTimeout(shakeTimer.current);
+      shakeTimer.current = window.setTimeout(() => setShakeTaskId(null), 200);
+    },
+    [board.tasks]
+  );
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set());
   const [collapsedParents, setCollapsedParents] = useState<ReadonlySet<string>>(new Set());
   const { childrenByParent, blockedBy } = useLinkMaps(board);
@@ -164,6 +176,7 @@ export function KanbanBoard({ board, showArchived = false, onToggleArchived, onM
   useEffect(
     () => () => {
       if (flashTimer.current !== null) window.clearTimeout(flashTimer.current);
+      if (shakeTimer.current !== null) window.clearTimeout(shakeTimer.current);
     },
     []
   );
@@ -308,11 +321,13 @@ export function KanbanBoard({ board, showArchived = false, onToggleArchived, onM
       beforeTaskId,
       afterTaskId,
     };
-    // The move guard fires the mutation itself on the free path; when it
-    // returns false the confirm dialog is pending and commits later (resolve)
-    // without any optimistic local state.
-    if (!confirmMove(task, target)) return;
+    // The move guard fires the mutation itself on the free path and returns
+    // the in-flight promise; when it returns false the confirm dialog is
+    // pending and commits later (resolve) without any optimistic local state.
+    const commit = confirmMove(task, target);
+    if (!commit) return;
     dispatch({ type: "move", taskId: task.id, columnId: targetColumnId, swimlaneId: targetLaneId, position });
+    void commit.catch(() => revertMove(task.id));
   };
 
   return (
