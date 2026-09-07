@@ -7,6 +7,15 @@ All notable changes to Lexa are documented here. Format based on
 
 ## [Unreleased]
 
+## [2026.2.6] - 2026-09-08
+
+### Fixed
+
+- **Workers `--reset-db` could never drop an existing D1** — the D1 list API
+  returns `uuid` per row (not `id`), so the DELETE URL was built with
+  `undefined` and CF rejected it (`Invalid uuid`); reuse path returns the
+  uuid now too (#34)
+
 ## [2026.2.5] - 2026-09-08
 
 ### Fixed
