@@ -3,11 +3,13 @@ import { HttpServerRequest } from "@effect/platform/HttpServerRequest";
 import * as Multipart from "@effect/platform/Multipart";
 import { Cause, Context, Effect, Layer, ManagedRuntime, Schema, Stream } from "effect";
 import { createHash, randomBytes } from "node:crypto";
+import { fileURLToPath } from "node:url";
 import { join, dirname } from "node:path";
 import { LoggerLayer } from "../logging/logger";
 import { Db, run, queryAll, withTx, DbError, queryFirst, RowNotFound, type DbDriver } from "../db/db";
 import { createBunSqliteDriver } from "../db/drivers/bun-sqlite";
 import type { Database } from "bun:sqlite";
+import { backfillTaskKeysDriver } from "../db/task-keys-backfill";
 import { getSettingAsync, setSettingAsync, deleteSettingAsync } from "./workers-ports";
 import { ProjectNotFound, WikiPageNotFound, MachineNotFound, Forbidden, SetupLocked, TaskNotFound, InvalidName, InvalidRateLimit, InvalidGithubSettings, NoUserContext, InvalidArgs, GithubApiError, errorResponse, errorToStatus, ProjectAccessDenied, HeraldTaskActive, HeraldThreadNotFound, ProviderNotConfigured, ProviderAuthFailed, ProviderUnreachable, HeraldGenerationFailed, HasChildren } from "./errors";
 import { respond } from "./http-helpers";
@@ -130,13 +132,16 @@ const SetupStatusSchema = Schema.Struct({
 const SetupAdminInput = Schema.Struct({ email: Schema.String, password: Schema.String });
 const SetupApiKeyResponse = Schema.Struct({ key: Schema.String });
 const SetupSeedResponse = Schema.Struct({ seeded: Schema.Boolean });
+const SetupSeedInput = Schema.Struct({
+  flavor: Schema.Literal("minimal", "full").pipe(Schema.optional),
+});
 const SetupOkResponse = Schema.Struct({ ok: Schema.Boolean });
 
 const setupGroup = HttpApiGroup.make("setup")
   .add(HttpApiEndpoint.get("status", "/setup/status").addSuccess(SetupStatusSchema))
   .add(HttpApiEndpoint.post("setAdmin", "/setup/admin").setPayload(SetupAdminInput).addSuccess(SetupOkResponse))
   .add(HttpApiEndpoint.post("createApiKey", "/setup/api-key").addSuccess(SetupApiKeyResponse))
-  .add(HttpApiEndpoint.post("seed", "/setup/seed").addSuccess(SetupSeedResponse))
+  .add(HttpApiEndpoint.post("seed", "/setup/seed").setPayload(SetupSeedInput).addSuccess(SetupSeedResponse))
   .add(HttpApiEndpoint.post("complete", "/setup/complete").addSuccess(SetupOkResponse));
 
 const ProjectRepoSchema = Schema.Struct({
@@ -1957,14 +1962,17 @@ function setupAdminLocked(driver: DbDriver): Effect.Effect<boolean, DbError> {
   });
 }
 
-// api-key minting / seed / complete lock like before: an instance configured
-// entirely via env (LXK_ADMIN_EMAILS + a key) must not leave key minting open.
-function setupLocked(driver: DbDriver, env: RuntimeEnv): Effect.Effect<boolean, DbError> {
+// api-key minting / seed / admin lock: an instance in use (projects exist)
+// or configured entirely via env (LXK_ADMIN_EMAILS + a key) must not leave
+// mutating setup endpoints open. `complete` passes ignoreProjects: the
+// wizard's own sample-data step creates projects right before complete —
+// counting them there would deadlock every seeded first install.
+function setupLocked(driver: DbDriver, env: RuntimeEnv, opts: { ignoreProjects?: boolean } = {}): Effect.Effect<boolean, DbError> {
   return Effect.gen(function* () {
     const adminEmails = adminEmailsFrom(env);
     const apiKeyCount = yield* countRows(driver, "SELECT COUNT(*) c FROM api_keys");
     if ((yield* getSettingAsync(driver, "setup_complete")) === "1") return true;
-    if ((yield* countRows(driver, "SELECT COUNT(*) c FROM projects")) > 0) return true;
+    if (!opts.ignoreProjects && (yield* countRows(driver, "SELECT COUNT(*) c FROM projects")) > 0) return true;
     return apiKeyCount > 0 && adminEmails.length > 0;
   });
 }
@@ -2046,19 +2054,21 @@ const setupLive = HttpApiBuilder.group(LexaApi, "setup", (handlers) =>
         return { key };
       }))
     )
-    .handle("seed", () =>
+    .handle("seed", (req) =>
       respond(Effect.gen(function* () {
         const db = yield* Db;
         const env = yield* currentEnv;
         if (yield* setupLocked(db, env)) return yield* Effect.fail(new SetupLocked());
         if (env.DB) return { seeded: false as const };
         const lxkEnv = env.LXK_ENV;
-        if (lxkEnv && lxkEnv !== "dev") return { seeded: false as const };
+        if (lxkEnv && lxkEnv !== "dev" && lxkEnv !== "staging") return { seeded: false as const };
         const fs = yield* Effect.tryPromise(() => import("node:fs")).pipe(
           Effect.catchAll(() => Effect.succeed(null))
         );
         if (!fs) return { seeded: false as const };
-        const seedFile = join(import.meta.dir, "../../scripts/seed-dev.sql");
+        // import.meta.dir is Bun-only; vitest runs this file on node.
+        const here = import.meta.dir ?? dirname(fileURLToPath(import.meta.url));
+        const seedFile = join(here, "../../scripts", req.payload.flavor === "minimal" ? "seed-minimal.sql" : "seed-dev.sql");
         if (!fs.existsSync(seedFile)) return { seeded: false as const };
         const projectCount = yield* countRows(db, "SELECT COUNT(*) c FROM projects");
         if (projectCount > 0) return { seeded: false as const };
@@ -2067,6 +2077,10 @@ const setupLive = HttpApiBuilder.group(LexaApi, "setup", (handlers) =>
         );
         if (sql === null) return { seeded: false as const };
         for (const stmt of splitSqlScript(sql)) yield* run(db, stmt);
+        // Seeded tasks carry keys only if the SQL set them (minimal does);
+        // backfill the rest so PREFIX-n identifiers are complete without a
+        // restart (the boot-time backfill never runs after wizard seeding).
+        yield* backfillTaskKeysDriver(db);
         return { seeded: true as const };
       }))
     )
@@ -2074,7 +2088,7 @@ const setupLive = HttpApiBuilder.group(LexaApi, "setup", (handlers) =>
       respond(Effect.gen(function* () {
         const db = yield* Db;
         const env = yield* currentEnv;
-        if (yield* setupLocked(db, env)) return yield* Effect.fail(new SetupLocked());
+        if (yield* setupLocked(db, env, { ignoreProjects: true })) return yield* Effect.fail(new SetupLocked());
         yield* setSettingAsync(db, "setup_complete", "1");
         return { ok: true as const };
       }))

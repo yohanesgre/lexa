@@ -48,8 +48,10 @@ export function createSetupApiKey(): Promise<{ key: string }> {
   return request(`${BASE}/setup/api-key`, { method: "POST" });
 }
 
-export function seedSampleData(): Promise<{ seeded: boolean }> {
-  return request(`${BASE}/setup/seed`, { method: "POST" });
+export type SeedFlavor = "minimal" | "full";
+
+export function seedSampleData(flavor: SeedFlavor): Promise<{ seeded: boolean }> {
+  return request(`${BASE}/setup/seed`, { method: "POST", body: JSON.stringify({ flavor }) });
 }
 
 export function completeSetup(): Promise<{ ok: boolean }> {

@@ -33,6 +33,8 @@ COPY --from=builder /app/server ./server
 COPY --from=builder /app/shared ./shared
 COPY --from=builder /app/migrations ./migrations
 COPY --from=builder /app/dist ./dist
+COPY --from=builder /app/scripts/seed-dev.sql ./scripts/seed-dev.sql
+COPY --from=builder /app/scripts/seed-minimal.sql ./scripts/seed-minimal.sql
 
 # Least privilege: the bun user owns the data volume; nothing needs root.
 RUN mkdir -p /app/data && chown -R bun:bun /app/data

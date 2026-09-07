@@ -35,3 +35,6 @@ skills-lock.json
 # lexa-swarm lane status files (heartbeats, PLAN.md) — ephemeral orchestration state
 status/
 .staging-data/
+
+# Local staging deploy dir (docker-compose + .env with real API keys) — never commit
+lexa-deploy/
