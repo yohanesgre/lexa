@@ -12,6 +12,13 @@ release the app image. The version lives in `cli/package.json` —
 
 ## [Unreleased]
 
+## [2026.1.1] - 2026-09-07
+
+### Fixed
+
+- **CI hygiene** — knip configured with real entries, mobile check boots the
+  dev stack with the correct seed password, unused imports cleaned
+
 ## [2026.1.0] - 2026-09-07
 
 ### Added
