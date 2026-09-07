@@ -125,6 +125,12 @@ deploy_bare() {
   else
     fetch_release "server" "${INSTALL_DIR:-${HOME}/.lexa-server}"
     INSTALL_DIR="${INSTALL_DIR:-${HOME}/.lexa-server}"
+    unpack_release "${INSTALL_DIR}" "${INSTALL_DIR}" server
+    # The tarball ships package.json + bun.lock without node_modules —
+    # resolve them once so `bun server/entry.ts` can run. --ignore-scripts
+    # skips the prepare hook (the Effect checkout is not shipped in the
+    # tarball and is dev-only).
+    step "bun install" bun install --frozen-lockfile --production --ignore-scripts
   fi
   [ -n "${API_KEY}" ] || API_KEY=$(gen_api_key)
   if [ -f "${INSTALL_DIR}/.env" ] && [ -n "${FROM_REPO}" ]; then
@@ -135,8 +141,10 @@ deploy_bare() {
       "LXK_API_KEY=${API_KEY}" \
       "LXK_ENV=${FLAVOR}" \
       "PORT=${BARE_PORT}" \
+      "DATABASE_PATH=${INSTALL_DIR}/data/lexa.db" \
       "LXK_PUBLIC_URL=${bare_public}" \
       "LXK_TRUSTED_ORIGINS=${bare_public},http://127.0.0.1:${BARE_PORT}"
+    step "data dir" mkdir -p "${INSTALL_DIR}/data"
   fi
   step "write start script" write_start_script "${INSTALL_DIR}"
   if [ "${SYSTEMD}" = "1" ]; then
@@ -176,6 +184,7 @@ deploy_workers() {
   else
     fetch_release "workers" "${WORK_DIR:-lexa-workers-release}"
     WORK_DIR="${WORK_DIR:-lexa-workers-release}"
+    unpack_release "${WORK_DIR}" "${WORK_DIR}" workers
   fi
 
   cf_args=(--cf-token "${CF_TOKEN}" --api-key "${API_KEY}" --flavor "${FLAVOR}")

@@ -108,7 +108,7 @@ jobs:
         run: |
           tar czf "lexa-server-${{ github.ref_name }}.tar.gz" \
             --exclude='*/.dev.vars' \
-            dist server shared migrations scripts/seed-dev.sql lexa-start.sh
+            package.json bun.lock dist server shared migrations scripts/seed-dev.sql lexa-start.sh
 
       - name: Build workers flavor
         run: LEXA_FLAVOR=workers bun run build
