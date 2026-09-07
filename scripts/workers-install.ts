@@ -111,8 +111,11 @@ async function ensureD1(): Promise<string> {
 }
 
 async function ensureR2(): Promise<string> {
-  const listed = await cfJson<Array<{ name: string }>>(`list R2 buckets`, `/accounts/${account}/r2/buckets`);
-  if (listed.some((b) => b.name === FLAVOR.r2Name)) {
+  // R2 list returns { result: { buckets: [...] } } — unlike D1/KV, whose
+  // result is a bare array.
+  const listed = await cfJson<{ buckets?: Array<{ name: string }> }>(`list R2 buckets`, `/accounts/${account}/r2/buckets`);
+  const names = listed.buckets ?? [];
+  if (names.some((b) => b.name === FLAVOR.r2Name)) {
     console.log(`  ✓ R2 '${FLAVOR.r2Name}' exists — reused`);
     return FLAVOR.r2Name;
   }
@@ -126,9 +129,10 @@ async function ensureR2(): Promise<string> {
 
 async function ensureKv(): Promise<string> {
   const listed = await cfJson<Array<{ id: string; title: string }>>(`list KV`, `/accounts/${account}/storage/kv/namespaces`);
-  if (listed[0]?.id) {
+  const existing = listed.find((n) => n.title === FLAVOR.kvTitle);
+  if (existing) {
     console.log(`  ✓ KV '${FLAVOR.kvTitle}' exists — reused`);
-    return listed[0]!.id;
+    return existing.id;
   }
   const created = await cfJson<{ id: string }>(`create KV ${FLAVOR.kvTitle}`, `/accounts/${account}/storage/kv/namespaces`, {
     method: "POST",
