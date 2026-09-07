@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState } from "react";
 import { Link, useParams } from "@tanstack/react-router";
-import { Check, ChevronDown, X } from "lucide-react";
 import type { Task, TipTapDoc, GithubIssue } from "../../shared/types";
 import { extractText } from "../../shared/tiptap-text";
 import { renderDoc } from "./tiptap-render";
@@ -26,10 +25,6 @@ import { SourcesSection } from "./hearth/SourcesSection";
 import { LinksSection } from "./hearth/LinksSection";
 import { ActivityTab } from "./activity/ActivityTab";
 import { cn } from "./ui/cn";
-
-
-
-
 
 type RequiredFieldName = "assignee" | "description";
 
@@ -64,8 +59,6 @@ interface TaskDetailProps {
   }) => Promise<void>;
 }
 
-
-
 const emptyDoc: TipTapDoc = { type: "doc", content: [] };
 
 function getMissingRequiredFields(
@@ -85,6 +78,197 @@ function getMissingRequiredFields(
   return missing;
 }
 
+function missingFieldsFor(isCreate: boolean, createColumnId: string, currentColumnId: string, columnRequiredFields: TaskDetailProps["columnRequiredFields"], task: Task | undefined, createAssignees: string[], createDescription: TipTapDoc): RequiredFieldName[] {
+  return isCreate
+    ? getMissingRequiredFields(createColumnId, columnRequiredFields, {
+        assignees: createAssignees,
+        description: createDescription,
+      })
+    : getMissingRequiredFields(currentColumnId, columnRequiredFields, {
+        assignees: task?.assignees ?? [],
+        description: task?.description ?? emptyDoc,
+      });
+}
+
+interface DetailContext {
+  currentColumnId: string;
+  currentColumnName: string;
+  currentSwimlaneName: string;
+  isArchived: boolean;
+  githubs: GithubIssue[];
+  columnGithubState: "open" | "closed" | null;
+}
+
+function resolveDetailContext(args: {
+  isCreate: boolean;
+  task: Task | undefined;
+  selectedColumnId: string;
+  createColumnId: string;
+  selectedSwimlaneId: string;
+  columns: TaskDetailProps["columns"];
+  swimlanes: TaskDetailProps["swimlanes"];
+}): DetailContext {
+  const currentColumnId = args.isCreate ? args.createColumnId : (args.selectedColumnId || args.task?.columnId || "");
+  const column = args.columns?.find((c) => c.id === currentColumnId);
+  return {
+    currentColumnId,
+    currentColumnName: column?.name ?? "",
+    currentSwimlaneName: args.swimlanes?.find((lane) => lane.id === args.selectedSwimlaneId)?.name ?? "",
+    isArchived: !args.isCreate && args.task != null && args.task.archivedAt != null,
+    githubs: args.isCreate ? [] : args.task?.githubs ?? [],
+    columnGithubState: column?.githubState ?? null,
+  };
+}
+
+function slideoverClassName(expanded: boolean, open: boolean): string {
+  return cn("slideover", expanded && "slideover-expanded", !open && "slideover-closed");
+}
+
+function overlayClassName(open: boolean): string {
+  return cn("slideover-overlay", !open && "overlay-closed");
+}
+
+function useEscapeKey(showDeleteDialog: boolean, closeDeleteDialog: () => void, handleClose: () => void): void {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        if (showDeleteDialog) {
+          e.stopPropagation();
+          closeDeleteDialog();
+        } else {
+          handleClose();
+        }
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  });
+}
+
+function useTaskTitleEditing(task: Task | undefined, onUpdate: ((id: string, data: Partial<Task>) => void) | undefined) {
+  const [editingTitle, setEditingTitle] = useState(false);
+  const [draft, setDraft] = useState(task?.title ?? "");
+  const [prevTitle, setPrevTitle] = useState(task?.title);
+  if (prevTitle !== task?.title && task?.title !== undefined) {
+    setPrevTitle(task.title);
+    setDraft(task.title);
+  }
+  const saveTitle = () => {
+    const v = draft.trim();
+    if (v && v !== task?.title) onUpdate?.(task!.id, { title: v });
+    setEditingTitle(false);
+  };
+  return { editingTitle, setEditingTitle, draft, setDraft, saveTitle };
+}
+
+function useDismissableWarning(resetKey: string) {
+  const [dismissed, setDismissed] = useState(false);
+  const [prevKey, setPrevKey] = useState(resetKey);
+  if (prevKey !== resetKey) {
+    setPrevKey(resetKey);
+    setDismissed(false);
+  }
+  return [dismissed, setDismissed] as const;
+}
+
+function useDeleteConfirmation(task: Task | undefined, onDelete: ((id: string) => Promise<void>) | undefined) {
+  const [deleting, setDeleting] = useState(false);
+  const confirmDelete = async () => {
+    if (!task || !onDelete) return;
+    setDeleting(true);
+    try {
+      await onDelete(task.id);
+    } finally {
+      setDeleting(false);
+    }
+  };
+  return { deleting, confirmDelete };
+}
+
+function ArchivedBanner() {
+  return (
+    <div
+      className="card-row flex items-center gap-2"
+      style={{ background: "var(--lx-surface-elevated)", marginBottom: 12 }}
+    >
+      <ArchiveIcon size={14} />
+      <span className="font-micro text-2xs text-lx-text-muted uppercase tracking-[0.04em]">
+        Archived — not shown on the board unless "Show archived" is on
+      </span>
+    </div>
+  );
+}
+
+function TaskTabsAndBody({ isCreate, tab, setTab, flush, slug, task, editingDescription, setEditingDescription, setCreateDescription, onUpdate, taskTitles, taskKeys, githubs, columnGithubState, currentColumnId, onLinkGithub, onUnlinkGithub, isArchived }: {
+  isCreate: boolean;
+  tab: "description" | "activity";
+  setTab: (tab: "description" | "activity") => void;
+  flush: boolean;
+  slug: string | undefined;
+  task: Task | undefined;
+  editingDescription: boolean;
+  setEditingDescription: (editing: boolean) => void;
+  setCreateDescription: (doc: TipTapDoc) => void;
+  onUpdate: (id: string, data: Partial<Task>) => void;
+  taskTitles: Map<string, string> | undefined;
+  taskKeys: Map<string, string> | undefined;
+  githubs: GithubIssue[];
+  columnGithubState: "open" | "closed" | null;
+  currentColumnId: string;
+  onLinkGithub: (id: string, repo: string) => Promise<{ repo: string; issueNumber: number } | null | undefined>;
+  onUnlinkGithub: (id: string, issueId: string) => Promise<void>;
+  isArchived: boolean;
+}) {
+  return (
+    <>
+      {!isCreate && (
+        <div className="tab-bar">
+          <button type="button" className={cn("tab-btn", tab === "description" && "active")} onClick={() => setTab("description")}>
+            Description
+          </button>
+          <button type="button" className={cn("tab-btn", tab === "activity" && "active")} onClick={() => setTab("activity")}>
+            Activity
+          </button>
+        </div>
+      )}
+
+      <div className={cn("slideover-body pt-4", flush && "editor-flush")}>
+        {tab === "description" ? (
+          <>
+            <TaskDescriptionSection
+              isCreate={isCreate}
+              slug={slug}
+              task={task ?? null}
+              emptyDoc={emptyDoc}
+              taskTitles={taskTitles}
+              taskKeys={taskKeys}
+              editingDescription={editingDescription}
+              setEditingDescription={setEditingDescription}
+              setCreateDescription={setCreateDescription}
+              onUpdate={onUpdate}
+            />
+
+            {!isCreate && (
+              <GitHubSection
+                slug={slug ?? ""}
+                taskId={task!.id}
+                githubs={githubs}
+                columnGithubState={columnGithubState}
+                onLink={onLinkGithub}
+                onUnlink={onUnlinkGithub}
+              />
+            )}
+            {!isCreate && slug && (
+              <AttachmentsPanel slug={slug} taskId={task!.id} />
+            )}
+          </>
+        ) : (
+          <ActivityTab slug={slug} taskId={task?.id ?? ""} isArchived={isArchived} />
+        )}
+      </div>
+    </>
+  );
+}
 
 export function TaskDetail({ mode = "view", task, project, defaultColumnId, columns, swimlanes, columnRequiredFields, availableAssignees, taskTitles, taskKeys, fieldConfig, onClose, onUpdate, onMove, onDelete, onArchive, onRestore, onLinkGithub, onUnlinkGithub, onCreate }: TaskDetailProps) {
   const params = useParams({ strict: false }) as { slug?: string };
@@ -94,8 +278,7 @@ export function TaskDetail({ mode = "view", task, project, defaultColumnId, colu
   const [open, setOpen] = useState(false);
   const [expanded, setExpanded] = useState(false);
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
-  const [deleting, setDeleting] = useState(false);
-  const [dismissedWarning, setDismissedWarning] = useState(false);
+  const [editingAssignees, setEditingAssignees] = useState(false);
   const [tab, setTab] = useState<"description" | "activity">("description");
   const closeTimer = useRef<number | null>(null);
 
@@ -117,20 +300,7 @@ export function TaskDetail({ mode = "view", task, project, defaultColumnId, colu
     closeTimer.current = window.setTimeout(onClose, 200);
   };
 
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        if (showDeleteDialog) {
-          e.stopPropagation();
-          setShowDeleteDialog(false);
-        } else {
-          handleClose();
-        }
-      }
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  });
+  useEscapeKey(showDeleteDialog, () => setShowDeleteDialog(false), handleClose);
 
   const {
     selectedColumnId, setSelectedColumnId,
@@ -156,68 +326,30 @@ export function TaskDetail({ mode = "view", task, project, defaultColumnId, colu
     onClose: handleClose,
   });
 
+  const title = useTaskTitleEditing(task, onUpdate);
+  const { deleting, confirmDelete } = useDeleteConfirmation(task, onDelete);
 
-  const [editingTitle, setEditingTitle] = useState(false);
+  const ctx = resolveDetailContext({
+    isCreate,
+    task,
+    selectedColumnId,
+    createColumnId,
+    selectedSwimlaneId,
+    columns,
+    swimlanes,
+  });
+  const missingFields = missingFieldsFor(isCreate, createColumnId, ctx.currentColumnId, columnRequiredFields, task, createAssignees, createDescription);
+  const [dismissedWarning, setDismissedWarning] = useDismissableWarning(`${ctx.currentColumnId}:${missingFields.join(",")}`);
   const [editingDescription, setEditingDescription] = useState(false);
-  const [editingAssignees, setEditingAssignees] = useState(false);
-  const [draft, setDraft] = useState(task?.title ?? "");
-
-  const [prevTitle, setPrevTitle] = useState(task?.title);
-  if (prevTitle !== task?.title && task?.title !== undefined) {
-    setPrevTitle(task?.title);
-    setDraft(task.title);
-  }
-
-
-  const saveTitle = () => {
-    const v = draft.trim();
-    if (v && v !== task?.title) onUpdate?.(task!.id, { title: v });
-    setEditingTitle(false);
-  };
-
-  const handleConfirmDelete = async () => {
-    if (!task || !onDelete) return;
-    setDeleting(true);
-    try {
-      await onDelete(task.id);
-    } finally {
-      setDeleting(false);
-    }
-  };
-
-  const currentColumnId = isCreate ? createColumnId : (selectedColumnId || task?.columnId || "");
-  const currentColumnName = columns?.find((column) => column.id === currentColumnId)?.name ?? "";
-  const currentSwimlaneName = swimlanes?.find((lane) => lane.id === selectedSwimlaneId)?.name ?? "";
-  const isArchived = !isCreate && task != null && task.archivedAt != null;
-  const missingFields = isCreate
-    ? getMissingRequiredFields(createColumnId, columnRequiredFields, {
-        assignees: createAssignees,
-        description: createDescription,
-      })
-    : getMissingRequiredFields(currentColumnId, columnRequiredFields, {
-        assignees: task?.assignees ?? [],
-        description: task?.description ?? emptyDoc,
-      });
-
-  const missingFieldsKey = missingFields.join(",");
-
-  const [prevFieldKey, setPrevFieldKey] = useState(`${currentColumnId}:${missingFieldsKey}`);
-  if (prevFieldKey !== `${currentColumnId}:${missingFieldsKey}`) {
-    setPrevFieldKey(`${currentColumnId}:${missingFieldsKey}`);
-    setDismissedWarning(false);
-  }
 
   if (!isCreate && !task) {
     return <TaskNotFoundDialog open={open} onClose={handleClose} />;
   }
 
-
-  const githubs: GithubIssue[] = isCreate ? [] : task?.githubs ?? [];
-
   return (
     <>
-      <button type="button" className={cn("slideover-overlay", !open && "overlay-closed")} onClick={handleClose} aria-label="Close" />
-      <dialog open className={cn("slideover", expanded && "slideover-expanded", !open && "slideover-closed")} aria-modal="true" aria-label="Task details">
+      <button type="button" className={overlayClassName(open)} onClick={handleClose} aria-label="Close" />
+      <dialog open className={slideoverClassName(expanded, open)} aria-modal="true" aria-label="Task details">
         <SlideoverHeader
           slug={slug}
           project={project ?? null}
@@ -227,37 +359,23 @@ export function TaskDetail({ mode = "view", task, project, defaultColumnId, colu
           onClose={handleClose}
         />
 
-
-
         <div className="px-4 pt-4">
-          {isArchived && (
-            <div
-              className="card-row flex items-center gap-2"
-              style={{ background: "var(--lx-surface-elevated)", marginBottom: 12 }}
-            >
-              <ArchiveIcon size={14} />
-              <span className="font-micro text-2xs text-lx-text-muted uppercase tracking-[0.04em]">
-                Archived — not shown on the board unless "Show archived" is on
-              </span>
-            </div>
-          )}
-        <TaskTitleInput
-          isArchived={isArchived}
-          isCreate={isCreate}
-          createTitle={createTitle}
-          setCreateTitle={setCreateTitle}
-          onCreate={handleCreate}
-          onClose={handleClose}
-          editingTitle={editingTitle}
-          draft={draft}
-          setDraft={setDraft}
-          onSaveTitle={saveTitle}
-          setEditingTitle={setEditingTitle}
-          taskTitle={task?.title ?? ""}
-          taskKey={task?.key ?? ""}
-        />
-
-
+          {ctx.isArchived && <ArchivedBanner />}
+          <TaskTitleInput
+            isArchived={ctx.isArchived}
+            isCreate={isCreate}
+            createTitle={createTitle}
+            setCreateTitle={setCreateTitle}
+            onCreate={handleCreate}
+            onClose={handleClose}
+            editingTitle={title.editingTitle}
+            draft={title.draft}
+            setDraft={title.setDraft}
+            onSaveTitle={title.saveTitle}
+            setEditingTitle={title.setEditingTitle}
+            taskTitle={task?.title ?? ""}
+            taskKey={task?.key ?? ""}
+          />
         </div>
 
         <TaskPropertyBar
@@ -267,8 +385,8 @@ export function TaskDetail({ mode = "view", task, project, defaultColumnId, colu
           swimlanes={swimlanes}
           fieldConfig={fieldConfig}
           missingFields={missingFields}
-          currentColumnName={currentColumnName}
-          currentSwimlaneName={currentSwimlaneName}
+          currentColumnName={ctx.currentColumnName}
+          currentSwimlaneName={ctx.currentSwimlaneName}
           selectedColumnId={selectedColumnId}
           setSelectedColumnId={setSelectedColumnId}
           selectedSwimlaneId={selectedSwimlaneId}
@@ -290,65 +408,38 @@ export function TaskDetail({ mode = "view", task, project, defaultColumnId, colu
           setEditingAssignees={setEditingAssignees}
         />
 
-
-
         {missingFields.length > 0 && !dismissedWarning && (
           <MissingFieldsWarning
-            columnName={currentColumnName}
+            columnName={ctx.currentColumnName}
             fields={missingFields}
             onDismiss={() => setDismissedWarning(true)}
           />
         )}
 
-        {!isCreate && (
-          <div className="tab-bar">
-            <button type="button" className={cn("tab-btn", tab === "description" && "active")} onClick={() => setTab("description")}>
-              Description
-            </button>
-            <button type="button" className={cn("tab-btn", tab === "activity" && "active")} onClick={() => setTab("activity")}>
-              Activity
-            </button>
-          </div>
-        )}
-
-        <div className={cn("slideover-body pt-4", !isCreate && tab === "description" && editingDescription && "editor-flush")}>
-        {tab === "description" ? (
-        <>
-        <TaskDescriptionSection
+        <TaskTabsAndBody
           isCreate={isCreate}
+          tab={tab}
+          setTab={setTab}
+          flush={!isCreate && tab === "description" && editingDescription}
           slug={slug}
-          task={task ?? null}
-          emptyDoc={emptyDoc}
-          taskTitles={taskTitles}
-          taskKeys={taskKeys}
+          task={task}
           editingDescription={editingDescription}
           setEditingDescription={setEditingDescription}
           setCreateDescription={setCreateDescription}
           onUpdate={onUpdate!}
+          taskTitles={taskTitles}
+          taskKeys={taskKeys}
+          githubs={ctx.githubs}
+          columnGithubState={ctx.columnGithubState}
+          currentColumnId={ctx.currentColumnId}
+          onLinkGithub={onLinkGithub!}
+          onUnlinkGithub={onUnlinkGithub!}
+          isArchived={ctx.isArchived}
         />
-
-        {!isCreate && (
-        <GitHubSection
-          slug={slug ?? ""}
-          taskId={task!.id}
-          githubs={githubs}
-          columnGithubState={columns?.find((column) => column.id === currentColumnId)?.githubState ?? null}
-          onLink={onLinkGithub!}
-          onUnlink={onUnlinkGithub!}
-        />
-        )}
-        {!isCreate && slug && (
-          <AttachmentsPanel slug={slug} taskId={task!.id} />
-        )}
-        </>
-        ) : (
-          <ActivityTab slug={slug} taskId={task?.id ?? ""} isArchived={isArchived} />
-        )}
-        </div>
 
         <TaskFooter
           isCreate={isCreate}
-          isArchived={isArchived}
+          isArchived={ctx.isArchived}
           creating={creating}
           createTitle={createTitle}
           createColumnId={createColumnId}
@@ -359,20 +450,17 @@ export function TaskDetail({ mode = "view", task, project, defaultColumnId, colu
           onDeleteClick={() => setShowDeleteDialog(true)}
           taskId={task?.id ?? ""}
         />
-
-
       </dialog>
 
       {showDeleteDialog && task && (
         <DeleteTaskDialog
-          task={task ?? null}
+          task={task}
           open={showDeleteDialog}
           deleting={deleting}
           onClose={() => setShowDeleteDialog(false)}
-          onDelete={handleConfirmDelete}
+          onDelete={confirmDelete}
         />
       )}
-
     </>
   );
 }

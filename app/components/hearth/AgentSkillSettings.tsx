@@ -75,6 +75,7 @@ export function AgentsSettingsSection() {
 
       {editing !== null && (
         <PromptEditorModal
+          key={typeof editing === "string" ? editing : editing.id}
           kind="agent"
           entity={editing}
           allSkills={skills}
@@ -169,6 +170,7 @@ export function SkillsSettingsSection() {
 
       {editing !== null && (
         <PromptEditorModal
+          key={editing === "new" ? "new" : editing.id}
           kind="skill"
           entity={editing === "new" ? null : editing}
           allAgents={agents}
