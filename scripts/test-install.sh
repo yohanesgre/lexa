@@ -152,6 +152,7 @@ assert_grep "dry-run logs '[dry-run] docker compose up'" '\[dry-run\] docker com
 assert_grep "dry-run health-wait faked via mutate curl" '\[dry-run\] curl -fsS' "$dry_out"
 assert_grep "dry-run prints final banner" 'running at http://127.0.0.1:9191' "$dry_out"
 assert_eq "dry-run renders docker-compose.yml" "present" "$([ -f "${drydir}/lexa-deploy/docker-compose.yml" ] && echo present || echo absent)"
+assert_grep "dry-run .env writes LXK_TRUSTED_ORIGINS" '^LXK_TRUSTED_ORIGINS=' "$(cat "${drydir}/lexa-deploy/.env" 2>/dev/null)"
 
 fake_calls="$(grep -v 'compose version' "${FAKE_DOCKER_LOG}" || true)"
 assert_eq "no mutating docker calls executed (shim log)" "" "$fake_calls"
