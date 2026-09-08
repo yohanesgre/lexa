@@ -16,6 +16,7 @@ import {
   useUpdateComment, useCancelHearthTask, useAddTaskLink, useRemoveTaskLink,
   useAddSource, useRemoveSource, useCreateHearthTask, useCreateHearthAgent,
   useUpdateRateLimit, useUpdateGithubSettings, useClearGithubSettings,
+  useCreateMyApiKey, useDeleteMyApiKey,
 } from "./queries";
 
 const fetchMock = vi.fn();
@@ -340,6 +341,25 @@ describe("board-structure + settings mutations", () => {
     const { result } = renderHook(() => useDeleteApiKey(), { wrapper });
     await act(async () => { await result.current.mutateAsync("k1"); });
     expect(queryClient.getQueryData(["api-keys"])).toEqual([]);
+  });
+
+  it("useCreateMyApiKey prepends the key to the my-api-keys cache (rawKey never cached)", async () => {
+    const MY_KEY = { ...KEY, id: "k2", name: "cli-myhost", ownerEmail: "maria@example.com", ownerName: "Maria" };
+    routes.set("POST /api/me/api-keys", { key: MY_KEY, rawKey: "lxk_secret" });
+    queryClient.setQueryData(["my-api-keys"], [KEY]);
+    const { result } = renderHook(() => useCreateMyApiKey(), { wrapper });
+    await act(async () => { await result.current.mutateAsync("cli-myhost"); });
+    expect(queryClient.getQueryData(["my-api-keys"])).toEqual([MY_KEY, KEY]);
+    const body = fetchMock.mock.calls.find((c) => String(c[0]) === "/api/me/api-keys" && (c[1] as RequestInit | undefined)?.method === "POST");
+    expect(JSON.parse(String((body?.[1] as RequestInit | undefined)?.body))).toEqual({ name: "cli-myhost" });
+  });
+
+  it("useDeleteMyApiKey filters the row from my-api-keys", async () => {
+    routes.set("DELETE /api/me/api-keys/k1", 204);
+    queryClient.setQueryData(["my-api-keys"], [KEY]);
+    const { result } = renderHook(() => useDeleteMyApiKey(), { wrapper });
+    await act(async () => { await result.current.mutateAsync("k1"); });
+    expect(queryClient.getQueryData(["my-api-keys"])).toEqual([]);
   });
 });
 

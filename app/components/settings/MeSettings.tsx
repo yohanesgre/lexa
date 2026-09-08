@@ -4,6 +4,7 @@ import { formatRelative } from "../../lib/relative-time";
 import type { SessionInfo } from "../../../shared/types";
 import { Field } from "../ui/Field";
 import { TextInput } from "../ui/TextInput";
+import { PersonalApiKeysSection } from "./PersonalApiKeysSection";
 
 // /settings/me — EVERY signed-in user. Own data only; nothing here is gated
 // by role.
@@ -26,6 +27,7 @@ export function MeSettings() {
 
       <ProfileSection />
       <PasswordSection />
+      <PersonalApiKeysSection />
       <SessionsSection currentSessionId={session?.session?.id ?? null} />
     </main>
   );

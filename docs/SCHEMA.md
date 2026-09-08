@@ -508,11 +508,40 @@ CREATE INDEX idx_wiki_share_links_page ON wiki_share_links(page_id);
 --   avoids a SQLite write on every API call).
 CREATE TABLE api_keys (
   id           TEXT PRIMARY KEY,
-  name         TEXT NOT NULL,                                -- "hermes", "opencode-local"
+  name         TEXT NOT NULL,                                -- "hermes", "opencode-local", "cli-<hostname>"
   key_hash     TEXT NOT NULL UNIQUE,                         -- hex(SHA-256(raw key))
   created_at   TEXT NOT NULL DEFAULT (datetime('now')),
   last_used_at TEXT,
-  user_id      TEXT REFERENCES users(id)                       -- owning user; NULL = unbound key
+  user_id      TEXT REFERENCES users(id)                       -- owning user; NULL = server key
+);
+-- Ownership semantics: UI-created keys are ALWAYS user-bound (user_id =
+-- creator). user_id NULL = "server key" — only seeded by env LXK_API_KEY
+-- / setup wizard; never created through the UI. Server keys resolve to
+-- role admin; bound keys resolve to the owner's role (superadmin→admin,
+-- member→member) and the owner's project access. Bound keys are revoked
+-- explicitly when the user is removed (workspace deletion), never cascaded.
+
+-- ============================================================
+-- Device login requests (CLI pairing flow)
+-- ============================================================
+-- Pairing flow: the CLI creates a request and prints a verify URL
+-- carrying a 256-bit random token (stored hashed — token_hash UNIQUE
+-- doubles as the lookup index, same pattern as api_keys.key_hash). A
+-- logged-in user opens the URL and approves (session + token = both
+-- required); the server mints a USER-BOUND API key (user_id = approver)
+-- and the CLI's next poll receives the raw key ONCE (row consumed —
+-- replay impossible). Raw key transits an in-memory store with a TTL
+-- (never persisted). Expired rows are purged at boot.
+CREATE TABLE device_login_requests (
+  id               TEXT PRIMARY KEY,
+  token_hash       TEXT NOT NULL UNIQUE,          -- hex(SHA-256(token)); lookup = poll/approve
+  code             TEXT NOT NULL,                 -- short display code (8 chars)
+  client_name      TEXT NOT NULL,                 -- "cli-<hostname>"
+  status           TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','approved','denied')),
+  expires_at       TEXT NOT NULL,                 -- datetime('now', '+10 minutes'); compared lexically
+  approver_user_id TEXT REFERENCES users(id),     -- set at approve
+  api_key_id       TEXT REFERENCES api_keys(id) ON DELETE SET NULL,  -- minted at approve
+  created_at       TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
 -- ============================================================
