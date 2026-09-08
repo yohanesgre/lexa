@@ -8,33 +8,21 @@ import {
   type DragEndEvent,
   type DragStartEvent,
 } from "@dnd-kit/core";
-import { SortableContext, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
-import { CSS } from "@dnd-kit/utilities";
-import type { Board, Swimlane, Task } from "../../../shared/types";
-import { keyAfter, keyBetween } from "../../../shared/positions";
-import { cn } from "../ui/cn";
-import { Column } from "./Column";
-import { BoardLane } from "./BoardLane";
+import type { Board, Task } from "../../../shared/types";
 import { BoardToolbar } from "./BoardToolbar";
-import { SwimlaneHeader } from "./SwimlaneHeader";
-import { TaskCard } from "./TaskCard";
-import { emptyFilters, isFilterActive, type FilterState } from "../../lib/filters";
-import { KanbanSettingsModal } from "./KanbanSettingsModal";
 import { MilestoneSelector } from "./MilestoneSelector";
-import { ColumnForm } from "./ColumnForm";
+import { KanbanSettingsModal } from "./KanbanSettingsModal";
 import { MoveConfirmDialog } from "./MoveConfirmDialog";
+import { ColumnForm } from "./ColumnForm";
+import { TaskCard } from "./TaskCard";
+import { BoardGrid } from "./board-grid";
+import { computeDropTarget, computeDropPosition, type MoveTarget } from "./board-drop";
+import { byPosition, cardProps, cellDropId, tasksReducer, useLinkMaps } from "./board-utils";
+import { emptyFilters, type FilterState } from "../../lib/filters";
 import { useArchiveTask, useCreateColumn, useRestoreTask } from "../../lib/queries";
 import { useMoveGuard } from "../../lib/useMoveGuard";
-import { Menu } from "../ui/Menu";
-import { MoreHorizontal } from "lucide-react";
-import { Archive, Trash2 } from "lucide-react";
 
-export interface MoveTarget {
-  columnId: string;
-  swimlaneId: string;
-  beforeTaskId?: string | undefined;
-  afterTaskId?: string | undefined;
-}
+export type { MoveTarget } from "./board-drop";
 
 interface KanbanBoardProps {
   board: Board;
@@ -45,83 +33,6 @@ interface KanbanBoardProps {
   onOpenCreateTask?: (columnId: string, swimlaneId?: string) => void;
   milestoneId?: string | null | undefined;
   onMilestoneChange?: (id: string | null) => void;
-}
-
-const byPosition = (a: Task, b: Task) => (a.position < b.position ? -1 : a.position > b.position ? 1 : 0);
-
-const cellDropId = (columnId: string, laneId: string | null) => `cell:${laneId ?? "none"}:${columnId}`;
-
-function cardProps(task: Task, board: Board) {
-  return {
-    id: task.id,
-    taskKey: task.key,
-    title: task.title,
-    priority: task.priority,
-    type: task.type,
-    priorities: board.fieldConfig?.priorities ?? [],
-    types: board.fieldConfig?.types ?? [],
-    assignees: task.assignees,
-    githubs: task.githubs,
-    dueAt: task.dueAt,
-  };
-}
-
-// Link maps derived from board.links: children per parent, blocked-by titles per task.
-function useLinkMaps(board: Board) {
-  return useMemo(() => {
-    const childrenByParent = new Map<string, string[]>();
-    const parentOf = new Map<string, string>();
-    const blockedBy = new Map<string, string[]>();
-    const titleById = new Map(board.tasks.map((t) => [t.id, t.title]));
-    for (const link of board.links) {
-      if (link.relation === "subtask_of") {
-        const kids = childrenByParent.get(link.toTaskId) ?? [];
-        kids.push(link.fromTaskId);
-        childrenByParent.set(link.toTaskId, kids);
-        parentOf.set(link.fromTaskId, link.toTaskId);
-      } else if (link.relation === "blocked_by") {
-        const blockers = blockedBy.get(link.fromTaskId) ?? [];
-        const title = titleById.get(link.toTaskId);
-        if (title) blockers.push(title);
-        blockedBy.set(link.fromTaskId, blockers);
-      }
-    }
-    return { childrenByParent, parentOf, blockedBy };
-  }, [board.links, board.tasks]);
-}
-
-const EMPTY_BLOCKED_BY: string[] = [];
-
-
-function BoardEmptyState({ onAddColumn }: { onAddColumn: () => void }) {
-  return (
-    <div className="empty-state" style={{ padding: 24 }}>
-      <div className="empty-state-icon">
-        <svg width={24} height={24} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round">
-          <rect x="3" y="4" width="18" height="16" rx="2" />
-          <path d="M9 4v16M15 4v16" />
-        </svg>
-      </div>
-      <div className="empty-state-title">No columns yet</div>
-      <div className="empty-state-desc">Add a column to start tracking tasks.</div>
-      <button
-        type="button"
-        className="btn btn-primary"
-        style={{ marginTop: 16 }}
-        onClick={onAddColumn}
-      >
-        <svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5}>
-          <path d="M12 5v14m-7-7h14" />
-        </svg>
-        Add Column
-      </button>
-    </div>
-  );
-}
-
-function tasksReducer(state: Task[], action: { type: "set"; tasks: Task[] } | { type: "move"; taskId: string; columnId: string; swimlaneId: string; position: string }): Task[] {
-  if (action.type === "set") return action.tasks;
-  return state.map((t) => (t.id === action.taskId ? { ...t, columnId: action.columnId, swimlaneId: action.swimlaneId, position: action.position } : t));
 }
 
 export function KanbanBoard({ board, showArchived = false, onToggleArchived, onMoveTask, onSelectTask, onOpenCreateTask, milestoneId = null, onMilestoneChange }: KanbanBoardProps) {
@@ -195,7 +106,7 @@ export function KanbanBoard({ board, showArchived = false, onToggleArchived, onM
   }, [liveLanes, milestoneId]);
   const hasLanes = visibleLiveLanes.length > 0;
 
-  const rows = useMemo<{ lane: Swimlane }[]>(() => {
+  const rows = useMemo<{ lane: Board["swimlanes"][number] }[]>(() => {
     if (!hasLanes) return [];
     return visibleLiveLanes.map((lane) => ({ lane }));
   }, [hasLanes, visibleLiveLanes]);
@@ -234,7 +145,6 @@ export function KanbanBoard({ board, showArchived = false, onToggleArchived, onM
     [filters.priorities, filters.types, filters.assignees, filters.swimlanes]
   );
 
-
   const toggleLane = (laneId: string) =>
     setCollapsed((prev) => {
       const next = new Set(prev);
@@ -250,83 +160,26 @@ export function KanbanBoard({ board, showArchived = false, onToggleArchived, onM
   const handleDragEnd = (event: DragEndEvent) => {
     const { active, over } = event;
     setActiveId(null);
-    if (!over) return;
     const task = localTasks.find((t) => t.id === String(active.id));
-    if (!task) return;
-    if (String(over.id) === task.id) return;
+    if (!task || !over || String(over.id) === task.id) return;
 
-    const overData = over.data.current as
-      | { type?: string | undefined; columnId?: string | undefined; swimlaneId?: string }
-      | undefined;
+    const target = computeDropTarget(task, over, tasksInCell, localTasks);
+    if (!target) return;
 
-    let targetColumnId: string;
-    let targetLaneId: string;
-    let beforeTaskId: string | undefined;
-    let afterTaskId: string | undefined;
-
-    if (overData?.type === "column") {
-      targetColumnId = overData.columnId!;
-      targetLaneId = overData.swimlaneId!;
-      const anchor =
-        tasksInCell(targetColumnId, targetLaneId)
-          .filter((t) => t.id !== task.id)
-          .at(-1) ??
-        localTasks
-          .filter((t) => t.columnId === targetColumnId && t.id !== task.id)
-          .sort(byPosition)
-          .at(-1);
-      beforeTaskId = anchor?.id;
-    } else {
-      const overTask = localTasks.find((t) => t.id === String(over.id));
-      if (!overTask) return;
-      targetColumnId = overTask.columnId;
-      targetLaneId = overTask.swimlaneId;
-      const items = tasksInCell(targetColumnId, targetLaneId).filter((t) => t.id !== task.id);
-      const idx = items.findIndex((t) => t.id === overTask.id);
-      const fromAbove =
-        task.columnId !== targetColumnId ||
-        task.swimlaneId !== targetLaneId ||
-        task.position < overTask.position;
-      if (fromAbove) {
-        beforeTaskId = overTask.id;
-        afterTaskId = items[idx + 1]?.id;
-      } else {
-        afterTaskId = overTask.id;
-        beforeTaskId = items[idx - 1]?.id;
-      }
-    }
-
-    const sameCell = task.columnId === targetColumnId && task.swimlaneId === targetLaneId;
+    const sameCell = task.columnId === target.columnId && task.swimlaneId === target.swimlaneId;
     if (sameCell) {
-      const items = tasksInCell(targetColumnId, targetLaneId);
+      const items = tasksInCell(target.columnId, target.swimlaneId);
       const cur = items.findIndex((t) => t.id === task.id);
-      if (items[cur - 1]?.id === beforeTaskId && items[cur + 1]?.id === afterTaskId) return;
+      if (items[cur - 1]?.id === target.beforeTaskId && items[cur + 1]?.id === target.afterTaskId) return;
     }
 
-    const anchorBefore = beforeTaskId ? localTasks.find((t) => t.id === beforeTaskId) : undefined;
-    const anchorAfter = afterTaskId ? localTasks.find((t) => t.id === afterTaskId) : undefined;
-    const position =
-      beforeTaskId || afterTaskId
-        ? keyBetween(anchorBefore?.position ?? null, anchorAfter?.position ?? null)
-        : keyAfter(
-            localTasks
-              .filter((t) => t.columnId === targetColumnId && t.id !== task.id)
-              .sort(byPosition)
-              .at(-1)?.position ?? null
-          );
-
-    const target: MoveTarget = {
-      columnId: targetColumnId,
-      swimlaneId: targetLaneId,
-      beforeTaskId,
-      afterTaskId,
-    };
+    const position = computeDropPosition(task, target, localTasks);
     // The move guard fires the mutation itself on the free path and returns
     // the in-flight promise; when it returns false the confirm dialog is
     // pending and commits later (resolve) without any optimistic local state.
     const commit = confirmMove(task, target);
     if (!commit) return;
-    dispatch({ type: "move", taskId: task.id, columnId: targetColumnId, swimlaneId: targetLaneId, position });
+    dispatch({ type: "move", taskId: task.id, columnId: target.columnId, swimlaneId: target.swimlaneId, position });
     void commit.catch(() => revertMove(task.id));
   };
 
@@ -351,54 +204,34 @@ export function KanbanBoard({ board, showArchived = false, onToggleArchived, onM
             ) : undefined
           }
         />
-
-        <div className={cn("board-scroll", columns.length === 0 && "items-center justify-center")}>
-        {columns.length === 0 ? (
-          <BoardEmptyState onAddColumn={() => setIsColumnCreateOpen(true)} />
-        ) : (
-          rows.map(({ lane }) => (
-            <BoardLane
-              key={lane.id}
-              slug={board.project.slug}
-              lane={lane}
-              columns={columns}
-              board={board}
-              localTasks={localTasks}
-              childrenByParent={childrenByParent}
-              blockedBy={blockedBy}
-              cardHidden={cardHidden}
-              cardDimmed={cardDimmed}
-              columnTotalCount={columnTotalCount}
-              columnDimmed={columnDimmed}
-              cellDropId={cellDropId}
-              flashColumnId={flashColumnId}
-              collapsed={collapsed}
-              toggleLane={toggleLane}
-              onOpenCreateTask={onOpenCreateTask}
-              onSelectTask={onSelectTask!}
-              newTaskIds={newTaskIds}
-              shakeTaskId={shakeTaskId}
-              archiveTask={archiveTask}
-              restoreTask={restoreTask}
-              collapsedParents={collapsedParents as Set<string>}
-              setCollapsedParents={setCollapsedParents}
-            />
-          ))
-
-        )}
-        {showArchived && archivedLanes.length > 0 && (
-          <div style={{ margin: "16px 0", maxWidth: 640 }}>
-            {archivedLanes.map((lane) => (
-              <SwimlaneHeader
-                key={lane.id}
-                slug={board.project.slug}
-                lane={lane}
-                count={localTasks.filter((t) => t.swimlaneId === lane.id).length}
-              />
-            ))}
-          </div>
-        )}
-        </div>
+        <BoardGrid
+          slug={board.project.slug}
+          board={board}
+          columns={columns}
+          rows={rows}
+          archivedLanes={archivedLanes}
+          showArchived={!!showArchived}
+          localTasks={localTasks}
+          childrenByParent={childrenByParent}
+          blockedBy={blockedBy}
+          cardHidden={cardHidden}
+          cardDimmed={cardDimmed}
+          columnTotalCount={columnTotalCount}
+          columnDimmed={columnDimmed}
+          cellDropId={cellDropId}
+          flashColumnId={flashColumnId}
+          collapsed={collapsed}
+          toggleLane={toggleLane}
+          {...(onOpenCreateTask !== undefined ? { onOpenCreateTask } : {})}
+          onSelectTask={onSelectTask!}
+          newTaskIds={newTaskIds}
+          shakeTaskId={shakeTaskId}
+          archiveTask={archiveTask}
+          restoreTask={restoreTask}
+          collapsedParents={collapsedParents as Set<string>}
+          setCollapsedParents={setCollapsedParents}
+          onAddColumn={() => setIsColumnCreateOpen(true)}
+        />
       </div>
       <DragOverlay dropAnimation={{ duration: 150, easing: "cubic-bezier(0.16, 1, 0.3, 1)" }}>
         {activeTask ? (
@@ -414,22 +247,22 @@ export function KanbanBoard({ board, showArchived = false, onToggleArchived, onM
       />
       <MoveConfirmDialog board={board} pending={pending} resolve={resolve} cancel={cancel} />
       {isColumnCreateOpen && (
-<ColumnForm
-        slug={board.project.slug}
-        column={null}
-        isOpen={isColumnCreateOpen}
-        onClose={() => setIsColumnCreateOpen(false)}
-        onSubmit={(input) => {
-          createColumn.mutate({
-            name: input.name,
-            wipLimit: input.wipLimit,
-            requiredFields: input.requiredFields,
-            color: input.color ?? undefined,
-            githubState: (input.githubState as "open" | "closed" | null | undefined) ?? undefined,
-            isDone: input.isDone ?? false,
-          });
-        }}
-      />
+        <ColumnForm
+          slug={board.project.slug}
+          column={null}
+          isOpen={isColumnCreateOpen}
+          onClose={() => setIsColumnCreateOpen(false)}
+          onSubmit={(input) => {
+            createColumn.mutate({
+              name: input.name,
+              wipLimit: input.wipLimit,
+              requiredFields: input.requiredFields,
+              color: input.color ?? undefined,
+              githubState: (input.githubState as "open" | "closed" | null | undefined) ?? undefined,
+              isDone: input.isDone ?? false,
+            });
+          }}
+        />
       )}
     </DndContext>
   );
