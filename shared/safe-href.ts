@@ -2,8 +2,7 @@
 // Renderers drop disallowed hrefs entirely (text stays plain, no anchor);
 // markdownToDoc drops them at the authoring boundary so the payload is
 // never stored. `javascript:` (and friends) in a stored href would execute
-// in any viewer's session when clicked — including reading the lxk-api-key
-// meta on the same page.
+// in any viewer's session when clicked.
 export function safeHref(href: unknown): string | null {
   if (typeof href !== "string") return null;
   const trimmed = href.trim();

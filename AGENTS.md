@@ -158,9 +158,9 @@ Acceptance checks live in `docs/GITHUB_SETUP.md` (sync round-trip) — run them 
 
 ### Running the dev stack (Bun standalone, no Cloudflare)
 
-The `.env` file is **required** — it supplies `LXK_API_KEY` (server auth) and
-`VITE_LXK_API_KEY` (browser auth header). `bun run setup` writes it (dev-only;
-self-hosters use the install script + `/setup` wizard).
+The `.env` file is **required** — it supplies `LXK_API_KEY` (server auth).
+`bun run setup` writes it (dev-only; self-hosters use the install script +
+`/setup` wizard).
 
 ```bash
 bun run setup          # first-time: admin email, API key, migrations, sample data
@@ -176,12 +176,12 @@ to start fresh. DB lives at `data/lexa.db` (SQLite WAL). Health check:
 
 Key facts:
 
-- **vite auto-loads `.env`** — `VITE_LXK_API_KEY` is injected into `import.meta.env`
+- **vite auto-loads `.env`** — `VITE_*` flags land in `import.meta.env`
   automatically; no manual `set -a; . ./.env` needed for the frontend.
-- **Key rotation is safe:** the server injects its current `LXK_API_KEY` into the
-  served HTML (`<meta name="lxk-api-key">`) and the client prefers it over any
-  build-time baked key. Re-running `bun run setup` (which may rotate the key)
-  never breaks the browser — no rebuild required.
+  Browsers authenticate via the session cookie — no key in the bundle.
+- **Key rotation is safe:** browsers authenticate via the session cookie, so
+  re-running `bun run setup` (which may rotate the key) never breaks the
+  browser — no rebuild required.
 - **`bun run dev:server` alone** serves the **built** app from `dist/` on :3000
   (frontend changes require `bun run build` first). Use it only for API work
   or to preview the production build; use `dev:full` for day-to-day development.
