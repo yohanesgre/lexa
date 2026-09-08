@@ -78,7 +78,7 @@ default columns appear when the first project is created.
 
 | Variable | Written by | Required |
 |---|---|---|
-| `LXK_API_KEY` | install script (or `--key`) / setup wizard | yes |
+| `LXK_API_KEY` | install script (or `--key`) | yes |
 | `LXK_ENV` | install script (`--flavor`) / setup wizard | yes (staging/prod) |
 | `LXK_PUBLIC_URL` | install script (from `--bind`/`--port`/`--domain`) | staging/prod (Better Auth baseURL) |
 | `CF_API_TOKEN` | operator env (workers target only) | workers only |

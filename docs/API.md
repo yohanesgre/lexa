@@ -107,7 +107,7 @@ unless it authenticates via one of two channels:
   (superadmin→admin, member→member). Member-bound keys call the same
   per-project authorization gates as member sessions and are 403'd on
   admin/superadmin gates (`requireSuperadmin` etc). `user_id` NULL =
-  **server key** (seeded `LXK_API_KEY` / setup-wizard only — never created
+  **server key** (seeded `LXK_API_KEY` only — never created
   through the UI): resolves to role admin. Key auth for CLI/webhooks is
   unchanged. UI-created keys always bind to the creating user (a key created
   by a superadmin keeps full admin power, attributed to that user).
@@ -115,10 +115,7 @@ unless it authenticates via one of two channels:
 **Attribution (R5):** the actor is the session user for browser calls and the
 key name for machine calls. The `x-lxk-user` header is **removed** — never
 sent by browsers, never read by the server. The `<meta name="lxk-api-key">`
-injection and `VITE_LXK_API_KEY` are still live — the server injects its
-current `LXK_API_KEY` into the served HTML (meta) and the client prefers it
-over the build-time baked key; browser `/api/*` calls otherwise authenticate
-via the session cookie.
+injection is removed — browsers authenticate `/api/*` via the session cookie.
 
 - **Superadmin vs member:** `users.role` ∈ {superadmin, member} — superadmin is
   env-only (`LXK_ADMIN_EMAILS`, applied at provisioning via the setup wizard),
@@ -516,9 +513,9 @@ GET    /api/health
   API-key exempt (health probe).
 
 GET    /api/setup/status
-→ 200 { configured: boolean, needsAdmin: boolean, hasApiKey: boolean,
+→ 200 { configured: boolean, needsAdmin: boolean,
         hasProjects: boolean, hasUsers: boolean }
-  API-key exempt. configured = setup_complete flag OR (api key + admin emails present).
+  API-key exempt. configured = setup_complete flag OR (api key + superadmin present).
 
 POST   /api/setup/admin        body { email*, password* }
 → 200 { ok: true } | 403 SETUP_LOCKED
@@ -527,10 +524,6 @@ POST   /api/setup/admin        body { email*, password* }
   provisioning: the operator picks any email in the wizard.
   LXK_ADMIN_EMAILS is the CLI bootstrap default only — it never gates or
   pre-populates the wizard. The legacy admin_emails setting is DELETED.
-
-POST   /api/setup/api-key
-→ 200 { key: "lxk_..." }
-  Creates a fresh admin key (user_id NULL → admin). rawKey returned once.
 
 POST   /api/setup/seed        body { flavor?: "minimal" | "full" }
 → 200 { seeded: boolean }
@@ -1075,7 +1068,7 @@ body { name* }
   The key binds to the creating user (identity.userId required — a bare
   server key cannot mint another key; 403 FORBIDDEN otherwise). Server keys
   (user_id NULL) are never created through the API — seeded by env
-  LXK_API_KEY / setup wizard only.
+  LXK_API_KEY only.
 
 DELETE /api/settings/api-keys/:id  (admin)
 → 204 | 404

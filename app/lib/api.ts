@@ -31,7 +31,6 @@ export function listProjects(): Promise<{ data: Project[]; nextCursor: string | 
 export interface SetupStatus {
   configured: boolean;
   needsAdmin: boolean;
-  hasApiKey: boolean;
   hasProjects: boolean;
   hasUsers: boolean;
 }
@@ -42,10 +41,6 @@ export function getSetupStatus(): Promise<SetupStatus> {
 
 export function setSetupAdmin(email: string, password: string): Promise<{ ok: boolean }> {
   return request(`${BASE}/setup/admin`, { method: "POST", body: JSON.stringify({ email, password }) });
-}
-
-export function createSetupApiKey(): Promise<{ key: string }> {
-  return request(`${BASE}/setup/api-key`, { method: "POST" });
 }
 
 export type SeedFlavor = "minimal" | "full";

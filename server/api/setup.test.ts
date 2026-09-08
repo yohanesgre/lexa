@@ -48,6 +48,13 @@ describe("provisioning (setup wizard)", () => {
     expect(settingsRows.c).toBe(0);
   });
 
+  it("no longer exposes hasApiKey and the api-key minting endpoint is gone", async () => {
+    const status = await json(await handler(new Request("http://localhost:3000/api/setup/status")));
+    expect("hasApiKey" in status).toBe(false);
+    const res = await handler(new Request("http://localhost:3000/api/setup/api-key", { method: "POST" }));
+    expect(res.status).toBe(404);
+  });
+
   it("creates the superadmin account with a password; login works", async () => {
     delete process.env.LXK_ADMIN_EMAILS;
     const res = await setAdmin({ email: "ops@lexa.dev", password: "password123" });

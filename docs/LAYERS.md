@@ -513,7 +513,7 @@ channels:
 // (superadmin→admin, member→member) and userId, so per-project gates use the
 // same AuthorizationService path as sessions. Member-bound keys are allowed
 // (no middleware denial) — admin/superadmin gates still 403 them.
-// user_id NULL = server key (env LXK_API_KEY / setup wizard seed): role
+// user_id NULL = server key (env LXK_API_KEY seed): role
 // admin, attribution = key name. SHA-256 lookup; last_used_at sampled
 // (only when NULL or older than 1h — avoids a write per API call).
 export function resolveApiKeyIdentity(authHeader: string, headers: Headers, db: Database, dbPath: string): ApiKeyIdentity | null {

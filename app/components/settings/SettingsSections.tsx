@@ -238,7 +238,7 @@ export function ApiKeysSection() {
         <span className="text-xs text-lx-text-muted">Workspace scope</span>
       </div>
       <p className="text-sm text-lx-text-secondary mb-4" style={{ maxWidth: 560 }}>
-        Machine authentication for MCP agents and integrations. Keys are hashed with SHA-256 before storage. Every key binds to its creator — rows without an owner are server keys (seeded via <span className="font-mono">LXK_API_KEY</span> / the setup wizard). Only the full key is shown once on creation.
+        Machine authentication for MCP agents and integrations. Keys are hashed with SHA-256 before storage. Every key binds to its creator — rows without an owner are server keys (seeded via <span className="font-mono">LXK_API_KEY</span>). Only the full key is shown once on creation.
       </p>
 
       {isLoading ? (

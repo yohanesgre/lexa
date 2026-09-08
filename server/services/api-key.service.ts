@@ -6,8 +6,8 @@ import type { ApiKey, ApiKeyCreateResult } from "../../shared/types";
 
 export class ApiKeyNameEmpty extends Data.TaggedError("ApiKeyNameEmpty")<{}> {}
 
-// System/bootstrap keys created outside the settings UI (env LXK_API_KEY seed,
-// first-run wizard key). The settings list hides only the seeded bootstrap
+// System/bootstrap keys created outside the settings UI (env LXK_API_KEY seed).
+// The settings list hides only the seeded bootstrap
 // keys — a user-minted key named the same must stay visible. Filter is
 // name + unbound, never name alone.
 const SYSTEM_KEY_NAMES = new Set(["admin", "setup-wizard"]);
