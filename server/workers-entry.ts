@@ -165,24 +165,39 @@ function r2StorageConfig(runtimeEnv: RuntimeEnv, blob: R2Bucket | undefined): St
   };
 }
 
+// The full API stack (better-auth + service graph + web handler) is
+// isolate-stable: bindings and env vars don't change within an isolate.
+// Rebuilding it per request costs tens of ms of CPU — far over the free
+// plan's 10ms budget. Cache on first build; a changed env fingerprint
+// (redeploy/new isolate) rebuilds once.
+let apiCache: { fingerprint: string; handler: (req: Request) => Promise<Response> } | null = null;
+
+function apiFingerprint(runtimeEnv: RuntimeEnv): string {
+  return JSON.stringify([runtimeEnv.LXK_ENV ?? "", runtimeEnv.LXK_PUBLIC_URL ?? "", (runtimeEnv.LXK_API_KEY ?? "").length]);
+}
+
 async function handleApi(
   req: WorkersRequest,
   runtimeEnv: RuntimeEnv,
   driver: DbDriver,
   blob: R2Bucket | undefined
 ): Promise<Response> {
-  const lexaAuth = createAuth(runtimeEnv) as unknown as { auth: BetterAuthApi };
-  const handler = createWorkersApiHandler({
-    driver,
-    runtimeEnv,
-    storage: r2StorageConfig(runtimeEnv, blob),
-    authHooks: {
-      createUser: (input) =>
-        lexaAuth.auth.api.createUser({ body: { ...input, data: { role: "superadmin" } } }),
-    },
-    getSession: (headers) => lexaAuth.auth.api.getSession({ headers }),
-  });
-  return handler(req as unknown as Request);
+  const fingerprint = apiFingerprint(runtimeEnv);
+  if (!apiCache || apiCache.fingerprint !== fingerprint) {
+    const lexaAuth = createAuth(runtimeEnv) as unknown as { auth: BetterAuthApi };
+    const handler = createWorkersApiHandler({
+      driver,
+      runtimeEnv,
+      storage: r2StorageConfig(runtimeEnv, blob),
+      authHooks: {
+        createUser: (input) =>
+          lexaAuth.auth.api.createUser({ body: { ...input, data: { role: "superadmin" } } }),
+      },
+      getSession: (headers) => lexaAuth.auth.api.getSession({ headers }),
+    });
+    apiCache = { fingerprint, handler };
+  }
+  return apiCache.handler(req as unknown as Request);
 }
 
 let ssrFetch: ((req: Request) => Promise<Response>) | null = null;
