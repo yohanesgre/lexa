@@ -267,7 +267,38 @@ export class LexaClient {
   }): Effect.Effect<MachineHeartbeatInfo, ApiError, never> {
     return this.request<MachineHeartbeatInfo>("/api/hearth/machines/heartbeat", { method: "POST", body: JSON.stringify(input) });
   }
+
+  // ── Device login (CLI pairing) ──
+  // No API key exists yet — create + poll are API-key exempt; the poll
+  // credential is the pairing token (x-device-token), the same 256-bit hex
+  // embedded in verifyUrl. Errors surface as ApiError with code so callers
+  // branch on DEVICE_LOGIN_DENIED / EXPIRED / NOT_FOUND.
+  createDeviceLoginRequest(clientName: string): Effect.Effect<DeviceLoginRequestInfo, ApiError, never> {
+    return this.request<DeviceLoginRequestInfo>("/api/device-login/requests", {
+      method: "POST",
+      body: JSON.stringify({ clientName }),
+    });
+  }
+
+  pollDeviceLoginRequest(id: string, token: string): Effect.Effect<DeviceLoginPollResult, ApiError, never> {
+    return this.request<DeviceLoginPollResult>(`/api/device-login/requests/${encodeURIComponent(id)}`, {
+      headers: { "x-device-token": token },
+    });
+  }
 }
+
+export interface DeviceLoginRequestInfo {
+  id: string;
+  code: string;
+  clientName: string;
+  status: "pending" | "approved" | "denied";
+  expiresMs: number;
+  verifyUrl: string;
+}
+
+export type DeviceLoginPollResult =
+  | { status: "pending"; clientName: string; code: string; expiresAt: string }
+  | { status: "approved"; rawKey: string; keyName: string; approverName: string | null };
 
 export interface MachineInfo {
   id: string;

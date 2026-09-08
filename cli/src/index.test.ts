@@ -8,7 +8,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { spawn } from "node:child_process";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { NotLoggedIn } from "./index";
@@ -195,6 +195,142 @@ describe("requireClient resolution (env + saved-login fallbacks)", () => {
     const r = await runCli(["status", "--url", base, "--key", "lxk_flag_key_1234567890123456789012345678901234567890"], { LEXA_DIR: lexaDir });
     expect(r.status).toBe(0);
     expect(r.stdout).toContain("Server:   reachable (health ok)");
+  });
+});
+
+describe("login (legacy key + device flow)", () => {
+  let server: Server;
+  let base = "";
+  let pollQueue: Array<{ status: number; body: unknown }> = [];
+  let registerCalls = 0;
+  const DEVICE_TOKEN = "ab".repeat(32);
+  const pendingBody = { status: "pending", clientName: "cli-testhost", code: "ABCDEFGH", expiresAt: new Date(Date.now() + 10 * 60 * 1000).toISOString() };
+  const approvedKey = "lxk_" + "d".repeat(43);
+  const legacyKey = "lxk_" + "l".repeat(43);
+
+  beforeAll(async () => {
+    server = createServer((req, res) => {
+      res.setHeader("Content-Type", "application/json");
+      const url = new URL(req.url ?? "", base);
+      if (req.method === "POST" && url.pathname === "/api/device-login/requests") {
+        let body = "";
+        req.on("data", (c) => (body += c));
+        req.on("end", () => {
+          const clientName = (JSON.parse(body) as { clientName?: string }).clientName ?? "";
+          res.writeHead(201);
+          res.end(JSON.stringify({
+            id: "dl_req_1",
+            code: "ABCDEFGH",
+            clientName,
+            status: "pending",
+            expiresMs: Date.now() + 10 * 60 * 1000,
+            verifyUrl: `${base}/device-login?token=${DEVICE_TOKEN}`,
+          }));
+        });
+        return;
+      }
+      if (req.method === "GET" && /^\/api\/device-login\/requests\/[^/]+$/.test(url.pathname)) {
+        const next = pollQueue.shift() ?? { status: 200, body: pendingBody };
+        res.writeHead(next.status);
+        res.end(JSON.stringify(next.body));
+        return;
+      }
+      if (url.pathname === "/api/health") { res.writeHead(200); res.end(JSON.stringify({ ok: true })); return; }
+      if (url.pathname === "/api/projects") { res.writeHead(200); res.end(JSON.stringify({ data: [] })); return; }
+      if (req.method === "POST" && url.pathname === "/api/hearth/machines/register") {
+        registerCalls++;
+        // Device flow must authenticate machine registration with the minted
+        // key — an empty Bearer would 401 against a real server.
+        const auth = req.headers.authorization ?? "";
+        if (!auth.startsWith("Bearer lxk_")) {
+          res.writeHead(401);
+          res.end(JSON.stringify({ error: { code: "UNAUTHORIZED", message: "Invalid or missing API key" } }));
+          return;
+        }
+        res.writeHead(200);
+        res.end(JSON.stringify({ machine: { id: "m1", hostname: "testhost", clis: [], lastSeen: null, createdAt: new Date().toISOString() }, secret: null }));
+        return;
+      }
+      res.writeHead(404);
+      res.end(JSON.stringify({ error: { code: "NOT_FOUND", message: "not found" } }));
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+  });
+
+  afterAll(async () => {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  });
+
+  function savedConfig(lexaDir: string): { url: string; apiKey: string } {
+    const group = join(lexaDir, `localhost:${new URL(base).port}`);
+    return JSON.parse(readFileSync(join(group, "config.json"), "utf-8")) as { url: string; apiKey: string };
+  }
+
+  it("legacy --url --key login: validates, saves config, runs machine registration", async () => {
+    const lexaDir = freshLexaDir();
+    registerCalls = 0;
+    const r = await runCli(["login", "--url", base, "--key", legacyKey], { LEXA_DIR: lexaDir });
+    expect(r.status).toBe(0);
+    expect(r.stdout).toContain(`Logged in to ${base}`);
+    expect(r.stdout).toContain("Registered machine");
+    expect(registerCalls).toBe(1);
+    expect(savedConfig(lexaDir)).toEqual({ url: base, apiKey: legacyKey });
+  });
+
+  it("legacy env login (LEXA_URL/LEXA_API_KEY) still works", async () => {
+    const lexaDir = freshLexaDir();
+    registerCalls = 0;
+    const r = await runCli(["login"], { LEXA_URL: base, LEXA_API_KEY: legacyKey, LEXA_DIR: lexaDir });
+    expect(r.status).toBe(0);
+    expect(r.stdout).toContain(`Logged in to ${base}`);
+    expect(registerCalls).toBe(1);
+    expect(savedConfig(lexaDir)).toEqual({ url: base, apiKey: legacyKey });
+  });
+
+  it("device flow happy path: verify URL printed, pending → approved, config saved, machine registered", async () => {
+    const lexaDir = freshLexaDir();
+    pollQueue = [{ status: 200, body: pendingBody }, { status: 200, body: { status: "approved", rawKey: approvedKey, keyName: "cli-testhost", approverName: "Maria" } }];
+    registerCalls = 0;
+    const r = await runCli(["login", base], { LEXA_URL: "", LEXA_API_KEY: "", LEXA_DIR: lexaDir });
+    expect(r.status).toBe(0);
+    expect(r.stdout).toContain(`${base}/device-login?token=${DEVICE_TOKEN}`);
+    expect(r.stdout).toContain("Backup code (shown on the approve page): ABCDEFGH");
+    expect(r.stdout).toContain("Waiting for approval");
+    expect(r.stdout).toContain(`New API key: cli-testhost`);
+    expect(r.stdout).toContain("Logged in as Maria");
+    expect(r.stdout).toContain(`Logged in to ${base}`);
+    expect(r.stdout).toContain("Registered machine");
+    expect(registerCalls).toBe(1);
+    expect(savedConfig(lexaDir)).toEqual({ url: base, apiKey: approvedKey });
+  });
+
+  it("device flow denied → exit 1 with a clear message", async () => {
+    pollQueue = [{ status: 403, body: { error: { code: "DEVICE_LOGIN_DENIED", message: "Login request denied" } } }];
+    const r = await runCli(["login", base], { LEXA_URL: "", LEXA_API_KEY: "" });
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain("denied");
+  });
+
+  it("device flow expired → exit 1 with a clear message", async () => {
+    pollQueue = [{ status: 410, body: { error: { code: "DEVICE_LOGIN_EXPIRED", message: "Login request expired" } } }];
+    const r = await runCli(["login", base], { LEXA_URL: "", LEXA_API_KEY: "" });
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain("expired");
+  });
+
+  it("device flow on an old server (404 DEVICE_LOGIN_NOT_FOUND) points at --key login", async () => {
+    pollQueue = [{ status: 404, body: { error: { code: "DEVICE_LOGIN_NOT_FOUND", message: "not found" } } }];
+    const r = await runCli(["login", base], { LEXA_URL: "", LEXA_API_KEY: "" });
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain("does not support device login");
+    expect(r.stderr).toContain("lexa-cli login --key <lxk_...>");
+  });
+
+  it("non-TTY login with no URL and no key fails with usage", async () => {
+    const r = await runCli(["login"], { LEXA_URL: "", LEXA_API_KEY: "" });
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain("Server URL is required");
   });
 });
 

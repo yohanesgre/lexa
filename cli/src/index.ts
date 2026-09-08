@@ -12,8 +12,10 @@
  * Env fallbacks (overridden by --url/--key or saved login):
  *   LEXA_URL, LEXA_API_KEY
  *
- * `lexa-cli login` without flags prompts interactively (TTY only); scripts
- * always pass --url/--key or env vars.
+ * `lexa-cli login` without a key starts browser-approval (device) login: it
+ * prints a verify link and polls until a logged-in user approves, then saves
+ * the minted key. Legacy --url/--key and LEXA_URL/LEXA_API_KEY keep working
+ * for scripts; the URL alone prompts interactively (TTY only).
  *
  * Effect boundary: command dispatch is an Effect program; the CliConfigService
  * is provided at the edge and failures print with the command's prefix then
@@ -185,39 +187,14 @@ function promptRequired(question: string, requiredMessage: string): Effect.Effec
   });
 }
 
-function cmdLogin(flags: Record<string, string | boolean>): Effect.Effect<void, unknown, CliConfigService> {
+// Bind the machine: registration creates the machines row (last_seen NULL
+// = "bound, not listening") so it shows up in Settings before the listener
+// ever runs. The server mints a per-machine secret on first registration
+// (returned once) — persisted for the listener's claims.
+// Non-fatal — login must succeed even if the server hiccups. Shared by the
+// key and device login paths.
+function registerMachineBlock(client: LexaClient, dir: string): Effect.Effect<void, unknown, never> {
   return Effect.gen(function* () {
-    const svc = yield* CliConfigService;
-    let url = ((typeof flags.url === "string" && flags.url) || ENV_URL || "").replace(/\/+$/, "");
-    let key = (typeof flags.key === "string" && flags.key) || ENV_KEY || "";
-    if (!url || !key) {
-      if (!process.stdin.isTTY) {
-        // Cannot loop without stdin — message + usage, exit 1.
-        console.error(`  ${url ? "API key" : "Server URL"} is required — please fill it`);
-        console.error("  Usage: lexa-cli login --url <base> --key <lxk_...>");
-        process.exit(1);
-      }
-      if (!url) url = yield* promptRequired("  Server URL: ", "  Server URL is required — please fill it");
-      if (!key) key = yield* promptRequired("  API key — from Settings → API Keys, starts with lxk_: ", "  API key is required — please fill it");
-    }
-    if (!/^lxk_[0-9A-Za-z]{43}$/.test(key)) {
-      console.error("  Invalid API key — must be lxk_ + 43 chars (from Settings → API Keys).");
-      process.exit(1);
-    }
-    // Validate: server reachable + key works.
-    const client = new LexaClient({ url, apiKey: key });
-    const h = yield* client.health();
-    if (!h.ok) yield* new ApiError({ status: 0, serverMessage: "health check failed" });
-    yield* client.listProjects();
-    // State lands in the group of THIS server — ~/.lexa/<host>/.
-    const dir = groupDir(url);
-    yield* svc.saveConfig({ url, apiKey: key }, dir);
-    console.log(`  Logged in to ${url}`);
-    // Bind the machine: registration creates the machines row (last_seen NULL
-    // = "bound, not listening") so it shows up in Settings before the
-    // listener ever runs. The server mints a per-machine secret on first
-    // registration (returned once) — persisted for the listener's claims.
-    // Non-fatal — login must succeed even if the server hiccups.
     const machineId = yield* getOrCreateMachineId(dir);
     const machineSecret = yield* getOrCreateMachineSecret(dir);
     const registered = yield* client.registerMachine({ id: machineId, hostname: osHostname(), secret: machineSecret }).pipe(
@@ -232,6 +209,101 @@ function cmdLogin(flags: Record<string, string | boolean>): Effect.Effect<void, 
     );
     if (registered?.secret) yield* saveMachineSecret(registered.secret, dir);
     console.log(`  Registered machine ${machineId} — run \`lexa-cli machine listen\` to go online`);
+  });
+}
+
+const DEVICE_POLL_INTERVAL_MS = 2000;
+const DEVICE_POLL_TIMEOUT_MS = 5 * 60 * 1000;
+
+// Browser-approval login: create a pairing request, print the verify URL,
+// poll until a logged-in user approves, then save the minted user-bound key
+// exactly like the legacy key login. No prompts — works with non-TTY stdin.
+function deviceLoginFlow(url: string): Effect.Effect<void, unknown, CliConfigService> {
+  return Effect.gen(function* () {
+    const svc = yield* CliConfigService;
+    const client = new LexaClient({ url, apiKey: "" });
+    const h = yield* client.health();
+    if (!h.ok) yield* new ApiError({ status: 0, serverMessage: "health check failed" });
+    const req = yield* client.createDeviceLoginRequest(`cli-${osHostname()}`);
+    const token = new URL(req.verifyUrl).searchParams.get("token") ?? "";
+    if (!token) yield* new ApiError({ status: 0, serverMessage: "server returned a verify URL without a token" });
+    console.log("  Open this link to approve the login:");
+    console.log(`    ${req.verifyUrl}`);
+    console.log(`  Backup code (shown on the approve page): ${req.code}`);
+    console.log("  Waiting for approval…");
+    const deadline = Date.now() + DEVICE_POLL_TIMEOUT_MS;
+    while (Date.now() < deadline) {
+      const result = yield* client.pollDeviceLoginRequest(req.id, token).pipe(
+        Effect.catchAll((e) => {
+          if (e instanceof ApiError && e.code === "DEVICE_LOGIN_NOT_FOUND") {
+            console.error("  This server does not support device login — use `lexa-cli login --key <lxk_...>`.");
+            process.exit(1);
+          }
+          if (e instanceof ApiError && e.code === "DEVICE_LOGIN_DENIED") {
+            console.error("  Login request was denied.");
+            process.exit(1);
+          }
+          if (e instanceof ApiError && e.code === "DEVICE_LOGIN_EXPIRED") {
+            console.error("  Login request expired — please try again.");
+            process.exit(1);
+          }
+          return Effect.fail(e);
+        })
+      );
+      if (result.status === "approved") {
+        const dir = groupDir(url);
+        yield* svc.saveConfig({ url, apiKey: result.rawKey }, dir);
+        console.log(`  New API key: ${result.keyName}`);
+        console.log(`  Logged in as ${result.approverName ?? "unknown"}`);
+        console.log(`  Logged in to ${url}`);
+        // Machine registration must authenticate with the minted key — the
+        // pre-login client has no credential.
+        yield* registerMachineBlock(new LexaClient({ url, apiKey: result.rawKey }), dir);
+        return;
+      }
+      yield* Effect.sleep(DEVICE_POLL_INTERVAL_MS);
+    }
+    console.error("  Login request timed out after 5 minutes — nobody approved it. Try again.");
+    process.exit(1);
+  });
+}
+
+function cmdLogin(flags: Record<string, string | boolean>, positionals: string[]): Effect.Effect<void, unknown, CliConfigService> {
+  return Effect.gen(function* () {
+    const svc = yield* CliConfigService;
+    // --url flag beats a positional URL (`login <url>`); env stays last.
+    let url = ((typeof flags.url === "string" && flags.url) || positionals[1] || ENV_URL || "").replace(/\/+$/, "");
+    const key = (typeof flags.key === "string" && flags.key) || ENV_KEY || "";
+    if (!url) {
+      if (!process.stdin.isTTY) {
+        // Cannot prompt without stdin — message + usage, exit 1. (The device
+        // flow below needs no stdin, so a missing KEY never lands here.)
+        console.error("  Server URL is required — please fill it");
+        console.error("  Usage: lexa-cli login [<url>] [--url <base>] [--key <lxk_...>]");
+        process.exit(1);
+      }
+      url = yield* promptRequired("  Server URL: ", "  Server URL is required — please fill it");
+    }
+    if (key) {
+      // Legacy key login — validate the lxk_ shape, confirm server + key, save.
+      if (!/^lxk_[0-9A-Za-z]{43}$/.test(key)) {
+        console.error("  Invalid API key — must be lxk_ + 43 chars (from Settings → API Keys).");
+        process.exit(1);
+      }
+      // Validate: server reachable + key works.
+      const client = new LexaClient({ url, apiKey: key });
+      const h = yield* client.health();
+      if (!h.ok) yield* new ApiError({ status: 0, serverMessage: "health check failed" });
+      yield* client.listProjects();
+      // State lands in the group of THIS server — ~/.lexa/<host>/.
+      const dir = groupDir(url);
+      yield* svc.saveConfig({ url, apiKey: key }, dir);
+      console.log(`  Logged in to ${url}`);
+      yield* registerMachineBlock(client, dir);
+      return;
+    }
+    // No key → device login: browser-approval pairing on the same server.
+    yield* deviceLoginFlow(url);
   });
 }
 
@@ -500,8 +572,10 @@ const HELP = `lexa-cli — Lexa operator CLI
 Usage: lexa-cli <command> [options]
 
 Auth:
-  login    --url <base> --key <lxk_...>   save credentials (chmod 600)
-                                           prompts interactively when omitted
+  login    [<url>] [--url <base>] [--key <lxk_...>]
+                                           save credentials (chmod 600); without
+                                           --key: browser-approval device login
+                                           (prints a link to approve)
   logout                                 remove saved credentials
   status                                 server health + auth + counts
 
@@ -660,7 +734,7 @@ async function main(): Promise<void> {
   let raw = false;
 
   switch (cmd) {
-    case "login": program = cmdLogin(flags); prefix = "Login failed"; break;
+    case "login": program = cmdLogin(flags, positionals); prefix = "Login failed"; break;
     case "logout": program = cmdLogout(flags); break;
     case "status": program = cmdStatus(flags); prefix = "Status check failed"; break;
     case "upgrade":
