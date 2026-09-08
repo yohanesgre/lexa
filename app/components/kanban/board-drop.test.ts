@@ -1,11 +1,13 @@
 import { describe, it, expect } from "vitest";
-import type { Task } from "../../../shared/types";
+import type { Task, TipTapDoc } from "../../../shared/types";
 import { computeDropTarget, computeDropPosition } from "./board-drop";
 
+const doc: TipTapDoc = { type: "doc", content: [] };
+
 const tasks: Task[] = [
-  { id: "t1", columnId: "c1", swimlaneId: "l1", position: "a0", key: "P-1", title: "One", priority: "p", type: "t", assignees: [], githubs: [], archivedAt: null, dueAt: null, createdAt: "", updatedAt: "", projectId: "p1", description: "" },
-  { id: "t2", columnId: "c1", swimlaneId: "l1", position: "a1", key: "P-2", title: "Two", priority: "p", type: "t", assignees: [], githubs: [], archivedAt: null, dueAt: null, createdAt: "", updatedAt: "", projectId: "p1", description: "" },
-  { id: "t3", columnId: "c2", swimlaneId: "l1", position: "b0", key: "P-3", title: "Three", priority: "p", type: "t", assignees: [], githubs: [], archivedAt: null, dueAt: null, createdAt: "", updatedAt: "", projectId: "p1", description: "" },
+  { id: "t1", columnId: "c1", swimlaneId: "l1", position: "a0", key: "P-1", title: "One", priority: "p", type: "t", assignees: [], githubs: [], archivedAt: null, dueAt: null, createdAt: "", updatedAt: "", projectId: "p1", description: doc },
+  { id: "t2", columnId: "c1", swimlaneId: "l1", position: "a1", key: "P-2", title: "Two", priority: "p", type: "t", assignees: [], githubs: [], archivedAt: null, dueAt: null, createdAt: "", updatedAt: "", projectId: "p1", description: doc },
+  { id: "t3", columnId: "c2", swimlaneId: "l1", position: "b0", key: "P-3", title: "Three", priority: "p", type: "t", assignees: [], githubs: [], archivedAt: null, dueAt: null, createdAt: "", updatedAt: "", projectId: "p1", description: doc },
 ];
 
 const tasksInCell = (columnId: string, laneId: string) =>
