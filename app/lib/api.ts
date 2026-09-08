@@ -333,6 +333,42 @@ export function deleteApiKey(id: string): Promise<void> {
   return request(`${BASE}/settings/api-keys/${id}`, { method: "DELETE" });
 }
 
+// ── Personal API keys (own only — user-bound; any signed-in user) ──
+
+export function listMyApiKeys(): Promise<{ data: ApiKey[] }> {
+  return request(`${BASE}/me/api-keys`);
+}
+
+export function createMyApiKey(name: string): Promise<ApiKeyCreateResult> {
+  return request(`${BASE}/me/api-keys`, { method: "POST", body: JSON.stringify({ name }) });
+}
+
+export function deleteMyApiKey(id: string): Promise<void> {
+  return request(`${BASE}/me/api-keys/${id}`, { method: "DELETE" });
+}
+
+// ── Device login (CLI pairing) ──
+// The poll credential is the pairing token carried by x-device-token — this
+// surface is API-key exempt; never send a Bearer header here.
+
+export type DeviceLoginPollResult =
+  | { status: "pending"; clientName: string; code: string; expiresAt: string }
+  | { status: "approved"; rawKey: string; keyName: string; approverName: string | null };
+
+export type DeviceLoginActionResult = { status: "approved" | "denied"; clientName: string };
+
+export function getDeviceLoginRequest(id: string, token: string): Promise<DeviceLoginPollResult> {
+  return request(`${BASE}/device-login/requests/${encodeURIComponent(id)}`, { headers: { "x-device-token": token } });
+}
+
+export function approveDeviceLogin(id: string, token: string): Promise<DeviceLoginActionResult> {
+  return request(`${BASE}/device-login/requests/${encodeURIComponent(id)}/approve`, { method: "POST", body: JSON.stringify({ token }) });
+}
+
+export function denyDeviceLogin(id: string, token: string): Promise<DeviceLoginActionResult> {
+  return request(`${BASE}/device-login/requests/${encodeURIComponent(id)}/deny`, { method: "POST", body: JSON.stringify({ token }) });
+}
+
 // ── Rate limiting (app scope — admin only) ──
 
 export interface RateLimitSettings {

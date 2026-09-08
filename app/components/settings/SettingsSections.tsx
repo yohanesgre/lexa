@@ -85,7 +85,7 @@ function ApiKeyRevealModal({ name, fullKey, onDone }: { name: string; fullKey: s
                   autoFocus
                 >
                   {copied ? <Check size={12} strokeWidth={1.5} /> : <Copy size={12} strokeWidth={1.5} />}
-                  {copied ? "Copied to clipboard" : "Copy"}
+                  {copied ? "Copied" : "Copy"}
                 </button>
               </div>
               <div className="field-hint">Full key is shown here exactly once — in the table it is always masked.</div>
@@ -96,7 +96,7 @@ function ApiKeyRevealModal({ name, fullKey, onDone }: { name: string; fullKey: s
 
             <div className="notice notice-warning">
               <AlertTriangle size={16} strokeWidth={1.5} />
-              <span>This key will not be shown again. Copy it now and store it somewhere safe.</span>
+              <span>This key will not be shown again. Copy it now and store it somewhere safe — Lexa stores only a SHA-256 hash.</span>
             </div>
           </div>
 
@@ -109,17 +109,21 @@ function ApiKeyRevealModal({ name, fullKey, onDone }: { name: string; fullKey: s
   );
 }
 
-function DeleteKeyModal({ name, onCancel, onConfirm }: { name: string; onCancel: () => void; onConfirm: () => void }) {
+export { ApiKeyRevealModal };
+
+function DeleteKeyModal({ name, owner, onCancel, onConfirm }: { name: string; owner?: string; onCancel: () => void; onConfirm: () => void }) {
   return (
     <ConfirmDialog
       title="Delete API key?"
-      body={<>This will permanently delete{" "}<span className="chip font-mono text-xs text-lx-text-primary">{name}</span>{" "}— agents and integrations using this key will lose access immediately. This action cannot be undone.</>}
+      body={<>This will permanently delete{" "}<span className="chip font-mono text-xs text-lx-text-primary">{name}</span>{owner ? <>{" "}<span className="text-xs text-lx-text-secondary">(owned by {owner})</span></> : null} — agents and integrations using this key will lose access immediately. This action cannot be undone.</>}
       confirmLabel="Delete"
       onCancel={onCancel}
       onConfirm={onConfirm}
     />
   );
 }
+
+export { DeleteKeyModal };
 
 function RemoveGithubSyncModal({ onCancel, onConfirm }: { onCancel: () => void; onConfirm: () => void }) {
   return (
@@ -224,14 +228,17 @@ export function ApiKeysSection() {
   const deleteKey = useDeleteApiKey();
   const [keyName, setKeyName] = useState("");
   const [reveal, setReveal] = useState<{ name: string; key: string } | null>(null);
-  const [deleting, setDeleting] = useState<{ id: string; name: string } | null>(null);
+  const [deleting, setDeleting] = useState<{ id: string; name: string; owner: string | null } | null>(null);
   const generateBtnRef = useRef<HTMLButtonElement>(null);
 
   return (
     <section className="mb-8">
-      <h2 className="font-display text-lg font-medium text-lx-text-primary mb-2">API Keys</h2>
+      <div className="flex items-center justify-between mb-3">
+        <h2 className="font-display text-lg font-medium text-lx-text-primary">API Keys</h2>
+        <span className="text-xs text-lx-text-muted">Workspace scope</span>
+      </div>
       <p className="text-sm text-lx-text-secondary mb-4" style={{ maxWidth: 560 }}>
-        Machine authentication for agents and integrations. Keys are hashed with SHA-256 before storage. Only the full key is shown once on creation.
+        Machine authentication for MCP agents and integrations. Keys are hashed with SHA-256 before storage. Every key binds to its creator — rows without an owner are server keys (seeded via <span className="font-mono">LXK_API_KEY</span> / the setup wizard). Only the full key is shown once on creation.
       </p>
 
       {isLoading ? (
@@ -252,6 +259,7 @@ export function ApiKeysSection() {
             <thead>
               <tr>
                 <th>Name</th>
+                <th>Owner</th>
                 <th>Key</th>
                 <th>Created</th>
                 <th>Last Used</th>
@@ -268,6 +276,19 @@ export function ApiKeysSection() {
                     </div>
                   </td>
                   <td>
+                    {k.ownerEmail ? (
+                      <>
+                        <div className="flex items-center gap-2">
+                          <div className="avatar">{(k.ownerName ?? "?")[0]?.toUpperCase()}</div>
+                          <span className="text-xs font-medium">{k.ownerName}</span>
+                        </div>
+                        <div className="text-xs text-lx-text-muted">{k.ownerEmail}</div>
+                      </>
+                    ) : (
+                      <span style={{ background: "var(--lx-bg-accent-subtle)", color: "var(--lx-text-link)", padding: "2px 8px", borderRadius: 9999, fontSize: 11 }}>Server key</span>
+                    )}
+                  </td>
+                  <td>
                     <span className="font-mono text-xs text-lx-text-muted">lxk_••••••••••••••••••••••••••••••••</span>
                   </td>
                   <td className="text-xs text-lx-text-secondary">{k.createdAt.slice(0, 10)}</td>
@@ -275,8 +296,8 @@ export function ApiKeysSection() {
                     {k.lastUsedAt ? formatRelative(k.lastUsedAt) : <span className="text-lx-text-muted">Never</span>}
                   </td>
                   <td>
-                    <button type="button" className="btn btn-ghost h-7 px-2 text-xs text-lx-text-danger" aria-label={`Delete key ${k.name}`} onClick={() => setDeleting(k)}>
-                      <Trash2 size={12} strokeWidth={1.5} />
+                    <button type="button" className="btn btn-danger btn-sm" aria-label={`Delete key ${k.name}`} title="Revoke key" onClick={() => setDeleting({ id: k.id, name: k.name, owner: k.ownerEmail ? `${k.ownerName ?? "?"} · ${k.ownerEmail}` : null })}>
+                      <Trash2 size={14} strokeWidth={1.5} />
                     </button>
                   </td>
                 </tr>
@@ -315,6 +336,7 @@ export function ApiKeysSection() {
             {createKey.isPending ? "Generating…" : "Generate Key"}
           </button>
         </div>
+        <div className="field-hint" style={{ marginTop: 8 }}>The new key binds to your account — you become its owner (owner column) and it appears in Settings → Me → API keys.</div>
       </div>
 
       {reveal && (
@@ -331,6 +353,7 @@ export function ApiKeysSection() {
       {deleting && (
         <DeleteKeyModal
           name={deleting.name}
+          {...(deleting.owner ? { owner: deleting.owner } : {})}
           onCancel={() => setDeleting(null)}
           onConfirm={() => {
             deleteKey.mutate(deleting.id, { onSuccess: () => setDeleting(null) });

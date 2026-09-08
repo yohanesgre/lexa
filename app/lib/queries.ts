@@ -958,6 +958,82 @@ export function useDeleteApiKey() {
   });
 }
 
+// ── Personal API keys (own only — user-bound, any signed-in user) ──
+
+export function useMyApiKeys() {
+  return useQuery({
+    queryKey: ["my-api-keys"],
+    queryFn: () => api.listMyApiKeys().then((r) => r.data),
+    staleTime: 60_000,
+  });
+}
+
+export function useCreateMyApiKey() {
+  const qc = useQueryClient();
+  const toast = useToast();
+  return useMutation({
+    mutationFn: (name: string) => api.createMyApiKey(name),
+    onSuccess: (result) => {
+      qc.setQueryData<ApiKey[]>(["my-api-keys"], (old) => {
+        if (!old) return [result.key];
+        return [result.key, ...old];
+      });
+      toast.push("success", "API key created", "Copy it now, it won't be shown again.");
+    },
+    onError: (err) => {
+      toast.push("error", "Failed to create API key", toastMessage(err));
+    },
+  });
+}
+
+export function useDeleteMyApiKey() {
+  const qc = useQueryClient();
+  const toast = useToast();
+  return useMutation({
+    mutationFn: (id: string) => api.deleteMyApiKey(id),
+    onSuccess: (_, id) => {
+      qc.setQueryData<ApiKey[]>(["my-api-keys"], (old) => {
+        if (!old) return old;
+        return old.filter((k) => k.id !== id);
+      });
+      toast.push("success", "API key revoked");
+    },
+    onError: (err) => {
+      toast.push("error", "Failed to revoke API key", toastMessage(err));
+    },
+  });
+}
+
+// ── Device login (CLI pairing approval — /device-login) ──
+// The browser page owns its state; these surfaces carry no shared cache, so
+// mutations only drive local UI (no setQueryData — nothing to update).
+
+export function useDeviceLoginRequest(id: string, token: string) {
+  return useQuery({
+    queryKey: ["device-login-request", id],
+    queryFn: () => api.getDeviceLoginRequest(id, token),
+    enabled: !!id && !!token,
+    retry: false,
+    // The approve page owns its terminal state locally (`done`). Refetching
+    // after approval would race the CLI's consume-once poll (404) and swap
+    // the approved screen for the not-found variant.
+    staleTime: 5 * 60_000,
+    refetchOnWindowFocus: false,
+  });
+}
+
+export function useApproveDeviceLogin() {
+  return useMutation({
+    mutationFn: ({ id, token }: { id: string; token: string }) => api.approveDeviceLogin(id, token),
+  });
+}
+
+export function useDenyDeviceLogin() {
+  return useMutation({
+    mutationFn: ({ id, token }: { id: string; token: string }) => api.denyDeviceLogin(id, token),
+  });
+}
+
 // ── Rate limiting (app scope — admin only) ──
 
 export function useRateLimit() {

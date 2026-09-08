@@ -95,7 +95,20 @@ describe("query hooks — keys + URLs", () => {
     await waitFor(() => expect(tasks.result.current.tasks).toBeDefined());
     const boardCalls = fetchMock.mock.calls.filter((c) => String(c[0]) === "/api/projects/demo/board").length;
     expect(boardCalls).toBe(1);
+    expect(tasks.result.current.tasks!.length).toBe(1);
     expect(tasks.result.current.tasks![0]!.title).toBe("T1");
+  });
+
+  it("useApiKeys returns admin rows with owner fields intact (Owner column rendering)", async () => {
+    routes.set("GET /api/settings/api-keys", { data: [
+      { id: "k1", name: "server-key", createdAt: "t", lastUsedAt: null },
+      { id: "k2", name: "cli-myhost", createdAt: "t", lastUsedAt: null, ownerEmail: "maria@example.com", ownerName: "Maria" },
+    ] });
+    const { result } = renderHook(() => useApiKeys(), { wrapper });
+    const data = (await awaitData(result))!;
+    expect(data[1]).toMatchObject({ ownerEmail: "maria@example.com", ownerName: "Maria" });
+    expect(data[0]).not.toHaveProperty("ownerEmail");
+    expect(queryClient.getQueryCache().findAll({ queryKey: ["api-keys"], exact: true })).toHaveLength(1);
   });
 });
 describe("deriveTaskList", () => {

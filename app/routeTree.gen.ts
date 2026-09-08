@@ -11,6 +11,7 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as ChatRouteImport } from './routes/chat'
+import { Route as DeviceLoginRouteImport } from './routes/device-login'
 import { Route as HearthRouteImport } from './routes/hearth'
 import { Route as InviteRouteImport } from './routes/invite'
 import { Route as LoginRouteImport } from './routes/login'
@@ -49,6 +50,11 @@ const IndexRoute = IndexRouteImport.update({
 const ChatRoute = ChatRouteImport.update({
   id: '/chat',
   path: '/chat',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const DeviceLoginRoute = DeviceLoginRouteImport.update({
+  id: '/device-login',
+  path: '/device-login',
   getParentRoute: () => rootRouteImport,
 } as any)
 const HearthRoute = HearthRouteImport.update({
@@ -201,6 +207,7 @@ const SettingsProjectProjectIdRoute =
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/chat': typeof ChatRoute
+  '/device-login': typeof DeviceLoginRoute
   '/hearth': typeof HearthRouteWithChildren
   '/invite': typeof InviteRoute
   '/login': typeof LoginRoute
@@ -234,6 +241,7 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/chat': typeof ChatRoute
+  '/device-login': typeof DeviceLoginRoute
   '/hearth': typeof HearthRouteWithChildren
   '/invite': typeof InviteRoute
   '/login': typeof LoginRoute
@@ -268,6 +276,7 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/chat': typeof ChatRoute
+  '/device-login': typeof DeviceLoginRoute
   '/hearth': typeof HearthRouteWithChildren
   '/invite': typeof InviteRoute
   '/login': typeof LoginRoute
@@ -303,6 +312,7 @@ export interface FileRouteTypes {
   fullPaths:
     | '/'
     | '/chat'
+    | '/device-login'
     | '/hearth'
     | '/invite'
     | '/login'
@@ -336,6 +346,7 @@ export interface FileRouteTypes {
   to:
     | '/'
     | '/chat'
+    | '/device-login'
     | '/hearth'
     | '/invite'
     | '/login'
@@ -369,6 +380,7 @@ export interface FileRouteTypes {
     | '__root__'
     | '/'
     | '/chat'
+    | '/device-login'
     | '/hearth'
     | '/invite'
     | '/login'
@@ -403,6 +415,7 @@ export interface FileRouteTypes {
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   ChatRoute: typeof ChatRoute
+  DeviceLoginRoute: typeof DeviceLoginRoute
   HearthRoute: typeof HearthRouteWithChildren
   InviteRoute: typeof InviteRoute
   LoginRoute: typeof LoginRoute
@@ -437,6 +450,13 @@ declare module '@tanstack/react-router' {
       path: '/chat'
       fullPath: '/chat'
       preLoaderRoute: typeof ChatRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/device-login': {
+      id: '/device-login'
+      path: '/device-login'
+      fullPath: '/device-login'
+      preLoaderRoute: typeof DeviceLoginRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/hearth': {
@@ -699,6 +719,7 @@ const SettingsRouteWithChildren = SettingsRoute._addFileChildren(
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   ChatRoute: ChatRoute,
+  DeviceLoginRoute: DeviceLoginRoute,
   HearthRoute: HearthRouteWithChildren,
   InviteRoute: InviteRoute,
   LoginRoute: LoginRoute,
