@@ -25,6 +25,7 @@ For lane-orchestrated multi-track work, the lexa-swarm orchestration uses:
 - If blocked on the BE contract commit, write `state: WAIT` and stop; the orchestrator pings the BE lane.
 - Never touch files outside your lane scope. If you need a backend endpoint or shared type, report it to the orchestrator — never add it yourself.
 - No commits unless the orchestrator/user explicitly asks. Do not push. Do not merge.
+- **Per-plan tracking (non-swarm):** the `work-plans` skill (the project ships one at `.agents/skills/work-plans/SKILL.md`). Load it when opening, updating, or closing a work plan in `status/` — one folder per plan, lanes only when parallel, `TIMELINE.md` chronology, memory links on DONE.
 
 ## Document authority (read in this order before touching code)
 
