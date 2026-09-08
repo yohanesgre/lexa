@@ -107,8 +107,8 @@ unless it authenticates via one of two channels:
   (superadmin→admin, member→member). Member-bound keys call the same
   per-project authorization gates as member sessions and are 403'd on
   admin/superadmin gates (`requireSuperadmin` etc). `user_id` NULL =
-  **server key** (seeded `LXK_API_KEY` only — never created
-  through the UI): resolves to role admin. Key auth for CLI/webhooks is
+  **server key** (legacy rows from pre-change installs and dev `setup-cli`
+  only — never created through the UI): resolves to role admin. Key auth for CLI/webhooks is
   unchanged. UI-created keys always bind to the creating user (a key created
   by a superadmin keeps full admin power, attributed to that user).
 

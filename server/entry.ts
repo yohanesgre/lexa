@@ -2,7 +2,6 @@ import { runMigrations } from "./db/migrate";
 import { backfillTaskKeys } from "./db/task-keys-backfill";
 import { mkdirSync, existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { createHash, randomBytes } from "node:crypto";
 import { Database } from "bun:sqlite";
 import { createApiHandler, createWebhookHandler, createWebhookVerifier } from "./api/http";
 import { getSetting, setSetting, mirrorSettingsFromEnv } from "./db/settings";
@@ -77,7 +76,6 @@ try {
 pruneWebhookEvents(DATABASE_PATH);
 pruneRuntimeEvents(DATABASE_PATH);
 pruneDeviceLoginRequests(DATABASE_PATH);
-seedAdminKey(DATABASE_PATH);
 autoLockSetupIfConfigured(DATABASE_PATH);
 setInterval(() => {
   try {
@@ -406,32 +404,6 @@ function pruneDeviceLoginRequests(dbPath: string) {
   }
 }
 
-function seedAdminKey(dbPath: string) {
-  const db = new Database(dbPath);
-  try {
-    const row = db.prepare("SELECT COUNT(*) as cnt FROM api_keys").get() as { cnt: number } | null;
-    if (row && row.cnt > 0) return;
-
-    const apiKey = process.env.LXK_API_KEY || generateRawKey();
-    const keyHash = createHash("sha256").update(apiKey).digest("hex");
-    const id = crypto.randomUUID();
-
-    db.prepare("INSERT INTO api_keys (id, name, key_hash, user_id) VALUES (?, ?, ?, ?)")
-      .run(id, "admin", keyHash, null);
-
-    if (process.env.LXK_API_KEY) {
-      console.log(`Seeded admin API key from LXK_API_KEY`);
-    } else if (process.stdout.isTTY) {
-      // Interactive boot only — container logs must not persist the raw key.
-      console.log(`\n⚡ Admin API key created: ${apiKey}\n`);
-    } else {
-      console.log("Admin API key generated — set LXK_API_KEY for non-interactive boots (key not printed to logs)");
-    }
-  } finally {
-    db.close();
-  }
-}
-
 async function seedDevAccounts(db: Database): Promise<void> {
   // The SQL seed inserts users directly (no Better Auth account rows), so
   // they cannot sign in. Provision credential accounts for every seed user
@@ -478,16 +450,4 @@ async function seedDevData(dbPath: string) {
   } finally {
     db.close();
   }
-}
-
-function generateRawKey(): string {
-  const raw = randomBytes(32);
-  const chars = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
-  let value = 0n;
-  for (const b of raw) value = (value << 8n) | BigInt(b);
-  let result = "";
-  const base = 62n;
-  while (value > 0n) { result = chars[Number(value % base)] + result; value /= base; }
-  while (result.length < 43) result = chars[0] + result;
-  return `lxk_${result}`;
 }

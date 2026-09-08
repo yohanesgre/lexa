@@ -77,15 +77,6 @@ rc=0
 lib_eval 'parse_flags --bogus' >/dev/null 2>&1 || rc=$?
 assert_rc "parse_flags --bogus dies" 1 "$rc"
 
-echo "== gen_api_key =="
-
-key="$(lib_eval 'gen_api_key')"
-if [[ "$key" =~ ^lxk_[0-9a-f]{48}$ ]]; then
-  assert_eq "gen_api_key matches ^lxk_[0-9a-f]{48}\$" "match" "match"
-else
-  assert_eq "gen_api_key matches ^lxk_[0-9a-f]{48}\$" "match" "$key"
-fi
-
 echo "== verify_checksum =="
 
 tmp="$(mktemp -d)"
@@ -103,9 +94,9 @@ assert_rc "verify_checksum mismatch dies" 1 "$rc"
 echo "== write_env_file =="
 
 envdir="$(mktemp -d)"
-lib_eval "write_env_file '${envdir}/.env' LXK_API_KEY=lxk_abc LXK_ENV=staging LXK_PUBLIC_URL=http://127.0.0.1:8080" >/dev/null 2>&1
+lib_eval "write_env_file '${envdir}/.env' LXK_ENV=staging LXK_PUBLIC_URL=http://127.0.0.1:8080" >/dev/null 2>&1
 assert_eq "write_env_file mode 0600" "600" "$(stat -c %a "${envdir}/.env")"
-assert_grep "write_env_file content" '^LXK_API_KEY=lxk_abc$' "$(cat "${envdir}/.env")"
+assert_grep "write_env_file content" '^LXK_ENV=staging$' "$(cat "${envdir}/.env")"
 
 rogue_rc=0
 lib_eval "write_env_file '${envdir}/rogue.env' ROGUE_KEY=1" >/dev/null 2>&1 || rogue_rc=$?

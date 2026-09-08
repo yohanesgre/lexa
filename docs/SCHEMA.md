@@ -515,7 +515,7 @@ CREATE TABLE api_keys (
   user_id      TEXT REFERENCES users(id)                       -- owning user; NULL = server key
 );
 -- Ownership semantics: UI-created keys are ALWAYS user-bound (user_id =
--- creator). user_id NULL = "server key" — only seeded by env LXK_API_KEY;
+-- creator). user_id NULL = "server key" — legacy/dev rows only;
 -- never created through the UI. Server keys resolve to
 -- role admin; bound keys resolve to the owner's role (superadmin→admin,
 -- member→member) and the owner's project access. Bound keys are revoked

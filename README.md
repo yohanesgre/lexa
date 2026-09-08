@@ -53,11 +53,10 @@ pinned to the tag and never changes under your feet. Targets:
 |---|---|
 | `docker` | prebuilt image from `ghcr.io/yohanesgre/lexa`, compose up, health check (default 127.0.0.1:8080) |
 | `bare` | release tarball + env file + `lexa-start.sh` (systemd opt-in via `--systemd`) |
-| `workers` | Cloudflare Workers + D1 + R2 + KV via `bunx wrangler` |
+| `workers` | Cloudflare Workers + D1 + R2 + KV via `bunx wrangler` — or zero-file: [![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/yohanesgre/lexa) (DRAFT-UNVERIFIED, see `docs/DEPLOYMENT.md`; disable Builds auto-deploy after) |
 | `dev` | clone the repo, `bun install`, `bun run dev:full` |
 
-Flags: `--flavor staging|prod`, `--port`, `--bind`, `--key <lxk_...>`
-(auto-generated if absent), `--domain` (workers custom domain), `--systemd`
+Flags: `--flavor staging|prod`, `--port`, `--bind`, `--domain` (workers custom domain), `--systemd`
 (bare), `--image <tag>` (docker version pin).
 
 **First run:** open `http://<host>:<port>/setup` — create the first admin
@@ -88,7 +87,7 @@ curl -fsSL https://raw.githubusercontent.com/yohanesgre/lexa/<tag>/scripts/unins
 `lexa-cli` wraps the REST API with the same `lxk_` Bearer auth as the web app:
 
 ```bash
-lexa-cli login --url https://lexa.example.com --key lxk_...
+lexa-cli login --url https://lexa.example.com   # browser-approval device flow
 lexa-cli task list --project my-project
 lexa-cli task create --project my-project --column "In Progress" --swimlane Backlog --title "Ship it"
 lexa-cli wiki get --project my-project getting-started
@@ -129,8 +128,8 @@ the machine and never committed (`.env*` is gitignored):
 
 | Situation | What's needed |
 |---|---|
-| Local dev (`.env`) | `bun run setup` generates `LXK_API_KEY` and `LXK_ADMIN_EMAILS`; `GITHUB_*` only if you want two-way GitHub sync |
-| Self-hosted (install script) | the script writes the env file (`LXK_API_KEY`, `LXK_ENV`, `LXK_PUBLIC_URL`; `--key` to pin the API key); `GITHUB_*` preserved across re-runs |
+| Local dev (`.env`) | `bun run setup` records `LXK_ADMIN_EMAILS`; machine keys minted post-setup; `GITHUB_*` only if you want two-way GitHub sync |
+| Self-hosted (install script) | the script writes the env file (`LXK_ENV`, `LXK_PUBLIC_URL`); machine keys minted post-setup (login → Settings → API Keys); `GITHUB_*` preserved across re-runs |
 | Optional | `LXK_HEARTH_DAEMON_TOKEN`, `LXK_MAX_BODY_MB` (body cap, default 16), `LOG_LEVEL` |
 
 ## Documentation

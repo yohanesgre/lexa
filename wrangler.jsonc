@@ -32,10 +32,14 @@
   "d1_databases": [
     {
       "binding": "DB",
-      "database_name": "lexa"
-      // No `database_id` here — the install-script provisioner binds the real
-      // id into a per-deploy wrangler config (see install.sh / docs/
-      // CLOUDFLARE_WORKERS.md).
+      "database_name": "lexa",
+      // Placeholder id — Deploy Button / Builds provision the real database
+      // and overwrite this. The install-script provisioner binds the real id
+      // into a per-deploy wrangler config (see install.sh / docs/
+      // CLOUDFLARE_WORKERS.md). Binding name DB is frozen (deploy scripts
+      // must reference the binding, never the database name).
+      "database_id": "00000000-0000-0000-0000-000000000000",
+      "migrations_dir": "migrations"
     }
   ],
   "r2_buckets": [

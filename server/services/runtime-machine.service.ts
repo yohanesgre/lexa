@@ -7,7 +7,7 @@ import { DbError, ConstraintViolation, Db, withTx } from "../db/db";
 import { MachineIdTaken, MachineNotFound } from "../api/errors";
 import type { Machine } from "../../shared/types";
 
-// 43-char base62 secret (same algorithm as entry.ts generateRawKey, without
+// 43-char base62 secret (same algorithm as api-key.service.ts generateRawKey, without
 // the lxk_ prefix). Minted per machine at first registration; returned to the
 // caller exactly once.
 function generateMachineSecret(): string {
