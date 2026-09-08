@@ -17,15 +17,16 @@ You are working on **Lexa**: a self-hosted project management tool. Kanban with 
 
 ## Status protocol + report contract
 
-For lane-orchestrated multi-track work, the lexa-swarm orchestration uses:
-- **Brief:** `status/briefs/<lane>.md` — single source of requirements (read FIRST; the dispatch prompt is only context).
-- **Status:** `status/<lane>.md` — `state: <PLAN|WAIT|WORKING|DONE|FAILED>` + `ts: <epoch>` + `msg: <message>`. Heartbeat on every significant action (fresh ts).
-- **Report:** `status/reports/<lane>.md` — full report (what you did, tests with output, deviations, concerns). Reply in chat ONLY with: state, commit sha, one-line test summary, concerns (if any).
-- **DONE** requires: `tsc --noEmit` green (where applicable) + lane tests + report file written + status file DONE. DONE does NOT mean reviewed — the orchestrator reviews after you.
-- If blocked on the BE contract commit, write `state: WAIT` and stop; the orchestrator pings the BE lane.
-- Never touch files outside your lane scope. If you need a backend endpoint or shared type, report it to the orchestrator — never add it yourself.
-- No commits unless the orchestrator/user explicitly asks. Do not push. Do not merge.
-- **Per-plan tracking (non-swarm):** the `work-plans` skill (the project ships one at `.agents/skills/work-plans/SKILL.md`). Load it when opening, updating, or closing a work plan in `status/` — one folder per plan, lanes only when parallel, `TIMELINE.md` chronology, memory links on DONE.
+All work tracking uses one folder per plan under `status/` (the `work-plans` skill — the project ships one at `.agents/skills/work-plans/SKILL.md`; load it when opening, updating, or closing a plan):
+- **Plan:** `status/<plan>/plan.md` — problem, scope, graph. Single source of requirements (read FIRST; the dispatch prompt is only context).
+- **Status:** `status/<plan>/status.md` — `state: <PLAN|WAIT|WORKING|DONE|FAILED>` + `ts: <epoch>` + `msg: <message>`. Heartbeat on every significant action (fresh ts).
+- **Lanes:** `status/<plan>/lanes/<lane>.md` — only when parallel tracks need separate heartbeats, same 3-line format. Plan-level status mirrors the slowest lane, never dumps lane logs.
+- **Report:** `status/<plan>/report.md` — full report (what you did, tests with output, deviations, concerns). Reply in chat ONLY with: state, commit sha, one-line test summary, concerns (if any).
+- **Timeline:** append one line per event to `status/TIMELINE.md` (`date | plan | state | one line | path`); link artifacts from memory (`mem_save` summary + paths) on DONE.
+- **DONE** requires: gate green (where applicable) + tests + report file written + status file DONE. DONE does NOT mean reviewed — the orchestrator reviews after you.
+- If blocked, write `state: WAIT` and stop; report the blocker instead of guessing.
+- Never touch files outside your scope. If you need something outside it, report back — never add it yourself.
+- No commits unless explicitly asked. Do not push. Do not merge.
 
 ## Document authority (read in this order before touching code)
 
