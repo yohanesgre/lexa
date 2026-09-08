@@ -1023,14 +1023,36 @@ export function useDeviceLoginRequest(id: string, token: string) {
 }
 
 export function useApproveDeviceLogin() {
+  const qc = useQueryClient();
   return useMutation({
     mutationFn: ({ id, token }: { id: string; token: string }) => api.approveDeviceLogin(id, token),
+    // Local-only query key: seed the approved shape so the page's query data
+    // agrees with the mutation outcome (rawKey is never rendered in the
+    // browser — the CLI consumes it via poll).
+    onSuccess: (res, { id }) => {
+      // Local-only query key: seed the approved shape so the page's query
+      // data agrees with the mutation outcome (rawKey is never rendered in
+      // the browser — the CLI consumes it via poll). Cast at the boundary:
+      // the literal widens under exactOptionalPropertyTypes + union narrowing.
+      qc.setQueryData<api.DeviceLoginPollResult>(["device-login-request", id], {
+        status: "approved",
+        rawKey: "",
+        keyName: res.clientName,
+        approverName: null,
+      } as api.DeviceLoginPollResult);
+    },
   });
 }
 
 export function useDenyDeviceLogin() {
+  const qc = useQueryClient();
   return useMutation({
     mutationFn: ({ id, token }: { id: string; token: string }) => api.denyDeviceLogin(id, token),
+    // Denied is a terminal error state on the GET; drop the local query data
+    // entirely (the page's `done` state renders the denied variant).
+    onSuccess: (_, { id }) => {
+      qc.removeQueries({ queryKey: ["device-login-request", id] });
+    },
   });
 }
 

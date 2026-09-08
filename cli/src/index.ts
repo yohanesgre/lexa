@@ -225,7 +225,12 @@ function deviceLoginFlow(url: string): Effect.Effect<void, unknown, CliConfigSer
     const h = yield* client.health();
     if (!h.ok) yield* new ApiError({ status: 0, serverMessage: "health check failed" });
     const req = yield* client.createDeviceLoginRequest(`cli-${osHostname()}`);
-    const token = new URL(req.verifyUrl).searchParams.get("token") ?? "";
+    let token = "";
+    try {
+      token = new URL(req.verifyUrl).searchParams.get("token") ?? "";
+    } catch {
+      token = "";
+    }
     if (!token) yield* new ApiError({ status: 0, serverMessage: "server returned a verify URL without a token" });
     console.log("  Open this link to approve the login:");
     console.log(`    ${req.verifyUrl}`);
