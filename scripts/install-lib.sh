@@ -43,7 +43,6 @@ Flags:
   --port <n>                       host port (docker, default 8080)
   --bind <addr>                    bind address (default 127.0.0.1)
   --domain <d>                     custom domain (workers; skips prompt)
-  --key <k>                        LXK_API_KEY (default: auto-generated)
   --image <tag>                    container image tag
   --systemd                        bare: write + enable systemd unit
   --reset-db                       workers: drop the existing D1 database and
@@ -182,17 +181,6 @@ tty_read() {
 }
 
 # ---------------------------------------------------------------------------
-# gen_api_key — prints lxk_<48 hex chars>
-# ---------------------------------------------------------------------------
-gen_api_key() {
-  if command -v openssl >/dev/null 2>&1; then
-    printf 'lxk_%s\n' "$(openssl rand -hex 24)"
-  else
-    printf 'lxk_%s\n' "$(head -c 24 /dev/urandom | od -An -tx1 | tr -d ' \n')"
-  fi
-}
-
-# ---------------------------------------------------------------------------
 # verify_checksum <file> <sha256>
 # ---------------------------------------------------------------------------
 verify_checksum() {
@@ -215,7 +203,7 @@ verify_checksum() {
 # write_env_file <path> <key=value...>
 # Whitelisted keys only; file written chmod 600.
 # ---------------------------------------------------------------------------
-ENV_FILE_ALLOWED_KEYS=" LXK_API_KEY LXK_ENV LXK_PUBLIC_URL LXK_TRUSTED_ORIGINS GITHUB_APP_ID GITHUB_PRIVATE_KEY_FILE GITHUB_WEBHOOK_SECRET CF_TUNNEL_TOKEN "
+ENV_FILE_ALLOWED_KEYS=" LXK_ENV LXK_PUBLIC_URL LXK_TRUSTED_ORIGINS GITHUB_APP_ID GITHUB_PRIVATE_KEY_FILE GITHUB_WEBHOOK_SECRET CF_TUNNEL_TOKEN "
 
 write_env_file() {
   local path="$1"
@@ -238,14 +226,14 @@ write_env_file() {
 
 # ---------------------------------------------------------------------------
 # parse_flags — whitelist-style parser; the ONLY reader of argv.
-# Sets: TARGET FLAVOR STAGING PROD PORT BIND DOMAIN API_KEY IMAGE_TAG
+# Sets: TARGET FLAVOR STAGING PROD PORT BIND DOMAIN IMAGE_TAG
 #       SYSTEMD ASSUME_YES PURGE CLEAN FROM_REPO HELP
 # Unknown flag -> usage + die. Positional target accepted (first one only).
 # ---------------------------------------------------------------------------
 parse_flags() {
   # shellcheck disable=SC2034  # parse_flags outputs are the caller's contract
   TARGET="" FLAVOR="" STAGING=0 PROD=0 PORT=8080 BIND=127.0.0.1 DOMAIN=""
-  API_KEY="" IMAGE_TAG="" SYSTEMD=0 ASSUME_YES=0 PURGE=0 CLEAN=0 RESET_DB=0
+  IMAGE_TAG="" SYSTEMD=0 ASSUME_YES=0 PURGE=0 CLEAN=0 RESET_DB=0
   FROM_REPO="" HELP=0 CF_TOKEN=""
   while [ $# -gt 0 ]; do
     case "$1" in
@@ -272,9 +260,7 @@ parse_flags() {
         shift 2
         ;;
       --key)
-        [ $# -ge 2 ] || die "--key requires a value"
-        API_KEY=$2
-        shift 2
+        die "--key was removed: machine keys are minted post-setup (login → Settings → API Keys, or lexa-cli login device flow)"
         ;;
       --cf-token)
         [ $# -ge 2 ] || die "--cf-token requires a value"
@@ -365,7 +351,6 @@ services:
       - DATABASE_PATH=/app/data/lexa.db
       - PORT=3000
       - LXK_ENV=\${LXK_ENV:-}
-      - LXK_API_KEY=\${LXK_API_KEY}
       - LXK_PUBLIC_URL=\${LXK_PUBLIC_URL:-}
       - LXK_TRUSTED_ORIGINS=\${LXK_TRUSTED_ORIGINS:-}
       - LXK_ADMIN_EMAILS=\${LXK_ADMIN_EMAILS:-}
@@ -394,7 +379,6 @@ services:
       - DATABASE_PATH=/app/data/lexa.db
       - PORT=3000
       - LXK_ENV=\${LXK_ENV:-}
-      - LXK_API_KEY=\${LXK_API_KEY}
       - LXK_PUBLIC_URL=\${LXK_PUBLIC_URL:-}
       - LXK_TRUSTED_ORIGINS=\${LXK_TRUSTED_ORIGINS:-}
       - LXK_ADMIN_EMAILS=\${LXK_ADMIN_EMAILS:-}
@@ -531,18 +515,20 @@ UNIT
 }
 
 # ---------------------------------------------------------------------------
-# final_banner <url> <api_key>
+# final_banner <url>
 # ---------------------------------------------------------------------------
 final_banner() {
-  local url="$1" api_key="$2"
+  local url="$1"
   echo ""
   echo "═══════════════════════════════════════════════"
   echo "  Lexa — running at ${url}"
-  echo "  API key: ${api_key}"
   echo ""
   echo "  NEXT → create the first admin (superadmin):"
   echo "         open ${url}/setup"
   echo "         (email + password, min 8 chars)"
+  echo ""
+  echo "  Machine keys (CLI/daemons) are minted post-setup:"
+  echo "         login → Settings → API Keys (or lexa-cli login)"
   echo "═══════════════════════════════════════════════"
 }
 

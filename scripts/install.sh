@@ -98,13 +98,11 @@ deploy_docker() {
   DEPLOY_DIR="${DEPLOY_DIR:-lexa-deploy}"
   mkdir -p "${DEPLOY_DIR}"
   cd "${DEPLOY_DIR}"
-  [ -n "${API_KEY}" ] || API_KEY=$(gen_api_key)
   local public_url="${PUBLIC_URL:-http://127.0.0.1:${PORT}}"
   # Local deploy — the operator may reach the app via either loopback
   # hostname; trust both or Better Auth rejects one of them.
   local trusted="${public_url},http://localhost:${PORT},http://127.0.0.1:${PORT}"
   write_env_file ".env" \
-    "LXK_API_KEY=${API_KEY}" \
     "LXK_ENV=${FLAVOR}" \
     "LXK_PUBLIC_URL=${public_url}" \
     "LXK_TRUSTED_ORIGINS=${trusted}"
@@ -115,7 +113,7 @@ deploy_docker() {
   step "compose pull" retry 3 mutate docker compose pull
   step "compose up" mutate docker compose up -d --wait
   step "wait health" wait_for "http://${BIND}:${PORT}/api/health"
-  final_banner "http://${BIND}:${PORT}" "${API_KEY}"
+  final_banner "http://${BIND}:${PORT}"
 }
 
 # ---------------------------------------------------------------------------
@@ -138,13 +136,11 @@ deploy_bare() {
     # tarball and is dev-only).
     step "bun install" bun install --frozen-lockfile --production --ignore-scripts
   fi
-  [ -n "${API_KEY}" ] || API_KEY=$(gen_api_key)
   if [ -f "${INSTALL_DIR}/.env" ] && [ -n "${FROM_REPO}" ]; then
     echo "  ✓ ${FROM_REPO}/.env exists — kept (dev env untouched)"
   else
     local bare_public="${PUBLIC_URL:-http://localhost:${BARE_PORT}}"
     step "write env" write_env_file "${INSTALL_DIR}/.env" \
-      "LXK_API_KEY=${API_KEY}" \
       "LXK_ENV=${FLAVOR}" \
       "PORT=${BARE_PORT}" \
       "DATABASE_PATH=${INSTALL_DIR}/data/lexa.db" \
@@ -157,7 +153,7 @@ deploy_bare() {
     step "systemd unit" install_systemd_unit "${INSTALL_DIR}"
   fi
   step "wait health" wait_for "http://localhost:${BARE_PORT}/api/health"
-  final_banner "${PUBLIC_URL}" "${API_KEY}"
+  final_banner "${PUBLIC_URL}"
   if [ "${SYSTEMD}" != "1" ]; then
     echo "  start manually: ${INSTALL_DIR}/lexa-start.sh (tmux/nohup for background)"
   fi
@@ -181,7 +177,6 @@ deploy_workers() {
     CF_TOKEN=$(tty_read_secret "Cloudflare API token (needs: Workers Scripts, D1, Workers KV Storage, Workers R2 Storage — all Edit, account scope)" "CF_API_TOKEN")
   fi
   [ -n "${CF_TOKEN}" ] || die "Cloudflare API token required (env CF_API_TOKEN or --cf-token)"
-  [ -n "${API_KEY}" ] || API_KEY=$(gen_api_key)
 
   if [ -n "${FROM_REPO}" ]; then
     WORK_DIR="${REPO_ROOT}"
@@ -196,15 +191,16 @@ deploy_workers() {
     unpack_release "${WORK_DIR}" "${WORK_DIR}" workers
   fi
 
-  cf_args=(--cf-token "${CF_TOKEN}" --api-key "${API_KEY}" --flavor "${FLAVOR}")
+  cf_args=(--cf-token "${CF_TOKEN}" --flavor "${FLAVOR}")
   [ "${RESET_DB}" = "1" ] && cf_args+=(--reset-db)
   [ -n "${DOMAIN}" ] && cf_args+=(--domain "${DOMAIN}")
   (cd "${WORK_DIR}" && step "workers install" bun scripts/workers-install.ts "${cf_args[@]}")
   if [ -n "${DOMAIN}" ]; then
-    final_banner "https://${DOMAIN}" "${API_KEY}"
+    final_banner "https://${DOMAIN}"
   else
     echo "  deployed to your workers.dev subdomain — URL printed above."
     echo "  NEXT → create the first admin (superadmin): open <worker-url>/setup"
+    echo "  Machine keys (CLI/daemons) are minted post-setup: login → Settings → API Keys"
   fi
 }
 

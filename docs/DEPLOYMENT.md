@@ -29,8 +29,7 @@ curl -fsSL https://raw.githubusercontent.com/yohanesgre/lexa/<tag>/scripts/insta
 | `dev` | git + bun | clones the repo into `./lexa`, `bun install`, `bun run setup`, `bun run dev:full` |
 
 Flags: `--flavor staging|prod` (default staging), `--port` (docker, default
-8080), `--bind` (default 127.0.0.1), `--key <lxk_...>` (auto-generated +
-printed once if absent), `--domain` (workers custom domain; skips the prompt),
+8080), `--bind` (default 127.0.0.1), `--domain` (workers custom domain; skips the prompt),
 `--systemd` (bare), `--image <tag>` (docker), `--from-repo <dir>` (install
 from a local checkout), `--yes`.
 
@@ -47,6 +46,37 @@ your own reverse proxy in front of `<bind>:<port>` to reach it over TLS.
   existing D1/R2/KV resources and apply migrations incrementally.
 - No tunnel, no VPS: the Worker route (custom domain or workers.dev) is the
   public entry. See `docs/CLOUDFLARE_WORKERS.md` for runtime details.
+- **Zero-file alternative (DRAFT-UNVERIFIED):** Deploy Button (one click,
+  no CLI — see below) or manual dashboard clicks
+  (`docs/DEPLOYMENT_DASHBOARD.md`). Same bindings, same migrations,
+  no secrets to paste — machine keys are minted post-setup.
+
+### Deploy Button — Cloudflare dashboard (DRAFT-UNVERIFIED)
+
+> Not yet click-tested on a live account. Steps below follow the
+> Cloudflare Deploy Button contract (reads `wrangler.jsonc`, provisions
+> D1/R2/KV, runs the repo `build` + `deploy` scripts). Report mismatches.
+
+[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/yohanesgre/lexa)
+
+1. Click the button → Cloudflare forks the repo into your account and
+   provisions D1 (`lexa`), R2 (`lexa-blobs`), KV from `wrangler.jsonc`.
+2. Build command: `LEXA_FLAVOR=workers vite build`
+   (repo script: `build:workers`). Deploy command: `deploy:workers`
+   (`wrangler d1 migrations apply DB --remote && wrangler deploy`).
+3. No secrets to fill — deploy with everything blank.
+4. Open `<worker>.workers.dev/setup` → create the superadmin.
+   The first superadmin locks setup; mint machine keys via
+   login → Settings → API Keys (or `lexa-cli login` device flow).
+5. **REQUIRED tail — disable auto-deploy:** the Button wires Workers
+   Builds (deploy on every push to your fork). Open the Worker →
+   Settings → Builds → pause/disable automatic deployments (or set the
+   deploy command to a versions upload). Your fork is then a manual
+   snapshot: update = sync upstream + click Deploy. Never auto.
+6. One DB, one method: a database deployed by the Button (wrangler
+   `d1_migrations` journal) must keep deploying that way; a database
+   deployed by `install.sh workers` (`_migrations` journal) the other.
+   Mixing methods double-applies migrations.
 
 ### Uninstall
 
@@ -78,7 +108,7 @@ default columns appear when the first project is created.
 
 | Variable | Written by | Required |
 |---|---|---|
-| `LXK_API_KEY` | install script (or `--key`) | yes |
+| `API keys (lxk_...)` | minted post-setup via login session (Settings → API Keys, or `lexa-cli login` device flow) | only for machines (CLI/daemons/scripts) |
 | `LXK_ENV` | install script (`--flavor`) / setup wizard | yes (staging/prod) |
 | `LXK_PUBLIC_URL` | install script (from `--bind`/`--port`/`--domain`) | staging/prod (Better Auth baseURL) |
 | `CF_API_TOKEN` | operator env (workers target only) | workers only |
@@ -100,7 +130,7 @@ default columns appear when the first project is created.
 | `GITHUB_WEBHOOK_SECRET` | HMAC secret for the `/api/webhooks/github` route |
 | `LOG_LEVEL` | logging level (default `info`) |
 | `LXK_ADMIN_EMAILS` | comma-separated **superadmin** emails — env-only allow-list, applied at provisioning (dev setup wizard only); never edited at runtime |
-| `LXK_API_KEY` | server auth Bearer key (`lxk_` + 43 chars) — machines use it directly; browsers authenticate via the session cookie |
+| `LXK_API_KEY` | REMOVED — no longer provisioned or read. Pre-change installs keep their DB-seeded row; fresh installs mint user-bound keys post-setup. |
 | `LXK_HEARTH_DAEMON_TOKEN` | shared secret for Hearth daemons (alternative to a Settings API key) |
 | `LXK_MAX_BODY_MB` | max request body for `/api` in MB (default 16); webhook payloads hard-capped at 1 MB before HMAC, regardless |
 | `LXK_PUBLIC_URL` | public base URL of this install (e.g. `https://lexa.example.com`) — Better Auth `baseURL` + `trustedOrigins`; written by the install script; hand-set in dev |
@@ -134,8 +164,8 @@ no email transport anywhere.
 - Sign in with the superadmin email + password → dashboard loads
 - `curl <url>/api/health` → **200** (key-exempt probe)
 - `curl -i <url>/api/projects` → **401** (no key, no session)
-- `lexa-cli login --url <url> --key <lxk_...>` → "Logged in" (needs a key
-  from Settings → API Keys)
+- `lexa-cli login --url <url>` → browser-approval device flow mints a key
+  ("Logged in"; headless scripts use a key from Settings → API Keys)
 
 **GitHub sync** — see `docs/GITHUB_SETUP.md` (includes the acceptance round-trip).
 
@@ -146,9 +176,9 @@ no email transport anywhere.
   script content cannot change between your read and your run. Bare-metal
   tarballs are additionally sha256-verified by the script.
 - `.env`, `.env.staging`, `.env.prod` are gitignored — values are generated on
-  the machine, never committed. The install script preserves `GITHUB_*` and
-  `LXK_API_KEY` across re-runs so upgrades don't rotate keys or clobber sync
-  config.
+  the machine, never committed. The install script preserves `GITHUB_*`
+  across re-runs so upgrades don't clobber sync config (DB-minted API keys
+  survive in the data volume / D1).
 - The GitHub App private key is never written to the env file: it is either
   referenced via `GITHUB_PRIVATE_KEY_FILE` or mounted read-only into the
   container (`./github-app.private-key.pem:/app/github-app.private-key.pem:ro`

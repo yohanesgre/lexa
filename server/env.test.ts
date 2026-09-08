@@ -17,7 +17,6 @@ describe("getEnv", () => {
       LXK_ENV: "prod",
       LXK_PUBLIC_URL: "https://lexa.example.com",
       LXK_TRUSTED_ORIGINS: "https://a.example.com, https://b.example.com",
-      LXK_API_KEY: "lxk_test",
       GITHUB_APP_ID: "123",
       LXK_MAX_BODY_MB: "32",
       LXK_RATE_LIMIT_MAX: "1000",
@@ -31,7 +30,6 @@ describe("getEnv", () => {
     expect(rt.LXK_ENV).toBe("prod");
     expect(rt.LXK_PUBLIC_URL).toBe("https://lexa.example.com");
     expect(rt.LXK_TRUSTED_ORIGINS).toBe("https://a.example.com, https://b.example.com");
-    expect(rt.LXK_API_KEY).toBe("lxk_test");
     expect(rt.GITHUB_APP_ID).toBe("123");
     expect(rt.LXK_MAX_BODY_MB).toBe("32");
     expect(rt.LXK_RATE_LIMIT_MAX).toBe("1000");
@@ -87,7 +85,6 @@ describe("getEnvFromWorkers", () => {
     const rt = getEnvFromWorkers({
       LXK_ENV: "prod",
       LXK_PUBLIC_URL: "https://lexa.example.com",
-      LXK_API_KEY: "lxk_secret",
       GITHUB_APP_ID: "123",
       GITHUB_WEBHOOK_SECRET: "whsec",
       LXK_TRUSTED_ORIGINS: "https://a.test",
@@ -102,7 +99,6 @@ describe("getEnvFromWorkers", () => {
     });
     expect(rt.LXK_ENV).toBe("prod");
     expect(rt.LXK_PUBLIC_URL).toBe("https://lexa.example.com");
-    expect(rt.LXK_API_KEY).toBe("lxk_secret");
     expect(rt.GITHUB_APP_ID).toBe("123");
     expect(rt.GITHUB_WEBHOOK_SECRET).toBe("whsec");
     expect(rt.LXK_TRUSTED_ORIGINS).toBe("https://a.test");
@@ -128,6 +124,7 @@ describe("getEnvFromWorkers", () => {
     const rt = getEnvFromWorkers({ LXK_MAX_BODY_MB: 16, LOG_LEVEL: null, LXK_API_KEY: 42 });
     expect(rt.LXK_MAX_BODY_MB).toBeUndefined();
     expect(rt.LOG_LEVEL).toBeUndefined();
-    expect(rt.LXK_API_KEY).toBeUndefined();
+    // Removed env keys are dropped entirely, never passed through.
+    expect("LXK_API_KEY" in rt).toBe(false);
   });
 });

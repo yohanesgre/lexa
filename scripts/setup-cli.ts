@@ -4,19 +4,18 @@
  *
  *   bun run setup                                      # interactive, dev (.env)
  *   bun run setup --prod                               # interactive, prod (.env.prod)
- *   bun run setup --prod --admin-email ops@x.com --api-key lxk_... --yes
+ *   bun run setup --prod --admin-email ops@x.com --yes
  *
  * Prompts for the admin email (LXK_ADMIN_EMAILS) + the superadmin password,
- * ensures an API key (LXK_API_KEY) exists in the flavor
- * env file, runs migrations, creates the superadmin account (Better Auth
- * credential), and (dev only) offers sample data.
+ * runs migrations, creates the superadmin account (Better Auth
+ * credential), and (dev only) offers sample data. Machine keys are minted
+ * post-setup (login → Settings → API Keys).
  *
  * Staging/prod never seeds: LXK_ENV=<flavor> is written so the server,
  * the web wizard, and later `lexa-cli deploy` runs all know sample data
  * must stay empty. This script is the first thing you run on a fresh box
  * — no lexa-cli binary required.
  */
-import { createHash, randomBytes } from "node:crypto";
 import { existsSync, readFileSync, writeFileSync, mkdirSync, chmodSync } from "node:fs";
 import { resolve, dirname } from "node:path";
 import { Database } from "bun:sqlite";
@@ -44,18 +43,6 @@ function writeEnv(file: string, env: Record<string, string>) {
   const lines = Object.entries(env).map(([k, v]) => `${k}=${v}`);
   writeFileSync(file, lines.join("\n") + "\n");
   try { chmodSync(file, 0o600); } catch {}
-}
-
-function generateRawKey(): string {
-  const raw = randomBytes(32);
-  const chars = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
-  let value = 0n;
-  for (const b of raw) value = (value << 8n) | BigInt(b);
-  let result = "";
-  const base = 62n;
-  while (value > 0n) { result = chars[Number(value % base)] + result; value /= base; }
-  while (result.length < 43) result = chars[0]! + result;
-  return `lxk_${result}`;
 }
 
 function ensureDirForDb(path: string) {
@@ -127,31 +114,10 @@ async function main() {
     console.log("  set one via the web /setup wizard or a superadmin set-password link.");
   }
 
-  // 3. API key
-  console.log("\n── API key ──");
-  let apiKey = flagValue("--api-key") || env.LXK_API_KEY || "";
-  if (apiKey) {
-    console.log(`  Existing key found: ${apiKey.slice(0, 10)}… (kept)`);
-  } else if (NON_INTERACTIVE) {
-    apiKey = generateRawKey();
-    console.log(`  Generated: ${apiKey}`);
-  } else {
-    const gen = ask("Generate new API key?", "y");
-    if (gen.toLowerCase() === "n") {
-      apiKey = ask("Paste API key (lxk_...)");
-      while (!/^lxk_[0-9A-Za-z]{43}$/.test(apiKey)) {
-        apiKey = ask("  Invalid key. Must be lxk_ + 43 chars");
-      }
-    } else {
-      apiKey = generateRawKey();
-      console.log(`  Generated: ${apiKey}`);
-    }
-  }
-  if (apiKey) {
-    env.LXK_API_KEY = apiKey;
-  }
-
   // 3. Persist env file — LXK_ENV is always explicit so the seed gate works.
+  // Drop legacy provisioned keys: the server no longer reads LXK_API_KEY
+  // (machine keys are minted post-setup).
+  delete env.LXK_API_KEY;
   if (!env.DATABASE_PATH) env.DATABASE_PATH = "./data/lexa.db";
   if (!env.PORT) env.PORT = "3000";
   env.LXK_ENV = flavor;
@@ -198,25 +164,7 @@ async function main() {
     }
   }
 
-  // 6. Ensure the seeded admin API key exists (entry.ts does this too, but be explicit)
-  try {
-    const db = new Database(DB_PATH);
-    db.exec("PRAGMA journal_mode = WAL");
-    db.exec("PRAGMA foreign_keys = ON");
-    db.exec("PRAGMA busy_timeout = 5000");
-  // @ts-ignore strict: exactOptional indexedAccess
-    const keyHash = createHash("sha256").update(env.LXK_API_KEY).digest("hex");
-    const row = db.prepare("SELECT id FROM api_keys WHERE key_hash = ?").get(keyHash) as { id: string } | null;
-    if (!row && env.LXK_API_KEY) {
-      db.prepare("INSERT INTO api_keys (id, name, key_hash) VALUES (?, ?, ?)").run(crypto.randomUUID(), "admin", keyHash);
-      console.log("  Seeded admin API key into database");
-    }
-    db.close();
-  } catch (e) {
-    console.warn(`  (settings sync skipped: ${(e as Error).message})`);
-  }
-
-  // 7. Seed sample data — dev only; staging/prod always stays empty.
+  // 6. Seed sample data — dev only; staging/prod always stays empty.
   console.log("\n── Sample data ──");
   const db = new Database(DB_PATH);
   const projectCount = db.query("SELECT COUNT(*) c FROM projects").get() as { c: number };
@@ -240,21 +188,20 @@ async function main() {
       }
     }
   }
-  // 8. Lock setup — CLI-provisioned instances are complete; /api/setup/*
+  // 7. Lock setup — CLI-provisioned instances are complete; /api/setup/*
   //    mutating endpoints stay locked from now on.
   //    mutating endpoints stay locked from now on.
   setSetting(db, "setup_complete", "1");
   console.log("  Setup marked complete — /api/setup/* is now locked.");
   db.close();
 
-  // 9. Summary
+  // 8. Summary
   console.log("\n══════════════════════════════════════════════");
   console.log("  Setup complete");
   console.log("══════════════════════════════════════════════");
   console.log(`  Flavor:         ${flavor}`);
   console.log(`  Env file:       ${envFile}`);
   console.log(`  Admin emails:   ${env.LXK_ADMIN_EMAILS || "(none — set later in /setup)"}`);
-  console.log(`  API key:        ${env.LXK_API_KEY || "(none)"}`);
   console.log(`  Database:       ${DB_PATH}`);
   console.log("");
   if (flavor === "dev") {

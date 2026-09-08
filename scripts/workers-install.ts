@@ -8,12 +8,13 @@
 // side owns /dev/tty); this helper takes everything via flags.
 //
 // Usage:
-//   bun workers-install.ts --cf-token <tok> --api-key <key> --flavor staging|prod \
+//   bun workers-install.ts --cf-token <tok> --flavor staging|prod \
 //     [--domain lexa.example.com]     # custom domain; absent = workers.dev
 //     [--dir <unpack dir>]            # default: cwd
 //
 // Superadmin provisioning is NOT done here — the web /setup wizard owns it
-// (owner decision: free-choice email + password at first install).
+// (owner decision: free-choice email + password at first install). Machine
+// keys are minted post-setup (login → Settings → API Keys).
 
 import { closeSync, existsSync, mkdirSync, openSync, readFileSync, readdirSync, readSync, rmSync, statSync, writeFileSync, writeSync } from "node:fs";
 import { join, dirname, basename } from "node:path";
@@ -43,7 +44,6 @@ function flag(name: string): string {
 }
 
 const CF_TOKEN = flag("cf-token") || die("--cf-token required");
-const API_KEY = flag("api-key") || die("--api-key required");
 // Boolean flag: drops any existing D1 databases matching the flavor name
 // before creating a fresh one (all data in them is gone).
 const RESET_DB = process.argv.includes("--reset-db");
@@ -306,9 +306,5 @@ if (CUSTOM_DOMAIN && zone) {
   console.log(`  ✓ route ${pattern} → ${FLAVOR.workerName}`);
 }
 
-// ── Secret: the machine Bearer key (superadmin provisioning lives in /setup) ──
-const secret = wrangler(["secret", "put", "LXK_API_KEY", "--config", configPath], { input: `${API_KEY}\n` });
-if (secret.status !== 0) die(`wrangler secret put LXK_API_KEY failed (status ${secret.status})`);
-console.log("  ✓ secret set: LXK_API_KEY");
-
+// ── Done: machine keys are minted post-setup (login → Settings → API Keys) ──
 console.log(`  ✓ deployed${CUSTOM_DOMAIN ? ` → https://${CUSTOM_DOMAIN}` : ""}`);

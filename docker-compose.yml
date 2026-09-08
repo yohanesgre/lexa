@@ -8,7 +8,6 @@ services:
       - DATABASE_PATH=/app/data/lexa.db
       - PORT=3000
       - LXK_ENV=${LXK_ENV:-}
-      - LXK_API_KEY=${LXK_API_KEY}
       - LXK_ADMIN_EMAILS=${LXK_ADMIN_EMAILS:-}
       - LXK_HEARTH_DAEMON_TOKEN=${LXK_HEARTH_DAEMON_TOKEN:-}
       - GITHUB_APP_ID=${GITHUB_APP_ID:-}

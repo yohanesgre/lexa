@@ -1987,13 +1987,12 @@ const countRows = (driver: DbDriver, sql: string): Effect.Effect<number, DbError
 
 function setupStatus(driver: DbDriver) {
   return Effect.gen(function* () {
-    const apiKeyCount = yield* countRows(driver, "SELECT COUNT(*) c FROM api_keys");
     const projectCount = yield* countRows(driver, "SELECT COUNT(*) c FROM projects");
     const userCount = yield* countRows(driver, "SELECT COUNT(*) c FROM users");
     const superadminCount = yield* countRows(driver, "SELECT COUNT(*) c FROM users WHERE role = 'superadmin'");
     const setupComplete = (yield* getSettingAsync(driver, "setup_complete")) === "1";
     return {
-      configured: setupComplete || (apiKeyCount > 0 && superadminCount > 0),
+      configured: setupComplete || superadminCount > 0,
       needsAdmin: superadminCount === 0,
       hasProjects: projectCount > 0,
       hasUsers: userCount > 0,
@@ -2003,16 +2002,14 @@ function setupStatus(driver: DbDriver) {
 
 // The wizard is only for first install: once setup is complete (flag set by
 // /setup/complete) or real projects exist, the mutating endpoints lock.
-// setAdmin (superadmin account creation) stays open while the env-provided
-// key exists but no superadmin ACCOUNT does — the web wizard is the only way
-// to set the superadmin password (no --admin-password flag, R3).
+// setAdmin (superadmin account creation) is closed by the first superadmin
+// account itself — no seed key needed (no --admin-password flag, R3).
 function setupAdminLocked(driver: DbDriver): Effect.Effect<boolean, DbError> {
   return Effect.gen(function* () {
-    const apiKeyCount = yield* countRows(driver, "SELECT COUNT(*) c FROM api_keys");
     const superadminCount = yield* countRows(driver, "SELECT COUNT(*) c FROM users WHERE role = 'superadmin'");
     if ((yield* getSettingAsync(driver, "setup_complete")) === "1") return true;
     if ((yield* countRows(driver, "SELECT COUNT(*) c FROM projects")) > 0) return true;
-    return apiKeyCount > 0 && superadminCount > 0;
+    return superadminCount > 0;
   });
 }
 

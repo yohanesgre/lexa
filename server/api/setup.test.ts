@@ -56,7 +56,9 @@ describe("provisioning (setup wizard)", () => {
   });
 
   it("creates the superadmin account with a password; login works", async () => {
-    delete process.env.LXK_ADMIN_EMAILS;
+    // LXK_ADMIN_EMAILS is set to a non-matching address: the allow-list must
+    // not gate who may become superadmin at first install.
+    process.env.LXK_ADMIN_EMAILS = "someone-else@lexa.dev";
     const res = await setAdmin({ email: "ops@lexa.dev", password: "password123" });
     expect(res.status).toBe(200);
     const db = new Database(dbPath);
@@ -68,15 +70,26 @@ describe("provisioning (setup wizard)", () => {
     expect(signIn.user.email).toBe("ops@lexa.dev");
   }, 15000);
 
-  it("accepts any email at first install — LXK_ADMIN_EMAILS never gates the wizard", async () => {
-    process.env.LXK_ADMIN_EMAILS = "ops@lexa.dev";
-    const res = await setAdmin({ email: "other@lexa.dev", password: "password123" });
-    expect(res.status).toBe(200);
+  it("second setAdmin → 403 SETUP_LOCKED with api_keys empty (superadmin closes the door)", async () => {
     const db = new Database(dbPath);
-    const user = db.query("SELECT email, role FROM users WHERE email = 'other@lexa.dev'").get() as { email: string; role: string } | null;
+    const keys = db.query("SELECT COUNT(*) c FROM api_keys").get() as { c: number };
     db.close();
-    expect(user?.role).toBe("superadmin");
-  }, 15000);
+    expect(keys.c).toBe(0);
+    const res = await setAdmin({ email: "other@lexa.dev", password: "password123" });
+    expect(res.status).toBe(403);
+    const body = await json(res);
+    expect(body.error.code).toBe("SETUP_LOCKED");
+  });
+
+  it("status after first admin: configured true, needsAdmin false, without keys", async () => {
+    const status = await json(await handler(new Request("http://localhost:3000/api/setup/status")));
+    expect(status.configured).toBe(true);
+    expect(status.needsAdmin).toBe(false);
+    const db = new Database(dbPath);
+    const keys = db.query("SELECT COUNT(*) c FROM api_keys").get() as { c: number };
+    db.close();
+    expect(keys.c).toBe(0);
+  });
 
   it("locks once a superadmin account and API key exist", async () => {
     const db = new Database(dbPath);
@@ -91,13 +104,33 @@ describe("provisioning (setup wizard)", () => {
   it("returns ok (idempotent) when the superadmin account already exists", async () => {
     // Same email as the locked test — but the account exists; recreate the
     // pre-lock state by clearing setup_complete: the lock above comes from
-    // (key && superadmin). Instead verify idempotency against the existing
-    // account via a fresh handler path: SETUP_LOCKED wins over idempotency,
-    // so assert the account is untouched.
+    // the superadmin account alone. Instead verify idempotency against the
+    // existing account via a fresh handler path: SETUP_LOCKED wins over
+    // idempotency, so assert the account is untouched.
     const db = new Database(dbPath);
     const count = db.query("SELECT COUNT(*) c FROM users WHERE email = 'ops@lexa.dev'").get() as { c: number };
     db.close();
     expect(count.c).toBe(1);
+  });
+
+  it("complete locks setAdmin and seed", async () => {
+    // setupLocked gates complete on (keys && admin emails): clear both so the
+    // wizard's own Done step can run, then both endpoints must lock.
+    const db = new Database(dbPath);
+    db.prepare("DELETE FROM api_keys").run();
+    db.close();
+    delete process.env.LXK_ADMIN_EMAILS;
+    const complete = await handler(new Request("http://localhost:3000/api/setup/complete", { method: "POST" }));
+    expect(complete.status).toBe(200);
+    const admin = await setAdmin({ email: "late@lexa.dev", password: "password123" });
+    expect(admin.status).toBe(403);
+    expect((await json(admin)).error.code).toBe("SETUP_LOCKED");
+    const seed = await handler(new Request("http://localhost:3000/api/setup/seed", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ flavor: "minimal" }),
+    }));
+    expect(seed.status).toBe(403);
   });
 });
 

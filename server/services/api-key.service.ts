@@ -6,7 +6,8 @@ import type { ApiKey, ApiKeyCreateResult } from "../../shared/types";
 
 export class ApiKeyNameEmpty extends Data.TaggedError("ApiKeyNameEmpty")<{}> {}
 
-// System/bootstrap keys created outside the settings UI (env LXK_API_KEY seed).
+// Legacy/dev bootstrap rows created outside the settings UI (the env seed
+// is removed — no new unbound keys are minted).
 // The settings list hides only the seeded bootstrap
 // keys — a user-minted key named the same must stay visible. Filter is
 // name + unbound, never name alone.

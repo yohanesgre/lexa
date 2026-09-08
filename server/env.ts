@@ -19,8 +19,6 @@ export interface RuntimeEnv {
   LXK_PUBLIC_URL?: string | undefined;
   LXK_TRUSTED_ORIGINS?: string | undefined;
   LXK_ADMIN_EMAILS?: string | undefined;
-  // Auth
-  LXK_API_KEY?: string | undefined;
   // GitHub
   GITHUB_APP_ID?: string | undefined;
   GITHUB_PRIVATE_KEY?: string | undefined;
@@ -74,7 +72,6 @@ export function getEnv(source: ProcessEnvSource = processEnvSafe()): RuntimeEnv 
     LXK_PUBLIC_URL: source.LXK_PUBLIC_URL,
     LXK_TRUSTED_ORIGINS: source.LXK_TRUSTED_ORIGINS,
     LXK_ADMIN_EMAILS: source.LXK_ADMIN_EMAILS,
-    LXK_API_KEY: source.LXK_API_KEY,
     GITHUB_APP_ID: source.GITHUB_APP_ID,
     GITHUB_PRIVATE_KEY: source.GITHUB_PRIVATE_KEY,
     GITHUB_PRIVATE_KEY_FILE: source.GITHUB_PRIVATE_KEY_FILE,
@@ -119,7 +116,6 @@ export function getEnvFromWorkers(env: Record<string, unknown>): RuntimeEnv {
     LXK_PUBLIC_URL: s("LXK_PUBLIC_URL"),
     LXK_TRUSTED_ORIGINS: s("LXK_TRUSTED_ORIGINS"),
     LXK_ADMIN_EMAILS: s("LXK_ADMIN_EMAILS"),
-    LXK_API_KEY: s("LXK_API_KEY"),
     GITHUB_APP_ID: s("GITHUB_APP_ID"),
     GITHUB_PRIVATE_KEY: s("GITHUB_PRIVATE_KEY"),
     GITHUB_PRIVATE_KEY_FILE: s("GITHUB_PRIVATE_KEY_FILE"),
