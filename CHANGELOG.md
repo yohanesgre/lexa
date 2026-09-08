@@ -7,6 +7,17 @@ All notable changes to Lexa are documented here. Format based on
 
 ## [Unreleased]
 
+## [2026.2.9] - 2026-09-08
+
+### Fixed
+
+- **Workers API rebuilt the entire stack per request** — better-auth, the
+  Effect service graph, and the HttpApi web handler were constructed on
+  every API call, blowing the Workers free plan's 10ms CPU budget
+  (`Worker exceeded CPU time limit` on `/api/projects`). The stack is now
+  built once per isolate (env-fingerprinted) — still recommended to run
+  the paid plan for real workloads
+
 ## [2026.2.8] - 2026-09-08
 
 ### Fixed
