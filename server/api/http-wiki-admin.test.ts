@@ -11,6 +11,7 @@ const MIGRATIONS = fileURLToPath(new URL("../../migrations", import.meta.url));
 
 const ADMIN_KEY = "lxk_" + "a".repeat(43);
 const MEMBER_KEY = "lxk_" + "m".repeat(43);
+const SERVER_KEY = "lxk_" + "s".repeat(43);
 
 async function sha256(text: string): Promise<string> {
   const data = new TextEncoder().encode(text);
@@ -30,11 +31,13 @@ beforeAll(async () => {
   runMigrations(dbPath, MIGRATIONS);
   const adminHash = await sha256(ADMIN_KEY);
   const memberHash = await sha256(MEMBER_KEY);
+  const serverHash = await sha256(SERVER_KEY);
   db = new Database(dbPath);
   db.exec(`
-INSERT INTO users (id, email, name, role) VALUES ('u1', 'maria@lexa.test', 'Maria', 'member'), ('u3', 'pam@lexa.test', 'Pam', 'member');
-INSERT INTO api_keys (id, name, key_hash, user_id) VALUES ('k1', 'test-admin', '${adminHash}', NULL);
+INSERT INTO users (id, email, name, role) VALUES ('u1', 'maria@lexa.test', 'Maria', 'member'), ('u3', 'pam@lexa.test', 'Pam', 'member'), ('u0', 'root@lexa.test', 'Root', 'superadmin');
+INSERT INTO api_keys (id, name, key_hash, user_id) VALUES ('k1', 'test-admin', '${adminHash}', 'u0');
 INSERT INTO api_keys (id, name, key_hash, user_id) VALUES ('k2', 'test-member', '${memberHash}', 'u3');
+INSERT INTO api_keys (id, name, key_hash, user_id) VALUES ('k3', 'test-server', '${serverHash}', NULL);
 INSERT INTO projects (id, name, slug) VALUES ('p1', 'P', 'p1');
 INSERT INTO wiki_pages (id, project_id, title, slug, content, content_text, position) VALUES ('w1', 'p1', 'Home', 'home', '{"type":"doc","content":[]}', 'hello world', 0);
 INSERT INTO wiki_pages (id, project_id, title, slug, content, content_text, parent_id, position) VALUES ('w2', 'p1', 'Child', 'child', '{"type":"doc","content":[]}', '', 'w1', 0);
@@ -178,6 +181,12 @@ describe("settings api-keys routes", () => {
     const res = await handler(json("GET", "/api/settings/api-keys", undefined, MEMBER_KEY));
     expect(res.status).toBe(403);
     expect((await res.json()).error.code).toBe("FORBIDDEN");
+  });
+
+  it("server key (user_id NULL) cannot mint a key — 403 NO_USER_CONTEXT", async () => {
+    const res = await handler(json("POST", "/api/settings/api-keys", { name: "sneaky" }, SERVER_KEY));
+    expect(res.status).toBe(403);
+    expect((await res.json()).error.code).toBe("NO_USER_CONTEXT");
   });
 });
 

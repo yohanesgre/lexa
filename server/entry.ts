@@ -76,12 +76,14 @@ try {
 } catch {}
 pruneWebhookEvents(DATABASE_PATH);
 pruneRuntimeEvents(DATABASE_PATH);
+pruneDeviceLoginRequests(DATABASE_PATH);
 seedAdminKey(DATABASE_PATH);
 autoLockSetupIfConfigured(DATABASE_PATH);
 setInterval(() => {
   try {
     pruneWebhookEvents(DATABASE_PATH);
     pruneRuntimeEvents(DATABASE_PATH);
+    pruneDeviceLoginRequests(DATABASE_PATH);
   } catch {}
 }, 3600_000).unref();
 // DB backups (docs/BACKUPS.md): snapshot + gzip + blob-dir copy into the
@@ -390,6 +392,15 @@ function pruneRuntimeEvents(dbPath: string) {
     // Terminal-state setup events older than 7 days. Pending/claimed events
     // stay: a claimed event is reclaimable for 2 minutes after a crash.
     db.exec("DELETE FROM runtime_events WHERE status IN ('completed', 'failed') AND finished_at < datetime('now', '-7 days')");
+  } finally {
+    db.close();
+  }
+}
+
+function pruneDeviceLoginRequests(dbPath: string) {
+  const db = new Database(dbPath);
+  try {
+    db.exec("DELETE FROM device_login_requests WHERE expires_at < datetime('now')");
   } finally {
     db.close();
   }

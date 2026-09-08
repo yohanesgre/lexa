@@ -101,10 +101,16 @@ unless it authenticates via one of two channels:
   Identity = the session user (id, name, email, role).
 - **Bearer API key (machines):** `Authorization: Bearer lxk_<43 base62 chars>`
   (regex `^lxk_[0-9A-Za-z]{43}$`). The key is SHA-256-hashed and looked up in
-  `api_keys`; `last_used_at` is bumped at most hourly. Keys created without a
-  user (`user_id` NULL — the seeded `LXK_API_KEY` and setup-wizard keys)
-  resolve to **admin**; keys bound to a user carry that user's role. Key auth
-  for CLI/webhooks is unchanged.
+  `api_keys`; `last_used_at` is bumped at most hourly. Keys are **user-bound**:
+  a key carries the acting user (session-equivalent identity + project
+  access from `user_project_roles`/team membership) and the owner's role
+  (superadmin→admin, member→member). Member-bound keys call the same
+  per-project authorization gates as member sessions and are 403'd on
+  admin/superadmin gates (`requireSuperadmin` etc). `user_id` NULL =
+  **server key** (seeded `LXK_API_KEY` / setup-wizard only — never created
+  through the UI): resolves to role admin. Key auth for CLI/webhooks is
+  unchanged. UI-created keys always bind to the creating user (a key created
+  by a superadmin keeps full admin power, attributed to that user).
 
 **Attribution (R5):** the actor is the session user for browser calls and the
 key name for machine calls. The `x-lxk-user` header is **removed** — never
@@ -1060,14 +1066,90 @@ GET    /api/share/:token/attachments/:id   (PUBLIC — same bucket + rules)
 ```
 GET    /api/settings/api-keys  (admin)
 → 200 { data: ApiKey[] }
+  Keys include owner info (ownerEmail/ownerName — null = server key).
 
-POST   /api/settings/api-keys  (admin)
+POST   /api/settings/api-keys  (admin, session user required)
 body { name* }
 → 201 { key: ApiKey, rawKey: "lxk_..." }
   ⚠ rawKey returned ONCE — never stored, never shown again
+  The key binds to the creating user (identity.userId required — a bare
+  server key cannot mint another key; 403 FORBIDDEN otherwise). Server keys
+  (user_id NULL) are never created through the API — seeded by env
+  LXK_API_KEY / setup wizard only.
 
 DELETE /api/settings/api-keys/:id  (admin)
 → 204 | 404
+```
+
+### Personal API keys (self-service — any signed-in user)
+
+```
+GET    /api/me/api-keys  (session or user-bound key)
+→ 200 { data: ApiKey[] }   own keys only
+
+POST   /api/me/api-keys  (session or user-bound key)
+body { name* }
+→ 201 { key: ApiKey, rawKey: "lxk_..." }  (rawKey once)
+  Binds to the caller (userId required; bare server keys → 403 NO_USER_CONTEXT)
+
+DELETE /api/me/api-keys/:id  (owner only)
+→ 204 | 404   (non-owner → 404 — no existence oracle)
+
+GET    /api/settings/api-keys remains the admin view of ALL keys (incl. owner
+       column + server-key tag).
+```
+
+### Device login (CLI pairing)
+
+Machine-to-machine login without a pre-shared key. Flow: CLI POSTs a request
+→ prints the verify URL → a logged-in user approves in the browser → the
+CLI's poll receives a freshly minted **user-bound** API key once. The single
+`token` (256-bit, hex-encoded) is both the poll credential and the approve
+capability; approval additionally requires a session. Both endpoints are
+API-key exempt but rate-limited (create: general bucket; the short `code` is
+display-only — no oracle, brute force is infeasible against a 256-bit token).
+
+```
+POST   /api/device-login/requests  (key-exempt, rate-limited)
+body { clientName*: string }              — "cli-<hostname>"
+→ 201 { id, code: "ABCDEFGH", verifyUrl: "<base>/device-login?request=<id>&token=t…", expiresMs }
+  verifyUrl built from LXK_PUBLIC_URL; carries the request id + one-time
+  token (the approve page needs both); valid 10 minutes.
+  | 429 RATE_LIMITED
+
+GET    /api/device-login/requests/:id  (key-exempt; header x-device-token)
+→ 200 { status: "pending", clientName, code, expiresAt }
+     — keep polling (~2s interval); clientName/code/expiresAt power the
+       browser approve page (same endpoint, no separate fetch)
+→ 200 { status: "approved", rawKey: "lxk_...", keyName, approverName? }
+     rawKey returned ONCE — the row is consumed on this response; a second
+     poll → 404 DEVICE_LOGIN_NOT_FOUND. Raw key transits an in-memory store
+     (TTL 30 min), never persisted.
+→ 403 { error: { code: "DEVICE_LOGIN_DENIED" } }
+→ 410 { error: { code: "DEVICE_LOGIN_EXPIRED" } }      (also when the minted
+       key is gone from the transit store)
+→ 404 { error: { code: "DEVICE_LOGIN_NOT_FOUND" } }    (unknown id / consumed)
+
+POST   /api/device-login/requests/:id/approve  (user-bound identity + token)
+body { token*: string }        — token is the raw hex string from the URL
+→ 200 { status: "approved", clientName }
+  Mints a user-bound key (user_id = approver, name = clientName) —
+  shows up in the approver's Settings → Me → API keys. Mint + status flip
+  are one atomic batch (Bun transaction / D1 batch). Any user-bound
+  identity may approve (session cookie or a user-bound key — the token,
+  a 256-bit capability, is the approval secret); bare server keys → 401/403.
+  | 401 (no identity) | 404 DEVICE_LOGIN_NOT_FOUND (unknown/mismatched/
+    consumed — no oracle) | 410 DEVICE_LOGIN_EXPIRED
+```
+
+Errors: `DEVICE_LOGIN_NOT_FOUND` (404), `DEVICE_LOGIN_EXPIRED` (410),
+`DEVICE_LOGIN_DENIED` (403), `NO_USER_CONTEXT` (403, personal keys +
+mint-from-server-key paths).
+
+Limitations: the minted raw key transits an in-memory store (30 min TTL)
+— per-isolate. On Workers, an approve on isolate A and a poll on isolate B
+cannot share the store (poll 410s; row pruned at next boot — no security
+impact). Bun serves one process, so self-hosted installs are unaffected.
 
 GET    /api/settings/rate-limit  (admin)
 → 200 { max: number, windowMs: number, envOverride: boolean }

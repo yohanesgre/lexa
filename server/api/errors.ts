@@ -63,6 +63,10 @@ export class InvalidName extends Data.TaggedError("InvalidName")<{ reason: strin
 export class InvalidRateLimit extends Data.TaggedError("InvalidRateLimit")<{ reason: string }> {}
 export class InvalidGithubSettings extends Data.TaggedError("InvalidGithubSettings")<{ reason: string }> {}
 export class NoUserContext extends Data.TaggedError("NoUserContext")<{}> {}
+export class NoUserContextForbidden extends Data.TaggedError("NoUserContextForbidden")<{}> {}
+export class DeviceLoginNotFound extends Data.TaggedError("DeviceLoginNotFound")<{}> {}
+export class DeviceLoginExpired extends Data.TaggedError("DeviceLoginExpired")<{}> {}
+export class DeviceLoginDenied extends Data.TaggedError("DeviceLoginDenied")<{}> {}
 export class HearthSessionActive extends Data.TaggedError("HearthSessionActive")<{}> {}
 export class ProviderNotConfigured extends Data.TaggedError("ProviderNotConfigured")<{ projectId: string }> {}
 export class ProviderAuthFailed extends Data.TaggedError("ProviderAuthFailed")<{
@@ -163,6 +167,10 @@ export const errorCodeMap: Record<string, string> = {
   InvalidRateLimit: "INVALID_RATE_LIMIT",
   InvalidGithubSettings: "INVALID_GITHUB_SETTINGS",
   NoUserContext: "NO_USER_CONTEXT",
+  NoUserContextForbidden: "NO_USER_CONTEXT",
+  DeviceLoginNotFound: "DEVICE_LOGIN_NOT_FOUND",
+  DeviceLoginExpired: "DEVICE_LOGIN_EXPIRED",
+  DeviceLoginDenied: "DEVICE_LOGIN_DENIED",
   ProjectAccessDenied: "FORBIDDEN",
   UserNotFound: "USER_NOT_FOUND",
   CannotDeleteSelf: "CANNOT_DELETE_SELF",
@@ -292,6 +300,13 @@ export function errorToStatus(error: { _tag: string }): number {
     case "GithubWebhookError":
     case "NoUserContext":
       return 400;
+    case "NoUserContextForbidden":
+    case "DeviceLoginDenied":
+      return 403;
+    case "DeviceLoginExpired":
+      return 410;
+    case "DeviceLoginNotFound":
+      return 404;
     case "GithubApiError":
     case "SourceFetchError":
     case "ProviderAuthFailed":
@@ -416,7 +431,14 @@ export function errorMessage(error: { _tag: string } & Record<string, unknown>):
     case "InvalidGithubSettings":
       return String(error.reason ?? "Invalid GitHub settings");
     case "NoUserContext":
+    case "NoUserContextForbidden":
       return "No user context — this endpoint needs a session or a key bound to a user";
+    case "DeviceLoginNotFound":
+      return "Device login request not found";
+    case "DeviceLoginExpired":
+      return "Device login request expired";
+    case "DeviceLoginDenied":
+      return "Device login request denied";
     case "ProviderNotConfigured":
       return `Herald provider is not configured for this project — enable at least one model in Workspace → Herald Providers`;
     case "ProviderAuthFailed":

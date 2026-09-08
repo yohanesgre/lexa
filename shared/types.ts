@@ -238,6 +238,17 @@ export interface ApiKey {
   name: string;
   createdAt: ISODate;
   lastUsedAt: ISODate | null;
+  ownerEmail?: string;         // present only for user-bound keys
+  ownerName?: string;
+}
+
+export interface DeviceLoginRequestInfo {
+  id: ID;
+  code: string;                // 8-char display code (display-only, no oracle)
+  clientName: string;
+  status: "pending" | "approved" | "denied";
+  expiresMs: number;           // absolute epoch ms
+  verifyUrl: string;
 }
 
 export interface ApiKeyCreateResult {

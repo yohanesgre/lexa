@@ -213,10 +213,10 @@ describe("DELETE /api/attachments/:id", () => {
     sha = body.data.sha256;
   });
 
-  it("member-bound key → 403 FORBIDDEN at the middleware (member keys unsupported on REST)", async () => {
+  it("member-bound key passes middleware but is still denied by the service guard (AttachmentDeleteForbidden)", async () => {
     const res = await handler(authed("DELETE", `/api/attachments/${id}`, undefined, MEMBER_KEY));
     expect(res.status).toBe(403);
-    expect((await res.json()).error.code).toBe("FORBIDDEN");
+    expect((await res.json()).error.code).toBe("ATTACHMENT_DELETE_FORBIDDEN");
   });
 
   it("service guard: non-uploader non-admin identity → AttachmentDeleteForbidden", async () => {

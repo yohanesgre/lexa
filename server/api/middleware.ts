@@ -79,6 +79,11 @@ export function createApiMiddleware(db: Database, dbPath: string, env: RuntimeEn
       // and DELETEs it on cancel/timeout with x-hearth-token; the browser
       // GET/reset keep using the Bearer key.
       const isHearthDaemon = path.startsWith("/api/hearth/daemon/") || path === "/api/hearth/runtimes/register" || path === "/api/hearth/sessions";
+      // Device-login pairing: the CLI has no credential yet. Create + poll
+      // are API-key exempt (still rate-limited); approve/deny go through
+      // normal session auth — never exempt.
+      const isDeviceLogin = request.method === "POST" && path === "/api/device-login/requests"
+        || request.method === "GET" && /^\/api\/device-login\/requests\/[^/]+$/.test(path);
 
       // Rate limit before auth: a blocked IP stays blocked regardless of key.
       // The key/token-gated hearth machine surfaces are exempt (isRateLimitExemptPath:
@@ -118,7 +123,7 @@ export function createApiMiddleware(db: Database, dbPath: string, env: RuntimeEn
         ? constantTimeTokenEqual(request.headers["x-hearth-token"] ?? "", env.LXK_HEARTH_DAEMON_TOKEN)
         : false;
       let identity: AuthIdentityShape;
-      if (!isHealth && !isSetup && !daemonTokenOk && !isPublicShare) {
+      if (!isHealth && !isSetup && !daemonTokenOk && !isPublicShare && !isDeviceLogin) {
         // Dual-channel (R4): session cookie first (browsers), Bearer key
         // second (machines). The x-lxk-user header is removed — never read.
         const session = yield* sessionIdentity(new Headers(request.headers), deps.getSession);
@@ -134,15 +139,6 @@ export function createApiMiddleware(db: Database, dbPath: string, env: RuntimeEn
               HttpServerResponse.unsafeJson(
                 { error: { code: "UNAUTHORIZED", message: "Invalid or missing API key" } },
                 { status: 401 }
-              )
-            );
-          }
-          if (resolved.userId !== null && resolved.role === "member") {
-            console.warn(`[Auth] denied path=${path} reason=member key`);
-            return withSecurityHeaders(
-              HttpServerResponse.unsafeJson(
-                { error: { code: "FORBIDDEN", message: "Member API keys are not supported on the REST API yet" } },
-                { status: 403 }
               )
             );
           }

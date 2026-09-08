@@ -11,7 +11,7 @@ import { createBunSqliteDriver } from "../db/drivers/bun-sqlite";
 import type { Database } from "bun:sqlite";
 import { backfillTaskKeysDriver } from "../db/task-keys-backfill";
 import { getSettingAsync, setSettingAsync, deleteSettingAsync } from "./workers-ports";
-import { ProjectNotFound, WikiPageNotFound, MachineNotFound, Forbidden, SetupLocked, TaskNotFound, InvalidName, InvalidRateLimit, InvalidGithubSettings, NoUserContext, InvalidArgs, GithubApiError, errorResponse, errorToStatus, ProjectAccessDenied, HeraldTaskActive, HeraldThreadNotFound, ProviderNotConfigured, ProviderAuthFailed, ProviderUnreachable, HeraldGenerationFailed, HasChildren } from "./errors";
+import { ProjectNotFound, WikiPageNotFound, MachineNotFound, Forbidden, SetupLocked, TaskNotFound, InvalidName, InvalidRateLimit, InvalidGithubSettings, NoUserContext, NoUserContextForbidden, InvalidArgs, GithubApiError, errorResponse, errorToStatus, ProjectAccessDenied, HeraldTaskActive, HeraldThreadNotFound, ProviderNotConfigured, ProviderAuthFailed, ProviderUnreachable, HeraldGenerationFailed, HasChildren } from "./errors";
 import { respond } from "./http-helpers";
 import { resolveTaskId } from "./task-id";
 import { parseTaskKey } from "../task-key";
@@ -53,6 +53,8 @@ import { resolveMaxApiBody, X_LEXA_REMOTE_IP } from "./limits";
 import { apiRateLimiter, shareRateLimiter, isPrivateIp, isRateLimitExemptPath } from "./rate-limit";
 import { ApiKeyService } from "../services/api-key.service";
 import { ApiKeyRepo } from "../repos/api-key.repo";
+import { DeviceLoginService } from "../services/device-login.service";
+import { DeviceLoginRepo } from "../repos/device-login.repo";
 import { UserService } from "../services/user.service";
 import { UserRepo } from "../repos/user.repo";
 import { UserProjectRoleService } from "../services/user-project-role.service";
@@ -109,6 +111,8 @@ const ApiKeySchema = Schema.Struct({
   name: Schema.String,
   createdAt: Schema.String,
   lastUsedAt: Schema.NullOr(Schema.String),
+  ownerEmail: Schema.optional(Schema.String),
+  ownerName: Schema.optional(Schema.String),
 });
 
 const CreateApiKeyInput = Schema.Struct({
@@ -1625,6 +1629,55 @@ const apiKeysGroup = HttpApiGroup.make("api-keys")
   .add(HttpApiEndpoint.get("searchGithubRepos", "/settings/github/search-repos")
     .addSuccess(Schema.Struct({ data: Schema.Array(Schema.String) })));
 
+// ── Device login (CLI pairing) — key-exempt create/poll per docs/API.md ──
+const DeviceLoginRequestInfoSchema = Schema.Struct({
+  id: Schema.String,
+  code: Schema.String,
+  clientName: Schema.String,
+  status: Schema.Literal("pending", "approved", "denied"),
+  expiresMs: Schema.Number,
+  verifyUrl: Schema.String,
+});
+
+const DeviceLoginPollSchema = Schema.Union(
+  Schema.Struct({
+    status: Schema.Literal("pending"),
+    clientName: Schema.String,
+    code: Schema.String,
+    expiresAt: Schema.String,
+  }),
+  Schema.Struct({
+    status: Schema.Literal("approved"),
+    rawKey: Schema.String,
+    keyName: Schema.String,
+    approverName: Schema.NullOr(Schema.String),
+  })
+);
+
+const DeviceLoginActionSchema = Schema.Struct({
+  status: Schema.Literal("approved", "denied"),
+  clientName: Schema.String,
+});
+
+const DeviceLoginTokenInput = Schema.Struct({ token: Schema.String });
+const DeviceLoginClientInput = Schema.Struct({ clientName: Schema.String });
+
+const deviceLoginGroup = HttpApiGroup.make("device-login")
+  .add(HttpApiEndpoint.post("createDeviceLogin", "/device-login/requests")
+    .setPayload(DeviceLoginClientInput)
+    .addSuccess(DeviceLoginRequestInfoSchema, { status: 201 }))
+  .add(HttpApiEndpoint.get("pollDeviceLogin", "/device-login/requests/:id")
+    .setPath(ApiKeyPath)
+    .addSuccess(DeviceLoginPollSchema))
+  .add(HttpApiEndpoint.post("approveDeviceLogin", "/device-login/requests/:id/approve")
+    .setPath(ApiKeyPath)
+    .setPayload(DeviceLoginTokenInput)
+    .addSuccess(DeviceLoginActionSchema))
+  .add(HttpApiEndpoint.post("denyDeviceLogin", "/device-login/requests/:id/deny")
+    .setPath(ApiKeyPath)
+    .setPayload(DeviceLoginTokenInput)
+    .addSuccess(DeviceLoginActionSchema));
+
 const UserSchema = Schema.Struct({
   id: Schema.String,
   email: Schema.String,
@@ -1665,7 +1718,14 @@ const UpdateMyNameInput = Schema.Struct({ name: Schema.String });
 const meGroup = HttpApiGroup.make("me")
   .add(HttpApiEndpoint.patch("updateMe", "/me")
     .setPayload(UpdateMyNameInput)
-    .addSuccess(UserSchema));
+    .addSuccess(UserSchema))
+  .add(HttpApiEndpoint.get("listMyApiKeys", "/me/api-keys")
+    .addSuccess(Schema.Struct({ data: Schema.Array(ApiKeySchema) })))
+  .add(HttpApiEndpoint.post("createMyApiKey", "/me/api-keys")
+    .setPayload(CreateApiKeyInput)
+    .addSuccess(Schema.Struct({ key: ApiKeySchema, rawKey: Schema.String }), { status: 201 }))
+  .add(HttpApiEndpoint.del("deleteMyApiKey", "/me/api-keys/:id")
+    .setPath(ApiKeyPath).addSuccess(Schema.Void, { status: 204 }));
 
 const HeraldUsageSummarySchema = Schema.Struct({
   totalTokens: Schema.Number,
@@ -1753,6 +1813,7 @@ export const LexaApi = HttpApi.make("lexa")
   .add(wikiGroup)
   .add(dashboardGroup)
   .add(apiKeysGroup)
+  .add(deviceLoginGroup)
   .add(adminGroup)
   .add(adminHeraldGroup)
   .add(projectHeraldUsageGroup)
@@ -1847,6 +1908,16 @@ const requireSuperadmin = Effect.gen(function* () {
     return yield* Effect.fail(new Forbidden({ message: "Admin role required" }));
   }
   return identity;
+});
+
+// Any user-bound caller (session or user-bound key) — server keys (userId
+// null) have no owner to bind keys to, so they get 403 NO_USER_CONTEXT.
+const requireUser: Effect.Effect<AuthIdentityShape & { userId: string }, NoUserContextForbidden, AuthIdentity> = Effect.gen(function* () {
+  const identity = yield* AuthIdentity;
+  if (!identity.userId) {
+    return yield* Effect.fail(new NoUserContextForbidden());
+  }
+  return identity as AuthIdentityShape & { userId: string };
 });
 
 // Resolve a project by slug AND gate read access (R8): superadmin > explicit
@@ -4083,9 +4154,12 @@ const apiKeysLive = HttpApiBuilder.group(LexaApi, "api-keys", (handlers) =>  han
     )
     .handle("createApiKey", (req) =>
       respond(Effect.gen(function* () {
-        yield* requireAdmin;
+        const identity = yield* requireAdmin;
+        if (!identity.userId) {
+          return yield* Effect.fail(new NoUserContextForbidden());
+        }
         const service = yield* ApiKeyService;
-        const result = yield* service.create(req.payload.name);
+        const result = yield* service.createFor(identity.userId, req.payload.name);
         return result;
       }))
     )
@@ -4181,6 +4255,39 @@ const apiKeysLive = HttpApiBuilder.group(LexaApi, "api-keys", (handlers) =>  han
         const client = yield* GitHubClient;
         const repos = yield* client.searchRepos(q);
         return { data: repos };
+      }))
+    )
+);
+
+// Device login (CLI pairing) — see docs/API.md → "Device login (CLI
+// pairing)". create/poll are key-exempt (middleware carve-out); approve/deny
+// require a user-bound identity (session or user-bound key).
+const deviceLoginLive = HttpApiBuilder.group(LexaApi, "device-login", (handlers) =>
+  handlers
+    .handle("createDeviceLogin", (req) =>
+      respond(Effect.gen(function* () {
+        const service = yield* DeviceLoginService;
+        return yield* service.create(req.payload.clientName);
+      }))
+    )
+    .handle("pollDeviceLogin", (req) =>
+      respond(Effect.gen(function* () {
+        const service = yield* DeviceLoginService;
+        return yield* service.poll(req.path.id, req.request.headers["x-device-token"] ?? "");
+      }))
+    )
+    .handle("approveDeviceLogin", (req) =>
+      respond(Effect.gen(function* () {
+        const identity = yield* requireUser;
+        const service = yield* DeviceLoginService;
+        return yield* service.approve(identity.userId, req.path.id, req.payload.token);
+      }))
+    )
+    .handle("denyDeviceLogin", (req) =>
+      respond(Effect.gen(function* () {
+        const identity = yield* requireUser;
+        const service = yield* DeviceLoginService;
+        return yield* service.deny(req.path.id, req.payload.token);
       }))
     )
 );
@@ -4488,6 +4595,30 @@ const meLive = HttpApiBuilder.group(LexaApi, "me", (handlers) =>
         return { id: user.id, email: user.email, name: user.name, role: user.role, createdAt: user.created_at, lastSeen: user.last_seen };
       }))
     )
+    .handle("listMyApiKeys", () =>
+      respond(Effect.gen(function* () {
+        const identity = yield* requireUser;
+        const service = yield* ApiKeyService;
+        const keys = yield* service.listForUser(identity.userId);
+        return { data: keys };
+      }))
+    )
+    .handle("createMyApiKey", (req) =>
+      respond(Effect.gen(function* () {
+        const identity = yield* requireUser;
+        const service = yield* ApiKeyService;
+        const result = yield* service.createFor(identity.userId, req.payload.name);
+        return result;
+      }))
+    )
+    .handle("deleteMyApiKey", (req) =>
+      respond(Effect.gen(function* () {
+        const identity = yield* requireUser;
+        const service = yield* ApiKeyService;
+        yield* service.deleteOwn(req.path.id, identity.userId);
+        return undefined;
+      }))
+    )
 );
 
 function withRepos(p: DomainProject & { teamId?: string | null }): Effect.Effect<Project & { teamId: string | null }, DbError, ProjectReposRepo> {
@@ -4542,7 +4673,7 @@ function formatWikiPageRevision<T>(r: T): T {
 
 function routeGroups() {
   return Layer.mergeAll(
-    healthLive, setupLive, projectsLive, columnsLive, swimlanesLive, milestonesLive, fieldConfigLive, hearthLive, agentsLive, skillsLive, heraldLive, taskLinksLive, tasksLive, boardLive, wikiLive, publicShareLive, attachmentsLive, apiKeysLive, adminLive, adminHeraldLive, projectHeraldUsageLive, meLive, dashboardLive,
+    healthLive, setupLive, projectsLive, columnsLive, swimlanesLive, milestonesLive, fieldConfigLive, hearthLive, agentsLive, skillsLive, heraldLive, taskLinksLive, tasksLive, boardLive, wikiLive, publicShareLive, attachmentsLive, apiKeysLive, deviceLoginLive, adminLive, adminHeraldLive, projectHeraldUsageLive, meLive, dashboardLive,
     createTeamsLive(LexaApi), createWorkspaceLive(LexaApi), createSessionsLive(LexaApi),
   );
 }
@@ -4608,6 +4739,7 @@ function buildServiceLayerWithStorage(storageCfg: StorageConfigShape) {
     WikiShareRepo.Default, WikiShareService.Default,
     AttachmentRepo.Default, AttachmentService.Default.pipe(Layer.provide(storageLayerFor(storageCfg)), Layer.provide(Layer.succeed(StorageConfig, storageCfg))),
     ApiKeyRepo.Default, ApiKeyService.Default,
+    DeviceLoginRepo.Default, DeviceLoginService.Default,
     UserRepo.Default, UserService.Default,
     UserProjectRoleRepo.Default, UserProjectRoleService.Default,
     WebhookEventRepo.Default,
@@ -4742,6 +4874,10 @@ function createWorkersApiMiddleware(
         path.startsWith("/api/hearth/daemon/") ||
         path === "/api/hearth/runtimes/register" ||
         path === "/api/hearth/sessions";
+      // Device-login pairing: create + poll are API-key exempt (still
+      // rate-limited); approve/deny run through normal session auth.
+      const isDeviceLogin = request.method === "POST" && path === "/api/device-login/requests"
+        || request.method === "GET" && /^\/api\/device-login\/requests\/[^/]+$/.test(path);
 
       const stampedIp = request.headers[X_LEXA_REMOTE_IP] ?? "";
       const cfIp = request.headers["cf-connecting-ip"];
@@ -4774,7 +4910,7 @@ function createWorkersApiMiddleware(
         ? constantTimeTokenEqual(request.headers["x-hearth-token"] ?? "", runtimeEnv.LXK_HEARTH_DAEMON_TOKEN)
         : false;
       let identity: AuthIdentityShape;
-      if (!isHealth && !isSetup && !daemonTokenOk && !isPublicShare) {
+      if (!isHealth && !isSetup && !daemonTokenOk && !isPublicShare && !isDeviceLogin) {
         const session = yield* workersSessionIdentity(new Headers(request.headers), deps.getSession);
         if (session) {
           identity = session;
@@ -4790,15 +4926,6 @@ function createWorkersApiMiddleware(
               HttpServerResponse.unsafeJson(
                 { error: { code: "UNAUTHORIZED", message: "Invalid or missing API key" } },
                 { status: 401 }
-              )
-            );
-          }
-          if (resolved.userId !== null && resolved.role === "member") {
-            console.warn(`[Auth] denied path=${path} reason=member key`);
-            return withSecurityHeaders(
-              HttpServerResponse.unsafeJson(
-                { error: { code: "FORBIDDEN", message: "Member API keys are not supported on the REST API yet" } },
-                { status: 403 }
               )
             );
           }

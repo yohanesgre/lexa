@@ -509,13 +509,18 @@ channels:
 ```typescript
 // server/api/auth-key.ts:17 — resolveApiKeyIdentity(authHeader, headers, db, dbPath)
 // MACHINES (CLI/webhooks): Authorization: Bearer lxk_<base62(43)>.
-// Keys have full read/write — no scopes (single-agent trust model,
-// documented). SHA-256 lookup; last_used_at sampled (only when NULL or
-// older than 1h — avoids a write per API call).
+// Keys are USER-BOUND: user_id = owner; the key carries the owner's role
+// (superadmin→admin, member→member) and userId, so per-project gates use the
+// same AuthorizationService path as sessions. Member-bound keys are allowed
+// (no middleware denial) — admin/superadmin gates still 403 them.
+// user_id NULL = server key (env LXK_API_KEY / setup wizard seed): role
+// admin, attribution = key name. SHA-256 lookup; last_used_at sampled
+// (only when NULL or older than 1h — avoids a write per API call).
 export function resolveApiKeyIdentity(authHeader: string, headers: Headers, db: Database, dbPath: string): ApiKeyIdentity | null {
   // "lxk_" prefix + /^lxk_[0-9A-Za-z]{43}$/ shape check → sha256 →
-  // api_keys.key_hash lookup; unbound keys (no user_id) resolve to role
+  // api_keys.key_hash lookup; server keys (no user_id) resolve to role
   // 'admin'. Returns null on any failure → the middleware denies 401.
+  // Keys bound to a deleted user resolve to null (row's user lookup 404s).
 }
 ```
 
@@ -539,6 +544,43 @@ team, never from `users.role`.
 **Login rate limit (R17):** `/api/auth/*` failed logins are throttled by the
 Better Auth rate-limit plugin (in-memory; ~5 attempts/60s per email, 15 min
 lockout). The existing per-IP `/api/*` limiter is untouched.
+
+### Device login (CLI pairing) — `DeviceLoginService`
+
+Effect service (`server/services/device-login.service.ts` + thin
+`server/repos/device-login.repo.ts`, SQL against the shared connection).
+Pairs a terminal client with a user without a pre-shared credential —
+capability-based, RFC-8628-flavored:
+
+```
+CLI ──POST /api/device-login/requests──► mint request
+      ◄── { id, code, verifyUrl, expiresMs }   (token = 256-bit, hex)
+browser ──GET <base>/device-login?token=…──► approve page (session required)
+      ──POST .../requests/:id/approve { token }──► mint user-bound key
+CLI ──GET .../requests/:id (x-device-token)──► { status: approved, rawKey } ONCE
+```
+
+Rules:
+- `token_hash` = hex(SHA-256(token)) — UNIQUE, backstop index; lookups by
+  id; no plaintext secrets in the DB. The short `code` is display-only.
+- Approve/deny require a **user-bound identity + token** (both) — the token
+  is a 256-bit capability (from the verify URL), the identity may be a
+  session cookie or a user-bound key. Bare server keys get 401/403.
+- The minted key binds to the approver (`api_keys.user_id`), name =
+  `client_name` (CLI sends `cli-<hostname>`), so it appears in the owner's
+  Settings → Me → API keys.
+- Raw key transits an in-memory store with TTL (same idiom as
+  `runtime-event.repo.ts` rawKeyStore 30 min). Poll returns it once; the row
+  is consumed (deleted) — replay is impossible; a later poll is 404.
+- Terminal states: denied (403 DEVICE_LOGIN_DENIED), expired (410 —
+  `expires_at` = 10 min; expired rows purged at boot with the webhook prune).
+- Middleware carve-out: create + poll are API-key exempt (the CLI has no
+  credential yet) but stay rate-limited; approve/deny run through normal
+  session auth — never exempt.
+
+**Minting is only ever user-bound:** `ApiKeyService.createFor(userId, name)`
+is the only mint path for UI/device keys; bare server keys cannot mint
+(identity.userId null → 403 NO_USER_CONTEXT).
 
 ### SessionService — Better Auth session wrapper
 
