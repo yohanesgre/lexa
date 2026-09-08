@@ -62,7 +62,6 @@ export interface WorkersEnv {
   DB?: D1Database;
   BLOB?: R2Bucket;
   KV?: KVNamespace;
-  LXK_API_KEY?: string;
   LXK_ENV?: string;
   LXK_PUBLIC_URL?: string;
   LXK_ADMIN_EMAILS?: string;
@@ -173,7 +172,7 @@ function r2StorageConfig(runtimeEnv: RuntimeEnv, blob: R2Bucket | undefined): St
 let apiCache: { fingerprint: string; handler: (req: Request) => Promise<Response> } | null = null;
 
 function apiFingerprint(runtimeEnv: RuntimeEnv): string {
-  return JSON.stringify([runtimeEnv.LXK_ENV ?? "", runtimeEnv.LXK_PUBLIC_URL ?? "", (runtimeEnv.LXK_API_KEY ?? "").length]);
+  return JSON.stringify([runtimeEnv.LXK_ENV ?? "", runtimeEnv.LXK_PUBLIC_URL ?? ""]);
 }
 
 async function handleApi(
