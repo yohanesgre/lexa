@@ -35,7 +35,7 @@ function Home() {
   useEffect(() => {
     getSetupStatus()
       .then((s) => {
-        if (s.needsAdmin && !s.hasProjects && !s.hasApiKey) {
+        if (s.needsAdmin && !s.hasProjects) {
           navigate({ to: "/setup" });
         } else if (s.needsAdmin) {
           setNeedsSetup(true);

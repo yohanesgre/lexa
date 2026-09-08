@@ -78,7 +78,7 @@ default columns appear when the first project is created.
 
 | Variable | Written by | Required |
 |---|---|---|
-| `LXK_API_KEY` | install script (or `--key`) / setup wizard | yes |
+| `LXK_API_KEY` | install script (or `--key`) | yes |
 | `LXK_ENV` | install script (`--flavor`) / setup wizard | yes (staging/prod) |
 | `LXK_PUBLIC_URL` | install script (from `--bind`/`--port`/`--domain`) | staging/prod (Better Auth baseURL) |
 | `CF_API_TOKEN` | operator env (workers target only) | workers only |
@@ -108,8 +108,8 @@ default columns appear when the first project is created.
 | `PORT` | server port (default 3000) |
 
 **Unused by the server:** `LXK_ACCESS_AUD` / `LXK_ACCESS_TEAM` (Cloudflare
-Access) — the server reads them nowhere. `VITE_LXK_API_KEY` is written by the
-dev setup but read by nothing — browsers authenticate via the session cookie.
+Access) — the server reads them nowhere. Browsers authenticate via the
+session cookie.
 **Never exist:** Google OAuth envs, SMTP envs — human auth is in-app
 email/password (Better Auth).
 

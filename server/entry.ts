@@ -164,7 +164,7 @@ async function readBodyWithLimit(req: Request, maxBytes: number): Promise<{ ok: 
 }
 
 // Instances configured entirely via env (LXK_ADMIN_EMAILS + a key, no web
-// wizard) would leave /api/setup/* key-minting unlocked forever. Lock it at
+// wizard) would leave the mutating /api/setup/* endpoints unlocked forever. Lock it at
 // boot: setup_complete=1 iff a key exists AND a superadmin account exists.
 // (LXK_ADMIN_EMAILS alone no longer counts — the superadmin password can only
 // be set through the web wizard, so it must stay open until the account is

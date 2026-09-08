@@ -104,16 +104,14 @@ clients, no callback URIs, no SMTP anywhere.
   AuthorizationService).
 
 ### Machines → API keys
-`Authorization: Bearer lxk_<base62(43 random bytes)>`. Server: `SHA-256(raw)` → `api_keys.key_hash` lookup. Keys are **user-bound**: a key acts as its owner (same project access and admin gates as the user's session; member keys pass per-project authorization via `AuthorizationService` and are 403'd on admin gates). API keys are full read/write **within the owner's authority** — a member key is never more powerful than the member. `user_id` NULL = **server key** (seeded `LXK_API_KEY` / setup-wizard only, role admin). `last_used_at` updated only when NULL or stale >1h. CLI login uses the device pairing flow (`/api/device-login/*`, see API.md) — no manual key copy; `--url/--key` remain for scripts.
+`Authorization: Bearer lxk_<base62(43 random bytes)>`. Server: `SHA-256(raw)` → `api_keys.key_hash` lookup. Keys are **user-bound**: a key acts as its owner (same project access and admin gates as the user's session; member keys pass per-project authorization via `AuthorizationService` and are 403'd on admin gates). API keys are full read/write **within the owner's authority** — a member key is never more powerful than the member. `user_id` NULL = **server key** (seeded `LXK_API_KEY` only, role admin). `last_used_at` updated only when NULL or stale >1h. CLI login uses the device pairing flow (`/api/device-login/*`, see API.md) — no manual key copy; `--url/--key` remain for scripts.
 
 The webhook route is exempt from API-key middleware — it authenticates via `X-Hub-Signature-256` (HMAC-SHA-256 over the raw body, constant-time compare, verified before parsing).
 
 ### Dual channel + attribution
 `/api/*` accepts a session cookie OR a Bearer key (session first, key
 fallback). The `x-lxk-user` header is removed. The `<meta name="lxk-api-key">`
-injection / `VITE_LXK_API_KEY` remain — the server injects its current
-`LXK_API_KEY` into the served HTML and the client prefers it over the
-build-time baked key; browsers otherwise authenticate via the cookie.
+injection is removed — browsers authenticate via the session cookie.
 Attribution: browser actor = session user; machine actor = key name.
 
 ## API Routes (REST)

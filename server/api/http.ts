@@ -2,7 +2,6 @@ import { HttpApi, HttpApiBuilder, HttpApiEndpoint, HttpApiGroup, HttpMiddleware,
 import { HttpServerRequest } from "@effect/platform/HttpServerRequest";
 import * as Multipart from "@effect/platform/Multipart";
 import { Cause, Context, Effect, Layer, ManagedRuntime, Schema, Stream } from "effect";
-import { createHash, randomBytes } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { join, dirname } from "node:path";
 import { LoggerLayer } from "../logging/logger";
@@ -129,12 +128,10 @@ const healthGroup = HttpApiGroup.make("health").add(healthEndpoint);
 const SetupStatusSchema = Schema.Struct({
   configured: Schema.Boolean,
   needsAdmin: Schema.Boolean,
-  hasApiKey: Schema.Boolean,
   hasProjects: Schema.Boolean,
   hasUsers: Schema.Boolean,
 });
 const SetupAdminInput = Schema.Struct({ email: Schema.String, password: Schema.String });
-const SetupApiKeyResponse = Schema.Struct({ key: Schema.String });
 const SetupSeedResponse = Schema.Struct({ seeded: Schema.Boolean });
 const SetupSeedInput = Schema.Struct({
   flavor: Schema.Literal("minimal", "full").pipe(Schema.optional),
@@ -144,7 +141,6 @@ const SetupOkResponse = Schema.Struct({ ok: Schema.Boolean });
 const setupGroup = HttpApiGroup.make("setup")
   .add(HttpApiEndpoint.get("status", "/setup/status").addSuccess(SetupStatusSchema))
   .add(HttpApiEndpoint.post("setAdmin", "/setup/admin").setPayload(SetupAdminInput).addSuccess(SetupOkResponse))
-  .add(HttpApiEndpoint.post("createApiKey", "/setup/api-key").addSuccess(SetupApiKeyResponse))
   .add(HttpApiEndpoint.post("seed", "/setup/seed").setPayload(SetupSeedInput).addSuccess(SetupSeedResponse))
   .add(HttpApiEndpoint.post("complete", "/setup/complete").addSuccess(SetupOkResponse));
 
@@ -1983,18 +1979,6 @@ const healthLive = HttpApiBuilder.group(LexaApi, "health", (handlers) =>
   handlers.handle("health", () => Effect.succeed({ ok: true as const }))
 );
 
-function generateRawApiKey(): string {
-  const raw = randomBytes(32);
-  const chars = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
-  let value = 0n;
-  for (const b of raw) value = (value << 8n) | BigInt(b);
-  let result = "";
-  const base = 62n;
-  while (value > 0n) { result = chars[Number(value % base)] + result; value /= base; }
-  while (result.length < 43) result = chars[0]! + result;
-  return `lxk_${result}`;
-}
-
 const countRows = (driver: DbDriver, sql: string): Effect.Effect<number, DbError> =>
   queryFirst<{ c: number }>(driver, sql).pipe(
     Effect.map((row) => row.c),
@@ -2011,7 +1995,6 @@ function setupStatus(driver: DbDriver) {
     return {
       configured: setupComplete || (apiKeyCount > 0 && superadminCount > 0),
       needsAdmin: superadminCount === 0,
-      hasApiKey: apiKeyCount > 0,
       hasProjects: projectCount > 0,
       hasUsers: userCount > 0,
     };
@@ -2112,17 +2095,6 @@ const setupLive = HttpApiBuilder.group(LexaApi, "setup", (handlers) =>
           );
         }
         return { ok: true as const };
-      }))
-    )
-    .handle("createApiKey", () =>
-      respond(Effect.gen(function* () {
-        const db = yield* Db;
-        const env = yield* currentEnv;
-        if (yield* setupLocked(db, env)) return yield* Effect.fail(new SetupLocked());
-        const key = generateRawApiKey();
-        const keyHash = createHash("sha256").update(key).digest("hex");
-        yield* run(db, "INSERT INTO api_keys (id, name, key_hash) VALUES (?, ?, ?)", crypto.randomUUID(), "setup-wizard", keyHash);
-        return { key };
       }))
     )
     .handle("seed", (req) =>
