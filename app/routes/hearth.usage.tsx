@@ -7,6 +7,7 @@ import { UsageKpiCards } from "../components/herald/UsageKpiCards";
 import { UsageChart } from "../components/herald/UsageChart";
 import { UsageByModelTable } from "../components/herald/UsageByModelTable";
 import { PriceEditor } from "../components/herald/PriceEditor";
+import { GatewayHealthSection } from "../components/herald/GatewayHealthSection";
 
 export const Route = createFileRoute("/hearth/usage")({
   validateSearch: (search: Record<string, unknown>): { from?: string | undefined; to?: string | undefined } => ({
@@ -89,23 +90,7 @@ function HearthUsageRoute() {
 
       <PriceEditor byModel={data?.byModel ?? []} isLoadingUsage={usageLoading} isErrorUsage={!!error} />
 
-      <section className="card-panel mt-4" id="hearth-usage-health">
-        <div className="flex items-center justify-between mb-3" style={{ flexWrap: "wrap", gap: 8 }}>
-          <div className="flex items-center gap-2">
-            <h2 className="font-display text-lg weight-500 color-primary">Gateway health</h2>
-            <span className="health-badge health-closed">closed</span>
-          </div>
-        </div>
-        <p className="text-sm color-secondary mb-3" style={{ maxWidth: 640 }}>Circuit breaker for the Herald gateway. Probe forces a health check — use after fixing upstream.</p>
-        <div className="card-panel" style={{ overflow: "hidden", padding: 0 }}>
-          <table className="settings-table">
-            <thead><tr><th style={{ width: 100 }}>State</th><th style={{ width: 85, textAlign: "right" }}>failureCount</th><th>openedAt</th><th>lastProbeAt</th><th style={{ width: 80, textAlign: "right" }}></th></tr></thead>
-            <tbody>
-              <tr><td><span className="health-badge health-closed">closed</span></td><td className="font-mono text-xs color-primary" style={{ textAlign: "right" }}>0</td><td className="font-mono text-xs color-muted">—</td><td className="font-mono text-xs color-secondary">—</td><td style={{ textAlign: "right" }}><button className="btn btn-ghost btn-sm" disabled title="Health probe (circuit breaker) — manual probe via POST /api/admin/herald/health/probe when breaker open"><svg width={12} height={12} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5}><path d="M21 12a9 9 0 1 1-9-9c2.5 0 4.7 1 6.3 2.7" /><path d="M21 3v6h-6" /></svg> Probe</button></td></tr>
-            </tbody>
-          </table>
-        </div>
-      </section>
+      <GatewayHealthSection />
     </section>
   );
 }

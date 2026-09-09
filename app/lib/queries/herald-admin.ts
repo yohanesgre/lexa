@@ -1,4 +1,4 @@
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueries, useMutation, useQueryClient } from "@tanstack/react-query";
 import type { HeraldProvider, HeraldProviderModel } from "../../../shared/herald";
 import * as api from "../api";
 import { useToast } from "../../components/ui/Toast";
@@ -14,6 +14,19 @@ export function useHeraldProviders() {
     queryFn: () => api.listHeraldProviders().then((r) => r.data),
     retry: false,
     staleTime: 30_000,
+  });
+}
+
+export function useHeraldProvidersHealth(providerIds: string[]) {
+  return useQueries({
+    queries: providerIds.map((id) => ({
+      queryKey: ["herald-provider-health", id],
+      queryFn: () => api.getHeraldProviderHealth(id),
+      retry: false,
+      staleTime: 30_000,
+      refetchInterval: 30_000,
+      refetchOnWindowFocus: false,
+    })),
   });
 }
 
