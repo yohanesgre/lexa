@@ -16,6 +16,9 @@ for a human. Safety after the gate comes from automated rails below.
 The user reads wave reports async; the loop never blocks on them.
 Approving the execution gate pre-authorizes lanes end-to-end
 (branch → commit → push → PR → auto-merge on green CI).
+Invoking `/goal` IS the explicit ask for that close-out lifecycle:
+every green+met DONE ends in commit → push → PR, no separate
+envelope needed. The gate still approves scope and waves.
 
 Runtime: opencode2 (v2) only. Assumed surfaces: herdr CLI (`pane
 split/run`, `agent start/prompt/wait/read`), opencode2 flags (`--auto`,
@@ -104,7 +107,9 @@ Validate tracking with `bash .agents/skills/work-plans/scripts/plan-check.sh <pl
 Present for one-shot approval: frozen acceptance, waves + lanes + file
 ownership, chosen route + why, model + thinking effort per lane
 (question tool, no defaults), autonomy envelope (branch → commit →
-push → PR → auto-merge on green CI). User approves → Phase 4 runs
+push → PR → auto-merge on green CI). Close-out runs on every
+green+met DONE by the invocation itself, not by envelope enumeration.
+User approves → Phase 4 runs
 with zero further questions. User rejects/changes → adjust Phases
 0–3, re-present. No approval = no execution. Approval lapses after
 72h or if the goal text changed → re-present only the diff, not the
@@ -232,12 +237,12 @@ Report progress per wave as: state, commit sha, one-line
 test summary, concerns (if any) — nothing else.
 
 Auto close-out: a wave that is green + met with its reviewer pass
-recorded commits on its branch (conventional message, body = WHY),
-pushes (`git push -u origin <branch>`), and opens a PR (base `main`,
-body = result + gate tails + deviations) — but ONLY when the
-execution-gate envelope pre-authorized commit + push + PR with the
-branch name enumerated (per-action rule, `git-workflow` §1 item 10).
-Then the merge gate takes over. No envelope = report back and wait.
+recorded always commits on its branch (conventional message, body =
+WHY), pushes (`git push -u origin <branch>`), and opens a PR (base
+`main`, body = result + gate tails + deviations). Invoking `/goal`
+is the explicit ask for this lifecycle (`git-workflow` §1 item 10 —
+the invocation enumerates branch → commit → push → PR), so no
+separate envelope is needed. Then the merge gate takes over.
 
 ## Edge cases (checklist, bukan opsional)
 
@@ -275,7 +280,8 @@ Then the merge gate takes over. No envelope = report back and wait.
   the lane and is reported).
 - Git guardrails before any git mutation (single trunk `main` — Section 4).
   Branch → PR → merge, never commit on `main`, never push/merge without
-  explicit ask. Stage files explicitly, check staged names for secrets.
+  explicit ask — invoking `/goal` counts as that ask for its close-out
+  commits/pushes/PRs. Stage files explicitly, check staged names for secrets.
 - Wireframe-first for UI: `wireframes/src/` + build before React.
 - Conventional commits (`feat|fix(scope): subject`, body = WHY).
 - Submodule rule: commit+push inside the submodule first, then bump
