@@ -33,6 +33,7 @@ These are never negotiable — report conflict, don't "fix" it yourself:
 7. **Wireframes submodule is commit-inside-first.** See §6.
 8. **No secrets.** Never commit `.env`, `*.pem`, `*.private-key.pem`, `~/.lexa/**/config.json`, or any token. CI runs gitleaks — it will block.
 9. **Phase gates green before commit/PR/tag.** See §4.
+10. **Authorization is per-action, never transitive.** "commit dan push" covers exactly commit + push — never branch create, worktree add, PR open, merge, rebase, or force-push. Each mutating step needs its own explicit ask. Approval envelopes (e.g. `/goal` execution gates) must enumerate every lifecycle step they pre-authorize, including the branch name.
 
 Violation = stop and ask user. Never silent-fallback.
 
@@ -40,17 +41,17 @@ Violation = stop and ask user. Never silent-fallback.
 
 - `main` is single trunk — never commit directly. Every change (feat/fix/chore/docs/refactor, even 1-line) starts from `main` in a separate branch, then PR → merge to `main`. No exceptions — `chore(release)` and hotfixes also via branch + PR.
 - Branch naming:
-  - Worktree lanes (preferred for parallel/risky work): `omos/<slug>` → path `.slim/worktrees/<slug>` (see `worktrees` skill).
+  - Worktree lanes (preferred for parallel/risky work): `omos/<slug>` → path `.worktrees/<slug>` (see `worktrees` skill).
   - Simple fix/feature (single lane, low risk): `feat/<slug>`, `fix/<slug>`, `chore/<slug>`, `docs/<slug>` — kebab-case, short.
   - Swarm lanes: branch per lane slug (orchestrator assigns).
   - Release branch: `chore/release-vX.Y.Z` (or `release/<version>`) → PR to `main`, tag after merge (see §7).
-- Flow: `git checkout main && git pull && git checkout -b <branch>` (or `git worktree add -b <branch> .slim/worktrees/<slug> main`). Keep branch rebased on `main` if trunk moves: `git fetch && git rebase origin/main` (or merge `main` into branch) — never rewrite `main`.
+- Flow: `git checkout main && git pull && git checkout -b <branch>` (or `git worktree add -b <branch> .worktrees/<slug> main`). Keep branch rebased on `main` if trunk moves: `git fetch && git rebase origin/main` (or merge `main` into branch) — never rewrite `main`.
 - Before `git worktree add` or `git checkout -b`:
   ```bash
   git status --porcelain  # must decide: stash or commit dirty state?
   git branch -a | grep <name>  # no collision local/remote
   git worktree list  # no path collision
-  cat .gitignore | grep ".slim/worktrees"  # must be ignored (worktrees skill adds block)
+  cat .gitignore | grep ".worktrees"  # must be ignored (goal skill mandates .worktrees/)
   ```
 - Ask user confirmation before `worktree add`, branch create/delete/rename, `prune`, or any destructive op (`reset --hard`, `clean`, `push --force`, removing dirty worktree).
 

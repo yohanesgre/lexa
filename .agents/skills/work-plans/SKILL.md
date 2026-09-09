@@ -60,6 +60,10 @@ Multi-track: one file per lane under `lanes/` in the same 3-line format.
 The plan-level `status.md` stays the summary — it mirrors the slowest lane, it never
 dumps lane logs. Lane files stay small for the same reason as `status.md`.
 
+Reopened work flips out of DONE first: any new request on a DONE plan (commit,
+fixup, follow-up) → overwrite `status.md` to WORKING/WAIT before acting, then
+append a TIMELINE line. Never act on a DONE plan while it still reads DONE.
+
 ## Close a plan (DONE)
 
 1. Write `status/<plan>/report.md`:
@@ -94,6 +98,7 @@ just backfill it when noticed.
 | work | `status.md` grows past 3 lines / log dump | move detail to `plan.md` or `report.md` |
 | lanes | lane file with no parent plan | delete or attach to a plan |
 | DONE | no `report.md` | don't flip to DONE until written |
+| reopen | act on a DONE plan without flipping status | flip to WORKING first + TIMELINE line |
 | memory | `mem_save` without artifact path | amend with path — a pointerless summary is lost |
 | root | loose file in `status/` | move into a plan folder or archive |
 
