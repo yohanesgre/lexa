@@ -9,6 +9,22 @@ Before editing files for a substantial task:
 - Multiple matches: prefer the most specific local skill for the package or concern you are changing; load additional skills only when the task spans multiple packages or concerns.
 <!-- intent-skills:end -->
 
+## Precedence (this repo)
+
+The harness combines global `~/.config/opencode/AGENTS.md` with this file
+and resolves no conflicts automatically. Where they conflict on work inside
+this repo, this file wins:
+- A `/goal` execution-gate ack enumerating branch→commit→push→PR counts as
+  the explicit ask for exactly those actions.
+- Inside a `/goal` lane branch/worktree, the gate envelope is the explicit
+  request for destructive ops.
+- `.agents/skills/goal` roster IDs may be absent from the harness skill list;
+  a failed load is a fallback signal, never a stall.
+- `bunx` means `bun x` here; the rtk allowlist lacks herdr/opencode2, so raw
+  shell is correct for those.
+- Gate output tails in lane reports are code blocks: quote exact, exempt
+  from compression.
+
 ## Git Workflow — single trunk (local auto-enforce)
 
 Trunk `main` — never commit directly. Every task: `main` → new branch → work → PR → merge to `main`. Before any git mutation (branch/worktree, checkout -b, add, commit, push, merge/rebase/cherry-pick, tag `v*`/`cli-v*`, or `wireframes/` submodule) load `.agents/skills/git-workflow/SKILL.md` and follow guardrails verbatim. No commit/push/merge without explicit user ask; gate (`tsc --noEmit` + `vitest run` + `check:invariants` + secrets check) must be green. Quick gate: `bash .agents/skills/git-workflow/scripts/verify-gate.sh`.
