@@ -14,7 +14,7 @@ const indentPadding: Record<number, number> = {
 };
 
 function getIndentPadding(level: number, isActive: boolean): number {
-  const base = (indentPadding[level] ?? indentPadding[5]!)!;
+  const base = indentPadding[level] ?? indentPadding[5]!;
   return isActive ? base - 2 : base;
 }
 
@@ -44,6 +44,7 @@ export function TreeItem({
   onToggle,
   onContextMenu,
   contextMenuPageId,
+  onNavigate,
 }: {
   node: WikiNode;
   level: number;
@@ -53,6 +54,7 @@ export function TreeItem({
   onToggle: (id: string) => void;
   onContextMenu: (event: React.MouseEvent, page: WikiPageMeta) => void;
   contextMenuPageId: string | null;
+  onNavigate?: (() => void) | undefined;
 }) {
   const isActive = node.slug === activeSlug;
   const isExpanded = expanded.has(node.id);
@@ -70,8 +72,9 @@ export function TreeItem({
         )}
         style={{
           paddingLeft: getIndentPadding(level, isActive),
-          marginLeft: isActive ? 8 : undefined,
+          marginLeft: isActive ? 6 : undefined,
         }}
+        onClick={onNavigate}
         onContextMenu={(event) => onContextMenu(event, node)}
       >
         {hasChildren ? (
@@ -105,6 +108,7 @@ export function TreeItem({
             onToggle={onToggle}
             onContextMenu={onContextMenu}
             contextMenuPageId={contextMenuPageId}
+            onNavigate={onNavigate}
           />
         ))}
     </>
