@@ -20,7 +20,7 @@ function memDb() {
   db.exec("CREATE TABLE herald_models (id TEXT PRIMARY KEY, provider_id TEXT, model_id TEXT, kind TEXT, priority INTEGER DEFAULT 0, enabled INTEGER DEFAULT 1, created_at TEXT DEFAULT (datetime('now')))");
   db.exec("CREATE TABLE herald_provider_health (provider_id TEXT PRIMARY KEY, failure_count INTEGER NOT NULL DEFAULT 0, circuit_state TEXT NOT NULL CHECK (circuit_state IN ('open','closed','half-open')) DEFAULT 'closed', opened_at TEXT, last_probe_at TEXT, consecutive_failures INTEGER NOT NULL DEFAULT 0)");
   db.exec("CREATE TABLE herald_call_logs (id TEXT PRIMARY KEY, project_id TEXT, provider_id TEXT, model TEXT, kind TEXT, status TEXT, error_code TEXT, usage_in INTEGER DEFAULT 0, usage_out INTEGER DEFAULT 0, cached_in INTEGER DEFAULT 0, latency_ms INTEGER, cost_cents INTEGER DEFAULT 0, estimated INTEGER DEFAULT 0, created_at TEXT DEFAULT (datetime('now')))");
-  db.exec("CREATE TABLE herald_model_prices (model TEXT PRIMARY KEY, prompt_price REAL DEFAULT 0, completion_price REAL DEFAULT 0, updated_at TEXT DEFAULT (datetime('now')))");
+  db.exec("CREATE TABLE herald_model_prices (model TEXT PRIMARY KEY, prompt_price REAL DEFAULT 0, completion_price REAL DEFAULT 0, cached_read_price REAL DEFAULT 0, cached_write_price REAL DEFAULT 0, updated_at TEXT DEFAULT (datetime('now')))");
   db.exec("CREATE TABLE herald_settings (project_id TEXT PRIMARY KEY, search_provider TEXT, search_api_key TEXT, url_allowlist TEXT, engine TEXT DEFAULT 'herald', engine_switcher_enabled INTEGER DEFAULT 0, primary_supports_images INTEGER DEFAULT 0, reasoning_effort TEXT, write_tools TEXT DEFAULT '', fallback_model_ids TEXT DEFAULT '[]', created_at TEXT DEFAULT (datetime('now')), updated_at TEXT DEFAULT (datetime('now')))");
   return db;
 }
@@ -172,7 +172,7 @@ describe("gateway health wiring", () => {
 
   it("tiktoken estimation used when usage 0 sets estimated flag and cost", async () => {
     const db = memDb();
-    db.prepare("INSERT INTO herald_model_prices (model, prompt_price, completion_price) VALUES ('m-est', 0.01, 0.02)").run();
+    db.prepare("INSERT INTO herald_model_prices (model, prompt_price, completion_price, cached_read_price, cached_write_price) VALUES ('m-est', 3000, 6000, 300, 900)").run();
     const spy = vi.spyOn(provider, "streamChat");
     spy.mockImplementation((() => (async function* () { yield { type: "TEXT_MESSAGE_CONTENT", delta: "hello" } as unknown as never; yield { type: "RUN_FINISHED", usage: { input: 0, output: 0 } } as unknown as never; })()) as never);
 

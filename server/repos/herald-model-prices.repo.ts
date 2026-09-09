@@ -6,11 +6,13 @@ export interface HeraldModelPriceRow {
   model: string;
   prompt_price: number;
   completion_price: number;
+  cached_read_price: number;
+  cached_write_price: number;
   updated_at: string;
 }
 
 function toDomain(row: HeraldModelPriceRow): HeraldModelPrice {
-  return { model: row.model, promptPrice: row.prompt_price, completionPrice: row.completion_price, updatedAt: row.updated_at };
+  return { model: row.model, promptPrice: row.prompt_price, completionPrice: row.completion_price, cachedReadPrice: row.cached_read_price, cachedWritePrice: row.cached_write_price, updatedAt: row.updated_at };
 }
 
 export class HeraldModelPricesRepo extends Effect.Service<HeraldModelPricesRepo>()("Lexa/HeraldModelPricesRepo", {
@@ -18,12 +20,12 @@ export class HeraldModelPricesRepo extends Effect.Service<HeraldModelPricesRepo>
     const db = yield* Db;
 
     return {
-      upsert: (input: { model: string; promptPrice: number; completionPrice: number }): Effect.Effect<HeraldModelPrice, ConstraintViolation | DbError | RowNotFound> =>
+      upsert: (input: { model: string; promptPrice: number; completionPrice: number; cachedReadPrice: number; cachedWritePrice: number }): Effect.Effect<HeraldModelPrice, ConstraintViolation | DbError | RowNotFound> =>
         run(
           db,
-          `INSERT INTO herald_model_prices (model, prompt_price, completion_price) VALUES (?, ?, ?)
-           ON CONFLICT(model) DO UPDATE SET prompt_price = excluded.prompt_price, completion_price = excluded.completion_price, updated_at = datetime('now')`,
-          input.model, input.promptPrice, input.completionPrice
+          `INSERT INTO herald_model_prices (model, prompt_price, completion_price, cached_read_price, cached_write_price) VALUES (?, ?, ?, ?, ?)
+           ON CONFLICT(model) DO UPDATE SET prompt_price = excluded.prompt_price, completion_price = excluded.completion_price, cached_read_price = excluded.cached_read_price, cached_write_price = excluded.cached_write_price, updated_at = datetime('now')`,
+          input.model, input.promptPrice, input.completionPrice, input.cachedReadPrice, input.cachedWritePrice
         ).pipe(
           Effect.flatMap(() => queryFirst<HeraldModelPriceRow>(db, `SELECT * FROM herald_model_prices WHERE model = ?`, input.model)),
           Effect.map(toDomain)

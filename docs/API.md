@@ -1773,11 +1773,12 @@ GET    /api/admin/herald/usage.csv?from=&to=&projectId=   (superadmin)
 → 200 text/csv; header day,model,tokens,cost_cents,cost_usd,avg_latency_ms,calls,error_rate; rows grouped by (day, model) ordered day ASC; same auth + filters as the JSON endpoint. Content-Disposition: attachment; filename="herald-usage.csv"
 
 GET    /api/admin/herald/prices   (superadmin)
-→ 200 { data: [{ model, prompt_price, completion_price, updated_at }] } | 403 FORBIDDEN
+→ 200 { data: [{ model, prompt_price, completion_price, cached_read_price, cached_write_price, updated_at }] }   // all prices USD per 1M tokens
+  | 403 FORBIDDEN
 
 PUT    /api/admin/herald/prices   (superadmin)
-body { model*, prompt_price*, completion_price* }   // numbers >=0, max 6 decimals
-→ 200 { model, prompt_price, completion_price, updated_at } | 403 FORBIDDEN | 422 INVALID_ARGS
+body { model*, prompt_price*, completion_price*, cached_read_price*, cached_write_price* }   // USD per 1M tokens, numbers >=0, max 6 decimals
+→ 200 { model, prompt_price, completion_price, cached_read_price, cached_write_price, updated_at } | 403 FORBIDDEN | 422 INVALID_ARGS
   Writes to herald_model_prices (ON CONFLICT upsert, updated_at = datetime('now')).
 
 GET    /api/projects/:slug/herald/usage?from=&to=   (superadmin)

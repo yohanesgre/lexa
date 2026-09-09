@@ -118,6 +118,8 @@ export interface HeraldModelPrice {
   model: string;
   promptPrice: number;
   completionPrice: number;
+  cachedReadPrice: number;
+  cachedWritePrice: number;
   updatedAt: ISODate;
 }
 
@@ -125,6 +127,8 @@ export interface HeraldModelPriceInput {
   model: string;
   promptPrice: number;
   completionPrice: number;
+  cachedReadPrice: number;
+  cachedWritePrice: number;
 }
 
 export type StreamFrame =

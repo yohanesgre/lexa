@@ -122,11 +122,14 @@ describe("GET /api/admin/herald/usage.csv", () => {
 
 describe("PUT /api/admin/herald/prices", () => {
   it("upserts price and returns row", async () => {
-    const res = await handler(authed("PUT", "/api/admin/herald/prices", { model: "anthropic/claude-sonnet-4", prompt_price: 0.003, completion_price: 0.015 }));
+    const res = await handler(authed("PUT", "/api/admin/herald/prices", { model: "anthropic/claude-sonnet-4", prompt_price: 3.0, completion_price: 15.0, cached_read_price: 0.3, cached_write_price: 3.75 }));
     expect(res.status).toBe(200);
     const body = await res.json() as any;
     expect(body.model).toBe("anthropic/claude-sonnet-4");
-    expect(body.prompt_price).toBe(0.003);
+    expect(body.prompt_price).toBe(3.0);
+    expect(body.completion_price).toBe(15.0);
+    expect(body.cached_read_price).toBe(0.3);
+    expect(body.cached_write_price).toBe(3.75);
     expect(body.updated_at).toBeTruthy();
     const get = await handler(authed("GET", "/api/admin/herald/prices"));
     expect(get.status).toBe(200);
@@ -135,7 +138,7 @@ describe("PUT /api/admin/herald/prices", () => {
   });
 
   it("rejects invalid decimals", async () => {
-    const res = await handler(authed("PUT", "/api/admin/herald/prices", { model: "x", prompt_price: 0.1234567, completion_price: 0 }));
+    const res = await handler(authed("PUT", "/api/admin/herald/prices", { model: "x", prompt_price: 0.1234567, completion_price: 0, cached_read_price: 0, cached_write_price: 0 }));
     expect(res.status).toBe(422);
     const body = await res.json() as any;
     expect(body.error.code).toBe("INVALID_ARGS");
@@ -143,7 +146,7 @@ describe("PUT /api/admin/herald/prices", () => {
 
   it("non-admin → 403", async () => {
     const memberKey = "lxk_" + "m".repeat(43);
-    const res = await handler(new Request("http://lexa.test/api/admin/herald/prices", { method: "PUT", headers: { authorization: `Bearer ${memberKey}`, "content-type": "application/json" }, body: JSON.stringify({ model: "x", prompt_price: 0, completion_price: 0 }) }));
+    const res = await handler(new Request("http://lexa.test/api/admin/herald/prices", { method: "PUT", headers: { authorization: `Bearer ${memberKey}`, "content-type": "application/json" }, body: JSON.stringify({ model: "x", prompt_price: 0, completion_price: 0, cached_read_price: 0, cached_write_price: 0 }) }));
     expect(res.status).toBe(403);
   });
 });

@@ -416,7 +416,7 @@ export class HeraldGateway extends Effect.Service<HeraldGateway>()("Lexa/HeraldG
                 modelOptions: input.modelOptions,
                 ...(input.sessionId !== undefined ? { sessionId: input.sessionId } : {}),
               });
-              let usageIn = 0; let usageOut = 0;
+              let usageIn = 0; let usageOut = 0; let cachedIn = 0;
               let generatedText = "";
               let inToolCallLeak = false;
               for await (const chunk of iterable) {
@@ -463,6 +463,11 @@ export class HeraldGateway extends Effect.Service<HeraldGateway>()("Lexa/HeraldG
                   const u = (chunk as { usage?: { input?: number; output?: number; promptTokens?: number; completionTokens?: number } }).usage;
                   usageIn = Number(u?.input ?? u?.promptTokens ?? 0);
                   usageOut = Number(u?.output ?? u?.completionTokens ?? 0);
+                  const uu = (u ?? {}) as unknown as Record<string, unknown>;
+                  const details = (uu.promptTokensDetails ?? uu.prompt_tokens_details ?? {}) as Record<string, unknown>;
+                  const cachedRaw = uu.cached ?? uu.cachedTokens ?? uu.cached_tokens ?? uu.cache_read_input_tokens ?? details.cached_tokens ?? 0;
+                  cachedIn = Number(cachedRaw ?? 0);
+                  if (!Number.isFinite(cachedIn) || cachedIn < 0) cachedIn = 0;
                 }
                 yield chunk;
               }
@@ -486,9 +491,9 @@ export class HeraldGateway extends Effect.Service<HeraldGateway>()("Lexa/HeraldG
                   }
                 }
                 try {
-                  const price = await Effect.runPromise(priceRepo.getByModel(cfg.model).pipe(Effect.catchAll(() => Effect.succeed(null as never as { promptPrice: number; completionPrice: number }))));
+                  const price = await Effect.runPromise(priceRepo.getByModel(cfg.model).pipe(Effect.catchAll(() => Effect.succeed(null as never as { promptPrice: number; completionPrice: number; cachedReadPrice: number }))));
                   if (price) {
-                    costCents = Math.round((usageIn * price.promptPrice + usageOut * price.completionPrice) * 100);
+                    costCents = Math.round(((usageIn - cachedIn) * price.promptPrice + cachedIn * price.cachedReadPrice + usageOut * price.completionPrice) / 1e6 * 100);
                   } else {
                     costCents = 0;
                     if (!estimated) estimated = usageIn === 0 && usageOut === 0;
@@ -499,7 +504,7 @@ export class HeraldGateway extends Effect.Service<HeraldGateway>()("Lexa/HeraldG
                   costCents = 0;
                   estimated = true;
                 }
-                try { const l2 = (callLogRepo as never as Record<string, unknown>); const fn2 = (l2.log ?? l2.insert) as ((i: unknown) => Effect.Effect<void, unknown>) | undefined; if (fn2) await Effect.runPromise(fn2.call(callLogRepo, { id: crypto.randomUUID(), projectId: input.projectId, providerId: cfg.providerId ?? null, model: cfg.model, kind: cfg.kind, status: "done", latencyMs: Date.now() - start, usageIn, usageOut, costCents, estimated } as never).pipe(Effect.catchAll(() => Effect.void)));
+                try { const l2 = (callLogRepo as never as Record<string, unknown>); const fn2 = (l2.log ?? l2.insert) as ((i: unknown) => Effect.Effect<void, unknown>) | undefined; if (fn2) await Effect.runPromise(fn2.call(callLogRepo, { id: crypto.randomUUID(), projectId: input.projectId, providerId: cfg.providerId ?? null, model: cfg.model, kind: cfg.kind, status: "done", latencyMs: Date.now() - start, usageIn, usageOut, cachedIn, costCents, estimated } as never).pipe(Effect.catchAll(() => Effect.void)));
                 } catch {}
               }
               if (cfg.providerId) {

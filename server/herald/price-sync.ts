@@ -31,20 +31,24 @@ export const syncModelPrices = (): Effect.Effect<number, ProviderUnreachable, Db
         return yield* Effect.fail(new ProviderUnreachable({ message: `models endpoint returned ${res.status}` }));
       }
       const json = (yield* Effect.tryPromise({
-        try: () => res.json() as Promise<{ data: Array<{ id: string; pricing?: { prompt?: string; completion?: string } }> }>,
+        try: () => res.json() as Promise<{ data: Array<{ id: string; pricing?: { prompt?: string; completion?: string; input_cache_read?: string; input_cache_write?: string; cached_read?: string; cached_write?: string } }> }>,
         catch: (e) => e as Error,
-      }).pipe(Effect.catchAll(() => Effect.succeed({ data: [] as Array<never> })))) as { data: Array<{ id: string; pricing?: { prompt?: string; completion?: string } }> };
+      }).pipe(Effect.catchAll(() => Effect.succeed({ data: [] as Array<never> })))) as { data: Array<{ id: string; pricing?: { prompt?: string; completion?: string; input_cache_read?: string; input_cache_write?: string; cached_read?: string; cached_write?: string } }> };
       let count = 0;
       for (const m of json.data ?? []) {
         const rawP = m.pricing?.prompt?.trim() ?? "";
         const rawC = m.pricing?.completion?.trim() ?? "";
         if (!isValidPriceString(rawP) || !isValidPriceString(rawC)) continue;
-        const p = parseFloat(rawP);
-        const c = parseFloat(rawC);
+        const p = parseFloat(rawP) * 1e6;
+        const c = parseFloat(rawC) * 1e6;
         if (!Number.isFinite(p) || !Number.isFinite(c)) continue;
         if (Number.isNaN(p) || Number.isNaN(c)) continue;
         if (p === 0 && c === 0) continue;
-        yield* repo.upsert({ model: m.id, promptPrice: p, completionPrice: c }).pipe(
+        const rawCr = (m.pricing?.input_cache_read ?? m.pricing?.cached_read ?? "").trim();
+        const rawCw = (m.pricing?.input_cache_write ?? m.pricing?.cached_write ?? "").trim();
+        const cr = isValidPriceString(rawCr) ? parseFloat(rawCr) * 1e6 : 0;
+        const cw = isValidPriceString(rawCw) ? parseFloat(rawCw) * 1e6 : 0;
+        yield* repo.upsert({ model: m.id, promptPrice: p, completionPrice: c, cachedReadPrice: cr, cachedWritePrice: cw }).pipe(
           Effect.catchAll((e) => {
             console.warn("[price-sync] upsert failed", m.id, e);
             return Effect.succeed(null as never);
