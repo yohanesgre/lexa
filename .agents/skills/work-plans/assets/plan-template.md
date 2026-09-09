@@ -2,6 +2,8 @@
 created: YYYY-MM-DD
 source: <origin, if migrated — else omit>
 state: PLAN | WORKING | DONE
+gate: <ISO8601 approved + who + branch, after execution gate — else omit>
+iter: <W<n>i<m> current position>
 
 ## X (problem)
 1–3 sentences: what + why. No background essay — link artifacts instead.
