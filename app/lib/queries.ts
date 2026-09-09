@@ -1179,6 +1179,20 @@ export function useSetPassword() {
   });
 }
 
+export function useAcceptInvite() {
+  const toast = useToast();
+  return useMutation({
+    mutationFn: ({ token, name, password }: { token: string; name: string; password: string }) =>
+      auth.acceptInvite({ token, name, password }),
+    onError: (err) => {
+      const code = (err as { code?: string }).code;
+      if (code !== "INVALID_TOKEN" && code !== "USER_EXISTS") {
+        toast.push("error", "Could not accept invite", toastMessage(err));
+      }
+    },
+  });
+}
+
 export function useChangePassword() {
   const qc = useQueryClient();
   const toast = useToast();

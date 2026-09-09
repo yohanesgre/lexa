@@ -158,7 +158,10 @@ function processEnvSafe(): ProcessEnvSource {
 // RuntimeEnv argument — never from `process.env` directly.
 
 export const DEFAULT_DATABASE_PATH = "/app/data/lexa.db";
-export const DEFAULT_PUBLIC_URL = "http://localhost:3000";
+// User-facing base URL (invite / set-password / share links). Points at the
+// vite frontend: the app is SPA mode, so link recipients must land on the UI
+// origin (:5173 in dev). :3000 serves the API (+ the built app only).
+export const DEFAULT_PUBLIC_URL = "http://localhost:5173";
 
 export function resolvePublicUrl(env: RuntimeEnv): string {
   return env.LXK_PUBLIC_URL ?? DEFAULT_PUBLIC_URL;
@@ -173,9 +176,11 @@ export function resolveTrustedOrigins(env: RuntimeEnv, publicUrl: string = resol
     .split(",")
     .map((o) => o.trim())
     .filter((o) => o.length > 0);
-  return env.LXK_ENV === "dev"
-    ? [publicUrl, "http://localhost:5173", ...extra]
-    : [publicUrl, ...extra];
+  const origins =
+    env.LXK_ENV === "dev"
+      ? [publicUrl, "http://localhost:5173", ...extra]
+      : [publicUrl, ...extra];
+  return [...new Set(origins)];
 }
 
 // ─── Workers / Bun dispatch ──────────────────────────────────────────────
