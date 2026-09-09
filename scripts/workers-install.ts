@@ -1,14 +1,13 @@
 #!/usr/bin/env bun
-// Workers flavor installer — port of the former `lexa-cli deploy --runtime
-// workers`. Runs from inside the release workers tarball (bun scripts/
-// workers-install.ts) with no repo checkout: provisions D1/R2/KV via the
-// Cloudflare API, stages the prebuilt bundle, writes a per-deploy wrangler
-// config, applies D1 migrations, deploys via bunx wrangler, and (custom
-// domain only) binds the worker route. Prompts live in install.sh (the bash
-// side owns /dev/tty); this helper takes everything via flags.
+// Workers deploy installer — runs from inside the release workers tarball
+// (bun scripts/workers-install.ts) with no repo checkout: provisions D1/R2/KV
+// via the Cloudflare API, stages the prebuilt bundle, writes a per-deploy
+// wrangler config, applies D1 migrations, deploys via bunx wrangler, and
+// (custom domain only) binds the worker route. Prompts live in install.sh
+// (the bash side owns /dev/tty); this helper takes everything via flags.
 //
 // Usage:
-//   bun workers-install.ts --cf-token <tok> --flavor staging|prod \
+//   bun workers-install.ts --cf-token <tok> --name <deploy> \
 //     [--domain lexa.example.com]     # custom domain; absent = workers.dev
 //     [--dir <unpack dir>]            # default: cwd
 //
@@ -21,18 +20,6 @@ import { join, dirname, basename } from "node:path";
 import { spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 
-interface WorkerFlavor {
-  workerName: string;
-  d1Name: string;
-  r2Name: string;
-  kvTitle: string;
-}
-
-const WORKER_FLAVORS: Record<string, WorkerFlavor> = {
-  staging: { workerName: "lexa-staging", d1Name: "lexa-staging", r2Name: "lexa-blobs-staging", kvTitle: "lexa-staging" },
-  prod: { workerName: "lexa", d1Name: "lexa-prod", r2Name: "lexa-blobs-prod", kvTitle: "lexa-prod" },
-};
-
 function die(msg: string): never {
   console.error(`  ✗ ${msg}`);
   process.exit(1);
@@ -44,11 +31,29 @@ function flag(name: string): string {
 }
 
 const CF_TOKEN = flag("cf-token") || die("--cf-token required");
-// Boolean flag: drops any existing D1 databases matching the flavor name
+// Boolean flag: drops any existing D1 databases matching the deploy name
 // before creating a fresh one (all data in them is gone).
 const RESET_DB = process.argv.includes("--reset-db");
-const FLAVOR_NAME = flag("flavor") || "staging";
-const FLAVOR = WORKER_FLAVORS[FLAVOR_NAME] ?? die(`unknown flavor '${FLAVOR_NAME}' (staging|prod)`);
+// Deploy name keys worker/D1/R2/KV resource names + the deploy dir.
+// "staging"/"prod" are deprecated compat aliases reproducing the pre-flavor
+// resource sets (prod's worker is bare "lexa"); anything else maps uniformly.
+const NAME = flag("name") || "lexa";
+interface WorkerFlavor {
+  workerName: string;
+  d1Name: string;
+  r2Name: string;
+  kvTitle: string;
+}
+function resolveNames(name: string): WorkerFlavor {
+  if (name === "staging") return { workerName: "lexa-staging", d1Name: "lexa-staging", r2Name: "lexa-blobs-staging", kvTitle: "lexa-staging" };
+  if (name === "prod") return { workerName: "lexa", d1Name: "lexa-prod", r2Name: "lexa-blobs-prod", kvTitle: "lexa-prod" };
+  return { workerName: name, d1Name: name, r2Name: `${name}-blobs`, kvTitle: name };
+}
+const FLAVOR = resolveNames(NAME);
+const FLAVOR_NAME = NAME;
+if (NAME === "staging" || NAME === "prod") {
+  console.log(`  (deploy name '${NAME}' is a deprecated flavor alias — prefer an explicit --name)`);
+}
 const CUSTOM_DOMAIN = flag("domain"); // absent → workers.dev
 const DIR = flag("dir") || process.cwd();
 const API = "https://api.cloudflare.com/client/v4";
@@ -243,7 +248,7 @@ const config = {
   ...(manifest.no_bundle ? { no_bundle: true } : {}),
   ...(manifest.rules !== undefined ? { rules: manifest.rules } : {}),
   assets: { directory: "./assets" },
-  vars: { LXK_ENV: FLAVOR_NAME === "staging" ? "staging" : "production", ...(publicUrl ? { LXK_PUBLIC_URL: publicUrl } : {}) },
+  vars: { LXK_ENV: "production", ...(publicUrl ? { LXK_PUBLIC_URL: publicUrl } : {}) },
   d1_databases: [{ binding: "DB", database_name: FLAVOR.d1Name, database_id: d1Id }],
   r2_buckets: [{ binding: "BLOB", bucket_name: r2Name }],
   kv_namespaces: [{ binding: "KV", id: kvId }],
@@ -308,3 +313,17 @@ if (CUSTOM_DOMAIN && zone) {
 
 // ── Done: machine keys are minted post-setup (login → Settings → API Keys) ──
 console.log(`  ✓ deployed${CUSTOM_DOMAIN ? ` → https://${CUSTOM_DOMAIN}` : ""}`);
+
+// ── Tarball cleanup: keep the 2 newest downloads, drop older ones ──
+// DIR is the tarball work dir in release runs (in --from-repo runs no
+// lexa-workers-*.tar.gz exists, so this is a no-op there).
+{
+  const tars = readdirSync(DIR)
+    .filter((f) => f.startsWith("lexa-workers-") && f.endsWith(".tar.gz"))
+    .map((f) => ({ f, m: statSync(join(DIR, f)).mtimeMs }))
+    .sort((a, b) => b.m - a.m);
+  for (const { f } of tars.slice(2)) {
+    rmSync(join(DIR, f));
+    console.log(`  (cleanup: removed old tarball ${f})`);
+  }
+}

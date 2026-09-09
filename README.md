@@ -56,7 +56,7 @@ pinned to the tag and never changes under your feet. Targets:
 | `workers` | Cloudflare Workers + D1 + R2 + KV via `bunx wrangler` — or zero-file: [![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/yohanesgre/lexa) (DRAFT-UNVERIFIED, see `docs/DEPLOYMENT.md`; disable Builds auto-deploy after) |
 | `dev` | clone the repo, `bun install`, `bun run dev:full` |
 
-Flags: `--flavor staging|prod`, `--port`, `--bind`, `--domain` (workers custom domain), `--systemd`
+Flags: `--ref <tag|branch>`, `--name <name>` (workers), `--port`, `--bind`, `--domain` (workers custom domain), `--systemd`
 (bare), `--image <tag>` (docker version pin).
 
 **First run:** open `http://<host>:<port>/setup` — create the first admin

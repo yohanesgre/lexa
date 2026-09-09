@@ -1,19 +1,17 @@
 #!/usr/bin/env bun
 /**
- * Lexa CLI setup wizard (dev bootstrap / prod bare-metal bootstrap).
+ * Lexa CLI setup wizard (dev bootstrap / bare-metal bootstrap).
  *
  *   bun run setup                                      # interactive, dev (.env)
- *   bun run setup --prod                               # interactive, prod (.env.prod)
- *   bun run setup --prod --admin-email ops@x.com --yes
+ *   bun run setup --env-file .env.prod --admin-email ops@x.com --yes
  *
  * Prompts for the admin email (LXK_ADMIN_EMAILS) + the superadmin password,
  * runs migrations, creates the superadmin account (Better Auth
- * credential), and (dev only) offers sample data. Machine keys are minted
+ * credential), and offers sample data. Machine keys are minted
  * post-setup (login → Settings → API Keys).
  *
- * Staging/prod never seeds: LXK_ENV=<flavor> is written so the server,
- * the web wizard, and later `lexa-cli deploy` runs all know sample data
- * must stay empty. This script is the first thing you run on a fresh box
+ * LXK_ENV is written explicitly so the server knows its environment.
+ * This script is the first thing you run on a fresh box
  * — no lexa-cli binary required.
  */
 import { existsSync, readFileSync, writeFileSync, mkdirSync, chmodSync } from "node:fs";
@@ -57,7 +55,6 @@ function flagValue(name: string): string | undefined {
 }
 const hasFlag = (name: string) => args.includes(name);
 
-const FLAG_FLAVOR = hasFlag("--prod") ? "prod" : hasFlag("--staging") ? "staging" : flagValue("--flavor");
 const NON_INTERACTIVE = hasFlag("--yes") || !process.stdin.isTTY;
 
 async function main() {
@@ -65,11 +62,11 @@ async function main() {
   console.log("  Lexa Setup");
   console.log("══════════════════════════════════════════════");
 
-  // Resolve flavor first so we know which env file to read.
+  // Resolve the env file first, then the environment name.
   const envFileArg = flagValue("--env-file");
-  const envFile = envFileArg || (FLAG_FLAVOR && FLAG_FLAVOR !== "dev" ? `.env.${FLAG_FLAVOR}` : ".env");
+  const envFile = envFileArg || ".env";
   const env = loadEnv(envFile);
-  const flavor = FLAG_FLAVOR || env.LXK_ENV || "dev";
+  const flavor = env.LXK_ENV || "dev";
   // DB path: explicit flag/env wins, then the env file, then the default —
   // a custom DATABASE_PATH in the env file must drive migrations/settings too.
   const DB_PATH = process.env.DATABASE_PATH || env.DATABASE_PATH || "./data/lexa.db";
@@ -164,16 +161,14 @@ async function main() {
     }
   }
 
-  // 6. Seed sample data — dev only; staging/prod always stays empty.
+  // 6. Seed sample data — offered in every environment.
   console.log("\n── Sample data ──");
   const db = new Database(DB_PATH);
   const projectCount = db.query("SELECT COUNT(*) c FROM projects").get() as { c: number };
   if (projectCount.c > 0) {
     console.log("  Projects exist — skipping seed.");
-  } else if (flavor !== "dev") {
-    console.log(`  ${flavor} flavor — skipping sample data (production stays empty).`);
   } else if (NON_INTERACTIVE) {
-    console.log("  Dev flavor, non-interactive — skipping sample data (run interactively to seed).");
+    console.log("  Non-interactive — skipping sample data (run interactively to seed).");
   } else {
     const seed = ask("Include sample data (dev projects + wiki)?", "y");
     if (seed.toLowerCase() !== "n") {
@@ -211,8 +206,7 @@ async function main() {
   console.log("  NOTE: seeded member users have no password — log in as the");
   console.log("        superadmin and issue set-password links from the Members UI.");
   } else {
-    console.log("  Deploy:             lexa-cli deploy <domain> " + flavor);
-    console.log("  (or docker compose --env-file " + envFile + " up -d --build)");
+    console.log("  Deploy via scripts/install.sh (see docs/DEPLOYMENT.md).");
     console.log("  Health:             curl https://<host>/api/health");
     console.log("  First login:        open https://<host>/setup once to create the");
     console.log("                      superadmin account, then onboard members via invite links.");

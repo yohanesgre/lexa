@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
 # Lexa install script — self-hosting entry point.
 #
+# Recommended (installer hub, newest release, BASE_URL pinned to its tag):
+#   curl -fsSL https://install.yohanesgre.com/lexa/install.sh \
+#     | bash -s -- [docker|bare|workers|dev] [flags]
+#
+# Direct (explicit tag, or main for bleeding edge):
 #   curl -fsSL https://raw.githubusercontent.com/yohanesgre/lexa/<tag>/scripts/install.sh \
 #     | bash -s -- [docker|bare|workers|dev] [flags]
 #
@@ -74,21 +79,10 @@ case "${TARGET}" in
   *) die "unknown target '${TARGET}' (docker|bare|workers|dev)" ;;
 esac
 
-# Interactive: ask which flavor (default staging). Headless automation
-# (--yes, INSTALL_DRY_RUN=1, no tty) gets a deterministic staging default —
-# never a prompt, never a guess on the target.
-if [ -z "${FLAVOR}" ] && [ "${ASSUME_YES}" != "1" ] && [ "${INSTALL_DRY_RUN:-0}" != "1" ] && [ -r /dev/tty ]; then
-  FLAVOR=$(tty_read "Flavor — staging (sample data in the wizard) or prod (starts empty)" "staging")
-fi
-FLAVOR="${FLAVOR:-staging}"
 CF_TOKEN="${CF_TOKEN:-}"
 PUBLIC_URL="${PUBLIC_URL:-}"
 RELEASE_TAG="${RELEASE_TAG:-}"
 BARE_PORT="${BARE_PORT:-3000}"
-case "${FLAVOR}" in
-  staging|prod) ;;
-  *) die "unknown flavor '${FLAVOR}' (staging|prod)" ;;
-esac
 
 # ---------------------------------------------------------------------------
 # docker — compose render → up → health
@@ -103,12 +97,11 @@ deploy_docker() {
   # hostname; trust both or Better Auth rejects one of them.
   local trusted="${public_url},http://localhost:${PORT},http://127.0.0.1:${PORT}"
   write_env_file ".env" \
-    "LXK_ENV=${FLAVOR}" \
+    "LXK_ENV=production" \
     "LXK_PUBLIC_URL=${public_url}" \
     "LXK_TRUSTED_ORIGINS=${trusted}"
   # Local docker deploy = direct semantics (host port mapping, no tunnel) —
-  # the wizard URL must be reachable on the host. Flavor still sets LXK_ENV.
-  [ -n "${IMAGE_TAG}" ] || { [ "${FLAVOR}" = "staging" ] && IMAGE_TAG="staging"; }
+  # the wizard URL must be reachable on the host.
   DEPLOY_DIR="${PWD}" compose_render direct "${PORT}" "${BIND}"
   step "compose pull" retry 3 mutate docker compose pull
   step "compose up" mutate docker compose up -d --wait
@@ -141,7 +134,7 @@ deploy_bare() {
   else
     local bare_public="${PUBLIC_URL:-http://localhost:${BARE_PORT}}"
     step "write env" write_env_file "${INSTALL_DIR}/.env" \
-      "LXK_ENV=${FLAVOR}" \
+      "LXK_ENV=production" \
       "PORT=${BARE_PORT}" \
       "DATABASE_PATH=${INSTALL_DIR}/data/lexa.db" \
       "LXK_PUBLIC_URL=${bare_public}" \
@@ -166,17 +159,72 @@ deploy_bare() {
 # ---------------------------------------------------------------------------
 deploy_workers() {
   require_bun
-  if [ -z "${DOMAIN}" ]; then
-    # Soft prompt: EOF/headless → workers.dev default (never a hard failure —
-    # the domain has a safe default). Hard-fatal prompts stay tty_read.
-    answer=$(tty_read_soft "Custom domain — press Enter for a free workers.dev subdomain [lexa.<account>.workers.dev]" "")
-    [ -n "${answer}" ] && DOMAIN="${answer}"
+  # Pre-resolve paths BEFORE any download/wipe: domain reuse reads the old
+  # wrangler config, and the fresh-install guard must fire before network.
+  _ww_dir="${WORK_DIR:-lexa-workers-release}"
+  [ -n "${FROM_REPO}" ] && _ww_dir="${REPO_ROOT}"
+  # Deploy name: explicit --name wins; a single previous deploy-*/ dir is
+  # resumed; fresh installs default to "lexa".
+  FLAVOR_NAME="$(resolve_deploy_name "${_ww_dir}" "${NAME}")"
+  if [ -z "${NAME}" ] && [ "${FLAVOR_NAME}" != "lexa" ]; then
+    echo "  (resuming previous workers deploy '${FLAVOR_NAME}')"
   fi
-  # headless without --domain → workers.dev default (no prompt, no failure)
-  if [ -z "${CF_TOKEN}" ] && [ -r /dev/tty ]; then
-    CF_TOKEN=$(tty_read_secret "Cloudflare API token (needs: Workers Scripts, D1, Workers KV Storage, Workers R2 Storage — all Edit, account scope)" "CF_API_TOKEN")
+  if [ ! -d "${_ww_dir}/deploy-${FLAVOR_NAME}" ]; then
+    if [ "${ASSUME_YES}" = "1" ] || [ "${INSTALL_DRY_RUN:-0}" = "1" ]; then
+      echo "  (no previous deploy '${FLAVOR_NAME}' in ${_ww_dir} — fresh install)"
+    else
+      confirm_tty "No previous deploy '${FLAVOR_NAME}' in ${_ww_dir} — start fresh (new Cloudflare resources)? [y/N]" "n" \
+        || die "aborted (nothing changed)"
+    fi
+  fi
+  # Token: --cf-token flag > CF_API_TOKEN env > saved file > TTY prompt.
+  # Only TTY-typed tokens are ever offered for saving; env/flag values
+  # never touch disk (safe for ephemeral CI tokens).
+  _token_file="${_ww_dir}/.cf-token"
+  if [ -z "${CF_TOKEN}" ] && [ -n "${CF_API_TOKEN:-}" ]; then
+    CF_TOKEN="${CF_API_TOKEN}"
+  fi
+  if [ -z "${CF_TOKEN}" ] && [ -f "${_token_file}" ]; then
+    CF_TOKEN="$(cat "${_token_file}")"
+    echo "  (using saved Cloudflare token — delete ${_token_file} to re-enter)"
+  fi
+  if [ -z "${CF_TOKEN}" ]; then
+    [ -r /dev/tty ] || die "Cloudflare API token required (env CF_API_TOKEN or --cf-token)"
+    CF_TOKEN=$(tty_read_secret "Cloudflare API token (needs: Workers Scripts, D1, Workers KV Storage, Workers R2 Storage — all Edit, account scope)")
+    _save_answer=$(tty_read "Save this token to ${_token_file} for future upgrades? [y/N]" "n")
+    case "${_save_answer}" in
+      [Yy]*)
+        mkdir -p "${_ww_dir}"
+        : > "${_token_file}"
+        chmod 600 "${_token_file}"
+        printf '%s' "${CF_TOKEN}" > "${_token_file}"
+        echo "  (token saved — remove the file to forget it)"
+        ;;
+    esac
   fi
   [ -n "${CF_TOKEN}" ] || die "Cloudflare API token required (env CF_API_TOKEN or --cf-token)"
+  # Domain: a previous deploy's LXK_PUBLIC_URL becomes the default (Enter
+  # keeps it, "-" switches back to workers.dev). Read BEFORE the wipe below.
+  if [ -z "${DOMAIN}" ]; then
+    _prev_cfg="$(ls "${_ww_dir}"/deploy-"${FLAVOR_NAME}"/wrangler.*.json 2>/dev/null | head -1)"
+    _prev_domain=""
+    if [ -n "${_prev_cfg}" ]; then
+      _prev_url="$(grep -o '"LXK_PUBLIC_URL": *"[^"]*"' "${_prev_cfg}" 2>/dev/null | head -1 | sed 's/.*"LXK_PUBLIC_URL": *"//;s/"$//')"
+      case "${_prev_url}" in
+        https://*) _prev_domain="${_prev_url#https://}" ;;
+        http://*) _prev_domain="${_prev_url#http://}" ;;
+      esac
+    fi
+    if [ -n "${_prev_domain}" ]; then
+      answer=$(tty_read_soft "Custom domain [${_prev_domain}] — Enter keeps it, '-' for workers.dev, or type a new domain" "${_prev_domain}")
+      if [ "${answer}" = "-" ]; then DOMAIN=""; else DOMAIN="${answer}"; fi
+    else
+      # Soft prompt: EOF/headless → workers.dev default (never a hard failure —
+      # the domain has a safe default). Hard-fatal prompts stay tty_read.
+      answer=$(tty_read_soft "Custom domain — press Enter for a free workers.dev subdomain [lexa.<account>.workers.dev]" "")
+      [ -n "${answer}" ] && DOMAIN="${answer}"
+    fi
+  fi
 
   if [ -n "${FROM_REPO}" ]; then
     WORK_DIR="${REPO_ROOT}"
@@ -186,12 +234,12 @@ deploy_workers() {
     WORK_DIR="${WORK_DIR:-lexa-workers-release}"
     # Retry safety: a previous failed run may have left stale extractions
     # (old-tag dist/migrations/scripts mixed with the new tarball's). The
-    # dir is installer-owned — keep only the downloads.
-    find "${WORK_DIR}" -mindepth 1 -maxdepth 1 ! -name '*.tar.gz' ! -name 'checksums.txt' -exec rm -rf {} +
+    # dir is installer-owned — keep only the downloads (+ the saved token).
+    find "${WORK_DIR}" -mindepth 1 -maxdepth 1 ! -name '*.tar.gz' ! -name 'checksums.txt' ! -name '.cf-token' -exec rm -rf {} +
     unpack_release "${WORK_DIR}" "${WORK_DIR}" workers
   fi
 
-  cf_args=(--cf-token "${CF_TOKEN}" --flavor "${FLAVOR}")
+  cf_args=(--cf-token "${CF_TOKEN}" --name "${FLAVOR_NAME}")
   [ "${RESET_DB}" = "1" ] && cf_args+=(--reset-db)
   [ -n "${DOMAIN}" ] && cf_args+=(--domain "${DOMAIN}")
   (cd "${WORK_DIR}" && step "workers install" bun scripts/workers-install.ts "${cf_args[@]}")

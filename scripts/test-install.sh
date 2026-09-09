@@ -70,8 +70,31 @@ fi
 
 echo "== parse_flags =="
 
-got="$(lib_eval 'parse_flags --staging --port 9999; printf "%s:%s" "$FLAVOR" "$PORT"')"
-assert_eq "parse_flags --staging --port 9999 sets FLAVOR:PORT" "staging:9999" "$got"
+got="$(lib_eval 'parse_flags --ref v2026.2.9 --name lexa --port 9999; printf "%s:%s:%s" "$REF" "$NAME" "$PORT"')"
+assert_eq "parse_flags --ref --name --port sets REF:NAME:PORT" "v2026.2.9:lexa:9999" "$got"
+
+rc=0
+lib_eval 'parse_flags --staging' >/dev/null 2>&1 || rc=$?
+assert_rc "parse_flags --staging dies (flavors removed)" 1 "$rc"
+
+echo "== resolve_deploy_name =="
+
+got="$(lib_eval 'resolve_deploy_name /nonexistent myname')"
+assert_eq "explicit --name wins" "myname" "$got"
+
+namedir="$(mktemp -d)"
+got="$(lib_eval "resolve_deploy_name '${namedir}' ''")"
+assert_eq "no deploy dir defaults to lexa" "lexa" "$got"
+mkdir -p "${namedir}/deploy-foo"
+got="$(lib_eval "resolve_deploy_name '${namedir}' ''")"
+assert_eq "single deploy dir resumes" "foo" "$got"
+got="$(lib_eval "resolve_deploy_name '${namedir}' 'bar'")"
+assert_eq "explicit beats resume" "bar" "$got"
+mkdir -p "${namedir}/deploy-bar"
+rc=0
+lib_eval "resolve_deploy_name '${namedir}' ''" >/dev/null 2>&1 || rc=$?
+assert_rc "several deploy dirs die" 1 "$rc"
+rm -rf "${namedir}"
 
 rc=0
 lib_eval 'parse_flags --bogus' >/dev/null 2>&1 || rc=$?

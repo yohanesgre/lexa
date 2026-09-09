@@ -72,7 +72,7 @@ function SetupWizard() {
             <SetupStepEmail email={email} onEmailChange={setEmail} isRemote={isRemote} onDone={() => setStep(1)} />
           )}
 
-          {/* Step 1 — Sample data (dev only) */}
+          {/* Step 1 — Sample data (local installs only) */}
           {step === 1 && !isRemote && (
             <SetupStepSeed onDone={() => setStep(2)} onBack={() => setStep(0)} />
           )}

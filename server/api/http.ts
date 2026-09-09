@@ -2100,8 +2100,7 @@ const setupLive = HttpApiBuilder.group(LexaApi, "setup", (handlers) =>
         const env = yield* currentEnv;
         if (yield* setupLocked(db, env)) return yield* Effect.fail(new SetupLocked());
         if (env.DB) return { seeded: false as const };
-        const lxkEnv = env.LXK_ENV;
-        if (lxkEnv && lxkEnv !== "dev" && lxkEnv !== "staging") return { seeded: false as const };
+        // No environment gate: sample data is offered in every environment.
         const fs = yield* Effect.tryPromise(() => import("node:fs")).pipe(
           Effect.catchAll(() => Effect.succeed(null))
         );

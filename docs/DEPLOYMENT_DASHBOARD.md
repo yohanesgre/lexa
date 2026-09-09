@@ -18,13 +18,13 @@ Prereqs: a Cloudflare account (Workers Paid, $5/mo — free D1 caps at
    `checksums.txt`, unpack. You need `dist/server/index.js`,
    `dist/server/wrangler.json`, `dist/client/`, `migrations/*.sql`.
 2. `[verify]` Dashboard → Storage & Databases → **D1** → Create database
-   named `lexa-prod` (staging: `lexa-staging`). Note the database ID.
-3. `[verify]` Dashboard → **R2** → Create bucket `lexa-blobs-prod`
-   (staging: `lexa-blobs-staging`).
+   named `lexa` (or your `--name`). Note the database ID.
+3. `[verify]` Dashboard → **R2** → Create bucket `lexa-blobs`
+   (or `<name>-blobs`).
 4. `[verify]` Dashboard → Storage & Databases → **KV** → Create namespace
-   titled `lexa-prod` (staging: `lexa-staging`). Note the namespace ID.
+   titled `lexa` (or your `--name`). Note the namespace ID.
 5. `[verify]` Workers & Pages → Create Worker → name it `lexa`
-   (staging: `lexa-staging`) → upload `dist/server/index.js` as the
+   (or your `--name`) → upload `dist/server/index.js` as the
    worker script and `dist/client/` as assets.
    **Open risk:** the dashboard editor is single-file oriented; if the
    assets upload has no slot, this path is blocked until the spike finds
@@ -33,7 +33,7 @@ Prereqs: a Cloudflare account (Workers Paid, $5/mo — free D1 caps at
    step 2; R2 binding `BLOB` → bucket from step 3; KV binding `KV` → id
    from step 4. Names are frozen — the worker reads exactly
    `DB`/`BLOB`/`KV`.
-7. `[verify]` Variables: `LXK_ENV=production` (staging: `staging`);
+7. `[verify]` Variables: `LXK_ENV=production`;
    `LXK_PUBLIC_URL=https://<your-domain>` when using a custom domain.
    No secrets needed.
 8. `[verify]` Cron trigger `*/15 * * * *` (prune + backup retention).

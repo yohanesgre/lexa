@@ -37,9 +37,9 @@ Usage: install.sh <target> [flags]
 Targets: docker | bare | workers | dev
 
 Flags:
-  --flavor <staging|prod>          deployment flavor
-  --staging                        shorthand for --flavor staging
-  --prod                           shorthand for --flavor prod
+  --ref <tag|branch>             script + artifact source (default: newest v* tag;
+                               resolved by the install-router track)
+  --name <name>                  workers deploy name (default lexa)
   --port <n>                       host port (docker, default 8080)
   --bind <addr>                    bind address (default 127.0.0.1)
   --domain <d>                     custom domain (workers; skips prompt)
@@ -226,24 +226,30 @@ write_env_file() {
 
 # ---------------------------------------------------------------------------
 # parse_flags — whitelist-style parser; the ONLY reader of argv.
-# Sets: TARGET FLAVOR STAGING PROD PORT BIND DOMAIN IMAGE_TAG
+# Sets: TARGET REF NAME PORT BIND DOMAIN IMAGE_TAG
 #       SYSTEMD ASSUME_YES PURGE CLEAN FROM_REPO HELP
 # Unknown flag -> usage + die. Positional target accepted (first one only).
 # ---------------------------------------------------------------------------
 parse_flags() {
   # shellcheck disable=SC2034  # parse_flags outputs are the caller's contract
-  TARGET="" FLAVOR="" STAGING=0 PROD=0 PORT=8080 BIND=127.0.0.1 DOMAIN=""
+  TARGET="" REF="" NAME="" PORT=8080 BIND=127.0.0.1 DOMAIN=""
   IMAGE_TAG="" SYSTEMD=0 ASSUME_YES=0 PURGE=0 CLEAN=0 RESET_DB=0
   FROM_REPO="" HELP=0 CF_TOKEN=""
   while [ $# -gt 0 ]; do
     case "$1" in
-      --flavor)
-        [ $# -ge 2 ] || die "--flavor requires a value"
-        FLAVOR=$2
+      --ref)
+        [ $# -ge 2 ] || die "--ref requires a value"
+        REF=$2
         shift 2
         ;;
-      --staging) STAGING=1; shift ;;
-      --prod) PROD=1; shift ;;
+      --name)
+        [ $# -ge 2 ] || die "--name requires a value"
+        NAME=$2
+        shift 2
+        ;;
+      --staging|--prod|--flavor)
+        die "$1 was removed: flavors are gone — use --ref <tag|branch> to pick main or a release tag"
+        ;;
       --port)
         [ $# -ge 2 ] || die "--port requires a value"
         PORT=$2
@@ -298,22 +304,37 @@ parse_flags() {
         ;;
     esac
   done
-  if [ "$STAGING" = 1 ] && [ "$PROD" = 1 ]; then
-    die "--staging and --prod are mutually exclusive"
-  fi
-  if [ "$STAGING" = 1 ]; then
-    FLAVOR=staging
-  fi
-  if [ "$PROD" = 1 ]; then
-    FLAVOR=prod
-  fi
 }
 
 # ---------------------------------------------------------------------------
-# compose_render <flavor> <port> <bind>
+# resolve_deploy_name <work_dir> [explicit]
+# Prints the workers deploy name: explicit --name wins; else a single
+# existing deploy-*/ dir is resumed; none -> fresh default "lexa";
+# several -> die (ambiguous, never guess).
+# ---------------------------------------------------------------------------
+resolve_deploy_name() {
+  local work_dir="$1" explicit="${2:-}"
+  if [ -n "$explicit" ]; then printf '%s\n' "$explicit"; return 0; fi
+  local found=0 name="" d base
+  for d in "${work_dir}"/deploy-*/; do
+    [ -d "$d" ] || continue
+    found=$((found + 1))
+    base="$(basename "$d")"
+    name="${base#deploy-}"
+  done
+  if [ "$found" -eq 1 ]; then printf '%s\n' "$name"; return 0; fi
+  if [ "$found" -gt 1 ]; then
+    die "multiple previous workers deploys in ${work_dir} — pass --name explicitly"
+  fi
+  printf 'lexa\n'
+}
+
+# ---------------------------------------------------------------------------
+# compose_render <mode> <port> <bind>
 # Emits docker-compose.yml into ${DEPLOY_DIR} (default: .). Modeled on the
-# repo's docker-compose.yml + docker-compose.staging.yml; flavor != direct
-# adds the cloudflared tunnel service. Values validated before interpolation.
+# repo's docker-compose.yml; mode != direct adds the cloudflared tunnel
+# service. Values validated before interpolation. Image defaults to latest;
+# pass --image to pin (e.g. a version tag or staging to track main).
 # ---------------------------------------------------------------------------
 compose_render() {
   local flavor="$1"
@@ -322,8 +343,8 @@ compose_render() {
   local deploy_dir="${DEPLOY_DIR:-.}"
   local image_tag="${IMAGE_TAG:-latest}"
   case "$flavor" in
-    direct|staging|prod) ;;
-    *) die "compose_render: invalid flavor: ${flavor}" ;;
+    direct) ;;
+    *) die "compose_render: invalid mode: ${flavor}" ;;
   esac
   case "$port" in
     ''|*[!0-9]*) die "compose_render: invalid port: ${port}" ;;
@@ -334,9 +355,6 @@ compose_render() {
   case "$bind" in
     ''|*[!A-Za-z0-9._-]*) die "compose_render: invalid bind address: ${bind}" ;;
   esac
-  if [ "$flavor" = "staging" ]; then
-    image_tag="${IMAGE_TAG:-staging}"
-  fi
   mkdir -p "$deploy_dir"
   if [ "$flavor" = "direct" ] || [ -z "${CF_TUNNEL_TOKEN:-}" ]; then
     cat > "${deploy_dir}/docker-compose.yml" <<EOF
@@ -447,9 +465,15 @@ LEXA_REPO="${LEXA_REPO:-yohanesgre/lexa}"
 fetch_release() {
   local kind="$1" dest="$2"
   mkdir -p "${dest}"
+  # --ref wins, then RELEASE_TAG (compat), then newest-release resolution
+  # (owned by the install-router track — do not duplicate that logic here).
+  local want="${REF:-${RELEASE_TAG:-}}"
+  if [ "${want}" = "main" ]; then
+    die "--ref main has no release tarballs — pass a release tag (e.g. --ref v2026.2.9) or use the dev target for a main checkout"
+  fi
   local tag
-  if [ -n "${RELEASE_TAG}" ] && [ "${RELEASE_TAG}" != "latest" ]; then
-    tag="${RELEASE_TAG}"
+  if [ -n "${want}" ] && [ "${want}" != "latest" ]; then
+    tag="${want}"
   else
     tag=$(curl -fsSL "https://api.github.com/repos/${LEXA_REPO}/releases/latest" \
       | grep -o '"tag_name": *"[^"]*"' | head -1 | sed 's/.*"tag_name": *"//;s/"//')

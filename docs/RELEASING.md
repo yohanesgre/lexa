@@ -77,11 +77,10 @@ CLI asset.
 
 ## Web app image flow
 
-- `main` pushes publish `ghcr.io/yohanesgre/lexa:staging` (what
-  `deploy <domain> staging` pulls by default).
+- `main` pushes publish `ghcr.io/yohanesgre/lexa:staging`.
 - `v*` tags → `ghcr.io/yohanesgre/lexa:latest` + `ghcr.io/yohanesgre/lexa:<version>` + `ghcr.io/yohanesgre/lexa:<YYYY.MINOR>` (where `<version>` is the tag name, e.g. `v2026.1.0` + floating `2026.1` for patch-auto pins).
-- The web wizard at `/setup` gates `LXK_ENV` non-dev deployments to skip
-  sample data; `LXK_ENV=dev` enables `LXK_SEED_DEV=1` seeding.
+- The web wizard at `/setup` offers sample data on local installs;
+  `LXK_ENV=dev` + `LXK_SEED_DEV=1` seeds at boot.
 - Remote deploy uses `scripts/install.sh` (`curl -fsSL …/scripts/install.sh |
   bash -s -- <target> [flags]`). It pulls the image — **no checkout, no
   build, no git**. Upgrade = re-run with a newer tag (data volume survives;
@@ -105,10 +104,10 @@ CLI asset.
 
 ## Deploy state + creds
 
-Deploy state lives at `~/.lexa/<domain>/deploy/` (one flavor per domain —
-subdomains are separate flavors) with creds in
+Deploy state lives at `~/.lexa/<domain>/deploy/` (one deploy per domain —
+subdomains are separate deploys) with creds in
 `~/.lexa/<domain>/config.json` (chmod 600). The web app keeps
-`LXK_API_KEY` / `LXK_ADMIN_EMAILS` from the flavor env file when present;
+`LXK_API_KEY` / `LXK_ADMIN_EMAILS` from the env file when present;
 non-interactive flags on `deploy` are `--cf-token`, `--admin-email`,
 `--api-key`.
 
