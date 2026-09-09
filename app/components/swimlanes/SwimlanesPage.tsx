@@ -92,7 +92,7 @@ function submitSwimlaneForm<TInput extends { description?: string | null | undef
 
 function SwimlanesSkeleton() {
   return (
-    <main className="page-frame">
+    <main className="page-frame page-frame-narrow">
       <div>
         <div className="skeleton" style={{ width: 160, height: 24 }} />
         <div className="skeleton mt-2" style={{ width: 100, height: 12 }} />
@@ -110,7 +110,7 @@ function SwimlanesSkeleton() {
 
 function SwimlanesErrorState({ message, onRetry }: { message: string; onRetry: () => void }) {
   return (
-    <main className="page-frame">
+    <main className="page-frame page-frame-narrow">
       <div className="tasks-error">
         <div className="tasks-error-title">Failed to load swimlanes</div>
         <div className="tasks-error-sub">{message}</div>
@@ -316,10 +316,10 @@ export function SwimlanesPage({ slug }: { slug: string }) {
   if (error) {
     return <SwimlanesErrorState message={(error as Error).message} onRetry={() => refetch()} />;
   }
-  if (!board) return <main className="page-frame"><div className="tasks-error">Project not found</div></main>;
+  if (!board) return <main className="page-frame page-frame-narrow"><div className="tasks-error">Project not found</div></main>;
 
   return (
-    <main className="page-frame">
+    <main className="page-frame page-frame-narrow">
       <div>
         <div className="flex items-center justify-between mb-2">
           <div>

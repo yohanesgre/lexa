@@ -44,7 +44,7 @@ function submitMilestoneForm<TInput extends { description?: string | null | unde
 
 function MilestonesSkeleton() {
   return (
-    <main className="page-frame">
+    <main className="page-frame page-frame-narrow">
       <div className="ms-tabs">
         <button type="button" className="ms-tab active">Milestones</button>
         <button type="button" className="ms-tab">Timeline</button>
@@ -67,7 +67,7 @@ function MilestonesSkeleton() {
 
 function MilestonesErrorState({ message, onRetry }: { message: string; onRetry: () => void }) {
   return (
-    <main className="page-frame">
+    <main className="page-frame page-frame-narrow">
       <div className="tasks-error">
         <div className="tasks-error-title">Failed to load milestones</div>
         <div className="tasks-error-sub">{message}</div>
@@ -135,7 +135,7 @@ export function MilestonesPage({ slug, tab }: { slug: string; tab: "list" | "tim
   }
 
   return (
-    <main className="page-frame">
+    <main className="page-frame page-frame-narrow">
       <div className="flex items-center justify-between mb-2">
         <div>
           <h1 className="font-display text-2xl weight-600 color-primary">Milestones</h1>
