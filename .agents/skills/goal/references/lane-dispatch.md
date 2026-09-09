@@ -16,6 +16,14 @@ stops that lane only; others continue.
    (read the new pane ID from `.result.pane.pane_id`).
 4. Agent: `herdr agent start <name> --kind <backend> --pane <pane-id>`
    (role travels in the brief, not the kind; map in `goal/SKILL.md` Phase 4).
+   No opencode2 kind exists — drive opencode2 without it: `herdr pane run
+   <pane> "cd <worktree> && opencode2 run --auto --model
+   <provider/model-with-stored-creds> '<brief>'"`, then `pane wait-output`
+   for the done marker and `pane read`. `--model` is required: the
+   default model needs cookie auth (`No cookie auth cred`); check
+   `opencode2 auth list` first. Warm up with one trivial prompt first;
+   a fresh `opencode` boot can fail with a postinstall error — record
+   it and switch paths instead of retrying blindly.
    Approved model errors here → FAST EXIT naming the model, never substitute.
 5. Drive: `herdr agent prompt <name> "<brief>" --wait --timeout 120000`;
    read via `herdr agent read <name> --source recent-unwrapped --lines 120`.

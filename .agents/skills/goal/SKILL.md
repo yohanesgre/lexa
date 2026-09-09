@@ -141,8 +141,12 @@ Run the approved route:
   lookup), planner (multi-step breakdown). For herdr, run `herdr agent`
   to list kinds and match the same roles. herdr kinds name backends,
   not roles — the role travels in the brief: implementer → subagent
-  `swe` / herdr `--kind opencode`; researcher → `explorer-jr` /
-  `librarian-jr`; planner → `planner`; reviewer → `reviewer`.
+  `swe`; researcher → `explorer-jr` / `librarian-jr`;
+  planner → `planner`; reviewer → `reviewer`. herdr has no opencode2
+  kind: drive opencode2 with `opencode2 run --auto --model` (a model
+  with stored creds — see `opencode2 auth list`; the default model
+  errors `No cookie auth cred`); warm a fresh
+  agent with one trivial prompt before the brief.
   Dispatch with `--model`/`--agent` matching the `plan.md` (R) record.
   If no fitting agent exists,
   do the step inline and record the gap. Never invent an agent name —

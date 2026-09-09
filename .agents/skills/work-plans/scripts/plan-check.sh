@@ -20,7 +20,7 @@ DIR="status/$PLAN"
 [ -f "$DIR/status.md" ] || { bad "$DIR/status.md missing"; }
 
 if [ -f "$DIR/plan.md" ]; then
-  grep -q "Out" "$DIR/plan.md" && ok "plan.md has scope Out" || bad "plan.md without scope Out"
+  grep -qE "Out|Non-scope" "$DIR/plan.md" && ok "plan.md has scope Out" || bad "plan.md without scope Out/Non-scope (legacy SPEC docs stay RED by design)"
 fi
 
 if [ -f "$DIR/status.md" ]; then
@@ -45,10 +45,17 @@ grep -q "| $PLAN |" status/TIMELINE.md 2>/dev/null \
   && ok "TIMELINE has $PLAN" || bad "TIMELINE missing $PLAN"
 
 if [ -d "$DIR/lanes" ]; then
-  for lane in "$DIR"/lanes/*.md; do
-    LINES="$(wc -l < "$lane")"
-    [ "$LINES" -eq 3 ] && ok "lane $(basename "$lane") is 3 lines" || bad "lane $(basename "$lane") is $LINES lines, want 3"
-  done
+  shopt -s nullglob
+  LANES=("$DIR"/lanes/*.md)
+  shopt -u nullglob
+  if [ ${#LANES[@]} -eq 0 ]; then
+    ok "lanes dir empty (none dispatched yet)"
+  else
+    for lane in "${LANES[@]}"; do
+      LINES="$(wc -l < "$lane")"
+      [ "$LINES" -eq 3 ] && ok "lane $(basename "$lane") is 3 lines" || bad "lane $(basename "$lane") is $LINES lines, want 3"
+    done
+  fi
 else
   ok "no lanes dir (single-track)"
 fi
