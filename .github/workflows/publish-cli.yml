@@ -57,3 +57,26 @@ jobs:
         run: |
           gh release delete "${{ github.ref_name }}" --yes 2>/dev/null || true
           gh release create "${{ github.ref_name }}" bin/lexa-cli --notes-file /tmp/cli-notes.md
+
+      - name: Warm installer + smoke
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          INSTALLER_HOOK_SECRET: ${{ secrets.INSTALLER_HOOK_SECRET }}
+        run: |
+          set -euo pipefail
+          TAG="${{ github.ref_name }}"
+          curl -fsSL -X POST https://install.yohanesgre.com/lexa/hooks/warm \
+            -H "Authorization: Bearer ${INSTALLER_HOOK_SECRET}" \
+            -H 'Content-Type: application/json' \
+            --data "{\"channel\":\"cli\",\"tag\":\"${TAG}\"}"
+          for i in $(seq 1 28); do
+            RESOLVED=$(curl -sSI https://install.yohanesgre.com/lexa/install-cli.sh \
+              | { grep -i '^X-Resolved-Tag:' || true; } | tr -d '\r' | awk '{print $2}')
+            if [ "${RESOLVED}" = "${TAG}" ]; then
+              echo "installer serving ${TAG}"
+              exit 0
+            fi
+            sleep 15
+          done
+          echo "::error::installer did not serve ${TAG} within ~7 min"
+          exit 1
