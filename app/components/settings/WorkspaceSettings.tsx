@@ -324,9 +324,20 @@ function AgentsSkillsSections() {
   );
 }
 
+type WorkspaceTab = "members" | "teams" | "compute" | "access" | "integrations";
+
+const WORKSPACE_TABS: { id: WorkspaceTab; label: string }[] = [
+  { id: "members", label: "Members" },
+  { id: "teams", label: "Teams" },
+  { id: "compute", label: "Compute" },
+  { id: "access", label: "Access" },
+  { id: "integrations", label: "Integrations" },
+];
+
 export function WorkspaceSettings() {
   const { data: session } = useSession();
   const isSuperadmin = session?.user?.role === "superadmin";
+  const [tab, setTab] = useState<WorkspaceTab>("members");
   return (
     <main className="page-frame page-frame-narrow">
       <h1 className="font-display text-2xl font-semibold text-lx-text-primary mb-4">Workspace settings</h1>
@@ -342,18 +353,45 @@ export function WorkspaceSettings() {
         </div>
       )}
 
-      <WorkspaceMembersSection />
-      <TeamsSection />
-      <div className="card-panel mb-6" style={{ padding: "10px 12px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, borderStyle: "dashed" }}>
-        <span className="text-sm text-lx-text-secondary">Hearth operations (runs, usage, providers, runtimes, bindings, agents) have moved to <span className="font-mono text-xs">/hearth</span> — canonical ops shell. This page retains machines/runtimes/providers/agents for reference until removal (Phase 3 duplication noted).</span>
-        <Link to="/hearth/runs" className="btn btn-ghost" style={{ height: 28, padding: "0 10px", fontSize: 12, textDecoration: "none", display: "inline-flex", alignItems: "center", whiteSpace: "nowrap" }}>Open /hearth</Link>
+      <div className="ms-tabs" role="tablist" aria-label="Workspace settings sections">
+        {WORKSPACE_TABS.map((t) => (
+          <button
+            key={t.id}
+            type="button"
+            role="tab"
+            aria-selected={tab === t.id}
+            className={tab === t.id ? "ms-tab active" : "ms-tab"}
+            onClick={() => setTab(t.id)}
+          >
+            {t.label}
+          </button>
+        ))}
       </div>
-      <MachinesRuntimesSection showTeamColumn />
-      <ApiKeysSection />
-      <RateLimitSection />
-      <GithubSyncSection />
-      {isSuperadmin && <HeraldProvidersSection />}
-      <AgentsSkillsSections />
+
+      {tab === "members" && <WorkspaceMembersSection />}
+      {tab === "teams" && <TeamsSection />}
+      {tab === "compute" && (
+        <>
+          <div className="card-panel mb-6" style={{ padding: "10px 12px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, borderStyle: "dashed" }}>
+            <span className="text-sm text-lx-text-secondary">Hearth operations (runs, usage, providers, runtimes, bindings, agents) have moved to <span className="font-mono text-xs">/hearth</span> — canonical ops shell. This page retains machines/runtimes/providers/agents for reference until removal (Phase 3 duplication noted).</span>
+            <Link to="/hearth/runs" className="btn btn-ghost" style={{ height: 28, padding: "0 10px", fontSize: 12, textDecoration: "none", display: "inline-flex", alignItems: "center", whiteSpace: "nowrap" }}>Open /hearth</Link>
+          </div>
+          <MachinesRuntimesSection showTeamColumn />
+        </>
+      )}
+      {tab === "access" && (
+        <>
+          <ApiKeysSection />
+          <RateLimitSection />
+        </>
+      )}
+      {tab === "integrations" && (
+        <>
+          <GithubSyncSection />
+          {isSuperadmin && <HeraldProvidersSection />}
+          <AgentsSkillsSections />
+        </>
+      )}
     </main>
   );
 }
