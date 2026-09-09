@@ -43,11 +43,12 @@ vitest run
 One install script — no clone, no repo checkout:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/yohanesgre/lexa/<tag>/scripts/install.sh | bash -s -- docker
+curl -fsSL https://install.yohanesgre.com/lexa/install.sh | bash -s -- docker
 ```
 
-Pipe a **release tag** (e.g. `v2026.1.2`), not `main` — the script content is
-pinned to the tag and never changes under your feet. Targets:
+The installer hub serves the newest release (pin with `?ref=vYYYY.MINOR.MICRO`,
+or use a raw `.../lexa/<tag>/scripts/install.sh` URL for a tag, `main` for
+bleeding edge). Targets:
 
 | Target | What it does |
 |---|---|
@@ -68,13 +69,13 @@ wiki, machines, keys, upgrades) — it installs separately and has **no deploy
 commands** (removed in cli-v2026.2.0):
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/yohanesgre/lexa/cli-v<TAG>/scripts/install-cli.sh | bash
+curl -fsSL https://install.yohanesgre.com/lexa/install-cli.sh | bash
 ```
 
 **Uninstall** (data kept unless `--purge`):
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/yohanesgre/lexa/<tag>/scripts/uninstall.sh | bash -s -- docker
+curl -fsSL https://install.yohanesgre.com/lexa/uninstall.sh | bash -s -- docker
 ```
 
 - **Upgrade = re-run `install.sh`** from the new tag (idempotent; data survives)
@@ -143,7 +144,7 @@ Design and API docs live in [`docs/`](docs/):
 | [`docs/API.md`](docs/API.md) | REST contract |
 | [`docs/LAYERS.md`](docs/LAYERS.md) | Effect service patterns, error catalog, webhook/auth flows |
 | [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) | Self-hosting via install.sh: targets, env reference, bootstrap |
-| [`docs/CLOUDFLARE_WORKERS.md`](docs/CLOUDFLARE_WORKERS.md) | Workers flavor: D1/R2/KV bindings, runtime quirks, cron |
+| [`docs/CLOUDFLARE_WORKERS.md`](docs/CLOUDFLARE_WORKERS.md) | Workers runtime: D1/R2/KV bindings, quirks, cron |
 | [`docs/GITHUB_SETUP.md`](docs/GITHUB_SETUP.md) | GitHub App setup: webhook URL/secret, private key |
 
 ## Contributing
