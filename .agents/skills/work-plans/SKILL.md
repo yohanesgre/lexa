@@ -102,6 +102,13 @@ just backfill it when noticed.
 | memory | `mem_save` without artifact path | amend with path — a pointerless summary is lost |
 | root | loose file in `status/` | move into a plan folder or archive |
 
+## Validate
+
+Run `bash .agents/skills/work-plans/scripts/plan-check.sh <plan>` at
+open and before flipping DONE. It checks scope Out, 3-line
+heartbeats, TIMELINE entry, no loose files, and DONE-has-report.
+Red → fix the artifact, then re-run.
+
 ## Non-scope
 
 This skill never touches app code, `server/`, `shared/`, `docs/`, or `wireframes/`.
