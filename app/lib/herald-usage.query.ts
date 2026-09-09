@@ -49,6 +49,8 @@ export interface HeraldPriceRow {
   model: string;
   prompt_price: number;
   completion_price: number;
+  cached_read_price: number;
+  cached_write_price: number;
   updated_at: string;
 }
 
@@ -123,7 +125,7 @@ export function useHeraldPrices() {
 export function usePutHeraldPrice() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (input: { model: string; prompt_price: number; completion_price: number }) =>
+    mutationFn: (input: { model: string; prompt_price: number; completion_price: number; cached_read_price: number; cached_write_price: number }) =>
       requestJson<HeraldPriceRow>(`/api/admin/herald/prices`, {
         method: "PUT",
         body: JSON.stringify(input),

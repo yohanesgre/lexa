@@ -83,9 +83,7 @@ function HearthUsageRoute() {
         </div>
       </section>
 
-      <div className="mt-4" style={{ height: 220 }}>
-        <UsageChart byDay={data?.byDay ?? []} isLoading={usageLoading} isError={!!error} onRetry={() => refetch()} />
-      </div>
+      <UsageChart byDay={data?.byDay ?? []} isLoading={usageLoading} isError={!!error} onRetry={() => refetch()} />
 
       <UsageByModelTable byModel={data?.byModel ?? []} isLoading={usageLoading} isError={!!error} onRetry={() => refetch()} summary={data?.summary ?? null} filters={filters} />
 
