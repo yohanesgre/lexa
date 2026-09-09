@@ -70,15 +70,23 @@ export function signOut(): Promise<void> {
   return authRequest("/sign-out", {}) as Promise<void>;
 }
 
-// Verification-token password set — the shared accept path for both
-// admin-issued set-password links (/set-password?token=) and workspace
-// invitation links (/invite?token=): the server resolves the token to the
-// account (invite accept mints the member account) and establishes the
-// session cookie. The token row is minted with the native
+// Verification-token password set for admin-issued set-password links
+// (/set-password?token=) only: the server resolves the token to the
+// existing account and establishes the session cookie. Workspace
+// invitation links (/invite?token=) live in a different table and use
+// acceptInvite below — the two token kinds are not interchangeable.
 // `reset-password:<token>` identifier (server/services/password-links.service.ts),
 // so consumption goes through better-auth's native /reset-password endpoint.
 export function setPassword(input: { newPassword: string; token: string }): Promise<SessionResponse> {
   return authRequest("/reset-password", input) as Promise<SessionResponse>;
+}
+
+// Workspace invitation accept (POST /api/auth/invite/accept — keyless,
+// session-less, the token is the auth). Creates the member account and
+// stamps accepted_at; establishes NO session — the caller signs in with
+// the returned email + chosen password afterwards.
+export function acceptInvite(input: { token: string; name: string; password: string }): Promise<{ status: boolean; email: string }> {
+  return authRequest("/invite/accept", input) as Promise<{ status: boolean; email: string }>;
 }
 
 export function changePassword(input: { currentPassword: string; newPassword: string }): Promise<void> {
