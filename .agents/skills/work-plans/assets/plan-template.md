@@ -20,6 +20,7 @@ step 1 → step 2 → DONE
 
 ## R
 {what each step needs: files, sessions, accounts, approvals}
+- memory: `mem_current_project` + `mem_context` at open (paste ts) · `mem_save` on DONE (summary + plan.md/report.md paths)
 
 ## Lanes (only when parallel — else delete this section)
 - <lane>: <files touched> — <content owned>
