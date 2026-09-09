@@ -3,15 +3,22 @@
 Order matters — run top to bottom, one lane at a time. Any FAST EXIT
 stops that lane only; others continue.
 
-1. Guards (in the lane pane, before anything else):
+1. Guards (control checkout, before worktree creation):
    ```bash
    test "${HERDR_ENV:-}" = 1          # else FAST EXIT, required: herdr session
    command -v herdr && command -v opencode2   # else FAST EXIT naming binary
-   git status --porcelain            # clean expected; dirty from unknown source → WAIT
+   git fetch origin main
    git worktree list                  # no path collision
+   git branch -a | grep <branch>      # no branch collision
    ```
-2. Isolate: `git worktree add -b <branch> .worktrees/<slug> main`
-   (fails → FAST EXIT naming cause, never proceed unisolated).
+   Control-checkout dirt is EXPECTED (other agents share it) — never gate
+   on it. The clean check runs INSIDE the fresh worktree (step 2b).
+2. Isolate: `git worktree add -b <branch> .worktrees/<plan>-<lane> origin/main`
+   (`<plan>` = work-plans folder name; fails → FAST EXIT naming cause,
+   never proceed unisolated). Then per-lane setup inside it
+   (`bun install`; copy `.env` only if a smoke needs it — never commit it).
+   2b. Clean check INSIDE the worktree: `git status --porcelain` — clean
+   expected; dirty from an unknown source → WAIT + report.
 3. Pane: `herdr pane split --current --direction right --cwd <worktree> --no-focus`
    (read the new pane ID from `.result.pane.pane_id`).
 4. Agent: `herdr agent start <name> --kind <backend> --pane <pane-id>`
@@ -33,5 +40,5 @@ stops that lane only; others continue.
 5. Drive: `herdr agent prompt <name> "<brief>" --wait --timeout 120000`;
    read via `herdr agent read <name> --source recent-unwrapped --lines 120`.
    Dead agent resumes with opencode2 `--session` (state lives in the worktree).
-6. Brief must hold: worktree, branch, files+lines, acceptance, gate,
+6. Brief must hold: absolute worktree path, branch, files+lines, acceptance, gate,
    no-commit, forbidden list (`goal/SKILL.md` Phase 4). Replies caveman-compressed.
