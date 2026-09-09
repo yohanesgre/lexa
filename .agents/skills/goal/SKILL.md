@@ -54,14 +54,18 @@ Never invent a skill ID.
 3. Ambiguous scope, missing acceptance, or architecture fork → ask the
    user with the question tool (this is the human-gated planning zone).
    Never guess on architecture; state what you would otherwise do.
-4. Triage the route BEFORE designing — lanes cost overhead, so earn them:
-   - **Sequential/simple** (one track, few files, low risk): work inline.
-     No worktree, no lanes, no herdr.
+4. Triage the route BEFORE designing — lanes cost overhead, so earn them.
+   Isolation is NOT triaged: every route executes in a fresh worktree
+   (Phase 4 isolate, after work-plans + gate) — never in the invoking
+   checkout, which other agents share.
+   - **Sequential/simple** (one track, few files, low risk): work inline
+     INSIDE the plan worktree. No lanes, no herdr.
    - **Simple + parallelizable** (≥2 independent tracks, small each,
-     disjoint files): background subagents, no worktrees.
+     disjoint files): background subagents INSIDE the same plan worktree,
+     disjoint files.
    - **Complex + parallelizable** (multi-file/risky tracks with disjoint
-     file ownership): full lanes — worktree + herdr pane + opencode2
-     per lane.
+     file ownership): full lanes — one worktree per lane + herdr pane +
+     opencode2 per lane.
    Parallelizable means: tracks share no files AND no output depends on
    another track's output. If either fails, serialize. State the chosen
    route + why in one line before proceeding.
@@ -106,14 +110,15 @@ Validate tracking with `bash .agents/skills/work-plans/scripts/plan-check.sh <pl
 
 Present for one-shot approval: frozen acceptance, waves + lanes + file
 ownership, chosen route + why, model + thinking effort per lane
-(question tool, no defaults), autonomy envelope (branch → commit →
+(question tool, no defaults), worktree path(s) + branch name(s),
+autonomy envelope (worktree → branch → commit →
 push → PR → auto-merge on green CI). Close-out runs on every
 green+met DONE by the invocation itself, not by envelope enumeration.
-User approves → Phase 4 runs
-with zero further questions. User rejects/changes → adjust Phases
+User approves → Phase 4 isolates first (fresh worktree, § Phase 4),
+then runs with zero further questions. User rejects/changes → adjust Phases
 0–3, re-present. No approval = no execution. Approval lapses after
 72h or if the goal text changed → re-present only the diff, not the
-whole gate. Lanes always branch from latest `main` at dispatch;
+whole gate. Worktrees/branches always derive from latest `main` at dispatch;
 post-approval main movement is handled by rebase-before-PR, not by
 re-gating.
 Fast path: triage = sequential/simple → gate collapses to goal
@@ -123,20 +128,40 @@ change request ("gas", "oke", "lanjut", 👍 all count; "tunggu",
 
 ## Phase 4 — Execute (route by complexity, zero questions from here)
 
-Run the approved route:
+Isolate FIRST (mandatory, every route — immediately after gate approval,
+before any code read/edit/gate/commit):
+1. `git fetch origin main`; confirm `.worktrees/` is gitignored and no
+   branch/path collision (`git worktree list`,
+   `git branch -a | grep <name>`). Control-checkout dirt is EXPECTED
+   (other agents share it) — never require a clean control checkout,
+   never branch from its working tree.
+2. Simple routes (sequential/simple, simple + parallelizable): one plan
+   worktree `git worktree add -b <branch> .worktrees/<plan> origin/main`
+   (`<plan>` = work-plans folder name; suffix on collision, never reuse).
+   Set up inside it (`bun install`; copy `.env` only if a smoke needs it —
+   never commit it); baseline `tsc --noEmit` to confirm clean.
+   `status/<plan>/` stays in the control checkout (tracking plane) — code
+   work never touches control-checkout files after this point.
+3. Complex route: skip the single plan worktree; create one worktree per
+   lane `.worktrees/<plan>-<lane>` per `references/lane-dispatch.md`
+   step 2 (same guards + per-lane setup).
+4. `git worktree add` failing (branch/path collision) → FAST EXIT naming
+   the cause — never proceed unisolated in the control checkout.
+
+Run the approved route (all code work inside the worktree(s) above):
 
 - **Complex + parallelizable** → one git worktree per lane
-  (`.worktrees/<slug>`, never `.slim/`; `.worktrees/` in `.gitignore`),
+  (`.worktrees/<plan>-<lane>`; `.worktrees/` in `.gitignore`),
   one herdr pane per lane (`pane split --cwd <worktree> --no-focus`),
   one opencode2 agent IN each pane (`pane run` / `agent start --kind
   opencode`, drive via `agent prompt --wait`, read via `agent read`).
-  Lane briefs are self-contained (worktree, branch, files+lines,
-  acceptance, gate, no-commit, forbidden list); replies
+  Lane briefs are self-contained (absolute worktree path, branch,
+  files+lines, acceptance, gate, no-commit, forbidden list); replies
   caveman-compressed. Follow `references/lane-dispatch.md` for the
   exact dispatch order (binary checks → worktree → pane → agent
   start → prompt → read).
-  Forbidden in every lane brief (opencode2 `--auto` approves what is
-  not denied): act outside the lane worktree, exfiltrate data beyond
+  Forbidden in every lane/subagent brief (opencode2 `--auto` approves what is
+  not denied): act outside the assigned worktree, exfiltrate data beyond
   declared fetches, `--force` or history rewrites on shared branches,
   commit secrets. Violation kills the lane.
   Pick lane agents by DISCOVERY, never hardcode IDs (available agents
@@ -160,8 +185,10 @@ Run the approved route:
   do the step inline and record the gap. Never invent an agent name —
   an unknown name fails the dispatch and burns a loop iteration.
 - **Simple + parallelizable** → background subagents via the subagent
-  tool, no worktrees. Same self-contained briefs.
-- **Sequential/simple** → work inline, no lanes.
+  tool INSIDE the plan worktree (cwd/workdir = worktree, disjoint files).
+  Same self-contained briefs + forbidden list; each brief pins the
+  absolute worktree path.
+- **Sequential/simple** → work inline INSIDE the plan worktree, no lanes.
 
 Lane rules: a lane that hits a contract mismatch or needs out-of-scope
 files flips to WAIT and reports — never guesses. Lanes may spawn
@@ -170,12 +197,15 @@ use subagents but MUST NOT touch anything already delegated.
 Lane lifecycle: keep worktree + branch until its PR merges (never delete
 early); removal needs explicit user approval. Resume a dead lane agent
 with opencode2 `--session` (state lives in the worktree, re-brief from
-the lane file). If `HERDR_ENV` is not `1` → FAST EXIT with reason
+the lane file). Each lane runs `git status` FIRST inside its own worktree —
+clean expected there; dirty from an unknown source → WAIT + report, never
+build on top of it (control-checkout dirt is irrelevant — lanes never touch
+it). If `HERDR_ENV` is not `1` → FAST EXIT with reason
 (required: herdr session) — never fall back silently to another route,
 never drive another client's panes. Binary check first: `herdr` and
 `opencode2` must both resolve in the lane pane (`command -v`); either
 missing → FAST EXIT naming the binary. `git worktree add` failing
-(dirty tree, branch/path collision) → FAST EXIT naming the cause —
+(branch/path collision) → FAST EXIT naming the cause —
 never proceed unisolated. Approved model erroring at dispatch →
 FAST EXIT naming the model — never silently substitute another model
 (cost/behavior was approved as-is).
@@ -246,8 +276,11 @@ separate envelope is needed. Then the merge gate takes over.
 
 ## Edge cases (checklist, bukan opsional)
 
-- Dirty worktree: lane runs `git status` FIRST — clean expected. Dirty
-  from an unknown source → WAIT + report, never build on top of it.
+- Dirty worktree: the clean check runs INSIDE the fresh worktree (`git status`
+  FIRST after creation) — clean expected there. Dirty from an unknown
+  source → WAIT + report, never build on top of it. Control-checkout dirt
+  is expected (shared with other agents) and never blocks isolate, because
+  worktrees branch from `origin/main`, not the working tree.
 - Shared-file collision: migrations numbering, CHANGELOGs, submodule
   gitlinks, and lockfiles are shared even when features look disjoint.
   Assign ownership explicitly at protocol time; on collision risk,
@@ -261,9 +294,10 @@ separate envelope is needed. Then the merge gate takes over.
   never assume file or memory state. If `mem_context` returns
   unreadable, proceed on files alone and note it.
 - Plan-env hygiene: if `status/<plan>/` already exists, suffix the plan
-  name (date/slug) — never reuse. Lane briefs pin the binary PATH and
-  set cwd to the lane worktree (missing tools = declare deviation,
-  use closest equivalent).
+  name (date/slug) — never reuse. `status/` stays in the control checkout;
+  the worktree never owns tracking files. Every brief (lane or subagent)
+  pins the binary PATH and sets cwd to the assigned worktree (missing
+  tools = declare deviation, use closest equivalent).
 
 ## Standing guardrails (every loop)
 
@@ -281,7 +315,9 @@ separate envelope is needed. Then the merge gate takes over.
 - Git guardrails before any git mutation (single trunk `main` — Section 4).
   Branch → PR → merge, never commit on `main`, never push/merge without
   explicit ask — invoking `/goal` counts as that ask for its close-out
-  commits/pushes/PRs. Stage files explicitly, check staged names for secrets.
+  worktree/branch/commits/pushes/PRs. After isolate, every code mutation
+  (edit, gate, commit) runs inside the assigned worktree — never in the
+  control checkout. Stage files explicitly, check staged names for secrets.
 - Wireframe-first for UI: `wireframes/src/` + build before React.
 - Conventional commits (`feat|fix(scope): subject`, body = WHY).
 - Submodule rule: commit+push inside the submodule first, then bump
