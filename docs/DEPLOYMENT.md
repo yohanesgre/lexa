@@ -18,17 +18,25 @@ gitignored. The tracked `.env.example` (repo root) is the dev template only.
 ## Targets
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/yohanesgre/lexa/<tag>/scripts/install.sh | bash -s -- <target> [flags]
+curl -fsSL https://install.yohanesgre.com/lexa/install.sh | bash -s -- <target> [flags]
 ```
+
+The installer hub serves the newest release with `BASE_URL` pinned to its
+tag (see `~/projects/lexa-installer`). Pin explicitly with
+`?ref=vYYYY.MINOR.MICRO`, or bypass the hub: raw
+`https://raw.githubusercontent.com/yohanesgre/lexa/<tag>/scripts/install.sh`
+for a tag, or `main` for the bleeding edge.
 
 | Target | Needs | Layout |
 |---|---|---|
-| `docker` | docker + compose plugin | deploy dir with compose file + `.env`; prebuilt image from `ghcr.io/yohanesgre/lexa` (CI: main → `:staging`, `v*` tags → `:latest`; `--image <tag>` pins) |
+| `docker` | docker + compose plugin | deploy dir with compose file + `.env`; prebuilt image from `ghcr.io/yohanesgre/lexa` (default `:latest`; `--image <tag>` pins, e.g. a version tag or `staging` to track main) |
 | `bare` | curl, `sha256sum`; bun auto-installed if absent | `~/.lexa-server` (release tarball, checksum-verified) + `lexa-start.sh`; `--systemd` writes + enables the `lexa` unit |
 | `workers` | bun (runs `bunx wrangler`), Cloudflare API token | D1 database + R2 bucket + KV namespace provisioned, migrations applied, prebuilt Worker bundle deployed (`scripts/workers-install.ts`) |
 | `dev` | git + bun | clones the repo into `./lexa`, `bun install`, `bun run setup`, `bun run dev:full` |
 
-Flags: `--flavor staging|prod` (default staging), `--port` (docker, default
+Flags: `--ref <tag|branch>` (script + artifact source: a release tag or
+`main`), `--name <name>` (workers deploy name, default `lexa`),
+`--port` (docker, default
 8080), `--bind` (default 127.0.0.1), `--domain` (workers custom domain; skips the prompt),
 `--systemd` (bare), `--image <tag>` (docker), `--from-repo <dir>` (install
 from a local checkout), `--yes`.
@@ -97,11 +105,19 @@ container (`lexa-data` volume survives); bare fetches the new tarball and
 restarts; workers reuses the Cloudflare resources and applies only new
 migrations. DB migrations run at server boot.
 
-## Seed gate
+Workers upgrades resume the previous deploy: run from the same directory,
+and the domain defaults to the last one (Enter keeps it); the token is
+reused from `CF_API_TOKEN`, `--cf-token`, or the saved `.cf-token` file
+(offered after TTY entry, `chmod 600`, never written from env/flag values).
+Only the 2 newest release tarballs are kept; starting in a directory with
+no previous deploy asks for confirmation first. On a shared machine,
+decline the token-save offer.
 
-`LXK_ENV` is the seed gate: when set and not `dev`, sample data is refused at
-three layers — the `/api/setup/seed` endpoint, the CLI wizard, and the web
-wizard's sample-data step. Staging/prod stay empty; the Backlog swimlane and
+## Sample data
+
+Sample data is offered in every environment: the web wizard shows the
+sample-data step on local installs, `/api/setup/seed` has no environment
+gate, and `bun run setup` offers it interactively. The Backlog swimlane and
 default columns appear when the first project is created.
 
 ## Who writes what
@@ -109,8 +125,8 @@ default columns appear when the first project is created.
 | Variable | Written by | Required |
 |---|---|---|
 | `API keys (lxk_...)` | minted post-setup via login session (Settings → API Keys, or `lexa-cli login` device flow) | only for machines (CLI/daemons/scripts) |
-| `LXK_ENV` | install script (`--flavor`) / setup wizard | yes (staging/prod) |
-| `LXK_PUBLIC_URL` | install script (from `--bind`/`--port`/`--domain`) | staging/prod (Better Auth baseURL) |
+| `LXK_ENV` | install script / setup wizard | yes (`production` on deployed targets) |
+| `LXK_PUBLIC_URL` | install script (from `--bind`/`--port`/`--domain`) | deployed targets (Better Auth baseURL) |
 | `CF_API_TOKEN` | operator env (workers target only) | workers only |
 | `LXK_ADMIN_EMAILS` | setup wizard (dev bootstrap) | dev only |
 | `GITHUB_APP_ID` / `GITHUB_WEBHOOK_SECRET` | hand-set once for issue sync; preserved across re-runs | only for GitHub sync |
@@ -175,7 +191,7 @@ no email transport anywhere.
   pinned release tag (`…/v2026.1.2/scripts/install.sh`), never `main` — the
   script content cannot change between your read and your run. Bare-metal
   tarballs are additionally sha256-verified by the script.
-- `.env`, `.env.staging`, `.env.prod` are gitignored — values are generated on
+- `.env*` files are gitignored — values are generated on
   the machine, never committed. The install script preserves `GITHUB_*`
   across re-runs so upgrades don't clobber sync config (DB-minted API keys
   survive in the data volume / D1).

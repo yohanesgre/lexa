@@ -528,8 +528,8 @@ POST   /api/setup/admin        body { email*, password* }
 POST   /api/setup/seed        body { flavor?: "minimal" | "full" }
 → 200 { seeded: boolean }
   Loads scripts/seed-minimal.sql or scripts/seed-dev.sql (default full) into
-  an empty DB (dev and staging flavors only). seeded=false if the file is
-  missing, the flavor is neither dev nor staging, or the DB already has
+  an empty DB (every environment). seeded=false if the file is
+  missing or the DB already has
   projects. Task keys are backfilled after loading.
 
 POST   /api/setup/complete

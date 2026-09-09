@@ -2,7 +2,7 @@ import { useState } from "react";
 import { ArrowLeft, ArrowRight, Database } from "lucide-react";
 import { completeSetup, seedSampleData, type SeedFlavor } from "../../lib/api";
 
-// Step 2 (dev + staging) — optional sample data before completing setup.
+// Step 2 (local installs) — optional sample data before completing setup.
 // Wireframe: wireframes/src/setup-wizard.html step 2.
 const OPTIONS: { flavor: SeedFlavor | "none"; title: string; description: string }[] = [
   {

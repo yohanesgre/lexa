@@ -33,11 +33,12 @@ replaces the other; either or both can be live at any time.
 6. **No data sync between flavors.** A user who wants to move from Bun to Workers
    dumps the Bun DB to SQL and replays it on D1 manually. The dev seed file is
    re-applied only via the dev bootstrap (`bun run setup` / the wizard's
-   sample-data step) — never in staging/prod (`LXK_ENV` seed gate).
+   sample-data step) in every environment.
 7. **Deploy surface:** `install.sh workers` is the operator's pick point —
    it fetches the release workers tarball, provisions D1+R2+KV via the
    Cloudflare API, applies D1 migrations, and deploys the prebuilt bundle via
-   `bunx wrangler` (staging helper: `scripts/workers-install.ts`). Repo deploys
+   `bunx wrangler` (helper: `scripts/workers-install.ts`, `--name` keys the
+   resource names). Repo deploys
    use `install.sh workers --from-repo <dir>` or `install.sh dev`. The Bun
    flavor uses the `install.sh docker` flow. See `docs/DEPLOYMENT.md` for the
    targets. (`lexa-cli deploy` was removed in cli-v2026.2.0.)

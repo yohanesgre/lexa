@@ -66,12 +66,14 @@ case "${TARGET}" in
   workers)
     require_bun
     WORK_DIR="${WORK_DIR:-lexa-workers-release}"
-    [ -f "${WORK_DIR}/deploy-${FLAVOR}/wrangler.${FLAVOR}.json" ] || die "no wrangler config at ${WORK_DIR}/deploy-${FLAVOR}/ — was workers installed here?"
+    UNINSTALL_NAME="$(resolve_deploy_name "${WORK_DIR}" "${NAME}")"
+    [ -f "${WORK_DIR}/deploy-${UNINSTALL_NAME}/wrangler.${UNINSTALL_NAME}.json" ] || die "no wrangler config at ${WORK_DIR}/deploy-${UNINSTALL_NAME}/ — was workers installed here? (pass --name if several deploys exist)"
     # Worker + route teardown via wrangler; resources (D1/R2/KV) default KEEP.
-    (cd "${WORK_DIR}" && step "wrangler delete" bunx wrangler delete --config "deploy-${FLAVOR}/wrangler.${FLAVOR}.json" || true)
+    (cd "${WORK_DIR}" && step "wrangler delete" bunx wrangler delete --config "deploy-${UNINSTALL_NAME}/wrangler.${UNINSTALL_NAME}.json" || true)
     if [ "${PURGE}" = "1" ]; then
+      rm -f "${WORK_DIR}/.cf-token"
       echo "  --purge: D1/R2/KV resources must be deleted from the CF dashboard"
-      echo "  (or via the CF API) — names: lexa-${FLAVOR} / lexa-blobs-${FLAVOR} / lexa-${FLAVOR}"
+      echo "  (or via the CF API) — see deploy-${UNINSTALL_NAME}/wrangler.${UNINSTALL_NAME}.json for resource names"
     else
       echo "  ✓ D1/R2/KV resources KEPT (delete from CF dashboard if unwanted)"
     fi
