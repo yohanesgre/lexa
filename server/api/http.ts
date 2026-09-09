@@ -1763,11 +1763,15 @@ const HeraldPriceInputSchema = Schema.Struct({
   model: Schema.String,
   prompt_price: Schema.Number,
   completion_price: Schema.Number,
+  cached_read_price: Schema.Number,
+  cached_write_price: Schema.Number,
 });
 const HeraldPriceResponseSchema = Schema.Struct({
   model: Schema.String,
   prompt_price: Schema.Number,
   completion_price: Schema.Number,
+  cached_read_price: Schema.Number,
+  cached_write_price: Schema.Number,
   updated_at: Schema.String,
 });
 
@@ -4348,7 +4352,7 @@ const adminHeraldLive = HttpApiBuilder.group(LexaApi, "adminHerald", (handlers) 
         yield* requireSuperadmin;
         const repo = yield* HeraldModelPricesRepo;
         const rows = yield* repo.list();
-        return { data: rows.map((r) => ({ model: r.model, prompt_price: r.promptPrice, completion_price: r.completionPrice, updated_at: r.updatedAt })) };
+        return { data: rows.map((r) => ({ model: r.model, prompt_price: r.promptPrice, completion_price: r.completionPrice, cached_read_price: r.cachedReadPrice, cached_write_price: r.cachedWritePrice, updated_at: r.updatedAt })) };
       }))
     )
     .handle("adminHeraldPutPrices", (req) =>
@@ -4358,6 +4362,8 @@ const adminHeraldLive = HttpApiBuilder.group(LexaApi, "adminHerald", (handlers) 
         if (!model) return yield* new InvalidArgs({ reason: "model is required" });
         const promptPrice = req.payload.prompt_price;
         const completionPrice = req.payload.completion_price;
+        const cachedReadPrice = req.payload.cached_read_price;
+        const cachedWritePrice = req.payload.cached_write_price;
         const decimalsOk = (n: number): boolean => {
           const s = String(n);
           const dot = s.indexOf(".");
@@ -4370,9 +4376,15 @@ const adminHeraldLive = HttpApiBuilder.group(LexaApi, "adminHerald", (handlers) 
         if (typeof completionPrice !== "number" || !Number.isFinite(completionPrice) || completionPrice < 0 || !decimalsOk(completionPrice)) {
           return yield* new InvalidArgs({ reason: "completion_price must be a number >= 0 with max 6 decimals" });
         }
+        if (typeof cachedReadPrice !== "number" || !Number.isFinite(cachedReadPrice) || cachedReadPrice < 0 || !decimalsOk(cachedReadPrice)) {
+          return yield* new InvalidArgs({ reason: "cached_read_price must be a number >= 0 with max 6 decimals" });
+        }
+        if (typeof cachedWritePrice !== "number" || !Number.isFinite(cachedWritePrice) || cachedWritePrice < 0 || !decimalsOk(cachedWritePrice)) {
+          return yield* new InvalidArgs({ reason: "cached_write_price must be a number >= 0 with max 6 decimals" });
+        }
         const repo = yield* HeraldModelPricesRepo;
-        const row = yield* repo.upsert({ model, promptPrice, completionPrice });
-        return { model: row.model, prompt_price: row.promptPrice, completion_price: row.completionPrice, updated_at: row.updatedAt };
+        const row = yield* repo.upsert({ model, promptPrice, completionPrice, cachedReadPrice, cachedWritePrice });
+        return { model: row.model, prompt_price: row.promptPrice, completion_price: row.completionPrice, cached_read_price: row.cachedReadPrice, cached_write_price: row.cachedWritePrice, updated_at: row.updatedAt };
       }))
     )
     .handle("adminHeraldCalls", () =>

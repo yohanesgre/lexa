@@ -846,8 +846,10 @@ CREATE INDEX idx_call_logs_model ON herald_call_logs(model);
 
 CREATE TABLE herald_model_prices (
   model TEXT PRIMARY KEY,
-  prompt_price REAL NOT NULL DEFAULT 0,
-  completion_price REAL NOT NULL DEFAULT 0,
+  prompt_price REAL NOT NULL DEFAULT 0,       -- USD per 1M input tokens
+  completion_price REAL NOT NULL DEFAULT 0,   -- USD per 1M output tokens
+  cached_read_price REAL NOT NULL DEFAULT 0,  -- USD per 1M cached-input tokens
+  cached_write_price REAL NOT NULL DEFAULT 0, -- USD per 1M cache-write tokens
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 

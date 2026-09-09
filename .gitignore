@@ -37,3 +37,7 @@ status/
 
 # Local staging deploy dir (docker-compose + .env with real API keys) — never commit
 lexa-deploy/
+
+# Slim worktrees — local orchestration checkouts, never commit
+.slim/worktrees/
+.worktrees/

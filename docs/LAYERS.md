@@ -864,13 +864,13 @@ export class HeraldCallLogsRepo extends Effect.Service<HeraldCallLogsRepo>()("Le
   // thin: insert/getById/listByProject/listByProvider/listByModel/listRecent
 }) {}
 export class HeraldModelPricesRepo extends Effect.Service<HeraldModelPricesRepo>()("Lexa/HeraldModelPricesRepo", {
-  // herald_model_prices(model PK,prompt_price,completion_price,updated_at) — OpenRouter cache, price-sync upserts
-  // thin: upsert/getByModel/list; upsert ON CONFLICT(model) DO UPDATE SET prompt_price,completion_price,updated_at=datetime('now')
+  // herald_model_prices(model PK,prompt_price,completion_price,cached_read_price,cached_write_price,updated_at) — OpenRouter cache, USD per 1M, price-sync upserts
+  // thin: upsert/getByModel/list; upsert ON CONFLICT(model) DO UPDATE SET prompt_price,completion_price,cached_read_price,cached_write_price,updated_at=datetime('now')
 }) {}
 // HeraldSettingsRepo after 0017: herald_settings dropped kind/base_url/api_key/model/vision_model —
 // now only search_provider, search_api_key, url_allowlist, engine, engine_switcher_enabled,
 // primary_supports_images, reasoning_effort, write_tools + project_id PK. Thin upsert/maskedView.
-// price-sync: server/herald/price-sync.ts fetch OpenRouter → herald_model_prices upserts (superadmin POST /admin/herald/prices/sync).
+// price-sync: server/herald/price-sync.ts fetch OpenRouter → herald_model_prices upserts, per-token strings ×1e6 to USD per 1M (superadmin POST /admin/herald/prices/sync).
 ```
 
 ### Lexa/Herald — assistant tier (server-side TanStack AI)
