@@ -7,6 +7,32 @@ All notable changes to Lexa are documented here. Format based on
 
 ## [Unreleased]
 
+## [2026.2.10] - 2026-09-09
+
+### Changed
+
+- **Deploy flavors removed** — `staging|prod` are gone from the install
+  tooling. `--ref <tag|branch>` picks `main` or a release tag, `--image`
+  pins the docker image (default `latest`), `--name` keys workers resource
+  names (default `lexa`; `staging|prod` stay as deprecated aliases so old
+  deploys keep upgrading). `LXK_ENV=production` on all deployed targets;
+  sample data is now offered in every environment.
+- **Installer hub is the default install path** —
+  `curl -fsSL https://install.yohanesgre.com/lexa/install.sh | bash`
+  serves the newest release with `BASE_URL` pinned to its tag
+  (`?ref=` pins explicitly, raw GitHub URLs still work).
+
+### Added
+
+- **Workers upgrades resume** — the previous domain becomes the prompt
+  default, the CF token is reused (`--cf-token` > `CF_API_TOKEN` > saved
+  `.cf-token`, offered after TTY entry, never written from env/flag), only
+  the 2 newest tarballs are kept, and a fresh-install confirm fires when
+  no previous deploy is found in the directory.
+- **Post-release installer verify** — `publish.yml` / `publish-cli.yml`
+  POST the warm hook and poll `X-Resolved-Tag` so a new tag is served
+  immediately instead of waiting out the resolve cache.
+
 ## [2026.2.9] - 2026-09-08
 
 ### Fixed

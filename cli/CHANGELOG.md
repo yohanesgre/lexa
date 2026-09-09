@@ -12,6 +12,21 @@ release the app image. The version lives in `cli/package.json` —
 
 ## [Unreleased]
 
+## [2026.3.0] - 2026-09-09
+
+### Added
+
+- **`lexa-cli login <url>` device flow** — login without `--key` creates a
+  pairing request, prints the verify URL, polls until approved in the
+  browser, then saves the minted user-bound key (chmod 600) and registers
+  the machine. Legacy `--url`/`--key` and env fallbacks unchanged; old
+  servers fall back with a clear message.
+
+### Fixed
+
+- **Verify URL parse guard** — device-login verify URL parsing no longer
+  throws unguarded on malformed input.
+
 ## [2026.2.0] - 2026-09-07
 
 ### Removed
