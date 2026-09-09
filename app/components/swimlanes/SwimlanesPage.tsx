@@ -128,6 +128,18 @@ function EmptyLanes({ stateFilter, milestoneFilter, isAdmin, onNew }: {
   isAdmin: boolean;
   onNew: () => void;
 }) {
+  const title =
+    stateFilter === "archived"
+      ? "No archived sprints"
+      : milestoneFilter !== ""
+        ? "No sprints match this filter"
+        : "No sprints yet";
+  const desc =
+    stateFilter === "archived"
+      ? "Archived lanes land here — Restore brings them back."
+      : milestoneFilter !== ""
+        ? "Try All milestones or clear the filter."
+        : "Create your first time-boxed sprint — Backlog above stays for unscheduled work.";
   return (
     <div className="empty-state" style={{ padding: 24 }}>
       <div className="empty-state-icon">
@@ -136,11 +148,11 @@ function EmptyLanes({ stateFilter, milestoneFilter, isAdmin, onNew }: {
           <path d="M3 10h18M8 4v16" />
         </svg>
       </div>
-      <div className="empty-state-title">No {stateFilter === "archived" ? "archived" : ""} swimlanes{stateFilter === "active" && !milestoneFilter ? " yet" : ""}</div>
+      <div className="empty-state-title">{title}</div>
       <div className="empty-state-desc">
-        {stateFilter === "archived" ? "Archived lanes land here — Restore brings them back." : "Sprints hold time-boxed work; Backlog is the permanent system lane."}
+        {desc}
       </div>
-      {stateFilter === "active" && isAdmin && (
+      {stateFilter === "active" && milestoneFilter === "" && isAdmin && (
         <button type="button" className="btn btn-primary" style={{ marginTop: 16 }} onClick={onNew}>
           <Plus size={14} strokeWidth={1.5} />
           New Swimlane
@@ -325,7 +337,7 @@ export function SwimlanesPage({ slug }: { slug: string }) {
           <div>
             <h1 className="font-display text-2xl weight-600 color-primary">Swimlanes</h1>
             <div className="font-micro text-2xs color-muted mt-1" style={{ textTransform: "uppercase", letterSpacing: "0.04em" }}>
-              {board.project.name} · {activeLaneCount(lanes)} lanes · {archivedLanes.length} archived
+              {board.project.name} · {activeLaneCount(lanes)} sprints · Backlog system · {archivedLanes.length} archived
             </div>
           </div>
           {isAdmin && (
@@ -350,13 +362,26 @@ export function SwimlanesPage({ slug }: { slug: string }) {
           </select>
         </div>
 
-        {filtered.length === 0 && (
-          <EmptyLanes
-            stateFilter={stateFilter}
-            milestoneFilter={milestoneFilter}
-            isAdmin={isAdmin}
-            onNew={() => { setEditing(null); setIsFormOpen(true); }}
-          />
+        {stateFilter === "active" && backlog && (
+          <div className="sl-group">
+            <div className="sl-group-title">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M4 6h16M4 12h16M4 18h10" /></svg>
+              System lane
+              <span className="sl-group-meta">permanent · always visible on Active — never hidden by sprint-empty or milestone filter</span>
+            </div>
+            <div className="sl-grid">
+              <BacklogRow slug={slug} backlog={backlog} isAdmin={isAdmin} onEdit={() => { setEditing(backlog); setIsFormOpen(true); }} />
+            </div>
+          </div>
+        )}
+
+        {stateFilter === "active" && (
+          <div className="sl-group">
+            <div className="sl-group-title" style={{ marginBottom: 0 }}>
+              Sprints
+              <span className="sl-group-meta">time-boxed lanes grouped by milestone below</span>
+            </div>
+          </div>
         )}
 
         {groups.map((g) => (
@@ -372,12 +397,13 @@ export function SwimlanesPage({ slug }: { slug: string }) {
           />
         ))}
 
-        {stateFilter === "active" && backlog && (
-          <div className="sl-group">
-            <div className="sl-grid">
-              <BacklogRow slug={slug} backlog={backlog} isAdmin={isAdmin} onEdit={() => { setEditing(backlog); setIsFormOpen(true); }} />
-            </div>
-          </div>
+        {filtered.length === 0 && (
+          <EmptyLanes
+            stateFilter={stateFilter}
+            milestoneFilter={milestoneFilter}
+            isAdmin={isAdmin}
+            onNew={() => { setEditing(null); setIsFormOpen(true); }}
+          />
         )}
 
         {stateFilter === "active" && archivedLanes.length > 0 && (
