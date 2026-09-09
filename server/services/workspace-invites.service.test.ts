@@ -60,7 +60,7 @@ describe("WorkspaceInvitesService", () => {
     const expiryMs = new Date(invite.expiresAt).getTime();
     expect(expiryMs - Date.now()).toBeGreaterThan(7 * 24 * 3600 * 1000 - 60_000);
     expect(expiryMs - Date.now()).toBeLessThan(7 * 24 * 3600 * 1000 + 60_000);
-    expect(link).toMatch(/^http:\/\/localhost:3000\/invite\?token=/);
+    expect(link).toMatch(/^http:\/\/localhost:5173\/invite\?token=/);
     const token = link.split("token=")[1]!;
     const row = db.prepare("SELECT token FROM workspace_invitations WHERE email = ?").get("new.user@lexa.dev") as { token: string } | null;
     expect(row?.token).toBe(token);

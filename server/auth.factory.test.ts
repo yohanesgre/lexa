@@ -65,8 +65,8 @@ describe("createAuth(env) per-request factory", () => {
 
   it("falls back to Bun-host defaults when keys are absent", () => {
     const lexa = createAuth({ DATABASE_PATH: dbPath });
-    expect(lexa.publicUrl).toBe("http://localhost:3000");
-    expect(lexa.trustedOrigins).toEqual(["http://localhost:3000"]);
+    expect(lexa.publicUrl).toBe("http://localhost:5173");
+    expect(lexa.trustedOrigins).toEqual(["http://localhost:5173"]);
   });
 
   it("two factories from different envs are isolated", () => {

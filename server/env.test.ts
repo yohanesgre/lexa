@@ -50,7 +50,7 @@ describe("resolvers", () => {
   it("applies Bun-host defaults when keys are absent", () => {
     expect(resolvePublicUrl({})).toBe(DEFAULT_PUBLIC_URL);
     expect(resolveDatabasePath({})).toBe(DEFAULT_DATABASE_PATH);
-    expect(DEFAULT_PUBLIC_URL).toBe("http://localhost:3000");
+    expect(DEFAULT_PUBLIC_URL).toBe("http://localhost:5173");
     expect(DEFAULT_DATABASE_PATH).toBe("/app/data/lexa.db");
   });
 
