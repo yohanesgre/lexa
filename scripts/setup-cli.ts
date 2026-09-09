@@ -4,6 +4,8 @@
  *
  *   bun run setup                                      # interactive, dev (.env)
  *   bun run setup --env-file .env.prod --admin-email ops@x.com --yes
+ *   bun run setup --no-seed                            # empty workspace, no boot seed
+ *   bun run setup --seed                               # force sample data non-interactively
  *
  * Prompts for the admin email (LXK_ADMIN_EMAILS) + the superadmin password,
  * runs migrations, creates the superadmin account (Better Auth
@@ -161,27 +163,59 @@ async function main() {
     }
   }
 
-  // 6. Seed sample data — offered in every environment.
+  // 6. Seed sample data — offered in every environment. The choice is
+  //    persisted as LXK_SEED_DEV so `dev:full` boot-seeding respects an
+  //    explicit N (otherwise the boot seed would resurrect sample data
+  //    right after setup).
   console.log("\n── Sample data ──");
   const db = new Database(DB_PATH);
+  const seedFile = resolve(process.cwd(), "scripts/seed-dev.sql");
+  const runSeedFile = (): boolean => {
+    if (!existsSync(seedFile)) {
+      console.log("  Seed file missing — skipping.");
+      return false;
+    }
+    try {
+      db.exec(readFileSync(seedFile, "utf-8"));
+      console.log("  Seeded sample data.");
+      return true;
+    } catch (e) {
+      console.error(`  Seed failed: ${(e as Error).message}`);
+      return false;
+    }
+  };
+  let seededNow = false;
+  let seedChoice: "yes" | "no" | null = null;
   const projectCount = db.query("SELECT COUNT(*) c FROM projects").get() as { c: number };
   if (projectCount.c > 0) {
     console.log("  Projects exist — skipping seed.");
+  } else if (hasFlag("--seed") && hasFlag("--no-seed")) {
+    console.error("  ERROR: --seed and --no-seed are mutually exclusive");
+    process.exit(1);
+  } else if (hasFlag("--seed")) {
+    seededNow = runSeedFile();
+    seedChoice = "yes";
+  } else if (hasFlag("--no-seed")) {
+    console.log("  Skipping sample data (--no-seed).");
+    console.log("  Boot seeding disabled (LXK_SEED_DEV=0) — dev:full will stay empty.");
+    seedChoice = "no";
   } else if (NON_INTERACTIVE) {
     console.log("  Non-interactive — skipping sample data (run interactively to seed).");
   } else {
     const seed = ask("Include sample data (dev projects + wiki)?", "y");
-    if (seed.toLowerCase() !== "n") {
-      const seedFile = resolve(process.cwd(), "scripts/seed-dev.sql");
-      if (existsSync(seedFile)) {
-        try {
-          db.exec(readFileSync(seedFile, "utf-8"));
-          console.log("  Seeded sample data.");
-        } catch (e) {
-          console.error(`  Seed failed: ${(e as Error).message}`);
-        }
-      }
+    if (seed.trim().toLowerCase().startsWith("n")) {
+      console.log("  Skipping sample data.");
+      console.log("  Boot seeding disabled (LXK_SEED_DEV=0) — dev:full will stay empty.");
+      seedChoice = "no";
+    } else {
+      seededNow = runSeedFile();
+      seedChoice = "yes";
     }
+  }
+  if (seedChoice !== null) {
+    env.LXK_SEED_DEV = seedChoice === "yes" ? "1" : "0";
+    writeEnv(envFile, env);
+    console.log(`  Wrote ${envFile} (LXK_SEED_DEV=${env.LXK_SEED_DEV})`);
   }
   // 7. Lock setup — CLI-provisioned instances are complete; /api/setup/*
   //    mutating endpoints stay locked from now on.
@@ -203,8 +237,13 @@ async function main() {
   console.log("  Run the dev stack:  bun run dev:full");
   console.log("  Frontend:           http://localhost:5173  (vite, live reload)");
   console.log("  API (optional):     http://localhost:3000  (serves the built app)");
+  if (seededNow) {
   console.log("  NOTE: seeded member users have no password — log in as the");
   console.log("        superadmin and issue set-password links from the Members UI.");
+  } else if (seedChoice === "no") {
+  console.log("  Workspace is empty — create your first project from the UI.");
+  console.log("  To seed later: LXK_SEED_DEV=1 bun run dev:full (empty DB only).");
+  }
   } else {
     console.log("  Deploy via scripts/install.sh (see docs/DEPLOYMENT.md).");
     console.log("  Health:             curl https://<host>/api/health");
