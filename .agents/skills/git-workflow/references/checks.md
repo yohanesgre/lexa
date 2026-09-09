@@ -49,3 +49,29 @@ Local `verify-gate.sh` covers the fast subset (first 3 + secrets + wireframes). 
 - Any gate red → fix, don't commit with `--no-verify`.
 - If you must bypass for WIP, use branch `wip/<slug>` and note in commit body `WIP: reason — will gate before PR`.
 - Never tag release with red gate.
+
+## Scoped reruns (save loop iterations)
+
+Full suite is slow (~2 min) and can flake under parallel load (API `beforeAll`
+hook timeouts). On red, rerun ONLY the failed files before concluding anything:
+
+```bash
+bun run test -- <path1> <path2>  # vitest scoped run, same config
+```
+
+Capture exit codes before pipes — `cmd | tail` reports `tail`'s status.
+Use `set -o pipefail` or save output first, then inspect:
+
+```bash
+set -o pipefail
+bun run test 2>&1 | tee /tmp/opencode/gate-<slug>.log | tail -n 30
+```
+
+Attribute reds on a pristine `main` worktree, never on the feature branch:
+
+```bash
+git worktree add .worktrees/<slug>-main main  # .worktrees/ is gitignored
+cd .worktrees/<slug>-main && bun run test -- <failed files>
+# identical failure on main = pre-existing (declare in PR body, proceed);
+# green on main = branch caused it (fix first). Remove worktree after merge.
+```

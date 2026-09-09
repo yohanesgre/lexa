@@ -776,8 +776,25 @@ export function testHeraldProvider(id: string): Promise<{ ok: boolean; latencyMs
   return request(`${BASE}/admin/herald/providers/${id}/test`, { method: "POST" });
 }
 
+export interface HeraldProviderHealth {
+  providerId: string;
+  circuitState: "open" | "closed" | "half-open";
+  failureCount: number;
+  openedAt: string | null;
+  lastProbeAt: string | null;
+  consecutiveFailures: number;
+}
+
+export function getHeraldProviderHealth(id: string): Promise<HeraldProviderHealth> {
+  return request(`${BASE}/admin/herald/providers/${encodeURIComponent(id)}/health`);
+}
+
+export function probeHeraldProvider(id: string): Promise<HeraldProviderHealth> {
+  return request(`${BASE}/admin/herald/providers/${encodeURIComponent(id)}/probe`, { method: "POST" });
+}
+
 export function fetchHeraldProviderModels(id: string): Promise<{ data: HeraldProviderModel[] }> {
-  return request(`${BASE}/admin/herald/providers/${id}/models`, { method: "POST" });
+  return request(`${BASE}/admin/herald/providers/${encodeURIComponent(id)}/models`, { method: "POST" });
 }
 
 export function updateHeraldProviderModel(id: string, modelId: string, patch: { enabled?: boolean | undefined; priority?: number }): Promise<HeraldProviderModel> {

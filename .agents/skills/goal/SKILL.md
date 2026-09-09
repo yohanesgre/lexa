@@ -16,6 +16,9 @@ for a human. Safety after the gate comes from automated rails below.
 The user reads wave reports async; the loop never blocks on them.
 Approving the execution gate pre-authorizes lanes end-to-end
 (branch → commit → push → PR → auto-merge on green CI).
+Invoking `/goal` IS the explicit ask for that close-out lifecycle:
+every green+met DONE ends in commit → push → PR, no separate
+envelope needed. The gate still approves scope and waves.
 
 Runtime: opencode2 (v2) only. Assumed surfaces: herdr CLI (`pane
 split/run`, `agent start/prompt/wait/read`), opencode2 flags (`--auto`,
@@ -95,13 +98,18 @@ criterion per work item, each paired with its verify command
 (`tsc --noEmit`, which `test:*` lane, which manual smoke). Waves verify
 against this frozen list — never invent new acceptance mid-execution.
 Record the dispatched model + thinking effort per lane in `plan.md` (R).
+Record the execution-gate ack in `plan.md` as `gate: <ISO8601> <who> <branch>`.
+Prefix lane status msgs with `W<n>i<m>` so loop position survives scrollback.
+Validate tracking with `bash .agents/skills/work-plans/scripts/plan-check.sh <plan>` at open and before DONE.
 
 ## Execution gate (LAST human gate — nothing human after this)
 
 Present for one-shot approval: frozen acceptance, waves + lanes + file
 ownership, chosen route + why, model + thinking effort per lane
 (question tool, no defaults), autonomy envelope (branch → commit →
-push → PR → auto-merge on green CI). User approves → Phase 4 runs
+push → PR → auto-merge on green CI). Close-out runs on every
+green+met DONE by the invocation itself, not by envelope enumeration.
+User approves → Phase 4 runs
 with zero further questions. User rejects/changes → adjust Phases
 0–3, re-present. No approval = no execution. Approval lapses after
 72h or if the goal text changed → re-present only the diff, not the
@@ -124,7 +132,9 @@ Run the approved route:
   opencode`, drive via `agent prompt --wait`, read via `agent read`).
   Lane briefs are self-contained (worktree, branch, files+lines,
   acceptance, gate, no-commit, forbidden list); replies
-  caveman-compressed.
+  caveman-compressed. Follow `references/lane-dispatch.md` for the
+  exact dispatch order (binary checks → worktree → pane → agent
+  start → prompt → read).
   Forbidden in every lane brief (opencode2 `--auto` approves what is
   not denied): act outside the lane worktree, exfiltrate data beyond
   declared fetches, `--force` or history rewrites on shared branches,
@@ -134,7 +144,19 @@ Run the approved route:
   agent list and match by role: implementer (bounded build/fix),
   reviewer (correctness/scope/edge cases), researcher (docs/codebase
   lookup), planner (multi-step breakdown). For herdr, run `herdr agent`
-  to list kinds and match the same roles. If no fitting agent exists,
+  to list kinds and match the same roles. herdr kinds name backends,
+  not roles — the role travels in the brief: implementer → subagent
+  `swe`; researcher → `explorer-jr` / `librarian-jr`;
+  planner → `planner`; reviewer → `reviewer`. herdr has no opencode2
+  kind: drive opencode2 with `opencode2 run --auto --model` (a model
+  with stored creds — see `opencode2 auth list`; the default model
+  errors `No cookie auth cred`); warm a fresh
+  agent with one trivial prompt before the brief. Wait for lane output
+  with `bun .agents/skills/goal/scripts/lane-wait.ts` (reactive
+  sentinel wait — never fixed `sleep`); the runner-file vehicle is
+  prescribed in `references/lane-dispatch.md` step 4.
+  Dispatch with `--model`/`--agent` matching the `plan.md` (R) record.
+  If no fitting agent exists,
   do the step inline and record the gap. Never invent an agent name —
   an unknown name fails the dispatch and burns a loop iteration.
 - **Simple + parallelizable** → background subagents via the subagent
@@ -169,12 +191,17 @@ integration — trust lane output, but verify before commit):
 - fe: `tsc --noEmit` + `test:fe`.
 - docs-only: reviewer read (names/numbers match source files verbatim).
 Evidence rule: paste gate output tails into the lane report — a bare
-"tests pass" without output does not count as green.
+"tests pass" without output does not count as green. Attach the full
+gate log path (`$GATE_LOG_DIR/gate-*.log` from `verify-gate.sh`)
+alongside the tails.
 Pre-existing failures: lane suite red → rerun the SAME suite on a
 pristine `main` checkout → identical failure = pre-existing: declare
 it in the PR body and proceed; new failure = lane fixes it first.
-Missing tool: use the closest equivalent (`bun x` for missing `bunx`,
-direct `node_modules/.bin`) and declare the deviation.
+Scoped reruns and the pristine-main recipe live in
+`git-workflow/references/checks.md`.
+Missing tool: `command -v` first, then the closest equivalent, and
+declare the deviation. Known pairs: `bunx` → `bun x`;
+`tsc` → `bun run typecheck`.
 
 End of every wave: gates + FROZEN acceptance. Green + met → reviewer
 pass → report + DONE + `mem_save`. Red or unmet → adjust the plan,
@@ -193,7 +220,9 @@ Merge gate: PR auto-merges when CI is green. CI red → fix loop (counts
 toward the loop guard); unfixable within budget → leave open + report.
 Merge BLOCKED BY POLICY (e.g. required-human-review rule, not red CI)
 → leave open + report immediately, never burn loop iterations polling
-it. Worktree/branch removal after merge needs no approval inside `/goal`
+it. PR body carries report excerpts (result + gate tails +
+deviations) — `status/` is gitignored, so reports travel via the PR
+body, not the repo. Worktree/branch removal after merge needs no approval inside `/goal`
 (the invocation pre-authorized the full lifecycle); keep them until
 merged, then clean up.
 
@@ -206,6 +235,14 @@ report. Lane findings live in the lane file (+ TIMELINE line);
 `report.md` is owned by the orchestrator and aggregates lanes.
 Report progress per wave as: state, commit sha, one-line
 test summary, concerns (if any) — nothing else.
+
+Auto close-out: a wave that is green + met with its reviewer pass
+recorded always commits on its branch (conventional message, body =
+WHY), pushes (`git push -u origin <branch>`), and opens a PR (base
+`main`, body = result + gate tails + deviations). Invoking `/goal`
+is the explicit ask for this lifecycle (`git-workflow` §1 item 10 —
+the invocation enumerates branch → commit → push → PR), so no
+separate envelope is needed. Then the merge gate takes over.
 
 ## Edge cases (checklist, bukan opsional)
 
@@ -221,7 +258,8 @@ test summary, concerns (if any) — nothing else.
 - Files are truth: terminal scrollback is ephemeral. Lane progress
   lives in lane files + `report.md`. After context compaction, re-read
   `plan.md` + lane files AND run `mem_context` before continuing —
-  never assume file or memory state.
+  never assume file or memory state. If `mem_context` returns
+  unreadable, proceed on files alone and note it.
 - Plan-env hygiene: if `status/<plan>/` already exists, suffix the plan
   name (date/slug) — never reuse. Lane briefs pin the binary PATH and
   set cwd to the lane worktree (missing tools = declare deviation,
@@ -242,7 +280,8 @@ test summary, concerns (if any) — nothing else.
   the lane and is reported).
 - Git guardrails before any git mutation (single trunk `main` — Section 4).
   Branch → PR → merge, never commit on `main`, never push/merge without
-  explicit ask. Stage files explicitly, check staged names for secrets.
+  explicit ask — invoking `/goal` counts as that ask for its close-out
+  commits/pushes/PRs. Stage files explicitly, check staged names for secrets.
 - Wireframe-first for UI: `wireframes/src/` + build before React.
 - Conventional commits (`feat|fix(scope): subject`, body = WHY).
 - Submodule rule: commit+push inside the submodule first, then bump
