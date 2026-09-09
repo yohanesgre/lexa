@@ -16,10 +16,15 @@ stops that lane only; others continue.
    (read the new pane ID from `.result.pane.pane_id`).
 4. Agent: `herdr agent start <name> --kind <backend> --pane <pane-id>`
    (role travels in the brief, not the kind; map in `goal/SKILL.md` Phase 4).
-   No opencode2 kind exists — drive opencode2 without it: `herdr pane run
-   <pane> "cd <worktree> && opencode2 run --auto --model
-   <provider/model-with-stored-creds> '<brief>'"`, then `pane wait-output`
-   for the done marker and `pane read`. `--model` is required: the
+   No opencode2 kind exists — drive opencode2 without it: write the lane
+   brief to a runner file `<worktree>/../<slug>-runner.sh` (or
+   `/tmp/opencode/<slug>-runner.sh`), run `herdr pane run <pane>
+   "bash <runner>"`, then wait with
+   `bun .agents/skills/goal/scripts/lane-wait.ts <pane> <sentinel>
+   [timeout-ms]`. The runner file keeps the sentinel out of the pane's
+   command echo, so `wait-output --match` can only fire on real
+   completion — never match on text that also appears in the dispatched
+   command. `--model` is required: the
    default model needs cookie auth (`No cookie auth cred`); check
    `opencode2 auth list` first. Warm up with one trivial prompt first;
    a fresh `opencode` boot can fail with a postinstall error — record

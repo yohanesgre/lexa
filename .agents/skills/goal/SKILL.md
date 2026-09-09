@@ -146,7 +146,10 @@ Run the approved route:
   kind: drive opencode2 with `opencode2 run --auto --model` (a model
   with stored creds — see `opencode2 auth list`; the default model
   errors `No cookie auth cred`); warm a fresh
-  agent with one trivial prompt before the brief.
+  agent with one trivial prompt before the brief. Wait for lane output
+  with `bun .agents/skills/goal/scripts/lane-wait.ts` (reactive
+  sentinel wait — never fixed `sleep`); the runner-file vehicle is
+  prescribed in `references/lane-dispatch.md` step 4.
   Dispatch with `--model`/`--agent` matching the `plan.md` (R) record.
   If no fitting agent exists,
   do the step inline and record the gap. Never invent an agent name —
