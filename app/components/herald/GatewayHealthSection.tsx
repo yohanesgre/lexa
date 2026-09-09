@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import { useHeraldProviders, useHeraldProvidersHealth } from "../../lib/queries/herald-admin";
+import { useHeraldProviders, useHeraldProvidersHealth, useProbeHeraldProvider } from "../../lib/queries/herald-admin";
 import type { HeraldProviderHealth } from "../../lib/api";
 
 type Circuit = HeraldProviderHealth["circuitState"];
@@ -22,6 +22,7 @@ export function GatewayHealthSection() {
   const { data: providers, isLoading, isError, refetch } = useHeraldProviders();
   const ids = useMemo(() => (providers ?? []).map((p) => p.id), [providers]);
   const health = useHeraldProvidersHealth(ids);
+  const probe = useProbeHeraldProvider();
   const byId = useMemo(() => new Map(health.map((h, i) => [ids[i]!, h])), [health, ids]);
   const settled = health.every((h) => !h.isPending);
   const worst = settled ? worstState(health.map((h) => h.data?.circuitState)) : null;
@@ -73,7 +74,7 @@ export function GatewayHealthSection() {
                     </td>
                     <td className="font-mono text-xs color-muted">{h.data?.openedAt ?? "—"}</td>
                     <td className="font-mono text-xs color-secondary">{h.data?.lastProbeAt ?? "—"}</td>
-                    <td style={{ textAlign: "right" }}><button className="btn btn-ghost btn-sm" disabled title="No probe endpoint — health is read-only"><svg width={12} height={12} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5}><path d="M21 12a9 9 0 1 1-9-9c2.5 0 4.7 1 6.3 2.7" /><path d="M21 3v6h-6" /></svg> Probe</button></td>
+                    <td style={{ textAlign: "right" }}><button className={state === "open" ? "btn btn-primary btn-sm" : "btn btn-ghost btn-sm"} disabled={probe.isPending} title="Run live upstream test and update breaker state" onClick={() => probe.mutate(p.id)}><svg width={12} height={12} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5}><path d="M21 12a9 9 0 1 1-9-9c2.5 0 4.7 1 6.3 2.7" /><path d="M21 3v6h-6" /></svg> {probe.isPending && probe.variables === p.id ? "Probing…" : "Probe"}</button></td>
                   </tr>
                 );
               })}

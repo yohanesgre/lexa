@@ -1797,6 +1797,11 @@ GET    /api/admin/herald/providers/:id/health   (superadmin)
 → 200 { providerId: string, circuitState: "open"|"closed"|"half-open", failureCount: number, openedAt: string|null, lastProbeAt: string|null, consecutiveFailures: number }
   | 403 FORBIDDEN | 404 (provider unknown → 404, missing health row → 200 default closed)
   Circuit breaker (pla-1): 3 consecutive fails in 5m → open 5m → half-open allow 1 probe (lazy, isAllowed handles transition).
+
+POST   /api/admin/herald/providers/:id/probe   (superadmin)
+→ 200 same health row shape as GET .../health (always 200 — upstream outcome is carried by the row, not the status)
+  | 403 FORBIDDEN | 404 (provider unknown)
+  Live probe: listModels against the stored provider row (same config as POST .../test), then recordSuccess (breaker closed, counts reset) or recordFailure (counts bumped, may re-open) before returning the row. Bypasses isAllowed — use after fixing the upstream.
 ```
 
 POST   /api/herald/tasks

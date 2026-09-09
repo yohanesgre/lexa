@@ -30,6 +30,22 @@ export function useHeraldProvidersHealth(providerIds: string[]) {
   });
 }
 
+export function useProbeHeraldProvider() {
+  const qc = useQueryClient();
+  const toast = useToast();
+  return useMutation({
+    mutationFn: (id: string) => api.probeHeraldProvider(id),
+    onSuccess: (row) => {
+      qc.setQueryData(["herald-provider-health", row.providerId], row);
+      if (row.circuitState === "closed") toast.push("success", "Probe succeeded — breaker closed");
+      else toast.push("warning", `Probe finished — breaker ${row.circuitState}`);
+    },
+    onError: (err) => {
+      toast.push("error", "Probe failed", toastMessage(err));
+    },
+  });
+}
+
 export function useCreateProvider() {
   const qc = useQueryClient();
   const toast = useToast();
