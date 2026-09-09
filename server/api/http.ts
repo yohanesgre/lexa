@@ -1,7 +1,7 @@
 import { HttpApi, HttpApiBuilder, HttpApiEndpoint, HttpApiGroup, HttpMiddleware, HttpServerResponse } from "@effect/platform";
 import { HttpServerRequest } from "@effect/platform/HttpServerRequest";
 import * as Multipart from "@effect/platform/Multipart";
-import { Cause, Context, Effect, Layer, ManagedRuntime, Schema, Stream } from "effect";
+import { Cause, Context, Effect, Either, Layer, ManagedRuntime, Schema, Stream } from "effect";
 import { fileURLToPath } from "node:url";
 import { join, dirname } from "node:path";
 import { LoggerLayer } from "../logging/logger";
@@ -1790,7 +1790,8 @@ const adminHeraldGroup = HttpApiGroup.make("adminHerald")
   .add(HttpApiEndpoint.post("adminHeraldProviderModels", "/admin/herald/providers/:id/models").setPath(Schema.Struct({ id: Schema.String })).addSuccess(Schema.Struct({ data: Schema.Array(Schema.Any) })))
   .add(HttpApiEndpoint.patch("adminHeraldUpdateModel", "/admin/herald/providers/:id/models/:modelId").setPath(Schema.Struct({ id: Schema.String, modelId: Schema.String })).setPayload(Schema.Struct({ enabled: Schema.optional(Schema.Boolean), priority: Schema.optional(Schema.Number) })).addSuccess(Schema.Any))
   .add(HttpApiEndpoint.post("adminHeraldReorderModels", "/admin/herald/providers/:id/models/reorder").setPath(Schema.Struct({ id: Schema.String })).setPayload(Schema.Struct({ orderedIds: Schema.Array(Schema.String) })).addSuccess(Schema.Struct({ data: Schema.Array(Schema.Any) })))
-  .add(HttpApiEndpoint.get("adminHeraldHealth", "/admin/herald/providers/:id/health").setPath(Schema.Struct({ id: Schema.String })).addSuccess(Schema.Struct({ providerId: Schema.String, circuitState: Schema.Literal("open", "closed", "half-open"), failureCount: Schema.Number, openedAt: Schema.NullOr(Schema.String), lastProbeAt: Schema.NullOr(Schema.String), consecutiveFailures: Schema.Number })));
+  .add(HttpApiEndpoint.get("adminHeraldHealth", "/admin/herald/providers/:id/health").setPath(Schema.Struct({ id: Schema.String })).addSuccess(Schema.Struct({ providerId: Schema.String, circuitState: Schema.Literal("open", "closed", "half-open"), failureCount: Schema.Number, openedAt: Schema.NullOr(Schema.String), lastProbeAt: Schema.NullOr(Schema.String), consecutiveFailures: Schema.Number })))
+  .add(HttpApiEndpoint.post("adminHeraldProbeProvider", "/admin/herald/providers/:id/probe").setPath(Schema.Struct({ id: Schema.String })).addSuccess(Schema.Struct({ providerId: Schema.String, circuitState: Schema.Literal("open", "closed", "half-open"), failureCount: Schema.Number, openedAt: Schema.NullOr(Schema.String), lastProbeAt: Schema.NullOr(Schema.String), consecutiveFailures: Schema.Number })));
 
 const projectHeraldUsageGroup = HttpApiGroup.make("projectHeraldUsage")
   .add(HttpApiEndpoint.get("projectHeraldUsage", "/projects/:slug/herald/usage").setPath(SlugPath).addSuccess(HeraldUsageResponseSchema));
@@ -4537,6 +4538,27 @@ const adminHeraldLive = HttpApiBuilder.group(LexaApi, "adminHerald", (handlers) 
         yield* requireSuperadmin;
         const svc = yield* HeraldHealthService;
         return yield* svc.getHealth(req.path.id);
+      }))
+    )
+    .handle("adminHeraldProbeProvider", (req) =>
+      respond(Effect.gen(function* () {
+        yield* requireSuperadmin;
+        const pRepo = yield* HeraldProvidersRepo;
+        const mRepo = yield* HeraldModelsRepo;
+        const healthSvc = yield* HeraldHealthService;
+        const prov = yield* pRepo.getById(req.path.id);
+        const models = yield* mRepo.listByProvider(req.path.id).pipe(Effect.catchAll(() => Effect.succeed([] as Array<{ kind: string; enabled: boolean; modelId: string }>)));
+        const firstEnabled = (models as Array<{ kind: string; enabled: boolean; modelId: string }>).find((m) => m.enabled);
+        const kind: ProviderConfig["kind"] = normalizeProviderKind(firstEnabled?.kind ?? (models[0] as { kind?: string } | undefined)?.kind ?? "openai_compatible");
+        const model = firstEnabled?.modelId ?? (models[0] as { modelId?: string } | undefined)?.modelId ?? "test";
+        const cfg: ProviderConfig = { kind, baseUrl: prov.base_url, apiKey: prov.api_key, model, sessionId: `provider-probe-${req.path.id}` };
+        const probed = yield* Effect.tryPromise({
+          try: () => listModels(cfg),
+          catch: (e) => e as ProviderAuthFailed | ProviderUnreachable,
+        }).pipe(Effect.either);
+        if (Either.isRight(probed)) yield* healthSvc.recordSuccess(req.path.id);
+        else yield* healthSvc.recordFailure(req.path.id);
+        return yield* healthSvc.getHealth(req.path.id);
       }))
     )
 );

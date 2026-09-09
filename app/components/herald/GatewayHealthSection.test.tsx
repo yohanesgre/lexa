@@ -3,12 +3,13 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { ToastProvider } from "../ui/Toast";
 import { GatewayHealthSection } from "./GatewayHealthSection";
 
 function wrapper() {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
   return ({ children }: { children: React.ReactNode }) => (
-    <QueryClientProvider client={qc}>{children}</QueryClientProvider>
+    <QueryClientProvider client={qc}><ToastProvider>{children}</ToastProvider></QueryClientProvider>
   );
 }
 
@@ -78,6 +79,41 @@ describe("GatewayHealthSection", () => {
     vi.stubGlobal("fetch", routeFetch(() => ({ data: [] })));
     render(<GatewayHealthSection />, { wrapper: wrapper() });
     await waitFor(() => expect(screen.getByText("No providers configured.")).toBeTruthy());
+  });
+
+  it("Probe POSTs and updates the row from the response", async () => {
+    const single = { data: [providers.data[0]] };
+    const fetchMock = vi.fn().mockImplementation((url: string, init?: RequestInit) => {
+      if (url.endsWith("/probe")) {
+        return Promise.resolve({ ok: true, json: async () => ({ ...healthP1, circuitState: "open", failureCount: 3 }) });
+      }
+      return Promise.resolve({ ok: true, json: async () => (url.endsWith("/health") ? healthP1 : single) });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const user = userEvent.setup();
+    render(<GatewayHealthSection />, { wrapper: wrapper() });
+    await waitFor(() => expect(screen.getByText("Opencode Go")).toBeTruthy());
+    await user.click(screen.getByRole("button", { name: "Probe" }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining("/probe"), expect.objectContaining({ method: "POST" })));
+    await waitFor(() => expect(screen.getAllByText("open").length).toBeGreaterThanOrEqual(2));
+    expect(screen.getByText("3")).toBeTruthy();
+  });
+
+  it("Probe transport failure shows error toast, row untouched", async () => {
+    const single = { data: [providers.data[0]] };
+    const fetchMock = vi.fn().mockImplementation((url: string) => {
+      if (url.endsWith("/probe")) {
+        return Promise.resolve({ ok: false, json: async () => ({ error: { code: "FORBIDDEN", message: "nope" } }) });
+      }
+      return Promise.resolve({ ok: true, json: async () => (url.endsWith("/health") ? healthP1 : single) });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const user = userEvent.setup();
+    render(<GatewayHealthSection />, { wrapper: wrapper() });
+    await waitFor(() => expect(screen.getByText("Opencode Go")).toBeTruthy());
+    await user.click(screen.getByRole("button", { name: "Probe" }));
+    await waitFor(() => expect(screen.getByText("Probe failed")).toBeTruthy());
+    expect(screen.getByText("0")).toBeTruthy();
   });
 
   it("marks failed provider row error while others render", async () => {
