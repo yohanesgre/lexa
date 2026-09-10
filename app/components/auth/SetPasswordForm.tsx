@@ -10,7 +10,7 @@ import { NoticeDanger } from "../ui/NoticeDanger";
 // Both carry a Better Auth verification token; the server resolves it to the
 // account (invite accept mints the member account), sets the password and
 // establishes the session cookie. Tokens are single-use with 7d expiry.
-export function SetPasswordForm({ token }: { token: string }) {
+export function SetPasswordForm({ token, onDone }: { token: string; onDone?: () => void }) {
   const navigate = useNavigate();
   const setPassword = useSetPassword();
   const [password, setPasswordValue] = useState("");
@@ -30,7 +30,10 @@ export function SetPasswordForm({ token }: { token: string }) {
     setPassword.mutate(
       { newPassword: password, token },
       {
-        onSuccess: () => setDone(true),
+        onSuccess: () => {
+          setDone(true);
+          onDone?.();
+        },
       }
     );
   };

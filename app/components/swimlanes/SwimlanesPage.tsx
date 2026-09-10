@@ -435,6 +435,7 @@ export function SwimlanesPage({ slug }: { slug: string }) {
           swimlane={editing}
           isOpen={isFormOpen}
           onClose={() => setIsFormOpen(false)}
+          onDelete={() => { setIsFormOpen(false); setDeleteTarget(editing!); }}
           onSubmit={(input) => submitSwimlaneForm(editing, input, updateSwimlane, createSwimlane)}
         />
       )}

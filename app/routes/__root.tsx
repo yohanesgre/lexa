@@ -7,6 +7,7 @@ import { ToastProvider } from "../components/ui/Toast";
 import { ProjectSelectionProvider } from "../lib/project-selection";
 import { TeamSelectionProvider } from "../lib/team-selection";
 import { AppShell } from "../components/layout/AppShell";
+import { PageNotFound } from "../components/PageNotFound";
 import { getSession } from "../lib/auth";
 import type { RouterContext } from "../router";
 
@@ -51,6 +52,7 @@ export const Route = createRootRouteWithContext<RouterContext>()({
       },
     ],
   }),
+  notFoundComponent: PageNotFound,
   component: RootComponent,
 });
 

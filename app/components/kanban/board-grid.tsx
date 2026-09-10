@@ -26,6 +26,8 @@ export interface BoardGridProps {
   toggleLane: (laneId: string) => void;
   onOpenCreateTask?: (columnId: string, swimlaneId?: string) => void;
   onSelectTask: (task: Task) => void;
+  onDelete?: ((id: string) => void) | undefined;
+  selectedTaskId: string | null;
   newTaskIds: Set<string>;
   shakeTaskId: string | null;
   archiveTask: { mutate: (input: { id: string }) => unknown };
@@ -40,7 +42,8 @@ export function BoardGrid(props: BoardGridProps) {
     slug, board, columns, rows, archivedLanes, showArchived, localTasks,
     childrenByParent, blockedBy, cardHidden, cardDimmed, columnTotalCount, columnDimmed,
     cellDropId, flashColumnId, collapsed, toggleLane, onOpenCreateTask, onSelectTask,
-    newTaskIds, shakeTaskId, archiveTask, restoreTask, collapsedParents, setCollapsedParents, onAddColumn,
+    onDelete, selectedTaskId, newTaskIds, shakeTaskId, archiveTask, restoreTask,
+    collapsedParents, setCollapsedParents, onAddColumn,
   } = props;
 
   return (
@@ -88,6 +91,8 @@ export function BoardGrid(props: BoardGridProps) {
             toggleLane={toggleLane}
             onOpenCreateTask={onOpenCreateTask}
             onSelectTask={onSelectTask}
+            onDelete={onDelete}
+            selectedTaskId={selectedTaskId}
             newTaskIds={newTaskIds}
             shakeTaskId={shakeTaskId}
             archiveTask={archiveTask}

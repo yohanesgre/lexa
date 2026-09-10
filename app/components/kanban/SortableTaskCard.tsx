@@ -85,6 +85,7 @@ export function SortableTaskCard({
   onArchive,
   onRestore,
   onDelete,
+  selected = false,
   isSubtask = false,
   blockedBy = EMPTY_BLOCKED_BY,
   subtaskCount = 0,
@@ -99,7 +100,8 @@ export function SortableTaskCard({
   isShaking?: boolean | undefined;
   onArchive?: (id: string) => void;
   onRestore?: (id: string) => void;
-  onDelete?: (id: string) => void;
+  onDelete?: ((id: string) => void) | undefined;
+  selected?: boolean | undefined;
   isSubtask?: boolean | undefined;
   blockedBy?: string[];
   subtaskCount?: number | undefined;
@@ -156,7 +158,7 @@ export function SortableTaskCard({
         subtaskCount={subtaskCount}
         onToggleSubtasks={onToggleSubtasks}
         subtasksCollapsed={subtasksCollapsed}
-        className={cn(isNew && "card-enter")}
+        className={cn(isNew && "card-enter", selected && "state-selected")}
         action={<CardMenu archived={archived} taskId={task.id} onArchive={onArchive} onRestore={onRestore} onDelete={onDelete} />}
       />
     </button>

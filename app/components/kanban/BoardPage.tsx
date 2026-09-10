@@ -192,6 +192,8 @@ export function BoardPage({ slug, search }: BoardPageProps) {
         onMoveTask={handleMove}
         onSelectTask={handleSelectTask}
         onOpenCreateTask={handleOpenCreateTask}
+        onDelete={handleDelete}
+        selectedTaskId={selectedTaskId}
         milestoneId={effectiveMilestone}
         onMilestoneChange={handleMilestoneChange}
       />

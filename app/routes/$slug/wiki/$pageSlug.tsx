@@ -3,6 +3,7 @@ import { useWikiPage } from "../../../lib/queries";
 import { getWikiPage, listWikiPages } from "../../../lib/api";
 import { WikiLayout } from "../../../components/wiki/WikiLayout";
 import { WikiPageViewer } from "../../../components/wiki/WikiPageViewer";
+import { WikiPageNotFound } from "../../../components/wiki/WikiPageNotFound";
 
 export const Route = createFileRoute("/$slug/wiki/$pageSlug")({
   ssr:false,
@@ -30,7 +31,12 @@ function WikiPagePage() {
     <WikiLayout slug={slug} activePageSlug={pageSlug}>
       {(pages, _ctx) => {
         if (isLoading) return <div className="text-lx-text-muted">Loading page…</div>;
-        if (error) return <div className="text-lx-text-danger">Failed to load page: {(error as Error).message}</div>;
+        if (error) {
+          if ((error as Error & { code?: string }).code === "PAGE_NOT_FOUND") {
+            return <WikiPageNotFound slug={slug} pageSlug={pageSlug} pages={pages} />;
+          }
+          return <div className="text-lx-text-danger">Failed to load page: {(error as Error).message}</div>;
+        }
         if (!page) return <div className="text-lx-text-muted">Page not found.</div>;
         return <WikiPageViewer slug={slug} page={page} pages={pages} />;
       }}

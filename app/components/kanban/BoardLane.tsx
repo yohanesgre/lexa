@@ -26,6 +26,8 @@ export interface BoardLaneProps {
   toggleLane: (laneId: string) => void;
   onOpenCreateTask?: ((columnId: string, laneId?: string | undefined) => void) | undefined;
   onSelectTask: (t: Task) => void;
+  onDelete?: ((id: string) => void) | undefined;
+  selectedTaskId: string | null;
   newTaskIds: Set<string>;
   shakeTaskId: string | null;
   archiveTask: { mutate: (input: { id: string }) => unknown };
@@ -38,7 +40,8 @@ export function BoardLane({
   slug, lane, columns, board, localTasks, childrenByParent, blockedBy,
   cardHidden, cardDimmed, columnTotalCount, columnDimmed, cellDropId,
   flashColumnId, collapsed, toggleLane, onOpenCreateTask, onSelectTask,
-  newTaskIds, shakeTaskId, archiveTask, restoreTask, collapsedParents, setCollapsedParents,
+  onDelete, selectedTaskId, newTaskIds, shakeTaskId, archiveTask, restoreTask,
+  collapsedParents, setCollapsedParents,
 }: BoardLaneProps) {
   const laneId = lane.id;
   const laneTaskCount = localTasks.filter((t) => t.swimlaneId === laneId).length;
@@ -112,6 +115,8 @@ export function BoardLane({
                             isShaking={shakeTaskId === task.id}
                             onArchive={(id) => archiveTask.mutate({ id })}
                             onRestore={(id) => restoreTask.mutate({ id })}
+                            onDelete={onDelete}
+                            selected={task.id === selectedTaskId}
                             blockedBy={blockedBy.get(task.id) ?? []}
                             subtaskCount={kids.length}
                             onToggleSubtasks={() =>
@@ -136,6 +141,8 @@ export function BoardLane({
                                 isShaking={shakeTaskId === kid.id}
                                 onArchive={(id) => archiveTask.mutate({ id })}
                                 onRestore={(id) => restoreTask.mutate({ id })}
+                                onDelete={onDelete}
+                                selected={kid.id === selectedTaskId}
                                 isSubtask
                                 blockedBy={blockedBy.get(kid.id) ?? []}
                               />

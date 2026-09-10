@@ -31,11 +31,13 @@ interface KanbanBoardProps {
   onMoveTask: (taskId: string, target: MoveTarget) => Promise<void>;
   onSelectTask?: (task: Task) => void;
   onOpenCreateTask?: (columnId: string, swimlaneId?: string) => void;
+  onDelete?: (id: string) => void;
+  selectedTaskId?: string | null | undefined;
   milestoneId?: string | null | undefined;
   onMilestoneChange?: (id: string | null) => void;
 }
 
-export function KanbanBoard({ board, showArchived = false, onToggleArchived, onMoveTask, onSelectTask, onOpenCreateTask, milestoneId = null, onMilestoneChange }: KanbanBoardProps) {
+export function KanbanBoard({ board, showArchived = false, onToggleArchived, onMoveTask, onSelectTask, onOpenCreateTask, onDelete, selectedTaskId = null, milestoneId = null, onMilestoneChange }: KanbanBoardProps) {
   const [localTasks, dispatch] = useReducer(tasksReducer, board.tasks);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [shakeTaskId, setShakeTaskId] = useState<string | null>(null);
@@ -224,6 +226,8 @@ export function KanbanBoard({ board, showArchived = false, onToggleArchived, onM
           toggleLane={toggleLane}
           {...(onOpenCreateTask !== undefined ? { onOpenCreateTask } : {})}
           onSelectTask={onSelectTask!}
+          {...(onDelete !== undefined ? { onDelete } : {})}
+          selectedTaskId={selectedTaskId}
           newTaskIds={newTaskIds}
           shakeTaskId={shakeTaskId}
           archiveTask={archiveTask}

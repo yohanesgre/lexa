@@ -37,3 +37,22 @@ describe("fetchSharedTree", () => {
     expect(headers).toBeUndefined();
   });
 });
+
+describe("SharedWikiPage dead link", () => {
+  it("renders the dead-link surface when pageId is outside the shared subtree", () => {
+    render(<SharedWikiPage tree={tree} token="tok" pageId="not-in-tree" />);
+    expect(screen.getByRole("heading", { name: "Page not available" })).toBeInTheDocument();
+    expect(screen.getByText("/share/tok")).toBeInTheDocument();
+  });
+
+  it("renders the dead-link surface when the tree is null", () => {
+    render(<SharedWikiPage tree={null} token="tok" />);
+    expect(screen.getByRole("heading", { name: "Page not available" })).toBeInTheDocument();
+  });
+
+  it("falls back to the root page when no pageId is provided", () => {
+    render(<SharedWikiPage tree={tree} token="tok" />);
+    expect(screen.getByRole("heading", { name: "API Reference" })).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Page not available" })).toBeNull();
+  });
+});

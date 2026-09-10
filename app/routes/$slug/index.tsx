@@ -1,10 +1,12 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
-import { Settings } from "lucide-react";
-import { useDashboard, useBoard, useMilestones, selectProjectHealth } from "../../lib/queries";
+import { Settings, Plus } from "lucide-react";
+import { useState } from "react";
+import { useDashboard, useBoard, useMilestones, selectProjectHealth, useCreateProject } from "../../lib/queries";
 import { getDashboard, getBoard, listMilestones } from "../../lib/api";
 import { cn } from "../../components/ui/cn";
 import { DashboardSkeleton } from "../../components/DashboardSkeleton";
 import { ProjectDescription } from "../../components/ProjectDescription";
+import { CreateProjectModal } from "../../components/CreateProjectModal";
 import { MilestoneCard } from "../../components/milestones/MilestoneCard";
 import type { Dashboard, ProjectHealth } from "../../../shared/types";
 
@@ -50,6 +52,8 @@ function ProjectDashboard() {
   const { data: dashboard, isLoading } = useDashboard();
   const board = useBoard(slug);
   const { data: milestones = [] } = useMilestones(slug);
+  const createProject = useCreateProject();
+  const [showCreate, setShowCreate] = useState(false);
   const activeMilestone = milestones.find((m) => !m.archivedAt) ?? null;
 
   if (isLoading) {
@@ -100,6 +104,14 @@ function ProjectDashboard() {
           >
             <Settings size={16} strokeWidth={1.5} />
           </button>
+          <button
+            type="button"
+            className="btn btn-primary"
+            onClick={() => setShowCreate(true)}
+          >
+            <Plus size={14} strokeWidth={1.5} />
+            New Project
+          </button>
         </div>
       </div>
 
@@ -107,6 +119,17 @@ function ProjectDashboard() {
 
       <MilestoneCard slug={slug} milestone={activeMilestone} board={board.data} />
       <StatusSections dashboard={dashboard} health={health} />
+
+      <CreateProjectModal
+        open={showCreate}
+        pending={createProject.isPending}
+        onClose={() => setShowCreate(false)}
+        onSubmit={(input) => {
+          createProject.mutate(input, {
+            onSuccess: () => setShowCreate(false),
+          });
+        }}
+      />
     </main>
   );
 }

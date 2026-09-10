@@ -1,4 +1,5 @@
 import { createFileRoute, Navigate } from "@tanstack/react-router";
+import { useState } from "react";
 import { InvalidTokenState, SetPasswordForm } from "../components/auth/SetPasswordForm";
 import { useSession } from "../lib/queries";
 
@@ -10,12 +11,13 @@ export const Route = createFileRoute("/set-password")({
   component: SetPasswordPage,
 });
 
-function SetPasswordPage() {
+export function SetPasswordPage() {
   const { token } = Route.useSearch();
   const { data: session, isLoading } = useSession();
+  const [completed, setCompleted] = useState(false);
 
   if (isLoading) return null;
-  if (session?.user) return <Navigate to="/" replace />;
+  if (session?.user && !completed) return <Navigate to="/" replace />;
 
   return (
     <main style={{ minHeight: "100vh", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: 24 }}>
@@ -24,7 +26,7 @@ function SetPasswordPage() {
           <div className="font-display mb-1" style={{ textAlign: "center", fontSize: 24, fontWeight: 600 }}>Lexa</div>
           <p className="text-sm text-lx-text-secondary mb-4" style={{ textAlign: "center" }}>Set your password</p>
         </div>
-        {token ? <SetPasswordForm token={token} /> : <InvalidTokenState />}
+        {token ? <SetPasswordForm token={token} onDone={() => setCompleted(true)} /> : <InvalidTokenState />}
       </div>
     </main>
   );
