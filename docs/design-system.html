@@ -860,10 +860,6 @@ a:hover { color: var(--lx-text-link-hover); }
   flex-direction: column;
 }
 
-.slideover.slideover-expanded {
-  width: calc(100vw - 48px);
-}
-
 .slideover-overlay {
   position: fixed;
   inset: 0;
@@ -997,6 +993,34 @@ a:hover { color: var(--lx-text-link-hover); }
   padding: 0 16px;
   border-top: 1px solid var(--lx-border-subtle);
   flex-shrink: 0;
+}
+
+/* ---- Task detail full page (/:slug/tasks/:taskId) ----
+   Same content tree as the slideover; page-scoped rhythm so sections align
+   to the page-frame gutters instead of the 480px panel gutters. */
+.task-page-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 16px;
+}
+
+.task-page .slideover-title {
+  font-size: 24px;
+  line-height: 32px;
+}
+
+.task-page .property-bar,
+.task-page .tab-bar,
+.task-page .slideover-body,
+.task-page .slideover-footer {
+  padding-left: 0;
+  padding-right: 0;
+}
+
+.task-page .slideover-footer {
+  justify-content: flex-end;
+  gap: 8px;
 }
 
 /* ---- Wiki ---- */

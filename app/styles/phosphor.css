@@ -1115,9 +1115,6 @@
     flex-direction: column;
     transition: transform 200ms var(--lx-ease-out);
   }
-  .slideover.slideover-expanded {
-    width: calc(100vw - 48px);
-  }
   .slideover.slideover-closed {
     transform: translateX(100%);
   }
@@ -1336,6 +1333,43 @@
     padding: 0 16px;
     border-top: 1px solid var(--lx-border-subtle);
     flex-shrink: 0;
+  }
+
+  /* ---- Task detail full page (/:slug/tasks/:taskId) ----
+     Same content tree as the slideover; page-scoped rhythm so sections align
+     to the page-frame gutters instead of the 480px panel gutters. */
+  .task-page-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 16px;
+  }
+
+  .task-page .slideover-title {
+    font-size: 24px;
+    line-height: 32px;
+  }
+
+  .task-page .property-bar,
+  .task-page .tab-bar,
+  .task-page .slideover-body,
+  .task-page .slideover-footer {
+    padding-left: 0;
+    padding-right: 0;
+  }
+
+  .task-page .slideover-footer {
+    justify-content: flex-end;
+    gap: 8px;
+  }
+
+  .task-page .empty-state {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    padding: 48px 24px;
   }
 
   /* Task detail rendered prose (TipTap read-mode) */
@@ -7037,9 +7071,6 @@
     width: 100vw;
     max-width: 100vw;
     box-shadow: none;
-  }
-  .slideover.slideover-expanded {
-    width: 100vw;
   }
   .slideover-header {
     padding: 0 12px;

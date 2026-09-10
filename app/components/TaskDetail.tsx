@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Link, useParams } from "@tanstack/react-router";
+import { Link, useNavigate, useParams } from "@tanstack/react-router";
 import type { Task, TipTapDoc, GithubIssue } from "../../shared/types";
 import { extractText } from "../../shared/tiptap-text";
 import { renderDoc } from "./tiptap-render";
@@ -9,8 +9,9 @@ import { SelectDropdown } from "./ui/SelectDropdown";
 import { AssigneeChips } from "./AssigneeChips";
 import { DescriptionEditor } from "./DescriptionEditor";
 import { SlideoverHeader } from "./SlideoverHeader";
+import { TaskPageBar } from "./TaskPageBar";
 import { TaskTitleInput } from "./TaskTitleInput";
-import { TaskNotFoundDialog } from "./TaskNotFoundDialog";
+import { TaskNotFoundDialog, TaskNotFoundBody } from "./TaskNotFoundDialog";
 import { useTaskDetailActions } from "./useTaskDetailActions";
 import { TaskDescriptionSection } from "./TaskDescriptionSection";
 import { DeleteTaskDialog } from "./DeleteTaskDialog";
@@ -30,6 +31,8 @@ type RequiredFieldName = "assignee" | "description";
 
 interface TaskDetailProps {
   mode?: "view" | "create";
+  variant?: "slideover" | "page";
+  from?: "board" | "tasks" | undefined;
   task?: Task | undefined;
   project?: { name: string };
   defaultColumnId?: string | undefined;
@@ -120,8 +123,8 @@ function resolveDetailContext(args: {
   };
 }
 
-function slideoverClassName(expanded: boolean, open: boolean): string {
-  return cn("slideover", expanded && "slideover-expanded", !open && "slideover-closed");
+function slideoverClassName(open: boolean): string {
+  return cn("slideover", !open && "slideover-closed");
 }
 
 function overlayClassName(open: boolean): string {
@@ -270,13 +273,14 @@ function TaskTabsAndBody({ isCreate, tab, setTab, flush, slug, task, editingDesc
   );
 }
 
-export function TaskDetail({ mode = "view", task, project, defaultColumnId, columns, swimlanes, columnRequiredFields, availableAssignees, taskTitles, taskKeys, fieldConfig, onClose, onUpdate, onMove, onDelete, onArchive, onRestore, onLinkGithub, onUnlinkGithub, onCreate }: TaskDetailProps) {
+export function TaskDetail({ mode = "view", variant = "slideover", from, task, project, defaultColumnId, columns, swimlanes, columnRequiredFields, availableAssignees, taskTitles, taskKeys, fieldConfig, onClose, onUpdate, onMove, onDelete, onArchive, onRestore, onLinkGithub, onUnlinkGithub, onCreate }: TaskDetailProps) {
   const params = useParams({ strict: false }) as { slug?: string };
+  const navigate = useNavigate();
   const slug = params.slug;
   const isCreate = mode === "create";
+  const isPage = variant === "page";
 
   const [open, setOpen] = useState(false);
-  const [expanded, setExpanded] = useState(false);
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
   const [editingAssignees, setEditingAssignees] = useState(false);
   const [tab, setTab] = useState<"description" | "activity">("description");
@@ -295,9 +299,18 @@ export function TaskDetail({ mode = "view", task, project, defaultColumnId, colu
   );
 
   const handleClose = () => {
+    if (isPage) {
+      onClose();
+      return;
+    }
     setOpen(false);
     if (closeTimer.current !== null) window.clearTimeout(closeTimer.current);
     closeTimer.current = window.setTimeout(onClose, 200);
+  };
+
+  const handleExpand = () => {
+    if (!slug || !task) return;
+    navigate({ to: "/$slug/tasks/$taskId", params: { slug, taskId: task.key || task.id }, search: { from } });
   };
 
   useEscapeKey(showDeleteDialog, () => setShowDeleteDialog(false), handleClose);
@@ -343,23 +356,32 @@ export function TaskDetail({ mode = "view", task, project, defaultColumnId, colu
   const [editingDescription, setEditingDescription] = useState(false);
 
   if (!isCreate && !task) {
+    if (isPage) {
+      return (
+        <div className="task-page">
+          <TaskPageBar slug={slug} project={project ?? null} onBack={handleClose} />
+          <TaskNotFoundBody message="This task was deleted or the link is stale." onClose={handleClose} />
+        </div>
+      );
+    }
     return <TaskNotFoundDialog open={open} onClose={handleClose} />;
   }
 
-  return (
+  const inner = (
     <>
-      <button type="button" className={overlayClassName(open)} onClick={handleClose} aria-label="Close" />
-      <dialog open className={slideoverClassName(expanded, open)} aria-modal="true" aria-label="Task details">
+      {isPage ? (
+        <TaskPageBar slug={slug} project={project ?? null} onBack={handleClose} />
+      ) : (
         <SlideoverHeader
           slug={slug}
           project={project ?? null}
           isCreate={isCreate}
-          expanded={expanded}
-          setExpanded={setExpanded}
+          onExpand={isCreate ? undefined : handleExpand}
           onClose={handleClose}
         />
+      )}
 
-        <div className="px-4 pt-4">
+        <div className={cn("pt-4", !isPage && "px-4")}>
           {ctx.isArchived && <ArchivedBanner />}
           <TaskTitleInput
             isArchived={ctx.isArchived}
@@ -375,6 +397,7 @@ export function TaskDetail({ mode = "view", task, project, defaultColumnId, colu
             setEditingTitle={title.setEditingTitle}
             taskTitle={task?.title ?? ""}
             taskKey={task?.key ?? ""}
+            slug={slug}
           />
         </div>
 
@@ -450,7 +473,19 @@ export function TaskDetail({ mode = "view", task, project, defaultColumnId, colu
           onDeleteClick={() => setShowDeleteDialog(true)}
           taskId={task?.id ?? ""}
         />
-      </dialog>
+    </>
+  );
+
+  return (
+    <>
+      {!isPage && <button type="button" className={overlayClassName(open)} onClick={handleClose} aria-label="Close" />}
+      {isPage ? (
+        <div className="task-page">{inner}</div>
+      ) : (
+        <dialog open className={slideoverClassName(open)} aria-modal="true" aria-label="Task details">
+          {inner}
+        </dialog>
+      )}
 
       {showDeleteDialog && task && (
         <DeleteTaskDialog
