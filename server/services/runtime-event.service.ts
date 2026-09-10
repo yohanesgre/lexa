@@ -18,6 +18,7 @@ export class RuntimeEventService extends Effect.Service<RuntimeEventService>()("
       machineId: string;
       action: RuntimeEventAction;
       agentCli: HearthProvider;
+      teamId: string | null;
       apiKeyId: string | null;
     }): Effect.Effect<RuntimeEvent, ConstraintViolation | DbError> =>
       repo.create({ id: crypto.randomUUID(), ...input });
@@ -27,6 +28,7 @@ export class RuntimeEventService extends Effect.Service<RuntimeEventService>()("
         machineId: string;
         action: "install" | "update";
         agentCli: HearthProvider;
+        teamId?: string | null;
         apiKeyId?: string;
         rawKey?: string;
       }): Effect.Effect<RuntimeEvent, MachineNotFound | ApiKeyNotFound | ConstraintViolation | DbError> =>
@@ -56,6 +58,7 @@ export class RuntimeEventService extends Effect.Service<RuntimeEventService>()("
             machineId: input.machineId,
             action: input.action,
             agentCli: input.agentCli,
+            teamId: input.teamId ?? null,
             apiKeyId,
           });
           if (input.action === "install" && input.rawKey) storeRawKey(event.id, input.rawKey);
@@ -67,7 +70,7 @@ export class RuntimeEventService extends Effect.Service<RuntimeEventService>()("
           yield* machineRepo.findById(input.machineId).pipe(
             Effect.catchTag("RowNotFound", () => new MachineNotFound({ id: input.machineId }))
           );
-          return yield* createRow({ ...input, action: "remove", apiKeyId: null });
+          return yield* createRow({ ...input, action: "remove", teamId: null, apiKeyId: null });
         }),
 
       claimForMachine: (machineId: string, secret: string): Effect.Effect<{ event: RuntimeEvent; rawKey: string | null } | null, MachineSecretMismatch | ConstraintViolation | DbError> =>

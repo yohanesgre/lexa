@@ -93,7 +93,7 @@ export class HeraldCallLogsRepo extends Effect.Service<HeraldCallLogsRepo>()("Le
           (rows) => rows.map(toDomain)
         ),
 
-      usageStats: (filters: { from?: string | null; to?: string | null; projectId?: string | null } = {}): Effect.Effect<{ totalTokens: number; promptTokens: number; completionTokens: number; totalCostCents: number; totalCostUsd: number; avgLatencyMs: number | null; errorRate: number; totalCalls: number; errorCalls: number }, DbError> =>
+      usageStats: (filters: { from?: string | null; to?: string | null; projectId?: string | null } = {}): Effect.Effect<{ totalTokens: number; promptTokens: number; completionTokens: number; totalCostCents: number; totalCostUsd: number; avgLatencyMs: number | null; p50LatencyMs: number | null; p95LatencyMs: number | null; errorRate: number; totalCalls: number; errorCalls: number }, DbError> =>
         Effect.gen(function* () {
           const params: unknown[] = [];
           const conds: string[] = [];
@@ -102,18 +102,31 @@ export class HeraldCallLogsRepo extends Effect.Service<HeraldCallLogsRepo>()("Le
           if (filters.to) { conds.push("date(created_at) <= date(?)"); params.push(filters.to); }
           const where = conds.length ? `WHERE ${conds.join(" AND ")}` : "";
           const row = yield* queryFirst<{
-            totalCalls: number; promptTokens: number; completionTokens: number; totalTokens: number; totalCostCents: number; avgLatencyMs: number | null; errorCalls: number;
+            totalCalls: number; promptTokens: number; completionTokens: number; totalTokens: number; totalCostCents: number; avgLatencyMs: number | null; p50LatencyMs: number | null; p95LatencyMs: number | null; errorCalls: number;
           }>(
             db,
-            `SELECT
+            `WITH filtered AS (
+                SELECT latency_ms, usage_in, usage_out, cached_in, cost_cents, status
+                FROM herald_call_logs ${where}
+             ),
+             lat AS (
+                SELECT latency_ms,
+                       ROW_NUMBER() OVER (ORDER BY latency_ms) AS rn,
+                       COUNT(*) OVER () AS n
+                FROM filtered
+                WHERE latency_ms IS NOT NULL
+             )
+             SELECT
                 COUNT(*) as totalCalls,
                 COALESCE(SUM(usage_in),0) as promptTokens,
                 COALESCE(SUM(usage_out),0) as completionTokens,
                 COALESCE(SUM(usage_in + usage_out + cached_in),0) as totalTokens,
                 COALESCE(SUM(cost_cents),0) as totalCostCents,
                 AVG(latency_ms) as avgLatencyMs,
-                COALESCE(SUM(CASE WHEN status = 'error' THEN 1 ELSE 0 END),0) as errorCalls
-                FROM herald_call_logs ${where}`,
+                COALESCE(SUM(CASE WHEN status = 'error' THEN 1 ELSE 0 END),0) as errorCalls,
+                (SELECT latency_ms FROM lat WHERE rn = MAX(1, (n * 50 + 99) / 100)) as p50LatencyMs,
+                (SELECT latency_ms FROM lat WHERE rn = MAX(1, (n * 95 + 99) / 100)) as p95LatencyMs
+                FROM filtered`,
             ...params
           ).pipe(Effect.catchTag("RowNotFound", () => Effect.succeed(null)));
           const totalCalls = Number(row?.totalCalls ?? 0);
@@ -125,6 +138,8 @@ export class HeraldCallLogsRepo extends Effect.Service<HeraldCallLogsRepo>()("Le
             totalCostCents: Number(row?.totalCostCents ?? 0),
             totalCostUsd: Number(row?.totalCostCents ?? 0) / 100,
             avgLatencyMs: row?.avgLatencyMs !== null && row?.avgLatencyMs !== undefined ? Math.round(Number(row.avgLatencyMs)) : null,
+            p50LatencyMs: row?.p50LatencyMs !== null && row?.p50LatencyMs !== undefined ? Math.round(Number(row.p50LatencyMs)) : null,
+            p95LatencyMs: row?.p95LatencyMs !== null && row?.p95LatencyMs !== undefined ? Math.round(Number(row.p95LatencyMs)) : null,
             errorRate: totalCalls > 0 ? errorCalls / totalCalls : 0,
             totalCalls,
             errorCalls,

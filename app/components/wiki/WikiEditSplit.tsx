@@ -104,10 +104,11 @@ interface WikiEditSplitProps {
   isDirty: boolean;
   lastSavedAt: Date | null;
   lastSavedLabel: string;
+  updatedByName: string | null;
   onReviewStateChange: (active: boolean, accepted: boolean) => void;
 }
 
-export function WikiEditSplit({ editor, slug, pageSlug, previewContent, isSaving, isDirty, lastSavedAt, lastSavedLabel, onReviewStateChange }: WikiEditSplitProps) {
+export function WikiEditSplit({ editor, slug, pageSlug, previewContent, isSaving, isDirty, lastSavedAt, lastSavedLabel, updatedByName, onReviewStateChange }: WikiEditSplitProps) {
   return (
     <div className="flex flex-1 overflow-hidden" style={{ borderTop: "1px solid var(--lx-border-subtle)" }}>
       {/* Left: Preview */}
@@ -154,7 +155,7 @@ export function WikiEditSplit({ editor, slug, pageSlug, previewContent, isSaving
           }}
         >
           <span className="font-micro text-2xs text-lx-text-muted uppercase tracking-[0.04em]">
-            {lastSavedLabel}
+            {lastSavedLabel}{!isSaving && updatedByName ? ` by ${updatedByName}` : ""}
           </span>
           {isSaving ? (
             <span className="font-micro text-2xs text-lx-text-warning uppercase tracking-[0.04em]">Saving…</span>

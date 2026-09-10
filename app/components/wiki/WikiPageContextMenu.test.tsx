@@ -13,7 +13,7 @@ vi.mock("../../lib/queries", () => ({
 import { MovePageModal, WikiPageContextMenu } from "./WikiPageContextMenu";
 
 function meta(id: string, title: string, parentId: string | null, position = 0): WikiPageMeta {
-  return { id, projectId: "p1", title, slug: title.toLowerCase().replace(/\s+/g, "-"), parentId, position, updatedAt: "2026-08-20T10:00:00.000Z" };
+  return { id, projectId: "p1", title, slug: title.toLowerCase().replace(/\s+/g, "-"), parentId, position, updatedBy: null, updatedByName: null, updatedAt: "2026-08-20T10:00:00.000Z" };
 }
 
 const root = meta("w1", "Root", null);

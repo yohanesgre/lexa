@@ -23,6 +23,8 @@ const page: WikiPageMeta = {
   slug: "api-reference",
   parentId: null,
   position: 0,
+  updatedBy: null,
+  updatedByName: null,
   updatedAt: "2026-08-20T10:00:00.000Z",
 };
 

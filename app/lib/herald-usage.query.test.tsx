@@ -14,7 +14,7 @@ function wrapper() {
 }
 
 const mockUsage = {
-  summary: { totalTokens: 1482391, promptTokens: 892100, completionTokens: 590291, totalCostCents: 4218, totalCostUsd: 42.18, avgLatencyMs: 1240, errorRate: 0.008, totalCalls: 1482, errorCalls: 12 },
+  summary: { totalTokens: 1482391, promptTokens: 892100, completionTokens: 590291, totalCostCents: 4218, totalCostUsd: 42.18, avgLatencyMs: 1240, p50LatencyMs: 890, p95LatencyMs: 2410, errorRate: 0.008, totalCalls: 1482, errorCalls: 12 },
   totalCostCents: 4218,
   byDay: [{ day: "2026-08-01", tokens: 500, costCents: 100, costUsd: 1, avgLatencyMs: 800, calls: 2, errorRate: 0 }],
   byModel: [{ model: "anthropic/claude-sonnet-4", tokens: 892400, costCents: 2842, costUsd: 28.42, avgLatencyMs: 1120, calls: 834, errorRate: 0.004 }],

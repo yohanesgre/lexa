@@ -160,6 +160,9 @@ export class GitHubService extends Effect.Service<GitHubService>()("Lexa/GitHubS
               }).pipe(
                 Effect.catchAll((e) => Effect.logWarning(`[GitHub] webhook edit apply failed for task ${task.id}`, e))
               );
+              yield* taskRepo.setGithubIssueTitle(task.id, nodeId, fetched.title).pipe(
+                Effect.catchAll((e) => Effect.logWarning(`[GitHub] issue-title refresh failed for task ${task.id}`, e))
+              );
               yield* webhookEvents.recordDelivery(deliveryId);
               return;
             }
@@ -172,6 +175,9 @@ export class GitHubService extends Effect.Service<GitHubService>()("Lexa/GitHubS
                 Effect.catchAll((e) => Effect.logWarning(`[GitHub] webhook edit apply failed for task ${task.id}`, e))
               );
             }
+            yield* taskRepo.setGithubIssueTitle(task.id, nodeId, title).pipe(
+              Effect.catchAll((e) => Effect.logWarning(`[GitHub] issue-title refresh failed for task ${task.id}`, e))
+            );
             yield* webhookEvents.recordDelivery(deliveryId);
             return;
           }
@@ -263,6 +269,7 @@ export class GitHubService extends Effect.Service<GitHubService>()("Lexa/GitHubS
               issueId: issue.nodeId,
               issueNumber: issue.number,
               repo, // stored "owner/name" — used by all future syncs
+              title: task.title,
             });
             const ev = yield* activityService.append(taskId, actor, "github_linked", msg.githubLinked(repo, issue.number));
             return { issueId: issue.nodeId, issueNumber: issue.number, repo, activity: [ev] };
@@ -301,6 +308,7 @@ export class GitHubService extends Effect.Service<GitHubService>()("Lexa/GitHubS
               issueId: issue.nodeId,
               issueNumber: issue.number,
               repo,
+              title: issue.title,
             });
             const ev = yield* activityService.append(taskId, actor, "github_linked", msg.githubLinked(repo, issue.number));
             return { issueId: issue.nodeId, issueNumber: issue.number, repo, activity: [ev] };
@@ -345,6 +353,7 @@ export class GitHubService extends Effect.Service<GitHubService>()("Lexa/GitHubS
               issueId: issue.nodeId,
               issueNumber: issue.number,
               repo,
+              title: issue.title,
             });
             return yield* activityService.append(task.id, actor, "github_linked", msg.githubLinked(repo, issue.number));
           }));

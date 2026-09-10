@@ -103,6 +103,7 @@ const GithubIssueSchema = Schema.Struct({
   issueId: Schema.String,
   issueNumber: Schema.Number,
   repo: Schema.String,
+  title: Schema.NullOr(Schema.String),
   syncedState: Schema.NullOr(Schema.Literal("open", "closed")),
   url: Schema.String,
   outOfSync: Schema.Boolean,

@@ -7,6 +7,7 @@ export interface RuntimeEventRow {
   machine_id: string;
   action: RuntimeEventAction;
   agent_cli: HearthProvider;
+  team_id: string | null;
   api_key_id: string | null;
   status: RuntimeEvent["status"];
   error: string | null;
@@ -21,6 +22,7 @@ function rowToRuntimeEvent(row: RuntimeEventRow): RuntimeEvent {
     machineId: row.machine_id,
     action: row.action,
     agentCli: row.agent_cli,
+    teamId: row.team_id ?? null,
     apiKeyId: row.api_key_id,
     status: row.status,
     error: row.error,
@@ -54,17 +56,19 @@ export class RuntimeEventRepo extends Effect.Service<RuntimeEventRepo>()("Lexa/R
         machineId: string;
         action: RuntimeEventAction;
         agentCli: HearthProvider;
+        teamId: string | null;
         apiKeyId: string | null;
       }): Effect.Effect<RuntimeEvent, ConstraintViolation | DbError> =>
         Effect.gen(function* () {
           yield* run(
             db,
-            `INSERT INTO runtime_events (id, machine_id, action, agent_cli, api_key_id, status)
-             VALUES (?, ?, ?, ?, ?, 'pending')`,
+            `INSERT INTO runtime_events (id, machine_id, action, agent_cli, team_id, api_key_id, status)
+             VALUES (?, ?, ?, ?, ?, ?, 'pending')`,
             input.id,
             input.machineId,
             input.action,
             input.agentCli,
+            input.teamId,
             input.apiKeyId
           );
           const rows = yield* queryAll<RuntimeEventRow>(db, `SELECT * FROM runtime_events WHERE id = ?`, input.id);
@@ -72,6 +76,24 @@ export class RuntimeEventRepo extends Effect.Service<RuntimeEventRepo>()("Lexa/R
           if (!row) return yield* Effect.fail(new DbError({ message: "runtime event row missing after create" }));
           return rowToRuntimeEvent(row);
         }),
+
+      // Team the machine's most recent setup event binds its runtime to.
+      // `found: false` means no install/update event exists (legacy machine);
+      // found + teamId null is an explicit Global choice.
+      latestSetupEventTeam: (
+        machineId: string,
+        agentCli: HearthProvider
+      ): Effect.Effect<{ found: boolean; teamId: string | null }, DbError> =>
+        queryAll<{ team_id: string | null }>(
+          db,
+          `SELECT team_id FROM runtime_events
+           WHERE machine_id = ? AND agent_cli = ? AND action != 'remove'
+           ORDER BY created_at DESC, rowid DESC LIMIT 1`,
+          machineId,
+          agentCli
+        ).pipe(
+          Effect.map((rows) => (rows[0] ? { found: true, teamId: rows[0].team_id ?? null } : { found: false, teamId: null }))
+        ),
 
       claimNextForMachine: (machineId: string): Effect.Effect<RuntimeEvent | null, ConstraintViolation | DbError> =>
         Effect.gen(function* () {

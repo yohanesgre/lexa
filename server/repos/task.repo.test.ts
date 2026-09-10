@@ -112,3 +112,20 @@ describe("TaskRepo.findUrgentAcrossAllProjects", () => {
     expect(urgent.map((t) => t.id).sort()).toEqual(["t-later", "t-live"]);
   });
 });
+
+describe("TaskRepo GitHub issue title", () => {
+  it("stores the title on link and refreshes it on upstream change", async () => {
+    seed(db);
+    const repo = makeRepo(db);
+    await Effect.runPromise(
+      repo.setGithubLink("t-live", { issueId: "ghi9", issueNumber: 9, repo: "owner/repo", title: "Original title" })
+    );
+    const linked = await Effect.runPromise(repo.findById("t-live"));
+    expect(linked.githubs).toHaveLength(1);
+    expect(linked.githubs[0]!.title).toBe("Original title");
+
+    await Effect.runPromise(repo.setGithubIssueTitle("t-live", "ghi9", "Renamed upstream"));
+    const refreshed = await Effect.runPromise(repo.findById("t-live"));
+    expect(refreshed.githubs[0]!.title).toBe("Renamed upstream");
+  });
+});

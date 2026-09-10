@@ -2,6 +2,7 @@ import { Effect } from "effect";
 import { HearthRepo } from "../repos/hearth.repo";
 import { HearthSessionRepo } from "../repos/hearth-session.repo";
 import { SourceRepo } from "../repos/source.repo";
+import { RuntimeEventRepo } from "../repos/runtime-event.repo";
 import { TaskRepo } from "../repos/task.repo";
 import { WikiRepo } from "../repos/wiki.repo";
 import { ProjectRepo } from "../repos/project.repo";
@@ -48,11 +49,12 @@ const DEFAULT_SKILLS: Record<string, string> = {
 };
 
 export class HearthService extends Effect.Service<HearthService>()("Lexa/HearthService", {
-  dependencies: [HearthRepo.Default, HearthSessionRepo.Default, SourceRepo.Default, SourceService.Default, TaskRepo.Default, WikiRepo.Default, ProjectRepo.Default, ActivityService.Default],
+  dependencies: [HearthRepo.Default, HearthSessionRepo.Default, SourceRepo.Default, RuntimeEventRepo.Default, SourceService.Default, TaskRepo.Default, WikiRepo.Default, ProjectRepo.Default, ActivityService.Default],
   effect: Effect.gen(function* () {
     const repo = yield* HearthRepo;
     const sessionRepo = yield* HearthSessionRepo;
     const sourceRepo = yield* SourceRepo;
+    const runtimeEventRepo = yield* RuntimeEventRepo;
     const sourceService = yield* SourceService;
     const taskRepo = yield* TaskRepo;
     const wikiRepo = yield* WikiRepo;
@@ -461,7 +463,7 @@ export class HearthService extends Effect.Service<HearthService>()("Lexa/HearthS
       // skill/type filters, keyset-paginated (limit + cursor → next cursor).
       // summary carries per-status totals (global — not filter-scoped).
       listHistory: (
-        filters: { projectId?: string; status?: HearthTask["status"]; skillId?: string; documentType?: "task" | "wiki" },
+        filters: { projectId?: string; status?: HearthTask["status"]; skillId?: string; documentType?: "task" | "wiki"; teamId?: string },
         limit = 50,
         cursor?: string
       ): Effect.Effect<{ tasks: Array<HearthTask & { projectName: string }>; nextCursor: string | null; summary: Record<HearthTask["status"], number> }, DbError> =>
@@ -502,7 +504,24 @@ export class HearthService extends Effect.Service<HearthService>()("Lexa/HearthS
       registerRuntime: (input: { id?: string; name: string; provider: "opencode" | "hermes" | "command-code"; machineId: string; agent: string; model: string; hostname: string; teamId?: string | null }): Effect.Effect<RuntimeWithTeam, ConstraintViolation | DbError> =>
         Effect.gen(function* () {
           const id = input.id ?? crypto.randomUUID();
-          return yield* repo.registerRuntime({ ...input, id, teamId: input.teamId ?? null });
+          let teamId = input.teamId ?? null;
+          if (teamId === null) {
+            // The daemon doesn't carry the setup event's team — apply it here
+            // from the machine's most recent install/update event (scoped to
+            // the provider). found + null is an explicit Global choice.
+            const fromEvent = yield* runtimeEventRepo.latestSetupEventTeam(input.machineId, input.provider);
+            if (fromEvent.found) {
+              teamId = fromEvent.teamId;
+            } else if (input.id) {
+              // Legacy machine with no event: keep the existing runtime's team
+              // on re-registration rather than resetting it to global.
+              const existing = yield* repo.findRuntimeById(input.id).pipe(
+                Effect.catchTag("RowNotFound", () => Effect.succeed(null))
+              );
+              teamId = existing?.teamId ?? null;
+            }
+          }
+          return yield* repo.registerRuntime({ ...input, id, teamId });
         }),
 
       // Server-authoritative config: edits apply on the daemon's next claim/spawn.

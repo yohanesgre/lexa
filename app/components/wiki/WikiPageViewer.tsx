@@ -50,11 +50,12 @@ interface WikiPageViewerProps {
   pages: WikiPageMeta[];
 }
 
-function WikiReadView({ breadcrumb, title, content, updatedAt, headings, outlineVisible, onToggleOutline, onEdit, onShare, slug, pageSlug }: {
+function WikiReadView({ breadcrumb, title, content, updatedAt, updatedByName, headings, outlineVisible, onToggleOutline, onEdit, onShare, slug, pageSlug }: {
   breadcrumb: string;
   title: string;
   content: TipTapDoc | undefined;
   updatedAt: string;
+  updatedByName: string | null;
   headings: { level: number; text: string; id: string }[];
   outlineVisible: boolean;
   onToggleOutline: () => void;
@@ -92,7 +93,7 @@ function WikiReadView({ breadcrumb, title, content, updatedAt, headings, outline
           />
           <div className="mt-8 pt-4 border-t border-lx-border-subtle">
             <span className="font-micro text-2xs text-lx-text-muted uppercase tracking-[0.04em]">
-              Last edited {formatRelative(updatedAt)}
+              Last edited {formatRelative(updatedAt)}{updatedByName ? ` by ${updatedByName}` : ""}
             </span>
           </div>
         </div>
@@ -191,6 +192,7 @@ export function WikiPageViewer({ slug, page, pages }: WikiPageViewerProps) {
           title={page.title}
           content={page.content}
           updatedAt={page.updatedAt}
+          updatedByName={page.updatedByName}
           headings={headings}
           outlineVisible={outlineVisible}
           onToggleOutline={() => setOutlineVisible(!outlineVisible)}
@@ -226,6 +228,7 @@ export function WikiPageViewer({ slug, page, pages }: WikiPageViewerProps) {
           isDirty={isDirty}
           lastSavedAt={lastSavedAt}
           lastSavedLabel={isSaving ? "Saving…" : lastSavedAt ? formatSavedAt(lastSavedAt) : `Last edited ${formatRelative(lastSavedPage.updatedAt)}`}
+          updatedByName={lastSavedPage.updatedByName}
           onReviewStateChange={handleReviewStateChange}
         />
       </div>

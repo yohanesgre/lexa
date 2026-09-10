@@ -177,3 +177,37 @@ describe("HearthRepo claimHeraldTask", () => {
     );
   });
 });
+
+describe("HearthRepo.listHistory team filter", () => {
+  it("narrows rows by the runtime's team and returns all when absent", async () => {
+    seed(db);
+    db.exec(`
+      INSERT INTO organization (id, name, slug, createdAt) VALUES
+        ('t1','Team One','team-one','2026-01-01T00:00:00.000Z'),
+        ('t2','Team Two','team-two','2026-01-01T00:00:00.000Z');
+      INSERT INTO runtimes (id, name, provider, team_id, status) VALUES
+        ('rt-a','a','opencode','t1','online'),
+        ('rt-b','b','opencode','t2','online');
+      INSERT INTO hearth_tasks (id, runtime_id, project_id, document_type, document_id, agent_id, skill_id, status, created_at) VALUES
+        ('ft-a','rt-a','p1','wiki','x','a1','sk1','completed','2026-01-01 10:00:00'),
+        ('ft-b','rt-b','p1','wiki','x','a1','sk1','completed','2026-01-02 10:00:00'),
+        ('ft-c',NULL,'p1','wiki','x','a1','sk1','completed','2026-01-03 10:00:00');
+    `);
+    const repo = makeRepo(db);
+
+    const all = await Effect.runPromise(repo.listHistory({}, 50));
+    expect(all.tasks.map((t) => t.id).sort()).toEqual(["ft-a", "ft-b", "ft-c"]);
+
+    const teamOne = await Effect.runPromise(repo.listHistory({ teamId: "t1" }, 50));
+    expect(teamOne.tasks.map((t) => t.id)).toEqual(["ft-a"]);
+
+    const teamTwo = await Effect.runPromise(repo.listHistory({ teamId: "t2" }, 50));
+    expect(teamTwo.tasks.map((t) => t.id)).toEqual(["ft-b"]);
+
+    const none = await Effect.runPromise(repo.listHistory({ teamId: "t-nope" }, 50));
+    expect(none.tasks).toEqual([]);
+
+    const combined = await Effect.runPromise(repo.listHistory({ teamId: "t1", status: "completed" }, 50));
+    expect(combined.tasks.map((t) => t.id)).toEqual(["ft-a"]);
+  });
+});

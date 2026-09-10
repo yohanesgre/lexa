@@ -9,6 +9,7 @@ import { parseApiDate } from "../../lib/date";
 import { copyToClipboard } from "../../lib/clipboard";
 import { MarkdownContent } from "../MarkdownContent";
 import { useCancelHearthTask, useHearthTask, useHearthTaskHistory, useHearthTaskLogs, useSkills, useProjects, useRuntimes, useSession } from "../../lib/queries";
+import { useHearthRole } from "../../lib/useHearthRole";
 import { HearthTaskLogModal } from "./HearthTaskLogModal";
 import { TaskNotFoundBody } from "../TaskNotFoundDialog";
 import { classifyLogLine } from "../../lib/hearth-log-line";
@@ -113,15 +114,15 @@ function projectSlugFor(projects: { data?: { id: string; slug: string }[] | unde
   return projects.data?.find((p) => p.id === detail.projectId)?.slug;
 }
 
-function emptyStateTitle(status: HearthTaskStatus | null, slug: string, skillId: string, cursor: string | null): string {
-  const filtered = status !== null || slug !== "" || skillId !== "";
+function emptyStateTitle(status: HearthTaskStatus | null, slug: string, skillId: string, teamId: string, cursor: string | null): string {
+  const filtered = status !== null || slug !== "" || skillId !== "" || teamId !== "";
   if (filtered) return "No runs match the current filters";
   if (cursor !== null) return "No older runs";
   return "No Hearth runs yet";
 }
 
-function emptyStateHint(status: HearthTaskStatus | null, slug: string, skillId: string, cursor: string | null): string {
-  const filtered = status !== null || slug !== "" || skillId !== "";
+function emptyStateHint(status: HearthTaskStatus | null, slug: string, skillId: string, teamId: string, cursor: string | null): string {
+  const filtered = status !== null || slug !== "" || skillId !== "" || teamId !== "";
   if (filtered) return "Try widening the filters — for example by clearing the status chip or choosing another project.";
   if (cursor !== null) return "You've reached the end of the run history.";
   return "Hearth tasks are created from the editor toolbar in any task or wiki page. Open a document and press the Hearth button to start your first run.";
@@ -171,12 +172,16 @@ interface FilterValues {
   status: HearthTaskStatus | null;
   slug: string;
   skillId: string;
+  teamId: string;
 }
 
-function FilterBar({ status, slug, skillId, projects, skills, onReset }: {
+export function FilterBar({ status, slug, skillId, teamId, teams, showTeamFilter, projects, skills, onReset }: {
   status: HearthTaskStatus | null;
   slug: string;
   skillId: string;
+  teamId: string;
+  teams: { id: string; name: string }[];
+  showTeamFilter: boolean;
   projects: { data?: { id: string; slug: string; name: string }[] | undefined };
   skills: { data?: { id: string; name: string }[] | undefined };
   onReset: (patch: Partial<FilterValues>) => void;
@@ -218,6 +223,14 @@ function FilterBar({ status, slug, skillId, projects, skills, onReset }: {
           <option key={s.id} value={s.id}>{s.name}</option>
         ))}
       </select>
+      {showTeamFilter && (
+        <select className="prop-input" aria-label="Filter by team" style={{ height: 24, fontSize: 12, minWidth: 130 }} value={teamId} onChange={(e) => onReset({ teamId: e.target.value })}>
+          <option value="">All teams</option>
+          {teams.map((t) => (
+            <option key={t.id} value={t.id}>{t.name}</option>
+          ))}
+        </select>
+      )}
     </div>
   );
 }
@@ -554,10 +567,10 @@ export function HistoryStates({ history, page, filters, cursor, children }: {
           <path d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.072-2.143-.224-4.054 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.153.433-2.294 1-3a2.5 2.5 0 0 0 2.5 2.5z" />
         </svg>
         <div className="text-sm weight-500 text-lx-text-primary">
-          {emptyStateTitle(filters.status, filters.slug, filters.skillId, cursor)}
+          {emptyStateTitle(filters.status, filters.slug, filters.skillId, filters.teamId, cursor)}
         </div>
         <p className="text-xs text-lx-text-secondary" style={{ maxWidth: 380 }}>
-          {emptyStateHint(filters.status, filters.slug, filters.skillId, cursor)}
+          {emptyStateHint(filters.status, filters.slug, filters.skillId, filters.teamId, cursor)}
         </p>
       </div>
     );
@@ -589,13 +602,14 @@ function PaginationBar({ history, page, cursor, setCursor }: {
   );
 }
 
-function useHearthRunsData(filters: { slug: string; status: HearthTaskStatus | null; skillId: string }, cursor: string | null, selectedId: string | null) {
+function useHearthRunsData(filters: { slug: string; status: HearthTaskStatus | null; skillId: string; teamId: string }, cursor: string | null, selectedId: string | null) {
   const skills = useSkills();
   const history = useHearthTaskHistory(
     {
       ...(filters.slug ? { slug: filters.slug } : {}),
       ...(filters.status ? { status: filters.status } : {}),
       ...(filters.skillId ? { skillId: filters.skillId } : {}),
+      ...(filters.teamId ? { teamId: filters.teamId } : {}),
     },
     cursor
   );
@@ -617,6 +631,7 @@ export function HearthControlPanel({ embedded = false }: { embedded?: boolean })
   const [status, setStatus] = useState<HearthTaskStatus | null>(null);
   const [slug, setSlug] = useState("");
   const [skillId, setSkillId] = useState("");
+  const [teamId, setTeamId] = useState("");
   const [cursor, setCursor] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [logModalOpen, setLogModalOpen] = useState(false);
@@ -626,7 +641,9 @@ export function HearthControlPanel({ embedded = false }: { embedded?: boolean })
     if (search.task) setSelectedId(search.task);
   }, [search.task]);
 
-  const { skills, history, runtimes, projects, selected, isAdmin, logs, cancelTask } = useHearthRunsData({ slug, status, skillId }, cursor, selectedId);
+  const { skills, history, runtimes, projects, selected, isAdmin, logs, cancelTask } = useHearthRunsData({ slug, status, skillId, teamId }, cursor, selectedId);
+  const { isSuperadmin, teams } = useHearthRole();
+  const showTeamFilter = isSuperadmin && (teams?.length ?? 0) > 0;
   const runtimesData = runtimes.data ?? [];
   const { online, total } = runtimeCounts(runtimes);
 
@@ -634,10 +651,11 @@ export function HearthControlPanel({ embedded = false }: { embedded?: boolean })
   const summary = history.data?.summary;
   const activeCount = activeRunCount(summary);
 
-  const reset = (next: { slug?: string | undefined; status?: HearthTaskStatus | null; skillId?: string }) => {
+  const reset = (next: { slug?: string | undefined; status?: HearthTaskStatus | null; skillId?: string; teamId?: string }) => {
     if (next.slug !== undefined) setSlug(next.slug);
     if (next.status !== undefined) setStatus(next.status ?? null);
     if (next.skillId !== undefined) setSkillId(next.skillId);
+    if (next.teamId !== undefined) setTeamId(next.teamId);
     setCursor(null);
   };
 
@@ -680,9 +698,9 @@ export function HearthControlPanel({ embedded = false }: { embedded?: boolean })
       {/* Summary strip — counts ride the history response (no separate aggregate endpoint) */}
       <SummaryStrip summary={summary} activeCount={activeCount} online={online} total={total} />
 
-      <FilterBar status={status} slug={slug} skillId={skillId} projects={projects} skills={skills} onReset={reset} />
+      <FilterBar status={status} slug={slug} skillId={skillId} teamId={teamId} teams={teams ?? []} showTeamFilter={showTeamFilter} projects={projects} skills={skills} onReset={reset} />
 
-      <HistoryStates history={history} page={page} filters={{ status, slug, skillId }} cursor={cursor}>
+      <HistoryStates history={history} page={page} filters={{ status, slug, skillId, teamId }} cursor={cursor}>
         <HistoryTable
           tasks={page}
           copiedId={copiedId}

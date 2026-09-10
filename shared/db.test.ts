@@ -51,10 +51,10 @@ describe("rowToSwimlane", () => {
 });
 
 describe("rowToWikiPage / rowToWikiPageMeta", () => {
-  const row: WikiPageRow = { id: "w1", project_id: "p1", title: "Home", slug: "home", content: '{"type":"doc","content":[]}', content_text: "hello", parent_id: null, position: 0, created_at: NOW, updated_at: NOW };
+  const row: WikiPageRow = { id: "w1", project_id: "p1", title: "Home", slug: "home", content: '{"type":"doc","content":[]}', content_text: "hello", parent_id: null, position: 0, updated_by: null, created_at: NOW, updated_at: NOW };
 
   it("rowToWikiPageMeta returns meta fields only", () => {
-    expect(rowToWikiPageMeta(row)).toEqual({ id: "w1", projectId: "p1", title: "Home", slug: "home", parentId: null, position: 0, updatedAt: NOW });
+    expect(rowToWikiPageMeta(row)).toEqual({ id: "w1", projectId: "p1", title: "Home", slug: "home", parentId: null, position: 0, updatedBy: null, updatedByName: null, updatedAt: NOW });
   });
 
   it("rowToWikiPage includes content + createdAt", () => {
@@ -62,6 +62,12 @@ describe("rowToWikiPage / rowToWikiPageMeta", () => {
     expect(p.content).toEqual({ type: "doc", content: [] });
     expect(p.createdAt).toBe(NOW);
     expect(p.title).toBe("Home");
+  });
+
+  it("carries the last-save author id", () => {
+    const meta = rowToWikiPageMeta({ ...row, updated_by: "u1" });
+    expect(meta.updatedBy).toBe("u1");
+    expect(meta.updatedByName).toBeNull();
   });
 });
 
@@ -103,10 +109,22 @@ describe("rowToTask", () => {
     const linked: TaskRow = { ...row, github_issues_raw: "ghi1,42,owner/repo,open,0" };
     const t = rowToTask(linked);
     expect(t.githubs).toEqual([{
-      issueId: "ghi1", issueNumber: 42, repo: "owner/repo",
+      issueId: "ghi1", issueNumber: 42, repo: "owner/repo", title: null,
       url: "https://github.com/owner/repo/issues/42",
       syncedState: "open", outOfSync: false, pushFailed: false,
     }]);
+  });
+
+  it("parses the issue title (6th field), preserving commas in the title", () => {
+    const linked: TaskRow = { ...row, github_issues_raw: "ghi1,42,owner/repo,open,0,Fix a, b and c" };
+    const t = rowToTask(linked);
+    expect(t.githubs[0]!.title).toBe("Fix a, b and c");
+  });
+
+  it("treats an empty title field as null", () => {
+    const linked: TaskRow = { ...row, github_issues_raw: "ghi1,42,owner/repo,open,0," };
+    const t = rowToTask(linked);
+    expect(t.githubs[0]!.title).toBeNull();
   });
 
   it("builds multiple githubs", () => {

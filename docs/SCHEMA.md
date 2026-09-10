@@ -362,6 +362,7 @@ CREATE TABLE task_github_issues (
   issue_number  INTEGER NOT NULL,
   repo          TEXT NOT NULL,                              -- "owner/name"
   synced_state  TEXT CHECK (synced_state IN ('open','closed')),
+  issue_title   TEXT,                                       -- last-known upstream GitHub title (NULL = unknown)
   pushed_title  TEXT,                                       -- last title we pushed (webhook echo detection)
   pushed_body   TEXT,                                       -- last body we pushed (Markdown)
   push_failed   INTEGER NOT NULL DEFAULT 0,                 -- last content push failed (badge reason)
@@ -430,6 +431,7 @@ CREATE TABLE wiki_pages (
   content_text TEXT NOT NULL DEFAULT '',                     -- app-maintained plain text
   parent_id    TEXT REFERENCES wiki_pages(id) ON DELETE RESTRICT,
   position     INTEGER NOT NULL DEFAULT 0,                   -- ordering within siblings
+  updated_by   TEXT,                                         -- users.id of the last save; NULL for legacy rows
   created_at   TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at   TEXT NOT NULL DEFAULT (datetime('now')),
   UNIQUE(project_id, slug)
@@ -674,6 +676,7 @@ CREATE TABLE runtime_events (
                 CHECK (action IN ('install', 'update', 'remove')),
   agent_cli   TEXT NOT NULL CHECK (agent_cli IN ('opencode','hermes','command-code')),
   api_key_id  TEXT REFERENCES api_keys(id) ON DELETE SET NULL,
+  team_id     TEXT REFERENCES organization(id) ON DELETE SET NULL,  -- team the installed runtime binds to; NULL = global
   status      TEXT NOT NULL DEFAULT 'pending'
                 CHECK (status IN ('pending','claimed','completed','failed')),
   error       TEXT,

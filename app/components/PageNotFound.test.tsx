@@ -57,6 +57,8 @@ describe("WikiPageNotFound", () => {
         slug: "second",
         parentId: null,
         position: 1,
+        updatedBy: null,
+        updatedByName: null,
         updatedAt: "2026-08-21T10:00:00.000Z",
       },
       {
@@ -66,6 +68,8 @@ describe("WikiPageNotFound", () => {
         slug: "home",
         parentId: null,
         position: 0,
+        updatedBy: null,
+        updatedByName: null,
         updatedAt: "2026-08-21T10:00:00.000Z",
       },
     ];

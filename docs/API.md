@@ -284,6 +284,7 @@ interface GithubIssue {
   issueId: string;
   issueNumber: number;
   repo: string;                 // "owner/name"
+  title: string | null;         // last-known upstream GitHub title; null = unknown
   syncedState: "open" | "closed" | null;
   url: string;                  // derived: github.com/<repo>/issues/<n>
   outOfSync: boolean;           // derived: syncedState !== column's githubState (state divergence)
@@ -318,6 +319,8 @@ interface WikiPageMeta {          // list/tree views — no content
   slug: string;
   parentId: ID | null;
   position: number;
+  updatedBy: ID | null;       // users.id of the last save; null = legacy/unknown
+  updatedByName: string | null;  // resolved on single-page payloads; list/tree/search emit null
   hasChildren: boolean;
   createdAt: ISODate;         // wire quirk: list formatters emit "" here
   updatedAt: ISODate;
@@ -375,6 +378,7 @@ interface RuntimeEvent {
   machineId: ID;
   action: "install" | "update" | "remove";
   agentCli: "opencode" | "hermes" | "command-code";
+  teamId: ID | null;            // team the installed runtime binds to; null = global
   apiKeyId: ID | null;
   status: "pending" | "claimed" | "completed" | "failed";
   error: string | null;
@@ -1363,6 +1367,10 @@ body { id?, name*, provider*: "opencode"|"hermes"|"command-code", machineId*, mo
   teamId omitted/NULL = global runtime (superadmin-owned; claims any team's
   project tasks). A non-null teamId scopes the runtime to that team's tasks.
   (R13: team admin registers for own team; superadmin any team + global.)
+  When teamId is omitted, the server applies the machine's latest setup event
+  (runtime_events.team_id) for this provider — the web wizard's team picker
+  binds the runtime without the daemon sending it; an explicit null teamId in
+  that event means Global.
 
 PATCH  /api/hearth/runtimes/:id              (browser)
 body { name?, provider?, agent?, model?, printLogs?, logLevel?, extraArgs?: string[] }   (server-authoritative config)
@@ -1470,12 +1478,14 @@ and silently undo the reset. Deleting a missing mapping is 204, never 404.
 
 # ── Runtime setup events (web wizard → machine CLI listener) ──
 POST   /api/hearth/runtime-events           (browser)
-body { machineId*, action*: "install"|"update", agentCli*, apiKeyId?, rawKey? }
+body { machineId*, action*: "install"|"update", agentCli*, teamId?, apiKeyId?, rawKey? }
 → 201 RuntimeEvent
   | 404 MACHINE_NOT_FOUND / API_KEY_NOT_FOUND
-The wizard sends only machine + agent CLI. Provider/model, agent persona,
+The wizard sends machine + agent CLI + team (superadmin picks any team or
+Global). Provider/model, agent persona,
 logging, and extra args are configured after setup. Install creates a FRESH API
 key; rawKey is verified against the stored SHA-256 hash and held ONLY in memory.
+The event's team_id is applied to the runtime when the daemon registers it.
 
 POST   /api/hearth/runtime-events/claim     (listener; Bearer + x-machine-secret)
 body { machineId* }   header: x-machine-secret
@@ -1576,9 +1586,10 @@ classified ONCE by the daemon at write time (shared/hearth-log.ts) and stored;
 the UI renders the stored level. Legacy rows default to out/info.
 
 GET    /api/hearth/tasks/history                (browser)
-query { slug?, status?, skillId?, documentType?, limit?, cursor? }
+query { slug?, status?, skillId?, documentType?, teamId?, limit?, cursor? }
   status: queued | running | completed | failed | cancelled
   skillId: a skill's id (filter by operation bundle)
+  teamId: runtime's owning team (superadmin filter; join runtimes.team_id)
   limit: 1–200 (default 50) · cursor: opaque keyset cursor
 → 200 {
   data: Array<HearthTask & { projectName }>,
@@ -1765,7 +1776,7 @@ POST   /api/admin/herald/providers/:id/models   (superadmin)
   | 403 FORBIDDEN | 404
 
 GET    /api/admin/herald/usage?from=YYYY-MM-DD&to=YYYY-MM-DD&projectId=ID   (superadmin)
-→ 200 { summary: { totalTokens, promptTokens, completionTokens, totalCostCents, totalCostUsd, avgLatencyMs: number|null, errorRate: 0-1, totalCalls, errorCalls }, byDay: Array<{ day: YYYY-MM-DD, tokens, costCents, costUsd, avgLatencyMs, calls, errorRate }>, byModel: Array<{ model, tokens, costCents, costUsd, avgLatencyMs, calls, errorRate }>, totalCostCents }
+→ 200 { summary: { totalTokens, promptTokens, completionTokens, totalCostCents, totalCostUsd, avgLatencyMs: number|null, p50LatencyMs: number|null, p95LatencyMs: number|null, errorRate: 0-1, totalCalls, errorCalls }, byDay: Array<{ day: YYYY-MM-DD, tokens, costCents, costUsd, avgLatencyMs, calls, errorRate }>, byModel: Array<{ model, tokens, costCents, costUsd, avgLatencyMs, calls, errorRate }>, totalCostCents }
   | 403 FORBIDDEN
   Filters: from/to are date( created_at ) inclusive bounds; projectId scopes to one project (also available as GET /api/projects/:slug/herald/usage?from=&to= — same shape, superadmin, slug resolved to projectId). Unbounded when omitted. Aggregation via herald_call_logs indexes idx_call_logs_project_time / idx_call_logs_model.
 

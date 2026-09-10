@@ -17,12 +17,13 @@ export class WikiRepo extends Effect.Service<WikiRepo>()("Lexa/WikiRepo", {
         contentText: string;
         parentId?: string | null;
         position?: number;
+        updatedBy?: string | null;
       }): Effect.Effect<WikiPage, RowNotFound | DbError | ConstraintViolation> =>
         Effect.gen(function* () {
           yield* run(
             db,
-            `INSERT INTO wiki_pages (id, project_id, title, slug, content, content_text, parent_id, position)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+            `INSERT INTO wiki_pages (id, project_id, title, slug, content, content_text, parent_id, position, updated_by)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
             input.id,
             input.projectId,
             input.title,
@@ -30,7 +31,8 @@ export class WikiRepo extends Effect.Service<WikiRepo>()("Lexa/WikiRepo", {
             input.content,
             input.contentText,
             input.parentId ?? null,
-            input.position ?? 0
+            input.position ?? 0,
+            input.updatedBy ?? null
           );
           return yield* queryFirst<WikiPageRow>(db, `SELECT * FROM wiki_pages WHERE id = ?`, input.id).pipe(
             Effect.map(rowToWikiPage)
@@ -108,6 +110,7 @@ export class WikiRepo extends Effect.Service<WikiRepo>()("Lexa/WikiRepo", {
           contentText?: string;
           parentId?: string | null;
           position?: number;
+          updatedBy?: string | null;
         }
       ): Effect.Effect<WikiPage, RowNotFound | DbError | ConstraintViolation> => {
         const sets: string[] = [];
@@ -135,6 +138,10 @@ export class WikiRepo extends Effect.Service<WikiRepo>()("Lexa/WikiRepo", {
         if (input.position !== undefined) {
           sets.push("position = ?");
           params.push(input.position);
+        }
+        if (input.updatedBy) {
+          sets.push("updated_by = ?");
+          params.push(input.updatedBy);
         }
         if (sets.length === 0)
           return queryFirst<WikiPageRow>(db, `SELECT * FROM wiki_pages WHERE id = ?`, id).pipe(
