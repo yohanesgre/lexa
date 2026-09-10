@@ -7,6 +7,23 @@ import type { ReactNode } from "react";
 import type { TipTapDoc } from "../../shared/types";
 import { DescriptionEditor } from "./DescriptionEditor";
 
+const reviewMock = vi.hoisted(() => ({ value: null as null | { action: unknown; runtime: unknown; diff: unknown } }));
+
+vi.mock("./hearth/useHearthReview", () => ({
+  useHearthReview: () => ({
+    review: reviewMock.value,
+    appliedTaskId: null,
+    rejectedTaskId: null,
+    handleReview: vi.fn(),
+    handleAcceptReview: vi.fn(),
+    handleRejectReview: vi.fn(),
+  }),
+}));
+
+vi.mock("./hearth/HearthReviewSurface", () => ({
+  HearthReviewSurface: () => <div className="hearth-review-panel" />,
+}));
+
 const fetchMock = vi.fn();
 function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
@@ -22,6 +39,7 @@ beforeEach(() => {
   fetchMock.mockReset();
   fetchMock.mockImplementation(() => Promise.resolve(json({ data: [] })));
   queryClient = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
+  reviewMock.value = null;
 });
 
 afterEach(() => {
@@ -53,6 +71,7 @@ describe("DescriptionEditor layouts", () => {
     const editorWrapper = container.querySelector(".editor-wrapper");
     expect(editorWrapper).not.toBeNull();
     expect(editorWrapper!.querySelector(".editor-toolbar")).not.toBeNull();
+    expect(editorWrapper!.querySelector(".font-micro")).toBeNull();
     expect(container.querySelector(".task-editor-chrome")).toBeNull();
 
     fireEvent.click(screen.getByRole("button", { name: "Save and finish editing" }));
@@ -71,6 +90,20 @@ describe("DescriptionEditor layouts", () => {
     expect(container.querySelector(".task-editor-chrome")).not.toBeNull();
     expect(container.querySelector(".task-editor-chrome .editor-toolbar")).not.toBeNull();
     expect(container.querySelector(".task-editor-host")).not.toBeNull();
+  });
+
+  it("renders the Hearth review surface inside the card while reviewing", async () => {
+    reviewMock.value = { action: {}, runtime: {}, diff: {} };
+    const { container } = render(
+      <DescriptionEditor initialContent={DOC} layout="wiki" onDone={vi.fn()} onCancel={vi.fn()} />,
+      { wrapper }
+    );
+
+    expect(await screen.findByText("Editing description")).toBeInTheDocument();
+    const editorWrapper = container.querySelector(".editor-wrapper");
+    expect(editorWrapper).not.toBeNull();
+    expect(editorWrapper!.querySelector(".hearth-review-panel")).not.toBeNull();
+    expect(editorWrapper!.classList.contains("is-reviewing")).toBe(true);
   });
 
   it("Enter finishes and Escape reverts", async () => {

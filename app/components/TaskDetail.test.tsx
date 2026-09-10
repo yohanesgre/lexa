@@ -102,5 +102,6 @@ describe("TaskDetail expand", () => {
     expect(await screen.findByText("Editing description")).toBeInTheDocument();
     expect(container.querySelector(".task-editor-chrome")).not.toBeNull();
     expect(container.querySelector(".task-editor-chrome .editor-toolbar")).not.toBeNull();
+    expect(container.querySelector(".slideover-body.editor-flush")).not.toBeNull();
   });
 });
