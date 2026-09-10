@@ -131,8 +131,9 @@ function overlayClassName(open: boolean): string {
   return cn("slideover-overlay", !open && "overlay-closed");
 }
 
-function useEscapeKey(showDeleteDialog: boolean, closeDeleteDialog: () => void, handleClose: () => void): void {
+function useEscapeKey(enabled: boolean, showDeleteDialog: boolean, closeDeleteDialog: () => void, handleClose: () => void): void {
   useEffect(() => {
+    if (!enabled) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         if (showDeleteDialog) {
@@ -313,7 +314,7 @@ export function TaskDetail({ mode = "view", variant = "slideover", from, task, p
     navigate({ to: "/$slug/tasks/$taskId", params: { slug, taskId: task.key || task.id }, search: { from } });
   };
 
-  useEscapeKey(showDeleteDialog, () => setShowDeleteDialog(false), handleClose);
+  useEscapeKey(!isPage || showDeleteDialog, showDeleteDialog, () => setShowDeleteDialog(false), handleClose);
 
   const {
     selectedColumnId, setSelectedColumnId,
@@ -358,10 +359,12 @@ export function TaskDetail({ mode = "view", variant = "slideover", from, task, p
   if (!isCreate && !task) {
     if (isPage) {
       return (
-        <div className="task-page">
-          <TaskPageBar slug={slug} project={project ?? null} onBack={handleClose} />
-          <TaskNotFoundBody message="This task was deleted or the link is stale." onClose={handleClose} />
-        </div>
+        <main className="page-frame page-frame-narrow">
+          <div className="task-page">
+            <TaskPageBar slug={slug} project={project ?? null} onBack={handleClose} />
+            <TaskNotFoundBody message="This task was deleted or the link is stale." onClose={handleClose} />
+          </div>
+        </main>
       );
     }
     return <TaskNotFoundDialog open={open} onClose={handleClose} />;

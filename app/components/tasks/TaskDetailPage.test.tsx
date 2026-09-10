@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import "@testing-library/jest-dom/vitest";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, fireEvent } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 import { TaskDetailPage } from "./TaskDetailPage";
@@ -100,11 +100,34 @@ describe("TaskDetailPage", () => {
     fetchMock.mockImplementation((input: RequestInfo | URL) => {
       const url = String(input);
       if (url.includes("/board")) return Promise.resolve(json(BOARD));
-      if (/\/tasks\/missing$/.test(url)) return Promise.resolve(json({ error: "NOT_FOUND" }, 404));
+      if (/\/tasks\/missing$/.test(url)) return Promise.resolve(json({ error: { code: "TASK_NOT_FOUND", message: "Task not found" } }, 404));
       return Promise.resolve(json({ data: [] }));
     });
     render(<TaskDetailPage slug="demo" taskId="missing" from={undefined} />, { wrapper });
     expect(await screen.findByText("Task not found")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Back to Tasks" })).toBeInTheDocument();
+  });
+
+  it("reflects edits when the URL addresses the task by ticket key", async () => {
+    fetchMock.mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const method = init?.method ?? "GET";
+      if (method === "PATCH" && /\/tasks\/t1$/.test(url)) {
+        return Promise.resolve(json({ data: { ...TASK, title: "Edited via key URL" }, activity: [] }));
+      }
+      if (url.includes("/board")) return Promise.resolve(json(BOARD));
+      if (/\/tasks\/P1-1$/.test(url)) return Promise.resolve(json(TASK));
+      if (/\/tasks\/t1$/.test(url)) return Promise.resolve(json(TASK));
+      return Promise.resolve(json({ data: [] }));
+    });
+    render(<TaskDetailPage slug="demo" taskId="P1-1" from="tasks" />, { wrapper });
+    expect(await screen.findByText("Crash on large board load")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByTitle("Click to edit"));
+    const input = screen.getByLabelText("Task title");
+    fireEvent.change(input, { target: { value: "Edited via key URL" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(await screen.findByText("Edited via key URL")).toBeInTheDocument();
   });
 });

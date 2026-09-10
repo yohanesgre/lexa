@@ -27,11 +27,11 @@ export function TaskDetailPageSkeleton() {
   );
 }
 
-function TaskDetailNotFound({ slug, onBack, onBackToTasks }: { slug: string; onBack: () => void; onBackToTasks: () => void }) {
+function TaskDetailNotFound({ slug, project, onBack, onBackToTasks }: { slug: string; project: { name: string } | null; onBack: () => void; onBackToTasks: () => void }) {
   return (
     <main className="page-frame page-frame-narrow">
       <div className="task-page">
-        <TaskPageBar slug={slug} project={null} onBack={onBack} />
+        <TaskPageBar slug={slug} project={project} onBack={onBack} />
         <div
           className="empty-state"
           style={{ border: "1px solid var(--lx-border-subtle)", borderRadius: 8, background: "var(--lx-surface-card)", minHeight: 360 }}
@@ -53,10 +53,20 @@ function TaskDetailNotFound({ slug, onBack, onBackToTasks }: { slug: string; onB
   );
 }
 
+function taskErrorCode(error: unknown): string | undefined {
+  return (error as { code?: string } | null)?.code;
+}
+
 export function TaskDetailPage({ slug, taskId, from }: TaskDetailPageProps) {
   const navigate = useNavigate();
   const boardQuery = useBoard(slug, false);
-  const { data: task, isLoading: taskLoading } = useTask(slug, taskId);
+  const taskQuery = useTask(slug, taskId);
+  // Mutations write authoritative responses under the task UUID key; a
+  // KEY-addressed URL (/tasks/EG-18) must observe that key too or edits
+  // never reach the rendered task.
+  const canonicalId = taskQuery.data?.id ?? null;
+  const canonicalQuery = useTask(slug, canonicalId);
+  const task = canonicalQuery.data ?? taskQuery.data;
   const board = boardQuery.data;
 
   const moveTask = useMoveTask(slug);
@@ -91,15 +101,27 @@ export function TaskDetailPage({ slug, taskId, from }: TaskDetailPageProps) {
     updateTask.mutate({ id, ...data });
   };
   const handleDelete = async (id: string) => {
-    await deleteTask.mutateAsync({ id });
-    leaveAfterMutation();
+    try {
+      await deleteTask.mutateAsync({ id });
+      leaveAfterMutation();
+    } catch {
+      // error toast comes from the mutation
+    }
   };
   const handleArchive = async (id: string) => {
-    await archiveTask.mutateAsync({ id });
-    leaveAfterMutation();
+    try {
+      await archiveTask.mutateAsync({ id });
+      leaveAfterMutation();
+    } catch {
+      // error toast comes from the mutation
+    }
   };
   const handleRestore = async (id: string) => {
-    await restoreTask.mutateAsync({ id });
+    try {
+      await restoreTask.mutateAsync({ id });
+    } catch {
+      // error toast comes from the mutation
+    }
   };
   const handleLinkGithub = async (id: string, repo: string) => {
     const { data: linked } = await linkGithubIssue.mutateAsync({ id, repo });
@@ -118,7 +140,11 @@ export function TaskDetailPage({ slug, taskId, from }: TaskDetailPageProps) {
     description: TipTapDoc;
   }): Promise<void> => {};
 
-  if (boardQuery.isLoading || taskLoading) {
+  const taskError = taskQuery.error;
+  const taskNotFound = task === undefined && taskError !== null
+    && (taskErrorCode(taskError) === "TASK_NOT_FOUND" || taskErrorCode(taskError) === "NOT_FOUND");
+
+  if (boardQuery.isLoading || taskQuery.isLoading) {
     return <TaskDetailPageSkeleton />;
   }
   if (boardQuery.error) {
@@ -131,8 +157,21 @@ export function TaskDetailPage({ slug, taskId, from }: TaskDetailPageProps) {
       </main>
     );
   }
+  if (taskError !== null && !taskNotFound) {
+    return (
+      <main className="page-frame page-frame-narrow">
+        <div className="tasks-error">
+          <div className="tasks-error-title">Failed to load task</div>
+          <div className="tasks-error-sub">{(taskError as Error).message}</div>
+          <button type="button" className="btn btn-ghost btn-sm" onClick={() => void taskQuery.refetch()}>
+            Retry
+          </button>
+        </div>
+      </main>
+    );
+  }
   if (!board || !task) {
-    return <TaskDetailNotFound slug={slug} onBack={leaveAfterMutation} onBackToTasks={toTasks} />;
+    return <TaskDetailNotFound slug={slug} project={board?.project ?? null} onBack={leaveAfterMutation} onBackToTasks={toTasks} />;
   }
 
   return (
