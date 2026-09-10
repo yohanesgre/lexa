@@ -553,6 +553,7 @@ export function listHearthTaskHistory(filters: {
   status?: HearthTaskStatus;
   skillId?: string | undefined;
   documentType?: "task" | "wiki";
+  teamId?: string | undefined;
   limit?: number | undefined;
   cursor?: string | undefined;
 }): Promise<HearthHistoryPage> {
@@ -561,6 +562,7 @@ export function listHearthTaskHistory(filters: {
   if (filters.status) q.set("status", filters.status);
   if (filters.skillId) q.set("skillId", filters.skillId);
   if (filters.documentType) q.set("documentType", filters.documentType);
+  if (filters.teamId) q.set("teamId", filters.teamId);
   if (filters.limit) q.set("limit", String(filters.limit));
   if (filters.cursor) q.set("cursor", filters.cursor);
   const qs = q.toString();
@@ -650,6 +652,7 @@ export function createRuntimeEvent(input: {
   machineId: string;
   action: "install" | "update";
   agentCli: "opencode" | "hermes" | "command-code";
+  teamId?: string | null | undefined;
   apiKeyId?: string | undefined;
   rawKey?: string | undefined;
 }): Promise<RuntimeEvent> {

@@ -35,7 +35,7 @@ export function UsageKpiCards({ summary }: { summary: HeraldUsageSummary | null 
         <div className="kpi-label">Avg latency</div>
         <div className="kpi-value">{summary.avgLatencyMs !== null ? `${summary.avgLatencyMs.toLocaleString()} ms` : "—"}</div>
         <div className="text-xs color-muted mt-1" style={{ fontFamily: "var(--lx-font-micro)", fontSize: 11, letterSpacing: "0.02em" }}>
-          p50 — · p95 — ms
+          p50 {summary.p50LatencyMs != null ? summary.p50LatencyMs.toLocaleString() : "—"} · p95 {summary.p95LatencyMs != null ? summary.p95LatencyMs.toLocaleString() : "—"} ms
         </div>
       </div>
       <div className="kpi-card">

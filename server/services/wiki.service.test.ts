@@ -363,3 +363,46 @@ describe("WikiService.search", () => {
     if (Either.isLeft(res)) expect(res.left).toBeInstanceOf(SearchError);
   });
 });
+
+describe("WikiService last-edited author", () => {
+  it("records updated_by on create and both save types, and resolves the display name", async () => {
+    seed(db);
+    db.prepare("INSERT INTO users (id, email, name, role) VALUES ('u1','al@lexa.test','Al','member')").run();
+    const svc = makeService(db);
+    const page = await Effect.runPromise(svc.create("p1", { title: "Home", updatedBy: "u1" }));
+    expect(page.updatedBy).toBe("u1");
+    expect(page.updatedByName).toBe("Al");
+    const raw = db.prepare("SELECT updated_by FROM wiki_pages WHERE id = ?").get(page.id) as { updated_by: string | null };
+    expect(raw.updated_by).toBe("u1");
+
+    const manual = await Effect.runPromise(svc.update(page.id, { title: "Home v2" }, "manual", "u1"));
+    expect(manual.updatedBy).toBe("u1");
+    expect(manual.updatedByName).toBe("Al");
+
+    const auto = await Effect.runPromise(svc.update(page.id, { title: "Home v3" }, "autosave", "u1"));
+    expect(auto.updatedBy).toBe("u1");
+    expect(auto.updatedByName).toBe("Al");
+
+    // Read path resolves the author name too.
+    const read = await Effect.runPromise(svc.findBySlug("p1", "home"));
+    expect(read.updatedByName).toBe("Al");
+  });
+
+  it("leaves legacy rows with a null author", async () => {
+    seed(db);
+    const svc = makeService(db);
+    const page = await Effect.runPromise(svc.create("p1", { title: "Legacy" }));
+    expect(page.updatedBy).toBeNull();
+    expect(page.updatedByName).toBeNull();
+  });
+
+  it("keeps a previously recorded author when a later save has no user context", async () => {
+    seed(db);
+    db.prepare("INSERT INTO users (id, email, name, role) VALUES ('u1','al@lexa.test','Al','member')").run();
+    const svc = makeService(db);
+    const page = await Effect.runPromise(svc.create("p1", { title: "Home", updatedBy: "u1" }));
+    await Effect.runPromise(svc.update(page.id, { title: "Machine edit" }, "autosave", null));
+    const raw = db.prepare("SELECT updated_by FROM wiki_pages WHERE id = ?").get(page.id) as { updated_by: string | null };
+    expect(raw.updated_by).toBe("u1");
+  });
+});

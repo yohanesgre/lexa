@@ -63,6 +63,9 @@ describe("GET /api/admin/herald/usage", () => {
     expect(body.summary.totalTokens).toBeGreaterThan(0);
     expect(body.summary.totalCostCents).toBe(360);
     expect(body.summary.errorRate).toBeCloseTo(0.25);
+    // Nearest-rank over [500,800,1000,1200]: p50 → rank 2 (800), p95 → rank 4 (1200).
+    expect(body.summary.p50LatencyMs).toBe(800);
+    expect(body.summary.p95LatencyMs).toBe(1200);
     expect(body.byDay.length).toBe(3);
     expect(body.byDay[0]!.day).toBe("2026-08-01");
     expect(body.byModel.length).toBeGreaterThanOrEqual(2);
@@ -84,6 +87,33 @@ describe("GET /api/admin/herald/usage", () => {
     const body = await res.json() as any;
     expect(body.summary.totalCalls).toBe(3);
     expect(body.byModel.find((m: any) => m.model === "anthropic/claude-sonnet-4").calls).toBe(2);
+  });
+
+  it("computes nearest-rank p50/p95 over non-null latencies (odd count)", async () => {
+    db.exec(`
+      INSERT INTO projects (id, name, slug) VALUES ('p3','Proj3','proj3');
+      INSERT INTO herald_call_logs (id, project_id, provider_id, model, kind, status, usage_in, usage_out, cached_in, latency_ms, cost_cents, created_at) VALUES
+        ('n1','p3',NULL,'m','openai_compatible','done',1,1,0,100,1,'2026-08-04 10:00:00'),
+        ('n2','p3',NULL,'m','openai_compatible','done',1,1,0,200,1,'2026-08-04 11:00:00'),
+        ('n3','p3',NULL,'m','openai_compatible','done',1,1,0,300,1,'2026-08-04 12:00:00'),
+        ('n4','p3',NULL,'m','openai_compatible','done',1,1,0,NULL,1,'2026-08-04 13:00:00');
+    `);
+    const res = await handler(authed("GET", "/api/admin/herald/usage?projectId=p3"));
+    expect(res.status).toBe(200);
+    const body = await res.json() as any;
+    expect(body.summary.totalCalls).toBe(4);
+    expect(body.summary.p50LatencyMs).toBe(200);
+    expect(body.summary.p95LatencyMs).toBe(300);
+  });
+
+  it("returns null p50/p95 when no latencies are recorded", async () => {
+    db.prepare("INSERT INTO projects (id, name, slug) VALUES ('p4','Proj4','proj4')").run();
+    const res = await handler(authed("GET", "/api/admin/herald/usage?projectId=p4"));
+    expect(res.status).toBe(200);
+    const body = await res.json() as any;
+    expect(body.summary.totalCalls).toBe(0);
+    expect(body.summary.p50LatencyMs).toBeNull();
+    expect(body.summary.p95LatencyMs).toBeNull();
   });
 
   it("non-admin → 403", async () => {

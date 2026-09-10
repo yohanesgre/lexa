@@ -169,12 +169,13 @@ export interface WikiPageRow {
   content_text: string;
   parent_id: string | null;
   position: number;
+  updated_by: string | null;
   created_at: string;
   updated_at: string;
 }
 
 export function rowToWikiPageMeta(row: WikiPageRow): {
-  id: string; projectId: string; title: string; slug: string; parentId: string | null; position: number; updatedAt: ISODate;
+  id: string; projectId: string; title: string; slug: string; parentId: string | null; position: number; updatedBy: string | null; updatedByName: string | null; updatedAt: ISODate;
 } {
   return {
     id: row.id,
@@ -183,12 +184,14 @@ export function rowToWikiPageMeta(row: WikiPageRow): {
     slug: row.slug,
     parentId: row.parent_id,
     position: row.position,
+    updatedBy: row.updated_by ?? null,
+    updatedByName: null,
     updatedAt: row.updated_at,
   };
 }
 
 export function rowToWikiPage(row: WikiPageRow): {
-  id: string; projectId: string; title: string; slug: string; parentId: string | null; position: number; updatedAt: ISODate; content: TipTapDoc; createdAt: ISODate;
+  id: string; projectId: string; title: string; slug: string; parentId: string | null; position: number; updatedBy: string | null; updatedByName: string | null; updatedAt: ISODate; content: TipTapDoc; createdAt: ISODate;
 } {
   return {
     ...rowToWikiPageMeta(row),
@@ -283,7 +286,7 @@ export interface TaskRow {
 }
 
 export function rowToTask(row: TaskRow, columnGithubState?: "open" | "closed" | null): {
-  id: string; key: string; projectId: string; columnId: string; swimlaneId: string; title: string; description: TipTapDoc; priority: string; type: string; assignees: string[]; position: string; dueAt: string | null; githubs: { issueId: string; issueNumber: number; repo: string; syncedState: "open" | "closed" | null; url: string; outOfSync: boolean; pushFailed: boolean }[]; archivedAt: ISODate | null; createdAt: ISODate; updatedAt: ISODate;
+  id: string; key: string; projectId: string; columnId: string; swimlaneId: string; title: string; description: TipTapDoc; priority: string; type: string; assignees: string[]; position: string; dueAt: string | null; githubs: { issueId: string; issueNumber: number; repo: string; title: string | null; syncedState: "open" | "closed" | null; url: string; outOfSync: boolean; pushFailed: boolean }[]; archivedAt: ISODate | null; createdAt: ISODate; updatedAt: ISODate;
 } {
   return taskFromRow(row, columnGithubState, parseTipTapDoc(row.description));
 }
@@ -291,27 +294,29 @@ export function rowToTask(row: TaskRow, columnGithubState?: "open" | "closed" | 
 // Slim rows (board/list paths select no description) map to an empty doc —
 // the key stays in the response shape, the blob never ships.
 export function rowToTaskSlim(row: Omit<TaskRow, "description">, columnGithubState?: "open" | "closed" | null): {
-  id: string; key: string; projectId: string; columnId: string; swimlaneId: string; title: string; description: TipTapDoc; priority: string; type: string; assignees: string[]; position: string; dueAt: string | null; githubs: { issueId: string; issueNumber: number; repo: string; syncedState: "open" | "closed" | null; url: string; outOfSync: boolean; pushFailed: boolean }[]; archivedAt: ISODate | null; createdAt: ISODate; updatedAt: ISODate;
+  id: string; key: string; projectId: string; columnId: string; swimlaneId: string; title: string; description: TipTapDoc; priority: string; type: string; assignees: string[]; position: string; dueAt: string | null; githubs: { issueId: string; issueNumber: number; repo: string; title: string | null; syncedState: "open" | "closed" | null; url: string; outOfSync: boolean; pushFailed: boolean }[]; archivedAt: ISODate | null; createdAt: ISODate; updatedAt: ISODate;
 } {
   return taskFromRow(row as TaskRow, columnGithubState, { type: "doc", content: [] });
 }
 
 function taskFromRow(row: TaskRow, columnGithubState: "open" | "closed" | null | undefined, description: TipTapDoc): {
-  id: string; key: string; projectId: string; columnId: string; swimlaneId: string; title: string; description: TipTapDoc; priority: string; type: string; assignees: string[]; position: string; dueAt: string | null; githubs: { issueId: string; issueNumber: number; repo: string; syncedState: "open" | "closed" | null; url: string; outOfSync: boolean; pushFailed: boolean }[]; archivedAt: ISODate | null; createdAt: ISODate; updatedAt: ISODate;
+  id: string; key: string; projectId: string; columnId: string; swimlaneId: string; title: string; description: TipTapDoc; priority: string; type: string; assignees: string[]; position: string; dueAt: string | null; githubs: { issueId: string; issueNumber: number; repo: string; title: string | null; syncedState: "open" | "closed" | null; url: string; outOfSync: boolean; pushFailed: boolean }[]; archivedAt: ISODate | null; createdAt: ISODate; updatedAt: ISODate;
 } {
   const colState = columnGithubState ?? row.column_github_state ?? null;
-  const githubs: { issueId: string; issueNumber: number; repo: string; syncedState: "open" | "closed" | null; url: string; outOfSync: boolean; pushFailed: boolean }[] = [];
+  const githubs: { issueId: string; issueNumber: number; repo: string; title: string | null; syncedState: "open" | "closed" | null; url: string; outOfSync: boolean; pushFailed: boolean }[] = [];
   const seen = new Set<string>();
   if (row.github_issues_raw) {
     for (const part of row.github_issues_raw.split("||")) {
-      const [issueId, issueNumberStr, repo, syncedState, pushFailed] = part.split(",");
+      const [issueId, issueNumberStr, repo, syncedState, pushFailed, ...titleParts] = part.split(",");
       if (!issueId || !issueNumberStr || !repo || seen.has(issueId)) continue;
       seen.add(issueId);
+      const issueTitle = titleParts.join(",");
       const outOfSync = !!(syncedState && colState && syncedState !== colState);
       githubs.push({
         issueId,
         issueNumber: Number(issueNumberStr),
         repo,
+        title: issueTitle.length > 0 ? issueTitle : null,
         syncedState: (syncedState || null) as "open" | "closed" | null,
         url: `https://github.com/${repo}/issues/${issueNumberStr}`,
         outOfSync,

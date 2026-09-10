@@ -625,6 +625,7 @@ const RuntimeEventSchema = Schema.Struct({
   machineId: Schema.String,
   action: Schema.Literal("install", "update", "remove"),
   agentCli: Schema.Literal("opencode", "hermes", "command-code"),
+  teamId: Schema.NullOr(Schema.String),
   apiKeyId: Schema.NullOr(Schema.String),
   status: Schema.Literal("pending", "claimed", "completed", "failed"),
   error: Schema.NullOr(Schema.String),
@@ -637,6 +638,7 @@ const CreateRuntimeEventInput = Schema.Struct({
   machineId: Schema.String,
   action: Schema.Literal("install", "update"),
   agentCli: Schema.Literal("opencode", "hermes", "command-code"),
+  teamId: Schema.optional(Schema.NullOr(Schema.String)),
   apiKeyId: Schema.optional(Schema.String),
   rawKey: Schema.optional(Schema.String),
 });
@@ -1163,6 +1165,8 @@ const WikiPageSchema = Schema.Struct({
   contentText: Schema.optional(Schema.String),
   parentId: Schema.NullOr(Schema.String),
   position: Schema.Number,
+  updatedBy: Schema.NullOr(Schema.String),
+  updatedByName: Schema.NullOr(Schema.String),
   createdAt: Schema.String,
   updatedAt: Schema.String,
 });
@@ -1174,6 +1178,8 @@ const WikiPageMetaSchema = Schema.Struct({
   slug: Schema.String,
   parentId: Schema.NullOr(Schema.String),
   position: Schema.Number,
+  updatedBy: Schema.NullOr(Schema.String),
+  updatedByName: Schema.NullOr(Schema.String),
   hasChildren: Schema.Boolean,
   createdAt: Schema.String,
   updatedAt: Schema.String,
@@ -1312,6 +1318,7 @@ const GithubIssueSchema = Schema.Struct({
   issueId: Schema.String,
   issueNumber: Schema.Number,
   repo: Schema.String,
+  title: Schema.NullOr(Schema.String),
   syncedState: Schema.NullOr(Schema.Literal("open", "closed")),
   url: Schema.String,
   outOfSync: Schema.Boolean,
@@ -1730,6 +1737,8 @@ const HeraldUsageSummarySchema = Schema.Struct({
   totalCostCents: Schema.Number,
   totalCostUsd: Schema.Number,
   avgLatencyMs: Schema.NullOr(Schema.Number),
+  p50LatencyMs: Schema.NullOr(Schema.Number),
+  p95LatencyMs: Schema.NullOr(Schema.Number),
   errorRate: Schema.Number,
   totalCalls: Schema.Number,
   errorCalls: Schema.Number,
@@ -2599,10 +2608,23 @@ const hearthLive = HttpApiBuilder.group(LexaApi, "hearth", (handlers) =>
     .handle("createRuntimeEvent", (req) =>
       respond(Effect.gen(function* () {
         const service = yield* RuntimeEventService;
+        const identity = yield* AuthIdentity;
+        const authz = yield* AuthorizationService;
+        const teamId = req.payload.teamId ?? null;
+        // R13: superadmin may bind any team or Global (null); a team admin may
+        // only bind a team they administer. Global is superadmin-only.
+        if (identity.role !== "admin") {
+          const userId = identity.userId;
+          const allowed = teamId !== null && userId !== null && (yield* authz.isTeamAdmin(userId, teamId));
+          if (!allowed) {
+            return yield* new Forbidden({ message: "Team admin role required for that team" });
+          }
+        }
         return yield* service.create({
           machineId: req.payload.machineId,
           action: req.payload.action,
           agentCli: req.payload.agentCli,
+          teamId,
           ...(req.payload.apiKeyId !== undefined ? { apiKeyId: req.payload.apiKeyId } : {}),
           ...(req.payload.rawKey !== undefined ? { rawKey: req.payload.rawKey } : {}),
         });
@@ -2777,6 +2799,7 @@ const hearthLive = HttpApiBuilder.group(LexaApi, "hearth", (handlers) =>
         const project = slug ? yield* projectService.findBySlug(slug) : null;
         const status = q.get("status");
         const skillId = q.get("skillId") ?? undefined;
+        const teamId = q.get("teamId") ?? undefined;
         const documentType = q.get("documentType");
         const statuses = new Set(["queued", "running", "completed", "failed", "cancelled"]);
         const limitRaw = Number(q.get("limit") ?? 50);
@@ -2786,6 +2809,7 @@ const hearthLive = HttpApiBuilder.group(LexaApi, "hearth", (handlers) =>
             ...(project?.id !== undefined ? { projectId: project.id } : {}),
             ...(status && statuses.has(status) ? { status: status as "queued" | "running" | "completed" | "failed" | "cancelled" } : {}),
             ...(skillId !== undefined ? { skillId } : {}),
+            ...(teamId !== undefined ? { teamId } : {}),
             ...(documentType === "task" || documentType === "wiki" ? { documentType } : {}),
           },
           limit,
@@ -3719,6 +3743,7 @@ const wikiLive = HttpApiBuilder.group(LexaApi, "wiki", (handlers) =>
     .handle("createPage", (req) =>
       respond(Effect.gen(function* () {
         const wikiService = yield* WikiService;
+        const identity = yield* AuthIdentity;
         const project = yield* requireProjectRead(req.path.slug);
         const contentText = req.payload.content ? extractText(req.payload.content) : undefined;
         const page = yield* wikiService.create(project.id, {
@@ -3727,6 +3752,7 @@ const wikiLive = HttpApiBuilder.group(LexaApi, "wiki", (handlers) =>
           ...(req.payload.content !== undefined ? { content: req.payload.content } : {}),
           ...(contentText !== undefined ? { contentText } : {}),
           ...(req.payload.parentId !== undefined ? { parentId: req.payload.parentId } : {}),
+          updatedBy: identity.userId ?? null,
         });
         return formatWikiPage(page);
       }))
@@ -3763,6 +3789,7 @@ const wikiLive = HttpApiBuilder.group(LexaApi, "wiki", (handlers) =>
     .handle("updatePage", (req) =>
       respond(Effect.gen(function* () {
         const wikiService = yield* WikiService;
+        const identity = yield* AuthIdentity;
         const project = yield* requireProjectRead(req.path.slug);
         const page = yield* wikiService.findBySlug(project.id, req.path.pageSlug);
         const updateInput: { title?: string; slug?: string; parentId?: string | null; position?: number; content?: string; contentText?: string } = {};
@@ -3775,7 +3802,7 @@ const wikiLive = HttpApiBuilder.group(LexaApi, "wiki", (handlers) =>
           updateInput.contentText = extractText(req.payload.content);
         }
         const saveType = req.payload.saveType ?? "autosave";
-        const updated = yield* wikiService.update(page.id, updateInput, saveType);
+        const updated = yield* wikiService.update(page.id, updateInput, saveType, identity.userId ?? null);
         return formatWikiPage(updated);
       }))
     )
@@ -3813,8 +3840,9 @@ const wikiLive = HttpApiBuilder.group(LexaApi, "wiki", (handlers) =>
     .handle("restoreRevision", (req) =>
       respond(Effect.gen(function* () {
         const wikiService = yield* WikiService;
+        const identity = yield* AuthIdentity;
         const project = yield* requireProjectRead(req.path.slug);
-        const page = yield* wikiService.restoreRevision(req.payload.revisionId, req.path.pageSlug, project.id);
+        const page = yield* wikiService.restoreRevision(req.payload.revisionId, req.path.pageSlug, project.id, identity.userId ?? null);
         return formatWikiPage(page);
       }))
     )

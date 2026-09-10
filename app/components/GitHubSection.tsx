@@ -42,6 +42,9 @@ function LinkedIssuesList({ githubs, onUnlinkClick }: { githubs: GithubIssue[]; 
                 <a href={g.url} target="_blank" rel="noreferrer" className="font-mono text-sm font-medium text-lx-text-link whitespace-nowrap">
                   {g.repo} #{g.issueNumber}
                 </a>
+                {g.title && (
+                  <span className="text-xs text-lx-text-secondary truncate">· {g.title}</span>
+                )}
               </div>
               <div className="flex items-center gap-2 shrink-0">
                 <span

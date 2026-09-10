@@ -129,7 +129,7 @@ describe("deriveTaskList", () => {
       columns: [],
       swimlanes: [],
       fieldConfig: { priorities: [], types: [] },
-      tasks: [{ ...TASK, columnId: "c-x", swimlaneId: "s-x", priority: "prio-x", type: "type-x", githubs: [{ issueId: "g", issueNumber: 7, repo: "r", syncedState: null, url: "u", outOfSync: false, pushFailed: false }] }],
+      tasks: [{ ...TASK, columnId: "c-x", swimlaneId: "s-x", priority: "prio-x", type: "type-x", githubs: [{ issueId: "g", issueNumber: 7, repo: "r", title: null, syncedState: null, url: "u", outOfSync: false, pushFailed: false }] }],
     });
     expect(bare[0]).toMatchObject({
       columnName: "Unknown column",

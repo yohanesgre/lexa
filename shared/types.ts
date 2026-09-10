@@ -169,6 +169,7 @@ export interface GithubIssue {
   issueId: string;
   issueNumber: number;
   repo: string;
+  title: string | null;       // last-known upstream title; NULL = unknown
   syncedState: "open" | "closed" | null;
   url: string;
   outOfSync: boolean;
@@ -207,6 +208,8 @@ export interface WikiPageMeta {
   slug: string;
   parentId: ID | null;
   position: number;
+  updatedBy: string | null;        // users.id of the last save; null = legacy/unknown
+  updatedByName: string | null;    // resolved on single-page payloads; list/tree/search emit null
   updatedAt: ISODate;
 }
 
@@ -383,6 +386,8 @@ export interface RuntimeEvent {
   machineId: ID;
   action: RuntimeEventAction;
   agentCli: HearthProvider;
+  // Team the installed runtime binds to; null = global.
+  teamId: ID | null;
   // Null for update/remove events; install delivers a fresh key once.
   apiKeyId: ID | null;
   status: "pending" | "claimed" | "completed" | "failed";

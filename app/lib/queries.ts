@@ -1667,7 +1667,7 @@ export function useCancelHearthTask() {
 // Polls while any row on the current page is queued/running so active runs
 // update in place; idle pages refresh on a slow heartbeat.
 export function useHearthTaskHistory(
-  filters: { slug?: string | undefined; status?: HearthTask["status"]; skillId?: string | undefined; documentType?: "task" | "wiki"; limit?: number },
+  filters: { slug?: string | undefined; status?: HearthTask["status"]; skillId?: string | undefined; documentType?: "task" | "wiki"; teamId?: string | undefined; limit?: number },
   cursor: string | null
 ) {
   return useQuery({

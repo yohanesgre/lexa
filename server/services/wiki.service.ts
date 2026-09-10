@@ -1,6 +1,7 @@
 import { Effect } from "effect";
 import { WikiRepo } from "../repos/wiki.repo";
 import { ProjectRepo } from "../repos/project.repo";
+import { UserRepo } from "../repos/user.repo";
 import { ConstraintViolation, DbError, RowNotFound, Db, withTx } from "../db/db";
 import { ProjectNotFound, WikiPageNotFound, SlugTaken, HasChildren, SearchError } from "../api/errors";
 import type { WikiPage, WikiPageMeta, WikiPageRevision, WikiPageRevisionSummary } from "../../shared/types";
@@ -8,11 +9,23 @@ import type { TipTapDoc } from "../../shared/types";
 import { extractText } from "../../shared/tiptap-text";
 
 export class WikiService extends Effect.Service<WikiService>()("Lexa/WikiService", {
-  dependencies: [WikiRepo.Default, ProjectRepo.Default],
+  dependencies: [WikiRepo.Default, ProjectRepo.Default, UserRepo.Default],
   effect: Effect.gen(function* () {
     const repo = yield* WikiRepo;
     const projectRepo = yield* ProjectRepo;
+    const userRepo = yield* UserRepo;
     const db = yield* Db;
+
+    // Resolves the last-save author's display name. Legacy rows (updatedBy
+    // null) and deleted users resolve to null.
+    const withUpdatedByName = <T extends WikiPageMeta>(page: T): Effect.Effect<T, DbError> =>
+      page.updatedBy
+        ? userRepo.findById(page.updatedBy).pipe(
+            Effect.map((u) => ({ ...page, updatedByName: u.name })),
+            Effect.catchTag("RowNotFound", () => Effect.succeed({ ...page, updatedByName: null })),
+            Effect.catchAll(() => Effect.succeed({ ...page, updatedByName: null }))
+          )
+        : Effect.succeed({ ...page, updatedByName: null });
 
     const slugify = (title: string): string =>
       title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 60) || "page";
@@ -31,6 +44,7 @@ export class WikiService extends Effect.Service<WikiService>()("Lexa/WikiService
           content?: TipTapDoc | undefined;
           contentText?: string | undefined;
           parentId?: string | null | undefined;
+          updatedBy?: string | null | undefined;
         }
       ): Effect.Effect<WikiPage, ProjectNotFound | SlugTaken | DbError | RowNotFound> =>
         Effect.gen(function* () {
@@ -50,10 +64,11 @@ export class WikiService extends Effect.Service<WikiService>()("Lexa/WikiService
               contentText,
               parentId: input.parentId ?? null,
               position: position + 1,
+              updatedBy: input.updatedBy ?? null,
             })
             .pipe(Effect.catchTag("ConstraintViolation", () => new SlugTaken({ slug })));
           yield* Effect.logInfo(`[Wiki] Created page ${page.id} in project ${page.projectId}`);
-          return page;
+          return yield* withUpdatedByName(page);
         }),
 
       findByProject: (projectId: string): Effect.Effect<WikiPageMeta[], ProjectNotFound | DbError> =>
@@ -69,7 +84,8 @@ export class WikiService extends Effect.Service<WikiService>()("Lexa/WikiService
         Effect.gen(function* () {
           yield* validateProject(projectId);
           return yield* repo.findBySlug(projectId, slug).pipe(
-            Effect.catchTag("RowNotFound", () => new WikiPageNotFound({ id: slug }))
+            Effect.catchTag("RowNotFound", () => new WikiPageNotFound({ id: slug })),
+            Effect.flatMap(withUpdatedByName)
           );
         }),
 
@@ -108,7 +124,8 @@ export class WikiService extends Effect.Service<WikiService>()("Lexa/WikiService
           parentId?: string | null;
           position?: number;
         },
-        saveType: "autosave" | "manual" = "autosave"
+        saveType: "autosave" | "manual" = "autosave",
+        updatedBy: string | null = null
       ): Effect.Effect<WikiPage, WikiPageNotFound | DbError | ConstraintViolation> =>
         Effect.gen(function* () {
           const current = yield* repo.findById(id).pipe(
@@ -128,13 +145,13 @@ export class WikiService extends Effect.Service<WikiService>()("Lexa/WikiService
               // Prune: keep the newest 100 revisions per page (same tx as
               // the insert — no unbounded revision growth).
               yield* repo.pruneRevisions(current.id);
-              return yield* repo.update(id, input).pipe(
+              return yield* repo.update(id, { ...input, updatedBy }).pipe(
                 Effect.catchTag("RowNotFound", () => new WikiPageNotFound({ id }))
               );
             })
           );
           yield* Effect.logInfo(`[Wiki] Updated page ${updated.id}`);
-          return updated;
+          return yield* withUpdatedByName(updated);
         }),
 
       listRevisions: (
@@ -153,7 +170,8 @@ export class WikiService extends Effect.Service<WikiService>()("Lexa/WikiService
       restoreRevision: (
         revisionId: string,
         pageSlug: string,
-        projectId: string
+        projectId: string,
+        updatedBy: string | null = null
       ): Effect.Effect<WikiPage, ProjectNotFound | WikiPageNotFound | DbError | ConstraintViolation> =>
         Effect.gen(function* () {
           yield* validateProject(projectId);
@@ -175,6 +193,7 @@ export class WikiService extends Effect.Service<WikiService>()("Lexa/WikiService
                 slug: revision.slug,
                 content: JSON.stringify(revision.content),
                 contentText: revision.contentText,
+                updatedBy,
               }).pipe(
                 Effect.catchTag("RowNotFound", () => new WikiPageNotFound({ id: page.id }))
               );
@@ -186,16 +205,18 @@ export class WikiService extends Effect.Service<WikiService>()("Lexa/WikiService
                 revision.contentText,
                 "manual"
               );
-              return yield* repo.findById(page.id).pipe(
+              const restored = yield* repo.findById(page.id).pipe(
                 Effect.catchTag("RowNotFound", () => new WikiPageNotFound({ id: page.id }))
               );
+              return yield* withUpdatedByName(restored);
             })
           );
         }),
 
       getById: (id: string): Effect.Effect<WikiPage, WikiPageNotFound | DbError> =>
         repo.findById(id).pipe(
-          Effect.catchTag("RowNotFound", () => new WikiPageNotFound({ id }))
+          Effect.catchTag("RowNotFound", () => new WikiPageNotFound({ id })),
+          Effect.flatMap(withUpdatedByName)
         ),
 
       getRevision: (id: string): Effect.Effect<WikiPageRevision, WikiPageNotFound | DbError> =>

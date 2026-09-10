@@ -23,11 +23,11 @@ function decodeCursor(cursor: string | null): { columnId: string; position: stri
   }
 }
 
-const TASK_SELECT = `t.*, c.github_state as column_github_state, GROUP_CONCAT(ta.user_name, '||') AS assignees, COALESCE(GROUP_CONCAT(gi.issue_id || ',' || gi.issue_number || ',' || gi.repo || ',' || COALESCE(gi.synced_state,'') || ',' || COALESCE(gi.push_failed,'0'), '||'), '') AS github_issues_raw`;
+const TASK_SELECT = `t.*, c.github_state as column_github_state, GROUP_CONCAT(ta.user_name, '||') AS assignees, COALESCE(GROUP_CONCAT(gi.issue_id || ',' || gi.issue_number || ',' || gi.repo || ',' || COALESCE(gi.synced_state,'') || ',' || COALESCE(gi.push_failed,'0') || ',' || COALESCE(gi.issue_title,''), '||'), '') AS github_issues_raw`;
 
 // Slim variant for list/board/anchor paths — no t.description (the TipTap
 // blob is only needed for get/update/mutation responses).
-const TASK_SELECT_SLIM = `t.id, t.key, t.project_id, t.column_id, t.swimlane_id, t.title, t.priority, t.type, t.position, t.due_at, t.archived_at, t.github_issue_id, t.github_issue_number, t.github_repo, t.github_synced_state, t.created_at, t.updated_at, c.github_state as column_github_state, GROUP_CONCAT(ta.user_name, '||') AS assignees, COALESCE(GROUP_CONCAT(gi.issue_id || ',' || gi.issue_number || ',' || gi.repo || ',' || COALESCE(gi.synced_state,'') || ',' || COALESCE(gi.push_failed,'0'), '||'), '') AS github_issues_raw`;
+const TASK_SELECT_SLIM = `t.id, t.key, t.project_id, t.column_id, t.swimlane_id, t.title, t.priority, t.type, t.position, t.due_at, t.archived_at, t.github_issue_id, t.github_issue_number, t.github_repo, t.github_synced_state, t.created_at, t.updated_at, c.github_state as column_github_state, GROUP_CONCAT(ta.user_name, '||') AS assignees, COALESCE(GROUP_CONCAT(gi.issue_id || ',' || gi.issue_number || ',' || gi.repo || ',' || COALESCE(gi.synced_state,'') || ',' || COALESCE(gi.push_failed,'0') || ',' || COALESCE(gi.issue_title,''), '||'), '') AS github_issues_raw`;
 
 const TASK_FROM = `tasks t LEFT JOIN columns c ON t.column_id = c.id LEFT JOIN task_assignees ta ON ta.task_id = t.id LEFT JOIN task_github_issues gi ON gi.task_id = t.id`;
 
@@ -38,6 +38,7 @@ export interface GithubLinkRow {
   issue_id: string;
   issue_number: number;
   repo: string;
+  issue_title: string | null;
   synced_state: "open" | "closed" | null;
   pushed_title: string | null;
   pushed_body: string | null;
@@ -354,14 +355,25 @@ export class TaskRepo extends Effect.Service<TaskRepo>()("Lexa/TaskRepo", {
           githubIssueId
         ).pipe(Effect.map((r) => rowToTask(r))),
 
-      setGithubLink: (taskId: string, link: { issueId: string; issueNumber: number; repo: string }): Effect.Effect<void, ConstraintViolation | DbError> =>
+      setGithubLink: (taskId: string, link: { issueId: string; issueNumber: number; repo: string; title?: string | null }): Effect.Effect<void, ConstraintViolation | DbError> =>
         run(
           db,
-          `INSERT INTO task_github_issues (task_id, issue_id, issue_number, repo) VALUES (?, ?, ?, ?)`,
+          `INSERT INTO task_github_issues (task_id, issue_id, issue_number, repo, issue_title) VALUES (?, ?, ?, ?, ?)`,
           taskId,
           link.issueId,
           link.issueNumber,
-          link.repo
+          link.repo,
+          link.title ?? null
+        ).pipe(Effect.map(() => undefined)),
+
+      // Refreshes the last-known upstream title (webhook edit / post-push).
+      setGithubIssueTitle: (taskId: string, issueId: string, title: string): Effect.Effect<void, ConstraintViolation | DbError> =>
+        run(
+          db,
+          `UPDATE task_github_issues SET issue_title = ? WHERE task_id = ? AND issue_id = ?`,
+          title,
+          taskId,
+          issueId
         ).pipe(Effect.map(() => undefined)),
 
       setGithubSyncedState: (taskId: string, issueId: string, state: "open" | "closed"): Effect.Effect<void, ConstraintViolation | DbError> =>
@@ -378,7 +390,7 @@ export class TaskRepo extends Effect.Service<TaskRepo>()("Lexa/TaskRepo", {
       findGithubLinks: (taskId: string): Effect.Effect<GithubLinkRow[], DbError> =>
         queryAll<GithubLinkRow>(
           db,
-          `SELECT task_id, issue_id, issue_number, repo, synced_state, pushed_title, pushed_body, push_failed FROM task_github_issues WHERE task_id = ?`,
+          `SELECT task_id, issue_id, issue_number, repo, issue_title, synced_state, pushed_title, pushed_body, push_failed FROM task_github_issues WHERE task_id = ?`,
           taskId
         ),
 
@@ -391,8 +403,8 @@ export class TaskRepo extends Effect.Service<TaskRepo>()("Lexa/TaskRepo", {
           db,
           failed
             ? `UPDATE task_github_issues SET push_failed = 1 WHERE task_id = ? AND issue_id = ?`
-            : `UPDATE task_github_issues SET pushed_title = ?, pushed_body = ?, push_failed = 0 WHERE task_id = ? AND issue_id = ?`,
-          ...(failed ? [taskId, issueId] : [title, body, taskId, issueId])
+            : `UPDATE task_github_issues SET pushed_title = ?, pushed_body = ?, issue_title = COALESCE(?, issue_title), push_failed = 0 WHERE task_id = ? AND issue_id = ?`,
+          ...(failed ? [taskId, issueId] : [title, body, title, taskId, issueId])
         ).pipe(Effect.map(() => undefined)),
 
       unlinkGithubIssue: (taskId: string, issueId: string): Effect.Effect<void, ConstraintViolation | DbError> =>

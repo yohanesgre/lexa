@@ -13,6 +13,8 @@ export interface HeraldUsageSummary {
   totalCostCents: number;
   totalCostUsd: number;
   avgLatencyMs: number | null;
+  p50LatencyMs: number | null;
+  p95LatencyMs: number | null;
   errorRate: number;
   totalCalls: number;
   errorCalls: number;

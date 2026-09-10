@@ -506,7 +506,7 @@ export class HearthRepo extends Effect.Service<HearthRepo>()("Lexa/HearthRepo", 
       // (created_at, id) descending; the id tiebreak keeps the cursor stable
       // across rows created in the same second. Filters are optional.
       listHistory: (
-        filters: { projectId?: string; status?: HearthTaskStatus; skillId?: string; documentType?: "task" | "wiki" },
+        filters: { projectId?: string; status?: HearthTaskStatus; skillId?: string; documentType?: "task" | "wiki"; teamId?: string },
         limit: number,
         cursor?: string
       ): Effect.Effect<{ tasks: Array<HearthTask & { project_name: string }>; hasMore: boolean }, DbError> => {
@@ -528,6 +528,10 @@ export class HearthRepo extends Effect.Service<HearthRepo>()("Lexa/HearthRepo", 
           conditions.push("ft.document_type = ?");
           params.push(filters.documentType);
         }
+        if (filters.teamId) {
+          conditions.push("rt.team_id = ?");
+          params.push(filters.teamId);
+        }
         if (cursor) {
           const [createdAt, id] = cursor.split(":");
           if (createdAt && id) {
@@ -545,6 +549,7 @@ export class HearthRepo extends Effect.Service<HearthRepo>()("Lexa/HearthRepo", 
                             fs.name AS skill_name
                      FROM hearth_tasks ft
                      INNER JOIN projects p ON p.id = ft.project_id
+                     LEFT JOIN runtimes rt ON rt.id = ft.runtime_id
                      LEFT JOIN lexa_agents fa ON fa.id = ft.agent_id
                      LEFT JOIN lexa_skills fs ON fs.id = ft.skill_id
                      ${where}

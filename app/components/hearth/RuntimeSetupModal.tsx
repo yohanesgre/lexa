@@ -7,8 +7,9 @@ import { Field } from "../ui/Field";
 import { TextInput } from "../ui/TextInput";
 import { cn } from "../ui/cn";
 import { useCreateApiKey } from "../../lib/queries";
+import { useHearthRole } from "../../lib/useHearthRole";
 import { parseApiDate } from "../../lib/date";
-import type { HearthProvider, Machine } from "../../../shared/types";
+import type { HearthProvider, Machine, Team } from "../../../shared/types";
 
 const STEPS = ["Machine", "Agent CLI", "Key / Send", "Verify"] as const;
 
@@ -28,7 +29,7 @@ function formatLastSeen(machine: Machine): string {
   return parseApiDate(machine.lastSeen).toLocaleString();
 }
 
-function StepMachine({ machines, machinesLoading, machine, onSelect, onNext, onClose, createApiKey }: {
+function StepMachine({ machines, machinesLoading, machine, onSelect, onNext, onClose, createApiKey, teams, showTeamPicker, teamId, onTeamChange }: {
   machines: Machine[];
   machinesLoading: boolean;
   machine: Machine | null;
@@ -36,6 +37,10 @@ function StepMachine({ machines, machinesLoading, machine, onSelect, onNext, onC
   onNext: () => void;
   onClose: () => void;
   createApiKey: ReturnType<typeof useCreateApiKey>;
+  teams: Team[];
+  showTeamPicker: boolean;
+  teamId: string;
+  onTeamChange: (teamId: string) => void;
 }) {
   const [machineKeyName, setMachineKeyName] = useState("");
   const [machineKeyRaw, setMachineKeyRaw] = useState<string | null>(null);
@@ -109,6 +114,24 @@ lexa-cli machine listen`}
       </pre>
       {machineKeyRaw && (
         <div className="field-hint mt-1">Use the created key in <span className="font-mono">lexa-cli login --key</span> above.</div>
+      )}
+
+      {showTeamPicker && (
+        <Field label="Team" htmlFor="runtime-team" className="mt-4">
+          <select
+            id="runtime-team"
+            className="prop-input"
+            style={{ width: "100%" }}
+            value={teamId}
+            onChange={(e) => onTeamChange(e.target.value)}
+          >
+            <option value="">Global — usable by every team</option>
+            {teams.map((team) => (
+              <option key={team.id} value={team.id}>{team.name}</option>
+            ))}
+          </select>
+          <p className="field-hint mt-1">The runtime claims tasks from this team's projects. Global accepts every team.</p>
+        </Field>
       )}
 
       <div className="mt-4">
@@ -276,6 +299,9 @@ export function RuntimeSetupModal({ onClose }: { onClose: () => void }) {
   const [eventId, setEventId] = useState<string | null>(null);
   const [sendError, setSendError] = useState<string | null>(null);
   const createApiKey = useCreateApiKey();
+  const { isSuperadmin, teams } = useHearthRole();
+  const [teamId, setTeamId] = useState("");
+  const showTeamPicker = isSuperadmin && (teams?.length ?? 0) > 0;
 
   const handleCreateKey = () => {
     if (!newKeyName.trim()) return;
@@ -322,10 +348,14 @@ export function RuntimeSetupModal({ onClose }: { onClose: () => void }) {
   const sendInstall = () => {
     if (!machine || !agentCli || !selectedKeyId || !createdRawKey) return;
     setSendError(null);
+    const selectedTeamId = showTeamPicker
+      ? (teamId === "" ? null : teamId)
+      : (!isSuperadmin ? (teams?.[0]?.id ?? null) : undefined);
     api.createRuntimeEvent({
       machineId: machine.id,
       action: "install",
       agentCli,
+      teamId: selectedTeamId,
       apiKeyId: selectedKeyId,
       rawKey: createdRawKey,
     }).then((created) => {
@@ -372,6 +402,10 @@ export function RuntimeSetupModal({ onClose }: { onClose: () => void }) {
                 onNext={() => setStep(1)}
                 onClose={onClose}
                 createApiKey={createApiKey}
+                teams={teams ?? []}
+                showTeamPicker={showTeamPicker}
+                teamId={teamId}
+                onTeamChange={setTeamId}
               />
             )}
 

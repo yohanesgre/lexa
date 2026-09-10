@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import { generateKeyPairSync } from "node:crypto";
 import { Database } from "bun:sqlite";
 import { runMigrations } from "../db/migrate";
-import { createApiHandler } from "./http";
+import { createApiHandler, createWebhookHandler } from "./http";
 import { syncGitHubConfigFromDb } from "../github/client";
 
 const MIGRATIONS = fileURLToPath(new URL("../../migrations", import.meta.url));
@@ -28,6 +28,7 @@ const testPrivateKeyPem = testPrivateKey.export({ type: "pkcs8", format: "pem" }
 
 let dir: string;
 let handler: (req: Request) => Promise<Response>;
+let webhookHandler: ReturnType<typeof createWebhookHandler>;
 let db: Database;
 let patchCalls: { url: string; body: unknown }[];
 let failPatches: boolean;
@@ -78,6 +79,7 @@ INSERT INTO settings (key, value) VALUES ('github_app_id', '12345');
   db.prepare("INSERT INTO settings (key, value) VALUES ('github_private_key', ?)").run(testPrivateKeyPem);
   syncGitHubConfigFromDb(db);
   handler = createApiHandler(dbPath);
+  webhookHandler = createWebhookHandler(dbPath);
 });
 
 afterAll(() => {
@@ -111,10 +113,12 @@ describe("GitHub content push on task save", () => {
     expect(patchCalls).toHaveLength(1);
     expect(JSON.parse(String(patchCalls[0]!.body))).toMatchObject({ title: "T1 edited", body: "" });
 
-    const row = db.prepare("SELECT pushed_title, pushed_body, push_failed FROM task_github_issues WHERE task_id = 't1'").get() as { pushed_title: string | null; pushed_body: string | null; push_failed: number };
+    const row = db.prepare("SELECT pushed_title, pushed_body, push_failed, issue_title FROM task_github_issues WHERE task_id = 't1'").get() as { pushed_title: string | null; pushed_body: string | null; push_failed: number; issue_title: string | null };
     expect(row.pushed_title).toBe("T1 edited");
     expect(row.pushed_body).toBe("");
     expect(row.push_failed).toBe(0);
+    // Post-push success refreshes the last-known upstream title.
+    expect(row.issue_title).toBe("T1 edited");
   });
 
   it("is a no-op when title and body match what we last pushed", async () => {
@@ -154,5 +158,29 @@ describe("GitHub content push on task save", () => {
     row = db.prepare("SELECT pushed_title, push_failed FROM task_github_issues WHERE task_id = 't1'").get() as { pushed_title: string | null; push_failed: number };
     expect(row.pushed_title).toBe("T1 edited");
     expect(row.push_failed).toBe(0);
+  });
+});
+
+async function waitFor(check: () => boolean, timeoutMs = 3000): Promise<boolean> {
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    if (check()) return true;
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  return check();
+}
+
+describe("GitHub webhook content sync", () => {
+  it("refreshes the stored issue title when the upstream issue is edited", async () => {
+    db.prepare("UPDATE task_github_issues SET issue_title = 'Old title' WHERE task_id = 't1'").run();
+    const raw = new TextEncoder().encode(JSON.stringify({ action: "edited", issue: { node_id: "ghi1", title: "T1" } })).buffer;
+    const res = webhookHandler(raw, `delivery-title-${Date.now()}`, "issues");
+    expect(res.status).toBe(200);
+
+    const refreshed = await waitFor(() => {
+      const r = db.prepare("SELECT issue_title FROM task_github_issues WHERE task_id = 't1'").get() as { issue_title: string | null };
+      return r.issue_title === "T1";
+    });
+    expect(refreshed).toBe(true);
   });
 });

@@ -36,7 +36,7 @@ describe("runMigrations", () => {
   it("applies the real migrations dir and records _migrations", () => {
     const dbPath = join(tmpDir(), "app.db");
     runMigrations(dbPath, MIGRATIONS);
-    expect(appliedMigrations(dbPath)).toEqual(["0001_init.sql", "0002_device_login.sql", "0003_herald_prices_1m_cached.sql"]);
+    expect(appliedMigrations(dbPath)).toEqual(["0001_init.sql", "0002_device_login.sql", "0003_herald_prices_1m_cached.sql", "0004_ui_gaps_w4.sql"]);
     const db = new Database(dbPath);
     expect(tableExists(db, "tasks")).toBe(true);
     expect(tableExists(db, "_migrations")).toBe(true);
@@ -47,7 +47,7 @@ describe("runMigrations", () => {
     const dbPath = join(tmpDir(), "app.db");
     runMigrations(dbPath, MIGRATIONS);
     runMigrations(dbPath, MIGRATIONS);
-    expect(appliedMigrations(dbPath)).toEqual(["0001_init.sql", "0002_device_login.sql", "0003_herald_prices_1m_cached.sql"]);
+    expect(appliedMigrations(dbPath)).toEqual(["0001_init.sql", "0002_device_login.sql", "0003_herald_prices_1m_cached.sql", "0004_ui_gaps_w4.sql"]);
   });
 
   it("rolls back a failed migration atomically (no partial schema, no _migrations row)", () => {
@@ -74,7 +74,29 @@ describe("runMigrations", () => {
   it("keeps the default migrations dir (prod behavior)", () => {
     const dbPath = join(tmpDir(), "app.db");
     runMigrations(dbPath);
-    expect(appliedMigrations(dbPath)).toEqual(["0001_init.sql", "0002_device_login.sql", "0003_herald_prices_1m_cached.sql"]);
+    expect(appliedMigrations(dbPath)).toEqual(["0001_init.sql", "0002_device_login.sql", "0003_herald_prices_1m_cached.sql", "0004_ui_gaps_w4.sql"]);
+  });
+
+  it("runtime_events.team_id uses ON DELETE SET NULL (0004)", () => {
+    const dbPath = join(tmpDir(), "app.db");
+    runMigrations(dbPath, MIGRATIONS);
+    const db = new Database(dbPath);
+    db.exec("PRAGMA foreign_keys = ON");
+    const fks = db.prepare("PRAGMA foreign_key_list(runtime_events)").all() as Array<{ from: string; table: string; on_delete: string }>;
+    const teamFk = fks.find((f) => f.from === "team_id");
+    expect(teamFk?.table).toBe("organization");
+    expect(teamFk?.on_delete).toBe("SET NULL");
+
+    db.exec(`
+      INSERT INTO organization (id, name, slug, createdAt) VALUES ('org1','Team','team','2026-01-01');
+      INSERT INTO machines (id, hostname) VALUES ('m1','host');
+      INSERT INTO runtime_events (id, machine_id, action, agent_cli, team_id, status)
+      VALUES ('e1','m1','install','opencode','org1','pending');
+    `);
+    db.prepare("DELETE FROM organization WHERE id = 'org1'").run();
+    const row = db.prepare("SELECT team_id FROM runtime_events WHERE id = 'e1'").get() as { team_id: string | null };
+    expect(row.team_id).toBeNull();
+    db.close();
   });
 
 

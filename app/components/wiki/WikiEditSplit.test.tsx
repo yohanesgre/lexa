@@ -44,21 +44,40 @@ function setAttachments(next: Attachment[]) {
   attachments.push(...next);
 }
 
-function renderSplit() {
+function renderSplit(overrides: { updatedByName?: string | null; isSaving?: boolean; lastSavedLabel?: string } = {}) {
   return render(
     <WikiEditSplit
       editor={null}
       slug="demo"
       pageSlug="api-reference"
       previewContent={base}
-      isSaving={false}
+      isSaving={overrides.isSaving ?? false}
       isDirty={false}
       lastSavedAt={null}
-      lastSavedLabel="Last edited just now"
+      lastSavedLabel={overrides.lastSavedLabel ?? "Last edited just now"}
+      updatedByName={overrides.updatedByName ?? null}
       onReviewStateChange={vi.fn()}
     />
   );
 }
+
+describe("WikiEditSplit last-edited author", () => {
+  it("appends the author name when present", () => {
+    renderSplit({ lastSavedLabel: "Last edited 2 hours ago", updatedByName: "Al" });
+    expect(screen.getByText("Last edited 2 hours ago by Al")).toBeInTheDocument();
+  });
+
+  it("omits the author while a save is in flight", () => {
+    renderSplit({ lastSavedLabel: "Saving…", updatedByName: "Al", isSaving: true });
+    expect(screen.queryByText(/by Al/)).not.toBeInTheDocument();
+    expect(screen.getAllByText("Saving…").length).toBeGreaterThan(0);
+  });
+
+  it("omits the author when unknown", () => {
+    renderSplit({ lastSavedLabel: "Last edited just now", updatedByName: null });
+    expect(screen.getByText("Last edited just now")).toBeInTheDocument();
+  });
+});
 
 describe("WikiEditSplit attachments", () => {
   it("renders file chips with size and a remove action for the uploader", () => {
