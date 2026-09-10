@@ -30,16 +30,19 @@ function SearchResult({
   slug,
   result,
   breadcrumb,
+  onNavigate,
 }: {
   slug: string;
   result: WikiPageMeta & { snippet: string };
   breadcrumb: string[];
+  onNavigate?: (() => void) | undefined;
 }) {
   return (
     <Link
       to="/$slug/wiki/$pageSlug"
       params={{ slug, pageSlug: result.slug }}
       className="search-result"
+      onClick={onNavigate}
     >
       {breadcrumb.length > 0 && (
         <div className="text-xs text-lx-text-muted font-body mb-1 truncate">
@@ -59,11 +62,13 @@ export function WikiSearchResults({
   searching,
   slug,
   pagesById,
+  onNavigate,
 }: {
   results: (WikiPageMeta & { snippet: string })[];
   searching: boolean;
   slug: string;
   pagesById: Map<string, WikiPageMeta>;
+  onNavigate?: (() => void) | undefined;
 }) {
   return (
     <>
@@ -84,6 +89,7 @@ export function WikiSearchResults({
           slug={slug}
           result={result}
           breadcrumb={getBreadcrumb(pagesById, result)}
+          onNavigate={onNavigate}
         />
       ))}
     </>

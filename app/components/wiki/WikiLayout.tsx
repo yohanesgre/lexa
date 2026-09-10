@@ -1,5 +1,5 @@
 import { useNavigate } from "@tanstack/react-router";
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import { PanelLeft } from "lucide-react";
 import { lockScroll } from "../../lib/scroll-lock";
 import { hasMatchMedia, isNarrowViewport } from "../../lib/viewport";
@@ -161,23 +161,77 @@ export function WikiLayout({ slug, activePageSlug, children }: WikiLayoutProps) 
     if (isNarrowViewport()) setSidebarCollapsed(true);
   }, []);
 
-  // The top nav's "PanelLeft" button dispatches this event on mobile. We
-  // open the sidebar so the user can pick a different page. Desktop
-  // behavior is unchanged (the rail remains the entry point there).
+  // Tree + search state lives here so collapsing to the rail (which unmounts
+  // the sidebar) never discards the user's expand choices or query.
+  const [expanded, setExpanded] = useState<Set<string>>(() => new Set((pages ?? []).map((p) => p.id)));
+  const expandedInit = useRef((pages?.length ?? 0) > 0);
+  const [wikiQuery, setWikiQuery] = useState("");
+  const [wikiSearchFocused, setWikiSearchFocused] = useState(false);
+  useEffect(() => {
+    if (pages && pages.length > 0 && !expandedInit.current) {
+      expandedInit.current = true;
+      setExpanded(new Set(pages.map((p) => p.id)));
+    }
+  }, [pages]);
+
+  const toggleExpanded = useCallback((id: string) => {
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }, []);
+
+  const closeOnMobile = useCallback(() => {
+    if (hasMatchMedia() && isNarrowViewport()) setSidebarCollapsed(true);
+  }, []);
+
+  // The top nav's "PanelLeft" button dispatches this event. On narrow screens
+  // it toggles the overlay (the in-header collapse is hidden there, so the
+  // nav owns both open and close). Desktop behavior is unchanged (the rail
+  // remains the entry point there).
   useEffect(() => {
     function handleToggle() {
       if (hasMatchMedia() && isNarrowViewport()) {
-        setSidebarCollapsed(false);
+        setSidebarCollapsed((v) => !v);
       }
     }
     window.addEventListener("lexa:toggle-wiki-sidebar", handleToggle);
     return () => window.removeEventListener("lexa:toggle-wiki-sidebar", handleToggle);
   }, []);
 
-  // Lock body scroll while the wiki sidebar is open.
+  // Esc dismisses the overlay on narrow screens.
   useEffect(() => {
-    return lockScroll(!sidebarCollapsed);
+    if (sidebarCollapsed) return;
+    function handleKey(event: KeyboardEvent) {
+      if (event.key === "Escape" && isNarrowViewport()) setSidebarCollapsed(true);
+    }
+    document.addEventListener("keydown", handleKey);
+    return () => document.removeEventListener("keydown", handleKey);
   }, [sidebarCollapsed]);
+
+  // Selecting a page dismisses the overlay on narrow screens — the tree and
+  // search links call `closeOnMobile` directly, so no route-change effect is
+  // needed here (and no state is adjusted after the prop changes).
+
+  // Narrow viewport tracking so the body scroll lock follows resizes and
+  // rotations, not just the collapse toggle.
+  const [isNarrow, setIsNarrow] = useState(false);
+  useEffect(() => {
+    if (!hasMatchMedia()) return;
+    const mq = window.matchMedia("(max-width: 767px)");
+    const update = () => setIsNarrow(mq.matches);
+    update();
+    mq.addEventListener("change", update);
+    return () => mq.removeEventListener("change", update);
+  }, []);
+
+  // Body scroll locks only while the narrow overlay is open. Desktop keeps
+  // the sidebar inline, so locking there would freeze the page underneath.
+  useEffect(() => {
+    return lockScroll(!sidebarCollapsed && isNarrow);
+  }, [sidebarCollapsed, isNarrow]);
 
   return (
     <div className="wiki-layout">
@@ -194,6 +248,21 @@ export function WikiLayout({ slug, activePageSlug, children }: WikiLayoutProps) 
           onContextMenu={contextMenu.open}
           onNewPage={openNewPage}
           onClose={() => setSidebarCollapsed(true)}
+          expanded={expanded}
+          onToggleExpand={toggleExpanded}
+          query={wikiQuery}
+          onQueryChange={setWikiQuery}
+          searchFocused={wikiSearchFocused}
+          onSearchFocusedChange={setWikiSearchFocused}
+          onNavigate={closeOnMobile}
+        />
+      )}
+      {!sidebarCollapsed && (
+        <button
+          type="button"
+          className="wiki-sidebar-backdrop"
+          aria-label="Close sidebar"
+          onClick={() => setSidebarCollapsed(true)}
         />
       )}
 

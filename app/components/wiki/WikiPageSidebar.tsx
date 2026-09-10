@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, useCallback } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { PanelLeft, Plus } from "lucide-react";
 import { useSearchWikiPages } from "../../lib/queries";
 import type { WikiPageMeta } from "../../../shared/types";
@@ -30,6 +30,7 @@ function SidebarList({
   onToggle,
   onContextMenu,
   contextMenuPageId,
+  onNavigate,
 }: {
   state: ListState;
   showResults: boolean;
@@ -43,6 +44,7 @@ function SidebarList({
   onToggle: (id: string) => void;
   onContextMenu: (event: React.MouseEvent, page: WikiPageMeta) => void;
   contextMenuPageId: string | null;
+  onNavigate?: (() => void) | undefined;
 }) {
   return (
     <div className="flex-1 overflow-y-auto pt-2">
@@ -58,7 +60,7 @@ function SidebarList({
       )}
 
       {state === "ready" && showResults && (
-        <WikiSearchResults results={results} searching={searching} slug={slug} pagesById={pagesById} />
+        <WikiSearchResults results={results} searching={searching} slug={slug} pagesById={pagesById} onNavigate={onNavigate} />
       )}
 
       {state === "ready" && !showResults && tree.map((node) => (
@@ -72,6 +74,7 @@ function SidebarList({
           onToggle={onToggle}
           onContextMenu={onContextMenu}
           contextMenuPageId={contextMenuPageId}
+          onNavigate={onNavigate}
         />
       ))}
     </div>
@@ -88,6 +91,13 @@ export function WikiPageSidebar({
   onContextMenu,
   onNewPage,
   onClose,
+  expanded,
+  onToggleExpand,
+  query,
+  onQueryChange,
+  searchFocused,
+  onSearchFocusedChange,
+  onNavigate,
 }: {
   slug: string;
   activePageSlug?: string | undefined;
@@ -98,35 +108,20 @@ export function WikiPageSidebar({
   onContextMenu: (event: React.MouseEvent, page: WikiPageMeta) => void;
   onNewPage: (defaultParentId: string | null) => void;
   onClose: () => void;
+  expanded: Set<string>;
+  onToggleExpand: (id: string) => void;
+  query: string;
+  onQueryChange: (q: string) => void;
+  searchFocused: boolean;
+  onSearchFocusedChange: (focused: boolean) => void;
+  onNavigate?: (() => void) | undefined;
 }) {
-  const [query, setQuery] = useState("");
-  const [debouncedQuery, setDebouncedQuery] = useState("");
-  const [isSearchFocused, setIsSearchFocused] = useState(false);
-  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const [debouncedQuery, setDebouncedQuery] = useState(query);
 
   useEffect(() => {
     const timer = window.setTimeout(() => setDebouncedQuery(query), 250);
     return () => window.clearTimeout(timer);
   }, [query]);
-
-  // Expand all pages once the list first arrives; later refetches keep the
-  // user's collapse choices (derived state via prev-compare, no effect).
-  const [prevPages, setPrevPages] = useState(pages);
-  if (pages !== prevPages) {
-    setPrevPages(pages);
-    if (pages) {
-      setExpanded((prev) => (prev.size > 0 ? prev : new Set(pages.map((p) => p.id))));
-    }
-  }
-
-  const toggle = useCallback((id: string) => {
-    setExpanded((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  }, []);
 
   const tree = useMemo(() => (pages ? buildTree(pages) : []), [pages]);
   const pagesById = useMemo(() => (pages ? buildPagesById(pages) : new Map<string, WikiPageMeta>()), [pages]);
@@ -148,9 +143,9 @@ export function WikiPageSidebar({
         <div style={{ flex: 1, minWidth: 0 }}>
           <WikiSearchBox
             query={query}
-            focused={isSearchFocused}
-            onQueryChange={setQuery}
-            onFocusedChange={setIsSearchFocused}
+            focused={searchFocused}
+            onQueryChange={onQueryChange}
+            onFocusedChange={onSearchFocusedChange}
           />
         </div>
         <button
@@ -173,9 +168,10 @@ export function WikiPageSidebar({
         pagesById={pagesById}
         activePageSlug={activePageSlug}
         expanded={expanded}
-        onToggle={toggle}
+        onToggle={onToggleExpand}
         onContextMenu={onContextMenu}
         contextMenuPageId={contextMenuPageId}
+        onNavigate={onNavigate}
       />
 
       <div className="px-3 mt-2">

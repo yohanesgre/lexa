@@ -2524,7 +2524,7 @@
   /* Wiki layout + tree + prose (ported from wireframes.css) */
   .wiki-layout {
     display: flex;
-    height: 100vh;
+    height: calc(100vh - 48px);
     overflow: hidden;
   }
 
@@ -2536,6 +2536,20 @@
     overflow-y: auto;
     display: flex;
     flex-direction: column;
+  }
+
+  .wiki-sidebar.wiki-sidebar-rail {
+    width: 36px;
+    min-width: 36px;
+    padding: 8px 0;
+    align-items: center;
+  }
+
+  .wiki-sidebar-backdrop {
+    display: none;
+    border: 0;
+    padding: 0;
+    cursor: pointer;
   }
 
   .sidebar-header {
