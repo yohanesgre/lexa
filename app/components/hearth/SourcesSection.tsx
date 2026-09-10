@@ -173,7 +173,7 @@ export function SourcesSection({ slug, documentType, documentId, className }: So
 
   return (
     <div className={cn(className)}>
-      <div className="flex items-center gap-2 mb-2">
+      <div className="flex items-center gap-2 mb-3">
         <BookOpen size={14} strokeWidth={1.5} className="text-lx-text-muted" />
         <span className="prop-label">Sources</span>
         <span className="font-micro text-2xs text-lx-text-muted uppercase tracking-[0.04em]">used by Hearth</span>
@@ -190,7 +190,7 @@ export function SourcesSection({ slug, documentType, documentId, className }: So
       )}
 
       <div style={{ position: "relative" }}>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 mt-3">
           <input
             className="prop-input"
             aria-label="Add source — type @ for a wiki page or paste a URL"

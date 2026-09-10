@@ -232,7 +232,7 @@ function TaskTabsAndBody({ isCreate, tab, setTab, flush, slug, task, editingDesc
         </div>
       )}
 
-      <div className={cn("slideover-body pt-4", flush && "editor-flush")}>
+      <div className={cn("slideover-body pt-5", flush && "editor-flush")}>
         {tab === "description" ? (
           <>
             <TaskDescriptionSection
@@ -359,7 +359,7 @@ export function TaskDetail({ mode = "view", task, project, defaultColumnId, colu
           onClose={handleClose}
         />
 
-        <div className="px-4 pt-4">
+        <div className="px-5 pt-5">
           {ctx.isArchived && <ArchivedBanner />}
           <TaskTitleInput
             isArchived={ctx.isArchived}

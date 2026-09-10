@@ -142,7 +142,7 @@ export function AttachmentsPanel({ slug, taskId }: AttachmentsPanelProps) {
   return (
     <div
       className={cn(
-        "mt-4 pt-4 border-t border-lx-border-subtle attachments-dropzone",
+        "mt-7 pt-5 border-t border-lx-border-subtle attachments-dropzone",
         dragActive && "active"
       )}
       onDragOver={(e) => {
@@ -158,7 +158,7 @@ export function AttachmentsPanel({ slug, taskId }: AttachmentsPanelProps) {
         startUploads(Array.from(e.dataTransfer.files));
       }}
     >
-      <div className="flex items-center gap-2 mb-2">
+      <div className="flex items-center gap-2 mb-3">
         <span className="text-lx-text-muted shrink-0">
           <PaperclipIcon />
         </span>

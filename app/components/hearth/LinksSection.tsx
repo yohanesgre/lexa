@@ -49,7 +49,7 @@ export function LinksSection({ slug, taskId, taskTitleById, taskKeyById, classNa
 
   return (
     <div className={cn(className)}>
-      <div className="flex items-center gap-2 mb-2">
+      <div className="flex items-center gap-2 mb-3">
         <Link2 size={14} strokeWidth={1.5} className="text-lx-text-muted" />
         <span className="prop-label">Links</span>
         <span className="font-micro text-2xs text-lx-text-muted uppercase tracking-[0.04em]">subtasks · blocked · related</span>
@@ -96,7 +96,7 @@ export function LinksSection({ slug, taskId, taskTitleById, taskKeyById, classNa
       )}
 
       <div style={{ position: "relative" }}>
-        <div className="flex items-center gap-2 mt-2">
+        <div className="flex items-center gap-2 mt-3">
           <input
             className="prop-input"
             aria-label="Add link — type a task title"
