@@ -6,6 +6,7 @@ import { SourcesSection } from "./hearth/SourcesSection";
 
 interface TaskDescriptionSectionProps {
   isCreate: boolean;
+  editorLayout?: "band" | "wiki";
   slug: string | undefined;
   task: { id: string; description: TipTapDoc } | null;
   emptyDoc: TipTapDoc;
@@ -17,7 +18,7 @@ interface TaskDescriptionSectionProps {
   onUpdate: (id: string, data: { description: TipTapDoc }) => void;
 }
 
-export function TaskDescriptionSection({ isCreate, slug, task, emptyDoc, taskTitles, taskKeys, editingDescription, setEditingDescription, setCreateDescription, onUpdate }: TaskDescriptionSectionProps) {
+export function TaskDescriptionSection({ isCreate, editorLayout, slug, task, emptyDoc, taskTitles, taskKeys, editingDescription, setEditingDescription, setCreateDescription, onUpdate }: TaskDescriptionSectionProps) {
   return (
 <>
 {isCreate ? (
@@ -38,6 +39,7 @@ export function TaskDescriptionSection({ isCreate, slug, task, emptyDoc, taskTit
       <DescriptionEditor
         initialContent={task!.description}
         editable={true}
+        layout={editorLayout ?? "band"}
         hearth={slug ? { slug, documentType: "task", documentId: task!.id } : undefined}
         attachments={slug ? { slug, documentId: task!.id } : undefined}
         onBlur={(doc) => {

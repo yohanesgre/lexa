@@ -124,7 +124,7 @@ function resolveDetailContext(args: {
 }
 
 function slideoverClassName(open: boolean): string {
-  return cn("slideover", !open && "slideover-closed");
+  return cn("slideover", "task-detail-panel", !open && "slideover-closed");
 }
 
 function overlayClassName(open: boolean): string {
@@ -203,11 +203,12 @@ function ArchivedBanner() {
   );
 }
 
-function TaskTabsAndBody({ isCreate, tab, setTab, flush, slug, task, editingDescription, setEditingDescription, setCreateDescription, onUpdate, taskTitles, taskKeys, githubs, columnGithubState, currentColumnId, onLinkGithub, onUnlinkGithub, isArchived }: {
+function TaskTabsAndBody({ isCreate, tab, setTab, flush, editorLayout, slug, task, editingDescription, setEditingDescription, setCreateDescription, onUpdate, taskTitles, taskKeys, githubs, columnGithubState, currentColumnId, onLinkGithub, onUnlinkGithub, isArchived }: {
   isCreate: boolean;
   tab: "description" | "activity";
   setTab: (tab: "description" | "activity") => void;
   flush: boolean;
+  editorLayout: "band" | "wiki";
   slug: string | undefined;
   task: Task | undefined;
   editingDescription: boolean;
@@ -241,6 +242,7 @@ function TaskTabsAndBody({ isCreate, tab, setTab, flush, slug, task, editingDesc
           <>
             <TaskDescriptionSection
               isCreate={isCreate}
+              editorLayout={editorLayout}
               slug={slug}
               task={task ?? null}
               emptyDoc={emptyDoc}
@@ -446,7 +448,8 @@ export function TaskDetail({ mode = "view", variant = "slideover", from, task, p
           isCreate={isCreate}
           tab={tab}
           setTab={setTab}
-          flush={!isCreate && tab === "description" && editingDescription}
+          flush={!isPage && !isCreate && tab === "description" && editingDescription}
+          editorLayout={isPage ? "wiki" : "band"}
           slug={slug}
           task={task}
           editingDescription={editingDescription}

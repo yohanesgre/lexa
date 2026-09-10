@@ -77,7 +77,10 @@ function renderDetail(overrides: Partial<Parameters<typeof TaskDetail>[0]> = {})
 
 describe("TaskDetail expand", () => {
   it("navigates to the full page with the ticket key and origin", () => {
-    renderDetail();
+    const { container } = renderDetail();
+    const dialog = container.querySelector("dialog.slideover");
+    expect(dialog).not.toBeNull();
+    expect(dialog!.classList.contains("task-detail-panel")).toBe(true);
     fireEvent.click(screen.getByRole("button", { name: "Open full page" }));
     expect(navigateMock).toHaveBeenCalledWith({
       to: "/$slug/tasks/$taskId",
@@ -89,5 +92,16 @@ describe("TaskDetail expand", () => {
   it("hides expand in create mode", () => {
     renderDetail({ mode: "create" });
     expect(screen.queryByRole("button", { name: "Open full page" })).not.toBeInTheDocument();
+  });
+
+  it("keeps the full-bleed chrome-band editor in the slideover", async () => {
+    const { container } = renderDetail();
+    const prose = container.querySelector(".td-prose");
+    expect(prose).not.toBeNull();
+    fireEvent.doubleClick(prose!);
+    expect(await screen.findByText("Editing description")).toBeInTheDocument();
+    expect(container.querySelector(".task-editor-chrome")).not.toBeNull();
+    expect(container.querySelector(".task-editor-chrome .editor-toolbar")).not.toBeNull();
+    expect(container.querySelector(".slideover-body.editor-flush")).not.toBeNull();
   });
 });

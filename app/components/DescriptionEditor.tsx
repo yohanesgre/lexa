@@ -18,6 +18,7 @@ interface DescriptionEditorProps {
   onCancel?: () => void;
   placeholder?: string | undefined;
   editable?: boolean | undefined;
+  layout?: "band" | "wiki" | undefined;
   hearth?: { slug: string; documentType: "task" | "wiki"; documentId: string } | undefined;
   // Paste/drop-to-embed uploads (attachments API). Absent in create mode —
   // there is no taskId to attach to yet.
@@ -33,6 +34,7 @@ export function DescriptionEditor({
   onCancel,
   placeholder,
   editable = true,
+  layout = "band",
   hearth,
   attachments,
   onReviewStateChange,
@@ -147,6 +149,28 @@ export function DescriptionEditor({
   const reviewSurface = review ? (
     <HearthReviewSurface action={review.action} runtime={review.runtime} diff={review.diff} onAccept={handleAcceptReview} onReject={handleRejectReview} />
   ) : null;
+  const exitControls = (
+    <div className="flex items-center gap-2">
+      <button
+        type="button"
+        className="btn btn-ghost btn-icon-sm"
+        onClick={() => onCancelRef.current?.()}
+        title="Revert changes (Esc)"
+        aria-label="Revert changes"
+      >
+        <X size={13} strokeWidth={2} />
+      </button>
+      <button
+        type="button"
+        className="btn btn-primary btn-icon-sm"
+        onClick={handleDone}
+        title="Save and finish (Enter)"
+        aria-label="Save and finish editing"
+      >
+        <Check size={13} strokeWidth={2.5} />
+      </button>
+    </div>
+  );
 
   // Create mode (no onDone): legacy inset card — toolbar + document inside
   // the bordered wrapper, unchanged from before the edit-mode restructure.
@@ -162,10 +186,29 @@ export function DescriptionEditor({
     );
   }
 
-  // Edit mode (task-detail-edit.html): chrome band — header strip + toolbar —
-  // renders full-bleed OUTSIDE the bordered card; the card wraps only the
-  // document so focus border + glow stay inset. wrapperRef still spans both,
-  // so blur inside the chrome never exits edit mode.
+  // Full page (task-detail-page-edit.html): wiki-style card — label + exit
+  // controls on a quiet row above one bordered wrapper holding the toolbar
+  // and document. wrapperRef spans both so blur inside the row never exits.
+  if (layout === "wiki") {
+    return (
+      <div ref={wrapperRef}>
+        <div className="flex items-center justify-between" style={{ padding: "0 0 6px" }}>
+          <span className="font-micro text-2xs text-lx-text-muted uppercase tracking-[0.04em]">Editing description</span>
+          {exitControls}
+        </div>
+        <div className={cn("editor-wrapper", review && "is-reviewing")}>
+          {toolbar}
+          {reviewSurface}
+          <EditorContent editor={editor} className="editor-content" />
+        </div>
+      </div>
+    );
+  }
+
+  // Slideover edit mode (task-detail-edit.html): chrome band — header strip +
+  // toolbar — renders full-bleed OUTSIDE the bordered card; the card wraps
+  // only the document so focus border + glow stay inset. wrapperRef still
+  // spans both, so blur inside the chrome never exits edit mode.
   return (
     <div className="task-editor-host" ref={wrapperRef}>
       <div className="task-editor-chrome">
@@ -174,26 +217,7 @@ export function DescriptionEditor({
           style={{ padding: "6px 16px", borderBottom: "1px solid var(--lx-border-default)" }}
         >
           <span className="font-micro text-2xs text-lx-text-muted uppercase tracking-[0.04em]">Editing description</span>
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              className="btn btn-ghost btn-icon-sm"
-              onClick={() => onCancelRef.current?.()}
-              title="Revert changes (Esc)"
-              aria-label="Revert changes"
-            >
-              <X size={13} strokeWidth={2} />
-            </button>
-            <button
-              type="button"
-              className="btn btn-primary btn-icon-sm"
-              onClick={handleDone}
-              title="Save and finish (Enter)"
-              aria-label="Save and finish editing"
-            >
-              <Check size={13} strokeWidth={2.5} />
-            </button>
-          </div>
+          {exitControls}
         </div>
         <div style={{ display: "flex", alignItems: "center", background: "var(--lx-surface-card)", borderBottom: "1px solid var(--lx-border-default)" }}>
           {toolbar}

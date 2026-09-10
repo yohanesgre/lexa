@@ -21,7 +21,7 @@ export function TaskFooter({ isCreate, isArchived, creating, createTitle, create
 <div className="slideover-footer">
   {isCreate ? (
     <>
-      <span className="font-micro text-2xs text-lx-text-muted uppercase tracking-[0.04em]">Unsaved draft</span>
+      <span className="font-micro text-2xs text-lx-text-muted uppercase tracking-[0.04em]" style={{ marginRight: "auto" }}>Unsaved draft</span>
       <div className="flex items-center gap-2">
         <button type="button" className="btn btn-ghost" onClick={handleClose}>
           Cancel
