@@ -94,14 +94,14 @@ describe("TaskDetail expand", () => {
     expect(screen.queryByRole("button", { name: "Open full page" })).not.toBeInTheDocument();
   });
 
-  it("keeps the full-bleed chrome-band editor in the slideover", async () => {
+  it("uses the wiki-style editor in the slideover", async () => {
     const { container } = renderDetail();
     const prose = container.querySelector(".td-prose");
     expect(prose).not.toBeNull();
     fireEvent.doubleClick(prose!);
     expect(await screen.findByText("Editing description")).toBeInTheDocument();
-    expect(container.querySelector(".task-editor-chrome")).not.toBeNull();
-    expect(container.querySelector(".task-editor-chrome .editor-toolbar")).not.toBeNull();
-    expect(container.querySelector(".slideover-body.editor-flush")).not.toBeNull();
+    const editorWrapper = container.querySelector(".editor-wrapper");
+    expect(editorWrapper).not.toBeNull();
+    expect(editorWrapper!.querySelector(".editor-toolbar")).not.toBeNull();
   });
 });

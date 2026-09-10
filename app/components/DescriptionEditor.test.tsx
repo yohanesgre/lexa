@@ -52,14 +52,13 @@ const DOC: TipTapDoc = {
   content: [{ type: "paragraph", content: [{ type: "text", text: "Hello" }] }],
 };
 
-describe("DescriptionEditor layouts", () => {
-  it("wiki layout renders the label row above one card holding the toolbar", async () => {
+describe("DescriptionEditor", () => {
+  it("renders the label row above one card holding the toolbar", async () => {
     const onDone = vi.fn();
     const onCancel = vi.fn();
     const { container } = render(
       <DescriptionEditor
         initialContent={DOC}
-        layout="wiki"
         onDone={onDone}
         onCancel={onCancel}
         placeholder="Add a description..."
@@ -72,7 +71,6 @@ describe("DescriptionEditor layouts", () => {
     expect(editorWrapper).not.toBeNull();
     expect(editorWrapper!.querySelector(".editor-toolbar")).not.toBeNull();
     expect(editorWrapper!.querySelector(".font-micro")).toBeNull();
-    expect(container.querySelector(".task-editor-chrome")).toBeNull();
 
     fireEvent.click(screen.getByRole("button", { name: "Save and finish editing" }));
     expect(onDone).toHaveBeenCalledTimes(1);
@@ -80,22 +78,10 @@ describe("DescriptionEditor layouts", () => {
     expect(onCancel).toHaveBeenCalledTimes(1);
   });
 
-  it("band layout keeps the full-bleed chrome band", async () => {
-    const { container } = render(
-      <DescriptionEditor initialContent={DOC} layout="band" onDone={vi.fn()} onCancel={vi.fn()} />,
-      { wrapper }
-    );
-
-    expect(await screen.findByText("Editing description")).toBeInTheDocument();
-    expect(container.querySelector(".task-editor-chrome")).not.toBeNull();
-    expect(container.querySelector(".task-editor-chrome .editor-toolbar")).not.toBeNull();
-    expect(container.querySelector(".task-editor-host")).not.toBeNull();
-  });
-
   it("renders the Hearth review surface inside the card while reviewing", async () => {
     reviewMock.value = { action: {}, runtime: {}, diff: {} };
     const { container } = render(
-      <DescriptionEditor initialContent={DOC} layout="wiki" onDone={vi.fn()} onCancel={vi.fn()} />,
+      <DescriptionEditor initialContent={DOC} onDone={vi.fn()} onCancel={vi.fn()} />,
       { wrapper }
     );
 
@@ -110,7 +96,7 @@ describe("DescriptionEditor layouts", () => {
     const onDone = vi.fn();
     const onCancel = vi.fn();
     const { container } = render(
-      <DescriptionEditor initialContent={DOC} layout="wiki" onDone={onDone} onCancel={onCancel} />,
+      <DescriptionEditor initialContent={DOC} onDone={onDone} onCancel={onCancel} />,
       { wrapper }
     );
 
