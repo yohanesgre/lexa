@@ -995,6 +995,23 @@ a:hover { color: var(--lx-text-link-hover); }
   flex-shrink: 0;
 }
 
+/* Task detail slideover — same content rhythm as the full page
+   (task-detail-page.html): 24px title, right-aligned footer, and the panel
+   recolored to the app surface instead of the elevated slideover surface. */
+.slideover.task-detail-panel {
+  background: var(--lx-surface-app);
+}
+
+.slideover.task-detail-panel .slideover-title {
+  font-size: 24px;
+  line-height: 32px;
+}
+
+.slideover.task-detail-panel .slideover-footer {
+  justify-content: flex-end;
+  gap: 8px;
+}
+
 /* ---- Task detail full page (/:slug/tasks/:taskId) ----
    Same content tree as the slideover; page-scoped rhythm so sections align
    to the page-frame gutters instead of the 480px panel gutters. */

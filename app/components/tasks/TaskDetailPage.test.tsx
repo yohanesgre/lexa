@@ -130,4 +130,19 @@ describe("TaskDetailPage", () => {
 
     expect(await screen.findByText("Edited via key URL")).toBeInTheDocument();
   });
+
+  it("uses the wiki-style description editor with no chrome band", async () => {
+    render(<TaskDetailPage slug="demo" taskId="t1" from="tasks" />, { wrapper });
+    expect(await screen.findByText("Crash on large board load")).toBeInTheDocument();
+
+    const prose = document.querySelector(".td-prose");
+    expect(prose).not.toBeNull();
+    fireEvent.doubleClick(prose!);
+
+    expect(await screen.findByText("Editing description")).toBeInTheDocument();
+    const editorWrapper = document.querySelector(".editor-wrapper");
+    expect(editorWrapper).not.toBeNull();
+    expect(editorWrapper!.querySelector(".editor-toolbar")).not.toBeNull();
+    expect(document.querySelector(".task-editor-chrome")).toBeNull();
+  });
 });
