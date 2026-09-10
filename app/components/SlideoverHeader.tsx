@@ -5,12 +5,11 @@ interface SlideoverHeaderProps {
   slug: string | undefined;
   project: { name: string } | null;
   isCreate: boolean;
-  expanded: boolean;
-  setExpanded: (v: boolean | ((prev: boolean) => boolean)) => void;
+  onExpand: (() => void) | undefined;
   onClose: () => void;
 }
 
-export function SlideoverHeader({ slug, project, isCreate, expanded, setExpanded, onClose }: SlideoverHeaderProps) {
+export function SlideoverHeader({ slug, project, isCreate, onExpand, onClose }: SlideoverHeaderProps) {
   return (
 <div className="slideover-header border-b border-lx-border-subtle">
   {isCreate ? (
@@ -42,22 +41,18 @@ export function SlideoverHeader({ slug, project, isCreate, expanded, setExpanded
     </span>
   )}
   <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
-    <button type="button"
-      className="btn btn-ghost !w-8 !h-8 !p-0"
-      onClick={() => setExpanded((v) => !v)}
-      aria-label={expanded ? "Shrink width" : "Expand width"}
-      title={expanded ? "Toggle width (full width → 480px)" : "Toggle width (480px → full width)"}
-    >
-      {expanded ? (
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5}>
-          <path d="M4 14h6v6M20 10h-6V4M14 14l7-7M10 10l-7 7" />
-        </svg>
-      ) : (
+    {!isCreate && onExpand && (
+      <button type="button"
+        className="btn btn-ghost !w-8 !h-8 !p-0"
+        onClick={onExpand}
+        aria-label="Open full page"
+        title="Open full page"
+      >
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5}>
           <path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7" />
         </svg>
-      )}
-    </button>
+      </button>
+    )}
     <button type="button" className="btn btn-ghost !w-8 !h-8 !p-0" onClick={onClose} aria-label="Close">
       <X size={18} strokeWidth={1.5} />
     </button>

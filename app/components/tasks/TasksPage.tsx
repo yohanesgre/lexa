@@ -344,6 +344,7 @@ export function TasksPage({ slug, search }: TasksPageProps) {
       {selectedTaskId !== null && (
         <TaskDetail
           mode="view"
+          from="tasks"
           task={selectedTask ?? undefined}
           columns={columns}
           swimlanes={swimlanes}

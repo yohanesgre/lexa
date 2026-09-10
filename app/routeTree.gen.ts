@@ -35,6 +35,7 @@ import { Route as SettingsMeRouteImport } from './routes/settings/me'
 import { Route as SettingsTeamRouteImport } from './routes/settings/team'
 import { Route as SettingsWorkspaceRouteImport } from './routes/settings/workspace'
 import { Route as ShareTokenRouteImport } from './routes/share.$token'
+import { Route as SlugTasksTaskIdRouteImport } from './routes/$slug/tasks_.$taskId'
 import { Route as SlugWikiIndexRouteImport } from './routes/$slug/wiki/index'
 import { Route as SlugWikiPageSlugRouteImport } from './routes/$slug/wiki/$pageSlug'
 import { Route as AdminHeraldUsageRouteImport } from './routes/admin.herald.usage'
@@ -172,6 +173,11 @@ const ShareTokenRoute = ShareTokenRouteImport.update({
   path: '/share/$token',
   getParentRoute: () => rootRouteImport,
 } as any)
+const SlugTasksTaskIdRoute = SlugTasksTaskIdRouteImport.update({
+  id: '/$slug/tasks_/$taskId',
+  path: '/$slug/tasks/$taskId',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const SlugWikiIndexRoute = SlugWikiIndexRouteImport.update({
   id: '/$slug/wiki/',
   path: '/$slug/wiki/',
@@ -231,6 +237,7 @@ export interface FileRoutesByFullPath {
   '/settings/workspace': typeof SettingsWorkspaceRoute
   '/share/$token': typeof ShareTokenRoute
   '/$slug/': typeof SlugIndexRoute
+  '/$slug/tasks/$taskId': typeof SlugTasksTaskIdRoute
   '/$slug/wiki/$pageSlug': typeof SlugWikiPageSlugRoute
   '/admin/herald/usage': typeof AdminHeraldUsageRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
@@ -265,6 +272,7 @@ export interface FileRoutesByTo {
   '/settings/workspace': typeof SettingsWorkspaceRoute
   '/share/$token': typeof ShareTokenRoute
   '/$slug': typeof SlugIndexRoute
+  '/$slug/tasks/$taskId': typeof SlugTasksTaskIdRoute
   '/$slug/wiki/$pageSlug': typeof SlugWikiPageSlugRoute
   '/admin/herald/usage': typeof AdminHeraldUsageRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
@@ -300,6 +308,7 @@ export interface FileRoutesById {
   '/settings/workspace': typeof SettingsWorkspaceRoute
   '/share/$token': typeof ShareTokenRoute
   '/$slug/': typeof SlugIndexRoute
+  '/$slug/tasks_/$taskId': typeof SlugTasksTaskIdRoute
   '/$slug/wiki/$pageSlug': typeof SlugWikiPageSlugRoute
   '/admin/herald/usage': typeof AdminHeraldUsageRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
@@ -336,6 +345,7 @@ export interface FileRouteTypes {
     | '/settings/workspace'
     | '/share/$token'
     | '/$slug/'
+    | '/$slug/tasks/$taskId'
     | '/$slug/wiki/$pageSlug'
     | '/admin/herald/usage'
     | '/api/auth/$'
@@ -370,6 +380,7 @@ export interface FileRouteTypes {
     | '/settings/workspace'
     | '/share/$token'
     | '/$slug'
+    | '/$slug/tasks/$taskId'
     | '/$slug/wiki/$pageSlug'
     | '/admin/herald/usage'
     | '/api/auth/$'
@@ -404,6 +415,7 @@ export interface FileRouteTypes {
     | '/settings/workspace'
     | '/share/$token'
     | '/$slug/'
+    | '/$slug/tasks_/$taskId'
     | '/$slug/wiki/$pageSlug'
     | '/admin/herald/usage'
     | '/api/auth/$'
@@ -430,6 +442,7 @@ export interface RootRouteChildren {
   SlugTasksRoute: typeof SlugTasksRoute
   ShareTokenRoute: typeof ShareTokenRoute
   SlugIndexRoute: typeof SlugIndexRoute
+  SlugTasksTaskIdRoute: typeof SlugTasksTaskIdRoute
   SlugWikiPageSlugRoute: typeof SlugWikiPageSlugRoute
   AdminHeraldUsageRoute: typeof AdminHeraldUsageRoute
   ApiAuthSplatRoute: typeof ApiAuthSplatRoute
@@ -620,6 +633,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ShareTokenRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/$slug/tasks_/$taskId': {
+      id: '/$slug/tasks_/$taskId'
+      path: '/$slug/tasks/$taskId'
+      fullPath: '/$slug/tasks/$taskId'
+      preLoaderRoute: typeof SlugTasksTaskIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/$slug/wiki/': {
       id: '/$slug/wiki/'
       path: '/$slug/wiki'
@@ -734,6 +754,7 @@ const rootRouteChildren: RootRouteChildren = {
   SlugTasksRoute: SlugTasksRoute,
   ShareTokenRoute: ShareTokenRoute,
   SlugIndexRoute: SlugIndexRoute,
+  SlugTasksTaskIdRoute: SlugTasksTaskIdRoute,
   SlugWikiPageSlugRoute: SlugWikiPageSlugRoute,
   AdminHeraldUsageRoute: AdminHeraldUsageRoute,
   ApiAuthSplatRoute: ApiAuthSplatRoute,

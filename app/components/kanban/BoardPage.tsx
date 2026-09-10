@@ -198,6 +198,7 @@ export function BoardPage({ slug, search }: BoardPageProps) {
       {(selectedTaskId !== null || isCreating) && (
         <TaskDetail
           mode={isCreating ? "create" : "view"}
+          from="board"
           task={selectedTask ?? undefined}
           defaultColumnId={createTarget?.columnId}
           columns={board.columns}
