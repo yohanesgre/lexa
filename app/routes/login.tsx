@@ -15,8 +15,28 @@ export const Route = createFileRoute("/login")({
   component: LoginPage,
 });
 
+// Only same-origin paths are safe redirect targets. On the client the WHATWG
+// URL parser normalizes whitespace/backslash tricks ("/\t/evil.com",
+// "/\evil.com") before the origin check, so protocol-relative and external
+// forms are rejected; anything else falls back to home. SSR (window absent)
+// falls back to prefix checks.
+export function safeRedirect(raw: string | undefined): string {
+  if (typeof window !== "undefined") {
+    try {
+      const u = new URL(raw ?? "", window.location.origin);
+      if (u.origin !== window.location.origin) return "/";
+      return u.pathname + u.search + u.hash || "/";
+    } catch {
+      return "/";
+    }
+  }
+  if (!raw || !raw.startsWith("/") || raw.startsWith("//") || raw.startsWith("/\\")) return "/";
+  return raw;
+}
+
 function LoginPage() {
   const { data: session, isLoading } = useSession();
+  const { redirect } = Route.useSearch();
   const navigate = useNavigate();
   const signIn = useSignIn();
   const [email, setEmail] = useState("");
@@ -39,9 +59,9 @@ function LoginPage() {
     };
   }, [isLoading, session?.user, navigate]);
 
-  // Fresh sign-in completes → always land on home. Simpler and reliable:
-  // avoids dynamic-path navigation entirely (the ?redirect= param stays in
-  // the URL but home is the single landing point).
+  // Fresh sign-in completes → return to the internal `?redirect=` target when
+  // one was supplied (root guard sets it to the originally requested path),
+  // otherwise home.
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!email.trim() || !password) return;
@@ -50,7 +70,7 @@ function LoginPage() {
       { email: email.trim(), password },
       {
         onSuccess: () => {
-          void navigate({ to: "/" });
+          void navigate({ to: safeRedirect(redirect) } as never);
         },
         onError: (err) => {
           setError(err.message || "Invalid email or password.");
@@ -60,8 +80,9 @@ function LoginPage() {
   };
 
   if (isLoading) return null;
-  // Already signed in — leave the login page for home.
-  if (session?.user) return <Navigate to="/" replace />;
+  // Already signed in — leave the login page for the same internal target the
+  // submit path would use (defaults to home).
+  if (session?.user) return <Navigate to={safeRedirect(redirect) as never} replace />;
 
   return (
     <main style={{ minHeight: "100vh", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: 24 }}>

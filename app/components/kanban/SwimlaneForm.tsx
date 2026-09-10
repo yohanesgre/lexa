@@ -10,6 +10,7 @@ export interface SwimlaneFormProps {
   swimlane?: Swimlane | null;
   isOpen: boolean;
   onClose: () => void;
+  onDelete?: ((swimlane: Swimlane) => void) | undefined;
   onSubmit: (input: { name: string; description?: string | null | undefined; dueAt?: string | null | undefined; startAt?: string | null | undefined; milestoneId?: string | null }) => void;
   zIndex?: number | undefined;
 }
@@ -169,9 +170,10 @@ function SwimlaneFormHeader({ title, onClose }: { title: string; onClose: () => 
   );
 }
 
-function SwimlaneFormFooter({ isEdit, swimlaneName, onClose, submitLabel }: {
+function SwimlaneFormFooter({ isEdit, swimlane, onDelete, onClose, submitLabel }: {
   isEdit: boolean;
-  swimlaneName: string;
+  swimlane: Swimlane | null;
+  onDelete?: ((swimlane: Swimlane) => void) | undefined;
   onClose: () => void;
   submitLabel: string;
 }) {
@@ -183,9 +185,7 @@ function SwimlaneFormFooter({ isEdit, swimlaneName, onClose, submitLabel }: {
           className="btn btn-danger-solid"
           style={{ marginRight: "auto" }}
           onClick={() => {
-            if (window.confirm(`Delete "${swimlaneName}"? This will unassign all tasks in this swimlane.`)) {
-              onClose();
-            }
+            if (swimlane) onDelete?.(swimlane);
           }}
         >
           <Trash2 size={14} strokeWidth={1.5} />
@@ -203,7 +203,7 @@ function SwimlaneFormFooter({ isEdit, swimlaneName, onClose, submitLabel }: {
   );
 }
 
-export function SwimlaneForm({ slug, swimlane, isOpen, onClose, onSubmit, zIndex = 70 }: SwimlaneFormProps) {
+export function SwimlaneForm({ slug, swimlane, isOpen, onClose, onDelete, onSubmit, zIndex = 70 }: SwimlaneFormProps) {
   const isEdit = !!swimlane;
   const { data: milestones = [] } = useMilestones(slug);
 
@@ -290,7 +290,8 @@ export function SwimlaneForm({ slug, swimlane, isOpen, onClose, onSubmit, zIndex
             />
             <SwimlaneFormFooter
               isEdit={isEdit}
-              swimlaneName={swimlane?.name ?? ""}
+              swimlane={swimlane ?? null}
+              onDelete={onDelete}
               onClose={onClose}
               submitLabel={isEdit ? "Save Changes" : "Create Swimlane"}
             />

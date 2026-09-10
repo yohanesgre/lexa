@@ -1,12 +1,13 @@
 import { useMemo, useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import { useQueryClient } from "@tanstack/react-query";
-import { useUpdateSwimlane, useUpdateMilestone, useBoard } from "../../lib/queries";
+import { useUpdateSwimlane, useUpdateMilestone, useBoard, useDeleteSwimlane } from "../../lib/queries";
 import { sprintProgress } from "../../lib/progress";
 import type { Board, Milestone, Swimlane } from "../../../shared/types";
 import { GanttChart, type TimelineLane } from "./GanttChart";
 import { MilestoneForm } from "./MilestoneForm";
 import { SwimlaneForm } from "../kanban/SwimlaneForm";
+import { DeleteSwimlaneDialog } from "../swimlanes/DeleteSwimlaneDialog";
 
 export function TimelineTab({ slug, board, milestones }: { slug: string; board: Board | undefined; milestones: Milestone[] }) {
   const navigate = useNavigate();
@@ -15,15 +16,17 @@ export function TimelineTab({ slug, board, milestones }: { slug: string; board: 
   const b = board ?? boardData;
   const updateSwimlane = useUpdateSwimlane(slug);
   const updateMilestone = useUpdateMilestone(slug);
+  const deleteSwimlane = useDeleteSwimlane(slug);
 
   const [editLane, setEditLane] = useState<Swimlane | null>(null);
   const [editMilestone, setEditMilestone] = useState<Milestone | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<Swimlane | null>(null);
 
   const lanes: TimelineLane[] = useMemo(() => {
     if (!b) return [];
     const out: TimelineLane[] = [];
     for (const lane of b.swimlanes) {
-      if (lane.archivedAt || lane.kind !== "sprint") continue;
+      if (lane.archivedAt || (lane.kind !== "sprint" && lane.kind !== "backlog")) continue;
       const p = sprintProgress(b, lane.id);
       out.push({ lane, done: p.done, total: p.total });
     }
@@ -83,7 +86,7 @@ export function TimelineTab({ slug, board, milestones }: { slug: string; board: 
   const hasCanvasItems = b?.swimlanes.some((l) => !l.archivedAt && (l.startAt || l.dueAt)) ||
     milestones.some((m) => !m.archivedAt && m.dueAt);
 
-  const unsetLanes = lanes.filter((l) => !l.lane.startAt && !l.lane.dueAt);
+  const unsetLanes = lanes.filter((l) => l.lane.kind !== "backlog" && !l.lane.startAt && !l.lane.dueAt);
   const unsetMilestones = milestones.filter((m) => !m.archivedAt && !m.dueAt);
 
   if (!b) return null;
@@ -142,9 +145,21 @@ export function TimelineTab({ slug, board, milestones }: { slug: string; board: 
           swimlane={editLane}
           isOpen={!!editLane}
           onClose={() => setEditLane(null)}
+          onDelete={() => { setDeleteTarget(editLane); setEditLane(null); }}
           onSubmit={(input) => {
             updateSwimlane.mutate({ id: editLane.id, ...input, description: input.description ?? undefined });
             setEditLane(null);
+          }}
+        />
+      )}
+
+      {deleteTarget && (
+        <DeleteSwimlaneDialog
+          target={deleteTarget}
+          onClose={() => setDeleteTarget(null)}
+          onDelete={() => {
+            deleteSwimlane.mutate({ id: deleteTarget.id });
+            setDeleteTarget(null);
           }}
         />
       )}

@@ -13,6 +13,7 @@ const navigateMock = vi.hoisted(() => vi.fn());
 vi.mock("@tanstack/react-router", () => ({
   createFileRoute: () => () => ({}),
   useNavigate: () => navigateMock,
+  useParams: () => ({ slug: "demo" }),
   Link: ({ to, params, search, className, children }: any) => (
     <a href={`${to}`} className={className}>{children}</a>
   ),
@@ -108,5 +109,27 @@ describe("board milestone selection", () => {
     render(<BoardPageWrapper />, { wrapper });
     expect(await screen.findByText("Hack week")).toBeInTheDocument();
     expect(screen.queryByText("Sprint 7")).not.toBeInTheDocument();
+  });
+});
+
+describe("board card actions", () => {
+  it("card menu Delete calls the delete endpoint", async () => {
+    const user = userEvent.setup();
+    routes.set("DELETE /api/projects/demo/tasks/t1", 204);
+    render(<BoardPageWrapper />, { wrapper });
+    await screen.findByText("Sprint task");
+    await user.click(document.querySelector('.icon-btn[title="Card menu"]')!);
+    await user.click(await screen.findByText("Delete"));
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringContaining("/api/projects/demo/tasks/t1"),
+      expect.objectContaining({ method: "DELETE" })
+    );
+  });
+
+  it("marks the card matching ?task as selected", async () => {
+    searchMock.value = { task: "t1", milestone: undefined };
+    render(<BoardPageWrapper />, { wrapper });
+    await screen.findAllByText("Sprint task");
+    expect(document.querySelector(".kanban-card.state-selected")).not.toBeNull();
   });
 });

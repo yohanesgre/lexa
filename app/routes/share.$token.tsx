@@ -42,6 +42,35 @@ const fileIcon = (
   </svg>
 );
 
+function SharedDeadLink({ token }: { token: string }) {
+  return (
+    <main style={{ maxWidth: 720, margin: "0 auto", padding: "48px 24px" }}>
+      <div className="empty-box">
+        <div className="flex justify-center mb-3">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} style={{ color: "var(--lx-text-muted)" }}>
+            <path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z" />
+            <polyline points="14 2 14 8 20 8" />
+            <line x1="9.5" x2="14.5" y1="12.5" y2="17.5" />
+            <line x1="14.5" x2="9.5" y1="12.5" y2="17.5" />
+          </svg>
+        </div>
+        <h2 className="font-display text-xl font-semibold text-lx-text-primary mb-2">Page not available</h2>
+        <p className="text-sm text-lx-text-secondary mb-2" style={{ lineHeight: 20, maxWidth: 400 }}>
+          This shared link is invalid, has expired, or was revoked by the owner.
+        </p>
+        <div className="flex justify-center mb-2">
+          <span className="font-mono text-xs text-lx-text-muted bg-lx-bg-input border border-lx-border-default rounded-sm" style={{ padding: "4px 8px" }}>
+            /share/{token}
+          </span>
+        </div>
+        <p className="text-xs text-lx-text-tertiary" style={{ lineHeight: 18, maxWidth: 420 }}>
+          Ask the person who shared this page for a fresh link.
+        </p>
+      </div>
+    </main>
+  );
+}
+
 export function SharedWikiPage({ tree, token, pageId, onSelectPage }: { tree: SharedTree | null; token: string; pageId?: string | undefined; onSelectPage?: (id: string) => void }) {
   const [currentId, setCurrentId] = useState<string | null>(null);
   const isMobile = useSyncExternalStore(
@@ -62,32 +91,7 @@ export function SharedWikiPage({ tree, token, pageId, onSelectPage }: { tree: Sh
   const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(isMobile);
 
   if (!tree) {
-    return (
-      <main style={{ maxWidth: 720, margin: "0 auto", padding: "48px 24px" }}>
-        <div className="empty-box">
-          <div className="flex justify-center mb-3">
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} style={{ color: "var(--lx-text-muted)" }}>
-              <path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z" />
-              <polyline points="14 2 14 8 20 8" />
-              <line x1="9.5" x2="14.5" y1="12.5" y2="17.5" />
-              <line x1="14.5" x2="9.5" y1="12.5" y2="17.5" />
-            </svg>
-          </div>
-          <h2 className="font-display text-xl font-semibold text-lx-text-primary mb-2">Page not available</h2>
-          <p className="text-sm text-lx-text-secondary mb-2" style={{ lineHeight: 20, maxWidth: 400 }}>
-            This shared link is invalid, has expired, or was revoked by the owner.
-          </p>
-          <div className="flex justify-center mb-2">
-            <span className="font-mono text-xs text-lx-text-muted bg-lx-bg-input border border-lx-border-default rounded-sm" style={{ padding: "4px 8px" }}>
-              /share/{token}
-            </span>
-          </div>
-          <p className="text-xs text-lx-text-tertiary" style={{ lineHeight: 18, maxWidth: 420 }}>
-            Ask the person who shared this page for a fresh link.
-          </p>
-        </div>
-      </main>
-    );
+    return <SharedDeadLink token={token} />;
   }
 
   const byId = new Map<string, SharedPageNode>();
@@ -96,6 +100,9 @@ export function SharedWikiPage({ tree, token, pageId, onSelectPage }: { tree: Sh
     node.children.forEach(walk);
   };
   walk(tree.root);
+  if (pageId && !byId.has(pageId)) {
+    return <SharedDeadLink token={token} />;
+  }
   const current = (pageId && byId.get(pageId)) || (currentId !== null && byId.get(currentId)) || tree.root;
   const doc: TipTapDoc =
     current.content && typeof current.content === "object" && Array.isArray((current.content as TipTapDoc).content)

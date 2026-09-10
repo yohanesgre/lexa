@@ -340,6 +340,7 @@ export function SwimlaneHeader({ slug, lane, count, collapsed = false, onToggle,
         swimlane={lane}
         isOpen={isSettingsOpen}
         onClose={() => setIsSettingsOpen(false)}
+        onDelete={() => { setIsSettingsOpen(false); setDeleteConfirm(true); }}
         onSubmit={(input) => {
           updateSwimlane.mutate({
             id: lane.id,
