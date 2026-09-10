@@ -211,11 +211,9 @@ export function WikiLayout({ slug, activePageSlug, children }: WikiLayoutProps) 
     return () => document.removeEventListener("keydown", handleKey);
   }, [sidebarCollapsed]);
 
-  // Selecting a page dismisses the overlay on narrow screens.
-  useEffect(() => {
-    if (activePageSlug === undefined) return;
-    closeOnMobile();
-  }, [activePageSlug, closeOnMobile]);
+  // Selecting a page dismisses the overlay on narrow screens — the tree and
+  // search links call `closeOnMobile` directly, so no route-change effect is
+  // needed here (and no state is adjusted after the prop changes).
 
   // Narrow viewport tracking so the body scroll lock follows resizes and
   // rotations, not just the collapse toggle.
