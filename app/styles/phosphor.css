@@ -1869,61 +1869,6 @@
     cursor: col-resize;
   }
 
-  /* ---- Task detail edit mode — chrome band full-bleed to slideover edges
-     (task-detail-edit.html: .slideover-body.editor-flush zeroes side padding,
-     .task-editor-chrome squares the shared toolbar's borders/radius; the
-     document card stays inset so focus border + glow never clip) ---- */
-  .slideover-body.editor-flush {
-    padding-left: 0;
-    padding-right: 0;
-  }
-
-  /* Sections below the flush editor get their side padding back */
-  .slideover-body.editor-flush > :not(.task-editor-host) {
-    padding-left: 16px;
-    padding-right: 16px;
-  }
-
-  /* Band carries no border of its own; the toolbar's wrapper (second child)
-     draws the full-width bottom edge */
-  .task-editor-chrome {
-    background: var(--lx-surface-card);
-    container-type: inline-size;
-  }
-
-  /* Shared toolbar: drop side/top borders + corner radius inside the band */
-  .task-editor-chrome .editor-toolbar {
-    border-top: none;
-    border-left: none;
-    border-right: none;
-    border-bottom: none;
-    border-radius: 0 !important;
-  }
-
-  /* Wide panels: distribute button groups across the full band width —
-     free space splits evenly at separators; collapses to packed-left
-     wrap when narrow (task-detail-edit.html annotation) */
-  .task-editor-chrome .toolbar-sep {
-    margin-left: auto;
-    margin-right: 12px;
-  }
-
-  /* Compact band (row wraps): auto margins would justify each wrapped line
-     into uneven sparse gaps — fall back to the shared toolbar's dense base
-     spacing. Packed single-line width is ~681px; distribute only when one
-     line fits with room to spare. */
-  @container (max-width: 759px) {
-    .task-editor-chrome .toolbar-sep {
-      margin-left: 0;
-      margin-right: 4px;
-    }
-  }
-
-  /* Focused document card: seam between band and card, inset from both edges */
-  .slideover-body.editor-flush .task-editor-host .editor-wrapper {
-    margin: 10px 16px 0;
-  }
-
   /* ---- Wiki edit mode ---- */
   .editor-wrapper:focus-within .editor-toolbar {
     border-bottom-color: var(--lx-border-focus);
@@ -7102,13 +7047,6 @@
   }
   .slideover-title {
     font-size: 16px;
-  }
-  .slideover-body.editor-flush > :not(.task-editor-host) {
-    padding-left: 12px;
-    padding-right: 12px;
-  }
-  .slideover-body.editor-flush .task-editor-host .editor-wrapper {
-    margin: 8px 12px 0;
   }
 }
 

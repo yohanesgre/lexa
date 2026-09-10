@@ -203,12 +203,10 @@ function ArchivedBanner() {
   );
 }
 
-function TaskTabsAndBody({ isCreate, tab, setTab, flush, editorLayout, slug, task, editingDescription, setEditingDescription, setCreateDescription, onUpdate, taskTitles, taskKeys, githubs, columnGithubState, currentColumnId, onLinkGithub, onUnlinkGithub, isArchived }: {
+function TaskTabsAndBody({ isCreate, tab, setTab, slug, task, editingDescription, setEditingDescription, setCreateDescription, onUpdate, taskTitles, taskKeys, githubs, columnGithubState, currentColumnId, onLinkGithub, onUnlinkGithub, isArchived }: {
   isCreate: boolean;
   tab: "description" | "activity";
   setTab: (tab: "description" | "activity") => void;
-  flush: boolean;
-  editorLayout: "band" | "wiki";
   slug: string | undefined;
   task: Task | undefined;
   editingDescription: boolean;
@@ -237,12 +235,11 @@ function TaskTabsAndBody({ isCreate, tab, setTab, flush, editorLayout, slug, tas
         </div>
       )}
 
-      <div className={cn("slideover-body pt-4", flush && "editor-flush")}>
+      <div className="slideover-body pt-4">
         {tab === "description" ? (
           <>
             <TaskDescriptionSection
               isCreate={isCreate}
-              editorLayout={editorLayout}
               slug={slug}
               task={task ?? null}
               emptyDoc={emptyDoc}
@@ -448,8 +445,6 @@ export function TaskDetail({ mode = "view", variant = "slideover", from, task, p
           isCreate={isCreate}
           tab={tab}
           setTab={setTab}
-          flush={!isPage && !isCreate && tab === "description" && editingDescription}
-          editorLayout={isPage ? "wiki" : "band"}
           slug={slug}
           task={task}
           editingDescription={editingDescription}

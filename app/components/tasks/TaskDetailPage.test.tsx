@@ -143,7 +143,5 @@ describe("TaskDetailPage", () => {
     const editorWrapper = document.querySelector(".editor-wrapper");
     expect(editorWrapper).not.toBeNull();
     expect(editorWrapper!.querySelector(".editor-toolbar")).not.toBeNull();
-    expect(document.querySelector(".task-editor-chrome")).toBeNull();
-    expect(document.querySelector(".slideover-body.editor-flush")).toBeNull();
   });
 });
