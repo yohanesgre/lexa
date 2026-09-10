@@ -49,6 +49,20 @@ function OfflineCommand({ machine }: { machine: Machine | undefined }) {
   );
 }
 
+function SystemdCommand() {
+  return (
+    <div className="field">
+      <div className="field-label">
+        Or via systemd
+        <span className="font-micro text-2xs text-lx-text-muted uppercase tracking-[0.04em]" style={{ marginLeft: 6 }}>If installed</span>
+      </div>
+      <pre className="font-mono text-xs text-lx-text-secondary whitespace-pre-wrap leading-6 m-0" style={{ background: "var(--lx-surface-input)", border: "1px solid var(--lx-border-default)", borderRadius: 6, padding: 12 }}>{`systemctl --user restart lexa-hearth-listen
+journalctl --user -u lexa-hearth-listen -f   # watch it reconnect`}</pre>
+      <div className="field-hint mt-1.5">The listener re-reads per-runtime env files and respawns children. Settings config remains server-authoritative.</div>
+    </div>
+  );
+}
+
 function ProgressLine({ runtimeName, sendError, event, eventComplete, backOnline }: {
   runtimeName: string;
   sendError: string | null;
@@ -61,10 +75,15 @@ function ProgressLine({ runtimeName, sendError, event, eventComplete, backOnline
   if (eventComplete && backOnline) {
     return <div className="card-row flex items-center gap-3 mt-4" style={{ background: "var(--lx-bg-success-subtle)" }}><span className="sync-dot sync-synced" /><span className="text-xs font-medium text-lx-text-primary">{runtimeName} is back online</span></div>;
   }
-  if (event) {
-    return <div className="flex items-center gap-3 mt-4" style={{ background: "var(--lx-surface-input)", border: "1px solid var(--lx-border-default)", borderRadius: 6, padding: "10px 12px" }}><span className="spinner" style={{ width: 14, height: 14, borderWidth: 2 }} /><span className="text-xs text-lx-text-secondary">Waiting for the listener to restart the child…</span></div>;
-  }
-  return null;
+  return (
+    <div className="card-row flex items-center gap-3 mt-4">
+      <span className="spinner" style={{ width: 14, height: 14, borderWidth: 2 }} />
+      <div className="flex-1">
+        <div className="text-xs font-medium text-lx-text-primary">Waiting for the runtime child to come back…</div>
+        <div className="text-xs text-lx-text-secondary" style={{ marginTop: 1 }}>Polls every 4s. This modal closes automatically once {runtimeName} is online again.</div>
+      </div>
+    </div>
+  );
 }
 
 interface RestartFooterProps {
@@ -135,7 +154,12 @@ export function RuntimeRestartModal({ runtime, onClose }: { runtime: Runtime; on
           </div>
           <div className="modal-body">
             <RestartNotice machineOnline={machineOnline} hostname={runtime.hostname} />
-            {!machineOnline && <OfflineCommand machine={machine} />}
+            {!machineOnline && (
+              <>
+                <OfflineCommand machine={machine} />
+                <SystemdCommand />
+              </>
+            )}
             <ProgressLine runtimeName={runtime.name} sendError={sendError} event={event} eventComplete={eventComplete} backOnline={backOnline} />
             <RestartFooter
               machineOnline={machineOnline}

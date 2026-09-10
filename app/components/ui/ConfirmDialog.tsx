@@ -1,10 +1,11 @@
 import type { ReactNode } from "react";
 import { Trash2 } from "lucide-react";
 
-export function ConfirmDialog({ title, body, confirmLabel, onCancel, onConfirm }: {
+export function ConfirmDialog({ title, body, confirmLabel, variant = "danger", onCancel, onConfirm }: {
   title: string;
   body: ReactNode;
   confirmLabel: string;
+  variant?: "danger" | "default";
   onCancel: () => void;
   onConfirm: () => void;
 }) {
@@ -16,11 +17,17 @@ export function ConfirmDialog({ title, body, confirmLabel, onCancel, onConfirm }
           <h2 className="font-display text-lg font-medium text-lx-text-primary">{title}</h2>
           <p className="text-sm text-lx-text-secondary mt-3 leading-5">{body}</p>
           <div className="flex items-center gap-2 mt-4 justify-end">
-            <button type="button" className="btn btn-ghost" onClick={onCancel}>Cancel</button>
-            <button type="button" className="btn btn-danger-solid" onClick={onConfirm}>
-              <Trash2 size={14} strokeWidth={1.5} />
-              {confirmLabel}
-            </button>
+            <button type="button" className="btn btn-ghost btn-sm" onClick={onCancel}>Cancel</button>
+            {variant === "danger" ? (
+              <button type="button" className="btn btn-danger-solid btn-sm" onClick={onConfirm}>
+                <Trash2 size={14} strokeWidth={1.5} />
+                {confirmLabel}
+              </button>
+            ) : (
+              <button type="button" className="btn btn-primary btn-sm" onClick={onConfirm}>
+                {confirmLabel}
+              </button>
+            )}
           </div>
         </dialog>
       </div>

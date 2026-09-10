@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import { useQueryClient } from "@tanstack/react-query";
-import { useUpdateSwimlane, useUpdateMilestone, useBoard, useDeleteSwimlane } from "../../lib/queries";
+import { useUpdateSwimlane, useUpdateMilestone, useBoard, useDeleteSwimlane, useDeleteMilestone } from "../../lib/queries";
 import { sprintProgress } from "../../lib/progress";
 import type { Board, Milestone, Swimlane } from "../../../shared/types";
 import { GanttChart, type TimelineLane } from "./GanttChart";
@@ -16,6 +16,7 @@ export function TimelineTab({ slug, board, milestones }: { slug: string; board: 
   const b = board ?? boardData;
   const updateSwimlane = useUpdateSwimlane(slug);
   const updateMilestone = useUpdateMilestone(slug);
+  const deleteMilestone = useDeleteMilestone(slug);
   const deleteSwimlane = useDeleteSwimlane(slug);
 
   const [editLane, setEditLane] = useState<Swimlane | null>(null);
@@ -113,7 +114,7 @@ export function TimelineTab({ slug, board, milestones }: { slug: string; board: 
         today={todayIso}
         onRescheduleLane={rescheduleLane}
         onRescheduleMilestone={rescheduleMilestone}
-        onOpenBoard={(laneId) => navigate({ to: "/$slug/board", params: { slug }, search: {} } as never)}
+        onOpenBoard={(laneId) => navigate({ to: "/$slug/board", params: { slug }, search: { swimlane: laneId } } as never)}
         onShowMilestoneList={() => navigate({ to: "/$slug/milestones", params: { slug }, search: {} } as never)}
       />
 
@@ -156,6 +157,7 @@ export function TimelineTab({ slug, board, milestones }: { slug: string; board: 
       {deleteTarget && (
         <DeleteSwimlaneDialog
           target={deleteTarget}
+          taskCount={b ? b.tasks.filter((t) => t.swimlaneId === deleteTarget.id).length : 0}
           onClose={() => setDeleteTarget(null)}
           onDelete={() => {
             deleteSwimlane.mutate({ id: deleteTarget.id });
@@ -170,6 +172,7 @@ export function TimelineTab({ slug, board, milestones }: { slug: string; board: 
           milestone={editMilestone}
           isOpen={!!editMilestone}
           onClose={() => setEditMilestone(null)}
+          onDelete={() => { deleteMilestone.mutate({ id: editMilestone.id }); setEditMilestone(null); }}
           onSubmit={(input) => {
             updateMilestone.mutate({ id: editMilestone.id, ...input, description: input.description ?? undefined });
             setEditMilestone(null);

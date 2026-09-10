@@ -80,8 +80,6 @@ export function PriceEditor({
   const isLoading = isLoadingPrices || !!isLoadingUsage;
   const isError = isErrorPrices || !!isErrorUsage;
 
-  if (isLoading) return <div className="card-panel card-panel--elevated mt-4"><div className="text-sm color-muted">Loading prices…</div></div>;
-
   if (isError && prices.length === 0 && models.length === 0) {
     return (
       <section className="card-panel card-panel--elevated mt-4">
@@ -103,7 +101,7 @@ export function PriceEditor({
       </p>
       {isError ? <div className="text-sm mb-2" style={{ color: "var(--lx-text-danger)" }}>Failed to load prices</div> : null}
       <div style={{ overflowX: "auto" }}>
-        <table className="settings-table">
+        <table className="settings-table settings-table--herald-prices">
           <thead>
             <tr>
               <th style={{ width: "auto" }}>Model</th>
@@ -115,7 +113,13 @@ export function PriceEditor({
             </tr>
           </thead>
           <tbody>
-            {models.length === 0 ? (
+            {isLoading ? (
+              <tr>
+                <td colSpan={6} style={{ textAlign: "center", padding: "14px 12px" }}>
+                  <div className="font-mono text-xs color-muted" style={{ fontStyle: "italic" }}>Loading prices…</div>
+                </td>
+              </tr>
+            ) : models.length === 0 ? (
               <tr>
                 <td colSpan={6} style={{ textAlign: "center", padding: "14px 12px" }}>
                   <div className="font-mono text-xs color-muted" style={{ fontStyle: "italic" }}>No models yet</div>

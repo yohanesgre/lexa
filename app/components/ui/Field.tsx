@@ -40,7 +40,7 @@ export function Field({ label, htmlFor, hint, error, children, className }: Fiel
         {children}
       </FieldContext.Provider>
       {invalid ? (
-        <div id={descId} className="field-hint-danger">
+        <div id={descId} className="notice notice-danger mt-2">
           {error}
         </div>
       ) : hint != null && hint !== "" ? (

@@ -95,6 +95,19 @@ function activeRunCount(summary: Record<HearthTaskStatus, number> | undefined): 
   return (summary?.queued ?? 0) + (summary?.running ?? 0);
 }
 
+// Total run count for the pagination line ("Showing 5 of 26 runs"). The
+// history response carries the global per-status summary (no total field),
+// so sum the statuses — matching the wireframe's "of N runs" copy.
+export function historyTotal(summary: Record<HearthTaskStatus, number> | undefined): number | null {
+  if (!summary) return null;
+  return STATUS_ORDER.reduce((n, s) => n + (summary[s] ?? 0), 0);
+}
+
+export function paginationLabel(pageLength: number, total: number | null): string {
+  if (pageLength === 0) return "End of history";
+  return total !== null ? `Showing ${pageLength} of ${total} runs` : `Showing ${pageLength} runs`;
+}
+
 function projectSlugFor(projects: { data?: { id: string; slug: string }[] | undefined }, detail: HearthTask | null): string | undefined {
   if (!detail) return undefined;
   return projects.data?.find((p) => p.id === detail.projectId)?.slug;
@@ -500,7 +513,7 @@ function TaskDetailSlideover({ detail, detailProjectSlug, runtimes, logs, canVie
   );
 }
 
-function HistoryStates({ history, page, filters, cursor, children }: {
+export function HistoryStates({ history, page, filters, cursor, children }: {
   history: UseQueryResult<{ data: HearthTaskRow[]; summary?: Record<HearthTaskStatus, number>; nextCursor?: string | null }, unknown>;
   page: HearthTaskRow[];
   filters: FilterValues;
@@ -538,8 +551,7 @@ function HistoryStates({ history, page, filters, cursor, children }: {
     return (
       <div className="empty-box mt-8" style={{ padding: 24 }}>
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" style={{ color: "var(--lx-text-muted)" }}>
-          <path d="m15 12-8.373 8.373a2.121 2.121 0 1 1-3-3L12 9m7-4 .65-.65a2.121 2.121 0 1 1 3 3L19.003 11M15 5l2 2" />
-          <path d="M6 18 2 22" />
+          <path d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.072-2.143-.224-4.054 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.153.433-2.294 1-3a2.5 2.5 0 0 0 2.5 2.5z" />
         </svg>
         <div className="text-sm weight-500 text-lx-text-primary">
           {emptyStateTitle(filters.status, filters.slug, filters.skillId, cursor)}
@@ -564,7 +576,7 @@ function PaginationBar({ history, page, cursor, setCursor }: {
   if (!visible) return null;
   return (
     <div className="flex items-center justify-between mt-3" style={{ gap: 12 }}>
-      <span className="text-xs text-lx-text-muted">{page.length > 0 ? `Showing ${page.length} runs` : "End of history"}</span>
+      <span className="text-xs text-lx-text-muted">{paginationLabel(page.length, historyTotal(history.data?.summary))}</span>
       <div className="flex items-center gap-2">
         <button type="button" className="btn btn-ghost" disabled={cursor === null} style={{ height: 28, padding: "0 12px", fontSize: 12 }} onClick={() => setCursor(null)}>
           ← Newer

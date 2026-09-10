@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { Plus, X } from "lucide-react";
+import { Plus, Trash2, X } from "lucide-react";
 import { cn } from "../ui/cn";
 import { OPTION_COLORS } from "../../lib/option-colors";
 import type { Column } from "../../../shared/types";
@@ -10,6 +10,7 @@ export interface ColumnFormProps {
   column?: Column | null;
   isOpen: boolean;
   onClose: () => void;
+  onDelete?: (() => void) | undefined;
   onSubmit: (input: {
     name: string;
     color?: string | null | undefined;
@@ -28,8 +29,8 @@ const colors: { value: string | null; label: string; hex: string }[] = [
 
 const requiredFieldOptions = [
   { value: "title", label: "Title" },
-  { value: "assignee", label: "Assignee" },
   { value: "description", label: "Description" },
+  { value: "assignee", label: "Assignee" },
 ] as const;
 
 type RequiredFieldValue = (typeof requiredFieldOptions)[number]["value"];
@@ -65,7 +66,7 @@ function seedState(column: Column | null | undefined): ColumnFormState {
   };
 }
 
-export function ColumnForm({ column, isOpen, onClose, onSubmit, zIndex = 70 }: ColumnFormProps) {
+export function ColumnForm({ column, isOpen, onClose, onDelete, onSubmit, zIndex = 70 }: ColumnFormProps) {
   const isEdit = !!column;
   const [state, setState] = useState<ColumnFormState>(EMPTY_STATE);
   const [error, setError] = useState<string | null>(null);
@@ -318,6 +319,12 @@ export function ColumnForm({ column, isOpen, onClose, onSubmit, zIndex = 70 }: C
             </div>
 
             <div className="flex items-center justify-end gap-2 px-4 py-3 border-t border-lx-border-subtle">
+              {isEdit && onDelete && (
+                <button type="button" className="btn btn-danger-solid mr-auto" onClick={onDelete}>
+                  <Trash2 size={14} strokeWidth={1.5} />
+                  Delete Column
+                </button>
+              )}
               <button type="button" className="btn btn-ghost" onClick={onClose}>
                 Cancel
               </button>

@@ -11,6 +11,13 @@ function toggleSet<T>(set: Set<T>, value: T): Set<T> {
   return next;
 }
 
+function assigneeInitials(name: string): string {
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return "?";
+  if (parts.length === 1) return parts[0]!.slice(0, 2).toUpperCase();
+  return (parts[0]![0]! + parts[parts.length - 1]![0]!).toUpperCase();
+}
+
 function FilterSection({ label, first, children }: { label: string; first?: boolean | undefined; children: React.ReactNode }) {
   return (
     <>
@@ -56,7 +63,6 @@ function FilterPopover({
     for (const t of board.tasks) for (const a of t.assignees) set.add(a);
     return Array.from(set).sort();
   }, [board.tasks]);
-  const hasUnassigned = board.tasks.some((t) => t.assignees.length === 0);
 
   const toggleColumn = (id: string) => onChange({ ...filters, columns: toggleSet(filters.columns, id) });
   const togglePriority = (value: string) => onChange({ ...filters, priorities: toggleSet(filters.priorities, value) });
@@ -118,18 +124,10 @@ function FilterPopover({
             key={a}
             checked={filters.assignees.has(a)}
             onChange={() => toggleAssignee(a)}
-            icon={<div className="avatar">{a[0]!.toUpperCase()}</div>}
+            icon={<div className="avatar">{assigneeInitials(a)}</div>}
             label={a}
           />
         ))}
-        {hasUnassigned && (
-          <FilterCheckbox
-            checked={filters.assignees.has("")}
-            onChange={() => toggleAssignee("")}
-            icon={<div className="avatar" style={{ fontSize: 8 }}>?</div>}
-            label="Unassigned"
-          />
-        )}
       </FilterSection>
 
       {board.swimlanes.length > 0 && (
@@ -236,7 +234,7 @@ export function ActiveFilterBar({ board, filters, onChange }: { board: Board; fi
       result.push({ label: "Type", value: typeMap.get(t) ?? t, key: `type:${t}`, remove: () => onChange({ ...filters, types: toggleSet(filters.types, t) }) });
     }
     for (const a of filters.assignees) {
-      result.push({ label: "Assignee", value: a || "Unassigned", key: `asgn:${a}`, remove: () => onChange({ ...filters, assignees: toggleSet(filters.assignees, a) }) });
+      result.push({ label: "Assignee", value: a, key: `asgn:${a}`, remove: () => onChange({ ...filters, assignees: toggleSet(filters.assignees, a) }) });
     }
     for (const s of filters.swimlanes) {
       result.push({ label: "Swimlane", value: laneMap.get(s) ?? "No swimlane", key: `lane:${s}`, remove: () => onChange({ ...filters, swimlanes: toggleSet(filters.swimlanes, s) }) });

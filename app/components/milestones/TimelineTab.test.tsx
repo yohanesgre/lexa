@@ -10,6 +10,7 @@ vi.mock("../../lib/queries", () => ({
   useBoard: () => ({ data: undefined }),
   useUpdateSwimlane: () => ({ mutate: vi.fn() }),
   useUpdateMilestone: () => ({ mutate: vi.fn() }),
+  useDeleteMilestone: () => ({ mutate: vi.fn() }),
   useDeleteSwimlane: () => ({ mutate: vi.fn() }),
 }));
 

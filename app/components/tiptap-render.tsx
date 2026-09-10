@@ -1,13 +1,13 @@
 import { type ReactNode } from "react";
 import type { TipTapDoc } from "../../shared/types";
-import { safeHref } from "../../shared/safe-href";
+import { safeHref, safeRelativeHref } from "../../shared/safe-href";
 import { withKeys } from "../lib/withKeys";
 import { cn } from "./ui/cn";
 
 // Root-relative attachment srcs render because cookie auth covers the GET —
 // same exact-shape uuid rule as shared/markdown.ts (safeImageSrc). Local copy:
 // importing markdown.ts would pull the marked parser into every render surface.
-const ATTACHMENT_SRC_RE = /^\/api\/attachments\/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
+const ATTACHMENT_SRC_RE = /^\/api\/attachments\/([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$/;
 
 function safeImageSrc(src: unknown): string | null {
   if (typeof src !== "string") return null;
@@ -15,6 +15,51 @@ function safeImageSrc(src: unknown): string | null {
   if (!trimmed) return null;
   if (ATTACHMENT_SRC_RE.test(trimmed)) return trimmed;
   return safeHref(trimmed);
+}
+
+// Public share render context (wiki-shared.html): the token is the credential
+// and only pages inside the shared subtree may be reached. Internal links that
+// leave the subtree resolve to the dead-link Variant B (an unknown `page` id)
+// instead of rendering into the app; embedded images re-serve read-only from
+// the share attachment endpoint.
+export interface ShareRenderContext {
+  token: string;
+  /** wiki page slug -> page id for pages inside the shared subtree */
+  pageIds: Map<string, string>;
+}
+
+export const SHARE_OUTSIDE_SUBTREE = "__outside__";
+
+function sharePageHref(share: ShareRenderContext, pageId: string): string {
+  return `/share/${encodeURIComponent(share.token)}?page=${encodeURIComponent(pageId)}`;
+}
+
+function resolveShareHref(href: string, share: ShareRenderContext): string {
+  if (!href.startsWith("/")) return href;
+  if (href.startsWith("/share/")) return href;
+  const wikiRef = /\/wiki\/([^/?#]+)/.exec(href);
+  const rawSegment = wikiRef?.[1];
+  if (rawSegment !== undefined) {
+    let segment = rawSegment;
+    try {
+      segment = decodeURIComponent(rawSegment);
+    } catch {
+      // keep the raw segment — a malformed escape still matches on raw slug
+    }
+    const id = share.pageIds.get(segment);
+    if (id) return sharePageHref(share, id);
+  }
+  return sharePageHref(share, SHARE_OUTSIDE_SUBTREE);
+}
+
+function resolveImageSrc(src: unknown, share?: ShareRenderContext): string | null {
+  const safe = safeImageSrc(src);
+  if (!safe || !share) return safe;
+  const attachmentId = ATTACHMENT_SRC_RE.exec(safe)?.[1];
+  if (attachmentId) {
+    return `/api/share/${encodeURIComponent(share.token)}/attachments/${attachmentId}`;
+  }
+  return safe;
 }
 
 // Mention chips link internally only. Both hrefs are CONSTRUCTED from
@@ -71,7 +116,8 @@ export function renderInline(
   nodes: TTNode[] | undefined,
   keyPrefix: string,
   variant: "task" | "wiki" = "task",
-  slug?: string
+  slug?: string,
+  share?: ShareRenderContext
 ): ReactNode {
   if (!nodes) return null;
   return withKeys(nodes, (node) => `${keyPrefix}/${node.type === "text" ? `t:${node.text ?? ""}` : node.type}`).map(({ item: node, key: nodeKey }) => {
@@ -88,7 +134,11 @@ export function renderInline(
           );
         else if (mark.type === "link") {
           // Scheme allowlist — disallowed hrefs render as plain text, no anchor.
-          const href = safeHref(mark.attrs?.href);
+          // Same-origin relative links are only accepted on the public share
+          // path, where they resolve inside the shared subtree (or Variant B);
+          // the app path keeps dropping them (unchanged).
+          const safe = share ? safeRelativeHref(mark.attrs?.href) : safeHref(mark.attrs?.href);
+          const href = safe && share ? resolveShareHref(safe, share) : safe;
           if (href)
             el = (
               <a href={href} target="_blank" rel="noreferrer">
@@ -105,12 +155,12 @@ export function renderInline(
       // Inline images (e.g. `text ![alt](src)` inside a paragraph): render
       // only the allowlisted src — disallowed schemes become nothing, never
       // a broken <img> carrying a `javascript:`/`data:` value.
-      const src = safeImageSrc(node.attrs?.src);
+      const src = resolveImageSrc(node.attrs?.src, share);
       if (!src) return null;
       const alt = typeof node.attrs?.alt === "string" ? node.attrs.alt : "";
       return <img key={nodeKey} src={src} alt={alt} loading="lazy" />;
     }
-    return renderNode(node, nodeKey, variant, slug);
+    return renderNode(node, nodeKey, variant, slug, share);
   });
 }
 
@@ -120,10 +170,11 @@ function renderBlocks(
   nodes: TTNode[] | undefined,
   keyPrefix: string,
   variant: "task" | "wiki",
-  slug?: string
+  slug?: string,
+  share?: ShareRenderContext
 ): ReactNode {
   return withKeys(nodes ?? [], (node) => node.type).map(({ item: node, key }) =>
-    renderNode(node, `${keyPrefix}/b/${key}`, variant, slug)
+    renderNode(node, `${keyPrefix}/b/${key}`, variant, slug, share)
   );
 }
 
@@ -131,14 +182,15 @@ export function renderNode(
   node: TTNode,
   key: string,
   variant: "task" | "wiki" = "task",
-  slug?: string
+  slug?: string,
+  share?: ShareRenderContext
 ): ReactNode {
   const isWiki = variant === "wiki";
   switch (node.type) {
     case "paragraph":
       return (
         <p key={key} className={isWiki ? undefined : "td-p"}>
-          {renderInline(node.content, key, variant, slug)}
+          {renderInline(node.content, key, variant, slug, share)}
         </p>
       );
     case "heading": {
@@ -155,28 +207,28 @@ export function renderNode(
       const id = slugifyHeading(headingText);
       return (
         <Tag key={key} className={cls} id={id}>
-          {renderInline(node.content, key, variant, slug)}
+          {renderInline(node.content, key, variant, slug, share)}
         </Tag>
       );
     }
     case "bulletList":
       return (
         <ul key={key} className={isWiki ? undefined : "td-ul"}>
-          {renderInline(node.content, key, variant, slug)}
+          {renderInline(node.content, key, variant, slug, share)}
         </ul>
       );
     case "orderedList":
       return (
         <ol key={key} className={isWiki ? undefined : "td-ol"}>
-          {renderInline(node.content, key, variant, slug)}
+          {renderInline(node.content, key, variant, slug, share)}
         </ol>
       );
     case "listItem":
-      return <li key={key}>{renderInline(node.content, key, variant, slug)}</li>;
+      return <li key={key}>{renderInline(node.content, key, variant, slug, share)}</li>;
     case "taskList":
       return (
         <ul key={key} className="checklist">
-          {renderInline(node.content, key, variant, slug)}
+          {renderInline(node.content, key, variant, slug, share)}
         </ul>
       );
     case "taskItem": {
@@ -184,7 +236,7 @@ export function renderNode(
       return (
         <li key={key} className={cn(checked && "checked")}>
           <span className={cn("checkbox", checked && "checked")} />
-          <span>{renderInline(node.content, key, variant, slug)}</span>
+          <span>{renderInline(node.content, key, variant, slug, share)}</span>
         </li>
       );
     }
@@ -197,7 +249,7 @@ export function renderNode(
     case "blockquote":
       return (
         <blockquote key={key} className={isWiki ? undefined : "td-quote"}>
-          {renderInline(node.content, key, variant, slug)}
+          {renderInline(node.content, key, variant, slug, share)}
         </blockquote>
       );
     case "horizontalRule":
@@ -206,17 +258,17 @@ export function renderNode(
       return (
         <div key={key} className={isWiki ? "table-wrap" : "td-table-wrap"}>
           <table className={isWiki ? undefined : "td-table"}>
-            {renderInline(node.content, key, variant, slug)}
+            {renderInline(node.content, key, variant, slug, share)}
           </table>
         </div>
       );
     case "tableRow":
-      return <tr key={key}>{renderInline(node.content, key, variant, slug)}</tr>;
+      return <tr key={key}>{renderInline(node.content, key, variant, slug, share)}</tr>;
     case "tableHeader": {
       const align = typeof node.attrs?.align === "string" ? (node.attrs.align as "left" | "center" | "right") : undefined;
       return (
         <th key={key} align={align}>
-          {renderBlocks(node.content, key, variant, slug)}
+          {renderBlocks(node.content, key, variant, slug, share)}
         </th>
       );
     }
@@ -224,14 +276,14 @@ export function renderNode(
       const align = typeof node.attrs?.align === "string" ? (node.attrs.align as "left" | "center" | "right") : undefined;
       return (
         <td key={key} align={align}>
-          {renderBlocks(node.content, key, variant, slug)}
+          {renderBlocks(node.content, key, variant, slug, share)}
         </td>
       );
     }
     case "image": {
       // Block-level image (top-level node in a doc, or a list/quote child).
       // Same allowlist as inline images — no scheme, no render.
-      const src = safeImageSrc(node.attrs?.src);
+      const src = resolveImageSrc(node.attrs?.src, share);
       if (!src) return null;
       const alt = typeof node.attrs?.alt === "string" ? node.attrs.alt : "";
       return (
@@ -245,7 +297,7 @@ export function renderNode(
       );
     }
     default:
-      return node.content ? <div key={key}>{renderInline(node.content, key, variant, slug)}</div> : null;
+      return node.content ? <div key={key}>{renderInline(node.content, key, variant, slug, share)}</div> : null;
   }
 }
 
@@ -290,7 +342,7 @@ export function extractHeadings(node: TTNode): HeadingOutline[] {
   return results;
 }
 
-export function renderDoc(doc: TipTapDoc, variant: "task" | "wiki" = "task", slug?: string): ReactNode {
+export function renderDoc(doc: TipTapDoc, variant: "task" | "wiki" = "task", slug?: string, share?: ShareRenderContext): ReactNode {
   const nodes = doc.content as TTNode[];
   if (!hasText(nodes)) {
     return variant === "task" ? (
@@ -304,6 +356,6 @@ export function renderDoc(doc: TipTapDoc, variant: "task" | "wiki" = "task", slu
     return true;
   });
   return withKeys(visibleNodes, (node) => node.type).map(({ item: node, key }) =>
-    renderNode(node, `n/${key}`, variant, slug)
+    renderNode(node, `n/${key}`, variant, slug, share)
   );
 }

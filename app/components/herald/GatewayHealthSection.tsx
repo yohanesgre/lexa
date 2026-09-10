@@ -10,6 +10,8 @@ const badgeClass: Record<Circuit, string> = {
   "half-open": "health-half",
 };
 
+const stateRank: Record<Circuit, number> = { open: 0, "half-open": 1, closed: 2 };
+
 function worstState(states: (Circuit | undefined)[]): Circuit | null {
   const loaded = states.filter((s): s is Circuit => s !== undefined);
   if (loaded.length === 0) return null;
@@ -26,6 +28,21 @@ export function GatewayHealthSection() {
   const byId = useMemo(() => new Map(health.map((h, i) => [ids[i]!, h])), [health, ids]);
   const settled = health.every((h) => !h.isPending);
   const worst = settled ? worstState(health.map((h) => h.data?.circuitState)) : null;
+  const worstProviderId = useMemo(() => {
+    if (!settled) return null;
+    let bestId: string | null = null;
+    let bestRank = Infinity;
+    for (let i = 0; i < ids.length; i++) {
+      const state = health[i]?.data?.circuitState;
+      if (!state) continue;
+      const rank = stateRank[state];
+      if (rank < bestRank) {
+        bestRank = rank;
+        bestId = ids[i]!;
+      }
+    }
+    return bestId;
+  }, [ids, health, settled]);
 
   return (
     <section className="card-panel mt-4" id="hearth-usage-health">
@@ -39,7 +56,15 @@ export function GatewayHealthSection() {
           )}
         </div>
       </div>
-      <p className="text-sm color-secondary mb-3" style={{ maxWidth: 640 }}>Circuit breaker for the Herald gateway. Probe forces a health check — use after fixing upstream.</p>
+      <p className="text-sm color-secondary mb-3" style={{ maxWidth: 640 }}>Circuit breaker for the Herald gateway. Failures trip the breaker; half-open probes recovery. Probe forces a health check — use after fixing the upstream.</p>
+      <div className="flex items-center gap-2 mb-3" style={{ flexWrap: "wrap" }}>
+        <span className="health-badge health-open">open</span>
+        <span className="font-micro text-2xs color-muted" style={{ textTransform: "uppercase", letterSpacing: "0.04em" }}>red · breaker tripped — gateway rejecting calls</span>
+        <span className="health-badge health-half" style={{ marginLeft: 12 }}>half-open</span>
+        <span className="font-micro text-2xs color-muted" style={{ textTransform: "uppercase", letterSpacing: "0.04em" }}>amber · probing recovery</span>
+        <span className="health-badge health-closed" style={{ marginLeft: 12 }}>closed</span>
+        <span className="font-micro text-2xs color-muted" style={{ textTransform: "uppercase", letterSpacing: "0.04em" }}>green · healthy</span>
+      </div>
       {isLoading ? (
         <div className="text-sm color-muted mt-2">Loading…</div>
       ) : isError ? (
@@ -51,12 +76,14 @@ export function GatewayHealthSection() {
         <div className="text-sm color-muted mt-2">No providers configured.</div>
       ) : (
         <div className="card-panel" style={{ overflow: "hidden", padding: 0 }}>
-          <table className="settings-table">
-            <thead><tr><th>Provider</th><th style={{ width: 100 }}>State</th><th style={{ width: 85, textAlign: "right" }}>failureCount</th><th>openedAt</th><th>lastProbeAt</th><th style={{ width: 80, textAlign: "right" }}></th></tr></thead>
+          <table className="settings-table settings-table--herald-health">
+            <thead><tr><th style={{ width: "auto" }}>Provider</th><th style={{ width: 100 }}>State</th><th style={{ width: 85, textAlign: "right" }}>failureCount</th><th>openedAt</th><th>lastProbeAt</th><th style={{ width: 80, textAlign: "right" }}></th></tr></thead>
             <tbody>
               {(providers ?? []).map((p) => {
                 const h = byId.get(p.id)!;
                 const state = h.data?.circuitState;
+                const failureColor = state === "open" ? "var(--lx-text-danger)" : state === "half-open" ? "var(--lx-text-warning)" : "var(--lx-text-primary)";
+                const probing = probe.isPending && probe.variables === p.id;
                 return (
                   <tr key={p.id}>
                     <td className="text-sm color-primary">{p.label}</td>
@@ -69,12 +96,12 @@ export function GatewayHealthSection() {
                         <span className="text-sm color-muted">…</span>
                       )}
                     </td>
-                    <td className="font-mono text-xs color-primary" style={{ textAlign: "right" }}>
+                    <td className="font-mono text-xs" style={{ textAlign: "right", color: failureColor }}>
                       {h.data ? h.data.failureCount : "—"}
                     </td>
                     <td className="font-mono text-xs color-muted">{h.data?.openedAt ?? "—"}</td>
                     <td className="font-mono text-xs color-secondary">{h.data?.lastProbeAt ?? "—"}</td>
-                    <td style={{ textAlign: "right" }}><button className={state === "open" ? "btn btn-primary btn-sm" : "btn btn-ghost btn-sm"} disabled={probe.isPending} title="Run live upstream test and update breaker state" onClick={() => probe.mutate(p.id)}><svg width={12} height={12} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5}><path d="M21 12a9 9 0 1 1-9-9c2.5 0 4.7 1 6.3 2.7" /><path d="M21 3v6h-6" /></svg> {probe.isPending && probe.variables === p.id ? "Probing…" : "Probe"}</button></td>
+                    <td style={{ textAlign: "right" }}><button className={state === "open" ? "btn btn-primary btn-sm" : "btn btn-ghost btn-sm"} disabled={probe.isPending} title="Run live upstream test and update breaker state" onClick={() => probe.mutate(p.id)}>{probing ? <span className="spinner" style={{ width: 10, height: 10, borderWidth: 2 }} /> : <svg width={12} height={12} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5}><path d="M21 12a9 9 0 1 1-9-9c2.5 0 4.7 1 6.3 2.7" /><path d="M21 3v6h-6" /></svg>} {probing ? "Probing…" : "Probe"}</button></td>
                   </tr>
                 );
               })}
@@ -82,6 +109,21 @@ export function GatewayHealthSection() {
           </table>
         </div>
       )}
+      <div className="flex items-center gap-2 mt-3" style={{ flexWrap: "wrap" }}>
+        <button
+          className="btn btn-ghost btn-sm"
+          disabled={probe.isPending || !worstProviderId}
+          title="Run live upstream test on the provider that needs attention"
+          onClick={() => worstProviderId && probe.mutate(worstProviderId)}
+        >
+          {probe.isPending && probe.variables === worstProviderId ? (
+            <span className="spinner" style={{ width: 10, height: 10, borderWidth: 2 }} />
+          ) : (
+            <svg width={12} height={12} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5}><path d="M21 12a9 9 0 1 1-9-9c2.5 0 4.7 1 6.3 2.7" /><path d="M21 3v6h-6" /></svg>
+          )}
+          Probe now
+        </button>
+      </div>
     </section>
   );
 }

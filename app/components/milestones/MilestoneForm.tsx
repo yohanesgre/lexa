@@ -1,6 +1,6 @@
 import { useEffect, useState, useEffectEvent } from "react";
 import { createPortal } from "react-dom";
-import { Plus, X } from "lucide-react";
+import { Plus, Trash2, X } from "lucide-react";
 import type { Milestone } from "../../../shared/types";
 import { DatePicker } from "../ui/DatePicker";
 
@@ -9,11 +9,12 @@ export interface MilestoneFormProps {
   milestone?: Milestone | null;
   isOpen: boolean;
   onClose: () => void;
+  onDelete?: (() => void) | undefined;
   onSubmit: (input: { name: string; description?: string | null | undefined; dueAt?: string | null }) => void;
   zIndex?: number | undefined;
 }
 
-export function MilestoneForm({ milestone, isOpen, onClose, onSubmit, zIndex = 70 }: MilestoneFormProps) {
+export function MilestoneForm({ milestone, isOpen, onClose, onDelete, onSubmit, zIndex = 70 }: MilestoneFormProps) {
   const isEdit = !!milestone;
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
@@ -147,6 +148,17 @@ export function MilestoneForm({ milestone, isOpen, onClose, onSubmit, zIndex = 7
             </div>
 
             <div className="flex items-center justify-end gap-2 px-4 py-3 border-t border-lx-border-subtle">
+              {isEdit && onDelete && (milestone?.sprintCount ?? 0) === 0 && (
+                <button
+                  type="button"
+                  className="btn btn-danger-solid"
+                  style={{ marginRight: "auto" }}
+                  onClick={onDelete}
+                >
+                  <Trash2 size={14} strokeWidth={1.5} />
+                  Delete Milestone
+                </button>
+              )}
               <button type="button" className="btn btn-ghost" onClick={onClose}>
                 Cancel
               </button>

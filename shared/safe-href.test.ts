@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { safeHref } from "./safe-href";
+import { safeHref, safeRelativeHref } from "./safe-href";
 
 describe("safeHref", () => {
   it("allows http, https, mailto", () => {
@@ -23,5 +23,27 @@ describe("safeHref", () => {
     expect(safeHref(42)).toBeNull();
     expect(safeHref("")).toBeNull();
     expect(safeHref("   ")).toBeNull();
+  });
+});
+
+describe("safeRelativeHref", () => {
+  it("accepts same-origin root-relative paths", () => {
+    expect(safeRelativeHref("/demo/wiki/child")).toBe("/demo/wiki/child");
+    expect(safeRelativeHref("/demo/wiki/child?x=1#h")).toBe("/demo/wiki/child?x=1#h");
+    expect(safeRelativeHref("  /demo/wiki/child  ")).toBe("/demo/wiki/child");
+  });
+
+  it("rejects protocol-relative and backslash-smuggled origins", () => {
+    expect(safeRelativeHref("//evil.example/x")).toBeNull();
+    expect(safeRelativeHref("/\\evil.example")).toBeNull();
+  });
+
+  it("still accepts http(s)/mailto and drops other schemes", () => {
+    expect(safeRelativeHref("https://example.com/x")).toBe("https://example.com/x");
+    expect(safeRelativeHref("mailto:a@b.c")).toBe("mailto:a@b.c");
+    expect(safeRelativeHref("javascript:alert(1)")).toBeNull();
+    expect(safeRelativeHref("data:text/html,<script>1</script>")).toBeNull();
+    expect(safeRelativeHref(null)).toBeNull();
+    expect(safeRelativeHref("")).toBeNull();
   });
 });

@@ -1197,10 +1197,17 @@ export function useChangePassword() {
   const qc = useQueryClient();
   const toast = useToast();
   return useMutation({
-    mutationFn: ({ currentPassword, newPassword }: { currentPassword: string; newPassword: string }) => auth.changePassword({ currentPassword, newPassword }),
+    mutationFn: ({ currentPassword, newPassword }: { currentPassword: string; newPassword: string }) =>
+      auth.changePassword({ currentPassword, newPassword, revokeOtherSessions: true }),
     onSuccess: () => {
-      void qc.invalidateQueries({ queryKey: ["session"] });
-      toast.push("success", "Password updated");
+      // Better Auth revoked every other session; keep the list authoritative
+      // (setQueryData, not invalidateQueries — invariant 6) by dropping all
+      // rows but the current session.
+      const currentId = qc.getQueryData<{ session: { id: string } | null } | null>(["session"])?.session?.id;
+      if (currentId) {
+        qc.setQueryData<SessionInfo[]>(["sessions"], (old) => old?.filter((s) => s.id === currentId));
+      }
+      toast.push("success", "Password updated — other sessions signed out");
     },
     onError: (err) => {
       toast.push("error", "Could not change password", toastMessage(err));

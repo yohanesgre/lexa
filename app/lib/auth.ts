@@ -89,6 +89,6 @@ export function acceptInvite(input: { token: string; name: string; password: str
   return authRequest("/invite/accept", input) as Promise<{ status: boolean; email: string }>;
 }
 
-export function changePassword(input: { currentPassword: string; newPassword: string }): Promise<void> {
+export function changePassword(input: { currentPassword: string; newPassword: string; revokeOtherSessions: boolean }): Promise<void> {
   return authRequest("/change-password", input) as Promise<void>;
 }

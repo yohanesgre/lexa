@@ -59,19 +59,19 @@ export function TaskDescriptionSection({ isCreate, slug, task, emptyDoc, taskTit
     )}
 
     {!isCreate && slug && (
+      <SourcesSection
+        slug={slug}
+        documentType="task"
+        documentId={task!.id}
+        className="mt-4 pt-4 border-t border-lx-border-subtle"
+      />
+    )}
+    {!isCreate && slug && (
       <LinksSection
         slug={slug}
         taskId={task!.id}
         taskTitleById={taskTitles}
         taskKeyById={taskKeys}
-        className="mt-4 pt-4 border-t border-lx-border-subtle"
-      />
-    )}
-    {!isCreate && slug && (
-      <SourcesSection
-        slug={slug}
-        documentType="task"
-        documentId={task!.id}
         className="mt-4 pt-4 border-t border-lx-border-subtle"
       />
     )}

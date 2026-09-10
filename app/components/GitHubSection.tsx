@@ -347,7 +347,7 @@ export function GitHubSection({ taskId, slug, githubs, columnGithubState, onLink
     <div className="github-section mt-4 pt-4">
       <div className="flex items-center gap-2 mb-2">
         <GithubMark size={14} className="text-lx-text-muted" />
-        <span className="prop-label">GitHub</span>
+        <span className="prop-label">GitHub Issues</span>
         {githubs.length > 0 && !flowOpen && (
           <button
             type="button"

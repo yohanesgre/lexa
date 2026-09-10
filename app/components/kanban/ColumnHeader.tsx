@@ -121,7 +121,7 @@ export function ColumnHeader({ slug, column, taskCount, wipLimit, wipFlash = fal
             </button>
             <button type="button" className="menu-item" onClick={() => setIsEditOpen(true)}>
               <SlidersHorizontal size={14} />
-              Settings
+              Edit column
             </button>
             <div className="menu-separator" />
             <button type="button" className="menu-item danger" onClick={() => setDeleteConfirm(true)}>
@@ -142,6 +142,7 @@ export function ColumnHeader({ slug, column, taskCount, wipLimit, wipFlash = fal
         column={column}
         isOpen={isEditOpen}
         onClose={() => setIsEditOpen(false)}
+        onDelete={() => { setIsEditOpen(false); setDeleteConfirm(true); }}
         onSubmit={(input) => {
           updateColumn.mutate({
             id: column.id,

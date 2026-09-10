@@ -59,7 +59,7 @@ function HearthUsageRoute() {
         </div>
       ) : null}
 
-      {usageLoading ? <div className="text-sm color-muted mt-2">Loading…</div> : <UsageKpiCards summary={data?.summary} />}
+      <UsageKpiCards summary={data?.summary} />
 
       <section className="card-panel mt-4">
         <div className="flex items-center justify-between mb-3">

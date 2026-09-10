@@ -19,7 +19,7 @@ function resolveEffectiveMilestone(milestoneParam: string | null, defaultMilesto
 
 export interface BoardPageProps {
   slug: string;
-  search: { task?: string | undefined; milestone?: string | undefined };
+  search: { task?: string | undefined; milestone?: string | undefined; swimlane?: string | undefined };
 }
 
 function BoardSkeleton() {
@@ -194,6 +194,7 @@ export function BoardPage({ slug, search }: BoardPageProps) {
         onOpenCreateTask={handleOpenCreateTask}
         onDelete={handleDelete}
         selectedTaskId={selectedTaskId}
+        initialSwimlaneId={search.swimlane}
         milestoneId={effectiveMilestone}
         onMilestoneChange={handleMilestoneChange}
       />

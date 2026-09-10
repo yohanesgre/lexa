@@ -95,8 +95,10 @@ export function SharedWikiPage({ tree, token, pageId, onSelectPage }: { tree: Sh
   }
 
   const byId = new Map<string, SharedPageNode>();
+  const pageIds = new Map<string, string>();
   const walk = (node: SharedPageNode) => {
     byId.set(node.id, node);
+    pageIds.set(node.slug, node.id);
     node.children.forEach(walk);
   };
   walk(tree.root);
@@ -207,7 +209,7 @@ export function SharedWikiPage({ tree, token, pageId, onSelectPage }: { tree: Sh
         <main style={{ flex: 1, minWidth: 0, padding: "24px 24px 32px" }}>
           <div className="wiki-prose">
             <h1>{current.title}</h1>
-            <div>{renderDoc(doc, "wiki")}</div>
+            <div>{renderDoc(doc, "wiki", undefined, { token, pageIds })}</div>
 
             <div style={{ marginTop: 32, paddingTop: 16, borderTop: "1px solid var(--lx-border-subtle)" }}>
               <span className="font-micro text-2xs text-lx-text-muted uppercase tracking-[0.04em]">

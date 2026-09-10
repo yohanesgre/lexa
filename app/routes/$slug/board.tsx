@@ -3,9 +3,10 @@ import { BoardPage } from "../../components/kanban/BoardPage";
 import { getBoard } from "../../lib/api";
 
 export const Route = createFileRoute("/$slug/board")({
-  validateSearch: (search: Record<string, unknown>): { task?: string | undefined; milestone?: string | undefined } => ({
+  validateSearch: (search: Record<string, unknown>): { task?: string | undefined; milestone?: string | undefined; swimlane?: string | undefined } => ({
     task: typeof search.task === "string" ? search.task : undefined,
     milestone: typeof search.milestone === "string" ? search.milestone : undefined,
+    swimlane: typeof search.swimlane === "string" && search.swimlane.length > 0 ? search.swimlane : undefined,
   }),
   // The board is the most interactive surface (DnD, TipTap) — keep the DOM
   // client-rendered, but still prefetch + hydrate the board data server-side

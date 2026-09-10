@@ -655,6 +655,20 @@
     border-color: var(--lx-border-subtle);
     box-shadow: none;
   }
+
+  /* Archived tag (inline chip on archived cards) */
+  .archived-tag {
+    font-size: 10px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--lx-text-muted);
+    border: 1px solid var(--lx-border-subtle);
+    border-radius: 4px;
+    padding: 1px 6px;
+    white-space: nowrap;
+  }
+
   .kanban-card.card-enter {
     animation: lx-card-enter 200ms var(--lx-ease-out);
   }

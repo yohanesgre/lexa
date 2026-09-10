@@ -319,6 +319,15 @@ export function SwimlaneHeader({ slug, lane, count, collapsed = false, onToggle,
         )}
         <SwimlaneDescInline lane={lane} collapsed={collapsed} onOpenDesc={() => setIsDescOpen(true)} />
         <span className="flex-1" />
+        {!!lane.archivedAt && (
+          <button
+            type="button"
+            className="btn btn-ghost btn-sm"
+            onClick={(e) => { e.stopPropagation(); restoreSwimlane.mutate({ id: lane.id }); }}
+          >
+            Restore
+          </button>
+        )}
         {(onToggle || !!lane.archivedAt) && (
           <SwimlaneActionsMenu
             lane={lane}

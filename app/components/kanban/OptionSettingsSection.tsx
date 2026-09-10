@@ -4,7 +4,12 @@ import { SortableContext, useSortable, verticalListSortingStrategy } from "@dnd-
 import { CSS } from "@dnd-kit/utilities";
 import { cn } from "../ui/cn";
 import { DragHandleTd } from "./DragHandle";
+import { OPTION_COLORS } from "../../lib/option-colors";
 import type { FieldOption } from "../../../shared/types";
+
+function colorName(color: string): string {
+  return OPTION_COLORS.find((c) => c.value.toUpperCase() === color.toUpperCase())?.label ?? color;
+}
 
 function SortableRow({ id, className, children }: { id: string; className?: string | undefined; children: React.ReactNode }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id });
@@ -21,7 +26,7 @@ function SortableRow({ id, className, children }: { id: string; className?: stri
   );
 }
 
-export function OptionSettingsSection({ kind, title, description, options, sensors, onDragEnd, onEdit, onDelete, onAdd }: {
+export function OptionSettingsSection({ kind, title, description, options, sensors, onDragEnd, onEdit, onDelete, onAdd, inUseIds }: {
   kind: "priority" | "type";
   title: string;
   description: string;
@@ -31,6 +36,7 @@ export function OptionSettingsSection({ kind, title, description, options, senso
   onEdit: (opt: FieldOption) => void;
   onDelete: (opt: FieldOption) => void;
   onAdd: () => void;
+  inUseIds?: Set<string> | undefined;
 }) {
   return (
     <section className="mb-8">
@@ -59,13 +65,20 @@ export function OptionSettingsSection({ kind, title, description, options, senso
                       <td className="py-2.5 px-3">
                         <span className="inline-flex items-center gap-2">
                           <span className="color-swatch" style={{ background: opt.color }} />
-                          <span className="text-xs text-lx-text-secondary">{opt.color}</span>
+                          <span className="text-xs text-lx-text-secondary">{colorName(opt.color)}</span>
                         </span>
                       </td>
                       <td className="py-2.5 px-3">
                         <div className="flex items-center gap-3">
                           <button type="button" className="btn btn-ghost h-7 px-2.5 text-xs" onClick={() => onEdit(opt)} aria-label={`Edit ${kind}`}>Edit</button>
-                          <button type="button" className="btn btn-danger h-7 w-7 p-0 flex items-center justify-center" onClick={() => onDelete(opt)} aria-label={`Delete ${kind}`}>
+                          <button
+                            type="button"
+                            className="btn btn-danger h-7 w-7 p-0 flex items-center justify-center"
+                            onClick={() => onDelete(opt)}
+                            aria-label={`Delete ${kind}`}
+                            disabled={inUseIds?.has(opt.id)}
+                            title={inUseIds?.has(opt.id) ? "In use by tasks — reassign tasks first" : undefined}
+                          >
                             <svg width={12} height={12} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6" /></svg>
                           </button>
                         </div>

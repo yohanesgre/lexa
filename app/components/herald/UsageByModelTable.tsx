@@ -36,6 +36,21 @@ function ErrorRow({ onRetry }: { onRetry?: (() => void) | undefined }) {
 }
 
 function ModelRow({ row }: { row: HeraldByModelRow }) {
+  const zeroCalls = row.calls === 0;
+  if (zeroCalls) {
+    return (
+      <tr>
+        <td className="font-mono text-xs color-muted" style={{ fontStyle: "italic" }}>{row.model}</td>
+        <td className="font-mono text-xs color-muted" style={{ textAlign: "right" }}>—</td>
+        <td className="font-mono text-xs color-muted" style={{ textAlign: "right" }}>—</td>
+        <td className="font-mono text-xs color-muted" style={{ textAlign: "right" }}>—</td>
+        <td className="font-mono text-xs color-muted" style={{ textAlign: "right" }}>0</td>
+        <td style={{ textAlign: "right" }}>
+          <span className="font-mono text-xs color-muted">—</span>
+        </td>
+      </tr>
+    );
+  }
   return (
     <tr>
       <td className="font-mono text-xs weight-500 color-primary">{row.model}</td>
@@ -82,7 +97,10 @@ function TableBody({ state, byModel, showHint, hasFilters, onRetry }: {
 }) {
   if (state === "loading") return <LoadingRow />;
   if (state === "error") return <ErrorRow onRetry={onRetry} />;
-  if (state === "data") return <>{byModel.map((r) => <ModelRow key={r.model} row={r} />)}</>;
+  if (state === "data") {
+    const sorted = [...byModel].sort((a, b) => b.tokens - a.tokens);
+    return <>{sorted.map((r) => <ModelRow key={r.model} row={r} />)}</>;
+  }
   return <EmptyRow showHint={showHint} hasFilters={hasFilters} onRetry={onRetry} />;
 }
 
@@ -111,12 +129,12 @@ export function UsageByModelTable({
         <table className="settings-table settings-table--herald-usage" style={{ width: "100%", tableLayout: "fixed" as const }}>
           <thead>
             <tr>
-              <th style={{ width: "34%" }}>Model</th>
-              <th style={{ width: "12%", textAlign: "right", whiteSpace: "nowrap" as const }}>Tokens</th>
-              <th style={{ width: "11%", textAlign: "right", whiteSpace: "nowrap" as const }}>Cost</th>
-              <th style={{ width: "14.5%", textAlign: "right", whiteSpace: "nowrap" as const }}>Avg latency</th>
-              <th style={{ width: "11%", textAlign: "right", whiteSpace: "nowrap" as const }}>Calls</th>
-              <th style={{ width: "14.5%", textAlign: "right", whiteSpace: "nowrap" as const }}>Error rate</th>
+              <th style={{ width: "auto" }}>Model</th>
+              <th style={{ width: 110, textAlign: "right", whiteSpace: "nowrap" as const }}>Tokens</th>
+              <th style={{ width: 110, textAlign: "right", whiteSpace: "nowrap" as const }}>Cost</th>
+              <th style={{ width: 110, textAlign: "right", whiteSpace: "nowrap" as const }}>Avg latency</th>
+              <th style={{ width: 80, textAlign: "right", whiteSpace: "nowrap" as const }}>Calls</th>
+              <th style={{ width: 90, textAlign: "right", whiteSpace: "nowrap" as const }}>Error rate</th>
             </tr>
           </thead>
           <tbody>

@@ -14,7 +14,7 @@ import type { RouterContext } from "../router";
 // Public/auth surfaces — everything else requires a session. The guard runs
 // on the server too (SSR cookie forwarding in getSession, try/catch inside);
 // a missing/invalid session bounces to /login with the target remembered.
-const PUBLIC_PATHS = new Set(["/login", "/set-password", "/invite", "/setup"]);
+const PUBLIC_PATHS = new Set(["/login", "/set-password", "/invite", "/setup", "/device-login"]);
 
 // Public wiki share reads: the token IS the credential (server enforces it
 // per-request) — no session required. Prefix match because the token is a

@@ -3,8 +3,6 @@ import { Send, Square } from "lucide-react";
 import { acceptImageFiles, type HeraldImage } from "../../lib/herald-image";
 import { useMentionTokens } from "../../lib/useMentionTokens";
 import { HeraldImageAttach } from "../hearth/herald/HeraldImageAttach";
-import { EffortPicker } from "./EffortPicker";
-import type { HeraldReasoningEffort } from "../../../shared/herald";
 
 const CHAT_CAPS = { maxCount: 3, maxTotalBytes: Math.floor(1.5 * 1024 * 1024) };
 const ATTACH_DISABLED_TITLE_GLOBAL = "Images are disabled — configure vision in Project Settings → Herald.";
@@ -77,10 +75,6 @@ function ComposerFooter({
   images,
   setImages,
   attachDisabled,
-  isMobileComposer,
-  effort,
-  projectEffort,
-  onEffortChange,
   onAbort,
   onSend,
   canSend,
@@ -91,10 +85,6 @@ function ComposerFooter({
   images: HeraldImage[];
   setImages: (images: HeraldImage[]) => void;
   attachDisabled: boolean;
-  isMobileComposer: boolean;
-  effort: HeraldReasoningEffort | "";
-  projectEffort: HeraldReasoningEffort | null | undefined;
-  onEffortChange: (e: HeraldReasoningEffort | "") => void;
   onAbort: () => void;
   onSend: () => void;
   canSend: boolean;
@@ -133,13 +123,10 @@ function ComposerFooter({
         <HeraldImageAttach images={images} onChange={setImages} caps={CHAT_CAPS} hint="" compact disabled={attachDisabled} disabledTitle={ATTACH_DISABLED_TITLE_GLOBAL} />
         <span className="font-micro text-2xs text-lx-text-muted uppercase tracking-[0.04em]">≤3 images · ≤1.5MB total</span>
       </div>
-      <div className="flex items-center gap-2">
-        <EffortPicker effort={effort} projectEffort={projectEffort ?? null} disabled={streaming} align={isMobileComposer ? "up" : "down"} onChange={onEffortChange} />
-        <button type="button" className="btn btn-primary btn-sm" disabled={!canSend} onClick={onSend}>
-          Send
-          <Send size={12} strokeWidth={1.5} />
-        </button>
-      </div>
+      <button type="button" className="btn btn-primary btn-sm" style={{ marginLeft: "auto" }} disabled={!canSend} onClick={onSend}>
+        Send
+        <Send size={12} strokeWidth={1.5} />
+      </button>
     </>
   );
 }
@@ -151,10 +138,6 @@ export const HeraldChatComposer = memo(function HeraldChatComposer({
   suspendedLock,
   suspendTally,
   attachDisabled,
-  isMobileComposer,
-  effort,
-  projectEffort,
-  onEffortChange,
   onSend,
   onAbort,
 }: {
@@ -164,10 +147,6 @@ export const HeraldChatComposer = memo(function HeraldChatComposer({
   suspendedLock: boolean;
   suspendTally: string;
   attachDisabled: boolean;
-  isMobileComposer: boolean;
-  effort: HeraldReasoningEffort | "";
-  projectEffort: HeraldReasoningEffort | null | undefined;
-  onEffortChange: (e: HeraldReasoningEffort | "") => void;
   onSend: (message: string, imageCount: number) => void;
   onAbort: () => void;
 }) {
@@ -234,10 +213,6 @@ export const HeraldChatComposer = memo(function HeraldChatComposer({
           images={images}
           setImages={setImages}
           attachDisabled={attachDisabled}
-          isMobileComposer={isMobileComposer}
-          effort={effort}
-          projectEffort={projectEffort}
-          onEffortChange={onEffortChange}
           onAbort={onAbort}
           onSend={handleSend}
           canSend={canSend}

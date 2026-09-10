@@ -1,6 +1,6 @@
 import { useCallback, useMemo, useRef, useState } from "react";
 import type { Attachment } from "../../shared/types";
-import { useTaskAttachments, useUploadAttachment, useDeleteAttachment } from "../lib/queries";
+import { useTaskAttachments, useUploadAttachment, useDeleteAttachment, useProjectMembers, useSession } from "../lib/queries";
 import { Menu } from "./ui/Menu";
 import { cn } from "./ui/cn";
 
@@ -107,6 +107,12 @@ export function AttachmentsPanel({ slug, taskId }: AttachmentsPanelProps) {
   const { data: attachments } = useTaskAttachments(slug, taskId);
   const upload = useUploadAttachment(slug, "task", taskId);
   const remove = useDeleteAttachment(slug, "task", taskId);
+  const { data: session } = useSession();
+  const members = useProjectMembers(slug);
+  const currentUserId = session?.user?.id ?? null;
+  const currentRole: string | null = members.data?.find((m) => m.email === session?.user?.email)?.role ?? null;
+  // Delete is uploader- or project-admin-only (task-detail-attachments.html:271).
+  const canDelete = (a: Attachment) => currentRole === "admin" || (currentUserId !== null && a.uploadedBy === currentUserId);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [dragActive, setDragActive] = useState(false);
   const [uploads, setUploads] = useState<UploadRow[]>([]);
@@ -225,35 +231,52 @@ export function AttachmentsPanel({ slug, taskId }: AttachmentsPanelProps) {
                 </span>
               </div>
             </div>
-            <Menu
-              trigger={({ open, toggle }) => (
-                <button
-                  type="button"
-                  className={cn("icon-btn", open && "active")}
-                  title="More actions"
-                  aria-label={`Actions for ${a.filename}`}
-                  onClick={toggle}
-                >
-                  <KebabIcon />
-                </button>
-              )}
-            >
-              <a href={attachmentUrl(a)} target="_blank" rel="noreferrer" className="menu-item" role="menuitem">
-                <DownloadIcon />
-                Download
-              </a>
-              <div className="menu-separator" />
-              <button
-                type="button"
-                className="menu-item danger"
-                role="menuitem"
-                disabled={remove.isPending}
-                onClick={() => remove.mutateAsync(a.id).catch(() => {})}
+            {previewable ? (
+              <Menu
+                trigger={({ open, toggle }) => (
+                  <button
+                    type="button"
+                    className={cn("icon-btn", open && "active")}
+                    title="More actions"
+                    aria-label={`Actions for ${a.filename}`}
+                    onClick={toggle}
+                  >
+                    <KebabIcon />
+                  </button>
+                )}
               >
-                <TrashIconSmall />
-                Delete
-              </button>
-            </Menu>
+                <a href={attachmentUrl(a)} target="_blank" rel="noreferrer" className="menu-item" role="menuitem">
+                  <DownloadIcon />
+                  Download
+                </a>
+                {canDelete(a) && (
+                  <>
+                    <div className="menu-separator" />
+                    <button
+                      type="button"
+                      className="menu-item danger"
+                      role="menuitem"
+                      disabled={remove.isPending}
+                      onClick={() => remove.mutateAsync(a.id).catch(() => {})}
+                    >
+                      <TrashIconSmall />
+                      Delete
+                    </button>
+                  </>
+                )}
+              </Menu>
+            ) : (
+              <a
+                href={attachmentUrl(a)}
+                target="_blank"
+                rel="noreferrer"
+                className="icon-btn"
+                title="Download"
+                aria-label={`Download ${a.filename}`}
+              >
+                <DownloadIcon />
+              </a>
+            )}
           </div>
         );
       })}

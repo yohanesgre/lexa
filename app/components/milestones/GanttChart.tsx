@@ -265,6 +265,7 @@ export function GanttChart({ lanes, milestones, today, onRescheduleLane, onResch
   };
 
   const activeMilestones = milestones.filter((m) => !m.archivedAt && m.dueAt);
+  const milestoneNameById = useMemo(() => new Map(milestones.map((m) => [m.id, m.name])), [milestones]);
   const looseLanes = lanes.filter((l) => !l.lane.archivedAt && !l.lane.milestoneId && l.lane.kind === "sprint" && (l.lane.startAt || l.lane.dueAt));
   const backlogLanes = lanes.filter((l) => l.lane.kind === "backlog");
   const hasCanvasItems = lanes.some((l) => !l.lane.archivedAt && (l.lane.startAt || l.lane.dueAt)) || activeMilestones.length > 0;
@@ -333,6 +334,7 @@ export function GanttChart({ lanes, milestones, today, onRescheduleLane, onResch
           sprintPlan={sprintPlan}
           barFor={barFor}
           milestoneDue={milestoneDue}
+          milestoneNames={milestoneNameById}
           onToggle={toggleGroup}
           onMarkerPointerDown={(e, id) => beginDrag(e, id, "milestone")}
           onMarkerPointerMove={onPointerMove}
@@ -347,7 +349,7 @@ export function GanttChart({ lanes, milestones, today, onRescheduleLane, onResch
   );
 }
 
-function TimelineCanvas({ canvasRef, guidelineXs, milestones, lanes, looseLanes, backlogLanes, collapsedGroups, gridCols, groupProps, axisStart, to, today, sprintPlan, barFor, milestoneDue, onToggle, onMarkerPointerDown, onMarkerPointerMove, onMarkerPointerUp, onMarkerClick, isJustDragged, onSprintPointerDown, sprintRowProps }: {
+function TimelineCanvas({ canvasRef, guidelineXs, milestones, lanes, looseLanes, backlogLanes, collapsedGroups, gridCols, groupProps, axisStart, to, today, sprintPlan, barFor, milestoneDue, milestoneNames, onToggle, onMarkerPointerDown, onMarkerPointerMove, onMarkerPointerUp, onMarkerClick, isJustDragged, onSprintPointerDown, sprintRowProps }: {
   canvasRef: React.RefObject<HTMLDivElement | null>;
   guidelineXs: { left: number; bottom: number }[];
   milestones: Milestone[];
@@ -363,6 +365,7 @@ function TimelineCanvas({ canvasRef, guidelineXs, milestones, lanes, looseLanes,
   sprintPlan: TimelineLane[];
   barFor: (laneId: string) => { startAt: string | null; dueAt: string | null };
   milestoneDue: (m: Milestone) => string | null;
+  milestoneNames: Map<string, string>;
   onToggle: (id: string) => void;
   onMarkerPointerDown: (e: React.PointerEvent, id: string) => void;
   onMarkerPointerMove: (e: React.PointerEvent) => void;
@@ -400,6 +403,7 @@ function TimelineCanvas({ canvasRef, guidelineXs, milestones, lanes, looseLanes,
         onOpenBoard={sprintRowProps.onOpenBoard}
         isJustDragged={isJustDragged}
         gridCols={gridCols}
+        milestoneName={t.lane.milestoneId ? milestoneNames.get(t.lane.milestoneId) : undefined}
       />
     );
   };
@@ -595,7 +599,7 @@ function SprintDueMarker({ dueAt, axisStart, to }: { dueAt: string; axisStart: D
   );
 }
 
-function SprintRow({ t, axisStart, to, today, bar, striped, dragging, onPointerDown, onPointerMove, onPointerUp, onOpenBoard, isJustDragged, gridCols }: {
+function SprintRow({ t, axisStart, to, today, bar, striped, dragging, onPointerDown, onPointerMove, onPointerUp, onOpenBoard, isJustDragged, gridCols, milestoneName }: {
   t: TimelineLane;
   axisStart: Date;
   to: Date;
@@ -609,8 +613,10 @@ function SprintRow({ t, axisStart, to, today, bar, striped, dragging, onPointerD
   onOpenBoard: (laneId: string) => void;
   isJustDragged: () => boolean;
   gridCols: string;
+  milestoneName?: string | undefined;
 }) {
   const { startAt, dueAt } = bar;
+  const [hovered, setHovered] = useState(false);
 
   let body: React.ReactNode = null;
   if (startAt && dueAt) {
@@ -622,6 +628,7 @@ function SprintRow({ t, axisStart, to, today, bar, striped, dragging, onPointerD
   }
 
   const dateLabel = ganttDateLabel(startAt, dueAt);
+  const barLeft = startAt ? xForDay(clampDate(parseDay(startAt), axisStart, to), axisStart) : 0;
 
   return (
     <div className={cn("tl-row", striped && "striped")} style={{ gridTemplateColumns: gridCols }}>
@@ -629,8 +636,20 @@ function SprintRow({ t, axisStart, to, today, bar, striped, dragging, onPointerD
         {t.lane.name}
         {dateLabel && <span className="sl-dates" style={{ marginLeft: 8, fontFamily: "var(--lx-font-micro)", fontSize: 11, color: "var(--lx-text-secondary)" }}>{dateLabel}</span>}
       </div>
-      <div className="tl-lane" style={{ userSelect: dragging ? "none" : undefined }}>
+      <div
+        className="tl-lane"
+        style={{ userSelect: dragging ? "none" : undefined }}
+        onMouseEnter={() => setHovered(true)}
+        onMouseLeave={() => setHovered(false)}
+      >
         {body}
+        {hovered && startAt && (
+          <div className="tl-tooltip" style={{ top: -16, left: barLeft + 8 }}>
+            <div className="tt-title">{t.lane.name}</div>
+            <div className="tt-line">{dateLabel} · {t.done}/{t.total} done</div>
+            {milestoneName && <div className="tt-line">Milestone: {milestoneName}</div>}
+          </div>
+        )}
       </div>
     </div>
   );
