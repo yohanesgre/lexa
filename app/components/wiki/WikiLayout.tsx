@@ -6,7 +6,7 @@ import { hasMatchMedia, isNarrowViewport } from "../../lib/viewport";
 import { useWikiPages, useDeleteWikiPage } from "../../lib/queries";
 import type { WikiPageMeta } from "../../../shared/types";
 import { NewPageModal } from "./NewPageModal";
-import { WikiPageContextMenu } from "./WikiPageContextMenu";
+import { WikiPageContextMenu, MovePageModal } from "./WikiPageContextMenu";
 import { RenamePageModal } from "./RenamePageModal";
 import { WikiPageSidebar } from "./WikiPageSidebar";
 import { WikiDeletePageDialog } from "./WikiDeletePageDialog";
@@ -36,6 +36,7 @@ function useWikiPageContextMenu(
   actions: {
     onAddChild: (pageId: string) => void;
     onRename: (page: WikiPageMeta) => void;
+    onMove: (page: WikiPageMeta) => void;
     onDelete: (page: WikiPageMeta) => void;
   }
 ) {
@@ -92,6 +93,14 @@ function useWikiPageContextMenu(
     actions.onRename(page);
   }, [menu, pages, actions]);
 
+  const move = useCallback(() => {
+    if (!menu || !pages) return;
+    const page = pages.find((p) => p.id === menu.pageId);
+    if (!page) return;
+    setMenu(null);
+    actions.onMove(page);
+  }, [menu, pages, actions]);
+
   const remove = useCallback(() => {
     if (!menu || !pages) return;
     const page = pages.find((p) => p.id === menu.pageId);
@@ -99,7 +108,7 @@ function useWikiPageContextMenu(
     setMenu(null);
   }, [menu, pages, actions]);
 
-  return { menu, open, close, addChild, rename, remove };
+  return { menu, open, close, addChild, rename, move, remove };
 }
 
 function SidebarRail({ onExpand }: { onExpand: () => void }) {
@@ -131,6 +140,10 @@ export function WikiLayout({ slug, activePageSlug, children }: WikiLayoutProps) 
     isOpen: false,
     page: null,
   });
+  const [moveModal, setMoveModal] = useState<{ isOpen: boolean; page: WikiPageMeta | null }>({
+    isOpen: false,
+    page: null,
+  });
   const [deleteConfirm, setDeleteConfirm] = useState<WikiPageMeta | null>(null);
 
   const openNewPage = useCallback(
@@ -150,6 +163,7 @@ export function WikiLayout({ slug, activePageSlug, children }: WikiLayoutProps) 
   const contextMenu = useWikiPageContextMenu(pages, {
     onAddChild: (pageId) => openNewPage(pageId),
     onRename: (page) => setRenameModal({ isOpen: true, page }),
+    onMove: (page) => setMoveModal({ isOpen: true, page }),
     onDelete: (page) => setDeleteConfirm(page),
   });
 
@@ -272,6 +286,7 @@ export function WikiLayout({ slug, activePageSlug, children }: WikiLayoutProps) 
           y={contextMenu.menu.y}
           onAddChild={contextMenu.addChild}
           onRename={contextMenu.rename}
+          onMove={contextMenu.move}
           onDelete={contextMenu.remove}
         />
       )}
@@ -294,6 +309,14 @@ export function WikiLayout({ slug, activePageSlug, children }: WikiLayoutProps) 
           onClose={() => setRenameModal({ isOpen: false, page: null })}
         />
       )}
+
+      <MovePageModal
+        slug={slug}
+        isOpen={moveModal.isOpen}
+        page={moveModal.page}
+        pages={pages ?? []}
+        onClose={() => setMoveModal({ isOpen: false, page: null })}
+      />
 
       {deleteConfirm && (
         <WikiDeletePageDialog

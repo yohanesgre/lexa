@@ -140,14 +140,18 @@ export function WikiPageSidebar({
   return (
     <aside className="wiki-sidebar wiki-sidebar-open">
       <div className="sidebar-header">
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <WikiSearchBox
-            query={query}
-            focused={searchFocused}
-            onQueryChange={onQueryChange}
-            onFocusedChange={onSearchFocusedChange}
-          />
-        </div>
+        {state === "empty" ? (
+          <div style={{ flex: 1 }} />
+        ) : (
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <WikiSearchBox
+              query={query}
+              focused={searchFocused}
+              onQueryChange={onQueryChange}
+              onFocusedChange={onSearchFocusedChange}
+            />
+          </div>
+        )}
         <button
           type="button"
           className="w-7 h-7 p-0 flex items-center justify-center text-lx-text-secondary hover:text-lx-text-primary flex-shrink-0 rounded"

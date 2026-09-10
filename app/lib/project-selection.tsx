@@ -6,7 +6,7 @@ const STORAGE_KEY = "lexa:selectedProject";
 
 // Auth/setup surfaces render without app chrome and never have a session —
 // fetching the project list there would 401 (and retry-spam the console).
-const PUBLIC_PATHS = new Set(["/login", "/set-password", "/invite", "/setup"]);
+const PUBLIC_PATHS = new Set(["/login", "/set-password", "/invite", "/setup", "/device-login"]);
 // Public wiki share reads: token-authenticated, no session — same 401 logic.
 const PUBLIC_PREFIXES = ["/share/"];
 

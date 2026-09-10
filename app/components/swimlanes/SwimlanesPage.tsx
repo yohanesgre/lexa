@@ -76,6 +76,10 @@ function activeLaneCount(lanes: Swimlane[]) {
   return lanes.filter((l) => !l.archivedAt).length;
 }
 
+function laneTaskCount(board: NonNullable<ReturnType<typeof useBoard>["data"]> | undefined, laneId: string) {
+  return board ? board.tasks.filter((t) => t.swimlaneId === laneId).length : 0;
+}
+
 function submitSwimlaneForm<TInput extends { description?: string | null | undefined }>(
   editing: Swimlane | null,
   input: TInput,
@@ -240,6 +244,7 @@ function LaneRow({ lane, board, isAdmin, onEdit, onArchive, onRestore, onDelete 
   onDelete: () => void;
 }) {
   const p = sprintProgress(board, lane.id);
+  const taskCount = board.tasks.filter((t) => t.swimlaneId === lane.id).length;
   const dateLabel = lane.startAt && lane.dueAt
     ? `${shortDate(lane.startAt)} → ${shortDate(lane.dueAt)}`
     : lane.startAt
@@ -258,7 +263,15 @@ function LaneRow({ lane, board, isAdmin, onEdit, onArchive, onRestore, onDelete 
         ) : (
           <span className="sl-dates" style={{ color: "var(--lx-text-muted)" }}>no dates set</span>
         )}
-        {!lane.archivedAt && p.total > 0 && <SprintProgress done={p.done} total={p.total} />}
+        {p.total > 0 && (
+          lane.archivedAt ? (
+            <span className={cn("lane-progress", p.done === p.total ? "lane-progress-done" : "lane-progress-running")}>
+              {p.done}/{p.total} done
+            </span>
+          ) : (
+            <SprintProgress done={p.done} total={p.total} />
+          )
+        )}
       </div>
       {lane.description && <div className="sl-row-desc">{lane.description}</div>}
       <span className="sl-row-actions">
@@ -278,7 +291,16 @@ function LaneRow({ lane, board, isAdmin, onEdit, onArchive, onRestore, onDelete 
           {isAdmin && lane.archivedAt && (
             <>
               <button type="button" className="btn btn-ghost btn-sm" onClick={onRestore}>Restore</button>
-              <button type="button" className="btn btn-ghost btn-sm" style={{ color: "var(--lx-text-danger)" }} onClick={onDelete}>Delete</button>
+              <button
+                type="button"
+                className="btn btn-ghost btn-sm"
+                style={{ color: "var(--lx-text-danger)" }}
+                disabled={taskCount > 0}
+                title={taskCount > 0 ? "409 HAS_CHILDREN — reassign or remove tasks first" : undefined}
+                onClick={onDelete}
+              >
+                Delete
+              </button>
             </>
           )}
         </span>
@@ -443,6 +465,7 @@ export function SwimlanesPage({ slug }: { slug: string }) {
       {deleteTarget && (
         <DeleteSwimlaneDialog
           target={deleteTarget}
+          taskCount={laneTaskCount(board, deleteTarget.id)}
           onClose={() => setDeleteTarget(null)}
           onDelete={() => {
             deleteSwimlane.mutate({ id: deleteTarget.id });

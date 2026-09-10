@@ -33,11 +33,12 @@ interface KanbanBoardProps {
   onOpenCreateTask?: (columnId: string, swimlaneId?: string) => void;
   onDelete?: (id: string) => void;
   selectedTaskId?: string | null | undefined;
+  initialSwimlaneId?: string | undefined;
   milestoneId?: string | null | undefined;
   onMilestoneChange?: (id: string | null) => void;
 }
 
-export function KanbanBoard({ board, showArchived = false, onToggleArchived, onMoveTask, onSelectTask, onOpenCreateTask, onDelete, selectedTaskId = null, milestoneId = null, onMilestoneChange }: KanbanBoardProps) {
+export function KanbanBoard({ board, showArchived = false, onToggleArchived, onMoveTask, onSelectTask, onOpenCreateTask, onDelete, selectedTaskId = null, initialSwimlaneId, milestoneId = null, onMilestoneChange }: KanbanBoardProps) {
   const [localTasks, dispatch] = useReducer(tasksReducer, board.tasks);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [shakeTaskId, setShakeTaskId] = useState<string | null>(null);
@@ -61,7 +62,11 @@ export function KanbanBoard({ board, showArchived = false, onToggleArchived, onM
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set());
   const [collapsedParents, setCollapsedParents] = useState<ReadonlySet<string>>(new Set());
   const { childrenByParent, blockedBy } = useLinkMaps(board);
-  const [filters, setFilters] = useState<FilterState>(() => emptyFilters());
+  const [filters, setFilters] = useState<FilterState>(() => {
+    const f = emptyFilters();
+    if (initialSwimlaneId) f.swimlanes.add(initialSwimlaneId);
+    return f;
+  });
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isColumnCreateOpen, setIsColumnCreateOpen] = useState(false);
   const createColumn = useCreateColumn(board.project.slug);

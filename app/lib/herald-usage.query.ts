@@ -131,16 +131,12 @@ export function usePutHeraldPrice() {
         body: JSON.stringify(input),
       }),
     onSuccess: (row) => {
-      qc.setQueryData<HeraldPriceRow[]>(["herald-prices"], (old) => {
-        if (!old) return [row];
-        const idx = old.findIndex((r) => r.model === row.model);
-        if (idx === -1) return [...old, row];
-        const next = [...old];
-        next[idx] = row;
-        return next;
+      qc.setQueryData<{ data: HeraldPriceRow[] }>(["herald-prices"], (old) => {
+        const rows = old?.data ?? [];
+        const idx = rows.findIndex((r) => r.model === row.model);
+        const next = idx === -1 ? [...rows, row] : rows.map((r, i) => (i === idx ? row : r));
+        return { data: next };
       });
-      qc.invalidateQueries({ queryKey: ["herald-usage"] });
-      qc.invalidateQueries({ queryKey: ["herald-usage-project"] });
     },
   });
 }

@@ -116,6 +116,34 @@ describe("GatewayHealthSection", () => {
     expect(screen.getByText("0")).toBeTruthy();
   });
 
+  it("renders the badge legend row and the health table modifier", async () => {
+    vi.stubGlobal("fetch", routeFetch((url) =>
+      url.endsWith("/health") ? (url.includes("p1") ? healthP1 : healthP2) : providers
+    ));
+    render(<GatewayHealthSection />, { wrapper: wrapper() });
+    await waitFor(() => expect(screen.getByText("Opencode Go")).toBeTruthy());
+    expect(screen.getByText("red · breaker tripped — gateway rejecting calls")).toBeTruthy();
+    expect(screen.getByText("amber · probing recovery")).toBeTruthy();
+    expect(screen.getByText("green · healthy")).toBeTruthy();
+    expect(document.querySelector("table.settings-table--herald-health")).toBeTruthy();
+    expect(screen.getByText("5").style.color).toBe("var(--lx-text-danger)");
+  });
+
+  it("Probe now probes the provider that needs attention", async () => {
+    const fetchMock = vi.fn().mockImplementation((url: string) => {
+      if (url.endsWith("/probe")) {
+        return Promise.resolve({ ok: true, json: async () => ({ ...healthP2, circuitState: "closed", failureCount: 0 }) });
+      }
+      return Promise.resolve({ ok: true, json: async () => (url.endsWith("/health") ? (url.includes("p1") ? healthP1 : healthP2) : providers) });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const user = userEvent.setup();
+    render(<GatewayHealthSection />, { wrapper: wrapper() });
+    await waitFor(() => expect(screen.getByText("Opencode Go")).toBeTruthy());
+    await user.click(screen.getByRole("button", { name: "Probe now" }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining("/p2/probe"), expect.objectContaining({ method: "POST" })));
+  });
+
   it("marks failed provider row error while others render", async () => {
     vi.stubGlobal("fetch", vi.fn().mockImplementation((url: string) => {
       if (url.endsWith("/health") && url.includes("p2")) {

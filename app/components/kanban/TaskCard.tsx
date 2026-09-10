@@ -160,6 +160,11 @@ export const TaskCard = memo(function TaskCard({ taskKey, title, priority, type,
           <span className={cn("card-due", due.overdue && "card-due-overdue")}>{due.text}</span>
         )}
         <div className="card-meta-spacer" />
+        {archived && (
+          <span className="text-[10px] font-semibold uppercase tracking-[0.05em] text-lx-text-muted border border-lx-border-subtle rounded px-1.5 py-px whitespace-nowrap">
+            Archived
+          </span>
+        )}
         <CardGithubIssues githubs={githubs} hasOutOfSync={hasOutOfSync} />
       </div>
     </div>

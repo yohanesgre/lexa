@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Link } from "@tanstack/react-router";
-import { Plus, Trash2 } from "lucide-react";
-import { useSession, useTeams, useTeamMembers, useAddTeamMember, useUpdateTeamMemberRole, useRemoveTeamMember, useTeamRuntimes, useWorkspaceMembers, useProjects } from "../../lib/queries";
+import { Trash2 } from "lucide-react";
+import { useSession, useTeams, useTeamMembers, useAddTeamMember, useUpdateTeamMemberRole, useRemoveTeamMember, useTeamRuntimes, useWorkspaceMembers, useDashboard } from "../../lib/queries";
 import { InlineDropdown } from "./SettingsSections";
 import { useTeamSelection } from "../../lib/team-selection";
 import { TeamSettingsRuntimesTable } from "./TeamRuntimesTable";
@@ -203,7 +203,6 @@ function TeamMembersSection({ teamId, isSuperadmin }: { teamId: string; isSupera
   const { data: workspaceMembers } = useWorkspaceMembers();
   const [query, setQuery] = useState("");
   const [showDropdown, setShowDropdown] = useState(false);
-  const [role, setRole] = useState<TeamMemberRole>("member");
   const [adding, setAdding] = useState<string | null>(null);
 
   const ownerCount = members.filter((m) => m.role === "owner").length;
@@ -211,9 +210,12 @@ function TeamMembersSection({ teamId, isSuperadmin }: { teamId: string; isSupera
     (u: WorkspaceMember) => !members.some((m) => m.userId === u.id) && (u.email.includes(query) || u.name.toLowerCase().includes(query.toLowerCase()))
   );
 
+  // New members default to "member"; the per-row role select (or PATCH) sets
+  // owner/admin after the fact — matches settings-team.html (single input +
+  // type-ahead, no inline role picker).
   const submitAdd = (email: string) => {
     setAdding(email);
-    addMember.mutate({ email, role }, {
+    addMember.mutate({ email, role: "member" }, {
       onSuccess: () => { setQuery(""); setShowDropdown(false); setAdding(null); },
       onError: () => setAdding(null),
     });
@@ -231,24 +233,16 @@ function TeamMembersSection({ teamId, isSuperadmin }: { teamId: string; isSupera
 
       <div className="flex items-start justify-between gap-4 mb-4 flex-wrap">
         <div style={{ position: "relative", minWidth: 280, flexShrink: 0 }}>
-          <div className="flex items-center gap-2">
-            <input
-              className="prop-input"
-              placeholder="Add member by email..."
-              value={query}
-              onChange={(e) => { setQuery(e.target.value); setShowDropdown(true); }}
-              onFocus={() => setShowDropdown(true)}
-              style={{ width: "100%" }}
-              aria-label="Add member by email"
-            />
-            <select className="prop-input" value={role} onChange={(e) => setRole(e.target.value as TeamMemberRole)} aria-label="Role" style={{ height: 32, fontSize: 12, width: 96, flexShrink: 0 }}>
-              {ROLES.map((r) => <option key={r} value={r}>{r}</option>)}
-            </select>
-            <button type="button" className="btn btn-primary" style={{ height: 32, padding: "0 12px", fontSize: 12, flexShrink: 0 }} disabled={!query.trim() || addMember.isPending} onClick={() => submitAdd(query.trim())}>
-              <Plus size={14} strokeWidth={1.5} />
-              Add
-            </button>
-          </div>
+          <input
+            className="prop-input"
+            placeholder="Add member by email..."
+            value={query}
+            onChange={(e) => { setQuery(e.target.value); setShowDropdown(true); }}
+            onFocus={() => setShowDropdown(true)}
+            onKeyDown={(e) => { if (e.key === "Enter" && query.trim() && !addMember.isPending) submitAdd(query.trim()); }}
+            style={{ width: "100%" }}
+            aria-label="Add member by email"
+          />
           {isSuperadmin && showDropdown && (
             <InlineDropdown
               items={suggestions.map((u) => ({ name: u.name, email: u.email }))}
@@ -317,10 +311,19 @@ function TeamMembersSection({ teamId, isSuperadmin }: { teamId: string; isSupera
   );
 }
 
+const HEALTH_LABEL: Record<"ok" | "approaching" | "exceeded", string> = {
+  ok: "ok",
+  approaching: "approaching",
+  exceeded: "needs attention",
+};
+
 // Projects: read-only list of this team's projects (unassigned = Global).
+// Health + Tasks come from the shared dashboard cache (ProjectHealth).
 function TeamProjectsSection({ teamId }: { teamId: string }) {
-  const { data: projects = [] } = useProjects();
-  const teamProjects = projects.filter((p) => (p as Project & { teamId?: string | null }).teamId === teamId);
+  const { data: dashboard } = useDashboard();
+  const teamProjects = (dashboard?.projects ?? []).filter(
+    (entry) => (entry.project as Project & { teamId?: string | null }).teamId === teamId
+  );
 
   return (
     <section className="mb-8">
@@ -331,18 +334,26 @@ function TeamProjectsSection({ teamId }: { teamId: string }) {
       <div className="card-panel" style={{ overflow: "hidden" }}>
         <table className="settings-table">
           <thead>
-            <tr><th>Project</th><th>Slug</th></tr>
+            <tr><th>Project</th><th>Slug</th><th>Health</th><th>Tasks</th></tr>
           </thead>
           <tbody>
             {teamProjects.length === 0 ? (
-              <tr><td colSpan={2} className="text-xs text-lx-text-muted text-center py-6">No projects in this team yet. Assignment happens in project settings (project switcher → Project settings → team control).</td></tr>
+              <tr><td colSpan={4} className="text-xs text-lx-text-muted text-center py-6">No projects in this team yet. Assignment happens in project settings (project switcher → Project settings → team control).</td></tr>
             ) : (
-              teamProjects.map((p) => (
-                <tr key={p.id}>
-                  <td><Link to="/$slug" params={{ slug: p.slug }} className="text-sm font-medium" style={{ color: "var(--lx-text-link)", textDecoration: "none" }}>{p.name}</Link></td>
-                  <td className="font-mono text-xs text-lx-text-secondary">{p.slug}</td>
-                </tr>
-              ))
+              teamProjects.map((entry) => {
+                const p = entry.project;
+                return (
+                  <tr key={p.id}>
+                    <td><Link to="/$slug" params={{ slug: p.slug }} className="text-sm font-medium" style={{ color: "var(--lx-text-link)", textDecoration: "none" }}>{p.name}</Link></td>
+                    <td className="font-mono text-xs text-lx-text-secondary">{p.slug}</td>
+                    <td>
+                      <span className={`health-dot health-dot-${entry.health}`} style={{ verticalAlign: "middle" }} />{" "}
+                      <span className="text-xs text-lx-text-secondary">{HEALTH_LABEL[entry.health]}</span>
+                    </td>
+                    <td className="text-xs text-lx-text-secondary">{String(entry.taskCount).padStart(3, "0")}</td>
+                  </tr>
+                );
+              })
             )}
           </tbody>
         </table>

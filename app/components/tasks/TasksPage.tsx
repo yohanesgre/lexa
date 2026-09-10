@@ -237,7 +237,9 @@ export function TasksPage({ slug, search }: TasksPageProps) {
   );
 
   const clearFilters = () => {
-    setFilters({ query: "", columnId: "", typeId: "", priorityId: "", assignee: "", swimlaneId: "", sortKey: "board" });
+    // Search + dropdowns only — the sort key and archived toggle are preserved
+    // (wireframes/src/tasks.html:234).
+    setFilters((s) => ({ ...s, query: "", columnId: "", typeId: "", priorityId: "", assignee: "", swimlaneId: "" }));
     navigate({ search: { swimlane: undefined }, replace: true } as never);
   };
 

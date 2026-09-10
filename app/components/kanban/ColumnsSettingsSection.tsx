@@ -4,6 +4,7 @@ import { SortableContext, useSortable, verticalListSortingStrategy } from "@dnd-
 import { CSS } from "@dnd-kit/utilities";
 import { cn } from "../ui/cn";
 import { DragHandleTd } from "./DragHandle";
+import { OPTION_COLORS } from "../../lib/option-colors";
 import type { Column } from "../../../shared/types";
 
 function SortableRow({ id, className, children }: { id: string; className?: string | undefined; children: React.ReactNode }) {
@@ -21,18 +22,25 @@ function SortableRow({ id, className, children }: { id: string; className?: stri
   );
 }
 
+function colorName(color: string): string {
+  return OPTION_COLORS.find((c) => c.value.toUpperCase() === color.toUpperCase())?.label ?? color;
+}
+
 function ColorSwatch({ color }: { color: string | null }) {
-  return color ? (
+  return (
     <span className="inline-flex items-center gap-2">
-      <span className="color-swatch" style={{ background: color }} />
-      <span className="text-xs text-lx-text-secondary">{color}</span>
+      <span
+        className="color-swatch"
+        style={color ? { background: color } : { background: "transparent", borderColor: "var(--lx-border-strong)" }}
+      />
+      <span className={cn("text-xs", color ? "text-lx-text-secondary" : "text-lx-text-muted")}>
+        {color ? colorName(color) : "None"}
+      </span>
     </span>
-  ) : (
-    <span className="text-xs text-lx-text-muted">—</span>
   );
 }
 
-const formatWipLimit = (limit: number | null) => (limit === null ? "—" : String(limit));
+const formatWipLimit = (limit: number | null) => (limit === null ? "—" : String(limit).padStart(3, "0"));
 const formatRequiredFields = (fields: string[]) => (fields.length === 0 ? "None" : fields.join(", "));
 
 export function ColumnsSettingsSection({ columns, sensors, onDragEnd, onEdit, onDelete, onAdd }: {

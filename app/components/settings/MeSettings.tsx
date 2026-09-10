@@ -88,7 +88,7 @@ function ProfileSection() {
   );
 }
 
-function PasswordSection() {
+export function PasswordSection() {
   const changePassword = useChangePassword();
   const [current, setCurrent] = useState("");
   const [next, setNext] = useState("");
@@ -137,7 +137,7 @@ function PasswordSection() {
           <TextInput id="pw-confirm" type="password" placeholder="••••••••••••" autoComplete="new-password" value={confirm} onChange={(v) => { setConfirm(v); setError(null); }} />
         </Field>
         {error && <div className="field-hint-danger mt-2">{error}</div>}
-        {success && <div className="field-hint mt-2" style={{ color: "var(--lx-text-success)" }}>Password updated. Other sessions stay valid — revoke them below.</div>}
+        {success && <div className="field-hint mt-2" style={{ color: "var(--lx-text-success)" }}>Password updated. All other sessions were signed out.</div>}
         <div className="flex justify-end mt-4">
           <button type="submit" className="btn btn-primary" disabled={!canSubmit || changePassword.isPending}>
             {changePassword.isPending ? "Updating…" : "Update password"}

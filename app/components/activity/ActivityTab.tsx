@@ -52,7 +52,7 @@ export function ActivityTab({ slug, taskId, isArchived }: ActivityTabProps) {
       )}
       {!isLoading && items.length === 0 ? (
         <div className="empty-box" style={{ padding: 24 }}>
-          <div className="text-sm font-medium text-lx-text-primary">No activity yet — be the first to comment</div>
+          <div className="text-sm font-medium text-lx-text-primary">No activity yet — be the first to comment.</div>
         </div>
       ) : (
         <ActivityTimeline

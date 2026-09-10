@@ -20,9 +20,8 @@ import {
   useDeleteColumn,
   useFieldConfig,
   useUpdateFieldConfig,
+  useBoard,
 } from "../../lib/queries";
-import { cn } from "../ui/cn";
-import { OPTION_COLORS } from "../../lib/option-colors";
 import { ColumnForm } from "./ColumnForm";
 import { OptionForm } from "./OptionForm";
 
@@ -31,18 +30,6 @@ interface KanbanSettingsModalProps {
   isOpen: boolean;
   onClose: () => void;
 }
-
-const formatRequiredFields = (fields: string[]) => (fields.length === 0 ? "—" : fields.join(", "));
-const formatWipLimit = (limit: number | null) => (limit === null ? "—" : String(limit).padStart(3, "0"));
-
-
-
-function colorName(color: string): string {
-  const name = OPTION_COLORS.find((c) => c.value.toUpperCase() === color.toUpperCase())?.label;
-  return name ?? color;
-}
-
-
 
 function ConfirmDeleteDialog({ title, body, onCancel, onConfirm }: { title: string; body: string; onCancel: () => void; onConfirm: () => void }) {
   return (
@@ -87,6 +74,7 @@ export function KanbanSettingsModal({ slug, isOpen, onClose }: KanbanSettingsMod
 function SettingsContent({ slug, onClose }: { slug: string; onClose: () => void }) {
   const { data: columns = [], isLoading: columnsLoading, isError: columnsError } = useColumns(slug);
   const { data: fieldConfig, isLoading: configLoading, isError: configError } = useFieldConfig(slug);
+  const { data: board } = useBoard(slug);
   const updateFieldConfig = useUpdateFieldConfig(slug);
 
   const createColumn = useCreateColumn(slug);
@@ -108,6 +96,9 @@ function SettingsContent({ slug, onClose }: { slug: string; onClose: () => void 
     };
     return { priorities: order(fieldConfig.priorities, optionOrder.priorities), types: order(fieldConfig.types, optionOrder.types) };
   }, [fieldConfig, optionOrder]);
+
+  const usedPriorityIds = useMemo(() => new Set((board?.tasks ?? []).map((t) => t.priority)), [board]);
+  const usedTypeIds = useMemo(() => new Set((board?.tasks ?? []).map((t) => t.type)), [board]);
 
   const handleOptionDragEnd = (event: DragEndEvent, kind: "priority" | "type") => {
     const ids = kind === "priority" ? optionOrder.priorities : optionOrder.types;
@@ -154,6 +145,8 @@ function SettingsContent({ slug, onClose }: { slug: string; onClose: () => void 
 
   const deleteOption = (kind: "priority" | "type", option: FieldOption) => {
     if (!fieldConfig) return;
+    const inUse = kind === "priority" ? usedPriorityIds.has(option.id) : usedTypeIds.has(option.id);
+    if (inUse) return;
     const list = kind === "priority" ? fieldConfig.priorities : fieldConfig.types;
     const next = list.filter((o) => o.id !== option.id);
     const full = kind === "priority"
@@ -192,6 +185,8 @@ function SettingsContent({ slug, onClose }: { slug: string; onClose: () => void 
 
   const isLoading = columnsLoading;
 
+  const editingColumn = columnForm.column ?? null;
+
   return (
     <>
       <button
@@ -229,26 +224,28 @@ function SettingsContent({ slug, onClose }: { slug: string; onClose: () => void 
                 <OptionSettingsSection
                   kind="priority"
                   title="Priorities"
-                  description="The priority options available on tasks in this project. First option is the create default."
+                  description="The priority options available on tasks in this project. Order defines the dropdown order; first option is the create default."
                   options={orderedOptions.priorities}
                   sensors={sensors}
                   onDragEnd={(e) => handleOptionDragEnd(e, "priority")}
                   onEdit={(opt) => setOptionForm({ kind: "priority", isOpen: true, option: opt })}
                   onDelete={(opt) => deleteOption("priority", opt)}
                   onAdd={() => setOptionForm({ kind: "priority", isOpen: true, option: null })}
+                  inUseIds={usedPriorityIds}
                 />
 
 
                 <OptionSettingsSection
                   kind="type"
                   title="Types"
-                  description="The type options available on tasks in this project. First option is the create default."
+                  description="The type options available on tasks in this project. Order defines the dropdown order; first option is the create default."
                   options={orderedOptions.types}
                   sensors={sensors}
                   onDragEnd={(e) => handleOptionDragEnd(e, "type")}
                   onEdit={(opt) => setOptionForm({ kind: "type", isOpen: true, option: opt })}
                   onDelete={(opt) => deleteOption("type", opt)}
                   onAdd={() => setOptionForm({ kind: "type", isOpen: true, option: null })}
+                  inUseIds={usedTypeIds}
                 />
 
               </>
@@ -275,6 +272,7 @@ function SettingsContent({ slug, onClose }: { slug: string; onClose: () => void 
         isOpen={columnForm.isOpen}
         zIndex={80}
         onClose={() => setColumnForm({ isOpen: false, column: null })}
+        onDelete={editingColumn ? () => { setColumnForm({ isOpen: false, column: null }); setDeleteColumnTarget(editingColumn); } : undefined}
         onSubmit={(input) => {
           if (columnForm.column) {
             updateColumn.mutate({

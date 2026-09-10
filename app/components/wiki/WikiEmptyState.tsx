@@ -37,7 +37,7 @@ export function WikiEmptyState({ onCreate }: { onCreate: () => void }) {
           No pages yet
         </h2>
         <p className="text-sm text-lx-text-secondary mb-4 leading-5">
-          The wiki is where design docs, combat formulas, and art direction live. Pages can be nested to mirror how your team thinks.
+          The wiki is where design docs, workflow formulas, and art direction live. Pages can be nested to mirror how your team thinks.
         </p>
         <button type="button" className="btn btn-primary" onClick={onCreate}>
           <Plus size={14} strokeWidth={1.5} />

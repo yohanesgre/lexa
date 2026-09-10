@@ -181,7 +181,19 @@ export function ChatComposerArea({
       <div className="chat-composer-inner">
         {/* Skill picker — collapsed by default to a one-line summary
             (skill name + chevron). Tapping expands the chip row. */}
-        <ChatSkillsPanel open={skillsPanelOpen} skillName={skillName} skills={skills} skillId={skillId} onToggle={onToggleSkills} onSkillChange={onSkillChange} />
+        <ChatSkillsPanel
+          open={skillsPanelOpen}
+          skillName={skillName}
+          skills={skills}
+          skillId={skillId}
+          effort={effort}
+          projectEffort={projectEffort}
+          onEffortChange={onEffortChange}
+          disabled={streaming}
+          isMobileComposer={isMobileComposer}
+          onToggle={onToggleSkills}
+          onSkillChange={onSkillChange}
+        />
 
         {engineGate && (
           <WarnBanner
@@ -203,10 +215,6 @@ export function ChatComposerArea({
           suspendedLock={suspendedLock}
           suspendTally={suspendTally}
           attachDisabled={attachDisabled}
-          isMobileComposer={isMobileComposer}
-          effort={effort}
-          projectEffort={projectEffort}
-          onEffortChange={onEffortChange}
           onSend={onSend}
           onAbort={onAbort}
         />

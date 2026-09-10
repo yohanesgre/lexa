@@ -47,4 +47,12 @@ describe("PriceEditor", () => {
     const body = JSON.parse((init as RequestInit).body as string);
     expect(body).toMatchObject({ model: "m1", prompt_price: 3, completion_price: 15, cached_read_price: 0.3, cached_write_price: 3.75 });
   });
+
+  it("keeps the prices table and shows the loading state inside it", () => {
+    vi.stubGlobal("fetch", vi.fn().mockReturnValue(new Promise(() => {})));
+    const { container } = render(<PriceEditor byModel={[]} />, { wrapper: wrapper() });
+    expect(container.querySelector("table.settings-table--herald-prices")).toBeTruthy();
+    expect(screen.getByText("Loading prices…")).toBeTruthy();
+    expect(screen.queryByText("No models yet")).toBeNull();
+  });
 });

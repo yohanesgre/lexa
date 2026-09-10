@@ -3,7 +3,7 @@ import { useEffect } from "react";
 import { cn } from "../ui/cn";
 import { classifyLogLine } from "../../lib/hearth-log-line";
 import { parseApiDate } from "../../lib/date";
-import type { HearthTask, HearthTaskLog, Runtime } from "../../../shared/types";
+import type { HearthTask, HearthTaskLog, HearthTaskStatus, Runtime } from "../../../shared/types";
 
 // SQLite datetime('now') is "YYYY-MM-DD HH:MM:SS" in UTC — render the local
 // wall-clock time for the log's timestamp column. Module-scope formatter with
@@ -15,6 +15,58 @@ function formatLogTime(iso: string): string {
   const d = parseApiDate(iso);
   if (Number.isNaN(d.getTime())) return iso.slice(11, 19);
   return LOG_TIME_FMT.format(d);
+}
+
+const STATUS_LABEL: Record<HearthTaskStatus, string> = {
+  queued: "Queued",
+  running: "Running",
+  completed: "Completed",
+  failed: "Failed",
+  cancelled: "Cancelled",
+};
+
+const STATUS_COLOR: Record<HearthTaskStatus, string> = {
+  queued: "text-lx-text-warning",
+  running: "text-lx-text-warning",
+  completed: "text-lx-text-success",
+  failed: "text-lx-text-danger",
+  cancelled: "text-lx-text-muted",
+};
+
+// Wireframe hearth-popover.html:238-266 — member-visible brief. One row per
+// lifecycle event that has occurred (queued → running → terminal), each row a
+// status chip + its server-side timestamp. Read-only; never includes result
+// text or log internals (those stay admin-gated).
+export function TaskBrief({ taskData }: { taskData: HearthTask }) {
+  const rows: Array<{ status: HearthTaskStatus; at: string }> = [{ status: "queued", at: taskData.createdAt }];
+  if (taskData.startedAt) rows.push({ status: "running", at: taskData.startedAt });
+  if (taskData.finishedAt && taskData.status !== "queued" && taskData.status !== "running") {
+    rows.push({ status: taskData.status, at: taskData.finishedAt });
+  }
+  if (!rows.some((row) => row.status === taskData.status)) {
+    rows.push({ status: taskData.status, at: taskData.finishedAt ?? taskData.startedAt ?? taskData.createdAt });
+  }
+  return (
+    <div className="flex flex-col" style={{ padding: "10px 12px", gap: 6, borderBottom: "1px solid var(--lx-border-default)" }}>
+      {rows.map((row) => (
+        <div key={row.status} className="flex items-center justify-between">
+          <span className={cn("font-micro text-2xs uppercase tracking-[0.04em]", STATUS_COLOR[row.status])}>
+            {STATUS_LABEL[row.status]}
+          </span>
+          <span className="text-2xs text-lx-text-muted" style={{ fontFamily: "var(--lx-font-mono)" }}>{formatLogTime(row.at)}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// Wireframe hearth-popover.html:86 — the running line is
+// "<runtime> · <provider> · <skill>" once a runtime has claimed the task.
+export function runLabel(taskData: HearthTask | null, runtimes: Runtime[]): string {
+  if (!taskData?.runtimeId) return "Queued…";
+  const runtime = runtimes.find((r) => r.id === taskData.runtimeId);
+  const meta = [runtime?.name, runtime?.provider, taskData.skillName].filter(Boolean).join(" · ");
+  return meta || "Agent working…";
 }
 
 function TaskDonePanel({ taskData, failed, reviewActive, dismissedIdsRef, setTaskId, runtimes, onReview }: {
@@ -92,7 +144,7 @@ function TaskDonePanel({ taskData, failed, reviewActive, dismissedIdsRef, setTas
   );
 }
 
-function TaskRunPanel({ taskData, running, followLog, setFollowLog, logBodyRef, logs, canViewLogs, setLogModalOpen, dismissedIdsRef, cancelTask, setTaskId }: {
+function TaskRunPanel({ taskData, running, followLog, setFollowLog, logBodyRef, logs, canViewLogs, setLogModalOpen, dismissedIdsRef, cancelTask, setTaskId, runtimes }: {
   taskData: HearthTask | null;
   running: boolean;
   followLog: boolean;
@@ -104,6 +156,7 @@ function TaskRunPanel({ taskData, running, followLog, setFollowLog, logBodyRef, 
   dismissedIdsRef: Set<string>;
   cancelTask: { mutate: (id: string) => void; isPending: boolean };
   setTaskId: (v: string | null) => void;
+  runtimes: Runtime[];
 }) {
   const logLines = (logs.data ?? []).slice(-50);
   // Follow mode: keep the activity log pinned to the newest line while the
@@ -120,7 +173,7 @@ function TaskRunPanel({ taskData, running, followLog, setFollowLog, logBodyRef, 
           <div className="flex items-center gap-2">
             <span className="spinner" style={{ width: 12, height: 12, borderWidth: 2 }} />
             <span className="text-xs text-lx-text-secondary font-body">
-              {taskData?.runtimeId ? "Agent working…" : "Queued…"}
+              {runLabel(taskData, runtimes)}
             </span>
           </div>
           <button
@@ -207,8 +260,19 @@ export function TaskStatusPanel(props: {
   onReview: (text: string, identity: { action: string; runtimeName: string | null; provider: string | null; taskId: string }) => void;
 }) {
   const { taskData, running, failed, done } = props;
+  const brief = taskData ? <TaskBrief taskData={taskData} /> : null;
   if (done || failed) {
-    return <TaskDonePanel taskData={taskData} failed={failed} reviewActive={props.reviewActive} dismissedIdsRef={props.dismissedIdsRef} setTaskId={props.setTaskId} runtimes={props.runtimes} onReview={props.onReview} />;
+    return (
+      <>
+        {brief}
+        <TaskDonePanel taskData={taskData} failed={failed} reviewActive={props.reviewActive} dismissedIdsRef={props.dismissedIdsRef} setTaskId={props.setTaskId} runtimes={props.runtimes} onReview={props.onReview} />
+      </>
+    );
   }
-  return <TaskRunPanel taskData={taskData} running={running} followLog={props.followLog} setFollowLog={props.setFollowLog} logBodyRef={props.logBodyRef} logs={props.logs} canViewLogs={props.canViewLogs} setLogModalOpen={props.setLogModalOpen} dismissedIdsRef={props.dismissedIdsRef} cancelTask={props.cancelTask} setTaskId={props.setTaskId} />;
+  return (
+    <>
+      {brief}
+      <TaskRunPanel taskData={taskData} running={running} followLog={props.followLog} setFollowLog={props.setFollowLog} logBodyRef={props.logBodyRef} logs={props.logs} canViewLogs={props.canViewLogs} setLogModalOpen={props.setLogModalOpen} dismissedIdsRef={props.dismissedIdsRef} cancelTask={props.cancelTask} setTaskId={props.setTaskId} runtimes={props.runtimes} />
+    </>
+  );
 }

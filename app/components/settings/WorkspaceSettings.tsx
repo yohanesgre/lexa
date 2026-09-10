@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Link } from "@tanstack/react-router";
 import { Check, Copy, Plus, Trash2, Users } from "lucide-react";
-import { useSession, useWorkspaceMembers, useUpdateWorkspaceMember, useDeleteWorkspaceMember, useWorkspaceInvites, useCreateWorkspaceInvite, useRevokeWorkspaceInvite, useCreateSetPasswordLink, useTeams, useCreateTeam, useDeleteTeam } from "../../lib/queries";
+import { useSession, useWorkspaceMembers, useUpdateWorkspaceMember, useDeleteWorkspaceMember, useWorkspaceInvites, useCreateWorkspaceInvite, useRevokeWorkspaceInvite, useCreateSetPasswordLink, useTeams, useCreateTeam, useDeleteTeam, useProjects, useRuntimes } from "../../lib/queries";
 import { ApiKeysSection, GithubSyncSection, MachinesRuntimesSection, RateLimitSection } from "./SettingsSections";
 import { HeraldProvidersSection } from "./HeraldProvidersSection";
 import { formatRelative } from "../../lib/relative-time";
@@ -10,7 +10,7 @@ import { copyToClipboard } from "../../lib/clipboard";
 import { Field } from "../ui/Field";
 import { TextInput } from "../ui/TextInput";
 import { ConfirmDialog } from "../ui/ConfirmDialog";
-import type { WorkspaceInvite } from "../../../shared/types";
+import type { Project, Runtime, WorkspaceInvite } from "../../../shared/types";
 import type { WorkspaceMember } from "../../lib/api";
 
 // Superadmin-only workspace settings: Members + invites, Teams, Machines &
@@ -165,7 +165,7 @@ function WorkspaceMembersSection() {
             Send invite
           </button>
         </div>
-        <div className="field-hint" style={{ marginTop: 8 }}>Creates a single-use invite link (7-day expiry) delivered out-of-band — no SMTP is configured. Accepting opens /invite → member account.</div>
+        <div className="field-hint" style={{ marginTop: 8 }}>Creates a single-use invite link (7-day expiry) delivered out-of-band — no SMTP is configured. Accepting opens /set-password → member account.</div>
 
         {pendingInvites.length > 0 && (
           <div className="card-panel" style={{ overflow: "hidden", marginTop: 12 }}>
@@ -221,6 +221,8 @@ function MemberDeleteModal({ name, onCancel, onConfirm }: { name: string; onCanc
 function TeamsSection() {
   const { data: teams = [], isLoading } = useTeams();
   const { data: members = [] } = useWorkspaceMembers();
+  const { data: projects = [] } = useProjects();
+  const { data: runtimes = [] } = useRuntimes();
   const createTeam = useCreateTeam();
   const deleteTeam = useDeleteTeam();
   const [name, setName] = useState("");
@@ -228,6 +230,8 @@ function TeamsSection() {
   const [deleting, setDeleting] = useState<{ id: string; name: string } | null>(null);
 
   const memberCountByTeam = (teamId: string) => members.filter((m) => m.teams?.some((t) => t.teamId === teamId)).length;
+  const projectCountByTeam = (teamId: string) => projects.filter((p) => (p as Project & { teamId?: string | null }).teamId === teamId).length;
+  const runtimeCountByTeam = (teamId: string) => runtimes.filter((r: Runtime) => (r as Runtime & { teamId?: string | null }).teamId === teamId).length;
 
   return (
     <section className="mb-8">
@@ -265,7 +269,7 @@ function TeamsSection() {
         <div className="card-panel" style={{ overflow: "hidden" }}>
           <table className="settings-table">
             <thead>
-              <tr><th>Team</th><th>Members</th><th>Created</th><th /></tr>
+              <tr><th>Team</th><th>Members</th><th>Projects</th><th>Runtimes</th><th>Created</th><th /></tr>
             </thead>
             <tbody>
               {teams.map((t) => (
@@ -278,6 +282,8 @@ function TeamsSection() {
                     </div>
                   </td>
                   <td className="text-xs text-lx-text-secondary">{memberCountByTeam(t.id)}</td>
+                  <td className="text-xs text-lx-text-secondary">{projectCountByTeam(t.id)}</td>
+                  <td className="text-xs text-lx-text-secondary">{runtimeCountByTeam(t.id)}</td>
                   <td className="text-xs text-lx-text-secondary">{t.createdAt?.slice(0, 10) ?? "—"}</td>
                   <td style={{ textAlign: "right" }}>
                     <button type="button" className="btn btn-danger" style={{ width: 28, height: 28, padding: 0 }} aria-label={`Delete team ${t.name}`} onClick={() => setDeleting({ id: t.id, name: t.name })}><Trash2 size={14} strokeWidth={1.5} /></button>

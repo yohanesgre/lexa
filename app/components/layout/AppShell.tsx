@@ -12,7 +12,7 @@ import { ThemeToggle } from "./ThemeToggle";
 import { UserMenu } from "./UserMenu";
 
 // Full-screen surfaces with no app chrome: auth pages + the setup wizard.
-const BARE_PATHS = new Set(["/setup", "/login", "/set-password", "/invite"]);
+const BARE_PATHS = new Set(["/setup", "/login", "/set-password", "/invite", "/device-login"]);
 
 // Public wiki share reads render zero app chrome (token IS the credential).
 const BARE_PREFIXES = ["/share/"];

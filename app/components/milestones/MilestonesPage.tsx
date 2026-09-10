@@ -18,14 +18,31 @@ function splitByArchive(milestones: Milestone[]) {
   };
 }
 
-function milestoneLaneStats(board: NonNullable<ReturnType<typeof useBoard>["data"]> | undefined, milestoneId: string) {
-  if (!board) return { laneCount: 0, liveTaskCount: 0 };
-  const laneCount = board.swimlanes.filter((l) => l.milestoneId === milestoneId && !l.archivedAt).length;
-  const liveTaskCount = board.tasks.filter((t) => {
-    const lane = board.swimlanes.find((l) => l.id === t.swimlaneId);
-    return lane?.milestoneId === milestoneId && !t.archivedAt;
-  }).length;
-  return { laneCount, liveTaskCount };
+interface RemainingSprint {
+  name: string;
+  live: number;
+  archived: number;
+}
+
+function milestoneRemainingSprints(board: NonNullable<ReturnType<typeof useBoard>["data"]> | undefined, milestoneId: string): RemainingSprint[] {
+  if (!board) return [];
+  return board.swimlanes
+    .filter((l) => l.milestoneId === milestoneId && !l.archivedAt)
+    .toSorted((a, b) => a.position - b.position)
+    .map((lane) => {
+      const tasks = board.tasks.filter((t) => t.swimlaneId === lane.id);
+      return {
+        name: lane.name,
+        live: tasks.filter((t) => !t.archivedAt).length,
+        archived: tasks.filter((t) => !!t.archivedAt).length,
+      };
+    });
+}
+
+function listSprintNames(names: string[]): string {
+  if (names.length <= 1) return names[0] ?? "";
+  if (names.length === 2) return `${names[0]} and ${names[1]}`;
+  return `${names.slice(0, -1).join(", ")}, and ${names[names.length - 1]}`;
 }
 
 function submitMilestoneForm<TInput extends { description?: string | null | undefined }>(
@@ -118,6 +135,7 @@ export function MilestonesPage({ slug, tab }: { slug: string; tab: "list" | "tim
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set());
 
   const { active, archived } = splitByArchive(milestones);
+  const archivingSprints = archiving ? milestoneRemainingSprints(board, archiving.id) : [];
 
   const toggleCollapsed = (id: string) =>
     setCollapsed((prev) => {
@@ -224,6 +242,7 @@ export function MilestonesPage({ slug, tab }: { slug: string; tab: "list" | "tim
           milestone={editing}
           isOpen={isFormOpen}
           onClose={() => setIsFormOpen(false)}
+          onDelete={editing ? () => { deleteMilestone.mutate({ id: editing.id }); setIsFormOpen(false); } : undefined}
           onSubmit={(input) => submitMilestoneForm(editing, input, updateMilestone, createMilestone)}
         />
       )}
@@ -231,8 +250,8 @@ export function MilestonesPage({ slug, tab }: { slug: string; tab: "list" | "tim
       {archiving && (
         <CompleteMilestoneDialog
           milestone={archiving}
-          laneCount={milestoneLaneStats(board, archiving.id).laneCount}
-          liveTaskCount={milestoneLaneStats(board, archiving.id).liveTaskCount}
+          remainingCount={archiving.sprintCount - archiving.archivedSprintCount}
+          sprints={archivingSprints}
           onCancel={() => setArchiving(null)}
           onConfirm={() => {
             archiveMilestone.mutate({ id: archiving.id });
@@ -385,8 +404,12 @@ function MilestoneCard({ milestone, isActive, board, collapsed, onToggleCollapse
           </button>
         )}
         <span className="milestone-name">{milestone.name}</span>
-        {isCurrent && <span className="milestone-badge-active">Active</span>}
-        {due && <span className={cn("milestone-due", due.overdue && "milestone-due-overdue")}>{due.text}</span>}
+        {!archived && <span className="milestone-badge-active">Active</span>}
+        {due ? (
+          <span className={cn("milestone-due", due.overdue && "milestone-due-overdue")}>{due.text}</span>
+        ) : (
+          <span className="milestone-due" style={{ borderColor: "var(--lx-border-default)", color: "var(--lx-text-muted)" }}>no due date</span>
+        )}
         <span className="flex-1" />
       </div>
       {milestone.description && <div className="milestone-desc">{milestone.description}</div>}
@@ -423,13 +446,17 @@ function laneDatesText(lane: Swimlane): string | null {
   return null;
 }
 
-function CompleteMilestoneDialog({ milestone, laneCount, liveTaskCount, onCancel, onConfirm }: {
+function CompleteMilestoneDialog({ milestone, remainingCount, sprints, onCancel, onConfirm }: {
   milestone: Milestone;
-  laneCount: number;
-  liveTaskCount: number;
+  remainingCount: number;
+  sprints: RemainingSprint[];
   onCancel: () => void;
   onConfirm: () => void;
 }) {
+  const liveTaskCount = sprints.reduce((n, s) => n + s.live, 0);
+  const archivedTaskCount = sprints.reduce((n, s) => n + s.archived, 0);
+  const split = sprints.map((s) => s.live).join(" + ");
+  const archivedNote = archivedTaskCount === 0 ? ", none archived yet" : `, ${archivedTaskCount} already archived`;
   return (
     <>
       <button type="button" className="dialog-overlay" onClick={onCancel} aria-label="Close" />
@@ -443,9 +470,18 @@ function CompleteMilestoneDialog({ milestone, laneCount, liveTaskCount, onCancel
           </div>
           <div className="modal-body">
             <p className="text-sm color-secondary" style={{ lineHeight: "20px" }}>
-              This archives the milestone and its <b>{laneCount} remaining {laneCount === 1 ? "sprint" : "sprints"}</b>
-              {laneCount > 0 && <> — plus their <b>{liveTaskCount} live {liveTaskCount === 1 ? "task" : "tasks"}</b></>}.
-              The milestone is complete when all its sprints are archived.
+              This archives the milestone and its{" "}
+              <b>{remainingCount} remaining {remainingCount === 1 ? "sprint" : "sprints"}</b>
+              {sprints.length > 0 && (
+                <>
+                  {" — "}
+                  {listSprintNames(sprints.map((s) => s.name))}
+                  {" — plus their "}
+                  <b>{liveTaskCount} live {liveTaskCount === 1 ? "task" : "tasks"}</b>
+                  {` (${split}${archivedNote})`}
+                </>
+              )}
+              . The milestone is complete when all its sprints are archived.
             </p>
             <div className="notice notice-danger" style={{ marginTop: 12 }}>
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5}><circle cx="12" cy="12" r="10" /><line x1="12" y1="8" x2="12" y2="12" /><line x1="12" y1="16" x2="12.01" y2="16" /></svg>

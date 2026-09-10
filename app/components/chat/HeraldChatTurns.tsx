@@ -5,6 +5,7 @@ import { Link } from "@tanstack/react-router";
 import { renderTokenized } from "../../lib/tokenizeTranscript";
 import { HeraldFlameIcon } from "../hearth/herald/HeraldFlameIcon";
 import { SkillPicker } from "../hearth/herald/SkillPicker";
+import { EffortPicker } from "./EffortPicker";
 import { CheckIcon, CopyButton, EditIcon, RegenerateIcon, XIcon } from "./herald-chat-icons";
 import { HeraldActivity } from "./HeraldActivity";
 import { HeraldApprovalBatch } from "./HeraldApprovals";
@@ -12,6 +13,7 @@ import { hhmm } from "./herald-chat-utils";
 import type { ChatTurn } from "./herald-chat-utils";
 import type { useHeraldStream } from "../../lib/use-herald-stream";
 import type { LexaSkill } from "../../../shared/types";
+import type { HeraldReasoningEffort } from "../../../shared/herald";
 
 type Stream = ReturnType<typeof useHeraldStream>;
 
@@ -210,6 +212,11 @@ export function ChatSkillsPanel({
   skillName,
   skills,
   skillId,
+  effort,
+  projectEffort,
+  onEffortChange,
+  disabled,
+  isMobileComposer,
   onToggle,
   onSkillChange,
 }: {
@@ -217,6 +224,11 @@ export function ChatSkillsPanel({
   skillName?: string | undefined;
   skills: LexaSkill[];
   skillId: string;
+  effort: HeraldReasoningEffort | "";
+  projectEffort: HeraldReasoningEffort | null | undefined;
+  onEffortChange: (effort: HeraldReasoningEffort | "") => void;
+  disabled: boolean;
+  isMobileComposer: boolean;
   onToggle: () => void;
   onSkillChange: (id: string) => void;
 }) {
@@ -231,7 +243,22 @@ export function ChatSkillsPanel({
       </button>
       {open && (
         <div className="skills-panel-body">
-          <SkillPicker skills={skills} skillId={skillId} onSkillChange={onSkillChange} layout="inline" allowNoSkill />
+          <SkillPicker
+            skills={skills}
+            skillId={skillId}
+            onSkillChange={onSkillChange}
+            layout="inline"
+            allowNoSkill
+            trailing={
+              <EffortPicker
+                effort={effort}
+                projectEffort={projectEffort ?? null}
+                disabled={disabled}
+                align={isMobileComposer ? "up" : "down"}
+                onChange={onEffortChange}
+              />
+            }
+          />
         </div>
       )}
     </div>
