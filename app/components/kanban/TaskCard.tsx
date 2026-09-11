@@ -3,6 +3,13 @@ import { cn } from "../ui/cn";
 import { formatDueLabel } from "../../lib/dates";
 import type { GithubIssue, FieldOption } from "../../../shared/types";
 
+const TYPE_BADGE_CLASS: Record<string, string> = {
+  "#4ADE80": "type-feature",
+  "#FF4444": "type-bug",
+  "#22D3EE": "type-task",
+  "#F472B6": "type-asset",
+};
+
 interface TaskCardProps {
   id: string;
   taskKey: string;                // "EG-12" — stable ticket identifier
@@ -63,11 +70,12 @@ function CardBadgesRow({ typeLabel, typeColor, blockedBy, isLowPriority, prioCol
   prioLabel: string;
   action: React.ReactNode | undefined;
 }) {
+  const badgeClass = TYPE_BADGE_CLASS[typeColor.toUpperCase()];
   return (
     <div className="flex items-center justify-between">
       <span
-        className="type-badge"
-        style={{ background: `${typeColor}1a`, color: typeColor }}
+        className={cn("type-badge", badgeClass)}
+        style={badgeClass ? undefined : { background: `${typeColor}1a`, color: typeColor }}
       >
         {typeLabel}
       </span>

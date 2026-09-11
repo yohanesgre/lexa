@@ -313,7 +313,7 @@ export function GanttChart({ lanes, milestones, today, onRescheduleLane, onResch
         {todayClamped && (
           <>
             <div className="tl-today" style={{ left: todayX + LABEL_W }} />
-            <span className="tl-today-label" style={{ left: todayX + LABEL_W + 6, top: 4 }}>Today</span>
+            <span className="tl-today-label" style={{ left: todayX + LABEL_W + 6, top: 6 }}>Today</span>
           </>
         )}
         <TimelineHeader days={days} headerSpans={headerSpans} gridCols={gridCols} />
@@ -662,7 +662,7 @@ function TimelineHeader({ days, headerSpans, gridCols }: {
 }) {
   return (
     <div className="tl-grid" style={{ gridTemplateColumns: gridCols }}>
-      <div className="tl-head-cell" style={{ gridRow: "span 3", fontWeight: 600, color: "var(--lx-text-primary)", alignItems: "flex-center" }}>Milestone / Sprint</div>
+      <div className="tl-head-cell" style={{ gridRow: "span 3", fontWeight: 600, color: "var(--lx-text-primary)", alignItems: "flex-start" }}>Milestone / Sprint</div>
       {headerSpans.years.map((y) => (
         <div key={y.label} className="tl-head-year" style={{ gridColumn: `span ${y.days}` }}>{y.label}</div>
       ))}

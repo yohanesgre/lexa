@@ -82,7 +82,9 @@ function FilterPopover({
             key={col.id}
             checked={filters.columns.has(col.id)}
             onChange={() => toggleColumn(col.id)}
-            icon={<span className="priority-dot" style={{ background: col.color || "var(--lx-border-default)" }} />}
+            icon={col.color
+              ? <span className="priority-dot" style={{ background: col.color }} />
+              : <span className="priority-dot" style={{ background: "transparent", border: "2px solid #6B6560", width: 6, height: 6 }} />}
             label={col.name}
           />
         ))}

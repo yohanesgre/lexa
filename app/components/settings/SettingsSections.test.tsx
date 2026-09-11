@@ -29,7 +29,9 @@ vi.mock("../../lib/queries", async (importOriginal) => {
   };
 });
 
-import { MachinesRuntimesSection, RateLimitSection } from "./SettingsSections";
+vi.mock("../../lib/clipboard", () => ({ copyToClipboard: vi.fn(async () => true) }));
+
+import { ApiKeyRevealModal, MachinesRuntimesSection, RateLimitSection } from "./SettingsSections";
 
 function wrapper() {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
@@ -87,5 +89,14 @@ describe("RateLimitSection", () => {
     h.state.rateLimit = { max: 6000, windowMs: 600000, envOverride: false };
     render(<RateLimitSection />, { wrapper: wrapper() });
     expect(screen.getByText(/Applies to \/api and \/mcp/)).toBeInTheDocument();
+  });
+});
+
+describe("ApiKeyRevealModal", () => {
+  it("makes the revealed key selectable as a manual-copy fallback", () => {
+    const { container } = render(<ApiKeyRevealModal name="Hermes Staging" fullKey="lxk_abc123" onDone={vi.fn()} />, { wrapper: wrapper() });
+    const code = container.querySelector("code") as HTMLElement;
+    expect(code).toHaveTextContent("lxk_abc123");
+    expect(code.style.userSelect).toBe("all");
   });
 });

@@ -161,7 +161,7 @@ function CatalogModelField(props: CatalogModelFieldProps) {
       {custom && (
         <input className="prop-input w-full mt-2 font-mono" type="text" value={model} onChange={(e) => setModel(e.target.value)} placeholder="e.g. opencode/deepseek-v4-flash" aria-labelledby="runtime-model-label" autoFocus />
       )}
-      <div className="field-hint">Live catalog reported by this runtime's agent, refreshed every ~10 min. Stores the full provider/model id — passed as --model.</div>
+      <div className="field-hint">Live catalog reported by the machine listener (opencode models / cmd --list-models), refreshed every ~10 min. Stores the full provider/model id — passed as --model.</div>
     </>
   );
 }
@@ -273,7 +273,7 @@ function AgentField({ agent, agentCustom, agentCatalog, setAgent, setAgentCustom
       ) : (
         <input className="prop-input w-full font-mono" type="text" value={agent} onChange={(e) => setAgent(e.target.value)} placeholder="build (default)" aria-label="Agent persona" />
       )}
-      <div className="field-hint">The CLI listener reports available agents after setup. Empty = the CLI default. Applies on the next Hearth task.</div>
+      <div className="field-hint">The machine listener reports installed agent personas after setup. Empty = the CLI default. Custom remains available.</div>
     </div>
   );
 }

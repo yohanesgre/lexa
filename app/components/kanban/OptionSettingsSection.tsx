@@ -40,7 +40,7 @@ export function OptionSettingsSection({ kind, title, description, options, senso
 }) {
   return (
     <section className="mb-8">
-      <h3 className="font-display text-base font-medium text-lx-text-primary mb-3">{title}</h3>
+      <h2 className="font-display text-base font-medium text-lx-text-primary mb-3">{title}</h2>
       <p className="text-sm text-lx-text-secondary mb-3 max-w-[560px]">{description}</p>
       {options.length === 0 ? (
         <div className="text-sm text-lx-text-muted py-4">No {title.toLowerCase()} configured.</div>

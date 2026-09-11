@@ -73,11 +73,11 @@ afterEach(() => {
 
 async function renderModal() {
   render(<RuntimeSetupModal onClose={() => {}} />, { wrapper });
-  await screen.findByText("host");
+  await screen.findByText("m1");
 }
 
 async function driveToSend() {
-  fireEvent.click(screen.getByRole("button", { name: /host/ }));
+  fireEvent.click(screen.getByRole("button", { name: /m1/ }));
   fireEvent.click(screen.getByRole("button", { name: "Continue" }));
   fireEvent.click(screen.getByRole("button", { name: /opencode/ }));
   fireEvent.click(screen.getByRole("button", { name: "Continue" }));

@@ -104,7 +104,7 @@ export function ShareDialog({ slug, pageSlug, isOpen, onClose }: ShareDialogProp
                 <div style={{ minWidth: 0 }}>
                   <div className="flex items-center gap-2">
                     <LinkIcon size={12} strokeWidth={1.5} className="text-lx-text-muted shrink-0" />
-                    <span className="font-mono text-xs text-lx-text-primary truncate">{link.url}</span>
+                    <span className="font-mono text-xs text-lx-text-primary truncate">{link.url.replace(/^https?:\/\//, "")}</span>
                   </div>
                   <div className="flex items-center gap-2 mt-1">
                     <span className="text-xs text-lx-text-secondary">Created {link.created}</span>

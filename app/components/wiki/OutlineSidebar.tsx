@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { ChevronRight, PanelRight } from "lucide-react";
+import { ChevronRight } from "lucide-react";
 import { cn } from "../ui/cn";
 import type { HeadingOutline } from "../tiptap-render";
 
@@ -202,7 +202,7 @@ export function OutlineSidebar({ headings, collapsed, onToggle }: OutlineSidebar
           aria-label="Expand sidebar"
           title="Contents"
         >
-          <PanelRight size={14} strokeWidth={1.5} />
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2" /><path d="M9 3v18" /></svg>
         </button>
       </aside>
     );
@@ -220,7 +220,7 @@ export function OutlineSidebar({ headings, collapsed, onToggle }: OutlineSidebar
           onClick={onToggle}
           aria-label="Collapse sidebar"
         >
-          <PanelRight size={14} strokeWidth={1.5} />
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2" /><path d="M9 3v18" /></svg>
         </button>
         <span className="text-xs font-medium font-body uppercase tracking-[0.05em] text-lx-text-secondary">Contents</span>
       </div>

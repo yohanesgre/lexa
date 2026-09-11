@@ -76,7 +76,7 @@ function ApiKeyRevealModal({ name, fullKey, onDone }: { name: string; fullKey: s
             <div className="mb-4">
               <div className="field-label">Key</div>
               <div className="key-display">
-                <code>{fullKey}</code>
+                <code style={{ userSelect: "all" }}>{fullKey}</code>
                 <button
                   type="button"
                   className="btn btn-ghost flex-shrink-0"

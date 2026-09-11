@@ -311,7 +311,9 @@ export function ThreadsSidebar({
             <dialog open className="dialog dialog-enter pointer-events-auto" aria-modal="true" aria-label="Delete this chat?">
               <div className="flex items-center justify-between mb-2">
                 <span className="font-display text-base font-semibold text-lx-text-primary">Delete this chat?</span>
-                <button type="button" className="btn btn-ghost btn-icon-sm" aria-label="Cancel delete" disabled={deleting} onClick={() => setConfirmTarget(null)}>✕</button>
+                <button type="button" className="btn btn-ghost btn-icon-sm" aria-label="Cancel delete" disabled={deleting} onClick={() => setConfirmTarget(null)}>
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><path d="M18 6L6 18M6 6l12 12" /></svg>
+                </button>
               </div>
               <p className="text-xs text-lx-text-secondary" style={{ lineHeight: "18px" }}>
                 Deletes "<span className="font-mono">{confirmTarget.title ?? "New chat"}</span>" — both turns and attachments. This cannot be undone.

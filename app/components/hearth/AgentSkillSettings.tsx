@@ -141,7 +141,18 @@ export function SkillsSettingsSection() {
                     <button type="button" className="btn btn-ghost" style={{ width: 28, height: 28, padding: 0, fontSize: 12 }} onClick={() => setEditing(s)} aria-label={`Edit ${s.name}`} title="Edit skill">
                       <Settings size={14} strokeWidth={1.5} />
                     </button>
-                    {!s.isBuiltin && (
+                    {s.isBuiltin ? (
+                      <button
+                        type="button"
+                        className="btn btn-danger"
+                        style={{ width: 28, height: 28, padding: 0, fontSize: 12, opacity: 0.45 }}
+                        disabled
+                        aria-label={`Delete ${s.name}`}
+                        title="Builtin skills can't be deleted"
+                      >
+                        <Trash2 size={14} strokeWidth={1.5} />
+                      </button>
+                    ) : (
                       <button
                         type="button"
                         className="btn btn-danger"
