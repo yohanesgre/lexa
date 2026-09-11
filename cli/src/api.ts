@@ -7,6 +7,10 @@
 import { Effect, Data } from "effect";
 import type { CliConfig } from "./config";
 
+// Per-request deadline — mirrors machine.ts COMMAND_TIMEOUT_MS. Without it a
+// hung server leaves `lx` waiting forever on a bare fetch.
+const REQUEST_TIMEOUT_MS = 30_000;
+
 export class ApiError extends Data.TaggedError("ApiError")<{
   status: number;
   code?: string | undefined;
@@ -112,7 +116,7 @@ export class LexaClient {
           Authorization: `Bearer ${this.config.apiKey}`,
           ...(init?.headers as Record<string, string> | undefined),
         };
-        const res = await fetch(`${this.config.url}${path}`, { ...init, headers });
+        const res = await fetch(`${this.config.url}${path}`, { ...init, headers, signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) });
         const contentType = res.headers.get("content-type") ?? "";
         if (contentType.includes("text/html")) {
           // A proxy answered with an HTML page (login page or error) — the
@@ -192,12 +196,15 @@ export class LexaClient {
   }
 
   // GitHub sync: create a GitHub issue from the task and link it.
-  // 200 Task (with githubs populated) | 404 | 409 ALREADY_LINKED | 502 GITHUB_API_ERROR
+  // 200 { data: Task (githubs populated), activity } | 404 | 409 ALREADY_LINKED | 502 GITHUB_API_ERROR
   linkGithubIssue(slug: string, id: string, repo: string): Effect.Effect<TaskInfo, ApiError, never> {
-    return this.request<TaskInfo>(`/api/projects/${slug}/tasks/${id}/github-link`, {
-      method: "POST",
-      body: JSON.stringify({ repo }),
-    });
+    return Effect.map(
+      this.request<{ data: TaskInfo }>(`/api/projects/${slug}/tasks/${id}/github-link`, {
+        method: "POST",
+        body: JSON.stringify({ repo }),
+      }),
+      (r) => r.data
+    );
   }
 
   // ── Settings (GitHub sync) ──
