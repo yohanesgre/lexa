@@ -1,6 +1,6 @@
 ---
 name: goal
-description: Goal-driven execution loop — breakdown a user goal, deepen with design graphs, protocol the work, track in work-plans, execute via lanes, loop until done. Use whenever the user invokes /goal or states an outcome to achieve (fix, feature, refactor) that needs breakdown → design → protocol → plan → execute → verify → repeat. Even if they don't say "goal", prefer this for multi-step work with a clear end state.
+description: Goal-driven execution loop — breakdown a user goal, deepen with design graphs, protocol the work, track in work-plans, execute via isolated herdr lanes, loop until done. Use ONLY when the user invokes `/goal`. This skill is `/goal`-scoped and does not govern ordinary sessions, other commands, or other agents.
 ---
 
 # Goal
@@ -8,6 +8,11 @@ description: Goal-driven execution loop — breakdown a user goal, deepen with d
 Turn a goal prompt into DONE through a loop. Each loop iteration is:
 verify state → met? close : adjust → execute next wave. The loop ends only
 when acceptance criteria hold and gates are green — never on effort spent.
+
+Scope: this skill runs ONLY under an explicit `/goal` invocation. Its
+guard and policies do NOT apply to ordinary sessions, other commands, or
+other agents. Outside `/goal`, the normal global/repo AGENTS.md rules
+govern.
 
 Autonomy: `/goal` is full-auto AFTER the execution gate. Human gates
 exist only before Phase 4 (goal clarity, design direction, protocol +
@@ -27,6 +32,57 @@ split/run`, `agent start/prompt/wait/read`), opencode2 flags (`--auto`,
 project commands dir `.opencode/commands/`. If this session is not
 opencode2, STOP and flag before doing anything.
 
+## Main-session guard (orchestrator never codes — `/goal` only)
+
+Applies only inside a `/goal` loop. The main session is the orchestrator,
+not an implementer. It NEVER edits `app/`, `server/`, `shared/`, `cli/`,
+`wireframes/`, `docs/*.md`, or any skill/config file, and never calls a
+mutating tool against those paths. Every code or design-doc mutation is
+delegated to an isolated herdr lane.
+
+The orchestrator writes only the tracking plane directly:
+`status/<plan>/` (`plan.md`, `status.md`, `lanes/<lane>.md`,
+`report.md`), `status/TIMELINE.md`, and `mem_save`. It also drives
+isolate, gates, review, PR, CI, and merge — it does not produce the diff.
+
+Delegation:
+- **`subagent` tool** — READ-ONLY only (research, exploration, review
+  reading). A single foreground (inline, blocking) call. It never mutates
+  files. Background or parallel `subagent` fan-out is banned.
+- **herdr lane(s)** — the ONLY mutation vehicle. Simple = exactly one
+  lane. Complex = one lane per track (1..N).
+
+A mutation the orchestrator makes itself is a violation: stop, revert it
+before proceeding, and re-dispatch the work to a lane.
+
+## Simple vs complex (lane-count + review boundary — risk + scope)
+
+Classify before designing. When unsure, it is complex. This does NOT pick
+the vehicle (all mutations are herdr lanes) — it picks how many lanes and
+how deep the review runs.
+
+**Simple** — ALL must hold:
+- one concern, one track
+- touches no named contract surface: no `docs/SCHEMA.md`,
+  `docs/LAYERS.md`, or `docs/API.md` invariant/schema/error-catalog
+  change; no migration
+- no wireframe change (`wireframes/src/**`) or design-system primitive
+- no shared-file collision (migrations, CHANGELOG, submodule gitlinks,
+  lockfiles)
+- no second parallelizable track
+
+**Complex** — ANY one makes it complex:
+- touches schema/API/ARCHITECTURE invariant, a service/repo/error
+  contract, or a migration
+- touches `wireframes/` or design-system primitives
+- multi-concern or broad refactor (one concern per lane)
+- ≥2 independent tracks (even small ones)
+- shared-file collision, or risk too broad for one brief
+
+Route: **simple** → exactly one herdr lane in the single plan worktree.
+**complex** → one herdr lane per track (1..N; single track = one lane).
+File count is a hint, never a gate — classify on contract surface.
+
 ## Skill roster (load by ID; fall back, never stall)
 
 | Phase | Skill ID | If missing |
@@ -35,7 +91,7 @@ opencode2, STOP and flag before doing anything.
 | 1 backend/graph | `design-thinking` | Effect/codebase conventions from repo docs, note gap |
 | 2 | graph-protocol in `design-thinking` references | order waves by dependency manually |
 | 3 | `work-plans` | mirror its layout (`plan.md`/`status.md`/lanes/`report.md`/TIMELINE) manually |
-| 4 lane | `herdr` | STOP herdr control, fall back one route step |
+| 4 lane | `herdr` | STOP + report — herdr is the only mutation vehicle |
 | 4 FE | `frontend-tanstack` | repo `app/` conventions + wireframes, note gap |
 | 4 BE | `backend` / `backend-effect-bun` | repo `server/` Effect patterns, note gap |
 | 5 | `verification-before-completion` if present | evidence-before-assertion manually: paste gate outputs |
@@ -54,21 +110,17 @@ Never invent a skill ID.
 3. Ambiguous scope, missing acceptance, or architecture fork → ask the
    user with the question tool (this is the human-gated planning zone).
    Never guess on architecture; state what you would otherwise do.
-4. Triage the route BEFORE designing — lanes cost overhead, so earn them.
+4. Triage the route BEFORE designing, using § Simple vs complex.
    Isolation is NOT triaged: every route executes in a fresh worktree
    (Phase 4 isolate, after work-plans + gate) — never in the invoking
-   checkout, which other agents share.
-   - **Sequential/simple** (one track, few files, low risk): work inline
-     INSIDE the plan worktree. No lanes, no herdr.
-   - **Simple + parallelizable** (≥2 independent tracks, small each,
-     disjoint files): background subagents INSIDE the same plan worktree,
-     disjoint files.
-   - **Complex + parallelizable** (multi-file/risky tracks with disjoint
-     file ownership): full lanes — one worktree per lane + herdr pane +
-     opencode2 per lane.
-   Parallelizable means: tracks share no files AND no output depends on
-   another track's output. If either fails, serialize. State the chosen
-   route + why in one line before proceeding.
+   checkout, which other agents share. The orchestrator never edits code
+   in any route (§ Main-session guard).
+   - **Simple** (all simple conditions hold): exactly one herdr lane in
+     the single plan worktree. No second lane.
+   - **Complex** (any complex condition holds): one herdr lane per track
+     — one worktree + pane + agent each; a single-track complex task is
+     still one lane. Full dispatch in Phase 4.
+   State the chosen route + lane count + why in one line before proceeding.
 
 ## Phase 1 — Deepen (design before protocol)
 
@@ -101,7 +153,11 @@ Freeze acceptance in `plan.md` BEFORE any lane executes: one verifiable
 criterion per work item, each paired with its verify command
 (`tsc --noEmit`, which `test:*` lane, which manual smoke). Waves verify
 against this frozen list — never invent new acceptance mid-execution.
-Record the dispatched model + thinking effort per lane in `plan.md` (R).
+Record the dispatched agent + its resolved model+variant per lane in
+`plan.md` (R). Resolve the model from the role agent's markdown `model:`
+field — `~/.config/opencode/agents/<role>.md` (source:
+`~/projects/dotfiles/config/opencode/agents/<role>.md`). The agent md is
+the single source of truth for model+effort.
 Record the execution-gate ack in `plan.md` as `gate: <ISO8601> <who> <branch>`.
 Prefix lane status msgs with `W<n>i<m>` so loop position survives scrollback.
 Validate tracking with `bash .agents/skills/work-plans/scripts/plan-check.sh <plan>` at open and before DONE.
@@ -109,8 +165,8 @@ Validate tracking with `bash .agents/skills/work-plans/scripts/plan-check.sh <pl
 ## Execution gate (LAST human gate — nothing human after this)
 
 Present for one-shot approval: frozen acceptance, waves + lanes + file
-ownership, chosen route + why, model + thinking effort per lane
-(question tool, no defaults), worktree path(s) + branch name(s),
+ownership, chosen route + why, agent + resolved model+variant per lane
+(from the agent md; question tool, no defaults), worktree path(s) + branch name(s),
 autonomy envelope (worktree → branch → commit →
 push → PR → auto-merge on green CI). Close-out runs on every
 green+met DONE by the invocation itself, not by envelope enumeration.
@@ -121,10 +177,10 @@ then runs with zero further questions. User rejects/changes → adjust Phases
 whole gate. Worktrees/branches always derive from latest `main` at dispatch;
 post-approval main movement is handled by rebase-before-PR, not by
 re-gating.
-Fast path: triage = sequential/simple → gate collapses to goal
-restatement + one scope line. Ack = any reply without rejection or
-change request ("gas", "oke", "lanjut", 👍 all count; "tunggu",
-"jangan", "ubah X" do not). Proceed on ack.
+Fast path: triage = simple (all § Simple vs complex conditions hold) →
+gate collapses to goal restatement + one scope line. Ack = any reply
+without rejection or change request ("gas", "oke", "lanjut", 👍 all
+count; "tunggu", "jangan", "ubah X" do not). Proceed on ack.
 
 ## Phase 4 — Execute (route by complexity, zero questions from here)
 
@@ -135,65 +191,72 @@ before any code read/edit/gate/commit):
    `git branch -a | grep <name>`). Control-checkout dirt is EXPECTED
    (other agents share it) — never require a clean control checkout,
    never branch from its working tree.
-2. Simple routes (sequential/simple, simple + parallelizable): one plan
-   worktree `git worktree add -b <branch> .worktrees/<plan> origin/main`
+2. Create the worktree(s) with the `lane-dispatch` guards: simple → one
+   plan worktree `git worktree add -b <branch> .worktrees/<plan>
+   origin/main`; complex → one per lane `.worktrees/<plan>-<lane>`
    (`<plan>` = work-plans folder name; suffix on collision, never reuse).
-   Set up inside it (`bun install`; copy `.env` only if a smoke needs it —
-   never commit it); baseline `tsc --noEmit` to confirm clean.
+   Set up inside each (`bun install`; copy `.env` only if a smoke needs
+   it — never commit it); baseline `tsc --noEmit` to confirm clean.
    `status/<plan>/` stays in the control checkout (tracking plane) — code
    work never touches control-checkout files after this point.
-3. Complex route: skip the single plan worktree; create one worktree per
-   lane `.worktrees/<plan>-<lane>` per `references/lane-dispatch.md`
-   step 2 (same guards + per-lane setup).
-4. `git worktree add` failing (branch/path collision) → FAST EXIT naming
+3. `git worktree add` failing (branch/path collision) → FAST EXIT naming
    the cause — never proceed unisolated in the control checkout.
 
-Run the approved route (all code work inside the worktree(s) above):
+Run the approved route. Every mutation is a herdr lane — the orchestrator
+only dispatches, waits, reads, and verifies; it never edits files itself
+(§ Main-session guard). Follow `references/lane-dispatch.md` for the exact
+dispatch order (binary checks → worktree → pane → agent start → prompt →
+read).
 
-- **Complex + parallelizable** → one git worktree per lane
-  (`.worktrees/<plan>-<lane>`; `.worktrees/` in `.gitignore`),
-  one herdr pane per lane (`pane split --cwd <worktree> --no-focus`),
-  one opencode2 agent IN each pane (`pane run` / `agent start --kind
-  opencode`, drive via `agent prompt --wait`, read via `agent read`).
-  Lane briefs are self-contained (absolute worktree path, branch,
-  files+lines, acceptance, gate, no-commit, forbidden list); replies
-  caveman-compressed. Follow `references/lane-dispatch.md` for the
-  exact dispatch order (binary checks → worktree → pane → agent
-  start → prompt → read).
-  Forbidden in every lane/subagent brief (opencode2 `--auto` approves what is
-  not denied): act outside the assigned worktree, exfiltrate data beyond
-  declared fetches, `--force` or history rewrites on shared branches,
-  commit secrets. Violation kills the lane.
-  Pick lane agents by DISCOVERY, never hardcode IDs (available agents
-  change between sessions). For the subagent tool, read the session's
-  agent list and match by role: implementer (bounded build/fix),
-  reviewer (correctness/scope/edge cases), researcher (docs/codebase
-  lookup), planner (multi-step breakdown). For herdr, run `herdr agent`
-  to list kinds and match the same roles. herdr kinds name backends,
-  not roles — the role travels in the brief: implementer → subagent
-  `swe`; researcher → `explorer-jr` / `librarian-jr`;
-  planner → `planner`; reviewer → `reviewer`. herdr has no opencode2
-  kind: drive opencode2 with `opencode2 run --auto --model` (a model
-  with stored creds — see `opencode2 auth list`; the default model
-  errors `No cookie auth cred`); warm a fresh
-  agent with one trivial prompt before the brief. Wait for lane output
-  with `bun .agents/skills/goal/scripts/lane-wait.ts` (reactive
-  sentinel wait — never fixed `sleep`); the runner-file vehicle is
-  prescribed in `references/lane-dispatch.md` step 4.
-  Dispatch with `--model`/`--agent` matching the `plan.md` (R) record.
-  If no fitting agent exists,
-  do the step inline and record the gap. Never invent an agent name —
-  an unknown name fails the dispatch and burns a loop iteration.
-- **Simple + parallelizable** → background subagents via the subagent
-  tool INSIDE the plan worktree (cwd/workdir = worktree, disjoint files).
-  Same self-contained briefs + forbidden list; each brief pins the
-  absolute worktree path.
-- **Sequential/simple** → work inline INSIDE the plan worktree, no lanes.
+- **Simple** → exactly one lane in `.worktrees/<plan>`.
+- **Complex** → one lane per track: worktree `.worktrees/<plan>-<lane>`
+  (`.worktrees/` in `.gitignore`), one herdr pane per lane (`pane split
+  --cwd <worktree> --no-focus`), one opencode2 agent IN each pane
+  (`pane run` / `agent start --kind opencode`, drive via `agent prompt
+  --wait`, read via `agent read`).
 
+Every lane brief is self-contained (absolute worktree path, branch,
+files+lines, acceptance, gate, no-commit, forbidden list); replies
+caveman-compressed.
+Forbidden in every lane brief (opencode2 `--auto` approves what is
+not denied): act outside the assigned worktree, exfiltrate data beyond
+declared fetches, `--force` or history rewrites on shared branches,
+commit secrets. Violation kills the lane.
+Pick lane agents by DISCOVERY, never hardcode IDs (available agents
+change between sessions). For herdr, run `herdr agent` to list kinds and
+match roles — implementer (bounded build/fix), reviewer
+(correctness/scope/edge cases), researcher (docs/codebase lookup),
+design/plan (multi-step breakdown). herdr kinds name backends, not roles —
+the role travels in the brief: implementer → `swe`; researcher →
+`researcher`; planner → `architect`; reviewer →
+`reviewer`. The orchestrator's own `subagent` calls are read-only
+(research/review) and pick their agent the same way — they never mutate.
+herdr has no opencode2 kind: drive opencode2 with `opencode2 run --auto
+--model` (a model with stored creds — see `opencode2 auth list`; the
+default model errors `No cookie auth cred`); warm a fresh
+agent with one trivial prompt before the brief. Wait for lane output
+with `bun .agents/skills/goal/scripts/lane-wait.ts` (reactive
+sentinel wait — never fixed `sleep`); the runner-file vehicle is
+prescribed in `references/lane-dispatch.md` step 4.
+Dispatch EVERY lane with an explicit `--model provider/model#variant` plus
+`--agent <role>`. Resolve the ref by reading the role agent's markdown
+`model:` field — `~/.config/opencode/agents/<role>.md` (source:
+`~/projects/dotfiles/config/opencode/agents/<role>.md`) — and pass that
+exact base+variant. The agent md is the single source of truth for
+model+effort: never hardcode, guess, or invent one. If the role agent md
+has no `model:`, use the gate-approved ref recorded in `plan.md` (R); if
+neither exists → FAST EXIT naming the gap. The default model errors
+(auth), and an agent's `model:` field does NOT auto-apply to a primary
+`opencode2 run --agent` session (child/subagent sessions only) — which is
+why it must be read and passed explicitly.
+If no fitting agent exists, keep the lane WAIT and report the gap — the
+orchestrator never does the lane's step itself. Never invent an agent
+name — an unknown name fails the dispatch and burns a loop iteration.
 Lane rules: a lane that hits a contract mismatch or needs out-of-scope
-files flips to WAIT and reports — never guesses. Lanes may spawn
-subagents while files/scopes don't collide. The orchestrator may also
-use subagents but MUST NOT touch anything already delegated.
+files flips to WAIT and reports — never guesses. Lanes may run their own
+inline subagents while files/scopes don't collide. The orchestrator's
+`subagent` calls are read-only and MUST NOT touch anything already
+delegated; the orchestrator never edits files itself.
 Lane lifecycle: keep worktree + branch until its PR merges (never delete
 early); removal needs explicit user approval. Resume a dead lane agent
 with opencode2 `--session` (state lives in the worktree, re-brief from
@@ -263,6 +326,8 @@ against a checklist (diff matches lane scope, acceptance re-checked,
 edge cases probed, staged names secret-free) and records it in the
 report. Lane findings live in the lane file (+ TIMELINE line);
 `report.md` is owned by the orchestrator and aggregates lanes.
+Review is reading, not coding — the orchestrator may run read-only
+reviewer subagents without violating the guard.
 Report progress per wave as: state, commit sha, one-line
 test summary, concerns (if any) — nothing else.
 
@@ -295,12 +360,19 @@ separate envelope is needed. Then the merge gate takes over.
   unreadable, proceed on files alone and note it.
 - Plan-env hygiene: if `status/<plan>/` already exists, suffix the plan
   name (date/slug) — never reuse. `status/` stays in the control checkout;
-  the worktree never owns tracking files. Every brief (lane or subagent)
-  pins the binary PATH and sets cwd to the assigned worktree (missing
-  tools = declare deviation, use closest equivalent).
+  the worktree never owns tracking files. Every lane brief pins the binary
+  PATH and sets cwd to the assigned worktree (missing tools = declare
+  deviation, use closest equivalent).
 
 ## Standing guardrails (every loop)
 
+- Main-session guard (`/goal` only): the orchestrator edits ONLY the
+  `status/` tracking plane (`status/<plan>/**`, `status/TIMELINE.md`) +
+  memory. Code and design docs (`app/`, `server/`, `shared/`, `cli/`,
+  `wireframes/`, `docs/*.md`, skill/config) are never edited by the main
+  session — every mutation goes to a herdr lane (simple = one lane,
+  complex = one per track). The orchestrator's `subagent` calls are
+  read-only. A self-made edit is a violation: revert it + re-dispatch.
 - Repo bindings, in order, before touching code: design-system primitives
   → `docs/SCHEMA.md` (names + invariants verbatim) → `docs/LAYERS.md` →
   `docs/API.md` → wireframes → `docs/ARCHITECTURE.md` (rationale only).
