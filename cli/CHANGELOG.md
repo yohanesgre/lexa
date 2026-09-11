@@ -12,6 +12,8 @@ release the app image. The version lives in `cli/package.json` —
 
 ## [Unreleased]
 
+## [2026.4.0] - 2026-09-11
+
 ### Changed
 
 - CLI binary renamed `lexa-cli` → `lx`.
