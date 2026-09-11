@@ -7,6 +7,48 @@ All notable changes to Lexa are documented here. Format based on
 
 ## [Unreleased]
 
+## [2026.3.0] - 2026-09-11
+
+### Added
+
+- **Full-page task view** — tasks expand from the board slideover into their
+  own route (`/$slug/tasks/$taskId`), sharing the slideover's layout and
+  actions.
+- **Wiki-style editor for task descriptions** — the TipTap rich-text editor
+  (same surface as the wiki) now backs task descriptions in both the
+  slideover and the full page.
+- **Swimlane redesign** — system lanes render first, sprint lanes get
+  dedicated empty states, and the page frame is narrowed to match the rest
+  of the app.
+- **Workspace settings tabs** — workspace settings grouped into tabs instead
+  of one long scroll.
+- **Herald per-1M pricing** — model prices are stored and displayed per
+  1M tokens with cached read/write pricing (migration
+  `0003_herald_prices_1m_cached.sql`).
+- **Herald gateway health** — live per-provider health rows, backed by an
+  upstream probe on the gateway health endpoint.
+- **Wireframe alignment waves 1–6** — close UI gaps across board, auth,
+  wiki, milestones, timeline and swimlanes, including the backend data the
+  wave-4 items needed (migration `0004_ui_gaps_w4.sql`).
+
+### Fixed
+
+- **Wiki sidebar** — rail, scroll lock, tree state, and mobile overlay
+  behavior.
+- **Invite accept flow** — the invite page routes through the invite/accept
+  endpoint.
+- **Setup sample-data choice** — persists so dev boot respects an opt-out.
+- **Device login** — route receives the request/token props it needs.
+- **Herald usage** — layout overlap and the per-1M price editor.
+- **Default public URL** — points at the vite frontend.
+- **User menu** — removed the retired Herald Usage entry.
+
+### Changed
+
+- **Docs + tooling** — README install URLs point at the installer hub; the
+  guided `goal` execution skill and a hardened `verify-gate` landed for
+  contributors.
+
 ## [2026.2.10] - 2026-09-09
 
 ### Changed
