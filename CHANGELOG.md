@@ -11,6 +11,9 @@ All notable changes to Lexa are documented here. Format based on
 
 - **Mention autocomplete ordering** — tasks sharing an `updated_at` could come
   back in arbitrary order; task hits now break ties by ticket number.
+- **Installer release resolution** — the app installer used GitHub's
+  `releases/latest`, which can point at a CLI release (`cli-v*`) published
+  after the newest app tag; it now resolves the newest `v*` app release.
 
 ## [2026.3.0] - 2026-09-11
 
