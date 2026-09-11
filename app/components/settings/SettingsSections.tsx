@@ -238,7 +238,7 @@ export function ApiKeysSection() {
         <span className="text-xs text-lx-text-muted">Workspace scope</span>
       </div>
       <p className="text-sm text-lx-text-secondary mb-4" style={{ maxWidth: 560 }}>
-        Machine authentication for MCP agents and integrations. Keys are hashed with SHA-256 before storage. Every key binds to its creator — rows without an owner are server keys (seeded via <span className="font-mono">LXK_API_KEY</span>). Only the full key is shown once on creation.
+        Machine authentication for agents and integrations. Keys are hashed with SHA-256 before storage. Every key binds to its creator — rows without an owner are server keys (seeded via <span className="font-mono">LXK_API_KEY</span>). Only the full key is shown once on creation.
       </p>
 
       {isLoading ? (
@@ -394,7 +394,7 @@ export function RateLimitSection() {
         <span className="text-xs text-lx-text-muted">Workspace scope</span>
       </div>
       <p className="text-sm text-lx-text-secondary mb-4" style={{ maxWidth: 560 }}>
-        Per-client-IP request budget for the API and MCP surfaces. Applies to /api and /mcp; Hearth machine surfaces are exempt. Changes apply immediately — no restart needed.
+        Per-client-IP request budget for the API surface. Applies to /api; Hearth machine surfaces are exempt. Changes apply immediately — no restart needed.
       </p>
 
       {data?.envOverride && (
