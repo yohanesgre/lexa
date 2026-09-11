@@ -32,7 +32,7 @@ function RestartNotice({ machineOnline, hostname }: { machineOnline: boolean; ho
 function OfflineCommand({ machine }: { machine: Machine | undefined }) {
   const [copied, setCopied] = useState(false);
   const copy = () => {
-    void copyToClipboard("lexa-cli machine listen").then(() => {
+    void copyToClipboard("lx machine listen").then(() => {
       setCopied(true);
       window.setTimeout(() => setCopied(false), 1500);
     });
@@ -41,7 +41,7 @@ function OfflineCommand({ machine }: { machine: Machine | undefined }) {
     <div className="field">
       <div className="field-label">Listener command</div>
       <div style={{ background: "var(--lx-surface-input)", border: "1px solid var(--lx-border-default)", borderRadius: 6, padding: 12, position: "relative" }}>
-        <pre className="font-mono text-xs text-lx-text-secondary whitespace-pre-wrap leading-6 m-0">lexa-cli machine listen</pre>
+        <pre className="font-mono text-xs text-lx-text-secondary whitespace-pre-wrap leading-6 m-0">lx machine listen</pre>
         <button type="button" className="btn btn-ghost" aria-label="Copy machine listen command" style={{ position: "absolute", top: 8, right: 8, height: 24, padding: "0 8px", fontSize: 11 }} onClick={copy}>{copied ? <Check size={12} strokeWidth={1.5} /> : <Copy size={12} strokeWidth={1.5} />} {copied ? "Copied" : "Copy"}</button>
       </div>
       <div className="field-hint mt-1.5">Last seen: {machine?.lastSeen ? LAST_SEEN_FMT.format(parseApiDate(machine.lastSeen)) : "never"}. This modal keeps polling.</div>

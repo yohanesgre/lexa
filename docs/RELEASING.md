@@ -45,11 +45,11 @@ all handle `YYYY.MINOR.MICRO` as-is (verified at adoption).
 |---|---|---|
 | Manifest (single source) | `package.json` | `cli/package.json` (read statically by `cli/src/version.ts` — never regenerated) |
 | Tag format | `vYYYY.MINOR.MICRO` (e.g. `v2026.1.0`) | `cli-vYYYY.MINOR.MICRO` (e.g. `cli-v2026.1.0`) |
-| CI | `.github/workflows/publish.yml` → `ghcr.io/yohanesgre/lexa` | `.github/workflows/publish-cli.yml` → GitHub release `bin/lexa-cli` |
+| CI | `.github/workflows/publish.yml` → `ghcr.io/yohanesgre/lexa` | `.github/workflows/publish-cli.yml` → GitHub release `bin/lx` (legacy `lexa-cli` asset published for one transition cycle) |
 | Changelog | `CHANGELOG.md` (root) | `cli/CHANGELOG.md` |
 | Failure guard | — | `publish-cli.yml` fails if the tag doesn't match `cli/package.json` |
 
-`install-cli.sh` and `lexa-cli upgrade` resolve the newest `cli-v*` tag via
+`install-cli.sh` and `lx upgrade` resolve the newest `cli-v*` tag via
 the API — never `releases/latest`, which may be a web app release with no
 CLI asset.
 
@@ -93,10 +93,10 @@ CLI asset.
 
 - `prod` = compiled binary. `bun run compile:cli` embeds the daemon source
   into `cli/src/packed.ts` and the compose files into
-  `cli/src/packed-compose.ts` → `bin/lexa-cli`. The systemd listener unit
+  `cli/src/packed-compose.ts` → `bin/lx`. The systemd listener unit
   runs the binary directly.
-- `dev` = `bun run lexa-cli-dev` or `bun run install:cli-dev` →
-  `~/.local/bin/lexa-cli-dev` (a pure "run repo source via bun" wrapper —
+- `dev` = `bun run lx-dev` or `bun run install:cli-dev` →
+  `~/.local/bin/lx-dev` (a pure "run repo source via bun" wrapper —
   no `LEXA_DIR` export or flavor logic, identical behavior and state paths
   to the compiled binary; never overwrites the prod name).
 - `cli/src/packed.ts` is a build-time embed — keep the committed stub empty
@@ -120,4 +120,4 @@ curl -fsSL https://raw.githubusercontent.com/yohanesgre/lexa/<cli-tag>/scripts/i
 ```
 
 Downloads the prebuilt binary from the newest `cli-v*` GitHub release →
-`~/.local/bin/lexa-cli`.
+`~/.local/bin/lx`.

@@ -75,7 +75,7 @@ your own reverse proxy in front of `<bind>:<port>` to reach it over TLS.
 3. No secrets to fill — deploy with everything blank.
 4. Open `<worker>.workers.dev/setup` → create the superadmin.
    The first superadmin locks setup; mint machine keys via
-   login → Settings → API Keys (or `lexa-cli login` device flow).
+   login → Settings → API Keys (or `lx login` device flow).
 5. **REQUIRED tail — disable auto-deploy:** the Button wires Workers
    Builds (deploy on every push to your fork). Open the Worker →
    Settings → Builds → pause/disable automatic deployments (or set the
@@ -95,7 +95,7 @@ curl -fsSL https://raw.githubusercontent.com/yohanesgre/lexa/<tag>/scripts/unins
 Data is **kept** unless `--purge` (requires typing `purge` on a TTY): docker
 removes the compose project but keeps the `lexa-data` volume; bare keeps the
 install dir; workers keeps D1/R2/KV; dev keeps `data/`. The CLI itself is
-uninstalled manually (`rm $(which lexa-cli)`).
+uninstalled manually (`rm $(which lx)`).
 
 ## Upgrade
 
@@ -124,7 +124,7 @@ default columns appear when the first project is created.
 
 | Variable | Written by | Required |
 |---|---|---|
-| `API keys (lxk_...)` | minted post-setup via login session (Settings → API Keys, or `lexa-cli login` device flow) | only for machines (CLI/daemons/scripts) |
+| `API keys (lxk_...)` | minted post-setup via login session (Settings → API Keys, or `lx login` device flow) | only for machines (CLI/daemons/scripts) |
 | `LXK_ENV` | install script / setup wizard | yes (`production` on deployed targets) |
 | `LXK_PUBLIC_URL` | install script (from `--bind`/`--port`/`--domain`) | deployed targets (Better Auth baseURL) |
 | `CF_API_TOKEN` | operator env (workers target only) | workers only |
@@ -180,7 +180,7 @@ no email transport anywhere.
 - Sign in with the superadmin email + password → dashboard loads
 - `curl <url>/api/health` → **200** (key-exempt probe)
 - `curl -i <url>/api/projects` → **401** (no key, no session)
-- `lexa-cli login --url <url>` → browser-approval device flow mints a key
+- `lx login --url <url>` → browser-approval device flow mints a key
   ("Logged in"; headless scripts use a key from Settings → API Keys)
 
 **GitHub sync** — see `docs/GITHUB_SETUP.md` (includes the acceptance round-trip).
@@ -219,7 +219,7 @@ must be reinstalled — the systemd unit (`lexa-hearth-listen`), state dir
 `LXK_HEARTH_DAEMON_TOKEN`) and auth header (`x-hearth-token`) all changed:
 
 ```bash
-lexa-cli machine uninstall && lexa-cli machine install
+lx machine uninstall && lx machine install
 ```
 
 Old daemons sending `x-forge-token` or polling `/api/forge/*` get 401/404

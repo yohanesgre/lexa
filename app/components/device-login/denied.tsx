@@ -9,7 +9,7 @@ export function DeniedVariant() {
       </IconFrame>
       <div className="text-sm weight-500 mb-1" style={{ textAlign: "center", fontSize: 15 }}>Request denied</div>
       <p className="text-xs text-lx-text-secondary" style={{ textAlign: "center", lineHeight: 1.5, margin: "0 0 16px" }}>
-        You rejected the request — no key was minted. Run <CodeInline>lexa-cli login &lt;URL&gt;</CodeInline> again to start a fresh one; the CLI shows <span className="font-mono">DEVICE_LOGIN_DENIED</span>.
+        You rejected the request — no key was minted. Run <CodeInline>lx login &lt;URL&gt;</CodeInline> again to start a fresh one; the CLI shows <span className="font-mono">DEVICE_LOGIN_DENIED</span>.
       </p>
     </div>
   );

@@ -63,21 +63,21 @@ describe("entry point (bun subprocess)", () => {
   it("prints help with no args and exits 0", async () => {
     const r = await runCli([]);
     expect(r.status).toBe(0);
-    expect(r.stdout).toContain("Usage: lexa-cli <command> [options]");
+    expect(r.stdout).toContain("Usage: lx <command> [options]");
   });
 
   it("prints the CLI version", async () => {
     const r = await runCli(["--version"]);
     expect(r.status).toBe(0);
     const pkg = await import("../package.json");
-    expect(r.stdout.trim()).toBe(`lexa-cli ${pkg.version}`);
+    expect(r.stdout.trim()).toBe(`lx ${pkg.version}`);
   });
 
   it("rejects an unknown command with usage + exit 1", async () => {
     const r = await runCli(["bogus"]);
     expect(r.status).toBe(1);
     expect(r.stderr).toContain("Unknown command: bogus");
-    expect(r.stdout).toContain("Usage: lexa-cli <command> [options]");
+    expect(r.stdout).toContain("Usage: lx <command> [options]");
   });
 
   it("routes to group help for a known group with an unknown subcommand", async () => {
@@ -90,7 +90,7 @@ describe("entry point (bun subprocess)", () => {
   it("task list without credentials fails with NotLoggedIn + exit 1", async () => {
     const r = await runCli(["task", "list"], { LEXA_URL: "", LEXA_API_KEY: "" });
     expect(r.status).toBe(1);
-    expect(r.stderr).toContain("Not logged in. Run: lexa-cli login");
+    expect(r.stderr).toContain("Not logged in. Run: lx login");
   });
 
   it("machine install --no-systemd prints the supervisor instructions", async () => {
@@ -109,7 +109,7 @@ describe("entry point (bun subprocess)", () => {
     writeFileSync(join(dir, ".env"), `GITHUB_APP_ID=123\nGITHUB_PRIVATE_KEY_FILE=${pem}\nGITHUB_WEBHOOK_SECRET=0123456789abcdef\n`);
     const r = await runCli(["github", "status", "--local", "--env-file", join(dir, ".env")], { LEXA_URL: "", LEXA_API_KEY: "" });
     expect(r.status).toBe(1);
-    expect(r.stderr).toContain("Not logged in. Run: lexa-cli login");
+    expect(r.stderr).toContain("Not logged in. Run: lx login");
     rmSync(dir, { recursive: true, force: true });
   });
 
@@ -130,7 +130,7 @@ describe("entry point (bun subprocess)", () => {
   it("github status without login fails pointing at login", async () => {
     const r = await runCli(["github", "status"], { LEXA_URL: "", LEXA_API_KEY: "" });
     expect(r.status).toBe(1);
-    expect(r.stderr).toContain("Not logged in. Run: lexa-cli login [--url <base>] [--key <lxk_...>]");
+    expect(r.stderr).toContain("Not logged in. Run: lx login [--url <base>] [--key <lxk_...>]");
   });
 
   it("newly-gated machine commands fail NotLoggedIn without credentials", async () => {
@@ -139,7 +139,7 @@ describe("entry point (bun subprocess)", () => {
     for (const args of [["machine", "uninstall"], ["machine", "start"], ["machine", "stop"], ["machine", "restart"], ["machine", "status"], ["machine", "logs"], ["machine", "workspace", "list"]]) {
       const r = await runCli(args, { LEXA_URL: "", LEXA_API_KEY: "" });
       expect(r.status, args.join(" ")).toBe(1);
-      expect(r.stderr, args.join(" ")).toContain("Not logged in. Run: lexa-cli login");
+      expect(r.stderr, args.join(" ")).toContain("Not logged in. Run: lx login");
     }
   });
 });
@@ -324,7 +324,7 @@ describe("login (legacy key + device flow)", () => {
     const r = await runCli(["login", base], { LEXA_URL: "", LEXA_API_KEY: "" });
     expect(r.status).toBe(1);
     expect(r.stderr).toContain("does not support device login");
-    expect(r.stderr).toContain("lexa-cli login --key <lxk_...>");
+    expect(r.stderr).toContain("lx login --key <lxk_...>");
   });
 
   it("non-TTY login with no URL and no key fails with usage", async () => {
@@ -340,6 +340,6 @@ describe("module import (in-worker)", () => {
     // printed HELP and called process.exit(0).
     expect(typeof NotLoggedIn).toBe("function");
     const err = new NotLoggedIn();
-    expect(err.message).toContain("Not logged in. Run: lexa-cli login");
+    expect(err.message).toContain("Not logged in. Run: lx login");
   });
 });

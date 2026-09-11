@@ -39,7 +39,7 @@ popover picks per-run.
 ## Daemon + listener
 
 - The Hearth button in the task/wiki editors needs at least one online daemon
-  child, managed by `lexa-cli machine listen` (env: `LEXA_URL`,
+  child, managed by `lx machine listen` (env: `LEXA_URL`,
   `LEXA_API_KEY` or `LXK_HEARTH_DAEMON_TOKEN`,
   `HEARTH_AGENT=opencode|hermes|command-code`). The listener owns per-runtime
   daemon children; there are no per-runtime systemd units. Without a daemon,
@@ -143,5 +143,5 @@ wipe) leaves a stale file context — reset the session after wiping a
 workspace. Global opencode config — permissions, plugins — never loads into
 Hearth runs.
 
-`lexa-cli machine workspace list|sync` inspects/re-syncs local workspaces.
+`lx machine workspace list|sync` inspects/re-syncs local workspaces.
 hermes/command-code keep the legacy ephemeral `~/.lexa/<host>/runs/` layout.

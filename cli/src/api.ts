@@ -1,4 +1,4 @@
-// lexa-cli REST client — thin fetch wrapper over the Lexa API.
+// lx REST client — thin fetch wrapper over the Lexa API.
 //   All calls need a base URL + Bearer API key (from config or env).
 //
 // Effect boundary: every call returns Effect.Effect<T, ApiError, never>.

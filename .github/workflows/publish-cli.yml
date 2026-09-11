@@ -3,7 +3,7 @@ name: publish-cli
 # CLI releases are INDEPENDENT of web app releases (see publish.yml):
 #   cli-vX.Y.Z tags → build the binary + attach it to the GitHub release
 #   vX.Y.Z tags     → web app image to ghcr.io (publish.yml)
-# install-cli.sh and `lexa-cli upgrade` resolve the newest cli-v* release.
+# install-cli.sh and `lx upgrade` resolve the newest cli-v* release.
 
 on:
   push:
@@ -48,15 +48,18 @@ jobs:
       - name: Extract latest changelog entry
         run: awk '/^## \[/{ if (seen) exit; seen=1; next } seen { print }' cli/CHANGELOG.md > /tmp/cli-notes.md
 
-      - name: Create release with the binary
+      - name: Create release with the binaries
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         # Retargeting/re-running a cli-v* tag must not fail on the existing
         # release: delete it first (ignore "not found"), then recreate with
         # the freshly compiled binary. gh release create has no --clobber.
+        # Rename transition: publish `lx` plus the legacy `lexa-cli` asset for
+        # one cycle so pre-rename installers keep resolving the old name.
         run: |
           gh release delete "${{ github.ref_name }}" --yes 2>/dev/null || true
-          gh release create "${{ github.ref_name }}" bin/lexa-cli --notes-file /tmp/cli-notes.md
+          cp bin/lx bin/lexa-cli
+          gh release create "${{ github.ref_name }}" bin/lx bin/lexa-cli --notes-file /tmp/cli-notes.md
 
       - name: Warm installer + smoke
         if: startsWith(github.ref, 'refs/tags/')

@@ -1541,7 +1541,7 @@ export function useRuntimes() {
 }
 
 export function useMachines() {
-  // Machine hosts (bound via lexa-cli login, listening via machine listen).
+  // Machine hosts (bound via lx login, listening via machine listen).
   return useQuery({
     queryKey: ["hearth-machines"],
     queryFn: () => api.listMachines().then((r) => r.data),

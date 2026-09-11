@@ -40,7 +40,7 @@ export class RuntimeMachineRepo extends Effect.Service<RuntimeMachineRepo>()("Le
     const db = yield* Db;
 
     return {
-      // Called by `lexa-cli login` — binds the machine without marking it
+      // Called by `lx login` — binds the machine without marking it
       // listening. last_seen must survive: a logged-in machine is "bound,
       // not listening" until its listener heartbeats. Binding is secret-
       // gated: unknown ids get a server-minted secret (mintedSecret) stored

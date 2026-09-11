@@ -1,9 +1,9 @@
 #!/usr/bin/env bun
 /**
- * lexa-cli — Lexa operator & daemon-management CLI.
+ * lx — Lexa operator & daemon-management CLI.
  *
- *   lexa-cli <command> [options]        (prod: compiled binary)
- *   lexa-cli-dev <command> [options]    (dev: bun run cli/index.ts)
+ *   lx <command> [options]        (prod: compiled binary)
+ *   lx-dev <command> [options]    (dev: bun run cli/index.ts)
  *
  * Wraps the Lexa REST API with the same lxk_ Bearer auth as the web app.
  * The Hearth daemon stays a polling process; this CLI installs/starts/stops it
@@ -12,7 +12,7 @@
  * Env fallbacks (overridden by --url/--key or saved login):
  *   LEXA_URL, LEXA_API_KEY
  *
- * `lexa-cli login` without a key starts browser-approval (device) login: it
+ * `lx login` without a key starts browser-approval (device) login: it
  * prints a verify link and polls until a logged-in user approves, then saves
  * the minted key. Legacy --url/--key and LEXA_URL/LEXA_API_KEY keep working
  * for scripts; the URL alone prompts interactively (TTY only).
@@ -68,7 +68,7 @@ function parseArgs(argv: string[]): ParsedArgs {
 // ── errors ──
 export class NotLoggedIn extends Data.TaggedError("NotLoggedIn")<{}> {
   override get message(): string {
-    return "Not logged in. Run: lexa-cli login [--url <base>] [--key <lxk_...>]";
+    return "Not logged in. Run: lx login [--url <base>] [--key <lxk_...>]";
   }
 }
 
@@ -202,13 +202,13 @@ function registerMachineBlock(client: LexaClient, dir: string): Effect.Effect<vo
         if (e instanceof ApiError && e.code === "MACHINE_ID_TAKEN") {
           console.log(`  ${e.message}`);
         } else {
-          console.log("  (machine registration skipped — run `lexa-cli machine listen` to register)");
+          console.log("  (machine registration skipped — run `lx machine listen` to register)");
         }
         return Effect.succeed(null);
       })
     );
     if (registered?.secret) yield* saveMachineSecret(registered.secret, dir);
-    console.log(`  Registered machine ${machineId} — run \`lexa-cli machine listen\` to go online`);
+    console.log(`  Registered machine ${machineId} — run \`lx machine listen\` to go online`);
   });
 }
 
@@ -241,7 +241,7 @@ function deviceLoginFlow(url: string): Effect.Effect<void, unknown, CliConfigSer
       const result = yield* client.pollDeviceLoginRequest(req.id, token).pipe(
         Effect.catchAll((e) => {
           if (e instanceof ApiError && e.code === "DEVICE_LOGIN_NOT_FOUND") {
-            console.error("  This server does not support device login — use `lexa-cli login --key <lxk_...>`.");
+            console.error("  This server does not support device login — use `lx login --key <lxk_...>`.");
             process.exit(1);
           }
           if (e instanceof ApiError && e.code === "DEVICE_LOGIN_DENIED") {
@@ -284,7 +284,7 @@ function cmdLogin(flags: Record<string, string | boolean>, positionals: string[]
         // Cannot prompt without stdin — message + usage, exit 1. (The device
         // flow below needs no stdin, so a missing KEY never lands here.)
         console.error("  Server URL is required — please fill it");
-        console.error("  Usage: lexa-cli login [<url>] [--url <base>] [--key <lxk_...>]");
+        console.error("  Usage: lx login [<url>] [--url <base>] [--key <lxk_...>]");
         process.exit(1);
       }
       url = yield* promptRequired("  Server URL: ", "  Server URL is required — please fill it");
@@ -384,7 +384,7 @@ function resolveTaskId(client: LexaClient, slug: string, id: string): Effect.Eff
     const matches = tasks.filter((t) => t.id.toLowerCase().startsWith(id.toLowerCase()));
     if (matches.length === 1) return matches[0]!.id;
     if (matches.length === 0) {
-      console.error(`  Task "${id}" not found. Use the full id from \`lexa-cli task list --json\`.`);
+      console.error(`  Task "${id}" not found. Use the full id from \`lx task list --json\`.`);
       process.exit(1);
     }
     console.error(`  Task id "${id}" is ambiguous (${matches.length} matches). Use a longer prefix or the full id.`);
@@ -396,7 +396,7 @@ function cmdTaskList(flags: Record<string, string | boolean>, args: string[]): E
   return Effect.gen(function* () {
     const { client } = yield* requireClient(flags);
     const slug = (typeof flags.project === "string" && flags.project) || args[0]! || "";
-    if (!slug) { console.error("  Usage: lexa-cli task list --project <slug>"); process.exit(1); }
+    if (!slug) { console.error("  Usage: lx task list --project <slug>"); process.exit(1); }
     const limit = typeof flags.limit === "string" ? parseInt(flags.limit, 10) : 20;
     const json = flags.json === true;
     const tasks = yield* client.listTasks(slug, limit);
@@ -425,7 +425,7 @@ function cmdTaskCreate(flags: Record<string, string | boolean>): Effect.Effect<v
     const title = (typeof flags.title === "string" && flags.title) || "";
     const description = typeof flags.description === "string" && flags.description ? flags.description : undefined;
     if (!slug || !column || !swimlane || !title) {
-      console.error("  Usage: lexa-cli task create --project <slug> --column <name> --swimlane <name> --title <t> [--description <markdown>]");
+      console.error("  Usage: lx task create --project <slug> --column <name> --swimlane <name> --title <t> [--description <markdown>]");
       process.exit(1);
     }
     const columnId = yield* resolveColumn(client, slug, column);
@@ -448,7 +448,7 @@ function cmdTaskMove(flags: Record<string, string | boolean>, args: string[]): E
     const column = (typeof flags.column === "string" && flags.column) || "";
     const swimlane = (typeof flags.swimlane === "string" && flags.swimlane) || "";
     if (!slug || !id || !column) {
-      console.error("  Usage: lexa-cli task move <id> --project <slug> --column <name> [--swimlane <name>]");
+      console.error("  Usage: lx task move <id> --project <slug> --column <name> [--swimlane <name>]");
       process.exit(1);
     }
     const columnId = yield* resolveColumn(client, slug, column);
@@ -464,7 +464,7 @@ function cmdTaskGet(flags: Record<string, string | boolean>, args: string[]): Ef
     const { client } = yield* requireClient(flags);
     const slug = (typeof flags.project === "string" && flags.project) || "";
     const id = args[0]! || "";
-    if (!slug || !id) { console.error("  Usage: lexa-cli task get <id> --project <slug>"); process.exit(1); }
+    if (!slug || !id) { console.error("  Usage: lx task get <id> --project <slug>"); process.exit(1); }
     const taskId = yield* resolveTaskId(client, slug, id);
     const t = yield* client.getTask(slug, taskId);
     if (flags.json === true) { console.log(JSON.stringify(t, null, 2)); return; }
@@ -488,7 +488,7 @@ function cmdTaskUpdate(flags: Record<string, string | boolean>, args: string[]):
     const priority = typeof flags.priority === "string" ? flags.priority : undefined;
     const type = typeof flags.type === "string" ? flags.type : undefined;
     if (!slug || !id || (title === undefined && priority === undefined && type === undefined)) {
-      console.error("  Usage: lexa-cli task update <id> --project <slug> [--title <t>] [--priority <p>] [--type <t>]");
+      console.error("  Usage: lx task update <id> --project <slug> [--title <t>] [--priority <p>] [--type <t>]");
       process.exit(1);
     }
     const taskId = yield* resolveTaskId(client, slug, id);
@@ -501,7 +501,7 @@ function cmdWikiList(flags: Record<string, string | boolean>): Effect.Effect<voi
   return Effect.gen(function* () {
     const { client } = yield* requireClient(flags);
     const slug = (typeof flags.project === "string" && flags.project) || "";
-    if (!slug) { console.error("  Usage: lexa-cli wiki list --project <slug>"); process.exit(1); }
+    if (!slug) { console.error("  Usage: lx wiki list --project <slug>"); process.exit(1); }
     const pages = yield* client.listWikiPages(slug);
     if (flags.json === true) { console.log(JSON.stringify(pages, null, 2)); return; }
     if (pages.length === 0) { console.log("  No wiki pages."); return; }
@@ -514,7 +514,7 @@ function cmdWikiGet(flags: Record<string, string | boolean>, args: string[]): Ef
     const { client } = yield* requireClient(flags);
     const slug = (typeof flags.project === "string" && flags.project) || "";
     const pageSlug = args[0]! || "";
-    if (!slug || !pageSlug) { console.error("  Usage: lexa-cli wiki get <pageSlug> --project <slug>"); process.exit(1); }
+    if (!slug || !pageSlug) { console.error("  Usage: lx wiki get <pageSlug> --project <slug>"); process.exit(1); }
     const page = yield* client.getWikiPage(slug, pageSlug);
     if (flags.json === true) { console.log(JSON.stringify(page, null, 2)); return; }
     console.log(`# ${page.title}`);
@@ -534,8 +534,8 @@ function cmdRuntimeDelete(flags: Record<string, string | boolean>, args: string[
     const { client } = yield* requireClient(flags);
     const id = args[0]! || "";
     if (!id) {
-      console.error("  Usage: lexa-cli runtime delete <id>");
-      console.error("  (ids from `lexa-cli runtime list`)");
+      console.error("  Usage: lx runtime delete <id>");
+      console.error("  (ids from `lx runtime list`)");
       process.exit(1);
     }
     yield* client.deleteRuntime(id);
@@ -549,13 +549,13 @@ function cmdMachineDelete(flags: Record<string, string | boolean>, args: string[
     const { client } = yield* requireClient(flags);
     const id = args[0]! || "";
     if (!id) {
-      console.error("  Usage: lexa-cli machine delete <id>");
-      console.error("  (ids from `lexa-cli machine list`)");
+      console.error("  Usage: lx machine delete <id>");
+      console.error("  (ids from `lx machine list`)");
       process.exit(1);
     }
     yield* client.deleteMachine(id);
     console.log(`  Deleted machine ${id} (with its runtimes)`);
-    console.log("  Note: if its listener is still running, the machine will reappear — run `lexa-cli machine stop` on it to fully remove.");
+    console.log("  Note: if its listener is still running, the machine will reappear — run `lx machine stop` on it to fully remove.");
   });
 }
 
@@ -563,7 +563,7 @@ function cmdMachineInstall(flags: Record<string, string | boolean>): Effect.Effe
   return Effect.gen(function* () {
     const config = yield* resolveConfig(flags);
     if (!config) {
-      console.error("  Not logged in. Run: lexa-cli login first.");
+      console.error("  Not logged in. Run: lx login first.");
       process.exit(1);
     }
     yield* machineInstall({ noSystemd: flags["no-systemd"] === true }, config);
@@ -572,9 +572,9 @@ function cmdMachineInstall(flags: Record<string, string | boolean>): Effect.Effe
 
 // ── main ──
 
-const HELP = `lexa-cli — Lexa operator CLI
+const HELP = `lx — Lexa operator CLI
 
-Usage: lexa-cli <command> [options]
+Usage: lx <command> [options]
 
 Auth:
   login    [<url>] [--url <base>] [--key <lxk_...>]
@@ -723,7 +723,7 @@ async function main(): Promise<void> {
     return;
   }
   if (argv[0]! === "--version" || argv[0]! === "-v" || argv[0]! === "version") {
-    console.log(`lexa-cli ${CLI_VERSION}`);
+    console.log(`lx ${CLI_VERSION}`);
     return;
   }
   // One-shot host-keyed migration (legacy flavor roots → groups), before any
@@ -842,7 +842,7 @@ async function main(): Promise<void> {
 // CLI. Shipped behavior is unchanged: bun executes main when run directly.
 if (import.meta.main) {
   main().catch((e) => {
-    console.error("  lexa-cli error:", (e as Error).message);
+    console.error("  lx error:", (e as Error).message);
     process.exit(1);
   });
 }

@@ -660,7 +660,7 @@ CREATE TABLE machines (
   created_at  TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE INDEX idx_machines_last_seen ON machines(last_seen);
--- Machine lifecycle: lexa-cli login registers (last_seen NULL = bound);
+-- Machine lifecycle: lx login registers (last_seen NULL = bound);
 -- machine listen/start heartbeats every 3s (listening); last_seen goes NULL
 -- after 2 min without a heartbeat (offline). Machine ids are
 -- `hostname-<unique>` for new machines; legacy UUID ids keep working.

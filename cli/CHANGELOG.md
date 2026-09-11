@@ -1,6 +1,6 @@
 # Changelog
 
-All notable changes to `lexa-cli` are documented here. Format based on
+All notable changes to `lx` are documented here. Format based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). This project follows
 [Calendar Versioning](https://calver.org/) (`YYYY.MINOR.MICRO` — see
 `docs/RELEASING.md`).
@@ -11,6 +11,12 @@ release the app image. The version lives in `cli/package.json` —
 `publish-cli.yml` verifies the tag matches it before compiling.
 
 ## [Unreleased]
+
+### Changed
+
+- CLI binary renamed `lexa-cli` → `lx`.
+- Releases publish the legacy `lexa-cli` asset for one transition cycle.
+- Dev shim renamed `lx-dev`.
 
 ## [2026.3.0] - 2026-09-09
 

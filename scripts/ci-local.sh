@@ -171,11 +171,11 @@ if bun run compile:cli 2>&1; then
     git diff -- cli/src/packed.ts | head -n 100 || true
   fi
   git checkout -- cli/src/packed.ts 2>/dev/null || true
-  rm -rf bin/lexa-cli bin/daemon-bundle.js 2>/dev/null || true
+  rm -rf bin/lx bin/daemon-bundle.js 2>/dev/null || true
 else
   warn "bun run compile:cli failed - warn not hard"
   git checkout -- cli/src/packed.ts 2>/dev/null || true
-  rm -rf bin/lexa-cli bin/daemon-bundle.js 2>/dev/null || true
+  rm -rf bin/lx bin/daemon-bundle.js 2>/dev/null || true
 fi
 
 # ── Lint (warn) ───────────────────────────────────────────────────────

@@ -14,7 +14,7 @@ Stack: **Bun + SQLite + TanStack Start (React) + Effect-TS + Tailwind** — self
 - **Herald chat** — streaming AI chat with threads, multi-provider gateway, and a proposed-actions approval flow for task/wiki writes
 - **Auth & teams** — email/password login with cookie sessions, teams and roles, workspace invites, `lxk_` API keys for machines
 - **Two-way GitHub sync** — link tasks to issues, echo-suppressed webhooks, column ↔ issue-state mapping, out-of-sync surfacing
-- **`lexa-cli`** — headless operator CLI for tasks, wiki, machines, keys, and upgrades
+- **`lx`** — headless operator CLI for tasks, wiki, machines, keys, and upgrades
 
 ## Quickstart (local dev)
 
@@ -64,7 +64,7 @@ Flags: `--ref <tag|branch>`, `--name <name>` (workers), `--port`, `--bind`, `--d
 (email + password, min 8 chars). The wizard is the **only** provisioning path;
 passwords never pass through the shell.
 
-**lexa-cli** is the headless operator frontend for the running server (tasks,
+**lx** is the headless operator frontend for the running server (tasks,
 wiki, machines, keys, upgrades) — it installs separately and has **no deploy
 commands** (removed in cli-v2026.2.0):
 
@@ -85,14 +85,14 @@ curl -fsSL https://install.yohanesgre.com/lexa/uninstall.sh | bash -s -- docker
 
 ## CLI
 
-`lexa-cli` wraps the REST API with the same `lxk_` Bearer auth as the web app:
+`lx` wraps the REST API with the same `lxk_` Bearer auth as the web app:
 
 ```bash
-lexa-cli login --url https://lexa.example.com   # browser-approval device flow
-lexa-cli task list --project my-project
-lexa-cli task create --project my-project --column "In Progress" --swimlane Backlog --title "Ship it"
-lexa-cli wiki get --project my-project getting-started
-lexa-cli upgrade                          # self-update the CLI binary
+lx login --url https://lexa.example.com   # browser-approval device flow
+lx task list --project my-project
+lx task create --project my-project --column "In Progress" --swimlane Backlog --title "Ship it"
+lx wiki get --project my-project getting-started
+lx upgrade                          # self-update the CLI binary
 ```
 
 Columns and swimlanes are referenced by name, projects by slug. Every `list`/`get` accepts `--json`. `LEXA_URL` + `LEXA_API_KEY` env vars replace the saved login.
@@ -103,11 +103,11 @@ Lexa is scriptable end to end — agents drive it without touching a browser:
 
 ```bash
 export LEXA_URL=https://lexa.example.com LEXA_API_KEY=lxk_...
-lexa-cli status                                   # connectivity + auth check
-lexa-cli task list --project my-project --json    # machine-readable
-lexa-cli task get <short-id> --project my-project # description as Markdown
-lexa-cli task move <id> --project my-project --column Done
-lexa-cli wiki get getting-started --project my-project
+lx status                                   # connectivity + auth check
+lx task list --project my-project --json    # machine-readable
+lx task get <short-id> --project my-project # description as Markdown
+lx task move <id> --project my-project --column Done
+lx wiki get getting-started --project my-project
 ```
 
 - One `lxk_` key (Settings → API Keys) is the only credential. Commands
@@ -118,7 +118,7 @@ lexa-cli wiki get getting-started --project my-project
   [`docs/API.md`](docs/API.md).
 - To run Lexa tasks *as* an agent runtime (persistent workspace, repo
   context, heartbeat), install the machine listener:
-  `lexa-cli machine install`.
+  `lx machine install`.
 
 ## Environment variables
 

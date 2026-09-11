@@ -67,7 +67,7 @@ function StepMachine({ machines, machinesLoading, machine, onSelect, onNext, onC
     <div>
       <h3 className="font-display text-base font-medium text-lx-text-primary mb-1">Choose a machine</h3>
       <p className="text-xs text-lx-text-secondary leading-5 mb-4">
-        <span className="font-mono">lexa-cli login</span> binds the machine; <span className="font-mono">machine listen</span> brings it online. The new runtime will be bound to the machine you choose.
+        <span className="font-mono">lx login</span> binds the machine; <span className="font-mono">machine listen</span> / <span className="font-mono">machine start</span> brings it online. The new runtime will be bound to the machine you choose.
       </p>
       {machinesLoading ? (
         <div className="flex flex-col items-center gap-3 py-6">
@@ -95,7 +95,7 @@ function StepMachine({ machines, machinesLoading, machine, onSelect, onNext, onC
                       ? `Listening · ${candidate.clis?.length ? candidate.clis.map((c) => `${c.provider} ${c.version}`).join(" · ") : "CLIs unknown"}`
                       : candidate.lastSeen
                         ? `Offline · last seen ${formatLastSeen(candidate)}`
-                        : "Bound, not listening — run `lexa-cli machine listen`"}
+                        : "Bound, not listening — run `lx machine listen`"}
                   </span>
                 </span>
                 <span className={cn("sync-dot", listening ? "sync-synced" : "sync-unlinked")} />
@@ -105,15 +105,15 @@ function StepMachine({ machines, machinesLoading, machine, onSelect, onNext, onC
         </div>
       ) : (
         <div className="notice notice-warning">
-          <span>No machines registered. On the target machine run <span className="font-mono">lexa-cli login</span>, then <span className="font-mono">lexa-cli machine listen</span>.</span>
+          <span>No machines registered. On the target machine run <span className="font-mono">lx login</span>, then <span className="font-mono">lx machine listen</span>.</span>
         </div>
       )}
       <pre className="font-mono text-xs text-lx-text-secondary whitespace-pre-wrap leading-6 mt-3" style={{ background: "var(--lx-surface-input)", border: "1px solid var(--lx-border-default)", borderRadius: 6, padding: 12 }}>
-{`lexa-cli login --url <lexa-url> --key <lxk_...>
-lexa-cli machine listen`}
+{`lx login --url <lexa-url> --key <lxk_...>
+lx machine listen`}
       </pre>
       {machineKeyRaw && (
-        <div className="field-hint mt-1">Use the created key in <span className="font-mono">lexa-cli login --key</span> above.</div>
+        <div className="field-hint mt-1">Use the created key in <span className="font-mono">lx login --key</span> above.</div>
       )}
 
       {showTeamPicker && (
@@ -137,7 +137,7 @@ lexa-cli machine listen`}
       <div className="mt-4">
         <h4 className="font-display text-sm font-medium text-lx-text-primary mb-1">Create an API key for this machine</h4>
         <p className="text-xs text-lx-text-secondary leading-5 mb-3">
-          Used by <span className="font-mono">lexa-cli login</span> on the machine. The runtime gets its own key in the next step.
+          Used by <span className="font-mono">lx login</span> on the machine. The runtime gets its own key in the next step.
         </p>
         <Field label="Key name" htmlFor="machine-key-name" className="mb-4">
           <div className="flex gap-2">

@@ -14,7 +14,7 @@
  *
  * LXK_ENV is written explicitly so the server knows its environment.
  * This script is the first thing you run on a fresh box
- * — no lexa-cli binary required.
+ * — no lx binary required.
  */
 import { existsSync, readFileSync, writeFileSync, mkdirSync, chmodSync } from "node:fs";
 import { resolve, dirname } from "node:path";

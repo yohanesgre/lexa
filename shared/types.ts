@@ -339,7 +339,7 @@ export interface LexaSkill {
   updatedAt: ISODate;
 }
 
-// A model the runtime's agent CLI can spawn, as reported by lexa-cli
+// A model the runtime's agent CLI can spawn, as reported by lx
 // (opencode models --verbose / cmd --list-models). id is the full
 // provider/model id — stored verbatim as Runtime.model and passed to --model.
 export interface RuntimeModel {
@@ -397,7 +397,7 @@ export interface RuntimeEvent {
   finishedAt: ISODate | null;
 }
 
-// A `lexa-cli machine listen` process heartbeating machine presence so the web
+// A `lx machine listen` process heartbeating machine presence so the web
 // setup wizard can target a listening machine. A machine is a host: runtimes
 // are bound to it (Runtime.machineId), not the other way around.
 export interface Machine {
