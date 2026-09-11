@@ -45,8 +45,16 @@ jobs:
       - name: Compile CLI
         run: bun run compile:cli
 
-      - name: Extract latest changelog entry
-        run: awk '/^## \[/{ if (seen) exit; seen=1; next } seen { print }' cli/CHANGELOG.md > /tmp/cli-notes.md
+      - name: Extract changelog entry for the tagged version
+        # The FIRST `## [` section is `[Unreleased]` — match the tagged
+        # version's section instead, else release bodies are empty.
+        run: |
+          VERSION="${GITHUB_REF_NAME#cli-v}"
+          awk -v want="## [${VERSION}]" '
+            index($0, want) == 1 { grab=1; next }
+            grab && /^## \[/ { exit }
+            grab { print }
+          ' cli/CHANGELOG.md > /tmp/cli-notes.md
 
       - name: Create release with the binaries
         env:

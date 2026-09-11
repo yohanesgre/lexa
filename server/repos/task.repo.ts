@@ -168,7 +168,7 @@ export class TaskRepo extends Effect.Service<TaskRepo>()("Lexa/TaskRepo", {
           `SELECT t.id, t.key, t.title FROM tasks t
            WHERE t.project_id = ? AND t.archived_at IS NULL
              AND (t.key LIKE ? ESCAPE '\\' OR t.title LIKE ? ESCAPE '\\')
-           ORDER BY t.updated_at DESC
+           ORDER BY t.updated_at DESC, t.number ASC
            LIMIT ?`,
           projectId,
           like,

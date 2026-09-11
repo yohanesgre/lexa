@@ -7,6 +7,11 @@ All notable changes to Lexa are documented here. Format based on
 
 ## [Unreleased]
 
+### Fixed
+
+- **Mention autocomplete ordering** — tasks sharing an `updated_at` could come
+  back in arbitrary order; task hits now break ties by ticket number.
+
 ## [2026.3.0] - 2026-09-11
 
 ### Added
