@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { Plus, Trash2, X } from "lucide-react";
+import { Check, Plus, Trash2, X } from "lucide-react";
 import { cn } from "../ui/cn";
 import { OPTION_COLORS } from "../../lib/option-colors";
 import type { Column } from "../../../shared/types";
@@ -329,7 +329,7 @@ export function ColumnForm({ column, isOpen, onClose, onDelete, onSubmit, zIndex
                 Cancel
               </button>
               <button type="submit" className="btn btn-primary">
-                <Plus size={14} strokeWidth={1.5} />
+                {isEdit ? <Check size={14} strokeWidth={1.5} /> : <Plus size={14} strokeWidth={1.5} />}
                 {isEdit ? "Save Changes" : "Create Column"}
               </button>
             </div>

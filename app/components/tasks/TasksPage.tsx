@@ -91,12 +91,14 @@ function resolveSelectedTask(
   return full ?? boardTasks?.find((t) => t.id === selectedTaskId) ?? null;
 }
 
-function TasksErrorState({ message, onRetry }: { message: string; onRetry: () => void }) {
+function TasksErrorState({ onRetry }: { onRetry: () => void }) {
   return (
     <main className="page-frame page-frame-narrow">
       <div className="tasks-error">
         <div className="tasks-error-title">Failed to load tasks</div>
-        <div className="tasks-error-sub">{message}</div>
+        <div className="tasks-error-sub">
+          <span className="font-mono">Network error</span> — the board query failed to load
+        </div>
         <button type="button" className="btn btn-ghost btn-sm" onClick={onRetry}>
           Retry
         </button>
@@ -105,17 +107,29 @@ function TasksErrorState({ message, onRetry }: { message: string; onRetry: () =>
   );
 }
 
+const SKELETON_ROW_WIDTHS = ["55%", "49%", "58%", "43%", "52%"];
+
 function TasksSkeleton() {
   return (
     <main className="page-frame page-frame-narrow">
       <div className="tasks-page">
         <div className="tasks-header">
-          <div className="skeleton" style={{ width: 140, height: 22 }} />
+          <div>
+            <div className="skeleton" style={{ width: 140, height: 22 }} />
+            <div className="skeleton mt-2" style={{ width: 96, height: 12 }} />
+          </div>
+        </div>
+        <div className="tasks-filter">
+          <div className="skeleton" style={{ flex: 1, minWidth: 200, height: 28 }} />
+          {[100, 88, 96, 104, 100, 112].map((width, i) => (
+            <div key={i} className="skeleton" style={{ width, height: 28 }} />
+          ))}
+          <div className="skeleton" style={{ width: 76, height: 28 }} />
         </div>
         <div className="tasks-list">
-          {[0, 1, 2, 3, 4].map((i) => (
-            <div key={i} className="card-row">
-              <div className="skeleton" style={{ width: i === 0 ? "55%" : `${40 + i * 9}%`, height: 14 }} />
+          {SKELETON_ROW_WIDTHS.map((width) => (
+            <div key={width} className="card-row">
+              <div className="skeleton" style={{ width, height: 14 }} />
             </div>
           ))}
         </div>
@@ -284,7 +298,7 @@ export function TasksPage({ slug, search }: TasksPageProps) {
     return <TasksSkeleton />;
   }
   if (error) {
-    return <TasksErrorState message={(error as Error).message} onRetry={() => refetch()} />;
+    return <TasksErrorState onRetry={() => refetch()} />;
   }
   if (!board || !tasks) return <main className="page-frame page-frame-narrow"><div className="tasks-error">Project not found</div></main>;
 

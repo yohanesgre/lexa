@@ -303,9 +303,11 @@ function MilestoneSprints({ board, lanes, collapsed }: {
             </span>
             {!lane.archivedAt && p.total > 0 && <SprintProgress done={p.done} total={p.total} />}
             <span className="flex-1" />
-            <Link to="/$slug/board" params={{ slug: board?.project.slug ?? "" }} search={{}} className="sl-link-btn">
-              View on board
-            </Link>
+            {!lane.archivedAt && (
+              <Link to="/$slug/board" params={{ slug: board?.project.slug ?? "" }} search={{}} className="sl-link-btn">
+                View on board
+              </Link>
+            )}
           </div>
         );
       })}
@@ -412,7 +414,7 @@ function MilestoneCard({ milestone, isActive, board, collapsed, onToggleCollapse
         )}
         <span className="flex-1" />
       </div>
-      {milestone.description && <div className="milestone-desc">{milestone.description}</div>}
+      {!archived && milestone.description && <div className="milestone-desc">{milestone.description}</div>}
 
       <MilestoneProgress
         sprintsArchived={milestone.archivedSprintCount}
@@ -463,7 +465,7 @@ function CompleteMilestoneDialog({ milestone, remainingCount, sprints, onCancel,
       <div className="fixed inset-0 flex items-center justify-center z-[80] pointer-events-none">
         <dialog open className="dialog dialog-enter pointer-events-auto" aria-modal="true" aria-label="Confirm" style={{ width: 440, maxWidth: "calc(100vw - 48px)" }}>
           <div className="modal-header">
-            <span className="modal-title">Complete &lsquo;{milestone.name}&rsquo;?</span>
+            <span className="modal-title">Complete "{milestone.name}"?</span>
             <button type="button" className="btn btn-ghost" style={{ width: 32, height: 32, padding: 0 }} onClick={onCancel} aria-label="Close">
               <X size={16} strokeWidth={1.5} />
             </button>

@@ -337,8 +337,8 @@ export function SwimlanesPage({ slug }: { slug: string }) {
   const lanes = sprintLanesOf(board);
   const filtered = filterLanes(lanes, stateFilter, milestoneFilter);
   const groups = useMemo(
-    () => buildGroups(activeMilestones, filtered),
-    [activeMilestones, filtered],
+    () => (stateFilter === "active" ? buildGroups(activeMilestones, filtered) : []),
+    [stateFilter, activeMilestones, filtered],
   );
 
   const backlog = backlogOf(board);
@@ -428,13 +428,13 @@ export function SwimlanesPage({ slug }: { slug: string }) {
           />
         )}
 
-        {stateFilter === "active" && archivedLanes.length > 0 && (
+        {(stateFilter === "archived" ? filtered.length > 0 : archivedLanes.length > 0) && (
           <div className="tasks-state-block" style={{ marginTop: 24 }}>
             <div className="font-micro text-2xs color-muted" style={{ textTransform: "uppercase", letterSpacing: "0.04em", marginBottom: 8 }}>
               Archived lanes
             </div>
             <div className="sl-grid">
-              {archivedLanes.map((lane) => (
+              {(stateFilter === "archived" ? filtered : archivedLanes).map((lane) => (
                 <LaneRow
                   key={lane.id}
                   lane={lane}

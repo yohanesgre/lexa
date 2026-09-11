@@ -119,7 +119,7 @@ export function MilestoneForm({ milestone, isOpen, onClose, onDelete, onSubmit, 
               <div className="mb-4">
                 <label className="block text-xs font-medium text-lx-text-secondary mb-1.5 font-body" htmlFor="milestone-description">
                   Description
-                  <span className="font-mono text-[10px] uppercase tracking-[0.04em] text-lx-text-muted ml-1.5">
+                  <span className="font-micro text-2xs uppercase tracking-[0.04em] text-lx-text-muted ml-1.5">
                     Optional
                   </span>
                 </label>
@@ -136,7 +136,7 @@ export function MilestoneForm({ milestone, isOpen, onClose, onDelete, onSubmit, 
               <div className="mb-4">
                 <label className="block text-xs font-medium text-lx-text-secondary mb-1.5 font-body" htmlFor="milestone-due">
                   Due date
-                  <span className="font-mono text-[10px] uppercase tracking-[0.04em] text-lx-text-muted ml-1.5">
+                  <span className="font-micro text-2xs uppercase tracking-[0.04em] text-lx-text-muted ml-1.5">
                     Optional
                   </span>
                 </label>

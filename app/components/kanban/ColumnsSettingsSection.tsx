@@ -53,7 +53,7 @@ export function ColumnsSettingsSection({ columns, sensors, onDragEnd, onEdit, on
 }) {
   return (
     <section className="mb-8">
-      <h3 className="font-display text-base font-medium text-lx-text-primary mb-3">Columns</h3>
+      <h2 className="font-display text-base font-medium text-lx-text-primary mb-3">Columns</h2>
       <p className="text-sm text-lx-text-secondary mb-3 max-w-[560px]">
         Define board columns, WIP limits, required fields per column, and GitHub state mapping.
       </p>

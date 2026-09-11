@@ -89,7 +89,7 @@ function StepMachine({ machines, machinesLoading, machine, onSelect, onNext, onC
               >
                 <Monitor size={16} strokeWidth={1.5} className={listening ? "text-lx-text-link" : "text-lx-text-muted"} />
                 <span className="flex-1">
-                  <span className="block text-sm font-medium text-lx-text-primary">{candidate.hostname || "Unnamed machine"}</span>
+                  <span className="block text-sm font-medium text-lx-text-primary">{candidate.id}</span>
                   <span className="block text-xs text-lx-text-secondary">
                     {listening
                       ? `Listening · ${candidate.clis?.length ? candidate.clis.map((c) => `${c.provider} ${c.version}`).join(" · ") : "CLIs unknown"}`

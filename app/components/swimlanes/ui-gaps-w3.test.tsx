@@ -2,12 +2,15 @@
 import "@testing-library/jest-dom/vitest";
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { render, screen, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import type { ReactNode } from "react";
 import type { Board, Swimlane, Task } from "../../../shared/types";
 
+const h = vi.hoisted(() => ({ milestones: [] as unknown[] }));
+
 vi.mock("../../lib/queries", () => ({
   useBoard: vi.fn(),
-  useMilestones: () => ({ data: [] }),
+  useMilestones: () => ({ data: h.milestones }),
   useUpdateSwimlane: () => ({ mutate: vi.fn() }),
   useDeleteSwimlane: () => ({ mutate: vi.fn() }),
   useArchiveSwimlane: () => ({ mutate: vi.fn() }),
@@ -67,6 +70,7 @@ function makeBoard(): Board {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  h.milestones = [];
   useBoardMock.mockReturnValue({ data: makeBoard(), isLoading: false, error: null, refetch: vi.fn() } as unknown as ReturnType<typeof useBoard>);
   useSessionMock.mockReturnValue({ data: { user: { role: "superadmin" } } } as unknown as ReturnType<typeof useSession>);
 });
@@ -89,6 +93,27 @@ describe("SwimlanesPage delete gating", () => {
     render(<SwimlanesPage slug="demo" />);
     expect(within(laneRow("Sprint 5 — Audio pass")).getByRole("button", { name: /delete/i })).toBeDisabled();
     expect(within(laneRow("Sprint 4 — Save system")).getByRole("button", { name: /delete/i })).toBeEnabled();
+  });
+});
+
+describe("SwimlanesPage archived-only state", () => {
+  it("renders archived lanes in the dimmed lower section, not inside milestone groups", async () => {
+    const user = userEvent.setup();
+    h.milestones = [{ id: "m1", name: "v1.0 launch", dueAt: null, archivedAt: null, sprintCount: 1, archivedSprintCount: 1 }];
+    const board = makeBoard();
+    useBoardMock.mockReturnValue({
+      data: { ...board, swimlanes: [{ ...LANE, milestoneId: "m1" }], milestones: h.milestones },
+      isLoading: false,
+      error: null,
+      refetch: vi.fn(),
+    } as unknown as ReturnType<typeof useBoard>);
+
+    render(<SwimlanesPage slug="demo" />);
+    await user.selectOptions(screen.getByLabelText("State filter"), "archived");
+
+    const row = laneRow("Sprint 5 — Audio pass");
+    expect(row.closest(".tasks-state-block")).toBeTruthy();
+    expect(row.closest(".sl-group")).toBeNull();
   });
 });
 

@@ -17,6 +17,7 @@ export function BoardToolbar({ board, showArchived, filters, onToggleArchived, o
       <div className="board-header">
         <div className="flex items-center gap-3">
           <h1 className="font-display text-xl font-semibold text-lx-text-primary">{board.project.name}</h1>
+          <span className="text-sm text-lx-text-muted">Kanban — the heart of Lexa</span>
           {milestoneSelector}
         </div>
         <div className="flex items-center gap-2">

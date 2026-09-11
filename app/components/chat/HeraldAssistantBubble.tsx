@@ -173,7 +173,7 @@ export function HeraldAssistantBubble({
   const time = hhmm(turn.ts);
   // Persona label mirrors the project's configured agent (read-only — chat
   // always runs the Herald lane, so it is always the Herald Agent).
-  const meta = `Herald Agent${skillName ? ` · ${skillName}` : ""}${turn.stopped ? " · stopped" : ""}`;
+  const meta = `Herald · Herald Agent persona${skillName ? ` · ${skillName}` : ""}${turn.stopped ? " · stopped" : ""}`;
 
   return (
     <div className="bubble-ai">

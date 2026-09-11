@@ -68,7 +68,7 @@ function WikiReadView({ breadcrumb, title, content, updatedAt, updatedByName, he
     <>
       <div className="wiki-content">
         <div className="wiki-prose" style={{ maxWidth: 760, margin: "0 auto" }}>
-          <div className="font-micro text-2xs text-lx-text-muted uppercase tracking-[0.04em]" style={{ marginBottom: 4 }}>
+          <div className="text-xs text-lx-text-muted font-body" style={{ marginBottom: 4 }}>
             {breadcrumb}
           </div>
           <div className="flex items-center justify-between gap-4">
@@ -123,10 +123,10 @@ function EditHeader({ breadcrumb, title, isSaving, historyPreviewId, onCancel, o
           <span className="font-micro text-2xs text-lx-text-warning uppercase tracking-[0.04em]">Editing</span>
         </div>
         <div className="flex items-center gap-2">
-          <button type="button" className="btn btn-ghost" onClick={onCancel}>
+          <button type="button" className="btn btn-ghost btn-sm" onClick={onCancel}>
             Cancel
           </button>
-          <button type="button" className="btn btn-primary" onClick={onSave} disabled={isSaving || historyPreviewId !== null}>
+          <button type="button" className="btn btn-primary btn-sm" onClick={onSave} disabled={isSaving || historyPreviewId !== null}>
             {isSaving ? "Saving..." : "Save"}
           </button>
         </div>

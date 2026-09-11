@@ -51,6 +51,7 @@ describe("RuntimeRestartModal", () => {
     render(<RuntimeRestartModal runtime={RUNTIME} onClose={() => {}} />, { wrapper: wrapper() });
 
     expect(await screen.findByText("Or via systemd")).toBeInTheDocument();
+    expect(screen.getByText("Listener command")).toBeInTheDocument();
     expect(screen.getByText(/systemctl --user restart lexa-hearth-listen/)).toBeInTheDocument();
     expect(screen.getByText(/journalctl --user -u lexa-hearth-listen/)).toBeInTheDocument();
     expect(screen.getByText(/Waiting for the runtime child to come back/)).toBeInTheDocument();
