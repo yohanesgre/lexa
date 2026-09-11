@@ -19,7 +19,7 @@ status/
     status.md                # 3-line heartbeat, overwritten on every action
     lanes/                   # ONLY when parallel; one 3-line file per lane
       <lane>.md
-    report.md                # written once at DONE
+    report.md                # written once at close (DONE | FAILED)
 ```
 
 `ls status/` must show active plans only. No loose files in `status/` root except
@@ -29,6 +29,19 @@ status/
 ## Open a plan
 
 Copy `assets/plan-template.md` to `status/<plan>/plan.md` and fill it in.
+
+States: `PLAN | WAIT | WORKING | DONE | FAILED` (mirror of AGENTS.md).
+`WAIT` = blocked, msg names the blocker. `FAILED` = closed without meeting
+scope within budget; `report.md` is still required.
+
+Header fields: `gate:` = execution-gate ack (`<ISO8601> <who> <branch>`)
+when a gated flow (e.g. `/goal`) drives the plan; `iter:` = current
+`W<n>i<m>` loop position. Omit when unused.
+
+`plan.md` is the plan of record for the flow that opened it. Design/plan
+artifacts produced elsewhere (specs, ADRs, project plan docs) are inputs —
+link them, never duplicate them here.
+
 Then write `status/<plan>/status.md`:
 
 ```
@@ -55,6 +68,9 @@ state: WORKING
 ts: <epoch>
 msg: <one line: latest step>
 ```
+
+Blocked → `state: WAIT` with a msg naming the blocker; never leave a blocked
+plan silently WORKING. Lane files use the same states.
 
 Multi-track: one file per lane under `lanes/` in the same 3-line format.
 The plan-level `status.md` stays the summary — it mirrors the slowest lane, it never
@@ -83,6 +99,13 @@ deviations: <contract breaks, or "none">
    (`plan.md`, `report.md`). Never duplicate full report content into memory —
    memory is the index, the files are the source.
 
+## Close a plan (FAILED)
+
+Acceptance can't be met within budget: write `report.md` the same way
+(`result: failed — <what shipped>; blockers: ...`), flip `status.md` to
+`state: FAILED`, append the TIMELINE line. A plan never stays WORKING after
+effort stops.
+
 ## Chronology
 
 Three sources, in order of convenience: `TIMELINE.md`, folder/archive names with
@@ -98,6 +121,8 @@ just backfill it when noticed.
 | work | `status.md` grows past 3 lines / log dump | move detail to `plan.md` or `report.md` |
 | lanes | lane file with no parent plan | delete or attach to a plan |
 | DONE | no `report.md` | don't flip to DONE until written |
+| FAILED | no `report.md` | write `report.md`, then flip FAILED |
+| state | undefined value (e.g. `PARTIAL`) | use the AGENTS.md enum; FAILED + blockers |
 | reopen | act on a DONE plan without flipping status | flip to WORKING first + TIMELINE line |
 | memory | `mem_save` without artifact path | amend with path — a pointerless summary is lost |
 | root | loose file in `status/` | move into a plan folder or archive |
@@ -105,7 +130,7 @@ just backfill it when noticed.
 ## Validate
 
 Run `bash .agents/skills/work-plans/scripts/plan-check.sh <plan>` at
-open and before flipping DONE. It checks scope Out, 3-line
+open and before flipping DONE/FAILED. It checks scope Out, 3-line
 heartbeats, TIMELINE entry, no loose files, and DONE-has-report.
 Red → fix the artifact, then re-run.
 

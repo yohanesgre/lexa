@@ -330,6 +330,58 @@ Herald runs otherwise. API keys held server-side plaintext (accepted for
 self-hosted threat model). Table renames fail at runtime, not compile time —
 gated by atomic migration plus mandatory repo/service test suites.
 
+**Herald service concern split (accepted 2026-08-27; formerly a standalone
+ADR, merged here):**
+
+`server/services/herald.service.ts` handled both freeform chat
+(`runChatStream`/`resumeChatStream`, `activeChats`, `MAX_CHAT_TOOL_ROUNDS=24`)
+and task/wiki doc streams (`runStream`/`resumeThreadStream`, `activeTasks`,
+`MAX_TOOL_ROUNDS=12`, queue+approvals, writeTools drain) plus shared
+`buildStream`, stall watchdog, and truncated tool-args salvage. The coupling
+let a chat stall block the task-queue tests and made round caps/registries
+indistinguishable. Split into two Effect services behind a thin facade:
+
+- `server/services/herald-chat.service.ts` — `HeraldChatService`
+  (`Lexa/HeraldChatService`): `activeChats`, `MAX_CHAT_TOOL_ROUNDS=24`, chat
+  stream, resume, listChats, updateChatMeta, decideApproval, abortChat.
+  Depends on repos/gateway/storage only; write-tool drain optional.
+- `server/services/herald-task.service.ts` — `HeraldTaskService`
+  (`Lexa/HeraldTaskService`): `activeTasks`, `MAX_TOOL_ROUNDS=12`, enqueue,
+  runStream, resumeThreadStream, decideApproval, abortStream. Owns the
+  queue/approval drain.
+- `server/herald/build-stream.ts` — shared `buildStream` factory
+  (`StreamRunContext` → `ReadableStream<StreamFrame>`) with
+  `STREAM_STALL_TIMEOUT_MS=90s`, `shouldEmitToolFrame`, `stripToolCallXml`,
+  `findPendingBatch`/`applyResumeResults`. Chat/task instantiate it with their
+  own `toolRoundCap`/`registry`; core loop/stall/salvage logic is not
+  duplicated.
+- `server/services/herald-helpers.ts` — pure helpers (`scanMentionTokens`,
+  `resolveHeraldThread`, `buildChatSnippet`, …) re-exported via the facade so
+  `import { buildStream } from "./herald.service"` tests keep passing.
+- `server/services/herald.service.ts` — thin facade `HeraldService`
+  (`Lexa/Herald`) delegating to chat/task, preserving
+  `import { HeraldService }` for `server/api/http.ts` (no route change).
+  `decideApproval` fans out to both (shared `pendingWrites` table).
+
+Alternatives rejected: single service with internal branching (caps/registries
+stay coupled); full `buildStream` duplication per service (hotfix drift);
+moving `decideApproval` entirely to one side (`pendingWrites` serves both
+docTypes). Frontend cache keys were already separate
+(`["herald-chats",projectId]` vs
+`["herald-thread",projectId,docType,docId]`) — no change. No DB migration, no
+new service cycle (`Herald*` → repos/gateway only; the `TaskService` →
+`GitHubService` cycle is unchanged). Phase A hotfixes preserved (tool-args
+salvage of `{"name":"v1","dueAt":` → skip with `HERALD_TOOL_ARGS_INVALID`,
+stall watchdog, 404 demote).
+
+**Consequences:** `activeChats`/`activeTasks` isolated — a chat stall cannot
+block the task queue; facade keeps existing imports green; future routes can
+import `HeraldChatService`/`HeraldTaskService` directly. Deviation:
+`Herald*Service` depends on `TaskService`/`CommentService`/etc. for
+approved-write execution, so `grep -r "TaskService" server/services/herald-*.ts`
+hits via class/tag name and the write executor — not a `TaskService` →
+`GitHubService` cycle; that no-service-cycle invariant is preserved.
+
 ## Frontend
 
 ### Routes (TanStack Start)

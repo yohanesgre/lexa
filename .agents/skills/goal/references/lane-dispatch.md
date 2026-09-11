@@ -30,7 +30,8 @@ stops that lane only; others continue.
 3. Pane: `herdr pane split --current --direction right --cwd <worktree> --no-focus`
    (read the new pane ID from `.result.pane.pane_id`).
 4. Agent: `herdr agent start <name> --kind <backend> --pane <pane-id>`
-   (role travels in the brief, not the kind; map in `goal/SKILL.md` Phase 4).
+   (role travels in the brief, not the kind; mutation roles: `swe`,
+   `designer` — read-only roles run as `subagent`, not lanes).
    No opencode2 kind exists — drive opencode2 without it: write the lane
    brief to a runner file `<worktree>/../<slug>-runner.sh` (or
    `/tmp/opencode/<slug>-runner.sh`), run `herdr pane run <pane>
@@ -52,6 +53,12 @@ stops that lane only; others continue.
 5. Drive: `herdr agent prompt <name> "<brief>" --wait --timeout 120000`;
    read via `herdr agent read <name> --source recent-unwrapped --lines 120`.
    Dead agent resumes with opencode2 `--session` (state lives in the worktree).
-6. Brief must hold: absolute worktree path, branch, files+lines, acceptance, gate,
-   no-commit, forbidden list, and the lane's `--agent` + `--model` (model read from the
-   role agent's md `model:` field) (`goal/SKILL.md` Phase 4). Replies caveman-compressed.
+6. Brief = the delegated subgraph (`goal/SKILL.md` §4.2): WHY, Nodes (files
+   + lines, one owner), Edges (inputs consumed / outputs produced),
+   Governing docs, Acceptance (frozen), Gate (verify commands), Forbidden,
+   Boundary (absolute worktree path, branch, no-commit). Include the lane's
+   `--agent` + `--model` (model read from the role agent's md `model:` field).
+7. Return = the implemented graph (`goal/SKILL.md` §4.3): Implemented
+   (files + what changed), Evidence (gate tails + log path), Deviations
+   (extra/missing nodes vs the delegated subgraph), Open. Replies
+   caveman-compressed, except `reviewer` (full prose).
