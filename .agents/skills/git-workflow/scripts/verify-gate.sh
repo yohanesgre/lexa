@@ -3,7 +3,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/../../../.." && pwd)"
 cd "$ROOT"
-[ -d package.json ] || { echo "verify-gate: repo root not found under $ROOT"; exit 2; }
+[ -f package.json ] || { echo "verify-gate: repo root not found under $ROOT"; exit 2; }
 
 LOG_DIR="${GATE_LOG_DIR:-/tmp/opencode}"
 mkdir -p "$LOG_DIR"
