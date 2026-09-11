@@ -85,10 +85,10 @@ describe("MachinesRuntimesSection", () => {
 });
 
 describe("RateLimitSection", () => {
-  it("names both /api and /mcp in the description", () => {
+  it("names the /api surface in the description", () => {
     h.state.rateLimit = { max: 6000, windowMs: 600000, envOverride: false };
     render(<RateLimitSection />, { wrapper: wrapper() });
-    expect(screen.getByText(/Applies to \/api and \/mcp/)).toBeInTheDocument();
+    expect(screen.getByText(/Applies to \/api;/)).toBeInTheDocument();
   });
 });
 

@@ -46,7 +46,7 @@ export function PersonalApiKeysSection() {
         <span className="text-xs text-lx-text-muted">Own keys only</span>
       </div>
       <p className="text-sm text-lx-text-secondary mb-4" style={{ maxWidth: 560 }}>
-        Personal API keys for scripts, MCP agents, and the CLI. A key acts as its owner — same project access as your session, never more. Device-login approvals (lexa-cli) mint keys here automatically.
+        Personal API keys for scripts, agents, and the CLI. A key acts as its owner — same project access as your session, never more. Device-login approvals (lexa-cli) mint keys here automatically.
       </p>
 
       {isLoading ? (
