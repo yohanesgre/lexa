@@ -8,7 +8,8 @@
 // `releases/latest`, which may be a web app release without the asset.
 import { Effect } from "effect";
 import { spawnSync } from "node:child_process";
-import { chmodSync, renameSync } from "node:fs";
+import { chmodSync, renameSync, unlinkSync } from "node:fs";
+import { basename, dirname, join } from "node:path";
 import { COMPILED } from "./machine";
 import { CLI_VERSION } from "./version";
 
@@ -27,6 +28,14 @@ export function compareVersions(a: string, b: string): number {
     if (d !== 0) return d;
   }
   return 0;
+}
+
+// After the lexa-cli → lx rename, an upgrade running from a legacy-named
+// binary must install the new binary as `lx` — otherwise the `lx` command
+// never appears (the old path just gets overwritten with new content).
+// Non-`lx` names (e.g. `lexa-cli`) resolve to the sibling `lx` path.
+export function lxInstallPath(self: string): string {
+  return basename(self) === "lx" ? self : join(dirname(self), "lx");
 }
 
 // Newest cli-v* release tag on GitHub, or null (API failure / none published).
@@ -61,11 +70,17 @@ export const cmdUpgradeCli = Effect.fn("LexaCli/cmdUpgradeCli")(function* () {
     return;
   }
   const self = process.execPath;
+  const target = lxInstallPath(self);
+  const renaming = target !== self;
   const baseUrl = `https://github.com/yohanesgre/lexa/releases/download/${latest}`;
   const url = `${baseUrl}/lx`;
-  console.log(`==> Upgrading CLI at ${self}`);
+  if (renaming) {
+    console.log(`==> Upgrading CLI (${basename(self)} → lx) at ${target}`);
+  } else {
+    console.log(`==> Upgrading CLI at ${self}`);
+  }
   console.log(`  ${CLI_VERSION} → ${latest} (${url})`);
-  const tmp = `${self}.new`;
+  const tmp = `${target}.new`;
   let result = spawnSync("curl", ["-fsSL", "-o", tmp, url], { stdio: "inherit" });
   if (result.status !== 0) {
     // Pre-rename releases published the asset as `lexa-cli`; retry the legacy
@@ -82,8 +97,19 @@ export const cmdUpgradeCli = Effect.fn("LexaCli/cmdUpgradeCli")(function* () {
     throw new Error(`downloaded file looks wrong (${size} bytes) — aborting`);
   }
   chmodSync(tmp, 0o755);
-  renameSync(tmp, self);
-  console.log(`  Installed ${self} (${(size / 1024 / 1024).toFixed(1)} MB)`);
+  renameSync(tmp, target);
+  if (renaming) {
+    // Legacy name is superseded — drop it so only `lx` remains on PATH.
+    try {
+      unlinkSync(self);
+    } catch {
+      // Already gone — nothing to migrate.
+    }
+  }
+  console.log(`  Installed ${target} (${(size / 1024 / 1024).toFixed(1)} MB)`);
+  if (renaming) {
+    console.log(`  Renamed \`${basename(self)}\` → \`lx\` — use \`lx\` from now on.`);
+  }
   console.log("  Restart the listener to pick up the new binary:");
   console.log("    lx machine restart   (if the systemd unit is installed)");
 });

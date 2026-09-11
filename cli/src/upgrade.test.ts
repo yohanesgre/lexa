@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { cliTagToVersion, compareVersions } from "./upgrade";
+import { cliTagToVersion, compareVersions, lxInstallPath } from "./upgrade";
 
 describe("cliTagToVersion", () => {
   it("parses cli-vX.Y.Z tags", () => {
@@ -12,6 +12,18 @@ describe("cliTagToVersion", () => {
     expect(cliTagToVersion("cli-v")).toBeNull();
     expect(cliTagToVersion("releases/latest")).toBeNull();
     expect(cliTagToVersion("cli-v1.2.3.4")).toBe("1.2.3.4"); // loose — any [0-9.] suffix parses
+  });
+});
+
+describe("lxInstallPath", () => {
+  it("keeps an existing lx path", () => {
+    expect(lxInstallPath("/home/u/.local/bin/lx")).toBe("/home/u/.local/bin/lx");
+    expect(lxInstallPath("/usr/local/bin/lx")).toBe("/usr/local/bin/lx");
+  });
+
+  it("migrates legacy names to the sibling lx path", () => {
+    expect(lxInstallPath("/home/u/.local/bin/lexa-cli")).toBe("/home/u/.local/bin/lx");
+    expect(lxInstallPath("/usr/local/bin/lexa-cli")).toBe("/usr/local/bin/lx");
   });
 });
 

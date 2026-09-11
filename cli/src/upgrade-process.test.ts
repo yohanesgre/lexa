@@ -99,6 +99,25 @@ describe("cmdUpgradeCli (COMPILED=true)", () => {
     restoreExecPath();
   });
 
+  it("installs as lx and removes the legacy name when run from lexa-cli", async () => {
+    stubReleases(["cli-v2.0.0"]);
+    stubBunFile(2 * 1024 * 1024);
+    const log = vi.spyOn(console, "log").mockImplementation(() => {});
+    const restoreExecPath = mockExecPath(join(dir, "lexa-cli"));
+    writeFileSync(join(dir, "lexa-cli"), "old-binary");
+    const mod = await import("./upgrade");
+    await Effect.runPromise(mod.cmdUpgradeCli());
+
+    expect(childMocks.curlCalls[0]!.args).toEqual(["-fsSL", "-o", join(dir, "lx.new"), "https://github.com/yohanesgre/lexa/releases/download/cli-v2.0.0/lx"]);
+    expect(existsSync(join(dir, "lx"))).toBe(true);
+    expect(existsSync(join(dir, "lexa-cli"))).toBe(false);
+    expect(statSync(join(dir, "lx")).mode & 0o777).toBe(0o755);
+    const out = log.mock.calls.map((c) => String(c[0]!)).join("\n");
+    expect(out).toContain("Renamed `lexa-cli` → `lx`");
+    log.mockRestore();
+    restoreExecPath();
+  });
+
   it("fails when both the lx and legacy asset downloads exit non-zero", async () => {
     stubReleases(["cli-v2.0.0"]);
     stubBunFile(2 * 1024 * 1024);

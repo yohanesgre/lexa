@@ -16,9 +16,16 @@ release the app image. The version lives in `cli/package.json` —
 
 ### Changed
 
-- CLI binary renamed `lexa-cli` → `lx`.
-- Releases publish the legacy `lexa-cli` asset for one transition cycle.
-- Dev shim renamed `lx-dev`.
+- CLI binary renamed `lexa-cli` → `lx`; the legacy `lexa-cli` release asset is
+  published for one transition cycle, and the dev shim is now `lx-dev`.
+- `install-cli.sh` adds `~/.local/bin` (or `$LEXA_CLI_DIR`) to the shell PATH
+  when missing, and removes stale `lexa-cli` / `lexa-cli-dev` shims.
+
+### Fixed
+
+- `lx upgrade` run from a legacy `lexa-cli` binary now installs the new binary
+  as `lx` and removes the old path, so the `lx` command appears after
+  upgrading (it previously rewrote the legacy path in place).
 
 ## [2026.3.0] - 2026-09-09
 
