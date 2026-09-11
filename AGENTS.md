@@ -131,17 +131,13 @@ Each is a hard-won design fix; rationale lives in `docs/ARCHITECTURE.md` and the
 These rules are non-negotiable and apply to every agent working on Lexa:
 
 - **@designer may only modify:**
-  - `app/components/` (UI components)
-  - `app/routes/` (route-level layout/styling, no backend logic)
-  - `app/styles/` (CSS, design tokens)
-  - `app/lib/` (client-side query hooks and utilities — never server libs)
-  - `wireframes/DESIGN_SYSTEM.md` and `wireframes/src/design-system.css` (the wireframes submodule)
+  - `wireframes/src/**` and `wireframes/DESIGN_SYSTEM.md` (the wireframes submodule)
+  - `docs/design-system.html` (PHOSPHOR primitives)
+  - design tokens/specs as represented in the wireframes
 - **@designer must never touch:**
-  - `server/` (any backend code: repos, services, API, DB, GitHub)
-  - `shared/types.ts` (schema types — read-only)
-  - `shared/` except pure frontend utilities explicitly in scope
-  - `docs/` (design docs: `SCHEMA.md`, `LAYERS.md`, `API.md`, `ARCHITECTURE.md`)
+  - `app/`, `server/`, `shared/`, `cli/` (all implementation belongs to @swe)
   - `package.json`, `tsconfig.json`, `app.config.ts`
+- **@swe owns all implementation:** `app/components/`, `app/routes/`, `app/styles/`, `app/lib/`, `server/`, `shared/`, `cli/`. Implement UI from `wireframes/` verbatim; missing/drifted wireframes → report back for a designer pass, never invent UI.
 - **@fixer scope is per-task** — specify exact files; same constraints apply unless the task explicitly includes backend files.
 - If an agent discovers a need for a new backend endpoint or shared type, it must report back to the orchestrator — never add it itself.
 
