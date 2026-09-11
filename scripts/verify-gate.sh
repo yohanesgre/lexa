@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT="$(cd "$(dirname "$0")/../../../.." && pwd)"
+ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
 cd "$ROOT"
 [ -f package.json ] || { echo "verify-gate: repo root not found under $ROOT"; exit 2; }
 
