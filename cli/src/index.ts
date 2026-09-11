@@ -96,16 +96,15 @@ function requireClient(flags: Record<string, string | boolean>): Effect.Effect<{
 }
 
 // Run a command effect at the boundary: print failures with the command's
-// prefix and exit(1). `raw` skips the prefix — DeployError/CfApiError already
-// carry their full original stderr lines (e.g. "  ERROR: CF API token ...").
-function runCommand<A>(prefix: string, program: Effect.Effect<A, unknown, CliConfigService>, raw = false): Promise<A> {
+// prefix and exit(1).
+function runCommand<A>(prefix: string, program: Effect.Effect<A, unknown, CliConfigService>): Promise<A> {
   return Effect.runPromise(
     program.pipe(
       Effect.provide(CliConfigService.Default),
       Effect.catchAll((e) =>
         Effect.sync((): never => {
           const msg = e instanceof Error ? e.message : String(e);
-          console.error(raw ? msg : `  ${prefix}: ${msg}`);
+          console.error(`  ${prefix}: ${msg}`);
           process.exit(1);
         })
       )
@@ -372,24 +371,11 @@ function resolveSwimlane(client: LexaClient, slug: string, name: string): Effect
   });
 }
 
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-
-// Accept the full task UUID or the 8-char prefix shown by `task list`
-// (the table truncates IDs for readability). Prefixes resolve by unique
-// match against the project's tasks.
-function resolveTaskId(client: LexaClient, slug: string, id: string): Effect.Effect<string, unknown, never> {
-  return Effect.gen(function* () {
-    if (UUID_RE.test(id)) return id;
-    const tasks = yield* client.listTasks(slug, 1000);
-    const matches = tasks.filter((t) => t.id.toLowerCase().startsWith(id.toLowerCase()));
-    if (matches.length === 1) return matches[0]!.id;
-    if (matches.length === 0) {
-      console.error(`  Task "${id}" not found. Use the full id from \`lx task list --json\`.`);
-      process.exit(1);
-    }
-    console.error(`  Task id "${id}" is ambiguous (${matches.length} matches). Use a longer prefix or the full id.`);
-    process.exit(1);
-  });
+// Task ids are accepted verbatim: the full UUID or the ticket key (PREFIX-N,
+// e.g. "NIM-12"). The server resolves both (`server/api/task-id.ts`), so no
+// client-side lookup is needed.
+function resolveTaskId(id: string): Effect.Effect<string, never, never> {
+  return Effect.succeed(id);
 }
 
 function cmdTaskList(flags: Record<string, string | boolean>, args: string[]): Effect.Effect<void, unknown, CliConfigService> {
@@ -407,7 +393,7 @@ function cmdTaskList(flags: Record<string, string | boolean>, args: string[]): E
     const colName = new Map(columns.map((c) => [c.id, c.name]));
     printTable(tasks.map((t) => ({
       KEY: t.key ?? "",
-      ID: t.id.slice(0, 8),
+      ID: t.id,
       TITLE: t.title,
       COLUMN: colName.get(t.columnId) ?? t.columnId,
       PRIORITY: t.priority ?? "",
@@ -452,8 +438,13 @@ function cmdTaskMove(flags: Record<string, string | boolean>, args: string[]): E
       process.exit(1);
     }
     const columnId = yield* resolveColumn(client, slug, column);
-    const swimlaneId = swimlane ? yield* resolveSwimlane(client, slug, swimlane) : "";
-    const taskId = yield* resolveTaskId(client, slug, id);
+    const taskId = yield* resolveTaskId(id);
+    // Every task belongs to a swimlane (swimlane_id NOT NULL) — only a
+    // user-supplied --swimlane changes it; otherwise keep the task's current
+    // lane. Sending "" would fail the FK.
+    const swimlaneId = swimlane
+      ? yield* resolveSwimlane(client, slug, swimlane)
+      : (yield* client.getTask(slug, taskId)).swimlaneId;
     const task = yield* client.moveTask(slug, taskId, { columnId, swimlaneId });
     console.log(`  Moved ${taskId} → ${column}`);
   });
@@ -465,7 +456,7 @@ function cmdTaskGet(flags: Record<string, string | boolean>, args: string[]): Ef
     const slug = (typeof flags.project === "string" && flags.project) || "";
     const id = args[0]! || "";
     if (!slug || !id) { console.error("  Usage: lx task get <id> --project <slug>"); process.exit(1); }
-    const taskId = yield* resolveTaskId(client, slug, id);
+    const taskId = yield* resolveTaskId(id);
     const t = yield* client.getTask(slug, taskId);
     if (flags.json === true) { console.log(JSON.stringify(t, null, 2)); return; }
     console.log(`  ${t.key} — ${t.title}`);
@@ -491,7 +482,7 @@ function cmdTaskUpdate(flags: Record<string, string | boolean>, args: string[]):
       console.error("  Usage: lx task update <id> --project <slug> [--title <t>] [--priority <p>] [--type <t>]");
       process.exit(1);
     }
-    const taskId = yield* resolveTaskId(client, slug, id);
+    const taskId = yield* resolveTaskId(id);
     const t = yield* client.updateTask(slug, taskId, { ...(title !== undefined ? { title } : {}), ...(priority !== undefined ? { priority } : {}), ...(type !== undefined ? { type } : {}) });
     console.log(`  Updated ${taskId} — ${t.title}`);
   });
@@ -736,7 +727,6 @@ async function main(): Promise<void> {
 
   let program: Effect.Effect<unknown, unknown, CliConfigService> | null = null;
   let prefix = "Failed";
-  let raw = false;
 
   switch (cmd) {
     case "login": program = cmdLogin(flags, positionals); prefix = "Login failed"; break;
@@ -831,7 +821,7 @@ async function main(): Promise<void> {
   }
 
   if (!program) usage("", "");
-  await runCommand(prefix, program as Effect.Effect<unknown, unknown, CliConfigService>, raw);
+  await runCommand(prefix, program as Effect.Effect<unknown, unknown, CliConfigService>);
   // Explicit exit: bun keeps a read interest on TTY stdin after interactive
   // prompts, which would otherwise keep the event loop alive forever.
   process.exit(0);
