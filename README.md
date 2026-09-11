@@ -105,15 +105,15 @@ Lexa is scriptable end to end — agents drive it without touching a browser:
 export LEXA_URL=https://lexa.example.com LEXA_API_KEY=lxk_...
 lx status                                   # connectivity + auth check
 lx task list --project my-project --json    # machine-readable
-lx task get <short-id> --project my-project # description as Markdown
+lx task get NIM-12 --project my-project     # description as Markdown
 lx task move <id> --project my-project --column Done
 lx wiki get getting-started --project my-project
 ```
 
 - One `lxk_` key (Settings → API Keys) is the only credential. Commands
   never prompt when piped and exit non-zero with errors on stderr.
-- Columns/swimlanes by name, projects by slug, tasks by UUID or short-ID
-  prefix; every `list`/`get` takes `--json`.
+- Columns/swimlanes by name, projects by slug, tasks by UUID or PREFIX-N
+  ticket key; every `list`/`get` takes `--json`.
 - For anything the CLI doesn't cover, speak the REST contract directly:
   [`docs/API.md`](docs/API.md).
 - To run Lexa tasks *as* an agent runtime (persistent workspace, repo

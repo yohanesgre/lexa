@@ -4,7 +4,7 @@
 // server stands in for the Lexa API for the env/saved-login fallback tests.
 // NOTE: the subprocess is spawned ASYNC — spawnSync would block this worker's
 // event loop and the in-process fake server could never accept connections.
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { spawn } from "node:child_process";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
@@ -331,6 +331,122 @@ describe("login (legacy key + device flow)", () => {
     const r = await runCli(["login"], { LEXA_URL: "", LEXA_API_KEY: "" });
     expect(r.status).toBe(1);
     expect(r.stderr).toContain("Server URL is required");
+  });
+});
+
+describe("task id resolution + move (server-delegating)", () => {
+  let server: Server;
+  let base = "";
+  let requests: Array<{ method: string; url: string; body: string }> = [];
+  const API_KEY = "lxk_move_key_1234567890123456789012345678901234567890";
+  const UUID = "11111111-2222-3333-4444-555555555555";
+  const task = {
+    id: UUID,
+    key: "NIM-12",
+    title: "Fix the thing",
+    priority: null,
+    type: null,
+    columnId: "col-1",
+    swimlaneId: "lane-1",
+    assignees: null,
+    createdAt: "2026-01-01T00:00:00.000Z",
+    updatedAt: "2026-01-01T00:00:00.000Z",
+  };
+
+  beforeAll(async () => {
+    server = createServer((req, res) => {
+      let body = "";
+      req.on("data", (c) => (body += c));
+      req.on("end", () => {
+        const url = new URL(req.url ?? "", base);
+        requests.push({ method: req.method ?? "GET", url: url.pathname + url.search, body });
+        res.setHeader("Content-Type", "application/json");
+        if (url.pathname === "/api/projects/demo/columns") {
+          res.end(JSON.stringify({ data: [{ id: "col-1", name: "In Progress", wipLimit: null, requiredFields: null, color: null, position: 0, githubState: null }] }));
+          return;
+        }
+        if (url.pathname === "/api/projects/demo/swimlanes") {
+          res.end(JSON.stringify({ data: [{ id: "lane-2", name: "Lane Two", position: 1 }] }));
+          return;
+        }
+        const move = url.pathname.match(/^\/api\/projects\/demo\/tasks\/(.+)\/move$/);
+        if (req.method === "POST" && move) {
+          const payload = JSON.parse(body) as { columnId: string; swimlaneId: string };
+          res.end(JSON.stringify({ data: { ...task, columnId: payload.columnId, swimlaneId: payload.swimlaneId } }));
+          return;
+        }
+        if (req.method === "GET" && url.pathname === "/api/projects/demo/tasks") {
+          res.end(JSON.stringify({ data: [task] }));
+          return;
+        }
+        const get = url.pathname.match(/^\/api\/projects\/demo\/tasks\/(.+)$/);
+        if (req.method === "GET" && get) {
+          res.end(JSON.stringify(task));
+          return;
+        }
+        res.writeHead(404);
+        res.end(JSON.stringify({ error: { code: "NOT_FOUND", message: "not found" } }));
+      });
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+  });
+
+  afterAll(async () => {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  });
+
+  beforeEach(() => {
+    requests = [];
+  });
+
+  function moveRequest(): { columnId: string; swimlaneId: string } | undefined {
+    const req = requests.find((q) => q.method === "POST" && q.url.endsWith("/move"));
+    return req ? (JSON.parse(req.body) as { columnId: string; swimlaneId: string }) : undefined;
+  }
+
+  it("task move without --swimlane sends the task's current non-empty swimlaneId", async () => {
+    const r = await runCli(["task", "move", UUID, "--project", "demo", "--column", "In Progress"], { LEXA_URL: base, LEXA_API_KEY: API_KEY });
+    expect(r.status).toBe(0);
+    const payload = moveRequest();
+    expect(payload).toBeDefined();
+    expect(payload!.columnId).toBe("col-1");
+    expect(payload!.swimlaneId).toBe("lane-1");
+    expect(payload!.swimlaneId).not.toBe("");
+  });
+
+  it("task move with --swimlane sends the resolved named swimlane id", async () => {
+    const r = await runCli(["task", "move", UUID, "--project", "demo", "--column", "In Progress", "--swimlane", "Lane Two"], { LEXA_URL: base, LEXA_API_KEY: API_KEY });
+    expect(r.status).toBe(0);
+    expect(moveRequest()!.swimlaneId).toBe("lane-2");
+  });
+
+  it("task list non-JSON output shows the full UUID", async () => {
+    const r = await runCli(["task", "list", "--project", "demo"], { LEXA_URL: base, LEXA_API_KEY: API_KEY });
+    expect(r.status).toBe(0);
+    expect(r.stdout).toContain(UUID);
+  });
+
+  it("PREFIX-N task id passes through to the server verbatim (no client-side list scan)", async () => {
+    const r = await runCli(["task", "move", "NIM-12", "--project", "demo", "--column", "In Progress"], { LEXA_URL: base, LEXA_API_KEY: API_KEY });
+    expect(r.status).toBe(0);
+    expect(requests.some((q) => q.url === "/api/projects/demo/tasks/NIM-12")).toBe(true);
+    expect(requests.some((q) => q.url.includes("?limit="))).toBe(false);
+    expect(moveRequest()!.swimlaneId).toBe("lane-1");
+  });
+
+  it("full UUID task id passes through unchanged", async () => {
+    const r = await runCli(["task", "get", UUID, "--project", "demo", "--json"], { LEXA_URL: base, LEXA_API_KEY: API_KEY });
+    expect(r.status).toBe(0);
+    expect(requests.some((q) => q.url === `/api/projects/demo/tasks/${UUID}`)).toBe(true);
+    expect(requests.some((q) => q.url.includes("?limit="))).toBe(false);
+  });
+
+  it("PREFIX-N task id passes through for task get too", async () => {
+    const r = await runCli(["task", "get", "NIM-12", "--project", "demo", "--json"], { LEXA_URL: base, LEXA_API_KEY: API_KEY });
+    expect(r.status).toBe(0);
+    expect(requests.some((q) => q.url === "/api/projects/demo/tasks/NIM-12")).toBe(true);
+    expect(requests.some((q) => q.url.includes("?limit="))).toBe(false);
   });
 });
 
