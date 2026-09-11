@@ -1,11 +1,11 @@
 // LexaClient — request building + error mapping against a local http server.
 // The client takes a base url + api key via constructor injection, so no
 // network beyond 127.0.0.1 is touched.
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { Effect, Exit, Cause, Either } from "effect";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
-import { LexaClient, ApiError } from "./api";
+import { LexaClient, ApiError, type TaskInfo } from "./api";
 
 interface SeenRequest {
   method: string;
@@ -17,6 +17,20 @@ interface SeenRequest {
 let server: Server;
 let base = "";
 const seen: SeenRequest[] = [];
+
+const linkedTask: TaskInfo = {
+  id: "t2",
+  key: "EG-2",
+  title: "Linked",
+  priority: null,
+  type: null,
+  columnId: "open",
+  swimlaneId: "sl",
+  assignees: null,
+  githubs: [{ issueId: "i1", issueNumber: 5, repo: "owner/repo", syncedState: "open", url: "https://github.com/owner/repo/issues/5", outOfSync: false }],
+  createdAt: "2026-01-01T00:00:00Z",
+  updatedAt: "2026-01-01T00:00:00Z",
+};
 
 function readBody(req: IncomingMessage): Promise<string> {
   return new Promise((resolve) => {
@@ -39,6 +53,7 @@ beforeAll(async () => {
     if (url === "/api/health") return json(res, 200, { ok: true });
     if (url === "/api/projects") return json(res, 200, { data: [{ id: "p1", slug: "demo", name: "Demo", description: null }] });
     if (url === "/api/projects/demo/tasks" && req.method === "POST") return json(res, 201, { data: { id: "t1", title: "New" }, activity: [] });
+    if (url === "/api/projects/demo/tasks/t2/github-link" && req.method === "POST") return json(res, 200, { data: linkedTask, activity: [] });
     if (url === "/api/hearth/runtimes" && req.method === "GET") { res.writeHead(401, { "Content-Type": "text/plain" }); return res.end("nope"); }
     if (url === "/api/projects/demo/tasks/t1/github-link") return json(res, 409, { error: { code: "ALREADY_LINKED", message: "issue already linked", details: { issueId: "42" } } });
     if (url === "/api/hearth/machines/heartbeat") { res.writeHead(500, { "Content-Type": "text/plain" }); return res.end("boom"); }
@@ -97,6 +112,15 @@ describe("LexaClient request building", () => {
   it("task mutations unwrap the { data, activity } envelope", async () => {
     const out = await Effect.runPromise(client().createTask("demo", { columnId: "c1", swimlaneId: "s1", title: "New" }));
     expect(out).toEqual({ id: "t1", title: "New" });
+  });
+
+  it("linkGithubIssue unwraps the { data, activity } envelope to the TaskInfo", async () => {
+    const out = await Effect.runPromise(client().linkGithubIssue("demo", "t2", "owner/repo"));
+    expect(out).toEqual(linkedTask);
+    expect((out as { data?: unknown }).data).toBeUndefined();
+    const req = seen.find((r) => r.url === "/api/projects/demo/tasks/t2/github-link");
+    expect(req?.method).toBe("POST");
+    expect(JSON.parse(req?.body ?? "{}")).toEqual({ repo: "owner/repo" });
   });
 
   it("claimRuntimeEvent sends x-machine-secret", async () => {
@@ -183,6 +207,26 @@ describe("LexaClient error mapping", () => {
     expect(err).toBeInstanceOf(ApiError);
     expect(err.status).toBe(0);
     expect(err.message.length).toBeGreaterThan(0);
+  });
+
+  it("hanging server rejects with ApiError status 0 at the request timeout", async () => {
+    const hanging = createServer(() => { /* never respond */ });
+    await new Promise<void>((resolve) => hanging.listen(0, "127.0.0.1", resolve));
+    const port = (hanging.address() as AddressInfo).port;
+    // Real deadline is 30s; shrink it to 10ms so the test fails fast while the
+    // spy still records the production timeout value.
+    const realTimeout = AbortSignal.timeout.bind(AbortSignal);
+    const spy = vi.spyOn(AbortSignal, "timeout").mockImplementation((ms: number) => realTimeout(Math.min(ms, 10)));
+    try {
+      const err = await failureOf(new LexaClient({ url: `http://127.0.0.1:${port}`, apiKey: "k" }).health());
+      expect(err).toBeInstanceOf(ApiError);
+      expect(err.status).toBe(0);
+      expect(spy).toHaveBeenCalledWith(30_000);
+    } finally {
+      spy.mockRestore();
+      hanging.closeAllConnections();
+      await new Promise<void>((resolve) => hanging.close(() => resolve()));
+    }
   });
 
   it("404 with envelope → code NOT_FOUND", async () => {
