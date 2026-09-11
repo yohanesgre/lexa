@@ -475,8 +475,11 @@ fetch_release() {
   if [ -n "${want}" ] && [ "${want}" != "latest" ]; then
     tag="${want}"
   else
-    tag=$(curl -fsSL "https://api.github.com/repos/${LEXA_REPO}/releases/latest" \
-      | grep -o '"tag_name": *"[^"]*"' | head -1 | sed 's/.*"tag_name": *"//;s/"//')
+    # Newest web-app release from the list — NOT `releases/latest`, which can
+    # point at a CLI release (`cli-v*`) published after the newest app tag.
+    # The `v[0-9]` anchor never matches `cli-v...`.
+    tag=$(curl -fsSL "https://api.github.com/repos/${LEXA_REPO}/releases?per_page=30" \
+      | grep -o '"tag_name": *"v[0-9][^"]*"' | head -1 | sed 's/.*"tag_name": *"//;s/"//')
     [ -n "${tag}" ] || die "could not resolve latest release of ${LEXA_REPO} (rate limit? pass RELEASE_TAG=vX.Y.Z)"
   fi
   local tarball="lexa-${kind}-${tag}.tar.gz"
