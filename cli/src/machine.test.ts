@@ -186,3 +186,13 @@ describe("workspaceList", () => {
     log.mockRestore();
   });
 });
+
+describe("packed daemon embed", () => {
+  it("committed state is the empty stub — source listeners build the daemon from disk", async () => {
+    const packed = await import("./packed");
+    expect(packed.DAEMON_SOURCE).toBe("");
+    const source = readFileSync(new URL("./packed.ts", import.meta.url), "utf-8");
+    expect(source.length).toBeLessThan(400);
+    expect(source).toContain('export const DAEMON_SOURCE = "";');
+  });
+});

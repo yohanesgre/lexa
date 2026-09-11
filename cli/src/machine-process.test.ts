@@ -188,6 +188,20 @@ describe("systemd unit lifecycle", () => {
     log.mockRestore();
   });
 
+  it("machineUninstall on a non-systemd host still removes the unit (no disable, no daemon-reload)", async () => {
+    childMocks.spawnSyncStatus = 3; // hasSystemd: not 0/1 → false
+    const mod = await import("./machine");
+    const log = vi.spyOn(console, "log").mockImplementation(() => {});
+    mkdirSync(join(homeDir, ".config", "systemd", "user"), { recursive: true });
+    writeFileSync(UNIT_PATH(), "[Unit]\n");
+    await Effect.runPromise(mod.machineUninstall(GROUP_DIR()));
+    expect(sysctlCalls().some((c) => c.includes("disable"))).toBe(false);
+    expect(sysctlCalls()).not.toContain("--user daemon-reload");
+    expect(existsSync(UNIT_PATH())).toBe(false);
+    expect(log.mock.calls.map((c) => String(c[0]!)).join("\n")).toContain("Removed listener unit");
+    log.mockRestore();
+  });
+
   it("machineLogs runs journalctl -f and exits with its status on failure", async () => {
     childMocks.spawnSyncStatus = 0;
     const mod = await import("./machine");
@@ -212,8 +226,9 @@ describe("machineListen daemon spawning", () => {
     const mod = await import("./machine");
     const cfg = (await import("./config")).CliConfigService;
     const svc = Effect.runSync(Effect.scoped(Layer.build(cfg.Default)));
-    // machineListen exits(0) without a persisted machine secret — pre-write it
-    // into the group dir derived from the config url.
+    // machineListen exits(1) without a persisted machine secret, so systemd
+    // (Restart=on-failure) retries — pre-write it into the group dir derived
+    // from the config url.
     await Effect.runPromise(mod.saveMachineSecret("sec-1", GROUP_DIR()));
     const config = { url: "http://fake-server", apiKey: "lxk_key" };
     // Race: the listener is a forever loop — let one iteration run, then
@@ -321,5 +336,32 @@ describe("machineListen daemon spawning", () => {
     const relayed = childMocks.heartbeats.find((h) => (h.daemonErrors as Array<{ runtimeId: string; error: string }> | undefined)?.length);
     expect(relayed).toBeDefined();
     expect((relayed?.daemonErrors as Array<{ runtimeId: string; error: string }> | undefined)?.[0]).toEqual({ runtimeId: "r1", error: "API key revoked" });
+  });
+
+  it("exits 1 when the machine secret is missing, so Restart=on-failure retries", async () => {
+    const exitSpy = vi.spyOn(process, "exit").mockImplementation(((code?: number) => { throw new Error(`exit(${code})`); }) as never);
+    const err = vi.spyOn(console, "error").mockImplementation(() => {});
+    const mod = await import("./machine");
+    const cfg = (await import("./config")).CliConfigService;
+    const svc = Effect.runSync(Effect.scoped(Layer.build(cfg.Default)));
+    await expect(
+      Effect.runPromise(mod.machineListen(CONFIG).pipe(Effect.provideService(cfg, Context.get(svc, cfg)))),
+    ).rejects.toThrow(/exit\(1\)/);
+    expect(err.mock.calls.map((c) => String(c[0]!)).join("\n")).toContain("Machine secret missing");
+    exitSpy.mockRestore();
+    err.mockRestore();
+  });
+
+  it("builds the daemon bundle once per listener boot, not once per spawn", async () => {
+    writeRuntimeEnv("opencode");
+    childMocks.setupEvent = {
+      event: { id: "evt-1", machineId: "m1", action: "install", agentCli: "command-code", apiKeyId: null, status: "pending", error: null, createdAt: "2026-01-01T00:00:00Z", claimedAt: null, finishedAt: null },
+      rawKey: "lxk_onetime",
+    };
+    await runListenOnce();
+    // Two daemons were spawned (boot runtime + setup-event runtime) but the
+    // bundle is built exactly once, at listener boot.
+    expect(childMocks.spawnCalls.filter((c) => c.cmd === "bun").length).toBe(2);
+    expect(childMocks.spawnSyncCalls.filter((c) => c.cmd === "bun").length).toBe(1);
   });
 });
