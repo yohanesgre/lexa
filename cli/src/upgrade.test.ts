@@ -7,11 +7,19 @@ describe("cliTagToVersion", () => {
     expect(cliTagToVersion("cli-v0.1.0")).toBe("0.1.0");
   });
 
+  it("accepts dot-separated numeric forms", () => {
+    expect(cliTagToVersion("cli-v1.2")).toBe("1.2");
+    expect(cliTagToVersion("cli-v1.2.3")).toBe("1.2.3");
+    expect(cliTagToVersion("cli-v1.2.3.4")).toBe("1.2.3.4");
+  });
+
   it("rejects non-cli tags and malformed versions", () => {
     expect(cliTagToVersion("v1.2.3")).toBeNull();
     expect(cliTagToVersion("cli-v")).toBeNull();
     expect(cliTagToVersion("releases/latest")).toBeNull();
-    expect(cliTagToVersion("cli-v1.2.3.4")).toBe("1.2.3.4"); // loose — any [0-9.] suffix parses
+    expect(cliTagToVersion("cli-v1.2.")).toBeNull();
+    expect(cliTagToVersion("cli-vx")).toBeNull();
+    expect(cliTagToVersion("cli-v1..2")).toBeNull();
   });
 });
 

@@ -41,3 +41,6 @@ lexa-deploy/
 # Slim worktrees — local orchestration checkouts, never commit
 .slim/worktrees/
 .worktrees/
+
+# Review artifacts (HTML reports from review lanes) — never commit
+.reviews/
