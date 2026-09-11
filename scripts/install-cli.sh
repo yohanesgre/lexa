@@ -55,10 +55,46 @@ if [ "$downloaded" -ne 1 ]; then
 fi
 chmod 755 "$CLI_BIN"
 
+# Migrate legacy names from the lexa-cli → lx rename (prod binary + dev shim).
+for legacy in lexa-cli lexa-cli-dev; do
+  if [ -e "$CLI_DIR/$legacy" ]; then
+    rm -f "$CLI_DIR/$legacy"
+    echo "  Removed legacy $CLI_DIR/$legacy (superseded by lx/lx-dev)"
+  fi
+done
+
+# Put CLI_DIR on PATH in the user's shell rc so `lx` works in new shells.
+register_path() {
+  rc="$1"
+  if grep -qsF "# lx installer: PATH" "$rc"; then
+    return 0
+  fi
+  {
+    printf '\n# lx installer: PATH\n'
+    printf 'export PATH="%s:$PATH"\n' "$CLI_DIR"
+  } >> "$rc"
+  echo "  Added $CLI_DIR to PATH in $rc"
+}
+
+path_registered=0
+case ":$PATH:" in
+  *":$CLI_DIR:"*) path_registered=1 ;;
+esac
+
+if [ "$path_registered" -eq 0 ]; then
+  case "$(basename "${SHELL:-}")" in
+    zsh)  register_path "$HOME/.zshrc" ;;
+    bash) register_path "$HOME/.bashrc" ;;
+    *)    register_path "$HOME/.profile" ;;
+  esac
+fi
+
 echo ""
 echo "════════════════════════════════════════════════"
 echo "  lx installed: $CLI_BIN"
 echo ""
-echo "  Next: $CLI_BIN login <url>"
-echo "  (add $CLI_DIR to PATH if needed)"
+echo "  Next: lx login <url>"
+if [ "$path_registered" -eq 0 ]; then
+  echo "  PATH updated — open a new shell (or source the rc file) to use \`lx\`."
+fi
 echo "════════════════════════════════════════════════"
