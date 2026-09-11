@@ -16,7 +16,7 @@ import { CLI_VERSION } from "./version";
 const GH_API = "https://api.github.com/repos/yohanesgre/lexa/releases?per_page=100";
 
 export function cliTagToVersion(tag: string): string | null {
-  const m = /^cli-v([0-9.]+)$/.exec(tag);
+  const m = /^cli-v(\d+(?:\.\d+)*)$/.exec(tag);
   return m ? m[1]! : null;
 }
 
