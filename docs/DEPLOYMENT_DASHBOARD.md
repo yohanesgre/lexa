@@ -47,7 +47,7 @@ Prereqs: a Cloudflare account (Workers Paid, $5/mo — free D1 caps at
 11. Open `<worker>.workers.dev/setup` → create the superadmin.
     The first superadmin locks setup.
 12. Login → Settings → API Keys → mint the first machine key
-    (or `lexa-cli login --url <worker-url>` device flow).
+    (or `lx login --url <worker-url>` device flow).
 13. Custom domain (optional): Workers & Pages → worker → Settings →
     Domains & Routes → add route `<domain>/*` (zone must be on this
     account). Workers.dev needs nothing.

@@ -18,7 +18,7 @@
  *   HEARTH_MACHINE_ID    stable machine id managed by the CLI listener
  *   HEARTH_POLL_MS       poll interval (default 3000)
  *
- * Run: the machine listener spawns this as a child (`lexa-cli machine listen`,
+ * Run: the machine listener spawns this as a child (`lx machine listen`,
  * or `bun run cli/src/index.ts machine listen` from source).
  */
 import { spawn } from "node:child_process";
@@ -36,7 +36,7 @@ import { Effect, Data, Fiber } from "effect";
 const LEXA_DIR = process.env.LEXA_DIR ?? join(process.env.HOME ?? "", ".lexa");
 
 // ── Credential resolution ──
-// Priority: process env → ~/.lexa/config.json (saved `lexa-cli login`) →
+// Priority: process env → ~/.lexa/config.json (saved `lx login`) →
 // the per-runtime env written by the CLI listener. This makes a manual
 // `bun run daemon.ts` work even when the shell has no LEXA_* vars, matching
 // what the systemd unit gets via EnvironmentFile.
@@ -129,12 +129,12 @@ const CMD_BIN = process.env.HEARTH_CMD_BIN ?? "cmd";
 if (import.meta.main) {
   if (!BEARER_KEY && !X_HEARTH_TOKEN) {
     console.error("No credential found. Set LEXA_API_KEY (server API key) or LXK_HEARTH_DAEMON_TOKEN (shared secret),");
-    console.error("or log in first with `lexa-cli login --url <base> --key <lxk_...>` — the daemon falls back to that saved config.");
+    console.error("or log in first with `lx login --url <base> --key <lxk_...>` — the daemon falls back to that saved config.");
     process.exit(1);
   }
 
   if (!MACHINE_ID) {
-    console.error("No machine id found. Run `lexa-cli machine listen` after login so this daemon can register.");
+    console.error("No machine id found. Run `lx machine listen` after login so this daemon can register.");
     process.exit(1);
   }
 }
@@ -269,7 +269,7 @@ const main = Effect.gen(function* () {
     });
   });
   // Heartbeat loop — reports liveness. Catalog discovery belongs to the
-  // parent lexa-cli listener.
+  // parent lx listener.
   yield* Effect.fork(
     Effect.forever(
       Effect.gen(function* () {

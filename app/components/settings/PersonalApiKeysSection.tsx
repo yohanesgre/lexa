@@ -46,7 +46,7 @@ export function PersonalApiKeysSection() {
         <span className="text-xs text-lx-text-muted">Own keys only</span>
       </div>
       <p className="text-sm text-lx-text-secondary mb-4" style={{ maxWidth: 560 }}>
-        Personal API keys for scripts, agents, and the CLI. A key acts as its owner — same project access as your session, never more. Device-login approvals (lexa-cli) mint keys here automatically.
+        Personal API keys for scripts, agents, and the CLI. A key acts as its owner — same project access as your session, never more. Device-login approvals (lx) mint keys here automatically.
       </p>
 
       {isLoading ? (
@@ -61,7 +61,7 @@ export function PersonalApiKeysSection() {
             </div>
             <h3 className="font-display text-lg font-medium text-lx-text-primary">No API keys yet</h3>
             <p className="text-sm text-lx-text-secondary mt-1" style={{ maxWidth: 300 }}>
-              Create a key below — or pair the CLI with <KeyCode>lexa-cli login &lt;URL&gt;</KeyCode> and approve it right here.
+              Create a key below — or pair the CLI with <KeyCode>lx login &lt;URL&gt;</KeyCode> and approve it right here.
             </p>
           </div>
         </div>
@@ -134,7 +134,7 @@ export function PersonalApiKeysSection() {
           </button>
         </div>
         <div className="field-hint" style={{ marginTop: 8 }}>
-          Key ini terikat ke akunmu — pakai <KeyCode>lexa-cli login &lt;URL&gt;</KeyCode> untuk masuk tanpa key manual.
+          Key ini terikat ke akunmu — pakai <KeyCode>lx login &lt;URL&gt;</KeyCode> untuk masuk tanpa key manual.
         </div>
       </div>
 

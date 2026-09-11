@@ -84,10 +84,10 @@ empty** — after that the DB wins and env is ignored until the key is cleared.
 | `GITHUB_PRIVATE_KEY_FILE` | Path to a `.pem` file, read at mirror time — **no escaping needed** (recommended; inline wins if both set) |
 | `GITHUB_WEBHOOK_SECRET` | The secret from §1 (must match the App exactly) |
 
-The `lexa-cli` operator tool defaults to the live server: `github status`
+The `lx` operator tool defaults to the live server: `github status`
 prints the server's effective settings and `github setup` pushes to the
 Settings API (applied immediately, env untouched) — both require
-`lexa-cli login`. The env-file path is explicit `--local`:
+`lx login`. The env-file path is explicit `--local`:
 `github setup --local` writes the bootstrap values (imported at the next
 boot only while the DB keys are unset) and `github status --local` validates
 them. When not logged in, the remote default fails with a hint to log in or

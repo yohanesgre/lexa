@@ -1,4 +1,4 @@
-// lexa-cli upgrade — self-update the CLI binary (GitHub release). Web app
+// lx upgrade — self-update the CLI binary (GitHub release). Web app
 // upgrades go through the install script (re-run pulls the latest image
 // and recreates the container; the data volume survives).
 //
@@ -32,7 +32,7 @@ export function compareVersions(a: string, b: string): number {
 // Newest cli-v* release tag on GitHub, or null (API failure / none published).
 async function latestCliTag(): Promise<string | null> {
   try {
-    const res = await fetch(GH_API, { headers: { "User-Agent": "lexa-cli", Accept: "application/vnd.github+json" } });
+    const res = await fetch(GH_API, { headers: { "User-Agent": "lx", Accept: "application/vnd.github+json" } });
     if (!res.ok) return null;
     const releases = (await res.json()) as Array<{ tag_name: string }>;
     const tags = releases.map((r) => r.tag_name).filter((t) => cliTagToVersion(t) !== null);
@@ -61,11 +61,19 @@ export const cmdUpgradeCli = Effect.fn("LexaCli/cmdUpgradeCli")(function* () {
     return;
   }
   const self = process.execPath;
-  const url = `https://github.com/yohanesgre/lexa/releases/download/${latest}/lexa-cli`;
+  const baseUrl = `https://github.com/yohanesgre/lexa/releases/download/${latest}`;
+  const url = `${baseUrl}/lx`;
   console.log(`==> Upgrading CLI at ${self}`);
   console.log(`  ${CLI_VERSION} → ${latest} (${url})`);
   const tmp = `${self}.new`;
-  const result = spawnSync("curl", ["-fsSL", "-o", tmp, url], { stdio: "inherit" });
+  let result = spawnSync("curl", ["-fsSL", "-o", tmp, url], { stdio: "inherit" });
+  if (result.status !== 0) {
+    // Pre-rename releases published the asset as `lexa-cli`; retry the legacy
+    // name so upgrade keeps working during the rename transition.
+    const legacyUrl = `${baseUrl}/lexa-cli`;
+    console.error(`  Download failed — retrying the legacy asset name (${legacyUrl})`);
+    result = spawnSync("curl", ["-fsSL", "-o", tmp, legacyUrl], { stdio: "inherit" });
+  }
   if (result.status !== 0) {
     throw new Error(`download failed (curl status ${result.status ?? "?"})`);
   }
@@ -77,5 +85,5 @@ export const cmdUpgradeCli = Effect.fn("LexaCli/cmdUpgradeCli")(function* () {
   renameSync(tmp, self);
   console.log(`  Installed ${self} (${(size / 1024 / 1024).toFixed(1)} MB)`);
   console.log("  Restart the listener to pick up the new binary:");
-  console.log("    lexa-cli machine restart   (if the systemd unit is installed)");
+  console.log("    lx machine restart   (if the systemd unit is installed)");
 });

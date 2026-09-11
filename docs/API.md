@@ -356,8 +356,8 @@ interface Runtime {
   printLogs: boolean;
   logLevel: "" | "DEBUG" | "INFO" | "WARN" | "ERROR";
   extraArgs: string[];
-  modelsCatalog: RuntimeModel[];  // live list from lexa-cli; [] = offline/hermes/failure
-  agentsCatalog: Array<{ id: string; name: string }>; // reported by lexa-cli
+  modelsCatalog: RuntimeModel[];  // live list from lx; [] = offline/hermes/failure
+  agentsCatalog: Array<{ id: string; name: string }>; // reported by lx
   status: "online" | "offline";
   lastError: string | null;   // last daemon failure (e.g. revoked key); cleared on live heartbeat/register
   hostname: string;
@@ -1405,7 +1405,7 @@ Runtimes without a machine are deleted directly.
 POST   /api/hearth/daemon/heartbeat         (daemon child)
 body { runtimeId* }
 → 200 { ok: true }
-The daemon reports liveness. `lexa-cli machine listen` discovers
+The daemon reports liveness. `lx machine listen` discovers
 agent/model catalogs and sends them through the machine heartbeat. A live
 heartbeat clears the runtime's last_error. A revoked runtime key makes every
 daemon call return 401 — the daemon exits with code 3 and the listener does
@@ -1550,7 +1550,7 @@ Removes the host: queues machine-scoped `remove` events for each of its
 runtimes (deduped per provider, delivered on the listener's next heartbeat),
 deletes the runtime rows, its pending setup events (FK cascade), and the
 machine row. Never blocks — a still-listening machine reappears on its next
-heartbeat (upsert) until `lexa-cli machine stop` is run on it.
+heartbeat (upsert) until `lx machine stop` is run on it.
 
 POST   /api/hearth/tasks                    (browser)
 body { slug*, documentType*: "task"|"wiki", documentId*, agentId*, skillId*,

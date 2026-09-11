@@ -249,7 +249,7 @@ end-to-end in 2026-08-24 via migration 0015: tables
 `hearth_tasks`/`hearth_task_logs`/`hearth_sessions`, routes `/api/hearth/*`,
 header `x-hearth-token`, env `HEARTH_*`/`LXK_HEARTH_DAEMON_TOKEN`, activity
 `hearth_*`, CLI state `~/.local/share/lexa-hearth` — breaking reinstall
-`lexa-cli machine uninstall && lexa-cli machine install`). Both tiers are
+`lx machine uninstall && lx machine install`). Both tiers are
 ACTIVE and co-exist; the run popover picks per-run. Design rationale:
 `docs/ARCHITECTURE.md` §Hearth — two active AI tiers (formerly ADR-0001, now merged here); runtime details: `docs/HEARTH.md`.
 
@@ -405,7 +405,7 @@ lexa/
 │   └── github/               # GitHub App client + webhook
 ├── shared/                   # types + pure functions (markdown, positions, tiptap-text)
 ├── migrations/               # *.sql applied on boot by server/db/migrate.ts
-├── cli/                      # lexa-cli (operator CLI incl. deploy)
+├── cli/                      # lx (operator CLI incl. deploy)
 ├── hearth/                    # Hearth daemon
 ├── scripts/                  # compile-cli.ts, dev.sh, install-cli-dev.sh, install-cli.sh, prepare-effect.sh, seed-dev.sql, setup-cli.ts
 ├── wireframes/               # git submodule → private repo yohanesgre/lexa-wireframes

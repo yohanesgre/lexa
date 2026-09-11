@@ -205,7 +205,7 @@ function RemoveMachineModal({ id, runtimeCount, onCancel, onConfirm }: { id: str
           </p>
           <p className="text-sm mt-2 leading-5" style={{ color: "var(--lx-text-warning)" }}>
             If the listener is still running on that machine, it will reappear within seconds — run{" "}
-            <span className="font-mono text-xs">lexa-cli machine stop</span> there first for permanent removal.
+            <span className="font-mono text-xs">lx machine stop</span> there first for permanent removal.
           </p>
 
           <div className="flex items-center gap-2 mt-4 justify-end">
@@ -541,7 +541,7 @@ export function MachinesRuntimesSection({ showTeamColumn = false }: { showTeamCo
           <thead><tr><th>Machine</th><th>State</th><th>Runtimes</th><th>CLIs</th><th>Last seen</th><th /></tr></thead>
           <tbody>
             {machines.length === 0 ? (
-              <tr><td colSpan={6} className="text-xs text-lx-text-muted text-center py-6">No machines registered yet. Connect one with <span className="font-mono">lexa-cli login</span>.</td></tr>
+              <tr><td colSpan={6} className="text-xs text-lx-text-muted text-center py-6">No machines registered yet. Connect one with <span className="font-mono">lx login</span>.</td></tr>
             ) : machines.map((m) => {
               const listening = !!m.lastSeen && nowMs - parseApiDate(m.lastSeen).getTime() < 2 * 60 * 1000;
               const runtimeCount = runtimes.filter((r) => r.machineId === m.id).length;

@@ -62,7 +62,7 @@ export function resolveStorageConfig(
   }
   if (driver === "r2") {
     // The native R2 binding is only available on Cloudflare Workers. The Bun
-    // host that drives `bun run dev:full` / `lexa-cli deploy bun` must use
+    // host that drives `bun run dev:full` / `lx deploy bun` must use
     // the S3 driver with `LXK_S3_ENDPOINT=https://<accountid>.r2.cloudflarestorage.com`
     // to talk to R2. Reject r2 here with a clear error so misconfiguration
     // is loud, not silent.

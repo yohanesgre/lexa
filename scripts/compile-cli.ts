@@ -1,18 +1,18 @@
 /**
- * Compile lexa-cli into the standalone prod binary.
+ * Compile lx into the standalone prod binary.
  *
  *   bun run compile:cli
  *
  * Bundles the Hearth daemon (hearth/daemon.ts imports shared modules) —
  * the bundled JS is embedded into cli/src/packed.ts so the compiled
  * binary can write it to ~/.local/share/lexa-hearth/daemon.js — then runs
- * `bun build --compile` → bin/lexa-cli.
+ * `bun build --compile` → bin/lx.
  *
  * The compiled binary is distributed via `scripts/install-cli.sh`
  * (downloads the GitHub release asset) — there is no repo install step.
  *
  * Install/uninstall (dev shim only):
- *   bun run install:cli-dev  → ~/.local/bin/lexa-cli-dev (shim → live repo
+ *   bun run install:cli-dev  → ~/.local/bin/lx-dev (shim → live repo
  *                              source via bun; never overwrites the prod name)
  *   bun run uninstall:cli-dev → removes the dev shim
  *
@@ -31,7 +31,7 @@ import { join } from "node:path";
 const root = join(import.meta.dir, "..");
 const daemonPath = join(root, "hearth", "daemon.ts");
 const packedPath = join(root, "cli", "src", "packed.ts");
-const outfile = join(root, "bin", "lexa-cli");
+const outfile = join(root, "bin", "lx");
 const bundlePath = join(root, "bin", "daemon-bundle.js");
 
 if (!existsSync(daemonPath)) {
@@ -68,4 +68,4 @@ if (result.status !== 0) process.exit(result.status ?? 1);
 const size = (await Bun.file(outfile).stat()).size;
 console.log(`  Compiled → ${outfile} (${(size / 1024 / 1024).toFixed(1)} MB)`);
 console.log(`  Distribute:  scripts/install-cli.sh (downloads the GitHub release asset)`);
-console.log(`  Dev shim:    bun run install:cli-dev  (→ ~/.local/bin/lexa-cli-dev)`);
+console.log(`  Dev shim:    bun run install:cli-dev  (→ ~/.local/bin/lx-dev)`);

@@ -134,14 +134,14 @@ export const machineInstall = (opts: MachineInstallOpts = {}, config: CliConfig)
     if (opts.noSystemd) {
       console.log("  Runtime setup is driven from the web wizard.");
       console.log("  Start the machine listener under your supervisor:");
-      console.log("    lexa-cli machine listen --url " + config.url);
+      console.log("    lx machine listen --url " + config.url);
       return;
     }
     yield* Effect.try({ try: () => ensureListenerUnit(config.url), catch: toMachineError });
     console.log(`  Listener unit → ${LISTENER_UNIT_PATH}`);
     if (!hasSystemd()) {
       console.log("  systemd not available — start the listener manually:");
-      console.log("    lexa-cli machine listen --url " + config.url);
+      console.log("    lx machine listen --url " + config.url);
       return;
     }
     yield* machineStart(config.url);
@@ -188,7 +188,7 @@ export const machineUninstall = (dir: string): Effect.Effect<void, MachineError>
         console.log("  Listener unit not installed — nothing to remove.");
       }
       console.log(`  Local machine state (${dir}) kept — remove it yourself if unwanted.`);
-      console.log("  Server-side: lexa-cli machine delete <id> (after stopping the listener).");
+      console.log("  Server-side: lx machine delete <id> (after stopping the listener).");
     },
     catch: toMachineError,
   });
@@ -206,7 +206,7 @@ export const machineStatus = (): Effect.Effect<void, MachineError> =>
   Effect.try({
     try: () => {
       if (!hasSystemd()) {
-        console.log("  systemd (user) not available — run `lexa-cli machine listen` in the foreground.");
+        console.log("  systemd (user) not available — run `lx machine listen` in the foreground.");
         return;
       }
       spawnSync("systemctl", ["--user", "status", SERVICE_NAME], { stdio: "inherit" });
@@ -776,7 +776,7 @@ export const machineListen = (config: CliConfig): Effect.Effect<never, ListenerE
     const machineId = yield* getOrCreateMachineId(dir);
     const machineSecret = yield* getOrCreateMachineSecret(dir);
     if (!machineSecret) {
-      console.error("  Machine secret missing — re-run `lexa-cli login` to re-register this machine");
+      console.error("  Machine secret missing — re-run `lx login` to re-register this machine");
       process.exit(0);
     }
     const machineHostname = osHostname();
@@ -905,7 +905,7 @@ function readProjectIndex(dir: string): Record<string, { name: string; slug: str
   }
 }
 
-// ── lexa-cli machine workspace ──
+// ── lx machine workspace ──
 
 // Local workspace view — one row per provisioned dir under <group>/projects/.
 // Orphan = dir exists but the project is gone from the server index (kept
@@ -917,7 +917,7 @@ export const workspaceList = (config: CliConfig): Effect.Effect<void, MachineErr
       const index = readProjectIndex(dir);
       const dirs = existsSync(projectsDir(dir)) ? readdirSync(projectsDir(dir)).sort() : [];
       if (dirs.length === 0) {
-        console.log("  No workspaces yet — run `lexa-cli machine listen` (or `machine workspace sync`); the listener provisions them from the server heartbeat.");
+        console.log("  No workspaces yet — run `lx machine listen` (or `machine workspace sync`); the listener provisions them from the server heartbeat.");
         return;
       }
       const rows = dirs.map((id) => {
@@ -965,7 +965,7 @@ export const listMachines = (config: CliConfig): Effect.Effect<void, never> =>
       ),
     );
     if (machines.length === 0) {
-      console.log("  No machines registered. Start `lexa-cli machine listen`.");
+      console.log("  No machines registered. Start `lx machine listen`.");
       return;
     }
     printTable(machines.map((machine) => ({

@@ -1,4 +1,4 @@
-// lexa-cli config — state is host-keyed: one root ~/.lexa/ (LEXA_DIR env
+// lx config — state is host-keyed: one root ~/.lexa/ (LEXA_DIR env
 // override wins, used by tests), grouped per server host:
 //   ~/.lexa/<host>/config.json      { url, apiKey } + deploy creds (chmod 600)
 //   ~/.lexa/<host>/machine-id       machine identity for THAT server

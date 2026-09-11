@@ -131,13 +131,13 @@ describe("cmdGithubStatus (default: remote)", () => {
     await Effect.runPromise(cmdGithubStatus({}, client));
     const out = outputOf(log);
     expect(out).toContain("❌ GitHub App ID — missing");
-    expect(out).toContain("fix with: lexa-cli github setup");
+    expect(out).toContain("fix with: lx github setup");
     log.mockRestore();
   });
 
   it("errors clearly without a client (no creds), pointing at --local", async () => {
     await expect(Effect.runPromise(cmdGithubStatus({}, null)))
-      .rejects.toThrow("Not logged in. Run: lexa-cli login [--url <base>] [--key <lxk_...>], or use --local to check the env file.");
+      .rejects.toThrow("Not logged in. Run: lx login [--url <base>] [--key <lxk_...>], or use --local to check the env file.");
   });
 
   it("--local validates the env file even with a client present (client ignored)", async () => {
@@ -241,7 +241,7 @@ describe("cmdGithubSetup", () => {
 
     it("errors clearly without a client (no creds), pointing at --local", async () => {
       await expect(Effect.runPromise(cmdGithubSetup({ "app-id": "123456", "pem-file": goodPem, "webhook-secret": "0123456789abcdef" }, null)))
-        .rejects.toThrow("Not logged in. Run: lexa-cli login [--url <base>] [--key <lxk_...>], or use --local to write the env bootstrap.");
+        .rejects.toThrow("Not logged in. Run: lx login [--url <base>] [--key <lxk_...>], or use --local to write the env bootstrap.");
     });
 
     it("fails with the login error before collecting inputs when not logged in", async () => {
@@ -334,7 +334,7 @@ describe("cmdGithubCheck", () => {
     const exitSpy = vi.spyOn(process, "exit").mockImplementation(((code?: number) => { throw new Error(`exit(${code})`); }) as never);
     const err = vi.spyOn(console, "error").mockImplementation(() => {});
     await expect(Effect.runPromise(cmdGithubCheck(stubClient("closed"), {}, []))).rejects.toThrow(/exit\(1\)/);
-    expect(outputOf(err)).toContain("Usage: lexa-cli github check <slug> <owner/repo>");
+    expect(outputOf(err)).toContain("Usage: lx github check <slug> <owner/repo>");
     exitSpy.mockRestore();
     err.mockRestore();
   });

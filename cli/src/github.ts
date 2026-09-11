@@ -1,4 +1,4 @@
-// lexa-cli github — validate, configure, and round-trip the GitHub sync
+// lx github — validate, configure, and round-trip the GitHub sync
 // integration. The server's settings DB is the single source of truth; the
 // server env is first-boot bootstrap only (mirrored into the DB at boot when
 // unset). status/setup default to the live server via the API (login
@@ -112,11 +112,11 @@ function printStatus(env: Map<string, string>): void {
     console.log("  Config looks complete — this is the first-boot BOOTSTRAP.");
     console.log("  The server imports it only while its settings DB is unset; once");
     console.log("  the server has DB config (web Settings, or a logged-in setup),");
-    console.log("  env-file edits are inert. Live state: lexa-cli github status");
+    console.log("  env-file edits are inert. Live state: lx github status");
   } else {
     console.log(`  ${missing} var(s) missing or invalid — fix with:`);
-    console.log("    lexa-cli github setup        (logged in — applies via the server API)");
-    console.log("    lexa-cli github setup --local [--env-file <path>]  (env bootstrap)");
+    console.log("    lx github setup        (logged in — applies via the server API)");
+    console.log("    lx github setup --local [--env-file <path>]  (env bootstrap)");
     console.log("  Full manual guide: docs/GITHUB_SETUP.md");
   }
 }
@@ -138,14 +138,14 @@ export const cmdGithubStatus = Effect.fn("LexaCli/cmdGithubStatus")(function* (f
     return;
   }
   // Default: the live server — the settings DB is the source of truth.
-  if (!client) throw new Error("Not logged in. Run: lexa-cli login [--url <base>] [--key <lxk_...>], or use --local to check the env file.");
+  if (!client) throw new Error("Not logged in. Run: lx login [--url <base>] [--key <lxk_...>], or use --local to check the env file.");
   const s = yield* client.getGithubSettings();
   console.log("==> GitHub sync — server state (GET /api/settings/github)");
   printServerState(s);
   if (!s.appId || !s.privateKeySet || !s.webhookSecretSet) {
-    console.log("  Missing pieces — fix with: lexa-cli github setup");
+    console.log("  Missing pieces — fix with: lx github setup");
   } else {
-    console.log("  Config complete. Run `lexa-cli github check <slug> <owner/repo>`");
+    console.log("  Config complete. Run `lx github check <slug> <owner/repo>`");
     console.log("  for the round-trip. Changes apply immediately (no restart).");
   }
 });
@@ -158,7 +158,7 @@ export const cmdGithubSetup = Effect.fn("LexaCli/cmdGithubSetup")(function* (fla
   // Default: the live server — the settings DB is the source of truth. Fail
   // loudly before collecting inputs; there is no silent env fallback.
   if (!local && !client) {
-    throw new Error("Not logged in. Run: lexa-cli login [--url <base>] [--key <lxk_...>], or use --local to write the env bootstrap.");
+    throw new Error("Not logged in. Run: lx login [--url <base>] [--key <lxk_...>], or use --local to write the env bootstrap.");
   }
 
   const appId = yield* Effect.gen(function* () {
@@ -230,14 +230,14 @@ export const cmdGithubSetup = Effect.fn("LexaCli/cmdGithubSetup")(function* (fla
   console.log("  Next steps:");
   console.log("    1. Restart the server (bun run dev:full / docker compose up -d) to import.");
   console.log("    2. Point the GitHub App webhook at https://<host>/api/webhooks/github");
-  console.log("    3. Verify with: lexa-cli github check <slug> <owner/repo>");
+  console.log("    3. Verify with: lx github check <slug> <owner/repo>");
 });
 
 export const cmdGithubCheck = Effect.fn("LexaCli/cmdGithubCheck")(function* (client: LexaClient, flags: Record<string, string | boolean>, args: string[]) {
   const slug = args[0]! ?? "";
   const repo = args[1]! ?? "";
   if (!slug || !repo) {
-    console.error("  Usage: lexa-cli github check <slug> <owner/repo>");
+    console.error("  Usage: lx github check <slug> <owner/repo>");
     process.exit(1);
   }
   const ts = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
