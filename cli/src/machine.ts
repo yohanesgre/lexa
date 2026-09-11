@@ -1,7 +1,6 @@
 import { Effect, Data } from "effect";
 import {
   chmodSync,
-  copyFileSync,
   existsSync,
   mkdirSync,
   readdirSync,
@@ -180,7 +179,7 @@ export const machineUninstall = (dir: string): Effect.Effect<void, MachineError>
   Effect.try({
     try: () => {
       if (existsSync(LISTENER_UNIT_PATH)) {
-        sysctl(["disable", "--now", SERVICE_NAME]);
+        if (hasSystemd()) sysctl(["disable", "--now", SERVICE_NAME]);
         rmSync(LISTENER_UNIT_PATH, { force: true });
         if (hasSystemd()) spawnSync("systemctl", ["--user", "daemon-reload"], { stdio: "inherit" });
         console.log(`  Removed listener unit ${LISTENER_UNIT_PATH}`);
@@ -632,7 +631,6 @@ function spawnRuntime(
   flavor: LexaFlavor,
   onAuthFailure?: (runtimeId: string) => void,
 ): void {
-  ensureDaemonInstalled();
   stopping.delete(runtime.runtimeId);
   const child = spawn("bun", ["run", join(INSTALL_DIR, "daemon.js")], {
     cwd: INSTALL_DIR,
@@ -671,10 +669,22 @@ function spawnRuntime(
       return;
     }
     console.error(`  [runtime ${runtime.runtimeId}] daemon exited; retrying in 5s`);
-    setTimeout(() => {
-      const latest = listRuntimeEnvs(dir).find((entry) => entry.runtimeId === runtime.runtimeId);
-      if (latest && !shuttingDown()) spawnRuntime(latest, children, stopping, shuttingDown, dir, flavor, onAuthFailure);
-    }, 5000).unref?.();
+    const scheduleRespawn = (): void => {
+      setTimeout(() => {
+        try {
+          const latest = listRuntimeEnvs(dir).find((entry) => entry.runtimeId === runtime.runtimeId);
+          if (latest && !shuttingDown()) spawnRuntime(latest, children, stopping, shuttingDown, dir, flavor, onAuthFailure);
+        } catch (error) {
+          // A throw here (e.g. spawn failure) must not take down the listener;
+          // re-arm the 5s retry instead of giving up (not a hot loop).
+          console.error(
+            `  [runtime ${runtime.runtimeId}] respawn failed: ${error instanceof Error ? error.message : String(error)}; retrying in 5s`,
+          );
+          scheduleRespawn();
+        }
+      }, 5000).unref?.();
+    };
+    scheduleRespawn();
   });
 }
 
@@ -777,7 +787,9 @@ export const machineListen = (config: CliConfig): Effect.Effect<never, ListenerE
     const machineSecret = yield* getOrCreateMachineSecret(dir);
     if (!machineSecret) {
       console.error("  Machine secret missing — re-run `lx login` to re-register this machine");
-      process.exit(0);
+      // Exit non-zero so the systemd unit (Restart=on-failure) retries and the
+      // failure is visible; exit 0 would disable the retry.
+      process.exit(1);
     }
     const machineHostname = osHostname();
     const children = new Map<string, RuntimeChild>();
@@ -830,6 +842,14 @@ export const machineListen = (config: CliConfig): Effect.Effect<never, ListenerE
     yield* Effect.sync(() => {
       process.once("SIGTERM", () => { void Effect.runPromise(shutdown()).finally(() => process.exit(0)); });
       process.once("SIGINT", () => { void Effect.runPromise(shutdown()).finally(() => process.exit(0)); });
+    });
+
+    // Build the daemon once per listener boot — not on every spawn/respawn —
+    // so a transient build failure surfaces here instead of inside a crash
+    // retry. spawnRuntime (boot loop + setup events) reuses the built file.
+    yield* Effect.try({
+      try: () => ensureDaemonInstalled(),
+      catch: (error) => new ListenerError({ reason: error instanceof Error ? error.message : String(error) }),
     });
 
     for (const runtime of listRuntimeEnvs(dir)) {
