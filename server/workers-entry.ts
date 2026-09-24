@@ -11,12 +11,12 @@
 // session, invite acceptance) + every other /api/* (the full HttpApi app:
 // Bearer keys AND session cookies, same middleware order/semantics as the
 // Bun host) + scheduled handler (event prune + R2 backup-retention prune,
-// cron */15 * * * * in wrangler.jsonc). Non-API GETs go to the TanStack
-// Start server handler; in source `wrangler dev` that import is shimmed
-// (Vite-virtuals are unresolvable outside the vite build) and non-API
-// routes get the fallback page — the vite workers build links the real
-// handler, which returns the client-only SPA shell/headless HTML (no route
-// content is server-rendered; see workers-b6 report).
+// cron */15 * * * * in wrangler.jsonc). Non-API GETs: /share/* goes to the
+// TanStack Start handler (server-rendered, OG meta); every other route is
+// client-only and served the prerendered SPA shell. In source `wrangler dev`
+// the Start import is shimmed (Vite-virtuals are unresolvable outside the
+// vite build) and non-API routes get the fallback page — the vite workers
+// build links the real handler.
 //
 // Workers-only differences (platform, never behavior):
 // - GITHUB_PRIVATE_KEY_FILE is impossible (no filesystem): the boot mirror
@@ -141,8 +141,9 @@ function json(data: unknown, status = 200): Response {
 // (it owns its own cookie auth; the HttpApi middleware would 401 it).
 // Every other /api/* goes through the full HttpApi app (B6a Workers
 // factory: same groups, async Db, Bearer + session-cookie middleware).
-// Non-API routes go to the TanStack Start server handler, which returns the
-// client-only SPA shell/headless HTML (shimmed in source dev).
+// Non-API routes: /share/* goes to the TanStack Start server handler
+// (server-rendered); every other route is client-only and served the
+// prerendered SPA shell (shimmed in source dev).
 
 type BetterAuthApi = {
   api: {
@@ -203,20 +204,56 @@ async function handleApi(
 
 let ssrFetch: ((req: Request) => Promise<Response>) | null = null;
 
-// The cloudflare-plugin ssr environment renders the SPA shell (client-only:
-// no route content is server-rendered) without the entry
-// <script type="module"> tag (the client manifest never queues it in that
-// environment), so the served shell never boots and every page is blank. The
-// entry path IS in the shell's $_TSR manifest — re-attach it. Cached: the
-// shell is build-static; preloads stay from the first hit (hints only — the
-// client still fetches what the active route needs).
-let patchedShell: string | null = null;
+// Non-share HTML: the prerendered SPA shell. Fetched once per isolate from the
+// static-assets binding when present (asset hit — assets are served before the
+// worker, so this does not recurse), then patched per response. When the
+// binding is absent or the fetch fails, callers fall back to handleSsr (the
+// Start handler emits the full root document for client-only routes).
+let shellHtml: string | null = null;
+let shellUnavailable = false;
 
-function injectEntryScript(html: string): string {
+export function injectEntryScript(html: string): string {
   if (/<script[^>]+type="module"/.test(html)) return html;
   const entry = html.match(/src:"(\/assets\/index-[^"]+\.js)"/)?.[1];
   if (!entry) return html;
   return `${html}<script type="module" async src="${entry}"></script>`;
+}
+
+interface AssetsFetcher {
+  fetch(input: Request | string): Promise<Response>;
+}
+
+async function getShellHtml(env: WorkersEnv, req: WorkersRequest): Promise<string | null> {
+  if (shellHtml !== null || shellUnavailable) return shellHtml;
+  const assets = (env as { ASSETS?: AssetsFetcher }).ASSETS;
+  if (!assets) {
+    shellUnavailable = true;
+    return null;
+  }
+  try {
+    const res = await assets.fetch(new Request(new URL("/_shell.html", req.url).toString()));
+    if (!res.ok) {
+      shellUnavailable = true;
+      return null;
+    }
+    shellHtml = injectEntryScript(await res.text());
+    return shellHtml;
+  } catch (e) {
+    console.warn("[Workers] shell asset fetch failed:", e instanceof Error ? e.message : String(e));
+    shellUnavailable = true;
+    return null;
+  }
+}
+
+async function handleNonShare(req: WorkersRequest, env: WorkersEnv): Promise<Response> {
+  const shell = await getShellHtml(env, req);
+  if (shell !== null) {
+    return new Response(shell, {
+      status: 200,
+      headers: securityHeaders({ "Content-Type": "text/html; charset=utf-8" }),
+    });
+  }
+  return handleSsr(req);
 }
 
 async function handleSsr(req: WorkersRequest): Promise<Response> {
@@ -225,11 +262,14 @@ async function handleSsr(req: WorkersRequest): Promise<Response> {
     const res = await ssrFetch(req as unknown as Request);
     const ct = res.headers.get("content-type") ?? "";
     if (!ct.includes("text/html")) return res;
-    patchedShell ??= injectEntryScript(await res.text());
-    if (patchedShell === null) return res;
+    // Per response — never a module-global cache: a share SSR document must not
+    // be served to a non-share route (or vice versa).
+    const patched = injectEntryScript(await res.text());
     const headers = new Headers(res.headers);
     headers.delete("content-length");
-    return new Response(patchedShell, { status: res.status, headers });
+    headers.set("Cache-Control", "no-store");
+    headers.set("X-Content-Type-Options", "nosniff");
+    return new Response(patched, { status: res.status, headers });
   } catch (e) {
     console.warn("[Workers] SSR unavailable, serving fallback page:", e instanceof Error ? e.message : String(e));
     return fallbackPage();
@@ -402,7 +442,12 @@ const handler: ExportedHandler<WorkersEnv> = {
       if (path.startsWith("/api/")) {
         return (await handleApi(req, runtimeEnv, driver, env.BLOB)) as unknown as WorkersResponse;
       }
-      return (await handleSsr(req)) as unknown as WorkersResponse;
+      // Only /share/* is server-rendered; every other route is client-only and
+      // served the prerendered SPA shell (per-response entry-script patch).
+      if (path.startsWith("/share/")) {
+        return (await handleSsr(req)) as unknown as WorkersResponse;
+      }
+      return (await handleNonShare(req, env)) as unknown as WorkersResponse;
     } catch (e) {
       console.error("[Workers] fetch failed:", e instanceof Error ? e.message : String(e));
       return json({ error: { code: "INTERNAL", message: "Internal error" } }, 500) as unknown as WorkersResponse;

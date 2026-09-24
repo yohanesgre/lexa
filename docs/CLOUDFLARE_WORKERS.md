@@ -104,10 +104,25 @@ Sources: [Workers pricing](https://developers.cloudflare.com/workers/platform/pr
 Official partner path: `@cloudflare/vite-plugin` + `tanstackStart()` in vite config;
 `wrangler.jsonc` with `"main": "@tanstack/react-start/server-entry"`,
 `"compatibility_flags": ["nodejs_compat"]`. Requires `@tanstack/react-start` ≥ 1.138.0.
-The Start server handler runs inside workerd via the Vite Environment API to
-serve the HTML entry (the client-only SPA shell — app routes are not
-server-rendered, same effective rendering as the Bun flavor) plus API routes;
-the current split dev setup (`vite proxy /api → :3000` + `bun server/entry.ts`)
+Lexa keeps its own `main: server/workers-entry.ts`, which calls the Start handler
+directly. Serving flow for non-API routes:
+
+- `/share/*` → `handleSsr` — server-rendered (loader + `head` produce
+  title/OG/description). The share lookup is D1-backed: `app/lib/share.server.ts`
+  reads the binding via `import { env } from "cloudflare:workers"` and builds
+  `DbD1Live`. That import is deliberately variable-held (`const pkg =
+  "cloudflare:workers"`) and dynamic so the Bun build never tries to resolve it;
+  workerd resolves it at runtime.
+- other non-API → `handleNonShare`: try the prerendered `_shell.html` from the
+  static-assets binding when present, else fall back to `handleSsr`. The
+  generated config (`dist/server/wrangler.json`) emits no `assets.binding`, so
+  `env.ASSETS` is undefined and the fallback runs today — the Start handler
+  emits the full root document for `ssr: false` routes. `injectEntryScript`
+  patches each response individually; there is no module-global shell cache (the
+  old `patchedShell` served the first route's HTML to every later one, so
+  `/share/*` got the root shell).
+
+The current split dev setup (`vite proxy /api → :3000` + `bun server/entry.ts`)
 disappears — single `vite dev`, API routes co-hosted with the handler.
 
 Env is **per-request**: module-scope `process.env.X` is `undefined` on Workers.

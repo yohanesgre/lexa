@@ -9,9 +9,9 @@ export const Route = createFileRoute("/$slug/board")({
     swimlane: typeof search.swimlane === "string" && search.swimlane.length > 0 ? search.swimlane : undefined,
   }),
   // The board is the most interactive surface (DnD, TipTap) — client-only
-  // (root `ssr: false` wins), so the loader prefetches board data into the
-  // query cache in the browser, sparing the first paint a loading skeleton
-  // plus a separate client fetch.
+  // (`ssr: false` here; root is `ssr: true` so public routes can render), so
+  // the loader prefetches board data into the query cache in the browser,
+  // sparing the first paint a loading skeleton plus a separate client fetch.
   ssr:false,
   loader: async ({ context, params }) => {
     const { slug } = params;

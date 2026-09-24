@@ -11,9 +11,10 @@ import { PageNotFound } from "../components/PageNotFound";
 import { getSession } from "../lib/auth";
 import type { RouterContext } from "../router";
 
-// Public/auth surfaces — everything else requires a session. The guard runs
-// on the server too (SSR cookie forwarding in getSession, try/catch inside);
-// a missing/invalid session bounces to /login with the target remembered.
+// Public/auth surfaces — everything else requires a session. On the client a
+// missing/invalid session bounces to /login with the target remembered; on the
+// server this guard is a no-op (SSR guard below) so the shell prerender stays
+// put.
 const PUBLIC_PATHS = new Set(["/login", "/set-password", "/invite", "/setup", "/device-login"]);
 
 // Public wiki share reads: the token IS the credential (server enforces it
@@ -22,17 +23,24 @@ const PUBLIC_PATHS = new Set(["/login", "/set-password", "/invite", "/setup", "/
 const PUBLIC_PREFIXES = ["/share/"];
 
 export const Route = createRootRouteWithContext<RouterContext>()({
-  // SPA shell only. `ssr: false` here makes every app route client-only —
-  // TanStack Router's parent-wins rule forces descendants client-side, so a
-  // child `ssr: true` cannot opt back in. The fn-form
-  // `ssr: ({location}) => ...` on the ROOT breaks the SPA shell emission in
-  // tanstack-start 1.168.x (ssr:false routes get a headless fragment, no
-  // <html>/<head>).
-  ssr: false,
+  // Root is SSR-enabled so public routes render on the server. Authed app
+  // routes declare `ssr: false` themselves (32 of them) and stay client-only:
+  // TanStack Router's parent-wins rule means a descendant cannot re-enable SSR
+  // once an ancestor disables it, but the reverse no longer holds — root
+  // `ssr: true` does not force descendants on. `/share/$token` has no
+  // `ssr: false`, so it inherits SSR here. The fn-form
+  // `ssr: ({location}) => ...` on the ROOT is still forbidden: it breaks SPA
+  // shell emission in tanstack-start 1.168.x (ssr:false routes get a headless
+  // fragment, no <html>/<head>).
+  ssr: true,
   beforeLoad: async ({ location }) => {
     if (location.pathname.startsWith("/__inspect") || location.pathname.startsWith("/.vite-inspect")) return;
     if (PUBLIC_PATHS.has(location.pathname)) return;
     if (PUBLIC_PREFIXES.some((prefix) => location.pathname.startsWith(prefix))) return;
+    // Server no-op: the build-time shell prerender renders `/` through this
+    // root, and a redirect there would emit the login page as `_shell.html`.
+    // Client-side auth behavior (useAuthBounce below) is unchanged.
+    if (import.meta.env.SSR) return;
     // Direct fetch, not the query cache: the guard must reflect the real
     // session cookie on every navigation, and seeding the cache here
     // interacts badly with useSession's staleTime (perpetual-loading / loop

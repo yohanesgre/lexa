@@ -6,7 +6,7 @@ A lightweight, self-hosted project management tool. Kanban board, issue/task tic
 
 | Layer        | Choice                        | Rationale |
 | ------------ | ----------------------------- | --------- |
-| Frontend     | React + Vite + TanStack Start | SPA shell mode: root route `ssr: false` forces every app route client-only (TanStack Router parent-wins rule — a child `ssr: true` cannot opt in), so only the build-time root shell is server-rendered; `/share/*` included, loaders run in the browser. TanStack Router + Query, file-based routing, server/entry serves the prerendered shell + SPA fallback; Workers: same client-only shell |
+| Frontend     | React + Vite + TanStack Start | Root route `ssr: true`; every authed/app route declares `ssr: false` and stays client-only (build-time root shell served for them). Public `/share/$token` has no `ssr: false`, so its loader + `head` server-render on both flavors (real title/OG for link unfurlers, rendered content for no-JS). TanStack Router + Query, file-based routing; `server/entry.ts` serves the shell + SPA fallback and routes only `/share/*` through the Start SSR handler; Workers: same model |
 | Backend      | Effect-TS + @effect/platform HttpApi | Typed errors, DI, declarative error→HTTP mapping, OpenAPI for free |
 | Database     | SQLite via bun:sqlite (WAL)   | Local file, zero-ops, transactional batch helper for atomic mutations |
 | Runtime      | Bun standalone HTTP server (Docker) primary + Cloudflare Workers + D1 + R2 parallel flavor (optional, $5/mo — see `docs/CLOUDFLARE_WORKERS.md`) | One process for SSR + REST + webhooks; simple deploys (Bun) or edge isolates (Workers, Workers flavor) |
@@ -418,8 +418,8 @@ Key components: `KanbanBoard` (swimlanes → columns → task cards, inline add,
 ### Mutation responses are authoritative
 SQLite is local (WAL) so reads are immediate, but the mutation response is still the single source of truth. Rule: **mutations return the updated entity and TanStack Query updates its cache from the mutation response (`setQueryData`) — no refetch on the mutation path.** Invariant #6 preserved.
 
-### Effect Mid (frontend, 3.22 — SPA only)
-Effect-TS 3.22 in frontend is limited to **Mid**: Effect lives under `queryFn` only, no global `Runtime`, no SSR Effect. Client-only `app/lib/effect-api.ts` (`effectFetch` → `Schema.decodeUnknownSync` via `shared/schema.ts` decode) consumed inside TanStack Query `queryFn`/`mutationFn`; `VITE_EFFECT_HERALD` gates the Herald path (default on, `VITE_EFFECT_HERALD=0` rolls back to legacy `run()` kept intact). Workers SPA static inherits the same client-only boundary.
+### Effect Mid (frontend app routes, 3.22 — SPA only)
+Effect-TS 3.22 on the frontend app routes is limited to **Mid**: Effect lives under `queryFn` only, no global `Runtime`, no SSR Effect. Client-only `app/lib/effect-api.ts` (`effectFetch` → `Schema.decodeUnknownSync` via `shared/schema.ts` decode) consumed inside TanStack Query `queryFn`/`mutationFn`; `VITE_EFFECT_HERALD` gates the Herald path (default on, `VITE_EFFECT_HERALD=0` rolls back to legacy `run()` kept intact). Workers app routes inherit the same client-only boundary. The one server-side exception is `/share/$token` SSR: `app/lib/share.server.ts` runs `WikiShareService.resolvePublic` through a per-flavor `ManagedRuntime` (Bun `bun:sqlite` / Workers D1 via `cloudflare:workers` env) — not through `effect-api.ts`.
 
 ## Hosting flavors
 
@@ -427,15 +427,21 @@ Two peer-level flavors share the same source tree (no data sync between them;
 migrate Bun→Workers by dumping the Bun DB to SQL and replaying on D1):
 
 - **Bun standalone (primary):** `Bun.serve` + `bun:sqlite` (WAL) + cloudflared
-  tunnel. `server/entry.ts` runs the Start handler + serves the prerendered
-  SPA shell for non-`/api` app routes (root `ssr: false` makes them all
-  client-only, `/share/*` included — no server-side render, no unfurl meta).
-  Current live system. Deployed via `scripts/install.sh` (Docker Compose /
-  bare metal) — see docs/DEPLOYMENT.md.
+  tunnel. `server/entry.ts` serves the prerendered SPA shell (`_shell.html`)
+  directly for every route except `/api/*`, `/health`, `/assets/*` and
+  `/favicon*` (all handled earlier) and `/share/*`, which runs the Start SSR
+  handler (loader + `head` server-rendered → title/OG/description). A missing
+  `_shell.html` falls through to the legacy `/` landing page /
+  `dist/client/index.html`. Root is `ssr: true`; the authed/app routes declare
+  `ssr: false` and stay client-only. Current live system. Deployed via
+  `scripts/install.sh` (Docker Compose / bare metal) — see docs/DEPLOYMENT.md.
 - **Cloudflare Workers (parallel, optional, $5/mo):** Workers + D1 + R2 + KV.
-  Same client-only SPA shell: the worker serves the patched build-time shell
-  for app routes, static fallback elsewhere (source `wrangler dev` = API +
-  fallback by platform limitation) — same
+  Same model: `/share/*` → the Start SSR handler, with the share lookup backed
+  by D1 (`cloudflare:workers` `env.DB` → `DbD1Live` in `app/lib/share.server.ts`);
+  other non-API routes → the prerendered shell. The generated worker config has
+  no assets binding, so the shell-cache path is inert today and the worker falls
+  back to the Start handler (full root document per response;
+  `injectEntryScript` is applied per response, never cached globally). Same
   routes and services, different drivers: `server/db/drivers/bun-sqlite.ts`
   vs `server/db/drivers/d1.ts` (repos async; bun-sqlite wraps sync API in
   `Promise.resolve`), R2 native binding driver vs `fs`/`s3`, `RuntimeEnv`
