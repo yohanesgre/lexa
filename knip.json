@@ -5,11 +5,11 @@
     "app/routes/**/*.{ts,tsx}",
     "scripts/*.ts",
     "cli/src/*.ts",
-    "hearth/daemon.ts"
+    "daemon/daemon.ts"
   ],
   "ignore": [
     "app/routeTree.gen.ts",
-    "app/components/hearth/herald/HeraldPanelViews.tsx",
+    "app/components/runtimes/herald/HeraldPanelViews.tsx",
     "app/components/ui/Checkbox.tsx",
     "app/components/ui/Toggle.tsx",
     "doctor.config.ts",

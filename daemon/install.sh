@@ -13,5 +13,5 @@ if [ ! -f "$CLI" ]; then
   exit 1
 fi
 
-echo "==> lx: ensuring Hearth machine listener (via deprecated install.sh wrapper) =="
+echo "==> lx: ensuring runtime machine listener (via deprecated install.sh wrapper) =="
 exec bun run "$CLI" machine install "$@"

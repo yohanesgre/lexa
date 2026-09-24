@@ -1,4 +1,4 @@
-// hearth/daemon.ts process-bound integration: the REAL daemon as a bun
+// daemon/daemon.ts process-bound integration: the REAL daemon as a bun
 // subprocess against a fake Lexa server and a fake agent CLI. The agent
 // echoes its env — proving the closed whitelist end-to-end (the daemon's
 // secrets must never reach the child) and the exit-3 auth-failure relay.
@@ -53,8 +53,8 @@ function emptyClaim(taskId: string): FakeAgentResponse {
           documentId: "d1",
           agentId: "lexa",
           agentName: "Lexa",
-          skillId: "hearth",
-          skillName: "Hearth",
+          skillId: "runtime",
+          skillName: "Runtime",
           selection: "",
           docContext: "context",
           status: "running",
@@ -75,7 +75,7 @@ function emptyClaim(taskId: string): FakeAgentResponse {
   };
 }
 
-describe("hearth daemon (bun subprocess, fake server + fake agent)", () => {
+describe("runtime daemon (bun subprocess, fake server + fake agent)", () => {
   let dir = "";
   let home = "";
   let agentScript = "";
@@ -91,7 +91,7 @@ describe("hearth daemon (bun subprocess, fake server + fake agent)", () => {
       let body = "";
       for await (const chunk of req) body += chunk;
       const url = req.url ?? "";
-      if (url === "/api/hearth/runtimes/register") {
+      if (url === "/api/runtimes/register") {
         if (registerStatus !== 200) {
           res.writeHead(registerStatus, { "Content-Type": "text/plain" });
           res.end("nope");
@@ -102,13 +102,13 @@ describe("hearth daemon (bun subprocess, fake server + fake agent)", () => {
         return;
       }
       res.writeHead(200, { "Content-Type": "application/json" });
-      if (url === "/api/hearth/daemon/claim") {
+      if (url === "/api/runtimes/daemon/claim") {
         const haveTask = completes.length === 0;
         res.end(JSON.stringify(emptyClaim(haveTask ? "t1" : "")));
-      } else if (url.startsWith("/api/hearth/daemon/tasks/") && url.endsWith("/complete")) {
+      } else if (url.startsWith("/api/runtimes/daemon/tasks/") && url.endsWith("/complete")) {
         completes.push({ url, body: JSON.parse(body) as Record<string, unknown> });
         res.end(JSON.stringify({ ok: true }));
-      } else if (url.startsWith("/api/hearth/daemon/tasks/") && url.endsWith("/status")) {
+      } else if (url.startsWith("/api/runtimes/daemon/tasks/") && url.endsWith("/status")) {
         res.end(JSON.stringify({ status: "running" }));
       } else {
         res.end(JSON.stringify({ ok: true }));
@@ -130,11 +130,11 @@ describe("hearth daemon (bun subprocess, fake server + fake agent)", () => {
         'echo "HOME=$HOME"',
         'echo "PWD=$PWD"',
         'echo "LEXA_API_KEY=${LEXA_API_KEY:-ABSENT}"',
-        'echo "LXK_HEARTH_DAEMON_TOKEN=${LXK_HEARTH_DAEMON_TOKEN:-ABSENT}"',
+        'echo "LXK_RUNTIME_DAEMON_TOKEN=${LXK_RUNTIME_DAEMON_TOKEN:-ABSENT}"',
         'echo "LEXA_URL=${LEXA_URL:-ABSENT}"',
-        'echo "HEARTH_POLL_MS=${HEARTH_POLL_MS:-ABSENT}"',
-        'echo "HEARTH_CMD_BIN=${HEARTH_CMD_BIN:-ABSENT}"',
-        'echo "HEARTH_AGENT=${HEARTH_AGENT:-ABSENT}"',
+        'echo "RUNTIME_POLL_MS=${RUNTIME_POLL_MS:-ABSENT}"',
+        'echo "RUNTIME_CMD_BIN=${RUNTIME_CMD_BIN:-ABSENT}"',
+        'echo "RUNTIME_AGENT=${RUNTIME_AGENT:-ABSENT}"',
         "exit 0",
       ].join("\n"),
       { mode: 0o755 },
@@ -150,17 +150,17 @@ describe("hearth daemon (bun subprocess, fake server + fake agent)", () => {
   });
 
   function spawnDaemon(): ReturnType<typeof spawn> {
-    return spawn("bun", ["hearth/daemon.ts"], {
+    return spawn("bun", ["daemon/daemon.ts"], {
       cwd: join(import.meta.dirname ?? ".", ".."),
       env: {
         ...process.env,
         LEXA_URL: base,
         LEXA_API_KEY: "lxk_daemon_key_1234567890123456789012345678901234567890",
-        LXK_HEARTH_DAEMON_TOKEN: "plain-shared-secret",
-        HEARTH_AGENT: "command-code",
-        HEARTH_CMD_BIN: agentScript,
-        HEARTH_MACHINE_ID: "m-test",
-        HEARTH_POLL_MS: "100",
+        LXK_RUNTIME_DAEMON_TOKEN: "plain-shared-secret",
+        RUNTIME_AGENT: "command-code",
+        RUNTIME_CMD_BIN: agentScript,
+        RUNTIME_MACHINE_ID: "m-test",
+        RUNTIME_POLL_MS: "100",
         LEXA_DIR: dir,
         HOME: home,
       },
@@ -186,7 +186,7 @@ describe("hearth daemon (bun subprocess, fake server + fake agent)", () => {
     daemon.stderr?.on("data", (d: Buffer) => (daemonStderr += d.toString()));
     try {
       const complete = await waitFor(() => completes[0]!);
-      expect(complete.url).toContain("/api/hearth/daemon/tasks/t1/complete");
+      expect(complete.url).toContain("/api/runtimes/daemon/tasks/t1/complete");
       const result = String(complete.body.result ?? "");
       // Allowlisted vars reach the child...
       expect(result).toContain("PATH=present");
@@ -194,11 +194,11 @@ describe("hearth daemon (bun subprocess, fake server + fake agent)", () => {
       expect(result).toContain("PWD=");
       // ...but every Lexa credential and daemon config var is scrubbed.
       expect(result).toContain("LEXA_API_KEY=ABSENT");
-      expect(result).toContain("LXK_HEARTH_DAEMON_TOKEN=ABSENT");
+      expect(result).toContain("LXK_RUNTIME_DAEMON_TOKEN=ABSENT");
       expect(result).toContain("LEXA_URL=ABSENT");
-      expect(result).toContain("HEARTH_POLL_MS=ABSENT");
-      expect(result).toContain("HEARTH_CMD_BIN=ABSENT");
-      expect(result).toContain("HEARTH_AGENT=ABSENT");
+      expect(result).toContain("RUNTIME_POLL_MS=ABSENT");
+      expect(result).toContain("RUNTIME_CMD_BIN=ABSENT");
+      expect(result).toContain("RUNTIME_AGENT=ABSENT");
     } finally {
       daemon.kill("SIGKILL");
     }
@@ -305,7 +305,7 @@ describe("runHttpTask against a local fixture", () => {
   });
 });
 
-describe("hearth daemon (bun subprocess) with a fake opencode serve runtime", () => {
+describe("runtime daemon (bun subprocess) with a fake opencode serve runtime", () => {
   interface ServeEvent {
     event: string;
     args?: string[];
@@ -340,19 +340,19 @@ describe("hearth daemon (bun subprocess) with a fake opencode serve runtime", ()
       let body = "";
       for await (const chunk of req) body += chunk;
       const url = req.url ?? "";
-      if (url === "/api/hearth/runtimes/register") {
+      if (url === "/api/runtimes/register") {
         res.writeHead(200, { "Content-Type": "application/json" });
         res.end(JSON.stringify({ id: "r-test" }));
         return;
       }
-      if (url === "/api/hearth/daemon/claim") {
+      if (url === "/api/runtimes/daemon/claim") {
         res.writeHead(200, { "Content-Type": "application/json" });
         if (!claimed) {
           claimed = true;
           res.end(JSON.stringify({
             task: {
               id: "t-oc", projectId: "p1", documentType: "task", documentId: "d1",
-              agentId: "lexa", agentName: "Lexa", skillId: "hearth", skillName: "Hearth",
+              agentId: "lexa", agentName: "Lexa", skillId: "runtime", skillName: "Runtime",
               selection: "", docContext: "ctx", status: "running", result: null, error: null,
             },
             provider: "opencode", agent: "build", model: "opencode-go/deepseek-v4-flash",
@@ -365,29 +365,29 @@ describe("hearth daemon (bun subprocess) with a fake opencode serve runtime", ()
         }
         return;
       }
-      if (url === "/api/hearth/sessions" && req.method === "PUT") {
+      if (url === "/api/runtimes/sessions" && req.method === "PUT") {
         sessionsPuts.push({ body: JSON.parse(body) as Record<string, unknown> });
         res.writeHead(204);
         res.end();
         return;
       }
-      if (url === "/api/hearth/sessions" && req.method === "DELETE") {
+      if (url === "/api/runtimes/sessions" && req.method === "DELETE") {
         sessionsDeletes.push({ body: JSON.parse(body) as Record<string, unknown> });
         res.writeHead(204);
         res.end();
         return;
       }
-      if (url.startsWith("/api/hearth/daemon/tasks/") && url.endsWith("/status")) {
+      if (url.startsWith("/api/runtimes/daemon/tasks/") && url.endsWith("/status")) {
         res.writeHead(200, { "Content-Type": "application/json" });
         res.end(JSON.stringify({ status: "cancelled" }));
         return;
       }
-      if (url.startsWith("/api/hearth/daemon/tasks/") && url.endsWith("/complete")) {
+      if (url.startsWith("/api/runtimes/daemon/tasks/") && url.endsWith("/complete")) {
         completes.push({ url, body: JSON.parse(body) as Record<string, unknown> });
         res.end(JSON.stringify({ ok: true }));
         return;
       }
-      if (url.startsWith("/api/hearth/daemon/tasks/") && url.endsWith("/fail")) {
+      if (url.startsWith("/api/runtimes/daemon/tasks/") && url.endsWith("/fail")) {
         fails.push({ url, body: JSON.parse(body) as Record<string, unknown> });
         res.end(JSON.stringify({ ok: true }));
         return;
@@ -413,17 +413,17 @@ describe("hearth daemon (bun subprocess) with a fake opencode serve runtime", ()
   }
 
   function spawnDaemon(): ReturnType<typeof spawn> {
-    return spawn("bun", ["hearth/daemon.ts"], {
+    return spawn("bun", ["daemon/daemon.ts"], {
       cwd: join(import.meta.dirname ?? ".", ".."),
       env: {
         ...process.env,
         PATH: `${dir}:${process.env.PATH ?? ""}`,
         LEXA_URL: lexaBase,
         LEXA_API_KEY: "lxk_daemon_key_1234567890123456789012345678901234567890",
-        HEARTH_AGENT: "opencode",
-        HEARTH_MACHINE_ID: "m-test",
-        HEARTH_POLL_MS: "100",
-        HEARTH_SERVE_PORT: String(servePort),
+        RUNTIME_AGENT: "opencode",
+        RUNTIME_MACHINE_ID: "m-test",
+        RUNTIME_POLL_MS: "100",
+        RUNTIME_SERVE_PORT: String(servePort),
         LEXA_DIR: dir,
         HOME: home,
       },
@@ -515,7 +515,7 @@ describe("hearth daemon (bun subprocess) with a fake opencode serve runtime", ()
         runtimeSessionId: "sess-1",
         provider: "opencode",
         agentId: "lexa",
-        skillId: "hearth",
+        skillId: "runtime",
       });
 
       const msg = await waitFor(() => readServeEvents().find((e) => e.event === "message"));
