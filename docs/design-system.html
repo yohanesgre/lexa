@@ -2225,7 +2225,7 @@ mark {
 }
 
 /* AI status pill in the navbar (running / done states) */
-.hearth-status {
+.runtime-status {
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -2409,7 +2409,7 @@ mark {
 
 .filter-chip-label { color: var(--lx-text-secondary); }
 
-/* Status chips (hearth history filter): one segmented control, status color as identity */
+/* Status chips (runtime history filter): one segmented control, status color as identity */
 .status-chip {
   display: inline-flex;
   align-items: center;
@@ -6026,7 +6026,7 @@ textarea.prop-input {
 
       <div class="block-shell">
         <div class="block-desc">
-          <strong>Use</strong> — `.status-chip` + `.status-dot` for hearth/task run states (queued/running/done/failed/cancelled).<br/>
+          <strong>Use</strong> — `.status-chip` + `.status-dot` for runtime/task run states (queued/running/done/failed/cancelled).<br/>
           <strong>Avoid</strong> — a status chip for a persistent field value; color alone without a label.<br/>
           <strong>Instead</strong> — `.type-badge`/`.priority-dot` for task fields; keep label + dot for status.
         </div>
