@@ -81,7 +81,7 @@ All non-2xx responses share one shape:
 | 502 | `PROVIDER_UNREACHABLE` | Provider network/timeout/DNS failure |
 | 502 | `ASSISTANT_GENERATION_FAILED` | RUN_ERROR catch-all, malformed stream |
 | 502 | `ASSISTANT_TOOL_BUDGET_EXCEEDED` | Tool round cap hit (document tasks `MAX_TOOL_ROUNDS=12`, freeform chat `MAX_CHAT_TOOL_ROUNDS=24`) |
-| 409 | `ASSISTANT_TASK_ACTIVE` | Thread reset or second chat stream while a Assistant stream is running |
+| 409 | `ASSISTANT_TASK_ACTIVE` | Thread reset or second chat stream while an Assistant stream is running |
 | 404 | `ASSISTANT_THREAD_NOT_FOUND` | Missing Assistant thread row |
 | 409 | `VISION_NOT_CONFIGURED` | Attachments submitted while `primary_supports_images=0` (vision_model delegation removed in the squashed baseline) |
 | 409 | `ENGINE_NOT_SUPPORTED_FOR_CHAT` | Freeform chat while the project engine is `blacksmith` (chat always runs the assistant lane) |

@@ -5,7 +5,7 @@ import { ENGINE_AGENT_IDS } from "../../../lib/use-runtime-engine";
 import type { AssistantSettingsMasked } from "../../../../shared/assistant";
 
 // Embedded /api/attachments/<uuid> image nodes in the open document are the
-// only image source for a Assistant run (assistant-popover.html State 1/5) — same
+// only image source for an Assistant run (assistant-popover.html State 1/5) — same
 // exact-shape uuid rule as shared/markdown.ts safeImageSrc.
 const ATTACHMENT_SRC_RE = /^\/api\/attachments\/([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$/;
 

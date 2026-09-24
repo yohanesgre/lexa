@@ -1148,7 +1148,7 @@ All list endpoints: `?limit` (default 50, max 200) + cursor (opaque: `"<columnId
 | `ProviderUnreachable` | 502 | provider network/timeout/DNS failure |
 | `AssistantGenerationFailed` | 502 | RUN_ERROR catch-all, malformed stream |
 | `AssistantToolBudgetExceeded` | 502 | tool round cap hit (document tasks `MAX_TOOL_ROUNDS=12`, freeform chat `MAX_CHAT_TOOL_ROUNDS=24`) |
-| `AssistantTaskActive` | 409 | thread reset or second chat stream while a Assistant stream is running |
+| `AssistantTaskActive` | 409 | thread reset or second chat stream while an Assistant stream is running |
 | `AssistantThreadNotFound` | 404 | missing thread row (`assistant_threads`) |
 | `VisionNotConfigured` | 409 | attachments submitted while `primary_supports_images=0` (vision_model delegation removed in the squashed baseline) |
 | `EngineNotSupportedForChat` | 409 | freeform chat while the project engine is `blacksmith` |

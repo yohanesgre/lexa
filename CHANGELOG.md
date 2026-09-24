@@ -1,7 +1,3 @@
-## [Unreleased] - 2026-09-24
-
-- Renamed Herald to Assistant across the server API, database namespace, and documentation. Migration `0006_assistant_rename.sql` migrates data without compatibility aliases; old `/api/herald/*` clients now receive 404.
-
 # Changelog
 
 All notable changes to Lexa are documented here. Format based on
@@ -10,6 +6,10 @@ All notable changes to Lexa are documented here. Format based on
 `docs/RELEASING.md`).
 
 ## [Unreleased]
+
+### Changed
+
+- Renamed Herald to Assistant across the server API, database namespace, and documentation. Migration `0006_assistant_rename.sql` migrates data without compatibility aliases; old `/api/herald/*` clients now receive 404.
 
 ### Fixed
 
