@@ -2,12 +2,12 @@ import { createFileRoute, Navigate } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { useRuntimeRole } from "../lib/useRuntimeRole";
 import { useToast } from "../components/ui/Toast";
-import { useHeraldUsage, exportHeraldUsageCsv } from "../lib/herald-usage.query";
-import { UsageKpiCards } from "../components/herald/UsageKpiCards";
-import { UsageChart } from "../components/herald/UsageChart";
-import { UsageByModelTable } from "../components/herald/UsageByModelTable";
-import { PriceEditor } from "../components/herald/PriceEditor";
-import { GatewayHealthSection } from "../components/herald/GatewayHealthSection";
+import { useAssistantUsage, exportAssistantUsageCsv } from "../lib/assistant-usage.query";
+import { UsageKpiCards } from "../components/assistant/UsageKpiCards";
+import { UsageChart } from "../components/assistant/UsageChart";
+import { UsageByModelTable } from "../components/assistant/UsageByModelTable";
+import { PriceEditor } from "../components/assistant/PriceEditor";
+import { GatewayHealthSection } from "../components/assistant/GatewayHealthSection";
 
 export const Route = createFileRoute("/runtimes/usage")({
   validateSearch: (search: Record<string, unknown>): { from?: string | undefined; to?: string | undefined } => ({
@@ -27,7 +27,7 @@ function RuntimeUsageRoute() {
   const [to, setTo] = useState(search.to ?? "");
   const [filters, setFilters] = useState<{ from?: string | null; to?: string | null }>({ from: search.from ?? null, to: search.to ?? null });
 
-  const { data, isLoading: usageLoading, error, refetch } = useHeraldUsage(filters);
+  const { data, isLoading: usageLoading, error, refetch } = useAssistantUsage(filters);
 
   useEffect(() => {
     setFrom(search.from ?? "");
@@ -48,7 +48,7 @@ function RuntimeUsageRoute() {
 
   const handleApply = () => setFilters({ from: from || null, to: to || null });
   const handleExport = async () => {
-    await exportHeraldUsageCsv({ from: from || null, to: to || null });
+    await exportAssistantUsageCsv({ from: from || null, to: to || null });
   };
 
   return (

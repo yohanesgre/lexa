@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { HeraldChatPage } from "../../components/chat/HeraldChatPage";
+import { AssistantChatPage } from "../../components/chat/AssistantChatPage";
 import { getProject } from "../../lib/api";
 
 export const Route = createFileRoute("/$slug/chat")({
@@ -19,5 +19,5 @@ export const Route = createFileRoute("/$slug/chat")({
 function ChatRoute() {
   const { slug } = Route.useParams();
   const { thread } = Route.useSearch();
-  return <HeraldChatPage slug={slug!} thread={thread} />;
+  return <AssistantChatPage slug={slug!} thread={thread} />;
 }

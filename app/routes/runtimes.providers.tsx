@@ -2,7 +2,7 @@ import { createFileRoute, Navigate } from "@tanstack/react-router";
 import { useEffect } from "react";
 import { useRuntimeRole } from "../lib/useRuntimeRole";
 import { useToast } from "../components/ui/Toast";
-import { HeraldProvidersSection } from "../components/settings/HeraldProvidersSection";
+import { AssistantProvidersSection } from "../components/settings/AssistantProvidersSection";
 
 export const Route = createFileRoute("/runtimes/providers")({
   ssr:false,
@@ -26,7 +26,7 @@ function RuntimeProvidersRoute() {
 
   return (
     <section className="mt-4">
-      <HeraldProvidersSection />
+      <AssistantProvidersSection />
     </section>
   );
 }

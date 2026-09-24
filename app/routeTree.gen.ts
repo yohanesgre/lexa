@@ -38,7 +38,7 @@ import { Route as ShareTokenRouteImport } from './routes/share.$token'
 import { Route as SlugTasksTaskIdRouteImport } from './routes/$slug/tasks_.$taskId'
 import { Route as SlugWikiIndexRouteImport } from './routes/$slug/wiki/index'
 import { Route as SlugWikiPageSlugRouteImport } from './routes/$slug/wiki/$pageSlug'
-import { Route as AdminHeraldUsageRouteImport } from './routes/admin.herald.usage'
+import { Route as AdminAssistantUsageRouteImport } from './routes/admin.assistant.usage'
 import { Route as ApiAuthSplatRouteImport } from './routes/api.auth.$'
 import { Route as RuntimesBindingsProjectIdRouteImport } from './routes/runtimes.bindings.$projectId'
 import { Route as SettingsProjectProjectIdRouteImport } from './routes/settings/project.$projectId'
@@ -188,9 +188,9 @@ const SlugWikiPageSlugRoute = SlugWikiPageSlugRouteImport.update({
   path: '/$slug/wiki/$pageSlug',
   getParentRoute: () => rootRouteImport,
 } as any)
-const AdminHeraldUsageRoute = AdminHeraldUsageRouteImport.update({
-  id: '/admin/herald/usage',
-  path: '/admin/herald/usage',
+const AdminAssistantUsageRoute = AdminAssistantUsageRouteImport.update({
+  id: '/admin/assistant/usage',
+  path: '/admin/assistant/usage',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ApiAuthSplatRoute = ApiAuthSplatRouteImport.update({
@@ -240,7 +240,7 @@ export interface FileRoutesByFullPath {
   '/$slug/': typeof SlugIndexRoute
   '/$slug/tasks/$taskId': typeof SlugTasksTaskIdRoute
   '/$slug/wiki/$pageSlug': typeof SlugWikiPageSlugRoute
-  '/admin/herald/usage': typeof AdminHeraldUsageRoute
+  '/admin/assistant/usage': typeof AdminAssistantUsageRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
   '/runtimes/bindings/$projectId': typeof RuntimesBindingsProjectIdRoute
   '/settings/project/$projectId': typeof SettingsProjectProjectIdRoute
@@ -275,7 +275,7 @@ export interface FileRoutesByTo {
   '/$slug': typeof SlugIndexRoute
   '/$slug/tasks/$taskId': typeof SlugTasksTaskIdRoute
   '/$slug/wiki/$pageSlug': typeof SlugWikiPageSlugRoute
-  '/admin/herald/usage': typeof AdminHeraldUsageRoute
+  '/admin/assistant/usage': typeof AdminAssistantUsageRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
   '/runtimes/bindings/$projectId': typeof RuntimesBindingsProjectIdRoute
   '/settings/project/$projectId': typeof SettingsProjectProjectIdRoute
@@ -311,7 +311,7 @@ export interface FileRoutesById {
   '/$slug/': typeof SlugIndexRoute
   '/$slug/tasks_/$taskId': typeof SlugTasksTaskIdRoute
   '/$slug/wiki/$pageSlug': typeof SlugWikiPageSlugRoute
-  '/admin/herald/usage': typeof AdminHeraldUsageRoute
+  '/admin/assistant/usage': typeof AdminAssistantUsageRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
   '/runtimes/bindings/$projectId': typeof RuntimesBindingsProjectIdRoute
   '/settings/project/$projectId': typeof SettingsProjectProjectIdRoute
@@ -348,7 +348,7 @@ export interface FileRouteTypes {
     | '/$slug/'
     | '/$slug/tasks/$taskId'
     | '/$slug/wiki/$pageSlug'
-    | '/admin/herald/usage'
+    | '/admin/assistant/usage'
     | '/api/auth/$'
     | '/runtimes/bindings/$projectId'
     | '/settings/project/$projectId'
@@ -383,7 +383,7 @@ export interface FileRouteTypes {
     | '/$slug'
     | '/$slug/tasks/$taskId'
     | '/$slug/wiki/$pageSlug'
-    | '/admin/herald/usage'
+    | '/admin/assistant/usage'
     | '/api/auth/$'
     | '/runtimes/bindings/$projectId'
     | '/settings/project/$projectId'
@@ -418,7 +418,7 @@ export interface FileRouteTypes {
     | '/$slug/'
     | '/$slug/tasks_/$taskId'
     | '/$slug/wiki/$pageSlug'
-    | '/admin/herald/usage'
+    | '/admin/assistant/usage'
     | '/api/auth/$'
     | '/runtimes/bindings/$projectId'
     | '/settings/project/$projectId'
@@ -445,7 +445,7 @@ export interface RootRouteChildren {
   SlugIndexRoute: typeof SlugIndexRoute
   SlugTasksTaskIdRoute: typeof SlugTasksTaskIdRoute
   SlugWikiPageSlugRoute: typeof SlugWikiPageSlugRoute
-  AdminHeraldUsageRoute: typeof AdminHeraldUsageRoute
+  AdminAssistantUsageRoute: typeof AdminAssistantUsageRoute
   ApiAuthSplatRoute: typeof ApiAuthSplatRoute
   SlugWikiIndexRoute: typeof SlugWikiIndexRoute
 }
@@ -655,11 +655,11 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof SlugWikiPageSlugRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/admin/herald/usage': {
-      id: '/admin/herald/usage'
-      path: '/admin/herald/usage'
-      fullPath: '/admin/herald/usage'
-      preLoaderRoute: typeof AdminHeraldUsageRouteImport
+    '/admin/assistant/usage': {
+      id: '/admin/assistant/usage'
+      path: '/admin/assistant/usage'
+      fullPath: '/admin/assistant/usage'
+      preLoaderRoute: typeof AdminAssistantUsageRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/api/auth/$': {
@@ -757,7 +757,7 @@ const rootRouteChildren: RootRouteChildren = {
   SlugIndexRoute: SlugIndexRoute,
   SlugTasksTaskIdRoute: SlugTasksTaskIdRoute,
   SlugWikiPageSlugRoute: SlugWikiPageSlugRoute,
-  AdminHeraldUsageRoute: AdminHeraldUsageRoute,
+  AdminAssistantUsageRoute: AdminAssistantUsageRoute,
   ApiAuthSplatRoute: ApiAuthSplatRoute,
   SlugWikiIndexRoute: SlugWikiIndexRoute,
 }

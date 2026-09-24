@@ -44,7 +44,7 @@ export interface WikiPageContent {
   content: TipTapDoc;
 }
 
-export interface HeraldToolDeps {
+export interface AssistantToolDeps {
   projectId: string;
   allowlist: string | null;
   searchApiKey: string | null;
@@ -113,7 +113,7 @@ export async function fetchUrlText(rawUrl: string, allowlist: string | null, fet
     const res = await fetchImpl(current, {
       redirect: "manual",
       signal: AbortSignal.timeout(FETCH_URL_TIMEOUT_MS),
-      headers: { "user-agent": "Lexa-Herald/1.0" },
+      headers: { "user-agent": "Lexa-Assistant/1.0" },
     });
     if (res.status >= 300 && res.status < 400) {
       const location = res.headers.get("location");
@@ -142,7 +142,7 @@ function summarizeTask(t: TaskRef) {
 
 // Build the active v1 read-only toolset. web_search is included only when an
 // Exa key is configured; everything else rides along unconditionally.
-export function buildHeraldTools(deps: HeraldToolDeps) {
+export function buildAssistantTools(deps: AssistantToolDeps) {
   const tools = [];
 
   if (deps.searchApiKey !== null && deps.searchApiKey !== "") {

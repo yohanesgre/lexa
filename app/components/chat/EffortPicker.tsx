@@ -1,12 +1,12 @@
 import { useEffect, useRef, useState } from "react";
 import { Check } from "lucide-react";
-import type { HeraldReasoningEffort } from "../../../shared/herald";
+import type { AssistantReasoningEffort } from "../../../shared/assistant";
 
-// Per-turn thinking-effort picker (herald-chat.html composer control row).
+// Per-turn thinking-effort picker (assistant-chat.html composer control row).
 // "" = following the project default — trigger reads muted "default (N)";
 // an explicit level tints the chip with the selected treatment and rides
 // the next stream payload only. Locked while a stream is in flight.
-const LEVELS: { value: HeraldReasoningEffort; label: string }[] = [
+const LEVELS: { value: AssistantReasoningEffort; label: string }[] = [
   { value: "minimal", label: "Minimal" },
   { value: "low", label: "Low" },
   { value: "medium", label: "Medium" },
@@ -26,14 +26,14 @@ const itemStyle = (selected: boolean): React.CSSProperties =>
   selected ? { ...ITEM_BASE_STYLE, ...ITEM_SELECTED_STYLE } : ITEM_BASE_STYLE;
 
 export function EffortPicker({ effort, projectEffort, disabled = false, align = "down", onChange }: {
-  effort: HeraldReasoningEffort | "";
-  projectEffort: HeraldReasoningEffort | null;
+  effort: AssistantReasoningEffort | "";
+  projectEffort: AssistantReasoningEffort | null;
   disabled?: boolean | undefined;
   /** "down" (default) opens below the trigger; "up" opens above — use "up"
    *  on mobile where the button sits near the bottom of the viewport and a
    *  downward menu would run off-screen. */
   align?: "up" | "down";
-  onChange: (effort: HeraldReasoningEffort | "") => void;
+  onChange: (effort: AssistantReasoningEffort | "") => void;
 }) {
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);

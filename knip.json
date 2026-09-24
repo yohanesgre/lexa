@@ -9,7 +9,7 @@
   ],
   "ignore": [
     "app/routeTree.gen.ts",
-    "app/components/runtimes/herald/HeraldPanelViews.tsx",
+    "app/components/runtimes/assistant/AssistantPanelViews.tsx",
     "app/components/ui/Checkbox.tsx",
     "app/components/ui/Toggle.tsx",
     "doctor.config.ts",

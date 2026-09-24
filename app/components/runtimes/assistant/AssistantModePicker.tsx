@@ -1,0 +1,72 @@
+import { Flame } from "lucide-react";
+import { cn } from "../../ui/cn";
+import type { RuntimeEngine } from "../../../../shared/assistant";
+
+// Header segmented control picking the active engine per member
+// (runtime-popover.html / assistant-popover.html toggle variant). Rendered ONLY
+// when the project sets engine_switcher_enabled — parents gate on that and
+// render nothing otherwise. Disabled while any run is active — switching
+// mid-run is blocked until the terminal frame.
+export type RuntimeMode = RuntimeEngine;
+
+const OPTION_BASE_STYLE: React.CSSProperties = { height: 22, padding: "0 10px", fontSize: 11 };
+const OPTION_SELECTED_STYLE: React.CSSProperties = {
+  background: "var(--lx-surface-selected)",
+  borderColor: "var(--lx-border-focus)",
+  color: "var(--lx-text-primary)",
+};
+const OPTION_UNSELECTED_STYLE: React.CSSProperties = { color: "var(--lx-text-secondary)" };
+const optionStyle = (selected: boolean): React.CSSProperties =>
+  selected ? { ...OPTION_BASE_STYLE, ...OPTION_SELECTED_STYLE } : { ...OPTION_BASE_STYLE, ...OPTION_UNSELECTED_STYLE };
+
+export function AssistantModePicker({ mode, onChange, disabled }: {
+  mode: RuntimeMode;
+  onChange: (mode: RuntimeMode) => void;
+  disabled?: boolean | undefined;
+}) {
+  return (
+    <div
+      className="flex items-center"
+      role="radiogroup"
+      aria-label="AI mode"
+      style={{ background: "var(--lx-surface-input)", border: "1px solid var(--lx-border-default)", borderRadius: 6, padding: 2, opacity: disabled ? 0.45 : undefined, pointerEvents: disabled ? "none" : undefined }}
+    >
+      <button
+        type="button"
+        role="radio"
+        aria-checked={mode === "assistant"}
+        className="btn btn-sm"
+        style={optionStyle(mode === "assistant")}
+        onClick={() => onChange("assistant")}
+      >
+        <Flame size={11} strokeWidth={1.5} />
+        Assistant
+      </button>
+      <button
+        type="button"
+        role="radio"
+        aria-checked={mode === "blacksmith"}
+        className={cn("btn btn-sm")}
+        style={optionStyle(mode === "blacksmith")}
+        onClick={() => onChange("blacksmith")}
+      >
+        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+          <path d="M14 4v10.54a4 4 0 1 1-4 0V4a2 2 0 0 1 4 0z" />
+        </svg>
+        Blacksmith
+      </button>
+    </div>
+  );
+}
+
+// Gated wrapper — the single rendering decision for the member engine toggle:
+// hidden entirely unless the project enabled the switcher.
+export function EngineToggle({ enabled, mode, onChange, disabled }: {
+  enabled: boolean;
+  mode: RuntimeMode;
+  onChange: (mode: RuntimeMode) => void;
+  disabled?: boolean | undefined;
+}) {
+  if (!enabled) return null;
+  return <AssistantModePicker mode={mode} onChange={onChange} disabled={disabled} />;
+}
