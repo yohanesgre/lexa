@@ -1,6 +1,6 @@
 # Lexa
 
-Self-hosted project management for small teams. Kanban with swimlanes and WIP limits, rich task descriptions, a nested wiki, milestones, the AI writing assistant, AI Runtimes and AI Agents, Herald chat, team auth, and two-way GitHub issue sync.
+Self-hosted project management for small teams. Kanban with swimlanes and WIP limits, rich task descriptions, a nested wiki, milestones, AI Runtimes and AI Agents, Herald chat, team auth, and two-way GitHub issue sync.
 
 Stack: **Bun + SQLite + TanStack Start (React) + Effect-TS + Tailwind** — self-hosted via `scripts/install.sh` (docker, bare metal, Cloudflare Workers, or dev).
 
@@ -10,7 +10,7 @@ Stack: **Bun + SQLite + TanStack Start (React) + Effect-TS + Tailwind** — self
 - **Tasks** — rich TipTap descriptions, assignees, activity timeline + comments, attachments, subtasks / blocked-by / related links, GitHub issue links with sync status
 - **Nested wiki** — hierarchical pages, FTS5 full-text search, revisions with restore, public share links
 - **Milestones** — goals above sprints with target dates, progress tracking, timeline gantt
-- **AI Runtimes & AI Agents** — AI writing assistant with builtin agents + skills rule bundles, per-project engines, pluggable runtimes (OpenCode / Hermes / Command Code), machine listener with persistent daemon
+- **AI Runtimes & AI Agents** — AI execution runtime with builtin agents + skills rule bundles, per-project engines, pluggable runtimes (OpenCode / Hermes / Command Code), machine listener with persistent daemon
 - **Herald chat** — streaming AI chat with threads, multi-provider gateway, and a proposed-actions approval flow for task/wiki writes
 - **Auth & teams** — email/password login with cookie sessions, teams and roles, workspace invites, `lxk_` API keys for machines
 - **Two-way GitHub sync** — link tasks to issues, echo-suppressed webhooks, column ↔ issue-state mapping, out-of-sync surfacing
@@ -131,7 +131,7 @@ the machine and never committed (`.env*` is gitignored):
 |---|---|
 | Local dev (`.env`) | `bun run setup` records `LXK_ADMIN_EMAILS`; machine keys minted post-setup; `GITHUB_*` only if you want two-way GitHub sync |
 | Self-hosted (install script) | the script writes the env file (`LXK_ENV`, `LXK_PUBLIC_URL`); machine keys minted post-setup (login → Settings → API Keys); `GITHUB_*` preserved across re-runs |
-| Optional | `LXK_HEARTH_DAEMON_TOKEN`, `LXK_MAX_BODY_MB` (body cap, default 16), `LOG_LEVEL` |
+| Optional | `LXK_RUNTIME_DAEMON_TOKEN`, `LXK_MAX_BODY_MB` (body cap, default 16), `LOG_LEVEL` |
 
 ## Documentation
 

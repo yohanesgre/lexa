@@ -1,30 +1,28 @@
 # AI Runtimes — AI execution runtime
 
-_Internal codename: Hearth — identifiers, routes, env keys, and tables keep the old name._
-
 AI Runtimes is Lexa's AI execution umbrella. Two co-existing active tiers (see
-`docs/ARCHITECTURE.md` §Hearth — two active AI tiers for the decision record,
-formerly ADR-0001, now merged; `docs/HEARTH.md` for runtime details;
-amendments 2026-08-23/24 merged into ARCHITECTURE.md — two-agent catalog,
-engine switching, personal-overlay toggle, skills junction, vision chain, and
-full Forge→Hearth identifier rename):
+`docs/ARCHITECTURE.md` §Runtimes — two active AI tiers for the decision record,
+formerly ADR-0001, now merged; amendments 2026-08-23/24 merged into
+ARCHITECTURE.md — two-agent catalog, engine switching, personal-overlay toggle,
+skills junction, vision chain, and the full Forge→Hearth→Runtimes identifier
+rename):
 
 | | Herald | Blacksmith |
 |---|---|---|
 | Role | Writing + PM assistant | Coding agent |
 | Engine | Server-side `chat()` (`server/herald/provider.ts`) | listener/daemon/warm `opencode serve` |
 | Queue | HTTP stream handler, in-process | daemons via `claimNextTask` |
-| Auth | Browser cookie/Bearer | x-hearth-token surfaces |
-| Thread state | `herald_threads` (ModelMessage[] JSON, rolling summary) | `hearth_sessions` |
+| Auth | Browser cookie/Bearer | x-runtime-token surfaces |
+| Thread state | `herald_threads` (ModelMessage[] JSON, rolling summary) | `runtime_sessions` |
 | Agents/skills render | prompt injection via systemPrompts | `.agents/` file writes |
 
-Shared: `hearth_tasks` queue with `kind` discriminator (`herald`|`blacksmith`
+Shared: `runtime_tasks` queue with `kind` discriminator (`herald`|`blacksmith`
 — `claimNextTask` carries `AND kind='blacksmith'`; Herald streams claim via a
 kind-scoped conditional UPDATE; field names `agentMarkdown`/`skillMarkdown`
 frozen for daemon wire compat), **Lexa Agents/Skills** catalog
-(`lexa_agents`/`lexa_skills`/`lexa_agent_skills` — renamed from `forge_*` in
-migration 0010; routes `/api/agents`, `/api/skills`; exactly two builtins
-`hearth-herald`/`hearth-blacksmith` after migration 0013 id rebind, generic
+(`lexa_agents`/`lexa_skills`/`lexa_agent_skills` — renamed from `forge_*` in the
+squashed `0001_init.sql` baseline; routes `/api/agents`, `/api/skills`; exactly
+two builtins `herald`/`blacksmith` after the `0005_runtime_rename.sql` id rebind, generic
 `lexa` retired; per-agent skill availability = `lexa_agent_skills` junction
 only), popover, logs/activity machinery. Per-project engine switching
 (`herald_settings.engine` ∈ `herald|blacksmith` with `engine_switcher_enabled`
@@ -32,18 +30,20 @@ gate; personal-overlay member toggle is client-side session preference, admin
 writes the default; freeform chat always herald → 409
 `ENGINE_NOT_SUPPORTED_FOR_CHAT` under blacksmith). Vision chain:
 `primarySupportsImages` checkbox → inline vs 409 `VISION_NOT_CONFIGURED`
-(`vision_model` delegation removed in 0017). Full Forge→Hearth
-identifier rename (tables `hearth_tasks`/`hearth_task_logs`/`hearth_sessions`,
-routes `/api/hearth/*`, header `x-hearth-token`, env `HEARTH_*/LXK_HEARTH_DAEMON_TOKEN`,
-activity `hearth_*`, CLI state) via migration 0015 — breaking reinstall. The
-popover picks per-run.
+(`vision_model` delegation removed in the squashed baseline). History:
+the full Forge→Hearth identifier rename (2026-08-24) is baked into
+the `0001_init.sql` baseline; the Hearth→Runtimes rename (2026-09-24, migration
+`0005_runtime_rename.sql`) carried tables
+`runtime_tasks`/`runtime_task_logs`/`runtime_sessions`, routes `/api/runtimes/*`,
+header `x-runtime-token`, env `RUNTIME_*`/`LXK_RUNTIME_DAEMON_TOKEN`, activity
+`runtime_*`, and CLI state — breaking reinstall. The popover picks per-run.
 
 ## Daemon + listener
 
 - The AI button in the task/wiki editors needs at least one online daemon
   child, managed by `lx machine listen` (env: `LEXA_URL`,
-  `LEXA_API_KEY` or `LXK_HEARTH_DAEMON_TOKEN`,
-  `HEARTH_AGENT=opencode|hermes|command-code`). The listener owns per-runtime
+  `LEXA_API_KEY` or `LXK_RUNTIME_DAEMON_TOKEN`,
+  `RUNTIME_AGENT=opencode|hermes|command-code`). The listener owns per-runtime
   daemon children; there are no per-runtime systemd units. Without a daemon,
   Generate returns `NO_RUNTIME_ONLINE`.
 - **Daemons NEVER inherit the listener's shell env.** Secret vars are scrubbed
@@ -66,7 +66,7 @@ instructions (`agentMarkdown` / `skillMarkdown`) — files-only, no host store.
 All host state lives under `~/.lexa/` (`LEXA_DIR`), grouped per server host
 (`~/.lexa/<host>/`).
 
-`POST /api/hearth/runtime-events` delivers only machine + agent CLI + a fresh
+`POST /api/runtimes/events` delivers only machine + agent CLI + a fresh
 key; the listener persists its machine id at `~/.lexa/<host>/machine-id` and
 the per-machine secret at `~/.lexa/<host>/machine-secret` (both chmod 600),
 heartbeats every 3s, claims only its own events (sending `x-machine-secret`),
@@ -84,7 +84,7 @@ on 1.18.11: it exits without mirroring text parts — spike-verified).
 The claim payload carries the continue-vs-mint verdict: `runtimeSessionId`
 (continue the mapped conversation) or `null` (mint
 `POST /session?directory=<workspace>` on serve, assert the bound directory,
-then persist the mapping in `hearth_sessions` BEFORE the run).
+then persist the mapping in `runtime_sessions` BEFORE the run).
 
 - Runs are blocking `POST /session/:id/message` (model as
   `{providerID, modelID}` — a `"provider/model"` string is rejected).
@@ -92,10 +92,10 @@ then persist the mapping in `hearth_sessions` BEFORE the run).
 - The result is the joined text parts; `session.error` fails the task.
 - Cancel/timeout = `POST /session/:id/abort` (best effort — unblocks the
   message POST) + **drop the mapping row unconditionally**
-  (`DELETE /api/hearth/sessions`; an aborted session is poisoned and must
+  (`DELETE /api/runtimes/sessions`; an aborted session is poisoned and must
   never be continued).
 - The popover's "New session" uses the user-facing
-  `POST /api/hearth/sessions/reset` (409 while the document has an active
+  `POST /api/runtimes/sessions/reset` (409 while the document has an active
   task on that runtime).
 - Agent/skill change → the server returns `null` → the daemon mints a fresh
   session and rewrites the row (reset semantics, no history rows).
@@ -106,7 +106,7 @@ then persist the mapping in `hearth_sessions` BEFORE the run).
 
 Serve binds `127.0.0.1` on a flavor-separated port — prod 4096–4127,
 staging 4196–4227, dev 4296–4327 (`flavorBaseFor(LEXA_FLAVOR)` +
-`fnv1a(runtimeId) % 32`, +1..+4 fallback candidates, `HEARTH_SERVE_PORT`
+`fnv1a(runtimeId) % 32`, +1..+4 fallback candidates, `RUNTIME_SERVE_PORT`
 override in the runtime env file first), readiness probed via
 `GET /session` (200 = fully up).
 
@@ -118,7 +118,7 @@ The daemon sweeps a stale `serve.pid` at boot (SIGKILL/power-loss orphans),
 respawns crashed serve with a 5s→30s backoff (never gives up, sessions
 survive — the session DB lives in the persistent sandbox), kills serve on
 its SIGTERM (listener stop) and on the exit-3 auth-failure path. If serve
-cannot boot, claimed tasks fail with "Hearth runtime unavailable — opencode
+cannot boot, claimed tasks fail with "Runtime unavailable — opencode
 serve did not start" — no legacy cold-`run` fallback.
 
 ## Persistent sandbox + workspace (opencode only)
@@ -129,8 +129,8 @@ a static orchestrator `AGENTS.md`); per run the daemon (over)writes
 `.agents/agents/<agentId>/AGENTS.md` (the selected lexa-agent's rules) and
 `.agents/skills/<skillId>/SKILL.md`.
 
-The sealed per-run `.hearth/` HOME is replaced by a persistent per-runtime
-sandbox at the group's `<LEXA_DIR>/runtimes/<runtimeId>/hearth-home/`
+The legacy sealed per-run HOME is replaced by a persistent per-runtime
+sandbox at the group's `<LEXA_DIR>/runtimes/<runtimeId>/runtime-home/`
 (seeded once, never wiped — removed only with the runtime; contains the
 deny-rule `opencode.json`: bash fully denied, `external_directory: deny`,
 `*auth.json*` denied, `skill`/`webfetch` denied + a copy of
