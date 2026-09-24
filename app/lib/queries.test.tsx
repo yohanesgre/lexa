@@ -10,8 +10,8 @@ import {
   useProjects, useDashboard, useBoard, useTasks, useFieldConfig, useWikiPages, useWikiPage,
   useSearchWikiPages, useRevisions, useColumns, useSwimlanes, useApiKeys, useUsers,
   useProjectMembers, useRuntimes, useMachines, useAgents, useSkills,
-  useRecentHearthTasks, useHearthTaskHistory, useSources, useTaskLinks, useTaskSearch,
-  useTaskActivity, useHearthTask, useHearthTaskLogs, useRecentHearthTask,
+  useRecentRuntimeTasks, useRuntimeTaskHistory, useSources, useTaskLinks, useTaskSearch,
+  useTaskActivity, useRuntimeTask, useRuntimeTaskLogs, useRecentRuntimeTask,
   useRateLimit, useGithubSettings,
   deriveTaskList, selectProjectHealth, prependActivity,
 } from "./queries";

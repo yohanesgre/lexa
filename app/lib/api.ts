@@ -1,5 +1,5 @@
 import { Schema } from "effect";
-import type { Project, ProjectRepo, Column, Swimlane, Task, Board, Milestone, WikiPageMeta, WikiPage, WikiPageRevision, WikiPageRevisionSummary, TipTapDoc, ApiKey, ApiKeyCreateResult, Dashboard, FieldConfig, HearthTask, HearthTaskLog, HearthTaskStatus, LexaAgent, LexaSkill, HearthProvider, HearthSession, DocumentSource, Runtime, RuntimeEvent, Machine, TaskLink, TaskLinkSuggestion, ActivityEvent, ActivityItem, TaskComment, GithubIssueSummary, Team, TeamMember, TeamMemberRole, WorkspaceInvite, SessionInfo, LexaUser, Attachment } from "../../shared/types";
+import type { Project, ProjectRepo, Column, Swimlane, Task, Board, Milestone, WikiPageMeta, WikiPage, WikiPageRevision, WikiPageRevisionSummary, TipTapDoc, ApiKey, ApiKeyCreateResult, Dashboard, FieldConfig, RuntimeTask, RuntimeTaskLog, RuntimeTaskStatus, LexaAgent, LexaSkill, AgentCli, RuntimeSession, DocumentSource, Runtime, RuntimeEvent, Machine, TaskLink, TaskLinkSuggestion, ActivityEvent, ActivityItem, TaskComment, GithubIssueSummary, Team, TeamMember, TeamMemberRole, WorkspaceInvite, SessionInfo, LexaUser, Attachment } from "../../shared/types";
 import type { HeraldSettingsMasked, HeraldSettingsInput, HeraldChatTranscript, ModelListResult, HeraldProvider, HeraldProviderModel, HeraldUsage, HeraldCall, HeraldProjectSettings } from "../../shared/herald";
 
 const BASE = "/api";
@@ -502,9 +502,9 @@ export function removeProjectMember(userId: string, projectId: string): Promise<
   return request(`${BASE}/admin/users/${userId}/projects/${projectId}`, { method: "DELETE" });
 }
 
-// ── Hearth (AI writing assistant) ──
+// ── Runtime (AI writing assistant) ──
 
-export function createHearthTask(input: {
+export function createRuntimeTask(input: {
   slug: string;
   documentType: "task" | "wiki";
   documentId: string;
@@ -513,50 +513,50 @@ export function createHearthTask(input: {
   extraPrompt?: string | undefined;
   selection?: string | undefined;
   runtimeId?: string | undefined;
-}): Promise<HearthTask> {
-  return request(`${BASE}/hearth/tasks`, { method: "POST", body: JSON.stringify(input) });
+}): Promise<RuntimeTask> {
+  return request(`${BASE}/runtimes/tasks`, { method: "POST", body: JSON.stringify(input) });
 }
 
-export function getHearthTask(id: string): Promise<HearthTask> {
-  return request(`${BASE}/hearth/tasks/${id}`);
+export function getRuntimeTask(id: string): Promise<RuntimeTask> {
+  return request(`${BASE}/runtimes/tasks/${id}`);
 }
 
-export function cancelHearthTask(id: string): Promise<HearthTask> {
-  return request(`${BASE}/hearth/tasks/${id}/cancel`, { method: "POST" });
+export function cancelRuntimeTask(id: string): Promise<RuntimeTask> {
+  return request(`${BASE}/runtimes/tasks/${id}/cancel`, { method: "POST" });
 }
 
-export function listHearthTaskLogs(id: string): Promise<{ data: HearthTaskLog[] }> {
-  return request(`${BASE}/hearth/tasks/${id}/logs`);
+export function listRuntimeTaskLogs(id: string): Promise<{ data: RuntimeTaskLog[] }> {
+  return request(`${BASE}/runtimes/tasks/${id}/logs`);
 }
 
-export function listHearthTasks(slug: string, documentType: "task" | "wiki", documentId: string): Promise<{ data: HearthTask[] }> {
-  return request(`${BASE}/hearth/tasks?slug=${encodeURIComponent(slug)}&documentType=${documentType}&documentId=${encodeURIComponent(documentId)}`);
+export function listRuntimeTasks(slug: string, documentType: "task" | "wiki", documentId: string): Promise<{ data: RuntimeTask[] }> {
+  return request(`${BASE}/runtimes/tasks?slug=${encodeURIComponent(slug)}&documentType=${documentType}&documentId=${encodeURIComponent(documentId)}`);
 }
 
-export interface RecentHearthTask extends HearthTask {
+export interface RecentRuntimeTask extends RuntimeTask {
   projectName: string;
 }
 
-export function listRecentHearthTasks(): Promise<{ data: RecentHearthTask[] }> {
-  return request(`${BASE}/hearth/tasks/recent`);
+export function listRecentRuntimeTasks(): Promise<{ data: RecentRuntimeTask[] }> {
+  return request(`${BASE}/runtimes/tasks/recent`);
 }
 
-export interface HearthHistoryPage {
-  data: RecentHearthTask[];
+export interface RuntimeHistoryPage {
+  data: RecentRuntimeTask[];
   nextCursor: string | null;
-  summary: Record<HearthTaskStatus, number>;
+  summary: Record<RuntimeTaskStatus, number>;
 }
 
-// Full Hearth task history (control panel): optional filters + keyset cursor.
-export function listHearthTaskHistory(filters: {
+// Full Runtime task history (control panel): optional filters + keyset cursor.
+export function listRuntimeTaskHistory(filters: {
   slug?: string | undefined;
-  status?: HearthTaskStatus;
+  status?: RuntimeTaskStatus;
   skillId?: string | undefined;
   documentType?: "task" | "wiki";
   teamId?: string | undefined;
   limit?: number | undefined;
   cursor?: string | undefined;
-}): Promise<HearthHistoryPage> {
+}): Promise<RuntimeHistoryPage> {
   const q = new URLSearchParams();
   if (filters.slug) q.set("slug", filters.slug);
   if (filters.status) q.set("status", filters.status);
@@ -566,38 +566,38 @@ export function listHearthTaskHistory(filters: {
   if (filters.limit) q.set("limit", String(filters.limit));
   if (filters.cursor) q.set("cursor", filters.cursor);
   const qs = q.toString();
-  return request(`${BASE}/hearth/tasks/history${qs ? `?${qs}` : ""}`);
+  return request(`${BASE}/runtimes/tasks/history${qs ? `?${qs}` : ""}`);
 }
 
-// ── Hearth sessions (warm opencode serve conversation mappings) ──
+// ── Runtime sessions (warm opencode serve conversation mappings) ──
 
-export function listHearthSessions(documentType: "task" | "wiki", documentId: string): Promise<{ data: HearthSession[] }> {
-  return request(`${BASE}/hearth/sessions?documentType=${documentType}&documentId=${encodeURIComponent(documentId)}`);
+export function listRuntimeSessions(documentType: "task" | "wiki", documentId: string): Promise<{ data: RuntimeSession[] }> {
+  return request(`${BASE}/runtimes/sessions?documentType=${documentType}&documentId=${encodeURIComponent(documentId)}`);
 }
 
 // Drops the session mapping so the next Generate mints a fresh session.
-// Returns 409 (HEARTH_SESSION_ACTIVE) while a task for the document runs on
+// Returns 409 (RUNTIME_SESSION_ACTIVE) while a task for the document runs on
 // that runtime — surfaced as an error toast by the caller.
-export function resetHearthSession(input: { documentType: "task" | "wiki"; documentId: string; runtimeId: string }): Promise<void> {
-  return request(`${BASE}/hearth/sessions/reset`, { method: "POST", body: JSON.stringify(input) });
+export function resetRuntimeSession(input: { documentType: "task" | "wiki"; documentId: string; runtimeId: string }): Promise<void> {
+  return request(`${BASE}/runtimes/sessions/reset`, { method: "POST", body: JSON.stringify(input) });
 }
 
-// ── Lexa Agents & Skills (global rule bundles, shared by both Hearth tiers) ──
-// Routes moved off /hearth/* in migration 0010 (S14 hard cutover).
+// ── Lexa Agents & Skills (global rule bundles, shared by both Runtime tiers) ──
+// Routes moved off /runtimes/* in migration 0010 (S14 hard cutover).
 
-export function listHearthAgents(): Promise<{ data: LexaAgent[] }> {
+export function listAgents(): Promise<{ data: LexaAgent[] }> {
   return request(`${BASE}/agents`);
 }
 
-export function createHearthAgent(input: { name: string; description?: string | undefined; instructions: string }): Promise<LexaAgent> {
+export function createAgent(input: { name: string; description?: string | undefined; instructions: string }): Promise<LexaAgent> {
   return request(`${BASE}/agents`, { method: "POST", body: JSON.stringify(input) });
 }
 
-export function updateHearthAgent(id: string, patch: { name?: string | undefined; description?: string | undefined; instructions?: string }): Promise<LexaAgent> {
+export function updateAgent(id: string, patch: { name?: string | undefined; description?: string | undefined; instructions?: string }): Promise<LexaAgent> {
   return request(`${BASE}/agents/${id}`, { method: "PATCH", body: JSON.stringify(patch) });
 }
 
-export function deleteHearthAgent(id: string): Promise<void> {
+export function deleteAgent(id: string): Promise<void> {
   return request(`${BASE}/agents/${id}`, { method: "DELETE" });
 }
 
@@ -605,45 +605,45 @@ export function replaceAgentSkills(id: string, skillIds: string[]): Promise<Lexa
   return request(`${BASE}/agents/${id}/skills`, { method: "PUT", body: JSON.stringify({ skillIds }) });
 }
 
-export function resetHearthAgent(id: string): Promise<LexaAgent> {
+export function resetAgent(id: string): Promise<LexaAgent> {
   return request(`${BASE}/agents/${id}/reset`, { method: "POST" });
 }
 
-export function listHearthSkills(): Promise<{ data: LexaSkill[] }> {
+export function listSkills(): Promise<{ data: LexaSkill[] }> {
   return request(`${BASE}/skills`);
 }
 
-export function createHearthSkill(input: { name: string; description?: string | undefined; instructions: string }): Promise<LexaSkill> {
+export function createSkill(input: { name: string; description?: string | undefined; instructions: string }): Promise<LexaSkill> {
   return request(`${BASE}/skills`, { method: "POST", body: JSON.stringify(input) });
 }
 
-export function updateHearthSkill(id: string, patch: { name?: string | undefined; description?: string | undefined; instructions?: string }): Promise<LexaSkill> {
+export function updateSkill(id: string, patch: { name?: string | undefined; description?: string | undefined; instructions?: string }): Promise<LexaSkill> {
   return request(`${BASE}/skills/${id}`, { method: "PATCH", body: JSON.stringify(patch) });
 }
 
-export function deleteHearthSkill(id: string): Promise<void> {
+export function deleteSkill(id: string): Promise<void> {
   return request(`${BASE}/skills/${id}`, { method: "DELETE" });
 }
 
-export function resetHearthSkill(id: string): Promise<LexaSkill> {
+export function resetSkill(id: string): Promise<LexaSkill> {
   return request(`${BASE}/skills/${id}/reset`, { method: "POST" });
 }
 
 export function listRuntimes(teamId?: string): Promise<{ data: Runtime[] }> {
   const qs = teamId ? `?teamId=${encodeURIComponent(teamId)}` : "";
-  return request(`${BASE}/hearth/runtimes${qs}`);
+  return request(`${BASE}/runtimes${qs}`);
 }
 
 export function updateRuntime(id: string, patch: { name?: string | undefined; provider?: "opencode" | "hermes" | "command-code"; agent?: string | undefined; model?: string | undefined; printLogs?: boolean | undefined; logLevel?: "" | "DEBUG" | "INFO" | "WARN" | "ERROR"; extraArgs?: string[] }): Promise<Runtime> {
-  return request(`${BASE}/hearth/runtimes/${id}`, { method: "PATCH", body: JSON.stringify(patch) });
+  return request(`${BASE}/runtimes/${id}`, { method: "PATCH", body: JSON.stringify(patch) });
 }
 
 export function removeRuntime(id: string): Promise<void> {
-  return request(`${BASE}/hearth/runtimes/${id}`, { method: "DELETE" });
+  return request(`${BASE}/runtimes/${id}`, { method: "DELETE" });
 }
 
 export function removeMachine(id: string): Promise<void> {
-  return request(`${BASE}/hearth/machines/${id}`, { method: "DELETE" });
+  return request(`${BASE}/runtimes/machines/${id}`, { method: "DELETE" });
 }
 
 // ── Runtime setup events (web wizard → machine CLI listener) ──
@@ -656,15 +656,15 @@ export function createRuntimeEvent(input: {
   apiKeyId?: string | undefined;
   rawKey?: string | undefined;
 }): Promise<RuntimeEvent> {
-  return request(`${BASE}/hearth/runtime-events`, { method: "POST", body: JSON.stringify(input) });
+  return request(`${BASE}/runtimes/events`, { method: "POST", body: JSON.stringify(input) });
 }
 
 export function getRuntimeEvent(id: string): Promise<RuntimeEvent> {
-  return request(`${BASE}/hearth/runtime-events/${id}`);
+  return request(`${BASE}/runtimes/events/${id}`);
 }
 
 export function listMachines(): Promise<{ data: Machine[] }> {
-  return request(`${BASE}/hearth/machines`);
+  return request(`${BASE}/runtimes/machines`);
 }
 
 export function listSources(slug: string, documentType: "task" | "wiki", documentId: string): Promise<{ data: DocumentSource[] }> {
@@ -837,7 +837,7 @@ export function createHeraldTask(input: {
   skillId: string;
   selection?: string | undefined;
   attachments?: { storageKey: string; mimeType: string; name: string }[];
-}): Promise<HearthTask> {
+}): Promise<RuntimeTask> {
   return request(`${BASE}/herald/tasks`, { method: "POST", body: JSON.stringify(input) });
 }
 

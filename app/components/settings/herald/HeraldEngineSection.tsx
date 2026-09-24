@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { cn } from "../../ui/cn";
-import type { HearthEngine } from "../../../../shared/herald";
+import type { RuntimeEngine } from "../../../../shared/herald";
 import { useHeraldSettings, useSaveHeraldSettings } from "../../../lib/queries";
 import type { HeraldSettingsMasked, HeraldSettingsInput } from "../../../../shared/herald";
 import type { Project } from "../../../../shared/types";
@@ -24,7 +24,7 @@ const optionStyle = (selected: boolean): React.CSSProperties =>
 export function HeraldEngineSection({ project }: { project: Project }) {
   const { data: settings } = useHeraldSettings(project.id);
   const save = useSaveHeraldSettings(project.id);
-  const [engine, setEngine] = useState<HearthEngine>("herald");
+  const [engine, setEngine] = useState<RuntimeEngine>("herald");
   const [switcher, setSwitcher] = useState(false);
   const hydratedRef = useRef<string | null>(null);
 

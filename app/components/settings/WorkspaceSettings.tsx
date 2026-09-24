@@ -5,7 +5,7 @@ import { useSession, useWorkspaceMembers, useUpdateWorkspaceMember, useDeleteWor
 import { ApiKeysSection, GithubSyncSection, MachinesRuntimesSection, RateLimitSection } from "./SettingsSections";
 import { HeraldProvidersSection } from "./HeraldProvidersSection";
 import { formatRelative } from "../../lib/relative-time";
-import { AgentsSettingsSection, SkillsSettingsSection } from "../hearth/AgentSkillSettings";
+import { AgentsSettingsSection, SkillsSettingsSection } from "../runtimes/AgentSkillSettings";
 import { copyToClipboard } from "../../lib/clipboard";
 import { Field } from "../ui/Field";
 import { TextInput } from "../ui/TextInput";
@@ -14,7 +14,7 @@ import type { Project, Runtime, WorkspaceInvite } from "../../../shared/types";
 import type { WorkspaceMember } from "../../lib/api";
 
 // Superadmin-only workspace settings: Members + invites, Teams, Machines &
-// runtimes, API keys, rate limiting, GitHub sync, Hearth agents & skills.
+// runtimes, API keys, rate limiting, GitHub sync, Runtime agents & skills.
 // NO Superadmins section — superadmin is env-only (LXK_ADMIN_EMAILS).
 
 function LinkCopyModal({ title, link, onDone }: { title: string; link: string; onDone: () => void }) {
@@ -320,7 +320,7 @@ function TeamDeleteModal({ name, onCancel, onConfirm }: { name: string; onCancel
   );
 }
 
-// Hearth Agents & Skills (workspace-global rule bundles; full editor inline).
+// Runtime Agents & Skills (workspace-global rule bundles; full editor inline).
 function AgentsSkillsSections() {
   return (
     <>
@@ -353,7 +353,7 @@ export function WorkspaceSettings() {
       {isSuperadmin && (
         <div className="card-panel mt-0 mb-6" style={{ padding: "10px 12px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
           <span className="text-sm text-lx-text-secondary">Gateway usage, cost, latency &amp; health — all projects aggregated.</span>
-          <Link to="/hearth/usage" className="btn btn-ghost" style={{ height: 28, padding: "0 10px", fontSize: 12, textDecoration: "none", display: "inline-flex", alignItems: "center", whiteSpace: "nowrap" }}>
+          <Link to="/runtimes/usage" className="btn btn-ghost" style={{ height: 28, padding: "0 10px", fontSize: 12, textDecoration: "none", display: "inline-flex", alignItems: "center", whiteSpace: "nowrap" }}>
             Herald Usage · Gateway
           </Link>
         </div>
@@ -379,8 +379,8 @@ export function WorkspaceSettings() {
       {tab === "compute" && (
         <>
           <div className="card-panel mb-6" style={{ padding: "10px 12px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, borderStyle: "dashed" }}>
-            <span className="text-sm text-lx-text-secondary">AI Runtimes (runs, usage, providers, runtimes, bindings, agents) have moved to <span className="font-mono text-xs">/hearth</span> — canonical ops shell. This page retains machines/runtimes/providers/agents for reference until removal (Phase 3 duplication noted).</span>
-            <Link to="/hearth/runs" className="btn btn-ghost" style={{ height: 28, padding: "0 10px", fontSize: 12, textDecoration: "none", display: "inline-flex", alignItems: "center", whiteSpace: "nowrap" }}>Open /hearth</Link>
+            <span className="text-sm text-lx-text-secondary">AI Runtimes (runs, usage, providers, runtimes, bindings, agents) have moved to <span className="font-mono text-xs">/runtimes</span> — canonical ops shell. This page retains machines/runtimes/providers/agents for reference until removal (Phase 3 duplication noted).</span>
+            <Link to="/runtimes/runs" className="btn btn-ghost" style={{ height: 28, padding: "0 10px", fontSize: 12, textDecoration: "none", display: "inline-flex", alignItems: "center", whiteSpace: "nowrap" }}>Open /runtimes</Link>
           </div>
           <MachinesRuntimesSection showTeamColumn />
         </>

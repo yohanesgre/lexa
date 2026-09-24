@@ -4,13 +4,13 @@ import { useRemoveRuntime } from "../../lib/queries";
 import { RemoveRuntimeModal } from "./SettingsSections";
 import { RuntimeRowActions } from "./RuntimeRowActions";
 import { formatRelative } from "../../lib/relative-time";
-import { RuntimeSetupModal } from "../hearth/RuntimeSetupModal";
-import { RuntimeEditModal } from "../hearth/RuntimeEditModal";
-import { RuntimeRestartModal } from "../hearth/RuntimeRestartModal";
+import { RuntimeSetupModal } from "../runtimes/RuntimeSetupModal";
+import { RuntimeEditModal } from "../runtimes/RuntimeEditModal";
+import { RuntimeRestartModal } from "../runtimes/RuntimeRestartModal";
 import type { Runtime } from "../../../shared/types";
 
 // Team-scoped runtimes table (settings/team). Shows the team's own runtimes
-// only — GET /api/hearth/runtimes?teamId=; Global runtimes are a
+// only — GET /api/runtimes?teamId=; Global runtimes are a
 // superadmin-only section on the workspace page.
 export function TeamSettingsRuntimesTable({ teamId, runtimes, isLoading, isError }: { teamId: string; runtimes: Runtime[]; isLoading: boolean; isError: boolean }) {
   const removeRuntime = useRemoveRuntime();

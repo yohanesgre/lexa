@@ -9,7 +9,7 @@ import {
   useCancelHeraldTask,
   useTaskAttachments,
   useWikiAttachments,
-  useHearthTask,
+  useRuntimeTask,
 } from "./queries";
 import { useHeraldStream } from "./use-herald-stream";
 import {
@@ -20,7 +20,7 @@ import {
   buildRunRequest,
   resolveRunSelection,
   getSelection,
-} from "../components/hearth/herald/herald-panel-utils";
+} from "../components/runtimes/herald/herald-panel-utils";
 
 // Herald panel session logic (herald-popover.html). Split from the panel
 // component: data/skill selection here, run lifecycle here, markup in the
@@ -77,7 +77,7 @@ function useHeraldRun(args: PanelArgs & { prompt: string; effectiveSkillId: stri
   const running = stream.status === "connecting" || stream.status === "streaming";
   const done = stream.status === "done";
   const failed = stream.status === "error";
-  const { data: heraldTaskData } = useHearthTask(taskId, !!taskId && done);
+  const { data: heraldTaskData } = useRuntimeTask(taskId, !!taskId && done);
 
   const selection = getSelection(editor);
 
