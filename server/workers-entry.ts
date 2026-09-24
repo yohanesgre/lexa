@@ -12,10 +12,11 @@
 // Bearer keys AND session cookies, same middleware order/semantics as the
 // Bun host) + scheduled handler (event prune + R2 backup-retention prune,
 // cron */15 * * * * in wrangler.jsonc). Non-API GETs go to the TanStack
-// Start SSR handler; in source `wrangler dev` that import is shimmed
+// Start server handler; in source `wrangler dev` that import is shimmed
 // (Vite-virtuals are unresolvable outside the vite build) and non-API
-// routes get the no-SSR fallback page — the vite workers build links the
-// real handler and serves SSR pages (see workers-b6 report).
+// routes get the fallback page — the vite workers build links the real
+// handler, which returns the client-only SPA shell/headless HTML (no route
+// content is server-rendered; see workers-b6 report).
 //
 // Workers-only differences (platform, never behavior):
 // - GITHUB_PRIVATE_KEY_FILE is impossible (no filesystem): the boot mirror
@@ -140,7 +141,8 @@ function json(data: unknown, status = 200): Response {
 // (it owns its own cookie auth; the HttpApi middleware would 401 it).
 // Every other /api/* goes through the full HttpApi app (B6a Workers
 // factory: same groups, async Db, Bearer + session-cookie middleware).
-// Non-API routes go to TanStack Start SSR (shimmed in source dev).
+// Non-API routes go to the TanStack Start server handler, which returns the
+// client-only SPA shell/headless HTML (shimmed in source dev).
 
 type BetterAuthApi = {
   api: {
@@ -201,12 +203,13 @@ async function handleApi(
 
 let ssrFetch: ((req: Request) => Promise<Response>) | null = null;
 
-// The cloudflare-plugin ssr environment renders the SPA shell without the
-// entry <script type="module"> tag (the client manifest never queues it in
-// that environment), so the served shell never boots and every page is
-// blank. The entry path IS in the shell's $_TSR manifest — re-attach it.
-// Cached: the shell is build-static; preloads stay from the first hit
-// (hints only — the client still fetches what the active route needs).
+// The cloudflare-plugin ssr environment renders the SPA shell (client-only:
+// no route content is server-rendered) without the entry
+// <script type="module"> tag (the client manifest never queues it in that
+// environment), so the served shell never boots and every page is blank. The
+// entry path IS in the shell's $_TSR manifest — re-attach it. Cached: the
+// shell is build-static; preloads stay from the first hit (hints only — the
+// client still fetches what the active route needs).
 let patchedShell: string | null = null;
 
 function injectEntryScript(html: string): string {

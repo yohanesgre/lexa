@@ -269,10 +269,12 @@ export const Route = createFileRoute("/share/$token")({
   validateSearch: (search: Record<string, unknown>): { page?: string | undefined } => ({
     page: typeof search.page === "string" && search.page ? search.page : undefined,
   }),
-  // Full server render: the token IS the credential, the loader runs
-  // server-side, and the page must work without JS. Must sit after
-  // validateSearch (route property order feeds TanStack type inference).
-  ssr: true,
+  // Effective client-only: the root route's `ssr: false` wins (TanStack
+  // Router parent-wins rule), so this route never server-renders and an
+  // `ssr: true` here would be dead. The token IS the credential (the server
+  // enforces it per-request); the loader below runs in the browser and there
+  // is no server-rendered head/OG. Proper share SSR is a separate product
+  // decision.
   loader: async ({ params, context }) => {
     let tree: SharedTree | null = null;
     try {

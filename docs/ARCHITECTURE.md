@@ -6,7 +6,7 @@ A lightweight, self-hosted project management tool. Kanban board, issue/task tic
 
 | Layer        | Choice                        | Rationale |
 | ------------ | ----------------------------- | --------- |
-| Frontend     | React + Vite + TanStack Start | Selective hybrid: SPA everywhere except `/share/*` (root `ssr` function gated on path; app/auth routes `ssr:false`, client-only loaders), TanStack Router + Query, file-based routing, server/entry SSR shell + SPA fallback; Workers: built worker SSRs `/share`, fallback elsewhere |
+| Frontend     | React + Vite + TanStack Start | SPA shell mode: root route `ssr: false` forces every app route client-only (TanStack Router parent-wins rule — a child `ssr: true` cannot opt in), so only the build-time root shell is server-rendered; `/share/*` included, loaders run in the browser. TanStack Router + Query, file-based routing, server/entry serves the prerendered shell + SPA fallback; Workers: same client-only shell |
 | Backend      | Effect-TS + @effect/platform HttpApi | Typed errors, DI, declarative error→HTTP mapping, OpenAPI for free |
 | Database     | SQLite via bun:sqlite (WAL)   | Local file, zero-ops, transactional batch helper for atomic mutations |
 | Runtime      | Bun standalone HTTP server (Docker) primary + Cloudflare Workers + D1 + R2 parallel flavor (optional, $5/mo — see `docs/CLOUDFLARE_WORKERS.md`) | One process for SSR + REST + webhooks; simple deploys (Bun) or edge isolates (Workers, Workers flavor) |
@@ -427,13 +427,15 @@ Two peer-level flavors share the same source tree (no data sync between them;
 migrate Bun→Workers by dumping the Bun DB to SQL and replaying on D1):
 
 - **Bun standalone (primary):** `Bun.serve` + `bun:sqlite` (WAL) + cloudflared
-  tunnel. `server/entry.ts` runs the Start handler (SSR shell) + serves
-  `index.html` fallback for non-`/api` SPA routes; `/share/*` renders
-  server-side (loader + unfurl meta). Current live system. Deployed via
-  `scripts/install.sh` (Docker Compose / bare metal) — see docs/DEPLOYMENT.md.
+  tunnel. `server/entry.ts` runs the Start handler + serves the prerendered
+  SPA shell for non-`/api` app routes (root `ssr: false` makes them all
+  client-only, `/share/*` included — no server-side render, no unfurl meta).
+  Current live system. Deployed via `scripts/install.sh` (Docker Compose /
+  bare metal) — see docs/DEPLOYMENT.md.
 - **Cloudflare Workers (parallel, optional, $5/mo):** Workers + D1 + R2 + KV.
-  Same selective hybrid: built worker SSRs `/share/*`, static fallback for SPA
-  routes (source `wrangler dev` = API + fallback by platform limitation) — same
+  Same client-only SPA shell: the worker serves the patched build-time shell
+  for app routes, static fallback elsewhere (source `wrangler dev` = API +
+  fallback by platform limitation) — same
   routes and services, different drivers: `server/db/drivers/bun-sqlite.ts`
   vs `server/db/drivers/d1.ts` (repos async; bun-sqlite wraps sync API in
   `Promise.resolve`), R2 native binding driver vs `fs`/`s3`, `RuntimeEnv`

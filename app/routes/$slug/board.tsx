@@ -8,9 +8,10 @@ export const Route = createFileRoute("/$slug/board")({
     milestone: typeof search.milestone === "string" ? search.milestone : undefined,
     swimlane: typeof search.swimlane === "string" && search.swimlane.length > 0 ? search.swimlane : undefined,
   }),
-  // The board is the most interactive surface (DnD, TipTap) — keep the DOM
-  // client-rendered, but still prefetch + hydrate the board data server-side
-  // so the first paint isn't a loading skeleton + client fetch.
+  // The board is the most interactive surface (DnD, TipTap) — client-only
+  // (root `ssr: false` wins), so the loader prefetches board data into the
+  // query cache in the browser, sparing the first paint a loading skeleton
+  // plus a separate client fetch.
   ssr:false,
   loader: async ({ context, params }) => {
     const { slug } = params;

@@ -17,10 +17,11 @@ import type { Server } from "bun";
 let ssrFetch: ((req: Request) => Promise<Response>) | null = null;
 
 // SPA shell (dist/client/_shell.html) — prerendered at build by the
-// tanstack-start SPA mode. ssr:false routes must be served this shell: the
-// SSR handler emits a headless React fragment for them (no <html>/<head>),
-// which renders as a blank page. /share/* responses carry real SSR markup
-// (<html> present) and pass through untouched.
+// tanstack-start SPA mode. With root `ssr: false`, every app route is
+// client-only: the SSR handler emits a headless React fragment (no
+// <html>/<head>) for all of them, which renders as a blank page, so they are
+// served this shell. There is no selective SSR — /share/* is client-only too
+// and never carries server-rendered markup.
 let spaShellHtml: string | null = null;
 function spaShell(): string {
   if (spaShellHtml === null) {
