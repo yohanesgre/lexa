@@ -7,6 +7,10 @@ All notable changes to Lexa are documented here. Format based on
 
 ## [Unreleased]
 
+### Changed
+
+- Renamed Herald to Assistant across the server API, database namespace, and documentation. Migration `0006_assistant_rename.sql` migrates data without compatibility aliases; old `/api/herald/*` clients now receive 404.
+
 ### Fixed
 
 - **Mention autocomplete ordering** — tasks sharing an `updated_at` could come

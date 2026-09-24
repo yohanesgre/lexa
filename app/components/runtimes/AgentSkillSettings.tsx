@@ -28,7 +28,7 @@ function formatUpdated(iso: string): string {
 
 // Workspace settings → Runtime Agents & Skills. Agents are global rule bundles;
 // each agent's instructions become AGENTS.md in the run dir at claim time.
-// Exactly two permanent builtins exist (herald, blacksmith) —
+// Exactly two permanent builtins exist (assistant, blacksmith) —
 // editable + resettable, never deletable, and no custom agent is creatable.
 export function AgentsSettingsSection() {
   const { data: agents = [], isLoading, isError } = useAgents();

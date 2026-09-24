@@ -70,21 +70,21 @@ All non-2xx responses share one shape:
 | 422 | `SOURCE_UNREACHABLE` | External source DNS/fetch failed after the SSRF guard (details: `{ url }`) |
 | 422 | `API_KEY_NAME_EMPTY` | API key name missing or blank |
 | 422 | `NOT_WORKSPACE_MEMBER` | Team-member add targets an email that is not a workspace member (details: `{ email, available }` — invite via the superadmin first) |
-| 422 | `INVALID_ARGS` | Sprint start date later than its due date (details: `{ reason }`); Herald provider settings first save without an apiKey (`apiKey required on first save`); Herald attachment scope/cap violations |
+| 422 | `INVALID_ARGS` | Sprint start date later than its due date (details: `{ reason }`); Assistant provider settings first save without an apiKey (`apiKey required on first save`); Assistant attachment scope/cap violations |
 | 429 | `RATE_LIMITED` | Per-IP rate limit exceeded on `/api/*` (webhook, `/api/runtimes/daemon/*`, `/api/runtimes/register` exempt; `/api/setup*` + `/api/health` ARE limited; `/api/share/*` uses a dedicated stricter bucket) — enforced in the API middleware, otherwise one shared bucket |
 | 500 | `DATABASE_ERROR` / `INTERNAL` | |
 | 500 | `PASSWORD_LINK_FAILED` | Admin-issued set-password link could not be issued (details: `{ message }`) |
 | 502 | `GITHUB_API_ERROR` | Only on explicit GitHub-linking endpoints; never on moves |
 | 502 | `SOURCE_FETCH_ERROR` | External source fetch failed upstream after the SSRF guard (details: `{ message }`) |
-| 409 | `PROVIDER_NOT_CONFIGURED` | Herald generate/test/chat without saved provider settings for the project |
+| 409 | `PROVIDER_NOT_CONFIGURED` | Assistant generate/test/chat without saved provider settings for the project |
 | 502 | `PROVIDER_AUTH_FAILED` | Upstream 401/403 from the provider or Exa |
 | 502 | `PROVIDER_UNREACHABLE` | Provider network/timeout/DNS failure |
-| 502 | `HERALD_GENERATION_FAILED` | RUN_ERROR catch-all, malformed stream |
-| 502 | `HERALD_TOOL_BUDGET_EXCEEDED` | Tool round cap hit (document tasks `MAX_TOOL_ROUNDS=12`, freeform chat `MAX_CHAT_TOOL_ROUNDS=24`) |
-| 409 | `HERALD_TASK_ACTIVE` | Thread reset or second chat stream while a Herald stream is running |
-| 404 | `HERALD_THREAD_NOT_FOUND` | Missing Herald thread row |
+| 502 | `ASSISTANT_GENERATION_FAILED` | RUN_ERROR catch-all, malformed stream |
+| 502 | `ASSISTANT_TOOL_BUDGET_EXCEEDED` | Tool round cap hit (document tasks `MAX_TOOL_ROUNDS=12`, freeform chat `MAX_CHAT_TOOL_ROUNDS=24`) |
+| 409 | `ASSISTANT_TASK_ACTIVE` | Thread reset or second chat stream while an Assistant stream is running |
+| 404 | `ASSISTANT_THREAD_NOT_FOUND` | Missing Assistant thread row |
 | 409 | `VISION_NOT_CONFIGURED` | Attachments submitted while `primary_supports_images=0` (vision_model delegation removed in the squashed baseline) |
-| 409 | `ENGINE_NOT_SUPPORTED_FOR_CHAT` | Freeform chat while the project engine is `blacksmith` (chat always runs the herald lane) |
+| 409 | `ENGINE_NOT_SUPPORTED_FOR_CHAT` | Freeform chat while the project engine is `blacksmith` (chat always runs the assistant lane) |
 
 Defined in the error map but never raised by any REST handler — do not match on them:
 - `MISSING_AUTH` / `INVALID_API_KEY` — the auth middleware emits `UNAUTHORIZED` instead.
@@ -404,7 +404,7 @@ interface RuntimeTask {
   status: "queued" | "running" | "completed" | "failed" | "cancelled";
   result: string | null;
   error: string | null;
-  kind: "blacksmith" | "herald";  // queue discriminator — daemons claim only blacksmith
+  kind: "blacksmith" | "assistant";  // queue discriminator — daemons claim only blacksmith
   createdAt: ISODate;
   startedAt: ISODate | null;
   finishedAt: ISODate | null;
@@ -877,7 +877,7 @@ GET    /api/projects/:slug/mentions?q=
 
 Mention model (user-ruled split):
 - **TipTap documents** carry mention NODES `{ type: "mention", attrs: { refType: "task"|"wiki", refId, label } }` — links only, never context injection. Pushed to GitHub as absolute deep links (`${PUBLIC_URL}/{slug}/tasks?task={id}` / `${PUBLIC_URL}/{slug}/wiki/{slug}`) with the label as link text.
-- **Herald chat** uses plain `@token` strings in the textarea; the server resolves them at send into ephemeral context (see the chat/stream contract above).
+- **Assistant chat** uses plain `@token` strings in the textarea; the server resolves them at send into ephemeral context (see the chat/stream contract above).
 
 ### Task Links (subtasks, blocked-by, related)
 ```
@@ -1606,7 +1606,7 @@ on a 15s idle heartbeat.
 # ── Lexa Agents & Skills catalog (global rule bundles; browser, Bearer) ──
 # Hard cutover from the pre-baseline agent/skill paths — no aliases (sole
 # consumer is the bundled web app). The catalog is the behavioral spec for
-# BOTH Runtimes tiers: prompt injection renders it for Herald, .agents/ file
+# BOTH Runtimes tiers: prompt injection renders it for Assistant, .agents/ file
 # writing renders it for Blacksmith. All mutations are admin-only
 # (403 FORBIDDEN for members).
 GET    /api/agents
@@ -1681,7 +1681,7 @@ Notes:
 - **Runtime loop:** the spawned agent CLI receives a server-built prompt; the
   one-shot result is returned to the editor for accept/reject.
 
-### Herald (AI assistant tier)
+### Assistant (AI assistant tier)
 
 Server-side TanStack AI `chat()` assistant beside Blacksmith under the Runtimes
 umbrella (see docs/ARCHITECTURE.md §Runtimes — two active AI tiers). Per-project provider settings;
@@ -1695,10 +1695,10 @@ detail/log internals (result text, `runtime_task_logs` streams) are
 admin-gated.
 
 ```
-GET    /api/herald/settings/:projectId
+GET    /api/assistant/settings/:projectId
 → 200 { projectId, searchProvider: "exa"|null, hasSearchKey: boolean,
         urlAllowlist: string|null,
-        engine: "herald"|"blacksmith", engineSwitcherEnabled: boolean,
+        engine: "assistant"|"blacksmith", engineSwitcherEnabled: boolean,
         reasoningEffort: "minimal"|"low"|"medium"|"high"|null,
         primarySupportsImages: boolean,
         writeTools: string[],
@@ -1706,27 +1706,27 @@ GET    /api/herald/settings/:projectId
         fallbackModelIds: string[] }
   Masked view — no provider api_key/search_api_key ever serialized. Provider
   binding (providerId/modelId/fallbackModelIds) comes from the global gateway
-  registry (GET /api/admin/herald/providers). Legacy per-project provider
+  registry (GET /api/admin/assistant/providers). Legacy per-project provider
   columns (kind/base_url/api_key/model/vision_model) were dropped in the squashed baseline.
-  | 404 PROJECT_NOT_FOUND | 404 HERALD_THREAD_NOT_FOUND | 409 PROVIDER_NOT_CONFIGURED (no row yet)
+  | 404 PROJECT_NOT_FOUND | 404 ASSISTANT_THREAD_NOT_FOUND | 409 PROVIDER_NOT_CONFIGURED (no row yet)
 
-PUT    /api/herald/settings/:projectId   (superadmin — requireSuperadmin, 403 FORBIDDEN otherwise)
+PUT    /api/assistant/settings/:projectId   (superadmin — requireSuperadmin, 403 FORBIDDEN otherwise)
 body { providerId?: string|null, modelId?: string|null, fallbackModelIds?: string[],
        searchProvider?: "exa"|null, searchApiKey?: string|null,
        urlAllowlist?: string|null,
-       engine?: "herald"|"blacksmith", engineSwitcherEnabled?: boolean,
+       engine?: "assistant"|"blacksmith", engineSwitcherEnabled?: boolean,
        reasoningEffort?: "minimal"|"low"|"medium"|"high"|null,
        writeTools?: string[] }
-  Payload is the project-level Herald binding + retained engine/search/writeTools.
-  providerId/modelId = primary model (must be an enabled herald_models row);
+  Payload is the project-level Assistant binding + retained engine/search/writeTools.
+  providerId/modelId = primary model (must be an enabled assistant_models row);
   fallbackModelIds = ordered cross-kind fallback list (≤3, deduped, provider
   registry supplies kind per model). Omitted searchApiKey keeps the stored value.
   After the squashed baseline kind/base_url/api_key/model/vision_model are gone from
-  herald_settings — provider credentials live in herald_providers only.
+  assistant_settings — provider credentials live in assistant_providers only.
   writeTools: unknown names dropped, duplicates collapse, stored comma-separated.
 → 200 masked view (same shape as GET) | 403 FORBIDDEN | 404 PROJECT_NOT_FOUND
 
-POST   /api/herald/settings/:projectId/test   (admin — requireAdmin)
+POST   /api/assistant/settings/:projectId/test   (admin — requireAdmin)
 body { kind?, baseUrl?, model?, apiKey?, searchProvider?, searchApiKey?,
        urlAllowlist?, engine?, engineSwitcherEnabled?, primarySupportsImages?,
        visionModel?, reasoningEffort?, writeTools? }
@@ -1737,91 +1737,101 @@ body { kind?, baseUrl?, model?, apiKey?, searchProvider?, searchApiKey?,
 → 200 { ok: true, latencyMs } | 502 PROVIDER_AUTH_FAILED | 502 PROVIDER_UNREACHABLE
   Minimal completion ping (+ Exa ping when configured).
 
-POST   /api/herald/settings/:projectId/models   (admin — requireAdmin)
+POST   /api/assistant/settings/:projectId/models   (admin — requireAdmin)
 body same as test
 → 200 { models: [{ id }] } | 502 PROVIDER_AUTH_FAILED / PROVIDER_UNREACHABLE
   Lists models from the provider using submitted unsaved values (per-kind wire
   format, base URL normalized per kind). Some compat endpoints lack the route
   — manual model entry is always available as fallback.
 
-### Herald Gateway — Admin Registry (superadmin-only, requireSuperadmin → 403 FORBIDDEN otherwise)
+### Assistant Gateway — Admin Registry (superadmin-only, requireSuperadmin → 403 FORBIDDEN otherwise)
 
-Global provider registry. `herald_providers` holds the credentials/base URLs;
-`herald_models` holds per-model kind/priority/enabled; `herald_call_logs` is
-append-only; `herald_model_prices` is the OpenRouter price cache. Gateway
+Global provider registry. `assistant_providers` holds the credentials/base URLs;
+`assistant_models` holds per-model kind/priority/enabled; `assistant_call_logs` is
+append-only; `assistant_model_prices` is the OpenRouter price cache. Gateway
 streams with cross-kind fallback (≤3, priority-ordered), fresh adapter per
-attempt, cost via `herald_model_prices` (OpenRouter fetch).
+attempt, cost via `assistant_model_prices` (OpenRouter fetch).
 
 ```
-GET    /api/admin/herald/providers   (superadmin)
-→ 200 { data: HeraldProviderMasked[] }   HeraldProviderMasked = { id, label, baseUrl, hasKey, keyMask, createdAt, updatedAt }
+GET    /api/admin/assistant/providers   (superadmin)
+→ 200 { data: AssistantProviderMasked[] }   AssistantProviderMasked = { id, label, baseUrl, hasKey, keyMask, createdAt, updatedAt }
   | 403 FORBIDDEN
 
-POST   /api/admin/herald/providers   (superadmin)
+POST   /api/admin/assistant/providers   (superadmin)
 body { label*, baseUrl*, apiKey* }   // baseUrl = provider base URL, apiKey = provider secret
-→ 200 HeraldProviderMasked (masked view of the created row) | 403 FORBIDDEN
+→ 200 AssistantProviderMasked (masked view of the created row) | 403 FORBIDDEN
 
-PATCH  /api/admin/herald/providers/:id   (superadmin)
+PATCH  /api/admin/assistant/providers/:id   (superadmin)
 body { label?, baseUrl?, apiKey? }   // patch — omitted fields unchanged; updated_at = datetime('now')
-→ 200 HeraldProviderMasked | 403 FORBIDDEN | 404 (RowNotFound → NOT_FOUND)
+→ 200 AssistantProviderMasked | 403 FORBIDDEN | 404 (RowNotFound → NOT_FOUND)
 
-DELETE /api/admin/herald/providers/:id   (superadmin)
+DELETE /api/admin/assistant/providers/:id   (superadmin)
 → 204 | 403 FORBIDDEN | 404
 
-POST   /api/admin/herald/providers/:id/test   (superadmin)
+POST   /api/admin/assistant/providers/:id/test   (superadmin)
 → 200 { ok: true, latencyMs: number } | 403 FORBIDDEN | 404 | 502 PROVIDER_AUTH_FAILED | 502 PROVIDER_UNREACHABLE
   Live probe: listModels against the stored provider row (kind openai_compatible, model "test").
 
-POST   /api/admin/herald/providers/:id/models   (superadmin)
-→ 200 { data: HeraldModelRow[] }   HeraldModelRow = { id, providerId, modelId, kind, priority, enabled, createdAt }
+POST   /api/admin/assistant/providers/:id/models   (superadmin)
+→ 200 { data: AssistantModelRow[] }   AssistantModelRow = { id, providerId, modelId, kind, priority, enabled, createdAt }
   | 403 FORBIDDEN | 404
 
-GET    /api/admin/herald/usage?from=YYYY-MM-DD&to=YYYY-MM-DD&projectId=ID   (superadmin)
+PATCH  /api/admin/assistant/providers/:id/models/:modelId   (superadmin)
+body { enabled?: boolean, priority?: number }
+→ 200 AssistantModelRow (updated model; fields omitted are unchanged)
+  | 403 FORBIDDEN | 404 (provider or model not found)
+
+POST   /api/admin/assistant/providers/:id/models/reorder   (superadmin)
+body { orderedIds: string[] }
+→ 200 { data: AssistantModelRow[] }   // all provider models, reordered by priority
+  | 403 FORBIDDEN | 404 (provider/model set not found or orderedIds does not exactly match)
+
+GET    /api/admin/assistant/usage?from=YYYY-MM-DD&to=YYYY-MM-DD&projectId=ID   (superadmin)
 → 200 { summary: { totalTokens, promptTokens, completionTokens, totalCostCents, totalCostUsd, avgLatencyMs: number|null, p50LatencyMs: number|null, p95LatencyMs: number|null, errorRate: 0-1, totalCalls, errorCalls }, byDay: Array<{ day: YYYY-MM-DD, tokens, costCents, costUsd, avgLatencyMs, calls, errorRate }>, byModel: Array<{ model, tokens, costCents, costUsd, avgLatencyMs, calls, errorRate }>, totalCostCents }
   | 403 FORBIDDEN
-  Filters: from/to are date( created_at ) inclusive bounds; projectId scopes to one project (also available as GET /api/projects/:slug/herald/usage?from=&to= — same shape, superadmin, slug resolved to projectId). Unbounded when omitted. Aggregation via herald_call_logs indexes idx_call_logs_project_time / idx_call_logs_model.
+  Filters: from/to are date( created_at ) inclusive bounds; projectId scopes to one project (also available as GET /api/projects/:slug/assistant/usage?from=&to= — same shape, superadmin, slug resolved to projectId). Unbounded when omitted. Aggregation via assistant_call_logs indexes idx_call_logs_project_time / idx_call_logs_model.
 
-GET    /api/admin/herald/usage.csv?from=&to=&projectId=   (superadmin)
-→ 200 text/csv; header day,model,tokens,cost_cents,cost_usd,avg_latency_ms,calls,error_rate; rows grouped by (day, model) ordered day ASC; same auth + filters as the JSON endpoint. Content-Disposition: attachment; filename="herald-usage.csv"
+GET    /api/admin/assistant/usage.csv?from=&to=&projectId=   (superadmin)
+→ 200 text/csv; header day,model,tokens,cost_cents,cost_usd,avg_latency_ms,calls,error_rate; rows grouped by (day, model) ordered day ASC; same auth + filters as the JSON endpoint. Content-Disposition: attachment; filename="assistant-usage.csv"
 
-GET    /api/admin/herald/prices   (superadmin)
+GET    /api/admin/assistant/prices   (superadmin)
 → 200 { data: [{ model, prompt_price, completion_price, cached_read_price, cached_write_price, updated_at }] }   // all prices USD per 1M tokens
   | 403 FORBIDDEN
 
-PUT    /api/admin/herald/prices   (superadmin)
+PUT    /api/admin/assistant/prices   (superadmin)
 body { model*, prompt_price*, completion_price*, cached_read_price*, cached_write_price* }   // USD per 1M tokens, numbers >=0, max 6 decimals
 → 200 { model, prompt_price, completion_price, cached_read_price, cached_write_price, updated_at } | 403 FORBIDDEN | 422 INVALID_ARGS
-  Writes to herald_model_prices (ON CONFLICT upsert, updated_at = datetime('now')).
+  Writes to assistant_model_prices (ON CONFLICT upsert, updated_at = datetime('now')).
 
-GET    /api/projects/:slug/herald/usage?from=&to=   (superadmin)
-→ 200 same shape as GET /api/admin/herald/usage scoped to that project | 403 FORBIDDEN | 404 PROJECT_NOT_FOUND
+GET    /api/projects/:slug/assistant/usage?from=&to=   (superadmin)
+→ 200 same shape as GET /api/admin/assistant/usage scoped to that project | 403 FORBIDDEN | 404 PROJECT_NOT_FOUND
 
-GET    /api/admin/herald/calls   (superadmin)
-→ 200 { data: HeraldCallLogRow[] }   // last 100, created_at DESC
+GET    /api/admin/assistant/calls   (superadmin)
+→ 200 { data: AssistantCallLogRow[] }   // last 100, created_at DESC
   | 403 FORBIDDEN
 
-POST   /api/admin/herald/prices/sync   (superadmin)
-→ 200 { synced: number }   // rows upserted from OpenRouter fetch into herald_model_prices
+POST   /api/admin/assistant/prices/sync   (superadmin)
+→ 200 { synced: number }   // rows upserted from OpenRouter fetch into assistant_model_prices
   | 403 FORBIDDEN
   Errors inside the price fetch are caught — sync returns 0 rather than 5xx.
 
-GET    /api/admin/herald/providers/:id/health   (superadmin)
+GET    /api/admin/assistant/providers/:id/health   (superadmin)
 → 200 { providerId: string, circuitState: "open"|"closed"|"half-open", failureCount: number, openedAt: string|null, lastProbeAt: string|null, consecutiveFailures: number }
   | 403 FORBIDDEN | 404 (provider unknown → 404, missing health row → 200 default closed)
   Circuit breaker (pla-1): 3 consecutive fails in 5m → open 5m → half-open allow 1 probe (lazy, isAllowed handles transition).
 
-POST   /api/admin/herald/providers/:id/probe   (superadmin)
+POST   /api/admin/assistant/providers/:id/probe   (superadmin)
 → 200 same health row shape as GET .../health (always 200 — upstream outcome is carried by the row, not the status)
   | 403 FORBIDDEN | 404 (provider unknown)
   Live probe: listModels against the stored provider row (same config as POST .../test), then recordSuccess (breaker closed, counts reset) or recordFailure (counts bumped, may re-open) before returning the row. Bypasses isAllowed — use after fixing the upstream.
 ```
 
-POST   /api/herald/tasks
+POST   /api/assistant/tasks
 body { slug*, documentType*: "task"|"wiki", documentId*, prompt*, agentId*,
        skillId*, selection?,
        attachments?: [{ storageKey*, mimeType*, name* }] }
-  Engine routing: the project's `herald_settings.engine` is resolved once per
-  request. engine='herald' → runtime_tasks row kind='herald' (queued), no
+  Engine routing: the project's `assistant_settings.engine` is resolved once per
+  request. engine='assistant' → runtime_tasks row kind='assistant' (queued), no
   runtime-online guard (unchanged). engine='blacksmith' → runtime_tasks row
   kind='blacksmith' + runtime-online guard (`NO_RUNTIME_ONLINE` 409); the
   claim payload carries `.agents/` bundles (agentMarkdown/skillMarkdown) as
@@ -1839,7 +1849,7 @@ body { slug*, documentType*: "task"|"wiki", documentId*, prompt*, agentId*,
   | 409 VISION_NOT_CONFIGURED            (attachments, no vision chain — vision_model removed in the squashed baseline)
   | 422 INVALID_ARGS                     (attachment scope/caps)
 
-POST   /api/herald/tasks/:id/stream      (SSE — POST + fetch-stream, not EventSource)
+POST   /api/assistant/tasks/:id/stream      (SSE — POST + fetch-stream, not EventSource)
 → 200 text/event-stream
   Frames (exactly one terminal frame — error|done|suspended):
     event: start  data: {"taskId":"…","threadId":"…"}
@@ -1847,8 +1857,8 @@ POST   /api/herald/tasks/:id/stream      (SSE — POST + fetch-stream, not Event
     event: tool   data: {"phase":"call"|"result","name":"…"}
     event: tool_pending data: {"approvalId":"…","batchId":"…","seq":n,
                                "name":"create_task","detail":"…",
-                               "diff":{…HeraldWriteDiff…}}
-    event: error  data: {"code":"HERALD_GENERATION_FAILED","message":"…"}
+                               "diff":{…AssistantWriteDiff…}}
+    event: error  data: {"code":"ASSISTANT_GENERATION_FAILED","message":"…"}
     event: done   data: {"taskId":"…","text":"…","usage":{"in":n,"out":n}}
     event: suspended data: {"batchId":"…"}
     event: approval_result data: {"approvalId":"…","status":"applied"|"failed"|"denied",
@@ -1863,30 +1873,30 @@ POST   /api/herald/tasks/:id/stream      (SSE — POST + fetch-stream, not Event
   Heartbeat comment ": ping" every 15s (proxy buffering). Client disconnect
   aborts the run (task → cancelled, "aborted" log). Stop button = client
   abort + cancel below.
-  | 404 RUNTIME_TASK_NOT_FOUND | 409 HERALD_TASK_ACTIVE (already claimed/running)
+  | 404 RUNTIME_TASK_NOT_FOUND | 409 ASSISTANT_TASK_ACTIVE (already claimed/running)
 
-POST   /api/herald/tasks/:id/cancel
+POST   /api/assistant/tasks/:id/cancel
 → 200 { ok: true }
   Aborts an in-flight stream or cancels a queued task.
 
-DELETE /api/herald/threads/:documentType/:documentId
-→ 204 | 404 HERALD_THREAD_NOT_FOUND | 409 HERALD_TASK_ACTIVE
+DELETE /api/assistant/threads/:documentType/:documentId
+→ 204 | 404 ASSISTANT_THREAD_NOT_FOUND | 409 ASSISTANT_TASK_ACTIVE
   Resets the document thread — next run starts fresh.
 
-POST   /api/herald/chat/stream           (freeform chat — no queue row)
+POST   /api/assistant/chat/stream           (freeform chat — no queue row)
 body { projectId*, chatId*, message*, agentId?, skillId?,
        attachments?: [{ storageKey*, mimeType*, name* }],
        fromIndex?: number }
-  ALWAYS runs the herald lane regardless of project engine — under
+  ALWAYS runs the assistant lane regardless of project engine — under
   engine='blacksmith' → 409 ENGINE_NOT_SUPPORTED_FOR_CHAT.
   One persistent thread per (project, user), ownership enforced (another
   user's chatId → 404). Direct synchronous SSE — same frames as the task
   stream minus taskId (frames carry chatId). Second concurrent stream on the
-  same chatId → 409 HERALD_TASK_ACTIVE. Image caps tighter than
-  document-Herald: ≤3/message, ≤1.5MB total request; vision resolution as on
+  same chatId → 409 ASSISTANT_TASK_ACTIVE. Image caps tighter than
+  document-Assistant: ≤3/message, ≤1.5MB total request; vision resolution as on
   task create (inline parts / 409 VISION_NOT_CONFIGURED — vision_model
   delegation removed in the squashed baseline).
-  | 400 NO_USER_CONTEXT | 409 PROVIDER_NOT_CONFIGURED / HERALD_TASK_ACTIVE
+  | 400 NO_USER_CONTEXT | 409 PROVIDER_NOT_CONFIGURED / ASSISTANT_TASK_ACTIVE
   | 409 ENGINE_NOT_SUPPORTED_FOR_CHAT / VISION_NOT_CONFIGURED
   | 422 INVALID_ARGS
 
@@ -1905,7 +1915,7 @@ body { projectId*, chatId*, message*, agentId?, skillId?,
   (catalog code); retrying means re-sending from the preceding user index,
   which drops the failed entry.
 
-  Citations: when Herald's web_search/fetch_url tools produce sources, the
+  Citations: when Assistant's web_search/fetch_url tools produce sources, the
   persisted assistant entry carries a `citations` meta list ({title, url},
   ≤10 per turn, URL-deduped, https-only) alongside the text.
 
@@ -1922,21 +1932,21 @@ body { projectId*, chatId*, message*, agentId?, skillId?,
   that parses as a task key is never tried as a wiki slug); duplicate
   references to the same task/page resolve once; unknown tokens are ignored.
 
-GET    /api/herald/chat/:chatId
+GET    /api/assistant/chat/:chatId
 → 200 { chatId, projectId, ownerUserId, agentId, skillId, messages, summary,
-        summarizedCount, createdAt, updatedAt } | 404 HERALD_THREAD_NOT_FOUND
+        summarizedCount, createdAt, updatedAt } | 404 ASSISTANT_THREAD_NOT_FOUND
   Transcript for reload/scrollback. Persisted entries carry optional meta:
   user entries a `ts` timestamp; assistant entries `ts`, `citations`, and on
   failure an `error` {code,message} block or a `stopped:true` marker (client
   abort with partial text).
 
-DELETE /api/herald/chat/:chatId
-→ 204 | 404 HERALD_THREAD_NOT_FOUND | 409 HERALD_TASK_ACTIVE
+DELETE /api/assistant/chat/:chatId
+→ 204 | 404 ASSISTANT_THREAD_NOT_FOUND | 409 ASSISTANT_TASK_ACTIVE
   Deletes the chat thread outright ("Reset" on a multi-thread chat = delete
   current). 409 while a stream is in flight on that chatId; next "New chat"
   starts fresh.
 
-POST   /api/herald/approvals/:id/decide
+POST   /api/assistant/approvals/:id/decide
 body { verdict*: "approve" | "reject" }
 → 200 { approvalId, batchId, status, remaining }
   | 404 APPROVAL_NOT_FOUND | 409 APPROVAL_EXPIRED / APPROVAL_ALREADY_DECIDED
@@ -1945,17 +1955,17 @@ body { verdict*: "approve" | "reject" }
   call), so results stream as frames. `remaining` = unresolved rows left in
   the batch; the client opens the resume stream only when it reaches 0.
 
-POST   /api/herald/chat/:chatId/resume            (SSE — POST + fetch-stream)
-POST   /api/herald/threads/:documentType/:documentId/resume   (SSE)
+POST   /api/assistant/chat/:chatId/resume            (SSE — POST + fetch-stream)
+POST   /api/assistant/threads/:documentType/:documentId/resume   (SSE)
   Same frames as the respective stream endpoints. Server-side sequence:
   sweep expired → execute approved rows in seq order (each emitting an
   approval_result frame right after start: applied|failed, error carries
   "CODE: message"; rejected rows emit denied) → continue the provider turn
   with no new user message → done.
-  | 404 HERALD_THREAD_NOT_FOUND / APPROVAL_NOT_FOUND (nothing to resume)
-  | 409 HERALD_TASK_ACTIVE | 409 APPROVALS_PENDING
+  | 404 ASSISTANT_THREAD_NOT_FOUND / APPROVAL_NOT_FOUND (nothing to resume)
+  | 409 ASSISTANT_TASK_ACTIVE | 409 APPROVALS_PENDING
 
-GET    /api/herald/chats/:projectId?q=
+GET    /api/assistant/chats/:projectId?q=
 → 200 { data: [{ chatId, title, pinned, snippet, createdAt, updatedAt }] }
   | 404 PROJECT_NOT_FOUND
   The caller's own chat threads for the project (owner-scoped — other users'
@@ -1966,33 +1976,33 @@ GET    /api/herald/chats/:projectId?q=
   until derived from the first text message or set via rename; first
   messages that are image-only arrays stay null until the next send.
 
-PATCH  /api/herald/chat/:chatId     body { title?, pinned? }
-→ 200 { chatId, title, pinned } | 404 HERALD_THREAD_NOT_FOUND | 422 INVALID_ARGS
+PATCH  /api/assistant/chat/:chatId     body { title?, pinned? }
+→ 200 { chatId, title, pinned } | 404 ASSISTANT_THREAD_NOT_FOUND | 422 INVALID_ARGS
   Updates an owned thread's metadata — at least one field must be present,
   else 422. `title`: 1–200 chars after trim (a later stream save keeps it —
   COALESCE backfill only fills NULL). `pinned`: boolean; pinned threads sort
   first in the list regardless of recency.
 
-GET    /api/herald/chat/:chatId/export
+GET    /api/assistant/chat/:chatId/export
 → 200 text/markdown (attachment, filename "<sanitized-title|chat>-<YYYYMMDD>.md")
-  | 404 HERALD_THREAD_NOT_FOUND
-  Owner-scoped markdown transcript: `# title` header, `**You**`/`**Herald**`
+  | 404 ASSISTANT_THREAD_NOT_FOUND
+  Owner-scoped markdown transcript: `# title` header, `**You**`/`**Assistant**`
   blocks (· ts suffix when the entry carries one), `[failed turn: CODE]` and
   `[stopped]` markers, citation lists under the turns that produced them.
 
-GET    /api/herald/memory/:projectId
-→ 200 { data: [{ id, projectId, content, source: "manual"|"herald",
+GET    /api/assistant/memory/:projectId
+→ 200 { data: [{ id, projectId, content, source: "manual"|"assistant",
                 createdAt, updatedAt }] }
-  Curated judgment-type facts injected into Herald prompts (FTS5-matched at
+  Curated judgment-type facts injected into Assistant prompts (FTS5-matched at
   enqueue; K=5 hits, 2000-char cap).
 
-POST   /api/herald/memory/:projectId     body { content* }
+POST   /api/assistant/memory/:projectId     body { content* }
 → 201 memory entry
 
-DELETE /api/herald/memory/:projectId/:memoryId
+DELETE /api/assistant/memory/:projectId/:memoryId
 → 204
 
-  Herald read tools (server-side toolset available to every herald turn;
+  Assistant read tools (server-side toolset available to every assistant turn;
   project-scoped, read-only):
     web_search(query)                    Exa, ≤5 results (only when configured)
     fetch_url(url)                       SSRF-guarded plain text / PDF extract

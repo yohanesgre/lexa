@@ -79,7 +79,7 @@ function RuntimeBindingsRoute() {
           <div className="field-hint">Picker sources GET /api/projects via session cookie — superadmin lists all, team admin lists scoped by teamIds (fallback shows all when filter empty).</div>
         </div>
         <div className="card-panel mt-4">
-          <p className="text-sm color-secondary">Select a project above to manage its Herald bindings (provider, engine, write tools, memory).</p>
+          <p className="text-sm color-secondary">Select a project above to manage its Assistant bindings (provider, engine, write tools, memory).</p>
         </div>
       </section>
       <Outlet />

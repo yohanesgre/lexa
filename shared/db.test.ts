@@ -157,22 +157,22 @@ describe("rowToActivityEvent", () => {
   it("maps snake_case to camelCase", () => {
     const row: ActivityRow = {
       id: 7, task_id: "t1", actor_kind: "user", actor_label: "Alice",
-      actor_user_id: "u1", type: "moved", message: "Moved to Done", via_herald: 0, created_at: NOW,
+      actor_user_id: "u1", type: "moved", message: "Moved to Done", via_assistant: 0, created_at: NOW,
     };
     expect(rowToActivityEvent(row)).toEqual({
       id: 7, taskId: "t1", actorKind: "user", actorLabel: "Alice",
-      actorUserId: "u1", type: "moved", message: "Moved to Done", viaHerald: false, createdAt: NOW,
+      actorUserId: "u1", type: "moved", message: "Moved to Done", viaAssistant: false, createdAt: NOW,
     });
   });
 
-  it("maps via_herald to a boolean", () => {
-    const base = { id: 1, task_id: "t1", actor_kind: "agent" as const, actor_label: "herald", actor_user_id: "u1" as string | null, type: "created" as const, message: "m", created_at: NOW };
-    expect(rowToActivityEvent({ ...base, via_herald: 1 }).viaHerald).toBe(true);
-    expect(rowToActivityEvent({ ...base, via_herald: 0 }).viaHerald).toBe(false);
+  it("maps via_assistant to a boolean", () => {
+    const base = { id: 1, task_id: "t1", actor_kind: "agent" as const, actor_label: "assistant", actor_user_id: "u1" as string | null, type: "created" as const, message: "m", created_at: NOW };
+    expect(rowToActivityEvent({ ...base, via_assistant: 1 }).viaAssistant).toBe(true);
+    expect(rowToActivityEvent({ ...base, via_assistant: 0 }).viaAssistant).toBe(false);
   });
 
   it("preserves all actor kinds and types", () => {
-    const base = { id: 1, task_id: "t1", actor_label: "sys", actor_user_id: null as string | null, message: "m", via_herald: 0, created_at: NOW };
+    const base = { id: 1, task_id: "t1", actor_label: "sys", actor_user_id: null as string | null, message: "m", via_assistant: 0, created_at: NOW };
     expect(rowToActivityEvent({ ...base, actor_kind: "agent", type: "runtime_completed" }).actorKind).toBe("agent");
     expect(rowToActivityEvent({ ...base, actor_kind: "system", type: "github_synced" }).type).toBe("github_synced");
   });
@@ -180,7 +180,7 @@ describe("rowToActivityEvent", () => {
   it("handles null actor_user_id", () => {
     const row: ActivityRow = {
       id: 2, task_id: "t1", actor_kind: "system", actor_label: "system",
-      actor_user_id: null, type: "created", message: "Task created", via_herald: 0, created_at: NOW,
+      actor_user_id: null, type: "created", message: "Task created", via_assistant: 0, created_at: NOW,
     };
     expect(rowToActivityEvent(row).actorUserId).toBeNull();
   });
@@ -190,7 +190,7 @@ describe("rowToComment", () => {
   const row: CommentRow = {
     id: 3, task_id: "t1", author_id: "u1", author_kind: "user", author_label: "Alice",
     body: '{"type":"doc","content":[{"type":"paragraph","content":[{"type":"text","text":"hi"}]}]}',
-    via_herald: 1,
+    via_assistant: 1,
     edited_at: null, deleted_at: null, created_at: NOW,
   };
 
@@ -199,7 +199,7 @@ describe("rowToComment", () => {
     expect(c).toEqual({
       id: 3, taskId: "t1", authorId: "u1", authorKind: "user", authorLabel: "Alice",
       body: { type: "doc", content: [{ type: "paragraph", content: [{ type: "text", text: "hi" }] }] },
-      viaHerald: true,
+      viaAssistant: true,
       editedAt: null, deletedAt: null, createdAt: NOW,
     });
   });

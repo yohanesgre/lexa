@@ -115,10 +115,10 @@ export function CommentCard({ comment, members, currentUser, onDelete, onUpdate 
   const isAuthor = !isAgent && comment.authorId !== null && comment.authorId === currentUser.id;
   const canEdit = isAuthor;
   const canDelete = isAuthor || currentUser.role === "admin";
-  // Provenance pill (herald-write-approvals.html State 5): comments posted by
+  // Provenance pill (assistant-write-approvals.html State 5): comments posted by
   // the add_comment tool. Fixed at creation — later edits keep it. Read
   // defensively; the field rides the API payload when serialized.
-  const viaHerald = (comment as { viaHerald?: unknown }).viaHerald === true;
+  const viaAssistant = (comment as { viaAssistant?: unknown }).viaAssistant === true;
 
   const extensions = useMemo(
     () =>
@@ -152,7 +152,7 @@ export function CommentCard({ comment, members, currentUser, onDelete, onUpdate 
         <div className="comment-header">
           <CommentHeaderMeta isAgent={isAgent} label={comment.authorLabel} />
           <span className="comment-time">{formatTime(comment.createdAt)}</span>
-          {viaHerald && <span className="via-pill">via Herald</span>}
+          {viaAssistant && <span className="via-pill">via Assistant</span>}
           {comment.editedAt && <span className="comment-edited">edited</span>}
           {!editing && (
             <CommentActions

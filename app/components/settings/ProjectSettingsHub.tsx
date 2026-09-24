@@ -55,7 +55,7 @@ export function ProjectSettingsHub({ projectId }: { projectId: string }) {
       </div>
 
       <div className="card-panel mb-6" style={{ padding: "10px 12px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, borderStyle: "dashed" }}>
-        <span className="text-sm text-lx-text-secondary">Herald provider, engine, write tools, memory, and skill bindings are now managed in <span className="font-mono text-xs">/runtimes/bindings</span>.</span>
+        <span className="text-sm text-lx-text-secondary">Assistant provider, engine, write tools, memory, and skill bindings are now managed in <span className="font-mono text-xs">/runtimes/bindings</span>.</span>
         <Link to="/runtimes/bindings" className="btn btn-ghost" style={{ height: 28, padding: "0 10px", fontSize: 12, textDecoration: "none", display: "inline-flex", alignItems: "center", whiteSpace: "nowrap" }}>Open in AI Runtimes · Bindings</Link>
       </div>
       <TeamAssignmentSection project={project} />

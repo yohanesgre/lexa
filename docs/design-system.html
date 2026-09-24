@@ -2001,22 +2001,22 @@ mark {
   50%      { opacity: 0.45; }
 }
 
-/* ---- Herald Streaming Cursor ----
+/* ---- Assistant Streaming Cursor ----
    Blinking block caret appended after the streaming assistant bubble text.
    Rendered only while the stream is in progress; removed on done/error.
    Deeper blink than .skeleton / lx-wip-pulse — a cursor is an attention
    beat, not ambient life. Reduced-motion flattens it via the global
    media query above. */
-.herald-stream-caret {
+.assistant-stream-caret {
   color: var(--lx-border-focus);
-  animation: lx-herald-caret-blink 1.2s var(--lx-ease-in-out) infinite;
+  animation: lx-assistant-caret-blink 1.2s var(--lx-ease-in-out) infinite;
 }
-@keyframes lx-herald-caret-blink {
+@keyframes lx-assistant-caret-blink {
   0%, 100% { opacity: 1; }
   50%      { opacity: 0.2; }
 }
 
-/* ---- Herald Activity Strip ----
+/* ---- Assistant Activity Strip ----
    Streaming-process surface inside the assistant bubble (codex/opencode-style
    verbose tool transcript): a collapsible Thinking row fed by live reasoning
    deltas + one always-visible mono line per tool call — `[tool_name] detail…`
@@ -2025,13 +2025,13 @@ mark {
    contract — driven only by live SSE frames, never persisted; a fetched
    transcript renders no strip. After done it folds to one subtle summary
    line ("Thought for 6s · 3 tools"), expandable. Tokens only. */
-.herald-activity {
+.assistant-activity {
   display: flex;
   flex-direction: column;
   gap: 4px;
   margin-bottom: 8px;
 }
-.herald-activity-toggle {
+.assistant-activity-toggle {
   display: flex;
   align-items: center;
   gap: 6px;
@@ -2046,8 +2046,8 @@ mark {
   cursor: pointer;
   text-align: left;
 }
-.herald-activity-toggle:hover { color: var(--lx-text-secondary); }
-.herald-activity-chevron {
+.assistant-activity-toggle:hover { color: var(--lx-text-secondary); }
+.assistant-activity-chevron {
   width: 11px;
   height: 11px;
   stroke: currentColor;
@@ -2056,8 +2056,8 @@ mark {
   flex-shrink: 0;
   transition: transform 0.15s var(--lx-ease-out);
 }
-.herald-activity-chevron.collapsed { transform: rotate(-90deg); }
-.herald-activity-reasoning {
+.assistant-activity-chevron.collapsed { transform: rotate(-90deg); }
+.assistant-activity-reasoning {
   margin: 2px 0 2px 17px;
   padding: 6px 10px;
   background: var(--lx-surface-elevated);
@@ -2073,7 +2073,7 @@ mark {
   max-height: 160px;
   overflow-y: auto;
 }
-.herald-activity-tool {
+.assistant-activity-tool {
   display: flex;
   align-items: baseline;
   gap: 6px;
@@ -2085,29 +2085,29 @@ mark {
   color: var(--lx-text-primary);
   min-width: 0;
 }
-.herald-activity-tool.done { color: var(--lx-text-muted); }
-.herald-activity-tool-name {
+.assistant-activity-tool.done { color: var(--lx-text-muted); }
+.assistant-activity-tool-name {
   flex-shrink: 0;
   font-weight: 500;
   color: var(--lx-text-secondary);
 }
-.herald-activity-tool.done .herald-activity-tool-name { color: var(--lx-text-muted); }
+.assistant-activity-tool.done .assistant-activity-tool-name { color: var(--lx-text-muted); }
 /* Process sentence (frame `detail`) — ellipsized to one line after the
    bracketed name; falls back to the humanized verb phrase when absent. */
-.herald-activity-tool-detail {
+.assistant-activity-tool-detail {
   min-width: 0;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.herald-activity-caret {
+.assistant-activity-caret {
   flex-shrink: 0;
   color: var(--lx-text-muted);
-  animation: lx-herald-caret-blink 1.2s var(--lx-ease-in-out) infinite;
+  animation: lx-assistant-caret-blink 1.2s var(--lx-ease-in-out) infinite;
 }
 /* Compact result marker under a completed call — result-frame `detail`
    truncated to one muted mono line. */
-.herald-activity-result {
+.assistant-activity-result {
   margin-left: 17px;
   padding-left: 12px;
   border-left: 2px solid var(--lx-border-subtle);
@@ -2120,7 +2120,7 @@ mark {
   text-overflow: ellipsis;
 }
 
-/* ---- Herald Chat — assistant bubble markdown ----
+/* ---- Assistant Chat — assistant bubble markdown ----
    Assistant turns render markdown client-side (no raw HTML injection).
    Scoped to .bubble-md so user bubbles stay plain text. Headings are
    demoted to bubble-appropriate sizes; code blocks reuse the input
@@ -5123,7 +5123,7 @@ textarea.prop-input {
   color: var(--lx-text-muted);
 }
 
-/* ---- Herald chat — Threads sidebar (herald-chat.html) ---- */
+/* ---- Assistant chat — Threads sidebar (assistant-chat.html) ---- */
 .threads-sidebar {
   width: 260px;
   flex-shrink: 0;
@@ -5225,7 +5225,7 @@ textarea.prop-input {
 }
 
 /* =========================================================
-   Admin — Herald Usage & Health (admin-herald-usage.html)
+   Admin — Assistant Usage & Health (admin-assistant-usage.html)
    KPI row 4 cards, by_day chart, by_model + price tables, health badges.
    ========================================================= */
 .kpi-grid { display:grid; grid-template-columns:repeat(4,1fr); gap:16px; }
@@ -6369,7 +6369,7 @@ textarea.prop-input {
       <h2 class="font-display text-xl weight-600 color-primary">Markdown / rich-text prose</h2>
       <p class="text-sm color-secondary" style="max-width:640px;margin-bottom:16px;">Canonical spec for rendered markdown (assistant replies, wiki pages, task descriptions). One heading scale, one code/pre treatment, one list rhythm — every prose surface copies these values; do not re-derive.</p>
 
-      <span class="annotation-tag" style="display:block;margin-bottom:16px;">Consumers: <span class="font-mono">.wiki-prose</span> (wiki pages) · <span class="font-mono">.td-*</span> (task detail TipTap read-mode) · <span class="font-mono">.bubble-md</span> (Herald chat). Intentional deltas — do NOT "unify" blindly: wiki base reads 15px/26px line-height vs chat+task 15px/22px (long-form reading vs narrow columns); chat trims the first/last child margins at bubble edges (<span class="font-mono">.bubble-md &gt; *:first-child/last-child</span>) because bubbles sit flush in the transcript; task detail ships per-element classes instead of a scoped wrapper.</span>
+      <span class="annotation-tag" style="display:block;margin-bottom:16px;">Consumers: <span class="font-mono">.wiki-prose</span> (wiki pages) · <span class="font-mono">.td-*</span> (task detail TipTap read-mode) · <span class="font-mono">.bubble-md</span> (Assistant chat). Intentional deltas — do NOT "unify" blindly: wiki base reads 15px/26px line-height vs chat+task 15px/22px (long-form reading vs narrow columns); chat trims the first/last child margins at bubble edges (<span class="font-mono">.bubble-md &gt; *:first-child/last-child</span>) because bubbles sit flush in the transcript; task detail ships per-element classes instead of a scoped wrapper.</span>
 
       <!-- Headings -->
       <div class="block-shell">
@@ -6462,7 +6462,7 @@ pre code { background:transparent; padding:0; font-size:12px; line-height:20px; 
             <li style="margin-bottom:0;"><input type="checkbox" checked disabled style="margin-right:5px;vertical-align:-1px;accent-color:var(--lx-border-focus);" /> done task item</li>
           </ul>
         </div>
-        <span class="annotation-tag" style="display:block;margin:12px 0;">CRITICAL — Tailwind v4 preflight sets <span class="font-mono">ol, ul, menu &#123; list-style: none &#125;</span> in @layer base. EVERY prose surface MUST explicitly restore markers under its own scope (<span class="font-mono">ul &#123; list-style: disc &#125;</span>, <span class="font-mono">ul ul &#123; circle &#125;</span>, <span class="font-mono">ol &#123; decimal &#125;</span>) or bullets and numbering vanish in BOTH themes. This bit Herald chat already; restore it in any new consumer.</span>
+        <span class="annotation-tag" style="display:block;margin:12px 0;">CRITICAL — Tailwind v4 preflight sets <span class="font-mono">ol, ul, menu &#123; list-style: none &#125;</span> in @layer base. EVERY prose surface MUST explicitly restore markers under its own scope (<span class="font-mono">ul &#123; list-style: disc &#125;</span>, <span class="font-mono">ul ul &#123; circle &#125;</span>, <span class="font-mono">ol &#123; decimal &#125;</span>) or bullets and numbering vanish in BOTH themes. This bit Assistant chat already; restore it in any new consumer.</span>
         <pre class="code-block" id="code-prose-lists">ul   { list-style: disc;    margin:0 0 12px 20px; padding-left:2px; }
 ul ul{ list-style: circle; }
 ol   { list-style: decimal; }
@@ -6555,10 +6555,10 @@ th { font-weight:500; color: var(--lx-text-secondary); font-size:11px; text-tran
         <div class="token-contract">Tokens: --lx-surface-card-hover (bg), --lx-text-secondary</div>
       </div>
 
-      <!-- Highlighted code block (Herald chat fenced segments) -->
+      <!-- Highlighted code block (Assistant chat fenced segments) -->
       <div class="block-shell">
         <div class="block-desc">
-          <strong>Use</strong> — `.herald-codeblock` for Herald chat done-turn fenced code: elevated surface matching `.bubble-md pre`, micro-caps language label + copy button in the top-right chrome row, body highlighted by highlight.js and themed through the opt-in `.hljs-theme` class on the `code` element.<br/>
+          <strong>Use</strong> — `.assistant-codeblock` for Assistant chat done-turn fenced code: elevated surface matching `.bubble-md pre`, micro-caps language label + copy button in the top-right chrome row, body highlighted by highlight.js and themed through the opt-in `.hljs-theme` class on the `code` element.<br/>
           <strong>Avoid</strong> — raw hex token colors or extra hljs scopes outside `.hljs-theme`; labels in sentence case inside the text (caps come from CSS).<br/>
           <strong>Instead</strong> — plain `.bubble-md pre` for streaming/inline code (no chrome, same surface).
         </div>
@@ -6573,9 +6573,9 @@ th { font-weight:500; color: var(--lx-text-secondary); font-size:11px; text-tran
           </div>
           <span class="annotation-tag" style="display:block;margin-top:8px;">Token mapping (.hljs-theme): keywords/literals → --lx-text-link · strings/additions → --lx-text-success · numbers/deletions → --lx-text-danger · functions → --lx-badge-task · types/built-ins → --lx-badge-asset · attributes → --lx-text-warning · comments → --lx-text-tertiary italic. Unknown fence languages fall back to highlightAuto; grammar errors fall back to escaped plain text (streaming-safe).</span>
         </div>
-        <pre class="code-block" id="code-misc-codeblock">&lt;div class="herald-codeblock"&gt;
-  &lt;span class="herald-codeblock-chrome"&gt;
-    &lt;span class="herald-codeblock-lang"&gt;ts&lt;/span&gt;
+        <pre class="code-block" id="code-misc-codeblock">&lt;div class="assistant-codeblock"&gt;
+  &lt;span class="assistant-codeblock-chrome"&gt;
+    &lt;span class="assistant-codeblock-lang"&gt;ts&lt;/span&gt;
   &lt;/span&gt;
   &lt;code class="hljs-theme"&gt;…highlight.js output…&lt;/code&gt;
 &lt;/div&gt;</pre>

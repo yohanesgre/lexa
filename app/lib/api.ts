@@ -1,6 +1,6 @@
 import { Schema } from "effect";
 import type { Project, ProjectRepo, Column, Swimlane, Task, Board, Milestone, WikiPageMeta, WikiPage, WikiPageRevision, WikiPageRevisionSummary, TipTapDoc, ApiKey, ApiKeyCreateResult, Dashboard, FieldConfig, RuntimeTask, RuntimeTaskLog, RuntimeTaskStatus, LexaAgent, LexaSkill, AgentCli, RuntimeSession, DocumentSource, Runtime, RuntimeEvent, Machine, TaskLink, TaskLinkSuggestion, ActivityEvent, ActivityItem, TaskComment, GithubIssueSummary, Team, TeamMember, TeamMemberRole, WorkspaceInvite, SessionInfo, LexaUser, Attachment } from "../../shared/types";
-import type { HeraldSettingsMasked, HeraldSettingsInput, HeraldChatTranscript, ModelListResult, HeraldProvider, HeraldProviderModel, HeraldUsage, HeraldCall, HeraldProjectSettings } from "../../shared/herald";
+import type { AssistantSettingsMasked, AssistantSettingsInput, AssistantChatTranscript, ModelListResult, AssistantProvider, AssistantProviderModel, AssistantUsage, AssistantCall, AssistantProjectSettings } from "../../shared/assistant";
 
 const BASE = "/api";
 
@@ -707,32 +707,32 @@ export function unlinkGithubIssue(slug: string, taskId: string, issueId: string)
   return request(`${BASE}/projects/${slug}/tasks/${taskId}/github-link/${issueId}`, { method: "DELETE" });
 }
 
-// ── Herald (server-side assistant tier) ──
+// ── Assistant (server-side assistant tier) ──
 
-export interface HeraldMemoryEntry {
+export interface AssistantMemoryEntry {
   id: string;
   projectId: string;
   content: string;
-  source: "manual" | "herald";
+  source: "manual" | "assistant";
   createdAt: string;
   updatedAt: string;
 }
 
-export function getHeraldSettings(projectId: string): Promise<HeraldSettingsMasked> {
-  return request(`${BASE}/herald/settings/${projectId}`);
+export function getAssistantSettings(projectId: string): Promise<AssistantSettingsMasked> {
+  return request(`${BASE}/assistant/settings/${projectId}`);
 }
 
-export function putHeraldSettings(projectId: string, input: HeraldSettingsInput): Promise<HeraldSettingsMasked> {
-  return request(`${BASE}/herald/settings/${projectId}`, { method: "PUT", body: JSON.stringify(input) });
+export function putAssistantSettings(projectId: string, input: AssistantSettingsInput): Promise<AssistantSettingsMasked> {
+  return request(`${BASE}/assistant/settings/${projectId}`, { method: "PUT", body: JSON.stringify(input) });
 }
 
-export async function testHeraldSettings(
+export async function testAssistantSettings(
   projectId: string,
-  input: HeraldSettingsInput,
+  input: AssistantSettingsInput,
   opts?: { signal?: AbortSignal }
 ): Promise<{ ok: boolean; latencyMs: number }> {
   try {
-    return await request<{ ok: boolean; latencyMs: number }>(`${BASE}/herald/settings/${projectId}/test`, {
+    return await request<{ ok: boolean; latencyMs: number }>(`${BASE}/assistant/settings/${projectId}/test`, {
       method: "POST",
       body: JSON.stringify(input),
       signal: opts?.signal ?? AbortSignal.timeout(35_000),
@@ -751,35 +751,35 @@ export async function testHeraldSettings(
   }
 }
 
-export function listHeraldModels(projectId: string, input: HeraldSettingsInput): Promise<ModelListResult> {
-  return request(`${BASE}/herald/settings/${projectId}/models`, { method: "POST", body: JSON.stringify(input) });
+export function listAssistantModels(projectId: string, input: AssistantSettingsInput): Promise<ModelListResult> {
+  return request(`${BASE}/assistant/settings/${projectId}/models`, { method: "POST", body: JSON.stringify(input) });
 }
 
-export function listHeraldProviders(): Promise<{ data: HeraldProvider[] }> {
-  return request(`${BASE}/admin/herald/providers`);
+export function listAssistantProviders(): Promise<{ data: AssistantProvider[] }> {
+  return request(`${BASE}/admin/assistant/providers`);
 }
 
-export function createHeraldProvider(input: { label: string; baseUrl: string; apiKey: string }): Promise<HeraldProvider> {
-  return request(`${BASE}/admin/herald/providers`, { method: "POST", body: JSON.stringify({ label: input.label, baseUrl: input.baseUrl, apiKey: input.apiKey }) });
+export function createAssistantProvider(input: { label: string; baseUrl: string; apiKey: string }): Promise<AssistantProvider> {
+  return request(`${BASE}/admin/assistant/providers`, { method: "POST", body: JSON.stringify({ label: input.label, baseUrl: input.baseUrl, apiKey: input.apiKey }) });
 }
 
-export function updateHeraldProvider(id: string, input: { label?: string | undefined; baseUrl?: string | undefined; apiKey?: string }): Promise<HeraldProvider> {
+export function updateAssistantProvider(id: string, input: { label?: string | undefined; baseUrl?: string | undefined; apiKey?: string }): Promise<AssistantProvider> {
   const body: Record<string, string> = {};
   if (input.label !== undefined) body.label = input.label;
   if (input.baseUrl !== undefined) body.baseUrl = input.baseUrl;
   if (input.apiKey !== undefined) body.apiKey = input.apiKey;
-  return request(`${BASE}/admin/herald/providers/${id}`, { method: "PATCH", body: JSON.stringify(body) });
+  return request(`${BASE}/admin/assistant/providers/${id}`, { method: "PATCH", body: JSON.stringify(body) });
 }
 
-export function deleteHeraldProvider(id: string): Promise<void> {
-  return request(`${BASE}/admin/herald/providers/${id}`, { method: "DELETE" });
+export function deleteAssistantProvider(id: string): Promise<void> {
+  return request(`${BASE}/admin/assistant/providers/${id}`, { method: "DELETE" });
 }
 
-export function testHeraldProvider(id: string): Promise<{ ok: boolean; latencyMs: number }> {
-  return request(`${BASE}/admin/herald/providers/${id}/test`, { method: "POST" });
+export function testAssistantProvider(id: string): Promise<{ ok: boolean; latencyMs: number }> {
+  return request(`${BASE}/admin/assistant/providers/${id}/test`, { method: "POST" });
 }
 
-export interface HeraldProviderHealth {
+export interface AssistantProviderHealth {
   providerId: string;
   circuitState: "open" | "closed" | "half-open";
   failureCount: number;
@@ -788,47 +788,47 @@ export interface HeraldProviderHealth {
   consecutiveFailures: number;
 }
 
-export function getHeraldProviderHealth(id: string): Promise<HeraldProviderHealth> {
-  return request(`${BASE}/admin/herald/providers/${encodeURIComponent(id)}/health`);
+export function getAssistantProviderHealth(id: string): Promise<AssistantProviderHealth> {
+  return request(`${BASE}/admin/assistant/providers/${encodeURIComponent(id)}/health`);
 }
 
-export function probeHeraldProvider(id: string): Promise<HeraldProviderHealth> {
-  return request(`${BASE}/admin/herald/providers/${encodeURIComponent(id)}/probe`, { method: "POST" });
+export function probeAssistantProvider(id: string): Promise<AssistantProviderHealth> {
+  return request(`${BASE}/admin/assistant/providers/${encodeURIComponent(id)}/probe`, { method: "POST" });
 }
 
-export function fetchHeraldProviderModels(id: string): Promise<{ data: HeraldProviderModel[] }> {
-  return request(`${BASE}/admin/herald/providers/${encodeURIComponent(id)}/models`, { method: "POST" });
+export function fetchAssistantProviderModels(id: string): Promise<{ data: AssistantProviderModel[] }> {
+  return request(`${BASE}/admin/assistant/providers/${encodeURIComponent(id)}/models`, { method: "POST" });
 }
 
-export function updateHeraldProviderModel(id: string, modelId: string, patch: { enabled?: boolean | undefined; priority?: number }): Promise<HeraldProviderModel> {
-  return request(`${BASE}/admin/herald/providers/${id}/models/${encodeURIComponent(modelId)}`, { method: "PATCH", body: JSON.stringify(patch) });
+export function updateAssistantProviderModel(id: string, modelId: string, patch: { enabled?: boolean | undefined; priority?: number }): Promise<AssistantProviderModel> {
+  return request(`${BASE}/admin/assistant/providers/${id}/models/${encodeURIComponent(modelId)}`, { method: "PATCH", body: JSON.stringify(patch) });
 }
 
-export function reorderHeraldProviderModels(id: string, orderedIds: string[]): Promise<{ data: HeraldProviderModel[] }> {
-  return request(`${BASE}/admin/herald/providers/${id}/models/reorder`, { method: "POST", body: JSON.stringify({ orderedIds }) });
+export function reorderAssistantProviderModels(id: string, orderedIds: string[]): Promise<{ data: AssistantProviderModel[] }> {
+  return request(`${BASE}/admin/assistant/providers/${id}/models/reorder`, { method: "POST", body: JSON.stringify({ orderedIds }) });
 }
 
-export function getHeraldUsage(): Promise<HeraldUsage> {
-  return request(`${BASE}/admin/herald/usage`);
+export function getAssistantUsage(): Promise<AssistantUsage> {
+  return request(`${BASE}/admin/assistant/usage`);
 }
 
-export function listHeraldCalls(params?: { projectId?: string | undefined; limit?: number }): Promise<{ data: HeraldCall[] }> {
+export function listAssistantCalls(params?: { projectId?: string | undefined; limit?: number }): Promise<{ data: AssistantCall[] }> {
   const qs = new URLSearchParams();
   if (params?.projectId) qs.set("projectId", params.projectId);
   if (params?.limit) qs.set("limit", String(params.limit));
   const q = qs.toString();
-  return request(`${BASE}/admin/herald/calls${q ? `?${q}` : ""}`);
+  return request(`${BASE}/admin/assistant/calls${q ? `?${q}` : ""}`);
 }
 
-export function getHeraldProjectSettings(projectId: string): Promise<HeraldProjectSettings> {
-  return request(`${BASE}/herald/settings/${projectId}`);
+export function getAssistantProjectSettings(projectId: string): Promise<AssistantProjectSettings> {
+  return request(`${BASE}/assistant/settings/${projectId}`);
 }
 
-export function putHeraldProjectSettings(projectId: string, input: { providerId: string | null; modelId: string | null; fallbackModelIds: string[] }): Promise<HeraldProjectSettings> {
-  return request(`${BASE}/herald/settings/${projectId}`, { method: "PUT", body: JSON.stringify({ providerId: input.providerId, modelId: input.modelId, fallbackModelIds: input.fallbackModelIds }) });
+export function putAssistantProjectSettings(projectId: string, input: { providerId: string | null; modelId: string | null; fallbackModelIds: string[] }): Promise<AssistantProjectSettings> {
+  return request(`${BASE}/assistant/settings/${projectId}`, { method: "PUT", body: JSON.stringify({ providerId: input.providerId, modelId: input.modelId, fallbackModelIds: input.fallbackModelIds }) });
 }
 
-export function createHeraldTask(input: {
+export function createAssistantTask(input: {
   slug: string;
   documentType: "task" | "wiki";
   documentId: string;
@@ -838,41 +838,41 @@ export function createHeraldTask(input: {
   selection?: string | undefined;
   attachments?: { storageKey: string; mimeType: string; name: string }[];
 }): Promise<RuntimeTask> {
-  return request(`${BASE}/herald/tasks`, { method: "POST", body: JSON.stringify(input) });
+  return request(`${BASE}/assistant/tasks`, { method: "POST", body: JSON.stringify(input) });
 }
 
-export function cancelHeraldTask(id: string): Promise<{ ok: boolean }> {
-  return request(`${BASE}/herald/tasks/${id}/cancel`, { method: "POST" });
+export function cancelAssistantTask(id: string): Promise<{ ok: boolean }> {
+  return request(`${BASE}/assistant/tasks/${id}/cancel`, { method: "POST" });
 }
 
-export function resetHeraldThread(documentType: "task" | "wiki", documentId: string): Promise<void> {
-  return request(`${BASE}/herald/threads/${documentType}/${documentId}`, { method: "DELETE" });
+export function resetAssistantThread(documentType: "task" | "wiki", documentId: string): Promise<void> {
+  return request(`${BASE}/assistant/threads/${documentType}/${documentId}`, { method: "DELETE" });
 }
 
-// One decision per approval (herald-write-approvals.html): the response's
+// One decision per approval (assistant-write-approvals.html): the response's
 // terminal status is authoritative for that chip alone. 409s surface as
 // thrown errors with code APPROVAL_EXPIRED / APPROVAL_ALREADY_DECIDED
 // (details.status carries the pre-existing decision).
-export interface HeraldApprovalDecision {
+export interface AssistantApprovalDecision {
   approvalId: string;
   batchId: string;
   status: string;
   remaining: number;
 }
 
-export function decideHeraldApproval(approvalId: string, verdict: "approve" | "reject"): Promise<HeraldApprovalDecision> {
-  return request(`${BASE}/herald/approvals/${approvalId}/decide`, { method: "POST", body: JSON.stringify({ verdict }) });
+export function decideAssistantApproval(approvalId: string, verdict: "approve" | "reject"): Promise<AssistantApprovalDecision> {
+  return request(`${BASE}/assistant/approvals/${approvalId}/decide`, { method: "POST", body: JSON.stringify({ verdict }) });
 }
 
-export function getHeraldChat(chatId: string): Promise<HeraldChatTranscript> {
-  return request(`${BASE}/herald/chat/${chatId}`);
+export function getAssistantChat(chatId: string): Promise<AssistantChatTranscript> {
+  return request(`${BASE}/assistant/chat/${chatId}`);
 }
 
 // Thread summary for the History dropdown (pinned-first then updated_at
 // DESC, cap 100). Title is null until the server derives it from the first
 // send; null renders as "New chat". snippet is a short window around the
 // first ?q= match (null for title-only matches or unfiltered lists).
-export interface HeraldChatThreadSummary {
+export interface AssistantChatThreadSummary {
   chatId: string;
   title: string | null;
   pinned: boolean;
@@ -881,27 +881,27 @@ export interface HeraldChatThreadSummary {
   updatedAt: string;
 }
 
-export function listHeraldChats(projectId: string, q?: string): Promise<{ data: HeraldChatThreadSummary[] }> {
+export function listAssistantChats(projectId: string, q?: string): Promise<{ data: AssistantChatThreadSummary[] }> {
   const qs = q && q.trim() ? `?q=${encodeURIComponent(q.trim())}` : "";
-  return request(`${BASE}/herald/chats/${projectId}${qs}`);
+  return request(`${BASE}/assistant/chats/${projectId}${qs}`);
 }
 
-export function updateHeraldChatMeta(
+export function updateAssistantChatMeta(
   chatId: string,
   patch: { title?: string | undefined; pinned?: boolean }
 ): Promise<{ chatId: string; title?: string | undefined; pinned?: boolean }> {
-  return request(`${BASE}/herald/chat/${chatId}`, { method: "PATCH", body: JSON.stringify(patch) });
+  return request(`${BASE}/assistant/chat/${chatId}`, { method: "PATCH", body: JSON.stringify(patch) });
 }
 
-export function renameHeraldChat(chatId: string, title: string): Promise<{ chatId: string; title?: string | undefined }> {
-  return updateHeraldChatMeta(chatId, { title });
+export function renameAssistantChat(chatId: string, title: string): Promise<{ chatId: string; title?: string | undefined }> {
+  return updateAssistantChatMeta(chatId, { title });
 }
 
-// Markdown attachment download (GET /herald/chat/:chatId/export →
+// Markdown attachment download (GET /assistant/chat/:chatId/export →
 // text/markdown). Frontend-only: blob → programmatic <a download> click.
 // Filename prefers the Content-Disposition header, falls back to chatId.
-export async function exportHeraldChat(chatId: string): Promise<void> {
-  const res = await fetch(`${BASE}/herald/chat/${chatId}/export`, { credentials: "include" });
+export async function exportAssistantChat(chatId: string): Promise<void> {
+  const res = await fetch(`${BASE}/assistant/chat/${chatId}/export`, { credentials: "include" });
   if (!res.ok) {
     const body = (await res.json().catch(() => ({}))) as { error?: { code?: string | undefined; message?: string } };
     const err = new Error(body.error?.message ?? `HTTP ${res.status}`) as Error & { code?: string | undefined };
@@ -911,7 +911,7 @@ export async function exportHeraldChat(chatId: string): Promise<void> {
   const blob = await res.blob();
   const dispo = res.headers.get("Content-Disposition") ?? "";
   const match = /filename\*?=(?:UTF-8'')?"?([^";]+)"?/i.exec(dispo);
-  const name = match?.[1] ? decodeURIComponent(match[1]!.trim()) : `herald-chat-${chatId}.md`;
+  const name = match?.[1] ? decodeURIComponent(match[1]!.trim()) : `assistant-chat-${chatId}.md`;
   const url = URL.createObjectURL(blob);
   const anchor = document.createElement("a");
   anchor.href = url;
@@ -922,20 +922,20 @@ export async function exportHeraldChat(chatId: string): Promise<void> {
   URL.revokeObjectURL(url);
 }
 
-export function resetHeraldChat(chatId: string): Promise<void> {
-  return request(`${BASE}/herald/chat/${chatId}`, { method: "DELETE" });
+export function resetAssistantChat(chatId: string): Promise<void> {
+  return request(`${BASE}/assistant/chat/${chatId}`, { method: "DELETE" });
 }
 
-export function listHeraldMemory(projectId: string): Promise<{ data: HeraldMemoryEntry[] }> {
-  return request(`${BASE}/herald/memory/${projectId}`);
+export function listAssistantMemory(projectId: string): Promise<{ data: AssistantMemoryEntry[] }> {
+  return request(`${BASE}/assistant/memory/${projectId}`);
 }
 
-export function addHeraldMemory(projectId: string, content: string): Promise<HeraldMemoryEntry> {
-  return request(`${BASE}/herald/memory/${projectId}`, { method: "POST", body: JSON.stringify({ content }) });
+export function addAssistantMemory(projectId: string, content: string): Promise<AssistantMemoryEntry> {
+  return request(`${BASE}/assistant/memory/${projectId}`, { method: "POST", body: JSON.stringify({ content }) });
 }
 
-export function removeHeraldMemory(projectId: string, memoryId: string): Promise<void> {
-  return request(`${BASE}/herald/memory/${projectId}/${memoryId}`, { method: "DELETE" });
+export function removeAssistantMemory(projectId: string, memoryId: string): Promise<void> {
+  return request(`${BASE}/assistant/memory/${projectId}/${memoryId}`, { method: "DELETE" });
 }
 
 // ── Attachments ──

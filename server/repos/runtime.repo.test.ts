@@ -58,7 +58,7 @@ function makeRepo(db: Database) {
   return Context.get(ctx, RuntimeRepo);
 }
 
-function taskInput(id: string, kind?: "blacksmith" | "herald") {
+function taskInput(id: string, kind?: "blacksmith" | "assistant") {
   return {
     id,
     projectId: "p1",
@@ -85,13 +85,13 @@ describe("RuntimeRepo createTask kind", () => {
     );
   });
 
-  it("kind='herald' is persisted", async () => {
+  it("kind='assistant' is persisted", async () => {
     seed(db);
     const repo = makeRepo(db);
     await Effect.runPromise(
       Effect.gen(function* () {
-        const task = yield* repo.createTask(taskInput("ft2", "herald"));
-        expect(task.kind).toBe("herald");
+        const task = yield* repo.createTask(taskInput("ft2", "assistant"));
+        expect(task.kind).toBe("assistant");
         expect(task.status).toBe("queued");
       })
     );
@@ -99,12 +99,12 @@ describe("RuntimeRepo createTask kind", () => {
 });
 
 describe("RuntimeRepo claimNextTask kind scoping", () => {
-  it("never returns a herald task", async () => {
+  it("never returns an assistant task", async () => {
     seed(db);
     const repo = makeRepo(db);
     await Effect.runPromise(
       Effect.gen(function* () {
-        yield* repo.createTask(taskInput("ft-h", "herald"));
+        yield* repo.createTask(taskInput("ft-h", "assistant"));
         yield* repo.createTask(taskInput("ft-b", "blacksmith"));
         const claimed = yield* repo.claimNextTask("rt1", null);
         expect(claimed).not.toBeNull();
@@ -114,12 +114,12 @@ describe("RuntimeRepo claimNextTask kind scoping", () => {
     );
   });
 
-  it("returns null when only herald tasks are queued", async () => {
+  it("returns null when only assistant tasks are queued", async () => {
     seed(db);
     const repo = makeRepo(db);
     await Effect.runPromise(
       Effect.gen(function* () {
-        yield* repo.createTask(taskInput("ft-h", "herald"));
+        yield* repo.createTask(taskInput("ft-h", "assistant"));
         const claimed = yield* repo.claimNextTask("rt1", null);
         expect(claimed).toBeNull();
       })
@@ -127,14 +127,14 @@ describe("RuntimeRepo claimNextTask kind scoping", () => {
   });
 });
 
-describe("RuntimeRepo claimHeraldTask", () => {
-  it("claims a queued herald task → running", async () => {
+describe("RuntimeRepo claimAssistantTask", () => {
+  it("claims a queued assistant task → running", async () => {
     seed(db);
     const repo = makeRepo(db);
     await Effect.runPromise(
       Effect.gen(function* () {
-        yield* repo.createTask(taskInput("ft-h", "herald"));
-        const claimed = yield* repo.claimHeraldTask("ft-h");
+        yield* repo.createTask(taskInput("ft-h", "assistant"));
+        const claimed = yield* repo.claimAssistantTask("ft-h");
         expect(claimed.status).toBe("running");
         expect(claimed.startedAt).not.toBeNull();
       })
@@ -147,7 +147,7 @@ describe("RuntimeRepo claimHeraldTask", () => {
     await Effect.runPromise(
       Effect.gen(function* () {
         yield* repo.createTask(taskInput("ft-b", "blacksmith"));
-        const err = yield* repo.claimHeraldTask("ft-b").pipe(Effect.flip);
+        const err = yield* repo.claimAssistantTask("ft-b").pipe(Effect.flip);
         expect(err._tag).toBe("ConstraintViolation");
       })
     );
@@ -158,9 +158,9 @@ describe("RuntimeRepo claimHeraldTask", () => {
     const repo = makeRepo(db);
     await Effect.runPromise(
       Effect.gen(function* () {
-        yield* repo.createTask(taskInput("ft-h", "herald"));
-        yield* repo.claimHeraldTask("ft-h");
-        const err = yield* repo.claimHeraldTask("ft-h").pipe(Effect.flip);
+        yield* repo.createTask(taskInput("ft-h", "assistant"));
+        yield* repo.claimAssistantTask("ft-h");
+        const err = yield* repo.claimAssistantTask("ft-h").pipe(Effect.flip);
         expect(err._tag).toBe("ConstraintViolation");
       })
     );
@@ -171,7 +171,7 @@ describe("RuntimeRepo claimHeraldTask", () => {
     const repo = makeRepo(db);
     await Effect.runPromise(
       Effect.gen(function* () {
-        const err = yield* repo.claimHeraldTask("ghost").pipe(Effect.flip);
+        const err = yield* repo.claimAssistantTask("ghost").pipe(Effect.flip);
         expect(err._tag).toBe("ConstraintViolation");
       })
     );

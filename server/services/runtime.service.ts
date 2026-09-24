@@ -19,10 +19,10 @@ import type { RuntimeTask, RuntimeTaskLog, DocumentSource, TipTapDoc, LexaAgent,
 // Builtin seed defaults — mirrors migrations/0001_init.sql (the squashed
 // 2026.1.0 baseline). Reset to default restores these exact values (and
 // skill sets). Keep the two in sync when editing either.
-export const HERALD_AGENT: { id: string; instructions: string; skillIds: string[] } = {
-  id: "herald",
+export const ASSISTANT_AGENT: { id: string; instructions: string; skillIds: string[] } = {
+  id: "assistant",
   instructions:
-    "You are the Herald Agent, Lexa's companion project-management assistant. You help teams run their projects: you draft and sharpen task descriptions, requirements, and wiki pages, spot missing details, unclear scope, and weak acceptance criteria, and answer questions about the project. You may read files in your working directory (the project workspace) to ground your writing in the actual repo and docs. You do not write files, run commands, or act on any system — your whole output is the text you write. Match the document's existing voice and structure. If the linked sources contradict the document, prefer the sources.",
+    "You are the Assistant Agent, Lexa's companion project-management assistant. You help teams run their projects: you draft and sharpen task descriptions, requirements, and wiki pages, spot missing details, unclear scope, and weak acceptance criteria, and answer questions about the project. You may read files in your working directory (the project workspace) to ground your writing in the actual repo and docs. You do not write files, run commands, or act on any system — your whole output is the text you write. Match the document's existing voice and structure. If the linked sources contradict the document, prefer the sources.",
   skillIds: ["requirements", "deliverables", "review", "definition-of-done", "status", "polish"],
 };
 
@@ -238,11 +238,11 @@ export class RuntimeService extends Effect.Service<RuntimeService>()("Lexa/Runti
         }),
 
       // Builtin-only: restore the seeded instructions + the agent's default
-      // skill set (Herald Agent and Blacksmith Agent since 0013).
+      // skill set (Assistant Agent and Blacksmith Agent since 0013).
       resetAgentToDefault: (id: string): Effect.Effect<LexaAgent, AgentNotFound | AgentBuiltinDelete | ConstraintViolation | DbError> =>
         Effect.gen(function* () {
           const agent = yield* repo.findAgentById(id).pipe(Effect.catchTag("RowNotFound", () => new AgentNotFound({ id })));
-          const seed = agent.id === HERALD_AGENT.id ? HERALD_AGENT : agent.id === BLACKSMITH_AGENT.id ? BLACKSMITH_AGENT : null;
+          const seed = agent.id === ASSISTANT_AGENT.id ? ASSISTANT_AGENT : agent.id === BLACKSMITH_AGENT.id ? BLACKSMITH_AGENT : null;
           if (!agent.isBuiltin || seed === null) {
             return yield* new AgentBuiltinDelete({ kind: "agent", name: agent.name });
           }

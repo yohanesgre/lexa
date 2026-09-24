@@ -442,14 +442,14 @@ export interface RuntimeTaskRow {
   status: "queued" | "running" | "completed" | "failed" | "cancelled";
   result: string | null;
   error: string | null;
-  kind: "blacksmith" | "herald";
+  kind: "blacksmith" | "assistant";
   created_at: string;
   started_at: string | null;
   finished_at: string | null;
 }
 
 export function rowToRuntimeTask(row: RuntimeTaskRow): {
-  id: string; key: string; runtimeId: string | null; projectId: string; documentType: "task" | "wiki"; documentId: string; documentTitle: string; agentId: string; skillId: string; agentName: string; skillName: string; extraPrompt: string; selection: string; docContext: string; status: "queued" | "running" | "completed" | "failed" | "cancelled"; result: string | null; error: string | null; kind: "blacksmith" | "herald"; createdAt: string; startedAt: string | null; finishedAt: string | null;
+  id: string; key: string; runtimeId: string | null; projectId: string; documentType: "task" | "wiki"; documentId: string; documentTitle: string; agentId: string; skillId: string; agentName: string; skillName: string; extraPrompt: string; selection: string; docContext: string; status: "queued" | "running" | "completed" | "failed" | "cancelled"; result: string | null; error: string | null; kind: "blacksmith" | "assistant"; createdAt: string; startedAt: string | null; finishedAt: string | null;
 } {
   return {
     id: row.id,
@@ -644,7 +644,7 @@ export interface ActivityRow {
   actor_user_id: string | null;
   type: ActivityType;
   message: string;
-  via_herald: number;
+  via_assistant: number;
   created_at: string;
 }
 
@@ -657,7 +657,7 @@ export function rowToActivityEvent(r: ActivityRow): ActivityEvent {
     actorUserId: r.actor_user_id,
     type: r.type,
     message: r.message,
-    viaHerald: r.via_herald === 1,
+    viaAssistant: r.via_assistant === 1,
     createdAt: r.created_at,
   };
 }
@@ -669,7 +669,7 @@ export interface CommentRow {
   author_kind: ActorKind;
   author_label: string;
   body: string;
-  via_herald: number;
+  via_assistant: number;
   edited_at: string | null;
   deleted_at: string | null;
   created_at: string;
@@ -683,7 +683,7 @@ export function rowToComment(r: CommentRow): TaskComment {
     authorKind: r.author_kind,
     authorLabel: r.author_label,
     body: parseTipTapDoc(r.body),
-    viaHerald: r.via_herald === 1,
+    viaAssistant: r.via_assistant === 1,
     editedAt: r.edited_at,
     deletedAt: r.deleted_at,
     createdAt: r.created_at,

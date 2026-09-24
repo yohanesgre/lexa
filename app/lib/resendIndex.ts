@@ -1,4 +1,4 @@
-// fromIndex computation for Herald chat edit/regenerate/retry (contract:
+// fromIndex computation for Assistant chat edit/regenerate/retry (contract:
 // the stream request truncates the thread to `fromIndex` entries, then
 // appends `message`). Positions are indices into the RAW transcript message
 // array — entries are counted even when they carry no meta (legacy) or only

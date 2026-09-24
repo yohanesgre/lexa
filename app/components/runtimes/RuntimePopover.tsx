@@ -2,15 +2,15 @@ import { useEffect, useEffectEvent, useLayoutEffect, useRef, useState, useSyncEx
 import { createPortal } from "react-dom";
 import type { Editor } from "@tiptap/core";
 import { docToMarkdown } from "../../../shared/markdown";
-import { useCreateRuntimeTask, useRuntimeTask, useRuntimes, useRecentRuntimeTask, useCancelRuntimeTask, useRuntimeTaskLogs, useAgents, useSkills, useProjects, useHeraldSettings, useSession } from "../../lib/queries";
+import { useCreateRuntimeTask, useRuntimeTask, useRuntimes, useRecentRuntimeTask, useCancelRuntimeTask, useRuntimeTaskLogs, useAgents, useSkills, useProjects, useAssistantSettings, useSession } from "../../lib/queries";
 import { useRuntimeSession, useResetRuntimeSession } from "../../lib/use-runtime-session";import { saveEngineOverlay, resolveActiveEngine, ENGINE_AGENT_IDS } from "../../lib/use-runtime-engine";
 import { RuntimeTaskLogModal } from "./RuntimeTaskLogModal";
 import { TaskStatusPanel } from "./RuntimeTaskStatusPanel";
 import { BlacksmithForm } from "./RuntimeBlacksmithForm";
-import { EngineToggle } from "./herald/HeraldModePicker";
-import type { RuntimeMode } from "./herald/HeraldModePicker";
-import { HeraldPanel } from "./herald/HeraldPanel";
-import { HeraldFlameIcon } from "./herald/HeraldFlameIcon";
+import { EngineToggle } from "./assistant/AssistantModePicker";
+import type { RuntimeMode } from "./assistant/AssistantModePicker";
+import { AssistantPanel } from "./assistant/AssistantPanel";
+import { AssistantFlameIcon } from "./assistant/AssistantFlameIcon";
 import type { LexaSkill, RuntimeTask, RuntimeTaskLog, Runtime } from "../../../shared/types";
 
 // The active engine is the admin-written project default; a member's
@@ -197,10 +197,10 @@ function buildCreateTaskInput(slug: string, documentType: "task" | "wiki", docum
   };
 }
 
-// Herald tier — full panel per herald-popover.html (own header states).
+// Assistant tier — full panel per assistant-popover.html (own header states).
 // Done state delegates to the editor review surface (diff only editor,
 // never raw in popover — runtime-review.html:153).
-function HeraldPortalView({ containerRef, popoverStyle, editor, slug, documentType, documentId, switcherEnabled, changeMode, onClose, onReview, reviewActive, appliedTaskId, rejectedTaskId, portalTarget }: {
+function AssistantPortalView({ containerRef, popoverStyle, editor, slug, documentType, documentId, switcherEnabled, changeMode, onClose, onReview, reviewActive, appliedTaskId, rejectedTaskId, portalTarget }: {
   containerRef: React.RefObject<HTMLDivElement | null>;
   popoverStyle: React.CSSProperties;
   editor: Editor;
@@ -218,7 +218,7 @@ function HeraldPortalView({ containerRef, popoverStyle, editor, slug, documentTy
 }) {
   return createPortal(
     <div ref={containerRef} className="menu-popover" data-runtime-popover style={popoverStyle}>
-      <HeraldPanel
+      <AssistantPanel
         editor={editor}
         slug={slug}
         documentType={documentType}
@@ -332,14 +332,14 @@ function PopoverBody({ taskId, taskData, running, failed, done, reviewActive, fo
 export function RuntimePopover({ editor, slug, documentType, documentId, open, onClose, onReview, reviewActive, appliedTaskId, rejectedTaskId, anchorRect }: RuntimePopoverProps) {
   const { data: projects = [] } = useProjects();
   const projectId = projects.find((p) => p.slug === slug)?.id;
-  // null after load = PROVIDER_NOT_CONFIGURED — the herald lane swaps in its
+  // null after load = PROVIDER_NOT_CONFIGURED — the assistant lane swaps in its
   // empty state; the blacksmith lane is unaffected.
-  const { data: settings } = useHeraldSettings(projectId);
+  const { data: settings } = useAssistantSettings(projectId);
   const switcherEnabled = settings?.engineSwitcherEnabled === true;
 
   // Active engine = project default, overridden by the member's personal
   // overlay (only when the project shows the switcher). The override lives
-  // in localStorage and NEVER touches herald_settings.engine.
+  // in localStorage and NEVER touches assistant_settings.engine.
   const [modeOverride, setModeOverride] = useState<RuntimeMode | null>(null);
   const mode: RuntimeMode = modeOverride ?? resolveActiveEngine(settings, projectId);
   const changeMode = (next: RuntimeMode) => {
@@ -426,12 +426,12 @@ export function RuntimePopover({ editor, slug, documentType, documentId, open, o
 
   if (!portalTarget) return null;
 
-  // Herald tier — full panel per herald-popover.html (own header states).
+  // Assistant tier — full panel per assistant-popover.html (own header states).
   // Done state delegates to the editor review surface (diff only editor,
   // never raw in popover — runtime-review.html:153).
-  if (mode === "herald") {
+  if (mode === "assistant") {
     return (
-      <HeraldPortalView
+      <AssistantPortalView
         containerRef={containerRef}
         popoverStyle={popoverStyle}
         editor={editor}
@@ -454,7 +454,7 @@ export function RuntimePopover({ editor, slug, documentType, documentId, open, o
     <div ref={containerRef} className="menu-popover" data-runtime-popover style={popoverStyle}>
       <div className="flex items-center justify-between" style={{ padding: "10px 12px", borderBottom: "1px solid var(--lx-border-default)" }}>
         <span className="text-sm font-medium text-lx-text-primary font-body" style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
-          <HeraldFlameIcon />
+          <AssistantFlameIcon />
           AI
         </span>
         <HeaderRight done={done} failed={failed} running={running} switcherEnabled={switcherEnabled} mode={mode} changeMode={changeMode} taskRunning={taskRunning} />

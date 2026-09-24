@@ -430,7 +430,7 @@ export interface RuntimeTask {
   status: RuntimeTaskStatus;
   result: string | null;
   error: string | null;
-  kind: "blacksmith" | "herald";
+  kind: "blacksmith" | "assistant";
   createdAt: ISODate;
   startedAt: ISODate | null;
   finishedAt: ISODate | null;
@@ -544,7 +544,7 @@ export interface ActivityEvent {
   actorUserId: string | null;
   type: ActivityType;
   message: string;
-  viaHerald: boolean;
+  viaAssistant: boolean;
   createdAt: string;
 }
 
@@ -555,7 +555,7 @@ export interface TaskComment {
   authorKind: ActorKind;
   authorLabel: string;
   body: TipTapDoc;
-  viaHerald: boolean;
+  viaAssistant: boolean;
   editedAt: string | null;
   deletedAt: string | null;
   createdAt: string;
