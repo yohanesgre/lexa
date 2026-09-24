@@ -17,11 +17,10 @@ import type { Server } from "bun";
 let ssrFetch: ((req: Request) => Promise<Response>) | null = null;
 
 // SPA shell (dist/client/_shell.html) — prerendered at build by the
-// tanstack-start SPA mode. With root `ssr: false`, every app route is
-// client-only: the SSR handler emits a headless React fragment (no
-// <html>/<head>) for all of them, which renders as a blank page, so they are
-// served this shell. There is no selective SSR — /share/* is client-only too
-// and never carries server-rendered markup.
+// tanstack-start SPA mode. Root is `ssr: true` and every authed/app route
+// declares `ssr: false`, so those routes are client-only and served this shell
+// directly (no SSR call). Only the public `/share/*` surface is server-rendered
+// (its loader + head run on the server for OG/title).
 let spaShellHtml: string | null = null;
 function spaShell(): string {
   if (spaShellHtml === null) {
@@ -319,7 +318,20 @@ const server: Server<unknown> = Bun.serve({
       }
     }
 
-    if (ssrFetch) {
+    // Only the public share surface is server-rendered. Every other non-API
+    // route is client-only and served the prerendered SPA shell directly — no
+    // Start SSR call (CPU cost) and no headless fragment. The fragment
+    // fallback stays as a safety net after an actual ssrFetch call.
+    if (!url.pathname.startsWith("/share/")) {
+      const shell = spaShell();
+      if (shell) {
+        return withSecurityHeaders(
+          new Response(shell, { status: 200, headers: { "Content-Type": "text/html; charset=utf-8" } })
+        );
+      }
+      // _shell.html missing → fall through to the existing / and index.html
+      // handling below (current fallback behavior).
+    } else if (ssrFetch) {
       let res: Response;
       try {
         res = await ssrFetch(req);
@@ -327,12 +339,7 @@ const server: Server<unknown> = Bun.serve({
         console.error("[SSR] Uncaught:", err);
         return withSecurityHeaders(new Response("Internal error", { status: 500, headers: { "Content-Type": "text/plain" } }));
       }
-      // SSR HTML must never be cached (browser or CDN). (A previous revision
-      // injected the server API key as <meta name="lxk-api-key"> here for
-      // browser auth; nothing has read it since the session-cookie switch,
-      // and the streamed SSR output carries no <head> for the replace to
-      // match, so the injection was dead — removed. Browser identity comes
-      // from the session cookie.)
+      // SSR HTML must never be cached (browser or CDN).
       if (res.headers.get("content-type")?.includes("text/html")) {
         const headers = new Headers(res.headers);
         headers.set("Cache-Control", "no-store");

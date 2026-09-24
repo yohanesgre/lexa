@@ -4,32 +4,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { renderDoc } from "../components/tiptap-render";
 import { ThemeToggle } from "../components/layout/ThemeToggle";
 import type { TipTapDoc } from "../../shared/types";
-import { fetchSharedTree, type SharedPageNode, type SharedTree } from "../lib/share";
-
-function extractSnippet(tree: SharedTree | null): string | null {
-  if (!tree?.root.content || typeof tree.root.content !== "object") return null;
-  const doc = tree.root.content as TipTapDoc;
-  if (!Array.isArray(doc.content)) return null;
-  const texts: string[] = [];
-  let totalLen = 0;
-  const walk = (nodes: unknown[]) => {
-    for (const n of nodes) {
-      if (totalLen > 160) break;
-      if (!n || typeof n !== "object") continue;
-      const node = n as { text?: string; content?: unknown[] };
-      if (typeof node.text === "string" && node.text.trim()) {
-        const t = node.text.trim();
-        texts.push(t);
-        totalLen += t.length + 1;
-      }
-      if (Array.isArray(node.content)) walk(node.content);
-    }
-  };
-  walk(doc.content);
-  const joined = texts.join(" ").replace(/\s+/g, " ").trim();
-  if (!joined) return null;
-  return joined.length > 160 ? `${joined.slice(0, 157)}...` : joined;
-}
+import { fetchSharedTree, shareHeadMeta, type SharedPageNode, type SharedTree } from "../lib/share";
 
 function formatDate(iso: string): string {
   return new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" });
@@ -269,12 +244,12 @@ export const Route = createFileRoute("/share/$token")({
   validateSearch: (search: Record<string, unknown>): { page?: string | undefined } => ({
     page: typeof search.page === "string" && search.page ? search.page : undefined,
   }),
-  // Effective client-only: the root route's `ssr: false` wins (TanStack
-  // Router parent-wins rule), so this route never server-renders and an
-  // `ssr: true` here would be dead. The token IS the credential (the server
-  // enforces it per-request); the loader below runs in the browser and there
-  // is no server-rendered head/OG. Proper share SSR is a separate product
-  // decision.
+  // Inherits the root's `ssr: true` (no `ssr: false` here), so this route is
+  // server-rendered: the loader and `head` below run on the server, giving
+  // link unfurlers real OG/title/description and no-JS visitors the rendered
+  // page. The token IS the credential (the server enforces it per-request);
+  // `fetchSharedTree` resolves via the share service on the server and over
+  // the API in the browser (isomorphic).
   loader: async ({ params, context }) => {
     let tree: SharedTree | null = null;
     try {
@@ -286,18 +261,7 @@ export const Route = createFileRoute("/share/$token")({
   },
   head: ({ loaderData }: any) => {
     const ld = loaderData as { tree?: SharedTree | null } | undefined;
-    const title = ld?.tree?.root.title ?? "Lexa shared page";
-    const snippet = extractSnippet(ld?.tree ?? null);
-    const description = snippet ?? "Shared via Lexa";
-    return {
-      meta: [
-        { title },
-        { name: "description", content: description },
-        { property: "og:title", content: title },
-        { property: "og:description", content: description },
-        { name: "robots", content: "noindex" },
-      ],
-    };
+    return { meta: shareHeadMeta(ld?.tree ?? null) };
   },
   component: SharePage,
 });
