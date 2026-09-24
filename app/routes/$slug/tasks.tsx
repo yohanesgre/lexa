@@ -7,8 +7,9 @@ export const Route = createFileRoute("/$slug/tasks")({
     task: typeof search.task === "string" ? search.task : undefined,
     swimlane: typeof search.swimlane === "string" ? search.swimlane : undefined,
   }),
-  // Interactive list view — same treatment as the board: server-prefetched
-  // board data, client-rendered DOM.
+  // Interactive list view — same treatment as the board: client-only (root
+  // `ssr: false` wins), loader prefetches board data into the query cache in
+  // the browser.
   ssr:false,
   loader: async ({ context, params }) => {
     const { slug } = params;

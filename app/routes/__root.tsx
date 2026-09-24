@@ -22,10 +22,12 @@ const PUBLIC_PATHS = new Set(["/login", "/set-password", "/invite", "/setup", "/
 const PUBLIC_PREFIXES = ["/share/"];
 
 export const Route = createRootRouteWithContext<RouterContext>()({
-  // SPA shell only. /share/* opts back INTO SSR at the route level
-  // (ssr: true on share.$token) — the fn-form `ssr: ({location}) => ...`
-  // on the ROOT breaks the SPA shell emission in tanstack-start 1.168.x
-  // (ssr:false routes get a headless fragment, no <html>/<head>).
+  // SPA shell only. `ssr: false` here makes every app route client-only —
+  // TanStack Router's parent-wins rule forces descendants client-side, so a
+  // child `ssr: true` cannot opt back in. The fn-form
+  // `ssr: ({location}) => ...` on the ROOT breaks the SPA shell emission in
+  // tanstack-start 1.168.x (ssr:false routes get a headless fragment, no
+  // <html>/<head>).
   ssr: false,
   beforeLoad: async ({ location }) => {
     if (location.pathname.startsWith("/__inspect") || location.pathname.startsWith("/.vite-inspect")) return;

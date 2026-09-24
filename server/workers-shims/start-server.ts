@@ -7,8 +7,9 @@
 //
 // The production path does not use this file: `vite build` (workers
 // flavor) never reads wrangler.jsonc `alias`, so the built worker links
-// the real Start server handler and serves SSR pages. In source dev the
-// stubs below throw, and the entry falls back to its no-SSR page for
+// the real Start server handler and serves the client-only SPA shell/HTML
+// (no route content is server-rendered). In source dev the stubs below
+// throw, and the entry falls back to its hardcoded fallback page for
 // non-API routes. Every stub carries the same marker so the built output
 // can be audited for accidental shim linkage (see workers-b6 report).
 

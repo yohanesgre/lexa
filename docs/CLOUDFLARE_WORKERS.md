@@ -104,9 +104,11 @@ Sources: [Workers pricing](https://developers.cloudflare.com/workers/platform/pr
 Official partner path: `@cloudflare/vite-plugin` + `tanstackStart()` in vite config;
 `wrangler.jsonc` with `"main": "@tanstack/react-start/server-entry"`,
 `"compatibility_flags": ["nodejs_compat"]`. Requires `@tanstack/react-start` ≥ 1.138.0.
-SSR runs inside workerd via the Vite Environment API; the current split dev setup
-(`vite proxy /api → :3000` + `bun server/entry.ts`) disappears — single `vite dev`,
-API routes co-hosted with SSR.
+The Start server handler runs inside workerd via the Vite Environment API to
+serve the HTML entry (the client-only SPA shell — app routes are not
+server-rendered, same effective rendering as the Bun flavor) plus API routes;
+the current split dev setup (`vite proxy /api → :3000` + `bun server/entry.ts`)
+disappears — single `vite dev`, API routes co-hosted with the handler.
 
 Env is **per-request**: module-scope `process.env.X` is `undefined` on Workers.
 Canonical access is `import { env } from "cloudflare:workers"` or the handler arg.
