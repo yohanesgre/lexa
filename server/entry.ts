@@ -11,7 +11,7 @@ import { syncGitHubConfigFromDb } from "./github/client";
 import { MAX_API_BODY, X_LEXA_REMOTE_IP } from "./api/limits";
 import { bodyCapFor, resolveStorageConfig } from "./storage/config";
 import { runBackup, createBackupDriver, DEFAULT_BACKUP_RETENTION } from "./storage/backup";
-import { auth, loginLimiter, authIpLimiter } from "./auth";
+import { auth, handleAuthSurface, readBodyWithLimit } from "./auth";
 import type { Server } from "bun";
 
 let ssrFetch: ((req: Request) => Promise<Response>) | null = null;
@@ -139,32 +139,6 @@ function tooLargeResponse(): Response {
   return withSecurityHeaders(new Response(JSON.stringify({ error: { code: "BODY_TOO_LARGE", message: "Request body too large" } }), { status: 413, headers: { "Content-Type": "application/json" } }));
 }
 
-// Streams the request body up to maxBytes; ok:false → caller replies 413.
-// The declared content-length pre-check lives in the HttpApi middleware — here
-// the stream itself is capped (chunked/CL-less bodies can't bypass the cap).
-async function readBodyWithLimit(req: Request, maxBytes: number): Promise<{ ok: true; bytes: ArrayBuffer } | { ok: false }> {
-  const reader = req.body?.getReader();
-  if (!reader) return { ok: true, bytes: new ArrayBuffer(0) };
-  const chunks: Uint8Array[] = [];
-  let total = 0;
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    if (value) {
-      total += value.byteLength;
-      if (total > maxBytes) return { ok: false };
-      chunks.push(value);
-    }
-  }
-  const out = new Uint8Array(total);
-  let offset = 0;
-  for (const chunk of chunks) {
-    out.set(chunk, offset);
-    offset += chunk.byteLength;
-  }
-  return { ok: true, bytes: out.buffer as ArrayBuffer };
-}
-
 // Instances configured entirely via env (LXK_ADMIN_EMAILS + a key, no web
 // wizard) would leave the mutating /api/setup/* endpoints unlocked forever. Lock it at
 // boot: setup_complete=1 iff a key exists AND a superadmin account exists.
@@ -202,56 +176,18 @@ const server: Server<unknown> = Bun.serve({
       // surface still gets the per-IP throttle + body cap (unbounded JSON
       // parse + scrypt cost must not bypass the /api limits).
       if (url.pathname.startsWith("/api/auth/")) {
+        // Shared with the Workers entry (server/auth.ts): per-IP throttle,
+        // streamed body cap, and the sign-in email limiter. The auth handler
+        // is keyless by design (session cookies); the surfaces still get the
+        // /api limits (unbounded JSON parse + scrypt cost).
         const socketIp = server.requestIP(req)?.address ?? "";
         const ip = req.headers.get("cf-connecting-ip") || socketIp || "unknown";
-        const ipVerdict = authIpLimiter(ip);
-        if (!ipVerdict.ok) {
-          return withSecurityHeaders(
-            new Response(JSON.stringify({ error: { code: "RATE_LIMITED", message: "Too many requests — try again later" } }), {
-              status: 429,
-              headers: { "Content-Type": "application/json", "Retry-After": String(ipVerdict.retryAfterSec) },
-            })
-          );
-        }
-        const read = await readBodyWithLimit(req, MAX_API_BODY);
-        if (!read.ok) {
-          console.warn(`[Auth] body too large path=${path} declared=${req.headers.get("content-length") ?? "unknown"} bytes`);
-          return tooLargeResponse();
-        }
-        const authReq = new Request(req.url, {
-          method: req.method,
-          headers: req.headers,
-          // Never attach an empty body to bodyless requests — better-call
-          // treats a present-but-empty body as a body and 415s GETs (e.g.
-          // get-session) for missing Content-Type.
-          ...(req.body ? { body: read.bytes as BodyInit } : {}),
+        const res = await handleAuthSurface(req, {
+          ip,
+          handler: (r) => auth.handler(r),
+          maxBodyBytes: MAX_API_BODY,
         });
-        // Login rate limiting (R17): 5 failed attempts / 60s per email, then
-        // a 15-minute lockout — small in-process limiter (1.6.27 has no
-        // rateLimit plugin; memory storage is fine for the single server
-        // process). Counted on sign-in only; successes reset the budget.
-        if (url.pathname === "/api/auth/sign-in/email" && req.method === "POST") {
-          let email = "";
-          try {
-            email = String(((await authReq.clone().json()) as { email?: unknown })?.email ?? "");
-          } catch {}
-          if (email) {
-            const verdict = loginLimiter.check(email);
-            if (!verdict.ok) {
-              return withSecurityHeaders(
-                new Response(
-                  JSON.stringify({ error: { code: "RATE_LIMITED", message: "Too many login attempts — try again later" } }),
-                  { status: 429, headers: { "Content-Type": "application/json", "Retry-After": String(verdict.retryAfterSec) } }
-                )
-              );
-            }
-            const res = await auth.handler(authReq);
-            if (res.status === 401) loginLimiter.recordFailure(email);
-            else if (res.status === 200) loginLimiter.recordSuccess(email);
-            return withSecurityHeaders(res);
-          }
-        }
-        return withSecurityHeaders(await auth.handler(authReq));
+        return withSecurityHeaders(res);
       }
       // GitHub webhook: HMAC-SHA-256 is the auth (no API-key middleware).
       // Signature verified over the RAW body, constant-time, BEFORE any

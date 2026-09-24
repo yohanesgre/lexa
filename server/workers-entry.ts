@@ -52,7 +52,8 @@ import {
   stringEnvFromRuntimeEnv,
 } from "./api/workers-ports";
 import { createWorkersApiHandler } from "./api/http";
-import { createAuth } from "./auth";
+import { createAuth, handleAuthSurface } from "./auth";
+import { resolveMaxApiBody } from "./api/limits";
 import { syncRateLimitFromDbAsync } from "./api/rate-limit";
 import { DEFAULT_MAX_UPLOAD_MB } from "./storage/config";
 import type { R2Bucket as NarrowR2Bucket, StorageConfigShape } from "./storage/config";
@@ -436,8 +437,16 @@ const handler: ExportedHandler<WorkersEnv> = {
         return (await handleWebhook(req, ctx, base)) as unknown as WorkersResponse;
       }
       if (path.startsWith("/api/auth/")) {
+        // Same /api/auth/* middleware semantics as the Bun host (server/auth.ts):
+        // per-IP throttle → body cap → sign-in email limiter → handler.
         const lexaAuth = createAuth(runtimeEnv) as unknown as { auth: BetterAuthApi };
-        return (await lexaAuth.auth.handler(req as unknown as Request)) as unknown as WorkersResponse;
+        const ip = req.headers.get("cf-connecting-ip") ?? "unknown";
+        const res = await handleAuthSurface(req as unknown as Request, {
+          ip,
+          handler: (r) => lexaAuth.auth.handler(r),
+          maxBodyBytes: resolveMaxApiBody(runtimeEnv),
+        });
+        return res as unknown as WorkersResponse;
       }
       if (path.startsWith("/api/")) {
         return (await handleApi(req, runtimeEnv, driver, env.BLOB)) as unknown as WorkersResponse;

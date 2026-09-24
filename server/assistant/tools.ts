@@ -149,10 +149,14 @@ async function extractPdf(bytes: Uint8Array): Promise<string> {
 }
 
 // Manual redirect loop — every Location hop re-runs full validation
-// (scheme/IP/allowlist). A redirect never bypasses the guards.
+// (scheme/IP/allowlist). A redirect never bypasses the guards. The URL is
+// re-validated immediately before each fetch so the DNS answer the guard
+// vetted is the freshest available (Bun's fetch exposes no custom lookup to
+// pin the vetted address; a narrow rebinding window remains).
 export async function fetchUrlText(rawUrl: string, allowlist: string | null, fetchImpl: FetchLike): Promise<string> {
-  let current = await validateUrl(rawUrl, allowlist);
+  let next = rawUrl;
   for (let hop = 0; hop <= FETCH_URL_MAX_REDIRECTS; hop++) {
+    const current = await validateUrl(next, allowlist);
     const res = await fetchImpl(current, {
       redirect: "manual",
       signal: AbortSignal.timeout(FETCH_URL_TIMEOUT_MS),
@@ -162,7 +166,7 @@ export async function fetchUrlText(rawUrl: string, allowlist: string | null, fet
       const location = res.headers.get("location");
       if (!location) throw new UrlBlocked({ reason: "redirect without a location" });
       if (hop === FETCH_URL_MAX_REDIRECTS) throw new UrlBlocked({ reason: "too many redirects" });
-      current = await validateUrl(new URL(location, current).toString(), allowlist);
+      next = new URL(location, current).toString();
       continue;
     }
     if (!res.ok) throw new Error(`HTTP_${res.status}`);

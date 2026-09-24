@@ -87,4 +87,13 @@ describe("verifyWebhookSignature", () => {
     await expect(verifyWebhookSignature(body, "md5=abc", secret)).resolves.toBe(false);
     await expect(verifyWebhookSignature(body, "sha256=", secret)).resolves.toBe(false);
   });
+
+  it("rejects an empty or blank secret even with a matching HMAC (no fail-open)", async () => {
+    // WebCrypto forbids a zero-length HMAC key, so forge nothing: a signature
+    // that IS valid for the real secret must still be rejected when the
+    // configured secret is empty/blank.
+    const sig = await hmacHex(body, secret);
+    await expect(verifyWebhookSignature(body, `sha256=${sig}`, "")).resolves.toBe(false);
+    await expect(verifyWebhookSignature(body, `sha256=${sig}`, "   ")).resolves.toBe(false);
+  });
 });

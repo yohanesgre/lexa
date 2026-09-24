@@ -171,10 +171,7 @@ export function buildWebhookMoveAndEmitBatch(input: {
 }
 
 export function buildTaskDeleteBatch(input: { taskId: string; activity: ActivityInput }): BatchStmt[] {
-  return [
-    ...buildActivityStmts(input.taskId, [input.activity]),
-    { sql: `DELETE FROM tasks WHERE id = ?`, params: [input.taskId] },
-  ];
+  return [{ sql: `DELETE FROM tasks WHERE id = ?`, params: [input.taskId] }];
 }
 
 export function buildTaskArchiveBatch(input: {
@@ -216,13 +213,12 @@ export function buildSetArchivedAndEmitBatch(input: {
   restoredMessage: string;
   viaAssistant: boolean;
 }): BatchStmt[] {
-  const now = new Date().toISOString();
   const type = input.archivedAt ? "archived" : "restored";
   const message = input.archivedAt ? input.archivedMessage : input.restoredMessage;
   return [
     {
-      sql: `UPDATE tasks SET archived_at = ?, updated_at = ? WHERE id = ?`,
-      params: [input.archivedAt, now, input.taskId],
+      sql: `UPDATE tasks SET archived_at = ?, updated_at = datetime('now') WHERE id = ?`,
+      params: [input.archivedAt, input.taskId],
     },
     {
       sql: `INSERT INTO task_activity (task_id, actor_kind, actor_label, actor_user_id, type, message, via_assistant)

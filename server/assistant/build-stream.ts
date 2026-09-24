@@ -1,4 +1,4 @@
-import { translateRunError } from "./provider";
+import { translateRunError, clientFacingErrorMessage } from "./provider";
 import { MAX_CHAT_TOOL_ROUNDS, MAX_TOOL_ROUNDS, toolCallDetail } from "./tools";
 import { isAssistantWriteTool, type QueuedProposal } from "./write-tools";
 import { AssistantGenerationFailed, AssistantToolBudgetExceeded } from "../api/errors";
@@ -433,6 +433,7 @@ export function buildStream(ctx: StreamRunContext): ReadableStream<StreamFrame> 
             const { errorCodeMap } = await import("../api/errors");
             const code = (errorCodeMap as Record<string, string>)[(err as { _tag: string })._tag] ?? "ASSISTANT_GENERATION_FAILED";
             const message = String((err as { message?: string }).message ?? "Assistant generation failed");
+            const clientMessage = clientFacingErrorMessage(err);
             const isFatal = code === "ASSISTANT_GENERATION_FAILED" && (message.toLowerCase().includes("upstream response mapping failed") || message.includes("400") || message.includes("422"));
             const level = isFatal ? "FATAL" : "ERROR";
             try {
@@ -440,9 +441,9 @@ export function buildStream(ctx: StreamRunContext): ReadableStream<StreamFrame> 
               if (level === "FATAL" || level === "ERROR") process.stderr.write(line + "\n");
               else process.stdout.write(line + "\n");
             } catch {}
-            await persistTerminalTurn({ error: { code, message } }).catch(() => {});
-            await ctx.onFail(String((err as { message?: string }).message ?? "").slice(0, 2000)).catch(() => {});
-            push({ type: "error", code, message });
+            await persistTerminalTurn({ error: { code, message: clientMessage } }).catch(() => {});
+            await ctx.onFail(clientMessage.slice(0, 2000)).catch(() => {});
+            push({ type: "error", code, message: clientMessage });
           }
         } finally {
           if (ctx.registry.get(ctx.keyId) === abort) ctx.registry.delete(ctx.keyId);

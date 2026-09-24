@@ -23,13 +23,17 @@ function decodeCursor(cursor: string | null): { columnId: string; position: stri
   }
 }
 
-const TASK_SELECT = `t.*, c.github_state as column_github_state, GROUP_CONCAT(ta.user_name, '||') AS assignees, COALESCE(GROUP_CONCAT(gi.issue_id || ',' || gi.issue_number || ',' || gi.repo || ',' || COALESCE(gi.synced_state,'') || ',' || COALESCE(gi.push_failed,'0') || ',' || COALESCE(gi.issue_title,''), '||'), '') AS github_issues_raw`;
+// JSON array so issue titles survive commas and "||" verbatim (parser in
+// shared/db.ts is JSON-first with a legacy delimiter fallback).
+const GITHUB_ISSUES_RAW = `COALESCE((SELECT json_group_array(json_object('issueId', gi2.issue_id, 'issueNumber', gi2.issue_number, 'repo', gi2.repo, 'syncedState', COALESCE(gi2.synced_state, ''), 'pushFailed', COALESCE(gi2.push_failed, 0), 'title', COALESCE(gi2.issue_title, ''))) FROM task_github_issues gi2 WHERE gi2.task_id = t.id), '[]') AS github_issues_raw`;
+
+const TASK_SELECT = `t.*, c.github_state as column_github_state, GROUP_CONCAT(ta.user_name, '||') AS assignees, ${GITHUB_ISSUES_RAW}`;
 
 // Slim variant for list/board/anchor paths — no t.description (the TipTap
 // blob is only needed for get/update/mutation responses).
-const TASK_SELECT_SLIM = `t.id, t.key, t.project_id, t.column_id, t.swimlane_id, t.title, t.priority, t.type, t.position, t.due_at, t.archived_at, t.github_issue_id, t.github_issue_number, t.github_repo, t.github_synced_state, t.created_at, t.updated_at, c.github_state as column_github_state, GROUP_CONCAT(ta.user_name, '||') AS assignees, COALESCE(GROUP_CONCAT(gi.issue_id || ',' || gi.issue_number || ',' || gi.repo || ',' || COALESCE(gi.synced_state,'') || ',' || COALESCE(gi.push_failed,'0') || ',' || COALESCE(gi.issue_title,''), '||'), '') AS github_issues_raw`;
+const TASK_SELECT_SLIM = `t.id, t.key, t.project_id, t.column_id, t.swimlane_id, t.title, t.priority, t.type, t.position, t.due_at, t.archived_at, t.github_issue_id, t.github_issue_number, t.github_repo, t.github_synced_state, t.created_at, t.updated_at, c.github_state as column_github_state, GROUP_CONCAT(ta.user_name, '||') AS assignees, ${GITHUB_ISSUES_RAW}`;
 
-const TASK_FROM = `tasks t LEFT JOIN columns c ON t.column_id = c.id LEFT JOIN task_assignees ta ON ta.task_id = t.id LEFT JOIN task_github_issues gi ON gi.task_id = t.id`;
+const TASK_FROM = `tasks t LEFT JOIN columns c ON t.column_id = c.id LEFT JOIN task_assignees ta ON ta.task_id = t.id`;
 
 type SlimTaskRow = Omit<TaskRow, "description"> & { column_github_state: "open" | "closed" | null; github_issues_raw: string | null };
 
@@ -351,7 +355,7 @@ export class TaskRepo extends Effect.Service<TaskRepo>()("Lexa/TaskRepo", {
       findByGithubIssue: (githubIssueId: string): Effect.Effect<Task, RowNotFound | DbError> =>
         queryFirst<TaskRow & { column_github_state: "open" | "closed" | null; github_issues_raw: string | null }>(
           db,
-          `SELECT ${TASK_SELECT} FROM tasks t INNER JOIN task_github_issues gi_filter ON gi_filter.task_id = t.id INNER JOIN columns c ON t.column_id = c.id LEFT JOIN task_assignees ta ON ta.task_id = t.id LEFT JOIN task_github_issues gi ON gi.task_id = t.id WHERE gi_filter.issue_id = ? GROUP BY t.id`,
+          `SELECT ${TASK_SELECT} FROM tasks t INNER JOIN task_github_issues gi_filter ON gi_filter.task_id = t.id INNER JOIN columns c ON t.column_id = c.id LEFT JOIN task_assignees ta ON ta.task_id = t.id WHERE gi_filter.issue_id = ? GROUP BY t.id`,
           githubIssueId
         ).pipe(Effect.map((r) => rowToTask(r))),
 

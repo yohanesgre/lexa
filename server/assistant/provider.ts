@@ -853,6 +853,23 @@ export function translateRunError(e: unknown, config?: ProviderConfig): Provider
 }
 
 // Minimal completion ping against submitted (unsaved) values. Never persists.
+// Client-visible error text: provider diagnostics (raw/rawEvent/upstreamBody)
+// must never cross the SSE / persisted-thread boundary. Provider-tagged errors
+// expose only the provider's own message, else a fixed generic string; all
+// other errors keep their domain message.
+export function clientFacingErrorMessage(err: unknown): string {
+  const e = err as { _tag?: string; message?: unknown; providerMessage?: unknown } | null;
+  const tag = typeof e?._tag === "string" ? e._tag : "";
+  const providerMessage = typeof e?.providerMessage === "string" && e.providerMessage.length > 0 ? e.providerMessage : null;
+  if (tag === "ProviderAuthFailed" || tag === "ProviderUnreachable" || tag === "AssistantGenerationFailed") {
+    if (providerMessage) return providerMessage.slice(0, 500);
+    if (tag === "ProviderAuthFailed") return "The AI provider rejected the API key";
+    if (tag === "ProviderUnreachable") return "The AI provider could not be reached";
+    return "Assistant generation failed";
+  }
+  return typeof e?.message === "string" && e.message.length > 0 ? e.message : "Assistant generation failed";
+}
+
 export async function testConnection(
   config: ProviderConfig,
   opts?: { signal?: AbortSignal; sessionId?: string },

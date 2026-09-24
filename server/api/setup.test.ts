@@ -134,6 +134,19 @@ describe("provisioning (setup wizard)", () => {
   });
 });
 
+describe("setup auth exemption boundary", () => {
+  it("does not exempt undefined paths that merely start with /api/setup", async () => {
+    const res = await handler(new Request("http://localhost:3000/api/setupAnything"));
+    expect(res.status).toBe(401);
+    expect(((await json(res)) as { error: { code: string } }).error.code).toBe("UNAUTHORIZED");
+  });
+
+  it("does not exempt a lookalike prefix with a non-slash separator", async () => {
+    const res = await handler(new Request("http://localhost:3000/api/setup-extra/status"));
+    expect(res.status).toBe(401);
+  });
+});
+
 describe("sample data seed (wizard step)", () => {
   let dir2: string;
   let dbPath2: string;

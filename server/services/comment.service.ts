@@ -65,12 +65,13 @@ export class CommentService extends Effect.Service<CommentService>()("Lexa/Comme
         return mapping?.role === "admin";
       });
 
-    const edit = (commentId: number, identity: AuthIdentityShape, body: TipTapDoc): Effect.Effect<TaskComment, CommentNotFound | CommentEditForbidden | CommentInvalid | DbError | RowNotFound> =>
+    const edit = (commentId: number, identity: AuthIdentityShape, body: TipTapDoc, taskId: string): Effect.Effect<TaskComment, CommentNotFound | CommentEditForbidden | CommentInvalid | DbError | RowNotFound> =>
       Effect.gen(function* () {
         yield* validateBody(body);
         const comment = yield* commentRepo.findById(commentId).pipe(
           Effect.flatMap((c) => c ? Effect.succeed(c) : Effect.fail(new CommentNotFound({ id: commentId })))
         );
+        if (comment.taskId !== taskId) return yield* new CommentNotFound({ id: commentId });
         if (comment.authorKind !== "user" || comment.authorId !== identity.userId) {
           return yield* new CommentEditForbidden({ id: commentId });
         }
@@ -79,11 +80,12 @@ export class CommentService extends Effect.Service<CommentService>()("Lexa/Comme
         );
       });
 
-    const remove = (commentId: number, identity: AuthIdentityShape, projectId: string): Effect.Effect<{ comment: TaskComment; activity: ActivityEvent }, CommentNotFound | CommentDeleteForbidden | DbError | ConstraintViolation | RowNotFound> =>
+    const remove = (commentId: number, identity: AuthIdentityShape, projectId: string, taskId: string): Effect.Effect<{ comment: TaskComment; activity: ActivityEvent }, CommentNotFound | CommentDeleteForbidden | DbError | ConstraintViolation | RowNotFound> =>
       Effect.gen(function* () {
         const comment = yield* commentRepo.findById(commentId).pipe(
           Effect.flatMap((c) => c ? Effect.succeed(c) : Effect.fail(new CommentNotFound({ id: commentId })))
         );
+        if (comment.taskId !== taskId) return yield* new CommentNotFound({ id: commentId });
         const admin = yield* isProjectAdmin(identity, projectId);
         const author = comment.authorKind === "user" && comment.authorId === identity.userId;
         if (!author && !admin) return yield* new CommentDeleteForbidden({ id: commentId });

@@ -1,5 +1,6 @@
 import { Effect } from "effect";
 import { Db, queryAll, queryFirst, run, batch, withTx, DbError, RowNotFound, ConstraintViolation } from "../db/db";
+import type { BatchStmt } from "../db/db";
 import type { ProviderKind, AssistantModelRow } from "../../shared/assistant";
 
 export interface AssistantModelDbRow {
@@ -67,15 +68,16 @@ export class AssistantModelsRepo extends Effect.Service<AssistantModelsRepo>()("
 
       delete: (id: string): Effect.Effect<void, ConstraintViolation | DbError> =>
         Effect.gen(function* () {
-          yield* run(db, `DELETE FROM assistant_models WHERE id = ?`, id);
           const rows = yield* queryAll<{ project_id: string; fallback_model_ids: string }>(db, `SELECT project_id, fallback_model_ids FROM assistant_settings`);
+          const stmts: BatchStmt[] = [{ sql: `DELETE FROM assistant_models WHERE id = ?`, params: [id] }];
           for (const r of rows) {
             let ids: string[] = [];
             try { const v = JSON.parse(r.fallback_model_ids ?? "[]"); if (Array.isArray(v)) ids = v.filter((x: unknown) => typeof x === "string"); } catch {}
             if (!ids.includes(id)) continue;
             const next = ids.filter((x) => x !== id);
-            yield* run(db, `UPDATE assistant_settings SET fallback_model_ids = ?, updated_at = datetime('now') WHERE project_id = ?`, JSON.stringify(next), r.project_id);
+            stmts.push({ sql: `UPDATE assistant_settings SET fallback_model_ids = ?, updated_at = datetime('now') WHERE project_id = ?`, params: [JSON.stringify(next), r.project_id] });
           }
+          yield* batch(db, stmts);
         }).pipe(Effect.map(() => undefined)),
 
       reorder: (providerId: string, orderedIds: string[]): Effect.Effect<AssistantModelRow[], ConstraintViolation | DbError | RowNotFound> =>

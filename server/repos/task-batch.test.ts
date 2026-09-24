@@ -32,8 +32,8 @@ describe("buildSetArchivedAndEmitBatch", () => {
       viaAssistant: false,
     });
     expect(stmts).toHaveLength(2);
-    expect(stmts[0]!.sql).toMatch(/UPDATE tasks SET archived_at = \?, updated_at = \? WHERE id = \?/);
-    expect(stmts[0]!.params).toEqual(["2026-08-25T10:00:00Z", expect.anything(), "t1"]);
+    expect(stmts[0]!.sql).toMatch(/UPDATE tasks SET archived_at = \?, updated_at = datetime\('now'\) WHERE id = \?/);
+    expect(stmts[0]!.params).toEqual(["2026-08-25T10:00:00Z", "t1"]);
     expect(stmts[1]!.sql).toMatch(/INSERT INTO task_activity/);
     expect(stmts[1]!.sql).toMatch(/type, message, via_assistant/);
     expect(stmts[1]!.params).toEqual([
@@ -207,11 +207,11 @@ describe("emission builders (B2 batch re-expression)", () => {
     expect(stmts).toHaveLength(2);
   });
 
-  it("buildTaskDeleteBatch inserts the deleted row before the DELETE", () => {
+  it("buildTaskDeleteBatch emits only the DELETE (activity row cascades)", () => {
     const stmts = buildTaskDeleteBatch({ taskId: "t1", activity: { ...actor, type: "deleted", message: "Maria deleted this task" } });
-    expect(stmts).toHaveLength(2);
-    expect(stmts[0]!.sql).toMatch(/INSERT INTO task_activity/);
-    expect(stmts[1]!.sql).toMatch(/DELETE FROM tasks WHERE id = \?/);
+    expect(stmts).toHaveLength(1);
+    expect(stmts[0]!.sql).toMatch(/DELETE FROM tasks WHERE id = \?/);
+    expect(stmts[0]!.params).toEqual(["t1"]);
   });
 
   it("buildTaskArchiveBatch flips archived_at with datetime('now') updated_at", () => {

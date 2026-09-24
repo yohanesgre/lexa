@@ -1,5 +1,5 @@
 import { Effect } from "effect";
-import { InvalidArgs, TaskNotFound, WikiPageNotFound, errorCodeMap } from "../api/errors";
+import { InvalidArgs, TaskNotFound, WikiPageNotFound, Forbidden, errorCodeMap } from "../api/errors";
 import type { AssistantPendingWriteRow } from "../repos/assistant-pending-writes.repo";
 import type { AssistantWriteToolName } from "./write-tools";
 import type { TipTapDoc, Actor } from "../../shared/types";
@@ -46,7 +46,17 @@ export const executeAssistantWrite = (row: AssistantPendingWriteRow, ctx: Assist
       args = {};
     }
     const resolveTaskRefRow = (ref: string) =>
-      ctx.taskRepo.findById(ref).pipe(Effect.orElse(() => ctx.taskRepo.findByKey(ref)), Effect.catchTag("RowNotFound", () => new TaskNotFound({ id: ref })));
+      ctx.taskRepo.findById(ref).pipe(
+        Effect.orElse(() => ctx.taskRepo.findByKey(ref)),
+        Effect.catchTag("RowNotFound", () => new TaskNotFound({ id: ref })),
+        // Proposal-time resolution scopes the ref to the pending row's
+        // project; re-check at execution time (the args are untrusted here).
+        Effect.flatMap((t) =>
+          t.projectId !== row.project_id
+            ? Effect.fail(new Forbidden({ message: "Write denied: task is outside the approved project." }))
+            : Effect.succeed(t)
+        )
+      );
     const applied = yield* Effect.gen(function* () {
       switch (row.tool_name as AssistantWriteToolName) {
         case "create_task": {

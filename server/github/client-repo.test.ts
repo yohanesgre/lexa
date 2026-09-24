@@ -33,8 +33,9 @@ function mockFetch() {
     const key = `${init?.method ?? "GET"} ${url}`;
     const hit = routes.get(key) ?? routes.get(`GET ${url}`);
     if (hit === undefined) return Promise.reject(new Error(`unmocked: ${key}`));
-    if (hit instanceof Response) return Promise.resolve(hit);
-    return Promise.resolve(json(hit as unknown));
+    const value = typeof hit === "function" ? (hit as () => unknown)() : hit;
+    if (value instanceof Response) return Promise.resolve(value);
+    return Promise.resolve(json(value as unknown));
   });
 }
 
@@ -164,5 +165,80 @@ describe("getRepoFileContent", () => {
     await expect(call((c) => c.getRepoFileContent("acme", "widget", "nope.ts"))).rejects.toMatchObject({
       message: expect.stringContaining("404"),
     });
+  });
+});
+
+describe("searchRepos", () => {
+  function setupInstallationList() {
+    routes.set("GET https://api.github.com/app/installations?per_page=100", [{ id: 7 }]);
+    routes.set("POST https://api.github.com/app/installations/7/access_tokens", {
+      token: "inst-token",
+      expires_at: new Date(Date.now() + 3_600_000).toISOString(),
+    });
+  }
+
+  function authHeaderFor(segment: string): string | undefined {
+    const callArgs = fetchMock.mock.calls.find(([url]) => String(url).includes(segment));
+    const headers = (callArgs?.[1] as RequestInit | undefined)?.headers as Record<string, string> | undefined;
+    return headers?.Authorization;
+  }
+
+  it("authenticates the search request with an installation token", async () => {
+    setupInstallationList();
+    routes.set("GET https://api.github.com/search/repositories?q=wid&per_page=8&sort=stars", { items: [{ full_name: "acme/widget" }] });
+    await expect(call((c) => c.searchRepos("wid"))).resolves.toEqual(["acme/widget"]);
+    expect(authHeaderFor("/search/repositories")).toBe("Bearer inst-token");
+  });
+
+  it("falls back to /installation/repositories and filters locally when search is unusable", async () => {
+    setupInstallationList();
+    routes.set("GET https://api.github.com/search/repositories?q=wid&per_page=8&sort=stars", json({ message: "Forbidden" }, 403));
+    routes.set("GET https://api.github.com/installation/repositories?per_page=100", {
+      repositories: [{ full_name: "acme/widget" }, { full_name: "acme/other" }],
+    });
+    await expect(call((c) => c.searchRepos("wid"))).resolves.toEqual(["acme/widget"]);
+    expect(authHeaderFor("/installation/repositories")).toBe("Bearer inst-token");
+  });
+});
+
+describe("githubFetch robustness", () => {
+  it("retries a 429 then succeeds, honoring Retry-After", async () => {
+    setupInstallationRoutes("acme/flaky");
+    let calls = 0;
+    routes.set("GET https://api.github.com/repos/acme/flaky", () => {
+      calls++;
+      return calls === 1
+        ? new Response(JSON.stringify({ message: "slow down" }), {
+            status: 429,
+            headers: { "Content-Type": "application/json", "Retry-After": "0" },
+          })
+        : { default_branch: "main" };
+    });
+    await expect(call((c) => c.getDefaultBranch("acme", "flaky"))).resolves.toBe("main");
+    expect(calls).toBe(2);
+  });
+
+  it("does not retry a plain 4xx", async () => {
+    setupInstallationRoutes("acme/missing");
+    routes.set("GET https://api.github.com/repos/acme/missing", json({ message: "Not Found" }, 404));
+    await expect(call((c) => c.getDefaultBranch("acme", "missing"))).rejects.toMatchObject({
+      message: expect.stringContaining("404"),
+    });
+  });
+
+  it("bounds every githubFetch request with an AbortSignal timeout", async () => {
+    setupInstallationRoutes("acme/widget");
+    routes.set("GET https://api.github.com/repos/acme/widget", { default_branch: "main" });
+    await call((c) => c.getDefaultBranch("acme", "widget"));
+    const callArgs = fetchMock.mock.calls.find(([url]) => String(url).endsWith("/repos/acme/widget"));
+    expect((callArgs?.[1] as RequestInit | undefined)?.signal).toBeTruthy();
+  });
+});
+
+describe("verifyWebhookSignature (client wrapper)", () => {
+  it("returns false when no webhook secret is configured", async () => {
+    const body = new TextEncoder().encode('{"action":"closed"}').buffer;
+    await expect(call((c) => c.verifyWebhookSignature(body, "sha256=deadbeef"))).resolves.toBe(false);
+    await expect(call((c) => c.verifyWebhookSignature(body, null))).resolves.toBe(false);
   });
 });

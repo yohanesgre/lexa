@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
+import { Effect } from "effect";
 import type { TipTapDoc } from "../../shared/types";
 import type { AssistantWriteDiff } from "../../shared/assistant";
+import { executeAssistantWrite, type AssistantWriteExecutionCtx } from "./write-execution";
+import type { AssistantPendingWriteRow } from "../repos/assistant-pending-writes.repo";
 import {
   MAX_WRITES_PER_TURN,
   APPROVAL_TTL_HOURS,
@@ -303,5 +306,38 @@ describe("new diff builders", () => {
   it("buildSprintArchiveDiff / buildSprintDeleteDiff", () => {
     expect(buildSprintArchiveDiff({ name: "S1" })).toEqual({ type: "sprint_archive", name: "S1" });
     expect(buildSprintDeleteDiff({ name: "S1" })).toEqual({ type: "sprint_delete", name: "S1" });
+  });
+});
+
+describe("executeAssistantWrite — execution-time project scope", () => {
+  it("denies a task ref that resolves to another project", async () => {
+    const marked: string[] = [];
+    let updateCalled = false;
+    const row = {
+      id: "a1",
+      project_id: "p1",
+      owner_user_id: "u1",
+      tool_name: "update_task",
+      args: JSON.stringify({ ref: "foreign-task", title: "New title" }),
+    } as unknown as AssistantPendingWriteRow;
+    const ctx = {
+      authz: { projectAccess: () => Effect.succeed({ role: "admin" }) },
+      pendingWritesRepo: {
+        markExecutionError: (id: string, message: string) => Effect.sync(() => { marked.push(`${id}:${message}`); }),
+      },
+      taskRepo: {
+        findById: () => Effect.succeed({ id: "foreign-task", projectId: "p2" }),
+        findByKey: () => Effect.succeed({ id: "foreign-task", projectId: "p2" }),
+      },
+      taskService: {
+        update: () => { updateCalled = true; return Effect.void; },
+      },
+    } as unknown as AssistantWriteExecutionCtx;
+
+    const out = (await Effect.runPromise(executeAssistantWrite(row, ctx))) as { ok: boolean; error?: string };
+    expect(out.ok).toBe(false);
+    expect(out.error).toContain("FORBIDDEN");
+    expect(marked).toHaveLength(1);
+    expect(updateCalled).toBe(false);
   });
 });

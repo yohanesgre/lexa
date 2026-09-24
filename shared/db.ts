@@ -299,28 +299,77 @@ export function rowToTaskSlim(row: Omit<TaskRow, "description">, columnGithubSta
   return taskFromRow(row as TaskRow, columnGithubState, { type: "doc", content: [] });
 }
 
+interface ParsedGithubIssue {
+  issueId: string;
+  issueNumber: number;
+  repo: string;
+  title: string | null;
+  syncedState: "open" | "closed" | null;
+  pushFailed: boolean;
+}
+
+// The SQL aggregate emits a JSON array; the delimiter fallback keeps rows
+// produced before that aggregate ships readable.
+function parseGithubIssues(raw: string): ParsedGithubIssue[] {
+  const trimmed = raw.trim();
+  if (trimmed.startsWith("[")) {
+    try {
+      const parsed: unknown = JSON.parse(trimmed);
+      if (Array.isArray(parsed)) {
+        const out: ParsedGithubIssue[] = [];
+        const seen = new Set<string>();
+        for (const entry of parsed) {
+          if (entry === null || typeof entry !== "object") continue;
+          const r = entry as Record<string, unknown>;
+          const issueId = typeof r.issueId === "string" ? r.issueId : "";
+          const issueNumber = typeof r.issueNumber === "number" && Number.isFinite(r.issueNumber) ? r.issueNumber : null;
+          const repo = typeof r.repo === "string" ? r.repo : "";
+          if (!issueId || issueNumber === null || !repo || seen.has(issueId)) continue;
+          seen.add(issueId);
+          out.push({
+            issueId,
+            issueNumber,
+            repo,
+            title: typeof r.title === "string" && r.title.length > 0 ? r.title : null,
+            syncedState: r.syncedState === "open" || r.syncedState === "closed" ? r.syncedState : null,
+            pushFailed: r.pushFailed === 1 || r.pushFailed === true,
+          });
+        }
+        return out;
+      }
+    } catch {}
+  }
+  const out: ParsedGithubIssue[] = [];
+  const seen = new Set<string>();
+  for (const part of raw.split("||")) {
+    const [issueId, issueNumberStr, repo, syncedState, pushFailed, ...titleParts] = part.split(",");
+    if (!issueId || !issueNumberStr || !repo || seen.has(issueId)) continue;
+    seen.add(issueId);
+    const issueTitle = titleParts.join(",");
+    out.push({
+      issueId,
+      issueNumber: Number(issueNumberStr),
+      repo,
+      title: issueTitle.length > 0 ? issueTitle : null,
+      syncedState: (syncedState || null) as "open" | "closed" | null,
+      pushFailed: pushFailed === "1",
+    });
+  }
+  return out;
+}
+
 function taskFromRow(row: TaskRow, columnGithubState: "open" | "closed" | null | undefined, description: TipTapDoc): {
   id: string; key: string; projectId: string; columnId: string; swimlaneId: string; title: string; description: TipTapDoc; priority: string; type: string; assignees: string[]; position: string; dueAt: string | null; githubs: { issueId: string; issueNumber: number; repo: string; title: string | null; syncedState: "open" | "closed" | null; url: string; outOfSync: boolean; pushFailed: boolean }[]; archivedAt: ISODate | null; createdAt: ISODate; updatedAt: ISODate;
 } {
   const colState = columnGithubState ?? row.column_github_state ?? null;
   const githubs: { issueId: string; issueNumber: number; repo: string; title: string | null; syncedState: "open" | "closed" | null; url: string; outOfSync: boolean; pushFailed: boolean }[] = [];
-  const seen = new Set<string>();
   if (row.github_issues_raw) {
-    for (const part of row.github_issues_raw.split("||")) {
-      const [issueId, issueNumberStr, repo, syncedState, pushFailed, ...titleParts] = part.split(",");
-      if (!issueId || !issueNumberStr || !repo || seen.has(issueId)) continue;
-      seen.add(issueId);
-      const issueTitle = titleParts.join(",");
-      const outOfSync = !!(syncedState && colState && syncedState !== colState);
+    for (const gi of parseGithubIssues(row.github_issues_raw)) {
+      const outOfSync = !!(gi.syncedState && colState && gi.syncedState !== colState);
       githubs.push({
-        issueId,
-        issueNumber: Number(issueNumberStr),
-        repo,
-        title: issueTitle.length > 0 ? issueTitle : null,
-        syncedState: (syncedState || null) as "open" | "closed" | null,
-        url: `https://github.com/${repo}/issues/${issueNumberStr}`,
+        ...gi,
+        url: `https://github.com/${gi.repo}/issues/${gi.issueNumber}`,
         outOfSync,
-        pushFailed: pushFailed === "1",
       });
     }
   }
