@@ -750,9 +750,11 @@ CREATE TABLE runtime_sessions (
 -- are seeded builtins; builtins are editable + resettable but not deletable.
 -- Renamed from forge_* in the squashed 0001_init.sql baseline — column
 -- definitions unchanged; both tiers share these catalogs.
--- Exactly TWO builtin agents — 'herald'
--- ("Herald Agent", PM-assistant persona) and 'blacksmith'
--- ("Blacksmith Agent"). The generic 'lexa' entry is retired. Skill
+-- Exactly TWO builtin agents — 'assistant' ("Assistant Agent", PM-assistant
+-- persona) and 'blacksmith' ("Blacksmith Agent"). The generic 'lexa' entry is
+-- retired. The assistant id was seeded as 'hearth-herald' in the 0001 baseline,
+-- rebound to 'herald' by 0005_runtime_rename.sql, and rebound to 'assistant' by
+-- 0006_assistant_rename.sql. Skill
 -- availability per agent = lexa_agent_skills junction rows ONLY (no JSON
 -- columns); builtins are editable + resettable but not deletable.
 CREATE TABLE lexa_agents (
@@ -782,32 +784,32 @@ CREATE TABLE lexa_agent_skills (
 );
 
 -- ============================================================
--- Herald assistant tier + Gateway (baked into the 0001_init.sql baseline)
+-- Assistant assistant tier + Gateway (baked into the 0001_init.sql baseline)
 -- ============================================================
--- Per-project Herald settings. The baseline hard-recreated this table
+-- Per-project Assistant settings. The baseline hard-recreated this table
 -- dropping legacy provider columns (kind, base_url, api_key, model, vision_model).
 -- Remaining columns: search + engine + reasoning + write_tools, plus
--- fallback_model_ids (JSON array of herald_models ids, ordered, ≤3) and
--- provider_id + primary_model_id (primary binding to herald_providers/models).
-CREATE TABLE herald_settings (
+-- fallback_model_ids (JSON array of assistant_models ids, ordered, ≤3) and
+-- provider_id + primary_model_id (primary binding to assistant_providers/models).
+CREATE TABLE assistant_settings (
   project_id TEXT PRIMARY KEY REFERENCES projects(id) ON DELETE CASCADE,
   search_provider TEXT,
   search_api_key TEXT,
   url_allowlist TEXT,
-  engine TEXT NOT NULL DEFAULT 'herald' CHECK (engine IN ('herald','blacksmith')),
+  engine TEXT NOT NULL DEFAULT 'assistant' CHECK (engine IN ('assistant','blacksmith')),
   engine_switcher_enabled INTEGER NOT NULL DEFAULT 0,
   primary_supports_images INTEGER NOT NULL DEFAULT 0,
   reasoning_effort TEXT CHECK (reasoning_effort IN ('minimal','low','medium','high')),
   write_tools TEXT NOT NULL DEFAULT '',
   fallback_model_ids TEXT NOT NULL DEFAULT '[]',
-  provider_id TEXT REFERENCES herald_providers(id) ON DELETE SET NULL,
+  provider_id TEXT REFERENCES assistant_providers(id) ON DELETE SET NULL,
   primary_model_id TEXT,
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
--- Herald Gateway: global providers (no project_id) — superadmin-only.
-CREATE TABLE herald_providers (
+-- Assistant Gateway: global providers (no project_id) — superadmin-only.
+CREATE TABLE assistant_providers (
   id TEXT PRIMARY KEY,
   label TEXT NOT NULL,
   base_url TEXT NOT NULL,
@@ -816,22 +818,22 @@ CREATE TABLE herald_providers (
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
-CREATE TABLE herald_models (
+CREATE TABLE assistant_models (
   id TEXT PRIMARY KEY,
-  provider_id TEXT NOT NULL REFERENCES herald_providers(id) ON DELETE CASCADE,
+  provider_id TEXT NOT NULL REFERENCES assistant_providers(id) ON DELETE CASCADE,
   model_id TEXT NOT NULL,
   kind TEXT NOT NULL CHECK (kind IN ('openai_compatible','anthropic_compatible','openai_responses')),
   priority INTEGER NOT NULL DEFAULT 0,
   enabled INTEGER NOT NULL DEFAULT 0,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
-CREATE INDEX idx_herald_models_provider ON herald_models(provider_id);
-CREATE UNIQUE INDEX idx_herald_models_provider_priority ON herald_models(provider_id, priority);
+CREATE INDEX idx_assistant_models_provider ON assistant_models(provider_id);
+CREATE UNIQUE INDEX idx_assistant_models_provider_priority ON assistant_models(provider_id, priority);
 
-CREATE TABLE herald_call_logs (
+CREATE TABLE assistant_call_logs (
   id TEXT PRIMARY KEY,
   project_id TEXT REFERENCES projects(id) ON DELETE CASCADE,
-  provider_id TEXT REFERENCES herald_providers(id) ON DELETE SET NULL,
+  provider_id TEXT REFERENCES assistant_providers(id) ON DELETE SET NULL,
   model TEXT NOT NULL,
   kind TEXT NOT NULL CHECK (kind IN ('openai_compatible','anthropic_compatible','openai_responses')),
   status TEXT NOT NULL CHECK (status IN ('done','error','suspended','aborted')),
@@ -844,11 +846,11 @@ CREATE TABLE herald_call_logs (
   estimated INTEGER NOT NULL DEFAULT 0,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
-CREATE INDEX idx_call_logs_project_time ON herald_call_logs(project_id, created_at);
-CREATE INDEX idx_call_logs_provider ON herald_call_logs(provider_id);
-CREATE INDEX idx_call_logs_model ON herald_call_logs(model);
+CREATE INDEX idx_call_logs_project_time ON assistant_call_logs(project_id, created_at);
+CREATE INDEX idx_call_logs_provider ON assistant_call_logs(provider_id);
+CREATE INDEX idx_call_logs_model ON assistant_call_logs(model);
 
-CREATE TABLE herald_model_prices (
+CREATE TABLE assistant_model_prices (
   model TEXT PRIMARY KEY,
   prompt_price REAL NOT NULL DEFAULT 0,       -- USD per 1M input tokens
   completion_price REAL NOT NULL DEFAULT 0,   -- USD per 1M output tokens
@@ -857,8 +859,8 @@ CREATE TABLE herald_model_prices (
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
-CREATE TABLE herald_provider_health (
-  provider_id TEXT PRIMARY KEY REFERENCES herald_providers(id) ON DELETE CASCADE,
+CREATE TABLE assistant_provider_health (
+  provider_id TEXT PRIMARY KEY REFERENCES assistant_providers(id) ON DELETE CASCADE,
   failure_count INTEGER NOT NULL DEFAULT 0,
   circuit_state TEXT NOT NULL CHECK (circuit_state IN ('open','closed','half-open')) DEFAULT 'closed',
   opened_at TEXT,
@@ -867,24 +869,24 @@ CREATE TABLE herald_provider_health (
 );
 
 -- Agent catalog (baked into the 0001_init.sql baseline; the ids are rebound
--- once more by 0005_runtime_rename.sql). Exactly two builtins — 'herald'
--- ("Herald Agent", PM-assistant persona) and 'blacksmith' ("Blacksmith
+-- once more by 0005_runtime_rename.sql). Exactly two builtins — 'assistant'
+-- ("Assistant Agent", PM-assistant persona) and 'blacksmith' ("Blacksmith
 -- Agent"). The generic 'lexa' entry is retired; its id is NOT reused. The
 -- pre-squash rebind was atomic (agent-id FKs + junction rows in one tx); its
 -- one-time consequence was that existing threads keyed on the old agentId saw
 -- an unknown agent and started fresh.
 INSERT INTO lexa_agents (id, name, description, instructions, is_builtin)
-VALUES ('herald', 'Herald Agent', <companion-persona description>, <companion-persona instructions>, 1);
+VALUES ('assistant', 'Assistant Agent', <companion-persona description>, <companion-persona instructions>, 1);
 INSERT INTO lexa_agents (id, name, description, instructions, is_builtin)
 VALUES ('blacksmith', 'Blacksmith Agent', '', <coding-agent instructions>, 1);
--- Junction seeding: Herald Agent gets every builtin skill; Blacksmith Agent
+-- Junction seeding: Assistant Agent gets every builtin skill; Blacksmith Agent
 -- starts with the coding-appropriate subset.
 INSERT INTO lexa_agent_skills (agent_id, skill_id)
-SELECT 'herald', id FROM lexa_skills WHERE is_builtin = 1;
+SELECT 'assistant', id FROM lexa_skills WHERE is_builtin = 1;
 INSERT INTO lexa_agent_skills (agent_id, skill_id)
 SELECT 'blacksmith', id FROM lexa_skills WHERE id IN (<coding subset>);
 
--- Herald thread transcripts: one persisted conversation per document
+-- Assistant thread transcripts: one persisted conversation per document
 -- (ModelMessage[] JSON in `messages`). Long threads roll into `summary`
 -- (`summarized_count` = messages folded into it) — explicit replacement for
 -- opencode's auto-compaction. document_type 'chat' rows are keyed by a chat
@@ -900,7 +902,7 @@ SELECT 'blacksmith', id FROM lexa_skills WHERE id IN (<coding subset>);
 -- updated_at DESC). Per-turn metadata (user `ts`, assistant `ts`/`citations`/
 -- `error`/`stopped`) lives INLINE in the messages JSON — no meta table, no
 -- migration churn when the meta shape evolves.
-CREATE TABLE herald_threads (
+CREATE TABLE assistant_threads (
   document_type TEXT NOT NULL CHECK (document_type IN ('task','wiki','chat')),
   document_id TEXT NOT NULL,
   project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
@@ -916,10 +918,10 @@ CREATE TABLE herald_threads (
   updated_at TEXT NOT NULL DEFAULT (datetime('now')),
   PRIMARY KEY (document_type, document_id)
 );
-CREATE INDEX idx_herald_threads_chat_list ON herald_threads(project_id, owner_user_id, pinned DESC, updated_at DESC)
+CREATE INDEX idx_assistant_threads_chat_list ON assistant_threads(project_id, owner_user_id, pinned DESC, updated_at DESC)
   WHERE document_type = 'chat';
 
--- Herald write tools v2 (in the 0001_init.sql baseline): per-write approval queue. Write-tool proposals
+-- Assistant write tools v2 (in the 0001_init.sql baseline): per-write approval queue. Write-tool proposals
 -- persist here at proposal time; the owner approves or rejects each row; resume
 -- executes approved rows in seq order. TTL is lazy (flipped to 'expired' on
 -- decide/resume/transcript reads) — no timer.
@@ -932,11 +934,11 @@ CREATE INDEX idx_herald_threads_chat_list ON herald_threads(project_id, owner_us
 -- executes approved rows in seq order, and records per-row failures in
 -- execution_error ('CODE: message') without aborting the batch.
 --
--- Attribution: executed writes run as the herald actor with the pending row's
+-- Attribution: executed writes run as the assistant actor with the pending row's
 -- owner_user_id; task_activity/task_comments rows written by an approved write
--- carry via_herald=1 so the timeline can mark them as Herald-proposed,
+-- carry via_assistant=1 so the timeline can mark them as Assistant-proposed,
 -- owner-approved actions.
-CREATE TABLE herald_pending_writes (
+CREATE TABLE assistant_pending_writes (
   id TEXT PRIMARY KEY,
   project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
   document_type TEXT NOT NULL CHECK (document_type IN ('task','wiki','chat')),
@@ -952,17 +954,17 @@ CREATE TABLE herald_pending_writes (
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   expires_at TEXT NOT NULL,
   decided_at TEXT,
-  FOREIGN KEY (document_type, document_id) REFERENCES herald_threads(document_type, document_id) ON DELETE CASCADE
+  FOREIGN KEY (document_type, document_id) REFERENCES assistant_threads(document_type, document_id) ON DELETE CASCADE
 );
-CREATE INDEX idx_herald_pending_batch ON herald_pending_writes(batch_id, seq);
-CREATE INDEX idx_herald_pending_thread ON herald_pending_writes(document_type, document_id, status);
+CREATE INDEX idx_assistant_pending_batch ON assistant_pending_writes(batch_id, seq);
+CREATE INDEX idx_assistant_pending_thread ON assistant_pending_writes(document_type, document_id, status);
 
-ALTER TABLE task_activity ADD COLUMN via_herald INTEGER NOT NULL DEFAULT 0;
-ALTER TABLE task_comments ADD COLUMN via_herald INTEGER NOT NULL DEFAULT 0;
--- write_tools is baked into the 0001_init.sql baseline (herald_settings rebuild).
+ALTER TABLE task_activity ADD COLUMN via_assistant INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE task_comments ADD COLUMN via_assistant INTEGER NOT NULL DEFAULT 0;
+-- write_tools is baked into the 0001_init.sql baseline (assistant_settings rebuild).
 
 -- Curated project memory: judgment-type facts only (live truth always comes
--- from DB reads, never memorized). `source` ∈ manual/herald (no CHECK in DDL).
+-- from DB reads, never memorized). `source` ∈ manual/assistant (no CHECK in DDL).
 -- FTS5 external-content index below; kept in sync by the repo on
 -- insert/delete (no triggers).
 CREATE TABLE project_memory (
@@ -1067,7 +1069,7 @@ CREATE INDEX idx_task_activity_task ON task_activity(task_id, created_at, id);
 -- _migrations (name TEXT PRIMARY KEY, applied_at TEXT) — applied migration files.
 -- The pre-release chain (0001-0024) was squashed into the single 0001_init.sql
 -- baseline for 2026.1.0. Migrations after the baseline are additive:
--- 0002_device_login.sql, 0003_herald_prices_1m_cached.sql, 0004_ui_gaps_w4.sql,
+-- 0002_device_login.sql, 0003_assistant_prices_1m_cached.sql, 0004_ui_gaps_w4.sql,
 -- then 0005_runtime_rename.sql (the Hearth→Runtimes rename). Future migrations
 -- continue at 0006_*.sql.
 ```
@@ -1158,9 +1160,9 @@ hermes/command-code), and reports the result.
 ### Runtimes — two agents, per-project engine, vision chain
 Umbrella renamed **Runtimes**. History: the namespace was renamed Forge→Hearth on 2026-08-24 (baked into the squashed `0001_init.sql` baseline), then Hearth→Runtimes on 2026-09-24 via `0005_runtime_rename.sql` — tables `runtime_tasks`/`runtime_task_logs`/`runtime_sessions`, routes `/api/runtimes/*`, header `x-runtime-token`, env `RUNTIME_*`, CLI state dir/unit — breaking reinstall.
 
-- **Exactly two builtin agents** (`lexa_agents`, in the 0001 baseline): `herald` ("Herald Agent") and `blacksmith` ("Blacksmith Agent") — same PM-assistant role, different execution architecture. The generic `lexa` entry is retired; its id is NOT reused.
+- **Exactly two builtin agents** (`lexa_agents`, in the 0001 baseline): `assistant` ("Assistant Agent") and `blacksmith` ("Blacksmith Agent") — same PM-assistant role, different execution architecture. The generic `lexa` entry is retired; its id is NOT reused.
 - **Skill availability = junction rows only.** Which skills an agent offers is whatever `lexa_agent_skills` says — admin-editable, no JSON columns on the agent rows.
-- **Engine switching:** `herald_settings.engine` ∈ `'herald'|'blacksmith'` applies to document threads + Generate. Freeform chat ALWAYS runs the herald lane; under `engine='blacksmith'` chat requests fail with `ENGINE_NOT_SUPPORTED_FOR_CHAT` (409). `engine_switcher_enabled=1` merely shows the member toggle, which is a personal overlay (client-side session preference) — it never writes `herald_settings.engine`; that column is the project default, admin-written.
+- **Engine switching:** `assistant_settings.engine` ∈ `'assistant'|'blacksmith'` applies to document threads + Generate. Freeform chat ALWAYS runs the assistant lane; under `engine='blacksmith'` chat requests fail with `ENGINE_NOT_SUPPORTED_FOR_CHAT` (409). `engine_switcher_enabled=1` merely shows the member toggle, which is a personal overlay (client-side session preference) — it never writes `assistant_settings.engine`; that column is the project default, admin-written.
 - **Vision resolution order** (per request): `primary_supports_images=1` → inline image parts; else `VISION_NOT_CONFIGURED` (409) — `vision_model` delegation was removed in the squashed baseline (columns `kind`/`base_url`/`api_key`/`model`/`vision_model` dropped; legacy code retains a compat check that never fires).
 - **Id rebind consequence (one-time, history):** threads keyed on the pre-squash agent id reset once — continue-vs-fresh saw an unknown agentId and started fresh.
 

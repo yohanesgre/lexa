@@ -262,3 +262,25 @@ reinstalled — upgrade the server first, then reinstall machines.
 
 The auth header also changed `x-hearth-token`→`x-runtime-token`; old daemons
 sending the old header get 401/404.
+
+## Upgrading across the Herald→Assistant rename (2026-09-24)
+
+Hard cutover, migration `0006_assistant_rename.sql`: the server applies it at
+boot, renaming the `herald_*` tables/indexes, rebuilding `assistant_settings` and
+`via_herald` columns, remapping `engine`/`kind`/`source` values, and rebinding
+builtin agent id `herald`→`assistant`, with no aliases for old routes, codes, or
+JSON fields. Data is migrated, never dropped. No env keys, CLI, or daemon changes;
+this rename is server-side only.
+
+1. **Upgrade the server.** Boot applies `0006_assistant_rename.sql` (Bun standalone:
+   re-run `install.sh` from the new release tag; Workers: `wrangler d1 migrations apply`).
+2. **Old API clients get 404** on `/api/herald/*` and `/api/admin/herald/*`. Error
+   codes are now `ASSISTANT_*`; activity/comment JSON field `viaHerald` is now
+   `viaAssistant`.
+3. **Browsers:** reload for the new bundle; session cookies and logins are
+   unaffected, with no rebuild or re-login.
+4. **Preserved:** chat threads, memory, provider registry and keys, project settings,
+   call logs, prices, and provider health.
+5. **Warm opencode sessions** minted under the old `lexa-herald-` prefix are
+   orphaned; transcripts replay from `assistant_threads`, so no data is lost.
+6. **Nothing to reinstall:** machines and daemons are not part of this rename.

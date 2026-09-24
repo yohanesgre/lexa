@@ -1,6 +1,6 @@
 # Lexa
 
-Self-hosted project management for small teams. Kanban with swimlanes and WIP limits, rich task descriptions, a nested wiki, milestones, AI Runtimes and AI Agents, Herald chat, team auth, and two-way GitHub issue sync.
+Self-hosted project management for small teams. Kanban with swimlanes and WIP limits, rich task descriptions, a nested wiki, milestones, AI Runtimes and AI Agents, Assistant chat, team auth, and two-way GitHub issue sync.
 
 Stack: **Bun + SQLite + TanStack Start (React) + Effect-TS + Tailwind** — self-hosted via `scripts/install.sh` (docker, bare metal, Cloudflare Workers, or dev).
 
@@ -11,7 +11,7 @@ Stack: **Bun + SQLite + TanStack Start (React) + Effect-TS + Tailwind** — self
 - **Nested wiki** — hierarchical pages, FTS5 full-text search, revisions with restore, public share links
 - **Milestones** — goals above sprints with target dates, progress tracking, timeline gantt
 - **AI Runtimes & AI Agents** — AI execution runtime with builtin agents + skills rule bundles, per-project engines, pluggable runtimes (OpenCode / Hermes / Command Code), machine listener with persistent daemon
-- **Herald chat** — streaming AI chat with threads, multi-provider gateway, and a proposed-actions approval flow for task/wiki writes
+- **Assistant chat** — streaming AI chat with threads, multi-provider gateway, and a proposed-actions approval flow for task/wiki writes
 - **Auth & teams** — email/password login with cookie sessions, teams and roles, workspace invites, `lxk_` API keys for machines
 - **Two-way GitHub sync** — link tasks to issues, echo-suppressed webhooks, column ↔ issue-state mapping, out-of-sync surfacing
 - **`lx`** — headless operator CLI for tasks, wiki, machines, keys, and upgrades

@@ -7,27 +7,27 @@ ARCHITECTURE.md — two-agent catalog, engine switching, personal-overlay toggle
 skills junction, vision chain, and the full Forge→Hearth→Runtimes identifier
 rename):
 
-| | Herald | Blacksmith |
+| | Assistant | Blacksmith |
 |---|---|---|
 | Role | Writing + PM assistant | Coding agent |
-| Engine | Server-side `chat()` (`server/herald/provider.ts`) | listener/daemon/warm `opencode serve` |
+| Engine | Server-side `chat()` (`server/assistant/provider.ts`) | listener/daemon/warm `opencode serve` |
 | Queue | HTTP stream handler, in-process | daemons via `claimNextTask` |
 | Auth | Browser cookie/Bearer | x-runtime-token surfaces |
-| Thread state | `herald_threads` (ModelMessage[] JSON, rolling summary) | `runtime_sessions` |
+| Thread state | `assistant_threads` (ModelMessage[] JSON, rolling summary) | `runtime_sessions` |
 | Agents/skills render | prompt injection via systemPrompts | `.agents/` file writes |
 
-Shared: `runtime_tasks` queue with `kind` discriminator (`herald`|`blacksmith`
-— `claimNextTask` carries `AND kind='blacksmith'`; Herald streams claim via a
+Shared: `runtime_tasks` queue with `kind` discriminator (`assistant`|`blacksmith`
+— `claimNextTask` carries `AND kind='blacksmith'`; Assistant streams claim via a
 kind-scoped conditional UPDATE; field names `agentMarkdown`/`skillMarkdown`
 frozen for daemon wire compat), **Lexa Agents/Skills** catalog
 (`lexa_agents`/`lexa_skills`/`lexa_agent_skills` — renamed from `forge_*` in the
 squashed `0001_init.sql` baseline; routes `/api/agents`, `/api/skills`; exactly
-two builtins `herald`/`blacksmith` after the `0005_runtime_rename.sql` id rebind, generic
+two builtins `assistant`/`blacksmith` after the `0005_runtime_rename.sql` id rebind, generic
 `lexa` retired; per-agent skill availability = `lexa_agent_skills` junction
 only), popover, logs/activity machinery. Per-project engine switching
-(`herald_settings.engine` ∈ `herald|blacksmith` with `engine_switcher_enabled`
+(`assistant_settings.engine` ∈ `assistant|blacksmith` with `engine_switcher_enabled`
 gate; personal-overlay member toggle is client-side session preference, admin
-writes the default; freeform chat always herald → 409
+writes the default; freeform chat always assistant → 409
 `ENGINE_NOT_SUPPORTED_FOR_CHAT` under blacksmith). Vision chain:
 `primarySupportsImages` checkbox → inline vs 409 `VISION_NOT_CONFIGURED`
 (`vision_model` delegation removed in the squashed baseline). History:

@@ -255,32 +255,32 @@ header `x-runtime-token`, env `RUNTIME_*`/`LXK_RUNTIME_DAEMON_TOKEN`, activity
 ACTIVE and co-exist; the run popover picks per-run. Design rationale:
 `docs/ARCHITECTURE.md` §Runtimes — two active AI tiers (formerly ADR-0001, now merged here); runtime details: `docs/RUNTIMES.md`.
 
-| | Herald | Blacksmith |
+| | Assistant | Blacksmith |
 |---|---|---|
 | Role | Writing + PM assistant | Coding agent |
-| Engine | Server-side TanStack AI `chat()` (`server/herald/provider.ts`) | listener/daemon/warm `opencode serve` |
+| Engine | Server-side TanStack AI `chat()` (`server/assistant/provider.ts`) | listener/daemon/warm `opencode serve` |
 | Queue consumer | HTTP stream handler, in-process | daemons via `claimNextTask` |
-| Thread state | `herald_threads` (ModelMessage[] JSON, rolling summary) | `runtime_sessions` |
+| Thread state | `assistant_threads` (ModelMessage[] JSON, rolling summary) | `runtime_sessions` |
 | Agents/skills render | prompt injection via systemPrompts | `.agents/` file writes |
-| Engine switching | default lane; freeform chat always herald | per-project `engine='blacksmith'`: document threads + Generate route here (runtime-online guard, `.agents/` claim bundles); chat → 409 `ENGINE_NOT_SUPPORTED_FOR_CHAT` |
+| Engine switching | default lane; freeform chat always assistant | per-project `engine='blacksmith'`: document threads + Generate route here (runtime-online guard, `.agents/` claim bundles); chat → 409 `ENGINE_NOT_SUPPORTED_FOR_CHAT` |
 
 **Amendments (accepted 2026-08-23/24, merged from ADR-0001):**
 
 - **Two-agent catalog with id rebind (history):** exactly two builtin agents —
-  `herald` ("Herald Agent") and `blacksmith` ("Blacksmith Agent") — seeded in
-  the squashed `0001_init.sql` baseline as `hearth-herald`/`hearth-blacksmith`,
+  `assistant` ("Assistant Agent") and `blacksmith` ("Blacksmith Agent") — seeded in
+  the squashed `0001_init.sql` baseline as `hearth-assistant`/`hearth-blacksmith`,
   with the generic `lexa` entry retired. Migration `0005_runtime_rename.sql`
   atomically rebinds `runtime_tasks.agent_id`, `runtime_sessions.agent_id`,
-  `herald_threads.agent_id`, and `lexa_agent_skills` junction rows from
-  `hearth-herald`/`hearth-blacksmith` to `herald`/`blacksmith`; because
-  `herald_threads.agent_id` is rebound too, thread continuity is preserved. The
+  `assistant_threads.agent_id`, and `lexa_agent_skills` junction rows from
+  `hearth-assistant`/`hearth-blacksmith` to `assistant`/`blacksmith`; because
+  `assistant_threads.agent_id` is rebound too, thread continuity is preserved. The
   one-time thread reset belonged to the earlier pre-squash `lexa` →
-  `hearth-herald` rebind — threads keyed on the retired `lexa` agent id saw an
+  `hearth-assistant` rebind — threads keyed on the retired `lexa` agent id saw an
   unknown agent and started fresh.
-- **Per-project engine switching:** `herald_settings.engine` ∈
-  `herald|blacksmith` applies to document threads + Generate; enqueue branches
-  on it (kind row + runtime-online guard for blacksmith). Freeform Herald Chat
-  always runs the herald lane — under `engine='blacksmith'` chat returns 409
+- **Per-project engine switching:** `assistant_settings.engine` ∈
+  `assistant|blacksmith` applies to document threads + Generate; enqueue branches
+  on it (kind row + runtime-online guard for blacksmith). Freeform Assistant Chat
+  always runs the assistant lane — under `engine='blacksmith'` chat returns 409
   `ENGINE_NOT_SUPPORTED_FOR_CHAT`.
 - **Personal-overlay toggle:** member engine toggle is a client-side session
   preference — never writes the project default; `engine` is admin-written
@@ -300,23 +300,23 @@ ACTIVE and co-exist; the run popover picks per-run. Design rationale:
 
 Engine switching rationale: one project may want the zero-infrastructure
 assistant lane while another routes generation through daemon runtimes —
-`herald_settings.engine` is the admin-written project default; the member
+`assistant_settings.engine` is the admin-written project default; the member
 toggle is a personal overlay (client-side session preference) shown only when
 `engine_switcher_enabled=1`. Skill availability per agent = junction rows only.
 Vision: `primary_supports_images=1` → inline image parts; else
 `VISION_NOT_CONFIGURED` (`vision_model` delegation removed in the squashed baseline).
 
 - **Shared queue with a discriminator:** both tiers ride `runtime_tasks`;
-  `kind` ∈ `'herald' | 'blacksmith'`. `claimNextTask` carries
-  `AND kind='blacksmith'` — daemons can never claim Herald tasks; Herald
+  `kind` ∈ `'assistant' | 'blacksmith'`. `claimNextTask` carries
+  `AND kind='blacksmith'` — daemons can never claim Assistant tasks; Assistant
   streams claim via a kind-scoped conditional UPDATE.
 - **Catalog renamed Lexa Agents/Skills** (`lexa_agents` / `lexa_skills` /
   `lexa_agent_skills`, in the squashed baseline): it is the behavioral spec for BOTH
-  renderers — prompt injection renders it for Herald, `.agents/` file writing
+  renderers — prompt injection renders it for Assistant, `.agents/` file writing
   renders it for Blacksmith. Routes `/api/agents` + `/api/skills` (hard
   cutover from the pre-baseline agent/skill paths); claim-payload field names
   (`agentMarkdown`/`skillMarkdown`) frozen for daemon wire compatibility.
-- **Herald** runs per-project provider settings (`herald_settings`, custom
+- **Assistant** runs per-project provider settings (`assistant_settings`, custom
   OpenAI-/Anthropic-compatible endpoints), server-side tools v1 (Exa web
   search, SSRF-guarded `fetch_url`, `read_s3_file`, PM reads), curated
   `project_memory` FTS5 facts, and a freeform chat surface on the same engine.
@@ -326,22 +326,22 @@ Vision: `primary_supports_images=1` → inline image parts; else
 **Consequences:** assistant features ship with the web app (deploy = image +
 one settings row); token streaming, tools, memory, multimodal become direct API
 surface; provider/vendor swap is a settings edit; Worker-portable by
-construction (no child processes in the Herald path); feature velocity — most
+construction (no child processes in the Assistant path); feature velocity — most
 changes touch prompt/tool rows, not plumbing.
 
 **Accepted risks:** TanStack AI is 0.x — pinned exact versions, `chat()`
-imported in exactly one service (`server/herald/provider.ts`); upgrades are
+imported in exactly one service (`server/assistant/provider.ts`); upgrades are
 deliberate acts. Catalog becomes load-bearing — prompt quality depends on
 curated Lexa Agents/Skills rows (size discipline required). Two tiers must be
 labeled distinctly in UI — users will expect Blacksmith-grade results from
-Herald runs otherwise. API keys held server-side plaintext (accepted for
+Assistant runs otherwise. API keys held server-side plaintext (accepted for
 self-hosted threat model). Table renames fail at runtime, not compile time —
 gated by atomic migration plus mandatory repo/service test suites.
 
-**Herald service concern split (accepted 2026-08-27; formerly a standalone
+**Assistant service concern split (accepted 2026-08-27; formerly a standalone
 ADR, merged here):**
 
-`server/services/herald.service.ts` handled both freeform chat
+`server/services/assistant.service.ts` handled both freeform chat
 (`runChatStream`/`resumeChatStream`, `activeChats`, `MAX_CHAT_TOOL_ROUNDS=24`)
 and task/wiki doc streams (`runStream`/`resumeThreadStream`, `activeTasks`,
 `MAX_TOOL_ROUNDS=12`, queue+approvals, writeTools drain) plus shared
@@ -349,44 +349,44 @@ and task/wiki doc streams (`runStream`/`resumeThreadStream`, `activeTasks`,
 let a chat stall block the task-queue tests and made round caps/registries
 indistinguishable. Split into two Effect services behind a thin facade:
 
-- `server/services/herald-chat.service.ts` — `HeraldChatService`
-  (`Lexa/HeraldChatService`): `activeChats`, `MAX_CHAT_TOOL_ROUNDS=24`, chat
+- `server/services/assistant-chat.service.ts` — `AssistantChatService`
+  (`Lexa/AssistantChatService`): `activeChats`, `MAX_CHAT_TOOL_ROUNDS=24`, chat
   stream, resume, listChats, updateChatMeta, decideApproval, abortChat.
   Depends on repos/gateway/storage only; write-tool drain optional.
-- `server/services/herald-task.service.ts` — `HeraldTaskService`
-  (`Lexa/HeraldTaskService`): `activeTasks`, `MAX_TOOL_ROUNDS=12`, enqueue,
+- `server/services/assistant-task.service.ts` — `AssistantTaskService`
+  (`Lexa/AssistantTaskService`): `activeTasks`, `MAX_TOOL_ROUNDS=12`, enqueue,
   runStream, resumeThreadStream, decideApproval, abortStream. Owns the
   queue/approval drain.
-- `server/herald/build-stream.ts` — shared `buildStream` factory
+- `server/assistant/build-stream.ts` — shared `buildStream` factory
   (`StreamRunContext` → `ReadableStream<StreamFrame>`) with
   `STREAM_STALL_TIMEOUT_MS=90s`, `shouldEmitToolFrame`, `stripToolCallXml`,
   `findPendingBatch`/`applyResumeResults`. Chat/task instantiate it with their
   own `toolRoundCap`/`registry`; core loop/stall/salvage logic is not
   duplicated.
-- `server/services/herald-helpers.ts` — pure helpers (`scanMentionTokens`,
-  `resolveHeraldThread`, `buildChatSnippet`, …) re-exported via the facade so
-  `import { buildStream } from "./herald.service"` tests keep passing.
-- `server/services/herald.service.ts` — thin facade `HeraldService`
-  (`Lexa/Herald`) delegating to chat/task, preserving
-  `import { HeraldService }` for `server/api/http.ts` (no route change).
+- `server/services/assistant-helpers.ts` — pure helpers (`scanMentionTokens`,
+  `resolveAssistantThread`, `buildChatSnippet`, …) re-exported via the facade so
+  `import { buildStream } from "./assistant.service"` tests keep passing.
+- `server/services/assistant.service.ts` — thin facade `AssistantService`
+  (`Lexa/Assistant`) delegating to chat/task, preserving
+  `import { AssistantService }` for `server/api/http.ts` (no route change).
   `decideApproval` fans out to both (shared `pendingWrites` table).
 
 Alternatives rejected: single service with internal branching (caps/registries
 stay coupled); full `buildStream` duplication per service (hotfix drift);
 moving `decideApproval` entirely to one side (`pendingWrites` serves both
 docTypes). Frontend cache keys were already separate
-(`["herald-chats",projectId]` vs
-`["herald-thread",projectId,docType,docId]`) — no change. No DB migration, no
-new service cycle (`Herald*` → repos/gateway only; the `TaskService` →
+(`["assistant-chats",projectId]` vs
+`["assistant-thread",projectId,docType,docId]`) — no change. No DB migration, no
+new service cycle (`Assistant*` → repos/gateway only; the `TaskService` →
 `GitHubService` cycle is unchanged). Phase A hotfixes preserved (tool-args
-salvage of `{"name":"v1","dueAt":` → skip with `HERALD_TOOL_ARGS_INVALID`,
+salvage of `{"name":"v1","dueAt":` → skip with `ASSISTANT_TOOL_ARGS_INVALID`,
 stall watchdog, 404 demote).
 
 **Consequences:** `activeChats`/`activeTasks` isolated — a chat stall cannot
 block the task queue; facade keeps existing imports green; future routes can
-import `HeraldChatService`/`HeraldTaskService` directly. Deviation:
-`Herald*Service` depends on `TaskService`/`CommentService`/etc. for
-approved-write execution, so `grep -r "TaskService" server/services/herald-*.ts`
+import `AssistantChatService`/`AssistantTaskService` directly. Deviation:
+`Assistant*Service` depends on `TaskService`/`CommentService`/etc. for
+approved-write execution, so `grep -r "TaskService" server/services/assistant-*.ts`
 hits via class/tag name and the write executor — not a `TaskService` →
 `GitHubService` cycle; that no-service-cycle invariant is preserved.
 
@@ -419,7 +419,7 @@ Key components: `KanbanBoard` (swimlanes → columns → task cards, inline add,
 SQLite is local (WAL) so reads are immediate, but the mutation response is still the single source of truth. Rule: **mutations return the updated entity and TanStack Query updates its cache from the mutation response (`setQueryData`) — no refetch on the mutation path.** Invariant #6 preserved.
 
 ### Effect Mid (frontend app routes, 3.22 — SPA only)
-Effect-TS 3.22 on the frontend app routes is limited to **Mid**: Effect lives under `queryFn` only, no global `Runtime`, no SSR Effect. Client-only `app/lib/effect-api.ts` (`effectFetch` → `Schema.decodeUnknownSync` via `shared/schema.ts` decode) consumed inside TanStack Query `queryFn`/`mutationFn`; `VITE_EFFECT_HERALD` gates the Herald path (default on, `VITE_EFFECT_HERALD=0` rolls back to legacy `run()` kept intact). Workers app routes inherit the same client-only boundary. The one server-side exception is `/share/$token` SSR: `app/lib/share.server.ts` runs `WikiShareService.resolvePublic` through a per-flavor `ManagedRuntime` (Bun `bun:sqlite` / Workers D1 via `cloudflare:workers` env) — not through `effect-api.ts`.
+Effect-TS 3.22 on the frontend app routes is limited to **Mid**: Effect lives under `queryFn` only, no global `Runtime`, no SSR Effect. Client-only `app/lib/effect-api.ts` (`effectFetch` → `Schema.decodeUnknownSync` via `shared/schema.ts` decode) consumed inside TanStack Query `queryFn`/`mutationFn`; Assistant path runs through this client-only boundary. Workers app routes inherit the same client-only boundary. The one server-side exception is `/share/$token` SSR: `app/lib/share.server.ts` runs `WikiShareService.resolvePublic` through a per-flavor `ManagedRuntime` (Bun `bun:sqlite` / Workers D1 via `cloudflare:workers` env) — not through `effect-api.ts`.
 
 ## Hosting flavors
 
