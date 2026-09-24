@@ -12,11 +12,16 @@ export function runMigrations(dbPath: string, migrationsDir = DEFAULT_MIGRATIONS
   const db = new Database(dbPath);
   try { chmodSync(dbPath, 0o600); } catch {}
   db.exec("PRAGMA busy_timeout = 5000");
-  // FK enforcement OFF during migrations, matching bun:sqlite's production
-  // default (the vitest shim defaults it ON). Rebuilds like 0004/0005 drop
-  // parent tables that children still reference — defer_foreign_keys cannot
-  // help (the implicit DELETE is re-checked at COMMIT), so enforcement is
-  // disabled for the whole run. Apps re-enable it via initSqlite.
+  // FK enforcement OFF on this (Bun) runner for the whole run. The
+  // Workers/D1 runner enforces FKs instead, so every migration file must
+  // also succeed with foreign_keys=ON. 0005 (`runtime` rename) does: it
+  // renames tables, DROP/CREATE INDEXes, and rebinds agent ids by
+  // inserting the new parent rows before repointing children and deleting
+  // the old rows — never by temporarily violating a reference. This runner
+  // still disables enforcement because some migrations need it; enforcement
+  // cannot simply be deferred (`defer_foreign_keys` re-checks at COMMIT and
+  // does not cover the DDL/DDL-adjacent cases here). Apps re-enable it via
+  // initSqlite.
   db.exec("PRAGMA foreign_keys = OFF");
 
   db.exec("CREATE TABLE IF NOT EXISTS _migrations (name TEXT PRIMARY KEY, applied_at TEXT DEFAULT (datetime('now')))");
@@ -69,8 +74,12 @@ if (dbPath) {
 //   * `WITHOUT ROWID` tables
 //   * Generated columns (`GENERATED ALWAYS AS ... STORED`)
 // D1 does NOT support: `ALTER COLUMN`, `RENAME COLUMN`, `DROP COLUMN`.
-// Migrations that need those use the table-rebuild pattern (see 0004
-// and 0005 — they create a new table, copy, drop the old, rename).
+// No migration in the current chain needs those: 0004 is additive columns
+// and 0005 (`runtime` rename) uses only `ALTER TABLE ... RENAME TO`,
+// `DROP INDEX` + `CREATE INDEX`, and value `UPDATE`s. FK note: the
+// Bun runner disables foreign-key enforcement for the run, while the
+// Workers/D1 runner enforces it, so every migration must succeed under both
+// (0005's agent-id rebind is written FK-safe for exactly that reason).
 export interface D1PreparedStmt {
   bind(...params: unknown[]): D1PreparedStmt;
   all<T>(): Promise<T[]>;

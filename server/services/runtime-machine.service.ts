@@ -1,7 +1,7 @@
 import { Effect } from "effect";
 import { randomBytes } from "node:crypto";
 import { RuntimeMachineRepo, type MachineCli } from "../repos/runtime-machine.repo";
-import { HearthRepo } from "../repos/hearth.repo";
+import { RuntimeRepo } from "../repos/runtime.repo";
 import { RuntimeEventService } from "./runtime-event.service";
 import { DbError, ConstraintViolation, Db, withTx } from "../db/db";
 import { MachineIdTaken, MachineNotFound } from "../api/errors";
@@ -23,10 +23,10 @@ function generateMachineSecret(): string {
 }
 
 export class RuntimeMachineService extends Effect.Service<RuntimeMachineService>()("Lexa/RuntimeMachineService", {
-  dependencies: [RuntimeMachineRepo.Default, HearthRepo.Default, RuntimeEventService.Default],
+  dependencies: [RuntimeMachineRepo.Default, RuntimeRepo.Default, RuntimeEventService.Default],
   effect: Effect.gen(function* () {
     const repo = yield* RuntimeMachineRepo;
-    const hearthRepo = yield* HearthRepo;
+    const runtimeRepo = yield* RuntimeRepo;
     const eventService = yield* RuntimeEventService;
     const db = yield* Db;
 
@@ -73,11 +73,11 @@ export class RuntimeMachineService extends Effect.Service<RuntimeMachineService>
           yield* withTx(
             db,
             Effect.gen(function* () {
-              const runtimes = yield* hearthRepo.listRuntimesByMachine(id);
+              const runtimes = yield* runtimeRepo.listRuntimesByMachine(id);
               for (const runtime of runtimes) {
                 yield* eventService.createRemove({ machineId: id, agentCli: runtime.provider });
               }
-              yield* hearthRepo.deleteRuntimesByMachine(id);
+              yield* runtimeRepo.deleteRuntimesByMachine(id);
               yield* repo.delete(id).pipe(
                 Effect.catchTag("RowNotFound", () => new MachineNotFound({ id }))
               );

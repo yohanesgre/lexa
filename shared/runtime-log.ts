@@ -1,7 +1,7 @@
-// Hearth activity-log level classification — the ONE place that decides
+// Runtime activity-log level classification — the ONE place that decides
 // severity, used by the daemon at write time (stored on the row) and as a
 // fallback by the UI for legacy rows. The UI never re-classifies stored
-// levels; this is pure and unit-tested (shared/hearth-log.test.ts).
+// levels; this is pure and unit-tested (shared/runtime-log.test.ts).
 //
 // stderr ≠ error: CLI agents (opencode especially) write plenty of non-error
 // output to stderr (progress, token usage, status). The danger tier is

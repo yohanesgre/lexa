@@ -1,6 +1,6 @@
 import { Effect } from "effect";
-import { HearthRepo } from "../repos/hearth.repo";
-import { HearthSessionRepo } from "../repos/hearth-session.repo";
+import { RuntimeRepo } from "../repos/runtime.repo";
+import { RuntimeSessionRepo } from "../repos/runtime-session.repo";
 import { SourceRepo } from "../repos/source.repo";
 import { RuntimeEventRepo } from "../repos/runtime-event.repo";
 import { TaskRepo } from "../repos/task.repo";
@@ -10,24 +10,24 @@ import { SourceService } from "./source.service";
 import { ActivityService } from "./activity.service";
 import { DbError, RowNotFound, ConstraintViolation, Db, withTx } from "../db/db";
 import { currentEnv, staleMinFrom } from "../runtime-env";
-import { ProjectNotFound, TaskNotFound, WikiPageNotFound, HearthTaskNotFound, NoRuntimeOnline, RuntimeNotFound, AgentNotFound, SkillNotFound, HearthBuiltinDelete, HearthEntityInUse, HearthSessionActive } from "../api/errors";
+import { ProjectNotFound, TaskNotFound, WikiPageNotFound, RuntimeTaskNotFound, NoRuntimeOnline, RuntimeNotFound, AgentNotFound, SkillNotFound, AgentBuiltinDelete, AgentEntityInUse, RuntimeSessionActive } from "../api/errors";
 import { docToMarkdown } from "../../shared/markdown";
 import * as msg from "../activity-messages";
-import { rowToHearthSession, RuntimeWithTeam } from "../../shared/db";
-import type { HearthTask, HearthTaskLog, DocumentSource, TipTapDoc, LexaAgent, LexaSkill, HearthSession, ActivityType, HearthProvider } from "../../shared/types";
+import { rowToRuntimeSession, RuntimeWithTeam } from "../../shared/db";
+import type { RuntimeTask, RuntimeTaskLog, DocumentSource, TipTapDoc, LexaAgent, LexaSkill, RuntimeSession, ActivityType, AgentCli } from "../../shared/types";
 
 // Builtin seed defaults — mirrors migrations/0001_init.sql (the squashed
 // 2026.1.0 baseline). Reset to default restores these exact values (and
 // skill sets). Keep the two in sync when editing either.
 export const HERALD_AGENT: { id: string; instructions: string; skillIds: string[] } = {
-  id: "hearth-herald",
+  id: "herald",
   instructions:
     "You are the Herald Agent, Lexa's companion project-management assistant. You help teams run their projects: you draft and sharpen task descriptions, requirements, and wiki pages, spot missing details, unclear scope, and weak acceptance criteria, and answer questions about the project. You may read files in your working directory (the project workspace) to ground your writing in the actual repo and docs. You do not write files, run commands, or act on any system — your whole output is the text you write. Match the document's existing voice and structure. If the linked sources contradict the document, prefer the sources.",
   skillIds: ["requirements", "deliverables", "review", "definition-of-done", "status", "polish"],
 };
 
 export const BLACKSMITH_AGENT: { id: string; instructions: string; skillIds: string[] } = {
-  id: "hearth-blacksmith",
+  id: "blacksmith",
   instructions:
     "You are the Blacksmith Agent, a coding agent working inside a persistent project workspace. You implement, refactor, and debug code: read the repository, plan the change, apply it, and verify with builds or tests where possible. Follow the project's existing conventions and keep changes minimal and focused. When a task is ambiguous, choose the smallest reasonable interpretation and state your assumption in the final summary.",
   skillIds: ["requirements", "definition-of-done", "review"],
@@ -48,11 +48,11 @@ const DEFAULT_SKILLS: Record<string, string> = {
     "Polish the selected text: clearer and more concise, keeping the meaning, structure, and level of detail. Output only the polished text.",
 };
 
-export class HearthService extends Effect.Service<HearthService>()("Lexa/HearthService", {
-  dependencies: [HearthRepo.Default, HearthSessionRepo.Default, SourceRepo.Default, RuntimeEventRepo.Default, SourceService.Default, TaskRepo.Default, WikiRepo.Default, ProjectRepo.Default, ActivityService.Default],
+export class RuntimeService extends Effect.Service<RuntimeService>()("Lexa/RuntimeService", {
+  dependencies: [RuntimeRepo.Default, RuntimeSessionRepo.Default, SourceRepo.Default, RuntimeEventRepo.Default, SourceService.Default, TaskRepo.Default, WikiRepo.Default, ProjectRepo.Default, ActivityService.Default],
   effect: Effect.gen(function* () {
-    const repo = yield* HearthRepo;
-    const sessionRepo = yield* HearthSessionRepo;
+    const repo = yield* RuntimeRepo;
+    const sessionRepo = yield* RuntimeSessionRepo;
     const sourceRepo = yield* SourceRepo;
     const runtimeEventRepo = yield* RuntimeEventRepo;
     const sourceService = yield* SourceService;
@@ -62,7 +62,7 @@ export class HearthService extends Effect.Service<HearthService>()("Lexa/HearthS
     const activityService = yield* ActivityService;
     const db = yield* Db;
 
-    // Hearth runs are unattended — the actor is the agent itself. Agent name
+    // Runtime runs are unattended — the actor is the agent itself. Agent name
     // resolved at write time; falls back to the agent id.
     const agentName = (agentId: string): Effect.Effect<string, never> =>
       repo.findAgentById(agentId).pipe(
@@ -73,11 +73,11 @@ export class HearthService extends Effect.Service<HearthService>()("Lexa/HearthS
     // Terminal statuses emit a task-activity row (document_type 'task' only)
     // in the SAME transaction as the status write. Message builds with the
     // RESOLVED agent name.
-    const emitTerminal = (hearthTask: HearthTask, type: ActivityType, buildMessage: (agentName: string) => string): Effect.Effect<void, never> =>
-      hearthTask.documentType === "task"
+    const emitTerminal = (runtimeTask: RuntimeTask, type: ActivityType, buildMessage: (agentName: string) => string): Effect.Effect<void, never> =>
+      runtimeTask.documentType === "task"
         ? Effect.gen(function* () {
-            const name = yield* agentName(hearthTask.agentId);
-            yield* activityService.append(hearthTask.documentId, { kind: "agent", label: name }, type, buildMessage(name));
+            const name = yield* agentName(runtimeTask.agentId);
+            yield* activityService.append(runtimeTask.documentId, { kind: "agent", label: name }, type, buildMessage(name));
           }).pipe(
             Effect.catchAll(() => Effect.void) // a timeline row must never fail the daemon round-trip
           )
@@ -120,7 +120,7 @@ export class HearthService extends Effect.Service<HearthService>()("Lexa/HearthS
         return parts.join("\n\n");
       });
 
-    // Hearth is a text-only project-management assistant: the agent's role and
+    // Runtime is a text-only project-management assistant: the agent's role and
     // rules travel as FILES (AGENTS.md + .agents/<skill>/SKILL.md written into
     // the run dir at claim time, read natively by AGENTS.md-capable CLIs like
     // opencode). The agent may read workspace files for grounding; the prompt
@@ -139,7 +139,7 @@ export class HearthService extends Effect.Service<HearthService>()("Lexa/HearthS
     ];
 
     const buildPrompt = (
-      task: HearthTask,
+      task: RuntimeTask,
       agent: LexaAgent,
       skill: LexaSkill,
       docContext: string,
@@ -186,7 +186,7 @@ export class HearthService extends Effect.Service<HearthService>()("Lexa/HearthS
     };
 
     const resolveRulesImpl = (
-      task: HearthTask
+      task: RuntimeTask
     ): Effect.Effect<{ agent: LexaAgent; skill: LexaSkill }, AgentNotFound | SkillNotFound | DbError> =>
       Effect.gen(function* () {
         const agent = yield* repo.findAgentById(task.agentId).pipe(
@@ -208,15 +208,15 @@ export class HearthService extends Effect.Service<HearthService>()("Lexa/HearthS
       updateAgent: (id: string, patch: { name?: string; description?: string; instructions?: string }): Effect.Effect<LexaAgent, AgentNotFound | ConstraintViolation | DbError> =>
         repo.updateAgent(id, patch).pipe(Effect.catchTag("RowNotFound", () => new AgentNotFound({ id }))),
 
-      deleteAgent: (id: string): Effect.Effect<void, AgentNotFound | HearthBuiltinDelete | HearthEntityInUse | ConstraintViolation | DbError> =>
+      deleteAgent: (id: string): Effect.Effect<void, AgentNotFound | AgentBuiltinDelete | AgentEntityInUse | ConstraintViolation | DbError> =>
         Effect.gen(function* () {
           const agent = yield* repo.findAgentById(id).pipe(Effect.catchTag("RowNotFound", () => new AgentNotFound({ id })));
           if (agent.isBuiltin) {
-            return yield* new HearthBuiltinDelete({ kind: "agent", name: agent.name });
+            return yield* new AgentBuiltinDelete({ kind: "agent", name: agent.name });
           }
           const count = yield* repo.countTasksByAgent(id);
           if (count > 0) {
-            return yield* new HearthEntityInUse({ kind: "agent", name: agent.name, count });
+            return yield* new AgentEntityInUse({ kind: "agent", name: agent.name, count });
           }
           yield* repo.deleteAgent(id).pipe(
             Effect.catchTag("RowNotFound", () => new AgentNotFound({ id }))
@@ -239,12 +239,12 @@ export class HearthService extends Effect.Service<HearthService>()("Lexa/HearthS
 
       // Builtin-only: restore the seeded instructions + the agent's default
       // skill set (Herald Agent and Blacksmith Agent since 0013).
-      resetAgentToDefault: (id: string): Effect.Effect<LexaAgent, AgentNotFound | HearthBuiltinDelete | ConstraintViolation | DbError> =>
+      resetAgentToDefault: (id: string): Effect.Effect<LexaAgent, AgentNotFound | AgentBuiltinDelete | ConstraintViolation | DbError> =>
         Effect.gen(function* () {
           const agent = yield* repo.findAgentById(id).pipe(Effect.catchTag("RowNotFound", () => new AgentNotFound({ id })));
           const seed = agent.id === HERALD_AGENT.id ? HERALD_AGENT : agent.id === BLACKSMITH_AGENT.id ? BLACKSMITH_AGENT : null;
           if (!agent.isBuiltin || seed === null) {
-            return yield* new HearthBuiltinDelete({ kind: "agent", name: agent.name });
+            return yield* new AgentBuiltinDelete({ kind: "agent", name: agent.name });
           }
           return yield* withTx(
             db,
@@ -266,27 +266,27 @@ export class HearthService extends Effect.Service<HearthService>()("Lexa/HearthS
       updateSkill: (id: string, patch: { name?: string; description?: string; instructions?: string }): Effect.Effect<LexaSkill, SkillNotFound | ConstraintViolation | DbError> =>
         repo.updateSkill(id, patch).pipe(Effect.catchTag("RowNotFound", () => new SkillNotFound({ id }))),
 
-      deleteSkill: (id: string): Effect.Effect<void, SkillNotFound | HearthBuiltinDelete | HearthEntityInUse | ConstraintViolation | DbError> =>
+      deleteSkill: (id: string): Effect.Effect<void, SkillNotFound | AgentBuiltinDelete | AgentEntityInUse | ConstraintViolation | DbError> =>
         Effect.gen(function* () {
           const skill = yield* repo.findSkillById(id).pipe(Effect.catchTag("RowNotFound", () => new SkillNotFound({ id })));
           if (skill.isBuiltin) {
-            return yield* new HearthBuiltinDelete({ kind: "skill", name: skill.name });
+            return yield* new AgentBuiltinDelete({ kind: "skill", name: skill.name });
           }
           const count = yield* repo.countTasksBySkill(id);
           if (count > 0) {
-            return yield* new HearthEntityInUse({ kind: "skill", name: skill.name, count });
+            return yield* new AgentEntityInUse({ kind: "skill", name: skill.name, count });
           }
           yield* repo.deleteSkill(id).pipe(
             Effect.catchTag("RowNotFound", () => new SkillNotFound({ id }))
           );
         }),
 
-      resetSkillToDefault: (id: string): Effect.Effect<LexaSkill, SkillNotFound | HearthBuiltinDelete | ConstraintViolation | DbError> =>
+      resetSkillToDefault: (id: string): Effect.Effect<LexaSkill, SkillNotFound | AgentBuiltinDelete | ConstraintViolation | DbError> =>
         Effect.gen(function* () {
           const skill = yield* repo.findSkillById(id).pipe(Effect.catchTag("RowNotFound", () => new SkillNotFound({ id })));
           const instructions = DEFAULT_SKILLS[skill.id];
           if (!skill.isBuiltin || instructions === undefined) {
-            return yield* new HearthBuiltinDelete({ kind: "skill", name: skill.name });
+            return yield* new AgentBuiltinDelete({ kind: "skill", name: skill.name });
           }
           return yield* repo.updateSkill(id, { instructions }).pipe(
             Effect.catchTag("RowNotFound", () => new SkillNotFound({ id }))
@@ -303,12 +303,12 @@ export class HearthService extends Effect.Service<HearthService>()("Lexa/HearthS
         extraPrompt?: string;
         selection: string;
         runtimeId?: string;   // preferred runtime
-      }): Effect.Effect<HearthTask, ProjectNotFound | TaskNotFound | WikiPageNotFound | AgentNotFound | SkillNotFound | NoRuntimeOnline | DbError | RowNotFound | ConstraintViolation> =>
+      }): Effect.Effect<RuntimeTask, ProjectNotFound | TaskNotFound | WikiPageNotFound | AgentNotFound | SkillNotFound | NoRuntimeOnline | DbError | RowNotFound | ConstraintViolation> =>
         Effect.gen(function* () {
           yield* projectRepo.findById(input.projectId).pipe(
             Effect.catchTag("RowNotFound", () => new ProjectNotFound({ identifier: input.projectId }))
           );
-          // Require at least one online runtime before enqueueing. Hearth runs
+          // Require at least one online runtime before enqueueing. Runtime runs
           // on the daemon's agent CLI directly (the claim carries all context),
           // so no Lexa MCP connection is needed on the runtime anymore.
           const runtimes = yield* repo.listRuntimes();
@@ -342,10 +342,10 @@ export class HearthService extends Effect.Service<HearthService>()("Lexa/HearthS
           });
         }),
 
-      getById: (id: string): Effect.Effect<HearthTask, HearthTaskNotFound | DbError> =>
-        repo.findTaskById(id).pipe(Effect.catchTag("RowNotFound", () => new HearthTaskNotFound({ id }))),
+      getById: (id: string): Effect.Effect<RuntimeTask, RuntimeTaskNotFound | DbError> =>
+        repo.findTaskById(id).pipe(Effect.catchTag("RowNotFound", () => new RuntimeTaskNotFound({ id }))),
 
-      claimNext: (runtimeId: string): Effect.Effect<HearthTask | null, ConstraintViolation | DbError | RowNotFound | RuntimeNotFound> =>
+      claimNext: (runtimeId: string): Effect.Effect<RuntimeTask | null, ConstraintViolation | DbError | RowNotFound | RuntimeNotFound> =>
         Effect.gen(function* () {
           // Team scoping: the runtime's team_id gates what it may claim
           // (NULL = global). The runtime must exist to resolve its scope.
@@ -358,85 +358,85 @@ export class HearthService extends Effect.Service<HearthService>()("Lexa/HearthS
       // Warm-session verdict for a claimed task: continue the mapped session
       // ONLY when the mapping exists AND its agent/skill match the task's —
       // an agent/skill change resets continuity (null → daemon mints fresh).
-      resolveSessionForTask: (task: HearthTask, runtimeId: string): Effect.Effect<string | null, DbError> =>
+      resolveSessionForTask: (task: RuntimeTask, runtimeId: string): Effect.Effect<string | null, DbError> =>
         sessionRepo.get(task.documentType, task.documentId, runtimeId).pipe(
           Effect.map((row) => (row && row.agent_id === task.agentId && row.skill_id === task.skillId ? row.runtime_session_id : null))
         ),
 
       // Pre-spawn mapping write (spec §8 step 3): the row exists before the
       // run starts; upsert also rewrites it on stale-session retry.
-      hearthSessionUpsert: (input: {
+      runtimeSessionUpsert: (input: {
         documentType: "task" | "wiki";
         documentId: string;
         runtimeId: string;
         runtimeSessionId: string;
-        provider: HearthProvider;
+        provider: AgentCli;
         agentId: string;
         skillId: string;
       }): Effect.Effect<void, ConstraintViolation | DbError> =>
         sessionRepo.upsert(input),
 
-      hearthSessionList: (documentType: "task" | "wiki", documentId: string): Effect.Effect<HearthSession[], DbError> =>
+      runtimeSessionList: (documentType: "task" | "wiki", documentId: string): Effect.Effect<RuntimeSession[], DbError> =>
         sessionRepo.listForDocument(documentType, documentId).pipe(
-          Effect.map((rows) => rows.map(rowToHearthSession))
+          Effect.map((rows) => rows.map(rowToRuntimeSession))
         ),
 
-      hearthSessionGet: (documentType: "task" | "wiki", documentId: string, runtimeId: string): Effect.Effect<HearthSession | null, DbError> =>
+      runtimeSessionGet: (documentType: "task" | "wiki", documentId: string, runtimeId: string): Effect.Effect<RuntimeSession | null, DbError> =>
         sessionRepo.get(documentType, documentId, runtimeId).pipe(
-          Effect.map((row) => (row ? rowToHearthSession(row) : null))
+          Effect.map((row) => (row ? rowToRuntimeSession(row) : null))
         ),
 
       // Daemon-side drop on cancel/timeout — always allowed (never 409):
       // the in-flight run is gone, nothing will re-write the row.
-      hearthSessionRemove: (documentType: "task" | "wiki", documentId: string, runtimeId: string): Effect.Effect<void, ConstraintViolation | DbError> =>
+      runtimeSessionRemove: (documentType: "task" | "wiki", documentId: string, runtimeId: string): Effect.Effect<void, ConstraintViolation | DbError> =>
         sessionRepo.remove(documentType, documentId, runtimeId),
 
       // User-facing reset: 409 while a task on this document+runtime is in
       // flight — otherwise the run's completion would re-write the row the
       // user just deleted and silently undo the reset.
-      hearthSessionReset: (documentType: "task" | "wiki", documentId: string, runtimeId: string): Effect.Effect<void, HearthSessionActive | ConstraintViolation | DbError> =>
+      runtimeSessionReset: (documentType: "task" | "wiki", documentId: string, runtimeId: string): Effect.Effect<void, RuntimeSessionActive | ConstraintViolation | DbError> =>
         Effect.gen(function* () {
           const active = yield* sessionRepo.hasActiveTask(documentType, documentId, runtimeId);
-          if (active) return yield* new HearthSessionActive();
+          if (active) return yield* new RuntimeSessionActive();
           yield* sessionRepo.remove(documentType, documentId, runtimeId);
         }),
 
-      complete: (id: string, result: string): Effect.Effect<HearthTask, HearthTaskNotFound | ConstraintViolation | DbError> =>
+      complete: (id: string, result: string): Effect.Effect<RuntimeTask, RuntimeTaskNotFound | ConstraintViolation | DbError> =>
         withTx(db, Effect.gen(function* () {
           const updated = yield* repo.updateTaskStatus(id, "completed", result, null).pipe(
-            Effect.catchTag("RowNotFound", () => new HearthTaskNotFound({ id }))
+            Effect.catchTag("RowNotFound", () => new RuntimeTaskNotFound({ id }))
           );
-          yield* emitTerminal(updated, "hearth_completed", (name) => msg.hearthCompleted(name));
+          yield* emitTerminal(updated, "runtime_completed", (name) => msg.runtimeCompleted(name));
           return updated;
         })),
 
-      fail: (id: string, error: string): Effect.Effect<HearthTask, HearthTaskNotFound | ConstraintViolation | DbError> =>
+      fail: (id: string, error: string): Effect.Effect<RuntimeTask, RuntimeTaskNotFound | ConstraintViolation | DbError> =>
         withTx(db, Effect.gen(function* () {
           const updated = yield* repo.updateTaskStatus(id, "failed", null, error).pipe(
-            Effect.catchTag("RowNotFound", () => new HearthTaskNotFound({ id }))
+            Effect.catchTag("RowNotFound", () => new RuntimeTaskNotFound({ id }))
           );
-          yield* emitTerminal(updated, "hearth_failed", () => msg.hearthFailed());
+          yield* emitTerminal(updated, "runtime_failed", () => msg.runtimeFailed());
           return updated;
         })),
 
-      cancel: (id: string): Effect.Effect<HearthTask, HearthTaskNotFound | ConstraintViolation | DbError> =>
+      cancel: (id: string): Effect.Effect<RuntimeTask, RuntimeTaskNotFound | ConstraintViolation | DbError> =>
         withTx(db, Effect.gen(function* () {
           const updated = yield* repo.updateTaskStatus(id, "cancelled", null, null).pipe(
-            Effect.catchTag("RowNotFound", () => new HearthTaskNotFound({ id }))
+            Effect.catchTag("RowNotFound", () => new RuntimeTaskNotFound({ id }))
           );
-          yield* emitTerminal(updated, "hearth_cancelled", () => msg.hearthCancelled());
+          yield* emitTerminal(updated, "runtime_cancelled", () => msg.runtimeCancelled());
           return updated;
         })),
 
       // Resolve the task's agent + skill rows (claim-time rule delivery —
       // the daemon writes these as files, never via the prompt).
-      resolveRules: (task: HearthTask): Effect.Effect<{ agent: LexaAgent; skill: LexaSkill }, AgentNotFound | SkillNotFound | DbError> =>
+      resolveRules: (task: RuntimeTask): Effect.Effect<{ agent: LexaAgent; skill: LexaSkill }, AgentNotFound | SkillNotFound | DbError> =>
         resolveRulesImpl(task),
 
       // Build the full prompt (with resolved sources) for the daemon.
       // hasRepoContent: the claim handler points the agent at repo-content/
       // only when linked-repo files actually shipped with the claim.
-      buildPromptForTask: (task: HearthTask, hasRepoContent = false): Effect.Effect<string, AgentNotFound | SkillNotFound | DbError | RowNotFound | WikiPageNotFound | import("../api/errors").SourceFetchError | import("../api/errors").SourceUnreachable> =>
+      buildPromptForTask: (task: RuntimeTask, hasRepoContent = false): Effect.Effect<string, AgentNotFound | SkillNotFound | DbError | RowNotFound | WikiPageNotFound | import("../api/errors").SourceFetchError | import("../api/errors").SourceUnreachable> =>
         Effect.gen(function* () {
           const { agent, skill } = yield* resolveRulesImpl(task);
           const sourcesContent = yield* loadSourcesContent(task.projectId, task.documentType, task.documentId);
@@ -450,23 +450,23 @@ export class HearthService extends Effect.Service<HearthService>()("Lexa/HearthS
           return buildPrompt(task, agent, skill, effectiveDocContext, sourcesContent, hasRepoContent);
         }),
 
-      listForDocument: (projectId: string, documentType: "task" | "wiki", documentId: string): Effect.Effect<HearthTask[], DbError> =>
+      listForDocument: (projectId: string, documentType: "task" | "wiki", documentId: string): Effect.Effect<RuntimeTask[], DbError> =>
         repo.listTasksForDocument(projectId, documentType, documentId),
 
       // Recent tasks across all projects (navbar status bar).
-      listRecent: (limit = 10): Effect.Effect<Array<HearthTask & { projectName: string }>, DbError> =>
+      listRecent: (limit = 10): Effect.Effect<Array<RuntimeTask & { projectName: string }>, DbError> =>
         repo.listRecent(limit).pipe(
           Effect.map((rows) => rows.map((r) => ({ ...r, projectName: r.project_name })))
         ),
 
-      // Full task history for the Hearth control panel: optional project/status/
+      // Full task history for the Runtime control panel: optional project/status/
       // skill/type filters, keyset-paginated (limit + cursor → next cursor).
       // summary carries per-status totals (global — not filter-scoped).
       listHistory: (
-        filters: { projectId?: string; status?: HearthTask["status"]; skillId?: string; documentType?: "task" | "wiki"; teamId?: string },
+        filters: { projectId?: string; status?: RuntimeTask["status"]; skillId?: string; documentType?: "task" | "wiki"; teamId?: string },
         limit = 50,
         cursor?: string
-      ): Effect.Effect<{ tasks: Array<HearthTask & { projectName: string }>; nextCursor: string | null; summary: Record<HearthTask["status"], number> }, DbError> =>
+      ): Effect.Effect<{ tasks: Array<RuntimeTask & { projectName: string }>; nextCursor: string | null; summary: Record<RuntimeTask["status"], number> }, DbError> =>
         Effect.gen(function* () {
           const [page, summary] = yield* Effect.all([repo.listHistory(filters, limit, cursor), repo.countByStatus()]);
           const last = page.tasks[page.tasks.length - 1];
@@ -482,22 +482,22 @@ export class HearthService extends Effect.Service<HearthService>()("Lexa/HearthS
       // polls while the task is running. The message is bounded so a chatty
       // agent can't grow rows without limit (daemon truncates to 500; this
       // is the server-side safety net). stream/level are classified ONCE by
-      // the daemon (shared/hearth-log.ts) and stored — the UI renders them.
+      // the daemon (shared/runtime-log.ts) and stored — the UI renders them.
       appendLog: (
         taskId: string,
         message: string,
         stream: "out" | "err" = "out",
         level: "info" | "warn" | "error" = "info"
-      ): Effect.Effect<HearthTaskLog, HearthTaskNotFound | ConstraintViolation | DbError | RowNotFound> =>
+      ): Effect.Effect<RuntimeTaskLog, RuntimeTaskNotFound | ConstraintViolation | DbError | RowNotFound> =>
         Effect.gen(function* () {
           yield* repo.findTaskById(taskId).pipe(
-            Effect.catchTag("RowNotFound", () => new HearthTaskNotFound({ id: taskId }))
+            Effect.catchTag("RowNotFound", () => new RuntimeTaskNotFound({ id: taskId }))
           );
           const bounded = message.slice(0, 2000);
           return yield* repo.appendLog(crypto.randomUUID(), taskId, bounded, stream, level);
         }),
 
-      listLogs: (taskId: string): Effect.Effect<HearthTaskLog[], DbError> =>
+      listLogs: (taskId: string): Effect.Effect<RuntimeTaskLog[], DbError> =>
         repo.listLogs(taskId),
 
       // Runtimes
@@ -559,7 +559,7 @@ export class HearthService extends Effect.Service<HearthService>()("Lexa/HearthS
 
       // Stale-run auto-removal threshold: a `running` task older than this
       // whose runtime is offline/gone is hard-deleted (task + log). A live
-      // runtime is never touched. Override with HEARTH_STALE_RUN_MIN.
+      // runtime is never touched. Override with RUNTIME_STALE_RUN_MIN.
       sweepStalledTasks: (): Effect.Effect<number, ConstraintViolation | DbError> =>
         Effect.gen(function* () {
           const staleMin = staleMinFrom(yield* currentEnv);

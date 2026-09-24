@@ -8,7 +8,7 @@ import { Database } from "bun:sqlite";
 import { runMigrations } from "../db/migrate";
 import { Sqlite, initSqlite } from "../db/database";
 import { DbBunLive } from "../db/db";
-import { HearthRepo } from "./hearth.repo";
+import { RuntimeRepo } from "./runtime.repo";
 
 const MIGRATIONS = fileURLToPath(new URL("../../migrations", import.meta.url));
 
@@ -16,7 +16,7 @@ let dir: string;
 let db: Database;
 
 beforeAll(() => {
-  dir = mkdtempSync(join(tmpdir(), "lexa-hearth-repo-"));
+  dir = mkdtempSync(join(tmpdir(), "lexa-runtime-repo-"));
   const path = join(dir, "test.db");
   runMigrations(path, MIGRATIONS);
   const ctx = Effect.runSync(Effect.scoped(Layer.build(initSqlite(path))));
@@ -53,9 +53,9 @@ function seed(db: Database) {
 }
 
 function makeRepo(db: Database) {
-  const layer = HearthRepo.Default.pipe(Layer.provide(Layer.mergeAll(Layer.succeed(Sqlite, db), DbBunLive(db))));
+  const layer = RuntimeRepo.Default.pipe(Layer.provide(Layer.mergeAll(Layer.succeed(Sqlite, db), DbBunLive(db))));
   const ctx = Effect.runSync(Effect.scoped(Layer.build(layer)));
-  return Context.get(ctx, HearthRepo);
+  return Context.get(ctx, RuntimeRepo);
 }
 
 function taskInput(id: string, kind?: "blacksmith" | "herald") {
@@ -73,7 +73,7 @@ function taskInput(id: string, kind?: "blacksmith" | "herald") {
   };
 }
 
-describe("HearthRepo createTask kind", () => {
+describe("RuntimeRepo createTask kind", () => {
   it("defaults to blacksmith", async () => {
     seed(db);
     const repo = makeRepo(db);
@@ -98,7 +98,7 @@ describe("HearthRepo createTask kind", () => {
   });
 });
 
-describe("HearthRepo claimNextTask kind scoping", () => {
+describe("RuntimeRepo claimNextTask kind scoping", () => {
   it("never returns a herald task", async () => {
     seed(db);
     const repo = makeRepo(db);
@@ -127,7 +127,7 @@ describe("HearthRepo claimNextTask kind scoping", () => {
   });
 });
 
-describe("HearthRepo claimHeraldTask", () => {
+describe("RuntimeRepo claimHeraldTask", () => {
   it("claims a queued herald task → running", async () => {
     seed(db);
     const repo = makeRepo(db);
@@ -178,7 +178,7 @@ describe("HearthRepo claimHeraldTask", () => {
   });
 });
 
-describe("HearthRepo.listHistory team filter", () => {
+describe("RuntimeRepo.listHistory team filter", () => {
   it("narrows rows by the runtime's team and returns all when absent", async () => {
     seed(db);
     db.exec(`
@@ -188,7 +188,7 @@ describe("HearthRepo.listHistory team filter", () => {
       INSERT INTO runtimes (id, name, provider, team_id, status) VALUES
         ('rt-a','a','opencode','t1','online'),
         ('rt-b','b','opencode','t2','online');
-      INSERT INTO hearth_tasks (id, runtime_id, project_id, document_type, document_id, agent_id, skill_id, status, created_at) VALUES
+      INSERT INTO runtime_tasks (id, runtime_id, project_id, document_type, document_id, agent_id, skill_id, status, created_at) VALUES
         ('ft-a','rt-a','p1','wiki','x','a1','sk1','completed','2026-01-01 10:00:00'),
         ('ft-b','rt-b','p1','wiki','x','a1','sk1','completed','2026-01-02 10:00:00'),
         ('ft-c',NULL,'p1','wiki','x','a1','sk1','completed','2026-01-03 10:00:00');

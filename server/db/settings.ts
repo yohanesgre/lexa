@@ -54,6 +54,6 @@ export function mirrorSettingsFromEnv(
   }
   mirror("rate_limit_max", env.LXK_RATE_LIMIT_MAX);
   mirror("rate_limit_window_ms", env.LXK_RATE_LIMIT_WINDOW_MS);
-  mirror("hearth_repo_cap", env.LXK_HEARTH_REPO_CAP);
+  mirror("runtime_repo_cap", env.LXK_RUNTIME_REPO_CAP);
   return mirrored;
 }

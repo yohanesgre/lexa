@@ -4,6 +4,7 @@ import {
   DEFAULT_PUBLIC_URL,
   getEnv,
   getEnvFromWorkers,
+  legacyHearthEnvWarning,
   resolveDatabasePath,
   resolvePublicUrl,
   resolveTrustedOrigins,
@@ -21,8 +22,8 @@ describe("getEnv", () => {
       LXK_MAX_BODY_MB: "32",
       LXK_RATE_LIMIT_MAX: "1000",
       LXK_RATE_LIMIT_WINDOW_MS: "60000",
-      LXK_HEARTH_REPO_CAP: "5",
-      HEARTH_STALE_RUN_MIN: "45",
+      LXK_RUNTIME_REPO_CAP: "5",
+      RUNTIME_STALE_RUN_MIN: "45",
       LOG_LEVEL: "debug",
     });
     expect(rt.DATABASE_PATH).toBe("/tmp/x.db");
@@ -34,8 +35,8 @@ describe("getEnv", () => {
     expect(rt.LXK_MAX_BODY_MB).toBe("32");
     expect(rt.LXK_RATE_LIMIT_MAX).toBe("1000");
     expect(rt.LXK_RATE_LIMIT_WINDOW_MS).toBe("60000");
-    expect(rt.LXK_HEARTH_REPO_CAP).toBe("5");
-    expect(rt.HEARTH_STALE_RUN_MIN).toBe("45");
+    expect(rt.LXK_RUNTIME_REPO_CAP).toBe("5");
+    expect(rt.RUNTIME_STALE_RUN_MIN).toBe("45");
     expect(rt.LOG_LEVEL).toBe("debug");
   });
 
@@ -43,6 +44,19 @@ describe("getEnv", () => {
     const rt = getEnv({ LXK_TANSTACK_AI_DEBUG: "1", LXK_TANSTACK_AI_JSON: "1" } as Record<string, string | undefined>);
     expect(rt.TANSTACK_AI_DEBUG).toBe("1");
     expect(rt.TANSTACK_AI_JSON).toBe("1");
+  });
+});
+
+describe("legacyHearthEnvWarning", () => {
+  it("warns when a legacy HEARTH_* key is set without its RUNTIME_* replacement", () => {
+    const msg = legacyHearthEnvWarning({ LXK_HEARTH_DAEMON_TOKEN: "old" });
+    expect(msg).toContain("LXK_HEARTH_DAEMON_TOKEN");
+    expect(msg).toContain("LXK_RUNTIME_DAEMON_TOKEN");
+  });
+
+  it("stays quiet when the replacement is set or the old key is absent", () => {
+    expect(legacyHearthEnvWarning({ LXK_RUNTIME_DAEMON_TOKEN: "new", LXK_HEARTH_DAEMON_TOKEN: "old" })).toBeNull();
+    expect(legacyHearthEnvWarning({})).toBeNull();
   });
 });
 
@@ -91,7 +105,7 @@ describe("getEnvFromWorkers", () => {
       LOG_LEVEL: "warn",
       LXK_MAX_BODY_MB: "16",
       LXK_RATE_LIMIT_MAX: "1000",
-      LXK_HEARTH_DAEMON_TOKEN: "daemon",
+      LXK_RUNTIME_DAEMON_TOKEN: "daemon",
       DB: fakeDb,
       BLOB: fakeBlob,
       KV: fakeKv,
@@ -105,7 +119,7 @@ describe("getEnvFromWorkers", () => {
     expect(rt.LOG_LEVEL).toBe("warn");
     expect(rt.LXK_MAX_BODY_MB).toBe("16");
     expect(rt.LXK_RATE_LIMIT_MAX).toBe("1000");
-    expect(rt.LXK_HEARTH_DAEMON_TOKEN).toBe("daemon");
+    expect(rt.LXK_RUNTIME_DAEMON_TOKEN).toBe("daemon");
     expect(rt.CRON_SECRET).toBe("cron");
     expect(rt.DB).toBe(fakeDb);
     expect(rt.BLOB).toBe(fakeBlob);

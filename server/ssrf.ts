@@ -1,5 +1,5 @@
 // SSRF guard — pure IP classification. Lexa is self-hosted behind a tunnel;
-// Hearth's external-source fetcher must never reach internal services.
+// Runtime's external-source fetcher must never reach internal services.
 
 export function isPrivateIp(ip: string): boolean {
   // IPv4

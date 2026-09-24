@@ -8,7 +8,7 @@ import { Database } from "bun:sqlite";
 import { runMigrations } from "../db/migrate";
 import { Sqlite, initSqlite } from "../db/database";
 import { DbBunLive } from "../db/db";
-import { HearthService } from "./hearth.service";
+import { RuntimeService } from "./runtime.service";
 
 const MIGRATIONS = fileURLToPath(new URL("../../migrations", import.meta.url));
 
@@ -16,7 +16,7 @@ let dir: string;
 let db: Database;
 
 beforeAll(() => {
-  dir = mkdtempSync(join(tmpdir(), "lexa-hearth-register-team-"));
+  dir = mkdtempSync(join(tmpdir(), "lexa-runtime-register-team-"));
   const path = join(dir, "test.db");
   runMigrations(path, MIGRATIONS);
   const ctx = Effect.runSync(Effect.scoped(Layer.build(initSqlite(path))));
@@ -49,14 +49,14 @@ afterEach(() => {
 });
 
 function makeService(db: Database) {
-  const layer = HearthService.Default.pipe(Layer.provide(Layer.mergeAll(Layer.succeed(Sqlite, db), DbBunLive(db))));
+  const layer = RuntimeService.Default.pipe(Layer.provide(Layer.mergeAll(Layer.succeed(Sqlite, db), DbBunLive(db))));
   const ctx = Effect.runSync(Effect.scoped(Layer.build(layer)));
-  return Context.get(ctx, HearthService);
+  return Context.get(ctx, RuntimeService);
 }
 
 const base = { name: "host-opencode", provider: "opencode" as const, machineId: "m1", agent: "build", model: "", hostname: "host" };
 
-describe("HearthService.registerRuntime team binding", () => {
+describe("RuntimeService.registerRuntime team binding", () => {
   it("applies the machine's latest setup-event team to the registered runtime", async () => {
     db.prepare(`INSERT INTO runtime_events (id, machine_id, action, agent_cli, team_id, status, created_at)
                 VALUES ('e1','m1','install','opencode','t1','completed','2026-01-01 10:00:00')`).run();

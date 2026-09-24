@@ -52,16 +52,16 @@ describe("buildSetArchivedAndEmitBatch", () => {
       taskId: "t1",
       archivedAt: null,
       actorKind: "agent",
-      actorLabel: "hearth-herald",
+      actorLabel: "herald",
       actorUserId: null,
       archivedMessage: "Maria archived this task",
-      restoredMessage: "hearth-herald restored this task",
+      restoredMessage: "herald restored this task",
       viaHerald: true,
     });
     expect(stmts).toHaveLength(2);
     expect(stmts[0]!.params[0]!).toBeNull();
     expect(stmts[1]!.params[4]!).toBe("restored");
-    expect(stmts[1]!.params[5]!).toBe("hearth-herald restored this task");
+    expect(stmts[1]!.params[5]!).toBe("herald restored this task");
     expect(stmts[1]!.params[6]!).toBe(1);
   });
 });

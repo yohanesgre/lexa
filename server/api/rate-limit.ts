@@ -3,7 +3,7 @@ import { Effect } from "effect";
 import { queryFirst, type DbDriver } from "../db/db";
 
 export interface RateLimiterOptions {
-  max?: number; // default 6000 requests per window (self-hosted; Hearth agents are chatty)
+  max?: number; // default 6000 requests per window (self-hosted; Runtime agents are chatty)
   windowMs?: number; // default 600_000 (10 min)
   sweepThreshold?: number; // default 10_000 — sweep expired buckets when size crosses this
 }
@@ -68,14 +68,14 @@ export function syncRateLimitFromDbAsync(driver: DbDriver): Effect.Effect<void, 
   });
 }
 
-// Hearth machine surfaces are key/token-gated and chatty by design — the
+// Runtime machine surfaces are key/token-gated and chatty by design — the
 // daemon's log POSTs, runtime registration, and the listener's 3s heartbeat
 // must never 429. Same policy as before, now covering machines/heartbeat.
 export function isRateLimitExemptPath(path: string): boolean {
   return (
-    path.startsWith("/api/hearth/daemon/") ||
-    path === "/api/hearth/runtimes/register" ||
-    path === "/api/hearth/machines/heartbeat"
+    path.startsWith("/api/runtimes/daemon/") ||
+    path === "/api/runtimes/register" ||
+    path === "/api/runtimes/machines/heartbeat"
   );
 }
 

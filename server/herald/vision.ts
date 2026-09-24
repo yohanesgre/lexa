@@ -5,7 +5,7 @@ import { normalizeBaseUrl, OPENCODE_SESSION_HEADER, resolveOpencodeSessionId } f
 
 export type VisionMode = "inline" | "delegate" | "none";
 
-// Vision resolution chain (docs/SCHEMA.md — Hearth): primary supports images
+// Vision resolution chain (docs/SCHEMA.md — Runtime): primary supports images
 // → inline parts; else a vision model is configured → internal analyze_image
 // delegation on the PRIMARY provider (same kind/api_key/base_url, only the
 // model differs); else attachments are rejected up front.

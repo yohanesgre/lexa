@@ -1,4 +1,4 @@
-import type { RepoContentEntry } from "../services/hearth-repo-content";
+import type { RepoContentEntry } from "../services/runtime-repo-content";
 
 export const IDENTITY = `You are Herald, the writing and project-management assistant inside Lexa, a self-hosted project management tool. You help with drafting, editing, summarizing, planning, and answering questions about the current project.
 

@@ -8,7 +8,7 @@ import { Database } from "bun:sqlite";
 import { runMigrations } from "../db/migrate";
 import { Sqlite, initSqlite } from "../db/database";
 import { DbBunLive } from "../db/db";
-import { HearthSessionRepo } from "./hearth-session.repo";
+import { RuntimeSessionRepo } from "./runtime-session.repo";
 
 const MIGRATIONS = fileURLToPath(new URL("../../migrations", import.meta.url));
 
@@ -16,7 +16,7 @@ let dir: string;
 let db: Database;
 
 beforeAll(() => {
-  dir = mkdtempSync(join(tmpdir(), "lexa-hearth-session-repo-"));
+  dir = mkdtempSync(join(tmpdir(), "lexa-runtime-session-repo-"));
   const path = join(dir, "test.db");
   runMigrations(path, MIGRATIONS);
   const ctx = Effect.runSync(Effect.scoped(Layer.build(initSqlite(path))));
@@ -43,7 +43,7 @@ beforeEach(() => {
 });
 
 
-// hearth_tasks rows (for hasActiveTask) need their FK targets; hearth_sessions
+// runtime_tasks rows (for hasActiveTask) need their FK targets; runtime_sessions
 // itself is FK-free.
 function seed(db: Database) {
   db.exec(`
@@ -57,19 +57,19 @@ function seed(db: Database) {
 }
 
 function makeRepo(db: Database) {
-  const layer = HearthSessionRepo.Default.pipe(Layer.provide(Layer.mergeAll(Layer.succeed(Sqlite, db), DbBunLive(db))));
+  const layer = RuntimeSessionRepo.Default.pipe(Layer.provide(Layer.mergeAll(Layer.succeed(Sqlite, db), DbBunLive(db))));
   const ctx = Effect.runSync(Effect.scoped(Layer.build(layer)));
-  return Context.get(ctx, HearthSessionRepo);
+  return Context.get(ctx, RuntimeSessionRepo);
 }
 
 function seedTask(db: Database, id: string, documentId: string, status: string, runtimeId: string | null) {
   db.prepare(
-    `INSERT INTO hearth_tasks (id, project_id, document_type, document_id, agent_id, skill_id, status, runtime_id, created_at)
+    `INSERT INTO runtime_tasks (id, project_id, document_type, document_id, agent_id, skill_id, status, runtime_id, created_at)
      VALUES (?, 'p1', 'task', ?, 'a1', 'sk1', ?, ?, datetime('now'))`
   ).run(id, documentId, status, runtimeId);
 }
 
-describe("HearthSessionRepo upsert/get", () => {
+describe("RuntimeSessionRepo upsert/get", () => {
   it("upsert then get round-trips all fields", async () => {
     seed(db);
     const repo = makeRepo(db);
@@ -121,7 +121,7 @@ describe("HearthSessionRepo upsert/get", () => {
   });
 });
 
-describe("HearthSessionRepo per-runtime isolation", () => {
+describe("RuntimeSessionRepo per-runtime isolation", () => {
   it("same document on two runtimes → two rows; listForDocument returns both", async () => {
     seed(db);
     const repo = makeRepo(db);
@@ -153,7 +153,7 @@ describe("HearthSessionRepo per-runtime isolation", () => {
   });
 });
 
-describe("HearthSessionRepo remove", () => {
+describe("RuntimeSessionRepo remove", () => {
   it("remove deletes the mapping row", async () => {
     seed(db);
     const repo = makeRepo(db);
@@ -184,7 +184,7 @@ describe("HearthSessionRepo remove", () => {
   });
 });
 
-describe("HearthSessionRepo hasActiveTask", () => {
+describe("RuntimeSessionRepo hasActiveTask", () => {
   it("true when a queued or running task exists for the document+runtime", async () => {
     seed(db);
     const repo = makeRepo(db);

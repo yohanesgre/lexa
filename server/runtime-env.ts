@@ -18,12 +18,12 @@ export function adminEmailsFrom(env: RuntimeEnv): string[] {
 }
 
 export function staleMinFrom(env: RuntimeEnv): number {
-  const v = Number(env.HEARTH_STALE_RUN_MIN);
+  const v = Number(env.RUNTIME_STALE_RUN_MIN);
   return Number.isFinite(v) && v > 0 ? v : 30;
 }
 
 export function repoCapFrom(env: RuntimeEnv, fallback: number): number {
-  const capParsed = Number.parseInt(env.LXK_HEARTH_REPO_CAP ?? "", 10);
+  const capParsed = Number.parseInt(env.LXK_RUNTIME_REPO_CAP ?? "", 10);
   return Number.isFinite(capParsed) && capParsed > 0 ? capParsed : fallback;
 }
 

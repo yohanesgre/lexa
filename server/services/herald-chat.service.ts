@@ -174,7 +174,7 @@ export class HeraldChatService extends Effect.Service<HeraldChatService>()("Lexa
         const config = configFromRow(settingsRow);
         if (req.skillId !== undefined) {
           const skillId = req.skillId;
-          if (!(yield* Effect.promise(() => skillJunctionBound("hearth-herald", skillId)))) return yield* new SkillNotFound({ id: skillId });
+          if (!(yield* Effect.promise(() => skillJunctionBound("herald", skillId)))) return yield* new SkillNotFound({ id: skillId });
         }
         const attachments = req.attachments ?? [];
         const imageMode = resolveVisionMode({ primary_supports_images: (settingsRow as unknown as { primary_supports_images: number }).primary_supports_images, vision_model: (settingsRow as unknown as { vision_model?: string | null }).vision_model ?? null });

@@ -2,7 +2,7 @@ import type { ID, ISODate } from "./types";
 
 export type ProviderKind = "openai_compatible" | "anthropic_compatible" | "openai_responses";
 
-export type HearthEngine = "herald" | "blacksmith";
+export type RuntimeEngine = "herald" | "blacksmith";
 
 export type HeraldReasoningEffort = "minimal" | "low" | "medium" | "high";
 
@@ -15,7 +15,7 @@ export interface HeraldSettingsMasked {
   searchProvider: "exa" | null;
   hasSearchKey: boolean;
   urlAllowlist: string | null;
-  engine: HearthEngine;
+  engine: RuntimeEngine;
   engineSwitcherEnabled: boolean;
   primarySupportsImages: boolean;
   reasoningEffort: HeraldReasoningEffort | null;
@@ -37,7 +37,7 @@ export interface HeraldSettingsInput {
   searchProvider?: "exa" | null | undefined;
   searchApiKey?: string | null | undefined;
   urlAllowlist?: string | null | undefined;
-  engine?: HearthEngine | undefined;
+  engine?: RuntimeEngine | undefined;
   engineSwitcherEnabled?: boolean | undefined;
   primarySupportsImages?: boolean | undefined;
   reasoningEffort?: HeraldReasoningEffort | null | undefined;
@@ -304,7 +304,7 @@ export interface HeraldProjectSettings {
   searchProvider: "exa" | null;
   hasSearchKey: boolean;
   urlAllowlist: string | null;
-  engine: HearthEngine;
+  engine: RuntimeEngine;
   engineSwitcherEnabled: boolean;
   reasoningEffort: HeraldReasoningEffort | null;
   writeTools: string[];

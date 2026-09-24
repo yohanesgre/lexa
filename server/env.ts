@@ -37,10 +37,10 @@ export interface RuntimeEnv {
   LXK_MAX_UPLOAD_MB?: string | undefined;
   LXK_RATE_LIMIT_MAX?: string | undefined;
   LXK_RATE_LIMIT_WINDOW_MS?: string | undefined;
-  // Hearth / daemon
-  LXK_HEARTH_DAEMON_TOKEN?: string | undefined;
-  LXK_HEARTH_REPO_CAP?: string | undefined;
-  HEARTH_STALE_RUN_MIN?: string | undefined;
+  // Runtime / daemon
+  LXK_RUNTIME_DAEMON_TOKEN?: string | undefined;
+  LXK_RUNTIME_REPO_CAP?: string | undefined;
+  RUNTIME_STALE_RUN_MIN?: string | undefined;
   // Logging
   LOG_LEVEL?: string | undefined;
   TANSTACK_AI_DEBUG?: string | undefined;
@@ -87,9 +87,9 @@ export function getEnv(source: ProcessEnvSource = processEnvSafe()): RuntimeEnv 
     LXK_MAX_UPLOAD_MB: source.LXK_MAX_UPLOAD_MB,
     LXK_RATE_LIMIT_MAX: source.LXK_RATE_LIMIT_MAX,
     LXK_RATE_LIMIT_WINDOW_MS: source.LXK_RATE_LIMIT_WINDOW_MS,
-    LXK_HEARTH_DAEMON_TOKEN: source.LXK_HEARTH_DAEMON_TOKEN,
-    LXK_HEARTH_REPO_CAP: source.LXK_HEARTH_REPO_CAP,
-    HEARTH_STALE_RUN_MIN: source.HEARTH_STALE_RUN_MIN,
+    LXK_RUNTIME_DAEMON_TOKEN: source.LXK_RUNTIME_DAEMON_TOKEN,
+    LXK_RUNTIME_REPO_CAP: source.LXK_RUNTIME_REPO_CAP,
+    RUNTIME_STALE_RUN_MIN: source.RUNTIME_STALE_RUN_MIN,
     LOG_LEVEL: source.LOG_LEVEL,
     TANSTACK_AI_DEBUG: source.TANSTACK_AI_DEBUG ?? source.LXK_TANSTACK_AI_DEBUG,
     TANSTACK_AI_JSON: source.TANSTACK_AI_JSON ?? source.LXK_TANSTACK_AI_JSON,
@@ -131,9 +131,9 @@ export function getEnvFromWorkers(env: Record<string, unknown>): RuntimeEnv {
     LXK_MAX_UPLOAD_MB: s("LXK_MAX_UPLOAD_MB"),
     LXK_RATE_LIMIT_MAX: s("LXK_RATE_LIMIT_MAX"),
     LXK_RATE_LIMIT_WINDOW_MS: s("LXK_RATE_LIMIT_WINDOW_MS"),
-    LXK_HEARTH_DAEMON_TOKEN: s("LXK_HEARTH_DAEMON_TOKEN"),
-    LXK_HEARTH_REPO_CAP: s("LXK_HEARTH_REPO_CAP"),
-    HEARTH_STALE_RUN_MIN: s("HEARTH_STALE_RUN_MIN"),
+    LXK_RUNTIME_DAEMON_TOKEN: s("LXK_RUNTIME_DAEMON_TOKEN"),
+    LXK_RUNTIME_REPO_CAP: s("LXK_RUNTIME_REPO_CAP"),
+    RUNTIME_STALE_RUN_MIN: s("RUNTIME_STALE_RUN_MIN"),
     LOG_LEVEL: s("LOG_LEVEL"),
     TANSTACK_AI_DEBUG: s("TANSTACK_AI_DEBUG") ?? s("LXK_TANSTACK_AI_DEBUG"),
     TANSTACK_AI_JSON: s("TANSTACK_AI_JSON") ?? s("LXK_TANSTACK_AI_JSON"),
@@ -150,6 +150,33 @@ export function getEnvFromWorkers(env: Record<string, unknown>): RuntimeEnv {
 function processEnvSafe(): ProcessEnvSource {
   if (typeof process !== "undefined" && process.env) return process.env;
   return {};
+}
+
+// ─── Legacy Hearth → Runtimes env warning ───────────────────────────────
+// The rename renamed every HEARTH_*/LXK_HEARTH_* key to RUNTIME_*. A stale
+// key is ignored by the readers, so boot warns once (entry.ts) when an old
+// key is set without its replacement — never fails boot.
+const LEGACY_HEARTH_ENV: ReadonlyArray<readonly [string, string]> = [
+  ["LXK_HEARTH_DAEMON_TOKEN", "LXK_RUNTIME_DAEMON_TOKEN"],
+  ["LXK_HEARTH_REPO_CAP", "LXK_RUNTIME_REPO_CAP"],
+  ["HEARTH_STALE_RUN_MIN", "RUNTIME_STALE_RUN_MIN"],
+  ["HEARTH_AGENT", "RUNTIME_AGENT"],
+  ["HEARTH_MODEL", "RUNTIME_MODEL"],
+  ["HEARTH_RUNTIME_NAME", "RUNTIME_NAME"],
+  ["HEARTH_RUNTIME_ID", "RUNTIME_ID"],
+  ["HEARTH_MACHINE_ID", "RUNTIME_MACHINE_ID"],
+  ["HEARTH_POLL_MS", "RUNTIME_POLL_MS"],
+  ["HEARTH_RUN_TIMEOUT_MS", "RUNTIME_RUN_TIMEOUT_MS"],
+  ["HEARTH_SERVE_PORT", "RUNTIME_SERVE_PORT"],
+  ["HEARTH_CMD_BIN", "RUNTIME_CMD_BIN"],
+];
+
+export function legacyHearthEnvWarning(source: ProcessEnvSource): string | null {
+  const stale = LEGACY_HEARTH_ENV.filter(([oldKey, newKey]) => source[oldKey] !== undefined && source[newKey] === undefined);
+  if (stale.length === 0) return null;
+  return `Legacy HEARTH_* environment variables are set without their RUNTIME_* replacements: ${stale
+    .map(([oldKey, newKey]) => `${oldKey} (use ${newKey})`)
+    .join(", ")}. The Hearth→Runtimes rename ignores the old keys — update the environment.`;
 }
 
 // ─── Shared resolvers ───────────────────────────────────────────────────

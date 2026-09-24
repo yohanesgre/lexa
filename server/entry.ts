@@ -5,6 +5,7 @@ import { dirname, join } from "node:path";
 import { Database } from "bun:sqlite";
 import { createApiHandler, createWebhookHandler, createWebhookVerifier } from "./api/http";
 import { getSetting, setSetting, mirrorSettingsFromEnv } from "./db/settings";
+import { legacyHearthEnvWarning } from "./env";
 import { syncRateLimitFromDb } from "./api/rate-limit";
 import { syncGitHubConfigFromDb } from "./github/client";
 import { MAX_API_BODY, X_LEXA_REMOTE_IP } from "./api/limits";
@@ -47,6 +48,9 @@ const PORT = Number.isInteger(rawPort) && rawPort > 0 ? rawPort : 3000;
 if (PORT !== rawPort) console.warn(`Invalid PORT (${process.env.PORT}) — falling back to ${PORT}`);
 const DATABASE_PATH = process.env.DATABASE_PATH || "/app/data/lexa.db";
 const STORAGE_CFG = resolveStorageConfig(process.env, dirname(DATABASE_PATH));
+
+const legacyEnvWarning = legacyHearthEnvWarning(process.env);
+if (legacyEnvWarning) console.warn(`[lexa] ${legacyEnvWarning}`);
 
 mkdirSync(dirname(DATABASE_PATH), { recursive: true });
 

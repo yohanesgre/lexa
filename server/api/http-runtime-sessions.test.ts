@@ -42,7 +42,7 @@ const upsertBody = (over: Record<string, unknown> = {}) =>
   });
 
 beforeAll(async () => {
-  dir = mkdtempSync(join(tmpdir(), "lexa-hearth-sessions-"));
+  dir = mkdtempSync(join(tmpdir(), "lexa-runtime-sessions-"));
   const dbPath = join(dir, "test.db");
   runMigrations(dbPath, MIGRATIONS);
   const adminHash = await sha256(ADMIN_KEY);
@@ -70,22 +70,22 @@ afterAll(() => {
   rmSync(dir, { recursive: true, force: true });
 });
 
-describe("PUT /api/hearth/sessions", () => {
+describe("PUT /api/runtimes/sessions", () => {
   it("upserts a mapping with 204 and no body", async () => {
-    const res = await handler(adminReq("/api/hearth/sessions", { method: "PUT", body: upsertBody() }));
+    const res = await handler(adminReq("/api/runtimes/sessions", { method: "PUT", body: upsertBody() }));
     expect(res.status).toBe(204);
     expect(await res.text()).toBe("");
   });
 
   it("upserting the same ref twice rewrites the row (204 both times)", async () => {
-    const res1 = await handler(adminReq("/api/hearth/sessions", { method: "PUT", body: upsertBody() }));
+    const res1 = await handler(adminReq("/api/runtimes/sessions", { method: "PUT", body: upsertBody() }));
     expect(res1.status).toBe(204);
-    const res2 = await handler(adminReq("/api/hearth/sessions", {
+    const res2 = await handler(adminReq("/api/runtimes/sessions", {
       method: "PUT",
       body: upsertBody({ runtimeSessionId: "sess-2", skillId: "sk2" }),
     }));
     expect(res2.status).toBe(204);
-    const list = await handler(adminReq("/api/hearth/sessions?documentType=task&documentId=t1"));
+    const list = await handler(adminReq("/api/runtimes/sessions?documentType=task&documentId=t1"));
     const body = await list.json();
     expect(body.data).toHaveLength(1);
     expect(body.data[0]!.runtimeSessionId).toBe("sess-2");
@@ -93,10 +93,10 @@ describe("PUT /api/hearth/sessions", () => {
   });
 });
 
-describe("GET /api/hearth/sessions", () => {
+describe("GET /api/runtimes/sessions", () => {
   it("returns the mapping as data (camelCase, updatedAt set)", async () => {
-    await handler(adminReq("/api/hearth/sessions", { method: "PUT", body: upsertBody() }));
-    const res = await handler(adminReq("/api/hearth/sessions?documentType=task&documentId=t1"));
+    await handler(adminReq("/api/runtimes/sessions", { method: "PUT", body: upsertBody() }));
+    const res = await handler(adminReq("/api/runtimes/sessions?documentType=task&documentId=t1"));
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.data).toHaveLength(1);
@@ -113,106 +113,106 @@ describe("GET /api/hearth/sessions", () => {
   });
 
   it("is scoped to the document — other documents get an empty list", async () => {
-    await handler(adminReq("/api/hearth/sessions", { method: "PUT", body: upsertBody() }));
-    const res = await handler(adminReq("/api/hearth/sessions?documentType=wiki&documentId=w1"));
+    await handler(adminReq("/api/runtimes/sessions", { method: "PUT", body: upsertBody() }));
+    const res = await handler(adminReq("/api/runtimes/sessions?documentType=wiki&documentId=w1"));
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.data).toEqual([]);
   });
 
   it("missing query params are an empty list, not an error", async () => {
-    const res = await handler(adminReq("/api/hearth/sessions"));
+    const res = await handler(adminReq("/api/runtimes/sessions"));
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.data).toEqual([]);
   });
 });
 
-describe("DELETE /api/hearth/sessions", () => {
+describe("DELETE /api/runtimes/sessions", () => {
   it("removes the mapping with 204", async () => {
-    await handler(adminReq("/api/hearth/sessions", { method: "PUT", body: upsertBody() }));
-    const res = await handler(adminReq("/api/hearth/sessions", { method: "DELETE", body: JSON.stringify({ documentType: "task", documentId: "t1", runtimeId: "rt1" }) }));
+    await handler(adminReq("/api/runtimes/sessions", { method: "PUT", body: upsertBody() }));
+    const res = await handler(adminReq("/api/runtimes/sessions", { method: "DELETE", body: JSON.stringify({ documentType: "task", documentId: "t1", runtimeId: "rt1" }) }));
     expect(res.status).toBe(204);
-    const list = await handler(adminReq("/api/hearth/sessions?documentType=task&documentId=t1"));
+    const list = await handler(adminReq("/api/runtimes/sessions?documentType=task&documentId=t1"));
     const body = await list.json();
     expect(body.data).toEqual([]);
   });
 
   it("does NOT 409 when a task is running for the document (daemon-side drop)", async () => {
     db.prepare(
-      `INSERT INTO hearth_tasks (id, project_id, document_type, document_id, agent_id, skill_id, status, runtime_id, created_at)
+      `INSERT INTO runtime_tasks (id, project_id, document_type, document_id, agent_id, skill_id, status, runtime_id, created_at)
        VALUES ('ft1', 'p1', 'task', 't1', 'a1', 'sk1', 'running', 'rt1', datetime('now'))`
     ).run();
-    await handler(adminReq("/api/hearth/sessions", { method: "PUT", body: upsertBody() }));
-    const res = await handler(adminReq("/api/hearth/sessions", { method: "DELETE", body: JSON.stringify({ documentType: "task", documentId: "t1", runtimeId: "rt1" }) }));
+    await handler(adminReq("/api/runtimes/sessions", { method: "PUT", body: upsertBody() }));
+    const res = await handler(adminReq("/api/runtimes/sessions", { method: "DELETE", body: JSON.stringify({ documentType: "task", documentId: "t1", runtimeId: "rt1" }) }));
     expect(res.status).toBe(204);
-    const list = await handler(adminReq("/api/hearth/sessions?documentType=task&documentId=t1"));
+    const list = await handler(adminReq("/api/runtimes/sessions?documentType=task&documentId=t1"));
     const body = await list.json();
     expect(body.data).toEqual([]);
-    db.prepare("DELETE FROM hearth_tasks WHERE id = 'ft1'").run();
+    db.prepare("DELETE FROM runtime_tasks WHERE id = 'ft1'").run();
   });
 
   it("deleting a missing mapping is 204, not 404", async () => {
-    const res = await handler(adminReq("/api/hearth/sessions", { method: "DELETE", body: JSON.stringify({ documentType: "task", documentId: "ghost", runtimeId: "rt1" }) }));
+    const res = await handler(adminReq("/api/runtimes/sessions", { method: "DELETE", body: JSON.stringify({ documentType: "task", documentId: "ghost", runtimeId: "rt1" }) }));
     expect(res.status).toBe(204);
   });
 });
 
-describe("POST /api/hearth/sessions/reset", () => {
+describe("POST /api/runtimes/sessions/reset", () => {
   it("deletes the mapping with 204", async () => {
-    await handler(adminReq("/api/hearth/sessions", { method: "PUT", body: upsertBody() }));
-    const res = await handler(adminReq("/api/hearth/sessions/reset", { method: "POST", body: JSON.stringify({ documentType: "task", documentId: "t1", runtimeId: "rt1" }) }));
+    await handler(adminReq("/api/runtimes/sessions", { method: "PUT", body: upsertBody() }));
+    const res = await handler(adminReq("/api/runtimes/sessions/reset", { method: "POST", body: JSON.stringify({ documentType: "task", documentId: "t1", runtimeId: "rt1" }) }));
     expect(res.status).toBe(204);
-    const list = await handler(adminReq("/api/hearth/sessions?documentType=task&documentId=t1"));
+    const list = await handler(adminReq("/api/runtimes/sessions?documentType=task&documentId=t1"));
     const body = await list.json();
     expect(body.data).toEqual([]);
   });
 
   it("resets only the given runtime's mapping", async () => {
-    await handler(adminReq("/api/hearth/sessions", { method: "PUT", body: upsertBody({ runtimeId: "rt1" }) }));
-    await handler(adminReq("/api/hearth/sessions", { method: "PUT", body: upsertBody({ runtimeId: "rt2" }) }));
-    const res = await handler(adminReq("/api/hearth/sessions/reset", { method: "POST", body: JSON.stringify({ documentType: "task", documentId: "t1", runtimeId: "rt1" }) }));
+    await handler(adminReq("/api/runtimes/sessions", { method: "PUT", body: upsertBody({ runtimeId: "rt1" }) }));
+    await handler(adminReq("/api/runtimes/sessions", { method: "PUT", body: upsertBody({ runtimeId: "rt2" }) }));
+    const res = await handler(adminReq("/api/runtimes/sessions/reset", { method: "POST", body: JSON.stringify({ documentType: "task", documentId: "t1", runtimeId: "rt1" }) }));
     expect(res.status).toBe(204);
-    const list = await handler(adminReq("/api/hearth/sessions?documentType=task&documentId=t1"));
+    const list = await handler(adminReq("/api/runtimes/sessions?documentType=task&documentId=t1"));
     const body = await list.json();
     expect(body.data.map((r: { runtimeId: string }) => r.runtimeId)).toEqual(["rt2"]);
   });
 
-  it("409 HEARTH_SESSION_ACTIVE when a queued task exists for the document+runtime", async () => {
+  it("409 RUNTIME_SESSION_ACTIVE when a queued task exists for the document+runtime", async () => {
     db.prepare(
-      `INSERT INTO hearth_tasks (id, project_id, document_type, document_id, agent_id, skill_id, status, runtime_id, created_at)
+      `INSERT INTO runtime_tasks (id, project_id, document_type, document_id, agent_id, skill_id, status, runtime_id, created_at)
        VALUES ('ft2', 'p1', 'task', 't1', 'a1', 'sk1', 'queued', 'rt1', datetime('now'))`
     ).run();
-    const res = await handler(adminReq("/api/hearth/sessions/reset", { method: "POST", body: JSON.stringify({ documentType: "task", documentId: "t1", runtimeId: "rt1" }) }));
+    const res = await handler(adminReq("/api/runtimes/sessions/reset", { method: "POST", body: JSON.stringify({ documentType: "task", documentId: "t1", runtimeId: "rt1" }) }));
     expect(res.status).toBe(409);
     const body = await res.json();
-    expect(body.error.code).toBe("HEARTH_SESSION_ACTIVE");
-    db.prepare("DELETE FROM hearth_tasks WHERE id = 'ft2'").run();
+    expect(body.error.code).toBe("RUNTIME_SESSION_ACTIVE");
+    db.prepare("DELETE FROM runtime_tasks WHERE id = 'ft2'").run();
   });
 
   it("409 when a running task exists for the document+runtime", async () => {
     db.prepare(
-      `INSERT INTO hearth_tasks (id, project_id, document_type, document_id, agent_id, skill_id, status, runtime_id, created_at)
+      `INSERT INTO runtime_tasks (id, project_id, document_type, document_id, agent_id, skill_id, status, runtime_id, created_at)
        VALUES ('ft3', 'p1', 'task', 't1', 'a1', 'sk1', 'running', 'rt1', datetime('now'))`
     ).run();
-    const res = await handler(adminReq("/api/hearth/sessions/reset", { method: "POST", body: JSON.stringify({ documentType: "task", documentId: "t1", runtimeId: "rt1" }) }));
+    const res = await handler(adminReq("/api/runtimes/sessions/reset", { method: "POST", body: JSON.stringify({ documentType: "task", documentId: "t1", runtimeId: "rt1" }) }));
     expect(res.status).toBe(409);
-    db.prepare("DELETE FROM hearth_tasks WHERE id = 'ft3'").run();
+    db.prepare("DELETE FROM runtime_tasks WHERE id = 'ft3'").run();
   });
 
   it("204 when the active task is on a different runtime (per-runtime reset)", async () => {
     db.prepare(
-      `INSERT INTO hearth_tasks (id, project_id, document_type, document_id, agent_id, skill_id, status, runtime_id, created_at)
+      `INSERT INTO runtime_tasks (id, project_id, document_type, document_id, agent_id, skill_id, status, runtime_id, created_at)
        VALUES ('ft4', 'p1', 'task', 't1', 'a1', 'sk1', 'running', 'rt2', datetime('now'))`
     ).run();
-    await handler(adminReq("/api/hearth/sessions", { method: "PUT", body: upsertBody() }));
-    const res = await handler(adminReq("/api/hearth/sessions/reset", { method: "POST", body: JSON.stringify({ documentType: "task", documentId: "t1", runtimeId: "rt1" }) }));
+    await handler(adminReq("/api/runtimes/sessions", { method: "PUT", body: upsertBody() }));
+    const res = await handler(adminReq("/api/runtimes/sessions/reset", { method: "POST", body: JSON.stringify({ documentType: "task", documentId: "t1", runtimeId: "rt1" }) }));
     expect(res.status).toBe(204);
-    db.prepare("DELETE FROM hearth_tasks WHERE id = 'ft4'").run();
+    db.prepare("DELETE FROM runtime_tasks WHERE id = 'ft4'").run();
   });
 
   it("no 404s: resetting a missing mapping is 204", async () => {
-    const res = await handler(adminReq("/api/hearth/sessions/reset", { method: "POST", body: JSON.stringify({ documentType: "task", documentId: "ghost", runtimeId: "rt1" }) }));
+    const res = await handler(adminReq("/api/runtimes/sessions/reset", { method: "POST", body: JSON.stringify({ documentType: "task", documentId: "ghost", runtimeId: "rt1" }) }));
     expect(res.status).toBe(204);
   });
 });

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { isPrivateIp, isPublicUrl } from "./hearth-ssrf";
+import { isPrivateIp, isPublicUrl } from "./ssrf";
 
 describe("isPrivateIp", () => {
   it("flags RFC1918 private ranges", () => {

@@ -36,14 +36,14 @@ const call = (method: string, path: string, headers: Record<string, string>, bod
   );
 
 const claim = (runtimeId: string) =>
-  handler(new Request("http://lexa.test/api/hearth/daemon/claim", {
+  handler(new Request("http://lexa.test/api/runtimes/daemon/claim", {
     method: "POST",
     headers: { authorization: `Bearer ${ADMIN_KEY}`, "content-type": "application/json" },
     body: JSON.stringify({ runtimeId }),
   }));
 
 beforeAll(async () => {
-  dir = mkdtempSync(join(tmpdir(), "lexa-hearth-team-"));
+  dir = mkdtempSync(join(tmpdir(), "lexa-runtime-team-"));
   dbPath = join(dir, "test.db");
   runMigrations(dbPath, MIGRATIONS);
   process.env.DATABASE_PATH = dbPath;
@@ -75,7 +75,7 @@ INSERT INTO tasks (id, project_id, column_id, swimlane_id, title, position, crea
   ('tg', 'p-g', 'c-g', 's-g', 'TG', 'a0', '2026-01-01 10:00:00', 'PG-1', 1);
 INSERT INTO lexa_agents (id, name, description, instructions, is_builtin) VALUES ('a1', 'A', '', '', 0);
 INSERT INTO lexa_skills (id, name, description, instructions, is_builtin) VALUES ('sk1', 'S', '', '', 0);
-INSERT INTO hearth_tasks (id, project_id, document_type, document_id, agent_id, skill_id, selection, doc_context, status, created_at) VALUES
+INSERT INTO runtime_tasks (id, project_id, document_type, document_id, agent_id, skill_id, selection, doc_context, status, created_at) VALUES
   ('ft-a', 'p-a', 'task', 'ta', 'a1', 'sk1', '', 'TA', 'queued', '2026-01-01 10:00:00'),
   ('ft-b', 'p-b', 'task', 'tb', 'a1', 'sk1', '', 'TB', 'queued', '2026-01-01 10:00:01'),
   ('ft-g', 'p-g', 'task', 'tg', 'a1', 'sk1', '', 'TG', 'queued', '2026-01-01 10:00:02');
@@ -91,7 +91,7 @@ afterAll(() => {
   rmSync(dir, { recursive: true, force: true });
 });
 
-describe("hearth runtime team scoping", () => {
+describe("runtime team scoping", () => {
   it("team runtime claims only own-team tasks", async () => {
     const res = await claim("r-a");
     expect(res.status).toBe(200);
@@ -110,7 +110,7 @@ describe("hearth runtime team scoping", () => {
   });
 
   it("register accepts teamId and reflects it on the payload", async () => {
-    const res = await handler(new Request("http://lexa.test/api/hearth/runtimes/register", {
+    const res = await handler(new Request("http://lexa.test/api/runtimes/register", {
       method: "POST",
       headers: { authorization: `Bearer ${ADMIN_KEY}`, "content-type": "application/json" },
       body: JSON.stringify({ id: "r-new", name: "scoped", provider: "opencode", machineId: "m1", teamId: "team-b" }),
@@ -125,12 +125,12 @@ describe("hearth runtime team scoping", () => {
   });
 
   it("listRuntimes: superadmin sees all; ?teamId= filters; team admin sees own team + global", async () => {
-    const all = (await (await call("GET", "/api/hearth/runtimes", { authorization: `Bearer ${ADMIN_KEY}` })).json()) as { data: { id: string }[] };
+    const all = (await (await call("GET", "/api/runtimes", { authorization: `Bearer ${ADMIN_KEY}` })).json()) as { data: { id: string }[] };
     expect(all.data.map((r) => r.id)).toEqual(expect.arrayContaining(["r-a", "r-g", "r-new"]));
-    const filtered = (await (await call("GET", "/api/hearth/runtimes?teamId=team-b", { authorization: `Bearer ${ADMIN_KEY}` })).json()) as { data: { id: string }[] };
+    const filtered = (await (await call("GET", "/api/runtimes?teamId=team-b", { authorization: `Bearer ${ADMIN_KEY}` })).json()) as { data: { id: string }[] };
     expect(filtered.data.map((r) => r.id)).toEqual(["r-new"]);
     // team-admin session (admin@lexa.test is team-a admin): own team + global
-    const scoped = (await (await call("GET", "/api/hearth/runtimes", { cookie: teamAdminCookie })).json()) as { data: { id: string }[] };
+    const scoped = (await (await call("GET", "/api/runtimes", { cookie: teamAdminCookie })).json()) as { data: { id: string }[] };
     expect(scoped.data.map((r) => r.id).sort()).toEqual(["r-a", "r-g"].sort());
   });
 });

@@ -76,8 +76,8 @@ export interface WorkersEnv {
   LXK_MAX_UPLOAD_MB?: string;
   LXK_RATE_LIMIT_MAX?: string;
   LXK_RATE_LIMIT_WINDOW_MS?: string;
-  LXK_HEARTH_DAEMON_TOKEN?: string;
-  LXK_HEARTH_REPO_CAP?: string;
+  LXK_RUNTIME_DAEMON_TOKEN?: string;
+  LXK_RUNTIME_REPO_CAP?: string;
   LXK_BACKUP_ENABLED?: string;
   LXK_BACKUP_RETENTION?: string;
 }

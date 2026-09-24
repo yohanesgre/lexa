@@ -24,7 +24,7 @@ let db: Database;
 let handler: (req: Request) => Promise<Response>;
 
 const createEvent = (key: string, teamId: string | null) =>
-  new Request("http://lexa.test/api/hearth/runtime-events", {
+  new Request("http://lexa.test/api/runtimes/events", {
     method: "POST",
     headers: { authorization: `Bearer ${key}`, "content-type": "application/json" },
     body: JSON.stringify({ machineId: "m1", action: "update", agentCli: "opencode", teamId }),
@@ -60,7 +60,7 @@ afterAll(() => {
   rmSync(dir, { recursive: true, force: true });
 });
 
-describe("POST /api/hearth/runtime-events team scoping (R13)", () => {
+describe("POST /api/runtimes/events team scoping (R13)", () => {
   it("superadmin may bind any team", async () => {
     const res = await handler(createEvent(ADMIN_KEY, "t2"));
     expect(res.status).toBe(201);

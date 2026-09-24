@@ -22,7 +22,7 @@ import { auth } from "../auth";
 import { createApiMiddleware, type MiddlewareSession } from "./middleware";
 import { resolveRateLimitFromDbValues, syncRateLimitFromDbAsync } from "./rate-limit";
 import { syncGitHubConfigFromDbAsync, resetGithubCaches } from "../github/client";
-import { loadTaskRepoContent } from "../services/hearth-repo-content";
+import { loadTaskRepoContent } from "../services/runtime-repo-content";
 import { clampLimit, nextCursor } from "../../shared/pagination";
 import { ProjectService } from "../services/project.service";
 import { ProjectRepo } from "../repos/project.repo";
@@ -66,7 +66,7 @@ import { WorkspaceInvitesService } from "../services/workspace-invites.service";
 import { PasswordLinksService } from "../services/password-links.service";
 import { FieldConfigService } from "../services/field-config.service";
 import { FieldConfigRepo } from "../repos/field-config.repo";
-import { HearthService } from "../services/hearth.service";
+import { RuntimeService } from "../services/runtime.service";
 import { HeraldService } from "../services/herald.service";
 import { HeraldChatService } from "../services/herald-chat.service";
 import { HeraldTaskService } from "../services/herald-task.service";
@@ -84,7 +84,7 @@ import { HeraldHealthService } from "../services/herald-health.service";
 import { HeraldGateway } from "../herald/gateway.service";
 import { syncModelPrices } from "../herald/price-sync";
 import { RuntimeEventService } from "../services/runtime-event.service";
-import { HearthRepo } from "../repos/hearth.repo";
+import { RuntimeRepo } from "../repos/runtime.repo";
 import { RuntimeEventRepo } from "../repos/runtime-event.repo";
 import { RuntimeMachineRepo } from "../repos/runtime-machine.repo";
 import { RuntimeMachineService } from "../services/runtime-machine.service";
@@ -102,7 +102,7 @@ import * as msg from "../activity-messages";
 import { WebhookEventRepo } from "../repos/webhook-event.repo";
 import { GitHubClient } from "../github/client";
 import { extractText } from "../../shared/tiptap-text";
-import type { ActivityEvent, HearthTask, Project, DomainProject, Column, Swimlane, Milestone, Task, WikiPage, WikiPageMeta, WikiPageRevision, WikiPageRevisionSummary } from "../../shared/types";
+import type { ActivityEvent, RuntimeTask, Project, DomainProject, Column, Swimlane, Milestone, Task, WikiPage, WikiPageMeta, WikiPageRevision, WikiPageRevisionSummary } from "../../shared/types";
 import type { StreamFrame } from "../../shared/herald";
 
 const ApiKeySchema = Schema.Struct({
@@ -413,7 +413,7 @@ const fieldConfigGroup = HttpApiGroup.make("field-config")
   .add(HttpApiEndpoint.put("putFieldConfig", "/projects/:slug/field-config")
     .setPath(SlugPath).setPayload(FieldConfigPayload).addSuccess(FieldConfigSchema));
 
-// ── Hearth (runtime agent writing assistant) ──
+// ── Runtime (runtime agent writing assistant) ──
 
 const RuntimeModelSchema = Schema.Struct({
   id: Schema.String,
@@ -447,7 +447,7 @@ const RuntimeSchema = Schema.Struct({
   createdAt: Schema.String,
 });
 
-const HearthTaskSchema = Schema.Struct({
+const RuntimeTaskSchema = Schema.Struct({
   id: Schema.String,
   key: Schema.String,
   runtimeId: Schema.NullOr(Schema.String),
@@ -493,7 +493,7 @@ const RepoContentEntrySchema = Schema.Struct({
 // array — [] when nothing shipped (the daemon writes files only when
 // non-empty).
 const ClaimResponseSchema = Schema.Struct({
-  task: Schema.NullOr(HearthTaskSchema),
+  task: Schema.NullOr(RuntimeTaskSchema),
   provider: Schema.Literal("opencode", "hermes", "command-code"),
   agent: Schema.String,
   model: Schema.String,
@@ -514,7 +514,7 @@ const ClaimResponseSchema = Schema.Struct({
   skillId: Schema.String,
 });
 
-const HearthAgentSchema = Schema.Struct({
+const LexaAgentSchema = Schema.Struct({
   id: Schema.String,
   name: Schema.String,
   description: Schema.String,
@@ -525,7 +525,7 @@ const HearthAgentSchema = Schema.Struct({
   updatedAt: Schema.String,
 });
 
-const HearthSkillSchema = Schema.Struct({
+const LexaSkillSchema = Schema.Struct({
   id: Schema.String,
   name: Schema.String,
   description: Schema.String,
@@ -535,9 +535,9 @@ const HearthSkillSchema = Schema.Struct({
   updatedAt: Schema.String,
 });
 
-// ── Hearth warm sessions (document ↔ runtime agent conversation mapping) ──
+// ── Runtime warm sessions (document ↔ runtime agent conversation mapping) ──
 // Sessions are document-agnostic metadata: any document_id is valid, no 404s.
-const HearthSessionSchema = Schema.Struct({
+const RuntimeSessionSchema = Schema.Struct({
   documentType: Schema.Literal("task", "wiki"),
   documentId: Schema.String,
   runtimeId: Schema.String,
@@ -549,9 +549,9 @@ const HearthSessionSchema = Schema.Struct({
   updatedAt: Schema.String,
 });
 
-const HearthSessionListResponse = Schema.Struct({ data: Schema.Array(HearthSessionSchema) });
+const RuntimeSessionListResponse = Schema.Struct({ data: Schema.Array(RuntimeSessionSchema) });
 
-const HearthSessionUpsertInput = Schema.Struct({
+const RuntimeSessionUpsertInput = Schema.Struct({
   documentType: Schema.Literal("task", "wiki"),
   documentId: Schema.String,
   runtimeId: Schema.String,
@@ -562,19 +562,19 @@ const HearthSessionUpsertInput = Schema.Struct({
 });
 
 // DELETE (daemon-side drop) and POST reset share the document+runtime ref.
-const HearthSessionRefInput = Schema.Struct({
+const RuntimeSessionRefInput = Schema.Struct({
   documentType: Schema.Literal("task", "wiki"),
   documentId: Schema.String,
   runtimeId: Schema.String,
 });
 
-const CreateHearthAgentInput = Schema.Struct({
+const CreateAgentInput = Schema.Struct({
   name: Schema.String,
   description: Schema.optionalWith(Schema.String, { default: () => "" }),
   instructions: Schema.String,
 });
 
-const UpdateHearthAgentInput = Schema.Struct({
+const UpdateAgentInput = Schema.Struct({
   name: Schema.optional(Schema.String),
   description: Schema.optional(Schema.String),
   instructions: Schema.optional(Schema.String),
@@ -582,20 +582,20 @@ const UpdateHearthAgentInput = Schema.Struct({
 
 const ReplaceAgentSkillsInput = Schema.Struct({ skillIds: Schema.Array(Schema.String) });
 
-const CreateHearthSkillInput = Schema.Struct({
+const CreateSkillInput = Schema.Struct({
   name: Schema.String,
   description: Schema.optionalWith(Schema.String, { default: () => "" }),
   instructions: Schema.String,
 });
 
-const UpdateHearthSkillInput = Schema.Struct({
+const UpdateSkillInput = Schema.Struct({
   name: Schema.optional(Schema.String),
   description: Schema.optional(Schema.String),
   instructions: Schema.optional(Schema.String),
 });
 
-const HearthAgentPath = Schema.Struct({ id: Schema.String });
-const HearthSkillPath = Schema.Struct({ id: Schema.String });
+const LexaAgentPath = Schema.Struct({ id: Schema.String });
+const LexaSkillPath = Schema.Struct({ id: Schema.String });
 
 const SourceSchema = Schema.Struct({
   id: Schema.String,
@@ -722,7 +722,7 @@ const ClaimRuntimeEventInput = Schema.Struct({ machineId: Schema.String });
 const CompleteTaskInput = Schema.Struct({ result: Schema.String });
 const FailTaskInput = Schema.Struct({ error: Schema.String });
 
-const CreateHearthTaskInput = Schema.Struct({
+const CreateRuntimeTaskInput = Schema.Struct({
   slug: Schema.String,
   documentType: Schema.Literal("task", "wiki"),
   documentId: Schema.String,
@@ -733,21 +733,21 @@ const CreateHearthTaskInput = Schema.Struct({
   runtimeId: Schema.optional(Schema.String),   // pick a specific runtime; omitted = any
 });
 
-const HearthTaskPath = Schema.Struct({ id: Schema.String });
+const RuntimeTaskPath = Schema.Struct({ id: Schema.String });
 const RuntimeIdPath = Schema.Struct({ id: Schema.String });
 
-const HearthTaskListResponse = Schema.Struct({ data: Schema.Array(HearthTaskSchema) });
+const RuntimeTaskListResponse = Schema.Struct({ data: Schema.Array(RuntimeTaskSchema) });
 
-const RecentHearthTaskSchema = Schema.extend(
-  HearthTaskSchema,
+const RecentRuntimeTaskSchema = Schema.extend(
+  RuntimeTaskSchema,
   Schema.Struct({ projectName: Schema.String })
 );
-const RecentHearthTaskListResponse = Schema.Struct({ data: Schema.Array(RecentHearthTaskSchema) });
+const RecentRuntimeTaskListResponse = Schema.Struct({ data: Schema.Array(RecentRuntimeTaskSchema) });
 
 // History rows carry the project name (control panel lists across projects).
 // summary = per-status totals, global (not filter-scoped).
-const HearthTaskHistoryResponse = Schema.Struct({
-  data: Schema.Array(RecentHearthTaskSchema),
+const RuntimeTaskHistoryResponse = Schema.Struct({
+  data: Schema.Array(RecentRuntimeTaskSchema),
   nextCursor: Schema.NullOr(Schema.String),
   summary: Schema.Struct({
     queued: Schema.Number,
@@ -758,7 +758,7 @@ const HearthTaskHistoryResponse = Schema.Struct({
   }),
 });
 
-const HearthTaskLogSchema = Schema.Struct({
+const RuntimeTaskLogSchema = Schema.Struct({
   id: Schema.String,
   taskId: Schema.String,
   message: Schema.String,
@@ -766,7 +766,7 @@ const HearthTaskLogSchema = Schema.Struct({
   level: Schema.Literal("info", "warn", "error"),
   createdAt: Schema.String,
 });
-const HearthTaskLogListResponse = Schema.Struct({ data: Schema.Array(HearthTaskLogSchema) });
+const RuntimeTaskLogListResponse = Schema.Struct({ data: Schema.Array(RuntimeTaskLogSchema) });
 // stream/level are classified ONCE by the daemon at write time; defaults keep
 // older daemons (and any non-daemon writer) working.
 const AppendLogInput = Schema.Struct({
@@ -828,7 +828,7 @@ const ActivityEventSchema = Schema.Struct({
   type: Schema.Literal("created", "moved", "field_changed", "archived", "restored", "deleted",
     "link_added", "link_removed", "source_added", "source_removed",
     "github_linked", "github_unlinked", "github_synced",
-    "hearth_completed", "hearth_failed", "hearth_cancelled",
+    "runtime_completed", "runtime_failed", "runtime_cancelled",
     "commented", "comment_deleted",
     "attachment_added", "attachment_removed"),
   message: Schema.String,
@@ -877,74 +877,74 @@ const taskLinksGroup = HttpApiGroup.make("task-links")  .add(HttpApiEndpoint.get
   .add(HttpApiEndpoint.get("searchMentions", "/projects/:slug/mentions")
     .setPath(SlugPath).addSuccess(MentionsResponse));
 
-const hearthGroup = HttpApiGroup.make("hearth")
-  .add(HttpApiEndpoint.post("registerRuntime", "/hearth/runtimes/register")
+const runtimesGroup = HttpApiGroup.make("runtimes")
+  .add(HttpApiEndpoint.post("registerRuntime", "/runtimes/register")
     .setPayload(RegisterRuntimeInput).addSuccess(RuntimeSchema, { status: 201 }))
-  .add(HttpApiEndpoint.patch("updateRuntime", "/hearth/runtimes/:id")
+  .add(HttpApiEndpoint.patch("updateRuntime", "/runtimes/:id")
     .setPath(RuntimeIdPath).setPayload(UpdateRuntimeInput).addSuccess(RuntimeSchema))
-  .add(HttpApiEndpoint.del("removeRuntime", "/hearth/runtimes/:id")
+  .add(HttpApiEndpoint.del("removeRuntime", "/runtimes/:id")
     .setPath(RuntimeIdPath).addSuccess(Schema.Void, { status: 204 }))
-  .add(HttpApiEndpoint.post("heartbeat", "/hearth/daemon/heartbeat")
+  .add(HttpApiEndpoint.post("heartbeat", "/runtimes/daemon/heartbeat")
     .setPayload(HeartbeatInput).addSuccess(Schema.Struct({ ok: Schema.Boolean })))
-  .add(HttpApiEndpoint.post("claimTask", "/hearth/daemon/claim")
+  .add(HttpApiEndpoint.post("claimTask", "/runtimes/daemon/claim")
     .setPayload(ClaimInput).addSuccess(ClaimResponseSchema))
   // Runtime setup events — web wizard creates, CLI listener claims/completes.
-  .add(HttpApiEndpoint.post("createRuntimeEvent", "/hearth/runtime-events")
+  .add(HttpApiEndpoint.post("createRuntimeEvent", "/runtimes/events")
     .setPayload(CreateRuntimeEventInput).addSuccess(RuntimeEventSchema, { status: 201 }))
-  .add(HttpApiEndpoint.post("claimRuntimeEvent", "/hearth/runtime-events/claim")
+  .add(HttpApiEndpoint.post("claimRuntimeEvent", "/runtimes/events/claim")
     .setPayload(ClaimRuntimeEventInput)
     .addSuccess(Schema.NullOr(Schema.Struct({ event: RuntimeEventSchema, rawKey: Schema.NullOr(Schema.String) }))))
-  .add(HttpApiEndpoint.post("completeRuntimeEvent", "/hearth/runtime-events/:id/complete")
+  .add(HttpApiEndpoint.post("completeRuntimeEvent", "/runtimes/events/:id/complete")
     .setPath(RuntimeEventPath).addSuccess(RuntimeEventSchema))
-  .add(HttpApiEndpoint.post("failRuntimeEvent", "/hearth/runtime-events/:id/fail")
+  .add(HttpApiEndpoint.post("failRuntimeEvent", "/runtimes/events/:id/fail")
     .setPath(RuntimeEventPath).setPayload(FailRuntimeEventInput).addSuccess(RuntimeEventSchema))
-  .add(HttpApiEndpoint.get("getRuntimeEvent", "/hearth/runtime-events/:id")
+  .add(HttpApiEndpoint.get("getRuntimeEvent", "/runtimes/events/:id")
     .setPath(RuntimeEventPath).addSuccess(RuntimeEventSchema))
-  .add(HttpApiEndpoint.get("listRuntimeEvents", "/hearth/runtime-events")
+  .add(HttpApiEndpoint.get("listRuntimeEvents", "/runtimes/events")
     .addSuccess(RuntimeEventListResponse))
-  .add(HttpApiEndpoint.post("machineHeartbeat", "/hearth/machines/heartbeat")
+  .add(HttpApiEndpoint.post("machineHeartbeat", "/runtimes/machines/heartbeat")
     .setPayload(MachineHeartbeatInput).addSuccess(MachineHeartbeatResponse))
-  .add(HttpApiEndpoint.post("registerMachine", "/hearth/machines/register")
+  .add(HttpApiEndpoint.post("registerMachine", "/runtimes/machines/register")
     .setPayload(MachineRegisterInput).addSuccess(MachineRegisterResponse))
-  .add(HttpApiEndpoint.get("listMachines", "/hearth/machines")
+  .add(HttpApiEndpoint.get("listMachines", "/runtimes/machines")
     .addSuccess(MachineListResponse))
-  .add(HttpApiEndpoint.del("removeMachine", "/hearth/machines/:id")
+  .add(HttpApiEndpoint.del("removeMachine", "/runtimes/machines/:id")
     .setPath(MachineIdPath).addSuccess(Schema.Void, { status: 204 }))
-  .add(HttpApiEndpoint.get("listRuntimes", "/hearth/runtimes")
+  .add(HttpApiEndpoint.get("listRuntimes", "/runtimes")
     .addSuccess(Schema.Struct({ data: Schema.Array(RuntimeSchema) })))
-  .add(HttpApiEndpoint.post("createHearthTask", "/hearth/tasks")
-    .setPayload(CreateHearthTaskInput).addSuccess(HearthTaskSchema, { status: 201 }))
-  .add(HttpApiEndpoint.get("getHearthTask", "/hearth/tasks/:id")
-    .setPath(HearthTaskPath).addSuccess(HearthTaskSchema))
-  .add(HttpApiEndpoint.get("listHearthTasks", "/hearth/tasks")
-    .addSuccess(HearthTaskListResponse))
-  .add(HttpApiEndpoint.get("listRecentHearthTasks", "/hearth/tasks/recent")
-    .addSuccess(RecentHearthTaskListResponse))
-  .add(HttpApiEndpoint.get("listHearthTaskHistory", "/hearth/tasks/history")
-    .addSuccess(HearthTaskHistoryResponse))
-  .add(HttpApiEndpoint.post("completeHearthTask", "/hearth/daemon/tasks/:id/complete")
-    .setPath(HearthTaskPath).setPayload(CompleteTaskInput).addSuccess(HearthTaskSchema))
-  .add(HttpApiEndpoint.post("failHearthTask", "/hearth/daemon/tasks/:id/fail")
-    .setPath(HearthTaskPath).setPayload(FailTaskInput).addSuccess(HearthTaskSchema))
-  .add(HttpApiEndpoint.get("getDaemonTaskStatus", "/hearth/daemon/tasks/:id/status")
-    .setPath(HearthTaskPath).addSuccess(Schema.Struct({ status: Schema.String })))
-  .add(HttpApiEndpoint.post("cancelHearthTask", "/hearth/tasks/:id/cancel")
-    .setPath(HearthTaskPath).addSuccess(HearthTaskSchema))
-  .add(HttpApiEndpoint.get("listHearthTaskLogs", "/hearth/tasks/:id/logs")
-    .setPath(HearthTaskPath).addSuccess(HearthTaskLogListResponse))
-  .add(HttpApiEndpoint.post("appendHearthTaskLog", "/hearth/daemon/tasks/:id/log")
-    .setPath(HearthTaskPath).setPayload(AppendLogInput).addSuccess(HearthTaskLogSchema))
+  .add(HttpApiEndpoint.post("createRuntimeTask", "/runtimes/tasks")
+    .setPayload(CreateRuntimeTaskInput).addSuccess(RuntimeTaskSchema, { status: 201 }))
+  .add(HttpApiEndpoint.get("getRuntimeTask", "/runtimes/tasks/:id")
+    .setPath(RuntimeTaskPath).addSuccess(RuntimeTaskSchema))
+  .add(HttpApiEndpoint.get("listRuntimeTasks", "/runtimes/tasks")
+    .addSuccess(RuntimeTaskListResponse))
+  .add(HttpApiEndpoint.get("listRecentRuntimeTasks", "/runtimes/tasks/recent")
+    .addSuccess(RecentRuntimeTaskListResponse))
+  .add(HttpApiEndpoint.get("listRuntimeTaskHistory", "/runtimes/tasks/history")
+    .addSuccess(RuntimeTaskHistoryResponse))
+  .add(HttpApiEndpoint.post("completeRuntimeTask", "/runtimes/daemon/tasks/:id/complete")
+    .setPath(RuntimeTaskPath).setPayload(CompleteTaskInput).addSuccess(RuntimeTaskSchema))
+  .add(HttpApiEndpoint.post("failRuntimeTask", "/runtimes/daemon/tasks/:id/fail")
+    .setPath(RuntimeTaskPath).setPayload(FailTaskInput).addSuccess(RuntimeTaskSchema))
+  .add(HttpApiEndpoint.get("getDaemonTaskStatus", "/runtimes/daemon/tasks/:id/status")
+    .setPath(RuntimeTaskPath).addSuccess(Schema.Struct({ status: Schema.String })))
+  .add(HttpApiEndpoint.post("cancelRuntimeTask", "/runtimes/tasks/:id/cancel")
+    .setPath(RuntimeTaskPath).addSuccess(RuntimeTaskSchema))
+  .add(HttpApiEndpoint.get("listRuntimeTaskLogs", "/runtimes/tasks/:id/logs")
+    .setPath(RuntimeTaskPath).addSuccess(RuntimeTaskLogListResponse))
+  .add(HttpApiEndpoint.post("appendRuntimeTaskLog", "/runtimes/daemon/tasks/:id/log")
+    .setPath(RuntimeTaskPath).setPayload(AppendLogInput).addSuccess(RuntimeTaskLogSchema))
   // Warm sessions: the daemon PUTs the pre-spawn mapping and DELETEs it on
   // cancel/timeout; the browser GETs (popover line) and POSTs reset.
-  .add(HttpApiEndpoint.get("listHearthSessions", "/hearth/sessions")
-    .addSuccess(HearthSessionListResponse))
-  .add(HttpApiEndpoint.put("upsertHearthSession", "/hearth/sessions")
-    .setPayload(HearthSessionUpsertInput).addSuccess(Schema.Void, { status: 204 }))
-  .add(HttpApiEndpoint.del("removeHearthSession", "/hearth/sessions")
-    .setPayload(HearthSessionRefInput).addSuccess(Schema.Void, { status: 204 }))
-  .add(HttpApiEndpoint.post("resetHearthSession", "/hearth/sessions/reset")
-    .setPayload(HearthSessionRefInput).addSuccess(Schema.Void, { status: 204 })
-    .addError(Schema.Struct({ _tag: Schema.Literal("HearthSessionActive") })))
+  .add(HttpApiEndpoint.get("listRuntimeSessions", "/runtimes/sessions")
+    .addSuccess(RuntimeSessionListResponse))
+  .add(HttpApiEndpoint.put("upsertRuntimeSession", "/runtimes/sessions")
+    .setPayload(RuntimeSessionUpsertInput).addSuccess(Schema.Void, { status: 204 }))
+  .add(HttpApiEndpoint.del("removeRuntimeSession", "/runtimes/sessions")
+    .setPayload(RuntimeSessionRefInput).addSuccess(Schema.Void, { status: 204 }))
+  .add(HttpApiEndpoint.post("resetRuntimeSession", "/runtimes/sessions/reset")
+    .setPayload(RuntimeSessionRefInput).addSuccess(Schema.Void, { status: 204 })
+    .addError(Schema.Struct({ _tag: Schema.Literal("RuntimeSessionActive") })))
   .add(HttpApiEndpoint.get("listSources", "/projects/:slug/documents/:type/:id/sources")
     .setPath(DocumentPath).addSuccess(SourceListResponse))
   .add(HttpApiEndpoint.post("addSource", "/projects/:slug/documents/:type/:id/sources")
@@ -957,29 +957,29 @@ const hearthGroup = HttpApiGroup.make("hearth")
 // old hearth-prefixed paths (no aliases).
 const agentsGroup = HttpApiGroup.make("agents")
   .add(HttpApiEndpoint.get("listAgents", "/agents")
-    .addSuccess(Schema.Struct({ data: Schema.Array(HearthAgentSchema) })))
+    .addSuccess(Schema.Struct({ data: Schema.Array(LexaAgentSchema) })))
   .add(HttpApiEndpoint.post("createAgent", "/agents")
-    .setPayload(CreateHearthAgentInput).addSuccess(HearthAgentSchema, { status: 201 }))
+    .setPayload(CreateAgentInput).addSuccess(LexaAgentSchema, { status: 201 }))
   .add(HttpApiEndpoint.patch("updateAgent", "/agents/:id")
-    .setPath(HearthAgentPath).setPayload(UpdateHearthAgentInput).addSuccess(HearthAgentSchema))
+    .setPath(LexaAgentPath).setPayload(UpdateAgentInput).addSuccess(LexaAgentSchema))
   .add(HttpApiEndpoint.del("deleteAgent", "/agents/:id")
-    .setPath(HearthAgentPath).addSuccess(Schema.Void, { status: 204 }))
+    .setPath(LexaAgentPath).addSuccess(Schema.Void, { status: 204 }))
   .add(HttpApiEndpoint.put("replaceAgentSkills", "/agents/:id/skills")
-    .setPath(HearthAgentPath).setPayload(ReplaceAgentSkillsInput).addSuccess(HearthAgentSchema))
+    .setPath(LexaAgentPath).setPayload(ReplaceAgentSkillsInput).addSuccess(LexaAgentSchema))
   .add(HttpApiEndpoint.post("resetAgent", "/agents/:id/reset")
-    .setPath(HearthAgentPath).addSuccess(HearthAgentSchema));
+    .setPath(LexaAgentPath).addSuccess(LexaAgentSchema));
 
 const skillsGroup = HttpApiGroup.make("skills")
   .add(HttpApiEndpoint.get("listSkills", "/skills")
-    .addSuccess(Schema.Struct({ data: Schema.Array(HearthSkillSchema) })))
+    .addSuccess(Schema.Struct({ data: Schema.Array(LexaSkillSchema) })))
   .add(HttpApiEndpoint.post("createSkill", "/skills")
-    .setPayload(CreateHearthSkillInput).addSuccess(HearthSkillSchema, { status: 201 }))
+    .setPayload(CreateSkillInput).addSuccess(LexaSkillSchema, { status: 201 }))
   .add(HttpApiEndpoint.patch("updateSkill", "/skills/:id")
-    .setPath(HearthSkillPath).setPayload(UpdateHearthSkillInput).addSuccess(HearthSkillSchema))
+    .setPath(LexaSkillPath).setPayload(UpdateSkillInput).addSuccess(LexaSkillSchema))
   .add(HttpApiEndpoint.del("deleteSkill", "/skills/:id")
-    .setPath(HearthSkillPath).addSuccess(Schema.Void, { status: 204 }))
+    .setPath(LexaSkillPath).addSuccess(Schema.Void, { status: 204 }))
   .add(HttpApiEndpoint.post("resetSkill", "/skills/:id/reset")
-    .setPath(HearthSkillPath).addSuccess(HearthSkillSchema));
+    .setPath(LexaSkillPath).addSuccess(LexaSkillSchema));
 
 // ── Herald assistant tier (S3/S5/S9/S15) ──
 const ProviderKindSchema = Schema.Literal("openai_compatible", "anthropic_compatible", "openai_responses");
@@ -1122,11 +1122,11 @@ const heraldGroup = HttpApiGroup.make("herald")
   .add(HttpApiEndpoint.post("listHeraldModels", "/herald/settings/:projectId/models")
     .setPath(HeraldSettingsPath).setPayload(HeraldSettingsTestPayload).addSuccess(ModelListResponse))
   .add(HttpApiEndpoint.post("createHeraldTask", "/herald/tasks")
-    .setPayload(CreateHeraldTaskInput).addSuccess(HearthTaskSchema, { status: 201 }))
+    .setPayload(CreateHeraldTaskInput).addSuccess(RuntimeTaskSchema, { status: 201 }))
   .add(HttpApiEndpoint.post("streamHeraldTask", "/herald/tasks/:id/stream")
-    .setPath(HearthTaskPath).addSuccess(Schema.Void))
+    .setPath(RuntimeTaskPath).addSuccess(Schema.Void))
   .add(HttpApiEndpoint.post("cancelHeraldTask", "/herald/tasks/:id/cancel")
-    .setPath(HearthTaskPath).addSuccess(Schema.Struct({ ok: Schema.Boolean })))
+    .setPath(RuntimeTaskPath).addSuccess(Schema.Struct({ ok: Schema.Boolean })))
   .add(HttpApiEndpoint.del("resetHeraldThread", "/herald/threads/:documentType/:documentId")
     .setPath(HeraldThreadPath).addSuccess(Schema.Void, { status: 204 }))
   .add(HttpApiEndpoint.post("streamHeraldChat", "/herald/chat/stream")
@@ -1813,7 +1813,7 @@ export const LexaApi = HttpApi.make("lexa")
   .add(swimlanesGroup)
   .add(milestonesGroup)
   .add(fieldConfigGroup)
-  .add(hearthGroup)
+  .add(runtimesGroup)
   .add(agentsGroup)
   .add(skillsGroup)
   .add(heraldGroup)
@@ -2506,11 +2506,11 @@ const fieldConfigLive = HttpApiBuilder.group(LexaApi, "field-config", (handlers)
     )
 );
 
-const hearthLive = HttpApiBuilder.group(LexaApi, "hearth", (handlers) =>
+const runtimesLive = HttpApiBuilder.group(LexaApi, "runtimes", (handlers) =>
   handlers
     .handle("registerRuntime", (req) =>
       respond(Effect.gen(function* () {
-        const service = yield* HearthService;
+        const service = yield* RuntimeService;
         const runtime = yield* service.registerRuntime({
           ...(req.payload.id !== undefined ? { id: req.payload.id } : {}),
           name: req.payload.name,
@@ -2529,7 +2529,7 @@ const hearthLive = HttpApiBuilder.group(LexaApi, "hearth", (handlers) =>
     )
     .handle("updateRuntime", (req) =>
       respond(Effect.gen(function* () {
-        const service = yield* HearthService;
+        const service = yield* RuntimeService;
         return yield* service.updateRuntime(req.path.id, {
           ...(req.payload.name !== undefined ? { name: req.payload.name } : {}),
           ...(req.payload.provider !== undefined ? { provider: req.payload.provider } : {}),
@@ -2543,7 +2543,7 @@ const hearthLive = HttpApiBuilder.group(LexaApi, "hearth", (handlers) =>
     )
     .handle("removeRuntime", (req) =>
       respond(Effect.gen(function* () {
-        const service = yield* HearthService;
+        const service = yield* RuntimeService;
         const eventService = yield* RuntimeEventService;
         const runtime = yield* service.getRuntimeConfig(req.path.id);
         // Never blocks on machine state: the remove event is delivered
@@ -2562,7 +2562,7 @@ const hearthLive = HttpApiBuilder.group(LexaApi, "hearth", (handlers) =>
     )
     .handle("heartbeat", (req) =>
       respond(Effect.gen(function* () {
-        const service = yield* HearthService;
+        const service = yield* RuntimeService;
         yield* service.heartbeat(req.payload.runtimeId);
         // A live heartbeat proves the credential works — clear any
         // previously reported auth failure.
@@ -2572,7 +2572,7 @@ const hearthLive = HttpApiBuilder.group(LexaApi, "hearth", (handlers) =>
     )
     .handle("claimTask", (req) =>
       respond(Effect.gen(function* () {
-        const service = yield* HearthService;
+        const service = yield* RuntimeService;
         const task = yield* service.claimNext(req.payload.runtimeId);
         if (!task) return { task: null, provider: "opencode" as const, agent: "", model: "", printLogs: false, logLevel: "", extraArgs: [], prompt: "", agentMarkdown: "", skillMarkdown: "", skillIds: [], repoContent: [], runtimeSessionId: null, agentId: "", skillId: "" };
         const runtime = yield* service.getRuntimeConfig(req.payload.runtimeId);
@@ -2665,7 +2665,7 @@ const hearthLive = HttpApiBuilder.group(LexaApi, "hearth", (handlers) =>
     .handle("machineHeartbeat", (req) =>
       respond(Effect.gen(function* () {
         const machineService = yield* RuntimeMachineService;
-        const hearthService = yield* HearthService;
+        const runtimeService = yield* RuntimeService;
         const projectService = yield* ProjectService;
         const machine = yield* machineService.heartbeat({
           id: req.payload.id,
@@ -2673,7 +2673,7 @@ const hearthLive = HttpApiBuilder.group(LexaApi, "hearth", (handlers) =>
           ...(req.payload.clis !== undefined ? { clis: req.payload.clis.map((c) => ({ provider: c.provider, version: c.version })) } : {}),
         });
         if (req.payload.runtimes) {
-          yield* hearthService.syncCatalogs(req.payload.id, req.payload.runtimes.map((catalog) => ({
+          yield* runtimeService.syncCatalogs(req.payload.id, req.payload.runtimes.map((catalog) => ({
             runtimeId: catalog.runtimeId,
             agentCli: catalog.agentCli,
             models: [...catalog.models],
@@ -2684,16 +2684,16 @@ const hearthLive = HttpApiBuilder.group(LexaApi, "hearth", (handlers) =>
           // The daemon died with a reportable failure (e.g. revoked API key,
           // exit code 3). The listener has valid auth, so it relays on the
           // machine's behalf — the runtime row surfaces it as lastError.
-          yield* hearthService.reportDaemonErrors([...req.payload.daemonErrors]);
+          yield* runtimeService.reportDaemonErrors([...req.payload.daemonErrors]);
         }
         // Stuck-task sweep: runs while any machine listens (3s cadence) —
         // the only case where a re-claim is possible. Re-queues 'running'
         // tasks whose runtime has been offline > 10 min, and hard-deletes
-        // stale 'running' runs (started > HEARTH_STALE_RUN_MIN, runtime
+        // stale 'running' runs (started > RUNTIME_STALE_RUN_MIN, runtime
         // offline/gone — the runner is dead and will never complete).
-        const swept = yield* hearthService.sweepStalledTasks();
+        const swept = yield* runtimeService.sweepStalledTasks();
         if (swept > 0) {
-          console.log(`[hearth-sweep] ${swept} stale task(s) re-queued or removed`);
+          console.log(`[runtime-sweep] ${swept} stale task(s) re-queued or removed`);
         }
         const projects = yield* projectService.list();
         return { ...machine, projects: projects.map((p) => ({ id: p.id, name: p.name, slug: p.slug, description: p.description })) };
@@ -2726,7 +2726,7 @@ const hearthLive = HttpApiBuilder.group(LexaApi, "hearth", (handlers) =>
     .handle("listRuntimes", (req) =>
       respond(Effect.gen(function* () {
         const identity = yield* AuthIdentity;
-        const service = yield* HearthService;
+        const service = yield* RuntimeService;
         let runtimes = yield* service.listRuntimes();
         // Team gating: team admin sees own-team + global runtimes; keys and
         // superadmin sessions see all. ?teamId= narrows the result.
@@ -2746,9 +2746,9 @@ const hearthLive = HttpApiBuilder.group(LexaApi, "hearth", (handlers) =>
         return { data: runtimes };
       }))
     )
-    .handle("createHearthTask", (req) =>
+    .handle("createRuntimeTask", (req) =>
       respond(Effect.gen(function* () {
-        const service = yield* HearthService;
+        const service = yield* RuntimeService;
         const project = yield* requireProjectRead(req.payload.slug);
         const task = yield* service.create({
           projectId: project.id,
@@ -2763,16 +2763,16 @@ const hearthLive = HttpApiBuilder.group(LexaApi, "hearth", (handlers) =>
         return task;
       }))
     )
-    .handle("getHearthTask", (req) =>
+    .handle("getRuntimeTask", (req) =>
       respond(Effect.gen(function* () {
-        const service = yield* HearthService;
+        const service = yield* RuntimeService;
         return yield* service.getById(req.path.id);
       }))
     )
-    .handle("listHearthTasks", (req) =>
+    .handle("listRuntimeTasks", (req) =>
       respond(Effect.gen(function* () {
         const projectService = yield* ProjectService;
-        const service = yield* HearthService;
+        const service = yield* RuntimeService;
         const q = searchParams(req);
         const slug = q.get("slug");
         if (!slug) return yield* Effect.fail(ProjectNotFound);
@@ -2783,17 +2783,17 @@ const hearthLive = HttpApiBuilder.group(LexaApi, "hearth", (handlers) =>
         return { data: tasks };
       }))
     )
-    .handle("listRecentHearthTasks", () =>
+    .handle("listRecentRuntimeTasks", () =>
       respond(Effect.gen(function* () {
-        const service = yield* HearthService;
+        const service = yield* RuntimeService;
         const tasks = yield* service.listRecent(10);
         return { data: tasks };
       }))
     )
-    .handle("listHearthTaskHistory", (req) =>
+    .handle("listRuntimeTaskHistory", (req) =>
       respond(Effect.gen(function* () {
         const projectService = yield* ProjectService;
-        const service = yield* HearthService;
+        const service = yield* RuntimeService;
         const q = searchParams(req);
         const slug = q.get("slug") ?? undefined;
         const project = slug ? yield* projectService.findBySlug(slug) : null;
@@ -2818,41 +2818,41 @@ const hearthLive = HttpApiBuilder.group(LexaApi, "hearth", (handlers) =>
         return { data: result.tasks, nextCursor: result.nextCursor, summary: result.summary };
       }))
     )
-    .handle("completeHearthTask", (req) =>
+    .handle("completeRuntimeTask", (req) =>
       respond(Effect.gen(function* () {
-        const service = yield* HearthService;
+        const service = yield* RuntimeService;
         return yield* service.complete(req.path.id, req.payload.result);
       }))
     )
     .handle("getDaemonTaskStatus", (req) =>
       respond(Effect.gen(function* () {
-        const service = yield* HearthService;
+        const service = yield* RuntimeService;
         const task = yield* service.getById(req.path.id);
         return { status: task.status };
       }))
     )
-    .handle("failHearthTask", (req) =>
+    .handle("failRuntimeTask", (req) =>
       respond(Effect.gen(function* () {
-        const service = yield* HearthService;
+        const service = yield* RuntimeService;
         return yield* service.fail(req.path.id, req.payload.error);
       }))
     )
-    .handle("cancelHearthTask", (req) =>
+    .handle("cancelRuntimeTask", (req) =>
       respond(Effect.gen(function* () {
-        const service = yield* HearthService;
+        const service = yield* RuntimeService;
         return yield* service.cancel(req.path.id);
       }))
     )
-    .handle("listHearthTaskLogs", (req) =>
+    .handle("listRuntimeTaskLogs", (req) =>
       respond(Effect.gen(function* () {
-        const service = yield* HearthService;
+        const service = yield* RuntimeService;
         const logs = yield* service.listLogs(req.path.id);
         return { data: logs };
       }))
     )
-    .handle("appendHearthTaskLog", (req) =>
+    .handle("appendRuntimeTaskLog", (req) =>
       respond(Effect.gen(function* () {
-        const service = yield* HearthService;
+        const service = yield* RuntimeService;
         return yield* service.appendLog(req.path.id, req.payload.message, req.payload.stream ?? "out", req.payload.level ?? "info");
       }))
     )
@@ -2887,9 +2887,9 @@ const hearthLive = HttpApiBuilder.group(LexaApi, "hearth", (handlers) =>
         return undefined;
       }))
     )
-    .handle("listHearthSessions", (req) =>
+    .handle("listRuntimeSessions", (req) =>
       respond(Effect.gen(function* () {
-        const service = yield* HearthService;
+        const service = yield* RuntimeService;
         const q = searchParams(req);
         const documentType = q.get("documentType");
         const documentId = q.get("documentId");
@@ -2897,27 +2897,27 @@ const hearthLive = HttpApiBuilder.group(LexaApi, "hearth", (handlers) =>
         // empty list (never 404).
         if (documentType !== "task" && documentType !== "wiki") return { data: [] };
         if (!documentId) return { data: [] };
-        return { data: yield* service.hearthSessionList(documentType, documentId) };
+        return { data: yield* service.runtimeSessionList(documentType, documentId) };
       }))
     )
-    .handle("upsertHearthSession", (req) =>
+    .handle("upsertRuntimeSession", (req) =>
       respond(Effect.gen(function* () {
-        const service = yield* HearthService;
-        yield* service.hearthSessionUpsert(req.payload);
+        const service = yield* RuntimeService;
+        yield* service.runtimeSessionUpsert(req.payload);
         return undefined;
       }))
     )
-    .handle("removeHearthSession", (req) =>
+    .handle("removeRuntimeSession", (req) =>
       respond(Effect.gen(function* () {
-        const service = yield* HearthService;
-        yield* service.hearthSessionRemove(req.payload.documentType, req.payload.documentId, req.payload.runtimeId);
+        const service = yield* RuntimeService;
+        yield* service.runtimeSessionRemove(req.payload.documentType, req.payload.documentId, req.payload.runtimeId);
         return undefined;
       }))
     )
-    .handle("resetHearthSession", (req) =>
+    .handle("resetRuntimeSession", (req) =>
       respond(Effect.gen(function* () {
-        const service = yield* HearthService;
-        yield* service.hearthSessionReset(req.payload.documentType, req.payload.documentId, req.payload.runtimeId);
+        const service = yield* RuntimeService;
+        yield* service.runtimeSessionReset(req.payload.documentType, req.payload.documentId, req.payload.runtimeId);
         return undefined;
       }))
     )
@@ -2927,7 +2927,7 @@ const agentsLive = HttpApiBuilder.group(LexaApi, "agents", (handlers) =>
   handlers
     .handle("listAgents", () =>
       respond(Effect.gen(function* () {
-        const service = yield* HearthService;
+        const service = yield* RuntimeService;
         const agents = yield* service.listAgents();
         return { data: agents };
       }))
@@ -2935,14 +2935,14 @@ const agentsLive = HttpApiBuilder.group(LexaApi, "agents", (handlers) =>
     .handle("createAgent", (req) =>
       respond(Effect.gen(function* () {
         yield* requireAdmin;
-        const service = yield* HearthService;
+        const service = yield* RuntimeService;
         return yield* service.createAgent(req.payload);
       }))
     )
     .handle("updateAgent", (req) =>
       respond(Effect.gen(function* () {
         yield* requireAdmin;
-        const service = yield* HearthService;
+        const service = yield* RuntimeService;
         return yield* service.updateAgent(req.path.id, {
           ...(req.payload.name !== undefined ? { name: req.payload.name } : {}),
           ...(req.payload.description !== undefined ? { description: req.payload.description } : {}),
@@ -2953,7 +2953,7 @@ const agentsLive = HttpApiBuilder.group(LexaApi, "agents", (handlers) =>
     .handle("deleteAgent", (req) =>
       respond(Effect.gen(function* () {
         yield* requireAdmin;
-        const service = yield* HearthService;
+        const service = yield* RuntimeService;
         yield* service.deleteAgent(req.path.id);
         return undefined;
       }))
@@ -2961,14 +2961,14 @@ const agentsLive = HttpApiBuilder.group(LexaApi, "agents", (handlers) =>
     .handle("replaceAgentSkills", (req) =>
       respond(Effect.gen(function* () {
         yield* requireAdmin;
-        const service = yield* HearthService;
+        const service = yield* RuntimeService;
         return yield* service.replaceAgentSkills(req.path.id, [...req.payload.skillIds]);
       }))
     )
     .handle("resetAgent", (req) =>
       respond(Effect.gen(function* () {
         yield* requireAdmin;
-        const service = yield* HearthService;
+        const service = yield* RuntimeService;
         return yield* service.resetAgentToDefault(req.path.id);
       }))
     )
@@ -2978,7 +2978,7 @@ const skillsLive = HttpApiBuilder.group(LexaApi, "skills", (handlers) =>
   handlers
     .handle("listSkills", () =>
       respond(Effect.gen(function* () {
-        const service = yield* HearthService;
+        const service = yield* RuntimeService;
         const skills = yield* service.listSkills();
         return { data: skills };
       }))
@@ -2986,14 +2986,14 @@ const skillsLive = HttpApiBuilder.group(LexaApi, "skills", (handlers) =>
     .handle("createSkill", (req) =>
       respond(Effect.gen(function* () {
         yield* requireAdmin;
-        const service = yield* HearthService;
+        const service = yield* RuntimeService;
         return yield* service.createSkill(req.payload);
       }))
     )
     .handle("updateSkill", (req) =>
       respond(Effect.gen(function* () {
         yield* requireAdmin;
-        const service = yield* HearthService;
+        const service = yield* RuntimeService;
         return yield* service.updateSkill(req.path.id, {
           ...(req.payload.name !== undefined ? { name: req.payload.name } : {}),
           ...(req.payload.description !== undefined ? { description: req.payload.description } : {}),
@@ -3004,7 +3004,7 @@ const skillsLive = HttpApiBuilder.group(LexaApi, "skills", (handlers) =>
     .handle("deleteSkill", (req) =>
       respond(Effect.gen(function* () {
         yield* requireAdmin;
-        const service = yield* HearthService;
+        const service = yield* RuntimeService;
         yield* service.deleteSkill(req.path.id);
         return undefined;
       }))
@@ -3012,7 +3012,7 @@ const skillsLive = HttpApiBuilder.group(LexaApi, "skills", (handlers) =>
     .handle("resetSkill", (req) =>
       respond(Effect.gen(function* () {
         yield* requireAdmin;
-        const service = yield* HearthService;
+        const service = yield* RuntimeService;
         return yield* service.resetSkillToDefault(req.path.id);
       }))
     )
@@ -3130,8 +3130,8 @@ const heraldLive = HttpApiBuilder.group(LexaApi, "herald", (handlers) =>
     .handle("streamHeraldTask", (req) =>
       respond(Effect.gen(function* () {
         const identity = yield* AuthIdentity;
-        const hearthService = yield* HearthService;
-        const task = yield* hearthService.getById(req.path.id);
+        const runtimeService = yield* RuntimeService;
+        const task = yield* runtimeService.getById(req.path.id);
         if (identity.role !== "admin" && identity.userId) {
           const authz = yield* AuthorizationService;
           const access = yield* authz.projectAccess(identity.userId, task.projectId);
@@ -3146,9 +3146,9 @@ const heraldLive = HttpApiBuilder.group(LexaApi, "herald", (handlers) =>
     .handle("cancelHeraldTask", (req) =>
       respond(Effect.gen(function* () {
         const service = yield* HeraldService;
-        const hearthService = yield* HearthService;
+        const runtimeService = yield* RuntimeService;
         if (!service.abortStream(req.path.id)) {
-          yield* hearthService.cancel(req.path.id);
+          yield* runtimeService.cancel(req.path.id);
         }
         return { ok: true as const };
       }))
@@ -4703,7 +4703,7 @@ function formatWikiPageRevision<T>(r: T): T {
 
 function routeGroups() {
   return Layer.mergeAll(
-    healthLive, setupLive, projectsLive, columnsLive, swimlanesLive, milestonesLive, fieldConfigLive, hearthLive, agentsLive, skillsLive, heraldLive, taskLinksLive, tasksLive, boardLive, wikiLive, publicShareLive, attachmentsLive, apiKeysLive, deviceLoginLive, adminLive, adminHeraldLive, projectHeraldUsageLive, meLive, dashboardLive,
+    healthLive, setupLive, projectsLive, columnsLive, swimlanesLive, milestonesLive, fieldConfigLive, runtimesLive, agentsLive, skillsLive, heraldLive, taskLinksLive, tasksLive, boardLive, wikiLive, publicShareLive, attachmentsLive, apiKeysLive, deviceLoginLive, adminLive, adminHeraldLive, projectHeraldUsageLive, meLive, dashboardLive,
     createTeamsLive(LexaApi), createWorkspaceLive(LexaApi), createSessionsLive(LexaApi),
   );
 }
@@ -4716,7 +4716,7 @@ export function createApiHandler(dbPath: string, env?: RuntimeEnv) {
     try {
       const { handler, driver } = await ready;
       const res = await handler(req);
-      if (url.pathname === "/api/hearth/tasks/recent" && req.method === "GET" && res.status < 400) {
+      if (url.pathname === "/api/runtimes/tasks/recent" && req.method === "GET" && res.status < 400) {
         const row = await Effect.runPromise(
           queryFirst<{ v: number }>(driver, "SELECT 1 AS v FROM runtimes WHERE status = 'online' LIMIT 1").pipe(
             Effect.catchAll(() => Effect.succeed(null))
@@ -4748,7 +4748,7 @@ function buildServiceLayerWithStorage(storageCfg: StorageConfigShape) {
     MilestoneRepo.Default, MilestoneService.Default,
     TaskRepo.Default, TaskService.Default,
     FieldConfigRepo.Default, FieldConfigService.Default,
-    HearthRepo.Default, HearthService.Default,
+    RuntimeRepo.Default, RuntimeService.Default,
     HeraldSettingsRepo.Default, HeraldThreadRepo.Default, ProjectMemoryRepo.Default,
     HeraldChatService.Default.pipe(
       Layer.provide(Layer.mergeAll(storageLayerFor(storageCfg), Layer.succeed(StorageConfig, storageCfg)))
@@ -4900,10 +4900,10 @@ function createWorkersApiMiddleware(
       const isSetup = path.startsWith("/api/setup");
       const isHealth = path === "/api/health";
       const isPublicShare = path.startsWith("/api/share/");
-      const isHearthDaemon =
-        path.startsWith("/api/hearth/daemon/") ||
-        path === "/api/hearth/runtimes/register" ||
-        path === "/api/hearth/sessions";
+      const isRuntimeDaemon =
+        path.startsWith("/api/runtimes/daemon/") ||
+        path === "/api/runtimes/register" ||
+        path === "/api/runtimes/sessions";
       // Device-login pairing: create + poll are API-key exempt (still
       // rate-limited); approve/deny run through normal session auth.
       const isDeviceLogin = request.method === "POST" && path === "/api/device-login/requests"
@@ -4936,8 +4936,8 @@ function createWorkersApiMiddleware(
         );
       }
 
-      const daemonTokenOk = isHearthDaemon && runtimeEnv.LXK_HEARTH_DAEMON_TOKEN
-        ? constantTimeTokenEqual(request.headers["x-hearth-token"] ?? "", runtimeEnv.LXK_HEARTH_DAEMON_TOKEN)
+      const daemonTokenOk = isRuntimeDaemon && runtimeEnv.LXK_RUNTIME_DAEMON_TOKEN
+        ? constantTimeTokenEqual(request.headers["x-runtime-token"] ?? "", runtimeEnv.LXK_RUNTIME_DAEMON_TOKEN)
         : false;
       let identity: AuthIdentityShape;
       if (!isHealth && !isSetup && !daemonTokenOk && !isPublicShare && !isDeviceLogin) {

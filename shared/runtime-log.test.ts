@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { classifyLogLine } from "./hearth-log";
+import { classifyLogLine } from "./runtime-log";
 
 describe("classifyLogLine", () => {
   it("classifies stdout as info always", () => {
