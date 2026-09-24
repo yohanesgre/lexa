@@ -29,13 +29,13 @@ describe("buildSetArchivedAndEmitBatch", () => {
       actorUserId: "u1",
       archivedMessage: "Maria archived this task",
       restoredMessage: "Maria restored this task",
-      viaHerald: false,
+      viaAssistant: false,
     });
     expect(stmts).toHaveLength(2);
     expect(stmts[0]!.sql).toMatch(/UPDATE tasks SET archived_at = \?, updated_at = \? WHERE id = \?/);
     expect(stmts[0]!.params).toEqual(["2026-08-25T10:00:00Z", expect.anything(), "t1"]);
     expect(stmts[1]!.sql).toMatch(/INSERT INTO task_activity/);
-    expect(stmts[1]!.sql).toMatch(/type, message, via_herald/);
+    expect(stmts[1]!.sql).toMatch(/type, message, via_assistant/);
     expect(stmts[1]!.params).toEqual([
       "t1",
       "user",
@@ -52,16 +52,16 @@ describe("buildSetArchivedAndEmitBatch", () => {
       taskId: "t1",
       archivedAt: null,
       actorKind: "agent",
-      actorLabel: "herald",
+      actorLabel: "assistant",
       actorUserId: null,
       archivedMessage: "Maria archived this task",
-      restoredMessage: "herald restored this task",
-      viaHerald: true,
+      restoredMessage: "assistant restored this task",
+      viaAssistant: true,
     });
     expect(stmts).toHaveLength(2);
     expect(stmts[0]!.params[0]!).toBeNull();
     expect(stmts[1]!.params[4]!).toBe("restored");
-    expect(stmts[1]!.params[5]!).toBe("herald restored this task");
+    expect(stmts[1]!.params[5]!).toBe("assistant restored this task");
     expect(stmts[1]!.params[6]!).toBe(1);
   });
 });
@@ -103,7 +103,7 @@ describe("emission builders (B2 batch re-expression)", () => {
     actorUserId: "u1",
     type: "created",
     message: "Maria created this task",
-    viaHerald: false,
+    viaAssistant: false,
   };
 
   it("buildTaskCreateBatch: task + assignees + subtask link + activity, in order", () => {
@@ -192,7 +192,7 @@ describe("emission builders (B2 batch re-expression)", () => {
     const stmts = buildWebhookMoveAndEmitBatch({
       taskId: "t1", issueId: "i1", columnId: "c2", swimlaneId: "s1",
       position: "a0", syncedState: "closed",
-      activity: { actorKind: "system", actorLabel: "github", actorUserId: null, type: "github_synced", message: "GitHub synced #7 → closed", viaHerald: false },
+      activity: { actorKind: "system", actorLabel: "github", actorUserId: null, type: "github_synced", message: "GitHub synced #7 → closed", viaAssistant: false },
     });
     expect(stmts).toHaveLength(3);
     expect(stmts[1]!.params).toEqual(["closed", "t1", "i1"]);

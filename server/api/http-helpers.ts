@@ -13,7 +13,7 @@ export const respond = <A, E, R>(eff: Effect.Effect<A, E, R>): Effect.Effect<A |
         const err = failure.value as { _tag: string; stack?: string; cause?: unknown } & Record<string, unknown>;
         const resp = errorResponse(err);
         const status = errorToStatus(err);
-        const isTransientChat404 = err._tag === "HeraldThreadNotFound" && (err as { documentType?: unknown }).documentType === "chat";
+        const isTransientChat404 = err._tag === "AssistantThreadNotFound" && (err as { documentType?: unknown }).documentType === "chat";
         if (isTransientChat404) {
           const chatId = String((err as { documentId?: unknown }).documentId ?? resp.error.details["documentId"] ?? "");
           try {

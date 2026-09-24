@@ -28,14 +28,14 @@ export interface ActivityInput {
   actorUserId: string | null;
   type: string;
   message: string;
-  viaHerald: boolean;
+  viaAssistant: boolean;
 }
 
 export function buildActivityStmts(taskId: string, rows: ActivityInput[]): BatchStmt[] {
   return rows.map((r) => ({
-    sql: `INSERT INTO task_activity (task_id, actor_kind, actor_label, actor_user_id, type, message, via_herald)
+    sql: `INSERT INTO task_activity (task_id, actor_kind, actor_label, actor_user_id, type, message, via_assistant)
            VALUES (?, ?, ?, ?, ?, ?, ?)`,
-    params: [taskId, r.actorKind, r.actorLabel, r.actorUserId, r.type, r.message, r.viaHerald ? 1 : 0],
+    params: [taskId, r.actorKind, r.actorLabel, r.actorUserId, r.type, r.message, r.viaAssistant ? 1 : 0],
   }));
 }
 
@@ -214,7 +214,7 @@ export function buildSetArchivedAndEmitBatch(input: {
   actorUserId: string | null;
   archivedMessage: string;     // "X archived this task" or "X restored this task"
   restoredMessage: string;
-  viaHerald: boolean;
+  viaAssistant: boolean;
 }): BatchStmt[] {
   const now = new Date().toISOString();
   const type = input.archivedAt ? "archived" : "restored";
@@ -225,7 +225,7 @@ export function buildSetArchivedAndEmitBatch(input: {
       params: [input.archivedAt, now, input.taskId],
     },
     {
-      sql: `INSERT INTO task_activity (task_id, actor_kind, actor_label, actor_user_id, type, message, via_herald)
+      sql: `INSERT INTO task_activity (task_id, actor_kind, actor_label, actor_user_id, type, message, via_assistant)
              VALUES (?, ?, ?, ?, ?, ?, ?)`,
       params: [
         input.taskId,
@@ -234,7 +234,7 @@ export function buildSetArchivedAndEmitBatch(input: {
         input.actorUserId,
         type,
         message,
-        input.viaHerald ? 1 : 0,
+        input.viaAssistant ? 1 : 0,
       ],
     },
   ];

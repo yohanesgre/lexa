@@ -303,7 +303,7 @@ export class RuntimeRepo extends Effect.Service<RuntimeRepo>()("Lexa/RuntimeRepo
         selection: string;
         docContext: string;
         runtimeId?: string;          // preferred runtime (set at claim time if omitted)
-        kind?: "blacksmith" | "herald";
+        kind?: "blacksmith" | "assistant";
       }): Effect.Effect<RuntimeTask, ConstraintViolation | DbError | RowNotFound> =>
         Effect.gen(function* () {
           yield* run(
@@ -367,20 +367,20 @@ export class RuntimeRepo extends Effect.Service<RuntimeRepo>()("Lexa/RuntimeRepo
           return updated.status === "running" && updated.runtimeId === runtimeId ? updated : null;
         }),
 
-      // Herald stream handler claims its task with a conditional UPDATE —
+      // Assistant stream handler claims its task with a conditional UPDATE —
       // kind-scoped so a blacksmith row can never be claimed here, and
       // status-scoped so a double claim (retry, concurrent stream) loses the
       // race and surfaces as ConstraintViolation.
-      claimHeraldTask: (taskId: string): Effect.Effect<RuntimeTask, ConstraintViolation | DbError | RowNotFound> =>
+      claimAssistantTask: (taskId: string): Effect.Effect<RuntimeTask, ConstraintViolation | DbError | RowNotFound> =>
         Effect.gen(function* () {
           const changes = yield* run(
             db,
             `UPDATE runtime_tasks SET status = 'running', started_at = datetime('now')
-             WHERE id = ? AND kind = 'herald' AND status = 'queued'`,
+             WHERE id = ? AND kind = 'assistant' AND status = 'queued'`,
             taskId
           );
           if (changes === 0) {
-            return yield* Effect.fail(new ConstraintViolation({ message: `task ${taskId} is not a queued herald task`, isPositionConflict: false }));
+            return yield* Effect.fail(new ConstraintViolation({ message: `task ${taskId} is not a queued assistant task`, isPositionConflict: false }));
           }
           return yield* queryFirst<RuntimeTaskRow>(db, `${TASK_SELECT} WHERE ft.id = ?`, taskId).pipe(
             Effect.map(rowToRuntimeTask)
