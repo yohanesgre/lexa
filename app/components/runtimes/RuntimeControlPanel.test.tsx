@@ -4,7 +4,8 @@ import { describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
 import type { UseQueryResult } from "@tanstack/react-query";
 import type { RuntimeTaskStatus } from "../../../shared/types";
-import { FilterBar, HistoryStates, historyTotal, paginationLabel } from "./RuntimeControlPanel";
+import { FilterBar, HistoryStates } from "./RuntimeControlPanel";
+import { historyTotal, paginationLabel } from "../../lib/runtime-panel-utils";
 
 const SUMMARY: Record<RuntimeTaskStatus, number> = { queued: 1, running: 2, completed: 18, failed: 3, cancelled: 2 };
 

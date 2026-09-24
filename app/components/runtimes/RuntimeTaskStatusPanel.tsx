@@ -4,6 +4,7 @@ import { cn } from "../ui/cn";
 import { classifyLogLine } from "../../lib/runtime-log-line";
 import { parseApiDate } from "../../lib/date";
 import type { RuntimeTask, RuntimeTaskLog, RuntimeTaskStatus, Runtime } from "../../../shared/types";
+import { runLabel } from "../../lib/runtime-panel-utils";
 
 // SQLite datetime('now') is "YYYY-MM-DD HH:MM:SS" in UTC — render the local
 // wall-clock time for the log's timestamp column. Module-scope formatter with
@@ -58,15 +59,6 @@ export function TaskBrief({ taskData }: { taskData: RuntimeTask }) {
       ))}
     </div>
   );
-}
-
-// Wireframe runtime-popover.html:86 — the running line is
-// "<runtime> · <provider> · <skill>" once a runtime has claimed the task.
-export function runLabel(taskData: RuntimeTask | null, runtimes: Runtime[]): string {
-  if (!taskData?.runtimeId) return "Queued…";
-  const runtime = runtimes.find((r) => r.id === taskData.runtimeId);
-  const meta = [runtime?.name, runtime?.provider, taskData.skillName].filter(Boolean).join(" · ");
-  return meta || "Agent working…";
 }
 
 function TaskDonePanel({ taskData, failed, reviewActive, dismissedIdsRef, setTaskId, runtimes, onReview }: {

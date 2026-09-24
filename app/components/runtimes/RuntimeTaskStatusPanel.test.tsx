@@ -3,7 +3,8 @@ import "@testing-library/jest-dom/vitest";
 import { describe, expect, it } from "vitest";
 import { render, screen } from "@testing-library/react";
 import type { RuntimeTask, Runtime } from "../../../shared/types";
-import { TaskBrief, runLabel } from "./RuntimeTaskStatusPanel";
+import { TaskBrief } from "./RuntimeTaskStatusPanel";
+import { runLabel } from "../../lib/runtime-panel-utils";
 
 const RUN: RuntimeTask = {
   id: "ht1",

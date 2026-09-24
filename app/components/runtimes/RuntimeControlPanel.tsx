@@ -14,8 +14,7 @@ import { RuntimeTaskLogModal } from "./RuntimeTaskLogModal";
 import { TaskNotFoundBody } from "../TaskNotFoundDialog";
 import { classifyLogLine } from "../../lib/runtime-log-line";
 import type { RuntimeTask, RuntimeTaskLog, RuntimeTaskStatus, Runtime } from "../../../shared/types";
-
-const STATUS_ORDER: RuntimeTaskStatus[] = ["queued", "running", "completed", "failed", "cancelled"];
+import { STATUS_ORDER, historyTotal, paginationLabel } from "../../lib/runtime-panel-utils";
 
 const STATUS_META: Record<RuntimeTaskStatus, { label: string; color: string; dot: string; tint: string }> = {
   queued: { label: "Queued", color: "text-lx-text-warning", dot: "var(--lx-text-warning)", tint: "var(--lx-bg-warning-subtle)" },
@@ -94,19 +93,6 @@ function runtimeLabel(data: Runtime[] | undefined, id: string | null): string {
 
 function activeRunCount(summary: Record<RuntimeTaskStatus, number> | undefined): number {
   return (summary?.queued ?? 0) + (summary?.running ?? 0);
-}
-
-// Total run count for the pagination line ("Showing 5 of 26 runs"). The
-// history response carries the global per-status summary (no total field),
-// so sum the statuses — matching the wireframe's "of N runs" copy.
-export function historyTotal(summary: Record<RuntimeTaskStatus, number> | undefined): number | null {
-  if (!summary) return null;
-  return STATUS_ORDER.reduce((n, s) => n + (summary[s] ?? 0), 0);
-}
-
-export function paginationLabel(pageLength: number, total: number | null): string {
-  if (pageLength === 0) return "End of history";
-  return total !== null ? `Showing ${pageLength} of ${total} runs` : `Showing ${pageLength} runs`;
 }
 
 function projectSlugFor(projects: { data?: { id: string; slug: string }[] | undefined }, detail: RuntimeTask | null): string | undefined {
