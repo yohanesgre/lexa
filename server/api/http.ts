@@ -954,7 +954,7 @@ const runtimesGroup = HttpApiGroup.make("runtimes")
     .addSuccess(Schema.Void, { status: 204 }));
 
 // Lexa Agents/Skills catalog (S14) — top-level groups, hard cutover from the
-// old hearth-prefixed paths (no aliases).
+// old assistant-prefixed paths (no aliases).
 const agentsGroup = HttpApiGroup.make("agents")
   .add(HttpApiEndpoint.get("listAgents", "/agents")
     .addSuccess(Schema.Struct({ data: Schema.Array(LexaAgentSchema) })))

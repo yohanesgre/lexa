@@ -171,7 +171,7 @@ const LEGACY_HEARTH_ENV: ReadonlyArray<readonly [string, string]> = [
   ["HEARTH_CMD_BIN", "RUNTIME_CMD_BIN"],
 ];
 
-export function legacyHearthEnvWarning(source: ProcessEnvSource): string | null {
+export function legacyRuntimeEnvWarning(source: ProcessEnvSource): string | null {
   const stale = LEGACY_HEARTH_ENV.filter(([oldKey, newKey]) => source[oldKey] !== undefined && source[newKey] === undefined);
   if (stale.length === 0) return null;
   return `Legacy HEARTH_* environment variables are set without their RUNTIME_* replacements: ${stale

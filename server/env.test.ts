@@ -4,7 +4,7 @@ import {
   DEFAULT_PUBLIC_URL,
   getEnv,
   getEnvFromWorkers,
-  legacyHearthEnvWarning,
+  legacyRuntimeEnvWarning,
   resolveDatabasePath,
   resolvePublicUrl,
   resolveTrustedOrigins,
@@ -47,16 +47,16 @@ describe("getEnv", () => {
   });
 });
 
-describe("legacyHearthEnvWarning", () => {
+describe("legacyRuntimeEnvWarning", () => {
   it("warns when a legacy HEARTH_* key is set without its RUNTIME_* replacement", () => {
-    const msg = legacyHearthEnvWarning({ LXK_HEARTH_DAEMON_TOKEN: "old" });
+    const msg = legacyRuntimeEnvWarning({ LXK_HEARTH_DAEMON_TOKEN: "old" });
     expect(msg).toContain("LXK_HEARTH_DAEMON_TOKEN");
     expect(msg).toContain("LXK_RUNTIME_DAEMON_TOKEN");
   });
 
   it("stays quiet when the replacement is set or the old key is absent", () => {
-    expect(legacyHearthEnvWarning({ LXK_RUNTIME_DAEMON_TOKEN: "new", LXK_HEARTH_DAEMON_TOKEN: "old" })).toBeNull();
-    expect(legacyHearthEnvWarning({})).toBeNull();
+    expect(legacyRuntimeEnvWarning({ LXK_RUNTIME_DAEMON_TOKEN: "new", LXK_HEARTH_DAEMON_TOKEN: "old" })).toBeNull();
+    expect(legacyRuntimeEnvWarning({})).toBeNull();
   });
 });
 
