@@ -119,7 +119,7 @@ Each is a hard-won design fix; rationale lives in `docs/ARCHITECTURE.md` and the
 | 4 | Positions are fractional-index keys. Generation is deterministic — retries must re-read anchors before regenerating. Neighborless moves append to end; never `generateKeyBetween(null, null)` into a non-empty column. Retry only on `isPositionConflict`, at most once. | Stable ordering under concurrent reorders. |
 | 5 | WIP limit enforced inside the conditional UPDATE (atomic), with within-column-reorder short-circuit (`column_id = ?2 OR count < limit`). | Race-free enforcement. |
 | 6 | Mutation responses are authoritative. Frontend updates TanStack Query cache via `setQueryData` from the mutation response. Never `invalidateQueries` on the mutation path. | Cache consistency. |
-| 7 | REST boundary speaks TipTap JSON. Markdown conversion lives only in `shared/markdown.ts` (used by GitHub sync, Hearth, CLI); the frontend never sees Markdown. | Single conversion surface. |
+| 7 | REST boundary speaks TipTap JSON. Markdown conversion lives only in `shared/markdown.ts` (used by GitHub sync, Runtimes, CLI); the frontend never sees Markdown. | Single conversion surface. |
 | 8 | Webhook route has no API-key middleware — HMAC-SHA-256 signature verification over the raw body is the auth, and it runs before JSON parsing. | Webhook auth is signature, not bearer. |
 | 9 | Column→GitHub state mapping uses `columns.github_state`, never column names. | Decouples labels from identifiers. |
 | 10 | `required_fields` enforced on create, move, AND update, with TipTap-aware emptiness (a doc with no text nodes is empty). | No silent bypass. |
@@ -166,7 +166,7 @@ Lane-scoped tests for iteration (pick your lane — `test`/`test:full` stay for 
 | backend | `bun run test:be` | `shared/` + `server/` incl. `server/api` |
 | frontend | `bun run test:fe` | `shared/` + `app/` |
 | cli | `bun run test:cli` | `cli/src/` |
-| hearth | `bun run test:hearth` | `hearth/` + `shared/hearth-log` + `server/*hearth*` |
+| daemon | `bun run test:daemon` | `daemon/` + `shared/runtime-log` |
 
 Full suite (`bun run test` / `test:full`) + `check:invariants` run only at the final gate / CI (PR runs `test:critical`, main runs `test:full` — see `.github/workflows/ci.yml`).
 
@@ -220,7 +220,7 @@ Key facts:
 
 ## Reference (read the linked doc/skill, don't inline it here)
 
-- **Hearth (AI runtime):** `docs/HEARTH.md` — tier table, daemon/listener, run claim flow, warm opencode serve, persistent sandbox/workspace.
+- **Runtimes (AI runtime):** `docs/RUNTIMES.md` — tier table, daemon/listener, run claim flow, warm opencode serve, persistent sandbox/workspace.
 - **Releasing:** `docs/RELEASING.md` — version policy, pre-tag checklist, image flow, CLI build flow, deploy state.
 - **lexa-cli operator tool:** the `lexa-cli` skill (auto-discovered; the
   project ships one at `~/.agents/skills/lexa-cli/SKILL.md`). Load it before
