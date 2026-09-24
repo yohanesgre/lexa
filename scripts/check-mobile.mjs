@@ -28,7 +28,7 @@ const VIEWPORTS = [
 // when logged in. Project-scoped routes use the first project the user has.
 const ROUTES = [
   { path: "/", name: "Home (project list)" },
-  { path: "/hearth", name: "Hearth" },
+  { path: "/runtimes", name: "Runtimes" },
   { path: "/settings/workspace", name: "Settings / Workspace" },
   { path: "/settings/team", name: "Settings / Team" },
   { path: "/settings/me", name: "Settings / Me" },

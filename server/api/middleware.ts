@@ -73,12 +73,12 @@ export function createApiMiddleware(db: Database, dbPath: string, env: RuntimeEn
       // AUTH below but still rate-limited — with the dedicated stricter
       // shareRateLimiter bucket instead of the general API bucket.
       const isPublicShare = path.startsWith("/api/share/");
-      // Hearth daemon endpoints accept the daemon token (LXK_HEARTH_DAEMON_TOKEN)
+      // Runtime daemon endpoints accept the daemon token (LXK_RUNTIME_DAEMON_TOKEN)
       // in place of the API key — the daemon may hold its own credential.
-      // /api/hearth/sessions joins them: the daemon PUTs the pre-spawn mapping
-      // and DELETEs it on cancel/timeout with x-hearth-token; the browser
+      // /api/runtimes/sessions joins them: the daemon PUTs the pre-spawn mapping
+      // and DELETEs it on cancel/timeout with x-runtime-token; the browser
       // GET/reset keep using the Bearer key.
-      const isHearthDaemon = path.startsWith("/api/hearth/daemon/") || path === "/api/hearth/runtimes/register" || path === "/api/hearth/sessions";
+      const isRuntimeDaemon = path.startsWith("/api/runtimes/daemon/") || path === "/api/runtimes/register" || path === "/api/runtimes/sessions";
       // Device-login pairing: the CLI has no credential yet. Create + poll
       // are API-key exempt (still rate-limited); approve/deny go through
       // normal session auth — never exempt.
@@ -86,7 +86,7 @@ export function createApiMiddleware(db: Database, dbPath: string, env: RuntimeEn
         || request.method === "GET" && /^\/api\/device-login\/requests\/[^/]+$/.test(path);
 
       // Rate limit before auth: a blocked IP stays blocked regardless of key.
-      // The key/token-gated hearth machine surfaces are exempt (isRateLimitExemptPath:
+      // The key/token-gated runtime machine surfaces are exempt (isRateLimitExemptPath:
       // daemon log POSTs, runtime registration, the listener's 3s heartbeat — a
       // chatty agent's traffic must not share the IP bucket); setup and health are
       // rate-limited again. IP is resolved in entry (socket only visible there) and
@@ -119,8 +119,8 @@ export function createApiMiddleware(db: Database, dbPath: string, env: RuntimeEn
         );
       }
 
-      const daemonTokenOk = isHearthDaemon && env.LXK_HEARTH_DAEMON_TOKEN
-        ? constantTimeTokenEqual(request.headers["x-hearth-token"] ?? "", env.LXK_HEARTH_DAEMON_TOKEN)
+      const daemonTokenOk = isRuntimeDaemon && env.LXK_RUNTIME_DAEMON_TOKEN
+        ? constantTimeTokenEqual(request.headers["x-runtime-token"] ?? "", env.LXK_RUNTIME_DAEMON_TOKEN)
         : false;
       let identity: AuthIdentityShape;
       if (!isHealth && !isSetup && !daemonTokenOk && !isPublicShare && !isDeviceLogin) {

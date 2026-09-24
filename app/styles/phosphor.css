@@ -1352,7 +1352,7 @@
   /* ---- Task detail slideover — page rhythm + recolored panel ----
      Same content style as .task-page: 24px title, right-aligned footer, and
      the app surface instead of the elevated slideover surface. Other
-     slideovers (Hearth task detail) keep --lx-surface-elevated. */
+     slideovers (Runtime task detail) keep --lx-surface-elevated. */
   .slideover.task-detail-panel {
     background: var(--lx-surface-app);
   }
@@ -1535,8 +1535,8 @@
     box-shadow: var(--lx-focus-glow);
   }
 
-  /* Hearth review-in-editor: focused panel in the editor body — between the
-     toolbar and the document (hearth-review wireframe). Not toolbar chrome:
+  /* Runtime review-in-editor: focused panel in the editor body — between the
+     toolbar and the document (runtime-review wireframe). Not toolbar chrome:
      the wrapper carries the focus ring and the document dims until Accept. */
   .editor-wrapper.is-reviewing {
     border-color: var(--lx-border-focus);
@@ -1546,14 +1546,14 @@
     opacity: 0.55;
     pointer-events: none;
   }
-  .hearth-review-panel {
+  .runtime-review-panel {
     background: var(--lx-surface-card);
     border-top: 1px solid var(--lx-border-default);
     border-bottom: 1px solid var(--lx-border-default);
     overflow: hidden;
   }
 
-  .hearth-review-banner {
+  .runtime-review-banner {
     display: flex;
     align-items: center;
     justify-content: space-between;
@@ -1562,13 +1562,13 @@
     background: var(--lx-bg-warning-subtle);
     border-bottom: 1px solid var(--lx-border-default);
   }
-  .hearth-review-identity {
+  .runtime-review-identity {
     display: flex;
     flex-direction: column;
     gap: 2px;
     min-width: 0;
   }
-  .hearth-review-title {
+  .runtime-review-title {
     font-family: var(--lx-font-micro);
     font-size: 11px;
     text-transform: uppercase;
@@ -1578,7 +1578,7 @@
     overflow: hidden;
     text-overflow: ellipsis;
   }
-  .hearth-review-note {
+  .runtime-review-note {
     font-size: 11px;
     color: var(--lx-text-secondary);
     opacity: 0.8;
@@ -1587,14 +1587,14 @@
     text-overflow: ellipsis;
   }
 
-  .hearth-diff {
+  .runtime-diff {
     margin: 0;
     border: 0;
     border-radius: 0;
     overflow: hidden;
     background: var(--lx-surface-card);
   }
-  .hearth-diff-empty {
+  .runtime-diff-empty {
     margin: 0;
     padding: 16px;
     border: 0;
@@ -1604,10 +1604,10 @@
     font-size: 12px;
     color: var(--lx-text-muted);
   }
-  .hearth-diff-hunk + .hearth-diff-hunk {
+  .runtime-diff-hunk + .runtime-diff-hunk {
     border-top: 1px solid var(--lx-border-default);
   }
-  .hearth-diff-hunk-header {
+  .runtime-diff-hunk-header {
     display: flex;
     align-items: center;
     gap: 8px;
@@ -1618,7 +1618,7 @@
     font-size: 11px;
     color: var(--lx-text-muted);
   }
-  .hearth-diff-line {
+  .runtime-diff-line {
     display: flex;
     gap: 10px;
     padding: 2px 12px;
@@ -1626,39 +1626,39 @@
     font-size: 12px;
     line-height: 20px;
   }
-  .hearth-diff-line.del {
+  .runtime-diff-line.del {
     background: var(--lx-bg-danger-subtle);
   }
-  .hearth-diff-line.add {
+  .runtime-diff-line.add {
     background: var(--lx-bg-success-subtle);
   }
-  .hearth-diff-sign {
+  .runtime-diff-sign {
     color: var(--lx-text-danger);
     flex-shrink: 0;
     user-select: none;
   }
-  .hearth-diff-line.add .hearth-diff-sign {
+  .runtime-diff-line.add .runtime-diff-sign {
     color: var(--lx-text-success);
   }
-  .hearth-diff-text {
+  .runtime-diff-text {
     color: var(--lx-text-secondary);
     overflow-wrap: anywhere;
   }
-  .hearth-diff-line.del > .hearth-diff-text {
+  .runtime-diff-line.del > .runtime-diff-text {
     color: var(--lx-text-danger);
   }
-  .hearth-diff-line.add > .hearth-diff-text {
+  .runtime-diff-line.add > .runtime-diff-text {
     color: var(--lx-text-success);
   }
-  .hearth-diff-span.same {
+  .runtime-diff-span.same {
     color: var(--lx-text-secondary);
   }
-  .hearth-diff-span.del {
+  .runtime-diff-span.del {
     background: color-mix(in srgb, var(--lx-text-danger) 22%, transparent);
     color: var(--lx-text-danger);
     border-radius: 3px;
   }
-  .hearth-diff-span.add {
+  .runtime-diff-span.add {
     background: color-mix(in srgb, var(--lx-text-success) 22%, transparent);
     color: var(--lx-text-success);
     border-radius: 3px;
@@ -2157,8 +2157,8 @@
     gap: 8px;
   }
 
-  /* Hearth status pill in the navbar (running / done / failed states) */
-  .hearth-status {
+  /* Runtime status pill in the navbar (running / done / failed states) */
+  .runtime-status {
     display: inline-flex;
     align-items: center;
     gap: 6px;
@@ -2172,12 +2172,12 @@
     cursor: pointer;
     transition: background 100ms, border-color 100ms;
   }
-  .hearth-status--idle    { background: var(--lx-surface-card); border-color: var(--lx-border-default); color: var(--lx-text-secondary); }
-  .hearth-status--warning { background: var(--lx-surface-card); border-color: rgba(240, 192, 64, 0.35); color: var(--lx-text-primary); }
-  .hearth-status--danger  { background: var(--lx-bg-danger-subtle); border-color: var(--lx-bg-danger-subtle); color: var(--lx-text-danger); }
-  .hearth-status--ok      { background: var(--lx-bg-success-subtle); border-color: rgba(74, 222, 128, 0.25); color: var(--lx-text-success); }
-  /* Dismiss (X) on finished tasks in the Hearth status panel */
-  .hearth-dismiss {
+  .runtime-status--idle    { background: var(--lx-surface-card); border-color: var(--lx-border-default); color: var(--lx-text-secondary); }
+  .runtime-status--warning { background: var(--lx-surface-card); border-color: rgba(240, 192, 64, 0.35); color: var(--lx-text-primary); }
+  .runtime-status--danger  { background: var(--lx-bg-danger-subtle); border-color: var(--lx-bg-danger-subtle); color: var(--lx-text-danger); }
+  .runtime-status--ok      { background: var(--lx-bg-success-subtle); border-color: rgba(74, 222, 128, 0.25); color: var(--lx-text-success); }
+  /* Dismiss (X) on finished tasks in the Runtime status panel */
+  .runtime-dismiss {
     display: inline-flex;
     align-items: center;
     justify-content: center;
@@ -2192,14 +2192,14 @@
     transition: background 100ms, color 100ms;
   }
 
-  /* Live activity feed for a running Hearth task (popover) */
-  .hearth-task-log {
+  /* Live activity feed for a running Runtime task (popover) */
+  .runtime-log {
     background: var(--lx-surface-input);
     border: 1px solid var(--lx-border-default);
     border-radius: 6px;
     overflow: hidden;
   }
-  .hearth-task-log-head {
+  .runtime-log-head {
     display: flex;
     align-items: center;
     justify-content: space-between;
@@ -2211,13 +2211,13 @@
     text-transform: uppercase;
     color: var(--lx-text-muted);
   }
-  .hearth-task-log-live {
+  .runtime-log-live {
     color: var(--lx-text-warning);
     display: inline-flex;
     align-items: center;
     gap: 4px;
   }
-  .hearth-task-log-live::before {
+  .runtime-log-live::before {
     content: "";
     width: 6px;
     height: 6px;
@@ -2227,13 +2227,13 @@
   }
   /* Static feed (finished/cancelled): the dot desaturates and stops pulsing —
      a dead "live" indicator on a closed log is noise. */
-  .hearth-task-log-live.is-static {
+  .runtime-log-live.is-static {
     color: var(--lx-text-muted);
   }
-  .hearth-task-log-live.is-static::before {
+  .runtime-log-live.is-static::before {
     animation: none;
   }
-  .hearth-task-log-body {
+  .runtime-log-body {
     max-height: 180px;
     overflow-y: auto;
     padding: 8px 10px;
@@ -2241,69 +2241,69 @@
     font-size: 11px;
     line-height: 20px;
   }
-  .hearth-task-log-empty {
+  .runtime-log-empty {
     font-family: var(--lx-font-mono);
     font-size: 11px;
     line-height: 20px;
     color: var(--lx-text-muted);
     padding: 8px 10px;
   }
-  .hearth-task-log-line {
+  .runtime-log-line {
     display: flex;
     gap: 8px;
     color: var(--lx-text-secondary);
     white-space: nowrap;
   }
-  .hearth-task-log-dot {
+  .runtime-log-dot {
     flex-shrink: 0;
     color: var(--lx-text-success);
     font-size: 8px;
     line-height: 20px;
   }
-  .hearth-task-log-time {
+  .runtime-log-time {
     flex-shrink: 0;
     color: var(--lx-text-muted);
   }
-  .hearth-task-log-msg {
+  .runtime-log-msg {
     overflow: hidden;
     text-overflow: ellipsis;
   }
   /* stderr lines (daemon prefixes [stderr]) — tinted danger + a subtle red
      wash so agent errors stand out from the stdout stream. The [stderr]
      prefix itself is stripped visually (the tint carries it); Copy keeps it. */
-  .hearth-task-log-line.stderr {
+  .runtime-log-line.stderr {
     color: var(--lx-text-danger);
     background: rgba(255, 68, 68, 0.05);
   }
-  .hearth-task-log-line.stderr .hearth-task-log-dot {
+  .runtime-log-line.stderr .runtime-log-dot {
     color: var(--lx-text-danger);
   }
   /* warn tier (retries, rate limits, backoffs — level classified once by the
      daemon) — amber, softer than errors but visible. */
-  .hearth-task-log-line.warn {
+  .runtime-log-line.warn {
     color: var(--lx-text-warning);
   }
-  .hearth-task-log-line.warn .hearth-task-log-dot {
+  .runtime-log-line.warn .runtime-log-dot {
     color: var(--lx-text-warning);
   }
-  .hearth-task-log-line.current {
+  .runtime-log-line.current {
     background: rgba(240, 192, 64, 0.08);
     border-radius: 4px;
     padding: 0 2px;
   }
-  .hearth-task-log-line.current .hearth-task-log-dot {
+  .runtime-log-line.current .runtime-log-dot {
     color: var(--lx-text-warning);
   }
-  .hearth-task-log-line.current .hearth-task-log-msg {
+  .runtime-log-line.current .runtime-log-msg {
     color: var(--lx-text-primary);
   }
   /* Follow toggle in the log header — active (pulsing ●) means auto-scroll on */
-  .hearth-task-log-head .btn.is-active {
+  .runtime-log-head .btn.is-active {
     border-color: var(--lx-border-focus);
     color: var(--lx-text-primary);
     animation: lx-wip-pulse 1.2s ease-in-out infinite;
   }
-  .hearth-dismiss:hover {
+  .runtime-dismiss:hover {
     background: var(--lx-bg-danger-subtle);
     color: var(--lx-text-danger);
   }
@@ -2845,7 +2845,7 @@
     display: inline-flex;
   }
 
-  /* Unified navbar pill — same geometry as the Hearth status pill.
+  /* Unified navbar pill — same geometry as the Runtime status pill.
      Used by: project switcher trigger, user profile trigger. */
   .nav-pill {
     display: inline-flex;
@@ -3402,7 +3402,7 @@
     left: 0;
   }
 
-  [data-hearth-popover] {
+  [data-runtime-popover] {
     max-height: calc(100vh - 16px);
     overflow-y: auto;
   }
@@ -3920,10 +3920,10 @@
     flex-shrink: 0;
   }
 
-  /* Expanded Hearth log viewer (hearth-log-modal) — shared by the editor
+  /* Expanded Runtime log viewer (runtime-log-modal) — shared by the editor
      popover and the control panel slideover. Same append-only feed as the
-     compact .hearth-task-log, but full-height with wrapped lines. */
-  .hearth-log-modal {
+     compact .runtime-log, but full-height with wrapped lines. */
+  .runtime-log-modal {
     width: 760px;
     max-width: calc(100vw - 32px);
     padding: 0;
@@ -3931,15 +3931,15 @@
     display: flex;
     flex-direction: column;
   }
-  .hearth-log-modal .modal-header {
+  .runtime-log-modal .modal-header {
     height: auto;
     padding: 12px 16px;
     gap: 12px;
   }
-  .hearth-log-modal .modal-title {
+  .runtime-log-modal .modal-title {
     font-size: 15px;
   }
-  .hearth-log-modal-body {
+  .runtime-log-modal-body {
     padding: 12px 16px 16px;
     display: flex;
     flex-direction: column;
@@ -3947,14 +3947,14 @@
     flex: 1;
     min-height: 0;
   }
-  .hearth-log-modal .modal-footer {
+  .runtime-log-modal .modal-footer {
     height: auto;
     padding: 10px 16px;
     justify-content: space-between;
   }
   /* Expanded feed: wraps long lines instead of truncating (the compact boxes
      ellipsize; the viewer wraps so the full stream is readable). */
-  .hearth-task-log-expanded {
+  .runtime-log-expanded {
     flex: 1;
     min-height: 0;
     max-height: none;
@@ -3965,15 +3965,15 @@
     border-radius: 6px;
     overflow-y: auto;
   }
-  .hearth-task-log-expanded .hearth-task-log-line {
+  .runtime-log-expanded .runtime-log-line {
     white-space: pre-wrap;
     word-break: break-word;
   }
-  .hearth-task-log-expanded .hearth-task-log-dot {
+  .runtime-log-expanded .runtime-log-dot {
     font-size: 9px;
     line-height: 21px;
   }
-  .hearth-task-log-expanded .hearth-task-log-msg {
+  .runtime-log-expanded .runtime-log-msg {
     overflow: visible;
     text-overflow: clip;
     white-space: pre-wrap;
@@ -6208,13 +6208,13 @@
 }
 .bubble-md a { color: var(--lx-text-link); }
 
-/* ---- Hearth slideover — task Result card (completed tasks) ----
-   Card shell transcribed verbatim from wireframes/src/hearth-control-panel.html
+/* ---- Runtime slideover — task Result card (completed tasks) ----
+   Card shell transcribed verbatim from wireframes/src/runtime-control-panel.html
    (success-subtle surface + rgba green border, 6px radius, 12px 16px padding,
    14px/22px base). Prose rules mirror .bubble-md (same heading scale, code/pre
    surfaces, blockquote/hr) at the card's 14px base; p/list rhythm follows the
    wireframe. Tokens only — the rgba border is the wireframe's own value. */
-.hearth-result-card {
+.runtime-result-card {
   background: var(--lx-bg-success-subtle);
   border: 1px solid rgba(74, 222, 128, 0.25);
   border-radius: 6px;
@@ -6224,10 +6224,10 @@
   line-height: 22px;
   color: var(--lx-text-primary);
 }
-.hearth-result-md > *:first-child { margin-top: 0; }
-.hearth-result-md > *:last-child { margin-bottom: 0; }
-.hearth-result-md p { margin: 0 0 8px; }
-.hearth-result-md h1 {
+.runtime-result-md > *:first-child { margin-top: 0; }
+.runtime-result-md > *:last-child { margin-bottom: 0; }
+.runtime-result-md p { margin: 0 0 8px; }
+.runtime-result-md h1 {
   font-size: 24px;
   font-weight: 600;
   font-family: var(--lx-font-display);
@@ -6236,7 +6236,7 @@
   color: var(--lx-text-primary);
   margin: 20px 0 12px;
 }
-.hearth-result-md h2 {
+.runtime-result-md h2 {
   font-size: 18px;
   font-weight: 600;
   font-family: var(--lx-font-display);
@@ -6245,8 +6245,8 @@
   color: var(--lx-text-primary);
   margin: 20px 0 8px;
 }
-.hearth-result-md h3,
-.hearth-result-md h4 {
+.runtime-result-md h3,
+.runtime-result-md h4 {
   font-size: 16px;
   font-weight: 500;
   font-family: var(--lx-font-display);
@@ -6255,24 +6255,24 @@
   color: var(--lx-text-primary);
   margin: 20px 0 8px;
 }
-.hearth-result-md ul,
-.hearth-result-md ol {
+.runtime-result-md ul,
+.runtime-result-md ol {
   margin: 0 0 8px;
   padding-left: 18px;
 }
 /* Tailwind preflight strips list-style globally (@layer base) — restore
    marker semantics per level; markers live in the 18px list gutter. */
-.hearth-result-md ul { list-style: disc; }
-.hearth-result-md ul ul { list-style: circle; }
-.hearth-result-md ol { list-style: decimal; }
-.hearth-result-md li { margin-bottom: 4px; }
-.hearth-result-md li::marker { color: var(--lx-text-secondary); }
-.hearth-result-md li > input[type="checkbox"] {
+.runtime-result-md ul { list-style: disc; }
+.runtime-result-md ul ul { list-style: circle; }
+.runtime-result-md ol { list-style: decimal; }
+.runtime-result-md li { margin-bottom: 4px; }
+.runtime-result-md li::marker { color: var(--lx-text-secondary); }
+.runtime-result-md li > input[type="checkbox"] {
   margin-right: 5px;
   vertical-align: -1px;
   accent-color: var(--lx-border-focus);
 }
-.hearth-result-md code {
+.runtime-result-md code {
   font-family: var(--lx-font-mono);
   font-size: 12px;
   background: var(--lx-surface-elevated);
@@ -6280,7 +6280,7 @@
   border-radius: 4px;
   color: var(--lx-text-secondary);
 }
-.hearth-result-md pre {
+.runtime-result-md pre {
   background: var(--lx-surface-elevated);
   border: 1px solid var(--lx-border-default);
   border-radius: 6px;
@@ -6288,7 +6288,7 @@
   margin: 0 0 8px;
   overflow-x: auto;
 }
-.hearth-result-md pre code {
+.runtime-result-md pre code {
   background: transparent;
   padding: 0;
   font-size: 12px;
@@ -6296,32 +6296,32 @@
   white-space: pre;
   color: var(--lx-text-secondary);
 }
-.hearth-result-md blockquote {
+.runtime-result-md blockquote {
   margin: 8px 0;
   padding-left: 12px;
   border-left: 2px solid var(--lx-border-strong);
   color: var(--lx-text-secondary);
 }
-.hearth-result-md hr {
+.runtime-result-md hr {
   border: none;
   border-top: 1px solid var(--lx-border-default);
   margin: 16px 0;
 }
-.hearth-result-md table {
+.runtime-result-md table {
   width: 100%;
   border-collapse: collapse;
   margin: 8px 0;
   font-size: 13px;
   line-height: 20px;
 }
-.hearth-result-md th,
-.hearth-result-md td {
+.runtime-result-md th,
+.runtime-result-md td {
   text-align: left;
   vertical-align: top;
   padding: 6px 10px;
   border: 1px solid var(--lx-border-default);
 }
-.hearth-result-md th {
+.runtime-result-md th {
   font-weight: 500;
   color: var(--lx-text-secondary);
   font-size: 11px;
@@ -6330,7 +6330,7 @@
   font-family: var(--lx-font-body);
   background: var(--lx-surface-elevated);
 }
-.hearth-result-md a { color: var(--lx-text-link); }
+.runtime-result-md a { color: var(--lx-text-link); }
 
 /* ---- Herald chat — highlighted code block (done-turn fenced segments) ----
    Same elevated surface as .bubble-md pre, plus a chrome row: micro-caps
@@ -6935,7 +6935,7 @@
   }
 
   /* The user menu (avatar + dropdown) in the nav-right — give it room.
-     On mobile the project switcher + hearth status are dropped: not enough
+     On mobile the project switcher + runtime status are dropped: not enough
      room in 375px. User menu + hamburger stay. */
   .nav-right > :not(.user-menu) {
     display: none;
@@ -7300,19 +7300,19 @@
   }
 }
 
-/* ---- 11. Hearth control panel ----
+/* ---- 11. Runtime control panel ----
    The control panel has 2 columns on desktop; stack on mobile. Form rows
    wrap. */
 @media (max-width: 767.98px) {
-  .hearth-page,
-  .hearth-content {
+  .runtime-page,
+  .runtime-content {
     gap: 12px;
   }
-  .hearth-grid {
+  .runtime-grid {
     grid-template-columns: 1fr !important;
     gap: 12px;
   }
-  .hearth-form-row {
+  .runtime-form-row {
     flex-wrap: wrap;
     gap: 8px;
   }
@@ -7581,7 +7581,7 @@
   .app-nav.app-nav-menu-open + .app-nav-backdrop {
     display: block;
   }
-  /* Right cluster: drop project switcher and hearth on tablet too, keep
+  /* Right cluster: drop project switcher and runtime on tablet too, keep
      theme + user. */
   .nav-right > :not(.user-menu):not(.nav-pill) {
     display: none;

@@ -1,5 +1,5 @@
 import { useAgents, useSkills, useReplaceAgentSkills } from "../../../lib/queries";
-import { ENGINE_AGENT_IDS } from "../../../lib/use-hearth-engine";
+import { ENGINE_AGENT_IDS } from "../../../lib/use-runtime-engine";
 
 // ── Agent skill availability (settings-project-herald.html) ──
 
@@ -45,7 +45,7 @@ export function AgentSkillAvailabilitySection({ projectId }: { projectId: string
   const { data: skills = [] } = useSkills();
   const replaceSkills = useReplaceAgentSkills();
 
-  // Checkbox writes PUT /api/hearth/agents/:id/skills immediately (junction
+  // Checkbox writes PUT /api/agents/:id/skills immediately (junction
   // insert/delete); the mutation response refreshes the agents cache via
   // setQueryData.
   const handleToggle = (agentId: string, skillIds: string[]) => {

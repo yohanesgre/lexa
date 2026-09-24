@@ -22,8 +22,8 @@ import { AttachmentsPanel } from "./AttachmentsPanel";
 import { TaskFooter } from "./TaskFooter";
 import { Toolbar } from "./TextEditor";
 import { textEditorExtensions } from "../lib/tiptap";
-import { SourcesSection } from "./hearth/SourcesSection";
-import { LinksSection } from "./hearth/LinksSection";
+import { SourcesSection } from "./runtimes/SourcesSection";
+import { LinksSection } from "./runtimes/LinksSection";
 import { ActivityTab } from "./activity/ActivityTab";
 import { cn } from "./ui/cn";
 

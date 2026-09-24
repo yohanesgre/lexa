@@ -1,5 +1,5 @@
 // Regression: String.prototype.replace expands `$$`, `$&`, `` $` ``, `$'` and
-// `$n` in a string replacement. The bundled Hearth daemon contains Effect's
+// `$n` in a string replacement. The bundled runtime daemon contains Effect's
 // escapeRegExp body (`"\$&"`), so a string replacement corrupted the embed and
 // `bun run compile:cli` emitted an unparseable packed.ts. packedEmbed must use
 // a function replacer so the payload survives verbatim.

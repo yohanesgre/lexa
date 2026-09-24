@@ -4,9 +4,9 @@ import { useEditor, EditorContent } from "@tiptap/react";
 import type { TipTapDoc } from "../../shared/types";
 import type { JSONContent } from "@tiptap/core";
 import { cn } from "./ui/cn";
-import { HearthPopover } from "./hearth/HearthPopover";
-import { HearthReviewSurface } from "./hearth/HearthReviewSurface";
-import { useHearthReview, type HearthReviewIdentity } from "./hearth/useHearthReview";
+import { RuntimePopover } from "./runtimes/RuntimePopover";
+import { RuntimeReviewSurface } from "./runtimes/RuntimeReviewSurface";
+import { useRuntimeReview, type RuntimeReviewIdentity } from "./runtimes/useRuntimeReview";
 import { textEditorExtensions, extensionsWithMentions } from "../lib/tiptap";
 import { useAttachmentEmbeds } from "../lib/useAttachmentEmbeds";
 import Placeholder from "@tiptap/extension-placeholder";
@@ -20,8 +20,8 @@ interface TextEditorProps {
   editorProps?: Record<string, unknown>;
   className?: string | undefined;
   extensions?: typeof textEditorExtensions;
-  // Hearth (AI writing assistant) wiring
-  hearth?: {
+  // Runtime (AI writing assistant) wiring
+  runtime?: {
     slug: string;
     documentType: "task" | "wiki";
     documentId: string;
@@ -33,7 +33,7 @@ interface TextEditorProps {
     documentType: "task" | "wiki";
     documentId: string;
   };
-  // Fired when a Hearth review enters/exits the editor (used by surfaces to
+  // Fired when a Runtime review enters/exits the editor (used by surfaces to
   // suspend autosave while a result is under review — the document itself is
   // never modified until Accept, so nothing unaccepted can be saved).
   onReviewStateChange?: (active: boolean) => void;
@@ -101,7 +101,7 @@ function setImage(editor: NonNullable<ReturnType<typeof useEditor>>) {
 export function Toolbar({
   editor,
   headingLevel,
-  hearth,
+  runtime,
   reviewActive,
   appliedTaskId,
   rejectedTaskId,
@@ -109,18 +109,18 @@ export function Toolbar({
 }: {
   editor: NonNullable<ReturnType<typeof useEditor>>;
   headingLevel: number;
-  hearth?: TextEditorProps["hearth"];
-  // Hearth review-in-editor: the review surface is rendered by the editing
+  runtime?: TextEditorProps["runtime"];
+  // Runtime review-in-editor: the review surface is rendered by the editing
   // surfaces in the editor body, not by the toolbar. The toolbar only opens
-  // the Hearth popover; "Review in editor" hands the result up via onReview.
+  // the Runtime popover; "Review in editor" hands the result up via onReview.
   reviewActive: boolean;
   appliedTaskId: string | null;
   rejectedTaskId: string | null;
-  onReview?: (text: string, identity: HearthReviewIdentity) => void;
+  onReview?: (text: string, identity: RuntimeReviewIdentity) => void;
 }) {
-  const [hearthOpen, setHearthOpen] = useState(false);
-  const [hearthAnchor, setHearthAnchor] = useState<DOMRect | null>(null);
-  const hearthBtnRef = useRef<HTMLButtonElement>(null);
+  const [runtimeOpen, setRuntimeOpen] = useState(false);
+  const [runtimeAnchor, setRuntimeAnchor] = useState<DOMRect | null>(null);
+  const runtimeBtnRef = useRef<HTMLButtonElement>(null);
 
   return (
     <>
@@ -197,15 +197,15 @@ export function Toolbar({
         </ToolbarButton>
         <ToolbarSeparator />
         <button
-          ref={hearthBtnRef}
+          ref={runtimeBtnRef}
           type="button"
-          className={cn("toolbar-btn", hearthOpen && "active")}
-          title={hearth ? "AI project assistant" : "AI writing assistant (coming soon)"}
+          className={cn("toolbar-btn", runtimeOpen && "active")}
+          title={runtime ? "AI project assistant" : "AI writing assistant (coming soon)"}
           aria-label="AI writing assistant"
-          disabled={!hearth}
+          disabled={!runtime}
           onClick={() => {
-            setHearthAnchor(hearthBtnRef.current?.getBoundingClientRect() ?? null);
-            setHearthOpen((v) => !v);
+            setRuntimeAnchor(runtimeBtnRef.current?.getBoundingClientRect() ?? null);
+            setRuntimeOpen((v) => !v);
           }}
         >
           <Flame size={16} strokeWidth={1.5} />
@@ -213,22 +213,22 @@ export function Toolbar({
         </button>
       </div>
       </div>
-      {hearth && hearthOpen && (
-        <HearthPopover
+      {runtime && runtimeOpen && (
+        <RuntimePopover
           editor={editor}
-          slug={hearth.slug}
-          documentType={hearth.documentType}
-          documentId={hearth.documentId}
-          open={hearthOpen}
-          onClose={() => setHearthOpen(false)}
+          slug={runtime.slug}
+          documentType={runtime.documentType}
+          documentId={runtime.documentId}
+          open={runtimeOpen}
+          onClose={() => setRuntimeOpen(false)}
           onReview={(text, identity) => {
-            setHearthOpen(false);
+            setRuntimeOpen(false);
             onReview?.(text, identity);
           }}
           reviewActive={reviewActive}
           appliedTaskId={appliedTaskId}
           rejectedTaskId={rejectedTaskId}
-          anchorRect={hearthAnchor}
+          anchorRect={runtimeAnchor}
         />
       )}
     </>
@@ -244,7 +244,7 @@ export function TextEditor({
   editorProps,
   className,
   extensions,
-  hearth,
+  runtime,
   attachments,
   onReviewStateChange,
 }: TextEditorProps) {
@@ -261,7 +261,7 @@ export function TextEditor({
     const onPointerDown = (e: PointerEvent) => {
       const target = e.target as HTMLElement | null;
       lastPointerDownInside.current =
-        wrapperRef.current?.contains(target) === true || target?.closest("[data-hearth-popover]") !== null;
+        wrapperRef.current?.contains(target) === true || target?.closest("[data-runtime-popover]") !== null;
     };
     document.addEventListener("pointerdown", onPointerDown, true);
     return () => document.removeEventListener("pointerdown", onPointerDown, true);
@@ -278,11 +278,11 @@ export function TextEditor({
         return e;
       });
     }
-    // Mentions need the project slug — available when hearth or attachments
+    // Mentions need the project slug — available when runtime or attachments
     // wiring exists. Absent both, the editor carries no mention plugin.
-    const mentionSlug = attachments?.slug ?? hearth?.slug;
+    const mentionSlug = attachments?.slug ?? runtime?.slug;
     return extensionsWithMentions(withPlaceholder, mentionSlug);
-  }, [extensions, placeholder, attachments?.slug, hearth?.slug]);
+  }, [extensions, placeholder, attachments?.slug, runtime?.slug]);
 
   // Hooks run unconditionally — empty options when attachments wiring is
   // absent (create mode); handlers only spread while active.
@@ -307,7 +307,7 @@ export function TextEditor({
         blur: (_view, event) => {
           const related = (event as FocusEvent).relatedTarget as HTMLElement | null;
           if (related !== null) {
-            return wrapperRef.current?.contains(related) === true || related?.closest("[data-hearth-popover]") !== null;
+            return wrapperRef.current?.contains(related) === true || related?.closest("[data-runtime-popover]") !== null;
           }
           return lastPointerDownInside.current;
         },
@@ -321,7 +321,7 @@ export function TextEditor({
     },
   });
 
-  const { review, appliedTaskId, rejectedTaskId, handleReview, handleAcceptReview, handleRejectReview } = useHearthReview(editor, onReviewStateChange);
+  const { review, appliedTaskId, rejectedTaskId, handleReview, handleAcceptReview, handleRejectReview } = useRuntimeReview(editor, onReviewStateChange);
 
   if (!editor) return null;
 
@@ -329,9 +329,9 @@ export function TextEditor({
 
   return (
     <div className={cn("editor-wrapper", className, review && "is-reviewing")} ref={wrapperRef}>
-      <Toolbar editor={editor} headingLevel={headingLevel} hearth={hearth} reviewActive={review !== null} appliedTaskId={appliedTaskId} rejectedTaskId={rejectedTaskId} onReview={handleReview} />
+      <Toolbar editor={editor} headingLevel={headingLevel} runtime={runtime} reviewActive={review !== null} appliedTaskId={appliedTaskId} rejectedTaskId={rejectedTaskId} onReview={handleReview} />
       {review && (
-        <HearthReviewSurface action={review.action} runtime={review.runtime} diff={review.diff} onAccept={handleAcceptReview} onReject={handleRejectReview} />
+        <RuntimeReviewSurface action={review.action} runtime={review.runtime} diff={review.diff} onAccept={handleAcceptReview} onReject={handleRejectReview} />
       )}
       <EditorContent editor={editor} className="editor-content" />
     </div>

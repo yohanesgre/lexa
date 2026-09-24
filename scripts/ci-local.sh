@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ci-local — local mirror of .github/workflows/ci.yml
-# Usage: bun run ci:local  |  bash scripts/ci-local.sh [--critical] [--lane=shared|be|fe|cli|hearth]  |  CRITICAL=1 bash scripts/ci-local.sh
+# Usage: bun run ci:local  |  bash scripts/ci-local.sh [--critical] [--lane=shared|be|fe|cli|daemon]  |  CRITICAL=1 bash scripts/ci-local.sh
 # Env: LXK_SKIP_PREPARE=1 is set inside (matches CI). CRITICAL=1 runs test:critical only.
 # Missing optional tools (docker, gitleaks) warn and skip.
 # Wireframes private submodule: skips gracefully if absent.
@@ -17,8 +17,8 @@ for arg in "$@"; do
   esac
 done
 case "$LANE" in
-  ""|shared|be|fe|cli|hearth) ;;
-  *) echo "unknown --lane=$LANE (want shared|be|fe|cli|hearth)"; exit 1 ;;
+  ""|shared|be|fe|cli|daemon) ;;
+  *) echo "unknown --lane=$LANE (want shared|be|fe|cli|daemon)"; exit 1 ;;
 esac
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"

@@ -138,7 +138,7 @@ const STRING_ENV_KEYS = [
   "GITHUB_WEBHOOK_SECRET",
   "LXK_RATE_LIMIT_MAX",
   "LXK_RATE_LIMIT_WINDOW_MS",
-  "LXK_HEARTH_REPO_CAP",
+  "LXK_RUNTIME_REPO_CAP",
 ] as const;
 
 export function stringEnvFromRuntimeEnv(env: RuntimeEnv): Record<string, string | undefined> {
@@ -209,7 +209,7 @@ export function mirrorSettingsFromEnvAsync(
     }
     yield* mirror("rate_limit_max", env.LXK_RATE_LIMIT_MAX);
     yield* mirror("rate_limit_window_ms", env.LXK_RATE_LIMIT_WINDOW_MS);
-    yield* mirror("hearth_repo_cap", env.LXK_HEARTH_REPO_CAP);
+    yield* mirror("runtime_repo_cap", env.LXK_RUNTIME_REPO_CAP);
     return mirrored;
   });
 }

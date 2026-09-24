@@ -25,7 +25,7 @@ CREATE UNIQUE INDEX idx_projects_key ON projects(key);
 -- ============================================================
 -- Replaces the dropped projects.github_repo column. A project links N repos,
 -- each with independent role flags (a repo can be source, workspace, or both):
---   source_role    → Hearth agent context (claim-time repo-content) + project label
+--   source_role    → Runtimes agent context (claim-time repo-content) + project label
 --   workspace_role → issue linking/creation/sync for that repo
 -- Removing a role gates NEW links only — existing task↔issue links keep syncing.
 -- Migrated at boot: legacy projects.github_repo → both roles; repos seen in
@@ -34,7 +34,7 @@ CREATE TABLE project_repos (
   id              TEXT PRIMARY KEY,                          -- UUID
   project_id      TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
   repo            TEXT NOT NULL,                             -- "owner/name"
-  source_role     INTEGER NOT NULL DEFAULT 0,                -- Hearth context + project label
+  source_role     INTEGER NOT NULL DEFAULT 0,                -- Runtimes context + project label
   workspace_role  INTEGER NOT NULL DEFAULT 0,                -- issue link/create/sync
   created_at      TEXT NOT NULL DEFAULT (datetime('now'))
 );
@@ -263,9 +263,10 @@ CREATE INDEX idx_milestones_proj ON milestones(project_id, position);
 --   cannot add table-level CHECKs; enforced in SwimlaneService (backlog
 --   rejects dueAt/startAt/milestoneId → BACKLOG_PROTECTED; start_at later
 --   than due_at → INVALID_ARGS).
--- Migration 0005 rebuilt this table (CHECK change) using the 0004
---   create-_new / copy / drop / rename pattern: existing 'milestone' rows
---   became loose sprints (kind 'sprint', milestone_id NULL); due_at survived.
+-- The squashed 0001_init.sql baseline carries this table with the sprint
+--   CHECKs already applied (the pre-squash create-new / copy / drop / rename
+--   rebuild is folded in): legacy 'milestone' rows are loose sprints
+--   (kind 'sprint', milestone_id NULL); due_at survived.
 -- archived_at: lane archive cascades to its live tasks (one transaction,
 --   per-task `archived` activity rows); restore brings the lane back only.
 CREATE TABLE swimlanes (
@@ -598,24 +599,24 @@ CREATE INDEX idx_task_links_proj ON task_links(project_id);
 -- api_keys.key_hash is indexed by its UNIQUE constraint.
 
 -- ============================================================
--- Hearth: runtime agents + persisted document sources
+-- Runtimes: runtime agents + persisted document sources
 -- ============================================================
 -- runtimes: daemons that run agent CLIs (opencode/hermes/command-code) and poll
 --   for tasks. team_id scopes ownership: NULL = superadmin-owned GLOBAL runtime
 --   (claims any team's project tasks); non-NULL = that team's runtime (claims
 --   only that team's project tasks). Team admin manages own team's runtimes;
 --   superadmin all (any team + global).
---   model is the agent model id reported by the daemon (HEARTH_MODEL);
+--   model is the agent model id reported by the daemon (RUNTIME_MODEL);
 --   extra_args is server-authoritative injected CLI tokens (JSON array), applied
 --   by the daemon at spawn time (Settings → Edit runtime).
 --   models_catalog is the live provider/model list the daemon reports with its
 --   machine listener heartbeat after each refresh (boot + every ~10 min); []
 --   when offline or the agent has no scriptable model list (hermes). Powers
 --   the Settings picker. agents_catalog follows the same rule for personas.
--- hearth_tasks: the writing-assist queue (created from editors, claimed by a
+-- runtime_tasks: the writing-assist queue (created from editors, claimed by a
 --   runtime, streamed/completed by the daemon).
 -- document_sources: persisted per-document sources (wiki page or external URL)
---   that Hearth grounds its output in.
+--   that Runtimes grounds its output in.
 CREATE TABLE runtimes (
   id             TEXT PRIMARY KEY,
   name           TEXT NOT NULL,
@@ -643,12 +644,12 @@ CREATE TABLE runtimes (
 -- reuses the env on install; remove events are provider-scoped).
 
 -- ============================================================
--- Hearth: machine registry + setup events
+-- Runtimes: machine registry + setup events
 -- ============================================================
 CREATE TABLE machines (
   id          TEXT PRIMARY KEY,
   hostname    TEXT NOT NULL DEFAULT '',
-  secret      TEXT NOT NULL DEFAULT '',        -- per-machine binding (0003):
+  secret      TEXT NOT NULL DEFAULT '',        -- per-machine binding (baseline):
                                               -- minted ONCE at register, returned
                                               -- a single time, required on event
                                               -- claim (x-machine-secret); '' =
@@ -687,7 +688,7 @@ CREATE TABLE runtime_events (
 CREATE INDEX idx_runtime_events_machine ON runtime_events(machine_id, status);
 CREATE INDEX idx_runtime_events_status ON runtime_events(status, created_at);
 
-CREATE TABLE hearth_tasks (
+CREATE TABLE runtime_tasks (
   id            TEXT PRIMARY KEY,
   runtime_id    TEXT REFERENCES runtimes(id) ON DELETE SET NULL,
   project_id    TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
@@ -706,16 +707,16 @@ CREATE TABLE hearth_tasks (
   started_at    TEXT,
   finished_at   TEXT
 );
-CREATE INDEX idx_hearth_tasks_created ON hearth_tasks(created_at DESC, id DESC);
-CREATE INDEX idx_hearth_tasks_status ON hearth_tasks(status, created_at);
+CREATE INDEX idx_runtime_tasks_created ON runtime_tasks(created_at DESC, id DESC);
+CREATE INDEX idx_runtime_tasks_status ON runtime_tasks(status, created_at);
 
--- Herald (0010): task tier — 'blacksmith' (daemon runtime lane) vs the
+-- Task tier discriminator (baseline): 'blacksmith' (daemon runtime lane) vs the
 -- server-side assistant tier. Existing rows default to 'blacksmith'.
-ALTER TABLE hearth_tasks ADD COLUMN kind TEXT NOT NULL DEFAULT 'blacksmith';
+ALTER TABLE runtime_tasks ADD COLUMN kind TEXT NOT NULL DEFAULT 'blacksmith';
 
-CREATE INDEX idx_hearth_tasks_kind_status ON hearth_tasks(kind, status);
+CREATE INDEX idx_runtime_tasks_kind_status ON runtime_tasks(kind, status);
 
--- Hearth warm sessions: maps one (document, runtime) pair to the agent-side
+-- Runtime warm sessions: maps one (document, runtime) pair to the agent-side
 -- conversation (opencode serve session id) the next task on that document
 -- should continue. Written pre-spawn by the daemon (spec §8 step 3); dropped
 -- on cancel/timeout (daemon-side) or via the user-facing reset endpoint.
@@ -725,7 +726,7 @@ CREATE INDEX idx_hearth_tasks_kind_status ON hearth_tasks(kind, status);
 -- the (deletable) runtimes row. Only opencode writes rows in v1.
 -- Agent/skill change → the daemon mints a new session and updates the row
 -- (reset semantics, no history rows).
-CREATE TABLE hearth_sessions (
+CREATE TABLE runtime_sessions (
   document_type   TEXT    NOT NULL CHECK (document_type IN ('task', 'wiki')),
   document_id     TEXT    NOT NULL,
   runtime_id      TEXT    NOT NULL,
@@ -739,7 +740,7 @@ CREATE TABLE hearth_sessions (
 );
 
 -- ============================================================
--- Hearth agents + skills — global rule bundles
+-- Runtimes agents + skills — global rule bundles
 -- ============================================================
 -- Agents are named rule bundles: their instructions become AGENTS.md in the
 -- run dir at claim time (claim-carried, no host store). Skills are named
@@ -747,10 +748,10 @@ CREATE TABLE hearth_sessions (
 -- Bindings are many-to-many. "Lexa" (the default agent) and the five
 -- original assistant actions (continue/rewrite/summarize/expand/grammar)
 -- are seeded builtins; builtins are editable + resettable but not deletable.
--- Renamed from forge_* by migration 0010 (Herald) — column definitions
--- unchanged; both tiers share these catalogs.
--- Hearth refactor (0013): exactly TWO builtin agents — 'hearth-herald'
--- ("Herald Agent", PM-assistant persona) and 'hearth-blacksmith'
+-- Renamed from forge_* in the squashed 0001_init.sql baseline — column
+-- definitions unchanged; both tiers share these catalogs.
+-- Exactly TWO builtin agents — 'herald'
+-- ("Herald Agent", PM-assistant persona) and 'blacksmith'
 -- ("Blacksmith Agent"). The generic 'lexa' entry is retired. Skill
 -- availability per agent = lexa_agent_skills junction rows ONLY (no JSON
 -- columns); builtins are editable + resettable but not deletable.
@@ -781,13 +782,13 @@ CREATE TABLE lexa_agent_skills (
 );
 
 -- ============================================================
--- Herald assistant tier (migration 0010) + Gateway (0017)
+-- Herald assistant tier + Gateway (baked into the 0001_init.sql baseline)
 -- ============================================================
--- Per-project Herald settings. Gateway migration 0017 hard-recreated this table
+-- Per-project Herald settings. The baseline hard-recreated this table
 -- dropping legacy provider columns (kind, base_url, api_key, model, vision_model).
--- Remaining columns: search + engine + reasoning + write_tools.
--- Migration 0018 adds fallback_model_ids (JSON array of herald_models ids, ordered, ≤3).
--- Migration 0021 adds provider_id + primary_model_id (primary binding to herald_providers/models).
+-- Remaining columns: search + engine + reasoning + write_tools, plus
+-- fallback_model_ids (JSON array of herald_models ids, ordered, ≤3) and
+-- provider_id + primary_model_id (primary binding to herald_providers/models).
 CREATE TABLE herald_settings (
   project_id TEXT PRIMARY KEY REFERENCES projects(id) ON DELETE CASCADE,
   search_provider TEXT,
@@ -865,24 +866,23 @@ CREATE TABLE herald_provider_health (
   consecutive_failures INTEGER NOT NULL DEFAULT 0
 );
 
--- Agent catalog rebinding (0013, single transaction — atomic):
--- Herald Agent gets a NEW internal id; hearth_tasks.agent_id FKs and any
--- lexa_agent_skills junction rows are rebound in the same tx. One-time
--- consequence: existing threads keyed on agentId reset once (continue-vs-
--- fresh sees an unknown agentId → fresh overwrite).
-UPDATE lexa_agents SET id = 'hearth-herald', name = 'Herald Agent',
-  instructions = <companion-persona instructions>
-WHERE id = 'lexa';
-UPDATE hearth_tasks SET agent_id = 'hearth-herald' WHERE agent_id = 'lexa';
-UPDATE lexa_agent_skills SET agent_id = 'hearth-herald' WHERE agent_id = 'lexa';
+-- Agent catalog (baked into the 0001_init.sql baseline; the ids are rebound
+-- once more by 0005_runtime_rename.sql). Exactly two builtins — 'herald'
+-- ("Herald Agent", PM-assistant persona) and 'blacksmith' ("Blacksmith
+-- Agent"). The generic 'lexa' entry is retired; its id is NOT reused. The
+-- pre-squash rebind was atomic (agent-id FKs + junction rows in one tx); its
+-- one-time consequence was that existing threads keyed on the old agentId saw
+-- an unknown agent and started fresh.
 INSERT INTO lexa_agents (id, name, description, instructions, is_builtin)
-VALUES ('hearth-blacksmith', 'Blacksmith Agent', '', <coding-agent instructions>, 1);
--- Junction seeding: bind existing builtin skills to Herald Agent;
--- Blacksmith Agent starts with the coding-appropriate subset.
+VALUES ('herald', 'Herald Agent', <companion-persona description>, <companion-persona instructions>, 1);
+INSERT INTO lexa_agents (id, name, description, instructions, is_builtin)
+VALUES ('blacksmith', 'Blacksmith Agent', '', <coding-agent instructions>, 1);
+-- Junction seeding: Herald Agent gets every builtin skill; Blacksmith Agent
+-- starts with the coding-appropriate subset.
 INSERT INTO lexa_agent_skills (agent_id, skill_id)
-SELECT 'hearth-herald', id FROM lexa_skills WHERE is_builtin = 1;
+SELECT 'herald', id FROM lexa_skills WHERE is_builtin = 1;
 INSERT INTO lexa_agent_skills (agent_id, skill_id)
-SELECT 'hearth-blacksmith', id FROM lexa_skills WHERE id IN (<coding subset>);
+SELECT 'blacksmith', id FROM lexa_skills WHERE id IN (<coding subset>);
 
 -- Herald thread transcripts: one persisted conversation per document
 -- (ModelMessage[] JSON in `messages`). Long threads roll into `summary`
@@ -919,7 +919,7 @@ CREATE TABLE herald_threads (
 CREATE INDEX idx_herald_threads_chat_list ON herald_threads(project_id, owner_user_id, pinned DESC, updated_at DESC)
   WHERE document_type = 'chat';
 
--- Herald write tools v2 (0016): per-write approval queue. Write-tool proposals
+-- Herald write tools v2 (in the 0001_init.sql baseline): per-write approval queue. Write-tool proposals
 -- persist here at proposal time; the owner approves or rejects each row; resume
 -- executes approved rows in seq order. TTL is lazy (flipped to 'expired' on
 -- decide/resume/transcript reads) — no timer.
@@ -959,7 +959,7 @@ CREATE INDEX idx_herald_pending_thread ON herald_pending_writes(document_type, d
 
 ALTER TABLE task_activity ADD COLUMN via_herald INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE task_comments ADD COLUMN via_herald INTEGER NOT NULL DEFAULT 0;
--- write_tools column added in 0016 and carried into the 0017 herald_settings rebuild (now baked in).
+-- write_tools is baked into the 0001_init.sql baseline (herald_settings rebuild).
 
 -- Curated project memory: judgment-type facts only (live truth always comes
 -- from DB reads, never memorized). `source` ∈ manual/herald (no CHECK in DDL).
@@ -990,21 +990,21 @@ CREATE TABLE document_sources (
 CREATE INDEX idx_sources_document ON document_sources(document_type, document_id);
 
 -- ============================================================
--- Hearth task activity log
+-- Runtime task activity log
 -- ============================================================
 -- Append-only live status feed per task: the daemon streams lines
 -- (claimed by <runtime>, model <id>, agent started, generating,
 -- done/failed) so the UI can show what a task is doing right now.
-CREATE TABLE hearth_task_logs (
+CREATE TABLE runtime_task_logs (
   id         TEXT PRIMARY KEY,
-  task_id    TEXT NOT NULL REFERENCES hearth_tasks(id) ON DELETE CASCADE,
+  task_id    TEXT NOT NULL REFERENCES runtime_tasks(id) ON DELETE CASCADE,
   message    TEXT NOT NULL,
   stream     TEXT NOT NULL DEFAULT 'out',  -- no CHECK in DDL
   level      TEXT NOT NULL DEFAULT 'info', -- no CHECK in DDL
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
-CREATE INDEX idx_hearth_task_logs_task ON hearth_task_logs(task_id, created_at);
--- Levels are classified ONCE by the daemon at write time (shared/hearth-log.ts
+CREATE INDEX idx_runtime_task_logs_task ON runtime_task_logs(task_id, created_at);
+-- Levels are classified ONCE by the daemon at write time (shared/runtime-log.ts
 -- — stderr ≠ error; retries/rate-limits → warn) and stored; the UI renders
 -- the stored level, never re-classifies. Legacy rows default out/info; the UI
 -- falls back to the shared classifier for rows still carrying the old
@@ -1065,8 +1065,11 @@ CREATE INDEX idx_task_activity_task ON task_activity(task_id, created_at, id);
 
 -- Migration bookkeeping (server/db/migrate.ts):
 -- _migrations (name TEXT PRIMARY KEY, applied_at TEXT) — applied migration files.
--- Pre-release history (0001-0024) was squashed into this single 0001_init.sql
--- baseline for 2026.1.0; future migrations continue at 0025_*.sql.
+-- The pre-release chain (0001-0024) was squashed into the single 0001_init.sql
+-- baseline for 2026.1.0. Migrations after the baseline are additive:
+-- 0002_device_login.sql, 0003_herald_prices_1m_cached.sql, 0004_ui_gaps_w4.sql,
+-- then 0005_runtime_rename.sql (the Hearth→Runtimes rename). Future migrations
+-- continue at 0006_*.sql.
 ```
 
 ## Design Notes
@@ -1103,26 +1106,26 @@ existing hard delete).
 - **Actor model:** `actor_kind` ∈ user/agent/system. `actor_user_id` is the
   user row for user actors, the API key owner for agent actors, NULL for
   unbound/system. `actor_label` is the frozen display name.
-- **Backfill:** 0004 inserts one `created` row per task existing at migration
-  time (from `tasks.created_at`) plus one `archived` row per archived task
-  (from `archived_at`). Rows created after the migration get their events from
-  the services, not the backfill.
+- **Backfill:** the pre-squash history inserted one `created` row per then-existing
+  task (from `tasks.created_at`) plus one `archived` row per archived task
+  (from `archived_at`) — a no-op on a fresh database. Rows created after the
+  migration get their events from the services, not the backfill.
 - **Comment edits/deletes** are soft: `edited_at` (UI "edited" marker) and
   `deleted_at` (hidden from timeline). No revision history — edit overwrites
   `body`.
 
-### Hearth (runtime agent writing assistant)
-Hearth is the AI writing button in the task/wiki editors. A **CLI listener** on a
+### Runtimes (AI execution runtime)
+Runtimes powers the AI writing button in the task/wiki editors. A **CLI listener** on a
 machine registers the machine, claims setup events, owns one daemon child per
 installed agent CLI, and reports the machine's available agents/models. Each
-daemon registers as a `runtimes` row, polls `hearth_tasks`, runs the configured
+daemon registers as a `runtimes` row, polls `runtime_tasks`, runs the configured
 CLI (warm `opencode serve` for opencode runtimes, one-shot spawn per task for
 hermes/command-code), and reports the result.
 
 - **Task lifecycle:** `queued` → (daemon claims) `running` → `completed`/`failed`.
   FIFO claim: the daemon updates the row conditionally (`WHERE status='queued'`);
   a lost race returns null and the daemon polls again.
-- **Agents + skills (0027):** every task carries `agent_id` + `skill_id` (global
+- **Agents + skills (baked into the 0001 baseline):** every task carries `agent_id` + `skill_id` (global
   rule bundles, M2M bindings). The server resolves them **at claim time** and
   sends the instructions back as `agentMarkdown`/`skillMarkdown`; the daemon
   writes them into the run dir as `AGENTS.md` + `.agents/<skill>/SKILL.md` —
@@ -1131,35 +1134,35 @@ hermes/command-code), and reports the result.
   per-task `extra_prompt`).
 - **Machine state root:** everything the host stores lives in `~/.lexa/`
   (`LEXA_DIR` override): `config.json`, `machine-id`, `env`, `runtimes/<id>/env`,
-  the persistent opencode sandbox at `runtimes/<id>/hearth-home/`, persistent
+  the persistent opencode sandbox at `runtimes/<id>/runtime-home/`, persistent
   project workspaces under `projects/`, and legacy per-run workdirs under
   `runs/<taskId>/` (ephemeral — removed after every run; opencode runtimes
   don't use it). The listener migrates the legacy `~/.config/lexa-cli` +
   `~/.config/lexa-forge` dirs into it on boot — migrate-and-delete, no fallback.
-- **`hearth_task_logs`** is the append-only live status feed per task. The daemon
+- **`runtime_task_logs`** is the append-only live status feed per task. The daemon
   streams a line per step (claimed, model, agent started, generating, done/failed);
-  the UI polls `GET /api/hearth/tasks/:id/logs` while a task is active to show
+  the UI polls `GET /api/runtimes/tasks/:id/logs` while a task is active to show
   what it's doing right now.
 - **`document_sources`** persist per document (task or wiki page). `kind=wiki`
-  stores the wiki page **slug** in `ref`; `kind=external` stores the URL. Hearth
-  resolves wiki sources to page content server-side; external URLs are fetched
+  stores the wiki page **slug** in `ref`; `kind=external` stores the URL. The server
+  resolves wiki sources to page content; external URLs are fetched
   with an **SSRF guard** (DNS resolve → reject private/loopback/link-local/CGNAT).
 - **Setup:** the web wizard sends only machine + agent CLI + a fresh one-time key.
   Provider/model, agent persona, logging, and extra args are edited after setup
   from Settings. The listener discovers catalogs by invoking the installed CLI
   and sends them with the machine heartbeat.
 - **Auth:** browser calls use the normal Bearer API key; daemon endpoints
-  (`/api/hearth/daemon/*`, `/api/hearth/runtimes/*`, `/api/hearth/sessions`)
-  accept `x-hearth-token` (`LXK_HEARTH_DAEMON_TOKEN`) or a Bearer key.
+  (`/api/runtimes/daemon/*`, `/api/runtimes/register`, `/api/runtimes/sessions`)
+  accept `x-runtime-token` (`LXK_RUNTIME_DAEMON_TOKEN`) or a Bearer key.
 
-### Hearth — two agents, per-project engine, vision chain
-Umbrella renamed **Hearth**; full identifier rename (tables `hearth_tasks`/`hearth_task_logs`/`hearth_sessions`, routes `/api/hearth/*`, header `x-hearth-token`, env `HEARTH_*`, CLI state dir/unit) executed 2026-08-24 via migration 0015.
+### Runtimes — two agents, per-project engine, vision chain
+Umbrella renamed **Runtimes**. History: the namespace was renamed Forge→Hearth on 2026-08-24 (baked into the squashed `0001_init.sql` baseline), then Hearth→Runtimes on 2026-09-24 via `0005_runtime_rename.sql` — tables `runtime_tasks`/`runtime_task_logs`/`runtime_sessions`, routes `/api/runtimes/*`, header `x-runtime-token`, env `RUNTIME_*`, CLI state dir/unit — breaking reinstall.
 
-- **Exactly two builtin agents** (`lexa_agents`, migration 0013): `hearth-herald` ("Herald Agent") and `hearth-blacksmith` ("Blacksmith Agent") — same PM-assistant role, different execution architecture. The generic `lexa` entry is retired; its id is NOT reused.
+- **Exactly two builtin agents** (`lexa_agents`, in the 0001 baseline): `herald` ("Herald Agent") and `blacksmith` ("Blacksmith Agent") — same PM-assistant role, different execution architecture. The generic `lexa` entry is retired; its id is NOT reused.
 - **Skill availability = junction rows only.** Which skills an agent offers is whatever `lexa_agent_skills` says — admin-editable, no JSON columns on the agent rows.
 - **Engine switching:** `herald_settings.engine` ∈ `'herald'|'blacksmith'` applies to document threads + Generate. Freeform chat ALWAYS runs the herald lane; under `engine='blacksmith'` chat requests fail with `ENGINE_NOT_SUPPORTED_FOR_CHAT` (409). `engine_switcher_enabled=1` merely shows the member toggle, which is a personal overlay (client-side session preference) — it never writes `herald_settings.engine`; that column is the project default, admin-written.
-- **Vision resolution order** (per request): `primary_supports_images=1` → inline image parts; else `VISION_NOT_CONFIGURED` (409) — `vision_model` delegation was removed in 0017 (columns `kind`/`base_url`/`api_key`/`model`/`vision_model` dropped; legacy code retains a compat check that never fires).
-- **Id rebind consequence (one-time):** threads keyed on the old agent id reset once after 0013 — continue-vs-fresh sees an unknown agentId and starts fresh.
+- **Vision resolution order** (per request): `primary_supports_images=1` → inline image parts; else `VISION_NOT_CONFIGURED` (409) — `vision_model` delegation was removed in the squashed baseline (columns `kind`/`base_url`/`api_key`/`model`/`vision_model` dropped; legacy code retains a compat check that never fires).
+- **Id rebind consequence (one-time, history):** threads keyed on the pre-squash agent id reset once — continue-vs-fresh saw an unknown agentId and started fresh.
 
 ### Task field options (custom priority/type)
 Priority and type are per-project option lists (`priority_options` / `type_options`), not global enums. `tasks.priority` / `tasks.type` are plain TEXT columns (DEFAULT `'medium'` / `'task'`) with **no FK** — SQLite enforces nothing; the service validates the value against the project's option rows (`InvalidOption` 422) and resolves an empty value to the first option.

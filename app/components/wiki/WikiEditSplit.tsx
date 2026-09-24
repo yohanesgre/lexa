@@ -144,7 +144,7 @@ export function WikiEditSplit({ editor, slug, pageSlug, previewContent, isSaving
         >
           <span className="text-xs text-lx-text-muted font-body uppercase tracking-[0.05em]">Editor</span>
         </div>
-        {editor && <WikiEditor editor={editor} hearth={{ slug, documentType: "wiki", documentId: pageSlug }} onReviewStateChange={onReviewStateChange} />}
+        {editor && <WikiEditor editor={editor} runtime={{ slug, documentType: "wiki", documentId: pageSlug }} onReviewStateChange={onReviewStateChange} />}
         <WikiAttachmentsSection slug={slug} pageSlug={pageSlug} />
         <div
           className="flex items-center justify-between"

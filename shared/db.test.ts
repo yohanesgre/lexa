@@ -173,7 +173,7 @@ describe("rowToActivityEvent", () => {
 
   it("preserves all actor kinds and types", () => {
     const base = { id: 1, task_id: "t1", actor_label: "sys", actor_user_id: null as string | null, message: "m", via_herald: 0, created_at: NOW };
-    expect(rowToActivityEvent({ ...base, actor_kind: "agent", type: "hearth_completed" }).actorKind).toBe("agent");
+    expect(rowToActivityEvent({ ...base, actor_kind: "agent", type: "runtime_completed" }).actorKind).toBe("agent");
     expect(rowToActivityEvent({ ...base, actor_kind: "system", type: "github_synced" }).type).toBe("github_synced");
   });
 

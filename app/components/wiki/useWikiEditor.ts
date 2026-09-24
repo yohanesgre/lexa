@@ -122,7 +122,7 @@ export function useWikiEditor({ slug, page }: { slug: string; page: WikiPage }) 
     extensions: [
       StarterKit.configure({ heading: { levels: [2, 3, 4, 5] }, code: false }),
       // Code must combine with other marks (bold+code is valid CommonMark,
-      // common in Hearth results) or accepting such a result throws.
+      // common in Runtime results) or accepting such a result throws.
       Code.extend({ excludes: "" }),
       TaskList,
       TaskItem.configure({ nested: true }),

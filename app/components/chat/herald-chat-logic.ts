@@ -1,5 +1,5 @@
 import type { QueryClient } from "@tanstack/react-query";
-import { ENGINE_AGENT_IDS, hasVisionCapability } from "../../lib/use-hearth-engine";
+import { ENGINE_AGENT_IDS, hasVisionCapability } from "../../lib/use-runtime-engine";
 import type { LexaSkill } from "../../../shared/types";
 import { deriveChatTitle } from "../../../shared/herald";
 import type { HeraldChatThreadSummary } from "../../lib/api";

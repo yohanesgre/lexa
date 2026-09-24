@@ -1,4 +1,4 @@
-// Hearth spark glyph — the agent marker used on agent event rows and agent
+// Runtime spark glyph — the agent marker used on agent event rows and agent
 // comment cards (wireframe robot/agent treatment).
 export function RobotGlyph({ size = 14, className }: { size?: number | undefined; className?: string }) {
   return (

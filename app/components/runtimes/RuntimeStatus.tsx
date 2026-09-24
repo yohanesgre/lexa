@@ -1,0 +1,371 @@
+import { useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
+import { Check, ChevronRight, Copy, Flame, List, X } from "lucide-react";
+import { Link } from "@tanstack/react-router";
+import { cn } from "../ui/cn";
+import { copyToClipboard } from "../../lib/clipboard";
+import { useRecentRuntimeTasks, useRuntimes, useCancelRuntimeTask, useRuntimeTaskLogs, useSession } from "../../lib/queries";
+import type { RecentRuntimeTask } from "../../lib/api";
+
+const STATUS_LABEL: Record<string, string> = {
+  queued: "Queued",
+  running: "Running",
+  completed: "Done",
+  failed: "Failed",
+  cancelled: "Cancelled",
+};
+
+const DISMISSED_KEY = "lxk.runtime-dismissed-tasks:v1";
+const TERMINAL_STATUSES = new Set(["completed", "failed", "cancelled"]);
+
+function skillLabel(t: RecentRuntimeTask): string {
+  const skill = t.skillName || t.skillId;
+  return t.documentTitle ? `${skill} · "${t.documentTitle}"` : skill;
+}
+
+function loadDismissed(): Set<string> {
+  try {
+    const raw = localStorage.getItem(DISMISSED_KEY);
+    return new Set((raw ? JSON.parse(raw) : []) as string[]);
+  } catch {
+    return new Set();
+  }
+}
+
+// Global Runtime status pill in the navbar. Clicking opens a control panel with
+// recent tasks: rows navigate to their document, finished tasks can be
+// dismissed (local, persists per browser), and running rows show which daemon
+// is doing the work. A task result stays reachable in its document's Runtime
+// popover regardless of dismissal here.
+function TaskRowMain({ t, navigable }: { t: RecentRuntimeTask; navigable: boolean }) {
+  const isActive = t.status === "queued" || t.status === "running";
+  return (
+    <>
+      <span className="text-xs text-lx-text-secondary truncate" style={{ flex: 1, minWidth: 0 }}>
+        {skillLabel(t)}
+      </span>
+      <span
+        className={cn(
+          "font-micro text-2xs uppercase tracking-[0.04em] flex-shrink-0",
+          t.status === "completed" && "text-lx-text-success",
+          t.status === "failed" && "text-lx-text-danger",
+          isActive && "text-lx-text-warning",
+          t.status === "cancelled" && "text-lx-text-muted"
+        )}
+      >
+        {STATUS_LABEL[t.status]}
+      </span>
+      {navigable && <ChevronRight size={12} strokeWidth={1.5} className="text-lx-text-muted flex-shrink-0" />}
+    </>
+  );
+}
+
+function rowMeta(t: RecentRuntimeTask, runtime: { name: string; provider: string } | undefined): string {
+  const isActive = t.status === "queued" || t.status === "running";
+  return isActive && runtime ? `${t.projectName} · ${runtime.name} · ${runtime.provider}` : t.projectName;
+}
+
+function StatusPill({ active, doneCount, failedCount, idle }: {
+  active: RecentRuntimeTask | undefined;
+  doneCount: number;
+  failedCount: number;
+  idle: boolean;
+}) {
+  if (active) {
+    return (
+      <>
+        <span className="spinner" style={{ width: 10, height: 10, borderWidth: 2 }} />
+        AI · {active.skillName || active.skillId}
+      </>
+    );
+  }
+  if (failedCount > 0) {
+    return (
+      <>
+        <Flame size={12} strokeWidth={1.5} />
+        {doneCount > 0 ? `${doneCount} done · ${failedCount} failed` : `${failedCount} failed`}
+      </>
+    );
+  }
+  if (idle) {
+    return (
+      <>
+        <Flame size={12} strokeWidth={1.5} />
+        AI
+      </>
+    );
+  }
+  return (
+    <>
+      <Check size={12} strokeWidth={2.5} />
+      {doneCount} done
+    </>
+  );
+}
+
+function pillClass(active: RecentRuntimeTask | undefined, failedCount: number, idle: boolean): string {
+  if (active) return "runtime-status runtime-status--warning";
+  if (failedCount > 0) return "runtime-status runtime-status--danger";
+  return cn("runtime-status", idle ? "runtime-status--idle" : "runtime-status--ok");
+}
+
+function TaskRowActions({ t, isActive, copiedId, onCopy, onCancel, onDismiss, cancelPending }: {
+  t: RecentRuntimeTask;
+  isActive: boolean;
+  copiedId: string | null;
+  onCopy: (id: string) => void;
+  onCancel: (id: string) => void;
+  onDismiss: (id: string) => void;
+  cancelPending: boolean;
+}) {
+  return (
+    <div style={{ position: "absolute", top: 8, right: 8, display: "flex", gap: 4 }}>
+      <button
+        type="button"
+        className="runtime-dismiss"
+        aria-label="Copy task id"
+        title={copiedId === t.id ? "Copied" : "Copy task id"}
+        onClick={() => onCopy(t.id)}
+        style={{ width: 16, height: 16 }}
+      >
+        {copiedId === t.id ? <Check size={10} strokeWidth={2.5} /> : <Copy size={10} strokeWidth={1.5} />}
+      </button>
+      {isActive && (
+        <button
+          type="button"
+          className="runtime-dismiss"
+          aria-label="Cancel AI task"
+          title="Cancel this AI task"
+          onClick={() => onCancel(t.id)}
+          disabled={cancelPending}
+        >
+          <X size={12} strokeWidth={2} />
+        </button>
+      )}
+      {TERMINAL_STATUSES.has(t.status) && (
+        <button
+          type="button"
+          className="runtime-dismiss"
+          aria-label="Dismiss from panel"
+          title="Dismiss from panel"
+          onClick={() => onDismiss(t.id)}
+        >
+          <X size={12} strokeWidth={2} />
+        </button>
+      )}
+    </div>
+  );
+}
+
+function TaskRow({ t, runtimes, isAdmin, lastLogMessage, copiedId, cancelPending, onClose, onCopy, onCancel, onDismiss }: {
+  t: RecentRuntimeTask;
+  runtimes: { id: string; name: string; provider: string }[];
+  isAdmin: boolean;
+  lastLogMessage: string | null;
+  copiedId: string | null;
+  cancelPending: boolean;
+  onClose: () => void;
+  onCopy: (id: string) => void;
+  onCancel: (id: string) => void;
+  onDismiss: (id: string) => void;
+}) {
+  const runtime = runtimes.find((r) => r.id === t.runtimeId);
+  const isActive = t.status === "queued" || t.status === "running";
+  return (
+    <div
+      role="menuitem"
+      className="dropdown-item"
+      style={{ height: "auto", padding: "8px 10px", alignItems: "flex-start", flexDirection: "column", gap: 2, cursor: "pointer", position: "relative" }}
+    >
+      <Link
+        to="/runtimes/runs"
+        search={{ task: t.id }}
+        onClick={onClose}
+        className="flex flex-col w-full"
+        style={{ gap: 2, textDecoration: "none", color: "inherit", minWidth: 0 }}
+      >
+        <div className="flex items-center gap-2 w-full" style={{ paddingRight: 64 }}>
+          <TaskRowMain t={t} navigable />
+        </div>
+        <span className="font-micro text-2xs text-lx-text-muted">{rowMeta(t, runtime)}</span>
+        {isAdmin && isActive && lastLogMessage && (
+          <span
+            className="font-mono"
+            style={{ fontSize: 10, color: "var(--lx-text-muted)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: "100%", display: "inline-flex", alignItems: "center", gap: 6 }}
+          >
+            <span className="runtime-log-live" />
+            {lastLogMessage}
+          </span>
+        )}
+      </Link>
+      <span
+        className="font-mono"
+        style={{ fontSize: 10, color: "var(--lx-text-muted)", display: "inline-flex", alignItems: "center", gap: 6, minWidth: 0, paddingRight: 64 }}
+      >
+        <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 180 }}>{t.id}</span>
+      </span>
+      <TaskRowActions
+        t={t}
+        isActive={isActive}
+        copiedId={copiedId}
+        onCopy={onCopy}
+        onCancel={onCancel}
+        onDismiss={onDismiss}
+        cancelPending={cancelPending}
+      />
+    </div>
+  );
+}
+
+export function RuntimeStatus() {
+  const { data: tasks = [] } = useRecentRuntimeTasks();
+  const { data: runtimes = [] } = useRuntimes();
+  const cancelTask = useCancelRuntimeTask();
+  // Log/detail internals are ADMIN-GATED — the live log line under an active
+  // row renders for admins only; members get status + timestamps.
+  const { data: session } = useSession();
+  const isAdmin = session?.user?.role === "superadmin";
+  const [open, setOpen] = useState(false);
+  const [dismissed, setDismissed] = useState<Set<string>>(loadDismissed);
+  const dismissedRef = useRef(dismissed);
+  useEffect(() => {
+    dismissedRef.current = dismissed;
+  });
+  const [copiedId, setCopiedId] = useState<string | null>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
+  const [popoverStyle, setPopoverStyle] = useState<React.CSSProperties>({});
+
+  // Copy the task id to the clipboard (for debugging — daemon logs, API).
+  // Shows a transient check on the row.
+  const copyTaskId = (id: string) => {
+    void copyToClipboard(id).then(() => {
+      setCopiedId(id);
+      window.setTimeout(() => setCopiedId((c) => (c === id ? null : c)), 1500);
+    });
+  };
+
+  const visible = useMemo(() => tasks.filter((t) => !dismissed.has(t.id)), [tasks, dismissed]);
+
+  // Live status of the active (queued/running) task — the last log line is
+  // shown under its row in the panel.
+  const active = visible.find((t) => t.status === "queued" || t.status === "running");
+  const activeLogs = useRuntimeTaskLogs(active?.id ?? null, open && !!active && isAdmin);
+
+  const doneCount = visible.filter((t) => t.status === "completed").length;
+  const failedCount = visible.filter((t) => t.status === "failed").length;
+
+  useEffect(() => {
+    if (!open) return;
+    function handleMouseDown(e: MouseEvent) {
+      const target = e.target as Node;
+      const insidePill = containerRef.current?.contains(target) ?? false;
+      const insidePanel = panelRef.current?.contains(target) ?? false;
+      if (!insidePill && !insidePanel) setOpen(false);
+    }
+    function handleKeyDown(e: KeyboardEvent) {
+      if (e.key === "Escape") setOpen(false);
+    }
+    document.addEventListener("mousedown", handleMouseDown);
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", handleMouseDown);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [open]);
+
+  const toggle = () => {
+    if (!open && containerRef.current) {
+      const rect = containerRef.current.getBoundingClientRect();
+      setPopoverStyle({ position: "fixed", top: rect.bottom + 6, right: window.innerWidth - rect.right, zIndex: 80, width: 320 });
+    }
+    setOpen((v) => !v);
+  };
+
+  const dismiss = (id: string) => {
+    const next = new Set(dismissedRef.current);
+    next.add(id);
+    dismissedRef.current = next;
+    setDismissed(next);
+    try {
+      localStorage.setItem(DISMISSED_KEY, JSON.stringify([...next]));
+    } catch {
+      // storage unavailable (private mode) — dismissal lasts this session
+    }
+  };
+
+  // The pill is ALWAYS visible — idle shows a neutral "Runtime" so the Runtime
+  // entry point (and its panel) is reachable even with no recent tasks.
+  const idle = !active && doneCount === 0 && failedCount === 0;
+
+  return (
+    <div ref={containerRef} style={{ position: "relative" }}>
+      <button
+        type="button"
+        className={pillClass(active, failedCount, idle)}
+        onClick={toggle}
+        aria-expanded={open}
+        aria-haspopup="menu"
+      >
+        <StatusPill active={active} doneCount={doneCount} failedCount={failedCount} idle={idle} />
+      </button>
+
+      {open &&
+        createPortal(
+          <div className="menu-popover" role="menu" aria-label="AI tasks" ref={panelRef} style={popoverStyle}>
+            <div className="dropdown-label">AI · recent</div>
+            {visible.length === 0 ? (
+              <div className="text-xs text-lx-text-muted px-3 py-3">No AI tasks yet.</div>
+            ) : (
+              visible.slice(0, 6).map((t) => {
+                const isActive = t.status === "queued" || t.status === "running";
+                const lastLog = isAdmin && isActive && activeLogs.data && activeLogs.data.length > 0
+                  ? activeLogs.data[activeLogs.data.length - 1]!.message
+                  : null;
+                return (
+                  <TaskRow
+                    key={t.id}
+                    t={t}
+                    runtimes={runtimes}
+                    isAdmin={isAdmin}
+                    lastLogMessage={lastLog}
+                    copiedId={copiedId}
+                    cancelPending={cancelTask.isPending}
+                    onClose={() => setOpen(false)}
+                    onCopy={copyTaskId}
+                    onCancel={(id) => {
+                      cancelTask.mutate(id);
+                      dismiss(id);
+                    }}
+                    onDismiss={dismiss}
+                  />
+                );
+              })
+            )}
+            <Link
+              to="/runtimes/runs"
+              role="menuitem"
+              onClick={() => setOpen(false)}
+              className="dropdown-item"
+              style={{ height: 28, textDecoration: "none" }}
+            >
+              <List size={14} strokeWidth={1.5} />
+              <span className="text-xs text-lx-text-secondary">AI Runtimes</span>
+            </Link>
+            <div className="dropdown-separator" />
+            <Link
+              to="/runtimes/daemons"
+              role="menuitem"
+              onClick={() => setOpen(false)}
+              className="dropdown-item"
+              style={{ height: 28, textDecoration: "none" }}
+            >
+              <Flame size={14} strokeWidth={1.5} />
+              <span className="text-xs text-lx-text-secondary">Runtimes settings</span>
+            </Link>
+          </div>,
+          document.body
+        )}
+    </div>
+  );
+}

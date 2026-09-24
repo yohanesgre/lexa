@@ -13,7 +13,7 @@ import {
   useDeleteHeraldChat,
   useUpdateHeraldChatMeta,
 } from "../../lib/queries";
-import { ENGINE_AGENT_IDS, hasVisionCapability } from "../../lib/use-hearth-engine";
+import { ENGINE_AGENT_IDS, hasVisionCapability } from "../../lib/use-runtime-engine";
 import { useToast } from "../ui/Toast";
 import { heraldSendForKey, useHeraldStream } from "../../lib/use-herald-stream";
 import { useDebouncedValue } from "../../lib/useDebouncedValue";
@@ -21,8 +21,8 @@ import { resendIndex } from "../../lib/resendIndex";
 import { isNarrowViewport, hasMatchMedia, matchMedia } from "../../lib/viewport";
 import { renderTokenized } from "../../lib/tokenizeTranscript";
 import { ThreadsSidebar } from "./ThreadsSidebar";
-import { SkillPicker } from "../hearth/herald/SkillPicker";
-import { HeraldFlameIcon } from "../hearth/herald/HeraldFlameIcon";
+import { SkillPicker } from "../runtimes/herald/SkillPicker";
+import { HeraldFlameIcon } from "../runtimes/herald/HeraldFlameIcon";
 import { HeraldActivity } from "./HeraldActivity";
 import { deriveChatTitle, type HeraldReasoningEffort } from "../../../shared/herald";
 import type { HeraldChatThreadSummary } from "../../lib/api";

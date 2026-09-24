@@ -13,8 +13,8 @@ import {
   useUpdateWikiPage, useDeleteWikiPage, useUpdateFieldConfig, useCreateColumn,
   useUpdateColumn, useDeleteColumn, useCreateSwimlane, useUpdateSwimlane, useArchiveSwimlane,
   useDeleteSwimlane, useCreateApiKey, useDeleteApiKey, useAddComment, useDeleteComment,
-  useUpdateComment, useCancelHearthTask, useAddTaskLink, useRemoveTaskLink,
-  useAddSource, useRemoveSource, useCreateHearthTask, useCreateHearthAgent,
+  useUpdateComment, useCancelRuntimeTask, useAddTaskLink, useRemoveTaskLink,
+  useAddSource, useRemoveSource, useCreateRuntimeTask, useCreateAgent,
   useUpdateRateLimit, useUpdateGithubSettings, useClearGithubSettings,
   useCreateMyApiKey, useDeleteMyApiKey,
 } from "./queries";
@@ -438,25 +438,25 @@ describe("activity + link mutations", () => {
   });
 });
 
-describe("hearth mutations", () => {
-  it("useCancelHearthTask updates recent + every cached history page in place", async () => {
-    routes.set("POST /api/hearth/tasks/ft1/cancel", { id: "ft1", status: "cancelled" });
+describe("runtime mutations", () => {
+  it("useCancelRuntimeTask updates recent + every cached history page in place", async () => {
+    routes.set("POST /api/runtimes/tasks/ft1/cancel", { id: "ft1", status: "cancelled" });
     const recent = [{ id: "ft1", status: "queued", projectName: "Demo" }];
-    queryClient.setQueryData(["hearth-recent-tasks"], recent);
-    queryClient.setQueryData(["hearth-task-history", {}, null], { data: [{ id: "ft1", status: "queued" }], nextCursor: null, summary: { queued: 1, running: 0, completed: 0, failed: 0, cancelled: 0 } });
-    const { result } = renderHook(() => useCancelHearthTask(), { wrapper });
+    queryClient.setQueryData(["runtime-recent-tasks"], recent);
+    queryClient.setQueryData(["runtime-task-history", {}, null], { data: [{ id: "ft1", status: "queued" }], nextCursor: null, summary: { queued: 1, running: 0, completed: 0, failed: 0, cancelled: 0 } });
+    const { result } = renderHook(() => useCancelRuntimeTask(), { wrapper });
     await act(async () => { await result.current.mutateAsync("ft1"); });
-    expect((queryClient.getQueryData<{ status: string }[]>(["hearth-recent-tasks"])![0] as { status: string }).status).toBe("cancelled");
-    const page = queryClient.getQueryData<{ data: { status: string }[] }>(["hearth-task-history", {}, null])!;
+    expect((queryClient.getQueryData<{ status: string }[]>(["runtime-recent-tasks"])![0] as { status: string }).status).toBe("cancelled");
+    const page = queryClient.getQueryData<{ data: { status: string }[] }>(["runtime-task-history", {}, null])!;
     expect(page.data[0]!.status).toBe("cancelled");
   });
 
-  it("useCreateHearthTask seeds the recent list with the project name", async () => {
-    routes.set("POST /api/hearth/tasks", { id: "ft2", projectId: "p1", status: "queued" });
+  it("useCreateRuntimeTask seeds the recent list with the project name", async () => {
+    routes.set("POST /api/runtimes/tasks", { id: "ft2", projectId: "p1", status: "queued" });
     queryClient.setQueryData(["projects"], [PROJECT]);
-    queryClient.setQueryData(["hearth-recent-tasks"], []);
-    const { result } = renderHook(() => useCreateHearthTask(), { wrapper });
+    queryClient.setQueryData(["runtime-recent-tasks"], []);
+    const { result } = renderHook(() => useCreateRuntimeTask(), { wrapper });
     await act(async () => { await result.current.mutateAsync({ slug: "demo", documentType: "task", documentId: "t1", agentId: "a1", skillId: "s1" }); });
-    expect(queryClient.getQueryData<{ projectName: string }[]>(["hearth-recent-tasks"])![0]).toMatchObject({ id: "ft2", projectName: "Demo" });
+    expect(queryClient.getQueryData<{ projectName: string }[]>(["runtime-recent-tasks"])![0]).toMatchObject({ id: "ft2", projectName: "Demo" });
   });
 });

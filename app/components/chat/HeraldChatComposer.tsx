@@ -2,7 +2,7 @@ import { memo, useCallback, useMemo, useRef, useState } from "react";
 import { Send, Square } from "lucide-react";
 import { acceptImageFiles, type HeraldImage } from "../../lib/herald-image";
 import { useMentionTokens } from "../../lib/useMentionTokens";
-import { HeraldImageAttach } from "../hearth/herald/HeraldImageAttach";
+import { HeraldImageAttach } from "../runtimes/herald/HeraldImageAttach";
 
 const CHAT_CAPS = { maxCount: 3, maxTotalBytes: Math.floor(1.5 * 1024 * 1024) };
 const ATTACH_DISABLED_TITLE_GLOBAL = "Images are disabled — configure vision in Project Settings → Herald.";

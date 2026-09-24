@@ -131,7 +131,7 @@ default columns appear when the first project is created.
 | `LXK_ADMIN_EMAILS` | setup wizard (dev bootstrap) | dev only |
 | `GITHUB_APP_ID` / `GITHUB_WEBHOOK_SECRET` | hand-set once for issue sync; preserved across re-runs | only for GitHub sync |
 | `GITHUB_PRIVATE_KEY` / `GITHUB_PRIVATE_KEY_FILE` | hand-set; PEM volume-mounted read-only in prod compose | only for GitHub sync |
-| `LXK_HEARTH_DAEMON_TOKEN` | hand-set (Settings alternative) | only for Hearth daemons |
+| `LXK_RUNTIME_DAEMON_TOKEN` | hand-set (Settings alternative) | only for runtime daemons |
 | `LXK_MAX_BODY_MB` / `LOG_LEVEL` / `DATABASE_PATH` / `PORT` | defaults; tune by hand | no |
 
 ## Full variable reference
@@ -147,7 +147,7 @@ default columns appear when the first project is created.
 | `LOG_LEVEL` | logging level (default `info`) |
 | `LXK_ADMIN_EMAILS` | comma-separated **superadmin** emails — env-only allow-list, applied at provisioning (dev setup wizard only); never edited at runtime |
 | `LXK_API_KEY` | REMOVED — no longer provisioned or read. Pre-change installs keep their DB-seeded row; fresh installs mint user-bound keys post-setup. |
-| `LXK_HEARTH_DAEMON_TOKEN` | shared secret for Hearth daemons (alternative to a Settings API key) |
+| `LXK_RUNTIME_DAEMON_TOKEN` | shared secret for runtime daemons (alternative to a Settings API key) |
 | `LXK_MAX_BODY_MB` | max request body for `/api` in MB (default 16); webhook payloads hard-capped at 1 MB before HMAC, regardless |
 | `LXK_PUBLIC_URL` | public base URL of this install (e.g. `https://lexa.example.com`) — Better Auth `baseURL` + `trustedOrigins`; written by the install script; hand-set in dev |
 | `LXK_SEED_DEV` | dev-only boot-time sample data (`1` enables; set by `scripts/dev.sh`) |
@@ -224,3 +224,41 @@ lx machine uninstall && lx machine install
 
 Old daemons sending `x-forge-token` or polling `/api/forge/*` get 401/404
 after the server upgrade — upgrade the server first, then reinstall machines.
+
+## Upgrading across the Hearth→Runtimes rename (2026-09-24)
+
+Hard cutover, migration `0005_runtime_rename.sql`: the server applies it at
+boot (renames the `hearth_*` tables/indexes plus the activity/settings values,
+and rebinds the builtin agent ids) with **no aliases** for the old routes, env
+keys, or header. Data is migrated, never dropped. Old daemons get 401/404 until
+reinstalled — upgrade the server first, then reinstall machines.
+
+1. **Upgrade the server.** Boot applies `0005_runtime_rename.sql`
+   (Bun standalone: re-run `install.sh` from the new release tag; Workers:
+   `wrangler d1 migrations apply`).
+2. **Rename `.env` keys.** `LXK_HEARTH_DAEMON_TOKEN`→`LXK_RUNTIME_DAEMON_TOKEN`
+   (**required** — the daemon token) and
+   `LXK_HEARTH_REPO_CAP`→`LXK_RUNTIME_REPO_CAP`. The daemon-side keys change
+   `HEARTH_*`→`RUNTIME_*` (e.g. `RUNTIME_AGENT`, `RUNTIME_MODEL`,
+   `RUNTIME_STALE_RUN_MIN`, `RUNTIME_SERVE_PORT`). A boot with a legacy key set
+   and its new counterpart unset logs a loud warning but never fails — the old
+   keys are ignored, so update them.
+3. **Upgrade the CLI:** `lx upgrade`.
+4. **Reinstall the listener + daemon:**
+   ```bash
+   lx machine uninstall && lx machine install
+   ```
+   The systemd unit is `lexa-machine-listener`; `~/.local/share/lexa-runtimes`
+   is the listener install dir (host state lives under `~/.lexa/<host>/`), and
+   each runtime's persistent sandbox moved from `runtimes/<id>/hearth-home` to
+   `runtimes/<id>/runtime-home`.
+5. **Re-run "Setup runtime" for each agent in the web UI.** The old
+   per-runtime env files carry `HEARTH_*` keys and are not discovered by the
+   new listener (it mints fresh runtimeIds); without this no daemons spawn.
+6. **Optional cleanup:** remove the old `~/.local/share/lexa-hearth` state dir
+   once the new listener is heartbeating.
+7. **Browsers need nothing** — session cookies and the web app are unaffected;
+   no rebuild is required.
+
+The auth header also changed `x-hearth-token`→`x-runtime-token`; old daemons
+sending the old header get 401/404.

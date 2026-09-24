@@ -31,9 +31,9 @@ describe("buildMilestoneArchiveCascadeBatch", () => {
       swimlanes: [{ id: "s1" }, { id: "s2" }, { id: "s3" }],
       tasks: [{ id: "t1" }, { id: "t2" }, { id: "t3" }, { id: "t4" }, { id: "t5" }],
       actorKind: "agent",
-      actorLabel: "hearth-herald",
+      actorLabel: "herald",
       actorUserId: null,
-      message: "hearth-herald archived this milestone",
+      message: "herald archived this milestone",
       viaHerald: true,
     });
     expect(stmts).toHaveLength(1 + 3 + 2 * 5);

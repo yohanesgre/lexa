@@ -1,12 +1,12 @@
 import { Effect } from "effect";
 import { Db, queryAll, queryFirst, run, DbError, RowNotFound, ConstraintViolation } from "../db/db";
-import type { RuntimeEvent, RuntimeEventAction, HearthProvider } from "../../shared/types";
+import type { RuntimeEvent, RuntimeEventAction, AgentCli } from "../../shared/types";
 
 export interface RuntimeEventRow {
   id: string;
   machine_id: string;
   action: RuntimeEventAction;
-  agent_cli: HearthProvider;
+  agent_cli: AgentCli;
   team_id: string | null;
   api_key_id: string | null;
   status: RuntimeEvent["status"];
@@ -55,7 +55,7 @@ export class RuntimeEventRepo extends Effect.Service<RuntimeEventRepo>()("Lexa/R
         id: string;
         machineId: string;
         action: RuntimeEventAction;
-        agentCli: HearthProvider;
+        agentCli: AgentCli;
         teamId: string | null;
         apiKeyId: string | null;
       }): Effect.Effect<RuntimeEvent, ConstraintViolation | DbError> =>
@@ -82,7 +82,7 @@ export class RuntimeEventRepo extends Effect.Service<RuntimeEventRepo>()("Lexa/R
       // found + teamId null is an explicit Global choice.
       latestSetupEventTeam: (
         machineId: string,
-        agentCli: HearthProvider
+        agentCli: AgentCli
       ): Effect.Effect<{ found: boolean; teamId: string | null }, DbError> =>
         queryAll<{ team_id: string | null }>(
           db,

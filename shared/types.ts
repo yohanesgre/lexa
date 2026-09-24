@@ -306,10 +306,10 @@ export interface Dashboard {
   outOfSyncTasks: OutOfSyncTask[];
 }
 
-// ── Hearth (runtime agent writing assistant) ──
+// ── Runtime (runtime agent writing assistant) ──
 
-export type HearthProvider = "opencode" | "hermes" | "command-code";
-export type HearthTaskStatus = "queued" | "running" | "completed" | "failed" | "cancelled";
+export type AgentCli = "opencode" | "hermes" | "command-code";
+export type RuntimeTaskStatus = "queued" | "running" | "completed" | "failed" | "cancelled";
 export type SourceKind = "wiki" | "external";
 
 // A named rule bundle defined in Lexa. Its instructions are written into the
@@ -356,7 +356,7 @@ export interface RuntimeAgent {
 export interface Runtime {
   id: ID;
   name: string;
-  provider: HearthProvider;
+  provider: AgentCli;
   machineId: ID | null;
   // The agent CLI's internal agent/persona flag (opencode --agent build/plan).
   // Empty = the CLI's default agent.
@@ -385,7 +385,7 @@ export interface RuntimeEvent {
   id: ID;
   machineId: ID;
   action: RuntimeEventAction;
-  agentCli: HearthProvider;
+  agentCli: AgentCli;
   // Team the installed runtime binds to; null = global.
   teamId: ID | null;
   // Null for update/remove events; install delivers a fresh key once.
@@ -405,14 +405,14 @@ export interface Machine {
   hostname: string;
   // Installed agent CLIs probed by the listener (`opencode --version`,
   // `cmd --version`; hermes skipped) and sent with every heartbeat.
-  clis: Array<{ provider: HearthProvider; version: string }>;
+  clis: Array<{ provider: AgentCli; version: string }>;
   // Null until the machine listens — a login-registered machine is
   // "bound, not listening".
   lastSeen: ISODate | null;
   createdAt: ISODate;
 }
 
-export interface HearthTask {
+export interface RuntimeTask {
   id: ID;
   runtimeId: ID | null;
   projectId: ID;
@@ -427,7 +427,7 @@ export interface HearthTask {
   extraPrompt: string;
   selection: string;
   docContext: string;
-  status: HearthTaskStatus;
+  status: RuntimeTaskStatus;
   result: string | null;
   error: string | null;
   kind: "blacksmith" | "herald";
@@ -437,18 +437,18 @@ export interface HearthTask {
 }
 
 // The warm-session mapping for one (document, runtime) pair: which
-// agent-side conversation (opencode serve session id) the next Hearth task on
+// agent-side conversation (opencode serve session id) the next Runtime task on
 // this document should continue. Agent-agnostic — hermes/command-code may
 // reuse the table later; only opencode writes rows in v1. Runtime-scoped PK:
 // a different runtime starts its own session for the same document.
-export interface HearthSession {
+export interface RuntimeSession {
   documentType: "task" | "wiki";
   documentId: string;
   runtimeId: string;
   // The runtime CLI's conversation id (opencode serve session id) — never a
   // Lexa session id. Null verdict on claim = the daemon mints a new one.
   runtimeSessionId: string;
-  provider: HearthProvider;
+  provider: AgentCli;
   // Agent/skill the mapping was created for: a changed agent/skill on the
   // task resets continuity (claim returns runtimeSessionId: null).
   agentId: ID;
@@ -457,14 +457,14 @@ export interface HearthSession {
   updatedAt: ISODate;
 }
 
-// One line of the live activity feed for a Hearth task (append-only).
-export interface HearthTaskLog {
+// One line of the live activity feed for a Runtime task (append-only).
+export interface RuntimeTaskLog {
   id: ID;
   taskId: ID;
   message: string;
   // Which agent stream produced the line (daemon tees both into the feed).
   stream: "out" | "err";
-  // Severity assigned ONCE by the daemon at write time (shared/hearth-log.ts).
+  // Severity assigned ONCE by the daemon at write time (shared/runtime-log.ts).
   // The UI renders the stored level; legacy rows default to "info".
   level: "info" | "warn" | "error";
   createdAt: ISODate;
@@ -510,7 +510,7 @@ export type ActivityType =
   | "created" | "moved" | "field_changed" | "archived" | "restored" | "deleted"
   | "link_added" | "link_removed" | "source_added" | "source_removed"
   | "github_linked" | "github_unlinked" | "github_synced"
-  | "hearth_completed" | "hearth_failed" | "hearth_cancelled"
+  | "runtime_completed" | "runtime_failed" | "runtime_cancelled"
   | "commented" | "comment_deleted"
   | "attachment_added" | "attachment_removed";
 

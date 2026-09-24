@@ -37,11 +37,11 @@ export class SearchError extends Data.TaggedError("SearchError")<{}> {}
 export class SourceNotFound extends Data.TaggedError("SourceNotFound")<{ id: string }> {}
 export class SourceFetchError extends Data.TaggedError("SourceFetchError")<{ message: string }> {}
 export class SourceUnreachable extends Data.TaggedError("SourceUnreachable")<{ url: string }> {}
-export class HearthTaskNotFound extends Data.TaggedError("HearthTaskNotFound")<{ id: string }> {}
+export class RuntimeTaskNotFound extends Data.TaggedError("RuntimeTaskNotFound")<{ id: string }> {}
 export class AgentNotFound extends Data.TaggedError("AgentNotFound")<{ id: string }> {}
 export class SkillNotFound extends Data.TaggedError("SkillNotFound")<{ id: string }> {}
-export class HearthBuiltinDelete extends Data.TaggedError("HearthBuiltinDelete")<{ kind: "agent" | "skill"; name: string }> {}
-export class HearthEntityInUse extends Data.TaggedError("HearthEntityInUse")<{ kind: "agent" | "skill"; name: string; count: number }> {}
+export class AgentBuiltinDelete extends Data.TaggedError("AgentBuiltinDelete")<{ kind: "agent" | "skill"; name: string }> {}
+export class AgentEntityInUse extends Data.TaggedError("AgentEntityInUse")<{ kind: "agent" | "skill"; name: string; count: number }> {}
 export class RuntimeNotFound extends Data.TaggedError("RuntimeNotFound")<{ id: string }> {}
 export class RuntimeEventNotFound extends Data.TaggedError("RuntimeEventNotFound")<{ id: string }> {}
 export class MachineNotFound extends Data.TaggedError("MachineNotFound")<{ id: string }> {}
@@ -67,7 +67,7 @@ export class NoUserContextForbidden extends Data.TaggedError("NoUserContextForbi
 export class DeviceLoginNotFound extends Data.TaggedError("DeviceLoginNotFound")<{}> {}
 export class DeviceLoginExpired extends Data.TaggedError("DeviceLoginExpired")<{}> {}
 export class DeviceLoginDenied extends Data.TaggedError("DeviceLoginDenied")<{}> {}
-export class HearthSessionActive extends Data.TaggedError("HearthSessionActive")<{}> {}
+export class RuntimeSessionActive extends Data.TaggedError("RuntimeSessionActive")<{}> {}
 export class ProviderNotConfigured extends Data.TaggedError("ProviderNotConfigured")<{ projectId: string }> {}
 export class ProviderAuthFailed extends Data.TaggedError("ProviderAuthFailed")<{
   message?: string;
@@ -141,11 +141,11 @@ export const errorCodeMap: Record<string, string> = {
   SourceNotFound: "SOURCE_NOT_FOUND",
   SourceFetchError: "SOURCE_FETCH_ERROR",
   SourceUnreachable: "SOURCE_UNREACHABLE",
-  HearthTaskNotFound: "HEARTH_TASK_NOT_FOUND",
+  RuntimeTaskNotFound: "RUNTIME_TASK_NOT_FOUND",
   AgentNotFound: "AGENT_NOT_FOUND",
   SkillNotFound: "SKILL_NOT_FOUND",
-  HearthBuiltinDelete: "HEARTH_BUILTIN_DELETE",
-  HearthEntityInUse: "HEARTH_ENTITY_IN_USE",
+  AgentBuiltinDelete: "AGENT_BUILTIN_DELETE",
+  AgentEntityInUse: "AGENT_ENTITY_IN_USE",
   RuntimeNotFound: "RUNTIME_NOT_FOUND",
   RuntimeEventNotFound: "RUNTIME_EVENT_NOT_FOUND",
   MachineNotFound: "MACHINE_NOT_FOUND",
@@ -178,7 +178,7 @@ export const errorCodeMap: Record<string, string> = {
   Forbidden: "FORBIDDEN",
   SetupLocked: "SETUP_LOCKED",
   SearchError: "SEARCH_ERROR",
-  HearthSessionActive: "HEARTH_SESSION_ACTIVE",
+  RuntimeSessionActive: "RUNTIME_SESSION_ACTIVE",
   ProviderNotConfigured: "PROVIDER_NOT_CONFIGURED",
   ProviderAuthFailed: "PROVIDER_AUTH_FAILED",
   ProviderUnreachable: "PROVIDER_UNREACHABLE",
@@ -233,7 +233,7 @@ export function errorToStatus(error: { _tag: string }): number {
     case "WikiPageNotFound":
     case "ShareLinkNotFound":
     case "SourceNotFound":
-    case "HearthTaskNotFound":
+    case "RuntimeTaskNotFound":
     case "AgentNotFound":
     case "SkillNotFound":
     case "RuntimeNotFound":
@@ -263,8 +263,8 @@ export function errorToStatus(error: { _tag: string }): number {
     case "OptionInUse":
     case "NoRuntimeOnline":
     case "TaskLinkCycle":
-    case "HearthEntityInUse":
-    case "HearthSessionActive":
+    case "AgentEntityInUse":
+    case "RuntimeSessionActive":
     case "ProviderNotConfigured":
     case "HeraldTaskActive":
     case "VisionNotConfigured":
@@ -281,7 +281,7 @@ export function errorToStatus(error: { _tag: string }): number {
     case "NeighborNotInColumn":
     case "InvalidOption":
     case "InvalidTaskLink":
-    case "HearthBuiltinDelete":
+    case "AgentBuiltinDelete":
     case "SearchError":
     case "ApiKeyNameEmpty":
     case "SourceUnreachable":
@@ -371,16 +371,16 @@ export function errorMessage(error: { _tag: string } & Record<string, unknown>):
       return typeof error.message === "string" && error.message ? error.message : "Failed to fetch source";
     case "SourceUnreachable":
       return `Cannot reach '${error.url}'`;
-    case "HearthTaskNotFound":
-      return `Hearth task not found`;
+    case "RuntimeTaskNotFound":
+      return `AI task not found`;
     case "AgentNotFound":
-      return `Hearth agent not found`;
+      return `AI agent not found`;
     case "SkillNotFound":
-      return `Hearth skill not found`;
-    case "HearthBuiltinDelete":
+      return `AI skill not found`;
+    case "AgentBuiltinDelete":
       return `Builtin ${error.kind} '${error.name}' cannot be deleted — edit it or reset it to default instead`;
-    case "HearthEntityInUse":
-      return `${error.kind === "agent" ? "Agent" : "Skill"} '${error.name}' is still used by ${error.count} hearth task${error.count === 1 ? "" : "s"} — reassign those tasks first`;
+    case "AgentEntityInUse":
+      return `${error.kind === "agent" ? "Agent" : "Skill"} '${error.name}' is still used by ${error.count} AI task${error.count === 1 ? "" : "s"} — reassign those tasks first`;
     case "RuntimeNotFound":
       return `Runtime not found`;
     case "RuntimeEventNotFound":
@@ -396,9 +396,9 @@ export function errorMessage(error: { _tag: string } & Record<string, unknown>):
     case "ApiKeyNotFound":
       return `API key not found`;
     case "NoRuntimeOnline":
-      return `No Hearth runtime is online. Start the daemon (bun run hearth:daemon) and try again.`;
-    case "HearthSessionActive":
-      return `A Hearth task is still running for this document — start a new session once it finishes`;
+      return `No AI runtime is online. Start the daemon and try again.`;
+    case "RuntimeSessionActive":
+      return `An AI task is still running for this document — start a new session once it finishes`;
     case "TaskLinkNotFound":
       return `Task link not found`;
     case "TaskLinkCycle":

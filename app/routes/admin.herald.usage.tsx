@@ -8,7 +8,7 @@ export const Route = createFileRoute("/admin/herald/usage")({
   ssr:false,
   beforeLoad: ({ search }) => {
     throw redirect({
-      to: "/hearth/usage",
+      to: "/runtimes/usage",
       search: search as never,
     } as never);
   },
@@ -17,5 +17,5 @@ export const Route = createFileRoute("/admin/herald/usage")({
 
 function LegacyRedirect() {
   const search = Route.useSearch() as { from?: string | undefined; to?: string | undefined };
-  return <Navigate to="/hearth/usage" search={search as never} replace />;
+  return <Navigate to="/runtimes/usage" search={search as never} replace />;
 }

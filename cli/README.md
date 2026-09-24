@@ -1,6 +1,6 @@
 # lx
 
-Operator CLI for a Lexa server — tasks, wiki, projects, Hearth machine/daemon
+Operator CLI for a Lexa server — tasks, wiki, projects, AI Runtimes machine/daemon
 management, deploy, and upgrade. Wraps the Lexa REST API with `lxk_` Bearer
 keys. The CLI is versioned and released INDEPENDENTLY of the web app:
 `cli-vX.Y.Z` tags publish the binary; `vX.Y.Z` tags publish the app image.
@@ -24,7 +24,7 @@ lx upgrade
 lx login --url https://lexa.example.com --key lxk_...   # stores creds in ~/.lexa/config.json
 lx status                                               # server + machine health
 
-# Hearth machine management (the listener supervises per-runtime daemons)
+# AI Runtimes machine management (the listener supervises per-runtime daemons)
 lx machine install          # install the listener (systemd unit)
 lx machine listen           # run the listener under your own supervisor
 lx machine list             # list machines + runtimes
@@ -52,7 +52,7 @@ setup guide (GitHub App).
 ## Development
 
 ```bash
-bun run compile:cli        # prod binary → bin/lx (bundles the Hearth daemon)
+bun run compile:cli        # prod binary → bin/lx (bundles the runtime daemon)
 bun run install:cli-dev    # dev shim → ~/.local/bin/lx-dev (runs live source, never overwrites prod)
 bun run uninstall:cli-dev  # removes the dev shim
 ```

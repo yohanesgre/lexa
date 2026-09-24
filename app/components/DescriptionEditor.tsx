@@ -7,8 +7,8 @@ import { textEditorExtensions, extensionsWithMentions } from "../lib/tiptap";
 import { useAttachmentEmbeds } from "../lib/useAttachmentEmbeds";
 import { cn } from "./ui/cn";
 import { TextEditor, Toolbar } from "./TextEditor";
-import { HearthReviewSurface } from "./hearth/HearthReviewSurface";
-import { useHearthReview } from "./hearth/useHearthReview";
+import { RuntimeReviewSurface } from "./runtimes/RuntimeReviewSurface";
+import { useRuntimeReview } from "./runtimes/useRuntimeReview";
 
 interface DescriptionEditorProps {
   initialContent: TipTapDoc;
@@ -18,7 +18,7 @@ interface DescriptionEditorProps {
   onCancel?: () => void;
   placeholder?: string | undefined;
   editable?: boolean | undefined;
-  hearth?: { slug: string; documentType: "task" | "wiki"; documentId: string } | undefined;
+  runtime?: { slug: string; documentType: "task" | "wiki"; documentId: string } | undefined;
   // Paste/drop-to-embed uploads (attachments API). Absent in create mode —
   // there is no taskId to attach to yet.
   attachments?: { slug: string; documentId: string } | undefined;
@@ -33,7 +33,7 @@ export function DescriptionEditor({
   onCancel,
   placeholder,
   editable = true,
-  hearth,
+  runtime,
   attachments,
   onReviewStateChange,
 }: DescriptionEditorProps) {
@@ -47,7 +47,7 @@ export function DescriptionEditor({
     onDoneRef.current = onDone;
     onCancelRef.current = onCancel;
   });
-  // Hearth review end: persist whatever the doc holds now (the accepted
+  // Runtime review end: persist whatever the doc holds now (the accepted
   // replacement) via the same save path as Done. Reject leaves the doc
   // untouched — stay in edit mode.
   const handleReviewStateChange = (active: boolean, accepted: boolean) => {
@@ -64,7 +64,7 @@ export function DescriptionEditor({
     const onPointerDown = (e: PointerEvent) => {
       const target = e.target as HTMLElement | null;
       lastPointerDownInside.current =
-        wrapperRef.current?.contains(target) === true || target?.closest("[data-hearth-popover]") !== null;
+        wrapperRef.current?.contains(target) === true || target?.closest("[data-runtime-popover]") !== null;
     };
     document.addEventListener("pointerdown", onPointerDown, true);
     return () => document.removeEventListener("pointerdown", onPointerDown, true);
@@ -83,7 +83,7 @@ export function DescriptionEditor({
     immediatelyRender: false,
     extensions: extensionsWithMentions(
       textEditorExtensions,
-      attachments?.slug ?? hearth?.slug
+      attachments?.slug ?? runtime?.slug
     ),
     content: initialContent as unknown as JSONContent,
     editable,
@@ -123,7 +123,7 @@ export function DescriptionEditor({
         blur: (_view, event) => {
           const related = (event as FocusEvent).relatedTarget as HTMLElement | null;
           if (related !== null) {
-            return wrapperRef.current?.contains(related) === true || related?.closest("[data-hearth-popover]") !== null;
+            return wrapperRef.current?.contains(related) === true || related?.closest("[data-runtime-popover]") !== null;
           }
           return lastPointerDownInside.current;
         },
@@ -131,7 +131,7 @@ export function DescriptionEditor({
     },
   });
 
-  const { review, appliedTaskId, rejectedTaskId, handleReview, handleAcceptReview, handleRejectReview } = useHearthReview(editor, handleReviewStateChange);
+  const { review, appliedTaskId, rejectedTaskId, handleReview, handleAcceptReview, handleRejectReview } = useRuntimeReview(editor, handleReviewStateChange);
 
   if (!editor) return null;
 
@@ -142,10 +142,10 @@ export function DescriptionEditor({
   };
 
   const toolbar = (
-    <Toolbar editor={editor} headingLevel={headingLevel} hearth={hearth} reviewActive={review !== null} appliedTaskId={appliedTaskId} rejectedTaskId={rejectedTaskId} onReview={handleReview} />
+    <Toolbar editor={editor} headingLevel={headingLevel} runtime={runtime} reviewActive={review !== null} appliedTaskId={appliedTaskId} rejectedTaskId={rejectedTaskId} onReview={handleReview} />
   );
   const reviewSurface = review ? (
-    <HearthReviewSurface action={review.action} runtime={review.runtime} diff={review.diff} onAccept={handleAcceptReview} onReject={handleRejectReview} />
+    <RuntimeReviewSurface action={review.action} runtime={review.runtime} diff={review.diff} onAccept={handleAcceptReview} onReject={handleRejectReview} />
   ) : null;
   const exitControls = (
     <div className="flex items-center gap-2">

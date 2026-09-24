@@ -166,7 +166,7 @@ describe("HeraldSettingsRepo getByProject/maskedView", () => {
   });
 });
 
-describe("HeraldSettingsRepo hearth columns (0013)", () => {
+describe("HeraldSettingsRepo runtime columns (0013)", () => {
   const base = {} as const;
 
   it("round-trips engine columns", async () => {

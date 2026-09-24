@@ -424,7 +424,7 @@ export function rowToRuntime(row: RuntimeRow): RuntimeWithTeam {
   };
 }
 
-export interface HearthTaskRow {
+export interface RuntimeTaskRow {
   id: string;
   key: string;
   runtime_id: string | null;
@@ -448,7 +448,7 @@ export interface HearthTaskRow {
   finished_at: string | null;
 }
 
-export function rowToHearthTask(row: HearthTaskRow): {
+export function rowToRuntimeTask(row: RuntimeTaskRow): {
   id: string; key: string; runtimeId: string | null; projectId: string; documentType: "task" | "wiki"; documentId: string; documentTitle: string; agentId: string; skillId: string; agentName: string; skillName: string; extraPrompt: string; selection: string; docContext: string; status: "queued" | "running" | "completed" | "failed" | "cancelled"; result: string | null; error: string | null; kind: "blacksmith" | "herald"; createdAt: string; startedAt: string | null; finishedAt: string | null;
 } {
   return {
@@ -525,7 +525,7 @@ export function rowToLexaSkill(row: LexaSkillRow): {
   };
 }
 
-export interface HearthSessionRow {
+export interface RuntimeSessionRow {
   document_type: "task" | "wiki";
   document_id: string;
   runtime_id: string;
@@ -537,7 +537,7 @@ export interface HearthSessionRow {
   updated_at: string;
 }
 
-export function rowToHearthSession(row: HearthSessionRow): {
+export function rowToRuntimeSession(row: RuntimeSessionRow): {
   documentType: "task" | "wiki";
   documentId: string;
   runtimeId: string;
@@ -561,7 +561,7 @@ export function rowToHearthSession(row: HearthSessionRow): {
   };
 }
 
-export interface HearthTaskLogRow {
+export interface RuntimeTaskLogRow {
   id: string;
   task_id: string;
   message: string;
@@ -570,7 +570,7 @@ export interface HearthTaskLogRow {
   created_at: string;
 }
 
-export function rowToHearthTaskLog(row: HearthTaskLogRow): {
+export function rowToRuntimeTaskLog(row: RuntimeTaskLogRow): {
   id: string;
   taskId: string;
   message: string;

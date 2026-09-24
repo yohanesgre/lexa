@@ -45,7 +45,7 @@ export function GatewayHealthSection() {
   }, [ids, health, settled]);
 
   return (
-    <section className="card-panel mt-4" id="hearth-usage-health">
+    <section className="card-panel mt-4" id="runtime-usage-health">
       <div className="flex items-center justify-between mb-3" style={{ flexWrap: "wrap", gap: 8 }}>
         <div className="flex items-center gap-2">
           <h2 className="font-display text-lg weight-500 color-primary">Gateway health</h2>

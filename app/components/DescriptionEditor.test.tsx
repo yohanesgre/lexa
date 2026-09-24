@@ -9,8 +9,8 @@ import { DescriptionEditor } from "./DescriptionEditor";
 
 const reviewMock = vi.hoisted(() => ({ value: null as null | { action: unknown; runtime: unknown; diff: unknown } }));
 
-vi.mock("./hearth/useHearthReview", () => ({
-  useHearthReview: () => ({
+vi.mock("./runtimes/useRuntimeReview", () => ({
+  useRuntimeReview: () => ({
     review: reviewMock.value,
     appliedTaskId: null,
     rejectedTaskId: null,
@@ -20,8 +20,8 @@ vi.mock("./hearth/useHearthReview", () => ({
   }),
 }));
 
-vi.mock("./hearth/HearthReviewSurface", () => ({
-  HearthReviewSurface: () => <div className="hearth-review-panel" />,
+vi.mock("./runtimes/RuntimeReviewSurface", () => ({
+  RuntimeReviewSurface: () => <div className="runtime-review-panel" />,
 }));
 
 const fetchMock = vi.fn();
@@ -78,7 +78,7 @@ describe("DescriptionEditor", () => {
     expect(onCancel).toHaveBeenCalledTimes(1);
   });
 
-  it("renders the Hearth review surface inside the card while reviewing", async () => {
+  it("renders the Runtime review surface inside the card while reviewing", async () => {
     reviewMock.value = { action: {}, runtime: {}, diff: {} };
     const { container } = render(
       <DescriptionEditor initialContent={DOC} onDone={vi.fn()} onCancel={vi.fn()} />,
@@ -88,7 +88,7 @@ describe("DescriptionEditor", () => {
     expect(await screen.findByText("Editing description")).toBeInTheDocument();
     const editorWrapper = container.querySelector(".editor-wrapper");
     expect(editorWrapper).not.toBeNull();
-    expect(editorWrapper!.querySelector(".hearth-review-panel")).not.toBeNull();
+    expect(editorWrapper!.querySelector(".runtime-review-panel")).not.toBeNull();
     expect(editorWrapper!.classList.contains("is-reviewing")).toBe(true);
   });
 

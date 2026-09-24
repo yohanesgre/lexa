@@ -5,15 +5,15 @@ import { HeraldSettingsRepo, type HeraldSettingsRow } from "../repos/herald-sett
 import { HeraldThreadRepo, type HeraldThread } from "../repos/herald-thread.repo";
 import { HeraldPendingWritesRepo } from "../repos/herald-pending-writes.repo";
 import { ProjectMemoryRepo } from "../repos/project-memory.repo";
-import { HearthRepo } from "../repos/hearth.repo";
+import { RuntimeRepo } from "../repos/runtime.repo";
 import { TaskRepo } from "../repos/task.repo";
 import { WikiRepo } from "../repos/wiki.repo";
 import { Storage } from "../storage/storage";
 import { Db, DbError, RowNotFound, queryFirst, run, type SqlParam } from "../db/db";
-import { HearthService, BLACKSMITH_AGENT, HERALD_AGENT } from "./hearth.service";
-import { loadTaskRepoContent } from "./hearth-repo-content";
+import { RuntimeService, BLACKSMITH_AGENT, HERALD_AGENT } from "./runtime.service";
+import { loadTaskRepoContent } from "./runtime-repo-content";
 import { HeraldGateway } from "../herald/gateway.service";
-import { ProviderNotConfigured, AgentNotFound, SkillNotFound, VisionNotConfigured, InvalidArgs, HeraldTaskActive, HearthTaskNotFound, TaskNotFound, WikiPageNotFound, NoRuntimeOnline, HeraldThreadNotFound, ApprovalsPending, ApprovalNotFound, ApprovalAlreadyDecided, ApprovalExpired } from "../api/errors";
+import { ProviderNotConfigured, AgentNotFound, SkillNotFound, VisionNotConfigured, InvalidArgs, HeraldTaskActive, RuntimeTaskNotFound, TaskNotFound, WikiPageNotFound, NoRuntimeOnline, HeraldThreadNotFound, ApprovalsPending, ApprovalNotFound, ApprovalAlreadyDecided, ApprovalExpired } from "../api/errors";
 import { buildHeraldWriteTools, createWriteRecorder, parseWriteTools, type HeraldWriteToolDeps, type QueuedProposal } from "../herald/write-tools";
 import { executeHeraldWrite } from "../herald/write-execution";
 import { AuthorizationService } from "./authorization.service";
@@ -34,14 +34,14 @@ import type { TaskRef } from "../herald/tools";
 const activeTasks = new Map<string, AbortController>();
 
 export class HeraldTaskService extends Effect.Service<HeraldTaskService>()("Lexa/HeraldTaskService", {
-  dependencies: [HearthRepo.Default, HeraldSettingsRepo.Default, HeraldThreadRepo.Default, HeraldPendingWritesRepo.Default, ProjectMemoryRepo.Default, HearthService.Default, Storage.Default, TaskRepo.Default, WikiRepo.Default, HeraldGateway.Default, TaskService.Default, CommentService.Default, WikiService.Default, MilestoneService.Default, SwimlaneService.Default, AuthorizationService.Default],
+  dependencies: [RuntimeRepo.Default, HeraldSettingsRepo.Default, HeraldThreadRepo.Default, HeraldPendingWritesRepo.Default, ProjectMemoryRepo.Default, RuntimeService.Default, Storage.Default, TaskRepo.Default, WikiRepo.Default, HeraldGateway.Default, TaskService.Default, CommentService.Default, WikiService.Default, MilestoneService.Default, SwimlaneService.Default, AuthorizationService.Default],
   effect: Effect.gen(function* () {
-    const hearthRepo = yield* HearthRepo;
+    const runtimeRepo = yield* RuntimeRepo;
     const settingsRepo = yield* HeraldSettingsRepo;
     const threadRepo = yield* HeraldThreadRepo;
     const pendingWritesRepo = yield* HeraldPendingWritesRepo;
     const memoryRepo = yield* ProjectMemoryRepo;
-    const hearthService = yield* HearthService;
+    const runtimeService = yield* RuntimeService;
     const storage = yield* Storage;
     const taskRepo = yield* TaskRepo;
     const wikiRepo = yield* WikiRepo;
@@ -149,14 +149,14 @@ export class HeraldTaskService extends Effect.Service<HeraldTaskService>()("Lexa
       abortStream: (taskId: string): boolean => { activeTasks.get(taskId)?.abort(); return activeTasks.has(taskId); },
       enqueue: (input: { projectId: string; documentType: "task" | "wiki"; documentId: string; prompt: string; agentId: string; skillId: string; selection?: string; attachments?: Array<{ storageKey: string; mimeType: string; name: string }> }) => Effect.gen(function* () {
         const settingsRow = yield* getSettingsOrFail(input.projectId);
-        yield* hearthRepo.findAgentById(input.agentId).pipe(Effect.catchTag("RowNotFound", () => new AgentNotFound({ id: input.agentId })));
-        yield* hearthRepo.findSkillById(input.skillId).pipe(Effect.catchTag("RowNotFound", () => new SkillNotFound({ id: input.skillId })));
+        yield* runtimeRepo.findAgentById(input.agentId).pipe(Effect.catchTag("RowNotFound", () => new AgentNotFound({ id: input.agentId })));
+        yield* runtimeRepo.findSkillById(input.skillId).pipe(Effect.catchTag("RowNotFound", () => new SkillNotFound({ id: input.skillId })));
         const engine = (settingsRow as unknown as { engine: string }).engine;
         const engineAgentId = engine === "blacksmith" ? BLACKSMITH_AGENT.id : HERALD_AGENT.id;
         if (!(yield* Effect.promise(() => skillJunctionBound(engineAgentId, input.skillId)))) return yield* new SkillNotFound({ id: input.skillId });
         if (input.documentType === "task") yield* taskRepo.findById(input.documentId).pipe(Effect.catchTag("RowNotFound", () => new TaskNotFound({ id: input.documentId })));
         else yield* wikiRepo.findBySlug(input.projectId, input.documentId).pipe(Effect.catchTag("RowNotFound", () => new WikiPageNotFound({ id: input.documentId })));
-        if (engine === "blacksmith") { const runtimes = yield* hearthRepo.listRuntimes(); if (!runtimes.some((r) => r.status === "online")) return yield* new NoRuntimeOnline(); }
+        if (engine === "blacksmith") { const runtimes = yield* runtimeRepo.listRuntimes(); if (!runtimes.some((r) => r.status === "online")) return yield* new NoRuntimeOnline(); }
         const attachments = input.attachments ?? [];
         if (attachments.length > 0) {
           yield* validateAttachments(input.projectId, attachments, DOC_IMAGE_CAPS);
@@ -166,15 +166,15 @@ export class HeraldTaskService extends Effect.Service<HeraldTaskService>()("Lexa
           yield* threadRepo.saveThread(input.documentType, input.documentId, { projectId: input.projectId, agentId: input.agentId, skillId: input.skillId, messages: [...verdict.messages, { role: "user", content: attachments.map((a) => ({ type: "image-ref", storageKey: a.storageKey, mimeType: a.mimeType })) }], summary: verdict.summary, summarizedCount: verdict.summarizedCount });
         }
         const docContext = engine === "blacksmith" ? (yield* loadDocContext(input.projectId, input.documentType, input.documentId)).context : "";
-        return yield* hearthRepo.createTask({ id: crypto.randomUUID(), projectId: input.projectId, documentType: input.documentType, documentId: input.documentId, agentId: input.agentId, skillId: input.skillId, extraPrompt: input.prompt, selection: input.selection ?? "", docContext, kind: engine as "herald" | "blacksmith" });
+        return yield* runtimeRepo.createTask({ id: crypto.randomUUID(), projectId: input.projectId, documentType: input.documentType, documentId: input.documentId, agentId: input.agentId, skillId: input.skillId, extraPrompt: input.prompt, selection: input.selection ?? "", docContext, kind: engine as "herald" | "blacksmith" });
       }),
       resetThread: (projectId: string, documentType: "task" | "wiki", documentId: string) => Effect.gen(function* () {
-        const tasks = yield* hearthRepo.listTasksForDocument(projectId, documentType, documentId);
+        const tasks = yield* runtimeRepo.listTasksForDocument(projectId, documentType, documentId);
         if (tasks.some((t) => t.kind === "herald" && t.status === "running")) return yield* new HeraldTaskActive();
         yield* threadRepo.resetThread(documentType, documentId).pipe(Effect.catchTag("RowNotFound", () => new HeraldThreadNotFound({ documentType, documentId })));
       }),
       runStream: (taskId: string, opts?: { userId?: string }) => Effect.gen(function* () {
-        const task = yield* hearthRepo.claimHeraldTask(taskId).pipe(Effect.catchTag("ConstraintViolation", () => new HeraldTaskActive()), Effect.catchTag("RowNotFound", () => new HearthTaskNotFound({ id: taskId })));
+        const task = yield* runtimeRepo.claimHeraldTask(taskId).pipe(Effect.catchTag("ConstraintViolation", () => new HeraldTaskActive()), Effect.catchTag("RowNotFound", () => new RuntimeTaskNotFound({ id: taskId })));
         const settingsRow = yield* getSettingsOrFail(task.projectId);
         const config = configFromRow(settingsRow);
         const existing = yield* threadRepo.loadThread(task.documentType, task.documentId).pipe(Effect.catchTag("RowNotFound", () => Effect.succeed(null)));
@@ -196,8 +196,8 @@ export class HeraldTaskService extends Effect.Service<HeraldTaskService>()("Lexa
             catch: () => new DbError({ message: "failed to init task thread" }),
           }).pipe(Effect.catchAll(() => Effect.succeed(0)));
         }
-        const agent = yield* hearthRepo.findAgentById(task.agentId).pipe(Effect.catchTag("RowNotFound", () => new AgentNotFound({ id: task.agentId })));
-        const skill = yield* hearthRepo.findSkillById(task.skillId).pipe(Effect.catchTag("RowNotFound", () => new SkillNotFound({ id: task.skillId })));
+        const agent = yield* runtimeRepo.findAgentById(task.agentId).pipe(Effect.catchTag("RowNotFound", () => new AgentNotFound({ id: task.agentId })));
+        const skill = yield* runtimeRepo.findSkillById(task.skillId).pipe(Effect.catchTag("RowNotFound", () => new SkillNotFound({ id: task.skillId })));
         const doc = yield* loadDocContext(task.projectId, task.documentType, task.documentId);
         const repoContent = yield* loadTaskRepoContent(task).pipe(Effect.catchAll(() => Effect.succeed([])));
         const enabledWriteTools = parseWriteTools((settingsRow as unknown as { write_tools: string }).write_tools);
@@ -216,20 +216,20 @@ export class HeraldTaskService extends Effect.Service<HeraldTaskService>()("Lexa
           systemPrompts, history: verdict.messages, userTs: new Date().toISOString(), getCitations: () => [], modelOptions: modelOptionsForEffort(resolveReasoningEffort((settingsRow as unknown as { reasoning_effort: import("../../shared/herald").HeraldReasoningEffort | null }).reasoning_effort)),
           historySummary: () => verdict.summary, historySummarizedCount: () => verdict.summarizedCount, userContent, tools, toolRoundCap: MAX_TOOL_ROUNDS, loadImageBase64, imageMode, ...(writeSet.drain ? { writeDrain: writeSet.drain } : {}), writeTools: enabledWriteTools,
           persist: (messages, summary, summarizedCount) => Effect.runPromise(threadRepo.saveThread(task.documentType, task.documentId, { projectId: task.projectId, agentId: task.agentId, skillId: task.skillId, messages, summary, summarizedCount })).then(() => {}),
-          onDone: (text) => Effect.runPromise(hearthService.complete(taskId, text)).then(() => {}).catch(() => {}),
-          onFail: (message) => Effect.runPromise(hearthService.fail(taskId, message)).then(() => {}).catch(() => {}),
-          onCancel: async () => { await Effect.runPromise(hearthService.cancel(taskId)).catch(() => {}); await Effect.runPromise(hearthRepo.appendLog(crypto.randomUUID(), taskId, "aborted")).catch(() => {}); },
+          onDone: (text) => Effect.runPromise(runtimeService.complete(taskId, text)).then(() => {}).catch(() => {}),
+          onFail: (message) => Effect.runPromise(runtimeService.fail(taskId, message)).then(() => {}).catch(() => {}),
+          onCancel: async () => { await Effect.runPromise(runtimeService.cancel(taskId)).catch(() => {}); await Effect.runPromise(runtimeRepo.appendLog(crypto.randomUUID(), taskId, "aborted")).catch(() => {}); },
         });
       }),
       resumeThreadStream: (documentType: "task" | "wiki", documentId: string) => Effect.gen(function* () {
         const thread = yield* threadRepo.loadThread(documentType, documentId).pipe(Effect.catchTag("RowNotFound", () => new HeraldThreadNotFound({ documentType, documentId })));
-        const tasks = yield* hearthRepo.listTasksForDocument(thread.projectId, documentType, documentId);
+        const tasks = yield* runtimeRepo.listTasksForDocument(thread.projectId, documentType, documentId);
         if (tasks.some((t) => t.kind === "herald" && t.status === "running")) return yield* new HeraldTaskActive();
         const settingsRow = yield* getSettingsOrFail(thread.projectId);
         const { messages: history, results: approvalResults } = yield* prepareResume(thread);
         if (!thread.agentId || !thread.skillId) return yield* new AgentNotFound({ id: "" });
-        const agent = yield* hearthRepo.findAgentById(thread.agentId).pipe(Effect.catchTag("RowNotFound", () => new AgentNotFound({ id: thread.agentId ?? "" })));
-        const skill = yield* hearthRepo.findSkillById(thread.skillId).pipe(Effect.catchTag("RowNotFound", () => new SkillNotFound({ id: thread.skillId ?? "" })));
+        const agent = yield* runtimeRepo.findAgentById(thread.agentId).pipe(Effect.catchTag("RowNotFound", () => new AgentNotFound({ id: thread.agentId ?? "" })));
+        const skill = yield* runtimeRepo.findSkillById(thread.skillId).pipe(Effect.catchTag("RowNotFound", () => new SkillNotFound({ id: thread.skillId ?? "" })));
         const doc = yield* loadDocContext(thread.projectId, documentType, documentId);
         const repoContent = yield* loadTaskRepoContent({ projectId: thread.projectId, documentType, documentId } as Parameters<typeof loadTaskRepoContent>[0]).pipe(Effect.catchAll(() => Effect.succeed([])));
         const enabledWriteTools = parseWriteTools((settingsRow as unknown as { write_tools: string }).write_tools);

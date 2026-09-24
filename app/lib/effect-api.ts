@@ -52,26 +52,26 @@ export function withRetry<A, E, R>(
   return Effect.retry(effect, schedule as unknown as Schedule.Schedule<never, E>) as unknown as Effect.Effect<A, E, R>;
 }
 
-export const HEARTH_POLL_BASE_MS = 1500;
-export const HEARTH_POLL_MAX_MS = 30000;
+export const RUNTIME_POLL_BASE_MS = 1500;
+export const RUNTIME_POLL_MAX_MS = 30000;
 
-export function hearthPollingSchedule(baseMs: number = HEARTH_POLL_BASE_MS): Schedule.Schedule<Duration.Duration, unknown> {
+export function runtimePollingSchedule(baseMs: number = RUNTIME_POLL_BASE_MS): Schedule.Schedule<Duration.Duration, unknown> {
   return Schedule.exponential(Duration.millis(baseMs)).pipe(
     Schedule.jittered,
     Schedule.intersect(Schedule.recurs(12))
   ) as unknown as Schedule.Schedule<Duration.Duration, unknown>;
 }
 
-export function hearthPollDelayForAttempt(attempt: number, baseMs: number = HEARTH_POLL_BASE_MS): number {
+export function runtimePollDelayForAttempt(attempt: number, baseMs: number = RUNTIME_POLL_BASE_MS): number {
   const raw = baseMs * Math.pow(2, attempt);
-  return Math.min(raw, HEARTH_POLL_MAX_MS);
+  return Math.min(raw, RUNTIME_POLL_MAX_MS);
 }
 
-export function withHearthPolling<A, E, R>(
+export function withRuntimePolling<A, E, R>(
   effect: Effect.Effect<A, E, R>,
-  baseMs: number = HEARTH_POLL_BASE_MS
+  baseMs: number = RUNTIME_POLL_BASE_MS
 ): Effect.Effect<A, E, R> {
-  return Effect.repeat(effect, hearthPollingSchedule(baseMs) as unknown as Schedule.Schedule<Duration.Duration, A>) as unknown as Effect.Effect<A, E, R>;
+  return Effect.repeat(effect, runtimePollingSchedule(baseMs) as unknown as Schedule.Schedule<Duration.Duration, A>) as unknown as Effect.Effect<A, E, R>;
 }
 
 export function decodeTipTapDoc(doc: unknown): Effect.Effect<import("../../shared/types").TipTapDoc, ApiError> {

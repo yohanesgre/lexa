@@ -5,7 +5,7 @@ import { ApiKeyRepo } from "../repos/api-key.repo";
 import { DbError, RowNotFound, ConstraintViolation } from "../db/db";
 import { ApiKeyNotFound, MachineNotFound, MachineSecretMismatch, RuntimeEventNotFound } from "../api/errors";
 import { constantTimeTokenEqual } from "../api/auth-key";
-import type { HearthProvider, RuntimeEvent, RuntimeEventAction } from "../../shared/types";
+import type { AgentCli, RuntimeEvent, RuntimeEventAction } from "../../shared/types";
 
 export class RuntimeEventService extends Effect.Service<RuntimeEventService>()("Lexa/RuntimeEventService", {
   dependencies: [RuntimeEventRepo.Default, RuntimeMachineRepo.Default, ApiKeyRepo.Default],
@@ -17,7 +17,7 @@ export class RuntimeEventService extends Effect.Service<RuntimeEventService>()("
     const createRow = (input: {
       machineId: string;
       action: RuntimeEventAction;
-      agentCli: HearthProvider;
+      agentCli: AgentCli;
       teamId: string | null;
       apiKeyId: string | null;
     }): Effect.Effect<RuntimeEvent, ConstraintViolation | DbError> =>
@@ -27,7 +27,7 @@ export class RuntimeEventService extends Effect.Service<RuntimeEventService>()("
       create: (input: {
         machineId: string;
         action: "install" | "update";
-        agentCli: HearthProvider;
+        agentCli: AgentCli;
         teamId?: string | null;
         apiKeyId?: string;
         rawKey?: string;
@@ -65,7 +65,7 @@ export class RuntimeEventService extends Effect.Service<RuntimeEventService>()("
           return event;
         }),
 
-      createRemove: (input: { machineId: string; agentCli: HearthProvider }): Effect.Effect<RuntimeEvent, MachineNotFound | ConstraintViolation | DbError> =>
+      createRemove: (input: { machineId: string; agentCli: AgentCli }): Effect.Effect<RuntimeEvent, MachineNotFound | ConstraintViolation | DbError> =>
         Effect.gen(function* () {
           yield* machineRepo.findById(input.machineId).pipe(
             Effect.catchTag("RowNotFound", () => new MachineNotFound({ id: input.machineId }))

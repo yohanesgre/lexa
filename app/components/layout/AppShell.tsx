@@ -4,7 +4,7 @@ import { Link, Outlet, useRouterState, useNavigate } from "@tanstack/react-route
 import { Menu, X, PanelLeft, ChevronDown } from "lucide-react";
 import { cn } from "../ui/cn";
 import { useProjectSelection } from "../../lib/project-selection";
-import { HearthStatus } from "../hearth/HearthStatus";
+import { RuntimeStatus } from "../runtimes/RuntimeStatus";
 import { useProjects } from "../../lib/queries";
 import { NavLink } from "./NavLink";
 import { ProjectSwitcher } from "./ProjectSwitcher";
@@ -17,11 +17,11 @@ const BARE_PATHS = new Set(["/setup", "/login", "/set-password", "/invite", "/de
 // Public wiki share reads render zero app chrome (token IS the credential).
 const BARE_PREFIXES = ["/share/"];
 
-type RouteType = "home" | "dashboard" | "board" | "tasks" | "wiki" | "chat" | "milestones" | "swimlanes" | "settings" | "hearth";
+type RouteType = "home" | "dashboard" | "board" | "tasks" | "wiki" | "chat" | "milestones" | "swimlanes" | "settings" | "runtimes";
 
 function resolveRouteType(pathname: string): RouteType {
   if (pathname === "/") return "home";
-  if (pathname === "/hearth" || pathname.startsWith("/hearth/")) return "hearth";
+  if (pathname === "/runtimes" || pathname.startsWith("/runtimes/")) return "runtimes";
   if (pathname === "/settings" || pathname.startsWith("/settings/")) return "settings";
   if (pathname.match(/^\/[^/]+\/board$/)) return "board";
   if (pathname.match(/^\/[^/]+\/tasks$/)) return "tasks";
@@ -161,7 +161,7 @@ function MobileMenuLinks({ targets }: { targets: {
       <Link {...linkProps(targets.chat)} className="app-nav-menu-link">
         Chat
       </Link>
-      <Link to="/hearth" className="app-nav-menu-link">
+      <Link to="/runtimes" className="app-nav-menu-link">
         AI Runtimes
       </Link>
     </>
@@ -250,12 +250,12 @@ export function AppShell() {
             <NavLink {...linkProps(targets.chat)} active={routeType === "chat"}>
               Chat
             </NavLink>
-            <NavLink to="/hearth" active={routeType === "hearth"}>AI Runtimes</NavLink>
+            <NavLink to="/runtimes" active={routeType === "runtimes"}>AI Runtimes</NavLink>
           </div>
           <div className="nav-spacer" />
           <div className="nav-right">
             <ThemeToggle />
-            <HearthStatus />
+            <RuntimeStatus />
             <ProjectSwitcher routeType={routeType} />
             <UserMenu />
           </div>
